@@ -52,6 +52,10 @@ export function suffixProblem(file) {
   if (file !== file.toLowerCase()) return "abapGit file names are lower case";
   const m = /^(.+?)\.([a-z0-9]+)\.(.+)$/.exec(file);
   if (m === null) return "the file name is not <object>.<type>.<ext>";
+  // the object part is ASCII: `zcl_\u0131` would upper-case to ZCL_I and
+  // pass for a name it is not. Inner spaces are the padding of a versioned
+  // name (IWSV, IWMO) and of an ICF node's file name.
+  if (!/^[a-z0-9_#-]+(?: +[a-z0-9]+)?$/.test(m[1])) return `"${m[1]}" is not an object name ([a-z0-9_#-])`;
   const type = m[2].toUpperCase();
   const allowed = SUFFIXES[type] ?? SUFFIXES["*"];
   return allowed.test(m[3]) ? undefined : `".${m[3]}" is not a suffix abapGit writes for a ${type}`;
@@ -67,7 +71,11 @@ export function createdNames(file, text) {
     return [...body().matchAll(/<FUNCNAME>([^<]+)<\/FUNCNAME>/g)].map((m) => ({kind: "FUNC", name: m[1].trim().toUpperCase()}));
   }
   if (/\.ddls\.asddls$/.test(file)) {
-    return [...body().matchAll(/@AbapCatalog\.sqlViewName\s*:\s*'([^']+)'/gi)].map((m) => ({kind: "SQL view", name: m[1].trim().toUpperCase()}));
+    // every spelling of the annotation: `@AbapCatalog.sqlViewName: 'X'`,
+    // `@AbapCatalog: { sqlViewName: 'X' }`, and an extend view's
+    // `sqlViewAppendName`, which creates an append view of its own
+    return [...body().matchAll(/\bsqlView(Append)?Name\s*:\s*'([^']+)'/gi)]
+      .map((m) => ({kind: m[1] === undefined ? "SQL view" : "SQL append view", name: m[2].trim().toUpperCase()}));
   }
   return [];
 }
@@ -163,9 +171,72 @@ export function sapNameRule(name, customerNamespaces = []) {
   return undefined;
 }
 
+/** Where each type's XML states the object's own name. abapGit creates the
+ *  object under **that** name, not the file's -- its CLAS deserializer takes
+ *  VSEOCLASS-CLSNAME -- so a `zcl_ok.clas.xml` carrying CL_GUI_ALV_GRID
+ *  would pass a check of file names and replace the system's class. The
+ *  file-derived name is only trusted when the XML says the same.
+ *  `all: true` means every occurrence of the tag must be the object; the
+ *  others hold other names too (W3MI's NAME is also each parameter's). */
+export const NAME_TAGS = {
+  CLAS: {tag: "CLSNAME", all: true},
+  INTF: {tag: "CLSNAME", all: true},
+  TABL: {tag: "TABNAME", all: true},
+  DTEL: {tag: "ROLLNAME"},
+  DOMA: {tag: "DOMNAME", all: true},
+  SHLP: {tag: "SHLPNAME", all: true},
+  TTYP: {tag: "TYPENAME"},
+  VIEW: {tag: "VIEWNAME", all: true},
+  ENQU: {tag: "VIEWNAME"},
+  DDLS: {tag: "DDLNAME"},
+  DDLX: {tag: "NAME"},
+  DCLS: {tag: "DCLNAME"},
+  // abapGit names a function group by its file (ms_item-obj_name); what the
+  // XML adds is its includes, which must be the group's own, and its
+  // modules, which createdNames() checks
+  FUGR: {fromFile: true},
+  MSAG: {tag: "ARBGB"},
+  PROG: {tag: "NAME"},
+  TRAN: {tag: "TCODE"},
+  SAPC: {tag: "APPLICATION_ID", all: true},
+  W3MI: {tag: "NAME"},
+  W3HT: {tag: "NAME"},
+  WAPA: {tag: "APPLNAME", all: true},
+  IWPR: {tag: "PROJECT", all: true},
+  IWSV: {tag: "TECHNICAL_NAME", version: "VERSION"},
+  IWMO: {tag: "TECHNICAL_NAME", version: "VERSION"},
+  IWVB: {tag: "TECHNICAL_NAME", version: "VERSION"},
+};
+
+/** Types that change an SAP object rather than add one of ours. */
+const MODIFIES_SAP = new Set(["ENHO", "ENHS", "ENHC", "ENSC"]);
+
+/** Why the XML of `obj` does not name it, or undefined when it does. */
+export function nameTagProblem(obj, xml) {
+  if (obj.type === "SICF") return undefined; // known by URL, named by ICF_NAME
+  const spec = NAME_TAGS[obj.type];
+  if (spec === undefined) return `no rule says where a ${obj.type} names itself, so its name cannot be checked`;
+  if (xml === undefined) return `the object has no .${obj.type.toLowerCase()}.xml, so nothing states its name`;
+  if (spec.fromFile === true) {
+    const own = obj.name.startsWith("/") ? undefined : [`L${obj.name}`, `SAPL${obj.name}`];
+    const stray = [...xml.matchAll(/<SOBJ_NAME>([^<]*)<\/SOBJ_NAME>/g)].map((m) => m[1].trim().toUpperCase())
+      .filter((inc) => own !== undefined && !own.some((o) => inc.startsWith(o)));
+    return stray.length === 0 ? undefined : `include ${stray[0]} is not one of the group's own (L${obj.name}*, SAPL${obj.name})`;
+  }
+  const values = [...xml.matchAll(new RegExp(`<${spec.tag}>([^<]*)</${spec.tag}>`, "g"))].map((m) => m[1].trim().toUpperCase());
+  if (values.length === 0) return `its XML has no <${spec.tag}>`;
+  const version = spec.version === undefined ? undefined : new RegExp(`<${spec.version}>([^<]*)<`).exec(xml)?.[1]?.trim();
+  const own = (v) => (version === undefined ? v : `${v} ${version}`);
+  const wrong = (spec.all === true ? values : values.slice(0, 1)).filter((v) => own(v) !== obj.name);
+  return wrong.length === 0 ? undefined
+    : `the file says ${obj.name} and its <${spec.tag}> says ${own(wrong[0])}; abapGit creates the one in the XML`;
+}
+
 // ------------------------------------------------------------ the unit
 
-const SENTINEL = "\u0001NNN\u0001";
+// no letters: rename() lower-cases what it renames when the entry is lower
+// case (every SICF URL is), and a sentinel with letters would not survive it
+const SENTINEL = "\u0001\u0002\u0001";
 
 /** A matcher for one listed entry. `{nnn}` stands for an attempt number
  *  (three digits); a unit with `attempt: {from, to}` also accepts each name
@@ -175,11 +246,11 @@ function matcherOf(entry, attempt) {
   const forms = [key];
   if (attempt?.from !== undefined && attempt?.to !== undefined) {
     const [type, ...rest] = key.split(" ");
-    const renamed = `${type} ${rename(rest.join(" "), attempt.from, attempt.to.replace("{nnn}", SENTINEL))}`;
+    const renamed = `${type} ${rename(rest.join(" "), attempt.from, attempt.to.replaceAll("{nnn}", SENTINEL))}`;
     if (renamed !== key) forms.push(renamed);
   }
   const res = forms.map((f) => {
-    const escaped = f.replace("{nnn}", SENTINEL).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    const escaped = f.replaceAll("{nnn}", SENTINEL).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
       .split(SENTINEL).join("\\d{3}");
     return new RegExp(`^${escaped}$`, "i");
   });
@@ -210,6 +281,10 @@ export function admit({files, read, tables = [], unit, customerNamespaces}) {
     if (sap !== undefined && !intended) {
       refusals.push({file, key: obj.key, ...sap});
     }
+    if (MODIFIES_SAP.has(obj.type) && !intended) {
+      refusals.push({file, key: obj.key, rule: "modifies-sap",
+        why: `an ${obj.type} enhances an SAP object rather than adding one of ours`});
+    }
     for (const c of obj.creates ?? []) {
       const rule = sapNameRule(c.name, namespaces);
       if (rule !== undefined && !intended) {
@@ -217,6 +292,7 @@ export function admit({files, read, tables = [], unit, customerNamespaces}) {
       }
     }
   };
+  const named = new Map(); // "<object part>.<type>" -> obj, once per object
   for (const f of files) {
     const obj = objectOf(f, () => read(f));
     if (obj?.structural === true) continue;
@@ -227,6 +303,15 @@ export function admit({files, read, tables = [], unit, customerNamespaces}) {
     }
     const creates = createdNames(f, () => read(f));
     check(f, creates.length > 0 ? {...obj, creates} : obj);
+    const stem = /^(.+?\.[a-z0-9]+)\./.exec(f)[1];
+    if (!named.has(stem)) named.set(stem, obj);
+  }
+  for (const [stem, obj] of named) {
+    const xmlFile = `${stem}.xml`;
+    const problem = nameTagProblem(obj, files.includes(xmlFile) ? read(xmlFile) : undefined);
+    if (problem !== undefined) {
+      refusals.push({file: files.includes(xmlFile) ? xmlFile : stem, key: obj.key, rule: "name-not-stated", why: problem});
+    }
   }
   for (const t of tables) {
     const name = t.replace(/#/g, "/").toUpperCase();

@@ -436,16 +436,30 @@ renames them, so `ZSTG_DEMO` and `ZOSD_004_DEMO` are the same entry and
 The other writer of a repository, `zcl_stg_segw_repo`, goes through the
 same check when it is taken out: `npm run segw:tree repo <P> --out <dir>
 [--zip <f>] [--unit u]` admits the project's files against the unit that
-lists `IWPR <P>` before it writes anything. `GET RepoFileSet` and
+lists `IWPR <P>` before it writes anything, refuses a path outside `src/`
+other than `.abapgit.xml`, and makes the zip here out of the admitted files
+rather than fetching `RepoSet`'s, so the bytes that leave are the bytes that
+were checked. `GET RepoFileSet` and
 `GET RepoSet('P')` themselves are the tree's export over OData and are **not**
 checked; they are not a route to a system unless they pass through that
 command or through `segw:zip`.
 
-**What v1 checks is names.** An object's own name, an ICF node's
-`ICF_NAME`, and the two names an object creates that its files already
-state: each `FUNCNAME` of a function group and the `sqlViewName` of a DDLS.
-Anything else an object creates when it is activated -- a message class's
-messages, a transaction, whatever a class does at runtime -- is not read.
+**What v1 checks is names.** An object's own name, and it is taken from
+the file **and** from the XML, which must agree: abapGit creates the object
+the XML names (its CLAS deserializer takes `VSEOCLASS-CLSNAME`), so a
+`zcl_ok.clas.xml` carrying `CL_GUI_ALV_GRID` is refused, and so is a type
+for which no rule says which tag holds the name (`NAME_TAGS` in
+`tools/osd-deploy-manifest.mjs`). A function group is named by its file, and
+its includes must be its own (`L<group>*`, `SAPL<group>`). Beyond that, an
+ICF node's `ICF_NAME`, and the names an object creates that its files
+already state: each `FUNCNAME` of a function group and a DDLS's SQL view in
+any spelling (`@AbapCatalog.sqlViewName`, `@AbapCatalog: { sqlViewName }`,
+`sqlViewAppendName`). An enhancement (`ENHO`, `ENHS`, `ENHC`, `ENSC`)
+changes an SAP object rather than adding one, and is refused by its type.
+The object part of a file name is `[a-z0-9_#-]`, and only the suffixes
+abapGit writes are accepted. Anything else an object creates when it is
+activated -- a message class's messages, whatever a class does at runtime --
+is not read.
 
 The units today are what has reached A4H: `demo` (the service, its DDIC and
 rows), `demo-app` (the BSP application and its node), `lsd-a4h-011` and

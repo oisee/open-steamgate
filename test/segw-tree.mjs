@@ -1,9 +1,10 @@
 import {expect} from "chai";
 import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync} from "node:fs";
 import {tmpdir} from "node:os";
+import {execFileSync} from "node:child_process";
 import {join} from "node:path";
 import {DDIC_DIR, SPEC_FILE, YAML_FILE, derive, generated, iwprTables, readSpec} from "../tools/segw-tables.mjs";
-import {DEFAULT_URL, exportIwpr, generateFiles, importIwpr, projectOf, pull, pullFile, push, pushFile, pushFunctionGroups, readData, repoFiles, repoZip, writeData, admitRepo} from "../tools/segw-tree.mjs";
+import {DEFAULT_URL, exportIwpr, generateFiles, importIwpr, projectOf, pull, pullFile, push, pushFile, pushFunctionGroups, readData, repoFiles, repoZip, writeData, admitRepo, main as segwTree} from "../tools/segw-tree.mjs";
 import {loadFunctionGroups} from "../tools/segw-gen-mapping.mjs";
 import {dirname} from "node:path";
 import {startServer} from "./start.mjs";
@@ -324,6 +325,18 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
     expect(() => admitRepo({...repo, "src/cl_http_client.clas.abap": "x"}, "ZSTG_DEMO"))
       .to.throw(/CLAS CL_HTTP_CLIENT[\s\S]*not-in-manifest[\s\S]*sap-api-name/);
     expect(() => admitRepo(repo, "ZSTG_MAPPED")).to.throw(/no deploy unit .* lists IWPR ZSTG_MAPPED/);
+    expect(() => admitRepo({...repo, "README.md": "x"}, "ZSTG_DEMO")).to.throw(/README\.md[\s\S]*outside src\//);
+
+    // the command's zip is made of the admitted files, entry for entry
+    const tmp = mkdtempSync(join(tmpdir(), "segw-repo-zip-"));
+    try {
+      expect(await segwTree(["repo", "ZSTG_DEMO", "--zip", join(tmp, "r.zip"), "--url", DEFAULT_URL])).to.equal(0);
+      const listed = execFileSync("unzip", ["-Z1", join(tmp, "r.zip")], {encoding: "utf8"})
+        .split("\n").filter((n) => n !== "" && !n.endsWith("/"));
+      expect(listed.sort()).to.deep.equal(Object.keys(repo).sort());
+    } finally {
+      rmSync(tmp, {recursive: true, force: true});
+    }
   });
 
   it("RepoSet is the same repository as one zip", async () => {

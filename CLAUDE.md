@@ -340,9 +340,9 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   NodeSet(P, uuid)` removes a node with its subtree (`zcl_stg_segw_tree`);
   `GET RepoFileSet?$filter=Project eq 'P'` (or `RepoSet('P')` as a zip, or
   `npm run segw:tree repo <P> --out <dir>`) is the project as an abapGit
-  repository (`zcl_stg_segw_repo`); only the `segw:tree repo` command is a
-  route to a system, because only it checks `deploy/manifest.json` -- the
-  two OData sets are the tree's export and are not checked;
+  repository (`zcl_stg_segw_repo`); of these three, only `segw:tree repo`
+  checks `deploy/manifest.json` and is a route to a system (the main route
+  is `segw:zip`, below);
   `GET GenerateSet?$filter=Project eq 'P'` is segw-gen in ABAP
   (`zcl_stg_segw_gen` + `zcl_stg_segw_gen_dpc` + `zcl_stg_segw_gen_rfc`:
   MPC, DPC with RFC and search-help bodies, XML, EXT pair), byte-identical

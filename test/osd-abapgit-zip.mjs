@@ -166,7 +166,7 @@ describe("deploy/manifest.json: only listed objects leave, never an SAP-owned na
   });
   const clas = (file, name) => {
     writeFileSync(join(dir, `${file}.clas.abap`), `CLASS ${name} DEFINITION PUBLIC. ENDCLASS.\n`);
-    writeFileSync(join(dir, `${file}.clas.xml`), "<abapGit/>\n");
+    writeFileSync(join(dir, `${file}.clas.xml`), `<VSEOCLASS><CLSNAME>${name.toUpperCase()}</CLSNAME></VSEOCLASS>\n`);
   };
   const copied = () => readdirSync(join(out, "src")).filter((f) => f !== "package.devc.xml");
 
@@ -266,8 +266,69 @@ describe("deploy/manifest.json: only listed objects leave, never an SAP-owned na
       "zosd_app.wapa.i18n_-i18n.properties", "zosd_v.ddls.asddls", "zosd_v.ddls.xml"]) {
       writeFileSync(join(dir, f), "x\n");
     }
+    // each object's XML states its own name, as abapGit's do
+    writeFileSync(join(dir, "zcl_osd_a.clas.xml"), "<CLSNAME>ZCL_OSD_A</CLSNAME>\n");
+    writeFileSync(join(dir, "zosd_fg.fugr.xml"), "<SOBJ_NAME>LZOSD_FGTOP</SOBJ_NAME><SOBJ_NAME>SAPLZOSD_FG</SOBJ_NAME>\n");
+    writeFileSync(join(dir, "zosd_m.w3mi.xml"), "<NAME>ZOSD_M</NAME>\n");
+    writeFileSync(join(dir, "zosd_app.wapa.xml"), "<APPLNAME>ZOSD_APP</APPLNAME>\n");
+    writeFileSync(join(dir, "zosd_v.ddls.xml"), "<DDLNAME>ZOSD_V</DDLNAME>\n");
     const unit = probe("CLAS ZCL_OSD_A", "FUGR ZOSD_FG", "W3MI ZOSD_M", "WAPA ZOSD_APP", "DDLS ZOSD_V");
     expect(() => layout(dir, out, "p", undefined, unit)).to.not.throw();
+  });
+
+  it("an object whose XML names another object is refused: abapGit creates the one in the XML", () => {
+    // abapGit's CLAS deserializer takes VSEOCLASS-CLSNAME, not the file name
+    writeFileSync(join(dir, "zcl_osd_ok.clas.abap"), "CLASS zcl_osd_ok DEFINITION PUBLIC. ENDCLASS.\n");
+    writeFileSync(join(dir, "zcl_osd_ok.clas.xml"), "<VSEOCLASS><CLSNAME>CL_GUI_ALV_GRID</CLSNAME></VSEOCLASS>\n");
+    writeFileSync(join(dir, "zosd_tab.tabl.xml"), "<DD02V><TABNAME>T000</TABNAME></DD02V>\n");
+    writeFileSync(join(dir, "zosd_srv 0001.iwsv.xml"), "<TECHNICAL_NAME>ZOSD_SRV</TECHNICAL_NAME><VERSION>0002</VERSION>\n");
+    writeFileSync(join(dir, "zcl_osd_bare.clas.abap"), "CLASS zcl_osd_bare DEFINITION PUBLIC. ENDCLASS.\n");
+    writeFileSync(join(dir, "zosd_x.zzzz.xml"), "<X/>\n");
+    writeFileSync(join(dir, "zosd_fg.fugr.xml"), "<SOBJ_NAME>LSVRSTOP</SOBJ_NAME>\n");
+    let message = "";
+    try {
+      layout(dir, out, "p", undefined, probe("CLAS ZCL_OSD_OK", "TABL ZOSD_TAB", "IWSV ZOSD_SRV 0001",
+        "CLAS ZCL_OSD_BARE", "ZZZZ ZOSD_X", "FUGR ZOSD_FG"));
+    } catch (e) { message = e.message; }
+    expect(message).to.match(/CLAS ZCL_OSD_OK[\s\S]*name-not-stated: the file says ZCL_OSD_OK and its <CLSNAME> says CL_GUI_ALV_GRID/);
+    expect(message).to.match(/TABL ZOSD_TAB[\s\S]*<TABNAME> says T000/);
+    expect(message).to.match(/IWSV ZOSD_SRV 0001[\s\S]*says ZOSD_SRV 0002/);
+    expect(message).to.match(/CLAS ZCL_OSD_BARE[\s\S]*has no \.clas\.xml/);
+    expect(message).to.match(/ZZZZ ZOSD_X[\s\S]*no rule says where a ZZZZ names itself/);
+    expect(message).to.match(/FUGR ZOSD_FG[\s\S]*include LSVRSTOP is not one of the group's own/);
+    expect(copied()).to.deep.equal([]);
+  });
+
+  it("an enhancement is refused by its type unless intended: it changes an SAP object", () => {
+    writeFileSync(join(dir, "zosd_enh.enho.xml"), "<X/>\n");
+    expect(() => layout(dir, out, "p", undefined, probe("ENHO ZOSD_ENH"))).to.throw(/ENHO ZOSD_ENH[\s\S]*modifies-sap/);
+  });
+
+  it("an object part outside [a-z0-9_#-] is refused (a dotless i upper-cases to I)", () => {
+    clas("zcl_osd_\u0131", "zcl_osd_i");
+    expect(() => layout(dir, out, "p", undefined, probe("CLAS ZCL_OSD_I"))).to.throw(/not-an-object[\s\S]*is not an object name/);
+  });
+
+  it("every spelling of a DDLS's SQL view is read, and an append view too", () => {
+    writeFileSync(join(dir, "zosd_v.ddls.xml"), "<DDLNAME>ZOSD_V</DDLNAME>\n");
+    writeFileSync(join(dir, "zosd_v.ddls.asddls"),
+      "@AbapCatalog: { sqlViewName: 'V_T001', compiler.compareFilter: true }\ndefine view ZOSD_V as select from t001 { bukrs }\n");
+    writeFileSync(join(dir, "zosd_e.ddls.xml"), "<DDLNAME>ZOSD_E</DDLNAME>\n");
+    writeFileSync(join(dir, "zosd_e.ddls.asddls"),
+      "@AbapCatalog.sqlViewAppendName: 'T001_APPEND'\nextend view I_X with ZOSD_E { x }\n");
+    let message = "";
+    try { layout(dir, out, "p", undefined, probe("DDLS ZOSD_V", "DDLS ZOSD_E")); } catch (e) { message = e.message; }
+    expect(message).to.match(/DDLS ZOSD_V creates SQL view V_T001/);
+    expect(message).to.match(/DDLS ZOSD_E creates SQL append view T001_APPEND/);
+  });
+
+  it("a lower-case entry matches its attempt form: every {nnn}, every SICF URL", () => {
+    writeFileSync(join(dir, "zosd_004_app.sicf.xml"), node("/sap/bc/zosd_004_app/", "ZOSD_004_APP"));
+    const unit = {name: "probe", attempt: {from: "ZSTG_", to: "ZOSD_{nnn}_"}, objects: ["SICF /sap/bc/zstg_app"]};
+    expect(() => layout(dir, out, "p", undefined, unit)).to.not.throw();
+    rmSync(join(dir, "zosd_004_app.sicf.xml"));
+    writeFileSync(join(dir, "zosd_004_x_005.sicf.xml"), node("/sap/bc/zosd_004_x_005/", "ZOSD_004_X_005"));
+    expect(() => layout(dir, out, "p", undefined, probe("SICF /sap/bc/zosd_{nnn}_x_{nnn}"))).to.not.throw();
   });
 
   it("a Z function group that creates an SAP-named module is refused, and so is a Z DDLS with an SAP SQL view", () => {

@@ -30,11 +30,13 @@
 //        node tools/segw-tree.mjs pull <PROJECT> [--rows] [--url http://localhost:3030] [--out <file>]
 //        node tools/segw-tree.mjs generate <PROJECT> [--url http://localhost:3030] [--out <dir>]
 //        node tools/segw-tree.mjs repo <PROJECT> --out <dir> [--zip <file>] [--unit u] [--url ...]
-import {existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
 import {dirname, join} from "node:path";
 import {CLIENT, SEQ_FIELD, escape, iwprTables, propertyName, readSpec, tableName} from "./segw-tables.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {admit, loadManifest, refusalMessage, unitForProject} from "./osd-deploy-manifest.mjs";
+import {zip as zipFolder} from "./osd-abapgit-zip.mjs";
 
 export const DATA_DIR = "data";
 export const SERVICE = "/sap/opu/odata/sap/ZSTG_SEGW_SRV";
@@ -243,9 +245,10 @@ export async function repoFiles(base, project) {
 
 /** The repository's objects against deploy/manifest.json: the same check
  *  osd-abapgit-zip makes, because this is the other writer of a repository
- *  a system can pull. Throws with every refusal named. `RepoSet` is
- *  `zcl_stg_segw_repo=>zip` over the same `files( )`, so checking the files
- *  checks the zip. */
+ *  a system can pull. Throws with every refusal named. Only `.abapgit.xml`
+ *  and flat `src/` objects may be in it; the zip is then made here out of
+ *  the admitted files, never fetched from RepoSet, so the bytes that leave
+ *  are the bytes that were checked. */
 export function admitRepo(files, project, {manifest = loadManifest(), unit} = {}) {
   const chosen = unitForProject(manifest, project, unit);
   const src = Object.fromEntries(Object.entries(files)
@@ -253,6 +256,9 @@ export function admitRepo(files, project, {manifest = loadManifest(), unit} = {}
   const nested = Object.keys(src).filter((n) => n.includes("/"));
   const refusals = admit({files: Object.keys(src).filter((n) => !n.includes("/")), read: (f) => src[f], unit: chosen});
   for (const n of nested) refusals.push({file: n, key: "?", rule: "not-an-object", why: "a sub-folder is a sub-package"});
+  for (const n of Object.keys(files).filter((p) => !p.startsWith("src/") && p !== ".abapgit.xml")) {
+    refusals.push({file: n, key: "?", rule: "not-an-object", why: "outside src/, and not .abapgit.xml"});
+  }
   if (refusals.length > 0) throw new Error(refusalMessage(`RepoFileSet ${project}`, refusals));
   return chosen;
 }
@@ -294,7 +300,7 @@ export function firstDifference(a, b) {
   return undefined;
 }
 
-async function main(args) {
+export async function main(args) {
   const spec = readSpec();
   const opt = (name, fallback) => {
     const at = args.indexOf(name);
@@ -387,17 +393,19 @@ async function main(args) {
       console.error(e.message);
       return 1;
     }
-    for (const [name, content] of Object.entries(files)) {
-      if (out) {
-        const target = join(out, name);
+    const zipFile = opt("--zip");
+    // the zip is made from exactly the admitted files, not fetched again
+    const into = out ?? (zipFile ? mkdtempSync(join(tmpdir(), "segw-repo-")) : undefined);
+    if (into) {
+      for (const [name, content] of Object.entries(files)) {
+        const target = join(into, name);
         mkdirSync(dirname(target), {recursive: true});
         writeFileSync(target, content);
       }
     }
-    const zipFile = opt("--zip");
     if (zipFile) {
-      const {zip} = await repoZip(url, rest[0]);
-      writeFileSync(zipFile, zip);
+      zipFolder(into, zipFile);
+      if (!out) rmSync(into, {recursive: true, force: true});
     }
     console.log(`${rest[0]}: ${Object.keys(files).length} files${out ? ` written to ${out}/` : ""}${zipFile ? `, zip ${zipFile}` : ""}`);
     return 0;
