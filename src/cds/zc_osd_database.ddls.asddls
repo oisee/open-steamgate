@@ -5,12 +5,12 @@
 define view ZC_OSD_DATABASE
   as select from zosd_db
 {
-      @EndUserText.label: 'Section'
-  key section as Section,
+      @EndUserText.label: 'Category'
+  key category as Category,
       @EndUserText.label: 'Fact'
-  key name    as Name,
+  key name     as Name,
       @EndUserText.label: 'Value'
-      value   as Value,
+      value    as Value,
       @EndUserText.label: 'Note'
-      note    as Note
+      note     as Note
 }

@@ -13,7 +13,7 @@ define view ZC_OSD_ICF_APC
       @EndUserText.label: 'Application ID'
   key application_id as ApplicationId,
       @EndUserText.label: 'Implementation class'
-      handler        as Handler,
+      class_name     as ClassName,
       @EndUserText.label: 'Stateful'
       stateful       as Stateful
 }

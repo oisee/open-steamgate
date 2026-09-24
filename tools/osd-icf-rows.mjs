@@ -114,7 +114,7 @@ export function icfRows(root = ".", options = {}) {
     // Link by URL to the existing SICF node, whose name need not be the
     // SAPC application ID. Keep this read-only inventory in our own table.
     apc.push({ICF_NAME: node.ICF_NAME, ICFPARGUID: node.ICFPARGUID,
-      APPLICATION_ID: channel.name, HANDLER: channel.handler, STATEFUL: channel.stateful ? "X" : ""});
+      APPLICATION_ID: channel.name, CLASS_NAME: channel.handler, STATEFUL: channel.stateful ? "X" : ""});
     if (channel.description && !icfdocu.some((d) => d.ICF_NAME === node.ICF_NAME && d.ICFPARGUID === node.ICFPARGUID)) {
       icfdocu.push({ICF_NAME: node.ICF_NAME, ICFPARGUID: node.ICFPARGUID,
         ICF_LANGU: "E", ICF_DOCU: channel.description.slice(0, 100)});

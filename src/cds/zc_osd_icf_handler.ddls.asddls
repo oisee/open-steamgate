@@ -17,5 +17,5 @@ define view ZC_OSD_ICF_HANDLER
       @EndUserText.label: 'Type'
       icftyp     as IcfTyp,
       @EndUserText.label: 'Handler'
-      icfhandler as Handler
+      icfhandler as IcfHandler
 }

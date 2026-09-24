@@ -96,7 +96,7 @@ entities:
     properties:
       Path: {type: String(120), field: PATH, readonly: true, label: Path}
       Kind: {type: String(8), field: KIND, readonly: true, label: Kind}
-      Handler: {type: String(60), field: HANDLER, readonly: true, label: Handler}
+      HandlerName: {type: String(60), field: HANDLERNAME, readonly: true, label: Handler}
       Text: {type: String(120), field: TEXT, readonly: true, label: Name}
       Pack: {type: String(30), field: PACK, readonly: true, label: Pack}
 
@@ -120,13 +120,13 @@ entities:
     set: DatabaseSet
     description: "safe facts about the database and runtime platform"
     source: {cds: ZC_OSD_DATABASE, struct: "ZCL_STG_CDS_ZVOSDDB=>TY_ROW"}
-    keys: [Section, Name]
+    keys: [Category, Name]
     creatable: false
     updatable: false
     deletable: false
     operations: [R, Q]
     properties:
-      Section: {type: String(20), field: SECTION, readonly: true, label: Section}
+      Category: {type: String(20), field: CATEGORY, readonly: true, label: Category}
       Name: {type: String(60), field: NAME, readonly: true, label: Fact}
       Value: {type: String(240), field: VALUE, readonly: true, label: Value}
       Note: {type: String(240), field: NOTE, readonly: true, label: Note}
@@ -245,7 +245,7 @@ annotations:
       - {value: Path, label: Path}
       - {value: Kind, label: Kind}
       - {value: Text, label: Name}
-      - {value: Handler, label: Handler}
+      - {value: HandlerName, label: Handler}
       - {value: Pack, label: Pack}
       # **Reached from the status app, not only from the launchpad** (Alice,
       # 2026-09-18, in the G.5 specification). This list is where a person
@@ -256,11 +256,11 @@ annotations:
     facets:
       - {id: ServiceGeneral, label: General, fieldGroup: General}
     fieldGroups:
-      General: [Path, Kind, Text, Handler, Pack]
+      General: [Path, Kind, Text, HandlerName, Pack]
   Service/Path: {label: Path}
   Service/Kind: {label: Kind}
   Service/Text: {label: Name}
-  Service/Handler: {label: Handler}
+  Service/HandlerName: {label: Handler}
   Service/Pack: {label: Pack}
 
   Pack:
@@ -282,17 +282,17 @@ annotations:
 
   Database:
     header: {typeName: Environment fact, typeNamePlural: Environment facts, title: Name, description: Value}
-    selectionFields: [Section, Name]
+    selectionFields: [Category, Name]
     lineItem:
-      - {value: Section, label: Section}
+      - {value: Category, label: Category}
       - {value: Name, label: Fact}
       - {value: Value, label: Value}
       - {value: Note, label: Note}
     facets:
       - {id: DatabaseGeneral, label: General, fieldGroup: General}
     fieldGroups:
-      General: [Section, Name, Value, Note]
-  Database/Section: {label: Section}
+      General: [Category, Name, Value, Note]
+  Database/Category: {label: Category}
   Database/Name: {label: Fact}
   Database/Value: {label: Value}
   Database/Note: {label: Note}

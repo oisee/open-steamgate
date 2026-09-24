@@ -879,6 +879,12 @@ export function toIr(tree, options = {}) {
       const spelled = fn.parameters.map((p) => p.name.toLowerCase() + (p.optional === true ? "?" : "")).join(", ");
       throw new BindError(`table function ${name} takes ${required === fn.parameters.length ? required : `${required} to ${fn.parameters.length}`} argument(s) (${spelled}) and is called with ${argNodes.length}`, call);
     }
+    // a table parameter left to its DEFAULT (EMPTY, or another table) has no
+    // relation to hand the callee: refused here rather than inside it
+    const leftTable = fn.parameters.slice(argNodes.length).find((p) => p.kind === "table");
+    if (leftTable !== undefined) {
+      throw new BindError(`argument ${leftTable.name.toLowerCase()} of ${name} is a table left to its DEFAULT, which is not carried`, call);
+    }
     const args = fn.parameters.slice(0, argNodes.length).map((p, i) => {
       const argNode = argNodes[i];
       if (p.kind === "table") {
@@ -890,9 +896,16 @@ export function toIr(tree, options = {}) {
           throw new BindError(`argument ${p.name.toLowerCase()} of ${name} is a table and must be a table variable`, argNode);
         }
         const varName = String(host.value).slice(1).toUpperCase();
+        // `param` is the callee's parameter the relation goes to; `name` the
+        // caller's variable, as the message of a refusal names it
+        if (options.deferTableVariables === true && relationSchemas[varName] !== undefined) {
+          // a procedure's table variable, resolved when the statement runs
+          // (as `FROM :lt` is in this mode)
+          return {kind: "relation", name: varName, param: p.name, rel: varRef(varName, relationSchemas[varName])};
+        }
         const known = bound.get(varName);
-        if (known !== undefined) return {kind: "relation", name: varName, rel: known.handle === undefined ? known.rel : refTo(known.handle, schemaOf(known.rel, catalogue))};
-        if (tableParams.some((one) => String(one.name).toUpperCase() === varName)) return {kind: "relation", name: varName, rel: scan(varName)};
+        if (known !== undefined) return {kind: "relation", name: varName, param: p.name, rel: known.handle === undefined ? known.rel : refTo(known.handle, schemaOf(known.rel, catalogue))};
+        if (tableParams.some((one) => String(one.name).toUpperCase() === varName)) return {kind: "relation", name: varName, param: p.name, rel: scan(varName)};
         throw new BindError(`unknown table variable :${varName.toLowerCase()} passed to ${name}`, host);
       }
       if (p.type === undefined || isUnresolved(p.type)) {

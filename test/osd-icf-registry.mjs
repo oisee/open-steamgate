@@ -56,12 +56,12 @@ describe("the ICF registry, applied to a database", function () {
   it("refreshes the APC implementation when only SAPC changes and removes stale applications", async () => {
     const original = objects();
     await applyTo(client(), original);
-    const changed = {...original, ZOSD_ICF_APC: original.ZOSD_ICF_APC.map((a) => ({...a, HANDLER: "ZCL_CHANGED_APC"}))};
+    const changed = {...original, ZOSD_ICF_APC: original.ZOSD_ICF_APC.map((a) => ({...a, CLASS_NAME: "ZCL_CHANGED_APC"}))};
     const result = await applyTo(client(), changed);
     expect(result.actions.every((a) => a.action === "KEEP")).to.equal(true);
-    const saved = (await client().select({select: "SELECT handler FROM zosd_icf_apc"})).rows;
+    const saved = (await client().select({select: "SELECT class_name FROM zosd_icf_apc"})).rows;
     expect(saved.length).to.equal(changed.ZOSD_ICF_APC.length);
-    expect(saved.every((r) => String(r.handler ?? r.HANDLER).trim() === "ZCL_CHANGED_APC")).to.equal(true);
+    expect(saved.every((r) => String(r.class_name ?? r.CLASS_NAME).trim() === "ZCL_CHANGED_APC")).to.equal(true);
     await applyTo(client(), {...original, ZOSD_ICF_APC: []});
     expect((await client().select({select: "SELECT * FROM zosd_icf_apc"})).rows).to.deep.equal([]);
   });
@@ -184,7 +184,7 @@ describe("the ICF registry, applied to a database", function () {
     // breath. The one thing the content hash calls part of a node was the
     // one thing "kept aside" lost, and this test counted rows rather than
     // reading one, so it passed throughout. Found by an adversarial review.
-    expect(String(aside[0].HANDLER ?? aside[0].handler ?? "").trim(),
+    expect(String(aside[0].ICF_HANDLER ?? aside[0].icf_handler ?? "").trim(),
       "the aside record keeps what answered before").to.equal("ZCL_OSD_RFC_HTTP");
     expect(said.join(" "), "said out loud").to.contain("kept aside");
     // an applied row is the object's again, so the next start is quiet

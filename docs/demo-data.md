@@ -70,8 +70,11 @@ synthetic rows. Should a month ever run out of cells (not below
 trips, cents of fare and tip, hundredths of a mile, the zone as its
 LocationID (0 for a text not in the lookup) and the payment as its number
 (0 for any other text). So Card to Cash, or one zone name for another of the
-same length, is a change, and no character codes are needed, which would
-differ between hosts. `GENERATE` leaves the client empty, so its checksum is
+same length, is a change. What it does not tell apart: client 000, an empty
+client and a client that is not digits all count as 0, and so does every
+zone the lookup does not have, so one unknown zone swapped for another is
+not a change. No character codes are needed, which would differ between
+hosts. `GENERATE` leaves the client empty, so its checksum is
 the same on every system (163171580 for the default size and seed). The
 checksum in `ENSURE_TAXI`'s report includes the logon client, and on Node,
 client 123, it is 2056928574.

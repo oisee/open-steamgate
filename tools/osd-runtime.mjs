@@ -241,7 +241,13 @@ export class ServingRuntime {
         stopped();
         const answer = await this.#spawn({announce: pending});
         // a stop that came while this one was coming up stops it, and a
-        // recycle whose process is being stopped did not recycle anything
+        // recycle whose process is being stopped did not recycle anything.
+        // Known and accepted (review of #60): when the stop overtakes a
+        // spawn that succeeded, this rejects with "stopped while recycling"
+        // although the new code did load and may have served requests in the
+        // meantime. The caller hears that the recycle does not stand, which
+        // is true once the stop has taken the process; it is not told that
+        // the new generation was briefly live
         stopped();
         return {...answer, ms: Date.now() - began, recycled: true};
       } catch (error) {

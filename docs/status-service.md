@@ -29,7 +29,7 @@ session number.
 | `ZOSD_SYS` | `ZC_OSD_SYSTEM` | the system: SID, host kind, generation built and serving, whether they are in step, work processes, when it started, when the snapshot was taken, and the process the tables were written in (`PID`) |
 | `ZOSD_PROC` | `ZC_OSD_PROCESS` | a process: pid, role (`facade` or `work`), port, generation, epoch, sockets pinned to it, RSS |
 | `ZOSD_PORT` | `ZC_OSD_PORT` | a port: number, protocol (HTTP, HTTPS, RFC, DIAG), what it is for, whether anything is listening |
-| `ZOSD_SVC` | `ZC_OSD_SERVICE` | a service: path, kind (`ODATA`, `ICF`, `APC`), handler class, the pack it came from |
+| `ZOSD_SVC` | `ZC_OSD_SERVICE` | a service: path, kind (`ODATA`, `ICF`, `APC`), handler class (`HANDLER_NAME`, OData `HandlerName`), the pack it came from |
 | `ZOSD_PACK` | `ZC_OSD_PACK` | a pack: name, order, objects, folders, description |
 
 `ZC_OSD_SYSTEM` exposes four associations, and `src/status/zosd_status.stg.yaml`
