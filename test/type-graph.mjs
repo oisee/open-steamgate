@@ -175,8 +175,12 @@ describe("a table's include rows are its fields too", () => {
     writeFileSync(join(dir, "zkeys.tabl.xml"), tabl("ZKEYS", [field("ID", "ZFLAG"), field("POS", "ZFLAG")]));
     writeFileSync(join(dir, "zkeyed.tabl.xml"), tabl("ZKEYED", [keyField("MANDT", "ZFLAG"), keyInclude(".INCLUDE", "ZKEYS"), field("TXT", "ZFLAG")]));
     writeFileSync(join(dir, "zlate.tabl.xml"), tabl("ZLATE", [keyField("A", "ZFLAG"), field("B", "ZFLAG"), keyField("C", "ZFLAG")]));
+    // a structure with keys of its own, included by a row that is no key:
+    // the row decides, and the table's key is its own fields only
+    writeFileSync(join(dir, "zowned.tabl.xml"), tabl("ZOWNED", [keyField("OCL", "ZFLAG"), keyField("OID", "ZFLAG")]));
+    writeFileSync(join(dir, "znonkey.tabl.xml"), tabl("ZNONKEY", [keyField("MANDT", "ZFLAG"), keyField("K", "ZFLAG"), include(".INCLUDE", "ZOWNED")]));
     const fresh = new FolderDdic([dir]);
-    expect(ddicKeys(fresh, ["ZKEYED", "ZLATE", "ZPLAIN", "ZNOWHERE"])).to.deep.equal({ZKEYED: ["MANDT", "ID", "POS"], ZLATE: ["A", "C"]});
+    expect(ddicKeys(fresh, ["ZKEYED", "ZLATE", "ZPLAIN", "ZNOWHERE", "ZNONKEY"])).to.deep.equal({ZKEYED: ["MANDT", "ID", "POS"], ZLATE: ["A", "C"], ZNONKEY: ["MANDT", "K"]});
   });
 
   it("splices an .INCLUDE where the row stands, in order", () => {

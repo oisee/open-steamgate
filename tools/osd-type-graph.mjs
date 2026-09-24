@@ -134,7 +134,9 @@ export function resolveType(store, name, seen = new Set()) {
           const includeIsKey = tag(f, "KEYFLAG") === "X";
           fields.push(...inner.FIELDS.map((one) => {
             const named = suffix === "" ? one : {...one, NAME: `${one.NAME}${suffix}`};
-            return includeIsKey ? {...named, KEY: true} : named;
+            // the include's row decides, as DDIC and abaplint's listKeys do: a
+            // structure's own key flags do not make keys of the table
+            return {...named, KEY: includeIsKey};
           }));
         } else {
           fields.push({NAME: `${fieldName} ${included}`, INCLUDE: included, DATATYPE: "", LENG: 0, DECIMALS: 0, LETTER: "",

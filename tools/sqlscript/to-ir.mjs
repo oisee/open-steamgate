@@ -1565,7 +1565,7 @@ export function toIr(tree, options = {}) {
       const values = kids(node, "Expr").map(expression);
       if (values.length !== columns.length) throw new BindError(`UPSERT ${table}: ${values.length} values for ${columns.length} columns`, node);
       const row = values.map((value, i) => writtenLiteral(value, schema[columns[i]], `UPSERT ${table}: ${columns[i]}`, node));
-      return upsert(table, columns, [row.map(canonicalPacked)], key, fill);
+      return upsert(table, columns, [row], key, fill);
     }
     if (node.node === "Insert") {
       if ((node.children ?? []).some((c) => c.node === "host")) {

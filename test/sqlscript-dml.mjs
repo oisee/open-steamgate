@@ -223,6 +223,18 @@ describe("UPSERT edges, as HANA Express ran them", () => {
         try { await run("lt = SELECT CAST(NULL AS INTEGER) AS k, 'p' AS v, 'q' AS w FROM dummy; UPSERT t SELECT * FROM :lt; rv = 'x';"); } catch (error) { caught = error; }
         expect(caught?.message).to.match(/NULL in a key column/);
       });
+      it("a NULL key from a variable in VALUES WITH PRIMARY KEY is refused, writing nothing", async () => {
+        let caught;
+        try { await run("DECLARE n INTEGER; UPSERT t (k, v) VALUES (:n, 'z') WITH PRIMARY KEY; rv = 'x';"); } catch (error) { caught = error; }
+        expect(caught?.message).to.match(/NULL in a key column/);
+        const count = (await client.native({sql: 'SELECT COUNT(*) AS "C" FROM "T"', expect: "rows"})).rows[0].C;
+        expect(Number(count)).to.equal(2);
+      });
+      it("a key numbered by a window with no ORDER BY is refused: the query is asked twice", async () => {
+        let caught;
+        try { await run("lt = SELECT ROW_NUMBER() OVER () AS k, v, w FROM t; UPSERT t SELECT * FROM :lt; rv = 'x';"); } catch (error) { caught = error; }
+        expect(caught).to.be.an("error");
+      });
       it("a query that brings one key twice raises, as HANA does, and writes nothing", async () => {
         let caught;
         try { await run("lt = SELECT 1 AS k, 'p' AS v, 'q' AS w FROM dummy UNION ALL SELECT 1 AS k, 'r' AS v, 's' AS w FROM dummy; UPSERT t SELECT * FROM :lt; rv = 'x';"); } catch (error) { caught = error; }
