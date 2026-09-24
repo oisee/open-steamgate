@@ -211,8 +211,8 @@ sap.ui.define([
         return response.json();
       }).then(function (body) {
         var facts = body.d && body.d.results || [];
-        var engineFact = facts.find(function (fact) { return fact.Section === "Database" && fact.Name === "Engine"; });
-        var storageFact = facts.find(function (fact) { return fact.Section === "Database" && fact.Name === "Storage"; });
+        var engineFact = facts.find(function (fact) { return fact.Category === "Database" && fact.Name === "Engine"; });
+        var storageFact = facts.find(function (fact) { return fact.Category === "Database" && fact.Name === "Storage"; });
         var backend = engineFact ? String(engineFact.Value) : "unknown backend";
         state.setProperty("/database", backend + (storageFact ? " · " + storageFact.Value : ""));
         var portable = backend.toLowerCase() === "duckdb";
