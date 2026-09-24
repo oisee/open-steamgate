@@ -823,6 +823,7 @@ function stmtLines(st, ctx, d) {
     }
     // ultra/events: SET HANDLER, one registration per handler (the names
     // Ev* are mixed case, so no ABAP name, all upper or all lower, meets them)
+    case "get_timestamp": return [`${t}${place(st.target, ctx)} = abap.TimeStamp(${st.dec})`];
     case "set_handler": {
       const lines = [`${t}func() {`];
       lines.push(`${t}\tEvFor := ${st.forObj ? `any(${expr(st.forObj, ctx)})` : "any(nil)"}`, `${t}\t_ = EvFor`);

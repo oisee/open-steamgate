@@ -552,6 +552,7 @@ function stmt(st, ctx, d) {
     case "stub": return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.where}: ${st.reason}`)});`];
     // ultra/events: SET HANDLER and RAISE EVENT, as emit-go (js/abap.mjs
     // setHandler / raiseEvent follow go/abap/events.go)
+    case "get_timestamp": return [`${t}${place(st.target, ctx)} = abap.TimeStamp(${st.dec});`];
     case "set_handler": {
       const lines = [`${t}{`, `${t}  const EvFor = ${st.forObj ? expr(st.forObj, ctx) : "null"};`,
         `${t}  const EvOn = ${st.activation ? `abap.activation(${expr(st.activation, ctx)})` : "true"};`];

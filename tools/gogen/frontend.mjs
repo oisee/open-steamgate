@@ -415,8 +415,17 @@ export function readClass(folder) {
   return compileProgram({folders: [folder], objects}).classes;
 }
 
+// ultra/events: the host functions whose TYPE p parameters are read as p(16,7) (typeOf)
+const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT"]);
 /** methods whose ABAP is kernel code in the transpiler runtime, and the host function that does their work */
 const NATIVE = new Map([
+  // ultra/events (the WEBGUI's transaction sessions, ZCL_OSD_TRAN_SESSION):
+  // the seconds from TSTMP2 to TSTMP1, their fractions cut off, as
+  // open-abap-core's kernel lines compute them (its RETURNING is an i; a
+  // system's is a p with decimals); a random integer 0 .. 2^31-2 as
+  // open-abap-core's INT (a seed given to CREATE is ignored there too)
+  ["CL_ABAP_TSTMP=>SUBTRACT", {fn: "abap.TstmpSubtract", args: ["TSTMP1:p", "TSTMP2:p"]}],
+  ["CL_ABAP_RANDOM=>INT", {fn: "abap.RandomInt31", args: []}],
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "Native_DESCRIBE_BY_NAME"],
   ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~UNESCAPE_URL", "abap.UnescapeURL"],
   ["ZCL_OAO_RFC_DESTINATION=>REGISTER_LOCAL", "abap.RegisterLocalDestination"],
@@ -614,6 +623,10 @@ function typeOf(t, where, program) {
   if (t instanceof BasicTypes.GenericObjectReferenceType) return {k: "ref", name: "OBJECT", intf: true};
   // d and t: their characters, initial all zeros
   if (t instanceof BasicTypes.DateType) return {k: "d", len: 8};
+  // ultra/events: a generic TYPE p takes the caller's decimals, which a typed
+  // signature cannot say; only the host functions listed in P_GENERIC take
+  // one, as p(16,7), which holds a TIMESTAMP and a TIMESTAMPL exactly
+  if (t instanceof BasicTypes.PGenericType && P_GENERIC.has(String(where).split(" ")[0])) return {k: "p", len: 16, dec: 7};
   // p: declared, initial, copied and compared with initial only, as its
   // decimal text; any arithmetic or conversion is refused until packed
   // numbers are measured on A4H
@@ -1700,6 +1713,14 @@ function statement(node, ctx) {
     if (!charlike(target.type)) throw new Unsupported("TRANSLATE of a non-character field");
     return {s: "translate", target, upper: upper(m[1]) === "UPPER"};
   }
+  // ultra/events: GET TIME STAMP FIELD ts into a TIMESTAMP p(8,0) or a
+  // TIMESTAMPL p(11,7): UTC, as sy-datum and sy-uzeit are here
+  if (isStmt(node, Statements.GetTime)) {
+    if (!/^GET\s+TIME\s+STAMP\s+FIELD\s+\S+\s*\.?$/i.test(text)) throw new Unsupported(`GET TIME form: ${text}`);
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "p" || !((target.type.len === 8 && (target.type.dec ?? 0) === 0) || (target.type.len === 11 && target.type.dec === 7))) throw new Unsupported(`GET TIME STAMP into a ${target.type.k}(${target.type.len},${target.type.dec ?? 0})`);
+    return {s: "get_timestamp", target, dec: target.type.dec ?? 0};
+  }
   // class events (ultra/events): SET HANDLER and RAISE EVENT, see setHandler
   if (isStmt(node, Statements.SetHandler)) return setHandler(node, ctx, text);
   if (isStmt(node, Statements.RaiseEvent)) return raiseEvent(node, ctx, text);
@@ -1732,7 +1753,7 @@ function statement(node, ctx) {
   }
   if (isStmt(node, Statements.CallFunction)) return callFunction(node, ctx, text);
   if (isStmt(node, Statements.Call)) {
-    const chain = node.findDirectExpression(Expressions.MethodCallChain);
+    const chain = node.findDirectExpression(Expressions.MethodCallChain) ?? callMethodChain(node);
     if (chain === undefined) throw new Unsupported(`CALL form: ${text}`);
     return {s: "call", call: call(chain, ctx, true)};
   }
@@ -2913,6 +2934,8 @@ function writeIrType(t, where) {
   if (t.k === "c" || t.k === "n") return RIR.T.char(t.len ?? 1);
   if (t.k === "d") return RIR.T.char(8);
   if (t.k === "t") return RIR.T.char(6);
+  // ultra/events: a p column (ZOSD_TSES-CREATED, a TIMESTAMP), as sqlIrType reads it
+  if (t.k === "p" && !t.calc) return RIR.T.dec(2 * (t.len ?? 8) - 1, t.dec ?? 0);
   throw new Unsupported(`${where}: a column of kind ${t.k} is not written yet`);
 }
 const lowName = (n) => n.toLowerCase();
@@ -3972,6 +3995,37 @@ const FUNCTIONS = {
   ABS: "same", SIGN: "same", FLOOR: "same", CEIL: "same", TRUNC: "same", FRAC: "same",
   NMAX: "max", NMIN: "max",
 };
+
+/*
+ * ultra/events: the old CALL METHOD m / obj->m / cls=>m [EXPORTING ...]
+ * [IMPORTING ...] [CHANGING ...] [RECEIVING ...] [EXCEPTIONS ...] (ZCL_OSD_NOTE
+ * calls the HTML viewer so) as the method call chain the functional form
+ * parses into, so call() reads it the same way; undefined for any other shape
+ */
+function callMethodChain(node) {
+  const ms = node.findDirectExpression(Expressions.MethodSource);
+  const body = node.findDirectExpression(Expressions.MethodCallBody);
+  if (!ms || ms.findDirectExpression(Expressions.Dynamic)) return undefined;
+  const mk = ms.getChildren();
+  const nameFrom = mk.length === 1 ? mk[0] : mk.length === 3 && isExpr(mk[2], Expressions.AttributeName) ? mk[2] : null;
+  if (!nameFrom || (mk.length === 1 && !isExpr(mk[0], Expressions.SourceField))) return undefined;
+  const tokens = (n) => (n instanceof Nodes.TokenNode ? [n] : n.getChildren().flatMap(tokens));
+  const name = new Nodes.ExpressionNode(new Expressions.MethodName());
+  name.setChildren(tokens(nameFrom));
+  const kids = [name];
+  if (body) {
+    const mp = body.findDirectExpression(Expressions.MethodParameters);
+    if (!mp || body.getChildren().length !== 1) return undefined;
+    const param = new Nodes.ExpressionNode(new Expressions.MethodCallParam());
+    param.setChildren([mp]);
+    kids.push(param);
+  }
+  const mc = new Nodes.ExpressionNode(new Expressions.MethodCall());
+  mc.setChildren(kids);
+  const chain = new Nodes.ExpressionNode(new Expressions.MethodCallChain());
+  chain.setChildren(mk.length === 1 ? [mc] : [mk[0], mk[1], mc]);
+  return chain;
+}
 
 function call(chain, ctx, statement, hint) {
   const kids = chain.getChildren();

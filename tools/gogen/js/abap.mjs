@@ -1278,3 +1278,9 @@ export function SubstringAfter(v, sub) {
   const i = v.indexOf(sub);
   return i >= 0 ? v.slice(i + sub.length) : "";
 }
+// GET TIME STAMP FIELD (ultra/events): go/abap sysinfo.go TimeStamp
+export function TimeStamp(dec) {
+  const d = new Date();
+  const ts = d.toISOString().slice(0, 19).replace(/[-:T]/g, "");
+  return dec === 7 ? `${ts}.${String(d.getUTCMilliseconds()).padStart(3, "0")}0000` : ts;
+}
