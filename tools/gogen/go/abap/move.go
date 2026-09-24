@@ -128,7 +128,29 @@ func MoveData(dst, src Data) {
 				return
 			}
 		}
-	case 'y', 'D', 'T':
+	case 'D', 'T':
+		// a string or a c into a d or a t, the typed conversions (conv.go
+		// S2D / S2T for a string, a c cut to the length; A4H
+		// ZCL_GOGEN_T_GENMOVD)
+		n := 8
+		if dk == 'T' {
+			n = 6
+		}
+		switch {
+		case sk == dk:
+			*dst.P.(*string) = *src.P.(*string)
+			return
+		case sk == 'g' && dk == 'D':
+			*dst.P.(*string) = S2D(*src.P.(*string))
+			return
+		case sk == 'g':
+			*dst.P.(*string) = S2T(*src.P.(*string))
+			return
+		case sk == 'C':
+			*dst.P.(*string) = CFit(*src.P.(*string), n)
+			return
+		}
+	case 'y':
 		if sk == dk {
 			*dst.P.(*string) = *src.P.(*string)
 			return

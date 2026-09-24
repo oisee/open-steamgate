@@ -369,7 +369,7 @@ export function emitGo(program, pkg = "main") {
   out.push(...staticRegistry(program, classes));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_NAME"))) out.push(...nativeRtti(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) out.push(...nativeMessageText(program));
-  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_DATA"))) out.push(...nativeRttiData());
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_DATA"))) out.push(...nativeRttiData(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_JSON_PARSE"))) out.push(...nativeJsonParse());
   out.push(...nativeCodepage(classes));
   out.push(...tableRegistry(program));
@@ -514,7 +514,7 @@ function nativeRtti(program) {
  * output length of a p that comes from the dictionary, a structure's length,
  * a table type's name and its key. A reference or an object is refused.
  */
-function nativeRttiData() {
+function nativeRttiData(program) {
   const td = CLASSES.get("CL_ABAP_TYPEDESCR");
   const ed = CLASSES.get("CL_ABAP_ELEMDESCR");
   const sd = CLASSES.get("CL_ABAP_STRUCTDESCR");
@@ -531,6 +531,10 @@ function nativeRttiData() {
   const dataRef = goType(attr(sd, "MT_REFS").type.row.k === "struct" ? STRUCTDEFS.get(refRow).fields.find((f) => f.name === "TYPE").type : null);
   const f = (a) => ident(a);
   return [
+    // parity-wave1: the output lengths of the data elements the program's
+    // components are typed with (frontend ddicOutputLength)
+    "// the output length of each data element named by a component (its domain's, or its own)",
+    `var rttiOutputLen = map[string]int32{${[...(program.ddicOutputLen ?? new Map())].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ")}}`, "",
     "// the descriptors handed out, one per type (rttiOf)",
     `var rttiDescs = map[*abap.Type]${ret}{}`, "",
     "var rttiAnon int", "",
@@ -570,10 +574,13 @@ function nativeRttiData() {
     `		base.${f("KIND")} = "E"`,
     "		n := t.Len",
     "		var length, out int32",
-    // a dictionary type's output length is its domain's (or data element's),
-    // which abap.Type does not carry: refused rather than taken from the
-    // length (ultra/json fix round, critic finding 6). ABAP_BOOL is measured
-    `		if t.DDIC != "" && t.DDIC != "ABAP_BOOL" && (t.Kind == 'C' || t.Kind == 'N' || t.Kind == 'P') {`,
+    // a dictionary type's output length is its domain's (or data element's):
+    // taken from rttiOutputLen, the data elements of the registry
+    // (parity-wave1, A4H ZCL_GOGEN_T_RTTIOL); one not there is refused rather
+    // than taken from the length (ultra/json fix round, critic finding 6).
+    // ABAP_BOOL is measured
+    "		ddicOut, fromDDIC := rttiOutputLen[t.DDIC]",
+    `		if t.DDIC != "" && t.DDIC != "ABAP_BOOL" && (t.Kind == 'C' || t.Kind == 'N' || t.Kind == 'P') && !fromDDIC {`,
     `			panic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "the output length of "+t.DDIC+", a dictionary type of kind "+string(t.Kind)+", is its domain's and not carried"))`,
     "		}",
     "		switch t.Kind {",
@@ -596,6 +603,9 @@ function nativeRttiData() {
     `			panic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "type kind "+string(t.Kind)))`,
     "		}",
     `		base.${f("LENGTH")} = length`,
+    `		if fromDDIC && (t.Kind == 'C' || t.Kind == 'N' || t.Kind == 'P') {`,
+    "			out = ddicOut",
+    "		}",
     `		ed.${f("OUTPUT_LENGTH")} = out`,
     "		rttiDescs[t] = d",
     "	}",
@@ -1709,6 +1719,7 @@ function expr(e, ctx) {
     }
     case "wrap": return `abap.Data{P: ${PLACES.has(e.x.e) ? `&${place(e.x, ctx)}` : `abap.Ptr(${expr(e.x, ctx)})`}, T: ${desc(e.x.type)}}`;
     case "unwrap": return unwrapTo(e.type, expr(e.x, ctx));
+    case "unwrap_chars": return `abap.DataChars(${expr(e.x, ctx)})`;
     case "lines_data": return `int32(abap.Lines(${expr(e.x, ctx)}))`;
     default: throw new Error(`no Go for expression ${e.e}`);
   }
@@ -1761,6 +1772,8 @@ function conv(e, ctx) {
     case "c2s": return x;
     case "table_rows": return `func() ${goType(e.to)} { var out ${goType(e.to)}; for _, ConvRow := range ${x} { out = append(out, ${expr(e.row, ctx)}) }; return out }()`;
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
+    case "s2d": return `abap.S2D(${x})`;
+    case "s2t": return `abap.S2T(${x})`;
     case "i2s": return `abap.IToString(${x})`;
     case "i2n": return `abap.IToN(${x}, ${e.to.len})`;
     case "s2n": return `abap.CToN(${x}, ${e.to.len})`;

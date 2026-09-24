@@ -930,6 +930,7 @@ function expr(e, ctx) {
     }
     case "wrap": return isPlace(e.x) ? bind(e.x, ctx) : `abap.cell(${expr(e.x, ctx)}, ${desc(e.x.type)})`;
     case "unwrap": return unwrapTo(e.type, expr(e.x, ctx));
+    case "unwrap_chars": return `abap.DataChars(${expr(e.x, ctx)})`;
     case "lines_data": return `abap.Lines(${expr(e.x, ctx)})`;
     default: throw new Error(`no JS for expression ${e.e}`);
   }
@@ -983,6 +984,8 @@ function conv(e, ctx) {
     case "c2s": return x;
     case "table_rows": return `${x}.map((ConvRow) => ${expr(e.row, ctx)})`;
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
+    case "s2d": return `abap.S2D(${x})`;
+    case "s2t": return `abap.S2T(${x})`;
     case "x2s": return e.to.k === "c" ? `abap.CFit(abap.XToHex(${x}), ${e.to.len})` : `abap.XToHex(${x})`;
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
     // packed numbers, js/abap.mjs (= go/abap packed.go)

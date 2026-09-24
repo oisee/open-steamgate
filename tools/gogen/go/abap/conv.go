@@ -24,6 +24,27 @@ func CFit(v string, n int) string {
 	return strings.TrimRight(v, " ")
 }
 
+// S2D and S2T are a string moved into a d or a t (A4H ZCL_GOGEN_T_GENMOVD):
+// the first eight (six) characters, an empty string the initial value, and
+// a t shorter than six filled with zeros on the right ('abc' is abc000).
+func S2D(v string) string {
+	if v == "" {
+		return "00000000"
+	}
+	return CFit(v, 8)
+}
+
+func S2T(v string) string {
+	if v == "" {
+		return "000000"
+	}
+	r := []rune(v)
+	if len(r) > 6 {
+		r = r[:6]
+	}
+	return string(r) + strings.Repeat("0", 6-len(r))
+}
+
 // FmtI formats an i the way a string template does: a leading minus, no
 // blanks.
 func FmtI(v int32) string { return strconv.FormatInt(int64(v), 10) }

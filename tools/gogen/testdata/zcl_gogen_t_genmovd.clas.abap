@@ -38,7 +38,7 @@ CLASS zcl_gogen_t_genmovd IMPLEMENTATION.
     LOOP AT lt_s INTO lv_s.
       <v> = lv_s.
       lv_d2 = lv_s.
-      rv = |{ rv }[{ lv_d }]{ b( xsdbool( lv_d IS INITIAL ) ) }{ b( xsdbool( lv_d = lv_d2 ) ) }{ lv_d+0(4) }{ strlen( |{ lv_d }| ) },|.
+      rv = |{ rv }[{ lv_d }]{ b( xsdbool( lv_d IS INITIAL ) ) }{ b( xsdbool( |{ lv_d }| = |{ lv_d2 }| ) ) }{ lv_d+0(4) }{ strlen( |{ lv_d }| ) },|.
     ENDLOOP.
     lv_c = '19991231'.
     <v> = lv_c.
@@ -48,7 +48,7 @@ CLASS zcl_gogen_t_genmovd IMPLEMENTATION.
     LOOP AT lt_s INTO lv_s.
       <v> = lv_s.
       lv_t2 = lv_s.
-      rv = |{ rv }[{ lv_t }]{ b( xsdbool( lv_t IS INITIAL ) ) }{ b( xsdbool( lv_t = lv_t2 ) ) },|.
+      rv = |{ rv }[{ lv_t }]{ b( xsdbool( lv_t IS INITIAL ) ) }{ b( xsdbool( |{ lv_t }| = |{ lv_t2 }| ) ) },|.
     ENDLOOP.
   ENDMETHOD.
 ENDCLASS.

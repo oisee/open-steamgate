@@ -845,6 +845,27 @@ function typeOf(t, where, program) {
 }
 
 /*
+ * The output length of a data element (parity-wave1, A4H ZCL_GOGEN_T_RTTIOL:
+ * cl_abap_elemdescr's OUTPUT_LENGTH is the domain's OUTPUTLEN when the data
+ * element has one, else the data element's own), read off the abapGit XML
+ * of the registry into PROGRAM.ddicOutputLen for emit-go's RTTI. A name that
+ * is not a data element of the registry, or whose XML has no OUTPUTLEN, is
+ * left out, and RTTI keeps refusing it.
+ */
+function ddicOutputLength(name) {
+  const map = (PROGRAM.ddicOutputLen ??= new Map());
+  if (map.has(name) || name.includes("-") || !REG) return;
+  const xmlOf = (type, n) => REG.getObject(type, n)?.getXMLFile?.()?.getRaw?.() ?? "";
+  const tag = (xml, t) => new RegExp(`<${t}>([^<]*)</${t}>`).exec(xml)?.[1];
+  const dtel = xmlOf("DTEL", name);
+  if (!dtel) return;
+  const dom = tag(dtel, "DOMNAME");
+  const src = dom && tag(dtel, "REFKIND") === "D" ? xmlOf("DOMA", upper(dom)) : dtel;
+  const out = tag(src, "OUTPUTLEN");
+  if (out !== undefined && /^\d+$/.test(out)) map.set(name, Number(out));
+}
+
+/*
  * An elementary component's type with the names RTTI reads (ultra/json):
  * abaplint's qualified name, upper case, as the transpiler hands it to its
  * runtime, and the dictionary type it comes from. Only components carry
@@ -855,8 +876,11 @@ function typeOf(t, where, program) {
 function rttiNamed(ir, t) {
   if (["struct", "table", "dref", "ref", "exc", "data"].includes(ir.k)) return ir;
   const q = t.getQualifiedName?.();
-  const d = t.getDDICName?.();
+  // abaplint gives a NUMC data element its name as the qualified name only
+  // (no DDIC name): read it as the dictionary type it is (parity-wave1)
+  const d = t.getDDICName?.() ?? (ir.k === "n" && q && !/[=>-]/.test(q) && REG?.getObject("DTEL", upper(q)) ? q : undefined);
   if (!q && !d) return ir;
+  if (d) ddicOutputLength(upper(d));
   return {...ir, ...(q ? {qname: upper(q)} : {}), ...(d ? {ddic: upper(d)} : {})};
 }
 
@@ -4821,10 +4845,15 @@ function call(chain, ctx, statement, hint) {
   if (receiver === null && owner === null && name === "ESCAPE" && !ctx.signatures.has(name)) {
     const ps = named?.findDirectExpressions(Expressions.ParameterS) ?? [];
     const arg = (p) => ps.find((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()) === p)?.findDirectExpression(Expressions.Source);
-    if (ps.length !== 2 || !arg("VAL") || !/^cl_abap_format=>e_html_attr$/i.test(arg("FORMAT")?.concatTokens() ?? "")) throw new Unsupported(`escape( ) form: ${chain.concatTokens()}`);
+    // parity-wave1: e_json_string (A4H ZCL_GOGEN_T_JSESC: \\ and " escaped,
+    // \b \t \n \f \r, every other control character \u00XX, the rest as
+    // it is; a c loses its trailing blanks, a generic operand is read as a
+    // string, which /UI2/CL_JSON=>SERIALIZE_INT passes)
+    const fmt = /^cl_abap_format=>(e_html_attr|e_json_string)$/i.exec(arg("FORMAT")?.concatTokens() ?? "")?.[1]?.toLowerCase();
+    if (ps.length !== 2 || !arg("VAL") || !fmt) throw new Unsupported(`escape( ) form: ${chain.concatTokens()}`);
     const v = source(arg("VAL"), ctx);
-    if (!charlike(v.type)) throw new Unsupported(`escape( ) of a ${v.type.k}`);
-    return {e: "str_fn", fn: "EscapeHTMLAttr", args: [convert(v, S)], type: S};
+    if (!charlike(v.type) && !(fmt === "e_json_string" && v.type.k === "data" && !v.type.table)) throw new Unsupported(`escape( ) of a ${v.type.k}`);
+    return {e: "str_fn", fn: fmt === "e_html_attr" ? "EscapeHTMLAttr" : "EscapeJSONString", args: [convert(v, S)], type: S};
   }
   if (receiver === null && owner === null && STRING_FNS[name] && !ctx.signatures.has(name)) return stringFn(name, direct, named, ctx, chain.concatTokens());
   // ultra/httpc: concat_lines_of( table = t sep = s ) over a table of
@@ -5109,6 +5138,11 @@ export function convert(expr, to) {
   if (numeric(from) && numeric(to)) return ok("num");
   if (to.k === "string" && from.k === "c") return ok("c2s");
   if (to.k === "c" && charlike(from)) return ok("s2c");
+  // string -> d / t (parity-wave1, A4H ZCL_GOGEN_T_GENMOVD): the first eight
+  // (six) characters as for a c, but an empty string is the initial value,
+  // and a t shorter than six is filled with zeros ('abc' is abc000)
+  if (to.k === "d" && from.k === "string") return ok("s2d");
+  if (to.k === "t" && from.k === "string") return ok("s2t");
   // c -> d, measured on A4H: the first eight characters, no check ('ABC' is
   // kept, reads back as ABC and counts as 0 days); '' is not initial
   if (to.k === "d" && charlike(from)) return ok("s2c");
@@ -5502,5 +5536,16 @@ function compareValues(op, l, r, ctx) {
   if (l.type.k === "n" && r.type.k === "n" && l.type.len === r.type.len) return {c: "cmp", op, l: convert(l, S), r: convert(r, S), type: S};
   // two object references, = and <>: the same object or not (ultra/json)
   if (l.type.k === "ref" && r.type.k === "ref" && (op === "=" || op === "<>")) return {c: "refeq", op, l, r};
+  // parity-wave1: a generic operand against a c, a string or another
+  // generic operand (A4H ZCL_GOGEN_T_GENCMP): holding a c or a string at
+  // run time, the typed rule above, both read as strings and a c without
+  // its trailing blanks (`AB ` <> 'AB', 'AB' = `AB`, '' = ``, ' ' <> ` `).
+  // Holding anything else it dumps NOT_COMPILED (abap.DataChars): those
+  // comparisons are numeric or by other rules, not measured here
+  const gen = (x) => x.type.k === "data" && !x.type.table;
+  if ((gen(l) || gen(r)) && [l, r].every((x) => gen(x) || charlike(x.type))) {
+    const side = (x) => (gen(x) ? {e: "unwrap_chars", x, type: S} : convert(x, S));
+    return {c: "cmp", op, l: side(l), r: side(r), type: S};
+  }
   throw new Unsupported(`comparison of ${l.type.k} with ${r.type.k}`);
 }
