@@ -169,6 +169,7 @@ CLASS zcl_osd_git DEFINITION PUBLIC CREATE PUBLIC.
       IMPORTING
         !ii_client     TYPE REF TO if_http_client
         !iv_url        TYPE string
+        !iv_expect     TYPE string OPTIONAL
       RETURNING
         VALUE(rv_data) TYPE xstring
       RAISING
@@ -525,7 +526,8 @@ CLASS zcl_osd_git IMPLEMENTATION.
     ENDIF.
 
     rv_data = exchange( ii_client = li_client
-                        iv_url    = iv_url ).
+                        iv_url    = iv_url
+                        iv_expect = iv_accept ).
 
   ENDMETHOD.
 
@@ -552,8 +554,10 @@ CLASS zcl_osd_git IMPLEMENTATION.
 
   METHOD exchange.
 
-    DATA lv_message TYPE string.
-    DATA lv_code    TYPE i.
+    DATA lv_message  TYPE string.
+    DATA lv_code     TYPE i.
+    DATA lv_location TYPE string.
+    DATA lv_type     TYPE string.
 
     ii_client->send(
       EXCEPTIONS
@@ -578,10 +582,24 @@ CLASS zcl_osd_git IMPLEMENTATION.
 
     " get_status rather than the ~status_code field, which the local runtime
     " does not fill (ANOMALY-2026-09-24-httpc-status-code-field)
+    " anything but a 2xx is refused: a redirect has no refs in it either, and
+    " its empty body would read as a repository with no branches
     ii_client->response->get_status( IMPORTING code = lv_code ).
-    IF lv_code >= 400.
+    IF lv_code < 200 OR lv_code >= 300.
+      lv_location = ii_client->response->get_header_field( 'location' ).
       ii_client->close( ).
-      zcx_abapgit_exception=>raise( |{ iv_url } answered { lv_code }| ).
+      IF lv_location IS INITIAL.
+        zcx_abapgit_exception=>raise( |{ iv_url } answered { lv_code }| ).
+      ELSE.
+        zcx_abapgit_exception=>raise( |{ iv_url } answered { lv_code }, to { lv_location }| ).
+      ENDIF.
+    ENDIF.
+
+    " a server that is not a smart git server answers 200 with something else
+    lv_type = ii_client->response->get_content_type( ).
+    IF iv_expect IS NOT INITIAL AND lv_type NP |{ iv_expect }*|.
+      ii_client->close( ).
+      zcx_abapgit_exception=>raise( |{ iv_url } answered { lv_type }, not { iv_expect }| ).
     ENDIF.
 
     rv_data = ii_client->response->get_data( ).
