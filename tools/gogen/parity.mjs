@@ -3,7 +3,7 @@
 //
 //   node tools/gogen/parity.mjs [--root <checkout>] [--osgo <binary>] [--media <dir>]
 //        [--port 4610] [--out <dir>] [--suites a,b] [--only node|osgo] [--reuse-node]
-//        [--timeout 30000] [--no-count]
+//        [--timeout 30000] [--no-count] [--e2e]
 //
 // How a suite reaches its server: 16 files of test/suites.json call
 // startServer() from test/start.mjs, which builds an express host in the
@@ -19,6 +19,11 @@
 // passed on Node and sent at least one request there. Every other suite of
 // test/suites.json is in-process (it imports output/ or a tool directly) and
 // is counted, not run (mocha --dry-run), as "not applicable".
+//
+// --e2e adds the Playwright specs of test/e2e (the browser against the
+// server, SAPUI5 from SAP's CDN): one server per backend for the whole run,
+// as playwright.config.mjs has it, and the specs' results joined the same
+// way. Every spec is HTTP-level by construction.
 //
 // Writes <out>/parity.json and <out>/parity.md (default .local/parity/).
 import {spawn, spawnSync} from "node:child_process";
@@ -145,6 +150,51 @@ for (const file of httpSuites) {
   if (only !== "osgo" && results.node[file] === undefined) results.node[file] = await runSuite("node", file, basePort + 1);
   if (only !== "node") results.osgo[file] = await runSuite("osgo", file, basePort + 2);
 }
+
+// the Playwright specs, one server per backend for the whole run
+async function runE2e(kind, port) {
+  const base = join(out, "runs", `${kind}-e2e`);
+  const config = `${base}.playwright.config.mjs`;
+  writeFileSync(config, `export default ${JSON.stringify({
+    testDir: join(root, "test", "e2e"), testIgnore: "**/*preview*.spec.mjs", workers: 1, timeout: 90_000, expect: {timeout: 30_000}, retries: 0,
+    outputDir: `${base}.artifacts`, reporter: [["json", {outputFile: `${base}.playwright.json`}]],
+    use: {baseURL: `http://localhost:${port}`, headless: true},
+  })};\n`);
+  const child = startBackend(kind, port, `${base}.server.log`);
+  const up = await waitUp(port, child, kind === "node" ? 240_000 : 120_000);
+  const records = [];
+  if (up) {
+    const env = {...process.env, STG_PORT: String(port)};
+    spawnSync(process.execPath, [join(root, "node_modules", "@playwright", "test", "cli.js"), "test", "--config", config],
+      {cwd: root, env, encoding: "utf8", timeout: 40 * 60_000, maxBuffer: 64 << 20});
+    let report;
+    try { report = JSON.parse(readFileSync(`${base}.playwright.json`, "utf8")); } catch {}
+    const walk = (suite, path) => {
+      for (const spec of suite.specs ?? []) {
+        for (const t of spec.tests ?? []) {
+          const r = t.results?.[t.results.length - 1];
+          const status = r?.status ?? "skipped";
+          const msg = String(r?.error?.message ?? "").replace(/\u001b\[[0-9;]*m/g, "");
+          records.push({title: `e2e ${[...path, spec.title].join(" ")}`, state: status === "passed" ? "passed" : status === "skipped" ? "pending" : "failed",
+            duration: r?.duration, err: status === "passed" ? undefined : {message: msg.slice(0, 800), timeout: /Timeout \d+ms exceeded|timed out/i.test(msg)},
+            // a spec drives the browser at the server, so every one is HTTP-level; its requests are not probed
+            requests: [{method: "BROWSER", path: spec.file ?? suite.file ?? "", status: status === "passed" ? 200 : 0}]});
+        }
+      }
+      for (const sub of suite.suites ?? []) walk(sub, [...path, sub.title]);
+    };
+    for (const s of report?.suites ?? []) walk(s, []);
+  }
+  const died = child.exitCode !== null || child.signalCode !== null;
+  await stop(child);
+  console.log(`  ${kind.padEnd(4)} test/e2e (playwright)         ${records.filter((r) => r.state === "passed").length}/${records.length} passed${died ? ", SERVER DIED" : ""}`);
+  return {file: "test/e2e", kind, up, boot: 0, records, hookFailures: [], serverDied: died, log: died ? tail(`${base}.server.log`) : undefined};
+}
+if (flag("e2e")) {
+  httpSuites.push("test/e2e");
+  if (only !== "osgo" && results.node["test/e2e"] === undefined) results.node["test/e2e"] = await runE2e("node", basePort + 1);
+  if (only !== "node") results.osgo["test/e2e"] = await runE2e("osgo", basePort + 2);
+}
 if (only !== "osgo") writeFileSync(cachePath, JSON.stringify(results.node));
 
 // the in-process suites, counted
@@ -189,6 +239,11 @@ function classify(t) {
   }
   const reqs = o.requests;
   const err = o.err ?? {};
+  if (t.file === "test/e2e") {
+    // the browser's requests are not probed: the spec file is the key, the first line of the error the detail
+    const spec = reqs[0]?.path?.split("/").pop() ?? "?";
+    return {cat: err.timeout ? "timeout" : "different answer", key: `e2e ${spec}`, detail: String(err.message ?? o.state).split("\n").filter(Boolean).slice(0, 2).join(" / ").slice(0, 300)};
+  }
   if (reqs.some((q) => /ECONNREFUSED|ECONNRESET|UND_ERR_SOCKET|fetch failed|socket hang up/.test(q.error ?? ""))) {
     return {cat: "crash", key: "connection refused or reset", detail: reqs.find((q) => q.error)?.error};
   }
