@@ -1,7 +1,6 @@
 package abap
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -161,7 +160,7 @@ func TestRangesA4H(t *testing.T) {
 	if err := json.Unmarshal(pairsFile(t, "a4h-ranges.json"), &file); err != nil {
 		t.Fatal(err)
 	}
-	d, err := sql.Open("sqlite", ":memory:")
+	d, err := openSQL(":memory:") // the build's driver: sqljs under js/wasm
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,6 @@
 package abap
 
 import (
-	"database/sql"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -42,7 +41,7 @@ func TestWritesPairs(t *testing.T) {
 		if !reflect.DeepEqual(normal(t, params), normal(t, want.Params)) {
 			t.Errorf("%s: params %v, want %v", c.Name, params, want.Params)
 		}
-		d, err := sql.Open("sqlite", ":memory:")
+		d, err := openSQL(":memory:") // the build's driver: sqljs under js/wasm
 		if err != nil {
 			t.Fatal(err)
 		}

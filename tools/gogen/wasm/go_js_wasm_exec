@@ -1,0 +1,5 @@
+#!/bin/sh
+# go test -exec for GOOS=js GOARCH=wasm with sql.js loaded (node-exec.mjs);
+# the stack size is Go's own go_js_wasm_exec's
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec node --stack-size=8192 "$DIR/node-exec.mjs" "$@"
