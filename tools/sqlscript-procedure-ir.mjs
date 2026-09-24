@@ -7,7 +7,16 @@
 // before a syntax tree is allowed to produce these nodes.
 import {effects, schemaOf, col, cast, project, filter, bin, lit, limit, scan, order, refTo, T} from "./sqlscript-ir.mjs";
 import {lower, Refused} from "./sqlscript-lower.mjs";
-import {childBodies, containsRelationStatement, readsRelations} from "./sqlscript-blocks.mjs";
+import {childBodies, containsRelationStatement, readsRelations, containsWrite} from "./sqlscript-blocks.mjs";
+import {columnType} from "./ir-host-relation.mjs";
+
+/** a snapshot's column type: the host relation's, and on SQLite a CHAR
+ *  compared as the transpiler's schema compares it, blanks at the end ignored */
+const snapshotColumnType = (type, dialect) => {
+  const base = columnType(type, dialect);
+  if (base === undefined) return undefined;
+  return dialect === "sqlite" && ["C", "D"].includes(type?.abap) ? `${base} COLLATE RTRIM` : base;
+};
 export {childBodies};
 import {packedText, WriteError} from "./ir-writes.mjs";
 
@@ -541,10 +550,11 @@ export async function runProcedure(program, {
   // table variables materialised before a write to the table they read;
   // dropped when the call ends, however it ends
   const snapshots = [];
-  const readsTable = (node, table) => {
+  const readsDatabase = (node) => {
     if (node === null || typeof node !== "object") return false;
-    if (node.rel === "scan" && upper(node.table) === table) return true;
-    return Object.values(node).some((value) => (Array.isArray(value) ? value.some((one) => readsTable(one, table)) : readsTable(value, table)));
+    if (node.rel === "scan" && upper(node.table) !== "DUMMY") return true;
+    if (node.rel === "tfcall") return true;
+    return Object.values(node).some((value) => (Array.isArray(value) ? value.some(readsDatabase) : readsDatabase(value)));
   };
   const snapshot = async (name, rel) => {
     let compiled;
@@ -554,9 +564,22 @@ export async function runProcedure(program, {
       throw error;
     }
     const schema = schemaOf(rel, inputCatalogue);
-    const handle = await client.defineRelation({name: `snap_${name}`, sql: compiled.sql, params: compiled.params,
-      materialise: "a table variable read before a write to its table"});
-    snapshots.push(handle);
+    const columns = Object.keys(schema);
+    // a table of the column types, filled by INSERT ... SELECT: CREATE TABLE
+    // AS keeps no collation, and SQLite's CHAR columns compare with RTRIM
+    const types = columns.map((c) => snapshotColumnType(schema[c], dialect));
+    let handle;
+    if (client.relationDdl === true && types.every((t) => t !== undefined)) {
+      const quote = (ident) => `"${ident.replace(/"/g, '""')}"`;
+      handle = await client.defineRelation({name: `snap_${name}`, materialise: "a table variable read before a write",
+        ddl: (ref) => `CREATE TABLE ${ref} (${columns.map((c, i) => `${quote(c)} ${types[i]}`).join(", ")})`});
+      snapshots.push(handle);
+      await client.native({sql: `INSERT INTO ${client.relationRef(handle)} ${compiled.sql}`, params: compiled.params, expect: "none"});
+    } else {
+      handle = await client.defineRelation({name: `snap_${name}`, sql: compiled.sql, params: compiled.params,
+        materialise: "a table variable read before a write"});
+      snapshots.push(handle);
+    }
     dbStatements += 1;
     return refTo(handle, schema);
   };
@@ -850,13 +873,19 @@ export async function runProcedure(program, {
           throw new UnsupportedSqlScript("a write to a table needs the database, and this run has none", statement);
         }
         if (deferRelation) throw new UnsupportedSqlScript("a write inside a nested CALL is not carried yet", statement);
-        const table = upper(statement.write.table);
         // A table variable read before the write keeps the rows it read
         // (measured on HXE: `lt = SELECT FROM t; DELETE FROM t;` and :lt
         // still has them). This executor keeps a variable as a plan, so a
         // plan that reads the table is materialised before the write runs.
+        // the snapshots, too, are made inside the LUW: a ROLLBACK then takes
+        // back their tables with the writes, and a COMMIT keeps neither
+        await client.beginTransaction?.();
+        // Conservatively: every plan that reads the database at all -- a view
+        // or a table function reads the table written as surely as a scan of
+        // it does, and which tables a view reads is not known here (the #63
+        // critic: a variable over a view saw the DELETE)
         for (const [name, rel] of [...relations]) {
-          if (readsTable(rel, table)) relations.set(name, await snapshot(name, rel));
+          if (readsDatabase(rel)) relations.set(name, await snapshot(name, rel));
         }
         const frozenRel = (rel) => freezeRelation(rel, relations, scalars, session);
         const frozen = (expr) => freezeExpr(expr, scalars, frozenRel, session);
@@ -874,7 +903,13 @@ export async function runProcedure(program, {
         step(statement);
         dbStatements += 1;
         dbParams += compiled.params.length;
-        await client.native({...compiled, expect: "none"});
+        // in the caller's LUW, as an Open SQL write is: a ROLLBACK WORK (or
+        // a dump ending the dialog step) takes it back
+        if (typeof client.write === "function") await client.write(compiled);
+        else {
+          await client.beginTransaction?.();
+          await client.native({...compiled, expect: "none"});
+        }
       } else if (statement.stmt === "for-range") {
         // measured on HXE: the bounds are evaluated once, inclusive; from >
         // to runs no time; REVERSE counts down; the counter is the loop's
@@ -984,6 +1019,10 @@ export async function runProcedure(program, {
             || child.outputType !== undefined) {
           throw new UnsupportedSqlScript(
             "initial nested CALL requires exactly one table IN and one table OUT parameter", statement);
+        }
+        // a write in the called body is refused before it runs anything
+        if (containsWrite(child.body ?? [])) {
+          throw new UnsupportedSqlScript(`a write inside the nested CALL of ${statement.procedure} is not carried yet`, statement);
         }
         const input = relations.get(statement.input);
         if (input === undefined) {

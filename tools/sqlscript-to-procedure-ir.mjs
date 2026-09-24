@@ -583,8 +583,13 @@ export function compileProcedure(method, types, options = {}) {
       } else if (["Delete", "Update", "Insert"].includes(node.node)) {
         // a write to a database table: the method must not be READ-ONLY (HANA
         // creates such a procedure READS SQL DATA, which cannot modify)
+        // measured on HXE: "INSERT/UPDATE/DELETE is/are not supported in
+        // read-only procedure" and "... in table function"
         if (method?.readOnly === true) {
-          throw new UnsupportedSqlScript(`${node.node.toUpperCase()} in a READ-ONLY method, which HANA refuses`, node);
+          throw new UnsupportedSqlScript(`${node.node.toUpperCase()} in a READ-ONLY method, which HANA refuses ("not supported in read-only procedure")`, node);
+        }
+        if (upper(method?.dbKind ?? "") === "FUNCTION" || method?.tableFunction !== undefined) {
+          throw new UnsupportedSqlScript(`${node.node.toUpperCase()} in a FUNCTION, which HANA refuses ("not supported in table function")`, node);
         }
         result.push(writeTable(bind(node, "write"), node));
       } else if (node.node === "Assignment") {

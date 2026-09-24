@@ -604,8 +604,16 @@ export function toIr(tree, options = {}) {
       }
       case "string":
         return lit(String(node.value), T.char(String(node.value).length));
-      case "number":
+      case "number": {
+        // an integer past 2^53 is not the number written once it is a
+        // JavaScript number: refused rather than rounded (the #63 critic:
+        // 9007199254740993 was stored as ...992)
+        const text = String(node.value);
+        if (!text.includes(".") && !/e/i.test(text) && !Number.isSafeInteger(Number(text))) {
+          throw new BindError(`the integer literal ${text} is past 2^53 and is not carried exactly`, node);
+        }
         return lit(Number(node.value), literalType(node));
+      }
       case "host":
         // a host variable is a **bound parameter**, never text: that is the
         // guarantee the native channel exists for
@@ -1455,6 +1463,25 @@ export function toIr(tree, options = {}) {
 
   /** DELETE, UPDATE, INSERT on a database table, as a tools/ir-writes.mjs node */
   function write(node) {
+    return writeNode(node);
+  }
+
+  /** every packed literal a write carries as a JavaScript number becomes the
+   *  decimal string of its own digits -- 2.34 as '2.34', P(31, 2) -- the form
+   *  a packed value is bound in; the column's rounding stays the engine's */
+  function canonicalPacked(node) {
+    if (node === null || typeof node !== "object") return node;
+    if (Array.isArray(node)) return node.map(canonicalPacked);
+    if (node.node === "lit" && node.type?.abap === "P" && typeof node.value === "number") {
+      let text = String(node.value);
+      if (/e/i.test(text)) text = node.value.toFixed(14).replace(/0+$/, "").replace(/\.$/, "");
+      const dec = text.includes(".") ? text.split(".")[1].length : 0;
+      return lit(text, {abap: "P", len: 31, dec});
+    }
+    return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, canonicalPacked(v)]));
+  }
+
+  function writeNode(node) {
     const targetOf = (rel) => {
       const aliasName = rel.rel === "alias" ? rel.name : undefined;
       const base = rel.rel === "alias" ? rel.input : rel;
@@ -1485,7 +1512,7 @@ export function toIr(tree, options = {}) {
       const schema = catalogue[target.table];
       const set = kids(node, "SetItem").map((item) => {
         const name = columnOf(kid(item, "ColumnRef"), schema, target);
-        return {col: name, expr: giveType(expression(kid(item, "Expr")), schema[name])};
+        return {col: name, expr: canonicalPacked(giveType(expression(kid(item, "Expr")), schema[name]))};
       });
       const cond = kid(node, "Condition");
       return update(target.table, set, cond === undefined ? undefined : condition(cond), target.alias);
@@ -1503,23 +1530,37 @@ export function toIr(tree, options = {}) {
       const named = kids(node, "Name").map(nameOf);
       const columns = named.length > 0 ? named : Object.keys(schema);
       for (const c of columns) if (schema[c] === undefined) throw new BindError(`${c} is not a column of ${table}`, node);
+      // a column the INSERT does not name gets its initial value, as a DDIC
+      // table's NOT NULL DEFAULT gives it on HANA; the transpiler's tables
+      // have no DEFAULT, so it is written (the #63 critic: MANDT was NULL)
+      const unnamed = Object.keys(schema).filter((c) => !columns.includes(c));
+      const initialOf = (c) => {
+        try { return bindWriteValue(undefined, schema[c]); }
+        catch { throw new BindError(`INSERT INTO ${table} leaves out ${c}, whose initial value is not carried for its type`, node); }
+      };
       const query = kid(node, "SetOperation");
       if (query !== undefined) {
-        const rel = relation(query);
-        const width = Object.keys(schemaOf(rel, catalogue)).length;
-        if (width !== columns.length) throw new BindError(`INSERT INTO ${table}: the query has ${width} columns, the insert names ${columns.length}`, node);
-        return insertFrom(table, columns, rel);
+        const rel = canonicalPacked(relation(query));
+        const produced = Object.keys(schemaOf(rel, catalogue));
+        if (produced.length !== columns.length) throw new BindError(`INSERT INTO ${table}: the query has ${produced.length} columns, the insert names ${columns.length}`, node);
+        if (unnamed.length === 0) return insertFrom(table, columns, rel);
+        return insertFrom(table, [...columns, ...unnamed], project(rel,
+          [...produced.map((c) => ({as: c, expr: col(c, schemaOf(rel, catalogue)[c])})), ...unnamed.map((c) => ({as: c, expr: initialOf(c)}))]));
       }
       const values = kids(node, "Expr").map(expression);
       if (values.length !== columns.length) throw new BindError(`INSERT INTO ${table}: ${values.length} values for ${columns.length} columns`, node);
-      // a number literal written to a packed column goes as the decimal
-      // string of the column's type, as every packed value is bound
+      // a literal written to a column goes as the column binds it: a packed
+      // number as the decimal string of its type, a text right-trimmed and
+      // no longer than the column (HANA: "inserted value too large")
       const row = values.map((value, i) => {
         const type = schema[columns[i]];
-        if (type?.abap === "P" && value.node === "lit" && typeof value.value === "number") return bindWriteValue(value.value, type);
-        return giveType(value, type);
+        if (value.node === "lit" && ((type?.abap === "P" && typeof value.value === "number") || (type?.abap === "C" && typeof value.value === "string"))) {
+          try { return bindWriteValue(value.value, type); }
+          catch (error) { throw new BindError(`INSERT INTO ${table}: ${columns[i]}: ${error.message}`, node); }
+        }
+        return canonicalPacked(giveType(value, type));
       });
-      return insertRows(table, columns, [row]);
+      return insertRows(table, [...columns, ...unnamed], [[...row, ...unnamed.map(initialOf)]]);
     }
     throw new BindError(`${node.node} is not a write`, node);
   }
