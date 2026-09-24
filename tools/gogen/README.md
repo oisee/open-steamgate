@@ -1289,3 +1289,28 @@ at 90 s), `CL_ABAP_GZIP=>COMPRESS_BINARY` (@KERNEL, RepoSet), and the
 editor's parser colouring and compile check (2, Node host tools).
 Wall time with 4 jobs: full 6m45s (the Playwright job alone 6m45s), fast
 3m20s (segw-tree alone 3m17s), against ~40 min serial before.
+
+## The IR as JSON
+
+`tools/gogen/ir-json.mjs` writes the program `compileProgram` builds as JSON documents, so another process can read it back: the Go side, or a later build that does not parse the ABAP again. `node tools/gogen/ir-json-check.mjs [--out <dir>]` checks the round trip on the whole OSGo program.
+
+**Documents.**
+- One shared document `{"ir": "gogen", "version": 1, "order": [...], "program": {...}}`: structures, constants, interfaces, RTTI, tables and the rest of the program.
+- One document per class or function group, `{"ir": "gogen", "version": 1, "object": "ZCL_X", "class": {...}}`. This is the unit an incremental build can keep by the hash of its source.
+
+**Tags.**
+- `Map` → `{"$map": [[k, v], ...]}` and `Set` → `{"$set": [...]}`, both in insertion order.
+- `BigInt` → `{"$bigint": "…"}`.
+- A node reached more than once in one document is written once as `{"$id": n, ...}` (or `{"$id": n, "$array": [...]}` for an array), and every later reach becomes `{"$ref": n}`.
+
+The IR is a graph, not a tree. A DELETE inside a LOOP holds the loop's own node, and the emitters write the loop's index name into it and read it back through that reference. A copy reads `undefined`, and the first version of this file did exactly that. Plain objects keep their keys in insertion order. Nothing is sorted, because the emitters iterate in that order.
+
+**What does not travel.** `reg`, the abaplint registry, and `functionModules`, front-end state holding abaplint groups and scopes. The emitters read neither: a function group's compiled form is its class. Anything else that is not plain data is refused with its path, which is how the `FunctionGroup` in `functionModules` was found. `osgDatabase` still needs `reg` for the transpiler's `DatabaseSetup`, so the CREATE TABLEs have to travel beside the IR if the Go side is to build without Node.
+
+**Measured 2026-09-24 on the OSGo program** (951 objects):
+- front end 57 s;
+- documents 83 MB, written in 1.3 s, read in 1.4 s;
+- Go (12.0 MB) and JS (7.3 MB) emitted from the JSON are byte-identical to the originals;
+- two runs in two processes give the same document hash.
+
+A second compile in the same process does not: the front end keeps counters across compiles (the FOR ALL ENTRIES row number `n` of a `fae_row`).
