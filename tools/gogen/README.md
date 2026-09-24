@@ -895,3 +895,57 @@ and OSGo cannot, and with the colour stripped Go's text is the file while
 Node's repeats a chained `TYPES:` keyword once per chained statement (a
 defect of the colouring on Node, not of the text). `ZCL_GOGEN_T_STORE` in
 `semantics.mjs` pins the fixture calls.
+
+## CL_HTTP_CLIENT on OSGo (ultra/httpc, 2026-09-24)
+
+open-abap-core's `CL_HTTP_CLIENT` does its network work in `WRITE '@KERNEL'`
+lines of `IF_HTTP_CLIENT~SEND` (Node's `http` / `https`). They are host
+functions now (`go/abap/httpc.go`, the `KERNEL` map in `frontend.mjs`, the
+ICF shim's pattern); the ABAP around them compiles as it is. Node is the
+oracle, including where it differs from a system (none of this is measured
+on A4H):
+
+- the request is what Node writes: the entity's header fields in JavaScript
+  key order (array-index names first), `Host` without a default port,
+  `Connection: keep-alive`, `accept-encoding: gzip` always, and
+  `Transfer-Encoding: chunked` with an empty last chunk for a POST or PUT
+  without a body. The method is upper-cased.
+- the body is `get_cdata( )` written in Node's `binary` encoding, one byte per
+  UTF-16 code unit: `€` goes out as `0xAC`, and `content-length` counts UTF-16
+  units. A body that `set_data` filled with bytes that are not UTF-8 raises
+  `CX_SY_CONVERSION_CODEPAGE` before anything is sent. A system sends UTF-8.
+- a form field of a POST becomes the body, and so does the query of a URL
+  given to `create_by_url` for a POST (the constructor turns it into form
+  fields).
+- the answer's header fields are Node's: lower case, latin1, trimmed,
+  duplicates joined with `, ` (`; ` for cookie) or the first kept, set-cookie
+  left out (an array there). The status reason stays empty, `~status_code`
+  is never set (so ZCL_OSD_GIT's 4xx/5xx check never fires, on either host).
+- one kept socket per client object; no timeout anywhere (SEND's `TIMEOUT` is
+  ignored on Node too). A socket the server closed right after answering is
+  redialled on Go; Node, sending again in the same turn of its loop, dumps
+  with "socket hang up" there. That is the one documented choice.
+- every failure (refused, TLS, protocol, a URL or header Node rejects) is a
+  host error, a dump: on Node it is a JavaScript error no CATCH takes, so the
+  classic exceptions of SEND and RECEIVE are never raised and sy-subrc is 0.
+- a URL the WHATWG parser would rewrite (dot segments, characters it
+  escapes, a numeric host it reads as IPv4, credentials, IPv6, IDN) is
+  refused as NOT_COMPILED rather than guessed. `create_by_destination` is
+  `ASSERT 1 = 'todo'` in open-abap-core and stays that.
+
+`node tools/gogen/httpc.mjs` runs `testdata-httpc/zcl_gogen_t_httpc` on the
+transpiler (Node) and on Go against one recording server: 35 of 35 cases,
+33 byte for byte the same on the wire and in what the ABAP got back, one
+refused on Go (dot segments) and the socket choice above.
+`node tools/gogen/httpc-git.mjs` (after a full osgo build) does the same for
+ZCL_OSD_GIT against `git http-backend` on 127.0.0.1: the requests Go sends
+are Node's byte for byte, and both methods then stop in
+`ZCL_OSD_GIT=>UNTIL_NULL`, an xstring compared with a c literal, which waits
+for the byte-like comparison rules to be measured on A4H.
+
+The front end gained what the path needed: `sy-subrc` as a target,
+`concat_lines_of( )` over a table of strings, host-function arguments
+through a reference (`LO_ENTITY->MV_DATA`) and kernel lines that are nops;
+`cl_abap_gzip=>decompress_binary_with_header` (zlib.gunzipSync: members in
+turn, anything else a dump) and `cl_http_utility=>encode_base64` are host
+functions. The OSG build went from 1290 to 1201 statement stubs, none new.
