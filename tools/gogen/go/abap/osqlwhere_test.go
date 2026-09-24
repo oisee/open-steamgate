@@ -153,7 +153,7 @@ func TestOsqlWhereLimits(t *testing.T) {
 }
 
 // the edges the critic on #47 named: the tokenizer runs first, a tab in a
-// number is a format, a sign on zero is dropped, NUMC '' is refused
+// number is a format, a sign on zero is dropped, NUMC of an empty literal is refused
 func TestOsqlWhereEdges(t *testing.T) {
 	cols := []OsqlColumn{{Name: "CARRID", Type: TChar(3)}, {Name: "SEATSMAX", Type: TInt},
 		{Name: "CONNID", Type: TChar(4), Kind: "NUMC"}, {Name: "PRICE", Type: &IRType{Abap: "P", Len: 8, Dec: 2}}}

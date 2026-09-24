@@ -193,8 +193,8 @@ func (l *lowering) placeholder(n int, code string) string {
 	return "?"
 }
 
-// like is DIALECTS[d].like: PostgreSQL always says ESCAPE, '' when the
-// condition has none (its default escape is a backslash, which neither
+// like is DIALECTS[d].like: PostgreSQL always says ESCAPE (the empty text when the
+// condition has none: its default escape is a backslash, which neither
 // ABAP nor the other engines have)
 func (l *lowering) like(e, p string, esc *string, neg bool) string {
 	n := ""
