@@ -19,7 +19,7 @@ define view ZC_OSD_TAXICUBE
       borough as Borough,
       @EndUserText.label: 'Pickup zone'
       @UI.selectionField: [{ position: 40 }]
-      zone as Zone,
+      pickup_zone as Zone,
       @EndUserText.label: 'Payment'
       @UI.selectionField: [{ position: 50 }]
       payment as Payment,

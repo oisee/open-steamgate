@@ -22,6 +22,8 @@ describe("NYC TLC import", function () {
     let instance = await DuckDBInstance.create(database);
     let connection = await instance.connect();
     try {
+      // the shape a build before the PICKUP_ZONE rename booted: the import
+      // migrates it (tools/osd-db-migrate.mjs)
       await connection.run(`CREATE TABLE zosd_taxifact (
         mandt VARCHAR, fact_id VARCHAR PRIMARY KEY, pickup_day VARCHAR,
         pickup_hour INTEGER, borough VARCHAR, zone VARCHAR, payment VARCHAR,
@@ -49,9 +51,9 @@ describe("NYC TLC import", function () {
       expect(result.trips).to.equal(3);
       instance = await DuckDBInstance.create(database);
       connection = await instance.connect();
-      const read = await connection.runAndReadAll("SELECT pickup_day, pickup_hour, borough, zone, payment, trips, fare, tip FROM zosd_taxifact ORDER BY pickup_day");
+      const read = await connection.runAndReadAll("SELECT pickup_day, pickup_hour, borough, pickup_zone, payment, trips, fare, tip FROM zosd_taxifact ORDER BY pickup_day");
       const rows = read.getRowObjects();
-      expect(rows.map((row) => [row.pickup_day, row.pickup_hour, row.borough, row.zone, row.payment, row.trips]))
+      expect(rows.map((row) => [row.pickup_day, row.pickup_hour, row.borough, row.pickup_zone, row.payment, row.trips]))
         .to.deep.equal([
           ["20250102", 8, "Manhattan", "Midtown", "Card", 2],
           ["20250103", 9, "Queens", "JFK Airport", "Cash", 1],

@@ -66,6 +66,14 @@ analytical fact table: `TRIPS` counts underlying trips, not rows in the
 table. It is deliberately not a per-trip drilldown. Tip amounts in TLC data
 are most complete for card payments; compare payment methods with that caveat.
 
+The pickup zone is the table field `PICKUP_ZONE`, not `ZONE`: a system
+refuses `ZONE` as a reserved word (ANORMALIES zone-reserved-word). The cube
+keeps the element `Zone`, so the OData property is still `ZONE`. A DuckDB
+file booted or imported before the rename is migrated when a server opens it
+and when the import runs (`tools/osd-db-migrate.mjs`): the column is renamed
+in place, the rows stay, and the file's views are made again from the
+running build. Nothing needs to be imported again.
+
 Adding the DDIC table changes the generated schema. Existing OSD database
 volumes need the planned non-destructive migration before this branch can be
 used as an upgrade. Build and test with a fresh isolated file; do not point

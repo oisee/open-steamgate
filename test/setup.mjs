@@ -219,6 +219,15 @@ export async function setup(abap, schemas, insert) {
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     if (process.env.STG_DB_PATH && await db.hasSchema()) {
+      // a file made by an earlier build: the column renames since then are
+      // applied before anything reads it, and its views are the running
+      // generation's (tools/osd-db-migrate.mjs)
+      const {migrateDuckdbColumns, refreshDuckdbViews} = await import("../tools/osd-db-migrate.mjs");
+      const access = {query: (sql) => db.query(sql), execute: (sql) => db.execute(sql)};
+      for (const done of await migrateDuckdbColumns(access)) {
+        console.log(`${process.env.STG_DB_PATH}: renamed ${done}`);
+      }
+      await refreshDuckdbViews(access, duckdbSchema(schemas));
       await requireCurrentSchema(db, duckdbSchema(schemas), "DuckDB",
         "Use a new STG_DB_PATH after preserving the old file");
       // A persistent database keeps its business rows, but the generated
