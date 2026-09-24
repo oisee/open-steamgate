@@ -165,6 +165,10 @@ describe("writes as IR: the pairs and the refusals", () => {
     expect(() => bindValue(".5", P)).to.throw(WriteError, /not a decimal number/);
     expect(() => bindValue("1e3", P)).to.throw(WriteError, /not a decimal number/);
     expect(() => bindValue(1.555, P)).to.throw(WriteError, /more than the column's 2 decimals/);
+    // the ABAP runtime's P(15,7) answers 1e-7 for 0.0000001: exponent form, written out
+    expect(bindValue(1e-7, {abap: "P", len: 15, dec: 7})).to.include({value: "0.0000001"});
+    expect(() => bindValue(-2.5e-8, {abap: "P", len: 15, dec: 7})).to.throw(WriteError, /more than the column's 7 decimals/);
+    expect(bindValue(-3e-7, {abap: "P", len: 15, dec: 7})).to.include({value: "-0.0000003"});
     expect(bindValue(-0, P)).to.include({value: "0.00"});
     expect(bindValue(2 ** 53 - 1, {abap: "P", len: 31, dec: 0})).to.include({value: "9007199254740991"});
     expect(() => bindValue(2 ** 53 + 2, {abap: "P", len: 31, dec: 0})).to.throw(WriteError, /past 2\^53/);

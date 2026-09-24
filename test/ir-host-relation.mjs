@@ -13,7 +13,7 @@ import {T, lit, col, bin, project, filter, order, scan, union} from "../tools/sq
 import {compileProcedure} from "../tools/sqlscript-to-procedure-ir.mjs";
 import {runProcedure} from "../tools/sqlscript-procedure-ir.mjs";
 import {readFileSync} from "node:fs";
-import {CASES, SCHEMA as PAIR_SCHEMA, PAIRS_FILE, render} from "../tools/ir-host-relation-pairs.mjs";
+import {SCHEMA as PAIR_SCHEMA, PAIRS_FILE, render} from "../tools/ir-host-relation-pairs.mjs";
 
 const SCHEMA = {MANDT: T.char(3), ID: T.int, BIG: T.int8, AMOUNT: T.dec(15, 2), DAY: T.date, NOTE: T.str};
 
@@ -108,8 +108,9 @@ for (const [dialect, make] of [["duckdb", () => new DuckDBDatabaseClient({path: 
         const heldRows = (await read(handle)).map((r) => [r.MANDT, String(r.ID), text(r.BIG), amount(dialect, r.AMOUNT), r.DAY, r.NOTE, String(r[ORDINAL])]);
         expect(heldRows, one.name).to.deep.equal(one.held);
         if (one.lowered !== undefined) {
-          const plan = CASES.find((c) => c.name === one.name).query(hostPlan(handle, PAIR_SCHEMA));
-          const rows = (await client.native({...lower(plan, dialect, {relationRef: (h) => client.relationRef(h)}), expect: "rows"})).rows;
+          // the file's own SQL, the relation's name put where "IT" stands
+          const {sql, params} = one.lowered[dialect];
+          const rows = (await client.native({sql: sql.split('"IT"').join(client.relationRef(handle)), params, expect: "rows"})).rows;
           const got = rows.map((r) => Object.entries(r).map(([k, v]) => (k === "AMOUNT" ? amount(dialect, v) : text(v))));
           expect(got, one.name).to.deep.equal(one.answer);
         }

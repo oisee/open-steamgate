@@ -357,6 +357,9 @@ export class FileSqliteClient {
       // a table the caller fills (tools/ir-host-relation.mjs): created from
       // the caller's column list, empty, and dropped like any materialised one
       if (materialise === undefined) throw new Error("defineRelation: a ddl relation is materialised");
+      // a process that died left its tables in a persistent file, and a
+      // later one with the same pid would collide with them
+      this.db.exec(`DROP TABLE IF EXISTS ${handle.ref}`);
       this.db.exec(ddl(handle.ref));
     } else if (materialise === undefined) {
       this.db.exec(`CREATE VIEW ${handle.ref} AS ${sql}`);

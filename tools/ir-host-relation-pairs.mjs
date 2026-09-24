@@ -37,6 +37,14 @@ export const CASES = [
     query: (source) => order(project(filter(source, bin(">", bin("*", col("AMOUNT", S.AMOUNT), lit(2, T.int), S.AMOUNT), lit("5.00", S.AMOUNT), T.bool)),
       [{as: "ID", expr: col("ID", S.ID)}, {as: "AMOUNT", expr: col("AMOUNT", S.AMOUNT)}]), [{col: "ID", desc: false}]),
     answer: [["2", "7.75"], ["3", "10.00"]]},
+  // sorted where text order is not number order: a P or an INT8 held as text
+  // would put "10.00" before "9.50" and "100" before "20"
+  {name: "sorted by a packed column: numbers, not text", rows: [{ID: 1, AMOUNT: "10.00"}, {ID: 2, AMOUNT: "9.50"}, {ID: 3, AMOUNT: "100.00"}, {ID: 4, AMOUNT: "-2.00"}],
+    query: (source) => order(project(source, [{as: "ID", expr: col("ID", S.ID)}]), [{col: "AMOUNT", desc: false}]),
+    answer: [["4"], ["2"], ["1"], ["3"]]},
+  {name: "sorted by an INT8 column past 2^53: numbers, not text", rows: [{ID: 1, BIG: "9007199254740993"}, {ID: 2, BIG: "20"}, {ID: 3, BIG: "100"}, {ID: 4, BIG: "-9007199254740993"}],
+    query: (source) => order(project(source, [{as: "ID", expr: col("ID", S.ID)}]), [{col: "BIG", desc: true}]),
+    answer: [["1"], ["3"], ["2"], ["4"]]},
   {name: "the caller's order, read through the ordinal", rows: [{ID: 30}, {ID: 10}, {ID: 20}],
     // the relation itself, below hostPlan's projection, which leaves the ordinal out
     query: (source) => order(project(source.input, [{as: "ID", expr: col("ID", S.ID)}, {as: ORDINAL, expr: col(ORDINAL, T.int)}]), [{col: ORDINAL, desc: false}]),
@@ -64,7 +72,7 @@ export function pairs() {
 export const PAIRS_FILE = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "ir-pairs", "host-relation.json");
 
 export const render = () => JSON.stringify({
-  note: "Host relations (tools/ir-host-relation.mjs). A host hands rows = {length, get(i, column)}; the relation holds, per row, the schema's columns and then OSD_ORD, the row's index from 0. `held` is each value as text, as ABAP holds it: get() never answers null, a field not named is the type's initial value (C '', I/INT8 0, P '0.00', D '00000000', STRING ''), C is right-trimmed, P the decimal string of its type (abapNumber's grammar, extra decimals refused), D is CHAR 8. Rows come in index order and nothing is pushed down. The handle lives one call; a second drop is not an error. `lowered` renders the query with the relation named \"IT\"; `answer` is its rows as text.",
+  note: "Host relations (tools/ir-host-relation.mjs). A host hands rows = {length, get(i, column)}; the relation holds, per row, the schema's columns and then OSD_ORD, the row's index from 0. `held` is each value as text, as ABAP holds it: get() never answers null, a field not named is the type's initial value (C '', I/INT8 0, P '0.00', D '00000000', STRING ''), C is right-trimmed, P the decimal string of its type (abapNumber's grammar, extra decimals refused), D is CHAR 8. Rows come in index order and nothing is pushed down. The handle lives one call; a second drop is not an error. `rows` is what a host hands over: a number, a string or (INT8 past 2^53, written here as a string) a BigInt; a P may come as a number or as text, with a trailing sign. What the relation must hold, per type: I, INT8 and OSD_ORD as integers (INT8 exact past 2^53), P as a number (DECIMAL where the engine has it; SQLite keeps a REAL), C, D and STRING as text -- a P or an INT8 held as text sorts and compares wrongly, which the two sorting pairs catch. `lowered` renders the query with the relation named \"IT\" (substitute the relation's own name); a param's `type` is the ABAP type code (C(3), I, INT8, P(15,2), D, STRING); `answer` is its rows as text.",
   schema: SCHEMA,
   ordinal: ORDINAL,
   ddl: Object.fromEntries(DIALECTS.map((d) => [d, Object.fromEntries([...Object.entries(SCHEMA).map(([c, t]) => [c, columnType(t, d)]), [ORDINAL, "INTEGER"]])])),

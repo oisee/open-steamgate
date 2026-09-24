@@ -43,6 +43,8 @@ describe("an ABAP type code that is a word is not read as a letter", () => {
 
   it("an INT8 given as a BigInt binds as that BigInt, past 2^53", () => {
     expect(bindValue({type: "INT8", value: 9007199254740993n})).to.equal(9007199254740993n);
+    // a small one as a number: node-hdb refuses a BigInt for BIGINT
+    expect(bindValue({type: "INT8", value: 5n})).to.equal(5);
   });
 
   it("X and XSTRING bind as bytes when the client asks for it", () => {

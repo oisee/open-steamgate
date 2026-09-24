@@ -44,8 +44,10 @@ export function bindValue(p, {hex} = {}) {
   if (p.isNull === true) return null;
   if (abapTypeLetter(p.type) === "P" && typeof p.value === "string") return p.value;
   // an INT8 past 2^53 arrives as a BigInt (ir-writes bindValue); Number()
-  // would make 9007199254740993 into ...992, and every client binds a BigInt
-  if (typeof p.value === "bigint") return p.value;
+  // would make 9007199254740993 into ...992. Only past it: the ABAP
+  // runtime's INT8 is a BigInt whatever its size, and node-hdb refuses a
+  // BigInt for BIGINT ("Cannot convert a BigInt value to a number")
+  if (typeof p.value === "bigint" && !Number.isSafeInteger(Number(p.value))) return p.value;
   if (isNumericType(p.type)) return Number(p.value);
   if (hex !== undefined && isHexType(p.type)) return hex(String(p.value));
   return p.value === undefined ? null : String(p.value);

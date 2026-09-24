@@ -76,6 +76,15 @@ export function packedText(value, type, what = "value") {
     if (!Number.isFinite(value)) throw new WriteError(`${what} ${JSON.stringify(value)} is not a decimal number`);
     if (Math.abs(value) > Number.MAX_SAFE_INTEGER) throw new WriteError(`${what} ${value} is past 2^53 as a JavaScript number: pass it as a decimal string`);
     text = String(value);
+    // the shortest text of a small number is exponent form: 1e-7 is what
+    // the ABAP runtime's P(15,7) answers for 0.0000001. Written out to the
+    // type's decimals, it must read back as the same number, or it had more
+    // decimals than the type
+    if (/e/i.test(text)) {
+      const fixed = value.toFixed(dec);
+      if (Number(fixed) !== value) throw new WriteError(`${what} ${text} has more than the column's ${dec} decimals`);
+      text = fixed;
+    }
   } else if (typeof value === "string" || typeof value === "bigint") {
     text = String(value).replace(/^ +| +$/g, "");
   } else {
