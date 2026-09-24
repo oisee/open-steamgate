@@ -85,8 +85,8 @@ describe("NYC TLC import", function () {
 
 describe("NYC taxi analytical benchmark", () => {
   it("keeps OData system-option names literal while escaping filter values", () => {
-    const url = taxiQueryUrl("http://localhost:31777", "$filter=BOROUGH eq 'Manhattan'&$select=ZONE,TRIPS&$orderby=TRIPS desc");
-    expect(url).to.include("?$filter=BOROUGH%20eq%20%27Manhattan%27&$select=ZONE,TRIPS&$orderby=TRIPS%20desc");
+    const url = taxiQueryUrl("http://localhost:31777", "$filter=BOROUGH eq 'Manhattan'&$select=PICKUPZONE,TRIPS&$orderby=TRIPS desc");
+    expect(url).to.include("?$filter=BOROUGH%20eq%20%27Manhattan%27&$select=PICKUPZONE,TRIPS&$orderby=TRIPS%20desc");
     expect(url).to.not.include("%24select");
   });
 

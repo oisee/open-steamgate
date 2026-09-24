@@ -15,7 +15,7 @@ const OLD_TABLE = `CREATE TABLE "zosd_taxifact" ("mandt" VARCHAR(3), "fact_id" V
 const OLD_VIEW = `CREATE VIEW "zvosdtaxicube" AS SELECT "zosd_taxifact".fact_id AS factid,
   "zosd_taxifact".borough AS borough, "zosd_taxifact".zone AS zone FROM "zosd_taxifact"`;
 const NEW_VIEW = `CREATE VIEW "zvosdtaxicube" AS SELECT "zosd_taxifact".fact_id AS factid,
-  "zosd_taxifact".borough AS borough, "zosd_taxifact".pickup_zone AS zone FROM "zosd_taxifact"`;
+  "zosd_taxifact".borough AS borough, "zosd_taxifact".pickup_zone AS pickupzone FROM "zosd_taxifact"`;
 
 async function open(path) {
   const instance = await DuckDBInstance.create(path);
@@ -57,8 +57,8 @@ describe("DuckDB file migration (tools/osd-db-migrate.mjs)", function () {
       expect(await refreshDuckdbViews(db, ["CREATE TABLE ignored (x INT)", NEW_VIEW])).to.deep.equal({refreshed: 1, foreign: []});
       const rows = await db.query("SELECT pickup_zone FROM zosd_taxifact");
       expect(rows.map((row) => row.pickup_zone)).to.deep.equal(["JFK Airport"]);
-      const view = await db.query("SELECT factid, zone FROM zvosdtaxicube");
-      expect(view).to.deep.equal([{factid: "0000000001", zone: "JFK Airport"}]);
+      const view = await db.query("SELECT factid, pickupzone FROM zvosdtaxicube");
+      expect(view).to.deep.equal([{factid: "0000000001", pickupzone: "JFK Airport"}]);
       try {
         await db.execute("INSERT INTO zosd_taxifact VALUES ('123','0000000001','20250101',0,'Queens','X','Card',1,1,0,1)");
         expect.fail("the primary key should survive the rename");
@@ -197,7 +197,7 @@ describe("DuckDB file migration through test/setup.mjs", function () {
     await oldFile(path);
     const db = await boot(path);
     try {
-      expect(await db.query("SELECT factid, zone FROM zvosdtaxicube")).to.deep.equal([{factid: "0000000001", zone: "JFK Airport"}]);
+      expect(await db.query("SELECT factid, pickupzone FROM zvosdtaxicube")).to.deep.equal([{factid: "0000000001", pickupzone: "JFK Airport"}]);
     } finally {
       await db.disconnect();
     }

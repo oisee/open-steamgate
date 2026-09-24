@@ -20,7 +20,7 @@
             <PropertyPath>PICKUPDAY</PropertyPath>
             <PropertyPath>PICKUPHOUR</PropertyPath>
             <PropertyPath>BOROUGH</PropertyPath>
-            <PropertyPath>ZONE</PropertyPath>
+            <PropertyPath>PICKUPZONE</PropertyPath>
             <PropertyPath>PAYMENT</PropertyPath>
           </Collection>
         </Annotation>
@@ -53,7 +53,7 @@
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataField"><PropertyValue Property="Value" Path="BOROUGH"/><PropertyValue Property="Label" String="Borough"/></Record>
-            <Record Type="UI.DataField"><PropertyValue Property="Value" Path="ZONE"/><PropertyValue Property="Label" String="Pickup zone"/></Record>
+            <Record Type="UI.DataField"><PropertyValue Property="Value" Path="PICKUPZONE"/><PropertyValue Property="Label" String="Pickup zone"/></Record>
             <Record Type="UI.DataField"><PropertyValue Property="Value" Path="PAYMENT"/><PropertyValue Property="Label" String="Payment"/></Record>
             <Record Type="UI.DataField"><PropertyValue Property="Value" Path="TRIPS"/><PropertyValue Property="Label" String="Trips"/></Record>
             <Record Type="UI.DataField"><PropertyValue Property="Value" Path="FARE"/><PropertyValue Property="Label" String="Fares (USD)"/></Record>
@@ -115,15 +115,15 @@
           </Collection></PropertyValue>
         </Record></Annotation>
       </Annotations>
-      <Annotations Target="ZSTG_SADL_SRV.Zc_Osd_Taxicube/ZONE">
+      <Annotations Target="ZSTG_SADL_SRV.Zc_Osd_Taxicube/PICKUPZONE">
         <Annotation Term="Common.ValueList"><Record>
           <PropertyValue Property="Label" String="Pickup zone"/>
           <PropertyValue Property="CollectionPath" String="Zc_Osd_TaxicubeSet"/>
           <PropertyValue Property="SearchSupported" Bool="false"/>
           <PropertyValue Property="Parameters"><Collection>
             <Record Type="Common.ValueListParameterInOut">
-              <PropertyValue Property="LocalDataProperty" PropertyPath="ZONE"/>
-              <PropertyValue Property="ValueListProperty" String="ZONE"/>
+              <PropertyValue Property="LocalDataProperty" PropertyPath="PICKUPZONE"/>
+              <PropertyValue Property="ValueListProperty" String="PICKUPZONE"/>
             </Record>
           </Collection></PropertyValue>
         </Record></Annotation>

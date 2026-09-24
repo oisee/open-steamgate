@@ -20,7 +20,8 @@
 
 export const COLUMN_RENAMES = [
   // ZONE is a reserved word in the dictionary of a system: the table does not
-  // activate there (ANORMALIES zone-reserved-word).
+  // activate there (ANORMALIES zone-reserved-word). The CDS element is
+  // PickupZone for the same reason, which the file's views get at boot.
   {table: "zosd_taxifact", from: "zone", to: "pickup_zone"},
 ];
 
@@ -112,7 +113,12 @@ export async function migrateDuckdbFile(access, statements) {
 }
 
 /** A kept HANA schema is not migrated: say which rename it lacks and how to
- *  get a schema this build can read, before the first SELECT fails. */
+ *  get a schema this build can read, before the first SELECT fails. It looks
+ *  at table columns only; the HANA branch of setup does not remake views, so
+ *  a schema whose table is already renamed but whose views are older (made by
+ *  a build between the column rename and the CDS element rename, #67 without
+ *  #69) passes here and fails at `SELECT ... PICKUPZONE`. Recreate that one
+ *  with STG_DB_FRESH=1 too. */
 export async function refuseUnmigratedHana({query}, schema) {
   const rows = await query(`SELECT TABLE_NAME AS table_name, COLUMN_NAME AS column_name FROM SYS.TABLE_COLUMNS WHERE SCHEMA_NAME = '${String(schema).replaceAll("'", "''")}'`);
   const pending = pendingRenames(rows);

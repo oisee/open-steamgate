@@ -67,8 +67,9 @@ table. It is deliberately not a per-trip drilldown. Tip amounts in TLC data
 are most complete for card payments; compare payment methods with that caveat.
 
 The pickup zone is the table field `PICKUP_ZONE`, not `ZONE`: a system
-refuses `ZONE` as a reserved word (ANORMALIES zone-reserved-word). The cube
-keeps the element `Zone`, so the OData property is still `ZONE`. A DuckDB
+refuses `ZONE` as a reserved word (ANORMALIES zone-reserved-word), and it
+refuses the CDS element `Zone` for the same reason, so the cube's element is
+`PickupZone` and the OData property is `PICKUPZONE`. A DuckDB
 file booted or imported before the rename is migrated when a server opens it
 and when the import runs (`tools/osd-db-migrate.mjs`): the column is renamed
 in place, the rows stay, and the file's views are made again from the
@@ -82,7 +83,10 @@ file afterwards. A view in the file that the running build does not have (a
 deleted CDS view, one made by hand) is named in the log and left as it is;
 if it selects `zone`, it no longer works. A kept HANA schema
 (`STG_DB=hana`) is not migrated: the boot refuses it and names
-`STG_DB_FRESH=1`.
+`STG_DB_FRESH=1`. The check reads table columns only, and HANA's views are
+not remade at boot, so a schema made by a build that had the column rename
+but not yet `PickupZone` passes it and fails at its first
+`SELECT ... PICKUPZONE`; recreate that one with `STG_DB_FRESH=1` as well.
 
 Adding the DDIC table changes the generated schema. Existing OSD database
 volumes need the planned non-destructive migration before this branch can be
