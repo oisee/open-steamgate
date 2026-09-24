@@ -7,6 +7,7 @@ import {Readable} from "node:stream";
 import {resolve, dirname, join} from "node:path";
 import {DuckDBInstance} from "@duckdb/node-api";
 import {identity} from "./osd-identity.mjs";
+import {migrateDuckdbColumns} from "./osd-db-migrate.mjs";
 
 const ORIGIN = "https://d37ci6vzurychx.cloudfront.net";
 const DEFAULT_MONTH = "2025-01";
@@ -66,6 +67,12 @@ export async function importTaxiTrips({database, month = DEFAULT_MONTH, limit, p
   try {
     const table = await connection.runAndReadAll("SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_name = 'zosd_taxifact'");
     if (Number(table.getRowObjects()[0]?.n ?? 0) !== 1) throw new Error("ZOSD_TAXIFACT is absent; boot this OSD build once before import");
+    // a file booted by an earlier build still has ZONE (tools/osd-db-migrate.mjs);
+    // its views are remade at the next server start, which has their list
+    await migrateDuckdbColumns({
+      query: async (sql) => (await connection.runAndReadAll(sql)).getRowObjects(),
+      execute: (sql) => connection.run(sql),
+    });
     const start = `${month}-01`;
     const [year, mm] = month.split("-").map(Number);
     const end = `${mm === 12 ? year + 1 : year}-${String(mm === 12 ? 1 : mm + 1).padStart(2, "0")}-01`;
@@ -76,7 +83,7 @@ export async function importTaxiTrips({database, month = DEFAULT_MONTH, limit, p
           STRFTIME(t.tpep_pickup_datetime, '%Y%m%d') AS pickup_day,
           EXTRACT(HOUR FROM t.tpep_pickup_datetime)::INTEGER AS pickup_hour,
           LEFT(COALESCE(z.Borough, 'Unknown'), 20) AS borough,
-          LEFT(COALESCE(z.Zone, 'Unknown'), 80) AS zone,
+          LEFT(COALESCE(z.Zone, 'Unknown'), 80) AS pickup_zone,
           CASE t.payment_type
             WHEN 1 THEN 'Card' WHEN 2 THEN 'Cash'
             WHEN 3 THEN 'No charge' WHEN 4 THEN 'Disputed'
@@ -93,17 +100,17 @@ export async function importTaxiTrips({database, month = DEFAULT_MONTH, limit, p
           AND t.trip_distance BETWEEN 0 AND 200
         ${limit === undefined ? "" : `LIMIT ${limit}`}
       ), grouped AS (
-        SELECT pickup_day, pickup_hour, borough, zone, payment,
+        SELECT pickup_day, pickup_hour, borough, pickup_zone, payment,
           COUNT(*)::INTEGER AS trips,
           ROUND(SUM(fare), 2)::DECIMAL(15,2) AS fare,
           ROUND(SUM(tip), 2)::DECIMAL(15,2) AS tip,
           ROUND(SUM(distance), 2)::DECIMAL(15,2) AS distance
         FROM valid
-        GROUP BY pickup_day, pickup_hour, borough, zone, payment
+        GROUP BY pickup_day, pickup_hour, borough, pickup_zone, payment
       )
       SELECT ${sqlString(client)} AS mandt,
         LPAD(CAST(1000000 + ROW_NUMBER() OVER () AS VARCHAR), 10, '0') AS fact_id,
-        pickup_day, pickup_hour, borough, zone, payment, trips, fare, tip, distance
+        pickup_day, pickup_hour, borough, pickup_zone, payment, trips, fare, tip, distance
       FROM grouped
     `);
     const counted = await connection.runAndReadAll("SELECT COUNT(*) AS n, SUM(trips) AS trips FROM taxi_incoming");
@@ -114,8 +121,8 @@ export async function importTaxiTrips({database, month = DEFAULT_MONTH, limit, p
     try {
       await connection.run(`DELETE FROM zosd_taxifact WHERE mandt = ${sqlString(client)}`);
       await connection.run(`INSERT INTO zosd_taxifact
-        (mandt, fact_id, pickup_day, pickup_hour, borough, zone, payment, trips, fare, tip, distance)
-        SELECT mandt, fact_id, pickup_day, pickup_hour, borough, zone, payment, trips, fare, tip, distance FROM taxi_incoming`);
+        (mandt, fact_id, pickup_day, pickup_hour, borough, pickup_zone, payment, trips, fare, tip, distance)
+        SELECT mandt, fact_id, pickup_day, pickup_hour, borough, pickup_zone, payment, trips, fare, tip, distance FROM taxi_incoming`);
       await connection.run("COMMIT");
     } catch (error) {
       await connection.run("ROLLBACK");

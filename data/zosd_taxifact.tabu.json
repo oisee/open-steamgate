@@ -1,6 +1,6 @@
 [
-  {"mandt":"123","fact_id":"0001000497","pickup_day":"20250101","pickup_hour":0,"borough":"Bronx","zone":"Mott Haven/Port Morris","payment":"Card","trips":1,"fare":50.50,"tip":0.00,"distance":0.00},
-  {"mandt":"123","fact_id":"0001000106","pickup_day":"20250101","pickup_hour":0,"borough":"Brooklyn","zone":"Williamsburg (South Side)","payment":"Card","trips":1,"fare":9.30,"tip":1.43,"distance":1.50},
-  {"mandt":"123","fact_id":"0001000001","pickup_day":"20250101","pickup_hour":0,"borough":"Manhattan","zone":"Sutton Place/Turtle Bay North","payment":"Card","trips":1,"fare":10.00,"tip":3.00,"distance":1.60},
-  {"mandt":"123","fact_id":"0001000085","pickup_day":"20250101","pickup_hour":0,"borough":"Queens","zone":"JFK Airport","payment":"Card","trips":1,"fare":29.60,"tip":6.75,"distance":7.20}
+  {"mandt":"123","fact_id":"0001000497","pickup_day":"20250101","pickup_hour":0,"borough":"Bronx","pickup_zone":"Mott Haven/Port Morris","payment":"Card","trips":1,"fare":50.50,"tip":0.00,"distance":0.00},
+  {"mandt":"123","fact_id":"0001000106","pickup_day":"20250101","pickup_hour":0,"borough":"Brooklyn","pickup_zone":"Williamsburg (South Side)","payment":"Card","trips":1,"fare":9.30,"tip":1.43,"distance":1.50},
+  {"mandt":"123","fact_id":"0001000001","pickup_day":"20250101","pickup_hour":0,"borough":"Manhattan","pickup_zone":"Sutton Place/Turtle Bay North","payment":"Card","trips":1,"fare":10.00,"tip":3.00,"distance":1.60},
+  {"mandt":"123","fact_id":"0001000085","pickup_day":"20250101","pickup_hour":0,"borough":"Queens","pickup_zone":"JFK Airport","payment":"Card","trips":1,"fare":29.60,"tip":6.75,"distance":7.20}
 ]
