@@ -23,6 +23,16 @@ export const COLUMN_RENAMES = [
   // activate there (ANORMALIES zone-reserved-word). The CDS element is
   // PickupZone for the same reason, which the file's views get at boot.
   {table: "zosd_taxifact", from: "zone", to: "pickup_zone"},
+  // HANDLER, SECTION and PARAMETER are reserved the same way (TRESE; A4H
+  // refuses each in a transparent table, ANORMALIES zone-reserved-word). The
+  // status tables and the APC inventory are refilled at every boot, the
+  // aside records and the module signatures are not; all of them are renamed
+  // so no file is left with a column the build no longer names.
+  {table: "zosd_icf_apc", from: "handler", to: "class_name"},
+  {table: "zosd_icf_aside", from: "handler", to: "icf_handler"},
+  {table: "zosd_svc", from: "handler", to: "handler_name"},
+  {table: "zosd_db", from: "section", to: "category"},
+  {table: "zstg_fm_param", from: "parameter", to: "param_name"},
 ];
 
 function quote(name) {

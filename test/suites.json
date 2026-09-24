@@ -33,6 +33,7 @@
     "test/conformance.mjs",
     "test/database-identity.mjs",
     "test/db-migrate.mjs",
+    "test/reserved-words.mjs",
     "test/database-identity-host.mjs",
     "test/ddic-corpus.mjs",
     "test/editor.mjs",

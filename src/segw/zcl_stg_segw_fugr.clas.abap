@@ -228,7 +228,7 @@ CLASS zcl_stg_segw_fugr IMPLEMENTATION.
       <lv_value> = sy-mandt.
       ASSIGN COMPONENT 'FUNCNAME' OF STRUCTURE <ls_line> TO <lv_value>.
       <lv_value> = ls_row-funcname.
-      ASSIGN COMPONENT 'PARAMETER' OF STRUCTURE <ls_line> TO <lv_value>.
+      ASSIGN COMPONENT 'PARAM_NAME' OF STRUCTURE <ls_line> TO <lv_value>.
       <lv_value> = ls_row-parameter.
       ASSIGN COMPONENT 'KIND' OF STRUCTURE <ls_line> TO <lv_value>.
       <lv_value> = ls_row-kind.
@@ -269,7 +269,7 @@ CLASS zcl_stg_segw_fugr IMPLEMENTATION.
     ASSIGN lr_data->* TO <lt_data>.
     LOOP AT <lt_data> ASSIGNING <ls_row>.
       CLEAR ls_param.
-      ASSIGN COMPONENT 'PARAMETER' OF STRUCTURE <ls_row> TO <lv_value>.
+      ASSIGN COMPONENT 'PARAM_NAME' OF STRUCTURE <ls_row> TO <lv_value>.
       ls_param-name = <lv_value>.
       ASSIGN COMPONENT 'KIND' OF STRUCTURE <ls_row> TO <lv_value>.
       lv_kind = <lv_value>.

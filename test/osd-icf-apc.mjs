@@ -50,7 +50,7 @@ describe("ICF object pages expose the APC implementation separately from HTTP", 
       const nodes = (await res.json()).d.results;
       expect(nodes).to.have.length(1);
       expect(nodes[0].to_Apc.results).to.have.length(1);
-      expect(nodes[0].to_Apc.results[0]).to.include({ApplicationId: application, Handler: handler});
+      expect(nodes[0].to_Apc.results[0]).to.include({ApplicationId: application, ClassName: handler});
       expect(nodes[0].to_Handlers.results, "an APC class must not masquerade as an HTTP handler").to.deep.equal([]);
     });
   }

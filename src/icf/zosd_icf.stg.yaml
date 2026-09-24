@@ -61,7 +61,7 @@ entities:
       IcfParGuid: {type: String(25), field: ICFPARGUID, readonly: true, label: Parent}
       IcfOrder: {type: String(2), field: ICFORDER, readonly: true, label: Order}
       IcfTyp: {type: String(1), field: ICFTYP, readonly: true, label: Type}
-      Handler: {type: String(30), field: HANDLER, readonly: true, label: Handler}
+      IcfHandler: {type: String(30), field: ICFHANDLER, readonly: true, label: Handler}
 
   Apc:
     set: ApcSet
@@ -76,7 +76,7 @@ entities:
       IcfName: {type: String(15), field: ICFNAME, readonly: true, label: Node}
       IcfParGuid: {type: String(25), field: ICFPARGUID, readonly: true, label: Parent}
       ApplicationId: {type: String(30), field: APPLICATIONID, readonly: true, label: Application ID}
-      Handler: {type: String(30), field: HANDLER, readonly: true, label: Implementation class}
+      ClassName: {type: String(30), field: CLASSNAME, readonly: true, label: Implementation class}
       Stateful: {type: String(1), field: STATEFUL, readonly: true, label: Stateful}
 
   Docu:
@@ -166,23 +166,23 @@ annotations:
   Node/IcfAltNme: {label: Alias}
 
   Handler:
-    header: {typeName: Handler, typeNamePlural: Handlers, title: Handler, description: IcfName}
+    header: {typeName: Handler, typeNamePlural: Handlers, title: IcfHandler, description: IcfName}
     lineItem:
       - {value: IcfOrder, label: Order}
-      - {value: Handler, label: Handler}
+      - {value: IcfHandler, label: Handler}
       - {value: IcfTyp, label: Type}
   Handler/IcfOrder: {label: Order}
-  Handler/Handler: {label: Handler}
+  Handler/IcfHandler: {label: Handler}
   Handler/IcfTyp: {label: Type}
 
   Apc:
-    header: {typeName: WebSocket application, typeNamePlural: WebSocket applications, title: ApplicationId, description: Handler}
+    header: {typeName: WebSocket application, typeNamePlural: WebSocket applications, title: ApplicationId, description: ClassName}
     lineItem:
       - {value: ApplicationId, label: Application ID}
-      - {value: Handler, label: Implementation class}
+      - {value: ClassName, label: Implementation class}
       - {value: Stateful, label: Stateful}
   Apc/ApplicationId: {label: Application ID}
-  Apc/Handler: {label: Implementation class}
+  Apc/ClassName: {label: Implementation class}
   Apc/Stateful: {label: Stateful}
 
   Docu:

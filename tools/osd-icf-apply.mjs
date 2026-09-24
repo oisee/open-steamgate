@@ -216,7 +216,7 @@ export async function applyTo(client, objects, options = {}) {
         .map((h) => h.ICFHANDLER).join(", ");
       await write(row("zosd_icf_aside", {
         ICF_NAME: a.previous.ICF_NAME, ICFPARGUID: a.previous.ICFPARGUID, CHANGED_AT: now,
-        URL: a.previous.URL, HANDLER: had, WHY: a.why,
+        URL: a.previous.URL, ICF_HANDLER: had, WHY: a.why,
       }));
     }
 

@@ -79,6 +79,51 @@ describe("DuckDB file migration (tools/osd-db-migrate.mjs)", function () {
     }
   });
 
+  it("names the HANDLER / SECTION / PARAMETER renames, reserved on a system as well", () => {
+    expect(COLUMN_RENAMES).to.deep.include.members([
+      {table: "zosd_icf_apc", from: "handler", to: "class_name"},
+      {table: "zosd_icf_aside", from: "handler", to: "icf_handler"},
+      {table: "zosd_svc", from: "handler", to: "handler_name"},
+      {table: "zosd_db", from: "section", to: "category"},
+      {table: "zstg_fm_param", from: "parameter", to: "param_name"},
+    ]);
+  });
+
+  it("renames a key column (ZOSD_DB-SECTION, ZSTG_FM_PARAM-PARAMETER) and keeps the rows", async () => {
+    const path = join(dir, "status.duckdb");
+    let db = await open(path);
+    await db.execute(`CREATE TABLE "zosd_db" ("section" VARCHAR(20), "name" VARCHAR(60), "value" VARCHAR(240),
+      "note" VARCHAR(240), "seq" INT, PRIMARY KEY("section","name"))`);
+    await db.execute(`CREATE TABLE "zstg_fm_param" ("mandt" VARCHAR(3), "funcname" VARCHAR(30), "parameter" VARCHAR(30),
+      "kind" VARCHAR(1), "typ" VARCHAR(30), "optional" VARCHAR(1), "remote" VARCHAR(1), "stg_seq" INT,
+      PRIMARY KEY("mandt","funcname","parameter"))`);
+    await db.execute("INSERT INTO zosd_db VALUES ('Database','Engine','duckdb','connected backend',1)");
+    await db.execute("INSERT INTO zstg_fm_param VALUES ('123','Z_MODULE','IV_ID','I','CHAR10','X','X',1)");
+    db.close();
+    db = await open(path);
+    try {
+      expect(await migrateDuckdbColumns(db)).to.deep.equal(["zosd_db.section -> category", "zstg_fm_param.parameter -> param_name"]);
+      expect(await db.query("SELECT category, name FROM zosd_db")).to.deep.equal([{category: "Database", name: "Engine"}]);
+      expect(await db.query("SELECT funcname, param_name FROM zstg_fm_param")).to.deep.equal([{funcname: "Z_MODULE", param_name: "IV_ID"}]);
+      // the renamed column is still part of the primary key
+      for (const duplicate of [
+        "INSERT INTO zosd_db VALUES ('Database','Engine','sqlite','again',2)",
+        "INSERT INTO zstg_fm_param VALUES ('123','Z_MODULE','IV_ID','E','CHAR10','','',2)",
+      ]) {
+        try {
+          await db.execute(duplicate);
+          expect.fail(`the primary key should survive the rename: ${duplicate}`);
+        } catch (error) {
+          expect(String(error.message)).to.match(/constraint|duplicate/i);
+        }
+      }
+      await db.execute("INSERT INTO zosd_db VALUES ('Platform','Engine','x','a different key',3)");
+      expect(await migrateDuckdbColumns(db)).to.deep.equal([]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("does nothing to a file made after the rename, or without the table", async () => {
     const db = await open(join(dir, "new.duckdb"));
     try {
@@ -198,6 +243,33 @@ describe("DuckDB file migration through test/setup.mjs", function () {
     const db = await boot(path);
     try {
       expect(await db.query("SELECT factid, pickupzone FROM zvosdtaxicube")).to.deep.equal([{factid: "0000000001", pickupzone: "JFK Airport"}]);
+    } finally {
+      await db.disconnect();
+    }
+  });
+
+  it("opens a file with ZOSD_DB-SECTION and serves Category through ZC_OSD_DATABASE's view", async () => {
+    // ZOSD_DB and its SQL view ZVOSDDB as a build before the rename wrote them
+    const oldDb = `CREATE TABLE "zosd_db" ("section" VARCHAR(20), "name" VARCHAR(60), "value" VARCHAR(240),
+      "note" VARCHAR(240), "seq" INT, PRIMARY KEY("section","name"))`;
+    const oldView = `CREATE VIEW "zvosddb" AS SELECT "zosd_db".section AS section, "zosd_db".name AS name,
+      "zosd_db".value AS value, "zosd_db".note AS note FROM "zosd_db"`;
+    const newView = `CREATE VIEW "zvosddb" AS SELECT "zosd_db".category AS category, "zosd_db".name AS name,
+      "zosd_db".value AS value, "zosd_db".note AS note FROM "zosd_db"`;
+    const path = join(dir, "status.duckdb");
+    await oldFile(path);
+    let file = await open(path);
+    await file.execute(oldDb);
+    await file.execute(oldView);
+    await file.execute("INSERT INTO zosd_db VALUES ('Database','Engine','duckdb','connected backend',1)");
+    file.close();
+    process.env.STG_DB = "duckdb";
+    process.env.STG_DB_PATH = path;
+    const abap = {context: {databaseConnections: {}, RFCDestinations: {}}, builtin: {}};
+    await setup(abap, {pg: [...TABLES, NEW_VIEW, oldDb.replaceAll('"section"', '"category"'), newView]}, []);
+    const db = abap.context.databaseConnections.DEFAULT;
+    try {
+      expect(await db.query("SELECT category, name, value FROM zvosddb")).to.deep.equal([{category: "Database", name: "Engine", value: "duckdb"}]);
     } finally {
       await db.disconnect();
     }

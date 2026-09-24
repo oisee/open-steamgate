@@ -175,7 +175,9 @@ search help (the DDSHSELOPS table, the search-help runtime through
 interface and its implementation in the class.
 
 The module signatures come from `ZSTG_FM_PARAM`, one row per parameter
-(FUNCNAME, PARAMETER, KIND I/E/C/T, TYP, OPTIONAL, REMOTE, STG_SEQ): what
+(FUNCNAME, PARAM_NAME, KIND I/E/C/T, TYP, OPTIONAL, REMOTE, STG_SEQ; the
+parameter's name is `PARAM_NAME` because a system reserves `PARAMETER`, and
+the OData property is still `Parameter`): what
 SEGW reads from the function library and `tools/segw-gen-mapping.mjs`
 from an abapGit `*.fugr.xml`. `POST FunctionGroupSet` with that XML as
 `Content` fills it (`zcl_stg_segw_fugr` mirrors `parseFunctionGroup`: the
