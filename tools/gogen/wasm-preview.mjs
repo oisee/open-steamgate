@@ -48,6 +48,9 @@ copyFileSync(join(goroot, "lib", "wasm", "wasm_exec.js"), join(out, "wasm_exec.j
 const sqljs = dirname(require.resolve("sql.js/dist/sql-wasm.js"));
 copyFileSync(join(sqljs, "sql-wasm.js"), join(out, "sql-wasm.js"));
 copyFileSync(join(sqljs, "sql-wasm.wasm"), join(out, "sql-wasm.wasm"));
+// the page side of APC: the JS preview's WebSocket shim, which the worker
+// injects into its HTML answers
+copyFileSync(join(home, "web", "preview-socket.mjs"), join(out, "preview-socket.mjs"));
 // the database a worker kept belongs to the build that seeded it
 const buildId = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
 writeFileSync(join(out, "sw.js"), readFileSync(join(here, "wasm", "osgo-sw.js"), "utf8").replace("__OSGO_BUILD_ID__", buildId));

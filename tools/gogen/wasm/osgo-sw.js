@@ -93,6 +93,73 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(serve(event.request, url, path, performance.now()));
 });
 
+// The page's WebSockets to the push channels: a MessageChannel per socket,
+// the protocol of web/preview-socket.mjs (the JS preview's shim, which this
+// worker injects into the HTML it answers, as web/preview-worker.mjs does).
+self.addEventListener("message", (event) => {
+  const message = event.data;
+  const port = event.ports?.[0];
+  if (message?.apc !== "open" || port === undefined) return;
+  const send = (payload) => port.postMessage(payload);
+  const query = message.search ?? "";
+  let conn;
+  let queue = Promise.resolve();
+  // one message at a time, in order, as a socket delivers them
+  const run = (work) => { queue = queue.then(work).catch((error) => {
+    send({apc: "close", code: 1011, reason: "handler failed"});
+    conn?.close("handler failed", 1006);
+    conn = undefined;
+    console.warn(`APC ${message.path}: ${error?.message ?? error}`);
+  }); };
+  port.onmessage = (inner) => {
+    const body = inner.data;
+    if (body?.apc === "message") {
+      run(async () => {
+        if (conn === undefined) return;
+        for (const text of await conn.message(body.text)) send({apc: "message", text});
+      });
+    } else if (body?.apc === "close") {
+      run(async () => {
+        await conn?.close("closed by the client", 1000);
+        conn = undefined;
+        send({apc: "close", code: 1000, reason: "bye"});
+      });
+    }
+  };
+  run(async () => {
+    const osgo = await start();
+    try {
+      const path = message.path.startsWith(MOUNT) ? `/${message.path.slice(MOUNT.length)}` : message.path;
+      conn = await osgo.apcOpen(path, query.replace(/^\?/, ""));
+    } catch (error) {
+      send({apc: "close", code: 1011, reason: String(error?.message ?? error)});
+      return;
+    }
+    // open before drain: the page's socket is OPEN before ON_START's messages
+    send({apc: "open"});
+    for (const text of conn.out) send({apc: "message", text});
+  });
+});
+
+// The shim goes first in the <head> of an HTML answer, inline and classic,
+// so it is in place before the page's own script opens its socket (the
+// reasoning is web/preview-worker.mjs's SHIM).
+let shim;
+async function withSocketShim(osgo, headers, body) {
+  const type = headers.get("content-type") ?? "";
+  if (!type.includes("text/html") || osgo.channels.length === 0) return body;
+  shim ??= (await (await fetch(`${MOUNT}preview-socket.mjs`)).text()).replace(/^export /gm, "");
+  // a page below a mount opens its socket below it too
+  const paths = [...osgo.channels].flatMap((p) => [p, `${MOUNT.slice(0, -1)}${p}`]);
+  const tag = `<script>${shim}\ninstall({paths: ${JSON.stringify(paths)}});</script>`;
+  const html = new TextDecoder().decode(body);
+  const at = html.search(/<head[^>]*>/i);
+  const patched = at < 0 ? tag + html : html.slice(0, html.indexOf(">", at) + 1) + tag + html.slice(html.indexOf(">", at) + 1);
+  const bytes = new TextEncoder().encode(patched);
+  headers.set("content-length", String(bytes.length));
+  return bytes;
+}
+
 async function serve(request, url, path, arrived) {
   try {
     if (path === PING_PATH) return new Response("{}", {headers: {"content-type": "application/json", "cache-control": "no-store"}});
@@ -126,7 +193,7 @@ async function serve(request, url, path, arrived) {
     h.append("server-timing", `osgo;dur=${took.toFixed(2)}, sw;dur=${(performance.now() - arrived).toFixed(2)}`);
     for (const [k, v] of answer.headers) h.append(k, v);
     const empty = EMPTY_STATUSES.has(answer.status) || request.method === "HEAD";
-    return new Response(empty ? null : answer.body, {status: answer.status, headers: h});
+    return new Response(empty ? null : await withSocketShim(osgo, h, answer.body), {status: answer.status, headers: h});
   } catch (error) {
     return new Response(`OSGo could not answer: ${error?.stack || error}`, {status: 500, headers: {"content-type": "text/plain; charset=utf-8"}});
   }
