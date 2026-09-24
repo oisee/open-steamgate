@@ -73,6 +73,22 @@ function cloneName(t) {
 }
 const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "refattr"]);
 /** a value moved out of a place: a table (or a structure holding one) is copied */
+/** one condition of an internal table's WHERE over the row `row`
+ * (ultra/itab: a nested component and IS [NOT] INITIAL read through fx) */
+function whereItem(w, row, ctx) {
+  const saved = ctx.lrow;
+  ctx.lrow = row;
+  try {
+    if (w.op === "initial" || w.op === "notinitial") {
+      const c = cond({c: "initial", x: w.fx}, ctx);
+      return w.op === "initial" ? c : `!(${c})`;
+    }
+    const lhs = w.fx ? expr(w.fx, ctx) : `${row}.${ident(w.name)}`;
+    return `${lhs} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr(w.value, ctx)}`;
+  } finally {
+    ctx.lrow = saved;
+  }
+}
 function copied(text, t, e) {
   return needsCopy(t) && (e === undefined || PLACES.has(e.e)) ? `${cloneName(t)}(${text})` : text;
 }
@@ -844,7 +860,7 @@ function stmtLines(st, ctx, d) {
       const start = st.from ? `int(${expr(st.from, ctx)}) - 1` : "0";
       const limit = st.to ? ` && i${n} < int(${expr(st.to, ctx)})` : "";
       const bind = st.fs ? `${ident(st.fs)} = &${tb}[i${n}]` : `${place(st.into, ctx)} = ${copied(`${tb}[i${n}]`, st.into.type)}`;
-      const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => `${tb}[i${n}].${ident(w.name)} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr(w.value, ctx)}`).join(" && ")}) { continue }` : null;
+      const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => whereItem(w, `${tb}[i${n}]`, ctx)).join(" && ")}) { continue }` : null;
       return [
         `${t}{`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
         `${t}\tfor i${n} := max(${start}, 0); i${n} < len(${tb})${limit}; i${n}++ {`,
@@ -1126,7 +1142,7 @@ ${t}	}`));
       // sy-subrc 0 when a row went, 4 when none did
       const tb = place(st.table, ctx);
       const n = ctx.loop++;
-      const keep = st.where.map((w) => `r${n}.${ident(w.name)} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr(w.value, ctx)}`).join(" && ");
+      const keep = st.where.map((w) => whereItem(w, `r${n}`, ctx)).join(" && ");
       return [`${t}{`, `${t}\tkept${n} := ${tb}[:0]`, `${t}\tfor _, r${n} := range ${tb} {`, `${t}\t\tif !(${keep}) {`,
         `${t}\t\t\tkept${n} = append(kept${n}, r${n})`, `${t}\t\t}`, `${t}\t}`,
         `${t}\ts.Sy.Subrc = 4`, `${t}\tif len(kept${n}) < len(${tb}) {`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}\t${tb} = kept${n}`, `${t}}`];

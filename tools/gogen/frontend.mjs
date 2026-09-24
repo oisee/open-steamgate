@@ -1263,16 +1263,35 @@ function whereOf(cc, rowType, ctx, text) {
   const where = [];
   for (const k of cc.getChildren()) {
     if (isTok(k, "AND")) continue;
-    if (!isExpr(k, Expressions.ComponentCompare) || k.getChildren().length !== 3) throw new Unsupported(`WHERE form: ${cc.concatTokens()}`);
-    const [comp, opN, src] = k.getChildren();
-    const f = fieldOf(ctx, rowType, comp.concatTokens(), text);
+    // ultra/itab: a component of a component (param-shape) is read through
+    // the row (fx, over the row placeholder lrow); c IS [NOT] INITIAL
+    const kids = isExpr(k, Expressions.ComponentCompare) ? k.getChildren() : [];
+    const words = kids.slice(1).map((x) => (x instanceof Nodes.TokenNode ? upper(x.concatTokens()) : null));
+    const initial = kids.length >= 3 && words[0] === "IS" && words[words.length - 1] === "INITIAL" && (kids.length === 3 || (kids.length === 4 && words[1] === "NOT"));
+    if (!initial && (!isExpr(k, Expressions.ComponentCompare) || kids.length !== 3)) throw new Unsupported(`WHERE form: ${cc.concatTokens()}`);
+    const path = kids[0].concatTokens().split("-");
+    let fx = null;
+    if (path.length > 1 || initial) {
+      fx = {e: "lrow", type: rowType};
+      for (const part of path) {
+        if (fx.type.k !== "struct") throw new Unsupported(`WHERE component ${kids[0].concatTokens()}`);
+        const pf = fieldOf(ctx, fx.type, part, text);
+        fx = {e: "field", base: fx, name: pf.name, type: pf.type};
+      }
+    }
+    if (initial) {
+      where.push({fx, op: kids.length === 4 ? "notinitial" : "initial"});
+      continue;
+    }
+    const [comp, opN, src] = kids;
+    const f = fx !== null ? {name: fx.name, type: fx.type} : fieldOf(ctx, rowType, comp.concatTokens(), text);
     const opT = upper(opN.concatTokens());
     const op = OPS[opT] ?? opT;
     if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE operator ${op}`);
     const v = source(src, ctx, f.type);
     const calc = numeric(f.type) || numeric(v.type) ? (f.type.k === "f" || v.type.k === "f" ? F : I) : S;
     if (calc !== S && (charlike(f.type) || charlike(v.type))) throw new Unsupported("WHERE comparing characters with a number");
-    where.push({name: f.name, ftype: f.type, op, value: convert(v, calc), calc});
+    where.push({name: f.name, ftype: f.type, op, value: convert(v, calc), calc, ...(fx !== null ? {fx} : {})});
   }
   return where;
 }

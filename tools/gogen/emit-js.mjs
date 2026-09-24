@@ -305,6 +305,21 @@ function place(p, ctx) {
 }
 
 /** a value moved somewhere: a structure or table read out of a place is copied */
+/** one condition of an internal table's WHERE, as emit-go whereItem */
+function whereItem(w, row, ctx) {
+  const saved = ctx.lrow;
+  ctx.lrow = row;
+  try {
+    if (w.op === "initial" || w.op === "notinitial") {
+      const c = cond({c: "initial", x: w.fx}, ctx);
+      return w.op === "initial" ? c : `!(${c})`;
+    }
+    const lhs = w.fx ? expr(w.fx, ctx) : `${row}.${ident(w.name)}`;
+    return `${lhs} ${w.op === "=" ? "===" : w.op === "<>" ? "!==" : w.op} ${expr(w.value, ctx)}`;
+  } finally {
+    ctx.lrow = saved;
+  }
+}
 const moved = (e, ctx) => (composite(e.type) && isPlace(e) ? `abap.copy(${expr(e, ctx)})` : expr(e, ctx));
 
 function stmt(st, ctx, d) {
@@ -482,7 +497,7 @@ function stmt(st, ctx, d) {
       return [
         `${t}{`, `${t}  const save${n} = s.sy.tabix;`, `${t}  s.sy.subrc = 4;`,
         `${t}  for (let i${n} = ${start}; i${n} < ${tb}.length${limit}; i${n}++) {`,
-        ...(st.where ? [`${t}    if (!(${st.where.map((w) => `${tb}[i${n}].${ident(w.name)} ${w.op === "=" ? "===" : w.op === "<>" ? "!==" : w.op} ${expr(w.value, ctx)}`).join(" && ")})) continue;`] : []),
+        ...(st.where ? [`${t}    if (!(${st.where.map((w) => whereItem(w, `${tb}[i${n}]`, ctx)).join(" && ")})) continue;`] : []),
         `${t}    s.sy.tabix = i${n} + 1; s.sy.subrc = 0;`, `${t}    ${bind};`,
         ...st.body.flatMap((x) => stmt(x, ctx, d + 2)),
         `${t}  }`, `${t}  s.sy.tabix = save${n};`, `${t}}`,
@@ -589,7 +604,7 @@ function stmt(st, ctx, d) {
     case "delete_where": {
       const tb = place(st.table, ctx);
       const n = ctx.loop++;
-      const keep = st.where.map((w) => `r${n}.${ident(w.name)} ${w.op === "=" ? "===" : w.op === "<>" ? "!==" : w.op} ${expr(w.value, ctx)}`).join(" && ");
+      const keep = st.where.map((w) => whereItem(w, `r${n}`, ctx)).join(" && ");
       return [`${t}{`, `${t}  const kept${n} = ${tb}.filter((r${n}) => !(${keep}));`,
         `${t}  s.sy.subrc = kept${n}.length < ${tb}.length ? 0 : 4;`, `${t}  ${tb} = kept${n};`, `${t}}`];
     }
