@@ -550,6 +550,7 @@ export async function runProcedure(program, {
   // table variables materialised before a write to the table they read;
   // dropped when the call ends, however it ends
   const snapshots = [];
+  let snapshotCount = 0;
   const readsDatabase = (node) => {
     if (node === null || typeof node !== "object") return false;
     if (node.rel === "scan" && upper(node.table) !== "DUMMY") return true;
@@ -569,7 +570,19 @@ export async function runProcedure(program, {
     // AS keeps no collation, and SQLite's CHAR columns compare with RTRIM
     const types = columns.map((c) => snapshotColumnType(schema[c], dialect));
     let handle;
-    if (client.relationDdl === true && types.every((t) => t !== undefined)) {
+    const quoteId = (ident) => `"${ident.replace(/"/g, '""')}"`;
+    if (typeof client.write === "function" && types.every((t) => t !== undefined)) {
+      // through the LUW's own writes, created, filled and (at the end) dropped
+      // in its order: DuckDB replays the LUW after a failed statement, and a
+      // write that read a snapshot the replay did not recreate failed there
+      // with "table ... does not exist" (the #64 critic)
+      snapshotCount += 1;
+      const ident = `OSD_SNAP_${String(name).replace(/[^A-Za-z0-9_]/g, "_").toUpperCase()}_${globalThis.process?.pid ?? 0}_${snapshotCount}`;
+      handle = {ident, ref: quoteId(ident), kind: "materialised", reason: "a table variable read before a write", viaWrite: true};
+      await client.write({sql: `CREATE TABLE ${handle.ref} (${columns.map((c, i) => `${quoteId(c)} ${types[i]}`).join(", ")})`});
+      snapshots.push(handle);
+      await client.write({sql: `INSERT INTO ${handle.ref} ${compiled.sql}`, params: compiled.params});
+    } else if (client.relationDdl === true && types.every((t) => t !== undefined)) {
       const quote = (ident) => `"${ident.replace(/"/g, '""')}"`;
       handle = await client.defineRelation({name: `snap_${name}`, materialise: "a table variable read before a write",
         ddl: (ref) => `CREATE TABLE ${ref} (${columns.map((c, i) => `${quote(c)} ${types[i]}`).join(", ")})`});
@@ -1103,7 +1116,14 @@ export async function runProcedure(program, {
   }
   return single === undefined ? emptyAnswer(program.outputSchema) : await finishOne(program.output, program.outputSchema, single);
   } finally {
-    for (const handle of snapshots) await client.dropRelation(handle);
+    for (const handle of snapshots) {
+      if (handle.viaWrite) {
+        // a failed drop must not hide the error the body ended with
+        try { await client.write({sql: `DROP TABLE ${handle.ref}`}); } catch { /* already gone with a rollback */ }
+      } else {
+        await client.dropRelation(handle);
+      }
+    }
   }
 
   async function finishOne(outputName, outputSchema, result) {

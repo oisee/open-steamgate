@@ -112,6 +112,14 @@ describe("the #63 critic's round", () => {
         await client.rollback();
         expect((await client.native({sql: 'SELECT "K" FROM "T" ORDER BY "K"', expect: "rows"})).rows.map((r) => Number(r.K))).to.deep.equal([1, 2]);
       });
+      it("keeps a write that read a snapshot through a later failed statement's replay", async () => {
+        await run("lt = SELECT k + 10 AS k, v FROM t; INSERT INTO t SELECT k, v FROM :lt; rv = 'x';");
+        let caught;
+        try { await client.write({sql: "INSERT INTO \"T\" VALUES (1, 'dup')"}); } catch (error) { caught = error; }
+        expect(caught).to.be.an("error");
+        const keys = (await client.native({sql: 'SELECT "K" FROM "T" ORDER BY "K"', expect: "rows"})).rows.map((r) => Number(r.K));
+        expect(keys).to.deep.equal([1, 2, 11, 12]);
+      });
       it("drops its snapshots when the body fails", async () => {
         try { await run("lt = SELECT k FROM t; DELETE FROM t WHERE k = 2; INSERT INTO t VALUES (1, 'dup'); rv = 'x';"); } catch { /* expected */ }
         await client.rollback();
