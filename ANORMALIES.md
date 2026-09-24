@@ -1587,3 +1587,20 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: **needs an issue** in abaplint/transpiler (runtime `createData`)
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_CRDYN
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-dynamic-where-pasted — the transpiler runtime pastes `WHERE (cond)` into the SQL text, where a system parses it against the table
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (a dynamic condition of `SELECT ... WHERE (lv_where)` goes into the statement text as it stands)
+- Affected ABAP statement, runtime API or adapter: `SELECT ... FROM <table>|(name) ... WHERE (lv_where)`; in OSG the generated readers `gen/cds/zcl_stg_tab_*` / `zcl_stg_cds_*` (SE16 and the SADL DPC go through them) and open-abap-odata's `zcl_oao_shlp_ddic` (value helps)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_dsel.clas.abap` (`1 = 1`, `id='A'`); through the gateway, `GET /sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_TravelcubeSet?$filter=STATUS%20eq%20%27AX%27`, `GET /sap/opu/odata/sap/ZSTG_DEMO_SRV/StatusVHSet`, `GET /sap/bc/osd/se16/?t=ZSTG_DEMO&f_seats=%3E1`
+- Exact command used to run it: OSG on Node (`test/run.mjs`, main 42755c5) and the Go backend (`tools/gogen/osgo.mjs`, branch ultra/osqlwhere) side by side, the same requests with `curl`
+- Expected SAP behaviour: measured on A4H over SFLIGHT (docs/osql-where.md, open-steamgate #47): a literal is converted to the column's type (a CHAR literal cut to the column, `'LH X'` against CHAR3 is `'LH'`; NUMC zero-padded; a quoted number against INT4 is the number, a letter an uncatchable runtime error); `1 = 1` and an unknown column raise CX_SY_DYNAMIC_OSQL_SEMANTICS, `carrid='LH'` and `!=` CX_SY_DYNAMIC_OSQL_SYNTAX; AND binds tighter than OR
+- Actual open-abap behaviour: the string reaches SQLite unparsed. `STATUS eq 'AX'` against CHAR1 finds nothing on Node (the Go backend, cutting as A4H does, finds the two `A` rows); `1 = 1` reads every row on Node where a system raises (StatusVHSet answers on Node and is CX_SY_DYNAMIC_OSQL_SEMANTICS on the Go backend, because `zcl_oao_shlp_ddic` still writes `'1 = 1'` for an empty condition); `SEATS = '>1'` (SE16, a typed-in `>1`) compares an INTEGER with text and finds nothing on Node, where the measurement names no outcome for that shape (the Go backend refuses it, NOT_COMPILED, "number format"). Every literal is text in the statement rather than bound
+- Impact on open-steamgate: a condition that is not in SQLite's own dialect, or one a system would refuse, answers differently on the Node host; a value help whose reader writes `1 = 1` works on Node and not on a system
+- Smallest safe workaround: the Go backend parses the condition with the port of `tools/ir-osql-where.mjs` (`tools/gogen/go/abap/osqlwhere.go`, checked against `test/fixtures/ir-pairs/osql-where.json` in four dialects) and binds every text; `zcl_oao_shlp_ddic` should leave an empty condition empty, as cds2ddic does since #48 (an upstream fix in open-abap-odata)
+- Not an anomaly, for the record: a read without ORDER BY answers the rows in another order on the two hosts (SE16 over ZOSD_TAXIFACT, ZSTG_STATUS, ZSTG_SBD_MP; Zc_Osd_TaxicubeSet): the Go backend's `MANDT = '123'` lets SQLite walk the primary key, Node scans in insertion order. Neither order is promised, on a system either
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, dynamic WHERE); open-abap-odata `zcl_oao_shlp_ddic` (`'1 = 1'`)
+- Regression-test location: `tools/gogen/go/abap/osqlwhere_test.go` (the pairs), `tools/gogen/semantics.mjs` ZCL_GOGEN_T_DSEL / ZCL_GOGEN_T_DSELX
+- Upstream version containing a fix: none yet
