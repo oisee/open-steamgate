@@ -521,15 +521,18 @@ export function compileProcedure(method, types, options = {}) {
       } else if (node.node === "Block") {
         const mode = (node.children ?? []).filter((one) => one.node === "word")
           .map((one) => upper(one.value)).filter((one) => !["BEGIN", "END", ";"].includes(one));
+        // A nested BEGIN ... END (plain, or SEQUENTIAL EXECUTION, which only
+        // forbids parallelism) that declares nothing is no scope at all: its
+        // statements are the enclosing body's. One that declares opens a
+        // scope -- shadowing, a variable gone at END, an EXIT HANDLER -- and
+        // that is not measured yet, so it is refused by name.
         const statements = children(node, "Statement");
-        const statement = statements.length === 1
-          ? (statements[0].children ?? []).find((one) => one.node !== "word")
-          : undefined;
-        const assignsOutput = statement?.node === "Assignment"
-          && outputNames.has(nameOf(child(statement, "Name")));
-        if (JSON.stringify(mode) !== JSON.stringify(["SEQUENTIAL", "EXECUTION"]) || !assignsOutput) {
-          throw new UnsupportedSqlScript(
-            "initial block support requires BEGIN SEQUENTIAL EXECUTION with exactly one assignment to the procedure output", node);
+        if (mode.length !== 0 && JSON.stringify(mode) !== JSON.stringify(["SEQUENTIAL", "EXECUTION"])) {
+          throw new UnsupportedSqlScript(`a nested BEGIN ${mode.join(" ")} block is not carried yet`, node);
+        }
+        if (statements.some((one) => (one.children ?? []).some((part) => part.node === "Declare"
+          || (part.node === "word" && upper(part.value) === "DECLARE")))) {
+          throw new UnsupportedSqlScript("a nested block with its own DECLARE opens a scope, which is not carried yet", node);
         }
         result.push(...compileStatements({children: statements}));
       } else if (node.node === "If") {

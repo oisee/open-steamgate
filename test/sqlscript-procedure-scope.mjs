@@ -360,14 +360,21 @@ for (const {dialect, make} of ENGINES) describe(`dictionary-typed tables and a w
       .to.throw(UnsupportedSqlScript, /include ZS_NOWHERE did not resolve/);
   });
 
-  it("unwraps a whole-body BEGIN SEQUENTIAL EXECUTION ... END, and still refuses a nested plain block", async () => {
+  it("unwraps a whole-body BEGIN SEQUENTIAL EXECUTION ... END, inlines a nested block that declares nothing, refuses one that does", async () => {
     const prog = compile(DICT_CLASS("EXPORTING VALUE(et_rows) TYPE zt_rows",
       "BEGIN SEQUENTIAL EXECUTION\n      lt = select id, txt from src where id > 1;\n      et_rows = select id, txt from :lt;\n    END;"));
     const {rows} = await runProcedure(prog, {client, dialect, inputCatalogue: CATALOGUE});
     expect(rows.map((r) => r.ID)).to.deep.equal([5, 20]);
+    const nested = compile(DICT_CLASS("EXPORTING VALUE(et_rows) TYPE zt_rows",
+      "DECLARE n INTEGER = 1;\n    BEGIN\n      n = 4;\n      et_rows = select id, txt from src where id > :n;\n    END;"));
+    const inner = await runProcedure(nested, {client, dialect, inputCatalogue: CATALOGUE});
+    expect(inner.rows.map((r) => r.ID)).to.deep.equal([5, 20]);
     expect(() => compile(DICT_CLASS("EXPORTING VALUE(et_rows) TYPE zt_rows",
-      "et_rows = select id, txt from src;\n    BEGIN\n      et_rows = select id, txt from src;\n    END;")))
-      .to.throw(UnsupportedSqlScript, /initial block support/);
+      "et_rows = select id, txt from src;\n    BEGIN\n      DECLARE n INTEGER = 1;\n      et_rows = select id, txt from src;\n    END;")))
+      .to.throw(UnsupportedSqlScript, /opens a scope, which is not carried yet/);
+    expect(() => compile(DICT_CLASS("EXPORTING VALUE(et_rows) TYPE zt_rows",
+      "et_rows = select id, txt from src;\n    BEGIN PARALLEL EXECUTION\n      et_rows = select id, txt from src;\n    END;")))
+      .to.throw(UnsupportedSqlScript, /nested BEGIN PARALLEL EXECUTION block is not carried yet/);
   });
 
   it("refuses a bare NULL in a subquery of an IF condition: no untyped NULL escapes through a fragment", () => {
