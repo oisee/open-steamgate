@@ -7,8 +7,8 @@ import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
 import {lower} from "../tools/sqlscript-lower.mjs";
 import {insertRows, insertFrom, update, upsert, remove, bindValue, WriteError} from "../tools/ir-writes.mjs";
-import {CASES, SEED, PAIRS_FILE, render} from "../tools/ir-writes-pairs.mjs";
-import {T, lit} from "../tools/sqlscript-ir.mjs";
+import {CASES, SEED, PAIRS_FILE, render, P_CASES, P_SEED, W_CASES, W_SEED, W_EXACT} from "../tools/ir-writes-pairs.mjs";
+import {T, lit, col, bin, project, scan} from "../tools/sqlscript-ir.mjs";
 
 const ENGINES = [
   {dialect: "duckdb", make: () => new DuckDBDatabaseClient({path: ":memory:"})},
@@ -66,7 +66,139 @@ for (const {dialect, make} of ENGINES) describe(`writes as IR, on ${dialect}`, f
   }
 });
 
+// the packed table after each case, amounts at two decimals, timestamps whole
+const PS = (m, i, a, t) => `${m}|${i}|${a}|${t}`;
+const P_BASE = P_SEED.map(([m, i, a, t]) => PS(m, i, a, t));
+const P_AFTER = {
+  "INSERT a packed amount and a TIMESTAMP, as decimal strings of the type": [...P_BASE, PS("001", 3, "12.50", "20260924123456")],
+  "INSERT a packed value given as a number": [...P_BASE, PS("001", 4, "3.00", "20260924000000")],
+  "INSERT a negative amount": [...P_BASE, PS("001", 5, "-7.25", "0")],
+  "MODIFY with the packed fields left out writes their initial values": [...P_BASE, PS("001", 6, "0.00", "0")],
+  "UPDATE a packed amount by key": [PS("001", 1, "99.99", "20260924120000"), PS("001", 2, "0.50", "20260101000000")],
+  "MODIFY a TIMESTAMP on an existing row": [PS("001", 1, "10.00", "20260924120000"), PS("001", 2, "0.50", "20261231235959")],
+  "UPDATE an amount by arithmetic on a packed parameter": [PS("001", 1, "20.00", "20260924120000"), PS("001", 2, "0.50", "20260101000000")],
+  "UPDATE where arithmetic on a packed column meets a packed parameter": [PS("001", 1, "10.00", "1"), PS("001", 2, "0.50", "20260101000000")],
+  "INSERT the product of a packed parameter and an integer": [...P_BASE, PS("001", 7, "25.00", "0")],
+};
+
+for (const {dialect, make} of ENGINES) describe(`packed writes as IR, on ${dialect}`, function () {
+  this.timeout(30000);
+  let client;
+  beforeEach(async () => {
+    client = make();
+    await client.connect();
+    await client.native({sql: 'CREATE TABLE "P" ("MANDT" VARCHAR, "ID" INTEGER, "AMOUNT" DECIMAL(15,2), "TS" DECIMAL(15,0), PRIMARY KEY ("MANDT", "ID"))', expect: "none"});
+    for (const [m, i, a, t] of P_SEED) {
+      await client.native({sql: `INSERT INTO "P" VALUES ('${m}', ${i}, ${a}, ${t})`, expect: "none"});
+    }
+  });
+  afterEach(async () => { await client.disconnect(); });
+  // read back as the engine's own text where it has a decimal type, so a
+  // rounding on the way in shows; SQLite keeps a REAL and is normalised
+  const table = async () => dialect === "sqlite"
+    ? (await client.native({sql: 'SELECT "MANDT", "ID", "AMOUNT", "TS" FROM "P"', expect: "rows"})).rows
+      .map((r) => PS(r.MANDT, Number(r.ID), Number(r.AMOUNT).toFixed(2), String(BigInt(Math.round(Number(r.TS)))))).sort()
+    : (await client.native({sql: 'SELECT "MANDT", "ID", CAST("AMOUNT" AS VARCHAR) AS "A", CAST("TS" AS VARCHAR) AS "T" FROM "P"', expect: "rows"})).rows
+      .map((r) => PS(r.MANDT, Number(r.ID), r.A, r.T)).sort();
+
+  for (const one of P_CASES) {
+    it(`${one.name}: the table after it is what ABAP means`, async () => {
+      await client.native({...lower(one.stmt(), dialect), expect: "none"});
+      expect(await table()).to.deep.equal([...P_AFTER[one.name]].sort());
+    });
+  }
+});
+
+// P 31,14: 31 digits exact where the engine has a decimal type
+const W_AFTER = {
+  "INSERT a P 31,14 value with all 31 digits": [["001", 1, "0.00000000000001"], ["001", 2, "12345678901234567.12345678901234"]],
+  "UPDATE a P 31,14 value to its negative extreme": [["001", 1, "-99999999999999999.99999999999999"]],
+};
+for (const {dialect, make} of ENGINES) describe(`a P 31,14 column written as IR, on ${dialect}`, function () {
+  this.timeout(30000);
+  let client;
+  beforeEach(async () => {
+    client = make();
+    await client.connect();
+    await client.native({sql: 'CREATE TABLE "W" ("MANDT" VARCHAR, "ID" INTEGER, "BIG" DECIMAL(31,14), PRIMARY KEY ("MANDT", "ID"))', expect: "none"});
+    for (const [m, i, b] of W_SEED) await client.native({sql: `INSERT INTO "W" VALUES ('${m}', ${i}, ${b})`, expect: "none"});
+  });
+  afterEach(async () => { await client.disconnect(); });
+  for (const one of W_CASES) {
+    it(`${one.name}: ${W_EXACT.includes(dialect) ? "every digit read back" : "the nearest REAL, SQLite having no decimal type"}`, async () => {
+      await client.native({...lower(one.stmt(), dialect), expect: "none"});
+      if (W_EXACT.includes(dialect)) {
+        const rows = (await client.native({sql: 'SELECT "MANDT", "ID", CAST("BIG" AS VARCHAR) AS "B" FROM "W" ORDER BY "ID"', expect: "rows"})).rows;
+        expect(rows.map((r) => [r.MANDT, Number(r.ID), r.B])).to.deep.equal(W_AFTER[one.name]);
+      } else {
+        // read as REAL: NUMERIC affinity stores a whole-valued REAL as an
+        // INTEGER, and 1.2e16 read as one is past what the client returns
+        const rows = (await client.native({sql: 'SELECT "MANDT", "ID", CAST("BIG" AS REAL) AS "BIG" FROM "W" ORDER BY "ID"', expect: "rows"})).rows;
+        expect(rows.map((r) => [r.MANDT, Number(r.ID), Number(r.BIG)])).to.deep.equal(W_AFTER[one.name].map(([m, i, b]) => [m, i, Number(b)]));
+      }
+    });
+  }
+});
+
 describe("writes as IR: the pairs and the refusals", () => {
+  it("binds a packed value as the decimal string of its type, and refuses one a work area could not hold", () => {
+    const P = {abap: "P", len: 15, dec: 2};
+    expect(bindValue("12.5", P)).to.include({value: "12.50"});
+    expect(bindValue(3, P)).to.include({value: "3.00"});
+    expect(bindValue("1.500", P)).to.include({value: "1.50"});
+    expect(bindValue("-0.00", P)).to.include({value: "0.00"});
+    expect(bindValue(undefined, P)).to.include({value: "0.00"});
+    expect(bindValue(undefined, {abap: "P", len: 15, dec: 0})).to.include({value: "0"});
+    expect(() => bindValue("1.555", P)).to.throw(WriteError, /more than the column's 2 decimals/);
+    expect(() => bindValue("12345678901234", P)).to.throw(WriteError, /does not fit the column's 15 digits/);
+    expect(() => bindValue(1e21, P)).to.throw(WriteError, /past 2\^53/);
+    expect(() => bindValue("abc", P)).to.throw(WriteError, /not a decimal number/);
+    // the edges of the type and of the grammar (abapNumber's, without its rounding)
+    expect(bindValue("9999999999999.99", P)).to.include({value: "9999999999999.99"});
+    expect(() => bindValue("10000000000000.00", P)).to.throw(WriteError, /does not fit the column's 15 digits/);
+    expect(bindValue("0005.10", P)).to.include({value: "5.10"});
+    expect(bindValue("  5  ", P)).to.include({value: "5.00"});
+    expect(bindValue("5-", P)).to.include({value: "-5.00"});
+    expect(bindValue("+5", P)).to.include({value: "5.00"});
+    expect(() => bindValue("-5-", P)).to.throw(WriteError, /not a decimal number/);
+    expect(() => bindValue("\t5", P)).to.throw(WriteError, /not a decimal number/);
+    expect(() => bindValue(".5", P)).to.throw(WriteError, /not a decimal number/);
+    expect(() => bindValue("1e3", P)).to.throw(WriteError, /not a decimal number/);
+    expect(() => bindValue(1.555, P)).to.throw(WriteError, /more than the column's 2 decimals/);
+    // the ABAP runtime's P(15,7) answers 1e-7 for 0.0000001: exponent form, written out
+    expect(bindValue(1e-7, {abap: "P", len: 15, dec: 7})).to.include({value: "0.0000001"});
+    expect(() => bindValue(-2.5e-8, {abap: "P", len: 15, dec: 7})).to.throw(WriteError, /more than the column's 7 decimals/);
+    expect(bindValue(-3e-7, {abap: "P", len: 15, dec: 7})).to.include({value: "-0.0000003"});
+    expect(bindValue(-0, P)).to.include({value: "0.00"});
+    expect(bindValue(2 ** 53 - 1, {abap: "P", len: 31, dec: 0})).to.include({value: "9007199254740991"});
+    expect(() => bindValue(2 ** 53 + 2, {abap: "P", len: 31, dec: 0})).to.throw(WriteError, /past 2\^53/);
+    expect(bindValue("12345678901234567890", {abap: "P", len: 31, dec: 0})).to.include({value: "12345678901234567890"});
+    expect(bindValue(12n, {abap: "P", len: 31, dec: 0})).to.include({value: "12"});
+    // the type as DDIC has it: len 1..31 (31 when absent), dec 0..14
+    expect(bindValue("1", {abap: "P", dec: 2})).to.include({value: "1.00"});
+    expect(() => bindValue("1", {abap: "P", len: 32, dec: 0})).to.throw(WriteError, /1 to 31 digits/);
+    expect(() => bindValue("1", {abap: "P", len: 31, dec: 15})).to.throw(WriteError, /0 to 14/);
+    expect(() => bindValue("1", {abap: "P", len: 3, dec: 4})).to.throw(WriteError, /not more than its 3 digits/);
+    expect(() => bindValue("1", {abap: "P", len: 1.5})).to.throw(WriteError, /1 to 31 digits/);
+  });
+
+  it("refuses a packed literal that is not the decimal string of its type, where values are written", () => {
+    const S = {MANDT: {abap: "C", len: 3}, AMT: {abap: "P", len: 15, dec: 2}};
+    const eqM = {node: "bin", op: "=", left: {node: "col", name: "MANDT", type: S.MANDT}, right: lit("001", S.MANDT), type: T.bool};
+    expect(() => insertRows("X", ["MANDT", "AMT"], [[lit("001", S.MANDT), lit(1.5, S.AMT)]])).to.throw(WriteError, /packed literal 1.5/);
+    expect(() => insertRows("X", ["MANDT", "AMT"], [[lit("001", S.MANDT), lit("1.5", S.AMT)]])).to.throw(WriteError, /packed literal "1.5"/);
+    expect(() => update("X", [{col: "AMT", expr: lit(2, S.AMT)}], eqM)).to.throw(WriteError, /packed literal 2/);
+    expect(() => upsert("X", ["MANDT", "AMT"], [[lit("001", S.MANDT), lit("1.500", S.AMT)]], ["MANDT"])).to.throw(WriteError, /packed literal/);
+    expect(() => update("X", [{col: "AMT", expr: bin("+", col("AMT", S.AMT), lit(1, S.AMT), S.AMT)}], eqM)).to.throw(WriteError, /packed literal 1/);
+    expect(insertRows("X", ["MANDT", "AMT"], [[lit("001", S.MANDT), lit("1.50", S.AMT)]]).rows[0][1].value).to.equal("1.50");
+    expect(() => insertFrom("X", ["MANDT", "AMT"], project(scan("Y"), [{as: "MANDT", expr: col("MANDT", S.MANDT)}, {as: "AMT", expr: lit(0.1 + 0.2, S.AMT)}])))
+      .to.throw(WriteError, /packed literal 0.30000000000000004/);
+  });
+
+  it("every packed case has an expected table", () => {
+    expect(Object.keys(P_AFTER).sort()).to.deep.equal(P_CASES.map((one) => one.name).sort());
+  });
+
   it("the pairs file is current (node tools/ir-writes-pairs.mjs writes it), and every case has an expected table", () => {
     expect(readFileSync(PAIRS_FILE, "utf8")).to.equal(render());
     expect(Object.keys(AFTER).sort()).to.deep.equal(CASES.map((one) => one.name).sort());

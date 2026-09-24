@@ -34,9 +34,20 @@ export function isHexType(type) {
   return abapTypeLetter(type) === "X";
 }
 
-/** one parameter, as every client's bind wants it */
+/** one parameter, as every client's bind wants it. A packed value the IR
+ *  carries as its decimal string (tools/ir-writes.mjs, ir-osql-where.mjs)
+ *  binds as that string: Number() would round a P(31,14) to a double's 15
+ *  digits before the engine saw it. The engine casts the text to its
+ *  DECIMAL (DuckDB, HANA, PostgreSQL exactly; SQLite by NUMERIC affinity,
+ *  which is a REAL again -- SQLite has no decimal type). */
 export function bindValue(p, {hex} = {}) {
   if (p.isNull === true) return null;
+  if (abapTypeLetter(p.type) === "P" && typeof p.value === "string") return p.value;
+  // an INT8 past 2^53 arrives as a BigInt (ir-writes bindValue); Number()
+  // would make 9007199254740993 into ...992. Only past it: the ABAP
+  // runtime's INT8 is a BigInt whatever its size, and node-hdb refuses a
+  // BigInt for BIGINT ("Cannot convert a BigInt value to a number")
+  if (typeof p.value === "bigint" && !Number.isSafeInteger(Number(p.value))) return p.value;
   if (isNumericType(p.type)) return Number(p.value);
   if (hex !== undefined && isHexType(p.type)) return hex(String(p.value));
   return p.value === undefined ? null : String(p.value);

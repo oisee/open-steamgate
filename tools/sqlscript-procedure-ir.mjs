@@ -7,6 +7,7 @@
 // before a syntax tree is allowed to produce these nodes.
 import {effects, schemaOf, col, cast, project, filter, bin, lit, limit, scan, order, T} from "./sqlscript-ir.mjs";
 import {lower, Refused} from "./sqlscript-lower.mjs";
+import {packedText, WriteError} from "./ir-writes.mjs";
 
 export class UnsupportedSqlScript extends Error {
   constructor(message, node) {
@@ -134,6 +135,16 @@ function scalarForType(value, type, name) {
   // particularly dangerous accidental answer for an INTEGER parameter.
   if (value == null) return null;
   if (type?.abap === "I") return integer(value, name);
+  // a packed input given as text binds as that text (abap-types bindValue),
+  // so it must be the decimal string of its type: '1.5E3' or '12.50 ' would
+  // otherwise reach the engine as they are (the #55 critic)
+  if (type?.abap === "P" && typeof value === "string") {
+    try { return packedText(value, type, name); }
+    catch (error) {
+      if (error instanceof WriteError) throw new UnsupportedSqlScript(error.message);
+      throw error;
+    }
+  }
   if (type?.abap === "STRING" && typeof value !== "string") {
     throw new UnsupportedSqlScript(`${name} is not a SQLScript string`);
   }
@@ -384,7 +395,7 @@ export function orderedRelation(rel) {
   // `ties`: the output columns an ORDER BY sorted by (null: no ties). Only
   // the cursor query's own ORDER BY counts -- one inside, as a caller's
   // relation or a table variable brings it, HANA may drop (the compiler's
-  // rule, orderOf); ties are carried through renames the way it does
+  // rule, orderOf)
   const ordered = (r, top) => {
     switch (r?.rel) {
       case "order": {
@@ -407,11 +418,16 @@ export function orderedRelation(rel) {
         const o = ordered(r.input, false);
         if (o === undefined) return undefined;
         const carried = o.keys.map((k) => ({key: k, as: `__ORD${hidden++}`}));
-        const ties = o.ties === null ? null : new Set(r.items.filter((item) => item.expr?.node === "col" && o.ties.has(upper(item.expr.name))).map((item) => upper(item.as)));
+        // below a projection nothing has ties: only the cursor's own ORDER BY
+        // makes them, and it is accepted at the top only; the keys carried up
+        // are positions, one row each
         return {rel: {...r, input: o.rel, items: [...r.items, ...carried.map((c) => ({as: c.as, expr: col(c.key.col, undefined)}))]},
-          keys: carried.map((c) => ({col: c.as, desc: c.key.desc})), ties};
+          keys: carried.map((c) => ({col: c.as, desc: c.key.desc})), ties: null};
       }
       case "scan": return upper(r.table) === "DUMMY" ? {rel: r, keys: [], ties: null} : undefined;
+      // a host relation (tools/ir-host-relation.mjs): the caller's rows,
+      // numbered by the host, as the union of single rows below is
+      case "ref": return r.ordinal === undefined ? undefined : {rel: r, keys: [{col: r.ordinal, desc: false}], ties: null};
       case "union": {
         if (r.all !== true || !r.inputs.every(singleRow)) return undefined;
         const name = `__ORD${hidden++}`;
@@ -867,7 +883,7 @@ export async function runProcedure(program, {
         }
         const outside = known.ties === null ? [] : Object.keys(statement.schema).filter((column) => !known.ties.has(upper(column)));
         if (outside.length > 0) {
-          const refusal = new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: rows equal in its ORDER BY come in any order, and the loop reads ${outside.join(", ")}`, statement);
+          const refusal = new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: rows equal in its ORDER BY come in any order, and its row carries ${outside.join(", ")} too`, statement);
           refusal.reason = "order";
           throw refusal;
         }

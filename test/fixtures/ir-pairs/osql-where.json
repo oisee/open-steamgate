@@ -474,7 +474,7 @@
       "where": "price > '500.5'",
       "lowered": {
         "sqlite": {
-          "sql": "(\"PRICE\" > ?)",
+          "sql": "(\"PRICE\" > CAST(? AS NUMERIC))",
           "params": [
             {
               "name": "p0",
@@ -485,7 +485,7 @@
           ]
         },
         "duckdb": {
-          "sql": "(\"PRICE\" > ?)",
+          "sql": "(\"PRICE\" > CAST(? AS DECIMAL(15,2)))",
           "params": [
             {
               "name": "p0",
@@ -1690,7 +1690,7 @@
       "where": "price = '422.935'",
       "lowered": {
         "sqlite": {
-          "sql": "(\"PRICE\" = ?)",
+          "sql": "(\"PRICE\" = CAST(? AS NUMERIC))",
           "params": [
             {
               "name": "p0",
@@ -1701,7 +1701,7 @@
           ]
         },
         "duckdb": {
-          "sql": "(\"PRICE\" = ?)",
+          "sql": "(\"PRICE\" = CAST(? AS DECIMAL(15,2)))",
           "params": [
             {
               "name": "p0",
@@ -1740,7 +1740,7 @@
       "where": "price = '1234567890123.5'",
       "lowered": {
         "sqlite": {
-          "sql": "(\"PRICE\" = ?)",
+          "sql": "(\"PRICE\" = CAST(? AS NUMERIC))",
           "params": [
             {
               "name": "p0",
@@ -1751,7 +1751,7 @@
           ]
         },
         "duckdb": {
-          "sql": "(\"PRICE\" = ?)",
+          "sql": "(\"PRICE\" = CAST(? AS DECIMAL(15,2)))",
           "params": [
             {
               "name": "p0",
@@ -1790,7 +1790,7 @@
       "where": "price = '9999999999999.99'",
       "lowered": {
         "sqlite": {
-          "sql": "(\"PRICE\" = ?)",
+          "sql": "(\"PRICE\" = CAST(? AS NUMERIC))",
           "params": [
             {
               "name": "p0",
@@ -1801,7 +1801,7 @@
           ]
         },
         "duckdb": {
-          "sql": "(\"PRICE\" = ?)",
+          "sql": "(\"PRICE\" = CAST(? AS DECIMAL(15,2)))",
           "params": [
             {
               "name": "p0",
