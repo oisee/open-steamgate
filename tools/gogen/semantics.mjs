@@ -14,6 +14,38 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // ultra/itab, A4H 2026-09-24 ($ZOSG_TMP_0400, ABAP Unit probes of the same
+  // classes). APPEND LINES OF [FROM] [TO]: sy-subrc untouched, sy-tabix
+  // lines(target) afterwards, c rows into a string table converted, itab
+  // TO itab doubles it (FROM 0 and TO 0 dump TABLE_INVALID_INDEX there)
+  ZCL_GOGEN_T_APPL: "all:4/6[0;1;2;3;4;5;] ft:4/3[2;3;4;] f:[4;5;] t:[1;2;] rev:0/0[] past:[] clamp:[3;4;5;] empty:4/3[3;4;5;] call:6[3;4;5;7;8;9;]<q ><ab><xyz> self:[1;2;3;4;5;1;2;3;4;5;]",
+  // SORT: without BY by the default key (the line; for a structure its c
+  // and string components, not the i), DESCENDING, STABLE BY, mixed
+  // directions; a string "a" sorts before "a "
+  // SELECT ... COUNT( * ) / MAX / MIN / SUM ... GROUP BY into a table, by
+  // position (aggregate first in the field list too) and CORRESPONDING
+  ZCL_GOGEN_T_GRPBY: {Go: "g:0/3,1=1,2=3,3=1 g0:4/0/0 cor:2,3=1,2=3 agg:3,1:A/A/1,2:C/AB/6,3:D/D/3 two:3,AB2=1,B2=1,C2=1",
+    JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
+  // arithmetic with a generic operand or target: the calculation type of
+  // the run-time types (/ 2 * 2 tells i from p: 7 / 2 * 2 is 8 in i, 7 in p;
+  // a c, string or n operand makes it p, an f f, a p target p)
+  ZCL_GOGEN_T_GENAR: "i:8,70,7.00 i8:8 p:8,1.88 c:7 s:7 n:7 f:8 ti:8,-3 tp:7.00,1.75",
+  // cl_abap_conv_in_ce=>uccp( 'hhhh' ) of a literal (zcl_stg_segw_gen's BOM)
+  ZCL_GOGEN_T_UCCP: "A/1/65279",
+  // LOOP / DELETE itab WHERE a-b = v and c IS [NOT] INITIAL (a structure
+  // component too)
+  ZCL_GOGEN_T_LOOPW: "a:11;33; b:1;4; c:3; d:4; e:1;3; del:0/3/4/3",
+  // template WIDTH / ALIGN / PAD, PAD = '=' among them (the option parser
+  // cut a quoted '=' in two)
+  ZCL_GOGEN_T_TPLPAD: "zcl_x=====CP/zcl_x/ab.../000zcl_x/zcl_x==",
+  // NS / CN (negated CS / CO); DELETE itab inside LOOP AT itab deletes the
+  // current row and the loop goes on with the next (two in a row here)
+  ZCL_GOGEN_T_NSCN: "01011-3-3 3:T1Berlin;T2Aarhus;T5Bergen;",
+  // ultra/itab critic fixes: honest refusals of what A4H was not asked
+  ZCL_GOGEN_T_DELFS: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELFS=>STALE (zcl_gogen_t_delfs.clas.abap:42): <L> used after DELETE of its row inside the LOOP: not measured at zcl_gogen_t_delfs.clas.abap:42", JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELFS=>STALE (zcl_gogen_t_delfs.clas.abap:42): <L> used after DELETE of its row inside the LOOP: not measured"},
+  ZCL_GOGEN_T_DELTO: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELTO=>RUN (zcl_gogen_t_delto.clas.abap:15): DELETE itab inside LOOP ... TO: not measured: DELETE lt. at zcl_gogen_t_delto.clas.abap:15", JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELTO=>RUN (zcl_gogen_t_delto.clas.abap:15): DELETE itab inside LOOP ... TO: not measured: DELETE lt."},
+  ZCL_GOGEN_T_GRPCOR: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_GRPCOR=>RUN (zcl_gogen_t_grpcor.clas.abap:13): SELECT aggregate without AS INTO CORRESPONDING FIELDS: not measured: SELECT val MAX( id ) FROM zgogen_t_dbw INTO CORRESPONDING FIELDS OF TABLE lt GROUP BY val. at zcl_gogen_t_grpcor.clas.abap:13", JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_GRPCOR=>RUN (zcl_gogen_t_grpcor.clas.abap:13): SELECT aggregate without AS INTO CORRESPONDING FIELDS: not measured: SELECT val MAX( id ) FROM zgogen_t_dbw INTO CORRESPONDING FIELDS OF TABLE lt GROUP BY val."},
+  ZCL_GOGEN_T_SORTK: "s:<><B><C><a><a ><b> sd:<b><a ><a><C><B><> c:<><C><a><ab><b> i:-1;2;3; st:A2z;a5y;a4y;a3y;a9a;b1x; mix:b1x;a3y;a4y;a5y;a9a;A2z; key:A2z;a9a;a3y;a4y;a5y;b1x;",
   // an IMPORTING by reference sees what CHANGING did to the same table,
   // APPEND included: it:3,99 on A4H
   ZCL_GOGEN_T_COPY: "copy a:2,1 b:3,50 struct a:1 b:60 alias it:3,99 after:3,99",

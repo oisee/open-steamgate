@@ -76,6 +76,22 @@ function cloneName(t) {
 }
 const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "refattr"]);
 /** a value moved out of a place: a table (or a structure holding one) is copied */
+/** one condition of an internal table's WHERE over the row `row`
+ * (ultra/itab: a nested component and IS [NOT] INITIAL read through fx) */
+function whereItem(w, row, ctx) {
+  const saved = ctx.lrow;
+  ctx.lrow = row;
+  try {
+    if (w.op === "initial" || w.op === "notinitial") {
+      const c = cond({c: "initial", x: w.fx}, ctx);
+      return w.op === "initial" ? c : `!(${c})`;
+    }
+    const lhs = w.fx ? expr(w.fx, ctx) : `${row}.${ident(w.name)}`;
+    return `${lhs} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr(w.value, ctx)}`;
+  } finally {
+    ctx.lrow = saved;
+  }
+}
 function copied(text, t, e) {
   return needsCopy(t) && (e === undefined || PLACES.has(e.e)) ? `${cloneName(t)}(${text})` : text;
 }
@@ -1057,11 +1073,12 @@ function stmtLines(st, ctx, d) {
       // index-based on purpose: a row APPENDed inside the loop is visited,
       // as in ABAP; a range over the slice would not see it
       const n = ctx.loop++;
+      st.token.idxVar = `i${n}`; // ultra/itab: DELETE itab of the current row
       const tb = expr(st.table, ctx);
       const start = st.from ? `int(${expr(st.from, ctx)}) - 1` : "0";
       const limit = st.to ? ` && i${n} < int(${expr(st.to, ctx)})` : "";
       const bind = st.fs ? `${ident(st.fs)} = &${tb}[i${n}]` : `${place(st.into, ctx)} = ${copied(`${tb}[i${n}]`, st.into.type)}`;
-      const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => `${tb}[i${n}].${ident(w.name)} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr(w.value, ctx)}`).join(" && ")}) { continue }` : null;
+      const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => whereItem(w, `${tb}[i${n}]`, ctx)).join(" && ")}) { continue }` : null;
       return [
         `${t}{`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
         `${t}\tfor i${n} := max(${start}, 0); i${n} < len(${tb})${limit}; i${n}++ {`,
@@ -1121,9 +1138,35 @@ function stmtLines(st, ctx, d) {
     }
     case "sort": {
       // SORT is not stable in ABAP; stable here, so equal keys keep their order
+      // (ultra/itab: a key may be the line itself; p compares as a number)
       const tb = place(st.table, ctx);
-      const cmp = st.keys.map((k) => `if x.${ident(k.name)} != y.${ident(k.name)} { return x.${ident(k.name)} ${k.desc ? ">" : "<"} y.${ident(k.name)} }`);
+      const cmp = st.keys.map((k) => {
+        const [xv, yv] = k.line ? ["x", "y"] : [`x.${ident(k.name)}`, `y.${ident(k.name)}`];
+        if (k.type.k === "p") return `if c := abap.CmpP(${xv}, ${yv}); c != 0 { return c ${k.desc ? ">" : "<"} 0 }`;
+        return `if ${xv} != ${yv} { return ${xv} ${k.desc ? ">" : "<"} ${yv} }`;
+      });
       return [`${t}sort.SliceStable(${tb}, func(a, b int) bool { x, y := ${tb}[a], ${tb}[b]; ${cmp.join("; ")}; return false })`];
+    }
+    // ultra/itab: APPEND LINES OF (frontend.mjs); lrow is the source row
+    case "append_lines": {
+      const tb = place(st.table, ctx);
+      const n = ctx.loop++;
+      const out = [`${t}{`, `${t}	src${n} := ${expr(st.src, ctx)}`, `${t}	lo${n}, hi${n} := 1, len(src${n})`];
+      const bound = (v, name, set) => [`${t}	if b := int(${expr(v, ctx)}); b <= 0 {`,
+        `${t}		panic(abap.ArithmeticError{Class: "TABLE_INVALID_INDEX", Op: "APPEND LINES OF ... ${name} " + abap.FmtI(int32(b))})`, `${t}	} else ${set}`];
+      if (st.from) out.push(...bound(st.from, "FROM", `{
+${t}		lo${n} = b
+${t}	}`));
+      if (st.to) out.push(...bound(st.to, "TO", `if b < hi${n} {
+${t}		hi${n} = b
+${t}	}`));
+      const saved = ctx.lrow;
+      ctx.lrow = `r${n}`;
+      const v = st.value.e === "lrow" ? copied(`r${n}`, st.value.type) : expr(st.value, ctx);
+      ctx.lrow = saved;
+      out.push(`${t}	for i${n} := lo${n}; i${n} <= hi${n}; i${n}++ {`, `${t}		r${n} := src${n}[i${n}-1]`, `${t}		${tb} = append(${tb}, ${v})`, `${t}	}`,
+        `${t}	s.Sy.Tabix = int32(len(${tb}))`, `${t}}`);
+      return out;
     }
     case "insert_table": {
       const tb = place(st.table, ctx);
@@ -1325,10 +1368,17 @@ function stmtLines(st, ctx, d) {
       // sy-subrc 0 when a row went, 4 when none did
       const tb = place(st.table, ctx);
       const n = ctx.loop++;
-      const keep = st.where.map((w) => `r${n}.${ident(w.name)} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr(w.value, ctx)}`).join(" && ");
+      const keep = st.where.map((w) => whereItem(w, `r${n}`, ctx)).join(" && ");
       return [`${t}{`, `${t}\tkept${n} := ${tb}[:0]`, `${t}\tfor _, r${n} := range ${tb} {`, `${t}\t\tif !(${keep}) {`,
         `${t}\t\t\tkept${n} = append(kept${n}, r${n})`, `${t}\t\t}`, `${t}\t}`,
         `${t}\ts.Sy.Subrc = 4`, `${t}\tif len(kept${n}) < len(${tb}) {`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}\t${tb} = kept${n}`, `${t}}`];
+    }
+    // ultra/itab: DELETE itab inside LOOP AT itab: the current row goes and
+    // the loop index steps back, so the next pass reads the row after it
+    case "delete_current": {
+      const tb = place(st.table, ctx);
+      const i = st.token.idxVar;
+      return [`${t}${tb} = append(${tb}[:${i}], ${tb}[${i}+1:]...)`, `${t}${i}--`, `${t}s.Sy.Subrc = 0`];
     }
     case "delete_index": {
       const n = `idx${ctx.loop++}`;
@@ -1440,6 +1490,19 @@ function expr(e, ctx) {
     }
     case "cast": return `abap.Cast[${goType(e.type)}](${expr(e.x, ctx)})`;
     // a typed slot seen as generic data: its address and its descriptor
+    case "lrow": return ctx.lrow;
+    // ultra/itab: generic arithmetic (frontend.mjs genericArith)
+    case "unwrap_calc": {
+      const d = expr(e.x, ctx);
+      return e.type.k === "i" ? `abap.DataI(${d})` : e.type.k === "int8" ? `abap.DataI8(${d})` : e.type.k === "f" ? `abap.DataF(${d})` : `abap.DataP(${d})`;
+    }
+    case "gen_arith": {
+      const sel = `abap.CalcKind(${JSON.stringify(e.statics)}, ${e.charTarget}, ${e.target ? expr(e.target, ctx) : "abap.Data{}"}${e.leaves.map((l) => `, ${expr(l, ctx)}`).join("")})`;
+      const arms = Object.entries(e.branches).map(([code, b]) => (b.reason !== undefined
+        ? `case '${code}': panic(abap.NotCompiled("arithmetic", ${JSON.stringify(b.reason)}))`
+        : `case '${code}': return ${expr(b, ctx)}`));
+      return `func() ${goType(e.type)} { switch ${sel} { ${arms.join("; ")} }; panic(abap.NotCompiled("arithmetic", ${JSON.stringify(`calculation type of ${e.text} with these operands: not measured`)})) }()`;
+    }
     case "wrap": return `abap.Data{P: ${PLACES.has(e.x.e) ? `&${place(e.x, ctx)}` : `abap.Ptr(${expr(e.x, ctx)})`}, T: ${desc(e.x.type)}}`;
     case "unwrap": return unwrapTo(e.type, expr(e.x, ctx));
     case "lines_data": return `int32(abap.Lines(${expr(e.x, ctx)}))`;

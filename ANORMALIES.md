@@ -1668,4 +1668,66 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Smallest safe workaround: none on the Node host; the refusal in `go/abap/seckey.go` UniqueKeyCheck and `js/abap.mjs` uniqueKeyCheck. Raising the exception there is the next step once `CX_SY_ITAB_DUPLICATE_KEY` is compiled into the program
 - Upstream: **needs an issue** in abaplint/transpiler (runtime unique secondary keys)
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SECKEYDUP
+### ANOMALY-2026-09-24-sort-default-key — `SORT itab` without BY leaves a table of structures unsorted in the transpiler runtime
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`build/src/statements/sort.js`, `sort` without `by`: whole rows compared with `lt`)
+- Affected ABAP statement, runtime API or adapter: `SORT itab [DESCENDING]` without BY on a STANDARD TABLE of structures WITH DEFAULT KEY
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_sortk.clas.abap` (the part after `key:`)
+- Exact command used to run it: A4H, the same class in `$ZOSG_TMP_0400` through an ABAP Unit probe (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core, `run()` called with `@abaplint/database-sqlite` (`.local/ultra-wip/itab/tp`); the Go and JS backends: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: A4H sorts by the default key, which for a row `name c(2), n i, s string` is `name` and `s` (the character-like components; the i is not part of it): `key:A2z;a9a;a3y;a4y;a5y;b1x;`. Rows of an elementary type sort by the line, strings by code point with "a" before "a " (`s:<><B><C><a><a ><b>`).
+- Actual open-abap behaviour: `key:b1x;a3y;a4y;a5y;a9a;A2z;`, the order the table already had. The elementary cases, `STABLE BY` and mixed directions are equal to A4H.
+- Impact on open-steamgate: none seen on a served path; the OSG classes that sort without BY (`ZCL_STG_SEGW_EXPORT=>TAGS`, `ZCL_STG_SEGW_GEN_DPC=>MPC_XML`) sort string tables
+- Smallest safe workaround: the Go and JS backends of `tools/gogen` sort by the default key (frontend.mjs, `SORT`; the table type carries its primary key as `skey`); components of other types than c and string in a default key are refused there until measured
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `sort`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SORTK
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-select-aggregate-position — `SELECT COUNT( * ) col ... INTO TABLE` by position writes 0 for the aggregate in the transpiler runtime
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`build/src/statements/select.js`, the result columns moved into the target)
+- Affected ABAP statement, runtime API or adapter: `SELECT COUNT( * ) id val FROM dbtab INTO TABLE itab ... GROUP BY id val` (an aggregate without AS, first in the field list, the target filled by position)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_grpby.clas.abap` (the part after `two:`)
+- Exact command used to run it: as ANOMALY-2026-09-24-sort-default-key (ZCL_GOGEN_T_GRPBY, with the table ZGOGEN_T_DBW in `$ZOSG_TMP_0400`)
+- Expected SAP behaviour: `two:3,AB2=1,B2=1,C2=1`, each group counted into the first component
+- Actual open-abap behaviour: `two:3,AB2=0,B2=0,C2=0`. The rest of the class (GROUP BY with `COUNT( * ) AS cnt`, INTO CORRESPONDING FIELDS, MAX / MIN / SUM, no rows: sy-subrc 4, sy-dbcnt 0) is equal to A4H.
+- Impact on open-steamgate: none on a served path (`ZCL_STG_TRAVEL_CALC` names its count `AS booked`)
+- Smallest safe workaround: the Go backend lowers the aggregate through the relational IR and projects the result back into the order of the field list (frontend.mjs, `groupedColumns`)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `select`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_GRPBY
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-generic-arith — arithmetic with a generic operand is not computed in the calculation type of its run-time types in the transpiler runtime
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`build/src/operators/*`, `_parse.js`)
+- Affected ABAP statement, runtime API or adapter: `lv_i = <any> / 2 * 2`, `<any_target> = lv_i / 2 * 2` and the like: a field symbol TYPE any as operand or as target
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_genar.clas.abap`
+- Exact command used to run it: as ANOMALY-2026-09-24-sort-default-key (ZCL_GOGEN_T_GENAR); each arithmetic statement of the transpiled class wrapped so that a JavaScript exception prints `!JS` and the run goes on
+- Expected SAP behaviour: `i:8,70,7.00 i8:8 p:8,1.88 c:7 s:7 n:7 f:8 ti:8,-3 tp:7.00,1.75`: the calculation type the static rule gives for the types the operands and the target have at run time (an i: `/` rounds in between, so 7 / 2 * 2 is 8; a c, string, n or p operand, or a p target: p, 7; an f: f, 7.5 rounded into the i: 8)
+- Actual open-abap behaviour: `i:7,70,7.00!JS i8:70 p:8,1.88 c:7 s:7 n:7 f:7 ti:7,-3 tp:7.00,1.75`: an i operand and an i target compute without rounding in between (7 instead of 8), an f likewise, and an int8 operand throws `TypeError: val.get is not a function`
+- Impact on open-steamgate: `ZCL_STG_TRAVEL_CALC` (the virtual elements of `ZC_STG_TRAVEL`) computes `<lv_seats> * 100 / gc_capacity` and `<lv_seats> - ls_booked-booked`, where the difference does not show for the seed rows (Node and the Go backend answer Zc_Stg_TravelSet byte for byte alike); a `/` whose quotient is not whole, inside such an expression, would compute another value on Node than on a system
+- Smallest safe workaround: the Go and JS backends of `tools/gogen` compile one branch per calculation type and choose it at run time (frontend.mjs `genericArith`, go/abap/genarith.go `CalcKind`). Deliberately refused, as NOT_COMPILED when reached, because not measured: a c or string target of an all-integer expression (the static rule would make it p), and any operand or target of a kind other than i, int8, f, p, c, string or n, with or without an f beside it
+- Upstream: **needs an issue** in abaplint/transpiler (runtime operators)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_GENAR
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-uccpi-255 — open-abap-core's `CL_ABAP_CONV_OUT_CE=>UCCPI` weighs the high byte by 255
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core at 4eec777 (`src/conv/cl_abap_conv_out_ce.clas.abap`, `uccpi`: `ret = ret + lv_hex+1(1) * 255`)
+- Affected ABAP statement, runtime API or adapter: `cl_abap_conv_out_ce=>uccpi( c )` for a character above U+00FF
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_uccp.clas.abap`
+- Exact command used to run it: as ANOMALY-2026-09-24-sort-default-key (ZCL_GOGEN_T_UCCP, measured in `$ZOSG_TMP_0400`)
+- Expected SAP behaviour: `A/1/65279` (the code point of U+FEFF). The same probe with `uccp( '00e4' )` gave 0 on A4H: lower-case hex is no hex digit to the c -> x move inside `uccp`, which open-abap-core's `uccp` also does, so that is not part of this entry
+- Actual open-abap behaviour: `A/1/65025` (0xFE * 255 + 0xFF)
+- Impact on open-steamgate: none seen; OSG calls `uccp( 'FEFF' )` (the BOM of `ZCL_STG_SEGW_GEN`) and not `uccpi` above U+00FF
+- Smallest safe workaround: the Go and JS backends compute `uccpi` natively (`abap.Uccp`)
+- Upstream: **needs a PR** in open-abap-core (`* 256`), through the fork, as open-abap-core takes PRs
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_UCCP
 - Upstream version containing a fix: none yet

@@ -1176,3 +1176,94 @@ export function keyRead(tb, c, unique) {
 export function uniqueKeyCheck(tb, dup, key) {
   if (tb.some(dup)) notCompiled(`APPEND: a row repeating the value of the unique secondary key ${key}: A4H raises the catchable CX_SY_ITAB_DUPLICATE_KEY (2026-09-24), which this runtime does not`);
 }
+
+// int8 (ultra/itab): BigInt values, overflow checked as go/abap conv.go
+const MAX8 = 9223372036854775807n;
+const MIN8 = -9223372036854775808n;
+const check8 = (v, op) => {
+  if (v > MAX8 || v < MIN8) throw new AbapError("CX_SY_ARITHMETIC_OVERFLOW", op);
+  return v;
+};
+const abs8 = (v) => (v < 0n ? -v : v);
+export const AddI8 = (a, b) => check8(a + b, "+");
+export const SubI8 = (a, b) => check8(a - b, "-");
+export const MulI8 = (a, b) => check8(a * b, "*");
+export const NegI8 = (a) => check8(-a, "-");
+export function DivI8(a, b) {
+  if (b === 0n) {
+    if (a === 0n) return 0n;
+    throw new AbapError("CX_SY_ZERODIVIDE", "/");
+  }
+  let q = a / b;
+  const r = a % b;
+  if (r !== 0n && 2n * abs8(r) >= abs8(b)) q += (a < 0n) !== (b < 0n) ? -1n : 1n;
+  return check8(q, "/");
+}
+export function DivIntI8(a, b) {
+  if (b === 0n) {
+    if (a === 0n) return 0n;
+    throw new AbapError("CX_SY_ZERODIVIDE", "DIV");
+  }
+  let q = a / b;
+  if (a % b < 0n) q += b > 0n ? -1n : 1n;
+  return check8(q, "DIV");
+}
+export function ModI8(a, b) {
+  if (b === 0n) {
+    if (a === 0n) return 0n;
+    throw new AbapError("CX_SY_ZERODIVIDE", "MOD");
+  }
+  let r = a % b;
+  if (r < 0n) r += abs8(b);
+  return r;
+}
+export function I8ToI(v) {
+  if (v > 2147483647n || v < -2147483648n) throw new AbapError("CX_SY_ARITHMETIC_OVERFLOW", "int8->i");
+  return Number(v);
+}
+export function F2I8(f) {
+  const r = Math.sign(f) * Math.round(Math.abs(f));
+  if (Number.isNaN(r) || r >= 9.223372036854775807e18 || r < -9.223372036854775808e18) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "f->int8");
+  return BigInt(r);
+}
+
+// generic arithmetic (ultra/itab): as go/abap genarith.go
+export function CalcKind(statics, charTarget, target, leaves) {
+  const ks = statics.split("");
+  for (const d of leaves) {
+    if (d === null) throw notAssigned("arithmetic");
+    ks.push(d.t.kind);
+  }
+  if (target !== null) {
+    const k = target.t.kind;
+    if ("I8FP".includes(k)) ks.push(k);
+    else if (k === "C" || k === "g") charTarget = true;
+    else if (k === "X") ks.push("I");
+    else return "";
+  }
+  const has = (set) => ks.some((k) => set.includes(k));
+  // a kind outside I 8 F P C g N is refused with or without an f operand,
+  // so the refusal is uniform (critic fix); a character target of an
+  // integer result is refused below until measured
+  if (ks.some((k) => !"I8FPCgN".includes(k))) return "";
+  if (has("F")) return "F";
+  if (has("PCgN")) return "P";
+  if (charTarget) return "";
+  if (has("8")) return "8";
+  return "I";
+}
+export function DataI8(d) {
+  if (d.t.kind === "I") return BigInt(d.get());
+  if (d.t.kind === "8") return d.get();
+  throw new AbapError("NOT_COMPILED", `move: a generic value of type kind ${d.t.kind} into an int8`);
+}
+export function DataF(d) {
+  const v = d.get();
+  switch (d.t.kind) {
+    case "I": case "F": return v;
+    case "8": return Number(v);
+    case "P": return PToF(v);
+    case "C": case "g": case "N": return ParseF(v);
+    default: throw new AbapError("NOT_COMPILED", `move: a generic value of type kind ${d.t.kind} into an f`);
+  }
+}

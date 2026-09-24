@@ -660,7 +660,13 @@ function typeOf(t, where, program) {
     const secondary = (t.getOptions().secondary ?? []).map((k) => ({name: upper(k.name), sorted: String(k.type).toUpperCase() === "SORTED",
       hashed: String(k.type).toUpperCase() === "HASHED", unique: k.isUnique === true, comps: k.keyFields.map(upper)}));
     if (secondary.length && access !== "STANDARD") throw new Unsupported(`${where}: secondary keys on a ${access} table`);
-    if (access === "STANDARD") return secondary.length ? {k: "table", row, secondary} : {k: "table", row};
+    // ultra/itab: the primary key, for SORT without BY: "default", the
+    // component names of a user key, or [] for an empty one
+    if (access === "STANDARD") {
+      const o = t.getOptions();
+      const skey = o.keyType === "DEFAULT" ? "default" : o.keyType === "EMPTY" ? [] : (o.primaryKey?.keyFields ?? []).map(upper);
+      return secondary.length ? {k: "table", row, skey, secondary} : {k: "table", row, skey};
+    }
     // a HASHED table loops in insertion order, so it is a slice whose
     // INSERT keeps the key unique; SORTED is not here yet
     if (access === "HASHED") {
@@ -1341,7 +1347,18 @@ function structure(node, ctx) {
     const cc = st.findDirectExpression(Expressions.ComponentCond);
     const where = cc ? whereOf(cc, table.type.row, ctx, text) : null;
     const key = using === null ? null : secondaryKey(table.type, using[1], ctx, text);
-    return {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, ...(key ? {key} : {}), body: bodyOf(node, ctx)};
+    // ultra/itab: the loop is known to its body, for DELETE itab (the
+    // current row) inside it
+    // (a shared token object, not the loop itself, so the IR stays a tree)
+    const loop = {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, ...(key ? {key} : {}), token: {}};
+    (ctx.loopStack ??= []).push(loop);
+    // critic fix: inside the body the loop's field symbol is freshly
+    // assigned on every pass until a DELETE of the current row makes it
+    // stale (fsCheck below)
+    const fresh = fs ? {name: fs, stale: false} : null;
+    if (fresh) (ctx.fsFresh ??= []).push(fresh);
+    try { loop.body = bodyOf(node, ctx); } finally { ctx.loopStack.pop(); if (fresh) ctx.fsFresh.pop(); }
+    return loop;
   }
   throw new Unsupported(`structure ${node.get().constructor.name}`);
 }
@@ -1400,16 +1417,35 @@ function whereOf(cc, rowType, ctx, text) {
   const where = [];
   for (const k of cc.getChildren()) {
     if (isTok(k, "AND")) continue;
-    if (!isExpr(k, Expressions.ComponentCompare) || k.getChildren().length !== 3) throw new Unsupported(`WHERE form: ${cc.concatTokens()}`);
-    const [comp, opN, src] = k.getChildren();
-    const f = fieldOf(ctx, rowType, comp.concatTokens(), text);
+    // ultra/itab: a component of a component (param-shape) is read through
+    // the row (fx, over the row placeholder lrow); c IS [NOT] INITIAL
+    const kids = isExpr(k, Expressions.ComponentCompare) ? k.getChildren() : [];
+    const words = kids.slice(1).map((x) => (x instanceof Nodes.TokenNode ? upper(x.concatTokens()) : null));
+    const initial = kids.length >= 3 && words[0] === "IS" && words[words.length - 1] === "INITIAL" && (kids.length === 3 || (kids.length === 4 && words[1] === "NOT"));
+    if (!initial && (!isExpr(k, Expressions.ComponentCompare) || kids.length !== 3)) throw new Unsupported(`WHERE form: ${cc.concatTokens()}`);
+    const path = kids[0].concatTokens().split("-");
+    let fx = null;
+    if (path.length > 1 || initial) {
+      fx = {e: "lrow", type: rowType};
+      for (const part of path) {
+        if (fx.type.k !== "struct") throw new Unsupported(`WHERE component ${kids[0].concatTokens()}`);
+        const pf = fieldOf(ctx, fx.type, part, text);
+        fx = {e: "field", base: fx, name: pf.name, type: pf.type};
+      }
+    }
+    if (initial) {
+      where.push({fx, op: kids.length === 4 ? "notinitial" : "initial"});
+      continue;
+    }
+    const [comp, opN, src] = kids;
+    const f = fx !== null ? {name: fx.name, type: fx.type} : fieldOf(ctx, rowType, comp.concatTokens(), text);
     const opT = upper(opN.concatTokens());
     const op = OPS[opT] ?? opT;
     if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE operator ${op}`);
     const v = source(src, ctx, f.type);
     const calc = numeric(f.type) || numeric(v.type) ? (f.type.k === "f" || v.type.k === "f" ? F : I) : S;
     if (calc !== S && (charlike(f.type) || charlike(v.type))) throw new Unsupported("WHERE comparing characters with a number");
-    where.push({name: f.name, ftype: f.type, op, value: convert(v, calc), calc});
+    where.push({name: f.name, ftype: f.type, op, value: convert(v, calc), calc, ...(fx !== null ? {fx} : {})});
   }
   return where;
 }
@@ -1508,9 +1544,38 @@ function statement(node, ctx) {
     // a ?= b: a down-cast, checked at run time
     if (node.getChildren().some((c) => isTok(c, "?="))) return {s: "assign", target, value: downCast(source(src, ctx), target.type, node.concatTokens())};
     // a generic target is a binding: the value is written into its slot
-    if (target.type.k === "data") return {s: "set_data", target, value: convert(source(src, ctx, target.type), target.type)};
+    // (ultra/itab: genericArith reads the target's kind through ctx.genTarget)
+    if (target.type.k === "data") {
+      ctx.genTarget = target;
+      try { return {s: "set_data", target, value: convert(source(src, ctx, target.type), target.type)}; } finally { ctx.genTarget = undefined; }
+    }
     // the calculation type of an assignment includes the TARGET
     return {s: "assign", target, value: convert(source(src, ctx, target.type), target.type)};
+  }
+  // ultra/itab: APPEND LINES OF src [FROM i] [TO j] TO itab (A4H 2026-09-24,
+  // ZCL_GOGEN_T_APPL): the rows i..j of src in order, j clamped to lines(src),
+  // nothing when i > j or i past the end; FROM or TO below 1 is the
+  // uncatchable TABLE_INVALID_INDEX; sy-subrc untouched, sy-tabix
+  // lines(itab) afterwards, whatever was appended; each row converted as a
+  // move (c into string); src evaluated once, so itab TO itab doubles it
+  if (isStmt(node, Statements.Append) && /^APPEND\s+LINES\s+OF\b/i.test(text)) {
+    if (/\b(ASSIGNING|REFERENCE|SORTED BY)\b/i.test(text)) throw new Unsupported(`APPEND form: ${text}`);
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table" || table.type.hashed) throw new Unsupported(`APPEND LINES OF into a ${table.type.hashed ? "hashed table" : table.type.k}`);
+    const kids = node.getChildren();
+    const srcNode = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+    const src = source(srcNode, ctx);
+    if (src.type.k !== "table") throw new Unsupported(`APPEND LINES OF a ${src.type.k}`);
+    let from = null;
+    let to = null;
+    for (let i = 0; i + 1 < kids.length; i += 1) {
+      const next = kids[i + 1];
+      if (!isExpr(next, Expressions.Source) || next === srcNode) continue;
+      if (isTok(kids[i], "FROM")) from = convert(source(next, ctx, I), I);
+      else if (isTok(kids[i], "TO")) to = convert(source(next, ctx, I), I);
+    }
+    const value = convert({e: "lrow", type: src.type.row}, table.type.row);
+    return {s: "append_lines", table, src, from, to, value};
   }
   if (isStmt(node, Statements.Append)) {
     if (/\b(LINES OF|INITIAL LINE|ASSIGNING|REFERENCE|SORTED BY)\b/i.test(text)) throw new Unsupported(`APPEND form: ${text}`);
@@ -1605,18 +1670,60 @@ function statement(node, ctx) {
     const into = lvalue(node.findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target), ctx);
     return {s: "read_index", table, index, into};
   }
+  // ultra/itab: SORT itab [ASCENDING|DESCENDING] [STABLE] [BY c [ASC|DESC] ...]
+  // (A4H 2026-09-24, ZCL_GOGEN_T_SORTK). The emitters sort stably, which is
+  // what STABLE asks and what A4H showed for equal keys without it. Without
+  // BY: the primary key, for a table WITH DEFAULT KEY the line itself when it
+  // is elementary, else its c and string components (the ones measured; i is
+  // left out); the direction after SORT itab is that of every component that
+  // names none. AS TEXT (locale collation) is not measured: refused.
   if (isStmt(node, Statements.Sort)) {
-    const m = /^SORT\s+(\S+)\s+BY\s+(.*?)\s*\.?$/i.exec(text);
-    if (m === null || /\b(STABLE|AS TEXT)\b/i.test(text)) throw new Unsupported(`SORT form: ${text}`);
+    const m = /^SORT\s+(\S+)((?:\s+(?:ASCENDING|DESCENDING|STABLE))*)(?:\s+BY\s+(.*?))?\s*\.?$/i.exec(text);
+    if (m === null || /\bAS\s+TEXT\b/i.test(text)) throw new Unsupported(`SORT form: ${text}`);
     const table = lvalue(node.findDirectExpression(Expressions.Target) ?? node.findFirstExpression(Expressions.Target), ctx);
-    if (table.type.k !== "table" || table.type.row.k !== "struct") throw new Unsupported("SORT of a table that is not of structures");
+    if (table.type.k !== "table" || table.type.hashed) throw new Unsupported(`SORT of a ${table.type.hashed ? "hashed table" : table.type.k}`);
+    const allDesc = /\bDESCENDING\b/i.test(m[2]);
+    const row = table.type.row;
+    const sortable = (t) => ["i", "int8", "f", "p", "c", "string", "n", "d", "t", "x", "xstring"].includes(t.k);
     const keys = [];
-    const words = m[2].trim().split(/\s+/);
-    for (let i = 0; i < words.length; i += 1) {
-      const f = fieldOf(ctx, table.type.row, words[i], text);
-      let desc = false;
-      if (/^(ASCENDING|DESCENDING)$/i.test(words[i + 1] ?? "")) { desc = /^DESCENDING$/i.test(words[i + 1]); i += 1; }
-      keys.push({name: f.name, type: f.type, desc});
+    if (m[3] === undefined) {
+      if (row.k !== "struct") {
+        if (table.type.skey !== "default" && !(Array.isArray(table.type.skey) && table.type.skey.length === 1 && table.type.skey[0] === "TABLE_LINE")) throw new Unsupported(`SORT without BY of a table whose key is not known here: ${text}`);
+        if (!sortable(row)) throw new Unsupported(`SORT of a table of ${row.k}`);
+        keys.push({line: true, type: row, desc: allDesc});
+      } else if (table.type.skey === "default") {
+        for (const f of PROGRAM.structs.get(row.go).fields) {
+          if (f.type.k === "c" || f.type.k === "string") keys.push({name: f.name, type: f.type, desc: allDesc});
+          else if (!["i", "int8", "f", "p"].includes(f.type.k)) throw new Unsupported(`SORT by the default key of a structure with a ${f.type.k} component: not measured`);
+        }
+      } else if (Array.isArray(table.type.skey) && table.type.skey.length > 0) {
+        for (const k of table.type.skey) {
+          const f = fieldOf(ctx, row, k, text);
+          if (!sortable(f.type)) throw new Unsupported(`SORT by a ${f.type.k} component`);
+          keys.push({name: f.name, type: f.type, desc: allDesc});
+        }
+      } else {
+        throw new Unsupported(`SORT without BY of a table whose key is not known here: ${text}`);
+      }
+    } else {
+      if (/[()]/.test(m[3])) throw new Unsupported(`SORT form: ${text}`);
+      const words = m[3].trim().split(/\s+/);
+      for (let i = 0; i < words.length; i += 1) {
+        let key;
+        if (upper(words[i]) === "TABLE_LINE") {
+          if (row.k === "struct" || !sortable(row)) throw new Unsupported(`SORT BY table_line of a table of ${row.k}`);
+          key = {line: true, type: row};
+        } else {
+          if (row.k !== "struct") throw new Unsupported("SORT BY a component of a table that is not of structures");
+          if (words[i].includes("-")) throw new Unsupported(`SORT BY a nested component: ${text}`);
+          const f = fieldOf(ctx, row, words[i], text);
+          if (!sortable(f.type)) throw new Unsupported(`SORT by a ${f.type.k} component`);
+          key = {name: f.name, type: f.type};
+        }
+        let desc = allDesc;
+        if (/^(ASCENDING|DESCENDING)$/i.test(words[i + 1] ?? "")) { desc = /^DESCENDING$/i.test(words[i + 1]); i += 1; }
+        keys.push({...key, desc});
+      }
     }
     keyGuard(table.type, "SORT");
     return {s: "sort", table, keys};
@@ -1628,6 +1735,27 @@ function statement(node, ctx) {
     if (!cc) throw new Unsupported(`DELETE form: ${text}`);
     keyGuard(table.type, "DELETE");
     return {s: "delete_where", table, where: whereOf(cc, table.type.row, ctx, text)};
+  }
+  // ultra/itab: DELETE itab, the short form inside LOOP AT itab: the
+  // current row goes and the loop goes on with the row after it (A4H
+  // ZCL_GOGEN_T_NSCN); only in the innermost loop, over that same table
+  if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+[^\s.]+\s*\.?$/i.test(text)) {
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const loop = ctx.loopStack?.[ctx.loopStack.length - 1];
+    const same = (a, b) => JSON.stringify(a, (k, v) => (k === "type" ? undefined : v)) === JSON.stringify(b, (k, v) => (k === "type" ? undefined : v));
+    if (!loop || table.type.k !== "table" || !same(loop.table, table)) throw new Unsupported(`DELETE itab outside a LOOP over it: ${text}`);
+    // critic fix: LOOP ... TO n with a deletion was not measured (the TO
+    // bound would stay absolute while the index steps back)
+    if (loop.to !== null) throw new Unsupported(`DELETE itab inside LOOP ... TO: not measured: ${text}`);
+    // critic fix: what <fs> of LOOP ... ASSIGNING <fs> is after its row went
+    // was not measured (Go would see the next row, JS the deleted one), so
+    // any later use of it in the method is refused (fsCheck)
+    if (loop.fs) {
+      const fresh = ctx.fsFresh?.findLast((f) => f.name === loop.fs);
+      if (fresh) fresh.stale = true;
+      (ctx.fsGone ??= new Set()).add(loop.fs);
+    }
+    return {s: "delete_current", table, token: loop.token};
   }
   if (isStmt(node, Statements.DeleteInternal)) {
     if (!/^DELETE\s+\S+\s+INDEX\s+/i.test(text)) throw new Unsupported(`DELETE form: ${text}`);
@@ -2008,11 +2136,25 @@ function initialValue(node, ctx) {
  * pointers in Go), an attribute of the instance, a static attribute or a
  * constant. The IR says which; the backend spells it.
  */
+/**
+ * ultra/itab (critic fix): a field symbol whose row a DELETE itab (the
+ * current row) removed is not used again, since what it then points to was
+ * not measured. Textual order over-approximates control flow on purpose:
+ * inside a later LOOP ... ASSIGNING of the same name it is fresh again, and
+ * everywhere else after the DELETE (the rest of that body, after the loop)
+ * it is refused.
+ */
+function fsCheck(n, ctx) {
+  if (!ctx.fsGone?.has(n)) return;
+  const fresh = ctx.fsFresh?.findLast((f) => f.name === n);
+  if (!fresh || fresh.stale) throw new Unsupported(`${n} used after DELETE of its row inside the LOOP: not measured`);
+}
+
 function variable(name, ctx) {
   const n = upper(name);
   // me as a value: the object itself (in Go its most-derived self)
   if (n === "ME") return {e: "me", type: {k: "ref", name: ctx.className}};
-  if (ctx.fieldSymbols?.has(n)) return {e: "fs", name: n, type: ctx.fieldSymbols.get(n)};
+  if (ctx.fieldSymbols?.has(n)) { fsCheck(n, ctx); return {e: "fs", name: n, type: ctx.fieldSymbols.get(n)}; }
   const p = ctx.sig.params.find((x) => x.name === n);
   // ref: a pointer in Go; box: an EXPORTING / CHANGING box in JS (an
   // IMPORTING table or structure is a pointer in Go and the object itself in JS)
@@ -2347,6 +2489,9 @@ function source(node, ctx, outer, hint = outer) {
     }
     return arith(node, ctx, leaves[0]);
   }
+  // ultra/itab: a generic operand or a generic target decides the
+  // calculation type at run time (genericArith)
+  if (outer?.k === "data" || leafTypes(node, ctx).some((t) => t.k === "data")) return genericArith(node, ctx, outer);
   // an x target computes as i and the i result is converted into it
   // (measured on A4H 2026-09-23 for i MOD 256 into x LENGTH 1: 255 and -1
   // both give FF, 300 gives 2C)
@@ -2378,6 +2523,74 @@ function source(node, ctx, outer, hint = outer) {
   if (types.some((t) => t.k === "d") && outer?.k !== "d" && types.every((t) => t.k === "i" || t.k === "d")) return arith(node, ctx, I);
   if (types.every((t) => t.k === "i")) return arith(node, ctx, I);
   throw new Unsupported(`calculation type of ${node.concatTokens()}`);
+}
+
+/*
+ * ultra/itab: arithmetic with a generic operand (TYPE any) or into a generic
+ * target. A4H 2026-09-24 (ZCL_GOGEN_T_GENAR, $ZOSG_TMP_0400): the
+ * calculation type is the one the static rule above gives for the types the
+ * field symbols have at run time, as if they had been declared with them
+ * ("<a> / 2 * 2" into i is 8 for an i, 7 for a c, a string, an n and a p
+ * 7.50, 8 for an f; a p target makes it p). So every calculation type that
+ * can come out is compiled here as ordinary typed arithmetic, a generic
+ * operand read into that type (unwrap_calc), and abap.CalcKind picks the
+ * branch at run time from the static kinds, the operands' descriptors and
+ * the target's. A branch that does not compile, and a combination the static
+ * rule refuses (a character target of an i result, a d or x operand), is
+ * NOT_COMPILED when it is reached, not before. A generic operand is read
+ * twice (kind, then value), so only a place is taken.
+ */
+let GEN_CALC = false;
+const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N", d: "D", t: "T", x: "X", xstring: "y"};
+function genericArith(node, ctx, outer) {
+  const text = node.concatTokens();
+  if (outer === undefined) throw new Unsupported(`arithmetic with a generic operand outside an assignment: ${text}`);
+  if (hasBitOp(node)) throw new Unsupported(`bit operation with a generic operand: ${text}`);
+  const statics = [];
+  for (const t of leafTypes(node, ctx)) {
+    if (t.k === "data") continue;
+    if (CALC_CODE[t.k] === undefined) throw new Unsupported(`calculation type with a ${t.k} operand: ${text}`);
+    statics.push(CALC_CODE[t.k]);
+  }
+  // ** computes in f (the static rule)
+  if (hasPow(node)) statics.push("F");
+  let charTarget = false;
+  if (outer.k !== "data") {
+    if (charlike(outer)) charTarget = true;
+    else if (outer.k === "x") statics.push("I");
+    else if (["i", "int8", "f", "p"].includes(outer.k)) statics.push(CALC_CODE[outer.k]);
+    else throw new Unsupported(`calculation type of ${text} into a ${outer.k}`);
+  }
+  const target = outer.k === "data" ? ctx.genTarget : null;
+  if (outer.k === "data" && !target) throw new Unsupported(`generic arithmetic into a generic value that is not a target: ${text}`);
+  const branches = {};
+  let leaves = null;
+  for (const [code, calc] of [["I", I], ["8", INT8], ["P", P31], ["F", F]]) {
+    GEN_CALC = true;
+    try {
+      const v = arith(node, ctx, calc);
+      if (leaves === null) {
+        leaves = [];
+        const walk = (n) => {
+          if (Array.isArray(n)) { n.forEach(walk); return; }
+          if (!n || typeof n !== "object") return;
+          if (n.e === "unwrap_calc") { leaves.push(n.x); return; }
+          for (const [k, x] of Object.entries(n)) if (k !== "type") walk(x);
+        };
+        walk(v);
+      }
+      branches[code] = outer.k === "data" ? {e: "wrap", x: v, type: {k: "data"}} : convert(v, outer);
+    } catch (e) {
+      if (!(e instanceof Unsupported)) throw e;
+      branches[code] = {reason: `calculation type ${calc.k} of ${text}: ${e.message}`};
+    } finally {
+      GEN_CALC = false;
+    }
+  }
+  if (leaves === null) throw new Unsupported(`calculation type of ${text}: ${branches.I.reason}`);
+  const PLACE = new Set(["var", "attr", "static", "field", "fs", "row", "refattr"]);
+  for (const l of leaves) if (!PLACE.has(l.e)) throw new Unsupported(`a generic operand that is not a field in ${text}`);
+  return {e: "gen_arith", statics: statics.join(""), charTarget, target, leaves, branches, text, type: outer.k === "data" ? {k: "data"} : outer};
 }
 
 /** a ComponentChain (a-b-c) read off a structured value */
@@ -2983,6 +3196,63 @@ function selectColumns(sel, tb, text) {
   return names.map((n) => ({name: n, type: tb.colType(n)}));
 }
 
+/*
+ * ultra/itab: SELECT c ... COUNT( * ) [AS a] MAX( c ) AS a ... GROUP BY c ...
+ * (A4H 2026-09-24, ZCL_GOGEN_T_GRPBY): plain columns, each one of the GROUP
+ * BY list, and COUNT( * ), MAX / MIN of a column (its own type) and SUM of
+ * an i column; the result named by AS (the CORRESPONDING name). An
+ * aggregate without GROUP BY reads NULL over no rows, which a scan into a
+ * field does not take: refused, as are AVG, COUNT( col ), DISTINCT inside
+ * and SUM of other types (not measured).
+ */
+function groupedColumns(sel, tb, text) {
+  const gb = sel.findDirectExpression(Expressions.SQLGroupBy);
+  if (!gb) throw new Unsupported(`SELECT with an aggregate and no GROUP BY: ${text}`);
+  // the first column is an SQLField, the ones after it bare SQLFieldNames
+  const gcols = gb.getChildren().filter((c) => !isTok(c, "GROUP") && !isTok(c, "BY") && !isTok(c, ","));
+  const groupBy = gcols.map((f) => {
+    const n = isExpr(f, Expressions.SQLFieldName) ? f : f.findDirectExpression(Expressions.SQLFieldName);
+    if (!n || (!isExpr(f, Expressions.SQLFieldName) && f.getChildren().length !== 1)) throw new Unsupported(`GROUP BY ${f.concatTokens()}`);
+    const name = upper(n.concatTokens());
+    tb.colType(name);
+    return name;
+  });
+  if (groupBy.length === 0) throw new Unsupported(`GROUP BY form: ${text}`);
+  const fl = sel.findDirectExpression(Expressions.SQLFieldList);
+  const cols = [];
+  for (const f of fl?.findDirectExpressions(Expressions.SQLField) ?? []) {
+    const agg = f.findDirectExpression(Expressions.SQLAggregation);
+    const as = f.findDirectExpression(Expressions.SQLAsName);
+    if (!agg) {
+      const n = f.findDirectExpression(Expressions.SQLFieldName);
+      if (!n || f.getChildren().length !== 1) throw new Unsupported(`SELECT field ${f.concatTokens()}`);
+      const name = upper(n.concatTokens());
+      if (!groupBy.includes(name)) throw new Unsupported(`SELECT field ${name} is not in GROUP BY: ${text}`);
+      cols.push({name, type: tb.colType(name)});
+      continue;
+    }
+    const fn = upper(agg.getFirstToken().getStr());
+    const name = as ? upper(as.concatTokens()) : null;
+    if (/\bDISTINCT\b/i.test(agg.concatTokens())) throw new Unsupported(`aggregate ${agg.concatTokens()}`);
+    if (fn === "COUNT" && /^COUNT\s*\(\s*\*\s*\)$/i.test(agg.concatTokens())) {
+      cols.push({name: name ?? "COUNT_STAR", type: I, agg: {star: true}, named: !!name});
+      continue;
+    }
+    const n = agg.findFirstExpression(Expressions.SQLFieldName);
+    if (!n || !["MAX", "MIN", "SUM"].includes(fn)) throw new Unsupported(`aggregate ${agg.concatTokens()}`);
+    const col = upper(n.concatTokens());
+    const ct = tb.colType(col);
+    if (fn === "SUM" && ct.k !== "i") throw new Unsupported(`SUM of a ${ct.k} column: not measured`);
+    if (fn !== "SUM" && !["c", "i", "n", "d", "t", "string"].includes(ct.k)) throw new Unsupported(`${fn} of a ${ct.k} column`);
+    cols.push({name: name ?? `${fn}_${col}`, type: ct, agg: {fn, col}, named: !!name});
+  }
+  if (cols.length === 0) throw new Unsupported(`SELECT field list: ${text}`);
+  if (new Set(cols.map((c) => c.name)).size !== cols.length) throw new Unsupported(`SELECT: two results of one name: ${text}`);
+  cols.grouped = true;
+  cols.groupBy = groupBy;
+  return cols;
+}
+
 function selectTable(sel, ctx, text) {
   const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
   if (from.length !== 1) throw new Unsupported(`SELECT FROM form: ${text}`);
@@ -3064,12 +3334,19 @@ function selectStatement(node, ctx, text) {
   if (sel && isDynamicSelect(sel)) return dynamicSelect(sel, ctx, text);
   if (sel && /^SELECT\s+SINGLE\b/i.test(text)) return selectSingle(sel, ctx, text);
   if (sel && /^SELECT\s+COUNT\s*\(\s*\*\s*\)\s+FROM\b/i.test(text)) return selectCount(sel, ctx, text);
-  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
+  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
   const tb = selectTable(sel, ctx, text);
-  const cols = selectColumns(sel, tb, text);
+  // ultra/itab: aggregates and GROUP BY (groupedColumns below)
+  const grouped = sel.findDirectExpression(Expressions.SQLGroupBy) !== undefined && sel.findDirectExpression(Expressions.SQLGroupBy) !== null;
+  const cols = grouped || sel.findFirstExpression(Expressions.SQLAggregation) ? groupedColumns(sel, tb, text) : selectColumns(sel, tb, text);
   const into = sel.findDirectExpression(Expressions.SQLIntoTable);
   if (!into) throw new Unsupported(`SELECT INTO form (only INTO [CORRESPONDING FIELDS OF] TABLE): ${text}`);
   const corresponding = /\bCORRESPONDING\s+FIELDS\b/i.test(into.concatTokens());
+  // ultra/itab (critic fix): an aggregate without AS has no name of its
+  // own (COUNT_STAR / MAX_ID are ours), so INTO CORRESPONDING FIELDS would
+  // drop it silently; what ABAP does there is not measured. By position it
+  // was measured (ZCL_GOGEN_T_GRPBY) and stays.
+  if (corresponding && cols.some((c) => c.agg && !c.named)) throw new Unsupported(`SELECT aggregate without AS INTO CORRESPONDING FIELDS: not measured: ${text}`);
   const target = lvalue(into.findFirstExpression(Expressions.Target), ctx);
   if (target.type.k !== "table") throw new Unsupported(`SELECT INTO TABLE of a ${target.type.k}`);
   const elementary = target.type.row.k !== "struct";
@@ -3092,7 +3369,16 @@ function selectStatement(node, ctx, text) {
   const order = orderByOf(sel, tb);
   let rel = RIR.scan(lowName(tb.name));
   if (pred !== null) rel = RIR.filter(rel, pred);
-  rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
+  if (cols.grouped) {
+    // GROUP BY keys and aggregates, then a projection back into the order of
+    // the field list: the rows are scanned by position
+    const aggs = cols.filter((c) => c.agg).map((c) => ({as: lowName(c.name), expr: c.agg.star
+      ? {...RIR.call("COUNT", [], RIR.T.int), star: true} : RIR.call(c.agg.fn, [RIR.col(lowName(c.agg.col), sqlIrType(c.type))], sqlIrType(c.type))}));
+    rel = RIR.aggregate(rel, cols.groupBy.map(lowName), aggs);
+    rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
+  } else {
+    rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
+  }
   if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc})));
   const lowered = lowerOrRefuse("SELECT", rel);
   return {s: "select_table", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
@@ -3728,7 +4014,13 @@ function template(n, ctx) {
       const fmt = c.findDirectExpression(Expressions.StringTemplateFormatting);
       const opts = {};
       if (fmt) {
-        const words = fmt.concatTokens().split(/\s*=\s*|\s+/);
+        // KEY = value pairs; a quoted value may itself be '=' (PAD = '=',
+        // ultra/itab: zcl_stg_segw_gen's include name), which a split on
+        // "=" cut in two
+        const src = fmt.concatTokens();
+        const pairs = [...src.matchAll(/(\w+)\s*=\s*('(?:[^']|'')*'|[^\s']+)/g)];
+        if (pairs.map((m) => m[0]).join(" ").replace(/\s+/g, "") !== src.replace(/\s+/g, "")) throw new Unsupported(`template formatting ${src}`);
+        const words = pairs.flatMap((m) => [m[1], m[2]]);
         for (let i = 0; i < words.length; i += 2) {
           const k = upper(words[i]);
           const val = words[i + 1];
@@ -3880,6 +4172,16 @@ function call(chain, ctx, statement, hint) {
       len: arg("LEN") ? convert(source(arg("LEN"), ctx, I), I) : null, type: S};
   }
   if (owner === "CL_ABAP_CONV_IN_CE" && name === "UCCPI") return {e: "uccpi", x: convert(source(direct, ctx), I), type: C(1)};
+  // ultra/itab: uccp( 'FEFF' ), the character of a code point given as four
+  // hex digits (open-abap-core: the text into x(2), that into i, uccpi( )).
+  // Its parameter is TYPE simple, outside the subset, so only a literal of
+  // four hex digits is taken (zcl_stg_segw_gen's BOM)
+  if (owner === "CL_ABAP_CONV_IN_CE" && name === "UCCP") {
+    // (lower case is no hex digit there: A4H gives U+0000 for '00e4')
+    const lit = /^'([0-9A-F]{4})'$/.exec(direct?.concatTokens() ?? "");
+    if (!lit) throw new Unsupported(`cl_abap_conv_in_ce=>uccp( ) of other than a literal of four hex digits: ${chain.concatTokens()}`);
+    return {e: "uccpi", x: {e: "int", value: parseInt(lit[1], 16), type: I}, type: C(1)};
+  }
   // an ALIASES name is the component it stands for; through an interface
   // reference, a method is otherwise the interface's own: I~M
   const alias = owner !== null && !name.includes("~") ? aliasTarget(ctx.reg, owner, name)
@@ -4076,6 +4378,8 @@ export function convert(expr, to) {
     return {e: "wrap", x: expr, type: to};
   }
   if (expr.type.k === "data") {
+    // ultra/itab: an operand of generic arithmetic, read into one calculation type
+    if (GEN_CALC && (["i", "int8", "f"].includes(to.k) || (to.k === "p" && to.calc))) return {e: "unwrap_calc", x: expr, type: to};
     if (!["string", "c", "i", "d", "t", "p"].includes(to.k) || to.calc) throw new Unsupported(`a generic value moved into a ${to.k}`);
     return {e: "unwrap", x: expr, type: to};
   }
@@ -4255,6 +4559,7 @@ function compare(node, ctx) {
   if (/\bIS\s+(NOT\s+)?ASSIGNED\b/.test(text)) {
     const nm = /<[\w]+>/.exec(text)?.[0];
     if (!nm || !ctx.fieldSymbols.has(nm)) throw new Unsupported(`IS ASSIGNED: ${text}`);
+    fsCheck(nm, ctx);
     const r = {c: "assigned", fs: {e: "fs", name: nm, type: ctx.fieldSymbols.get(nm)}};
     return /\bIS\s+NOT\s+ASSIGNED\b/.test(text) !== not ? {c: "not", x: r} : r;
   }
@@ -4277,12 +4582,14 @@ function compare(node, ctx) {
   if (sources.length !== 2 || opNode === undefined) throw new Unsupported(`comparison ${node.concatTokens()}`);
   const opText = upper(opNode.concatTokens());
   const op = OPS[opText] ?? opText;
-  if (op === "CO" || op === "CS") {
+  if (op === "CO" || op === "CS" || op === "CN" || op === "NS") {
     // measured on A4H: CO is true for an empty operand; CS ignores case and
     // an empty pattern is always found; trailing blanks count in a string,
-    // a c operand has none stored
-    const r = {c: op.toLowerCase(), l: convert(source(sources[0], ctx), S), r: convert(source(sources[1], ctx), S)};
-    return not ? {c: "not", x: r} : r;
+    // a c operand has none stored. CN and NS are the negations of CO and CS
+    // (ultra/itab: NS in the demo DPC's search; A4H ZCL_GOGEN_T_NSCN)
+    const neg = op === "CN" || op === "NS";
+    const r = {c: op === "CO" || op === "CN" ? "co" : "cs", l: convert(source(sources[0], ctx), S), r: convert(source(sources[1], ctx), S)};
+    return neg !== not ? {c: "not", x: r} : r;
   }
   if (["CP", "NP", "CA", "NA"].includes(op)) {
     // measured on A4H (2026-09-23): CP ignores case except after #, + is one
