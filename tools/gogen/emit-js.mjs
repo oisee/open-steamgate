@@ -871,6 +871,7 @@ function cond(c, ctx) {
     case "cmp":
       if (c.type?.k === "p") return `abap.CmpP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} 0`;
       return `${expr(c.l, ctx)} ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} ${expr(c.r, ctx)}`;
+    case "refeq": return `(${expr(c.l, ctx)} ${c.op === "=" ? "===" : "!=="} ${expr(c.r, ctx)})`;
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;
       if (c.x.type.k === "dref") return `(${expr(c.x, ctx)} === null)`;

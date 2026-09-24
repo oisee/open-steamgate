@@ -410,6 +410,20 @@ function localClasses(reg, obj) {
   return out;
 }
 
+/*
+ * Statements A4H does not activate, which abaplint takes and the transpiler
+ * gives a meaning; refused everywhere (ANORMALIES), except in the methods
+ * named here, which are compiled with the transpiler's meaning until the
+ * library is fixed upstream. A decision of the foreman's, not a rule:
+ *   /UI2/CL_JSON=>_DESERIALIZE: CREATE DATA ref LIKE LINE OF data (data TYPE
+ *   data): the line type of the table data holds at run time, as the
+ *   transpiler reads it (ANORMALIES create-data-like-line-generic; the fix
+ *   upstream is LIKE LINE OF <at> after ASSIGN data TO <at>)
+ */
+const TRANSPILER_MEANING = new Map([
+  ["/UI2/CL_JSON=>_DESERIALIZE", "CREATE DATA LIKE LINE OF generic data"],
+]);
+
 /** kept for the numeric bench sample: one folder, every class in it */
 export function readClass(folder) {
   const objects = [...new Set(readdirSync(folder).map((f) => f.split(".")[0]))];
@@ -3451,7 +3465,15 @@ function createDataStatic(node, ctx, text) {
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (target.type.k !== "dref") throw new Unsupported(`CREATE DATA into a ${target.type.k}`);
     const tb = variable(likeLine[1], ctx);
-    if (tb.type.k === "data") return {s: "create_data_line", target, table: tb};
+    if (tb.type.k === "data" && tb.type.table) return {s: "create_data_line", target, table: tb};
+    // LIKE LINE OF a TYPE data / any parameter does not activate on A4H
+    // ("DATA is not an internal table", 2026-09-24) and abaplint takes it:
+    // refused, but for the one method listed in TRANSPILER_MEANING
+    if (tb.type.k === "data") {
+      const allowed = TRANSPILER_MEANING.get(`${ctx.className}=>${ctx.method}`);
+      if (allowed !== "CREATE DATA LIKE LINE OF generic data") throw new Unsupported(`CREATE DATA ... LIKE LINE OF ${likeLine[1]}: a generic operand that is not a table does not activate on A4H`);
+      return {s: "create_data_line", target, table: tb};
+    }
     if (tb.type.k === "table" && !["ref", "exc", "data", "dref"].includes(tb.type.row.k)) return {s: "create_data", target, type: tb.type.row};
     throw new Unsupported(`CREATE DATA LIKE LINE OF a ${tb.type.k}`);
   }
@@ -4305,5 +4327,7 @@ function compareValues(op, l, r, ctx) {
     return {c: "cmp", op, l: convert(l, calc), r: convert(r, calc), type: calc};
   }
   if (charlike(l.type) && charlike(r.type)) return {c: "cmp", op, l: convert(l, S), r: convert(r, S), type: S};
+  // two object references, = and <>: the same object or not (ultra/json)
+  if (l.type.k === "ref" && r.type.k === "ref" && (op === "=" || op === "<>")) return {c: "refeq", op, l, r};
   throw new Unsupported(`comparison of ${l.type.k} with ${r.type.k}`);
 }

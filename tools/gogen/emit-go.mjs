@@ -1542,6 +1542,7 @@ function cond(c, ctx) {
     case "cmp":
       if (c.type?.k === "p") return `abap.CmpP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} 0`;
       return `${expr(c.l, ctx)} ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} ${expr(c.r, ctx)}`;
+    case "refeq": return `(any(${expr(c.l, ctx)}) ${c.op === "=" ? "==" : "!="} any(${expr(c.r, ctx)}))`;
     // in parentheses: a composite literal right before the { of an if does not parse
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;

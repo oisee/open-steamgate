@@ -330,6 +330,24 @@ const EXPECT = {
   // 8 past the end (ANORMALIES secondary-key-duplicates: the transpiler
   // runtime answers otherwise)
   ZCL_GOGEN_T_SECKEY: "w:5/3,3/4,1/5, after:5 app:0/3,5/4,3/5,1/6, mod:4/1,3/2,2/3, all:0/1,5/2,4/3,3/4,2/5,1/6, ru:0/3/4 rp:0/0/4 rmiss:8/0/7 rlow:4/0/1 rfs:0/4/3",
+  // the generic statements of /UI2/CL_JSON's deserializer (ultra/json), A4H
+  // 2026-09-24 (the same code in ZCL_GOGEN_T_SECKEY's probe include): INSERT
+  // INTO TABLE of a generic standard table appends and leaves sy-tabix alone,
+  // CREATE DATA LIKE LINE OF <any table> is a new initial row, CREATE DATA
+  // of a typed reference a new empty table; a variable may be called value;
+  // two references are equal when they point at one object
+  ZCL_GOGEN_T_JSONGEN: "ins:0/1/2 new:0 value:3 lt:2 row2:7/x cd:0 ins:0/2/1 new:0 after:1 eq ne",
+  // LOOP AT ref->* ASSIGNING <typed>: A4H the same day; the JS emitter binds
+  // no typed field symbol over generic rows (as ASSIGN ref->* TO <typed>)
+  ZCL_GOGEN_T_DREFLOOP: {Go: "1:1/a,2:2/b,10,20,",
+    JS: "ERROR NOT_COMPILED in LOOP AT lr->* ASSIGNING <ls>.: a typed field symbol over generic rows is Go-only"},
+  // cl_abap_typedescr=>describe_by_data (ultra/json, a host function in Go,
+  // emit-go nativeRttiData): A4H 2026-09-24 ran this class under the name
+  // ZCL_GOGEN_T_SECKEY (the name in the absolute names replaced). What the
+  // Go host leaves out is not printed: the technical names of unnamed c, n,
+  // x, p (\TYPE=%_T...), a structure's length. The JS emitter has no RTTI
+  ZCL_GOGEN_T_RTTI: {Go: "c3:E/C/0/6/3 n4:E/N/0/8/4 x2:E/X/0/2/4 d:E/D/0/16/\\TYPE=D/D//8 t:E/T/0/12/\\TYPE=T/T//6 f:E/F/0/8/\\TYPE=F/F//24 i:E/I/0/4/\\TYPE=I/I//11 i8:E/8/0/8/\\TYPE=INT8/INT8//20 p:E/P/2/8/17 b:E/C/0/2/\\TYPE-POOL=ABAP\\TYPE=ABAP_BOOL/ABAP_BOOL//1 s:E/g/0/8/\\TYPE=STRING/STRING//0 xs:E/y/0/8/\\TYPE=XSTRING/XSTRING//0 flat:S/u/0/\\CLASS=ZCL_GOGEN_T_RTTI\\TYPE=TY_FLAT/TY_FLAT/ deep:S/v/0/\\CLASS=ZCL_GOGEN_T_RTTI\\TYPE=TY_DEEP/TY_DEEP/ comps:S=E,XS=E,FL=S,TB=T, line:\\CLASS=ZCL_GOGEN_T_RTTI\\TYPE=TY_FLAT tk:S uk: same",
+    JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
   ZCL_GOGEN_T_SELLOOP: {Go: "n:2 in:1/0,2/0, after:0/2 exit:0/1/A exitmiss:0/1 none:4/0/QQQ cont:0/2/2 corr:5/A elem:A/2 exit2:0/2",
     JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
   // not an A4H value (A4H has no destination AMDP and says HDB / 758): parity
@@ -397,7 +415,9 @@ const core = `${home}/.local/lars/open-abap-core/src`;
 const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).sort();
 // the roots of the exception classes, and get_text( )'s helper, compiled
 // out of open-abap-core as the gateway compiles them
-const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE"];
+// and RTTI (ultra/json: describe_by_data, ZCL_GOGEN_T_RTTI)
+const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE",
+  "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR"];
 const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)

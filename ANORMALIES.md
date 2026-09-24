@@ -1620,3 +1620,35 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: **needs an issue** in abaplint/transpiler (runtime secondary keys); open-abap-core `/UI2/CL_JSON` `LCL_PARSER=>MEMBERS` (depends on the runtime's order)
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SECKEY
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-create-data-like-line-generic — abaplint accepts `CREATE DATA ref LIKE LINE OF data` for a `TYPE data` parameter, which does not activate on a system; open-abap-core's `/UI2/CL_JSON` relies on it
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/core` / `@abaplint/transpiler` 2.13.89; open-abap-core `/UI2/CL_JSON=>_DESERIALIZE` (`#ui2#cl_json.clas.abap`, the `kind_table` branch)
+- Affected ABAP statement, runtime API or adapter: `CREATE DATA ref LIKE LINE OF data` where `data` is a generic parameter (`TYPE data` / `TYPE any`), not a table type
+- Minimal ABAP reproducer: a method `m CHANGING data TYPE data` whose body is `DATA ref TYPE REF TO data. CREATE DATA ref LIKE LINE OF data.`
+- Exact command used to run it: A4H, the method added to the ABAP Unit probe include of `ZCL_GOGEN_T_SECKEY` in `$ZOSG_TMP_0420` through ADT (2026-09-24): the syntax check refused the save; the transpiler: the same method in `/UI2/CL_JSON` is transpiled and runs on every Node host (the line type of the table the parameter holds at run time)
+- Expected SAP behaviour: a syntax error, `"DATA" is not an internal table.`; the form that activates is `ASSIGN data TO <at>` (`<at> TYPE ANY TABLE`) and `CREATE DATA ref LIKE LINE OF <at>`, which A4H runs as expected (`ZCL_GOGEN_T_JSONGEN`)
+- Actual open-abap behaviour: abaplint reports nothing; the transpiled code creates a line of whatever table the parameter holds
+- Impact on open-steamgate: `/UI2/CL_JSON=>DESERIALIZE` into a structure with a table component (`ZCL_OSD_STATUS=>REFRESH`, the system status) would not activate on a system as open-abap-core writes it. The Go backend refuses the statement everywhere but in `/UI2/CL_JSON=>_DESERIALIZE`, where it is compiled with the transpiler's meaning (`tools/gogen/frontend.mjs` `TRANSPILER_MEANING`), so that the status tables are written on OSGo; a decision for the foreman, not a rule
+- Smallest safe workaround: the exception in `TRANSPILER_MEANING`; the fix is upstream, one line in open-abap-core (`LIKE LINE OF <at>` after `ASSIGN data TO <at>`, which the method does two lines later anyway), after which the exception goes
+- Upstream: **needs an issue** in abaplint (the syntax check) and a PR in open-abap-core (`/UI2/CL_JSON=>_DESERIALIZE`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_JSONGEN (the form that activates)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-rtti-lengths — `describe_by_data` in open-abap-core gives an f a length of 0 and an f or a p an output length of 0
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core `CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA` (the `Float` and `Packed` branches), `@abaplint/runtime` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `cl_abap_typedescr=>describe_by_data( )` of an `f` or a `p` field: `length`, `cl_abap_elemdescr->output_length`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_rtti.clas.abap`
+- Exact command used to run it: A4H, the same class under the name `ZCL_GOGEN_T_SECKEY` in `$ZOSG_TMP_0420` through an ABAP Unit probe (2026-09-24); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core; the Go backend: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: `f:E/F/0/8/\TYPE=F/F//24 ... p:E/P/2/8/17` (an f is 8 bytes with output length 24; a p LENGTH 8 DECIMALS 2 has output length 17). The rest of the line is the same on both: `c3:E/C/0/6/3 n4:E/N/0/8/4 x2:E/X/0/2/4 d:E/D/0/16/\TYPE=D/D//8 ...`
+- Actual open-abap behaviour: `f:E/F/0/0/\TYPE=F/F//0 ... p:E/P/2/8/0`
+- Impact on open-steamgate: none known; nothing in the tree reads the length of an f or the output length of a p
+- Smallest safe workaround: none needed on the Node host; the Go backend's `describe_by_data` (a host function, `emit-go.mjs` `nativeRttiData`) gives A4H's values
+- Upstream: **needs an issue** in open-abap-core (`CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_RTTI
+- Upstream version containing a fix: none yet
