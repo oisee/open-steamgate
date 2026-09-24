@@ -123,7 +123,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
         const [a, b] = order === "recycle, stop"
           ? [runtime.recycle(), runtime.stop()]
           : [runtime.stop(), runtime.recycle()];
-        expect(await settles(Promise.all([settles(a), settles(b)]).then(([x, y]) => (x === "settled" && y === "settled" ? undefined : Promise.reject()))), order).to.equal("settled");
+        expect([await settles(a), await settles(b)], order).to.deep.equal(["settled", "settled"]);
         expect(serving(), `${order}: a process left running`).to.equal(0);
         expect(runtime.running, order).to.equal(false);
         // and the runtime is usable afterwards, not wedged behind them

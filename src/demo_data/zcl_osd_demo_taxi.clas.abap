@@ -383,6 +383,8 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
       lv_n9 = ls_fact-fact_id+1(9).
       lv_v = lv_n9.
       rv_sum = zcl_osd_demo_random=>fold( iv_sum = rv_sum iv_value = lv_v ).
+      " client 000, an empty client and one that is not digits all fold
+      " as 0: they are not told apart (GENERATE leaves it empty)
       lv_v = 0.
       IF ls_fact-mandt IS NOT INITIAL AND ls_fact-mandt CO '0123456789'.
         lv_v = ls_fact-mandt.
@@ -400,6 +402,8 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
       rv_sum = zcl_osd_demo_random=>fold( iv_sum = rv_sum iv_value = lv_v ).
       READ TABLE lt_codes INTO ls_code
         WITH TABLE KEY borough = ls_fact-borough zone = ls_fact-pickup_zone.
+      " every zone not in the lookup folds as 0, so two unknown zones are
+      " not told apart from each other; a known zone never is 0
       IF sy-subrc = 0.
         lv_v = ls_code-code.
       ELSE.

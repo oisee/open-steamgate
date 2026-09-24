@@ -94,6 +94,10 @@ export class RuntimePool {
     return this.primary.ensure();
   }
 
+  // One work process after the other. A stop that arrives in the middle
+  // leaves some already recycled and some not; the stop then takes them all
+  // (each runtime's stop wins over its own recycle), so nothing half-done
+  // keeps serving, and the half-done recycle is harmless (review of #60)
   async recycle() {
     const done = [];
     for (const runtime of this.runtimes) {
