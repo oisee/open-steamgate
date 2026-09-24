@@ -5,7 +5,11 @@ List Page. It has an interactive chart, an analytical table and filters for
 pickup day, hour, borough, zone and payment method. Both read the same
 `Zc_Osd_TaxicubeSet` OData entity; measures are summed by the dimensions
 requested by the page. The four bundled rows are an attributed UI smoke
-sample from NYC TLC's January 2025 yellow taxi records.
+sample from NYC TLC's January 2025 yellow taxi records. Beside them every
+host makes 20000 synthetic groups at start (`FACT_ID` 9000000001 and up,
+`OSD_DEMO_ROWS`), the same rows on every runtime: see
+[demo-data.md](demo-data.md). An imported month of at least that size is
+left alone.
 The page starts in compact-filter mode. Each of its five filter fields has
 F4 value help backed by the same analytical entity set, which groups by the
 requested dimension; no separate lookup table is needed for this demo.
