@@ -550,9 +550,6 @@ export function toIr(tree, options = {}) {
         if (sessionKeyword && (name === "TRUE" || name === "FALSE")) {
           throw new BindError(`the BOOLEAN literal ${name} is not portable yet: HANA has BOOLEAN and SQLite has not`, node);
         }
-        // `r.col` inside `FOR r AS c DO`: a column of the loop's current row,
-        // a scalar of the procedure (R.COL), unless the query in hand has a
-        // source of that name
         // a scalar written without its colon in a scalar statement --
         // `v = :v || i`, `IF i > 3` -- outside any query: HANA reads the
         // variable (measured on HXE, a numeric FOR's loop variable)
@@ -561,6 +558,9 @@ export function toIr(tree, options = {}) {
             && scalarTypes[name] !== undefined) {
           return param(name, scalarTypes[name]);
         }
+        // `r.col` inside `FOR r AS c DO`: a column of the loop's current row,
+        // a scalar of the procedure (R.COL), unless the query in hand has a
+        // source of that name
         const row = sourceName !== undefined && qualifiedColumns[sourceName] === undefined
           ? rowVariables[sourceName] : undefined;
         if (row !== undefined) {

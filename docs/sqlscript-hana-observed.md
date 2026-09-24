@@ -743,3 +743,17 @@ called on HANA Express:
 | `FOR i IN 1 .. 2.7`, `FOR i IN 1 .. NULL` | does not compile: a non-integer bound |
 | a BIGINT loop variable over 2147483646 .. 2147483647 | accepted |
 | `v = :v \|\| i` -- the variable without its colon | accepted in a scalar statement |
+
+What the portable runtime does beyond the table, none of it measured on
+HANA (the #56 critic):
+
+- every spelling of the range is read: `1..3`, `1 ..3`, `:n..3` -- a dot
+  right after a dot never starts a number, so `.3` does not swallow the
+  upper bound;
+- a BIGINT bound past 2^53 is refused, not counted: a JavaScript number
+  stops changing at `c + 1` there;
+- a FOR inside a FOR over the same variable is refused;
+- `BREAK` and `CONTINUE` are not carried (the body does not parse);
+- each turn costs a step, as a WHILE's does, and the body's statements cost
+  theirs: `FOR i IN 1 .. 5000 DO n = :n + 1; END FOR;` already reaches the
+  default limit of 10000 steps.

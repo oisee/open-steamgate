@@ -423,6 +423,9 @@ export function compileProcedure(method, types, options = {}) {
   const rowVariables = {};
   const cursors = new Map();
   const openCursors = new Set();
+  // the variables of the numeric FOR loops being compiled: one inside
+  // another over the same variable is not measured, and is refused
+  const openRanges = new Set();
   // a table variable is read as a relation, so an ORDER BY at its top is an
   // ORDER BY inside whatever reads it; paths meeting are merged above
   const noteOrder = (name, rel) => relationOrders.set(upper(name), orderOf(rel, relationOrders, false));
@@ -633,7 +636,13 @@ export function compileProcedure(method, types, options = {}) {
           return e;
         };
         const reverse = (range.children ?? []).some((one) => one.node === "word" && upper(one.value) === "REVERSE");
-        result.push(forRange(name, bound(fromNode), bound(toNode), reverse, compileStatements({children: children(node, "Statement")}), node));
+        if (openRanges.has(name)) throw new UnsupportedSqlScript(`a FOR over ${name} inside a FOR over ${name} is not measured`, node);
+        const from = bound(fromNode);
+        const to = bound(toNode);
+        openRanges.add(name);
+        let body;
+        try { body = compileStatements({children: children(node, "Statement")}); } finally { openRanges.delete(name); }
+        result.push(forRange(name, from, to, reverse, body, node));
       } else if (node.node === "For") {
         const [rowName, cursorName] = children(node, "Name").map(nameOf);
         const query = cursors.get(cursorName);

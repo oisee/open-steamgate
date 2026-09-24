@@ -216,7 +216,11 @@ export function lex(source, options = {}) {
     }
 
     // a number: digits, one dot, an optional exponent
-    if (isDigit(c) || (c === "." && isDigit(source[i + 1] ?? ""))) {
+    // a number: digits, one dot, an optional exponent. A dot right after a
+    // dot does not start one: in `1..5` the range's second dot is followed
+    // by a digit, and `.5` there would swallow the upper bound (the #56
+    // critic)
+    if (isDigit(c) || (c === "." && isDigit(source[i + 1] ?? "") && source[i - 1] !== ".")) {
       let j = i;
       while (j < source.length && isDigit(source[j])) {
         j += 1;

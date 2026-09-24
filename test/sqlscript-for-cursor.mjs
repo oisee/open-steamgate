@@ -3,6 +3,7 @@
 // unknown), observed on HXE and A4H (docs/sqlscript-hana-observed.md, "The
 // order a cursor's rows come in"). A loop over an unknown order is refused.
 import {expect} from "chai";
+import {lex} from "../tools/sqlscript/lexer.mjs";
 import {compileProcedure, orderOf} from "../tools/sqlscript-to-procedure-ir.mjs";
 import {runProcedure, orderedRelation, UnsupportedSqlScript, procedure, forCursor, assignScalar} from "../tools/sqlscript-procedure-ir.mjs";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
@@ -213,5 +214,25 @@ describe("FOR over a range of integers, as HANA Express ran it", () => {
     expect(() => compile1("DECLARE v NVARCHAR(200) = ''; FOR i IN 1 .. 3 DO v = :v || i; END FOR; ev = :v;")).to.throw(/i is not declared|I is not declared/);
     expect(() => compile1("DECLARE v NVARCHAR(200) = ''; DECLARE i INTEGER = 0; FOR i IN 1 .. 2.7 DO v = :v || i; END FOR; ev = :v;")).to.throw(/not an integer/);
     expect(() => compile1("DECLARE v NVARCHAR(200) = ''; DECLARE s NVARCHAR(3); FOR s IN 1 .. 2 DO v = :v; END FOR; ev = :v;")).to.throw(/not INTEGER or BIGINT/);
+  });
+
+  // not measured on HANA: how this runtime spells and bounds the loop
+  it("reads every spelling of the range: 1..3, 1 ..3, :n..3, 1.5..2 lexes as three tokens", async () => {
+    expect(await run("FOR i IN 1..3 DO v = :v || i || ','; END FOR;")).to.equal("1,2,3,");
+    expect(await run("FOR i IN 1 ..3 DO v = :v || i || ','; END FOR;")).to.equal("1,2,3,");
+    expect(await run("n = 1; FOR i IN :n..3 DO v = :v || i || ','; END FOR;")).to.equal("1,2,3,");
+    expect(lex("1.5..2").filter((t) => t.kind !== "eof").map((t) => t.value)).to.deep.equal(["1.5", ".", ".", "2"]);
+    expect(lex("x = .5").filter((t) => t.kind !== "eof").map((t) => t.value)).to.deep.equal(["x", "=", ".5"]);
+  });
+
+  it("refuses what it does not count exactly or was not measured: a BIGINT bound past 2^53, a FOR inside a FOR over the same variable", async () => {
+    const SIGB = {name: "M", kind: "METHOD", parameters: [{name: "ev", direction: "OUT", abapType: "string"}]};
+    let caught;
+    try {
+      await runProcedure(compileProcedure({...SIGB, body: "DECLARE v NVARCHAR(200) = ''; DECLARE b BIGINT = 0; FOR b IN 9007199254740991 .. 9007199254740993 DO v = :v || 'x'; END FOR; ev = :v;"}, new Map(), {}), {});
+    } catch (error) { caught = error; }
+    expect(caught?.message).to.match(/past 2\^53/);
+    expect(() => compileProcedure({...SIGB, body: "DECLARE v NVARCHAR(200) = ''; DECLARE i INTEGER = 0; FOR i IN 1 .. 2 DO FOR i IN 1 .. 2 DO v = :v || i; END FOR; END FOR; ev = :v;"}, new Map(), {}))
+      .to.throw(/a FOR over I inside a FOR over I is not measured/);
   });
 });

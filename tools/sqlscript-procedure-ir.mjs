@@ -827,6 +827,13 @@ export async function runProcedure(program, {
         if (from === null || to === null) {
           throw new UnsupportedSqlScript(`FOR ${statement.variable}: a NULL bound is not measured (a NULL literal does not compile on HANA)`, statement);
         }
+        // a BIGINT bound past 2^53 would make `c += 1` a no-op in a JavaScript
+        // number; refused rather than counted wrongly
+        for (const bound of [from, to]) {
+          if (!Number.isSafeInteger(Number(bound))) {
+            throw new UnsupportedSqlScript(`FOR ${statement.variable}: a bound past 2^53 (${bound}) is not counted exactly here`, statement);
+          }
+        }
         const current = scalars.get(statement.variable);
         const turns = [];
         for (let c = Number(from); c <= Number(to); c += 1) {
