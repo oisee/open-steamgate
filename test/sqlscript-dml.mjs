@@ -179,3 +179,42 @@ describe("UPSERT by the primary key, as HANA Express ran it", () => {
     expect(() => compileU("UPSERT t (k, v) VALUES (2, 'w') WHERE k = 2; rv = 'x';")).to.throw(/without WITH PRIMARY KEY is not carried/);
   });
 });
+
+describe("UPSERT edges, as HANA Express ran them", () => {
+  const T3 = {K: {abap: "I"}, V: {abap: "C", len: 10}, W: {abap: "C", len: 10}};
+  const compile3 = (body) => compileProcedure({...SIG, body: "DECLARE s NVARCHAR(200); " + body}, new Map(), {catalogue: {T: T3}, keys: {T: ["K"]}});
+  const agg3 = "SELECT STRING_AGG(k || v || w, ',' ORDER BY k) AS s INTO s FROM t; rv = :s;";
+  for (const [dialect, make] of [["duckdb", () => new DuckDBDatabaseClient({path: ":memory:"})], ["sqlite", () => new FileSqliteClient({path: ":memory:"})]]) {
+    describe(`on ${dialect}`, function () {
+      this.timeout(30000);
+      let client;
+      const run = async (body) => (await runProcedure(compile3(body), {client, dialect, inputCatalogue: {T: T3}})).value;
+      beforeEach(async () => {
+        client = make();
+        await client.connect();
+        for (const sql of ['CREATE TABLE "T" ("K" INTEGER PRIMARY KEY, "V" VARCHAR(10), "W" VARCHAR(10))', "INSERT INTO \"T\" VALUES (1, 'a', 'x')", "INSERT INTO \"T\" VALUES (2, 'b', 'y')"]) {
+          await client.native({sql, expect: "none"});
+        }
+      });
+      afterEach(async () => { await client.disconnect(); });
+      // HXE: W left out keeps its value when updated, takes its default when
+      // inserted -- the default of a DDIC table being the initial value ''
+      it("a column left out keeps its value on an update and is initial on an insert (SELECT)", async () => {
+        expect(await run("lt = SELECT 1 AS k, 'n' AS v FROM dummy UNION ALL SELECT 3 AS k, 'm' AS v FROM dummy; UPSERT t (k, v) SELECT * FROM :lt; " + agg3)).to.equal("1nx,2by,3m");
+      });
+      it("the same with VALUES WITH PRIMARY KEY", async () => {
+        expect(await run("UPSERT t (k, v) VALUES (2, 'z') WITH PRIMARY KEY; UPSERT t (k, v) VALUES (4, 'o') WITH PRIMARY KEY; " + agg3)).to.equal("1ax,2zy,4o");
+      });
+      it("a query that brings one key twice raises, as HANA does, and writes nothing", async () => {
+        let caught;
+        try { await run("lt = SELECT 1 AS k, 'p' AS v, 'q' AS w FROM dummy UNION ALL SELECT 1 AS k, 'r' AS v, 's' AS w FROM dummy; UPSERT t SELECT * FROM :lt; rv = 'x';"); } catch (error) { caught = error; }
+        expect(caught?.message).to.match(/unique constraint violated/);
+        const rows = (await client.native({sql: 'SELECT "V" FROM "T" WHERE "K" = 1', expect: "rows"})).rows;
+        expect(rows[0].V).to.equal("a");
+      });
+    });
+  }
+  it("refuses an UPSERT that leaves out a key column", () => {
+    expect(() => compile3("UPSERT t (v) VALUES ('z') WITH PRIMARY KEY; rv = 'x';")).to.throw(/leaves out the key column K/);
+  });
+});

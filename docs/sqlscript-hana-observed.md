@@ -828,6 +828,8 @@ A table T (K INTEGER PRIMARY KEY, V NVARCHAR(10)) holding (1, a), (2, b):
 | `UPSERT t SELECT ...` | by the primary key: updates the keys there, inserts the others |
 | `UPSERT t (k, v) VALUES (2, 'w') WHERE k = 2` | updates the rows the WHERE finds |
 | `UPSERT n VALUES ...` twice, N without a key | one row -- the second updated it |
+| `UPSERT t SELECT ...` bringing one key twice | `unique constraint violated` |
+| `UPSERT t (k, v) SELECT ...` / `VALUES ... WITH PRIMARY KEY`, W left out | an updated row keeps its W; an inserted one takes W's default |
 | `DELETE FROM t WHERE k > 1;` then `::ROWCOUNT` | 1 |
 | `DELETE` in a FUNCTION (a table function) | does not compile: `INSERT/UPDATE/DELETE is/are not supported in table function` |
 | `DELETE` in a `READS SQL DATA` procedure (an AMDP OPTIONS READ-ONLY) | does not compile: `... not supported in read-only procedure` |

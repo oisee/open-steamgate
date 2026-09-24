@@ -913,6 +913,19 @@ export async function runProcedure(program, {
           if (error instanceof Refused) throw new UnsupportedSqlScript(error.message);
           throw error;
         }
+        // measured on HXE: an UPSERT ... SELECT that brings one key twice
+        // raises "unique constraint violated"; SQLite would take the last
+        // and DuckDB refuse in its own words, so the query is asked first
+        if (w.write === "upsert" && w.from !== undefined) {
+          const produced = Object.keys(schemaOf(w.from, inputCatalogue));
+          const keyOut = w.key.map((k) => produced[w.columns.indexOf(k)]);
+          const inner = lower(w.from, dialect, {relationRef: (handle) => client.relationRef(handle)});
+          const quoteId = (id) => `"${String(id).replace(/"/g, '""')}"`;
+          const twice = await ask({sql: `SELECT 1 AS "D" FROM (${inner.sql}) AS "q" GROUP BY ${keyOut.map(quoteId).join(", ")} HAVING COUNT(*) > 1`, params: inner.params});
+          if (twice.rows.length > 0) {
+            throw new UnsupportedSqlScript(`UPSERT ${w.table}: the query brings one key twice; HANA raises "unique constraint violated" here`, statement);
+          }
+        }
         step(statement);
         dbStatements += 1;
         dbParams += compiled.params.length;

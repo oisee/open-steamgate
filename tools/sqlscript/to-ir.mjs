@@ -1531,12 +1531,17 @@ export function toIr(tree, options = {}) {
       const named = kids(node, "Name").map(nameOf);
       const columns = named.length > 0 ? named : Object.keys(schema);
       for (const c of columns) if (schema[c] === undefined) throw new BindError(`${c} is not a column of ${table}`, node);
+      for (const k of key) if (!columns.includes(k)) throw new BindError(`UPSERT ${table} leaves out the key column ${k}`, node);
+      const fill = Object.keys(schema).filter((c) => !columns.includes(c)).map((c) => {
+        try { return {col: c, expr: bindWriteValue(undefined, schema[c])}; }
+        catch { throw new BindError(`UPSERT ${table} leaves out ${c}, whose initial value is not carried for its type`, node); }
+      });
       const query = kid(node, "SetOperation");
       if (query !== undefined) {
-        const rel = relation(query);
+        const rel = canonicalPacked(relation(query));
         const width = Object.keys(schemaOf(rel, catalogue)).length;
         if (width !== columns.length) throw new BindError(`UPSERT ${table}: the query has ${width} columns, the upsert names ${columns.length}`, node);
-        return upsertFrom(table, columns, rel, key);
+        return upsertFrom(table, columns, rel, key, fill);
       }
       // measured on HXE: VALUES WITH PRIMARY KEY updates by the key; VALUES
       // alone on a keyed table raised "unique constraint violated"; VALUES
@@ -1552,7 +1557,7 @@ export function toIr(tree, options = {}) {
         if (type?.abap === "P" && value.node === "lit" && typeof value.value === "number") return bindWriteValue(value.value, type);
         return giveType(value, type);
       });
-      return upsert(table, columns, [row], key);
+      return upsert(table, columns, [row.map(canonicalPacked)], key, fill);
     }
     if (node.node === "Insert") {
       if ((node.children ?? []).some((c) => c.node === "host")) {
