@@ -420,6 +420,9 @@ export function orderedRelation(rel) {
           keys: carried.map((c) => ({col: c.as, desc: c.key.desc})), ties};
       }
       case "scan": return upper(r.table) === "DUMMY" ? {rel: r, keys: [], ties: null} : undefined;
+      // a host relation (tools/ir-host-relation.mjs): the caller's rows,
+      // numbered by the host, as the union of single rows below is
+      case "ref": return r.ordinal === undefined ? undefined : {rel: r, keys: [{col: r.ordinal, desc: false}], ties: null};
       case "union": {
         if (r.all !== true || !r.inputs.every(singleRow)) return undefined;
         const name = `__ORD${hidden++}`;

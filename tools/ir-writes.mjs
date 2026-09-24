@@ -38,6 +38,7 @@ const names = (columns) => columns.map(upper);
 export function initialValue(type) {
   if (type?.abap === "I" || type?.abap === "INT8") return lit(0, type);
   if (type?.abap === "C" || type?.abap === "STRING") return lit("", type);
+  if (type?.abap === "D") return lit("00000000", type);
   if (type?.abap === "P") return lit(packedText("0", type, "the initial value"), type);
   throw new WriteError(`a column of type ${type?.abap ?? "unknown"} has no initial value here yet`);
 }
@@ -103,10 +104,31 @@ export function packedText(value, type, what = "value") {
 export function bindValue(value, type) {
   if (value === undefined) return initialValue(type);
   if (value === null) throw new WriteError("a NULL value: an ABAP work area has none");
-  if (type?.abap === "I" || type?.abap === "INT8") {
+  if (type?.abap === "INT8") {
+    // an INT8 past 2^53 stays a BigInt, which every client binds exactly;
+    // a JavaScript number past it is already not the caller's value
+    if (typeof value === "bigint") return lit(Number.isSafeInteger(Number(value)) ? Number(value) : value, type);
+    if (typeof value === "number" && !Number.isSafeInteger(value)) throw new WriteError(`value ${value} is not an INT8 a JavaScript number can carry: pass a BigInt or a string`);
+    if (typeof value === "string" && /^ *[+-]?\d+ *$/.test(value)) {
+      const b = BigInt(value.trim());
+      if (b < -(2n ** 63n) || b >= 2n ** 63n) throw new WriteError(`value ${JSON.stringify(value)} is past INT8`);
+      return lit(Number.isSafeInteger(Number(b)) ? Number(b) : b, type);
+    }
+    if (!Number.isInteger(value)) throw new WriteError(`value ${JSON.stringify(value)} is not an INT8`);
+    return lit(value, type);
+  }
+  if (type?.abap === "I") {
     const n = Number(value);
     if (!Number.isInteger(n)) throw new WriteError(`value ${JSON.stringify(value)} is not an INTEGER`);
     return lit(n, type);
+  }
+  if (type?.abap === "D") {
+    // a date is CHAR 8 of digits, as DATS is on the database; '00000000' is
+    // its initial value, and a blank field is the same
+    const text = String(value).replace(/ +$/, "");
+    if (text === "") return lit("00000000", type);
+    if (!/^\d{8}$/.test(text)) throw new WriteError(`value ${JSON.stringify(value)} is not a date of eight digits`);
+    return lit(text, type);
   }
   if (type?.abap === "C") {
     const text = String(value).replace(/ +$/, "");

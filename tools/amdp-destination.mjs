@@ -506,13 +506,39 @@ export class AmdpDestination {
       inputs[parameter.name] = typeof given.get === "function" ? given.get() : given;
     }
     const relationInputs = {};
+    // IN tables the client holds as host relations (tools/ir-host-relation.mjs),
+    // dropped when the call ends however it ends
+    const hosted = [];
+    try {
+      await this.#relationInputs(p, signature, database, relationInputs, hosted, pick, firstPresent);
+      await this.#runPortable(p, signature, database, inputs, relationInputs, pick, firstPresent);
+    } finally {
+      for (const handle of hosted) await database.dropRelation(handle);
+    }
+  }
+
+  /** each IN table as a relation: a host relation where the client can hold
+   *  one, the union of single-row selects where it cannot */
+  async #relationInputs(p, signature, database, relationInputs, hosted, pick, firstPresent) {
     if ((p.portable.relationParameters ?? []).length > 0) {
       const {scan, project, union, filter, lit, T} = await import("./sqlscript-ir.mjs");
+      const {hostRelation, hostPlan, abapTableRows} = await import("./ir-host-relation.mjs");
       for (const parameter of p.portable.relationParameters) {
         const given = firstPresent(pick(signature.exporting, parameter.name),
           pick(signature.changing, parameter.name), pick(signature.tables, parameter.name));
         if (given === undefined || typeof given.array !== "function") {
           await refuse(`AMDP: portable table input ${parameter.name} is missing or is not an ABAP table`, p.module);
+        }
+        let handle;
+        try {
+          handle = await hostRelation(database, "duckdb", {name: parameter.name, schema: parameter.schema, rows: abapTableRows(given)});
+        } catch (error) {
+          await refuse(`AMDP: portable table input ${parameter.name}: ${String(error?.message ?? error)}`, p.module);
+        }
+        if (handle !== undefined) {
+          hosted.push(handle);
+          relationInputs[parameter.name] = hostPlan(handle, parameter.schema);
+          continue;
         }
         const columns = Object.entries(parameter.schema);
         const rows = given.array().map(plainRow);
@@ -536,6 +562,9 @@ export class AmdpDestination {
           : (rows.length === 1 ? rowPlan(rows[0]) : union(rows.map(rowPlan), true));
       }
     }
+  }
+
+  async #runPortable(p, signature, database, inputs, relationInputs, pick, firstPresent) {
     const {runProcedure} = await import("./sqlscript-procedure-ir.mjs");
     let answer;
     try {
