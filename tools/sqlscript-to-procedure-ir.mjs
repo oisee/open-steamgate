@@ -227,6 +227,9 @@ function outputFrom(method, types, resolve, store) {
     return {name: "RESULT", kind: "relation", schema};
   }
   const outputs = method.parameters.filter((one) => one.direction !== "IN");
+  // no output at all: a procedure that only writes (the corpus has eleven),
+  // whose answer is what it did to the database
+  if (outputs.length === 0) return {name: undefined, kind: "none", outputs: []};
   // several OUT tables (measured on A4H: each is what the path taken
   // assigned, an empty table where it assigned none); every one of them must
   // be a resolved table -- a scalar OUT beside them is not carried yet
@@ -244,7 +247,9 @@ function outputFrom(method, types, resolve, store) {
       return {name: upper(one.name), scalar};
     });
     const tables = all.filter((one) => one.schema !== undefined);
-    if (tables.length === 0) throw new UnsupportedSqlScript("several scalar OUTs and no table OUT are not carried yet");
+    // several scalar OUTs and no table: each is what the body assigned, its
+    // initial value otherwise, as beside a table (measured on A4H)
+    if (tables.length === 0) return {name: all[0].name, kind: "scalars", outputs: all};
     return {name: tables[0].name, kind: "relation", schema: tables[0].schema, outputs: all};
   }
   if (outputs.length !== 1 || !["OUT", "RETURNING"].includes(outputs[0]?.direction)) {
@@ -907,10 +912,15 @@ export function compileProcedure(method, types, options = {}) {
       const missing = (output.outputs ?? [output]).filter((one) => one.scalar === undefined).find((one) => !assigned.has(one.name));
       if (missing !== undefined) throw new UnsupportedSqlScript(`some out table variable is not assigned: ${missing.name}`);
     }
-    return procedure({parameters, relationParameters, body, output: output.name,
+    // `outputs` is the authority whenever it is there (none, or several):
+    // `output` and `outputSchema` name the one output of a procedure that has
+    // exactly one, and are absent otherwise, so that a port has nothing to
+    // guess about which of several they would mean
+    const several = Array.isArray(output.outputs);
+    return procedure({parameters, relationParameters, body, output: several ? undefined : output.name,
       ...(output.initialWhenUnassigned === true ? {outputInitialWhenUnassigned: true} : {}),
-      ...(Array.isArray(output.outputs) ? {outputs: output.outputs} : {}),
-      outputSchema: output.kind === "relation" ? output.schema : undefined,
+      ...(several ? {outputs: output.outputs} : {}),
+      outputSchema: output.kind === "relation" && !several ? output.schema : undefined,
       outputType: output.kind === "scalar" ? output.type : undefined,
       catalogue});
   } catch (error) {

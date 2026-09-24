@@ -36,7 +36,7 @@ const upper = (name) => String(name).toUpperCase();
 
 export const procedure = ({parameters = [], relationParameters = [], body = [], output, outputSchema, outputType,
   outputs, outputInitialWhenUnassigned, catalogue = {}}) =>
-  ({ir: "sqlscript-procedure", parameters, relationParameters, body, output: upper(output), outputSchema, outputType,
+  ({ir: "sqlscript-procedure", parameters, relationParameters, body, output: output === undefined ? undefined : upper(output), outputSchema, outputType,
     ...(Array.isArray(outputs) ? {outputs: outputs.map((one) => (one.scalar !== undefined
       ? {name: upper(one.name), scalar: one.scalar} : {name: upper(one.name), schema: one.schema}))} : {}),
     ...(outputInitialWhenUnassigned === true ? {outputInitialWhenUnassigned: true} : {}),
@@ -1207,6 +1207,11 @@ export async function runProcedure(program, {
   // type is not the declared one, and some types have no literal at all)
   const emptyAnswer = (schema) => ({rows: [], columns: Object.keys(schema).map((name) => ({name})), outputSchema: schema,
     trace: traced(steps + nestedSteps, {nestedCalls})});
+  if (Array.isArray(program.outputs) && program.outputs.length === 0) {
+    // a procedure with no output: what it wrote is its answer
+    if (deferRelation) throw new UnsupportedSqlScript("a nested CALL of a procedure with no output hands on no relation");
+    return {outputs: {}, trace: traced(steps + nestedSteps, {nestedCalls})};
+  }
   if (Array.isArray(program.outputs) && program.outputs.length > 1) {
     if (deferRelation) {
       throw new UnsupportedSqlScript(`a nested CALL of ${program.outputs.length} outputs is not carried; a CALL hands on one relation`);
