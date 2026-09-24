@@ -1321,14 +1321,27 @@ The IR is a graph, not a tree. A DELETE inside a LOOP holds the loop's own node,
 
 `osgDatabase` still needs `reg` for the transpiler's `DatabaseSetup`, so the CREATE TABLEs have to travel beside the IR if the Go side is to build without Node.
 
-**Not yet a cache unit.** A class document is the unit a cache would keep, but it is not enough by itself:
-- A class contributes to the shared document (structures, constants, signatures, events, interface methods and attributes, RTTI, tables).
-- Its IR depends on its callees' signatures, on interfaces and on the DDIC.
+**What a cache gets from a class document.** Each class document carries two more fields.
+- `contributes`: what the class added to the shared document while it was compiled, field by field. `compileProgram` runs each class through `record` (`ir-contrib.mjs`), which diffs the program's Maps, Sets and lists around it. A value changed in place under a key another class created is not seen.
+- `inputs`: `{object, self, reads}`. `object` is the source object, `self` its source hash, and `reads` the hash of every object whose definitions the compile resolved a reference to, according to abaplint's scopes.
 
-A cache needs, per class, what it contributed and what it read, keyed by the hash of that closure. `fromDocuments` takes the whole set; it refuses a class named in `order` whose document is missing.
+`staleAfter(objects, ["INTF ZIF_X"])` gives the class documents a change makes stale. That is the changed object's own document, then its readers, transitively: a reader of X depends on X's signature, and X's signature on what X reads. `fromDocuments(..., {partial: true})` reads a subset, and the incremental build fills in the rest.
+
+Still missing for an incremental build of the whole program:
+- The shared document's derived tables (RTTI, tables, exception supers, interface methods, CDS views) are computed from the registry after all classes are compiled, so they are rebuilt, not cached.
+- A change is judged by source text, not by surface, so a comment in an interface stales its readers.
+
+On the OSGo program, the documents a change makes stale:
+
+| change | stale |
+| --- | ---: |
+| a class nobody reads (`ZCL_OSD_AMDP_SBX`) | 1 of 951 |
+| a Gateway DPC_EXT, reached by name and not by reference | 1 |
+| the SADL source interface `ZIF_STG_CDS_SOURCE` | 137 |
+| `CX_ROOT` or `CL_ABAP_CHAR_UTILITIES` of open-abap-core | 682 |
 
 **Measured 2026-09-24 on the OSGo program** (951 objects, after 58ef230):
 - front end 8.2–8.4 s;
-- documents 35.2 MB, written in 1.2 s, read in 1.3 s;
+- documents 35.6 MB with `contributes` and `inputs`, written in 1.1–1.3 s (reading every reference of 951 scopes included), read in 1.3 s;
 - Go (12.0 MB) and JS (7.3 MB) emitted from the JSON are byte-identical to the originals;
 - the document hash is the same in two processes.

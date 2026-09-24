@@ -29,6 +29,9 @@
 
 import {createHash} from "node:crypto";
 import {readFileSync} from "node:fs";
+import {createRequire} from "node:module";
+
+const abaplint = createRequire(import.meta.url)("@abaplint/core");
 
 export const IR_VERSION = 1;
 
@@ -46,7 +49,7 @@ export function irSource() {
 // compiled form is in `classes`, as a function group's class)
 // and the compiler's scratch position (current*), which depends on the order
 // it compiled in
-const DROPPED = new Set(["reg", "functionModules", "currentClass", "currentOwner", "currentTypes"]);
+const DROPPED = new Set(["reg", "functionModules", "currentClass", "currentOwner", "currentTypes", "contributions"]);
 // written by the emitters into the IR while they emit (a loop's index
 // variable), and different per emitter: not IR, dropped wherever it stands
 const EMITTER_SCRATCH = new Set(["idxVar"]);
@@ -157,6 +160,76 @@ function decoder() {
 }
 
 const nameOf = (cls, i) => String(cls.name ?? cls.go ?? `#${i}`);
+const sha = (t) => createHash("sha256").update(t).digest("hex").slice(0, 16);
+
+/** the abaplint object a class document was compiled from: a global class,
+ *  a function group, or the class pool a local class lives in */
+function objectOf(reg, program, name) {
+  for (const type of ["CLAS", "FUGR", "INTF"]) {
+    const o = reg.getObject(type, name);
+    if (o !== undefined) return o;
+  }
+  for (const [key, local] of program.locals ?? []) {
+    if (local === name) return reg.getObject("CLAS", key.split("|")[0]);
+  }
+  for (const [fm, m] of program.functionModules ?? []) {
+    if (m.owner === name && m.group !== undefined) return m.group;
+  }
+  return undefined;
+}
+
+/** a source object's text, all its files, as one hash (once per object) */
+const hashes = new WeakMap();
+const sourceHash = (obj) => {
+  if (!hashes.has(obj)) hashes.set(obj, sha(obj.getFiles().map((f) => f.getFilename() + "\0" + f.getRaw()).join("\0")));
+  return hashes.get(obj);
+};
+
+/** file name -> object, once per registry */
+const owners = new WeakMap();
+function ownerOf(reg, file) {
+  let map = owners.get(reg);
+  if (map === undefined) {
+    map = new Map();
+    for (const o of reg.getObjects()) for (const f of o.getFiles()) map.set(f.getFilename(), o);
+    owners.set(reg, map);
+  }
+  return map.get(file);
+}
+
+/** the objects a class's compile read, from abaplint's scopes: every
+ *  reference whose target is in another object, as "TYPE NAME" */
+function readsOf(reg, obj) {
+  const reads = new Set();
+  const top = new abaplint.SyntaxLogic(reg, obj).run().spaghetti?.getTop();
+  const stack = top ? [top] : [];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    for (const r of node.getData().references) {
+      const file = r.resolved?.getFilename?.();
+      if (file === undefined) continue;
+      const target = ownerOf(reg, file);
+      if (target !== undefined && target !== obj) reads.add(`${target.getType()} ${target.getName()}`);
+    }
+    stack.push(...node.getChildren());
+  }
+  return [...reads].sort();
+}
+
+/** what a cache needs of one class: the hash of its own source, and of every
+ *  object its compile read -- valid while all of them are unchanged */
+function inputsOf(reg, program, name) {
+  const obj = objectOf(reg, program, name);
+  if (obj === undefined) return undefined;
+  const reads = readsOf(reg, obj);
+  const hashes = {};
+  for (const key of reads) {
+    const [type, n] = key.split(" ");
+    const o = reg.getObject(type, n);
+    if (o !== undefined) hashes[key] = sourceHash(o);
+  }
+  return {object: `${obj.getType()} ${obj.getName()}`, self: sourceHash(obj), reads: hashes};
+}
 
 /** the program as documents: one shared, and one per class (the unit a
  *  build can keep by the hash of its source) */
@@ -167,7 +240,17 @@ export function toDocuments(program) {
     shared[k] = v;
   }
   const source = irSource();
-  const objects = program.classes.map((cls, i) => ({ir: "gogen", version: IR_VERSION, source, object: nameOf(cls, i), class: encoder(cls)(cls, `classes[${i}]`)}));
+  const objects = program.classes.map((cls, i) => {
+    const name = nameOf(cls, i);
+    const doc = {ir: "gogen", version: IR_VERSION, source, object: name};
+    // what the class added to the shared document, and what it read
+    const contributed = program.contributions?.get(name);
+    if (contributed !== undefined) doc.contributes = encoder(contributed)(contributed, `contributions.${name}`);
+    const inputs = program.reg === undefined ? undefined : inputsOf(program.reg, program, name);
+    if (inputs !== undefined) doc.inputs = inputs;
+    doc.class = encoder(cls)(cls, `classes[${i}]`);
+    return doc;
+  });
   const names = new Set();
   for (const o of objects) {
     if (names.has(o.object)) throw new Error(`two classes named ${o.object}: the second would replace the first when read back`);
@@ -177,7 +260,35 @@ export function toDocuments(program) {
 }
 
 /** the program back from its documents, classes in the order the front end had them */
-export function fromDocuments({program, objects}, {source = irSource()} = {}) {
+/** the class documents a change makes stale: those whose own source is one
+ *  of the changed objects ("TYPE NAME"), and, transitively, those that read
+ *  a stale one -- a reader of X depends on X's signature, and X's signature
+ *  on what X reads, so a change travels up the whole chain of readers */
+export function staleAfter(objects, changed) {
+  const readers = new Map();
+  for (const o of objects) {
+    for (const key of Object.keys(o.inputs?.reads ?? {})) {
+      if (!readers.has(key)) readers.set(key, []);
+      readers.get(key).push(o);
+    }
+  }
+  const stale = new Set();
+  const todo = [...changed];
+  const done = new Set();
+  while (todo.length > 0) {
+    const key = todo.pop();
+    if (done.has(key)) continue;
+    done.add(key);
+    for (const o of objects) if (o.inputs?.object === key) stale.add(o);
+    for (const o of readers.get(key) ?? []) {
+      stale.add(o);
+      if (o.inputs?.object !== undefined) todo.push(o.inputs.object);
+    }
+  }
+  return [...stale];
+}
+
+export function fromDocuments({program, objects}, {source = irSource(), partial = false} = {}) {
   for (const d of [program, ...objects]) {
     if (d.ir !== "gogen" || d.version !== IR_VERSION) throw new Error(`not gogen IR version ${IR_VERSION}: ${JSON.stringify({ir: d.ir, version: d.version})}`);
     if (d.source !== source) throw new Error(`${d.object ?? "the program document"} was written by front-end sources ${d.source}, these are ${source}`);
@@ -186,9 +297,14 @@ export function fromDocuments({program, objects}, {source = irSource()} = {}) {
   const out = decoder()(program.program);
   out.classes = program.order.map((name) => {
     const o = byName.get(name);
-    if (o === undefined) throw new Error(`object ${name} is in the order and has no document`);
+    if (o === undefined) {
+      // a subset is read only when asked for: the caller (an incremental
+      // build) fills the missing classes itself
+      if (partial) return undefined;
+      throw new Error(`object ${name} is in the order and has no document`);
+    }
     return decoder()(o.class);
-  });
+  }).filter((c) => c !== undefined);
   return out;
 }
 

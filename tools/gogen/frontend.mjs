@@ -15,6 +15,7 @@ import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
 import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
 import * as WIR from "../ir-writes.mjs";
+import {record} from "./ir-contrib.mjs";
 import {createRequire} from "node:module";
 import {readFileSync, readdirSync, existsSync} from "node:fs";
 import {join} from "node:path";
@@ -153,10 +154,10 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
     }
   });
   for (const obj of reg.getObjects()) {
-    if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(classIr(ctx0, obj));
+    if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(record(program, () => classIr(ctx0, obj)));
   }
-  for (const l of localDefs) program.classes.push(classIr(ctx0, l));
-  for (const g of readable) program.classes.push(functionGroupIr(ctx0, g));
+  for (const l of localDefs) program.classes.push(record(program, () => classIr(ctx0, l)));
+  for (const g of readable) program.classes.push(record(program, () => functionGroupIr(ctx0, g)));
   // every interface used as a reference type: its methods whose signature
   // types, which is what a class must provide to satisfy it
   program.interfaceMethods = new Map();
