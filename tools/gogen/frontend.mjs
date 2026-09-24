@@ -2435,19 +2435,37 @@ function declaringClass(reg, cls, name, kind) {
 
 /** a table of the dictionary: its columns (typed on demand), its key, whether it has a client */
 function dbTable(ctx, tableName, verb) {
-  const tabl = ctx.reg.getObject("TABL", tableName);
+  // a DDIC view (the SQL views of OSG's CDS entities, created as SQLite views
+  // by the transpiler's DatabaseSetup) is read like a table: its fields are
+  // its columns, MANDT among them when it has one (ultra/sadl). It is never
+  // written: a write to a view is refused
+  const view = verb === "SELECT FROM" ? ctx.reg.getObject("VIEW", tableName) : undefined;
+  const tabl = ctx.reg.getObject("TABL", tableName) ?? view;
   if (!tabl) throw new Unsupported(`${verb} ${tableName}: not a table of the dictionary in this program`);
   let tType;
   try { tType = tabl.parseType(ctx.reg); } catch { throw new Unsupported(`${verb} ${tableName}: its type does not resolve`); }
   if (!(tType instanceof BasicTypes.StructureType)) throw new Unsupported(`${verb} ${tableName}: its type does not resolve`);
   const columns = new Map(tType.getComponents().map((c) => [upper(c.name), c]));
+  // a view over a client-dependent table that does not carry MANDT hides
+  // the client: a system reads the logon client's rows (a CDS view's SQL view
+  // has MANDT), this one would read every client's. Refused, not served
+  // unfiltered (OSG's tools/cds2ddic.mjs leaves MANDT out of such views)
+  if (tabl === view && !columns.has("MANDT")) {
+    const hidden = [...new Set((view.getFields() ?? []).map((f) => upper(f.TABNAME)))].find((t) => {
+      try {
+        const bt = ctx.reg.getObject("TABL", t)?.parseType(ctx.reg);
+        return bt instanceof BasicTypes.StructureType && bt.getComponents().some((c) => upper(c.name) === "MANDT");
+      } catch { return false; }
+    });
+    if (hidden) throw new Unsupported(`${verb} ${tableName}: a view over the client-dependent ${hidden} without MANDT`);
+  }
   const colType = (n) => {
     const c = columns.get(n);
     if (!c) throw new Unsupported(`${verb}: ${tableName} has no column ${n}`);
     return typeOf(c.type, `${tableName}-${n}`, ctx.program);
   };
   let key = [];
-  try { key = tabl.listKeys(ctx.reg).map(upper); } catch { key = []; }
+  try { key = tabl.listKeys?.(ctx.reg)?.map(upper) ?? []; } catch { key = []; }
   return {name: tableName, columns, colType, key, client: columns.has("MANDT")};
 }
 

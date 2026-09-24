@@ -275,6 +275,13 @@ const EXPECT = {
   // 2026-09-24, $ZOSG_TMP_0041, the same code): as for a typed table, and a
   // move into the generic table copies (orig keeps its four rows)
   ZCL_GOGEN_T_GENIDX: "d1:0/3 d9:4/3 r2:0/2/3 r7:4 kept:30 2 30 orig:4",
+  // SELECT from a DDIC view with MANDT: read as a client-dependent table (not
+  // an A4H value: the Open SQL rule, pinned so the view path stays compiled);
+  // a view over a client-dependent table without MANDT is refused
+  ZCL_GOGEN_T_SELVIEW: {Go: "0/1 B:2", JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
+  ZCL_GOGEN_T_SELVIEWN: {
+    Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SELVIEWN=>RUN (zcl_gogen_t_selviewn.clas.abap:11): SELECT FROM ZGOGEN_T_DBWN: a view over the client-dependent ZGOGEN_T_DBW without MANDT at zcl_gogen_t_selviewn.clas.abap:11",
+    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SELVIEWN=>RUN (zcl_gogen_t_selviewn.clas.abap:11): SELECT FROM ZGOGEN_T_DBWN: a view over the client-dependent ZGOGEN_T_DBW without MANDT"},
   ZCL_GOGEN_T_X2S: "a:AB b:00 c:2C d:FF e:[0A0B] f:[DEADBEEF] g:[] h:[0A0] i:FF",
   // SMW0 through the host: WWWDATA_IMPORT and SCMS_BINARY_TO_XSTRING, A4H
   // 2026-09-23 ($ZOSG_TMP_0230) answered this string over an object of its
