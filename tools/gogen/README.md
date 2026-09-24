@@ -661,3 +661,44 @@ only (open-steamgate #45): a read under the CDS name takes its client filter
 from the SQL view (`abap.ClientTable`). `go test ./abap -run Where` pins the
 shape against the pairs file's SFLIGHT-like columns.
 
+
+## Dynamic Open SQL, 2026-09-24
+
+`go/abap/osqlwhere.go` ports `osqlWherePredicate()` of
+`tools/ir-osql-where.mjs` (open-steamgate #47, now on main): the condition
+an ABAP program builds as a string, parsed against the columns of the table
+it reads, as A4H reads it (docs/osql-where.md). `irsql.go` lowers for all
+four dialects of `sqlscript-lower.mjs` (placeholders and LIKE differ;
+PostgreSQL always says ESCAPE), so `go test ./abap -run Osql` checks every
+pair of `test/fixtures/ir-pairs/osql-where.json`: 85 pairs, 36 outcomes
+(the ABAP class, or the refusal reason) and 49 predicates byte for byte in
+sqlite, duckdb, postgres and hana. `ranges.json` is checked in the four
+dialects too.
+
+`SELECT [*|(fields)|f ...] FROM <table>|(name) INTO [CORRESPONDING FIELDS
+OF] TABLE <itab> [WHERE (cond)] [GROUP BY (g)] [ORDER BY (o)|PRIMARY KEY]`
+compiles to `select_dyn`; `go/abap/selectdyn.go` runs it:
+
+- the table from the registry, any case; a CDS name reads through its SQL
+  view (MANDT); a view over a client-dependent table without MANDT is
+  refused, as the static read is;
+- the condition through the parser: CX_SY_DYNAMIC_OSQL_SYNTAX and
+  _SEMANTICS where A4H raised them (catchable, CX_SY_DYNAMIC_OSQL_ERROR
+  takes both), an uncatchable error where A4H dumped, NOT_COMPILED for a
+  refusal; an empty condition is every row, `1 = 1` is _SEMANTICS;
+- `MANDT = sy-mandt` AND'ed for a client-dependent table, every text bound;
+- field lists of columns, `col AS alias` and `SUM / MIN / MAX( col ) AS
+  alias`; GROUP BY and ORDER BY of columns; anything else NOT_COMPILED;
+- the rows moved into the target through its descriptor (by name with
+  CORRESPONDING, else by position), sy-subrc 0 / 4, sy-dbcnt the rows.
+
+Against OSG on Node (main 42755c5, the producers of #48 / #49), the same
+requests on both, with the ICF and status rows Node's start writes copied
+into the Go database (OSGo has no ICF apply and no status refresh):
+ZOSD_ICF_SRV 5 of 5 sets equal, ZOSD_STATUS_SRV 4 of 6 (two carry the
+snapshot's time and memory), ZSTG_SEGW_SRV 54 of 55 sets with the editor's
+`$filter` and `$orderby` plus 12 of 13 filters (LIKE with `#` escapes,
+E-first), the flight cube with and without `$select` aggregation, SE16 90
+of 106 pages. Every other difference is named in ANORMALIES
+(ANOMALY-2026-09-24-dynamic-where-pasted: a CHAR literal cut, `1 = 1`,
+the order of a read without ORDER BY, client 001) or is another subset gap.
