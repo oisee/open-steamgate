@@ -1088,6 +1088,29 @@ an error), and a test that sent none is in-process and not compared.
     OSG_HOME=<checkout> flock <shared lock> node tools/gogen/osgo.mjs   # heavy
     OSG_HOME=<checkout> node tools/gogen/parity.mjs --e2e --out .local/parity/final
     OSG_HOME=<checkout> node tools/gogen/parity.mjs --report-only --out .local/parity/final
+    # inside a wave: mocha suites only, Node reused, 4 at a time (~3.5 min)
+    OSG_HOME=<checkout> node tools/gogen/parity.mjs --fast --out .local/parity/fast \
+        --node-ref .local/parity/final/node-reference.json [--suites a,b] [--changed] [--jobs N]
+
+The Node reference is reused by default: `<ref>.meta.json` records the
+checkout commit, a hash of its tracked diff and the suites in it, and the
+harness says "reused" or "STALE (why)" and runs only what is missing.
+Suites run `--jobs` at a time (default cores / 2), each job with a server
+of its own on `--port + 1 + slot` (4721.. by default); a mocha is a
+process per suite and its probe notes only its own port, so attribution per
+test does not change. `--changed` reruns just the suites OSGo did not pass
+in full last time. Wall time is printed and written per phase.
+
+The harness also guards the checkout's `gen/`: `test/shadowed-objects.mjs`
+calls `compileAll("src", "gen/stg")` in its `describe` body, so even the
+`--dry-run` count of the in-process suites runs it, and its sweep deletes
+the `gen/stg` folders of every model it was not given (the four
+CDS-published services and `zvdb_100`). The previous full run did that to
+the frozen checkout, and an osgo built from it afterwards lost those
+classes (CX_SY_CREATE_OBJECT_ERROR on `ZCL_ZVSTGTRAVEL_MPC_EXT`, 9 tests).
+`gen/` is now copied aside at the start and put back after any phase that
+changed it, with a warning naming what changed; the count is kept in the
+reference's meta, so a reused reference does not run it at all.
 
 Measured on main 6327bab, osgo from this branch (953 classes, 31 methods
 not compiled): **55.6 %** -- 165 of the 297 HTTP-level tests that pass on
