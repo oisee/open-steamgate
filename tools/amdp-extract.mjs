@@ -359,35 +359,50 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
     if (m !== null) tableFunctions.set(m[1].toUpperCase(), m[2].toUpperCase());
   }
 
+  // The database methods are cut out of the TEXT, not out of abaplint's
+  // statements: from `METHOD m BY DATABASE ...` to the first line that is
+  // `ENDMETHOD.`. abaplint lexes a SQLScript body as ABAP, and a body can
+  // put its lexer into a state where the rest of the method is one token a
+  // line -- `endmethod.` among them -- so two methods came out as one and
+  // the second was lost (a corpus class whose SQLScript comment ends in
+  // `] ) }`; HANA then refused the merged body "near <the next method>").
+  // Searched in copies with the ABAP comments blanked, offset for offset:
+  // a `*` line inside a USING list is not a table, a header in a comment is
+  // none. `"` is blanked only where the header is looked for -- in a
+  // SQLScript body it opens a quoted name, not a comment. The body is cut
+  // from the source itself, and ends at the LAST `ENDMETHOD` (pragmas
+  // allowed) before the next METHOD or ENDCLASS: an `ENDMETHOD.` in a
+  // comment of the body comes earlier, and `x = 1; ENDMETHOD.` or
+  // `ENDMETHOD ##NEEDED.` still end it. No ENDMETHOD before that boundary:
+  // the method is left out rather than merged with the next.
   const out = [];
-  let open;
-  for (const st of file.getStatements()) {
-    const kind = st.get().constructor.name;
-    if (kind === "MethodImplementation") {
-      const text = st.concatTokens();
-      if (!/BY\s+DATABASE\s+(PROCEDURE|FUNCTION)/i.test(text)) { open = undefined; continue; }
-      open = {
-        name: /METHOD\s+(\S+)/i.exec(text)?.[1] ?? "",
-        // PROCEDURE or FUNCTION: a table function becomes CREATE FUNCTION ...
-        // RETURNS TABLE(...) in HANA, not a procedure with an OUT parameter
-        dbKind: (/BY\s+DATABASE\s+(PROCEDURE|FUNCTION)/i.exec(text)?.[1] ?? "PROCEDURE").toUpperCase(),
-        forDb: /FOR\s+(\w+)/i.exec(text)?.[1] ?? "",
-        language: /LANGUAGE\s+(\w+)/i.exec(text)?.[1] ?? "",
-        readOnly: /OPTIONS\s+READ-ONLY/i.test(text),
-        usings: (/\bUSING\b([^.]*)/i.exec(text)?.[1] ?? "").split(/[\s,]+/).filter(Boolean),
-        bodyFrom: st.getEnd(),
-      };
-    } else if (kind === "EndMethod" && open !== undefined) {
-      const from = open.bodyFrom, to = st.getStart();
-      const body = lines.slice(from.getRow() - 1, to.getRow())
-        .map((l, i, a) => (i === 0 ? l.slice(from.getCol() - 1) : i === a.length - 1 ? l.slice(0, to.getCol() - 1) : l))
-        .join("\n").trim();
-      const tableFunction = tableFunctions.get(open.name.toUpperCase());
-      out.push({...open, bodyFrom: undefined, body, parameters: defs.get(open.name.toUpperCase()) ?? [],
-        signatureSource: byText.has(open.name.toUpperCase()) ? "text" : definitionSource,
-        ...(tableFunction === undefined ? {} : {tableFunction})});
-      open = undefined;
-    }
+  const starless = source.split("\n").map((line) => (line.startsWith("*") ? " ".repeat(line.length) : line)).join("\n");
+  const blanked = starless.split("\n").map((line) => line.replace(/"[^\n]*$/, (c) => " ".repeat(c.length))).join("\n");
+  const headerAt = /^[ \t]*METHOD\s+([\w\/~]+)\s+BY\s+DATABASE\s+(PROCEDURE|FUNCTION)\b[^.]*\./gim;
+  for (const header of blanked.matchAll(headerAt)) {
+    const text = header[0];
+    const bodyStart = header.index + text.length;
+    const rest = starless.slice(bodyStart);
+    const boundary = /^[ \t]*(?:METHOD\s|ENDCLASS\b)/im.exec(rest);
+    const region = boundary === null ? rest : rest.slice(0, boundary.index);
+    const ends = [...region.matchAll(/\bENDMETHOD(?:\s+##\w+)*\s*\./gi)];
+    if (ends.length === 0) continue;
+    const body = source.slice(bodyStart, bodyStart + ends.at(-1).index).trim();
+    const name = header[1];
+    const tableFunction = tableFunctions.get(name.toUpperCase());
+    out.push({
+      name,
+      // PROCEDURE or FUNCTION: a table function becomes CREATE FUNCTION ...
+      // RETURNS TABLE(...) in HANA, not a procedure with an OUT parameter
+      dbKind: header[2].toUpperCase(),
+      forDb: /FOR\s+(\w+)/i.exec(text)?.[1] ?? "",
+      language: /LANGUAGE\s+(\w+)/i.exec(text)?.[1] ?? "",
+      readOnly: /OPTIONS\s+READ-ONLY/i.test(text),
+      usings: (/\bUSING\b([^.]*)/i.exec(text)?.[1] ?? "").split(/[\s,]+/).filter(Boolean),
+      body, parameters: defs.get(name.toUpperCase()) ?? [],
+      signatureSource: byText.has(name.toUpperCase()) ? "text" : definitionSource,
+      ...(tableFunction === undefined ? {} : {tableFunction}),
+    });
   }
   // Types an AMDP signature uses are often not in the class: the Z80 CPU
   // keeps them in ZIF_Z80_00_AMDP_TYPES. Extra sources contribute theirs, and

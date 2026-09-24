@@ -376,24 +376,25 @@ export function hanaParameterType(abapType, types, store) {
 export function createStatement(body, store) {
   const sig = body.signature;
   const name = `${quote(SCHEMA)}.${quote(`${upper(body.className)}=>${upper(sig.name)}`)}`;
-  const params = (sig.parameters ?? []).map((p) => ({...p, hana: hanaParameterType(p.abapType, body.types, store)}));
+  const params = (sig.parameters ?? []).map((p) => {
+    const hana = hanaParameterType(p.abapType, body.types, store);
+    return {...p, hana, dflt: defaultClause(p, hana)};
+  });
   const language = upper(sig.language || "SQLSCRIPT");
-  // the ABAP compiler strips a full-line ABAP comment (`*` in column one)
-  // from an AMDP body before HANA sees it; SQLScript has no such comment
-  const stripped = String(sig.body ?? body.body).split("\n").map((line) => (line.startsWith("*") ? "" : line)).join("\n");
+  const stripped = withoutAbapCommentLines(String(sig.body ?? body.body));
   // `$ABAP.type( x )` is an AMDP macro: the ABAP compiler writes x's HANA
   // type in its place before HANA sees the body
   const text = stripped.replace(/"?\$ABAP\.type\(\s*([^)]*?)\s*\)"?/gi, (all, inner) =>
     hanaParameterType(inner.replace(/^"|"$/g, ""), body.types, store));
   if (sig.tableFunction) {
     const returns = (sig.returns ?? []).map((c) => `${quote(upper(c.name))} ${hanaParameterType(c.abapType, body.types, store)}`);
-    const args = params.filter((p) => p.direction === "IN").map((p) => `${p.name} ${p.hana}`).join(", ");
+    const args = params.filter((p) => p.direction === "IN").map((p) => `${p.name} ${p.hana}${p.dflt}`).join(", ");
     return [`CREATE FUNCTION ${name} (${args})`, `  RETURNS TABLE (${returns.join(", ")})`,
       `  LANGUAGE ${language}`, "  SQL SECURITY INVOKER", "  READS SQL DATA", "AS BEGIN", text, "END"].join("\n");
   }
   const returning = params.find((p) => p.direction === "RETURNING");
   if (returning !== undefined || upper(sig.dbKind) === "FUNCTION") {
-    const args = params.filter((p) => p.direction === "IN").map((p) => `${p.name} ${p.hana}`).join(", ");
+    const args = params.filter((p) => p.direction === "IN").map((p) => `${p.name} ${p.hana}${p.dflt}`).join(", ");
     // a table comes back as `RETURNS TABLE (...)`, a scalar as `RETURNS name type`
     const out = params.filter((p) => p.direction === "RETURNING")
       .map((p) => (/^TABLE\b/.test(p.hana) ? p.hana : `${p.name} ${p.hana}`)).join(", ");
@@ -413,11 +414,69 @@ export function createStatement(body, store) {
       args.push(`IN ${quote(`${n}__IN__`)} ${p.hana}`, `OUT ${quote(n)} ${p.hana}`);
       prologue.push(`${quote(n)} = SELECT * FROM :${quote(`${n}__IN__`)};`);
     } else {
-      args.push(`${p.direction === "INOUT" ? "INOUT" : p.direction} ${p.name} ${p.hana}`);
+      args.push(`${p.direction === "INOUT" ? "INOUT" : p.direction} ${p.name} ${p.hana}${p.direction === "IN" ? p.dflt : ""}`);
     }
   }
   return [`CREATE PROCEDURE ${name} (${args.join(", ")})`, `  LANGUAGE ${language}`, "  SQL SECURITY INVOKER",
     sig.readOnly ? "  READS SQL DATA" : "", "AS BEGIN", ...prologue, "BEGIN", text, "END;", "END"].filter((x) => x !== "").join("\n");
+}
+
+/**
+ * The body as the kernel hands it to HANA: a full-line ABAP comment (`*` in
+ * column one) is removed -- but not inside a SQLScript block comment, where
+ * the line in column one that closes the comment (star, slash) is kept
+ * (read off a generated procedure on A4H, 2026-09-24: its body ends with
+ * `end if;`, that closing line, `end;`), and not inside a string. The SQLScript lexer draws the same line
+ * (tools/sqlscript/lexer.mjs reads a block comment whole).
+ */
+export function withoutAbapCommentLines(text) {
+  let out = "";
+  let state = "code"; // code | block | line | string | quoted
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const lineStart = i === 0 || text[i - 1] === "\n";
+    if (state === "code" && lineStart && c === "*") {
+      while (i < text.length && text[i] !== "\n") i++;
+      if (i < text.length) out += "\n";
+      continue;
+    }
+    out += c;
+    if (state === "code") {
+      if (c === "-" && text[i + 1] === "-") state = "line";
+      else if (c === "/" && text[i + 1] === "*") { out += "*"; i++; state = "block"; }
+      else if (c === "'") state = "string";
+      else if (c === '"') state = "quoted";
+    } else if (state === "block") {
+      if (c === "*" && text[i + 1] === "/") { out += "/"; i++; state = "code"; }
+    } else if (state === "line") {
+      if (c === "\n") state = "code";
+    } else if (state === "string") {
+      if (c === "'") { if (text[i + 1] === "'") { out += "'"; i++; } else state = "code"; }
+    } else if (state === "quoted") {
+      if (c === '"') state = "code";
+    }
+  }
+  return out;
+}
+
+/**
+ * The DEFAULT the kernel writes for an IN parameter, read off generated
+ * procedures on A4H (SYS.PROCEDURES, 2026-09-24): an ABAP `DEFAULT 1` on an
+ * INTEGER is `DEFAULT '1'` -- the literal's text, quoted -- and an optional
+ * table parameter is `DEFAULT EMPTY`. Without it a caller that leaves the
+ * parameter out is refused ("IV_X is not bound"), which the stand used to
+ * count as HXE refusing the caller. A default that is a constant or a
+ * system field (abap_true, sy-datum) is not measured and gets none.
+ */
+export function defaultClause(p, hana) {
+  const table = /^TABLE\b/i.test(hana ?? "") || /#ttyp"?$/.test(hana ?? "");
+  if (table) return p.optional || p.default !== undefined ? " DEFAULT EMPTY" : "";
+  const text = p.default;
+  if (text === undefined) return "";
+  if (/^[-+]?\d+(?:\.\d+)?$/.test(text)) return ` DEFAULT '${text}'`;
+  const quoted = /^'((?:[^']|'')*)'$/.exec(text);
+  if (quoted !== null) return ` DEFAULT '${quoted[1]}'`;
+  return "";
 }
 
 /** what a HANA error says is missing, or undefined */

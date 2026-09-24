@@ -4,7 +4,7 @@
 // no corpus here: a clean-room class over SFLIGHT's shapes.
 import {expect} from "chai";
 import {typesOfSource, createStatement, hanaOfDdic, TypeGap, classify, missingObject,
-  readCatalog, readExtraDdic} from "../tools/amdp-corpus-oracle.mjs";
+  readCatalog, readExtraDdic, defaultClause, withoutAbapCommentLines} from "../tools/amdp-corpus-oracle.mjs";
 
 const SOURCE = `CLASS zcl_flight_demo DEFINITION PUBLIC.
   PUBLIC SECTION.
@@ -24,6 +24,39 @@ const body = (parameters, text, extra = {}) => ({
 });
 
 describe("the corpus oracle: the kernel's form of a created procedure", () => {
+  it("removes a `*` line as the kernel does, but not inside a block comment or a string", () => {
+    expect(withoutAbapCommentLines("* note\nx = 1;\n")).to.equal("\nx = 1;\n");
+    // A4H kept the `*/` in column one that closes a block comment
+    expect(withoutAbapCommentLines("/*\n  old code;\n*/\ny = 2;")).to.equal("/*\n  old code;\n*/\ny = 2;");
+    expect(withoutAbapCommentLines("s = 'a\n* b';\n* gone\n")).to.equal("s = 'a\n* b';\n\n");
+    expect(withoutAbapCommentLines("x = 1; -- a /* in a line comment\n* gone\n")).to.equal("x = 1; -- a /* in a line comment\n\n");
+  });
+
+    it("writes an IN parameter's DEFAULT as the kernel does: the literal quoted, an optional table EMPTY", () => {
+    // read off generated procedures on A4H: DEFAULT 1 on an INTEGER is
+    // DEFAULT '1'; an optional table is DEFAULT EMPTY
+    const sql = createStatement(body([
+      {name: "iv_top", direction: "IN", abapType: "i", default: "1"},
+      {name: "iv_flag", direction: "IN", abapType: "ty_name", default: "'X'"},
+      {name: "it_rows", direction: "IN", abapType: "tt_rows", optional: true},
+      {name: "iv_plain", direction: "IN", abapType: "i"},
+      {name: "et_rows", direction: "OUT", abapType: "tt_rows"},
+    ], "et_rows = SELECT * FROM :it_rows;"), undefined);
+    expect(sql).to.contain("IN iv_top INTEGER DEFAULT '1'");
+    expect(sql).to.contain("IN iv_flag NVARCHAR(20) DEFAULT 'X'");
+    expect(sql).to.contain('IN it_rows TABLE ("CARRID" NVARCHAR(3), "SEATSMAX" INTEGER) DEFAULT EMPTY');
+    expect(sql).to.contain("IN iv_plain INTEGER,");
+    expect(sql).not.to.match(/et_rows[^,)]*DEFAULT/);
+    // an optional OUT with a default gets none: DEFAULT is an input's
+    const out = createStatement(body([
+      {name: "ev_n", direction: "OUT", abapType: "i", optional: true, default: "1"},
+    ], "ev_n = 1;"), undefined);
+    expect(out).not.to.contain("DEFAULT");
+    // a constant or a system field is not measured: no DEFAULT at all
+    expect(defaultClause({default: "abap_true"}, "NVARCHAR(1)")).to.equal("");
+    expect(defaultClause({default: "sy-datum"}, "NVARCHAR(8)")).to.equal("");
+  });
+
   it("reads chained TYPES, a table of a structure and a scalar alias", () => {
     const types = typesOfSource(SOURCE);
     expect(types.get("TY_ROW")).to.deep.include({kind: "structure"});
@@ -117,5 +150,44 @@ describe("the corpus oracle: shapes read off a system, and HANA's refusals sorte
     expect(classify("sql syntax error: incorrect syntax near \"TABLE\": line 2 col 18", 5)).to.equal("signature");
     expect(classify("sql syntax error: incorrect syntax near \"FOR\": line 9 col 3", 5)).to.equal("hxe-refuses");
     expect(classify("something nobody expected")).to.equal("other");
+  });
+});
+
+describe("the corpus oracle: a signature declared elsewhere", () => {
+  it("takes a REDEFINITION's parameters from the superclass, and an interface method's from the interface", async () => {
+    const {inheritedSignatures} = await import("../tools/sqlscript/coverage.mjs");
+    const classSources = new Map([
+      ["ZCL_CHILD", `CLASS zcl_child DEFINITION INHERITING FROM zcl_mid.
+  PUBLIC SECTION.
+    METHODS get_max FINAL REDEFINITION.
+    INTERFACES zif_exit.
+ENDCLASS.`],
+      ["ZCL_MID", "CLASS zcl_mid DEFINITION INHERITING FROM zcl_base ABSTRACT.\nENDCLASS."],
+      ["ZCL_BASE", `CLASS zcl_base DEFINITION ABSTRACT.
+  PUBLIC SECTION.
+    TYPES: BEGIN OF ty_row, id TYPE i, END OF ty_row,
+           tt_rows TYPE STANDARD TABLE OF ty_row WITH EMPTY KEY.
+    METHODS get_max ABSTRACT
+      IMPORTING VALUE(iv_id) TYPE i VALUE(it_rows) TYPE tt_rows
+      EXPORTING VALUE(ev_max) TYPE i.
+ENDCLASS.`],
+    ]);
+    const interfaceSources = new Map([["ZIF_EXIT", `INTERFACE zif_exit PUBLIC.
+  METHODS process IMPORTING VALUE(iv_name) TYPE string EXPORTING VALUE(ev_value) TYPE string.
+ENDINTERFACE.`]]);
+    const bodies = [
+      {className: "ZCL_CHILD", signature: {name: "get_max", parameters: []}, types: new Map([["TY_ROW", {kind: "structure", components: [{name: "own", abapType: "i"}]}]])},
+      {className: "ZCL_CHILD", signature: {name: "zif_exit~process", parameters: []}, types: new Map()},
+      {className: "ZCL_CHILD", signature: {name: "not_declared_anywhere", parameters: []}, types: new Map()},
+    ];
+    expect(inheritedSignatures(bodies, classSources, interfaceSources)).to.equal(2);
+    expect(bodies[0].signature.parameters.map((p) => [p.name.toUpperCase(), p.direction])).to.deep.equal([["IV_ID", "IN"], ["IT_ROWS", "IN"], ["EV_MAX", "OUT"]]);
+    expect(bodies[0].signature.signatureSource).to.equal("superclass");
+    expect([bodies[0].types.has("TY_ROW"), bodies[0].types.has("TT_ROWS")]).to.deep.equal([true, true]);
+    // the class's own type wins a name it shares with an ancestor
+    expect(bodies[0].types.get("TY_ROW").components[0].name).to.equal("own");
+    expect(bodies[1].signature.parameters.map((p) => p.name.toUpperCase())).to.deep.equal(["IV_NAME", "EV_VALUE"]);
+    expect(bodies[1].signature.signatureSource).to.equal("interface");
+    expect(bodies[2].signature.parameters).to.deep.equal([]);
   });
 });
