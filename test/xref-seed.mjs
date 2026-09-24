@@ -140,7 +140,10 @@ describe("tools/osd-xref-seed: the cross-reference on every host", function () {
       select: async () => ({rows: []}),
     };
     const said = [];
+    // what setup left open is committed with the registry, and said
+    hana.inTransaction = true;
     const registry = await applyAtStartup(hana, {root: process.cwd(), say: (l) => said.push(l)});
+    expect(said.join("\n")).to.contain("a transaction was already open at start");
     expect(registry, said.join("\n")).to.be.an("array");
     expect(hana.inTransaction, "the ICF registry left its transaction open").to.equal(false);
     const seeded = await seedAtStartup(hana, {root: process.cwd(), say: (l) => said.push(l)});

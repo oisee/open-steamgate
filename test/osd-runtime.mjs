@@ -104,6 +104,57 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     }
   });
 
+  // within a bound: the failure these guard against is a promise that never
+  // settles, and a case that hangs reports nothing
+  const settles = (promise, ms = 30000) => Promise.race([
+    promise.then(() => "settled", () => "settled"),
+    new Promise((resolve) => setTimeout(() => resolve("HANGS"), ms)),
+  ]);
+  const serving = () => liveChildren().filter((c) => c.exitCode === null && c.signalCode === null).length;
+
+  it("a stop during a recycle, and a recycle during a stop, both settle and leave nothing running", async () => {
+    // Found by review of #60: stop() awaited the recycle and the recycle
+    // awaited the stop, so `recycle(); stop();` never settled, and every
+    // start() and ensure() after it waited behind them.
+    for (const order of ["recycle, stop", "stop, recycle"]) {
+      const runtime = new ServingRuntime();
+      try {
+        await runtime.start();
+        const [a, b] = order === "recycle, stop"
+          ? [runtime.recycle(), runtime.stop()]
+          : [runtime.stop(), runtime.recycle()];
+        expect(await settles(Promise.all([settles(a), settles(b)]).then(([x, y]) => (x === "settled" && y === "settled" ? undefined : Promise.reject()))), order).to.equal("settled");
+        expect(serving(), `${order}: a process left running`).to.equal(0);
+        expect(runtime.running, order).to.equal(false);
+        // and the runtime is usable afterwards, not wedged behind them
+        expect(await settles(runtime.ensure()), `${order}: ensure after`).to.equal("settled");
+        expect(serving(), order).to.equal(1);
+      } finally {
+        await settles(runtime.stop());
+      }
+    }
+  });
+
+  it("requests joining a start that fails do not leave an unhandled rejection", async () => {
+    // Found by review of #60: a joined spawn attached `.then(undefined,
+    // undefined)`, a derived promise nobody caught, and a child that died
+    // before "ready" became an unhandled rejection -- which ends a process.
+    const unhandled = [];
+    const trap = (reason) => unhandled.push(reason);
+    process.on("unhandledRejection", trap);
+    const runtime = new ServingRuntime();
+    runtime.command = [process.execPath, "-e", "process.exit(3)"];
+    try {
+      const answers = await Promise.allSettled([runtime.ensure(), runtime.ensure(), runtime.start()]);
+      expect(answers.map((a) => a.status)).to.deep.equal(["rejected", "rejected", "rejected"]);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(unhandled.map(String)).to.deep.equal([]);
+    } finally {
+      process.off("unhandledRejection", trap);
+      await settles(runtime.stop());
+    }
+  });
+
   it("a start and the requests that arrive while it comes up are one process", async () => {
     // Found by the image's DuckDB check: the facade starts the runtime at
     // listen, an OData request or the status refresh calls ensure() before
