@@ -244,6 +244,9 @@ other step takes**: on Node the step queue of osg-i7's PR in
 the daemon's own. The queue is released for the length of a `WAIT` and taken
 again after it. Inside the lock, `dialogStep` / `DialogStep` commits on
 return and rolls back on a dump, unless P7 says a system does otherwise.
+The rule lives in the module every host already imports (CLAUDE.md, "A
+rule written once ... does not survive the second caller"), so the daemon
+driver calls it rather than repeating it.
 
 The daemon runs **in the host process and on its thread**, not in a thread
 or process of its own (decision D4, model (b)). What a system gives a
@@ -254,9 +257,9 @@ the rule against state that outlives a call and crosses sessions without
 paying for isolation. The guard exempts the runtime's own classes (the
 daemon host, PCP, the timer manager, AMC, the kernel classes of
 open-abap-core), which keep process state on purpose; everything else a
-daemon step reaches is checked. The rule lives in the module every
-host already imports (CLAUDE.md, "A rule written once ... does not survive
-the second caller"), so the daemon driver calls it rather than repeating it.
+daemon step reaches is checked. **How the guard is enforced is not proven
+yet** (see "Statics" under Node): it is the rule the design commits to, and
+its mechanism is the first thing step 5 has to demonstrate.
 
 ### Node
 
@@ -276,10 +279,13 @@ the second caller"), so the daemon driver calls it rather than repeating it.
   step it is blocking could send. On a system `WAIT` rolls the session out
   and frees the work process, so here the lock is released for the length
   of the wait and taken again before the step goes on. The LUW side already
-  matches: `@abaplint/runtime` `statements/wait.js` (line 9,
-  `implicitCommit`) commits every open connection before it sleeps, which
-  is the database commit a roll-out implies. osg-i7's queue is built with
-  this release; the daemon driver uses the same one.
+  matches: `@abaplint/runtime` `statements/wait.js` commits every open
+  connection before it sleeps (`implicitCommit`, the `commit()` call at
+  line 9), which is the database commit a roll-out implies. After
+  osg-i7's dialog-step lock PR (#TBD), a `WAIT` inside a step no longer does this in the runtime's
+  JavaScript alone: it goes through `installWait` in
+  `tools/osd-dialog-step.mjs`, which releases the lock around the wait. The
+  daemon driver uses the same queue and the same release.
 - **The transpiler's async model.** Every ABAP method is an `async`
   function; a callback yields only at `await` points (database, `WAIT`,
   HTTP). Nothing preempts a busy loop, so a daemon that computes for a
@@ -307,16 +313,36 @@ the second caller"), so the daemon driver calls it rather than repeating it.
   accept frames that did not come from `on_message`; the waiting side needs
   `KERNEL_PUSH_CHANNELS=>wait` to see a delivered message instead of only
   polling a condition (it can keep polling at 100 ms in a first version).
-- **Statics: a guard, not isolation.** The daemon runs in the work
-  process, so it could see the class statics of the requests it shares the
-  process with. The step sets a flag in `abap.context` for its length, and
-  the host, once at load, puts an accessor over the static attributes of
-  every class outside the runtime's own: a read or a write while the flag
-  is set raises a runtime error that names the class and the attribute and
-  goes to the dumps list (cost of the accessor on ordinary requests: to
-  measure; a transpiler option emitting the check at the access would be
-  the cheaper form later). Decision D4.
-- **Why not a `worker_threads` worker per daemon by default.** It would
+- **Statics: a guard, not isolation, and the guard is unproven.** The
+  daemon runs in the work process, so it could see the class statics of the
+  requests it shares the process with. The step sets a flag in
+  `abap.context` for its length, and a read or a write of a static
+  attribute of a class outside the runtime's own while the flag is set
+  raises a runtime error that names the class and the attribute and goes to
+  the dumps list. Two ways to enforce it, neither built:
+  - **The primary path: a transpiler option** that emits the check at the
+    access in the ABAP source, where the transpiler knows whether the
+    statement really is a read or write of class data. It is an option of
+    the transpiler, so it is an upstream change (a branch in
+    `abaplint/transpiler`, CLAUDE.md), and its cost is one flag test per
+    static access, to measure.
+  - **A prototype only: an accessor** put once at load over every static
+    attribute. It has two holes found by reading, and each alone is enough
+    not to rely on it. **A false positive:** transpiled constructors copy
+    statics into instance fields (`this.gt_by_uuid =
+    zcl_stg_segw_gen.gt_by_uuid;` at line 1208 of
+    `output/zcl_stg_segw_gen.clas.mjs`), so merely creating such an object
+    inside a daemon step reads a static through the getter and dumps,
+    though the ABAP never named the static. **A miss:** a data reference,
+    a field symbol or an alias taken outside the step (in `ON_START`'s
+    caller, or held in an instance attribute of the daemon) reaches the
+    same value without going through the accessor at all.
+  The transpiler path closes the first hole (it checks the statement, not
+  the property) and narrows the second to references taken before the
+  step, which the P9 probe and the ANORMALIES entry must name as a known
+  gap. Decision D4.
+- **Why not a thread per daemon by default** (the counter-argument that
+  decided D4; a `worker_threads` worker remains possible as an opt-in). It would
   give each daemon its own statics, but also its own database connection,
   and with the default database that breaks the daemon. The default SQLite
   is in-memory sql.js, so a second connection is a second, separate copy:
@@ -385,11 +411,16 @@ works:
   which is exported and kept) say which daemons were running, and they are
   restarted with `ON_RESTART`, the same path as a generation swap.
 
-Model (b) fits the worker as it is: there are no `worker_threads` in a
-service worker, and none are needed. The daemon runs in the worker's one
-thread, its callbacks go through the `serialized( )` queue that
-`web/preview-backend.mjs` already has for requests, and the class-data guard
-is the same accessor as on Node.
+Model (b) fits the worker: there are no `worker_threads` in a service
+worker, and none are needed; the daemon runs in the worker's one thread.
+But the preview is not ready for it as it stands. Today `openChannel`,
+`channelMessage` and `closeChannel` (`web/preview-backend.mjs`, lines
+201-240) bypass both `serialized( )` and `dialogStep`, and `serialized( )`
+is not released on `WAIT`. osg-i7's dialog-step lock PR (#TBD) changes that: APC callbacks go through
+`dialogStep`, the lock is released on `WAIT`, and a database reset runs
+under the lock exclusively. The daemon's callbacks in the preview are built
+on that PR, the same queue as on Node, and the class-data guard is the
+same transpiler check.
 
 The recommendation is to support it as that, say so on the page, and not
 chase more: nothing in the browser will keep a background object alive
@@ -449,12 +480,21 @@ Under option A, precisely:
    says so:
    - **Exactly once for the database effects of a step with a single
      commit**, the one at its end. A step can commit in the middle:
-     `WAIT UP TO` does (`@abaplint/runtime` `statements/wait.js`, line 17,
-     `implicitCommit`), and `COMMIT WORK` may be allowed in a daemon (P7).
-     So the ID is written at **every** commit point of a daemon step, not
-     only at the end, and a replay of a step killed after a mid-step commit
-     resumes nothing: it is dropped, and the part after the commit is lost
-     as it would be on a system whose session died there.
+     `WAIT UP TO` does (`@abaplint/runtime` `statements/wait.js`,
+     `implicitCommit`, the `commit()` call at line 9), and `COMMIT WORK` may
+     be allowed in a daemon (P7). So the ID is written at **every** commit
+     point of a daemon step, not only at the end. The hook for the `WAIT`
+     case is `installWait` in `tools/osd-dialog-step.mjs` from osg-i7's dialog-step lock PR (#TBD):
+     a `WAIT` inside a step passes through it, so it writes the ID into the
+     LUW just before the commit it triggers. For `COMMIT WORK` the same
+     write goes into the host's commit path of the daemon step.
+   - **A step killed after a mid-step commit is dropped, not resumed, and
+     that leaves the daemon half-done.** What it committed before the kill
+     stays; what came after is lost. There is no redo and no undo. The
+     daemon must tolerate that state on its next callback, exactly as a
+     daemon on a system must tolerate a session that died after a
+     `COMMIT WORK`: write in steps that are each consistent on their own,
+     or record progress and check it in `ON_RESTART`.
    - **At least once for effects outside the database**: an AMC message
      published at `SEND` (if P8 says a system does that), outbound HTTP, a
      live RFC call, anything the step did before a kill that the rollback
@@ -595,7 +635,7 @@ cost here (the APC host, the RFC channel, the pool).
 | 2 | PCP: `IF_AC_MESSAGE_TYPE_PCP`, `CL_AC_MESSAGE_TYPE_PCP`, the serialiser, tested against captured bytes | 1 |
 | 3 | timers: `CL_ABAP_TIMER_MANAGER` and the host hook, first inside stateful APC sessions (no daemon needed to prove them) | 1 |
 | 4 | AMC in one process: producer, consumer, `WAIT FOR MESSAGING CHANNELS`, the APC binding delivering to a socket, the `SAMC` reader | 1.5 |
-| 5 | the daemon host (ABAP), the client manager, the Node driver (mailbox on the shared step queue, restart policy from P3/P4), the class-data guard, the registry (D9) | 2 |
+| 5 | the daemon host (ABAP), the client manager, the Node driver (mailbox on the shared step queue, restart policy from P3/P4), the class-data guard (first proving it, as a transpiler option sent upstream; the accessor only as a prototype), the registry (D9) | 2 |
 | 6 | the stable layer on Node: mailboxes and the AMC broker in the supervisor, IPC to the children, the pool, the swap phase in `recycle()`, the ack after commit and the message-ID dedup, restart from the registry | 2.5 |
 | 7 | status list and `ps`; the demo, its page and `test/daemon.mjs` | 1.5 |
 | 8 | OSGo: `DaemonStep` under `WorkProcess`, goroutine and channels, timers, the class-data check in gogen, restart from rows on process start; the same test file green | 1.5 |
