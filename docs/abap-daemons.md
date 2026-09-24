@@ -174,7 +174,7 @@ they differ from what the runtime does. The same test classes then run here
 unchanged and must pass, which is what makes them able to fail.
 
 A daemon's callbacks run asynchronously, so a probe observes them through a
-log table of its own (`ZOSG_DAEMON_LOG`: instance, callback, sequence,
+log table of its own (`ZOSD_DAEMON_LOG`: instance, callback, sequence,
 timestamp in microseconds, `sy-uname`, `sy-mandt`, a free text) and the test
 polls it with `WAIT UP TO` (or `WAIT FOR MESSAGING CHANNELS` where AMC is
 the subject).
@@ -603,9 +603,9 @@ existing APC channel through AMC.** It proves every piece in one path:
 
 | piece | object |
 | --- | --- |
-| the daemon | `ZCL_STG_DAEMON_TICKER`, inheriting `CL_ABAP_DAEMON_EXT_BASE` and implementing `IF_ABAP_TIMER_HANDLER`. `ON_START` / `ON_RESTART` arm a timer (start parameter field `interval`, default 1000 ms). `ON_TIMEOUT` reads the counters (trip count per pickup borough from the taxi facts, or the demo's travel count where the taxi data is absent), publishes them as a PCP message with a sequence number, the instance's restart count and the generation, and re-arms. `ON_MESSAGE` takes `interval` and `pause` fields. |
-| the channel | `ZSTG_TICKER`, an AMC application with channel `/counters`, message type PCP (`*.samc.xml`) |
-| the socket | `ZCL_STG_APC_TICKER`, a stateless PCP APC handler whose `ON_START` binds the connection to `/counters` and which otherwise does nothing: every frame the page sees came through AMC, none through `on_message` |
+| the daemon | `ZCL_OSD_DAEMON_TICKER`, inheriting `CL_ABAP_DAEMON_EXT_BASE` and implementing `IF_ABAP_TIMER_HANDLER`. `ON_START` / `ON_RESTART` arm a timer (start parameter field `interval`, default 1000 ms). `ON_TIMEOUT` reads the counters (trip count per pickup borough from the taxi facts, or the demo's travel count where the taxi data is absent), publishes them as a PCP message with a sequence number, the instance's restart count and the generation, and re-arms. `ON_MESSAGE` takes `interval` and `pause` fields. |
+| the channel | `ZOSD_TICKER`, an AMC application with channel `/counters`, message type PCP (`*.samc.xml`) |
+| the socket | `ZCL_OSD_APC_TICKER`, a stateless PCP APC handler whose `ON_START` binds the connection to `/counters` and which otherwise does nothing: every frame the page sees came through AMC, none through `on_message` |
 | the controls | an ICF node (or a function import on an existing service) that calls `CL_ABAP_DAEMON_CLIENT_MANAGER=>START`, `ATTACH`+`SEND` and `STOP` |
 | the page | `webapp/ticker/`, a launchpad tile: the counters, the sequence number, the generation and the restart count, and a reconnect when the socket closes |
 
@@ -663,6 +663,16 @@ decisions below.
 Alice decided all nine as recommended on 2026-09-24. The steps
 start with step 2 (step 1 is #75), and the A4H probes P0 to P11 go
 as one batch before anything relies on them.
+
+Naming (Alice, 2026-09-24). Every object of our own uses the OSD prefix in
+the Z namespace: `ZOSD_*` tables (the registry `ZOSD_DAEMON`, the
+acknowledgements `ZOSD_DAEMON_ACK`, the mailbox `ZOSD_DAEMON_MSG`, the
+probes' `ZOSD_DAEMON_LOG`, the ticker's `ZOSD_TICKER`), `ZCL_OSD_*` classes
+and `ZIF_OSD_*` interfaces. A system keeps its own daemon state
+(`ABAP_DAEMON_RT`, `ABAP_DAEMON_ST`), which we do not copy. The public API
+keeps SAP's names (`CL_ABAP_DAEMON_EXT_BASE`, `ABAP_DAEMON_INFO`), as
+open-abap-core does for the classes it reimplements. Which of these may be
+deployed to a system is decided by the deploy manifest, not by the name.
 
 | # | decision | decided (as recommended) |
 | --- | --- | --- |
