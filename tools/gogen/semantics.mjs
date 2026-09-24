@@ -254,6 +254,34 @@ const EXPECT = {
   // ($ZOSG_TMP_0022; the copy leaves out the probe's TRY around hex1( -1 ),
   // which raised nothing there, and sets x'0A0B' as 2571 and x'DEADBEEF' as a
   // constant: c -> x is not in the subset): the demo's outro stopped on INT_TO_HEX
+  // FIND IN SECTION [OFFSET] [LENGTH] OF a string and FIND [REGEX] IN TABLE
+  // of strings (A4H 2026-09-24, $ZOSG_TMP_0041, the same code with CATCH
+  // cx_root printing the class): MATCH OFFSET counts from the start of the
+  // string; an offset at the end is an empty section; offset < 0, offset past
+  // the end, a section past the end and LENGTH < -1 raise; LENGTH -1 is the
+  // rest; an empty substring is found at the start (x1, x2: plain FIND too);
+  // IN TABLE goes row by row, first row with a match, MATCH LINE from 1
+  ZCL_GOGEN_T_FINDSEC: "a:0/5/1 b:0/2/1 c:4/99/98 d:4/99/98 e:\\CLASS=CX_SY_RANGE_OUT_OF_BOUNDS f:\\CLASS=CX_SY_RANGE_OUT_OF_BOUNDS g:4/99/98 h:0/5/1 i:4/99/98 j:0/2/1 k:\\CLASS=CX_SY_RANGE_OUT_OF_BOUNDS l:0/2/1 m:4/99/98 n:4/99/98 p:0/1/0 p2:4/99/98 p3:0/6/1 q:0/SUM/2/2 r:0/max/3/1 s:4/keep/99 s2:0/a/ u:4/keep/99 v:4/99 w:0/2/1 w2:0/2/1"
+    + " x1:0/0/0 x2:0/0/0 l3:\\CLASS=CX_SY_RANGE_OUT_OF_BOUNDS l4:0/5/1 l5:0/7/0 l6:0/7/0",
+  // a c literal of digits into p DECIMALS 0 (CONSTANTS ... TYPE timestamp
+  // VALUE '...', leading zeros dropped) and p compared with p and with i
+  // (A4H 2026-09-24, $ZOSG_TMP_0041, the same code): the SADL MPCs' dates
+  ZCL_GOGEN_T_PCMP: "c:20260912010000 z:12 v:20260912010001 gt lt eq ne zi ilt neg init",
+  // CREATE DATA ... TYPE <static type> / TYPE STANDARD TABLE OF <ddic
+  // table>: a new initial value each time, a reference kept apart from the
+  // next CREATE (A4H 2026-09-24, $ZOSG_TMP_0041, the same code)
+  ZCL_GOGEN_T_CRDATA: "t000:0 tt:1 fresh:0 kept:1 n0:0 n1:42 n2:0",
+  // DELETE / READ TABLE ... INDEX on a generic STANDARD TABLE (A4H
+  // 2026-09-24, $ZOSG_TMP_0041, the same code): as for a typed table, and a
+  // move into the generic table copies (orig keeps its four rows)
+  ZCL_GOGEN_T_GENIDX: "d1:0/3 d9:4/3 r2:0/2/3 r7:4 kept:30 2 30 orig:4",
+  // SELECT from a DDIC view with MANDT: read as a client-dependent table (not
+  // an A4H value: the Open SQL rule, pinned so the view path stays compiled);
+  // a view over a client-dependent table without MANDT is refused
+  ZCL_GOGEN_T_SELVIEW: {Go: "0/1 B:2", JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
+  ZCL_GOGEN_T_SELVIEWN: {
+    Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SELVIEWN=>RUN (zcl_gogen_t_selviewn.clas.abap:11): SELECT FROM ZGOGEN_T_DBWN: a view over the client-dependent ZGOGEN_T_DBW without MANDT at zcl_gogen_t_selviewn.clas.abap:11",
+    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SELVIEWN=>RUN (zcl_gogen_t_selviewn.clas.abap:11): SELECT FROM ZGOGEN_T_DBWN: a view over the client-dependent ZGOGEN_T_DBW without MANDT"},
   ZCL_GOGEN_T_X2S: "a:AB b:00 c:2C d:FF e:[0A0B] f:[DEADBEEF] g:[] h:[0A0] i:FF",
   // SMW0 through the host: WWWDATA_IMPORT and SCMS_BINARY_TO_XSTRING, A4H
   // 2026-09-23 ($ZOSG_TMP_0230) answered this string over an object of its

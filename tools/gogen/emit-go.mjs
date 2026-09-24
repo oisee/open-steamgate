@@ -111,7 +111,7 @@ function descFuncs() {
       out.push(`var ${d.name} = &abap.Type{}`);
       if (t.k === "table") {
         const g = goType(t);
-        inits.push(`\t*${d.name} = abap.Type{Kind: 'h', Row: ${desc(t.row)}, Lines: func(p any) int { return len(*p.(*${g})) }, At: func(p any, i int) any { return &(*p.(*${g}))[i] }, ${t.hashed ? "" : `Append: func(p any) any { *p.(*${g}) = append(*p.(*${g}), ${zero(t.row)}); return &(*p.(*${g}))[len(*p.(*${g}))-1] }, `}${copyZero(t)}}`);
+        inits.push(`\t*${d.name} = abap.Type{Kind: 'h', Row: ${desc(t.row)}, Lines: func(p any) int { return len(*p.(*${g})) }, At: func(p any, i int) any { return &(*p.(*${g}))[i] }, ${t.hashed ? "" : `Append: func(p any) any { *p.(*${g}) = append(*p.(*${g}), ${zero(t.row)}); return &(*p.(*${g}))[len(*p.(*${g}))-1] }, Delete: func(p any, i int) { *p.(*${g}) = append((*p.(*${g}))[:i], (*p.(*${g}))[i+1:]...) }, `}${copyZero(t)}}`);
       } else {
         const fs = STRUCTDEFS.get(t.go)?.fields ?? [];
         // a structure with a string, a table or a reference in it is deep: 'v' (A4H)
@@ -912,6 +912,9 @@ function stmtLines(st, ctx, d) {
       return [`${t}abap.ClearData(${expr(st.target, ctx)})`];
     case "get_ref":
       return [`${t}${place(st.target, ctx)} = ${expr(st.value, ctx)}`];
+    // CREATE DATA ... TYPE <static type> (ultra/sadl): a new initial value
+    case "create_data":
+      return [`${t}${place(st.target, ctx)} = abap.Data{P: new(${goType(st.type)}), T: ${desc(st.type)}}`];
     case "describe_kind":
       return [`${t}${place(st.target, ctx)} = string(${expr(st.x, ctx)}.T.Kind)`];
     case "move_corr_data":
@@ -923,6 +926,14 @@ function stmtLines(st, ctx, d) {
     case "condense": {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps})`];
+    }
+    // DELETE / READ TABLE ... INDEX on a generic table (ultra/sadl, the SADL DPC's paging)
+    case "delete_index_data":
+      return [`${t}if abap.DeleteIndex(${expr(st.table, ctx)}, ${expr(st.index, ctx)}) {`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+    case "read_index_data": {
+      const n = `idx${ctx.loop++}`;
+      return [`${t}if ${n}, tb${n} := ${expr(st.index, ctx)}, ${expr(st.table, ctx)}; ${n} >= 1 && int(${n}) <= abap.Lines(tb${n}) {`,
+        `${t}\t${ident(st.fs)} = abap.Row(tb${n}, int(${n}-1))`, `${t}\ts.Sy.Subrc = 0`, `${t}\ts.Sy.Tabix = ${n}`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
     case "loop_data": return withBuilders(st.body, ctx, t, () => {
       const n = ctx.loop++;
@@ -1031,8 +1042,13 @@ function stmtLines(st, ctx, d) {
         `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
     }
     case "find": {
-      const lines = [`${t}{`, `${t}\tfok, foff, flen, fsub := abap.FindStmt(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length})`,
-        `${t}\t_, _, _ = foff, flen, fsub`, `${t}\tif fok {`, `${t}\t\ts.Sy.Subrc = 0`];
+      // IN TABLE and IN SECTION (ultra/sadl): see abap.FindTable / abap.FindSection
+      const call = st.table ? `fok, fline, foff, flen, fsub := abap.FindTable(${expr(st.table, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length})`
+        : "secOff" in st ? `fok, foff, flen, fsub := abap.FindSection(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.icase}, ${st.secOff ? expr(st.secOff, ctx) : "0"}, ${st.secLen ? expr(st.secLen, ctx) : "-1"}, ${st.subs.length})`
+          : `fok, foff, flen, fsub := abap.FindStmt(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length})`;
+      const lines = [`${t}{`, `${t}\t${call}`,
+        `${t}\t_, _, _ = foff, flen, fsub`, ...(st.table ? [`${t}\t_ = fline`] : []), `${t}\tif fok {`, `${t}\t\ts.Sy.Subrc = 0`];
+      if (st.line) lines.push(`${t}\t\t${place(st.line, ctx)} = fline`);
       if (st.off) lines.push(`${t}\t\t${place(st.off, ctx)} = foff`);
       if (st.len) lines.push(`${t}\t\t${place(st.len, ctx)} = flen`);
       for (const x of st.subs) lines.push(`${t}\t\t${place(x.target, ctx)} = ${expr(x.value, ctx)}`);
@@ -1247,7 +1263,9 @@ function cond(c, ctx) {
     case "cs": return `abap.CS(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
-    case "cmp": return `${expr(c.l, ctx)} ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} ${expr(c.r, ctx)}`;
+    case "cmp":
+      if (c.type?.k === "p") return `abap.CmpP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} 0`;
+      return `${expr(c.l, ctx)} ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} ${expr(c.r, ctx)}`;
     // in parentheses: a composite literal right before the { of an if does not parse
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;

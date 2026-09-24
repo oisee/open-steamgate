@@ -287,7 +287,8 @@ export function RandomInt(min, max) {
 export function FindStmt(s, p, regex, icase, n) {
   const subs = new Array(n).fill("");
   if (!regex) {
-    if (p === "") return [false, 0, 0, subs];
+    // an empty substring is found at the start (A4H 2026-09-24, ZCL_GOGEN_T_FINDSEC)
+    if (p === "") return [true, 0, 0, subs];
     const i = (icase ? s.toUpperCase() : s).indexOf(icase ? p.toUpperCase() : p);
     return i < 0 ? [false, 0, 0, subs] : [true, [...s.slice(0, i)].length, [...p].length, subs];
   }
@@ -297,6 +298,29 @@ export function FindStmt(s, p, regex, icase, n) {
   if (!m) return [false, 0, 0, subs];
   for (let i = 0; i < n; i++) subs[i] = m[i + 1] ?? "";
   return [true, [...s.slice(0, m.index)].length, [...m[0]].length, subs];
+}
+
+// FIND p IN SECTION [OFFSET off] [LENGTH n] OF s, a substring: go/abap FindSection
+export function FindSection(s, p, icase, off, n, nsub) {
+  const r = [...s];
+  if (off < 0 || off > r.length || n < -1) rangeError();
+  let end = r.length;
+  if (n >= 0) {
+    if (off + n > end) rangeError();
+    end = off + n;
+  }
+  const [ok, o, l, subs] = FindStmt(r.slice(off, end).join(""), p, false, icase, nsub);
+  return ok ? [true, off + o, l, subs] : [false, 0, 0, subs];
+}
+
+// FIND [REGEX] p IN TABLE itab of strings: go/abap FindTable
+export function FindTable(rows, p, regex, icase, nsub) {
+  if (!regex && p === "") throw new AbapError("NOT_COMPILED", "FIND IN TABLE: an empty pattern in a table is not measured");
+  for (let i = 0; i < rows.length; i++) {
+    const [ok, o, l, subs] = FindStmt(rows[i], p, regex, icase, nsub);
+    if (ok) return [true, i + 1, o, l, subs];
+  }
+  return [false, 0, 0, 0, new Array(nsub).fill("")];
 }
 
 // An ABAP regex as a JS RegExp, with the lines of the Go runtime: ^ and $
@@ -638,6 +662,14 @@ export function Lines(d) {
   return d.get().length;
 }
 
+// DELETE <generic table> INDEX i: false (sy-subrc 4) without a row i
+export function DeleteIndex(d, i) {
+  const n = Lines(d);
+  if (i < 1 || i > n) return false;
+  d.get().splice(i - 1, 1);
+  return true;
+}
+
 // row i (from 0) of a generic table, bound to the row itself
 export function Row(d, i) {
   const a = d.get();
@@ -877,6 +909,8 @@ export const AddP = (a, b) => pOut(BigInt(a) + BigInt(b), 31, "+");
 export const SubP = (a, b) => pOut(BigInt(a) - BigInt(b), 31, "-");
 export const MulP = (a, b) => pOut(BigInt(a) * BigInt(b), 31, "*");
 export const IToP = (i) => String(i);
+// CmpP compares two packed values: -1, 0 or 1
+export const CmpP = (a, b) => { const x = BigInt(a), y = BigInt(b); return x < y ? -1 : x > y ? 1 : 0; };
 export const PFit = (a, n, arith) => {
   const v = BigInt(a);
   if ((v < 0n ? -v : v).toString().length > 2 * n - 1) throw new AbapError(arith ? "CX_SY_ARITHMETIC_OVERFLOW" : "CX_SY_CONVERSION_OVERFLOW", arith ? "=" : "p");

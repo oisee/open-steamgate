@@ -163,6 +163,9 @@ function rttiTable(reg, program) {
     if (["TABL", "DTEL", "TTYP", "DOMA", "CLAS", "INTF", "VIEW", "DDLS"].includes(obj.getType())) known.add(n);
     try {
       if (obj instanceof abaplint.Objects.Table) add(n, obj.parseType(reg));
+      // a DDIC view (the SQL views of OSG's CDS entities, gen/cds/*.view.xml)
+      // is a structure of its fields too (ultra/sadl: the SADL MPC's entity types)
+      if (obj instanceof abaplint.Objects.View) add(n, obj.parseType(reg));
       if (obj instanceof abaplint.Objects.Class && program.wanted.has(n)) {
         for (const td of obj.getDefinition()?.getTypeDefinitions().getAll() ?? []) {
           known.add(`${n}=>${upper(td.type.getName())}`);
@@ -1160,6 +1163,7 @@ function statement(node, ctx) {
   }
   if (isStmt(node, Statements.Type) || isStmt(node, Statements.TypeBegin) || isStmt(node, Statements.TypeEnd)) return undefined;
   if (isStmt(node, Statements.CreateObject)) return createObject(node, ctx);
+  if (isStmt(node, Statements.CreateData)) return createDataStatic(node, ctx, text);
   if (isStmt(node, Statements.Assign)) return assignStatement(node, ctx, text);
   if (isStmt(node, Statements.Select)) return selectStatement(node, ctx, text);
   if (isStmt(node, Statements.Commit) || isStmt(node, Statements.Rollback)) return luwStatement(node, text);
@@ -1291,6 +1295,12 @@ function statement(node, ctx) {
       throw new Unsupported(`READ TABLE form: ${text}`);
     }
     const table = sourceOperand(node.findDirectExpression(Expressions.SimpleSource2).getFirstChild(), ctx);
+    // a generic table (ultra/sadl): READ TABLE <t> INDEX n ASSIGNING <generic> only
+    if (table.type.k === "data" && table.type.table) {
+      const fsName = upper(/ASSIGNING\s+(<[\w]+>)/i.exec(text)?.[1] ?? "");
+      if (!fsName || ctx.fieldSymbols.get(fsName)?.k !== "data") throw new Unsupported(`READ TABLE form over a generic table: ${text}`);
+      return {s: "read_index_data", table, index: convert(source(node.findDirectExpression(Expressions.Source), ctx, I), I), fs: fsName};
+    }
     if (table.type.k !== "table") throw new Unsupported(`READ TABLE ... INDEX of a ${table.type.k}`);
     const index = convert(source(node.findDirectExpression(Expressions.Source), ctx, I), I);
     if (/\bASSIGNING\b/i.test(text)) {
@@ -1326,6 +1336,8 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.DeleteInternal)) {
     if (!/^DELETE\s+\S+\s+INDEX\s+/i.test(text)) throw new Unsupported(`DELETE form: ${text}`);
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    // a generic table (ultra/sadl): the same rule through its descriptor
+    if (table.type.k === "data" && table.type.table) return {s: "delete_index_data", table, index: convert(source(node.findDirectExpressions(Expressions.Source).slice(-1)[0], ctx, I), I)};
     if (table.type.k !== "table") throw new Unsupported("DELETE from a non-table");
     const idx = node.findDirectExpressions(Expressions.Source).slice(-1)[0];
     return {s: "delete_index", table, index: convert(source(idx, ctx, I), I)};
@@ -1419,23 +1431,59 @@ function statement(node, ctx) {
     // [MATCH OFFSET o] [MATCH LENGTH l]; measured on A4H: POSIX leftmost-
     // longest, offsets in characters, a failed FIND leaves every target alone,
     // a submatch target without a group (or of a group that did not take
-    // part) becomes initial
+    // part) becomes initial.
+    // ultra/sadl (A4H 2026-09-24, ZCL_GOGEN_T_FINDSEC): IN SECTION [OFFSET o]
+    // [LENGTH l] OF s for a substring in a string (MATCH OFFSET counts from
+    // the start of s, not of the section), and IN TABLE itab of strings
+    // [MATCH LINE n] (row by row, the first row with a match). REGEX IN
+    // SECTION stays refused: what ^ and $ see there is not measured.
     const kids = node.getChildren();
     const words = kids.map((k) => (k instanceof Nodes.TokenNode ? upper(k.concatTokens()) : ""));
-    if (words.includes("ALL") || /\b(RESULTS|MATCH\s+COUNT|SECTION|IN\s+TABLE|IN\s+BYTE\s+MODE)\b/i.test(text)) throw new Unsupported(`FIND form: ${text}`);
+    if (words.includes("ALL") || /\b(RESULTS|MATCH\s+COUNT|IN\s+BYTE\s+MODE|RESPECTING)\b/i.test(text)) throw new Unsupported(`FIND form: ${text}`);
     const ft = node.findDirectExpression(Expressions.FindType);
     const kind = ft ? upper(ft.concatTokens()) : "";
     if (kind && kind !== "REGEX") throw new Unsupported(`FIND ${kind}`);
-    const [pat, subj] = node.findDirectExpressions(Expressions.Source);
-    const targets = [];
-    let mode = null;
-    const out = {s: "find", regex: kind === "REGEX", pattern: convert(source(pat, ctx), S), subject: convert(source(subj, ctx), S),
+    const inTable = words.some((w, i) => w === "IN" && words[i + 1] === "TABLE");
+    const section = words.includes("SECTION");
+    if (section && (kind === "REGEX" || inTable)) throw new Unsupported(`FIND form: ${text}`);
+    // the Sources in order: pattern, [section offset], [section length], subject
+    const srcs = [];
+    let smode = "pat";
+    for (let i = 0; i < kids.length; i += 1) {
+      const w = words[i];
+      if (w === "SECTION") { smode = "sec"; continue; }
+      if (smode === "sec" && w === "OFFSET") { smode = "secoff"; continue; }
+      if (smode !== "pat" && smode !== "subj" && w === "LENGTH") { smode = "seclen"; continue; }
+      if (smode !== "pat" && w === "OF") { smode = "subj"; continue; }
+      if (isExpr(kids[i], Expressions.Source)) srcs.push({mode: smode === "pat" && srcs.length > 0 ? "subj" : smode, node: kids[i]});
+    }
+    const pat = srcs.find((x) => x.mode === "pat")?.node;
+    const subj = srcs.find((x) => x.mode === "subj")?.node;
+    if (!pat || !subj) throw new Unsupported(`FIND operands: ${text}`);
+    const patX = source(pat, ctx);
+    if (!charlike(patX.type)) throw new Unsupported(`FIND of a ${patX.type.k}`);
+    const out = {s: "find", regex: kind === "REGEX", pattern: convert(patX, S),
       icase: /\bIGNORING\s+CASE\b/i.test(text), subs: [], off: null, len: null};
+    if (inTable) {
+      const tb = source(subj, ctx);
+      if (tb.type.k !== "table" || tb.type.row.k !== "string") throw new Unsupported(`FIND IN TABLE of a ${tb.type.k === "table" ? `table of ${tb.type.row.k}` : tb.type.k}`);
+      out.table = tb;
+    } else if (section) {
+      const sx = source(subj, ctx);
+      if (sx.type.k !== "string") throw new Unsupported(`FIND IN SECTION of a ${sx.type.k}`);
+      out.subject = sx;
+      const so = srcs.find((x) => x.mode === "secoff")?.node;
+      const sl = srcs.find((x) => x.mode === "seclen")?.node;
+      out.secOff = so ? convert(source(so, ctx, I), I) : null;
+      out.secLen = sl ? convert(source(sl, ctx, I), I) : null;
+    } else out.subject = convert(source(subj, ctx), S);
+    let mode = null;
     for (let i = 0; i < kids.length; i += 1) {
       const w = words[i];
       if (w === "SUBMATCHES") { mode = "sub"; continue; }
       if (w === "MATCH" && words[i + 1] === "OFFSET") { mode = "off"; i += 1; continue; }
       if (w === "MATCH" && words[i + 1] === "LENGTH") { mode = "len"; i += 1; continue; }
+      if (w === "MATCH" && words[i + 1] === "LINE") { mode = "line"; i += 1; continue; }
       if (w) { mode = null; continue; }
       if (!isExpr(kids[i], Expressions.Target) || mode === null) continue;
       const t = lvalue(kids[i], ctx);
@@ -1443,11 +1491,11 @@ function statement(node, ctx) {
         if (!charlike(t.type)) throw new Unsupported(`SUBMATCHES into a ${t.type.k}`);
         out.subs.push({target: t, value: convert({e: "temp", name: `fsub[${out.subs.length}]`, type: S}, t.type)});
       } else {
-        if (t.type.k !== "i") throw new Unsupported(`MATCH ${mode === "off" ? "OFFSET" : "LENGTH"} into a ${t.type.k}`);
+        if (t.type.k !== "i") throw new Unsupported(`MATCH ${mode.toUpperCase()} into a ${t.type.k}`);
+        if (mode === "line" && !inTable) throw new Unsupported(`MATCH LINE without IN TABLE: ${text}`);
         out[mode] = t;
       }
     }
-    void targets;
     return out;
   }
   if (isStmt(node, Statements.Clear)) {
@@ -2415,19 +2463,37 @@ function declaringClass(reg, cls, name, kind) {
 
 /** a table of the dictionary: its columns (typed on demand), its key, whether it has a client */
 function dbTable(ctx, tableName, verb) {
-  const tabl = ctx.reg.getObject("TABL", tableName);
+  // a DDIC view (the SQL views of OSG's CDS entities, created as SQLite views
+  // by the transpiler's DatabaseSetup) is read like a table: its fields are
+  // its columns, MANDT among them when it has one (ultra/sadl). It is never
+  // written: a write to a view is refused
+  const view = verb === "SELECT FROM" ? ctx.reg.getObject("VIEW", tableName) : undefined;
+  const tabl = ctx.reg.getObject("TABL", tableName) ?? view;
   if (!tabl) throw new Unsupported(`${verb} ${tableName}: not a table of the dictionary in this program`);
   let tType;
   try { tType = tabl.parseType(ctx.reg); } catch { throw new Unsupported(`${verb} ${tableName}: its type does not resolve`); }
   if (!(tType instanceof BasicTypes.StructureType)) throw new Unsupported(`${verb} ${tableName}: its type does not resolve`);
   const columns = new Map(tType.getComponents().map((c) => [upper(c.name), c]));
+  // a view over a client-dependent table that does not carry MANDT hides
+  // the client: a system reads the logon client's rows (a CDS view's SQL view
+  // has MANDT), this one would read every client's. Refused, not served
+  // unfiltered (OSG's tools/cds2ddic.mjs leaves MANDT out of such views)
+  if (tabl === view && !columns.has("MANDT")) {
+    const hidden = [...new Set((view.getFields() ?? []).map((f) => upper(f.TABNAME)))].find((t) => {
+      try {
+        const bt = ctx.reg.getObject("TABL", t)?.parseType(ctx.reg);
+        return bt instanceof BasicTypes.StructureType && bt.getComponents().some((c) => upper(c.name) === "MANDT");
+      } catch { return false; }
+    });
+    if (hidden) throw new Unsupported(`${verb} ${tableName}: a view over the client-dependent ${hidden} without MANDT`);
+  }
   const colType = (n) => {
     const c = columns.get(n);
     if (!c) throw new Unsupported(`${verb}: ${tableName} has no column ${n}`);
     return typeOf(c.type, `${tableName}-${n}`, ctx.program);
   };
   let key = [];
-  try { key = tabl.listKeys(ctx.reg).map(upper); } catch { key = []; }
+  try { key = tabl.listKeys?.(ctx.reg)?.map(upper) ?? []; } catch { key = []; }
   return {name: tableName, columns, colType, key, client: columns.has("MANDT")};
 }
 
@@ -2973,6 +3039,30 @@ function assignStatement(node, ctx, text) {
 }
 
 /**
+ * CREATE DATA dref TYPE t | TYPE STANDARD TABLE OF t [WITH DEFAULT KEY], with
+ * t a type known at build time (ultra/sadl: the generated CDS and table
+ * sources of OSG's SADL runtime). The reference points at a new initial
+ * value of that type. A type given by name at run time ((name)), LIKE, REF
+ * TO, LENGTH / DECIMALS and HANDLE are other forms, not taken here.
+ */
+function createDataStatic(node, ctx, text) {
+  const m = /^CREATE\s+DATA\s+\S+\s+TYPE\s+(STANDARD\s+TABLE\s+OF\s+)?([\w\/=>~-]+)(\s+WITH\s+(NON-UNIQUE\s+)?DEFAULT\s+KEY)?\s*\.?$/i.exec(text);
+  if (!m || /^(REF|LINE|RANGE|SORTED|HASHED|TABLE)$/i.test(m[2])) throw new Unsupported(`statement CreateData: ${text}`);
+  const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+  if (target.type.k !== "dref") throw new Unsupported(`CREATE DATA into a ${target.type.k}`);
+  const name = upper(m[2]);
+  let t;
+  const ddic = ctx.reg.getObject("TABL", name) ?? ctx.reg.getObject("VIEW", name) ?? ctx.reg.getObject("TTYP", name) ?? ctx.reg.getObject("DTEL", name);
+  if (!/=>/.test(name) && !(ctx.scope.findType?.(name)) && ddic) {
+    let at;
+    try { at = ddic.parseType(ctx.reg); } catch { throw new Unsupported(`CREATE DATA TYPE ${name}: its type does not resolve`); }
+    t = typeOf(at, name, ctx.program);
+  } else t = namedType(node.findDirectExpression(Expressions.TypeName) ?? {concatTokens: () => m[2]}, ctx);
+  if (["ref", "exc", "data", "dref"].includes(t.k)) throw new Unsupported(`CREATE DATA TYPE ${name}: a ${t.k}`);
+  return {s: "create_data", target, type: m[1] ? {k: "table", row: t} : t};
+}
+
+/**
  * CREATE OBJECT o [TYPE cls | TYPE (name)] [EXPORTING ...]. A static class
  * is NEW. A class given by name goes through the program's class registry and
  * takes no arguments. The runtime checks that the result fits o, as the kernel
@@ -3491,6 +3581,16 @@ export function convert(expr, to) {
   // length (overflow when the digits do not fit, as ABAP raises)
   if (to.k === "p" && to.dec === 0 && (from.k === "i" || from.k === "int8")) return ok("i2p");
   if (to.k === "p" && to.dec === 0 && from.k === "p" && from.dec === 0) return ok("p2p");
+  // a character literal of digits only into a p without decimals (ultra/
+  // sadl: CONSTANTS ... TYPE timestamp VALUE '20260912010000', iv_timestamp
+  // = '...'): the digits are the value, decided here at build time; a sign,
+  // a blank, a point or more digits than the p holds is a conversion rule
+  // (or an overflow) not taken here
+  if (to.k === "p" && to.dec === 0 && expr.e === "chars" && /^[0-9]{1,31}$/.test(expr.value)) {
+    const digits = expr.value.replace(/^0+(?=\d)/, "");
+    if (digits.length > 2 * to.len - 1) throw new Unsupported(`the literal '${expr.value}' does not fit p LENGTH ${to.len}`);
+    return {e: "str", value: digits, type: to};
+  }
   // x / xstring into characters: the hex digits, upper case, zeros kept; a c
   // target cuts them to its length (A4H 2026-09-23: x'0A0B' into c(3) is 0A0)
   if ((to.k === "string" || to.k === "c") && (from.k === "x" || from.k === "xstring")) return ok("x2s");
@@ -3637,6 +3737,14 @@ function compare(node, ctx) {
   if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`comparison operator ${op}`);
   const types = [...leafTypes(sources[0], ctx), ...leafTypes(sources[1], ctx)];
   let r;
+  // packed without decimals against packed or an integer (ultra/sadl, the
+  // SADL MPCs' timestamps): compared as numbers, the operands as they are
+  // (the digits of a p value are exact); an arithmetic operand is refused
+  const pInt = (t) => (t.k === "p" && t.dec === 0) || t.k === "i" || t.k === "int8";
+  if (types.some((t) => t.k === "p") && types.every(pInt) && !hasArith(sources[0]) && !hasArith(sources[1])) {
+    r = {c: "cmp", op, l: convert(source(sources[0], ctx), P31), r: convert(source(sources[1], ctx), P31), type: P31};
+    return not ? {c: "not", x: r} : r;
+  }
   if (types.some(numeric)) {
     // numbers compare numerically; a character operand is converted to the
     // numeric type (f when any operand is f)
