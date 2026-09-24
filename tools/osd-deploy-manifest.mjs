@@ -28,9 +28,49 @@ import {rename} from "./osd-rename.mjs";
 export const MANIFEST = "deploy/manifest.json";
 
 /** The files of a folder that are structure rather than objects. The layout
- *  writes its own `package.devc.xml`; one in the folder is the package's
- *  description, and a package is named at import time, not by the file. */
+ *  writes its own `package.devc.xml` and does **not** copy one found in the
+ *  folder: the package is named at import time, and its description is the
+ *  zip's `--description`, not whatever a pack happened to carry. */
 const STRUCTURAL = new Set(["package.devc.xml"]);
+export const isStructural = (file) => STRUCTURAL.has(file);
+
+/** What may follow `<object>.<type>.` in an abapGit file name. Anything else
+ *  -- `x.clas.abap.bak`, an editor's swap file, an upper-case `X.CLAS.abap`
+ *  that abapGit would not find -- is refused, not copied: fail closed means
+ *  a file this does not recognise does not travel. */
+const SUFFIXES = {
+  "*": /^(xml|abap)$/,
+  CLAS: /^(xml|abap|testclasses\.abap|locals_imp\.abap|locals_def\.abap|macros\.abap)$/,
+  FUGR: /^(xml|[a-z0-9_#-]+\.(abap|xml))$/,
+  W3MI: /^(xml|data\.[a-z0-9]+)$/,
+  WAPA: /^[a-z0-9_#.-]+$/,
+  DDLS: /^(xml|asddls|baseinfo)$/,
+  DDLX: /^(xml|asddlxs)$/,
+  DCLS: /^(xml|asdcls)$/,
+};
+export function suffixProblem(file) {
+  if (file !== file.toLowerCase()) return "abapGit file names are lower case";
+  const m = /^(.+?)\.([a-z0-9]+)\.(.+)$/.exec(file);
+  if (m === null) return "the file name is not <object>.<type>.<ext>";
+  const type = m[2].toUpperCase();
+  const allowed = SUFFIXES[type] ?? SUFFIXES["*"];
+  return allowed.test(m[3]) ? undefined : `".${m[3]}" is not a suffix abapGit writes for a ${type}`;
+}
+
+/** Names an object creates besides its own, where the XML already says so:
+ *  the function modules of a function group and the SQL view of a DDLS. A
+ *  Z function group holding SCMS_BINARY_TO_XSTRING would replace the
+ *  system's module as surely as a class named CL_ would. */
+export function createdNames(file, text) {
+  const body = () => (typeof text === "function" ? text() : text);
+  if (/\.fugr\.xml$/.test(file)) {
+    return [...body().matchAll(/<FUNCNAME>([^<]+)<\/FUNCNAME>/g)].map((m) => ({kind: "FUNC", name: m[1].trim().toUpperCase()}));
+  }
+  if (/\.ddls\.asddls$/.test(file)) {
+    return [...body().matchAll(/@AbapCatalog\.sqlViewName\s*:\s*'([^']+)'/gi)].map((m) => ({kind: "SQL view", name: m[1].trim().toUpperCase()}));
+  }
+  return [];
+}
 
 export function loadManifest(file = join(process.env.OSD_ROOT ?? process.cwd(), MANIFEST)) {
   if (!existsSync(file)) {
@@ -48,18 +88,35 @@ export function unitFor(manifest, input, name) {
     if (units[name] === undefined) {
       throw new Error(`deploy unit "${name}" is not in ${manifest.file} (units: ${Object.keys(units).join(", ")})`);
     }
-    return {name, ...units[name]};
+    return withNamespaces(manifest, {name, ...units[name]});
   }
   const root = resolve(process.env.OSD_ROOT ?? process.cwd());
   const rel = (p) => relative(root, isAbsolute(p) ? p : resolve(p)).replace(/\/+$/, "");
   const want = rel(input);
   const hits = Object.entries(units).filter(([, u]) => (u.sources ?? []).some((s) => rel(join(root, s)) === want));
-  if (hits.length === 1) return {name: hits[0][0], ...hits[0][1]};
+  if (hits.length === 1) return withNamespaces(manifest, {name: hits[0][0], ...hits[0][1]});
   if (hits.length > 1) {
     throw new Error(`${input} is a source of ${hits.length} deploy units (${hits.map(([n]) => n).join(", ")}): pass --unit`);
   }
   throw new Error(`${input} is not the source of any deploy unit in ${manifest.file}. `
     + `Pass --unit <name>, or add a unit that lists what this zip may carry.`);
+}
+
+/** The unit whose objects list this SEGW project (`IWPR <project>`). */
+export function unitForProject(manifest, project, name) {
+  if (name !== undefined) return unitFor(manifest, undefined, name);
+  const key = `IWPR ${String(project).toUpperCase()}`;
+  const hits = Object.entries(manifest.units ?? {})
+    .filter(([n, u]) => entriesOf({name: n, ...u}).some((e) => e.matches(key)));
+  if (hits.length === 1) return withNamespaces(manifest, {name: hits[0][0], ...hits[0][1]});
+  throw new Error(hits.length === 0
+    ? `no deploy unit in ${manifest.file} lists ${key}: pass --unit, or add a unit that lists what may carry it`
+    : `${key} is in ${hits.length} deploy units (${hits.map(([n]) => n).join(", ")}): pass --unit`);
+}
+
+/** A unit's customer namespaces are the manifest's plus its own. */
+function withNamespaces(manifest, unit) {
+  return {...unit, customerNamespaces: [...(manifest.customerNamespaces ?? []), ...(unit.customerNamespaces ?? [])]};
 }
 
 // ------------------------------------------------------------ object names
@@ -149,18 +206,27 @@ export function admit({files, read, tables = [], unit, customerNamespaces}) {
       refusals.push({file, key: obj.key, rule: "not-in-manifest", why: `unit "${unit.name}" does not list it`});
     }
     const sap = sapNameRule(obj.name, namespaces);
-    if (sap !== undefined && (entry?.intended ?? "").trim() === "") {
+    const intended = (entry?.intended ?? "").trim() !== "";
+    if (sap !== undefined && !intended) {
       refusals.push({file, key: obj.key, ...sap});
+    }
+    for (const c of obj.creates ?? []) {
+      const rule = sapNameRule(c.name, namespaces);
+      if (rule !== undefined && !intended) {
+        refusals.push({file, key: `${obj.key} creates ${c.kind} ${c.name}`, rule: rule.rule, why: rule.why});
+      }
     }
   };
   for (const f of files) {
     const obj = objectOf(f, () => read(f));
     if (obj?.structural === true) continue;
-    if (obj === undefined) {
-      refusals.push({file: f, key: "?", rule: "not-an-object", why: "the file name is not <object>.<type>.<ext>"});
+    const problem = suffixProblem(f);
+    if (obj === undefined || problem !== undefined) {
+      refusals.push({file: f, key: obj?.key ?? "?", rule: "not-an-object", why: problem ?? "the file name is not <object>.<type>.<ext>"});
       continue;
     }
-    check(f, obj);
+    const creates = createdNames(f, () => read(f));
+    check(f, creates.length > 0 ? {...obj, creates} : obj);
   }
   for (const t of tables) {
     const name = t.replace(/#/g, "/").toUpperCase();

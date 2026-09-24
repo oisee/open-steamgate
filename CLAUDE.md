@@ -340,7 +340,9 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   NodeSet(P, uuid)` removes a node with its subtree (`zcl_stg_segw_tree`);
   `GET RepoFileSet?$filter=Project eq 'P'` (or `RepoSet('P')` as a zip, or
   `npm run segw:tree repo <P> --out <dir>`) is the project as an abapGit
-  repository, which is how it reaches a system (`zcl_stg_segw_repo`);
+  repository (`zcl_stg_segw_repo`); only the `segw:tree repo` command is a
+  route to a system, because only it checks `deploy/manifest.json` -- the
+  two OData sets are the tree's export and are not checked;
   `GET GenerateSet?$filter=Project eq 'P'` is segw-gen in ABAP
   (`zcl_stg_segw_gen` + `zcl_stg_segw_gen_dpc` + `zcl_stg_segw_gen_rfc`:
   MPC, DPC with RFC and search-help bodies, XML, EXT pair), byte-identical
@@ -517,8 +519,8 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   offline repository out of a compiled project, **only of what a unit of
   `deploy/manifest.json` lists and never an SAP-owned name** (`CL_`/`IF_`/
   `CX_`, a foreign `/ns/`, standard DDIC -- fail closed,
-  `tools/osd-deploy-manifest.mjs`); `.local/make-level.sh <nnn>`
-  builds one numbered attempt, because a failed import leaves rows in
+  `tools/osd-deploy-manifest.mjs`); a numbered attempt is
+  `osd-rename.mjs` + `segw:zip --unit demo`, because a failed import leaves rows in
   `/IWBEP/I_MGW_SRG` and the next attempt with the same names dumps on them
   -- so every attempt gets its own package and its own prefix. What a real
   system checks and this runtime does not: a versioned file name is a fixed

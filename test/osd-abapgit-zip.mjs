@@ -250,10 +250,88 @@ describe("deploy/manifest.json: only listed objects leave, never an SAP-owned na
     }
   });
 
+  it("a suffix abapGit does not write is refused, and so is an upper-case name", () => {
+    clas("zcl_osd_ok", "zcl_osd_ok");
+    writeFileSync(join(dir, "zcl_osd_ok.clas.abap.bak"), "old\n");
+    expect(() => layout(dir, out, "p", undefined, probe("CLAS ZCL_OSD_OK"))).to.throw(/zcl_osd_ok\.clas\.abap\.bak[\s\S]*not-an-object/);
+    rmSync(join(dir, "zcl_osd_ok.clas.abap.bak"));
+    writeFileSync(join(dir, "ZCL_OSD_UP.CLAS.abap"), "x\n");
+    expect(() => layout(dir, out, "p", undefined, probe("CLAS ZCL_OSD_OK", "CLAS ZCL_OSD_UP"))).to.throw(/lower case/);
+  });
+
+  it("the suffixes abapGit does write pass", () => {
+    for (const f of ["zcl_osd_a.clas.abap", "zcl_osd_a.clas.xml", "zcl_osd_a.clas.testclasses.abap",
+      "zcl_osd_a.clas.locals_imp.abap", "zosd_fg.fugr.xml", "zosd_fg.fugr.lzosd_fgtop.abap",
+      "zosd_fg.fugr.z_osd_fm.xml", "zosd_m.w3mi.xml", "zosd_m.w3mi.data.m4a", "zosd_app.wapa.xml",
+      "zosd_app.wapa.i18n_-i18n.properties", "zosd_v.ddls.asddls", "zosd_v.ddls.xml"]) {
+      writeFileSync(join(dir, f), "x\n");
+    }
+    const unit = probe("CLAS ZCL_OSD_A", "FUGR ZOSD_FG", "W3MI ZOSD_M", "WAPA ZOSD_APP", "DDLS ZOSD_V");
+    expect(() => layout(dir, out, "p", undefined, unit)).to.not.throw();
+  });
+
+  it("a Z function group that creates an SAP-named module is refused, and so is a Z DDLS with an SAP SQL view", () => {
+    writeFileSync(join(dir, "zosd_fg.fugr.xml"),
+      "<FUNCNAME>Z_OSD_FINE</FUNCNAME><FUNCNAME>SCMS_BINARY_TO_XSTRING</FUNCNAME>\n");
+    writeFileSync(join(dir, "zosd_v.ddls.asddls"), "@AbapCatalog.sqlViewName: 'V_T000'\ndefine view ZOSD_V as select from t000 { mandt }\n");
+    let message = "";
+    try { layout(dir, out, "p", undefined, probe("FUGR ZOSD_FG", "DDLS ZOSD_V")); } catch (e) { message = e.message; }
+    expect(message).to.match(/FUGR ZOSD_FG creates FUNC SCMS_BINARY_TO_XSTRING[\s\S]*sap-name/);
+    expect(message).to.match(/DDLS ZOSD_V creates SQL view V_T000[\s\S]*sap-name/);
+    expect(message).to.not.match(/Z_OSD_FINE/);
+  });
+
+  it("a node at a listed URL with an SAP ICF_NAME is refused", () => {
+    writeFileSync(join(dir, "zosd_thing.sicf.xml"), node("/sap/bc/osd/thing/", "SAPNODE"));
+    expect(() => layout(dir, out, "p", undefined, probe("SICF /sap/bc/osd/thing"))).to.throw(/SICF \/sap\/bc\/osd\/thing[\s\S]*sap-name/);
+  });
+
+  it("a name that only starts like a listed one is not it; {nnn} is three digits", () => {
+    clas("zcl_osd_004_demo_evil", "zcl_osd_004_demo_evil");
+    const attempt = {name: "probe", objects: ["CLAS ZCL_OSD_{nnn}_DEMO"]};
+    expect(() => layout(dir, out, "p", undefined, attempt)).to.throw(/ZCL_OSD_004_DEMO_EVIL[\s\S]*not-in-manifest/);
+    for (const wrong of ["zcl_osd_04_demo", "zcl_osd_1234_demo"]) {
+      rmSync(dir, {recursive: true, force: true});
+      mkdirSync(dir);
+      clas(wrong, wrong);
+      expect(() => layout(dir, out, "p", undefined, attempt), wrong).to.throw(/not-in-manifest/);
+    }
+    rmSync(dir, {recursive: true, force: true});
+    mkdirSync(dir);
+    clas("zcl_osd_004_demo", "zcl_osd_004_demo");
+    expect(() => layout(dir, out, "p", undefined, attempt)).to.not.throw();
+  });
+
+  it("the folder's own package.devc.xml does not replace the one the layout writes", () => {
+    clas("zcl_osd_ok", "zcl_osd_ok");
+    writeFileSync(join(dir, "package.devc.xml"), "<CTEXT>from the folder</CTEXT>\n");
+    layout(dir, out, "the zip's own", undefined, probe("CLAS ZCL_OSD_OK"));
+    const devc = readFileSync(join(out, "src", "package.devc.xml"), "utf8");
+    expect(devc).to.contain("the zip's own");
+    expect(devc).to.not.contain("from the folder");
+  });
+
+  it("a missing, broken or foreign-version manifest refuses; two units with one source ask for --unit", () => {
+    expect(() => loadManifest(join(dir, "nope.json"))).to.throw(/no deploy manifest/);
+    writeFileSync(join(dir, "broken.json"), "{ not json");
+    expect(() => loadManifest(join(dir, "broken.json"))).to.throw();
+    writeFileSync(join(dir, "v2.json"), JSON.stringify({version: 2, units: {}}));
+    expect(() => loadManifest(join(dir, "v2.json"))).to.throw(/version 2/);
+    const twice = {file: "m", units: {a: {sources: ["src/demo"]}, b: {sources: ["src/demo"]}}};
+    expect(() => unitFor(twice, "src/demo")).to.throw(/2 deploy units \(a, b\): pass --unit/);
+    expect(unitFor(twice, "src/demo", "b").name).to.equal("b");
+    expect(() => unitFor(twice, "src/demo", "c")).to.throw(/deploy unit "c" is not in/);
+  });
+
+  it("a unit's own customer namespaces add to the manifest's", () => {
+    const m = {file: "m", customerNamespaces: ["/ZA/"], units: {u: {sources: [], customerNamespaces: ["/ZB/"], objects: []}}};
+    expect(unitFor(m, undefined, "u").customerNamespaces).to.deep.equal(["/ZA/", "/ZB/"]);
+  });
+
   // ------------------------------------------------ what is deployed today
 
   const manifest = loadManifest(MANIFEST);
-  const unit = (name) => ({...unitFor(manifest, undefined, name), customerNamespaces: manifest.customerNamespaces});
+  const unit = (name) => unitFor(manifest, undefined, name);
 
   it("every unit's sources name the unit", () => {
     for (const [name, u] of Object.entries(manifest.units)) {

@@ -28,7 +28,7 @@ import {buildApp} from "./osd-bsp-app.mjs";
 import {packAppName} from "./osd-bsp-registry.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {deliveredAt} from "./osd-nodes.mjs";
-import {admit, loadManifest, refusalMessage, unitFor} from "./osd-deploy-manifest.mjs";
+import {admit, isStructural, loadManifest, refusalMessage, unitFor} from "./osd-deploy-manifest.mjs";
 
 const BOM = "﻿";
 
@@ -277,12 +277,14 @@ export function layout(from, into, description, data, unit) {
     files, read: (f) => readFileSync(join(from, f), "utf8"), tables: dataTables(data), unit,
   });
   if (refusedByManifest.length > 0) throw new Error(refusalMessage(from, refusedByManifest));
-  for (const f of files) cpSync(join(from, f), join(into, "src", f));
+  // the folder's own package.devc.xml is not copied over the one written
+  // above: the package is named at import and described by --description
+  for (const f of files.filter((x) => !isStructural(x))) cpSync(join(from, f), join(into, "src", f));
 
   // an object is its name up to the first dot; `zstg_demo_srv    0001.iwsv.xml`
   // keeps its spaces, which is how abapGit names an IWSV and is not a mistake
   const objects = new Map();
-  for (const f of files) {
+  for (const f of files.filter((x) => !isStructural(x))) {
     const m = /^(.+?)\.([a-z0-9]+)\./i.exec(f);
     if (m === null) continue;
     const type = m[2].toUpperCase();
@@ -290,7 +292,7 @@ export function layout(from, into, description, data, unit) {
     objects.get(type).add(m[1].trim());
   }
   const rows = data === undefined ? {carried: [], unpaired: []} : dataFiles(data, into);
-  return {files: files.length + 2 + rows.carried.length * 2, objects, rows};
+  return {files: files.filter((x) => !isStructural(x)).length + 2 + rows.carried.length * 2, objects, rows};
 }
 
 export function zip(dir, out) {
@@ -313,8 +315,17 @@ if (runsAs("osd-abapgit-zip.mjs")) {
   const out = flag("out", "repo.zip");
   const staging = `${out}.dir`;
 
+  // the unit first: a zip nothing lists fails before anything is compiled
+  let unit;
+  try {
+    unit = unitFor(loadManifest(flag("manifest")), input, flag("unit"));
+  } catch (e) {
+    console.error(e.message);
+    process.exit(1);
+  }
+
   let objects = input;
-  let data = flag("data");
+  let data = flag("data") ?? unit.data;
   if (input.endsWith(".stg.yaml")) {
     // a library call and not a spawn: test/osd-binary.mjs forbids starting
     // another tool by process.execPath and a script path, because in a
@@ -331,11 +342,8 @@ if (runsAs("osd-abapgit-zip.mjs")) {
   }
 
   const description = flag("description", `open-steamgate: ${basename(input).replace(/\..*$/, "")}`);
-  let unit;
   let laid;
   try {
-    const manifest = loadManifest(flag("manifest"));
-    unit = {...unitFor(manifest, input, flag("unit")), customerNamespaces: manifest.customerNamespaces ?? []};
     laid = layout(objects, staging, description, data, unit);
   } catch (e) {
     rmSync(staging, {recursive: true, force: true});

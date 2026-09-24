@@ -24,8 +24,11 @@ What travels, in the order it was made to travel:
 | 007 | one seed row fewer | a client-dependent row does not survive a client-rewriting import |
 | 008 | the Fiori app as a BSP application **and its ICF node** | the system serves the page |
 
-`.local/make-level.sh <nnn>` builds one attempt; `tools/osd-bsp-app.mjs`
-builds the application. Both are described at the end.
+An attempt was assembled by a local script that is no longer kept; the
+recipe is `tools/osd-rename.mjs` over the compiled project, its `_EXT` pair
+and its DDIC, then `segw:zip --unit demo` (the test in
+`test/osd-abapgit-zip.mjs` rebuilds attempt 004 exactly that way).
+`tools/osd-bsp-app.mjs` builds the application. Both are described at the end.
 
 ---
 
@@ -394,7 +397,6 @@ Measured through OSD into A4H: `POST TravelSet` inside a changeset answered
 | `npm run segw:zip -- <folder> --out <f>.zip [--unit <u>] [--data <dir>]` | an abapGit offline repository of one deploy unit; refuses anything the unit does not list and any SAP-owned name, refuses a nested folder, drops other-client rows, names what it did not carry |
 | `node tools/osd-rename.mjs --from ZSTG_ --to ZOSD_008_ …` | a whole object set under another prefix, re-padding the versioned names |
 | `node tools/osd-bsp-app.mjs <webapp> --name <APP> --out <dir> [--service <SRV>]` | a BSP application and its ICF node; refuses a name over 15 |
-| `.local/make-level.sh <nnn> [outdir]` | one numbered attempt, end to end |
 
 The zips of one evening are eight numbered files; nothing about the route
 depends on which number an attempt has.
@@ -422,13 +424,28 @@ names each **deploy unit** and every object it carries, by type and name
   is where the standard DDIC lives. An entry
   `{"object": "...", "intended": "<why>"}` is the one way past it;
 - **without a unit nothing goes.** The unit is the one whose `sources` name
-  the input, or `--unit <name>`.
+  the input, or `--unit <name>`. Its `data` is the default `--data`, and its
+  `customerNamespaces` add to the manifest's.
 
 Every refusal names the object, the file and the rule, and nothing is copied
 on the way to refusing. A unit may carry `{nnn}` in a name for an attempt
 number, and `attempt: {from, to}` accepts its names as `tools/osd-rename.mjs`
 renames them, so `ZSTG_DEMO` and `ZOSD_004_DEMO` are the same entry and
 `ZOSD_X_DEMO` is not.
+
+The other writer of a repository, `zcl_stg_segw_repo`, goes through the
+same check when it is taken out: `npm run segw:tree repo <P> --out <dir>
+[--zip <f>] [--unit u]` admits the project's files against the unit that
+lists `IWPR <P>` before it writes anything. `GET RepoFileSet` and
+`GET RepoSet('P')` themselves are the tree's export over OData and are **not**
+checked; they are not a route to a system unless they pass through that
+command or through `segw:zip`.
+
+**What v1 checks is names.** An object's own name, an ICF node's
+`ICF_NAME`, and the two names an object creates that its files already
+state: each `FUNCNAME` of a function group and the `sqlViewName` of a DDLS.
+Anything else an object creates when it is activated -- a message class's
+messages, a transaction, whatever a class does at runtime -- is not read.
 
 The units today are what has reached A4H: `demo` (the service, its DDIC and
 rows), `demo-app` (the BSP application and its node), `lsd-a4h-011` and

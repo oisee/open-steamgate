@@ -3,7 +3,7 @@ import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync} fr
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {DDIC_DIR, SPEC_FILE, YAML_FILE, derive, generated, iwprTables, readSpec} from "../tools/segw-tables.mjs";
-import {DEFAULT_URL, exportIwpr, generateFiles, importIwpr, projectOf, pull, pullFile, push, pushFile, pushFunctionGroups, readData, repoFiles, repoZip, writeData} from "../tools/segw-tree.mjs";
+import {DEFAULT_URL, exportIwpr, generateFiles, importIwpr, projectOf, pull, pullFile, push, pushFile, pushFunctionGroups, readData, repoFiles, repoZip, writeData, admitRepo} from "../tools/segw-tree.mjs";
 import {loadFunctionGroups} from "../tools/segw-gen-mapping.mjs";
 import {dirname} from "node:path";
 import {startServer} from "./start.mjs";
@@ -317,6 +317,13 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
       expect(repo["src/" + name], name).to.equal(content);
     }
     expect(Object.keys(repo).length).to.equal(2 + Object.keys(compiled.files).length + Object.keys(oracle.files).length + Object.keys(oracle.ext).length);
+
+    // it is a route to a system, so it passes the deploy manifest like a zip:
+    // the demo unit lists every object, and one SAP-named file refuses it
+    expect(admitRepo(repo, "ZSTG_DEMO").name).to.equal("demo");
+    expect(() => admitRepo({...repo, "src/cl_http_client.clas.abap": "x"}, "ZSTG_DEMO"))
+      .to.throw(/CLAS CL_HTTP_CLIENT[\s\S]*not-in-manifest[\s\S]*sap-api-name/);
+    expect(() => admitRepo(repo, "ZSTG_MAPPED")).to.throw(/no deploy unit .* lists IWPR ZSTG_MAPPED/);
   });
 
   it("RepoSet is the same repository as one zip", async () => {
