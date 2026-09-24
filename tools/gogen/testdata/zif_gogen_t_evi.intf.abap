@@ -1,0 +1,4 @@
+INTERFACE zif_gogen_t_evi PUBLIC.
+  EVENTS iping EXPORTING VALUE(txt) TYPE string OPTIONAL.
+  METHODS fire IMPORTING txt TYPE string.
+ENDINTERFACE.
