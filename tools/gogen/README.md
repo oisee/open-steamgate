@@ -185,6 +185,32 @@ arrive at 5 MB before the first application class and run slower than the
 IR's JS in the same page, so for the browser the IR emitted as JS is the
 better target and Go the one for a server.
 
+### Planned: OSGo in the browser (a later wave, decided 2026-09-24)
+
+Speed is not the whole story. Two runtimes cost twice: `js/abap.mjs` follows
+`go/abap` line for line, so every semantic rule is written twice. The page
+the preview runs today is the transpiler's output, 2.62 ms a plasma frame;
+Go → wasm at 0.59 ms is 4.4 times that, with the same semantics as the server
+and the Pi. So the direction, once the current order is done (upstream,
+daemons, incremental rebuild of Z code, ADT):
+
+- **Go is the one product runtime everywhere**: server, Pi, and the browser
+  through wasm.
+- **IR-JS is kept as an oracle**, not a product: `semantics.mjs` runs every
+  pinned case on Go and on JS against A4H, and a second independent runtime
+  keeps catching mistakes. It stays green; it is not grown.
+- **What the browser build needs**, each a step of its own:
+  1. a `database/sql` driver over sql.js through `syscall/js`, registered in
+     `db_wasm.go` (the seam is there);
+  2. a service-worker `fetch` handler calling the ICF dispatcher instead of
+     the `net/http` server (the shape of `web/preview-backend.mjs`);
+  3. APC over a `MessageChannel` instead of a WebSocket;
+  4. files and media (`WWWDATA_IMPORT`, the object store) through a host hook
+     instead of `os`, as `abap.W3MI_LOADER` does for the JS preview;
+  5. `CL_HTTP_CLIENT` over `fetch`;
+  6. a kernel split so a page that only draws does not link `crypto/tls`
+     (the Go runtime alone is 1.9 MB, 444 KB brotli).
+
 ## Demo scenes against A4H
 
 `node tools/gogen/scenes.mjs <scene>` compiles one scene of ZO4D straight out
