@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"unicode"
 	"unicode/utf8"
@@ -901,29 +902,29 @@ func CP(a, p string, cpat bool) bool {
 	if cpat && p == "" {
 		p = " "
 	}
-	type tok struct {
-		r    rune
-		kind byte // 'l' literal ignoring case, 'e' escaped (exact), '*', '+'
-	}
-	var ps []tok
-	pr := []rune(p)
-	for i := 0; i < len(pr); i++ {
-		switch {
-		case pr[i] == '#' && i+1 < len(pr):
-			i++
-			ps = append(ps, tok{pr[i], 'e'})
-		case pr[i] == '*':
-			ps = append(ps, tok{0, '*'})
-		case pr[i] == '+':
-			ps = append(ps, tok{0, '+'})
-		default:
-			ps = append(ps, tok{pr[i], 'l'})
+	ps := cpTokens(p)
+	// the subject as characters: its bytes when it is ASCII (no copy, the
+	// common case: a tag, a name), else its runes
+	var ar []rune
+	ascii := true
+	for i := 0; i < len(a); i++ {
+		if a[i] >= utf8.RuneSelf {
+			ascii = false
+			break
 		}
 	}
-	ar := []rune(a)
-	// classic wildcard matching with backtracking over the last *
-	i, j, star, mark := 0, 0, -1, 0
-	eq := func(t tok, c rune) bool {
+	n := len(a)
+	if !ascii {
+		ar = []rune(a)
+		n = len(ar)
+	}
+	at := func(i int) rune {
+		if ascii {
+			return rune(a[i])
+		}
+		return ar[i]
+	}
+	eq := func(t cpTok, c rune) bool {
 		switch t.kind {
 		case '+':
 			return true
@@ -933,8 +934,10 @@ func CP(a, p string, cpat bool) bool {
 			return foldEq(t.r, c)
 		}
 	}
-	for i < len(ar) {
-		if j < len(ps) && ps[j].kind != '*' && eq(ps[j], ar[i]) {
+	// classic wildcard matching with backtracking over the last *
+	i, j, star, mark := 0, 0, -1, 0
+	for i < n {
+		if j < len(ps) && ps[j].kind != '*' && eq(ps[j], at(i)) {
 			i++
 			j++
 		} else if j < len(ps) && ps[j].kind == '*' {
@@ -952,6 +955,47 @@ func CP(a, p string, cpat bool) bool {
 		j++
 	}
 	return j == len(ps)
+}
+
+type cpTok struct {
+	r    rune
+	kind byte // 'l' literal ignoring case, 'e' escaped (exact), '*', '+'
+}
+
+// the tokens of a CP pattern, kept per pattern text (most are constants of
+// the program; at most cpCacheMax are kept, the rest made each time)
+var (
+	cpCache    sync.Map
+	cpCacheLen atomic.Int32
+)
+
+const cpCacheMax = 4096
+
+func cpTokens(p string) []cpTok {
+	if v, ok := cpCache.Load(p); ok {
+		return v.([]cpTok)
+	}
+	var ps []cpTok
+	pr := []rune(p)
+	for i := 0; i < len(pr); i++ {
+		switch {
+		case pr[i] == '#' && i+1 < len(pr):
+			i++
+			ps = append(ps, cpTok{pr[i], 'e'})
+		case pr[i] == '*':
+			ps = append(ps, cpTok{0, '*'})
+		case pr[i] == '+':
+			ps = append(ps, cpTok{0, '+'})
+		default:
+			ps = append(ps, cpTok{pr[i], 'l'})
+		}
+	}
+	if cpCacheLen.Load() < cpCacheMax {
+		if _, loaded := cpCache.LoadOrStore(p, ps); !loaded {
+			cpCacheLen.Add(1)
+		}
+	}
+	return ps
 }
 
 // foldEq is strings.EqualFold of two single characters, without making

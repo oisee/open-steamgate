@@ -145,3 +145,64 @@ func TestLUWDumpSurvivesRollbackError(t *testing.T) {
 		t.Fatalf("the dump was replaced: %v", got)
 	}
 }
+
+// The statement cache (parity-wave2): a text run twice in a step is
+// prepared after it and reused by the steps after; a dumped step still
+// takes back what it wrote through a cached statement, and COMMIT WORK in
+// the middle of a step keeps it
+func TestLUWStatementCache(t *testing.T) {
+	if err := OpenDB([]byte(`["CREATE TABLE t (id TEXT PRIMARY KEY)"]`)); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { db = nil; tx = nil }()
+	const ins, cnt = "INSERT INTO t VALUES (?)", "SELECT COUNT(*) FROM t"
+	count := func() int {
+		r, err := conn().Query(cnt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+		n := 0
+		r.Next()
+		r.Scan(&n)
+		return n
+	}
+	DialogStep(func() {
+		conn().Exec(ins, "A")
+		conn().Exec(ins, "B")
+		if count()+count() != 4 {
+			t.Fatal("first step")
+		}
+	})
+	if stmtCache[ins] == nil || stmtCache[cnt] == nil {
+		t.Fatalf("not prepared after the step: %v", stmtCache)
+	}
+	func() {
+		defer func() { recover() }()
+		DialogStep(func() {
+			if _, err := conn().Exec(ins, "C"); err != nil {
+				t.Fatal(err)
+			}
+			if count() != 3 {
+				t.Fatal("the cached insert is not in the step")
+			}
+			panic(ArithmeticError{"CX_SY_ZERODIVIDE", "/"})
+		})
+	}()
+	s := &Session{}
+	DialogStep(func() {
+		if count() != 2 {
+			t.Fatalf("the dumped step's row stayed: %d", count())
+		}
+		conn().Exec(ins, "D")
+		CommitWork(s)
+		conn().Exec(ins, "E")
+		RollbackWork(s)
+	})
+	if n := count(); n != 3 {
+		t.Fatalf("after COMMIT WORK and ROLLBACK WORK: %d rows, want 3", n)
+	}
+	if _, err := conn().Exec(ins, "A"); err == nil {
+		t.Fatal("a duplicate key through a cached statement is still refused")
+	}
+}

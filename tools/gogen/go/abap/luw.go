@@ -1,6 +1,9 @@
 package abap
 
-import "database/sql"
+import (
+	"database/sql"
+	"strings"
+)
 
 // The database LUW of the kernel. A dialog step opens one database
 // transaction; COMMIT WORK and ROLLBACK WORK end it and open the next; the
@@ -28,10 +31,123 @@ type querier interface {
 }
 
 func conn() querier {
+	return cachedQuerier{}
+}
+
+func plainConn() querier {
 	if tx != nil {
 		return tx
 	}
 	return DB()
+}
+
+// The statement cache (parity-wave2). SQLite parsed every statement again:
+// a quarter of an ImportSet was sqlite3_prepare. A text run at least twice
+// in a step is prepared on the database once that step has ended (the pool
+// has one connection, which the step's transaction holds while it runs),
+// and later steps run it through tx.Stmt, which database/sql keeps prepared
+// on that same connection. Only one SELECT / INSERT / UPDATE / DELETE
+// without a ';' is cached (a prepare takes the first statement of a text
+// only), at most stmtCacheMax of them; the answers are the statement's
+// either way, and SQLite prepares again by itself when the schema changed.
+const stmtCacheMax = 4096
+
+var (
+	stmtCache   = map[string]*sql.Stmt{}
+	stmtSeen    = map[string]int{}
+	stmtPending []string
+	txStmts     = map[string]*sql.Stmt{}
+	// the database the cache belongs to: another one (OpenDB again) starts
+	// it empty
+	stmtDB *sql.DB
+)
+
+func stmtCacheFor(d *sql.DB) {
+	if stmtDB == d {
+		return
+	}
+	for _, p := range stmtCache {
+		p.Close()
+	}
+	clear(stmtCache)
+	clear(stmtSeen)
+	clear(txStmts)
+	stmtPending = stmtPending[:0]
+	stmtDB = d
+}
+
+type cachedQuerier struct{}
+
+func (cachedQuerier) Query(q string, args ...any) (*sql.Rows, error) {
+	if st := stmtFor(q); st != nil {
+		return st.Query(args...)
+	}
+	return plainConn().Query(q, args...)
+}
+
+func (cachedQuerier) Exec(q string, args ...any) (sql.Result, error) {
+	if st := stmtFor(q); st != nil {
+		return st.Exec(args...)
+	}
+	return plainConn().Exec(q, args...)
+}
+
+func cacheable(q string) bool {
+	if strings.Contains(q, ";") || len(q) < 7 {
+		return false
+	}
+	switch strings.ToUpper(strings.TrimSpace(q)[:6]) {
+	case "SELECT", "INSERT", "UPDATE", "DELETE":
+		return true
+	}
+	return false
+}
+
+func stmtFor(q string) *sql.Stmt {
+	if db == nil {
+		return nil
+	}
+	stmtCacheFor(db)
+	if p, ok := stmtCache[q]; ok {
+		if tx == nil {
+			return p
+		}
+		if st, ok := txStmts[q]; ok {
+			return st
+		}
+		st := tx.Stmt(p)
+		txStmts[q] = st
+		return st
+	}
+	if len(stmtCache)+len(stmtPending) >= stmtCacheMax || !cacheable(q) {
+		return nil
+	}
+	if len(stmtSeen) > 4*stmtCacheMax {
+		clear(stmtSeen)
+	}
+	stmtSeen[q]++
+	if stmtSeen[q] == 2 {
+		stmtPending = append(stmtPending, q)
+	}
+	return nil
+}
+
+// prepareSeen prepares what the step that just ended ran twice, on the
+// connection its transaction gave back; a text that does not prepare stays
+// uncached
+func prepareSeen() {
+	clear(txStmts)
+	if tx != nil || db == nil {
+		return
+	}
+	stmtCacheFor(db)
+	for _, q := range stmtPending {
+		if p, err := db.Prepare(q); err == nil {
+			stmtCache[q] = p
+		}
+		delete(stmtSeen, q)
+	}
+	stmtPending = stmtPending[:0]
 }
 
 func begin() {
@@ -62,6 +178,7 @@ func end(commit bool) {
 	} else {
 		err = t.Rollback()
 	}
+	prepareSeen()
 	if err != nil {
 		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
 	}
