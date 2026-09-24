@@ -79,6 +79,10 @@ export class Data {
       if (client === undefined) {
         throw new NotBuilt("the runtime came up without a database connection");
       }
+      // a runtime booted here is a host like any other: its cross-reference
+      // tables are filled by the module every host calls
+      const {seedAtStartup} = await import("./osd-xref-seed.mjs");
+      await seedAtStartup(client, {root: this.root, quiet: true});
       return client;
     })();
     return this.booted;

@@ -20,6 +20,7 @@ import {pathToFileURL} from "node:url";
 import {mountServices, servicesFromRows, channels} from "./osd-icf.mjs";
 import {mountHost, nodes} from "./osd-nodes.mjs";
 import {applyAtStartup, currentRows} from "./osd-icf-apply.mjs";
+import {seedAtStartup} from "./osd-xref-seed.mjs";
 import {mountChannels} from "./osd-apc.mjs";
 import {Data} from "./osd-data.mjs";
 import {dumpOf} from "./osd-where.mjs";
@@ -70,6 +71,9 @@ if (registry === undefined) {
   throw new Error("the ICF registry could not be applied, and the routes below come from it");
 }
 const icfRowsNow = await currentRows(globalThis.abap.context.databaseConnections.DEFAULT);
+// the cross-reference, derived from the files and cached per generation
+// (tools/osd-xref-seed.mjs): the same call every host makes
+await seedAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root, say: announce});
 await zcl_stg_segw_registry.register();
 await zcl_stg_shlp_registry.register();
 

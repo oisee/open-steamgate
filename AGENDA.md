@@ -35,6 +35,20 @@ Open:
   ZOSD_ISSUE_S) were not measured; a structure has no database table. Not
   renamed yet.
 
+## Sources are files; tables hold only derived indices (2026-09-24)
+
+Decided by Alice: sources stay files in abapGit shape plus git. Database
+tables hold only DERIVED indices such as the cross-reference, rebuilt from
+the files per generation and never edited. The first one to follow it:
+`CROSS`, `WBCROSSGT`, `WBCROSSGTX` and `D010INC` were filled only by a manual
+`osd-xref.mjs --write`, so every host started with them empty and vsp's
+where-used saw nothing. Now one module, `tools/osd-xref-seed.mjs`, fills
+them on every host -- `test/start.mjs`, `tools/osd-serve.mjs` (and so the
+binary), `tools/osd-data.mjs` at start, the browser preview and OSGo at
+build -- replacing the rows rather than merging with them, and the parse is
+cached per generation under `build/xref/`. `test/xref-seed.mjs` fails when
+a host stops calling it.
+
 ## pAMDP scalars: host first, engine only where paired (2026-09-24)
 
 Decided with foreman-dell on #44: a scalar rule measured on A4H is the

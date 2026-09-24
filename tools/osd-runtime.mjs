@@ -36,6 +36,10 @@ const CHILD = fileURLToPath(new URL("./osd-serve.mjs", import.meta.url));
 // hours, found by vsp rather than by anything of ours. A child is not
 // something to leave behind because the parent was not asked to tidy up.
 const CHILDREN = new Set();
+
+/** every serving child this process started and has not seen exit: for a
+ *  test that must not leave one behind when the code under test is wrong */
+export const liveChildren = () => [...CHILDREN];
 let reaperInstalled = false;
 
 function reapOnExit() {
@@ -100,6 +104,17 @@ export class ServingRuntime {
     this.child = undefined;
     this.ready = undefined;
     this.recycling = undefined;
+    // the spawn in flight: a child exists before it says "ready", and
+    // `running` only knows about a child that has said it
+    this.starting = undefined;
+    // a stop in flight: the child is no longer `running` from the moment it
+    // is asked to go, and it holds the database until it has gone
+    this.stopping = undefined;
+    // how many stops were asked for: a recycle compares it to the count it
+    // started with, and gives up when a stop arrived meanwhile
+    this.stops = 0;
+    // the exit of a child being stopped, whoever is stopping it
+    this.exiting = undefined;
     // what the last unexpected death said, for a caller that wants to
     // report why nothing is serving rather than only that nothing is
     this.died = undefined;
@@ -123,21 +138,60 @@ export class ServingRuntime {
     return this.ready ?? Promise.reject(new NotServing());
   }
 
+  // what every path that may spawn waits out first: a recycle (which has a
+  // child of its own coming) and a stop (whose child still holds the
+  // database). A spawn that did not wait them out was a second process on
+  // the same file, found twice by review of #60.
+  //
+  // Returns nothing to await when nothing is busy, so the spawn that follows
+  // happens in the same turn as the call -- a stop() on the next line then
+  // finds it `starting` and stops it. And a stop asked for while this one
+  // waited wins: what was asked before a stop is not started after it.
+  #settled() {
+    if ((this.recycling ?? this.stopping) === undefined) {
+      return undefined;
+    }
+    const stops = this.stops;
+    return (async () => {
+      for (;;) {
+        const busy = this.recycling ?? this.stopping;
+        if (busy === undefined) break;
+        await busy.catch(() => undefined);
+      }
+      if (this.stops !== stops) {
+        throw new NotServing("stopped while this was waiting to start");
+      }
+    })();
+  }
+
+
   async start() {
+    const settling = this.#settled();
+    if (settling !== undefined) await settling;
     if (this.running === true) {
-      return {url: this.url, generation: this.generation, epoch: this.epoch, started: false};
+      return {url: this.url, generation: this.generation, epoch: this.epoch, pid: this.child?.pid, started: false};
     }
     return this.#spawn();
   }
+
+  // **One child at a time, counting the one that is still coming up.**
+  // `running` is true only once a child has said "ready", so between the
+  // spawn and that message a second caller -- an OData request, the status
+  // refresh, a healthcheck -- saw "nothing is serving" and spawned another
+  // child over the same database. SQLite tolerates two processes on one
+  // file; DuckDB does not, and the file came back unreadable on the next
+  // start ("Failed to deserialize: field id mismatch"). The window was a
+  // second wide until the start-up grew by the cross-reference parse
+  // (tools/osd-xref-seed.mjs), and then the image's DuckDB check fell in it.
+  // Every path that spawns goes through here and joins the spawn in flight.
 
   // what a proxy wants when it does not care why nothing is serving: a
   // runtime, now. It waits out a recycle, starts one after a crash, and is
   // idempotent while one is up. The crash is not hidden, because the
   // generation it answers with is a new one.
   async ensure() {
-    if (this.recycling !== undefined) {
-      await this.recycling.catch(() => undefined);
-    }
+    const settling = this.#settled();
+    if (settling !== undefined) await settling;
     if (this.running === true) {
       return this.whenReady();
     }
@@ -146,10 +200,29 @@ export class ServingRuntime {
 
   // the old one goes, the new one comes up, and the caller learns when the
   // code it activated is the code that answers
+  // **A stop wins over a recycle, and neither waits for the other.** The
+  // order is decided when each is asked for, never by awaiting:
+  //
+  //   - recycle() asked while a stop is in progress is refused at once;
+  //   - stop() asked while a recycle is in progress counts itself (`stops`),
+  //     and the recycle checks that count after every await and before it
+  //     spawns, and gives up; a child the recycle had already started is
+  //     `starting`, which the stop waits for and then stops.
+  //
+  // The first version had stop() await the recycle and the recycle await
+  // the stop, and `recycle(); stop();` never settled (found by review of
+  // #60) -- with every later start() and ensure() stuck behind them.
   async recycle() {
     if (this.recycling !== undefined) {
       return this.recycling;
     }
+    if (this.stopping !== undefined) {
+      throw new NotServing("a stop is in progress; there is nothing to recycle");
+    }
+    const stops = this.stops;
+    const stopped = () => {
+      if (this.stops !== stops) throw new NotServing("stopped while recycling");
+    };
     this.recycling = (async () => {
       const began = Date.now();
       let pending;
@@ -160,8 +233,16 @@ export class ServingRuntime {
       // unhandled rejection would take the process down with it
       this.ready.catch(() => undefined);
       try {
+        // a child still coming up is a child: let it finish, then stop it,
+        // rather than start a second one beside it
+        await this.starting?.catch(() => undefined);
+        stopped();
         await this.#stopChild();
+        stopped();
         const answer = await this.#spawn({announce: pending});
+        // a stop that came while this one was coming up stops it, and a
+        // recycle whose process is being stopped did not recycle anything
+        stopped();
         return {...answer, ms: Date.now() - began, recycled: true};
       } catch (error) {
         // whoever is waiting hears why; the next caller hears "nothing is
@@ -178,12 +259,51 @@ export class ServingRuntime {
   }
 
   async stop() {
-    await this.#stopChild();
-    this.ready = undefined;
-    this.port = undefined;
+    if (this.stopping !== undefined) {
+      return this.stopping;
+    }
+    // counted before the first await, so a recycle in progress sees it
+    this.stops += 1;
+    const stopping = (async () => {
+      // a child still coming up would outlive a stop that only looked at the
+      // ready one -- including the one a recycle has just started
+      await this.starting?.catch(() => undefined);
+      await this.#stopChild();
+      // and a child somebody else is already stopping (a recycle's) holds
+      // the database until it has gone
+      await this.exiting;
+      this.ready = undefined;
+      this.port = undefined;
+    })();
+    this.stopping = stopping;
+    try {
+      await stopping;
+    } finally {
+      if (this.stopping === stopping) this.stopping = undefined;
+    }
   }
 
   #spawn(options = {}) {
+    if (this.starting !== undefined) {
+      // joined, and whoever waits on the announcement still hears it. Only
+      // then: a `.then(undefined, undefined)` is a derived promise that
+      // rejects with the spawn and that nobody catches -- an unhandled
+      // rejection, which ends the process (found by review of #60)
+      if (options.announce !== undefined) {
+        this.starting.then(options.announce.resolve, options.announce.reject);
+      }
+      return this.starting;
+    }
+    const starting = this.#spawnOne(options);
+    this.starting = starting;
+    const clear = () => {
+      if (this.starting === starting) this.starting = undefined;
+    };
+    starting.then(clear, clear);
+    return starting;
+  }
+
+  #spawnOne(options = {}) {
     return new Promise((resolve, reject) => {
       const epoch = this.epoch + 1;
       const generation = liveHash(this.root) ?? String(epoch);
@@ -241,9 +361,13 @@ export class ServingRuntime {
         }
       });
 
+      // **Refused once it has gone, not when it was told to go.** Rejecting
+      // at the kill ended the spawn in flight while the child still held
+      // the database, and an ensure() in that window started another.
+      let timedOut;
       const timer = setTimeout(() => {
+        timedOut = new NotServing(`the serving runtime did not answer within ${this.timeout} ms: ${out.slice(-2000)}`);
         child.kill("SIGKILL");
-        reject(new NotServing(`the serving runtime did not answer within ${this.timeout} ms: ${out.slice(-2000)}`));
       }, this.timeout);
 
       // **`on`, not `once`, and that distinction cost every test in this
@@ -298,7 +422,7 @@ export class ServingRuntime {
         }
         // an exit before "ready" is a runtime that could not come up, and
         // the output is the only explanation anyone will get
-        reject(new NotServing(`the serving runtime exited (${signal ?? code}) before it answered: ${out.slice(-2000)}`));
+        reject(timedOut ?? new NotServing(`the serving runtime exited (${signal ?? code}) before it answered: ${out.slice(-2000)}`));
       });
     });
   }
@@ -309,17 +433,18 @@ export class ServingRuntime {
     const child = this.child;
     this.child = undefined;
     this.port = undefined;
-    if (child === undefined || child.exitCode !== null) {
+    if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
       return Promise.resolve();
     }
-    return new Promise((resolve) => {
+    const exiting = new Promise((resolve) => {
       const done = () => {
         clearTimeout(timer);
         resolve();
       };
+      // insisted on, then waited for: a stop is over when the process is,
+      // because until then it holds the database the next one opens
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve();
       }, this.grace + 8000);
       child.once("exit", done);
       try {
@@ -329,6 +454,12 @@ export class ServingRuntime {
         child.kill("SIGTERM");
       }
     });
+    this.exiting = exiting;
+    const clear = () => {
+      if (this.exiting === exiting) this.exiting = undefined;
+    };
+    exiting.then(clear);
+    return exiting;
   }
 }
 

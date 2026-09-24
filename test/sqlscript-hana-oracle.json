@@ -13,7 +13,8 @@
   "Re-measure with --hana --json and keep fixture, builds.hana and hana from",
   "the result. A file measured on the other fixture is refused by name: the",
   "padded and unpadded columns differ by seven rows, which is the size of a",
-  "finding."
+  "finding.",
+  "dec_mult was added on 2026-09-24 from HXE 2.00.088; a full re-run that day answered every other row exactly as this column does."
  ],
  "fixture": "unpadded",
  "measuredAt": "2026-09-19",
@@ -138,6 +139,9 @@
   },
   "fn_log": {
    "error": "wrong number of arguments in function invocation: line 1 col 8 (at pos 7)"
+  },
+  "dec_mult": {
+   "value": "2.8900"
   }
  }
 }

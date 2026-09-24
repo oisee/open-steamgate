@@ -140,13 +140,10 @@ export const CASES = [
   // happens to agree, which is exactly how "one sqlite dialect is fine" would
   // have become a belief rather than a measurement. HANA takes LOG(base, x)
   // and refuses the one-argument form, which is its own answer and a true one.
-  // Added 2026-09-20 with no oracle answer behind it, on purpose. The
-  // decimal treatment in `sqlscript-lower.mjs` covers `+` and `-`, where
-  // HANA's result scale is the operands' own; multiplication's is s1 + s2,
-  // so the same rewrite would ROUND 0.0225 to 0.02 and be wrong in a way no
-  // row here would catch. Until a machine with HANA answers this, the table
-  // reports it as NOT measured -- which is the honest state and is visible,
-  // rather than an assumption living in a comment.
+  // Added 2026-09-20 with no oracle answer behind it, on purpose, and
+  // answered on 2026-09-24 by HXE: 1.70 * 1.70 is 2.8900, scale s1 + s2.
+  // The IR types a product that way now (docs/sqlscript-hana-observed.md,
+  // "Decimal arithmetic"), so the SQLite rounding covers `*` as well.
   {id: "dec_mult", sql: "SELECT d1 * d1 AS v FROM t WHERE k = 'r3'",
    why: "decimal multiplication: HANA's result scale is s1 + s2, which decides whether the SQLite rounding may be extended to it"},
   {id: "fn_log", sql: "SELECT LOG(10) AS v FROM t WHERE k = 'r1'",

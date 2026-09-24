@@ -117,7 +117,28 @@ Refused by name and not carried: a host variable (a system reads one; no
 producer here writes one), a column compared with a column, a qualified
 name (`tab~col`), an unquoted number against a CHAR column, a NUMC literal
 that is not digits within the column's length, LIKE on anything but a CHAR
-column, and TIME or RAW columns.
+column, and TIME columns.
+
+A RAW(n) column (`X`, measured on A4H by the zvdb agent, 2026-09-24) is
+stored as its 2n hex digits in upper case and compared as that text. Its
+literal must be exactly 2n digits of `[0-9A-F]`; anything else -- lower
+case, a wrong length, a character past F -- is what a system answers with
+CX_SY_OPEN_SQL_DATA_ERROR, and the pairs carry it as the outcome
+`{error: "OsqlWhereData", abap: "CX_SY_OPEN_SQL_DATA_ERROR"}`, a kind of
+its own beside a refusal. IN and BETWEEN on a RAW, a backtick literal and
+any condition on a RAWSTRING were not measured and are refused ("column
+type"); LIKE is refused as on any column that is not CHAR ("like type").
+Which of a data error and a syntax or semantics error right of it wins was
+not measured either; the pairs assume the first from the left. A write
+gives a RAW what ABAP's `c -> x` conversion gives a text: the longest
+prefix of `[0-9A-F]` (lower case ends it), an odd count padded with a 0,
+then cut or padded with 00 to n bytes; a number, which would go by the
+`i -> x` rule instead, is refused. Its initial value is n zero bytes, never
+empty (`tools/ir-writes.mjs`, the `raw` section of `writes.json`). The
+probes are ANOMALY-2026-09-24-raw-columns and -c-to-x in `ANORMALIES.md`.
+HANA stores a RAW as VARBINARY(n) and binds bytes; SQLite, DuckDB and
+PostgreSQL hold the transpiler's NCHAR(2n) text, and the seed pads a RAW
+from abapGit's file to its 2n digits so that an equal comparison can hit.
 
 ## What the measurement found in the producers
 

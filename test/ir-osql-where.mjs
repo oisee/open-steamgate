@@ -56,12 +56,12 @@ describe("dynamic WHERE as IR: the pairs a port checks", () => {
 
 // rows chosen so each measured rule decides a different set
 const ROWS = [
-  {CARRID: "LH", CONNID: "0400", SEATSMAX: 385, PRICE: 600, FLDATE: "20161115", NOTE: "a b "},
-  {CARRID: "LH", CONNID: "0401", SEATSMAX: 280, PRICE: 400, FLDATE: "20161116", NOTE: "a b"},
-  {CARRID: "AA", CONNID: "0017", SEATSMAX: 385, PRICE: 422.94, FLDATE: "20161115", NOTE: "it's"},
-  {CARRID: "AA", CONNID: "0064", SEATSMAX: 250, PRICE: 300, FLDATE: "20170101", NOTE: null},
-  {CARRID: "L_", CONNID: "0500", SEATSMAX: 100, PRICE: 100, FLDATE: "20170102", NOTE: null},
-  {CARRID: "UA", CONNID: "0941", SEATSMAX: -385, PRICE: 900, FLDATE: "20170103", NOTE: null},
+  {CARRID: "LH", CONNID: "0400", SEATSMAX: 385, PRICE: 600, FLDATE: "20161115", NOTE: "a b ", R: "00000001"},
+  {CARRID: "LH", CONNID: "0401", SEATSMAX: 280, PRICE: 400, FLDATE: "20161116", NOTE: "a b", R: "000000FF"},
+  {CARRID: "AA", CONNID: "0017", SEATSMAX: 385, PRICE: 422.94, FLDATE: "20161115", NOTE: "it's", R: "0000000A"},
+  {CARRID: "AA", CONNID: "0064", SEATSMAX: 250, PRICE: 300, FLDATE: "20170101", NOTE: null, R: "00000100"},
+  {CARRID: "L_", CONNID: "0500", SEATSMAX: 100, PRICE: 100, FLDATE: "20170102", NOTE: null, R: "FFFFFFFF"},
+  {CARRID: "UA", CONNID: "0941", SEATSMAX: -385, PRICE: 900, FLDATE: "20170103", NOTE: null, R: "00000000"},
 ];
 
 const ENGINES = [
@@ -75,12 +75,13 @@ for (const {dialect, make} of ENGINES) describe(`dynamic WHERE as IR, selecting 
   before(async () => {
     client = make();
     await client.connect();
-    await client.native({sql: 'CREATE TABLE "FLIGHTS" ("CARRID" VARCHAR(3), "CONNID" VARCHAR(4), "SEATSMAX" INTEGER, "PRICE" DECIMAL(15,2), "FLDATE" VARCHAR(8), "NOTE" VARCHAR)', expect: "none"});
+    await client.native({sql: 'CREATE TABLE "FLIGHTS" ("CARRID" VARCHAR(3), "CONNID" VARCHAR(4), "SEATSMAX" INTEGER, "PRICE" DECIMAL(15,2), "FLDATE" VARCHAR(8), "NOTE" VARCHAR, "R" VARCHAR(8))', expect: "none"});
     for (const row of ROWS) {
-      await client.native({sql: 'INSERT INTO "FLIGHTS" VALUES (?, ?, ?, ?, ?, ?)', expect: "none", params: [
+      await client.native({sql: 'INSERT INTO "FLIGHTS" VALUES (?, ?, ?, ?, ?, ?, ?)', expect: "none", params: [
         {name: "a", value: row.CARRID, type: "STRING"}, {name: "b", value: row.CONNID, type: "STRING"},
         {name: "c", value: row.SEATSMAX, type: "I"}, {name: "d", value: String(row.PRICE), type: "P(8,2)"},
-        {name: "e", value: row.FLDATE, type: "STRING"}, {name: "f", value: row.NOTE, type: "STRING", isNull: row.NOTE === null}]});
+        {name: "e", value: row.FLDATE, type: "STRING"}, {name: "f", value: row.NOTE, type: "STRING", isNull: row.NOTE === null},
+        {name: "g", value: row.R, type: "STRING"}]});
     }
   });
   after(async () => { await client.disconnect(); });
@@ -93,6 +94,10 @@ for (const {dialect, make} of ENGINES) describe(`dynamic WHERE as IR, selecting 
     return rows.map((one) => one.CONNID);
   };
 
+  it("a RAW is compared as its upper-case hex, which orders as its bytes (hex TEXT of fixed length)", async () => {
+    expect(await selected("r = '0000000A'")).to.deep.equal(["0017"]);
+    expect(await selected("r < '00000100'")).to.deep.equal(["0017", "0400", "0401", "0941"]);
+  });
   it("an empty condition is every row", async () => {
     expect(await selected("")).to.have.length(ROWS.length);
   });
