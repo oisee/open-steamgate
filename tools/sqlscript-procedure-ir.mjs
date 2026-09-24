@@ -819,8 +819,20 @@ export async function runProcedure(program, {
   // its answer stands where the call was. A statement's call is resolved
   // when that statement runs -- not the bodies of loops and branches under
   // it, whose calls are resolved when they run in turn.
-  const containsTableCall = (node) => node !== null && typeof node === "object"
-    && (node.rel === "tfcall" || Object.values(node).some((value) => (Array.isArray(value) ? value.some(containsTableCall) : containsTableCall(value))));
+  // HANA has the function as an object of that name and runs it itself
+  const emulated = dialect !== "hana";
+  const scanned = new WeakMap();
+  const containsTableCall = (node) => {
+    if (node === null || typeof node !== "object") return false;
+    if (scanned.has(node)) return scanned.get(node);
+    const found = node.rel === "tfcall" || Object.values(node).some((value) => (Array.isArray(value) ? value.some(containsTableCall) : containsTableCall(value)));
+    scanned.set(node, found);
+    return found;
+  };
+  // the names a call's relation was held under, dropped at the next
+  // statement: by then whatever read them has frozen the relation itself
+  const heldCalls = [];
+  const dropHeldCalls = () => { for (const name of heldCalls.splice(0)) relations.delete(name); };
   const callTableFunction = async (call) => {
     const child = procedures instanceof Map ? procedures.get(upper(call.name)) : procedures?.[upper(call.name)];
     if (child?.ir !== "sqlscript-procedure") {
@@ -849,10 +861,15 @@ export async function runProcedure(program, {
     tableCalls += 1;
     const held = `#TABLE_FUNCTION_${tableCalls}`;
     relations.set(held, called.relation);
+    heldCalls.push(held);
     return {rel: "var", name: held};
   };
   let tableCalls = 0;
-  const NESTED_BODIES = new Set(["body", "branches", "otherwise", "handlers"]);
+  // what is resolved when it runs, not when the statement starts: the
+  // bodies, and a WHILE's condition, which is asked again before every turn
+  // with the variables of that turn (an IF's conditions are in `branches`)
+  const NESTED_BODIES = new Set(["body", "branches", "otherwise", "handlers", "condition"]);
+  const conditionNow = async (condition) => (emulated && containsTableCall(condition) ? withTableCalls(condition, false) : condition);
   const withTableCalls = async (node, top = true) => {
     if (node === null || typeof node !== "object") return node;
     if (Array.isArray(node)) {
@@ -872,7 +889,8 @@ export async function runProcedure(program, {
 
   const execute = async (body) => {
     for (const raw of body) {
-      const statement = containsTableCall(raw) ? await withTableCalls(raw) : raw;
+      dropHeldCalls();
+      const statement = emulated && containsTableCall(raw) ? await withTableCalls(raw) : raw;
       step(statement);
       if (statement.stmt === "declare-scalar") {
         const raw = statement.initial === undefined ? null : await evaluate(statement.initial, "scalar declaration");
@@ -1105,14 +1123,14 @@ export async function runProcedure(program, {
           await execute(statement.body);
         }
       } else if (statement.stmt === "while") {
-        while (booleanOrNull(await evaluate(statement.condition, "WHILE condition"), "WHILE condition") === true) {
+        while (booleanOrNull(await evaluate(await conditionNow(statement.condition), "WHILE condition"), "WHILE condition") === true) {
           step(statement);
           await execute(statement.body);
         }
       } else if (statement.stmt === "if") {
         let selected;
         for (const branch of statement.branches) {
-          if (booleanOrNull(await evaluate(branch.condition, "IF condition"), "IF condition") === true) {
+          if (booleanOrNull(await evaluate(await conditionNow(branch.condition), "IF condition"), "IF condition") === true) {
             selected = branch.body;
             break;
           }

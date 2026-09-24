@@ -4,7 +4,7 @@
 // (tools/sqlscript-procedure-ir.mjs, callTableFunction). HANA runs the same
 // two bodies natively; what it answered is in the expectations (HXE
 // 2.00.088, 2026-09-24: 2b; 3c,4d; 3c,4d; and 2b,4d with a table argument
-// -- the same four calls).
+// -- the same four calls; the WHILE and IF conditions below: 2b and 2b).
 import {expect} from "chai";
 import {compileProcedure} from "../tools/sqlscript-to-procedure-ir.mjs";
 import {runProcedure} from "../tools/sqlscript-procedure-ir.mjs";
@@ -74,6 +74,28 @@ for (const [dialect, make] of ENGINES) {
     it("hands a table variable of the caller to a table parameter of the callee", async () => {
       expect(await run(`lt = SELECT id, name FROM t WHERE id <> 3;
         et = SELECT id, name FROM "CL_X=>FROM_ROWS"(:lt, :iv_from) ORDER BY id;`, {IV_FROM: 1})).to.deep.equal(["2b", "4d"]);
+    });
+    it("asks a call in a WHILE condition again before every turn, with that turn's variables", async () => {
+      // the #72 critic's repro: resolved once at the loop's entry, the call
+      // kept answering for n = 0 and the loop ran on to 4d; against t it is 2b
+      expect(await run(`DECLARE n INTEGER = 0;
+        WHILE :n < 6 AND EXISTS (SELECT * FROM "CL_X=>GET_ROWS"(:n + 1, :n + 1)) DO n = :n + 1; END WHILE;
+        et = SELECT id, name FROM t WHERE id = :n - 2 ORDER BY id;`, {IV_FROM: 0})).to.deep.equal(["2b"]);
+    });
+    it("runs a call in an IF condition when that condition is asked", async () => {
+      expect(await run(`IF EXISTS (SELECT * FROM "CL_X=>GET_ROWS"(:iv_from, :iv_from)) THEN
+          et = SELECT id, name FROM t WHERE id = 1;
+        ELSE
+          et = SELECT id, name FROM t WHERE id = 2;
+        END IF;`, {IV_FROM: 9})).to.deep.equal(["2b"]);
+    });
+    it("refuses a table parameter left to its DEFAULT when it compiles, not inside the callee", () => {
+      const registry = {...REGISTRY, "CL_X=>OPT_TABLE": {name: "CL_X=>OPT_TABLE", source: "class",
+        parameters: [{name: "IV_MIN", kind: "scalar", abapType: "i", type: {abap: "I"}},
+          {name: "IT_ROWS", kind: "table", abapType: "tt_rows", schema: {ID: {abap: "I"}, NAME: {abap: "STRING"}}, optional: true}],
+        returns: {ID: {abap: "I"}, NAME: {abap: "STRING"}}}};
+      expect(() => compileProcedure(callerOf('et = SELECT id, name FROM "CL_X=>OPT_TABLE"(1);'), TYPES, {catalogue: CATALOGUE, tableFunctions: registry}))
+        .to.throw(/it_rows of CL_X=>OPT_TABLE is a table left to its DEFAULT, which is not carried/);
     });
     it("refuses a callee the run was not given, by name", async () => {
       const program = compileProcedure(callerOf('et = SELECT id, name FROM "CL_X=>GET_ROWS"(1);'), TYPES, {catalogue: CATALOGUE, tableFunctions: REGISTRY});
