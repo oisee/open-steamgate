@@ -939,9 +939,8 @@ transpiler (Node) and on Go against one recording server: 35 of 35 cases,
 refused on Go (dot segments) and the socket choice above.
 `node tools/gogen/httpc-git.mjs` (after a full osgo build) does the same for
 ZCL_OSD_GIT against `git http-backend` on 127.0.0.1: the requests Go sends
-are Node's byte for byte, and both methods then stop in
-`ZCL_OSD_GIT=>UNTIL_NULL`, an xstring compared with a c literal, which waits
-for the byte-like comparison rules to be measured on A4H.
+are Node's byte for byte. Since ultra/bytecmp (below) REFS answers what
+Node answers; CLONE stops later, in `ZCL_ABAPGIT_GIT_PACK=>DECODE`.
 
 The front end gained what the path needed: `sy-subrc` as a target,
 `concat_lines_of( )` over a table of strings, host-function arguments
@@ -949,3 +948,37 @@ through a reference (`LO_ENTITY->MV_DATA`) and kernel lines that are nops;
 `cl_abap_gzip=>decompress_binary_with_header` (zlib.gunzipSync: members in
 turn, anything else a dump) and `cl_http_utility=>encode_base64` are host
 functions. The OSG build went from 1290 to 1201 statement stubs, none new.
+
+## Byte-like comparisons (ultra/bytecmp, 2026-09-24)
+
+A comparison with an `x` or an `xstring` on either side follows what A4H
+answered (`$ZOSG_TMP_0480` / `0481`, probes with the bodies of testdata
+`ZCL_GOGEN_T_XCMP`, `_XCMPN`, `_XMOVI`):
+
+- `x` against `x` of another length: the shorter is padded with 00 on the
+  right (`x'AB' = x'AB00'`);
+- `xstring` against `xstring`, or an `x` against an `xstring`: the bytes in
+  order, a prefix is the smaller (`x'AB' < xstring AB00`); `v+off(len)` of an
+  xstring is an xstring;
+- against `c` or `string`, literal or not: the byte operand becomes its hex
+  digits in upper case and the comparison is one of characters (`x'FF' <>
+  'ff'`, `x'FF' < 'ff'`, `x'00' <> '0'`, an empty xstring `= ' '`);
+- against `i` or `n`: the last four bytes, 00 on the left, a signed int32
+  (`x'FF' = 255`, `x'FFFFFFFF' = -1`, five bytes `0100000002 = 2`, empty
+  `= 0`). A move of an `x` or `xstring` into an `i` is the same rule.
+
+Any other operand with a byte one (p, f, int8, d, t, an arithmetic or bit
+expression) is refused. A c literal of upper-case hex pairs now moves into an
+xstring, or into an x it fills exactly, as its bytes. The transpiler differs
+in three places (ANORMALIES `byte-compare-x-length`, `byte-compare-numeric`,
+`byte-to-i-move`); Node's ZCL_OSD_GIT never meets them.
+
+`node tools/gogen/httpc-git.mjs` after this: REFS on Go equals Node, the
+three requests are byte for byte the same, and CLONE stops in
+`ZCL_ABAPGIT_GIT_PACK=>DECODE` at `GET_TYPE`, whose `iv_x TYPE x` is a
+generic-length parameter. Behind it on the clone path: `GET_LENGTH`
+compares a `BIT-AND` result, `ZCL_ABAPGIT_ZLIB=>DECOMPRESS` and
+`CL_ABAP_MESSAGE_DIGEST` are `@KERNEL` host code, `DECODE_TREE` uses `FIND
+... IN BYTE MODE`, `ZCL_ABAPGIT_HASH=>SHA1` needs i -> c and string ->
+xstring moves. None of these is small, so the chain stops there. The OSG
+build went from 1200 to 1184 statement stubs.

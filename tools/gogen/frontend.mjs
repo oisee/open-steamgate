@@ -5042,10 +5042,11 @@ export function convert(expr, to) {
   // x <-> xstring: the bytes; into x LENGTH n cut or padded right with 00
   if (to.k === "x" && (from.k === "xstring" || from.k === "x")) return ok("xs2x");
   if (to.k === "xstring" && from.k === "x") return {...expr, type: to};
-  // x -> i: an x shorter than four bytes is filled with 00 on the left, so
-  // it reads unsigned (measured on A4H: FF gives 255); four and more bytes
-  // are not measured
-  if (to.k === "i" && from.k === "x" && from.len < 4) return ok("x2i");
+  // x / xstring -> i: the last four bytes, 00 on the left, a signed int32
+  // (A4H: FF gives 255; ultra/bytecmp 2026-09-24, ZCL_GOGEN_T_XMOVI:
+  // FFFFFFFF -1, 80000000 -2147483648, 0100000002 2 for an x and an
+  // xstring, an empty xstring 0; ZCL_ABAPGIT_CONVERT=>XSTRING_TO_INT)
+  if (to.k === "i" && (from.k === "x" || from.k === "xstring")) return ok("x2i");
   if (numeric(to) && charlike(from)) return ok("c2n");
   // ultra/events (fix round): a move INTO a SORTED table sorts the rows (and
   // raises on a duplicate of a unique key), which no emitter does, so a

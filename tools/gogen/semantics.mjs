@@ -77,6 +77,11 @@ const EXPECT = {
   // XCMPN (ANORMALIES byte-like-comparisons)
   ZCL_GOGEN_T_XCMP: "a:10010010 b:101011 c:1011010 d:0100111 e:100001101111010 f:010010010111 g:10010101101 h:101111111/1; a:01100011001 b:0110 c:00000011; s:000000000000011110; m:AB00/2 z:10000",
   ZCL_GOGEN_T_XCMPN: "xi:1111110 xn:1 xsi:111 l:1111 l2:11",
+  // x / xstring moved into an i (A4H 2026-09-24, $ZOSG_TMP_0481; the move of
+  // ZCL_ABAPGIT_CONVERT=>XSTRING_TO_INT): the last four bytes, signed. The
+  // transpiler gives e:NaN x5:4294967298 xs5:4294967298
+  // (ANORMALIES byte-to-i-move)
+  ZCL_GOGEN_T_XMOVI: "a:11 b:-1 c:255 d:258 e:0 f:-2147483648 g:-2 h:255 x5:2 xs5:2",
   ZCL_GOGEN_T_BYTECAT: "cat:FFAB00CD00/5/0 zeros:0000AB00CD00/6 empty:0/0",
   // cl_http_utility=>encode_x_base64: RFC 4648, padded (A4H 2026-09-24,
   // $ZOSG_TMP_0460; the LSD channel). A host function of the Go runtime: the

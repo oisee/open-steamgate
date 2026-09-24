@@ -411,7 +411,8 @@ func BitX(op, a, b string) string {
 
 // XToI reads an x or xstring as an i: the last four bytes, 00 on the left,
 // a signed int32 (A4H 2026-09-24, ZCL_GOGEN_T_XCMPN: FF 255, FFFFFFFF -1,
-// 0100000002 2, empty 0); the shift drops the bytes before the last four.
+// 0100000002 2, empty 0; a move the same, ZCL_GOGEN_T_XMOVI); the shift
+// drops the bytes before the last four.
 func XToI(v string) int32 {
 	var r int32
 	for i := 0; i < len(v); i++ {

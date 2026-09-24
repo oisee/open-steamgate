@@ -21,6 +21,9 @@
 // comparison of an xstring with a c literal (iv_data+lv_at(1) = '00'),
 // which the front end refuses until the byte-like comparison rules are
 // measured on A4H; PACK_OF has the same (lv_hex = '5041434B').
+// ultra/bytecmp (after the A4H measurement): REFS equals Node's, CLONE
+// stops in ZCL_ABAPGIT_GIT_PACK=>DECODE (GET_TYPE, a generic TYPE x
+// parameter); README "Byte-like comparisons" lists the rest of the path.
 import {execFile, execFileSync, spawn} from "node:child_process";
 import {mkdirSync, rmSync, writeFileSync} from "node:fs";
 import {createServer} from "node:net";

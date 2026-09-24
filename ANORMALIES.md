@@ -29,6 +29,134 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-09-24-byte-compare-x-length — two `x` fields of different lengths are unequal in the transpiler runtime; a system pads the shorter with 00
+
+- Status: `open` (the Go and JS backends of tools/gogen answer as A4H does)
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`compare/eq.js`: two `Hex` of different lengths are equal only when both are initial; `lt` / `gt` compare the hex text)
+- Affected ABAP statement, runtime API or adapter: `=`, `<>`, `<`, `>` between `x LENGTH m` and `x LENGTH n`, m <> n
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_xcmp.clas.abap`, segment `g` of `RUN1` (`lv_x1 = 'AB'. lv_x2 = 'AB00'. lv_x1 = lv_x2 ...`)
+- Exact command used to run it: A4H, the same bodies as ABAP Unit probes ZCL_GOGEN_T_XCMP, _XCMP2, _XCMP3 in `$ZOSG_TMP_0480` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core, `run( )` called from Node (scratch runner, not tracked); the Go and JS backends: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: `g:10010101101` -- `x'AB' = x'AB00'` is true and `x'AB' < x'AB00'` false (the shorter operand is padded with 00 on the right); the rest of the class matches the transpiler: an `xstring` against an `xstring` or an `x` compares the bytes in order and a prefix is the smaller (`x'AB' < xstring AB00`); against `c` or `string` the byte operand becomes its upper-case hex digits and the comparison is one of characters (`x'FF' <> 'ff'`, `x'FF' < 'ff'`, `x'00' <> '0'`, an empty xstring `= ' '`)
+- Actual open-abap behaviour: `g:01010101101` -- `x'AB' = x'AB00'` false, `x'AB' < x'AB00'` true
+- Impact on open-steamgate: none found (ZCL_OSD_GIT compares xstrings with c literals, which both runtimes answer alike)
+- Smallest safe workaround: none needed
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, `compare/eq`, `lt`, `gt` for `Hex`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XCMP
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-byte-compare-numeric — an `x` or `xstring` against an `i` or `n` is not read as a number in the transpiler runtime
+
+- Status: `open` (the Go and JS backends of tools/gogen answer as A4H does)
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`compare/eq.js`, `lt.js`, `gt.js`)
+- Affected ABAP statement, runtime API or adapter: `=`, `<`, `>` between an `x` / `xstring` and an `i` (literal or field) or an `n`; all of them activate on A4H
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_xcmpn.clas.abap`
+- Exact command used to run it: as ANOMALY-2026-09-24-byte-compare-x-length (A4H probes ZCL_GOGEN_T_XCMP2=>NUM, ZCL_GOGEN_T_XCMP3=>LONG, =>LONG2 in `$ZOSG_TMP_0480`)
+- Expected SAP behaviour: `xi:1111110 xn:1 xsi:111 l:1111 l2:11` -- the byte operand is an integer of its last four bytes, 00 on the left, signed: `x'0A' = 10`, `x'0100' = 256`, `x'FF' = 255` (not -1), `x'FFFFFFFF' = -1`, `x LENGTH 5 '0100000002' = 2`, `x'00FFFFFFFF' = -1`; an `xstring` the same by its run-time length (`FFFF = 65535`, empty `= 0`); `x'0A' = n '0010'`
+- Actual open-abap behaviour: `xi:1110110 xn:0 xsi:000 l:0000 l2:00` -- `x'FFFFFFFF' = -1` is false, `x'0A' = n '0010'` is false, and every `xstring` against a number is false
+- Impact on open-steamgate: none found (no OSG source compares bytes with a number)
+- Smallest safe workaround: none needed
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, comparisons of `Hex` / `XString` with numbers)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XCMPN
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-byte-to-i-move — an empty `xstring` moved into an `i` is NaN, and more than four bytes are not cut, in the transpiler runtime
+
+- Status: `open` (the Go and JS backends of tools/gogen answer as A4H does)
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (the move of `Hex` / `XString` into `Integer` parses the whole hex text)
+- Affected ABAP statement, runtime API or adapter: `lv_i = lv_x.` / `lv_i = lv_xstring.`; in OSG `ZCL_ABAPGIT_CONVERT=>XSTRING_TO_INT` (abapGit's pack header, four bytes: not affected)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_xmovi.clas.abap`
+- Exact command used to run it: A4H, the same class as an ABAP Unit probe in `$ZOSG_TMP_0481` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core, `run( )` called from Node (scratch runner, not tracked); the Go and JS backends: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: `a:11 b:-1 c:255 d:258 e:0 f:-2147483648 g:-2 h:255 x5:2 xs5:2` -- the last four bytes, 00 on the left, a signed int32; an empty xstring is 0; no exception for five bytes
+- Actual open-abap behaviour: `... e:NaN ... x5:4294967298 xs5:4294967298` -- an empty xstring gives NaN, and five bytes give a value no `i` can hold
+- Impact on open-steamgate: none found (abapGit converts exactly four bytes)
+- Smallest safe workaround: none needed
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, move of `Hex` / `XString` into `Integer`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XMOVI
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-httpc-body-latin1 — open-abap-core's `CL_HTTP_CLIENT` sends the request body one byte per UTF-16 code unit; a system sends UTF-8
+
+- Status: `open` (the Go host of tools/gogen does what Node does, on purpose: Node is its oracle)
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core 4eec777 (`src/http/cl_http_client.clas.abap`, `IF_HTTP_CLIENT~SEND`: `req.write(requestBody, "binary")`, `content-length` from `lv_body.get().length`)
+- Affected ABAP statement, runtime API or adapter: `IF_HTTP_CLIENT~SEND` with a body set by `set_cdata` (or `set_data`, read back through `get_cdata`)
+- Minimal ABAP reproducer: `tools/gogen/testdata-httpc/zcl_gogen_t_httpc.clas.abap`, case `post-nonlatin` of `tools/gogen/httpc.mjs`
+- Exact command used to run it: **read from the open-abap-core source, not measured on A4H**; the Node side recorded by `node tools/gogen/httpc.mjs` (ultra/httpc, 2026-09-24)
+- Expected SAP behaviour: the character body is sent in the entity's code page, UTF-8 by default: `€` is `E2 82 AC` and `Content-Length` counts bytes
+- Actual open-abap behaviour: `€` goes out as the single byte `AC`, `content-length` counts UTF-16 code units; a body `set_data` filled with bytes that are not UTF-8 raises `CX_SY_CONVERSION_CODEPAGE` in `get_cdata` before anything is sent
+- Impact on open-steamgate: any request body outside Latin-1 is corrupted on the wire; ZCL_OSD_GIT's upload-pack request is ASCII and is not affected
+- Smallest safe workaround: none in OSG
+- Upstream: **needs an issue** in open-abap/open-abap-core (`CL_HTTP_CLIENT`, send the body as UTF-8 bytes of `get_data( )`)
+- Regression-test location: `tools/gogen/httpc.mjs` (Node and Go compared, not against a system)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-httpc-failure-dumps — a failed `CL_HTTP_CLIENT` request is an uncatchable error on Node; a system raises SEND's and RECEIVE's classic exceptions
+
+- Status: `open` (the Go host dumps where Node does)
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core 4eec777 (`IF_HTTP_CLIENT~SEND`: the promise rejects out of a `WRITE '@KERNEL'` line; `SEND` and `RECEIVE` end in `sy-subrc = 0. " workaround for classic exceptions`)
+- Affected ABAP statement, runtime API or adapter: `client->send( EXCEPTIONS http_communication_failure = 1 http_invalid_state = 2 http_processing_failed = 3 ... )`, `client->receive( EXCEPTIONS ... )`
+- Minimal ABAP reproducer: `tools/gogen/testdata-httpc/zcl_gogen_t_httpc.clas.abap`, cases `refused`, `tls-to-plain`, `bad-scheme`, `header-newline` of `tools/gogen/httpc.mjs`
+- Exact command used to run it: **read from the open-abap-core source, not measured on A4H**; the Node side recorded by `node tools/gogen/httpc.mjs`
+- Expected SAP behaviour: a refused connection, a TLS or protocol failure ends `SEND` or `RECEIVE` with `http_communication_failure` (or `http_processing_failed`), sy-subrc set, and `get_last_error( )` explains it
+- Actual open-abap behaviour: a JavaScript error no `CATCH` takes (a dump); the classic exceptions are never raised and sy-subrc is 0 whenever the call returns
+- Impact on open-steamgate: ZCL_OSD_GIT (and any client) cannot report an unreachable remote; the dialog step dumps
+- Smallest safe workaround: none in OSG
+- Upstream: **needs an issue** in open-abap/open-abap-core (`CL_HTTP_CLIENT`); classic exceptions in the transpiler are the underlying gap
+- Regression-test location: `tools/gogen/httpc.mjs`
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-httpc-timeout-ignored — `SEND`'s `TIMEOUT` is ignored by open-abap-core's `CL_HTTP_CLIENT`
+
+- Status: `open` (the Go host ignores it as well)
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core 4eec777 (`IF_HTTP_CLIENT~SEND` never reads `timeout`; no timeout is set on the Node request or its agent)
+- Affected ABAP statement, runtime API or adapter: `client->send( timeout = n )`
+- Minimal ABAP reproducer: any `send( timeout = 1 )` against a server that does not answer
+- Exact command used to run it: **read from the open-abap-core source, not measured on A4H**
+- Expected SAP behaviour: after `timeout` seconds the call ends with `http_communication_failure` (`http_invalid_timeout` for an invalid value)
+- Actual open-abap behaviour: the request waits as long as the socket stays open
+- Impact on open-steamgate: a remote that hangs hangs the dialog step
+- Smallest safe workaround: none in OSG
+- Upstream: **needs an issue** in open-abap/open-abap-core (`CL_HTTP_CLIENT`)
+- Regression-test location: none (no timing test)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-httpc-status-code-field — the response of open-abap-core's `CL_HTTP_CLIENT` has no `~status_code` header field
+
+- Status: `open` (the Go host does the same)
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core 4eec777 (`IF_HTTP_CLIENT~SEND` sets `mv_status` and the header fields Node returns; no pseudo field)
+- Affected ABAP statement, runtime API or adapter: `client->response->get_header_field( '~status_code' )`; `get_status( )` itself answers
+- Minimal ABAP reproducer: `tools/gogen/testdata-httpc/zcl_gogen_t_httpc.clas.abap`, case `status-500` of `tools/gogen/httpc.mjs` (it prints `get_status( )` and every header field; no `~status_code` among them)
+- Exact command used to run it: **read from the open-abap-core source, not measured on A4H**; Node recorded by `node tools/gogen/httpc.mjs`
+- Expected SAP behaviour: the response carries the pseudo header fields `~status_code`, `~status_reason`, `~server_protocol`
+- Actual open-abap behaviour: `~status_code` is empty; the status reason is empty too
+- Impact on open-steamgate: ZCL_OSD_GIT's 4xx/5xx check reads `~status_code` and never fires, on Node or on OSGo
+- Smallest safe workaround: none in OSG (read `get_status( )` instead, in the ABAP that is ours)
+- Upstream: **needs an issue** in open-abap/open-abap-core (`CL_HTTP_CLIENT`)
+- Regression-test location: `tools/gogen/httpc.mjs`
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-httpc-post-url-query — the query of a URL given to open-abap-core's `create_by_url` becomes the body of a POST
+
+- Status: `open` (the Go host does the same)
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core 4eec777 (`CREATE_BY_URL` splits the query off into form fields with `cl_http_utility=>set_query`; `SEND` writes the form fields of a POST into the body with `set_cdata`)
+- Affected ABAP statement, runtime API or adapter: `cl_http_client=>create_by_url( 'http://h/p?a=1' )` followed by `request->set_method( 'POST' )` and `send( )`
+- Minimal ABAP reproducer: `tools/gogen/testdata-httpc/zcl_gogen_t_httpc.clas.abap`, case `query-post` of `tools/gogen/httpc.mjs`
+- Exact command used to run it: **read from the open-abap-core source, not measured on A4H**; Node recorded by `node tools/gogen/httpc.mjs`
+- Expected SAP behaviour: the query stays in the request URI; a POST body is what the program set
+- Actual open-abap behaviour: the request line has no query, and the body is `a=1` (replacing a body set before, as `set_cdata` does)
+- Impact on open-steamgate: none found (git's smart HTTP puts `?service=` on GETs only)
+- Smallest safe workaround: none in OSG
+- Upstream: **needs an issue** in open-abap/open-abap-core (`CL_HTTP_CLIENT`)
+- Regression-test location: `tools/gogen/httpc.mjs`
+- Upstream version containing a fix: none yet
+
 ### ANOMALY-2026-09-24-find-section — `FIND ... IN SECTION` and an empty `FIND` pattern differ from A4H in the transpiler runtime
 
 - Status: `open` (the Go and JS backends of tools/gogen answer as A4H does; the transpiler runtime does not)
