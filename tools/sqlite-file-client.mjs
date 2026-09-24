@@ -192,6 +192,13 @@ export class FileSqliteClient {
     this.inTransaction = true;
   }
 
+  /** A write a SQLScript body makes: in the LUW like an Open SQL write, so
+   *  a ROLLBACK WORK takes it back */
+  async write({sql, params = []}) {
+    await this.beginTransaction();
+    await this.native({sql, params, expect: "none"});
+  }
+
   async commit() {
     this.#end("COMMIT");
   }

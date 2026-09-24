@@ -16,8 +16,13 @@ export const containsRelationStatement = (statements) => statements.some((statem
   statement.stmt === "assign-relation" || statement.stmt === "call-procedure"
     || childBodies(statement).some(containsRelationStatement));
 
-/** something that reads relations into scalars: a FOR over a cursor, or
- *  SELECT ... INTO -- what makes a scalar output over relations carried */
+/** something that consumes relations: a FOR over a cursor, SELECT ... INTO,
+ *  or a write (its rows, its condition) -- what makes a scalar output over
+ *  relations carried */
 export const readsRelations = (statements) => statements.some((statement) =>
-  statement.stmt === "for-cursor" || statement.stmt === "select-into"
+  statement.stmt === "for-cursor" || statement.stmt === "select-into" || statement.stmt === "write"
     || childBodies(statement).some(readsRelations));
+
+/** a write to a database table anywhere in these statements */
+export const containsWrite = (statements) => statements.some((statement) =>
+  statement.stmt === "write" || childBodies(statement).some(containsWrite));

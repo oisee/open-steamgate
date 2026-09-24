@@ -716,6 +716,8 @@ export function lower(rel, dialectName, options = {}) {
   // conditions, so their placeholders and params come in text order
   const writeStatement = (w) => {
     const table = d.quote(w.table);
+    // the target's alias, which a correlated subquery in the condition names
+    const target = w.alias === undefined ? table : `${table} AS ${d.quote(w.alias)}`;
     const cols = (list) => `(${list.map((c) => d.quote(c)).join(", ")})`;
     const values = (rows) => rows.map((row) => `(${row.map(expr).join(", ")})`).join(", ");
     // HANA takes one VALUES row; several go as a SELECT ... FROM DUMMY union
@@ -743,9 +745,9 @@ export function lower(rel, dialectName, options = {}) {
     }
     if (w.write === "update") {
       const set = w.set.map((one) => `${d.quote(one.col)} = ${expr(one.expr)}`).join(", ");
-      return `UPDATE ${table} SET ${set}${where()}`;
+      return `UPDATE ${target} SET ${set}${where()}`;
     }
-    if (w.write === "delete") return `DELETE FROM ${table}${where()}`;
+    if (w.write === "delete") return `DELETE FROM ${target}${where()}`;
     if (w.write === "upsert") {
       if (dialectName === "hana") {
         return w.rows.length === 1

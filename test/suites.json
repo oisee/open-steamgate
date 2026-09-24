@@ -113,6 +113,7 @@
     "test/sqlscript-eager.mjs",
     "test/sqlscript-for-cursor.mjs",
     "test/sqlscript-declare.mjs",
+    "test/sqlscript-dml.mjs",
     "test/sqlscript-order-pairs.mjs",
     "test/sqlscript-end-to-end.mjs",
     "test/sqlscript-engines.mjs",

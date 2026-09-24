@@ -103,9 +103,32 @@ export class DuckDBDatabaseClient {
   async replayAfterFailure() {
     await this.connection.run("ROLLBACK");
     await this.connection.run("BEGIN TRANSACTION");
-    for (const sql of this.luw) {
-      await this.connection.run(sql);
+    for (const one of this.luw) {
+      if (typeof one === "string") await this.connection.run(one);
+      else await this.#run(one.sql, one.params);
     }
+  }
+
+  async #run(sql, params = []) {
+    const prepared = await this.connection.prepare(sql);
+    this.#bind(params).forEach((v, i) => prepared.bind({[String(i + 1)]: v}));
+    return prepared.runAndReadAll();
+  }
+
+  /** A write a SQLScript body makes (tools/sqlscript-procedure-ir.mjs): in the
+   *  LUW like an Open SQL write -- the transaction opened, the statement kept
+   *  for the replay a later failure makes, so a ROLLBACK WORK takes it back
+   *  and a failed Open SQL statement after it does not lose it */
+  async write({sql, params = []}) {
+    await this.beginTransaction();
+    if (this.trace) console.log("write:", sql, params.length ? JSON.stringify(params) : "");
+    try {
+      await this.#run(sql, params);
+    } catch (error) {
+      await this.replayAfterFailure();
+      throw error;
+    }
+    this.luw.push({sql, params});
   }
 
   async modifying(sql) {
