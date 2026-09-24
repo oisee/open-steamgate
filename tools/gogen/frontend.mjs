@@ -78,11 +78,14 @@ export function compileProgram({folders, objects, tolerant = false}) {
   // a namespace is written # in a file name and / in the object's name
   const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
   const wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
+  const ddls = [];
   const walk = (dir) => {
     for (const e of readdirSync(dir, {withFileTypes: true}).sort((x, y) => x.name.localeCompare(y.name))) {
       const path = join(dir, e.name);
       if (e.isDirectory()) walk(path);
       else if (/\.(abap|xml)$/i.test(e.name)) reg.addFile(new abaplint.MemoryFile(e.name, readFileSync(path, "utf8")));
+      // a CDS view's source: its SQL view name, for the table registry
+      else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push(readFileSync(path, "utf8"));
     }
   };
   for (const folder of folders) walk(folder);
@@ -144,6 +147,7 @@ export function compileProgram({folders, objects, tolerant = false}) {
   }
   program.rtti = rttiTable(reg, program);
   program.exceptionSupers = exceptionSupers(reg, program);
+  program.cdsViews = cdsSqlViews(ddls);
   program.tables = tableRegistry(reg, program);
   return program;
 }
@@ -160,12 +164,38 @@ export function compileProgram({folders, objects, tolerant = false}) {
  * the same DDIC facts the SELECT path reads (dbTable), after the classes, so
  * that the row types it adds change nothing they compiled.
  */
+/** CDS name -> SQL view name, read off each DDLS source
+ * (`@AbapCatalog.sqlViewName: 'ZV...'` and `define [root] view NAME`); a
+ * view entity has no SQL view and is left out */
+function cdsSqlViews(sources) {
+  const out = {};
+  for (const src of sources) {
+    const sql = /@AbapCatalog\.sqlViewName\s*:\s*'([^']+)'/i.exec(src)?.[1];
+    const cds = /\bdefine\s+(?:root\s+)?view\s+(?!entity\b)([\w\/]+)/i.exec(src)?.[1];
+    if (sql && cds) out[upper(cds)] = upper(sql);
+  }
+  return out;
+}
+
 /** the table registry as the column registry of the dynamic Open SQL
  * condition parser: {NAME: {view, client, key, columns: [{name, kind, len,
  * dec, key, type}]}}, JSON as it stands (README "The table registry") */
 export function columnRegistry(program) {
-  return Object.fromEntries((program.tables ?? []).map((t) => [t.name, {view: t.view, client: t.client, key: t.key,
-    columns: t.columns.map((c) => ({name: c.name, kind: c.kind, len: c.len, dec: c.dec, key: c.key, type: c.type}))}]));
+  return {
+    tables: Object.fromEntries((program.tables ?? []).map((t) => [t.name, {view: t.view, client: t.client, key: t.key,
+      ...(t.sqlView ? {sqlView: t.sqlView} : {}), ...(t.cds ? {cds: t.cds} : {}),
+      // tools/ir-osql-where.mjs osqlWherePredicate(text, columns) as it is
+      columns: whereColumns(t),
+      fields: t.columns.map((c) => ({name: c.name, kind: c.kind, len: c.len, dec: c.dec, key: c.key}))}])),
+    cdsViews: program.cdsViews ?? {},
+  };
+}
+
+/** {COL: {type, kind?}}: the columns argument of osqlWherePredicate
+ * (tools/ir-osql-where.mjs), NUMC marked; a column with no IR type is left
+ * out, as the parser could not compare it anyway */
+export function whereColumns(t) {
+  return Object.fromEntries(t.columns.filter((c) => c.type !== null).map((c) => [c.name, c.kind === "N" ? {type: c.type, kind: "NUMC"} : {type: c.type}]));
 }
 
 export function tableRegistry(reg, program) {
@@ -192,6 +222,13 @@ export function tableRegistry(reg, program) {
         return {name: upper(c.name), kind, len, dec, key: key.includes(upper(c.name)), type: ir};
       });
       const entry = {name, view, client: columns.some((c) => c.name === "MANDT"), key, columns};
+      // a CDS name and its SQL view (both are views here, gen/cds writes the
+      // DDIC view under each name); the client is the SQL view's, which is
+      // where MANDT is (open-steamgate #45)
+      const sqlView = view ? program.cdsViews?.[name] : undefined;
+      if (sqlView && sqlView !== name) entry.sqlView = sqlView;
+      const cds = Object.entries(program.cdsViews ?? {}).find(([, v]) => v === name)?.[0];
+      if (cds && cds !== name) entry.cds = cds;
       try {
         entry.row = typeOf(st, name, program);
         if (entry.row.k !== "struct") throw new Unsupported(`${name}: not a flat structure`);

@@ -1571,3 +1571,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: **needs an issue** in abaplint/abaplint (syntax check of comparisons)
 - Regression-test location: `tools/gogen` front end, `compare( )` (the refusal); the activating form in `ZCL_GOGEN_T_PDCMP`
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-create-data-name-case — `CREATE DATA ... TYPE STANDARD TABLE OF (name)` with a lower-case name raises in the transpiler runtime and works on a system
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`statements/create_data.js`)
+- Affected ABAP statement, runtime API or adapter: `CREATE DATA dref TYPE STANDARD TABLE OF (name)` (and `TYPE (name)`) with `name` not in upper case
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_crdyn.clas.abap` (`lv_name = 't000'.`)
+- Exact command used to run it: A4H, the same class as an ABAP Unit probe in `$ZOSG_TMP_0270` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core; the Go backend: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: A4H answered `a:0/h b:u/0[] c:2 lower:ok unknown:err kept:0`: the name is found in any case (unlike `CREATE OBJECT ... TYPE (name)`, where lower case is CX_SY_CREATE_OBJECT_ERROR), an unknown name is CX_SY_CREATE_DATA_ERROR and leaves the reference as it was
+- Actual open-abap behaviour: `a:0/h b:u/0[] c:2 lower:err unknown:err kept:2`: `'t000'` raises CX_SY_CREATE_DATA_ERROR, so the reference still holds the table of two rows filled before
+- Impact on open-steamgate: none today (the producers, `ZCL_OAO_SHLP_DDIC` among them, pass DDIC names in upper case); a name taken from a URL or a lower-case constant would fail on the Node host and work on a system
+- Smallest safe workaround: none needed yet; the Go backend looks the name up in any case (`go/abap/tables.go` `TableByName`)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `createData`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_CRDYN
+- Upstream version containing a fix: none yet

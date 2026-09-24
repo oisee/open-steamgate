@@ -48,6 +48,53 @@ type Table struct {
 	Row  *Type
 	Rows *Type
 	Why  string
+	// SQLView is, for a CDS name, the SQL view it is defined with
+	// (@AbapCatalog.sqlViewName): the one that carries MANDT, so the client
+	// filter of a read under the CDS name goes through it; CDS is the
+	// reverse, on the SQL view
+	SQLView string
+	CDS     string
+}
+
+// WhereColumn is one column as the dynamic WHERE parser takes it
+// (tools/ir-osql-where.mjs osqlWherePredicate(text, {COL: {type, kind?}})):
+// its IR type, and Kind "NUMC" for a NUMC column. The JSON is the parser's
+// input shape as it stands.
+type WhereColumn struct {
+	Type *IRType `json:"type"`
+	Kind string  `json:"kind,omitempty"`
+}
+
+// WhereColumns is the table's columns in the parser's shape; a column with
+// no IR type (T, F) is left out, the parser could not compare it.
+func (t *Table) WhereColumns() map[string]WhereColumn {
+	out := make(map[string]WhereColumn, len(t.Columns))
+	for _, c := range t.Columns {
+		if c.IR == nil {
+			continue
+		}
+		w := WhereColumn{Type: c.IR}
+		if c.Kind == 'N' {
+			w.Kind = "NUMC"
+		}
+		out[c.Name] = w
+	}
+	return out
+}
+
+// ClientTable is the table whose MANDT decides the client of a read under
+// name: the SQL view of a CDS name, else the table itself.
+func ClientTable(name string) (*Table, bool) {
+	t, ok := TableByName(name)
+	if !ok {
+		return nil, false
+	}
+	if t.SQLView != "" {
+		if v, ok := TableByName(t.SQLView); ok {
+			return v, true
+		}
+	}
+	return t, true
 }
 
 var (

@@ -139,7 +139,7 @@ function tableRegistry(program) {
   const lines = tables.map((t) => {
     const cols = t.columns.map((c) => `{Name: ${JSON.stringify(c.name)}, Kind: '${c.kind}', Len: ${c.len}, Dec: ${c.dec}, Key: ${c.key}, IR: ${irType(c.type)}}`);
     const types = t.row ? `Row: ${desc(t.row)}, Rows: ${desc({k: "table", row: t.row})}` : `Why: ${JSON.stringify(t.why)}`;
-    return `		&abap.Table{Name: ${JSON.stringify(t.name)}, View: ${t.view}, Client: ${t.client}, Key: []string{${t.key.map((k) => JSON.stringify(k)).join(", ")}}, Columns: []abap.Column{${cols.join(", ")}}, ${types}},`;
+    return `\t\t&abap.Table{Name: ${JSON.stringify(t.name)}, View: ${t.view}, Client: ${t.client}, Key: []string{${t.key.map((k) => JSON.stringify(k)).join(", ")}}, Columns: []abap.Column{${cols.join(", ")}}, ${types}${t.sqlView ? `, SQLView: ${JSON.stringify(t.sqlView)}` : ""}${t.cds ? `, CDS: ${JSON.stringify(t.cds)}` : ""}},`;
   });
   const names = program.ddicNames ?? [];
   return ["func init() {", "	abap.RegisterTables(", ...lines, "	)",

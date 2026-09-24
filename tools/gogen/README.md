@@ -44,8 +44,8 @@ positional, named and EXPORTING/IMPORTING parameters; `sin cos tan sqrt exp
 log abs sign floor ceil trunc frac nmax nmin lines strlen`;
 `sy-index sy-tabix sy-subrc`. Anything else is `Unsupported` with its name,
 and a method that calls a refused one is refused in turn. Refused on
-purpose until measured: `i` -> `string` (the sign goes to the end there),
-and arithmetic whose calculation type would be `p`.
+purpose until measured: `i` -> `string` (the sign goes to the end there).
+Packed numbers came later and are their own section below.
 
 ## Measured, 2026-09-23
 
@@ -319,8 +319,8 @@ range LOW, and the plain comparison and the `SET` are not measured yet
   table compile (above); every other SQL form (`FOR ALL ENTRIES`, `JOIN`,
   `GROUP BY`, dynamic clauses, `IS NULL` / `IS INITIAL`) is a
   `NotCompiled` stub.
-- `d`, `t` and `n` are declared, copied and compared with initial; `p` is
-  declared and copied only; no `decfloat`. No `RAISE RESUMABLE`, no `RAISE
+- `d`, `t` and `n` are declared, copied and compared with initial (`p`:
+  see "Packed numbers"); no `decfloat`. No `RAISE RESUMABLE`, no `RAISE
   EXCEPTION ... MESSAGE`, no T100 or OTR texts in `get_text( )`.
 - Class statics are per process, so a host runs one step at a time (the
   stand serializes). Statics per session come before any parallelism.
@@ -557,3 +557,107 @@ binding to the caller's variable and `MOVE-CORRESPONDING` over generic
 data (A4H, `ZCL_GOGEN_T_GENEXP`); `sy-mandt`; `n` components of structured
 constants; moves between structures of one technical type. 2831 -> 2252
 statement stubs over the 821 classes.
+
+## Packed numbers, 2026-09-24
+
+`p LENGTH n DECIMALS d` in both backends (`go/abap/packed.go`,
+`js/abap.mjs`), every rule measured on A4H first (`$ZOSG_TMP_0270`,
+ZCL_GOGEN_T_PDCONV, _PDCALC, _PDFMT, _PDPREC, _PDCMP, _PDTPL in
+`semantics.mjs`; `go test ./abap -run Packed` holds the same values).
+
+Representation: a p value is its decimal text. A field of d decimals holds
+exactly d of them (`"1.50"`, `"0.00"`), which is what a template prints, so
+a template of a field is the value. An intermediate result is exact and
+carries as many decimals as it has; it is rounded only where it lands. A
+string was chosen over a scaled big.Int because it is what the generic data
+layer, the templates and the database hand over anyway, and the JS runtime
+holds the same text (BigInt inside each operation).
+
+| rule | A4H |
+| --- | --- |
+| calculation type | p when a p is an operand or the target, and when a c or string is an operand (`'7' / 2 * 2` into i is 7); p before int8 (int8 / 3 into p(8,2) is 1666666666.67) |
+| + - * | exact |
+| / | 31 significant digits, rounded half away from zero (2 * 10^28 / 3 - 6666666666666666666666666666 is 0.667; 1e-14 cubed is exact) |
+| in between | 63 integer digits; the 64th is CX_SY_ARITHMETIC_OVERFLOW |
+| DIV MOD | as for i: the remainder is never negative (-7.5 DIV 2 is -4, MOD 0.5) |
+| into a field | rounded half away from zero (1.5625 -> 1.56, -2.5 -> -3); too many digits: CX_SY_ARITHMETIC_OVERFLOW after arithmetic, CX_SY_CONVERSION_OVERFLOW after a move |
+| c / string -> p | blanks around; a sign in front, behind (`12.5-`) or `- 1`; `.5`, `5.`; blanks only 0; exponent, comma, inner blank CX_SY_CONVERSION_NO_NUMBER |
+| f -> p | its seventeen significant digits, then rounded (2.345 -> 2.35, 2.675 -> 2.67) |
+| p -> i, int8 | rounded half away from zero |
+| p -> c | right aligned with a sign place (`   1.50-`); without the sign place when only that fits; `*` and the last digits when short (`*67`, `*50-`) |
+| p -> string | the digits and a sign place (`1.50 `, `1.50-`) |
+| p -> n | rounded, unsigned, the last digits (12345.6 in n(4) is 2346) |
+| templates | the field's decimals; `DECIMALS =` rounds; `NUMBER = RAW` is the plain form; + and - of p print the most decimals of their operands; * and / are refused (1.25 * 2 printed 2.500, 1.25 * 1.25 1.56250: two points do not make the rule) |
+| comparisons | p against p, i, c, string numerically; a string against an i alone compares as i (`'-0.4' < 0` is false); an arithmetic side makes a string operand p; an arithmetic side against a bare string does not activate (refused) |
+| functions | abs( ) frac( ) keep the type, sign( ) is i, ceil( ) floor( ) trunc( ) have no decimals |
+
+DEC columns: SQLite keeps them with NUMERIC affinity; `abap.DBP` reads the
+integer, REAL or text the driver hands over exactly and rounds it into the
+field. A REAL has 15 to 17 significant digits, so a DEC of more digits is
+not exact on this store (HANA's is). Writing a p column still waits for
+`tools/ir-writes.mjs`, which has no P type (`bindValue`); the statement is
+a stub, not a guess.
+
+Consumers: `ZCL_STG_SADL_DPC=>SYNTHETIC_KEYS` (MOD in p) and the
+`/Date(ms)/` arithmetic of `ZCL_STG_ENTRY_PROVIDER=>CONVERT_VALUE` compile;
+`TravelSet('T0001')/to_Bookings` answers through `EPOCH_MS` in p. One line
+of the entry provider (`lv_days * 86400 * 1000 > lv_ms`, a string) does not
+activate on a system and is refused with that reason (ANORMALIES
+arith-compared-with-string). The Flight analytics cube stops before any p:
+its source reads through a dynamic SELECT over a view (the next step, the
+WHERE parser). Statement stubs over OSG: 1810 -> 1531 (208 of them string
+against i comparisons, 24 n in templates).
+
+## The table registry, 2026-09-24
+
+The build writes every TABL and DDIC view the program knows into
+`zz_generated.go` (`frontend.mjs` `tableRegistry`, emitted by `emit-go`):
+its columns in DDIC order, the key, the client flag, and the Go descriptors
+of a row and of a STANDARD TABLE of rows when every column is in the subset.
+`go/abap/tables.go` is the runtime side:
+
+```go
+abap.TableByName(name) (*abap.Table, bool)   // any case, blanks ignored
+t.Columns []abap.Column                      // {Name, Kind, Len, Dec, Key, IR}
+t.Key, t.Client, t.View, t.SQLView, t.CDS
+t.WhereColumns() map[string]abap.WhereColumn // the WHERE parser's input, as it stands
+abap.ClientTable(name)                       // the SQL view of a CDS name (its MANDT), else the table
+t.NewRow(), t.NewTable(), abap.NewData(desc) // the generic factory (Type.New)
+abap.CreateDataByName(name, table)           // CREATE DATA ... TYPE [STANDARD TABLE OF] (name)
+```
+
+`CREATE DATA r TYPE (name)` and `TYPE STANDARD TABLE OF (name)` compile
+through it, and `APPEND wa TO <generic table>` with them (A4H
+ZCL_GOGEN_T_CRDYN: a new initial value each time, the name in any case, an
+unknown name CX_SY_CREATE_DATA_ERROR with the reference kept; the JS emitter
+has no registry and refuses). `ZCL_OAO_SHLP_DDIC` line 254 (StatusVHSet)
+passes and now stops at `SELECT * FROM (name) WHERE (cond)`, which is the
+parser's.
+
+The same facts as JSON, written by `osgo.mjs` to `go/cmd/osgo/zz_tables.json`
+(`frontend.mjs` `columnRegistry`):
+
+```json
+{"tables": {
+   "ZSTG_FLIGHTFACT": {"view": false, "client": true, "key": ["MANDT", "FACT_ID"],
+     "columns": {"FACT_ID": {"type": {"abap": "C", "len": 10}, "kind": "NUMC"},
+                 "SEATS": {"type": {"abap": "I"}},
+                 "PRICE": {"type": {"abap": "P", "len": 15, "dec": 2}}, "...": {}},
+     "fields": [{"name": "FACT_ID", "kind": "N", "len": 10, "dec": 0, "key": true}, "..."]},
+   "ZC_STG_FLIGHTCUBE": {"view": true, "sqlView": "ZVSTGFLIGHTCUBE", "...": {}}},
+ "cdsViews": {"ZC_STG_FLIGHTCUBE": "ZVSTGFLIGHTCUBE", "...": ""}}
+```
+
+`tables[T].columns` is the `columns` argument of
+`osqlWherePredicate(text, columns)` (`tools/ir-osql-where.mjs`, branch
+feat/ir-osql-where) as it is: the IR type of each column
+(`sqlscript-ir.mjs` `T`: C/len for CHAR and NUMC, I, INT8, P with its
+digits (2n-1 for `P LENGTH n`) and decimals, STRING, D, X/len, XSTRING) and
+`kind: "NUMC"`; a column the IR has no type for (t, f) is left out.
+`fields` keeps the ABAP facts: kind letter (C N D T I 8 F P g y X), length
+in characters (C N X) or bytes (P), decimals, key. `cdsViews` maps a CDS name
+to its SQL view (read off the DDLS source), because MANDT is on the SQL view
+only (open-steamgate #45): a read under the CDS name takes its client filter
+from the SQL view (`abap.ClientTable`). `go test ./abap -run Where` pins the
+shape against the pairs file's SFLIGHT-like columns.
+
