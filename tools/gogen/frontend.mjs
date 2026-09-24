@@ -419,6 +419,11 @@ export function readClass(folder) {
 /** methods whose ABAP is kernel code in the transpiler runtime, and the host function that does their work */
 const NATIVE = new Map([
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "Native_DESCRIBE_BY_NAME"],
+  // ultra/json: the descriptor of a value (emit-go nativeRttiData), and the
+  // JSON.parse half of open-abap-core's JSON reader (go/abap/jsonparse.go);
+  // both are @KERNEL code on Node, and the JS emitter has neither
+  ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "Native_DESCRIBE_BY_DATA"],
+  ["CL_SXML_STRING_READER:LCL_JSON_PARSER=>PARSE", "Native_JSON_PARSE"],
   ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~UNESCAPE_URL", "abap.UnescapeURL"],
   ["ZCL_OAO_RFC_DESTINATION=>REGISTER_LOCAL", "abap.RegisterLocalDestination"],
   // get_text( ) of an exception without a T100 message or a text id: the
@@ -670,10 +675,10 @@ function typeOf(t, where, program) {
     }
     if (program.badStructs?.has(go)) throw new Unsupported(program.badStructs.get(go));
     if (!program.structs.has(go)) {
-      const st = {k: "struct", go, fields: [], shape};
+      const st = {k: "struct", go, fields: [], shape, ...(q ? {qname: upper(q)} : {})};
       program.structs.set(go, st); // before the fields: a struct may nest itself through a table
       try {
-        st.fields = comps.map((c) => ({name: upper(c.name), type: typeOf(c.type, `${where}-${c.name}`, program)}));
+        st.fields = comps.map((c) => ({name: upper(c.name), type: rttiNamed(typeOf(c.type, `${where}-${c.name}`, program), c.type)}));
       } catch (e) {
         // a field outside the subset: the structure is not in the program,
         // and every later use of it is refused with the same reason
@@ -695,6 +700,22 @@ function typeOf(t, where, program) {
     return {k: "ref", name, intf};
   }
   throw new Unsupported(`${where}: type ${t.constructor.name} is outside the subset`);
+}
+
+/*
+ * An elementary component's type with the names RTTI reads (ultra/json):
+ * abaplint's qualified name, upper case, as the transpiler hands it to its
+ * runtime, and the dictionary type it comes from. Only components carry
+ * them: a component is what describe_by_data sees through ASSIGN
+ * COMPONENT, and naming every local would give every generic binding a
+ * descriptor of its own.
+ */
+function rttiNamed(ir, t) {
+  if (["struct", "table", "dref", "ref", "exc", "data"].includes(ir.k)) return ir;
+  const q = t.getQualifiedName?.();
+  const d = t.getDDICName?.();
+  if (!q && !d) return ir;
+  return {...ir, ...(q ? {qname: upper(q)} : {}), ...(d ? {ddic: upper(d)} : {})};
 }
 
 const structOf = (ctx, t) => ctx.program.structs.get(t.go);
@@ -1237,7 +1258,15 @@ function structure(node, ctx) {
     // USING KEY <sorted secondary key> (ultra/json): the key's order, see secondaryKey
     const using = /\bUSING\s+KEY\s+([\w~]+)/i.exec(text);
     if (/\b(REFERENCE|GROUP|CASTING)\b/i.test(text) || (/\bUSING\b/i.test(text) && using === null)) throw new Unsupported(`LOOP form: ${text}`);
-    const table = sourceOperand(st.findFirstExpression(Expressions.LoopSource).getFirstChild().getFirstChild(), ctx);
+    // LOOP AT ref->* (ultra/json, CL_SXML_STRING_READER's reader): what a data
+    // reference points to, generic data in Go and JS alike
+    const derefLoop = /^([\w\/~]+)->\*$/.exec(st.findFirstExpression(Expressions.LoopSource).concatTokens());
+    let table;
+    if (derefLoop) {
+      const ref = variable(derefLoop[1], ctx);
+      if (ref.type.k !== "dref") throw new Unsupported(`LOOP AT ->* of a ${ref.type.k}`);
+      table = {...ref, type: {k: "data", table: true}};
+    } else table = sourceOperand(st.findFirstExpression(Expressions.LoopSource).getFirstChild().getFirstChild(), ctx);
     if (using !== null) {
       if (table.type.k !== "table") throw new Unsupported(`LOOP ... USING KEY over a ${table.type.k}`);
       if (/\b(FROM|TO)\b/i.test(text)) throw new Unsupported(`LOOP ... USING KEY with FROM / TO: ${text}`);
@@ -1258,8 +1287,11 @@ function structure(node, ctx) {
     if (table.type.k === "data") {
       // LOOP AT <generic table> ASSIGNING <generic>: row by row, bound
       const nm = /ASSIGNING\s+(<[\w]+>)/i.exec(text)?.[1];
-      if (!nm || ctx.fieldSymbols.get(upper(nm))?.k !== "data" || /\b(WHERE|FROM|TO|INTO)\b/i.test(text.replace(/ASSIGNING.*/i, ""))) throw new Unsupported(`LOOP form over a generic table: ${text}`);
-      return {s: "loop_data", table, fs: upper(nm), body: bodyOf(node, ctx)};
+      const fsType = nm ? ctx.fieldSymbols.get(upper(nm)) : undefined;
+      if (!nm || !["data", "struct"].includes(fsType?.k) || /\b(WHERE|FROM|TO|INTO|USING)\b/i.test(text.replace(/ASSIGNING.*/i, ""))) throw new Unsupported(`LOOP form over a generic table: ${text}`);
+      // a typed field symbol (ultra/json): each row must be a value of that
+      // structure, checked at run time as ASSIGN ref->* TO <typed> is
+      return {s: "loop_data", table, fs: upper(nm), ...(fsType.k === "struct" ? {fsType, text} : {}), body: bodyOf(node, ctx)};
     }
     if (table.type.k !== "table") throw new Unsupported("LOOP over a non-table");
     const lt = st.findFirstExpression(Expressions.LoopTarget);
@@ -1363,7 +1395,9 @@ function statement(node, ctx) {
     // declared from the scope; a VALUE is set once at the start of the
     // method, as ABAP does, not where the statement stands (inside a loop
     // it would reset the field on every pass)
-    if (/\bVALUE\b/i.test(text)) ctx.inits.push(initialValue(node, ctx));
+    // a VALUE clause, not a variable named value (DATA value TYPE REF TO ...,
+    // CL_SXML_STRING_READER's reader; ultra/json)
+    if (node.findFirstExpression(Expressions.Value)) ctx.inits.push(initialValue(node, ctx));
     return undefined;
   }
   if (isStmt(node, Statements.Type) || isStmt(node, Statements.TypeBegin) || isStmt(node, Statements.TypeEnd)) return undefined;
@@ -1583,8 +1617,12 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.InsertInternal) && /\bINTO\s+TABLE\b/i.test(text)) {
     if (/\b(LINES OF|INITIAL LINE|ASSIGNING|REFERENCE)\b/i.test(text)) throw new Unsupported(`INSERT form: ${text}`);
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
-    if (table.type.k !== "table") throw new Unsupported("INSERT into a non-table");
     const vNode = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+    // INSERT v INTO TABLE <generic table> (ultra/json, /UI2/CL_JSON): a
+    // standard table appends, as INSERT INTO TABLE does to one; any other
+    // kind is refused at run time (abap.InsertData)
+    if (table.type.k === "data" && table.type.table) return {s: "insert_data", table, value: convert(source(vNode, ctx), {k: "data"})};
+    if (table.type.k !== "table") throw new Unsupported("INSERT into a non-table");
     // a unique key: a row with the same key is not inserted (sy-subrc 4)
     const keys = table.type.hashed && !(table.type.hashed.length === 1 && table.type.hashed[0] === "TABLE_LINE") ? table.type.hashed : null;
     if (keys && table.type.row.k !== "struct") throw new Unsupported(`INSERT INTO TABLE with key ${keys.join(",")} on a table not of structures`);
@@ -3406,6 +3444,30 @@ function assignStatement(node, ctx, text) {
  * TO, LENGTH / DECIMALS and HANDLE are other forms, not taken here.
  */
 function createDataStatic(node, ctx, text) {
+  // CREATE DATA ref LIKE LINE OF itab (ultra/json, /UI2/CL_JSON): a new
+  // initial row of the table's line type, a generic table's at run time
+  const likeLine = /^CREATE\s+DATA\s+\S+\s+LIKE\s+LINE\s+OF\s+([\w\/~<>-]+)\s*\.?$/i.exec(text);
+  if (likeLine) {
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "dref") throw new Unsupported(`CREATE DATA into a ${target.type.k}`);
+    const tb = variable(likeLine[1], ctx);
+    if (tb.type.k === "data") return {s: "create_data_line", target, table: tb};
+    if (tb.type.k === "table" && !["ref", "exc", "data", "dref"].includes(tb.type.row.k)) return {s: "create_data", target, type: tb.type.row};
+    throw new Unsupported(`CREATE DATA LIKE LINE OF a ${tb.type.k}`);
+  }
+  // CREATE DATA ref. (ultra/json, CL_SXML_STRING_READER): a new value of the
+  // type the reference is declared with (REF TO t)
+  const bare = /^CREATE\s+DATA\s+([\w\/~]+)\s*\.?$/i.exec(text);
+  if (bare) {
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "dref") throw new Unsupported(`CREATE DATA into a ${target.type.k}`);
+    const declared = ctx.scope.findVariable?.(bare[1])?.getType();
+    const inner = declared instanceof BasicTypes.DataReference ? declared.getType() : undefined;
+    if (inner === undefined || inner instanceof BasicTypes.AnyType || inner instanceof BasicTypes.DataType) throw new Unsupported(`CREATE DATA ${bare[1]}: a reference without a complete type`);
+    const t = typeOf(inner, `CREATE DATA ${bare[1]}`, ctx.program);
+    if (["ref", "exc", "data", "dref"].includes(t.k)) throw new Unsupported(`CREATE DATA ${bare[1]}: a ${t.k}`);
+    return {s: "create_data", target, type: t};
+  }
   // CREATE DATA r TYPE (name) / TYPE STANDARD TABLE OF (name): a table or
   // view of the dictionary, looked up at run time in the table registry
   // (A4H ZCL_GOGEN_T_CRDYN: the name in any case, an unknown one

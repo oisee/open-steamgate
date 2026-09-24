@@ -65,7 +65,7 @@ let STRUCTS = new Map();
  * written at the end of the module.
  */
 let DESCS = new Map();
-const typeKey = (t) => (t.k === "struct" ? `s:${t.go}` : t.k === "table" ? `t:${typeKey(t.row)}` : `${t.k}:${t.len ?? ""}:${t.dec ?? ""}:${t.name ?? ""}`);
+const typeKey = (t) => (t.k === "struct" ? `s:${t.go}` : t.k === "table" ? `t:${t.hashed ? "h:" : ""}${typeKey(t.row)}` : `${t.k}:${t.len ?? ""}:${t.dec ?? ""}:${t.name ?? ""}`);
 function desc(t) {
   switch (t.k) {
     case "i": return "abap.TI";
@@ -107,7 +107,7 @@ function descDecls() {
       again = true;
       const t = d.type;
       if (t.k === "table") {
-        decl.push(`const ${d.name} = {kind: "h", row: null, zero: () => []};`);
+        decl.push(`const ${d.name} = {kind: "h", row: null, ${t.hashed ? "hashed: true, " : ""}zero: () => []};`);
         fill.push(`${d.name}.row = ${desc(t.row)};`);
       } else {
         const fs = STRUCTS.get(t.go)?.fields ?? [];
@@ -413,6 +413,11 @@ function stmt(st, ctx, d) {
     // a move into generic data writes into the slot it is bound to
     case "append_data":
       return [`${t}s.sy.tabix = abap.AppendData(${expr(st.table, ctx)}, ${expr(st.value, ctx)});`];
+    // ultra/json: as emit-go (js/abap.mjs InsertData, NewLine)
+    case "insert_data":
+      return [`${t}abap.InsertData(${expr(st.table, ctx)}, ${expr(st.value, ctx)}); s.sy.subrc = 0;`];
+    case "create_data_line":
+      return [`${t}${place(st.target, ctx)} = abap.NewLine(${expr(st.table, ctx)});`];
     case "set_data":
       return [`${t}abap.MoveData(${expr(st.target, ctx)}, ${expr(st.value, ctx)});`];
     case "clear_data":
@@ -436,6 +441,7 @@ function stmt(st, ctx, d) {
         `${t}  if (${n} >= 1 && ${n} <= abap.Lines(tb${n})) { ${ident(st.fs)} = abap.Row(tb${n}, ${n} - 1); s.sy.subrc = 0; s.sy.tabix = ${n}; } else { s.sy.subrc = 4; }`, `${t}}`];
     }
     case "loop_data": {
+      if (st.fsType) return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.text}: a typed field symbol over generic rows is Go-only`)});`];
       const n = ctx.loop++;
       return [`${t}{`, `${t}  const tab${n} = ${expr(st.table, ctx)};`, `${t}  const save${n} = s.sy.tabix;`, `${t}  s.sy.subrc = 4;`,
         `${t}  for (let i${n} = 0; i${n} < abap.Lines(tab${n}); i${n}++) {`,

@@ -60,6 +60,9 @@ let POLY = new Set();
 let CLASSES = new Map();
 // descriptors of the types generic data binds to, generated at the end
 let DESCS = new Map();
+// elementary descriptors with a type name (ultra/json, RTTI's absolute
+// names): one var each, abap.Named once at start
+let NAMED = new Map();
 let STRUCTDEFS = new Map();
 function needsCopy(t) {
   if (t?.k === "table") return true;
@@ -78,6 +81,12 @@ function copied(text, t, e) {
 }
 /** the descriptor of a type, for generic data: built-in for elementary types, generated for the rest */
 function desc(t) {
+  if ((t.qname || t.ddic) && !["struct", "table", "dref", "ref", "exc", "data"].includes(t.k)) {
+    const base = desc({...t, qname: undefined, ddic: undefined});
+    const key = `${base}|${t.qname ?? ""}|${t.ddic ?? ""}`;
+    if (!NAMED.has(key)) NAMED.set(key, {name: `tn_${NAMED.size}`, text: `abap.Named(${base}, ${JSON.stringify(t.qname ?? "")}, ${JSON.stringify(t.ddic ?? "")})`});
+    return NAMED.get(key).name;
+  }
   switch (t.k) {
     case "i": return "abap.TI";
     case "int8": return "abap.TInt8";
@@ -118,12 +127,14 @@ function descFuncs() {
       } else {
         const fs = STRUCTDEFS.get(t.go)?.fields ?? [];
         // a structure with a string, a table or a reference in it is deep: 'v' (A4H)
-        inits.push(`\t*${d.name} = abap.Type{Kind: '${deepType(t) ? "v" : "u"}', Comps: []abap.Comp{${fs.map((f) => `{Name: ${JSON.stringify(String(f.name).toUpperCase())}, T: ${desc(f.type)}, Get: func(p any) any { return &p.(*${t.go}).${ident(f.name)} }}`).join(", ")}}, ${copyZero(t)}}`);
+        const sname = STRUCTDEFS.get(t.go)?.qname;
+        inits.push(`\t*${d.name} = abap.Type{Kind: '${deepType(t) ? "v" : "u"}', ${sname ? `Name: ${JSON.stringify(sname)}, ` : ""}Comps: []abap.Comp{${fs.map((f) => `{Name: ${JSON.stringify(String(f.name).toUpperCase())}, T: ${desc(f.type)}, Get: func(p any) any { return &p.(*${t.go}).${ident(f.name)} }}`).join(", ")}}, ${copyZero(t)}}`);
       }
     }
   }
-  if (out.length === 0) return [];
-  return [...out, "", "func init() {", ...inits, "}", ""];
+  const named = [...NAMED.values()].map((n) => `var ${n.name} = ${n.text}`);
+  if (out.length === 0) return named.length ? [...named, ""] : [];
+  return [...named, ...out, "", "func init() {", ...inits, "}", ""];
 }
 
 /**
@@ -205,6 +216,7 @@ export function emitGo(program, pkg = "main") {
   const structs = Array.isArray(program) ? new Map() : program.structs;
   CLONES = new Map();
   DESCS = new Map();
+  NAMED = new Map();
   STRUCTDEFS = structs;
   CLASSES = new Map(classes.map((c) => [c.name, c]));
   POLY = new Set(classes.map((c) => c.super).filter(Boolean));
@@ -278,6 +290,8 @@ export function emitGo(program, pkg = "main") {
   out.push(...staticRegistry(program, classes));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_NAME"))) out.push(...nativeRtti(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) out.push(...nativeMessageText(program));
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_DATA"))) out.push(...nativeRttiData());
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_JSON_PARSE"))) out.push(...nativeJsonParse());
   out.push(...nativeCodepage(classes));
   out.push(...tableRegistry(program));
   // descriptors first: their Copy asks for clone functions
@@ -400,6 +414,143 @@ function nativeRtti(program) {
     "\t\td.mt_refs_comp = append(d.mt_refs_comp, c)",
     ...(has(sd, "MT_REFS") ? ["\t\td.mt_refs = append(d.mt_refs, c)"] : []), "\t}", "\treturn d", "}", "");
   return out;
+}
+
+/*
+ * describe_by_data for the Go host (ultra/json; open-abap-core writes it as
+ * kernel code): the descriptor of the value's type, built from the same
+ * generated RTTI classes the ABAP around it uses, so ?=, get_components( )
+ * and get_table_line_type( ) work as written. One descriptor per type,
+ * kept for the process, as a system hands out the same object. The values
+ * are A4H's (2026-09-24, ZCL_GOGEN_T_SECKEY's RTTI probe in $ZOSG_TMP_0420):
+ *   kind / type_kind; length in bytes (c and n two per character, d 16,
+ *   t 12, f 8, i 4, int8 8, string and xstring 8, a table 8); decimals;
+ *   output_length (c, n: the length, x twice it, d 8, t 6, f 24, i 11,
+ *   int8 20, p 2 * length + (decimals > 0), string 0);
+ *   absolute_name \TYPE=D, T, F, I, INT8, STRING, XSTRING for the built-in
+ *   types, \TYPE-POOL=ABAP\TYPE=ABAP_BOOL, \TYPE=<data element> with ddic
+ *   'X', \CLASS=<class>\TYPE=<type> for a class's structure type.
+ * Left out, rather than invented: the technical name A4H gives an unnamed
+ * c, n, x or p (\TYPE=%_T... here counts up as open-abap's does), the
+ * output length of a p that comes from the dictionary, a structure's length,
+ * a table type's name and its key. A reference or an object is refused.
+ */
+function nativeRttiData() {
+  const td = CLASSES.get("CL_ABAP_TYPEDESCR");
+  const ed = CLASSES.get("CL_ABAP_ELEMDESCR");
+  const sd = CLASSES.get("CL_ABAP_STRUCTDESCR");
+  const tb = CLASSES.get("CL_ABAP_TABLEDESCR");
+  const ret = goType({k: "ref", name: "CL_ABAP_TYPEDESCR"});
+  const head = `func Native_DESCRIBE_BY_DATA(s *abap.Session, p_data abap.Data) ${ret} {`;
+  const attr = (cls, a) => [cls, ...ancestorsOf(cls)].flatMap((c) => c.attributes ?? []).find((x) => x.name === a && !x.unsupported && !x.static);
+  const need = [[ed, "OUTPUT_LENGTH"], [sd, "MT_REFS"], [sd, "MT_REFS_COMP"], [sd, "COMPONENTS"], [tb, "MO_LINE_TYPE"], [tb, "TABLE_KIND"], [tb, "HAS_UNIQUE_KEY"],
+    [td, "KIND"], [td, "TYPE_KIND"], [td, "LENGTH"], [td, "DECIMALS"], [td, "ABSOLUTE_NAME"], [td, "RELATIVE_NAME"], [td, "DDIC"]];
+  const missing = [td, ed, sd, tb].some((c) => !c || c.abstract) ? "the RTTI classes" : need.filter(([c, a]) => !attr(c, a)).map(([c, a]) => `${c.name}-${a}`).join(", ");
+  if (missing) return [head, `\tpanic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", ${JSON.stringify(`RTTI needs ${missing} compiled`)}))`, "}", ""];
+  const refRow = attr(sd, "MT_REFS").type.row.go;
+  const compRow = attr(sd, "COMPONENTS").type.row.go;
+  const dataRef = goType(attr(sd, "MT_REFS").type.row.k === "struct" ? STRUCTDEFS.get(refRow).fields.find((f) => f.name === "TYPE").type : null);
+  const f = (a) => ident(a);
+  return [
+    "// the descriptors handed out, one per type (rttiOf)",
+    `var rttiDescs = map[*abap.Type]${ret}{}`, "",
+    "var rttiAnon int", "",
+    head, "	if p_data.T == nil {", `		panic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "a value without a type"))`, "	}", "	return rttiOf(p_data.T)", "}", "",
+    `func rttiOf(t *abap.Type) ${ret} {`,
+    "	if d, ok := rttiDescs[t]; ok {", "		return d", "	}",
+    `	var d ${ret}`,
+    "	var base *CL_ABAP_TYPEDESCR",
+    `	builtin := ""`,
+    "	switch t.Kind {",
+    "	case 'u', 'v':",
+    "		sd := Alloc_CL_ABAP_STRUCTDESCR()",
+    "		d, base = sd, sd.As_CL_ABAP_TYPEDESCR()",
+    `		base.${f("KIND")} = "S"`,
+    "		rttiDescs[t] = d",
+    "		for _, c := range t.Comps {",
+    `			sd.${f("MT_REFS")} = append(sd.${f("MT_REFS")}, ${refRow}{${f("NAME")}: c.Name, ${f("TYPE")}: abap.Cast[${dataRef}](rttiOf(c.T))})`,
+    "			ct := rttiOf(c.T).As_CL_ABAP_TYPEDESCR()",
+    `			sd.${f("COMPONENTS")} = append(sd.${f("COMPONENTS")}, ${compRow}{${f("NAME")}: c.Name, ${f("TYPE_KIND")}: ct.${f("TYPE_KIND")}, ${f("LENGTH")}: ct.${f("LENGTH")}, ${f("DECIMALS")}: ct.${f("DECIMALS")}})`,
+    "		}",
+    `		sd.${f("MT_REFS_COMP")} = append(sd.${f("MT_REFS_COMP")}[:0:0], sd.${f("MT_REFS")}...)`,
+    "	case 'h':",
+    "		td := Alloc_CL_ABAP_TABLEDESCR()",
+    "		d, base = td, td.As_CL_ABAP_TYPEDESCR()",
+    `		base.${f("KIND")}, base.${f("LENGTH")} = "T", 8`,
+    "		rttiDescs[t] = d",
+    `		td.${f("MO_LINE_TYPE")} = rttiOf(t.Row)`,
+    `		td.${f("TABLE_KIND")} = "S"`,
+    "		if t.Append == nil {",
+    `			td.${f("TABLE_KIND")}, td.${f("HAS_UNIQUE_KEY")} = "H", "X"`,
+    "		}",
+    "	case 'l', 'r':",
+    `		panic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "a reference: RTTI in the Go host describes data"))`,
+    "	default:",
+    "		ed := Alloc_CL_ABAP_ELEMDESCR()",
+    "		d, base = ed, ed.As_CL_ABAP_TYPEDESCR()",
+    `		base.${f("KIND")} = "E"`,
+    "		n := t.Len",
+    "		var length, out int32",
+    "		switch t.Kind {",
+    "		case 'C':", "			length, out = int32(2*n), int32(n)",
+    "		case 'N':", "			length, out = int32(2*n), int32(n)",
+    "		case 'X':", "			length, out = int32(n), int32(2*n)",
+    "		case 'D':", `			length, out, builtin = 16, 8, "D"`,
+    "		case 'T':", `			length, out, builtin = 12, 6, "T"`,
+    "		case 'F':", `			length, out, builtin = 8, 24, "F"`,
+    "		case 'I':", `			length, out, builtin = 4, 11, "I"`,
+    "		case '8':", `			length, out, builtin = 8, 20, "INT8"`,
+    "		case 'g':", `			length, builtin = 8, "STRING"`,
+    "		case 'y':", `			length, builtin = 8, "XSTRING"`,
+    "		case 'P':",
+    "			length = int32(n / 100)",
+    `			base.${f("DECIMALS")} = int32(n % 100)`,
+    `			if t.DDIC == "" {`,
+    "				out = 2 * length",
+    "				if n%100 > 0 {", "					out++", "				}",
+    "			}",
+    "		default:",
+    `			panic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "type kind "+string(t.Kind)))`,
+    "		}",
+    `		base.${f("LENGTH")} = length`,
+    `		ed.${f("OUTPUT_LENGTH")} = out`,
+    "		rttiDescs[t] = d",
+    "	}",
+    `	base.${f("TYPE_KIND")} = string(t.Kind)`,
+    "	switch {",
+    `	case t.DDIC == "ABAP_BOOL":`,
+    `		base.${f("ABSOLUTE_NAME")}, base.${f("RELATIVE_NAME")} = \`\\TYPE-POOL=ABAP\\TYPE=ABAP_BOOL\`, "ABAP_BOOL"`,
+    `	case t.DDIC != "" && !strings.Contains(t.DDIC, "-"):`,
+    `		base.${f("ABSOLUTE_NAME")}, base.${f("RELATIVE_NAME")}, base.${f("DDIC")} = \`\\TYPE=\`+t.DDIC, t.DDIC, "X"`,
+    `	case (t.Kind == 'u' || t.Kind == 'v') && strings.Contains(t.Name, "=>") && !strings.Contains(t.Name, "-"):`,
+    `		cls, typ, _ := strings.Cut(t.Name, "=>")`,
+    `		base.${f("ABSOLUTE_NAME")}, base.${f("RELATIVE_NAME")} = \`\\CLASS=\`+cls+\`\\TYPE=\`+typ, typ`,
+    `	case builtin != "":`,
+    `		base.${f("ABSOLUTE_NAME")}, base.${f("RELATIVE_NAME")} = \`\\TYPE=\`+builtin, builtin`,
+    "	default:",
+    "		rttiAnon++",
+    `		base.${f("ABSOLUTE_NAME")} = \`\\TYPE=%_T000000000000000\` + abap.FmtI(int32(rttiAnon))`,
+    "	}",
+    "	return d",
+    "}", "",
+  ];
+}
+
+/*
+ * LCL_JSON_PARSER=>PARSE of open-abap-core's CL_SXML_STRING_READER, whose
+ * work is JavaScript on Node (JSON.parse and the TRAVERSE walk): the node
+ * list abap.JSONNodes makes, written into the table IT_NODES points to; a
+ * text that is not JSON raises CX_SXML_PARSE_ERROR (XML_OFFSET 0, see
+ * go/abap/jsonparse.go) (ultra/json)
+ */
+function nativeJsonParse() {
+  const head = "func Native_JSON_PARSE(s *abap.Session, iv_json string, it_nodes abap.Data) {";
+  const cx = CLASSES.get("CX_SXML_PARSE_ERROR");
+  const ctor = cx?.constructor?.params ?? cx?.ctorParams;
+  const raise = cx && !cx.abstract ? `panic(abap.Raise(New_CX_SXML_PARSE_ERROR(s, 0), "CX_SXML_PARSE_ERROR"))`
+    : `panic(abap.NotCompiled("LCL_JSON_PARSER=>PARSE", "CX_SXML_PARSE_ERROR is not compiled"))`;
+  void ctor;
+  return [head, "	nodes, ok := abap.JSONNodes(iv_json)", "	if !ok {", `		${raise}`, "	}", "	abap.FillJSONNodes(it_nodes, nodes)", "}", ""];
 }
 
 /**
@@ -992,6 +1143,11 @@ function stmtLines(st, ctx, d) {
       return [`${t}abap.MoveData(${expr(st.target, ctx)}, ${expr(st.value, ctx)})`];
     case "append_data":
       return [`${t}s.Sy.Tabix = int32(abap.AppendData(${expr(st.table, ctx)}, ${expr(st.value, ctx)}))`];
+    // ultra/json: INSERT INTO TABLE of a generic table, CREATE DATA LIKE LINE OF one
+    case "insert_data":
+      return [`${t}abap.InsertData(${expr(st.table, ctx)}, ${expr(st.value, ctx)})`, `${t}s.Sy.Subrc = 0`];
+    case "create_data_line":
+      return [`${t}${place(st.target, ctx)} = abap.NewLine(${expr(st.table, ctx)})`];
     case "clear_data":
       return [`${t}abap.ClearData(${expr(st.target, ctx)})`];
     case "get_ref":
@@ -1027,7 +1183,9 @@ function stmtLines(st, ctx, d) {
       const tb = `tab${n}`;
       return [`${t}{`, `${t}\t${tb} := ${expr(st.table, ctx)}`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
         `${t}\tfor i${n} := 0; i${n} < abap.Lines(${tb}); i${n}++ {`,
-        `${t}\t\ts.Sy.Tabix = int32(i${n} + 1)`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t\t${ident(st.fs)} = abap.Row(${tb}, i${n})`,
+        `${t}\t\ts.Sy.Tabix = int32(i${n} + 1)`, `${t}\t\ts.Sy.Subrc = 0`,
+        // a typed field symbol (ultra/json): the row must be that structure
+        st.fsType ? `${t}\t\t${ident(st.fs)} = abap.DerefAs[${goType(st.fsType)}](abap.Row(${tb}, i${n}), ${JSON.stringify(st.text)})` : `${t}\t\t${ident(st.fs)} = abap.Row(${tb}, i${n})`,
         ...st.body.flatMap((x) => stmt(x, ctx, d + 2)), `${t}\t}`, `${t}\ts.Sy.Tabix = save${n}`, `${t}}`];
     });
     case "call_dyn_static":

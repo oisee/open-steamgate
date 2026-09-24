@@ -682,6 +682,24 @@ export function AppendData(t, v) {
   return n + 1;
 }
 
+// INSERT v INTO TABLE <generic table> and CREATE DATA LIKE LINE OF one
+// (ultra/json), as go/abap/data.go: a standard table appends; the JS
+// descriptors carry no table kind, so a table whose descriptor says hashed is refused
+export function InsertData(t, v) {
+  if (t === null) throw notAssigned("INSERT INTO TABLE");
+  if (t.t.kind !== "h") notCompiled("INSERT INTO TABLE: a generic value that is not a table");
+  if (t.t.hashed) notCompiled("INSERT INTO TABLE: a generic table that is not a standard table");
+  AppendData(t, v);
+}
+
+export function NewLine(t) {
+  if (t === null) throw notAssigned("CREATE DATA LIKE LINE OF");
+  if (t.t.kind !== "h") notCompiled("CREATE DATA LIKE LINE OF: a generic value that is not a table");
+  const rt = t.t.row;
+  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0)})[rt.kind] ?? "";
+  return cell(zero, rt);
+}
+
 // row i (from 0) of a generic table, bound to the row itself
 export function Row(d, i) {
   const a = d.get();

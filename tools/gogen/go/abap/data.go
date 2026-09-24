@@ -35,6 +35,27 @@ type Type struct {
 	// New allocates a new initial value of this type and returns its
 	// address (CREATE DATA through a descriptor, tables.go NewData)
 	New func() any
+	// Name and DDIC: the type's name as the transpiler's runtime carries it
+	// (abaplint's qualified name, upper case) and the dictionary type it
+	// comes from, for RTTI's absolute names (rtti.go); empty when the
+	// front end gave none (ultra/json)
+	Name string
+	DDIC string
+}
+
+var named sync.Map
+
+// Named is an elementary descriptor with a type name: a type of its own,
+// one per base type and names, made once (emit-go hoists each into a var).
+func Named(base *Type, name, ddic string) *Type {
+	key := [3]any{base, name, ddic}
+	if t, ok := named.Load(key); ok {
+		return t.(*Type)
+	}
+	c := *base
+	c.Name, c.DDIC = name, ddic
+	t, _ := named.LoadOrStore(key, &c)
+	return t.(*Type)
 }
 
 type Comp struct {
@@ -275,3 +296,32 @@ func InitialCh(v, zero string) bool { return v == "" || v == zero }
 // IsInitialOf is IS INITIAL of a typed value through its descriptor, for a
 // structure whose initial value is not Go's zero value.
 func IsInitialOf[T any](v T, t *Type) bool { return IsInitialData(Data{P: &v, T: t}) }
+
+// InsertData is INSERT v INTO TABLE <generic table> (ultra/json): a
+// standard table takes the row at the end, as INSERT INTO TABLE does to a
+// typed one; another kind of table is refused, its key rules not being
+// carried by the descriptor.
+func InsertData(t, v Data) {
+	if t.P == nil {
+		panic(notAssigned("INSERT INTO TABLE"))
+	}
+	if t.T.Kind != 'h' {
+		panic(NotCompiled("INSERT INTO TABLE", "a generic value that is not a table"))
+	}
+	if t.T.Append == nil {
+		panic(NotCompiled("INSERT INTO TABLE", "a generic table that is not a standard table"))
+	}
+	AppendData(t, v)
+}
+
+// NewLine is CREATE DATA ref LIKE LINE OF <generic table> (ultra/json): a
+// new initial row of the table's line type.
+func NewLine(t Data) Data {
+	if t.P == nil {
+		panic(notAssigned("CREATE DATA LIKE LINE OF"))
+	}
+	if t.T.Kind != 'h' {
+		panic(NotCompiled("CREATE DATA LIKE LINE OF", "a generic value that is not a table"))
+	}
+	return NewData(t.T.Row)
+}
