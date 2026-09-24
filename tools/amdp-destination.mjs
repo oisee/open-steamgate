@@ -121,7 +121,7 @@ function statement(p) {
     .filter((x) => x !== "").join("\n");
 }
 
-function nestedProcedures(program, found = new Set()) {
+export function nestedProcedures(program, found = new Set()) {
   const visit = (body) => {
     for (const one of body ?? []) {
       if (one.stmt === "call-procedure") found.add(String(one.procedure).toUpperCase());

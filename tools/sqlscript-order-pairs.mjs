@@ -22,6 +22,7 @@ import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {orderOf, compileProcedure, ORDER_OBSERVED} from "./sqlscript-to-procedure-ir.mjs";
 import {orderedRelation} from "./sqlscript-procedure-ir.mjs";
+import {childBodies} from "./sqlscript-blocks.mjs";
 import {lower} from "./sqlscript-lower.mjs";
 import {T, lit, col, bin, scan, filter, project, order, union, join as joinRel, aggregate, limit, subquery} from "./sqlscript-ir.mjs";
 import {runsAs} from "./osd-main.mjs";
@@ -176,7 +177,7 @@ export async function pairs() {
     try {
       const program = compileProcedure({...SIG, body: one.body}, TYPES, {});
       const loops = [];
-      const walk = (body) => body.forEach((s) => { if (s.stmt === "for-cursor") loops.push({cursor: s.cursorName, order: plainOrder(s.order)}); walk(s.body ?? []); (s.branches ?? []).forEach((b) => walk(b.body ?? [])); walk(s.otherwise ?? []); });
+      const walk = (body) => body.forEach((s) => { if (s.stmt === "for-cursor") loops.push({cursor: s.cursorName, order: plainOrder(s.order)}); childBodies(s).forEach(walk); });
       walk(program.body);
       expect = {loops};
     } catch (error) {

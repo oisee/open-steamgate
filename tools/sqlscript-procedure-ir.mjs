@@ -7,7 +7,7 @@
 // before a syntax tree is allowed to produce these nodes.
 import {effects, schemaOf, col, cast, project, filter, bin, lit, limit, scan, order, T} from "./sqlscript-ir.mjs";
 import {lower, Refused} from "./sqlscript-lower.mjs";
-import {childBodies} from "./sqlscript-blocks.mjs";
+import {childBodies, containsRelationStatement, readsRelations} from "./sqlscript-blocks.mjs";
 export {childBodies};
 import {packedText, WriteError} from "./ir-writes.mjs";
 
@@ -553,15 +553,6 @@ export async function runProcedure(program, {
   if (program.outputType !== undefined && !["I", "C", "STRING"].includes(program.outputType?.abap)) {
     throw new UnsupportedSqlScript("portable scalar outputs are limited to ABAP INTEGER, fixed-length character and STRING");
   }
-  const containsRelationStatement = (body) => body.some((statement) =>
-    statement.stmt === "assign-relation"
-      || statement.stmt === "call-procedure"
-      || childBodies(statement).some(containsRelationStatement));
-  // a scalar output over relations is carried when something reads them into
-  // scalars: a FOR loop over a cursor, or SELECT ... INTO
-  const readsRelations = (body) => body.some((statement) =>
-    statement.stmt === "for-cursor" || statement.stmt === "select-into"
-      || childBodies(statement).some(readsRelations));
   if (program.outputType !== undefined && !readsRelations(program.body ?? [])
       && ((program.relationParameters ?? []).length > 0 || containsRelationStatement(program.body ?? []))) {
     throw new UnsupportedSqlScript("scalar-only portable functions cannot contain relational inputs or statements");
@@ -850,11 +841,12 @@ export async function runProcedure(program, {
         }
         const current = scalars.get(statement.variable);
         // the number of turns by arithmetic, not by building them: a range
-        // past the step budget is refused before the first turn
+        // past what is left of the step budget is refused before its first
+        // turn, so no turn runs for a loop that cannot finish
         const first = Number(from);
         const last = Number(to);
         const count = Math.max(0, last - first + 1);
-        if (count > maxSteps) throw new UnsupportedSqlScript(`SQLScript step limit ${maxSteps} exceeded`, statement);
+        if (steps + count > maxSteps) throw new UnsupportedSqlScript(`SQLScript step limit ${maxSteps} exceeded`, statement);
         for (let k = 0; k < count; k += 1) {
           const c = statement.reverse ? last - k : first + k;
           step(statement);

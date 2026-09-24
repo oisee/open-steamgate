@@ -9,3 +9,15 @@ export const childBodies = (statement) => [
   ...(["while", "for-range", "for-cursor"].includes(statement?.stmt) ? [statement.body ?? []] : []),
   ...(statement?.stmt === "if" ? [...(statement.branches ?? []).map((branch) => branch.body ?? []), statement.otherwise ?? []] : []),
 ];
+
+/** a relational statement anywhere in these statements: an assignment of a
+ *  table variable, or a CALL (whose output is one) */
+export const containsRelationStatement = (statements) => statements.some((statement) =>
+  statement.stmt === "assign-relation" || statement.stmt === "call-procedure"
+    || childBodies(statement).some(containsRelationStatement));
+
+/** something that reads relations into scalars: a FOR over a cursor, or
+ *  SELECT ... INTO -- what makes a scalar output over relations carried */
+export const readsRelations = (statements) => statements.some((statement) =>
+  statement.stmt === "for-cursor" || statement.stmt === "select-into"
+    || childBodies(statement).some(readsRelations));

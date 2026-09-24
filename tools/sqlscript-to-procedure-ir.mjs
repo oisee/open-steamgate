@@ -11,7 +11,8 @@ import {lex} from "./sqlscript/lexer.mjs";
 import {parse} from "./sqlscript/combi.mjs";
 import {Body} from "./sqlscript/expressions/index.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop, selectInto,
-  ifElse, callProcedure, forCursor, forRange, UnsupportedSqlScript, assignable, childBodies} from "./sqlscript-procedure-ir.mjs";
+  ifElse, callProcedure, forCursor, forRange, UnsupportedSqlScript, assignable} from "./sqlscript-procedure-ir.mjs";
+import {childBodies, containsRelationStatement, readsRelations} from "./sqlscript-blocks.mjs";
 
 const upper = (value) => String(value).toUpperCase();
 
@@ -682,6 +683,9 @@ export function compileProcedure(method, types, options = {}) {
           refusal.reason = "order";
           throw refusal;
         }
+        // a table assigned inside the loop is unknown to every cursor inside
+        // it, as in a WHILE (the #59 critic: only WHILE and a numeric FOR did)
+        assignedInLoop(node);
         rowVariables[rowName] = schema;
         for (const [column, type] of Object.entries(schema)) scalarTypes[`${rowName}.${column}`] = type;
         openCursors.add(cursorName);
@@ -698,8 +702,10 @@ export function compileProcedure(method, types, options = {}) {
           for (const v of Object.values(r)) (Array.isArray(v) ? v : [v]).forEach(collectVars);
         };
         collectVars(cursor);
+        // an assignment or a CALL's output, in any block of the body
         const assigns = (statements) => statements.some((one) => (one.stmt === "assign-relation" && readByCursor.has(upper(one.name)))
-          || assigns(one.body ?? []) || (one.branches ?? []).some((b) => assigns(b.body ?? [])) || assigns(one.otherwise ?? []));
+          || (one.stmt === "call-procedure" && readByCursor.has(upper(one.output)))
+          || childBodies(one).some(assigns));
         if (assigns(body)) throw new UnsupportedSqlScript(`FOR over cursor ${cursorName}: a table it reads is assigned inside the loop`, node);
         result.push(forCursor(rowName, cursorName, cursor, schema, body, order, node));
       } else if (node.node === "While") {
@@ -845,15 +851,6 @@ export function compileProcedure(method, types, options = {}) {
     const outer = wrapperMode !== undefined && (wrapperMode.length === 0 || JSON.stringify(wrapperMode) === JSON.stringify(["SEQUENTIAL", "EXECUTION"]))
       ? {children: children(onlyNode, "Statement")} : tree;
     const body = compileStatements(outer, true, true);
-    const containsRelationStatement = (statements) => statements.some((statement) =>
-      statement.stmt === "assign-relation"
-        || statement.stmt === "call-procedure"
-        || childBodies(statement).some(containsRelationStatement));
-    // a scalar output over relations is carried when something reads them
-    // into scalars -- a FOR loop over a cursor, or SELECT ... INTO
-    const readsRelations = (statements) => statements.some((statement) =>
-      statement.stmt === "for-cursor" || statement.stmt === "select-into"
-        || childBodies(statement).some(readsRelations));
     if (output.kind === "scalar" && (relationParameters.length > 0 || containsRelationStatement(body)) && !readsRelations(body)) {
       throw new UnsupportedSqlScript("scalar-only portable functions cannot contain relational inputs or statements");
     }
