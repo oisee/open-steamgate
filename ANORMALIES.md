@@ -29,6 +29,38 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-09-24-escape-json-string-control-characters — `escape( format = e_json_string )` leaves control characters other than a newline raw
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime 2.13.89` (`builtin/escape.ts`, the `e_json_string` case)
+- Affected ABAP statement, runtime API or adapter: `escape( val = v format = cl_abap_format=>e_json_string )`, which open-abap-core's `/UI2/CL_JSON=>SERIALIZE_INT` uses for every c and string it writes
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_jsesc.clas.abap` (branch `ultra/parity-wave1`)
+- Exact command used to run it: **measured on A4H, 2026-09-24**, the class as it stands in an ABAP Unit probe ($ZOSG_TMP_0050, deleted afterwards); the runtime side read from `escape.ts`
+- Expected SAP behaviour: `\` and `"` escaped; U+0008 U+0009 U+000A U+000C U+000D as `\b \t \n \f \r`; every other character below U+0020 as `\u00XX` with upper-case hex (`\u0000`, `\u000B`, `\u001F`); `/`, `'`, U+007F and everything beyond ASCII (U+2028 included) unchanged; a c operand without its trailing blanks
+- Actual open-abap behaviour: only `\`, `"` and U+000A are escaped; a tab, a carriage return and every other control character reach the JSON raw, which makes the document invalid JSON
+- Impact on open-steamgate: a string with a tab or a CR in it (source code through the RFC channel, a message text) serializes to JSON a browser's `JSON.parse` refuses on Node and not on a system or on OSGo, which follows A4H (`go/abap/strings.go` EscapeJSONString)
+- Smallest safe workaround: none in ABAP; the Go and JS backends of tools/gogen follow A4H
+- Upstream issue: not reported yet (goes through the critic gate with the next batch)
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_JSESC
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-24-empty-string-to-date — an empty string moved into a `d` is eight blanks, not the initial date
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime 2.13.89` (`types/date.ts`, `set` of a string)
+- Affected ABAP statement, runtime API or adapter: `lv_d = lv_string` and the same move into a field symbol bound to a `d`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_genmovd.clas.abap` (branch `ultra/parity-wave1`)
+- Exact command used to run it: **measured on A4H, 2026-09-24** in an ABAP Unit probe ($ZOSG_TMP_0050, deleted afterwards); the runtime side read from `date.ts`
+- Expected SAP behaviour: a string into a `d` is its first eight characters, blank-filled when shorter, and an **empty** string is the initial date `00000000` (IS INITIAL true). Into a `t` the same with six, and a shorter string is filled with zeros (`abc` is `abc000`; the runtime does this one right)
+- Actual open-abap behaviour: `Date.set("")` pads with blanks, so the date is eight blanks, IS INITIAL false
+- Impact on open-steamgate: an absent date in a JSON body or an OData request that reaches a `d` through a string is not initial on Node; OSGo follows A4H (`go/abap/conv.go` S2D)
+- Smallest safe workaround: `IF lv_s IS INITIAL. CLEAR lv_d. ELSE. lv_d = lv_s. ENDIF.`
+- Upstream issue: not reported yet (goes through the critic gate with the next batch)
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_GENMOVD
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-24-byte-compare-x-length — two `x` fields of different lengths are unequal in the transpiler runtime; a system pads the shorter with 00
 
 - Status: `open` (the Go and JS backends of tools/gogen answer as A4H does)
