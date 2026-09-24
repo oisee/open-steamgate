@@ -456,6 +456,9 @@ export function compileProcedure(method, types, options = {}) {
   const bind = (node, fragment, targetSchema) => toIr(node, {
     fragment, scalarTypes, relationSchemas, rowVariables, deferTableVariables: true, strictColumns: true,
     signature: method, arrayValues, catalogue, keys: options.keys ?? {}, ...(targetSchema === undefined ? {} : {targetSchema}),
+    // the table functions a body may call (tools/sqlscript/table-function-registry.mjs);
+    // without it every `FROM "CL=>M"(...)` is refused as not in the registry
+    tableFunctions: options.tableFunctions ?? {},
   });
 
   // HANA refuses a bare BOOLEAN as a condition (`IF :g THEN` is a syntax

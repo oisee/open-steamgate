@@ -598,7 +598,7 @@ const withTimeout = (promise, ms, what) => {
 function ours(body, r) {
   try {
     compileProcedure({...body.signature, body: body.signature.body ?? body.body}, body.types ?? new Map(),
-      {catalogue: body.catalogue, resolveType: r.dictionary.resolver(), store: r.dictionary});
+      {catalogue: body.catalogue, resolveType: r.dictionary.resolver(), store: r.dictionary, tableFunctions: r.tableFunctionRegistry ?? {}});
     return "OK";
   } catch (error) {
     return String(error.message);
