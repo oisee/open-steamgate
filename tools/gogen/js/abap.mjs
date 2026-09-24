@@ -1267,3 +1267,14 @@ export function DescrLength(d) {
   }
   throw new AbapError("NOT_COMPILED", `describe_by_data( )->length: of type kind ${d.t.kind}`);
 }
+// substring_before / _after( val sub ): go/abap strings.go
+export function SubstringBefore(v, sub) {
+  if (sub === "") throw new AbapError("NOT_COMPILED", "substring_before( ): an empty sub is not measured");
+  const i = v.indexOf(sub);
+  return i >= 0 ? v.slice(0, i) : "";
+}
+export function SubstringAfter(v, sub) {
+  if (sub === "") throw new AbapError("NOT_COMPILED", "substring_after( ): an empty sub is not measured");
+  const i = v.indexOf(sub);
+  return i >= 0 ? v.slice(i + sub.length) : "";
+}

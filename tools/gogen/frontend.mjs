@@ -1992,6 +1992,8 @@ function moveCorresponding(node, ctx, text) {
 const STRING_FNS = {
   REPEAT: ["VAL", "OCC"], REPLACE: ["VAL", "SUB", "REGEX", "WITH", "OCC"], CONDENSE: ["VAL", "DEL", "FROM", "TO"],
   SHIFT_LEFT: ["VAL", "PLACES", "CIRCULAR", "SUB"], SHIFT_RIGHT: ["VAL", "PLACES", "CIRCULAR", "SUB"], TO_MIXED: ["VAL", "SEP", "CASE", "MIN"],
+  // ultra/events: substring_before / _after( val sub ), abapGit's parse_fields
+  SUBSTRING_BEFORE: ["VAL", "SUB"], SUBSTRING_AFTER: ["VAL", "SUB"],
 };
 function stringFn(name, direct, named, ctx, text) {
   const ps = named?.findDirectExpressions(Expressions.ParameterS) ?? [];
@@ -2006,6 +2008,12 @@ function stringFn(name, direct, named, ctx, text) {
   };
   const int = (k) => convert(source(given.get(k), ctx, I), I);
   const val = chars("VAL");
+  // the text before / after the first occurrence of sub, empty when there is
+  // none (A4H ZCL_GOGEN_T_WGUI2)
+  if (name === "SUBSTRING_BEFORE" || name === "SUBSTRING_AFTER") {
+    if (!given.has("SUB")) throw new Unsupported(`${name.toLowerCase()}( ) without sub: ${text}`);
+    return {e: "str_fn", fn: name === "SUBSTRING_BEFORE" ? "SubstringBefore" : "SubstringAfter", args: [val, chars("SUB")], type: S};
+  }
   if (name === "REPEAT") {
     if (!given.has("OCC")) throw new Unsupported(`repeat( ) without occ: ${text}`);
     return {e: "str_fn", fn: "Repeat", args: [val, int("OCC")], type: S};

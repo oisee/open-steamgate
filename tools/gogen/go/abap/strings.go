@@ -476,3 +476,26 @@ func FindAllCount(s, p string, regex, icase bool) int32 {
 func EscapeHTMLAttr(v string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#39;").Replace(v)
 }
+
+// SubstringBefore / SubstringAfter are substring_before / _after( val sub )
+// (ultra/events, A4H ZCL_GOGEN_T_WGUI2): around the first occurrence of sub,
+// empty when there is none; an empty sub is not measured and refused.
+func SubstringBefore(v, sub string) string {
+	if sub == "" {
+		panic(NotCompiled("substring_before( )", "an empty sub is not measured"))
+	}
+	if i := strings.Index(v, sub); i >= 0 {
+		return v[:i]
+	}
+	return ""
+}
+
+func SubstringAfter(v, sub string) string {
+	if sub == "" {
+		panic(NotCompiled("substring_after( )", "an empty sub is not measured"))
+	}
+	if i := strings.Index(v, sub); i >= 0 {
+		return v[i+len(sub):]
+	}
+	return ""
+}
