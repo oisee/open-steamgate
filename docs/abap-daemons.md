@@ -658,9 +658,13 @@ decisions below.
 
 ---
 
-## Open decisions for Alice
+## Decisions
 
-| # | decision | recommendation |
+Alice decided all nine as recommended on 2026-09-24. The steps
+start with step 2 (step 1 is #75), and the A4H probes P0 to P11 go
+as one batch before anything relies on them.
+
+| # | decision | decided (as recommended) |
 | --- | --- | --- |
 | D1 | Build ADF at all, or stop after AMC and timers (steps 1 to 4)? | build, in this order; stop after step 4 is a valid answer if daemons are not wanted now |
 | D2 | What a generation swap does to a running daemon | option A: restart in the new generation from its start parameter, mailbox held and replayed with an ack after commit and a message-ID dedup. P10 decides which callbacks run, not whether the old load keeps running: if a system keeps the old load, we still restart, and record the divergence |
