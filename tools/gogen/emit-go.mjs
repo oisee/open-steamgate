@@ -93,6 +93,8 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "refattr"
 function copied(text, t, e) {
   return needsCopy(t) && (e === undefined || PLACES.has(e.e)) ? `${cloneName(t)}(${text})` : text;
 }
+const descKey = (t) => (t.k === "struct" ? `s:${t.go}` : t.k === "table" ? `t${t.sorted ? "s" : t.hashed ? "h" : ""}:${descKey(t.row)}`
+  : `${t.k}:${t.len ?? ""}:${t.dec ?? ""}:${t.name ?? ""}`);
 /** the descriptor of a type, for generic data: built-in for elementary types, generated for the rest */
 function desc(t) {
   switch (t.k) {
@@ -110,8 +112,11 @@ function desc(t) {
     case "dref": return "abap.TRef";
     case "ref": case "exc": return "abap.TObj";
     case "struct": case "table": {
-      // a SORTED or HASHED table has no Append (ultra/events): its own descriptor
-      const key = goType(t) + (t.sorted ? "|sorted" : t.hashed ? "|hashed" : "");
+      // the ABAP type, not the Go one: a table of c 200 and a table of string
+      // are both []string in Go but not one descriptor (ultra/events: STRING_TO_TAB
+      // read the rows of a c 200 table as strings); a SORTED or HASHED table
+      // has no Append
+      const key = descKey(t);
       if (!DESCS.has(key)) DESCS.set(key, {name: `td_${DESCS.size}`, type: t});
       return DESCS.get(key).name;
     }
