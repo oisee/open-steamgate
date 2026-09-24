@@ -20,6 +20,21 @@ export const ident = (name) => {
 const typeName = (s) => String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 export const funcName = (cls, method) => `${typeName(cls)}_${typeName(method)}`;
 const evType = (key) => `EV_${typeName(key)}`;
+/*
+ * ultra/events: CLASS_CONSTRUCTOR runs once, at the first use of the class:
+ * the first NEW of it or of a subclass, or the first call of one of its
+ * static methods (ABAP also counts a read of a static attribute from
+ * outside; the front end compiles no such read). The superclass's runs
+ * first. The flag is process-wide, as the class data is. CL_ABAP_CHAR_
+ * UTILITIES is left out: its class constructor is two kernel lines setting
+ * constants the front end already knows (CHAR_UTILITIES).
+ */
+const ownCctor = (cls) => cls.name !== "CL_ABAP_CHAR_UTILITIES"
+  && (cls.methods.some((m) => m.name === "CLASS_CONSTRUCTOR") || (cls.stubs ?? []).some((m) => m.name === "CLASS_CONSTRUCTOR"));
+function chainCctor(cls) {
+  for (let c = cls; c; c = c.super ? CLASSES.get(c.super) : null) if (ownCctor(c)) return true;
+  return false;
+}
 
 export function goType(t) {
   switch (t.k) {
@@ -262,6 +277,11 @@ export function emitGo(program, pkg = "main") {
     for (const a of (cls.attributes ?? []).filter((x) => x.static && !x.unsupported)) {
       out.push(`var ${typeName(`${cls.name}=>${a.name}`)} ${goType(a.type)}${a.value === undefined ? "" : ` = ${constLiteral(a)}`}`);
     }
+    if (chainCctor(cls)) {
+      const sup = cls.super && CLASSES.get(cls.super) && chainCctor(CLASSES.get(cls.super)) ? `\tEnsure_${typeName(cls.super)}(s)` : null;
+      out.push(`var cctor_${typeName(cls.name)} bool`, "", `func Ensure_${typeName(cls.name)}(s *abap.Session) {`, `\tif cctor_${typeName(cls.name)} {`, "\t\treturn", "\t}",
+        `\tcctor_${typeName(cls.name)} = true`, ...(sup ? [sup] : []), ...(ownCctor(cls) ? [`\t${funcName(cls.name, "CLASS_CONSTRUCTOR")}(s)`] : []), "}", "");
+    }
     for (const m of cls.methods) out.push(...method(cls, m), "");
     // a method that did not compile still exists, and says why when called
     for (const m of cls.stubs ?? []) {
@@ -284,6 +304,7 @@ export function emitGo(program, pkg = "main") {
       ...chain.filter((c) => POLY.has(c.name)).map((c) => `\to.self_${typeName(c.name)} = o`),
       "\treturn o", "}", "");
     out.push(`func New_${typeName(cls.name)}(${["s *abap.Session", ...cp.map((p) => `${ident(p.name)} ${byRef(p) ? "*" : ""}${goType(p.type)}`)].join(", ")}) *${typeName(cls.name)} {`,
+      ...(chainCctor(cls) ? [`\tEnsure_${typeName(cls.name)}(s)`] : []),
       `\to := Alloc_${typeName(cls.name)}()`,
       ...(ctorAt?.constructor ? [`\to.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")})`] : []),
       "\treturn o", "}", "");
@@ -567,6 +588,7 @@ function signature(cls, m, inInterface = false) {
 
 function method(cls, m) {
   const lines = [...(LINES && m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
+  if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`\tEnsure_${typeName(cls.name)}(s)`);
   if (!m.static) lines.push("\t_ = me");
   for (const l of m.locals) lines.push(`\tvar ${ident(l.name)} ${goType(l.type)}`, `\t_ = ${ident(l.name)}`);
   for (const f of m.fieldSymbols ?? []) lines.push(`\tvar ${ident(f.name)} ${f.type.k === "data" ? "" : "*"}${goType(f.type)}`, `\t_ = ${ident(f.name)}`);

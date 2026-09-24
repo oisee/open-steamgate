@@ -171,6 +171,7 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
   for (const name of referencedClasses(program)) if (!compiledNames.has(name)) out.push(`export class ${typeName(name)} {}`);
   // a superclass is declared before its subclasses
   const byName = new Map(program.classes.map((c) => [c.name, c]));
+  BYNAME = byName;
   const ordered = [];
   const placed = new Set();
   const put = (c) => { if (placed.has(c.name)) return; placed.add(c.name); if (c.super && byName.has(c.super)) put(byName.get(c.super)); ordered.push(c); };
@@ -197,8 +198,15 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     const ctorAt = chain.find((c) => c.constructor || c.ctorParams);
     const cp = ctorAt ? (ctorAt.constructor?.params ?? ctorAt.ctorParams ?? []) : [];
     out.push(`  static $is = new Set(${JSON.stringify(isOf(cls))});`);
+    // ultra/events: CLASS_CONSTRUCTOR at the first use, as emit-go (chainCctor)
+    if (chainCctor(cls)) {
+      out.push(`  static $ensure(s) {`, `    if (Object.prototype.hasOwnProperty.call(${typeName(cls.name)}, "$cc")) return;`, `    ${typeName(cls.name)}.$cc = true;`);
+      if (cls.super && byName.get(cls.super) && chainCctor(byName.get(cls.super))) out.push(`    ${typeName(cls.super)}.$ensure(s);`);
+      if (ownCctor(cls)) out.push(`    ${typeName(cls.name)}.CLASS_CONSTRUCTOR(s);`);
+      out.push("  }");
+    }
     out.push(`  static $abap = ${JSON.stringify(cls.name)};`);
-    out.push(`  static $new(${["s", ...cp.map((p) => ident(p.name))].join(", ")}) {`, `    const o = new ${typeName(cls.name)}();`,
+    out.push(`  static $new(${["s", ...cp.map((p) => ident(p.name))].join(", ")}) {`, ...(chainCctor(cls) ? [`    ${typeName(cls.name)}.$ensure(s);`] : []), `    const o = new ${typeName(cls.name)}();`,
       ...(ctorAt?.constructor ? [`    o.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")});`] : []), "    return o;", "  }");
     const all = [...cls.methods, ...(cls.constructor ? [{...cls.constructor, name: "CONSTRUCTOR", static: false}] : [])];
     for (const m of all) out.push(...method(cls, m));
@@ -267,10 +275,20 @@ function catchIntoJs(c, t) {
   return `${t}    ${ident(c.into)} = ${c.intoKind === "ref" ? "xE.obj" : "xE"};\n`;
 }
 
+// ultra/events: see chainCctor in emit-go.mjs
+const ownCctor = (cls) => cls.name !== "CL_ABAP_CHAR_UTILITIES"
+  && (cls.methods.some((m) => m.name === "CLASS_CONSTRUCTOR") || (cls.stubs ?? []).some((m) => m.name === "CLASS_CONSTRUCTOR"));
+let BYNAME = new Map();
+function chainCctor(cls) {
+  for (let c = cls; c; c = c.super ? BYNAME.get(c.super) : null) if (ownCctor(c)) return true;
+  return false;
+}
+
 function method(cls, m) {
   const params = ["s", ...m.params.map((p) => ident(p.name))];
   const head = `  ${m.static ? "static " : ""}${typeName(m.name)}(${params.join(", ")}) {`;
   const lines = [head];
+  if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`    ${typeName(cls.name)}.$ensure(s);`);
   if (!m.static) lines.push("    const me = this;");
   const ret = m.returning ? ident(m.returning.name) : null;
   if (m.returning) lines.push(`    let ${ret} = ${zero(m.returning.type)};`);

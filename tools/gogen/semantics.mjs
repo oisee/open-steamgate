@@ -411,6 +411,11 @@ const EXPECT = {
   // holds no field symbol of a string and refuses the method
   ZCL_GOGEN_T_WGUI1: {Go: "le:XXXX ns:XX ref:XXXX so:0/2,0/2,0/2,4/2,0/2 B5 c2 m1 x3 rd:0/4 ap:2 cc:[abcd e][ab cd][ab- cd][ab cd][abc]4[ab]0[ab cdx] cl:[p!/r!][ab][a  b  ][a b][]0 fa:3/0,1/0,0/4,2,2,2 esc:a&lt;b&gt;&quot;c&#39;&amp;d e",
     JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_WGUI1=>RUN: field symbol <LV_S> of a string: the JS emitter holds only rows of structures"},
+  // a class constructor runs at the first use of its class: a static method
+  // call, a CREATE OBJECT of it or of a subclass (the superclass's first),
+  // once (A4H 2026-09-24, $ZOSG_TMP_0440; the transpiler runs them all when
+  // the program loads, ANOMALY-2026-09-14-class-constructor-eager)
+  ZCL_GOGEN_T_CCTOR: "a cc3 t3 t3 b cc1 cc2 t1 c ",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
