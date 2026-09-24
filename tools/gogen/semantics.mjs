@@ -291,6 +291,10 @@ const EXPECT = {
   ZCL_GOGEN_T_DSELX: {
     Go: "ERROR NOT_COMPILED in SELECT ... FROM (ZGOGEN_T_DBWN): ZGOGEN_T_DBWN is a view over the client-dependent ZGOGEN_T_DBW without MANDT: a system reads the logon client's rows, this one would read every client's at zcl_gogen_t_dselx.clas.abap:18",
     JS: "ERROR NOT_COMPILED in CREATE DATA TYPE (name): the JS backend has no table registry (the Go host has)"},
+  // UNASSIGN of a generic and a typed field symbol (the language rule, not
+  // measured): not assigned after, the variable and the row untouched; SE16's
+  // ROWS_OF needs it
+  ZCL_GOGEN_T_UNASSIGN: "XX/  /7/1",
   ZCL_GOGEN_T_SELVIEWN: {
     Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SELVIEWN=>RUN (zcl_gogen_t_selviewn.clas.abap:11): SELECT FROM ZGOGEN_T_DBWN: a view over the client-dependent ZGOGEN_T_DBW without MANDT at zcl_gogen_t_selviewn.clas.abap:11",
     JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SELVIEWN=>RUN (zcl_gogen_t_selviewn.clas.abap:11): SELECT FROM ZGOGEN_T_DBWN: a view over the client-dependent ZGOGEN_T_DBW without MANDT"},

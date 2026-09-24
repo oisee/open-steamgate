@@ -367,6 +367,8 @@ function stmt(st, ctx, d) {
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.text}: a typed field symbol over a data reference is Go-only`)});`];
     case "assign_data":
       return [`${t}${ident(st.fs.name)} = ${expr(st.value, ctx)};`];
+    case "unassign":
+      return [`${t}${ident(st.fs.name)} = null;`];
     // a move into generic data writes into the slot it is bound to
     case "append_data":
       return [`${t}s.sy.tabix = abap.AppendData(${expr(st.table, ctx)}, ${expr(st.value, ctx)});`];

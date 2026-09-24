@@ -991,6 +991,8 @@ function stmtLines(st, ctx, d) {
         `${t}\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t${m}`), `${t}\t${tgt} = append(${tgt}, r)`,
         `${t}}); n${n} > 0 {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 0, int32(n${n})`, `${t}} else {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}}`];
     }
+    case "unassign":
+      return [`${t}${ident(st.fs.name)} = ${st.fs.type.k === "data" ? "abap.Data{}" : "nil"}`];
     case "select_dyn": {
       // dynamic Open SQL (go/abap selectdyn.go): the parts given at run time
       // as strings, the target as generic data

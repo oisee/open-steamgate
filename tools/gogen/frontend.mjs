@@ -1284,6 +1284,14 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.CreateObject)) return createObject(node, ctx);
   if (isStmt(node, Statements.CreateData)) return createDataStatic(node, ctx, text);
   if (isStmt(node, Statements.Assign)) return assignStatement(node, ctx, text);
+  // UNASSIGN <fs>: the field symbol is not assigned any more (a later
+  // IS ASSIGNED is false, a read of it GETWA_NOT_ASSIGNED)
+  if (isStmt(node, Statements.Unassign)) {
+    const m = /^UNASSIGN\s+(<[\w\/]+>)\s*\.?$/i.exec(text);
+    const name = m ? upper(m[1]) : undefined;
+    if (!name || !ctx.fieldSymbols?.has(name)) throw new Unsupported(`statement Unassign: ${text}`);
+    return {s: "unassign", fs: {e: "fs", name, type: ctx.fieldSymbols.get(name)}};
+  }
   if (isStmt(node, Statements.Select)) return selectStatement(node, ctx, text);
   if (isStmt(node, Statements.Commit) || isStmt(node, Statements.Rollback)) return luwStatement(node, text);
   if (isStmt(node, Statements.InsertDatabase)) return dbWriteStatement("insert", node, ctx, text);
