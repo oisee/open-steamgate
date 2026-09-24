@@ -22,6 +22,10 @@ const EXPECT = {
   // SORT: without BY by the default key (the line; for a structure its c
   // and string components, not the i), DESCENDING, STABLE BY, mixed
   // directions; a string "a" sorts before "a "
+  // SELECT ... COUNT( * ) / MAX / MIN / SUM ... GROUP BY into a table, by
+  // position (aggregate first in the field list too) and CORRESPONDING
+  ZCL_GOGEN_T_GRPBY: {Go: "g:0/3,1=1,2=3,3=1 g0:4/0/0 cor:2,3=1,2=3 agg:3,1:A/A/1,2:C/AB/6,3:D/D/3 two:3,AB2=1,B2=1,C2=1",
+    JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
   ZCL_GOGEN_T_SORTK: "s:<><B><C><a><a ><b> sd:<b><a ><a><C><B><> c:<><C><a><ab><b> i:-1;2;3; st:A2z;a5y;a4y;a3y;a9a;b1x; mix:b1x;a3y;a4y;a5y;a9a;A2z; key:A2z;a9a;a3y;a4y;a5y;b1x;",
   // an IMPORTING by reference sees what CHANGING did to the same table,
   // APPEND included: it:3,99 on A4H

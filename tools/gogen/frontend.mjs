@@ -2886,6 +2886,63 @@ function selectColumns(sel, tb, text) {
   return names.map((n) => ({name: n, type: tb.colType(n)}));
 }
 
+/*
+ * ultra/itab: SELECT c ... COUNT( * ) [AS a] MAX( c ) AS a ... GROUP BY c ...
+ * (A4H 2026-09-24, ZCL_GOGEN_T_GRPBY): plain columns, each one of the GROUP
+ * BY list, and COUNT( * ), MAX / MIN of a column (its own type) and SUM of
+ * an i column; the result named by AS (the CORRESPONDING name). An
+ * aggregate without GROUP BY reads NULL over no rows, which a scan into a
+ * field does not take: refused, as are AVG, COUNT( col ), DISTINCT inside
+ * and SUM of other types (not measured).
+ */
+function groupedColumns(sel, tb, text) {
+  const gb = sel.findDirectExpression(Expressions.SQLGroupBy);
+  if (!gb) throw new Unsupported(`SELECT with an aggregate and no GROUP BY: ${text}`);
+  // the first column is an SQLField, the ones after it bare SQLFieldNames
+  const gcols = gb.getChildren().filter((c) => !isTok(c, "GROUP") && !isTok(c, "BY") && !isTok(c, ","));
+  const groupBy = gcols.map((f) => {
+    const n = isExpr(f, Expressions.SQLFieldName) ? f : f.findDirectExpression(Expressions.SQLFieldName);
+    if (!n || (!isExpr(f, Expressions.SQLFieldName) && f.getChildren().length !== 1)) throw new Unsupported(`GROUP BY ${f.concatTokens()}`);
+    const name = upper(n.concatTokens());
+    tb.colType(name);
+    return name;
+  });
+  if (groupBy.length === 0) throw new Unsupported(`GROUP BY form: ${text}`);
+  const fl = sel.findDirectExpression(Expressions.SQLFieldList);
+  const cols = [];
+  for (const f of fl?.findDirectExpressions(Expressions.SQLField) ?? []) {
+    const agg = f.findDirectExpression(Expressions.SQLAggregation);
+    const as = f.findDirectExpression(Expressions.SQLAsName);
+    if (!agg) {
+      const n = f.findDirectExpression(Expressions.SQLFieldName);
+      if (!n || f.getChildren().length !== 1) throw new Unsupported(`SELECT field ${f.concatTokens()}`);
+      const name = upper(n.concatTokens());
+      if (!groupBy.includes(name)) throw new Unsupported(`SELECT field ${name} is not in GROUP BY: ${text}`);
+      cols.push({name, type: tb.colType(name)});
+      continue;
+    }
+    const fn = upper(agg.getFirstToken().getStr());
+    const name = as ? upper(as.concatTokens()) : null;
+    if (/\bDISTINCT\b/i.test(agg.concatTokens())) throw new Unsupported(`aggregate ${agg.concatTokens()}`);
+    if (fn === "COUNT" && /^COUNT\s*\(\s*\*\s*\)$/i.test(agg.concatTokens())) {
+      cols.push({name: name ?? "COUNT_STAR", type: I, agg: {star: true}});
+      continue;
+    }
+    const n = agg.findFirstExpression(Expressions.SQLFieldName);
+    if (!n || !["MAX", "MIN", "SUM"].includes(fn)) throw new Unsupported(`aggregate ${agg.concatTokens()}`);
+    const col = upper(n.concatTokens());
+    const ct = tb.colType(col);
+    if (fn === "SUM" && ct.k !== "i") throw new Unsupported(`SUM of a ${ct.k} column: not measured`);
+    if (fn !== "SUM" && !["c", "i", "n", "d", "t", "string"].includes(ct.k)) throw new Unsupported(`${fn} of a ${ct.k} column`);
+    cols.push({name: name ?? `${fn}_${col}`, type: ct, agg: {fn, col}});
+  }
+  if (cols.length === 0) throw new Unsupported(`SELECT field list: ${text}`);
+  if (new Set(cols.map((c) => c.name)).size !== cols.length) throw new Unsupported(`SELECT: two results of one name: ${text}`);
+  cols.grouped = true;
+  cols.groupBy = groupBy;
+  return cols;
+}
+
 function selectTable(sel, ctx, text) {
   const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
   if (from.length !== 1) throw new Unsupported(`SELECT FROM form: ${text}`);
@@ -2967,9 +3024,11 @@ function selectStatement(node, ctx, text) {
   if (sel && isDynamicSelect(sel)) return dynamicSelect(sel, ctx, text);
   if (sel && /^SELECT\s+SINGLE\b/i.test(text)) return selectSingle(sel, ctx, text);
   if (sel && /^SELECT\s+COUNT\s*\(\s*\*\s*\)\s+FROM\b/i.test(text)) return selectCount(sel, ctx, text);
-  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
+  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
   const tb = selectTable(sel, ctx, text);
-  const cols = selectColumns(sel, tb, text);
+  // ultra/itab: aggregates and GROUP BY (groupedColumns below)
+  const grouped = sel.findDirectExpression(Expressions.SQLGroupBy) !== undefined && sel.findDirectExpression(Expressions.SQLGroupBy) !== null;
+  const cols = grouped || sel.findFirstExpression(Expressions.SQLAggregation) ? groupedColumns(sel, tb, text) : selectColumns(sel, tb, text);
   const into = sel.findDirectExpression(Expressions.SQLIntoTable);
   if (!into) throw new Unsupported(`SELECT INTO form (only INTO [CORRESPONDING FIELDS OF] TABLE): ${text}`);
   const corresponding = /\bCORRESPONDING\s+FIELDS\b/i.test(into.concatTokens());
@@ -2995,7 +3054,16 @@ function selectStatement(node, ctx, text) {
   const order = orderByOf(sel, tb);
   let rel = RIR.scan(lowName(tb.name));
   if (pred !== null) rel = RIR.filter(rel, pred);
-  rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
+  if (cols.grouped) {
+    // GROUP BY keys and aggregates, then a projection back into the order of
+    // the field list: the rows are scanned by position
+    const aggs = cols.filter((c) => c.agg).map((c) => ({as: lowName(c.name), expr: c.agg.star
+      ? {...RIR.call("COUNT", [], RIR.T.int), star: true} : RIR.call(c.agg.fn, [RIR.col(lowName(c.agg.col), sqlIrType(c.type))], sqlIrType(c.type))}));
+    rel = RIR.aggregate(rel, cols.groupBy.map(lowName), aggs);
+    rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
+  } else {
+    rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
+  }
   if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc})));
   const lowered = lowerOrRefuse("SELECT", rel);
   return {s: "select_table", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
