@@ -112,6 +112,12 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
 
   METHOD where_for_option.
     DATA lv_pattern TYPE string.
+    DATA lv_char    TYPE string.
+    DATA lv_len     TYPE i.
+    DATA lv_off     TYPE i.
+    DATA lv_hash    TYPE abap_bool.
+    DATA lv_escape  TYPE abap_bool.
+    DATA lv_like    TYPE string.
 
     CASE is_option-option.
       WHEN 'EQ'.
@@ -128,11 +134,51 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
         rv_clause = |{ iv_field } <= { sql_literal( is_option-low ) }|.
       WHEN 'BT'.
         rv_clause = |{ iv_field } BETWEEN { sql_literal( is_option-low ) } AND { sql_literal( is_option-high ) }|.
-      WHEN 'CP'.
-        lv_pattern = is_option-low.
-        REPLACE ALL OCCURRENCES OF '*' IN lv_pattern WITH '%'.
-        REPLACE ALL OCCURRENCES OF '+' IN lv_pattern WITH '_'.
-        rv_clause = |{ iv_field } LIKE { sql_literal( lv_pattern ) }|.
+      WHEN 'NB'.
+        rv_clause = |{ iv_field } NOT BETWEEN { sql_literal( is_option-low ) } AND { sql_literal( is_option-high ) }|.
+      WHEN 'CP' OR 'NP'.
+* * is any string, + one character, # makes the next character literal; a
+* literal % or _ (or #) is escaped with # and the condition says ESCAPE '#'
+* (measured on A4H: LIKE 'L#_' ESCAPE '#' finds only L_). Not measured: a
+* # before an ordinary character (it drops, the character stays) and a # at
+* the very end, which escapes a padding blank in ABAP's CP and is dropped
+* here, as a CHAR column holds no trailing blank to match
+        lv_len = strlen( is_option-low ).
+        DO lv_len TIMES.
+          lv_off = sy-index - 1.
+          lv_char = substring( val = is_option-low off = lv_off len = 1 ).
+          IF lv_hash = abap_true.
+            lv_hash = abap_false.
+            IF lv_char = '%' OR lv_char = '_' OR lv_char = '#'.
+              lv_escape = abap_true.
+              lv_pattern = lv_pattern && '#' && lv_char.
+            ELSE.
+              lv_pattern = lv_pattern && lv_char.
+            ENDIF.
+            CONTINUE.
+          ENDIF.
+          CASE lv_char.
+            WHEN '#'.
+              lv_hash = abap_true.
+            WHEN '*'.
+              lv_pattern = lv_pattern && '%'.
+            WHEN '+'.
+              lv_pattern = lv_pattern && '_'.
+            WHEN '%' OR '_'.
+              lv_escape = abap_true.
+              lv_pattern = lv_pattern && '#' && lv_char.
+            WHEN OTHERS.
+              lv_pattern = lv_pattern && lv_char.
+          ENDCASE.
+        ENDDO.
+        lv_like = 'LIKE'.
+        IF is_option-option = 'NP'.
+          lv_like = 'NOT LIKE'.
+        ENDIF.
+        rv_clause = |{ iv_field } { lv_like } { sql_literal( lv_pattern ) }|.
+        IF lv_escape = abap_true.
+          rv_clause = |{ rv_clause } ESCAPE '#'|.
+        ENDIF.
       WHEN OTHERS.
         rv_clause = |{ iv_field } = { sql_literal( is_option-low ) }|.
     ENDCASE.
@@ -191,6 +237,8 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
     DATA lv_field    TYPE string.
     DATA lv_group    TYPE string.
     DATA lv_clause   TYPE string.
+    DATA lv_include  TYPE string.
+    DATA lv_exclude  TYPE string.
 
     LOOP AT mt_filter INTO ls_filter.
       READ TABLE ms_set-properties INTO ls_property WITH KEY name = ls_filter-property.
@@ -199,18 +247,35 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
       ELSE.
         lv_field = to_upper( ls_filter-property ).
       ENDIF.
-      CLEAR lv_group.
+* a select-options table means (any I line) AND NOT (any E line): the I
+* lines OR-ed and put in parentheses, the E lines AND-ed after them. Chained
+* as `a OR b AND NOT ( c )` the kernel reads `a OR ( b AND NOT c )`, AND
+* binding tighter than OR (measured on A4H, docs/osql-where.md)
+      CLEAR: lv_group, lv_include, lv_exclude.
       LOOP AT ls_filter-select_options INTO ls_option.
         lv_clause = where_for_option( iv_field  = lv_field
                                       is_option = ls_option ).
-        IF lv_group IS INITIAL.
-          lv_group = lv_clause.
-        ELSEIF ls_option-sign = 'E'.
-          lv_group = |{ lv_group } AND { lv_clause }|.
+        IF ls_option-sign = 'E'.
+          IF lv_exclude IS INITIAL.
+            lv_exclude = lv_clause.
+          ELSE.
+            lv_exclude = |{ lv_exclude } AND { lv_clause }|.
+          ENDIF.
         ELSE.
-          lv_group = |{ lv_group } OR { lv_clause }|.
+          IF lv_include IS INITIAL.
+            lv_include = lv_clause.
+          ELSE.
+            lv_include = |{ lv_include } OR { lv_clause }|.
+          ENDIF.
         ENDIF.
       ENDLOOP.
+      IF lv_include IS NOT INITIAL AND lv_exclude IS NOT INITIAL.
+        lv_group = |( { lv_include } ) AND { lv_exclude }|.
+      ELSEIF lv_include IS NOT INITIAL.
+        lv_group = lv_include.
+      ELSE.
+        lv_group = lv_exclude.
+      ENDIF.
       IF lv_group IS INITIAL.
         CONTINUE.
       ENDIF.
