@@ -457,8 +457,9 @@ function functionGroupSignatures(ctx0, g) {
   program.currentClass = goName(owner);
   program.currentOwner = owner;
   program.currentTypes = new Set();
-  let top;
-  try { top = new abaplint.SyntaxLogic(reg, g).run().spaghetti.getTop(); } catch { top = undefined; }
+  let spaghetti;
+  try { spaghetti = new abaplint.SyntaxLogic(reg, g).run().spaghetti; } catch { spaghetti = undefined; }
+  const top = spaghetti?.getTop();
   const globalData = g.getABAPFiles().some((f) => /top\.abap$/i.test(f.getFilename()) && f.getStatements().some((st) => st.get() instanceof Statements.Data || st.get() instanceof Statements.DataBegin || st.get() instanceof Statements.Tables));
   for (const m of g.getModules()) {
     const name = upper(m.getName());
@@ -490,7 +491,7 @@ function functionGroupSignatures(ctx0, g) {
       if (!(e instanceof Unsupported)) throw e;
       sig = {name, unsupported: e.message};
     }
-    program.functionModules.set(name, {owner, group: g, module: m, sig, top});
+    program.functionModules.set(name, {owner, group: g, module: m, sig, top, spaghetti});
   }
 }
 
@@ -519,7 +520,7 @@ function functionGroupIr(ctx0, g) {
     if (!file || !node) { skip("no source"); continue; }
     try {
       const scope = findScopeNamed(x.top, "function", name);
-      const ctx = {program, reg, className: owner, scopeName: owner, owner, method: name, sig, signatures, scope, file, spaghetti: null, locals: new Map(), temps: 0};
+      const ctx = {program, reg, className: owner, scopeName: owner, owner, method: name, sig, signatures, scope, file, spaghetti: x.spaghetti, locals: new Map(), temps: 0};
       const known = new Set(sig.params.map((p) => p.name));
       ctx.fieldSymbols = new Map();
       for (const [vname, id] of Object.entries(scope.getData().vars)) {
@@ -539,8 +540,10 @@ function functionGroupIr(ctx0, g) {
       cls.methods.push({...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
         body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
     } catch (e) {
-      if (!(e instanceof Unsupported)) throw e;
-      skip(e.message);
+      // a module is not a class: a path of the front end written for classes
+      // may fail on it with an error that is not a refusal; the module is
+      // then a stub that dumps with that error, never a crash of the build
+      skip(e instanceof Unsupported ? e.message : `the front end failed on a function module: ${e.message}`);
     }
   }
   return cls;
@@ -5135,7 +5138,12 @@ function call(chain, ctx, statement, hint) {
     return {e: "case_fn", upper: name === "TO_UPPER", x: convert(source(argNode, ctx), S), type: S};
   }
   if (receiver === null && name === "STRLEN" && !ctx.signatures.has(name)) {
-    return {e: "strlen", x: source(direct, ctx), type: I};
+    // parity-wave1: of a value the backends hold as text only (a generic
+    // operand reached it through a function module's untyped parameter and
+    // the Go build failed on it)
+    const x = source(direct, ctx);
+    if (["data", "i", "int8", "f", "struct", "table", "ref", "dref", "exc"].includes(x.type.k)) throw new Unsupported(`strlen( ) of a ${x.type.k}`);
+    return {e: "strlen", x, type: I};
   }
   if (receiver === null && owner === null && name === "FIND" && !ctx.signatures.has(name)) {
     // find( val = s sub = x [off = n] ): measured on A4H, see abap.Find
