@@ -75,9 +75,9 @@
       "folder": "/.local/lars/open-abap-gui",
       "files": [
         "/src/**",
-        "/scaffold/zcl_gg_context_menu_state.clas.abap",
-        "/scaffold/zcl_gg_host_html.clas.abap",
-        "/scaffold/host/zcl_gg_host_surface.clas.abap"
+        "/framework/zcl_gg_context_menu_state.clas.abap",
+        "/framework/zcl_gg_host_html.clas.abap",
+        "/framework/host/zcl_gg_host_surface.clas.abap"
       ]
     },
     {
