@@ -606,13 +606,15 @@ const EXPECT = {
   ZCL_GOGEN_T_NUMC: "i:0000000042,005,456,00 c:9000000001,0000000012,123,765,000 ni:42  ns:[0000000042] nc:[00000000] off:123 ,000000123 cat:20250107,9000000017 tpl:000000017 const:9000000000 gt",
   // ZCL_OSD_DEMO_RANDOM / ZCL_OSD_DEMO_TAXI (copies of src/demo_data, checked
   // below): A4H answered exactly this for the same class (2026-09-24,
-  // $ZOSG_TMP_0462), and so does Node's transpiler: the 10000th step of the
+  // $ZOSG_TMP_0462; the checksum re-pinned after #65's review, which folds
+  // the client, zone and payment in: 163171580, pinned_checksum green on
+  // A4H in $ZOSG_TMP_0463), and so does Node's transpiler: the 10000th step of the
   // minimal standard, the first five rows and the checksum of 20000
-  ZCL_GOGEN_T_DEMODATA: "pm:1043618065  9000000001 20250101 0 Manhattan/Penn Station/Madison Sq West/Cash 2 28.24 0.00 4.48; 9000000002 20250101 0 Manhattan/TriBeCa/Civic Center/Card 2 28.90 4.33 4.56; 9000000003 20250101 0 Manhattan/Upper West Side South/Card 8 83.76 14.23 12.24; 9000000004 20250101 0 Manhattan/Chinatown/Card 1 12.12 2.90 1.76; 9000000005 20250101 0 Manhattan/Central Park/Card 2 16.02 2.88 2.38; rows 20000 trips 78715 fare 1264137.29 tip 178368.34 distance 215645.95 checksum 999629773",
+  ZCL_GOGEN_T_DEMODATA: "pm:1043618065  9000000001 20250101 0 Manhattan/Penn Station/Madison Sq West/Cash 2 28.24 0.00 4.48; 9000000002 20250101 0 Manhattan/TriBeCa/Civic Center/Card 2 28.90 4.33 4.56; 9000000003 20250101 0 Manhattan/Upper West Side South/Card 8 83.76 14.23 12.24; 9000000004 20250101 0 Manhattan/Chinatown/Card 1 12.12 2.90 1.76; 9000000005 20250101 0 Manhattan/Central Park/Card 2 16.02 2.88 2.38; rows 20000 trips 78715 fare 1264137.29 tip 178368.34 distance 215645.95 checksum 163171580",
   // not an A4H value (ZOSD_TAXIFACT does not activate there: ZONE is a
   // reserved word): what Node's transpiler answers for the same calls.
   // Written, unchanged, read back (p columns round-trip), replaced, removed
-  ZCL_GOGEN_T_DEMODB: {Go: "taxi: 300 synthetic rows of seed 9 written (checksum 1933915984), 0 replaced | taxi: 300 synthetic rows of seed 9 present (checksum 1933915984); unchanged | 9000000001 20250101 3 Queens/LaGuardia Airport/Other 1 56.11 0.00 11.44; 9000000002 20250101 8 Manhattan/Lincoln Square West/Disputed 1 13.31 0.00 2.05; rows 300 trips 1365 fare 20086.65 tip 3245.89 distance 3279.43 checksum 1933915984 | taxi: 100 synthetic rows of seed 9 written (checksum 1987232832), 300 replaced | taxi: 0 synthetic rows of seed 20250101 written (checksum 1), 100 replaced",
+  ZCL_GOGEN_T_DEMODB: {Go: "taxi: 300 synthetic rows of seed 9 written (checksum 669166395), 0 replaced | taxi: 300 synthetic rows of seed 9 present (checksum 669166395); unchanged | 9000000001 20250101 3 Queens/LaGuardia Airport/Other 1 56.11 0.00 11.44; 9000000002 20250101 8 Manhattan/Lincoln Square West/Disputed 1 13.31 0.00 2.05; rows 300 trips 1365 fare 20086.65 tip 3245.89 distance 3279.43 checksum 669166395 | taxi: 100 synthetic rows of seed 9 written (checksum 1304488219), 300 replaced | taxi: 0 synthetic rows of seed 20250101 written (checksum 1), 100 replaced",
     JS: "ERROR NOT_COMPILED in SELECT COUNT(*) FROM ZOSD_TAXIFACT: the JS backend has no database (the Go host has SQLite)"},
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };

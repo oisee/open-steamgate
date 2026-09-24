@@ -56,21 +56,24 @@ CLASS zcl_osd_demo_taxi DEFINITION PUBLIC FINAL CREATE PUBLIC.
     TYPES ty_facts TYPE STANDARD TABLE OF ty_fact WITH DEFAULT KEY.
     TYPES ty_strings TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
 
-    " the first key of the synthetic range; every FACT_ID >= this is ours
+    " the lower bound of the synthetic range: every FACT_ID >= this is ours.
+    " The value itself is never generated; the first row is 9000000001
     CONSTANTS c_synthetic_min TYPE n LENGTH 10 VALUE '9000000000'.
     CONSTANTS c_default_seed TYPE i VALUE 20250101.
     CONSTANTS c_max_rows TYPE i VALUE 200000.
 
-    " iv_rows groups (at most C_MAX_ROWS), keys 9000000001 and up
+    " iv_rows groups (at most C_MAX_ROWS), keys 9000000001 and up, the
+    " client left empty
     CLASS-METHODS generate
       IMPORTING
         iv_rows         TYPE i
         iv_seed         TYPE i
       RETURNING
         VALUE(rt_facts) TYPE ty_facts.
-    " a number over every row, in the order given (the key, day, hour,
-    " trips, cents of fare and tip, hundredths of a mile, and the lengths
-    " of the three texts)
+    " a number over every row, in the order given: the key, the client,
+    " day, hour, trips, cents of fare and tip, hundredths of a mile, the
+    " zone (borough and name) and the payment -- every column
+    " ENSURE_TAXI compares is in it
     CLASS-METHODS checksum
       IMPORTING
         it_facts      TYPE ty_facts
@@ -275,6 +278,9 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
             ENDIF.
           ENDDO.
           IF lv_found = 0.
+            " every drawable cell of this day-hour is taken: it gets fewer
+            " groups, and the table fewer than iv_rows. Not reached below
+            " C_MAX_ROWS; ZCL_OSD_DEMO_DATA=>ENSURE_TAXI says so if it is
             EXIT.
           ENDIF.
           lv_pay = ( lv_found - 1 ) MOD c_payments + 1.
@@ -317,7 +323,8 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
         ENDIF.
 
         CLEAR ls_fact.
-        ls_fact-mandt = sy-mandt.
+        " no client: the rows are the same on every system;
+        " ZCL_OSD_DEMO_DATA puts sy-mandt in before it compares and writes
         lv_key = lines( rt_facts ) + 1.
         lv_n9 = lv_key.
         CONCATENATE '9' lv_n9 INTO lv_c10.
@@ -339,13 +346,47 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD checksum.
+    TYPES:
+      BEGIN OF ty_code,
+        borough TYPE c LENGTH 20,
+        zone    TYPE c LENGTH 80,
+        code    TYPE i,
+      END OF ty_code.
+    DATA lt_codes TYPE SORTED TABLE OF ty_code WITH UNIQUE KEY borough zone.
+    DATA ls_code TYPE ty_code.
+    DATA lt_zones TYPE ty_zones.
+    DATA ls_zone TYPE ty_zone.
     DATA ls_fact TYPE ty_fact.
     DATA lv_n9 TYPE n LENGTH 9.
     DATA lv_v TYPE i.
+    DATA lv_pay TYPE i.
+    DATA lv_name TYPE string.
+* the texts go in as numbers: a zone as its LocationID (the first one for a
+* name the lookup lists twice, 0 for a text not in the lookup), a payment
+* as its number in PAYMENT_NAME (0 for any other text), the client as its
+* digits. Every text a generated row can hold has its own number, so
+* changing a borough, a zone or a payment to another value changes the
+* sum; no character codes are needed, which keeps it the same on every host
+    lt_zones = zones( ).
+    LOOP AT lt_zones INTO ls_zone.
+      ls_code-borough = ls_zone-borough.
+      ls_code-zone = ls_zone-zone.
+      ls_code-code = sy-tabix.
+      READ TABLE lt_codes TRANSPORTING NO FIELDS
+        WITH TABLE KEY borough = ls_code-borough zone = ls_code-zone.
+      IF sy-subrc <> 0.
+        INSERT ls_code INTO TABLE lt_codes.
+      ENDIF.
+    ENDLOOP.
     rv_sum = 1.
     LOOP AT it_facts INTO ls_fact.
       lv_n9 = ls_fact-fact_id+1(9).
       lv_v = lv_n9.
+      rv_sum = zcl_osd_demo_random=>fold( iv_sum = rv_sum iv_value = lv_v ).
+      lv_v = 0.
+      IF ls_fact-mandt IS NOT INITIAL AND ls_fact-mandt CO '0123456789'.
+        lv_v = ls_fact-mandt.
+      ENDIF.
       rv_sum = zcl_osd_demo_random=>fold( iv_sum = rv_sum iv_value = lv_v ).
       lv_v = ls_fact-pickup_day.
       rv_sum = zcl_osd_demo_random=>fold( iv_sum = rv_sum iv_value = lv_v ).
@@ -357,11 +398,23 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
       rv_sum = zcl_osd_demo_random=>fold( iv_sum = rv_sum iv_value = lv_v ).
       lv_v = ls_fact-distance * 100.
       rv_sum = zcl_osd_demo_random=>fold( iv_sum = rv_sum iv_value = lv_v ).
-      lv_v = strlen( ls_fact-borough ).
+      READ TABLE lt_codes INTO ls_code
+        WITH TABLE KEY borough = ls_fact-borough zone = ls_fact-zone.
+      IF sy-subrc = 0.
+        lv_v = ls_code-code.
+      ELSE.
+        lv_v = 0.
+      ENDIF.
       rv_sum = zcl_osd_demo_random=>fold( iv_sum = rv_sum iv_value = lv_v ).
-      lv_v = strlen( ls_fact-zone ).
-      rv_sum = zcl_osd_demo_random=>fold( iv_sum = rv_sum iv_value = lv_v ).
-      lv_v = strlen( ls_fact-payment ).
+      lv_v = 0.
+      DO c_payments TIMES.
+        lv_pay = sy-index.
+        lv_name = payment_name( lv_pay ).
+        IF lv_name = ls_fact-payment.
+          lv_v = lv_pay.
+          EXIT.
+        ENDIF.
+      ENDDO.
       rv_sum = zcl_osd_demo_random=>fold( iv_sum = rv_sum iv_value = lv_v ).
     ENDLOOP.
   ENDMETHOD.
