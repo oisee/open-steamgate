@@ -4,7 +4,7 @@
 //
 //   node tools/gogen/semantics.mjs
 import {execFileSync} from "node:child_process";
-import {copyFileSync, cpSync, mkdirSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {compileProgram} from "./frontend.mjs";
@@ -575,9 +575,28 @@ const EXPECT = {
   // keeps the digits only, n -> string keeps the zeros, n -> c 8 is its
   // first eight, n by offset, in CONCATENATE, a template and a constant
   ZCL_GOGEN_T_NUMC: "i:0000000042,005,456,00 c:9000000001,0000000012,123,765,000 ni:42  ns:[0000000042] nc:[00000000] off:123 ,000000123 cat:20250107,9000000017 tpl:000000017 const:9000000000 gt",
+  // ZCL_OSD_DEMO_RANDOM / ZCL_OSD_DEMO_TAXI (copies of src/demo_data, checked
+  // below): A4H answered exactly this for the same class (2026-09-24,
+  // $ZOSG_TMP_0462), and so does Node's transpiler: the 10000th step of the
+  // minimal standard, the first five rows and the checksum of 20000
+  ZCL_GOGEN_T_DEMODATA: "pm:1043618065  9000000001 20250101 0 Manhattan/Penn Station/Madison Sq West/Cash 2 28.24 0.00 4.48; 9000000002 20250101 0 Manhattan/TriBeCa/Civic Center/Card 2 28.90 4.33 4.56; 9000000003 20250101 0 Manhattan/Upper West Side South/Card 8 83.76 14.23 12.24; 9000000004 20250101 0 Manhattan/Chinatown/Card 1 12.12 2.90 1.76; 9000000005 20250101 0 Manhattan/Central Park/Card 2 16.02 2.88 2.38; rows 20000 trips 78715 fare 1264137.29 tip 178368.34 distance 215645.95 checksum 999629773",
+  // not an A4H value (ZOSD_TAXIFACT does not activate there: ZONE is a
+  // reserved word): what Node's transpiler answers for the same calls.
+  // Written, unchanged, read back (p columns round-trip), replaced, removed
+  ZCL_GOGEN_T_DEMODB: {Go: "taxi: 300 synthetic rows of seed 9 written (checksum 1933915984), 0 replaced | taxi: 300 synthetic rows of seed 9 present (checksum 1933915984); unchanged | 9000000001 20250101 3 Queens/LaGuardia Airport/Other 1 56.11 0.00 11.44; 9000000002 20250101 8 Manhattan/Lincoln Square West/Disputed 1 13.31 0.00 2.05; rows 300 trips 1365 fare 20086.65 tip 3245.89 distance 3279.43 checksum 1933915984 | taxi: 100 synthetic rows of seed 9 written (checksum 1987232832), 300 replaced | taxi: 0 synthetic rows of seed 20250101 written (checksum 1), 100 replaced",
+    JS: "ERROR NOT_COMPILED in SELECT COUNT(*) FROM ZOSD_TAXIFACT: the JS backend has no database (the Go host has SQLite)"},
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
+// the demo-data classes in testdata/ are copies of src/demo_data: when the
+// checkout has them (OSG_HOME), a copy that drifted is a failure
+const demoCopies = readdirSync(join(here, "testdata")).filter((f) => /^zcl_osd_demo_\w+\.clas\.abap$/.test(f)).sort();
+const demoDrift = [];
+for (const f of demoCopies) {
+  const theirs = join(home, "src", "demo_data", f);
+  if (!existsSync(theirs)) { console.log(`skip copy check ${f}: not in ${home}/src/demo_data`); continue; }
+  if (readFileSync(theirs, "utf8") !== readFileSync(join(here, "testdata", f), "utf8")) demoDrift.push(f);
+}
 // sorted: zcl_gogen_t_uncaught_read reads what zcl_gogen_t_uncaught left
 const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).sort();
 // the roots of the exception classes, and get_text( )'s helper, compiled
@@ -676,6 +695,7 @@ for (const line of new Set([...Object.keys(REFUSED_SORT).map(Number), ...rgot.ke
   if (!ok) bad += 1;
   console.log(`${ok ? "ok  " : "FAIL"} refused sort :${line}: ${rgot.get(line) ?? "(compiled)"}${ok ? "" : `\n     want: ${REFUSED_SORT[line] ?? "(compiled)"}`}`);
 }
+for (const f of demoDrift) { bad += 1; console.log(`FAIL testdata/${f} differs from ${home}/src/demo_data/${f}: copy it again`); }
 const own = refused.broken.includes("zcl_gogen_t_rf_own");
 if (!own) bad += 1;
 console.log(`${own ? "ok  " : "FAIL"} refused ZCL_GOGEN_T_RF_OWN left out by abaplint's syntax check`);

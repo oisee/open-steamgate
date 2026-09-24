@@ -982,3 +982,41 @@ compares a `BIT-AND` result, `ZCL_ABAPGIT_ZLIB=>DECOMPRESS` and
 ... IN BYTE MODE`, `ZCL_ABAPGIT_HASH=>SHA1` needs i -> c and string ->
 xstring moves. None of these is small, so the chain stops there. The OSG
 build went from 1200 to 1184 statement stubs.
+
+## NUMC moves, DEC columns written, demo data at boot (ultra/demodata, 2026-09-24)
+
+`ZCL_OSD_DEMO_RANDOM`, `ZCL_OSD_DEMO_TAXI` and `ZCL_OSD_DEMO_DATA`
+(`src/demo_data` on main) make the synthetic NYC taxi facts every host
+starts with. What they needed, each measured on A4H first (`$ZOSG_TMP_0462`,
+testdata `ZCL_GOGEN_T_NUMC`):
+
+- `i` -> `n`: the sign dropped, the last digits kept, zeros in front (42
+  into n 10 is `0000000042`, -5 into n 3 is `005`, 123456 into n 3 is
+  `456`); `c` or `string` -> `n`: the digits only, right-aligned (`' 12'`
+  is `0000000012`, `'a1b2 3'` into n 3 is `123`, `'98765'` is `765`, blank
+  is `000`);
+- `n` -> `string` keeps the zeros, `n` -> `c` is a move of its characters
+  (`0000000042` into a c 8 is `00000000`), `n` -> `i` reads the digits;
+  `n` by offset is its digits, as a `c`; `n` in `CONCATENATE` and in a
+  template; an `n` constant whose VALUE is exactly its digits; `n` against
+  `n` of one length compares the digits;
+- a NUMC column `SELECT`ed into an `n` field of its length;
+- a DEC column written (`INSERT` / `MODIFY` ... `FROM` a work area or a
+  table): bound as the decimal text of the `p` field with the column's
+  decimals. `tools/ir-writes.mjs` is main's (its `packedText` and the P and
+  D initial values came with #55), and `WriteCol` now carries `Dec`; before,
+  a DEC column read back 111.12 as 111.00.
+
+`ZCL_GOGEN_T_DEMODATA` is the generator on both emitters, equal to A4H;
+`ZCL_GOGEN_T_DEMODB` writes, rereads and replaces ZOSD_TAXIFACT on Go (the
+table does not activate on A4H: its column `ZONE` is a reserved word in the
+dictionary there). `semantics.mjs` fails when the testdata copies of the
+three classes differ from `$OSG_HOME/src/demo_data`.
+
+OSGo runs `ZCL_OSD_DEMO_DATA=>BOOT( OSD_DEMO_ROWS )` after `boot` in a
+dialog step of its own; a dump there is logged and the server starts without
+the rows. Measured on the workstation, OSGo built from the demodata tree:
+20000 rows written in 571 ms on a new file, 332 ms for the unchanged second
+start, checksum 999629773 as on Node and A4H; the cube's 555 groups by
+borough, payment and hour equal Node's. The OSG build went from 1195 to 1053
+statement stubs (11 of them in the demo classes).
