@@ -95,6 +95,10 @@ export function typesOfSource(source) {
       x = /^END OF (\w+)$/i.exec(part);
       if (x !== null) { if (structure !== undefined) types.set(structure.name, {kind: "structure", components: structure.components}); structure = undefined; continue; }
       if (structure !== undefined) {
+        // the old length form: `priority(2) TYPE n`, and `name(10)` alone,
+        // whose type is c
+        x = /^(\w+)\((\d+)\)(?: TYPE (\w+))?$/i.exec(part);
+        if (x !== null) { structure.components.push({name: x[1], abapType: `${x[3] ?? "c"} LENGTH ${x[2]}`}); continue; }
         x = /^(\w+) TYPE (.+)$/i.exec(part);
         if (x !== null) structure.components.push({name: x[1], abapType: x[2].trim()});
         else structure.components.push({name: part, abapType: "", unreadable: true});
@@ -102,6 +106,8 @@ export function typesOfSource(source) {
       }
       x = /^(\w+) TYPE (?:STANDARD |SORTED |HASHED )?TABLE OF ([\w\/=>-]+)/i.exec(part);
       if (x !== null) { types.set(upper(x[1]), {kind: "table", of: upper(x[2])}); continue; }
+      x = /^(\w+)\((\d+)\)(?: TYPE (\w+))?$/i.exec(part);
+      if (x !== null) { types.set(upper(x[1]), {kind: "alias", of: `${x[3] ?? "c"} LENGTH ${x[2]}`}); continue; }
       x = /^(\w+) TYPE (.+)$/i.exec(part);
       if (x !== null && !/\bRANGE OF\b|\bREF TO\b/i.test(x[2])) types.set(upper(x[1]), {kind: "alias", of: x[2].trim()});
     }
@@ -332,6 +338,22 @@ export function hanaParameterType(abapType, types, store) {
       }
       throw new TypeGap(`${text} is not a scalar this corpus declares`);
     }
+    // `struct-field`: the type of one component -- a structure of this
+    // owner, another owner's (`if_x=>ty_s-f`), or a table of the dictionary
+    const component = /^([\w\/]+(?:=>[\w\/]+)?)-([\w\/]+)$/.exec(t);
+    if (component !== null && !/^(?:SY|SYST)$/.test(component[1])) {
+      const [, owner, field] = component;
+      const row = owner.includes("=>") ? CLASS_TYPES.get(owner.split("=>")[0])?.get(owner.split("=>")[1]) : types?.get?.(owner);
+      if (row?.kind === "structure") {
+        const c = row.components.find((one) => upper(one.name) === field);
+        if (c !== undefined && !c.unreadable) {
+          return owner.includes("=>") ? hanaParameterType(c.abapType, CLASS_TYPES.get(owner.split("=>")[0]), store) : scalarOf(c.abapType);
+        }
+      }
+      const columns = ddicColumns(store, owner.split("=>").pop());
+      const column = columns?.find((one) => one.name === field);
+      if (column !== undefined) return column.type;
+    }
     const d = resolveTypeX(store, t);
     if (d.KIND === "DTEL" || d.KIND === "BUILTIN") return hanaOfDdic(d, text);
     const known = WELL_KNOWN[t];
@@ -359,6 +381,8 @@ export function hanaParameterType(abapType, types, store) {
     }
     throw new TypeGap(`${name} is a local ${local.kind}, not a table type or a scalar`);
   }
+  // `struct-field` is always a scalar: the component's type
+  if (/^[\w\/]+(?:=>[\w\/]+)?-[\w\/]+$/.test(name)) return scalarOf(abapType);
   const d = resolveTypeX(store, name);
   if (d.KIND === "DTEL") return hanaOfDdic(d, name);
   if (d.KIND === "TABLE") {

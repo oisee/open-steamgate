@@ -159,7 +159,7 @@ export function withoutBangValue(source) {
  *  `TYPE sy-mandt`, `LIKE x`, with LENGTH / DECIMALS -- REF TO and the table
  *  kind are kept in the text, so a reader downstream refuses them by name
  *  rather than reading `REF TO x` as `x` */
-const TYPE_TEXT = /\b(?:TYPE|LIKE)\s+((?:REF\s+TO\s+)?(?:(?:STANDARD|SORTED|HASHED)\s+TABLE\s+OF\s+)?[\w\/]+(?:-[\w\/]+)*(?:\s+LENGTH\s+\d+)?(?:\s+DECIMALS\s+\d+)?)/i;
+const TYPE_TEXT = /\b(?:TYPE|LIKE)\s+((?:REF\s+TO\s+)?(?:(?:STANDARD|SORTED|HASHED)\s+TABLE\s+OF\s+)?[\w\/]+(?:=>[\w\/]+)?(?:-[\w\/]+)*(?:\s+LENGTH\s+\d+)?(?:\s+DECIMALS\s+\d+)?)/i;
 /** the literal after DEFAULT: a quoted text (with '' inside), a number, or a name such as sy-datum */
 const DEFAULT_TEXT = /\bDEFAULT\s+('(?:[^']|'')*'|[-\w.]+)/i;
 

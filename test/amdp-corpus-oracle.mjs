@@ -191,3 +191,26 @@ ENDINTERFACE.`]]);
     expect(bodies[2].signature.parameters).to.deep.equal([]);
   });
 });
+
+describe("the corpus oracle: type texts it reads", () => {
+  it("reads the old length form of a component and of an alias, `x(2) TYPE n` and `x(10)`", () => {
+    const types = typesOfSource(`CLASS zcl_old DEFINITION.
+  PUBLIC SECTION.
+    TYPES: BEGIN OF ty_s,
+             priority(2) TYPE n,
+             label(10),
+           END OF ty_s,
+           ty_code(4) TYPE c.
+ENDCLASS.`);
+    expect(types.get("TY_S").components).to.deep.equal([{name: "priority", abapType: "n LENGTH 2"}, {name: "label", abapType: "c LENGTH 10"}]);
+    expect(types.get("TY_CODE")).to.deep.equal({kind: "alias", of: "c LENGTH 4"});
+  });
+
+  it("types a `struct-field` parameter by the component, and an `if_x=>ty` one by the interface", () => {
+    const sql = createStatement(body([
+      {name: "iv_carrid", direction: "IN", abapType: "ty_row-carrid"},
+      {name: "et_rows", direction: "OUT", abapType: "tt_rows"},
+    ], "et_rows = SELECT * FROM :et_rows;"), undefined);
+    expect(sql).to.contain("IN iv_carrid NVARCHAR(3)");
+  });
+});
