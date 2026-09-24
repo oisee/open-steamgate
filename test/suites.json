@@ -83,6 +83,7 @@
     "test/osd-unit.mjs",
     "test/osd-where.mjs",
     "test/osd-xref.mjs",
+    "test/xref-seed.mjs",
     "test/pages-index.mjs",
     "test/preflight.mjs",
     "test/preview-closure.mjs",

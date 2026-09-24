@@ -1,6 +1,5 @@
 import {expect} from "chai";
 import express from "express";
-import {existsSync} from "node:fs";
 import {startServer} from "./start.mjs";
 import {nodeStructureDocument} from "../tools/adt-documents.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
@@ -506,15 +505,13 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       });
       expect(res.status).to.equal(200);
       expect(await res.text()).to.contain("<dataPreview:tableData");
-      // the rows themselves are derived rather than authored, so they are
-      // there only where the generator has run (npm run osd:xref -- --write)
-      if (existsSync("data/wbcrossgt.tabu.json")) {
-        const again = await call("/datapreview/freestyle", {
-          method: "POST",
-          body: "SELECT include, name FROM wbcrossgt WHERE name LIKE 'CL_ABAP_Z%'",
-        });
-        expect(await again.text()).to.contain("CL_ABAP_ZIP");
-      }
+      // the rows are derived from the files and seeded by every host at
+      // start (tools/osd-xref-seed.mjs), so they are there in any checkout
+      const again = await call("/datapreview/freestyle", {
+        method: "POST",
+        body: "SELECT include, name FROM wbcrossgt WHERE name LIKE 'CL_ABAP_Z%'",
+      });
+      expect(await again.text()).to.contain("CL_ABAP_ZIP");
     });
 
     it("a statement that is not a SELECT is refused, and is not a 403", async () => {
