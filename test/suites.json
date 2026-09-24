@@ -134,6 +134,7 @@
     "test/sqlscript-scope.mjs",
     "test/sqlscript-signature-schemas.mjs",
     "test/sqlscript-table-function.mjs",
+    "test/sqlscript-table-function-call.mjs",
     "test/sqlscript-to-ir.mjs",
     "test/sqlscript-treatments.mjs",
     "test/sqlscript-values.mjs",
