@@ -460,6 +460,9 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
   report.signatures = {classesByText, crossCheck};
   report.scratch = scratch;
   report.redefinitions = {read: redefinitionsRead};
+  // the registry itself, for a caller that compiles the bodies again (the
+  // corpus oracle): `tableFunctions` above is the count, not the map
+  report.tableFunctionRegistry = tableFunctions;
   report.tableFunctions = {read: tableFunctionsRead, missing: [...tableFunctionsMissing.entries()].map(([k, n]) => (n > 1 ? `${k} x${n}` : k))};
   return report;
 }
@@ -478,7 +481,7 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
     if (args[i] === "--ddic") ddic.push(args[++i]);
     else rest.push(args[i]);
   }
-  const {dictionary, tableFunctions, scratch, catalogueFailures, registry, signatures, bodies: _bodies, ...corporaReport} = measure(rest[0], undefined, {ddic});
+  const {dictionary, tableFunctions, tableFunctionRegistry: _registry, scratch, catalogueFailures, registry, signatures, bodies: _bodies, ...corporaReport} = measure(rest[0], undefined, {ddic});
   // the numbers below depend on which dictionaries this machine holds, so
   // the header says which, and how much each one answered
   console.log("dictionaries given to the scalar typer (later wins a shared name):");

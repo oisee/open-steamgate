@@ -811,8 +811,68 @@ export async function runProcedure(program, {
     return value;
   };
 
+  // **A table function called in FROM runs as a nested call** and hands its
+  // relation on, the way a nested CALL does: on HANA `FROM "CL=>M"(:a, 1)`
+  // is an object of that name, and no other engine has one, so the callee's
+  // own program (the registry of `procedures`, keyed by the name as the
+  // caller spells it, upper case) runs with the arguments of this moment and
+  // its answer stands where the call was. A statement's call is resolved
+  // when that statement runs -- not the bodies of loops and branches under
+  // it, whose calls are resolved when they run in turn.
+  const containsTableCall = (node) => node !== null && typeof node === "object"
+    && (node.rel === "tfcall" || Object.values(node).some((value) => (Array.isArray(value) ? value.some(containsTableCall) : containsTableCall(value))));
+  const callTableFunction = async (call) => {
+    const child = procedures instanceof Map ? procedures.get(upper(call.name)) : procedures?.[upper(call.name)];
+    if (child?.ir !== "sqlscript-procedure") {
+      throw new UnsupportedSqlScript(`table function ${call.name} is not in the portable registry`, call);
+    }
+    const inputs = {};
+    const relationInputs = {};
+    for (const arg of call.args) {
+      if (arg.kind === "relation") relationInputs[upper(arg.param ?? arg.name)] = freezeRelation(arg.rel, relations, scalars, session);
+      else inputs[upper(arg.name)] = await evaluate(arg.expr, `argument ${String(arg.name).toLowerCase()} of ${call.name}`);
+    }
+    const called = await runProcedure(child, {
+      client, dialect, inputs, relationInputs,
+      inputCatalogue: {...inputCatalogue, ...(child.catalogue ?? {})},
+      maxSteps, maxPlanNodes, maxPlanDepth, maxParameters, maxCallDepth, session, procedures,
+      callDepth: callDepth + 1, deferRelation: true, closedRelationInputs: true,
+    });
+    nestedSteps += called.trace.hostSteps;
+    nestedCalls += 1 + (called.trace.nestedCalls ?? 0);
+    dbStatements += called.trace.databaseStatements ?? 0;
+    dbParams += called.trace.boundParameters ?? 0;
+    // held under a name no body can spell, and read back as a table
+    // variable: the callee's relation is frozen in the callee's scope, and
+    // freezing it again in this one would look for the callee's parameters
+    // among the caller's scalars
+    tableCalls += 1;
+    const held = `#TABLE_FUNCTION_${tableCalls}`;
+    relations.set(held, called.relation);
+    return {rel: "var", name: held};
+  };
+  let tableCalls = 0;
+  const NESTED_BODIES = new Set(["body", "branches", "otherwise", "handlers"]);
+  const withTableCalls = async (node, top = true) => {
+    if (node === null || typeof node !== "object") return node;
+    if (Array.isArray(node)) {
+      const out = [];
+      for (const one of node) out.push(await withTableCalls(one, false));
+      return out;
+    }
+    if (node.rel === "tfcall") return callTableFunction(node);
+    if (!containsTableCall(node)) return node;
+    const copy = {...node};
+    for (const [key, value] of Object.entries(node)) {
+      if (top && NESTED_BODIES.has(key)) continue;
+      copy[key] = await withTableCalls(value, false);
+    }
+    return copy;
+  };
+
   const execute = async (body) => {
-    for (const statement of body) {
+    for (const raw of body) {
+      const statement = containsTableCall(raw) ? await withTableCalls(raw) : raw;
       step(statement);
       if (statement.stmt === "declare-scalar") {
         const raw = statement.initial === undefined ? null : await evaluate(statement.initial, "scalar declaration");
