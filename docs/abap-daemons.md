@@ -157,7 +157,8 @@ captured on A4H.
 
 Where the ABAP lives is decision D6 below; the natural home is
 `oisee/open-abap-apc`, which already holds the APC half, the channel types
-and the binding manager, and which is ours to merge.
+and the binding manager, and which is ours to merge. None of this is sent to
+the upstream repositories: only fixes for a difference from A4H go there.
 
 ---
 
@@ -320,12 +321,20 @@ its mechanism is the first thing step 5 has to demonstrate.
   attribute of a class outside the runtime's own while the flag is set
   raises a runtime error that names the class and the attribute and goes to
   the dumps list. Two ways to enforce it, neither built:
-  - **The primary path: a transpiler option** that emits the check at the
-    access in the ABAP source, where the transpiler knows whether the
-    statement really is a read or write of class data. It is an option of
-    the transpiler, so it is an upstream change (a branch in
-    `abaplint/transpiler`, CLAUDE.md), and its cost is one flag test per
-    static access, to measure.
+  - **The primary path: our own pass at build time**, never offered
+    upstream. The guard is our experiment and not a fix for a difference
+    from A4H, and only such fixes go to the transpiler's maintainer. The
+    pass is a post-processing step in `tools/osd-transpile.mjs` over the
+    generated modules: it rewrites each access of a static attribute in a
+    method body into a guarded one, and leaves alone the copies a
+    constructor makes (`this.x = <class>.x;` is a fixed shape the
+    transpiler emits, so the pass can recognise it). Where the generated
+    JavaScript alone cannot tell a read of class data from something that
+    only looks like one, the pass asks the abaplint registry that
+    `osd-transpile.mjs` already builds. If a post-processing pass proves
+    too brittle, the fallback is a local hook on a feature branch of the
+    transpiler clone that is **never** offered upstream. Either way the
+    cost is one flag test per static access, to measure.
   - **A prototype only: an accessor** put once at load over every static
     attribute. It has two holes found by reading, and each alone is enough
     not to rely on it. **A false positive:** transpiled constructors copy
@@ -337,8 +346,8 @@ its mechanism is the first thing step 5 has to demonstrate.
     a field symbol or an alias taken outside the step (in `ON_START`'s
     caller, or held in an instance attribute of the daemon) reaches the
     same value without going through the accessor at all.
-  The transpiler path closes the first hole (it checks the statement, not
-  the property) and narrows the second to references taken before the
+  The build-time pass closes the first hole (it checks the access in the
+  method body, not the property) and narrows the second to references taken before the
   step, which the P9 probe and the ANORMALIES entry must name as a known
   gap. Decision D4.
 - **Why not a thread per daemon by default** (the counter-argument that
@@ -635,7 +644,7 @@ cost here (the APC host, the RFC channel, the pool).
 | 2 | PCP: `IF_AC_MESSAGE_TYPE_PCP`, `CL_AC_MESSAGE_TYPE_PCP`, the serialiser, tested against captured bytes | 1 |
 | 3 | timers: `CL_ABAP_TIMER_MANAGER` and the host hook, first inside stateful APC sessions (no daemon needed to prove them) | 1 |
 | 4 | AMC in one process: producer, consumer, `WAIT FOR MESSAGING CHANNELS`, the APC binding delivering to a socket, the `SAMC` reader | 1.5 |
-| 5 | the daemon host (ABAP), the client manager, the Node driver (mailbox on the shared step queue, restart policy from P3/P4), the class-data guard (first proving it, as a transpiler option sent upstream; the accessor only as a prototype), the registry (D9) | 2 |
+| 5 | the daemon host (ABAP), the client manager, the Node driver (mailbox on the shared step queue, restart policy from P3/P4), the class-data guard (first proving it, as our own post-processing pass in `tools/osd-transpile.mjs`, never sent upstream; the accessor only as a prototype), the registry (D9) | 2 |
 | 6 | the stable layer on Node: mailboxes and the AMC broker in the supervisor, IPC to the children, the pool, the swap phase in `recycle()`, the ack after commit and the message-ID dedup, restart from the registry | 2.5 |
 | 7 | status list and `ps`; the demo, its page and `test/daemon.mjs` | 1.5 |
 | 8 | OSGo: `DaemonStep` under `WorkProcess`, goroutine and channels, timers, the class-data check in gogen, restart from rows on process start; the same test file green | 1.5 |
@@ -658,7 +667,7 @@ decisions below.
 | D3 | Do queued messages survive a *process* restart (a crash, a Go swap without a dispatcher), i.e. is the mailbox also written to `ZOSD_DAEMON_MSG`? | no in the first version: the mailbox lives in the supervisor on Node, which survives a swap; a crash loses it, as a crashed server does. Revisit with the Go dispatcher |
 | D4 | Daemon statics and where a daemon runs | model (b), the foreman's choice: in the host process and thread, under the same step lock, and class data read or written from a daemon step is a recorded runtime error (ANORMALIES, P9). A thread or process of its own only as an explicit opt-in, for daemons without database access, or later with SQL routed to the main connection. Not isolation by default, because the default database is in-memory sql.js, where a second connection is a separate copy, and a file has one holder |
 | D5 | Restart daemons after a process or system restart | yes for a process restart (same path as the swap); after a whole-system restart, mirror P12, with a switch to restart anyway for local use |
-| D6 | Where the ABAP lives | proposal: `oisee/open-abap-apc`, which exists (public, checked with `gh repo view` on 2026-09-24), already holds the APC half and the binding manager and is ours to merge; not open-abap-core; the timer manager possibly in open-abap-core later, as one small PR, since it is not specific to channels |
+| D6 | Where the ABAP lives | proposal: `oisee/open-abap-apc`, which exists (public, checked with `gh repo view` on 2026-09-24), already holds the APC half and the binding manager and is ours to merge; not open-abap-core. Nothing of this goes to the upstream repositories: they receive only fixes for differences from A4H, and ADF, AMC and the timer manager are new work |
 | D7 | The preview | best effort as described: a daemon lives while a page keeps the worker alive, restarts from rows when the worker starts |
 | D8 | Probes on A4H | ask once for the whole set P0 to P11 in one `$ZOSG_TMP` package, rather than one at a time |
 | D9 | Keep the daemon registry `ZOSD_DAEMON` (and `ZOSD_DAEMON_ACK`) as a table, although it is authoritative state and not an index derived from files | the table, because `GET_DAEMON_INFO` is ABAP and a system keeps this state authoritatively too; the alternatives are supervisor memory only (lost on a crash and on every Go swap) or a host file under `.local/` |
