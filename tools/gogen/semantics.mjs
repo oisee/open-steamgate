@@ -40,6 +40,13 @@ const EXPECT = {
   // cl_http_utility=>encode_x_base64: RFC 4648, padded (A4H 2026-09-24,
   // $ZOSG_TMP_0460; the LSD channel). A host function of the Go runtime: the
   // JS emitter refuses
+  // the initial value of an x/d/t/n/p that nobody assigned, wherever it
+  // lives: a structure component (nested too), a row APPENDed after CLEAR, a
+  // CLASS-DATA, an instance attribute, a local, a RETURNING never set, a
+  // component VALUE #( ) does not name (A4H 2026-09-24, $ZOSG_TMP_0461; the
+  // transpiler 2.13.89 agrees). Before the ultra/packs fix round Go gave
+  // s:0 row:0 static:0 inst:0 and "" for the d/t/n/p components
+  ZCL_GOGEN_T_XINIT: "s:2 row:2 static:2 inst:2 00000000 nested:2 00000000 000000 000 0.00 comp:00000000 000000 000 0.00 loc:00000000 000000 000 0.00 ret:1 00 value:7 2 00000000 000",
   ZCL_GOGEN_T_B64: {Go: "b1:/w== b2://4= b3:+/+/ b0:[]", JS: "ERROR NOT_COMPILED in abap.EncodeXBase64: a host function of the Go runtime"},
   // SHIFT s RIGHT DELETING TRAILING mask on a string: the length stays, the
   // masked tail goes and blanks come in on the left; a blank stops it
