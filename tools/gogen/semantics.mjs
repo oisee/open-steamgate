@@ -416,6 +416,9 @@ const EXPECT = {
   // once (A4H 2026-09-24, $ZOSG_TMP_0440; the transpiler runs them all when
   // the program loads, ANOMALY-2026-09-14-class-constructor-eager)
   ZCL_GOGEN_T_CCTOR: "a cc3 t3 t3 b cc1 cc2 t1 c ",
+  // substring_before / _after: the first occurrence, empty when none (A4H
+  // 2026-09-24, $ZOSG_TMP_0440, ultra/events)
+  ZCL_GOGEN_T_WGUI2: "b:[a][][][k] a:[b=c][][x][][c]",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
