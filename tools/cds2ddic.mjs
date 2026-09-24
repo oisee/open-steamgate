@@ -529,10 +529,9 @@ CLASS ${cls} IMPLEMENTATION.
     CREATE DATA rr_data TYPE tt_row.
     ASSIGN rr_data->* TO <lt_data>.
 
+* an empty condition is every row on a system; '1 = 1' in its place is
+* CX_SY_DYNAMIC_OSQL_SEMANTICS there (measured on A4H, docs/osql-where.md)
     lv_where = iv_where.
-    IF lv_where IS INITIAL.
-      lv_where = '1 = 1'.
-    ENDIF.
 
     IF it_fields IS INITIAL.
       SELECT * FROM ${view}
@@ -643,10 +642,9 @@ CLASS ${cls} IMPLEMENTATION.
     CREATE DATA rr_data TYPE STANDARD TABLE OF ${tab}.
     ASSIGN rr_data->* TO <lt_data>.
 
+* an empty condition is every row on a system; '1 = 1' in its place is
+* CX_SY_DYNAMIC_OSQL_SEMANTICS there (measured on A4H, docs/osql-where.md)
     lv_where = iv_where.
-    IF lv_where IS INITIAL.
-      lv_where = '1 = 1'.
-    ENDIF.
 
     IF it_fields IS INITIAL.
       SELECT * FROM ${tab}
