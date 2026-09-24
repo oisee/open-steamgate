@@ -98,7 +98,7 @@ describe("NULL is a literal, not a column", () => {
 describe("ORDER BY sees the projection's aliases", () => {
   it("sorts by a window column named in the same SELECT", () => {
     const text = sql("SELECT k, row_number() OVER (PARTITION BY k ORDER BY n) AS row_nr FROM src ORDER BY k, row_nr DESC;");
-    expect(text).to.match(/ORDER BY "K" ASC, "ROW_NR" DESC/);
+    expect(text).to.match(/ORDER BY "K" ASC NULLS FIRST, "ROW_NR" DESC NULLS LAST/);
   });
 
   it("still refuses a key that is neither a source column nor an alias", () => {

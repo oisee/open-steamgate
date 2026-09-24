@@ -5,7 +5,7 @@
 // with constructors and an interpreter independent of the parser: the first
 // tests pin the semantics of immutable relation rebinding and scalar capture
 // before a syntax tree is allowed to produce these nodes.
-import {effects, schemaOf, col, cast, project, filter, bin, lit, limit, scan, T} from "./sqlscript-ir.mjs";
+import {effects, schemaOf, col, cast, project, filter, bin, lit, limit, scan, order, T} from "./sqlscript-ir.mjs";
 import {lower, Refused} from "./sqlscript-lower.mjs";
 
 export class UnsupportedSqlScript extends Error {
@@ -34,6 +34,10 @@ export const assignRelation = (name, rel, source) =>
   ({stmt: "assign-relation", name: upper(name), rel, source});
 export const whileLoop = (condition, body, source) =>
   ({stmt: "while", condition, body, source});
+/** `FOR row AS cursor DO body END FOR`: the cursor's relation, its row
+ *  schema, and the order its rows are known to come in (orderOf) */
+export const forCursor = (row, cursorName, cursor, schema, body, order, source) =>
+  ({stmt: "for-cursor", row, cursorName, cursor, schema, body, order, source});
 export const ifElse = (branches, otherwise = [], source) =>
   ({stmt: "if", branches, otherwise, source});
 // `SELECT ... INTO a, b [DEFAULT x, y]`: the relation, the scalars it
@@ -363,6 +367,60 @@ function freezeExpr(expr, scalars, freezeRel, session) {
  * `t = SELECT ... FROM :t` points at the previous version and a loop's
  * `:i` points at that iteration's value.
  */
+/**
+ * A frozen cursor relation rewritten so the order its rows are known to come
+ * in is an ORDER BY at the top: the keys of an ORDER BY, carried as hidden
+ * columns through the projections above it, or the position of each row of
+ * a table given as rows (a caller's table input), numbered. Undefined when
+ * no such order is known -- the compiler refused those, and a table input
+ * that turns out to be a database table at run time is refused here.
+ */
+export function orderedRelation(rel) {
+  let hidden = 0;
+  const singleRow = (r) => r?.rel === "project" && r.input?.rel === "scan" && upper(r.input.table) === "DUMMY";
+  // `ties`: the output columns an ORDER BY sorted by (null: no ties). Only
+  // the cursor query's own ORDER BY counts -- one inside, as a caller's
+  // relation or a table variable brings it, HANA may drop (the compiler's
+  // rule, orderOf); ties are carried through renames the way it does
+  const ordered = (r, top) => {
+    switch (r?.rel) {
+      case "order": {
+        if (!top) return undefined;
+        let input = r.input;
+        // a key the projection below does not output is added to it
+        if (input?.rel === "project") {
+          const names = new Set(input.items.map((one) => upper(one.as)));
+          const missing = r.keys.filter((k) => !names.has(upper(k.col)));
+          // widening a DISTINCT changes what it removes
+          if (input.distinct && missing.length > 0) return undefined;
+          if (missing.length > 0) input = {...input, items: [...input.items, ...missing.map((k) => ({as: k.col, expr: col(k.col, undefined)}))]};
+        }
+        return {rel: input, keys: r.keys, ties: new Set(r.keys.map((k) => upper(k.col)))};
+      }
+      case "filter": { const o = ordered(r.input, false); return o && {rel: {...r, input: o.rel}, keys: o.keys, ties: o.ties}; }
+      case "alias": { const o = ordered(r.input, false); return o && {rel: {...r, input: o.rel}, keys: o.keys, ties: o.ties}; }
+      case "project": {
+        if (r.distinct) return undefined;
+        const o = ordered(r.input, false);
+        if (o === undefined) return undefined;
+        const carried = o.keys.map((k) => ({key: k, as: `__ORD${hidden++}`}));
+        const ties = o.ties === null ? null : new Set(r.items.filter((item) => item.expr?.node === "col" && o.ties.has(upper(item.expr.name))).map((item) => upper(item.as)));
+        return {rel: {...r, input: o.rel, items: [...r.items, ...carried.map((c) => ({as: c.as, expr: col(c.key.col, undefined)}))]},
+          keys: carried.map((c) => ({col: c.as, desc: c.key.desc})), ties};
+      }
+      case "scan": return upper(r.table) === "DUMMY" ? {rel: r, keys: [], ties: null} : undefined;
+      case "union": {
+        if (r.all !== true || !r.inputs.every(singleRow)) return undefined;
+        const name = `__ORD${hidden++}`;
+        return {rel: {...r, inputs: r.inputs.map((part, i) => ({...part, items: [...part.items, {as: name, expr: lit(i, T.int)}]}))},
+          keys: [{col: name, desc: false}], ties: null};
+      }
+      default: return undefined;
+    }
+  };
+  return ordered(rel, true);
+}
+
 export function freezeRelation(rel, relations, scalars, session = {}) {
   const freeze = (node) => {
     if (node === undefined || node === null || node.rel === undefined) {
@@ -455,13 +513,15 @@ export async function runProcedure(program, {
   // answer), so the trace says the database was used when it was
   let dbStatements = 0;
   let dbParams = 0;
+  // what each FOR loop relied on for its order, for the trace
+  const orderTrace = [];
   const ask = (compiled) => {
     dbStatements += 1;
     dbParams += compiled.params.length;
     return client.native({...compiled, expect: "rows"});
   };
   const traced = (hostSteps, extra = {}) => ({engine: dbStatements > 0 ? dialect : "host", fallback: false, hostSteps, ...extra,
-    databaseStatements: dbStatements, boundParameters: dbParams});
+    databaseStatements: dbStatements, boundParameters: dbParams, ...(orderTrace.length > 0 ? {order: orderTrace} : {})});
   session = session ?? {};
   if (typeof session !== "object" || Array.isArray(session)) {
     throw new UnsupportedSqlScript("SQLScript session must be an object");
@@ -479,7 +539,14 @@ export async function runProcedure(program, {
       || (statement.stmt === "if" && (statement.branches ?? []).some((branch) =>
         containsRelationStatement(branch.body ?? []))
         || (statement.stmt === "if" && containsRelationStatement(statement.otherwise ?? []))));
-  if (program.outputType !== undefined
+  // a scalar output over relations is carried when something reads them into
+  // scalars: a FOR loop over a cursor, or SELECT ... INTO
+  const readsRelations = (body) => body.some((statement) =>
+    statement.stmt === "for-cursor" || statement.stmt === "select-into"
+      || (statement.stmt === "while" && readsRelations(statement.body ?? []))
+      || (statement.stmt === "if" && ((statement.branches ?? []).some((branch) => readsRelations(branch.body ?? []))
+        || readsRelations(statement.otherwise ?? []))));
+  if (program.outputType !== undefined && !readsRelations(program.body ?? [])
       && ((program.relationParameters ?? []).length > 0 || containsRelationStatement(program.body ?? []))) {
     throw new UnsupportedSqlScript("scalar-only portable functions cannot contain relational inputs or statements");
   }
@@ -747,6 +814,57 @@ export async function runProcedure(program, {
           throw new UnsupportedSqlScript("non-deterministic relational execution is outside the P1a subset", statement);
         }
         relations.set(statement.name, value);
+      } else if (statement.stmt === "for-cursor") {
+        if (client?.native === undefined) {
+          throw new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: its rows come from the database, and this run has none`, statement);
+        }
+        // the checks an assignment and SELECT ... INTO make
+        const budget = {nodes: maxPlanNodes, depth: maxPlanDepth, parameters: maxParameters};
+        assertExpandedRelationBudget(statement.cursor, budget);
+        const frozen = freezeRelation(statement.cursor, relations, scalars, session);
+        assertExpandedRelationBudget(frozen, budget);
+        if (effects(frozen).nonDeterministic) {
+          throw new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: a non-deterministic relation is outside the portable subset`, statement);
+        }
+        const known = orderedRelation(frozen);
+        if (known === undefined) {
+          const refusal = new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: the order of its rows is not known at run time`, statement);
+          refusal.reason = "order";
+          throw refusal;
+        }
+        const outside = known.ties === null ? [] : Object.keys(statement.schema).filter((column) => !known.ties.has(upper(column)));
+        if (outside.length > 0) {
+          const refusal = new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: rows equal in its ORDER BY come in any order, and the loop reads ${outside.join(", ")}`, statement);
+          refusal.reason = "order";
+          throw refusal;
+        }
+        const query = known.keys.length > 0 ? order(known.rel, known.keys) : known.rel;
+        let compiled;
+        try { compiled = lower(query, dialect, {relationRef: (handle) => client.relationRef(handle)}); }
+        catch (error) {
+          if (error instanceof Refused) throw new UnsupportedSqlScript(error.message);
+          throw error;
+        }
+        const answer = await ask(compiled);
+        const seen = orderTrace.find((one) => one.cursor === statement.cursorName);
+        if (seen !== undefined) seen.opened += 1;
+        else orderTrace.push({cursor: statement.cursorName, order: `${statement.order.kind}(${statement.order.why})`,
+          basis: statement.order.basis ?? "assumed", keys: known.keys.map((k) => k.col), opened: 1});
+        for (const row of answer.rows) {
+          step(statement);
+          for (const [column, type] of Object.entries(statement.schema)) {
+            const raw = row[column] ?? row[column.toLowerCase()] ?? null;
+            // the INTEGER range and a BIGINT's precision, as SELECT ... INTO has them
+            if (raw !== null && type?.abap === "I" && type.bits === undefined) {
+              const n = Number(raw);
+              if (!Number.isInteger(n) || n < -2147483648 || n > 2147483647) {
+                throw new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: ${raw} does not fit an INTEGER`, statement);
+              }
+            }
+            scalars.set(`${upper(statement.row)}.${upper(column)}`, {type, value: intoVariable(raw, undefined, type, `${statement.row}.${column}`)});
+          }
+          await execute(statement.body);
+        }
       } else if (statement.stmt === "while") {
         while (booleanOrNull(await evaluate(statement.condition, "WHILE condition"), "WHILE condition") === true) {
           step(statement);

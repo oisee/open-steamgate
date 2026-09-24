@@ -1022,3 +1022,33 @@ evaluate goes to the engine as a one-row SELECT.
 What the moved bodies stop at now: a nested `BEGIN ... END` block (9),
 several scalar OUTs with no table OUT (4), a scalar OUT of an unmeasured
 type, and single ones further on.
+
+### FOR loops over cursors: 30 → 31
+
+*2026-09-24. The first construct of the backlog the corpus oracle measured:
+19 bodies HANA accepts stopped at `FOR r AS c DO`.*
+
+A cursor a FOR loop reads is a relation of the body; the loop visits its
+rows in the order they are known to come in, and only what was measured or
+what SQL guarantees counts: the cursor query's own ORDER BY (guaranteed, and
+only over the columns it sorts by -- ties come in any order, measured), the
+caller's rows of a table parameter (observed), inherited through a scan, a
+filter without a subquery and a projection without a window or a subquery
+(observed on HXE and A4H, `docs/sqlscript-hana-observed.md`). Unknown: an
+ORDER BY inside a table variable (HANA may drop it when it inlines one),
+DISTINCT, a join, a union, grouping, LIMIT, a semi-join, a window, a database
+table without ORDER BY, a table variable assigned inside a loop or
+differently on different paths. A loop over an
+unknown order is refused with the reason `order`; at run time the known
+order becomes an ORDER BY -- the caller's row positions, or the ORDER BY keys
+carried as hidden columns through the projections above -- and the trace
+says what it relied on. `r.col` inside the loop is a scalar of the body.
+
+| | before | after |
+| --- | ---: | ---: |
+| working, compiles as a procedure | 30 | **31** |
+
+The loop was only the first wall: of the 19 bodies, 11 go on to stop at
+`XMLTABLE( XMLNAMESPACE(...) ... )`, XML read inside SQL, which no portable
+engine here has; 5 at numeric `FOR i IN 1 .. n`, and the rest at named
+arguments of a table function and `lt.col[i]`.

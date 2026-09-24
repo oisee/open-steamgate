@@ -94,6 +94,8 @@ const mergedTextType = (left, right) => {
 export function toIr(tree, options = {}) {
   const catalogue = options.catalogue ?? {};
   const relationSchemas = options.relationSchemas ?? {};
+  // the rows a FOR loop is over: loop variable -> the cursor's schema
+  const rowVariables = options.rowVariables ?? {};
   // The method signature, which is where fifteen refusals turned out to come
   // from (docs/sqlscript-corpus.md). An AMDP procedure answers through its
   // OUT table parameter -- it assigns and never selects at the end -- and
@@ -547,6 +549,15 @@ export function toIr(tree, options = {}) {
         if (sessionKeyword && name === "NULL") return {...lit(null, undefined), untyped: true};
         if (sessionKeyword && (name === "TRUE" || name === "FALSE")) {
           throw new BindError(`the BOOLEAN literal ${name} is not portable yet: HANA has BOOLEAN and SQLite has not`, node);
+        }
+        // `r.col` inside `FOR r AS c DO`: a column of the loop's current row,
+        // a scalar of the procedure (R.COL), unless the query in hand has a
+        // source of that name
+        const row = sourceName !== undefined && qualifiedColumns[sourceName] === undefined
+          ? rowVariables[sourceName] : undefined;
+        if (row !== undefined) {
+          if (row[name] === undefined) throw new BindError(`${sourceName}.${name} is not a column of the loop's cursor`, node);
+          return param(`${sourceName}.${name}`, row[name]);
         }
         return col(name, typeOfColumn(name, sourceName), sourceName);
       }
@@ -1500,6 +1511,9 @@ export function toIr(tree, options = {}) {
         // procedural compiler consumes this node and invokes this binder for
         // each relational assignment with the current immutable bindings.
         throw new BindError("While is parsed but belongs to the procedural IR, not the relational IR", node);
+      case "For":
+        // the same: a loop over a cursor's rows is the procedural compiler's
+        throw new BindError("For is parsed but belongs to the procedural IR, not the relational IR", node);
       case "word":
       case "operator":
         break;

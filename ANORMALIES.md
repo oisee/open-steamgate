@@ -1321,3 +1321,17 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream issue: part of the implicit-MANDT anomaly; no separate issue.
 - Upstream version containing a fix: none yet
 - Regression-test location: `test/cds-client.mjs` (the column itself)
+
+### NOTE-2026-09-24-order-beyond-bmp — the sort order of text outside the Basic Multilingual Plane is not measured
+
+- Status: `known`
+- Discovery date: `2026-09-24` (critic on #53)
+- Affected versions: every ORDER BY the portable lowering writes over text
+- Affected ABAP statement, runtime API or adapter: an AMDP body sorting NVARCHAR values that hold characters outside the BMP (emoji and the like)
+- Expected SAP behaviour: not measured. HANA stores Unicode as CESU-8 / UTF-16, where a character outside the BMP is a surrogate pair and may sort before U+E000..U+FFFF.
+- Actual open-abap behaviour: SQLite and DuckDB compare UTF-8 bytes, which puts U+FF21 before U+1F600; HANA may put them the other way round.
+- Impact on open-steamgate: a FOR loop over such a cursor would visit rows in a different order; the scalar runtime already refuses a non-BMP character in a text variable, so the case reaches only an ORDER BY over table data.
+- Smallest safe workaround: none needed on the corpus; measure before relying on it.
+- Upstream issue: none (ours)
+- Upstream version containing a fix: none yet
+- Regression-test location: none yet
