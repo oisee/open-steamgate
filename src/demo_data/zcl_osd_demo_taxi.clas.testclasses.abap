@@ -39,7 +39,7 @@ CLASS ltcl_taxi IMPLEMENTATION.
         pickup_day  TYPE zcl_osd_demo_taxi=>ty_fact-pickup_day,
         pickup_hour TYPE zcl_osd_demo_taxi=>ty_fact-pickup_hour,
         borough     TYPE zcl_osd_demo_taxi=>ty_fact-borough,
-        zone        TYPE zcl_osd_demo_taxi=>ty_fact-zone,
+        pickup_zone TYPE zcl_osd_demo_taxi=>ty_fact-pickup_zone,
         payment     TYPE zcl_osd_demo_taxi=>ty_fact-payment,
       END OF ty_group.
     DATA lt_facts TYPE zcl_osd_demo_taxi=>ty_facts.
@@ -58,7 +58,7 @@ CLASS ltcl_taxi IMPLEMENTATION.
     ENDLOOP.
 * by every component: the default key of this table leaves the i out on a
 * system (and not on the transpiler), and the hour is part of the group
-    SORT lt_groups BY pickup_day pickup_hour borough zone payment.
+    SORT lt_groups BY pickup_day pickup_hour borough pickup_zone payment.
     DELETE ADJACENT DUPLICATES FROM lt_groups COMPARING ALL FIELDS.
     lv_rows = lines( lt_groups ).
     cl_abap_unit_assert=>assert_equals( act = lv_rows exp = 3000 ).
@@ -94,7 +94,7 @@ CLASS ltcl_taxi IMPLEMENTATION.
 * another zone name of the same length
     lt_edit = lt_facts.
     READ TABLE lt_edit INTO ls_fact INDEX 1.
-    TRANSLATE ls_fact-zone TO UPPER CASE.
+    TRANSLATE ls_fact-pickup_zone TO UPPER CASE.
     MODIFY lt_edit FROM ls_fact INDEX 1.
     lv_sum = zcl_osd_demo_taxi=>checksum( lt_edit ).
     cl_abap_unit_assert=>assert_differs( act = lv_sum exp = lv_base ).

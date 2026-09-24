@@ -60,7 +60,7 @@ CLASS ltcl_demo_data IMPLEMENTATION.
     ls_fact-fact_id = '8999999999'.
     ls_fact-pickup_day = '20250102'.
     ls_fact-borough = 'Queens'.
-    ls_fact-zone = 'JFK Airport'.
+    ls_fact-pickup_zone = 'JFK Airport'.
     ls_fact-payment = 'Card'.
     ls_fact-trips = 1.
     INSERT zosd_taxifact FROM ls_fact.

@@ -60,11 +60,8 @@ taxi facts, FACT_ID 9000000001 and up; A4H, Node and OSGo gave the same
 first rows and checksum for the same class (docs/demo-data.md).
 
 Open:
-- **ZOSD_TAXIFACT does not activate on a system**: its field `ZONE` is a
-  reserved word there (ANORMALIES zone-reserved-word). Renaming it to
-  `PICKUP_ZONE` with the CDS alias kept as `Zone` would keep the OData
-  property; `tools/import-nyc-taxi.mjs`, the seed rows and DuckDB files made
-  by an import carry the old name. Not decided.
+- `ZCL_OSD_DEMO_DATA` has not run on a system: ZOSD_TAXIFACT could not be
+  created there before the `PICKUP_ZONE` rename (#67, above).
 - The flight facts (`tools/gen-data.mjs`, `STG_DATA_SCALE`) move to a
   `ZCL_OSD_DEMO_FLIGHT` over `ZCL_OSD_DEMO_RANDOM` the same way; not started.
 

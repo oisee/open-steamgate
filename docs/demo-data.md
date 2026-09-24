@@ -182,8 +182,8 @@ NYC Taxi and Limousine Commission.
 
 The zones are ABAP data (`ZCL_OSD_DEMO_TAXI=>ZONE_LINES`), not a seed table:
 
-- the generator then needs no table at all, which is what let it run on A4H,
-  where `ZOSD_TAXIFACT` does not activate (next section);
+- the generator then needs no table at all, which is what let it run on A4H
+  while `ZOSD_TAXIFACT` did not activate there (next section);
 - the zones reach every host with the class, with no seed file to load
   first;
 - a table would add a TABL, a TABU file and the seeding path on four hosts,
@@ -191,10 +191,12 @@ The zones are ABAP data (`ZCL_OSD_DEMO_TAXI=>ZONE_LINES`), not a seed table:
 
 ## ZOSD_TAXIFACT on a system
 
-The table does not activate on A4H: its field `ZONE` is a reserved word in
-the dictionary there (ANORMALIES `zone-reserved-word`). This is why the
-generator is its own class with its own row type. Renaming the field is an
-open question in AGENDA.
+The table did not activate on A4H while its field was `ZONE`, a reserved
+word in the dictionary there (ANORMALIES `zone-reserved-word`). This is why
+the generator is its own class with its own row type. The field is
+`PICKUP_ZONE` since #67 and the cube's element `PickupZone` since #69; the
+generator's row type follows the table's names. `ZCL_OSD_DEMO_DATA`, which
+writes the table, has not run on a system yet.
 
 ## Measured sizes and times (workstation, 2026-09-24, 20000 rows)
 

@@ -1,9 +1,9 @@
 * Synthetic NYC taxi facts in the shape of ZOSD_TAXIFACT, made without a
 * database: the same rows on every host for the same size and seed
 * (ZCL_OSD_DEMO_RANDOM). ZCL_OSD_DEMO_DATA writes them; this class needs no
-* table and runs on a system where ZOSD_TAXIFACT cannot be created (its
-* column ZONE is a reserved word in the dictionary there, ANORMALIES
-* zone-reserved-word), which is how its rows were compared with A4H's.
+* table, which is how its rows were compared with A4H's while ZOSD_TAXIFACT
+* could not be created there (its column was ZONE, a reserved word in the
+* dictionary, ANORMALIES zone-reserved-word; it is PICKUP_ZONE since #67).
 *
 * Shape. A row is an aggregate in the table's grain: one pickup day of
 * C_MONTH, one hour, one zone, one payment method, with the trips of that
@@ -46,7 +46,7 @@ CLASS zcl_osd_demo_taxi DEFINITION PUBLIC FINAL CREATE PUBLIC.
         pickup_day  TYPE c LENGTH 8,
         pickup_hour TYPE i,
         borough     TYPE c LENGTH 20,
-        zone        TYPE c LENGTH 80,
+        pickup_zone TYPE c LENGTH 80,
         payment     TYPE c LENGTH 12,
         trips       TYPE i,
         fare        TYPE p LENGTH 8 DECIMALS 2,
@@ -333,7 +333,7 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
         CONCATENATE c_month lv_n2 INTO ls_fact-pickup_day.
         ls_fact-pickup_hour = lv_hour.
         ls_fact-borough = ls_zone-borough.
-        ls_fact-zone = ls_zone-zone.
+        ls_fact-pickup_zone = ls_zone-zone.
         ls_fact-payment = payment_name( lv_pay ).
         ls_fact-trips = lv_trips.
         ls_fact-fare = lv_fare / 100.
@@ -399,7 +399,7 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
       lv_v = ls_fact-distance * 100.
       rv_sum = zcl_osd_demo_random=>fold( iv_sum = rv_sum iv_value = lv_v ).
       READ TABLE lt_codes INTO ls_code
-        WITH TABLE KEY borough = ls_fact-borough zone = ls_fact-zone.
+        WITH TABLE KEY borough = ls_fact-borough zone = ls_fact-pickup_zone.
       IF sy-subrc = 0.
         lv_v = ls_code-code.
       ELSE.
@@ -430,7 +430,7 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
     LOOP AT it_facts INTO ls_fact.
       IF sy-tabix <= iv_first.
         rv_text = rv_text && |{ ls_fact-fact_id } { ls_fact-pickup_day } { ls_fact-pickup_hour } | &&
-          |{ ls_fact-borough }/{ ls_fact-zone }/{ ls_fact-payment } | &&
+          |{ ls_fact-borough }/{ ls_fact-pickup_zone }/{ ls_fact-payment } | &&
           |{ ls_fact-trips } { ls_fact-fare } { ls_fact-tip } { ls_fact-distance }; |.
       ENDIF.
       lv_trips = lv_trips + ls_fact-trips.
