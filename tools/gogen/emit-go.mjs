@@ -1409,7 +1409,7 @@ function conv(e, ctx) {
       if (from === "f" && to === "int8") return `abap.F2I8(${x})`;
       break;
     case "c2s": return x;
-    case "table_rows": return `func() ${goType(e.to)} { out := make(${goType(e.to)}, 0, len(${x})); for _, ConvRow := range ${x} { out = append(out, ${expr(e.row, ctx)}) }; return out }()`;
+    case "table_rows": return `func() ${goType(e.to)} { var out ${goType(e.to)}; for _, ConvRow := range ${x} { out = append(out, ${expr(e.row, ctx)}) }; return out }()`;
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
     case "i2s": return `abap.IToString(${x})`;
     case "x2s": return e.to.k === "c" ? `abap.CFit(abap.XToHex(${x}), ${e.to.len})` : `abap.XToHex(${x})`;
@@ -1473,6 +1473,9 @@ function cond(c, ctx) {
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;
       if (c.x.type.k === "dref") return `(${expr(c.x, ctx)}.P == nil)`;
+      // a table is initial when it has no rows, whether its slice is nil or
+      // an empty one (ultra/events: a converted table, make(T, 0))
+      if (c.x.type.k === "table") return `(len(${expr(c.x, ctx)}) == 0)`;
       // a d, t or n field of a structure starts as "" (Go's zero), a
       // variable as its typed zero: both are initial
       if (["d", "t", "n"].includes(c.x.type.k)) return `abap.InitialCh(${expr(c.x, ctx)}, ${zero(c.x.type)})`;
