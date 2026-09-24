@@ -355,6 +355,28 @@ ranked.forEach((g, i) => {
   if (g.tests.length > 8) md.push(`- ... and ${g.tests.length - 8} more`);
   md.push("");
 });
+// what OSGo itself logged as a dump, over every run: the e2e specs' only view of the server side
+{
+  const dumps = new Map();
+  for (const file of httpSuites) {
+    let text = "";
+    try { text = readFileSync(join(out, "runs", `osgo-${file === "test/e2e" ? "e2e" : slug(file)}.server.log`), "utf8"); } catch { continue; }
+    for (const line of text.split("\n")) {
+      const m = line.match(/runtime error: \S+ (\S+): (.*?)  at /);
+      if (!m) continue;
+      const k = m[2].slice(0, 160);
+      const e = dumps.get(k) ?? {n: 0, suites: new Set(), example: m[1]};
+      e.n++; e.suites.add(file); dumps.set(k, e);
+    }
+  }
+  summary.serverDumps = [...dumps].sort((a, b) => b[1].n - a[1].n).map(([k, e]) => ({dump: k, count: e.n, suites: [...e.suites], example: e.example}));
+  writeFileSync(join(out, "parity.json"), JSON.stringify(summary, null, 1));
+  if (dumps.size) {
+    md.push("## Dumps OSGo logged (all runs, e2e included)", "", "| count | dump | suites | e.g. |", "|---:|---|---|---|");
+    for (const d of summary.serverDumps.slice(0, 40)) md.push(`| ${d.count} | ${d.dump.replace(/\|/g, "\\|")} | ${d.suites.join(", ")} | \`${d.example.slice(0, 80)}\` |`);
+    md.push("");
+  }
+}
 if (osgoOnly.length) md.push("## Pass on OSGo, fail on Node", "", ...osgoOnly.map((t) => `- ${t.file}: ${t.title}`), "");
 writeFileSync(join(out, "parity.md"), md.join("\n"));
 console.log(`\nscore ${pct(summary.score)} (${passed.length}/${denom.length}); ${failing.length} failing in ${ranked.length} groups; not applicable: ${summary.totals.notApplicableSuites} suites, ${summary.totals.notApplicableTests ?? "?"} tests`);
