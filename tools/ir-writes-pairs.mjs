@@ -100,6 +100,9 @@ export const R_CASES = [
   {name: "INSERT a short RAW: padded with 00", stmt: () => insertRows("R", R_COLS, rrow({mandt: "001", id: 3, r: "12"}))},
   {name: "INSERT a long RAW: cut to 4 bytes", stmt: () => insertRows("R", R_COLS, rrow({mandt: "001", id: 4, r: "1234567890"}))},
   {name: "INSERT a text by the c -> x rule: the hex prefix, an odd count padded", stmt: () => insertRows("R", R_COLS, rrow({mandt: "001", id: 5, r: "ABCg12"}))},
+  {name: "INSERT a lower-case text: the prefix ends at once", stmt: () => insertRows("R", R_COLS, rrow({mandt: "001", id: 7, r: "12ab"}))},
+  {name: "INSERT a text past F: no prefix, 4 zero bytes", stmt: () => insertRows("R", R_COLS, rrow({mandt: "001", id: 8, r: "XYZ"}))},
+  {name: "INSERT an empty text: 4 zero bytes", stmt: () => insertRows("R", R_COLS, rrow({mandt: "001", id: 9, r: ""}))},
   {name: "MODIFY with the RAW left out writes 4 zero bytes", stmt: () => upsert("R", R_COLS, rrow({mandt: "001", id: 6}), ["MANDT", "ID"])},
 ];
 export const DIALECT_ORDER = ["sqlite", "duckdb", "postgres", "hana"];
@@ -154,7 +157,7 @@ export const render = () => JSON.stringify({
     seed: W_SEED, schema: W_SCHEMA, exact: W_EXACT, pairs: widePairs(),
   },
   raw: {
-    note: "Table R (MANDT C3, ID I, R RAW(4) stored as its 8 hex digits in upper case, as the transpiler's schema has it), key (MANDT, ID), seeded with seed before each case. A written RAW is cut or padded with 00 to its length; a text goes by ABAP's c -> x rule; an initial RAW is its zero bytes, never empty.",
+    note: "Table R (MANDT C3, ID I, R RAW(4)), key (MANDT, ID), seeded with seed before each case. A RAW binds as its 2n upper-case hex digits with type X(n): SQLite, DuckDB and PostgreSQL store that text (the transpiler's NCHAR(2n)), HANA a VARBINARY(n) bound as bytes. A written RAW is cut or padded with 00 to its length; only a text is written, by ABAP's c -> x rule (the longest prefix of [0-9A-F], an odd count padded with 0), a number is refused; an initial RAW is its zero bytes, never empty.",
     seed: R_SEED, schema: R_SCHEMA, pairs: rawPairs(),
   },
 }, undefined, 2) + "\n";

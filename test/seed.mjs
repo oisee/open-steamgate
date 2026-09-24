@@ -24,6 +24,11 @@ function fieldLengths(tablXml) {
       lengths.set(name, {pad: 3});
     } else if ((datatype === "CHAR" || datatype === "NUMC") && leng !== undefined) {
       lengths.set(name, {pad: Number(leng)});
+    } else if (datatype === "RAW" && leng !== undefined) {
+      // a RAW(n) is its 2n hex digits in upper case, 00-padded, as a system
+      // holds n bytes (ANOMALY-2026-09-24-raw-columns): abapGit's file may
+      // carry fewer, and an equal comparison with a full value would miss
+      lengths.set(name, {pad: 0, hex: 2 * Number(leng)});
     } else if (datatype === "DATS") {
       // **The file holds an ISO date and the runtime holds the internal one.**
       // These seed files are abapGit's own TABU JSON -- its data serialiser
@@ -41,11 +46,12 @@ function fieldLengths(tablXml) {
   return lengths;
 }
 
-function quote(value, pad, isDate = false) {
+function quote(value, pad, isDate = false, hex = 0) {
   if (typeof value === "number") {
     return String(value);
   }
   let s = String(value ?? "");
+  if (hex > 0) s = s.toUpperCase().slice(0, hex).padEnd(hex, "0");
   if (isDate) {
     // ISO in the file, internal in the database; anything else is left as it
     // is, so a value that is already internal still works
@@ -115,7 +121,7 @@ function seedFrom(dataDir, ddicDirs) {
         flush();
         shape = cols;
       }
-      batch.push(cols.map((c) => quote(row[c], lengths.get(c)?.pad ?? 0, lengths.get(c)?.date === true)));
+      batch.push(cols.map((c) => quote(row[c], lengths.get(c)?.pad ?? 0, lengths.get(c)?.date === true, lengths.get(c)?.hex ?? 0)));
       // a bound on the statement rather than on the row count: engines differ
       // on how long a statement may be, and none of them differ on this being
       // far inside it

@@ -145,6 +145,9 @@ const R_AFTER = {
   "INSERT a short RAW: padded with 00": ["1|0000000A", "3|12000000"],
   "INSERT a long RAW: cut to 4 bytes": ["1|0000000A", "4|12345678"],
   "INSERT a text by the c -> x rule: the hex prefix, an odd count padded": ["1|0000000A", "5|ABC00000"],
+  "INSERT a lower-case text: the prefix ends at once": ["1|0000000A", "7|12000000"],
+  "INSERT a text past F: no prefix, 4 zero bytes": ["1|0000000A", "8|00000000"],
+  "INSERT an empty text: 4 zero bytes": ["1|0000000A", "9|00000000"],
   "MODIFY with the RAW left out writes 4 zero bytes": ["1|0000000A", "6|00000000"],
 };
 for (const {dialect, make} of ENGINES) describe(`a RAW column written as IR, on ${dialect}`, function () {
@@ -181,6 +184,9 @@ describe("writes as IR: the pairs and the refusals", () => {
     expect(initialValue(X)).to.include({value: "00000000"});
     expect(initialValue({abap: "XSTRING"})).to.include({value: ""});
     expect(bindValue("ABC", {abap: "XSTRING"})).to.include({value: "ABC0"});
+    // a number would go by the i -> x rule (12 is 0000000C), which is not this one
+    expect(() => bindValue(12, X)).to.throw(WriteError, /not a hex text/);
+    expect(() => bindValue(12n, X)).to.throw(WriteError, /not a hex text/);
   });
   it("binds a packed value as the decimal string of its type, and refuses one a work area could not hold", () => {
     const P = {abap: "P", len: 15, dec: 2};

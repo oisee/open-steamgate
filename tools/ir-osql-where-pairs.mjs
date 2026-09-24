@@ -24,6 +24,8 @@ export const COLUMNS = {
   NOTE: {type: {abap: "STRING"}},
   // a RAW(4), as the zvdb agent measured RAW on A4H (a table of its own there)
   R: {type: {abap: "X", len: 4}},
+  // a RAWSTRING, which was not measured: every condition on it is refused
+  RS: {type: {abap: "XSTRING"}},
 };
 
 export const CASES = [
@@ -124,9 +126,17 @@ export const CASES = [
   {name: "a RAW literal with a blank before it is CX_SY_OPEN_SQL_DATA_ERROR", where: "r = ' 0000000A'"},
   {name: "a RAW literal that is empty is CX_SY_OPEN_SQL_DATA_ERROR", where: "r = ''"},
   {name: "an unquoted number against a RAW is CX_SY_OPEN_SQL_DATA_ERROR", where: "r = 12"},
+  {name: "an unquoted number of 2n digits against a RAW is CX_SY_OPEN_SQL_DATA_ERROR too", where: "r = 12345678"},
+  {name: "a RAW literal past F is CX_SY_OPEN_SQL_DATA_ERROR", where: "r = 'XYZ'"},
+  {name: "a RAW literal with a blank after it is CX_SY_OPEN_SQL_DATA_ERROR", where: "r = '1200000 '"},
+  {name: "a RAW compared with <>", where: "r <> '0000000A'"},
+  {name: "a RAW compared with >", where: "r > '00000100'"},
+  {name: "a backtick literal against a RAW is not measured", where: "r = `0000000A`"},
+  {name: "a condition on a RAWSTRING is not measured", where: "rs = '00'"},
+  {name: "a RAW data error left of an unknown column: the first error from the left (not measured)", where: "r = '12' AND nosuch = 'x'"},
   {name: "IN on a RAW is not measured", where: "r IN ('0000000A')"},
   {name: "BETWEEN on a RAW is not measured", where: "r BETWEEN '00000000' AND '0000000A'"},
-  {name: "LIKE on a RAW is not measured", where: "r LIKE '0000%'"},
+  {name: "LIKE on a RAW is refused as on any column that is not CHAR", where: "r LIKE '0000%'"},
 ];
 export const DIALECT_ORDER = ["sqlite", "duckdb", "postgres", "hana"];
 
@@ -153,6 +163,8 @@ const render = () => JSON.stringify({
     "Depth counts each '(' and each NOT; more than " + MAX_DEPTH + " is 'too deep'. MAX_TERMS counts comparisons (a column with its operator), not IN values; more than " + MAX_TERMS + " is 'too deep'.",
     "Blanks are space, tab, CR and LF. An operator with no blank on either side is _SYNTAX, with a blank on one side only 'malformed'; a word run into a quote or a '(' is 'malformed'.",
     "D is C(8), the literal cut. A LIKE pattern is a STRING, bound; ESCAPE is a bound one-character STRING; a trailing blank in the pattern is dropped only without an ESCAPE.",
+    "Outcomes: {sql, params}; {every: true}; {error: 'OsqlWhereSyntax' | 'OsqlWhereSemantics' | 'OsqlWhereData', abap} for the ABAP exception A4H raises; {error: 'OsqlWhereDump'} for an uncatchable runtime error; {error: 'Refused', reason} for what is not carried, reason from reasons.",
+    "RAW(n) (X with len): the literal is exactly 2n characters of [0-9A-F] in quotes, anything else -- lower case, a blank, another length, an unquoted number -- is OsqlWhereData; it binds as that text with type X(n) (PostgreSQL varchar(2n), HANA VARBINARY(n) as bytes); =, <>, <, <=, >, >= compare bytes, which on hex text is text order; IN and BETWEEN, a backtick literal and any RAWSTRING (X without len) are 'column type', LIKE is 'like type'. Which of OsqlWhereData and an error right of it wins was not measured: the first from the left is the assumption.",
     "A surrogate anywhere in a literal refuses it before any cut; a CHAR literal is cut in UTF-16 code units. NUMC: spaces trimmed, then zero-padded; not digits (or empty) is 'numc'.",
   ],
   reasons: REASONS,
