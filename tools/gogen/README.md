@@ -211,6 +211,107 @@ daemons, incremental rebuild of Z code, ADT):
   6. a kernel split so a page that only draws does not link `crypto/tls`
      (the Go runtime alone is 1.9 MB, 444 KB brotli).
 
+### OSGo in the browser, steps 1-3 (ultra/osgo-wasm, 2026-09-25)
+
+Steps 1-3 of the plan above are built; the whole OSGo program runs in a
+service worker and answers the launchpad and the Travels app (list and
+object page) in headless Chromium.
+
+- **The driver** (`go/abap/db_wasm.go`, `js && wasm`): `database/sql`
+  driver `sqljs` over sql.js through `syscall/js`, synchronous. Rows come
+  across as one JSON text per statement (INTEGER read with `useBigInt`, so an
+  int64 comes whole; a REAL, BLOB or NUL-led TEXT tagged). The LUW is
+  `database/sql`'s Tx, so `DialogStep` / COMMIT WORK / ROLLBACK WORK are
+  luw.go's unchanged. A duplicate key is read off sql.js's message
+  ("UNIQUE constraint failed" is 2067 for `duplicateKey`). sql.js's
+  `export()` reopens the database and forgets connection PRAGMAs, so the
+  driver sets them again. `wasip1` keeps the refusing stub
+  (`db_wasip1.go`). **All 37 go/abap tests pass under js/wasm**
+  (`GOOS=js GOARCH=wasm go test -exec $PWD/../wasm/go_js_wasm_exec ./abap/`;
+  the runner loads sql.js first). Two tests had opened `"sqlite"` by name;
+  they now call `openSQL`.
+- **The host** (`go/cmd/osgo/wasm.go`): `main.go`'s routes are now
+  `buildMux` and its boot is `startABAP`, so one program serves both a port
+  and `osgo.handle({method, url, headers, body}) -> Promise<{status,
+  headers, body}>`. Each request is still one `step`. The worker
+  (`wasm/osgo-sw.js`) answers everything below `sap/`; the pages are
+  static files. `node tools/gogen/wasm-preview.mjs` (after `osgo.mjs`)
+  writes `build/osgo-preview`.
+- **Files and media:** Go's `os` under `GOOS=js` calls `globalThis.fs`. The
+  worker supplies a read-only one that fetches `media/` beside the wasm, so
+  `WWWDATA_IMPORT` is the server's code and the BSP apps (the launchpad's
+  `ui5_ui5` components) and Zork's story load. Every other call answers
+  an errno. A missing method would be a panic in Go, not an error, and the
+  status service's `/proc` read was one.
+- **The database image:** the build runs the same wasm once under Node
+  (`wasm/node-host.mjs`), then seeds, boots, writes the demo rows and
+  exports the result as `seed.sqlite` (14.2 MB, 1.8 MB brotli). A first
+  visit starts from that image, and a later visit starts from the worker's
+  copy in cache storage. An image skips `ZCL_OSD_DEMO_DATA=>BOOT`.
+- **APC** over a MessageChannel: `osgo.apcOpen(path, query)` drives the
+  compiled `ZCL_APC_HOST` through the server's adapter. Each call is an
+  `abap.APCStep`, and the page side is the JS preview's
+  `web/preview-socket.mjs`, injected the same way. Zork connects, reads its
+  story and answers "open mailbox" in 60 ms.
+
+Measured in headless Chromium 151 on a shared machine (load 7-10 on 8
+cores) with `wasm/preview-measure.mjs`, which alternates the runtimes for 3
+rounds in fresh profiles. The instrument is `performance.now()` in the page
+around `fetch`, and each figure is the median of the rounds. The JS preview
+is a `build/preview` of the demo-data branch (#65), served from the same
+static server.
+
+| | OSGo (Go -> wasm) | JS preview (transpiler) |
+| --- | ---: | ---: |
+| worker payload, raw | 49.2 MB wasm + 14.2 MB image | 37.0 MB sw.js |
+| worker payload, brotli q11 | 5.6 MB + 1.8 MB | 2.6 MB |
+| cold start to the first OData answer | 1.59 s | 2.66 s |
+| of which (Go): sql.js / wasm compile / Go start (image 0.48 s) | 0.15 / 0.38 / 0.72 s | |
+| Travels list request (`$top=20&$inlinecount`), page-side median | 8.8 ms | 6.1 ms |
+| the same, inside the worker (Go only) | 3.6 ms | |
+| worker round trip with nothing behind it | 2.8 ms | |
+| list report page to the first row | 2.6 s | 2.1 s |
+| launchpad to its tiles / tile to object page | 0.98 / 0.96 s | 1.02 / 0.86 s |
+
+Without the image, Go seeds `zz_db.json` (3961 INSERTs) and writes the
+20 000 taxi rows at start. The cold start is then 4.4-7.4 s (seed 1.6-3.1
+s). A request costs about 1 ms in Go under Node, 3-4 ms in the worker, and
+8-9 ms as the page sees it. The worker round trip alone is about 3 ms, so
+the gap to the transpiler's 6 ms is Go's time in Chromium (tiering of a 49
+MB module, GC) and not the plumbing. A synchronous `handle` without the
+goroutine and Promise was tried and changed nothing measurable, so it was
+removed. In this data the Travels list shows 3 rows where the JS preview
+shows 4, as native osgo does: Go keeps the client (T0009 is client 001).
+
+The preview specs against it (`wasm/playwright.osgo.config.mjs`,
+`build/osgo-preview` at the root of a port): 12 passed and 14 failed of 27.
+They pass Travels, Bookings, Flight analytics, an ICF page, the demo's
+frame, LSD, an APC answer, Zork, the tile click, the launchpad's console
+and the registry count.
+
+The failures fall into two groups. The first is the harness: it reads
+`build/preview/build.json` or `output/`, it asserts the JS stamp, and it
+expects 4 travels. The second is the runtime and fails natively too: the
+dynamic WHERE of the table sources (`CX_SY_DYNAMIC_OSQL_SEMANTICS` "a
+literal on the left", in SEGW, status and ICF) and `NOT_COMPILED` in
+`ZCL_ZSTG_SADL_DPC` (taxi). Those belong to the parity waves, not to the
+host.
+
+Next (steps 4-6 and what this wave showed):
+4. **Files:** the object store (`DESTINATION 'STORE'`, `SetStore`) needs
+   the same fs, a listing (`readdir`) of the tree's files published beside
+   the wasm, or a store config that names them. Media is done.
+5. **`CL_HTTP_CLIENT` over `fetch`:** Go's `net/http` client under
+   `GOOS=js` already uses `fetch`, and requests already run on a goroutine
+   of their own, so it may work as it is. It needs a test against a
+   same-origin service.
+6. **Size:** drop `zz_db.json` from a preview build, since the image
+   replaces it: 11.4 MB raw and 1.3 MB brotli. Then split the kernel so
+   `crypto/tls` and the websocket server are not linked. Also bring the
+   image's 0.48 s `prepareStore` pass down to the PRAGMA only.
+- Deploy: a Pages workflow job that runs `osgo.mjs` + `wasm-preview.mjs`,
+  with the static host serving brotli.
+
 ## Demo scenes against A4H
 
 `node tools/gogen/scenes.mjs <scene>` compiles one scene of ZO4D straight out
