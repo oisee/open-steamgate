@@ -53,21 +53,33 @@ framework is greenfield; AMC is signatures without a body.
 
 Two facts from the reading that matter below and are easy to miss:
 
-- **Node does not serialise dialog steps across requests.**
-  `tools/osd-serve.mjs` wraps each request in `dialogStep` and takes no lock,
-  so two requests that overlap at an `await` share one database connection
-  and one LUW, and the first to finish commits the other's rows. Only the
+- **Node does not serialise dialog steps across requests** (confirmed as
+  a defect on 2026-09-24; osg-i7 is fixing it in a separate PR).
+  `tools/osd-serve.mjs` wraps each request in `dialogStep` and takes no
+  lock. With the default SQLite client this does no harm, because sql.js
+  is synchronous: a request never yields to the event loop in the middle,
+  so two requests never interleave. They do interleave as soon as a step
+  waits on a real macrotask: DuckDB, PostgreSQL, HANA, `WAIT UP TO`,
+  outbound HTTP, live RFC. Then two requests share one database connection
+  and one LUW, and the first to finish commits the other's rows. Worse,
+  `cl_express_icf_shim` keeps its server object in `CLASS-DATA mi_server`,
+  so interleaved requests can answer each other's responses. And APC
+  (`tools/osd-apc.mjs`, `serveChannel`, lines 180-282) has no commit and no
+  rollback at all: its callbacks do not run through `dialogStep`. Only the
   preview serialises (`serialized( )` in `web/preview-backend.mjs`), and Go
-  does (`abap.WorkProcess`). Today this is rare, because a request seldom
-  waits on anything but the database. A daemon's timer fires whenever it
-  likes, so it would make the overlap routine. **A work-process lock on
-  Node is a prerequisite of this work, not a part of it** (step 1 below).
+  does (`abap.WorkProcess`). A daemon's timer fires whenever it likes, so
+  it would make the overlap routine. **osg-i7's fix is a prerequisite of
+  this work**: a queue in `tools/osd-dialog-step.mjs` that is released
+  during `WAIT`, APC callbacks run through `dialogStep`, and `/osd/sql`
+  and the shim's static server inside the step.
 - **Class data is per process on both hosts.** A JavaScript class's statics
   and Go's package-level variables are shared by every session in the
   process. On a system a daemon runs in an ABAP session of its own, with its
-  own static attributes (to be confirmed by probe P9). A daemon here would
-  share its statics with every HTTP request of its work process. That is a
-  divergence and goes into `ANORMALIES.md` before anything is built on it.
+  own static attributes (to be confirmed by probe P9). Run in a work
+  process as it is, a daemon here would share its statics with every HTTP
+  request of that process. That is state outliving a call, shared across
+  sessions, which Alice's decision of 2026-09-24 rules out, so it is not
+  the default (decision D4).
 
 ---
 
@@ -90,9 +102,9 @@ exact parameter names and types are the first thing to read (step 0).
 | `ON_MESSAGE` | a message sent through a handle | the context and the message, an `IF_AC_MESSAGE_TYPE_PCP` | — |
 | `ON_TIMEOUT` | a timer the daemon armed has expired. On a system this is `IF_ABAP_TIMER_HANDLER~ON_TIMEOUT`, which the daemon class implements itself; it is not a method of the extension interface (to confirm in step 0) | the timeout context | — |
 | `ON_STOP` | stopped through a handle, optionally with a PCP message | the context, the message | — |
-| `ON_ERROR` | the previous callback ended in a runtime error | the context | — |
-| `ON_RESTART` | a new instance after the system restarted the daemon (after an error, or on another application server) | the context, the original start parameter | — |
-| `ON_BEFORE_RESTART_BY_SYSTEM` | the system is about to restart the daemon; the old instance's last word | the context | — |
+| `ON_ERROR` | **unverified until P3.** Most likely called in the *new* instance after the previous one dumped: a session that has dumped cannot run ABAP any more, so it cannot be the one that hears about its own error | the context | — |
+| `ON_RESTART` | **unverified until P3.** Most likely the first callback of a new instance after a restart the *system* decided (announced to the old instance by `ON_BEFORE_RESTART_BY_SYSTEM`), rather than after a dump | the context, the original start parameter | — |
+| `ON_BEFORE_RESTART_BY_SYSTEM` | the system is about to restart the daemon for a reason of its own; the old, still healthy instance's last word | the context | — |
 | `ON_SERVER_SHUTDOWN` | the application server the daemon runs on is going down | the context | — |
 | `ON_SYSTEM_SHUTDOWN` | the whole system is going down; no restart follows | the context | — |
 
@@ -240,6 +252,15 @@ the second caller"), so the daemon driver calls it rather than repeating it.
   to one queue and run one at a time, which is what P1 is expected to
   confirm. The chain holds the work-process lock for each step, so a daemon
   step and an HTTP request never share a LUW.
+- **`WAIT` releases the lock.** A lock held across `WAIT UP TO` or `WAIT FOR
+  MESSAGING CHANNELS` deadlocks: the daemon waits for a message that only a
+  step it is blocking could send. On a system `WAIT` rolls the session out
+  and frees the work process, so here the lock is released for the length
+  of the wait and taken again before the step goes on. The LUW side already
+  matches: `@abaplint/runtime` `statements/wait.js` (line 9,
+  `implicitCommit`) commits every open connection before it sleeps, which
+  is the database commit a roll-out implies. osg-i7's queue is built with
+  this release; the daemon driver uses the same one.
 - **The transpiler's async model.** Every ABAP method is an `async`
   function; a callback yields only at `await` points (database, `WAIT`,
   HTTP). Nothing preempts a busy loop, so a daemon that computes for a
@@ -254,20 +275,30 @@ the second caller"), so the daemon driver calls it rather than repeating it.
   has (`process.send`, the same channel as `say` and `ready`), and the
   supervisor appends it to the instance's mailbox and forwards it to child
   B. With one child the round trip is the same and only shorter.
-- **AMC.** A publication is drained from the ABAP after the step (so a
-  rolled-back step publishes nothing, if P8 says that is what a system
-  does), posted to the supervisor, and fanned out in publish order to every
+- **AMC.** When a publication leaves is **not decided until P8**. A system
+  may send at `SEND`, independently of `COMMIT WORK`, in which case a
+  rolled-back step has still published; or it may hold messages until the
+  commit. The host supports both shapes (hand each message to the
+  supervisor at `SEND`, or drain them after the step and drop them on a
+  rollback) and picks the one P8 measures; no default is written before
+  that. Either way a publication is posted to the supervisor and fanned
+  out in publish order to every
   subscriber: a bound APC socket in any child, or an ABAP session waiting in
   `WAIT FOR MESSAGING CHANNELS`. The socket side needs `serveChannel` to
   accept frames that did not come from `on_message`; the waiting side needs
   `KERNEL_PUSH_CHANNELS=>wait` to see a delivered message instead of only
   polling a condition (it can keep polling at 100 ms in a first version).
-- **One process per generation, and statics.** Because the daemon runs in a
-  work process, it shares that process's class statics with the requests it
-  serves (the P9 divergence). The faithful alternative is a
-  `worker_threads` worker per daemon: its own module graph, so its own
-  statics and its own database connection, at the cost of loading the
-  runtime once more per daemon (tens of megabytes; to measure). Decision D4.
+- **Statics: isolated by default.** Run inside a work process, a daemon
+  would share that process's class statics with the requests it serves,
+  which is state outliving a call and crossing sessions. The default is
+  therefore a `worker_threads` worker per daemon: its own module graph, so
+  its own statics and its own database connection, as a daemon's own
+  session has on a system, at the cost of loading the runtime once more
+  per daemon (tens of megabytes; to measure). The cheaper fallback, if the
+  memory is too much, is to run the daemon in the work process and make
+  every read or write of class data from a daemon step a recorded runtime
+  error. Sharing is at most an explicit opt-in per daemon class. Decision
+  D4.
 
 ### Go (OSGo)
 
@@ -284,10 +315,14 @@ the second caller"), so the daemon driver calls it rather than repeating it.
   it to the restart policy. The process has one `tx` and one set of class
   data, so the lock is not optional: every daemon step runs under the same
   mutex as HTTP and APC steps.
-- **Statics.** Package-level variables, one set per process: the same P9
-  divergence as on Node, and no in-process way out. The faithful form would
-  be a daemon in a process of its own (the same binary, started with a
-  daemon flag). Decision D4 covers both hosts.
+- **Statics.** Package-level variables, one set per process, and no
+  in-process way to give a goroutine its own. The isolated default is a
+  daemon in a process of its own (the same binary, started with a daemon
+  flag, its mailbox over a pipe); the fallback is the recorded error on
+  class data from a daemon step, which gogen can emit at the static access
+  itself. Decision D4 covers both hosts.
+- **`WAIT` releases `WorkProcess`**, for the same deadlock reason as on
+  Node.
 - **The stable layer.** OSGo is one process today, so there is nowhere
   outside a generation to keep a mailbox. Until the dispatcher proxy of the
   reload strategy exists, a generation swap on Go is a process restart, and
@@ -333,7 +368,7 @@ The options, with the rule "only data crosses a generation" as the test:
 
 | option | what happens | verdict |
 | --- | --- | --- |
-| **A. restart in the new generation** | admission to the daemon's mailbox is held in the stable layer; the old instance finishes the callback it is in (the drain, bounded by the quiesce grace); it gets its last word; its timers are dropped; the new generation creates a new object from the class of the same name, calls `ON_RESTART` with the same instance ID and the original start parameter; the held mailbox is released to it in order | **recommended** |
+| **A. restart in the new generation** | admission to the daemon's mailbox is held in the stable layer; the old instance finishes the callback it is in (the drain, bounded by the quiesce grace); it gets its last word; its timers are dropped; the new generation creates a new object from the class of the same name, gives it its first callback (`ON_RESTART`, or whatever P3/P10 show a system calls) with the same instance ID and the original start parameter; the held mailbox is released to it in order, each message removed only on an ack after its step committed | **recommended** |
 | B. pin the daemon to its generation | the old generation stays up for as long as the daemon runs | rejected: a daemon never ends by itself, so the old generation never retires, and every activation adds a process |
 | C. migrate the object | serialise the daemon's attributes, rebuild them in the new generation | rejected: this is option 2's roll-area serialisation, the part the reload strategy removed on purpose, and an attribute of a changed class may no longer exist |
 | D. stop and forget | the daemon is stopped with the old generation and not restarted; whoever started it starts it again | honest and smallest, but an activation would silently end every daemon, and the status list would be the only place to notice |
@@ -345,16 +380,34 @@ Under option A, precisely:
    persisted. The closest meaning SAP has for "this server is going away and
    you will continue elsewhere" is `ON_SERVER_SHUTDOWN` followed by
    `ON_RESTART` on another server, or `ON_BEFORE_RESTART_BY_SYSTEM`
-   followed by `ON_RESTART`. P10 (re-activation) and P12 (reading) decide
-   which of the two; the recommendation is to **mirror whatever A4H does on
-   re-activation (P10)**, because that is the event a generation swap
-   actually is. If P10 shows a system does nothing until the next message,
-   the old-generation callback is skipped and only `ON_RESTART` runs.
+   followed by `ON_RESTART`. P10 (re-activation) and P12 (reading) inform
+   the choice of **callbacks**, and only that. **Option A wins over
+   whatever P10 shows about the old load.** If a system turns out to keep
+   running the old load of a daemon until it is restarted, mirroring that
+   here would be option B, which keeps the old generation alive for as long
+   as the daemon runs. On a system the old load costs nothing, because it
+   is one program in a shared buffer; here it is a whole process with its
+   own database handle, and the generation model (`docs/generations.md`)
+   has one serving generation per database. The fidelity rule
+   ("do what a system does") gives way to Alice's rule on state outliving
+   a call, and the note records that as a divergence in `ANORMALIES.md`.
+   From P10 we take which callbacks run and in what order; if a system runs
+   none in the old load, the old-generation callback is skipped and only
+   the new instance's first callback runs.
 2. **The message being processed** completes in the old generation, under
    the quiesce grace (2 s today, which a daemon may need raised). If the
-   grace runs out, the step is killed, its LUW rolls back (the dialog-step
-   rule), and the message is treated as P3 says a dumped message is treated:
-   redelivered if a system redelivers, lost if it does not.
+   grace runs out, the step is killed. A kill **before** the step commits
+   rolls its LUW back (the dialog-step rule), and the message is treated as
+   P3 says a dumped message is treated. A kill **after** the commit but
+   before the supervisor hears of it would make the message run twice in
+   the new generation. So a message leaves the mailbox only on an
+   **acknowledgement sent after the commit**, and every message carries an
+   ID that the daemon host records in the same LUW as the step's work
+   (`ZOSD_DAEMON_ACK`: instance, last message ID). On replay, a message whose
+   ID is already recorded is dropped rather than run again. Either
+   mechanism alone has a gap (an ack can be lost with the process; a dedup
+   table alone does not tell the supervisor when to forget a message);
+   together they make delivery exactly once for a committed step.
 3. **Messages queued behind it** are PCP text in the stable layer and are
    delivered to the new instance after `ON_RESTART`, in order. Nothing is
    lost on Node. On Go, until the dispatcher proxy exists, they are lost
@@ -366,8 +419,9 @@ Under option A, precisely:
    well-written daemon does on a system anyway, because a restart after an
    error loses them there too (to confirm by P3/P10).
 6. **AMC publications** already handed to the broker are delivered; the
-   broker is in the stable layer. Publications of a step that rolled back
-   were never handed over (step 2).
+   broker is in the stable layer. Whether a step that was killed or rolled
+   back had already published depends on P8 (at `SEND`, or at commit); no
+   default is set before it.
 7. **APC sockets bound to an AMC channel** live in a work process and die
    with it, as every APC socket does on a recycle today (`#stopChild`). The
    page reconnects and binds again. This is not new and not made worse; the
@@ -390,9 +444,24 @@ A registry table, `ZOSD_DAEMON` (name, class, instance ID, start parameter
 as PCP text, state RUNNING / STOPPED / FAILED, generation, restart count,
 started by, started at, last callback, last error), written by the daemon
 host at `START`, `STOP`, restart and failure, in the same LUW as the
-callback that caused it. It is ordinary runtime data, like the status
-tables: it does not move sources into the database, so it does not touch the
-"thin layer over files" rule.
+callback that caused it.
+
+This table is **authoritative state, not a derived index**, and that has to
+be said plainly. The rule of 2026-09-24 is that the files are the truth and
+tables hold only indices derived from them (the cross-reference), rebuilt
+per generation. `ZOSD_DAEMON` is neither a source nor derived from one: it
+is the only record that a daemon is running and what it was started with,
+and nothing can rebuild it. The status tables are not a precedent either,
+because they are refreshed from the processes and could be dropped at any
+time. So keeping it is a decision of its own (D9). The alternatives are to
+keep the registry only in the supervisor's memory (a crash forgets every
+daemon, and the Go swap, which is a process restart, forgets them too), or
+in a file under `.local/` beside `instances.json` (host state, not table
+state, but invisible to ABAP, so `GET_DAEMON_INFO` would have to ask the
+host). The recommendation is the table, because `GET_DAEMON_INFO` is ABAP
+and reads it, and because on a system this state lives in the kernel and is
+equally authoritative; but it is Alice's call, not a status table in
+disguise.
 
 The recommendation is that **a generation swap, a process restart and a
 crash take the same path**: the new work process reads the RUNNING rows and
@@ -466,19 +535,18 @@ cost here (the APC host, the RFC channel, the pool).
 | step | what | days |
 | --- | --- | --- |
 | 0 | read the signatures off A4H (P0) and run the probes P1 to P11, with Alice's go; write the results into this file and `ANORMALIES.md` | 1.5 |
-| 1 | **work-process lock on Node**: one step at a time per process in `tools/osd-dialog-step.mjs`, for requests, APC callbacks and (later) daemon callbacks; a test that two overlapping requests no longer share a LUW. Worth doing on its own | 0.5 |
+| 1 | **not in this work**: osg-i7's separate PR (the step queue in `tools/osd-dialog-step.mjs`, released during `WAIT`; APC callbacks through `dialogStep`; `/osd/sql` and the shim's static server inside the step). This work starts after it is merged | 0 |
 | 2 | PCP: `IF_AC_MESSAGE_TYPE_PCP`, `CL_AC_MESSAGE_TYPE_PCP`, the serialiser, tested against captured bytes | 1 |
 | 3 | timers: `CL_ABAP_TIMER_MANAGER` and the host hook, first inside stateful APC sessions (no daemon needed to prove them) | 1 |
 | 4 | AMC in one process: producer, consumer, `WAIT FOR MESSAGING CHANNELS`, the APC binding delivering to a socket, the `SAMC` reader | 1.5 |
-| 5 | the daemon host (ABAP), the client manager, the Node driver (mailbox, lock, restart policy from P3/P4), `ZOSD_DAEMON` | 2 |
-| 6 | the stable layer on Node: mailboxes and the AMC broker in the supervisor, IPC to the children, the pool, the swap phase in `recycle()`, restart from rows | 2 |
+| 5 | the daemon host (ABAP), the client manager, the Node driver (mailbox, lock, restart policy from P3/P4), the worker thread per daemon (D4), the registry (D9) | 3 |
+| 6 | the stable layer on Node: mailboxes and the AMC broker in the supervisor, IPC to the children, the pool, the swap phase in `recycle()`, the ack after commit and the message-ID dedup, restart from the registry | 2.5 |
 | 7 | status list and `ps`; the demo, its page and `test/daemon.mjs` | 1.5 |
 | 8 | OSGo: `DaemonStep`, goroutine and channels, timers, restart from rows on process start; the same test file green | 2 |
 | 9 | the preview, best effort as described | 1 |
-| | **total** | **about 14** |
+| | **total** | **about 15** |
 
-Steps 1 to 4 are useful without daemons: the lock fixes a latent LUW
-defect, and timers and AMC make stateful APC handlers that push on their
+Steps 2 to 4 are useful without daemons: timers and AMC make stateful APC handlers that push on their
 own possible. A stop after step 4 leaves nothing half-built. Steps 5 and 6
 are where state outliving a call begins, and should start only after the
 decisions below.
@@ -490,10 +558,11 @@ decisions below.
 | # | decision | recommendation |
 | --- | --- | --- |
 | D1 | Build ADF at all, or stop after AMC and timers (steps 1 to 4)? | build, in this order; stop after step 4 is a valid answer if daemons are not wanted now |
-| D2 | What a generation swap does to a running daemon | option A: restart in the new generation from its start parameter, `ON_RESTART`, mailbox held and replayed; the old-generation callback mirrors A4H's re-activation behaviour (P10) |
+| D2 | What a generation swap does to a running daemon | option A: restart in the new generation from its start parameter, mailbox held and replayed with an ack after commit and a message-ID dedup. P10 decides which callbacks run, not whether the old load keeps running: if a system keeps the old load, we still restart, and record the divergence |
 | D3 | Do queued messages survive a *process* restart (a crash, a Go swap without a dispatcher), i.e. is the mailbox also written to `ZOSD_DAEMON_MSG`? | no in the first version: the mailbox lives in the supervisor on Node, which survives a swap; a crash loses it, as a crashed server does. Revisit with the Go dispatcher |
-| D4 | Daemon statics: share the work process (divergence recorded) or isolate (a worker thread on Node, a process on Go)? | share, record in `ANORMALIES.md` with P9 as its measurement, isolate only when a real daemon depends on it |
+| D4 | Daemon statics: isolate, make class data from a daemon step a recorded error, or share? | isolate by default (a worker thread per daemon on Node, a process on Go); if the memory is too much, the recorded error; sharing only as an explicit opt-in per class, since shared statics are the state outliving a call that the 2026-09-24 decision rules out |
 | D5 | Restart daemons after a process or system restart | yes for a process restart (same path as the swap); after a whole-system restart, mirror P12, with a switch to restart anyway for local use |
-| D6 | Where the ABAP lives | `oisee/open-abap-apc` (the channel family, ours to merge), not open-abap-core; the timer manager possibly in open-abap-core later, as one small PR, since it is not specific to channels |
+| D6 | Where the ABAP lives proposal: `oisee/open-abap-apc`, which exists (public, checked with `gh repo view` on 2026-09-24), already holds the APC half and the binding manager and is ours to merge; not open-abap-core; the timer manager possibly in open-abap-core later, as one small PR, since it is not specific to channels |
 | D7 | The preview | best effort as described: a daemon lives while a page keeps the worker alive, restarts from rows when the worker starts |
 | D8 | Probes on A4H | ask once for the whole set P0 to P11 in one `$ZOSG_TMP` package, rather than one at a time |
+| D9 | Keep the daemon registry `ZOSD_DAEMON` (and `ZOSD_DAEMON_ACK`) as a table, although it is authoritative state and not an index derived from files | the table, because `GET_DAEMON_INFO` is ABAP and a system keeps this state authoritatively too; the alternatives are supervisor memory only (lost on a crash and on every Go swap) or a host file under `.local/` |
