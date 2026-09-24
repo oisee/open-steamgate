@@ -471,11 +471,19 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   adopted them: a half-write that becomes permanent one request later and
   looks like nothing in between. It is the kernel's job and not the
   application's -- on a system such an exception is a short dump and a dump
-  ends the LUW -- so it now lives in `tools/osd-dialog-step.mjs` and all
-  three hosts call it (`docs/luw-buffer.md`, test in `test/mocha.mjs`,
-  checked failing without it). The general form: when a rule is about **what
-  every host must do**, a comment saying so is not where it goes; a module
-  they all import is.
+  ends the LUW -- so it now lives in `tools/osd-dialog-step.mjs` and the
+  three hosts' HTTP fronts call it (`docs/luw-buffer.md`, test in
+  `test/mocha.mjs`, checked failing without it). "All three hosts" was said
+  here and was not true: the APC events (`tools/osd-apc.mjs` and the
+  preview's channels) ran ABAP outside any step until 2026-09-24, and no
+  step waited for another, so on DuckDB, PostgreSQL or HANA -- engines that
+  answer on a macrotask -- a step that dumped rolled back the rows of the
+  step beside it. The module is now also the one work process: a FIFO lock
+  every step, APC event and read of the shared connection takes, given up
+  during a WAIT (`test/dialog-step.mjs`, each case checked failing without
+  its half). The general form: when a rule is about **what every host must
+  do**, a comment saying so is not where it goes; a module they all import
+  is -- and "every host" is every entry into the ABAP, not every HTTP route.
 - **Verify a built artefact by its code, never by a comment, and never by
   the build command exiting 0.** Three false greens in one day, 2026-09-14,
   all the same shape: a test that called `install()` itself and passed while

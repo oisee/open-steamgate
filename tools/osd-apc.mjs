@@ -13,6 +13,10 @@
 // and this project keeps one runtime dependency on purpose.
 import {createHash} from "node:crypto";
 import {describe} from "./osd-describe.mjs";
+// every APC event is a dialog step of its own: it waits for the work
+// process, commits when it is done and rolls back when it dumps -- the rule
+// the HTTP steps had and these did not (tools/osd-dialog-step.mjs)
+import {dialogStep} from "./osd-dialog-step.mjs";
 export {describe};
 
 // the constant RFC 6455 §1.3 defines; it exists so a server cannot answer a
@@ -190,7 +194,7 @@ export async function serveChannel(options) {
   // "this channel is here", and if the class is not in this runtime, or the
   // handler refuses the connection, that is knowable now and should be said
   // in the language the client is still speaking — HTTP.
-  const start = async () => {
+  const start = () => dialogStep(async () => {
     await host.constructor_({
       iv_handler: new abap.types.String().set(channel.handler),
       it_fields: fieldsOf(req.url, options.host),
@@ -198,7 +202,7 @@ export async function serveChannel(options) {
     const accepted = await host.open();
     await drain();
     return accepted.get() === "X";
-  };
+  });
 
   let accepted;
   try {
@@ -271,16 +275,16 @@ export async function serveChannel(options) {
       buffer = parsed.rest;
       if (parsed.opcode === OP.text) {
         const text = parsed.payload.toString("utf8");
-        queue(async () => {
+        queue(() => dialogStep(async () => {
           await host.message({iv_text: new abap.types.String().set(text)});
           await drain();
-        });
+        }));
       } else if (parsed.opcode === OP.ping) {
         socket.write(frame(parsed.payload, OP.pong));
       } else if (parsed.opcode === OP.close) {
-        queue(async () => {
+        queue(() => dialogStep(async () => {
           await host.close({iv_reason: new abap.types.String().set("closed by the client"), iv_code: new abap.types.Integer().set(1000)});
-        }).finally(() => shut(1000, "bye"));
+        })).finally(() => shut(1000, "bye"));
         return;
       }
     }

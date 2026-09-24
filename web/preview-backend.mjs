@@ -6,7 +6,7 @@
 // ZCL_STG_HTTP_HANDLER. This module does the same with the service worker in
 // the role of express and sql.js compiled to JavaScript in the role of the
 // database file. The pattern is larshp/hithub's web/preview-backend.mjs (MIT).
-import {dialogStep} from "../tools/osd-dialog-step.mjs";
+import {dialogStep, exclusive} from "../tools/osd-dialog-step.mjs";
 import {ensureDemoData} from "../tools/osd-demo-data.mjs";
 import {realNow} from "./preview-runtime.mjs";
 import {Buffer} from "buffer";
@@ -200,6 +200,8 @@ async function invoke({method, path, search = "", headers = {}, body}) {
 // callback — on_start is allowed to speak first and usually does.
 const hosts = new Map();
 
+// Each APC event is a dialog step (tools/osd-dialog-step.mjs): it waits for
+// the one work process, commits when done, rolls back when it dumps.
 export async function openChannel(id, channel, send) {
   const {zcl_apc_host} = await import("../output/zcl_apc_host.clas.mjs");
   const host = new zcl_apc_host();
@@ -209,11 +211,13 @@ export async function openChannel(id, channel, send) {
       send({apc: "message", text: row.get()});
     }
   };
-  await host.constructor_({
-    iv_handler: new abap.types.String().set(channel.handler),
-    it_fields: zcl_apc_host.METHODS.CONSTRUCTOR.parameters.IT_FIELDS.type(),
+  const accepted = await dialogStep(async () => {
+    await host.constructor_({
+      iv_handler: new abap.types.String().set(channel.handler),
+      it_fields: zcl_apc_host.METHODS.CONSTRUCTOR.parameters.IT_FIELDS.type(),
+    });
+    return host.open();
   });
-  const accepted = await host.open();
   if (accepted.get() !== "X") {
     throw new Error("the handler refused the connection");
   }
@@ -226,7 +230,7 @@ export async function openChannel(id, channel, send) {
   // onopen and any send( ) from it is refused as "the socket is not open".
   // The page is right and the ordering was wrong.
   send({apc: "open"});
-  await drain();
+  await dialogStep(drain);
 }
 
 export async function channelMessage(id, text, send) {
@@ -234,8 +238,10 @@ export async function channelMessage(id, text, send) {
   if (entry === undefined) {
     throw new Error(`no channel ${id}`);
   }
-  await entry.host.message({iv_text: new abap.types.String().set(text)});
-  await entry.drain();
+  await dialogStep(async () => {
+    await entry.host.message({iv_text: new abap.types.String().set(text)});
+    await entry.drain();
+  });
   void send;
 }
 
@@ -243,10 +249,10 @@ export async function closeChannel(id) {
   const entry = hosts.get(id);
   hosts.delete(id);
   if (entry !== undefined) {
-    await entry.host.close({
+    await dialogStep(() => entry.host.close({
       iv_reason: new abap.types.String().set("closed by the page"),
       iv_code: new abap.types.Integer().set(1000),
-    });
+    }));
   }
 }
 
@@ -402,14 +408,19 @@ export function handleRequest(request) {
 // is rebuilt through the same setup that opened it.
 export function resetBackend() {
   return serialized(async () => {
-    if (preview.database === "duckdb") await preview.db?.disconnect();
-    preview.stored = undefined;
-    const setup = await import("../test/setup.mjs");
-    await setup.setup(globalThis.abap, preview.schemas, preview.insert);
-    const {applyTo} = await import("../tools/osd-icf-apply.mjs");
-    await applyTo(abap.context.databaseConnections.DEFAULT, icfRegistry);
-    registryServices = servicesFromRows(await currentRows(abap.context.databaseConnections.DEFAULT));
-    await applyXref(abap.context.databaseConnections.DEFAULT, xref);
+    // the connection is replaced: no step (an APC event) may be half-way
+    // through it. The demo data below is a dialog step of its own and takes
+    // the work process itself, so it comes after, as it does at start
+    await exclusive(async () => {
+      if (preview.database === "duckdb") await preview.db?.disconnect();
+      preview.stored = undefined;
+      const setup = await import("../test/setup.mjs");
+      await setup.setup(globalThis.abap, preview.schemas, preview.insert);
+      const {applyTo} = await import("../tools/osd-icf-apply.mjs");
+      await applyTo(abap.context.databaseConnections.DEFAULT, icfRegistry);
+      registryServices = servicesFromRows(await currentRows(abap.context.databaseConnections.DEFAULT));
+      await applyXref(abap.context.databaseConnections.DEFAULT, xref);
+    });
     // and so did the synthetic taxi facts
     await ensureDemoData(zcl_osd_demo_data, {env: preview.env});
     // the status tables went with the database; fill them again rather than
@@ -419,7 +430,7 @@ export function resetBackend() {
 }
 
 export function exportDatabase() {
-  return serialized(() => preview.database === "duckdb" ? undefined : preview.db.export());
+  return serialized(() => exclusive(() => preview.database === "duckdb" ? undefined : preview.db.export()));
 }
 
 export {buildId, database};
