@@ -2,6 +2,8 @@ package apc
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -83,16 +85,18 @@ func TestAPCChannel(t *testing.T) {
 	if got := read(t, c); got != "ABC" {
 		t.Fatalf("echo %q", got)
 	}
-	// a dump ends the step, not the connection; what it sent is dropped
-	c.Write(ctx, websocket.MessageText, []byte("dump"))
+	// a binary frame is ignored and the socket stays up (the Node host)
+	c.Write(ctx, websocket.MessageBinary, []byte{1, 2})
 	c.Write(ctx, websocket.MessageText, []byte("x"))
 	if got := read(t, c); got != "X" {
-		t.Fatalf("after a dump %q", got)
+		t.Fatalf("after a binary frame %q", got)
 	}
-	c.Close(websocket.StatusNormalClosure, "bye")
+	// a client close is ON_CLOSE "closed by the client"/1000 whatever its
+	// code (the Node host)
+	c.Close(websocket.StatusGoingAway, "")
 	select {
 	case got := <-f.closed:
-		if got != "bye/1000" {
+		if got != "closed by the client/1000" {
 			t.Fatalf("ON_CLOSE %q", got)
 		}
 	case <-time.After(5 * time.Second):
@@ -100,28 +104,77 @@ func TestAPCChannel(t *testing.T) {
 	}
 }
 
-func TestAPCRejectAndBinary(t *testing.T) {
-	f := &fakeHost{reject: true, closed: make(chan string, 1)}
-	srv, url := serve(t, f)
-	if _, resp, err := websocket.Dial(context.Background(), url, nil); err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("a rejected connection: %v %v", err, resp)
-	}
-	srv.Close()
-
-	g := &fakeHost{closed: make(chan string, 1)}
-	_, url = serve(t, g)
-	c, _, err := websocket.Dial(context.Background(), url, nil)
+// a dump in ON_MESSAGE closes the socket 1011 "handler failed", and what
+// the step sent goes nowhere (the Node host's queue)
+func TestAPCDumpInMessage(t *testing.T) {
+	f := &fakeHost{closed: make(chan string, 1)}
+	_, url := serve(t, f)
+	ctx := context.Background()
+	c, _, err := websocket.Dial(ctx, url, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	read(t, c)
-	c.Write(context.Background(), websocket.MessageBinary, []byte{1, 2})
-	if got := <-g.closed; got != "binary message/1003" {
-		t.Fatalf("ON_CLOSE after binary %q", got)
+	c.Write(ctx, websocket.MessageText, []byte("dump"))
+	_, _, err = c.Read(ctx)
+	var ce websocket.CloseError
+	if !errors.As(err, &ce) || ce.Code != websocket.StatusInternalError || ce.Reason != "handler failed" {
+		t.Fatalf("after a dump: %v", err)
 	}
-	_, _, err = c.Read(context.Background())
-	if websocket.CloseStatus(err) != websocket.StatusUnsupportedData {
-		t.Fatalf("close status %v", err)
+	select {
+	case got := <-f.closed:
+		if got != "closed by the client/1000" {
+			t.Fatalf("ON_CLOSE %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no ON_CLOSE")
+	}
+}
+
+// a dump while the handler starts is a 503 naming the handler
+func TestAPCDumpAtStart(t *testing.T) {
+	ch := &Channel{Name: "t", Handler: "ZCL_H", New: func(s *abap.Session, r *http.Request) Host {
+		panic(abap.ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "/"})
+	}, Logf: func(string, ...any) {}}
+	srv := httptest.NewServer(ch)
+	defer srv.Close()
+	_, resp, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err == nil || resp == nil || resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("a dump at start: %v %v", err, resp)
+	}
+}
+
+// the query as URLSearchParams reads it (outputs taken from Node 26)
+func TestFormFields(t *testing.T) {
+	for q, want := range map[string]string{
+		"a=1&b=2":                `[[a 1] [b 2]]`,
+		"a=%zz&b=%4":             `[[a %zz] [b %4]]`,
+		"x;y=1&z=a+b":            `[[x;y 1] [z a b]]`,
+		"=v&n=&&k":               `[[ v] [n ] [k ]]`,
+		"%E2%82&%FF%FF=%C3%A9":   "[[\uFFFD ] [\uFFFD\uFFFD \u00e9]]",
+		"a=b=c":                  `[[a b=c]]`,
+		"%F0%9F%98%80=%ED%A0%80": "[[\U0001F600 \uFFFD\uFFFD\uFFFD]]",
+	} {
+		if got := fmt.Sprint(FormFields(q)); got != want {
+			t.Errorf("%q: %s, want %s", q, got, want)
+		}
+	}
+}
+
+func TestRequestPath(t *testing.T) {
+	for target, want := range map[string]string{"/sap/bc/apc/sap/zork/?a=1": "/sap/bc/apc/sap/zork", "/sap/bc/apc/sap/%7Aork": "/sap/bc/apc/sap/%7Aork"} {
+		r := httptest.NewRequest("GET", target, nil)
+		if got := RequestPath(r); got != want {
+			t.Errorf("%s: %s", target, got)
+		}
+	}
+}
+
+func TestAPCReject(t *testing.T) {
+	f := &fakeHost{reject: true, closed: make(chan string, 1)}
+	_, url := serve(t, f)
+	if _, resp, err := websocket.Dial(context.Background(), url, nil); err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("a rejected connection: %v %v", err, resp)
 	}
 }
 
@@ -184,4 +237,19 @@ func TestAPCOrigin(t *testing.T) {
 	}
 	c.Close(websocket.StatusNormalClosure, "")
 	<-g.closed
+
+	// AnyOrigin: every origin, as the Node host (osgo sets it)
+	h := &fakeHost{closed: make(chan string, 1)}
+	any := &Channel{Name: "t", AnyOrigin: true, New: func(s *abap.Session, r *http.Request) Host { return h }, Logf: func(string, ...any) {}}
+	srv2 := httptest.NewServer(any)
+	defer srv2.Close()
+	for _, o := range []string{"http://evil.example", "null"} {
+		c, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(srv2.URL, "http"), &websocket.DialOptions{HTTPHeader: http.Header{"Origin": {o}}})
+		if err != nil {
+			t.Fatalf("AnyOrigin %s: %v", o, err)
+		}
+		read(t, c)
+		c.Close(websocket.StatusNormalClosure, "")
+		<-h.closed
+	}
 }

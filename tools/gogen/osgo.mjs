@@ -110,18 +110,12 @@ func (a apcHost) Close(s *abap.Session, reason string, code int32) { a.h.CLOSE(s
 func (a apcHost) Drain(s *abap.Session) []string { return a.h.DRAIN(s) }
 
 func newAPCHost(s *abap.Session, handler string, r *http.Request) apc.Host {
-\t// in the order the URL has them, as URLSearchParams gives them to the Node host
+\t// in the order the URL has them, decoded as URLSearchParams decodes them
+\t// for the Node host (apc.FormFields; url.ParseQuery would drop a pair with
+\t// a bad escape or a ';')
 \tfields := []IHTTPNVP{}
-\tfor _, pair := range strings.Split(r.URL.RawQuery, "&") {
-\t\tq, err := url.ParseQuery(pair)
-\t\tif pair == "" || err != nil {
-\t\t\tcontinue
-\t\t}
-\t\tfor k, vs := range q {
-\t\t\tfor _, v := range vs {
-\t\t\t\tfields = append(fields, IHTTPNVP{name: k, value: v})
-\t\t\t}
-\t\t}
+\tfor _, f := range apc.FormFields(r.URL.RawQuery) {
+\t\tfields = append(fields, IHTTPNVP{name: f[0], value: f[1]})
 \t}
 \treturn apcHost{New_ZCL_APC_HOST(s, handler, &fields)}
 }

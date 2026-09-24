@@ -415,7 +415,7 @@ export function readClass(folder) {
 const NATIVE = new Map([
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "Native_DESCRIBE_BY_NAME"],
   ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~UNESCAPE_URL", "abap.UnescapeURL"],
-  // bytes as base64, RFC 4648 with padding (A4H 2026-09-24, ZCL_GOGEN_T_BYTECAT);
+  // bytes as base64, RFC 4648 with padding (A4H 2026-09-24, ZCL_GOGEN_T_B64);
   // the LSD channel sends the show this way (ultra/packs). decode_x_base64
   // stays kernel code: what a system does with text that is not base64 is
   // not measured

@@ -70,7 +70,7 @@ func isUpgrade(r *http.Request) bool {
 
 // channelRoutes is tools/osd-apc.mjs mountChannels: an upgrade request goes
 // to the channel declared at its path (trailing slashes dropped, the path
-// compared as it is), a declared channel whose class this program lacks is
+// compared as it was sent, not percent-decoded), a declared channel whose class this program lacks is
 // refused 501, and an upgrade to any other path is 404. A request that is not
 // an upgrade is not the channel's: it is routed as any other (on Node the
 // channel lives on the listener's upgrade event, and express answers the rest).
@@ -78,7 +78,10 @@ func channelRoutes() func(w http.ResponseWriter, r *http.Request) bool {
 	byPath := map[string]http.Handler{}
 	for _, c := range apcChannels {
 		c := c
-		ch := &apc.Channel{Name: c.Name, New: func(s *abap.Session, r *http.Request) apc.Host { return newAPCHost(s, c.Handler, r) }}
+		// AnyOrigin: the Node host never looks at Origin, and behind a proxy
+		// that rewrites Host a same-origin rule would refuse every page
+		// (ultra/packs review); Handler names the class in a start dump's 503
+		ch := &apc.Channel{Name: c.Name, Handler: c.Handler, AnyOrigin: true, New: func(s *abap.Session, r *http.Request) apc.Host { return newAPCHost(s, c.Handler, r) }}
 		byPath[c.Path] = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// the receipt the Node host writes into its 101 (tools/osd-apc.mjs)
 			w.Header().Set("X-OSD-Channel", c.Name)
@@ -95,7 +98,8 @@ func channelRoutes() func(w http.ResponseWriter, r *http.Request) bool {
 		if !isUpgrade(r) {
 			return false
 		}
-		p := strings.TrimRight(r.URL.Path, "/")
+		// the raw request path, as the Node host's req.url (not decoded)
+		p := apc.RequestPath(r)
 		if h, ok := byPath[p]; ok {
 			h.ServeHTTP(w, r)
 		} else {

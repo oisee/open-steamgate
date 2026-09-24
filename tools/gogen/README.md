@@ -526,9 +526,14 @@ requests and channel steps share `abap.WorkProcess`.
 What the packs needed of the compiler: `CONCATENATE ... IN BYTE MODE` into
 an xstring (the SMW0 loaders of Zork and ZO4D), `cl_http_utility=>
 encode_x_base64` as a host function (the LSD channel sends the show so),
-and an `x` local that is never assigned starting at its length in 00 bytes
-(it was Go's empty string). All three measured on A4H
-(`ZCL_GOGEN_T_BYTECAT`, `ZCL_GOGEN_T_B64`).
+and an `x` that is never assigned starting at its length in 00 bytes
+(it was Go's empty string). The last one is wider than a local: in the
+review round the same held for a structure's `x`/`d`/`t`/`n`/`p`
+component, a row appended after `CLEAR`, `CLASS-DATA`, an instance
+attribute, a `RETURNING` never set and a component `VALUE #( )` leaves out,
+so `zero()` of a structure now sets those components and attributes and
+results start there too. All measured on A4H (`ZCL_GOGEN_T_BYTECAT`,
+`ZCL_GOGEN_T_B64`, `ZCL_GOGEN_T_XINIT`).
 
 Against OSG on Node (`STG_DB=sqlite node test/run.mjs`), in Chromium and on
 the sockets: the three pages are byte for byte equal; Zork boots from
