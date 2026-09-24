@@ -38,12 +38,40 @@ const names = (columns) => columns.map(upper);
 export function initialValue(type) {
   if (type?.abap === "I" || type?.abap === "INT8") return lit(0, type);
   if (type?.abap === "C" || type?.abap === "STRING") return lit("", type);
+  if (type?.abap === "P") return lit(packedText("0", type, "the initial value"), type);
   throw new WriteError(`a column of type ${type?.abap ?? "unknown"} has no initial value here yet`);
 }
 
 /**
+ * A packed value as the decimal string of its type: exactly `dec` digits
+ * after the point, no exponent, no -0. It is what an ABAP work area's P field
+ * holds, so a value it could not hold is refused rather than rounded: more
+ * decimals than the type has (unless the extra ones are zeros), or more
+ * digits than its length -- rounding on the way in is ABAP's assignment, not
+ * the write's, and was not measured here. A JavaScript number is read by its
+ * shortest text, so a caller with more than 15 digits passes a string.
+ */
+function packedText(value, type, what) {
+  const dec = Number.isInteger(type.dec) ? type.dec : 0;
+  const text = typeof value === "number" ? (Number.isFinite(value) ? String(value) : "") : String(value).trim();
+  const m = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(text);
+  if (m === null) throw new WriteError(`${what} ${JSON.stringify(value)} is not a decimal number`);
+  const fraction = m[3] ?? "";
+  if (fraction.length > dec && /[1-9]/.test(fraction.slice(dec))) {
+    throw new WriteError(`${what} ${JSON.stringify(value)} has more than the column's ${dec} decimals`);
+  }
+  const whole = m[2].replace(/^0+(?=\d)/, "");
+  const digits = fraction.padEnd(dec, "0").slice(0, dec);
+  if (Number.isInteger(type.len) && (whole === "0" ? 0 : whole.length) + dec > type.len) {
+    throw new WriteError(`${what} ${JSON.stringify(value)} does not fit the column's ${type.len} digits`);
+  }
+  const zero = /^0*$/.test(whole + digits);
+  return `${m[1] === "-" && !zero ? "-" : ""}${whole}${dec > 0 ? `.${digits}` : ""}`;
+}
+
+/**
  * A value bound as the column's type binds it: CHAR right-trimmed, INTEGER a
- * number, STRING unchanged. A field the row does not name is ABAP's initial
+ * number, STRING unchanged, a packed number as its decimal string. A field the row does not name is ABAP's initial
  * value (a work area has no NULL); an explicit null is refused.
  */
 export function bindValue(value, type) {
@@ -60,6 +88,7 @@ export function bindValue(value, type) {
     return lit(text, type);
   }
   if (type?.abap === "STRING") return lit(String(value), type);
+  if (type?.abap === "P") return lit(packedText(value, type, "value"), type);
   throw new WriteError(`a column of type ${type?.abap ?? "unknown"} is not written yet`);
 }
 

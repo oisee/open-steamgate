@@ -7,7 +7,7 @@ import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
 import {lower} from "../tools/sqlscript-lower.mjs";
 import {insertRows, insertFrom, update, upsert, remove, bindValue, WriteError} from "../tools/ir-writes.mjs";
-import {CASES, SEED, PAIRS_FILE, render} from "../tools/ir-writes-pairs.mjs";
+import {CASES, SEED, PAIRS_FILE, render, P_CASES, P_SEED} from "../tools/ir-writes-pairs.mjs";
 import {T, lit} from "../tools/sqlscript-ir.mjs";
 
 const ENGINES = [
@@ -66,7 +66,60 @@ for (const {dialect, make} of ENGINES) describe(`writes as IR, on ${dialect}`, f
   }
 });
 
+// the packed table after each case, amounts at two decimals, timestamps whole
+const PS = (m, i, a, t) => `${m}|${i}|${a}|${t}`;
+const P_BASE = P_SEED.map(([m, i, a, t]) => PS(m, i, a, t));
+const P_AFTER = {
+  "INSERT a packed amount and a TIMESTAMP, as decimal strings of the type": [...P_BASE, PS("001", 3, "12.50", "20260924123456")],
+  "INSERT a packed value given as a number": [...P_BASE, PS("001", 4, "3.00", "20260924000000")],
+  "INSERT a negative amount": [...P_BASE, PS("001", 5, "-7.25", "0")],
+  "MODIFY with the packed fields left out writes their initial values": [...P_BASE, PS("001", 6, "0.00", "0")],
+  "UPDATE a packed amount by key": [PS("001", 1, "99.99", "20260924120000"), PS("001", 2, "0.50", "20260101000000")],
+  "MODIFY a TIMESTAMP on an existing row": [PS("001", 1, "10.00", "20260924120000"), PS("001", 2, "0.50", "20261231235959")],
+};
+
+for (const {dialect, make} of ENGINES) describe(`packed writes as IR, on ${dialect}`, function () {
+  this.timeout(30000);
+  let client;
+  beforeEach(async () => {
+    client = make();
+    await client.connect();
+    await client.native({sql: 'CREATE TABLE "P" ("MANDT" VARCHAR, "ID" INTEGER, "AMOUNT" DECIMAL(15,2), "TS" DECIMAL(15,0), PRIMARY KEY ("MANDT", "ID"))', expect: "none"});
+    for (const [m, i, a, t] of P_SEED) {
+      await client.native({sql: `INSERT INTO "P" VALUES ('${m}', ${i}, ${a}, ${t})`, expect: "none"});
+    }
+  });
+  afterEach(async () => { await client.disconnect(); });
+  const table = async () => (await client.native({sql: 'SELECT "MANDT", "ID", "AMOUNT", "TS" FROM "P"', expect: "rows"})).rows
+    .map((r) => PS(r.MANDT, Number(r.ID), Number(r.AMOUNT).toFixed(2), String(BigInt(Math.round(Number(r.TS)))))).sort();
+
+  for (const one of P_CASES) {
+    it(`${one.name}: the table after it is what ABAP means`, async () => {
+      await client.native({...lower(one.stmt(), dialect), expect: "none"});
+      expect(await table()).to.deep.equal([...P_AFTER[one.name]].sort());
+    });
+  }
+});
+
 describe("writes as IR: the pairs and the refusals", () => {
+  it("binds a packed value as the decimal string of its type, and refuses one a work area could not hold", () => {
+    const P = {abap: "P", len: 15, dec: 2};
+    expect(bindValue("12.5", P)).to.include({value: "12.50"});
+    expect(bindValue(3, P)).to.include({value: "3.00"});
+    expect(bindValue("1.500", P)).to.include({value: "1.50"});
+    expect(bindValue("-0.00", P)).to.include({value: "0.00"});
+    expect(bindValue(undefined, P)).to.include({value: "0.00"});
+    expect(bindValue(undefined, {abap: "P", len: 15, dec: 0})).to.include({value: "0"});
+    expect(() => bindValue("1.555", P)).to.throw(WriteError, /more than the column's 2 decimals/);
+    expect(() => bindValue("12345678901234", P)).to.throw(WriteError, /does not fit the column's 15 digits/);
+    expect(() => bindValue(1e21, P)).to.throw(WriteError, /not a decimal number/);
+    expect(() => bindValue("abc", P)).to.throw(WriteError, /not a decimal number/);
+  });
+
+  it("every packed case has an expected table", () => {
+    expect(Object.keys(P_AFTER).sort()).to.deep.equal(P_CASES.map((one) => one.name).sort());
+  });
+
   it("the pairs file is current (node tools/ir-writes-pairs.mjs writes it), and every case has an expected table", () => {
     expect(readFileSync(PAIRS_FILE, "utf8")).to.equal(render());
     expect(Object.keys(AFTER).sort()).to.deep.equal(CASES.map((one) => one.name).sort());

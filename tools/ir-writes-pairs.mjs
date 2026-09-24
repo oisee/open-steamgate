@@ -9,7 +9,7 @@
 import {readFileSync, writeFileSync, mkdirSync, existsSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
-import {insertRows, insertFrom, update, remove, upsert, bindRows} from "./ir-writes.mjs";
+import {insertRows, insertFrom, update, remove, upsert, bindRows, bindValue} from "./ir-writes.mjs";
 import {lower, Refused} from "./sqlscript-lower.mjs";
 import {T, lit, col, bin, scan, filter, project} from "./sqlscript-ir.mjs";
 import {runsAs} from "./osd-main.mjs";
@@ -45,6 +45,21 @@ export const CASES = [
   {name: "MODIFY with a key twice: the last row wins", stmt: () => upsert("T", COLS, rows({mandt: "001", id: 1, txt: "a"}, {mandt: "001", id: 1, txt: "b"}), KEY)},
   {name: "MODIFY with a field left out writes its initial value", stmt: () => upsert("T", COLS, rows({mandt: "001", id: 8}), KEY)},
 ];
+// a table with packed columns: an amount (P 15,2) and a TIMESTAMP (P 15,0)
+export const P_SCHEMA = {MANDT: {abap: "C", len: 3}, ID: {abap: "I"}, AMOUNT: {abap: "P", len: 15, dec: 2}, TS: {abap: "P", len: 15, dec: 0}};
+const P_COLS = ["MANDT", "ID", "AMOUNT", "TS"];
+const prow = (...list) => bindRows(P_COLS, P_SCHEMA, list);
+const peq = (c, v) => bin("=", col(c, P_SCHEMA[c]), lit(v, P_SCHEMA[c]), T.bool);
+export const P_SEED = [["001", 1, "10.00", "20260924120000"], ["001", 2, "0.50", "20260101000000"]];
+export const P_CASES = [
+  {name: "INSERT a packed amount and a TIMESTAMP, as decimal strings of the type", stmt: () => insertRows("P", P_COLS,
+    prow({mandt: "001", id: 3, amount: "12.5", ts: "20260924123456"}))},
+  {name: "INSERT a packed value given as a number", stmt: () => insertRows("P", P_COLS, prow({mandt: "001", id: 4, amount: 3, ts: 20260924000000}))},
+  {name: "INSERT a negative amount", stmt: () => insertRows("P", P_COLS, prow({mandt: "001", id: 5, amount: "-7.25", ts: "0"}))},
+  {name: "MODIFY with the packed fields left out writes their initial values", stmt: () => upsert("P", P_COLS, prow({mandt: "001", id: 6}), ["MANDT", "ID"])},
+  {name: "UPDATE a packed amount by key", stmt: () => update("P", [{col: "AMOUNT", expr: bindValue("99.99", P_SCHEMA.AMOUNT)}], bin("AND", peq("MANDT", "001"), peq("ID", 1), T.bool))},
+  {name: "MODIFY a TIMESTAMP on an existing row", stmt: () => upsert("P", P_COLS, prow({mandt: "001", id: 2, amount: "0.5", ts: "20261231235959"}), ["MANDT", "ID"])},
+];
 export const DIALECT_ORDER = ["sqlite", "duckdb", "postgres", "hana"];
 
 function rendered(stmt, dialect) {
@@ -63,10 +78,21 @@ export function pairs() {
 }
 
 export const PAIRS_FILE = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "ir-pairs", "writes.json");
+export function packedPairs() {
+  return P_CASES.map((one) => {
+    const stmt = one.stmt();
+    return {name: one.name, statement: stmt, lowered: Object.fromEntries(DIALECT_ORDER.map((dialect) => [dialect, rendered(stmt, dialect)]))};
+  });
+}
+
 export const render = () => JSON.stringify({
   note: "write statements lowered per dialect by tools/ir-writes-pairs.mjs; a port must give the same {sql, params} bytes. Table T (MANDT C3, ID I, TXT C10), key (MANDT, ID), seeded with SEED before each case.",
   seed: SEED, key: KEY, schema: SCHEMA,
   pairs: pairs(),
+  packed: {
+    note: "Table P (MANDT C3, ID I, AMOUNT P 15,2, TS P 15,0 -- a TIMESTAMP), key (MANDT, ID), seeded with seed before each case. A packed value is a decimal string with exactly the type's decimals; more non-zero decimals than the type, or more digits than its length, is refused (an ABAP work area cannot hold it), not rounded.",
+    seed: P_SEED, schema: P_SCHEMA, pairs: packedPairs(),
+  },
 }, undefined, 2) + "\n";
 
 if (runsAs("ir-writes-pairs.mjs")) {
