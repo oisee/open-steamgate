@@ -33,6 +33,14 @@ const EXPECT = {
     Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2. at zcl_gogen_t_delname.clas.abap:19",
     JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2."},
   ZCL_GOGEN_T_DYN: "upper:7 lower:err unknown:err",
+  // CONCATENATE ... IN BYTE MODE into an xstring (A4H 2026-09-24, $ZOSG_TMP_0460;
+  // ultra/packs, the SMW0 loaders of Zork and ZO4D): an x keeps its trailing
+  // 00 bytes, an x never assigned is its length in 00, sy-subrc 0
+  ZCL_GOGEN_T_BYTECAT: "cat:FFAB00CD00/5/0 zeros:0000AB00CD00/6 empty:0/0",
+  // cl_http_utility=>encode_x_base64: RFC 4648, padded (A4H 2026-09-24,
+  // $ZOSG_TMP_0460; the LSD channel). A host function of the Go runtime: the
+  // JS emitter refuses
+  ZCL_GOGEN_T_B64: {Go: "b1:/w== b2://4= b3:+/+/ b0:[]", JS: "ERROR NOT_COMPILED in abap.EncodeXBase64: a host function of the Go runtime"},
   // SHIFT s RIGHT DELETING TRAILING mask on a string: the length stays, the
   // masked tail goes and blanks come in on the left; a blank stops it
   // (A4H 2026-09-23, $batch parts end their body this way)
@@ -389,7 +397,7 @@ const core = `${home}/.local/lars/open-abap-core/src`;
 const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).sort();
 // the roots of the exception classes, and get_text( )'s helper, compiled
 // out of open-abap-core as the gateway compiles them
-const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE"];
+const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_HTTP_UTILITY"];
 const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)

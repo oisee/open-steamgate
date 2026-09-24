@@ -415,6 +415,11 @@ export function readClass(folder) {
 const NATIVE = new Map([
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "Native_DESCRIBE_BY_NAME"],
   ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~UNESCAPE_URL", "abap.UnescapeURL"],
+  // bytes as base64, RFC 4648 with padding (A4H 2026-09-24, ZCL_GOGEN_T_BYTECAT);
+  // the LSD channel sends the show this way (ultra/packs). decode_x_base64
+  // stays kernel code: what a system does with text that is not base64 is
+  // not measured
+  ["CL_HTTP_UTILITY=>ENCODE_X_BASE64", "abap.EncodeXBase64"],
   ["ZCL_OAO_RFC_DESTINATION=>REGISTER_LOCAL", "abap.RegisterLocalDestination"],
   // get_text( ) of an exception without a T100 message or a text id: the
   // fallback text, which A4H gives too (2026-09-23); anything else dumps
@@ -1333,6 +1338,21 @@ function statement(node, ctx) {
     const mask = source(node.findDirectExpression(Expressions.Source), ctx);
     if (mask.type.k !== "c" && mask.type.k !== "string") throw new Unsupported(`SHIFT ... DELETING TRAILING a ${mask.type.k}`);
     return {s: "shift_right_trailing", target, mask: convert(mask, S)};
+  }
+  // CONCATENATE a b ... INTO t IN BYTE MODE, t an xstring and every operand
+  // an x or an xstring (ultra/packs: the SMW0 loaders of Zork and ZO4D glue
+  // WWWDATA_IMPORT's rows together this way). Measured on A4H 2026-09-24
+  // (ZCL_GOGEN_T_BYTECAT): an x keeps its trailing x'00', sy-subrc is 0.
+  // Character mode, SEPARATED BY, RESPECTING BLANKS, LINES OF and a target
+  // of fixed length stay refused.
+  if (isStmt(node, Statements.Concatenate)) {
+    if (!/\bIN\s+BYTE\s+MODE\s*\.?$/i.test(text) || /\b(SEPARATED|RESPECTING|LINES\s+OF)\b/i.test(text)) throw new Unsupported(`CONCATENATE form: ${text}`);
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "xstring") throw new Unsupported(`CONCATENATE IN BYTE MODE into a ${target.type.k}`);
+    const parts = node.findDirectExpressions(Expressions.SimpleSource3).map((n) => source(n, ctx));
+    if (parts.length < 2) throw new Unsupported(`CONCATENATE form: ${text}`);
+    for (const p of parts) if (p.type.k !== "x" && p.type.k !== "xstring") throw new Unsupported(`CONCATENATE IN BYTE MODE of a ${p.type.k}`);
+    return {s: "concat_bytes", target, parts: parts.map((p) => convert(p, XS))};
   }
   if (isStmt(node, Statements.Condense)) {
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);

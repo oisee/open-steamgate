@@ -549,7 +549,15 @@ function signature(cls, m, inInterface = false) {
 function method(cls, m) {
   const lines = [...(LINES && m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
   if (!m.static) lines.push("\t_ = me");
-  for (const l of m.locals) lines.push(`\tvar ${ident(l.name)} ${goType(l.type)}`, `\t_ = ${ident(l.name)}`);
+  // a local whose initial value is not Go's zero value (an x of its length in
+  // 00 bytes, d, t, n, p) starts at the type's initial value, as the JS
+  // emitter's locals do; before (ultra/packs, ZCL_GOGEN_T_BYTECAT) an x never
+  // assigned read as zero bytes long
+  for (const l of m.locals) {
+    const z = zero(l.type);
+    const goZero = z === "0" || z === `""` || z === "nil" || z === "abap.Data{}" || z === `${l.type.go}{}`;
+    lines.push(goZero ? `\tvar ${ident(l.name)} ${goType(l.type)}` : `\tvar ${ident(l.name)} ${goType(l.type)} = ${z}`, `\t_ = ${ident(l.name)}`);
+  }
   for (const f of m.fieldSymbols ?? []) lines.push(`\tvar ${ident(f.name)} ${f.type.k === "data" ? "" : "*"}${goType(f.type)}`, `\t_ = ${ident(f.name)}`);
   const ctx = {cls, loop: 0, inCtor: m.name === "CONSTRUCTOR", method: m};
   lines.push(...m.body.flatMap((st) => stmt(st, ctx, 1)));
@@ -953,6 +961,10 @@ function stmtLines(st, ctx, d) {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.ShiftRightTrailing(${p}, ${expr(st.mask, ctx)})`];
     }
+    // CONCATENATE ... IN BYTE MODE into an xstring (ultra/packs): the bytes
+    // joined, the operands read before the target is written
+    case "concat_bytes":
+      return [`${t}${place(st.target, ctx)} = ${st.parts.map((x) => expr(x, ctx)).join(" + ")}`, `${t}s.Sy.Subrc = 0`];
     case "condense": {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps})`];

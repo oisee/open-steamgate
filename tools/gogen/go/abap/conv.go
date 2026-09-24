@@ -1,6 +1,7 @@
 package abap
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"math"
 	"net/url"
@@ -551,6 +552,13 @@ func UnescapeURL(s *Session, escaped string, options int32) string {
 		panic(ArithmeticError{"URI_MALFORMED", "unescape_url: " + err.Error()})
 	}
 	return out
+}
+
+// EncodeXBase64 is cl_http_utility=>encode_x_base64: the bytes of an
+// xstring as base64, standard alphabet, padded (A4H 2026-09-24,
+// ZCL_GOGEN_T_BYTECAT; ultra/packs).
+func EncodeXBase64(s *Session, unencoded string) string {
+	return base64.StdEncoding.EncodeToString([]byte(unencoded))
 }
 
 // CP is the pattern match, measured on A4H (2026-09-23): * is any run, + any
