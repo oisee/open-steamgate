@@ -54,7 +54,7 @@ for (const source of sources.libraries) {
   if (source.licenseAssumption) {
     const approved = new Map([
       ["oisee/open-abap-odata", "bd9f1fb175e7b26678e48eb2e311a278a13ef91b"],
-      ["oisee/open-abap-gui", "0324e1c1538f7ac63826ebbddab3fbee31c4501c"],
+      ["oisee/open-abap-gui", "31cc8b3177569afb66c88a4ec9fd2e640a353877"],
     ]);
     if (approved.get(source.repo) !== source.ref || source.licenseAssumption.license !== "MIT") {
       throw new Error("Unapproved license assumption");

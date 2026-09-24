@@ -969,7 +969,7 @@ ENDLOOP.
 
 ### ANOMALY-2026-09-18-html-viewer-show-url — `cl_gui_html_viewer=>show_url` of an assigned url shows the url's text, not the document
 
-- Status: `fixed in fork` — open-abap-gui branch `html-viewer-sapevent`, commit `0324e1c`, not yet offered upstream
+- Status: `fixed upstream` — open-abap-gui `d7dca1f` (#166, in `main` since `8a5f474`) rewrote `load_data` / `show_url` so that `show_url` of the url last loaded shows that document (`mv_external_url`); our fork commit for it was dropped when the branch was rebased onto `8a5f474`, and the build pins the rebased fork commit `31cc8b3` (branch `html-viewer-sapevent-r1`, the `sapevent` raise alone). Upstream keeps one document rather than a cache per url, which covers abapGit's order (assets first, the page last)
 - Discovery date: `2026-09-18`
 - Affected versions: `open-abap-gui` at `ed96e89` (upstream `main`)
 - Affected ABAP statement, runtime API or adapter: `cl_gui_html_viewer->load_data( )` followed by `show_url( assigned_url )`, which is how abapGit shows every page (`zcl_abapgit_gui=>cache_asset` then `render`)
@@ -978,10 +978,10 @@ ENDLOOP.
 - Expected SAP behaviour: `load_data` puts the document into the control's data cache under the url it assigns (or the one given), and `show_url` of that url shows the document; any other url is a link the control navigates to
 - Actual open-abap behaviour: the substitute set the payload to the url's text at `show_url`, so the document loaded a line earlier was replaced by its own name. `load_data` without a url also assigned nothing, so abapGit's `show_url( '' )` had nothing to name
 - Impact on open-steamgate: abapGit's own page flow drew an empty frame with a file name in it; the sapevent round trip (backlog G.2) could not be run against real markup until this was fixed
-- Smallest safe workaround: none here; fixed in the fork, which the build takes from `.local/lars/open-abap-gui` and the preview workflow pins by commit (`OSD_GUI_REF`)
-- Upstream issue: none yet. The branch carries two commits, the raise of `sapevent` and this; both go to open-abap/open-abap-gui as one PR after a critic pass (`docs/upstream.md`, "Beside the transpiler")
-- Regression-test location: `cl_gui_html_viewer.clas.testclasses.abap` in the fork (`show_url_shows_what_was_loaded`), `test/sapevent.mjs` here
-- Upstream version containing a fix: `unknown`
+- Smallest safe workaround: none here; the build takes the library from `.local/lars/open-abap-gui` and the workflows pin it by commit (`OSD_GUI_REF`)
+- Upstream issue: none needed for this half; the remaining fork commit, the raise of `sapevent`, goes to open-abap/open-abap-gui as a PR after a critic pass (`docs/upstream.md`, "Beside the transpiler")
+- Regression-test location: `test/sapevent.mjs` here (green at `31cc8b3`); the fork's `show_url_shows_what_was_loaded` went with the dropped commit
+- Upstream version containing a fix: open-abap-gui `d7dca1f` (#166)
 
 ### ANOMALY-2026-09-19-interface-call-without-interfaces — a call through an interface the class does not implement is accepted here and refused on a system
 

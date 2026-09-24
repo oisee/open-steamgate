@@ -34,7 +34,7 @@ node tools/osd-link.mjs transpiler packages/transpiler
 node tools/osd-link.mjs transpiler-cli packages/cli
 node tools/osd-link.mjs runtime packages/runtime
 checkout open-abap-core 52ba51a5662b93bd5093a9c1adef64bd438ce7f0 .local/lars/open-abap-core
-checkout open-abap-gui 0324e1c1538f7ac63826ebbddab3fbee31c4501c .local/lars/open-abap-gui
+checkout open-abap-gui 31cc8b3177569afb66c88a4ec9fd2e640a353877 .local/lars/open-abap-gui
 node tools/osd-libs.mjs
 npm run packs:fetch
 npm run transpile

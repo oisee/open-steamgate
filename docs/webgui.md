@@ -385,22 +385,24 @@ like `open-abap-core` and the pack/delta half of abapGit: it is the substrate a
 program compiles against, not content this system serves.
 
 - URL: our fork, `https://github.com/oisee/open-abap-gui`; folder
-  `.local/lars/open-abap-gui`. Upstream `main` is at **`ed96e89`** ("update",
-  #162); the folder is on the fork branch **`html-viewer-sapevent`** at
-  **`0324e1c`** (two commits on top of `ed96e89`: the `sapevent` raise, and
-  `show_url` showing what `load_data` loaded), which is what the preview
-  workflow pins (`OSD_GUI_REF`) and what "How close" below describes.
+  `.local/lars/open-abap-gui`. The build pins **`31cc8b3`** (fork branch
+  `html-viewer-sapevent-r1`): one commit, the `sapevent` raise, on top of
+  upstream `main` at **`8a5f474`** ("move files", #170). Until 2026-09-25 it
+  pinned `0324e1c`, the same work on top of `ed96e89` plus a `show_url` fix
+  that upstream has since made its own way (#166). `OSD_GUI_REF` in the
+  workflows, `docker/image/sources.json` and `docker/image/assemble.mjs` carry
+  the pin; "How close" below describes it.
 - Declared in `abap_transpile.json` (libs) and `abaplint.jsonc` (dependencies).
-- **Only `/src` comes in.** The repository also carries `/scaffold` — 162
-  example programs and a dynpro host of its own — and `/test`, and neither
-  belongs in this build.
-- **Three files under `/scaffold` are the exception**, named one by one:
+- **Only `/src` comes in.** The repository also carries `/framework` — a
+  dynpro host of its own — `/examples` (the example programs, `/scaffold`
+  before #170) and `/test`, and none of it belongs in this build.
+- **Three files under `/framework` are the exception**, named one by one:
   `zcl_gg_context_menu_state`, `zcl_gg_host_html`, `host/zcl_gg_host_surface`.
   `/src` refers to them by name — `cl_ctmenu` and `cl_gui_toolbar` keep their
   items in the first, the tree and grid controls render through the third,
   which asks the second for a CSS class — so they are closure and not example.
   They would be library files upstream; naming them costs three lines and keeps
-  the other 159 out.
+  the rest out.
 
 **What it cost, measured before and after:** 1173 objects → 1474, so **+301**.
 That is exactly `/src` plus the three: 117 classes, 16 interfaces, 11 type
