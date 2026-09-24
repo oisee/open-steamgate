@@ -3,7 +3,10 @@
 //
 //   node tools/gogen/parity.mjs [--root <checkout>] [--osgo <binary>] [--media <dir>]
 //        [--port 4610] [--out <dir>] [--suites a,b] [--only node|osgo] [--reuse-node]
-//        [--timeout 30000] [--no-count] [--e2e]
+//        [--timeout 30000] [--no-count] [--e2e] [--report-only]
+//
+// --report-only reads the last run's results (<out>/node-reference.json and
+// <out>/osgo-results.json) and only classifies and writes the summary again.
 //
 // How a suite reaches its server: 16 files of test/suites.json call
 // startServer() from test/start.mjs, which builds an express host in the
@@ -137,16 +140,23 @@ function tail(f) {
 // ---- run -----------------------------------------------------------------
 const results = {node: {}, osgo: {}};
 const cachePath = join(out, "node-reference.json");
+const osgoPath = join(out, "osgo-results.json");
+const reportOnly = flag("report-only");
+if (reportOnly) {
+  results.node = JSON.parse(readFileSync(cachePath, "utf8"));
+  results.osgo = JSON.parse(readFileSync(osgoPath, "utf8"));
+  for (const f of Object.keys(results.osgo)) if (!httpSuites.includes(f)) httpSuites.push(f);
+}
 if (flag("reuse-node") && existsSync(cachePath)) {
   results.node = JSON.parse(readFileSync(cachePath, "utf8"));
   console.log(`node reference: reused ${cachePath}`);
 }
-if (!existsSync(osgoBin) && only !== "node") {
+if (!reportOnly && !existsSync(osgoBin) && only !== "node") {
   console.error(`no osgo binary at ${osgoBin} (node tools/gogen/osgo.mjs builds it)`);
   process.exit(2);
 }
 console.log(`parity: ${httpSuites.length} HTTP suites, checkout ${root}, osgo ${osgoBin}`);
-for (const file of httpSuites) {
+for (const file of reportOnly ? [] : httpSuites) {
   if (only !== "osgo" && results.node[file] === undefined) results.node[file] = await runSuite("node", file, basePort + 1);
   if (only !== "node") results.osgo[file] = await runSuite("osgo", file, basePort + 2);
 }
@@ -190,16 +200,20 @@ async function runE2e(kind, port) {
   console.log(`  ${kind.padEnd(4)} test/e2e (playwright)         ${records.filter((r) => r.state === "passed").length}/${records.length} passed${died ? ", SERVER DIED" : ""}`);
   return {file: "test/e2e", kind, up, boot: 0, records, hookFailures: [], serverDied: died, log: died ? tail(`${base}.server.log`) : undefined};
 }
-if (flag("e2e")) {
+if (flag("e2e") && !reportOnly) {
   httpSuites.push("test/e2e");
   if (only !== "osgo" && results.node["test/e2e"] === undefined) results.node["test/e2e"] = await runE2e("node", basePort + 1);
   if (only !== "node") results.osgo["test/e2e"] = await runE2e("osgo", basePort + 2);
 }
-if (only !== "osgo") writeFileSync(cachePath, JSON.stringify(results.node));
+if (!reportOnly && only !== "osgo") writeFileSync(cachePath, JSON.stringify(results.node));
+if (!reportOnly && only !== "node") writeFileSync(osgoPath, JSON.stringify(results.osgo));
 
 // the in-process suites, counted
 let naCount;
-if (!flag("no-count")) {
+if (reportOnly && existsSync(join(out, "runs", "na.mocha.json"))) {
+  const r = JSON.parse(readFileSync(join(out, "runs", "na.mocha.json"), "utf8"));
+  naCount = {suites: naSuites.length, tests: r.stats?.tests, counted: true};
+} else if (!flag("no-count")) {
   const m = runMocha(naSuites, basePort + 3, join(out, "runs", "na.records.json"), join(out, "runs", "na.mocha.json"), ["--dry-run"]);
   naCount = {suites: naSuites.length, tests: m.report?.stats?.tests ?? (m.report?.tests ?? []).length, counted: m.report !== undefined};
 }
@@ -228,6 +242,15 @@ function dumpKey(body) {
   try { const j = JSON.parse(body); text = j?.error?.message?.value ?? body; } catch {}
   return String(text).replace(/\s+/g, " ").trim();
 }
+// where a missing route belongs: the ICF service (/sap/bc/<x>), the OData service, else the first two segments
+const routeOf = (p) => {
+  const path = p.split("?")[0];
+  const odata = path.match(/^\/sap\/opu\/odata\/sap\/[^/]+/);
+  if (odata) return odata[0];
+  const seg = path.split("/").filter(Boolean);
+  if (seg[0] === "sap" && seg[1] === "bc") return "/" + seg.slice(0, 3).join("/");
+  return "/" + seg.slice(0, 2).join("/");
+};
 const shape = (p) => p.split("?")[0].replace(/\('[^']*'\)|\([^)]*=[^)]*\)|\(\d+\)/g, "(…)");
 
 function classify(t) {
@@ -268,7 +291,7 @@ function classify(t) {
   }
   if (diff && (diff.q.status === 404 || diff.q.status === 501 || diff.q.status === 503) && diff.nq.status < 400) {
     const refused = /not served by OSGo|is not in this program|not compiled/i.test(diff.q.body ?? "");
-    return {cat: refused ? "missing service" : "missing route", key: `${diff.q.method} ${shape(diff.q.path)}`, detail: `${diff.q.status} (Node ${diff.nq.status}): ${(diff.q.body ?? "").replace(/\s+/g, " ").slice(0, 200)}`};
+    return {cat: refused ? "missing service" : "missing route", key: `${routeOf(diff.q.path)}`, detail: `${diff.q.method} ${diff.q.path.slice(0, 120)} -> ${diff.q.status} (Node ${diff.nq.status}): ${(diff.q.body ?? "").replace(/\s+/g, " ").slice(0, 160)}`};
   }
   if (diff) {
     return {cat: "different answer", key: `${diff.q.method} ${shape(diff.q.path)}: ${diff.nq.status} -> ${diff.q.status}`, detail: `${(diff.q.body ?? "").replace(/\s+/g, " ").slice(0, 200)} | ${String(err.message ?? "").split("\n")[0].slice(0, 200)}`};
