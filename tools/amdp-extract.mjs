@@ -24,6 +24,8 @@ const HANA_TYPE = {
   // form. DATS/TIMS are DDIC names, not scalar SQL types accepted by HANA's
   // CREATE PROCEDURE grammar.
   D: "NVARCHAR(8)", T: "NVARCHAR(6)", DATS: "NVARCHAR(8)", TIMS: "NVARCHAR(6)",
+  // the type-pool boolean everybody uses, c LENGTH 1
+  ABAP_BOOL: "NVARCHAR(1)",
 };
 
 /** the HANA type of one ABAP-typed component */

@@ -11,7 +11,7 @@ import {lex} from "./sqlscript/lexer.mjs";
 import {parse} from "./sqlscript/combi.mjs";
 import {Body} from "./sqlscript/expressions/index.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop, selectInto,
-  ifElse, callProcedure, UnsupportedSqlScript} from "./sqlscript-procedure-ir.mjs";
+  ifElse, callProcedure, UnsupportedSqlScript, assignable} from "./sqlscript-procedure-ir.mjs";
 
 const upper = (value) => String(value).toUpperCase();
 const children = (node, kind) => (node.children ?? []).filter((one) => one.node === kind);
@@ -164,14 +164,21 @@ function outputFrom(method, types, resolve, store) {
   // assigned, an empty table where it assigned none); every one of them must
   // be a resolved table -- a scalar OUT beside them is not carried yet
   if (outputs.length > 1 && outputs.every((one) => one.direction === "OUT")) {
-    const tables = outputs.map((one) => {
+    // a scalar OUT beside them is typed like a scalar input (INTEGER, a
+    // fixed-length character such as abap_bool, STRING -- measured on A4H)
+    const all = outputs.map((one) => {
       const schema = structuredTable(one.abapType, types, resolve, store);
-      if (schema === undefined) {
-        throw new UnsupportedSqlScript(`output ${one.name} is not a resolved structured table type; a scalar OUT beside table OUTs is not carried yet`);
+      if (schema !== undefined) return {name: upper(one.name), schema};
+      let scalar;
+      try { scalar = irTypeFromAbap(one.abapType, resolve); } catch { scalar = undefined; }
+      if (scalar === undefined || !["I", "C", "STRING"].includes(scalar.abap) || (scalar.abap === "I" && scalar.bits !== undefined)) {
+        throw new UnsupportedSqlScript(`output ${one.name} is neither a resolved structured table type nor a measured scalar`);
       }
-      return {name: upper(one.name), schema};
+      return {name: upper(one.name), scalar};
     });
-    return {name: tables[0].name, kind: "relation", schema: tables[0].schema, outputs: tables};
+    const tables = all.filter((one) => one.schema !== undefined);
+    if (tables.length === 0) throw new UnsupportedSqlScript("several scalar OUTs and no table OUT are not carried yet");
+    return {name: tables[0].name, kind: "relation", schema: tables[0].schema, outputs: all};
   }
   if (outputs.length !== 1 || !["OUT", "RETURNING"].includes(outputs[0]?.direction)) {
     throw new UnsupportedSqlScript("initial portable procedures require exactly one OUT or RETURNING output parameter");
@@ -179,14 +186,40 @@ function outputFrom(method, types, resolve, store) {
   const parameter = outputs[0];
   const schema = structuredTable(parameter.abapType, types, resolve, store);
   if (schema !== undefined) return {name: upper(parameter.name), kind: "relation", schema};
-  if (parameter.direction === "RETURNING") {
-    const type = irTypeFromAbap(parameter.abapType, resolve);
-    if (type.abap !== "I") {
-      throw new UnsupportedSqlScript("initial scalar RETURNING support is limited to ABAP INTEGER exactly");
+  if (parameter.direction === "RETURNING" || parameter.direction === "OUT") {
+    let type;
+    try { type = irTypeFromAbap(parameter.abapType, resolve); } catch (error) {
+      if (parameter.direction === "OUT") throw new UnsupportedSqlScript(`output ${parameter.name} is not a resolved structured table type`);
+      throw error;
     }
-    return {name: upper(parameter.name), kind: "scalar", type};
+    if (!["I", "C", "STRING"].includes(type.abap) || (type.abap === "I" && type.bits !== undefined)) {
+      throw new UnsupportedSqlScript("scalar outputs are limited to ABAP INTEGER, fixed-length character and STRING");
+    }
+    // an OUT scalar left alone is its initial value (measured on A4H); a
+    // RETURNING one is not measured and stays refused when unassigned
+    return {name: upper(parameter.name), kind: "scalar", type, initialWhenUnassigned: parameter.direction === "OUT"};
   }
   throw new UnsupportedSqlScript(`output ${parameter.name} is not a resolved structured table type`);
+}
+
+/**
+ * The type a scalar DECLARE names, as SQLScript variables behave on A4H
+ * (docs/sqlscript-hana-observed.md, string scalars): INTEGER; BIGINT;
+ * NVARCHAR / VARCHAR / CHAR / NCHAR of a length -- a value kept as it is,
+ * trailing blanks and all, never padded (a CHAR(5) of 'a' has length 1),
+ * one longer than the length raised; NCLOB / CLOB / NVARCHAR without a
+ * length as STRING; BOOLEAN. A declared variable without a value is NULL.
+ */
+function declaredScalarType(typeNode, node) {
+  const words = typeNode?.children ?? [];
+  const name = upper(words.find((c) => c.node === "identifier" || c.node === "quoted")?.value ?? "");
+  const sizes = words.filter((c) => c.node === "number").map((c) => Number(c.value));
+  if (["INT", "INTEGER"].includes(name)) return T.int;
+  if (name === "BIGINT") return T.int8;
+  if (["NVARCHAR", "VARCHAR", "CHAR", "NCHAR"].includes(name) && sizes.length === 1 && sizes[0] > 0) return {abap: "C", len: sizes[0], variable: true};
+  if (["NCLOB", "CLOB"].includes(name) && sizes.length === 0) return T.str;
+  if (name === "BOOLEAN") return T.bool;
+  throw new UnsupportedSqlScript(`a scalar DECLARE of ${name || "an unnamed type"}${sizes.length ? `(${sizes.join(",")})` : ""} is not measured yet`, node);
 }
 
 /** Compile one extracted AMDP method without changing its source body. */
@@ -283,6 +316,7 @@ export function compileProcedure(method, types, options = {}) {
   const arrayValues = Object.create(null);
   const cursorNames = new Set();
   if (output.kind === "scalar") scalarTypes[output.name] = output.type;
+  for (const one of output.outputs ?? []) if (one.scalar !== undefined) scalarTypes[one.name] = one.scalar;
   const snapshotEnvironment = () => ({
     relations: structuredClone(relationSchemas),
     scalars: structuredClone(scalarTypes),
@@ -309,6 +343,16 @@ export function compileProcedure(method, types, options = {}) {
     signature: method, arrayValues, catalogue, ...(targetSchema === undefined ? {} : {targetSchema}),
   });
 
+  // HANA refuses a bare BOOLEAN as a condition (`IF :g THEN` is a syntax
+  // error, measured on A4H): it wants `IF :g = TRUE`
+  const condition = (node) => {
+    const bound = bind(node, "condition");
+    if (bound?.node === "param") {
+      throw new UnsupportedSqlScript(
+        `a bare :${String(bound.name).toLowerCase()} is not a condition on HANA (a syntax error there); write :${String(bound.name).toLowerCase()} = TRUE`, node);
+    }
+    return bound;
+  };
   const compileStatements = (container, allowArrayDeclarations = false, returnAllowed = false) => {
     const result = [];
     const directStatements = new Set(["Declare", "Assignment", "While", "If", "Block", "ProcedureCall", "Return", "SetOperation"]);
@@ -399,10 +443,7 @@ export function compileProcedure(method, types, options = {}) {
         }
         const name = nameOf(child(node, "Name"));
         if (cursorNames.has(name)) throw new UnsupportedSqlScript(`duplicate declaration ${name}`, node);
-        const type = bind(child(node, "TypeName"), "type");
-        if (type.abap !== "I" || !["INT", "INTEGER"].includes(nameOf(child(node, "TypeName")))) {
-          throw new UnsupportedSqlScript("initial portable DECLARE supports only INTEGER exactly", node);
-        }
+        const type = declaredScalarType(child(node, "TypeName"), node);
         scalarTypes[name] = type;
         const initialNode = child(node, "Expr");
         result.push(declareScalar(name, type,
@@ -476,7 +517,7 @@ export function compileProcedure(method, types, options = {}) {
         relationSchemas[calledOutput] = structuredClone(output.schema);
         result.push(callProcedure(procedureLeaves[0].value, input, calledOutput, node));
       } else if (node.node === "While") {
-        result.push(whileLoop(bind(child(node, "Condition"), "condition"), compileStatements(node), node));
+        result.push(whileLoop(condition(child(node, "Condition")), compileStatements(node), node));
       } else if (node.node === "Block") {
         const mode = (node.children ?? []).filter((one) => one.node === "word")
           .map((one) => upper(one.value)).filter((one) => !["BEGIN", "END", ";"].includes(one));
@@ -522,7 +563,7 @@ export function compileProcedure(method, types, options = {}) {
             break;
           } else if (part.node === "Condition" && current?.condition === null) {
             restoreEnvironment(before);
-            current.condition = bind(part, "condition");
+            current.condition = condition(part);
           } else if (part.node === "Statement" && current !== undefined) {
             current.statements.push(part);
           }
@@ -560,7 +601,7 @@ export function compileProcedure(method, types, options = {}) {
           // BIGINT into an INTEGER scalar: `SELECT COUNT(*) INTO lv` with
           // lv INTEGER compiles and assigns on A4H; the value is range-checked
           const narrowing = shape[i][1]?.abap === "INT8" && same(scalarTypes[target], T.int);
-          if (!narrowing && !same(shape[i][1], scalarTypes[target])) {
+          if (!narrowing && !assignable(shape[i][1], scalarTypes[target])) {
             throw new UnsupportedSqlScript(`SELECT ... INTO ${target}: column ${i + 1} (${shape[i][0]}) is ${shape[i][1]?.abap ?? "untyped"}, the scalar ${scalarTypes[target].abap}; not an identical measured type`, node);
           }
         });
@@ -636,10 +677,11 @@ export function compileProcedure(method, types, options = {}) {
         }
       };
       walk(body);
-      const missing = (output.outputs ?? [output]).find((one) => !assigned.has(one.name));
+      const missing = (output.outputs ?? [output]).filter((one) => one.scalar === undefined).find((one) => !assigned.has(one.name));
       if (missing !== undefined) throw new UnsupportedSqlScript(`some out table variable is not assigned: ${missing.name}`);
     }
     return procedure({parameters, relationParameters, body, output: output.name,
+      ...(output.initialWhenUnassigned === true ? {outputInitialWhenUnassigned: true} : {}),
       ...(Array.isArray(output.outputs) ? {outputs: output.outputs} : {}),
       outputSchema: output.kind === "relation" ? output.schema : undefined,
       outputType: output.kind === "scalar" ? output.type : undefined,

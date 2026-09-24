@@ -137,7 +137,7 @@ ${items}
  *  builds the right structure for -- checked 2026-09-18. */
 function abapTypeFor(cls, p) {
   const t = String(p.abapType);
-  return /^[a-z_0-9]+$/i.test(t) && !/^(i|f|d|t|string|xstring|int8|int4|int2|int1)$/i.test(t)
+  return /^[a-z_0-9]+$/i.test(t) && !/^(i|f|d|t|string|xstring|int8|int4|int2|int1|abap_bool)$/i.test(t)
     ? `${cls.toUpperCase()}=>${t.toUpperCase()}`
     : t.toUpperCase();
 }

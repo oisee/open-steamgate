@@ -7,6 +7,16 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
 > [`docs/backlog.md`](docs/backlog.md). This file stays the narrative: what
 > was decided and why.
 
+## pAMDP scalars: host first, engine only where paired (2026-09-24)
+
+Decided with foreman-dell on #44: a scalar rule measured on A4H is the
+host's to evaluate, not the engine's, so it holds on SQLite, DuckDB and
+sql.js alike and ports to the Go IR without a database. The engine route
+(`SELECT <expr> FROM DUMMY`) stays for what is not measured yet -- ordering a
+text, CASE, functions -- and each function leaves it only with an
+engine = A4H pair in the IR pairs files. Open: LENGTH / SUBSTR / UPPER /
+LOWER / TRIM measured and moved to the host.
+
 ## SAP Easy Access, and the GUI substitutes wired in, 2026-09-18
 
 The system has an entry screen. `/sap/bc/gui/sap/its/webgui/` — the path the

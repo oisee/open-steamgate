@@ -50,6 +50,15 @@ CLASS zcl_osd_amdp_demo DEFINITION
       EXPORTING VALUE(et_small)  TYPE tt_amount
                 VALUE(et_large)  TYPE tt_amount.
 
+*   Scalar OUTs beside a table OUT: a STRING keeps its trailing blanks, an
+*   abap_bool is a c LENGTH 1 (both measured on A4H, 2026-09-23).
+    CLASS-METHODS label_amounts
+      IMPORTING VALUE(it_amount) TYPE tt_amount
+                VALUE(iv_label)  TYPE string
+      EXPORTING VALUE(et_small)  TYPE tt_amount
+                VALUE(ev_found)  TYPE abap_bool
+                VALUE(ev_label)  TYPE string.
+
     CLASS-METHODS total_amount_nested
       IMPORTING VALUE(it_amount) TYPE tt_amount
       EXPORTING VALUE(et_total)  TYPE tt_total.
@@ -112,6 +121,14 @@ CLASS zcl_osd_amdp_demo IMPLEMENTATION.
                        OPTIONS READ-ONLY.
     et_small = SELECT amount FROM :it_amount WHERE amount < :iv_limit;
     et_large = SELECT amount FROM :it_amount WHERE amount >= :iv_limit;
+  ENDMETHOD.
+
+  METHOD label_amounts BY DATABASE PROCEDURE FOR HDB
+                       LANGUAGE SQLSCRIPT
+                       OPTIONS READ-ONLY.
+    et_small = SELECT amount FROM :it_amount WHERE amount < 10;
+    ev_found = 'X';
+    ev_label = :iv_label || '  ';
   ENDMETHOD.
 
   METHOD total_amount BY DATABASE PROCEDURE FOR HDB

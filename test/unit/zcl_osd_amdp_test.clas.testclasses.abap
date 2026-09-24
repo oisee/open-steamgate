@@ -9,6 +9,7 @@ CLASS ltcl_amdp DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS open_sql_luw_is_shared FOR TESTING RAISING cx_static_check.
     METHODS a_table_function_returns_rows FOR TESTING RAISING cx_static_check.
     METHODS two_outputs_come_back FOR TESTING RAISING cx_static_check.
+    METHODS scalar_outs_beside_a_table FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_amdp IMPLEMENTATION.
@@ -177,5 +178,29 @@ CLASS ltcl_amdp IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lt_large
                                         exp = VALUE zcl_osd_amdp_demo=>tt_amount( ( amount = 12 ) ( amount = 40 ) )
                                         msg = 'the second OUT table, the caller''s row replaced' ).
+  ENDMETHOD.
+
+  METHOD scalar_outs_beside_a_table.
+    DATA lt_amount TYPE zcl_osd_amdp_demo=>tt_amount.
+    DATA lt_small TYPE zcl_osd_amdp_demo=>tt_amount.
+    DATA lv_found TYPE abap_bool.
+    DATA lv_label TYPE string.
+
+    IF sy-dbsys <> 'HDB' AND sy-dbsys <> 'duckdb'.
+      RETURN.
+    ENDIF.
+
+    lt_amount = VALUE #( ( amount = 3 ) ( amount = 12 ) ).
+    zcl_osd_amdp_demo=>label_amounts( EXPORTING it_amount = lt_amount
+                                                iv_label  = `ab`
+                                      IMPORTING et_small  = lt_small
+                                                ev_found  = lv_found
+                                                ev_label  = lv_label ).
+    cl_abap_unit_assert=>assert_equals( act = lt_small
+                                        exp = VALUE zcl_osd_amdp_demo=>tt_amount( ( amount = 3 ) )
+                                        msg = 'the OUT table' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_found exp = abap_true msg = 'the abap_bool OUT' ).
+    cl_abap_unit_assert=>assert_equals( act = strlen( lv_label ) exp = 4
+                                        msg = 'the STRING OUT keeps its trailing blanks' ).
   ENDMETHOD.
 ENDCLASS.

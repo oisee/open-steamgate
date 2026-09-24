@@ -584,3 +584,52 @@ The portable compiler carries several OUT tables: each is what the body
 assigned, an empty relation where the path assigned none, and an OUT
 assigned nowhere is refused in HANA's words. A scalar OUT beside table OUTs
 and a nested CALL inside such a procedure are refused by name for now.
+
+## String and other scalar variables (measured on A4H, 2026-09-23)
+
+A throwaway class with AMDP procedures, called through `execute_abap`,
+deleted afterwards.
+
+| case | on A4H |
+| --- | --- |
+| `DECLARE v NVARCHAR(10);` | NULL until assigned |
+| `DECLARE c NVARCHAR(10) = 'x  '` | kept: length 3; `'x  ' = 'x'` is false |
+| `DECLARE d CHAR(5) = 'a'` | `'a'`, length 1 -- a variable is never padded |
+| `e = :e \|\| :b` with `b` NULL | NULL |
+| `f = 42` into an NVARCHAR | `'42'` |
+| `DECLARE a NVARCHAR(3) = 'abcdef'` | raises (`CX_AMDP_EXECUTION_FAILED`), not truncated |
+| `DECLARE i NCLOB = 'long text'`, `DECLARE j BIGINT = 3000000000` | as given |
+| `DECLARE g BOOLEAN = TRUE; IF :g THEN` | a syntax error: `IF :g = TRUE THEN` |
+| a STRING OUT assigned `'ab  '` | `'ab  '` in ABAP, the blanks kept |
+| a `c LENGTH 3` OUT assigned `'ab '` / `'abcdef'` | `'ab'` / raises |
+| a scalar OUT the path left alone | its initial value (`''`, `0`) |
+| a scalar OUT or RETURNING assigned NULL (`i`, `string`, `c LENGTH 3`; alone or beside others; a scalar function) | its initial value, no raise (2026-09-24) |
+| `UPPER(NCHAR(228) \|\| NCHAR(246))` / `LOWER` of the capitals | `'ÄÖ'` / `'äö'`: DuckDB agrees, SQLite and sql.js do not |
+| `UPPER('stra' \|\| NCHAR(223) \|\| 'e')` | `'STRAßE'`, length 6: one character in, one out (DuckDB writes the capital sharp s, JavaScript writes SS) |
+| `:i \|\| :i` with `i = 5` | `'55'` |
+| `''` in an NVARCHAR, `IS NULL` | false: an empty text is not NULL |
+| `NCHAR(128512) \|\| NCHAR(128512)` into NVARCHAR(2) or NVARCHAR(10) | raises in both |
+
+The portable runtime declares NVARCHAR / VARCHAR / CHAR / NCHAR of a length,
+NCLOB / CLOB, BIGINT and BOOLEAN. The host evaluates what is measured here
+itself -- literals, variables, `||`, `=` / `<>` between two texts, IS NULL,
+COALESCE, UPPER / LOWER with the one-to-one mapping measured above -- so those mean what they mean on HANA on every backend and the IR
+needs no engine for them. Anything else (ordering a text, a CASE, a function)
+still goes to the engine as `SELECT <expr> FROM DUMMY` through the same
+lowering as a query, and is refused where the run has no engine; each such
+route moves to the host once it is measured and paired (foreman-dell's
+review of #44).
+
+Two limits, written down so they are not mistaken for measurements:
+
+- **Inside a SELECT the engine still decides.** A text compared with a
+  number in a WHERE (`WHERE txt = 5`: DuckDB raises, SQLite answers no row)
+  and UPPER / LOWER in a projection (DuckDB writes the capital sharp s,
+  SQLite maps ASCII only) are lowered as they are. The host rules above
+  cover scalar statements, not queries; a refusal at lowering is the next
+  step.
+- **The host's UPPER / LOWER beyond the measured cases is a decision.**
+  Measured: `äö`, `ÄÖ`, `ß`. Not measured, and handled by the one-to-one
+  rule (a mapping that would change the length keeps the character): the
+  dotted and dotless i (`İ`, `ı`), ligatures (`ﬀ`), `ŉ`, `ǰ`, `ΐ`, and the
+  Greek final sigma (`ΣΑΣ` lowers to `σασ`, no `ς`).

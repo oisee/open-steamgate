@@ -551,7 +551,8 @@ export class AmdpDestination {
     }
     // one OUT, or several (each written to its own target, by name)
     const targets = Array.isArray(p.portable.outputs)
-      ? p.portable.outputs.map((one) => ({name: one.name, value: answer.outputs?.[one.name]?.rows}))
+      ? p.portable.outputs.map((one) => ({name: one.name,
+        value: one.scalar !== undefined ? answer.outputs?.[one.name]?.value : answer.outputs?.[one.name]?.rows}))
       : [{name: p.portable.output, value: p.portable.outputType === undefined ? answer.rows : answer.value}];
     // every target resolved before any is written: a missing one refuses
     // the call with nothing half-written

@@ -78,14 +78,17 @@ function literalType(token) {
 
 const measuredTextType = (type) => {
   if (type?.abap === "STRING") return Object.keys(type).length === 1;
-  return type?.abap === "C" && Object.keys(type).length === 2
+  // a declared NVARCHAR(n) variable is C of n marked `variable` (never padded)
+  const keys = Object.keys(type ?? {}).filter((key) => !(key === "variable" && type.variable === true));
+  return type?.abap === "C" && keys.length === 2
     && Number.isSafeInteger(type.len) && type.len >= 0;
 };
 
 const mergedTextType = (left, right) => {
   if (!measuredTextType(left) || !measuredTextType(right)) return undefined;
   if (left.abap === "STRING" || right.abap === "STRING") return T.str;
-  return T.char(Math.max(Number(left.len), Number(right.len)));
+  const merged = T.char(Math.max(Number(left.len), Number(right.len)));
+  return left.variable === true || right.variable === true ? {...merged, variable: true} : merged;
 };
 
 export function toIr(tree, options = {}) {
@@ -290,7 +293,15 @@ export function toIr(tree, options = {}) {
           // INT2 arithmetic is INTEGER's: 32767 + 32767 is 65534 on A4H, no
           // SMALLINT overflow, so the INT2 range does not travel into a result
           const widened = (t) => (t?.abap === "I" && t.bits !== undefined ? T.int : t);
-          const type = op === "/" ? T.dec(15, 2)
+          // a concatenation is as long as both sides together; a STRING or
+          // a number on either side makes it a STRING
+          const concatenated = () => {
+            const [a, b] = [left.type, right.type];
+            if (a?.abap !== "C" || b?.abap !== "C" || !Number.isInteger(a.len) || !Number.isInteger(b.len)) return T.str;
+            const joined = T.char(a.len + b.len);
+            return a.variable === true || b.variable === true ? {...joined, variable: true} : joined;
+          };
+          const type = op === "||" ? concatenated() : op === "/" ? T.dec(15, 2)
             : (left.type?.abap === "P" || right.type?.abap === "P" ? T.dec(15, 2) : widened(left.type));
           left = bin(op, left, right, type);
         }
@@ -413,6 +424,8 @@ export function toIr(tree, options = {}) {
         // doubling 2147483647 overflows for MAX(int) and not for COUNT(*).
         // SUM(int) overflowed too on HANA, where DuckDB widens: not typed yet.
         if (fn === "COUNT") resultType = T.int8;
+        // LENGTH of a text is an INTEGER (A4H: LENGTH('x  ') is 3)
+        if (fn === "LENGTH" && args.length === 1 && ["C", "STRING"].includes(args[0].type?.abap)) resultType = T.int;
         if (["MIN", "MAX"].includes(fn) && args.length === 1 && args[0].type !== undefined && !isUnresolved(args[0].type)) resultType = args[0].type;
         if (fn === "LOWER") {
           if (args.length !== 1 || !measuredTextType(args[0]?.type)) {

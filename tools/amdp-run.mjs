@@ -173,14 +173,25 @@ export async function call(client, name, method, inputs, types) {
         `CALL ${name} (${args.join(", ")}); SELECT ${scalarOuts.map((p) =>
           `:V_${p.name.toUpperCase()} AS "${p.name.toLowerCase()}"`).join(", ")} FROM DUMMY; END;`
       : `CALL ${name} (${args.join(", ")})`;
-    const parts = await exec(sql);
+    // Scalar OUTs beside table OUTs come back only from a prepared statement:
+    // node-hdb's exec answers them as an empty object (measured on HANA
+    // Express 2026-09-24: exec gave [{}, rows], prepare + exec gave
+    // [{EV_FOUND: "X", EV_LABEL: "ab  "}, rows]), so the scalar was lost.
+    const prepared = (text) => new Promise((resolve, reject) => client.prepare(text, (err, statement) => {
+      if (err) { reject(err); return; }
+      statement.exec([], (error, ...rest) => {
+        statement.drop(() => undefined);
+        if (error) reject(error); else resolve(rest);
+      });
+    }));
+    const parts = !scalarOnly && scalarOuts.length > 0 ? await prepared(sql) : await exec(sql);
     if (scalarOnly) {
       const row = parts.find(Array.isArray)?.[0] ?? {};
       return Object.fromEntries(scalarOuts.map((p) => [p.name.toLowerCase(), readable(row[p.name.toLowerCase()])]));
     }
     const [scalars, ...tables] = parts;
     const result = {};
-    for (const [k, v] of Object.entries(scalars ?? {})) result[k] = readable(v);
+    for (const [k, v] of Object.entries(scalars ?? {})) result[k.toLowerCase()] = readable(v);
     let i = 0;
     for (const p of outs) {
       const table = tables[i];

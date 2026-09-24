@@ -1001,3 +1001,24 @@ gitignored) resolved them.
 What the moved bodies stop at now: a UTCL timestamp field (10, a datatype
 not measured yet), a non-INTEGER DECLARE (6, host string scalars), a table
 function not in the registry (6), a scalar OUT beside table OUTs.
+
+### String scalars and scalar outputs: 25 → 29
+
+*2026-09-24. The largest single runtime feature by body count, measured on
+A4H first (`docs/sqlscript-hana-observed.md`).*
+
+A body may now declare text, BIGINT and BOOLEAN variables, assign them by
+the measured rules (a text kept as it is, a number into a text its digits,
+too long raised), fill them by `SELECT ... INTO`, test them in IF / WHILE,
+and hand text or INTEGER scalars back: a STRING or `c LENGTH n` RETURNING,
+and scalar OUTs beside table OUTs (`abap_bool`, `string`, `i`), each its
+initial value where the path left it alone. What the host does not
+evaluate goes to the engine as a one-row SELECT.
+
+| | before | after |
+| --- | ---: | ---: |
+| working, compiles as a procedure | 25 | **29** |
+
+What the moved bodies stop at now: a nested `BEGIN ... END` block (9),
+several scalar OUTs with no table OUT (4), a scalar OUT of an unmeasured
+type, and single ones further on.

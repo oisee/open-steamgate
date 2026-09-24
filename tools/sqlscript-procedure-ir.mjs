@@ -20,9 +20,11 @@ export class UnsupportedSqlScript extends Error {
 const upper = (name) => String(name).toUpperCase();
 
 export const procedure = ({parameters = [], relationParameters = [], body = [], output, outputSchema, outputType,
-  outputs, catalogue = {}}) =>
+  outputs, outputInitialWhenUnassigned, catalogue = {}}) =>
   ({ir: "sqlscript-procedure", parameters, relationParameters, body, output: upper(output), outputSchema, outputType,
-    ...(Array.isArray(outputs) ? {outputs: outputs.map((one) => ({name: upper(one.name), schema: one.schema}))} : {}),
+    ...(Array.isArray(outputs) ? {outputs: outputs.map((one) => (one.scalar !== undefined
+      ? {name: upper(one.name), scalar: one.scalar} : {name: upper(one.name), schema: one.schema}))} : {}),
+    ...(outputInitialWhenUnassigned === true ? {outputInitialWhenUnassigned: true} : {}),
     catalogue});
 export const declareScalar = (name, type, initial, source) =>
   ({stmt: "declare-scalar", name: upper(name), type, initial, source});
@@ -49,6 +51,75 @@ function integer(value, name) {
     throw new UnsupportedSqlScript(`${name} is outside SQLScript INTEGER`);
   }
   return n;
+}
+
+/** what an assignment may put into a declared variable (measured on A4H) */
+export function assignable(from, to) {
+  const text = (t) => ["C", "STRING"].includes(t?.abap);
+  const whole = (t) => ["I", "INT8"].includes(t?.abap);
+  if (JSON.stringify(from) === JSON.stringify(to)) return true;
+  if (text(to)) return text(from) || whole(from);
+  if (whole(to)) return whole(from) && (to.bits === undefined || JSON.stringify(from) === JSON.stringify(to));
+  return false;
+}
+
+/** what the database raises when a text is longer than the variable (A4H) */
+export class ScalarTooLong extends Error {}
+
+/**
+ * A value into a declared variable, as SQLScript does it on A4H: a text is
+ * kept as it is -- trailing blanks too, never padded -- and one longer than a
+ * declared length raises; a number into a text becomes its digits; a BIGINT
+ * into an INTEGER is range-checked; NULL stays NULL.
+ */
+function intoVariable(value, fromType, type, name) {
+  if (value == null) return null;
+  if (type?.abap === "C" || type?.abap === "STRING") {
+    const text = typeof value === "string" ? value : String(value);
+    // a character outside the BMP raised on A4H even with room to spare
+    // (NVARCHAR(10), two of them), and JavaScript counts it as two: refused
+    if (/[\uD800-\uDFFF]/.test(text)) {
+      throw new UnsupportedSqlScript(`${name}: a character outside the Basic Multilingual Plane is not carried (HANA raised on it, measured)`);
+    }
+    if (type.abap === "C" && Number.isInteger(type.len) && text.length > type.len) {
+      throw new ScalarTooLong(`${name}: ${JSON.stringify(text)} is longer than its ${type.len} characters; HANA raises CX_AMDP_EXECUTION_FAILED here`);
+    }
+    return text;
+  }
+  if (type?.abap === "INT8") {
+    const n = Number(value);
+    if (!Number.isSafeInteger(n)) throw new UnsupportedSqlScript(`${name}: ${value} is outside the BIGINT range carried here`);
+    return n;
+  }
+  return scalarForType(value, type, name);
+}
+
+/** ABAP's initial value of a scalar output type */
+function initialOf(type) {
+  if (type?.abap === "I" || type?.abap === "INT8") return 0;
+  return "";
+}
+
+/**
+ * A scalar into an ABAP output (measured on A4H): a fixed-length character
+ * output takes the value without its trailing blanks and raises when it is
+ * longer than the field; a STRING keeps it as it is.
+ */
+function intoOutput(value, type, name) {
+  // NULL into a scalar output is its initial value: 0 for i, '' for string
+  // and c LENGTH 3, alone or beside others, OUT or RETURNING (measured on A4H)
+  if (value == null) return initialOf(type);
+  if (type?.abap === "C") {
+    const text = String(value).replace(/ +$/, "");
+    // a guard, not the rule: the body's variable of this type was assigned
+    // through intoVariable, which raises first
+    if (Number.isInteger(type.len) && text.length > type.len) {
+      throw new ScalarTooLong(`output ${name}: ${JSON.stringify(text)} is longer than its ${type.len} characters; HANA raises CX_AMDP_EXECUTION_FAILED here`);
+    }
+    return text;
+  }
+  if (type?.abap === "STRING") return String(value);
+  return scalarForType(value, type, name);
 }
 
 function scalarForType(value, type, name) {
@@ -169,6 +240,16 @@ export function evaluateScalar(expr, scalars) {
     const first = evaluateScalar(expr.args[0], scalars);
     return first == null ? evaluateScalar(expr.args[1], scalars) : first;
   }
+  if (expr.node === "call" && (expr.fn === "UPPER" || expr.fn === "LOWER") && (expr.args ?? []).length === 1) {
+    const value = evaluateScalar(expr.args[0], scalars);
+    if (value == null) return null;
+    // one character in, one out, as on A4H: UPPER('äö') is 'ÄÖ', and
+    // UPPER('straße') keeps its ß (length 6) where JavaScript would write SS
+    return [...String(value)].map((ch) => {
+      const mapped = expr.fn === "UPPER" ? ch.toUpperCase() : ch.toLowerCase();
+      return [...mapped].length === 1 ? mapped : ch;
+    }).join("");
+  }
   if (expr.node !== "bin") throw new UnsupportedSqlScript(`scalar ${expr.node} is not supported yet`, expr);
   const left = evaluateScalar(expr.left, scalars);
   const right = evaluateScalar(expr.right, scalars);
@@ -199,12 +280,6 @@ function assertPortableHostExpression(expr, context, scalars) {
     if (JSON.stringify(expr.type) !== JSON.stringify(declared.type)) {
       throw new UnsupportedSqlScript(`${context} parameter :${upper(expr.name).toLowerCase()} changes its measured type`, expr);
     }
-    if (declared.type?.abap === "STRING") {
-      throw new UnsupportedSqlScript(`${context} cannot evaluate STRING on the portable host yet`, expr);
-    }
-  }
-  if (expr.type?.abap === "STRING") {
-    throw new UnsupportedSqlScript(`${context} cannot evaluate STRING on the portable host yet`, expr);
   }
   for (const key of ["left", "right", "expr", "pattern", "escape", "otherwise"]) {
     assertPortableHostExpression(expr[key], context, scalars);
@@ -375,6 +450,18 @@ export async function runProcedure(program, {
   callDepth = 0, deferRelation = false, closedRelationInputs = false,
 } = {}) {
   if (program?.ir !== "sqlscript-procedure") throw new UnsupportedSqlScript("not a SQLScript procedure IR");
+  // every statement sent to the database is counted here, whatever sent it
+  // (a scalar the host does not evaluate, SELECT ... INTO, an INT2 probe, the
+  // answer), so the trace says the database was used when it was
+  let dbStatements = 0;
+  let dbParams = 0;
+  const ask = (compiled) => {
+    dbStatements += 1;
+    dbParams += compiled.params.length;
+    return client.native({...compiled, expect: "rows"});
+  };
+  const traced = (hostSteps, extra = {}) => ({engine: dbStatements > 0 ? dialect : "host", fallback: false, hostSteps, ...extra,
+    databaseStatements: dbStatements, boundParameters: dbParams});
   session = session ?? {};
   if (typeof session !== "object" || Array.isArray(session)) {
     throw new UnsupportedSqlScript("SQLScript session must be an object");
@@ -382,8 +469,8 @@ export async function runProcedure(program, {
   if (session.values != null && (typeof session.values !== "object" || Array.isArray(session.values))) {
     throw new UnsupportedSqlScript("SQLScript session values must be an object");
   }
-  if (program.outputType !== undefined && program.outputType?.abap !== "I") {
-    throw new UnsupportedSqlScript("portable scalar RETURNING is limited to ABAP INTEGER exactly");
+  if (program.outputType !== undefined && !["I", "C", "STRING"].includes(program.outputType?.abap)) {
+    throw new UnsupportedSqlScript("portable scalar outputs are limited to ABAP INTEGER, fixed-length character and STRING");
   }
   const containsRelationStatement = (body) => body.some((statement) =>
     statement.stmt === "assign-relation"
@@ -442,10 +529,18 @@ export async function runProcedure(program, {
     const value = parameter.kind !== undefined ? boundDateTime(raw, parameter.kind, name)
       : parameter.type.abap === "C" ? boundCharacter(raw, parameter.type, name)
       : parameter.type.abap === "X" ? boundBytes(raw, parameter.type, name) : scalarForType(raw, parameter.type, name);
+    // the same refusal as for a variable: a character outside the BMP raised
+    // on A4H, and JavaScript would count it as two
+    if (typeof value === "string" && ["C", "STRING"].includes(parameter.type.abap) && /[\uD800-\uDFFF]/.test(value)) {
+      throw new UnsupportedSqlScript(`input ${name}: a character outside the Basic Multilingual Plane is not carried (HANA raised on it, measured)`);
+    }
     scalars.set(name, {type: parameter.type, value});
   }
   if (program.outputType !== undefined) {
     scalars.set(program.output, {type: program.outputType, value: null});
+  }
+  for (const one of program.outputs ?? []) {
+    if (one.scalar !== undefined) scalars.set(one.name, {type: one.scalar, value: null});
   }
   for (const parameter of program.relationParameters ?? []) {
     const name = upper(parameter.name);
@@ -484,7 +579,7 @@ export async function runProcedure(program, {
       let probe;
       try { probe = lower(limit(filter(value, outside), 1), dialect, {relationRef: (handle) => client.relationRef(handle)}); }
       catch (error) { throw new UnsupportedSqlScript(`cannot check INT2 columns of relation input ${name}: ${error.message}`); }
-      const found = await client.native({...probe, expect: "rows"});
+      const found = await ask(probe);
       if (found.rows.length > 0) {
         throw new Int2OutOfRange(`relation input ${name}: a row is outside INT2 (-32768..32767) in ${int2Inputs.join(", ")}; an ABAP int2 table cannot carry it`);
       }
@@ -499,23 +594,100 @@ export async function runProcedure(program, {
     steps += 1;
     if (steps > maxSteps) throw new UnsupportedSqlScript(`SQLScript step limit ${maxSteps} exceeded`, node);
   };
+  // A scalar expression the host evaluates (INTEGER / BOOLEAN arithmetic and
+  // comparisons), or one the database evaluates: any text in it goes to the
+  // engine as SELECT <expr> FROM DUMMY, rendered by the same lower() as a
+  // query, so a string scalar means what the same expression in a SELECT
+  // means on that engine (measured against HANA through the value tests).
+  const textual = (e) => e != null && (["C", "STRING"].includes(e.type?.abap)
+    || (e.node === "param" && ["C", "STRING"].includes(scalars.get(upper(e.name))?.type?.abap))
+    || ["left", "right", "expr", "pattern", "escape", "otherwise"].some((k) => textual(e[k]))
+    || (e.args ?? []).some(textual) || (e.values ?? []).some(textual)
+    || (e.whens ?? []).some((w) => textual(w.when) || textual(w.then)));
+  // a parameter node must carry the type its scalar was declared with,
+  // whichever side evaluates it: a forged type is refused before routing
+  const sameParamTypes = (e, context) => {
+    if (e == null) return;
+    if (e.node === "param") {
+      const declared = scalars.get(upper(e.name));
+      if (declared === undefined) throw new UnsupportedSqlScript(`unknown scalar :${upper(e.name).toLowerCase()}`, e);
+      if (JSON.stringify(e.type) !== JSON.stringify(declared.type)) {
+        throw new UnsupportedSqlScript(`${context} parameter :${upper(e.name).toLowerCase()} changes its measured type`, e);
+      }
+    }
+    for (const k of ["left", "right", "expr", "pattern", "escape", "otherwise"]) sameParamTypes(e[k], context);
+    for (const one of [...(e.args ?? []), ...(e.values ?? [])]) sameParamTypes(one, context);
+    for (const w of e.whens ?? []) { sameParamTypes(w.when, context); sameParamTypes(w.then, context); }
+  };
+  // what evaluateScalar does itself: literals, scalars, arithmetic,
+  // comparisons, AND / OR / NOT, IS NULL, a two-argument COALESCE. Text
+  // stays on the host where the rule is the one measured on A4H and not an
+  // engine's: `||` (NULL wins), `=` / `<>` (trailing blanks count, 'x  '
+  // <> 'x'). Ordering a text and arithmetic on one are the engine's until
+  // measured, so the semantics are HANA's on every backend and the IR needs
+  // no engine for what the corpus mostly does.
+  const hostCapable = (e) => e == null || (
+    ["lit", "param"].includes(e.node)
+    || (e.node === "isnull" && hostCapable(e.expr))
+    || (e.node === "not" && hostCapable(e.expr))
+    || (e.node === "bin" && hostCapable(e.left) && hostCapable(e.right)
+      && (!(textual(e.left) || textual(e.right)) || ["||", "AND", "OR"].includes(e.op)
+        || (["=", "<>", "!="].includes(e.op) && textual(e.left) && textual(e.right))))
+    || (e.node === "call" && e.fn === "COALESCE" && (e.args ?? []).length === 2 && e.args.every(hostCapable))
+    || (e.node === "call" && ["UPPER", "LOWER"].includes(e.fn) && (e.args ?? []).length === 1 && hostCapable(e.args[0])));
+  // a comparison of a text with a number is not measured on HANA, and the
+  // engines disagree (DuckDB raises, SQLite answers false): refused
+  // decided by the type of each SIDE, not by any text below it:
+  // LENGTH(:s) = 3 compares two numbers (the critic's N1)
+  const textTyped = (e) => ["C", "STRING"].includes(e.type?.abap)
+    || (e.node === "param" && ["C", "STRING"].includes(scalars.get(upper(e.name))?.type?.abap));
+  const mixedComparison = (e) => e != null && (
+    (e.node === "bin" && ["=", "<>", "!=", "<", ">", "<=", ">="].includes(e.op)
+      && e.left != null && e.right != null && textTyped(e.left) !== textTyped(e.right))
+    || ["left", "right", "expr", "otherwise"].some((k) => mixedComparison(e[k]))
+    || (e.args ?? []).some(mixedComparison) || (e.values ?? []).some(mixedComparison)
+    || (e.whens ?? []).some((w) => mixedComparison(w.when) || mixedComparison(w.then)));
+  const evaluate = async (expr, context) => {
+    sameParamTypes(expr, context);
+    if (mixedComparison(expr)) {
+      throw new UnsupportedSqlScript(`${context}: comparing a text with a number is not measured on HANA yet`);
+    }
+    if (hostCapable(expr)) {
+      assertPortableHostExpression(expr, context, scalars);
+      return evaluateScalar(expr, scalars);
+    }
+    if (client?.native === undefined) {
+      throw new UnsupportedSqlScript(`${context}: a scalar the host does not evaluate goes to the database, and this run has none`);
+    }
+    const frozen = freezeExpr(expr, scalars, (rel) => freezeRelation(rel, relations, scalars, session), session);
+    let compiled;
+    try { compiled = lower(project(scan("DUMMY"), [{as: "V", expr: frozen}]), dialect, {relationRef: (handle) => client.relationRef(handle)}); }
+    catch (error) {
+      if (error instanceof Refused) throw new UnsupportedSqlScript(error.message);
+      throw error;
+    }
+    const answer = await ask(compiled);
+    const value = answer.rows[0]?.V ?? null;
+    if (typeof value === "bigint") return Number(value);
+    // SQLite answers a comparison as 1 / 0
+    if (expr.type?.abap === "BOOL" && (value === 0 || value === 1)) return value === 1;
+    return value;
+  };
+
   const execute = async (body) => {
     for (const statement of body) {
       step(statement);
       if (statement.stmt === "declare-scalar") {
-        assertPortableHostExpression(statement.initial, "scalar declaration", scalars);
-        const raw = statement.initial === undefined ? null : evaluateScalar(statement.initial, scalars);
-        const value = scalarForType(raw, statement.type, statement.name);
+        const raw = statement.initial === undefined ? null : await evaluate(statement.initial, "scalar declaration");
+        const value = intoVariable(raw, statement.initial?.type, statement.type, statement.name);
         scalars.set(statement.name, {type: statement.type, value});
       } else if (statement.stmt === "assign-scalar") {
         const current = scalars.get(statement.name);
         if (current === undefined) throw new UnsupportedSqlScript(`assignment to undeclared scalar ${statement.name}`, statement);
-        if (JSON.stringify(statement.expr?.type) !== JSON.stringify(current.type)) {
+        if (!assignable(statement.expr?.type, current.type)) {
           throw new UnsupportedSqlScript(`scalar assignment ${statement.name} requires an identical measured type`, statement);
         }
-        assertPortableHostExpression(statement.expr, "scalar assignment", scalars);
-        let value = evaluateScalar(statement.expr, scalars);
-        value = scalarForType(value, current.type, statement.name);
+        const value = intoVariable(await evaluate(statement.expr, "scalar assignment"), statement.expr?.type, current.type, statement.name);
         scalars.set(statement.name, {type: current.type, value});
         assignedScalars.add(statement.name);
       } else if (statement.stmt === "select-into") {
@@ -535,7 +707,7 @@ export async function runProcedure(program, {
           if (error instanceof Refused) throw new UnsupportedSqlScript(error.message);
           throw error;
         }
-        const answer = await client.native({...compiled, expect: "rows"});
+        const answer = await ask(compiled);
         let values;
         if (answer.rows.length > 1) {
           throw new SelectIntoRows(`SELECT ... INTO ${statement.targets.join(", ")} found more than one row; HANA raises CX_AMDP_EXECUTION_FAILED here`);
@@ -560,7 +732,7 @@ export async function runProcedure(program, {
               throw new UnsupportedSqlScript(`SELECT ... INTO ${target}: ${values[i]} does not fit an INTEGER; the overflow is not measured, so it is refused`, statement);
             }
           }
-          scalars.set(target, {type: current.type, value: scalarForType(values[i], current.type, target)});
+          scalars.set(target, {type: current.type, value: intoVariable(values[i], undefined, current.type, target)});
           assignedScalars.add(target);
         });
       } else if (statement.stmt === "assign-relation") {
@@ -576,16 +748,14 @@ export async function runProcedure(program, {
         }
         relations.set(statement.name, value);
       } else if (statement.stmt === "while") {
-        assertPortableHostExpression(statement.condition, "WHILE condition", scalars);
-        while (booleanOrNull(evaluateScalar(statement.condition, scalars), "WHILE condition") === true) {
+        while (booleanOrNull(await evaluate(statement.condition, "WHILE condition"), "WHILE condition") === true) {
           step(statement);
           await execute(statement.body);
         }
       } else if (statement.stmt === "if") {
         let selected;
         for (const branch of statement.branches) {
-          assertPortableHostExpression(branch.condition, "IF condition", scalars);
-          if (booleanOrNull(evaluateScalar(branch.condition, scalars), "IF condition") === true) {
+          if (booleanOrNull(await evaluate(branch.condition, "IF condition"), "IF condition") === true) {
             selected = branch.body;
             break;
           }
@@ -616,6 +786,9 @@ export async function runProcedure(program, {
         relations.set(statement.output, called.relation);
         nestedSteps += called.trace.hostSteps;
         nestedCalls += 1 + (called.trace.nestedCalls ?? 0);
+        // what the called body sent to the database is this call's too
+        dbStatements += called.trace.databaseStatements ?? 0;
+        dbParams += called.trace.boundParameters ?? 0;
       } else {
         throw new UnsupportedSqlScript(`procedure statement ${statement.stmt} is not supported`, statement);
       }
@@ -624,14 +797,27 @@ export async function runProcedure(program, {
   await execute(program.body);
   if (program.outputType !== undefined) {
     const scalar = scalars.get(program.output);
+    // an OUT scalar the path left alone is its initial value (measured on
+    // A4H); a RETURNING one stays refused, as it was not measured
+    if ((scalar === undefined || !assignedScalars.has(program.output)) && program.outputInitialWhenUnassigned === true) {
+      return {value: initialOf(program.outputType), outputType: program.outputType,
+        trace: traced(steps)};
+    }
     if (scalar === undefined || !assignedScalars.has(program.output)) {
       throw new UnsupportedSqlScript(`scalar output ${program.output} was not assigned`);
+    }
+    if (["C", "STRING"].includes(program.outputType.abap)) {
+      return {value: intoOutput(scalar.value, program.outputType, program.output), outputType: program.outputType,
+        trace: traced(steps)};
     }
     // no range check here: a scalar INT2 output can only be assigned an INT2
     // value (an INTEGER into it is refused as not an identical measured type),
     // so it is always in range; the INT2 scalar boundary itself is unmeasured
+    if (scalar.value == null) {
+      return {value: initialOf(program.outputType), outputType: program.outputType, trace: traced(steps)};
+    }
     return {value: scalarForType(scalar.value, program.outputType, program.output), outputType: program.outputType,
-      trace: {engine: "host", fallback: false, hostSteps: steps, databaseStatements: 0, boundParameters: 0}};
+      trace: traced(steps)};
   }
   // An OUT table the path taken did not assign is an empty table (measured
   // on A4H: the caller's rows are replaced by none); one assigned nowhere in
@@ -640,23 +826,24 @@ export async function runProcedure(program, {
   // declared columns (a typed empty SELECT would render literals whose SQL
   // type is not the declared one, and some types have no literal at all)
   const emptyAnswer = (schema) => ({rows: [], columns: Object.keys(schema).map((name) => ({name})), outputSchema: schema,
-    trace: {engine: "host", fallback: false, hostSteps: steps + nestedSteps, nestedCalls, databaseStatements: 0, boundParameters: 0}});
+    trace: traced(steps + nestedSteps, {nestedCalls})});
   if (Array.isArray(program.outputs) && program.outputs.length > 1) {
     if (deferRelation) {
       throw new UnsupportedSqlScript(`a nested CALL of ${program.outputs.length} outputs is not carried; a CALL hands on one relation`);
     }
     const outputs = {};
-    let statements = 0;
-    let bound = 0;
     for (const one of program.outputs) {
+      if (one.scalar !== undefined) {
+        // an OUT scalar: what the body assigned, its initial value otherwise
+        const held = scalars.get(one.name);
+        outputs[one.name] = {value: assignedScalars.has(one.name) ? intoOutput(held?.value, one.scalar, one.name) : initialOf(one.scalar)};
+        continue;
+      }
       const assignedRel = relations.get(one.name);
       const answer = assignedRel === undefined ? emptyAnswer(one.schema) : await finishOne(one.name, one.schema, assignedRel);
       outputs[one.name] = {rows: answer.rows, columns: answer.columns, outputSchema: one.schema};
-      statements += answer.trace.databaseStatements;
-      bound += answer.trace.boundParameters;
     }
-    return {outputs, trace: {engine: dialect, fallback: false, hostSteps: steps + nestedSteps, nestedCalls,
-      databaseStatements: statements, boundParameters: bound}};
+    return {outputs, trace: traced(steps + nestedSteps, {nestedCalls})};
   }
   const single = relations.get(program.output);
   if (single === undefined && deferRelation) {
@@ -724,8 +911,7 @@ export async function runProcedure(program, {
       throw new UnsupportedSqlScript(`output ${outputName} of a nested CALL has INT2 columns (${int2Columns.join(", ")}); their range check is not carried across a CALL`);
     }
     return {relation: output, outputSchema: outputSchema,
-      trace: {engine: "host", fallback: false, hostSteps: steps + nestedSteps,
-        nestedCalls, databaseStatements: 0, boundParameters: 0}};
+      trace: traced(steps + nestedSteps, {nestedCalls})};
   }
   let compiled;
   try {
@@ -737,7 +923,7 @@ export async function runProcedure(program, {
   if (compiled.params.length > maxParameters) {
     throw new UnsupportedSqlScript(`SQLScript bound parameter limit ${maxParameters} exceeded after ${dialect} lowering`);
   }
-  const answer = await client.native({...compiled, expect: "rows"});
+  const answer = await ask(compiled);
   for (const row of answer.rows) {
     for (const column of int2Columns) {
       if (row[column] !== null && row[column] !== undefined) inInt2Range(row[column], `output ${outputName}.${column}`);
@@ -747,8 +933,7 @@ export async function runProcedure(program, {
     rows: answer.rows,
     columns: answer.columns,
     outputSchema: outputSchema,
-    trace: {engine: dialect, fallback: false, hostSteps: steps + nestedSteps, nestedCalls,
-      databaseStatements: 1, boundParameters: compiled.params.length},
+    trace: traced(steps + nestedSteps, {nestedCalls}),
   };
   }
 }
