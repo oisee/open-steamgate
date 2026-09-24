@@ -477,6 +477,41 @@ func EscapeHTMLAttr(v string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#39;").Replace(v)
 }
 
+// EscapeJSONString is escape( val = v format = cl_abap_format=>e_json_string )
+// (A4H ZCL_GOGEN_T_JSESC): \ and " escaped, U+0008 U+0009 U+000A U+000C
+// U+000D as \b \t \n \f \r, every other character below U+0020 as \u00XX
+// in upper-case hex; / ' U+007F and everything beyond ASCII unchanged.
+func EscapeJSONString(v string) string {
+	var b strings.Builder
+	for _, r := range v {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\b':
+			b.WriteString(`\b`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\f':
+			b.WriteString(`\f`)
+		case '\r':
+			b.WriteString(`\r`)
+		default:
+			if r < 0x20 {
+				b.WriteString(`\u00`)
+				b.WriteByte("0123456789ABCDEF"[r>>4])
+				b.WriteByte("0123456789ABCDEF"[r&15])
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
+}
+
 // SubstringBefore / SubstringAfter are substring_before / _after( val sub )
 // (ultra/events, A4H ZCL_GOGEN_T_WGUI2): around the first occurrence of sub,
 // empty when there is none; an empty sub is not measured and refused.

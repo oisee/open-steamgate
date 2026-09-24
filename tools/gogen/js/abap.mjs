@@ -740,6 +740,17 @@ export function DataString(d) {
   }
 }
 
+// go/abap DataChars: a generic operand compared with a character operand
+export function DataChars(d) {
+  if (d === null) throw notAssigned("comparison");
+  if (d.t.kind === "g" || d.t.kind === "C") return d.get();
+  throw new AbapError("NOT_COMPILED", `comparison: a generic value of type kind ${d.t.kind} with a character operand`);
+}
+
+// go/abap S2D / S2T: a string into a d or a t
+export const S2D = (v) => (v === "" ? "00000000" : CFit(v, 8));
+export const S2T = (v) => (v === "" ? "000000" : [...v].slice(0, 6).join("").padEnd(6, "0"));
+
 // a generic value moved into an i
 export function DataI(d) {
   if (d === null) throw notAssigned("move");
@@ -853,7 +864,13 @@ export function MoveData(dst, src) {
       }
       break;
     }
-    case "y": case "D": case "T":
+    case "D": case "T":
+      // go/abap MoveData: a string by S2D / S2T, a c cut to the length
+      if (sk === dk) return dst.set(v);
+      if (sk === "g") return dst.set(dk === "D" ? S2D(v) : S2T(v));
+      if (sk === "C") return dst.set(CFit(v, dk === "D" ? 8 : 6));
+      break;
+    case "y":
       if (sk === dk) return dst.set(v);
       break;
     case "l":
@@ -1363,6 +1380,9 @@ export function FindAllCount(s, p, regex, icase) {
   if (ms.some((m) => m[0] === "")) throw new AbapError("NOT_COMPILED", "FIND ALL OCCURRENCES: a regex that matches the empty string is not measured");
   return ms.length;
 }
+// go/abap EscapeJSONString (A4H ZCL_GOGEN_T_JSESC)
+const JSON_ESC = {"\\": "\\\\", '"': '\\"', "\b": "\\b", "\t": "\\t", "\n": "\\n", "\f": "\\f", "\r": "\\r"};
+export const EscapeJSONString = (v) => v.replace(/[\u0000-\u001f"\\]/g, (c) => JSON_ESC[c] ?? `\\u00${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
 export const EscapeHTMLAttr = (v) => v.replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
 
 // ultra/events: APPEND INITIAL LINE TO <generic table> ASSIGNING <fs>, and

@@ -369,7 +369,7 @@ export function emitGo(program, pkg = "main") {
   out.push(...staticRegistry(program, classes));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_NAME"))) out.push(...nativeRtti(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) out.push(...nativeMessageText(program));
-  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_DATA"))) out.push(...nativeRttiData());
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_DATA"))) out.push(...nativeRttiData(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_JSON_PARSE"))) out.push(...nativeJsonParse());
   out.push(...nativeCodepage(classes));
   out.push(...tableRegistry(program));
@@ -514,7 +514,7 @@ function nativeRtti(program) {
  * output length of a p that comes from the dictionary, a structure's length,
  * a table type's name and its key. A reference or an object is refused.
  */
-function nativeRttiData() {
+function nativeRttiData(program) {
   const td = CLASSES.get("CL_ABAP_TYPEDESCR");
   const ed = CLASSES.get("CL_ABAP_ELEMDESCR");
   const sd = CLASSES.get("CL_ABAP_STRUCTDESCR");
@@ -531,6 +531,10 @@ function nativeRttiData() {
   const dataRef = goType(attr(sd, "MT_REFS").type.row.k === "struct" ? STRUCTDEFS.get(refRow).fields.find((f) => f.name === "TYPE").type : null);
   const f = (a) => ident(a);
   return [
+    // parity-wave1: the output lengths of the data elements the program's
+    // components are typed with (frontend ddicOutputLength)
+    "// the output length of each data element named by a component (its domain's, or its own)",
+    `var rttiOutputLen = map[string]int32{${[...(program.ddicOutputLen ?? new Map())].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ")}}`, "",
     "// the descriptors handed out, one per type (rttiOf)",
     `var rttiDescs = map[*abap.Type]${ret}{}`, "",
     "var rttiAnon int", "",
@@ -570,10 +574,13 @@ function nativeRttiData() {
     `		base.${f("KIND")} = "E"`,
     "		n := t.Len",
     "		var length, out int32",
-    // a dictionary type's output length is its domain's (or data element's),
-    // which abap.Type does not carry: refused rather than taken from the
-    // length (ultra/json fix round, critic finding 6). ABAP_BOOL is measured
-    `		if t.DDIC != "" && t.DDIC != "ABAP_BOOL" && (t.Kind == 'C' || t.Kind == 'N' || t.Kind == 'P') {`,
+    // a dictionary type's output length is its domain's (or data element's):
+    // taken from rttiOutputLen, the data elements of the registry
+    // (parity-wave1, A4H ZCL_GOGEN_T_RTTIOL); one not there is refused rather
+    // than taken from the length (ultra/json fix round, critic finding 6).
+    // ABAP_BOOL is measured
+    "		ddicOut, fromDDIC := rttiOutputLen[t.DDIC]",
+    `		if t.DDIC != "" && t.DDIC != "ABAP_BOOL" && (t.Kind == 'C' || t.Kind == 'N' || t.Kind == 'P') && !fromDDIC {`,
     `			panic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "the output length of "+t.DDIC+", a dictionary type of kind "+string(t.Kind)+", is its domain's and not carried"))`,
     "		}",
     "		switch t.Kind {",
@@ -596,6 +603,9 @@ function nativeRttiData() {
     `			panic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "type kind "+string(t.Kind)))`,
     "		}",
     `		base.${f("LENGTH")} = length`,
+    `		if fromDDIC && (t.Kind == 'C' || t.Kind == 'N' || t.Kind == 'P') {`,
+    "			out = ddicOut",
+    "		}",
     `		ed.${f("OUTPUT_LENGTH")} = out`,
     "		rttiDescs[t] = d",
     "	}",
@@ -876,16 +886,13 @@ const isAppend = (st, name) => st?.s === "assign" && st.target.e === "var" && !s
 
 function builders(body, ctx, outside = []) {
   const names = new Set();
-  let exits = false;
   const walk = (n) => {
     if (Array.isArray(n)) { n.forEach(walk); return; }
     if (!n || typeof n !== "object") return;
-    if (n.s === "return") exits = true;
     if (isAppend(n)) names.add(n.target.name);
     for (const k of Object.keys(n)) if (k !== "type") walk(n[k]);
   };
   walk(body);
-  if (exits) return [];
   // ultra/events: a name the loop's own condition (WHILE, LOOP ... WHERE)
   // reads must stay current on every pass: no builder for it (a WHILE
   // strlen( v ) < 32 appending to v never ended, ZCL_OSD_TRAN_SESSION=>NEW_ID)
@@ -1418,6 +1425,29 @@ ${t}	}`));
       const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
       const moves = st.assign.map((a, i) => (a === null ? null
         : `${a.line ? "r" : `r.${ident(a.field)}`} = ${dbColumn(st.cols[i], `c${i}_${n}`, a.type)}`)).filter(Boolean);
+      if (st.fae) {
+        // FOR ALL ENTRIES (frontend selectStatement): once per driving row,
+        // a row kept only the first time its columns are seen; an empty
+        // driving table runs the statement without its WHERE
+        const fr = `fae${st.fae.n}`;
+        return [`${t}${tgt} = nil`, `${t}{`,
+          `${t}\ttype faekey${n} struct {`, ...st.cols.map((c, i) => `${t}\t\tc${i} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`), `${t}\t}`,
+          `${t}\tseen${n} := map[faekey${n}]bool{}`,
+          `${t}\trow${n} := func(scan func(dest ...any) error) {`,
+          `${t}\t\tvar k faekey${n}`,
+          `${t}\t\tabap.Must(scan(${st.cols.map((_, i) => `&k.c${i}`).join(", ")}))`,
+          `${t}\t\tif seen${n}[k] {`, `${t}\t\t\treturn`, `${t}\t\t}`, `${t}\t\tseen${n}[k] = true`,
+          ...st.cols.map((_, i) => `${t}\t\tc${i}_${n} := k.c${i}\n${t}\t\t_ = c${i}_${n}`),
+          `${t}\t\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t\t${m}`), `${t}\t\t${tgt} = append(${tgt}, r)`, `${t}\t}`,
+          `${t}\tif drv${n} := ${expr(st.fae.table, ctx)}; len(drv${n}) == 0 {`,
+          `${t}\t\tabap.Select(s, ${JSON.stringify(st.fae.sql)}, ${sqlArgs(st.fae.args, ctx)}, ${hostPreds(st.fae.preds, ctx)}, row${n})`,
+          `${t}\t} else {`,
+          `${t}\t\tfor _, ${fr} := range drv${n} {`, `${t}\t\t\t_ = ${fr}`,
+          `${t}\t\t\tabap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, row${n})`,
+          `${t}\t\t}`, `${t}\t}`,
+          `${t}\tif len(seen${n}) > 0 {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 0, int32(len(seen${n}))`, `${t}\t} else {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}\t}`,
+          `${t}}`];
+      }
       return [`${t}${tgt} = nil`,
         `${t}if n${n} := abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
@@ -1590,7 +1620,11 @@ ${t}	}`));
     case "rollback_work": return [`${t}abap.RollbackWork(s)`];
     case "exit": return [`${t}${leave(ctx, 2)}`];
     case "continue": return [`${t}${leave(ctx, 3)}`];
-    case "return": return [`${t}${leave(ctx, 1)}`];
+    // a RETURN inside a loop that appends through builders writes the
+    // strings back first (parity-wave1: ZCL_STG_JSON=>READ_STRING appended a
+    // 750 KB value a character at a time and returned from inside the loop,
+    // which kept it off the builder and made the append quadratic)
+    case "return": return [...[...(ctx.builders ?? new Map())].map(([n, sb]) => `${t}${ident(n)} = ${sb}.String()`), `${t}${leave(ctx, 1)}`];
     default: throw new Error(`no Go for statement ${st.s}`);
   }
 }
@@ -1709,6 +1743,8 @@ function expr(e, ctx) {
     }
     case "wrap": return `abap.Data{P: ${PLACES.has(e.x.e) ? `&${place(e.x, ctx)}` : `abap.Ptr(${expr(e.x, ctx)})`}, T: ${desc(e.x.type)}}`;
     case "unwrap": return unwrapTo(e.type, expr(e.x, ctx));
+    case "unwrap_chars": return `abap.DataChars(${expr(e.x, ctx)})`;
+    case "fae_row": return `fae${e.n}`;
     case "lines_data": return `int32(abap.Lines(${expr(e.x, ctx)}))`;
     default: throw new Error(`no Go for expression ${e.e}`);
   }
@@ -1761,6 +1797,8 @@ function conv(e, ctx) {
     case "c2s": return x;
     case "table_rows": return `func() ${goType(e.to)} { var out ${goType(e.to)}; for _, ConvRow := range ${x} { out = append(out, ${expr(e.row, ctx)}) }; return out }()`;
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
+    case "s2d": return `abap.S2D(${x})`;
+    case "s2t": return `abap.S2T(${x})`;
     case "i2s": return `abap.IToString(${x})`;
     case "i2n": return `abap.IToN(${x}, ${e.to.len})`;
     case "s2n": return `abap.CToN(${x}, ${e.to.len})`;

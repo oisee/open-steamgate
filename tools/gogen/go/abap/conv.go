@@ -7,7 +7,9 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
+	"unsafe"
 )
 
 // Character-like values are Go strings. A c field is stored without its
@@ -22,6 +24,27 @@ func CFit(v string, n int) string {
 		v = string(r[:n])
 	}
 	return strings.TrimRight(v, " ")
+}
+
+// S2D and S2T are a string moved into a d or a t (A4H ZCL_GOGEN_T_GENMOVD):
+// the first eight (six) characters, an empty string the initial value, and
+// a t shorter than six filled with zeros on the right ('abc' is abc000).
+func S2D(v string) string {
+	if v == "" {
+		return "00000000"
+	}
+	return CFit(v, 8)
+}
+
+func S2T(v string) string {
+	if v == "" {
+		return "000000"
+	}
+	r := []rune(v)
+	if len(r) > 6 {
+		r = r[:6]
+	}
+	return string(r) + strings.Repeat("0", 6-len(r))
 }
 
 // FmtI formats an i the way a string template does: a leading minus, no
@@ -428,11 +451,117 @@ func XToI(v string) int32 {
 	return r
 }
 
+// A character offset into a string is a byte offset only when every
+// character is one byte. For a long string asked about again (a parser
+// calling find( off = ... ) and substring( ) on one document over and over)
+// the answer is kept: whether it is ASCII, and else its length in
+// characters and the byte offset of every 64th character, so that an offset
+// costs at most 63 steps. The memo keeps the pointer it was given, so the
+// memory it names cannot be reused for another string meanwhile. Without it
+// each call converted the whole string to runes, and a 750 KB import took
+// minutes instead of milliseconds (parity-wave1, ZCL_STG_JSON=>READ_STRING
+// and ZCL_STG_SEGW_IMPORT=>PARSE).
+type strMemo struct {
+	p     *byte
+	n     int
+	ascii bool
+	runes int
+	idx   []int
+}
+
+var lastStr atomic.Pointer[strMemo]
+
+func memoOf(v string) *strMemo {
+	if len(v) < 256 {
+		return nil
+	}
+	p := unsafe.StringData(v)
+	if m := lastStr.Load(); m != nil && m.p == p && m.n == len(v) {
+		return m
+	}
+	m := &strMemo{p: p, n: len(v), ascii: true}
+	for i := 0; i < len(v); i++ {
+		if v[i] >= 0x80 {
+			m.ascii = false
+			break
+		}
+	}
+	if !m.ascii {
+		k := 0
+		for i := range v {
+			if k%64 == 0 {
+				m.idx = append(m.idx, i)
+			}
+			k++
+		}
+		m.runes = k
+	}
+	lastStr.Store(m)
+	return m
+}
+
+func isASCII(v string) bool {
+	if m := memoOf(v); m != nil {
+		return m.ascii
+	}
+	for i := 0; i < len(v); i++ {
+		if v[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// byteAt is the byte offset of character k of a non-ASCII memoised string
+// (k up to its length)
+func (m *strMemo) byteAt(v string, k int) int {
+	if k >= m.runes {
+		return len(v)
+	}
+	b := m.idx[k/64]
+	for j := k % 64; j > 0; j-- {
+		_, w := utf8.DecodeRuneInString(v[b:])
+		b += w
+	}
+	return b
+}
+
 func rangeError() { panic(ArithmeticError{"CX_SY_RANGE_OUT_OF_BOUNDS", "offset/length"}) }
 
 // SubS is v+off(len) of a string, counted in characters; len -1 is the
 // rest. Out of range raises, as ABAP does.
 func SubS(v string, off, length int32) string {
+	if isASCII(v) {
+		n := int32(len(v))
+		if off < 0 || off > n {
+			rangeError()
+		}
+		if length < 0 {
+			return v[off:]
+		}
+		if off+length > n {
+			rangeError()
+		}
+		return v[off : off+length]
+	}
+	if m := memoOf(v); m != nil {
+		if off < 0 || int(off) > m.runes {
+			rangeError()
+		}
+		b := m.byteAt(v, int(off))
+		if length < 0 {
+			return v[b:]
+		}
+		if int(off+length) > m.runes {
+			rangeError()
+		}
+		e := b
+		for j := int32(0); j < length; j++ {
+			_, w := utf8.DecodeRuneInString(v[e:])
+			e += w
+		}
+		return v[b:e]
+	}
 	r := []rune(v)
 	n := int32(len(r))
 	if off < 0 || off > n {
@@ -508,6 +637,27 @@ func Uccpi(v int32) string { return strings.TrimRight(string(rune(v)), " ") }
 func Find(v, sub string, off int32) int32 {
 	if sub == "" {
 		panic(ArithmeticError{"CX_SY_STRG_PAR_VAL", "find"})
+	}
+	if isASCII(v) {
+		if off < 0 || off > int32(len(v)) {
+			rangeError()
+		}
+		i := strings.Index(v[off:], sub)
+		if i < 0 {
+			return -1
+		}
+		return off + int32(i)
+	}
+	if m := memoOf(v); m != nil {
+		if off < 0 || int(off) > m.runes {
+			rangeError()
+		}
+		b := m.byteAt(v, int(off))
+		i := strings.Index(v[b:], sub)
+		if i < 0 {
+			return -1
+		}
+		return off + int32(utf8.RuneCountInString(v[b:b+i]))
 	}
 	r := []rune(v)
 	if off < 0 || off > int32(len(r)) {

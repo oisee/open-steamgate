@@ -14,6 +14,33 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // parity-wave1, A4H 2026-09-24 ($ZOSG_TMP_0050, ABAP Unit probes of the
+  // same classes). escape( format = e_json_string ): \\ and " escaped,
+  // \b \t \n \f \r, the other control characters \u00XX in upper case,
+  // U+007F, / ' and non-ASCII as they are; a c without its trailing blanks
+  ZCL_GOGEN_T_JSESC: "p:[a\\\\b\\\"c/d'e f ] cc:\\u0000,\\u0001,\\u0002,\\u0003,\\u0004,\\u0005,\\u0006,\\u0007,\\b,\\t,\\n,\\u000B,\\f,\\r,\\u000E,\\u000F,\\u0010,\\u0011,\\u0012,\\u0013,\\u0014,\\u0015,\\u0016,\\u0017,\\u0018,\\u0019,\\u001A,\\u001B,\\u001C,\\u001D,\\u001E,\\u001F, del:11 u:31 c:[a\\\"b]4 g:[x\\\"y ][a\\\"b]",
+  // a generic operand against c / string holding a c or a string: the typed
+  // rule (both strings, a c without trailing blanks)
+  ZCL_GOGEN_T_GENCMP: "ty:10101 c:1011101111 s:001011 c1:01110,10010",
+  // a string into a d / t, generic and typed alike: the first 8 / 6
+  // characters, an empty string initial, a short t filled with zeros
+  ZCL_GOGEN_T_GENMOVD: "d:[20250107]0120258,[2025010]0120257,[00000000]1100008,[abc]01abc3,[20250107]0120258,[2025-01-]0120258,[ 2025010]01 2028,c[19991231] t:[202501]01,[202501]01,[000000]11,[abc000]01,[202501]01,[2025-0]01,[ 20250]01,",
+  // SELECT ... FOR ALL ENTRIES: the rows unique over the columns selected
+  // (sy-dbcnt counts them after), an empty driving table ignores the whole
+  // WHERE, INTO TABLE replaces the target, no row is 4/0 and an empty table
+  ZCL_GOGEN_T_FAE: {Go: "dup:0/2/2,A1,C2 col:0/2/2,1,2 two:0/2,B2,D3 empty:0/4/4 cor:0/2,2[],3[] none:4/0/0",
+    JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
+  // describe_by_data's OUTPUT_LENGTH of a dictionary type: the domain's
+  // OUTPUTLEN, or the data element's without a domain (A4H ran it with SAP's
+  // data elements of the same shape, see the class)
+  // CALL FUNCTION of a module compiled with the program: by-value EXPORTING
+  // starts initial in the module; after RAISE the caller's EXPORTING and
+  // CHANGING fields keep their values and the TABLES rows appended stay;
+  // an optional importing left out is initial, OTHERS takes an exception
+  // not named
+  ZCL_GOGEN_T_FM: "ok:0/6/11/2/in:3/0/10/1 boom:4/5/10/3/keep opt:0/11/4 oth:7/11/5,X0,F3,F4,F0,F0",
+  ZCL_GOGEN_T_RTTIOL: {Go: "C/80/0/10 C/2/0/80 C/10/0/5 P/8/0/19 N/4/0/1 ",
+    JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
   // ultra/itab, A4H 2026-09-24 ($ZOSG_TMP_0400, ABAP Unit probes of the same
   // classes). APPEND LINES OF [FROM] [TO]: sy-subrc untouched, sy-tabix
   // lines(target) afterwards, c rows into a string table converted, itab
@@ -426,9 +453,11 @@ const EXPECT = {
   // x, p (\TYPE=%_T...), a structure's length. The JS emitter has no RTTI
   ZCL_GOGEN_T_RTTI: {Go: "c3:E/C/0/6/3 n4:E/N/0/8/4 x2:E/X/0/2/4 d:E/D/0/16/\\TYPE=D/D//8 t:E/T/0/12/\\TYPE=T/T//6 f:E/F/0/8/\\TYPE=F/F//24 i:E/I/0/4/\\TYPE=I/I//11 i8:E/8/0/8/\\TYPE=INT8/INT8//20 p:E/P/2/8/17 b:E/C/0/2/\\TYPE-POOL=ABAP\\TYPE=ABAP_BOOL/ABAP_BOOL//1 s:E/g/0/8/\\TYPE=STRING/STRING//0 xs:E/y/0/8/\\TYPE=XSTRING/XSTRING//0 flat:S/u/0/\\CLASS=ZCL_GOGEN_T_RTTI\\TYPE=TY_FLAT/TY_FLAT/ deep:S/v/0/\\CLASS=ZCL_GOGEN_T_RTTI\\TYPE=TY_DEEP/TY_DEEP/ comps:S=E,XS=E,FL=S,TB=T, line:\\CLASS=ZCL_GOGEN_T_RTTI\\TYPE=TY_FLAT tk:S uk: same",
     JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
-  // a dictionary-typed c: its output length is its domain's, not carried
-  // by the Go host, so describe_by_data refuses (ultra/json fix round)
-  ZCL_GOGEN_T_RTTIDDIC: {Go: "ERROR NOT_COMPILED in CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA: the output length of SDOK_CLASS, a dictionary type of kind C, is its domain's and not carried at cl_abap_typedescr.clas.abap:304", JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
+  // a dictionary-typed c: its output length is its domain's (ultra/json
+  // refused it; parity-wave1 carries it, the rule of ZCL_GOGEN_T_RTTIOL;
+  // A4H's DD04L has SDOK_CLASS CHAR 10 with output length 10, as
+  // open-abap-core's sdok_class.doma.xml)
+  ZCL_GOGEN_T_RTTIDDIC: {Go: "C/20/10", JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
   // open-abap-core's /UI2/CL_JSON=>DESERIALIZE end to end (ultra/json): not
   // an A4H value, a system has its own /UI2/CL_JSON. What the pieces give
   // that were measured there (the parser's members through a non-unique
@@ -630,6 +659,8 @@ for (const f of demoCopies) {
 }
 // sorted: zcl_gogen_t_uncaught_read reads what zcl_gogen_t_uncaught left
 const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).sort();
+// the function groups (parity-wave1: ZGOGEN_T_FG, called by ZCL_GOGEN_T_FM)
+const groups = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".fugr.xml")).map((f) => f.split(".")[0]).sort();
 // the roots of the exception classes, and get_text( )'s helper, compiled
 // out of open-abap-core as the gateway compiles them
 // and RTTI (ultra/json: describe_by_data, ZCL_GOGEN_T_RTTI)
@@ -637,7 +668,7 @@ const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "
   "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR",
   // and open-abap-core's JSON reader (ZCL_GOGEN_T_JSONDES)
   "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE"];
-const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...CORE]});
+const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...groups, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)
 objects.splice(0, objects.length, ...objects.filter((o) => program.classes.find((c) => c.name === o.toUpperCase())?.methods.some((m) => m.name === "RUN" && m.static)));

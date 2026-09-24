@@ -1071,3 +1071,109 @@ Merged with ultra/zvdb, `dbwrite.go` binds both a RAW(n) and a DEC column;
 `ZCL_GOGEN_T_RAWDEC` writes a row with one of each by INSERT and MODIFY
 FROM TABLE and reads it back (Go only, not an A4H value: each rule is pinned
 on its own above).
+
+## Parity with OSG on Node: OSG's own suites against OSGo (ultra/parity, 2026-09-24)
+
+`tools/gogen/parity.mjs` runs the HTTP-level suites of `test/suites.json`
+against OSG on Node and against the osgo binary, the same test files, a fresh
+server per suite file and backend. Those suites call `startServer()` from
+`test/start.mjs` in their own process and then fetch `localhost:STG_PORT`; a
+module hook (`parity/hooks.mjs`) turns `test/start.mjs` into a stub, so the
+fetches reach the server the harness started instead. A probe
+(`parity/register.mjs`) notes each test's requests (status, and the body of
+an error), and a test that sent none is in-process and not compared.
+`--e2e` adds the Playwright specs, one server per backend for the whole run.
+
+    # a frozen checkout: a detached worktree of main, transpiled, packs fetched
+    OSG_HOME=<checkout> flock <shared lock> node tools/gogen/osgo.mjs   # heavy
+    OSG_HOME=<checkout> node tools/gogen/parity.mjs --e2e --out .local/parity/final
+    OSG_HOME=<checkout> node tools/gogen/parity.mjs --report-only --out .local/parity/final
+    # inside a wave: mocha suites only, Node reused, 4 at a time (~3.5 min)
+    OSG_HOME=<checkout> node tools/gogen/parity.mjs --fast --out .local/parity/fast \
+        --node-ref .local/parity/final/node-reference.json [--suites a,b] [--changed] [--jobs N]
+
+The Node reference is reused by default: `<ref>.meta.json` records the
+checkout commit, a hash of its tracked diff and the suites in it, and the
+harness says "reused" or "STALE (why)" and runs only what is missing.
+Suites run `--jobs` at a time (default cores / 2), each job with a server
+of its own on `--port + 1 + slot` (4721.. by default); a mocha is a
+process per suite and its probe notes only its own port, so attribution per
+test does not change. `--changed` reruns just the suites OSGo did not pass
+in full last time. Wall time is printed and written per phase.
+
+The harness also guards the checkout's `gen/`: `test/shadowed-objects.mjs`
+calls `compileAll("src", "gen/stg")` in its `describe` body, so even the
+`--dry-run` count of the in-process suites runs it, and its sweep deletes
+the `gen/stg` folders of every model it was not given (the four
+CDS-published services and `zvdb_100`). The previous full run did that to
+the frozen checkout, and an osgo built from it afterwards lost those
+classes (CX_SY_CREATE_OBJECT_ERROR on `ZCL_ZVSTGTRAVEL_MPC_EXT`, 9 tests).
+`gen/` is now copied aside at the start and put back after any phase that
+changed it, with a warning naming what changed; the count is kept in the
+reference's meta, so a reused reference does not run it at all.
+
+Measured on main 6327bab, osgo from this branch (953 classes, 31 methods
+not compiled): **55.6 %** -- 165 of the 297 HTTP-level tests that pass on
+Node pass on OSGo (57.9 % without the 12 known divergences). 14 mocha suites
++ the Playwright specs; 130 suites (1905 tests) are in-process and not
+applicable, plus 32 in-process tests inside the HTTP suites and
+`zosd-test.mjs`, whose `before` needs the in-process database.
+
+| group | tests |
+|---|---:|
+| the ADT façade (`/sap/bc/adt`, `/osd/not-served`): a JS module of the Node host, not ABAP, absent from OSGo | 86 |
+| `escape( format = cl_abap_format=>e_json_string )` in `/UI2/CL_JSON=>SERIALIZE_INT` (RFC channel, transactions, e2e) | 18 |
+| known: implicit MANDT, T0009 of client 001 is filtered by OSGo and served by Node | 12 |
+| `ZCL_STG_SEGW_IMPORT=>IMPORT`: comparison of string with data (+ RepoSet and a timeout after it) | 7 |
+| `GET_EXPANDED_ENTITYSET`: `SELECT * FROM zstg_demo_bk INTO` form | 2 |
+| `DESCRIBE_BY_DATA`: output length of a DDIC type of kind C | 2 |
+| the editor's parser colouring and compile check (Node host tools) | 2 |
+| move of kind g into generic data of kind D; `ZCL_STG_SEGW_FUGR=>SIGNATURE` comparison; `CALL FUNCTION` without a host implementation | 1 each |
+
+### Wave 1 (ultra/parity-wave1, 2026-09-24)
+
+Seven NOT_COMPILED groups closed, each rule measured on A4H first
+($ZOSG_TMP_0050, ABAP Unit probes of the testdata classes as they stand)
+and pinned in `semantics.mjs` on Go and JS:
+
+- `escape( format = e_json_string )` (ZCL_GOGEN_T_JSESC): `\\` `"`, `\b \t
+  \n \f \r`, every other control character `\u00XX` in upper case; `/ '`,
+  U+007F and non-ASCII unchanged; a generic operand read as a string. Node
+  escapes only `\\ " \n` (ANORMALIES escape-json-string-control-characters).
+- a generic operand compared with a c or a string (ZCL_GOGEN_T_GENCMP): the
+  typed rule, both strings and a c without trailing blanks; any other kind
+  at run time dumps NOT_COMPILED (`abap.DataChars`).
+- a string into a d / t, generic and typed (ZCL_GOGEN_T_GENMOVD): the first
+  8 / 6 characters, an empty string the initial value, a short t filled
+  with zeros (Node: `''` into d is blanks, ANORMALIES empty-string-to-date).
+- `SELECT ... FOR ALL ENTRIES` (ZCL_GOGEN_T_FAE): once per driving row, rows
+  unique over the columns selected, sy-dbcnt counts them, an empty driving
+  table ignores the whole WHERE; with GROUP BY, aggregates or ORDER BY refused.
+- `describe_by_data`'s OUTPUT_LENGTH of a dictionary type
+  (ZCL_GOGEN_T_RTTIOL): the domain's OUTPUTLEN, or the data element's
+  without a domain, read off the abapGit XML (NUMC data elements included).
+- function groups (ZCL_GOGEN_T_FM, ZGOGEN_T_FG): compiled as a pseudo class
+  `FUGR:<group>`, a static method per module; CALL FUNCTION maps EXPORTING /
+  IMPORTING / TABLES / CHANGING, a VALUE( ) exporting or changing goes
+  through a temporary written back only on a normal return (after RAISE
+  the caller keeps its values, TABLES rows appended stay). A group with
+  global data, a global interface or a DEFAULT is refused.
+
+`parity.mjs` puts two kinds of test apart from the headline:
+`go-matches-system` (OSGo answers as a system does, Node's answer is an
+ANORMALIES entry: the implicit MANDT) and `adt-deferred` (the ADT facade,
+postponed). The headline is passed / (Node-passed - go-matches-system -
+adt-deferred), the raw ratio is printed beside it.
+
+Measured after the wave (osgo from this branch on parity-home 6327bab, 965
+classes, 33 methods not compiled; `--e2e`, Node reference reused):
+**95.1 %** -- 176 of 185 (297 Node-passed, less 13 go-matches-system and 99
+adt-deferred, of which 13 pass on OSGo anyway); raw 63.6 % (189/297). Before
+the wave, the same arithmetic: 165/199, 83 %. `--fast` (mocha only): 131/136,
+96.3 %. What is left: `CREATE DATA` of a type without a generated
+descriptor in ZCL_OSD_WEBGUI (2 mocha + 2 e2e), `ImportSet` being slow on
+OSGo (20-50 s a call against 1-5 s; one mocha timeout, the SEGW e2e spec
+at 90 s), `CL_ABAP_GZIP=>COMPRESS_BINARY` (@KERNEL, RepoSet), and the
+editor's parser colouring and compile check (2, Node host tools).
+Wall time with 4 jobs: full 6m45s (the Playwright job alone 6m45s), fast
+3m20s (segw-tree alone 3m17s), against ~40 min serial before.

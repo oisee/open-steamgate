@@ -185,6 +185,21 @@ func DataString(d Data) string {
 	panic(NotCompiled("move", "a generic value of type kind "+string(d.T.Kind)+" into a string"))
 }
 
+// DataChars is a generic operand of a comparison with a character operand:
+// its characters when it holds a c or a string (a c has no trailing blanks
+// stored), the rule A4H showed (ZCL_GOGEN_T_GENCMP); any other kind compares
+// by rules not measured here and dumps.
+func DataChars(d Data) string {
+	if d.P == nil {
+		panic(notAssigned("comparison"))
+	}
+	switch d.T.Kind {
+	case 'g', 'C':
+		return *d.P.(*string)
+	}
+	panic(NotCompiled("comparison", "a generic value of type kind "+string(d.T.Kind)+" with a character operand"))
+}
+
 // DataI is a generic value moved into an i.
 func DataI(d Data) int32 {
 	switch d.T.Kind {
