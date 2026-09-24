@@ -1378,6 +1378,13 @@ function cond(c, ctx) {
       // a structure holding such a field: component by component
       if (c.x.type.k === "struct" && typedZeroInside(c.x.type)) return `abap.IsInitialOf(${expr(c.x, ctx)}, ${desc(c.x.type)})`;
       return `(${expr(c.x, ctx)} == ${zero(c.x.type)})`;
+    // ultra/events: line_exists( ) and ref = ref (frontend lineExists, compareValues)
+    case "line_exists": {
+      const n = ctx.loop++;
+      const keys = c.keys.map((k) => (k.line ? `r${n} == ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} == ${expr(k.value, ctx)}`)).join(" && ");
+      return `func() bool { for _, r${n} := range ${expr(c.table, ctx)} { if ${keys} { return true } }; return false }()`;
+    }
+    case "same_ref": return `abap.SameRef(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "assigned": return c.fs.type.k === "data" ? `(${ident(c.fs.name)}.P != nil)` : `(${ident(c.fs.name)} != nil)`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;
     case "or": return `(${cond(c.l, ctx)} || ${cond(c.r, ctx)})`;

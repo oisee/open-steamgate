@@ -4228,10 +4228,24 @@ function compare(node, ctx) {
     const r = {c: "initial", x: v};
     return /\bIS\s+NOT\s+INITIAL\b/.test(text) !== not ? {c: "not", x: r} : r;
   }
+  // line_exists( itab[ c = v ... ] ) (ultra/events, CL_GUI_CONTAINER=>ADD_CHILD
+  // and CL_GUI_HTML_VIEWER=>DISPATCH_SAPEVENT): whether READ TABLE ... WITH
+  // KEY with the same components would find a row, without sy-subrc
+  const pf = node.findDirectExpression(Expressions.MethodCallChain);
+  if (pf && sources.length === 0 && /^LINE_EXISTS$/i.test(pf.findDirectExpression(Expressions.MethodCall)?.findDirectExpression(Expressions.MethodName)?.concatTokens() ?? "")) {
+    const r = lineExists(pf, ctx);
+    return not ? {c: "not", x: r} : r;
+  }
   const opNode = node.findDirectExpression(Expressions.CompareOperator);
   if (sources.length !== 2 || opNode === undefined) throw new Unsupported(`comparison ${node.concatTokens()}`);
   const opText = upper(opNode.concatTokens());
   const op = OPS[opText] ?? opText;
+  // NS is NOT CS and CN is NOT CO (sy-fdpos, which they also set, is not
+  // read on any compiled path: see CP below)
+  if (op === "NS" || op === "CN") {
+    const r = {c: op === "NS" ? "cs" : "co", l: convert(source(sources[0], ctx), S), r: convert(source(sources[1], ctx), S)};
+    return not ? r : {c: "not", x: r};
+  }
   if (op === "CO" || op === "CS") {
     // measured on A4H: CO is true for an empty operand; CS ignores case and
     // an empty pattern is always found; trailing blanks count in a string,
@@ -4286,6 +4300,37 @@ function compare(node, ctx) {
   return not ? {c: "not", x: r} : r;
 }
 
+/** line_exists( itab[ c1 = v1 c2 = v2 ... ] ) and itab[ table_line = v ]: the
+ * keys as READ TABLE ... WITH KEY builds them (each value converted to the
+ * component's type) */
+function lineExists(chain, ctx) {
+  const src = chain.findFirstExpression(Expressions.MethodCallParam)?.findDirectExpression(Expressions.Source);
+  const fc = src?.findDirectExpression(Expressions.FieldChain);
+  const fk = fc?.getChildren() ?? [];
+  const te = fk.at(-1);
+  if (!fc || !isExpr(te, Expressions.TableExpression)) throw new Unsupported(`line_exists form: ${chain.concatTokens()}`);
+  const head = {getChildren: () => fk.slice(0, -1), concatTokens: () => fk.slice(0, -1).map((k) => k.concatTokens()).join(""),
+    findFirstExpression: (t) => fk.slice(0, -1).map((k) => (isExpr(k, t) ? k : k.findFirstExpression?.(t))).find(Boolean), get: () => fc.get()};
+  const table = fk.length === 2 ? sourceOperand(fk[0], ctx) : fieldChain(head, ctx);
+  if (table.type.k !== "table") throw new Unsupported("line_exists of a non-table");
+  const inner = te.getChildren().filter((c) => !isTok(c, "[") && !isTok(c, "]"));
+  const keys = [];
+  for (let i = 0; i < inner.length; i += 3) {
+    const comp = inner[i];
+    if (!isExpr(comp, Expressions.ComponentChainSimple) || !isTok(inner[i + 1], "=") || !isExpr(inner[i + 2], Expressions.Source)) {
+      throw new Unsupported(`line_exists key form: ${te.concatTokens()}`);
+    }
+    const cname = upper(comp.concatTokens());
+    if (cname === "TABLE_LINE") keys.push({line: true, value: convert(source(inner[i + 2], ctx, table.type.row), table.type.row)});
+    else {
+      const f = fieldOf(ctx, table.type.row, cname, te.concatTokens());
+      keys.push({name: f.name, value: convert(source(inner[i + 2], ctx, f.type), f.type)});
+    }
+  }
+  if (keys.length === 0) throw new Unsupported(`line_exists key form: ${te.concatTokens()}`);
+  return {c: "line_exists", table, keys};
+}
+
 /** character comparisons: c ignores trailing blanks, which the stored form already has */
 function compareValues(op, l, r, ctx) {
   if (numeric(l.type) || numeric(r.type)) {
@@ -4293,5 +4338,10 @@ function compareValues(op, l, r, ctx) {
     return {c: "cmp", op, l: convert(l, calc), r: convert(r, calc), type: calc};
   }
   if (charlike(l.type) && charlike(r.type)) return {c: "cmp", op, l: convert(l, S), r: convert(r, S), type: S};
+  // two object references: the same object, or both initial (CL_GUI_CONTROL=>SYNC)
+  if (l.type.k === "ref" && r.type.k === "ref" && (op === "=" || op === "<>")) {
+    const same = {c: "same_ref", l, r};
+    return op === "=" ? same : {c: "not", x: same};
+  }
   throw new Unsupported(`comparison of ${l.type.k} with ${r.type.k}`);
 }

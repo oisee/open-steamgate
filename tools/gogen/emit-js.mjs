@@ -846,6 +846,13 @@ function cond(c, ctx) {
     case "cmp":
       if (c.type?.k === "p") return `abap.CmpP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} 0`;
       return `${expr(c.l, ctx)} ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} ${expr(c.r, ctx)}`;
+    // ultra/events: line_exists( ) and ref = ref (frontend lineExists, compareValues)
+    case "line_exists": {
+      const n = ctx.loop++;
+      const keys = c.keys.map((k) => (k.line ? `r${n} === ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} === ${expr(k.value, ctx)}`)).join(" && ");
+      return `${expr(c.table, ctx)}.some((r${n}) => ${keys})`;
+    }
+    case "same_ref": return `((${expr(c.l, ctx)} ?? null) === (${expr(c.r, ctx)} ?? null))`;
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;
       if (c.x.type.k === "dref") return `(${expr(c.x, ctx)} === null)`;

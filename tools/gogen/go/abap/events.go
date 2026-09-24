@@ -225,3 +225,13 @@ func SenderAs[T any](v any) T {
 	}
 	return v.(T)
 }
+
+// SameRef is ref1 = ref2 of two object references: the same object, or both
+// initial (a nil pointer inside an interface is initial too).
+func SameRef(a, b any) bool {
+	ia, ib := IsInitialRef(a), IsInitialRef(b)
+	if ia || ib {
+		return ia && ib
+	}
+	return a == b
+}
