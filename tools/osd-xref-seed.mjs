@@ -34,11 +34,15 @@
 //                                  rows with upper-case field names, unpadded.
 //                                  The parse costs ~3 s on the full tree, so
 //                                  the answer is kept per generation in
-//                                  build/xref/<key>.json (cache: false skips it)
+//                                  build/xref/<key>.json (cache: false skips
+//                                  it; cacheKey(root) says which generation)
 //   insertStatements(rows)      -> SQL strings: one DELETE per table, then
 //                                  multi-row INSERTs, CHAR padded to its DDIC
-//                                  length the way the seed pads it
-//   await applyRows(client, rows)  runs them on a DatabaseClient
+//                                  length the way the seed pads it; a row
+//                                  with a value longer than its column is
+//                                  left out (overlong(rows) names them)
+//   await applyRows(client, rows)  runs them on a DatabaseClient in one
+//                                  transaction; returns the counts + refused
 //   await seedAtStartup(client, {root, say})  rows + applyRows, reported;
 //                                  never throws, returns the counts or undefined
 //
@@ -70,12 +74,16 @@ export async function rows(root = process.cwd(), options = {}) {
   const fs = await import(/* webpackIgnore: true */ "node:fs");
   const path = await import(/* webpackIgnore: true */ "node:path");
   const key = options.cache === false ? undefined : await cacheKey(root);
-  const file = key === undefined ? undefined : path.join(root, "build", "xref", `${key}.json`);
+  const dir = path.join(root, "build", "xref");
+  const file = key === undefined ? undefined : path.join(dir, `${key}.json`);
   if (file !== undefined && fs.existsSync(file)) {
     try {
-      return JSON.parse(fs.readFileSync(file, "utf8"));
+      const cached = JSON.parse(fs.readFileSync(file, "utf8"));
+      // a torn, foreign or empty file is a miss, not an answer: `{}` read as
+      // rows would empty all four tables and call that a seed
+      if (wellFormed(cached)) return cached;
     } catch {
-      // a torn or foreign file is a miss, not an answer
+      // unreadable: a miss
     }
   }
   const {CrossReference} = await import(/* webpackIgnore: true */ "./osd-xref.mjs");
@@ -89,11 +97,14 @@ export async function rows(root = process.cwd(), options = {}) {
   };
   if (file !== undefined) {
     try {
-      const dir = path.dirname(file);
       fs.mkdirSync(dir, {recursive: true});
-      // one generation's answer; the others are what this one replaced
+      // one generation's answer; the others are what this one replaced. A
+      // `.tmp` is somebody's write in flight unless it is old enough to be
+      // the leftover of a writer that died.
       for (const old of fs.readdirSync(dir)) {
-        if (old.endsWith(".json")) fs.rmSync(path.join(dir, old), {force: true});
+        const full = path.join(dir, old);
+        if (old.endsWith(".json")) fs.rmSync(full, {force: true});
+        else if (old.endsWith(".tmp") && Date.now() - fs.statSync(full).mtimeMs > 10 * 60 * 1000) fs.rmSync(full, {force: true});
       }
       // written aside and renamed, so a second process starting at the same
       // moment reads a whole file or none
@@ -107,15 +118,43 @@ export async function rows(root = process.cwd(), options = {}) {
   return out;
 }
 
-/** The generation the rows belong to: the build's own hash of its inputs
- *  (tools/osd-build.mjs hashOf -- the folders, the libraries, the config, the
- *  transpiler and the generators), plus the derivation. Undefined where there
- *  is no tree to hash, which only costs the cache. */
-async function cacheKey(root) {
+/** four arrays of rows carrying the columns of their table, as strings */
+export function wellFormed(tables) {
+  if (tables === null || typeof tables !== "object") return false;
+  return TABLES.every((t) => Array.isArray(tables[t]) && tables[t].every((row) =>
+    row !== null && typeof row === "object" && Object.keys(WIDTHS[t]).every((c) => typeof row[c] === "string")));
+}
+
+/** Which generation the rows belong to. Everything the parse reads, and the
+ *  code that parses:
+ *
+ *  - the build's hash of its inputs (tools/osd-build.mjs hashOf: the
+ *    folders, the libraries, the config, the transpiler, the generators);
+ *  - **`gen/` by content** (genHash). hashOf leaves `gen/` out on purpose --
+ *    for the build it is an output -- but the object store parses it, so a
+ *    key without it filed the rows of a tree before `transpile` under the
+ *    same name as the tree after it, and served them (found by review);
+ *  - the derivation: tools/osd-xref.mjs and what it imports, by content.
+ *    In the binary those files are not on disk and the binary's own
+ *    identity, already inside hashOf, stands for them.
+ *
+ *  Undefined where there is no tree to hash, which only costs the cache. */
+export async function cacheKey(root) {
   try {
-    const {hashOf} = await import(/* webpackIgnore: true */ "./osd-build.mjs");
+    const {hashOf, genHash, generatorClosure} = await import(/* webpackIgnore: true */ "./osd-build.mjs");
+    const {hosted} = await import(/* webpackIgnore: true */ "./osd-host.mjs");
     const {createHash} = await import(/* webpackIgnore: true */ "node:crypto");
-    return createHash("sha256").update(DERIVATION).update("\0").update(hashOf(root)).digest("hex").slice(0, 16);
+    const {readFileSync} = await import(/* webpackIgnore: true */ "node:fs");
+    const {fileURLToPath} = await import(/* webpackIgnore: true */ "node:url");
+    const h = createHash("sha256");
+    h.update(DERIVATION).update("\0").update(hashOf(root)).update("\0").update(genHash(root)).update("\0");
+    if (!hosted()) {
+      const tools = fileURLToPath(new URL(".", import.meta.url));
+      for (const f of generatorClosure(tools, [["osd-xref.mjs"], ["osd-xref-seed.mjs"]])) {
+        h.update(f.slice(tools.length)).update("\0").update(readFileSync(f)).update("\0");
+      }
+    }
+    return h.digest("hex").slice(0, 16);
   } catch {
     return undefined;
   }
@@ -123,17 +162,33 @@ async function cacheKey(root) {
 
 const quote = (value, width = 0) => `'${String(value ?? "").padEnd(width, " ").replaceAll("'", "''")}'`;
 
+/** A row with a value longer than its column. Refused, not cut: a name cut
+ *  to the width is another name, and a where-used that answers for the
+ *  wrong object is worse than one that says it left a row out. */
+export function overlong(tables) {
+  const out = [];
+  for (const table of TABLES) {
+    for (const row of tables[table] ?? []) {
+      const column = Object.entries(WIDTHS[table]).find(([c, w]) => String(row[c] ?? "").length > w);
+      if (column !== undefined) out.push({table, column: column[0], row});
+    }
+  }
+  return out;
+}
+
 /** The rows as SQL: every table emptied, then filled. Emptying first is what
  *  makes a restart, a second host on the same database file, or a stored
- *  browser database restored under a new build all end in the same rows. */
+ *  browser database restored under a new build all end in the same rows.
+ *  Rows `overlong` names are left out. */
 export function insertStatements(tables, options = {}) {
   const batch = options.batch ?? 500;
+  const refused = new Set(overlong(tables).map((o) => o.row));
   const out = [];
   for (const table of TABLES) {
     const widths = WIDTHS[table];
     const columns = Object.keys(widths);
     out.push(`DELETE FROM "${table.toLowerCase()}";`);
-    const list = tables[table] ?? [];
+    const list = (tables[table] ?? []).filter((row) => !refused.has(row));
     for (let i = 0; i < list.length; i += batch) {
       const values = list.slice(i, i + batch)
         .map((row) => `(${columns.map((c) => quote(row[c], widths[c])).join(", ")})`);
@@ -143,12 +198,27 @@ export function insertStatements(tables, options = {}) {
   return out;
 }
 
-/** Run them on the eleven-method DatabaseClient every host already holds. */
+/** Run them on the eleven-method DatabaseClient every host already holds,
+ *  as one transaction: the DELETEs and the INSERTs land together or not at
+ *  all, so a failed INSERT leaves the previous rows rather than half of the
+ *  new ones under a log line saying nothing was seeded. Every client of
+ *  test/setup.mjs has beginTransaction / commit / rollback (the interface
+ *  requires them). */
 export async function applyRows(client, tables) {
-  for (const sql of insertStatements(tables)) {
-    await client.execute(sql);
+  await client.beginTransaction();
+  try {
+    for (const sql of insertStatements(tables)) {
+      await client.execute(sql);
+    }
+    await client.commit();
+  } catch (e) {
+    await client.rollback();
+    throw e;
   }
-  return counts(tables);
+  const refused = overlong(tables);
+  const n = counts(tables);
+  for (const {table} of refused) n[table] -= 1;
+  return {...n, refused};
 }
 
 export const counts = (tables) => Object.fromEntries(TABLES.map((t) => [t, (tables[t] ?? []).length]));
@@ -165,6 +235,10 @@ export async function seedAtStartup(client, options = {}) {
     const n = await applyRows(client, tables);
     if (options.quiet !== true) {
       say(`cross-reference: ${TABLES.map((t) => `${t} ${n[t]}`).join(", ")} (${Date.now() - started} ms)`);
+    }
+    // said even when quiet: a row left out is a where-used that is short
+    for (const {table, column, row} of n.refused) {
+      say(`cross-reference: ${table} row left out, ${column} longer than its column: ${JSON.stringify(row)}`);
     }
     return n;
   } catch (e) {
