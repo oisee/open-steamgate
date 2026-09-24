@@ -109,31 +109,63 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: `test/db-migrate.mjs` (the migration, including a renamed key column), `test/taxi-import.mjs` (an import into an old-shaped file), `test/reserved-words.mjs` (no field of an own transparent table and no CDS element is one of the names A4H was seen refusing: ZONE, HANDLER, SECTION, PARAMETER; checked failing on the tree before the renames)
 - Upstream version containing a fix: `unknown`
 
-### ANOMALY-2026-09-24-delete-adjacent-default-key -- DELETE ADJACENT DUPLICATES compares every component of a DEFAULT KEY table
+### ANOMALY-2026-09-24-delete-adjacent-default-key -- DELETE ADJACENT DUPLICATES without COMPARING compares whole rows, where a system compares the primary key
 
-- Status: `open`
+- Status: `fixed upstream: abaplint/transpiler#1892, merged 2026-09-24, not yet in a release`
 - Discovery date: `2026-09-24`
-- Affected versions: `@abaplint/runtime` 2.13.x as this tree pins it
-- Affected ABAP statement, runtime API or adapter: `DELETE ADJACENT DUPLICATES FROM itab` without `COMPARING`, on a standard table of a structure `WITH DEFAULT KEY`
+- Affected versions: `@abaplint/runtime` 2.13.89 as this tree pins it, and every release up to the one that ships #1892 (`packages/runtime/src/statements/delete_internal.ts`: without `COMPARING`, the whole row was compared)
+- Affected ABAP statement, runtime API or adapter: `DELETE ADJACENT DUPLICATES FROM itab` without `COMPARING`, on any table whose primary key is not the whole row: a structure `WITH DEFAULT KEY` (or `TYPE TABLE OF` with no key clause), a user key, a sorted key, an empty key
 - Minimal ABAP reproducer:
 
 ```abap
-TYPES: BEGIN OF ty, c TYPE c LENGTH 1, i TYPE i, END OF ty.
-DATA lt TYPE STANDARD TABLE OF ty WITH DEFAULT KEY.
-" rows (a,2) (a,1) (b,1)
-SORT lt.                          " both: a2 a1 b1
-DELETE ADJACENT DUPLICATES FROM lt.
-" SAP: 2 rows -- open-abap: 3 rows
+TYPES: BEGIN OF ty_row,
+         c TYPE c LENGTH 2,
+         i TYPE i,
+       END OF ty_row.
+DATA tab TYPE STANDARD TABLE OF ty_row WITH DEFAULT KEY.
+DATA row TYPE ty_row.
+APPEND row TO tab.
+row-i = 7.
+APPEND row TO tab.
+DELETE ADJACENT DUPLICATES FROM tab.
+WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 ```
 
-- Exact command used to run it: **measured on A4H 2026-09-24** (`$ZOSG_TMP_0462`, ultra/demodata), an ABAP Unit probe with the lines above: `a2 a1 b1  lines:2`; the same class transpiled here: `a2 a1 b1  lines:3`. The probe was deleted.
-- Expected SAP behaviour: the default key of a structured line is its character-like components, so the comparison leaves the `i` out, as `SORT` already does here
-- Actual open-abap behaviour: `SORT` uses the default key (the order agrees), `DELETE ADJACENT DUPLICATES` compares the whole line
-- Impact on open-steamgate: found by `ZCL_OSD_DEMO_TAXI`'s grain test, which passed here and failed on A4H; the test now sorts and compares by every component explicitly, which both answer alike
-- Smallest safe workaround: name the key: `SORT ... BY` and `COMPARING ALL FIELDS` (or the components)
-- Upstream issue: needs an issue (transpiler runtime); not filed yet
-- Regression-test location: `src/demo_data/zcl_osd_demo_taxi.clas.testclasses.abap` (`grain_and_marks`) uses the portable form; no test pins the anomaly
-- Upstream version containing a fix: `unknown`
+- Exact command used to run it: first seen with `ZCL_OSD_DEMO_TAXI`'s grain test (`$ZOSG_TMP_0462`, ultra/demodata): rows (a,2) (a,1) (b,1) of `c(1), i`, `SORT` then `DELETE ADJACENT DUPLICATES`, 2 lines on an ABAP 7.5x system and 3 here. The rule was then measured with ABAP Unit probes on the same ABAP 7.5x system in `$ZOSG_TMP_0030` and `$ZOSG_TMP_0031` (deleted after): two rows that differ in one component only, then `DELETE ADJACENT DUPLICATES FROM tab`; two lines left means the component is in the key.
+
+| Component type | Lines left | In the default key |
+| --- | ---: | --- |
+| `c`, `n`, `d`, `t` | 2 | yes |
+| `string` | 2 | yes |
+| `x`, `xstring` | 2 | yes |
+| `i`, `int1`, `int2`, `int8` | 1 | no |
+| `p`, `f`, `decfloat16`, `decfloat34` | 1 | no |
+| `utclong` | 1 | no |
+| `c` inside a substructure | 2 | yes, substructures are expanded |
+| `i` inside a substructure | 1 | no |
+| table component | 1 | no |
+| `REF TO data`, `REF TO object` | 1 | no |
+| `c` from `INCLUDE TYPE` | 2 | yes |
+
+| Case | System | Runtime before #1892 |
+| --- | --- | --- |
+| `TYPE TABLE OF ty_row` (no key clause), rows differ in `i` only | 1 line | 2 |
+| Only numeric components, `WITH DEFAULT KEY`, two identical rows | 2 lines, nothing deleted | 1 |
+| `WITH EMPTY KEY`, two identical rows | 2 lines, nothing deleted | 1 |
+| `WITH NON-UNIQUE KEY i`, rows (0,''), (0,'AB'), (5,'AB') | 2 | 3 |
+| `SORTED ... WITH NON-UNIQUE KEY c`, rows differ in `n`, then in `c` | 2 | 3 |
+| `WITH NON-UNIQUE KEY table_line` | whole row compared | same |
+| elementary `STANDARD TABLE OF i`, 1 1 2 1 | 3 | same |
+
+- Expected SAP behaviour: without `COMPARING` only the primary key is compared. The standard key of a structured row is its character-like and byte-like components (`c`, `n`, `d`, `t`, `string`, `x`, `xstring`), with substructures and includes expanded; `i`/`int1`/`int2`/`int8`, `p`, `f`, `decfloat16`/`decfloat34`, `utclong`, table and reference components are not in it. An empty key (a row of numeric components only, or `WITH EMPTY KEY`) deletes nothing, not even identical rows; the syntax check warns "table with an empty primary key"
+- Actual open-abap behaviour: before #1892 the runtime compared whole rows, whatever the key, so rows differing only outside the key stayed and an empty key deleted identical rows
+- Impact on open-steamgate: found by `ZCL_OSD_DEMO_TAXI`'s grain test, which passed here and failed on the system; the test now sorts and compares by every component explicitly, which both answer alike. Any ABAP relying on the default key to drop rows that differ in an amount or a count keeps them here
+- Smallest safe workaround: name the key: `SORT ... BY` and `COMPARING <components>` (or `COMPARING ALL FIELDS` where the whole row is meant)
+- Upstream issue: fixed by [abaplint/transpiler#1892](https://github.com/abaplint/transpiler/pull/1892), merged 2026-09-24 (branch `delete-adjacent-default-key`): without `COMPARING`, rows are reduced to their primary key (the given `keyFields`, else the standard key above; `keyType` EMPTY or a standard key with no components deletes nothing). Two callers relied on the old whole-row compare and keep it through an explicit `allFields: true`: `COMPARING ALL FIELDS`, which was transpiled like the plain form, and the duplicate removal after `FOR ALL ENTRIES` (`statements/select.ts`), which passed a `by` the runtime ignored. Not covered: `USING KEY` on the statement is still ignored, and a row type that is itself a table type (empty standard key) is still compared as a whole row
+- Relation to ANOMALY-2026-09-24-sort-default-key (ultra/parity-wave1, not on main yet): both measurements agree that a system uses the standard key for `SORT` and `DELETE ADJACENT DUPLICATES` alike. That entry measures the runtime's `SORT` without `BY` on a table of structures as leaving the order unchanged (whole rows compared with `lt`), which contradicts this entry's first version, where the taxi rows came out of `SORT` in the same order on both sides; that agreement was the rows' order, not the runtime sorting by the default key. The key rule measured here (character-like and byte-like components) is wider than what sort-default-key measured (`c` and `string`); the rule of that entry is left to it
+- Regression-test location: upstream, `test/statements/delete_internal.ts` (six cases from the tables above), `test/database.ts` ("FOR ALL ENTRIES, duplicates removed comparing all fields, not the key"), `packages/transpiler/test/single_statements.ts` (`COMPARING ALL FIELDS` emits `allFields: true`); here `src/demo_data/zcl_osd_demo_taxi.clas.testclasses.abap` (`grain_and_marks`) uses the portable form, and no test pins the anomaly
+- Upstream version containing a fix: `unknown` (merged, not yet released)
+
 ### ANOMALY-2026-09-18-icf-shim-form-fields-from-body — A POSTed form field is not there, and reads as an empty one
 
 The same defect as ANOMALY-2026-09-19-posted-form-has-no-fields, found a day
@@ -631,7 +663,7 @@ WRITE / 'after'.
 ```
 
 - Exact command used to run it: transpile and run; measured 2026-09-14
-- Expected SAP behaviour: `before / ctor / touch / after`. The class constructor runs once, at the first access to the class, which here is inside the program's executable part. **Not verified on a system** — this is the documented rule rather than a read of A4H, and it is worth one confirmation the next time someone is there with Alice's say-so
+- Expected SAP behaviour: `before / ctor / touch / after`. The class constructor runs once, at the first access to the class, which here is inside the program's executable part. **Verified on A4H 2026-09-24** (ultra/events, `$ZOSG_TMP_0440`): `tools/gogen/testdata/zcl_gogen_t_cctor.clas.abap` with `_CC1`, `_CC2` (a subclass), `_CC3` and `_CCLOG` answered `a cc3 t3 t3 b cc1 cc2 t1 c ` — at the first static call, at the first CREATE OBJECT of a subclass (the superclass's first), once; the transpiler 2.13.89 answers `cc3 cc1 cc2 a t3 t3 b t1 c `. An exception out of a class constructor (`zcl_gogen_t_ccboom2.clas.abap`, `$ZOSG_TMP_0441`) is a runtime abortion on A4H that no CATCH takes, `CX_SY_ZERODIVIDE`, `CX_SY_NO_HANDLER` or `CX_ROOT`; the transpiler raises it while the modules load, before any statement of the program, so nothing can catch it either, but the program never starts
 - Actual open-abap behaviour: `ctor / before / touch / after`. The constructor runs eagerly, before the program's own statements, which is what an ES module initialising at import time does
 - Impact on open-steamgate: subtle and real, because a class constructor can touch `sy-tabix`. A registry filled with `APPEND` in a class constructor leaves `sy-tabix` at the last appended index; run lazily inside a loop body that reads `sy-tabix` afterwards, the first iteration sees that index rather than its own row number. Measured: `12` here where a system would give `32` for the same program. Found by larshp reviewing `abaplint/transpiler#1848`, who asked whether a test should expect `,a,b,c` — it depends entirely on this
 - Smallest safe workaround: do not read `sy-tabix` after a call that may be a class's first access; or touch the class once before the loop, which is what that test now does
