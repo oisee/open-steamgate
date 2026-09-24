@@ -73,6 +73,10 @@ file booted or imported before the rename is migrated when a server opens it
 and when the import runs (`tools/osd-db-migrate.mjs`): the column is renamed
 in place, the rows stay, and the file's views are made again from the
 running build, all in one transaction. Nothing needs to be imported again.
+The import tool renames the column itself but cannot remake the views (it
+does not have the build's view list), so after an import into an old file
+the views still select `zone` until the next server start makes them again;
+start the server before reading the cube.
 The migration is one way: a build from before the rename cannot read the
 file afterwards. A view in the file that the running build does not have (a
 deleted CDS view, one made by hand) is named in the log and left as it is;

@@ -67,7 +67,8 @@ export async function importTaxiTrips({database, month = DEFAULT_MONTH, limit, p
   try {
     const table = await connection.runAndReadAll("SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_name = 'zosd_taxifact'");
     if (Number(table.getRowObjects()[0]?.n ?? 0) !== 1) throw new Error("ZOSD_TAXIFACT is absent; boot this OSD build once before import");
-    // a file booted by an earlier build still has ZONE (tools/osd-db-migrate.mjs)
+    // a file booted by an earlier build still has ZONE (tools/osd-db-migrate.mjs);
+    // its views are remade at the next server start, which has their list
     await migrateDuckdbColumns({
       query: async (sql) => (await connection.runAndReadAll(sql)).getRowObjects(),
       execute: (sql) => connection.run(sql),
