@@ -20,6 +20,15 @@
 //   missing    an object the body needs is still not there when no pass makes
 //              progress (a table not in the dictionary, a CDS view not
 //              reconstructed, a procedure not in the corpus)
+//   library-absent  the body needs a HANA library neither A4H nor HXE has
+//              installed -- APL (schema SAP_PA_APL) or UMML (SAP_HANA_UMML*)
+//              -- directly, or by calling a body that does. Checked on A4H
+//              2026-09-23: no such schema there either, only _SYS_AFL. Not a
+//              fault of the body, of our stand or of the portable compiler:
+//              no HANA we can reach can create it. Taken out of the other
+//              classes after the passes, since the root is often refused as
+//              a signature (an APL table type in the head) and the rest as
+//              a missing routine
 //   ddic-type  our DDIC -> HANA type mapping has no answer for a type
 //   ours-table a table we meant to reconstruct and could not create
 //   signature  HANA refused the procedure head we wrote, not the body
@@ -534,9 +543,35 @@ export function missingObject(message) {
   if (m !== null) return {kind: "table", name: m[1].replace(/^"|"$/g, "")};
   m = /invalid table name:\s+([^\s:]+)/i.exec(text);
   if (m !== null && !/Could not find/.test(text)) return {kind: "table", name: m[1].replace(/^"|"$/g, "")};
+  // HXE 2.00.088 says "no procedure with name X=>Y found" after the colon;
+  // read the name there, not the word "no" (the passes only used the kind,
+  // the library-absent class needs the name)
+  // (a quoted or schema-qualified name keeps the routine, not the schema)
+  m = /no procedure with name (?:"?[^\s".]+"?\.)?"?([^\s"]+)"? found/i.exec(text);
+  if (m !== null) return {kind: "routine", name: m[1]};
   m = /(?:invalid name of function or procedure|Could not find (?:procedure|function))[:\s]+"?([^\s":]+(?:=>[^\s":]+)?)"?/i.exec(text);
   if (m !== null) return {kind: "routine", name: m[1]};
   return undefined;
+}
+
+/** a HANA message that names a library schema neither A4H nor HXE has */
+export const ABSENT_LIBRARY = /(?:invalid schema name:\s*|unknown type\s+"?|in schema\s+|name\s+)"?(SAP_PA_APL|SAP_HANA_UMML\w*)(?![\w])/i;
+
+/** the keys of the refused bodies that need an absent library: a body whose
+ *  refusal names one, and, to a fixpoint, a body refused because a routine
+ *  it calls is one of those. `refused` is [{key, routine, message, missing}] */
+export function libraryAbsent(refused) {
+  const keys = new Set(refused.filter((one) => ABSENT_LIBRARY.test(String(one.message ?? ""))).map((one) => one.key));
+  const routineOf = new Map(refused.map((one) => [one.key, String(one.routine ?? "").toUpperCase()]));
+  for (let grew = true; grew;) {
+    grew = false;
+    const routines = new Set([...keys].map((key) => routineOf.get(key)));
+    for (const one of refused) {
+      if (keys.has(one.key) || one.missing?.kind !== "routine") continue;
+      if (routines.has(String(one.missing.name).toUpperCase())) { keys.add(one.key); grew = true; }
+    }
+  }
+  return keys;
 }
 
 /** a HANA refusal sorted into the class that says whose fault it is */
@@ -684,6 +719,12 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
   }
   client.end();
 
+  // a body that needs an absent library is its own class, whatever the
+  // passes sorted it into (see the header)
+  const absent = libraryAbsent(bodies.filter((body) => result.get(body.key)?.status === "refused")
+    .map((body) => ({key: body.key, routine: body.routine, ...result.get(body.key)})));
+  for (const key of absent) result.set(key, {...result.get(key), class: "library-absent"});
+
   // our verdict beside HANA's
   const rows = bodies.map((body) => {
     const hana = result.get(body.key) ?? {status: "not tried"};
@@ -698,6 +739,9 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
   for (const row of rows.filter((x) => x.hana === "created" && x.stop !== undefined)) gaps[row.stop] = (gaps[row.stop] ?? 0) + 1;
   const summary = {
     hana: version, bodies: rows.length,
+    // what a HANA we can reach could ever create: the bodies less those that
+    // need a library none of them has
+    reachable: rows.length - (classes["library-absent"] ?? 0),
     hanaCreated: count((x) => x.hana === "created"), hanaRefused: classes,
     oursCompile: count((x) => x.ours === "OK"),
     bothOk: count((x) => x.hana === "created" && x.ours === "OK"),

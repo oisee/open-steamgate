@@ -3,7 +3,7 @@
 // shapes taken off a system, and the sorting of HANA's refusals. No HANA and
 // no corpus here: a clean-room class over SFLIGHT's shapes.
 import {expect} from "chai";
-import {typesOfSource, createStatement, hanaOfDdic, TypeGap, classify, missingObject,
+import {typesOfSource, createStatement, hanaOfDdic, TypeGap, classify, missingObject, libraryAbsent,
   readCatalog, readExtraDdic, defaultClause, withoutAbapCommentLines} from "../tools/amdp-corpus-oracle.mjs";
 
 const SOURCE = `CLASS zcl_flight_demo DEFINITION PUBLIC.
@@ -142,6 +142,11 @@ describe("the corpus oracle: shapes read off a system, and HANA's refusals sorte
     expect(missingObject("invalid table name:  Could not find table/view SCARR in schema OSD_CORPUS: line 3 col 10"))
       .to.deep.equal({kind: "table", name: "SCARR"});
     expect(missingObject("invalid name of function or procedure: ZCL_FLIGHT_DEMO=>RUN: line 5 col 3").kind).to.equal("routine");
+    // HXE's longer form names the routine after "no procedure with name"
+    expect(missingObject("invalid name of function or procedure: no procedure with name ZCL_FLIGHT_DEMO=>RUN found: line 5 col 3"))
+      .to.deep.equal({kind: "routine", name: "ZCL_FLIGHT_DEMO=>RUN"});
+    expect(missingObject('invalid name of function or procedure: no procedure with name "OSD_CORPUS"."ZCL_FLIGHT_DEMO=>RUN" found: line 5 col 3'))
+      .to.deep.equal({kind: "routine", name: "ZCL_FLIGHT_DEMO=>RUN"});
     expect(classify("invalid table name:  Could not find table/view SCARR in schema X: line 3 col 10")).to.equal("missing");
     expect(classify("invalid schema name: ANOTHER: line 9 col 2")).to.equal("missing");
     expect(classify("invalid column name: CARRNAME: line 12 col 4")).to.equal("shape");
@@ -150,6 +155,25 @@ describe("the corpus oracle: shapes read off a system, and HANA's refusals sorte
     expect(classify("sql syntax error: incorrect syntax near \"TABLE\": line 2 col 18", 5)).to.equal("signature");
     expect(classify("sql syntax error: incorrect syntax near \"FOR\": line 9 col 3", 5)).to.equal("hxe-refuses");
     expect(classify("something nobody expected")).to.equal("other");
+  });
+
+  it("takes a body that needs an absent library out of the other classes, and every body that calls one", () => {
+    const refused = [
+      // the roots: a table type of APL in the head, a UMML schema in the body
+      {key: "ZCL_A=>ROOT#1", routine: "ZCL_A=>ROOT", message: "invalid datatype: unknown type SAP_PA_APL.sap.pa.apl.base::BASE.T.X: line 6 col 40"},
+      {key: "ZCL_U=>READ#2", routine: "ZCL_U=>READ", message: "invalid schema name: SAP_HANA_UMML_ENGINE_STATIC: line 13 col 10"},
+      // a caller, and its caller: missing routines that are roots
+      {key: "ZCL_B=>MID#3", routine: "ZCL_B=>MID", message: "invalid name of function or procedure: no procedure with name ZCL_A=>ROOT found",
+        missing: {kind: "routine", name: "ZCL_A=>ROOT"}},
+      {key: "ZCL_C=>TOP#4", routine: "ZCL_C=>TOP", message: "...", missing: {kind: "routine", name: "zcl_b=>mid"}},
+      // not this: a routine missing for another reason, and another schema
+      {key: "ZCL_D=>OTHER#5", routine: "ZCL_D=>OTHER", message: "...", missing: {kind: "routine", name: "ZCL_E=>GONE"}},
+      {key: "ZCL_F=>REPO#6", routine: "ZCL_F=>REPO", message: "invalid schema name: SOMETHING_ELSE: line 1 col 1"},
+      // a table or a procedure inside the library's own schema is a root too
+      {key: "ZCL_G=>TAB#7", routine: "ZCL_G=>TAB", message: "invalid table name:  Could not find table/view X in schema SAP_PA_APL: line 3 col 10"},
+      {key: "ZCL_H=>CALL#8", routine: "ZCL_H=>CALL", message: 'invalid name of function or procedure: no procedure with name "SAP_PA_APL"."sap.pa.apl.base::PING" found'},
+    ];
+    expect([...libraryAbsent(refused)].sort()).to.deep.equal(["ZCL_A=>ROOT#1", "ZCL_B=>MID#3", "ZCL_C=>TOP#4", "ZCL_G=>TAB#7", "ZCL_H=>CALL#8", "ZCL_U=>READ#2"]);
   });
 });
 
