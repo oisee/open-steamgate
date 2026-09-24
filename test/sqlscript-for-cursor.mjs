@@ -37,7 +37,7 @@ describe("the order of a relation's rows, as the compiler classifies it", () => 
     let caught;
     try { compile(LOOP("SELECT n, k FROM :it ORDER BY k")); } catch (error) { caught = error; }
     expect(caught).to.include({reason: "order"});
-    expect(caught.message).to.match(/sorted by K, and rows equal in those come in any order, while the loop reads N too/);
+    expect(caught.message).to.match(/sorted by K, and rows equal in those come in any order, while its row carries N too/);
   });
 
   const refusedFor = (body) => { try { compile(body); } catch (error) { return error; } };
@@ -156,7 +156,7 @@ for (const [dialect, make] of [["duckdb", () => new DuckDBDatabaseClient({path: 
       let caught;
       try { await runProcedure(program, {client, dialect, relationInputs: {IT}}); } catch (error) { caught = error; }
       expect(caught).to.include({reason: "order"});
-      expect(caught.message).to.match(/rows equal in its ORDER BY come in any order, and the loop reads N/);
+      expect(caught.message).to.match(/rows equal in its ORDER BY come in any order, and its row carries N too/);
     });
 
     it("refuses at run time a caller's table whose rows have no positions (a database table)", async () => {

@@ -392,7 +392,7 @@ export function orderedRelation(rel) {
   // `ties`: the output columns an ORDER BY sorted by (null: no ties). Only
   // the cursor query's own ORDER BY counts -- one inside, as a caller's
   // relation or a table variable brings it, HANA may drop (the compiler's
-  // rule, orderOf); ties are carried through renames the way it does
+  // rule, orderOf)
   const ordered = (r, top) => {
     switch (r?.rel) {
       case "order": {
@@ -415,9 +415,11 @@ export function orderedRelation(rel) {
         const o = ordered(r.input, false);
         if (o === undefined) return undefined;
         const carried = o.keys.map((k) => ({key: k, as: `__ORD${hidden++}`}));
-        const ties = o.ties === null ? null : new Set(r.items.filter((item) => item.expr?.node === "col" && o.ties.has(upper(item.expr.name))).map((item) => upper(item.as)));
+        // below a projection nothing has ties: only the cursor's own ORDER BY
+        // makes them, and it is accepted at the top only; the keys carried up
+        // are positions, one row each
         return {rel: {...r, input: o.rel, items: [...r.items, ...carried.map((c) => ({as: c.as, expr: col(c.key.col, undefined)}))]},
-          keys: carried.map((c) => ({col: c.as, desc: c.key.desc})), ties};
+          keys: carried.map((c) => ({col: c.as, desc: c.key.desc})), ties: null};
       }
       case "scan": return upper(r.table) === "DUMMY" ? {rel: r, keys: [], ties: null} : undefined;
       case "union": {
@@ -845,7 +847,7 @@ export async function runProcedure(program, {
         }
         const outside = known.ties === null ? [] : Object.keys(statement.schema).filter((column) => !known.ties.has(upper(column)));
         if (outside.length > 0) {
-          const refusal = new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: rows equal in its ORDER BY come in any order, and the loop reads ${outside.join(", ")}`, statement);
+          const refusal = new UnsupportedSqlScript(`FOR over cursor ${statement.cursorName}: rows equal in its ORDER BY come in any order, and its row carries ${outside.join(", ")} too`, statement);
           refusal.reason = "order";
           throw refusal;
         }
