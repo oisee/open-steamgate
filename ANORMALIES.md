@@ -29,7 +29,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
-### ANOMALY-2026-09-24-zone-reserved-word — A table field named ZONE activates here and not on a system
+### ANOMALY-2026-09-24-zone-reserved-word -- A table field named ZONE activates here and not on a system
 
 - Status: `workaround` (the table field is renamed in #67, the CDS element here; with both, ZC_OSD_TAXICUBE activates on A4H)
 - Discovery date: `2026-09-24`
@@ -45,6 +45,31 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: `test/db-migrate.mjs` (the migration), `test/taxi-import.mjs` (an import into an old-shaped file); nothing checks names against the reserved list yet
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-09-24-delete-adjacent-default-key -- DELETE ADJACENT DUPLICATES compares every component of a DEFAULT KEY table
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.x as this tree pins it
+- Affected ABAP statement, runtime API or adapter: `DELETE ADJACENT DUPLICATES FROM itab` without `COMPARING`, on a standard table of a structure `WITH DEFAULT KEY`
+- Minimal ABAP reproducer:
+
+```abap
+TYPES: BEGIN OF ty, c TYPE c LENGTH 1, i TYPE i, END OF ty.
+DATA lt TYPE STANDARD TABLE OF ty WITH DEFAULT KEY.
+" rows (a,2) (a,1) (b,1)
+SORT lt.                          " both: a2 a1 b1
+DELETE ADJACENT DUPLICATES FROM lt.
+" SAP: 2 rows -- open-abap: 3 rows
+```
+
+- Exact command used to run it: **measured on A4H 2026-09-24** (`$ZOSG_TMP_0462`, ultra/demodata), an ABAP Unit probe with the lines above: `a2 a1 b1  lines:2`; the same class transpiled here: `a2 a1 b1  lines:3`. The probe was deleted.
+- Expected SAP behaviour: the default key of a structured line is its character-like components, so the comparison leaves the `i` out, as `SORT` already does here
+- Actual open-abap behaviour: `SORT` uses the default key (the order agrees), `DELETE ADJACENT DUPLICATES` compares the whole line
+- Impact on open-steamgate: found by `ZCL_OSD_DEMO_TAXI`'s grain test, which passed here and failed on A4H; the test now sorts and compares by every component explicitly, which both answer alike
+- Smallest safe workaround: name the key: `SORT ... BY` and `COMPARING ALL FIELDS` (or the components)
+- Upstream issue: needs an issue (transpiler runtime); not filed yet
+- Regression-test location: `src/demo_data/zcl_osd_demo_taxi.clas.testclasses.abap` (`grain_and_marks`) uses the portable form; no test pins the anomaly
+- Upstream version containing a fix: `unknown`
 ### ANOMALY-2026-09-18-icf-shim-form-fields-from-body — A POSTed form field is not there, and reads as an empty one
 
 **A POSTed form field is not there.** On a system, ICF fills the form fields of

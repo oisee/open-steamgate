@@ -37,6 +37,6 @@ test("NYC TLC analytical page renders chart and grouped table from OData", async
   await page.locator(`[id="${selectionId}"]`).click();
   await help.getByRole("button", {name: "OK", exact: true}).click();
   await expect(page.locator("body")).toContainText("Adapt Filters (1)");
-  await expect(page.locator("body")).toContainText(process.env.OSD_TAXI_FULL === "1" ? "Taxi trips (326)" : "Taxi trips (1)");
+  await expect(page.locator("body")).toContainText(process.env.OSD_TAXI_FULL === "1" ? "Taxi trips (326)" : "Taxi trips (331)");
   expect(failures).toEqual([]);
 });

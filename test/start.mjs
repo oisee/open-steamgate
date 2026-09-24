@@ -1,5 +1,6 @@
 import {databasePath} from "../tools/osd-persist.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
+import {ensureDemoData} from "../tools/osd-demo-data.mjs";
 import express from "express";
 import {existsSync} from "node:fs";
 import {tilesOf, webappsOf} from "../tools/osd-packs.mjs";
@@ -75,6 +76,9 @@ async function loadInline() {
   // the search help objects (*.shlp.xml in src/) become value help providers;
   // tools/segw-shlp.mjs generated this
   await zcl_stg_shlp_registry.register();
+  // the synthetic taxi facts, made by ZCL_OSD_DEMO_DATA (tools/osd-demo-data.mjs)
+  const {zcl_osd_demo_data} = await from("zcl_osd_demo_data.clas.mjs");
+  await ensureDemoData(zcl_osd_demo_data);
   return {cl_express_icf_shim, zcl_apc_host, zcl_osd_status, icf};
 }
 const inline = MODE === "inline" ? await loadInline() : undefined;

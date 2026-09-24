@@ -7,9 +7,10 @@
 // the role of express and sql.js compiled to JavaScript in the role of the
 // database file. The pattern is larshp/hithub's web/preview-backend.mjs (MIT).
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
+import {ensureDemoData} from "../tools/osd-demo-data.mjs";
 import {realNow} from "./preview-runtime.mjs";
 import {Buffer} from "buffer";
-import {seed, buildId, database} from "./generated/seed.mjs";
+import {seed, buildId, database, demoRows} from "./generated/seed.mjs";
 import {odata as odataServices, packs as packRows, sid as SID} from "./generated/status.mjs";
 import {registry as icfRegistry} from "./generated/icf.mjs";
 import {xref} from "./generated/xref.mjs";
@@ -24,7 +25,7 @@ import {currentRows} from "../tools/osd-icf-apply.mjs";
 // sy-sysid / sy-mandt / sy-uname from it through tools/osd-identity.mjs, so
 // the ABAP in a service worker knows which system it is exactly as the ABAP
 // in a work process does (backlog G.1b).
-const preview = {seed, buildId, database, stored: undefined, db: undefined, env: {OSD_SID: SID}};
+const preview = {seed, buildId, database, stored: undefined, db: undefined, env: {OSD_SID: SID, OSD_DEMO_ROWS: demoRows}};
 globalThis.__stgPreview = preview;
 
 const {initializeABAP} = await import("../output/init.mjs");
@@ -117,6 +118,7 @@ function serviceFor(path) {
 const {zcl_osd_status} = await import("../output/zcl_osd_status.clas.mjs");
 const {zcl_stg_segw_registry} = await import("../output/zcl_stg_segw_registry.clas.mjs");
 const {zcl_stg_shlp_registry} = await import("../output/zcl_stg_shlp_registry.clas.mjs");
+const {zcl_osd_demo_data} = await import("../output/zcl_osd_demo_data.clas.mjs");
 
 // CL_EXPRESS_ICF_SHIM keeps request and response on one static server object;
 // overlapping fetch events would answer each other's requests. Serialize.
@@ -387,6 +389,8 @@ export async function startBackend(stored, options = {}) {
   // database from an older build ends with this build's rows
   await applyXref(abap.context.databaseConnections.DEFAULT, xref);
   await registerServices();
+  // the synthetic taxi facts, made by ZCL_OSD_DEMO_DATA (tools/osd-demo-data.mjs)
+  await ensureDemoData(zcl_osd_demo_data, {env: preview.env});
   await refreshStatus();
 }
 
@@ -406,6 +410,8 @@ export function resetBackend() {
     await applyTo(abap.context.databaseConnections.DEFAULT, icfRegistry);
     registryServices = servicesFromRows(await currentRows(abap.context.databaseConnections.DEFAULT));
     await applyXref(abap.context.databaseConnections.DEFAULT, xref);
+    // and so did the synthetic taxi facts
+    await ensureDemoData(zcl_osd_demo_data, {env: preview.env});
     // the status tables went with the database; fill them again rather than
     // leaving the app empty until somebody opens it
     await refreshStatus();
