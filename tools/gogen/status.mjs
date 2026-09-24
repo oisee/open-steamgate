@@ -15,8 +15,23 @@
 // The texts and pack names are the ones osd-status.mjs gives the same
 // rows, read from the same functions.
 import {createHash} from "node:crypto";
+import {existsSync, readFileSync} from "node:fs";
 import {resolve} from "node:path";
 import {home} from "./home.mjs";
+
+// the paths test/start.mjs refreshes the status tables before (its
+// app.all("<path>*", withFreshStatus) lines), read from the file rather than
+// written out again, so OSGo refreshes before exactly the requests Node does
+// (ultra/json fix round: the webgui was missing). Without the file (an echo
+// build) the two paths it had on 2026-09-24.
+export const FRESH_DEFAULT = ["/sap/bc/gui/sap/its/webgui", "/sap/opu/odata/sap/ZOSD_STATUS_SRV"];
+export function freshPrefixes(root = home) {
+  const f = `${root}/test/start.mjs`;
+  if (!existsSync(f)) return FRESH_DEFAULT;
+  const found = [...readFileSync(f, "utf8").matchAll(/app\.all\(\s*["']([^"'*]+)\*?["']\s*,\s*withFreshStatus\s*\)/g)].map((m) => m[1]);
+  if (found.length === 0) throw new Error(`${f}: no app.all(..., withFreshStatus) found; the status refresh paths of OSGo cannot follow Node's`);
+  return [...new Set(found)].sort();
+}
 
 export async function statusFacts({program, services, webapps, generated}) {
   const {servicesOf, packsInfo} = await import(`${home}/tools/osd-status.mjs`);
@@ -46,7 +61,7 @@ export async function statusFacts({program, services, webapps, generated}) {
   });
   // the generation this process serves: the program itself, by content
   const generation = "go:" + createHash("sha256").update(generated).digest("hex").slice(0, 16);
-  return {services: svc, packs, generation};
+  return {services: svc, packs, generation, fresh: freshPrefixes(home)};
 }
 
 /** zz_status.go: the facts above as Go values */
@@ -68,6 +83,10 @@ ${refresh}
 
 // the program this process runs, by the content of its generated code
 const buildGeneration = ${q(facts.generation)}
+
+// the paths whose requests refresh the status tables first: test/start.mjs's
+// withFreshStatus mounts (status.mjs freshPrefixes)
+var statusFreshPrefixes = []string{${(facts.fresh ?? FRESH_DEFAULT).map((x) => q(x)).join(", ")}}
 
 var statusServed = []statusService{
 ${facts.services.map((s) => `\t{Path: ${q(s.path)}, Kind: ${q(s.kind)}, Handler: ${q(String(s.handler))}, Text: ${q(String(s.text ?? ""))}, Pack: ${q(String(s.pack ?? ""))}},`).join("\n")}

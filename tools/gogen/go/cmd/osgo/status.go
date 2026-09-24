@@ -430,8 +430,20 @@ func refreshStatus(h statusHost) (rows int32, err error) {
 	return rows, nil
 }
 
+// freshPath: a route at or below one of statusFreshPrefixes (the glob
+// "<prefix>*" of test/start.mjs, case as the mux compares)
+func freshPath(route string) bool {
+	for _, p := range statusFreshPrefixes {
+		if len(route) >= len(p) && strings.EqualFold(route[:len(p)], p) {
+			return true
+		}
+	}
+	return false
+}
+
 // withFreshStatus refreshes the tables before the request, as test/start.mjs
-// does for ZOSD_STATUS_SRV; a refresh that fails is logged and the read goes on
+// does for ZOSD_STATUS_SRV and the webgui; a refresh that fails is logged and
+// the read goes on
 func withFreshStatus(h statusHost, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, err := refreshStatus(h); err != nil {

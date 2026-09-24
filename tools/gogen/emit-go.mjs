@@ -249,6 +249,10 @@ export function emitGo(program, pkg = "main") {
     // the most-derived object, for the calls a method makes on me
     if (POLY.has(cls.name)) out.push(`\tself_${typeName(cls.name)} I_${typeName(cls.name)}`);
     for (const a of inst) out.push(`\t${ident(a.name)} ${goType(a.type)}`);
+    // an object is an identity (ultra/json fix round, ZCL_GOGEN_T_JSONGEN's
+    // "ne"): Go may give two zero-size values one address, so a class with
+    // nothing in it gets a byte, and two CREATE OBJECTs are two objects
+    if (!cls.super && !POLY.has(cls.name) && inst.length === 0) out.push("\t_ byte");
     out.push("}", "");
     if (POLY.has(cls.name)) out.push(...classInterface(program, cls));
     out.push(...attrAccessors(cls, inst));
@@ -1542,7 +1546,8 @@ function cond(c, ctx) {
     case "cmp":
       if (c.type?.k === "p") return `abap.CmpP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} 0`;
       return `${expr(c.l, ctx)} ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} ${expr(c.r, ctx)}`;
-    case "refeq": return `(any(${expr(c.l, ctx)}) ${c.op === "=" ? "==" : "!="} any(${expr(c.r, ctx)}))`;
+    // abap.RefEq: two initial references of different static types are equal (ultra/json fix round)
+    case "refeq": return `(${c.op === "=" ? "" : "!"}abap.RefEq(${expr(c.l, ctx)}, ${expr(c.r, ctx)}))`;
     // in parentheses: a composite literal right before the { of an if does not parse
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;

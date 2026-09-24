@@ -395,8 +395,19 @@ func main() {
 	}
 	odata := icfHandler("ZCL_STG_HTTP_HANDLER", odataBase, odataDump)
 	status := statusHost{port: *port, root: *root, dbFile: *dbFile, started: started}
-	routes = append(routes, route{statusODataPath, false, withFreshStatus(status, odata)})
+	routes = append(routes, route{statusODataPath, false, odata})
 	routes = append(routes, route{odataBase + "/", false, odata})
+	// every route under a path test/start.mjs refreshes the status tables
+	// for (statusFreshPrefixes: ZOSD_STATUS_SRV and the webgui, which reads
+	// the same tables) refreshes them first (ultra/json fix round)
+	for i, rt := range routes {
+		if freshPath(rt.prefix) {
+			routes[i].h = withFreshStatus(status, rt.h)
+		}
+	}
+	if !freshPath(statusODataPath) {
+		log.Printf("status: test/start.mjs does not refresh before %s, neither does this process", statusODataPath)
+	}
 	// longest prefix first, so /sap/bc/a/b is not taken by /sap/bc/a
 	sort.SliceStable(routes, func(i, j int) bool { return len(routes[i].prefix) > len(routes[j].prefix) })
 

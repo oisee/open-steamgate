@@ -2,6 +2,7 @@ package abap
 
 import (
 	"cmp"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -77,4 +78,29 @@ func UniqueKeyCheck(n int, dup func(i int) bool, key string) {
 			panic(NotCompiled("APPEND", "a row repeating the value of the unique secondary key "+key+" (not measured on A4H)"))
 		}
 	}
+}
+
+// RefEq is = between two object references (ultra/json fix round,
+// ZCL_GOGEN_T_REFEQ). Two initial references are equal whatever their
+// static types; a typed nil pointer in an interface is initial, so
+// any((*Sub)(nil)) and any((*Base)(nil)), unequal to Go, are equal here.
+// Bound references compare by identity.
+func RefEq(a, b any) bool {
+	na, nb := refNil(a), refNil(b)
+	if na || nb {
+		return na && nb
+	}
+	return a == b
+}
+
+func refNil(x any) bool {
+	if x == nil {
+		return true
+	}
+	v := reflect.ValueOf(x)
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return v.IsNil()
+	}
+	return false
 }
