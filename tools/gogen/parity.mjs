@@ -236,6 +236,11 @@ const denom = http.filter((t) => t.node.state === "passed");
 const passed = denom.filter((t) => t.osgo?.state === "passed");
 const failing = denom.filter((t) => t.osgo?.state !== "passed");
 const osgoOnly = http.filter((t) => t.node.state !== "passed" && t.osgo?.state === "passed");
+// the ADT facade (tools/adt-facade.mjs, a JS module of the Node host) is
+// postponed (Alice, 2026-09-24): its tests are "adt-deferred", out of the
+// headline's numerator and denominator alike and listed on their own line
+const ADT_PATH = /^\/sap\/bc\/adt(\/|$|\?)|^\/osd\/not-served(\/|$|\?)/;
+const isAdt = (t) => t.file === "test/adt-facade.mjs" || [...(t.node?.requests ?? []), ...(t.osgo?.requests ?? [])].some((q) => ADT_PATH.test(q.path ?? ""));
 
 function dumpKey(body) {
   let text = body;
@@ -273,6 +278,7 @@ const KNOWN = [
 ];
 
 function classify(t) {
+  if (isAdt(t)) return {cat: "adt-deferred", key: "the ADT facade (/sap/bc/adt, /osd/not-served): a JS module of the Node host, postponed", detail: String(t.osgo?.err?.message ?? "").split("\n")[0].slice(0, 200)};
   const o = t.osgo;
   if (o !== undefined && o.state !== "passed") {
     const text = `${o.err?.message ?? ""} ${o.err?.expected ?? ""} ${o.err?.actual ?? ""}`;
@@ -368,15 +374,22 @@ writeFileSync(join(out, "parity.json"), JSON.stringify(summary, null, 1));
 // the headline leaves the go-matches-system tests out of the denominator:
 // OSGo answers them as a system does (scoreRaw keeps them in)
 const known = failing.filter((t) => t.cat.cat === "go-matches-system").length;
+const adtAll = denom.filter(isAdt).length;
+const passedH = passed.filter((t) => !isAdt(t)).length;
+const denomH = denom.length - known - adtAll;
 summary.scoreRaw = summary.score;
-summary.score = denom.length - known ? passed.length / (denom.length - known) : null;
+summary.score = denomH ? passedH / denomH : null;
 summary.totals.goMatchesSystem = known;
+summary.totals.adtDeferred = adtAll;
+summary.totals.headlinePassed = passedH;
+summary.totals.headlineDenominator = denomH;
 summary.closerToReference = failing.filter((t) => t.cat.cat === "go-matches-system").map((t) => ({file: t.file, title: t.title, why: t.cat.key}));
 writeFileSync(join(out, "parity.json"), JSON.stringify(summary, null, 1));
 const pct = (x) => x === null ? "n/a" : `${(x * 100).toFixed(1)}%`;
 const md = [];
 md.push(`# OSG parity: Node vs OSGo`, "", `${summary.when}, checkout \`${root}\`.`, "");
-md.push(`**Score: ${pct(summary.score)}** -- ${passed.length} of ${denom.length - known} HTTP-level tests that pass on Node also pass on OSGo, not counting the ${known} where OSGo is closer to the reference (below).`, "");
+md.push(`**Score: ${pct(summary.score)}** -- ${passedH} of ${denomH} HTTP-level tests that pass on Node also pass on OSGo (${denom.length} pass on Node, less ${known} go-matches-system and ${adtAll} adt-deferred).`, "");
+md.push(`**adt-deferred** -- ${adtAll} test(s) of the ADT facade (/sap/bc/adt, /osd/not-served), postponed; ${passed.length - passedH} of them pass on OSGo.`, "");
 md.push(`Counting those as failures: ${pct(summary.scoreRaw)} (${passed.length} of ${denom.length}).`, "");
 if (known) {
   md.push(`**Closer to the reference** (go-matches-system: OSGo answers as a system does, Node's answer is an ANORMALIES entry) -- ${known} test(s):`, "");
@@ -422,6 +435,6 @@ ranked.forEach((g, i) => {
 }
 if (osgoOnly.length) md.push("## Pass on OSGo, fail on Node", "", ...osgoOnly.map((t) => `- ${t.file}: ${t.title}`), "");
 writeFileSync(join(out, "parity.md"), md.join("\n"));
-console.log(`\nscore ${pct(summary.score)} (${passed.length}/${denom.length - known}, ${known} closer to the reference left out); ${pct(summary.scoreRaw)} counting them (${passed.length}/${denom.length})`);
+console.log(`\nscore ${pct(summary.score)} (${passedH}/${denomH}: ${denom.length} Node-passed - ${known} go-matches-system - ${adtAll} adt-deferred); raw ${pct(summary.scoreRaw)} (${passed.length}/${denom.length})`);
 console.log(`${failing.length} failing in ${ranked.length} groups; not applicable: ${summary.totals.notApplicableSuites} suites, ${summary.totals.notApplicableTests ?? "?"} tests`);
 console.log(`-> ${join(out, "parity.md")}`);
