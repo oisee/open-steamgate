@@ -437,6 +437,32 @@ describe("the typed SQLScript procedural IR", function () {
     expect(invocations).to.equal(1);
   });
 
+  it("counts in the caller's trace what a nested CALL sent to the database", async () => {
+    // the child evaluates LENGTH of a text in the engine: one statement of
+    // its own, which the parent's trace must not report as a host run
+    const child = procedure({
+      relationParameters: [{name: "IT_ROWS", schema: {ID: T.int}}],
+      output: "ET_ROWS", outputSchema: {ID: T.int},
+      body: [
+        declareScalar("S", T.str, lit("ab", T.str)),
+        declareScalar("N", T.int, call("LENGTH", [p("S", T.str)], T.int)),
+        assignRelation("ET_ROWS", varRef("IT_ROWS")),
+      ],
+    });
+    const parent = procedure({
+      relationParameters: [{name: "IT_ROWS", schema: {ID: T.int}}],
+      output: "ET_ROWS", outputSchema: {ID: T.int},
+      body: [callProcedure("ZCL_DEMO=>CHILD", "IT_ROWS", "ET_ROWS")],
+    });
+    const answer = await runProcedure(parent, {
+      client, dialect: "duckdb", inputCatalogue: {DUMMY: {}},
+      relationInputs: {IT_ROWS: project(scan("DUMMY"), [{as: "ID", expr: lit(3, T.int)}])},
+      procedures: new Map([["ZCL_DEMO=>CHILD", child]]),
+    });
+    expect(answer.rows.map((one) => one.ID)).to.deep.equal([3]);
+    expect(answer.trace).to.include({engine: "duckdb", nestedCalls: 1, databaseStatements: 2});
+  });
+
   it("refuses an INT2 output or an INT2 table input of a nested CALL, whose range check the CALL does not carry", async () => {
     const rows = (...ids) => union(ids.map((id) => project(scan("DUMMY"), [{as: "ID", expr: lit(id, T.int)}])), true);
     const small = {ID: T.int2};
