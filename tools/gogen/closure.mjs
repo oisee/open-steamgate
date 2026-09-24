@@ -14,7 +14,7 @@ import {home} from "./home.mjs";
 const entry = (process.argv[2] ?? "ZCL_STG_DISPATCHER=>DISPATCH").toUpperCase();
 const walk = (d) => readdirSync(d, {withFileTypes: true}).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
 const layers = [`${home}/src`, `${home}/gen`];
-const libs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/scaffold", "open-abap-odata/src", "ajson/src/core"]
+const libs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/framework", "open-abap-odata/src", "ajson/src/core"]
   .map((d) => `${home}/.local/lars/${d}`).filter(existsSync);
 const objectsOf = (dirs) => [...new Set(dirs.flatMap(walk).filter((f) => /\.(clas|intf)\.abap$/.test(f)).map((f) => f.split("/").pop().split(".")[0]))];
 // OSG's own objects plus the libraries': a library class a request reaches must compile too

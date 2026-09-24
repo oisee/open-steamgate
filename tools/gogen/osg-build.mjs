@@ -25,7 +25,7 @@ if (resolved.duplicates.length > 0) throw new Error(`the same object twice in on
 /** the files of an object that a later layer holds too, absolute */
 export const hidden = new Set(resolved.hidden.map((f) => `${home}/${f}`));
 export const overridden = resolved.overridden;
-export const libs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/scaffold", "open-abap-odata/src", "ajson/src/core"]
+export const libs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/framework", "open-abap-odata/src", "ajson/src/core"]
   .map((d) => `${home}/.local/lars/${d}`).filter(existsSync);
 
 /*

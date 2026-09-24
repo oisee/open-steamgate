@@ -72,18 +72,18 @@
       // Same shape as open-abap-core above -- SAP-namespace shim code, a
       // library and not a pack (docs/webgui.md).
       //
-      // Only /src is the library. The repository also carries /scaffold (162
-      // example programs and a dynpro host of its own) and /test, and neither
-      // belongs in this tree. Three files under /scaffold are the exception:
-      // /src refers to them by name, so they are closure and not example --
-      // cl_ctmenu and cl_gui_toolbar keep their items in
-      // zcl_gg_context_menu_state, and the tree and grid controls render
-      // through zcl_gg_host_surface, which asks zcl_gg_host_html for a CSS
-      // class. They would be library files upstream; naming them here costs
-      // three lines and keeps the other 159 out.
+      // Only /src is the library. The repository also carries /framework
+      // (a dynpro host of its own), /examples (the example programs) and
+      // /test, and none of it belongs in this tree. Three files under
+      // /framework are the exception: /src refers to them by name, so they
+      // are closure and not example -- cl_ctmenu and cl_gui_toolbar keep
+      // their items in zcl_gg_context_menu_state, and the tree and grid
+      // controls render through zcl_gg_host_surface, which asks
+      // zcl_gg_host_html for a CSS class. They would be library files
+      // upstream; naming them here costs three lines and keeps the rest out.
       "url": "https://github.com/oisee/open-abap-gui",
       "folder": "/.local/lars/open-abap-gui",
-      "files": "/{src/**/*.*,scaffold/zcl_gg_context_menu_state.clas.abap,scaffold/zcl_gg_host_html.clas.abap,scaffold/host/zcl_gg_host_surface.clas.abap}"
+      "files": "/{src/**/*.*,framework/zcl_gg_context_menu_state.clas.abap,framework/zcl_gg_host_html.clas.abap,framework/host/zcl_gg_host_surface.clas.abap}"
     }
   ],
   "syntax": {
