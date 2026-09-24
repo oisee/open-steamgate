@@ -210,8 +210,24 @@ export const update = (table, set, pred, alias) => {
 /** DELETE FROM dbtab [AS alias] WHERE ...; `pred` undefined deletes every row */
 export const remove = (table, pred, alias) => ({write: "delete", table: upper(table),
   ...(alias === undefined ? {} : {alias: upper(alias)}), ...(pred === undefined ? {} : {pred})});
+/** UPSERT dbtab [(cols)] SELECT ...: by the primary key, the keys the query
+ *  brings updated and the others inserted (measured on HXE) */
+export const upsertFrom = (table, columns, rel, key, fill = []) => {
+  const cols = names(columns);
+  const keys = names(key);
+  if (keys.length === 0) throw new WriteError("an UPSERT ... SELECT needs the table's key columns");
+  if (keys.some((k) => !cols.includes(k))) throw new WriteError("an UPSERT's key columns must be among its columns");
+  checkWritten(fill.map((one) => one.expr));
+  return {write: "upsert", table: upper(table), columns: cols, from: rel, key: keys,
+    ...(fill.length === 0 ? {} : {fill: fill.map((one) => ({col: upper(one.col), expr: one.expr}))})};
+};
 /** MODIFY dbtab FROM wa / FROM TABLE itab: insert, or update the row of the same key */
-export const upsert = (table, columns, rows, key) => {
+/** `fill`: the columns the statement does not name, with the value an insert
+ *  gives them -- measured on HXE: a column left out of an UPSERT keeps its
+ *  value when the row is updated and takes its default when it is inserted
+ *  (a DDIC table's default is the initial value, which the transpiler's
+ *  tables do not declare, so it is written; HANA's own UPSERT needs none) */
+export const upsert = (table, columns, rows, key, fill = []) => {
   const cols = names(columns);
   const keys = names(key);
   if (keys.length === 0) throw new WriteError("a MODIFY needs the table's key columns");
@@ -228,7 +244,11 @@ export const upsert = (table, columns, rows, key) => {
     if (parts.some((e) => e?.node !== "lit")) throw new WriteError("a MODIFY row whose key is not a bound value cannot be ordered by key");
     return JSON.stringify(parts.map((e) => e.value));
   };
-  const last = new Map(rows.map((row, i) => [keyOf(row), i]));
-  const kept = rows.filter((row, i) => last.get(keyOf(row)) === i);
-  return {write: "upsert", table: upper(table), columns: cols, rows: kept, key: keys};
+  // one row needs no ordering by key, and its key may be any expression
+  // (`UPSERT t VALUES (:iv, ...) WITH PRIMARY KEY`, the #64 critic)
+  const last = rows.length === 1 ? undefined : new Map(rows.map((row, i) => [keyOf(row), i]));
+  const kept = rows.length === 1 ? rows : rows.filter((row, i) => last.get(keyOf(row)) === i);
+  checkWritten(fill.map((one) => one.expr));
+  return {write: "upsert", table: upper(table), columns: cols, rows: kept, key: keys,
+    ...(fill.length === 0 ? {} : {fill: fill.map((one) => ({col: upper(one.col), expr: one.expr}))})};
 };

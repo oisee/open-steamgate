@@ -417,7 +417,7 @@ export class Return extends Expression {
 export class Statement extends Expression {
   getRunnable() {
     return altPrio(new Declare(), new Return(), new If(), new While(), new For(), new Block(), new ProcedureCall(),
-      new Delete(), new Update(), new Insert(), new Assignment(),
+      new Delete(), new Update(), new Insert(), new Upsert(), new Assignment(),
       seq(new SetOperation(), ";"));
   }
 }
@@ -450,6 +450,19 @@ export class Insert extends Expression {
     return seq(str("INSERT"), str("INTO"), altPrio(tok(TokenKind.host), new ColumnRef()),
       opt(seq("(", new Name(), star(seq(",", new Name())), ")")),
       altPrio(seq(str("VALUES"), "(", new Expr(), star(seq(",", new Expr())), ")"), new SetOperation()), ";");
+  }
+}
+
+/** `UPSERT t [(c, ...)] VALUES (e, ...) [WITH PRIMARY KEY | WHERE cond];` and
+ *  `UPSERT t [(c, ...)] SELECT ...;` */
+export class Upsert extends Expression {
+  getRunnable() {
+    return seq(str("UPSERT"), new ColumnRef(),
+      opt(seq("(", new Name(), star(seq(",", new Name())), ")")),
+      altPrio(
+        seq(str("VALUES"), "(", new Expr(), star(seq(",", new Expr())), ")",
+          opt(altPrio(seq(str("WITH"), str("PRIMARY"), str("KEY")), seq(str("WHERE"), new Condition())))),
+        new SetOperation()), ";");
   }
 }
 

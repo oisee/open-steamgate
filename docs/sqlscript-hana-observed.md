@@ -828,6 +828,8 @@ A table T (K INTEGER PRIMARY KEY, V NVARCHAR(10)) holding (1, a), (2, b):
 | `UPSERT t SELECT ...` | by the primary key: updates the keys there, inserts the others |
 | `UPSERT t (k, v) VALUES (2, 'w') WHERE k = 2` | updates the rows the WHERE finds |
 | `UPSERT n VALUES ...` twice, N without a key | one row -- the second updated it |
+| `UPSERT t SELECT ...` bringing one key twice | `unique constraint violated` |
+| `UPSERT t (k, v) SELECT ...` / `VALUES ... WITH PRIMARY KEY`, W left out | an updated row keeps its W; an inserted one takes W's default |
 | `DELETE FROM t WHERE k > 1;` then `::ROWCOUNT` | 1 |
 | `DELETE` in a FUNCTION (a table function) | does not compile: `INSERT/UPDATE/DELETE is/are not supported in table function` |
 | `DELETE` in a `READS SQL DATA` procedure (an AMDP OPTIONS READ-ONLY) | does not compile: `... not supported in read-only procedure` |
@@ -855,5 +857,12 @@ ends. Which plans: every one that reads the database at all -- a view or a
 table function reads the table under it, and which tables a view reads is
 not known here. The snapshot is a table of the columns' types filled by
 INSERT ... SELECT (SQLite keeps CHAR's RTRIM comparison), made inside the
-LUW. UPSERT, `::ROWCOUNT`, `INSERT INTO :lt` and MERGE are not carried yet:
-UPSERT needs the table's key, which the catalogue does not hold.
+LUW. UPSERT is carried in the two forms the corpus uses and HANA was
+measured in -- VALUES WITH PRIMARY KEY and SELECT, both by the table's
+primary key, which `ddicKeys` reads beside the catalogue (the fields of a
+key `.INCLUDE` are key fields); VALUES alone and VALUES WHERE are refused by
+name. Before an UPSERT ... SELECT the runtime asks the query for a NULL in a
+key column and for a key twice, and raises before writing (HANA's key is NOT
+NULL; the repeated key is measured); fill values exist for C, D, P, I, INT8
+and STRING, and an UPSERT leaving out a column of another type is refused. `::ROWCOUNT`, `INSERT INTO :lt` and MERGE
+are not carried yet.

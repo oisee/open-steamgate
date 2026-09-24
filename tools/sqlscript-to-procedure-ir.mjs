@@ -455,7 +455,7 @@ export function compileProcedure(method, types, options = {}) {
   const noteOrder = (name, rel) => relationOrders.set(upper(name), orderOf(rel, relationOrders, false));
   const bind = (node, fragment, targetSchema) => toIr(node, {
     fragment, scalarTypes, relationSchemas, rowVariables, deferTableVariables: true, strictColumns: true,
-    signature: method, arrayValues, catalogue, ...(targetSchema === undefined ? {} : {targetSchema}),
+    signature: method, arrayValues, catalogue, keys: options.keys ?? {}, ...(targetSchema === undefined ? {} : {targetSchema}),
   });
 
   // HANA refuses a bare BOOLEAN as a condition (`IF :g THEN` is a syntax
@@ -471,7 +471,7 @@ export function compileProcedure(method, types, options = {}) {
   const compileStatements = (container, allowArrayDeclarations = false, returnAllowed = false) => {
     const result = [];
     const directStatements = new Set(["Declare", "Assignment", "While", "If", "Block", "ProcedureCall", "Return", "SetOperation",
-      "Delete", "Update", "Insert"]);
+      "Delete", "Update", "Insert", "Upsert"]);
     for (const wrapper of container.children ?? []) {
       const node = wrapper.node === "Statement"
         ? (wrapper.children ?? []).find((one) => one.node !== "word")
@@ -580,7 +580,7 @@ export function compileProcedure(method, types, options = {}) {
         const initialNode = child(node, "Expr");
         result.push(declareScalar(name, type,
           initialNode === undefined ? undefined : bind(initialNode, "expression"), node));
-      } else if (["Delete", "Update", "Insert"].includes(node.node)) {
+      } else if (["Delete", "Update", "Insert", "Upsert"].includes(node.node)) {
         // a write to a database table: the method must not be READ-ONLY (HANA
         // creates such a procedure READS SQL DATA, which cannot modify)
         // measured on HXE: "INSERT/UPDATE/DELETE is/are not supported in

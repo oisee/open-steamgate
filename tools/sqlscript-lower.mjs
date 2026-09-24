@@ -748,16 +748,34 @@ export function lower(rel, dialectName, options = {}) {
       return `UPDATE ${target} SET ${set}${where()}`;
     }
     if (w.write === "delete") return `DELETE FROM ${target}${where()}`;
+    if (w.write === "upsert" && w.from !== undefined) {
+      if (dialectName === "hana") return `UPSERT ${table} ${cols(w.columns)} ${select(w.from)}`;
+      const fill = w.fill ?? [];
+      // the named columns only: one left out keeps its value on an update
+      const rest = w.columns.filter((c) => !w.key.includes(c));
+      const action = rest.length === 0 ? "DO NOTHING"
+        : `DO UPDATE SET ${rest.map((c) => `${d.quote(c)} = excluded.${d.quote(c)}`).join(", ")}`;
+      // the fill values are rendered before the query they follow in the
+      // text's order; SQLite reads `... FROM t ON CONFLICT` as a join
+      // constraint, so the source is a derived table with a WHERE of its own
+      const fillValues = fill.map((one) => expr(one.expr));
+      const source = fill.length === 0
+        ? (dialectName === "sqlite" ? `SELECT * FROM (${select(w.from)}) WHERE true` : select(w.from))
+        : `SELECT "q".*${fillValues.map((v) => `, ${v}`).join("")} FROM (${select(w.from)}) AS "q"${dialectName === "sqlite" ? " WHERE true" : ""}`;
+      return `INSERT INTO ${table} ${cols([...w.columns, ...fill.map((one) => one.col)])} ${source} ON CONFLICT ${cols(w.key)} ${action}`;
+    }
     if (w.write === "upsert") {
       if (dialectName === "hana") {
         return w.rows.length === 1
           ? `UPSERT ${table} ${cols(w.columns)} VALUES ${values(w.rows)} WITH PRIMARY KEY`
           : `UPSERT ${table} ${cols(w.columns)} ${hanaRows(w.rows)}`;
       }
+      const fill = w.fill ?? [];
       const rest = w.columns.filter((c) => !w.key.includes(c));
       const action = rest.length === 0 ? "DO NOTHING"
         : `DO UPDATE SET ${rest.map((c) => `${d.quote(c)} = excluded.${d.quote(c)}`).join(", ")}`;
-      return `INSERT INTO ${table} ${cols(w.columns)} VALUES ${values(w.rows)} ON CONFLICT ${cols(w.key)} ${action}`;
+      const rows = w.rows.map((row) => [...row, ...fill.map((one) => one.expr)]);
+      return `INSERT INTO ${table} ${cols([...w.columns, ...fill.map((one) => one.col)])} VALUES ${values(rows)} ON CONFLICT ${cols(w.key)} ${action}`;
     }
     throw new Refused(`no write ${JSON.stringify(w.write)}`);
   };

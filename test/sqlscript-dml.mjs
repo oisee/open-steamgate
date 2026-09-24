@@ -151,3 +151,103 @@ describe("the #63 critic's round", () => {
     expect(() => compileC("lt = SELECT 5 AS k, 'e' AS v FROM dummy; INSERT INTO t SELECT k, v FROM :lt; rv = 'x';")).not.to.throw();
   });
 });
+
+describe("UPSERT by the primary key, as HANA Express ran it", () => {
+  const KEYS = {T: ["K"]};
+  const compileU = (body) => compileProcedure({...SIG, body: "DECLARE n INTEGER; DECLARE s NVARCHAR(200); " + body},
+    new Map(), {catalogue: {T: TABLE}, keys: KEYS});
+  for (const [dialect, make] of [["duckdb", () => new DuckDBDatabaseClient({path: ":memory:"})], ["sqlite", () => new FileSqliteClient({path: ":memory:"})]]) {
+    for (const [name, body, hana] of [
+      ["VALUES WITH PRIMARY KEY updates a key and inserts a new one", "UPSERT t VALUES (1, 'u') WITH PRIMARY KEY; UPSERT t VALUES (5, 'e') WITH PRIMARY KEY; " + agg, "1u,2b,5e"],
+      ["SELECT updates the keys it brings and inserts the others", "lt = SELECT 2 AS k, 'y' AS v FROM dummy UNION ALL SELECT 7 AS k, 'g' AS v FROM dummy; UPSERT t SELECT * FROM :lt; " + agg, "1a,2y,7g"],
+    ]) {
+      it(`on ${dialect}: ${name}: ${JSON.stringify(hana)}`, async () => {
+        const client = make();
+        await client.connect();
+        try {
+          await client.native({sql: 'CREATE TABLE "T" ("K" INTEGER PRIMARY KEY, "V" VARCHAR(10))', expect: "none"});
+          await client.native({sql: "INSERT INTO \"T\" VALUES (1, 'a')", expect: "none"});
+          await client.native({sql: "INSERT INTO \"T\" VALUES (2, 'b')", expect: "none"});
+          expect((await runProcedure(compileU(body), {client, dialect, inputCatalogue: {T: TABLE}})).value).to.equal(hana);
+        } finally { await client.disconnect(); }
+      });
+    }
+  }
+  it("refuses UPSERT without a known key, and VALUES without WITH PRIMARY KEY", () => {
+    expect(() => compile("UPSERT t SELECT k, v FROM t; rv = 'x';")).to.throw(/primary key is not known/);
+    expect(() => compileU("UPSERT t VALUES (1, 'x'); rv = 'x';")).to.throw(/without WITH PRIMARY KEY is not carried/);
+    expect(() => compileU("UPSERT t (k, v) VALUES (2, 'w') WHERE k = 2; rv = 'x';")).to.throw(/without WITH PRIMARY KEY is not carried/);
+  });
+});
+
+describe("UPSERT edges, as HANA Express ran them", () => {
+  const T3 = {K: {abap: "I"}, V: {abap: "C", len: 10}, W: {abap: "C", len: 10}};
+  const compile3 = (body) => compileProcedure({...SIG, body: "DECLARE s NVARCHAR(200); " + body}, new Map(), {catalogue: {T: T3}, keys: {T: ["K"]}});
+  const agg3 = "SELECT STRING_AGG(k || v || w, ',' ORDER BY k) AS s INTO s FROM t; rv = :s;";
+  for (const [dialect, make] of [["duckdb", () => new DuckDBDatabaseClient({path: ":memory:"})], ["sqlite", () => new FileSqliteClient({path: ":memory:"})]]) {
+    describe(`on ${dialect}`, function () {
+      this.timeout(30000);
+      let client;
+      const run = async (body) => (await runProcedure(compile3(body), {client, dialect, inputCatalogue: {T: T3}})).value;
+      beforeEach(async () => {
+        client = make();
+        await client.connect();
+        for (const sql of ['CREATE TABLE "T" ("K" INTEGER PRIMARY KEY, "V" VARCHAR(10), "W" VARCHAR(10))', "INSERT INTO \"T\" VALUES (1, 'a', 'x')", "INSERT INTO \"T\" VALUES (2, 'b', 'y')"]) {
+          await client.native({sql, expect: "none"});
+        }
+      });
+      afterEach(async () => { await client.disconnect(); });
+      // HXE: W left out keeps its value when updated, takes its default when
+      // inserted -- the default of a DDIC table being the initial value ''
+      it("a column left out keeps its value on an update and is initial on an insert (SELECT)", async () => {
+        expect(await run("lt = SELECT 1 AS k, 'n' AS v FROM dummy UNION ALL SELECT 3 AS k, 'm' AS v FROM dummy; UPSERT t (k, v) SELECT * FROM :lt; " + agg3)).to.equal("1nx,2by,3m");
+      });
+      it("the same with VALUES WITH PRIMARY KEY", async () => {
+        expect(await run("UPSERT t (k, v) VALUES (2, 'z') WITH PRIMARY KEY; UPSERT t (k, v) VALUES (4, 'o') WITH PRIMARY KEY; " + agg3)).to.equal("1ax,2zy,4o");
+      });
+      it("a key given as a variable in VALUES WITH PRIMARY KEY", async () => {
+        expect(await run("DECLARE n INTEGER = 2; UPSERT t (k, v) VALUES (:n, 'z') WITH PRIMARY KEY; UPSERT t (k, v) VALUES (:n + 3, 'o') WITH PRIMARY KEY; " + agg3)).to.equal("1ax,2zy,5o");
+      });
+      it("a table variable read before an UPSERT keeps the old row", async () => {
+        expect(await run("lt = SELECT k, v, w FROM t WHERE k = 2; UPSERT t (k, v) VALUES (2, 'z') WITH PRIMARY KEY; SELECT MAX(v) AS m INTO s FROM :lt; rv = :s;")).to.equal("b");
+      });
+      it("keeps an UPSERT that read a snapshot through a later failed statement", async () => {
+        await run("lt = SELECT k + 10 AS k, v, w FROM t; UPSERT t SELECT * FROM :lt; rv = 'x';");
+        try { await client.write({sql: "INSERT INTO \"T\" VALUES (1, 'dup', 'd')"}); } catch { /* the duplicate */ }
+        const keys = (await client.native({sql: 'SELECT "K" FROM "T" ORDER BY "K"', expect: "rows"})).rows.map((r) => Number(r.K));
+        expect(keys).to.deep.equal([1, 2, 11, 12]);
+      });
+      it("a NULL in the key of the query is refused, writing nothing (DuckDB: SQLite refuses the CAST first)", async function () {
+        if (dialect === "sqlite") this.skip();
+        let caught;
+        try { await run("lt = SELECT CAST(NULL AS INTEGER) AS k, 'p' AS v, 'q' AS w FROM dummy; UPSERT t SELECT * FROM :lt; rv = 'x';"); } catch (error) { caught = error; }
+        expect(caught?.message).to.match(/NULL in a key column/);
+      });
+      it("a NULL key from a variable in VALUES WITH PRIMARY KEY is refused, writing nothing", async () => {
+        let caught;
+        try { await run("DECLARE n INTEGER; UPSERT t (k, v) VALUES (:n, 'z') WITH PRIMARY KEY; rv = 'x';"); } catch (error) { caught = error; }
+        expect(caught?.message).to.match(/NULL in a key column/);
+        const count = (await client.native({sql: 'SELECT COUNT(*) AS "C" FROM "T"', expect: "rows"})).rows[0].C;
+        expect(Number(count)).to.equal(2);
+      });
+      it("a key numbered by a window with no ORDER BY is refused: the query is asked twice", async () => {
+        let caught;
+        try { await run("lt = SELECT ROW_NUMBER() OVER () AS k, v, w FROM t; UPSERT t SELECT * FROM :lt; rv = 'x';"); } catch (error) { caught = error; }
+        expect(caught).to.be.an("error");
+      });
+      it("a query that brings one key twice raises, as HANA does, and writes nothing", async () => {
+        let caught;
+        try { await run("lt = SELECT 1 AS k, 'p' AS v, 'q' AS w FROM dummy UNION ALL SELECT 1 AS k, 'r' AS v, 's' AS w FROM dummy; UPSERT t SELECT * FROM :lt; rv = 'x';"); } catch (error) { caught = error; }
+        expect(caught?.message).to.match(/unique constraint violated/);
+        const rows = (await client.native({sql: 'SELECT "V" FROM "T" WHERE "K" = 1', expect: "rows"})).rows;
+        expect(rows[0].V).to.equal("a");
+      });
+    });
+  }
+  it("refuses a text longer than its column in UPSERT VALUES, as INSERT does", () => {
+    expect(() => compile3("UPSERT t VALUES (3, 'abcdefghijklmnop', 'q') WITH PRIMARY KEY; rv = 'x';")).to.throw(/longer than the column's 10/);
+  });
+  it("refuses an UPSERT that leaves out a key column", () => {
+    expect(() => compile3("UPSERT t (v) VALUES ('z') WITH PRIMARY KEY; rv = 'x';")).to.throw(/leaves out the key column K/);
+  });
+});

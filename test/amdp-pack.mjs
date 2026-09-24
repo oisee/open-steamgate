@@ -72,6 +72,49 @@ ENDCLASS.\n`);
     }
   });
 
+  it("hands the compiler the table's primary key from the DDIC, so an UPSERT compiles", async () => {
+    const {ObjectStore} = await import("../tools/osd-store.mjs");
+    const {rmSync} = await import("node:fs");
+    const root = mkdtempSync(join(tmpdir(), "osd-amdp-upsert-"));
+    try {
+      const src = join(root, "src");
+      mkdirSync(src, {recursive: true});
+      writeFileSync(join(src, "zstg_ups.tabl.xml"), `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_TABL" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <DD02V><TABNAME>ZSTG_UPS</TABNAME><DDLANGUAGE>E</DDLANGUAGE><TABCLASS>TRANSP</TABCLASS><DDTEXT>x</DDTEXT></DD02V>
+   <DD03P_TABLE>
+    <DD03P><FIELDNAME>K</FIELDNAME><KEYFLAG>X</KEYFLAG><ADMINFIELD>0</ADMINFIELD><INTTYPE>X</INTTYPE><INTLEN>000004</INTLEN><NOTNULL>X</NOTNULL><DATATYPE>INT4</DATATYPE><LENG>000010</LENG></DD03P>
+    <DD03P><FIELDNAME>V</FIELDNAME><ADMINFIELD>0</ADMINFIELD><INTTYPE>C</INTTYPE><INTLEN>000020</INTLEN><DATATYPE>CHAR</DATATYPE><LENG>000010</LENG></DD03P>
+   </DD03P_TABLE>
+  </asx:values>
+ </asx:abap>
+</abapGit>
+`);
+      writeFileSync(join(src, "zcl_stg_ups.clas.abap"), `
+CLASS zcl_stg_ups DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES if_amdp_marker_hdb.
+    CLASS-METHODS put EXPORTING VALUE(ev) TYPE string.
+ENDCLASS.
+CLASS zcl_stg_ups IMPLEMENTATION.
+  METHOD put BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT USING zstg_ups.
+    UPSERT zstg_ups VALUES (1, 'a') WITH PRIMARY KEY;
+    ev = 'x';
+  ENDMETHOD.
+ENDCLASS.\n`);
+      const store = new ObjectStore({root, roots: [{path: "src", package: "$UPSERT", writable: false}], libs: []});
+      const made = generate([src], join(root, "gen", "amdp"), {store});
+      expect(made.procedures).to.have.length(1);
+      expect(made.procedures[0].portableRefusal, JSON.stringify(made.procedures[0].portableRefusal)).to.equal(undefined);
+      const write = made.procedures[0].portable.body.find((one) => one.stmt === "write").write;
+      expect([write.write, write.key]).to.deep.equal(["upsert", ["K"]]);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
   describe("the store's entity look-up stays a read, and follows writes", () => {
     let root, store, ObjectStore;
     const ddls = (entity) => `define table function ${entity} returns { k : abap.int4; } implemented by method cl_x=>m;\n`;

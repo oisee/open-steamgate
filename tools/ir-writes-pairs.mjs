@@ -9,7 +9,7 @@
 import {readFileSync, writeFileSync, mkdirSync, existsSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
-import {insertRows, insertFrom, update, remove, upsert, bindRows, bindValue} from "./ir-writes.mjs";
+import {insertRows, insertFrom, update, remove, upsert, upsertFrom, bindRows, bindValue} from "./ir-writes.mjs";
 import {lower, Refused} from "./sqlscript-lower.mjs";
 import {T, lit, col, bin, scan, filter, project} from "./sqlscript-ir.mjs";
 import {runsAs} from "./osd-main.mjs";
@@ -44,6 +44,11 @@ export const CASES = [
     {onDuplicate: "ignore"})},
   {name: "MODIFY with a key twice: the last row wins", stmt: () => upsert("T", COLS, rows({mandt: "001", id: 1, txt: "a"}, {mandt: "001", id: 1, txt: "b"}), KEY)},
   {name: "MODIFY with a field left out writes its initial value", stmt: () => upsert("T", COLS, rows({mandt: "001", id: 8}), KEY)},
+  {name: "UPSERT ... SELECT: the keys the query brings updated, the others inserted", stmt: () => upsertFrom("T", COLS, project(scan("T"),
+    [{as: "MANDT", expr: col("MANDT", SCHEMA.MANDT)}, {as: "ID", expr: bin("+", col("ID", SCHEMA.ID), lit(1, SCHEMA.ID), SCHEMA.ID)}, {as: "TXT", expr: col("TXT", SCHEMA.TXT)}]), KEY)},
+  {name: "UPSERT ... SELECT naming the key only: TXT kept on an update, initial on an insert", stmt: () => upsertFrom("T", ["MANDT", "ID"], project(scan("T"),
+    [{as: "MANDT", expr: col("MANDT", SCHEMA.MANDT)}, {as: "ID", expr: bin("+", col("ID", SCHEMA.ID), lit(1, SCHEMA.ID), SCHEMA.ID)}]), KEY,
+    [{col: "TXT", expr: bindValue(undefined, SCHEMA.TXT)}])},
 ];
 // a table with packed columns: an amount (P 15,2) and a TIMESTAMP (P 15,0)
 export const P_SCHEMA = {MANDT: {abap: "C", len: 3}, ID: {abap: "I"}, AMOUNT: {abap: "P", len: 15, dec: 2}, TS: {abap: "P", len: 15, dec: 0}};

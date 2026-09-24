@@ -10,6 +10,9 @@ import {lower, Refused} from "./sqlscript-lower.mjs";
 import {childBodies, containsRelationStatement, readsRelations, containsWrite} from "./sqlscript-blocks.mjs";
 import {columnType} from "./ir-host-relation.mjs";
 
+// one counter for the process: a snapshot's name is unique across calls
+let snapshotCounter = 0;
+
 /** a snapshot's column type: the host relation's, and on SQLite a CHAR
  *  compared as the transpiler's schema compares it, blanks at the end ignored */
 const snapshotColumnType = (type, dialect) => {
@@ -550,7 +553,6 @@ export async function runProcedure(program, {
   // table variables materialised before a write to the table they read;
   // dropped when the call ends, however it ends
   const snapshots = [];
-  let snapshotCount = 0;
   const readsDatabase = (node) => {
     if (node === null || typeof node !== "object") return false;
     if (node.rel === "scan" && upper(node.table) !== "DUMMY") return true;
@@ -576,7 +578,8 @@ export async function runProcedure(program, {
       // in its order: DuckDB replays the LUW after a failed statement, and a
       // write that read a snapshot the replay did not recreate failed there
       // with "table ... does not exist" (the #64 critic)
-      snapshotCount += 1;
+      snapshotCounter += 1;
+      const snapshotCount = snapshotCounter;
       const ident = `OSD_SNAP_${String(name).replace(/[^A-Za-z0-9_]/g, "_").toUpperCase()}_${globalThis.process?.pid ?? 0}_${snapshotCount}`;
       handle = {ident, ref: quoteId(ident), kind: "materialised", reason: "a table variable read before a write", viaWrite: true};
       await client.write({sql: `CREATE TABLE ${handle.ref} (${columns.map((c, i) => `${quoteId(c)} ${types[i]}`).join(", ")})`});
@@ -912,6 +915,40 @@ export async function runProcedure(program, {
         catch (error) {
           if (error instanceof Refused) throw new UnsupportedSqlScript(error.message);
           throw error;
+        }
+        // measured on HXE: an UPSERT ... SELECT that brings one key twice
+        // raises "unique constraint violated"; SQLite would take the last
+        // and DuckDB refuse in its own words, so the query is asked first
+        // UPSERT VALUES: a NULL in a key column is refused before writing,
+        // as for a query below (a composite key on SQLite would take it)
+        if (w.write === "upsert" && w.rows !== undefined) {
+          const keyed = project(scan("DUMMY"), w.key.map((k, i) => ({as: `K${i}`, expr: w.rows[0][w.columns.indexOf(k)]})));
+          const probe = lower(keyed, dialect, {relationRef: (handle) => client.relationRef(handle)});
+          const quoteId = (id) => `"${String(id).replace(/"/g, '""')}"`;
+          const nulls = await ask({sql: `SELECT 1 AS "N" FROM (${probe.sql}) AS "q" WHERE ${w.key.map((k, i) => `${quoteId(`K${i}`)} IS NULL`).join(" OR ")}`, params: probe.params});
+          if (nulls.rows.length > 0) {
+            throw new UnsupportedSqlScript(`UPSERT ${w.table}: a NULL in a key column, which HANA's NOT NULL key refuses`, statement);
+          }
+        }
+        if (w.write === "upsert" && w.from !== undefined) {
+          // the query is asked twice, so it must answer the same both times
+          if (effects(w.from).nonDeterministic) {
+            throw new UnsupportedSqlScript(`UPSERT ${w.table}: a query that may answer differently twice is not carried`, statement);
+          }
+          const produced = Object.keys(schemaOf(w.from, inputCatalogue));
+          const keyOut = w.key.map((k) => produced[w.columns.indexOf(k)]);
+          const inner = lower(w.from, dialect, {relationRef: (handle) => client.relationRef(handle)});
+          const quoteId = (id) => `"${String(id).replace(/"/g, '""')}"`;
+          // a NULL in the key: a key column is NOT NULL on HANA, and a
+          // composite key on SQLite would take it (the #64 critic)
+          const nulls = await ask({sql: `SELECT 1 AS "N" FROM (${inner.sql}) AS "q" WHERE ${keyOut.map((k) => `${quoteId(k)} IS NULL`).join(" OR ")}`, params: inner.params});
+          if (nulls.rows.length > 0) {
+            throw new UnsupportedSqlScript(`UPSERT ${w.table}: the query brings a NULL in a key column, which HANA's NOT NULL key refuses`, statement);
+          }
+          const twice = await ask({sql: `SELECT 1 AS "D" FROM (${inner.sql}) AS "q" GROUP BY ${keyOut.map(quoteId).join(", ")} HAVING COUNT(*) > 1`, params: inner.params});
+          if (twice.rows.length > 0) {
+            throw new UnsupportedSqlScript(`UPSERT ${w.table}: the query brings one key twice; HANA raises "unique constraint violated" here`, statement);
+          }
         }
         step(statement);
         dbStatements += 1;
