@@ -2,7 +2,7 @@ import {expect} from "chai";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {T, lit, param, sessionValue, bin, call, scan, filter, project, union, varRef} from "../tools/sqlscript-ir.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop,
-  ifElse, callProcedure, runProcedure, UnsupportedSqlScript, Int2OutOfRange} from "../tools/sqlscript-procedure-ir.mjs";
+  ifElse, callProcedure, runProcedure, UnsupportedSqlScript, Int2OutOfRange, ScalarTooLong} from "../tools/sqlscript-procedure-ir.mjs";
 
 const p = (name, type = T.int) => param(name, type);
 
@@ -219,10 +219,9 @@ describe("the typed SQLScript procedural IR", function () {
     ]});
     failure = undefined;
     try { await runProcedure(wide); } catch (error) { failure = error; }
-    expect(failure).to.be.instanceOf(UnsupportedSqlScript);
-    // a text RETURNING is carried, and a text scalar is the database's to
-    // evaluate: without one, refused by name
-    expect(failure.message).to.match(/goes to the database, and this run has none/);
+    // a text RETURNING is carried and evaluated on the host; too long for
+    // c LENGTH 3 raises, as on A4H
+    expect(failure).to.be.instanceOf(ScalarTooLong);
 
     const optionalChar = procedure({parameters: [{name: "IV", type: T.char(3), optional: true}],
       output: "RV", outputType: T.int, body: [assignScalar("RV", lit(1, T.int))]});
@@ -248,11 +247,19 @@ describe("the typed SQLScript procedural IR", function () {
         ifElse([{condition: bin("=", p("IV", T.str), lit("x", T.str), T.bool),
           body: [assignScalar("RV", lit(1, T.int))]}], [assignScalar("RV", lit(0, T.int))]),
       ]});
+    // a text equality is the host's, by the measured rule, with no database
+    expect((await runProcedure(stringCondition, {inputs: {IV: "x"}})).value).to.equal(1);
+    expect((await runProcedure(stringCondition, {inputs: {IV: "x  "}})).value).to.equal(0);
+    const orderedText = procedure({parameters: [{name: "IV", type: T.str}],
+      output: "RV", outputType: T.int, body: [
+        ifElse([{condition: bin("<", p("IV", T.str), lit("x", T.str), T.bool),
+          body: [assignScalar("RV", lit(1, T.int))]}], [assignScalar("RV", lit(0, T.int))]),
+      ]});
     failure = undefined;
-    try { await runProcedure(stringCondition, {inputs: {IV: "x"}}); } catch (error) { failure = error; }
+    try { await runProcedure(orderedText, {inputs: {IV: "a"}}); } catch (error) { failure = error; }
     expect(failure).to.be.instanceOf(UnsupportedSqlScript);
-    // a text condition is the database's to evaluate, and this run has none
-    expect(failure.message).to.match(/IF condition: a text scalar, or one the host does not evaluate, goes to the database, and this run has none/);
+    // ordering a text is not measured, so it is the engine's, and there is none
+    expect(failure.message).to.match(/IF condition: a scalar the host does not evaluate goes to the database, and this run has none/);
 
     const forgedStringCondition = procedure({parameters: [{name: "IV", type: T.str}],
       output: "RV", outputType: T.int, body: [

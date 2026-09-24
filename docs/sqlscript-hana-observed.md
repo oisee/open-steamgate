@@ -605,7 +605,11 @@ deleted afterwards.
 | a scalar OUT the path left alone | its initial value (`''`, `0`) |
 
 The portable runtime declares NVARCHAR / VARCHAR / CHAR / NCHAR of a length,
-NCLOB / CLOB, BIGINT and BOOLEAN, and evaluates a scalar the host does not
-(any text, a CASE, a function) in the engine as `SELECT <expr> FROM DUMMY`,
-rendered by the same lowering as a query, so a string scalar means there
-what the same expression in a SELECT means.
+NCLOB / CLOB, BIGINT and BOOLEAN. The host evaluates what is measured here
+itself -- literals, variables, `||`, `=` / `<>` between two texts, IS NULL,
+COALESCE -- so those mean what they mean on HANA on every backend and the IR
+needs no engine for them. Anything else (ordering a text, a CASE, a function)
+still goes to the engine as `SELECT <expr> FROM DUMMY` through the same
+lowering as a query, and is refused where the run has no engine; each such
+route moves to the host once it is measured and paired (foreman-dell's
+review of #44).

@@ -261,12 +261,6 @@ function assertPortableHostExpression(expr, context, scalars) {
     if (JSON.stringify(expr.type) !== JSON.stringify(declared.type)) {
       throw new UnsupportedSqlScript(`${context} parameter :${upper(expr.name).toLowerCase()} changes its measured type`, expr);
     }
-    if (declared.type?.abap === "STRING") {
-      throw new UnsupportedSqlScript(`${context} cannot evaluate STRING on the portable host yet`, expr);
-    }
-  }
-  if (expr.type?.abap === "STRING") {
-    throw new UnsupportedSqlScript(`${context} cannot evaluate STRING on the portable host yet`, expr);
   }
   for (const key of ["left", "right", "expr", "pattern", "escape", "otherwise"]) {
     assertPortableHostExpression(expr[key], context, scalars);
@@ -590,21 +584,28 @@ export async function runProcedure(program, {
     for (const w of e.whens ?? []) { sameParamTypes(w.when, context); sameParamTypes(w.then, context); }
   };
   // what evaluateScalar does itself: literals, scalars, arithmetic,
-  // comparisons, AND / OR / NOT, IS NULL, a two-argument COALESCE
+  // comparisons, AND / OR / NOT, IS NULL, a two-argument COALESCE. Text
+  // stays on the host where the rule is the one measured on A4H and not an
+  // engine's: `||` (NULL wins), `=` / `<>` (trailing blanks count, 'x  '
+  // <> 'x'). Ordering a text and arithmetic on one are the engine's until
+  // measured, so the semantics are HANA's on every backend and the IR needs
+  // no engine for what the corpus mostly does.
   const hostCapable = (e) => e == null || (
     ["lit", "param"].includes(e.node)
     || (e.node === "isnull" && hostCapable(e.expr))
     || (e.node === "not" && hostCapable(e.expr))
-    || (e.node === "bin" && hostCapable(e.left) && hostCapable(e.right))
+    || (e.node === "bin" && hostCapable(e.left) && hostCapable(e.right)
+      && (!(textual(e.left) || textual(e.right)) || ["||", "AND", "OR"].includes(e.op)
+        || (["=", "<>", "!="].includes(e.op) && textual(e.left) && textual(e.right))))
     || (e.node === "call" && e.fn === "COALESCE" && (e.args ?? []).length === 2 && e.args.every(hostCapable)));
   const evaluate = async (expr, context) => {
     sameParamTypes(expr, context);
-    if (!textual(expr) && hostCapable(expr)) {
+    if (hostCapable(expr)) {
       assertPortableHostExpression(expr, context, scalars);
       return evaluateScalar(expr, scalars);
     }
     if (client?.native === undefined) {
-      throw new UnsupportedSqlScript(`${context}: a text scalar, or one the host does not evaluate, goes to the database, and this run has none`);
+      throw new UnsupportedSqlScript(`${context}: a scalar the host does not evaluate goes to the database, and this run has none`);
     }
     const frozen = freezeExpr(expr, scalars, (rel) => freezeRelation(rel, relations, scalars, session), session);
     let compiled;
