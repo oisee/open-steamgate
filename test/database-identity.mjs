@@ -6,7 +6,7 @@ import {createRequire} from "node:module";
 import {HanaDatabaseClient} from "../tools/hana-client.mjs";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
-import {OsdPostgresClient, postgresInserts} from "../tools/postgres-client.mjs";
+import {OsdPostgresClient, postgresInserts, bindNativeValue} from "../tools/postgres-client.mjs";
 
 describe("database identity", () => {
   it("rewrites only PostgreSQL seed column identifiers, not string values", () => {
@@ -158,4 +158,14 @@ describe("database identity", () => {
       }
     });
   }
+});
+
+describe("PostgreSQL binds a RAW as the text its column holds", () => {
+  it("an X or XSTRING parameter is its upper-case hex, never a Buffer", () => {
+    // the transpiler's PostgreSQL schema makes a RAW(n) NCHAR(2n) and a
+    // RAWSTRING TEXT; a Buffer would go out in binary and land as raw bytes
+    expect(bindNativeValue({name: "p0", value: "deadbeef", type: "X(4)", isNull: false})).to.equal("DEADBEEF");
+    expect(bindNativeValue({name: "p0", value: "0000000A", type: "XSTRING", isNull: false})).to.equal("0000000A");
+    expect(bindNativeValue({name: "p0", value: null, type: "X(4)", isNull: true})).to.equal(null);
+  });
 });

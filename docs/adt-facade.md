@@ -357,9 +357,12 @@ The cross-reference tables cost the façade nothing: `CROSS`, `WBCROSSGT`,
 `WBCROSSGTX` for who-calls and references, `D010INC` for the load graph. Their
 DDIC is under `src/osd/ddic/`, their rows are derived from the parse the
 transpiler already does rather than authored, and the columns are the ones
-vsp actually selects. `npm run osd:xref -- --write` rebuilds them; they are
-not tracked, being derived. A client reads them over freestyle SQL like any
-other table.
+vsp actually selects. Every host fills them at start -- the Node server,
+`osd serve` and the binary -- and the browser preview and OSGo at build,
+all through `tools/osd-xref-seed.mjs`, once per generation (the parse is
+cached under `build/xref/`). They are an index and never edited: a start
+replaces them with what the files say. A client reads them over freestyle
+SQL like any other table.
 
 ## The development loop
 

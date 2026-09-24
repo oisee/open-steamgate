@@ -95,6 +95,7 @@ export async function setup(abap, schemas, insert) {
   // statement costs its parse, so consecutive rows of one shape are merged
   // into one. Here rather than in each branch below: all six of them execute
   // this same array.
+  const given = insert;
   insert = batchInserts(insert);
   // the browser preview (web/preview-backend.mjs): seed rows come from the
   // bundle, the database from cache storage when there is one
@@ -107,7 +108,14 @@ export async function setup(abap, schemas, insert) {
   bootIdentity(abap, preview?.env ?? globalThis.process?.env ?? {});
   if (preview !== undefined) {
     preview.schemas = schemas;
-    preview.insert = insert;
+    // **The rows as they were given, not as they were batched.** The
+    // preview's "reset" calls this again with what it kept here, and
+    // batching an already-batched array merged it once more: REPOSRC became
+    // one INSERT of 5.6 MB, and sql.js died on it with "memory access out of
+    // bounds" (node) or "is not a function" (the service worker). Reset had
+    // been failing with a 500 for as long as it batched; found while
+    // testing that reset re-seeds the cross-reference.
+    preview.insert = given;
     if (preview.database === "duckdb") {
       const {DuckDBWasmClient, duckdbSchema, duckdbInserts} = await import("../tools/duckdb-wasm-client.mjs");
       db = installTrim(new DuckDBWasmClient());

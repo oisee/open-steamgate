@@ -6,13 +6,16 @@ import {fingerprintOf} from "./osd-persist.mjs";
 import {abapTypeLetter, bindValue} from "./abap-types.mjs";
 import {randomBytes} from "node:crypto";
 
-function bindNativeValue(parameter) {
+export function bindNativeValue(parameter) {
   if (parameter.isNull === true) return null;
   // node-postgres accepts a decimal as text and lets the target expression
   // give it a NUMERIC type. Passing through Number here would lose decimal
   // digits before PostgreSQL ever sees them.
   if (abapTypeLetter(parameter.type) === "P") return String(parameter.value);
-  return bindValue(parameter, {hex: (value) => Buffer.from(value, "hex")});
+  // a RAW is NCHAR(2n) and a RAWSTRING TEXT in the transpiler's PostgreSQL
+  // schema, so it binds as its hex text; a Buffer goes out in binary and
+  // lands in a character column as raw bytes (a 00 is invalid UTF8)
+  return bindValue(parameter, {hex: (value) => value.toUpperCase()});
 }
 
 export class OsdPostgresClient extends PostgresDatabaseClient {

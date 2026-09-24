@@ -190,7 +190,7 @@
       ],
       "lowered": {
         "sqlite": {
-          "sql": "SELECT \"ID\" AS \"ID\", \"AMOUNT\" AS \"AMOUNT\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" WHERE ((\"AMOUNT\" * 2) > CAST(? AS NUMERIC)) ORDER BY \"ID\" ASC NULLS FIRST",
+          "sql": "SELECT \"ID\" AS \"ID\", \"AMOUNT\" AS \"AMOUNT\" FROM (SELECT \"MANDT\" AS \"MANDT\", \"ID\" AS \"ID\", \"BIG\" AS \"BIG\", \"AMOUNT\" AS \"AMOUNT\", \"DAY\" AS \"DAY\", \"NOTE\" AS \"NOTE\" FROM \"IT\") AS \"t0\" WHERE (ROUND((\"AMOUNT\" * 2), 2) > CAST(? AS NUMERIC)) ORDER BY \"ID\" ASC NULLS FIRST",
           "params": [
             {
               "name": "p0",

@@ -3,7 +3,7 @@ import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {spawn} from "node:child_process";
-import {ServingRuntime} from "../tools/osd-runtime.mjs";
+import {ServingRuntime, liveChildren} from "../tools/osd-runtime.mjs";
 
 // is that process still there?
 const alive = (pid) => {
@@ -53,6 +53,129 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     }
     expect(runtime.running).to.equal(false);
     expect(runtime.url).to.equal(undefined);
+  });
+
+  // a wrong supervisor leaves children behind, and a child keeps mocha alive
+  // long after the case has failed: whatever is left is killed here
+  afterEach(() => {
+    for (const child of liveChildren()) child.kill("SIGKILL");
+  });
+
+  it("a request during a stop waits for the old process to be gone before a new one", async () => {
+    // Found by review of #60: #stopChild forgot the child at once and waited
+    // up to ten seconds for it to exit, so an ensure() in that window saw
+    // nothing running and started a second process on the same database.
+    const runtime = new ServingRuntime();
+    // how many serving processes existed at once, sampled while it happens
+    let most = 0;
+    const sampler = setInterval(() => {
+      most = Math.max(most, liveChildren().filter((c) => c.exitCode === null && c.signalCode === null).length);
+    }, 2);
+    try {
+      const first = await runtime.start();
+      const stopped = runtime.stop();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const second = await runtime.ensure();
+      await stopped;
+      expect(second.pid).to.not.equal(first.pid);
+      expect(alive(first.pid), "the old process is gone").to.equal(false);
+      expect(most, "two serving processes at once").to.equal(1);
+    } finally {
+      clearInterval(sampler);
+      await runtime.stop();
+    }
+  });
+
+  it("a start during a recycle waits for it, and the recycle's readiness is announced", async () => {
+    // Found by review of #60: start() did not wait for a recycle, joined its
+    // spawn, and the recycle's announcement was lost -- whenReady() hung.
+    const runtime = new ServingRuntime();
+    try {
+      await runtime.start();
+      const recycled = runtime.recycle();
+      const started = runtime.start();
+      const [r, s] = await Promise.all([recycled, started]);
+      expect(s.pid).to.equal(r.pid);
+      const ready = await Promise.race([runtime.whenReady(), new Promise((resolve) => setTimeout(() => resolve("HANGS"), 5000))]);
+      expect(ready).to.not.equal("HANGS");
+      expect(ready.pid).to.equal(r.pid);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  // within a bound: the failure these guard against is a promise that never
+  // settles, and a case that hangs reports nothing
+  const settles = (promise, ms = 30000) => Promise.race([
+    promise.then(() => "settled", () => "settled"),
+    new Promise((resolve) => setTimeout(() => resolve("HANGS"), ms)),
+  ]);
+  const serving = () => liveChildren().filter((c) => c.exitCode === null && c.signalCode === null).length;
+
+  it("a stop during a recycle, and a recycle during a stop, both settle and leave nothing running", async () => {
+    // Found by review of #60: stop() awaited the recycle and the recycle
+    // awaited the stop, so `recycle(); stop();` never settled, and every
+    // start() and ensure() after it waited behind them.
+    for (const order of ["recycle, stop", "stop, recycle"]) {
+      const runtime = new ServingRuntime();
+      try {
+        await runtime.start();
+        const [a, b] = order === "recycle, stop"
+          ? [runtime.recycle(), runtime.stop()]
+          : [runtime.stop(), runtime.recycle()];
+        expect(await settles(Promise.all([settles(a), settles(b)]).then(([x, y]) => (x === "settled" && y === "settled" ? undefined : Promise.reject()))), order).to.equal("settled");
+        expect(serving(), `${order}: a process left running`).to.equal(0);
+        expect(runtime.running, order).to.equal(false);
+        // and the runtime is usable afterwards, not wedged behind them
+        expect(await settles(runtime.ensure()), `${order}: ensure after`).to.equal("settled");
+        expect(serving(), order).to.equal(1);
+      } finally {
+        await settles(runtime.stop());
+      }
+    }
+  });
+
+  it("requests joining a start that fails do not leave an unhandled rejection", async () => {
+    // Found by review of #60: a joined spawn attached `.then(undefined,
+    // undefined)`, a derived promise nobody caught, and a child that died
+    // before "ready" became an unhandled rejection -- which ends a process.
+    const unhandled = [];
+    const trap = (reason) => unhandled.push(reason);
+    process.on("unhandledRejection", trap);
+    const runtime = new ServingRuntime();
+    runtime.command = [process.execPath, "-e", "process.exit(3)"];
+    try {
+      const answers = await Promise.allSettled([runtime.ensure(), runtime.ensure(), runtime.start()]);
+      expect(answers.map((a) => a.status)).to.deep.equal(["rejected", "rejected", "rejected"]);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(unhandled.map(String)).to.deep.equal([]);
+    } finally {
+      process.off("unhandledRejection", trap);
+      await settles(runtime.stop());
+    }
+  });
+
+  it("a start and the requests that arrive while it comes up are one process", async () => {
+    // Found by the image's DuckDB check: the facade starts the runtime at
+    // listen, an OData request or the status refresh calls ensure() before
+    // the child has said "ready", and a second child opened the same
+    // database. DuckDB does not survive two writers, and the file could not
+    // be opened on the next start.
+    const runtime = new ServingRuntime();
+    try {
+      const answers = await Promise.all([runtime.start(), runtime.ensure(), runtime.ensure(), runtime.start()]);
+      expect(new Set(answers.map((a) => a.pid)).size, "one process").to.equal(1);
+      expect(answers.map((a) => a.epoch)).to.deep.equal([1, 1, 1, 1]);
+      expect(runtime.epoch).to.equal(1);
+    } finally {
+      await runtime.stop();
+    }
+    // and a stop that arrives while one is still coming up stops it
+    const late = new ServingRuntime();
+    const coming = late.start();
+    await late.stop();
+    const first = await coming;
+    expect(alive(first.pid), "the child that was coming up is stopped too").to.equal(false);
   });
 
   it("a recycle is a new process, and the old one is gone", async () => {

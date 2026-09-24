@@ -22,6 +22,7 @@
 import {icfRows} from "./osd-icf-rows.mjs";
 import {createHash} from "node:crypto";
 import {runsAs} from "./osd-main.mjs";
+import {inTransaction} from "./osd-xref-seed.mjs";
 
 // Who last wrote a row. One letter, the way a system spells such a thing,
 // and the column without which every case below is a guess.
@@ -298,7 +299,35 @@ export async function applyAtStartup(client, options = {}) {
       throw new Error(`no *.sicf.xml under ${options.root ?? process.cwd()}: refusing to apply an empty registry over `
         + `what is there. If this really is an empty tree, the root is wrong -- check OSD_ROOT.`);
     }
-    const {actions, report: lines} = await applyTo(client, objects);
+    // **Its own transaction, committed.** A start is outside every LUW, and
+    // what it writes is finished when it returns. Left to the clients it was
+    // not: HANA's execute() opens a transaction implicitly, so these rows
+    // stayed pending on the connection until somebody else's COMMIT took
+    // them -- the cross-reference seed's, until that learned to refuse a
+    // connection with a transaction open (tools/osd-xref-seed.mjs) and was
+    // then refused on every HANA start. The other clients' execute() runs
+    // outside a transaction when none is open, but their ABAP write methods
+    // (insert/update/delete) open one implicitly as well, so none of them
+    // can be trusted to be clean here by construction; this makes it so.
+    //
+    // A transaction already open at this point is one the start itself left
+    // (setup's rows); beginTransaction() is then a no-op and the COMMIT below
+    // takes that work with it. That is said, not hidden: at start there is
+    // no LUW whose work could be taken by mistake, but a start that leaves
+    // things open is worth knowing about.
+    if (inTransaction(client)) {
+      say("ICF registry: a transaction was already open at start; it is committed with the registry");
+    }
+    await client.beginTransaction?.();
+    let result;
+    try {
+      result = await applyTo(client, objects);
+      await client.commit?.();
+    } catch (e) {
+      await client.rollback?.();
+      throw e;
+    }
+    const {actions, report: lines} = result;
     for (const line of lines) say(line);
     // **What was applied, not what was looked at.** `!== "KEEP"` counted an
     // ORPHAN as applied, so a start that wrote nothing and kept one row it

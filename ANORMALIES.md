@@ -1384,3 +1384,35 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream issue: [abaplint/abaplint#4329](https://github.com/abaplint/abaplint/issues/4329) (filed 2026-09-24 after foreman-dell's critic pass), related #3486 and #4307
 - Regression-test location: `test/amdp.mjs` ("the database methods are cut out of the text, not out of abaplint's statements")
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-24-raw-columns — a RAW(n) column holds what was written, of any length, in the transpiler runtime; a system holds n bytes and checks the length of a compared value
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/transpiler` 2.13.89 (`DatabaseSetup`: RAW(n) is `NCHAR(2n)` hex text, RAWSTRING `TEXT`) and `@abaplint/runtime` 2.13.89; OSG's `test/seed.mjs` wrote abapGit's hex as it stood until 2026-09-24 and now pads a RAW to its 2n upper-case digits
+- Affected ABAP statement, runtime API or adapter: `SELECT` / `UPDATE ... SET` / `INSERT` on a RAW column, a RAW column in `WHERE` (static and dynamic); in OSG `packs/zvdb` (`ZVDB_100_VEC-QBITS RAW(192)`, seeded with 96 bytes for the 768-bit vectors)
+- Minimal ABAP reproducer: [zcl_gogen_t_rawrd](https://github.com/oisee/open-steamgate/blob/spike/go-backend/tools/gogen/testdata/zcl_gogen_t_rawrd.clas.abap), `_rawsel`, `_rawstr`, `_rawdyn` over `zgogen_t_raw.tabl.xml` (on the branch `spike/go-backend`) (MANDT, ID CHAR4, R RAW4)
+- Exact command used to run it: A4H ABAP Unit probes of the same classes (`$ZOSG_TMP_0300`, deleted); Node: the classes transpiled with open-abap-core and run over `@abaplint/database-sqlite` (`.local/ultra-wip/zvdb-tp`); Go: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour (A4H): a RAW(4) written as x'12000000' reads back into an xstring as four bytes, an initial one as four 00 bytes; `SET r = x'12'` gives 12000000 and `SET r = x'1200000000'` 12000000 (00-padded, cut), a string is moved by the c -> x rule (`12ab` gives 12000000); `WHERE r = @xs` with an xstring of another length than 4 (empty too) raises CX_SY_OPEN_SQL_DATA_ERROR, an x of another length does not activate; a literal against R, static or in `WHERE (cond)`, must be exactly 8 upper-case hex digits, anything else CX_SY_OPEN_SQL_DATA_ERROR; `<` and `ORDER BY` are byte order
+- Actual open-abap behaviour: `set1:1/1=12` (one byte stored), `set5:5=1200000000` (five bytes in a RAW(4)), `[12ab]=12`, `[1234567890AB]=1234567890AB`; `eqs1:` / `gts1:A B D` / `[r = '12']:` answer rows or none where a system raises; a seeded 96-byte value of a RAW(192) reads back as 96 bytes into an xstring. (The same runs also show CHAR read into a string keeping its trailing blanks, `new:0/[A   ]`, where A4H gives `[A]`.)
+- Impact on open-steamgate: the zvdb pack reads and writes QBITS only through `x LENGTH 192` fields and validates the hex first, so its answers are the same on both hosts (checked request by request); a program that reads a RAW column into an xstring, compares one with an xstring or writes a shorter value sees other bytes than on a system
+- Smallest safe workaround: the portable IR binds and compares a RAW as HANA does (`tools/ir-osql-where.mjs`, `tools/ir-writes.mjs`, the RAW pairs in `test/fixtures/ir-pairs/`), and `test/seed.mjs` pads seeded RAW values; the Go backend keeps the store as HANA does (`go/abap/dbraw.go`, `dbstore.go` pads seeded RAW values to 2n upper-case digits at open), binds every value at n bytes and raises where A4H raises
+- Upstream: **needs an issue** in abaplint/transpiler (runtime Open SQL on RAW columns)
+- Regression-test location: `test/ir-osql-where.mjs`, `test/ir-writes.mjs` (the RAW cases); on `spike/go-backend` `tools/gogen/semantics.mjs` ZCL_GOGEN_T_RAWRD, _RAWSEL, _RAWSTR, _RAWDYN
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-c-to-x — a character value moved into an x keeps the characters after a non-hex one in the transpiler runtime
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`Hex.set` of a character value takes it as it stands and pads with 0)
+- Affected ABAP statement, runtime API or adapter: `x = string`, `x = c` (and `UPDATE ... SET raw = string`, ANOMALY-2026-09-24-raw-columns)
+- Minimal ABAP reproducer: [zcl_gogen_t_xconv](https://github.com/oisee/open-steamgate/blob/spike/go-backend/tools/gogen/testdata/zcl_gogen_t_xconv.clas.abap) (on the branch `spike/go-backend`)
+- Exact command used to run it: A4H ABAP Unit probe of the same class (`$ZOSG_TMP_0300`, deleted); Node as in the entry above
+- Expected SAP behaviour (A4H): the longest prefix of upper-case hex digits, an odd count padded with 0, then cut or 00-padded: `ABG1` gives AB000000, `AB CD` AB000000, `0a1B` 00000000, a c(6) `AB` AB000000; into an xstring the same prefix (`ABG1` is one byte AB)
+- Actual open-abap behaviour: into x LENGTH 4, `ABG10000`, `AB CD000`, `0a1B0000` and `AB    00` (the blanks of the c kept), none of them hex; into an xstring the same as A4H
+- Impact on open-steamgate: none seen; the zvdb DPC upper-cases and validates VectorHex before the move
+- Smallest safe workaround: the IR writes a RAW by the A4H rule (`tools/ir-writes.mjs` bindValue); the Go backend has it too (`go/abap/conv.go` CToX)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, `Hex.set`)
+- Regression-test location: `test/ir-writes.mjs` ("binds a RAW as its upper-case hex"); on `spike/go-backend` `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XCONV
+- Upstream version containing a fix: none yet

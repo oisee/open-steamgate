@@ -43,6 +43,12 @@ export class OsqlWhereSemantics extends Error {
 }
 /** an uncatchable runtime error on A4H: nothing an ABAP program can CATCH */
 export class OsqlWhereDump extends Error {}
+/** CX_SY_OPEN_SQL_DATA_ERROR on A4H: a literal the column's type cannot
+ *  take -- a RAW compared with anything but exactly its 2n hex digits in
+ *  upper case (measured by the zvdb agent, 2026-09-24) */
+export class OsqlWhereData extends Error {
+  constructor(message) { super(message); this.abap = "CX_SY_OPEN_SQL_DATA_ERROR"; }
+}
 
 /** the outcome of a refused condition as the pairs file carries it, for a port to check */
 export function errorCode(error) {
@@ -50,6 +56,7 @@ export function errorCode(error) {
     return {error: error.constructor.name, abap: error.abap};
   }
   if (error instanceof OsqlWhereDump) return {error: "OsqlWhereDump"};
+  if (error instanceof OsqlWhereData) return {error: "OsqlWhereData", abap: error.abap};
   if (error instanceof OsqlWhereError) return {error: "Refused", reason: error.reason};
   throw error;
 }
@@ -185,6 +192,19 @@ function valueFor(token, column) {
   const raw = token.value;
   if (/[\uD800-\uDFFF]/.test(raw)) {
     throw new OsqlWhereError(`a character outside the Basic Multilingual Plane in a literal against ${column.name} is not carried`, "non-BMP");
+  }
+  if (type.abap === "X") {
+    // measured on A4H (the zvdb agent): in a dynamic WHERE a RAW(n) takes
+    // exactly 2n hex digits in upper case; '12', lower case, a blank before
+    // or after, '' or an unquoted number is CX_SY_OPEN_SQL_DATA_ERROR.
+    // RAWSTRING was not measured, and neither was a `backtick` literal (the
+    // Go port refuses it too). ANOMALY-2026-09-24-raw-columns has the probes
+    if (!Number.isInteger(type.len)) throw new OsqlWhereError(`a condition on the RAWSTRING column ${column.name} is not measured`, "column type");
+    if (token.kind === "string") throw new OsqlWhereError(`a string literal against the RAW column ${column.name} is not measured`, "column type");
+    if (token.kind === "number" || !new RegExp(`^[0-9A-F]{${2 * type.len}}$`).test(raw)) {
+      throw new OsqlWhereData(`${JSON.stringify(raw)} against the RAW(${type.len}) column ${column.name}: only its ${2 * type.len} hex digits in upper case`);
+    }
+    return lit(raw, type);
   }
   if (type.abap === "I") {
     const value = abapNumber(raw, 0, column.name);
@@ -344,6 +364,10 @@ export function osqlWherePredicate(text, columns) {
     const negated = word() === "NOT";
     if (negated) take();
     const keyword = word();
+    // BETWEEN and IN on a RAW were not measured
+    if ((keyword === "BETWEEN" || keyword === "IN") && column.type.abap === "X") {
+      throw new OsqlWhereError(`${keyword} on the RAW column ${column.name} is not measured`, "column type");
+    }
     if (keyword === "BETWEEN") {
       take();
       const low = literal(column);

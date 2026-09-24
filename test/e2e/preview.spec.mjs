@@ -96,6 +96,36 @@ test("the worker answering is the worker that was just built", async () => {
   }
 });
 
+// The cross-reference in the published system (tools/osd-xref-seed.mjs):
+// the build ships the rows, the worker's backend applies them at start AND
+// after "reset", which rebuilds the database from the seed. Read through
+// SE16, the way a person in the page would look. test/xref-seed.mjs runs
+// the same backend under node; this is the bundle, in the browser. It is
+// also the first check of "reset" at all: it answered 500 until the seed
+// stopped batching its inserts twice (test/setup.mjs).
+test("the cross-reference is there at start and after a reset", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "stg-preview-xref-"));
+  const context = await chromium.launchPersistentContext(profile, {headless: true, serviceWorkers: "allow"});
+  try {
+    const page = await context.newPage();
+    await page.goto(`${ORIGIN}/index.html?stay=1`);
+    await controlled(page);
+    await page.goto(`${ORIGIN}/sap/bc/zstg_icf_demo/stamp`, {waitUntil: "domcontentloaded"});
+    const who = () => page.evaluate(async () =>
+      (await fetch("/sap/bc/osd/se16/?t=WBCROSSGT&f_include=ZCL_STG_SEGW_REPO&max=500", {cache: "no-store"})).text());
+    expect(await who()).toContain("CL_ABAP_ZIP");
+    const reset = await page.evaluate(async () => {
+      const r = await fetch("/__preview/reset", {redirect: "manual", cache: "no-store"});
+      return r.type === "opaqueredirect" ? r.type : `${r.status} ${(await r.text()).slice(0, 400)}`;
+    });
+    expect(reset).toBe("opaqueredirect");
+    expect(await who()).toContain("CL_ABAP_ZIP");
+  } finally {
+    await context.close();
+    await rm(profile, {recursive: true, force: true});
+  }
+});
+
 // The static preview build: no server answers /sap/opu/odata/sap/, the
 // service worker does, with the transpiled DPC over sql.js.
 //
