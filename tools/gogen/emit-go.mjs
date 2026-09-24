@@ -886,16 +886,13 @@ const isAppend = (st, name) => st?.s === "assign" && st.target.e === "var" && !s
 
 function builders(body, ctx, outside = []) {
   const names = new Set();
-  let exits = false;
   const walk = (n) => {
     if (Array.isArray(n)) { n.forEach(walk); return; }
     if (!n || typeof n !== "object") return;
-    if (n.s === "return") exits = true;
     if (isAppend(n)) names.add(n.target.name);
     for (const k of Object.keys(n)) if (k !== "type") walk(n[k]);
   };
   walk(body);
-  if (exits) return [];
   // ultra/events: a name the loop's own condition (WHILE, LOOP ... WHERE)
   // reads must stay current on every pass: no builder for it (a WHILE
   // strlen( v ) < 32 appending to v never ended, ZCL_OSD_TRAN_SESSION=>NEW_ID)
@@ -1623,7 +1620,11 @@ ${t}	}`));
     case "rollback_work": return [`${t}abap.RollbackWork(s)`];
     case "exit": return [`${t}${leave(ctx, 2)}`];
     case "continue": return [`${t}${leave(ctx, 3)}`];
-    case "return": return [`${t}${leave(ctx, 1)}`];
+    // a RETURN inside a loop that appends through builders writes the
+    // strings back first (parity-wave1: ZCL_STG_JSON=>READ_STRING appended a
+    // 750 KB value a character at a time and returned from inside the loop,
+    // which kept it off the builder and made the append quadratic)
+    case "return": return [...[...(ctx.builders ?? new Map())].map(([n, sb]) => `${t}${ident(n)} = ${sb}.String()`), `${t}${leave(ctx, 1)}`];
     default: throw new Error(`no Go for statement ${st.s}`);
   }
 }

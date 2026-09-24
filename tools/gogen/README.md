@@ -1106,3 +1106,40 @@ applicable, plus 32 in-process tests inside the HTTP suites and
 | `DESCRIBE_BY_DATA`: output length of a DDIC type of kind C | 2 |
 | the editor's parser colouring and compile check (Node host tools) | 2 |
 | move of kind g into generic data of kind D; `ZCL_STG_SEGW_FUGR=>SIGNATURE` comparison; `CALL FUNCTION` without a host implementation | 1 each |
+
+### Wave 1 (ultra/parity-wave1, 2026-09-24)
+
+Seven NOT_COMPILED groups closed, each rule measured on A4H first
+($ZOSG_TMP_0050, ABAP Unit probes of the testdata classes as they stand)
+and pinned in `semantics.mjs` on Go and JS:
+
+- `escape( format = e_json_string )` (ZCL_GOGEN_T_JSESC): `\\` `"`, `\b \t
+  \n \f \r`, every other control character `\u00XX` in upper case; `/ '`,
+  U+007F and non-ASCII unchanged; a generic operand read as a string. Node
+  escapes only `\\ " \n` (ANORMALIES escape-json-string-control-characters).
+- a generic operand compared with a c or a string (ZCL_GOGEN_T_GENCMP): the
+  typed rule, both strings and a c without trailing blanks; any other kind
+  at run time dumps NOT_COMPILED (`abap.DataChars`).
+- a string into a d / t, generic and typed (ZCL_GOGEN_T_GENMOVD): the first
+  8 / 6 characters, an empty string the initial value, a short t filled
+  with zeros (Node: `''` into d is blanks, ANORMALIES empty-string-to-date).
+- `SELECT ... FOR ALL ENTRIES` (ZCL_GOGEN_T_FAE): once per driving row, rows
+  unique over the columns selected, sy-dbcnt counts them, an empty driving
+  table ignores the whole WHERE; with GROUP BY, aggregates or ORDER BY refused.
+- `describe_by_data`'s OUTPUT_LENGTH of a dictionary type
+  (ZCL_GOGEN_T_RTTIOL): the domain's OUTPUTLEN, or the data element's
+  without a domain, read off the abapGit XML (NUMC data elements included).
+- function groups (ZCL_GOGEN_T_FM, ZGOGEN_T_FG): compiled as a pseudo class
+  `FUGR:<group>`, a static method per module; CALL FUNCTION maps EXPORTING /
+  IMPORTING / TABLES / CHANGING, a VALUE( ) exporting or changing goes
+  through a temporary written back only on a normal return (after RAISE
+  the caller keeps its values, TABLES rows appended stay). A group with
+  global data, a global interface or a DEFAULT is refused.
+
+`parity.mjs` puts two kinds of test apart from the headline:
+`go-matches-system` (OSGo answers as a system does, Node's answer is an
+ANORMALIES entry: the implicit MANDT) and `adt-deferred` (the ADT facade,
+postponed). The headline is passed / (Node-passed - go-matches-system -
+adt-deferred), the raw ratio is printed beside it.
+
+WAVE1_RESULT
