@@ -404,7 +404,7 @@ func main() {
 		log.Printf("database: %s (WAL)%s", *dbFile, map[bool]string{true: ", new: seeded", false: ", as it was"}[seeded])
 		abap.HostFacts = append(abap.HostFacts, "database\tSQLite (modernc.org/sqlite, pure Go), file "+filepath.Base(*dbFile)+", WAL")
 	}
-	startABAP()
+	startABAP(true)
 
 	status := statusHost{port: *port, root: *root, dbFile: *dbFile, started: started}
 	mux := buildMux(*root, status)
@@ -442,8 +442,9 @@ func main() {
 var jsMain func()
 
 // startABAP is what every host runs once its database is open: the boot
-// classes, then the synthetic demo rows, each a dialog step of its own
-func startABAP() {
+// classes, then (demo: unless the database is an image that has them
+// already) the synthetic demo rows, each a dialog step of its own
+func startABAP(demo bool) {
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -456,7 +457,7 @@ func startABAP() {
 	// it through tools/osd-demo-data.mjs): the same class and the same knob,
 	// OSD_DEMO_ROWS; one dialog step of its own, and a dump there is reported
 	// and the server starts without the rows
-	if hasDemoData {
+	if hasDemoData && demo {
 		func() {
 			started := time.Now()
 			defer func() {

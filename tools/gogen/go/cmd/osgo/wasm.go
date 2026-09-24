@@ -15,10 +15,17 @@
 // Uint8Array. Each request is one dialog step (step in main.go), as on the
 // server: committed when it returns, rolled back when it dumps.
 //
+// Files: Go's os under GOOS=js calls globalThis.fs, which the worker
+// provides over fetch for media/ (the SMW0 objects, OSGO_MEDIA), so
+// WWWDATA_IMPORT is the same code as on the server; the files are fetched
+// when a page asks for them, not carried in the wasm.
+//
 // The database is sql.js through go/abap's sqljs driver (db_wasm.go):
-// seeded from zz_db.json on a cold start, or, when the worker kept a copy in
-// cache storage (OSGO_STORED=1 in the environment), that copy as it was,
-// handed over by the worker's osgoOpenDatabase("preview").
+// seeded from zz_db.json, or an image (OSGO_STORED=1 in the environment)
+// the worker hands over as osgoOpenDatabase("preview"): the copy it kept in
+// cache storage, or the one the build seeded by running this same wasm
+// under Node (tools/gogen/wasm-preview.mjs, seed.sqlite), which is what
+// spares a first visit the seeding.
 package main
 
 import (
@@ -69,6 +76,15 @@ func wasmMain() {
 		}
 		select {}
 	}
+	// SMW0: the worker's fs answers the files of media/ beside the wasm
+	// (osgo-sw.js), which is where WWWDATA_IMPORT reads them through os, as
+	// the server reads them from the disk; no media, every import is
+	// IMPORT_ERROR, as on a server started without -media
+	if dir := os.Getenv("OSGO_MEDIA"); dir != "" {
+		if err := abap.SetMediaDir(dir); err != nil {
+			log.Printf("media: %v (every WWWDATA_IMPORT is IMPORT_ERROR)", err)
+		}
+	}
 	stored := os.Getenv("OSGO_STORED") == "1"
 	if stored {
 		if err := abap.OpenDBImage("preview"); err != nil {
@@ -88,7 +104,9 @@ func wasmMain() {
 				fail("boot", fmt.Sprintf("%s  at %s", dumpText(r), strings.Join(abapStack(r), " <- ")))
 			}
 		}()
-		startABAP()
+		// an image (the worker's copy, or the one the build seeded) holds the
+		// demo rows already: ZCL_OSD_DEMO_DATA=>BOOT would write them again
+		startABAP(!stored)
 	}()
 	mux := buildMux("", statusHost{started: started})
 

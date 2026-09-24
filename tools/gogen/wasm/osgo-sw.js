@@ -7,15 +7,76 @@
 // A classic script: importScripts during the first evaluation is the one way
 // a worker takes Go's loader and sql.js, both of which are classic scripts.
 /* global Go, initSqlJs */
+const MOUNT = new URL("./", self.location).pathname;
+
+// Go's os under GOOS=js calls globalThis.fs (Node's shape, callbacks). This
+// one answers the files below /media/ (OSGO_MEDIA) out of <mount>media/ by
+// fetch, read-only, and writes stdout and stderr to the console: the host
+// hook for SMW0, the place of abap.W3MI_LOADER in the JS preview. Anything
+// else is ENOENT. It is installed before wasm_exec.js, which keeps an fs it
+// finds.
+self.fs = (() => {
+  const files = new Map();
+  let next = 100;
+  let line = "";
+  const decoder = new TextDecoder("utf-8");
+  const error = (code) => Object.assign(new Error(code), {code});
+  const statOf = (size) => ({dev: 0, ino: 0, mode: 0o100444, nlink: 1, uid: 0, gid: 0, rdev: 0, size, blksize: 4096,
+    blocks: Math.ceil(size / 512), atimeMs: 0, mtimeMs: 0, ctimeMs: 0, isDirectory: () => false});
+  const load = async (path) => {
+    if (!path.startsWith("/media/")) throw error("ENOENT");
+    const res = await fetch(`${MOUNT}media/${path.slice(7).split("/").map(encodeURIComponent).join("/")}`, {cache: "force-cache"});
+    if (!res.ok) throw error("ENOENT");
+    return new Uint8Array(await res.arrayBuffer());
+  };
+  return {
+    constants: {O_WRONLY: -1, O_RDWR: -1, O_CREAT: -1, O_TRUNC: -1, O_APPEND: -1, O_EXCL: -1, O_DIRECTORY: -1},
+    writeSync(fd, buf) {
+      line += decoder.decode(buf);
+      const nl = line.lastIndexOf("\n");
+      if (nl !== -1) {
+        console.log(line.slice(0, nl));
+        line = line.slice(nl + 1);
+      }
+      return buf.length;
+    },
+    write(fd, buf, offset, length, position, callback) {
+      if (offset !== 0 || length !== buf.length || position !== null) { callback(error("ENOSYS")); return; }
+      callback(null, this.writeSync(fd, buf));
+    },
+    open(path, flags, mode, callback) {
+      if (flags !== 0) { callback(error("EROFS")); return; }
+      load(path).then((bytes) => { const fd = next++; files.set(fd, bytes); callback(null, fd); }, (e) => callback(e));
+    },
+    close(fd, callback) { files.delete(fd); callback(null); },
+    fstat(fd, callback) {
+      const f = files.get(fd);
+      if (f === undefined) callback(error("EBADF")); else callback(null, statOf(f.length));
+    },
+    stat(path, callback) { load(path).then((b) => callback(null, statOf(b.length)), (e) => callback(e)); },
+    lstat(path, callback) { this.stat(path, callback); },
+    read(fd, buffer, offset, length, position, callback) {
+      const f = files.get(fd);
+      if (f === undefined) { callback(error("EBADF")); return; }
+      const at = position ?? f.pos ?? 0;
+      const n = Math.max(0, Math.min(length, f.length - at));
+      buffer.set(f.subarray(at, at + n), offset);
+      if (position === null || position === undefined) f.pos = at + n;
+      callback(null, n);
+    },
+  };
+})();
 importScripts("wasm_exec.js", "sql-wasm.js");
 
-const MOUNT = new URL("./", self.location).pathname;
 const BUILD_ID = "__OSGO_BUILD_ID__";
 const PREFIXES = ["sap/"];
 const DATABASE_CACHE = "osgo-preview-database";
 const DATABASE_KEY = `${MOUNT}__osgo/database`;
 const RESET_PATH = "__osgo/reset";
 const INFO_PATH = "__osgo/info";
+// answered by the worker alone: the page -> worker -> page round trip that
+// every answer pays, measured beside the ones Go answers
+const PING_PATH = "__osgo/ping";
 const EMPTY_STATUSES = new Set([204, 205, 304]);
 
 let started;
@@ -28,12 +89,13 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin || !url.pathname.startsWith(MOUNT)) return;
   const path = url.pathname.slice(MOUNT.length);
-  if (path !== RESET_PATH && path !== INFO_PATH && !PREFIXES.some((p) => path.startsWith(p))) return;
-  event.respondWith(serve(event.request, url, path));
+  if (path !== RESET_PATH && path !== INFO_PATH && path !== PING_PATH && !PREFIXES.some((p) => path.startsWith(p))) return;
+  event.respondWith(serve(event.request, url, path, performance.now()));
 });
 
-async function serve(request, url, path) {
+async function serve(request, url, path, arrived) {
   try {
+    if (path === PING_PATH) return new Response("{}", {headers: {"content-type": "application/json", "cache-control": "no-store"}});
     if (path === INFO_PATH) {
       await start();
       return new Response(JSON.stringify({buildId: BUILD_ID, ...info}), {headers: {"content-type": "application/json", "cache-control": "no-store"}});
@@ -50,14 +112,18 @@ async function serve(request, url, path) {
     headers.host = url.host;
     headers["x-forwarded-proto"] = url.protocol.replace(":", "");
     headers["x-forwarded-prefix"] = MOUNT.slice(0, -1);
+    const t0 = performance.now();
     const answer = await osgo.handle({
       method: request.method,
       url: `/${path}${url.search}`,
       headers,
       body: mutation ? new Uint8Array(await request.arrayBuffer()) : undefined,
     });
+    const took = performance.now() - t0;
     if (mutation) await storeDatabase(osgo);
     const h = new Headers();
+    // the time Go took, as the worker sees it, beside what the page sees
+    h.append("server-timing", `osgo;dur=${took.toFixed(2)}, sw;dur=${(performance.now() - arrived).toFixed(2)}`);
     for (const [k, v] of answer.headers) h.append(k, v);
     const empty = EMPTY_STATUSES.has(answer.status) || request.method === "HEAD";
     return new Response(empty ? null : answer.body, {status: answer.status, headers: h});
@@ -76,17 +142,20 @@ function start() {
 
 async function boot() {
   const t0 = performance.now();
-  const [SQL, stored] = await Promise.all([
+  // the worker's own copy first, else the image the build seeded
+  // (seed.sqlite), else Go seeds from zz_db.json
+  const [SQL, kept] = await Promise.all([
     initSqlJs({locateFile: (file) => `${MOUNT}${file}`}),
     readDatabase(),
   ]);
+  const stored = kept ?? await fetch(`${MOUNT}seed.sqlite`).then((r) => (r.ok ? r.arrayBuffer() : undefined)).then((b) => b && new Uint8Array(b)).catch(() => undefined);
   const tSql = performance.now();
   self.SQL = SQL;
   self.osgoOpenDatabase = (dsn) => (dsn === "preview" && stored ? new SQL.Database(stored) : null);
   const ready = new Promise((resolve) => { self.osgoReady = resolve; });
   const go = new Go();
   go.argv = ["osgo"];
-  go.env = {OSGO_STORED: stored ? "1" : ""};
+  go.env = {OSGO_STORED: stored ? "1" : "", OSGO_MEDIA: "/media"};
   const {instance} = await WebAssembly.instantiateStreaming(fetch(`${MOUNT}osgo.wasm`), go.importObject);
   const tWasm = performance.now();
   go.run(instance).then(() => { started = undefined; });
@@ -94,14 +163,14 @@ async function boot() {
   if (report.error) throw new Error(report.error);
   const tReady = performance.now();
   info = {
-    stored: Boolean(stored),
+    stored: kept ? "cache" : stored ? "seed.sqlite" : "",
     sqljsMs: Math.round(tSql - t0),
     wasmMs: Math.round(tWasm - tSql),
     goStartMs: Math.round(tReady - tWasm),
     goSeedMs: report.seedMs,
     totalMs: Math.round(tReady - t0),
   };
-  if (!stored) await storeDatabase(self.osgo);
+  if (!kept) await storeDatabase(self.osgo);
   return self.osgo;
 }
 
