@@ -848,3 +848,50 @@ Fix round, same day (all measured on A4H in `$ZOSG_TMP_0441`):
   with a fraction is refused) and `CL_ABAP_RANDOM=>CREATE( )->INT( )`
   (unseeded only; a seed is refused, since a seeded generator's sequence is
   the system's and not reproducible here).
+
+## The object store over the files: DESTINATION 'STORE' (ultra/store, 2026-09-24)
+
+The editor screen (`/sap/bc/osd/edit`, ZCL_OSD_EDIT, the WEBGUI's "Editor"
+node) reaches the object store with `CALL FUNCTION 'ZOSD_STORE' DESTINATION
+'STORE'`. On Node that is `tools/osd-store-destination.mjs` over
+`tools/osd-store.mjs`; OSGo refused the call at compile time. Now the front
+end maps DESTINATION 'STORE' + ZOSD_STORE (`DESTINATION_FM`) to a host
+function, `go/abap/store.go`, which answers over the same files. The files,
+named the abapGit way, stay the only copy of a source; git is the history.
+
+- **LIST, READ, WRITE** as Node answers them, field for field: the roots in
+  layer order, the libraries from the build's file lists, the build's
+  exclusions, the package chains, every scalar filled on every call, the
+  tally of what the filter matched, and the order of JavaScript's
+  `localeCompare` (ICU root collation: `ZCL_A` before `ZCLA`), which is not
+  byte order. The index is walked again for each call (milliseconds), so a
+  file a git pull or another editor changed is never answered stale.
+- **Library and generated objects are read-only**; a WRITE lands in the
+  working tree, CRLF made LF, and is confined to the writable roots
+  (`storeConfined`, `store_test.go`).
+- **Versions.** Active is what the running generation was built from: the
+  build records a sha256 of every file of a writable root
+  (`tools/gogen/store.mjs`, into `zz_store.json`), and an object whose files
+  still hash to it is active. A file that differs, or one this process
+  wrote, is inactive, which is what Node answers after a WRITE.
+- **CHECK, ACTIVATE, TOKENS** are the compiler's and the binary carries
+  none: `activation needs a new generation (rebuild): ...` as EV_ERROR and
+  as one issue that stands (rule `rebuild`; CHECK `no_compiler`), so the
+  screen says "activated: 1 issue(s) ... Nothing is active while one of
+  these stands" rather than "the system still compiles". TOKENS answers an
+  error and the screen shows the source uncoloured.
+- `-root` names the tree (default: the checkout the binary was built from);
+  a tree without `abap_transpile.json` is answered "no object store here".
+
+Measured against Node over one tree (`node tools/gogen/storecmp.mjs`, the
+showcase checkout, 1569 objects): **1598 of 1598 read answers and 14 of 14
+write answers equal** (EV_MS left out, and the time of a file each host wrote
+itself), and the files the writes leave behind byte-equal; over
+`testdata-store/tree` 29 of 29 and 20 of 20. The screen itself, OSGo and a
+Node host on one scratch tree: 21 of 22 pages byte-equal (ten lists, eight
+text areas, the save page, the list and the text area after a save); the one
+that differs is the coloured display, where Node colours through the parser
+and OSGo cannot, and with the colour stripped Go's text is the file while
+Node's repeats a chained `TYPES:` keyword once per chained statement (a
+defect of the colouring on Node, not of the text). `ZCL_GOGEN_T_STORE` in
+`semantics.mjs` pins the fixture calls.
