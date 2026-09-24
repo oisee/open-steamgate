@@ -207,7 +207,7 @@ reading, not running, and is the only one that stays unmeasured.
 ```
                  stable layer (does not change with a generation)
    +-------------------------------------------------------------+
-   | daemon registry     /OSD/DAEMON rows: name, class, instance, |
+   | daemon registry     ZOSD_DAEMON rows: name, class, instance, |
    |                     start parameter (PCP text), state,       |
    |                     generation, restarts, started by/at      |
    | mailboxes           per instance: queued PCP messages (text) |
@@ -481,7 +481,7 @@ Under option A, precisely:
    the new generation. So a message leaves the mailbox only on an
    **acknowledgement sent after the commit**, and every message carries an
    ID that the daemon host records in the same LUW as the step's work
-   (`/OSD/DAEMON_ACK`: instance, last message ID). On replay, a message whose
+   (`ZOSD_DAEMON_ACK`: instance, last message ID). On replay, a message whose
    ID is already recorded is dropped rather than run again. Either
    mechanism alone has a gap (an ack can be lost with the process; a dedup
    table alone does not tell the supervisor when to forget a message).
@@ -545,7 +545,7 @@ database file.
 
 ### Persistence: is a daemon restarted after a process restart?
 
-A registry table, `/OSD/DAEMON` (name, class, instance ID, start parameter
+A registry table, `ZOSD_DAEMON` (name, class, instance ID, start parameter
 as PCP text, state RUNNING / STOPPED / FAILED, generation, restart count,
 started by, started at, last callback, last error), written by the daemon
 host at `START`, `STOP`, restart and failure, in the same LUW as the
@@ -554,7 +554,7 @@ callback that caused it.
 This table is **authoritative state, not a derived index**, and that has to
 be said plainly. The rule of 2026-09-24 is that the files are the truth and
 tables hold only indices derived from them (the cross-reference), rebuilt
-per generation. `/OSD/DAEMON` is neither a source nor derived from one: it
+per generation. `ZOSD_DAEMON` is neither a source nor derived from one: it
 is the only record that a daemon is running and what it was started with,
 and nothing can rebuild it. The status tables are not a precedent either,
 because they are refreshed from the processes and could be dropped at any
@@ -583,7 +583,7 @@ until someone starts it.
 ### Observability
 
 An SM-like list in the status app, the same way the work processes are
-listed: `/OSD/DAEMON` behind a CDS view `ZC_OSD_DAEMON`, served by the
+listed: `ZOSD_DAEMON` behind a CDS view `ZC_OSD_DAEMON`, served by the
 status service beside `ZC_OSD_PROCESS`, one row per instance with its work
 process (pid), generation, state, restart count, mailbox depth, armed timers,
 last callback and its duration, last error. The mailbox depth and timers are
@@ -664,24 +664,24 @@ Alice decided all nine as recommended on 2026-09-24. The steps
 start with step 2 (step 1 is #75), and the A4H probes P0 to P11 go
 as one batch before anything relies on them.
 
-Naming (Alice, 2026-09-24). What stands in for the kernel and never goes
-to a real system lives in the `/OSD/` namespace: the registry
-`/OSD/DAEMON`, the acknowledgements `/OSD/DAEMON_ACK`, the mailbox
-`/OSD/DAEMON_MSG`. A system has its own state for this (`ABAP_DAEMON_RT`,
-`ABAP_DAEMON_ST`), which we do not copy. Everything that can be deployed
-to a system, such as the ticker demo and the probes' log table, stays in Z
-with the OSD prefix (`ZCL_OSD_*`, `ZOSD_*`). The public API keeps SAP's
-names (`CL_ABAP_DAEMON_EXT_BASE`, `ABAP_DAEMON_INFO`), as open-abap-core
-does for the classes it reimplements.
+Naming (Alice, 2026-09-24). Every object of our own uses the OSD prefix in
+the Z namespace: `ZOSD_*` tables (the registry `ZOSD_DAEMON`, the
+acknowledgements `ZOSD_DAEMON_ACK`, the mailbox `ZOSD_DAEMON_MSG`, the
+probes' `ZOSD_DAEMON_LOG`, the ticker's `ZOSD_TICKER`), `ZCL_OSD_*` classes
+and `ZIF_OSD_*` interfaces. A system keeps its own daemon state
+(`ABAP_DAEMON_RT`, `ABAP_DAEMON_ST`), which we do not copy. The public API
+keeps SAP's names (`CL_ABAP_DAEMON_EXT_BASE`, `ABAP_DAEMON_INFO`), as
+open-abap-core does for the classes it reimplements. Which of these may be
+deployed to a system is decided by the deploy manifest, not by the name.
 
 | # | decision | decided (as recommended) |
 | --- | --- | --- |
 | D1 | Build ADF at all, or stop after AMC and timers (steps 1 to 4)? | build, in this order; stop after step 4 is a valid answer if daemons are not wanted now |
 | D2 | What a generation swap does to a running daemon | option A: restart in the new generation from its start parameter, mailbox held and replayed with an ack after commit and a message-ID dedup. P10 decides which callbacks run, not whether the old load keeps running: if a system keeps the old load, we still restart, and record the divergence |
-| D3 | Do queued messages survive a *process* restart (a crash, a Go swap without a dispatcher), i.e. is the mailbox also written to `/OSD/DAEMON_MSG`? | no in the first version: the mailbox lives in the supervisor on Node, which survives a swap; a crash loses it, as a crashed server does. Revisit with the Go dispatcher |
+| D3 | Do queued messages survive a *process* restart (a crash, a Go swap without a dispatcher), i.e. is the mailbox also written to `ZOSD_DAEMON_MSG`? | no in the first version: the mailbox lives in the supervisor on Node, which survives a swap; a crash loses it, as a crashed server does. Revisit with the Go dispatcher |
 | D4 | Daemon statics and where a daemon runs | model (b), the foreman's choice: in the host process and thread, under the same step lock, and class data read or written from a daemon step is a recorded runtime error (ANORMALIES, P9). A thread or process of its own only as an explicit opt-in, for daemons without database access, or later with SQL routed to the main connection. Not isolation by default, because the default database is in-memory sql.js, where a second connection is a separate copy, and a file has one holder |
 | D5 | Restart daemons after a process or system restart | yes for a process restart (same path as the swap); after a whole-system restart, mirror P12, with a switch to restart anyway for local use |
 | D6 | Where the ABAP lives | proposal: `oisee/open-abap-apc`, which exists (public, checked with `gh repo view` on 2026-09-24), already holds the APC half and the binding manager and is ours to merge; not open-abap-core. Nothing of this goes to the upstream repositories: they receive only fixes for differences from A4H, and ADF, AMC and the timer manager are new work |
 | D7 | The preview | best effort as described: a daemon lives while a page keeps the worker alive, restarts from rows when the worker starts |
 | D8 | Probes on A4H | ask once for the whole set P0 to P11 in one `$ZOSG_TMP` package, rather than one at a time |
-| D9 | Keep the daemon registry `/OSD/DAEMON` (and `/OSD/DAEMON_ACK`) as a table, although it is authoritative state and not an index derived from files | the table, because `GET_DAEMON_INFO` is ABAP and a system keeps this state authoritatively too; the alternatives are supervisor memory only (lost on a crash and on every Go swap) or a host file under `.local/` |
+| D9 | Keep the daemon registry `ZOSD_DAEMON` (and `ZOSD_DAEMON_ACK`) as a table, although it is authoritative state and not an index derived from files | the table, because `GET_DAEMON_INFO` is ABAP and a system keeps this state authoritatively too; the alternatives are supervisor memory only (lost on a crash and on every Go swap) or a host file under `.local/` |
