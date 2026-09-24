@@ -514,7 +514,10 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   tasks and a plain `&` dies with the shell.
 - **A system is reached with a zip, and the last mile is measured**
   (`docs/a4h-deploy.md`, 2026-09-19). `npm run segw:zip` builds an abapGit
-  offline repository out of a compiled project; `.local/make-level.sh <nnn>`
+  offline repository out of a compiled project, **only of what a unit of
+  `deploy/manifest.json` lists and never an SAP-owned name** (`CL_`/`IF_`/
+  `CX_`, a foreign `/ns/`, standard DDIC -- fail closed,
+  `tools/osd-deploy-manifest.mjs`); `.local/make-level.sh <nnn>`
   builds one numbered attempt, because a failed import leaves rows in
   `/IWBEP/I_MGW_SRG` and the next attempt with the same names dumps on them
   -- so every attempt gets its own package and its own prefix. What a real

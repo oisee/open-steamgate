@@ -1,7 +1,12 @@
 // A folder of abapGit-named objects, as a zip abapGit will import.
 //
 //   node tools/osd-abapgit-zip.mjs <src/…/x.stg.yaml | folder> --out <file.zip>
-//                                  [--description "…"]
+//                                  [--unit <name>] [--manifest <file>]
+//                                  [--data <dir>] [--description "…"]
+//
+// Only the objects the deploy unit lists in deploy/manifest.json go in, and
+// never an SAP-owned name (tools/osd-deploy-manifest.mjs). The unit is the
+// one whose `sources` name the input, or the one --unit names.
 //
 // Why this exists (Alice, 2026-09-19). The last mile of this project is
 // "SEGW project offline -> abapGit -> a system", and it is the one arc of the
@@ -23,6 +28,7 @@ import {buildApp} from "./osd-bsp-app.mjs";
 import {packAppName} from "./osd-bsp-registry.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {deliveredAt} from "./osd-nodes.mjs";
+import {admit, loadManifest, refusalMessage, unitFor} from "./osd-deploy-manifest.mjs";
 
 const BOM = "﻿";
 
@@ -98,6 +104,16 @@ export function withoutOtherClients(rows) {
   const [own] = [...count].sort((a, b) => b[1] - a[1])[0];
   const kept = rows.filter((r) => client(r) === "" || client(r) === own);
   return {rows: kept, dropped: rows.length - kept.length, client: own};
+}
+
+/** The tables whose rows `dataFiles` would carry: a `.tabu.json` with its
+ *  `.conf.json` beside it. Read before anything is copied, so the manifest
+ *  can refuse a table's rows the same way it refuses an object. */
+export function dataTables(from) {
+  if (from === undefined || !existsSync(from)) return [];
+  const files = readdirSync(from);
+  return files.filter((f) => f.endsWith(".tabu.json") && files.includes(f.replace(/\.tabu\.json$/, ".conf.json")))
+    .map((f) => f.replace(/\.tabu\.json$/, "")).sort();
 }
 
 export function dataFiles(from, into) {
@@ -198,7 +214,9 @@ export function preparePack(dir, out) {
 }
 
 
-export function layout(from, into, description, data) {
+/** `unit` is the deploy unit of `deploy/manifest.json` this folder is
+ *  (`unitFor`); without one nothing may go, because nothing is listed. */
+export function layout(from, into, description, data, unit) {
   rmSync(into, {recursive: true, force: true});
   mkdirSync(join(into, "src"), {recursive: true});
   writeFileSync(join(into, ".abapgit.xml"), abapgitXml());
@@ -250,6 +268,15 @@ export function layout(from, into, description, data) {
       + `\nImporting one would replace that system's own handler. Move them out of the folder this zip is built `
       + `from, or build the zip from a folder that does not contain them.`);
   }
+  // **Only what the deploy unit lists, and never an SAP-owned name.** The
+  // check above is a blocklist of one kind of object; this one is the
+  // allowlist, and it is the only real guarantee that a reimplemented
+  // CL_/IF_/CX_, an /IWBEP/ or /UI2/ stand-in, or anything in a foreign
+  // namespace does not reach a system (osd-deploy-manifest.mjs says why).
+  const refusedByManifest = admit({
+    files, read: (f) => readFileSync(join(from, f), "utf8"), tables: dataTables(data), unit,
+  });
+  if (refusedByManifest.length > 0) throw new Error(refusalMessage(from, refusedByManifest));
   for (const f of files) cpSync(join(from, f), join(into, "src", f));
 
   // an object is its name up to the first dot; `zstg_demo_srv    0001.iwsv.xml`
@@ -280,7 +307,7 @@ if (runsAs("osd-abapgit-zip.mjs")) {
   const flag = (n, d) => { const i = argv.indexOf(`--${n}`); return i < 0 ? d : argv[i + 1]; };
   const input = argv.find((a) => !a.startsWith("--") && argv[argv.indexOf(a) - 1]?.startsWith("--") !== true);
   if (input === undefined) {
-    console.error("usage: osd-abapgit-zip.mjs <x.stg.yaml | folder> --out <file.zip> [--description …]");
+    console.error("usage: osd-abapgit-zip.mjs <x.stg.yaml | folder> --out <file.zip> [--unit <deploy unit>] [--manifest <file>] [--data <dir>] [--description …]");
     process.exit(2);
   }
   const out = flag("out", "repo.zip");
@@ -304,12 +331,24 @@ if (runsAs("osd-abapgit-zip.mjs")) {
   }
 
   const description = flag("description", `open-steamgate: ${basename(input).replace(/\..*$/, "")}`);
-  const {files, objects: found, rows} = layout(objects, staging, description, data);
+  let unit;
+  let laid;
+  try {
+    const manifest = loadManifest(flag("manifest"));
+    unit = {...unitFor(manifest, input, flag("unit")), customerNamespaces: manifest.customerNamespaces ?? []};
+    laid = layout(objects, staging, description, data, unit);
+  } catch (e) {
+    rmSync(staging, {recursive: true, force: true});
+    if (objects !== input) rmSync(objects, {recursive: true, force: true});
+    console.error(e.message);
+    process.exit(1);
+  }
+  const {files, objects: found, rows} = laid;
   const size = zip(staging, out);
   rmSync(staging, {recursive: true, force: true});
   if (objects !== input) rmSync(objects, {recursive: true, force: true});
 
-  console.log(`${out}: ${files} files, ${(size / 1024).toFixed(1)} KB`);
+  console.log(`${out}: ${files} files, ${(size / 1024).toFixed(1)} KB, deploy unit "${unit.name}"`);
   for (const [type, names] of [...found].sort()) {
     console.log(`  ${type.padEnd(5)} ${[...names].sort().join(", ")}`);
   }

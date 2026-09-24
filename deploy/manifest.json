@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "about": "What may leave this repository for a real system, by object. tools/osd-abapgit-zip.mjs refuses any object that is not listed in the unit it builds, and any object with an SAP-owned name even when it is listed, unless the entry says why it is intended. See docs/a4h-deploy.md, section 'What may leave for a system'.",
+  "customerNamespaces": [],
+  "units": {
+    "demo": {
+      "description": "The demo SEGW service and its DDIC, as the numbered A4H attempts carried it (docs/a4h-deploy.md, levels 002-007).",
+      "sources": ["src/demo/zstg_demo.stg.yaml"],
+      "data": "data",
+      "attempt": {"from": "ZSTG_", "to": "ZOSD_{nnn}_"},
+      "objects": [
+        "IWPR ZSTG_DEMO",
+        "IWSV ZSTG_DEMO_SRV 0001",
+        "IWMO ZSTG_DEMO_MDL 0001",
+        "CLAS ZCL_ZSTG_DEMO_MPC",
+        "CLAS ZCL_ZSTG_DEMO_MPC_ANN",
+        "CLAS ZCL_ZSTG_DEMO_MPC_EXT",
+        "CLAS ZCL_ZSTG_DEMO_DPC",
+        "CLAS ZCL_ZSTG_DEMO_DPC_EXT",
+        "TABL ZSTG_DEMO",
+        "TABL ZSTG_DEMO_BK",
+        "TABL ZSTG_PHOTO",
+        "TABL ZSTG_STATUS",
+        "SHLP ZSTG_STATUS_SH",
+        "TABU ZSTG_DEMO",
+        "TABU ZSTG_DEMO_BK",
+        "TABU ZSTG_PHOTO",
+        "TABU ZSTG_STATUS",
+        "TABU ZSTG_FLIGHTFACT"
+      ]
+    },
+    "demo-app": {
+      "description": "The demo's Fiori app as a BSP application and its ICF node, built by tools/osd-bsp-app.mjs (level 008).",
+      "sources": [],
+      "objects": [
+        "WAPA ZOSD_{nnn}_APP",
+        "SICF /sap/bc/ui5_ui5/sap/zosd_{nnn}_app"
+      ]
+    },
+    "lsd-a4h-011": {
+      "description": "The LSD light show as installed in $ZOSD_011 (deploy/lsd-a4h-011/README.md).",
+      "sources": ["deploy/lsd-a4h-011/src"],
+      "objects": [
+        "CLAS ZCL_ZOSD_011_LSD_APC",
+        "CLAS ZCL_ZOSD_011_LSD_HTTP",
+        "CLAS ZCL_ZOSD_011_LSD_MEDIA",
+        "SAPC ZOSD_011_LSD",
+        "SICF /sap/bc/zosd_011_lsd",
+        "SICF /sap/bc/apc/sap/zosd_011_lsd",
+        "W3MI ZOSD_011_SHOW",
+        "W3MI ZOSD_011_MUSIC"
+      ]
+    },
+    "zvdb": {
+      "description": "The ZVDB 100 vector-search pack, its service, workbench and the two buckets (packs/zvdb/README.md).",
+      "sources": ["packs/zvdb"],
+      "objects": [
+        "INTF ZIF_VDB_100_ENGINE",
+        "CLAS ZCL_VDB_100_ANYDB",
+        "CLAS ZCL_VDB_100_FACTORY",
+        "CLAS ZCL_VDB_100_HANA",
+        "CLAS ZCL_ZVDB_100_MPC",
+        "CLAS ZCL_ZVDB_100_MPC_ANN",
+        "CLAS ZCL_ZVDB_100_MPC_EXT",
+        "CLAS ZCL_ZVDB_100_DPC",
+        "CLAS ZCL_ZVDB_100_DPC_EXT",
+        "IWPR ZVDB_100",
+        "IWSV ZVDB_100_SRV 0001",
+        "IWMO ZVDB_100_MDL 0001",
+        "TABL ZVDB_100_VEC",
+        "TABU ZVDB_100_VEC",
+        "WAPA ZZVDB",
+        "SICF /sap/bc/ui5_ui5/sap/zzvdb"
+      ]
+    }
+  }
+}
