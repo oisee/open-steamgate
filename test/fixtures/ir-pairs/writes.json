@@ -3651,5 +3651,583 @@
         }
       }
     ]
+  },
+  "raw": {
+    "note": "Table R (MANDT C3, ID I, R RAW(4) stored as its 8 hex digits in upper case, as the transpiler's schema has it), key (MANDT, ID), seeded with seed before each case. A written RAW is cut or padded with 00 to its length; a text goes by ABAP's c -> x rule; an initial RAW is its zero bytes, never empty.",
+    "seed": [
+      [
+        "001",
+        1,
+        "0000000A"
+      ]
+    ],
+    "schema": {
+      "MANDT": {
+        "abap": "C",
+        "len": 3
+      },
+      "ID": {
+        "abap": "I"
+      },
+      "R": {
+        "abap": "X",
+        "len": 4
+      }
+    },
+    "pairs": [
+      {
+        "name": "INSERT a RAW as its 8 hex digits",
+        "statement": {
+          "write": "insert",
+          "table": "R",
+          "columns": [
+            "MANDT",
+            "ID",
+            "R"
+          ],
+          "rows": [
+            [
+              {
+                "node": "lit",
+                "value": "001",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              },
+              {
+                "node": "lit",
+                "value": 2,
+                "type": {
+                  "abap": "I"
+                }
+              },
+              {
+                "node": "lit",
+                "value": "DEADBEEF",
+                "type": {
+                  "abap": "X",
+                  "len": 4
+                }
+              }
+            ]
+          ],
+          "onDuplicate": "error"
+        },
+        "lowered": {
+          "sqlite": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 2, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "DEADBEEF",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "duckdb": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 2, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "DEADBEEF",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "postgres": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES ($1::varchar(3), 2, $2::varchar(8))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "DEADBEEF",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "hana": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 2, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "DEADBEEF",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "INSERT a short RAW: padded with 00",
+        "statement": {
+          "write": "insert",
+          "table": "R",
+          "columns": [
+            "MANDT",
+            "ID",
+            "R"
+          ],
+          "rows": [
+            [
+              {
+                "node": "lit",
+                "value": "001",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              },
+              {
+                "node": "lit",
+                "value": 3,
+                "type": {
+                  "abap": "I"
+                }
+              },
+              {
+                "node": "lit",
+                "value": "12000000",
+                "type": {
+                  "abap": "X",
+                  "len": 4
+                }
+              }
+            ]
+          ],
+          "onDuplicate": "error"
+        },
+        "lowered": {
+          "sqlite": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 3, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12000000",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "duckdb": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 3, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12000000",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "postgres": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES ($1::varchar(3), 3, $2::varchar(8))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12000000",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "hana": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 3, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12000000",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "INSERT a long RAW: cut to 4 bytes",
+        "statement": {
+          "write": "insert",
+          "table": "R",
+          "columns": [
+            "MANDT",
+            "ID",
+            "R"
+          ],
+          "rows": [
+            [
+              {
+                "node": "lit",
+                "value": "001",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              },
+              {
+                "node": "lit",
+                "value": 4,
+                "type": {
+                  "abap": "I"
+                }
+              },
+              {
+                "node": "lit",
+                "value": "12345678",
+                "type": {
+                  "abap": "X",
+                  "len": 4
+                }
+              }
+            ]
+          ],
+          "onDuplicate": "error"
+        },
+        "lowered": {
+          "sqlite": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 4, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12345678",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "duckdb": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 4, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12345678",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "postgres": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES ($1::varchar(3), 4, $2::varchar(8))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12345678",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "hana": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 4, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "12345678",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "INSERT a text by the c -> x rule: the hex prefix, an odd count padded",
+        "statement": {
+          "write": "insert",
+          "table": "R",
+          "columns": [
+            "MANDT",
+            "ID",
+            "R"
+          ],
+          "rows": [
+            [
+              {
+                "node": "lit",
+                "value": "001",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              },
+              {
+                "node": "lit",
+                "value": 5,
+                "type": {
+                  "abap": "I"
+                }
+              },
+              {
+                "node": "lit",
+                "value": "ABC00000",
+                "type": {
+                  "abap": "X",
+                  "len": 4
+                }
+              }
+            ]
+          ],
+          "onDuplicate": "error"
+        },
+        "lowered": {
+          "sqlite": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 5, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "ABC00000",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "duckdb": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 5, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "ABC00000",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "postgres": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES ($1::varchar(3), 5, $2::varchar(8))",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "ABC00000",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "hana": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 5, ?)",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "ABC00000",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "MODIFY with the RAW left out writes 4 zero bytes",
+        "statement": {
+          "write": "upsert",
+          "table": "R",
+          "columns": [
+            "MANDT",
+            "ID",
+            "R"
+          ],
+          "rows": [
+            [
+              {
+                "node": "lit",
+                "value": "001",
+                "type": {
+                  "abap": "C",
+                  "len": 3
+                }
+              },
+              {
+                "node": "lit",
+                "value": 6,
+                "type": {
+                  "abap": "I"
+                }
+              },
+              {
+                "node": "lit",
+                "value": "00000000",
+                "type": {
+                  "abap": "X",
+                  "len": 4
+                }
+              }
+            ]
+          ],
+          "key": [
+            "MANDT",
+            "ID"
+          ]
+        },
+        "lowered": {
+          "sqlite": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 6, ?) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"R\" = excluded.\"R\"",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "00000000",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "duckdb": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 6, ?) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"R\" = excluded.\"R\"",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "00000000",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "postgres": {
+            "sql": "INSERT INTO \"R\" (\"MANDT\", \"ID\", \"R\") VALUES ($1::varchar(3), 6, $2::varchar(8)) ON CONFLICT (\"MANDT\", \"ID\") DO UPDATE SET \"R\" = excluded.\"R\"",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "00000000",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          },
+          "hana": {
+            "sql": "UPSERT \"R\" (\"MANDT\", \"ID\", \"R\") VALUES (?, 6, ?) WITH PRIMARY KEY",
+            "params": [
+              {
+                "name": "p0",
+                "value": "001",
+                "type": "C(3)",
+                "isNull": false
+              },
+              {
+                "name": "p1",
+                "value": "00000000",
+                "type": "X(4)",
+                "isNull": false
+              }
+            ]
+          }
+        }
+      }
+    ]
   }
 }

@@ -100,6 +100,9 @@ export const DIALECTS = {
       else if (/^P\(\d+,\d+\)$/.test(code)) pg = `numeric${code.slice(1)}`;
       else if (/^C\(\d+\)$/.test(code)) pg = `varchar${code.slice(1)}`;
       else if (code === "STRING") pg = "text";
+      // a RAW(n) is its 2n upper-case hex digits, as the transpiler's schema
+      // stores it (NCHAR(2n)), bound as that text
+      else if (/^X\(\d+\)$/.test(code)) pg = `varchar(${2 * Number(code.slice(2, -1))})`;
       else throw new Refused(`the ABAP type ${code || "(missing)"} has no PostgreSQL parameter type`);
       return `$${n}::${pg}`;
     },

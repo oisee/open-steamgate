@@ -22,6 +22,8 @@ export const COLUMNS = {
   PRICE: {type: {abap: "P", len: 15, dec: 2}},
   FLDATE: {type: {abap: "D"}},
   NOTE: {type: {abap: "STRING"}},
+  // a RAW(4), as the zvdb agent measured RAW on A4H (a table of its own there)
+  R: {type: {abap: "X", len: 4}},
 };
 
 export const CASES = [
@@ -113,6 +115,18 @@ export const CASES = [
   {name: "a qualified name is refused", where: "sflight~carrid = 'LH'"},
   {name: "an unquoted number against CHAR is refused", where: "carrid = 5"},
   {name: "a NUMC literal that is not digits is refused", where: "connid = 'A1'"},
+  // RAW(4), measured by the zvdb agent: exactly 8 hex digits in upper case
+  {name: "a RAW against its 2n upper-case hex digits", where: "r = '0000000A'"},
+  {name: "a RAW compared by its bytes", where: "r < '00000100'"},
+  {name: "a RAW literal too short is CX_SY_OPEN_SQL_DATA_ERROR", where: "r = '12'"},
+  {name: "a RAW literal too long is CX_SY_OPEN_SQL_DATA_ERROR", where: "r = '1200000000'"},
+  {name: "a RAW literal in lower case is CX_SY_OPEN_SQL_DATA_ERROR", where: "r = '0000000a'"},
+  {name: "a RAW literal with a blank before it is CX_SY_OPEN_SQL_DATA_ERROR", where: "r = ' 0000000A'"},
+  {name: "a RAW literal that is empty is CX_SY_OPEN_SQL_DATA_ERROR", where: "r = ''"},
+  {name: "an unquoted number against a RAW is CX_SY_OPEN_SQL_DATA_ERROR", where: "r = 12"},
+  {name: "IN on a RAW is not measured", where: "r IN ('0000000A')"},
+  {name: "BETWEEN on a RAW is not measured", where: "r BETWEEN '00000000' AND '0000000A'"},
+  {name: "LIKE on a RAW is not measured", where: "r LIKE '0000%'"},
 ];
 export const DIALECT_ORDER = ["sqlite", "duckdb", "postgres", "hana"];
 

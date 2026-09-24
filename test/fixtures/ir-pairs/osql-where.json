@@ -58,6 +58,12 @@
       "type": {
         "abap": "STRING"
       }
+    },
+    "R": {
+      "type": {
+        "abap": "X",
+        "len": 4
+      }
     }
   },
   "pairs": [
@@ -2718,6 +2724,178 @@
       "outcome": {
         "error": "Refused",
         "reason": "numc"
+      }
+    },
+    {
+      "name": "a RAW against its 2n upper-case hex digits",
+      "where": "r = '0000000A'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"R\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0000000A",
+              "type": "X(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"R\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0000000A",
+              "type": "X(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"R\" = $1::varchar(8))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0000000A",
+              "type": "X(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"R\" = ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "0000000A",
+              "type": "X(4)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a RAW compared by its bytes",
+      "where": "r < '00000100'",
+      "lowered": {
+        "sqlite": {
+          "sql": "(\"R\" < ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "00000100",
+              "type": "X(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "duckdb": {
+          "sql": "(\"R\" < ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "00000100",
+              "type": "X(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "postgres": {
+          "sql": "(\"R\" < $1::varchar(8))",
+          "params": [
+            {
+              "name": "p0",
+              "value": "00000100",
+              "type": "X(4)",
+              "isNull": false
+            }
+          ]
+        },
+        "hana": {
+          "sql": "(\"R\" < ?)",
+          "params": [
+            {
+              "name": "p0",
+              "value": "00000100",
+              "type": "X(4)",
+              "isNull": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a RAW literal too short is CX_SY_OPEN_SQL_DATA_ERROR",
+      "where": "r = '12'",
+      "outcome": {
+        "error": "OsqlWhereData",
+        "abap": "CX_SY_OPEN_SQL_DATA_ERROR"
+      }
+    },
+    {
+      "name": "a RAW literal too long is CX_SY_OPEN_SQL_DATA_ERROR",
+      "where": "r = '1200000000'",
+      "outcome": {
+        "error": "OsqlWhereData",
+        "abap": "CX_SY_OPEN_SQL_DATA_ERROR"
+      }
+    },
+    {
+      "name": "a RAW literal in lower case is CX_SY_OPEN_SQL_DATA_ERROR",
+      "where": "r = '0000000a'",
+      "outcome": {
+        "error": "OsqlWhereData",
+        "abap": "CX_SY_OPEN_SQL_DATA_ERROR"
+      }
+    },
+    {
+      "name": "a RAW literal with a blank before it is CX_SY_OPEN_SQL_DATA_ERROR",
+      "where": "r = ' 0000000A'",
+      "outcome": {
+        "error": "OsqlWhereData",
+        "abap": "CX_SY_OPEN_SQL_DATA_ERROR"
+      }
+    },
+    {
+      "name": "a RAW literal that is empty is CX_SY_OPEN_SQL_DATA_ERROR",
+      "where": "r = ''",
+      "outcome": {
+        "error": "OsqlWhereData",
+        "abap": "CX_SY_OPEN_SQL_DATA_ERROR"
+      }
+    },
+    {
+      "name": "an unquoted number against a RAW is CX_SY_OPEN_SQL_DATA_ERROR",
+      "where": "r = 12",
+      "outcome": {
+        "error": "OsqlWhereData",
+        "abap": "CX_SY_OPEN_SQL_DATA_ERROR"
+      }
+    },
+    {
+      "name": "IN on a RAW is not measured",
+      "where": "r IN ('0000000A')",
+      "outcome": {
+        "error": "Refused",
+        "reason": "column type"
+      }
+    },
+    {
+      "name": "BETWEEN on a RAW is not measured",
+      "where": "r BETWEEN '00000000' AND '0000000A'",
+      "outcome": {
+        "error": "Refused",
+        "reason": "column type"
+      }
+    },
+    {
+      "name": "LIKE on a RAW is not measured",
+      "where": "r LIKE '0000%'",
+      "outcome": {
+        "error": "Refused",
+        "reason": "like type"
       }
     }
   ]

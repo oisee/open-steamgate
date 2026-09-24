@@ -117,7 +117,20 @@ Refused by name and not carried: a host variable (a system reads one; no
 producer here writes one), a column compared with a column, a qualified
 name (`tab~col`), an unquoted number against a CHAR column, a NUMC literal
 that is not digits within the column's length, LIKE on anything but a CHAR
-column, and TIME or RAW columns.
+column, and TIME columns.
+
+A RAW(n) column (`X`, measured on A4H by the zvdb agent, 2026-09-24) is
+stored as its 2n hex digits in upper case and compared as that text. Its
+literal must be exactly 2n digits of `[0-9A-F]`; anything else -- lower
+case, a wrong length, a character past F -- is what a system answers with
+CX_SY_OPEN_SQL_DATA_ERROR, and the pairs carry it as the outcome
+`{error: "OsqlWhereData", abap: "CX_SY_OPEN_SQL_DATA_ERROR"}`, a kind of
+its own beside a refusal. IN, BETWEEN and LIKE on a RAW were not measured
+and are refused ("column type"), and so is a RAWSTRING. A write gives a RAW
+what ABAP's `c -> x` conversion gives it: the longest prefix of
+`[0-9A-F]`, an odd count padded with a 0, then cut or padded with 00 to n
+bytes; its initial value is n zero bytes, never empty
+(`tools/ir-writes.mjs`, the `raw` section of `writes.json`).
 
 ## What the measurement found in the producers
 

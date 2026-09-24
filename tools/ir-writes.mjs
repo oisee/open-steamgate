@@ -39,6 +39,10 @@ export function initialValue(type) {
   if (type?.abap === "I" || type?.abap === "INT8") return lit(0, type);
   if (type?.abap === "C" || type?.abap === "STRING") return lit("", type);
   if (type?.abap === "D") return lit("00000000", type);
+  // a RAW(n) is n zero bytes, never empty (measured: a cleared field reads
+  // back 00000000); a RAWSTRING is empty
+  if (type?.abap === "X") return lit(Number.isInteger(type.len) ? "00".repeat(type.len) : "", type);
+  if (type?.abap === "XSTRING") return lit("", type);
   if (type?.abap === "P") return lit(packedText("0", type, "the initial value"), type);
   throw new WriteError(`a column of type ${type?.abap ?? "unknown"} has no initial value here yet`);
 }
@@ -145,6 +149,17 @@ export function bindValue(value, type) {
     return lit(text, type);
   }
   if (type?.abap === "STRING") return lit(String(value), type);
+  if (type?.abap === "X" || type?.abap === "XSTRING") {
+    // measured on A4H (the zvdb agent): what a SET writes to a RAW(n) is cut
+    // or padded with 00 to n bytes, never raising; a text goes by ABAP's
+    // c -> x rule, the longest prefix of [0-9A-F], an odd count padded with
+    // a 0. Upper-case hex is the value at the IR's boundary
+    const text = String(value);
+    let hex = /^[0-9A-F]*/.exec(text)[0];
+    if (hex.length % 2 === 1) hex += "0";
+    if (type.abap === "X" && Number.isInteger(type.len)) hex = hex.slice(0, 2 * type.len).padEnd(2 * type.len, "0");
+    return lit(hex, type);
+  }
   if (type?.abap === "P") return lit(packedText(value, type, "value"), type);
   throw new WriteError(`a column of type ${type?.abap ?? "unknown"} is not written yet`);
 }

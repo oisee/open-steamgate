@@ -87,6 +87,21 @@ export const W_CASES = [
     [{col: "BIG", expr: bindValue("-99999999999999999.99999999999999", W_SCHEMA.BIG)}],
     bin("AND", bin("=", col("MANDT", W_SCHEMA.MANDT), lit("001", W_SCHEMA.MANDT), T.bool), bin("=", col("ID", W_SCHEMA.ID), lit(1, W_SCHEMA.ID), T.bool), T.bool))},
 ];
+// a RAW(4): its value is 8 hex digits in upper case; what a write gives it is
+// cut or padded with 00 to 4 bytes, and a text goes by ABAP's c -> x rule
+// (the longest prefix of [0-9A-F], an odd count padded with a 0) -- measured
+// on A4H by the zvdb agent, 2026-09-24
+export const R_SCHEMA = {MANDT: {abap: "C", len: 3}, ID: {abap: "I"}, R: {abap: "X", len: 4}};
+const R_COLS = ["MANDT", "ID", "R"];
+const rrow = (...list) => bindRows(R_COLS, R_SCHEMA, list);
+export const R_SEED = [["001", 1, "0000000A"]];
+export const R_CASES = [
+  {name: "INSERT a RAW as its 8 hex digits", stmt: () => insertRows("R", R_COLS, rrow({mandt: "001", id: 2, r: "DEADBEEF"}))},
+  {name: "INSERT a short RAW: padded with 00", stmt: () => insertRows("R", R_COLS, rrow({mandt: "001", id: 3, r: "12"}))},
+  {name: "INSERT a long RAW: cut to 4 bytes", stmt: () => insertRows("R", R_COLS, rrow({mandt: "001", id: 4, r: "1234567890"}))},
+  {name: "INSERT a text by the c -> x rule: the hex prefix, an odd count padded", stmt: () => insertRows("R", R_COLS, rrow({mandt: "001", id: 5, r: "ABCg12"}))},
+  {name: "MODIFY with the RAW left out writes 4 zero bytes", stmt: () => upsert("R", R_COLS, rrow({mandt: "001", id: 6}), ["MANDT", "ID"])},
+];
 export const DIALECT_ORDER = ["sqlite", "duckdb", "postgres", "hana"];
 
 function rendered(stmt, dialect) {
@@ -119,6 +134,13 @@ export function widePairs() {
   });
 }
 
+export function rawPairs() {
+  return R_CASES.map((one) => {
+    const stmt = one.stmt();
+    return {name: one.name, statement: stmt, lowered: Object.fromEntries(DIALECT_ORDER.map((dialect) => [dialect, rendered(stmt, dialect)]))};
+  });
+}
+
 export const render = () => JSON.stringify({
   note: "write statements lowered per dialect by tools/ir-writes-pairs.mjs; a port must give the same {sql, params} bytes. Table T (MANDT C3, ID I, TXT C10), key (MANDT, ID), seeded with SEED before each case.",
   seed: SEED, key: KEY, schema: SCHEMA,
@@ -130,6 +152,10 @@ export const render = () => JSON.stringify({
   wide: {
     note: "Table W (MANDT C3, ID I, BIG P 31,14), key (MANDT, ID), seeded with seed before each case. Every packed parameter binds as its decimal string, never as a JavaScript number: 31 digits do not survive a double. The engines in exact read BIG back digit for digit; SQLite has no decimal type and keeps a REAL.",
     seed: W_SEED, schema: W_SCHEMA, exact: W_EXACT, pairs: widePairs(),
+  },
+  raw: {
+    note: "Table R (MANDT C3, ID I, R RAW(4) stored as its 8 hex digits in upper case, as the transpiler's schema has it), key (MANDT, ID), seeded with seed before each case. A written RAW is cut or padded with 00 to its length; a text goes by ABAP's c -> x rule; an initial RAW is its zero bytes, never empty.",
+    seed: R_SEED, schema: R_SCHEMA, pairs: rawPairs(),
   },
 }, undefined, 2) + "\n";
 
