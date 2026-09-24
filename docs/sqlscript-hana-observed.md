@@ -619,3 +619,17 @@ still goes to the engine as `SELECT <expr> FROM DUMMY` through the same
 lowering as a query, and is refused where the run has no engine; each such
 route moves to the host once it is measured and paired (foreman-dell's
 review of #44).
+
+Two limits, written down so they are not mistaken for measurements:
+
+- **Inside a SELECT the engine still decides.** A text compared with a
+  number in a WHERE (`WHERE txt = 5`: DuckDB raises, SQLite answers no row)
+  and UPPER / LOWER in a projection (DuckDB writes the capital sharp s,
+  SQLite maps ASCII only) are lowered as they are. The host rules above
+  cover scalar statements, not queries; a refusal at lowering is the next
+  step.
+- **The host's UPPER / LOWER beyond the measured cases is a decision.**
+  Measured: `äö`, `ÄÖ`, `ß`. Not measured, and handled by the one-to-one
+  rule (a mapping that would change the length keeps the character): the
+  dotted and dotless i (`İ`, `ı`), ligatures (`ﬀ`), `ŉ`, `ǰ`, `ΐ`, and the
+  Greek final sigma (`ΣΑΣ` lowers to `σασ`, no `ς`).

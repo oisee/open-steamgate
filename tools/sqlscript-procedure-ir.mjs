@@ -529,6 +529,11 @@ export async function runProcedure(program, {
     const value = parameter.kind !== undefined ? boundDateTime(raw, parameter.kind, name)
       : parameter.type.abap === "C" ? boundCharacter(raw, parameter.type, name)
       : parameter.type.abap === "X" ? boundBytes(raw, parameter.type, name) : scalarForType(raw, parameter.type, name);
+    // the same refusal as for a variable: a character outside the BMP raised
+    // on A4H, and JavaScript would count it as two
+    if (typeof value === "string" && ["C", "STRING"].includes(parameter.type.abap) && /[\uD800-\uDFFF]/.test(value)) {
+      throw new UnsupportedSqlScript(`input ${name}: a character outside the Basic Multilingual Plane is not carried (HANA raised on it, measured)`);
+    }
     scalars.set(name, {type: parameter.type, value});
   }
   if (program.outputType !== undefined) {
@@ -632,9 +637,13 @@ export async function runProcedure(program, {
     || (e.node === "call" && ["UPPER", "LOWER"].includes(e.fn) && (e.args ?? []).length === 1 && hostCapable(e.args[0])));
   // a comparison of a text with a number is not measured on HANA, and the
   // engines disagree (DuckDB raises, SQLite answers false): refused
+  // decided by the type of each SIDE, not by any text below it:
+  // LENGTH(:s) = 3 compares two numbers (the critic's N1)
+  const textTyped = (e) => ["C", "STRING"].includes(e.type?.abap)
+    || (e.node === "param" && ["C", "STRING"].includes(scalars.get(upper(e.name))?.type?.abap));
   const mixedComparison = (e) => e != null && (
     (e.node === "bin" && ["=", "<>", "!=", "<", ">", "<=", ">="].includes(e.op)
-      && e.left != null && e.right != null && textual(e.left) !== textual(e.right))
+      && e.left != null && e.right != null && textTyped(e.left) !== textTyped(e.right))
     || ["left", "right", "expr", "otherwise"].some((k) => mixedComparison(e[k]))
     || (e.args ?? []).some(mixedComparison) || (e.values ?? []).some(mixedComparison)
     || (e.whens ?? []).some((w) => mixedComparison(w.when) || mixedComparison(w.then)));
@@ -777,6 +786,9 @@ export async function runProcedure(program, {
         relations.set(statement.output, called.relation);
         nestedSteps += called.trace.hostSteps;
         nestedCalls += 1 + (called.trace.nestedCalls ?? 0);
+        // what the called body sent to the database is this call's too
+        dbStatements += called.trace.databaseStatements ?? 0;
+        dbParams += called.trace.boundParameters ?? 0;
       } else {
         throw new UnsupportedSqlScript(`procedure statement ${statement.stmt} is not supported`, statement);
       }

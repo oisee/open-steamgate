@@ -770,6 +770,8 @@ for (const {dialect, make, name = dialect} of [...ENGINES, SQLJS]) describe(`str
     let caught;
     try { await value("DECLARE s NVARCHAR(10) = 'ab'; IF :s = 5 THEN rv = 1; ELSE rv = 0; END IF;"); } catch (error) { caught = error; }
     expect(caught?.message).to.match(/comparing a text with a number is not measured on HANA yet/);
+    // a side is text by its own type: LENGTH of a text is a number
+    expect(await value("DECLARE s NVARCHAR(10) = 'abc'; IF LENGTH(:s) = 3 THEN rv = 1; ELSE rv = 0; END IF;")).to.equal(1);
     expect(() => program("DECLARE g BOOLEAN; IF :g THEN rv = 1; ELSE rv = 0; END IF;"))
       .to.throw(UnsupportedSqlScript, /a bare :g is not a condition on HANA .*write :g = TRUE/);
     expect(() => program("DECLARE g BOOLEAN; WHILE :g DO rv = 1; END WHILE; rv = 0;"))
@@ -808,6 +810,12 @@ for (const {dialect, make, name = dialect} of [...ENGINES, SQLJS]) describe(`str
     let caught;
     try { await value("DECLARE a NVARCHAR(10) = '\ud83d\ude00'; rv = 1;"); } catch (error) { caught = error; }
     expect(caught?.message).to.match(/outside the Basic Multilingual Plane is not carried/);
+    caught = undefined;
+    try {
+      await runProcedure(program("rv = LENGTH(:iv);", "IMPORTING VALUE(iv) TYPE string RETURNING VALUE(rv) TYPE i"),
+        {client, dialect, inputs: {IV: "\ud83d\ude00"}, inputCatalogue: CATALOGUE});
+    } catch (error) { caught = error; }
+    expect(caught?.message).to.match(/input IV: a character outside the Basic Multilingual Plane is not carried/);
   });
 
   it("a text longer than the declared length raises, as on A4H", async () => {
