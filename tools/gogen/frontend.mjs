@@ -1398,10 +1398,18 @@ function statement(node, ctx) {
   // FIELD-SYMBOLS: declared from the scope like DATA
   if (isStmt(node, Statements.FieldSymbol)) return undefined;
   if (isStmt(node, Statements.ModifyInternal)) {
-    if (!/^MODIFY\s+\S+\s+INDEX\s+.+\s+FROM\s+/i.test(text) || /\bTRANSPORTING\b/i.test(text)) throw new Unsupported(`MODIFY form: ${text}`);
+    // MODIFY itab INDEX n FROM wa, and the same written MODIFY itab FROM wa
+    // INDEX n (the order of the two additions is free; open-abap-gui's
+    // CL_GUI_CONTROL writes the second): each Source is the one after its word
+    const indexFirst = /^MODIFY\s+\S+\s+INDEX\s+.+\s+FROM\s+/i.test(text);
+    if (!(indexFirst || /^MODIFY\s+\S+\s+FROM\s+.+\s+INDEX\s+/i.test(text)) || /\b(TRANSPORTING|USING\s+KEY|ASSIGNING|REFERENCE\s+INTO)\b/i.test(text)) throw new Unsupported(`MODIFY form: ${text}`);
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (table.type.k !== "table") throw new Unsupported("MODIFY of a non-table");
-    const [idx, val] = node.findDirectExpressions(Expressions.Source);
+    const kids = node.getChildren();
+    const after = (kw) => { const at = kids.findIndex((c) => isTok(c, kw)); return at < 0 || !isExpr(kids[at + 1], Expressions.Source) ? undefined : kids[at + 1]; };
+    const idx = after("INDEX");
+    const val = after("FROM");
+    if (!idx || !val || node.findDirectExpressions(Expressions.Source).length !== 2) throw new Unsupported(`MODIFY form: ${text}`);
     return {s: "modify_index", table, index: convert(source(idx, ctx, I), I), value: convert(source(val, ctx, table.type.row), table.type.row)};
   }
   if (isStmt(node, Statements.Split)) return splitStatement(node, ctx, text);

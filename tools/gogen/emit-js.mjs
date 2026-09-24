@@ -327,7 +327,7 @@ function stmt(st, ctx, d) {
       const tb = expr(st.table, ctx);
       if (st.fs) {
         return [`${t}{`, `${t}  const ${n} = ${expr(st.index, ctx)};`,
-          `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${ident(st.fs)} = ${tb}[${n} - 1]; s.sy.subrc = 0; s.sy.tabix = ${n}; } else { s.sy.subrc = 4; }`, `${t}}`];
+          `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${ident(st.fs)} = ${tb}[${n} - 1]; s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
       }
       const row = composite(st.into.type) ? `abap.copy(${tb}[${n} - 1])` : `${tb}[${n} - 1]`;
       return [
@@ -476,7 +476,7 @@ function stmt(st, ctx, d) {
       const n = `idx${ctx.loop++}`;
       const tb = place(st.table, ctx);
       return [`${t}{`, `${t}  const ${n} = ${expr(st.index, ctx)};`,
-        `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${tb}[${n} - 1] = ${moved(st.value, ctx)}; s.sy.subrc = 0; s.sy.tabix = ${n}; } else { s.sy.subrc = 4; }`, `${t}}`];
+        `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${tb}[${n} - 1] = ${moved(st.value, ctx)}; s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
     }
     case "split": return [`${t}${place(st.table, ctx)} = abap.Split(${expr(st.x, ctx)}, ${expr(st.sep, ctx)});`];
     case "split_into": return [`${t}{`, `${t}  const spl = abap.SplitInto(${expr(st.x, ctx)}, ${expr(st.sep, ctx)}, ${st.targets.length});`,

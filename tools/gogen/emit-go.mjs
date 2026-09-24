@@ -831,10 +831,12 @@ function stmtLines(st, ctx, d) {
       ];
     });
     case "modify_index": {
+      // sy-subrc 0 or 4; sy-tabix is left as it was (A4H 2026-09-24,
+      // ZCL_GOGEN_T_MODFROM: "b:0/2" after MODIFY ... INDEX 3)
       const n = `idx${ctx.loop++}`;
       const tb = place(st.table, ctx);
       return [`${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
-        `${t}\t${tb}[${n}-1] = ${copied(expr(st.value, ctx), st.value.type, st.value)}`, `${t}\ts.Sy.Subrc = 0`, `${t}\ts.Sy.Tabix = ${n}`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+        `${t}\t${tb}[${n}-1] = ${copied(expr(st.value, ctx), st.value.type, st.value)}`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
     case "split": return [`${t}${place(st.table, ctx)} = abap.Split(${expr(st.x, ctx)}, ${expr(st.sep, ctx)})`];
     case "split_into": return [`${t}{`, `${t}\tspl := abap.SplitInto(${expr(st.x, ctx)}, ${expr(st.sep, ctx)}, ${st.targets.length})`,

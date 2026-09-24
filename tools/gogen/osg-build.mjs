@@ -1,7 +1,7 @@
 // What gateway.mjs and osgo.mjs share: OSG compiled whole (src/, gen/ and the
 // libraries of abap_transpile.json) and its database as SQL statements.
-import {existsSync, readdirSync} from "node:fs";
-import {join} from "node:path";
+import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync} from "node:fs";
+import {dirname, join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {home} from "./home.mjs";
 
@@ -10,6 +10,34 @@ const walk = (d) => readdirSync(d, {withFileTypes: true}).flatMap((e) => (e.isDi
 export const layers = [`${home}/src`, `${home}/gen`];
 export const libs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/scaffold", "open-abap-odata/src", "ajson/src/core"]
   .map((d) => `${home}/.local/lars/${d}`).filter(existsSync);
+
+/*
+ * abapGit is a library of the Node build with a file list (the "files"
+ * globs of its entry in abap_transpile.json: the HTML, event and string-map
+ * classes the sapevent node and ZOSD_GIT use, not all of abapGit). A folder
+ * here is loaded whole, so the listed files are copied into .out/libs/abapgit
+ * and that folder is the library. Without it ZCL_OSD_SAPEVENT had syntax
+ * errors and its SICF node answered "not in this program".
+ */
+function filteredLib(name) {
+  let spec;
+  try { spec = JSON.parse(readFileSync(`${home}/abap_transpile.json`, "utf8")).libs?.find((l) => String(l.folder).toLowerCase().endsWith(`/${name}`)); } catch { return null; }
+  const root = spec ? `${home}${spec.folder}` : null;
+  if (!root || !existsSync(root) || !Array.isArray(spec.files)) return null;
+  const out = join(import.meta.dirname, ".out", "libs", name);
+  rmSync(out, {recursive: true, force: true});
+  const globs = spec.files.map((g) => new RegExp(`^${g.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*\*/g, "\u0000").replace(/\*/g, "[^/]*").replace(/\u0000/g, ".*")}$`));
+  const all = (d) => readdirSync(d, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name)).flatMap((e) => (e.isDirectory() ? all(join(d, e.name)) : [join(d, e.name)]));
+  for (const f of all(root)) {
+    const rel = f.slice(root.length);
+    if (rel.startsWith("/.git/") || !globs.some((r) => r.test(rel))) continue;
+    mkdirSync(dirname(join(out, rel)), {recursive: true});
+    copyFileSync(f, join(out, rel));
+  }
+  return out;
+}
+const abapgit = filteredLib("abapgit");
+if (abapgit) libs.push(abapgit);
 
 /** every class and interface of the layers and libraries, compiled (a statement outside the subset is a stub) */
 export function compileOsg() {

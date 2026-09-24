@@ -278,6 +278,10 @@ const EXPECT = {
   // any parameter is passed; sy-dbsys the database client's name, sy-saprl
   // the transpiler runtime's constant (ultra/gaps, the AMDP sandbox page)
   ZCL_GOGEN_T_AMDPDEST: "illegal_func out:[] db:[sqlite] rel:[OPEN]",
+  // MODIFY itab FROM wa INDEX n = MODIFY itab INDEX n FROM wa (A4H
+  // 2026-09-24, $ZOSG_TMP_0195): sy-subrc 0 / 4, sy-tabix untouched (both
+  // emitters set it to n before)
+  ZCL_GOGEN_T_MODFROM: "a:0/2 b:0/2 c:4 A1 B20 X30",
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
