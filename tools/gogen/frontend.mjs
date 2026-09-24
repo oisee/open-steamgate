@@ -319,7 +319,7 @@ function typeKindOf(t) {
 /** ALIASES a FOR i~m of a class or interface (or a superclass): i~m */
 function aliasTarget(reg, owner, name) {
   for (const o of [owner, ...ancestors(reg, owner)]) {
-    const def = reg.getObject("INTF", o)?.getDefinition() ?? reg.getObject("CLAS", o)?.getDefinition();
+    const def = reg.getObject("INTF", o)?.getDefinition() ?? clasDef(reg, o);
     const all = def?.getAliases?.();
     const list = Array.isArray(all) ? all : all?.getAll?.() ?? [];
     const hit = list.find((x) => upper(x.getName()) === name);
@@ -377,9 +377,15 @@ function componentInterfaces(reg, intf, seen = new Set()) {
  * superclass or a constructor of its own is refused: neither is looked up
  * outside the registry yet.
  */
-const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM"]);
+// ultra/json: /UI2/CL_JSON (LCL_PARSER, LCL_STACK) and CL_SXML_STRING_READER
+// (LCL_READER and its node classes; LCL_JSON_PARSER's PARSE is kernel code,
+// NATIVE below) carry the deserialize path ZCL_OSD_STATUS=>REFRESH takes
+const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM", "/UI2/CL_JSON", "CL_SXML_STRING_READER"]);
 // the definitions of the local classes compiled, by their compiled name
 const LOCAL_DEFS = new Map();
+// a class's definition: a global class of the registry, or a local class of
+// LOCAL_CLASSES by its compiled name (OWNER:LOCAL)
+const clasDef = (reg, name) => LOCAL_DEFS.get(name) ?? reg.getObject("CLAS", name)?.getDefinition();
 
 function localClasses(reg, obj) {
   const owner = upper(obj.getName());
@@ -387,6 +393,8 @@ function localClasses(reg, obj) {
   const out = [];
   for (const file of obj.getABAPFiles()) {
     if (file === obj.getMainABAPFile()) continue;
+    // the test include's classes are ABAP Unit, never part of the program
+    if (/\.testclasses\.abap$/i.test(file.getFilename())) continue;
     for (const info of file.getInfo().listClassDefinitions()) {
       const local = upper(info.name);
       const def = findScope(top, "class_definition", local)?.findClassDefinition(local);
@@ -672,6 +680,9 @@ function typeOf(t, where, program) {
   }
   if (t instanceof BasicTypes.ObjectReferenceType) {
     const name = upper(t.getIdentifierName());
+    // a local class of the class being compiled, by its compiled name (ultra/json)
+    const local = program.locals?.get(`${program.currentOwner}|${name}`);
+    if (local !== undefined) return {k: "ref", name: local, intf: false};
     const intf = program.reg?.getObject("INTF", name) !== undefined;
     if (!intf && program.reg?.getObject("CLAS", name) === undefined) throw new Unsupported(`${where}: REF TO ${name}, which is not in the program`);
     if (intf) program.interfaces.add(name);
@@ -693,6 +704,8 @@ const fieldOf = (ctx, t, name, where) => {
 function classIr(ctx0, obj) {
   const {reg, program} = ctx0;
   program.currentClass = goName(obj.getName());
+  // the class whose local classes a REF TO / CREATE OBJECT names (ultra/json)
+  program.currentOwner = upper(obj.owner ?? obj.getName());
   const file = obj.getMainABAPFile();
   // the type names this class declares itself (class and method TYPES)
   program.currentTypes = new Set([...file.getRaw().matchAll(/\bTYPES\s*:?\s*(?:BEGIN\s+OF\s+)?([\w\/]+)/gi)].map((m) => upper(m[1])));
@@ -768,7 +781,7 @@ function classIr(ctx0, obj) {
       return found;
     }
     for (let sup = def.getSuperClass(), guard = 0; sup && guard < 20; guard += 1) {
-      const sdef = reg.getObject("CLAS", sup)?.getDefinition();
+      const sdef = clasDef(reg, sup);
       if (!sdef) break;
       const found = sdef.getMethodDefinitions().getAll().find((x) => upper(x.getName()) === nm);
       if (found && !found.isRedefinition()) return found;
@@ -787,7 +800,7 @@ function classIr(ctx0, obj) {
   // included one) is a field of the superclass's part of the object: a
   // second copy here would be a second field in Go, shadowing the embedded
   // one, and the value would split in two
-  const inherited = new Set(ancestors(reg, className).flatMap((c) => (reg.getObject("CLAS", c)?.getDefinition()?.getImplementing() ?? [])
+  const inherited = new Set(ancestors(reg, className).flatMap((c) => (clasDef(reg, c)?.getImplementing() ?? [])
     .flatMap((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))])));
   attributes.push(...implementedAttributes(program, implemented.filter((i) => !inherited.has(i))));
   for (const intf of implemented.map((name) => ({name}))) {
@@ -896,7 +909,6 @@ function classIr(ctx0, obj) {
   // the classes that create it compile, but none of its methods runs on a
   // state the constructor never set -- they all raise, with the reason
   const hasCtor = methodNodes.some((n) => upper(n.findFirstExpression(Expressions.MethodName).concatTokens()) === "CONSTRUCTOR");
-  if (hasCtor && obj.local !== undefined) throw new Error(`${className}: a local class with a constructor is not compiled (LOCAL_CLASSES)`);
   if (hasCtor && cls.constructor === null) {
     const why = program.skipped.find((x) => x.startsWith(`${className}=>CONSTRUCTOR:`))?.replace(/^[^:]+: /, "") ?? "?";
     cls.ctorBroken = why;
@@ -1089,7 +1101,7 @@ const RUNTIME_CX_SUPER = {CX_SY_REPLACE_INFINITE_LOOP: "CX_DYNAMIC_CHECK", CX_SY
 function isSubclass(reg, cls, ancestor) {
   for (let c = cls, guard = 0; c && guard < 20; guard += 1) {
     if (c === ancestor) return true;
-    c = reg.getObject("CLAS", c)?.getDefinition()?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c];
+    c = clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c];
   }
   return false;
 }
@@ -1932,7 +1944,7 @@ function refAttribute(base, attrNode, ctx, write = false) {
   if (base.type.k === "ref" && !base.type.intf && attrNode.concatTokens().includes("~")) return classRefIntfAttribute(base, upper(attrNode.concatTokens()), ctx, write);
   if (base.type.k !== "ref" || base.type.intf) throw new Unsupported(`-> on a ${base.type.k === "ref" ? "interface reference" : base.type.k}`);
   const name = upper(attrNode.concatTokens());
-  const a = [base.type.name, ...ancestors(ctx.reg, base.type.name)].map((c) => ctx.reg.getObject("CLAS", c)?.getDefinition()?.getAttributes().getInstance()
+  const a = [base.type.name, ...ancestors(ctx.reg, base.type.name)].map((c) => clasDef(ctx.reg, c)?.getAttributes().getInstance()
     .find((x) => upper(x.getName()) === name)).find(Boolean);
   if (a === undefined) throw new Unsupported(`${base.type.name}->${name}: not an instance attribute`);
   return {e: "refattr", base, name, type: typeOf(a.getType(), `${base.type.name}->${name}`, ctx.program)};
@@ -2073,7 +2085,7 @@ function classRefIntfAttribute(base, name, ctx, write) {
   const pre = name.slice(0, name.lastIndexOf("~"));
   // the topmost class that implements it: the field is its, and a subclass
   // implementing the same interface again shares it
-  const owner = [base.type.name, ...ancestors(ctx.reg, base.type.name)].findLast((c) => (ctx.reg.getObject("CLAS", c)?.getDefinition()?.getImplementing() ?? [])
+  const owner = [base.type.name, ...ancestors(ctx.reg, base.type.name)].findLast((c) => (clasDef(ctx.reg, c)?.getImplementing() ?? [])
     .some((i) => upper(i.name) === pre || componentInterfaces(ctx.reg, upper(i.name)).includes(pre)));
   if (owner === undefined) throw new Unsupported(`${base.type.name}->${name}: the class does not implement ${pre}`);
   if (!ctx.program.wanted.has(owner)) throw new Unsupported(`${base.type.name}->${name}: ${owner}, which implements ${pre}, is not compiled`);
@@ -2394,7 +2406,7 @@ const CHAR_UTILITIES = {NEWLINE: "\n", CR_LF: "\r\n", HORIZONTAL_TAB: "\t", FORM
 function resolveStatic(owner, attr, ctx) {
   if (owner === "CL_ABAP_CHAR_UTILITIES" && CHAR_UTILITIES[attr] !== undefined) return {e: "chars", value: CHAR_UTILITIES[attr], type: C(1)};
   const intf = ctx.reg.getObject("INTF", owner)?.getDefinition();
-  const clas = ctx.reg.getObject("CLAS", owner)?.getDefinition();
+  const clas = clasDef(ctx.reg, owner);
   const def = intf ?? clas;
   if (def === undefined) throw new Unsupported(`${owner}=>${attr}: ${owner} is not in the program`);
   const c = def.getAttributes().getConstants().find((x) => upper(x.getName()) === attr);
@@ -2428,12 +2440,12 @@ function namedType(typeNode, ctx, inferred) {
   const t = upper(text);
   const builtin = {I, F, STRING: S, INT8, D: C(8), T: C(6)}[t];
   if (builtin) return builtin;
-  const local = ctx.scope.findType?.(t) ?? ctx.reg.getObject("CLAS", ctx.className)?.getDefinition()?.getTypeDefinitions().getByName(t);
+  const local = ctx.scope.findType?.(t) ?? clasDef(ctx.reg, ctx.className)?.getTypeDefinitions().getByName(t);
   if (local !== undefined) return typeOf(local.getType(), text, ctx.program);
   if (ctx.reg.getObject("CLAS", t) || ctx.reg.getObject("INTF", t)) return {k: "ref", name: t, intf: ctx.reg.getObject("INTF", t) !== undefined};
   const m = /^(\w+)=>(\w+)$/.exec(t);
   if (m) {
-    const owner = ctx.reg.getObject("INTF", m[1])?.getDefinition() ?? ctx.reg.getObject("CLAS", m[1])?.getDefinition();
+    const owner = ctx.reg.getObject("INTF", m[1])?.getDefinition() ?? clasDef(ctx.reg, m[1]);
     const td = owner?.getTypeDefinitions().getByName(m[2]);
     if (td === undefined) throw new Unsupported(`type ${text}`);
     return typeOf(td.getType(), text, ctx.program);
@@ -2522,7 +2534,7 @@ function methodSignature(ctx, owner, name) {
   try {
     const [intf, meth] = name.includes("~") ? name.split("~") : [null, name];
     const defOwner = intf ?? owner;
-    const def = ctx.reg.getObject("INTF", defOwner)?.getDefinition() ?? ctx.reg.getObject("CLAS", defOwner)?.getDefinition();
+    const def = ctx.reg.getObject("INTF", defOwner)?.getDefinition() ?? clasDef(ctx.reg, defOwner);
     if (def === undefined) throw new Unsupported(`${defOwner} is not in the program`);
     const m = intf ? Array.from((() => { const all = def.getMethodDefinitions(); return Array.isArray(all) ? all : all.getAll(); })()).find((x) => upper(x.getName()) === meth)
       : declaredMethod(ctx.reg, defOwner, meth);
@@ -2548,9 +2560,9 @@ function methodSignature(ctx, owner, name) {
 /** the superclasses of a class, nearest first, as far as the registry has them */
 export function ancestors(reg, cls) {
   const out = [];
-  for (let c = reg.getObject("CLAS", cls)?.getDefinition()?.getSuperClass(), g = 0; c && g < 30; g += 1) {
+  for (let c = clasDef(reg, cls)?.getSuperClass(), g = 0; c && g < 30; g += 1) {
     out.push(upper(c));
-    c = reg.getObject("CLAS", c)?.getDefinition()?.getSuperClass();
+    c = clasDef(reg, c)?.getSuperClass();
   }
   return out;
 }
@@ -2559,7 +2571,7 @@ export function ancestors(reg, cls) {
  * superclass's; a REDEFINITION declares no parameters, so its origin's */
 function declaredMethod(reg, cls, meth) {
   for (const c of [cls, ...ancestors(reg, cls)]) {
-    const m = reg.getObject("CLAS", c)?.getDefinition()?.getMethodDefinitions().getAll().find((x) => upper(x.getName()) === meth);
+    const m = clasDef(reg, c)?.getMethodDefinitions().getAll().find((x) => upper(x.getName()) === meth);
     if (m && !m.isRedefinition()) return m;
   }
   return undefined;
@@ -2569,7 +2581,7 @@ function declaredMethod(reg, cls, meth) {
 /** the class of cls and its ancestors that lists intf in its INTERFACES */
 function implementingClass(reg, cls, intf) {
   for (const c of [cls, ...ancestors(reg, cls)]) {
-    const def = reg.getObject("CLAS", c)?.getDefinition();
+    const def = clasDef(reg, c);
     if (!def) return undefined;
     if (def.getImplementing().some((x) => upper(x.name) === intf)) return c;
   }
@@ -2578,7 +2590,7 @@ function implementingClass(reg, cls, intf) {
 
 function declaringClass(reg, cls, name, kind) {
   for (const c of [cls, ...ancestors(reg, cls)]) {
-    const def = reg.getObject("CLAS", c)?.getDefinition();
+    const def = clasDef(reg, c);
     if (!def) return undefined;
     const has = kind === "method" ? def.getMethodDefinitions().getAll().some((x) => upper(x.getName()) === name && !x.isRedefinition())
       : def.getAttributes().getAll().some((x) => upper(x.getName()) === name);
@@ -3446,7 +3458,8 @@ function caughtClasses(ctx, names) {
 function constructorSignature(ctx, clsName) {
   // a class without a constructor of its own is created through the
   // nearest superclass's
-  const def = ctx.reg.getObject("CLAS", declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName)?.getDefinition();
+  // a local class (LOCAL_CLASSES) has its definition by its compiled name
+  const def = LOCAL_DEFS.get(clsName) ?? ctx.reg.getObject("CLAS", declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName)?.getDefinition();
   const m = def?.getMethodDefinitions().getByName("CONSTRUCTOR");
   if (m === undefined) return [];
   const p = m.getParameters();
@@ -3790,7 +3803,7 @@ function defaultValue(p, ctx) {
   // a constant of the class or interface that declares the method, by its
   // plain name: its VALUE, a literal
   if (/^[a-z_][\w]*$/i.test(t) && !/^abap_(true|false)$/i.test(t) && p.defaultOwner !== undefined) {
-    const def = ctx.reg.getObject("INTF", p.defaultOwner)?.getDefinition() ?? ctx.reg.getObject("CLAS", p.defaultOwner)?.getDefinition();
+    const def = ctx.reg.getObject("INTF", p.defaultOwner)?.getDefinition() ?? clasDef(ctx.reg, p.defaultOwner);
     const c = def?.getAttributes().getConstants().find((x) => upper(x.getName()) === upper(t));
     if (c !== undefined && typeof c.getValue() === "string") t = c.getValue();
   }
