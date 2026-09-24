@@ -31,10 +31,10 @@ CLASS ltcl IMPLEMENTATION.
     out( zcl_osd_t_httpc=>call( iv_url = `http://localhost:1/x` ) ).
   ENDMETHOD.
   METHOD f2_tls_to_plain.
-    out( zcl_osd_t_httpc=>call( iv_url = `https://localhost:50000/sap/bc/abap/demo_post` ) ).
+    out( zcl_osd_t_httpc=>call( iv_url = replace( val = zcl_osd_t_httpc=>base sub = `http:` with = `https:` ) && `/sap/bc/abap/demo_post` ) ).
   ENDMETHOD.
   METHOD f3_bad_scheme.
-    out( zcl_osd_t_httpc=>call( iv_url = `ftp://localhost:50000/x` ) ).
+    out( zcl_osd_t_httpc=>call( iv_url = replace( val = zcl_osd_t_httpc=>base sub = `http:` with = `ftp:` ) && `/x` ) ).
   ENDMETHOD.
   METHOD f4_header_newline.
     out( zcl_osd_t_httpc=>call( iv_url = zcl_osd_t_httpc=>base && `/sap/bc/abap/demo_post`
@@ -66,7 +66,7 @@ CLASS ltcl IMPLEMENTATION.
     out( zcl_osd_t_httpc=>call( iv_url = zcl_osd_t_httpc=>base && `/sap/public/ping` iv_ticket = abap_false ) ).
   ENDMETHOD.
   METHOD s2_404.
-    out( zcl_osd_t_httpc=>call( iv_url = zcl_osd_t_httpc=>base && `/sap/bc/abap/zz_osg_no_such_node` ) ).
+    out( zcl_osd_t_httpc=>call( iv_url = zcl_osd_t_httpc=>base && `/sap/bc/abap/zz_osd_no_such_node` ) ).
   ENDMETHOD.
   METHOD s3_401.
     out( zcl_osd_t_httpc=>call( iv_url = zcl_osd_t_httpc=>base && `/sap/bc/abap/demo_post` iv_ticket = abap_false ) ).

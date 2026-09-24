@@ -1,6 +1,7 @@
 {
   "note": "The integration suites, one per line, so two people adding a suite do not conflict on one line of package.json. npm run integration reads this. tools/osd-suites.mjs refuses to run when this list and test/ disagree, in either direction: ten suites were in no list at all until 2026-09-20 and a green run had been answering a narrower question than it was read as.",
   "files": [
+    "test/anormalies-ids.mjs",
     "test/abap-types.mjs",
     "test/adt-devloop.mjs",
     "test/adt-editor.mjs",

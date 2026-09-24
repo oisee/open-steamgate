@@ -169,6 +169,21 @@ describe("tools/osd-git: a clone, with no git binary in the path", function () {
     expect(failed.message).to.contain("refs/heads/nope");
   });
 
+  it("a remote that answers 404 is refused with its status, not read as refs", async () => {
+    // the status comes from get_status: the ~status_code field the class
+    // read before is empty on this runtime (ANOMALY-2026-09-24-httpc-status-code-field),
+    // so an error answer went on to be parsed as an advertisement
+    let failed;
+    try {
+      await new Git().refs(url.replace(/\/repo$/, "/norepo"));
+    } catch (error) {
+      failed = error;
+    }
+    expect(failed, "a 404 has to be an error").to.not.equal(undefined);
+    expect(failed.code).to.equal("GIT_FAILED");
+    expect(failed.message).to.contain("answered 404");
+  });
+
   it("inflate is the platform's, and says how much of the input it ate", async () => {
     // zcl_abapgit_zlib is ours: abapGit's pack code asks it for the raw
     // bytes and for how far the stream ran, and the second answer is what

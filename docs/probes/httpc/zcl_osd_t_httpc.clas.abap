@@ -7,7 +7,8 @@
 * with an assertion ticket of the current user, so no password is involved.
 CLASS zcl_osd_t_httpc DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
-    CONSTANTS base TYPE string VALUE `http://localhost:50000`.
+* base: the system's own ICM, http://localhost:<ICM HTTP port> (SMICM, Goto > Services); set it before running
+    CONSTANTS base TYPE string VALUE `http://localhost:8000`.
     CLASS-METHODS call
       IMPORTING
         iv_url         TYPE string
