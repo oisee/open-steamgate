@@ -277,3 +277,17 @@ func (x *ICFExchange) Write(w http.ResponseWriter, method string) {
 		io.Copy(w, bytes.NewReader(body))
 	}
 }
+
+// XStringToStringUTF8 is ZCL_ABAPGIT_CONVERT=>XSTRING_TO_STRING_UTF8
+// (ultra/events): the first n bytes of data (all when n <= 0) as UTF-8. On
+// a system a byte sequence that is not UTF-8 is a ZCX_ABAPGIT_EXCEPTION the
+// host cannot make, so here it is refused.
+func XStringToStringUTF8(s *Session, data string, n int32) string {
+	if n > 0 && int(n) < len(data) {
+		data = data[:n]
+	}
+	if !utf8.ValidString(data) {
+		panic(NotCompiled("ZCL_ABAPGIT_CONVERT=>XSTRING_TO_STRING_UTF8", "bytes that are not UTF-8: the ZCX_ABAPGIT_EXCEPTION is not made by the host"))
+	}
+	return data
+}

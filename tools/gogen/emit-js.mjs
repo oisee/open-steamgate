@@ -361,9 +361,11 @@ function stmt(st, ctx, d) {
       if (st.call.e === "nop_call") return [];
       const c = st.call;
       const plain = c.receiving ? [`${t}${place(c.receiving, ctx)} = ${expr(c, ctx)};`] : callStmt(c, ctx, t);
-      if (!c.exceptions) return plain;
+      // ultra/events: a c field passed to a generic TYPE c keeps its length (emit-go)
+      const fits = c.args.filter((a) => a.fitc).map((a) => `${t}${place(a.place, ctx)} = abap.CFit(${place(a.place, ctx)}, ${a.fitc});`);
+      if (!c.exceptions) return [...plain, ...fits];
       return [`${t}try {`, ...plain.map((l) => `  ${l}`), `${t}  s.sy.subrc = 0;`,
-        `${t}} catch (e) { abap.classic(s, e, ${JSON.stringify(c.callee)}, ${JSON.stringify(c.exceptions.map)}, ${c.exceptions.others}); }`];
+        `${t}} catch (e) { abap.classic(s, e, ${JSON.stringify(c.callee)}, ${JSON.stringify(c.exceptions.map)}, ${c.exceptions.others}); }`, ...fits];
     }
     case "move_corr_data":
       return [`${t}abap.MoveCorrespondingData(${expr(st.to, ctx)}, ${expr(st.from, ctx)});`];
@@ -781,6 +783,7 @@ function expr(e, ctx) {
       return `${callee(e, ctx)}(${["s", ...args].join(", ")})`;
     }
     case "me": return "me";
+    case "xbytes": return literal({type: e.type, value: e.value});
     case "type_kind": return `${expr(e.x, ctx)}.t.kind`;
     // ultra/events: inside a handler's registration (set_handler)
     case "ev_arg": return `EvA.${ident(e.name)}`;
@@ -844,6 +847,7 @@ function conv(e, ctx) {
       if (from === "f" && to === "int8") return `abap.F2I8(${x})`;
       break;
     case "c2s": return x;
+    case "table_rows": return `${x}.map((ConvRow) => ${expr(e.row, ctx)})`;
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
     case "x2s": return e.to.k === "c" ? `abap.CFit(abap.XToHex(${x}), ${e.to.len})` : `abap.XToHex(${x})`;
     case "i2x": return `abap.IToX(${x}, ${e.to.len})`;

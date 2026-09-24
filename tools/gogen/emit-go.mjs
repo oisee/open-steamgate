@@ -786,6 +786,14 @@ function stmtLines(st, ctx, d) {
       if (st.call.e === "nop_call") return [];
       const c = st.call;
       const run = c.receiving ? `${place(c.receiving, ctx)} = ${expr(c, ctx)}` : expr(c, ctx);
+      // ultra/events: a c field passed to a generic TYPE c keeps its length
+      const fits = c.args.filter((a) => a.fitc).map((a) => `${t}${place(a.place, ctx)} = abap.CFit(${place(a.place, ctx)}, ${a.fitc})`);
+      if (fits.length) {
+        if (!c.exceptions) return [`${t}${run}`, ...fits];
+        const m = Object.entries(c.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
+        return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(c.callee)}, map[string]int32{${m}}, ${c.exceptions.others})`,
+          `${t}\t${run}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`, ...fits];
+      }
       if (!c.exceptions) return [`${t}${run}`];
       const m = Object.entries(c.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
       return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(c.callee)}, map[string]int32{${m}}, ${c.exceptions.others})`,
@@ -1303,6 +1311,7 @@ function expr(e, ctx) {
       return `${self(ctx, e.method)}.${typeName(e.method)}(${args.join(", ")})`;
     }
     case "nop_call": return "";
+    case "xbytes": return constLiteral({type: e.type, value: e.value});
     case "type_kind": return `string(${expr(e.x, ctx)}.T.Kind)`;
     // ultra/events: inside a handler's registration (set_handler)
     case "ev_arg": return `EvA.${ident(e.name)}`;
@@ -1372,6 +1381,7 @@ function conv(e, ctx) {
       if (from === "f" && to === "int8") return `abap.F2I8(${x})`;
       break;
     case "c2s": return x;
+    case "table_rows": return `func() ${goType(e.to)} { out := make(${goType(e.to)}, 0, len(${x})); for _, ConvRow := range ${x} { out = append(out, ${expr(e.row, ctx)}) }; return out }()`;
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
     case "i2s": return `abap.IToString(${x})`;
     case "x2s": return e.to.k === "c" ? `abap.CFit(abap.XToHex(${x}), ${e.to.len})` : `abap.XToHex(${x})`;

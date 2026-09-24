@@ -430,6 +430,12 @@ const NATIVE = new Map([
   // what the host is: runtime, platform, memory, one "name<TAB>value" line
   // each (go/abap/sysinfo.go; on Node the class's own @KERNEL lines)
   ["ZCL_OSD_SYSINFO=>ENVIRONMENT", {fn: "abap.SysInfoEnv", args: []}],
+  // ultra/events: abapGit's UTF-8 decoding, which its local class LCL_IN does
+  // through a codepage class found by name at run time (the class
+  // constructor of ZCL_ABAPGIT_GUI_EVENT needs it): the first IV_LENGTH bytes
+  // (all when not positive) read as UTF-8; bytes that are not UTF-8 would be
+  // a ZCX_ABAPGIT_EXCEPTION there, which the host does not make, so it dumps
+  ["ZCL_ABAPGIT_CONVERT=>XSTRING_TO_STRING_UTF8", {fn: "abap.XStringToStringUTF8", args: ["IV_DATA:xstring", "IV_LENGTH:i"]}],
   ["CL_HTTP_ENTITY=>IF_HTTP_ENTITY~GET_CDATA", {fn: "abap.ICFGetCData", args: ["MV_DATA:xstring"]}],
   ["CL_HTTP_ENTITY=>IF_HTTP_ENTITY~SET_CDATA", {fn: "abap.ICFSetCData", args: ["&MV_DATA:xstring", "DATA:string"]}],
 ]);
@@ -631,6 +637,9 @@ function typeOf(t, where, program) {
   // operation of a c ignores anyway (a structure passed as clike is refused
   // at the call, where the conversion to string fails)
   if (t instanceof BasicTypes.CSequenceType || t instanceof BasicTypes.CLikeType) return S;
+  // ultra/events: xsequence takes an x or an xstring: carried as an xstring,
+  // as csequence is carried as a string (ZCL_ABAPGIT_CONVERT=>XSTRING_TO_STRING_UTF8)
+  if (t instanceof BasicTypes.XSequenceType) return XS;
   if (t instanceof BasicTypes.TableType) {
     const access = t.getAccessType();
     const row = typeOf(t.getRowType(), where, program);
@@ -2027,6 +2036,11 @@ function initialValue(node, ctx) {
   else if (isExpr(src, Expressions.SimpleFieldChain) || isExpr(src, Expressions.FieldChain)) v = fieldChain(src, ctx);
   else throw new Unsupported(`VALUE ${src.concatTokens()} of ${name}`);
   if (type.k === "struct" || type.k === "table") throw new Unsupported(`VALUE for a ${type.k}`);
+  // ultra/events: VALUE 'C2A0' of an x or xstring is its bytes, as a class
+  // constant's is (ZCL_ABAPGIT_GUI_EVENT's class constructor); only hex digits
+  if ((type.k === "xstring" || type.k === "x") && v.e === "chars" && /^([0-9A-F]{2})*$/i.test(v.value)) {
+    return {s: "assign", target: {e: "var", name, type}, value: {e: "xbytes", value: v.value, type}};
+  }
   return {s: "assign", target: {e: "var", name, type}, value: convert(v, type)};
 }
 
@@ -4138,6 +4152,10 @@ function call(chain, ctx, statement, hint) {
     if (p.type.k === "data" && !p.byValue && t.type.k !== "data" && t.type.k !== "dref" && (!p.type.table || t.type.k === "table")) {
       return {dir: p.dir, place: null, wrap: {e: "wrap", x: t, type: p.type}, type: p.type};
     }
+    // ultra/events: a generic TYPE c parameter (C(262143) here) takes the
+    // caller's c of any length: the callee writes the caller's field, which
+    // keeps its own length (the value is fitted to it after the call)
+    if (statement && p.type.k === "c" && p.type.len === 262143 && t.type.k === "c" && p.dir !== "importing") return {dir: p.dir, place: t, type: p.type, fitc: t.type.len};
     if (!sameType(t.type, p.type)) throw new Unsupported(`${name}: IMPORTING ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
     return {dir: p.dir, place: t, type: p.type};
   });
@@ -4354,6 +4372,14 @@ export function convert(expr, to) {
     if (to.intf && (to.name === "OBJECT" || implementsIntf(expr, from.name, to.name))) return {e: "upcast", x: expr, type: to};
     if (!to.intf && !from.intf && REG && ancestors(REG, from.name).includes(to.name)) return {e: "upcast", x: expr, type: to};
     throw new Unsupported(`reference ${from.name} -> ${to.name}`);
+  }
+  // ultra/events: a standard table into a standard table of another row
+  // type, row by row as a move converts the row (RAISE EVENT of abapGit's
+  // viewer: POSTDATA of c 1024 lines into c 256 lines, QUERY_TABLE of one
+  // flat structure into another)
+  if (from.k === "table" && to.k === "table" && !from.sorted && !to.sorted && !from.hashed && !to.hashed) {
+    const row = convert({e: "temp", name: "ConvRow", type: from.row}, to.row);
+    return {e: "conv", kind: "table_rows", from, to, x: expr, row, type: to};
   }
   throw new Unsupported(`conversion ${from.k} -> ${to.k}`);
 }
