@@ -1321,3 +1321,18 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream issue: part of the implicit-MANDT anomaly; no separate issue.
 - Upstream version containing a fix: none yet
 - Regression-test location: `test/cds-client.mjs` (the column itself)
+
+### ANOMALY-2026-09-24-amdp-using-client — a portable AMDP reads a USING table without its client filter; the kernel reads it through a client view
+
+- Status: `open`
+- Discovery date: `2026-09-24` (reading the kernel's generated procedure on A4H; raised by foreman-dell)
+- Affected versions: `tools/sqlscript-procedure-ir.mjs` / `tools/sqlscript-lower.mjs` (every portable run that reads a dictionary table)
+- Affected ABAP statement, runtime API or adapter: an AMDP method with `USING <client-dependent table>` whose body reads that table
+- Minimal ABAP reproducer: an AMDP procedure `USING scarr` with `et = SELECT carrid FROM scarr;`, over a table holding rows of two clients.
+- Expected SAP behaviour (read on A4H, `SYS.PROCEDURES.DEFINITION` of a documented SAP AMDP demo, 2026-09-24): the generated procedure reads `"<class>=><method>=>SCARR#covw"`, a view the kernel generates per USING table, which restricts the table to the session's client -- the body never names MANDT and gets its own client's rows only.
+- Actual open-abap behaviour: the portable compiler scans the table itself; with rows of more than one client, the body sees all of them. The native HANA route (eAMDP here) creates the body as it stands and reads the plain table too.
+- Impact on open-steamgate: none on the seed data (one client); a database with a second client's rows answers them through any AMDP.
+- Smallest safe workaround: seed one client per database. The fix is to read a client-dependent USING table through `MANDT = SESSION_CONTEXT('CLIENT')` on both routes (the portable scan and the created procedure), as the kernel's view does -- to be measured against the kernel's view definition first.
+- Upstream issue: none (ours)
+- Upstream version containing a fix: none yet
+- Regression-test location: none yet
