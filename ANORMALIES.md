@@ -1526,3 +1526,48 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: **needs an issue** in abaplint/transpiler (`SelectTranspiler`)
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SELLOOP
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-packed-decimals — the transpiler runtime computes packed numbers with decimals in floating point and rounds, converts and overflows them differently from a system
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/transpiler` 2.13.89, `@abaplint/runtime` 2.13.89 (`types/packed.js`, `operators/*`, `types/integer8.js`, `templateFormatting`)
+- Affected ABAP statement, runtime API or adapter: every statement with a `p LENGTH n DECIMALS d` operand or target: moves into and out of p, arithmetic of calculation type p, `DIV` / `MOD`, string templates of p (`DECIMALS =`, `ALIGN`), `abs( )` / `frac( )` of p
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_pdconv.clas.abap`, `_pdcalc`, `_pdfmt`, `_pdprec`, `_pdcmp`, `_pdtpl` (each prints one line)
+- Exact command used to run it: A4H, the same classes as ABAP Unit probes in `$ZOSG_TMP_0270` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the classes and open-abap-core, each `lv_x.set(...)` statement of the output wrapped so that a JavaScript `RangeError` / `TypeError` prints `!JS` and the run goes on; the Go and JS backends of `tools/gogen`: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: the EXPECT lines of `tools/gogen/semantics.mjs` (A4H's answers). The rules they pin: `+ - *` exact, `/` to 31 significant digits, 63 integer digits in between, commercial rounding into the field, `CX_SY_ARITHMETIC_OVERFLOW` after arithmetic and `CX_SY_CONVERSION_OVERFLOW` after a move, c -> p with a trailing sign and no exponent, f -> p through seventeen significant digits, `DIV` / `MOD` with a remainder never negative, p -> c right aligned with a sign place, p -> n rounded and unsigned, a string compared with an i converted to i
+- Actual open-abap behaviour, where it differs from A4H (A4H in brackets):
+  - c -> p(3,2): `'12.5-'` NN (-12.50); `'1E2'` 100.00 (NN); `'999.995'` and `'1000'` 1000.00 (CO); `'- 1'` NN (-1.00); string `` `1e1` `` 10.00 (NN)
+  - f -> p(3,2): -0.125 -0.12 (-0.13); 2.675 2.68 (2.67); 999.995, 1000 and 1E300 no overflow (CO), 1E300 written out as 300 digits
+  - i 1000 into p(3,2) 1000.00 (CO); p(8,3) -> p(8,2): 1.255 1.25 (1.26), -1.255 -1.25 (-1.26); -2.50 into p(8,0) -2 (-3); 999.995 into p(3,2) 1000.00 (CO)
+  - p 3000000000 into i: no overflow (CO); p -2.50 into int8: `RangeError` (-3)
+  - p 0.10 into f, in a template: 0.1000000000000000 (0.10000000000000001)
+  - p into c(8): `1.5`, `-1.5`, `0` (`   1.50`, `   1.50-`, `   0.00`); into c(3) `123` (`*67`); into c(4)/(5)/(3) of -1.50 `-1.5`, `-1.5`, `-1.` (`1.50-`, `*50-`, `*0-`); p into n(4) 12.50 `0012` (0013), -12.5 `0-12` (0013), 12345.6 `2345` (2346)
+  - -7 / 2 into p(8,0) -3 (-4); `1 / 3 * 3` and every `/` whose result is multiplied again: `RangeError` (the quotient is a JS float handed to `BigInt`)
+  - DIV / MOD of 7.5 and -7.5 by 2 and -2: 3.00/2.00, -4.00/1.00, -4.00/1.00, 3.00/2.00 (3.00/1.50, -3.00/1.50, -4.00/0.50, 4.00/0.50); 7.5 MOD '0.4' 0.00 (0.30); -7 DIV -2 into p -4 (-3)
+  - no overflow anywhere: 31 nines + 1 into p(16,0) 9999999999999999635896294965248 (AO); 5 * 1000 into p(3,2) 5000.00 (AO)
+  - `lv_s = '-0.4'. IF lv_s < 0` true (false); `lv_s = '2.6'. IF lv_s = 3` false (true)
+  - int8 5000000000 / 3 into p(8,2) 1666666666.00 (1666666666.67)
+  - templates: `DECIMALS = 0` of 1.25 and 2.50 prints 1.25 and 2.50 (1, 3); `WIDTH = 8 ALIGN = RIGHT` `1.50    ` (`    1.50`); `abs( )` / `frac( )` of -1.5 print 1.5 / -0.5 (1.50, -0.50); p arithmetic in a template prints sixteen decimals (`2.2500000000000000` for 1.25 + 1, A4H 2.25)
+  - equal to A4H: plain templates of p fields, comparisons of p, generic data (DESCRIBE, move to string, IS INITIAL, writes through a field symbol), the products, 1 / 3 and 2 / 3 into p(8,2) and p(16,14), the character-operand calculation type (`'7' / 2 * 2` into i is 7)
+- Impact on open-steamgate: every DEC amount on the Node host (`ZSTG_FLIGHTFACT-PRICE`, `ZOSD_TAXIFACT-FARE`) is computed in doubles; sums, divisions and roundings of amounts can differ from a system in the last digit, and a value that overflows its field on a system is stored
+- Smallest safe workaround: none on the Node host; the Go and JS backends of `tools/gogen` compute p as A4H does (`go/abap/packed.go`, `js/abap.mjs`)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `Packed` and the operators); large, several issues rather than one
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_PDCONV, _PDCALC, _PDFMT, _PDPREC, _PDCMP, _PDTPL, _PDTPLM; `go test ./abap -run Packed` in `tools/gogen/go`
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-arith-compared-with-string — abaplint accepts an arithmetic expression compared with a character operand, which does not activate on a system
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/core` as used by OSG's lint (2.13.89 transpiler toolchain)
+- Affected ABAP statement, runtime API or adapter: a comparison `arith_expr op char_operand`, e.g. `IF lv_i * 86400 * 1000 > lv_s.` with `lv_s TYPE string`
+- Minimal ABAP reproducer: `DATA lv_i TYPE i. DATA lv_s TYPE string. IF lv_i * 2 > lv_s. ENDIF.`
+- Exact command used to run it: A4H, creating `ZCL_GOGEN_T_PDCMP` in `$ZOSG_TMP_0270` with that line (2026-09-24): activation refused
+- Expected SAP behaviour: syntax error "An arithmetic expression cannot be compared with the non-numeric operand "LV_S". However, "+ LV_S" can be used." (`lv_s + 0` activates; the comparison then runs in calculation type p)
+- Actual open-abap behaviour: abaplint reports nothing; OSG's own `src/gateway/zcl_stg_entry_provider.clas.abap` `CONVERT_VALUE` has `IF lv_ms < 0 OR lv_days * 86400 * 1000 > lv_ms.` with `lv_ms TYPE string`, which would not activate on a system
+- Impact on open-steamgate: the entry provider's `/Date(ms)/` branch cannot be deployed to a system as it is; the Go backend refuses that comparison with the system's reason (statement stub)
+- Smallest safe workaround: none applied (OSG source, `+ 0` or a p variable for `lv_ms` fixes it; not changed from this branch)
+- Upstream: **needs an issue** in abaplint/abaplint (syntax check of comparisons)
+- Regression-test location: `tools/gogen` front end, `compare( )` (the refusal); the activating form in `ZCL_GOGEN_T_PDCMP`
+- Upstream version containing a fix: none yet
