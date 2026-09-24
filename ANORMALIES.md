@@ -29,6 +29,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-09-24-find-section — `FIND ... IN SECTION` and an empty `FIND` pattern differ from A4H in the transpiler runtime
+
+- Status: `open` (the Go and JS backends of tools/gogen answer as A4H does; the transpiler runtime does not)
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/transpiler` / `@abaplint/runtime` as installed in the main checkout (2.13.89)
+- Affected ABAP statement, runtime API or adapter: `FIND [FIRST OCCURRENCE OF] p IN SECTION [OFFSET o] [LENGTH l] OF s [MATCH OFFSET m] [MATCH LENGTH n]`; `FIND '' IN s`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_findsec.clas.abap` (`s` is `ab<cd<e`, one `sec( )` call per case)
+- Exact command used to run it: A4H ABAP Unit probe ZCL_GOGEN_T_FINDSEC in `$ZOSG_TMP_0041` (deleted); the transpiler side by transpiling the same class with open-abap-core and calling `sec( )` per case (scratch runner, not tracked)
+- Expected SAP behaviour: MATCH OFFSET counts from the start of `s`; `OFFSET -1`, an offset past the end, `LENGTH` below -1 and a section past the end raise `CX_SY_RANGE_OUT_OF_BOUNDS`; `LENGTH -1` is the rest of `s`; `SECTION LENGTH 3 OF s` finds `<` at 2; an empty pattern is found at the section's start with length 0 (`FIND '' IN s MATCH OFFSET o MATCH LENGTH l` over `abc` is 0/0/0).
+- Actual open-abap behaviour: any `SECTION ... LENGTH` form (`OFFSET o LENGTH l OF`, `LENGTH l OF`) takes the wrong operand as the subject: with `OFFSET` it throws a JavaScript `TypeError` (`blah.substr is not a function`), without it the FIND answers 4 where A4H finds (`j`); `OFFSET -1` is sy-subrc 4, not an exception; an empty pattern sets sy-subrc 0 and leaves MATCH OFFSET and MATCH LENGTH as they were (`p: 0/99/98` against A4H `0/1/0`).
+- Impact on open-steamgate: none today: `ZCL_STG_SADL_DEF` uses `IN SECTION OFFSET o OF` with valid offsets, which the transpiler answers correctly. A LENGTH section anywhere in OSG's ABAP would crash on Node.
+- Smallest safe workaround: none needed in `src/`; avoid `IN SECTION ... LENGTH` in ABAP meant for the Node hosts.
+- Upstream issue: not drafted (abaplint/transpiler, `statements/find.ts` reads `IN SECTION OFFSET` only).
+- Regression-test location: `tools/gogen/semantics.mjs` (`ZCL_GOGEN_T_FINDSEC`)
+- Upstream version containing a fix: unknown
+
 ### ANOMALY-2026-09-23-w3mi-edges — WWWDATA_IMPORT and SCMS_BINARY_TO_XSTRING differ from A4H at their edges
 
 - Status: `open` (the Go host of tools/gogen answers as A4H does; the open-abap-core functions do not)
