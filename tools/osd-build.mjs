@@ -40,7 +40,7 @@ import {runsAs} from "./osd-main.mjs";
 
 // the tools this build runs before the transpiler, in the order the old npm
 // script ran them; each writes its part of gen/ and says so
-const GENERATORS = [
+export const GENERATORS = [
   ["osd-transpiler.mjs"],
   ["osd-inputs.mjs"],
   ["osd-ddic-binary.mjs"],
@@ -275,31 +275,69 @@ export function genHash(root) {
   return h.digest("hex").slice(0, 16);
 }
 
-export function hashOf(root, inputs = inputsOf(root)) {
+// a file's content, as a digest kept for as long as its stat says it has not
+// changed: the name of a generation is then a walk and a stat per input,
+// which is what lets a warm build (tools/osd-warm.mjs) name the generation it
+// makes in milliseconds rather than reading the whole tree again. The key
+// holds ctime as well as mtime, so a write that restores an mtime is seen
+const DIGESTS = new Map();
+function digestOf(file) {
+  const st = statSync(file);
+  const key = `${st.size}:${st.mtimeMs}:${st.ctimeMs}:${st.ino}`;
+  let hit = DIGESTS.get(file);
+  if (hit === undefined || hit.key !== key) {
+    hit = {key, digest: createHash("sha256").update(readFileSync(file)).digest("hex")};
+    // git's rule for a racy entry: a file written in the last two seconds
+    // may be written again within the resolution of its timestamps and keep
+    // its size, so its digest is not kept -- it is read again next time
+    if (Date.now() - st.mtimeMs > 2000) {
+      DIGESTS.set(file, hit);
+    } else {
+      DIGESTS.delete(file);
+    }
+  }
+  return hit.digest;
+}
+
+// `options`, all optional, are for a warm build (tools/osd-warm.mjs):
+//   digests    filled with every input and its digest, which is what the warm
+//              build compares with the inputs it was primed on;
+//   folders    per input folder, the (file, digest) list of an earlier walk,
+//              for a folder a watcher says has not changed since -- the
+//              libraries are 4400 of this tree's 5100 inputs;
+//   transpiler describeBuild(root), when the caller has it already.
+// None of them changes the name: it is the same hash over the same list.
+export function hashOf(root, inputs = inputsOf(root), options = {}) {
+  const digests = options instanceof Map ? options : options.digests;
+  const folders = options instanceof Map ? undefined : options.folders;
   const h = createHash("sha256");
-  h.update("transpiler\0").update(String(describeBuild(root))).update("\0");
+  h.update("transpiler\0").update(String(options.transpiler ?? describeBuild(root))).update("\0");
   // the rule that decides a name held by two inputs is part of what the
   // output is: a generation built under another rule is another generation
   h.update("layers\0later-wins\0");
   h.update("config\0").update(readFileSync(inputs.config)).update("\0");
+  const folder = (label, dir, list) => {
+    let entries = folders?.get(dir);
+    if (entries === undefined) {
+      entries = list().map((f) => [f, digestOf(f)]);
+      folders?.set(dir, entries);
+    }
+    h.update(`${label} ${relative(root, dir)} ${entries.length}\0`);
+    for (const [f, digest] of entries) {
+      digests?.set(f, digest);
+      h.update(relative(root, f)).update("\0").update(digest).update("\0");
+    }
+  };
   for (const dir of [...inputs.folders, ...inputs.libs]) {
     // **`gen/` is an OUTPUT and is left out.** It is written by this build
     // from the folders above and the generators below, so hashing it made
     // the name a function of the tree AND of how many times the tree had
     // been built. What decides its content is hashed instead.
     if (relative(root, dir) === "gen") continue;
-    const files = existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f)).sort() : [];
-    h.update(`dir ${relative(root, dir)} ${files.length}\0`);
-    for (const f of files) {
-      h.update(relative(root, f)).update("\0").update(readFileSync(f)).update("\0");
-    }
+    folder("dir", dir, () => (existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f)).sort() : []));
   }
   for (const dir of inputs.bspFolders ?? []) {
-    const files = walk(dir).sort();
-    h.update(`bsp ${relative(root, dir)} ${files.length}\0`);
-    for (const f of files) {
-      h.update(relative(root, f)).update("\0").update(readFileSync(f)).update("\0");
-    }
+    folder("bsp", dir, () => walk(dir).sort());
   }
   // the generators that will actually run -- the files under node, the
   // binary itself when it is the binary, because it executes its own copies
@@ -310,7 +348,7 @@ export function hashOf(root, inputs = inputsOf(root)) {
 // one build at a time: the generators write gen/ at the root, and two of
 // them at once would race over it. A stale lock from a process that died is
 // taken over, not obeyed.
-function lock(paths) {
+export function lock(paths) {
   mkdirSync(paths.build, {recursive: true});
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -370,9 +408,12 @@ function run(cmd, args, cwd) {
 // the root. Idempotent, and run on switch as well as on build, so a
 // generation made before this existed gets its links the first time it
 // goes live.
-export function linkRoots(root, generation, config = loadConfig(root), log = () => {}) {
+// the directories beside output/ that the modules of a generation name with
+// "../<dir>/": the setup hook, and whatever else a module points at. `files`
+// narrows the scan to some modules (a warm build's rebuilt ones)
+export function rootsWanted(generation, config, files = undefined) {
   const wanted = new Set();
-  const setup = config.options?.setup?.filename;
+  const setup = config?.options?.setup?.filename;
   if (typeof setup === "string") {
     const m = /^\.\.\/([^/]+)/.exec(setup);
     if (m) {
@@ -380,12 +421,20 @@ export function linkRoots(root, generation, config = loadConfig(root), log = () 
     }
   }
   const out = join(generation, "output");
-  for (const f of existsSync(out) ? readdirSync(out).filter((n) => n.endsWith(".mjs")).slice(0, 4000) : []) {
+  const names = files ?? (existsSync(out) ? readdirSync(out).filter((n) => n.endsWith(".mjs")).slice(0, 4000) : []);
+  for (const f of names) {
     const text = readFileSync(join(out, f), "utf8");
     for (const m of text.matchAll(/["'`]\.\.\/([^/"'`]+)\//g)) {
       wanted.add(m[1]);
     }
   }
+  return wanted;
+}
+
+export function linkRoots(root, generation, config = loadConfig(root), log = () => {}, options = {}) {
+  // `wanted`: the names, when the caller knows them already (a warm build:
+  // the live generation's plus whatever the modules it rebuilt name)
+  const wanted = new Set(options.wanted ?? rootsWanted(generation, config));
   for (const name of wanted) {
     // a string that merely looks like a path ("../sap/bc/…" in a literal)
     // names nothing at the root, and a link to nothing is worse than none
@@ -443,7 +492,7 @@ export function generations(root) {
 
 // point live at a generation, and output at live. Two renames, each atomic;
 // nothing between them is a state a reader can see as "no output".
-export function switchTo(root, hash, log = () => {}) {
+export function switchTo(root, hash, log = () => {}, options = {}) {
   const paths = layout(root);
   const target = join(paths.byInput, hash);
   if (!existsSync(join(target, "output"))) {
@@ -451,7 +500,7 @@ export function switchTo(root, hash, log = () => {}) {
     e.code = "NOT_BUILT";
     throw e;
   }
-  linkRoots(root, target, undefined, log);
+  linkRoots(root, target, undefined, log, options);
   const tmpLink = paths.live + ".tmp";
   try {
     unlinkSync(tmpLink);
@@ -486,11 +535,10 @@ export function switchTo(root, hash, log = () => {}) {
 
 // the build: hash, then either the cached generation or a fresh one to the
 // side, then the switch. Every failure leaves live untouched.
-export async function build(options = {}) {
-  const root = resolve(options.root ?? process.env.OSD_ROOT ?? process.cwd());
-  const log = options.log ?? (() => {});
-  const paths = layout(root);
-  const started = Date.now();
+// what every build refuses before it takes a lock or runs a generator, and
+// the layers it builds from: shared by the cold build below and the warm one
+// (tools/osd-warm.mjs), so the two cannot disagree about what a tree is
+export function prepare(root, log = () => {}) {
   const config = loadConfig(root);
   const missingLibs = missingLibraries(root, config);
   if (missingLibs.length > 0) {
@@ -522,9 +570,49 @@ export async function build(options = {}) {
   for (const {object, winner, hidden} of stack.overridden) {
     log(`overridden: ${object}: ${hidden.join(", ")} hidden by ${winner}`);
   }
+  return {config, stack};
+}
+
+// the config a build hands the transpiler: the same config, aimed at the
+// build's own directory. The path is root-relative because the transpiler
+// joins it to its working directory. The transpiler is handed the winner of
+// every name only: a class in two inputs is "already defined" to it, not an
+// override, so the files an earlier layer hides are kept from it here
+export function ownConfig(root, config, stack, outputFolder) {
+  return {
+    ...config,
+    // the packs are layers of this build, so the transpiler is handed them
+    // with the tree's own folders (backlog E.2)
+    input_folder: inputFoldersOf(root, config),
+    output_folder: relative(root, outputFolder),
+    exclude_filter: [...(config.exclude_filter ?? []), ...excludePatterns(stack.hidden)],
+  };
+}
+
+export async function build(options = {}) {
+  const root = resolve(options.root ?? process.env.OSD_ROOT ?? process.cwd());
+  const log = options.log ?? (() => {});
+  const paths = layout(root);
+  const started = Date.now();
+  const {config, stack} = prepare(root, log);
   const inputs = inputsOf(root, config);
   const hash = hashOf(root, inputs);
   const target = join(paths.byInput, hash);
+
+  // a generation a warm build made (tools/osd-warm.mjs) is not a cache hit
+  // until a cold transpile has been compared with it: it is built again,
+  // compared, and replaced if it differs
+  const warmSide = `${target}.warm.json`;
+  let warmUnchecked = false;
+  try {
+    warmUnchecked = JSON.parse(readFileSync(warmSide, "utf8")).verified !== true;
+  } catch {
+    warmUnchecked = false;
+  }
+  if (warmUnchecked) {
+    options = {...options, force: true, replace: true};
+    log(`generation ${hash} was made warm and nobody has compared it yet: building it cold`);
+  }
 
   if (options.force !== true && existsSync(join(target, "manifest.json"))) {
     const manifest = JSON.parse(readFileSync(join(target, "manifest.json"), "utf8"));
@@ -556,22 +644,14 @@ export async function build(options = {}) {
   try {
     rmSync(tmp, {recursive: true, force: true});
     mkdirSync(join(tmp, "output"), {recursive: true});
-    // the same config, aimed at this build's own directory. The path is
-    // root-relative because the transpiler joins it to its working directory.
-    // The transpiler is handed the winner of every name only: a class in two
-    // inputs is "already defined" to it, not an override, so the files an
-    // earlier layer hides are kept from it here
-    const own = {
-      ...config,
-      // the packs are layers of this build, so the transpiler is handed them
-      // with the tree's own folders (backlog E.2)
-      input_folder: inputFoldersOf(root, config),
-      output_folder: relative(root, join(tmp, "output")),
-      exclude_filter: [...(config.exclude_filter ?? []), ...excludePatterns(stack.hidden)],
-    };
+    const own = ownConfig(root, config, stack, join(tmp, "output"));
     writeFileSync(join(tmp, "abap_transpile.json"), JSON.stringify(own, null, 2));
 
-    output += runGenerators(root, log);
+    // generators: false is for a tree with nothing to generate (a test's
+    // tree of a few classes); every real build runs them
+    if (options.generators !== false) {
+      output += runGenerators(root, log);
+    }
     // the transpile itself is a library call in this process (N3,
     // tools/osd-transpile.mjs): no node_modules/.bin, no second process,
     // no parsing a count out of its output
@@ -657,6 +737,10 @@ export async function build(options = {}) {
       rmSync(tmp, {recursive: true, force: true});
     } else {
       renameSync(tmp, target);
+    }
+    if (warmUnchecked) {
+      // the bytes under the name are a cold build's now
+      rmSync(warmSide, {force: true});
     }
     if (options.switch !== false) {
       switchTo(root, hash, log);

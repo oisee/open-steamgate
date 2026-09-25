@@ -212,6 +212,52 @@ export class ServingRuntime {
   // The first version had stop() await the recycle and the recycle await
   // the stop, and `recycle(); stop();` never settled (found by review of
   // #60) -- with every later start() and ensure() stuck behind them.
+  // A warm build's modules, loaded into the running process instead of
+  // replacing it (tools/osd-hot.mjs). Only onto the generation the build
+  // started from: a delta applied to another base is not that generation.
+  // Rejects when the process is changing hands or the swap fails; the
+  // caller recycles then.
+  async hot(swap) {
+    const child = this.child;
+    if (this.running !== true || this.recycling !== undefined || this.stopping !== undefined) {
+      throw new NotServing("nothing to swap into");
+    }
+    if (swap.from !== undefined && swap.from !== this.generation) {
+      throw new Error(`the runtime carries ${this.generation}, and the swap is from ${swap.from}`);
+    }
+    const id = (this.hotSeq = (this.hotSeq ?? 0) + 1);
+    const done = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        child.off("message", onMessage);
+        reject(new Error("the warm swap did not answer within 30 s"));
+      }, 30000);
+      const onMessage = (message) => {
+        if (message?.type !== "hot-done" || message.id !== id) {
+          return;
+        }
+        child.off("message", onMessage);
+        clearTimeout(timer);
+        if (message.ok === true) {
+          resolve(message);
+        } else {
+          reject(new Error(`the warm swap failed: ${message.error}`));
+        }
+      };
+      child.on("message", onMessage);
+      child.send({type: "hot", id, generation: swap.generation, modules: swap.modules, verified: swap.verified === true});
+    });
+    this.generation = swap.generation;
+    this.swaps = done.swaps;
+    return done;
+  }
+
+  // a cold transpile of the same inputs gave the same bytes (osd-warm verify)
+  verified(generation) {
+    if (this.running === true && this.generation === generation) {
+      this.child.send({type: "verified", generation});
+    }
+  }
+
   async recycle() {
     if (this.recycling !== undefined) {
       return this.recycling;
@@ -399,6 +445,8 @@ export class ServingRuntime {
         this.port = message.port;
         this.epoch = epoch;
         this.generation = generation;
+        // a new process has taken no warm swaps (tools/osd-hot.mjs)
+        this.swaps = 0;
         registryUpdate(this.root, (list) => [...list.filter((e) => e.pid !== message.pid), {
           pid: message.pid, port: this.port, generation, root: this.root, database: this.database ?? "memory", since: new Date().toISOString(),
         }]);

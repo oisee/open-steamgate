@@ -1613,3 +1613,31 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream: [abaplint/transpiler#1857](https://github.com/abaplint/transpiler/issues/1857) (a related, older issue about conversion type c; the measured table is in a comment of 2026-09-24), fix offered as [PR #1895](https://github.com/abaplint/transpiler/pull/1895)
 - Regression-test location: `test/ir-writes.mjs` ("binds a RAW as its upper-case hex"); on `spike/go-backend` `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XCONV
 - Upstream version containing a fix: none yet
+
+### NOTE-2026-09-25-warm-swap-class-constructor — a warm swap runs a class constructor when the class is loaded, a system runs it at the first access
+
+- Status: `known` (a deliberate choice, `docs/warm-compile.md`)
+- Discovery date: `2026-09-25`
+- Affected versions: `tools/osd-hot.mjs`, the in-process swap of a warm build (`OSD_WARM=1`)
+- Affected ABAP statement, runtime API or adapter: `CLASS-METHODS class_constructor` of a class a warm build rebuilt
+- Expected SAP behaviour: after an activation, the new load's class constructor runs at the first access to the class in a session; a session that already used the class keeps the old load and its static attributes.
+- Actual open-abap behaviour: a transpiled module runs its class constructor when it is evaluated, which a swap does at once for every rebuilt class; objects created before the swap keep the code they were created with, as on a system, and static attributes start again, as with a new load.
+- Impact on open-steamgate: a class constructor with side effects (a row written, a message said) runs at the save rather than at the next call; none of the tree's class constructors does more than set static attributes.
+- Smallest safe workaround: none needed; the catch-up recycle after a swap starts a process that runs every class constructor at its start, as before.
+- Upstream issue: none (ours)
+- Upstream version containing a fix: none
+- Regression-test location: `test/warm.mjs` ("binds a swapped module to the instances already loaded": the module is evaluated again on a swap)
+
+### ANOMALY-2026-09-25-in-process-numbering — a second transpile in one process numbers the temporary names on from the first, so a dev-loop build is not reproducible
+
+- Status: `reported` (fix offered as abaplint/transpiler#1899)
+- Discovery date: `2026-09-25` (foreman-dell, measuring the dev loop on main 03f0fa0)
+- Affected versions: `@abaplint/transpiler` at the pinned 0263e428 and on npm
+- Affected ABAP statement, runtime API or adapter: `Transpiler.run` called more than once in one process (the dev loop's and ADT activation's cold build run in the façade process, `tools/osd-store.mjs` transpile)
+- Expected SAP behaviour: not a system behaviour; the expectation is ours: a generation is named by its inputs, so the same inputs give the same bytes.
+- Actual open-abap behaviour: `UniqueIdentifier`'s counters (`unique1…`, `indexBackup1…`) carry on from the earlier run, so `osd-build --force` over a generation the dev loop built in-process reported "NOT reproducible: 415 of 2524 files differ"; the binary's forced rebuilds were byte-identical.
+- Impact on open-steamgate: a generation the dev loop built cold differs from a fresh build of the same inputs in the temporary names only; what runs is the same. The warm build (`tools/osd-warm.mjs`) needs the fix and refuses without it.
+- Smallest safe workaround: none in the tree; a build in a fresh process (`npm run transpile`, `osd build`) is reproducible.
+- Upstream issue: [abaplint/transpiler#1898](https://github.com/abaplint/transpiler/issues/1898), fix offered as [PR #1899](https://github.com/abaplint/transpiler/pull/1899)
+- Upstream version containing a fix: none yet
+- Regression-test location: `packages/transpiler/test/unique_identifier.ts` in #1899; here `test/warm.mjs`, whose real path is verified against a cold transpile in a separate process

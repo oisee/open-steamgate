@@ -20,7 +20,9 @@ import {objectOf} from "./osd-inputs.mjs";
 export function devLoop(options = {}) {
   const store = options.store;
   const log = options.log ?? ((m) => console.log(`dev: ${m}`));
-  const quiet = options.debounce ?? 300;
+  // an editor's save is one write or a few in a burst; a warm build is
+  // short enough that a long wait for the burst to end would be most of it
+  const quiet = options.debounce ?? Number(process.env.OSD_DEBOUNCE ?? (process.env.OSD_WARM === "1" ? 30 : 300));
   const publish = options.publish ?? (() => store.publish());
   const pending = new Map(); // file -> event
   let timer;
@@ -43,6 +45,31 @@ export function devLoop(options = {}) {
       }
     }
     log(`${files.length} file${files.length === 1 ? "" : "s"} changed${objects.size > 0 ? `: ${[...objects.keys()].join(", ")}` : ""}`);
+
+    // with a warm registry the check is the build: the transpiler checks what
+    // the change reaches and builds nothing if one of them is broken, in a
+    // fraction of the ~3 s the check below costs
+    // -- for classes and interfaces only: anything else is a cold build, and
+    // a cold build is only as checked as the check below makes it
+    const warmable = objects.size > 0 && [...objects.values()].every(({type}) => type === "CLAS" || type === "INTF");
+    if (warmable && store.warm?.().compiler?.primed === true) {
+      const started = Date.now();
+      const checked = [...objects.values()].map(({type, name}) => store.warmActivation(type, name));
+      const result = await publish();
+      const t = result.transpile ?? {};
+      if (result.ok !== true) {
+        log(`${t.warm ? "check" : "build"} failed after ${t.ms ?? "?"} ms: ${result.error ?? t.error ?? "see the output below"}; the running system is untouched`);
+        return {ok: false, stage: t.warm ? "check" : "build", result};
+      }
+      if (!store.completeActivations(checked)) {
+        log("source changed during build; leaving the new edit inactive for the next pass");
+        return {ok: false, stage: "changed", result};
+      }
+      const how = t.warm ? `warm, ${t.stale} object${t.stale === 1 ? "" : "s"}` : t.cached ? "reused" : "built";
+      const live = result.hot ? `, swapped in ${result.ms} ms` : result.recycled ? `, recycled in ${result.ms} ms` : "";
+      log(`${how} ${t.hash ?? ""} in ${t.ms ?? "?"} ms${live}; ${Date.now() - started} ms from the change`);
+      return {ok: true, stage: "live", result};
+    }
 
     // check first, the object and whoever depends on it; the registry sees
     // the system whole, so three changed files that broke against an

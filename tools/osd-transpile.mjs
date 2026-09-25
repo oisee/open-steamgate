@@ -103,7 +103,7 @@ function matching(dir, patterns) {
 
 const regexps = (list) => (list ?? []).map((p) => new RegExp(p, "i"));
 
-async function readAll(files, relativeTo) {
+export async function readAll(files, relativeTo) {
   return files.map((filename) => ({
     filename: basename(filename),
     relative: relative(relativeTo, dirname(filename)),
@@ -114,6 +114,13 @@ async function readAll(files, relativeTo) {
 // the input folders, filtered the way the CLI filters them: the regular
 // expressions of input_filter and exclude_filter over the absolute path
 export async function loadFiles(root, config) {
+  const {wanted, skipped} = listFiles(root, config);
+  return {files: await readAll(wanted, resolve(root, config.output_folder)), skipped};
+}
+
+// the same list, unread: a caller that keeps the files it read (a warm
+// compile, tools/osd-warm.mjs) reads only the ones whose stat changed
+export function listFiles(root, config) {
   const include = regexps(config.input_filter);
   const exclude = regexps(config.exclude_filter);
   const folders = Array.isArray(config.input_folder) ? config.input_folder : [config.input_folder];
@@ -130,7 +137,7 @@ export async function loadFiles(root, config) {
       }
     }
   }
-  return {files: await readAll(wanted, resolve(root, config.output_folder)), skipped};
+  return {wanted, skipped};
 }
 
 // the libraries: a folder beside the tree when there is one, a shallow
@@ -169,7 +176,7 @@ export async function loadLibs(root, config, log = () => {}) {
 }
 
 // what the CLI writes beside the objects, byte for byte
-function outputFiles(output, config, outputFolder, files) {
+export function outputFiles(output, config, outputFolder, files) {
   const writeSourceMaps = config.write_source_map || false;
   const out = [];
   for (const o of output.objects) {
