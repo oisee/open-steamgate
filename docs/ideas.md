@@ -55,6 +55,7 @@ the system inside it.
 | E7 | Classes loaded as Go plugins, shadowing older ones | research | Linux/macOS only, never unloaded; measure the build time of one plugin |
 | E8 | Link without DWARF (`-ldflags=-w`) | research | measure against the 0.5–0.7 s link |
 | E9 | Per-class incremental emit + merged IR JSON | accepted | the part of the Go path that is not incremental yet |
+| E10 | DIAG and RFC listeners native in OSGo (Go), from the Go code the sibling projects already have (the DIAG tape screen, open-rfc-go) | accepted (backlog) | today the Pi Zero stand runs the JS listeners as a separate Bun binary (81 MB file, ~33 MB RSS); one Go binary should answer HTTP, HTTPS, DIAG and RFC |
 | — | V8 inside the Go binary (v8go) | rejected | cgo: per-target C++ toolchains, Windows doubtful, +30–40 MB, still no rebuild without a Go toolchain |
 | — | A JS engine compiled to wasm under Go | rejected | no JIT in a wasm guest; goja measured 196 s against 3 s |
 | — | abaplint rewritten in ABAP for speed | rejected | ~86,000 lines, a fork of a fast-moving upstream, and ABAP semantics cost speed in Go |
