@@ -5,7 +5,7 @@
 //        [--port 4720] [--jobs N] [--out <dir>] [--node-ref <file>]
 //        [--suites a,b] [--changed] [--only node|osgo]
 //        [--reuse-node | --fresh-node] [--timeout 30000] [--no-count]
-//        [--e2e] [--fast] [--report-only]
+//        [--e2e] [--fast] [--report-only] [--stale-gen]
 //
 // --report-only reads the last run's results (<out>/node-reference.json and
 // <out>/osgo-results.json) and only classifies and writes the summary again.
@@ -243,6 +243,17 @@ const genList = (dir) => {
   return acc;
 };
 let genBefore;
+// a checkout whose gen/ is not the generation of its inputs is refused
+// (osg-build.mjs staleGen): Node runs such a gen/ and hides what an osgo
+// built from it lacks, which is how two holes reached the browser build
+if (!flag("report-only") && !flag("stale-gen")) {
+  const {staleGen} = await import("./osg-build.mjs");
+  const stale = await staleGen(root);
+  if (stale) {
+    console.error(`parity: refused: ${stale} (or pass --stale-gen)`);
+    process.exit(2);
+  }
+}
 if (!flag("report-only") && existsSync(genDir)) {
   rmSync(genSnap, {recursive: true, force: true});
   cpSync(genDir, genSnap, {recursive: true, preserveTimestamps: true});
@@ -434,6 +445,18 @@ const osgoOnly = http.filter((t) => t.node.state !== "passed" && t.osgo?.state =
 // headline's numerator and denominator alike and listed on their own line
 const ADT_PATH = /^\/sap\/bc\/adt(\/|$|\?)|^\/osd\/not-served(\/|$|\?)/;
 const isAdt = (t) => t.file === "test/adt-facade.mjs" || [...(t.node?.requests ?? []), ...(t.osgo?.requests ?? [])].some((q) => ADT_PATH.test(q.path ?? ""));
+// "compiler-deferred" (Alice, 2026-09-25): the editor's CHECK, which on
+// Node is abaplint over the whole system behind DESTINATION 'STORE'. OSGo is
+// a built generation and answers CHECK with an explicit refusal naming the
+// missing compiler (go/abap/store.go storeNoCompiler); it is deferred until
+// the incremental rebuild exists. Out of the headline's numerator and
+// denominator, as adt-deferred is, and listed on its own line. That test
+// only: the parser colouring (TOKENS) is not deferred, it moves to ABAP
+// (ZCL_OSD_ABAP_TOKENS) and counts as a failure until then.
+const COMPILER_DEFERRED = [
+  {file: "test/editor.mjs", title: /checks the source it was POSTED/, tool: "abaplint's check over the whole system (STORE CHECK), until the incremental rebuild"},
+];
+const compilerDeferredOf = (t) => COMPILER_DEFERRED.find((h) => h.file === t.file && h.title.test(t.title));
 
 function dumpKey(body) {
   let text = body;
@@ -472,6 +495,8 @@ const KNOWN = [
 
 function classify(t) {
   if (isAdt(t)) return {cat: "adt-deferred", key: "the ADT facade (/sap/bc/adt, /osd/not-served): a JS module of the Node host, postponed", detail: String(t.osgo?.err?.message ?? "").split("\n")[0].slice(0, 200)};
+  const cd = compilerDeferredOf(t);
+  if (cd) return {cat: "compiler-deferred", key: `the compiler, not in a built generation: ${cd.tool}`, detail: String(t.osgo?.err?.message ?? "").split("\n")[0].slice(0, 200)};
   const o = t.osgo;
   if (o !== undefined && o.state !== "passed") {
     const text = `${o.err?.message ?? ""} ${o.err?.expected ?? ""} ${o.err?.actual ?? ""}`;
@@ -568,10 +593,13 @@ writeFileSync(join(out, "parity.json"), JSON.stringify(summary, null, 1));
 // OSGo answers them as a system does (scoreRaw keeps them in)
 const known = failing.filter((t) => t.cat.cat === "go-matches-system").length;
 const adtAll = denom.filter(isAdt).length;
-const passedH = passed.filter((t) => !isAdt(t)).length;
-const denomH = denom.length - known - adtAll;
+const cdAll = denom.filter((t) => !isAdt(t) && compilerDeferredOf(t)).length;
+const cdPassed = passed.filter((t) => !isAdt(t) && compilerDeferredOf(t)).length;
+const passedH = passed.filter((t) => !isAdt(t) && !compilerDeferredOf(t)).length;
+const denomH = denom.length - known - adtAll - cdAll;
 summary.scoreRaw = summary.score;
 summary.score = denomH ? passedH / denomH : null;
+summary.totals.compilerDeferred = cdAll;
 summary.totals.goMatchesSystem = known;
 summary.totals.adtDeferred = adtAll;
 summary.totals.headlinePassed = passedH;
@@ -581,9 +609,10 @@ writeFileSync(join(out, "parity.json"), JSON.stringify(summary, null, 1));
 const pct = (x) => x === null ? "n/a" : `${(x * 100).toFixed(1)}%`;
 const md = [];
 md.push(`# OSG parity: Node vs OSGo`, "", `${summary.when}, checkout \`${root}\`.`, "");
-md.push(`**Score: ${pct(summary.score)}** -- ${passedH} of ${denomH} HTTP-level tests that pass on Node also pass on OSGo (${denom.length} pass on Node, less ${known} go-matches-system and ${adtAll} adt-deferred).`, "");
+md.push(`**Score: ${pct(summary.score)}** -- ${passedH} of ${denomH} HTTP-level tests that pass on Node also pass on OSGo (${denom.length} pass on Node, less ${known} go-matches-system and ${adtAll} adt-deferred${cdAll ? `, ${cdAll} compiler-deferred` : ""}).`, "");
 md.push(`**adt-deferred** -- ${adtAll} test(s) of the ADT facade (/sap/bc/adt, /osd/not-served), postponed; ${passed.length - passedH} of them pass on OSGo.`, "");
 md.push(`Counting those as failures: ${pct(summary.scoreRaw)} (${passed.length} of ${denom.length}).`, "");
+if (cdAll) md.push(`**compiler-deferred** -- ${cdAll} test(s) whose Node answer is abaplint's whole-system check (the editor's CHECK), deferred until the incremental rebuild; ${cdPassed} of them pass on OSGo.`, "");
 if (known) {
   md.push(`**Closer to the reference** (go-matches-system: OSGo answers as a system does, Node's answer is an ANORMALIES entry) -- ${known} test(s):`, "");
   const why = new Map();
@@ -634,7 +663,7 @@ summary.wallMs = Date.now() - T0;
 writeFileSync(join(out, "parity.json"), JSON.stringify(summary, null, 1));
 md.push("## Wall time", "", "| phase | s |", "|---|---:|", ...phases.map((p) => `| ${p.name} | ${(p.ms / 1000).toFixed(1)} |`), `| total | ${(summary.wallMs / 1000).toFixed(1)} |`, "");
 writeFileSync(join(out, "parity.md"), md.join("\n"));
-console.log(`\nscore ${pct(summary.score)} (${passedH}/${denomH}: ${denom.length} Node-passed - ${known} go-matches-system - ${adtAll} adt-deferred); raw ${pct(summary.scoreRaw)} (${passed.length}/${denom.length})`);
+console.log(`\nscore ${pct(summary.score)} (${passedH}/${denomH}: ${denom.length} Node-passed - ${known} go-matches-system - ${adtAll} adt-deferred - ${cdAll} compiler-deferred); raw ${pct(summary.scoreRaw)} (${passed.length}/${denom.length})`);
 console.log(`${failing.length} failing in ${ranked.length} groups; not applicable: ${summary.totals.notApplicableSuites} suites, ${summary.totals.notApplicableTests ?? "?"} tests`);
 console.log(`wall ${(summary.wallMs / 1000).toFixed(1)} s: ${phases.map((p) => `${p.name} ${(p.ms / 1000).toFixed(1)} s`).join("; ")}`);
 console.log(`-> ${join(out, "parity.md")}`);

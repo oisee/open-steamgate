@@ -452,7 +452,12 @@ function stmt(st, ctx, d) {
       return [`${t}${p} = abap.ShiftRightTrailing(${p}, ${expr(st.mask, ctx)});`];
     }
     // CONCATENATE ... IN BYTE MODE (ultra/packs; see emit-go.mjs)
+    case "shift_left_circ_bytes": {
+      const p = place(st.target, ctx);
+      return [`${t}${p} = ${p}.slice(1) + ${p}.slice(0, 1);`];
+    }
     case "concat_bytes":
+      if (st.fixed !== undefined) return [`${t}{ const j = ${st.parts.map((x) => expr(x, ctx)).join(" + ")}; ${place(st.target, ctx)} = abap.XFit(j, ${st.fixed}); s.sy.subrc = j.length > ${st.fixed} ? 4 : 0; }`];
       return [`${t}${place(st.target, ctx)} = ${st.parts.map((x) => expr(x, ctx)).join(" + ")};`, `${t}s.sy.subrc = 0;`];
     case "condense": {
       const p = place(st.target, ctx);
@@ -746,6 +751,21 @@ function stmt(st, ctx, d) {
       for (const x of st.subs) lines.push(`${t}    ${place(x.target, ctx)} = ${expr(x.value, ctx)};`);
       lines.push(`${t}  } else { s.sy.subrc = 4; }`, `${t}}`);
       return lines;
+    }
+    // FIND ... RESULTS (parity-wave2): as emit-go
+    case "find_results": {
+      const n = ctx.loop++;
+      const f = st.f;
+      const tgt = place(st.target, ctx);
+      const fill = (r) => `${r}.${ident(f.LINE)} = 0; ${r}.${ident(f.OFFSET)} = fm${n}[0]; ${r}.${ident(f.LENGTH)} = fm${n}[1]; ${r}.${ident(f.SUBMATCHES)} = [];`
+        + ` for (let g = 2; g + 1 < fm${n}.length; g += 2) { const sr = ${zero(st.sub)}; sr.${ident(f.SOFFSET)} = fm${n}[g]; sr.${ident(f.SLENGTH)} = fm${n}[g + 1]; ${r}.${ident(f.SUBMATCHES)}.push(sr); }`;
+      const call = `abap.FindResults(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${JSON.stringify(st.mode)}, ${st.icase}, ${st.all})`;
+      if (st.table) {
+        return [`${t}{ const fms${n} = ${call}; ${tgt} = []; s.sy.subrc = fms${n}.length > 0 ? 0 : 4;`,
+          `${t}  for (const fm${n} of fms${n}) { const fr${n} = ${zero(st.row)}; ${fill(`fr${n}`)} ${tgt}.push(fr${n}); } }`];
+      }
+      return [`${t}{ const fms${n} = ${call}; s.sy.subrc = fms${n}.length > 0 ? 0 : 4;`,
+        `${t}  if (fms${n}.length > 0) { const fm${n} = fms${n}[0]; const fr${n} = ${tgt}; ${fill(`fr${n}`)} } }`];
     }
     case "delete_where": {
       const tb = place(st.table, ctx);

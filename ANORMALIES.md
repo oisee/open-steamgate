@@ -1959,3 +1959,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: **needs an issue** in abaplint/transpiler (runtime, `Hex.set`)
 - Regression-test location: `test/ir-writes.mjs` ("binds a RAW as its upper-case hex"); on `spike/go-backend` `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XCONV
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-25-zip-read-int4 — open-abap-core's `CL_ABAP_ZIP=>LOAD` overflows `i` in `LCL_STREAM=>READ_INT4`, and the transpiler runtime lets it through
+
+- Status: `open`
+- Discovery date: `2026-09-25`
+- Affected versions: open-abap-core (`src/abap/cl_abap_zip.clas.locals_imp.abap`, as cloned in `.local/lars/open-abap-core`); `@abaplint/runtime` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `LCL_STREAM=>READ_INT4` (and `READ_INT2`'s pattern): `DO 4 TIMES. ... lv_factor = lv_factor * 256. ENDDO.`, which after the fourth byte computes 256 ** 4 into an `i`; `CL_ABAP_ZIP=>LOAD` calls it for every header
+- Minimal ABAP reproducer: `DATA lv_factor TYPE i VALUE 1. DO 4 TIMES. lv_factor = lv_factor * 256. ENDDO.`
+- Exact command used to run it: `node tools/gogen/semantics.mjs` on branch ultra/parity-wave2 with a LOAD in ZCL_GOGEN_T_ZIP (taken out again): Go stops with `CX_SY_ARITHMETIC_OVERFLOW in * at cl_abap_zip.clas.locals_imp.abap:63`
+- Expected SAP behaviour: `CX_SY_ARITHMETIC_OVERFLOW` (the rule measured on A4H for ANOMALY-2026-09-23-epoch-ms-overflow: `i` arithmetic is range checked). SAP's own `CL_ABAP_ZIP=>LOAD` is other code and not affected
+- Actual open-abap behaviour: the JavaScript runtime computes 4294967296 into the `i` and LOAD works on Node
+- Impact on open-steamgate: none today; OSG saves zips (SEGW `RepoSet`, `CL_ABAP_ZIP=>SAVE`) and loads none. A host that checks `i` (OSGo) cannot LOAD a zip through open-abap-core
+- Smallest safe workaround: none needed yet; the fix is one line upstream (multiply only while bytes remain)
+- Upstream: **needs an issue** in open-abap/open-abap-core (the method), and the runtime's missing range check is the one ANOMALY-2026-09-23-epoch-ms-overflow already names
+- Regression-test location: none yet (ZCL_GOGEN_T_ZIP pins SAVE only)
+- Upstream version containing a fix: none yet

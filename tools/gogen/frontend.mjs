@@ -413,7 +413,9 @@ function componentInterfaces(reg, intf, seen = new Set()) {
 // ultra/json: /UI2/CL_JSON (LCL_PARSER, LCL_STACK) and CL_SXML_STRING_READER
 // (LCL_READER and its node classes; LCL_JSON_PARSER's PARSE is kernel code,
 // NATIVE below) carry the deserialize path ZCL_OSD_STATUS=>REFRESH takes
-const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM", "/UI2/CL_JSON", "CL_SXML_STRING_READER"]);
+// parity-wave2: CL_ABAP_ZIP (LCL_STREAM: the zip's bytes and its CRC-32),
+// the SEGW RepoSet zip
+const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM", "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CL_ABAP_ZIP"]);
 // the definitions of the local classes compiled, by their compiled name
 const LOCAL_DEFS = new Map();
 // a class's definition: a global class of the registry, or a local class of
@@ -622,6 +624,12 @@ const NATIVE = new Map([
   // answer to accept-encoding: gzip is inflated with zlib.gunzipSync, a
   // string as base64 is Buffer.from(string) (UTF-8) as base64 (authenticate)
   ["CL_ABAP_GZIP=>DECOMPRESS_BINARY_WITH_HEADER", {fn: "abap.GunzipWithHeader", args: ["GZIP_IN:xstring", "&RAW_OUT:xstring"]}],
+  // parity-wave2: raw DEFLATE both ways (zlib.deflateRawSync /
+  // inflateRawSync on Node, go/abap/gzip.go): cl_abap_zip's ADD and GET,
+  // the SEGW RepoSet zip. Go's encoder is not zlib's, so the compressed
+  // bytes differ; the stream inflates to the same input on both
+  ["CL_ABAP_GZIP=>COMPRESS_BINARY", {fn: "abap.DeflateRaw", args: ["RAW_IN:xstring", "&GZIP_OUT:xstring", "&GZIP_OUT_LEN:i"]}],
+  ["CL_ABAP_GZIP=>DECOMPRESS_BINARY", {fn: "abap.InflateRaw", args: ["GZIP_IN:xstring", "&RAW_OUT:xstring", "&RAW_OUT_LEN:i"]}],
   ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~ENCODE_BASE64", {fn: "abap.EncodeBase64", args: ["UNENCODED:string"]}],
 ]);
 
@@ -1896,6 +1904,14 @@ function statement(node, ctx) {
   // mask go and as many blanks come in on the left, so the length stays; a
   // blank not in the mask stops it. Every other SHIFT form is refused.
   if (isStmt(node, Statements.Shift)) {
+    // parity-wave2: SHIFT x LEFT CIRCULAR IN BYTE MODE, one byte (CL_ABAP_ZIP's
+    // little-endian int2; A4H 2026-09-24, ZCL_GOGEN_T_ZIP: AABB is BBAA,
+    // 01020304 is 02030401)
+    if (/^SHIFT\s+\S+\s+LEFT\s+CIRCULAR\s+IN\s+BYTE\s+MODE\s*\.?$/i.test(text)) {
+      const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      if (target.type.k !== "x") throw new Unsupported(`SHIFT LEFT CIRCULAR IN BYTE MODE of a ${target.type.k}`);
+      return {s: "shift_left_circ_bytes", target};
+    }
     if (!/^SHIFT\s+\S+\s+RIGHT\s+DELETING\s+TRAILING\s/i.test(text)) throw new Unsupported(`statement Shift: ${text}`);
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (target.type.k !== "string") throw new Unsupported(`SHIFT RIGHT DELETING TRAILING of a ${target.type.k}`);
@@ -1913,11 +1929,15 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.Concatenate) && /\bIN\s+BYTE\s+MODE\b/i.test(text)) {
     if (!/\bIN\s+BYTE\s+MODE\s*\.?$/i.test(text) || /\b(SEPARATED|RESPECTING|LINES\s+OF)\b/i.test(text)) throw new Unsupported(`CONCATENATE form: ${text}`);
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
-    if (target.type.k !== "xstring") throw new Unsupported(`CONCATENATE IN BYTE MODE into a ${target.type.k}`);
+    // parity-wave2: into an x of fixed length (A4H 2026-09-24,
+    // ZCL_GOGEN_T_BYTECATX): padded with 00 on the right and sy-subrc 0,
+    // cut to the length and sy-subrc 4 when longer; the operands, the target
+    // among them, are read first
+    if (target.type.k !== "xstring" && target.type.k !== "x") throw new Unsupported(`CONCATENATE IN BYTE MODE into a ${target.type.k}`);
     const parts = node.findDirectExpressions(Expressions.SimpleSource3).map((n) => source(n, ctx));
     if (parts.length < 2) throw new Unsupported(`CONCATENATE form: ${text}`);
     for (const p of parts) if (p.type.k !== "x" && p.type.k !== "xstring") throw new Unsupported(`CONCATENATE IN BYTE MODE of a ${p.type.k}`);
-    return {s: "concat_bytes", target, parts: parts.map((p) => convert(p, XS))};
+    return {s: "concat_bytes", target, parts: parts.map((p) => convert(p, XS)), fixed: target.type.k === "x" ? target.type.len : undefined};
   }
   if (isStmt(node, Statements.Condense)) {
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
@@ -2412,6 +2432,12 @@ function statement(node, ctx) {
       if (count.type.k !== "i") throw new Unsupported(`MATCH COUNT into a ${count.type.k}`);
       return {s: "find_all", regex, pattern, icase, subject: convert(source(subj, ctx), S), count};
     }
+    // parity-wave2: FIND [FIRST OCCURRENCE OF | ALL OCCURRENCES OF]
+    // [REGEX | PCRE] p IN s [IGNORING CASE] RESULTS r, r a match_result or a
+    // match_result_tab (open-abap-core's CL_ABAP_MATCHER, CL_IXML). A4H
+    // 2026-09-25 (ZCL_GOGEN_T_FINDRES, _FINDPCRE): see abap.FindResults
+    if (/^FIND (FIRST OCCURRENCE OF |ALL OCCURRENCES OF )?IN ((IGNORING|RESPECTING) CASE )?RESULTS$/.test(tw)
+      && node.findDirectExpressions(Expressions.Source).length === 2) return findResults(node, ctx, text, tw);
     if (words.includes("ALL") || /\b(RESULTS|MATCH\s+COUNT|IN\s+BYTE\s+MODE|RESPECTING)\b/i.test(text)) throw new Unsupported(`FIND form: ${text}`);
     const ft = node.findDirectExpression(Expressions.FindType);
     const kind = ft ? upper(ft.concatTokens()) : "";
@@ -2667,6 +2693,53 @@ function stringFn(name, direct, named, ctx, text) {
     given.has("CASE") ? chars("CASE") : {e: "str", value: "", type: S}, given.has("MIN") ? int("MIN") : {e: "int", value: 1, type: I}], type: S};
 }
 
+/**
+ * FIND ... RESULTS (parity-wave2). The target is a structure with LINE,
+ * OFFSET, LENGTH (i) and SUBMATCHES, a standard table of a structure with
+ * OFFSET and LENGTH (i) and nothing else -- match_result -- for FIRST, or a
+ * standard table of such rows -- match_result_tab -- for ALL. The subject is
+ * a string or a c (not a table, not a section); the pattern a string or a
+ * c, not a CL_ABAP_REGEX object.
+ */
+function findResults(node, ctx, text, tw) {
+  const all = tw.startsWith("FIND ALL");
+  const ft = node.findDirectExpression(Expressions.FindType);
+  const kind = ft ? upper(ft.concatTokens()) : "";
+  if (kind && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind} ... RESULTS`);
+  const [pat, subj] = node.findDirectExpressions(Expressions.Source);
+  const patX = source(pat, ctx);
+  if (!charlike(patX.type)) throw new Unsupported(`FIND ... RESULTS with a ${patX.type.k} pattern`);
+  const subjX = source(subj, ctx);
+  if (!charlike(subjX.type)) throw new Unsupported(`FIND ... RESULTS in a ${subjX.type.k}`);
+  const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+  const where = `FIND ... RESULTS ${target.type.k}`;
+  let row = target.type;
+  if (all) {
+    if (target.type.k !== "table" || target.type.sorted || target.type.hashed) throw new Unsupported(`FIND ALL OCCURRENCES ... RESULTS into other than a standard table`);
+    row = target.type.row;
+  } else if (target.type.k !== "struct") throw new Unsupported(`FIND FIRST OCCURRENCE ... RESULTS into a ${target.type.k}`);
+  if (row.k !== "struct") throw new Unsupported(`${where}: rows that are not structures`);
+  const f = {};
+  for (const n of ["LINE", "OFFSET", "LENGTH"]) {
+    const x = fieldOf(ctx, row, n, where);
+    if (x.type.k !== "i") throw new Unsupported(`${where}: ${n} is a ${x.type.k}`);
+    f[n] = x.name;
+  }
+  const sm = fieldOf(ctx, row, "SUBMATCHES", where);
+  if (sm.type.k !== "table" || sm.type.sorted || sm.type.hashed || sm.type.row.k !== "struct") throw new Unsupported(`${where}: SUBMATCHES is not a standard table of structures`);
+  f.SUBMATCHES = sm.name;
+  const sub = sm.type.row;
+  for (const n of ["OFFSET", "LENGTH"]) {
+    const x = fieldOf(ctx, sub, n, where);
+    if (x.type.k !== "i") throw new Unsupported(`${where}: SUBMATCHES-${n} is a ${x.type.k}`);
+    f[`S${n}`] = x.name;
+  }
+  const nFields = (t) => ctx.program.structs.get(t.go)?.fields?.length ?? 0;
+  if (nFields(row) !== 4 || nFields(sub) !== 2) throw new Unsupported(`${where}: a result structure with more components than match_result`);
+  return {s: "find_results", all, mode: kind === "PCRE" ? "P" : kind === "REGEX" ? "R" : "", pattern: convert(patX, S), subject: convert(subjX, S),
+    icase: /\bIGNORING\s+CASE\b/i.test(text), target, table: all, row, sub, f};
+}
+
 function initialValue(node, ctx) {
   const name = upper(node.findFirstExpression(Expressions.DefinitionName).concatTokens());
   const type = ctx.locals.get(name);
@@ -2676,6 +2749,9 @@ function initialValue(node, ctx) {
   if (src === undefined) throw new Unsupported(`VALUE of ${name}`);
   let v;
   if (isExpr(src, Expressions.Constant)) v = sourceOperand(src, ctx);
+  // parity-wave2: VALUE <a constant of the method> (CL_ABAP_ZIP's
+  // LCL_STREAM: crc TYPE x LENGTH 4 VALUE mffffffff), a bare name
+  else if (isExpr(src, Expressions.SimpleFieldChain) && src.getChildren().length === 1) v = variable(upper(src.concatTokens()), ctx);
   else if (isExpr(src, Expressions.SimpleFieldChain) || isExpr(src, Expressions.FieldChain)) v = fieldChain(src, ctx);
   else throw new Unsupported(`VALUE ${src.concatTokens()} of ${name}`);
   if (type.k === "struct" || type.k === "table") throw new Unsupported(`VALUE for a ${type.k}`);
@@ -3094,7 +3170,12 @@ function source(node, ctx, outer, hint = outer) {
   // (measured on A4H 2026-09-23 for i MOD 256 into x LENGTH 1: 255 and -1
   // both give FF, 300 gives 2C)
   const target = outer?.k === "x" ? I : outer;
-  const leaves = leafTypes(node, ctx);
+  // an x or xstring operand is its move into an i (the last four bytes,
+  // ZCL_GOGEN_T_XMOVI) and counts as an i for the calculation type (A4H
+  // 2026-09-24, ZCL_GOGEN_T_XARITH: 'EDB88320' DIV 2 is -153337456, x1 FF
+  // + 1 is 256, x8 ...000000FF is 255, x1 0A + p 1.5 is 11.50 in p, 07 / 2
+  // into i is 4); arith converts such a leaf to i first
+  const leaves = leafTypes(node, ctx).map((t) => (t.k === "x" || t.k === "xstring" ? I : t));
   // a character target (c, string) does not take part: the calculation
   // type of `s = i + 1` is not measured, so it is refused below unless the
   // operands decide it (a p or character operand: p, an f: f)
@@ -3220,6 +3301,8 @@ function arith(node, ctx, calc, hint) {
     if (isExpr(item.node, Expressions.Source)) return arith(item.node, ctx, t);
     let v = sourceOperand(item.node, ctx, item.hint);
     if (item.comps) v = componentsOf(v, item.comps, ctx);
+    // an x operand of arithmetic that is not a bit operation: through i
+    if (t !== undefined && (v.type.k === "x" || v.type.k === "xstring") && t.k !== "x" && t.k !== "xstring" && t.k !== "i") v = convert(v, I);
     return t === undefined ? v : convert(v, t);
   };
   let expr;
@@ -5063,7 +5146,11 @@ function call(chain, ctx, statement, hint) {
   } else if (kids.length === 1 && isExpr(kids[0], Expressions.MethodCall)) {
     mc = kids[0];
   } else if (kids.length === 3 && isExpr(kids[0], Expressions.ClassName) && isTok(kids[1], "=>") && isExpr(kids[2], Expressions.MethodCall)) {
-    if (upper(kids[0].concatTokens()) !== ctx.className) owner = upper(kids[0].concatTokens());
+    // a local class of the owner being compiled, by its compiled name
+    // (parity-wave2: CL_ABAP_ZIP's lcl_stream=>read_int2( ))
+    const cn = upper(kids[0].concatTokens());
+    const local = ctx.program.locals?.get(`${ctx.program.currentOwner}|${cn}`);
+    if ((local ?? cn) !== ctx.className) owner = local ?? cn;
     mc = kids[2];
   } else if (kids.length === 3 && upper(kids[0].concatTokens()) === "ME" && isTok(kids[1], "->")) {
     mc = kids[2];

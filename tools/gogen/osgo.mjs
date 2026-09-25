@@ -2,7 +2,8 @@
 // ABAP, compiled as gateway.mjs compiles it (osg-build.mjs), with the ICF
 // shim in front: a browser can use it.
 //
-//   node tools/gogen/osgo.mjs            -> .out/osgo  (all of OSG; heavy, run it under the shared lock)
+//   node tools/gogen/osgo.mjs            -> .out/osgo  (all of OSG; heavy, run it under the shared lock;
+//                                           refused when gen/ is not the tree's generation, --stale-gen overrides)
 //   node tools/gogen/osgo.mjs --echo     -> .out/osgo-echo  (the shim, open-abap-core and a test handler at /echo)
 //   .out/osgo [-port 3095] [-db file.sqlite] [-root <checkout>]
 //
@@ -41,7 +42,14 @@ if (echo) {
   console.log(`front end: ${program.classes.length} classes, ${program.partial.length} statement stubs`);
   services = [{path: "/echo", handler: "ZCL_OSGO_ECHO", active: true}];
 } else {
-  const {compileOsg, osgDatabase} = await import("./osg-build.mjs");
+  const {compileOsg, osgDatabase, staleGen} = await import("./osg-build.mjs");
+  // a stale gen/ is refused (--stale-gen builds it anyway, with the warning)
+  const stale = await staleGen();
+  if (stale && !process.argv.includes("--stale-gen")) {
+    console.error(`osgo: refused: ${stale} (or pass --stale-gen)`);
+    process.exit(2);
+  }
+  if (stale) console.warn(`osgo: WARNING ${stale}`);
   const built = compileOsg();
   program = built.program;
   console.log(built.summary);

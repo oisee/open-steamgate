@@ -89,3 +89,22 @@ export async function osgDatabase(program) {
   const summary = `database: ${created.size} tables and views, ${kept.length} inserts${skipped.size ? `; left out, no table in this program: ${[...skipped].map(([t, n]) => `${t} (${n})`).join(", ")}` : ""}`;
   return {statements: [...setup.schemas.sqlite, ...kept], summary};
 }
+
+/*
+ * Is gen/ the generation of this tree? (parity-wave2) gen/ is written by
+ * `npm run transpile` (tools/osd-build.mjs) from the tree's inputs, and OSGo
+ * compiles it as it finds it. A tree changed since its last build keeps the
+ * old gen/: the main checkout of 2026-09-25 held table sources from before
+ * #48 ('1 = 1' as an empty WHERE, which a system and OSGo refuse) and a
+ * ZCL_ZSTG_SADL_DPC from before #67 (LT_TAXI-ZONE), and an osgo built from
+ * it broke SEGW, status, ICF and the taxi app while Node, which accepts
+ * '1 = 1', did not show it. The build answers by its own record: the hash of
+ * the inputs now must name a build (build/by-input/<hash>/manifest.json).
+ * Returns undefined when it does, else why not.
+ */
+export async function staleGen(root = home) {
+  const {hashOf, layout, liveHash} = await import(`${root}/tools/osd-build.mjs`);
+  const hash = hashOf(root);
+  if (existsSync(join(layout(root).byInput, hash, "manifest.json"))) return undefined;
+  return `gen/ of ${root} is not the generation of its inputs: they hash to ${hash} and no build of that exists (live: ${liveHash(root) || "none"}); run npm run transpile there first`;
+}

@@ -119,16 +119,48 @@ export function IToX(v, n) {
   return String.fromCharCode(...out);
 }
 export const XToHex = (v) => [...v].map((c) => c.charCodeAt(0).toString(16).padStart(2, "0")).join("").toUpperCase();
-export function ParseF(v) {
-  let t = v.trim();
-  if (t === "") return 0;
+// text into f and into i, as A4H does (parity-wave2, ZCL_GOGEN_T_C2NUM;
+// the rules are written out at go/abap/conv.go ParseF / ParseI)
+function numSign(t) {
+  let signs = 0;
   let neg = false;
-  if (t.endsWith("-")) { neg = true; t = t.slice(0, -1).trim(); }
-  const f = Number(t);
-  if (Number.isNaN(f)) throw new AbapError("CX_SY_CONVERSION_NO_NUMBER", "c->f");
+  if (t !== "" && (t[0] === "+" || t[0] === "-")) { signs++; neg = t[0] === "-"; t = t.slice(1); }
+  if (t !== "" && t.endsWith("-")) { signs++; neg = true; t = t.slice(0, -1); }
+  return {neg, body: t, ok: signs <= 1};
+}
+const decimalDigits = (t) => /^(\d+\.?\d*|\.\d+)$/.test(t);
+export function ParseF(v) {
+  let t = v.replace(/^ +/, "");
+  if (t === "") return 0;
+  const sp = t.indexOf(" ");
+  if (sp >= 0) t = t.slice(0, sp);
+  if (t === "nan" || t === "inf" || t === "Infinity") throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "c->f");
+  for (const w of ["nan", "inf", "infinity"]) {
+    if (t.toLowerCase().includes(w)) notCompiled(`move to f: a text naming ${w} in a spelling not measured: ${t}`);
+  }
+  const {neg, body, ok} = numSign(t);
+  const m = /^([^Ee]*)(?:[Ee]([+-]?)(\d+))?$/.exec(body);
+  if (!ok || m === null || !decimalDigits(m[1])) throw new AbapError("CX_SY_CONVERSION_NO_NUMBER", "c->f");
+  const f = Number(body);
+  if (!Number.isFinite(f)) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "c->f");
   return neg ? -f : f;
 }
-export const ParseI = (v) => F2I(ParseF(v));
+export function ParseI(v) {
+  const t = v.replace(/^ +| +$/g, "");
+  if (t === "") return 0;
+  const {neg, body: raw, ok} = numSign(t);
+  const body = raw.replace(/^ +| +$/g, "");
+  if (!ok || !decimalDigits(body)) throw new AbapError("CX_SY_CONVERSION_NO_NUMBER", "c->i");
+  const dot = body.indexOf(".");
+  const whole = (dot < 0 ? body : body.slice(0, dot)).replace(/^0+/, "");
+  const frac = dot < 0 ? "" : body.slice(dot + 1);
+  if (whole.length > 10) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "c->i");
+  let n = whole === "" ? 0 : Number(whole);
+  if (frac !== "" && frac[0] >= "5") n++;
+  if (neg) n = -n;
+  if (n > 2147483647 || n < -2147483648) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "c->i");
+  return n;
+}
 export const ToUpper = (v) => v.toUpperCase();
 export const ToLower = (v) => v.toLowerCase();
 export const Strlen = (v) => [...v].length;
@@ -699,7 +731,7 @@ export function AppendData(t, v) {
   if (t.t.noAppend) throw new AbapError("NOT_COMPILED", "APPEND: to a generic table that is not a standard table");
   const n = Lines(t);
   const rt = t.t.row;
-  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0)})[rt.kind] ?? "";
+  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0), N: "0".repeat(rt.len ?? 0)})[rt.kind] ?? "";
   t.get().push(zero);
   MoveData(Row(t, n), v);
   return n + 1;
@@ -719,7 +751,7 @@ export function NewLine(t) {
   if (t === null) throw notAssigned("CREATE DATA LIKE LINE OF");
   if (t.t.kind !== "h") notCompiled("CREATE DATA LIKE LINE OF: a generic value that is not a table");
   const rt = t.t.row;
-  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0)})[rt.kind] ?? "";
+  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0), N: "0".repeat(rt.len ?? 0)})[rt.kind] ?? "";
   return cell(zero, rt);
 }
 
@@ -1391,7 +1423,7 @@ export function AppendInitialData(t) {
   if (t.t.noAppend) throw new AbapError("NOT_COMPILED", "APPEND INITIAL LINE: to a generic table that is not a standard table");
   const n = Lines(t);
   const rt = t.t.row;
-  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0)})[rt.kind] ?? "";
+  const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0), N: "0".repeat(rt.len ?? 0)})[rt.kind] ?? "";
   t.get().push(zero);
   return [Row(t, n), n + 1];
 }
@@ -1432,4 +1464,62 @@ export function cctorDump(cls, e) {
 // concat_lines_of( table = t sep = sep ) over a table of strings (go/abap ConcatLinesOf)
 export function ConcatLinesOf(t, sep) {
   return t.join(sep);
+}
+
+// FIND ... RESULTS (parity-wave2): go/abap FindResults, the same iteration
+// (after a match at its end, after an empty one a character on, an empty
+// match at the end found) and the same answer shape, offsets in code points.
+// A JS RegExp is leftmost-first: for PCRE ('P') that is the engine; for
+// REGEX ('R', POSIX leftmost-longest) an alternation whose shorter branch
+// matches first differs, as in FindStmt (a|ab in xabab: JS 1,1 3,1, A4H
+// 1,2 3,2); the Go runtime is the exact one. PCRE's refusals are Go's.
+const PCRE_REFUSED = [[/\(\?=/, "a lookahead (?=...)"], [/\(\?!/, "a negative lookahead (?!...)"], [/\(\?<=/, "a lookbehind (?<=...)"],
+  [/\(\?<!/, "a negative lookbehind (?<!...)"], [/\(\?>/, "an atomic group (?>...)"], [/\\[1-9]|\\g\{?-?\d|\\k[<{']/, "a backreference"],
+  [/[*+?}]\+/, "a possessive quantifier"], [/\\K/, "\\K"], [/\\G/, "\\G"], [/\(\?(R|\d|&|P>|\()/, "a recursion or a conditional"],
+  [/\(\*/, "a verb (*...)"], [/\\[cexoNXRhHvV]/, "an escape RE2 reads differently or not at all"]];
+export function FindResults(s, p, kind, icase, all) {
+  if (p === "") notCompiled("FIND ... RESULTS: an empty pattern is not measured");
+  const cp = (i) => [...s.slice(0, i)].length;
+  if (kind === "" && !icase) {
+    const out = [];
+    const n = [...p].length;
+    for (let pos = 0; pos <= s.length;) {
+      const i = s.indexOf(p, pos);
+      if (i < 0) break;
+      out.push([cp(i), n]);
+      if (!all) break;
+      pos = i + p.length;
+    }
+    return out;
+  }
+  let re;
+  if (kind === "P") {
+    const plain = p.replaceAll("\\\\", "");
+    for (const [r, what] of PCRE_REFUSED) if (r.test(plain)) notCompiled(`FIND PCRE: ${what} is not in Go's RE2: ${p}`);
+    if (/[\n\r]/.test(s)) notCompiled("FIND PCRE: a text with line ends: PCRE's ^ $ and . around them are not measured");
+    try { re = new RegExp(p, (icase ? "i" : "") + "gdu"); } catch { notCompiled(`FIND PCRE: the pattern does not compile here: ${p}`); }
+  } else {
+    const pat = kind === "" ? p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : p;
+    if (/\*\?|\+\?|\?\?/.test(pat)) throw new AbapError("CX_SY_INVALID_REGEX", pat);
+    re = abapRegExp(pat, s, icase, "gd", "FIND REGEX");
+  }
+  const out = [];
+  for (let pos = 0; pos <= s.length;) {
+    re.lastIndex = pos;
+    const m = re.exec(s);
+    if (!m) break;
+    const r = [];
+    for (const ix of m.indices) {
+      if (ix === undefined) { r.push(-1, 0); continue; }
+      const o = cp(ix[0]);
+      r.push(o, cp(ix[1]) - o);
+    }
+    out.push(r);
+    if (!all) break;
+    const end = m.index + m[0].length;
+    if (end > m.index) { pos = end; continue; }
+    if (m.index >= s.length) break;
+    pos = m.index + (s.codePointAt(m.index) > 0xffff ? 2 : 1);
+  }
+  return out;
 }

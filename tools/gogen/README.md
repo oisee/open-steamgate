@@ -1323,3 +1323,84 @@ at 90 s), `CL_ABAP_GZIP=>COMPRESS_BINARY` (@KERNEL, RepoSet), and the
 editor's parser colouring and compile check (2, Node host tools).
 Wall time with 4 jobs: full 6m45s (the Playwright job alone 6m45s), fast
 3m20s (segw-tree alone 3m17s), against ~40 min serial before.
+
+### Wave 2 (ultra/parity-wave2, 2026-09-25)
+
+Each rule measured on A4H first ($ZOSG_TMP_0080-0084, ABAP Unit probes of the
+testdata classes, deleted after) and pinned in `semantics.mjs` on Go and JS
+(264 ok, 0 FAIL):
+
+- `CREATE DATA ... LIKE LINE OF` a generic table of elementary rows
+  (ZCL_GOGEN_T_CRELEM): a new initial value of the row's type (`abap.NewData`
+  on a built-in descriptor); /UI2/CL_JSON into ZOSD_NOTE's table of strings.
+- `cl_abap_gzip=>compress_binary` / `decompress_binary` (ZCL_GOGEN_T_GZIP,
+  go/abap/gzip.go): raw DEFLATE both ways; Node's zlib rules for a cut or a
+  trailing stream measured there. Go's encoder writes other bytes than zlib
+  (A4H writes zlib's): the stream inflates to the input on all three.
+- `CL_ABAP_ZIP=>SAVE` (the SEGW RepoSet zip, ZCL_GOGEN_T_ZIP against SAP's
+  own class): LCL_STREAM compiled as a local class, `DATA ... VALUE <local
+  constant>`, an x / xstring operand of arithmetic as its move into i and an
+  i for the calculation type (ZCL_GOGEN_T_XARITH), `CONCATENATE ... IN BYTE
+  MODE` into an x, padded with 00 or cut with sy-subrc 4
+  (ZCL_GOGEN_T_BYTECATX), `SHIFT x LEFT CIRCULAR IN BYTE MODE`. LOAD
+  overflows i in open-abap-core (ANOMALY-2026-09-25-zip-read-int4).
+- text into i and f (ZCL_GOGEN_T_C2NUM, 54 texts): an exponent, nan, inf,
+  `1_0` or `0x10` are no number for an i; into an f the first word counts
+  (`12 abc` is 12), 1E400 and nan / inf / Infinity overflow. Both backends
+  had taken strconv.ParseFloat / Number( ).
+- `FIND [FIRST|ALL] [REGEX|PCRE] p IN s [IGNORING CASE] RESULTS r`
+  (ZCL_GOGEN_T_FINDRES, _FINDPCRE; open-abap-core's CL_ABAP_MATCHER and
+  CL_IXML): POSIX leftmost-longest, PCRE leftmost-first with lazy
+  quantifiers, (-1,0) for a group that did not take part, a missed FIRST
+  keeps the structure and a missed ALL clears the table, empty matches as
+  the kernel lists them. PCRE lookaround, backreferences, atomic groups,
+  possessive quantifiers, \K, \G, recursion, conditionals and verbs are
+  refused by name (Go's RE2 has none), as is PCRE on a text with line ends.
+  JS is leftmost-first for REGEX too (pinned apart). REPLACE ... RESULTS is
+  not done.
+
+ImportSet was slow (20-50 s a call) because `FIND ... IN SECTION OFFSET`
+converted the whole text to runes on every call, and ZCL_STG_SADL_DEF walks
+its XML that way once per request of ZSTG_SEGW_SRV (45 of 60 s of a pprof;
+`OSGO_PPROF=127.0.0.1:<port>` puts Go's profiler on a listener of its own).
+Then a prepared-statement cache that keeps the LUW (a text run twice in a
+step is prepared once the step has ended; `TestLUWStatementCache`), and CP
+without per-call rune copies (most of the GC). Same instrument on both
+hosts, load 10-14 on 8 cores from other sessions:
+
+| | Node | OSGo, wave 1 | OSGo now |
+|---|---:|---:|---:|
+| one ImportSet push (median of 11) | 42-57 ms | 20-50 s | 9-14 ms |
+| one ExportSet pull (median of 11) | 25-32 ms | | 6-10 ms |
+| segw-tree.mjs, its 11 HTTP tests | 25-29 s | 3m17s (whole suite) | 4.2-5.1 s |
+
+What is left of a push is the ABAP's own work: CLEAR_PROJECT's 53 dynamic
+SELECTs and row-by-row deletes in SQLite, the GC, and ZCL_STG_JSON reading
+the body character by character.
+
+Two holes the browser build found (CX_SY_DYNAMIC_OSQL_SEMANTICS on `1 = 1`
+in the table sources behind SEGW, status and ICF; NOT_COMPILED
+`LT_TAXI-ZONE` in ZCL_ZSTG_SADL_DPC) were the main checkout's stale `gen/`,
+generated before #48 and #67: osgo built from a fresh transpile of the same
+commit answers every entity set of the four services, and refusing `1 = 1`
+is what A4H does (Node accepts it, which is why Node hid the stale code).
+`osgo.mjs` and `parity.mjs` now refuse a checkout whose inputs hash to no
+Node build (`osg-build.mjs` staleGen; `--stale-gen` overrides). The native
+e2e set already covers the apps the preview specs open (launchpad-navigation,
+taxi incl. its F4 selection, status, segw, listreport, fcl).
+
+`parity.mjs` has a third class apart from the headline, `compiler-deferred`
+(Alice, 2026-09-25): the editor's CHECK only, abaplint over the whole
+system on Node, which a built generation cannot answer until the
+incremental rebuild exists. The colouring test counts (it moves to ABAP,
+ZCL_OSD_ABAP_TOKENS). Headline = passed / (Node-passed - go-matches-system
+- adt-deferred - compiler-deferred).
+
+Measured at the end (osgo from this branch on parity-home 6327bab, 968
+classes, 31 methods not compiled, 2 objects with syntax errors; Node
+reference reused): `--fast` **99.3 %** (134/135) in 10.7 s, full `--e2e`
+**98.9 %** (182/184, raw 65.7 %) in 4m05s. Before the wave: 131/136 and
+176/185, 200 s and 405 s. Left: the SEGW e2e spec's "Save to gen/" step
+(cut from every host by Alice; passes once that PR lands) and the editor's
+colouring (ZCL_OSD_ABAP_TOKENS). The one dump OSGo logs, CX_SY_CONVERSION_NO_NUMBER
+in a `$batch` of mocha.mjs, is the test's own `Seats = "abc"`.

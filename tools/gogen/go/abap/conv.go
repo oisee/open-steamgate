@@ -3,11 +3,14 @@ package abap
 import (
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"math"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"unicode"
 	"unicode/utf8"
 	"unsafe"
 )
@@ -76,21 +79,55 @@ func IToX(v int32, n int) string {
 // XToHex is an x field as text: two upper-case hex digits per byte.
 func XToHex(v string) string { return strings.ToUpper(hex.EncodeToString([]byte(v))) }
 
-// ParseF converts a character value to f: blanks are 0, a trailing minus
-// is a sign, anything else that is not a number raises.
+// ParseF converts a character value to f, as A4H does (parity-wave2,
+// ZCL_GOGEN_T_C2NUM): leading blanks skipped, the first word read and the
+// rest of the text ignored ('12 abc' is 12, '12 -' is 12); in that word a
+// leading + or -, or a trailing -, digits with at most one point (at least
+// one digit) and an exponent E or e with an optional sign and digits.
+// Blanks are 0. A value past f's range raises CX_SY_CONVERSION_OVERFLOW, as
+// do the words nan, inf and Infinity; a value below it is 0. Anything else
+// is CX_SY_CONVERSION_NO_NUMBER. Other spellings of nan / inf are not
+// measured and dump as not compiled.
 func ParseF(v string) float64 {
-	t := strings.TrimSpace(v)
+	t := strings.TrimLeft(v, " ")
 	if t == "" {
 		return 0
 	}
-	neg := false
-	if strings.HasSuffix(t, "-") {
-		neg = true
-		t = strings.TrimSpace(t[:len(t)-1])
+	if i := strings.IndexByte(t, ' '); i >= 0 {
+		t = t[:i]
 	}
-	f, err := strconv.ParseFloat(t, 64)
-	if err != nil {
+	switch t {
+	case "nan", "inf", "Infinity":
+		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "c->f"})
+	}
+	for _, w := range []string{"nan", "inf", "infinity"} {
+		if strings.Contains(strings.ToLower(t), w) {
+			panic(NotCompiled("move to f", "a text naming "+w+" in a spelling not measured: "+t))
+		}
+	}
+	neg, body, ok := numSign(t)
+	if !ok {
 		panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->f"})
+	}
+	mant, exp := body, ""
+	if i := strings.IndexAny(body, "Ee"); i >= 0 {
+		mant, exp = body[:i], body[i+1:]
+		if exp != "" && (exp[0] == '+' || exp[0] == '-') {
+			exp = exp[1:]
+		}
+		if exp == "" || !allDigits(exp) {
+			panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->f"})
+		}
+	}
+	if !decimalDigits(mant) {
+		panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->f"})
+	}
+	f, err := strconv.ParseFloat(body, 64)
+	if err != nil && !errors.Is(err, strconv.ErrRange) {
+		panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->f"})
+	}
+	if math.IsInf(f, 0) {
+		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "c->f"})
 	}
 	if neg {
 		f = -f
@@ -98,9 +135,83 @@ func ParseF(v string) float64 {
 	return f
 }
 
-// ParseI converts a character value to i, rounding a fraction half away
-// from zero.
-func ParseI(v string) int32 { return F2I(ParseF(v)) }
+// numSign takes the sign off a number's text: a leading + or -, or a
+// trailing -, never two (A4H: '+-1' and '-1-' are no number); blanks
+// between the sign and the digits stay for the caller to judge
+func numSign(t string) (neg bool, body string, ok bool) {
+	signs := 0
+	if t != "" && (t[0] == '+' || t[0] == '-') {
+		signs++
+		neg = t[0] == '-'
+		t = t[1:]
+	}
+	if t != "" && t[len(t)-1] == '-' {
+		signs++
+		neg = true
+		t = t[:len(t)-1]
+	}
+	return neg, t, signs <= 1
+}
+
+func allDigits(t string) bool {
+	for i := 0; i < len(t); i++ {
+		if t[i] < '0' || t[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// decimalDigits: digits with at most one point, at least one digit ('.5'
+// and '5.' are numbers, '.' is not)
+func decimalDigits(t string) bool {
+	i := strings.IndexByte(t, '.')
+	if i < 0 {
+		return t != "" && allDigits(t)
+	}
+	return len(t) > 1 && allDigits(t[:i]) && allDigits(t[i+1:])
+}
+
+// ParseI converts a character value to i, as A4H does (parity-wave2,
+// ZCL_GOGEN_T_C2NUM): blanks around it, one sign -- a leading + or -, or a
+// trailing -, a blank between it and the digits allowed ('- 12' and '12 -'
+// are -12) -- and digits with at most one point; no exponent, nothing after
+// a blank. The fraction rounds half away from zero; past i's range is
+// CX_SY_CONVERSION_OVERFLOW, anything else CX_SY_CONVERSION_NO_NUMBER.
+// Blanks are 0.
+func ParseI(v string) int32 {
+	t := strings.Trim(v, " ")
+	if t == "" {
+		return 0
+	}
+	neg, body, ok := numSign(t)
+	body = strings.Trim(body, " ")
+	if !ok || !decimalDigits(body) {
+		panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->i"})
+	}
+	whole, frac := body, ""
+	if i := strings.IndexByte(body, '.'); i >= 0 {
+		whole, frac = body[:i], body[i+1:]
+	}
+	whole = strings.TrimLeft(whole, "0")
+	if len(whole) > 10 {
+		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "c->i"})
+	}
+	var n int64
+	for i := 0; i < len(whole); i++ {
+		n = n*10 + int64(whole[i]-'0')
+	}
+	if frac != "" && frac[0] >= '5' {
+		n++
+	}
+	if neg {
+		n = -n
+	}
+	if n > math.MaxInt32 || n < math.MinInt32 {
+		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "c->i"})
+	}
+	return int32(n)
+}
 
 // I8ToI and F2I8: int8 into i with an overflow check, f into int8 rounded.
 func I8ToI(v int64) int32 { return check(v, "int8->i") }
@@ -627,6 +738,16 @@ func XFit(v string, n int) string {
 	return v + strings.Repeat("\x00", n-len(v))
 }
 
+// CatBytesX is CONCATENATE ... INTO x IN BYTE MODE for an x of n bytes (A4H
+// 2026-09-24, ZCL_GOGEN_T_BYTECATX): the bytes padded with 00 and sy-subrc
+// 0, or cut to n and sy-subrc 4
+func CatBytesX(n int, joined string) (string, int32) {
+	if len(joined) > n {
+		return joined[:n], 4
+	}
+	return XFit(joined, n), 0
+}
+
 // Uccpi is cl_abap_conv_in_ce=>uccpi: the character of a code point, as a
 // c(1) (a blank is stored as the empty c).
 func Uccpi(v int32) string { return strings.TrimRight(string(rune(v)), " ") }
@@ -781,40 +902,42 @@ func CP(a, p string, cpat bool) bool {
 	if cpat && p == "" {
 		p = " "
 	}
-	type tok struct {
-		r    rune
-		kind byte // 'l' literal ignoring case, 'e' escaped (exact), '*', '+'
-	}
-	var ps []tok
-	pr := []rune(p)
-	for i := 0; i < len(pr); i++ {
-		switch {
-		case pr[i] == '#' && i+1 < len(pr):
-			i++
-			ps = append(ps, tok{pr[i], 'e'})
-		case pr[i] == '*':
-			ps = append(ps, tok{0, '*'})
-		case pr[i] == '+':
-			ps = append(ps, tok{0, '+'})
-		default:
-			ps = append(ps, tok{pr[i], 'l'})
+	ps := cpTokens(p)
+	// the subject as characters: its bytes when it is ASCII (no copy, the
+	// common case: a tag, a name), else its runes
+	var ar []rune
+	ascii := true
+	for i := 0; i < len(a); i++ {
+		if a[i] >= utf8.RuneSelf {
+			ascii = false
+			break
 		}
 	}
-	ar := []rune(a)
-	// classic wildcard matching with backtracking over the last *
-	i, j, star, mark := 0, 0, -1, 0
-	eq := func(t tok, c rune) bool {
+	n := len(a)
+	if !ascii {
+		ar = []rune(a)
+		n = len(ar)
+	}
+	at := func(i int) rune {
+		if ascii {
+			return rune(a[i])
+		}
+		return ar[i]
+	}
+	eq := func(t cpTok, c rune) bool {
 		switch t.kind {
 		case '+':
 			return true
 		case 'e':
 			return t.r == c
 		default:
-			return strings.EqualFold(string(t.r), string(c))
+			return foldEq(t.r, c)
 		}
 	}
-	for i < len(ar) {
-		if j < len(ps) && ps[j].kind != '*' && eq(ps[j], ar[i]) {
+	// classic wildcard matching with backtracking over the last *
+	i, j, star, mark := 0, 0, -1, 0
+	for i < n {
+		if j < len(ps) && ps[j].kind != '*' && eq(ps[j], at(i)) {
 			i++
 			j++
 		} else if j < len(ps) && ps[j].kind == '*' {
@@ -832,6 +955,70 @@ func CP(a, p string, cpat bool) bool {
 		j++
 	}
 	return j == len(ps)
+}
+
+type cpTok struct {
+	r    rune
+	kind byte // 'l' literal ignoring case, 'e' escaped (exact), '*', '+'
+}
+
+// the tokens of a CP pattern, kept per pattern text (most are constants of
+// the program; at most cpCacheMax are kept, the rest made each time)
+var (
+	cpCache    sync.Map
+	cpCacheLen atomic.Int32
+)
+
+const cpCacheMax = 4096
+
+func cpTokens(p string) []cpTok {
+	if v, ok := cpCache.Load(p); ok {
+		return v.([]cpTok)
+	}
+	var ps []cpTok
+	pr := []rune(p)
+	for i := 0; i < len(pr); i++ {
+		switch {
+		case pr[i] == '#' && i+1 < len(pr):
+			i++
+			ps = append(ps, cpTok{pr[i], 'e'})
+		case pr[i] == '*':
+			ps = append(ps, cpTok{0, '*'})
+		case pr[i] == '+':
+			ps = append(ps, cpTok{0, '+'})
+		default:
+			ps = append(ps, cpTok{pr[i], 'l'})
+		}
+	}
+	if cpCacheLen.Load() < cpCacheMax {
+		if _, loaded := cpCache.LoadOrStore(p, ps); !loaded {
+			cpCacheLen.Add(1)
+		}
+	}
+	return ps
+}
+
+// foldEq is strings.EqualFold of two single characters, without making
+// two strings per comparison (CP ran it for every character it tried)
+func foldEq(a, b rune) bool {
+	if a == b {
+		return true
+	}
+	if a < utf8.RuneSelf && b < utf8.RuneSelf {
+		if 'A' <= a && a <= 'Z' {
+			a += 'a' - 'A'
+		}
+		if 'A' <= b && b <= 'Z' {
+			b += 'a' - 'A'
+		}
+		return a == b
+	}
+	for r := unicode.SimpleFold(a); r != a; r = unicode.SimpleFold(r) {
+		if r == b {
+			return true
+		}
+	}
+	return false
 }
 
 // CA: a contains any character of b, case-sensitive (A4H); an empty operand

@@ -130,22 +130,61 @@ func checkLines(p, s, where string) {
 // empty section, where only an empty pattern is found (at the offset,
 // length 0). A match must lie inside the section.
 func FindSection(s, p string, icase bool, off, n int32, nsub int) (bool, int32, int32, []string) {
-	r := []rune(s)
-	if off < 0 || off > int32(len(r)) || n < -1 {
+	// the section by byte index, walked to once: no []rune of the whole
+	// text per call (a loop of FIND ... SECTION OFFSET over a long text was
+	// quadratic in allocations, 45 s of an ImportSet in ZCL_STG_SADL_DEF)
+	if off < 0 || n < -1 {
 		rangeError()
 	}
-	end := int32(len(r))
-	if n >= 0 {
-		if off+n > end {
+	var from, to int
+	if isASCII(s) {
+		if int(off) > len(s) || (n >= 0 && int(off+n) > len(s)) {
 			rangeError()
 		}
-		end = off + n
+		from, to = int(off), len(s)
+		if n >= 0 {
+			to = int(off + n)
+		}
+	} else if m := memoOf(s); m != nil {
+		if int(off) > m.runes || (n >= 0 && int(off+n) > m.runes) {
+			rangeError()
+		}
+		from, to = m.byteAt(s, int(off)), len(s)
+		if n >= 0 {
+			to = m.byteAt(s, int(off+n))
+		}
+	} else {
+		var ok bool
+		if from, ok = charsToByte(s, 0, int(off)); !ok {
+			rangeError()
+		}
+		to = len(s)
+		if n >= 0 {
+			if to, ok = charsToByte(s, from, int(n)); !ok {
+				rangeError()
+			}
+		}
 	}
-	ok, o, l, subs := FindStmt(string(r[off:end]), p, false, icase, nsub)
-	if !ok {
+	found, o, l, subs := FindStmt(s[from:to], p, false, icase, nsub)
+	if !found {
 		return false, 0, 0, subs
 	}
 	return true, off + o, l, subs
+}
+
+// charsToByte is the byte index k characters after byte index from in s;
+// false when s ends before that.
+func charsToByte(s string, from, k int) (int, bool) {
+	i := from
+	for ; k > 0 && i < len(s); k-- {
+		if s[i] < utf8.RuneSelf {
+			i++
+			continue
+		}
+		_, w := utf8.DecodeRuneInString(s[i:])
+		i += w
+	}
+	return i, k == 0
 }
 
 // FindTable is FIND [REGEX] p IN TABLE itab (rows of strings), measured on
@@ -163,4 +202,155 @@ func FindTable(rows []string, p string, regex, icase bool, nsub int) (bool, int3
 		}
 	}
 	return false, 0, 0, 0, make([]string, nsub)
+}
+
+// FindResults is FIND [FIRST OCCURRENCE OF | ALL OCCURRENCES OF] [REGEX |
+// PCRE] p IN s [IGNORING CASE] RESULTS (parity-wave2), measured on A4H
+// 2026-09-25 (ZCL_GOGEN_T_FINDRES, ZCL_GOGEN_T_FINDPCRE): each match as
+// offset, length, then offset and length of every group, in characters; a
+// group that did not take part is -1, 0. kind is 0 (a substring), 'R'
+// (REGEX: POSIX, leftmost-longest: a|ab takes ab) or 'P' (PCRE,
+// leftmost-first: a|ab takes a; lazy quantifiers allowed). ALL goes on
+// after a match at its end, and after an empty match one character on, so
+// empty matches are found, one at the end of the text too: x* in abc is
+// 0,0 1,0 2,0 3,0 and b* in abbc is 0,0 1,2 3,0 4,0 (both engines).
+// A substring does not overlap its matches (aa in aaaaa: 0 and 2).
+func FindResults(s, p string, kind byte, icase, all bool) [][]int32 {
+	if p == "" {
+		panic(NotCompiled("FIND ... RESULTS", "an empty pattern is not measured"))
+	}
+	var re, after *regexp.Regexp
+	switch kind {
+	case 0:
+		if !icase {
+			return plainResults(s, p, all)
+		}
+		re, after = compileABAP(regexp.QuoteMeta(p), true), compileABAPAfter(regexp.QuoteMeta(p), true)
+	case 'R':
+		re = compileABAP(p, icase)
+		checkLines(p, s, "FIND REGEX")
+		after = compileABAPAfter(p, icase)
+	case 'P':
+		re, after = compilePCRE(p, icase, s)
+	default:
+		panic(NotCompiled("FIND ... RESULTS", "a search kind "+string(kind)))
+	}
+	var out [][]int32
+	chars := func(b int) int32 { return int32(utf8.RuneCountInString(s[:b])) }
+	for pos := 0; pos <= len(s); {
+		var m []int
+		if pos == 0 {
+			m = re.FindStringSubmatchIndex(s)
+		} else {
+			// a match that starts at pos or later, the character before in view
+			_, w := utf8.DecodeLastRuneInString(s[:pos])
+			base := pos - w
+			if m2 := after.FindStringSubmatchIndex(s[base:]); m2 != nil {
+				m = make([]int, len(m2)-2)
+				for i := 2; i < len(m2); i++ {
+					if m2[i] >= 0 {
+						m[i-2] = m2[i] + base
+					} else {
+						m[i-2] = -1
+					}
+				}
+			}
+		}
+		if m == nil {
+			break
+		}
+		r := make([]int32, 0, len(m))
+		for g := 0; g+1 < len(m); g += 2 {
+			if m[g] < 0 {
+				r = append(r, -1, 0)
+				continue
+			}
+			o := chars(m[g])
+			r = append(r, o, chars(m[g+1])-o)
+		}
+		out = append(out, r)
+		if !all {
+			break
+		}
+		if m[1] > m[0] {
+			pos = m[1]
+			continue
+		}
+		if m[0] >= len(s) {
+			break
+		}
+		_, w := utf8.DecodeRuneInString(s[m[0]:])
+		pos = m[0] + w
+	}
+	return out
+}
+
+func plainResults(s, p string, all bool) [][]int32 {
+	var out [][]int32
+	n := int32(utf8.RuneCountInString(p))
+	for pos := 0; pos <= len(s); {
+		i := strings.Index(s[pos:], p)
+		if i < 0 {
+			break
+		}
+		out = append(out, []int32{int32(utf8.RuneCountInString(s[:pos+i])), n})
+		if !all {
+			break
+		}
+		pos += i + len(p)
+	}
+	return out
+}
+
+// pcreRefused are the PCRE constructs Go's RE2 does not have: refused by
+// name rather than read as something else
+var pcreRefused = []struct {
+	re   *regexp.Regexp
+	what string
+}{
+	{regexp.MustCompile(`\(\?=`), "a lookahead (?=...)"},
+	{regexp.MustCompile(`\(\?!`), "a negative lookahead (?!...)"},
+	{regexp.MustCompile(`\(\?<=`), "a lookbehind (?<=...)"},
+	{regexp.MustCompile(`\(\?<!`), "a negative lookbehind (?<!...)"},
+	{regexp.MustCompile(`\(\?>`), "an atomic group (?>...)"},
+	{regexp.MustCompile(`\\[1-9]|\\g\{?-?\d|\\k[<{']`), "a backreference"},
+	{regexp.MustCompile(`[*+?}]\+`), "a possessive quantifier"},
+	{regexp.MustCompile(`\\K`), "\\K"},
+	{regexp.MustCompile(`\\G`), "\\G"},
+	{regexp.MustCompile(`\(\?(R|\d|&|P>|\()`), "a recursion or a conditional"},
+	{regexp.MustCompile(`\(\*`), "a verb (*...)"},
+	{regexp.MustCompile(`\\[cexoNXRhHvV]`), "an escape RE2 reads differently or not at all"},
+}
+
+// compilePCRE is the pattern for PCRE, leftmost-first, and its "after"
+// form (see compileABAPAfter). PCRE's own ^ $ and . around line ends are
+// not measured, so a text with \n or \r is refused; a construct RE2 lacks
+// is refused by name; a pattern RE2 cannot read is not called invalid.
+func compilePCRE(p string, icase bool, s string) (*regexp.Regexp, *regexp.Regexp) {
+	plain := strings.NewReplacer(`\\`, "").Replace(p)
+	for _, r := range pcreRefused {
+		if r.re.MatchString(plain) {
+			panic(NotCompiled("FIND PCRE", r.what+" is not in Go's RE2: "+p))
+		}
+	}
+	if strings.ContainsAny(s, "\n\r") {
+		panic(NotCompiled("FIND PCRE", "a text with line ends: PCRE's ^ $ and . around them are not measured"))
+	}
+	flags := ""
+	if icase {
+		flags = "(?i)"
+	}
+	key := "pcre" + flags + "\x00" + p
+	if r, ok := regexCache.Load(key); ok {
+		a, _ := regexCache.Load("after-" + key)
+		return r.(*regexp.Regexp), a.(*regexp.Regexp)
+	}
+	re, err := regexp.Compile(flags + p)
+	if err != nil {
+		panic(NotCompiled("FIND PCRE", "RE2 does not read this pattern ("+err.Error()+"); whether PCRE does is not measured"))
+	}
+	after := regexp.MustCompile(flags + "(?s:.)(" + p + ")")
+	regexCache.Store(key, re)
+	regexCache.Store("after-"+key, after)
+	return re, after
 }

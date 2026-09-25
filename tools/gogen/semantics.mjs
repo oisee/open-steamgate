@@ -120,6 +120,55 @@ const EXPECT = {
   // transpiler 2.13.89 agrees). Before the ultra/packs fix round Go gave
   // s:0 row:0 static:0 inst:0 and "" for the d/t/n/p components
   ZCL_GOGEN_T_XINIT: "s:2 row:2 static:2 inst:2 00000000 nested:2 00000000 000000 000 0.00 comp:00000000 000000 000 0.00 loc:00000000 000000 000 0.00 ret:1 00 value:7 2 00000000 000",
+  // parity-wave2, A4H 2026-09-24 ($ZOSG_TMP_0083, ABAP Unit probes of these
+  // classes; CL_ABAP_ZIP's CRC-32 needs both). An x or xstring operand of
+  // arithmetic is its move into an i (the last four bytes, signed) and
+  // counts as an i for the calculation type; CONCATENATE IN BYTE MODE into
+  // an x pads with 00 (sy-subrc 0) or cuts (sy-subrc 4)
+  // parity-wave2, A4H 2026-09-25 ($ZOSG_TMP_0084, ABAP Unit probes of these
+  // classes). FIND ... RESULTS into match_result / match_result_tab: POSIX
+  // leftmost-longest (a|ab takes ab), a group that did not take part is
+  // (-1,0), a FIRST that misses leaves the structure alone and an ALL that
+  // misses clears the table, empty matches listed (x* in abc four times;
+  // after bb of abbc the empty one at its end too). PCRE is leftmost-first
+  // with lazy quantifiers. JS's RegExp is leftmost-first for REGEX as well:
+  // a|ab gives 1,1 3,1 there (as FindStmt; the Go runtime is the exact one)
+  ZCL_GOGEN_T_FINDRES: {Go: "alt:0/2[0:1,2;0:3,2;] grp:0/0:1,1(-1,0)(1,1) nest:2[0:0,2(0,2)(0,1)(1,1);0:2,2(2,2)(2,1)(3,1);] wb:2[0:0,2;0:7,2;] sub:2[0:0,2;0:2,2;] ic:2[0:1,2;0:3,2;] uni:1[0:2,1;] opt:0/0:1,1(-1,0) opt2:2[0:0,1(-1,0);0:1,2(2,1);] miss1:4/0:7,1(-1,0) missall:4/0[] empty:0/4[0:0,0;0:1,0;0:2,0;0:3,0;] empty2:0/4[0:0,0;0:1,2;0:3,0;0:4,0;] w:2[0:0,3(0,3);0:4,3(4,3);] posix:1[0:0,4(0,1)(1,3);]",
+    JS: "alt:0/2[0:1,1;0:3,1;] grp:0/0:1,1(-1,0)(1,1) nest:2[0:0,2(0,2)(0,1)(1,1);0:2,2(2,2)(2,1)(3,1);] wb:2[0:0,2;0:7,2;] sub:2[0:0,2;0:2,2;] ic:2[0:1,2;0:3,2;] uni:1[0:2,1;] opt:0/0:1,1(-1,0) opt2:2[0:0,1(-1,0);0:1,2(2,1);] miss1:4/0:7,1(-1,0) missall:4/0[] empty:0/4[0:0,0;0:1,0;0:2,0;0:3,0;] empty2:0/4[0:0,0;0:1,2;0:3,0;0:4,0;] w:2[0:0,3(0,3);0:4,3(4,3);] posix:1[0:0,4(0,1)(1,3);]"},
+  ZCL_GOGEN_T_FINDPCRE: "alt:2[1,1;3,1;] grp:1[0,4(0,1)(1,3);] empty:4[0,0;1,2;3,0;4,0;] wb:2[0,2;7,2;] opt:1[1,1(-1,0);] lazy:3[0,1;1,1;2,1;] ic:2[1,2;3,2;]",
+  ZCL_GOGEN_T_XARITH: "div:F6DC4190/-153337456 mod:00000002 mul:000003FC ff:FFFFFFFF/0 x1:256 x2:65536 x8:255 xs:256 p:11.50 f:10.25 div2:4",
+  // CL_ABAP_ZIP=>SAVE of two files, run against SAP's own CL_ABAP_ZIP on
+  // A4H ($ZOSG_TMP_0083) and open-abap-core's here: the same frame, entry
+  // count, first name and CRC-32 (zlib's too); SHIFT LEFT CIRCULAR IN BYTE
+  // MODE rotates one byte. JS has no codepage host function
+  ZCL_GOGEN_T_ZIP: {Go: "shift:BBAA/02030401 head:504B0304 eocd:504B0506 entries:0200 name:612E747874 crc:-1167589325",
+    JS: "ERROR NOT_COMPILED in Native_CONV_OUT_CONVERT: a host function of the Go runtime"},
+  ZCL_GOGEN_T_BYTECATX: "exact:000000AB/0 short:ABCDEF00/0 long:CDEF1234/4 rev:04030201/0 sub:000000B2/0",
+  // parity-wave2, A4H 2026-09-24 ($ZOSG_TMP_0082, ABAP Unit probe of this
+  // class, in two runs whose outputs are joined here): a text into an i is
+  // blanks, one sign (leading + -, or trailing -, a blank after or before
+  // it allowed), digits with at most one point, rounded half away from
+  // zero, NN for anything else (an exponent, nan, 1_0, 0x10) and OV past
+  // the range. Into an f the first word counts and the rest is ignored
+  // ('12 abc' is 12, '- 12' NN), an exponent is allowed, 1E400 and the
+  // words nan inf Infinity are OV, 1E-400 is 0. Go and JS both took
+  // strconv.ParseFloat / Number( ) before (the $batch of mocha.mjs dumps
+  // on Seats = "abc" by design: NN either way)
+  ZCL_GOGEN_T_C2NUM: "[12]12/12.000 [ 12 ]12/12.000 [-12]-12/-12.000 [12-]-12/-12.000 [+12]12/12.000 [2.5]3/2.500 [-2.5]-3/-2.500 [.5]1/0.500 [5.]5/5.000 [1E3]NN/1000.000 [1e3]NN/1000.000 [1.5E+2]NN/150.000 [nan]NN/OV [inf]NN/OV [Infinity]NN/OV [0x10]NN/NN [1_0]NN/NN [1,5]NN/NN [12 3]NN/12.000 [abc]NN/NN []0/0.000 [   ]0/0.000 [-]NN/NN [3000000000]OV/3000000000.000 [12 abc]NN/12.000 [1 2 3]NN/1.000 [- 12]-12/NN [12 -]-12/12.000 [ -12 ]-12/-12.000 [1E 3]NN/NN [E3]NN/NN [1E]NN/NN [1e+]NN/NN [1.5.2]NN/NN [+-1]NN/NN [--1]NN/NN [-1-]NN/NN [0012]12/12.000 [.]NN/NN [+]NN/NN [2147483647.4]2147483647/2147483647.400 [2147483647.5]OV/2147483647.500 [-2147483648.5]OV/-2147483648.500 [-2147483648.4]-2147483648/-2147483648.400 [1.49999]1/1.500 [12 3 ]NN/12.000 [1E400]NN/OV [1E-400]NN/0.000 [1.5E3-]NN/-1500.000 [1.5D3]NN/NN [12a]NN/NN [1.e2]NN/100.000 [.5e1]NN/5.000 [1E+03]NN/1000.000 ",
+  // parity-wave2, A4H 2026-09-24 ($ZOSG_TMP_0081, ABAP Unit probe of this
+  // class): CREATE DATA LIKE LINE OF a generic table of elementary rows is
+  // a new initial value of the row type (d 00000000, n zeros, i 0), which
+  // is written and inserted (/UI2/CL_JSON into a table of strings, ZOSD_NOTE)
+  ZCL_GOGEN_T_CRELEM: "s:g[][ab]1 s2:g[][cd]2 i:I[0 ][42 ]1 c:C[][abc]1 d:D[00000000][20250107]1 t:T[000000][123456]1 n:N[0000][0012]1",
+  // parity-wave2, A4H 2026-09-24 ($ZOSG_TMP_0080, ABAP Unit probe of this
+  // class): cl_abap_gzip=>compress_binary then decompress_binary gives the
+  // input back, GZIP_OUT_LEN is xstrlen( gzip_out ), an empty input too,
+  // 1000 repetitive bytes compress below 100; zlib's raw stream of 11223344
+  // and one with a sync marker before an empty final block (Go's) both
+  // inflate. The compressed bytes are not pinned: A4H writes zlib's
+  // (130A312A63646160F8FF1F00 for 1254327601040000FFFF), Go its own
+  ZCL_GOGEN_T_GZIP: {Go: "rt:11/8 e:11/0 big:11/1000 small:1 z:11223344/4 s:11223344/4",
+    JS: "ERROR NOT_COMPILED in abap.DeflateRaw: a host function of the Go runtime"},
   ZCL_GOGEN_T_B64: {Go: "b1:/w== b2://4= b3:+/+/ b0:[]", JS: "ERROR NOT_COMPILED in abap.EncodeXBase64: a host function of the Go runtime"},
   // SHIFT s RIGHT DELETING TRAILING mask on a string: the length stays, the
   // masked tail goes and blanks come in on the left; a blank stops it
@@ -667,7 +716,9 @@ const groups = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".fu
 const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_ABAP_REGEX", "CL_HTTP_UTILITY",
   "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR",
   // and open-abap-core's JSON reader (ZCL_GOGEN_T_JSONDES)
-  "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE"];
+  "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE",
+  // raw DEFLATE and zip (parity-wave2, ZCL_GOGEN_T_GZIP, ZCL_GOGEN_T_ZIP)
+  "CL_ABAP_GZIP", "CL_ABAP_ZIP"];
 const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...groups, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)
