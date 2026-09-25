@@ -98,6 +98,46 @@ server's own mapping (`entityNameConstantsOf`, `entitySetMethodsOf`,
 in `test/vscode-extension.mjs`; the route itself in
 `test/adt-devloop.mjs`, beside the other `core/http/*` routes.
 
+## Q3: readers of a class or interface
+
+*2026-09-25.* A CodeLens "read by N · tests M · services K" over a class's
+own `CLASS <name> DEFINITION` line or an interface's own `INTERFACE <name>`
+line. It is the reverse of Q2b's own class-to-service map: not what a
+`_DPC_EXT` calls, but who calls *this* class or interface, off the
+cross-reference tables every host already seeds at start
+(`tools/osd-xref-seed.mjs`, from the parse) -- the same direction
+`tools/osd-xref.mjs --who-calls` reads for a terminal. A
+`WBCROSSGT`/`WBCROSSGTX` row is `{OTYPE: 'TY', NAME: the referenced object,
+INCLUDE: the referencer}`, and `INCLUDE` already carries the referencing
+object's own name, never a per-include suffix (`tools/osd-xref.mjs`
+`CrossReference#build`, the `WBCROSSGT` branch), so no include-to-object
+mapping is needed to read it back. `GET
+/sap/bc/adt/core/http/xref/readers?type=CLAS|INTF&name=<NAME>`
+(`tools/adt-facade.mjs`) answers `{name, readers: [{type, name, include,
+isTest, services}], counts: {readers, tests, services}}` for a CLAS or INTF
+this store knows, 404 otherwise; the class or interface itself and any
+self-reference are left out. The rows are read the same way the client's own
+data preview reads any table (`data.query`, `tools/osd-data.mjs`) -- this is
+a where-used view over the same seeded tables, not a second index. A reader
+is marked a test when it carries its own ABAP Unit tests
+(`tools/osd-unit-run.mjs` `testClassesIn`) and a service when it is
+registered as a service's own `_DPC_EXT` (`tools/segw-registry.mjs`
+`segwRegistrations`, read fresh off the tree the way the entitysets route
+does); a reader can be neither, either, or both.
+
+Clicking the lens shows a quick pick of the readers (Test / Service tagged in
+the description) and opens the file of the one chosen, by the glob its own
+type and name give (`readerFilePattern` in `lib.js`: `**/<base>.<ext>.abap`,
+the same namespace-to-`#` mapping `objectOf` reads back) -- a type this
+extension has no file shape for (FUGR, TABL, DDLS, ...) opens nothing rather
+than guessing. A save anywhere refreshes the lens, since a reference to the
+class open in the editor can be added or removed in any other file.
+
+`editors/vscode/lib.js` carries the pure half (`readersLensLine`,
+`readersLensTitle`, `readersQuickPickItems`, `readerFilePattern`, `Osd#readers`),
+tested without VS Code or a server in `test/vscode-extension.mjs`; the route
+itself in `test/adt-devloop.mjs`, beside the other `core/http/*` routes.
+
 ## Trying it
 
 No build step and no dependencies: plain CommonJS, VS Code's own Node.
@@ -137,4 +177,3 @@ download a VS Code per run.
 - Smart F8 / Runner, the rest of it: create/update/delete entity, a function
   import, `$expand` on the lens's own request. Today's lens and F8 only
   read (Q2b, above).
-- Q3, readers of a class, as a CodeLens count over the xref route.

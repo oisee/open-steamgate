@@ -461,6 +461,53 @@ describe("tools/adt-facade: the development loop", () => {
       expect(res.status).to.equal(404);
     });
 
+    // Q3 "Readers": who references a CLAS or INTF (the reverse of Q2b's own
+    // map), off the seeded cross-reference tables. `node tools/osd-xref.mjs
+    // --who-calls <NAME>` names the same readers independently of this route
+    // (tools/osd-xref-seed.mjs seeds WBCROSSGT from the same parse this
+    // façade's own store reads), which is how these two classes were picked:
+    // ZCL_ZSTG_DEMO_MPC_EXT is read by ZCL_STG_PHASE0_TEST (a class with its
+    // own ABAP Unit tests) and by ZCL_ZSTG_DEMO_DPC_EXT (the _DPC_EXT of
+    // ZSTG_DEMO_SRV), one of each; ZCL_STG_TAB_ZSTG_STATUS is a generated
+    // leaf nothing reads.
+    it("Q3: names who reads a class, one a test and one a registered service's DPC", async () => {
+      const res = await call("/core/http/xref/readers?type=CLAS&name=ZCL_ZSTG_DEMO_MPC_EXT");
+      expect(res.status).to.equal(200);
+      const found = await res.json();
+      expect(found.name).to.equal("ZCL_ZSTG_DEMO_MPC_EXT");
+      expect(found.readers).to.deep.equal([
+        {type: "CLAS", name: "ZCL_STG_PHASE0_TEST", include: "ZCL_STG_PHASE0_TEST", isTest: true, services: []},
+        {type: "CLAS", name: "ZCL_ZSTG_DEMO_DPC_EXT", include: "ZCL_ZSTG_DEMO_DPC_EXT", isTest: false, services: ["ZSTG_DEMO_SRV"]},
+      ]);
+      expect(found.counts).to.deep.equal({readers: 2, tests: 1, services: 1});
+    });
+
+    it("Q3: an interface's own readers, and the class itself left out of them", async () => {
+      const res = await call("/core/http/xref/readers?type=INTF&name=ZIF_STG_CDS_SOURCE");
+      expect(res.status).to.equal(200);
+      const found = await res.json();
+      expect(found.counts.readers).to.be.greaterThan(50);
+      expect(found.readers.map((r) => r.name)).to.not.include("ZIF_STG_CDS_SOURCE");
+      // every entry is unique -- one row per reading object, not per reference
+      expect(found.readers.map((r) => r.name)).to.deep.equal([...new Set(found.readers.map((r) => r.name))]);
+    });
+
+    it("Q3: an object nothing reads answers an empty list, not an error", async () => {
+      const res = await call("/core/http/xref/readers?type=CLAS&name=ZCL_STG_TAB_ZSTG_STATUS");
+      expect(res.status).to.equal(200);
+      expect(await res.json()).to.deep.equal({name: "ZCL_STG_TAB_ZSTG_STATUS", readers: [], counts: {readers: 0, tests: 0, services: 0}});
+    });
+
+    it("Q3: refuses a type that is not CLAS or INTF", async () => {
+      const res = await call("/core/http/xref/readers?type=PROG&name=ZCL_ZSTG_DEMO_MPC_EXT");
+      expect(res.status).to.equal(400);
+    });
+
+    it("Q3: 404s a class that does not exist", async () => {
+      const res = await call("/core/http/xref/readers?type=CLAS&name=ZCL_OSD_NOPE_NOPE");
+      expect(res.status).to.equal(404);
+    });
+
     it("runs one selected method through the Workbench endpoint", async function () {
       this.timeout(180000);
       const res = await call("/core/http/unit/object/run?type=CLAS%2FOC&name=ZCL_STG_SEGW_TEST" +
