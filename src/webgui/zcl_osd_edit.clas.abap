@@ -91,15 +91,17 @@ CLASS zcl_osd_edit DEFINITION PUBLIC CREATE PUBLIC.
       RETURNING
         VALUE(rv_html) TYPE string.
 
-*   the source with its keywords coloured, built from the tokens the PARSER
-*   classified: a TokenNode is a keyword because the grammar matched it as
-*   one, so `VALUE` is a keyword in a DATA statement and a name in a method
-*   called `value`. No word list, and nothing to keep in step with ABAP.
+*   the source with its keywords coloured, from the tokens of
+*   ZCL_OSD_ABAP_TOKENS: a character scanner over a word list, so a word in
+*   the list is a keyword wherever it stands (`VALUE` in a method called
+*   `value` too). It used to be the host's parser (STORE TOKENS), exact and
+*   seconds on a cold display and absent where the host has no parser; the
+*   scanner is the same on every host and on a system (host-tools review
+*   2026-09-25, S1).
 *
 *   It is display only -- the text area stays plain, because a caret cannot
 *   be styled and an editor that fought the browser for it would be a worse
-*   editor. Display and change, the pair the original had, and the colouring
-*   is done where the parse already is (backlog G.8).
+*   editor. Display and change, the pair the original had.
     CLASS-METHODS coloured
       IMPORTING
         iv_source      TYPE string
@@ -164,8 +166,7 @@ CLASS zcl_osd_edit IMPLEMENTATION.
                     ev_error    = rs_answer-error
           TABLES    et_object   = rs_answer-objects
                     et_issue    = rs_answer-issues
-                    et_type     = rs_answer-types
-                    et_token    = rs_answer-tokens.
+                    et_type     = rs_answer-types.
       CATCH cx_root INTO lx_root.
 *       The same rule as the AMDP tile and the trace screen: the ABAP guards
 *       itself, and what is thrown has to SAY why. An exception with no
@@ -186,7 +187,6 @@ CLASS zcl_osd_edit IMPLEMENTATION.
     DATA ls_answer TYPE ty_answer.
     DATA lt_fields TYPE tihttpnvp.
     DATA lv_change TYPE abap_bool.
-    DATA ls_tokens TYPE ty_answer.
 
 *   read through zcl_osd_form, not through `get_form_field`: the shim fills
 *   the form fields from the query string only, so the body of the POST this
@@ -250,14 +250,11 @@ CLASS zcl_osd_edit IMPLEMENTATION.
                              iv_name    = lv_name ).
           lv_source = ls_answer-source.
       ENDCASE.
-*     the tokens for the coloured display, and only when it is shown: the
-*     parse costs seconds the first time and a text area does not need it
+*     the tokens for the coloured display, and only when it is shown: a
+*     text area does not need them. Scanned here, in ABAP, rather than asked
+*     of the host, so the display is the same wherever this runs
       IF lv_change = abap_false AND ls_answer-error IS INITIAL.
-        ls_tokens = store( iv_command = `TOKENS`
-                           iv_type    = lv_type
-                           iv_name    = lv_name
-                           iv_source  = lv_source ).
-        ls_answer-tokens = ls_tokens-tokens.
+        ls_answer-tokens = zcl_osd_abap_tokens=>scan( lv_source ).
       ENDIF.
 *     after a write the box keeps what the person typed, not what a READ
 *     would give back: the two are the same file, and a round trip that
@@ -341,14 +338,14 @@ CLASS zcl_osd_edit IMPLEMENTATION.
     ENDIF.
 
 *   Display and change, the pair the original had. In display the source is
-*   coloured by the parser that is already in this process; in change it is
+*   coloured by ZCL_OSD_ABAP_TOKENS, a word list; in change it is
 *   a plain text area, because a caret cannot be styled and an editor that
 *   fought the browser over it would be a worse editor.
     IF iv_change = abap_false.
       lv_box = coloured( iv_source = iv_source it_token = is_answer-tokens ) &&
                |<div class="bar"><a class="btn" href="?type={ esc( iv_type ) }| &&
                |&amp;name={ esc( iv_name ) }&amp;change=x">Change</a>| &&
-               |<span class="dim">coloured on the server, by the same parse the check runs on</span></div>|.
+               |<span class="dim">coloured on the server, by a keyword list</span></div>|.
     ELSE.
       lv_box =
         `<form method="post" action="">` &&
@@ -394,7 +391,7 @@ CLASS zcl_osd_edit IMPLEMENTATION.
       CLEAR lv_out.
 *     the tokens of this line, in order; everything between two of them is
 *     written as it is, so the text always comes out whole even where the
-*     parser understood nothing
+*     scanner made no token of it
       LOOP AT it_token INTO ls_token WHERE line = lv_no.
         IF ls_token-col > lv_at.
           lv_out = lv_out && esc( substring( val = lv_line

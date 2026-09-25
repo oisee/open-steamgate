@@ -486,6 +486,24 @@ G.8  SE80 in the screen: edit ABAP, CDS and AMDP                         [S]
      │     `sapevent`, which is why no screen before this one met it.
      │     ANORMALIES `posted-form-has-no-fields`, workaround
      │     `src/webgui/zcl_osd_form`, and the fix belongs in the shim
+     ├─ **colouring is a word list, not the grammar -- decided 2026-09-25**
+     │  (host-tools review S1, Alice accepted it). The display used to ask
+     │  the host (`STORE TOKENS`): swap the box's text into abaplint's
+     │  registry, parse, call a leaf a keyword when the grammar matched it
+     │  as one. Exact, but a cold parse of ~7 s on the first display, a
+     │  parse on every display after it, and nothing at all on a host
+     │  without the parser (OSGo showed plain text). Now
+     │  `src/webgui/zcl_osd_abap_tokens` scans the text in ABAP with no
+     │  regex (the Go backend refuses `FIND ... RESULTS`): `*` in column 1
+     │  and `"` are comments, `'...'`, `` `...` `` and `|...|` are strings
+     │  (a template's `{ }` is code again), `##x` is a pragma, and a word is
+     │  a keyword when it is in abapGit's list (MIT, credited in the class).
+     │  **What that gives up, on purpose**: a word in the list is a keyword
+     │  wherever it stands, so `VALUE` in a method called `value` is
+     │  coloured as a keyword; the grammar knew better. What it gains: the
+     │  same colours on every host and on a system, and TOKENS is gone from
+     │  the Node store (the Go store's refusal of it is a follow-up on
+     │  `spike/go-backend`)
      ├─ **wave 3's first item, from fable-osd using the screen** (the way a
      │  defect should be found) -- **DONE 2026-09-19**: the default list is
      │  cut at 300 and the types sort together, so 607 classes filled it and

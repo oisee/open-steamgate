@@ -26,19 +26,13 @@
 // is a button people stop pressing.
 import {given, givenText, fill} from "./osd-destination.mjs";
 import {snapshotOf, changedSince} from "./osd-generation-diff.mjs";
-import * as abaplint from "@abaplint/core";
 import {objectOf} from "./osd-inputs.mjs";
 import {basename, join} from "node:path";
 
-const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS"];
-
-/** the class includes, by the suffix abapGit gives them */
-const INCLUDE_SUFFIX = {
-  locals_def: ".clas.locals_def.abap",
-  locals_imp: ".clas.locals_imp.abap",
-  testclasses: ".clas.testclasses.abap",
-  macros: ".clas.macros.abap",
-};
+// TOKENS was a seventh until 2026-09-25: the editor colours in ABAP now
+// (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
+// command that needed a parse per display is gone (host-tools review S1/C2)
+const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE"];
 
 export class StoreDestination {
   /**
@@ -108,7 +102,6 @@ export class StoreDestination {
         case "WRITE": return this.#write(type, name, include, source, started);
         case "CHECK": return this.#check(type, name, include, source, started);
         case "ACTIVATE": return await this.#activate(type, name, started);
-        case "TOKENS": return this.#tokens(type, name, include, source);
       }
     } catch (error) {
       // the store's own refusals -- NotFound, ReadOnly, NotSupported -- are
@@ -205,34 +198,6 @@ export class StoreDestination {
     };
   }
 
-  /** the source's tokens, for a screen that colours on the server */
-  #tokens(type, name, include, source) {
-    const entry = this.store.find(type, name);
-    if (entry === undefined) {
-      throw new NotFound(type, name);
-    }
-    const file = include === "main" || type !== "CLAS"
-      ? entry.file
-      : entry.file.replace(/\.clas\.abap$/, INCLUDE_SUFFIX[include] ?? ".clas.abap");
-    const registry = this.store.registry();
-    if (source === undefined) {
-      return {ET_TOKEN: tokensOf(registry, "/" + file)};
-    }
-    // the text in the box rather than the text on disk, the same way CHECK
-    // works: a screen colours what the person is looking at
-    const before = registry.getFileByName("/" + file);
-    const {MemoryFile} = abaplint;
-    const replacement = new MemoryFile("/" + file, String(source));
-    try {
-      registry.updateFile(replacement);
-      registry.parse();
-      return {ET_TOKEN: tokensOf(registry, "/" + file)};
-    } finally {
-      if (before !== undefined) registry.updateFile(before);
-      registry.parse();
-    }
-  }
-
   #check(type, name, include, source, started) {
     const options = source === undefined ? {} : {source: String(source), include};
     const result = this.store.check(type, name, options);
@@ -314,60 +279,6 @@ export class StoreDestination {
   }
 }
 
-/**
- * Which tokens of a source are keywords, and which are names.
- *
- * **The parser answers it, not a word list.** abaplint's statement tree
- * distinguishes the two by construction: a `TokenNode` is a token the
- * grammar matched as a keyword, a `TokenNodeRegex` is one matched by a
- * pattern -- an identifier, a literal, a number. So "is DATA a keyword
- * here" is a question about this statement rather than about a list
- * somebody maintains, and `VALUE` is a keyword in `DATA x TYPE i VALUE 2`
- * and a name in a method called `value`.
- *
- * Everything else is the token's own class: a comment, a string, a pragma,
- * punctuation. A statement the parser did not recognise contributes its
- * tokens as names, which is the honest answer -- the screen then colours
- * nothing it cannot justify.
- */
-function tokensOf(registry, filename) {
-  const file = registry.getFileByName(filename);
-  if (file === undefined) return [];
-  const object = [...registry.getObjects()].find((o) => o.getABAPFiles?.().some((f) => f.getFilename() === filename));
-  const abap = object?.getABAPFiles?.().find((f) => f.getFilename() === filename);
-  if (abap === undefined) return [];
-  const out = [];
-  const kindOf = (token) => {
-    const name = token.constructor.name;
-    if (name.includes("Comment")) return "comment";
-    if (name.includes("String")) return "string";
-    if (name.includes("Pragma")) return "pragma";
-    if (name.includes("Punctuation") || name.includes("Paren") || name.includes("Bracket")) return "punct";
-    return "name";
-  };
-  const walk = (node, keyword) => {
-    const kids = node.getChildren?.() ?? [];
-    if (kids.length === 0) {
-      const token = node.getFirstToken?.();
-      if (token === undefined) return;
-      const kind = kindOf(token);
-      out.push({
-        LINE: token.getRow(),
-        COL: token.getCol(),
-        LEN: String(token.getStr()).length,
-        // a keyword only where the grammar said so: TokenNode, not TokenNodeRegex
-        KIND: keyword && kind === "name" ? "keyword" : kind,
-      });
-      return;
-    }
-    for (const kid of kids) walk(kid, kid.constructor.name === "TokenNode");
-  };
-  for (const statement of abap.getStatements()) {
-    walk(statement, false);
-  }
-  return out.sort((a, b) => a.LINE - b.LINE || a.COL - b.COL);
-}
-
 /** a file the generators wrote, as the object it is: the same row shape the
  *  list uses, because it answers the same question -- which objects, and in
  *  which files */
@@ -420,5 +331,6 @@ const EMPTY = {
   ET_OBJECT: [],
   ET_ISSUE: [],
   ET_TYPE: [],
+  // kept while ZOSD_STORE still declares it; nothing fills it since TOKENS left
   ET_TOKEN: [],
 };
