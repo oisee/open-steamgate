@@ -7,10 +7,12 @@ import {readFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {checkReportDocument, activationSuccessDocument, activationFailureDocument, uriOf as facadeUriOf} from "../tools/adt-documents.mjs";
 import {entitySetMapFor} from "../tools/segw-entityset-map.mjs";
+import {tableDataDocument} from "../tools/adt-facade.mjs";
 
 const {objectOf, adtObjectOf, uriOf, fileOf, outcomes, abapFrame, parseCheckReport, parseActivationResult, runActionFor,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
-  readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern} =
+  readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
+  htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
 
 describe("editors/vscode: the extension's logic", function () {
@@ -264,5 +266,79 @@ describe("editors/vscode: the extension's logic", function () {
     const line = readersLensLine(mpcSource, object);
     expect(line).to.be.a("number");
     expect(mpcSource.split(/\r\n|\r|\n/)[line - 1]).to.match(/^CLASS\s+zcl_zstg_demo_mpc_ext\s+DEFINITION\b/i);
+  });
+
+  // ---- Q6a "Notebook SQL": the pure half of a *.osdnb notebook -- the
+  // freestyle route's own column-oriented XML into rows, the rows into an
+  // escaped HTML table, and a notebook file's JSON into cells and back.
+
+  it("Q6a: the freestyle route's own XML shape (tools/adt-facade.mjs tableDataDocument) becomes columns and rows", () => {
+    const xml = tableDataDocument({
+      rows: [{TRAVEL_ID: "T0001", DESCRIPTION: "Berlin"}, {TRAVEL_ID: "T0002", DESCRIPTION: "Paris"}],
+      columns: ["TRAVEL_ID", "DESCRIPTION"],
+    });
+    const {columns, rows} = freestyleRows(xml);
+    expect(columns).to.deep.equal(["TRAVEL_ID", "DESCRIPTION"]);
+    expect(rows).to.deep.equal([
+      {TRAVEL_ID: "T0001", DESCRIPTION: "Berlin"},
+      {TRAVEL_ID: "T0002", DESCRIPTION: "Paris"},
+    ]);
+  });
+
+  it("Q6a: an empty result set is zero rows, not one row of nothing", () => {
+    const xml = tableDataDocument({rows: [], columns: ["A", "B"]});
+    expect(freestyleRows(xml)).to.deep.equal({columns: ["A", "B"], rows: []});
+  });
+
+  it("Q6a: a value the XML had to escape (& and <) round-trips through freestyleRows unescaped", () => {
+    const xml = tableDataDocument({rows: [{NOTE: "Tom & Jerry <3"}], columns: ["NOTE"]});
+    expect(freestyleRows(xml).rows).to.deep.equal([{NOTE: "Tom & Jerry <3"}]);
+  });
+
+  it("Q6a: htmlEscape stops a cell value with < or & from becoming markup", () => {
+    expect(htmlEscape("<script>alert(1)</script>")).to.equal("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(htmlEscape("Fish & Chips")).to.equal("Fish &amp; Chips");
+    expect(htmlEscape(undefined)).to.equal("");
+  });
+
+  it("Q6a: the cell output table escapes every cell, and the status line carries rows, ms and generation", () => {
+    const html = freestyleTableHtml(["NAME"], [{NAME: "<b>&</b>"}], {ms: 12, generation: "abcdef1234567890"});
+    expect(html).to.contain("<th>NAME</th>");
+    expect(html).to.contain("<td>&lt;b&gt;&amp;&lt;/b&gt;</td>");
+    expect(html).to.not.contain("<b>&</b>");
+    expect(html).to.contain("1 row · 12 ms · abcdef12");
+  });
+
+  it("Q6a: the status line leaves the generation off when the answer did not carry one", () => {
+    const html = freestyleTableHtml([], [], {ms: 3});
+    expect(html).to.contain("0 rows · 3 ms</div>");
+  });
+
+  it("Q6a: a notebook's own JSON becomes cells, code defaulting to sql, markdown its own kind", () => {
+    const cells = notebookFromJson(JSON.stringify({cells: [
+      {kind: "markdown", value: "# Demo"},
+      {kind: "code", value: "SELECT 1"},
+      {kind: "code", language: "sql", value: "SELECT 2"},
+    ]}));
+    expect(cells).to.deep.equal([
+      {kind: "markdown", language: "markdown", value: "# Demo"},
+      {kind: "code", language: "sql", value: "SELECT 1"},
+      {kind: "code", language: "sql", value: "SELECT 2"},
+    ]);
+  });
+
+  it("Q6a: a bad or missing notebook JSON reads as no cells rather than throwing", () => {
+    expect(notebookFromJson("not json")).to.deep.equal([]);
+    expect(notebookFromJson(JSON.stringify({}))).to.deep.equal([]);
+  });
+
+  it("Q6a: notebookToJson and notebookFromJson round-trip a notebook", () => {
+    const cells = [
+      {kind: "code", language: "sql", value: "SELECT * FROM zstg_demo"},
+      {kind: "markdown", language: "markdown", value: "a query"},
+    ];
+    const text = notebookToJson(cells);
+    expect(text.endsWith("\n")).to.equal(true);
+    expect(notebookFromJson(text)).to.deep.equal(cells);
   });
 });

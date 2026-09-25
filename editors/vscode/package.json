@@ -9,7 +9,11 @@
   "engines": {"vscode": "^1.88.0"},
   "categories": ["Testing", "Other"],
   "main": "./extension.js",
-  "activationEvents": ["workspaceContains:**/*.abap"],
+  "activationEvents": [
+    "workspaceContains:**/*.abap",
+    "onNotebook:osd-sql-notebook",
+    "onCommand:osd.newSqlNotebook"
+  ],
   "contributes": {
     "configuration": {
       "title": "osd",
@@ -24,14 +28,27 @@
           "enum": ["abap", "vscode"],
           "default": "abap",
           "description": "What an ABAP developer's fingers expect (SAP GUI / ADT: Ctrl+F2 Check, Ctrl+F3 Activate, F8 Run, the debug keys) over an .abap editor, or VS Code's own bindings unchanged (\"vscode\")."
+        },
+        "osd.notebook.rowLimit": {
+          "type": "number",
+          "default": 100,
+          "description": "The row limit (rowNumber) a *.osdnb cell's SELECT is run with, against /sap/bc/adt/datapreview/freestyle."
         }
       }
     },
+    "notebooks": [
+      {
+        "type": "osd-sql-notebook",
+        "displayName": "osd SQL Notebook",
+        "selector": [{"filenamePattern": "*.osdnb"}]
+      }
+    ],
     "commands": [
       {"command": "osd.showDumps", "title": "osd: Show short dumps"},
       {"command": "osd.check", "title": "osd: Check"},
       {"command": "osd.activate", "title": "osd: Activate"},
-      {"command": "osd.run", "title": "osd: Run"}
+      {"command": "osd.run", "title": "osd: Run"},
+      {"command": "osd.newSqlNotebook", "title": "osd: New SQL notebook"}
     ],
     "keybindings": [
       {"key": "ctrl+f2", "command": "osd.check", "when": "resourceExtname == .abap && config.osd.keymap == abap"},

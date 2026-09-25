@@ -1,0 +1,23 @@
+{
+  "cells": [
+    {
+      "kind": "markdown",
+      "value": "# osd SQL notebook demo\n\nThree cells over the demo data (`npm start` serving on `osd.url`, default `http://localhost:3030`): a plain table read, an aggregate, and a where-used query -- each `Run` posts the cell to `/sap/bc/adt/datapreview/freestyle` (the same route ADT's own SQL Pane uses) and shows the rows under it."
+    },
+    {
+      "kind": "code",
+      "language": "sql",
+      "value": "SELECT travel_id, description, status, seats FROM zstg_demo ORDER BY travel_id"
+    },
+    {
+      "kind": "code",
+      "language": "sql",
+      "value": "SELECT airline, SUM(seats) AS total_seats, SUM(price) AS total_revenue FROM zstg_flightfact GROUP BY airline ORDER BY airline"
+    },
+    {
+      "kind": "code",
+      "language": "sql",
+      "value": "SELECT include, name FROM wbcrossgt WHERE name = 'ZIF_STG_CDS_SOURCE'"
+    }
+  ]
+}

@@ -798,6 +798,30 @@ describe("tools/adt-facade: the development loop", () => {
       expect(xml).to.contain('href="/sap/bc/adt/activation"');
     });
   });
+
+  // Q6a "Notebook SQL" (docs/vscode-extension.md): a notebook cell runs
+  // over the same freestyle route a real ADT's SQL Pane uses
+  // (tools/adt-facade.mjs `datapreview/freestyle`, ~2358); the route itself
+  // is already covered in test/adt-facade.mjs, this is the one round trip
+  // against the demo data seeded the way this suite's own `before()` seeds
+  // it (test/start.mjs, through the same `call()`/CSRF session every other
+  // test here uses, rather than a bare fetch).
+  describe("Q6a: notebook SQL", () => {
+    it("posts a SELECT and gets rows back, column-oriented", async () => {
+      const res = await call("/datapreview/freestyle?rowNumber=100", {
+        method: "POST",
+        headers: {"content-type": "text/plain; charset=utf-8"},
+        body: "SELECT travel_id, description FROM zstg_demo ORDER BY travel_id",
+      });
+      expect(res.status).to.equal(200);
+      const generation = res.headers.get("x-osd-generation");
+      expect(generation, "every façade answer names its generation (docs/generations.md)").to.be.a("string").with.length.greaterThan(0);
+      const xml = await res.text();
+      expect(xml).to.contain("<dataPreview:tableData");
+      expect(xml).to.contain('dataPreview:name="TRAVEL_ID"');
+      expect(xml).to.contain("<dataPreview:data>T0001</dataPreview:data>");
+    });
+  });
 });
 
 

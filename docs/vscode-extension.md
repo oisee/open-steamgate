@@ -138,6 +138,40 @@ class open in the editor can be added or removed in any other file.
 tested without VS Code or a server in `test/vscode-extension.mjs`; the route
 itself in `test/adt-devloop.mjs`, beside the other `core/http/*` routes.
 
+## Q6a: a SQL notebook
+
+*2026-09-25.* `*.osdnb` is a small JSON file of SQL (or markdown) cells
+(`editors/vscode/examples/demo.osdnb`): a VS Code
+[NotebookSerializer](https://code.visualstudio.com/api/extension-guides/notebook)
+for the type `osd-sql-notebook` (`package.json` `contributes.notebooks`,
+selector `*.osdnb`), and a `NotebookController` named "osd SQL" that runs a
+cell the way ADT's own SQL Pane does: `POST
+/sap/bc/adt/datapreview/freestyle?rowNumber=<osd.notebook.rowLimit>` with
+the cell's own text as the body (`tools/adt-facade.mjs`, ~2358; `data.query`
+underneath is SELECT-only and applies the row limit itself -- this is the
+one façade route that already does exactly what a notebook cell needs, so
+Q6a adds no new server route). The answer is XML, column-oriented (one
+`<dataPreview:columns>` per selected column, its own metadata and a
+`<dataPreview:data>` per row -- `tableDataDocument`, ~257); a cell's output
+is that answer turned into an HTML table (`text/html`, escaped so a value
+carrying `<` or `&` renders as text) with a status line "N rows · M ms ·
+\<generation\>" (the generation off `X-OSD-Generation`, set on every façade
+answer), plus the same rows as `application/json` so VS Code's own JSON /
+table renderers work on them too. A refused statement (not a SELECT, or a
+database never built) becomes the cell's error output, the server's own
+message unwrapped. Command "osd: New SQL notebook" opens a fresh one-cell
+notebook of the type.
+
+`editors/vscode/lib.js` carries the pure half (`freestyleRows`,
+`freestyleTableHtml`, `htmlEscape`, `notebookFromJson`, `notebookToJson`,
+`Osd#freestyle`), tested without VS Code or a server in
+`test/vscode-extension.mjs`; the route itself (already exercised in
+`test/adt-facade.mjs`) also gets one round trip in `test/adt-devloop.mjs`,
+beside the other façade routes that suite drives through a CSRF session.
+
+Left for Q6b: ABAP cells (`IF_OO_ADT_CLASSRUN`-shaped, `classrun`) -- the F8
+table above already notes `oo/classrun` is not served today.
+
 ## Trying it
 
 No build step and no dependencies: plain CommonJS, VS Code's own Node.
@@ -161,9 +195,14 @@ install.
   `activationFailureDocument`, imported directly rather than re-typed), F8's
   dispatch table, and Q2b's lens placement / cursor-to-method / OData row
   shapes, including one test run against the demo's own DPC_EXT and MPC
-  sources through `tools/segw-entityset-map.mjs` end to end.
+  sources through `tools/segw-entityset-map.mjs` end to end; Q6a's
+  `freestyleRows` / `freestyleTableHtml` / `htmlEscape` /
+  `notebookFromJson` / `notebookToJson`, including a cell value carrying
+  `<` and `&`.
 - `test/adt-devloop.mjs`: `core/http/segw/entitysets` against the real demo
-  service, beside the other `core/http/*` routes.
+  service, beside the other `core/http/*` routes; Q6a's `datapreview/
+  freestyle` round trip (a SELECT over the demo data, through the same CSRF
+  session the rest of that suite uses).
 - `test/osd-child.mjs`: the extension's own client (`Osd`) against a real
   `npm start`, through the parent -- the doors, discovery, one method run
   with the CSRF round trip.
