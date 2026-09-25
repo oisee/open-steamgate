@@ -5,7 +5,7 @@
 //        [--port 4720] [--jobs N] [--out <dir>] [--node-ref <file>]
 //        [--suites a,b] [--changed] [--only node|osgo]
 //        [--reuse-node | --fresh-node] [--timeout 30000] [--no-count]
-//        [--e2e] [--fast] [--report-only]
+//        [--e2e] [--fast] [--report-only] [--stale-gen]
 //
 // --report-only reads the last run's results (<out>/node-reference.json and
 // <out>/osgo-results.json) and only classifies and writes the summary again.
@@ -243,6 +243,17 @@ const genList = (dir) => {
   return acc;
 };
 let genBefore;
+// a checkout whose gen/ is not the generation of its inputs is refused
+// (osg-build.mjs staleGen): Node runs such a gen/ and hides what an osgo
+// built from it lacks, which is how two holes reached the browser build
+if (!flag("report-only") && !flag("stale-gen")) {
+  const {staleGen} = await import("./osg-build.mjs");
+  const stale = await staleGen(root);
+  if (stale) {
+    console.error(`parity: refused: ${stale} (or pass --stale-gen)`);
+    process.exit(2);
+  }
+}
 if (!flag("report-only") && existsSync(genDir)) {
   rmSync(genSnap, {recursive: true, force: true});
   cpSync(genDir, genSnap, {recursive: true, preserveTimestamps: true});
