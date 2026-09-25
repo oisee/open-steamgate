@@ -562,6 +562,10 @@ func (r storeRefusal) Error() string { return string(r) }
 
 func storeNotFound(typ, name string) error { return storeRefusal(typ + " " + name + " does not exist") }
 
+// StoreCapabilities is what CAPABILITIES names: the commands this host does,
+// as opposed to the ones it only refuses (CHECK, ACTIVATE: storeNoCompiler).
+var StoreCapabilities = []string{"LIST", "READ", "WRITE"}
+
 // StoreCall answers one call of ZOSD_STORE. in holds the importing values
 // that were passed (IV_*), present or absent the way the caller passed them.
 func StoreCall(in map[string]*string) StoreAnswer {
@@ -583,6 +587,13 @@ func StoreCall(in map[string]*string) StoreAnswer {
 	}
 	switch command {
 	case "LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS":
+	case "CAPABILITIES":
+		// what this host can do, for a screen that draws a button only for
+		// a command named here (ZCL_OSD_EDIT): no CHECK and no ACTIVATE,
+		// since this binary carries no compiler and is a built generation.
+		// Node answers all five (tools/osd-store-destination.mjs).
+		a.Scalars["EV_NOTE"] = strings.Join(StoreCapabilities, " ")
+		return a
 	default:
 		a.Scalars["EV_ERROR"] = "unknown store command " + command
 		return a

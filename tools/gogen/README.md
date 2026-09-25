@@ -1277,6 +1277,40 @@ ANORMALIES entry: the implicit MANDT) and `adt-deferred` (the ADT facade,
 postponed). The headline is passed / (Node-passed - go-matches-system -
 adt-deferred), the raw ratio is printed beside it.
 
+**`compiler-deferred`** (rule confirmed by Alice, 2026-09-25, host-tools
+review D2): a third class kept apart from the headline, holding **only the
+editor's CHECK test** (`test/editor.mjs`, "checks the source it was
+POSTED"). Its Node answer needs the compiler inside the running host
+(abaplint over the whole registry); OSGo must answer it with an explicit
+refusal naming the missing step (`store.go` `storeNoCompiler`, an error and
+an issue that stands), never a success. It is out of numerator and
+denominator until the incremental rebuild exists, printed on its own line as
+`adt-deferred` is, one entry per test, and no other reason admits an entry.
+The editor's **colouring is not deferred**: `ZCL_OSD_ABAP_TOKENS` scans in
+ABAP (open-steamgate branch `feat/editor-colours-in-abap`), so that test is
+expected to pass on OSGo and counts in the headline. The rule replaces the
+wave-2 `HOST_TOOL` proposal; `parity.mjs` itself is the parity agent's to
+change (note left in `.local/ultra-wip/parity-wave2-PROGRESS.md`).
+
+Follow-ups on this branch from the same review:
+
+- the store answers `CAPABILITIES` with `LIST READ WRITE`
+  (`go/abap/store.go` `StoreCapabilities`, `TestStoreCapabilities`), so
+  `ZCL_OSD_EDIT` draws no Check or Activate button on OSGo once the
+  open-steamgate branch `feat/editor-capabilities` is in
+  the tree osgo is built from. Done in this commit.
+- `TOKENS` can go once the colouring PR is in that tree: `go/abap/store.go`
+  (the command switch, the `case "CHECK", "ACTIVATE", "TOKENS"` dispatch,
+  the `TOKENS` branch of `storeNoCompiler` and the comment above
+  `storeNoCompiler` and at the top of the file), the `TOKENS` call in
+  `testdata/zcl_gogen_t_store.clas.abap` (line 129) with its part of the
+  pinned `ZCL_GOGEN_T_STORE` answer in `semantics.mjs`, the comment in
+  `frontend.mjs` (line 757), and `ET_TOKEN` in `storecmp.mjs` `FIELDS` if
+  `ZOSD_STORE` drops the parameter. Until then an unknown-command answer
+  and the current refusal read the same to the screen.
+- `CL_ABAP_GZIP=>COMPRESS_BINARY` as a Go native (review K11): on
+  `ultra/parity-wave2` (`go/abap/gzip.go`), not in this commit.
+
 Measured after the wave (osgo from this branch on parity-home 6327bab, 965
 classes, 33 methods not compiled; `--e2e`, Node reference reused):
 **95.1 %** -- 176 of 185 (297 Node-passed, less 13 go-matches-system and 99

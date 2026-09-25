@@ -26,6 +26,21 @@ func TestCollateIsLocaleCompare(t *testing.T) {
 	}
 }
 
+// CAPABILITIES names what this host does, so the editor draws no Check or
+// Activate button here; with no store it is the same named error as any call
+func TestStoreCapabilities(t *testing.T) {
+	cmd := "CAPABILITIES"
+	if a := StoreCall(map[string]*string{"IV_COMMAND": &cmd}); a.Scalars["EV_ERROR"] == "" {
+		t.Fatalf("no store, and yet capabilities: %v", a.Scalars)
+	}
+	storeState.cfg = &StoreConfig{Roots: []StoreRoot{{Path: "src", Writable: true}}}
+	defer func() { storeState.cfg = nil }()
+	a := StoreCall(map[string]*string{"IV_COMMAND": &cmd})
+	if a.Scalars["EV_ERROR"] != "" || a.Scalars["EV_NOTE"] != "LIST READ WRITE" {
+		t.Fatalf("CAPABILITIES: note %q error %q", a.Scalars["EV_NOTE"], a.Scalars["EV_ERROR"])
+	}
+}
+
 // a WRITE touches only a file inside a writable root of the tree
 func TestStoreConfined(t *testing.T) {
 	storeState.cfg = &StoreConfig{Roots: []StoreRoot{{Path: "src", Writable: true}, {Path: "gen"}, {Path: "packs/o4d/src", Writable: true}}}
