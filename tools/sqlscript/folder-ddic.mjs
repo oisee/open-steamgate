@@ -61,7 +61,7 @@ export class FolderDdic {
         if (entry.isDirectory()) { walk(path); continue; }
         // DTEL and DOMA as abapGit XML; a DDLS as its source, because a
         // table function's signature is in the source and nowhere else
-        const m = /^(.+)\.(dtel|doma|ttyp|tabl)\.xml$/i.exec(entry.name) ?? /^(.+)\.(ddls)\.asddls$/i.exec(entry.name);
+        const m = /^(.+)\.(dtel|doma|ttyp|tabl|view)\.xml$/i.exec(entry.name) ?? /^(.+)\.(ddls)\.asddls$/i.exec(entry.name);
         if (m === null) continue;
         const key = `${m[2].toUpperCase()}:${m[1].toUpperCase().replaceAll("#", "/")}`;
         const was = this.index.get(key);

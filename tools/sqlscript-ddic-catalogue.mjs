@@ -24,6 +24,38 @@ function irType(field, table) {
   }
 }
 
+/** A database view's fields, each typed by the base-table field it projects
+ *  (DD27P: VIEWFIELD <- TABNAME.FIELDNAME). A view generated for a CDS view
+ *  keeps the client column its base tables have (MANDT, measured on A4H:
+ *  the SQL view of a client-dependent CDS view lists MANDT first), which the
+ *  CDS entity itself does not show. A base table this dictionary lacks
+ *  leaves its columns marked, refused when a body reads them. */
+function viewColumns(store, name) {
+  const source = store.read("VIEW", name)?.source ?? "";
+  const fields = [...source.matchAll(/<DD27P>([\s\S]*?)<\/DD27P>/g)].map(([, block]) => {
+    const tag = (t) => (new RegExp(`<${t}>([^<]*)</${t}>`).exec(block)?.[1] ?? "").trim().toUpperCase();
+    return {view: tag("VIEWFIELD"), table: tag("TABNAME"), field: tag("FIELDNAME")};
+  }).filter((one) => one.view !== "");
+  if (fields.length === 0) throw new Error(`DDIC view ${name}: no fields in its definition`);
+  const bases = new Map();
+  const baseOf = (table) => {
+    if (!bases.has(table)) bases.set(table, resolveType(store, table));
+    return bases.get(table);
+  };
+  return Object.fromEntries(fields.map((one) => {
+    // a CDS view's literal or cast column projects a pseudo-field of
+    // DDDDLCHARTYPES whose name is its type: `CHAR*000256*000000`
+    const literal = /^([A-Z0-9_]+)\*(\d+)\*(\d+)$/.exec(one.field);
+    if (one.table.startsWith("DDDDL") && literal !== null) {
+      return [one.view, irType({NAME: one.view, DATATYPE: literal[1], LENG: literal[2], DECIMALS: literal[3]}, name)];
+    }
+    const base = baseOf(one.table);
+    const field = base.KIND === "STRUCTURE" ? base.FIELDS.find((f) => String(f.NAME).toUpperCase() === one.field) : undefined;
+    if (field === undefined) return [one.view, unresolvedType(`${name}.${one.view}: base field ${one.table}.${one.field} is not in this dictionary`)];
+    return [one.view, irType(field, `${name}(${one.table})`)];
+  }));
+}
+
 /** All transparent/structure TABL objects visible through an ObjectStore.
  *
  * A caller may request only referenced names.  That is how generated AMDP
@@ -34,7 +66,10 @@ export function ddicCatalogue(store, names = store.list("TABL").map((one) => one
   for (const name of [...new Set(names.map((one) => String(one).toUpperCase()))].sort()) {
     // USING also names called procedures.  Only DDIC tables belong in this
     // catalogue; the procedure registry resolves the other names.
-    if (store.find("TABL", name) === undefined) continue;
+    if (store.find("TABL", name) === undefined) {
+      if (store.find("VIEW", name) !== undefined) catalogue[name] = viewColumns(store, name);
+      continue;
+    }
     const resolved = resolveType(store, name);
     if (resolved.KIND !== "STRUCTURE") {
       throw new Error(`DDIC ${name}: ${resolved.REASON ?? `expected STRUCTURE, got ${resolved.KIND}`}`);

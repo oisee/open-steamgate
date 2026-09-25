@@ -383,3 +383,36 @@ ENDCLASS.`;
     expect(definitionsDisagree(source, "cl_opt.clas.abap")).to.deep.equal({compared: 1, differing: []});
   });
 });
+
+describe("a DDIC database view in the catalogue", () => {
+  it("types each view field from the base-table field it projects, keeps MANDT, and decodes a CDS literal column", async () => {
+    const {ddicCatalogue} = await import("../tools/sqlscript-ddic-catalogue.mjs");
+    const dir = mkdtempSync(join(tmpdir(), "osd-view-"));
+    try {
+      writeFileSync(join(dir, "zbase.tabl.xml"), `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_TABL" serializer_version="v1.0.0"><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>
+<DD02V><TABNAME>ZBASE</TABNAME><TABCLASS>TRANSP</TABCLASS></DD02V>
+<DD03P_TABLE>
+<DD03P><FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><INTTYPE>C</INTTYPE><INTLEN>000006</INTLEN><DATATYPE>CLNT</DATATYPE><LENG>000003</LENG><MASK>  CLNT</MASK></DD03P>
+<DD03P><FIELDNAME>ID</FIELDNAME><KEYFLAG>X</KEYFLAG><INTTYPE>X</INTTYPE><INTLEN>000004</INTLEN><DATATYPE>INT4</DATATYPE><LENG>000010</LENG><MASK>  INT4</MASK></DD03P>
+</DD03P_TABLE></asx:values></asx:abap></abapGit>`);
+      writeFileSync(join(dir, "zv_base.view.xml"), `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_VIEW" serializer_version="v1.0.0"><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>
+<DD25V><VIEWNAME>ZV_BASE</VIEWNAME><VIEWCLASS>D</VIEWCLASS></DD25V>
+<DD27P_TABLE>
+<DD27P><VIEWFIELD>MANDT</VIEWFIELD><TABNAME>ZBASE</TABNAME><FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG></DD27P>
+<DD27P><VIEWFIELD>ID</VIEWFIELD><TABNAME>ZBASE</TABNAME><FIELDNAME>ID</FIELDNAME></DD27P>
+<DD27P><VIEWFIELD>KIND</VIEWFIELD><TABNAME>DDDDLCHARTYPES</TABNAME><FIELDNAME>CHAR*000004*000000</FIELDNAME></DD27P>
+<DD27P><VIEWFIELD>GONE</VIEWFIELD><TABNAME>ZMISSING</TABNAME><FIELDNAME>X</FIELDNAME></DD27P>
+</DD27P_TABLE></asx:values></asx:abap></abapGit>`);
+      const catalogue = ddicCatalogue(new FolderDdic([dir]), ["ZV_BASE"]);
+      expect(catalogue.ZV_BASE.MANDT).to.deep.equal({abap: "C", len: 3});
+      expect(catalogue.ZV_BASE.ID).to.deep.equal({abap: "I"});
+      expect(catalogue.ZV_BASE.KIND).to.deep.equal({abap: "C", len: 4});
+      expect(catalogue.ZV_BASE.GONE.abap).to.equal("UNRESOLVED");
+      expect(Object.keys(catalogue.ZV_BASE)).to.deep.equal(["MANDT", "ID", "KIND", "GONE"]);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+});

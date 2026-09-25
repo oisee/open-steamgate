@@ -275,7 +275,7 @@ export function measure(root = ".local/a4h-export", scratch = "/tmp/sqlscript-co
     const catalogue = {};
     for (const name of one.signature?.usings ?? []) {
       const table = String(name).toUpperCase();
-      if (ddic.find("TABL", table) === undefined) continue;
+      if (ddic.find("TABL", table) === undefined && ddic.find("VIEW", table) === undefined) continue;
       try {
         Object.assign(catalogue, ddicCatalogue(ddic, [table]));
       } catch (error) {
