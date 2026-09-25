@@ -3,10 +3,13 @@
 // answer means per method. The live half, against a real server, is in
 // test/osd-child.mjs.
 import {expect} from "chai";
+import {readFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {checkReportDocument, activationSuccessDocument, activationFailureDocument, uriOf as facadeUriOf} from "../tools/adt-documents.mjs";
+import {entitySetMapFor} from "../tools/segw-entityset-map.mjs";
 
-const {objectOf, adtObjectOf, uriOf, fileOf, outcomes, abapFrame, parseCheckReport, parseActivationResult, runActionFor} =
+const {objectOf, adtObjectOf, uriOf, fileOf, outcomes, abapFrame, parseCheckReport, parseActivationResult, runActionFor,
+  entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
 
 describe("editors/vscode: the extension's logic", function () {
@@ -88,11 +91,17 @@ describe("editors/vscode: the extension's logic", function () {
   it("SE80's F8, one entry per object type: what this build does, or the route its turn would use", () => {
     expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: true})).to.deep.equal({kind: "unit"});
     expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: false}).kind).to.equal("not-yet");
-    // a service's own class: F8 there means a Gateway client, before ABAP Unit
+    // a service's own class, cursor outside any entity-set method: F8 there
+    // means a Gateway client, before ABAP Unit -- still not yet
     const dpc = runActionFor({type: "CLAS", name: "ZCL_ZSTG_DEMO_DPC_EXT"}, {hasUnitTests: true});
-    expect(dpc).to.deep.equal({kind: "not-yet", text: "not yet: a Gateway client prefilled with the service and the entity set of the method under the cursor"});
+    expect(dpc.kind).to.equal("not-yet");
+    expect(dpc.text).to.contain("get_entityset");
     const mpc = runActionFor({type: "CLAS", name: "ZCL_ZSTG_DEMO_MPC_EXT"}, {hasUnitTests: true});
     expect(mpc.kind).to.equal("not-yet");
+    // Q2b: cursor inside a known entity-set method does what its lens does
+    const inside = runActionFor({type: "CLAS", name: "ZCL_ZSTG_DEMO_DPC_EXT"},
+      {hasUnitTests: true, entitySet: {service: "ZSTG_DEMO_SRV", set: "TravelSet", entityKind: "get_entityset"}});
+    expect(inside).to.deep.equal({kind: "call-entityset", service: "ZSTG_DEMO_SRV", set: "TravelSet", entityKind: "get_entityset"});
     expect(runActionFor({type: "INTF", name: "ZIF_A"})).to.deep.equal({kind: "not-yet", text: "not yet: an interface has nothing of its own to run"});
     expect(runActionFor({type: "FUGR", name: "ZFG"}).text).to.contain("/sap/bc/osd/rfc/functions/<NAME>");
     expect(runActionFor({type: "TABL", name: "ZSTG_DEMO"}).text).to.equal("not yet: data preview");
@@ -100,5 +109,93 @@ describe("editors/vscode: the extension's logic", function () {
     expect(runActionFor({type: "IWSV", name: "ZSTG_DEMO_SRV"}).text).to.equal("not yet: the Gateway client on the service document");
     expect(runActionFor({type: "SICF", name: "ZOSD_APP"}).kind).to.equal("not-yet");
     expect(runActionFor({type: "BOGUS", name: "X"}).text).to.contain("BOGUS");
+  });
+
+  // ---- Q2b "Runner": the CodeLens over a SEGW _DPC_EXT class's own
+  // `<set>_get_entityset` / `<set>_get_entity` methods, and F8 doing what
+  // the lens above the cursor's own method does.
+
+  it("Q2b: a lens line over each METHOD <set>_get_entityset. / <set>_get_entity. line, none elsewhere", () => {
+    const source = [
+      "CLASS zcl_x IMPLEMENTATION.",
+      "  METHOD travelset_get_entityset.",
+      "    \" body",
+      "  ENDMETHOD.",
+      "  METHOD travelset_get_entity.",
+      "  ENDMETHOD.",
+      "  METHODS travelset_get_entityset REDEFINITION.", // a declaration, not the body: no line for this
+      "  METHOD other_method.",
+      "  ENDMETHOD.",
+      "ENDCLASS.",
+    ].join("\n");
+    expect(entitySetMethodLines(source)).to.deep.equal([
+      {line: 2, method: "TRAVELSET_GET_ENTITYSET", kind: "get_entityset"},
+      {line: 5, method: "TRAVELSET_GET_ENTITY", kind: "get_entity"},
+    ]);
+  });
+
+  it("Q2b: a lens only for a method the server's map names, titled with the set's real name", () => {
+    const source = [
+      "  METHOD travelset_get_entityset.",
+      "  ENDMETHOD.",
+      "  METHOD bookingset_get_entityset.", // the server does not know this one
+      "  ENDMETHOD.",
+    ].join("\n");
+    const map = {service: "ZSTG_DEMO_SRV", sets: [{method: "TRAVELSET_GET_ENTITYSET", kind: "get_entityset", set: "TravelSet"}]};
+    expect(entitySetLenses(source, map)).to.deep.equal([
+      {line: 1, kind: "get_entityset", set: "TravelSet", service: "ZSTG_DEMO_SRV", title: "▶ Call TravelSet"},
+    ]);
+    expect(entitySetLenses(source, undefined)).to.deep.equal([]);
+  });
+
+  it("Q2b: the method a cursor's (0-based) line sits inside, cleared by the ENDMETHOD that closes it", () => {
+    const source = [
+      "  METHOD travelset_get_entityset.", // 0
+      "    DATA lv TYPE i.",               // 1
+      "  ENDMETHOD.",                      // 2
+      "  METHOD travelset_get_entity.",    // 3
+      "  ENDMETHOD.",                      // 4
+      "  DATA gv TYPE i.",                 // 5, between methods
+    ].join("\n");
+    expect(methodAtLine(source, 0)).to.equal("TRAVELSET_GET_ENTITYSET");
+    expect(methodAtLine(source, 1)).to.equal("TRAVELSET_GET_ENTITYSET");
+    expect(methodAtLine(source, 2)).to.equal(undefined);
+    expect(methodAtLine(source, 3)).to.equal("TRAVELSET_GET_ENTITY");
+    expect(methodAtLine(source, 5)).to.equal(undefined);
+  });
+
+  it("Q2b: an OData v2 answer's rows, the key predicate off __metadata, columns without it", () => {
+    const setBody = {d: {results: [
+      {__metadata: {uri: "http://x/TravelSet('T0001')"}, TravelId: "T0001", Description: "A"},
+      {__metadata: {uri: "http://x/TravelSet('T0002')"}, TravelId: "T0002", Description: "B"},
+    ]}};
+    const rows = resultRows(setBody);
+    expect(rows).to.have.lengthOf(2);
+    expect(keyOf(rows[0])).to.equal("'T0001'");
+    expect(stripMetadata(rows[0])).to.deep.equal({TravelId: "T0001", Description: "A"});
+
+    const entityBody = {d: {__metadata: {uri: "http://x/BookingSet(TravelID='T0001',BookingID='0001')"}, TravelID: "T0001", BookingID: "0001"}};
+    const one = resultRows(entityBody);
+    expect(one).to.have.lengthOf(1);
+    expect(keyOf(one[0])).to.equal("TravelID='T0001',BookingID='0001'");
+
+    expect(resultRows({})).to.deep.equal([]);
+    expect(keyOf({})).to.equal(undefined);
+  });
+
+  it("Q2b: end to end against the demo's own sources -- what a CodeLens gets is what tools/adt-facade.mjs answers", () => {
+    const readSource = (name) => readFileSync(`src/demo/${name.toLowerCase()}.clas.abap`, "utf8");
+    const registrations = [{dpc: "ZCL_ZSTG_DEMO_DPC_EXT", mpc: "ZCL_ZSTG_DEMO_MPC_EXT", external: "ZSTG_DEMO_SRV", service: "ZSTG_DEMO_SRV"}];
+    const map = entitySetMapFor("ZCL_ZSTG_DEMO_DPC_EXT", registrations, readSource);
+    expect(map.service).to.equal("ZSTG_DEMO_SRV");
+    const dpcSource = readSource("ZCL_ZSTG_DEMO_DPC_EXT");
+    const lenses = entitySetLenses(dpcSource, map);
+    expect(lenses.map((l) => l.title)).to.include("▶ Call TravelSet");
+    const travel = lenses.find((l) => l.kind === "get_entityset" && l.set === "TravelSet");
+    expect(dpcSource.split(/\r\n|\r|\n/)[travel.line - 1]).to.match(/METHOD travelset_get_entityset\.\s*$/i);
+    // and F8 with the cursor on that same line does the same as the lens
+    const entitySet = {service: map.service, set: travel.set, entityKind: travel.kind};
+    expect(runActionFor({type: "CLAS", name: "ZCL_ZSTG_DEMO_DPC_EXT"}, {hasUnitTests: false, entitySet}))
+      .to.deep.equal({kind: "call-entityset", service: "ZSTG_DEMO_SRV", set: "TravelSet", entityKind: "get_entityset"});
   });
 });

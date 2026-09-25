@@ -32,6 +32,9 @@ import {hashOf, liveHash} from "./osd-build.mjs";
 import {ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
+import {segwRegistrations} from "./segw-registry.mjs";
+import {contentFoldersOf} from "./osd-packs.mjs";
+import {entitySetMapFor} from "./segw-entityset-map.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -1245,6 +1248,36 @@ export function adtRouter(options = {}) {
         missing ? "ExceptionResourceNotFound" : "ExceptionTestRunFailed",
         error.message ?? String(error));
     }
+  });
+
+  // Q2b "Runner" (docs/vscode-extension.md): which service and entity set a
+  // SEGW _DPC_EXT class's own `<set>_get_entityset` / `<set>_get_entity`
+  // methods answer for, so a CodeLens can call one without the extension
+  // guessing at file names. Read fresh off the tree every call, the way the
+  // registry itself is built (tools/segw-registry.mjs, tools/osd-status.mjs
+  // servicesOf): a class not registered as a service's DPC, or whose model
+  // has no MPC, is 404 rather than a guess.
+  router.get(`${BASE}/core/http/segw/entitysets`, (req, res) => {
+    const name = String(req.query.class ?? "").toUpperCase();
+    if (name === "") {
+      refuse(res, 400, "ExceptionInvalidRequest", "class is required");
+      return;
+    }
+    const folders = [...contentFoldersOf(store.root), "gen"].map((f) => join(store.root, f));
+    const registrations = segwRegistrations(folders);
+    const readSource = (className) => {
+      try {
+        return store.read("CLAS", className).source;
+      } catch {
+        return undefined;
+      }
+    };
+    const map = entitySetMapFor(name, registrations, readSource);
+    if (map === undefined) {
+      refuse(res, 404, "ExceptionResourceNotFound", `${name} is not a registered service's _DPC_EXT with a known MPC`);
+      return;
+    }
+    res.type("application/json; charset=utf-8").send(JSON.stringify(map));
   });
 
   // Ending a session. There is nothing to end — the session is a cookie and a

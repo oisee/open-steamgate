@@ -446,6 +446,21 @@ describe("tools/adt-facade: the development loop", () => {
       expect(tree.methods.map((item) => item.name)).to.include("PROPERTIES_IN_FILE_ORDER");
     });
 
+    it("Q2b: names the service and entity sets of a SEGW _DPC_EXT class", async () => {
+      const res = await call("/core/http/segw/entitysets?class=ZCL_ZSTG_DEMO_DPC_EXT");
+      expect(res.status).to.equal(200);
+      const found = await res.json();
+      expect(found).to.include({class: "ZCL_ZSTG_DEMO_DPC_EXT", service: "ZSTG_DEMO_SRV", mpc: "ZCL_ZSTG_DEMO_MPC_EXT"});
+      expect(found.sets).to.deep.include({method: "TRAVELSET_GET_ENTITYSET", kind: "get_entityset", set: "TravelSet"});
+      expect(found.sets).to.deep.include({method: "TRAVELSET_GET_ENTITY", kind: "get_entity", set: "TravelSet"});
+      expect(found.sets.map((s) => s.set)).to.include.members(["TravelSet", "BookingSet", "PhotoSet", "StatusVHSet"]);
+    });
+
+    it("Q2b: 404s a class the registry does not know as a service's DPC", async () => {
+      const res = await call("/core/http/segw/entitysets?class=ZCL_OSD_SCRATCH");
+      expect(res.status).to.equal(404);
+    });
+
     it("runs one selected method through the Workbench endpoint", async function () {
       this.timeout(180000);
       const res = await call("/core/http/unit/object/run?type=CLAS%2FOC&name=ZCL_STG_SEGW_TEST" +
