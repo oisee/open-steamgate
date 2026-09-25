@@ -9,8 +9,9 @@
 //   node tools/amdp-tablefunc.mjs [--check]
 import {readFileSync, readdirSync, existsSync} from "node:fs";
 import {basename,join} from "node:path";
-import {createRequire} from "node:module";
-const require = createRequire(import.meta.url);
+// a static import, so a compiled binary carries it: createRequire off
+// import.meta.url resolves nothing inside one (CLAUDE.md, "The binary")
+import * as abaplintCore from "@abaplint/core";
 
 /** abap.<type> as a CDS `returns` list writes it -> the HANA column type */
 export function cdsType(text) {
@@ -37,7 +38,7 @@ export function cdsType(text) {
 
 /** every `define table function` under the folders */
 export function tableFunctions(folders) {
-  const abaplint = require("@abaplint/core");
+  const abaplint = abaplintCore;
   const found = [];
   const walk = (dir) => {
     if (!existsSync(dir)) return;

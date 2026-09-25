@@ -13,6 +13,7 @@
 // it is asked to. Started by hand it works too, which is how it is
 // debugged: `node tools/osd-serve.mjs 3099`.
 import {dialogStep, exclusive} from "./osd-dialog-step.mjs";
+import {HotLoader, warmVerdict} from "./osd-hot.mjs";
 import {ensureDemoData} from "./osd-demo-data.mjs";
 import {databaseDescriptor} from "./osd-database-identity.mjs";
 import express from "express";
@@ -86,8 +87,16 @@ app.set("etag", false);
 app.use(express.raw({type: "*/*", limit: "16mb"}));
 // every answer says which code produced it: the generation the supervisor
 // named when it started this process (the live build's hash)
+// -- or, after a warm swap (tools/osd-hot.mjs), the generation the swap
+// brought in, marked while nobody has compared it with a cold build
+const hot = new HotLoader(root);
+let generation = process.env.OSD_GENERATION ?? "0";
+// a process recycled onto a warm generation nobody has compared yet says so
+// as well (tools/osd-warm.mjs, the note beside the generation)
+let unverified = warmVerdict(join(root, "build", "by-input", generation)) === false;
+const generationLabel = () => (unverified ? `${generation} warm-unverified` : generation);
 app.use((req, res, next) => {
-  res.set("X-OSD-Generation", process.env.OSD_GENERATION ?? "0");
+  res.set("X-OSD-Generation", generationLabel());
   next();
 });
 serveSandboxConfig(app);
@@ -107,7 +116,9 @@ hostNodes.serving = (a, node) => a.get(node.path, function (req, res) {
     ready: true,
     pid: process.pid,
     since: started,
-    generation: process.env.OSD_GENERATION ?? "0",
+    generation: generationLabel(),
+    // the swaps this process took instead of being replaced
+    hot: {swaps: hot.swaps, since: hot.since, unverified},
     root,
     // the connection's own path, not the environment's guess about it
     database: globalThis.abap?.context?.databaseConnections?.DEFAULT?.path ?? process.env.STG_DB_PATH ?? ":memory:",
@@ -249,6 +260,31 @@ const server = app.listen(wanted, "127.0.0.1", () => {
 // and exit. The database writes itself on the way out (tools/osd-persist.mjs
 // registered that when the runtime booted), which is why an exit is allowed
 // to be the thing that saves.
+// a warm build's modules, loaded between two dialog steps: under the work
+// process, so no step sees half a swap
+process.on("message", (message) => {
+  if (message?.type === "verified" && message.generation === generation) {
+    unverified = false;
+    return;
+  }
+  if (message?.type !== "hot") {
+    return;
+  }
+  exclusive(async () => {
+    const done = await hot.swap(message);
+    // the gateway keeps each service's model, built from its MPC, for the
+    // life of the process; a swapped MPC is read again at the next request
+    await globalThis.abap.Classes["ZCL_STG_MODEL_INFO"]?.clear?.();
+    return done;
+  }, "a warm swap").then((done) => {
+    generation = message.generation;
+    unverified = message.verified !== true;
+    process.send?.({type: "hot-done", id: message.id, ok: true, ...done, heap: process.memoryUsage().heapUsed});
+  }, (error) => {
+    process.send?.({type: "hot-done", id: message.id, ok: false, error: String(error?.stack ?? error)});
+  });
+});
+
 process.on("message", (message) => {
   if (message?.type !== "quiesce") {
     return;

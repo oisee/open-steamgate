@@ -12,7 +12,7 @@
 // registry, because a class that compiles alone can still break the system
 // it is part of. The check returns the same shape for a write and for an
 // activation, since the façade reports both the same way.
-import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {parseDDLS, viewFieldsOf} from "./cds2ddic.mjs";
 import {entityOf} from "./ddls-entity.mjs";
@@ -25,6 +25,17 @@ import {Data} from "./osd-data.mjs";
 import {ServingRuntime} from "./osd-runtime.mjs";
 import {RuntimePool} from "./osd-pool.mjs";
 import {runsAs} from "./osd-main.mjs";
+
+// a process that has taken this many warm swaps, or has been quiet this long
+// after one, is replaced by one started on the live generation: every swap
+// leaves its old module instances in the module map, and the start-up's own
+// work (the init script's rows) is only done by a start
+const WARM_SWAPS = Number(process.env.OSD_WARM_SWAPS ?? 25);
+const WARM_QUIET_MS = Number(process.env.OSD_WARM_QUIET_MS ?? 60000);
+// ... or whose heap has grown this much since its first swap
+const WARM_HEAP_MB = Number(process.env.OSD_WARM_HEAP_MB ?? 512);
+// how long after a cold build the registry waits before it is primed again
+const WARM_REPRIME_MS = Number(process.env.OSD_WARM_REPRIME_MS ?? 5000);
 
 // abapGit writes /DEMO/ZREPORT as #demo#zreport; ADT hands us the name
 // with its slashes, URL-encoded, and the façade decodes before it gets here
@@ -929,14 +940,158 @@ export class ObjectStore {
     if (runtime === undefined || runtime.running === false) {
       return {ok: true, transpile, recycled: false};
     }
+    // a warm build is loaded into the process that serves, not a new one
+    // (tools/osd-hot.mjs); when that cannot be done, the recycle below does
+    if (transpile.warm === true && (transpile.hostHeld ?? []).length === 0) {
+      if (transpile.modules.length === 0 && transpile.hash === runtime.generation) {
+        return {ok: true, transpile, recycled: false, hot: false, generation: transpile.hash};
+      }
+      try {
+        const swap = await runtime.hot({generation: transpile.hash, from: transpile.from,
+          modules: transpile.modules, verified: transpile.unverified !== true});
+        this.#afterSwap(transpile.hash, swap);
+        return {ok: true, transpile, recycled: false, hot: true, generation: transpile.hash, ms: swap.ms, swaps: swap.swaps};
+      } catch (error) {
+        console.log(`warm: the swap was refused, recycling instead: ${error.message}`);
+      }
+    }
+    if (transpile.warm === true && (transpile.hostHeld ?? []).length > 0) {
+      console.log(`warm: ${transpile.hostHeld.join(", ")} is held by the serving process itself, recycling instead of swapping`);
+    }
     try {
       const recycle = await runtime.recycle();
+      this.#cleanHot();
+      if (this.warmState !== undefined) this.warmState.heapBase = undefined;
       return {ok: true, transpile, recycled: true, generation: recycle.generation, ms: recycle.ms};
     } catch (error) {
       // the modules are good and the process that should carry them is not:
       // that is a failure of the activation, not a detail to log quietly
       return {ok: false, transpile, recycled: false, error: error.message};
     }
+  }
+
+  // ---- the warm compile (tools/osd-warm.mjs, docs/warm-compile.md) --------
+  //
+  // On with OSD_WARM=1. The registry is primed in the background after a
+  // cold build, and a save it may build (a content edit of a class or an
+  // interface) becomes a build of the objects it reaches and a swap in the
+  // serving process. Anything else is the cold build, and after it the
+  // registry is primed again.
+
+  warm() {
+    if (this.warmState === undefined) {
+      const on = (process.env.OSD_WARM ?? "") === "1";
+      this.warmState = {on, compiler: undefined, priming: undefined, reason: on ? "not primed yet" : "OSD_WARM is not 1",
+        verifying: undefined, next: undefined, last: undefined, timer: undefined};
+    }
+    return this.warmState;
+  }
+
+  // prime in the background; a failure leaves every build cold and says why
+  warmUp() {
+    const w = this.warm();
+    if (w.on !== true) return undefined;
+    if (w.priming !== undefined) return w.priming;
+    w.priming = (async () => {
+      const {WarmCompiler} = await import("./osd-warm.mjs");
+      w.compiler ??= new WarmCompiler({root: this.root, log: (m) => console.log(m)});
+      try {
+        const r = await w.compiler.prime();
+        w.reason = undefined;
+        return r;
+      } catch (error) {
+        w.reason = error.message;
+        console.log(`warm: builds stay cold: ${error.message}`);
+        return undefined;
+      } finally {
+        w.priming = undefined;
+      }
+    })();
+    return w.priming;
+  }
+
+  // after a swap: compare the generation with a cold transpile of the same
+  // inputs, and once the process has been swapped into for long enough,
+  // replace it with one started on the live generation
+  #afterSwap(hash, swap = {}) {
+    const w = this.warm();
+    w.heapBase ??= swap.heap;
+    const grown = (swap.heap ?? 0) - (w.heapBase ?? 0);
+    if (w.compiler?.unverified.has(hash)) {
+      w.next = hash;
+      this.#verifyNext();
+    }
+    const runtime = this.served;
+    clearTimeout(w.timer);
+    if ((runtime?.swaps ?? 0) >= WARM_SWAPS) {
+      this.#catchUp("the swap limit");
+    } else if (grown > WARM_HEAP_MB * 1024 * 1024) {
+      this.#catchUp(`a heap ${Math.round(grown / 1048576)} MB larger than at the first swap`);
+    } else {
+      w.timer = setTimeout(() => {
+        // the live generation is compared once the saves have stopped, if
+        // the comparison of it was cut short by the next save
+        const live = this.served?.generation;
+        if (live !== undefined && w.compiler?.unverified.has(live)) {
+          w.next = live;
+          this.#verifyNext();
+        }
+        this.#catchUp("quiet");
+      }, WARM_QUIET_MS);
+      w.timer.unref?.();
+    }
+  }
+
+  #verifyNext() {
+    const w = this.warm();
+    if (w.verifying !== undefined || w.next === undefined) return;
+    const hash = w.next;
+    w.next = undefined;
+    w.verifying = w.compiler.verify(hash).then(async (result) => {
+      w.last = {hash, ...result, at: new Date().toISOString()};
+      if (result.verdict === "same") {
+        console.log(`warm: ${hash} verified against a cold transpile (${result.files} files, ${result.ms} ms)`);
+        this.served?.verified?.(hash);
+      } else if (result.verdict === "differs") {
+        // the warm build and the cold one disagree: the cold one is the
+        // truth, so it replaces the generation and the process, and the
+        // registry is primed again from it
+        console.log(`warm: ${hash} DIFFERS from a cold transpile in ${result.count} files (${result.differing.slice(0, 5).join(", ")}); rebuilding cold`);
+        // the note beside it keeps the generation from ever being a cache
+        // hit, whatever the tree is by the time the cold build runs
+        try {
+          const side = join(this.root, "build", "by-input", `${hash}.warm.json`);
+          writeFileSync(side, JSON.stringify({...JSON.parse(readFileSync(side, "utf8")), verified: false, differs: result.differing}, null, 2));
+        } catch {
+          // no note: nothing a cold build would take as its own
+        }
+        w.compiler.drop();
+        await this.publish({force: true, replace: true});
+      } else {
+        console.log(`warm: ${hash} not verified: ${result.verdict} ${result.why ?? result.output ?? ""}`);
+      }
+    }).finally(() => {
+      w.verifying = undefined;
+      this.#verifyNext();
+    });
+  }
+
+  async #catchUp(why) {
+    const runtime = this.served;
+    if (runtime === undefined || runtime.running !== true || (runtime.swaps ?? 0) === 0) return;
+    try {
+      const r = await runtime.recycle();
+      this.#cleanHot();
+      this.warm().heapBase = undefined;
+      console.log(`warm: recycled after ${why} (${r.ms} ms)`);
+    } catch (error) {
+      console.log(`warm: the catch-up recycle failed: ${error.message}`);
+    }
+  }
+
+  // the swapped copies, once no process carries them
+  #cleanHot() {
+    rmSync(join(this.root, "build", "hot"), {recursive: true, force: true});
   }
 
   // the test run of an object (tools/osd-unit.mjs). It needs the parse and
@@ -1172,6 +1327,14 @@ export class ObjectStore {
       revision: broken.length === 0 ? this.#sourceRevision(type, name) : undefined};
   }
 
+  // what a warm build's check stands for (tools/osd-warm.mjs): the
+  // transpiler checks the objects a change reaches while it builds them, and
+  // refuses to build when one is broken, so the activation is the revision
+  // taken before that build -- completed only if it is still the one on disk
+  warmActivation(type, name) {
+    return {type, name, active: true, issues: [], dependents: [], warm: true, revision: this.#sourceRevision(type, name)};
+  }
+
   // Complete only the exact revision that passed the check. An editor may
   // save again while publish() awaits its build or runtime recycle.
   completeActivation(result) {
@@ -1199,19 +1362,55 @@ export class ObjectStore {
     if (this.building !== undefined && options.force !== true) {
       return this.building;
     }
+    // a forced build waits for the one in flight rather than running beside it
+    const before = options.force === true ? this.building : undefined;
     this.building = (async () => {
+      await before?.catch(() => undefined);
       const started = Date.now();
+      const w = this.warm();
+      if (w.on === true && options.force !== true) {
+        await w.priming;
+        if (w.compiler?.primed === true) {
+          try {
+            const r = await w.compiler.build();
+            return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, warm: true,
+              modules: r.modules, hostHeld: r.hostHeld, from: r.from, stale: r.stale, steps: r.steps,
+              unverified: w.compiler.unverified.has(r.hash)};
+          } catch (error) {
+            if (error.code !== "NOT_WARM") {
+              // `check`: the transpiler refused the change; anything else
+              // (BUSY, a disk that failed) is a build that did not happen
+              return {ok: false, ms: Date.now() - started, objects: 0, warm: true, check: error.check === true,
+                output: String(error.output || error.message).slice(-2000), error: error.message};
+            }
+            w.reason = error.message;
+            w.compiler.drop();
+            console.log(`warm: a cold build: ${error.message}`);
+          }
+        }
+      }
       try {
         const {build} = await import("./osd-build.mjs");
-        const r = await build({root: this.root, force: options.force === true});
+        const r = await build({root: this.root, force: options.force === true, replace: options.replace === true});
         return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached};
       } catch (error) {
         return {ok: false, ms: Date.now() - started, objects: 0, output: String(error.output || error.message).slice(-2000), error: error.message};
       } finally {
-        this.building = undefined;
+        // a cold build is a new start for the warm registry, primed once the
+        // saves have stopped for a while: the prime holds this process for
+        // its 8-9 s, and a burst of cold saves would pay it each time
+        if (w.on === true && w.compiler?.primed !== true) {
+          clearTimeout(w.reprime);
+          w.reprime = setTimeout(() => this.warmUp(), WARM_REPRIME_MS);
+          w.reprime.unref?.();
+        }
       }
     })();
-    return this.building;
+    const building = this.building;
+    building.finally(() => {
+      if (this.building === building) this.building = undefined;
+    });
+    return building;
   }
 }
 

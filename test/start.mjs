@@ -359,6 +359,12 @@ export function startServer(quiet) {
     if (process.env.STG_DEV === "1") {
       devLoop({store: facade.store});
     }
+    // OSD_WARM=1: the registry is kept, and a save of a class or an
+    // interface is built and swapped in without a new process
+    // (tools/osd-warm.mjs); primed once the runtime is up
+    if (process.env.OSD_WARM === "1") {
+      runtime.start().then(() => facade.store.warmUp(), () => undefined);
+    }
     // the system comes up with the listener, not at the first request: the
     // app is there when you look, the registry names it, and the build
     // endpoint has a serving generation to compare with from the start

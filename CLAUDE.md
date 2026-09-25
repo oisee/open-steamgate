@@ -548,6 +548,18 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   answers a service this registry lacks out of a destination on this origin,
   carrying the CSRF token **with** its session cookie, which is the pair a
   write needs.
+- **`OSD_WARM=1`: a save of a class reaches the running system in ~0.46 s**
+  instead of ~18 s (`docs/warm-compile.md`, 2026-09-25). `tools/osd-warm.mjs`
+  keeps the abaplint registry, builds the objects a content edit reaches
+  (`only`) into an ordinary generation of hard links, and `tools/osd-hot.mjs`
+  loads the rebuilt modules into the serving process under the work-process
+  lock instead of recycling it. Warm only for content edits of an existing
+  class or interface that no generator reads (no AMDP, same `INTERFACES`
+  lines); everything else is the cold build. A child compares each warm
+  generation with a cold transpile (`warm-unverified` in `X-OSD-Generation`
+  until it has), and the process is recycled after 25 swaps, 512 MB of heap
+  or a quiet minute. Needs abaplint/transpiler#1899, #1900 and #1921; with
+  the pinned transpiler the probe says which is missing and it stays cold.
 - Never put real `_DPC_EXT` sources or captures under a tracked path; use
   `.local/`.
 - **Decode before you scan.** `npm run leak` (`tools/osd-leak-scan.mjs`, hook in

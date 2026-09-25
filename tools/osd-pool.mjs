@@ -58,6 +58,11 @@ export class RuntimePool {
     return this.primary.running;
   }
 
+  // the most any work process has taken: the catch-up recycle replaces them all
+  get swaps() {
+    return Math.max(0, ...this.runtimes.map((r) => r.swaps ?? 0));
+  }
+
   get generation() {
     return this.primary.generation;
   }
@@ -104,6 +109,20 @@ export class RuntimePool {
       done.push(await runtime.recycle());
     }
     return done[0];
+  }
+
+  // every work process takes the same swap; one that cannot fails the lot,
+  // and the caller recycles them all
+  async hot(swap) {
+    const done = [];
+    for (const runtime of this.runtimes) {
+      done.push(await runtime.hot(swap));
+    }
+    return done[0];
+  }
+
+  verified(generation) {
+    for (const runtime of this.runtimes) runtime.verified(generation);
   }
 
   async stop() {
