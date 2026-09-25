@@ -19,3 +19,6 @@ go/zork
 go/gateway
 go/httpc
 go/scenewasm
+go/cmd/osgosplit/
+go/cmd/osgoscc/
+splitproto/objects.json

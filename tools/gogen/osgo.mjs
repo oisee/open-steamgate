@@ -19,6 +19,9 @@ import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
 
 const here = import.meta.dirname;
+// phase times (the go build floor measurement): one line per phase, since start
+const tStart = performance.now();
+const phase = (name) => console.log(`phase ${name} ${Math.round(performance.now() - tStart)} ms`);
 const echo = process.argv.includes("--echo");
 const dir = join(here, "go", "cmd", "osgo");
 const out = join(here, ".out", echo ? "osgo-echo" : "osgo");
@@ -50,7 +53,9 @@ if (echo) {
     process.exit(2);
   }
   if (stale) console.warn(`osgo: WARNING ${stale}`);
+  phase("stale-check");
   const built = compileOsg();
+  phase("front-end");
   program = built.program;
   console.log(built.summary);
   const db = await osgDatabase(program);
@@ -107,7 +112,9 @@ if (echo) {
   webapps = webappsOf(home).map((p) => ({path: `/app/${p.name}`, dir: p.dir}));
 }
 
+phase("database+media+icf+store");
 const go = emitGo(program);
+phase("emit");
 writeFileSync(join(dir, "zz_generated.go"), go);
 writeFileSync(join(dir, "zz_db.json"), JSON.stringify(statements));
 writeFileSync(join(dir, "zz_store.json"), store);
@@ -213,7 +220,9 @@ var packWebapps = map[string]string{
 ${webapps.map((w) => `\t${JSON.stringify(w.path)}: ${JSON.stringify(w.dir)},`).join("\n")}
 }
 `);
+phase("write");
 try { execFileSync("gofmt", ["-w", dir], {stdio: ["ignore", "pipe", "pipe"]}); } catch (e) { console.log(`gofmt: ${String(e.stderr).split("\n").slice(0, 10).join("\n")}`); process.exit(1); }
+phase("gofmt");
 const t1 = performance.now();
 try {
   execFileSync("go", ["build", "-o", out, "./cmd/osgo"], {cwd: join(here, "go"), stdio: ["ignore", "pipe", "pipe"], env: {...process.env, GOPROXY: "off"}});

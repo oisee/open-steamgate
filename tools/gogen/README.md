@@ -1404,3 +1404,245 @@ reference reused): `--fast` **99.3 %** (134/135) in 10.7 s, full `--e2e`
 (cut from every host by Alice; passes once that PR lands) and the editor's
 colouring (ZCL_OSD_ABAP_TOKENS). The one dump OSGo logs, CX_SY_CONVERSION_NO_NUMBER
 in a `$batch` of mocha.mjs, is the test's own `Seats = "abc"`.
+
+## Incremental rebuild: the go build floor (spike/go-build-floor, 2026-09-25)
+
+The question was how fast one edited Z class can become a running OSGo
+binary if everything else is prebuilt and cached. The path under test is
+"Z edit → emit Go for the affected classes only → go build" (G2). The
+alternative is interpreting the IR of the changed classes.
+
+**Setup.** 8-core AMD Ryzen AI 7 PRO 350 laptop (WSL2, 23 GB), Go 1.26.0,
+Node 26.9. The machine was shared: load average 1.4–5.5 while measuring,
+heavy runs under `flock /tmp/claude-1000/osg-heavy.lock`. Every go build
+number below is `/usr/bin/time` wall, the median of 5 runs. Each run
+changes the file anew, so the build cache never answers. The split between
+compile and link comes from `go build -debug-trace`.
+
+The main checkout's HEAD (03f0fa0, #88) did not transpile: `CL_CTMENU` line
+94, "type not found: #", in open-abap-gui. So the program is the live
+generation 3905b9bb, built with `--stale-gen`. It has 755 classes, and
+`zz_generated.go` is 10.7 MB in 172 977 lines. `osgo.mjs` and
+`compileProgram` now print their phase times.
+
+### 1. Today: one `main` package
+
+| step | s |
+| --- | ---: |
+| full `node osgo.mjs` (front end 5.9, database/media/ICF/store 0.3, emit 0.35, write 0.2, gofmt 0.6, go build 9.5–12.0) | **17.3–17.6** |
+| `go build`, nothing changed | 0.17 |
+| relink only (the binary removed, everything cached) | 0.85 |
+| relink with `-ldflags=-s -w` | 0.65 |
+| one Z method body edited (a literal in `ZCL_OSD_SYSINFO_ESC`) | **9.33** (compile 8.37, link 0.68) |
+| the same, with `-gcflags=<pkg>=-N -l` | 7.40 (compile 6.5) |
+| the same, with `-ldflags=-s -w` | 9.07 (link 0.43) |
+| the same, with `-gcflags=<pkg>=-c=8` | no gain (9.2–13, under load) |
+
+The binary is 40.2 MB, or 32.4 MB with `-s -w`. With one package, any edit
+recompiles all 10.7 MB. Turning optimisation off saves about a fifth. The
+time goes to the compiler's serial front end (parse, typecheck, IR), and no
+flag makes that parallel.
+
+### 2. The package split, prototyped
+
+`splitproto/` (its own module, `golang.org/x/tools/go/packages`) works on
+the generated code after the fact:
+
+```
+cd tools/gogen/splitproto
+node objects.mjs > objects.json        # ABAP objects by origin: libs (.local/lars, abapGit filtered) vs the tree
+go run . -go ../go -pkg ./cmd/osgo -out ../go/cmd/osgosplit -objects objects.json [-leaf ZCL_X]
+go run . -go ../go -pkg ./cmd/osgo -out ../go/cmd/osgoscc -modpath osg/gogen/cmd/osgoscc -scc -objects objects.json
+node emitcost.mjs [OBJECT]             # front end + emit for closures of 1, 10, N classes
+```
+
+It type-checks the package and gives every declaration an owner: the
+`//line` file of a function, otherwise the longest object name its Go name
+starts with. Declarations owned by a library go into `std`, and those owned
+by the tree go into `z`. A declaration without an owner goes into `z` when
+its name is Z/Y, otherwise into `std`. Any `std` declaration that
+references a `z` one moves to `z`, until nothing changes. Then:
+
+- **Export.** Every unexported package-level name, struct field and method
+  of the generated code is renamed with an `X` prefix: 7 484 objects,
+  renamed through `go/types` identity in the generated file and in
+  `main.go`, `status.go` and `zz_boot.go`.
+- **Imports.** The packages dot-import each other, so no reference needs a
+  qualifier.
+
+The split binaries boot and answer. OData (`ZSTG_DEMO_SRV`, `ZSTG_SADL_SRV`
+`$metadata`, `ZSTG_SEGW_SRV`), sysinfo and the webgui give the same bytes
+as the monolith; the only difference is the pid in the webgui title. So
+init order across the packages (`std` inits before `z`, and
+`abap.RegisterClass` per package) did not matter.
+
+| layout | edit | s | what compiled |
+| --- | --- | ---: | --- |
+| `std` 2.5 MB + `z` 7.3 MB + `main` | a Z method body | **6.43** | z 5.38, main 0.15, link 0.62 |
+| same | the same, `z` with `-N -l` | 5.12 | z 4.07 |
+| same | a method body in `std` (`CL_GUI_ALV_GRID`, 219 lines) | 8.8–9.1 | std 2.4, **z 5.3–5.7**, main, link |
+| + `zleaf` (only `ZCL_OSD_SYSINFO`, 9 KB) | `ZCL_OSD_SYSINFO` | **1.08** | zleaf 0.03, main 0.15, link 0.63 |
+| `std` + one package per SCC (609) + `main` | nothing changed | 0.25 | – |
+| same | relink only | 1.00 | – |
+| same | `ZCL_OSD_SYSINFO` (leaf, 8 KB) | **1.51** | 2 packages: leaf 0.03, main 0.21; link 0.72 |
+| same | the same, `-ldflags=-s -w` | **1.22** | link 0.48 |
+| same | `ZCL_STG_DISPATCHER` (SCC of 5 objects, 78 KB; 113 KB with its importers) | **1.56** | – |
+| same | `ZIF_STG_CDS_SOURCE` (110 importing SCCs, 3.4 MB) | **3.75** | 62 packages, 9.3 s CPU, largest 1.2 s; link 0.72 |
+| same | cold build of the 610 packages, `std` cached | 9.5 | 33.6 s CPU |
+
+The binary of the SCC split is 41.0 MB.
+
+**What the split shows.**
+
+- **`z` is the bigger half.** It is 7.3 MB against 2.5 MB for the
+  libraries, so `std`/`z` alone takes an edit from 9.3 s to 6.4 s. The
+  floor needs small packages.
+- **Go recompiles every importer of a changed package, whatever changed.**
+  A body-only edit in a large, non-inlinable `std` method recompiled all of
+  `z`. The compile action ID hashes each dependency's whole content ID, not
+  its export data, so a change ripples up the import graph. The cost of an
+  edit is the size of its package plus the sizes of everything that imports
+  it.
+- **Most SCCs are small.** The z side has 707 nodes in 609 SCCs. The
+  largest are:
+
+  | SCC | size |
+  | --- | ---: |
+  | `ZCL_STG_CDS_REGISTRY` with its clones (8 objects) | 832 KB |
+  | `ZCL_ZSTG_SEGW_MPC` | 760 KB |
+  | `ZCL_ZSTG_SEGW_DPC` | 582 KB |
+  | `CL_OAUTH2_CLIENT` | 510 KB |
+  | `ZCL_STG_SEGW_GEN*` (28 objects) | 295 KB |
+
+- **Most edits recompile little.** The table gives how much Go an edit to
+  each of 357 objects recompiles: its SCC plus every importer. 172 objects
+  are leaves under 200 KB.
+
+  | percentile | recompiled |
+  | --- | ---: |
+  | p10 | 2 KB |
+  | p50 | 26 KB |
+  | p75 | 80 KB |
+  | p90 | 571 KB |
+  | max | 4.3 MB |
+
+- **The floor is about 1 s** whatever the edit: go's own overhead with 610
+  packages is 0.25 s, `main` recompiles in 0.2 s (it imports everything),
+  and the link takes 0.5–0.7 s. `-N -l` does not matter at this size, since
+  a leaf package compiles in 0.03 s.
+
+### 3. Front end and emit per closure
+
+`splitproto/emitcost.mjs` runs `compileProgram` + `emitGo` for the reader
+closure of `ZIF_STG_CDS_SOURCE`, found by name: 147 objects. It uses a
+prefix of 10 of them, `ZCL_OSD_SYSINFO` alone, and the whole program, 3
+runs each. Each run loads and parses the registry again, the way `osgo.mjs`
+does.
+
+| closure | parse | check | compile | emit | Go written |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 class | 2.85 | 1.20 | 0.03 | 0.02 | 775 KB |
+| 10 (8 compiled) | 2.55 | 0.87 | 0.09 | 0.03 | 1019 KB |
+| 147 (145 compiled) | 2.60 | 0.85 | 0.45 | 0.10 | 3912 KB |
+| whole (745) | 2.85 | 0.77 | 1.45 | 0.29 | 9481 KB |
+
+**The fixed part dominates.** Registry parse plus the whole-registry check
+cost 3.4–4 s whatever is compiled. G2 therefore needs a front end that
+stays up: it keeps the registry, reparses the changed file and checks only
+that file and its readers. osg-i7's numbers for that are 0.17 s for a leaf
+and 1.27 s for an interface with 141 readers. `emitGo` also writes 775 KB
+for a single class: the derived tables (RTTI, table registry, DDIC and
+shared types) are emitted whatever the program is.
+
+### 4. Boot
+
+Time from spawn to the first 200 of `/sap/bc/osd/sysinfo`, median of 5:
+
+| database | `OSD_DEMO_ROWS=0` | default (20 000 demo rows) |
+| --- | ---: | ---: |
+| in memory | 242 ms | 812 ms |
+| `-db` file, already seeded | 194 ms | 558 ms |
+
+The demo rows are written again at every boot. A swap after a code-only
+change should not do that: tables and seed are unchanged, so the file keeps
+its mark and is reused.
+
+### 5. One Z class edited: the estimate
+
+The estimate assumes a front end that stays up, one package per SCC,
+`-ldflags=-s -w`, and emit plus gofmt of only the changed packages.
+
+| edit | front end | emit | go build | binary ready | + boot and switch |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| leaf / median object | 0.17 | ~0.02 | 1.22 | **≈ 1.4 s** | **≈ 1.65 s** |
+| mid (`ZCL_STG_DISPATCHER`) | ~0.2 | ~0.03 | 1.3 (1.56 − link saving) | ≈ 1.55 s | ≈ 1.8 s |
+| interface with ~141 readers (`ZIF_STG_CDS_SOURCE`) | 1.27 | ~0.1 | 3.5 | **≈ 4.9 s** | **≈ 5.1 s** |
+| a library (`std`) object | – | – | full `std` + all of the tree | ≈ 10 s+ | – |
+| today, monolith, `osgo.mjs` | 5.9 | 0.35 | 9.3–9.8 | **17.3–17.6 s** | – |
+
+A front end that is not kept up adds 3.5–4 s to every row. The switch
+figure assumes the new binary takes over the port once it answers, with
+`SO_REUSEPORT` or a front that switches: about 0.2–0.25 s of boot without
+demo rows. The drain was not measured.
+
+**Verdict.**
+
+- **G2 is viable at ≤ 2 s for the typical edit.** That covers leaf classes,
+  handlers, DPC_EXTs and the p50–p75 of objects. It needs three things: one
+  Go package per SCC, a front end that stays up, and emit that writes only
+  the changed packages.
+- **It is ≤ 5 s for the widely-read interfaces.**
+- **It is not ≤ 2 s for a hub** (an interface, base class or SCC that many
+  packages import), nor for any library edit.
+- **Nothing gets an edit below about 1 s with `go build`.** The go
+  overhead, `main` and the link add up to about 1 s for any edit. Anything
+  interactive under that, a keystroke-level loop, needs the other path:
+  interpret the IR of the changed class inside the running binary.
+
+### What a real split costs in `emit-go.mjs`
+
+1. **A package per SCC.** The object graph is osg-i7's `inputs.reads`; a
+   cycle between ABAP classes forces them into one package. Package names
+   must be stable, derived from the SCC's objects and not from an index.
+2. **Everything exported.** That covers struct fields (ABAP component
+   names are lower-case Go fields), the `tn_`/`td_`/`clone_N` helpers, and
+   the namespaced names `_IWBEP_...` (a leading `_` is unexported). The
+   runtime's `reflect` use is only by type and for nil checks (`raise.go`,
+   `events.go`, `seckey.go`), so renaming fields is safe. `main.go` and
+   `zz_boot.go` follow the renames (`IHTTPNVP{name, value}`).
+3. **Stable names for shared helpers.** `clone_N`, `tn_N` and `td_N` are
+   numbered program-wide. One added class renumbers them, which changes
+   `std` and costs a full rebuild. They must be keyed by the type they
+   serve and emitted in the package that owns that type.
+4. **Anonymous structure types named by structure, not by first user.**
+   The emitter reuses the name of the first class that spelled a structure,
+   so `/IWBEP/` exception constants have the type
+   `ZCL_STG_SADL_DPC__S_MSGID_MSGNO_ATTR1_...`. Other cases:
+   `ZIF_AJSON_TYPES=>NODE_TYPE` has a type named after `ZCL_OSG_JSON_MATCHER`,
+   and `ZIF_ABAPGIT_*` constants have types named after `ZCL_OSD_GIT` and
+   `ZCL_OSD_SAPEVENT`. In the prototype this pulled all of `/IWBEP/`
+   exceptions, `ZCL_OAO_*` and the abapGit HTML classes into `z`, 318
+   declarations in all.
+5. **Program-wide tables.** `Call`, the switch over every static method with
+   numeric arguments, must be registered per package in `init`, the way
+   `RegisterClass` already is. The same goes for the derived tables emitted
+   whatever the program: RTTI, table registry, supers, interface methods.
+6. **`main` kept small.** `main` imports every package, so it recompiles on
+   every edit (0.15–0.2 s). With `main.go` moved into a host package,
+   `main` would be a blank-import stub. Not measured.
+
+### What cannot be split
+
+- **Cycles.** An SCC is one package, and an edit to any class in it
+  recompiles all of it: `ZCL_STG_CDS_REGISTRY` (832 KB) or the SEGW
+  generator (28 objects).
+- **The ripple.** Go has no early cut-off, so editing a hub recompiles all
+  its importers. An interface with 141 readers is 62 packages and 3.4 MB.
+  Only a header/body split would stop it: signatures in one package, bodies
+  reached through registered function values, at the price of an indirect
+  call. Not tried.
+- **Library objects that call the tree.** `ZCL_ABAPGIT_PROGRESS` is a tree
+  stub read by abapGit's git-pack classes; the `CL_SADL_GW_*` classes are
+  the tree's implementations of SAP names; the tree's function groups sit
+  in the kernel's dispatch. They stay on the z side, and their library
+  callers go with them.

@@ -105,8 +105,12 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
       else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push(readFileSync(path, "utf8"));
     }
   };
+  // phase times (the go build floor): load, parse, check, compile
+  const timing = {start: performance.now()};
   for (const folder of folders) walk(folder);
+  timing.load = performance.now();
   reg.parse();
+  timing.parse = performance.now();
   REG = reg;
   const ours = (fn) => wanted.includes(objName(fn));
   const errors = reg.findIssues().filter((i) => (i.getKey() === "check_syntax" || i.getKey() === "parser_error") && ours(i.getFilename()));
@@ -119,6 +123,8 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
 
   const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], wanted: new Set(wanted.map(upper)),
     interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
+  timing.check = performance.now();
+  program.timing = timing;
   program.supplied = suppliedParams(reg, program.wanted);
   PROGRAM = program;
   const ctx0 = {reg, program};
@@ -182,6 +188,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   program.exceptionSupers = exceptionSupers(reg, program);
   program.cdsViews = cdsSqlViews(ddls);
   program.tables = tableRegistry(reg, program);
+  timing.compile = performance.now();
   return program;
 }
 
