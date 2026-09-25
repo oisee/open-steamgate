@@ -45,11 +45,12 @@ function walk(dir, hit = []) {
  *  object rather than in somebody's memory" -- and it already does, as soon
  *  as we stop inventing a field and use the thing SAP has had all along.
  *
- *  That matters for the two host routes nobody should ever deploy:
- *  `POST /segw/generate/:project` writes to a developer's file system and
- *  `GET /osd/not-served` reports what the facade could not answer. When they
- *  become nodes they go in a local package, and then "does not travel" is a
- *  property a system would agree with rather than a convention of ours. */
+ *  That matters for the host route nobody should ever deploy:
+ *  `GET /osd/not-served` reports what the facade could not answer. When it
+ *  becomes a node it goes in a local package, and then "does not travel" is
+ *  a property a system would agree with rather than a convention of ours.
+ *  (`POST /segw/generate/:project`, which wrote to a developer's file
+ *  system, was the other one; it was removed on 2026-09-25.) */
 export function packageOf(file, root = ".") {
   let at = resolve(dirname(file));
   const stop = resolve(root);

@@ -9,7 +9,6 @@ import {segwRegistrations} from "../tools/segw-registry.mjs";
 import {createServer as createHttpsServer} from "node:https";
 import {join} from "node:path";
 import {fileURLToPath} from "node:url";
-import {generateProject} from "../tools/segw-editor.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
@@ -147,18 +146,6 @@ export function startServer(quiet) {
   if (remote.length > 0) {
     console.log(`remote services (a destination answers these): ${remote.join(", ")}`);
   }
-
-  // the SEGW editor's dev-time seam (webapp/segw/): the files GenerateSet
-  // gives, written to gen/segw-editor/<project>/ (Generate, Import and
-  // Export are the service's; only the file system is Node's)
-  const self = "http://localhost:" + PORT;
-  hostNodes["segw-generate"] = (a, node) => a.post(`${node.path}/:project`, async function (req, res) {
-    try {
-      res.json(await generateProject(self, req.params.project));
-    } catch (e) {
-      res.status(500).type("text/plain").send(String(e?.message ?? e));
-    }
-  });
 
   // the ADT façade: /sap/bc/adt/** answered by OSD, the off-stack
   // doppelgänger. Node rather than ABAP, because it reads the file system

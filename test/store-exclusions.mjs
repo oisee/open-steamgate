@@ -7,12 +7,14 @@ import {ObjectStore, exclusionsOf} from "../tools/osd-store.mjs";
 //
 // CLAUDE.md says the `input_folder` list is the layer order "for the
 // transpiler, the builder and the object store alike". It says nothing about
-// the exclusions, and they were not alike: `gen/segw-editor/` is written by
-// the SEGW editor's "Save to gen/" button and left out of the build on
-// purpose, and the store indexed it anyway — so the ADT façade and the cross
-// reference described objects the system does not contain. On this tree,
-// which had been used, that was four classes (fable-osd found the symptom in
-// `test/osd-xref.mjs`, which named one of them).
+// the exclusions, and they were not alike: `gen/segw-editor/` (written by the
+// SEGW editor's "Save to gen/" button until that was removed, 2026-09-25) was
+// left out of the build on purpose, and the store indexed it anyway — so the
+// ADT façade and the cross reference described objects the system does not
+// contain. On this tree, which had been used, that was four classes
+// (fable-osd found the symptom in `test/osd-xref.mjs`, which named one of
+// them). The probe below now sits under `test/fixtures/`, the entry that is
+// left.
 //
 // **Three attempts at inferring which exclusions meant "not ours" were wrong
 // in three different directions**, which is why this reads a named list
@@ -25,7 +27,7 @@ import {ObjectStore, exclusionsOf} from "../tools/osd-store.mjs";
 // turns one question into the other. So it is stated in the config, and the
 // last test here keeps the two lists from drifting.
 describe("what the build leaves out, the store leaves out — and no more", () => {
-  const folder = join("gen", "segw-editor");
+  const folder = join("test", "fixtures", "store-exclusion-probe");
   const file = join(folder, "zcl_exclusion_probe.clas.abap");
   const xml = join(folder, "zcl_exclusion_probe.clas.xml");
   let made = false;

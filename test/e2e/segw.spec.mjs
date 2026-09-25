@@ -18,7 +18,7 @@ test("SEGW editor: the project tree, a property edited in place, Generate over t
   });
   const failed = [];
   page.on("response", (res) => {
-    if ((res.url().includes("/sap/opu/odata/sap/") || res.url().includes("/segw/generate")) && res.status() >= 400) {
+    if (res.url().includes("/sap/opu/odata/sap/") && res.status() >= 400) {
       failed.push(res.status() + " " + res.url());
     }
   });
@@ -119,8 +119,9 @@ test("SEGW editor: the project tree, a property edited in place, Generate over t
   expect(requests.some((r) => r.includes("POST FunctionGroupSet") && r.includes("LCL_OBJECT_FUGR"))).toBe(true);
 
   // Generate: GenerateSet of the service (segw-gen in ABAP) lists the
-  // files; a file opens as source; Save to gen/ lands them through the dev
-  // server, whose answer carries the same contents
+  // files; a file opens as source. The files stay in the service: there is
+  // no host route that writes them to disk (a system's SEGW generates into
+  // its own repository, and here the project reaches one as abapGit files)
   await page.getByRole("button", {name: "Generate"}).click();
   const generated = page.getByRole("dialog", {name: /Generated ZSTG_MAPPED/});
   await expect(generated).toContainText("zcl_zstg_mapped_mpc.clas.abap");
@@ -130,10 +131,11 @@ test("SEGW editor: the project tree, a property edited in place, Generate over t
   const source = page.getByRole("dialog", {name: "zcl_zstg_mapped_mpc.clas.abap"});
   await expect(source.getByRole("textbox")).toHaveValue(/iv_property_name = 'Price' iv_abap_fieldname = 'PRICE'/);
   await source.getByRole("button", {name: "Close"}).click();
-  await generated.getByRole("button", {name: "Save to gen/"}).click();
-  await expect(page.getByText(/\d+ files in gen\/segw-editor\/zstg_mapped/)).toBeVisible();
   await generated.getByRole("button", {name: "Close"}).click();
-  const gen = await (await page.request.post("/segw/generate/ZSTG_MAPPED")).json();
+  const rows = (await (await page.request.get(
+    "/sap/opu/odata/sap/ZSTG_SEGW_SRV/GenerateSet?$filter=" + encodeURIComponent("Project eq 'ZSTG_MAPPED'") + "&$format=json",
+    {headers: {accept: "application/json"}})).json()).d.results;
+  const gen = {files: Object.fromEntries(rows.map((row) => [row.Name, row.Content]))};
   expect(gen.files["zcl_zstg_mapped_mpc.clas.abap"]).toContain("iv_property_name = 'Price' iv_abap_fieldname = 'PRICE'");
   expect(gen.files["zcl_zstg_mapped_mpc.clas.abap"]).toContain("set_maxlength( iv_max_length = 12 )");
   // the nodes created from the folders are in the generated model too

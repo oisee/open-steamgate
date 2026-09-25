@@ -154,9 +154,9 @@ const packageWord = (s) => s.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
 // and what sits under local/ was imported, not written here.
 /** The exclusions that mean "this is not an object of this system".
  *
- *  The gap this closes: `gen/segw-editor/` is written by the SEGW editor's
- *  "Save to gen/" button and left out of the build on purpose, and the store
- *  indexed it anyway -- so the ADT façade and the cross reference described
+ *  The gap this closed: `gen/segw-editor/` (the SEGW editor's "Save to gen/"
+ *  button wrote it, until that was removed on 2026-09-25) was left out of
+ *  the build on purpose, and the store indexed it anyway -- so the ADT façade and the cross reference described
  *  objects the system does not contain. Measured on this tree, which had
  *  been used: four such classes (fable-osd found the symptom in
  *  `test/osd-xref.mjs`, which named one of them).

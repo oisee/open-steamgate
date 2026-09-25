@@ -682,15 +682,9 @@ sap.ui.define([
 
     // Generate is the service's: GET GenerateSet?$filter=Project eq 'P'
     // gives the classes as files (segw-gen in ABAP: zcl_stg_segw_gen); the
-    // dialog lists them, shows a source, and "Save to gen/" asks the local
-    // runtime (test/start.mjs) to write them to gen/segw-editor/<project>/,
-    // which the browser preview cannot (no Node behind the service worker).
-    // On a system this button is SEGW's own Generate.
-    serverBase() {
-      const model = this.getOwnerComponent().getModel();
-      return new URL(model.sServiceUrl, document.baseURI).href.replace(/\/sap\/opu\/odata\/sap\/.*$/, "");
-    },
-
+    // dialog lists them and shows a source. Nothing writes them to disk from
+    // here: the project reaches a system as an abapGit repository
+    // (RepoSet), and on a system this button is SEGW's own Generate.
     async onGenerate() {
       const model = this.getOwnerComponent().getModel();
       const project = this.project;
@@ -711,21 +705,6 @@ sap.ui.define([
         title: "Generated " + project + ": " + files.length + " files",
         contentWidth: "40rem",
         content: [list],
-        beginButton: new Button({
-          text: "Save to gen/", icon: "sap-icon://save", type: "Emphasized",
-          press: async () => {
-            try {
-              const res = await fetch(this.serverBase() + "/segw/generate/" + encodeURIComponent(project), {method: "POST"});
-              if (!res.ok) {
-                throw new Error(res.status === 404 ? "Saving needs the local runtime (npm start); the browser preview has no file system." : await res.text());
-              }
-              const result = await res.json();
-              MessageToast.show(Object.keys(result.files).length + " files in " + result.folder);
-            } catch (e) {
-              MessageBox.error(String(e.message || e));
-            }
-          },
-        }),
         endButton: new Button({text: "Close", press: () => dialog.close()}),
         afterClose: () => dialog.destroy(),
       });

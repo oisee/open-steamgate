@@ -97,8 +97,9 @@ no local annotation file.
 
 `http://localhost:3030/app/segw/` is SEGW as an application: the project tree
 in SEGW's own shape, every node edited in place, Create and Delete, Import of
-an `.iwpr.xml`, Export back out, and Generate. "Save to gen/" writes what
-Generate produced into `gen/segw-editor/`, which the next build picks up.
+an `.iwpr.xml`, Export back out, and Generate, which shows the classes the
+project generates. To take them further, export the project as an abapGit
+repository (`RepoSet`, or `npm run segw:tree repo <P> --out <dir>`).
 
 ### From an existing project
 

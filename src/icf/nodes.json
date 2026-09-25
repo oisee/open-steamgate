@@ -42,10 +42,6 @@
     "type": "HOST", "host": "test/start.mjs", "handler": "pack-tiles", "needs": "fs",
     "text": "tilesOf() reads every pack's manifest from disk for the launchpad"
   },
-  "/segw/generate": {
-    "type": "HOST", "host": "test/start.mjs", "handler": "segw-generate", "needs": "fs",
-    "text": "the SEGW editor's Save to gen/; writes a developer's file system, dev-only"
-  },
 
   "/sap/opu/odata/sap": {
     "type": "ABAP", "host": "test/start.mjs", "mount": "elsewhere",

@@ -91,8 +91,8 @@ describe("a CDS view is checked by the thing that has to read it", function () {
       .map((o) => ({name: o.name, issues: store.check("DDLS", o.name).issues}))
       .filter((one) => one.issues.length > 0)
       // ZDEMO_EDITOR is a FIXTURE under test/fixtures/, which the build
-      // excludes and the store indexes anyway -- the same shape as
-      // gen/segw-editor, one folder short of the rule that fixed it. Its
+      // excludes and the store indexes anyway -- the same shape as the
+      // gen/segw-editor folder had, one folder short of the rule that fixed it. Its
       // complaint is true of the object and false of the system.
       .filter((one) => one.name !== "ZDEMO_EDITOR");
     expect(noisy.map((one) => `${one.name}: ${one.issues[0].message}`)).to.deep.equal([]);
