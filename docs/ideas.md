@@ -12,22 +12,26 @@ reason given) · `fun` (for its own sake).
 
 Costs are estimates by the sessions that proposed them, not measurements.
 
+**Order agreed 2026-09-25:** Q1 → Q2 → Q3 → B0 → B1. The Q items are built
+against a server started by hand; B0 then carries the same extension with
+the system inside it.
+
 ## Product and editor (ADR 0003)
 
 | id | idea | status | reason / next step |
 |---|---|---|---|
 | S0 | SAP's ADT for VS Code against our ADT façade | accepted | a test client for the façade (it is Eclipse ADT on a headless Equinox), not our editor; licence read first; 1–2 d spike; same work as the ADT proxy for OSGo |
-| B0 | The system is an extension: a VS Code extension carrying the whole system, no separate binary | candidate (flagship) | feasibility measured 2026-09-25: runs unchanged on VS Code's Node v24, `node:sqlite`, no native module by default; needs the DB and TLS paths moved out of the working directory; `output/` is 64 MB |
+| B0 | The system is an extension: a VS Code extension carrying the whole system, no separate binary | accepted (order 4, after Q1–Q3) | feasibility measured 2026-09-25: runs unchanged on VS Code's Node v24, `node:sqlite`, no native module by default; needs the DB and TLS paths moved out of the working directory; `output/` is 64 MB |
 | B7 | adt-express: one small JSON protocol, answered natively here, by the same ABAP classes on a system with the plugin, and by vsp over ADT on a system without it | accepted (spec first) | optimistic writes (`If-Match`, one LUW) remove the need for a session; APC + daemon + AMC only where state is needed |
 | B8 | Multiverse of runs: record and replay a dialog step, find where a failing run leaves a passing one, step back in time | candidate | replay via the dialog-step module and the DB seam works on any engine; the path trace needs our own emitter (Go) |
-| Q1 | Debugger through VS Code's JS debugger and the transpiler's source maps | accepted | checked 2026-09-25: 795 maps, mapped per statement to the `.abap` line; relative source paths resolve from the real generation folder |
-| Q2 | Thin extension: CodeLens run/call, Test Explorer, generation in the status bar | candidate | 2–3 d; abaplint stays the language server |
-| Q3 | Readers of a class in CodeLens | candidate | 0.5 d; the numbers are in the warm registry |
+| Q1 | Debugger through VS Code's JS debugger and the transpiler's source maps | accepted (order 1) | checked 2026-09-25: 795 maps, mapped per statement to the `.abap` line; relative source paths resolve from the real generation folder |
+| Q2 | Thin extension: CodeLens run/call, Test Explorer, generation in the status bar | accepted (order 2) | 2–3 d; abaplint stays the language server |
+| Q3 | Readers of a class in CodeLens | accepted (order 3) | 0.5 d; the numbers are in the warm registry |
 | Q4 | Dumps as diagnostics on the ABAP line | candidate | 1 d; first step of B8 |
 | Q5 | The `osd` MCP server as language-model tools in VS Code | candidate | 0.5 d |
 | Q6 | ABAP and SQL notebooks | candidate | 2–3 d |
 | Q7 | SEGW editor and Fiori preview in a VS Code tab | candidate | ~1 d; the pages exist |
-| B1 | Tests chosen by the closure of an edit, rerun on save, results inline | candidate | 1–2 weeks |
+| B1 | Tests chosen by the closure of an edit, rerun on save, results inline ("Wallaby for ABAP") | accepted (order 5) | 1–2 weeks |
 | B5 | Behaviour of recorded OData requests before and after an edit | candidate | +3–5 d on B1's engine |
 | B2 | A sandbox MCP for agents (write, activate, run unit, call OData, SQL, where-used, dumps) | candidate | a real system only as the A4H sandbox, only in throwaway packages, only when asked |
 | B6 | The same unit test locally and on a system, a mismatch drafted as an ANORMALIES entry | candidate | same condition as B2 |
