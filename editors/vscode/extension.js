@@ -8,7 +8,8 @@
 
 const vscode = require("vscode");
 const path = require("node:path");
-const {objectOf, fileOf, Osd, outcomes} = require("./lib.js");
+const fs = require("node:fs");
+const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor} = require("./lib.js");
 
 const EXCLUDE = "{**/node_modules/**,**/.local/**,**/output/**,**/gen/**,**/build/**}";
 
@@ -24,6 +25,15 @@ function activate(context) {
   context.subscriptions.push(statusBar(context));
   context.subscriptions.push(testExplorer(output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.showDumps", () => showDumps(output)));
+
+  // Ctrl+F2 / Ctrl+F3 (docs/vscode-extension.md): one diagnostic collection
+  // for both, so an activation that passes clears what a check had left, and
+  // the other way round.
+  const diagnostics = vscode.languages.createDiagnosticCollection("osd-abap");
+  context.subscriptions.push(diagnostics);
+  context.subscriptions.push(vscode.commands.registerCommand("osd.check", () => check(diagnostics, output)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.activate", () => activateCurrent(diagnostics, output)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.run", () => run(output)));
 }
 
 // ---- status bar: which generation the system serves, or that it is down
@@ -69,6 +79,99 @@ async function showDumps(output) {
     output.appendLine(String(e.message ?? e));
   }
   output.show(true);
+}
+
+// ---- Ctrl+F2 / Ctrl+F3: check and activate the object of the current editor
+// (docs/vscode-extension.md), over the ADT façade's checkruns and activation
+// routes (tools/adt-facade.mjs). Both keys apply to the whole object, not
+// only the include that happens to be open, so an edit in the definitions
+// part is checked and activated along with the implementations beside it.
+
+function currentObject() {
+  const editor = vscode.window.activeTextEditor;
+  if (editor === undefined) return undefined;
+  const object = adtObjectOf(editor.document.fileName);
+  return object === undefined ? undefined : {editor, object};
+}
+
+// severity -> vscode.DiagnosticSeverity; A and X are ABAP's abort/exception
+// levels and read as errors the same as E
+function severityOf(code) {
+  if (code === "W") return vscode.DiagnosticSeverity.Warning;
+  if (code === "I" || code === "S") return vscode.DiagnosticSeverity.Information;
+  return vscode.DiagnosticSeverity.Error;
+}
+
+function diagnosticAt(line, column, message, severity) {
+  const at = new vscode.Position(Math.max(0, (line ?? 1) - 1), Math.max(0, (column ?? 1) - 1));
+  return new vscode.Diagnostic(new vscode.Range(at, at.translate(0, 1)), message, severityOf(severity));
+}
+
+async function check(diagnostics, output) {
+  const current = currentObject();
+  if (current === undefined) return;
+  const {editor, object} = current;
+  try {
+    const reports = await osd().check(object, object.include, editor.document.getText());
+    const issues = reports.flatMap((r) => r.issues);
+    diagnostics.set(editor.document.uri, issues.map((i) => diagnosticAt(i.line, i.column, i.message, i.severity)));
+    const failed = reports.filter((r) => r.status === "notProcessed");
+    if (failed.length > 0) {
+      vscode.window.showErrorMessage(`osd check: ${failed.map((r) => r.statusText).join("; ")}`);
+    } else {
+      vscode.window.setStatusBarMessage(`osd check: ${issues.length === 0 ? "no errors" : `${issues.length} issue(s)`}`, 5000);
+    }
+  } catch (e) {
+    output.appendLine(`osd check ${object.name}: ${String(e.message ?? e)}`);
+    vscode.window.showErrorMessage(`osd check: ${String(e.message ?? e)}`);
+  }
+}
+
+async function activateCurrent(diagnostics, output) {
+  const current = currentObject();
+  if (current === undefined) return;
+  const {editor, object} = current;
+  if (editor.document.isDirty) await editor.document.save();
+  try {
+    const result = await osd().activate(object);
+    if (result.ok) {
+      diagnostics.delete(editor.document.uri);
+      const generation = String(result.generation ?? "?").slice(0, 8);
+      vscode.window.setStatusBarMessage(`osd: ${object.name} activated, generation ${generation}`, 5000);
+    } else {
+      // an issue names the object it belongs to (objDescr); the ones this
+      // editor's object owns go on it, the rest -- what activating it broke
+      // elsewhere -- go to the output channel rather than nowhere
+      const own = result.issues.filter((i) => i.objDescr === object.name || i.objDescr === "");
+      const elsewhere = result.issues.filter((i) => i.objDescr !== object.name && i.objDescr !== "");
+      diagnostics.set(editor.document.uri, own.map((i) => diagnosticAt(i.line, i.column, i.message)));
+      if (elsewhere.length > 0) {
+        output.appendLine(`osd activate ${object.name}: also broke ${elsewhere.map((i) => `${i.objDescr} (${i.message})`).join("; ")}`);
+      }
+      vscode.window.showErrorMessage(`osd: ${object.name} did not activate (${result.issues.length || "no"} issue(s), see Problems)`);
+    }
+  } catch (e) {
+    output.appendLine(`osd activate ${object.name}: ${String(e.message ?? e)}`);
+    vscode.window.showErrorMessage(`osd activate: ${String(e.message ?? e)}`);
+  }
+}
+
+// ---- F8: SE80's own key, dispatched by object type (lib.js RUN_TABLE).
+// Only a class with ABAP Unit tests reaches a real action today; everything
+// else answers the text of the server work its turn would add.
+
+async function run(output) {
+  const current = currentObject();
+  if (current === undefined) return;
+  const {editor, object} = current;
+  const hasUnitTests = fs.existsSync(fileOf(path.dirname(editor.document.fileName), object, "testclasses"));
+  const action = runActionFor(object, {hasUnitTests});
+  if (action.kind === "unit") {
+    await vscode.commands.executeCommand("testing.runCurrentFile");
+    return;
+  }
+  output.appendLine(`osd run ${object.name}: ${action.text}`);
+  vscode.window.showInformationMessage(`osd: ${action.text}`);
 }
 
 // ---- Test Explorer: one item per object, its test classes and methods below

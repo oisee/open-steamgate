@@ -18,11 +18,32 @@
           "type": "string",
           "default": "http://localhost:3030",
           "description": "The listener of a running osd (npm start, build/osd up)."
+        },
+        "osd.keymap": {
+          "type": "string",
+          "enum": ["abap", "vscode"],
+          "default": "abap",
+          "description": "What an ABAP developer's fingers expect (SAP GUI / ADT: Ctrl+F2 Check, Ctrl+F3 Activate, F8 Run, the debug keys) over an .abap editor, or VS Code's own bindings unchanged (\"vscode\")."
         }
       }
     },
     "commands": [
-      {"command": "osd.showDumps", "title": "osd: Show short dumps"}
+      {"command": "osd.showDumps", "title": "osd: Show short dumps"},
+      {"command": "osd.check", "title": "osd: Check"},
+      {"command": "osd.activate", "title": "osd: Activate"},
+      {"command": "osd.run", "title": "osd: Run"}
+    ],
+    "keybindings": [
+      {"key": "ctrl+f2", "command": "osd.check", "when": "resourceExtname == .abap && config.osd.keymap == abap"},
+      {"key": "ctrl+f3", "command": "osd.activate", "when": "resourceExtname == .abap && config.osd.keymap == abap"},
+      {"key": "f8", "command": "osd.run", "when": "resourceExtname == .abap && config.osd.keymap == abap && !inDebugMode"},
+      {"key": "ctrl+shift+f10", "command": "testing.runCurrentFile", "when": "resourceExtname == .abap && config.osd.keymap == abap"},
+
+      {"key": "ctrl+shift+b", "command": "editor.debug.action.toggleBreakpoint", "when": "resourceExtname == .abap && config.osd.keymap == abap"},
+      {"key": "f5", "command": "workbench.action.debug.stepInto", "when": "resourceExtname == .abap && config.osd.keymap == abap && inDebugMode"},
+      {"key": "f6", "command": "workbench.action.debug.stepOver", "when": "resourceExtname == .abap && config.osd.keymap == abap && inDebugMode"},
+      {"key": "f7", "command": "workbench.action.debug.stepOut", "when": "resourceExtname == .abap && config.osd.keymap == abap && inDebugMode"},
+      {"key": "f8", "command": "workbench.action.debug.continue", "when": "resourceExtname == .abap && config.osd.keymap == abap && inDebugMode"}
     ]
   }
 }
