@@ -110,6 +110,32 @@ sap.ui.define([], function () {
     });
   }
 
+  // The Workbench speaks ADT to the facade (/sap/bc/adt), which only the
+  // Node host serves. OSGo and the browser preview have none, and there the
+  // app opens and then fails on every call. So ask the way an ADT client
+  // does -- HEAD on core/discovery -- and grey the tile unless it is a 200.
+  // The Workbench itself stays: it is the editor meant for a real system
+  // through the ADT proxy (host-tools review 2026-09-25, D1).
+  function greyWorkbenchWithoutAdt() {
+    function grey() {
+      (launchPage && launchPage.groups || []).forEach(function (group) {
+        (group.tiles || []).forEach(function (tile) {
+          if (tile.id !== "workbench" && tile.stgRequires !== "ADT") {
+            return;
+          }
+          tile.properties.info = tile.stgDisabledReason || "no ADT here";
+          tile.properties.subtitle = tile.stgDisabledReason || "needs the ADT facade of the Node host";
+          delete tile.properties.targetURL;
+        });
+      });
+    }
+    return fetch(atMount("/sap/bc/adt/core/discovery"), {method: "HEAD"}).then(function (r) {
+      if (r.status !== 200) {
+        grey();
+      }
+    }).catch(grey);
+  }
+
   // A missing target makes the old sandbox tile non-clickable, but does not
   // make it look disabled. The rendered control is sap.m.GenericTile, whose
   // native Disabled state is the visual/accessibility contract we want.
@@ -215,7 +241,7 @@ sap.ui.define([], function () {
   }
 
   installHeaderLogo();
-  withPackTiles().then(greyAmdpWithoutEngine).then(function () {
+  withPackTiles().then(greyAmdpWithoutEngine).then(greyWorkbenchWithoutAdt).then(function () {
     return sap.ushell.Container.createRenderer("fiori2", true);
   }).then(function (renderer) {
     renderer.placeAt("content");
