@@ -162,6 +162,18 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     }
   });
 
+  it("the child's own doors (/osd/serving, /osd/dumps, /osd/sql) answer through the parent", async () => {
+    const serving = await fetch(`${BASE}/osd/serving`);
+    expect(serving.status, "/osd/serving").to.equal(200);
+    expect(await serving.json()).to.be.an("object");
+    const dumps = await fetch(`${BASE}/osd/dumps`);
+    expect(dumps.status, "/osd/dumps").to.equal(200);
+    expect(await dumps.json()).to.be.an("array");
+    const sql = await fetch(`${BASE}/osd/sql`, {method: "POST", headers: {"content-type": "application/json"},
+      body: JSON.stringify({sql: "SELECT COUNT(*) AS n FROM zstg_demo"})});
+    expect(sql.status, `/osd/sql: ${await sql.clone().text()}`).to.equal(200);
+  });
+
   it("an ADT answer names the same generation the child runs", async () => {
     const adt = await call("/core/discovery");
     const odata = await fetch(`${BASE}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata`);
