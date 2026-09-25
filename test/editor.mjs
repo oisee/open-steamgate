@@ -133,11 +133,21 @@ describe("the editor", function () {
 
   it("draws the buttons the host says it can do, and on Node that is all three", async () => {
     // STORE CAPABILITIES decides them: OSGo cannot check or activate, and
-    // a button that could only ever be refused is not drawn there
+    // a button that could only ever be refused is not drawn there. Save is
+    // every host's; Check and Activate come as a pair, because both need the
+    // compiler. Only an inline server has the Node store in this process, so
+    // only there is "all three" a fact this test can hold the page to; a
+    // server in another process (OSGo under tools/gogen/parity.mjs) is held
+    // to what every host must draw.
     const page = await (await fetch(`${BASE}?type=CLAS&name=${OBJECT}&change=x`)).text();
-    expect(page).to.contain('value="check">Check</button>');
-    expect(page).to.contain('value="save">Save</button>');
-    expect(page).to.contain('value="activate">Activate</button>');
+    const has = (v) => page.includes(`value="${v}">`);
+    expect(has("save"), "Save is every host's").to.equal(true);
+    expect(has("check"), "Check and Activate come together").to.equal(has("activate"));
+    if (globalThis.abap?.context?.RFCDestinations?.STORE !== undefined) {
+      expect(page).to.contain('value="check">Check</button>');
+      expect(page).to.contain('value="save">Save</button>');
+      expect(page).to.contain('value="activate">Activate</button>');
+    }
   });
 
   it("a host with no store to call says so instead of dumping", async function () {
