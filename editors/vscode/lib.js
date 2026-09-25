@@ -120,6 +120,44 @@ class Osd {
     return this.json(`/sap/bc/adt/core/http/unit/object?type=${encodeURIComponent(object.type)}&name=${encodeURIComponent(object.name)}`);
   }
 
+  /** Which service and entity sets a SEGW _DPC_EXT class's own
+   *  `<set>_get_entityset` / `<set>_get_entity` methods answer for
+   *  (tools/adt-facade.mjs `core/http/segw/entitysets`). `undefined` on a
+   *  404 (the class is not a registered service's DPC), an error on
+   *  anything else -- the same distinction `run()`/`discover()` leave to
+   *  their caller, made here because a CodeLensProvider asks this for
+   *  every `.abap` file VS Code opens and "not a DPC_EXT" is not a fault. */
+  async entitySets(className) {
+    try {
+      return await this.json(`/sap/bc/adt/core/http/segw/entitysets?class=${encodeURIComponent(className)}`);
+    } catch (e) {
+      if (/HTTP 404/.test(String(e.message ?? e))) return undefined;
+      throw e;
+    }
+  }
+
+  /** Q2b "Runner": GET an OData v2 resource of a service this osd serves --
+   *  `service` and `resource` joined as `/sap/opu/odata/sap/<service>/
+   *  <resource>` -- timed and never throwing on a non-2xx answer, so a
+   *  webview can show the status and the body's own error message instead
+   *  of an exception: `{status, ms, url, body}`, `body` parsed from JSON
+   *  when the answer is JSON, else `undefined` (the raw text stays in
+   *  `text`). */
+  async odata(service, resource) {
+    const url = `/sap/opu/odata/sap/${service}/${resource}`;
+    const startedAt = Date.now();
+    const res = await this.fetch(this.url + url, {headers: {accept: "application/json"}});
+    const ms = Date.now() - startedAt;
+    const text = await res.text();
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = undefined;
+    }
+    return {status: res.status, ms, url, text, body};
+  }
+
   /** Run an object's tests, or one class, or one method of it. */
   run(object, testClass, method) {
     let route = `/sap/bc/adt/core/http/unit/object/run?type=${encodeURIComponent(object.type)}&name=${encodeURIComponent(object.name)}`;
@@ -235,6 +273,114 @@ function parseActivationResult(xml) {
   return {ok: false, issues};
 }
 
+// ---- Q2b "Runner" (docs/vscode-extension.md, "Next"): call the entity set
+// of a SEGW _DPC_EXT class's own `<set>_get_entityset` / `<set>_get_entity`
+// method, from a CodeLens above it or from F8 inside it. The server names
+// the class's service and its sets (tools/adt-facade.mjs `core/http/segw/
+// entitysets`, tools/segw-entityset-map.mjs); everything here is the pure
+// half -- where a lens goes over a source string, and which method (if any)
+// a cursor line sits inside -- so a test holds it without VS Code or a
+// server.
+
+const ENTITYSET_METHOD_LINE = /^[ \t]*METHOD\s+(\w+)_get_entityset\s*\.[ \t]*$/i;
+const ENTITY_METHOD_LINE = /^[ \t]*METHOD\s+(\w+)_get_entity\s*\.[ \t]*$/i;
+const METHOD_LINE = /^[ \t]*METHOD\s+(\S+?)\s*\.[ \t]*$/i;
+const ENDMETHOD_LINE = /^[ \t]*ENDMETHOD\s*\.[ \t]*$/i;
+
+/** `[{line, method, kind}]`, one per `METHOD <set>_get_entityset.` /
+ *  `METHOD <set>_get_entity.` line of `source` (1-based line numbers, the
+ *  shape a `vscode.CodeLens`'s `Range` wants minus one) -- a plain text
+ *  scan of the editor's own buffer, so a lens follows an unsaved edit the
+ *  way the server's answer (by method name) cannot. */
+function entitySetMethodLines(source) {
+  const out = [];
+  const lines = String(source ?? "").split(/\r\n|\r|\n/);
+  lines.forEach((text, i) => {
+    const entityset = ENTITYSET_METHOD_LINE.exec(text);
+    if (entityset !== null) {
+      out.push({line: i + 1, method: `${entityset[1]}_get_entityset`.toUpperCase(), kind: "get_entityset"});
+      return;
+    }
+    const entity = ENTITY_METHOD_LINE.exec(text);
+    if (entity !== null) {
+      out.push({line: i + 1, method: `${entity[1]}_get_entity`.toUpperCase(), kind: "get_entity"});
+    }
+  });
+  return out;
+}
+
+/** `entitySetMethodLines(source)` joined with the server's own map for the
+ *  class (`{service, sets: [{method, kind, set}]}`, `core/http/segw/
+ *  entitysets`) into what a CodeLens shows: `{line, kind, set, service,
+ *  title}`. A method the server's map does not carry -- an override the
+ *  MPC's own constants do not name -- gets no lens rather than a guessed
+ *  one; `map` itself missing (the class is not a registered service's DPC)
+ *  answers no lenses at all. */
+function entitySetLenses(source, map) {
+  if (map === undefined || !Array.isArray(map.sets)) return [];
+  const bySets = new Map(map.sets.map((s) => [`${s.kind} ${s.method}`, s]));
+  const out = [];
+  for (const found of entitySetMethodLines(source)) {
+    const known = bySets.get(`${found.kind} ${found.method}`);
+    if (known === undefined) continue;
+    out.push({line: found.line, kind: found.kind, set: known.set, service: map.service, title: `▶ Call ${known.set}`});
+  }
+  return out;
+}
+
+/** The method active at 0-based `line` of `source`: the name of the last
+ *  `METHOD x.` seen up to and including that line, cleared by the
+ *  `ENDMETHOD.` that closes it -- so F8 pressed on the `METHOD` line itself
+ *  or anywhere in its body dispatches the same as a lens above it, and F8
+ *  pressed between methods (or on a declaration, not an implementation)
+ *  finds none. `undefined` outside any method. */
+function methodAtLine(source, line) {
+  const lines = String(source ?? "").split(/\r\n|\r|\n/);
+  let current;
+  for (let i = 0; i <= line && i < lines.length; i++) {
+    const m = METHOD_LINE.exec(lines[i]);
+    if (m !== null) {
+      current = m[1].toUpperCase();
+      continue;
+    }
+    if (ENDMETHOD_LINE.test(lines[i])) {
+      current = undefined;
+    }
+  }
+  return current;
+}
+
+/** OData v2 JSON's own rows: an entity set's `d.results`, a single entity's
+ *  `d` itself, or `[]` when the body wears neither shape -- each row as the
+ *  server sent it, `__metadata` and all (`stripMetadata` below strips it
+ *  for display; `keyOf` below reads the key predicate out of it first). */
+function resultRows(body) {
+  const d = body?.d;
+  if (Array.isArray(d?.results)) return d.results;
+  if (d !== undefined) return [d];
+  return [];
+}
+
+/** A row without `__metadata`: the columns a table shows. */
+function stripMetadata(row) {
+  const {__metadata, ...rest} = row ?? {};
+  return rest;
+}
+
+/** The key predicate out of a row's own `__metadata.uri`
+ *  (`.../TravelSet('T0001')` -> `'T0001'`, a composite key's
+ *  `(TravelID='T0001',BookingID='0001')` unchanged) -- what the `_get_entity`
+ *  lens's key prompt defaults to, read off the server's own answer rather
+ *  than reconstructed from the entity type's key properties, which this
+ *  client does not otherwise know. `undefined` when the row carries no
+ *  `__metadata` (a service not built with `set_is_media` or a plain object). */
+function keyOf(row) {
+  const uri = row?.__metadata?.uri;
+  if (typeof uri !== "string") return undefined;
+  const m = /\(([^)]*)\)\s*$/.exec(uri);
+  return m === null ? undefined : m[1];
+}
+
 // ---- F8, "Run", by object type (SE80's own dispatch). What this build
 // already reaches stays concrete; every other type answers a `text`
 // describing the server work its turn would add, so the table gets one
@@ -243,11 +389,19 @@ function parseActivationResult(xml) {
 // its planned action without VS Code.
 const RUN_TABLE = {
   // a service's _DPC_EXT / _MPC_EXT: SE80's F8 there opens a client of the
-  // service, not a debugger -- so this waits on a Gateway client, not on
-  // ABAP Unit, even though the class itself could carry tests too.
+  // service, not a debugger. Q2b (docs/vscode-extension.md) narrowed the
+  // gap: the cursor inside a `<set>_get_entityset` / `<set>_get_entity`
+  // method now does the same as that method's CodeLens -- extension.js
+  // finds the method the cursor sits in (lib.js methodAtLine) and looks it
+  // up in the server's own map (Osd#entitySets) before calling here, and
+  // hands the answer in `ctx.entitySet`; everything else on such a class
+  // still has no Gateway client to open.
   CLAS: (ctx) => {
     if (/_DPC_EXT$|_MPC_EXT$/i.test(ctx.name ?? "")) {
-      return {kind: "not-yet", text: "not yet: a Gateway client prefilled with the service and the entity set of the method under the cursor"};
+      if (ctx.entitySet !== undefined) {
+        return {kind: "call-entityset", ...ctx.entitySet};
+      }
+      return {kind: "not-yet", text: "not yet: put the cursor inside a <set>_get_entityset or <set>_get_entity method (or click its CodeLens) -- the rest of a service's DPC_EXT / MPC_EXT still has no Gateway client"};
     }
     if (ctx.hasUnitTests) {
       return {kind: "unit"};
@@ -308,4 +462,5 @@ function outcomes(run, asked = []) {
   return out;
 }
 
-module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor};
+module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
+  entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf};

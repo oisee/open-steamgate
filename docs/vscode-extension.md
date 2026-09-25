@@ -48,7 +48,8 @@ F8's dispatch by object type (`lib.js` `runActionFor`, held to this table by
 
 | Type | F8 here |
 | --- | --- |
-| CLAS, name ends `_DPC_EXT` / `_MPC_EXT` | not yet: a Gateway client prefilled with the service and the entity set of the method under the cursor |
+| CLAS, name ends `_DPC_EXT`, cursor inside a `<set>_get_entityset` / `<set>_get_entity` method | calls the set, the same as that method's CodeLens (Q2b, below) |
+| CLAS, name ends `_DPC_EXT` / `_MPC_EXT`, otherwise | not yet: the rest of a Gateway client |
 | CLAS, has an ABAP Unit test include | runs them (Test Explorer) |
 | CLAS, neither | not yet: `IF_OO_ADT_CLASSRUN` has no server route (see F9 above) |
 | INTF | nothing of its own to run |
@@ -57,6 +58,45 @@ F8's dispatch by object type (`lib.js` `runActionFor`, held to this table by
 | TABL, DDLS | not yet: data preview |
 | IWSV | not yet: the Gateway client on the service document |
 | SICF | not yet: open the node's URL |
+
+## Q2b: calling an entity set
+
+*2026-09-25.* A CodeLens "▶ Call \<Set\>" over every `METHOD
+<set>_get_entityset.` / `METHOD <set>_get_entity.` line of a SEGW `_DPC_EXT`
+class's source. The class → service → set mapping is a server route rather
+than a build artefact (the smaller of the two ways the class carried this
+work): `GET /sap/bc/adt/core/http/segw/entitysets?class=<NAME>`
+(`tools/adt-facade.mjs`) answers `{class, service, mpc, sets: [{method,
+kind, set}]}` for a class the registry knows as a service's DPC, 404
+otherwise -- read fresh off the tree on every call, never guessed from a
+file name: the service comes from `segwRegistrations()`
+(`tools/segw-registry.mjs`, the project's own IWSV/IWMO), the set's real
+name and case from the MPC's own entity-name constants
+(`tools/segw-entityset-map.mjs`, the type SEGW gives every one of them,
+`ty_e_med_entity_name`, not the constant's own name). A `_DPC_EXT` and its
+model's `_MPC_EXT` are read together with their base classes (SEGW puts the
+constants and the generated method bodies there, the hand-written overrides
+in `_EXT`), the way inheritance actually resolves them.
+
+Clicking a lens does `GET <osd.url>/sap/opu/odata/sap/<service>/<set>?$top=
+20&$format=json` for `_get_entityset`, or prompts for a key (defaulted from
+the first row's own `__metadata.uri`, `keyOf` in `lib.js`) and does
+`<set>(<key>)?$format=json` for `_get_entity`, and shows the answer in a
+webview: the URL, the HTTP status, the time and the row count above a table
+(the columns are the properties, `__metadata` left out), a "raw JSON"
+toggle beside it. F8 does the same when the cursor sits inside one of these
+two kinds of method (`lib.js` `methodAtLine` finds which, `RUN_TABLE`'s
+`CLAS` entry answers `{kind: "call-entityset", ...}` when it does); every
+other `_DPC_EXT` / `_MPC_EXT` case is still the "not yet" of the F8 table
+above.
+
+`editors/vscode/lib.js` carries the pure half (`entitySetMethodLines`,
+`entitySetLenses`, `methodAtLine`, `resultRows`, `stripMetadata`, `keyOf`,
+`Osd#entitySets`, `Osd#odata`); `tools/segw-entityset-map.mjs` carries the
+server's own mapping (`entityNameConstantsOf`, `entitySetMethodsOf`,
+`entitySetsOf`, `entitySetMapFor`), both tested without VS Code or a server
+in `test/vscode-extension.mjs`; the route itself in
+`test/adt-devloop.mjs`, beside the other `core/http/*` routes.
 
 ## Trying it
 
@@ -78,8 +118,12 @@ install.
   method, the frame a failure points at, a check run's diagnostics and an
   activation's result read off the real documents (`tools/adt-documents.mjs`
   `checkReportDocument` / `activationSuccessDocument` /
-  `activationFailureDocument`, imported directly rather than re-typed), and
-  F8's dispatch table.
+  `activationFailureDocument`, imported directly rather than re-typed), F8's
+  dispatch table, and Q2b's lens placement / cursor-to-method / OData row
+  shapes, including one test run against the demo's own DPC_EXT and MPC
+  sources through `tools/segw-entityset-map.mjs` end to end.
+- `test/adt-devloop.mjs`: `core/http/segw/entitysets` against the real demo
+  service, beside the other `core/http/*` routes.
 - `test/osd-child.mjs`: the extension's own client (`Osd`) against a real
   `npm start`, through the parent -- the doors, discovery, one method run
   with the CSRF round trip.
@@ -90,8 +134,7 @@ download a VS Code per run.
 
 ## Next
 
-- OData: from a `_DPC_EXT` method, call its entity set. The class → service
-  → set mapping is `segwRegistrations()` (`tools/segw-registry.mjs`); it
-  needs to be written out as JSON at transpile (`gen/segw/registry.json`)
-  or served, then a CodeLens on `GET_ENTITYSET` opens the result.
+- Smart F8 / Runner, the rest of it: create/update/delete entity, a function
+  import, `$expand` on the lens's own request. Today's lens and F8 only
+  read (Q2b, above).
 - Q3, readers of a class, as a CodeLens count over the xref route.
