@@ -359,6 +359,21 @@ export class ServingRuntime {
     return new Promise((resolve, reject) => {
       const epoch = this.epoch + 1;
       const generation = liveHash(this.root) ?? String(epoch);
+      // OSD_INSPECT=<port>: the child, not this process, opens the V8
+      // inspector -- it is the one that runs the transpiled ABAP (this one
+      // is the supervisor or the façade, which never does). Setting
+      // NODE_OPTIONS on the whole shell before `npm start` would hand
+      // --inspect to both processes on the same fixed port, and the second
+      // one to bind loses silently ("address already in use", checked by
+      // hand): the façade would get the inspector and the ABAP would not.
+      // So this is the child's env only, folded onto whatever NODE_OPTIONS
+      // this instance already carries (this.env, then process.env) rather
+      // than replacing it.
+      const inspectPort = process.env.OSD_INSPECT;
+      const nodeOptions = [
+        this.env.NODE_OPTIONS ?? process.env.NODE_OPTIONS,
+        inspectPort ? `--inspect=127.0.0.1:${inspectPort} --enable-source-maps` : undefined,
+      ].filter((s) => s !== undefined && s !== "").join(" ");
       const child = spawn(this.command[0], this.command.slice(1), {
         cwd: this.root,
         env: {
@@ -370,6 +385,7 @@ export class ServingRuntime {
           ...(this.database === undefined ? {} : {STG_DB_PATH: this.database}),
           ...this.env,
           OSD_GENERATION: generation,
+          ...(nodeOptions === "" ? {} : {NODE_OPTIONS: nodeOptions}),
         },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       });
