@@ -136,6 +136,22 @@ class Osd {
     }
   }
 
+  /** Q3 "Readers" (docs/vscode-extension.md): who references a CLAS or INTF
+   *  (tools/adt-facade.mjs `core/http/xref/readers`): `{name, readers:
+   *  [{type, name, include, isTest, services}], counts: {readers, tests,
+   *  services}}`. `undefined` on a 404 (not a CLAS/INTF this store knows),
+   *  an error on anything else -- the same shape `entitySets` above answers,
+   *  for the same reason: a CodeLensProvider asks this for every
+   *  class/interface file VS Code opens. */
+  async readers(type, name) {
+    try {
+      return await this.json(`/sap/bc/adt/core/http/xref/readers?type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}`);
+    } catch (e) {
+      if (/HTTP 404/.test(String(e.message ?? e))) return undefined;
+      throw e;
+    }
+  }
+
   /** Q2b "Runner": GET an OData v2 resource of a service this osd serves --
    *  `service` and `resource` joined as `/sap/opu/odata/sap/<service>/
    *  <resource>` -- timed and never throwing on a non-2xx answer, so a
@@ -462,5 +478,70 @@ function outcomes(run, asked = []) {
   return out;
 }
 
+// ---- Q3 "Readers" (docs/vscode-extension.md, "Next"): a CodeLens "read by N
+// · tests M · services K" over a class's own `CLASS <name> DEFINITION` line
+// or an interface's own `INTERFACE <name>` line, off the server's own
+// where-used answer (tools/adt-facade.mjs `core/http/xref/readers`). As with
+// Q2b, the placement is a plain text scan of the editor's own buffer (so an
+// unsaved rename of the class does not still show the old line) and the
+// server is asked by the object's name, not guessed from the file.
+
+/** The 1-based line of `object`'s own `CLASS <name> DEFINITION` /
+ *  `INTERFACE <name>` statement in `source`, or undefined when `object` is
+ *  not a CLAS/INTF or that line is not in `source` (an include other than
+ *  the main one, or a name the file does not actually declare). */
+function readersLensLine(source, object) {
+  if (object === undefined || (object.type !== "CLAS" && object.type !== "INTF")) return undefined;
+  const escaped = String(object.name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = object.type === "CLAS"
+    ? new RegExp(`^[ \\t]*CLASS\\s+${escaped}\\s+DEFINITION\\b`, "i")
+    : new RegExp(`^[ \\t]*INTERFACE\\s+${escaped}\\b`, "i");
+  const lines = String(source ?? "").split(/\r\n|\r|\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (pattern.test(lines[i])) return i + 1;
+  }
+  return undefined;
+}
+
+/** "read by N · tests M · services K" -- the lens title, off the server's
+ *  own `counts` (`core/http/xref/readers`'s `counts.readers/tests/services`). */
+function readersLensTitle(counts) {
+  return `read by ${counts?.readers ?? 0} · tests ${counts?.tests ?? 0} · services ${counts?.services ?? 0}`;
+}
+
+/** The quick pick a click on the lens shows: one item per reader
+ *  (`core/http/xref/readers`'s own `readers`), sorted the way the server
+ *  already sorted them, Test / Service named in the description so a person
+ *  can tell the two counts in the lens apart from the list rather than only
+ *  from the number. Each item carries its own `reader` back, for opening. */
+function readersQuickPickItems(readers) {
+  return (readers ?? []).map((reader) => {
+    const tags = [];
+    if (reader.isTest) tags.push("Test");
+    if ((reader.services ?? []).length > 0) tags.push(`Service (${reader.services.join(", ")})`);
+    return {
+      label: reader.name,
+      description: [reader.type, ...tags].join(" · "),
+      reader,
+    };
+  });
+}
+
+// abapGit's own extension per object type, so a reader's file can be found
+// without guessing at what generated it; a type this extension has no file
+// shape for (FUGR, TABL, DDLS, ...) opens nothing rather than a wrong guess
+const READER_EXTENSION = {CLAS: "clas", INTF: "intf", PROG: "prog"};
+
+/** The glob `vscode.workspace.findFiles` matches for `reader`'s own file
+ *  (`**\/<base>.<ext>.abap`, the namespace-to-`#` mapping `objectOf` above
+ *  reads back), or undefined for a type with no such file. */
+function readerFilePattern(reader) {
+  const ext = READER_EXTENSION[reader?.type];
+  if (ext === undefined) return undefined;
+  const base = String(reader.name).replaceAll("/", "#").toLowerCase();
+  return `**/${base}.${ext}.abap`;
+}
+
 module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
-  entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf};
+  entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
+  readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern};

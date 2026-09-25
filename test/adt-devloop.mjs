@@ -5,6 +5,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
+import {Data} from "../tools/osd-data.mjs";
 
 // The state-changing half of the façade: lock, write, unlock, activate.
 //
@@ -51,10 +52,45 @@ describe("tools/adt-facade: the development loop", () => {
 
   before(async function () {
     this.timeout(120000);
+    // Q3's readers route reads the database through `data` (tools/adt-facade.mjs
+    // xref/readers, ~1310), and a façade built with no `data` of its own gets
+    // tools/osd-store.mjs ObjectStore#data's default: a bare `new Data({root})`
+    // that boots a *raw* runtime on the first query (tools/osd-data.mjs boot())
+    // -- output/init.mjs's `initializeABAP()` with no demo data, because the
+    // synthetic taxi facts are seeded by test/start.mjs's own extra step
+    // (`ensureDemoData`, tools/osd-demo-data.mjs), not by init.mjs itself.
+    // The raw boot does not stop at seeding its own, separate database: the
+    // default SQLite branch of test/setup.mjs makes a fresh in-memory client
+    // every time `setup()` runs and *replaces*
+    // `abap.context.databaseConnections.DEFAULT` with it. So a raw boot here,
+    // if it happens before anything else in the process has imported
+    // test/start.mjs, leaves that name pointing at an empty database; when
+    // test/start.mjs is imported afterwards (test/analytics.mjs does),
+    // its own `initializeABAP()` call replaces DEFAULT again and runs
+    // `ensureDemoData` against *that* connection, which should be fine on
+    // its own -- except this suite's own `data` (and the client Data.boot()
+    // captured into it) is still the first, now-orphaned connection, one
+    // instance of the mismatch; the one that broke test/analytics.mjs
+    // (2026-09-25, PR #98) is the reverse case, an analytics run that
+    // imports test/start.mjs first: whichever runtime that import produced,
+    // Q3's raw boot swaps DEFAULT out from under it and the cube's rows
+    // (already written by that earlier `ensureDemoData`) are on a connection
+    // nothing still named DEFAULT can find.
+    //
+    // The fix is to never let this file be the one that boots raw: import
+    // the canonical inline boot (test/start.mjs, run at most once per
+    // process thanks to ESM's module cache, demo data included) before this
+    // façade ever touches `data`, and hand it that boot's own client the way
+    // test/zosd-test.mjs already does for the same reason.
+    await import("./start.mjs");
+    const client = globalThis.abap?.context?.databaseConnections?.DEFAULT;
+    if (client === undefined) {
+      throw new Error("the inline test system has no connected database");
+    }
     const app = express();
     app.disable("x-powered-by");
     app.use(express.raw({type: "*/*", limit: "16mb"}));
-    const facade = adtRouter({transpileOnActivate: false});
+    const facade = adtRouter({transpileOnActivate: false, data: new Data({client})});
     store = facade.store;
     app.use(facade.router);
     await new Promise((resolve) => {
@@ -458,6 +494,53 @@ describe("tools/adt-facade: the development loop", () => {
 
     it("Q2b: 404s a class the registry does not know as a service's DPC", async () => {
       const res = await call("/core/http/segw/entitysets?class=ZCL_OSD_SCRATCH");
+      expect(res.status).to.equal(404);
+    });
+
+    // Q3 "Readers": who references a CLAS or INTF (the reverse of Q2b's own
+    // map), off the seeded cross-reference tables. `node tools/osd-xref.mjs
+    // --who-calls <NAME>` names the same readers independently of this route
+    // (tools/osd-xref-seed.mjs seeds WBCROSSGT from the same parse this
+    // façade's own store reads), which is how these two classes were picked:
+    // ZCL_ZSTG_DEMO_MPC_EXT is read by ZCL_STG_PHASE0_TEST (a class with its
+    // own ABAP Unit tests) and by ZCL_ZSTG_DEMO_DPC_EXT (the _DPC_EXT of
+    // ZSTG_DEMO_SRV), one of each; ZCL_STG_TAB_ZSTG_STATUS is a generated
+    // leaf nothing reads.
+    it("Q3: names who reads a class, one a test and one a registered service's DPC", async () => {
+      const res = await call("/core/http/xref/readers?type=CLAS&name=ZCL_ZSTG_DEMO_MPC_EXT");
+      expect(res.status).to.equal(200);
+      const found = await res.json();
+      expect(found.name).to.equal("ZCL_ZSTG_DEMO_MPC_EXT");
+      expect(found.readers).to.deep.equal([
+        {type: "CLAS", name: "ZCL_STG_PHASE0_TEST", include: "ZCL_STG_PHASE0_TEST", isTest: true, services: []},
+        {type: "CLAS", name: "ZCL_ZSTG_DEMO_DPC_EXT", include: "ZCL_ZSTG_DEMO_DPC_EXT", isTest: false, services: ["ZSTG_DEMO_SRV"]},
+      ]);
+      expect(found.counts).to.deep.equal({readers: 2, tests: 1, services: 1});
+    });
+
+    it("Q3: an interface's own readers, and the class itself left out of them", async () => {
+      const res = await call("/core/http/xref/readers?type=INTF&name=ZIF_STG_CDS_SOURCE");
+      expect(res.status).to.equal(200);
+      const found = await res.json();
+      expect(found.counts.readers).to.be.greaterThan(50);
+      expect(found.readers.map((r) => r.name)).to.not.include("ZIF_STG_CDS_SOURCE");
+      // every entry is unique -- one row per reading object, not per reference
+      expect(found.readers.map((r) => r.name)).to.deep.equal([...new Set(found.readers.map((r) => r.name))]);
+    });
+
+    it("Q3: an object nothing reads answers an empty list, not an error", async () => {
+      const res = await call("/core/http/xref/readers?type=CLAS&name=ZCL_STG_TAB_ZSTG_STATUS");
+      expect(res.status).to.equal(200);
+      expect(await res.json()).to.deep.equal({name: "ZCL_STG_TAB_ZSTG_STATUS", readers: [], counts: {readers: 0, tests: 0, services: 0}});
+    });
+
+    it("Q3: refuses a type that is not CLAS or INTF", async () => {
+      const res = await call("/core/http/xref/readers?type=PROG&name=ZCL_ZSTG_DEMO_MPC_EXT");
+      expect(res.status).to.equal(400);
+    });
+
+    it("Q3: 404s a class that does not exist", async () => {
+      const res = await call("/core/http/xref/readers?type=CLAS&name=ZCL_OSD_NOPE_NOPE");
       expect(res.status).to.equal(404);
     });
 

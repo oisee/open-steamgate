@@ -9,7 +9,8 @@ import {checkReportDocument, activationSuccessDocument, activationFailureDocumen
 import {entitySetMapFor} from "../tools/segw-entityset-map.mjs";
 
 const {objectOf, adtObjectOf, uriOf, fileOf, outcomes, abapFrame, parseCheckReport, parseActivationResult, runActionFor,
-  entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf} =
+  entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
+  readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
 
 describe("editors/vscode: the extension's logic", function () {
@@ -197,5 +198,71 @@ describe("editors/vscode: the extension's logic", function () {
     const entitySet = {service: map.service, set: travel.set, entityKind: travel.kind};
     expect(runActionFor({type: "CLAS", name: "ZCL_ZSTG_DEMO_DPC_EXT"}, {hasUnitTests: false, entitySet}))
       .to.deep.equal({kind: "call-entityset", service: "ZSTG_DEMO_SRV", set: "TravelSet", entityKind: "get_entityset"});
+  });
+
+  // ---- Q3 "Readers": the lens over a class's or interface's own definition
+  // line, its title, the quick pick a click shows, and the file glob a
+  // chosen reader opens.
+
+  it("Q3: the lens line is the object's own CLASS ... DEFINITION / INTERFACE line, none for another object's", () => {
+    const clas = [
+      "CLASS zcl_other DEFINITION PUBLIC.",      // 1, not this object
+      "ENDCLASS.",                               // 2
+      "CLASS zcl_x DEFINITION PUBLIC FINAL.",    // 3
+      "  PUBLIC SECTION.",                       // 4
+      "ENDCLASS.",                               // 5
+      "CLASS zcl_x IMPLEMENTATION.",             // 6, not a DEFINITION line
+      "ENDCLASS.",                               // 7
+    ].join("\n");
+    expect(readersLensLine(clas, {type: "CLAS", name: "ZCL_X"})).to.equal(3);
+    expect(readersLensLine(clas, {type: "CLAS", name: "ZCL_NOT_THERE"})).to.equal(undefined);
+
+    const intf = ["\" a comment", "INTERFACE zif_x PUBLIC."].join("\n");
+    expect(readersLensLine(intf, {type: "INTF", name: "ZIF_X"})).to.equal(2);
+
+    // an INTERFACES statement (implementing one, inside a class) is not an
+    // INTERFACE statement (declaring one)
+    expect(readersLensLine("  INTERFACES zif_x.", {type: "INTF", name: "ZIF_X"})).to.equal(undefined);
+    expect(readersLensLine(clas, {type: "PROG", name: "ZCL_X"})).to.equal(undefined);
+    expect(readersLensLine(clas, undefined)).to.equal(undefined);
+  });
+
+  it("Q3: the lens title, off the server's own counts", () => {
+    expect(readersLensTitle({readers: 3, tests: 1, services: 2})).to.equal("read by 3 · tests 1 · services 2");
+    expect(readersLensTitle(undefined)).to.equal("read by 0 · tests 0 · services 0");
+  });
+
+  it("Q3: the quick pick tags a reader that is a test, a service, both, or neither", () => {
+    const readers = [
+      {type: "CLAS", name: "ZCL_A", include: "ZCL_A", isTest: false, services: []},
+      {type: "CLAS", name: "ZCL_B", include: "ZCL_B", isTest: true, services: []},
+      {type: "CLAS", name: "ZCL_C", include: "ZCL_C", isTest: false, services: ["ZSTG_DEMO_SRV"]},
+      {type: "CLAS", name: "ZCL_D", include: "ZCL_D", isTest: true, services: ["ZSTG_DEMO_SRV", "ZOSD_TEST_SRV"]},
+    ];
+    const items = readersQuickPickItems(readers);
+    expect(items.map((i) => i.label)).to.deep.equal(["ZCL_A", "ZCL_B", "ZCL_C", "ZCL_D"]);
+    expect(items[0].description).to.equal("CLAS");
+    expect(items[1].description).to.equal("CLAS · Test");
+    expect(items[2].description).to.equal("CLAS · Service (ZSTG_DEMO_SRV)");
+    expect(items[3].description).to.equal("CLAS · Test · Service (ZSTG_DEMO_SRV, ZOSD_TEST_SRV)");
+    expect(items.map((i) => i.reader)).to.deep.equal(readers);
+    expect(readersQuickPickItems(undefined)).to.deep.equal([]);
+  });
+
+  it("Q3: a reader's file glob, namespace-to-# and all, undefined for a type with no known file shape", () => {
+    expect(readerFilePattern({type: "CLAS", name: "ZCL_ZSTG_DEMO_MPC_EXT"})).to.equal("**/zcl_zstg_demo_mpc_ext.clas.abap");
+    expect(readerFilePattern({type: "INTF", name: "ZIF_STG_CDS_SOURCE"})).to.equal("**/zif_stg_cds_source.intf.abap");
+    expect(readerFilePattern({type: "PROG", name: "ZREPORT"})).to.equal("**/zreport.prog.abap");
+    expect(readerFilePattern({type: "CLAS", name: "/NS/ZCL_X"})).to.equal("**/#ns#zcl_x.clas.abap");
+    expect(readerFilePattern({type: "FUGR", name: "ZFG"})).to.equal(undefined);
+    expect(readerFilePattern(undefined)).to.equal(undefined);
+  });
+
+  it("Q3: end to end against the demo's own sources -- what the lens shows is what tools/adt-facade.mjs's readers route answers", () => {
+    const mpcSource = readFileSync("src/demo/zcl_zstg_demo_mpc_ext.clas.abap", "utf8");
+    const object = adtObjectOf("zcl_zstg_demo_mpc_ext.clas.abap");
+    const line = readersLensLine(mpcSource, object);
+    expect(line).to.be.a("number");
+    expect(mpcSource.split(/\r\n|\r|\n/)[line - 1]).to.match(/^CLASS\s+zcl_zstg_demo_mpc_ext\s+DEFINITION\b/i);
   });
 });

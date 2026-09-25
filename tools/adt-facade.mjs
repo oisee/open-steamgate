@@ -35,6 +35,7 @@ import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
 import {segwRegistrations} from "./segw-registry.mjs";
 import {contentFoldersOf} from "./osd-packs.mjs";
 import {entitySetMapFor} from "./segw-entityset-map.mjs";
+import {testClassesIn} from "./osd-unit-run.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -1278,6 +1279,74 @@ export function adtRouter(options = {}) {
       return;
     }
     res.type("application/json; charset=utf-8").send(JSON.stringify(map));
+  });
+
+  // Q3 "Readers" (docs/vscode-extension.md): who references a CLAS or INTF,
+  // for a CodeLens above its `CLASS ... DEFINITION` / `INTERFACE` line. The
+  // parse already knows this direction and seeds it at every host start
+  // (tools/osd-xref-seed.mjs): a WBCROSSGT/WBCROSSGTX row is `{OTYPE: 'TY',
+  // NAME: the referenced object, INCLUDE: the referencer}` -- INCLUDE
+  // already carries the referencer's own object name, never a per-include
+  // suffix (tools/osd-xref.mjs CrossReference#build, the WBCROSSGT branch),
+  // so there is no include-to-object mapping to do here. The rows are read
+  // the same way the client's own data preview reads any table
+  // (`data.query`, tools/osd-data.mjs) -- this is a where-used view over the
+  // same seeded tables, not a second index.
+  //
+  // A reader is a class if it carries its own ABAP Unit tests
+  // (tools/osd-unit-run.mjs testClassesIn, the build's own list of
+  // `*.clas.testclasses.abap` objects) or a service if it is registered as a
+  // service's own `_DPC_EXT` (tools/segw-registry.mjs segwRegistrations,
+  // read fresh off the tree the way the entitysets route above does) --
+  // both are classifications of the reader, not of the class being read, so
+  // a reader can be neither, either or both.
+  router.get(`${BASE}/core/http/xref/readers`, async (req, res) => {
+    const type = String(req.query.type ?? "").toUpperCase();
+    const name = String(req.query.name ?? "").toUpperCase();
+    if (!["CLAS", "INTF"].includes(type)) {
+      refuse(res, 400, "ExceptionInvalidRequest", "type must be CLAS or INTF");
+      return;
+    }
+    if (name === "") {
+      refuse(res, 400, "ExceptionInvalidRequest", "name is required");
+      return;
+    }
+    if (!store.exists(type, name)) {
+      refuse(res, 404, "ExceptionResourceNotFound", `${type} ${name} does not exist`);
+      return;
+    }
+    try {
+      const escaped = name.replace(/'/g, "''");
+      const result = await data.query(
+        `SELECT include FROM wbcrossgt WHERE otype = 'TY' AND name = '${escaped}' AND include <> '${escaped}' ` +
+        `UNION SELECT include FROM wbcrossgtx WHERE otype = 'TY' AND name = '${escaped}' AND include <> '${escaped}'`,
+        {max: 5000});
+      const typeOf = new Map(store.list().map((o) => [o.name, o.type]));
+      const folders = [...contentFoldersOf(store.root), "gen"].map((f) => join(store.root, f));
+      const registrations = segwRegistrations(folders);
+      const testClasses = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
+      const readers = [...new Set(result.rows.map((r) => String(r.include).toUpperCase()))]
+        .filter((include) => include !== name)
+        .sort()
+        .map((include) => ({
+          type: typeOf.get(include) ?? "UNKNOWN",
+          name: include,
+          include,
+          isTest: testClasses.has(include),
+          services: registrations.filter((r) => r.dpc === include).map((r) => r.service),
+        }));
+      res.type("application/json; charset=utf-8").send(JSON.stringify({
+        name,
+        readers,
+        counts: {
+          readers: readers.length,
+          tests: readers.filter((r) => r.isTest).length,
+          services: readers.filter((r) => r.services.length > 0).length,
+        },
+      }));
+    } catch (e) {
+      refuse(res, 500, "ExceptionInternalError", String(e?.message ?? e));
+    }
   });
 
   // Ending a session. There is nothing to end — the session is a cookie and a

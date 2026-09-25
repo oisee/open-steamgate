@@ -9,7 +9,8 @@
 const vscode = require("vscode");
 const path = require("node:path");
 const fs = require("node:fs");
-const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf} = require("./lib.js");
+const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
+  readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern} = require("./lib.js");
 
 const EXCLUDE = "{**/node_modules/**,**/.local/**,**/output/**,**/gen/**,**/build/**}";
 
@@ -40,6 +41,12 @@ function activate(context) {
   // class, and the command it (and F8, above) both call.
   context.subscriptions.push(vscode.commands.registerCommand("osd.callEntitySet", (args) => callEntitySet(args, output)));
   context.subscriptions.push(entitySetLensProvider(output));
+
+  // Q3 "Readers" (docs/vscode-extension.md): a lens "read by N · tests M ·
+  // services K" over a class's or an interface's own definition line, and
+  // the quick pick a click on it opens.
+  context.subscriptions.push(vscode.commands.registerCommand("osd.showReaders", (found) => showReaders(found, output)));
+  context.subscriptions.push(readersLensProvider(output));
 }
 
 // ---- status bar: which generation the system serves, or that it is down
@@ -331,6 +338,73 @@ function entitySetHtml(title, call, rows) {
   </script>
 </body>
 </html>`;
+}
+
+// ---- Q3 "Readers": a CodeLens "read by N · tests M · services K" over a
+// class's own `CLASS <name> DEFINITION` line or an interface's own
+// `INTERFACE <name>` line (tools/adt-facade.mjs `core/http/xref/readers`,
+// the reverse of Q2b's own class-to-service map). lib.js readersLensLine
+// does the placement (a plain text scan, tested without VS Code); this asks
+// the server for the object's own readers and turns what it finds into one
+// `vscode.CodeLens`. A click opens a quick pick of the readers (Test /
+// Service tagged) and opens the file of the one chosen.
+
+function readersLensProvider(output) {
+  const emitter = new vscode.EventEmitter();
+  const provider = {
+    onDidChangeCodeLenses: emitter.event,
+    async provideCodeLenses(document) {
+      const object = adtObjectOf(document.fileName);
+      if (object === undefined || (object.type !== "CLAS" && object.type !== "INTF") || object.include !== "main") return [];
+      const line = readersLensLine(document.getText(), object);
+      if (line === undefined) return [];
+      let found;
+      try {
+        found = await osd().readers(object.type, object.name);
+      } catch (e) {
+        output.appendLine(`osd readers ${object.name}: ${String(e.message ?? e)}`);
+        return [];
+      }
+      if (found === undefined) return [];
+      const range = new vscode.Range(line - 1, 0, line - 1, 0);
+      return [new vscode.CodeLens(range, {
+        title: readersLensTitle(found.counts),
+        command: "osd.showReaders",
+        arguments: [found],
+      })];
+    },
+  };
+  const registration = vscode.languages.registerCodeLensProvider({pattern: "**/*.abap"}, provider);
+  // a save can add, rename or remove a reference this class's readers count
+  // depends on, in this file or in whichever other file did the referencing
+  const onSave = vscode.workspace.onDidSaveTextDocument(() => emitter.fire());
+  return {dispose: () => { registration.dispose(); onSave.dispose(); }};
+}
+
+async function showReaders(found, output) {
+  if (found === undefined) return;
+  if (found.readers.length === 0) {
+    vscode.window.showInformationMessage(`osd: nothing reads ${found.name}`);
+    return;
+  }
+  const picked = await vscode.window.showQuickPick(readersQuickPickItems(found.readers), {placeHolder: `Readers of ${found.name}`});
+  if (picked === undefined) return;
+  const pattern = readerFilePattern(picked.reader);
+  if (pattern === undefined) {
+    vscode.window.showInformationMessage(`osd: ${picked.reader.name} (${picked.reader.type}) has no source file this extension knows how to open`);
+    return;
+  }
+  try {
+    const files = await vscode.workspace.findFiles(pattern, EXCLUDE, 1);
+    if (files.length === 0) {
+      vscode.window.showWarningMessage(`osd: ${picked.reader.name}'s file was not found in this workspace`);
+      return;
+    }
+    await vscode.window.showTextDocument(files[0]);
+  } catch (e) {
+    output.appendLine(`osd show readers ${found.name}: ${String(e.message ?? e)}`);
+    vscode.window.showErrorMessage(`osd: ${String(e.message ?? e)}`);
+  }
 }
 
 // ---- Test Explorer: one item per object, its test classes and methods below
