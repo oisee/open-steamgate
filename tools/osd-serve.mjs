@@ -26,6 +26,7 @@ import {seedAtStartup} from "./osd-xref-seed.mjs";
 import {mountChannels} from "./osd-apc.mjs";
 import {Data} from "./osd-data.mjs";
 import {dumpOf} from "./osd-where.mjs";
+import {persistDump} from "./osd-dumps.mjs";
 import {serveSandboxConfig} from "./osd-sandbox-config.mjs";
 
 const started = Date.now();
@@ -146,6 +147,14 @@ function dump(error, request) {
   for (const f of d.frames.slice(1, 6)) {
     console.error(`    at ${f.file}:${f.line}${f.text ? "  " + f.text : ""}`);
   }
+  // ZOSD_DUMP, the table (tools/osd-dumps.mjs): a kernel job, so it happens
+  // here and not in the ABAP, and after this request's own step has already
+  // rolled back -- dump() only runs from a catch of a rejected dialogStep(),
+  // and persistDump() commits through a fresh one of its own. Not awaited:
+  // the response above does not wait on the table, and a table write that
+  // fails is still a dump the ring and the log already have.
+  persistDump(globalThis.abap.context.databaseConnections.DEFAULT, d, {request, generation: generationLabel()})
+    .catch((e) => console.error(`ZOSD_DUMP: ${e?.message ?? e}`));
   return d;
 }
 hostNodes.dumps = (a, node) => a.get(node.path, function (req, res) {

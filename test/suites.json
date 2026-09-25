@@ -150,6 +150,7 @@
     "test/transaction.mjs",
     "test/type-graph.mjs",
     "test/unit-run.mjs",
+    "test/osd-dumps.mjs",
     "test/vscode-extension.mjs",
     "test/warm.mjs",
     "test/webgui.mjs",

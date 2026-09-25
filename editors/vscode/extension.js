@@ -11,7 +11,8 @@ const path = require("node:path");
 const fs = require("node:fs");
 const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
-  freestyleTableHtml, notebookFromJson, notebookToJson} = require("./lib.js");
+  freestyleTableHtml, notebookFromJson, notebookToJson,
+  hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText} = require("./lib.js");
 
 // Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
 // *.osdnb file opens as (package.json `contributes.notebooks`) and the
@@ -32,6 +33,13 @@ function activate(context) {
   context.subscriptions.push(statusBar(context));
   context.subscriptions.push(testExplorer(output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.showDumps", () => showDumps(output)));
+
+  // Q4 "Hotspots" (docs/vscode-extension.md): line decorations and an
+  // explorer badge off ZOSD_DUMP, refreshed by command, by a timer and
+  // after osd.run / osd.activate (both registered below, which call
+  // refreshHotspots() themselves once their own work is done).
+  context.subscriptions.push(hotspots(context, output));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.refreshHotspots", () => refreshHotspots(output)));
 
   // Ctrl+F2 / Ctrl+F3 (docs/vscode-extension.md): one diagnostic collection
   // for both, so an activation that passes clears what a check had left, and
@@ -106,6 +114,122 @@ async function showDumps(output) {
   output.show(true);
 }
 
+// ---- Q4 "Hotspots" (docs/vscode-extension.md): ZOSD_DUMP as heat -- line
+// decorations in an .abap editor and a dump-count badge in the explorer, off
+// the counts osd().hotspots() reads through the freestyle SQL door Q6a's
+// notebook already uses. `state.data` is the one place the numbers live
+// (`{byLine, byFile}`, lib.js `hotspotsFromRows`'s own shape); everything
+// below reads it rather than asking the server again.
+
+/** One `vscode.TextEditorDecorationType` per intensity bucket (lib.js
+ *  `hotspotBucket`, 1-4), built once and kept for the life of the
+ *  extension -- a decoration type is a VS Code resource, and a fresh set
+ *  per refresh would leak one on every tick. */
+function hotspotDecorationTypes() {
+  if (hotspotDecorationTypes.types === undefined) {
+    hotspotDecorationTypes.types = [1, 2, 3, 4].map((bucket) => vscode.window.createTextEditorDecorationType({
+      isWholeLine: true,
+      backgroundColor: hotspotColor(bucket),
+      overviewRulerColor: hotspotColor(bucket),
+      overviewRulerLane: vscode.OverviewRulerLane.Right,
+    }));
+  }
+  return hotspotDecorationTypes.types;
+}
+
+function decorateEditor(editor, state) {
+  if (editor === undefined || !/\.abap$/i.test(editor.document.fileName)) return;
+  const object = adtObjectOf(editor.document.fileName);
+  const types = hotspotDecorationTypes();
+  if (object === undefined) {
+    types.forEach((t) => editor.setDecorations(t, []));
+    return;
+  }
+  // perBucket[0] is bucket 1 (one dump), ... perBucket[3] bucket 4 (10+)
+  const perBucket = [[], [], [], []];
+  for (const entry of state.data.byLine) {
+    if (entry.objname !== object.name || entry.include !== object.include) continue;
+    const range = new vscode.Range(entry.line - 1, 0, entry.line - 1, 0);
+    perBucket[hotspotBucket(entry.count) - 1].push({range, hoverMessage: hotspotHoverText(entry)});
+  }
+  types.forEach((type, i) => editor.setDecorations(type, perBucket[i]));
+}
+
+function decorateVisibleEditors(state) {
+  for (const editor of vscode.window.visibleTextEditors) decorateEditor(editor, state);
+}
+
+/** `vscode.FileDecorationProvider`: the dump-count badge on an .abap file
+ *  in the explorer, off `state.data.byFile` (summed over every include of
+ *  the object -- an explorer badge is on the file, not on a class's one
+ *  main include). Undefined (no badge) for a file with no dumps, rather
+ *  than a "0" nobody asked to see. */
+function hotspotFileDecorationProvider(state) {
+  return {
+    onDidChangeFileDecorations: state.emitter.event,
+    provideFileDecoration(uri) {
+      if (!/\.abap$/i.test(uri.fsPath)) return undefined;
+      const object = adtObjectOf(uri.fsPath);
+      const count = object === undefined ? undefined : state.data.byFile[object.name];
+      if (!count) return undefined;
+      return {
+        badge: hotspotBadge(count),
+        color: new vscode.ThemeColor("problemsErrorIcon.foreground"),
+        tooltip: `${count} dump${count === 1 ? "" : "s"} (osd: Refresh hotspots)`,
+      };
+    },
+  };
+}
+
+async function refreshHotspots(output, state) {
+  const target = state ?? refreshHotspots.state;
+  if (target === undefined) return;
+  try {
+    target.data = await osd().hotspots();
+  } catch (e) {
+    output.appendLine(`osd hotspots: ${String(e.message ?? e)}`);
+    target.data = {byLine: [], byFile: {}};
+  }
+  decorateVisibleEditors(target);
+  target.emitter.fire(undefined); // every explorer badge this provider owns
+}
+
+/** Wires Q4 up: the state `refreshHotspots`/`decorateEditor` share, the
+ *  FileDecorationProvider, a refresh on every visible-editor change (a
+ *  newly opened editor has had no `setDecorations` call yet) and the timer
+ *  (`osd.hotspots.refreshSeconds`, default 30, 0 = off; re-read on a
+ *  settings change rather than only at startup). */
+function hotspots(context, output) {
+  const state = {data: {byLine: [], byFile: {}}, emitter: new vscode.EventEmitter()};
+  refreshHotspots.state = state;
+  const provider = vscode.window.registerFileDecorationProvider(hotspotFileDecorationProvider(state));
+  const onVisible = vscode.window.onDidChangeVisibleTextEditors(() => decorateVisibleEditors(state));
+
+  let timer;
+  const restartTimer = () => {
+    if (timer !== undefined) clearInterval(timer);
+    const seconds = vscode.workspace.getConfiguration("osd").get("hotspots.refreshSeconds", 30);
+    timer = seconds > 0 ? setInterval(() => refreshHotspots(output, state), seconds * 1000) : undefined;
+  };
+  restartTimer();
+  const onConfig = vscode.workspace.onDidChangeConfiguration((e) => {
+    if (e.affectsConfiguration("osd.hotspots.refreshSeconds")) restartTimer();
+  });
+
+  refreshHotspots(output, state);
+  return {
+    dispose: () => {
+      if (timer !== undefined) clearInterval(timer);
+      provider.dispose();
+      onVisible.dispose();
+      onConfig.dispose();
+      state.emitter.dispose();
+      for (const t of hotspotDecorationTypes()) t.dispose();
+      refreshHotspots.state = undefined;
+    },
+  };
+}
+
 // ---- Ctrl+F2 / Ctrl+F3: check and activate the object of the current editor
 // (docs/vscode-extension.md), over the ADT façade's checkruns and activation
 // routes (tools/adt-facade.mjs). Both keys apply to the whole object, not
@@ -175,6 +299,11 @@ async function activateCurrent(diagnostics, output) {
       }
       vscode.window.showErrorMessage(`osd: ${object.name} did not activate (${result.issues.length || "no"} issue(s), see Problems)`);
     }
+    // Q4: an activation is the point a class's own line numbers can have
+    // moved, so the heat this object's decorations show is worth a refresh
+    // even when nothing has dumped -- and if something had, this is also
+    // the soonest an editor open on it would see the new count.
+    void refreshHotspots(output);
   } catch (e) {
     output.appendLine(`osd activate ${object.name}: ${String(e.message ?? e)}`);
     vscode.window.showErrorMessage(`osd activate: ${String(e.message ?? e)}`);
@@ -208,6 +337,10 @@ async function run(output) {
     }
   }
   const action = runActionFor(object, {hasUnitTests, entitySet});
+  // Q4: a run is server work, so it is a point the table this object's own
+  // heat comes from may have changed -- fire-and-forget, the same as the
+  // timer, so F8 does not wait on it.
+  void refreshHotspots(output);
   if (action.kind === "unit") {
     await vscode.commands.executeCommand("testing.runCurrentFile");
     return;

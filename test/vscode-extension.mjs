@@ -12,7 +12,8 @@ import {tableDataDocument} from "../tools/adt-facade.mjs";
 const {objectOf, adtObjectOf, uriOf, fileOf, outcomes, abapFrame, parseCheckReport, parseActivationResult, runActionFor,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
-  htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson} =
+  htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson,
+  HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
 
 describe("editors/vscode: the extension's logic", function () {
@@ -340,5 +341,68 @@ describe("editors/vscode: the extension's logic", function () {
     const text = notebookToJson(cells);
     expect(text.endsWith("\n")).to.equal(true);
     expect(notebookFromJson(text)).to.deep.equal(cells);
+  });
+
+  // ---- Q4 "Hotspots": ZOSD_DUMP as heat, off the same freestyle SQL door
+  // Q6a's notebook uses (HOTSPOTS_SQL, hotspotsFromRows); tableDataDocument
+  // builds the real XML shape a server answers with, the same way Q6a's own
+  // tests hold freestyleRows to the real document rather than a hand-typed one.
+
+  it("Q4: HOTSPOTS_SQL is a SELECT, over zosd_dump, grouped by object/include/line", () => {
+    expect(HOTSPOTS_SQL).to.match(/^SELECT\b/i);
+    expect(HOTSPOTS_SQL).to.contain("FROM zosd_dump");
+    expect(HOTSPOTS_SQL).to.contain("GROUP BY objname");
+  });
+
+  it("Q4: a server's own freestyle rows (real XML shape) become byLine and byFile counts", () => {
+    const rows = [
+      {objname: "ZCL_STG_DISPATCHER", include: "main", line: "119", n: "3", last_at: "1700000000000", last_message: "Division by zero"},
+      {objname: "ZCL_STG_DISPATCHER", include: "main", line: "44", n: "1", last_at: "1700000001000", last_message: "no such field"},
+      {objname: "ZCL_STG_ENTRY_PROVIDER", include: "testclasses", line: "7", n: "12", last_at: "1700000002000", last_message: "conversion"},
+    ];
+    const xml = tableDataDocument({columns: ["objname", "include", "line", "n", "last_at", "last_message"], rows});
+    const {byLine, byFile} = hotspotsFromRows(freestyleRows(xml).rows);
+    expect(byLine).to.have.length(3);
+    const dispatcher119 = byLine.find((e) => e.objname === "ZCL_STG_DISPATCHER" && e.line === 119);
+    expect(dispatcher119).to.deep.equal({objname: "ZCL_STG_DISPATCHER", include: "main", line: 119, count: 3, lastAt: 1700000000000, lastMessage: "Division by zero"});
+    expect(byFile).to.deep.equal({ZCL_STG_DISPATCHER: 4, ZCL_STG_ENTRY_PROVIDER: 12});
+  });
+
+  it("Q4: a row with no object name or no usable line is dropped, not guessed at", () => {
+    const {byLine, byFile} = hotspotsFromRows([
+      {objname: "", include: "main", line: "5", n: "2"},
+      {objname: "ZCL_A", include: "main", line: "", n: "1"},
+      {objname: "ZCL_A", include: "main", line: "0", n: "1"},
+    ]);
+    expect(byLine).to.deep.equal([]);
+    expect(byFile).to.deep.equal({});
+    expect(hotspotsFromRows(undefined)).to.deep.equal({byLine: [], byFile: {}});
+  });
+
+  it("Q4: intensity buckets a fixed few steps rather than a scale fitted to the data", () => {
+    expect([0, 1, 2, 4, 5, 9, 10, 999].map(hotspotBucket)).to.deep.equal([1, 1, 2, 2, 3, 3, 4, 4]);
+  });
+
+  it("Q4: bucket colours are translucent and get heavier with the bucket", () => {
+    const colors = [1, 2, 3, 4].map(hotspotColor);
+    for (const c of colors) expect(c).to.match(/^rgba\(255, 0, 0, 0(\.\d+)?\)$/);
+    const alpha = (c) => Number(/rgba\(255, 0, 0, (0(?:\.\d+)?)\)/.exec(c)[1]);
+    expect(alpha(colors[0])).to.be.lessThan(alpha(colors[1]));
+    expect(alpha(colors[1])).to.be.lessThan(alpha(colors[2]));
+    expect(alpha(colors[2])).to.be.lessThan(alpha(colors[3]));
+  });
+
+  it("Q4: a badge is at most two characters (VS Code's own limit)", () => {
+    expect(hotspotBadge(1)).to.equal("1");
+    expect(hotspotBadge(9)).to.equal("9");
+    expect(hotspotBadge(10)).to.equal("9+");
+    expect(hotspotBadge(250)).to.equal("9+");
+    for (const n of [1, 9, 10, 250]) expect(hotspotBadge(n)).to.have.length.at.most(2);
+  });
+
+  it("Q4: a line's hover names the count, the last time and the message", () => {
+    const text = hotspotHoverText({count: 3, lastAt: Date.parse("2026-09-25T12:00:00Z"), lastMessage: "Division by zero"});
+    expect(text).to.equal("3 dumps, last 2026-09-25T12:00:00.000Z: Division by zero");
+    expect(hotspotHoverText({count: 1, lastAt: 0, lastMessage: ""})).to.equal("1 dump, last an unknown time: (no message)");
   });
 });
