@@ -138,6 +138,86 @@ class open in the editor can be added or removed in any other file.
 tested without VS Code or a server in `test/vscode-extension.mjs`; the route
 itself in `test/adt-devloop.mjs`, beside the other `core/http/*` routes.
 
+## Q4: hotspots
+
+*2026-09-25.* Short dumps are kept in a table the way a system keeps them
+for ST22: `ZOSD_DUMP` (`src/dumps/zosd_dump.tabl.xml`, client-dependent,
+key `MANDT` + `DUMP_ID`), one row per dump -- the runtime error, the
+message, the ABAP position (object type, object name, include, line), the
+request (method, path truncated to 120), the generation, and the frames as
+a JSON string. Capped at the last `OSD_DUMP_CAP` rows (default 1000, an
+env var read once) so a long-lived process does not grow it without bound.
+
+**Writing is a kernel job, not the application's** -- the same rule as the
+end of a dialog step (`tools/osd-dialog-step.mjs`, "a rule for what every
+host must do lives in a module they all import"): an AS ABAP writes a dump
+*after* the LUW has been rolled back, in its own statement and its own
+commit, never inside the failed one. `tools/osd-dumps.mjs` (`persistDump`)
+is that module; `tools/osd-serve.mjs`'s `dump()` calls it, not awaited, only
+after the request's own `dialogStep()` has already rolled back (its catch
+runs on a rejected `await`, by which point `exclusive()`'s `finally` has
+released the work process) -- `persistDump` commits through a fresh
+`dialogStep()` of its own. `test/start.mjs`'s inline front (`MODE ===
+"inline"`, `runtime === undefined`) has **no dump hook at all**: its catch
+logs to the console and answers 500, with no ring and no `/osd/dumps` --
+that door is declared only for `tools/osd-serve.mjs`
+(`src/icf/nodes.json`), so there was nothing to wire this into, and it is
+left that way on purpose rather than given a second, parallel writer.
+
+`/osd/dumps` keeps its current shape (the in-memory ring of the last 100,
+tested by `test/osd-child.mjs` and depended on by the status bar below) --
+smaller than teaching it to read the table, and the two are two views of
+the same events rather than two sources of truth.
+
+**Reading is the freestyle SQL door Q6a's notebook already uses** -- no new
+route. `editors/vscode/lib.js` `HOTSPOTS_SQL` groups `ZOSD_DUMP` by
+`(objname, include, line)`, with a correlated subquery for each line's own
+last message; `Osd#hotspots()` runs it through `Osd#freestyle()` and
+`hotspotsFromRows` turns the answer into `{byLine: [{objname, include,
+line, count, lastAt, lastMessage}], byFile: {OBJNAME: count}}` --
+normalising every column to lower case first, because `tableDataDocument`
+(`tools/adt-facade.mjs`) always writes `dataPreview:name` upper-case
+regardless of how the SQL cased it, and a reducer that trusted the SQL's
+own case would only fail against the real door, never against a fixture
+that happened to agree with it.
+
+In the editor: a `vscode.TextEditorDecorationType` per intensity bucket
+(`hotspotBucket`, 1 dump to 4 = ten or more), a translucent red
+(`rgba(255, 0, 0, alpha)`, heavier per bucket) laid over whatever the
+theme's own background is rather than a colour of its own, so it reads in
+both; hovering a coloured line shows `hotspotHoverText` ("N dumps, last
+\<ISO time\>: \<message\>"). A `FileDecorationProvider` puts a badge
+(`hotspotBadge`, "1".."9", else "9+" -- VS Code keeps at most two
+characters of it) on an `.abap` file in the explorer, summed over every
+include of the object. Command "osd: Refresh hotspots"
+(`osd.refreshHotspots`) re-reads the table and redecorates; so does a timer
+(`osd.hotspots.refreshSeconds`, default 30, 0 = off, re-read on a settings
+change) and the end of `osd.run` / `osd.activate` (fire-and-forget, so
+neither waits on it). The status bar's dump count (Q2, `$(bug) N`) is left
+reading `/osd/dumps` as before -- the ring and the table are fed by the
+same `dump()`, so the two numbers are already the same kind of count, just
+with different caps (100 vs. `OSD_DUMP_CAP`).
+
+`editors/vscode/lib.js` carries the pure half (`HOTSPOTS_SQL`,
+`hotspotsFromRows`, `hotspotBucket`, `hotspotColor`, `hotspotBadge`,
+`hotspotHoverText`, `Osd#hotspots`), tested without VS Code in
+`test/vscode-extension.mjs`, including one round trip through
+`tableDataDocument` so the upper-casing above is caught by a fixture built
+the way the server actually answers, not typed by hand to agree with the
+code under test. The write, the rollback and the read together, against a
+real `tools/osd-serve.mjs` (`ServingRuntime`, in-memory database) rather
+than a synthetic dump: `test/osd-dumps.mjs`.
+
+**ANORMALIES-worth noting here rather than there** (a one-liner, since the
+difference is deliberate and small): unlike SAP's `SNAP`, `ZOSD_DUMP` is
+one flat table with no TemSe cluster and no per-user/task columns -- a
+short dump here is what `tools/osd-where.mjs` can already say (the ABAP
+position and the frames), and this table is exactly that, kept.
+
+Not done: `test/start.mjs`'s inline front writes nothing (see above); OSGo
+(the Go runtime) does not write the table at all -- named as a follow-up,
+not attempted here.
+
 ## Q6a: a SQL notebook
 
 *2026-09-25.* `*.osdnb` is a small JSON file of SQL (or markdown) cells
@@ -206,6 +286,12 @@ install.
 - `test/osd-child.mjs`: the extension's own client (`Osd`) against a real
   `npm start`, through the parent -- the doors, discovery, one method run
   with the CSRF round trip.
+- `test/osd-dumps.mjs`: Q4 -- `objectOf`/`rowOf` (`tools/osd-dumps.mjs`)
+  against abapGit file names and `dumpOf()`'s own shape; a real request that
+  dumps, against a real `tools/osd-serve.mjs` (`ServingRuntime`), writes one
+  `ZOSD_DUMP` row with the right object and line while the rest of its
+  changeset is still rolled back, readable through `/osd/sql` and through
+  the same `GROUP BY` a hotspot query runs; the cap.
 
 `extension.js` itself (the Testing API wiring) is checked by hand in VS Code
 only; there is no `@vscode/test-electron` here, on purpose, since it would

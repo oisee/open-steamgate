@@ -199,6 +199,24 @@ class Osd {
     return {...freestyleRows(xml), ms, generation};
   }
 
+  /** Q4 "Hotspots" (docs/vscode-extension.md): counts per (object, line)
+   *  and per object off ZOSD_DUMP -- the table tools/osd-dumps.mjs writes
+   *  after a request's own rollback (tools/osd-serve.mjs `dump()`). No new
+   *  route: this is `freestyle()` above with HOTSPOTS_SQL, the same door
+   *  Q6a's notebook runs a cell through. `hotspotsFromRows` (below) does the
+   *  rows-to-maps half, so a test can hold it to a canned answer without a
+   *  server. A table the SQL door refuses (not built yet) reads as no
+   *  hotspots rather than an error a status-bar timer would have to filter. */
+  async hotspots(rowLimit = 1000) {
+    try {
+      const result = await this.freestyle(HOTSPOTS_SQL, rowLimit);
+      return hotspotsFromRows(result.rows);
+    } catch (e) {
+      if (/no such table/i.test(String(e.message ?? e))) return {byLine: [], byFile: {}};
+      throw e;
+    }
+  }
+
   /** Run an object's tests, or one class, or one method of it. */
   run(object, testClass, method) {
     let route = `/sap/bc/adt/core/http/unit/object/run?type=${encodeURIComponent(object.type)}&name=${encodeURIComponent(object.name)}`;
@@ -622,6 +640,96 @@ function freestyleTableHtml(columns, rows, meta = {}) {
 </div>`;
 }
 
+// ---- Q4 "Hotspots": ZOSD_DUMP as line and file heat (docs/vscode-extension.md).
+// The SQL is the whole server side of this -- no new route, the freestyle
+// door above runs it -- so it lives here where a test can hold it and the
+// rows-to-maps reduction to the server's real column names.
+
+/** One dump count per (object, line), the last time and message with it
+ *  (a correlated subquery rather than a second round trip): the line's own
+ *  hover text is built off the same row the count came from. GROUP BY
+ *  "include" too -- a class carries more than one file (main, locals,
+ *  testclasses), and two of them can share a line number.
+ *
+ *  The subquery's own `LIMIT 1` makes `Data#query` (tools/osd-data.mjs)
+ *  see this statement as already carrying a LIMIT and leave the outer one
+ *  off -- so `hotspots()`'s own `rowLimit` does not bound this query. Left
+ *  as is: the result is one row per distinct (object, include, line), which
+ *  ZOSD_DUMP's own cap (tools/osd-dumps.mjs, 1000 rows) already bounds. */
+const HOTSPOTS_SQL = `SELECT objname, "include", line, COUNT(*) AS n, MAX(created_at) AS last_at,
+  (SELECT message FROM zosd_dump z2 WHERE z2.objname = z.objname AND z2."include" = z."include"
+    AND z2.line = z.line ORDER BY z2.dump_id DESC LIMIT 1) AS last_message
+FROM zosd_dump z
+WHERE objname <> ''
+GROUP BY objname, "include", line
+ORDER BY n DESC`;
+
+/** HOTSPOTS_SQL's own rows (freestyleRows' shape: every value a string,
+ *  every key upper-case -- `tableDataDocument`, tools/adt-facade.mjs,
+ *  writes `dataPreview:name` as `name.toUpperCase()` regardless of how the
+ *  SQL cased it, so a lower-case column read here would silently see
+ *  `undefined` against the real door and only against it, never against a
+ *  hand-built fixture that happened to keep the SQL's own case) into
+ *  `{byLine: [{objname, include, line, count, lastAt, lastMessage}],
+ *  byFile: {OBJNAME: count}}`. A row with no object name or no usable line
+ *  number is dropped rather than guessed at -- ZOSD_DUMP.LINE is INT4, so
+ *  that only happens against a table this SQL was not written for. */
+function hotspotsFromRows(rows) {
+  const byLine = [];
+  const byFile = {};
+  for (const raw of rows ?? []) {
+    const row = Object.fromEntries(Object.entries(raw ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
+    const objname = String(row.objname ?? "").trim();
+    const line = Number(row.line);
+    const count = Number(row.n ?? 0);
+    if (objname === "" || !Number.isFinite(line) || line <= 0 || count <= 0) continue;
+    byLine.push({
+      objname, include: String(row.include ?? "main").trim() || "main", line, count,
+      lastAt: Number(row.last_at ?? 0), lastMessage: String(row.last_message ?? ""),
+    });
+    byFile[objname] = (byFile[objname] ?? 0) + count;
+  }
+  return {byLine, byFile};
+}
+
+/** count -> intensity bucket, 1 (one dump) to 4 (heaviest): a fixed few
+ *  steps rather than a scale fitted to whatever counts happen to be open,
+ *  so a file with one hotspot and a file with a thousand read the same way
+ *  from one editor to the next. */
+function hotspotBucket(count) {
+  if (count >= 10) return 4;
+  if (count >= 5) return 3;
+  if (count >= 2) return 2;
+  return 1;
+}
+
+// translucent red over whatever the editor's own background is, rather
+// than a fixed hex: a colour the theme already chose stays the theme's, in
+// light mode and in dark, and the tint is what carries the heat
+const HOTSPOT_ALPHA = {1: 0.12, 2: 0.22, 3: 0.35, 4: 0.5};
+
+/** The decoration background for a bucket (1-4, hotspotBucket's own range):
+ *  an rgba string, translucent over either theme rather than a colour of
+ *  its own. */
+function hotspotColor(bucket) {
+  return `rgba(255, 0, 0, ${HOTSPOT_ALPHA[bucket] ?? HOTSPOT_ALPHA[1]})`;
+}
+
+/** A FileDecoration badge for `count`: VS Code keeps at most two characters
+ *  of it, so ten or more reads as "9+" rather than being cut to "1" of "10". */
+function hotspotBadge(count) {
+  return count > 9 ? "9+" : String(count);
+}
+
+/** The hover text for one line's entry (a `byLine` row, above): "N dumps,
+ *  last <ISO time>: <message>". `lastAt` of 0 (should not happen once a
+ *  dump has been written; a defensive read of a row this function did not
+ *  itself produce) reads as "an unknown time" rather than the 1970 epoch. */
+function hotspotHoverText(entry) {
+  const when = entry.lastAt > 0 ? new Date(entry.lastAt).toISOString() : "an unknown time";
+  return `${entry.count} dump${entry.count === 1 ? "" : "s"}, last ${when}: ${entry.lastMessage || "(no message)"}`;
+}
+
 /** A *.osdnb file's own JSON (`{cells: [{kind: "code"|"markdown", value,
  *  language?}]}`) into `[{kind, language, value}]` -- close to `vscode.
  *  NotebookData`'s own cells but without the `vscode` module, so
@@ -677,4 +785,5 @@ function readerFilePattern(reader) {
 module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
-  htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson};
+  htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson,
+  HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText};
