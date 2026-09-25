@@ -2,6 +2,7 @@ import {expect} from "chai";
 import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {createServer} from "node:net";
 import {spawn} from "node:child_process";
 import {ServingRuntime, liveChildren} from "../tools/osd-runtime.mjs";
 
@@ -414,6 +415,39 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
       const read = await get(runtime.url, "/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T7778')?$format=json");
       expect(read.status, "an in-memory database does not carry a row across a recycle").to.equal(404);
     } finally {
+      await runtime.stop();
+    }
+  });
+
+  // docs/debugging-abap.md: the child runs the transpiled ABAP, the
+  // supervisor (this process, or the façade in test/start.mjs) never does,
+  // so OSD_INSPECT must reach only the child's NODE_OPTIONS -- read from
+  // process.env, the way `OSD_INSPECT=9229 npm start` sets it for the whole
+  // invocation, not from ServingRuntime's own `env` option (which is the
+  // child's env already, not this process's).
+  it("OSD_INSPECT opens the V8 inspector on the child, not on this process", async () => {
+    const inspectPort = await new Promise((resolve, reject) => {
+      const probe = createServer();
+      probe.on("error", reject);
+      probe.listen(0, "127.0.0.1", () => {
+        const {port} = probe.address();
+        probe.close(() => resolve(port));
+      });
+    });
+    const before = process.env.NODE_OPTIONS;
+    process.env.OSD_INSPECT = String(inspectPort);
+    const runtime = new ServingRuntime({env: {STG_DB: "sqlite", STG_DB_PATH: ""}});
+    try {
+      await runtime.start();
+      const list = await (await fetch(`http://127.0.0.1:${inspectPort}/json/list`)).json();
+      expect(list, "the child's own inspector answers").to.have.lengthOf.at.least(1);
+      expect(list[0].url).to.contain("osd-serve.mjs");
+      // this process asked the child to open an inspector; its own
+      // NODE_OPTIONS is untouched, because #spawnOne only ever builds an
+      // env object for the child -- it never writes back to process.env
+      expect(process.env.NODE_OPTIONS).to.equal(before);
+    } finally {
+      delete process.env.OSD_INSPECT;
       await runtime.stop();
     }
   });
