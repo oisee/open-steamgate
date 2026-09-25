@@ -131,6 +131,44 @@ describe("the editor", function () {
     expect(page, "and the display is not shown twice").to.not.contain('<pre class="src">');
   });
 
+  it("draws the buttons the host says it can do, and on Node that is all three", async () => {
+    // STORE CAPABILITIES decides them: OSGo cannot check or activate, and
+    // a button that could only ever be refused is not drawn there
+    const page = await (await fetch(`${BASE}?type=CLAS&name=${OBJECT}&change=x`)).text();
+    expect(page).to.contain('value="check">Check</button>');
+    expect(page).to.contain('value="save">Save</button>');
+    expect(page).to.contain('value="activate">Activate</button>');
+  });
+
+  it("a host with no store to call says so instead of dumping", async function () {
+    // On a system there is no STORE destination: the call comes back as
+    // COMMUNICATION_FAILURE, and the screen used to have no EXCEPTIONS for
+    // it, which is a short dump there. Simulated here with a destination
+    // that answers the way a missing one does on a system; only an inline
+    // server has its runtime in this process to swap it in.
+    const destinations = globalThis.abap?.context?.RFCDestinations;
+    if (destinations?.STORE === undefined) this.skip();
+    const real = destinations.STORE;
+    // a classic exception, the way the runtime raises one: the transpiled
+    // CALL FUNCTION maps its name to the EXCEPTIONS clause's sy-subrc
+    destinations.STORE = {
+      call: async () => {
+        throw new globalThis.abap.ClassicError({classic: "COMMUNICATION_FAILURE"});
+      },
+    };
+    try {
+      const list = await fetch(`${BASE}?q=OSD_ST05`);
+      expect(list.status, "an answer, not a dump").to.equal(200);
+      const text = await list.text();
+      expect(text).to.contain("The STORE destination did not answer");
+      expect(text, "and no list pretending the system is empty").to.not.match(/\d+ shown of \d+ objects/);
+      const box = await (await fetch(`${BASE}?type=CLAS&name=${OBJECT}&change=x`)).text();
+      expect(box, "and no button that would only fail again").to.not.contain("<button type=\"submit\" name=\"do\"");
+    } finally {
+      destinations.STORE = real;
+    }
+  });
+
   it("ships no JavaScript, like the rest of these screens", async () => {
     const page = await (await fetch(`${BASE}?type=CLAS&name=${OBJECT}`)).text();
     expect(page.toLowerCase(), "a screen that is a form and a link needs none")

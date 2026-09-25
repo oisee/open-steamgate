@@ -29,10 +29,17 @@ import {snapshotOf, changedSince} from "./osd-generation-diff.mjs";
 import {objectOf} from "./osd-inputs.mjs";
 import {basename, join} from "node:path";
 
-// TOKENS was a seventh until 2026-09-25: the editor colours in ABAP now
+// TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
 // command that needed a parse per display is gone (host-tools review S1/C2)
-const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE"];
+const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES"];
+
+/** What this host can do, as the screen asks it (CAPABILITIES, EV_NOTE):
+ *  the editor draws a button only for a command named here. Node holds the
+ *  compiler and the build, so it offers all five; a host that cannot check
+ *  or activate (OSGo, a built binary) leaves them out and the screen shows
+ *  no button that would only be refused (host-tools review 2026-09-25, D2). */
+export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE"];
 
 export class StoreDestination {
   /**
@@ -97,6 +104,7 @@ export class StoreDestination {
     const started = Date.now();
     try {
       switch (command) {
+        case "CAPABILITIES": return {EV_NOTE: CAPABILITIES.join(" ")};
         case "LIST": return this.#list(signature);
         case "READ": return this.#read(type, name, include);
         case "WRITE": return this.#write(type, name, include, source, started);

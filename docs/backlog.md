@@ -504,6 +504,26 @@ G.8  SE80 in the screen: edit ABAP, CDS and AMDP                         [S]
      │  same colours on every host and on a system, and TOKENS is gone from
      │  the Node store (the Go store's refusal of it is a follow-up on
      │  `spike/go-backend`)
+     ├─ **the buttons are the host's answer -- 2026-09-25** (host-tools
+     │  review D2). `STORE CAPABILITIES` names the commands a host does
+     │  (`EV_NOTE`, blank-separated); `ZCL_OSD_EDIT` draws Check, Save and
+     │  Activate only for those. Node answers all five; OSGo answers
+     │  `LIST READ WRITE`, since it carries no compiler and is a built
+     │  generation, so its screen offers Save and says the rest waits for a
+     │  build. A host from before the question ("unknown store command")
+     │  gets the five it always offered. CHECK and ACTIVATE themselves are
+     │  deferred to the incremental rebuild, and the parity rule
+     │  `compiler-deferred` keeps the one CHECK test out of the headline
+     │  ├─ **and a system with no STORE destination gets a sentence, not a
+     │  │  dump.** The call now has `EXCEPTIONS system_failure /
+     │  │  communication_failure ... MESSAGE`, which is how a remote call to
+     │  │  a destination that is not there comes back on a system; before,
+     │  │  that was a short dump. What a system raises for a missing SM59
+     │  │  entry is **not measured yet**; the test fakes COMMUNICATION_FAILURE
+     │  └─ on this runtime a destination missing from
+     │     `abap.context.RFCDestinations` is a plain JavaScript `Error`, not
+     │     an ABAP exception, so no ABAP can catch it; every OSD host installs
+     │     STORE, so that path is not reached here
      ├─ **wave 3's first item, from fable-osd using the screen** (the way a
      │  defect should be found) -- **DONE 2026-09-19**: the default list is
      │  cut at 300 and the types sort together, so 607 classes filled it and
