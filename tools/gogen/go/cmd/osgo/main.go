@@ -23,7 +23,6 @@ import (
 	"flag"
 	"fmt"
 	"html"
-	"io"
 	"log"
 	"mime"
 	"net"
@@ -502,12 +501,6 @@ func main() {
 	}
 	odata := icfHandler("ZCL_STG_HTTP_HANDLER", odataBase, odataDump)
 	status := statusHost{port: *port, root: *root, dbFile: *dbFile, started: started}
-	// the SEGW editor's dev-time seam (test/start.mjs "segw-generate",
-	// tools/segw-editor.mjs): the rows GenerateSet gives, read through this
-	// server's own URL, written to <root>/gen/segw-editor/<project>/;
-	// Generate itself is the service's ABAP, only the file system is the
-	// host's. A local-only route, as on Node
-	routes = append(routes, route{"/segw/generate/", false, segwGenerate(*root, *port)})
 	routes = append(routes, route{statusODataPath, false, odata})
 	routes = append(routes, route{odataBase + "/", false, odata})
 	// every route under a path test/start.mjs refreshes the status tables
@@ -584,70 +577,4 @@ func main() {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
-}
-
-// segwGenerate is POST /segw/generate/<project>: what tools/segw-editor.mjs
-// generateProject does on Node, the same JSON back ({project, folder,
-// files, warnings}, folder relative to the checkout)
-func segwGenerate(root string, port int) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
-			notFound(w, r)
-			return
-		}
-		project, _ := url.PathUnescape(strings.TrimPrefix(r.URL.Path[len("/segw/generate/"):], "/"))
-		if project == "" || strings.ContainsAny(project, "/\\.") {
-			http.Error(w, "no project", 400)
-			return
-		}
-		fail := func(err error) {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(500)
-			w.Write([]byte(err.Error()))
-		}
-		u := fmt.Sprintf("http://127.0.0.1:%d/sap/opu/odata/sap/ZSTG_SEGW_SRV/GenerateSet?$filter=%s&$format=json", port, strings.ReplaceAll(url.QueryEscape("Project eq '"+project+"'"), "+", "%20"))
-		req, _ := http.NewRequest("GET", u, nil)
-		req.Header.Set("Accept", "application/json")
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			fail(err)
-			return
-		}
-		defer res.Body.Close()
-		var body struct {
-			D struct {
-				Results []struct{ Name, Content string } `json:"results"`
-			} `json:"d"`
-		}
-		if res.StatusCode != 200 {
-			b := new(strings.Builder)
-			io.Copy(b, res.Body)
-			fail(fmt.Errorf("GET GenerateSet for %s: %d %s", project, res.StatusCode, b.String()))
-			return
-		}
-		if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
-			fail(err)
-			return
-		}
-		folder := path.Join("gen/segw-editor", strings.ToLower(project))
-		dir := filepath.Join(root, filepath.FromSlash(folder))
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			fail(err)
-			return
-		}
-		files := map[string]string{}
-		for _, f := range body.D.Results {
-			if strings.ContainsAny(f.Name, "/\\") {
-				fail(fmt.Errorf("a generated file name with a path: %s", f.Name))
-				return
-			}
-			if err := os.WriteFile(filepath.Join(dir, f.Name), []byte(f.Content), 0o644); err != nil {
-				fail(err)
-				return
-			}
-			files[f.Name] = f.Content
-		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		json.NewEncoder(w).Encode(map[string]any{"project": project, "folder": folder, "files": files, "warnings": []string{}})
-	}
 }
