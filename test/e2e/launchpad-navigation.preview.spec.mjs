@@ -40,6 +40,10 @@ registerLaunchpadNavigationTests({
 // The preview has no ADT facade, so the Workbench would open and then fail
 // on every call. The tile is greyed instead, like the AMDP one.
 previewTest("launchpad: the Workbench tile is greyed where there is no ADT", async ({launchpadPage: page}) => {
+  // and without asking: the preview knows it has no facade, so a probe
+  // could only ever be answered 404
+  const asked = [];
+  page.on("request", (r) => { if (r.url().includes("/sap/bc/adt/")) asked.push(`${r.method()} ${r.url()}`); });
   await openLaunchpad(page);
   const shellTile = page.locator(".sapUshellTile", {hasText: /Workbench/}).first();
   const tile = shellTile.locator(".sapMGT");
@@ -48,4 +52,5 @@ previewTest("launchpad: the Workbench tile is greyed where there is no ADT", asy
   await expect(tile).toHaveAttribute("aria-disabled", "true");
   await expect(tile.locator(".sapMTileCntFooterTextColorError")).toContainText("no ADT here");
   await expect(shellTile.locator("a")).toHaveCount(0);
+  expect(asked, "the preview asked for ADT").toEqual([]);
 });

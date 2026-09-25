@@ -129,6 +129,16 @@ sap.ui.define([], function () {
         });
       });
     }
+    // The browser preview is a host that knows it has no ADT: the page is
+    // controlled by its service worker (web/index.html registers sw.js),
+    // and the facade is Node code that is never bundled into it. Asking
+    // there would be a request whose only possible answer is a 404, so the
+    // tile is greyed without one.
+    var worker = navigator.serviceWorker && navigator.serviceWorker.controller;
+    if (worker && /\/sw\.js$/.test(worker.scriptURL)) {
+      grey();
+      return Promise.resolve();
+    }
     return fetch(atMount("/sap/bc/adt/core/discovery"), {method: "HEAD"}).then(function (r) {
       if (r.status !== 200) {
         grey();
