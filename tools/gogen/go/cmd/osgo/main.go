@@ -361,6 +361,12 @@ func main() {
 	dbFile := flag.String("db", "", "an SQLite file (WAL) instead of the in-memory database; seeded once, when it has no tables, and refused when another build seeded it")
 	root := flag.String("root", osgRoot, "the checkout whose webapp/ is served")
 	media := flag.String("media", "", "the SMW0 media directory (w3mi.json and the data files); default media/ beside the binary when it is there")
+	// HTTPS beside HTTP, the way a system answers on 443nn next to 80nn: the
+	// same handler, one more listener. No certificate is made here; a
+	// self-signed pair is enough for a device on a LAN
+	tlsPort := flag.Int("tls-port", 0, "an HTTPS port beside the HTTP one (0: none); needs -tls-cert and -tls-key")
+	tlsCert := flag.String("tls-cert", "", "the certificate (PEM) for -tls-port")
+	tlsKey := flag.String("tls-key", "", "its private key (PEM)")
 	flag.Parse()
 	started := time.Now()
 	// OSGO_PPROF=127.0.0.1:<port>: Go's profiler on a listener of its own,
@@ -570,6 +576,14 @@ func main() {
 		log.Printf("status refresh: %v", err)
 	} else {
 		log.Printf("status       %d rows of this process in the status tables, refreshed before each %s request", rows, statusODataPath)
+	}
+	if *tlsPort > 0 {
+		if *tlsCert == "" || *tlsKey == "" {
+			log.Fatal("-tls-port needs -tls-cert and -tls-key")
+		}
+		secure := &http.Server{Addr: fmt.Sprintf("%s:%d", *addr, *tlsPort), Handler: mux, ReadHeaderTimeout: 30 * time.Second}
+		go func() { log.Fatal(secure.ListenAndServeTLS(*tlsCert, *tlsKey)) }()
+		log.Printf("Listening on https://localhost:%d/", *tlsPort)
 	}
 	log.Fatal(server.Serve(ln))
 }
