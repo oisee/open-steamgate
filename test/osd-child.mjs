@@ -9,6 +9,9 @@ import {mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {services} from "../tools/osd-icf.mjs";
+import {createRequire} from "node:module";
+
+const {Osd, objectOf, outcomes} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 
 const PORT = Number(process.env.STG_PORT ?? 3091) + 7;
 const BASE = `http://localhost:${PORT}`;
@@ -160,6 +163,29 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
       // matters is that the child answered it, which its header proves
       expect(res.headers.get("x-osd-generation"), `${service.path} (${service.handler}) answered by the child, status ${res.status}`).to.match(/^[0-9a-f]{16}$/);
     }
+  });
+
+  it("the child's own doors (/osd/serving, /osd/dumps, /osd/sql) answer through the parent", async () => {
+    const serving = await fetch(`${BASE}/osd/serving`);
+    expect(serving.status, "/osd/serving").to.equal(200);
+    expect(await serving.json()).to.be.an("object");
+    const dumps = await fetch(`${BASE}/osd/dumps`);
+    expect(dumps.status, "/osd/dumps").to.equal(200);
+    expect(await dumps.json()).to.be.an("array");
+    const sql = await fetch(`${BASE}/osd/sql`, {method: "POST", headers: {"content-type": "application/json"},
+      body: JSON.stringify({sql: "SELECT COUNT(*) AS n FROM zstg_demo"})});
+    expect(sql.status, `/osd/sql: ${await sql.clone().text()}`).to.equal(200);
+  });
+
+  it("the VS Code extension's client discovers and runs one method through the parent", async () => {
+    const client = new Osd(BASE);
+    expect((await client.serving()).generation).to.be.a("string");
+    const object = objectOf("test/unit/zcl_osd_form_test.clas.testclasses.abap");
+    const found = await client.discover(object);
+    const testClass = found.classes.find((c) => c.name === "LTCL_FORM");
+    expect(testClass.methods.map((m) => m.name)).to.include("A_PAIR");
+    const results = outcomes(await client.run(object, "LTCL_FORM", "A_PAIR"));
+    expect(results.map((r) => [r.method, r.passed])).to.deep.equal([["A_PAIR", true]]);
   });
 
   it("an ADT answer names the same generation the child runs", async () => {

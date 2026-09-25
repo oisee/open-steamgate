@@ -165,7 +165,11 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   fork, never fires it; `ci.yml` and `web.yml` do have `pull_request`, which
   is why such a PR still looks green. The check that did not run and the
   check that passed are the same colour. After pushing a branch, confirm
-  **Regression** is in the checks list and not only **CI**. That rule holds for
+  **Regression** is in the checks list and not only **CI**, and then read
+  its verdict off the red/green table in the bot comment, not off the
+  check's colour: the workflow concludes "success" when downstream repos
+  fail (#1916, 2026-09-25: four red rows, three of them out of memory,
+  under a green rollup). That rule holds for
   `abaplint/transpiler`, where we have push rights; it **cannot** be followed for
   `abaplint/abaplint`, where we do not, and whose regression workflow skips forks
   by an explicit condition. `npm run parked` prints which rule applies to which

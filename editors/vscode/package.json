@@ -1,0 +1,28 @@
+{
+  "name": "osd-vscode",
+  "displayName": "open-steamgate (osd)",
+  "description": "ABAP Unit in the Test Explorer, the serving generation and short dumps of a running osd",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "publisher": "open-steamgate",
+  "engines": {"vscode": "^1.88.0"},
+  "categories": ["Testing", "Other"],
+  "main": "./extension.js",
+  "activationEvents": ["workspaceContains:**/*.abap"],
+  "contributes": {
+    "configuration": {
+      "title": "osd",
+      "properties": {
+        "osd.url": {
+          "type": "string",
+          "default": "http://localhost:3030",
+          "description": "The listener of a running osd (npm start, build/osd up)."
+        }
+      }
+    },
+    "commands": [
+      {"command": "osd.showDumps", "title": "osd: Show short dumps"}
+    ]
+  }
+}

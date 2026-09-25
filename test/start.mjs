@@ -352,6 +352,14 @@ export function startServer(quiet) {
 
   if (runtime !== undefined) {
     app.all("/sap/opu/odata/sap/*", odataProxy(runtime));
+    // the doors the child implements itself (/osd/serving, /osd/dumps,
+    // /osd/sql) are declared for tools/osd-serve.mjs, and a client of this
+    // listener -- an editor's status bar, a dump list -- asks here, not at
+    // the child's loopback port. Forwarded by what the registry says that
+    // host serves, so a door added there needs no line here.
+    for (const node of declaredNodeList.filter((n) => n.type === "HOST" && n.implementedIn === "tools/osd-serve.mjs")) {
+      app.all(node.path, odataProxy(runtime));
+    }
     // STG_DEV=1: the disk is the other editor. A save becomes a check, a
     // build and a recycle of this runtime (tools/osd-dev.mjs), and the
     // runtime is started now rather than at the first request, so the first
