@@ -5,7 +5,6 @@ import {installSqlTrace, fileSink} from "../tools/osd-sql-trace.mjs";
 import {batchInserts} from "../tools/osd-batch-inserts.mjs";
 import {TraceRing, TraceDestination} from "../tools/osd-sql-trace-buffer.mjs";
 import {StoreDestination} from "../tools/osd-store-destination.mjs";
-import {ddicBinary} from "../gen/osd-ddic-binary.mjs";
 
 /** The trace a running system holds, for the ST05-shaped screen to read
  *  (backlog G.10). It is off until the screen turns it on, and the wrapper
@@ -201,6 +200,14 @@ export async function setup(abap, schemas, insert) {
   // kept between runs unless STG_DB_FRESH=1.
   if (process.env.STG_DB === "hana") {
     const {HanaDatabaseClient, hanaSchema, hanaInserts} = await import("../tools/hana-client.mjs");
+    // Which columns are byte strings is a generation artefact
+    // (tools/osd-ddic-binary.mjs writes it into gen/), so it is read from
+    // the generation this run belongs to, and only here, the one branch that
+    // uses it. A static import made every bundle of this module -- the Bun
+    // binary, the preview -- need gen/ at bundle time and froze whatever it
+    // held then; the specifier is a variable so no bundler resolves it.
+    const ddicBinaryModule = "../gen/osd-ddic-binary.mjs";
+    const {ddicBinary} = await import(/* webpackIgnore: true */ ddicBinaryModule);
     db = new HanaDatabaseClient({trace: process.env.STG_DB_TRACE === "1", ddicBinary});
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
