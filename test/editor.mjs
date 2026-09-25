@@ -98,14 +98,18 @@ describe("the editor", function () {
     expect(readFileSync(FILE, "utf8"), "and the file is what it was").to.equal(source);
   });
 
-  it("shows the source coloured by the parser, and the text is the text", async () => {
+  it("shows the source coloured by the keyword list, and the text is the text", async () => {
     // Display and change, the pair the original had. The colouring is done
-    // where the parse already is -- so a keyword is a keyword because the
-    // grammar matched it as one, not because it is in a list somebody keeps.
+    // in ABAP, by ZCL_OSD_ABAP_TOKENS: a character scanner over abapGit's
+    // keyword list, so a keyword is a word in that list, wherever it stands.
+    // It used to be the host's parser (STORE TOKENS), grammar-exact and
+    // present only where the host had one; giving that up for the same
+    // colours on every host was decided on purpose (host-tools review
+    // 2026-09-25, S1).
     const page = await (await fetch(`${BASE}?type=CLAS&name=${OBJECT}`)).text();
     const pre = /<pre class="src">([\s\S]*?)<\/pre>/.exec(page)?.[1] ?? "";
     expect(pre, "the display is rendered").to.not.equal("");
-    expect(pre, "a keyword the grammar matched").to.contain('<span class="tkeyword">CLASS</span>');
+    expect(pre, "a word in the keyword list").to.contain('<span class="tkeyword">CLASS</span>');
     expect(pre, "and a name that is not one").to.contain('<span class="tname">zcl_osd_st05</span>');
     expect(pre, "comments are comments").to.match(/class="tcomment"/);
 

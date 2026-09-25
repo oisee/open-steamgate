@@ -327,45 +327,14 @@ ENDCLASS.
     expect(store.stateOf(store.find("CLAS", NAME)).version).to.equal("inactive");
   });
 
-  it("TOKENS answers which words are keywords, and the PARSER decides that", async () => {
-    // not a word list: abaplint's statement tree distinguishes a token the
-    // grammar matched as a keyword (TokenNode) from one matched by a pattern
-    // (TokenNodeRegex), so `VALUE` is a keyword in `DATA x TYPE i VALUE 2`
-    // and a name in a method called `value`. A list would have to be kept in
-    // step with the language; this cannot drift.
-    const source = `CLASS ${NAME.toLowerCase()} DEFINITION PUBLIC CREATE PUBLIC.
-  PUBLIC SECTION.
-* a comment
-    METHODS answer RETURNING VALUE(rv_answer) TYPE i.
-ENDCLASS.
-
-CLASS ${NAME.toLowerCase()} IMPLEMENTATION.
-  METHOD answer.
-    rv_answer = 42.
-  ENDMETHOD.
-ENDCLASS.
-`;
-    const answer = await call(destination, {IV_COMMAND: "TOKENS", IV_NAME: NAME, IV_TYPE: "CLAS", IV_SOURCE: source});
-    expect(answer.EV_ERROR).to.equal("");
-    const at = (line, col) => answer.ET_TOKEN.find((t) => t.LINE === line && t.COL === col);
-    expect(at(1, 1), "CLASS").to.include({KIND: "keyword", LEN: 5});
-    expect(at(1, 7), "the class's own name is not a keyword").to.include({KIND: "name"});
-    expect(at(3, 1), "a comment is a comment").to.include({KIND: "comment"});
-    expect(at(4, 5), "METHODS").to.include({KIND: "keyword"});
-    expect(at(9, 17), "a number is not a name either").to.include({KIND: "name", LEN: 2});
-    expect(answer.ET_TOKEN.filter((t) => t.KIND === "keyword").length).to.be.greaterThan(8);
-  });
-
-  it("and it colours what is in the BOX, not what is on disk", async () => {
-    // the same rule CHECK follows: a screen colours what the person is
-    // looking at. And the file on disk is put back afterwards, or the next
-    // reader of the registry sees the draft
-    const edited = CLEAN.replace("rv_answer = 42.", "rv_answer = 43.");
-    await call(destination, {IV_COMMAND: "TOKENS", IV_NAME: NAME, IV_TYPE: "CLAS", IV_SOURCE: edited});
-    const after = await call(destination, {IV_COMMAND: "READ", IV_NAME: NAME, IV_TYPE: "CLAS"});
-    expect(after.EV_SOURCE, "the draft did not reach the disk").to.equal(CLEAN);
-    const clean = await call(destination, {IV_COMMAND: "CHECK", IV_NAME: NAME, IV_TYPE: "CLAS"});
-    expect(clean.EV_ACTIVE, "and the registry was put back").to.equal("X");
+  it("TOKENS is not a command any more: the editor colours in ABAP", async () => {
+    // The screen scans its own text (ZCL_OSD_ABAP_TOKENS, a word list, the
+    // same on every host), so the host no longer parses the system to colour
+    // a display. A caller that still asks is told so by name, the way any
+    // unknown command is (host-tools review 2026-09-25, S1/C2).
+    const answer = await call(destination, {IV_COMMAND: "TOKENS", IV_NAME: NAME, IV_TYPE: "CLAS", IV_SOURCE: CLEAN});
+    expect(answer.EV_ERROR).to.match(/unknown store command TOKENS/);
+    expect(answer.ET_TOKEN).to.have.length(0);
   });
 
   it("an object nobody has is NAMED, not answered with an empty source", async () => {
