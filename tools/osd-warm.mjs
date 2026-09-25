@@ -177,6 +177,13 @@ ENDCLASS.`);
 }
 
 const key = (o) => o.getType() + " " + o.getName();
+const warmDiffers = (generationDir) => {
+  try {
+    return JSON.parse(readFileSync(`${generationDir}.warm.json`, "utf8")).differs !== undefined;
+  } catch {
+    return false;
+  }
+};
 const statKey = (file) => {
   try {
     const st = statSync(file);
@@ -507,6 +514,13 @@ export class WarmCompiler {
       mark("outputs");
 
       const target = join(paths.byInput, hash);
+      // a generation a cold transpile was found to differ from is never
+      // taken again: it is built anew (it cannot be the live one here, which
+      // the store has rebuilt cold)
+      if (hash !== from && warmDiffers(target)) {
+        rmSync(target, {recursive: true, force: true});
+        rmSync(`${target}.warm.json`, {force: true});
+      }
       let cached = existsSync(join(target, "manifest.json"));
       // the roots the modules name: the live generation's, and whatever a
       // rebuilt module names that it did not

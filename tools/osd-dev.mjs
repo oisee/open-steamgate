@@ -58,8 +58,8 @@ export function devLoop(options = {}) {
       const result = await publish();
       const t = result.transpile ?? {};
       if (result.ok !== true) {
-        log(`${t.warm ? "check" : "build"} failed after ${t.ms ?? "?"} ms: ${result.error ?? t.error ?? "see the output below"}; the running system is untouched`);
-        return {ok: false, stage: t.warm ? "check" : "build", result};
+        log(`${t.check ? "check" : "build"} failed after ${t.ms ?? "?"} ms: ${result.error ?? t.error ?? "see the output below"}; the running system is untouched`);
+        return {ok: false, stage: t.check ? "check" : "build", result};
       }
       if (!store.completeActivations(checked)) {
         log("source changed during build; leaving the new edit inactive for the next pass");

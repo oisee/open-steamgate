@@ -276,6 +276,23 @@ describe("tools/osd-warm: the real path on a small tree", function () {
     await warm.prime();
   });
 
+  it("never takes again a generation a cold transpile was found to differ from", async () => {
+    const before = liveHash(root);
+    edit("zcl_ws_alone.clas.abap", "rv = 4.", "rv = 5.");
+    const bad = await warm.build();
+    // as the store marks it when verify() says `differs`
+    const side = join(layout(root).byInput, `${bad.hash}.warm.json`);
+    writeFileSync(side, JSON.stringify({...JSON.parse(readFileSync(side, "utf8")), differs: ["x"]}));
+    writeFileSync(join(layout(root).byInput, bad.hash, "output", "zcl_ws_alone.clas.mjs"), "// the wrong bytes");
+    edit("zcl_ws_alone.clas.abap", "rv = 5.", "rv = 4.");
+    expect((await warm.build()).hash).to.equal(before);
+    edit("zcl_ws_alone.clas.abap", "rv = 4.", "rv = 5.");
+    const again = await warm.build();
+    expect(again.hash).to.equal(bad.hash);
+    expect(again.cached).to.equal(false);
+    expect(readFileSync(join(root, "output", "zcl_ws_alone.clas.mjs"), "utf8")).to.include("IntegerFactory.get(5)");
+  });
+
   it("refuses a new file, and leaves the live generation alone", async () => {
     const live = liveHash(root);
     writeFileSync(join(root, "src", "zcl_ws_new.clas.abap"), SOURCES["zcl_ws_alone.clas.abap"].replaceAll("zcl_ws_alone", "zcl_ws_new"));

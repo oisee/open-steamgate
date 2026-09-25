@@ -1028,7 +1028,16 @@ export class ObjectStore {
     } else if (grown > WARM_HEAP_MB * 1024 * 1024) {
       this.#catchUp(`a heap ${Math.round(grown / 1048576)} MB larger than at the first swap`);
     } else {
-      w.timer = setTimeout(() => this.#catchUp("quiet"), WARM_QUIET_MS);
+      w.timer = setTimeout(() => {
+        // the live generation is compared once the saves have stopped, if
+        // the comparison of it was cut short by the next save
+        const live = this.served?.generation;
+        if (live !== undefined && w.compiler?.unverified.has(live)) {
+          w.next = live;
+          this.#verifyNext();
+        }
+        this.#catchUp("quiet");
+      }, WARM_QUIET_MS);
       w.timer.unref?.();
     }
   }
@@ -1369,7 +1378,10 @@ export class ObjectStore {
               unverified: w.compiler.unverified.has(r.hash)};
           } catch (error) {
             if (error.code !== "NOT_WARM") {
-              return {ok: false, ms: Date.now() - started, objects: 0, warm: true, output: String(error.output || error.message).slice(-2000), error: error.message};
+              // `check`: the transpiler refused the change; anything else
+              // (BUSY, a disk that failed) is a build that did not happen
+              return {ok: false, ms: Date.now() - started, objects: 0, warm: true, check: error.check === true,
+                output: String(error.output || error.message).slice(-2000), error: error.message};
             }
             w.reason = error.message;
             w.compiler.drop();
