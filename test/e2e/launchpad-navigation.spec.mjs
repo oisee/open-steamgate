@@ -18,3 +18,16 @@ test("launchpad: keeps an unavailable capability visible and disabled", async ({
   await expect(tile.locator(".sapMTileCntFooterTextColorError")).toContainText("no SQLScript engine here");
   await expect(shellTile.locator("a")).toHaveCount(0);
 });
+
+// The Workbench speaks ADT, and this host serves the facade: its tile stays
+// live here. Where core/discovery is not a 200 (OSGo, the browser preview)
+// launchpad.js greys it the way it greys the AMDP tile.
+test("launchpad: the Workbench tile is live where ADT answers", async ({page}) => {
+  await openLaunchpad(page);
+  const discovery = await page.request.head("/sap/bc/adt/core/discovery");
+  expect(discovery.status()).toBe(200);
+  const shellTile = page.locator(".sapUshellTile", {hasText: /Workbench/}).first();
+  await expect(shellTile).toBeVisible();
+  await expect(shellTile.locator(".sapMGT")).not.toHaveClass(/sapMGTStateDisabled/);
+  await expect(shellTile).not.toContainText("no ADT here");
+});

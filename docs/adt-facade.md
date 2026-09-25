@@ -105,6 +105,31 @@ advertised collection still says nothing about every operation or document
 version under it. A run of vsp certifies vsp; Eclipse, VS Code and an abapGit
 adapter each need their own run.
 
+### Five endpoints that are OSD's, not ADT's: do not carry them into the proxy
+
+The Workbench app (`webapp/workbench/`) reads five endpoints that OSD made up
+and put under the ADT prefix. A real system answers 404 on each of them, so
+the ADT proxy (`ultra/adt-proxy`, the planned way to reach a real system) must
+**not** forward, fake or reimplement them (host-tools review 2026-09-25, H7a):
+
+| Endpoint | What it answers here |
+| --- | --- |
+| `GET /sap/bc/adt/core/http/build` | the facade's build stamp and the generation it serves |
+| `GET /sap/bc/adt/core/http/git/object` | the git state of an object's files in the host checkout |
+| `GET /sap/bc/adt/core/http/git/object/revision` | one revision of an object's source out of git |
+| `GET /sap/bc/adt/core/http/unit/object` | the test classes and methods of an object |
+| `POST /sap/bc/adt/core/http/unit/object/run` | a run of those tests in a child runtime |
+
+The genuine ADT endpoints nearby (`core/http/sessions`,
+`core/http/systeminformation`, `core/http/reentranceticket`) are not in this
+list. If the Workbench survives the proxy decision, these five become ABAP
+later (the generation is already in sysinfo, git as a STORE command, unit as
+an ABAP runner), not proxy routes. Until then the launchpad greys the
+Workbench tile wherever `HEAD /sap/bc/adt/core/discovery` is not a 200
+(OSGo, the browser preview), the same way it greys the AMDP tile without
+an engine. The Workbench stays: it is the editor meant for a real system
+through that proxy.
+
 ### The six object types named in the abapGit roadmap
 
 The matrix describes the routes as mounted in `tools/adt-facade.mjs`. It does
