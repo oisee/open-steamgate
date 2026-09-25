@@ -337,6 +337,14 @@ ENDCLASS.
     expect(answer.ET_TOKEN).to.have.length(0);
   });
 
+  it("CAPABILITIES names what this host can do, so a screen draws only those buttons", async () => {
+    // Node holds the compiler and the build, so all five; OSGo answers
+    // without CHECK and ACTIVATE and the editor then offers neither
+    const answer = await call(destination, {IV_COMMAND: "CAPABILITIES"});
+    expect(answer.EV_ERROR).to.equal("");
+    expect(answer.EV_NOTE.split(" ")).to.deep.equal(["LIST", "READ", "WRITE", "CHECK", "ACTIVATE"]);
+  });
+
   it("an object nobody has is NAMED, not answered with an empty source", async () => {
     const answer = await call(destination, {IV_COMMAND: "READ", IV_NAME: "ZCL_NOT_HERE_AT_ALL", iv_type: "CLAS"});
     expect(answer.EV_ERROR).to.match(/ZCL_NOT_HERE_AT_ALL/);

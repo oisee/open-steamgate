@@ -73,6 +73,21 @@ CLASS zcl_osd_edit DEFINITION PUBLIC CREATE PUBLIC.
       RETURNING
         VALUE(rs_answer) TYPE ty_answer.
 
+*   which of the store's commands this host can do, as a blank-separated
+*   list of their names: the buttons are drawn from it, so a host that
+*   cannot check or activate (OSGo, a built binary) shows no button that
+*   would only ever be refused
+    CLASS-METHODS capabilities
+      RETURNING
+        VALUE(rv_caps) TYPE string.
+
+    CLASS-METHODS can
+      IMPORTING
+        iv_caps       TYPE string
+        iv_command    TYPE string
+      RETURNING
+        VALUE(rv_yes) TYPE abap_bool.
+
     CLASS-METHODS object_list
       IMPORTING
         iv_filter      TYPE string
@@ -143,6 +158,7 @@ CLASS zcl_osd_edit IMPLEMENTATION.
 
   METHOD store.
     DATA lx_root TYPE REF TO cx_root.
+    DATA lv_msg  TYPE c LENGTH 255.
 
     TRY.
         CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'
@@ -166,13 +182,56 @@ CLASS zcl_osd_edit IMPLEMENTATION.
                     ev_error    = rs_answer-error
           TABLES    et_object   = rs_answer-objects
                     et_issue    = rs_answer-issues
-                    et_type     = rs_answer-types.
+                    et_type     = rs_answer-types
+          EXCEPTIONS
+                    system_failure        = 1 MESSAGE lv_msg
+                    communication_failure = 2 MESSAGE lv_msg
+                    OTHERS                = 3.
+*       **On a system there is no STORE destination**: the store is the
+*       tree an OSD host was built from, and a system keeps its sources in
+*       its own repository. A remote call to a destination that is not
+*       there comes back as one of the two RFC exceptions -- and without
+*       them it is a short dump, which is what this screen did before
+*       (host-tools review 2026-09-25). So it says what happened instead.
+*       What a system raises for a missing destination is not measured yet.
+        IF sy-subrc <> 0.
+          rs_answer-error = |The STORE destination did not answer (sy-subrc { sy-subrc }| &&
+                            |{ COND string( WHEN lv_msg IS INITIAL THEN `` ELSE |: { lv_msg }| ) }). | &&
+                            `This screen edits the source tree of an OSD host through that destination; ` &&
+                            `a system without it keeps its sources in its own repository (SE80, ADT).`.
+        ENDIF.
       CATCH cx_root INTO lx_root.
 *       The same rule as the AMDP tile and the trace screen: the ABAP guards
 *       itself, and what is thrown has to SAY why. An exception with no
 *       message is a 500 that has learnt to answer 200.
         rs_answer-error = lx_root->get_text( ).
+        IF rs_answer-error IS INITIAL.
+          rs_answer-error = `ZOSD_STORE raised an exception without a text: no store answered this call`.
+        ENDIF.
     ENDTRY.
+  ENDMETHOD.
+
+  METHOD capabilities.
+    DATA ls_answer TYPE ty_answer.
+
+    ls_answer = store( iv_command = `CAPABILITIES` ).
+    IF ls_answer-error IS INITIAL.
+      rv_caps = to_upper( ls_answer-note ).
+    ELSEIF ls_answer-error CS `unknown store command`.
+*     a host from before the question: it offered all five and refused
+*     what it could not do, so that is what it still gets
+      rv_caps = `LIST READ WRITE CHECK ACTIVATE`.
+    ENDIF.
+*   and no store at all is no buttons: the error is shown where the source
+*   would be, and a button would only repeat it
+  ENDMETHOD.
+
+  METHOD can.
+    DATA lt_caps TYPE string_table.
+
+    SPLIT iv_caps AT ` ` INTO TABLE lt_caps.
+    READ TABLE lt_caps WITH KEY table_line = iv_command TRANSPORTING NO FIELDS.
+    rv_yes = boolc( sy-subrc = 0 ).
   ENDMETHOD.
 
   METHOD if_http_extension~handle_request.
@@ -326,9 +385,12 @@ CLASS zcl_osd_edit IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD editor.
-    DATA lv_head  TYPE string.
-    DATA lv_state TYPE string.
-    DATA lv_box   TYPE string.
+    DATA lv_head    TYPE string.
+    DATA lv_state   TYPE string.
+    DATA lv_box     TYPE string.
+    DATA lv_caps    TYPE string.
+    DATA lv_buttons TYPE string.
+    DATA lv_hint    TYPE string.
 
     IF is_answer-error IS NOT INITIAL.
       lv_head = |<div class="err"><b>The store refused.</b><div class="msg">{ esc( is_answer-error ) }</div></div>|.
@@ -347,19 +409,36 @@ CLASS zcl_osd_edit IMPLEMENTATION.
                |&amp;name={ esc( iv_name ) }&amp;change=x">Change</a>| &&
                |<span class="dim">coloured on the server, by a keyword list</span></div>|.
     ELSE.
+      lv_caps = capabilities( ).
+      IF can( iv_caps = lv_caps iv_command = `CHECK` ) = abap_true.
+        lv_buttons = `<button type="submit" name="do" value="check">Check</button>`.
+      ENDIF.
+      IF can( iv_caps = lv_caps iv_command = `WRITE` ) = abap_true.
+        lv_buttons = lv_buttons && `<button type="submit" name="do" value="save">Save</button>`.
+      ENDIF.
+      IF can( iv_caps = lv_caps iv_command = `ACTIVATE` ) = abap_true.
+        lv_buttons = lv_buttons && `<button type="submit" name="do" value="activate">Activate</button>`.
+      ENDIF.
+*     say what each costs, and say it only about the buttons that are there
+      IF can( iv_caps = lv_caps iv_command = `CHECK` ) = abap_true
+          AND can( iv_caps = lv_caps iv_command = `ACTIVATE` ) = abap_true.
+        lv_hint = `Check is a parse of the system, seconds. ` &&
+                  `Activate is that check over every caller and then a build, and a build ` &&
+                  `of changed sources is never cached.`.
+      ELSEIF can( iv_caps = lv_caps iv_command = `WRITE` ) = abap_true.
+        lv_hint = `This host is a built system: it can save a source but not check or activate it. ` &&
+                  `What is saved becomes active when the system is built again from this tree.`.
+      ELSE.
+        lv_hint = `Nothing here can be saved: this host has no store to write to.`.
+      ENDIF.
       lv_box =
         `<form method="post" action="">` &&
         |<input type="hidden" name="type" value="{ esc( iv_type ) }">| &&
         |<input type="hidden" name="name" value="{ esc( iv_name ) }">| &&
         |<input type="hidden" name="change" value="x">| &&
         |<textarea name="src" rows="28" spellcheck="false">{ esc( iv_source ) }</textarea>| &&
-        `<div class="bar">` &&
-        `<button type="submit" name="do" value="check">Check</button>` &&
-        `<button type="submit" name="do" value="save">Save</button>` &&
-        `<button type="submit" name="do" value="activate">Activate</button>` &&
-        `<span class="dim">Check is a parse of the system, seconds. ` &&
-        `Activate is that check over every caller and then a build, and a build ` &&
-        `of changed sources is never cached.</span>` &&
+        `<div class="bar">` && lv_buttons &&
+        |<span class="dim">{ esc( lv_hint ) }</span>| &&
         `</div></form>`.
     ENDIF.
 
