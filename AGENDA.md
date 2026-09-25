@@ -1030,6 +1030,10 @@ Missing, in order of use:
 
 ## Ideas parked (2026-09-11)
 
+The current register of ideas, with status and reason for each, is
+[`docs/ideas.md`](docs/ideas.md) (from 2026-09-25; ADRs 0003 and 0004).
+The entries below are the first round, kept as they were.
+
 - **DuckDB: done as a spike 2026-09-12** (section above). ClickHouse would
   be the same adapter shape without UPDATE/DELETE semantics; not started.
 - **SADL-lite: done 2026-09-12** (see the section above); joins and writes
