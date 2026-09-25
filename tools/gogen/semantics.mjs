@@ -125,6 +125,17 @@ const EXPECT = {
   // arithmetic is its move into an i (the last four bytes, signed) and
   // counts as an i for the calculation type; CONCATENATE IN BYTE MODE into
   // an x pads with 00 (sy-subrc 0) or cuts (sy-subrc 4)
+  // parity-wave2, A4H 2026-09-25 ($ZOSG_TMP_0084, ABAP Unit probes of these
+  // classes). FIND ... RESULTS into match_result / match_result_tab: POSIX
+  // leftmost-longest (a|ab takes ab), a group that did not take part is
+  // (-1,0), a FIRST that misses leaves the structure alone and an ALL that
+  // misses clears the table, empty matches listed (x* in abc four times;
+  // after bb of abbc the empty one at its end too). PCRE is leftmost-first
+  // with lazy quantifiers. JS's RegExp is leftmost-first for REGEX as well:
+  // a|ab gives 1,1 3,1 there (as FindStmt; the Go runtime is the exact one)
+  ZCL_GOGEN_T_FINDRES: {Go: "alt:0/2[0:1,2;0:3,2;] grp:0/0:1,1(-1,0)(1,1) nest:2[0:0,2(0,2)(0,1)(1,1);0:2,2(2,2)(2,1)(3,1);] wb:2[0:0,2;0:7,2;] sub:2[0:0,2;0:2,2;] ic:2[0:1,2;0:3,2;] uni:1[0:2,1;] opt:0/0:1,1(-1,0) opt2:2[0:0,1(-1,0);0:1,2(2,1);] miss1:4/0:7,1(-1,0) missall:4/0[] empty:0/4[0:0,0;0:1,0;0:2,0;0:3,0;] empty2:0/4[0:0,0;0:1,2;0:3,0;0:4,0;] w:2[0:0,3(0,3);0:4,3(4,3);] posix:1[0:0,4(0,1)(1,3);]",
+    JS: "alt:0/2[0:1,1;0:3,1;] grp:0/0:1,1(-1,0)(1,1) nest:2[0:0,2(0,2)(0,1)(1,1);0:2,2(2,2)(2,1)(3,1);] wb:2[0:0,2;0:7,2;] sub:2[0:0,2;0:2,2;] ic:2[0:1,2;0:3,2;] uni:1[0:2,1;] opt:0/0:1,1(-1,0) opt2:2[0:0,1(-1,0);0:1,2(2,1);] miss1:4/0:7,1(-1,0) missall:4/0[] empty:0/4[0:0,0;0:1,0;0:2,0;0:3,0;] empty2:0/4[0:0,0;0:1,2;0:3,0;0:4,0;] w:2[0:0,3(0,3);0:4,3(4,3);] posix:1[0:0,4(0,1)(1,3);]"},
+  ZCL_GOGEN_T_FINDPCRE: "alt:2[1,1;3,1;] grp:1[0,4(0,1)(1,3);] empty:4[0,0;1,2;3,0;4,0;] wb:2[0,2;7,2;] opt:1[1,1(-1,0);] lazy:3[0,1;1,1;2,1;] ic:2[1,2;3,2;]",
   ZCL_GOGEN_T_XARITH: "div:F6DC4190/-153337456 mod:00000002 mul:000003FC ff:FFFFFFFF/0 x1:256 x2:65536 x8:255 xs:256 p:11.50 f:10.25 div2:4",
   // CL_ABAP_ZIP=>SAVE of two files, run against SAP's own CL_ABAP_ZIP on
   // A4H ($ZOSG_TMP_0083) and open-abap-core's here: the same frame, entry

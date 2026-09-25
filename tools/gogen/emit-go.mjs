@@ -1591,6 +1591,29 @@ ${t}	}`));
       lines.push(`${t}\t} else {`, `${t}\t\ts.Sy.Subrc = 4`, `${t}\t}`, `${t}}`);
       return lines;
     }
+    // FIND ... RESULTS (parity-wave2): abap.FindResults gives each match as
+    // offset, length and a pair per group, in characters; the rows are
+    // built here in the target's own types. A FIRST that misses leaves the
+    // structure alone, an ALL that misses clears the table (A4H)
+    case "find_results": {
+      const n = ctx.loop++;
+      const f = st.f;
+      const rowGo = goType(st.row);
+      const subGo = goType(st.sub);
+      const fill = (r) => [`${t}\t\t${r}.${ident(f.LINE)} = 0`, `${t}\t\t${r}.${ident(f.OFFSET)} = fm${n}[0]`, `${t}\t\t${r}.${ident(f.LENGTH)} = fm${n}[1]`,
+        `${t}\t\t${r}.${ident(f.SUBMATCHES)} = nil`,
+        `${t}\t\tfor g := 2; g+1 < len(fm${n}); g += 2 {`,
+        `${t}\t\t\t${r}.${ident(f.SUBMATCHES)} = append(${r}.${ident(f.SUBMATCHES)}, ${subGo}{${ident(f.SOFFSET)}: fm${n}[g], ${ident(f.SLENGTH)}: fm${n}[g+1]})`,
+        `${t}\t\t}`];
+      const tgt = place(st.target, ctx);
+      const call = `abap.FindResults(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.mode ? `'${st.mode}'` : "0"}, ${st.icase}, ${st.all})`;
+      if (st.table) {
+        return [`${t}{`, `${t}\tfms${n} := ${call}`, `${t}\t${tgt} = nil`, `${t}\ts.Sy.Subrc = 4`, `${t}\tfor _, fm${n} := range fms${n} {`,
+          `${t}\t\ts.Sy.Subrc = 0`, `${t}\t\tvar fr${n} ${rowGo}`, ...fill(`fr${n}`), `${t}\t\t${tgt} = append(${tgt}, fr${n})`, `${t}\t}`, `${t}}`];
+      }
+      return [`${t}{`, `${t}\tfms${n} := ${call}`, `${t}\ts.Sy.Subrc = 4`, `${t}\tif len(fms${n}) > 0 {`, `${t}\t\ts.Sy.Subrc = 0`,
+        `${t}\t\tfm${n} := fms${n}[0]`, `${t}\t\tfr${n} := &${tgt}`, ...fill(`fr${n}`), `${t}\t}`, `${t}}`];
+    }
     case "delete_where": {
       // sy-subrc 0 when a row went, 4 when none did
       const tb = place(st.table, ctx);

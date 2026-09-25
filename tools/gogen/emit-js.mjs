@@ -752,6 +752,21 @@ function stmt(st, ctx, d) {
       lines.push(`${t}  } else { s.sy.subrc = 4; }`, `${t}}`);
       return lines;
     }
+    // FIND ... RESULTS (parity-wave2): as emit-go
+    case "find_results": {
+      const n = ctx.loop++;
+      const f = st.f;
+      const tgt = place(st.target, ctx);
+      const fill = (r) => `${r}.${ident(f.LINE)} = 0; ${r}.${ident(f.OFFSET)} = fm${n}[0]; ${r}.${ident(f.LENGTH)} = fm${n}[1]; ${r}.${ident(f.SUBMATCHES)} = [];`
+        + ` for (let g = 2; g + 1 < fm${n}.length; g += 2) { const sr = ${zero(st.sub)}; sr.${ident(f.SOFFSET)} = fm${n}[g]; sr.${ident(f.SLENGTH)} = fm${n}[g + 1]; ${r}.${ident(f.SUBMATCHES)}.push(sr); }`;
+      const call = `abap.FindResults(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${JSON.stringify(st.mode)}, ${st.icase}, ${st.all})`;
+      if (st.table) {
+        return [`${t}{ const fms${n} = ${call}; ${tgt} = []; s.sy.subrc = fms${n}.length > 0 ? 0 : 4;`,
+          `${t}  for (const fm${n} of fms${n}) { const fr${n} = ${zero(st.row)}; ${fill(`fr${n}`)} ${tgt}.push(fr${n}); } }`];
+      }
+      return [`${t}{ const fms${n} = ${call}; s.sy.subrc = fms${n}.length > 0 ? 0 : 4;`,
+        `${t}  if (fms${n}.length > 0) { const fm${n} = fms${n}[0]; const fr${n} = ${tgt}; ${fill(`fr${n}`)} } }`];
+    }
     case "delete_where": {
       const tb = place(st.table, ctx);
       const n = ctx.loop++;

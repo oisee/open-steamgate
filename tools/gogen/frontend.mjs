@@ -2425,6 +2425,12 @@ function statement(node, ctx) {
       if (count.type.k !== "i") throw new Unsupported(`MATCH COUNT into a ${count.type.k}`);
       return {s: "find_all", regex, pattern, icase, subject: convert(source(subj, ctx), S), count};
     }
+    // parity-wave2: FIND [FIRST OCCURRENCE OF | ALL OCCURRENCES OF]
+    // [REGEX | PCRE] p IN s [IGNORING CASE] RESULTS r, r a match_result or a
+    // match_result_tab (open-abap-core's CL_ABAP_MATCHER, CL_IXML). A4H
+    // 2026-09-25 (ZCL_GOGEN_T_FINDRES, _FINDPCRE): see abap.FindResults
+    if (/^FIND (FIRST OCCURRENCE OF |ALL OCCURRENCES OF )?IN ((IGNORING|RESPECTING) CASE )?RESULTS$/.test(tw)
+      && node.findDirectExpressions(Expressions.Source).length === 2) return findResults(node, ctx, text, tw);
     if (words.includes("ALL") || /\b(RESULTS|MATCH\s+COUNT|IN\s+BYTE\s+MODE|RESPECTING)\b/i.test(text)) throw new Unsupported(`FIND form: ${text}`);
     const ft = node.findDirectExpression(Expressions.FindType);
     const kind = ft ? upper(ft.concatTokens()) : "";
@@ -2678,6 +2684,53 @@ function stringFn(name, direct, named, ctx, text) {
   // TO_MIXED
   return {e: "str_fn", fn: "ToMixed", args: [val, given.has("SEP") ? chars("SEP") : {e: "str", value: "_", type: S}, {e: "flag", value: given.has("CASE")},
     given.has("CASE") ? chars("CASE") : {e: "str", value: "", type: S}, given.has("MIN") ? int("MIN") : {e: "int", value: 1, type: I}], type: S};
+}
+
+/**
+ * FIND ... RESULTS (parity-wave2). The target is a structure with LINE,
+ * OFFSET, LENGTH (i) and SUBMATCHES, a standard table of a structure with
+ * OFFSET and LENGTH (i) and nothing else -- match_result -- for FIRST, or a
+ * standard table of such rows -- match_result_tab -- for ALL. The subject is
+ * a string or a c (not a table, not a section); the pattern a string or a
+ * c, not a CL_ABAP_REGEX object.
+ */
+function findResults(node, ctx, text, tw) {
+  const all = tw.startsWith("FIND ALL");
+  const ft = node.findDirectExpression(Expressions.FindType);
+  const kind = ft ? upper(ft.concatTokens()) : "";
+  if (kind && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind} ... RESULTS`);
+  const [pat, subj] = node.findDirectExpressions(Expressions.Source);
+  const patX = source(pat, ctx);
+  if (!charlike(patX.type)) throw new Unsupported(`FIND ... RESULTS with a ${patX.type.k} pattern`);
+  const subjX = source(subj, ctx);
+  if (!charlike(subjX.type)) throw new Unsupported(`FIND ... RESULTS in a ${subjX.type.k}`);
+  const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+  const where = `FIND ... RESULTS ${target.type.k}`;
+  let row = target.type;
+  if (all) {
+    if (target.type.k !== "table" || target.type.sorted || target.type.hashed) throw new Unsupported(`FIND ALL OCCURRENCES ... RESULTS into other than a standard table`);
+    row = target.type.row;
+  } else if (target.type.k !== "struct") throw new Unsupported(`FIND FIRST OCCURRENCE ... RESULTS into a ${target.type.k}`);
+  if (row.k !== "struct") throw new Unsupported(`${where}: rows that are not structures`);
+  const f = {};
+  for (const n of ["LINE", "OFFSET", "LENGTH"]) {
+    const x = fieldOf(ctx, row, n, where);
+    if (x.type.k !== "i") throw new Unsupported(`${where}: ${n} is a ${x.type.k}`);
+    f[n] = x.name;
+  }
+  const sm = fieldOf(ctx, row, "SUBMATCHES", where);
+  if (sm.type.k !== "table" || sm.type.sorted || sm.type.hashed || sm.type.row.k !== "struct") throw new Unsupported(`${where}: SUBMATCHES is not a standard table of structures`);
+  f.SUBMATCHES = sm.name;
+  const sub = sm.type.row;
+  for (const n of ["OFFSET", "LENGTH"]) {
+    const x = fieldOf(ctx, sub, n, where);
+    if (x.type.k !== "i") throw new Unsupported(`${where}: SUBMATCHES-${n} is a ${x.type.k}`);
+    f[`S${n}`] = x.name;
+  }
+  const nFields = (t) => ctx.program.structs.get(t.go)?.fields?.length ?? 0;
+  if (nFields(row) !== 4 || nFields(sub) !== 2) throw new Unsupported(`${where}: a result structure with more components than match_result`);
+  return {s: "find_results", all, mode: kind === "PCRE" ? "P" : kind === "REGEX" ? "R" : "", pattern: convert(patX, S), subject: convert(subjX, S),
+    icase: /\bIGNORING\s+CASE\b/i.test(text), target, table: all, row, sub, f};
 }
 
 function initialValue(node, ctx) {

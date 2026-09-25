@@ -1465,3 +1465,61 @@ export function cctorDump(cls, e) {
 export function ConcatLinesOf(t, sep) {
   return t.join(sep);
 }
+
+// FIND ... RESULTS (parity-wave2): go/abap FindResults, the same iteration
+// (after a match at its end, after an empty one a character on, an empty
+// match at the end found) and the same answer shape, offsets in code points.
+// A JS RegExp is leftmost-first: for PCRE ('P') that is the engine; for
+// REGEX ('R', POSIX leftmost-longest) an alternation whose shorter branch
+// matches first differs, as in FindStmt (a|ab in xabab: JS 1,1 3,1, A4H
+// 1,2 3,2); the Go runtime is the exact one. PCRE's refusals are Go's.
+const PCRE_REFUSED = [[/\(\?=/, "a lookahead (?=...)"], [/\(\?!/, "a negative lookahead (?!...)"], [/\(\?<=/, "a lookbehind (?<=...)"],
+  [/\(\?<!/, "a negative lookbehind (?<!...)"], [/\(\?>/, "an atomic group (?>...)"], [/\\[1-9]|\\g\{?-?\d|\\k[<{']/, "a backreference"],
+  [/[*+?}]\+/, "a possessive quantifier"], [/\\K/, "\\K"], [/\\G/, "\\G"], [/\(\?(R|\d|&|P>|\()/, "a recursion or a conditional"],
+  [/\(\*/, "a verb (*...)"], [/\\[cexoNXRhHvV]/, "an escape RE2 reads differently or not at all"]];
+export function FindResults(s, p, kind, icase, all) {
+  if (p === "") notCompiled("FIND ... RESULTS: an empty pattern is not measured");
+  const cp = (i) => [...s.slice(0, i)].length;
+  if (kind === "" && !icase) {
+    const out = [];
+    const n = [...p].length;
+    for (let pos = 0; pos <= s.length;) {
+      const i = s.indexOf(p, pos);
+      if (i < 0) break;
+      out.push([cp(i), n]);
+      if (!all) break;
+      pos = i + p.length;
+    }
+    return out;
+  }
+  let re;
+  if (kind === "P") {
+    const plain = p.replaceAll("\\\\", "");
+    for (const [r, what] of PCRE_REFUSED) if (r.test(plain)) notCompiled(`FIND PCRE: ${what} is not in Go's RE2: ${p}`);
+    if (/[\n\r]/.test(s)) notCompiled("FIND PCRE: a text with line ends: PCRE's ^ $ and . around them are not measured");
+    try { re = new RegExp(p, (icase ? "i" : "") + "gdu"); } catch { notCompiled(`FIND PCRE: the pattern does not compile here: ${p}`); }
+  } else {
+    const pat = kind === "" ? p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : p;
+    if (/\*\?|\+\?|\?\?/.test(pat)) throw new AbapError("CX_SY_INVALID_REGEX", pat);
+    re = abapRegExp(pat, s, icase, "gd", "FIND REGEX");
+  }
+  const out = [];
+  for (let pos = 0; pos <= s.length;) {
+    re.lastIndex = pos;
+    const m = re.exec(s);
+    if (!m) break;
+    const r = [];
+    for (const ix of m.indices) {
+      if (ix === undefined) { r.push(-1, 0); continue; }
+      const o = cp(ix[0]);
+      r.push(o, cp(ix[1]) - o);
+    }
+    out.push(r);
+    if (!all) break;
+    const end = m.index + m[0].length;
+    if (end > m.index) { pos = end; continue; }
+    if (m.index >= s.length) break;
+    pos = m.index + (s.codePointAt(m.index) > 0xffff ? 2 : 1);
+  }
+  return out;
+}
