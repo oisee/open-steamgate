@@ -772,7 +772,8 @@ the generator, the editor is the file.
    (types, sets + operations, associations, navigation, function imports,
    parameters, properties), Delete via `NodeSet`, Import IWPR via
    `ImportSet` / `FunctionGroupSet`, Export through `ExportSet`, Generate through `GenerateSet` (files landed by a dev route of `test/start.mjs`)
-   (`tools/segw-editor.mjs`, output in `gen/segw-editor/`), launchpad tile
+   (`tools/segw-editor.mjs`, output in `gen/segw-editor/`; that route was
+   cut on 2026-09-25, host-tools review C1), launchpad tile
    `SegwProject-manage`, `test/e2e/segw.spec.mjs`. Generate in ABAP landed
    in three stages (16d7988, 3c50c73, a913296: MPC, DPC + EXT pair, RFC
    and search-help bodies with `ZSTG_FM_PARAM`), every file byte-identical

@@ -67,16 +67,16 @@ entity type still used by an entity set is refused in the app first.
 - **Generate** is `GET GenerateSet?$filter=Project eq 'P'`: segw-gen in
   ABAP (`zcl_stg_segw_gen`, byte-identical to `tools/segw-gen.mjs` over the
   corpus), one row per file (`Name`, `Content`): the `_MPC`/`_DPC` pair,
-  their class XMLs and the four `_EXT` files. The dialog lists them, a
-  file opens as source, and **Save to gen/** asks the local runtime to
-  write them to `gen/segw-editor/<project>/` (`POST /segw/generate/<P>` in
-  `test/start.mjs`, `tools/segw-editor.mjs`: the rows of `GenerateSet`
-  onto disk). That last step is the only one that needs Node: in the
-  browser preview Generate shows the files and Save says why it cannot.
-  On a system the button is SEGW's own Generate. `gen/segw-editor/` is
-  excluded from the transpiler and from abaplint: what the editor
-  generates is a build product to look at or to take to a system, not part
-  of this runtime.
+  their class XMLs and the four `_EXT` files. The dialog lists them and a
+  file opens as source. Nothing writes them to disk: on a system the button
+  is SEGW's own Generate, and here the project reaches a system as an
+  abapGit repository (`RepoSet` / `RepoFileSet`), which carries the
+  generated classes with it. (Until 2026-09-25 a **Save to gen/** button
+  asked the local runtime to write them to `gen/segw-editor/<project>/`
+  through a dev route of `test/start.mjs`. It was cut: the folder it wrote
+  had to be excluded by hand from the transpiler, the store, the CDS check
+  and the cross reference, nothing read it, and it was the one step that
+  needed Node, so the same app failed on OSGo and in the preview.)
 
 ## Tested
 
@@ -89,8 +89,8 @@ navigation property created from the folders and rows (all of them in the
 generated MPC/DPC afterwards), the property deleted (`DELETE NodeSet`, an entity type with
 sets refused), the fixture's function group imported through
 `FunctionGroupSet`, Generate listing `GenerateSet`'s files, the MPC source
-with the new property, Save to gen/ landing them (the DPC with the RFC
-call of the mapped operation), Export downloading the IWPR through
+with the new property, the same rows read back from `GenerateSet` (the DPC
+with the RFC call of the mapped operation), Export downloading the IWPR through
 `ExportSet`, Import of `zstg_mini.iwpr.xml` through `ImportSet` selecting
 `ZSTG_MINI`; and the launchpad tile.
 

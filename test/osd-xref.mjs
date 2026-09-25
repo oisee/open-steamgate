@@ -23,8 +23,8 @@ describe("tools/osd-xref: the cross-reference, derived from the parse", () => {
     //
     // This used to name `ZCL_ZSTG_MAPPED_DPC`, which lives only in
     // `gen/segw-editor/` -- a folder the SEGW editor's "Save to gen/" dev
-    // route writes when somebody presses a button, and which
-    // `abap_transpile.json` excludes from the build. So the test passed on a
+    // route wrote when somebody pressed a button (removed 2026-09-25), and which
+    // `abap_transpile.json` excluded from the build. So the test passed on a
     // machine where a human had once used the editor and failed in a fresh
     // worktree, which is where it was found (2026-09-19).
     //

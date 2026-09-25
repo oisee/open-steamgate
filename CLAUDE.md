@@ -393,11 +393,10 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   operations), associations, navigation properties, function imports,
   parameters and properties, Delete = `NodeSet` subtree delete, Import IWPR through
   `ImportSet` (a `*.fugr.xml` through `FunctionGroupSet`), Export IWPR
-  through `ExportSet`, Generate through `GenerateSet` (segw-gen in ABAP);
-  "Save to gen/" is the one dev route of `test/start.mjs`
-  (`POST /segw/generate/<P>`, `tools/segw-editor.mjs` writes the rows of
-  `GenerateSet` to `gen/segw-editor/`, which the transpiler and abaplint
-  skip). Launchpad tile "SEGW"
+  through `ExportSet`, Generate through `GenerateSet` (segw-gen in ABAP,
+  shown in a dialog; nothing writes the files to disk -- the "Save to
+  gen/" dev route was cut on 2026-09-25, the project reaches a system
+  through `RepoSet`). Launchpad tile "SEGW"
   (`SegwProject-manage`); `test/e2e/segw.spec.mjs`. Tests and the
   Playwright config read `STG_PORT` like `test/start.mjs`, so two sessions
   can run their suites side by side on different ports.
