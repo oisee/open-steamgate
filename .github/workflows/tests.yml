@@ -69,6 +69,24 @@ jobs:
           cache: npm
       - run: npm ci
 
+      # **The binary builds from a checkout, before anything is generated.**
+      # `npm run binary` bundles bin/osd.mjs and everything it reaches, and
+      # twice it reached a file only another build writes: gen/ (a static
+      # import of gen/osd-ddic-binary.mjs in test/setup.mjs) and
+      # web/generated/amdp.mjs (written by the preview build). On a
+      # workstation both are left over and the build is green; here, before
+      # the transpile step, they do not exist, which is the state a fresh
+      # clone is in. Built outside build/ so the suites' runtime cases of
+      # test/osd-binary.mjs stay as they were; `doctor` checks what the
+      # bundle did to the runtime's class names.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Build the binary from the clean checkout
+        run: |
+          bun scripts/build-binary.mjs "$RUNNER_TEMP/osd"
+          "$RUNNER_TEMP/osd" doctor
+
       - name: Build the transpiler this tree is pinned to
         if: env.OSD_TRANSPILER_REF != ''
         run: |
