@@ -384,7 +384,10 @@ async function runE2e(kind, port) {
           const status = r?.status ?? "skipped";
           const msg = String(r?.error?.message ?? "").replace(/\u001b\[[0-9;]*m/g, "");
           records.push({title: `e2e ${[...path, spec.title].join(" ")}`, state: status === "passed" ? "passed" : status === "skipped" ? "pending" : "failed",
-            duration: r?.duration, err: status === "passed" ? undefined : {message: msg.slice(0, 800), timeout: /Timeout \d+ms exceeded|timed out/i.test(msg)},
+            duration: r?.duration, err: status === "passed" ? undefined : {message: msg.slice(0, 800), timeout: /Timeout \d+ms exceeded|timed out/i.test(msg),
+              // the lines around the failing assertion, as Playwright prints them: the
+              // browser's requests are not probed, so this is how a spec names its path
+              snippet: String(r?.error?.snippet ?? "").replace(/\u001b\[[0-9;]*m/g, "").slice(0, 800)},
             // a spec drives the browser at the server, so every one is HTTP-level; its requests are not probed
             requests: [{method: "BROWSER", path: spec.file ?? suite.file ?? "", status: status === "passed" ? 200 : 0}]});
         }
@@ -444,7 +447,13 @@ const osgoOnly = http.filter((t) => t.node.state !== "passed" && t.osgo?.state =
 // postponed (Alice, 2026-09-24): its tests are "adt-deferred", out of the
 // headline's numerator and denominator alike and listed on their own line
 const ADT_PATH = /^\/sap\/bc\/adt(\/|$|\?)|^\/osd\/not-served(\/|$|\?)/;
-const isAdt = (t) => t.file === "test/adt-facade.mjs" || [...(t.node?.requests ?? []), ...(t.osgo?.requests ?? [])].some((q) => ADT_PATH.test(q.path ?? ""));
+// A Playwright spec's requests are not probed: an e2e test is adt-deferred when
+// the assertion OSGo failed on is next to a request to the facade, as in
+// launchpad-navigation's "the Workbench tile is live where ADT answers"
+// (HEAD /sap/bc/adt/core/discovery, a 404 on OSGo, which greys the tile)
+const ADT_IN_SNIPPET = /["'`]\/sap\/bc\/adt(\/|["'`?])|["'`]\/osd\/not-served(\/|["'`?])/;
+const isAdt = (t) => t.file === "test/adt-facade.mjs" || [...(t.node?.requests ?? []), ...(t.osgo?.requests ?? [])].some((q) => ADT_PATH.test(q.path ?? "")) ||
+  (t.file === "test/e2e" && ADT_IN_SNIPPET.test(t.osgo?.err?.snippet ?? ""));
 // "compiler-deferred" (Alice, 2026-09-25): the editor's CHECK, which on
 // Node is abaplint over the whole system behind DESTINATION 'STORE'. OSGo is
 // a built generation and answers CHECK with an explicit refusal naming the

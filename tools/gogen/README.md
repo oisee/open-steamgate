@@ -1404,3 +1404,31 @@ reference reused): `--fast` **99.3 %** (134/135) in 10.7 s, full `--e2e`
 (cut from every host by Alice; passes once that PR lands) and the editor's
 colouring (ZCL_OSD_ABAP_TOKENS). The one dump OSGo logs, CX_SY_CONVERSION_NO_NUMBER
 in a `$batch` of mocha.mjs, is the test's own `Seats = "abc"`.
+
+### Measured on main 63972f9 (ultra/parity-wave3, 2026-09-25)
+
+The frozen checkout moved from 6327bab to 63972f9 (#84-#91: "Save to gen/"
+cut, the editor's colouring in ABAP, the editor drawing only the buttons the
+host can do, the greyed Workbench tile), transpiled afresh, osgo rebuilt from
+this branch (788 classes, 33 methods not compiled, 2 objects with syntax
+errors: `CL_APC_TCP_CLIENT_MANAGER`, `ZCL_AJSON`; every class of the Node
+output but the ten test classes), Node reference measured again at that
+commit. The editor's colouring and the SEGW "Save to gen/" step now pass.
+
+One harness fix: a Playwright spec's requests are not probed, so an e2e test
+whose failing assertion stands next to a request to `/sap/bc/adt` (the
+snippet Playwright prints) is `adt-deferred` like the mocha ones. That is
+launchpad-navigation's "the Workbench tile is live where ADT answers": HEAD
+`core/discovery` is a 404 on OSGo, and the greyed tile is what #87 wants.
+
+`--fast` **99.3 %** (136/137) in 55 s with Node run afresh; full `--e2e`
+**99.5 %** (185/186, raw 66.0 %, 198/300) in 2m53s with Node reused (5m23s
+with Node's e2e included). Apart: go-matches-system 13 (implicit MANDT),
+adt-deferred 100 (13 pass on OSGo anyway), compiler-deferred 1. The one
+failure left is editor.mjs "draws the buttons the host says it can do, and
+on Node that is all three": it asserts Check and Activate, and OSGo draws
+Save only because `STORE CAPABILITIES` answers `LIST READ WRITE`, which is
+the design; the test assumes Node. Not a gap in OSGo; it is outside
+`compiler-deferred` because that class admits the CHECK test only. Node
+itself fails two e2e tests at both commits (the status object page's
+Services section, the Workbench's "Browse only"), which are not counted.
