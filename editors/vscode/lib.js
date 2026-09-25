@@ -174,6 +174,31 @@ class Osd {
     return {status: res.status, ms, url, text, body};
   }
 
+  /** Q6a "Notebook SQL" (docs/vscode-extension.md): run one SQL statement
+   *  through the ADT façade's data preview (tools/adt-facade.mjs
+   *  `datapreview/freestyle`, ~2358-2392): POST the statement as the
+   *  body, `rowNumber` the row limit. The answer is XML, column-oriented
+   *  (`tableDataDocument`, ~257-303) -- `freestyleRows` below turns it into
+   *  `{columns, rows}`. Timed like `odata()` above; the generation the
+   *  answer carries (`X-OSD-Generation`, set on every façade answer, see
+   *  `router.use` near the top of `adtRouter`) rides along for the cell's
+   *  own status line. Goes through `request()`, so a refused statement (not
+   *  a SELECT, or a database never built) throws with the server's own
+   *  `exceptionDocument` message, the same as `check()` / `activate()`
+   *  above -- a notebook cell's error output is that message, unwrapped. */
+  async freestyle(statement, rowLimit) {
+    const startedAt = Date.now();
+    const res = await this.request(`/sap/bc/adt/datapreview/freestyle?rowNumber=${encodeURIComponent(rowLimit)}`, {
+      method: "POST",
+      headers: {"content-type": "text/plain; charset=utf-8"},
+      body: statement,
+    });
+    const ms = Date.now() - startedAt;
+    const xml = await res.text();
+    const generation = res.headers.get("x-osd-generation") ?? undefined;
+    return {...freestyleRows(xml), ms, generation};
+  }
+
   /** Run an object's tests, or one class, or one method of it. */
   run(object, testClass, method) {
     let route = `/sap/bc/adt/core/http/unit/object/run?type=${encodeURIComponent(object.type)}&name=${encodeURIComponent(object.name)}`;
@@ -527,6 +552,113 @@ function readersQuickPickItems(readers) {
   });
 }
 
+// ---- Q6a "Notebook SQL" (docs/vscode-extension.md): a *.osdnb notebook of
+// SQL cells, run against `Osd#freestyle` above. The pure half: the
+// column-oriented XML that route answers turned into rows, the rows turned
+// into the HTML a cell's output shows (escaped, so a cell value carrying
+// `<` or `&` -- an XML fragment sitting in a CHAR column, say -- renders as
+// text and not markup), and the notebook file's own JSON turned into cells
+// and back. None of this touches `vscode`, so a plain mocha test holds it
+// without a notebook editor open (test/vscode-extension.mjs); extension.js's
+// NotebookSerializer and NotebookController are the thin wrapping.
+
+/** Escape for HTML text content (not an attribute): the notebook output's
+ *  own `<td>`/`<th>` cells go through this, the same three entities
+ *  `entitySetHtml`'s `xmlEscapeHtml` (extension.js, Q2b) escapes -- kept
+ *  here rather than there because a mocha test needs it without `vscode`. */
+function htmlEscape(text) {
+  return String(text ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** freestyle SQL's own answer (tools/adt-facade.mjs `tableDataDocument`,
+ *  ~257-303: one `<dataPreview:columns>` per selected column, each with its
+ *  own `dataPreview:metadata dataPreview:name="..."` and a `dataPreview:
+ *  dataSet` of one `<dataPreview:data>` per row, in row order) into
+ *  `{columns, rows}` -- `columns` the names in the server's own order,
+ *  `rows` one plain object per row keyed by column name, so a JSON output
+ *  and an HTML table can both be built off the same shape `resultRows` /
+ *  `stripMetadata` above give the OData side. A column with fewer
+ *  `<dataPreview:data>` than the widest one (should not happen -- every
+ *  column carries exactly one value per row) pads the short rows with "".*/
+function freestyleRows(xml) {
+  const columns = [];
+  const values = [];
+  const colRe = /<dataPreview:columns>([\s\S]*?)<\/dataPreview:columns>/g;
+  for (const m of String(xml ?? "").matchAll(colRe)) {
+    const block = m[1];
+    columns.push(xmlUnescape(block.match(/dataPreview:name="([^"]*)"/)?.[1] ?? ""));
+    const cells = [];
+    for (const d of block.matchAll(/<dataPreview:data>([\s\S]*?)<\/dataPreview:data>/g)) {
+      cells.push(xmlUnescape(d[1]));
+    }
+    values.push(cells);
+  }
+  const rowCount = values.reduce((max, v) => Math.max(max, v.length), 0);
+  const rows = [];
+  for (let i = 0; i < rowCount; i++) {
+    const row = {};
+    columns.forEach((name, ci) => { row[name] = values[ci][i] ?? ""; });
+    rows.push(row);
+  }
+  return {columns, rows};
+}
+
+/** The HTML a run cell's output shows: `columns`/`rows` (`freestyleRows`
+ *  above) as a table, and the status line Q6a asks for -- "N rows · M ms ·
+ *  <generation>", the generation truncated the same way the status bar and
+ *  Ctrl+F3 truncate it (`serving.generation.slice(0, 8)` / `result.
+ *  generation.slice(0, 8)`, extension.js). `meta.generation` missing (an
+ *  answer with no `X-OSD-Generation`, which should not happen against a
+ *  real façade but is not this function's business to assume) leaves that
+ *  segment off rather than showing "undefined". */
+function freestyleTableHtml(columns, rows, meta = {}) {
+  const thead = columns.map((c) => `<th>${htmlEscape(c)}</th>`).join("");
+  const tbody = rows.map((row) => `<tr>${columns.map((c) => `<td>${htmlEscape(row[c])}</td>`).join("")}</tr>`).join("");
+  const generation = meta.generation === undefined ? undefined : String(meta.generation).slice(0, 8);
+  const status = `${rows.length} row${rows.length === 1 ? "" : "s"} · ${meta.ms ?? 0} ms${generation === undefined ? "" : ` · ${generation}`}`;
+  return `<div class="osd-sql-result">
+<table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>
+<div class="osd-sql-status">${htmlEscape(status)}</div>
+</div>`;
+}
+
+/** A *.osdnb file's own JSON (`{cells: [{kind: "code"|"markdown", value,
+ *  language?}]}`) into `[{kind, language, value}]` -- close to `vscode.
+ *  NotebookData`'s own cells but without the `vscode` module, so
+ *  `NotebookSerializer#deserializeNotebook` and a mocha test both go
+ *  through this. A `kind: "code"` cell with no `language` defaults to
+ *  "sql" (the only kernel this extension registers); a bad or missing
+ *  `cells` array reads as no cells rather than throwing, the way an empty
+ *  notebook opens instead of refusing to. */
+function notebookFromJson(text) {
+  let doc;
+  try {
+    doc = JSON.parse(text);
+  } catch {
+    doc = undefined;
+  }
+  const cells = Array.isArray(doc?.cells) ? doc.cells : [];
+  return cells.map((c) => (c?.kind === "markdown"
+    ? {kind: "markdown", language: "markdown", value: String(c.value ?? "")}
+    : {kind: "code", language: String(c?.language ?? "sql"), value: String(c?.value ?? "")}));
+}
+
+/** The reverse of `notebookFromJson`: `[{kind, language, value}]` (what
+ *  `NotebookSerializer#serializeNotebook` reads off `vscode.NotebookData`'s
+ *  own cells) into the file's own JSON text, newline-terminated so a saved
+ *  `*.osdnb` diffs cleanly. A markdown cell carries no `language` back out
+ *  (its kind already says what it is); a code cell's language is written
+ *  even when it is "sql", so a notebook this wrote round-trips byte for
+ *  byte through `notebookFromJson`. */
+function notebookToJson(cells) {
+  const doc = {
+    cells: (cells ?? []).map((c) => (c.kind === "markdown"
+      ? {kind: "markdown", value: c.value}
+      : {kind: "code", language: c.language ?? "sql", value: c.value})),
+  };
+  return `${JSON.stringify(doc, undefined, 2)}\n`;
+}
+
 // abapGit's own extension per object type, so a reader's file can be found
 // without guessing at what generated it; a type this extension has no file
 // shape for (FUGR, TABL, DDLS, ...) opens nothing rather than a wrong guess
@@ -544,4 +676,5 @@ function readerFilePattern(reader) {
 
 module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
-  readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern};
+  readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
+  htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson};

@@ -10,7 +10,13 @@ const vscode = require("vscode");
 const path = require("node:path");
 const fs = require("node:fs");
 const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
-  readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern} = require("./lib.js");
+  readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
+  freestyleTableHtml, notebookFromJson, notebookToJson} = require("./lib.js");
+
+// Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
+// *.osdnb file opens as (package.json `contributes.notebooks`) and the
+// kernel that runs its cells.
+const NOTEBOOK_TYPE = "osd-sql-notebook";
 
 const EXCLUDE = "{**/node_modules/**,**/.local/**,**/output/**,**/gen/**,**/build/**}";
 
@@ -47,6 +53,12 @@ function activate(context) {
   // the quick pick a click on it opens.
   context.subscriptions.push(vscode.commands.registerCommand("osd.showReaders", (found) => showReaders(found, output)));
   context.subscriptions.push(readersLensProvider(output));
+
+  // Q6a "Notebook SQL" (docs/vscode-extension.md): a *.osdnb notebook of SQL
+  // cells over the ADT façade's freestyle data preview.
+  context.subscriptions.push(vscode.workspace.registerNotebookSerializer(NOTEBOOK_TYPE, sqlNotebookSerializer()));
+  context.subscriptions.push(sqlNotebookController(output));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.newSqlNotebook", newSqlNotebook));
 }
 
 // ---- status bar: which generation the system serves, or that it is down
@@ -545,6 +557,80 @@ function message(alert, dir, item) {
     ? new vscode.Location(vscode.Uri.file(path.join(dir, alert.frame.file)), new vscode.Position(alert.frame.line - 1, Math.max(0, alert.frame.column - 1)))
     : new vscode.Location(item.uri, item.range ?? new vscode.Position(0, 0));
   return text;
+}
+
+// ---- Q6a "Notebook SQL": a *.osdnb file is a small JSON document of SQL
+// (or markdown) cells (lib.js notebookFromJson / notebookToJson does the
+// pure JSON <-> cells half); running a cell POSTs it to the ADT façade's
+// freestyle data preview (lib.js Osd#freestyle, tools/adt-facade.mjs
+// `datapreview/freestyle`) and shows the rows under it, the way a Jupyter
+// SQL kernel would -- except the "kernel" is the same running osd every
+// other door in this extension already talks to, not a second process.
+
+function sqlNotebookSerializer() {
+  return {
+    deserializeNotebook(content) {
+      const text = Buffer.from(content).toString("utf8");
+      const cells = notebookFromJson(text).map((c) => new vscode.NotebookCellData(
+        c.kind === "markdown" ? vscode.NotebookCellKind.Markup : vscode.NotebookCellKind.Code,
+        c.value,
+        c.language,
+      ));
+      return new vscode.NotebookData(cells);
+    },
+    serializeNotebook(data) {
+      const cells = data.cells.map((c) => ({
+        kind: c.kind === vscode.NotebookCellKind.Markup ? "markdown" : "code",
+        language: c.languageId,
+        value: c.value,
+      }));
+      return Buffer.from(notebookToJson(cells), "utf8");
+    },
+  };
+}
+
+async function newSqlNotebook() {
+  const data = new vscode.NotebookData([
+    new vscode.NotebookCellData(vscode.NotebookCellKind.Code, "SELECT * FROM zstg_demo", "sql"),
+  ]);
+  const doc = await vscode.workspace.openNotebookDocument(NOTEBOOK_TYPE, data);
+  await vscode.window.showNotebookDocument(doc);
+}
+
+function sqlNotebookController(output) {
+  const controller = vscode.notebooks.createNotebookController("osd-sql-kernel", NOTEBOOK_TYPE, "osd SQL");
+  controller.supportedLanguages = ["sql"];
+  controller.supportsExecutionOrder = true;
+  let executionOrder = 0;
+  controller.executeHandler = (cells) => {
+    for (const cell of cells) runSqlCell(controller, cell, ++executionOrder, output);
+  };
+  return controller;
+}
+
+async function runSqlCell(controller, cell, executionOrder, output) {
+  const execution = controller.createNotebookCellExecution(cell);
+  execution.executionOrder = executionOrder;
+  execution.start(Date.now());
+  const rowLimit = vscode.workspace.getConfiguration("osd").get("notebook.rowLimit", 100);
+  try {
+    const result = await osd().freestyle(cell.document.getText(), rowLimit);
+    const html = freestyleTableHtml(result.columns, result.rows, {ms: result.ms, generation: result.generation});
+    await execution.replaceOutput([
+      new vscode.NotebookCellOutput([
+        vscode.NotebookCellOutputItem.text(html, "text/html"),
+        vscode.NotebookCellOutputItem.json(result.rows),
+      ]),
+    ]);
+    execution.end(true, Date.now());
+  } catch (e) {
+    const message = String(e.message ?? e);
+    output.appendLine(`osd sql: ${message}`);
+    await execution.replaceOutput([
+      new vscode.NotebookCellOutput([vscode.NotebookCellOutputItem.error({name: "osd", message})]),
+    ]);
+    execution.end(false, Date.now());
+  }
 }
 
 function deactivate() {}
