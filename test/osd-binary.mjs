@@ -1,7 +1,8 @@
 import {expect} from "chai";
 import {execFileSync, spawn} from "node:child_process";
 import {existsSync, readFileSync, readdirSync} from "node:fs";
-import {join} from "node:path";
+import {dirname, join, relative, resolve} from "node:path";
+import {builtinModules} from "node:module";
 
 // The binary as a host of the same system (SP4, docs/bun-spike.md part
 // three). What bit once is measured here every time, so a quirk between
@@ -29,6 +30,51 @@ describe("the binary: the same system, one file", function () {
       }
     }
     expect(offenders, "route these through tools/osd-host.mjs").to.deep.equal([]);
+  });
+
+  // `osd build` inside the binary runs each generator as `<binary> gen
+  // <name>`, which executes the copy compiled into the binary. A generator
+  // that reaches a package through createRequire(import.meta.url) -- or any
+  // require of a package by name -- resolves it against /$bunfs/root/osd,
+  // where there is no node_modules, and fails; the dev loop then keeps the
+  // old generation and no edit ever goes live. Bun cannot see such a
+  // require at bundle time, so nothing else catches it: a static import is
+  // bundled (and @abaplint/core is kept one module by build-binary's
+  // one-core plugin, which the transpiler's instanceof needs).
+  const generatorsOf = (file, pattern) => [...readFileSync(join(root, file), "utf8").matchAll(pattern)].map((m) => m[1]);
+  const binaryGenerators = () => generatorsOf("bin/osd.mjs", /^\s*"([\w.-]+\.mjs)":\s*\(\)\s*=>\s*import\(/gm);
+
+  it("every generator osd build runs is one the binary can run", () => {
+    const built = generatorsOf("tools/osd-build.mjs", /^\s*\["([\w.-]+\.mjs)"/gm);
+    expect(built.length, "the generator list of tools/osd-build.mjs").to.be.greaterThan(5);
+    expect(built.filter((name) => !binaryGenerators().includes(name)), "add these to GENERATORS in bin/osd.mjs").to.deep.equal([]);
+  });
+
+  it("no generator the binary runs requires a package by name at run time", () => {
+    const builtin = new Set(builtinModules);
+    const seen = new Set();
+    const queue = binaryGenerators().map((name) => join(root, "tools", name));
+    const offenders = [];
+    while (queue.length > 0) {
+      const file = queue.pop();
+      if (seen.has(file) || !existsSync(file)) {
+        continue;
+      }
+      seen.add(file);
+      const text = readFileSync(file, "utf8");
+      for (const m of text.matchAll(/(?:from\s+|import\(\s*)["'](\.{1,2}\/[^"']+\.m?js)["']/g)) {
+        queue.push(resolve(dirname(file), m[1]));
+      }
+      for (const m of text.matchAll(/(?:\brequire(?:\.resolve)?|createRequire\([^()]*(?:\([^()]*\))?[^()]*\))\(\s*["']([^"']+)["']/g)) {
+        const spec = m[1];
+        if (spec.startsWith("node:") || spec.startsWith(".") || spec.startsWith("/") || builtin.has(spec)) {
+          continue;
+        }
+        offenders.push(`${relative(root, file)}: ${m[0]}`);
+      }
+    }
+    expect(seen.size, "the generators and what they import").to.be.greaterThan(5);
+    expect(offenders, "import these statically; the binary has no node_modules to require them from").to.deep.equal([]);
   });
 
   it("the bundle renamed no runtime class, or the host put the names back", function () {

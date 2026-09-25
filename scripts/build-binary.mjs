@@ -36,6 +36,18 @@ const result = await Bun.build({
         contents: 'export const DuckDBInstance = {create() { throw new Error("DuckDB is not part of the binary"); }}; export default {DuckDBInstance};',
         loader: "js",
       }));
+      // web/generated/amdp.mjs is written by scripts/build-preview.mjs for
+      // the service worker only: test/setup.mjs imports it on the
+      // globalThis.__stgPreview branch, which no binary ever takes (the
+      // binary answers AMDP through tools/amdp-destination.mjs and
+      // gen/amdp/procedures.json at run time). Bun still resolves the
+      // dynamic import at build time, so without this the binary build
+      // depended on a preview build having run first in the same tree.
+      build.onResolve({filter: /\/web\/generated\/amdp\.mjs$/}, () => ({path: "preview-amdp-absent", namespace: "osd-preview-stub"}));
+      build.onLoad({filter: /.*/, namespace: "osd-preview-stub"}, () => ({
+        contents: "// the preview's AMDP list; the binary is not a preview (scripts/build-binary.mjs)\nexport const procedures = [];",
+        loader: "js",
+      }));
     },
   }],
 });
