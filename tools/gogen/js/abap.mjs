@@ -163,7 +163,13 @@ export function ParseI(v) {
 }
 export const ToUpper = (v) => v.toUpperCase();
 export const ToLower = (v) => v.toLowerCase();
-export const Strlen = (v) => [...v].length;
+// A string without surrogates has one UTF-16 unit per character, so its
+// offsets are the characters' (go/abap conv.go isASCII/memoOf does the same
+// for bytes): the fast path, measured on the editor's tokenizer (80 KB, 7840
+// tokens): 117-138 ms a scan with a spread per call, 27-30 ms without
+const SURROGATE = /[\uD800-\uDFFF]/;
+const flat = (v) => !SURROGATE.test(v);
+export const Strlen = (v) => (flat(v) ? v.length : [...v].length);
 
 // f in a string template, as measured on A4H: seventeen significant digits,
 // positional, trailing zeros of the fraction dropped
@@ -208,7 +214,7 @@ export function PowF(a, b) {
 
 // WIDTH / ALIGN / PAD, as measured on A4H: padded, never cut
 export function Pad(v, width, align, pad) {
-  const n = [...v].length;
+  const n = Strlen(v);
   if (n >= width) return v;
   const fill = width - n;
   if (align === "RIGHT") return pad.repeat(fill) + v;
@@ -267,6 +273,12 @@ export function XToI(v) {
 const rangeError = () => { throw new AbapError("CX_SY_RANGE_OUT_OF_BOUNDS", "offset/length"); };
 // v+off(len) of a string in characters; len -1 is the rest; out of range raises
 export function SubS(v, off, len) {
+  if (flat(v)) {
+    if (off < 0 || off > v.length) rangeError();
+    if (len < 0) return v.slice(off);
+    if (off + len > v.length) rangeError();
+    return v.slice(off, off + len);
+  }
   const r = [...v];
   if (off < 0 || off > r.length) rangeError();
   if (len < 0) return r.slice(off).join("");
@@ -296,6 +308,10 @@ export const Uccpi = (v) => String.fromCodePoint(v).replace(/ +$/, "");
 // find( val sub off ), as measured on A4H: offset or -1, empty sub raises
 export function Find(v, sub, off) {
   if (sub === "") throw new AbapError("CX_SY_STRG_PAR_VAL", "find");
+  if (flat(v)) {
+    if (off < 0 || off > v.length) rangeError();
+    return v.indexOf(sub, off);
+  }
   const r = [...v];
   if (off < 0 || off > r.length) rangeError();
   const rest = r.slice(off).join("");
@@ -344,18 +360,28 @@ export function FindStmt(s, p, regex, icase, n) {
     // an empty substring is found at the start (A4H 2026-09-24, ZCL_GOGEN_T_FINDSEC)
     if (p === "") return [true, 0, 0, subs];
     const i = (icase ? s.toUpperCase() : s).indexOf(icase ? p.toUpperCase() : p);
-    return i < 0 ? [false, 0, 0, subs] : [true, [...s.slice(0, i)].length, [...p].length, subs];
+    return i < 0 ? [false, 0, 0, subs] : [true, Strlen(s.slice(0, i)), Strlen(p), subs];
   }
   // non-greedy is invalid on A4H; (?:...) and lookahead are valid there and here
   if (/\*\?|\+\?|\?\?/.test(p)) throw new AbapError("CX_SY_INVALID_REGEX", p);
   const m = abapRegExp(p, s, icase, "", "FIND REGEX").exec(s);
   if (!m) return [false, 0, 0, subs];
   for (let i = 0; i < n; i++) subs[i] = m[i + 1] ?? "";
-  return [true, [...s.slice(0, m.index)].length, [...m[0]].length, subs];
+  return [true, Strlen(s.slice(0, m.index)), Strlen(m[0]), subs];
 }
 
 // FIND p IN SECTION [OFFSET off] [LENGTH n] OF s, a substring: go/abap FindSection
 export function FindSection(s, p, icase, off, n, nsub) {
+  if (flat(s)) {
+    if (off < 0 || off > s.length || n < -1) rangeError();
+    let end = s.length;
+    if (n >= 0) {
+      if (off + n > end) rangeError();
+      end = off + n;
+    }
+    const [ok, o, l, subs] = FindStmt(s.slice(off, end), p, false, icase, nsub);
+    return ok ? [true, off + o, l, subs] : [false, 0, 0, subs];
+  }
   const r = [...s];
   if (off < 0 || off > r.length || n < -1) rangeError();
   let end = r.length;
