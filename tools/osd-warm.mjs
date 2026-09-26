@@ -339,6 +339,16 @@ export class WarmCompiler {
     return [...this.#closure([obj])].map((o) => ({type: o.getType(), name: o.getName()}));
   }
 
+  // Who reads this object directly, from the reverse index the last build
+  // left: fresher than the seeded cross-reference, which a swap does not
+  // reseed. undefined when the registry is not primed or does not hold it.
+  readersOf(type, name) {
+    if (!this.primed) return undefined;
+    const obj = this.reg.getObject(type, name);
+    if (obj === undefined) return undefined;
+    return [...(this.readers.get(key(obj)) ?? [])].map((o) => ({type: o.getType(), name: o.getName()}));
+  }
+
   // The issues the checked registry holds for these objects, with the line
   // and column of each, for a client that shows them on the dependent's own
   // file rather than as one "activation failed"
