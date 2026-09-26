@@ -690,6 +690,50 @@ launcher always creates (even with zero detected workspace layers) so a
 notebook has somewhere to write into without `OSD_PACKS` needing to be
 set to something new after the process is already up.
 
+## Getting started and System overview
+
+*2026-09-26.* `osd: Getting started` opens the contributed walkthrough in
+`editors/vscode/walkthrough/`. Its first step is the one-button quick path;
+the remaining Markdown steps cover start/stop, the three places, key
+bindings, the Test Explorer and editor tools, and reinstalling a VSIX.
+`test/vscode-extension.mjs` checks every walkthrough Markdown reference
+against the files in the extension package.
+
+`osd.quickStart` applies the `defaults` entry in `editors/vscode/lib.js`'s
+`PRESETS` table, starts the system, then opens **System overview**. If this
+window already has a running system, quick start stops it and starts it again
+with the preset's database and warm settings. The overview reads the serving
+and status routes from the controller's launcher port, independent of a later
+change to `osd.url`. The
+preset selects SQLite, `osd.keymap = abap`, and `osd.warm = auto`. Auto
+sets `OSD_WARM=1` on a host with at least 4 GB of memory, following the
+warm compiler's existing memory guidance; otherwise the setting is off.
+`/osd/serving` supplies the page's actual database identity, file path,
+and warm state. The home resolver uses an explicit `osd.home` first, the
+open-steamgate checkout as `osd.home` when that checkout is open (the DX2
+rule, implemented locally on this branch), then the packaged bundled copy,
+then one workspace folder in a development install.
+
+The top OSD tree row is the overview entry: a click opens the page, while
+its stopped/running/building context menus expose the actions for that
+state. Stop during a build terminates the launcher's own build child. A
+warm rebuild restarts with the ordinary cached build and warm activation
+enabled; later supported class/interface activations can swap into the
+serving process. Full rebuild passes `--force` to `tools/osd-build.mjs`.
+Both actions can also be reached from the OSD view title bar. **Open log**
+shows Output → `osd system`.
+
+The page model is pure (`systemOverviewModel` in `lib.js`) and keeps the
+route for each set. The extension reads the existing `SystemSet`,
+`ProcessSet`, `PortSet`, `ServiceSet`, `PackSet`, and `DatabaseSet` OData
+JSON from `ZOSD_STATUS_SRV`, plus `/osd/serving` and launcher state. The
+System information app has no JSON route, so the overview iframes its
+existing `/sap/bc/osd/sysinfo/` page. `system-overview.js` owns the reusable
+HTML components for this overview and a future Services details view; no
+server route was needed. The stopped state still renders its selected base,
+layers, settings link, and a large Start action without making a server
+request.
+
 ## Databases
 
 *2026-09-26.* B0 hard-coded `STG_DB=file`. The system already runs on

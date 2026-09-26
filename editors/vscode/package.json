@@ -17,6 +17,8 @@
     "onNotebook:osd-sql-notebook",
     "onCommand:osd.newSqlNotebook",
     "onCommand:osd.start",
+    "onCommand:osd.quickStart",
+    "onCommand:osd.gettingStarted",
     "onView:osdTree"
   ],
   "contributes": {
@@ -38,6 +40,12 @@
           "enum": ["abap", "vscode"],
           "default": "abap",
           "description": "What an ABAP developer's fingers expect (SAP GUI / ADT: Ctrl+F2 Check, Ctrl+F3 Activate, F8 Run, the debug keys) over an .abap editor, or VS Code's own bindings unchanged (\"vscode\")."
+        },
+        "osd.warm": {
+          "type": "string",
+          "enum": ["auto", "on", "off"],
+          "default": "auto",
+          "description": "OSD_WARM for a system osd.start launches (docs/warm-compile.md, docs/vscode-extension.md \"Warm\"): a save reaches the running system in well under a second instead of the cold build's several. \"auto\" turns it on when this machine has at least 4 GB of RAM (the prime costs about 0.7 GB); \"on\"/\"off\" always do or never do. Whether it actually primes is still the server's own business -- with the pinned transpiler it stays cold and says why, shown as the status bar's own \"cold: <reason>\"."
         },
         "osd.notebook.rowLimit": {
           "type": "number",
@@ -121,12 +129,6 @@
           "type": "boolean",
           "default": false,
           "description": "STG_DB_FRESH=1: drop and rebuild osd.database.hana.schema on the next start instead of refusing a schema this build did not stamp. osd.start turns this on itself (and asks first) when a start fails with that refusal."
-        },
-        "osd.warm": {
-          "type": "string",
-          "enum": ["auto", "on", "off"],
-          "default": "auto",
-          "description": "OSD_WARM for a system osd.start launches (docs/warm-compile.md, docs/vscode-extension.md \"Warm\"): a save reaches the running system in well under a second instead of the cold build's several. \"auto\" turns it on when this machine has at least 4 GB of RAM (the prime costs about 0.7 GB); \"on\"/\"off\" always do or never do. Whether it actually primes is still the server's own business -- with the pinned transpiler it stays cold and says why, shown as the status bar's own \"cold: <reason>\"."
         }
       }
     },
@@ -157,10 +159,15 @@
       {"command": "osd.run", "title": "osd: Run", "icon": "$(play)"},
       {"command": "osd.classrun", "title": "osd: Run as ABAP Application (Console)"},
       {"command": "osd.newSqlNotebook", "title": "osd: New SQL notebook"},
+      {"command": "osd.gettingStarted", "title": "osd: Getting started"},
+      {"command": "osd.quickStart", "title": "osd: Quick start (defaults)", "icon": "$(rocket)"},
+      {"command": "osd.openSystemOverview", "title": "osd: Open System overview"},
       {"command": "osd.start", "title": "osd: Start (build + run this system)", "icon": "$(play)"},
       {"command": "osd.stop", "title": "osd: Stop", "icon": "$(primitive-square)"},
       {"command": "osd.rebuildWarm", "title": "osd: Rebuild (warm)", "icon": "$(tools)"},
       {"command": "osd.rebuild", "title": "osd: Full rebuild (stop, build, start)"},
+      {"command": "osd.fullRebuild", "title": "osd: Full rebuild (force build)", "icon": "$(tools)"},
+      {"command": "osd.openSystemLog", "title": "osd: Open system log"},
       {"command": "osd.openLaunchpad", "title": "osd: Open launchpad", "icon": "$(rocket)"},
       {"command": "osd.openLaunchpadInVsCode", "title": "osd: Open launchpad inside VS Code"},
       {"command": "osd.refreshTree", "title": "osd: Refresh the view (no rebuild)", "icon": "$(refresh)"},
@@ -176,11 +183,20 @@
         {"command": "osd.start", "when": "view == osdTree", "group": "navigation@1"},
         {"command": "osd.stop", "when": "view == osdTree", "group": "navigation@2"},
         {"command": "osd.rebuildWarm", "when": "view == osdTree", "group": "navigation@3"},
-        {"command": "osd.refreshTree", "when": "view == osdTree", "group": "navigation@4"},
+        {"command": "osd.fullRebuild", "when": "view == osdTree", "group": "navigation@4"},
+        {"command": "osd.refreshTree", "when": "view == osdTree", "group": "navigation@5"},
         {"command": "osd.openLaunchpad", "when": "view == osdTree", "group": "9_osd@1"},
         {"command": "osd.rebuild", "when": "view == osdTree", "group": "9_osd@2"}
       ],
       "view/item/context": [
+        {"command": "osd.start", "when": "view == osdTree && viewItem == osd-state-stopped", "group": "state@1"},
+        {"command": "osd.fullRebuild", "when": "view == osdTree && viewItem == osd-state-stopped", "group": "state@2"},
+        {"command": "osd.stop", "when": "view == osdTree && viewItem == osd-state-running", "group": "state@1"},
+        {"command": "osd.rebuildWarm", "when": "view == osdTree && viewItem == osd-state-running", "group": "state@2"},
+        {"command": "osd.fullRebuild", "when": "view == osdTree && viewItem == osd-state-running", "group": "state@3"},
+        {"command": "osd.openLaunchpad", "when": "view == osdTree && viewItem == osd-state-running", "group": "state@4"},
+        {"command": "osd.openSystemLog", "when": "view == osdTree && (viewItem == osd-state-running || viewItem == osd-state-building)", "group": "state@5"},
+        {"command": "osd.stop", "when": "view == osdTree && viewItem == osd-state-building", "group": "state@6"},
         {"command": "osd.openLaunchpadInVsCode", "when": "view == osdTree && viewItem == osd-launchpad", "group": "inline"},
         {"command": "osd.copyServiceUrl", "when": "view == osdTree && (viewItem == osd-service-app || viewItem == osd-service-icf || viewItem == osd-service-odata)", "group": "inline"},
         {"command": "osd.openServiceMetadata", "when": "view == osdTree && viewItem == osd-service-odata", "group": "inline"},
@@ -199,6 +215,21 @@
       {"key": "f6", "command": "workbench.action.debug.stepOver", "when": "resourceExtname == .abap && config.osd.keymap == abap && inDebugMode"},
       {"key": "f7", "command": "workbench.action.debug.stepOut", "when": "resourceExtname == .abap && config.osd.keymap == abap && inDebugMode"},
       {"key": "f8", "command": "workbench.action.debug.continue", "when": "resourceExtname == .abap && config.osd.keymap == abap && inDebugMode"}
+    ],
+    "walkthroughs": [
+      {
+        "id": "gettingStarted",
+        "title": "Getting started with osd",
+        "description": "Start a local ABAP system, see what runs, and try the editor tools.",
+        "steps": [
+          {"id": "quickStart", "title": "TL;DR — I trust you, use the defaults", "description": "One click starts the bundled copy (or the open-steamgate checkout), SQLite, and warm activation when the host has enough memory. It opens System overview when ready.", "media": {"markdown": "./walkthrough/quick-start.md"}, "completionEvents": ["onCommand:osd.quickStart"]},
+          {"id": "startSystem", "title": "Start the system", "description": "The OSD view owns the build, listener, and stop controls.", "media": {"markdown": "./walkthrough/start-system.md"}},
+          {"id": "whereThingsLive", "title": "Where things live", "description": "The base system and your workspace layers are separate places.", "media": {"markdown": "./walkthrough/where-things-live.md"}},
+          {"id": "keys", "title": "Keys", "description": "The default ABAP keymap follows familiar ADT actions.", "media": {"markdown": "./walkthrough/keys.md"}},
+          {"id": "tryIt", "title": "Try the tools", "description": "Run tests, use a lens, preview data, and open the launchpad.", "media": {"markdown": "./walkthrough/try-it.md"}},
+          {"id": "reinstall", "title": "Reinstall the extension", "description": "Build and install a fresh VSIX when the extension changes.", "media": {"markdown": "./walkthrough/reinstall.md"}}
+        ]
+      }
     ]
   }
 }

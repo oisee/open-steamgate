@@ -49,6 +49,14 @@ function classify(logText, error) {
   return {kind: "build-failed", message: "The build failed.", actions: ["Open log", "Full rebuild"]};
 }
 
+/** OSD_WARM enables warm ABAP activation; auto follows the warm compiler's
+ *  existing 4 GB minimum-memory guidance. Explicit output prevents an
+ *  inherited OSD_WARM value from overriding the extension's choice. */
+function warmEnvironment(mode = "auto", memoryBytes = os.totalmem()) {
+  const on = shouldWarm(mode, memoryBytes);
+  return {OSD_WARM: on ? "1" : "0"};
+}
+
 // ---- databases (docs/vscode-extension.md, "Databases") -------------------
 //
 // `test/setup.mjs` already picks a backend off `STG_DB` (file | postgres |
@@ -339,11 +347,12 @@ function ensureWorkspacePacks(storageDir, layers) {
  *  `onLine` as they arrive (so a caller can show a build's own log, not just
  *  its exit code) and resolving with `{code, output}` when it exits. Used
  *  for the build step, which is a run-to-completion command, not a server. */
-function runToCompletion(cwd, script, args, env, onLine) {
+function runToCompletion(cwd, script, args, env, onLine, onChild) {
   return new Promise((resolve, reject) => {
     let child;
     try {
       child = spawn(process.execPath, [script, ...args], {cwd, env});
+      onChild?.(child);
     } catch (error) {
       reject(error);
       return;
@@ -357,7 +366,10 @@ function runToCompletion(cwd, script, args, env, onLine) {
     child.stdout?.on("data", onData);
     child.stderr?.on("data", onData);
     child.on("error", reject);
-    child.on("exit", (code) => resolve({code, output}));
+    child.on("exit", (code) => {
+      onChild?.(undefined);
+      resolve({code, output});
+    });
   });
 }
 
@@ -556,11 +568,14 @@ class Launcher extends EventEmitter {
     this.warmMode = options.warm ?? "auto";
     this.state = "stopped";
     this.child = undefined;
+    this.buildChild = undefined;
+    this.buildCancelled = false;
     this.port = undefined;
     this.pid = undefined;
     this.generation = undefined;
     this.layers = [];
     this.lastLog = "";
+    this.lastAttemptedPort = undefined;
     // when this start() began -- the status bar's "warming up..." (T7)
     // shows that rather than "osd down" for a little while after this,
     // since the prime is synchronous and the façade answers nothing at all
@@ -583,10 +598,11 @@ class Launcher extends EventEmitter {
    *  state back at "stopped", if the build fails or the server never comes
    *  up -- there is no half-started state a caller has to notice on their
    *  own. */
-  async start(options = {}) {
+  async start({force = false, forceBuild = false, port: requestedPort} = {}) {
     if (this.state !== "stopped") {
       throw new Error(`cannot start: already ${this.state}`);
     }
+    this.buildCancelled = false;
     this.lastLog = "";
     fs.mkdirSync(this.storageDir, {recursive: true});
     this.startedAt = Date.now();
@@ -609,10 +625,10 @@ class Launcher extends EventEmitter {
 
     let port;
     try {
-      if (options.port === undefined) {
+      if (requestedPort === undefined) {
         port = await pickPort(this.portRange);
       } else {
-        port = Number(options.port);
+        port = Number(requestedPort);
         if (!Number.isInteger(port) || port < this.portRange.from || port > this.portRange.to) {
           throw new Error(`port must be in ${this.portRange.from}-${this.portRange.to}`);
         }
@@ -627,6 +643,10 @@ class Launcher extends EventEmitter {
       this.#setState("stopped");
       error.logText ??= this.lastLog;
       throw error;
+    }
+    if (this.buildCancelled) {
+      this.#setState("stopped");
+      return undefined;
     }
     const dbEnv = databaseEnv(this.database);
     const env = {
@@ -648,31 +668,28 @@ class Launcher extends EventEmitter {
       // more port outside 3531-3539 on every launch.
       OSD_TLS_DIR: tlsDir,
       STG_SERVE: "child",
+      ...warmEnvironment(this.warmMode),
     };
     if (packsDir !== undefined) {
       env.OSD_PACKS = packsDir;
-    }
-    // osd.warm (T7): "auto"/"on" tells the launched system to try priming
-    // the warm registry; "off" (or an "auto" machine under the floor)
-    // leaves OSD_WARM out, even when the surrounding shell had it set, so
-    // the setting is the one thing deciding this rather than what happened
-    // to be inherited.
-    if (shouldWarm(this.warmMode)) {
-      env.OSD_WARM = "1";
-    } else {
-      delete env.OSD_WARM;
     }
     this.env = env;
     this.databaseLabel = describeDatabase(this.database);
 
     let build;
     try {
-      build = await runToCompletion(this.osdHome, "tools/osd-build.mjs", options.forceBuild === true ? ["--force"] : [], env,
-        (line) => this.#log(line));
+      build = await runToCompletion(this.osdHome, "tools/osd-build.mjs", force || forceBuild ? ["--force"] : [], env,
+        (line) => this.#log(line), (child) => { this.buildChild = child; });
     } catch (error) {
+      this.buildChild = undefined;
       this.#setState("stopped");
       error.logText ??= this.lastLog;
       throw error;
+    }
+    this.buildChild = undefined;
+    if (this.buildCancelled) {
+      this.#setState("stopped");
+      return undefined;
     }
     if (build.code !== 0) {
       this.#setState("stopped");
@@ -682,11 +699,16 @@ class Launcher extends EventEmitter {
     }
 
     this.#setState("starting");
+    if (this.buildCancelled) {
+      this.#setState("stopped");
+      return undefined;
+    }
     let child;
     try {
       child = spawn(process.execPath, ["test/run.mjs"], {cwd: this.osdHome, env});
     } catch (error) {
       this.#setState("stopped");
+      error.logText ??= this.lastLog;
       throw error;
     }
     this.child = child;
@@ -711,7 +733,7 @@ class Launcher extends EventEmitter {
       resolveExitedEarly = resolve;
     });
     child.on("exit", (code, signal) => {
-      const wasRunning = this.state === "running";
+      const wasRunning = this.state !== "stopped";
       this.child = undefined;
       this.port = undefined;
       this.pid = undefined;
@@ -755,6 +777,13 @@ class Launcher extends EventEmitter {
    *  before this process exits. Never sends a signal to a pid this launcher
    *  did not itself spawn. */
   async stop() {
+    if (this.state === "building") {
+      this.buildCancelled = true;
+      await terminate(this.buildChild);
+      this.buildChild = undefined;
+      this.#setState("stopped");
+      return;
+    }
     if (this.child === undefined) {
       this.#setState("stopped");
       return;
@@ -785,6 +814,7 @@ class Launcher extends EventEmitter {
 module.exports = {
   WARM_MEMORY_FLOOR_BYTES,
   shouldWarm,
+  warmEnvironment,
   PORT_RANGE,
   classify,
   isFree,

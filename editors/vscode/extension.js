@@ -17,9 +17,11 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   dataPreviewObjectOf, tablHasMandt, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText,
   transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, demoFailureObjects, progRunLens,
   groupServices, serviceLabel, serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
-  warmStatusText, activationBuildText, closureTestsText} = require("./lib.js");
-const {Launcher, ensureMaterializedHome, databaseEnv, defaultDedicatedName, describeDatabase,
-  isOpenSteamgateCheckout, decideStartTarget, classify, PORT_RANGE, isFree} = require("./launcher.js");
+  warmStatusText, activationBuildText, closureTestsText,
+  presetSettings, isOpenSteamgateCheckout: isOpenSteamgateManifest, osdHomeChoice, osdStateContext, systemOverviewModel} = require("./lib.js");
+const {Launcher, ensureMaterializedHome, materializedHomeDir, detectWorkspaceLayers, databaseEnv, defaultDedicatedName, describeDatabase,
+  isOpenSteamgateCheckout: isOpenSteamgatePath, decideStartTarget, classify, PORT_RANGE, isFree} = require("./launcher.js");
+const {systemOverviewHtml} = require("./system-overview.js");
 
 // Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
 // *.osdnb file opens as (package.json `contributes.notebooks`) and the
@@ -47,11 +49,25 @@ function osd() {
  *  every caller below treats as "nothing to start". */
 function osdHomeOf() {
   const configured = vscode.workspace.getConfiguration("osd").get("home", "").trim();
-  if (configured !== "") {
-    return configured;
-  }
-  const folders = vscode.workspace.workspaceFolders;
-  return folders?.length === 1 ? folders[0].uri.fsPath : undefined;
+  return osdHomeChoice({configuredHome: configured, workspaces: workspaceDescriptors()})?.path;
+}
+
+function workspaceDescriptors() {
+  return (vscode.workspace.workspaceFolders ?? []).map((folder) => {
+    let manifest;
+    try {
+      manifest = JSON.parse(fs.readFileSync(path.join(folder.uri.fsPath, "package.json"), "utf8"));
+    } catch {
+      manifest = undefined;
+    }
+    return {
+      path: folder.uri.fsPath,
+      isOpenSteamgate: isOpenSteamgateManifest(manifest, {
+        buildScript: fs.existsSync(path.join(folder.uri.fsPath, "tools", "osd-build.mjs")),
+        vscodeExtension: fs.existsSync(path.join(folder.uri.fsPath, "editors", "vscode", "package.json")),
+      }),
+    };
+  });
 }
 
 /** Whether this install carries a bundled seed to run (a packaged .vsix,
@@ -79,7 +95,9 @@ async function resolveStartTarget(context) {
   const configured = vscode.workspace.getConfiguration("osd").get("home", "").trim();
   const folders = vscode.workspace.workspaceFolders;
   const workspaceFolder = folders?.length === 1 ? folders[0].uri.fsPath : undefined;
-  const checkout = workspaceFolder !== undefined && isOpenSteamgateCheckout(workspaceFolder);
+  const descriptor = workspaceDescriptors().find((folder) => folder.path === workspaceFolder);
+  const checkout = workspaceFolder !== undefined &&
+    (isOpenSteamgatePath(workspaceFolder) || descriptor?.isOpenSteamgate === true);
   const seedDir = bundledSeedDir(context);
   const preference = context.workspaceState.get(BUNDLED_HOME_PREFERENCE);
   const facts = {configuredHome: configured, workspaceFolder, workspaceIsOpenSteamgate: checkout,
@@ -118,6 +136,50 @@ function homeSourceText(source) {
   if (source === "workspace") return "from workspace";
   if (source === "bundled") return "bundled copy";
   return undefined;
+}
+
+/** Selected home and its visible source. A packaged extension chooses the
+ *  bundled copy, except when the open-steamgate checkout itself is open;
+ *  DX2 uses that checkout as osd.home so edits reach the system in view. */
+function osdHomeChoiceFor(context, homeMode = "auto") {
+  const configured = vscode.workspace.getConfiguration("osd").get("home", "").trim();
+  const folders = workspaceDescriptors();
+  const seedDir = bundledSeedDir(context);
+  const version = context.extension.packageJSON.version;
+  const bundledHome = seedDir === undefined ? undefined : materializedHomeDir(context.globalStorageUri.fsPath, version);
+  return {...(osdHomeChoice({configuredHome: configured, workspaces: folders, bundledHome, bundledAvailable: seedDir !== undefined, homeMode}) ?? {}), seedDir, version};
+}
+
+/** Mainline's first-start choice takes precedence in auto mode for a packaged
+ *  install opened on the checkout. Other preset modes use DX2's pure choice. */
+async function resolveStartChoice(context, homeMode = "auto") {
+  if (homeMode === "auto") {
+    const folders = vscode.workspace.workspaceFolders;
+    const workspaceFolder = folders?.length === 1 ? folders[0].uri.fsPath : undefined;
+    const descriptor = workspaceDescriptors().find((folder) => folder.path === workspaceFolder);
+    const checkout = workspaceFolder !== undefined &&
+      (isOpenSteamgatePath(workspaceFolder) || descriptor?.isOpenSteamgate === true);
+    if (checkout && bundledSeedDir(context) !== undefined) {
+      const target = await resolveStartTarget(context);
+      if (target.kind === "cancelled") return target;
+      if (target.kind === "ready") {
+        return {
+          path: target.osdHome,
+          kind: target.source === "bundled" ? "bundled copy" : "osd.home",
+          source: target.source,
+          materialized: target.source === "bundled",
+        };
+      }
+    }
+  }
+
+  const choice = osdHomeChoiceFor(context, homeMode);
+  if (choice.path === undefined) return undefined;
+  const folders = vscode.workspace.workspaceFolders;
+  const workspaceFolder = folders?.length === 1 ? folders[0].uri.fsPath : undefined;
+  const source = choice.kind === "bundled copy" ? "bundled"
+    : choice.path === workspaceFolder ? "workspace" : "configured";
+  return {...choice, source};
 }
 
 /** Every byte a launch needs beyond osdHome's own tracked files lives here:
@@ -256,6 +318,11 @@ class SystemController {
     this.output = output;
     this.launcher = undefined;
     this.homeSource = undefined;
+    this.homeMode = "auto";
+    this.homeKind = undefined;
+    this.overviewPanel = undefined;
+    this.overviewListener = undefined;
+    this.overviewRender = 0;
     this.emitter = new vscode.EventEmitter();
     this.onDidChange = this.emitter.event;
   }
@@ -265,15 +332,15 @@ class SystemController {
    *  to build -- callers show that as an error rather than starting nothing
    *  silently. */
   async ensureLauncher() {
-    const target = await resolveStartTarget(this.context);
-    if (target.kind === "cancelled") {
-      return undefined;
-    }
-    if (target.kind !== "ready") {
+    const choice = await resolveStartChoice(this.context, this.homeMode);
+    if (choice?.kind === "cancelled") return undefined;
+    if (choice?.path === undefined) {
       throw new Error("osd.home is not set, and this window has no single workspace folder to default to");
     }
-    const osdHome = target.osdHome;
-    this.homeSource = target.source;
+    const osdHome = choice.kind === "bundled copy" && choice.materialized !== true
+      ? await ensureMaterializedHome(choice.seedDir, this.context.globalStorageUri.fsPath, choice.version)
+      : choice.path;
+    this.homeSource = choice.source;
     if (this.launcher !== undefined && this.launcher.osdHome === osdHome && this.launcher.state !== "stopped") {
       return this.launcher;
     }
@@ -286,6 +353,7 @@ class SystemController {
         database,
         warm: osdWarmModeOf(),
       });
+      launcher.homeKind = choice.kind;
       launcher.on("log", (line) => this.output.append(line));
       launcher.on("state", () => this.emitter.fire());
       launcher.on("exit", ({code, signal}) => {
@@ -300,7 +368,9 @@ class SystemController {
       this.launcher.database = database;
       this.launcher.databaseLabel = describeDatabase(database);
       this.launcher.warmMode = osdWarmModeOf();
+      this.launcher.homeKind = choice.kind;
     }
+    this.homeKind = choice.kind;
     return this.launcher;
   }
 
@@ -320,10 +390,24 @@ class SystemController {
     }
   }
 
+  async applyPreset(name) {
+    const preset = presetSettings(name);
+    this.homeMode = preset.home ?? "auto";
+    const target = vscode.workspace.workspaceFolders?.length
+      ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+    const config = vscode.workspace.getConfiguration("osd");
+    await Promise.all([
+      config.update("database.system", preset.database, target),
+      config.update("warm", preset.warm, target),
+      config.update("keymap", preset.keymap, target),
+    ]);
+  }
+
   async start(options = {}) {
     if (this.launcher !== undefined && this.launcher.state !== "stopped") {
+      if (this.launcher.state === "running") return true;
       vscode.window.showInformationMessage(`osd: already ${this.launcher.state}`);
-      return;
+      return false;
     }
     let launcher;
     try {
@@ -332,11 +416,15 @@ class SystemController {
       vscode.window.showErrorMessage(`osd: ${String(e.message ?? e)}`);
       return;
     }
-    if (launcher === undefined) return;
-    this.emitter.fire();
+    if (launcher === undefined) return false;
+    if (launcher.state !== "stopped") {
+      if (launcher.state === "running") return true;
+      vscode.window.showInformationMessage(`osd: already ${launcher.state}`);
+      return false;
+    }
     this.output.show(true);
     this.output.appendLine(`--- osd start: ${launcher.osdHome} (${launcher.databaseLabel}) ---`);
-    await this.#launch(launcher, options, "osd start");
+    return this.#launch(launcher, options, "osd start");
   }
 
   async stop() {
@@ -348,20 +436,43 @@ class SystemController {
   }
 
   async rebuild(options = {}) {
-    if (this.launcher === undefined) {
-      return this.start(options);
+    return this.#rebuild(options);
+  }
+
+  async fullRebuild() {
+    return this.#rebuild({force: true});
+  }
+
+  async #rebuild(options = {}) {
+    const force = options.force === true || options.forceBuild === true;
+    let launcher;
+    try {
+      launcher = await this.ensureLauncher();
+    } catch (e) {
+      vscode.window.showErrorMessage(`osd: ${String(e.message ?? e)}`);
+      return false;
+    }
+    if (launcher.state !== "stopped" && launcher.state !== "running") {
+      vscode.window.showInformationMessage(`osd: already ${launcher.state}`);
+      return false;
     }
     this.output.show(true);
-    this.output.appendLine("--- osd rebuild (full: stop, build, start) ---");
+    this.output.appendLine(force
+      ? "--- osd full rebuild (force: stop, build, start) ---"
+      : "--- osd rebuild (full: stop, build, start) ---");
     try {
-      await this.launcher.rebuild(options);
-      await this.#pointUrlAt(this.launcher.port);
-    } catch (e) {
-      await this.#launcherError(this.launcher, e, "osd rebuild");
+      const result = launcher.state === "running"
+        ? await launcher.rebuild({...options, force})
+        : await launcher.start({...options, force});
+      if (result === undefined) return false;
+      await this.#pointUrlAt(launcher.port);
       this.emitter.fire();
-      return;
+      return true;
+    } catch (e) {
+      await this.#launcherError(launcher, e, "osd rebuild");
+      this.emitter.fire();
+      return false;
     }
-    this.emitter.fire();
   }
 
   async #launch(launcher, options, label) {
@@ -371,12 +482,14 @@ class SystemController {
     } catch (error) {
       await this.#launcherError(launcher, error, label);
       this.emitter.fire();
-      return;
+      return false;
     }
+    if (result === undefined) return false;
     await this.#pointUrlAt(result.port);
     vscode.window.setStatusBarMessage(
       `osd: running on :${result.port} · ${launcher.databaseLabel}, generation ${String(result.generation).slice(0, 8)}`, 5000);
     this.emitter.fire();
+    return true;
   }
 
   async #launcherError(launcher, error, label) {
@@ -384,7 +497,6 @@ class SystemController {
     const lastLog = typeof launcher?.lastLog === "string" ? launcher.lastLog : "";
     const logText = errorLog.trim() ? errorLog : lastLog.trim() ? lastLog : "";
     const message = String(error?.message ?? error);
-    // Keep the upstream shortcut for the launcher’s stale HANA schema case.
     if (/STG_DB_FRESH/.test(message) && launcher.database?.kind === "hana") {
       const choice = await vscode.window.showErrorMessage(`${label}: ${message}`, "Set osd.database.hana.fresh and retry");
       if (choice !== undefined) {
@@ -432,6 +544,100 @@ class SystemController {
     this.output.show(true);
     this.output.appendLine(`--- osd start on :${selected.port} ---`);
     await this.#launch(launcher, {port: selected.port}, "osd start");
+  }
+
+  async quickStart(name = "defaults") {
+    const state = this.launcher?.state ?? "stopped";
+    if (state !== "stopped" && state !== "running") {
+      vscode.window.showInformationMessage(`osd: already ${state}`);
+      return;
+    }
+    await this.applyPreset(name);
+    // A running launcher has already captured its database and warm settings.
+    // Stop it so start() rebuilds the Launcher from the selected preset.
+    if (state === "running") await this.stop();
+    const started = await this.start();
+    if (started) await this.openSystemOverview();
+  }
+
+  openLog() {
+    this.output.show(true);
+  }
+
+  async #overviewModel() {
+    const state = this.launcher?.state ?? "stopped";
+    const choice = osdHomeChoiceFor(this.context, this.homeMode);
+    const homePath = this.launcher?.osdHome ?? choice.path;
+    const layerFolders = this.launcher?.layers ?? (homePath === undefined ? [] : detectWorkspaceLayers(workspaceFoldersFor(homePath)));
+    const keymap = vscode.workspace.getConfiguration("osd").get("keymap", "abap");
+    let serving;
+    let status;
+    const baseUrl = state === "running" && this.launcher?.port !== undefined
+      ? `http://localhost:${this.launcher.port}` : undefined;
+    if (baseUrl !== undefined) {
+      const client = new Osd(baseUrl);
+      [serving, status] = await Promise.all([
+        client.serving().catch(() => undefined),
+        client.systemStatus().catch(() => undefined),
+      ]);
+    }
+    const model = systemOverviewModel({
+      state,
+      launcher: this.launcher,
+      serving,
+      status,
+      homeKind: this.launcher?.homeKind ?? choice.kind,
+      homePath,
+      layers: layerFolders,
+      keymap,
+      baseUrl,
+    });
+    let sysinfoUrl;
+    if (state === "running" && baseUrl !== undefined) {
+      try {
+        sysinfoUrl = (await vscode.env.asExternalUri(vscode.Uri.parse(`${baseUrl}${model.sources.sysinfo}`))).toString();
+      } catch {
+        sysinfoUrl = `${baseUrl}${model.sources.sysinfo}`;
+      }
+      if (model.launchpadUrl) {
+        try {
+          model.launchpadUrl = (await vscode.env.asExternalUri(vscode.Uri.parse(model.launchpadUrl))).toString();
+        } catch {
+          // The host URL remains useful for local windows.
+        }
+      }
+    }
+    return {model, sysinfoUrl};
+  }
+
+  async openSystemOverview() {
+    if (this.overviewPanel === undefined) {
+      const panel = vscode.window.createWebviewPanel("osdSystemOverview", "System overview", vscode.ViewColumn.Beside, {
+        enableScripts: false,
+        retainContextWhenHidden: true,
+        enableCommandUris: ["osd.start", "workbench.action.openSettings"],
+      });
+      this.overviewPanel = panel;
+      panel.onDidDispose(() => {
+        this.overviewPanel = undefined;
+        this.overviewListener?.dispose();
+        this.overviewListener = undefined;
+      });
+      this.overviewListener = this.onDidChange(() => { this.refreshOverview(); });
+    } else {
+      this.overviewPanel.reveal(vscode.ViewColumn.Beside);
+    }
+    await this.refreshOverview();
+  }
+
+  async refreshOverview() {
+    const panel = this.overviewPanel;
+    if (panel === undefined) return;
+    const render = ++this.overviewRender;
+    const {model, sysinfoUrl} = await this.#overviewModel();
+    if (this.overviewPanel === panel && this.overviewRender === render) {
+      panel.webview.html = systemOverviewHtml(model, {sysinfoUrl});
+    }
   }
 
   /** T7 "Rebuild (warm)" (docs/vscode-extension.md "Warm", the $(tools)
@@ -613,7 +819,8 @@ class OsdTreeProvider {
     const stateItem = new vscode.TreeItem(label);
     stateItem.iconPath = new vscode.ThemeIcon(
       state === "running" ? "pass-filled" : state === "stopped" ? "circle-large-outline" : "sync~spin");
-    stateItem.contextValue = "osd-state";
+    stateItem.contextValue = osdStateContext(state);
+    stateItem.command = {command: "osd.openSystemOverview", title: "Open System overview"};
     if (this.warm !== undefined) {
       const lastVerify = this.warm.lastVerify === undefined ? "never"
         : `${this.warm.lastVerify.verdict ?? "?"} at ${this.warm.lastVerify.at ?? "?"}`;
@@ -640,11 +847,13 @@ class OsdTreeProvider {
 
   layerItems() {
     const launcher = this.controller.launcher;
-    const osdHome = launcher?.osdHome ?? osdHomeOf();
+    const choice = osdHomeChoiceFor(this.controller.context, this.controller.homeMode);
+    const osdHome = launcher?.osdHome ?? choice.path;
     const base = new vscode.TreeItem(osdHome === undefined ? "(osd.home not set, no single workspace folder)" : `base: ${osdHome}`);
     base.iconPath = new vscode.ThemeIcon("folder-library");
     const items = [base];
-    for (const layer of launcher?.layers ?? []) {
+    const layers = launcher?.layers ?? (osdHome === undefined ? [] : detectWorkspaceLayers(workspaceFoldersFor(osdHome)));
+    for (const layer of layers) {
       const item = new vscode.TreeItem(`workspace: ${layer.folder}`);
       item.iconPath = new vscode.ThemeIcon("folder");
       items.push(item);
@@ -1004,10 +1213,18 @@ function activate(context) {
   context.subscriptions.push(systemOutput);
   const controller = new SystemController(context, systemOutput);
   activeController = controller;
+  context.subscriptions.push(vscode.commands.registerCommand("osd.gettingStarted", () => {
+    const {publisher, name} = context.extension.packageJSON;
+    return vscode.commands.executeCommand("workbench.action.openWalkthrough", `${publisher}.${name}#gettingStarted`, false);
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.quickStart", (preset) => controller.quickStart(preset ?? "defaults")));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openSystemOverview", () => controller.openSystemOverview()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.start", () => controller.start()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.stop", () => controller.stop()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.rebuild", () => controller.rebuild()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.rebuildWarm", () => controller.rebuildWarm()));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.fullRebuild", () => controller.fullRebuild()));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openSystemLog", () => controller.openLog()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpad", () => controller.openLaunchpad()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpadInVsCode", () => controller.openLaunchpadInVsCode()));
   const treeProvider = new OsdTreeProvider(controller);
@@ -2299,4 +2516,4 @@ async function deactivate() {
   await activeController?.stop();
 }
 
-module.exports = {activate, deactivate};
+module.exports = {activate, deactivate, SystemController};

@@ -22,7 +22,7 @@ const {
   waitForServing, servingOnce, terminate, Launcher,
   linkOrCopyTree, materializedHomeDir, ensureMaterializedHome, MATERIALIZED_MARKER,
   DATABASE_KINDS, defaultDedicatedName, databaseEnv, describeDatabase, duckdbAvailable,
-  WARM_MEMORY_FLOOR_BYTES, shouldWarm,
+  WARM_MEMORY_FLOOR_BYTES, shouldWarm, warmEnvironment,
 } = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 
 // No chai-as-promised in this tree's node_modules, so a rejection is caught
@@ -160,6 +160,16 @@ describe("editors/vscode/launcher.js: shouldWarm (osd.warm's auto rule)", functi
     // boolean -- the point is that the default argument works, not a
     // specific verdict for this machine
     expect(shouldWarm("auto")).to.be.a("boolean");
+  });
+});
+
+describe("editors/vscode/launcher.js: warm activation defaults", function () {
+  it("enables auto mode at 4 GB, while explicit off and on take precedence", () => {
+    const fourGb = 4 * 1024 ** 3;
+    expect(warmEnvironment("auto", fourGb)).to.deep.equal({OSD_WARM: "1"});
+    expect(warmEnvironment("auto", fourGb - 1)).to.deep.equal({OSD_WARM: "0"});
+    expect(warmEnvironment("off", fourGb)).to.deep.equal({OSD_WARM: "0"});
+    expect(warmEnvironment("on", 1)).to.deep.equal({OSD_WARM: "1"});
   });
 });
 
@@ -480,6 +490,34 @@ describe("editors/vscode/launcher.js: Launcher surfaces a child that exits befor
       expect(Date.now() - started, "must not wait out the full timeout").to.be.lessThan(9000);
       expect(String(error.message)).to.contain("osd exited before it started serving");
     } finally {
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+});
+
+describe("editors/vscode/launcher.js: stop while building", function () {
+  it("terminates its own build child and does not start the server afterward", async function () {
+    const osdHome = mkdtempSync(join(tmpdir(), "osd-launcher-cancel-home-"));
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-cancel-storage-"));
+    const serverMarker = join(storageDir, "server-started");
+    mkdirSync(join(osdHome, "tools"), {recursive: true});
+    mkdirSync(join(osdHome, "test"), {recursive: true});
+    writeFileSync(join(osdHome, "tools", "osd-build.mjs"), "setInterval(() => {}, 1000);\n");
+    writeFileSync(join(osdHome, "test", "run.mjs"), `import {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(serverMarker)}, 'started');\n`);
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: []});
+    try {
+      const starting = launcher.start();
+      for (let attempt = 0; launcher.buildChild === undefined && attempt < 100; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(launcher.buildChild).not.to.equal(undefined);
+      await launcher.stop();
+      expect(await starting).to.equal(undefined);
+      expect(launcher.state).to.equal("stopped");
+      expect(existsSync(serverMarker)).to.equal(false);
+    } finally {
+      await launcher.stop();
       rmSync(osdHome, {recursive: true, force: true});
       rmSync(storageDir, {recursive: true, force: true});
     }
