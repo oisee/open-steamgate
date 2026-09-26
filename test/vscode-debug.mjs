@@ -1,0 +1,227 @@
+import {expect} from "chai";
+import {readFileSync, readdirSync, realpathSync} from "node:fs";
+import {dirname, join, resolve} from "node:path";
+import {pathToFileURL, fileURLToPath} from "node:url";
+import {ObjectStore} from "../tools/osd-store.mjs";
+import {UnitRun} from "../tools/osd-unit.mjs";
+import {createRequire} from "node:module";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const {pickInspectorPort} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
+const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+function decodeVlq(text) {
+  const values = [];
+  let value = 0;
+  let shift = 0;
+  for (const char of text) {
+    const digit = BASE64.indexOf(char);
+    if (digit < 0) throw new Error(`invalid source-map VLQ character: ${char}`);
+    value |= (digit & 31) << shift;
+    if ((digit & 32) !== 0) {
+      shift += 5;
+      continue;
+    }
+    values.push((value & 1) === 1 ? -(value >> 1) : value >> 1);
+    value = 0;
+    shift = 0;
+  }
+  return values;
+}
+
+function generatedPosition(mappings, sourceIndex, sourceLine, sourceColumn) {
+  let previousSource = 0;
+  let previousLine = 0;
+  let previousColumn = 0;
+  for (const [lineIndex, line] of mappings.split(";").entries()) {
+    let generatedColumn = 0;
+    for (const segment of line.split(",")) {
+      if (segment === "") continue;
+      const [generatedDelta, sourceDelta, lineDelta, columnDelta] = decodeVlq(segment);
+      generatedColumn += generatedDelta;
+      if (sourceDelta === undefined) continue;
+      previousSource += sourceDelta;
+      previousLine += lineDelta;
+      previousColumn += columnDelta;
+      if (previousSource === sourceIndex && previousLine === sourceLine - 1 && previousColumn >= sourceColumn) {
+        return {line: lineIndex + 1, column: generatedColumn};
+      }
+    }
+  }
+  return undefined;
+}
+
+class InspectorClient {
+  constructor(socket) {
+    this.socket = socket;
+    this.nextId = 0;
+    this.pending = new Map();
+    this.events = [];
+    this.waiters = [];
+    socket.addEventListener("message", (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.id !== undefined) {
+        const pending = this.pending.get(message.id);
+        if (pending === undefined) return;
+        this.pending.delete(message.id);
+        if (message.error !== undefined) pending.reject(new Error(message.error.message));
+        else pending.resolve(message.result ?? {});
+        return;
+      }
+      const waiterIndex = this.waiters.findIndex((waiter) => waiter.method === message.method && waiter.predicate(message.params));
+      if (waiterIndex >= 0) this.waiters.splice(waiterIndex, 1)[0].resolve(message.params);
+      else this.events.push(message);
+    });
+  }
+
+  send(method, params = {}) {
+    const id = ++this.nextId;
+    const result = new Promise((resolve, reject) => this.pending.set(id, {resolve, reject}));
+    this.socket.send(JSON.stringify({id, method, params}));
+    return result;
+  }
+
+  waitFor(method, predicate = () => true, timeoutMs = 15000) {
+    const index = this.events.findIndex((event) => event.method === method && predicate(event.params));
+    if (index >= 0) return Promise.resolve(this.events.splice(index, 1)[0].params);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.waiters = this.waiters.filter((waiter) => waiter.resolve !== finish);
+        reject(new Error(`timed out waiting for inspector event ${method}`));
+      }, timeoutMs);
+      const finish = (params) => {
+        clearTimeout(timer);
+        resolve(params);
+      };
+      this.waiters.push({method, predicate, resolve: finish});
+    });
+  }
+}
+
+async function inspectorTarget(port) {
+  const until = Date.now() + 15000;
+  while (Date.now() < until) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+      if (response.ok) {
+        const [target] = await response.json();
+        if (target?.webSocketDebuggerUrl) return target;
+      }
+    } catch {
+      // The detached child has not opened its inspector yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`unit child inspector did not open on port ${port}`);
+}
+
+function breakpointFor(sourcePath, sourceLine, sourceColumn) {
+  const output = join(ROOT, "output");
+  for (const name of readdirSync(output).filter((entry) => entry.endsWith(".mjs.map"))) {
+    const mapFile = join(output, name);
+    const data = JSON.parse(readFileSync(mapFile, "utf8"));
+    const source = data.sources.find((entry) => {
+      const absolute = resolve(dirname(mapFile), entry);
+      return absolute === sourcePath || entry.replaceAll("\\", "/").endsWith("/src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
+    });
+    if (source === undefined) continue;
+    const position = generatedPosition(data.mappings, data.sources.indexOf(source), sourceLine, sourceColumn);
+    if (position === undefined) continue;
+    const moduleFile = mapFile.slice(0, -4);
+    return {url: pathToFileURL(realpathSync(moduleFile)).href, lineNumber: position.line - 1,
+      columnNumber: position.column, source, position};
+  }
+  throw new Error(`no source-map position for ${sourcePath}:${sourceLine}`);
+}
+
+describe("VS Code debugger transport: detached ABAP Unit child", function () {
+  this.timeout(180000);
+
+  it("attaches over CDP and stops on an ABAP line in a test method", async () => {
+    const sourcePath = join(ROOT, "src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
+    const sourceLines = readFileSync(sourcePath, "utf8").split(/\r?\n/);
+    const sourceLine = sourceLines.findIndex((line) => line.includes("lt_token = zcl_osd_abap_tokens=>scan")) + 1;
+    expect(sourceLine).to.be.greaterThan(0);
+    const breakpoint = breakpointFor(sourcePath, sourceLine, sourceLines[sourceLine - 1].search(/\S/));
+    const inspectPort = await pickInspectorPort();
+    const runner = new UnitRun(new ObjectStore({root: ROOT}));
+    const resultPromise = runner.runDetached("CLAS", "ZCL_OSD_ABAP_TOKENS", {
+      testClass: "LTCL_SCAN",
+      method: "KEYWORDS_AND_NAMES",
+      inspectPort,
+      waitForDebugger: true,
+    });
+    let client;
+    let released = false;
+    try {
+      const target = await inspectorTarget(inspectPort);
+      const socket = new WebSocket(target.webSocketDebuggerUrl);
+      await new Promise((resolve, reject) => {
+        socket.addEventListener("open", resolve, {once: true});
+        socket.addEventListener("error", reject, {once: true});
+      });
+      client = new InspectorClient(socket);
+      await client.send("Debugger.enable");
+      const set = await client.send("Debugger.setBreakpointByUrl", {
+        url: breakpoint.url,
+        lineNumber: breakpoint.lineNumber,
+        columnNumber: breakpoint.columnNumber,
+      });
+      expect(set.breakpointId).to.be.a("string");
+      await client.send("Runtime.runIfWaitingForDebugger");
+      released = true;
+      const entry = await client.waitFor("Debugger.paused");
+      expect(entry.reason).to.equal("Break on start");
+      await client.send("Debugger.resume");
+      const paused = await client.waitFor("Debugger.paused");
+      expect(paused.hitBreakpoints).to.include(set.breakpointId);
+      expect(paused.callFrames[0].location.lineNumber).to.equal(breakpoint.lineNumber);
+      const script = client.events.find((event) => event.method === "Debugger.scriptParsed"
+        && event.params.scriptId === paused.callFrames[0].location.scriptId);
+      expect(script?.params.url).to.equal(breakpoint.url);
+      await client.send("Debugger.resume");
+      client.socket.close();
+      client = undefined;
+      const result = await resultPromise;
+      expect(result.ok).to.equal(true);
+      expect(result.counts).to.include({passed: 1, failed: 0});
+    } finally {
+      if (client !== undefined) {
+        if (!released) await client.send("Runtime.runIfWaitingForDebugger").catch(() => {});
+        await client.send("Debugger.resume").catch(() => {});
+        client.socket.close();
+      }
+      await resultPromise.catch(() => {});
+    }
+  });
+
+  it("terminates a child paused at startup when the debug request is aborted", async () => {
+    const inspectPort = await pickInspectorPort();
+    const cancellation = new AbortController();
+    const runner = new UnitRun(new ObjectStore({root: ROOT}));
+    const resultPromise = runner.runDetached("CLAS", "ZCL_OSD_ABAP_TOKENS", {
+      testClass: "LTCL_SCAN", method: "KEYWORDS_AND_NAMES", inspectPort,
+      waitForDebugger: true, signal: cancellation.signal,
+    });
+    try {
+      await inspectorTarget(inspectPort);
+      cancellation.abort();
+      try {
+        await resultPromise;
+        throw new Error("expected cancelled run");
+      } catch (error) {
+        expect(error.message).to.equal("ABAP Unit run cancelled");
+      }
+      let closed = false;
+      try {
+        await fetch(`http://127.0.0.1:${inspectPort}/json/list`);
+      } catch {
+        closed = true;
+      }
+      expect(closed, "the paused inspector closed").to.equal(true);
+    } finally {
+      cancellation.abort();
+      await resultPromise.catch(() => {});
+    }
+  });
+});

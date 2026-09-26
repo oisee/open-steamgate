@@ -1,8 +1,11 @@
 import {expect} from "chai";
 import express from "express";
+import {createRequire} from "node:module";
 import {startServer} from "./start.mjs";
 import {nodeStructureDocument} from "../tools/adt-documents.mjs";
-import {adtRouter, unitRunDbEnv, UNIT_RUN_DB_ENV_KEYS} from "../tools/adt-facade.mjs";
+import {adtRouter, unitRunDbEnv, unitRunOptions, UNIT_RUN_DB_ENV_KEYS} from "../tools/adt-facade.mjs";
+
+const {pickInspectorPort} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 
 // The façade against the real server, the way a client meets it: the same
 // listener that serves OData also serves /sap/bc/adt/**, which is the whole
@@ -34,6 +37,53 @@ describe("tools/adt-facade: OSD answers ADT", () => {
   const call = (path, options = {}) => fetch(ADT + path, {
     ...options,
     headers: {cookie: `sap-contextid=${context}`, "x-csrf-token": token, ...(options.headers ?? {})},
+  });
+
+  it("terminates a paused unit child when its debug request is disconnected", async function () {
+    this.timeout(60000);
+    const inspectPort = await pickInspectorPort();
+    const cancellation = new AbortController();
+    const request = call("/core/http/unit/object/run?type=CLAS&name=ZCL_STG_SEGW_TEST&testClass=LTCL_TREE&method=PROPERTIES_IN_FILE_ORDER", {
+      method: "POST", signal: cancellation.signal,
+      headers: {"content-type": "application/json"},
+      body: JSON.stringify({inspectPort, waitForDebugger: true}),
+    });
+    try {
+      const deadline = Date.now() + 30000;
+      let open = false;
+      while (Date.now() < deadline) {
+        try {
+          const response = await fetch(`http://127.0.0.1:${inspectPort}/json/list`);
+          if (response.ok) { open = true; break; }
+        } catch {
+          // The child has not opened its inspector yet.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(open, "the child reached its paused inspector").to.equal(true);
+      cancellation.abort();
+      try {
+        await request;
+        throw new Error("expected aborted request");
+      } catch (error) {
+        expect(error.name).to.equal("AbortError");
+      }
+      const exitDeadline = Date.now() + 5000;
+      let closed = false;
+      while (Date.now() < exitDeadline) {
+        try {
+          await fetch(`http://127.0.0.1:${inspectPort}/json/list`);
+        } catch {
+          closed = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(closed, "the paused inspector closed after request cancellation").to.equal(true);
+    } finally {
+      cancellation.abort();
+      await request.catch(() => {});
+    }
   });
 
   // What an ABAP Cloud Project needs beyond the classic surface, written
@@ -1356,5 +1406,33 @@ describe("tools/adt-facade: unitRunDbEnv (core/http/unit/object/run's dbEnv body
   it("an empty dbEnv, or one that is entirely filtered away, is undefined", async () => {
     expect(await unitRunDbEnv(reqWith(JSON.stringify({dbEnv: {}})))).to.equal(undefined);
     expect(await unitRunDbEnv(reqWith(JSON.stringify({dbEnv: {PATH: "/x"}})))).to.equal(undefined);
+  });
+
+  it("passes a validated inspector port alongside the database config", async () => {
+    expect(await unitRunOptions(reqWith(JSON.stringify({dbEnv: {STG_DB: "hana"}, inspectPort: 9444}))))
+      .to.deep.equal({dbEnv: {STG_DB: "hana"}, inspectPort: 9444, waitForDebugger: false});
+    expect(await unitRunOptions(reqWith(JSON.stringify({inspectPort: 9444, waitForDebugger: true}))))
+      .to.deep.equal({dbEnv: undefined, inspectPort: 9444, waitForDebugger: true});
+    for (const body of [{waitForDebugger: true}, {inspectPort: 9444, waitForDebugger: "true"}]) {
+      try {
+        await unitRunOptions(reqWith(JSON.stringify(body)));
+        throw new Error("expected invalid debugger gate to fail");
+      } catch (error) {
+        expect(error.code).to.equal("INVALID_REQUEST");
+      }
+    }
+    try {
+      await unitRunOptions(reqWith(JSON.stringify({inspectPort: "--inspect"})));
+      throw new Error("expected invalid inspector port to fail");
+    } catch (error) {
+      expect(error.code).to.equal("INVALID_REQUEST");
+      expect(error.message).to.contain("inspector port");
+    }
+    try {
+      await unitRunOptions(reqWith(JSON.stringify({inspectPort: true})));
+      throw new Error("expected a non-numeric inspector port to fail");
+    } catch (error) {
+      expect(error.code).to.equal("INVALID_REQUEST");
+    }
   });
 });

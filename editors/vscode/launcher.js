@@ -210,6 +210,35 @@ async function pickPort(range = PORT_RANGE) {
   throw new Error(`no free port in ${range.from}-${range.to}`);
 }
 
+/** A free loopback port for a Node inspector. Unlike the listener port this
+ *  has no small product budget; the operating system chooses an ephemeral
+ *  port and the caller closes the probe before starting the child. */
+function pickInspectorPort() {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const {port} = server.address();
+      server.close((error) => error ? reject(error) : resolve(port));
+    });
+  });
+}
+
+/** `OSD_INSPECT` belongs to the launched system setting, never an inherited
+ *  shell value. The runtime uses this only for its ABAP-serving child. */
+function debugSystemEnv(env, enabled, port) {
+  const out = {...env};
+  delete out.OSD_INSPECT;
+  if (enabled) {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error(`invalid inspector port: ${port}`);
+    }
+    out.OSD_INSPECT = String(port);
+    out.OSD_WORKERS = "1";
+  }
+  return out;
+}
+
 // ---- workspace layers -----------------------------------------------------
 
 /** Whether `dir` looks like an abapGit folder: a `.abapgit.xml` at its root,
@@ -566,6 +595,7 @@ class Launcher extends EventEmitter {
     // "auto" | "on" | "off" (osd.warm, resolved by shouldWarm() below into
     // OSD_WARM); a test hands in "off" to keep the plain end-to-end run cold.
     this.warmMode = options.warm ?? "auto";
+    this.debug = options.debug === true;
     this.state = "stopped";
     this.child = undefined;
     this.buildChild = undefined;
@@ -581,6 +611,7 @@ class Launcher extends EventEmitter {
     // since the prime is synchronous and the façade answers nothing at all
     // while it runs (docs/warm-compile.md)
     this.startedAt = undefined;
+    this.inspectPort = undefined;
   }
 
   #setState(state) {
@@ -648,6 +679,10 @@ class Launcher extends EventEmitter {
       this.#setState("stopped");
       return undefined;
     }
+    if (!this.debug) this.inspectPort = undefined;
+    if (this.debug && (this.inspectPort === undefined || await isFree(this.inspectPort) === false)) {
+      this.inspectPort = await pickInspectorPort();
+    }
     const dbEnv = databaseEnv(this.database);
     const env = {
       ...process.env,
@@ -670,6 +705,9 @@ class Launcher extends EventEmitter {
       STG_SERVE: "child",
       ...warmEnvironment(this.warmMode),
     };
+    // RuntimePool gives every serving worker the same inspector port; a
+    // debugger session can follow one child only.
+    Object.assign(env, debugSystemEnv(env, this.debug, this.inspectPort));
     if (packsDir !== undefined) {
       env.OSD_PACKS = packsDir;
     }
@@ -766,7 +804,7 @@ class Launcher extends EventEmitter {
     this.port = port;
     this.generation = serving.generation;
     this.#setState("running");
-    return {port: this.port, pid: this.pid, generation: this.generation};
+    return {port: this.port, pid: this.pid, generation: this.generation, inspectPort: this.inspectPort};
   }
 
   /** Stops both processes: the child this module spawned (`node
@@ -819,6 +857,8 @@ module.exports = {
   classify,
   isFree,
   pickPort,
+  pickInspectorPort,
+  debugSystemEnv,
   looksLikeAbapGitFolder,
   isOpenSteamgateCheckout,
   decideStartTarget,

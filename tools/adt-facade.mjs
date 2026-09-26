@@ -551,28 +551,53 @@ export const UNIT_RUN_DB_ENV_KEYS = new Set([
  *  `undefined` for no body, an unparsable body, or a body with no `dbEnv`
  *  of its own -- every existing caller sends no body at all and this must
  *  leave that alone. */
-export async function unitRunDbEnv(req) {
+export async function unitRunOptions(req) {
   const body = await rawBody(req);
   if (body.length === 0) {
-    return undefined;
+    return {dbEnv: undefined, inspectPort: undefined, waitForDebugger: false};
   }
   let parsed;
   try {
     parsed = JSON.parse(body.toString("utf8"));
   } catch {
-    return undefined;
+    return {dbEnv: undefined, inspectPort: undefined, waitForDebugger: false};
   }
   const dbEnv = parsed?.dbEnv;
-  if (dbEnv === null || typeof dbEnv !== "object") {
-    return undefined;
-  }
   const out = {};
-  for (const [key, value] of Object.entries(dbEnv)) {
-    if (UNIT_RUN_DB_ENV_KEYS.has(key) && typeof value === "string") {
-      out[key] = value;
+  if (dbEnv !== null && typeof dbEnv === "object") {
+    for (const [key, value] of Object.entries(dbEnv)) {
+      if (UNIT_RUN_DB_ENV_KEYS.has(key) && typeof value === "string") {
+        out[key] = value;
+      }
     }
   }
-  return Object.keys(out).length === 0 ? undefined : out;
+  let inspectPort;
+  if (parsed?.inspectPort !== undefined) {
+    inspectPort = typeof parsed.inspectPort === "number" ? parsed.inspectPort
+      : typeof parsed.inspectPort === "string" && /^\d+$/.test(parsed.inspectPort) ? Number(parsed.inspectPort) : NaN;
+    if (!Number.isInteger(inspectPort) || inspectPort < 1 || inspectPort > 65535) {
+      const error = new Error("inspector port must be an integer between 1 and 65535");
+      error.code = "INVALID_REQUEST";
+      throw error;
+    }
+  }
+  if (parsed?.waitForDebugger !== undefined && typeof parsed.waitForDebugger !== "boolean") {
+    const error = new Error("waitForDebugger must be boolean");
+    error.code = "INVALID_REQUEST";
+    throw error;
+  }
+  if (parsed?.waitForDebugger === true && inspectPort === undefined) {
+    const error = new Error("waitForDebugger needs an inspector port");
+    error.code = "INVALID_REQUEST";
+    throw error;
+  }
+  return {dbEnv: Object.keys(out).length === 0 ? undefined : out, inspectPort,
+    waitForDebugger: parsed?.waitForDebugger === true};
+}
+
+/** Backwards-compatible db-only view used by other façade routes/tests. */
+export async function unitRunDbEnv(req) {
+  return (await unitRunOptions(req)).dbEnv;
 }
 
 const STARTED = new Date().toISOString();
@@ -1312,16 +1337,23 @@ export function adtRouter(options = {}) {
       refuse(res, 400, "ExceptionInvalidRequest", `${type || "object"} cannot carry ABAP Unit tests here`);
       return;
     }
+    const cancellation = new AbortController();
+    res.on("close", () => {
+      if (!res.writableEnded) cancellation.abort();
+    });
     try {
-      const dbEnv = await unitRunDbEnv(req);
+      const {dbEnv, inspectPort, waitForDebugger} = await unitRunOptions(req);
       const runner = await store.unit();
       const plan = runner.classes(type, name);
-      const run = await runner.runDetached(type, name, {...selectedUnitPlan(plan, testClass, method), dbEnv});
+      const run = await runner.runDetached(type, name, {...selectedUnitPlan(plan, testClass, method), dbEnv, inspectPort,
+        waitForDebugger, signal: cancellation.signal});
       res.type("application/json; charset=utf-8").send(JSON.stringify(run));
     } catch (error) {
+      if (cancellation.signal.aborted) return;
       const missing = error instanceof NotFound || error?.code === "NOT_FOUND";
-      refuse(res, missing ? 404 : 500,
-        missing ? "ExceptionResourceNotFound" : "ExceptionTestRunFailed",
+      const invalid = error?.code === "INVALID_REQUEST";
+      refuse(res, invalid ? 400 : missing ? 404 : 500,
+        invalid ? "ExceptionInvalidRequest" : missing ? "ExceptionResourceNotFound" : "ExceptionTestRunFailed",
         error.message ?? String(error));
     }
   });
