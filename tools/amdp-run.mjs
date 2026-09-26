@@ -7,9 +7,8 @@
 //
 //   node tools/amdp-run.mjs <class.clas.abap> <method> [--types <f>]... [--in name=json]...
 //
-// Connection comes from HXE_HOST / HXE_PORT / HXE_USER / HXE_PASSWORD, or
-// from .local/hxe-password, which is where the password of the local
-// laboratory is kept and which is not tracked.
+// A HANA system uses HANA_* first so its AMDP destination reaches the same
+// database. Other systems may use the separate HXE_* sandbox connection.
 import {readFileSync, existsSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import {basename,join} from "node:path";
@@ -41,11 +40,15 @@ export function passwordFiles() {
 
 export function connection() {
   const found = passwordFiles().find((f) => existsSync(f));
+  const system = process.env.STG_DB === "hana";
+  const preferred = (key) => system
+    ? process.env[`HANA_${key}`] ?? process.env[`HXE_${key}`]
+    : process.env[`HXE_${key}`] ?? process.env[`HANA_${key}`];
   return {
-    host: process.env.HXE_HOST ?? process.env.HANA_HOST ?? "localhost",
-    port: Number(process.env.HXE_PORT ?? process.env.HANA_PORT ?? 39017),
-    user: process.env.HXE_USER ?? process.env.HANA_USER ?? "SYSTEM",
-    password: process.env.HXE_PASSWORD ?? process.env.HANA_PASSWORD
+    host: preferred("HOST") ?? "localhost",
+    port: Number(preferred("PORT") ?? 39017),
+    user: preferred("USER") ?? "SYSTEM",
+    password: preferred("PASSWORD")
       ?? (found === undefined ? undefined : readFileSync(found, "utf8").trim()),
   };
 }

@@ -6,6 +6,7 @@
     "test/adt-devloop.mjs",
     "test/adt-editor.mjs",
     "test/adt-facade.mjs",
+    "test/adt-notebook.mjs",
     "test/adt-session.mjs",
     "test/amdp-cleanroom-corpus.mjs",
     "test/amdp-demo.mjs",

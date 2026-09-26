@@ -75,6 +75,23 @@ describe("the AMDP sandbox", function () {
     expect(answer.system_db, "and the system database, which is a different thing").to.be.a("string");
   });
 
+  it("answers a notebook cell clearly when the system database is not HANA", async function () {
+    const system = await (await fetch(BASE + "engine")).json();
+    if (system.system_db === "HDB") this.skip();
+    const res = await fetch(BASE + "cell", {
+      method: "POST",
+      headers: {"content-type": "text/plain", accept: "application/json"},
+      body: "SELECT 1 AS one FROM dummy;",
+    });
+    expect(res.status, "an unsupported engine is a handled result").to.equal(200);
+    expect(res.headers.get("content-type")).to.contain("application/json");
+    const answer = await res.json();
+    expect(answer.status).to.equal("error");
+    expect(answer.system_db).to.equal(system.system_db);
+    expect(answer.error).to.contain("SQLScript notebook cells require a HANA system database");
+    expect(answer.error).to.contain(`this system uses ${system.system_db}`);
+  });
+
   // **Gated like the other two, and for the same reason.** It asserts where a
   // body *ran*, which is only a question when one did: without a HANA the
   // page carries the refusal instead, and quite right. Ungated it was red for

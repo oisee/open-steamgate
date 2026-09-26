@@ -336,19 +336,19 @@ Not done: `test/start.mjs`'s inline front writes nothing (see above); OSGo
 (the Go runtime) does not write the table at all -- named as a follow-up,
 not attempted here.
 
-## Q6a: a SQL notebook
+## Q6a: SQL, ABAP, and SQLScript notebook cells
 
-*2026-09-25.* `*.osdnb` is a small JSON file of SQL (or markdown) cells
+*2026-09-26.* `*.osdnb` is a small JSON file of SQL, ABAP, SQLScript or
+markdown cells
 (`editors/vscode/examples/demo.osdnb`): a VS Code
 [NotebookSerializer](https://code.visualstudio.com/api/extension-guides/notebook)
 for the type `osd-sql-notebook` (`package.json` `contributes.notebooks`,
-selector `*.osdnb`), and a `NotebookController` named "osd SQL" that runs a
+selector `*.osdnb`), and a `NotebookController` named "osd notebook" that runs a
 cell the way ADT's own SQL Pane does: `POST
 /sap/bc/adt/datapreview/freestyle?rowNumber=<osd.notebook.rowLimit>` with
 the cell's own text as the body (`tools/adt-facade.mjs`, ~2358; `data.query`
-underneath is SELECT-only and applies the row limit itself -- this is the
-one façade route that already does exactly what a notebook cell needs, so
-Q6a adds no new server route). The answer is XML, column-oriented (one
+underneath is SELECT-only and applies the row limit itself). The answer is
+XML, column-oriented (one
 `<dataPreview:columns>` per selected column, its own metadata and a
 `<dataPreview:data>` per row -- `tableDataDocument`, ~257); a cell's output
 is that answer turned into an HTML table (`text/html`, escaped so a value
@@ -361,12 +361,43 @@ disclosure in the HTML shows the same rows on demand. A refused statement
 the server's own message unwrapped. Command
 "osd: New SQL notebook" opens a fresh one-cell notebook of the type.
 
+The same controller accepts `abap` and `sqlscript` code cells. An ABAP cell's
+statements are wrapped as the main method of `ZCL_OSD_NOTEBOOK_CELL`, written
+to the persistent `notebook-scratch` pack, activated through
+`ObjectStore#publish()` and `completeActivation()`, and run through the
+existing classrun path. Its
+console text appears under that cell. The façade serializes these runs because
+each uses the same class and activation replaces the serving process's loaded
+module graph. A failed activation restores the prior scratch source and its
+active or inactive ADT state, or removes the first failed cell before the next
+launch. The launcher creates the scratch
+pack under its ignored extension storage and keeps it in `OSD_PACKS` even when
+no workspace layers are configured. `ObjectStore#write(..., "main", {root})` places the new
+object in that already-known writable layer; ordinary writes still use the
+first writable root.
+
+A `sqlscript` cell posts its body to `/sap/bc/osd/amdp/cell`, the structured
+cell interface of the existing `/sap/bc/osd/amdp/` sandbox. The sandbox's
+existing `AMDP` destination runs the throwaway SQLScript procedure and returns
+rows or the engine's message as JSON. When the system database is HANA, it
+uses the configured `HANA_*` connection even if a separate `HXE_*` sandbox
+connection is also configured. On SQLite, PostgreSQL, or DuckDB the route
+answers with a clear requirement for a HANA system database before attempting
+the destination call, even if an unrelated HANA connection is configured.
+Plain `sql` cells continue to use the system database through freestyle.
+`pAMDP` remains parked.
+
+`editors/vscode/examples/abap-amdp.osdnb` shows both new cell types: an ABAP
+`SELECT ... INTO TABLE` and `LOOP` that writes with `out->write`, plus a
+SQLScript query.
+
 `editors/vscode/lib.js` carries the pure half (`freestyleRows`,
-`freestyleTableHtml`, `freestyleOutputItems`, `htmlEscape`, `notebookFromJson`, `notebookToJson`,
-`Osd#freestyle`), tested without VS Code or a server in
-`test/vscode-extension.mjs`; the route itself (already exercised in
-`test/adt-facade.mjs`) also gets one round trip in `test/adt-devloop.mjs`,
-beside the other façade routes that suite drives through a CSRF session.
+`freestyleTableHtml`, `freestyleOutputItems`, `htmlEscape`,
+`notebookAbapSource`, `amdpCellResult`, `notebookFromJson`, `notebookToJson`,
+`Osd#freestyle`), tested without VS Code in `test/vscode-extension.mjs`.
+The SQL and ABAP routes use the façade. The freestyle route is also tested
+through a CSRF session in `test/adt-devloop.mjs`, and the ICF-owned AMDP
+route is tested through the sandbox suite.
 
 ## Q6b: classrun
 
@@ -426,33 +457,9 @@ server-side, over the editor's own buffer (not necessarily saved), the way
 `ctx.hasUnitTests` is a file-system fact and Ctrl+F2's check already reads
 the unsaved buffer.
 
-Not done: ABAP cells in the SQL notebook (Q6a). The obvious design -- a
-scratch class in a gitignored layer, written and activated per cell,
-classrun immediately -- runs into two facts of this tree rather than one:
-`ObjectStore#rootsOf` resolves the writable roots **once, at construction**
-(`tools/osd-store.mjs`), so a pack folder (`tools/osd-packs.mjs`,
-`OSD_PACKS`) has to exist on disk *before* the façade's process starts, not
-something a notebook cell can arrange against an already-running `osd`; and
-`ObjectStore#write` puts a brand-new object in the **first** writable root
-regardless (`this.roots.find((r) => r.writable)`), not a root a caller
-names, so even with the pack pre-existing, nothing hands a cell's scratch
-class to it without a small store change (an optional target root on
-`write()`). Under that, activating and classrunning the same class within
-one still-running process hits the fact `tools/osd-classrun.mjs` documents
-at length: Node pins a module graph for the life of a process, the same
-reason the serving runtime recycles into a new one after every activation
-rather than reload; measured directly on this worktree (occasional `lstat
-ENOENT` on a file the build had just written, naming the *previous*
-generation's hash even though `readlinkSync` in the same process already
-showed the new one) and the reason this repo's own classrun fixtures
-(`src/classrun/zcl_osd_classrun_demo.clas.abap`,
-`zcl_osd_classrun_dumper.clas.abap`) are ordinary tracked objects built by
-`npm run transpile`, not written by a test. The smallest fix that keeps
-"sources stay files, git is the only version layer" is two small, separate
-pieces of future work: an optional `root` on `ObjectStore#write` for a
-caller that already knows which one, and a permanently-declared (not
-pack-discovered) scratch root so a notebook does not need `OSD_PACKS` set
-before `osd` starts -- neither attempted here.
+ABAP and SQLScript cells are implemented as described above. The scratch
+root is a normal pack, discovered at startup like other packs, and notebook
+ABAP requests reuse the existing activation and classrun lifecycle.
 
 ## Q7: F8 on a table or a CDS view
 
@@ -609,9 +616,10 @@ workspace layer always sorts after the tree's own packs and wins a name it
 shares, "the later folder wins") and a `src` **symlink** at the folder's
 own `src/` (or at the folder itself, when its ABAP sits directly at its
 root) — no copy, and nothing is ever written under the workspace folder or
-under `osdHome`. The container is rebuilt from scratch on every `start()`,
-so a workspace folder that has since closed does not leave a stale layer
-serving code nobody can see any more. This was the smallest of the three
+under `osdHome`. Workspace packs are rebuilt on every `start()`, while the
+notebook scratch pack retains its files. A workspace folder that has since
+closed does not leave a stale layer serving code nobody can see any more.
+This was the smallest of the three
 options the task named: an env var for extra input folders does not exist
 (`input_folder` is a build-config field, not read from the environment),
 and the pack mechanism already does exactly what was needed, found by one
@@ -677,19 +685,12 @@ An `EADDRINUSE` failure offers **Pick another port** from the currently
 available ports in 3531–3539. The serving status tooltip includes
 `/osd/serving`'s `warm.reason` verbatim when `warm.state` is `cold`.
 
-**Q6b's notebook gap does not fall out for free.** The storage layer this
-spike adds *is* a permanent, pre-existing pack directory once a workspace
-layer exists, which is the missing half `docs/vscode-extension.md`
-(Q6b, above) named — but only the half that exists **before the process
-starts**: `tools/osd-store.mjs`'s `ObjectStore#rootsOf` still resolves the
-writable roots once, at construction, so a notebook cell run against an
-*already-running* `osd` still cannot add a new root, and `write()` still
-puts a new object in the first writable root regardless of which pack a
-cell meant. Next step, not attempted here: an optional `root` on
-`ObjectStore#write()`, and a permanently-declared scratch pack the
-launcher always creates (even with zero detected workspace layers) so a
-notebook has somewhere to write into without `OSD_PACKS` needing to be
-set to something new after the process is already up.
+Q6a's scratch pack is created on every launcher start and retained between
+starts, even without workspace layers. The launched process receives it in
+`OSD_PACKS` alongside any packs inherited from the environment. The façade's
+store discovers it before the system starts, so an already-running notebook
+can select that writable root without changing `OSD_PACKS` or reconstructing
+the store.
 
 ## Getting started and System overview
 

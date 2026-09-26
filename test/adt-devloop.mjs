@@ -1006,6 +1006,91 @@ describe("tools/adt-facade: publication state", function () {
   });
 });
 
+describe("tools/adt-facade: notebook scratch after failed activation", function () {
+  let root;
+  let store;
+  let server;
+  let token;
+  let context;
+  const roots = [
+    {path: "src", writable: true},
+    {path: "packs/notebook-scratch/src", writable: true, pack: "notebook-scratch"},
+  ];
+  const name = "ZCL_OSD_NOTEBOOK_CELL";
+  const valid = SOURCE.replaceAll("zcl_osd_scratch", "zcl_osd_notebook_cell");
+  const invalid = valid.replace("rv = 'hello'.", "rv = .");
+
+  before(async () => {
+    root = mkdtempSync(join(tmpdir(), "osd-notebook-failure-"));
+    for (const layer of roots) mkdirSync(join(root, layer.path), {recursive: true});
+    store = new ObjectStore({root, roots, libs: []});
+    store.publish = async () => store.read("CLAS", name).source === invalid
+      ? {ok: false, transpile: {issues: [{issues: [{message: "invalid ABAP"}]}]}}
+      : {ok: true};
+    store.classrun = async () => ({run: async () => ({ok: true, text: "hello", ms: 1})});
+    const app = express();
+    app.use(express.raw({type: "*/*", limit: "16mb"}));
+    app.use(adtRouter({store}).router);
+    await new Promise((resolve) => { server = app.listen(0, resolve); });
+    const res = await fetch(`http://localhost:${server.address().port}/sap/bc/adt/core/discovery`,
+      {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
+    token = res.headers.get("x-csrf-token");
+    context = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
+  });
+
+  after(() => {
+    server?.close();
+    rmSync(root, {recursive: true, force: true});
+  });
+
+  const send = async (source) => fetch(`http://localhost:${server.address().port}/sap/bc/adt/notebook/abap`, {
+    method: "POST",
+    headers: {cookie: `sap-contextid=${context}`, "x-csrf-token": token,
+      "content-type": "application/json"},
+    body: JSON.stringify({source}),
+  });
+  const restarted = () => new ObjectStore({root, roots, libs: []});
+  const reportedVersion = async () => {
+    const response = await fetch(`http://localhost:${server.address().port}/sap/bc/adt/oo/classes/${name.toLowerCase()}?version=workingArea`);
+    expect(response.status).to.equal(200);
+    return (await response.text()).match(/adtcore:version="([^"]+)"/)?.[1];
+  };
+
+  it("removes a first cell that fails activation before the next startup", async () => {
+    const failed = await send(invalid);
+    expect(failed.status, await failed.text()).to.equal(422);
+    expect(restarted().find("CLAS", name)).to.equal(undefined);
+  });
+
+  it("restores the last working cell when a replacement fails activation", async () => {
+    const first = await send(valid);
+    expect(first.status, await first.text()).to.equal(200);
+    expect(await reportedVersion()).to.equal("active");
+    const failed = await send(invalid);
+    expect(failed.status, await failed.text()).to.equal(422);
+    expect(restarted().read("CLAS", name).source).to.equal(valid);
+    expect(await reportedVersion()).to.equal("active");
+  });
+
+  it("restores the source when publication throws", async () => {
+    store.publish = async () => { throw new Error("build interrupted"); };
+    const failed = await send(invalid);
+    expect(failed.status, await failed.text()).to.equal(500);
+    expect(restarted().read("CLAS", name).source).to.equal(valid);
+    expect(await reportedVersion()).to.equal("active");
+  });
+
+  it("keeps a previously inactive cell inactive after a failed replacement", async () => {
+    store.write("CLAS", name, valid, "main", {root: roots[1].path});
+    expect(await reportedVersion()).to.equal("inactive");
+    store.publish = async () => ({ok: false, error: "invalid ABAP"});
+    const failed = await send(invalid);
+    expect(failed.status, await failed.text()).to.equal(422);
+    expect(restarted().read("CLAS", name).source).to.equal(valid);
+    expect(await reportedVersion()).to.equal("inactive");
+  });
+});
+
 describe("tools/adt-facade: create and delete over the wire", () => {
   let server;
   let port;

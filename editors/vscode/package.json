@@ -140,7 +140,7 @@
     "notebooks": [
       {
         "type": "osd-sql-notebook",
-        "displayName": "osd SQL Notebook",
+        "displayName": "osd Notebook",
         "selector": [{"filenamePattern": "*.osdnb"}]
       }
     ],

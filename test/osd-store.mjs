@@ -202,6 +202,25 @@ ENDCLASS.
     expect(store.list("CLAS").map((o) => o.name)).to.deep.equal(["ZCL_OSD_PROBE"]);
   });
 
+  it("a new object may name a writable layer root", () => {
+    mkdirSync(join(root, "scratch", "src"), {recursive: true});
+    const layered = new ObjectStore({root, libs: [], roots: [
+      {path: "src", writable: true, library: false},
+      {path: "scratch/src", writable: true, library: false, pack: "notebook-scratch", package: "$NOTEBOOK_SCRATCH"},
+    ]});
+
+    const written = layered.write("CLAS", "ZCL_OSD_PROBE", CLASS, "main", {root: "scratch/src"});
+
+    expect(written.file).to.equal("scratch/src/osd/zcl_osd_probe.clas.abap");
+    expect(layered.find("CLAS", "ZCL_OSD_PROBE").root).to.equal("scratch/src");
+    expect(readFileSync(join(root, written.file), "utf8")).to.equal(CLASS);
+    expect(existsSync(join(root, "src", "osd", "zcl_osd_probe.clas.abap"))).to.equal(false);
+    expect(() => layered.write("CLAS", "ZCL_OSD_OTHER", CLASS, "main", {root: "missing/src"}))
+      .to.throw(/not a writable object-store root/);
+    expect(() => layered.write("CLAS", "ZCL_OSD_PROBE", CLASS, "main", {root: "src"}))
+      .to.throw(/already belongs to scratch\/src/);
+  });
+
   it("a new object joins the package tree without rebuilding the index", () => {
     expect(store.packages()).to.deep.equal([]);
 

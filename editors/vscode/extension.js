@@ -12,7 +12,7 @@ const fs = require("node:fs");
 const crypto = require("node:crypto");
 const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
-  freestyleTableHtml, freestyleOutputItems, notebookFromJson, notebookToJson,
+  freestyleTableHtml, freestyleOutputItems, notebookAbapSource, notebookFromJson, notebookToJson,
   hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText,
   transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, demoFailureObjects, progRunLens,
@@ -26,9 +26,8 @@ const {Launcher, ensureMaterializedHome, materializedHomeDir, detectWorkspaceLay
   pickInspectorPort} = require("./launcher.js");
 const {systemOverviewHtml} = require("./system-overview.js");
 
-// Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
-// *.osdnb file opens as (package.json `contributes.notebooks`) and the
-// kernel that runs its cells.
+// Q6a "Notebook SQL, ABAP and SQLScript" (docs/vscode-extension.md): the
+// notebook type a *.osdnb file opens as and the controller for its cells.
 const NOTEBOOK_TYPE = "osd-sql-notebook";
 
 // One report panel per transaction code. F8 and the CodeLens both reach the
@@ -2573,13 +2572,10 @@ function message(alert, dir, item) {
   return text;
 }
 
-// ---- Q6a "Notebook SQL": a *.osdnb file is a small JSON document of SQL
-// (or markdown) cells (lib.js notebookFromJson / notebookToJson does the
-// pure JSON <-> cells half); running a cell POSTs it to the ADT façade's
-// freestyle data preview (lib.js Osd#freestyle, tools/adt-facade.mjs
-// `datapreview/freestyle`) and shows the rows under it, the way a Jupyter
-// SQL kernel would -- except the "kernel" is the same running osd every
-// other door in this extension already talks to, not a second process.
+// ---- Q6a notebooks: a *.osdnb file holds SQL, ABAP, SQLScript, and markdown
+// cells (lib.js notebookFromJson / notebookToJson handles the JSON format).
+// SQL uses ADT freestyle preview, ABAP uses the notebook classrun route, and
+// SQLScript uses the AMDP sandbox. All run in the same serving osd.
 
 function sqlNotebookSerializer() {
   return {
@@ -2616,32 +2612,47 @@ async function newSqlNotebook(statement) {
 }
 
 function sqlNotebookController(output) {
-  const controller = vscode.notebooks.createNotebookController("osd-sql-kernel", NOTEBOOK_TYPE, "osd SQL");
-  controller.supportedLanguages = ["sql"];
+  const controller = vscode.notebooks.createNotebookController("osd-sql-kernel", NOTEBOOK_TYPE, "osd notebook");
+  controller.supportedLanguages = ["sql", "abap", "sqlscript"];
   controller.supportsExecutionOrder = true;
   let executionOrder = 0;
   controller.executeHandler = (cells) => {
-    for (const cell of cells) runSqlCell(controller, cell, ++executionOrder, output);
+    for (const cell of cells) runNotebookCell(controller, cell, ++executionOrder, output);
   };
   return controller;
 }
 
-async function runSqlCell(controller, cell, executionOrder, output) {
+async function runNotebookCell(controller, cell, executionOrder, output) {
   const execution = controller.createNotebookCellExecution(cell);
   execution.executionOrder = executionOrder;
   execution.start(Date.now());
-  const rowLimit = vscode.workspace.getConfiguration("osd").get("notebook.rowLimit", 100);
   try {
-    const result = await osd().freestyle(cell.document.getText(), rowLimit);
-    const html = freestyleTableHtml(result.columns, result.rows, {ms: result.ms, generation: result.generation});
-    await execution.replaceOutput([
-      new vscode.NotebookCellOutput(freestyleOutputItems(html).map(({mime, value}) =>
-        vscode.NotebookCellOutputItem.text(value, mime))),
-    ]);
-    execution.end(true, Date.now());
+    const source = cell.document.getText();
+    if (cell.document.languageId === "abap") {
+      const result = await osd().notebookAbap(notebookAbapSource(source));
+      await execution.replaceOutput([new vscode.NotebookCellOutput([
+        vscode.NotebookCellOutputItem.text(result.text ?? "", "text/plain"),
+      ])]);
+      execution.end(result.ok === true, Date.now());
+    } else {
+      let result;
+      if (cell.document.languageId === "sqlscript") {
+        result = await osd().amdpCell(source);
+        if (result.error !== undefined) throw new Error(result.error);
+      } else {
+        const rowLimit = vscode.workspace.getConfiguration("osd").get("notebook.rowLimit", 100);
+        result = await osd().freestyle(source, rowLimit);
+      }
+      const html = freestyleTableHtml(result.columns, result.rows, {ms: result.ms, generation: result.generation});
+      await execution.replaceOutput([
+        new vscode.NotebookCellOutput(freestyleOutputItems(html).map(({mime, value}) =>
+          vscode.NotebookCellOutputItem.text(value, mime))),
+      ]);
+      execution.end(true, Date.now());
+    }
   } catch (e) {
     const message = String(e.message ?? e);
-    output.appendLine(`osd sql: ${message}`);
+    output.appendLine(`osd ${cell.document.languageId}: ${message}`);
     await execution.replaceOutput([
       new vscode.NotebookCellOutput([vscode.NotebookCellOutputItem.error({name: "osd", message})]),
     ]);

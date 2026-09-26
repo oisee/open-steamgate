@@ -297,7 +297,14 @@ class Osd {
         continue;
       }
       if (!res.ok) {
-        const detail = (await res.text()).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        const text = await res.text();
+        let detail;
+        try {
+          detail = JSON.parse(text)?.error?.message;
+        } catch {
+          // Most ADT refusals are XML; keep their own words below.
+        }
+        detail = String(detail ?? text).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
         throw new Error(`${options.method ?? "GET"} ${route}: HTTP ${res.status}${detail ? ` -- ${detail.slice(0, 300)}` : ""}`);
       }
       return res;
@@ -459,6 +466,40 @@ class Osd {
     const text = await res.text();
     const generation = res.headers.get("x-osd-generation") ?? undefined;
     return {text, ms, generation};
+  }
+
+  /** ABAP notebook cells are one generated classrun class in the persistent
+   *  scratch pack. The façade writes it to that layer, activates it, and
+   *  returns this run's console text, all in one serialized request. */
+  async notebookAbap(source) {
+    const res = await this.request("/sap/bc/adt/notebook/abap", {
+      method: "POST",
+      headers: {"content-type": "application/json"},
+      body: JSON.stringify({source}),
+    });
+    return res.json();
+  }
+
+  /** SQLScript notebook cells use the existing AMDP sandbox's JSON cell
+   *  path. This door is ICF, not ADT, and its own database guard answers a
+   *  structured error when the system is not on HANA. */
+  async amdpCell(source) {
+    const res = await this.fetch(`${this.url}/sap/bc/osd/amdp/cell`, {
+      method: "POST",
+      headers: {"content-type": "text/plain; charset=utf-8", accept: "application/json"},
+      body: source,
+    });
+    const text = await res.text();
+    let answer;
+    try {
+      answer = JSON.parse(text);
+    } catch {
+      answer = undefined;
+    }
+    if (res.ok === false) {
+      throw new Error(answer?.error ?? `AMDP sandbox: HTTP ${res.status}`);
+    }
+    return amdpCellResult(answer);
   }
 
   /** Q4 "Hotspots" (docs/vscode-extension.md): counts per (object, line)
@@ -1181,15 +1222,11 @@ function readersQuickPickItems(readers) {
   });
 }
 
-// ---- Q6a "Notebook SQL" (docs/vscode-extension.md): a *.osdnb notebook of
-// SQL cells, run against `Osd#freestyle` above. The pure half: the
-// column-oriented XML that route answers turned into rows, the rows turned
-// into the HTML a cell's output shows (escaped, so a cell value carrying
-// `<` or `&` -- an XML fragment sitting in a CHAR column, say -- renders as
-// text and not markup), and the notebook file's own JSON turned into cells
-// and back. None of this touches `vscode`, so a plain mocha test holds it
-// without a notebook editor open (test/vscode-extension.mjs); extension.js's
-// NotebookSerializer and NotebookController are the thin wrapping.
+// ---- Q6a notebooks (docs/vscode-extension.md): the pure half of SQL result
+// parsing, table rendering, ABAP source wrapping, AMDP result parsing, and
+// notebook JSON serialization. None of this touches `vscode`, so a plain
+// mocha test covers it without a notebook editor open. extension.js owns the
+// NotebookSerializer and NotebookController.
 
 /** Escape for HTML text content (not an attribute): the notebook output's
  *  own `<td>`/`<th>` cells go through this, the same three entities
@@ -1256,6 +1293,46 @@ function freestyleTableHtml(columns, rows, meta = {}) {
  *  HTML item makes the table the default; raw JSON is inside its disclosure. */
 function freestyleOutputItems(html) {
   return [{mime: "text/html", value: html}];
+}
+
+/** Turn an ABAP statement cell into the main source of the one class the
+ *  notebook scratch pack owns. Keeping the wrapper pure makes the exact
+ *  source checked by the extension testable without a VS Code host. */
+function notebookAbapSource(source) {
+  return `CLASS zcl_osd_notebook_cell DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES if_oo_adt_classrun.
+ENDCLASS.
+
+CLASS zcl_osd_notebook_cell IMPLEMENTATION.
+  METHOD if_oo_adt_classrun~main.
+${String(source ?? "").split(/\r\n|\r|\n/).map((line) => `    ${line}`).join("\n")}
+  ENDMETHOD.
+ENDCLASS.
+`;
+}
+
+/** The AMDP cell route wraps the sandbox's result JSON in an ordinary JSON
+ *  response so a notebook can render rows without scraping its HTML page. */
+function amdpCellResult(answer) {
+  if (answer === null || typeof answer !== "object") {
+    return {error: "AMDP sandbox did not return a JSON answer"};
+  }
+  if (answer.status !== "ok") {
+    return {error: String(answer.error ?? "AMDP sandbox could not run this cell"), raw: answer.raw};
+  }
+  let rows;
+  try {
+    rows = JSON.parse(answer.result ?? "[]");
+  } catch {
+    return {error: "AMDP sandbox returned rows that were not valid JSON"};
+  }
+  if (Array.isArray(rows) === false) {
+    return {error: "AMDP sandbox returned a result that was not a row array"};
+  }
+  const columns = rows.length > 0 && rows[0] !== null && typeof rows[0] === "object"
+    ? Object.keys(rows[0]) : [];
+  return {columns, rows, ms: Number(answer.ms) || 0, raw: answer.raw};
 }
 
 // ---- Q4 "Hotspots": ZOSD_DUMP as line and file heat (docs/vscode-extension.md).
@@ -1808,7 +1885,8 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   warmStatusText, activationBuildText, closureTestsText,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
-  htmlEscape, freestyleRows, freestyleTableHtml, freestyleOutputItems, notebookFromJson, notebookToJson,
+  htmlEscape, freestyleRows, freestyleTableHtml, freestyleOutputItems, notebookAbapSource, amdpCellResult,
+  notebookFromJson, notebookToJson,
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,

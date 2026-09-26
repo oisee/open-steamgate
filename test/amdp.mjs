@@ -382,6 +382,31 @@ ENDCLASS.`;
 // (osg-osd-i7, E.5, 2026-09-19), and it is the same family as
 // ANOMALY-2026-09-14, the exception with no message.
 describe("the AMDP destination fails where the calling ABAP can catch it", () => {
+  it("uses the system HANA connection for a cell even when HXE settings disagree", async () => {
+    const {connection} = await import("../tools/amdp-run.mjs");
+    const names = ["STG_DB", "HANA_HOST", "HANA_PORT", "HANA_USER", "HANA_PASSWORD",
+      "HXE_HOST", "HXE_PORT", "HXE_USER", "HXE_PASSWORD"];
+    const before = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+    try {
+      Object.assign(process.env, {
+        STG_DB: "hana", HANA_HOST: "system.example.invalid", HANA_PORT: "30115",
+        HANA_USER: "SYSTEM_USER", HANA_PASSWORD: "system-secret",
+        HXE_HOST: "sandbox.example.invalid", HXE_PORT: "39017",
+        HXE_USER: "SANDBOX_USER", HXE_PASSWORD: "sandbox-secret",
+      });
+      expect(connection()).to.include({host: "system.example.invalid", port: 30115,
+        user: "SYSTEM_USER", password: "system-secret"});
+      process.env.STG_DB = "sqlite";
+      expect(connection()).to.include({host: "sandbox.example.invalid", port: 39017,
+        user: "SANDBOX_USER", password: "sandbox-secret"});
+    } finally {
+      for (const name of names) {
+        if (before[name] === undefined) delete process.env[name];
+        else process.env[name] = before[name];
+      }
+    }
+  });
+
   it("binds its independent HANA session to the system schema", async () => {
     const {amdpSessionSchema} = await import("../tools/amdp-destination.mjs");
     expect(amdpSessionSchema("OSD_ZVDB_100")).to.deep.equal([

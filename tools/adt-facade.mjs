@@ -1874,6 +1874,85 @@ export function adtRouter(options = {}) {
     }
   });
 
+  // A notebook ABAP cell is one generated class in the permanent scratch
+  // pack. Reuse the regular store, build and classrun path so it has exactly
+  // the same database and activation boundary as another class. The fixed
+  // class name makes runs one-at-a-time: activation replaces the process's
+  // module graph, and another cell must not replace its source before its
+  // classrun has read it.
+  let notebookCellRun = Promise.resolve();
+  router.post(`${BASE}/notebook/abap`, async (req, res) => {
+    let asked;
+    try {
+      const body = await rawBody(req);
+      asked = JSON.parse(body.toString("utf8"));
+    } catch {
+      res.status(400).json({error: {code: "BAD_REQUEST", message: "a JSON body with source is required"}});
+      return;
+    }
+    if (typeof asked?.source !== "string" || asked.source.trim() === "") {
+      res.status(400).json({error: {code: "BAD_REQUEST", message: "notebook ABAP source is empty"}});
+      return;
+    }
+
+    const run = notebookCellRun.then(async () => {
+      const scratch = store.roots.find((root) => root.pack === "notebook-scratch" && root.writable === true);
+      if (scratch === undefined) {
+        const error = new Error("the notebook-scratch pack is not configured; start osd through the VS Code launcher");
+        error.code = "NOTEBOOK_SCRATCH_MISSING";
+        throw error;
+      }
+      const name = "ZCL_OSD_NOTEBOOK_CELL";
+      const previousEntry = store.find("CLAS", name);
+      const previous = previousEntry === undefined ? undefined : store.read("CLAS", name).source;
+      const previousActive = previousEntry !== undefined && store.stateOf(previousEntry).version === "active";
+      store.write("CLAS", name, asked.source, "main", {root: scratch.path});
+      const checked = store.warmActivation("CLAS", name);
+      try {
+        const activation = await store.publish();
+        if (activation?.ok === false) {
+          const issue = activation.transpile?.issues?.flatMap((object) => object.issues ?? [])[0];
+          const message = issue?.message ?? activation.error ?? activation.transpile?.output ?? "the notebook class did not activate";
+          const error = new Error(String(message));
+          error.code = "NOTEBOOK_ACTIVATION_FAILED";
+          throw error;
+        }
+      } catch (error) {
+        // The pack survives restarts, so a failed candidate must not become
+        // the next launcher's build input. Keep the last source that built.
+        if (previous === undefined) store.delete("CLAS", name);
+        else {
+          store.write("CLAS", name, previous, "main", {root: scratch.path});
+          // The old source is still the serving generation. write() marks it
+          // inactive, so restore its earlier ADT state for that revision.
+          if (previousActive) store.completeActivation(store.warmActivation("CLAS", name));
+        }
+        throw error;
+      }
+      if (!store.completeActivation(checked)) {
+        const error = new Error("source changed during activation; run the notebook cell again");
+        error.code = "NOTEBOOK_ACTIVATION_FAILED";
+        throw error;
+      }
+      const runner = await store.classrun();
+      const result = await runner.run(name, {data});
+      return {
+        text: result.ok ? result.text : `${result.text}${result.text ? "\n\n" : ""}Runtime error: ${result.error.message} at ${result.error.where}`,
+        ok: result.ok,
+        ms: result.ms,
+        generation: result.generation,
+      };
+    });
+    notebookCellRun = run.catch(() => undefined);
+    try {
+      res.status(200).json(await run);
+    } catch (error) {
+      const status = error?.code === "NOTEBOOK_SCRATCH_MISSING" ? 503
+        : error?.code === "NOTEBOOK_ACTIVATION_FAILED" ? 422 : 500;
+      res.status(status).json({error: {code: error?.code ?? "FAILED", message: String(error?.message ?? error)}});
+    }
+  });
+
   // ---- the development loop: lock, write, unlock, activate.
   //
   // A lock is synthetic, because a local system has nobody to lock against
