@@ -3,6 +3,7 @@
 !package-lock.json
 !LICENSE
 !abap_transpile.json
+!libs.lock.json
 !abaplint.jsonc
 !src/**
 !tools/**
