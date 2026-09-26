@@ -388,6 +388,183 @@ install.
 only; there is no `@vscode/test-electron` here, on purpose, since it would
 download a VS Code per run.
 
+## B0 spike
+
+*2026-09-26.* Everything above is a client of a system started by hand. B0
+(ADR 0003 point 5, `docs/ideas.md`'s B0 row) is the other half: the
+extension builds and runs the system itself, so opening a folder and
+clicking Start needs no terminal. `editors/vscode/launcher.js` is the
+proof, plain Node with no `vscode` import (unit-testable on its own,
+`test/vscode-launcher.mjs`), and `extension.js` is the thin VS Code glue
+over it (`SystemController`, `OsdTreeProvider`, the ▶/■ status bar item).
+
+**What it spawns is exactly `npm start`'s own two steps**, with
+`process.execPath` rather than a `node` on some PATH (VS Code's extension
+host already is one): `node tools/osd-build.mjs` (what `npm run transpile`
+runs) to completion, then `node test/run.mjs`, waited on by polling `GET
+/osd/serving` until it answers `ready: true` with a generation — robust to
+the log's own wording, which grepping stdout for "serving generation"
+would not be, though the same text is there too (`tools/osd-runtime.mjs`
+forwards the child's lines to the parent's stdout, prefixed `[runtime]`,
+which is what streams into the extension's Output channel).
+
+**All mutable state lives in the extension's own storage**
+(`context.globalStorageUri`, one subdirectory per `osdHome` keyed by a hash
+of its path), never in `osdHome`'s tracked files and never in a workspace
+folder:
+- the database: `STG_DB=file`, `STG_DB_PATH=<storage>/db/osd.sqlite`;
+- the TLS directory: a new override, `OSD_TLS_DIR` (`tools/osd-tls.mjs`
+  `paths()`), pointed at `<storage>/tls`. It starts empty and the launcher
+  never runs `osd:tls`, so there is no certificate to find — which is what
+  makes plain HTTP the default. Without this a worktree that shares a
+  `.local/tls` with its origin (`tools/osd-worktree.mjs`'s own symlink)
+  would have opened one more HTTPS listener outside the 3531-3539 budget
+  on every launch (measured: `44300 + port % 100` lands at 44331 for
+  3531). `test/start.mjs`'s log line that used to read `TLS_DIR` directly
+  now reads `dirOf()` so it still names the right directory when
+  `OSD_TLS_DIR` is set.
+- the generated pack manifests that add a workspace's ABAP as a top layer
+  (below).
+
+**The layer mechanism is the existing one, unchanged: `OSD_PACKS` naming a
+container directory of packs** (`tools/osd-packs.mjs`, "a pack is a
+directory"). Nothing new was built for this — a pack is found either at
+`<root>/packs` or at whatever `OSD_PACKS` names, "a pack itself, or a
+container of packs", and the container form is exactly what a launcher that
+does not know in advance how many workspace folders there will be needs.
+For every open workspace folder that looks like an abapGit repository (a
+`.abapgit.xml` at its root, or `*.clas.abap` / `*.prog.abap` under `src/`
+— `detectWorkspaceLayers`), the launcher writes one small pack into
+`<storage>/packs/<name>/`: an `osd-pack.json` (`order: 900+`, so a
+workspace layer always sorts after the tree's own packs and wins a name it
+shares, "the later folder wins") and a `src` **symlink** at the folder's
+own `src/` (or at the folder itself, when its ABAP sits directly at its
+root) — no copy, and nothing is ever written under the workspace folder or
+under `osdHome`. The container is rebuilt from scratch on every `start()`,
+so a workspace folder that has since closed does not leave a stale layer
+serving code nobody can see any more. This was the smallest of the three
+options the task named: an env var for extra input folders does not exist
+(`input_folder` is a build-config field, not read from the environment),
+and the pack mechanism already does exactly what was needed, found by one
+extra directory and a two-line manifest rather than by touching
+`tools/osd-build.mjs` or `tools/osd-store.mjs` at all.
+
+Shadowing is already said out loud by the build itself
+(`osd-build: overridden: CLAS X: <hidden files> hidden by <winner>`,
+`tools/osd-build.mjs`), and since the launcher streams the build's stdout
+verbatim into the "osd system" Output channel, that line is already
+visible there with no extra plumbing. A missing reference (the user's code
+calling something the system lacks) is not yet surfaced as an editor
+diagnostic in this spike — abaplint's own errors reach the build log the
+same way overrides do, but nothing here turns them into
+`vscode.Diagnostic`s the way Ctrl+F2's `check` command already does for a
+single object; `npm run probe` / `tools/osd-inputs.mjs` exist for a closure
+audit by hand and were not wired into the tree view.
+
+**The UI**: an Activity Bar container "OSD" (`views` id `osdTree`) with a
+tree of three roots — the state (`Stopped` / `Building…` / `Starting…` /
+`Running on :port, generation …`), **Layers** (the base `osdHome` plus
+every detected workspace folder), and **Services**, read off
+`ZOSD_STATUS_SRV`'s own `ServiceSet` (`GET
+/sap/opu/odata/sap/ZOSD_STATUS_SRV/ServiceSet?$format=json`) — the
+smallest existing mechanism named in the task, no new server route: that
+service already refreshes itself on every read
+(`test/start.mjs`'s `withFreshStatus` on `ZOSD_STATUS_SRV*`) and already
+lists every OData/ICF/APC/UI5 service the tree serves
+(`tools/osd-status.mjs` `servicesOf`). "osd: Open launchpad" opens
+`http://localhost:<port>/app/flp.html` with `vscode.env.openExternal`; a
+second, new status bar item (▶ / ■, left of the existing generation
+display, which assumes something is already serving) starts or stops the
+one `Launcher` this window drives, and the editor-title button on `.abap`
+files is `osd.run` (F8's own command) via `contributes.menus["editor/title"]`
+rather than new code. Once started, `osd.url` is written to the launched
+address (Workspace target when the window has a folder, Global otherwise)
+— every existing feature reads that setting fresh on every call
+(`osd()` in `extension.js`), so nothing else had to change for the rest of
+the extension to follow a self-started instance automatically.
+
+**Q6b's notebook gap does not fall out for free.** The storage layer this
+spike adds *is* a permanent, pre-existing pack directory once a workspace
+layer exists, which is the missing half `docs/vscode-extension.md`
+(Q6b, above) named — but only the half that exists **before the process
+starts**: `tools/osd-store.mjs`'s `ObjectStore#rootsOf` still resolves the
+writable roots once, at construction, so a notebook cell run against an
+*already-running* `osd` still cannot add a new root, and `write()` still
+puts a new object in the first writable root regardless of which pack a
+cell meant. Next step, not attempted here: an optional `root` on
+`ObjectStore#write()`, and a permanently-declared scratch pack the
+launcher always creates (even with zero detected workspace layers) so a
+notebook has somewhere to write into without `OSD_PACKS` needing to be
+set to something new after the process is already up.
+
+**Tests**: `test/vscode-launcher.mjs` (registered in `test/suites.json`) —
+pure: `pickPort`/`isFree` over the 3531-3539 range and its exhaustion,
+`detectWorkspaceLayers`/`looksLikeAbapGitFolder` (`.abapgit.xml`, `src/
+*.clas.abap`, `src/*.prog.abap`, a `src/` with only XML is not a layer, a
+folder that does not exist is skipped), `packNameOf`'s stability,
+`ensureWorkspacePacks` read back through `tools/osd-packs.mjs`'s own
+`packAt`/`packsOf` (a real symlink, nothing written into the workspace
+folder, a stale layer removed on the next call), `waitForServing`/
+`servingOnce` against a fake HTTP server (resolves once ready, times out
+when nothing ever answers), `terminate()` against a real spawned child.
+Then two real, unmocked runs of `Launcher` against this checkout on a free
+port in 3531-3539 with a temp storage directory: a full start (build,
+serve, one OData read of `ZSTG_DEMO_SRV/TravelSet`, `/osd/serving`, then
+`stop()` and a check that the spawned pid is actually gone) and a build
+that is made to fail (`osdHome` pointed at an empty temp directory), which
+must leave the state back at `"stopped"` rather than half-started. Run
+beside its neighbours as the task asked
+(`STG_PORT=3538 npx mocha test/vscode-extension.mjs test/adt-devloop.mjs
+test/osd-dumps.mjs test/vscode-launcher.mjs`): 130 passing, no port
+collisions, because the launcher's own range (3531-3539) and its
+neighbours' dynamically-assigned ports never overlap.
+
+**Live smoke** (`.local/b0-demo-ws/`, gitignored, one abapGit-shaped class,
+`ZCL_B0_HELLO IMPLEMENTS IF_OO_ADT_CLASSRUN`): the launcher, given that
+folder as a workspace folder, built 1728 objects where the tree alone
+builds 1727 — the one extra being the workspace layer's own class — and
+`POST /sap/bc/adt/oo/classrun/ZCL_B0_HELLO` (after the same CSRF round
+trip every other write in this extension already does) answered `hello
+from the B0 workspace layer`. Cold start to `ready: true` measured at
+~19.2 s on this machine (build ~12-13 s of it); a build the generation
+cache already has (unchanged code, `test/vscode-launcher.mjs`'s own second
+run of the same tree) came back at ~4.3 s. Stopping left neither the
+spawned `node test/run.mjs` nor its `tools/osd-serve.mjs` grandchild
+running, and opened no port outside 3531-3539 (confirmed with `ss -ltnp`
+before and after) — `tools/osd-runtime.mjs`'s own SIGTERM/SIGINT/SIGHUP
+handler reaps the grandchild before the parent exits, so the launcher only
+ever signals the one pid it spawned.
+
+**What packaging still needs**, none of it attempted here:
+- **Bundle size**: `output/` is prebuilt as part of `npm run transpile`
+  and this spike always rebuilds it from `src/`; a packaged extension
+  cannot ship `src/`, `node_modules`, `.local/lars/` and expect a build on
+  the user's machine to reproduce it, so either a prebuilt `output/`
+  (and `build/`) ships inside the `.vsix`, or the extension bundles (or
+  fetches) the whole tree it drives — ADR 0003 point 5 measured "no
+  native module loaded by default" and "`output/` is 64 MB", both of
+  which bound what "ship it" costs, but the spike itself never built a
+  `.vsix` to measure the real number.
+- **What stays in `osdHome` versus storage**: everything this spike wrote
+  is already storage-only (the database, the TLS directory, the pack
+  manifests); `osdHome` itself is only ever read, never written, by the
+  launcher — the open question packaging adds is whether `osdHome` is the
+  extension's own bundled copy of the tree (nothing to open separately) or
+  a checkout the user still has to clone (`osd.home` still has to point
+  somewhere).
+- **The remote/WSL note**: `code --extensionDevelopmentPath=...` is not
+  supported over a remote connection (SSH, a container, or — the case that
+  matters here, since this repository runs under WSL2 — the VS Code Server
+  a Remote-WSL window talks to), so a dev install there is a symlink from
+  `~/.vscode-server/extensions/<publisher>.<name>-<version>` to
+  `editors/vscode/`, picked up on the next window reload; this was not
+  exercised in this spike either (no VS Code window was opened by the
+  agent that wrote it), and packaging should turn it into a checked
+  script rather than a paragraph.
+- Marketplace metadata (an actual `publisher`, an icon that is not the
+  activity-bar glyph, a `README.md` for the listing, a `CHANGELOG.md`) —
+  explicitly out of scope for this spike per the task.
+
 ## Next
 
 - Smart F8 / Runner, the rest of it: create/update/delete entity, a function
