@@ -60,6 +60,52 @@ F8's dispatch by object type (`lib.js` `runActionFor`, held to this table by
 | IWSV | not yet: the Gateway client on the service document |
 | SICF | not yet: open the node's URL |
 
+## Test Explorer groups
+
+*2026-09-26.* Before this, "ABAP Unit (osd)" was one flat list: every
+`*.clas.testclasses.abap` `findFiles()` turned up became a sibling, so a
+project class sat next to `CL_ABAP_*` and `/UI2/CL_JSON` from
+`open-abap-core` under `.local/lars/` -- and any workspace that opened a lib
+clone as its own root, or a lib file the exclude glob missed, mixed the two
+sets with nothing to tell them apart. Now the tree has four top-level
+groups, decided per file by `lib.js`'s `classifyTestPath()`, the pure half
+(`test/vscode-extension.mjs` holds it to real paths of this tree):
+
+| Group | What is in it | Sub-node |
+| --- | --- | --- |
+| **Project** | `src/`, `test/`, `gen/` -- `abap_transpile.json`'s own `input_folder`, minus any that is also a lib's own folder | none of its own (Project lists straight, or by package once it clears the threshold below) |
+| **Packs** | `packs/<name>/**` | one per pack, always |
+| **Workspace layers** | a running B0 launcher's own `layers` (`launcher.js` `detectWorkspaceLayers`) -- shown only while one is known | one per layer |
+| **System** | `abap_transpile.json`'s own `libs` (`.local/lars/open-abap-core`, `abapgit`, `express-icf-shim`, `open-abap-apc`, `open-abap-gui`, `open-abap-odata`, `ajson`) | one per lib, always; collapsed by default the way any Test Explorer node with unexpanded children already is |
+
+`classifyTestPath()` is checked in that order for a reason: a workspace
+layer can sit anywhere on disk, even inside what would otherwise read as a
+lib's own folder, so it wins first. `osd.tests.showSystem` (default `true`)
+turns System off (and skips scanning those folders at all) for a session
+that only wants its own tests.
+
+Once a group's own bucket (Project as a whole; one pack; one lib; one
+workspace layer) clears `PACKAGE_SPLIT_THRESHOLD` (15) classes, `lib.js`'s
+`packageOf()` sub-groups it further by the directory under `src/`/`test/`/
+`gen/` that carries the file (an abapGit `package.xml`, when
+`packageDirsFrom()` is handed any, wins over that guess -- none of this
+repo's own corpus has one today, so the fallback is what runs in practice:
+`open-abap-core`'s 62 test classes split into `rtti`, `http`, `json`,
+`oauth2`, ... rather than 62 flat siblings under System).
+
+`objectOf`/`fileOf`/`discover()`/`run()` below the object level are
+unchanged, and so are an object's, a class's and a method's own ids -- only
+where in the tree an object sits moved, so a run's history still matches it
+by id. The cheap filter that was always implicit (a class without test
+methods has nothing to run, `discover()`'s own
+`(c.methods ?? []).length > 0`) now also runs before an item is even built:
+`hasTestMethods()` skips a `*.clas.testclasses.abap` with no `FOR TESTING`
+anywhere in it, rather than adding an item only to find it empty once
+expanded. Running a group, a pack, a lib or a workspace layer runs every
+object under it, the way the Testing API does by default for any parent
+handed to a run profile -- there is no special "run this group" code beyond
+expanding it to the objects it holds.
+
 ## Q2b: calling an entity set
 
 *2026-09-25.* A CodeLens "▶ Call \<Set\>" over every `METHOD

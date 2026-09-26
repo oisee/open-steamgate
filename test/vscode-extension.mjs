@@ -4,6 +4,8 @@
 // test/osd-child.mjs.
 import {expect} from "chai";
 import {readFileSync} from "node:fs";
+import path from "node:path";
+import {fileURLToPath} from "node:url";
 import {createRequire} from "node:module";
 import {checkReportDocument, activationSuccessDocument, activationFailureDocument, uriOf as facadeUriOf} from "../tools/adt-documents.mjs";
 import {entitySetMapFor} from "../tools/segw-entityset-map.mjs";
@@ -14,9 +16,12 @@ const {objectOf, adtObjectOf, uriOf, fileOf, outcomes, abapFrame, parseCheckRepo
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson,
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
-  implementsClassrun} =
+  implementsClassrun,
+  transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
 import {implementsClassrun as facadeImplementsClassrun} from "../tools/osd-classrun.mjs";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("editors/vscode: the extension's logic", function () {
   it("names the object and include of an abapGit file", () => {
@@ -438,5 +443,101 @@ describe("editors/vscode: the extension's logic", function () {
     const text = hotspotHoverText({count: 3, lastAt: Date.parse("2026-09-25T12:00:00Z"), lastMessage: "Division by zero"});
     expect(text).to.equal("3 dumps, last 2026-09-25T12:00:00.000Z: Division by zero");
     expect(hotspotHoverText({count: 1, lastAt: 0, lastMessage: ""})).to.equal("1 dump, last an unknown time: (no message)");
+  });
+});
+
+describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace layers / System)", function () {
+  const transpileConfig = JSON.parse(readFileSync(path.join(ROOT, "abap_transpile.json"), "utf8"));
+  const layers = transpileLayers(transpileConfig);
+
+  it("reads abap_transpile.json's own libs and input folders, not a hardcoded list", () => {
+    expect(layers.inputFolders).to.deep.equal(["src", "test", "gen"]);
+    const names = layers.libs.map((l) => l.name).sort();
+    expect(names).to.deep.equal(
+      ["abapgit", "ajson", "express-icf-shim", "open-abap-apc", "open-abap-core", "open-abap-gui", "open-abap-odata"].sort());
+    expect(layers.libs.find((l) => l.name === "open-abap-core")).to.deep.equal(
+      {name: "open-abap-core", folder: ".local/lars/open-abap-core"});
+  });
+
+  it("classifies a project file under src/ as Project, with no sub-node of its own", () => {
+    const abs = path.join(ROOT, "src/webgui/zcl_osd_webgui.clas.testclasses.abap");
+    expect(classifyTestPath(ROOT, abs, layers)).to.deep.equal(
+      {group: "project", subgroup: undefined, relInGroup: "src/webgui/zcl_osd_webgui.clas.testclasses.abap"});
+  });
+
+  it("classifies a project file under test/ the same way, gen/ included by the same rule though empty today", () => {
+    const abs = path.join(ROOT, "test/unit/zcl_stg_gateway_test.clas.testclasses.abap");
+    expect(classifyTestPath(ROOT, abs, layers).group).to.equal("project");
+    expect(classifyTestPath(ROOT, abs, layers).relInGroup).to.equal("test/unit/zcl_stg_gateway_test.clas.testclasses.abap");
+  });
+
+  it("classifies a packs/* file under Packs, one sub-node per pack", () => {
+    const zvdb = path.join(ROOT, "packs/zvdb/src/zcl_vdb_100_anydb.clas.testclasses.abap");
+    expect(classifyTestPath(ROOT, zvdb, layers)).to.deep.equal(
+      {group: "packs", subgroup: "zvdb", relInGroup: "src/zcl_vdb_100_anydb.clas.testclasses.abap"});
+    const lsd = path.join(ROOT, "packs/lsd/src/zcl_lsd_media.clas.testclasses.abap");
+    expect(classifyTestPath(ROOT, lsd, layers).subgroup).to.equal("lsd");
+  });
+
+  it("classifies a .local/lars/<lib> file under System, named by the lib's own folder", () => {
+    const core = path.join(ROOT, ".local/lars/open-abap-core/src/rtti/cl_abap_typedescr.clas.testclasses.abap");
+    expect(classifyTestPath(ROOT, core, layers)).to.deep.equal(
+      {group: "system", subgroup: "open-abap-core", relInGroup: "src/rtti/cl_abap_typedescr.clas.testclasses.abap"});
+    const json = path.join(ROOT, ".local/lars/open-abap-core/src/json/#ui2#cl_json.clas.testclasses.abap");
+    expect(classifyTestPath(ROOT, json, layers).group).to.equal("system");
+    expect(classifyTestPath(ROOT, json, layers).subgroup).to.equal("open-abap-core");
+  });
+
+  it("classifies under a running B0 workspace layer before System or Packs, even if it sits under .local", () => {
+    const layerFolder = path.join(ROOT, ".local/lars/open-abap-core");
+    const abs = path.join(layerFolder, "src/http/cl_http_server.clas.testclasses.abap");
+    const workspaceLayers = [{folder: layerFolder}];
+    expect(classifyTestPath(ROOT, abs, layers, workspaceLayers)).to.deep.equal(
+      {group: "workspace", subgroup: "open-abap-core", relInGroup: "src/http/cl_http_server.clas.testclasses.abap"});
+  });
+
+  it("falls back to Project for a path outside every known root", () => {
+    const abs = path.join(ROOT, "docs/vscode-extension.md");
+    expect(classifyTestPath(ROOT, abs, layers).group).to.equal("project");
+  });
+
+  it("sub-groups by the directory under src/ or test/ once package.xml is not there to ask", () => {
+    expect(packageOf("src/rtti/cl_abap_typedescr.clas.testclasses.abap")).to.equal("rtti");
+    expect(packageOf("test/adbc/zcl_adbc_test.clas.testclasses.abap")).to.equal("adbc");
+    expect(packageOf("src/json/#ui2#cl_json.clas.testclasses.abap")).to.equal("json");
+    // a file sitting directly in a content root, no directory of its own
+    expect(packageOf("test/cl_http_client.clas.testclasses.abap")).to.equal(undefined);
+  });
+
+  it("prefers the nearest package.xml directory over the src/ guess when one is known", () => {
+    const dirs = packageDirsFrom(["package.xml", "a/package.xml", "a/b/package.xml"]);
+    expect(dirs).to.deep.equal(["", "a", "a/b"]);
+    expect(packageOf("a/b/c/zcl_x.clas.testclasses.abap", dirs)).to.equal("a/b");
+    expect(packageOf("a/zcl_y.clas.testclasses.abap", dirs)).to.equal("a");
+    // a root package.xml alone: everything below it is the root package, i.e. no sub-node
+    expect(packageOf("zcl_z.clas.testclasses.abap", packageDirsFrom(["package.xml"]))).to.equal(undefined);
+  });
+
+  it("only splits a group into packages once it is bigger than the ~15 the task named", () => {
+    expect(PACKAGE_SPLIT_THRESHOLD).to.equal(15);
+    expect(needsPackageSplit(15)).to.equal(false);
+    expect(needsPackageSplit(16)).to.equal(true);
+    // measured in this tree: open-abap-core's own test classes clear it, a single pack does not
+    const coreCount = 62;
+    const packCount = 1;
+    expect(needsPackageSplit(coreCount)).to.equal(true);
+    expect(needsPackageSplit(packCount)).to.equal(false);
+  });
+
+  it("finds FOR TESTING in a real testclasses include, case-insensitively", () => {
+    const real = readFileSync(path.join(ROOT, "test/unit/zcl_stg_gateway_test.clas.testclasses.abap"), "utf8");
+    expect(hasTestMethods(real)).to.equal(true);
+    expect(hasTestMethods("class ltcl_x definition for testing.\nendclass.")).to.equal(true);
+  });
+
+  it("skips a testclasses include with no FOR TESTING at all, the cheap filter done before any server round trip", () => {
+    expect(hasTestMethods("CLASS ltcl_empty DEFINITION.\nENDCLASS.\n")).to.equal(false);
+    expect(hasTestMethods("")).to.equal(false);
+    expect(hasTestMethods(undefined)).to.equal(false);
   });
 });

@@ -822,9 +822,184 @@ function readerFilePattern(reader) {
   return `**/${base}.${ext}.abap`;
 }
 
+// ---- Test Explorer grouping (docs/vscode-extension.md, "Test Explorer
+// groups"): today every `*.clas.testclasses.abap` this extension finds
+// becomes one flat sibling, project classes next to CL_ABAP_* and
+// /UI2/CL_JSON from open-abap-core under .local/lars/. This section is the
+// pure half of splitting that into Project / Packs / Workspace layers /
+// System: which of the four a file's own path falls under, and -- once a
+// group holds more than a handful of classes -- which package inside it.
+// extension.js's testExplorer() is the thin wrapping: it walks
+// abap_transpile.json into transpileLayers() once, calls classifyTestPath()
+// per file findFiles() turns up, and builds the group/subgroup TestItems
+// around the object items this file already knew how to build (unchanged,
+// same ids, so a run's history still matches them).
+
+/** `abap_transpile.json`'s own `input_folder` and `libs` turned into what
+ *  classifyTestPath() below reads: the folders that are the Project (every
+ *  `input_folder` entry that is not also a lib's own folder -- none are,
+ *  today, but a future lib pointed at `src` should still not double as
+ *  Project) and, per lib, its `name` (the folder's own last path segment --
+ *  "open-abap-core", not the folder or the `url`) and its `folder`
+ *  (leading/trailing slashes trimmed, so it compares one way against a
+ *  relative path built by relOf() below). `config` is the parsed JSON
+ *  itself, not a path -- a test holds this to the real file's own content,
+ *  and extension.js reads it off disk. */
+function transpileLayers(config) {
+  const libs = (config?.libs ?? []).map((lib) => {
+    const folder = String(lib.folder ?? "").replace(/^\/+/, "").replace(/\/+$/, "");
+    const name = folder.split("/").filter(Boolean).pop() ?? folder;
+    return {name, folder};
+  });
+  const libFolders = new Set(libs.map((l) => l.folder));
+  const inputFolders = (config?.input_folder ?? [])
+    .map((f) => String(f).replace(/^\/+/, "").replace(/\/+$/, ""))
+    .filter((f) => !libFolders.has(f));
+  return {inputFolders, libs};
+}
+
+/** `absPath` relative to `root`, forward slashes always -- what every
+ *  comparison in classifyTestPath() below is done against, on Windows too. */
+function relOf(root, absPath) {
+  return path.relative(root, absPath).split(path.sep).join("/");
+}
+
+function startsWithSegment(rel, prefix) {
+  if (prefix === "") return false;
+  return rel === prefix || rel.startsWith(`${prefix}/`);
+}
+
+const PACKS_FOLDER = "packs";
+
+/** A short, stable label for a workspace layer (launcher.js's own `{folder,
+ *  srcDir}`): the folder's own last path segment, the way the System group
+ *  below names a lib by its folder's, so "workspace layer" and "library"
+ *  read the same way once either has more than one. */
+function workspaceLayerName(layer) {
+  return path.basename(String(layer?.folder ?? "")) || "layer";
+}
+
+/** Which Test Explorer group (and, inside it, which sub-node) a
+ *  `*.clas.testclasses.abap` file at `absPath` belongs under, given
+ *  `layers` (transpileLayers()'s own answer) and `workspaceLayers` (the
+ *  running launcher's own `layers`, `[]` when none is running or known --
+ *  extension.js reads `activeController?.launcher?.layers`). Checked in
+ *  this order because a workspace layer can sit anywhere on disk, even
+ *  somewhere that would otherwise read as a lib's own folder or as `packs/`:
+ *
+ *  1. `workspace` -- under a running B0 workspace layer's own folder.
+ *  2. `system` -- under one of abap_transpile.json's `libs` (`.local/lars/*`
+ *     today, but read off the config rather than hardcoded).
+ *  3. `packs` -- under `packs/<name>/`.
+ *  4. `project` -- under `src/`, `test/`, `gen/`, or whatever else
+ *     `input_folder` lists that is not a lib's own folder.
+ *
+ *  A path outside all four (should not happen against what findFiles() is
+ *  actually asked for) still answers `project` with the path unchanged,
+ *  rather than nothing -- an unclassified file loses no test rather than
+ *  vanishing from the tree.
+ *
+ *  `relInGroup` is the path below whatever root matched, for packageOf()
+ *  below to sub-group further; `subgroup` is `undefined` for `project`,
+ *  which has no sub-node of its own (Project lists straight from
+ *  packageOf(), when it needs to at all). */
+function classifyTestPath(root, absPath, layers, workspaceLayers = []) {
+  const rel = relOf(root, absPath);
+  for (const wl of workspaceLayers ?? []) {
+    const wlRel = relOf(root, wl.folder ?? wl.srcDir);
+    if (startsWithSegment(rel, wlRel)) {
+      return {group: "workspace", subgroup: workspaceLayerName(wl), relInGroup: rel.slice(wlRel.length).replace(/^\//, "")};
+    }
+  }
+  for (const lib of layers?.libs ?? []) {
+    if (startsWithSegment(rel, lib.folder)) {
+      return {group: "system", subgroup: lib.name, relInGroup: rel.slice(lib.folder.length).replace(/^\//, "")};
+    }
+  }
+  if (startsWithSegment(rel, PACKS_FOLDER)) {
+    const rest = rel.slice(PACKS_FOLDER.length + 1);
+    const slash = rest.indexOf("/");
+    return {
+      group: "packs",
+      subgroup: slash === -1 ? rest : rest.slice(0, slash),
+      relInGroup: slash === -1 ? "" : rest.slice(slash + 1),
+    };
+  }
+  for (const folder of layers?.inputFolders ?? []) {
+    if (startsWithSegment(rel, folder)) {
+      return {group: "project", subgroup: undefined, relInGroup: rel};
+    }
+  }
+  return {group: "project", subgroup: undefined, relInGroup: rel};
+}
+
+/** How many test-carrying classes a group (or a group's own sub-node -- one
+ *  pack, one lib, one workspace layer) may hold before it is worth
+ *  splitting further by package rather than listed flat -- the "~15" the
+ *  task named, kept in one place so extension.js and a test read the same
+ *  number. */
+const PACKAGE_SPLIT_THRESHOLD = 15;
+
+function needsPackageSplit(count) {
+  return count > PACKAGE_SPLIT_THRESHOLD;
+}
+
+/** `package.xml` files' own paths (each relative to the same root
+ *  `classifyTestPath()` above measured `relInGroup` against) turned into
+ *  the directories that carry one -- what packageOf() below prefers over
+ *  guessing from `src/`. */
+function packageDirsFrom(packageXmlPaths) {
+  return (packageXmlPaths ?? []).map((p) => {
+    const parts = String(p).replace(/\\/g, "/").split("/");
+    parts.pop();
+    return parts.join("/");
+  });
+}
+
+/** The sub-group `relInGroup` (classifyTestPath()'s own field) falls into
+ *  once its group is too big to list flat: the nearest ancestor directory
+ *  in `packageDirs` (abapGit's own `package.xml`, ~one per ABAP package)
+ *  when any is known, else the first real directory once any leading
+ *  `src`/`test`/`gen` content root is stripped -- so
+ *  "src/rtti/cl_abap_typedescr...abap" reads as "rtti" and
+ *  "test/adbc/zcl_adbc_test...abap" as "adbc", the subject rather than
+ *  which content root happened to carry it. `undefined` for a file with no
+ *  directory of its own once that stripping is done (kept in the group's
+ *  own flat overflow rather than given a made-up name). */
+function packageOf(relInGroup, packageDirs = []) {
+  const parts = String(relInGroup).replace(/\\/g, "/").split("/").filter(Boolean);
+  parts.pop();
+  if (packageDirs.length > 0) {
+    let dir = "";
+    let best = packageDirs.includes("") ? "" : undefined;
+    for (const part of parts) {
+      dir = dir === "" ? part : `${dir}/${part}`;
+      if (packageDirs.includes(dir)) best = dir;
+    }
+    if (best !== undefined) return best === "" ? undefined : best;
+  }
+  let i = 0;
+  while (i < parts.length && (parts[i] === "src" || parts[i] === "test" || parts[i] === "gen")) i++;
+  return parts[i];
+}
+
+/** Whether `source` (a `*.clas.testclasses.abap` include's own text) is
+ *  worth turning into a Test Explorer item at all: does it mark at least
+ *  one method `FOR TESTING` anywhere? Run up front, against the file
+ *  system, before any object item is created -- the cheap half of the
+ *  filter `discover()`'s own server round trip already does per test class
+ *  and method (extension.js, `(c.methods ?? []).length > 0`), so a
+ *  testclasses include with no test method at all (a global class's own
+ *  empty include, or one that declares a test class with none) never
+ *  becomes an item only to be found empty once expanded. */
+function hasTestMethods(source) {
+  return /\bFOR\s+TESTING\b/i.test(String(source ?? ""));
+}
+
 module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson,
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
-  implementsClassrun};
+  implementsClassrun,
+  transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods};

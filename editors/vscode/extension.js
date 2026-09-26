@@ -13,7 +13,8 @@ const crypto = require("node:crypto");
 const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   freestyleTableHtml, notebookFromJson, notebookToJson,
-  hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun} = require("./lib.js");
+  hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun,
+  transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods} = require("./lib.js");
 const {Launcher, ensureMaterializedHome} = require("./launcher.js");
 
 // Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
@@ -944,24 +945,156 @@ async function showReaders(found, output) {
   }
 }
 
-// ---- Test Explorer: one item per object, its test classes and methods below
+// ---- Test Explorer: Project / Packs / Workspace layers / System groups,
+// each object's test classes and methods below it (docs/vscode-extension.md,
+// "Test Explorer groups"). lib.js's transpileLayers()/classifyTestPath() do
+// the pure half (which of the four a file falls under, and which package
+// inside it); everything here is the tree built around that, and, below the
+// object level, unchanged from before this: same object/class/method ids
+// (so a run's history still matches them), same discover()/run() shape.
 
 function testExplorer(output) {
   const controller = vscode.tests.createTestController("osd-abap-unit", "ABAP Unit (osd)");
-  const objects = new Map(); // item id -> {object, dir}
+  const objects = new Map(); // object item id -> {object, dir} -- unchanged meaning, any tree depth
+  const groupNodes = new Map(); // group/subgroup/package id -> its TestItem
 
-  const objectItem = (uri) => {
-    const object = objectOf(uri.fsPath);
-    if (object === undefined) return undefined;
-    const id = `${object.type}:${object.name}`;
-    let item = controller.items.get(id);
-    if (item === undefined) {
-      item = controller.createTestItem(id, object.name, vscode.Uri.file(fileOf(path.dirname(uri.fsPath), object, "testclasses")));
-      item.canResolveChildren = true;
-      controller.items.add(item);
-      objects.set(id, {object, dir: path.dirname(uri.fsPath)});
+  const GROUP_LABEL = {project: "Project", packs: "Packs", workspace: "Workspace layers", system: "System"};
+  const GROUP_ORDER = ["project", "packs", "workspace", "system"];
+
+  function readTranspileConfig(root) {
+    if (root === undefined) return {};
+    try {
+      return JSON.parse(fs.readFileSync(path.join(root, "abap_transpile.json"), "utf8"));
+    } catch {
+      return {};
     }
+  }
+
+  function ensureGroupNode(id, label, parent) {
+    let node = groupNodes.get(id);
+    if (node === undefined) {
+      node = controller.createTestItem(id, label);
+      groupNodes.set(id, node);
+      if (parent === undefined) controller.items.add(node);
+      else parent.children.add(node);
+    }
+    return node;
+  }
+
+  function objectItemFor(entry) {
+    const id = `${entry.object.type}:${entry.object.name}`;
+    if (objects.has(id)) return undefined; // the same object found twice (two scans overlapping) -- keep the first
+    const item = controller.createTestItem(id, entry.object.name, entry.uri);
+    item.canResolveChildren = true;
+    objects.set(id, {object: entry.object, dir: entry.dir});
     return item;
+  }
+
+  // one bucket per bucketKey holds the object items directly: Project's own
+  // top node (Project has no sub-node of its own), else the one mandatory
+  // sub-node a pack / lib / workspace layer always gets. Split further by
+  // packageOf() once the bucket clears PACKAGE_SPLIT_THRESHOLD -- the
+  // "~15" the task named, read off lib.js so a test and this agree on it.
+  function placeEntries(containerNode, entries) {
+    if (!needsPackageSplit(entries.length)) {
+      for (const entry of entries) {
+        const item = objectItemFor(entry);
+        if (item !== undefined) containerNode.children.add(item);
+      }
+      return;
+    }
+    const byPackage = new Map();
+    for (const entry of entries) {
+      const pkg = packageOf(entry.classification.relInGroup);
+      if (!byPackage.has(pkg)) byPackage.set(pkg, []);
+      byPackage.get(pkg).push(entry);
+    }
+    for (const [pkg, pkgEntries] of byPackage) {
+      const target = pkg === undefined ? containerNode : ensureGroupNode(`${containerNode.id}:pkg:${pkg}`, pkg, containerNode);
+      for (const entry of pkgEntries) {
+        const item = objectItemFor(entry);
+        if (item !== undefined) target.children.add(item);
+      }
+    }
+  }
+
+  // findFiles() the way the four groups actually differ: Project and Packs
+  // sit under the repo root and stay behind EXCLUDE (never .local, gen,
+  // node_modules, output, build -- the same exclude every other feature
+  // here uses); a lib's own folder and a running workspace layer's own
+  // folder are asked for directly, RelativePattern-scoped, bypassing
+  // EXCLUDE on purpose -- that is the one thing that lets System (`.local/
+  // lars/*`, today) be found at all, without also walking the dozens of
+  // other clones and worktrees `.local/**` carries that are neither.
+  async function scanAll(root, layers, workspaceLayers, showSystem) {
+    const uris = [...await vscode.workspace.findFiles("**/*.clas.testclasses.abap", EXCLUDE)];
+    if (showSystem) {
+      for (const lib of layers.libs) {
+        const base = path.join(root, lib.folder);
+        if (!fs.existsSync(base)) continue;
+        const pattern = new vscode.RelativePattern(vscode.Uri.file(base), "**/*.clas.testclasses.abap");
+        uris.push(...await vscode.workspace.findFiles(pattern));
+      }
+    }
+    for (const wl of workspaceLayers) {
+      const folder = typeof wl.folder === "string" ? wl.folder : wl.srcDir;
+      if (typeof folder !== "string" || !fs.existsSync(folder)) continue;
+      const pattern = new vscode.RelativePattern(vscode.Uri.file(folder), "**/*.clas.testclasses.abap");
+      uris.push(...await vscode.workspace.findFiles(pattern));
+    }
+    return uris;
+  }
+
+  const buildTree = async () => {
+    const root = activeController?.launcher?.osdHome ?? osdHomeOf();
+    const layers = transpileLayers(readTranspileConfig(root));
+    const workspaceLayers = activeController?.launcher?.layers ?? [];
+    const showSystem = vscode.workspace.getConfiguration("osd").get("tests.showSystem", true);
+
+    controller.items.replace([]);
+    groupNodes.clear();
+    objects.clear();
+    if (root === undefined) return;
+
+    const placed = [];
+    for (const uri of await scanAll(root, layers, workspaceLayers, showSystem)) {
+      let source;
+      try {
+        source = fs.readFileSync(uri.fsPath, "utf8");
+      } catch {
+        continue;
+      }
+      // the cheap filter, done up front: a testclasses include with no
+      // FOR TESTING at all never becomes an item only to be found empty
+      // once expanded (lib.js hasTestMethods -- discover()'s own server
+      // round trip still filters per class/method the same way, below)
+      if (!hasTestMethods(source)) continue;
+      const object = objectOf(uri.fsPath);
+      if (object === undefined) continue;
+      const classification = classifyTestPath(root, uri.fsPath, layers, workspaceLayers);
+      placed.push({uri, object, dir: path.dirname(uri.fsPath), classification});
+    }
+
+    const groupsPresent = new Set(["project", "packs"]);
+    if (showSystem) groupsPresent.add("system");
+    if (workspaceLayers.length > 0) groupsPresent.add("workspace");
+    for (const group of GROUP_ORDER) {
+      if (groupsPresent.has(group)) ensureGroupNode(`group:${group}`, GROUP_LABEL[group], undefined);
+    }
+
+    const buckets = new Map(); // bucketKey -> {group, subgroup, entries}
+    for (const entry of placed) {
+      const {group, subgroup} = entry.classification;
+      if (!groupsPresent.has(group)) continue; // e.g. a workspace-layer file with no active layer known right now
+      const bucketKey = subgroup === undefined ? `group:${group}` : `group:${group}:${subgroup}`;
+      if (!buckets.has(bucketKey)) buckets.set(bucketKey, {group, subgroup, entries: []});
+      buckets.get(bucketKey).entries.push(entry);
+    }
+    for (const [bucketKey, bucket] of buckets) {
+      const topNode = groupNodes.get(`group:${bucket.group}`);
+      const containerNode = bucket.subgroup === undefined ? topNode : ensureGroupNode(bucketKey, bucket.subgroup, topNode);
+      placeEntries(containerNode, bucket.entries);
+    }
   };
 
   const discover = async (item) => {
@@ -994,35 +1127,102 @@ function testExplorer(output) {
 
   controller.resolveHandler = async (item) => {
     if (item === undefined) {
-      for (const uri of await vscode.workspace.findFiles("**/*.clas.testclasses.abap", EXCLUDE)) objectItem(uri);
+      await buildTree();
       return;
     }
     await discover(item);
   };
 
+  // narrowly scoped, so an unrelated edit never disturbs another object's
+  // own expansion: onDidChange only re-runs discover() for an object
+  // already found and already expanded (the tree's own shape did not
+  // change); a create or a delete can change which bucket exists or
+  // whether a group is now empty, so those go through buildTree() again --
+  // debounced, so a burst of saves (a checkout, a branch switch) rebuilds
+  // once rather than once per file
+  let rebuildTimer;
+  const scheduleRebuild = () => {
+    clearTimeout(rebuildTimer);
+    rebuildTimer = setTimeout(() => { buildTree().catch((e) => output.appendLine(String(e.message ?? e))); }, 300);
+  };
   const watcher = vscode.workspace.createFileSystemWatcher("**/*.clas.testclasses.abap");
-  watcher.onDidCreate((uri) => objectItem(uri));
+  watcher.onDidCreate(() => scheduleRebuild());
+  watcher.onDidDelete(() => scheduleRebuild());
   watcher.onDidChange((uri) => {
-    const item = objectItem(uri);
+    const object = objectOf(uri.fsPath);
+    const item = object === undefined ? undefined : controllerFind(`${object.type}:${object.name}`);
     if (item !== undefined && item.children.size > 0) discover(item);
   });
 
+  // objects.has(id) is not enough on its own to find a TestItem anywhere in
+  // the tree (controller.items is top-level groups only, now) -- walk every
+  // group down to the object items once, for the rare watcher onDidChange
+  function controllerFind(id) {
+    const walk = (collection) => {
+      for (const [, child] of collection) {
+        if (child.id === id) return child;
+        const found = walk(child.children);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    };
+    return walk(controller.items);
+  }
+
+  // the ancestor object item of `item` (itself, if `item` already is one),
+  // or undefined when `item` sits above every object (a group, a pack/lib/
+  // workspace-layer sub-node, or a package split inside one)
+  function objectAncestorOf(item) {
+    let node = item;
+    while (node !== undefined && !objects.has(node.id)) node = node.parent;
+    return node;
+  }
+
+  // every object item under `item`, itself included when it already is one
+  // -- "running a group runs all of its children", the way the Testing API
+  // does by default: a group/pack/lib/workspace-layer/package node handed
+  // to the run handler (Run on the group, or "Run All") expands to every
+  // object it holds, each run in full
+  function objectDescendantsOf(item) {
+    if (objects.has(item.id)) return [item];
+    const out = [];
+    for (const [, child] of item.children) out.push(...objectDescendantsOf(child));
+    return out;
+  }
+
   const runHandler = async (request, token) => {
     const run = controller.createTestRun(request);
-    // what was asked, grouped by object: the server runs one object at a time
+    // what was asked, expanded down to (or across) actual objects, then
+    // grouped by object: the server runs one object at a time
     const asked = request.include ?? [...gather(controller.items)];
-    const byObject = new Map();
+    const selections = [];
     for (const item of asked) {
-      const [objectId, testClass, method] = item.id.split("/");
-      if (!byObject.has(objectId)) byObject.set(objectId, []);
-      byObject.get(objectId).push({item, testClass, method});
+      if (objects.has(item.id)) {
+        selections.push({item, objectItem: item, testClass: undefined, method: undefined});
+        continue;
+      }
+      const ancestor = objectAncestorOf(item);
+      if (ancestor !== undefined) {
+        const suffix = item.id.slice(ancestor.id.length).replace(/^\//, "");
+        const [testClass, method] = suffix === "" ? [undefined, undefined] : suffix.split("/");
+        selections.push({item, objectItem: ancestor, testClass, method});
+        continue;
+      }
+      for (const objItem of objectDescendantsOf(item)) {
+        selections.push({item: objItem, objectItem: objItem, testClass: undefined, method: undefined});
+      }
     }
-    for (const [objectId, selections] of byObject) {
+    const byObject = new Map();
+    for (const sel of selections) {
+      if (!byObject.has(sel.objectItem.id)) byObject.set(sel.objectItem.id, []);
+      byObject.get(sel.objectItem.id).push(sel);
+    }
+    for (const [objectId, sels] of byObject) {
       if (token.isCancellationRequested) break;
-      const objectItemOf = controller.items.get(objectId);
+      const objectItemOf = sels[0].objectItem;
       if (objectItemOf.children.size === 0) await discover(objectItemOf);
       const {object, dir} = objects.get(objectId);
-      for (const sel of selections) {
+      for (const sel of sels) {
         const methods = leaves(sel.item);
         methods.forEach((m) => run.started(m));
         try {
@@ -1051,11 +1251,9 @@ function testExplorer(output) {
   };
   controller.createRunProfile("Run", vscode.TestRunProfileKind.Run, runHandler, true);
   controller.refreshHandler = async () => {
-    controller.items.replace([]);
-    objects.clear();
-    await controller.resolveHandler(undefined);
+    await buildTree();
   };
-  return {dispose: () => { watcher.dispose(); controller.dispose(); }};
+  return {dispose: () => { clearTimeout(rebuildTimer); watcher.dispose(); controller.dispose(); }};
 }
 
 function* gather(collection) {
