@@ -224,6 +224,11 @@ The form is a GET, so the shim hands the query string on as it arrived and the
 field is decoded in the handler: a browser sends a space as `+` and the rest
 percent-encoded, and "System status" has a space in it.
 
+The same entry route starts a transaction directly with
+`/sap/bc/gui/sap/its/webgui/?okcode=<tcode>`. The VS Code report runner uses
+this form, which `test/gui-reports.mjs` also exercises with all three
+converted report transactions.
+
 ## A transaction node runs (G.3)
 
 `ZOSD_NOTE` on the screen, or typed into the command field, starts a
