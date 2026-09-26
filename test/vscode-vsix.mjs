@@ -14,21 +14,20 @@
 import {expect} from "chai";
 import {execFileSync} from "node:child_process";
 import {createRequire} from "node:module";
-import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
-import {join} from "node:path";
+import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {basename, join} from "node:path";
 import {homedir, tmpdir} from "node:os";
-import {stampStagedPackage} from "../scripts/build-vsix.mjs";
+import {buildVsix, stampStagedPackage} from "../scripts/build-vsix.mjs";
 
 const root = process.cwd();
 const VSIX_DIR = join(root, "build", "vsix");
-const stagedPackagePath = join(VSIX_DIR, "stage", "extension", "package.json");
-const stagedVersion = existsSync(stagedPackagePath)
-  ? JSON.parse(readFileSync(stagedPackagePath, "utf8")).version
-  : undefined;
-const vsixFiles = existsSync(VSIX_DIR) ? readdirSync(VSIX_DIR).filter((f) => f.endsWith(".vsix")) : [];
-const vsixFile = (stagedVersion === undefined ? undefined : `osd-vscode-${stagedVersion}.vsix`);
-const builtVsix = vsixFiles.includes(vsixFile) ? vsixFile : vsixFiles[0];
-const built = builtVsix !== undefined;
+const trackedVersion = JSON.parse(readFileSync(join(root, "editors", "vscode", "package.json"), "utf8")).version;
+const versionParts = /^(\d+)\.(\d+)\.\d+$/.exec(trackedVersion);
+if (versionParts === null) throw new Error(`expected a plain major.minor.patch version, got ${trackedVersion}`);
+const commitCount = execFileSync("git", ["rev-list", "--count", "HEAD"], {cwd: root, encoding: "utf8"}).trim();
+const currentVsixFile = `osd-vscode-${versionParts[1]}.${versionParts[2]}.${commitCount}.vsix`;
+let builtVsix = existsSync(join(VSIX_DIR, currentVsixFile)) ? currentVsixFile : undefined;
+let built = builtVsix !== undefined;
 
 const DEMO_WS = join(root, ".local", "b0-demo-ws");
 // **Outside the checkout, on purpose.** A scratch folder under this tree
@@ -55,6 +54,73 @@ describe("packaging version stamp", function () {
     } finally {
       rmSync(scratch, {recursive: true, force: true});
     }
+  });
+});
+
+describe("packaging changed seed content", function () {
+  this.timeout(240000);
+
+  it("packages twice at one stamped version and rematerializes the second seed", async function () {
+    mkdirSync(SCRATCH, {recursive: true});
+    const scratch = mkdtempSync(join(SCRATCH, "repackage-"));
+    const sourceName = `.vsix-package-test-${process.pid}-${Date.now()}`;
+    const sourceFile = join(root, "src", sourceName);
+    const firstArchive = join(scratch, "first.vsix");
+    const firstUnzip = join(scratch, "first");
+    const secondUnzip = join(scratch, "second");
+    const globalStorage = join(scratch, "globalStorage");
+    try {
+      writeFileSync(sourceFile, "first packaged seed content\n");
+      const first = await buildVsix();
+      copyFileSync(first.out, firstArchive);
+
+      writeFileSync(sourceFile, "second packaged seed content\n");
+      const second = await buildVsix();
+
+      expect(second.pkg.version).to.equal(first.pkg.version);
+      expect(basename(first.out)).to.equal(currentVsixFile);
+      expect(basename(second.out)).to.equal(currentVsixFile);
+      expect(readFileSync(join(VSIX_DIR, "stage", "extension", "package.json"), "utf8"))
+        .to.contain(`"version": "${second.pkg.version}"`);
+      execFileSync("unzip", ["-q", firstArchive, "-d", firstUnzip]);
+      execFileSync("unzip", ["-q", second.out, "-d", secondUnzip]);
+
+      const firstExtension = join(firstUnzip, "extension");
+      const secondExtension = join(secondUnzip, "extension");
+      const firstLauncher = createRequire(import.meta.url)(join(firstExtension, "launcher.js"));
+      const secondLauncher = createRequire(import.meta.url)(join(secondExtension, "launcher.js"));
+      const firstSeed = join(firstExtension, "osd");
+      const secondSeed = join(secondExtension, "osd");
+      const seedFile = join("src", sourceName);
+      expect(readFileSync(join(firstSeed, seedFile), "utf8")).to.equal("first packaged seed content\n");
+      expect(readFileSync(join(secondSeed, seedFile), "utf8")).to.equal("second packaged seed content\n");
+
+      const firstId = firstLauncher.seedContentId(firstSeed);
+      const secondId = secondLauncher.seedContentId(secondSeed);
+      expect(secondId).to.not.equal(firstId);
+      expect(readFileSync(join(firstSeed, firstLauncher.SEED_ID_FILE), "utf8").trim()).to.equal(firstId);
+      expect(readFileSync(join(secondSeed, secondLauncher.SEED_ID_FILE), "utf8").trim()).to.equal(secondId);
+
+      const firstHome = firstLauncher.ensureMaterializedHome(firstSeed, globalStorage);
+      expect(readFileSync(join(firstHome, seedFile), "utf8")).to.equal("first packaged seed content\n");
+      const secondHome = secondLauncher.ensureMaterializedHome(secondSeed, globalStorage);
+      expect(secondHome).to.not.equal(firstHome);
+      expect(readFileSync(join(secondHome, seedFile), "utf8")).to.equal("second packaged seed content\n");
+      expect(existsSync(firstHome), "materializing the second seed removes the old generation").to.equal(false);
+
+      builtVsix = currentVsixFile;
+      built = true;
+    } finally {
+      rmSync(sourceFile, {force: true});
+      rmSync(scratch, {recursive: true, force: true});
+    }
+
+    // Leave the normal build artifact for the out-of-checkout smoke below.
+    // The two packages above deliberately contain the temporary source file.
+    const canonical = await buildVsix();
+    expect(basename(canonical.out)).to.equal(currentVsixFile);
+    builtVsix = basename(canonical.out);
+    built = true;
   });
 });
 

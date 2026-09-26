@@ -704,16 +704,12 @@ describe("editors/vscode/launcher.js: linkOrCopyTree / ensureMaterializedHome (p
     expect(existsSync(join(target, "added-later.txt"))).to.equal(false);
   });
 
-  it("repackages changed seed content at the same extension version and rematerializes", () => {
-    const extensionPackage = join(process.cwd(), "editors/vscode/package.json");
-    const extensionVersion = JSON.parse(readFileSync(extensionPackage, "utf8")).version;
+  it("rematerializes when a packaged seed receives a different content ID", () => {
     const firstId = seedId;
     const firstHome = ensureMaterializedHome(seedDir, storageDir);
     expect(existsSync(firstHome)).to.equal(true);
 
-    // Model a second packaging pass: the extension version is unchanged,
-    // one seed file changes, and packaging writes the new content ID.
-    expect(JSON.parse(readFileSync(extensionPackage, "utf8")).version).to.equal(extensionVersion);
+    // Model a packaged seed with changed content and its newly written ID.
     rmSync(join(seedDir, "top.txt"));
     writeFileSync(join(seedDir, "top.txt"), "changed seed content");
     const secondId = writeSeedId(seedDir);
