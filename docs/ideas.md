@@ -21,15 +21,15 @@ the system inside it.
 | id | idea | status | reason / next step |
 |---|---|---|---|
 | S0 | SAP's ADT for VS Code against our ADT façade | accepted | a test client for the façade (it is Eclipse ADT on a headless Equinox), not our editor; licence read first; 1–2 d spike; same work as the ADT proxy for OSGo |
-| B0 | The system is an extension: a VS Code extension carrying the whole system, no separate binary | accepted (order 5, after the Q items) | feasibility measured 2026-09-25: runs unchanged on VS Code's Node v24, `node:sqlite`, no native module by default; needs the DB and TLS paths moved out of the working directory; `output/` is 64 MB |
+| B0 | The system is an extension: a VS Code extension carrying the whole system, no separate binary | spike done (#104), packaged as one universal .vsix (#105, #106, #107) | feasibility measured 2026-09-25: runs unchanged on VS Code's Node v24, `node:sqlite`, no native module by default; needs the DB and TLS paths moved out of the working directory; `output/` is 64 MB |
 | B7 | adt-express: one small JSON protocol, answered natively here, by the same ABAP classes on a system with the plugin, and by vsp over ADT on a system without it | accepted (spec first) | optimistic writes (`If-Match`, one LUW) remove the need for a session; APC + daemon + AMC only where state is needed |
 | B8 | Multiverse of runs: record and replay a dialog step, find where a failing run leaves a passing one, step back in time | candidate | replay via the dialog-step module and the DB seam works on any engine; the path trace needs our own emitter (Go) |
-| Q1 | Debugger through VS Code's JS debugger and the transpiler's source maps | accepted (order 1) | checked 2026-09-25: 795 maps, mapped per statement to the `.abap` line; relative source paths resolve from the real generation folder |
-| Q2 | Thin extension: CodeLens run/call, Test Explorer, generation in the status bar | accepted (order 2) | 2–3 d; abaplint stays the language server |
-| Q3 | Readers of a class in CodeLens | accepted (order 3) | 0.5 d; the numbers are in the warm registry |
-| Q4 | Dumps as diagnostics on the ABAP line | candidate | 1 d; first step of B8 |
+| Q1 | Debugger through VS Code's JS debugger and the transpiler's source maps | done (#94) | checked 2026-09-25: 795 maps, mapped per statement to the `.abap` line; relative source paths resolve from the real generation folder |
+| Q2 | Thin extension: CodeLens run/call, Test Explorer, generation in the status bar | done (#95, #96 keys, #97 Call EntitySet, #109 test groups) | 2–3 d; abaplint stays the language server |
+| Q3 | Readers of a class in CodeLens | done (#98, warm index #103) | 0.5 d; the numbers are in the warm registry |
+| Q4 | Dumps as diagnostics on the ABAP line ("Hotspots") | done (#100: ZOSD_DUMP, heat, badges) | 1 d; first step of B8 |
 | Q5 | The `osd` MCP server as language-model tools in VS Code | candidate | 0.5 d |
-| Q6 | ABAP and SQL notebooks | accepted (order 4) | 2–3 d; a cell runs through the warm build (an ABAP cell becomes a throwaway class, 0.5 s), an SQL cell through Open SQL |
+| Q6 | ABAP and SQL notebooks | SQL done (#99); classrun and F9 done (#101); ABAP cells need a scratch layer in the object store | 2–3 d; a cell runs through the warm build (an ABAP cell becomes a throwaway class, 0.5 s), an SQL cell through Open SQL |
 | Q7 | SEGW editor and Fiori preview in a VS Code tab | candidate | ~1 d; the pages exist |
 | B1 | Tests chosen by the closure of an edit, rerun on save, results inline ("Wallaby for ABAP") | accepted (order 6) | 1–2 weeks |
 | B5 | Behaviour of recorded OData requests before and after an edit | candidate | +3–5 d on B1's engine |
@@ -73,3 +73,25 @@ the system inside it.
 - Portable AMDP (pAMDP): parked 2026-09-25; value parity against HANA is the
   first step when it returns (`docs/handover-pamdp-2026-09-24.md`).
 - The licence of open-abap-odata: parked (ADR 0003, consequences).
+
+## Tails and small items
+
+Things found along the way that are not ideas of their own: each has the
+reason it was noticed and the smallest next step. Status as above.
+
+| id | item | status | reason / next step |
+|---|---|---|---|
+| T1 | Reuse libraries independently: a transpiled library as its own cached, versioned artefact keyed by its own content; a build transpiles only the upper layers and links the libraries' prebuilt modules | candidate | fast cold builds everywhere (extension first start, CI, fresh clones). Caveat: a module's output depends on the registry it was transpiled in, so an override in a later layer must invalidate the library's dependents (the warm closure knows them). Builds on transpiler `only` (#1900/#1921) |
+| T2 | A portable generation hash, so a .vsix can ship a prebuilt generation and the first start is a cache hit (~4 s instead of ~23 s) | candidate | a locally built transpiler puts its path and git state into the hash, and a packaged copy has no git state left; needs a metadata file written at packaging time (docs/vscode-extension.md, Packaging) |
+| T3 | A smaller .vsix (0.1.2: 90.8 MB unpacked, 34.7 MB packed) | candidate | ~21 MB is demo-pack media that is already compressed; text compresses only ×4–5 because a .vsix is a zip, compressed per file. Media out of the package, the seed as one solid .tar.xz/.zst unpacked by the materialize step, no .map files: ~8–12 MB expected |
+| T4 | One system identity, read by every client | candidate (nailed to client 123 for now) | the data client is one place already (tools/osd-identity.mjs, OSD_CLIENT, default 123); the ADT client 001 is on purpose (Eclipse projects, the session cookie's name). Expose client/SID/user/language on /osd/serving and ADT discovery; the extension reads the data client from there instead of its MANDT_CLIENT constant |
+| T5 | Windows: build/live and output are symlinks, which need admin rights without Developer Mode | accepted | junctions for directories |
+| T6 | The Pi Zero stand does not come back after the board reboots | candidate | an @reboot start |
+| T7 | Warm build inside the extension's launched system: OSD_WARM when memory allows (≥ 4 GB), Rebuild = warm activation, Full rebuild = cold, "warming up" in the status bar | accepted | the server side (warm state on /osd/serving, a copy fallback when hard links fail) is in progress |
+| T8 | The extension's tree grouped by kind (OData / Apps / ICF / APC, later daemons, jobs, transactions); a node is a pointer to its source plus one action; a Launchpad node | accepted | one composing GET route on the server, entity sets lazily from segw/entitysets |
+| T9 | An Eclipse-like package tree in the extension, over the ADT façade's own repository/nodestructure routes (one truth with Eclipse) | accepted | check how completely nodestructure expands a class before building on it; adt-express only once its spec exists |
+| T10 | "Also serve DIAG/RFC for SAP GUI / Eclipse" in the extension, off by default | candidate | a free 32nn/33nn pair shown to the user; the listeners run with demo authentication, so not by default |
+| T11 | Smart F8 and a Gateway client: per method, create/update/delete, function imports, $expand, value help | candidate | Q2b covers read only |
+| T12 | "Any output": CL_DEMO_OUTPUT (a stub in open-abap-core today), the classic WRITE list, ALV, into the console and notebook cells | candidate | one output sink per run |
+| T13 | Classic reports through open-abap-gui's converter: ALV untried, dynpro (module pool) not driven, report state lives in process memory so a recycle or a warm swap loses it | candidate | spike #113 runs three examples in webgui and in a VS Code tab |
+
