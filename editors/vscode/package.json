@@ -2,7 +2,7 @@
   "name": "osd-vscode",
   "displayName": "open-steamgate (osd)",
   "description": "ABAP Unit in the Test Explorer, the serving generation and short dumps of a running osd",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "license": "MIT",
   "publisher": "open-steamgate",

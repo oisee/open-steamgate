@@ -19,7 +19,7 @@ const {objectOf, adtObjectOf, uriOf, fileOf, outcomes, abapFrame, parseCheckRepo
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
-  progTcodeOf, progRunLens,
+  demoFailureObjects, progTcodeOf, progRunLens,
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
   serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
@@ -548,8 +548,13 @@ describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace la
     const names = layers.libs.map((l) => l.name).sort();
     expect(names).to.deep.equal(
       ["abapgit", "ajson", "express-icf-shim", "open-abap-apc", "open-abap-core", "open-abap-gui", "open-abap-odata"].sort());
-    expect(layers.libs.find((l) => l.name === "open-abap-core")).to.deep.equal(
+    expect(layers.libs.find((l) => l.name === "open-abap-core")).to.include(
       {name: "open-abap-core", folder: ".local/lars/open-abap-core"});
+    // the build's own top-level exclude_filter (bug 3, docs/vscode-extension.md)
+    expect(layers.excludeFilter.some((re) => re.test("/x/test/fixtures/y.clas.abap"))).to.equal(true);
+    // and each lib's own, read the same way
+    const core = layers.libs.find((l) => l.name === "open-abap-core");
+    expect(core.excludeFilter.some((re) => re.test("/x/.local/lars/open-abap-core/src/tcp/y.clas.abap"))).to.equal(true);
   });
 
   it("classifies a project file under src/ as Project, with no sub-node of its own", () => {
@@ -589,9 +594,83 @@ describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace la
       {group: "workspace", subgroup: "open-abap-core", relInGroup: "src/http/cl_http_server.clas.testclasses.abap"});
   });
 
-  it("falls back to Project for a path outside every known root", () => {
-    const abs = path.join(ROOT, "docs/vscode-extension.md");
-    expect(classifyTestPath(ROOT, abs, layers).group).to.equal("project");
+  it("is undefined for a path outside every known root, rather than falling into Project (deploy/ is a staging folder, not a layer)", () => {
+    const docs = path.join(ROOT, "docs/vscode-extension.md");
+    expect(classifyTestPath(ROOT, docs, layers)).to.equal(undefined);
+    // bug 3: exactly this shape (a real capture staged for a system's deploy,
+    // never one of abap_transpile.json's input_folder/libs/packs)
+    const deploy = path.join(ROOT, "deploy/lsd-a4h-011/src/zcl_zosd_011_lsd_media.clas.testclasses.abap");
+    expect(classifyTestPath(ROOT, deploy, layers)).to.equal(undefined);
+  });
+
+  it("is undefined for a project file the build's own exclude_filter hides (bug 3: test/fixtures/)", () => {
+    const abs = path.join(ROOT, "test/fixtures/adt-editor/zcl_editor.clas.testclasses.abap");
+    // it IS under test/, an input_folder -- exclude_filter is what removes
+    // it, not the root check: a layers with no excludeFilter at all still
+    // classifies it as project, proving the root check alone would pass it
+    expect(classifyTestPath(ROOT, abs, {...layers, excludeFilter: []}).group).to.equal("project");
+    expect(classifyTestPath(ROOT, abs, layers)).to.equal(undefined);
+  });
+
+  it("is undefined for a lib file the LIB's own exclude_filter hides (open-abap-core's /src/tcp/)", () => {
+    const abs = path.join(ROOT, ".local/lars/open-abap-core/src/tcp/zcl_x.clas.testclasses.abap");
+    expect(classifyTestPath(ROOT, abs, layers)).to.equal(undefined);
+  });
+
+  it("bugs 1/2/6: is undefined when root and absPath share no common tree -- the packaged install's own osdHome (a materialized copy) versus the workspace folder a person actually opened", () => {
+    // the bug: root is a different tree entirely (a materialized copy in
+    // globalStorage, say), while absPath is the real, open workspace
+    // folder's own file -- path.relative climbs out of one tree and back
+    // down the other, landing on the fallback branch (now undefined) rather
+    // than matching any of the four; before the fix that fallback answered
+    // {group: "project", subgroup: undefined, relInGroup: "../../.../src/..."},
+    // which is where the Project group's stray ".." sub-node came from
+    const unrelatedRoot = path.join(ROOT, ".local", "not-a-real-osdhome");
+    const abs = path.join(ROOT, "src/webgui/zcl_osd_webgui.clas.testclasses.abap");
+    expect(classifyTestPath(unrelatedRoot, abs, layers)).to.equal(undefined);
+    // the fix: classify against the file's OWN root instead, and it is fine again
+    expect(classifyTestPath(ROOT, abs, layers)).to.deep.equal(
+      {group: "project", subgroup: undefined, relInGroup: "src/webgui/zcl_osd_webgui.clas.testclasses.abap"});
+    // bug 2 (Packs empty) is the same cause, over a packs/ file
+    const zvdb = path.join(ROOT, "packs/zvdb/src/zcl_vdb_100_anydb.clas.testclasses.abap");
+    expect(classifyTestPath(unrelatedRoot, zvdb, layers)).to.equal(undefined);
+    expect(classifyTestPath(ROOT, zvdb, layers).group).to.equal("packs");
+  });
+
+  // ---- Item 4: a class abap_transpile.json's own `options.skip` already
+  // marks as deliberately failing (ZOSD_TEST's own demo, so "Run" on
+  // Project stays green) gets its own sub-node -- derived from that list
+  // rather than a new marker, since it is already the single, explicit,
+  // per-object statement of exactly this fact.
+
+  it("reads the demo-failure objects off abap_transpile.json's own options.skip, not a new marker", () => {
+    const demoObjects = demoFailureObjects(transpileConfig);
+    expect(demoObjects.has("ZCL_ZOSD_TEST_DEMO")).to.equal(true);
+    expect(demoObjects.has("ZCL_STG_GATEWAY_TEST")).to.equal(false);
+    expect(demoFailureObjects(undefined)).to.deep.equal(new Set());
+    expect(demoFailureObjects({options: {}})).to.deep.equal(new Set());
+  });
+
+  // ---- Item 5: abapGit keeps a program's local test classes inline, in
+  // its own `*.prog.abap` (or an include it reaches) rather than split into
+  // a `.testclasses.abap` the way a class's are -- hasTestMethods()/
+  // objectOf() are already generic by suffix, so finding one is the same
+  // scan with a wider glob (extension.js TEST_FILE_GLOB), not new lib.js
+  // logic.
+
+  it("finds FOR TESTING in a PROG's own main file the same way, and classifies it under Project", () => {
+    const prog = readFileSync(path.join(ROOT, "src/zosd_test/src/zosd_test_demo_prog.prog.abap"), "utf8");
+    expect(hasTestMethods(prog)).to.equal(true);
+    expect(objectOf("zosd_test_demo_prog.prog.abap")).to.deep.equal(
+      {type: "PROG", name: "ZOSD_TEST_DEMO_PROG", base: "zosd_test_demo_prog", include: "main"});
+    const abs = path.join(ROOT, "src/zosd_test/src/zosd_test_demo_prog.prog.abap");
+    expect(classifyTestPath(ROOT, abs, layers)).to.deep.equal(
+      {group: "project", subgroup: undefined, relInGroup: "src/zosd_test/src/zosd_test_demo_prog.prog.abap"});
+  });
+
+  it("a PROG with no FOR TESTING at all is skipped by the same cheap filter as a class", () => {
+    const plain = readFileSync(path.join(ROOT, "src/zosd_test/src/zosd_test_demo_plain.prog.abap"), "utf8");
+    expect(hasTestMethods(plain)).to.equal(false);
   });
 
   it("sub-groups by the directory under src/ or test/ once package.xml is not there to ask", () => {

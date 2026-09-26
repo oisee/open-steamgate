@@ -1044,18 +1044,45 @@ function readerFilePattern(reader) {
  *  (leading/trailing slashes trimmed, so it compares one way against a
  *  relative path built by relOf() below). `config` is the parsed JSON
  *  itself, not a path -- a test holds this to the real file's own content,
- *  and extension.js reads it off disk. */
+ *  and extension.js reads it off disk.
+ *
+ *  `excludeFilter` (top-level) and each lib's own `excludeFilter` are the
+ *  build's own `exclude_filter` lists (tools/osd-inputs.mjs / osd-build.mjs,
+ *  tools/osd-transpile.mjs `regexps()`), read the same way -- case-
+ *  insensitively, unanchored -- so a file the build itself would never read
+ *  or serve (`test/fixtures/`, a lib's own `/src/tcp/`) is not listed in the
+ *  Test Explorer either (classifyTestPath() below applies them). A pack has
+ *  no `exclude_filter` of its own: it is layered into `input_folder` at
+ *  build time and the top-level list already covers it. */
 function transpileLayers(config) {
   const libs = (config?.libs ?? []).map((lib) => {
     const folder = String(lib.folder ?? "").replace(/^\/+/, "").replace(/\/+$/, "");
     const name = folder.split("/").filter(Boolean).pop() ?? folder;
-    return {name, folder};
+    const excludeFilter = (lib.exclude_filter ?? []).map((p) => new RegExp(p, "i"));
+    return {name, folder, excludeFilter};
   });
   const libFolders = new Set(libs.map((l) => l.folder));
   const inputFolders = (config?.input_folder ?? [])
     .map((f) => String(f).replace(/^\/+/, "").replace(/\/+$/, ""))
     .filter((f) => !libFolders.has(f));
-  return {inputFolders, libs};
+  const excludeFilter = (config?.exclude_filter ?? []).map((p) => new RegExp(p, "i"));
+  return {inputFolders, libs, excludeFilter};
+}
+
+/** Whether `absPath`, already routed to `classification` by
+ *  classifyTestPath() below, is hidden by the build's own exclude filters:
+ *  the top-level list for a Project or a Packs file (both are plain
+ *  `input_folder` entries by the time the transpiler sees them), the
+ *  matching lib's own list for a System file. A Workspace-layer file is
+ *  never excluded here -- another layer's own config is not this tree's to
+ *  read, and `classifyTestPath` never reads it for one either. */
+function isExcludedByConfig(absPath, classification, layers) {
+  const patterns = classification.group === "system"
+    ? (layers?.libs ?? []).find((l) => l.name === classification.subgroup)?.excludeFilter ?? []
+    : classification.group === "project" || classification.group === "packs"
+      ? layers?.excludeFilter ?? []
+      : [];
+  return patterns.some((re) => re.test(absPath));
 }
 
 /** `absPath` relative to `root`, forward slashes always -- what every
@@ -1080,12 +1107,15 @@ function workspaceLayerName(layer) {
 }
 
 /** Which Test Explorer group (and, inside it, which sub-node) a
- *  `*.clas.testclasses.abap` file at `absPath` belongs under, given
- *  `layers` (transpileLayers()'s own answer) and `workspaceLayers` (the
- *  running launcher's own `layers`, `[]` when none is running or known --
- *  extension.js reads `activeController?.launcher?.layers`). Checked in
- *  this order because a workspace layer can sit anywhere on disk, even
- *  somewhere that would otherwise read as a lib's own folder or as `packs/`:
+ *  `*.clas.testclasses.abap` (or, since PROG keeps its own local test
+ *  classes inline, a `*.prog.abap`) file at `absPath` belongs under, given
+ *  `layers` (transpileLayers()'s own answer, read off `root`'s own
+ *  `abap_transpile.json` -- the file's own workspace folder, never a
+ *  different tree's) and `workspaceLayers` (the running launcher's own
+ *  `layers`, `[]` when none is running or known -- extension.js reads
+ *  `activeController?.launcher?.layers`). Checked in this order because a
+ *  workspace layer can sit anywhere on disk, even somewhere that would
+ *  otherwise read as a lib's own folder or as `packs/`:
  *
  *  1. `workspace` -- under a running B0 workspace layer's own folder.
  *  2. `system` -- under one of abap_transpile.json's `libs` (`.local/lars/*`
@@ -1094,10 +1124,18 @@ function workspaceLayerName(layer) {
  *  4. `project` -- under `src/`, `test/`, `gen/`, or whatever else
  *     `input_folder` lists that is not a lib's own folder.
  *
- *  A path outside all four (should not happen against what findFiles() is
- *  actually asked for) still answers `project` with the path unchanged,
- *  rather than nothing -- an unclassified file loses no test rather than
- *  vanishing from the tree.
+ *  `undefined` both for a path outside every one of the four (a staging
+ *  folder such as `deploy/`, never a layer of the build) and for a path a
+ *  matching root's own `exclude_filter` hides from the build itself
+ *  (`test/fixtures/`, a lib's own excluded corner -- isExcludedByConfig()
+ *  above): a file that is not an object of this system is not listed,
+ *  rather than dropped into Project as though it were one. `root` and
+ *  `absPath` sharing no common tree (the packaged extension's osdHome, a
+ *  materialized copy in globalStorage, handed the workspace folder's own
+ *  file) reads the same way, for the same reason: `rel` starts with `..`
+ *  all the way up, matches none of the four, and is correctly refused --
+ *  the fix for that case is the caller passing the file's OWN workspace
+ *  folder as `root`, never falling back to it here.
  *
  *  `relInGroup` is the path below whatever root matched, for packageOf()
  *  below to sub-group further; `subgroup` is `undefined` for `project`,
@@ -1105,32 +1143,42 @@ function workspaceLayerName(layer) {
  *  packageOf(), when it needs to at all). */
 function classifyTestPath(root, absPath, layers, workspaceLayers = []) {
   const rel = relOf(root, absPath);
+  let result;
   for (const wl of workspaceLayers ?? []) {
     const wlRel = relOf(root, wl.folder ?? wl.srcDir);
     if (startsWithSegment(rel, wlRel)) {
-      return {group: "workspace", subgroup: workspaceLayerName(wl), relInGroup: rel.slice(wlRel.length).replace(/^\//, "")};
+      result = {group: "workspace", subgroup: workspaceLayerName(wl), relInGroup: rel.slice(wlRel.length).replace(/^\//, "")};
+      break;
     }
   }
-  for (const lib of layers?.libs ?? []) {
-    if (startsWithSegment(rel, lib.folder)) {
-      return {group: "system", subgroup: lib.name, relInGroup: rel.slice(lib.folder.length).replace(/^\//, "")};
+  if (result === undefined) {
+    for (const lib of layers?.libs ?? []) {
+      if (startsWithSegment(rel, lib.folder)) {
+        result = {group: "system", subgroup: lib.name, relInGroup: rel.slice(lib.folder.length).replace(/^\//, "")};
+        break;
+      }
     }
   }
-  if (startsWithSegment(rel, PACKS_FOLDER)) {
+  if (result === undefined && startsWithSegment(rel, PACKS_FOLDER)) {
     const rest = rel.slice(PACKS_FOLDER.length + 1);
     const slash = rest.indexOf("/");
-    return {
+    result = {
       group: "packs",
       subgroup: slash === -1 ? rest : rest.slice(0, slash),
       relInGroup: slash === -1 ? "" : rest.slice(slash + 1),
     };
   }
-  for (const folder of layers?.inputFolders ?? []) {
-    if (startsWithSegment(rel, folder)) {
-      return {group: "project", subgroup: undefined, relInGroup: rel};
+  if (result === undefined) {
+    for (const folder of layers?.inputFolders ?? []) {
+      if (startsWithSegment(rel, folder)) {
+        result = {group: "project", subgroup: undefined, relInGroup: rel};
+        break;
+      }
     }
   }
-  return {group: "project", subgroup: undefined, relInGroup: rel};
+  if (result === undefined) return undefined;
+  if (isExcludedByConfig(absPath, result, layers)) return undefined;
+  return result;
 }
 
 /** How many test-carrying classes a group (or a group's own sub-node -- one
@@ -1194,6 +1242,24 @@ function packageOf(relInGroup, packageDirs = []) {
  *  becomes an item only to be found empty once expanded. */
 function hasTestMethods(source) {
   return /\bFOR\s+TESTING\b/i.test(String(source ?? ""));
+}
+
+/** The object names `abap_transpile.json`'s own `options.skip` already
+ *  marks as deliberately failing (`{object, class, method}`, read by
+ *  tools/osd-transpile.mjs into the transpiler's own `settings.skip` --
+ *  what keeps `npm test`'s build-time ABAP Unit run green over a method
+ *  that fails on purpose, ZOSD_TEST's `deliberate_failure`
+ *  (`docs/vscode-extension.md`, "Test Explorer groups"): the demo's own
+ *  point is that the failure DOES reach a live client, so "Run" on Project
+ *  in the Test Explorer must still run it and still see it fail; only the
+ *  build-time run, which cannot tell "meant to fail" from "broken", skips
+ *  it. Reused here rather than a new marker (a source comment, a second
+ *  config list) because it is already the single, explicit, machine-read
+ *  statement of exactly this fact, per object -- adding a second one risks
+ *  the two drifting the way `exclude_filter`/`not_in_system` do not, only
+ *  because a test holds those two together and nothing would hold these. */
+function demoFailureObjects(config) {
+  return new Set((config?.options?.skip ?? []).map((s) => String(s.object ?? "").toUpperCase()).filter((s) => s !== ""));
 }
 
 // ---- Services tree (docs/vscode-extension.md, "Services tree"): the
@@ -1367,6 +1433,7 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
+  demoFailureObjects,
   progTcodeOf, progRunLens,
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
   serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes};
