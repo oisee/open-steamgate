@@ -7,29 +7,37 @@
 // plus a runnable system tree at `extension/osd/`.
 //
 // What goes into `extension/osd/` is exactly what `node test/run.mjs` needs
-// at run time, found by tracing rather than guessing:
-//   - the CURRENT generation's `output/` -- the real files, not
-//     `build/live/output`'s symlink chain, and NOT the `build/by-input/<hash>/`
-//     cache entry it lives in either. Two things ruled the cache entry out,
-//     found by trying it first: `zip` without `-y` dereferences a symlink
-//     into a real directory when it archives one (`build/live` -> a full
-//     second copy of its own target, and unzip then hands
-//     `tools/osd-build.mjs`'s own live-switch a real directory where it
-//     only ever expects a symlink or nothing, which is an unhandled EISDIR
-//     on `renameSync` -- `output/` itself, alone among the three, DOES
-//     tolerate that shape, "a real directory there is what every tree had
-//     before this existed"); and separately, the input hash the cache is
-//     keyed on is computed over each lib folder'S WHOLE tree, not the
-//     `files` glob a lib entry restricts reading to, so a lib trimmed to
-//     that glob (below) never reproduces the hash of the untrimmed clone
-//     this generation was actually built from -- the cache would miss on
-//     first build regardless. `output/` alone, shipped as plain files,
-//     costs nothing extra (`switchTo` moves a pre-existing directory there
-//     aside to `build/legacy-<ts>` on the first real build) and adds
-//     nothing broken; a first start is therefore a full, ordinary build
-//     (measured below), and a second start of the SAME materialized copy
-//     is fast because BY THEN it has grown its own matching cache, the
-//     same way any other checkout's second build does.
+// at run time, found by tracing rather than guessing. **`output/` is NOT
+// shipped** (fallback (b) of the vsix-prebuilt-generation task,
+// 2026-09-26; see docs/vscode-extension.md, "Packaging", for the numbers
+// and the portable-hash design this replaces): the first design shipped
+// `output/` alone as plain files, on the theory that a first build on the
+// user's machine would recompute the SAME input hash and reuse it (the
+// generation cache, `build/by-input/<hash>/`). Two things ruled that out.
+// `zip` without `-y` dereferences a symlink into a real directory when it
+// archives one, so the cache entry and `build/live` cannot travel as
+// themselves -- only `output/` tolerates arriving as a plain directory
+// (`switchTo` moves a pre-existing one aside to `build/legacy-<ts>` on the
+// first real build, "what every tree had before this existed"). Separately,
+// and enough on its own: `hashOf()` (`tools/osd-build.mjs`) folds
+// `describeBuild(root)` (`tools/osd-transpiler.mjs`) into the name, and for
+// a LOCAL transpiler build (`.local/lars/`, the shape this repo actually
+// builds against sometimes, CLAUDE.md "Known traps") that string carries an
+// absolute path and the git branch/commit/dirty flag of the MACHINE THAT
+// PACKAGED IT -- there is no way for a user's machine, materializing a
+// plain copy of `node_modules/@abaplint/transpiler` with no git metadata
+// left in it, to ever recompute the same string, so the shipped hash could
+// never be hit even after fixing the two problems above with a portable
+// STRING. Making the STRING portable (dropping the path, keeping
+// branch/commit/dirty so a dirty local build still changes the hash on the
+// packaging machine) is a small change; making the shipped `output/`
+// actually REPRODUCE that string from a plain copy of `node_modules` is
+// not, without a metadata file written at packaging time and read back in
+// preference to the on-disk shape -- more than the hour this task set
+// aside for it. So: no `output/` in the vsix. A first start is an ordinary
+// full build (measured below, ~20 s); a second start of the SAME
+// materialized copy is fast because by then it has grown its own matching
+// cache, the same way any other checkout's second build does.
 //   - `src/`, `gen/`, `packs/` (whole -- generators read pack content, not a
 //     layer list), `webapp/`, `tools/` (whole), `test/` minus `test/e2e/`
 //     and `test/fixtures/` (`abap_transpile.json`'s and `abaplint.jsonc`'s
@@ -70,7 +78,7 @@ import {execFileSync} from "node:child_process";
 import {createHash} from "node:crypto";
 import {
   cpSync, existsSync, mkdirSync, readdirSync, readFileSync,
-  readlinkSync, realpathSync, rmSync, statSync, writeFileSync,
+  realpathSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -193,32 +201,12 @@ function libEntries() {
 
 // ---- stage layout ---------------------------------------------------------
 
-/** The current generation's `output/` as plain files at the seed root --
- *  no `build/`, no symlink. `tools/osd-build.mjs`'s own `switchTo()`
- *  tolerates exactly this shape on the FIRST real build it runs (a
- *  pre-existing real directory at `output/` is moved aside to
- *  `build/legacy-<ts>`, never deleted from under a process still loading
- *  it, and a fresh symlink takes its place), so this is not a special case
- *  the build has to be taught -- it is the case the comment at the top of
- *  that file names as "what every tree had before this existed". Minus
- *  `*.mjs.map`: a build OUTPUT, never hashed as an input, so dropping the
- *  source maps changes nothing about correctness, only a stack trace's
- *  exact source line. */
-function copyOutput(seedRoot) {
-  const liveOutput = join(ROOT, "build", "live", "output");
-  if (existsSync(liveOutput) === false) {
-    throw new Error("build-vsix: build/live/output does not exist -- run npm run transpile first");
-  }
-  cpSync(realpathSync(liveOutput), join(seedRoot, "output"), {
-    recursive: true, dereference: true, filter: (p) => p.endsWith(".mjs.map") === false,
-  });
-  log(`output/ (${basename(readlinkSync(join(ROOT, "build", "live")))})`);
-}
-
 function copySeedTree(seedRoot) {
   mkdirSync(seedRoot, {recursive: true});
 
-  copyOutput(seedRoot);
+  // No output/: see the top-of-file comment (fallback (b) of the
+  // vsix-prebuilt-generation task) for why shipping the current
+  // generation was tried and reverted. A first start transpiles cold.
 
   for (const dir of ["src", "gen", "packs", "webapp", "tools", "data"]) {
     copyReal(join(ROOT, dir), join(seedRoot, dir));
@@ -356,7 +344,8 @@ export async function buildVsix() {
   execFileSync("zip", ["-X", "-q", "-r", out, "[Content_Types].xml", "extension.vsixmanifest", "extension"], {cwd: STAGE});
 
   const breakdown = {
-    "output/ (current generation, plain files)": dirSizeBytes(join(seedRoot, "output")),
+    // no output/ entry: not shipped (fallback (b), see the top-of-file
+    // comment) -- a first start transpiles cold instead of hitting a cache.
     "node_modules/": dirSizeBytes(join(seedRoot, "node_modules")),
     "packs/": dirSizeBytes(join(seedRoot, "packs")),
     "src/ + gen/ + webapp/ + tools/ + test/ + data/": ["src", "gen", "webapp", "tools", "test", "data"]
