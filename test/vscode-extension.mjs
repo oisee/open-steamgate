@@ -17,6 +17,7 @@ const {objectOf, adtObjectOf, uriOf, fileOf, outcomes, abapFrame, parseCheckRepo
   htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson,
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
   implementsClassrun,
+  dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
 import {implementsClassrun as facadeImplementsClassrun} from "../tools/osd-classrun.mjs";
@@ -115,8 +116,8 @@ describe("editors/vscode: the extension's logic", function () {
     expect(inside).to.deep.equal({kind: "call-entityset", service: "ZSTG_DEMO_SRV", set: "TravelSet", entityKind: "get_entityset"});
     expect(runActionFor({type: "INTF", name: "ZIF_A"})).to.deep.equal({kind: "not-yet", text: "not yet: an interface has nothing of its own to run"});
     expect(runActionFor({type: "FUGR", name: "ZFG"}).text).to.contain("/sap/bc/osd/rfc/functions/<NAME>");
-    expect(runActionFor({type: "TABL", name: "ZSTG_DEMO"}).text).to.equal("not yet: data preview");
-    expect(runActionFor({type: "DDLS", name: "ZC_STG_DEMO"}).text).to.equal("not yet: data preview");
+    expect(runActionFor({type: "TABL", name: "ZSTG_DEMO"})).to.deep.equal({kind: "data-preview", objectType: "TABL", name: "ZSTG_DEMO"});
+    expect(runActionFor({type: "DDLS", name: "ZC_STG_DEMO"})).to.deep.equal({kind: "data-preview", objectType: "DDLS", name: "ZC_STG_DEMO"});
     expect(runActionFor({type: "IWSV", name: "ZSTG_DEMO_SRV"}).text).to.equal("not yet: the Gateway client on the service document");
     expect(runActionFor({type: "SICF", name: "ZOSD_APP"}).kind).to.equal("not-yet");
     expect(runActionFor({type: "BOGUS", name: "X"}).text).to.contain("BOGUS");
@@ -380,6 +381,73 @@ describe("editors/vscode: the extension's logic", function () {
     const text = notebookToJson(cells);
     expect(text.endsWith("\n")).to.equal(true);
     expect(notebookFromJson(text)).to.deep.equal(cells);
+  });
+
+  // ---- Q7 "F8 on a table or a CDS view": name resolution off the file
+  // alone (dataPreviewObjectOf), the MANDT filter SQL (dataPreviewQuery /
+  // dataPreviewCountQuery), the row cap wording (dataPreviewStatusText)
+  // and the façade's own datapreview XML (dataPreviewRows), held to
+  // tableDataDocument's real shape the same way Q6a's freestyleRows tests
+  // are above.
+
+  it("Q7: dataPreviewObjectOf names a TABL and a DDLS off the file alone, and knows neither for anything else", () => {
+    expect(dataPreviewObjectOf("/x/src/ddic/zstg_flightfact.tabl.xml")).to.deep.equal({type: "TABL", name: "ZSTG_FLIGHTFACT"});
+    expect(dataPreviewObjectOf("zc_stg_flightcube.ddls.asddls")).to.deep.equal({type: "DDLS", name: "ZC_STG_FLIGHTCUBE"});
+    expect(dataPreviewObjectOf("zc_stg_flightcube.ddls.xml")).to.deep.equal({type: "DDLS", name: "ZC_STG_FLIGHTCUBE"});
+    expect(dataPreviewObjectOf("#ns#ztab.tabl.xml")).to.deep.equal({type: "TABL", name: "/NS/ZTAB"});
+    expect(dataPreviewObjectOf("zcl_a.clas.abap")).to.equal(undefined);
+    expect(dataPreviewObjectOf("zstg_flightfact.tabl.abap")).to.equal(undefined);
+  });
+
+  it("Q7: tablHasMandt reads a TABL's own DD03P rows, off the buffer -- ZSTG_FLIGHTFACT has the field, ZOSD_PACK does not", () => {
+    const withMandt = readFileSync(new URL("../src/ddic/zstg_flightfact.tabl.xml", import.meta.url), "utf8");
+    const withoutMandt = readFileSync(new URL("../src/status/zosd_pack.tabl.xml", import.meta.url), "utf8");
+    expect(tablHasMandt(withMandt)).to.equal(true);
+    expect(tablHasMandt(withoutMandt)).to.equal(false);
+    expect(tablHasMandt(undefined)).to.equal(false);
+  });
+
+  it("Q7: dataPreviewQuery filters to the logon client only for a TABL that has MANDT and is not showing all clients", () => {
+    expect(dataPreviewQuery("ZSTG_FLIGHTFACT", {hasMandt: true})).to.equal(`SELECT * FROM ZSTG_FLIGHTFACT WHERE MANDT = '${MANDT_CLIENT}'`);
+    expect(MANDT_CLIENT).to.equal("123"); // CLAUDE.md "Known traps": the runtime's own sy-mandt
+    expect(dataPreviewQuery("ZSTG_FLIGHTFACT", {hasMandt: true, allClients: true})).to.equal("SELECT * FROM ZSTG_FLIGHTFACT");
+    expect(dataPreviewQuery("ZOSD_PACK", {hasMandt: false})).to.equal("SELECT * FROM ZOSD_PACK");
+    // a DDLS is never filtered: the CDS-name view has no MANDT column at all
+    expect(dataPreviewQuery("ZC_STG_FLIGHTCUBE", {hasMandt: false})).to.equal("SELECT * FROM ZC_STG_FLIGHTCUBE");
+    expect(dataPreviewQuery("ZSTG_FLIGHTFACT")).to.equal("SELECT * FROM ZSTG_FLIGHTFACT");
+  });
+
+  it("Q7: dataPreviewCountQuery is the same statement, as a count", () => {
+    expect(dataPreviewCountQuery("ZSTG_FLIGHTFACT", {hasMandt: true})).to.equal(`SELECT COUNT(*) AS N FROM ZSTG_FLIGHTFACT WHERE MANDT = '${MANDT_CLIENT}'`);
+    expect(dataPreviewCountQuery("ZOSD_PACK", {hasMandt: false})).to.equal("SELECT COUNT(*) AS N FROM ZOSD_PACK");
+  });
+
+  it("Q7: dataPreviewStatusText says the row cap only once there is something to say about it", () => {
+    expect(dataPreviewStatusText(24, 100)).to.equal("24 rows");
+    expect(dataPreviewStatusText(1, 100)).to.equal("1 row");
+    expect(dataPreviewStatusText(100, 100, 137)).to.equal("first 100 of 137");
+    expect(dataPreviewStatusText(100, 100, undefined)).to.equal("first 100 rows");
+  });
+
+  it("Q7: dataPreviewRows reads tableDataDocument's own labels and keys, off the real façade shape (datapreview/ddic and /cds)", () => {
+    const xml = tableDataDocument({
+      rows: [{FACT_ID: "0000000001", AIRLINE: "LH"}, {FACT_ID: "0000000002", AIRLINE: "BA"}],
+      columns: ["FACT_ID", "AIRLINE"],
+    }, {fields: [
+      {name: "FACT_ID", description: "Fact", key: true, letter: "N", dataType: "NUMC", length: 10},
+      {name: "AIRLINE", description: "Airline", key: false, letter: "C", dataType: "CHAR", length: 3},
+    ]});
+    const {columns, rows} = dataPreviewRows(xml);
+    expect(columns).to.deep.equal([
+      {name: "FACT_ID", label: "Fact", key: true},
+      {name: "AIRLINE", label: "Airline", key: false},
+    ]);
+    expect(rows).to.deep.equal([{FACT_ID: "0000000001", AIRLINE: "LH"}, {FACT_ID: "0000000002", AIRLINE: "BA"}]);
+  });
+
+  it("Q7: dataPreviewRows falls back to the column's own name when the façade did not know it (freestyle's own fallback metadata)", () => {
+    const xml = tableDataDocument({rows: [{X: "1"}], columns: ["X"]}); // no fields option: the unknown-column branch
+    expect(dataPreviewRows(xml).columns).to.deep.equal([{name: "X", label: "X", key: false}]);
   });
 
   // ---- Q4 "Hotspots": ZOSD_DUMP as heat, off the same freestyle SQL door

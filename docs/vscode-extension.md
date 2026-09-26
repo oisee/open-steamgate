@@ -29,7 +29,11 @@ below carries `when: config.osd.keymap == abap`, so the setting is the only
 place this is decided. Scoped by `resourceExtname == .abap` rather than a
 language id: abaplint is an extension this repo does not install or
 control, so which language id it registers (if any) is not something a
-`when` clause here can depend on.
+`when` clause here can depend on. F8 alone widens that to a `resourceFilename
+=~ /regex/` match (`resourceExtname` is only ever the last extension, and a
+TABL's own file is `<table>.tabl.xml`, a DDLS's `<view>.ddls.asddls` or
+`.ddls.xml`) -- Ctrl+F2/Ctrl+F3/F9 stay `.abap`-only, since Check/Activate/
+Classrun do not reach either type (Q7, below).
 
 | Key | SAP GUI / ADT | Here | Gap |
 | --- | --- | --- | --- |
@@ -56,7 +60,7 @@ F8's dispatch by object type (`lib.js` `runActionFor`, held to this table by
 | INTF | nothing of its own to run |
 | PROG | not yet: no server route to run a report headlessly |
 | FUGR | not yet: a test form from `GET /sap/bc/osd/rfc/functions/<NAME>`, then `POST /call` |
-| TABL, DDLS | not yet: data preview |
+| TABL, DDLS | data preview (Q7, below) |
 | IWSV | not yet: the Gateway client on the service document |
 | SICF | not yet: open the node's URL |
 
@@ -381,6 +385,57 @@ pieces of future work: an optional `root` on `ObjectStore#write` for a
 caller that already knows which one, and a permanently-declared (not
 pack-discovered) scratch root so a notebook does not need `OSD_PACKS` set
 before `osd` starts -- neither attempted here.
+
+## Q7: F8 on a table or a CDS view
+
+*2026-09-26.* F8 on a `*.tabl.xml` (a TABL) or a `*.ddls.asddls` / `*.ddls.xml`
+(a DDLS) opens a "Data Preview \<NAME\>" webview: rows (capped by
+`osd.dataPreview.rowLimit`, default 100, "N rows" or "first N of M" once a
+cheap `COUNT(*)` was worth asking for), column headers with the DDIC field's
+own label when the façade offers one, a Refresh button and an "Open in SQL
+notebook" button that seeds a fresh `*.osdnb` cell (Q6a) with the exact
+statement the panel is showing.
+
+Neither type reaches `adtObjectOf` (Check/Activate/Classrun do not apply to
+either), so `run()` falls back to `lib.js` `dataPreviewObjectOf` -- a plain
+regex over the file's own name, `run()`'s editor buffer and all, the same
+"read what is open, not what adtObjectOf knows" split Q6b's classrun already
+uses. The name it reads off a DDLS file is the CDS entity's own name (say
+`ZC_STG_FLIGHTCUBE`), never its `@AbapCatalog.sqlViewName` (`ZVSTGFLIGHTCUBE`)
+-- this client does not need to know that annotation exists. **No new server
+route**: F8's rows and labels come from the façade's own `datapreview/ddic`
+(a TABL) and `datapreview/cds` (a DDLS) -- the same door ADT's own Data
+Preview uses (`tools/adt-facade.mjs`, `lib.js` `Osd#dataPreview`), which
+already resolves a DDLS by its CDS name (`tools/adt-cds.mjs` `cdsEntityOf`,
+against the twin view `tools/cds2ddic.mjs` writes under that name -- "the CDS
+entity itself has no client... as on a system") and already carries each
+column's own DDIC label (`tableDataDocument`'s `dataPreview:description`).
+The row count, asked for only once the main fetch came back at the cap, goes
+through the plain `datapreview/freestyle` door instead (`Osd#freestyle`) --
+the one door this feature is told to prefer, and the one already built for
+"run this SQL, hand back a number". A DDLS with no database object behind it
+(an unsupported join, `tools/cds2ddic.mjs`'s own skip, or a name that does
+not exist at all) answers the façade's own message ("DDLS X does not exist",
+or the SQL engine's refusal), not a bare 404.
+
+**Client**: `ZSTG_FLIGHTFACT` (and every TABL with a MANDT field, read off
+its own DD03P rows in the buffer, `lib.js` `tablHasMandt`) is filtered to the
+runtime's own client by default -- `WHERE MANDT = '123'`, `MANDT_CLIENT` in
+`lib.js`, the constant CLAUDE.md's "Known traps" already names, not read off
+the ADT façade's own identity: that one deliberately answers a different,
+made-up client (`tools/osd-identity.mjs`, `identity().adt.client`, `"001"`,
+backlog G.1b) so the façade's pretend system is never confused with the data
+underneath it, and reading it here would filter for the wrong one. An "all
+clients" toggle drops the filter and shows the MANDT column (hidden while
+filtered -- every row would carry the same value). A DDLS never gets the
+toggle: the CDS-name view has no MANDT column at all
+(`tools/cds2ddic.mjs` `viewFieldsOf`), so there is nothing to filter or to
+show.
+
+Pure logic (`dataPreviewObjectOf`, `tablHasMandt`, `dataPreviewQuery`,
+`dataPreviewCountQuery`, `dataPreviewStatusText`, `dataPreviewRows`), held to
+`tableDataDocument`'s real shape the way Q6a's `freestyleRows` already is,
+in `test/vscode-extension.mjs`.
 
 ## Trying it
 
