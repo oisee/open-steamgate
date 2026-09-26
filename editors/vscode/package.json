@@ -93,10 +93,10 @@
       {"command": "osd.newSqlNotebook", "title": "osd: New SQL notebook"},
       {"command": "osd.start", "title": "osd: Start (build + run this system)", "icon": "$(play)"},
       {"command": "osd.stop", "title": "osd: Stop", "icon": "$(primitive-square)"},
-      {"command": "osd.rebuild", "title": "osd: Rebuild", "icon": "$(refresh)"},
-      {"command": "osd.openLaunchpad", "title": "osd: Open launchpad", "icon": "$(link-external)"},
+      {"command": "osd.rebuild", "title": "osd: Rebuild (stop, build, start)", "icon": "$(tools)"},
+      {"command": "osd.openLaunchpad", "title": "osd: Open launchpad", "icon": "$(rocket)"},
       {"command": "osd.openLaunchpadInVsCode", "title": "osd: Open launchpad inside VS Code"},
-      {"command": "osd.refreshTree", "title": "osd: Refresh System view", "icon": "$(refresh)"},
+      {"command": "osd.refreshTree", "title": "osd: Refresh the view (no rebuild)", "icon": "$(refresh)"},
       {"command": "osd.copyServiceUrl", "title": "osd: Copy URL"},
       {"command": "osd.copyServiceWsUrl", "title": "osd: Copy ws:// URL"},
       {"command": "osd.openServiceMetadata", "title": "osd: Open $metadata"}
