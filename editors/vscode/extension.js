@@ -16,7 +16,8 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText,
   transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, demoFailureObjects, progRunLens,
-  groupServices, serviceLabel, serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes} = require("./lib.js");
+  groupServices, serviceLabel, serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
+  warmStatusText, activationBuildText, closureTestsText} = require("./lib.js");
 const {Launcher, ensureMaterializedHome, databaseEnv, defaultDedicatedName, describeDatabase} = require("./launcher.js");
 
 // Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
@@ -91,6 +92,12 @@ async function resolveOsdHome(context) {
 function storageDirFor(context, osdHome) {
   const hash = crypto.createHash("sha1").update(osdHome).digest("hex").slice(0, 16);
   return path.join(context.globalStorageUri.fsPath, "osd-instance", hash);
+}
+
+/** `osd.warm`'s own setting (T7, docs/vscode-extension.md "Warm"): "auto",
+ *  "on" or "off", read fresh on every launch the way osd.home is. */
+function osdWarmModeOf() {
+  return vscode.workspace.getConfiguration("osd").get("warm", "auto");
 }
 
 /** The workspace folders to offer as layers, minus osdHome itself -- a
@@ -235,6 +242,7 @@ class SystemController {
         storageDir: storageDirFor(this.context, osdHome),
         workspaceFolders: workspaceFoldersFor(osdHome),
         database,
+        warm: osdWarmModeOf(),
       });
       launcher.on("log", (line) => this.output.append(line));
       launcher.on("state", () => this.emitter.fire());
@@ -249,6 +257,7 @@ class SystemController {
       // setting change must not need a window reload to take effect.
       this.launcher.database = database;
       this.launcher.databaseLabel = describeDatabase(database);
+      this.launcher.warmMode = osdWarmModeOf();
     }
     return this.launcher;
   }
@@ -316,7 +325,7 @@ class SystemController {
       return this.start();
     }
     this.output.show(true);
-    this.output.appendLine("--- osd rebuild ---");
+    this.output.appendLine("--- osd rebuild (full: stop, build, start) ---");
     try {
       await this.launcher.rebuild();
       await this.#pointUrlAt(this.launcher.port);
@@ -324,6 +333,60 @@ class SystemController {
       vscode.window.showErrorMessage(`osd rebuild: ${String(e.message ?? e)}`);
     }
     this.emitter.fire();
+  }
+
+  /** T7 "Rebuild (warm)" (docs/vscode-extension.md "Warm", the $(tools)
+   *  icon in the view's own title bar): activate every CLAS/INTF whose
+   *  source changed since the serving generation, in one call
+   *  (tools/adt-facade.mjs `core/http/changed`, Osd#activateMany above) --
+   *  the fast path a cold "Full rebuild" (the "..." menu, still stop +
+   *  build + start) is the fallback for whenever this cannot tell what
+   *  changed: not running yet, the warm registry not primed, or the route
+   *  itself saying so. Never dumps or hangs on that: every branch below
+   *  either falls back to rebuild() or reports and returns, and the try
+   *  around the live calls falls back too, on the chance of a transient
+   *  network failure between "primed" and the next request. */
+  async rebuildWarm() {
+    if (this.launcher === undefined || this.launcher.state !== "running") {
+      this.output.appendLine("--- osd rebuild (warm): not running -- falling back to a full rebuild ---");
+      return this.rebuild();
+    }
+    this.output.show(true);
+    try {
+      const serving = await osd().serving();
+      const warm = serving.warm;
+      if (warm?.state !== "primed") {
+        const reason = warm?.reason ?? (warm?.state === "off" ? "osd.warm is off" : `warm: ${warm?.state ?? "unknown"}`);
+        this.output.appendLine(`--- osd rebuild (warm): not primed (${reason}) -- falling back to a full rebuild ---`);
+        vscode.window.setStatusBarMessage(`osd: warm not primed (${reason}) -- full rebuild instead`, 5000);
+        return this.rebuild();
+      }
+      const changed = await osd().changed();
+      if (changed.objects === undefined) {
+        this.output.appendLine(`--- osd rebuild (warm): ${changed.reason ?? "could not tell what changed"} -- falling back to a full rebuild ---`);
+        return this.rebuild();
+      }
+      if (changed.objects.length === 0) {
+        vscode.window.setStatusBarMessage("osd: nothing changed since the serving generation", 5000);
+        return undefined;
+      }
+      this.output.appendLine(`--- osd rebuild (warm): activating ${changed.objects.map((o) => o.name).join(", ")} ---`);
+      const result = await osd().activateMany(changed.objects);
+      const build = activationBuildText(result);
+      const tests = closureTestsText(result);
+      if (result.ok) {
+        vscode.window.setStatusBarMessage(
+          `osd: ${changed.objects.length} object(s) activated${build ? ` (${build})` : ""}${tests ? `, ${tests}` : ""}`, 5000);
+      } else {
+        this.output.appendLine(`osd rebuild (warm): ${result.issues.map((i) => `${i.objDescr || "?"}: ${i.message}`).join("; ")}`);
+        vscode.window.showErrorMessage(`osd rebuild (warm): ${result.issues.length} issue(s), see the output channel`);
+      }
+      this.emitter.fire();
+      return undefined;
+    } catch (e) {
+      this.output.appendLine(`osd rebuild (warm): ${String(e.message ?? e)} -- falling back to a full rebuild`);
+      return this.rebuild();
+    }
   }
 
   async openLaunchpad() {
@@ -363,9 +426,42 @@ class OsdTreeProvider {
     this.emitter = new vscode.EventEmitter();
     this.onDidChangeTreeData = this.emitter.event;
     this.groups = [];
-    controller.onDidChange(() => {
-      this.refreshServices().then(() => this.emitter.fire(), () => this.emitter.fire());
-    });
+    // T7 (docs/vscode-extension.md "Warm"): /osd/serving's own `warm` field,
+    // shown on the state row the way the status bar shows it.
+    this.warm = undefined;
+    const refresh = () => this.refresh().then(() => this.emitter.fire(), () => this.emitter.fire());
+    controller.onDidChange(refresh);
+    // the prime finishing, or a swap happening, is not a controller state
+    // change (start/stop/rebuild) -- nothing else tells this the row is
+    // stale, so it polls the same way the status bar does, and only while
+    // there is something running to ask.
+    this.timer = setInterval(() => {
+      if (this.controller.launcher?.state === "running") refresh();
+    }, 5000);
+  }
+
+  dispose() {
+    clearInterval(this.timer);
+  }
+
+  /** Both live reads this row and the Services tree depend on: osd.refreshTree
+   *  (view/title's own $(refresh)) calls this by name, and so does the
+   *  constructor's own timer and controller listener. */
+  async refresh() {
+    await this.refreshServices();
+    await this.#refreshWarm();
+  }
+
+  async #refreshWarm() {
+    if (this.controller.launcher?.state !== "running") {
+      this.warm = undefined;
+      return;
+    }
+    try {
+      this.warm = (await osd().serving()).warm;
+    } catch {
+      this.warm = undefined;
+    }
   }
 
   async refreshServices() {
@@ -406,14 +502,24 @@ class OsdTreeProvider {
   rootItems() {
     const launcher = this.controller.launcher;
     const state = launcher?.state ?? "stopped";
+    const warmText = warmStatusText(this.warm);
+    const swaps = this.warm?.swaps ?? 0;
     const label = state === "running"
-      ? `Running on :${launcher.port} · ${launcher.databaseLabel}, generation ${String(launcher.generation).slice(0, 8)}`
+      ? `Running on :${launcher.port} · ${launcher.databaseLabel}, generation ${String(launcher.generation).slice(0, 8)}` +
+        (warmText ? ` · ${warmText}` : "") + (swaps ? ` +${swaps}` : "")
       : state === "stopped" ? "Stopped"
         : `${state[0].toUpperCase()}${state.slice(1)}…`;
     const stateItem = new vscode.TreeItem(label);
     stateItem.iconPath = new vscode.ThemeIcon(
       state === "running" ? "pass-filled" : state === "stopped" ? "circle-large-outline" : "sync~spin");
     stateItem.contextValue = "osd-state";
+    if (this.warm !== undefined) {
+      const lastVerify = this.warm.lastVerify === undefined ? "never"
+        : `${this.warm.lastVerify.verdict ?? "?"} at ${this.warm.lastVerify.at ?? "?"}`;
+      stateItem.tooltip = `warm: ${this.warm.state}${this.warm.reason ? ` (${this.warm.reason})` : ""}\n` +
+        `generation: ${this.warm.generation ?? "n/a"}\nunverified: ${(this.warm.unverified ?? []).join(", ") || "none"}\n` +
+        `swaps: ${this.warm.swaps ?? 0}\ncopies: ${this.warm.copies ?? 0}\nlast verify: ${lastVerify}`;
+    }
 
     const launchpad = new vscode.TreeItem("▶ Open Fiori Launchpad");
     launchpad.contextValue = "osd-launchpad";
@@ -798,12 +904,14 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("osd.start", () => controller.start()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.stop", () => controller.stop()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.rebuild", () => controller.rebuild()));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.rebuildWarm", () => controller.rebuildWarm()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpad", () => controller.openLaunchpad()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpadInVsCode", () => controller.openLaunchpadInVsCode()));
   const treeProvider = new OsdTreeProvider(controller);
+  context.subscriptions.push(treeProvider);
   context.subscriptions.push(vscode.window.registerTreeDataProvider("osdTree", treeProvider));
   context.subscriptions.push(vscode.commands.registerCommand("osd.refreshTree",
-    () => treeProvider.refreshServices().then(() => treeProvider.emitter.fire(), () => treeProvider.emitter.fire())));
+    () => treeProvider.refresh().then(() => treeProvider.emitter.fire(), () => treeProvider.emitter.fire())));
 
   // Services tree (docs/vscode-extension.md, "Services tree"): a row's own
   // click (osd.openServiceRow, gated by osd.openIn) and its view/item/context
@@ -841,17 +949,37 @@ function statusBar(context) {
       const serving = await osd().serving();
       const dumps = await osd().dumps().catch(() => []);
       const generation = String(serving.generation ?? "?").slice(0, 8);
-      const hot = serving.hot?.swaps ? ` +${serving.hot.swaps}` : "";
+      const warm = serving.warm;
+      // T7 (docs/vscode-extension.md "Warm"): the swap count from the warm
+      // field when it is there (this façade carries it, #108), else the
+      // older `serving.hot.swaps` a system without it still answers with
+      const swaps = warm?.swaps ?? serving.hot?.swaps ?? 0;
+      const warmText = warmStatusText(warm);
       const engine = serving.databaseIdentity?.engine;
       const dbLabel = DB_ENGINE_LABEL[engine] ?? engine;
-      item.text = `$(server) osd ${generation}${hot}${dbLabel ? ` · ${dbLabel}` : ""}${dumps.length ? `  $(bug) ${dumps.length}` : ""}`;
-      item.tooltip = `${osd().url}\ngeneration ${serving.generation}\ndatabase ${dbLabel ?? "unknown"}\npid ${serving.pid}\n${dumps.length} short dump(s) -- click to list`;
+      item.text = `$(server) osd ${generation}${dbLabel ? ` · ${dbLabel}` : ""}${warmText ? ` · ${warmText}` : ""}${swaps ? ` +${swaps}` : ""}${dumps.length ? `  $(bug) ${dumps.length}` : ""}`;
+      const lastVerify = warm?.lastVerify === undefined ? "never"
+        : `${warm.lastVerify.verdict ?? "?"} at ${warm.lastVerify.at ?? "?"}`;
+      item.tooltip = `${osd().url}\ngeneration ${serving.generation}\ndatabase ${dbLabel ?? "unknown"}\npid ${serving.pid}` +
+        (warm === undefined ? "" : `\nwarm: ${warm.state}${warm.reason ? ` (${warm.reason})` : ""}` +
+          `\nwarm generation: ${warm.generation ?? "n/a"}\nunverified: ${(warm.unverified ?? []).join(", ") || "none"}` +
+          `\nswaps: ${warm.swaps ?? 0}\ncopies: ${warm.copies ?? 0}\nlast verify: ${lastVerify}`) +
+        `\n${dumps.length} short dump(s) -- click to list`;
       item.backgroundColor = dumpsSeen !== undefined && dumps.length > dumpsSeen
         ? new vscode.ThemeColor("statusBarItem.errorBackground") : undefined;
       dumpsSeen ??= dumps.length;
     } catch {
-      item.text = "$(debug-disconnect) osd down";
-      item.tooltip = `nothing answers /osd/serving at ${osd().url} (setting osd.url)`;
+      // T7: right after a launch the façade answers nothing at all while the
+      // warm registry primes synchronously (docs/warm-compile.md), for up to
+      // about the ~9 s that was measured -- "warming up..." rather than
+      // "osd down" for the first 20 s of a launch this window itself made,
+      // so a person does not read a normal start as a failure.
+      const since = activeController?.launcher?.startedAt;
+      const launching = activeController?.launcher?.state !== "stopped" && since !== undefined && Date.now() - since < 20000;
+      item.text = launching ? "$(sync~spin) osd warming up…" : "$(debug-disconnect) osd down";
+      item.tooltip = launching
+        ? `${osd().url} has not answered yet -- normal for the first few seconds of a launch (osd.warm primes synchronously)`
+        : `nothing answers /osd/serving at ${osd().url} (setting osd.url)`;
       item.backgroundColor = undefined;
     }
   };
@@ -1048,7 +1176,16 @@ async function activateCurrent(diagnostics, output) {
     if (result.ok) {
       diagnostics.delete(editor.document.uri);
       const generation = String(result.generation ?? "?").slice(0, 8);
-      vscode.window.setStatusBarMessage(`osd: ${object.name} activated, generation ${generation}`, 5000);
+      // T7 (docs/vscode-extension.md "Warm"): what the build behind this
+      // activation was, off X-OSD-Build/X-OSD-Swap-Ms -- "hot-swapped in
+      // <ms> ms (warm)", "recycled (host-held module)" or "cold build:
+      // <reason>" -- plus the closure-tests count (kept on the result for
+      // B1, shown here as the line the task asks for).
+      const build = activationBuildText(result);
+      const tests = closureTestsText(result);
+      const extra = [build, tests].filter(Boolean).join(", ");
+      vscode.window.setStatusBarMessage(
+        `osd: ${object.name} activated, generation ${generation}${extra ? ` (${extra})` : ""}`, 5000);
     } else {
       // an issue names the object it belongs to (objDescr); the ones this
       // editor's object owns go on it, the rest -- what activating it broke

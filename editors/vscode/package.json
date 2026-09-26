@@ -120,6 +120,12 @@
           "type": "boolean",
           "default": false,
           "description": "STG_DB_FRESH=1: drop and rebuild osd.database.hana.schema on the next start instead of refusing a schema this build did not stamp. osd.start turns this on itself (and asks first) when a start fails with that refusal."
+        },
+        "osd.warm": {
+          "type": "string",
+          "enum": ["auto", "on", "off"],
+          "default": "auto",
+          "description": "OSD_WARM for a system osd.start launches (docs/warm-compile.md, docs/vscode-extension.md \"Warm\"): a save reaches the running system in well under a second instead of the cold build's several. \"auto\" turns it on when this machine has at least 4 GB of RAM (the prime costs about 0.7 GB); \"on\"/\"off\" always do or never do. Whether it actually primes is still the server's own business -- with the pinned transpiler it stays cold and says why, shown as the status bar's own \"cold: <reason>\"."
         }
       }
     },
@@ -152,7 +158,8 @@
       {"command": "osd.newSqlNotebook", "title": "osd: New SQL notebook"},
       {"command": "osd.start", "title": "osd: Start (build + run this system)", "icon": "$(play)"},
       {"command": "osd.stop", "title": "osd: Stop", "icon": "$(primitive-square)"},
-      {"command": "osd.rebuild", "title": "osd: Rebuild (stop, build, start)", "icon": "$(tools)"},
+      {"command": "osd.rebuildWarm", "title": "osd: Rebuild (warm)", "icon": "$(tools)"},
+      {"command": "osd.rebuild", "title": "osd: Full rebuild (stop, build, start)"},
       {"command": "osd.openLaunchpad", "title": "osd: Open launchpad", "icon": "$(rocket)"},
       {"command": "osd.openLaunchpadInVsCode", "title": "osd: Open launchpad inside VS Code"},
       {"command": "osd.refreshTree", "title": "osd: Refresh the view (no rebuild)", "icon": "$(refresh)"},
@@ -167,9 +174,10 @@
       "view/title": [
         {"command": "osd.start", "when": "view == osdTree", "group": "navigation@1"},
         {"command": "osd.stop", "when": "view == osdTree", "group": "navigation@2"},
-        {"command": "osd.rebuild", "when": "view == osdTree", "group": "navigation@3"},
+        {"command": "osd.rebuildWarm", "when": "view == osdTree", "group": "navigation@3"},
         {"command": "osd.refreshTree", "when": "view == osdTree", "group": "navigation@4"},
-        {"command": "osd.openLaunchpad", "when": "view == osdTree", "group": "9_osd@1"}
+        {"command": "osd.openLaunchpad", "when": "view == osdTree", "group": "9_osd@1"},
+        {"command": "osd.rebuild", "when": "view == osdTree", "group": "9_osd@2"}
       ],
       "view/item/context": [
         {"command": "osd.openLaunchpadInVsCode", "when": "view == osdTree && viewItem == osd-launchpad", "group": "inline"},

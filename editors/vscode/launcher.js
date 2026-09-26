@@ -23,6 +23,7 @@ const {EventEmitter} = require("node:events");
 const {createHash} = require("node:crypto");
 const {request} = require("node:http");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
 // Ports 3531-3539 only (the budget this spike was given); nothing here ever
@@ -131,6 +132,28 @@ function isFile(p) {
   } catch {
     return false;
   }
+}
+
+// ---- warm (T7, docs/vscode-extension.md "Warm", docs/warm-compile.md) ----
+//
+// `osd.warm`: "auto" (the default: on when the machine has at least
+// WARM_MEMORY_FLOOR_BYTES of RAM -- the prime measured ~0.7 GB, docs/warm-
+// compile.md), "on" or "off". This only decides whether the launched
+// system is TOLD to try (OSD_WARM=1 in its env, below); whether it actually
+// primes is the server's own business (tools/osd-store.mjs warmUp()) --
+// on a pinned transpiler without abaplint/transpiler#1899/#1900/#1921 it
+// stays cold and says why, and that reason is shown as-is rather than
+// guessed at here.
+const WARM_MEMORY_FLOOR_BYTES = 4 * 1024 * 1024 * 1024;
+
+/** Whether a launch should set OSD_WARM=1, given `osd.warm`'s mode and the
+ *  machine's total memory (os.totalmem() by default; a test hands in a
+ *  number instead of measuring the real machine). Pure, so the auto rule is
+ *  tested without starting anything. */
+function shouldWarm(mode, totalMemBytes = os.totalmem()) {
+  if (mode === "on") return true;
+  if (mode === "off") return false;
+  return totalMemBytes >= WARM_MEMORY_FLOOR_BYTES;
 }
 
 // ---- ports ---------------------------------------------------------------
@@ -470,12 +493,20 @@ class Launcher extends EventEmitter {
     // itself.
     this.database = options.database ?? {kind: "sqlite"};
     this.databaseLabel = describeDatabase(this.database);
+    // "auto" | "on" | "off" (osd.warm, resolved by shouldWarm() below into
+    // OSD_WARM); a test hands in "off" to keep the plain end-to-end run cold.
+    this.warmMode = options.warm ?? "auto";
     this.state = "stopped";
     this.child = undefined;
     this.port = undefined;
     this.pid = undefined;
     this.generation = undefined;
     this.layers = [];
+    // when this start() began -- the status bar's "warming up..." (T7)
+    // shows that rather than "osd down" for a little while after this,
+    // since the prime is synchronous and the façade answers nothing at all
+    // while it runs (docs/warm-compile.md)
+    this.startedAt = undefined;
   }
 
   #setState(state) {
@@ -497,6 +528,7 @@ class Launcher extends EventEmitter {
       throw new Error(`cannot start: already ${this.state}`);
     }
     fs.mkdirSync(this.storageDir, {recursive: true});
+    this.startedAt = Date.now();
     this.#setState("building");
     this.layers = detectWorkspaceLayers(this.workspaceFolders);
     const packsDir = ensureWorkspacePacks(this.storageDir, this.layers);
@@ -538,6 +570,16 @@ class Launcher extends EventEmitter {
     };
     if (packsDir !== undefined) {
       env.OSD_PACKS = packsDir;
+    }
+    // osd.warm (T7): "auto"/"on" tells the launched system to try priming
+    // the warm registry; "off" (or an "auto" machine under the floor)
+    // leaves OSD_WARM out, even when the surrounding shell had it set, so
+    // the setting is the one thing deciding this rather than what happened
+    // to be inherited.
+    if (shouldWarm(this.warmMode)) {
+      env.OSD_WARM = "1";
+    } else {
+      delete env.OSD_WARM;
     }
     this.env = env;
     this.databaseLabel = describeDatabase(this.database);
@@ -634,6 +676,8 @@ class Launcher extends EventEmitter {
 }
 
 module.exports = {
+  WARM_MEMORY_FLOOR_BYTES,
+  shouldWarm,
   PORT_RANGE,
   isFree,
   pickPort,

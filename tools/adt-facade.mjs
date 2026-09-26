@@ -1196,6 +1196,24 @@ export function adtRouter(options = {}) {
     }));
   });
 
+  // What "Rebuild (warm)" (editors/vscode, docs/vscode-extension.md "Warm")
+  // activates in one call: every CLAS/INTF whose file no longer hashes to
+  // what the warm registry was primed or last built from
+  // (ObjectStore#changedObjects, off the warm compiler's own digests --
+  // tools/osd-warm.mjs). `objects: undefined` (not an empty array) when the
+  // registry is not primed, which is the caller's cue to fall back to a
+  // cold rebuild rather than trust a list this could not check; `reason`
+  // carries store.warm()'s own reason in that case. OSG-specific, so not
+  // advertised, like the other core/http/* doors around it.
+  router.get(`${BASE}/core/http/changed`, (req, res) => {
+    const objects = store.changedObjects();
+    const w = store.warm?.();
+    res.type("application/json; charset=utf-8").send(JSON.stringify({
+      objects,
+      reason: objects === undefined ? (w?.on !== true ? "OSD_WARM is not 1" : w?.reason) : undefined,
+    }));
+  });
+
   // The host checkout is the Workbench's history layer. This endpoint is
   // intentionally read-only and resolves type/name through ObjectStore
   // before Git sees a path. It is OSG-specific, so it is not advertised as
