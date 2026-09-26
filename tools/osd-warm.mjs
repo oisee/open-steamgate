@@ -27,7 +27,7 @@
 // them (see warmRule below).
 import {spawn} from "node:child_process";
 import {createHash} from "node:crypto";
-import {existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync} from "node:fs";
+import {copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync} from "node:fs";
 import {basename, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {generatorIdentity, hashOf, inputsOf, layout, liveHash, lock, linkRoots, ownConfig, prepare, rootsWanted, switchTo} from "./osd-build.mjs";
@@ -203,9 +203,29 @@ const statKey = (file) => {
 export const HOST_HELD = ["init.mjs", "cl_express_icf_shim.clas.mjs", "zcl_stg_segw_registry.clas.mjs",
   "zcl_stg_shlp_registry.clas.mjs", "zcl_apc_host.clas.mjs", "zcl_osd_status.clas.mjs", "zcl_osd_demo_data.clas.mjs"];
 
+// A generation's unchanged files are hard links of the live one's, which is
+// what makes a warm build cost what it rebuilds. Where the filesystem will
+// not link -- another device, a Windows volume that refuses, a file at its
+// link limit -- the file is copied: slower, the same bytes.
+const COPY_INSTEAD = new Set(["EXDEV", "EPERM", "ENOTSUP", "EMLINK", "EACCES", "ENOSYS"]);
+export function linkOrCopy(from, to, link = linkSync) {
+  try {
+    link(from, to);
+    return "link";
+  } catch (error) {
+    if (!COPY_INSTEAD.has(error?.code)) throw error;
+    copyFileSync(from, to);
+    return "copy";
+  }
+}
+
 export class WarmCompiler {
   constructor(options = {}) {
     this.root = resolve(options.root ?? process.cwd());
+    // the link a build makes the unchanged files with; a test can hand in one
+    // that refuses, to take the copy path on a filesystem that would link
+    this.link = options.link ?? linkSync;
+    this.copies = 0;
     this.log = options.log ?? (() => {});
     this.modules = options.modules;
     // generations this made that verify() has not yet compared with a cold
@@ -576,12 +596,12 @@ export class WarmCompiler {
           mkdirSync(join(tmp, "output"), {recursive: true});
           const replaced = new Set(written.map((f) => basename(f.path)));
           for (const f of readdirSync(liveOut)) {
-            if (!replaced.has(f)) linkSync(join(liveOut, f), join(tmp, "output", f));
+            if (!replaced.has(f) && linkOrCopy(join(liveOut, f), join(tmp, "output", f), this.link) === "copy") this.copies++;
           }
           for (const f of written) {
             writeFileSync(join(tmp, "output", basename(f.path)), f.contents, isBinaryFilename(f.path) ? {encoding: "latin1"} : undefined);
           }
-          linkSync(join(paths.byInput, from, "abap_transpile.json"), join(tmp, "abap_transpile.json"));
+          linkOrCopy(join(paths.byInput, from, "abap_transpile.json"), join(tmp, "abap_transpile.json"), this.link);
           // the manifest a cold build of these inputs writes: the same fields in
           // the same order, so the comparison in verify() is of the output
           const manifest = JSON.parse(readFileSync(join(paths.byInput, from, "manifest.json"), "utf8"));

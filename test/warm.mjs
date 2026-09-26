@@ -11,7 +11,9 @@ import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {GENERATORS, build, liveHash, layout} from "../tools/osd-build.mjs";
-import {GENERATORS_READ, HOST_HELD, WarmCompiler, importerRefusal, importsOf, probe, warmRule} from "../tools/osd-warm.mjs";
+import {GENERATORS_READ, HOST_HELD, WarmCompiler, importerRefusal, importsOf, linkOrCopy, probe, warmRule} from "../tools/osd-warm.mjs";
+import {ObjectStore} from "../tools/osd-store.mjs";
+import {statSync} from "node:fs";
 import {RuntimePool} from "../tools/osd-pool.mjs";
 import {devLoop} from "../tools/osd-dev.mjs";
 import {existsSync} from "node:fs";
@@ -158,6 +160,37 @@ describe("tools/osd-warm: the supervisor and the dev loop", () => {
     await loop.touch("src/zcl_a.clas.abap");
     await loop.touch("src/ztab.tabl.xml");
     expect(calls).to.deep.equal(["warm CLAS ZCL_A", "check TABL ZTAB"]);
+  });
+});
+
+describe("tools/osd-warm: where the filesystem will not link", () => {
+  it("copies instead, for the errors that mean 'not here', and rethrows the rest", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-link-"));
+    writeFileSync(join(dir, "a"), "bytes");
+    const refuse = (code) => () => {
+      throw Object.assign(new Error(code), {code});
+    };
+    expect(linkOrCopy(join(dir, "a"), join(dir, "b"), refuse("EXDEV"))).to.equal("copy");
+    expect(readFileSync(join(dir, "b"), "utf8")).to.equal("bytes");
+    expect(linkOrCopy(join(dir, "a"), join(dir, "c"), refuse("EPERM"))).to.equal("copy");
+    expect(() => linkOrCopy(join(dir, "a"), join(dir, "d"), refuse("ENOENT"))).to.throw("ENOENT");
+    expect(linkOrCopy(join(dir, "a"), join(dir, "e"))).to.equal("link");
+    rmSync(dir, {recursive: true, force: true});
+  });
+
+  it("says the warm build is off, and why, when OSD_WARM is not set", () => {
+    const before = process.env.OSD_WARM;
+    delete process.env.OSD_WARM;
+    const dir = mkdtempSync(join(tmpdir(), "osd-warmstate-"));
+    try {
+      const status = new ObjectStore({root: dir, libs: []}).warmStatus();
+      expect(status.state).to.equal("off");
+      expect(status.reason).to.match(/OSD_WARM/);
+      expect(status.swaps).to.equal(0);
+    } finally {
+      if (before !== undefined) process.env.OSD_WARM = before;
+      rmSync(dir, {recursive: true, force: true});
+    }
   });
 });
 
@@ -322,6 +355,24 @@ describe("tools/osd-warm: the real path on a small tree", function () {
     const fixed = await warm.build();
     expect(fixed.hash).to.equal(live);
     expect(fixed.closure.map((o) => o.name).sort()).to.include("ZCL_WS_CALLER");
+  });
+
+  it("builds a generation of copies where the filesystem refuses to link", async () => {
+    warm.link = () => {
+      throw Object.assign(new Error("cross-device link"), {code: "EXDEV"});
+    };
+    try {
+      edit("zcl_ws_alone.clas.abap", /rv = \d+\./, "rv = 6.");
+      const r = await warm.build();
+      expect(r.cached).to.equal(false);
+      expect(warm.copies).to.be.greaterThan(0);
+      // an unchanged module is a file of its own, not a link to the live one's
+      expect(statSync(join(root, "output", "zcl_ws_caller.clas.mjs")).nlink).to.equal(1);
+      expect(readFileSync(join(root, "output", "zcl_ws_alone.clas.mjs"), "utf8")).to.include("IntegerFactory.get(6)");
+    } finally {
+      warm.link = undefined;
+      warm.link = (await import("node:fs")).linkSync;
+    }
   });
 
   it("refuses a new file, and leaves the live generation alone", async () => {
