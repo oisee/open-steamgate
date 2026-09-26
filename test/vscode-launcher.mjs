@@ -17,7 +17,8 @@ import {once} from "node:events";
 
 const {
   PORT_RANGE, isFree, pickPort,
-  looksLikeAbapGitFolder, detectWorkspaceLayers, packNameOf, ensureWorkspacePacks,
+  looksLikeAbapGitFolder, isOpenSteamgateCheckout, decideStartTarget,
+  detectWorkspaceLayers, packNameOf, ensureWorkspacePacks,
   waitForServing, servingOnce, terminate, Launcher,
   linkOrCopyTree, materializedHomeDir, ensureMaterializedHome, MATERIALIZED_MARKER,
   DATABASE_KINDS, defaultDedicatedName, databaseEnv, describeDatabase, duckdbAvailable,
@@ -151,6 +152,55 @@ describe("editors/vscode/launcher.js: workspace layers", function () {
     expect(a).to.equal(b);
     expect(a).to.not.equal(c);
     expect(a).to.match(/^ws-src-[0-9a-f]{10}$/);
+  });
+});
+
+describe("editors/vscode/launcher.js: Start home choice", function () {
+  const checkout = "/work/open-steamgate";
+  const bundled = "/extension/osd-home-0.1.0";
+  const specialCase = {configuredHome: "", workspaceFolder: checkout,
+    workspaceIsOpenSteamgate: true, bundledHome: bundled};
+
+  it("prompts only for one open-steamgate folder with no configured home and a bundled system", () => {
+    expect(decideStartTarget(specialCase)).to.deep.equal({
+      kind: "prompt", workspaceHome: checkout, bundledHome: bundled,
+    });
+    expect(decideStartTarget({...specialCase, configuredHome: "/work/other"})).to.deep.equal({
+      kind: "ready", osdHome: "/work/other", source: "configured",
+    });
+    expect(decideStartTarget({...specialCase, workspaceIsOpenSteamgate: false})).to.deep.equal({
+      kind: "ready", osdHome: bundled, source: "bundled",
+    });
+    expect(decideStartTarget({...specialCase, workspaceFolder: undefined})).to.deep.equal({
+      kind: "ready", osdHome: bundled, source: "bundled",
+    });
+    expect(decideStartTarget({...specialCase, bundledHome: undefined})).to.deep.equal({
+      kind: "ready", osdHome: checkout, source: "workspace",
+    });
+  });
+
+  it("Yes selects the workspace, No remembers the bundle, and Always ask leaves prompting enabled", () => {
+    expect(decideStartTarget({...specialCase, configuredHome: checkout})).to.deep.equal({
+      kind: "ready", osdHome: checkout, source: "workspace",
+    });
+    expect(decideStartTarget({...specialCase, rememberedChoice: "bundled"})).to.deep.equal({
+      kind: "ready", osdHome: bundled, source: "bundled",
+    });
+    // Always ask clears the remembered answer, so a subsequent Start asks.
+    expect(decideStartTarget({...specialCase, rememberedChoice: undefined}).kind).to.equal("prompt");
+  });
+
+  it("recognizes a checkout only when both marker files exist", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-open-steamgate-home-"));
+    try {
+      mkdirSync(join(dir, "tools"));
+      writeFileSync(join(dir, "abap_transpile.json"), "{}\n");
+      expect(isOpenSteamgateCheckout(dir)).to.equal(false);
+      writeFileSync(join(dir, "tools", "osd-build.mjs"), "// build\n");
+      expect(isOpenSteamgateCheckout(dir)).to.equal(true);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
   });
 });
 

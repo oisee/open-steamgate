@@ -18,7 +18,8 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, demoFailureObjects, progRunLens,
   groupServices, serviceLabel, serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
   warmStatusText, activationBuildText, closureTestsText} = require("./lib.js");
-const {Launcher, ensureMaterializedHome, databaseEnv, defaultDedicatedName, describeDatabase} = require("./launcher.js");
+const {Launcher, ensureMaterializedHome, databaseEnv, defaultDedicatedName, describeDatabase,
+  isOpenSteamgateCheckout, decideStartTarget} = require("./launcher.js");
 
 // Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
 // *.osdnb file opens as (package.json `contributes.notebooks`) and the
@@ -63,25 +64,60 @@ function bundledSeedDir(context) {
   return fs.existsSync(path.join(dir, "test", "run.mjs")) ? dir : undefined;
 }
 
-/** `osd.home` when set (the dev path, wins over everything); else, for a
- *  packaged install, the bundled seed materialized once into this
- *  extension's own storage (`ensureMaterializedHome`, launcher.js); else
- *  the workspace folder when the window has exactly one (a dev install with
- *  no bundled seed -- `osdHomeOf`'s own original fallback, unchanged for
- *  that case). Async only because the materialize step is: on every OTHER
- *  call it is a marker-file check and returns immediately. */
-async function resolveOsdHome(context) {
+const BUNDLED_HOME_PREFERENCE = "osd.startHomePreference";
+const START_HOME_PROMPT = "Run the system from this folder? (edits go to your files and git)";
+const START_HOME_YES = "Yes";
+const START_HOME_NO = "No, use the bundled copy (remembered)";
+const START_HOME_ALWAYS_ASK = "Always ask";
+
+/** Resolve the pure launcher decision against this VS Code window. A
+ *  workspace checkout gets a choice only when a packaged bundled system is
+ *  available; development installs without one already run the open folder
+ *  as their system. Choosing the bundle is remembered in workspace storage,
+ *  while Always ask uses it this time and clears that preference. */
+async function resolveStartTarget(context) {
   const configured = vscode.workspace.getConfiguration("osd").get("home", "").trim();
-  if (configured !== "") {
-    return configured;
-  }
-  const seedDir = bundledSeedDir(context);
-  if (seedDir !== undefined) {
-    const version = context.extension.packageJSON.version;
-    return ensureMaterializedHome(seedDir, context.globalStorageUri.fsPath, version);
-  }
   const folders = vscode.workspace.workspaceFolders;
-  return folders?.length === 1 ? folders[0].uri.fsPath : undefined;
+  const workspaceFolder = folders?.length === 1 ? folders[0].uri.fsPath : undefined;
+  const checkout = workspaceFolder !== undefined && isOpenSteamgateCheckout(workspaceFolder);
+  const seedDir = bundledSeedDir(context);
+  const preference = context.workspaceState.get(BUNDLED_HOME_PREFERENCE);
+  const facts = {configuredHome: configured, workspaceFolder, workspaceIsOpenSteamgate: checkout,
+    bundledHome: seedDir, rememberedChoice: preference};
+  let target = decideStartTarget(facts);
+
+  if (target.kind === "prompt") {
+    const answer = await vscode.window.showInformationMessage(
+      START_HOME_PROMPT, START_HOME_YES, START_HOME_NO, START_HOME_ALWAYS_ASK);
+    if (answer === undefined) return {kind: "cancelled"};
+    if (answer === START_HOME_YES) {
+      await vscode.workspace.getConfiguration("osd").update("home", workspaceFolder, vscode.ConfigurationTarget.Workspace);
+      target = decideStartTarget({...facts, configuredHome: workspaceFolder});
+    } else {
+      if (answer === START_HOME_NO) {
+        await context.workspaceState.update(BUNDLED_HOME_PREFERENCE, "bundled");
+      } else if (answer === START_HOME_ALWAYS_ASK) {
+        await context.workspaceState.update(BUNDLED_HOME_PREFERENCE, undefined);
+      } else {
+        return {kind: "cancelled"};
+      }
+      // Always ask still needs a source for this Start. Use the bundle for
+      // this run; because the choice was cleared, the next Start asks again.
+      target = decideStartTarget({...facts, rememberedChoice: "bundled"});
+    }
+  }
+
+  if (target.kind === "ready" && target.source === "bundled") {
+    const version = context.extension.packageJSON.version;
+    target.osdHome = ensureMaterializedHome(seedDir, context.globalStorageUri.fsPath, version);
+  }
+  return target;
+}
+
+function homeSourceText(source) {
+  if (source === "workspace") return "from workspace";
+  if (source === "bundled") return "bundled copy";
+  return undefined;
 }
 
 /** Every byte a launch needs beyond osdHome's own tracked files lives here:
@@ -219,6 +255,7 @@ class SystemController {
     this.context = context;
     this.output = output;
     this.launcher = undefined;
+    this.homeSource = undefined;
     this.emitter = new vscode.EventEmitter();
     this.onDidChange = this.emitter.event;
   }
@@ -228,10 +265,15 @@ class SystemController {
    *  to build -- callers show that as an error rather than starting nothing
    *  silently. */
   async ensureLauncher() {
-    const osdHome = await resolveOsdHome(this.context);
-    if (osdHome === undefined) {
+    const target = await resolveStartTarget(this.context);
+    if (target.kind === "cancelled") {
+      return undefined;
+    }
+    if (target.kind !== "ready") {
       throw new Error("osd.home is not set, and this window has no single workspace folder to default to");
     }
+    const osdHome = target.osdHome;
+    this.homeSource = target.source;
     if (this.launcher !== undefined && this.launcher.osdHome === osdHome && this.launcher.state !== "stopped") {
       return this.launcher;
     }
@@ -275,6 +317,10 @@ class SystemController {
   }
 
   async start() {
+    if (this.launcher !== undefined && this.launcher.state !== "stopped") {
+      vscode.window.showInformationMessage(`osd: already ${this.launcher.state}`);
+      return;
+    }
     let launcher;
     try {
       launcher = await this.ensureLauncher();
@@ -282,10 +328,8 @@ class SystemController {
       vscode.window.showErrorMessage(`osd: ${String(e.message ?? e)}`);
       return;
     }
-    if (launcher.state !== "stopped") {
-      vscode.window.showInformationMessage(`osd: already ${launcher.state}`);
-      return;
-    }
+    if (launcher === undefined) return;
+    this.emitter.fire();
     this.output.show(true);
     this.output.appendLine(`--- osd start: ${launcher.osdHome} (${launcher.databaseLabel}) ---`);
     try {
@@ -502,13 +546,15 @@ class OsdTreeProvider {
   rootItems() {
     const launcher = this.controller.launcher;
     const state = launcher?.state ?? "stopped";
+    const source = homeSourceText(this.controller.homeSource);
+    const sourceSuffix = source === undefined ? "" : ` · ${source}`;
     const warmText = warmStatusText(this.warm);
     const swaps = this.warm?.swaps ?? 0;
     const label = state === "running"
       ? `Running on :${launcher.port} · ${launcher.databaseLabel}, generation ${String(launcher.generation).slice(0, 8)}` +
-        (warmText ? ` · ${warmText}` : "") + (swaps ? ` +${swaps}` : "")
-      : state === "stopped" ? "Stopped"
-        : `${state[0].toUpperCase()}${state.slice(1)}…`;
+        (warmText ? ` · ${warmText}` : "") + (swaps ? ` +${swaps}` : "") + sourceSuffix
+      : state === "stopped" ? `Stopped${sourceSuffix}`
+        : `${state[0].toUpperCase()}${state.slice(1)}…${sourceSuffix}`;
     const stateItem = new vscode.TreeItem(label);
     stateItem.iconPath = new vscode.ThemeIcon(
       state === "running" ? "pass-filled" : state === "stopped" ? "circle-large-outline" : "sync~spin");
@@ -809,17 +855,19 @@ function startStopStatusBar(context, controller) {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 11);
   const refresh = () => {
     const state = controller.launcher?.state ?? "stopped";
+    const source = homeSourceText(controller.homeSource);
+    const sourceSuffix = source === undefined ? "" : ` · ${source}`;
     if (state === "running") {
-      item.text = "$(primitive-square) osd";
-      item.tooltip = `osd is running on :${controller.launcher.port} · ${controller.launcher.databaseLabel} -- click to stop`;
+      item.text = `$(primitive-square) osd${sourceSuffix}`;
+      item.tooltip = `osd is running on :${controller.launcher.port} · ${controller.launcher.databaseLabel}${source === undefined ? "" : `, ${source}`} -- click to stop`;
       item.command = "osd.stop";
     } else if (state === "stopped") {
-      item.text = "$(play) osd";
-      item.tooltip = "click to build and start osd (B0)";
+      item.text = `$(play) osd${sourceSuffix}`;
+      item.tooltip = `click to build and start osd (B0)${source === undefined ? "" : `, ${source}`}`;
       item.command = "osd.start";
     } else {
-      item.text = `$(sync~spin) osd ${state}`;
-      item.tooltip = `osd is ${state}`;
+      item.text = `$(sync~spin) osd ${state}${sourceSuffix}`;
+      item.tooltip = `osd is ${state}${source === undefined ? "" : `, ${source}`}`;
       item.command = undefined;
     }
   };
