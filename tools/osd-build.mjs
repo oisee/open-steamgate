@@ -63,6 +63,10 @@ export const GENERATORS = [
   // building at all
   ["amdp-tablefunc.mjs"],
   ["osd-fm-registry.mjs"],
+  // classic reports through open-abap-gui's converter, wired as transactions
+  // (docs/gui-reports.md); before the transaction registry, which is what
+  // picks up the *.tran.xml this writes
+  ["osd-gui-convert.mjs"],
   ["osd-tran-registry.mjs"],
 ];
 
@@ -431,6 +435,35 @@ export function rootsWanted(generation, config, files = undefined) {
   return wanted;
 }
 
+// A link to a directory: a relative symlink where anyone may make one, a
+// junction on Windows, where a symlink needs an administrator or Developer
+// Mode and a junction needs neither. A junction's target is absolute, and
+// OSD_DIR_LINK=junction takes that form anywhere, so the path Windows takes
+// is tested on Linux too. `target` is relative to the link's own folder.
+export function dirLinkMode(env = process.env) {
+  return env.OSD_DIR_LINK ?? (process.platform === "win32" ? "junction" : "symlink");
+}
+export function linkDir(target, path) {
+  if (dirLinkMode() === "junction") {
+    symlinkSync(resolve(dirname(path), target), path, "junction");
+  } else {
+    symlinkSync(target, path, "dir");
+  }
+}
+// a link replaced by another: one rename where the platform renames over an
+// existing link, and where it refuses (a junction on Windows), the old link
+// removed first -- a moment without it, which a reader that finds nothing
+// retries
+function replaceLink(from, to) {
+  try {
+    renameSync(from, to);
+  } catch (error) {
+    if (!["EPERM", "EEXIST", "EISDIR", "ENOTEMPTY", "EACCES"].includes(error?.code)) throw error;
+    unlinkSync(to);
+    renameSync(from, to);
+  }
+}
+
 export function linkRoots(root, generation, config = loadConfig(root), log = () => {}, options = {}) {
   // `wanted`: the names, when the caller knows them already (a warm build:
   // the live generation's plus whatever the modules it rebuilt name)
@@ -451,7 +484,7 @@ export function linkRoots(root, generation, config = loadConfig(root), log = () 
       kind = undefined;
     }
     if (kind === undefined) {
-      symlinkSync(target, link);
+      linkDir(target, link);
       log(`${basename(generation)}/${name} -> ${target}`);
     }
   }
@@ -465,7 +498,8 @@ export function liveHash(root) {
   }
   const paths = layout(root);
   try {
-    return basename(readlinkSync(paths.live));
+    // a junction reads back absolute, on Windows with a trailing separator
+    return basename(readlinkSync(paths.live).replace(/[\\/]+$/, "").replace(/\\/g, "/"));
   } catch {
     return undefined;
   }
@@ -507,8 +541,8 @@ export function switchTo(root, hash, log = () => {}, options = {}) {
   } catch {
     // nothing to remove
   }
-  symlinkSync(join("by-input", hash), tmpLink);
-  renameSync(tmpLink, paths.live);
+  linkDir(join("by-input", hash), tmpLink);
+  replaceLink(tmpLink, paths.live);
 
   // output/ at the root: a symlink to build/live/output. A real directory
   // there is what every tree had before this existed; it is moved aside once
@@ -527,7 +561,7 @@ export function switchTo(root, hash, log = () => {}, options = {}) {
     kind = undefined;
   }
   if (kind === undefined) {
-    symlinkSync(join("build", "live", "output"), paths.output);
+    linkDir(join("build", "live", "output"), paths.output);
   }
   log(`live -> ${hash}`);
   return hash;

@@ -13,7 +13,10 @@ const crypto = require("node:crypto");
 const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   freestyleTableHtml, notebookFromJson, notebookToJson,
-  hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun} = require("./lib.js");
+  hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun,
+  dataPreviewObjectOf, tablHasMandt, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText,
+  transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, demoFailureObjects, progRunLens,
+  groupServices, serviceLabel, serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes} = require("./lib.js");
 const {Launcher, ensureMaterializedHome} = require("./launcher.js");
 
 // Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
@@ -208,37 +211,52 @@ class SystemController {
       vscode.window.showInformationMessage("osd: not running -- osd.start first");
       return;
     }
-    await vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${this.launcher.port}/app/flp.html`));
+    await openExternalOrOwn(`http://localhost:${this.launcher.port}/app/flp.html`);
+  }
+
+  /** The context-menu twin of openLaunchpad() above (docs/vscode-extension.md,
+   *  "Services tree"): always the webview iframe, regardless of `osd.openIn`
+   *  -- that setting is the *default* for a service row's own click, and the
+   *  Launchpad node's own click stays openLaunchpad() (the system browser)
+   *  unconditionally, so a person who wants it inside VS Code this once asks
+   *  for it by name rather than by a setting they would have to remember to
+   *  flip back. */
+  async openLaunchpadInVsCode() {
+    if (this.launcher?.state !== "running") {
+      vscode.window.showInformationMessage("osd: not running -- osd.start first");
+      return;
+    }
+    await openInWebview(`http://localhost:${this.launcher.port}/app/flp.html`, "osdLaunchpad", "Fiori Launchpad");
   }
 }
 
 /** The Activity Bar tree: state, the layers (base osdHome plus every
- *  detected workspace layer), and the Services this instance registers
- *  (ZOSD_STATUS_SRV's own ServiceSet -- the "smallest existing mechanism"
- *  the task named, no new server route). */
+ *  detected workspace layer), and the Services this instance registers,
+ *  grouped by kind (docs/vscode-extension.md, "Services tree") -- lib.js's
+ *  Osd#services() answers whichever of the two sources exists (the
+ *  composing route, docs/ideas.md T8, or ZOSD_STATUS_SRV's own ServiceSet),
+ *  already normalized; groupServices()/serviceLabel()/serviceClassNodes()
+ *  do the rest without needing to know which one it was. */
 class OsdTreeProvider {
   constructor(controller) {
     this.controller = controller;
     this.emitter = new vscode.EventEmitter();
     this.onDidChangeTreeData = this.emitter.event;
-    this.services = [];
+    this.groups = [];
     controller.onDidChange(() => {
       this.refreshServices().then(() => this.emitter.fire(), () => this.emitter.fire());
     });
   }
 
   async refreshServices() {
-    const launcher = this.controller.launcher;
-    if (launcher?.state !== "running") {
-      this.services = [];
+    if (this.controller.launcher?.state !== "running") {
+      this.groups = [];
       return;
     }
     try {
-      const res = await fetch(`http://localhost:${launcher.port}/sap/opu/odata/sap/ZOSD_STATUS_SRV/ServiceSet?$format=json`);
-      const body = await res.json();
-      this.services = (body?.d?.results ?? []).map((r) => ({path: r.Path, kind: r.Kind, text: r.Text}));
+      this.groups = groupServices(await osd().services());
     } catch {
-      this.services = [];
+      this.groups = [];
     }
   }
 
@@ -254,7 +272,13 @@ class OsdTreeProvider {
       return this.layerItems();
     }
     if (element.contextValue === "osd-services") {
-      return this.serviceItems();
+      return this.serviceGroupItems();
+    }
+    if (element instanceof ServiceGroupItem) {
+      return this.serviceRowItems(element.group);
+    }
+    if (element instanceof ServiceRowItem) {
+      return this.serviceClassItems(element.row);
     }
     return [];
   }
@@ -271,6 +295,11 @@ class OsdTreeProvider {
       state === "running" ? "pass-filled" : state === "stopped" ? "circle-large-outline" : "sync~spin");
     stateItem.contextValue = "osd-state";
 
+    const launchpad = new vscode.TreeItem("▶ Open Fiori Launchpad");
+    launchpad.contextValue = "osd-launchpad";
+    launchpad.iconPath = new vscode.ThemeIcon("link-external");
+    launchpad.command = {command: "osd.openLaunchpad", title: "Open Fiori Launchpad"};
+
     const layers = new vscode.TreeItem("Layers", vscode.TreeItemCollapsibleState.Expanded);
     layers.contextValue = "osd-layers";
     layers.iconPath = new vscode.ThemeIcon("layers");
@@ -279,7 +308,7 @@ class OsdTreeProvider {
     services.contextValue = "osd-services";
     services.iconPath = new vscode.ThemeIcon("plug");
 
-    return [stateItem, layers, services];
+    return [stateItem, launchpad, layers, services];
   }
 
   layerItems() {
@@ -296,18 +325,252 @@ class OsdTreeProvider {
     return items;
   }
 
-  serviceItems() {
+  serviceGroupItems() {
     if (this.controller.launcher?.state !== "running") {
       return [new vscode.TreeItem("(start the system to see its services)")];
     }
-    if (this.services.length === 0) {
-      return [new vscode.TreeItem("(none, or ZOSD_STATUS_SRV not reachable yet -- osd.refreshTree)")];
+    if (this.groups.length === 0) {
+      return [new vscode.TreeItem("(none, or nothing answered yet -- osd.refreshTree)")];
     }
-    return this.services.map((s) => {
-      const item = new vscode.TreeItem(`${s.kind}  ${s.path}`);
-      item.description = s.text;
-      return item;
-    });
+    return this.groups.map((group) => new ServiceGroupItem(group));
+  }
+
+  serviceRowItems(group) {
+    return group.rows.map((row) => new ServiceRowItem(row));
+  }
+
+  async serviceClassItems(row) {
+    const items = serviceClassNodes(row).map((node) => new ServiceClassItem(node));
+    if (row.kind !== "ODATA" || !row.handler) return items;
+    // Q2b's own map (tools/adt-facade.mjs core/http/segw/entitysets), lazily
+    // -- fetched only once this row is actually expanded, never eagerly for
+    // every OData row the group happens to list.
+    let map;
+    try {
+      map = await osd().entitySets(row.handler);
+    } catch {
+      return items;
+    }
+    if (map === undefined || !Array.isArray(map.sets) || map.sets.length === 0) return items;
+    let source;
+    try {
+      const files = await vscode.workspace.findFiles(readerFilePattern({type: "CLAS", name: row.handler}), EXCLUDE, 1);
+      if (files.length > 0) source = fs.readFileSync(files[0].fsPath, "utf8");
+    } catch {
+      source = undefined;
+    }
+    const lenses = source === undefined ? [] : entitySetLenses(source, map);
+    for (const set of map.sets) {
+      const lens = lenses.find((l) => l.set === set.set && l.kind === set.kind);
+      items.push(new EntitySetItem(row.handler, set, lens?.line));
+    }
+    return items;
+  }
+}
+
+/** One kind's own node ("OData (n)", "Apps (n)", ...), collapsed, its rows
+ *  fetched from `group.rows` -- no server round trip of its own, since
+ *  refreshServices() above already asked once for the whole tree. */
+class ServiceGroupItem extends vscode.TreeItem {
+  constructor(group) {
+    super(`${group.label} (${group.rows.length})`, vscode.TreeItemCollapsibleState.Collapsed);
+    this.group = group;
+    this.contextValue = "osd-service-group";
+    this.iconPath = new vscode.ThemeIcon("folder");
+  }
+}
+
+/** One service row: label/description from lib.js serviceLabel(), a click
+ *  that opens it the way its kind allows (APP/ICF/ODATA -- APC never, a
+ *  WebSocket URL does nothing on its own), and a contextValue
+ *  (serviceContextValue()) package.json's view/item/context matches to
+ *  offer exactly the actions that kind supports. Expandable for every kind
+ *  serviceClassNodes() answers at least one node for. */
+class ServiceRowItem extends vscode.TreeItem {
+  constructor(row) {
+    const {label, description} = serviceLabel(row);
+    const expandable = row.kind === "ODATA" || serviceClassNodes(row).length > 0;
+    super(label, expandable ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
+    this.row = row;
+    this.description = description;
+    this.contextValue = serviceContextValue(row.kind);
+    this.iconPath = new vscode.ThemeIcon(
+      row.kind === "APP" ? "browser" : row.kind === "ODATA" ? "database" : row.kind === "APC" ? "broadcast" : "plug");
+    if (row.kind === "APC") {
+      // a WebSocket URL does nothing opened as a page -- no default click,
+      // "Copy ws:// URL" (view/item/context) is the one action this row has
+    } else {
+      this.command = {command: "osd.openServiceRow", title: "Open", arguments: [row]};
+    }
+  }
+}
+
+/** A DPC/MPC/handler class node under a service row, or an entity set under
+ *  an OData row's own DPC (EntitySetItem below) -- both leaves, both a
+ *  click away from the source they name. */
+class ServiceClassItem extends vscode.TreeItem {
+  constructor(node) {
+    super(node.name, vscode.TreeItemCollapsibleState.None);
+    this.node = node;
+    this.contextValue = "osd-service-class";
+    this.iconPath = new vscode.ThemeIcon("symbol-class");
+    this.description = node.role.toUpperCase();
+    this.command = {command: "osd.openServiceClass", title: "Open source", arguments: [node]};
+  }
+}
+
+/** One entity set under an OData row's DPC, from `map.sets` (Osd#entitySets)
+ *  -- `line` is the `<set>_get_entityset` / `<set>_get_entity` method's own
+ *  line in the DPC's source when a workspace copy of it was found (lib.js
+ *  entitySetLenses, the same lookup Q2b's CodeLens already does),
+ *  `undefined` when it was not (the class opens at its top instead, rather
+ *  than the node doing nothing at all). */
+class EntitySetItem extends vscode.TreeItem {
+  constructor(dpcName, set, line) {
+    super(set.set, vscode.TreeItemCollapsibleState.None);
+    this.dpcName = dpcName;
+    this.set = set;
+    this.line = line;
+    this.contextValue = "osd-service-entityset";
+    this.iconPath = new vscode.ThemeIcon("symbol-field");
+    this.description = set.kind;
+    this.command = {command: "osd.openEntitySetMethod", title: "Open method", arguments: [dpcName, set, line]};
+  }
+}
+
+/** `osd.openIn` (docs/vscode-extension.md, "Services tree"): the shared
+ *  default for what a service row's own click does -- the system browser
+ *  (`vscode.env.openExternal`, this extension's default everywhere else,
+ *  e.g. openLaunchpad() above) or a webview tab inside VS Code, the same
+ *  iframe-over-CSP pattern openDataPreview() (Q7) and, for a running
+ *  system's own pages, the gui-reports spike's openWebguiTransaction()
+ *  already use: the panel carries no copy of the page, it iframes the
+ *  running osd's own URL, so whatever that page does (a click inside the
+ *  Fiori launchpad, a $batch request) runs exactly as it does in a
+ *  browser tab. `vscode.env.asExternalUri` is asked first either way --
+ *  under Remote-WSL/Remote-SSH a bare `http://localhost:<port>` is a
+ *  coincidence when it works and a dead port otherwise, the same reasoning
+ *  openWebguiTransaction's own comment gives. */
+async function openExternalOrOwn(url) {
+  let external;
+  try {
+    external = await vscode.env.asExternalUri(vscode.Uri.parse(url));
+  } catch {
+    external = vscode.Uri.parse(url);
+  }
+  await vscode.env.openExternal(external);
+}
+
+async function openInWebview(url, panelType, title) {
+  let external;
+  try {
+    external = await vscode.env.asExternalUri(vscode.Uri.parse(url));
+  } catch {
+    external = vscode.Uri.parse(url);
+  }
+  const panel = vscode.window.createWebviewPanel(panelType, title, vscode.ViewColumn.Beside, {
+    enableScripts: true,
+    retainContextWhenHidden: true,
+  });
+  panel.webview.html = iframePanelHtml(external.toString(), title);
+}
+
+/** frame-src names the one origin this panel is allowed to embed; nothing
+ *  else in the page runs a script of its own, so a strict default-src
+ *  'none' beside it costs nothing (the gui-reports spike's own
+ *  webguiPanelHtml, reused verbatim in shape). */
+function iframePanelHtml(url, title) {
+  const origin = new URL(url).origin;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${xmlEscapeHtml(origin)}; style-src 'unsafe-inline';">
+<style>html,body{margin:0;height:100%;background:#1f4e79}iframe{border:0;width:100%;height:100%;display:block}</style>
+</head>
+<body><iframe src="${xmlEscapeHtml(url)}" title="${xmlEscapeHtml(title)}"></iframe></body>
+</html>`;
+}
+
+async function openServiceRow(row) {
+  if (row === undefined || row.kind === "APC") return;
+  const url = serviceHttpUrl(row, osd().url);
+  const openIn = vscode.workspace.getConfiguration("osd").get("openIn", "browser");
+  if (openIn === "vscode") {
+    await openInWebview(url, "osdService", serviceLabel(row).label);
+  } else {
+    await openExternalOrOwn(url);
+  }
+}
+
+async function copyServiceUrl(item) {
+  const row = item?.row;
+  if (row === undefined) return;
+  await vscode.env.clipboard.writeText(serviceHttpUrl(row, osd().url));
+  vscode.window.setStatusBarMessage(`osd: copied ${row.path}`, 3000);
+}
+
+async function copyServiceWsUrl(item) {
+  const row = item?.row;
+  if (row === undefined) return;
+  await vscode.env.clipboard.writeText(serviceWsUrl(row, osd().url));
+  vscode.window.setStatusBarMessage(`osd: copied ${row.path} (ws://)`, 3000);
+}
+
+async function openServiceMetadata(item) {
+  const row = item?.row;
+  if (row === undefined) return;
+  const url = serviceMetadataUrl(row, osd().url);
+  const openIn = vscode.workspace.getConfiguration("osd").get("openIn", "browser");
+  if (openIn === "vscode") {
+    await openInWebview(url, "osdServiceMetadata", `${serviceLabel(row).label} $metadata`);
+  } else {
+    await openExternalOrOwn(url);
+  }
+}
+
+/** A DPC/MPC/handler class node's own click: a workspace glob on the name
+ *  (readerFilePattern, the same lookup Q3's "read by" quick pick already
+ *  uses), open at the top -- the composing route's own `handlerUri` names
+ *  the class the same way Check/Activate do, but this extension opens by
+ *  file, not by ADT uri, so the file glob is what every source path here
+ *  goes through regardless of which of the two sources answered. */
+async function openServiceClass(node, output) {
+  if (node?.name === undefined) return;
+  const pattern = readerFilePattern({type: "CLAS", name: node.name});
+  try {
+    const files = await vscode.workspace.findFiles(pattern, EXCLUDE, 1);
+    if (files.length === 0) {
+      vscode.window.showWarningMessage(`osd: ${node.name}'s file was not found in this workspace`);
+      return;
+    }
+    await vscode.window.showTextDocument(files[0]);
+  } catch (e) {
+    output?.appendLine(`osd open service class ${node.name}: ${String(e.message ?? e)}`);
+    vscode.window.showErrorMessage(`osd: ${String(e.message ?? e)}`);
+  }
+}
+
+/** An entity set node's own click: the same DPC file openServiceClass()
+ *  above opens, at the method's own line when one was found while building
+ *  the node, else at the top. */
+async function openEntitySetMethod(dpcName, set, line, output) {
+  const pattern = readerFilePattern({type: "CLAS", name: dpcName});
+  try {
+    const files = await vscode.workspace.findFiles(pattern, EXCLUDE, 1);
+    if (files.length === 0) {
+      vscode.window.showWarningMessage(`osd: ${dpcName}'s file was not found in this workspace`);
+      return;
+    }
+    const editor = await vscode.window.showTextDocument(files[0]);
+    if (typeof line === "number") {
+      const at = new vscode.Position(line - 1, 0);
+      editor.selection = new vscode.Selection(at, at);
+      editor.revealRange(new vscode.Range(at, at));
+    }
+  } catch (e) {
+    output?.appendLine(`osd open entity set ${dpcName} ${set?.set}: ${String(e.message ?? e)}`);
+    vscode.window.showErrorMessage(`osd: ${String(e.message ?? e)}`);
   }
 }
 
@@ -384,6 +647,11 @@ function activate(context) {
   // class, and the command it (and F8, above) both call.
   context.subscriptions.push(vscode.commands.registerCommand("osd.callEntitySet", (args) => callEntitySet(args, output)));
   context.subscriptions.push(entitySetLensProvider(output));
+  // gui-reports spike: "Open in VS Code" for a converted report, the same
+  // action F8 (RUN_TABLE.PROG) reaches, placed as a lens above its own
+  // REPORT line rather than asked for by name.
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openWebguiTransaction", (args) => openWebguiTransaction(args?.tcode, output)));
+  context.subscriptions.push(progLensProvider());
 
   // Q3 "Readers" (docs/vscode-extension.md): a lens "read by N · tests M ·
   // services K" over a class's or an interface's own definition line, and
@@ -409,10 +677,22 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("osd.stop", () => controller.stop()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.rebuild", () => controller.rebuild()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpad", () => controller.openLaunchpad()));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpadInVsCode", () => controller.openLaunchpadInVsCode()));
   const treeProvider = new OsdTreeProvider(controller);
   context.subscriptions.push(vscode.window.registerTreeDataProvider("osdTree", treeProvider));
   context.subscriptions.push(vscode.commands.registerCommand("osd.refreshTree",
     () => treeProvider.refreshServices().then(() => treeProvider.emitter.fire(), () => treeProvider.emitter.fire())));
+
+  // Services tree (docs/vscode-extension.md, "Services tree"): a row's own
+  // click (osd.openServiceRow, gated by osd.openIn) and its view/item/context
+  // actions (package.json), plus a class or entity-set node's own click.
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceRow", (row) => openServiceRow(row)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.copyServiceUrl", (item) => copyServiceUrl(item)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.copyServiceWsUrl", (item) => copyServiceWsUrl(item)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceMetadata", (item) => openServiceMetadata(item)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceClass", (node) => openServiceClass(node, output)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openEntitySetMethod",
+    (dpcName, set, line) => openEntitySetMethod(dpcName, set, line, output)));
   context.subscriptions.push(startStopStatusBar(context, controller));
 }
 
@@ -670,7 +950,23 @@ async function activateCurrent(diagnostics, output) {
 
 async function run(output, classrunOutput) {
   const current = currentObject();
-  if (current === undefined) return;
+  if (current === undefined) {
+    // Q7: a TABL or a DDLS -- adtObjectOf (currentObject's own) knows
+    // neither type (Check/Activate do not reach them), so they are found
+    // here instead, off the file F8 was pressed on.
+    const editor = vscode.window.activeTextEditor;
+    const preview = editor === undefined ? undefined : dataPreviewObjectOf(editor.document.fileName);
+    if (preview === undefined) return;
+    const hasMandt = preview.type === "TABL" && tablHasMandt(editor.document.getText());
+    const action = runActionFor(preview);
+    if (action.kind === "data-preview") {
+      await openDataPreview(action.objectType, action.name, hasMandt, output);
+    } else {
+      output.appendLine(`osd run ${preview.name}: ${action.text}`);
+      vscode.window.showInformationMessage(`osd: ${action.text}`);
+    }
+    return;
+  }
   const {editor, object} = current;
   const hasUnitTests = fs.existsSync(fileOf(path.dirname(editor.document.fileName), object, "testclasses"));
   // Q6b: read straight off the buffer VS Code already has, not necessarily
@@ -710,8 +1006,67 @@ async function run(output, classrunOutput) {
     await classrunObject(object.name, classrunOutput);
     return;
   }
+  if (action.kind === "webgui") {
+    await openWebguiTransaction(action.tcode, output);
+    return;
+  }
   output.appendLine(`osd run ${object.name}: ${action.text}`);
   vscode.window.showInformationMessage(`osd: ${action.text}`);
+}
+
+// ---- gui-reports spike (docs/gui-reports.md): F8 on a converted report
+// opens SAP Easy Access, at that report's transaction, in a webview panel
+// beside the editor rather than in the system browser "Open launchpad"
+// uses -- the ask was a panel inside VS Code, and a webview is the one VS
+// Code has.
+//
+// The panel does not carry a copy of the page: it iframes the running
+// osd's own URL, so the sapevent round trip (docs/webgui.md) runs exactly
+// as it does in a browser tab, clicks and all. The one real constraint is
+// what a webview's default Content-Security-Policy blocks by default (no
+// origin at all, same as any other webview until the page's own CSP names
+// one) and what "localhost" even means from inside the panel: under
+// Remote-WSL and Remote-SSH the webview itself renders in the local UI
+// process, on the other side of the remote/local boundary from the osd
+// server it is asking for, so a bare `http://localhost:<port>` is a
+// coincidence when it works (Remote-WSL's own automatic port forwarding)
+// and a dead port otherwise (Remote-SSH forwards nothing unless asked).
+// `vscode.env.asExternalUri` is VS Code's own answer to exactly that: it
+// hands back the URL this window's UI can actually reach, forwarding the
+// port first if that remote needs it, and is a no-op when nothing is
+// remote at all -- so this asks it rather than assuming osd's configured
+// URL already is the right one.
+async function openWebguiTransaction(tcode, output) {
+  const base = osd().url;
+  const target = vscode.Uri.parse(`${base}/sap/bc/gui/sap/its/webgui/?okcode=${encodeURIComponent(tcode)}`);
+  let external;
+  try {
+    external = await vscode.env.asExternalUri(target);
+  } catch (e) {
+    output.appendLine(`osd webgui ${tcode}: asExternalUri failed, using ${target.toString()} as typed (${String(e.message ?? e)})`);
+    external = target;
+  }
+  const panel = vscode.window.createWebviewPanel("osdWebgui", `Easy Access: ${tcode}`, vscode.ViewColumn.Beside, {
+    enableScripts: true,
+    retainContextWhenHidden: true,
+  });
+  panel.webview.html = webguiPanelHtml(external.toString(), tcode);
+}
+
+function webguiPanelHtml(url, tcode) {
+  // frame-src names the one origin this panel is allowed to embed; nothing
+  // else in the page runs a script of its own, so a strict default-src
+  // 'none' beside it costs nothing.
+  const origin = new URL(url).origin;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${xmlEscapeHtml(origin)}; style-src 'unsafe-inline';">
+<style>html,body{margin:0;height:100%;background:#1f4e79}iframe{border:0;width:100%;height:100%;display:block}</style>
+</head>
+<body><iframe src="${xmlEscapeHtml(url)}" title="${xmlEscapeHtml(tcode)}"></iframe></body>
+</html>`;
 }
 
 // ---- Q6b "Classrun": F9, ADT's "Run as ABAP Application (Console)" --
@@ -743,6 +1098,126 @@ async function classrunObject(name, classrunOutput) {
     classrunOutput.appendLine(`osd classrun ${name}: ${String(e.message ?? e)}`);
     vscode.window.showErrorMessage(`osd classrun: ${String(e.message ?? e)}`);
   }
+}
+
+// ---- Q7 "F8 on a table or a CDS view" (docs/vscode-extension.md): a
+// webview of the rows, over the façade's own datapreview/ddic (TABL) /
+// datapreview/cds (DDLS) route (lib.js Osd#dataPreview) -- the same door
+// ADT's own Data Preview uses, so the name resolution (a DDLS's own CDS
+// name, not its @AbapCatalog.sqlViewName) and the DDIC field labels are
+// the façade's, not guessed here. A row's own count, when the fetch came
+// back at the row cap, is one more query through the plain freestyle
+// route -- the one door this whole feature is told to prefer, and the one
+// that already exists for exactly "run this SQL and hand back a number".
+
+async function openDataPreview(objectType, name, hasMandt, output) {
+  const panel = vscode.window.createWebviewPanel("osdDataPreview", `Data Preview ${name}`, vscode.ViewColumn.Beside,
+    {enableScripts: true, retainContextWhenHidden: true});
+  let allClients = false;
+  const load = async () => {
+    const rowLimit = vscode.workspace.getConfiguration("osd").get("dataPreview.rowLimit", 100);
+    panel.webview.html = dataPreviewHtml(name, {loading: true});
+    const statement = dataPreviewQuery(name, {hasMandt, allClients});
+    try {
+      const result = await osd().dataPreview(objectType, name, statement, rowLimit);
+      let total;
+      if (result.rows.length >= rowLimit) {
+        try {
+          const count = await osd().freestyle(dataPreviewCountQuery(name, {hasMandt, allClients}), 1);
+          const first = count.rows[0] ?? {};
+          total = Number(first.N ?? first.n ?? Object.values(first)[0]);
+        } catch (e) {
+          output.appendLine(`osd data preview ${name}: count failed: ${String(e.message ?? e)}`);
+        }
+      }
+      panel.webview.html = dataPreviewHtml(name, {
+        objectType, columns: result.columns, rows: result.rows, ms: result.ms, generation: result.generation,
+        statement, hasMandt, allClients, status: dataPreviewStatusText(result.rows.length, rowLimit, total),
+      });
+    } catch (e) {
+      output.appendLine(`osd data preview ${name}: ${String(e.message ?? e)}`);
+      panel.webview.html = dataPreviewHtml(name, {error: String(e.message ?? e)});
+    }
+  };
+  panel.webview.onDidReceiveMessage(async (message) => {
+    if (message?.command === "refresh") {
+      await load();
+    } else if (message?.command === "toggleAllClients") {
+      allClients = message.value === true;
+      await load();
+    } else if (message?.command === "openNotebook") {
+      await newSqlNotebook(typeof message.statement === "string" ? message.statement : `SELECT * FROM ${name}`);
+    }
+  });
+  await load();
+}
+
+function dataPreviewShell(name, body) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: var(--vscode-font-family, sans-serif); font-size: 13px; padding: 8px; color: var(--vscode-foreground); }
+  .meta { margin-bottom: 8px; opacity: 0.9; }
+  .meta div { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid var(--vscode-panel-border, #555); padding: 4px 8px; text-align: left; white-space: nowrap; }
+  th { background: var(--vscode-editor-lineHighlightBackground, #2a2a2a); }
+  button { cursor: pointer; }
+  label { user-select: none; cursor: pointer; margin-right: 12px; }
+  .osd-error { color: var(--vscode-errorForeground, #f66); }
+</style>
+</head>
+<body>
+${body}
+</body>
+</html>`;
+}
+
+/** The webview body for `openDataPreview`'s current state: `{loading:
+ *  true}` while a fetch is in flight, `{error}` when one failed (F8 on a
+ *  DDLS with no database object behind it lands here with the façade's
+ *  own message, not a bare 404), or the full shape with `columns` (lib.js
+ *  dataPreviewRows' own `{name, label, key}`), `rows`, `status` (lib.js
+ *  dataPreviewStatusText), `statement` (what "Open in SQL notebook" seeds
+ *  its cell with) and `hasMandt`/`allClients` (the toggle, shown only for
+ *  a TABL that carries the field at all). MANDT itself is dropped from
+ *  the table while filtered -- every row would show the same value -- and
+ *  shown once "all clients" reveals rows that may not share it. */
+function dataPreviewHtml(name, state = {}) {
+  if (state.loading === true) {
+    return dataPreviewShell(name, `<p>loading ${xmlEscapeHtml(name)}...</p>`);
+  }
+  if (state.error !== undefined) {
+    return dataPreviewShell(name, `<p class="osd-error">${xmlEscapeHtml(state.error)}</p>
+<button id="refresh">Refresh</button>
+<script>
+  const vscode = acquireVsCodeApi();
+  document.getElementById("refresh").addEventListener("click", () => vscode.postMessage({command: "refresh"}));
+</script>`);
+  }
+  const shown = state.columns.filter((c) => state.allClients || c.name !== "MANDT");
+  const thead = shown.map((c) => `<th title="${xmlEscapeHtml(c.name)}">${xmlEscapeHtml(c.label)}</th>`).join("");
+  const tbody = state.rows.map((row) => `<tr>${shown.map((c) => `<td>${xmlEscapeHtml(cellText(row[c.name]))}</td>`).join("")}</tr>`).join("");
+  const generation = state.generation === undefined ? "" : ` -- ${xmlEscapeHtml(String(state.generation).slice(0, 8))}`;
+  const toggle = state.hasMandt
+    ? `<label><input type="checkbox" id="all-clients"${state.allClients ? " checked" : ""}> all clients</label>`
+    : "";
+  const body = `<div class="meta">
+  <div>${xmlEscapeHtml(state.objectType)} ${xmlEscapeHtml(name)} -- ${xmlEscapeHtml(state.status)} -- ${state.ms} ms${generation}</div>
+  <div>${toggle}<button id="refresh">Refresh</button> <button id="notebook">Open in SQL notebook</button></div>
+</div>
+<table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>
+<script>
+  const vscode = acquireVsCodeApi();
+  document.getElementById("refresh").addEventListener("click", () => vscode.postMessage({command: "refresh"}));
+  document.getElementById("notebook").addEventListener("click", () =>
+    vscode.postMessage({command: "openNotebook", statement: ${JSON.stringify(state.statement)}}));
+  const allClients = document.getElementById("all-clients");
+  if (allClients) allClients.addEventListener("change", () => vscode.postMessage({command: "toggleAllClients", value: allClients.checked}));
+</script>`;
+  return dataPreviewShell(name, body);
 }
 
 // ---- Q2b "Runner": a CodeLens "▶ Call <Set>" above each
@@ -785,6 +1260,33 @@ function entitySetLensProvider(output) {
     if (/_dpc_ext\.clas\.abap$/i.test(doc.fileName)) emitter.fire();
   });
   return {dispose: () => { registration.dispose(); onSave.dispose(); }};
+}
+
+// ---- gui-reports spike: a CodeLens "▶ Run in Easy Access (ZGUI_...)"
+// above a *.prog.abap's own REPORT line -- "Open in VS Code" for a
+// converted report, symmetric to F8 (RUN_TABLE.PROG in lib.js) rather than
+// a second way of deciding what to do. lib.js progRunLens does the
+// placement, tested without VS Code the same way entitySetLenses is; this
+// never asks the server whether the report was actually converted, for the
+// reason openWebguiTransaction's own comment gives.
+
+function progLensProvider() {
+  const provider = {
+    provideCodeLenses(document) {
+      const object = adtObjectOf(document.fileName);
+      if (object === undefined || object.type !== "PROG") return [];
+      const lens = progRunLens(document.getText(), object.name);
+      if (lens === undefined) return [];
+      const range = new vscode.Range(lens.line - 1, 0, lens.line - 1, 0);
+      return [new vscode.CodeLens(range, {
+        title: lens.title,
+        command: "osd.openWebguiTransaction",
+        arguments: [{tcode: lens.tcode}],
+      })];
+    },
+  };
+  const registration = vscode.languages.registerCodeLensProvider({pattern: "**/*.prog.abap"}, provider);
+  return {dispose: () => registration.dispose()};
 }
 
 /** `{service, set, kind}` (a lens's own command arguments, or F8's) into
@@ -944,24 +1446,211 @@ async function showReaders(found, output) {
   }
 }
 
-// ---- Test Explorer: one item per object, its test classes and methods below
+// ---- Test Explorer: Project / Packs / Workspace layers / System groups,
+// each object's test classes and methods below it (docs/vscode-extension.md,
+// "Test Explorer groups"). lib.js's transpileLayers()/classifyTestPath() do
+// the pure half (which of the four a file falls under, and which package
+// inside it); everything here is the tree built around that, and, below the
+// object level, unchanged from before this: same object/class/method ids
+// (so a run's history still matches them), same discover()/run() shape.
 
 function testExplorer(output) {
   const controller = vscode.tests.createTestController("osd-abap-unit", "ABAP Unit (osd)");
-  const objects = new Map(); // item id -> {object, dir}
+  const objects = new Map(); // object item id -> {object, dir} -- unchanged meaning, any tree depth
+  const groupNodes = new Map(); // group/subgroup/package id -> its TestItem
 
-  const objectItem = (uri) => {
-    const object = objectOf(uri.fsPath);
-    if (object === undefined) return undefined;
-    const id = `${object.type}:${object.name}`;
-    let item = controller.items.get(id);
-    if (item === undefined) {
-      item = controller.createTestItem(id, object.name, vscode.Uri.file(fileOf(path.dirname(uri.fsPath), object, "testclasses")));
-      item.canResolveChildren = true;
-      controller.items.add(item);
-      objects.set(id, {object, dir: path.dirname(uri.fsPath)});
+  const GROUP_LABEL = {project: "Project", packs: "Packs", workspace: "Workspace layers", system: "System"};
+  const GROUP_ORDER = ["project", "packs", "workspace", "system"];
+
+  function readTranspileConfig(root) {
+    if (root === undefined) return {};
+    try {
+      return JSON.parse(fs.readFileSync(path.join(root, "abap_transpile.json"), "utf8"));
+    } catch {
+      return {};
     }
+  }
+
+  function ensureGroupNode(id, label, parent) {
+    let node = groupNodes.get(id);
+    if (node === undefined) {
+      node = controller.createTestItem(id, label);
+      groupNodes.set(id, node);
+      if (parent === undefined) controller.items.add(node);
+      else parent.children.add(node);
+    }
+    return node;
+  }
+
+  function objectItemFor(entry) {
+    const id = `${entry.object.type}:${entry.object.name}`;
+    if (objects.has(id)) return undefined; // the same object found twice (two scans overlapping) -- keep the first
+    const item = controller.createTestItem(id, entry.object.name, entry.uri);
+    item.canResolveChildren = true;
+    objects.set(id, {object: entry.object, dir: entry.dir});
     return item;
+  }
+
+  // one bucket per bucketKey holds the object items directly: Project's own
+  // top node (Project has no sub-node of its own), else the one mandatory
+  // sub-node a pack / lib / workspace layer always gets. Split further by
+  // packageOf() once the bucket clears PACKAGE_SPLIT_THRESHOLD -- the
+  // "~15" the task named, read off lib.js so a test and this agree on it.
+  function placeEntries(containerNode, entries) {
+    if (!needsPackageSplit(entries.length)) {
+      for (const entry of entries) {
+        const item = objectItemFor(entry);
+        if (item !== undefined) containerNode.children.add(item);
+      }
+      return;
+    }
+    const byPackage = new Map();
+    for (const entry of entries) {
+      const pkg = packageOf(entry.classification.relInGroup);
+      if (!byPackage.has(pkg)) byPackage.set(pkg, []);
+      byPackage.get(pkg).push(entry);
+    }
+    for (const [pkg, pkgEntries] of byPackage) {
+      const target = pkg === undefined ? containerNode : ensureGroupNode(`${containerNode.id}:pkg:${pkg}`, pkg, containerNode);
+      for (const entry of pkgEntries) {
+        const item = objectItemFor(entry);
+        if (item !== undefined) target.children.add(item);
+      }
+    }
+  }
+
+  // Item 5 (docs/vscode-extension.md): a class's own testclasses include,
+  // or a PROG's local test classes -- abapGit keeps those inline in the
+  // program's own `*.prog.abap` (or an include it reaches the same way),
+  // never split out the way a class's `.testclasses.abap` is. Both routes
+  // land on the same generic server side (tools/adt-facade.mjs
+  // `core/http/unit/object[/run]`, `type=CLAS` or `type=PROG`; FUGR is not
+  // accepted there -- refused with 400, so a function group's own `FOR
+  // TESTING` is never listed, a gap named in the doc rather than guessed
+  // at silently).
+  const TEST_FILE_GLOB = "**/{*.clas.testclasses.abap,*.prog.abap}";
+
+  // findFiles() the way the four groups actually differ: Project and Packs
+  // sit under the repo root and stay behind EXCLUDE (never .local, gen,
+  // node_modules, output, build -- the same exclude every other feature
+  // here uses); a lib's own folder and a running workspace layer's own
+  // folder are asked for directly, RelativePattern-scoped, bypassing
+  // EXCLUDE on purpose -- that is the one thing that lets System (`.local/
+  // lars/*`, today) be found at all, without also walking the dozens of
+  // other clones and worktrees `.local/**` carries that are neither.
+  async function scanAll(root, layers, workspaceLayers, showSystem) {
+    const uris = [...await vscode.workspace.findFiles(TEST_FILE_GLOB, EXCLUDE)];
+    if (showSystem) {
+      for (const lib of layers.libs) {
+        const base = path.join(root, lib.folder);
+        if (!fs.existsSync(base)) continue;
+        const pattern = new vscode.RelativePattern(vscode.Uri.file(base), TEST_FILE_GLOB);
+        uris.push(...await vscode.workspace.findFiles(pattern));
+      }
+    }
+    for (const wl of workspaceLayers) {
+      const folder = typeof wl.folder === "string" ? wl.folder : wl.srcDir;
+      if (typeof folder !== "string" || !fs.existsSync(folder)) continue;
+      const pattern = new vscode.RelativePattern(vscode.Uri.file(folder), TEST_FILE_GLOB);
+      uris.push(...await vscode.workspace.findFiles(pattern));
+    }
+    return uris;
+  }
+
+  // Bugs 1/2/6 (docs/vscode-extension.md): `vscode.workspace.findFiles`
+  // above walks every open workspace folder, which is not necessarily
+  // osdHome -- a packaged install's osdHome is a materialized copy of the
+  // bundled seed in globalStorage, while the window's own workspace folder
+  // (the checkout a person actually opened and edits) is a different tree
+  // entirely. Classifying a file found there against osdHome's own
+  // abap_transpile.json made `path.relative` climb out of one tree and back
+  // down into the other, so every project/packs file landed in one "`..`"
+  // sub-node holding everything (and Packs, whose own prefix check can
+  // never match a path that starts "`..`", held nothing at all). Each
+  // file's OWN workspace folder is read once and cached, and that folder's
+  // OWN config -- never osdHome's -- is what its packages and its System/
+  // Packs membership are read against. A lib's own folder and a running
+  // workspace layer's own folder are found by an explicit RelativePattern
+  // rooted at `root` (osdHome) or the layer's own absolute folder
+  // respectively (see scanAll above), so they are always already under the
+  // root they are classified against and need no lookup here; a file with
+  // no owning workspace folder at all (that is exactly this case) falls
+  // back to `root`.
+  const configCache = new Map(); // workspace-folder root -> {layers, demoObjects}
+  const layersFor = (folderRoot) => {
+    if (!configCache.has(folderRoot)) {
+      const config = readTranspileConfig(folderRoot);
+      configCache.set(folderRoot, {layers: transpileLayers(config), demoObjects: demoFailureObjects(config)});
+    }
+    return configCache.get(folderRoot);
+  };
+
+  const buildTree = async () => {
+    const root = activeController?.launcher?.osdHome ?? osdHomeOf();
+    const layers = transpileLayers(readTranspileConfig(root));
+    const workspaceLayers = activeController?.launcher?.layers ?? [];
+    const showSystem = vscode.workspace.getConfiguration("osd").get("tests.showSystem", true);
+
+    controller.items.replace([]);
+    groupNodes.clear();
+    objects.clear();
+    configCache.clear();
+    if (root === undefined) return;
+
+    const placed = [];
+    for (const uri of await scanAll(root, layers, workspaceLayers, showSystem)) {
+      let source;
+      try {
+        source = fs.readFileSync(uri.fsPath, "utf8");
+      } catch {
+        continue;
+      }
+      // the cheap filter, done up front: a testclasses include (or a PROG
+      // with no local test class at all) never becomes an item only to be
+      // found empty once expanded (lib.js hasTestMethods -- discover()'s
+      // own server round trip still filters per class/method the same way,
+      // below)
+      if (!hasTestMethods(source)) continue;
+      const object = objectOf(uri.fsPath);
+      if (object === undefined) continue;
+      // the file's OWN workspace folder, not osdHome -- bugs 1/2/6 above
+      const ownRoot = vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath ?? root;
+      const {layers: ownLayers, demoObjects} = layersFor(ownRoot);
+      const classification = classifyTestPath(ownRoot, uri.fsPath, ownLayers, workspaceLayers);
+      // outside every known root, or hidden by that root's own
+      // exclude_filter (test/fixtures/, deploy/ is not a layer at all,
+      // a lib's own excluded corner) -- not part of the system, not listed
+      if (classification === undefined) continue;
+      // Item 4: a class or program abap_transpile.json's own `options.skip`
+      // already marks as deliberately failing gets its own sub-node under
+      // Project, so "Run" there stays green while the demo itself still
+      // runs and still fails when asked for on purpose.
+      if (classification.group === "project" && demoObjects.has(object.name)) {
+        classification.subgroup = "Demos (fail on purpose)";
+      }
+      placed.push({uri, object, dir: path.dirname(uri.fsPath), classification});
+    }
+
+    const groupsPresent = new Set(["project", "packs"]);
+    if (showSystem) groupsPresent.add("system");
+    if (workspaceLayers.length > 0) groupsPresent.add("workspace");
+    for (const group of GROUP_ORDER) {
+      if (groupsPresent.has(group)) ensureGroupNode(`group:${group}`, GROUP_LABEL[group], undefined);
+    }
+
+    const buckets = new Map(); // bucketKey -> {group, subgroup, entries}
+    for (const entry of placed) {
+      const {group, subgroup} = entry.classification;
+      if (!groupsPresent.has(group)) continue; // e.g. a workspace-layer file with no active layer known right now
+      const bucketKey = subgroup === undefined ? `group:${group}` : `group:${group}:${subgroup}`;
+      if (!buckets.has(bucketKey)) buckets.set(bucketKey, {group, subgroup, entries: []});
+      buckets.get(bucketKey).entries.push(entry);
+    }
+    for (const [bucketKey, bucket] of buckets) {
+      const topNode = groupNodes.get(`group:${bucket.group}`);
+      const containerNode = bucket.subgroup === undefined ? topNode : ensureGroupNode(bucketKey, bucket.subgroup, topNode);
+      placeEntries(containerNode, bucket.entries);
+    }
   };
 
   const discover = async (item) => {
@@ -994,35 +1683,102 @@ function testExplorer(output) {
 
   controller.resolveHandler = async (item) => {
     if (item === undefined) {
-      for (const uri of await vscode.workspace.findFiles("**/*.clas.testclasses.abap", EXCLUDE)) objectItem(uri);
+      await buildTree();
       return;
     }
     await discover(item);
   };
 
-  const watcher = vscode.workspace.createFileSystemWatcher("**/*.clas.testclasses.abap");
-  watcher.onDidCreate((uri) => objectItem(uri));
+  // narrowly scoped, so an unrelated edit never disturbs another object's
+  // own expansion: onDidChange only re-runs discover() for an object
+  // already found and already expanded (the tree's own shape did not
+  // change); a create or a delete can change which bucket exists or
+  // whether a group is now empty, so those go through buildTree() again --
+  // debounced, so a burst of saves (a checkout, a branch switch) rebuilds
+  // once rather than once per file
+  let rebuildTimer;
+  const scheduleRebuild = () => {
+    clearTimeout(rebuildTimer);
+    rebuildTimer = setTimeout(() => { buildTree().catch((e) => output.appendLine(String(e.message ?? e))); }, 300);
+  };
+  const watcher = vscode.workspace.createFileSystemWatcher(TEST_FILE_GLOB);
+  watcher.onDidCreate(() => scheduleRebuild());
+  watcher.onDidDelete(() => scheduleRebuild());
   watcher.onDidChange((uri) => {
-    const item = objectItem(uri);
+    const object = objectOf(uri.fsPath);
+    const item = object === undefined ? undefined : controllerFind(`${object.type}:${object.name}`);
     if (item !== undefined && item.children.size > 0) discover(item);
   });
 
+  // objects.has(id) is not enough on its own to find a TestItem anywhere in
+  // the tree (controller.items is top-level groups only, now) -- walk every
+  // group down to the object items once, for the rare watcher onDidChange
+  function controllerFind(id) {
+    const walk = (collection) => {
+      for (const [, child] of collection) {
+        if (child.id === id) return child;
+        const found = walk(child.children);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    };
+    return walk(controller.items);
+  }
+
+  // the ancestor object item of `item` (itself, if `item` already is one),
+  // or undefined when `item` sits above every object (a group, a pack/lib/
+  // workspace-layer sub-node, or a package split inside one)
+  function objectAncestorOf(item) {
+    let node = item;
+    while (node !== undefined && !objects.has(node.id)) node = node.parent;
+    return node;
+  }
+
+  // every object item under `item`, itself included when it already is one
+  // -- "running a group runs all of its children", the way the Testing API
+  // does by default: a group/pack/lib/workspace-layer/package node handed
+  // to the run handler (Run on the group, or "Run All") expands to every
+  // object it holds, each run in full
+  function objectDescendantsOf(item) {
+    if (objects.has(item.id)) return [item];
+    const out = [];
+    for (const [, child] of item.children) out.push(...objectDescendantsOf(child));
+    return out;
+  }
+
   const runHandler = async (request, token) => {
     const run = controller.createTestRun(request);
-    // what was asked, grouped by object: the server runs one object at a time
+    // what was asked, expanded down to (or across) actual objects, then
+    // grouped by object: the server runs one object at a time
     const asked = request.include ?? [...gather(controller.items)];
-    const byObject = new Map();
+    const selections = [];
     for (const item of asked) {
-      const [objectId, testClass, method] = item.id.split("/");
-      if (!byObject.has(objectId)) byObject.set(objectId, []);
-      byObject.get(objectId).push({item, testClass, method});
+      if (objects.has(item.id)) {
+        selections.push({item, objectItem: item, testClass: undefined, method: undefined});
+        continue;
+      }
+      const ancestor = objectAncestorOf(item);
+      if (ancestor !== undefined) {
+        const suffix = item.id.slice(ancestor.id.length).replace(/^\//, "");
+        const [testClass, method] = suffix === "" ? [undefined, undefined] : suffix.split("/");
+        selections.push({item, objectItem: ancestor, testClass, method});
+        continue;
+      }
+      for (const objItem of objectDescendantsOf(item)) {
+        selections.push({item: objItem, objectItem: objItem, testClass: undefined, method: undefined});
+      }
     }
-    for (const [objectId, selections] of byObject) {
+    const byObject = new Map();
+    for (const sel of selections) {
+      if (!byObject.has(sel.objectItem.id)) byObject.set(sel.objectItem.id, []);
+      byObject.get(sel.objectItem.id).push(sel);
+    }
+    for (const [objectId, sels] of byObject) {
       if (token.isCancellationRequested) break;
-      const objectItemOf = controller.items.get(objectId);
+      const objectItemOf = sels[0].objectItem;
       if (objectItemOf.children.size === 0) await discover(objectItemOf);
       const {object, dir} = objects.get(objectId);
-      for (const sel of selections) {
+      for (const sel of sels) {
         const methods = leaves(sel.item);
         methods.forEach((m) => run.started(m));
         try {
@@ -1051,11 +1807,9 @@ function testExplorer(output) {
   };
   controller.createRunProfile("Run", vscode.TestRunProfileKind.Run, runHandler, true);
   controller.refreshHandler = async () => {
-    controller.items.replace([]);
-    objects.clear();
-    await controller.resolveHandler(undefined);
+    await buildTree();
   };
-  return {dispose: () => { watcher.dispose(); controller.dispose(); }};
+  return {dispose: () => { clearTimeout(rebuildTimer); watcher.dispose(); controller.dispose(); }};
 }
 
 function* gather(collection) {
@@ -1114,9 +1868,13 @@ function sqlNotebookSerializer() {
   };
 }
 
-async function newSqlNotebook() {
+/** `osd.newSqlNotebook`'s own untitled notebook, and Q7's "Open in SQL
+ *  notebook" button -- `statement` is the cell it opens with, ready to
+ *  run; the command palette calls this with none, which keeps the
+ *  original placeholder cell. */
+async function newSqlNotebook(statement) {
   const data = new vscode.NotebookData([
-    new vscode.NotebookCellData(vscode.NotebookCellKind.Code, "SELECT * FROM zstg_demo", "sql"),
+    new vscode.NotebookCellData(vscode.NotebookCellKind.Code, statement ?? "SELECT * FROM zstg_demo", "sql"),
   ]);
   const doc = await vscode.workspace.openNotebookDocument(NOTEBOOK_TYPE, data);
   await vscode.window.showNotebookDocument(doc);

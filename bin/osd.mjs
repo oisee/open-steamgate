@@ -82,6 +82,7 @@ const GENERATORS = {
   "osd-ddic-binary.mjs": () => import("../tools/osd-ddic-binary.mjs"),
   "osd-bsp-registry.mjs": () => import("../tools/osd-bsp-registry.mjs"),
   "osd-tran-registry.mjs": () => import("../tools/osd-tran-registry.mjs"),
+  "osd-gui-convert.mjs": () => import("../tools/osd-gui-convert.mjs"),
   // not a generator: the warm build's comparison with a cold transpile
   "osd-warm.mjs": () => import("../tools/osd-warm.mjs"),
 };

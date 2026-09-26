@@ -2,7 +2,7 @@
   "name": "osd-vscode",
   "displayName": "open-steamgate (osd)",
   "description": "ABAP Unit in the Test Explorer, the serving generation and short dumps of a running osd",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "private": true,
   "license": "MIT",
   "publisher": "open-steamgate",
@@ -43,10 +43,26 @@
           "default": 100,
           "description": "The row limit (rowNumber) a *.osdnb cell's SELECT is run with, against /sap/bc/adt/datapreview/freestyle."
         },
+        "osd.dataPreview.rowLimit": {
+          "type": "number",
+          "default": 100,
+          "description": "The row limit (rowNumber) F8's Data Preview on a TABL or a DDLS is run with, against /sap/bc/adt/datapreview/ddic or /cds."
+        },
         "osd.hotspots.refreshSeconds": {
           "type": "number",
           "default": 30,
           "description": "How often the ZOSD_DUMP heat (line decorations, explorer badges) is re-read. 0 turns the timer off; osd.run, osd.activate and \"osd: Refresh hotspots\" still refresh it."
+        },
+        "osd.tests.showSystem": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the Test Explorer's System group (the libraries abap_transpile.json's own \"libs\" pull in -- open-abap-core, abapgit, ... -- shown collapsed) is built at all. Off hides it and skips scanning those folders."
+        },
+        "osd.openIn": {
+          "type": "string",
+          "enum": ["browser", "vscode"],
+          "default": "browser",
+          "description": "Where a click on a Services tree row (App, ICF, OData) opens it: the system browser (vscode.env.openExternal), or a webview tab inside VS Code (an iframe of the running osd's own URL, the way the SEGW editor's and the gui-reports spike's own panels do it). APC rows have no default click either way -- a WebSocket URL does nothing opened as a page."
         }
       }
     },
@@ -79,23 +95,34 @@
       {"command": "osd.stop", "title": "osd: Stop", "icon": "$(primitive-square)"},
       {"command": "osd.rebuild", "title": "osd: Rebuild", "icon": "$(refresh)"},
       {"command": "osd.openLaunchpad", "title": "osd: Open launchpad", "icon": "$(link-external)"},
-      {"command": "osd.refreshTree", "title": "osd: Refresh System view", "icon": "$(refresh)"}
+      {"command": "osd.openLaunchpadInVsCode", "title": "osd: Open launchpad inside VS Code"},
+      {"command": "osd.refreshTree", "title": "osd: Refresh System view", "icon": "$(refresh)"},
+      {"command": "osd.copyServiceUrl", "title": "osd: Copy URL"},
+      {"command": "osd.copyServiceWsUrl", "title": "osd: Copy ws:// URL"},
+      {"command": "osd.openServiceMetadata", "title": "osd: Open $metadata"}
     ],
     "menus": {
       "editor/title": [
-        {"command": "osd.run", "when": "resourceExtname == .abap", "group": "navigation"}
+        {"command": "osd.run", "when": "resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/", "group": "navigation"}
       ],
       "view/title": [
         {"command": "osd.start", "when": "view == osdTree", "group": "navigation@1"},
         {"command": "osd.stop", "when": "view == osdTree", "group": "navigation@2"},
         {"command": "osd.rebuild", "when": "view == osdTree", "group": "navigation@3"},
-        {"command": "osd.refreshTree", "when": "view == osdTree", "group": "navigation@4"}
+        {"command": "osd.refreshTree", "when": "view == osdTree", "group": "navigation@4"},
+        {"command": "osd.openLaunchpad", "when": "view == osdTree", "group": "9_osd@1"}
+      ],
+      "view/item/context": [
+        {"command": "osd.openLaunchpadInVsCode", "when": "view == osdTree && viewItem == osd-launchpad", "group": "inline"},
+        {"command": "osd.copyServiceUrl", "when": "view == osdTree && (viewItem == osd-service-app || viewItem == osd-service-icf || viewItem == osd-service-odata)", "group": "inline"},
+        {"command": "osd.openServiceMetadata", "when": "view == osdTree && viewItem == osd-service-odata", "group": "inline"},
+        {"command": "osd.copyServiceWsUrl", "when": "view == osdTree && viewItem == osd-service-apc", "group": "inline"}
       ]
     },
     "keybindings": [
       {"key": "ctrl+f2", "command": "osd.check", "when": "resourceExtname == .abap && config.osd.keymap == abap"},
       {"key": "ctrl+f3", "command": "osd.activate", "when": "resourceExtname == .abap && config.osd.keymap == abap"},
-      {"key": "f8", "command": "osd.run", "when": "resourceExtname == .abap && config.osd.keymap == abap && !inDebugMode"},
+      {"key": "f8", "command": "osd.run", "when": "resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && config.osd.keymap == abap && !inDebugMode"},
       {"key": "f9", "command": "osd.classrun", "when": "resourceExtname == .abap && config.osd.keymap == abap && !inDebugMode"},
       {"key": "ctrl+shift+f10", "command": "testing.runCurrentFile", "when": "resourceExtname == .abap && config.osd.keymap == abap"},
 

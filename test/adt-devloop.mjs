@@ -550,6 +550,27 @@ describe("tools/adt-facade: the development loop", () => {
       expect((await call("/core/http/xref/closure?type=PROG&name=ZCL_ZSTG_DEMO_MPC_EXT")).status).to.equal(400);
     });
 
+    it("the service tree: each row with the class that answers and where it is declared", async () => {
+      const res = await call("/core/http/services");
+      expect(res.status).to.equal(200);
+      const {services, counts} = await res.json();
+      expect(Object.keys(counts)).to.include.members(["ODATA", "ICF", "APP"]);
+      const demo = services.find((s) => s.kind === "ODATA" && s.name === "ZSTG_DEMO_SRV");
+      expect(demo).to.include({
+        path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV",
+        handler: "ZCL_ZSTG_DEMO_DPC_EXT",
+        handlerUri: "/sap/bc/adt/oo/classes/zcl_zstg_demo_dpc_ext",
+        mpc: "ZCL_ZSTG_DEMO_MPC_EXT",
+      });
+      expect(demo.source).to.match(/\.iwsv\.xml$/);
+      const icf = services.find((s) => s.kind === "ICF" && s.handlerUri !== undefined);
+      expect(icf.handlerUri).to.match(/^\/sap\/bc\/adt\/oo\/classes\//);
+      const app = services.find((s) => s.kind === "APP");
+      expect(app.app).to.be.a("string");
+      expect(app.handler).to.equal(undefined);
+      expect(app.source).to.match(/webapp|packs/);
+    });
+
     it("Q3: an object nothing reads answers an empty list, not an error", async () => {
       const res = await call("/core/http/xref/readers?type=CLAS&name=ZCL_STG_TAB_ZSTG_STATUS");
       expect(res.status).to.equal(200);

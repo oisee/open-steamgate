@@ -29,7 +29,11 @@ below carries `when: config.osd.keymap == abap`, so the setting is the only
 place this is decided. Scoped by `resourceExtname == .abap` rather than a
 language id: abaplint is an extension this repo does not install or
 control, so which language id it registers (if any) is not something a
-`when` clause here can depend on.
+`when` clause here can depend on. F8 alone widens that to a `resourceFilename
+=~ /regex/` match (`resourceExtname` is only ever the last extension, and a
+TABL's own file is `<table>.tabl.xml`, a DDLS's `<view>.ddls.asddls` or
+`.ddls.xml`) -- Ctrl+F2/Ctrl+F3/F9 stay `.abap`-only, since Check/Activate/
+Classrun do not reach either type (Q7, below).
 
 | Key | SAP GUI / ADT | Here | Gap |
 | --- | --- | --- | --- |
@@ -56,9 +60,122 @@ F8's dispatch by object type (`lib.js` `runActionFor`, held to this table by
 | INTF | nothing of its own to run |
 | PROG | not yet: no server route to run a report headlessly |
 | FUGR | not yet: a test form from `GET /sap/bc/osd/rfc/functions/<NAME>`, then `POST /call` |
-| TABL, DDLS | not yet: data preview |
+| TABL, DDLS | data preview (Q7, below) |
 | IWSV | not yet: the Gateway client on the service document |
 | SICF | not yet: open the node's URL |
+
+## Test Explorer groups
+
+*2026-09-26.* Before this, "ABAP Unit (osd)" was one flat list: every
+`*.clas.testclasses.abap` `findFiles()` turned up became a sibling, so a
+project class sat next to `CL_ABAP_*` and `/UI2/CL_JSON` from
+`open-abap-core` under `.local/lars/` -- and any workspace that opened a lib
+clone as its own root, or a lib file the exclude glob missed, mixed the two
+sets with nothing to tell them apart. Now the tree has four top-level
+groups, decided per file by `lib.js`'s `classifyTestPath()`, the pure half
+(`test/vscode-extension.mjs` holds it to real paths of this tree):
+
+| Group | What is in it | Sub-node |
+| --- | --- | --- |
+| **Project** | `src/`, `test/`, `gen/` -- `abap_transpile.json`'s own `input_folder`, minus any that is also a lib's own folder | none of its own (Project lists straight, or by package once it clears the threshold below) |
+| **Packs** | `packs/<name>/**` | one per pack, always |
+| **Workspace layers** | a running B0 launcher's own `layers` (`launcher.js` `detectWorkspaceLayers`) -- shown only while one is known | one per layer |
+| **System** | `abap_transpile.json`'s own `libs` (`.local/lars/open-abap-core`, `abapgit`, `express-icf-shim`, `open-abap-apc`, `open-abap-gui`, `open-abap-odata`, `ajson`) | one per lib, always; collapsed by default the way any Test Explorer node with unexpanded children already is |
+
+`classifyTestPath()` is checked in that order for a reason: a workspace
+layer can sit anywhere on disk, even inside what would otherwise read as a
+lib's own folder, so it wins first. `osd.tests.showSystem` (default `true`)
+turns System off (and skips scanning those folders at all) for a session
+that only wants its own tests.
+
+Once a group's own bucket (Project as a whole; one pack; one lib; one
+workspace layer) clears `PACKAGE_SPLIT_THRESHOLD` (15) classes, `lib.js`'s
+`packageOf()` sub-groups it further by the directory under `src/`/`test/`/
+`gen/` that carries the file (an abapGit `package.xml`, when
+`packageDirsFrom()` is handed any, wins over that guess -- none of this
+repo's own corpus has one today, so the fallback is what runs in practice:
+`open-abap-core`'s 62 test classes split into `rtti`, `http`, `json`,
+`oauth2`, ... rather than 62 flat siblings under System).
+
+`objectOf`/`fileOf`/`discover()`/`run()` below the object level are
+unchanged, and so are an object's, a class's and a method's own ids -- only
+where in the tree an object sits moved, so a run's history still matches it
+by id. The cheap filter that was always implicit (a class without test
+methods has nothing to run, `discover()`'s own
+`(c.methods ?? []).length > 0`) now also runs before an item is even built:
+`hasTestMethods()` skips a `*.clas.testclasses.abap` with no `FOR TESTING`
+anywhere in it, rather than adding an item only to find it empty once
+expanded. Running a group, a pack, a lib or a workspace layer runs every
+object under it, the way the Testing API does by default for any parent
+handed to a run profile -- there is no special "run this group" code beyond
+expanding it to the objects it holds.
+
+*2026-09-26, same day, as seen with the packaged extension.* Six bugs, all
+fixed together:
+
+1/2/6. **Classify a file against its own workspace folder, never osdHome.**
+   The packaged install runs the system from a materialized copy of the
+   bundled seed under `context.globalStorageUri` (`resolveOsdHome()`), while
+   the window's own workspace folder is the checkout a person actually
+   opened and edits -- two different trees. `classifyTestPath(root, ...)`
+   was always called with `root = activeController?.launcher?.osdHome ??
+   osdHomeOf()`, so a project or a packs file `findFiles()` turned up (which
+   walks the open workspace, never osdHome) was classified relative to the
+   *wrong* tree: `path.relative` climbed out of osdHome and back down into
+   the workspace folder, landing on `classifyTestPath`'s own fallback branch
+   with a `relInGroup` starting `../../...`. `packageOf()` then read that
+   leading `..` as the sub-node's own name -- one node called ".." holding
+   every Project class -- and Packs, whose own prefix check can never match
+   a path that starts `..`, held nothing at all. The fix reads each found
+   file's own root with `vscode.workspace.getWorkspaceFolder(uri)` and reads
+   *that* folder's own `abap_transpile.json` (cached per root for the
+   build), rather than osdHome's; a lib's own folder and a running
+   workspace layer's own folder are already found by an explicit
+   `RelativePattern` rooted correctly, so they needed no change. Readers
+   (Q3), F8's dispatch (`RUN_TABLE`) and Data Preview (Q7) map a file to an
+   object by its own filename alone (`objectOf`/`adtObjectOf`/
+   `dataPreviewObjectOf`) and never call `path.relative` against osdHome at
+   all, so this bug never reached them -- checked, not assumed.
+2. **Packs empty** was the same bug (1), over a `packs/` file.
+3. **Only a file the build itself would read is listed.** A path outside
+   every one of `classifyTestPath`'s four roots (`deploy/`, a staging folder
+   for a system, never one of `input_folder`/`libs`/`packs`) now answers
+   `undefined` instead of falling into Project; a path *inside* a root but
+   hidden by that root's own `exclude_filter` (the top-level list for a
+   Project or a Packs file, the same list `tools/osd-transpile.mjs
+   listFiles()` applies to `input_folder`, packs included, once they are
+   layered in; the matching lib's own list for a System file, the same list
+   `loadLibs()` applies) is excluded the same way -- `test/fixtures/`
+   (`test/fixtures/adt-editor/zcl_editor.*`) and a lib's own excluded corner
+   (open-abap-core's `/src/tcp/`) both go through this, not the root check.
+   `transpileLayers()` now also carries `excludeFilter` (top-level) and each
+   lib's own, as `RegExp`s built the same case-insensitive, unanchored way
+   the build reads them.
+4. **A demo that fails on purpose no longer reddens "Run" on Project.**
+   ZOSD_TEST's `deliberate_failure` exists to prove a failure reaches a live
+   client, so it must still run and still fail when asked for -- only
+   `npm test`'s own build-time run needs to skip it, which
+   `abap_transpile.json`'s `options.skip` (`{object, class, method}`) already
+   does. `lib.js`'s `demoFailureObjects(config)` reads that same list (no
+   second marker to keep in step with it) and, for a Project-group class
+   whose name is in it, the Test Explorer puts it under its own
+   **Demos (fail on purpose)** sub-node instead of listing it flat.
+5. **A PROG's own local test class is found the same way a class's is.**
+   abapGit keeps a program's `FOR TESTING` classes inline in its
+   `*.prog.abap` (no `.testclasses.abap` split the way a class has), so the
+   scan glob widened from `**/*.clas.testclasses.abap` to
+   `**/{*.clas.testclasses.abap,*.prog.abap}` (`TEST_FILE_GLOB`, also the
+   file watcher's own pattern now); `objectOf`/`hasTestMethods`/
+   `classifyTestPath` already worked by suffix and needed no change, and
+   neither did `discover()`/`run()`, which already pass the object's own
+   `type` (`CLAS` or `PROG`) through to
+   `GET/POST .../unit/object[/run]?type=...` -- that route already accepts
+   both. `src/zosd_test/src/zosd_test_demo_prog.prog.abap` carries a small
+   passing local test class (`ltcl_zosd_test_demo_prog`, over the program's
+   own `lcl_counter`) as the worked example. **A function group's `FOR
+   TESTING` is a gap, not silently listed**: the same route refuses
+   `type=FUGR` with 400 ("cannot carry ABAP Unit tests here",
+   `tools/adt-facade.mjs`), so the Test Explorer does not scan for one.
 
 ## Q2b: calling an entity set
 
@@ -336,6 +453,57 @@ caller that already knows which one, and a permanently-declared (not
 pack-discovered) scratch root so a notebook does not need `OSD_PACKS` set
 before `osd` starts -- neither attempted here.
 
+## Q7: F8 on a table or a CDS view
+
+*2026-09-26.* F8 on a `*.tabl.xml` (a TABL) or a `*.ddls.asddls` / `*.ddls.xml`
+(a DDLS) opens a "Data Preview \<NAME\>" webview: rows (capped by
+`osd.dataPreview.rowLimit`, default 100, "N rows" or "first N of M" once a
+cheap `COUNT(*)` was worth asking for), column headers with the DDIC field's
+own label when the façade offers one, a Refresh button and an "Open in SQL
+notebook" button that seeds a fresh `*.osdnb` cell (Q6a) with the exact
+statement the panel is showing.
+
+Neither type reaches `adtObjectOf` (Check/Activate/Classrun do not apply to
+either), so `run()` falls back to `lib.js` `dataPreviewObjectOf` -- a plain
+regex over the file's own name, `run()`'s editor buffer and all, the same
+"read what is open, not what adtObjectOf knows" split Q6b's classrun already
+uses. The name it reads off a DDLS file is the CDS entity's own name (say
+`ZC_STG_FLIGHTCUBE`), never its `@AbapCatalog.sqlViewName` (`ZVSTGFLIGHTCUBE`)
+-- this client does not need to know that annotation exists. **No new server
+route**: F8's rows and labels come from the façade's own `datapreview/ddic`
+(a TABL) and `datapreview/cds` (a DDLS) -- the same door ADT's own Data
+Preview uses (`tools/adt-facade.mjs`, `lib.js` `Osd#dataPreview`), which
+already resolves a DDLS by its CDS name (`tools/adt-cds.mjs` `cdsEntityOf`,
+against the twin view `tools/cds2ddic.mjs` writes under that name -- "the CDS
+entity itself has no client... as on a system") and already carries each
+column's own DDIC label (`tableDataDocument`'s `dataPreview:description`).
+The row count, asked for only once the main fetch came back at the cap, goes
+through the plain `datapreview/freestyle` door instead (`Osd#freestyle`) --
+the one door this feature is told to prefer, and the one already built for
+"run this SQL, hand back a number". A DDLS with no database object behind it
+(an unsupported join, `tools/cds2ddic.mjs`'s own skip, or a name that does
+not exist at all) answers the façade's own message ("DDLS X does not exist",
+or the SQL engine's refusal), not a bare 404.
+
+**Client**: `ZSTG_FLIGHTFACT` (and every TABL with a MANDT field, read off
+its own DD03P rows in the buffer, `lib.js` `tablHasMandt`) is filtered to the
+runtime's own client by default -- `WHERE MANDT = '123'`, `MANDT_CLIENT` in
+`lib.js`, the constant CLAUDE.md's "Known traps" already names, not read off
+the ADT façade's own identity: that one deliberately answers a different,
+made-up client (`tools/osd-identity.mjs`, `identity().adt.client`, `"001"`,
+backlog G.1b) so the façade's pretend system is never confused with the data
+underneath it, and reading it here would filter for the wrong one. An "all
+clients" toggle drops the filter and shows the MANDT column (hidden while
+filtered -- every row would carry the same value). A DDLS never gets the
+toggle: the CDS-name view has no MANDT column at all
+(`tools/cds2ddic.mjs` `viewFieldsOf`), so there is nothing to filter or to
+show.
+
+Pure logic (`dataPreviewObjectOf`, `tablHasMandt`, `dataPreviewQuery`,
+`dataPreviewCountQuery`, `dataPreviewStatusText`, `dataPreviewRows`), held to
+`tableDataDocument`'s real shape the way Q6a's `freestyleRows` already is,
+in `test/vscode-extension.mjs`.
+
 ## Trying it
 
 No build step and no dependencies: plain CommonJS, VS Code's own Node.
@@ -462,26 +630,23 @@ single object; `npm run probe` / `tools/osd-inputs.mjs` exist for a closure
 audit by hand and were not wired into the tree view.
 
 **The UI**: an Activity Bar container "OSD" (`views` id `osdTree`) with a
-tree of three roots — the state (`Stopped` / `Building…` / `Starting…` /
-`Running on :port, generation …`), **Layers** (the base `osdHome` plus
-every detected workspace folder), and **Services**, read off
-`ZOSD_STATUS_SRV`'s own `ServiceSet` (`GET
-/sap/opu/odata/sap/ZOSD_STATUS_SRV/ServiceSet?$format=json`) — the
-smallest existing mechanism named in the task, no new server route: that
-service already refreshes itself on every read
-(`test/start.mjs`'s `withFreshStatus` on `ZOSD_STATUS_SRV*`) and already
-lists every OData/ICF/APC/UI5 service the tree serves
-(`tools/osd-status.mjs` `servicesOf`). "osd: Open launchpad" opens
-`http://localhost:<port>/app/flp.html` with `vscode.env.openExternal`; a
-second, new status bar item (▶ / ■, left of the existing generation
-display, which assumes something is already serving) starts or stops the
-one `Launcher` this window drives, and the editor-title button on `.abap`
-files is `osd.run` (F8's own command) via `contributes.menus["editor/title"]`
-rather than new code. Once started, `osd.url` is written to the launched
-address (Workspace target when the window has a folder, Global otherwise)
-— every existing feature reads that setting fresh on every call
-(`osd()` in `extension.js`), so nothing else had to change for the rest of
-the extension to follow a self-started instance automatically.
+tree of four roots — the state (`Stopped` / `Building…` / `Starting…` /
+`Running on :port, generation …`), "▶ Open Fiori Launchpad", **Layers**
+(the base `osdHome` plus every detected workspace folder), and
+**Services**, grouped by kind ("Services tree", below). "osd: Open
+launchpad" opens `http://localhost:<port>/app/flp.html` with
+`vscode.env.openExternal` (the Launchpad node's own click; its
+context menu offers "Open launchpad inside VS Code" instead, the same
+webview pattern "Services tree" uses); a second, new status bar item
+(▶ / ■, left of the existing generation display, which assumes something
+is already serving) starts or stops the one `Launcher` this window
+drives, and the editor-title button on `.abap` files is `osd.run` (F8's
+own command) via `contributes.menus["editor/title"]` rather than new
+code. Once started, `osd.url` is written to the launched address
+(Workspace target when the window has a folder, Global otherwise) —
+every existing feature reads that setting fresh on every call (`osd()` in
+`extension.js`), so nothing else had to change for the rest of the
+extension to follow a self-started instance automatically.
 
 **Q6b's notebook gap does not fall out for free.** The storage layer this
 spike adds *is* a permanent, pre-existing pack directory once a workspace
@@ -496,6 +661,75 @@ cell meant. Next step, not attempted here: an optional `root` on
 launcher always creates (even with zero detected workspace layers) so a
 notebook has somewhere to write into without `OSD_PACKS` needing to be
 set to something new after the process is already up.
+
+## Services tree
+
+*2026-09-26.* Before this, "Services" was one flat list of every APP/APC/
+ICF/ODATA row `ZOSD_STATUS_SRV`'s own `ServiceSet` answered, nothing
+wired to a click (docs/ideas.md T8). Now it groups by kind, each group
+collapsed with a count — "OData (n)", "Apps (n)", "ICF (n)", "APC (n)",
+and any other kind the server returns gets a generic group (title-cased)
+rather than needing a code change first — rows inside a group sorted by
+path, labelled by the server's own text with the path dimmed
+(`TreeItem.description`). A row's own click opens it the way its kind
+allows: the app's page or the ICF node's URL, or the OData service
+document; APC never (a WebSocket URL does nothing opened as a page, only
+"Copy ws:// URL" on its context menu). The shared setting `osd.openIn`
+(`"browser"`, default, or `"vscode"`) decides *how* a click opens it —
+`vscode.env.openExternal` or a webview tab that iframes the running
+osd's own URL behind a `Content-Security-Policy` naming only that
+origin, the same pattern `openDataPreview` (Q7) and the gui-reports
+spike's `openWebguiTransaction` already use, reused here as
+`openInWebview`/`iframePanelHtml`. Every row's context menu offers "Copy
+URL" (APP/ICF/OData); OData also offers "Open $metadata"; APC offers
+"Copy ws:// URL" instead of either.
+
+`editors/vscode/lib.js` carries the pure half, tested without VS Code or
+a server in `test/vscode-extension.mjs`: `serviceGroupLabel`,
+`normalizeServiceSetRow`/`normalizeServiceRow` (the two row shapes below,
+into one), `groupServices`, `serviceLabel`, `serviceContextValue`,
+`serviceHttpUrl`/`serviceMetadataUrl`/`serviceWsUrl`, and
+`serviceClassNodes` (the next paragraph). `extension.js`'s
+`OsdTreeProvider` is the thin wrapping — `ServiceGroupItem`/
+`ServiceRowItem`/`ServiceClassItem`/`EntitySetItem`, `openServiceRow`/
+`copyServiceUrl`/`copyServiceWsUrl`/`openServiceMetadata`/
+`openServiceClass`/`openEntitySetMethod`.
+
+**Forward-compatible expansion.** osg-i7 is building a composing route,
+one `GET` under `/sap/bc/adt/core/http/…`, that lists everything a system
+serves as one tree — `{kind, name, path, text, pack, handler,
+handlerUri, mpc, mpcUri, app, source}` per row, already kind-typed (an
+APP row's own class-shaped field is `app`, a manifest id, never
+`handler`) — replacing five separate reads of `ZOSD_STATUS_SRV` with one
+shape an editor is built to read. It does not exist on `main` yet (open
+PR, `feat/services-tree`, `GET core/http/services`) — `grep -n
+"core/http" tools/adt-facade.mjs` on `main` shows every other `core/http/*`
+route this extension already uses (`unit/object`, `segw/entitysets`,
+`xref/readers`, ...) but not this one. So `lib.js`'s `Osd#services()`
+tries it first and falls back to `ServiceSet` on a 404, silently: this
+client is written to the row shape the route will answer, whether or not
+the server it happens to be talking to has it yet, with nothing to set
+either way. When it lands, three things follow with no further server
+work: a service row's `handlerUri`/`mpcUri` (the ADT class uri) lets a
+class node open by uri directly instead of a workspace glob on the name
+(`readerFilePattern`, the same lookup Q3's "read by" quick pick already
+falls back to); `source` names the declaring file (the `.iwsv.xml`, the
+`.sicf.xml`/`.apc.xml`, or the app's manifest folder) for a context
+action this extension does not offer yet ("Reveal source"); and a
+DAEMON/JOB/TRAN kind, once the route starts naming one, appears as its
+own group with no code change (`groupServices`'s own alphabetical
+fallback) and, if it carries a `handler`, a class node under it
+(`serviceClassNodes`'s own fallback for "everything but APP and OData").
+
+An OData row expands to its DPC then its MPC (`serviceClassNodes`,
+clicking either opens its source), plus, lazily, the entity sets Q2b's
+own map already answers for (`GET core/http/segw/entitysets?class=
+<DPC_EXT>`, fetched only once the row is actually expanded): each set's
+own click opens the DPC at the `<set>_get_entityset` / `<set>_get_entity`
+method's own line, reusing Q2b's `entitySetLenses` rather than a second
+way of finding it. An ICF or an APC row expands to its one handler class
+the same way. APP rows do not expand at all — an app has a manifest, not
+an ADT class.
 
 **Tests**: `test/vscode-launcher.mjs` (registered in `test/suites.json`) —
 pure: `pickPort`/`isFree` over the 3531-3539 range and its exhaustion,

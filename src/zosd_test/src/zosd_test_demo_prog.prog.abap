@@ -63,4 +63,30 @@ FORM count_items CHANGING cv_total TYPE i.
 
 ENDFORM.
 
+* A program's own local test class, the same as a class's -- proof for the
+* VS Code Test Explorer (docs/vscode-extension.md, "Test Explorer groups")
+* that a PROG with FOR TESTING is found and runs through the same route
+* CLAS already does (tools/adt-facade.mjs core/http/unit/object, type=PROG).
+CLASS ltcl_zosd_test_demo_prog DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
+
+  PRIVATE SECTION.
+    METHODS counter_adds FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_zosd_test_demo_prog IMPLEMENTATION.
+
+  METHOD counter_adds.
+    DATA lo_counter TYPE REF TO lcl_counter.
+
+    CREATE OBJECT lo_counter.
+    lo_counter->add( iv_value = 3 ).
+    lo_counter->add( iv_value = 4 ).
+    cl_abap_unit_assert=>assert_equals(
+      act = lo_counter->total( )
+      exp = 7 ).
+  ENDMETHOD.
+
+ENDCLASS.
+
 INCLUDE zosd_test_demo_inc.
