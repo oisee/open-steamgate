@@ -773,7 +773,7 @@ test("the launchpad carries the ABAP-served demos, wired to the ICF paths", asyn
     await expect(page.getByText("a demo, in ABAP")).toBeVisible({timeout: 60000});
     const logo = page.locator("#shell-header-icon");
     await expect(logo).toHaveAttribute("alt", "PASS logo");
-    await expect(logo).toHaveAttribute("src", /\/app\/osd-airship\.png$/);
+    await expect(logo).toHaveAttribute("src", /\/app\/osd-airship\.svg$/);
     await expect.poll(() => logo.evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
     expect(await logo.evaluate((img) => ({width: img.clientWidth, height: img.clientHeight})))
       .toEqual({width: 60, height: 30});
