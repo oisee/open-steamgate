@@ -1,0 +1,17 @@
+{
+  "name": "gui-examples",
+  "description": "Three of Lars's open-abap-gui example reports (converter spike): a plain WRITE report, a selection screen with a default value, and an interactive list with AT LINE-SELECTION",
+  "order": 46,
+  "abap": ["upstream"],
+  "sources": [
+    {
+      "folder": "upstream",
+      "repo": "https://github.com/oisee/open-abap-gui",
+      "ref": "31cc8b3177569afb66c88a4ec9fd2e640a353877",
+      "path": "examples",
+      "exclude": [
+        "^(?!zgg_ex_(?:001|012|043)\\.prog\\.abap$).*$"
+      ]
+    }
+  ]
+}

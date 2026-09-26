@@ -190,6 +190,9 @@ function runtimeModuleClosure() {
  *  `folder` starts with `/.local/lars/` -- the only lib shape this repo
  *  actually has: a folder relative to the root, with an optional `files`
  *  glob list. */
+/** Parts of a lib outside its `files` filter that a generator imports. */
+const LIB_EXTRA = {"open-abap-gui": ["converter/src", "converter/package.json"]};
+
 function libEntries() {
   const config = JSON.parse(readFileSync(join(ROOT, "abap_transpile.json"), "utf8"));
   return config.libs.map((lib) => ({
@@ -243,6 +246,15 @@ function copySeedTree(seedRoot) {
     if (lib.files !== undefined) {
       const n = copyFiltered(srcDir, destDir, lib.files);
       log(`lib ${lib.name}: ${n} files (files: filter)`);
+      // a lib's `files` filter names the ABAP the transpiler reads, not the
+      // JavaScript a generator imports: tools/osd-gui-convert.mjs loads
+      // open-abap-gui's converter from converter/src at build time, so the
+      // seed carries it too, or the first build of an install fails on it
+      const extra = LIB_EXTRA[lib.name] ?? [];
+      for (const rel of extra) {
+        copyReal(join(srcDir, rel), join(destDir, rel));
+        log(`lib ${lib.name}: + ${rel} (read by a generator)`);
+      }
     } else {
       copyExcludingTop(srcDir, destDir, ["node_modules", "output", "test", ".git"]);
       log(`lib ${lib.name}: whole folder minus its own node_modules/output/test`);

@@ -63,6 +63,10 @@ export const GENERATORS = [
   // building at all
   ["amdp-tablefunc.mjs"],
   ["osd-fm-registry.mjs"],
+  // classic reports through open-abap-gui's converter, wired as transactions
+  // (docs/gui-reports.md); before the transaction registry, which is what
+  // picks up the *.tran.xml this writes
+  ["osd-gui-convert.mjs"],
   ["osd-tran-registry.mjs"],
 ];
 

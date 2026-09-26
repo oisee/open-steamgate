@@ -60,6 +60,9 @@ export class NotWarm extends Error {
 //     source for those bodies;
 //   - osd-tran-registry: whether a class names the transaction contract in
 //     an INTERFACES line, and a report's source;
+//   - osd-gui-convert (2026-09-26): a report's source (*.prog.abap), which
+//     the rule below already sends cold -- only a class or an interface is
+//     ever warm;
 //   - cds2ddic, stg-compile, segw-*, osd-bsp-registry, osd-fm-registry:
 //     other object types (DDLS, TABL, IWSV, WAPA, FUGR, YAML), and which
 //     class files exist.
@@ -72,7 +75,7 @@ export class NotWarm extends Error {
 export const GENERATORS_READ = [
   "osd-transpiler.mjs", "osd-inputs.mjs", "osd-ddic-binary.mjs", "cds2ddic.mjs", "stg-compile.mjs",
   "segw-registry.mjs", "segw-shlp.mjs", "osd-bsp-registry.mjs", "amdp-gen.mjs", "amdp-tablefunc.mjs",
-  "osd-fm-registry.mjs", "osd-tran-registry.mjs",
+  "osd-fm-registry.mjs", "osd-gui-convert.mjs", "osd-tran-registry.mjs",
 ];
 
 const SOURCE = /\.(clas(\.(locals_imp|locals_def|testclasses|macros))?\.abap|intf\.abap)$/i;
