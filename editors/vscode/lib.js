@@ -5,6 +5,8 @@
 "use strict";
 
 const path = require("node:path");
+const {pathToFileURL} = require("node:url");
+const {packNameOf} = require("./launcher.js");
 
 // Quick start's choices live here rather than in the command handler so a
 // future preset can add a row without duplicating its settings in UI code.
@@ -107,6 +109,108 @@ function systemOverviewModel(input = {}) {
 // `zprog.prog.abap`; a namespace is `#ns#zcl_x`
 const FILE = /^(.+?)\.(clas|prog)(?:\.(locals_def|locals_imp|macros|testclasses))?\.abap$/i;
 const INCLUDE = {locals_def: "definitions", locals_imp: "implementations", macros: "macros", testclasses: "testclasses"};
+
+/** The Node attach configuration used by the extension and by
+ *  docs/debugging-abap.md. `restart` lets vscode-js-debug reconnect when
+ *  the supervised ABAP process recycles on the same inspector port. */
+function debuggerConfiguration(port, {target = "system", restart = true, root, storageDir, layers = []} = {}) {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`invalid inspector port: ${port}`);
+  }
+  const normalizedRoot = typeof root === "string" && root !== "" ? root.replaceAll("\\", "/").replace(/\/+$/, "") : undefined;
+  const buildRoot = normalizedRoot === undefined ? "${workspaceFolder}/build" : `${normalizedRoot}/build`;
+  const modulesRoot = normalizedRoot === undefined ? "${workspaceFolder}/node_modules" : `${normalizedRoot}/node_modules`;
+  const sourceMapPathOverrides = {};
+  if (storageDir !== undefined && normalizedRoot !== undefined) {
+    for (const layer of layers) {
+      const packSource = path.join(storageDir, "packs", packNameOf(layer.folder), "src");
+      const source = `${layer.srcDir.replaceAll("\\", "/").replace(/\/+$/, "")}/*`;
+      // The transpiler names each source relative to build/by-input/<generation>/output.
+      // js-debug applies overrides to that entry before resolving it to a file URL.
+      const generated = path.join(root, "build", "by-input", "generation", "output");
+      const relativeSource = path.relative(generated, packSource).replaceAll("\\", "/");
+      sourceMapPathOverrides[`${relativeSource}/*`] = source;
+      sourceMapPathOverrides[`${pathToFileURL(packSource).href}/*`] = source;
+    }
+  }
+  return {
+    name: `OSD: ${target === "unit" ? "ABAP Unit" : "ABAP"} (${port})`,
+    type: "node",
+    request: "attach",
+    address: "127.0.0.1",
+    port,
+    restart,
+    ...(target === "unit" ? {continueOnAttach: true} : {}),
+    timeout: 30000,
+    resolveSourceMapLocations: [`${buildRoot}/**`, "!**/node_modules/**"],
+    skipFiles: ["<node_internals>/**", `${modulesRoot}/@abaplint/runtime/**`],
+    outFiles: [`${buildRoot}/**/*.mjs`],
+    ...(Object.keys(sourceMapPathOverrides).length ? {sourceMapPathOverrides} : {}),
+    customDescriptionGenerator: "this && this.get ? (this.getQualifiedName && this.getQualifiedName() ? this.getQualifiedName() + ' ' : '') + JSON.stringify(this.get()) : undefined",
+  };
+}
+
+/** Pure attach lifecycle policy. A supervised runtime restart keeps the
+ *  same inspector port, so the existing restart-enabled debug session owns
+ *  reconnection; stopping the extension-launched system ends that session.
+ *  Detached unit children get their own one-shot attach session. */
+function debugAttachPlan(state = {}, event = {}) {
+  const current = state.systemPort;
+  if (event.type === "system-attached" && Number.isInteger(event.port)) {
+    return {state: {systemPort: event.port}, actions: []};
+  }
+  if (event.type === "system-session-ended") {
+    return {state: current === event.port ? {systemPort: undefined} : state, actions: []};
+  }
+  if (event.type === "system-started") {
+    if (event.enabled !== true || !Number.isInteger(event.port) || event.port < 1 || event.port > 65535) {
+      return {state: {systemPort: undefined}, actions: current === undefined ? [] : [{type: "stop", target: "system", port: current}]};
+    }
+    if (current === event.port) return {state, actions: []};
+    return {
+      state,
+      actions: [
+        ...(current === undefined ? [] : [{type: "stop", target: "system", port: current}]),
+        {type: "attach", target: "system", port: event.port, restart: true},
+      ],
+    };
+  }
+  if (event.type === "system-stopped") {
+    return {state: {systemPort: undefined}, actions: current === undefined ? [] : [{type: "stop", target: "system", port: current}]};
+  }
+  if (event.type === "unit-started" && Number.isInteger(event.port) && event.port >= 1 && event.port <= 65535) {
+    return {state, actions: [{type: "attach", target: "unit", port: event.port, restart: false}]};
+  }
+  return {state, actions: []};
+}
+
+/** Start the paused child request while VS Code attaches. A rejected attach
+ * or a cancelled Test Explorer run aborts the HTTP request, which tells the
+ * façade to kill that child. */
+async function runWithDebuggerAttach(attach, execute, token) {
+  const cancellation = new AbortController();
+  const subscription = token?.onCancellationRequested(() => cancellation.abort());
+  if (token?.isCancellationRequested) cancellation.abort();
+  const attached = Promise.resolve().then(attach).then((started) => {
+    if (started !== true) throw new Error("VS Code could not attach to the ABAP Unit child");
+  }).catch((error) => {
+    cancellation.abort();
+    throw error;
+  });
+  const response = Promise.resolve().then(() => execute(cancellation.signal));
+  try {
+    const [, result] = await Promise.all([attached, response]);
+    return result;
+  } finally {
+    subscription?.dispose();
+  }
+}
+
+/** VS Code does not expose its global activation bit to extensions. A label
+ *  without a local shadow bit stays true when the built-in command is used. */
+function breakpointToggleText() {
+  return "$(debug) Toggle ABAP breakpoints";
+}
 const SUFFIX = Object.fromEntries(Object.entries(INCLUDE).map(([suffix, include]) => [include, suffix]));
 
 // Same shape as FILE, plus interfaces: an interface has no ABAP Unit to run,
@@ -169,8 +273,8 @@ class Osd {
     this.cookie = undefined;
   }
 
-  async #csrf() {
-    const res = await this.fetch(`${this.url}/sap/bc/adt/core/discovery`, {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
+  async #csrf(signal) {
+    const res = await this.fetch(`${this.url}/sap/bc/adt/core/discovery`, {method: "HEAD", headers: {"x-csrf-token": "fetch"}, signal});
     if (res.status !== 200) throw new Error(`osd at ${this.url}: CSRF fetch answered ${res.status}`);
     this.token = res.headers.get("x-csrf-token") ?? undefined;
     const cookies = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
@@ -180,7 +284,7 @@ class Osd {
   async request(route, options = {}) {
     const write = options.method !== undefined && options.method !== "GET" && options.method !== "HEAD";
     for (let attempt = 0; ; attempt++) {
-      if (write && this.token === undefined) await this.#csrf();
+      if (write && this.token === undefined) await this.#csrf(options.signal);
       const headers = {...(options.headers ?? {})};
       if (write) {
         headers["x-csrf-token"] = this.token;
@@ -408,14 +512,15 @@ class Osd {
    *  test in its usual throwaway SQLite file, unchanged. Sent in the body,
    *  never the query string: it may carry a password, and a query string
    *  ends up in server logs where a body does not. */
-  run(object, testClass, method, dbEnv) {
+  run(object, testClass, method, dbEnv, inspectPort, waitForDebugger = false, signal) {
     let route = `/sap/bc/adt/core/http/unit/object/run?type=${encodeURIComponent(object.type)}&name=${encodeURIComponent(object.name)}`;
     if (testClass) route += `&testClass=${encodeURIComponent(testClass)}`;
     if (method) route += `&method=${encodeURIComponent(method)}`;
-    const options = {method: "POST"};
-    if (dbEnv !== undefined) {
+    const options = {method: "POST", signal};
+    if (dbEnv !== undefined || inspectPort !== undefined) {
       options.headers = {"content-type": "application/json"};
-      options.body = JSON.stringify({dbEnv});
+      options.body = JSON.stringify({...(dbEnv === undefined ? {} : {dbEnv}),
+        ...(inspectPort === undefined ? {} : {inspectPort, waitForDebugger})});
     }
     return this.json(route, options);
   }
@@ -1699,6 +1804,7 @@ function serviceClassNodes(row) {
 }
 
 module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
+  debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText,
   warmStatusText, activationBuildText, closureTestsText,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,

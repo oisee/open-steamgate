@@ -32,6 +32,46 @@ whatever `NODE_OPTIONS` the instance already carries rather than replacing
 it. The façade's own process is never touched, so there is no port to race
 for.
 
+## VS Code extension-managed debugging
+
+Set `osd.debug` to `true` before using **osd: Start**. The launcher picks a
+free loopback inspector port, sets `OSD_INSPECT` only on the launched system,
+and starts VS Code's Node attach configuration itself. The child that serves
+ABAP is the process being debugged; the façade remains uninspected. A normal
+**Full rebuild** keeps the same port where it is free, so the attach session's
+`restart` option reconnects when the new serving child starts. Warm activation
+recycles that same child port and uses the same reconnect path. Debug launches
+use one serving worker because multiple workers cannot share one inspector
+port.
+For a packaged install, workspace ABAP is compiled through symlinks in the
+extension's storage. The attach configuration maps those pack source-map URLs
+back to the workspace folders, so a breakpoint in the open editor binds to
+the compiled line.
+
+ABAP Unit uses a separate inspector for each detached test child. The child
+gets `--inspect=127.0.0.1:<port>` and `--enable-source-maps`. The extension
+starts the attach session before requesting the detached run. The child uses
+`--inspect-brk`, so it waits at entry until the debugger has installed
+breakpoints; js-debug's `continueOnAttach` then resumes it. `test/vscode-debug.mjs`
+exercises this ordering against a real detached run. The Test Explorer's **Debug** profile always uses this
+path. With `osd.debug` enabled, the ordinary Test Explorer Run profile and F8
+unit runs also attach automatically.
+
+**Run with debugger** is available beside F8's ordinary Run action. The
+entity-set CodeLens and classrun command also have debugger variants; those
+execute in the persistent system, so that system must have been started by
+the extension with `osd.debug` enabled. Turning the setting on after a system
+has started takes effect on its next start. The status-bar item **Toggle ABAP
+breakpoints** runs VS Code's global breakpoint activation command;
+it leaves the breakpoint markers in place while temporarily disabling or
+reactivating them. VS Code does not expose this global activation state to
+extensions, so the item does not claim an on/off state that could disagree
+with the built-in toggle.
+
+When `osd.debug` is false, the launcher removes inherited `OSD_INSPECT` from
+its child environment. Ordinary test children get no inspector flags unless
+the Debug profile or a debugger run command requested one.
+
 ```
 OSD_INSPECT=9229 npm start
 ```
@@ -143,12 +183,12 @@ inspected after the fact.
 }
 ```
 
-The attach config is the reliable one: start the server by hand
+The attach config is the manual alternative: start the server by hand
 (`OSD_INSPECT=9229 npm start`, or `npm run osd:serve` with the same env)
 and attach to port 9229. The launch config runs `npm start` from VS Code
 itself and relies on `autoAttachChildProcesses` to notice the child's
-inspector; unverified here, since it needs the VS Code UI to observe the
-attach actually happen (see below).
+inspector. With the extension, no `launch.json` is needed for systems it
+starts itself.
 
 `customDescriptionGenerator` was checked the same way as the breakpoint,
 not through the UI: the expression above, wrapped as
@@ -160,21 +200,21 @@ and `42` rather than `[object Object]` or throwing.
 
 ## Not yet
 
-- **`--inspect`, not `--inspect-brk`.** The child does not pause at start,
+- **The serving child uses `--inspect`, not `--inspect-brk`.** It does not pause at start,
   so a breakpoint on code that only runs during boot (the ICF registry
   apply, the cross-reference seed, the demo data write) has already run by
   the time a debugger attaches. `OSD_INSPECT_BRK` would be the same change
-  with `--inspect-brk`; not added, because nothing needed it yet.
-- **VS Code itself is unverified.** Everything above was proven by speaking
-  CDP directly (the same protocol, not the same client): whether
-  `vscode-js-debug` actually resolves a breakpoint placed by clicking in a
-  `.abap` file to the generated location the way this doc's raw
-  `setBreakpointByUrl` call did by hand, whether `autoAttachChildProcesses`
-  actually notices the child, and whether the Variables pane renders
-  `customDescriptionGenerator`'s output, all need the UI this environment
-  does not have.
+  with `--inspect-brk`; not added for the serving child. Detached debug tests
+  use `--inspect-brk` because their test methods can finish before an attach.
+- **The VS Code UI is still unverified here.** `test/vscode-debug.mjs` starts
+  a detached ABAP Unit child, attaches to it over CDP, sets a breakpoint
+  from the test method's source map and asserts that the child pauses on that
+  line. This verifies the inspector and source-map path without a UI; whether
+  a click in the editor resolves identically and how the Variables pane
+  renders `customDescriptionGenerator` still need an interactive VS Code
+  session.
 - **A pooled server (`OSD_WORKERS>1`).** `RuntimePool` builds one
   `ServingRuntime` per worker from the same options, so `OSD_INSPECT` would
-  point every worker's `NODE_OPTIONS` at the same port; only the first
-  binds it, checked above for the plain-`NODE_OPTIONS` case and true here
-  for the same reason. Debug with one worker.
+  point every worker's `NODE_OPTIONS` at the same port; the extension sets
+  `OSD_WORKERS=1` for its debug launches. A manually started debug server
+  still needs one worker.

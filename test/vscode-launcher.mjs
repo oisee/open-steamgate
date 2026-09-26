@@ -17,6 +17,7 @@ import {once} from "node:events";
 
 const {
   PORT_RANGE, isFree, pickPort, classify,
+  pickInspectorPort, debugSystemEnv,
   looksLikeAbapGitFolder, isOpenSteamgateCheckout, decideStartTarget,
   detectWorkspaceLayers, packNameOf, ensureWorkspacePacks,
   waitForServing, servingOnce, terminate, Launcher,
@@ -60,6 +61,17 @@ describe("editors/vscode/launcher.js: ports", function () {
     } finally {
       await new Promise((r) => server.close(r));
     }
+  });
+
+  it("chooses a free ephemeral inspector port and only enables OSD_INSPECT when requested", async () => {
+    const port = await pickInspectorPort();
+    expect(port).to.be.within(1, 65535);
+    expect(await isFree(port)).to.equal(true);
+    expect(debugSystemEnv({OSD_INSPECT: "9229", OSD_WORKERS: "4"}, false))
+      .to.deep.equal({OSD_WORKERS: "4"});
+    expect(debugSystemEnv({OSD_INSPECT: "9229", OSD_WORKERS: "4"}, true, port))
+      .to.deep.equal({OSD_INSPECT: String(port), OSD_WORKERS: "1"});
+    expect(() => debugSystemEnv({}, true, 0)).to.throw(/invalid inspector port/);
   });
 
   it("classifies an empty-log no-free-port launcher error", async () => {

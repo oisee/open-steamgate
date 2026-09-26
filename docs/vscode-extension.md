@@ -1327,6 +1327,36 @@ warm swap when the registry primed, and that the cold reason is surfaced,
 verbatim, when it did not (this checkout's pinned transpiler: `the
 transpiler has no \`only\` option (abaplint/transpiler#1900)`).
 
+## Debugging ABAP
+
+`osd.debug` defaults to `false`. When enabled before **osd: Start**, the
+launcher selects a free inspector port for the ABAP-serving child and the
+extension starts a Node attach session with the same source-map settings as
+[`docs/debugging-abap.md`](debugging-abap.md). The session reconnects when
+that child recycles or a full rebuild starts it again. Debug launches set
+`OSD_WORKERS=1`, since runtime workers cannot share one inspector port.
+For packaged installs, the attach profile maps source paths in generated
+workspace-layer packs back to the folder open in the editor.
+
+The Test Explorer has **Run** and **Debug** profiles. Debug starts the
+detached ABAP Unit child with its own free `--inspect-brk` port and
+`--enable-source-maps`; js-debug resumes it after attaching and installing
+breakpoints. With
+`osd.debug` enabled, ordinary Test Explorer runs and F8 unit runs use the
+same attach path automatically. F8 also has **osd: Run with debugger**;
+entity-set CodeLens and classrun each have a debugger variant. Those run in
+the serving child and need a system started by the extension with
+`osd.debug` enabled.
+
+The status bar's **Toggle ABAP breakpoints** item calls VS Code's global
+breakpoint activation command. It stops or resumes reactions to breakpoints
+without removing their markers. Its label does not claim the global state,
+which VS Code's extension API does not expose. The attach policy and configuration are pure
+functions in `editors/vscode/lib.js`; the live CDP test
+`test/vscode-debug.mjs` pauses on a mapped line in an ABAP Unit test method.
+The pure attach transitions are unit-tested in `test/vscode-extension.mjs`,
+and port/environment selection in `test/vscode-launcher.mjs`.
+
 ## Next
 
 - Smart F8 / Runner, the rest of it: create/update/delete entity, a function

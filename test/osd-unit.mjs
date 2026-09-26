@@ -203,6 +203,19 @@ ENDCLASS.
 // the tests above; this is only the mapping unitChildEnv does before a
 // child is ever spawned.
 describe("tools/osd-unit: unitChildEnv (runDetached's own database, or a different one)", function () {
+  it("adds the inspector and source maps only to a requested detached debug run", () => {
+    const parent = {STG_DB: "file", NODE_OPTIONS: "--trace-warnings"};
+    const plain = unitChildEnv({dbEnv: {STG_DB: "hana"}}, parent);
+    expect(plain.env.NODE_OPTIONS).to.equal("--trace-warnings");
+    const debug = unitChildEnv({dbEnv: {STG_DB: "hana"}, inspectPort: 9444}, parent);
+    expect(debug.env.NODE_OPTIONS).to.equal("--trace-warnings --inspect=127.0.0.1:9444 --enable-source-maps");
+    const gated = unitChildEnv({inspectPort: 9444, waitForDebugger: true}, parent);
+    expect(gated.env.NODE_OPTIONS).to.equal("--trace-warnings --inspect-brk=127.0.0.1:9444 --enable-source-maps");
+    expect(debug.env.HANA_PASSWORD).to.equal(undefined);
+    expect(debug.ownPath).to.equal(undefined);
+    expect(() => unitChildEnv({inspectPort: 0}, parent)).to.throw(/invalid inspector port/);
+  });
+
   it("no dbEnv at all: file, always, unchanged from before this existed", () => {
     const {env, ownPath} = unitChildEnv({}, {STG_DB: "file", PATH: "/bin"});
     expect(env).to.include({STG_DB: "file", PATH: "/bin"});

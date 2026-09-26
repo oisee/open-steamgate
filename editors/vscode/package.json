@@ -129,6 +129,11 @@
           "type": "boolean",
           "default": false,
           "description": "STG_DB_FRESH=1: drop and rebuild osd.database.hana.schema on the next start instead of refusing a schema this build did not stamp. osd.start turns this on itself (and asks first) when a start fails with that refusal."
+        },
+        "osd.debug": {
+          "type": "boolean",
+          "default": false,
+          "description": "Attach VS Code's Node debugger to systems osd.start launches and to detached ABAP Unit children. The Test Explorer's Debug profile works when this is off; classrun and EntitySet debugger commands need a debug-enabled system already running."
         }
       }
     },
@@ -157,7 +162,11 @@
       {"command": "osd.check", "title": "osd: Check"},
       {"command": "osd.activate", "title": "osd: Activate"},
       {"command": "osd.run", "title": "osd: Run", "icon": "$(play)"},
+      {"command": "osd.runWithDebugger", "title": "osd: Run with debugger", "icon": "$(debug)"},
       {"command": "osd.classrun", "title": "osd: Run as ABAP Application (Console)"},
+      {"command": "osd.classrunWithDebugger", "title": "osd: Run as ABAP Application with debugger"},
+      {"command": "osd.callEntitySetWithDebugger", "title": "osd: Call EntitySet with debugger"},
+      {"command": "osd.toggleBreakpoints", "title": "osd: Toggle ABAP breakpoints"},
       {"command": "osd.newSqlNotebook", "title": "osd: New SQL notebook"},
       {"command": "osd.gettingStarted", "title": "osd: Getting started"},
       {"command": "osd.quickStart", "title": "osd: Quick start (defaults)", "icon": "$(rocket)"},
@@ -177,7 +186,8 @@
     ],
     "menus": {
       "editor/title": [
-        {"command": "osd.run", "when": "resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/", "group": "navigation"}
+        {"command": "osd.run", "when": "resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/", "group": "navigation@1"},
+        {"command": "osd.runWithDebugger", "when": "resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/", "group": "navigation@2"}
       ],
       "view/title": [
         {"command": "osd.start", "when": "view == osdTree", "group": "navigation@1"},

@@ -155,6 +155,7 @@
     "test/unit-run.mjs",
     "test/osd-dumps.mjs",
     "test/vscode-extension.mjs",
+    "test/vscode-debug.mjs",
     "test/vscode-launcher.mjs",
     "test/vscode-vsix.mjs",
     "test/vscode-warm.mjs",

@@ -25,7 +25,8 @@ const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseChec
   serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
   warmStatusText, activationBuildText, closureTestsText,
   PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext, SYSTEM_STATUS_SETS,
-  odataV2Results, systemOverviewModel} =
+  odataV2Results, systemOverviewModel,
+  debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
 const {overviewStatusSection, systemOverviewHtml} = createRequire(import.meta.url)("../editors/vscode/system-overview.js");
 import {implementsClassrun as facadeImplementsClassrun} from "../tools/osd-classrun.mjs";
@@ -35,7 +36,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const Module = require("node:module");
 
-function loadSystemController(vscodeApi) {
+function loadExtension(vscodeApi) {
   const extensionPath = require.resolve("../editors/vscode/extension.js");
   delete require.cache[extensionPath];
   const originalLoad = Module._load;
@@ -44,10 +45,14 @@ function loadSystemController(vscodeApi) {
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
-    return require(extensionPath).SystemController;
+    return require(extensionPath);
   } finally {
     Module._load = originalLoad;
   }
+}
+
+function loadSystemController(vscodeApi) {
+  return loadExtension(vscodeApi).SystemController;
 }
 
 function vscodeStub(settings = {}) {
@@ -91,6 +96,10 @@ function vscodeStub(settings = {}) {
       externalUris.push(uri.toString());
       return uri;
     }},
+    debug: {
+      sessions: [],
+      onDidTerminateDebugSession: () => ({dispose() {}}),
+    },
     workspace: {
       workspaceFolders: [],
       getConfiguration: () => ({get: (name, fallback) => settings[name] ?? fallback, update: async () => {}}),
@@ -114,6 +123,7 @@ function vscodeStub(settings = {}) {
 
 function controllerContext() {
   return {
+    subscriptions: [],
     globalStorageUri: {fsPath: path.join(tmpdir(), "osd-controller-test")},
     extensionUri: {fsPath: path.join(tmpdir(), "osd-controller-test-no-bundle")},
     extension: {packageJSON: {version: "test"}},
@@ -121,6 +131,230 @@ function controllerContext() {
 }
 
 describe("editors/vscode: the extension's logic", function () {
+  it("builds the attach profile and keeps a supervised restart on one debugger session", () => {
+    const config = debuggerConfiguration(9341);
+    expect(config).to.include({name: "OSD: ABAP (9341)", type: "node", request: "attach", address: "127.0.0.1", port: 9341, restart: true, timeout: 30000});
+    expect(config.resolveSourceMapLocations).to.deep.equal(["${workspaceFolder}/build/**", "!**/node_modules/**"]);
+    expect(config.outFiles).to.deep.equal(["${workspaceFolder}/build/**/*.mjs"]);
+    expect(debuggerConfiguration(9342, {target: "unit", restart: false}))
+      .to.include({name: "OSD: ABAP Unit (9342)", restart: false, continueOnAttach: true});
+    const externalRoot = debuggerConfiguration(9343, {root: "C:\\workspace\\osd"});
+    expect(externalRoot.outFiles).to.deep.equal(["C:/workspace/osd/build/**/*.mjs"]);
+    expect(externalRoot.skipFiles).to.include("C:/workspace/osd/node_modules/@abaplint/runtime/**");
+    expect(() => debuggerConfiguration(0)).to.throw(/invalid inspector port/);
+
+    const first = debugAttachPlan({}, {type: "system-started", enabled: true, port: 9341});
+    expect(first.actions).to.deep.equal([{type: "attach", target: "system", port: 9341, restart: true}]);
+    const attached = debugAttachPlan(first.state, {type: "system-attached", port: 9341});
+    const recycled = debugAttachPlan(attached.state, {type: "system-started", enabled: true, port: 9341});
+    expect(recycled.actions).to.deep.equal([]);
+    expect(recycled.state).to.equal(attached.state);
+    const stopped = debugAttachPlan(recycled.state, {type: "system-stopped"});
+    expect(stopped.actions).to.deep.equal([{type: "stop", target: "system", port: 9341}]);
+    const restarted = debugAttachPlan(stopped.state, {type: "system-started", enabled: true, port: 9341});
+    expect(restarted.actions).to.deep.equal([{type: "attach", target: "system", port: 9341, restart: true}]);
+    expect(debugAttachPlan(restarted.state, {type: "unit-started", port: 9342}).actions)
+      .to.deep.equal([{type: "attach", target: "unit", port: 9342, restart: false}]);
+    expect(breakpointToggleText()).to.equal("$(debug) Toggle ABAP breakpoints");
+  });
+
+  it("retries a failed attach and a manually closed system session", () => {
+    const pending = debugAttachPlan({}, {type: "system-started", enabled: true, port: 9341});
+    expect(pending.state.systemPort).to.equal(undefined);
+    expect(debugAttachPlan(pending.state, {type: "system-started", enabled: true, port: 9341}).actions)
+      .to.deep.equal(pending.actions);
+    const attached = debugAttachPlan(pending.state, {type: "system-attached", port: 9341});
+    expect(attached.state.systemPort).to.equal(9341);
+    const closed = debugAttachPlan(attached.state, {type: "system-session-ended", port: 9341});
+    expect(closed.state.systemPort).to.equal(undefined);
+    expect(debugAttachPlan(attached.state, {type: "system-session-ended", port: 9342}).state)
+      .to.equal(attached.state);
+    expect(debugAttachPlan(closed.state, {type: "system-started", enabled: true, port: 9341}).actions)
+      .to.deep.equal(pending.actions);
+  });
+
+  it("propagates attach failure to the debug run and aborts its paused child request", async () => {
+    for (const failure of [false, new Error("attach rejected")]) {
+      let requestSignal;
+      const execute = (signal) => new Promise((resolve, reject) => {
+        requestSignal = signal;
+        signal.addEventListener("abort", () => reject(new Error("request aborted")), {once: true});
+      });
+      const attach = () => failure === false ? false : Promise.reject(failure);
+      try {
+        await runWithDebuggerAttach(attach, execute);
+        throw new Error("expected attach failure");
+      } catch (error) {
+        expect(error.message).to.equal(failure === false
+          ? "VS Code could not attach to the ABAP Unit child" : "attach rejected");
+      }
+      expect(requestSignal.aborted).to.equal(true);
+    }
+  });
+
+  it("aborts an active debug request when Test Explorer cancels the run", async () => {
+    let cancel;
+    let disposed = false;
+    let requestSignal;
+    const token = {
+      isCancellationRequested: false,
+      onCancellationRequested(listener) {
+        cancel = () => {
+          this.isCancellationRequested = true;
+          listener();
+        };
+        return {dispose: () => { disposed = true; }};
+      },
+    };
+    const execute = (signal) => new Promise((resolve, reject) => {
+      requestSignal = signal;
+      signal.addEventListener("abort", () => reject(new Error("request aborted")), {once: true});
+    });
+    const run = runWithDebuggerAttach(() => true, execute, token);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(requestSignal.aborted).to.equal(false);
+    cancel();
+    try {
+      await run;
+      throw new Error("expected cancelled request");
+    } catch (error) {
+      expect(error.message).to.equal("request aborted");
+    }
+    expect(requestSignal.aborted).to.equal(true);
+    expect(disposed).to.equal(true);
+  });
+
+  it("stops a multi-method debug run before attaching the next selection after cancellation", async () => {
+    const api = vscodeStub({home: ROOT, "tests.showSystem": false});
+    const source = path.join(ROOT, "src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
+    api.Uri.file = (fsPath) => ({fsPath});
+    api.Range = class {
+      constructor() {}
+    };
+    api.TestMessage = class {
+      constructor(message) { this.message = message; }
+    };
+    api.TestRunProfileKind = {Run: 1, Debug: 2};
+    api.workspace.findFiles = async () => [api.Uri.file(source)];
+    api.workspace.getWorkspaceFolder = () => ({uri: api.Uri.file(ROOT)});
+    api.workspace.createFileSystemWatcher = () => ({onDidCreate() {}, onDidDelete() {}, onDidChange() {}, dispose() {}});
+    api.commands = {registerCommand: () => ({dispose() {}})};
+    const collection = (parent) => {
+      const items = new Map();
+      return {
+        get size() { return items.size; },
+        get: (id) => items.get(id),
+        add(item) { item.parent = parent; items.set(item.id, item); },
+        replace(next) { items.clear(); next.forEach((item) => this.add(item)); },
+        [Symbol.iterator]: () => items[Symbol.iterator](),
+      };
+    };
+    const profiles = new Map();
+    const events = [];
+    const controller = {
+      items: collection(undefined),
+      createTestItem(id, label, uri) {
+        const item = {id, label, uri};
+        item.children = collection(item);
+        return item;
+      },
+      createRunProfile(name, kind, handler) { profiles.set(name, handler); },
+      createTestRun() {
+        return Object.fromEntries(["started", "passed", "failed", "skipped", "errored", "appendOutput", "end"]
+          .map((name) => [name, (item) => events.push([name, item?.id])]));
+      },
+      dispose() {},
+    };
+    api.tests = {createTestController: () => controller};
+    const {testExplorer} = loadExtension(api);
+    const originalDiscover = Osd.prototype.discover;
+    const originalRun = Osd.prototype.run;
+    const runs = [];
+    const attaches = [];
+    const cancellationToken = () => {
+      const listeners = new Set();
+      return {
+        isCancellationRequested: false,
+        get listenerCount() { return listeners.size; },
+        onCancellationRequested(listener) {
+          listeners.add(listener);
+          return {dispose: () => listeners.delete(listener)};
+        },
+        cancel() {
+          this.isCancellationRequested = true;
+          for (const listener of listeners) listener();
+        },
+      };
+    };
+    let token = cancellationToken();
+    let pickPort = async () => 9341;
+    Osd.prototype.discover = async () => ({classes: [{name: "LTCL_SCAN", include: "testclasses", line: 1,
+      methods: [{name: "FIRST", line: 2}, {name: "SECOND", line: 3}]}]});
+    Osd.prototype.run = (object, testClass, method, dbEnv, inspectPort, waitForDebugger, signal) => {
+      runs.push({method, inspectPort, waitForDebugger});
+      if (signal.aborted) return Promise.reject(new Error("request aborted"));
+      return new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("request aborted")), {once: true});
+        setImmediate(() => token.cancel());
+      });
+    };
+    let explorer;
+    try {
+      explorer = testExplorer(controllerContext(), {appendLine() {}}, {
+        attachUnitDebugger: (event) => {
+          attaches.push(event);
+          return true;
+        },
+        pickUnitInspectorPort: () => pickPort(),
+      });
+      await controller.resolveHandler();
+      const object = controller.items.get("group:project").children.get("CLAS:ZCL_OSD_ABAP_TOKENS");
+      expect(object).not.to.equal(undefined);
+      await controller.resolveHandler(object);
+      const methods = [...object.children.get("CLAS:ZCL_OSD_ABAP_TOKENS/LTCL_SCAN").children].map(([, item]) => item);
+      await profiles.get("Debug")({include: methods}, token);
+      expect(runs).to.have.lengthOf(1);
+      expect(runs[0]).to.include({method: "FIRST", inspectPort: 9341, waitForDebugger: true});
+      expect(attaches).to.have.lengthOf(1);
+      expect(attaches[0]).to.include({type: "unit-started", port: runs[0].inspectPort});
+      expect(events.filter(([name]) => name === "started").map(([, id]) => id)).to.deep.equal([methods[0].id]);
+      expect(events.filter(([name]) => name === "errored").map(([, id]) => id)).to.deep.equal([methods[0].id]);
+      expect(events.at(-1)[0]).to.equal("end");
+      expect(token.listenerCount).to.equal(0);
+
+      token = cancellationToken();
+      pickPort = async () => {
+        token.cancel();
+        return 9342;
+      };
+      runs.length = 0;
+      attaches.length = 0;
+      events.length = 0;
+      await profiles.get("Debug")({include: methods}, token);
+      expect(runs).to.have.lengthOf(0);
+      expect(attaches).to.have.lengthOf(0);
+      expect(events.filter(([name]) => name === "started").map(([, id]) => id)).to.deep.equal([methods[0].id]);
+      expect(events.filter(([name]) => name === "skipped").map(([, id]) => id)).to.deep.equal([methods[0].id]);
+      expect(events.at(-1)[0]).to.equal("end");
+    } finally {
+      explorer?.dispose();
+      Osd.prototype.discover = originalDiscover;
+      Osd.prototype.run = originalRun;
+    }
+  });
+
+  it("maps packaged workspace-layer source-map entries to the open folder", () => {
+    const layer = {folder: "/work/project", srcDir: "/work/project/src"};
+    const config = debuggerConfiguration(9341, {root: "/installed/osd", storageDir: "/storage/osd", layers: [layer]});
+    const {packNameOf} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
+    const packSource = `/storage/osd/packs/${packNameOf(layer.folder)}/src`;
+    const relativeSource = path.relative("/installed/osd/build/by-input/generation/output", packSource).replaceAll("\\", "/");
+    expect(config.sourceMapPathOverrides[`${relativeSource}/*`])
+      .to.equal("/work/project/src/*");
+    expect(config.sourceMapPathOverrides[`file://${packSource}/*`])
+      .to.equal("/work/project/src/*");
+  });
+
   it("quick start applies its preset and restarts a running controller before opening the overview", async () => {
     const api = vscodeStub();
     const SystemController = loadSystemController(api);
@@ -264,6 +498,19 @@ describe("editors/vscode: the extension's logic", function () {
         expect(readFileSync(path.join(ROOT, "editors/vscode", step.media.markdown), "utf8")).not.to.equal("");
       }
     }
+  });
+
+  it("contributes each configuration key and command only once", () => {
+    const source = readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8");
+    const manifest = JSON.parse(source);
+    // JSON.parse keeps the last value of a duplicate key, so inspect the
+    // declarations in the source before that information is lost.
+    const properties = source.slice(source.indexOf('"properties": {'), source.indexOf('"notebooks": ['));
+    const keys = [...properties.matchAll(/^\s*"(osd\.[^"]+)":\s*\{/gm)].map((match) => match[1]);
+    expect(keys).to.have.lengthOf(Object.keys(manifest.contributes.configuration.properties).length);
+    expect(new Set(keys).size).to.equal(keys.length);
+    const commands = manifest.contributes.commands.map(({command}) => command);
+    expect(new Set(commands).size).to.equal(commands.length);
   });
 
   it("reads all six existing status OData sets for the overview", async () => {
@@ -1184,6 +1431,13 @@ describe("editors/vscode/lib.js: Osd#run's dbEnv (run tests on a different datab
     expect(post.url).to.not.contain("HANA_PASSWORD");
     expect(post.options.headers["content-type"]).to.equal("application/json");
     expect(JSON.parse(post.options.body)).to.deep.equal({dbEnv: {STG_DB: "hana", HANA_PASSWORD: "s3cret", HANA_SCHEMA: "OSD_TEST"}});
+  });
+
+  it("requests a paused child for a debugger run", async () => {
+    const {client, calls} = fakeOsd();
+    await client.run({type: "CLAS", name: "ZCL_X"}, "LTCL_A", "M1", undefined, 9444, true);
+    const post = calls.find((c) => c.options.method === "POST");
+    expect(JSON.parse(post.options.body)).to.deep.equal({inspectPort: 9444, waitForDebugger: true});
   });
 });
 

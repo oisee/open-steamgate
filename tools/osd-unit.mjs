@@ -58,12 +58,24 @@ export function unitChildEnv(options = {}, parentEnv = process.env) {
   const dbEnv = options.dbEnv;
   const requested = dbEnv?.STG_DB ?? parentEnv.STG_DB;
   const ownsFile = dbEnv === undefined || (requested !== "hana" && requested !== "postgres");
+  let inherited = {...parentEnv, ...dbEnv};
+  if (options.inspectPort !== undefined) {
+    const port = typeof options.inspectPort === "number" ? options.inspectPort
+      : typeof options.inspectPort === "string" && /^\d+$/.test(options.inspectPort) ? Number(options.inspectPort) : NaN;
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error(`invalid inspector port: ${options.inspectPort}`);
+    }
+    inherited.NODE_OPTIONS = [
+      inherited.NODE_OPTIONS,
+      `--inspect${options.waitForDebugger === true ? "-brk" : ""}=127.0.0.1:${port} --enable-source-maps`,
+    ].filter((value) => value !== undefined && value !== "").join(" ");
+  }
   if (ownsFile === false) {
-    return {env: {...parentEnv, ...dbEnv}, ownPath: undefined};
+    return {env: inherited, ownPath: undefined};
   }
   const ownPath = join(tmpdir(), `osd-unit-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}.sqlite`);
   return {
-    env: {...parentEnv, ...dbEnv, STG_DB: requested === "duckdb" ? "duckdb" : "file", STG_DB_PATH: ownPath},
+    env: {...inherited, STG_DB: requested === "duckdb" ? "duckdb" : "file", STG_DB_PATH: ownPath},
     ownPath,
   };
 }
@@ -301,6 +313,10 @@ export class UnitRun {
   runDetached(type, name, options = {}) {
     const plan = options.plan ?? this.classes(type, name);
     return new Promise((resolve, reject) => {
+      if (options.signal?.aborted) {
+        reject(new Error("ABAP Unit run cancelled"));
+        return;
+      }
       const args = [type, name, "--json", "--plan-stdin"];
       if (options.testClass !== undefined) {
         args.push("--class", options.testClass);
@@ -315,6 +331,14 @@ export class UnitRun {
         stdio: ["pipe", "pipe", "pipe"],
         env,
       });
+      let killTimer;
+      const abort = () => {
+        child.kill("SIGTERM");
+        killTimer = setTimeout(() => child.kill("SIGKILL"), 1000);
+        killTimer.unref();
+      };
+      options.signal?.addEventListener("abort", abort, {once: true});
+      if (options.signal?.aborted) abort();
       const tidy = () => {
         if (ownPath === undefined) {
           return;
@@ -323,6 +347,9 @@ export class UnitRun {
           rmSync(ownPath + suffix, {force: true});
         }
       };
+      child.stdin.on("error", (error) => {
+        if (!options.signal?.aborted) reject(error);
+      });
       child.stdin.end(JSON.stringify(plan));
       let out = "";
       let err = "";
@@ -333,7 +360,13 @@ export class UnitRun {
         err += d.toString();
       });
       child.on("close", (code) => {
+        options.signal?.removeEventListener("abort", abort);
+        clearTimeout(killTimer);
         tidy();
+        if (options.signal?.aborted) {
+          reject(new Error("ABAP Unit run cancelled"));
+          return;
+        }
         const start = out.indexOf("{");
         if (start < 0) {
           reject(new RunFailed(code, `${out}${err}`.slice(-2000)));
