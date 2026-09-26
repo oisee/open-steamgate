@@ -24,6 +24,7 @@ const {
   linkOrCopyTree, materializedHomeDir, ensureMaterializedHome, MATERIALIZED_MARKER,
   DATABASE_KINDS, defaultDedicatedName, databaseEnv, describeDatabase, duckdbAvailable,
   WARM_MEMORY_FLOOR_BYTES, shouldWarm, warmEnvironment,
+  SEED_ID_FILE, seedContentId, writeSeedId,
 } = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 
 // No chai-as-promised in this tree's node_modules, so a rejection is caught
@@ -643,11 +644,11 @@ describe("editors/vscode/launcher.js: Launcher end to end (against this checkout
 
 // Packaging (docs/vscode-extension.md, "Packaging"): materializing a
 // packaged extension's bundled seed (`extension/osd/`) into the extension's
-// own writable storage, once per version. A small fake seed here, never the
-// real 100+ MB one -- what is under test is the copy mechanism and the
-// once/per-version/cleans-up-old-versions rules, not the seed's own size.
+// own writable storage, keyed by seed content. A small fake seed here, never the
+// real 100+ MB one -- what is under test is the copy mechanism, content-keyed
+// reuse and stale-generation cleanup, not the seed's own size.
 describe("editors/vscode/launcher.js: linkOrCopyTree / ensureMaterializedHome (packaging)", function () {
-  let seedDir, storageDir;
+  let seedDir, storageDir, seedId;
 
   beforeEach(() => {
     seedDir = mkdtempSync(join(tmpdir(), "osd-seed-"));
@@ -658,6 +659,7 @@ describe("editors/vscode/launcher.js: linkOrCopyTree / ensureMaterializedHome (p
     writeFileSync(join(seedDir, "node_modules", "x", "index.js"), "module.exports = 1;\n");
     symlinkSync(join(seedDir, "node_modules"), join(seedDir, "output"), "dir");
     storageDir = mkdtempSync(join(tmpdir(), "osd-storage-"));
+    seedId = writeSeedId(seedDir);
   });
 
   afterEach(() => {
@@ -679,36 +681,49 @@ describe("editors/vscode/launcher.js: linkOrCopyTree / ensureMaterializedHome (p
     expect(a.ino).to.equal(b.ino);
   });
 
-  it("materializedHomeDir is one directory per version, under globalStorageDir", () => {
-    expect(materializedHomeDir(storageDir, "0.1.0")).to.equal(join(storageDir, "osd-home-0.1.0"));
-    expect(materializedHomeDir(storageDir, "0.2.0")).to.equal(join(storageDir, "osd-home-0.2.0"));
+  it("materializedHomeDir is keyed by the seed's content ID under globalStorageDir", () => {
+    expect(materializedHomeDir(storageDir, seedId)).to.equal(join(storageDir, `osd-home-${seedId}`));
+    expect(seedId).to.match(/^[0-9a-f]{64}$/);
+    expect(readFileSync(join(seedDir, SEED_ID_FILE), "utf8").trim()).to.equal(seedId);
   });
 
-  it("ensureMaterializedHome copies the seed once, and a second call is a no-op (marker file)", () => {
-    const target = ensureMaterializedHome(seedDir, storageDir, "0.1.0");
-    expect(target).to.equal(join(storageDir, "osd-home-0.1.0"));
+  it("ensureMaterializedHome reuses a copy only while the packaged seed ID matches", () => {
+    const target = ensureMaterializedHome(seedDir, storageDir);
+    expect(target).to.equal(join(storageDir, `osd-home-${seedId}`));
     expect(existsSync(join(target, "top.txt"))).to.equal(true);
-    expect(existsSync(join(target, MATERIALIZED_MARKER))).to.equal(true);
+    expect(readFileSync(join(target, MATERIALIZED_MARKER), "utf8").trim()).to.equal(seedId);
 
     // add to the seed after the first materialize: a second call must NOT
-    // pick it up, because the marker says "already done for this version"
+    // pick it up, because the marker says "already done for this seed ID"
     // (a hard link shares content with a file mutated in place, so a NEW
     // file is what proves "no second copy happened" -- an edited existing
     // one would prove nothing either way)
     writeFileSync(join(seedDir, "added-later.txt"), "should not appear");
-    const again = ensureMaterializedHome(seedDir, storageDir, "0.1.0");
+    const again = ensureMaterializedHome(seedDir, storageDir);
     expect(again).to.equal(target);
     expect(existsSync(join(target, "added-later.txt"))).to.equal(false);
   });
 
-  it("a version change makes a new copy and removes the old one", () => {
-    const v1 = ensureMaterializedHome(seedDir, storageDir, "0.1.0");
-    expect(existsSync(v1)).to.equal(true);
+  it("repackages changed seed content at the same extension version and rematerializes", () => {
+    const extensionPackage = join(process.cwd(), "editors/vscode/package.json");
+    const extensionVersion = JSON.parse(readFileSync(extensionPackage, "utf8")).version;
+    const firstId = seedId;
+    const firstHome = ensureMaterializedHome(seedDir, storageDir);
+    expect(existsSync(firstHome)).to.equal(true);
 
-    writeFileSync(join(seedDir, "top.txt"), "v2 content");
-    const v2 = ensureMaterializedHome(seedDir, storageDir, "0.2.0");
-    expect(v2).to.equal(join(storageDir, "osd-home-0.2.0"));
-    expect(readFileSync(join(v2, "top.txt"), "utf8")).to.equal("v2 content");
-    expect(existsSync(v1)).to.equal(false, "the old version's copy must be gone");
+    // Model a second packaging pass: the extension version is unchanged,
+    // one seed file changes, and packaging writes the new content ID.
+    expect(JSON.parse(readFileSync(extensionPackage, "utf8")).version).to.equal(extensionVersion);
+    rmSync(join(seedDir, "top.txt"));
+    writeFileSync(join(seedDir, "top.txt"), "changed seed content");
+    const secondId = writeSeedId(seedDir);
+    expect(secondId).to.not.equal(firstId);
+    expect(secondId).to.equal(seedContentId(seedDir));
+
+    const secondHome = ensureMaterializedHome(seedDir, storageDir);
+    expect(secondHome).to.equal(join(storageDir, `osd-home-${secondId}`));
+    expect(readFileSync(join(secondHome, "top.txt"), "utf8")).to.equal("changed seed content");
+    expect(readFileSync(join(secondHome, MATERIALIZED_MARKER), "utf8").trim()).to.equal(secondId);
+    expect(existsSync(firstHome), "the old content generation must be removed").to.equal(false);
   });
 });

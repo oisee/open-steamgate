@@ -537,37 +537,79 @@ function linkOrCopyTree(src, dest) {
   }
 }
 
+const SEED_ID_FILE = ".seed-id";
 const MATERIALIZED_MARKER = ".osd-materialized";
 
-/** Where a packaged seed for `version` lands under the extension's own
- *  `globalStorageDir` -- one directory per version, so an update (which
- *  wipes the install folder, `extension/osd/` included) gets a fresh copy
- *  rather than silently keeps serving the old one. */
-function materializedHomeDir(globalStorageDir, version) {
-  return path.join(globalStorageDir, `osd-home-${version}`);
+/** Stable SHA-256 of a seed tree's paths and file contents. The ID file is
+ *  excluded so writing the result into the tree does not change the result. */
+function seedContentId(seedDir) {
+  const hash = createHash("sha256");
+  const record = (kind, rel, content = Buffer.alloc(0)) => {
+    const name = Buffer.from(rel.replaceAll(path.sep, "/"), "utf8");
+    const header = Buffer.alloc(13);
+    header[0] = kind;
+    header.writeUInt32BE(name.length, 1);
+    header.writeBigUInt64BE(BigInt(content.length), 5);
+    hash.update(header);
+    hash.update(name);
+    hash.update(content);
+  };
+  const visit = (dir, rel = "") => {
+    const entries = fs.readdirSync(dir).sort();
+    if (rel !== "") record(0x44, rel);
+    for (const name of entries) {
+      if (rel === "" && name === SEED_ID_FILE) continue;
+      const file = path.join(dir, name);
+      const childRel = rel === "" ? name : path.join(rel, name);
+      const stat = fs.lstatSync(file);
+      if (stat.isDirectory()) {
+        visit(file, childRel);
+      } else if (stat.isSymbolicLink()) {
+        record(0x4c, childRel, Buffer.from(fs.readlinkSync(file), "utf8"));
+      } else if (stat.isFile()) {
+        record(0x46, childRel, fs.readFileSync(file));
+      }
+    }
+  };
+  visit(seedDir);
+  return hash.digest("hex");
+}
+
+/** Writes the seed's content ID during packaging and returns it. */
+function writeSeedId(seedDir) {
+  const id = seedContentId(seedDir);
+  fs.writeFileSync(path.join(seedDir, SEED_ID_FILE), `${id}\n`);
+  return id;
+}
+
+/** Where a packaged seed lands under `globalStorageDir`, keyed by its
+ *  content ID rather than extension version. */
+function materializedHomeDir(globalStorageDir, seedId) {
+  return path.join(globalStorageDir, `osd-home-${seedId}`);
 }
 
 /** Materializes `seedDir` (a packaged extension's own `extension/osd/`)
- *  into `<globalStorageDir>/osd-home-<version>/`, once: a marker file says
- *  a copy already happened, so a second start of the same version does
- *  nothing here. Every OTHER `osd-home-*` directory is removed first, so a
- *  previous version's copy does not sit there forever. Returns the
- *  materialized directory, which is what a caller uses as `osdHome` from
- *  here on -- `osdHome` itself is never written to again. */
-function ensureMaterializedHome(seedDir, globalStorageDir, version) {
-  const target = materializedHomeDir(globalStorageDir, version);
-  if (isFile(path.join(target, MATERIALIZED_MARKER))) {
-    return target;
+ *  into `<globalStorageDir>/osd-home-<seedId>`. A matching marker reuses the
+ *  copy; a changed ID gets a fresh copy and removes stale generations. */
+function ensureMaterializedHome(seedDir, globalStorageDir) {
+  const seedId = fs.readFileSync(path.join(seedDir, SEED_ID_FILE), "utf8").trim();
+  if (!/^[0-9a-f]{64}$/.test(seedId)) {
+    throw new Error(`Invalid packaged seed ID in ${path.join(seedDir, SEED_ID_FILE)}`);
   }
+  const target = materializedHomeDir(globalStorageDir, seedId);
   fs.mkdirSync(globalStorageDir, {recursive: true});
   for (const name of fs.readdirSync(globalStorageDir)) {
-    if (name.startsWith("osd-home-") && name !== `osd-home-${version}`) {
+    if (name.startsWith("osd-home-") && name !== `osd-home-${seedId}`) {
       fs.rmSync(path.join(globalStorageDir, name), {recursive: true, force: true});
     }
   }
+  const marker = path.join(target, MATERIALIZED_MARKER);
+  if (isFile(marker) && fs.readFileSync(marker, "utf8").trim() === seedId) {
+    return target;
+  }
   fs.rmSync(target, {recursive: true, force: true});
   linkOrCopyTree(seedDir, target);
-  fs.writeFileSync(path.join(target, MATERIALIZED_MARKER), new Date().toISOString());
+  fs.writeFileSync(path.join(target, MATERIALIZED_MARKER), `${seedId}\n`);
   return target;
 }
 
@@ -878,6 +920,9 @@ module.exports = {
   terminate,
   Launcher,
   linkOrCopyTree,
+  SEED_ID_FILE,
+  seedContentId,
+  writeSeedId,
   materializedHomeDir,
   ensureMaterializedHome,
   MATERIALIZED_MARKER,

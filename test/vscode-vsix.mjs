@@ -6,8 +6,8 @@
 // never built (`npm run vsix` first) -- the same shape `test/osd-binary.mjs`
 // already uses for the compiled binary.
 //
-// Scratch lives under this checkout's own `.local/` (never `/tmp`, a small
-// tmpfs on this box) and is removed again at the end; the workspace layer
+// Scratch defaults to ~/.cache/osd-vsix-test (outside the checkout, never
+// `/tmp`, a small tmpfs on this box) and is removed again at the end; the workspace layer
 // fixture (`.local/b0-demo-ws/`, named in docs/vscode-extension.md's own
 // "Live smoke") is created once if missing and left there, since it is
 // gitignored scratch by design and other sessions may reuse it.
@@ -79,9 +79,7 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
     execFileSync("unzip", ["-q", join(VSIX_DIR, vsixFile), "-d", unzipDir]);
 
     const extensionDir = join(unzipDir, "extension");
-    const {Launcher, ensureMaterializedHome} = createRequire(import.meta.url)(join(extensionDir, "launcher.js"));
-    const pkg = JSON.parse(readFileSync(join(extensionDir, "package.json"), "utf8"));
-
+    const {Launcher, ensureMaterializedHome, seedContentId, SEED_ID_FILE} = createRequire(import.meta.url)(join(extensionDir, "launcher.js"));
     const seedDir = join(extensionDir, "osd");
     expect(existsSync(join(seedDir, "test", "run.mjs")), "the .vsix carries a runnable osd/ seed").to.equal(true);
     // hdb and @abaplint/database-pg (-> pg) travel with the package (both
@@ -91,11 +89,14 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
     expect(existsSync(join(seedDir, "node_modules", "@abaplint", "database-pg")),
       "@abaplint/database-pg ships in the .vsix").to.equal(true);
     expect(existsSync(join(seedDir, "node_modules", "@duckdb")), "DuckDB's native module does NOT ship in the .vsix").to.equal(false);
+    const seedId = readFileSync(join(seedDir, SEED_ID_FILE), "utf8").trim();
+    expect(seedId, "the packaged ID matches the packaged seed content").to.equal(seedContentId(seedDir));
 
     globalStorageDir = join(SCRATCH, "globalStorage"); // stands in for context.globalStorageUri
     // osd.home unset: this is the packaged path, materializing the bundled
     // seed rather than pointing at a dev checkout.
-    osdHome = ensureMaterializedHome(seedDir, globalStorageDir, pkg.version);
+    osdHome = ensureMaterializedHome(seedDir, globalStorageDir);
+    expect(osdHome).to.equal(join(globalStorageDir, `osd-home-${seedId}`));
     expect(osdHome).to.not.equal(seedDir, "the launcher must run the materialized copy, never the install folder");
     LauncherClass = Launcher;
 

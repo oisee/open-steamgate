@@ -75,6 +75,7 @@
 // See `docs/vscode-extension.md`, "Packaging", for the measured numbers this
 // produced and the trims proposed if the total ever creeps back up.
 import {execFileSync} from "node:child_process";
+import {createRequire} from "node:module";
 import {
   cpSync, existsSync, mkdirSync, readdirSync, readFileSync,
   realpathSync, rmSync, statSync, writeFileSync,
@@ -89,6 +90,7 @@ const EXT_DIR = join(ROOT, "editors", "vscode");
 const BUILD_DIR = join(ROOT, "build", "vsix");
 const STAGE = join(BUILD_DIR, "stage");
 let minimatch;
+const {writeSeedId} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 
 function log(msg) {
   console.log(`build-vsix: ${msg}`);
@@ -380,6 +382,8 @@ export async function buildVsix() {
     throw new Error(`build-vsix: ${describeUnfetched(missing)}`);
   }
   const modules = copySeedTree(seedRoot);
+  const seedId = writeSeedId(seedRoot);
+  log(`seed ID: ${seedId}`);
 
   writeFileSync(join(STAGE, "[Content_Types].xml"), contentTypesXml());
   writeFileSync(join(STAGE, "extension.vsixmanifest"), vsixManifestXml(pkg));

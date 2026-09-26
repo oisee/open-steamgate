@@ -997,6 +997,11 @@ transpiler. The Docker image build also reads the lock; `docker/image/sources.js
 keeps its source inventory and licensing notes without a second copy of those
 commits.
 
+`npm run vsix:install` runs that same build and then installs the resulting
+file with `code --install-extension <vsix> --force`. The build still refuses
+to package while any pack is unfetched, so a successful install command has a
+complete bundled seed.
+
 **What is in `extension/osd/`**, found by tracing rather than guessing:
 **not `output/`** -- see "two false starts, and a third" below for why a
 first design shipped it and a second one dropped it again; `src/`, `gen/`,
@@ -1114,21 +1119,26 @@ the second code path it needs. Backlogged rather than attempted under this
 task's one-hour budget for it.
 
 **Materializing on first start** (`osd.home` unset, the packaged path):
-`ensureMaterializedHome()` (`editors/vscode/launcher.js`) copies
-`extension/osd/` into `<globalStorageUri>/osd-home-<version>/` once --
-`linkOrCopyTree()` hard-links every regular file and keeps a symlink as a
-symlink, so the copy costs close to nothing on one filesystem, falling
-back to a real copy across a device boundary (`EXDEV`). A marker file
-(`.osd-materialized`) makes a second call a no-op; a version change
-removes every OTHER `osd-home-*` directory first, so an update does not
-accumulate stale copies. `osd.home`, when set, still wins -- the
+packaging writes the SHA-256 content ID of the staged `extension/osd/` tree
+into `extension/osd/.seed-id`. The ID covers relative paths and file contents
+and excludes `.seed-id` itself. `ensureMaterializedHome()`
+(`editors/vscode/launcher.js`) uses that ID as the key for
+`<globalStorageUri>/osd-home-<seedId>/`; its `.osd-materialized` marker stores
+the same ID. A matching ID reuses the existing copy. A changed seed, even
+under the same extension version, gets a new copy and removes every other
+`osd-home-*` directory. `linkOrCopyTree()` hard-links regular files and keeps
+symlinks as symlinks, so the copy costs close to nothing on one filesystem,
+falling back to a real copy across a device boundary (`EXDEV`). `osd.home`,
+when set, still wins -- the
 dev path, unchanged, and the only path a checkout with no bundled
 `extension/osd/` (the symlinked dev install) ever takes. `build/` and
 `gen/` are then written inside that storage copy by the ordinary build,
-never inside `extension/osd/` itself. Pure-function tests: `test/vscode-launcher.mjs`
-("packaging" describe block) -- the hard-link/symlink shapes, the
-once-per-version rule, the old-version cleanup, all against a small fake
-seed, never the real 100+ MB one.
+never inside `extension/osd/` itself. Pure-function tests in
+`test/vscode-launcher.mjs` package a small fake seed twice with an unchanged
+extension version and one changed seed file, then prove the ID changes, the
+second start rematerializes, and the old content copy is removed. The separate
+`test/vscode-vsix.mjs` check verifies the ID inside a real `.vsix` against its
+packaged seed content.
 
 **Measured before** (2026-09-26, `output/` shipped, the state #105/#106
 left this in, version 0.1.1): `.vsix` 53.5 MB, unpacked 148.7 MB
@@ -1183,8 +1193,8 @@ now simply what happens.
 **Proving it runs outside this checkout**: `test/vscode-vsix.mjs`
 (registered in `test/suites.json`, skipped via `this.skip()` when
 `build/vsix` was never built, the same shape `test/osd-binary.mjs` already
-uses for the compiled binary) unzips the `.vsix` into a scratch folder
-under this checkout's own `.local/` (never `/tmp`), runs
+uses for the compiled binary) unzips the `.vsix` into
+`~/.cache/osd-vsix-test` (never `/tmp`), runs
 `ensureMaterializedHome()` against a scratch `globalStorageDir` with
 `osd.home` unset, and points `Launcher` at a workspace folder
 `.local/b0-demo-ws/` (gitignored, created by the test itself if missing:

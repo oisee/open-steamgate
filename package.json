@@ -15,6 +15,7 @@
     "builds": "node tools/osd-build.mjs list",
     "vsix": "node scripts/build-vsix.mjs",
     "prevsix": "node tools/osd-node-check.mjs",
+    "vsix:install": "node scripts/install-vsix.mjs",
     "binary": "bun scripts/build-binary.mjs",
     "binary:sea": "bun scripts/build-sea.mjs sea",
     "binary:bundle": "bun scripts/build-sea.mjs bundle",
