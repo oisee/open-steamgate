@@ -293,6 +293,34 @@ describe("tools/osd-warm: the real path on a small tree", function () {
     expect(readFileSync(join(root, "output", "zcl_ws_alone.clas.mjs"), "utf8")).to.include("IntegerFactory.get(5)");
   });
 
+  it("names what an edit would reach, and which of it has tests, without building", async () => {
+    const closure = warm.closureOf("INTF", "ZIF_WS_SHAPE").map((o) => o.name).sort();
+    expect(closure).to.deep.equal(["ZCL_WS_CALLER", "ZCL_WS_SQUARE", "ZIF_WS_SHAPE"]);
+    expect(warm.closureOf("CLAS", "ZCL_WS_ALONE").map((o) => o.name)).to.deep.equal(["ZCL_WS_ALONE"]);
+    expect(warm.closureOf("CLAS", "ZCL_WS_NOPE")).to.equal(undefined);
+  });
+
+  it("refuses a broken interface with each reader's issues at its own line and column", async () => {
+    const live = liveHash(root);
+    edit("zif_ws_shape.intf.abap", "METHODS area", "METHODS area2");
+    let error;
+    try {
+      await warm.build();
+    } catch (e) {
+      error = e;
+    }
+    edit("zif_ws_shape.intf.abap", "METHODS area2", "METHODS area");
+    expect(error?.check).to.equal(true);
+    const caller = error.issues.find((o) => o.name === "ZCL_WS_CALLER");
+    expect(caller, JSON.stringify(error.issues)).to.not.equal(undefined);
+    expect(caller.issues[0].line).to.equal(9);
+    expect(caller.issues[0].column).to.be.greaterThan(1);
+    expect(liveHash(root)).to.equal(live);
+    const fixed = await warm.build();
+    expect(fixed.hash).to.equal(live);
+    expect(fixed.closure.map((o) => o.name).sort()).to.include("ZCL_WS_CALLER");
+  });
+
   it("refuses a new file, and leaves the live generation alone", async () => {
     const live = liveHash(root);
     writeFileSync(join(root, "src", "zcl_ws_new.clas.abap"), SOURCES["zcl_ws_alone.clas.abap"].replaceAll("zcl_ws_alone", "zcl_ws_new"));
