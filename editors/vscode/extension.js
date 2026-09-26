@@ -16,7 +16,9 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText,
   transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, demoFailureObjects, progRunLens,
-  groupServices, serviceLabel, serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
+  groupServices, serviceLabel, serviceContextValue, serviceActionContext, normalizeTransactionRow,
+  appManifestDetails, httpTestFiles, closureTestNames, dumpsForService, serviceDetailsHtml,
+  serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   webguiPanelHtml, runWebguiPanel,
   warmStatusText, activationBuildText, closureTestsText,
   presetSettings, isOpenSteamgateCheckout: isOpenSteamgateManifest, osdHomeChoice, osdStateContext, systemOverviewModel,
@@ -814,22 +816,28 @@ class SystemController {
  *  already normalized; groupServices()/serviceLabel()/serviceClassNodes()
  *  do the rest without needing to know which one it was. */
 class OsdTreeProvider {
-  constructor(controller) {
+  constructor(controller, discoverCapabilities = serviceCapabilities) {
     this.controller = controller;
+    this.discoverCapabilities = discoverCapabilities;
     this.emitter = new vscode.EventEmitter();
     this.onDidChangeTreeData = this.emitter.event;
     this.groups = [];
+    this.rows = [];
+    this.capabilitiesByRow = new Map();
+    this.transactions = [];
+    this.transactionsLoaded = false;
+    this.groupBy = vscode.workspace.getConfiguration("osd").get("services.groupBy", "kind");
     // T7 (docs/vscode-extension.md "Warm"): /osd/serving's own `warm` field,
     // shown on the state row the way the status bar shows it.
     this.warm = undefined;
-    const refresh = () => this.refresh().then(() => this.emitter.fire(), () => this.emitter.fire());
+    const refresh = () => this.refresh(true).then(() => this.emitter.fire(), () => this.emitter.fire());
     controller.onDidChange(refresh);
     // the prime finishing, or a swap happening, is not a controller state
     // change (start/stop/rebuild) -- nothing else tells this the row is
     // stale, so it polls the same way the status bar does, and only while
     // there is something running to ask.
     this.timer = setInterval(() => {
-      if (this.controller.launcher?.state === "running") refresh();
+      if (this.controller.launcher?.state === "running") this.refresh().then(() => this.emitter.fire(), () => this.emitter.fire());
     }, 5000);
   }
 
@@ -840,9 +848,9 @@ class OsdTreeProvider {
   /** Both live reads this row and the Services tree depend on: osd.refreshTree
    *  (view/title's own $(refresh)) calls this by name, and so does the
    *  constructor's own timer and controller listener. */
-  async refresh() {
-    await this.refreshServices();
-    await this.#refreshWarm();
+  async refresh(forceTransactions = false) {
+    if (forceTransactions) this.capabilitiesByRow.clear();
+    await Promise.all([this.refreshServices(), this.refreshTransactions(forceTransactions), this.#refreshWarm()]);
   }
 
   async #refreshWarm() {
@@ -859,14 +867,45 @@ class OsdTreeProvider {
 
   async refreshServices() {
     if (this.controller.launcher?.state !== "running") {
+      this.rows = [];
       this.groups = [];
+      this.capabilitiesByRow.clear();
       return;
     }
     try {
-      this.groups = groupServices(await osd().services());
+      this.rows = await osd().services();
+      for (const row of this.rows) {
+        const saved = this.capabilitiesByRow.get(serviceRowKey(row));
+        if (saved !== undefined) row.detailsCapabilities = saved;
+      }
+      this.groups = groupServices(this.rows, this.groupBy);
     } catch {
+      this.rows = [];
       this.groups = [];
     }
+  }
+
+  async refreshTransactions(force = false) {
+    if (this.controller.launcher?.state !== "running") {
+      this.transactions = [];
+      this.transactionsLoaded = false;
+      return;
+    }
+    if (this.transactionsLoaded && !force) return;
+    try {
+      this.transactions = await osd().transactions();
+    } catch {
+      this.transactions = [];
+    }
+    this.transactionsLoaded = true;
+  }
+
+  async setServiceGrouping(groupBy) {
+    this.groupBy = groupBy === "pack" ? "pack" : "kind";
+    const target = vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+    await vscode.workspace.getConfiguration("osd").update("services.groupBy", this.groupBy, target);
+    this.groups = groupServices(this.rows, this.groupBy);
+    this.emitter.fire();
   }
 
   getTreeItem(element) {
@@ -882,6 +921,12 @@ class OsdTreeProvider {
     }
     if (element.contextValue === "osd-services") {
       return this.serviceGroupItems();
+    }
+    if (element instanceof SystemGroupItem) {
+      return systemDoorItems();
+    }
+    if (element instanceof TransactionGroupItem) {
+      return this.transactionItems();
     }
     if (element instanceof ServiceGroupItem) {
       return this.serviceRowItems(element.group);
@@ -930,7 +975,13 @@ class OsdTreeProvider {
     services.contextValue = "osd-services";
     services.iconPath = new vscode.ThemeIcon("plug");
 
-    return [stateItem, launchpad, layers, services];
+    const system = new SystemGroupItem();
+    const transactions = new TransactionGroupItem(this.transactions);
+    const grouping = vscode.workspace.getConfiguration("osd").get("services.groupBy", "kind");
+    this.groupBy = grouping === "pack" ? "pack" : "kind";
+    this.groups = groupServices(this.rows, this.groupBy);
+
+    return [stateItem, launchpad, system, transactions, layers, services];
   }
 
   layerItems() {
@@ -959,8 +1010,35 @@ class OsdTreeProvider {
     return this.groups.map((group) => new ServiceGroupItem(group));
   }
 
-  serviceRowItems(group) {
-    return group.rows.map((row) => new ServiceRowItem(row));
+  async serviceRowItems(group) {
+    return Promise.all(group.rows.map(async (row) => {
+      const key = serviceRowKey(row);
+      let capabilities = row.detailsCapabilities ?? this.capabilitiesByRow.get(key);
+      if (capabilities === undefined) {
+        try {
+          capabilities = await this.discoverCapabilities(row);
+        } catch {
+          capabilities = {sources: {}, testClasses: []};
+        }
+        this.capabilitiesByRow.set(key, capabilities);
+      }
+      row.detailsCapabilities = capabilities;
+      return new ServiceRowItem(row);
+    }));
+  }
+
+  transactionItems() {
+    if (this.controller.launcher?.state !== "running") return [new vscode.TreeItem("(start the system to see transactions)")];
+    if (this.transactions.length === 0) return [new vscode.TreeItem("(no transactions registered)")];
+    return this.transactions.map((tran) => new TransactionItem(tran));
+  }
+
+  refreshItem(item) {
+    this.emitter.fire(item);
+  }
+
+  rememberCapabilities(row, capabilities) {
+    this.capabilitiesByRow.set(serviceRowKey(row), capabilities);
   }
 
   async serviceClassItems(row) {
@@ -992,6 +1070,61 @@ class OsdTreeProvider {
   }
 }
 
+function serviceRowKey(row) {
+  return `${row.kind}\n${row.path}\n${row.handler ?? ""}`;
+}
+
+class SystemGroupItem extends vscode.TreeItem {
+  constructor() {
+    super("System", vscode.TreeItemCollapsibleState.Collapsed);
+    this.contextValue = "osd-system-group";
+    this.iconPath = new vscode.ThemeIcon("server-environment");
+  }
+}
+
+function systemDoorItems() {
+  return [
+    new HostDoorItem("Serving", "/osd/serving", "Generation and warm state", "open"),
+    new HostDoorItem("Short dumps", "/osd/dumps", "Runtime errors collected by this system", "dumps"),
+    new HostDoorItem("SQL", "/osd/sql", "Bounded SELECT door", "sql"),
+  ];
+}
+
+class HostDoorItem extends vscode.TreeItem {
+  constructor(label, route, description, action) {
+    super(`${label}  ${route}`, vscode.TreeItemCollapsibleState.None);
+    this.route = route;
+    this.contextValue = `osd-host-${action}`;
+    this.description = description;
+    this.iconPath = new vscode.ThemeIcon(action === "dumps" ? "warning" : action === "sql" ? "database" : "pulse");
+    this.command = {command: action === "dumps" ? "osd.showDumps" : action === "sql" ? "osd.newSqlNotebook" : "osd.openHostDoor", title: label,
+      arguments: [route]};
+  }
+}
+
+class TransactionGroupItem extends vscode.TreeItem {
+  constructor(transactions) {
+    super(`TRAN (${transactions.length})`, vscode.TreeItemCollapsibleState.Collapsed);
+    this.contextValue = "osd-transactions";
+    this.iconPath = new vscode.ThemeIcon("list-tree");
+  }
+}
+
+class TransactionItem extends vscode.TreeItem {
+  constructor(transaction) {
+    const label = transaction.text ? `${transaction.tcode} · ${transaction.text}` : transaction.tcode;
+    super(label, vscode.TreeItemCollapsibleState.None);
+    this.transaction = transaction;
+    this.contextValue = "osd-transaction";
+    this.description = `${transaction.kind}${transaction.runnable ? " · runnable" : ""}`;
+    this.tooltip = transaction.reason || transaction.source || transaction.tcode;
+    this.iconPath = new vscode.ThemeIcon(transaction.kind === "REPORT" ? "symbol-file" : "play");
+    if (transaction.runnable) {
+      this.command = {command: "osd.openWebguiTransaction", title: "Open transaction", arguments: [{tcode: transaction.tcode}]};
+    }
+  }
+}
+
 /** One kind's own node ("OData (n)", "Apps (n)", ...), collapsed, its rows
  *  fetched from `group.rows` -- no server round trip of its own, since
  *  refreshServices() above already asked once for the whole tree. */
@@ -1000,16 +1133,13 @@ class ServiceGroupItem extends vscode.TreeItem {
     super(`${group.label} (${group.rows.length})`, vscode.TreeItemCollapsibleState.Collapsed);
     this.group = group;
     this.contextValue = "osd-service-group";
-    this.iconPath = new vscode.ThemeIcon("folder");
+    this.iconPath = new vscode.ThemeIcon(group.groupBy === "pack" ? "package" : "folder");
   }
 }
 
-/** One service row: label/description from lib.js serviceLabel(), a click
- *  that opens it the way its kind allows (APP/ICF/ODATA -- APC never, a
- *  WebSocket URL does nothing on its own), and a contextValue
- *  (serviceContextValue()) package.json's view/item/context matches to
- *  offer exactly the actions that kind supports. Expandable for every kind
- *  serviceClassNodes() answers at least one node for. */
+/** One service row: a click selects its details panel, and capability flags
+ *  control the context actions package.json contributes. Expandable for
+ *  every kind serviceClassNodes() answers at least one node for. */
 class ServiceRowItem extends vscode.TreeItem {
   constructor(row) {
     const {label, description} = serviceLabel(row);
@@ -1017,15 +1147,12 @@ class ServiceRowItem extends vscode.TreeItem {
     super(label, expandable ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
     this.row = row;
     this.description = description;
-    this.contextValue = serviceContextValue(row.kind);
+    this.contextValue = serviceActionContext(row, row.detailsCapabilities);
     this.iconPath = new vscode.ThemeIcon(
       row.kind === "APP" ? "browser" : row.kind === "ODATA" ? "database" : row.kind === "APC" ? "broadcast" : "plug");
-    if (row.kind === "APC") {
-      // a WebSocket URL does nothing opened as a page -- no default click,
-      // "Copy ws:// URL" (view/item/context) is the one action this row has
-    } else {
-      this.command = {command: "osd.openServiceRow", title: "Open", arguments: [row]};
-    }
+    // A single click selects details. The inline play action retains the
+    // setting-controlled browser/webview open target.
+    this.command = {command: "osd.showServiceDetails", title: "Details", arguments: [this]};
   }
 }
 
@@ -1063,7 +1190,7 @@ class EntitySetItem extends vscode.TreeItem {
 }
 
 /** `osd.openIn` (docs/vscode-extension.md, "Services tree"): the shared
- *  default for what a service row's own click does -- the system browser
+ *  target for a service row's inline Open action -- the system browser
  *  (`vscode.env.openExternal`, this extension's default everywhere else,
  *  e.g. openLaunchpad() above) or a webview tab inside VS Code, the same
  *  iframe-over-CSP pattern openDataPreview() (Q7) and, for a running
@@ -1099,6 +1226,201 @@ async function openInWebview(url, panelType, title) {
   panel.webview.html = iframePanelHtml(external.toString(), title);
 }
 
+let serviceDetailsPanel;
+let serviceDetailsSelection = 0;
+let serviceDetailsItem;
+
+function serviceSourceRoot() {
+  return activeController?.launcher?.osdHome ?? osdHomeOf() ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+function sourcePath(root, relativePath, allowAbsolute = false) {
+  if (!relativePath) return undefined;
+  const rootPath = path.resolve(root ?? process.cwd());
+  if (path.isAbsolute(relativePath) && !allowAbsolute) return undefined;
+  const absolute = path.isAbsolute(relativePath) ? path.resolve(relativePath) : path.resolve(rootPath, relativePath);
+  if (!path.isAbsolute(relativePath) && (path.relative(rootPath, absolute) === ".." || path.relative(rootPath, absolute).startsWith(`..${path.sep}`))) {
+    return undefined;
+  }
+  return fs.existsSync(absolute) ? absolute : undefined;
+}
+
+function testSourcesForService(root, row) {
+  const collected = [];
+  const seen = new Set();
+  const readTree = (dir) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, {withFileTypes: true}); } catch { return; }
+    for (const entry of entries) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        readTree(file);
+      } else if (/\.(?:mjs|cjs|js|ts|abap)$/i.test(entry.name) && !seen.has(file)) {
+        seen.add(file);
+        try { collected.push({path: path.relative(root, file).replaceAll(path.sep, "/"), source: fs.readFileSync(file, "utf8")}); } catch {}
+      }
+    }
+  };
+  readTree(path.join(root, "test"));
+  return httpTestFiles(collected, row.path, row.name);
+}
+
+async function classSourcePath(row, role, root) {
+  const direct = sourcePath(root, role === "dpc" || role === "handler" ? row.handlerSource : row.mpcSource);
+  if (direct) return direct;
+  const name = role === "mpc" ? row.mpc : row.handler;
+  if (!name) return undefined;
+  try {
+    const files = await vscode.workspace.findFiles(readerFilePattern({type: "CLAS", name}), EXCLUDE, 1);
+    return files[0]?.fsPath;
+  } catch { return undefined; }
+}
+
+/** Resolve menu targets as the kind group is expanded, before a row can be
+ *  right-clicked. The full details panel can still fetch its richer data
+ *  only when selected. */
+async function serviceCapabilities(row) {
+  const root = serviceSourceRoot();
+  const sources = {};
+  const classes = row.kind === "ODATA"
+    ? [{role: "dpc", name: row.handler}, {role: "mpc", name: row.mpc}]
+    : row.kind === "APP" ? [] : [{role: "handler", name: row.handler}];
+  const closures = await Promise.all(classes.filter(({name}) => name).map(async ({role, name}) => {
+    const found = await classSourcePath(row, role, root);
+    if (found) sources[role] = {path: found};
+    try { return await osd().closure("CLAS", name); } catch { return undefined; }
+  }));
+  if (row.kind === "APP") {
+    const folder = sourcePath(root, row.source);
+    if (folder) sources.app = {path: folder};
+  } else if (row.kind !== "ODATA") {
+    const declaration = sourcePath(root, row.source);
+    if (declaration) sources.service = {path: declaration};
+  }
+  return {sources, testClasses: closureTestNames(...closures)};
+}
+
+async function serviceDetailsData(item, provider) {
+  const row = item.row;
+  const root = serviceSourceRoot();
+  const details = {row, sources: {}, metadataUrl: row.kind === "ODATA"
+    ? await serviceMetadataExternalUrl(row, osd().url, (url) => vscode.env.asExternalUri(vscode.Uri.parse(url)))
+    : undefined};
+  if (row.kind === "ODATA") {
+    const names = [{role: "dpc", name: row.handler}, {role: "mpc", name: row.mpc}].filter((one) => one.name);
+    const settled = await Promise.all(names.map(async ({role, name}) => {
+      const [readers, closure] = await Promise.allSettled([osd().readers("CLAS", name), osd().closure("CLAS", name)]);
+      details.readers ??= {};
+      details.closures ??= {};
+      details.readers[role] = readers.status === "fulfilled" ? readers.value : undefined;
+      details.closures[role] = closure.status === "fulfilled" ? closure.value : undefined;
+      const source = await classSourcePath(row, role, root);
+      details.sources[role] = source ? {path: source} : undefined;
+      return closure.status === "fulfilled" ? closure.value : undefined;
+    }));
+    try {
+      const map = row.handler ? await osd().entitySets(row.handler) : undefined;
+      details.entitySets = map?.sets ?? [];
+    } catch (e) {
+      details.entitySets = [];
+      details.entitySetsError = String(e.message ?? e);
+    }
+    const [serving, dumps] = await Promise.allSettled([osd().serving(), osd().dumps()]);
+    details.serving = serving.status === "fulfilled" ? serving.value : undefined;
+    details.dumps = dumpsForService(dumps.status === "fulfilled" ? dumps.value : [], row);
+    details.httpTests = testSourcesForService(root, row);
+    item.row.detailsCapabilities = {
+      sources: details.sources,
+      testClasses: closureTestNames(...settled),
+    };
+  } else if (row.kind === "APP") {
+    const folder = sourcePath(root, row.source);
+    if (folder) {
+      try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(folder, "manifest.json"), "utf8"));
+        details.app = appManifestDetails(manifest, row, provider.rows);
+      } catch {
+        details.app = appManifestDetails({}, row, provider.rows);
+      }
+    } else {
+      details.app = appManifestDetails({}, row, provider.rows);
+    }
+    details.sources.app = folder ? {path: folder} : undefined;
+    item.row.detailsCapabilities = {sources: details.sources, testClasses: []};
+  } else {
+    const handler = await classSourcePath(row, "handler", root);
+    const declaration = sourcePath(root, row.source);
+    details.sources.handler = handler ? {path: handler} : undefined;
+    details.sources.service = declaration ? {path: declaration} : undefined;
+    let closure;
+    if (row.handler) {
+      const [readers, found] = await Promise.allSettled([osd().readers("CLAS", row.handler), osd().closure("CLAS", row.handler)]);
+      details.readers = readers.status === "fulfilled" ? readers.value : undefined;
+      closure = found.status === "fulfilled" ? found.value : undefined;
+      details.closure = closure;
+    }
+    item.row.detailsCapabilities = {sources: details.sources, testClasses: closureTestNames(closure)};
+  }
+  item.contextValue = serviceActionContext(row, item.row.detailsCapabilities);
+  provider.rememberCapabilities(row, item.row.detailsCapabilities);
+  provider.refreshItem(item);
+  return details;
+}
+
+async function showServiceDetails(item, provider, output) {
+  if (!item?.row) return;
+  if (serviceDetailsPanel === undefined) {
+    serviceDetailsPanel = vscode.window.createWebviewPanel("osdServiceDetails", "Service details", vscode.ViewColumn.Beside,
+      {enableScripts: true, retainContextWhenHidden: false});
+    serviceDetailsPanel.webview.onDidReceiveMessage(async (message) => {
+      if (message?.command === "openSource") await openServiceSource(serviceDetailsItem, message.role, output);
+    });
+    serviceDetailsPanel.onDidDispose(() => {
+      serviceDetailsPanel = undefined;
+      serviceDetailsItem = undefined;
+      serviceDetailsSelection += 1;
+    });
+  }
+  serviceDetailsItem = item;
+  const selection = ++serviceDetailsSelection;
+  serviceDetailsPanel.title = `${serviceLabel(item.row).label} · Details`;
+  serviceDetailsPanel.webview.html = serviceDetailsHtml({row: item.row}, "loading");
+  try {
+    const details = await serviceDetailsData(item, provider);
+    if (selection === serviceDetailsSelection && serviceDetailsPanel !== undefined) {
+      const nonce = crypto.randomBytes(16).toString("base64");
+      serviceDetailsPanel.webview.html = serviceDetailsHtml(details, nonce);
+    }
+  } catch (e) {
+    output?.appendLine(`osd service details ${item.row.name ?? item.row.path}: ${String(e.message ?? e)}`);
+    if (selection === serviceDetailsSelection && serviceDetailsPanel !== undefined) {
+      serviceDetailsPanel.webview.html = serviceDetailsHtml({row: item.row, entitySetsError: String(e.message ?? e)}, crypto.randomBytes(16).toString("base64"));
+    }
+  }
+}
+
+async function openServiceSource(item, role, output) {
+  const source = item?.row?.detailsCapabilities?.sources?.[role]?.path ??
+    (role === "service" || role === "app" ? item?.row?.source : undefined);
+  const root = serviceSourceRoot();
+  const target = sourcePath(root, source, path.isAbsolute(source ?? ""));
+  if (!target) {
+    vscode.window.showWarningMessage(`osd: ${role} source was not found for ${item?.row?.name ?? item?.row?.path ?? "service"}`);
+    return;
+  }
+  try {
+    if (role === "app") {
+      await vscode.commands.executeCommand("revealInExplorer", vscode.Uri.file(target));
+    } else {
+      const document = await vscode.workspace.openTextDocument(vscode.Uri.file(target));
+      await vscode.window.showTextDocument(document);
+    }
+  } catch (e) {
+    output?.appendLine(`osd open service source ${target}: ${String(e.message ?? e)}`);
+    vscode.window.showErrorMessage(`osd: ${String(e.message ?? e)}`);
+  }
+}
+
 /** frame-src names the one origin this panel is allowed to embed; nothing
  *  else in the page runs a script of its own, so a strict default-src
  *  'none' beside it costs nothing (the gui-reports spike's own
@@ -1116,7 +1438,8 @@ function iframePanelHtml(url, title) {
 </html>`;
 }
 
-async function openServiceRow(row) {
+async function openServiceRow(item) {
+  const row = item?.row ?? item;
   if (row === undefined || row.kind === "APC") return;
   const url = serviceHttpUrl(row, osd().url);
   const openIn = vscode.workspace.getConfiguration("osd").get("openIn", "browser");
@@ -1127,30 +1450,72 @@ async function openServiceRow(row) {
   }
 }
 
+async function openServiceRowExternal(item) {
+  const row = item?.row ?? item;
+  if (row === undefined || row.kind === "APC" || !row.path) return;
+  await openExternalOrOwn(serviceHttpUrl(row, osd().url));
+}
+
+async function openHostDoor(route) {
+  if (!route) return;
+  await openExternalOrOwn(`${osd().url}${route}`);
+}
+
 async function copyServiceUrl(item) {
-  const row = item?.row;
+  const row = item?.row ?? item;
   if (row === undefined) return;
   await vscode.env.clipboard.writeText(serviceHttpUrl(row, osd().url));
   vscode.window.setStatusBarMessage(`osd: copied ${row.path}`, 3000);
 }
 
 async function copyServiceWsUrl(item) {
-  const row = item?.row;
+  const row = item?.row ?? item;
   if (row === undefined) return;
   await vscode.env.clipboard.writeText(serviceWsUrl(row, osd().url));
   vscode.window.setStatusBarMessage(`osd: copied ${row.path} (ws://)`, 3000);
 }
 
-async function openServiceMetadata(item) {
-  const row = item?.row;
-  if (row === undefined) return;
+async function copyServiceMetadata(item) {
+  const row = item?.row ?? item;
+  if (!row?.path || row.kind !== "ODATA") return;
   const url = serviceMetadataUrl(row, osd().url);
-  const openIn = vscode.workspace.getConfiguration("osd").get("openIn", "browser");
-  if (openIn === "vscode") {
+  await vscode.env.clipboard.writeText(url);
+  vscode.window.setStatusBarMessage(`osd: copied ${row.path}/$metadata`, 3000);
+}
+
+async function openServiceMetadata(item) {
+  const row = item?.row ?? item;
+  if (!row?.path || row.kind !== "ODATA") return;
+  const url = serviceMetadataUrl(row, osd().url);
+  if (vscode.workspace.getConfiguration("osd").get("openIn", "browser") === "vscode") {
     await openInWebview(url, "osdServiceMetadata", `${serviceLabel(row).label} $metadata`);
   } else {
     await openExternalOrOwn(url);
   }
+}
+
+async function testServiceClosure(item, output) {
+  const row = item?.row;
+  const names = row?.detailsCapabilities?.testClasses ?? [];
+  if (names.length === 0) return;
+  output.appendLine(`osd service tests ${row.name ?? row.path}: ${names.join(", ")}`);
+  let methods = 0;
+  let failures = 0;
+  for (const name of names) {
+    try {
+      const run = await osd().run({type: "CLAS", name});
+      const results = outcomes(run);
+      methods += results.length;
+      failures += results.filter((result) => result.passed !== true).length;
+      output.appendLine(`  ${name}: ${results.length} method(s), ${results.filter((result) => result.passed !== true).length} failed`);
+    } catch (e) {
+      failures += 1;
+      output.appendLine(`  ${name}: ${String(e.message ?? e)}`);
+    }
+  }
+  const summary = `${methods} test method(s), ${failures} failed`;
+  output.appendLine(`osd service tests: ${summary}`);
+  vscode.window.setStatusBarMessage(`osd: service tests ${summary}`, 5000);
 }
 
 /** A DPC/MPC/handler class node's own click: a workspace glob on the name
@@ -1161,6 +1526,16 @@ async function openServiceMetadata(item) {
  *  goes through regardless of which of the two sources answered. */
 async function openServiceClass(node, output) {
   if (node?.name === undefined) return;
+  const direct = sourcePath(serviceSourceRoot(), node.source);
+  if (direct) {
+    try {
+      const document = await vscode.workspace.openTextDocument(vscode.Uri.file(direct));
+      await vscode.window.showTextDocument(document);
+      return;
+    } catch (e) {
+      output?.appendLine(`osd open service class ${node.name}: ${String(e.message ?? e)}`);
+    }
+  }
   const pattern = readerFilePattern({type: "CLAS", name: node.name});
   try {
     const files = await vscode.workspace.findFiles(pattern, EXCLUDE, 1);
@@ -1342,18 +1717,36 @@ function activate(context) {
   context.subscriptions.push(treeProvider);
   context.subscriptions.push(vscode.window.registerTreeDataProvider("osdTree", treeProvider));
   context.subscriptions.push(vscode.commands.registerCommand("osd.refreshTree",
-    () => treeProvider.refresh().then(() => treeProvider.emitter.fire(), () => treeProvider.emitter.fire())));
+    () => treeProvider.refresh(true).then(() => treeProvider.emitter.fire(), () => treeProvider.emitter.fire())));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.groupServicesByKind", () => treeProvider.setServiceGrouping("kind")));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.groupServicesByPack", () => treeProvider.setServiceGrouping("pack")));
 
   // Services tree (docs/vscode-extension.md, "Services tree"): a row's own
-  // click (osd.openServiceRow, gated by osd.openIn) and its view/item/context
-  // actions (package.json), plus a class or entity-set node's own click.
+  // click shows the reusable details webview. Inline Open uses osd.openIn;
+  // the context menu's Open is always the external browser.
   context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceRow", (row) => openServiceRow(row)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceRowExternal", (item) => openServiceRowExternal(item)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.showServiceDetails", (item) => showServiceDetails(item, treeProvider, output)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceSource", (item, role) => openServiceSource(item, role, output)));
+  for (const [command, role] of [["osd.openServiceSourceDpc", "dpc"], ["osd.openServiceSourceMpc", "mpc"],
+    ["osd.openServiceSourceHandler", "handler"], ["osd.openServiceSourceApp", "app"],
+    ["osd.openServiceSourceDeclaration", "service"]]) {
+    context.subscriptions.push(vscode.commands.registerCommand(command, (item) => openServiceSource(item, role, output)));
+  }
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openHostDoor", (route) => openHostDoor(route)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.testServiceClosure", (item) => testServiceClosure(item, output)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.copyServiceUrl", (item) => copyServiceUrl(item)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.copyServiceWsUrl", (item) => copyServiceWsUrl(item)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.copyServiceMetadata", (item) => copyServiceMetadata(item)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceMetadata", (item) => openServiceMetadata(item)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceClass", (node) => openServiceClass(node, output)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openEntitySetMethod",
     (dpcName, set, line) => openEntitySetMethod(dpcName, set, line, output)));
+  context.subscriptions.push({dispose: () => {
+    serviceDetailsPanel?.dispose();
+    serviceDetailsPanel = undefined;
+    serviceDetailsItem = undefined;
+  }});
   context.subscriptions.push(startStopStatusBar(context, controller));
 }
 
@@ -2667,4 +3060,4 @@ async function deactivate() {
   await activeController?.stop();
 }
 
-module.exports = {activate, deactivate, SystemController, testExplorer};
+module.exports = {activate, deactivate, SystemController, testExplorer, OsdTreeProvider, TransactionItem};

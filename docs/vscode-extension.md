@@ -541,6 +541,10 @@ install.
   `<` and `&`; Q6b's `implementsClassrun` against the tracked demo fixture
   and against a comment merely naming the interface, and `RUN_TABLE.CLAS`'s
   classrun branch (tests still win over it, a DPC_EXT still wins over both).
+  The Services tree cases cover kind/pack grouping, valid context actions,
+  app manifest data-source resolution, HTTP tests by URL, closure test union,
+  service dump filtering, safe details HTML, and the services/transaction
+  routes against an in-memory `ObjectStore`.
 - `test/adt-devloop.mjs`: `core/http/segw/entitysets` against the real demo
   service, beside the other `core/http/*` routes; Q6a's `datapreview/
   freestyle` round trip (a SELECT over the demo data, through the same CSRF
@@ -639,11 +643,10 @@ single object; `npm run probe` / `tools/osd-inputs.mjs` exist for a closure
 audit by hand and were not wired into the tree view.
 
 **The UI**: an Activity Bar container "OSD" (`views` id `osdTree`) with a
-tree of four roots — the state (`Stopped` / `Building…` / `Starting…` /
-`Running on :port, generation …`), "▶ Open Fiori Launchpad", **Layers**
-(the base `osdHome` plus every detected workspace folder), and
-**Services**, grouped by kind ("Services tree", below). "osd: Open
-launchpad" opens `http://localhost:<port>/app/flp.html` with
+tree of state and launchpad items, **System**, **TRAN**, **Layers**, and
+**Services** ("Services tree", below). **System** contains the serving,
+dumps, and SQL doors. **TRAN** comes from the transaction registry.
+"osd: Open launchpad" opens `http://localhost:<port>/app/flp.html` with
 `vscode.env.openExternal` (the Launchpad node's own click; its
 context menu offers "Open launchpad inside VS Code" instead, the same
 webview pattern "Services tree" uses); a second, new status bar item
@@ -863,72 +866,62 @@ vocabulary that never serializes the connection).
 
 ## Services tree
 
-*2026-09-26.* Before this, "Services" was one flat list of every APP/APC/
-ICF/ODATA row `ZOSD_STATUS_SRV`'s own `ServiceSet` answered, nothing
-wired to a click (docs/ideas.md T8). Now it groups by kind, each group
-collapsed with a count — "OData (n)", "Apps (n)", "ICF (n)", "APC (n)",
-and any other kind the server returns gets a generic group (title-cased)
-rather than needing a code change first — rows inside a group sorted by
-path, labelled by the server's own text with the path dimmed
-(`TreeItem.description`). A row's own click opens it the way its kind
-allows: the app's page or the ICF node's URL, or the OData service
-document; APC never (a WebSocket URL does nothing opened as a page, only
-"Copy ws:// URL" on its context menu). The shared setting `osd.openIn`
-(`"browser"`, default, or `"vscode"`) decides *how* a click opens it —
-`vscode.env.openExternal` or a webview tab that iframes the running
-osd's own URL behind a `Content-Security-Policy` naming only that
-origin, the same pattern `openDataPreview` (Q7) and the gui-reports
-spike's `openWebguiTransaction` already use, reused here as
-`openInWebview`/`iframePanelHtml`. Every row's context menu offers "Copy
-URL" (APP/ICF/OData); OData also offers "Open $metadata"; APC offers
-"Copy ws:// URL" instead of either.
+The tree root has serving status, the launchpad, **Layers**, a **System**
+group for `/osd/serving`, `/osd/dumps`, and `/osd/sql`, a **TRAN** group, and
+the service inventory. TRAN rows come from the same transaction registry the
+WebGUI uses; report transactions converted into registry entries appear here
+alongside hand-declared transactions. Entries the registry marks non-runnable
+stay visible with their reason, but have no Open command.
 
-`editors/vscode/lib.js` carries the pure half, tested without VS Code or
-a server in `test/vscode-extension.mjs`: `serviceGroupLabel`,
-`normalizeServiceSetRow`/`normalizeServiceRow` (the two row shapes below,
-into one), `groupServices`, `serviceLabel`, `serviceContextValue`,
-`serviceHttpUrl`/`serviceMetadataUrl`/`serviceWsUrl`, and
-`serviceClassNodes` (the next paragraph). `extension.js`'s
-`OsdTreeProvider` is the thin wrapping — `ServiceGroupItem`/
-`ServiceRowItem`/`ServiceClassItem`/`EntitySetItem`, `openServiceRow`/
-`copyServiceUrl`/`copyServiceWsUrl`/`openServiceMetadata`/
-`openServiceClass`/`openEntitySetMethod`.
+Service rows are grouped by kind by default. Use the view title toggle to group
+them by pack; rows with no pack appear under **Unpacked**. The setting is
+`osd.services.groupBy`. A single click on an APP, OData, ICF, or APC row updates
+one reused **Service details** webview. The panel is disposed when closed and
+does not retain its hidden context. Its sections are specific to each row:
 
-**Forward-compatible expansion.** osg-i7 is building a composing route,
-one `GET` under `/sap/bc/adt/core/http/…`, that lists everything a system
-serves as one tree — `{kind, name, path, text, pack, handler,
-handlerUri, mpc, mpcUri, app, source}` per row, already kind-typed (an
-APP row's own class-shaped field is `app`, a manifest id, never
-`handler`) — replacing five separate reads of `ZOSD_STATUS_SRV` with one
-shape an editor is built to read. It does not exist on `main` yet (open
-PR, `feat/services-tree`, `GET core/http/services`) — `grep -n
-"core/http" tools/adt-facade.mjs` on `main` shows every other `core/http/*`
-route this extension already uses (`unit/object`, `segw/entitysets`,
-`xref/readers`, ...) but not this one. So `lib.js`'s `Osd#services()`
-tries it first and falls back to `ServiceSet` on a 404, silently: this
-client is written to the row shape the route will answer, whether or not
-the server it happens to be talking to has it yet, with nothing to set
-either way. When it lands, three things follow with no further server
-work: a service row's `handlerUri`/`mpcUri` (the ADT class uri) lets a
-class node open by uri directly instead of a workspace glob on the name
-(`readerFilePattern`, the same lookup Q3's "read by" quick pick already
-falls back to); `source` names the declaring file (the `.iwsv.xml`, the
-`.sicf.xml`/`.apc.xml`, or the app's manifest folder) for a context
-action this extension does not offer yet ("Reveal source"); and a
-DAEMON/JOB/TRAN kind, once the route starts naming one, appears as its
-own group with no code change (`groupServices`'s own alphabetical
-fallback) and, if it carries a `handler`, a class node under it
-(`serviceClassNodes`'s own fallback for "everything but APP and OData").
+- **OData:** DPC and MPC source links, lazily loaded entity sets, `$metadata`,
+  reader and xref closure counts for each class, closure test classes labelled
+  **ABAP Unit by reference**, matching files under `test/` and `test/e2e`
+  labelled **HTTP tests by URL**, generation and `/osd/serving` warm state,
+  and `/osd/dumps` entries whose frames name the DPC or MPC.
+  VS Code forwards the `$metadata` link through `asExternalUri` for remote
+  workspaces.
+- **App:** manifest id, title, first inbound intent, folder, and each
+  `sap.app.dataSources` URI resolved to a service row (for example, “uses
+  ZSTG_DEMO_SRV”).
+- **ICF/APC:** path, handler and handler source, the SICF/SAPC declaration
+  source, and HTTP or WebSocket protocol.
 
-An OData row expands to its DPC then its MPC (`serviceClassNodes`,
-clicking either opens its source), plus, lazily, the entity sets Q2b's
-own map already answers for (`GET core/http/segw/entitysets?class=
-<DPC_EXT>`, fetched only once the row is actually expanded): each set's
-own click opens the DPC at the `<set>_get_entityset` / `<set>_get_entity`
-method's own line, reusing Q2b's `entitySetLenses` rather than a second
-way of finding it. An ICF or an APC row expands to its one handler class
-the same way. APP rows do not expand at all — an app has a manifest, not
-an ADT class.
+The inline **▶ Open** action follows `osd.openIn` (`browser` or `vscode`). The
+context menu has **Open** (always the external browser), **Open $metadata**
+(following `osd.openIn`), **Test** (runs the
+ABAP Unit classes found in the handler/DPC/MPC xref closures), **Source**
+(only source files or folders that exist), and **Copy** (only available URL,
+WebSocket URL, and `$metadata` URL targets). A row's context value is updated
+when its group is expanded, before the row is first shown, using existing
+source paths and closure tests. Selecting it refreshes those targets with the
+rest of its details. Missing source or test targets produce no menu action.
+APC rows have no page-open action.
+
+The service inventory comes from `GET /sap/bc/adt/core/http/services`, with
+the status service's `ServiceSet` as a fallback for older systems; class
+source paths and generated service helpers are returned with the rows. An
+OData row expands to its DPC, MPC, MPC annotation, and available SEGW, search
+help, and function module registry helpers; an app may expand to its BSP
+registry helper. Generated helpers are children of their service. Its entity
+sets are requested lazily from
+`GET /sap/bc/adt/core/http/segw/entitysets?class=<DPC>`.
+ICF and APC rows expand to their handler. `GET
+/sap/bc/adt/core/http/transactions` reads all declared and generated
+`*.tran.xml` entries, including report wrappers, with relative source paths.
+
+Pure view logic lives in `editors/vscode/lib.js` and is held without VS Code
+or a live server by `test/vscode-extension.mjs`: service normalization,
+kind/pack grouping, target-specific context actions, manifest data-source
+resolution, HTTP test matching, closure test union, dump filtering, and the
+details HTML renderer. It also checks the services and transaction routes
+against a real in-memory `ObjectStore`. `extension.js` owns the webview and
+tree commands.
 
 **Tests**: `test/vscode-launcher.mjs` (registered in `test/suites.json`) —
 pure: `pickPort`/`isFree` over the 3531-3539 range and its exhaustion,
@@ -947,12 +940,12 @@ port in 3531-3539 with a temp storage directory: a full start (build,
 serve, one OData read of `ZSTG_DEMO_SRV/TravelSet`, `/osd/serving`, then
 `stop()` and a check that the spawned pid is actually gone) and a build
 that is made to fail (`osdHome` pointed at an empty temp directory), which
-must leave the state back at `"stopped"` rather than half-started. Run
-beside its neighbours as the task asked
+must leave the state back at `"stopped"` rather than half-started. An earlier
+recorded run beside its neighbours
 (`STG_PORT=3538 npx mocha test/vscode-extension.mjs test/adt-devloop.mjs
-test/osd-dumps.mjs test/vscode-launcher.mjs`): 130 passing, no port
-collisions, because the launcher's own range (3531-3539) and its
-neighbours' dynamically-assigned ports never overlap.
+test/osd-dumps.mjs test/vscode-launcher.mjs`) produced 130 passing before
+the Services tree additions; the launcher's own range (3531-3539) and its
+neighbours' dynamically-assigned ports do not overlap.
 
 **Live smoke** (`.local/b0-demo-ws/`, gitignored, one abapGit-shaped class,
 `ZCL_B0_HELLO IMPLEMENTS IF_OO_ADT_CLASSRUN`): the launcher, given that

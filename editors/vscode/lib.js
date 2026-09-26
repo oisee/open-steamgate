@@ -371,6 +371,17 @@ class Osd {
     }
   }
 
+  /** The full transitive xref closure used by a service's details and its
+   *  "Test" action. Returns undefined when this class is not in the store. */
+  async closure(type, name) {
+    try {
+      return await this.json(`/sap/bc/adt/core/http/xref/closure?type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}`);
+    } catch (e) {
+      if (/HTTP 404/.test(String(e.message ?? e))) return undefined;
+      throw e;
+    }
+  }
+
   /** Q2b "Runner": GET an OData v2 resource of a service this osd serves --
    *  `service` and `resource` joined as `/sap/opu/odata/sap/<service>/
    *  <resource>` -- timed and never throwing on a non-2xx answer, so a
@@ -525,10 +536,7 @@ class Osd {
    *  `normalizeServiceSetRow` above) whichever of the two sources
    *  answered. Tries the composing route first (docs/ideas.md T8, `GET
    *  core/http/services`) and falls back to ZOSD_STATUS_SRV's own
-   *  ServiceSet on a 404 -- the route did not exist on `main` when this
-   *  was written (open PR, feat/services-tree), so this client works
-   *  against both a system that already carries it and one that does
-   *  not, with no flag to set either way. Any other error (osd down, a
+   *  ServiceSet on a 404 for older systems. Any other error (osd down, a
    *  malformed answer) is the caller's to catch, the same as every other
    *  method here. */
   async services() {
@@ -542,6 +550,13 @@ class Osd {
     if (!res.ok) throw new Error(`GET ZOSD_STATUS_SRV/ServiceSet: HTTP ${res.status}`);
     const body = await res.json();
     return (body?.d?.results ?? []).map(normalizeServiceSetRow);
+  }
+
+  /** Every transaction declaration, including reports and dynpros the
+   *  runtime cannot enter, from the same registry the WebGUI renders. */
+  async transactions() {
+    const body = await this.json("/sap/bc/adt/core/http/transactions");
+    return (body?.transactions ?? []).map(normalizeTransactionRow);
   }
 
   /** Run an object's tests, or one class, or one method of it.
@@ -1717,20 +1732,15 @@ function demoFailureObjects(config) {
   return new Set((config?.options?.skip ?? []).map((s) => String(s.object ?? "").toUpperCase()).filter((s) => s !== ""));
 }
 
-// ---- Services tree (docs/vscode-extension.md, "Services tree"): the
-// panel's "OSD: System" view used to show one flat list of every APP/APC/
-// ICF/ODATA row ZOSD_STATUS_SRV's own ServiceSet answers, with nothing
-// wired to a click. This section is the pure half of grouping it by kind,
-// with a count per group, and of the URL a click or a context-menu action
-// on one row opens -- extension.js's OsdTreeProvider is the thin wrapping
-// (which group and row are expanded, the webview for "open inside
-// VS Code", vscode.env.clipboard for the "Copy ... URL" actions).
+// ---- Services tree (docs/vscode-extension.md, "Services tree"): pure row
+// normalisation, grouping, target flags, manifest resolution, and details
+// rendering. extension.js supplies the VS Code tree and panel.
 //
 // Two sources answer the same rows, normalized to one shape here so the
 // rest of the provider reads either without knowing which one answered:
 // ZOSD_STATUS_SRV's own ServiceSet (today, PascalCase OData columns,
 // osd-status.mjs's own servicesOf/appsOf) and the composing route
-// docs/ideas.md T8 names (`GET core/http/services`, lowercase, already
+// docs/ideas.md T8 named (`GET core/http/services`, lowercase, already
 // kind-typed: `handler` is a class name for every kind but APP, whose own
 // class-shaped field is `app` -- an app has a manifest id, not an ADT
 // class). `Osd#services()` below tries the route first and falls back to
@@ -1772,8 +1782,9 @@ function normalizeServiceSetRow(row) {
     kind, name: undefined, path: String(row?.Path ?? ""), text: String(row?.Text ?? ""), pack,
     handler: kind === "APP" ? undefined : handlerName,
     handlerUri: undefined,
+    handlerSource: undefined,
     app: kind === "APP" ? handlerName : undefined,
-    mpc: undefined, mpcUri: undefined, source: undefined,
+    mpc: undefined, mpcUri: undefined, mpcSource: undefined, helpers: [], source: undefined,
   };
 }
 
@@ -1789,8 +1800,13 @@ function normalizeServiceRow(row) {
   return {
     kind: String(row?.kind ?? ""), name: str(row?.name),
     path: String(row?.path ?? ""), text: String(row?.text ?? ""), pack: str(row?.pack),
-    handler: str(row?.handler), handlerUri: str(row?.handlerUri),
-    app: str(row?.app), mpc: str(row?.mpc), mpcUri: str(row?.mpcUri), source: str(row?.source),
+    handler: str(row?.handler), handlerUri: str(row?.handlerUri), handlerSource: str(row?.handlerSource),
+    app: str(row?.app), mpc: str(row?.mpc), mpcUri: str(row?.mpcUri), mpcSource: str(row?.mpcSource),
+    helpers: (row?.helpers ?? []).map((helper) => ({
+      name: String(helper?.name ?? ""), role: String(helper?.role ?? "helper"),
+      uri: str(helper?.uri), source: str(helper?.source),
+    })).filter((helper) => helper.name !== ""),
+    source: str(row?.source),
   };
 }
 
@@ -1800,18 +1816,24 @@ function normalizeServiceRow(row) {
  *  has never named, alphabetically -- "a generic group, so new kinds
  *  appear without code changes". Each group's own rows sorted by path,
  *  the way the flat list this replaces already read top to bottom. */
-function groupServices(rows) {
+function groupServices(rows, groupBy = "kind") {
   const byKind = new Map();
   for (const row of rows ?? []) {
-    const list = byKind.get(row.kind) ?? [];
+    const key = groupBy === "pack" ? (row.pack ?? "") : row.kind;
+    const list = byKind.get(key) ?? [];
     list.push(row);
-    byKind.set(row.kind, list);
+    byKind.set(key, list);
+  }
+  if (groupBy === "pack") {
+    return [...byKind.keys()].sort((a, b) => (a || "Unpacked").localeCompare(b || "Unpacked")).map((pack) => ({
+      key: pack, pack: pack || undefined, groupBy, label: pack || "Unpacked",
+      rows: [...byKind.get(pack)].sort((a, b) => serviceLabel(a).label.localeCompare(serviceLabel(b).label) || a.path.localeCompare(b.path)),
+    }));
   }
   const known = SERVICE_GROUP_ORDER.filter((k) => byKind.has(k));
   const rest = [...byKind.keys()].filter((k) => !SERVICE_GROUP_ORDER.includes(k)).sort();
   return [...known, ...rest].map((kind) => ({
-    kind,
-    label: serviceGroupLabel(kind),
+    key: kind, kind, groupBy: "kind", label: serviceGroupLabel(kind),
     rows: [...byKind.get(kind)].sort((a, b) => a.path.localeCompare(b.path)),
   }));
 }
@@ -1836,6 +1858,89 @@ function serviceContextValue(kind) {
   return `osd-service-${String(kind ?? "").toLowerCase()}`;
 }
 
+/** The context value also names only the actions whose targets exist for
+ *  this row. VS Code's menu predicates match the semicolon-delimited flags. */
+function serviceActionContext(row, capabilities = {}) {
+  const flags = [];
+  if (row?.path) flags.push("url");
+  if (row?.kind === "ODATA" && row.path) flags.push("metadata");
+  if (row?.kind === "APC" && row.path) flags.push("ws");
+  if ((capabilities.testClasses ?? []).length > 0) flags.push("test");
+  for (const role of ["dpc", "mpc", "handler", "app", "service"]) {
+    if (capabilities.sources?.[role]?.path) flags.push(`source-${role}`);
+  }
+  return [serviceContextValue(row?.kind), ...flags].join(";");
+}
+
+function normalizeTransactionRow(row) {
+  return {
+    tcode: String(row?.tcode ?? ""), text: String(row?.text ?? ""),
+    program: String(row?.program ?? ""), dynpro: String(row?.dynpro ?? ""),
+    className: String(row?.className ?? ""), method: String(row?.method ?? ""),
+    kind: String(row?.kind ?? ""), runnable: row?.runnable === true,
+    reason: String(row?.reason ?? ""), source: String(row?.source ?? ""),
+  };
+}
+
+/** Read a UI5 manifest's identity and resolve each sap.app.dataSources URI
+ *  to the OData inventory row with the same service path. */
+function appManifestDetails(manifest, appRow, serviceRows = []) {
+  const app = manifest?.["sap.app"] ?? {};
+  const inbounds = app.crossNavigation?.inbounds ?? {};
+  const intent = Object.keys(inbounds)[0];
+  const dataSources = Object.entries(app.dataSources ?? {}).map(([key, value]) => {
+    const uri = String(value?.uri ?? "");
+    const match = /\/sap\/opu\/odata\/sap\/([^/?#]+)\/?/i.exec(uri);
+    const serviceName = match?.[1]?.toUpperCase();
+    const service = serviceRows.find((row) => {
+      if (row.kind !== "ODATA") return false;
+      const rowName = /\/sap\/opu\/odata\/sap\/([^/]+)/i.exec(row.path)?.[1]?.toUpperCase();
+      return row.name?.toUpperCase() === serviceName || rowName === serviceName;
+    });
+    return {key, uri, service: service?.name};
+  });
+  return {
+    id: String(app.id ?? appRow?.app ?? ""),
+    title: String(app.title ?? appRow?.text ?? ""),
+    intent,
+    folder: String(appRow?.source ?? ""),
+    dataSources,
+  };
+}
+
+/** Tests from test/ and test/e2e whose source names a service URL. The
+ *  extension supplies only those files, so this stays pure and fast to test. */
+function httpTestFiles(files, servicePath, serviceName) {
+  const pathNeedle = String(servicePath ?? "");
+  const nameNeedle = String(serviceName ?? "");
+  const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const boundary = "(?=$|[/?#'\"`\\s])";
+  const direct = pathNeedle ? new RegExp(`${escapeRegex(pathNeedle)}${boundary}`, "i") : undefined;
+  const prefix = nameNeedle && pathNeedle.toUpperCase().endsWith(nameNeedle.toUpperCase())
+    ? pathNeedle.slice(0, -nameNeedle.length) : undefined;
+  const assembled = prefix
+    ? new RegExp(`${escapeRegex(prefix)}[\"'\x60]\\s*\\+\\s*[\"'\x60]${escapeRegex(nameNeedle)}${boundary}`, "i") : undefined;
+  return (files ?? []).filter((file) => {
+    const content = String(file?.source ?? file?.content ?? "");
+    return direct?.test(content) || assembled?.test(content);
+  }).map((file) => String(file.path ?? "")).filter(Boolean).sort();
+}
+
+/** Unique ABAP Unit objects across DPC/MPC closures, in stable order. */
+function closureTestNames(...closures) {
+  return [...new Set(closures.flatMap((closure) => closure?.tests ?? []))].sort();
+}
+
+/** Only dumps whose mapped ABAP frames name this service's DPC or MPC. */
+function dumpsForService(dumps, row) {
+  const names = [row?.handler, row?.mpc].filter(Boolean).map((name) => name.toLowerCase());
+  if (names.length === 0) return [];
+  return (dumps ?? []).filter((dump) => (dump.frames ?? []).some((frame) => {
+    const file = String(frame.file ?? "").toLowerCase();
+    return names.some((name) => file.includes(name));
+  }));
+}
+
 /** `baseUrl` (osd().url, no trailing slash) plus the row's own path --
  *  what an APP, an ICF node or an OData service document opens, in a
  *  browser or in the "open inside VS Code" webview alike. */
@@ -1849,6 +1954,16 @@ function serviceHttpUrl(row, baseUrl) {
  *  asks for it by name. */
 function serviceMetadataUrl(row, baseUrl) {
   return `${serviceHttpUrl(row, baseUrl)}/$metadata`;
+}
+
+/** VS Code forwards localhost for Remote SSH, WSL and web workspaces. */
+async function serviceMetadataExternalUrl(row, baseUrl, externalize) {
+  const raw = serviceMetadataUrl(row, baseUrl);
+  try {
+    return String(await externalize(raw));
+  } catch {
+    return raw;
+  }
 }
 
 /** The push channel's own `ws://` (or `wss://` over `https://`) URL --
@@ -1870,14 +1985,72 @@ function serviceWsUrl(row, baseUrl) {
  *  route answered one, `undefined` over ServiceSet (extension.js opens by
  *  a workspace glob on the name instead, the same way Q3's readers does). */
 function serviceClassNodes(row) {
-  if (row.kind === "APP") return [];
+  const helpers = (row.helpers ?? []).map((helper) => ({role: helper.role, name: helper.name, uri: helper.uri, source: helper.source}));
+  if (row.kind === "APP") return helpers;
   if (row.kind === "ODATA") {
     const out = [];
-    if (row.handler) out.push({role: "dpc", name: row.handler, uri: row.handlerUri});
-    if (row.mpc) out.push({role: "mpc", name: row.mpc, uri: row.mpcUri});
-    return out;
+    if (row.handler) out.push({role: "dpc", name: row.handler, uri: row.handlerUri, source: row.handlerSource});
+    if (row.mpc) out.push({role: "mpc", name: row.mpc, uri: row.mpcUri, source: row.mpcSource});
+    return [...out, ...helpers];
   }
-  return row.handler ? [{role: "handler", name: row.handler, uri: row.handlerUri}] : [];
+  return [...(row.handler ? [{role: "handler", name: row.handler, uri: row.handlerUri, source: row.handlerSource}] : []), ...helpers];
+}
+
+const htmlAttrEscape = (text) => String(text ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+function serviceDetailsHtml(details, nonce = "") {
+  const row = details?.row ?? {};
+  const esc = htmlEscape;
+  const attr = htmlAttrEscape;
+  const heading = serviceLabel(row).label;
+  const sourceButton = (role, label, source) => source?.path
+    ? `<button type="button" data-source="${attr(role)}">${esc(label)}</button> <code>${esc(source.path)}</code>`
+    : `<span class="muted">${esc(label)} source unavailable</span>`;
+  const list = (items, render) => (items?.length ? `<ul>${items.map(render).join("")}</ul>` : `<p class="muted">None found</p>`);
+  let body = `<h1>${esc(heading)}</h1><p class="muted">${esc(row.kind ?? "")} · ${esc(row.path ?? "")}${row.pack ? ` · ${esc(row.pack)}` : ""}</p>`;
+
+  if (row.kind === "ODATA") {
+    const metadataUrl = details.metadataUrl;
+    const section = (role, title, name, source, readers, closure) => {
+      if (!name) return "";
+      const tests = closure?.tests ?? [];
+      return `<section><h2>${esc(title)} ${esc(name)}</h2>${sourceButton(role, "Open source", source)}
+        <p>Readers: ${readers?.counts?.readers ?? "n/a"} (${readers?.counts?.tests ?? 0} with tests, ${readers?.counts?.services ?? 0} services) ·
+          Closure: ${closure?.counts?.objects ?? "n/a"} objects · ${closure?.counts?.tests ?? tests.length} tests</p>
+        <p class="muted">ABAP Unit by reference</p>${list(tests, (test) => `<li><code>${esc(test)}</code></li>`)}</section>`;
+    };
+    body += `<section><h2>OData</h2><p>DPC: ${esc(row.handler ?? "n/a")}</p><p>MPC: ${esc(row.mpc ?? "n/a")}</p>
+      <p><a href="${attr(metadataUrl ?? "")}" target="_blank" rel="noreferrer">$metadata</a></p>
+      ${details.entitySetsError ? `<p class="error">Entity sets: ${esc(details.entitySetsError)}</p>` : ""}
+      <h3>Entity sets</h3>${list(details.entitySets ?? [], (set) => `<li><code>${esc(set.set)}</code> <span class="muted">${esc(set.kind)}</span></li>`)}</section>`;
+    body += section("dpc", "DPC", row.handler, details.sources?.dpc, details.readers?.dpc, details.closures?.dpc);
+    body += section("mpc", "MPC", row.mpc, details.sources?.mpc, details.readers?.mpc, details.closures?.mpc);
+    const warm = details.serving?.warm;
+    body += `<section><h2>Runtime</h2><p>Generation: <code>${esc(details.serving?.generation ?? "unavailable")}</code> ·
+      Warm: ${esc(warm?.state ?? "unavailable")}${warm?.reason ? ` (${esc(warm.reason)})` : ""}</p></section>`;
+    body += `<section><h2>Short dumps naming this service</h2>${list(details.dumps ?? [], (dump) =>
+      `<li>${esc(dump.at ?? "")} · ${esc(dump.name ?? "error")} · ${esc(dump.message ?? "")}</li>`)}</section>`;
+    body += `<section><h2>HTTP tests by URL</h2>${list(details.httpTests ?? [], (file) => `<li><code>${esc(file)}</code></li>`)}</section>`;
+  } else if (row.kind === "APP") {
+    const app = details.app ?? {};
+    body += `<section><h2>App</h2><p>Id: <code>${esc(app.id ?? "")}</code></p><p>Title: ${esc(app.title ?? "")}</p>
+      <p>Intent: <code>${esc(app.intent ?? "n/a")}</code></p><p>Folder: ${sourceButton("app", "Open app folder", details.sources?.app)}</p>
+      <h3>OData data sources</h3>${list(app.dataSources ?? [], (source) =>
+        `<li><code>${esc(source.key)}</code>: ${source.service ? `uses <code>${esc(source.service)}</code>` : esc(source.uri)}</li>`)}</section>`;
+  } else {
+    const role = row.kind === "ICF" || row.kind === "APC" ? "handler" : undefined;
+    const protocol = row.kind === "APC" ? "WebSocket (ws)" : "HTTP";
+    body += `<section><h2>${esc(row.kind ?? "Service")}</h2><p>Protocol: ${esc(protocol)}</p><p>Path: <code>${esc(row.path ?? "")}</code></p>
+      <p>Handler: <code>${esc(row.handler ?? "n/a")}</code></p>
+      ${role ? sourceButton("handler", "Open handler source", details.sources?.handler) : ""}
+      <p>Service declaration: ${sourceButton("service", row.kind === "APC" ? "Open SAPC source" : "Open SICF source", details.sources?.service)}</p></section>`;
+  }
+
+  const script = `<script nonce="${attr(nonce)}">const vscode=acquireVsCodeApi();document.addEventListener("click",e=>{const b=e.target.closest("[data-source]");if(b)vscode.postMessage({command:"openSource",role:b.dataset.source});});</script>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${attr(nonce)}';"><style>
+    body{font:13px var(--vscode-font-family);color:var(--vscode-foreground);padding:0 20px;max-width:1000px}h1{font-size:20px}h2{font-size:16px;margin-bottom:8px}section{border-top:1px solid var(--vscode-panel-border);padding:8px 0}button{color:var(--vscode-textLink-foreground);background:transparent;border:0;padding:0;text-decoration:underline;cursor:pointer}a{color:var(--vscode-textLink-foreground)}code{font-family:var(--vscode-editor-font-family)}ul{margin-top:6px}.muted{color:var(--vscode-descriptionForeground)}.error{color:var(--vscode-errorForeground)}
+    </style></head><body>${body}${script}</body></html>`;
 }
 
 module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
@@ -1894,6 +2067,7 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   demoFailureObjects,
   progTcodeOf, webguiTransactionUrl, webguiPanelHtml, runWebguiPanel, progRunLens,
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
-  serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
+  serviceContextValue, serviceActionContext, normalizeTransactionRow, appManifestDetails, httpTestFiles, closureTestNames, dumpsForService,
+  serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext,
   SYSTEM_STATUS_SETS, odataV2Results, systemOverviewModel};

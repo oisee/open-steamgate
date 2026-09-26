@@ -563,12 +563,25 @@ describe("tools/adt-facade: the development loop", () => {
         mpc: "ZCL_ZSTG_DEMO_MPC_EXT",
       });
       expect(demo.source).to.match(/\.iwsv\.xml$/);
+      expect(demo.handlerSource).to.match(/\.clas\.abap$/);
+      expect(demo.mpcSource).to.match(/\.clas\.abap$/);
+      expect(demo.helpers).to.be.an("array");
       const icf = services.find((s) => s.kind === "ICF" && s.handlerUri !== undefined);
       expect(icf.handlerUri).to.match(/^\/sap\/bc\/adt\/oo\/classes\//);
       const app = services.find((s) => s.kind === "APP");
       expect(app.app).to.be.a("string");
       expect(app.handler).to.equal(undefined);
       expect(app.source).to.match(/webapp|packs/);
+    });
+
+    it("the transaction inventory includes every registry row and its declaring source", async () => {
+      const res = await call("/core/http/transactions");
+      expect(res.status).to.equal(200);
+      const {transactions} = await res.json();
+      const note = transactions.find((one) => one.tcode === "ZOSD_NOTE");
+      expect(note).to.include({kind: "CLASS", source: "src/webgui/zosd_note.tran.xml"});
+      expect(note.className).to.be.a("string");
+      expect(transactions.every((one) => one.source.endsWith(".tran.xml"))).to.equal(true);
     });
 
     it("Q3: an object nothing reads answers an empty list, not an error", async () => {
