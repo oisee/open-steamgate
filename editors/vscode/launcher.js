@@ -30,6 +30,93 @@ const path = require("node:path");
 // still has to say so explicitly.
 const PORT_RANGE = {from: 3531, to: 3539};
 
+// ---- databases (docs/vscode-extension.md, "Databases") -------------------
+//
+// `test/setup.mjs` already picks a backend off `STG_DB` (file | postgres |
+// hana | duckdb) -- this section is only the env this launcher hands that
+// process, built the same pure way as everything else here: no `vscode`
+// import, so it is unit-testable without a server or a real database.
+//
+// A password never lives in `config`'s caller-visible shape for long: the
+// extension reads it out of `context.secrets` right before calling this and
+// it travels only in the env of the one process it is for, never in argv
+// (a `ps` on this host would otherwise show it) and never written to a
+// tracked file or to `settings.json`.
+
+const DATABASE_KINDS = ["sqlite", "postgres", "hana", "duckdb"];
+
+/** A short, stable, per-`osdHome` name for the schema/database this
+ *  launcher's own instance uses by default, so two workspace windows on two
+ *  different checkouts never collide in one shared HANA or PostgreSQL, and
+ *  a rerun of the same checkout keeps writing to the same place. Never an
+ *  existing schema: it is derived, not typed in by a person, so there is
+ *  nothing to accidentally point at somebody's own `OSD`. */
+function defaultDedicatedName(osdHome) {
+  return createHash("sha1").update(String(osdHome)).digest("hex").slice(0, 8);
+}
+
+/** The env `STG_DB` and its friends are read from (test/setup.mjs), built
+ *  from one `{kind, host, port, user, database, schema, password, fresh}`
+ *  config -- `kind` is one of DATABASE_KINDS, everything else optional and
+ *  named the way the setting it comes from is named, not the way the env
+ *  var is. Unset fields simply leave the matching env var unset, so the
+ *  client's own default (tools/hana-client.mjs, tools/postgres-client.mjs)
+ *  applies exactly as it would with no launcher involved at all. */
+function databaseEnv(config = {}) {
+  const kind = config.kind ?? "sqlite";
+  if (kind === "sqlite") {
+    return {STG_DB: "file"};
+  }
+  if (kind === "duckdb") {
+    return {STG_DB: "duckdb"};
+  }
+  if (kind === "postgres") {
+    const env = {STG_DB: "postgres"};
+    if (config.host) env.PGHOST = String(config.host);
+    if (config.port) env.PGPORT = String(config.port);
+    if (config.user) env.PGUSER = String(config.user);
+    if (config.database) env.PGDATABASE = String(config.database);
+    if (config.password) env.PGPASSWORD = String(config.password);
+    return env;
+  }
+  if (kind === "hana") {
+    const env = {STG_DB: "hana"};
+    if (config.host) env.HANA_HOST = String(config.host);
+    if (config.port) env.HANA_PORT = String(config.port);
+    if (config.user) env.HANA_USER = String(config.user);
+    if (config.schema) env.HANA_SCHEMA = String(config.schema);
+    if (config.password) env.HANA_PASSWORD = String(config.password);
+    if (config.fresh) env.STG_DB_FRESH = "1";
+    return env;
+  }
+  throw new Error(`unknown database kind: ${kind}`);
+}
+
+/** A short label for the status bar and the tree's own state row, e.g.
+ *  "SQLite", "HANA (schema OSD_A1B2C3D4)", "PostgreSQL (osd_a1b2c3d4)" --
+ *  built from `config` alone (what this launcher asked for), never from a
+ *  live connection, so it is available the instant a start is requested and
+ *  never carries a password. */
+function describeDatabase(config = {}) {
+  const kind = config.kind ?? "sqlite";
+  if (kind === "sqlite") return "SQLite";
+  if (kind === "duckdb") return "DuckDB";
+  if (kind === "postgres") return config.database ? `PostgreSQL (${config.database})` : "PostgreSQL";
+  if (kind === "hana") return config.schema ? `HANA (schema ${config.schema})` : "HANA";
+  return kind;
+}
+
+/** Whether `osdHome` has the native DuckDB module a `duckdb` choice needs
+ *  (`@duckdb/node-api`, CLAUDE.md "Substrate"): present in an ordinary
+ *  checkout's `node_modules/`, and never shipped into a packaged `.vsix`
+ *  (scripts/build-vsix.mjs, "left out on purpose" -- native, and not on the
+ *  default path). Checked before a build is even attempted, so a packaged
+ *  install answers with a plain sentence instead of a build failure a
+ *  person has to read a stack trace to understand. */
+function duckdbAvailable(osdHome) {
+  return isDir(path.join(osdHome, "node_modules", "@duckdb", "node-api"));
+}
+
 function isDir(p) {
   try {
     return fs.statSync(p).isDirectory();
@@ -375,6 +462,14 @@ class Launcher extends EventEmitter {
     this.workspaceFolders = options.workspaceFolders ?? [];
     this.portRange = options.portRange ?? PORT_RANGE;
     this.timeoutMs = options.timeoutMs ?? 180000;
+    // `osd.database.system` (docs/vscode-extension.md, "Databases"):
+    // `{kind, host, port, user, database, schema, password, fresh}`, the
+    // shape `databaseEnv()` above reads. Connection details and a
+    // password already resolved by the caller (settings.json plus
+    // `context.secrets`) -- this module stays pure and never reads either
+    // itself.
+    this.database = options.database ?? {kind: "sqlite"};
+    this.databaseLabel = describeDatabase(this.database);
     this.state = "stopped";
     this.child = undefined;
     this.port = undefined;
@@ -414,12 +509,23 @@ class Launcher extends EventEmitter {
     fs.mkdirSync(dbDir, {recursive: true});
     fs.mkdirSync(tlsDir, {recursive: true});
 
+    if (this.database.kind === "duckdb" && duckdbAvailable(this.osdHome) === false) {
+      this.#setState("stopped");
+      throw new Error("DuckDB needs the native module; not in this package");
+    }
+
     const port = await pickPort(this.portRange);
+    const dbEnv = databaseEnv(this.database);
     const env = {
       ...process.env,
       STG_PORT: String(port),
-      STG_DB: "file",
-      STG_DB_PATH: path.join(dbDir, "osd.sqlite"),
+      ...dbEnv,
+      // `sqlite` and `duckdb` keep their rows under this instance's own
+      // storage, exactly like before -- a persisted file, not `:memory:`,
+      // so a rebuild does not start from nothing. `postgres` and `hana`
+      // have no file of their own; their location is the connection.
+      ...(dbEnv.STG_DB === "file" ? {STG_DB_PATH: path.join(dbDir, "osd.sqlite")} : {}),
+      ...(dbEnv.STG_DB === "duckdb" ? {STG_DB_PATH: path.join(dbDir, "osd.duckdb")} : {}),
       // No cert ever lands in `storageDir`'s TLS folder (it starts empty and
       // this launcher never runs `osd:tls`), so pointing OSD_TLS_DIR at it
       // is what makes plain HTTP the default: there is nothing to find, and
@@ -434,6 +540,7 @@ class Launcher extends EventEmitter {
       env.OSD_PACKS = packsDir;
     }
     this.env = env;
+    this.databaseLabel = describeDatabase(this.database);
 
     const build = await runToCompletion(this.osdHome, "tools/osd-build.mjs", [], env, (line) => this.#log(line));
     if (build.code !== 0) {
@@ -451,8 +558,25 @@ class Launcher extends EventEmitter {
     }
     this.child = child;
     this.pid = child.pid;
-    child.stdout?.on("data", (d) => this.#log(d.toString()));
-    child.stderr?.on("data", (d) => this.#log(d.toString()));
+    // The last few KB of what the server printed, kept only so a caller
+    // who never gets a "serving" answer at all still sees WHY -- test/setup.mjs's
+    // own stale-schema refusal ("Use a fresh HANA_SCHEMA, or explicitly
+    // recreate it with STG_DB_FRESH=1") is a thrown Error that reaches
+    // stderr and then a process exit, never a "serving" answer, so without
+    // this a person waiting on HANA or PostgreSQL just saw "never answered
+    // ready" after the full timeout with no reason at all.
+    let recentOutput = "";
+    const capture = (d) => {
+      const text = d.toString();
+      recentOutput = (recentOutput + text).slice(-4000);
+      this.#log(text);
+    };
+    child.stdout?.on("data", capture);
+    child.stderr?.on("data", capture);
+    let resolveExitedEarly;
+    const exitedEarly = new Promise((resolve) => {
+      resolveExitedEarly = resolve;
+    });
     child.on("exit", (code, signal) => {
       const wasRunning = this.state !== "stopped";
       this.child = undefined;
@@ -463,11 +587,17 @@ class Launcher extends EventEmitter {
       if (wasRunning) {
         this.emit("exit", {code, signal});
       }
+      resolveExitedEarly({code, signal});
     });
 
     let serving;
     try {
-      serving = await waitForServing(port, {timeoutMs: this.timeoutMs});
+      serving = await Promise.race([
+        waitForServing(port, {timeoutMs: this.timeoutMs}),
+        exitedEarly.then(({code, signal}) => {
+          throw new Error(`osd exited before it started serving (code ${code ?? "?"}, signal ${signal ?? "?"}): ${recentOutput.trim().slice(-1000)}`);
+        }),
+      ]);
     } catch (error) {
       await terminate(child);
       if (this.state !== "stopped") {
@@ -519,4 +649,9 @@ module.exports = {
   materializedHomeDir,
   ensureMaterializedHome,
   MATERIALIZED_MARKER,
+  DATABASE_KINDS,
+  defaultDedicatedName,
+  databaseEnv,
+  describeDatabase,
+  duckdbAvailable,
 };

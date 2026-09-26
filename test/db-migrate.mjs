@@ -197,6 +197,39 @@ describe("DuckDB file migration (tools/osd-db-migrate.mjs)", function () {
     }
     await refuseUnmigratedHana({query: async () => [{table_name: "ZOSD_TAXIFACT", column_name: "PICKUP_ZONE"}]}, "OSD");
   });
+
+  // Regression: test/setup.mjs's HANA branch used to call this as
+  // `refuseUnmigratedHana(db, db.schema)` -- `db` itself, not `{query: ...}`.
+  // `query` destructured off an object and called unbound loses its `this`,
+  // and `HanaDatabaseClient#query` reads `this.trace` on its very first
+  // line, so every real HANA connection died with "Cannot read properties
+  // of undefined (reading 'trace')" the moment it reached an already-built
+  // schema (found live against a real HANA, 2026-09-26; docs/vscode-extension.md
+  // "Databases"). A plain object shaped the same way (a method that reads
+  // `this`) reproduces the trap without needing hdb or a real HANA.
+  it("a query method that reads `this` -- HanaDatabaseClient's own shape -- must be called bound, not destructured", async () => {
+    class QueryReadsThis {
+      constructor() {
+        this.trace = false;
+      }
+      async query() {
+        if (this.trace) {
+          throw new Error("unreachable in this test");
+        }
+        return [];
+      }
+    }
+    const client = new QueryReadsThis();
+    try {
+      // the trap: destructuring `query` off `client` loses `this`
+      await refuseUnmigratedHana(client, "OSD");
+      expect.fail("an unbound query() should have thrown on `this.trace`");
+    } catch (error) {
+      expect(error.message).to.contain("reading 'trace'");
+    }
+    // the fix: a closure keeps `this` bound
+    await refuseUnmigratedHana({query: (sql) => client.query(sql)}, "OSD");
+  });
 });
 
 // The same, through the setup every host passes (test/setup.mjs, STG_DB=duckdb

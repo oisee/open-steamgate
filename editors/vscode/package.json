@@ -2,7 +2,7 @@
   "name": "osd-vscode",
   "displayName": "open-steamgate (osd)",
   "description": "ABAP Unit in the Test Explorer, the serving generation and short dumps of a running osd",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "license": "MIT",
   "publisher": "open-steamgate",
@@ -63,6 +63,63 @@
           "enum": ["browser", "vscode"],
           "default": "browser",
           "description": "Where a click on a Services tree row (App, ICF, OData) opens it: the system browser (vscode.env.openExternal), or a webview tab inside VS Code (an iframe of the running osd's own URL, the way the SEGW editor's and the gui-reports spike's own panels do it). APC rows have no default click either way -- a WebSocket URL does nothing opened as a page."
+        },
+        "osd.database.system": {
+          "type": "string",
+          "enum": ["sqlite", "postgres", "hana", "duckdb"],
+          "default": "sqlite",
+          "description": "What osd.start runs the system on (test/setup.mjs's own STG_DB). A password never lives here -- \"osd: Set database password (HANA)\" / \"(PostgreSQL)\" store it in VS Code's own secret storage. duckdb needs the native module (@duckdb/node-api): not available in a packaged install."
+        },
+        "osd.database.tests": {
+          "type": "string",
+          "enum": ["same", "sqlite", "postgres", "hana", "duckdb"],
+          "default": "same",
+          "description": "What a Test Explorer run (or osd.run's own detached run) uses, when it should be a DIFFERENT database than osd.database.system -- e.g. the live system on sqlite while tests run on a real hana. \"same\" (the default) sends no override at all."
+        },
+        "osd.database.postgres.host": {
+          "type": "string",
+          "default": "",
+          "description": "PostgreSQL host for osd.database.system/tests = postgres. Empty uses the client's own default (PGHOST, else \"postgres\")."
+        },
+        "osd.database.postgres.port": {
+          "type": "number",
+          "default": 0,
+          "description": "PostgreSQL port. 0 uses the client's own default (PGPORT, else 5432)."
+        },
+        "osd.database.postgres.user": {
+          "type": "string",
+          "default": "",
+          "description": "PostgreSQL user. Empty uses the client's own default (PGUSER, else \"osd\")."
+        },
+        "osd.database.postgres.database": {
+          "type": "string",
+          "default": "",
+          "description": "PostgreSQL database -- the isolation boundary (tools/postgres-client.mjs never drops or rewrites a pre-existing schema). Empty defaults to a dedicated osd_<hash> derived from osd.home, so this window never writes into somebody else's database by accident."
+        },
+        "osd.database.hana.host": {
+          "type": "string",
+          "default": "",
+          "description": "HANA host for osd.database.system/tests = hana. Empty uses the client's own default (HANA_HOST/HXE_HOST, else \"localhost\")."
+        },
+        "osd.database.hana.port": {
+          "type": "number",
+          "default": 0,
+          "description": "HANA port. 0 uses the client's own default (HANA_PORT/HXE_PORT, else 39017)."
+        },
+        "osd.database.hana.user": {
+          "type": "string",
+          "default": "",
+          "description": "HANA user. Empty uses the client's own default (HANA_USER/HXE_USER, else \"SYSTEM\")."
+        },
+        "osd.database.hana.schema": {
+          "type": "string",
+          "default": "",
+          "description": "HANA schema -- the isolation boundary. Empty defaults to a dedicated OSD_<HASH> derived from osd.home, so this window never writes into an existing schema by accident."
+        },
+        "osd.database.hana.fresh": {
+          "type": "boolean",
+          "default": false,
+          "description": "STG_DB_FRESH=1: drop and rebuild osd.database.hana.schema on the next start instead of refusing a schema this build did not stamp. osd.start turns this on itself (and asks first) when a start fails with that refusal."
         }
       }
     },
@@ -85,6 +142,8 @@
     },
     "commands": [
       {"command": "osd.showDumps", "title": "osd: Show short dumps"},
+      {"command": "osd.setHanaPassword", "title": "osd: Set database password (HANA)"},
+      {"command": "osd.setPostgresPassword", "title": "osd: Set database password (PostgreSQL)"},
       {"command": "osd.refreshHotspots", "title": "osd: Refresh hotspots"},
       {"command": "osd.check", "title": "osd: Check"},
       {"command": "osd.activate", "title": "osd: Activate"},

@@ -291,12 +291,25 @@ class Osd {
     return (body?.d?.results ?? []).map(normalizeServiceSetRow);
   }
 
-  /** Run an object's tests, or one class, or one method of it. */
-  run(object, testClass, method) {
+  /** Run an object's tests, or one class, or one method of it.
+   *
+   *  `dbEnv` (docs/vscode-extension.md, "Databases"; the shape
+   *  editors/vscode/launcher.js's `databaseEnv` builds) runs THIS request's
+   *  tests on a different database than the server's own -- `undefined`
+   *  (the default) sends no body at all, and the façade route runs the
+   *  test in its usual throwaway SQLite file, unchanged. Sent in the body,
+   *  never the query string: it may carry a password, and a query string
+   *  ends up in server logs where a body does not. */
+  run(object, testClass, method, dbEnv) {
     let route = `/sap/bc/adt/core/http/unit/object/run?type=${encodeURIComponent(object.type)}&name=${encodeURIComponent(object.name)}`;
     if (testClass) route += `&testClass=${encodeURIComponent(testClass)}`;
     if (method) route += `&method=${encodeURIComponent(method)}`;
-    return this.json(route, {method: "POST"});
+    const options = {method: "POST"};
+    if (dbEnv !== undefined) {
+      options.headers = {"content-type": "application/json"};
+      options.body = JSON.stringify({dbEnv});
+    }
+    return this.json(route, options);
   }
 
   /** Ctrl+F2: check `source` (an editor's own buffer, not necessarily saved)

@@ -20,6 +20,7 @@ const {
   looksLikeAbapGitFolder, detectWorkspaceLayers, packNameOf, ensureWorkspacePacks,
   waitForServing, servingOnce, terminate, Launcher,
   linkOrCopyTree, materializedHomeDir, ensureMaterializedHome, MATERIALIZED_MARKER,
+  DATABASE_KINDS, defaultDedicatedName, databaseEnv, describeDatabase, duckdbAvailable,
 } = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 
 // No chai-as-promised in this tree's node_modules, so a rejection is caught
@@ -231,6 +232,106 @@ describe("editors/vscode/launcher.js: terminate()", function () {
     const child = spawn(process.execPath, ["-e", "process.exit(0)"]);
     await once(child, "exit");
     await terminate(child); // must not hang or throw
+  });
+});
+
+// Databases (docs/vscode-extension.md, "Databases"): the env this launcher
+// hands the process it starts, and how it is labelled -- pure functions,
+// tested without spawning anything (test/setup.mjs's own STG_DB branches
+// stay the oracle for what a key is called; this only proves the mapping).
+describe("editors/vscode/launcher.js: databases", function () {
+  it("DATABASE_KINDS is exactly the four test/setup.mjs branches", () => {
+    expect(DATABASE_KINDS).to.deep.equal(["sqlite", "postgres", "hana", "duckdb"]);
+  });
+
+  it("defaultDedicatedName is stable per osdHome and differs across osdHome", () => {
+    const a = defaultDedicatedName("/home/alice/dev/open-steamgate");
+    const b = defaultDedicatedName("/home/alice/dev/open-steamgate");
+    const c = defaultDedicatedName("/home/alice/dev/another-checkout");
+    expect(a).to.equal(b);
+    expect(a).to.not.equal(c);
+    expect(a).to.match(/^[0-9a-f]{8}$/);
+  });
+
+  it("databaseEnv(sqlite) is exactly STG_DB=file, nothing else", () => {
+    expect(databaseEnv({kind: "sqlite"})).to.deep.equal({STG_DB: "file"});
+    expect(databaseEnv()).to.deep.equal({STG_DB: "file"}, "no config at all defaults to sqlite");
+  });
+
+  it("databaseEnv(duckdb) is exactly STG_DB=duckdb", () => {
+    expect(databaseEnv({kind: "duckdb"})).to.deep.equal({STG_DB: "duckdb"});
+  });
+
+  it("databaseEnv(postgres) sets only the fields given, never a password key when there is none", () => {
+    expect(databaseEnv({kind: "postgres"})).to.deep.equal({STG_DB: "postgres"});
+    expect(databaseEnv({kind: "postgres", host: "db.example", port: 5555, user: "alice", database: "osd_1234"}))
+      .to.deep.equal({STG_DB: "postgres", PGHOST: "db.example", PGPORT: "5555", PGUSER: "alice", PGDATABASE: "osd_1234"});
+    expect(databaseEnv({kind: "postgres", password: "s3cret"})).to.deep.equal({STG_DB: "postgres", PGPASSWORD: "s3cret"});
+  });
+
+  it("databaseEnv(hana) sets HANA_* and STG_DB_FRESH only when fresh is truthy", () => {
+    expect(databaseEnv({kind: "hana"})).to.deep.equal({STG_DB: "hana"});
+    expect(databaseEnv({kind: "hana", host: "hxehost", port: 39017, user: "SYSTEM", schema: "OSD_ABCD1234"}))
+      .to.deep.equal({STG_DB: "hana", HANA_HOST: "hxehost", HANA_PORT: "39017", HANA_USER: "SYSTEM", HANA_SCHEMA: "OSD_ABCD1234"});
+    expect(databaseEnv({kind: "hana", fresh: true})).to.deep.equal({STG_DB: "hana", STG_DB_FRESH: "1"});
+    expect(databaseEnv({kind: "hana", fresh: false})).to.deep.equal({STG_DB: "hana"});
+  });
+
+  it("databaseEnv rejects a kind it does not know, rather than silently doing nothing", async () => {
+    expect(() => databaseEnv({kind: "oracle"})).to.throw(/unknown database kind/);
+  });
+
+  it("describeDatabase labels each kind without ever including a password", () => {
+    expect(describeDatabase({kind: "sqlite"})).to.equal("SQLite");
+    expect(describeDatabase({kind: "duckdb"})).to.equal("DuckDB");
+    expect(describeDatabase({kind: "postgres"})).to.equal("PostgreSQL");
+    expect(describeDatabase({kind: "postgres", database: "osd_1234", password: "s3cret"})).to.equal("PostgreSQL (osd_1234)");
+    expect(describeDatabase({kind: "hana"})).to.equal("HANA");
+    expect(describeDatabase({kind: "hana", schema: "OSD_1234", password: "s3cret"})).to.equal("HANA (schema OSD_1234)");
+  });
+
+  it("duckdbAvailable is true only when <osdHome>/node_modules/@duckdb/node-api is a directory", () => {
+    const home = mkdtempSync(join(tmpdir(), "osd-duckdb-check-"));
+    try {
+      expect(duckdbAvailable(home)).to.equal(false);
+      mkdirSync(join(home, "node_modules", "@duckdb", "node-api"), {recursive: true});
+      expect(duckdbAvailable(home)).to.equal(true);
+    } finally {
+      rmSync(home, {recursive: true, force: true});
+    }
+  });
+});
+
+// The stale-schema refusal (test/setup.mjs, HANA/DuckDB): a thrown Error
+// naming its own fix (STG_DB_FRESH=1), reaching stderr and then a process
+// exit -- never a "serving" answer. Proven here with a fake `test/run.mjs`
+// standing in for the real one, so this does not need a real HANA: what is
+// under test is that start() surfaces that message QUICKLY (the exit race),
+// not the full waitForServing timeout.
+describe("editors/vscode/launcher.js: Launcher surfaces a child that exits before serving", function () {
+  it("rejects with the child's own stderr tail, well inside the timeout", async function () {
+    this.timeout(15000);
+    const osdHome = mkdtempSync(join(tmpdir(), "osd-launcher-earlyexit-home-"));
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-earlyexit-storage-"));
+    mkdirSync(join(osdHome, "tools"), {recursive: true});
+    mkdirSync(join(osdHome, "test"), {recursive: true});
+    // stands in for `tools/osd-build.mjs`: a build that "succeeds" instantly
+    writeFileSync(join(osdHome, "tools", "osd-build.mjs"), "process.exit(0);\n");
+    // stands in for `node test/run.mjs`: exits the way test/setup.mjs's own
+    // HANA branch does on a schema this build did not stamp
+    writeFileSync(join(osdHome, "test", "run.mjs"),
+      "process.stderr.write('Error: Existing HANA database is missing generated tables: T1. " +
+      "Use a fresh HANA_SCHEMA, or explicitly recreate it with STG_DB_FRESH=1\\n'); process.exit(1);\n");
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 10000});
+    const started = Date.now();
+    try {
+      const error = await rejects(launcher.start(), /STG_DB_FRESH/);
+      expect(Date.now() - started, "must not wait out the full timeout").to.be.lessThan(9000);
+      expect(String(error.message)).to.contain("osd exited before it started serving");
+    } finally {
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
   });
 });
 

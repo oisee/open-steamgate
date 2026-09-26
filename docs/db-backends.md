@@ -51,6 +51,9 @@ await db.execute(seedStatements());              // ours, from data/*.tabu.json
 `STG_DB=duckdb` picks the other one, `STG_DB_PATH` makes it persistent, the
 browser preview passes a database restored from cache storage. A third
 backend needs no change anywhere else: write the object, add a branch here.
+The VS Code extension picks `STG_DB` for you (`osd.database.system` /
+`osd.database.tests`, `docs/vscode-extension.md`, "Databases") rather than
+you setting the env var by hand.
 
 ## What the runtime emits, and who translates
 

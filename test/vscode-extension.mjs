@@ -11,7 +11,7 @@ import {checkReportDocument, activationSuccessDocument, activationFailureDocumen
 import {entitySetMapFor} from "../tools/segw-entityset-map.mjs";
 import {tableDataDocument} from "../tools/adt-facade.mjs";
 
-const {objectOf, adtObjectOf, uriOf, fileOf, outcomes, abapFrame, parseCheckReport, parseActivationResult, runActionFor,
+const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseCheckReport, parseActivationResult, runActionFor,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson,
@@ -837,5 +837,45 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     // a kind this client has never seen, but that still carries a handler
     const daemon = {kind: "DAEMON", handler: "ZCL_OSD_DAEMON"};
     expect(serviceClassNodes(daemon)).to.deep.equal([{role: "handler", name: "ZCL_OSD_DAEMON", uri: undefined}]);
+  });
+});
+
+// "run tests on a different database" (docs/vscode-extension.md,
+// "Databases"): Osd#run's own half of the wiring -- a fake fetch, no
+// server, so this proves the body/headers/query-string split without a
+// running osd. The other half (which env a caller builds, and what the
+// façade route does with it) is tools/adt-facade.mjs `unitRunDbEnv`
+// (test/adt-facade.mjs) and tools/osd-unit.mjs `unitChildEnv`
+// (test/osd-unit.mjs).
+describe("editors/vscode/lib.js: Osd#run's dbEnv (run tests on a different database)", () => {
+  function fakeOsd() {
+    const calls = [];
+    const fetchImpl = async (url, options = {}) => {
+      calls.push({url, options});
+      if (options.method === "HEAD") {
+        return {status: 200, headers: {get: (name) => (name === "x-csrf-token" ? "TOK" : undefined), getSetCookie: () => []}};
+      }
+      return {ok: true, status: 200, headers: {get: () => undefined}, json: async () => ({ok: true}), text: async () => ""};
+    };
+    return {client: new Osd("http://localhost:3611", fetchImpl), calls};
+  }
+
+  it("with no dbEnv sends no body at all -- the façade route's own default, unchanged", async () => {
+    const {client, calls} = fakeOsd();
+    await client.run({type: "CLAS", name: "ZCL_X"}, "LTCL_A", "M1");
+    const post = calls.find((c) => c.options.method === "POST");
+    expect(post.options.body).to.equal(undefined);
+    expect(post.options.headers?.["content-type"]).to.equal(undefined);
+    expect(post.url).to.contain("testClass=LTCL_A").and.to.contain("method=M1");
+  });
+
+  it("with a dbEnv sends it as a JSON body, never in the query string a server logs", async () => {
+    const {client, calls} = fakeOsd();
+    await client.run({type: "CLAS", name: "ZCL_X"}, undefined, undefined, {STG_DB: "hana", HANA_PASSWORD: "s3cret", HANA_SCHEMA: "OSD_TEST"});
+    const post = calls.find((c) => c.options.method === "POST");
+    expect(post.url).to.not.contain("s3cret");
+    expect(post.url).to.not.contain("HANA_PASSWORD");
+    expect(post.options.headers["content-type"]).to.equal("application/json");
+    expect(JSON.parse(post.options.body)).to.deep.equal({dbEnv: {STG_DB: "hana", HANA_PASSWORD: "s3cret", HANA_SCHEMA: "OSD_TEST"}});
   });
 });

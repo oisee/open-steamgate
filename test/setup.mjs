@@ -218,9 +218,16 @@ export async function setup(abap, schemas, insert) {
     if (await db.hasSchema() && db.droppedSchema !== true) {
       await requireCurrentSchema(db, hanaSchema(schemas, ddicBinary), "HANA",
         "Use a fresh HANA_SCHEMA, or explicitly recreate it with STG_DB_FRESH=1");
-      // not migrated: a column renamed since is named, not met at a SELECT
+      // not migrated: a column renamed since is named, not met at a SELECT.
+      // `{query: (sql) => db.query(sql)}`, not `db` itself: refuseUnmigratedHana
+      // destructures `query` off its first argument and calls it unbound, so
+      // passing `db` straight through lost its `this` and died one query in
+      // with "Cannot read properties of undefined (reading 'trace')" --
+      // found live against a real HANA (a schema this build had already
+      // built, hit on the very next connection that did not itself drop it).
+      // The DuckDB branch above already gets this right.
       const {refuseUnmigratedHana} = await import("../tools/osd-db-migrate.mjs");
-      await refuseUnmigratedHana(db, db.schema);
+      await refuseUnmigratedHana({query: (sql) => db.query(sql)}, db.schema);
       return;
     }
     await db.execute(hanaSchema(schemas, ddicBinary));

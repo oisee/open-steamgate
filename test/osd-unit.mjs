@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {ObjectStore} from "../tools/osd-store.mjs";
-import {UnitRun, alertOf, statementAfter} from "../tools/osd-unit.mjs";
+import {UnitRun, alertOf, statementAfter, unitChildEnv} from "../tools/osd-unit.mjs";
 import {writeFileSync, rmSync} from "node:fs";
 import {join} from "node:path";
 
@@ -194,5 +194,62 @@ ENDCLASS.
 
     const dump = alertOf(new TypeError("cannot read properties of undefined"), "run");
     expect(dump).to.include({kind: "shortDump", severity: "fatal", title: "cannot read properties of undefined"});
+  });
+});
+
+// "run tests on a different database" (docs/vscode-extension.md,
+// "Databases"): the env a detached run's child gets. Pure, no spawn --
+// runDetached's own end-to-end behaviour is unchanged and stays covered by
+// the tests above; this is only the mapping unitChildEnv does before a
+// child is ever spawned.
+describe("tools/osd-unit: unitChildEnv (runDetached's own database, or a different one)", function () {
+  it("no dbEnv at all: file, always, unchanged from before this existed", () => {
+    const {env, ownPath} = unitChildEnv({}, {STG_DB: "file", PATH: "/bin"});
+    expect(env).to.include({STG_DB: "file", PATH: "/bin"});
+    expect(env.STG_DB_PATH).to.equal(ownPath);
+    expect(ownPath).to.match(/\.sqlite$/);
+  });
+
+  it("no dbEnv, parent STG_DB=hana: still file -- a detached run never inherits the live system's own backend by accident", () => {
+    const {env, ownPath} = unitChildEnv({}, {STG_DB: "hana", HANA_SCHEMA: "OSD_LIVE"});
+    expect(env.STG_DB).to.equal("file");
+    expect(ownPath).to.not.equal(undefined);
+    // the parent's HANA_SCHEMA travels (it is just an unused env var to a
+    // sqlite run), but STG_DB itself was overridden
+    expect(env.HANA_SCHEMA).to.equal("OSD_LIVE");
+  });
+
+  it("no dbEnv, parent STG_DB=duckdb: duckdb, unchanged from before this existed", () => {
+    const {env, ownPath} = unitChildEnv({}, {STG_DB: "duckdb"});
+    expect(env.STG_DB).to.equal("duckdb");
+    expect(ownPath).to.not.equal(undefined);
+    expect(env.STG_DB_PATH).to.equal(ownPath);
+  });
+
+  it("dbEnv explicitly asking for file or duckdb still gets a throwaway file of its own", () => {
+    const asFile = unitChildEnv({dbEnv: {STG_DB: "file"}}, {STG_DB: "hana"});
+    expect(asFile.env.STG_DB).to.equal("file");
+    expect(asFile.ownPath).to.not.equal(undefined);
+
+    const asDuckdb = unitChildEnv({dbEnv: {STG_DB: "duckdb"}}, {STG_DB: "hana"});
+    expect(asDuckdb.env.STG_DB).to.equal("duckdb");
+    expect(asDuckdb.ownPath).to.not.equal(undefined);
+  });
+
+  it("dbEnv asking for hana: passed through, no throwaway file, no STG_DB_PATH forced on it", () => {
+    const {env, ownPath} = unitChildEnv({dbEnv: {STG_DB: "hana", HANA_SCHEMA: "OSD_TEST", HANA_HOST: "hxehost"}},
+      {STG_DB: "file", STG_DB_PATH: "/should/not/leak/into/hana/env.sqlite"});
+    expect(ownPath).to.equal(undefined);
+    expect(env).to.include({STG_DB: "hana", HANA_SCHEMA: "OSD_TEST", HANA_HOST: "hxehost"});
+    // the parent's own STG_DB_PATH travels along (this only sets STG_DB and
+    // merges dbEnv, it does not scrub the rest), but it is inert: STG_DB is
+    // "hana" here, and test/setup.mjs's hana branch never reads it
+    expect(env.STG_DB_PATH).to.equal("/should/not/leak/into/hana/env.sqlite");
+  });
+
+  it("dbEnv asking for postgres: passed through the same way", () => {
+    const {env, ownPath} = unitChildEnv({dbEnv: {STG_DB: "postgres", PGDATABASE: "osd_test", PGHOST: "pghost"}}, {});
+    expect(ownPath).to.equal(undefined);
+    expect(env).to.include({STG_DB: "postgres", PGDATABASE: "osd_test", PGHOST: "pghost"});
   });
 });
