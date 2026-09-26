@@ -91,7 +91,10 @@ test("F4 on Status: the value help dialog reads StatusVHSet, searches it, and it
   const pick = dialog.getByRole("gridcell", {name: "Click to Select"}).first();
   await pick.focus();
   await page.keyboard.press("Space");
-  await expect(dialog.getByText("No Items or Conditions Selected")).toBeHidden();
+  // the visible toolbar title, not the screen-reader copy UI5 also renders
+  // (class sapUiInvisibleText): two matches fail a strict locator at random,
+  // depending on whether the second one is in the DOM yet
+  await expect(dialog.locator("span:not(.sapUiInvisibleText)", {hasText: "No Items or Conditions Selected"})).toBeHidden();
   // The CDN dialog currently leaves OK open after focus()+Enter; click still
   // exercises the chosen value and the resulting OData filter.
   await dialog.getByRole("button", {name: "OK"}).click();
