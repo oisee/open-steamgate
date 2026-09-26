@@ -19,7 +19,9 @@ const {objectOf, adtObjectOf, uriOf, fileOf, outcomes, abapFrame, parseCheckRepo
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
-  progTcodeOf, progRunLens} =
+  progTcodeOf, progRunLens,
+  SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
+  serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
 import {implementsClassrun as facadeImplementsClassrun} from "../tools/osd-classrun.mjs";
 import {namesOf as guiConvertNamesOf} from "../tools/osd-gui-convert.mjs";
@@ -630,5 +632,131 @@ describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace la
     expect(hasTestMethods("CLASS ltcl_empty DEFINITION.\nENDCLASS.\n")).to.equal(false);
     expect(hasTestMethods("")).to.equal(false);
     expect(hasTestMethods(undefined)).to.equal(false);
+  });
+});
+
+// The "OSD: System" panel's Services tree (docs/vscode-extension.md,
+// "Services tree"): grouping by kind, sorting inside a group, and the two
+// normalisers that turn either source's own row shape (ZOSD_STATUS_SRV's
+// ServiceSet today, the composing route's own `GET core/http/services`
+// tomorrow -- docs/ideas.md T8) into the one shape groupServices/
+// serviceLabel/serviceClassNodes read. No server, no VS Code: the live
+// round trip against a real osd (whichever route answers) is
+// test/osd-child.mjs; the route itself, when it exists, is
+// test/adt-devloop.mjs.
+describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)", function () {
+  it("labels the four named kinds SEGW's own words, and title-cases a kind it has never seen", () => {
+    expect(serviceGroupLabel("ODATA")).to.equal("OData");
+    expect(serviceGroupLabel("APP")).to.equal("Apps");
+    expect(serviceGroupLabel("ICF")).to.equal("ICF");
+    expect(serviceGroupLabel("APC")).to.equal("APC");
+    expect(serviceGroupLabel("DAEMON")).to.equal("Daemon");
+    expect(serviceGroupLabel("")).to.equal("Other");
+    expect(serviceGroupLabel(undefined)).to.equal("Other");
+  });
+
+  it("normalizes a ZOSD_STATUS_SRV ServiceSet row: HandlerName is a class for every kind but APP", () => {
+    const icf = normalizeServiceSetRow({Path: "/sap/bc/osd/rfc/", Kind: "ICF", HandlerName: "ZCL_OSD_RFC", Text: "RFC channel", Pack: ""});
+    expect(icf).to.deep.equal({
+      kind: "ICF", name: undefined, path: "/sap/bc/osd/rfc/", text: "RFC channel", pack: undefined,
+      handler: "ZCL_OSD_RFC", handlerUri: undefined, app: undefined, mpc: undefined, mpcUri: undefined, source: undefined,
+    });
+    const app = normalizeServiceSetRow({Path: "/app/flp.html#Travel-manage", Kind: "APP", HandlerName: "travels", Text: "Travels", Pack: "o4d"});
+    expect(app.handler).to.equal(undefined);
+    expect(app.app).to.equal("travels");
+    expect(app.pack).to.equal("o4d");
+  });
+
+  it("normalizes the composing route's own row, already the target shape, missing keys as undefined", () => {
+    const odata = normalizeServiceRow({
+      kind: "ODATA", name: "ZSTG_DEMO_SRV", path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV", text: "Demo",
+      handler: "ZCL_ZSTG_DEMO_DPC_EXT", handlerUri: "/sap/bc/adt/oo/classes/zcl_zstg_demo_dpc_ext",
+      mpc: "ZCL_ZSTG_DEMO_MPC_EXT", mpcUri: "/sap/bc/adt/oo/classes/zcl_zstg_demo_mpc_ext",
+      source: "src/demo/zstg_demo.iwsv.xml",
+    });
+    expect(odata).to.deep.equal({
+      kind: "ODATA", name: "ZSTG_DEMO_SRV", path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV", text: "Demo", pack: undefined,
+      handler: "ZCL_ZSTG_DEMO_DPC_EXT", handlerUri: "/sap/bc/adt/oo/classes/zcl_zstg_demo_dpc_ext",
+      app: undefined, mpc: "ZCL_ZSTG_DEMO_MPC_EXT", mpcUri: "/sap/bc/adt/oo/classes/zcl_zstg_demo_mpc_ext",
+      source: "src/demo/zstg_demo.iwsv.xml",
+    });
+    const app = normalizeServiceRow({kind: "APP", path: "/app/index.html", text: "", handler: undefined, app: "travels"});
+    expect(app.text).to.equal("");
+    expect(app.app).to.equal("travels");
+    expect(app.handler).to.equal(undefined);
+  });
+
+  it("groups by kind in OData/Apps/ICF/APC order, a new kind after them alphabetically, rows sorted by path", () => {
+    expect(SERVICE_GROUP_ORDER).to.deep.equal(["ODATA", "APP", "ICF", "APC"]);
+    const rows = [
+      {kind: "ICF", path: "/sap/bc/osd/rfc/", text: "RFC"},
+      {kind: "APP", path: "/app/flp.html#B", text: "B"},
+      {kind: "JOB", path: "/job/z", text: "Z job"},
+      {kind: "ODATA", path: "/sap/opu/odata/sap/ZB_SRV", text: "B service"},
+      {kind: "ODATA", path: "/sap/opu/odata/sap/ZA_SRV", text: "A service"},
+      {kind: "APP", path: "/app/flp.html#A", text: "A"},
+      {kind: "APC", path: "/sap/bc/apc/z", text: "push"},
+      {kind: "DAEMON", path: "/daemon/a", text: "A daemon"},
+    ];
+    const groups = groupServices(rows);
+    expect(groups.map((g) => g.kind)).to.deep.equal(["ODATA", "APP", "ICF", "APC", "DAEMON", "JOB"]);
+    expect(groups.map((g) => g.label)).to.deep.equal(["OData", "Apps", "ICF", "APC", "Daemon", "Job"]);
+    const odataGroup = groups.find((g) => g.kind === "ODATA");
+    expect(odataGroup.rows.map((r) => r.path)).to.deep.equal(["/sap/opu/odata/sap/ZA_SRV", "/sap/opu/odata/sap/ZB_SRV"]);
+    const appGroup = groups.find((g) => g.kind === "APP");
+    expect(appGroup.rows.map((r) => r.path)).to.deep.equal(["/app/flp.html#A", "/app/flp.html#B"]);
+  });
+
+  it("groups an empty list into no groups at all", () => {
+    expect(groupServices([])).to.deep.equal([]);
+    expect(groupServices(undefined)).to.deep.equal([]);
+  });
+
+  it("labels a row by its own text first, then its name, then its path -- the path always in description", () => {
+    expect(serviceLabel({text: "Travels", name: "ZSTG_DEMO_SRV", path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"}))
+      .to.deep.equal({label: "Travels", description: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"});
+    expect(serviceLabel({text: "", name: "ZSTG_DEMO_SRV", path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"}))
+      .to.deep.equal({label: "ZSTG_DEMO_SRV", description: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"});
+    expect(serviceLabel({text: "", name: undefined, path: "/app/index.html"}))
+      .to.deep.equal({label: "/app/index.html", description: "/app/index.html"});
+  });
+
+  it("gives each kind its own lower-cased contextValue, for view/item/context in package.json to match", () => {
+    expect(serviceContextValue("ODATA")).to.equal("osd-service-odata");
+    expect(serviceContextValue("APP")).to.equal("osd-service-app");
+    expect(serviceContextValue("ICF")).to.equal("osd-service-icf");
+    expect(serviceContextValue("APC")).to.equal("osd-service-apc");
+    expect(serviceContextValue("DAEMON")).to.equal("osd-service-daemon");
+  });
+
+  it("builds the URL a click or a context action opens: the plain path for APP/ICF/ODATA, $metadata beside it, ws:// for APC", () => {
+    const base = "http://localhost:3591";
+    const odata = {path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"};
+    expect(serviceHttpUrl(odata, base)).to.equal("http://localhost:3591/sap/opu/odata/sap/ZSTG_DEMO_SRV");
+    expect(serviceMetadataUrl(odata, base)).to.equal("http://localhost:3591/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata");
+    const apc = {path: "/sap/bc/apc/zosd/push"};
+    expect(serviceWsUrl(apc, base)).to.equal("ws://localhost:3591/sap/bc/apc/zosd/push");
+    expect(serviceWsUrl(apc, "https://localhost:44300")).to.equal("wss://localhost:44300/sap/bc/apc/zosd/push");
+    const app = {path: "/app/flp.html#Travel-manage"};
+    expect(serviceHttpUrl(app, base)).to.equal("http://localhost:3591/app/flp.html#Travel-manage");
+  });
+
+  it("expands an OData row to its DPC then its MPC, an ICF/APC row to its one handler, an APP row to nothing", () => {
+    const odata = {kind: "ODATA", handler: "ZCL_X_DPC_EXT", handlerUri: "/sap/bc/adt/oo/classes/zcl_x_dpc_ext",
+      mpc: "ZCL_X_MPC_EXT", mpcUri: "/sap/bc/adt/oo/classes/zcl_x_mpc_ext"};
+    expect(serviceClassNodes(odata)).to.deep.equal([
+      {role: "dpc", name: "ZCL_X_DPC_EXT", uri: "/sap/bc/adt/oo/classes/zcl_x_dpc_ext"},
+      {role: "mpc", name: "ZCL_X_MPC_EXT", uri: "/sap/bc/adt/oo/classes/zcl_x_mpc_ext"},
+    ]);
+    // ServiceSet carries no uri at all -- still a node, just nothing to open by uri
+    const icf = {kind: "ICF", handler: "ZCL_OSD_RFC", handlerUri: undefined};
+    expect(serviceClassNodes(icf)).to.deep.equal([{role: "handler", name: "ZCL_OSD_RFC", uri: undefined}]);
+    const apc = {kind: "APC", handler: "ZCL_OSD_APC_HANDLER", handlerUri: "/sap/bc/adt/oo/classes/zcl_osd_apc_handler"};
+    expect(serviceClassNodes(apc)).to.deep.equal([{role: "handler", name: "ZCL_OSD_APC_HANDLER", uri: "/sap/bc/adt/oo/classes/zcl_osd_apc_handler"}]);
+    const app = {kind: "APP", app: "travels"};
+    expect(serviceClassNodes(app)).to.deep.equal([]);
+    // a kind this client has never seen, but that still carries a handler
+    const daemon = {kind: "DAEMON", handler: "ZCL_OSD_DAEMON"};
+    expect(serviceClassNodes(daemon)).to.deep.equal([{role: "handler", name: "ZCL_OSD_DAEMON", uri: undefined}]);
   });
 });

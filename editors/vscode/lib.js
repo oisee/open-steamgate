@@ -267,6 +267,30 @@ class Osd {
     }
   }
 
+  /** Services tree (docs/vscode-extension.md, "Services tree"): every row
+   *  this osd serves, normalized (lib.js `normalizeServiceRow` /
+   *  `normalizeServiceSetRow` above) whichever of the two sources
+   *  answered. Tries the composing route first (docs/ideas.md T8, `GET
+   *  core/http/services`) and falls back to ZOSD_STATUS_SRV's own
+   *  ServiceSet on a 404 -- the route did not exist on `main` when this
+   *  was written (open PR, feat/services-tree), so this client works
+   *  against both a system that already carries it and one that does
+   *  not, with no flag to set either way. Any other error (osd down, a
+   *  malformed answer) is the caller's to catch, the same as every other
+   *  method here. */
+  async services() {
+    try {
+      const body = await this.json("/sap/bc/adt/core/http/services");
+      return (body?.services ?? []).map(normalizeServiceRow);
+    } catch (e) {
+      if (!/HTTP 404/.test(String(e.message ?? e))) throw e;
+    }
+    const res = await this.fetch(`${this.url}/sap/opu/odata/sap/ZOSD_STATUS_SRV/ServiceSet?$format=json`);
+    if (!res.ok) throw new Error(`GET ZOSD_STATUS_SRV/ServiceSet: HTTP ${res.status}`);
+    const body = await res.json();
+    return (body?.d?.results ?? []).map(normalizeServiceSetRow);
+  }
+
   /** Run an object's tests, or one class, or one method of it. */
   run(object, testClass, method) {
     let route = `/sap/bc/adt/core/http/unit/object/run?type=${encodeURIComponent(object.type)}&name=${encodeURIComponent(object.name)}`;
@@ -1172,6 +1196,169 @@ function hasTestMethods(source) {
   return /\bFOR\s+TESTING\b/i.test(String(source ?? ""));
 }
 
+// ---- Services tree (docs/vscode-extension.md, "Services tree"): the
+// panel's "OSD: System" view used to show one flat list of every APP/APC/
+// ICF/ODATA row ZOSD_STATUS_SRV's own ServiceSet answers, with nothing
+// wired to a click. This section is the pure half of grouping it by kind,
+// with a count per group, and of the URL a click or a context-menu action
+// on one row opens -- extension.js's OsdTreeProvider is the thin wrapping
+// (which group and row are expanded, the webview for "open inside
+// VS Code", vscode.env.clipboard for the "Copy ... URL" actions).
+//
+// Two sources answer the same rows, normalized to one shape here so the
+// rest of the provider reads either without knowing which one answered:
+// ZOSD_STATUS_SRV's own ServiceSet (today, PascalCase OData columns,
+// osd-status.mjs's own servicesOf/appsOf) and the composing route
+// docs/ideas.md T8 names (`GET core/http/services`, lowercase, already
+// kind-typed: `handler` is a class name for every kind but APP, whose own
+// class-shaped field is `app` -- an app has a manifest id, not an ADT
+// class). `Osd#services()` below tries the route first and falls back to
+// ServiceSet on a 404, so this client works whether or not that route
+// exists on the server it happens to be talking to (docs/vscode-extension.md,
+// "forward-compatible expansion").
+
+const SERVICE_GROUP_LABEL = {ODATA: "OData", APP: "Apps", ICF: "ICF", APC: "APC"};
+const SERVICE_GROUP_ORDER = ["ODATA", "APP", "ICF", "APC"];
+
+/** The group label for a service kind: the four named ones read as this
+ *  tree's own words for them; any other kind the server starts returning
+ *  (DAEMON, JOB, TRAN, ... -- docs/osd-status.mjs `servicesOf`'s own
+ *  comment names them as coming) still gets a readable label instead of
+ *  needing a code change first -- title case of the raw kind, the only
+ *  guess this client can make about a word it has never seen. */
+function serviceGroupLabel(kind) {
+  if (SERVICE_GROUP_LABEL[kind] !== undefined) return SERVICE_GROUP_LABEL[kind];
+  const word = String(kind ?? "");
+  return word.length === 0 ? "Other" : word[0].toUpperCase() + word.slice(1).toLowerCase();
+}
+
+/** ZOSD_STATUS_SRV's own ServiceSet row (PascalCase, one of `d.results`)
+ *  into the one shape every row below reads: `{kind, name, path, text,
+ *  pack, handler, handlerUri, app, mpc, mpcUri, source}`. `HandlerName` is
+ *  the manifest app id for an APP row (osd-status.mjs `appsOf`) and a
+ *  class name for every other kind -- the same split the composing route
+ *  makes explicit with its own `app` field, so an APP row here answers
+ *  `app` and every other kind answers `handler`, never both. ServiceSet
+ *  carries no ADT uri, no MPC and no source file, so those three stay
+ *  undefined -- serviceClassNodes() below still finds a handler to show
+ *  for every kind but APP, just with nowhere to click through to its
+ *  source (extension.js falls back to a workspace glob by name). */
+function normalizeServiceSetRow(row) {
+  const kind = String(row?.Kind ?? "");
+  const handlerName = row?.HandlerName === undefined || row.HandlerName === "" ? undefined : String(row.HandlerName);
+  const pack = row?.Pack === undefined || row.Pack === "" ? undefined : String(row.Pack);
+  return {
+    kind, name: undefined, path: String(row?.Path ?? ""), text: String(row?.Text ?? ""), pack,
+    handler: kind === "APP" ? undefined : handlerName,
+    handlerUri: undefined,
+    app: kind === "APP" ? handlerName : undefined,
+    mpc: undefined, mpcUri: undefined, source: undefined,
+  };
+}
+
+/** The composing route's own row (docs/ideas.md T8, `GET core/http/
+ *  services`: `{kind, name, path, text, pack, handler, handlerUri, app,
+ *  mpc, mpcUri, source}`) into the same shape -- already this shape, field
+ *  for field, so this is only the defensive normalisation of an absent
+ *  optional key into `undefined` rather than `null` or a missing property,
+ *  the one thing a fixture and the real route are not promised to agree on
+ *  byte for byte. */
+function normalizeServiceRow(row) {
+  const str = (v) => (v === undefined || v === null || v === "" ? undefined : String(v));
+  return {
+    kind: String(row?.kind ?? ""), name: str(row?.name),
+    path: String(row?.path ?? ""), text: String(row?.text ?? ""), pack: str(row?.pack),
+    handler: str(row?.handler), handlerUri: str(row?.handlerUri),
+    app: str(row?.app), mpc: str(row?.mpc), mpcUri: str(row?.mpcUri), source: str(row?.source),
+  };
+}
+
+/** Every normalized row grouped by kind: `SERVICE_GROUP_ORDER` first (so
+ *  "OData (n)", "Apps (n)", "ICF (n)", "APC (n)" read in that order, the
+ *  task's own words), then any kind the server returns that this client
+ *  has never named, alphabetically -- "a generic group, so new kinds
+ *  appear without code changes". Each group's own rows sorted by path,
+ *  the way the flat list this replaces already read top to bottom. */
+function groupServices(rows) {
+  const byKind = new Map();
+  for (const row of rows ?? []) {
+    const list = byKind.get(row.kind) ?? [];
+    list.push(row);
+    byKind.set(row.kind, list);
+  }
+  const known = SERVICE_GROUP_ORDER.filter((k) => byKind.has(k));
+  const rest = [...byKind.keys()].filter((k) => !SERVICE_GROUP_ORDER.includes(k)).sort();
+  return [...known, ...rest].map((kind) => ({
+    kind,
+    label: serviceGroupLabel(kind),
+    rows: [...byKind.get(kind)].sort((a, b) => a.path.localeCompare(b.path)),
+  }));
+}
+
+/** The label and the (dimmed, `TreeItem.description`) text a service row's
+ *  own tree item shows: the server's own text first, falling back to the
+ *  row's name or its path when a row carries no text at all -- the path
+ *  always goes in `description`, never folded into the label itself. */
+function serviceLabel(row) {
+  const label = row.text !== undefined && row.text !== "" ? row.text : (row.name ?? row.path);
+  return {label, description: row.path};
+}
+
+/** `osd-service-<kind>`, lower-cased -- one contextValue per kind so
+ *  package.json's `view/item/context` menus can offer exactly the actions
+ *  that kind supports (Copy URL everywhere, "Open $metadata" for OData
+ *  only, "Copy ws:// URL" for APC only) without an enum this file and
+ *  package.json would otherwise have to keep in lockstep by hand: a kind
+ *  neither knows about gets a contextValue and simply matches no menu
+ *  entry, rather than the provider needing to special-case it. */
+function serviceContextValue(kind) {
+  return `osd-service-${String(kind ?? "").toLowerCase()}`;
+}
+
+/** `baseUrl` (osd().url, no trailing slash) plus the row's own path --
+ *  what an APP, an ICF node or an OData service document opens, in a
+ *  browser or in the "open inside VS Code" webview alike. */
+function serviceHttpUrl(row, baseUrl) {
+  return `${baseUrl}${row.path}`;
+}
+
+/** The OData `$metadata` document beside the service document above --
+ *  its own context-menu action rather than the click, because the service
+ *  document is the more useful default and a person who wants the EDMX
+ *  asks for it by name. */
+function serviceMetadataUrl(row, baseUrl) {
+  return `${serviceHttpUrl(row, baseUrl)}/$metadata`;
+}
+
+/** The push channel's own `ws://` (or `wss://` over `https://`) URL --
+ *  never opened by a click, since a WebSocket URL does nothing in a
+ *  browser tab or a webview iframe (docs/vscode-extension.md, "Services
+ *  tree"): only ever copied to the clipboard. */
+function serviceWsUrl(row, baseUrl) {
+  return serviceHttpUrl(row, baseUrl).replace(/^http/i, "ws");
+}
+
+/** The class nodes a service row expands to (docs/vscode-extension.md,
+ *  "forward-compatible expansion"): the DPC then the MPC for an OData
+ *  service (in that order, the way SEGW itself always names the pair),
+ *  the one handler class for everything else that carries one (ICF, APC,
+ *  and any future kind this client has never seen), and none for APP --
+ *  an app has no ADT class of its own, only a manifest, which is why the
+ *  normalisers above route its id to `row.app` rather than `row.handler`.
+ *  `{role, name, uri}`: `uri` is the ADT class uri when the composing
+ *  route answered one, `undefined` over ServiceSet (extension.js opens by
+ *  a workspace glob on the name instead, the same way Q3's readers does). */
+function serviceClassNodes(row) {
+  if (row.kind === "APP") return [];
+  if (row.kind === "ODATA") {
+    const out = [];
+    if (row.handler) out.push({role: "dpc", name: row.handler, uri: row.handlerUri});
+    if (row.mpc) out.push({role: "mpc", name: row.mpc, uri: row.mpcUri});
+    return out;
+  }
+  return row.handler ? [{role: "handler", name: row.handler, uri: row.handlerUri}] : [];
+}
+
 module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
@@ -1180,4 +1367,6 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
-  progTcodeOf, progRunLens};
+  progTcodeOf, progRunLens,
+  SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
+  serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes};
