@@ -16,6 +16,7 @@ import {execFileSync} from "node:child_process";
 import {createRequire} from "node:module";
 import {existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
+import {homedir} from "node:os";
 
 const root = process.cwd();
 const VSIX_DIR = join(root, "build", "vsix");
@@ -25,7 +26,12 @@ const vsixFile = existsSync(VSIX_DIR)
 const built = vsixFile !== undefined;
 
 const DEMO_WS = join(root, ".local", "b0-demo-ws");
-const SCRATCH = join(root, ".local", "vsix-run-scratch");
+// **Outside the checkout, on purpose.** A scratch folder under this tree
+// resolves a bare import by walking up into the checkout's own node_modules,
+// so a package the .vsix forgot (js-yaml, found by the first real install,
+// 2026-09-26) still loads here and the test is green for a package that fails
+// in a user's globalStorage. Not /tmp either: it is a small tmpfs.
+const SCRATCH = join(process.env.OSD_VSIX_SCRATCH ?? join(homedir(), ".cache", "osd-vsix-test"));
 
 /** `.local/b0-demo-ws/src/zcl_b0_hello.clas.abap`: a workspace-layer fixture
  *  shaped like the one docs/vscode-extension.md's "Live smoke" describes by

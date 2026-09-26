@@ -150,7 +150,11 @@ function copyExcludingTop(srcDir, destDir, exclude) {
 
 // ---- node_modules: traced from package-lock.json, not guessed -----------
 
-const RUNTIME_ROOTS = ["@abaplint/core", "@abaplint/runtime", "@abaplint/transpiler", "@abaplint/database-sqlite", "express"];
+// js-yaml: tools/stg-compile.mjs, a generator every build runs, imports it;
+// it is no direct dependency of the root package.json (it arrives with dev
+// tooling), which is why a list of "what the server imports" missed it and
+// the first install in a real globalStorage failed on it (2026-09-26)
+const RUNTIME_ROOTS = ["@abaplint/core", "@abaplint/runtime", "@abaplint/transpiler", "@abaplint/database-sqlite", "express", "js-yaml"];
 
 function runtimeModuleClosure() {
   const lock = JSON.parse(readFileSync(join(ROOT, "package-lock.json"), "utf8"));
