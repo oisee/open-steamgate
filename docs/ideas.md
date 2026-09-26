@@ -41,6 +41,8 @@ the system inside it.
 | R7 | The ADT debugger through our façade | research | long-polling and a stateful debug session: weeks |
 | — | ABAP-in-CI product (GitHub Action, hosted checks) | rejected | abaplint's own offering serves CI for ABAP; we build on abaplint |
 | — | A codename for the project | rejected | the name stays open-steamgate |
+| B10 | The round trip with a real system: pull a package from a system (ADT through vsp, or abapGit), develop it fast in open-steamgate (warm activation, lenses, notebooks, the debugger), push it back (ADT, abapGit, or B7's plugin endpoint) | candidate | Alice, 2026-09-26, in a conversation with SAP developers; the pieces exist (vsp, abapGit zips, the extension); what is missing is the one flow and its conflict story (what changed on the system meanwhile) |
+| S1 | abap-fs (the ABAP remote filesystem extension for VS Code, over ADT) against our ADT façade | candidate | like S0 with SAP's own client: a second real ADT client that tells how complete the façade is; measured, not assumed |
 
 ## Engines and the hot path (ADR 0004)
 
@@ -99,3 +101,5 @@ reason it was noticed and the smallest next step. Status as above.
 | T15 | The extension as its own release artifact from this repository: its own version and CHANGELOG, a `vscode-v*` tag that builds the .vsix and attaches it to a GitHub release (later: the marketplace) | accepted | a separate repository only once adt-express makes the extension a client of real systems too; today server and extension change together in almost every PR |
 | T16 | An extension icon from the airship sketch (open-steamgate's steam-and-gate): a vector master in SVG, a 128×128 PNG for the marketplace, and a monochrome silhouette for the Activity Bar | candidate | the Activity Bar needs a single-colour SVG; the marketplace icon must be PNG |
 | T17 | The system on HANA: the first start (schema + seed over the network) takes ~17 min, and the parent's 60 s readiness timeout gives up before the seed ends | candidate (after the Claude limit resets) | measure where the time goes first (DDL, demo rows, zvdb vectors, taxi facts); batch inserts through one prepared statement; readiness that follows the child's progress instead of a fixed 60 s; a separate, explicit "recreate the schema" step, with an existing schema reused by default |
+| T18 | A short "how it works" page for people outside the project: the system runs inside the extension (no ADT connection), what is transpiled, what the debugger shows, how it relates to a real system | candidate | the first question from an SAP developer who saw the demo was "how are you connecting to the transpiled ABAP, ADT?"; README plus the extension's marketplace page |
+
