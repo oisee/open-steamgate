@@ -298,6 +298,9 @@ describe("tools/osd-warm: the real path on a small tree", function () {
     expect(closure).to.deep.equal(["ZCL_WS_CALLER", "ZCL_WS_SQUARE", "ZIF_WS_SHAPE"]);
     expect(warm.closureOf("CLAS", "ZCL_WS_ALONE").map((o) => o.name)).to.deep.equal(["ZCL_WS_ALONE"]);
     expect(warm.closureOf("CLAS", "ZCL_WS_NOPE")).to.equal(undefined);
+    // the direct readers only, from the same index
+    expect(warm.readersOf("INTF", "ZIF_WS_SHAPE").map((o) => o.name).sort()).to.deep.equal(["ZCL_WS_CALLER", "ZCL_WS_SQUARE"]);
+    expect(warm.readersOf("CLAS", "ZCL_WS_SQUARE").map((o) => o.name)).to.deep.equal(["ZCL_WS_CALLER"]);
   });
 
   it("refuses a broken interface with each reader's issues at its own line and column", async () => {

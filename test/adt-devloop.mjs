@@ -553,7 +553,7 @@ describe("tools/adt-facade: the development loop", () => {
     it("Q3: an object nothing reads answers an empty list, not an error", async () => {
       const res = await call("/core/http/xref/readers?type=CLAS&name=ZCL_STG_TAB_ZSTG_STATUS");
       expect(res.status).to.equal(200);
-      expect(await res.json()).to.deep.equal({name: "ZCL_STG_TAB_ZSTG_STATUS", readers: [], counts: {readers: 0, tests: 0, services: 0}});
+      expect(await res.json()).to.deep.equal({name: "ZCL_STG_TAB_ZSTG_STATUS", source: "xref", readers: [], counts: {readers: 0, tests: 0, services: 0}});
     });
 
     it("Q3: refuses a type that is not CLAS or INTF", async () => {

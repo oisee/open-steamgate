@@ -1330,16 +1330,25 @@ export function adtRouter(options = {}) {
       return;
     }
     try {
-      const escaped = name.replace(/'/g, "''");
-      const result = await data.query(
-        `SELECT include FROM wbcrossgt WHERE otype = 'TY' AND name = '${escaped}' AND include <> '${escaped}' ` +
-        `UNION SELECT include FROM wbcrossgtx WHERE otype = 'TY' AND name = '${escaped}' AND include <> '${escaped}'`,
-        {max: 5000});
+      // the warm registry's reverse index when it is primed -- as fresh as the
+      // last build, where the seeded rows are as fresh as the last start of
+      // the serving process, and a warm swap does not reseed them -- and the
+      // seeded rows otherwise; `source` says which one answered
+      let includes = store.warm?.().compiler?.readersOf(type, name)?.map((o) => o.name);
+      const source = includes === undefined ? "xref" : "warm";
+      if (includes === undefined) {
+        const escaped = name.replace(/'/g, "''");
+        const result = await data.query(
+          `SELECT include FROM wbcrossgt WHERE otype = 'TY' AND name = '${escaped}' AND include <> '${escaped}' ` +
+          `UNION SELECT include FROM wbcrossgtx WHERE otype = 'TY' AND name = '${escaped}' AND include <> '${escaped}'`,
+          {max: 5000});
+        includes = result.rows.map((r) => String(r.include).toUpperCase());
+      }
       const typeOf = new Map(store.list().map((o) => [o.name, o.type]));
       const folders = [...contentFoldersOf(store.root), "gen"].map((f) => join(store.root, f));
       const registrations = segwRegistrations(folders);
       const testClasses = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
-      const readers = [...new Set(result.rows.map((r) => String(r.include).toUpperCase()))]
+      const readers = [...new Set(includes)]
         .filter((include) => include !== name)
         .sort()
         .map((include) => ({
@@ -1351,6 +1360,7 @@ export function adtRouter(options = {}) {
         }));
       res.type("application/json; charset=utf-8").send(JSON.stringify({
         name,
+        source,
         readers,
         counts: {
           readers: readers.length,
