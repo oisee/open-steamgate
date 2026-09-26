@@ -31,7 +31,7 @@
         "osd.home": {
           "type": "string",
           "default": "",
-          "description": "B0 (docs/vscode-extension.md, \"B0 spike\"): the open-steamgate checkout osd.start builds and runs. Empty uses the workspace folder when the window has exactly one."
+          "description": "The open-steamgate checkout osd.start builds and runs. On a packaged install, Start asks when the only workspace folder is an open-steamgate checkout; otherwise an empty value uses the bundled copy."
         },
         "osd.keymap": {
           "type": "string",

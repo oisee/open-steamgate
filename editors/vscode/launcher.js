@@ -207,6 +207,46 @@ function looksLikeAbapGitFolder(dir) {
   return entries.some((name) => /\.(clas|prog)\.abap$/i.test(name));
 }
 
+/** The one workspace shape where starting the extension's bundled system
+ *  beside the open-steamgate checkout can hide edits to the system itself.
+ *  Keep the filesystem check here separate from the pure target decision
+ *  below, so that decision can be exercised with plain values in tests. */
+function isOpenSteamgateCheckout(dir) {
+  return isFile(path.join(dir, "abap_transpile.json")) &&
+    isFile(path.join(dir, "tools", "osd-build.mjs"));
+}
+
+/** Choose the system tree Start should use. `workspaceIsOpenSteamgate` and
+ *  `bundledHome` are facts supplied by the VS Code adapter; this function
+ *  has no filesystem or VS Code dependency. A prompt is needed only for one
+ *  open-steamgate workspace folder, no configured `osd.home`, and a bundled
+ *  system that can actually be selected. `rememberedChoice` is either
+ *  `"bundled"` or unset; choosing Always ask leaves it unset. */
+function decideStartTarget({configuredHome, workspaceFolder, workspaceIsOpenSteamgate = false,
+  bundledHome, rememberedChoice} = {}) {
+  const configured = typeof configuredHome === "string" ? configuredHome.trim() : "";
+  if (configured !== "") {
+    const source = typeof workspaceFolder === "string" &&
+      configured === workspaceFolder ? "workspace" : "configured";
+    return {kind: "ready", osdHome: configured, source};
+  }
+
+  if (typeof workspaceFolder === "string" && workspaceIsOpenSteamgate && typeof bundledHome === "string") {
+    if (rememberedChoice === "bundled") {
+      return {kind: "ready", osdHome: bundledHome, source: "bundled"};
+    }
+    return {kind: "prompt", workspaceHome: workspaceFolder, bundledHome};
+  }
+
+  if (typeof bundledHome === "string") {
+    return {kind: "ready", osdHome: bundledHome, source: "bundled"};
+  }
+  if (typeof workspaceFolder === "string") {
+    return {kind: "ready", osdHome: workspaceFolder, source: "workspace"};
+  }
+  return {kind: "unavailable"};
+}
+
 /** `{folder, srcDir}` for every workspace folder that looks like an abapGit
  *  repository, `srcDir` being the folder actually handed to the transpiler
  *  as an input (its own `src/` when there is one, else the folder itself --
@@ -682,6 +722,8 @@ module.exports = {
   isFree,
   pickPort,
   looksLikeAbapGitFolder,
+  isOpenSteamgateCheckout,
+  decideStartTarget,
   detectWorkspaceLayers,
   packNameOf,
   ensureWorkspacePacks,

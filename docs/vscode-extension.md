@@ -115,7 +115,7 @@ fixed together:
 
 1/2/6. **Classify a file against its own workspace folder, never osdHome.**
    The packaged install runs the system from a materialized copy of the
-   bundled seed under `context.globalStorageUri` (`resolveOsdHome()`), while
+   bundled seed under `context.globalStorageUri` (`resolveStartTarget()`), while
    the window's own workspace folder is the checkout a person actually
    opened and edits -- two different trees. `classifyTestPath(root, ...)`
    was always called with `root = activeController?.launcher?.osdHome ??
@@ -647,6 +647,24 @@ code. Once started, `osd.url` is written to the launched address
 every existing feature reads that setting fresh on every call (`osd()` in
 `extension.js`), so nothing else had to change for the rest of the
 extension to follow a self-started instance automatically.
+
+When the window has exactly one folder and it is an open-steamgate checkout
+(`abap_transpile.json` and `tools/osd-build.mjs` both exist), a packaged
+extension with `osd.home` unset asks before the first start: **"Run the system
+from this folder? (edits go to your files and git)"**. **Yes** writes that
+folder to the workspace's `osd.home` setting and starts it as the system.
+**No, use the bundled copy** starts the materialized bundled system and
+remembers that choice in VS Code workspace storage. **Always ask** uses the
+bundled copy for this start and clears the remembered choice, so the next
+Start asks again. Dismissing the prompt leaves the system stopped. The pure
+decision is `decideStartTarget()` in `editors/vscode/launcher.js`; its tests
+cover the checkout, configured-home, remembered-bundle and ordinary-workspace
+cases in `test/vscode-launcher.mjs`. The tree's state row and the ▶ / ■ status
+bar item show **from workspace** or **bundled copy** after a source is chosen.
+Other workspace folders keep the existing behavior: the packaged bundle is
+the base system, and their ABAP files are workspace layers. A development
+install without a packaged bundle already uses its single workspace folder as
+the system and does not offer an unavailable bundle choice.
 
 **Q6b's notebook gap does not fall out for free.** The storage layer this
 spike adds *is* a permanent, pre-existing pack directory once a workspace
