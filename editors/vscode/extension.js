@@ -15,7 +15,7 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   freestyleTableHtml, notebookFromJson, notebookToJson,
   hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText,
-  transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, progRunLens,
+  transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, demoFailureObjects, progRunLens,
   groupServices, serviceLabel, serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes} = require("./lib.js");
 const {Launcher, ensureMaterializedHome} = require("./launcher.js");
 
@@ -1519,6 +1519,17 @@ function testExplorer(output) {
     }
   }
 
+  // Item 5 (docs/vscode-extension.md): a class's own testclasses include,
+  // or a PROG's local test classes -- abapGit keeps those inline in the
+  // program's own `*.prog.abap` (or an include it reaches the same way),
+  // never split out the way a class's `.testclasses.abap` is. Both routes
+  // land on the same generic server side (tools/adt-facade.mjs
+  // `core/http/unit/object[/run]`, `type=CLAS` or `type=PROG`; FUGR is not
+  // accepted there -- refused with 400, so a function group's own `FOR
+  // TESTING` is never listed, a gap named in the doc rather than guessed
+  // at silently).
+  const TEST_FILE_GLOB = "**/{*.clas.testclasses.abap,*.prog.abap}";
+
   // findFiles() the way the four groups actually differ: Project and Packs
   // sit under the repo root and stay behind EXCLUDE (never .local, gen,
   // node_modules, output, build -- the same exclude every other feature
@@ -1528,23 +1539,51 @@ function testExplorer(output) {
   // lars/*`, today) be found at all, without also walking the dozens of
   // other clones and worktrees `.local/**` carries that are neither.
   async function scanAll(root, layers, workspaceLayers, showSystem) {
-    const uris = [...await vscode.workspace.findFiles("**/*.clas.testclasses.abap", EXCLUDE)];
+    const uris = [...await vscode.workspace.findFiles(TEST_FILE_GLOB, EXCLUDE)];
     if (showSystem) {
       for (const lib of layers.libs) {
         const base = path.join(root, lib.folder);
         if (!fs.existsSync(base)) continue;
-        const pattern = new vscode.RelativePattern(vscode.Uri.file(base), "**/*.clas.testclasses.abap");
+        const pattern = new vscode.RelativePattern(vscode.Uri.file(base), TEST_FILE_GLOB);
         uris.push(...await vscode.workspace.findFiles(pattern));
       }
     }
     for (const wl of workspaceLayers) {
       const folder = typeof wl.folder === "string" ? wl.folder : wl.srcDir;
       if (typeof folder !== "string" || !fs.existsSync(folder)) continue;
-      const pattern = new vscode.RelativePattern(vscode.Uri.file(folder), "**/*.clas.testclasses.abap");
+      const pattern = new vscode.RelativePattern(vscode.Uri.file(folder), TEST_FILE_GLOB);
       uris.push(...await vscode.workspace.findFiles(pattern));
     }
     return uris;
   }
+
+  // Bugs 1/2/6 (docs/vscode-extension.md): `vscode.workspace.findFiles`
+  // above walks every open workspace folder, which is not necessarily
+  // osdHome -- a packaged install's osdHome is a materialized copy of the
+  // bundled seed in globalStorage, while the window's own workspace folder
+  // (the checkout a person actually opened and edits) is a different tree
+  // entirely. Classifying a file found there against osdHome's own
+  // abap_transpile.json made `path.relative` climb out of one tree and back
+  // down into the other, so every project/packs file landed in one "`..`"
+  // sub-node holding everything (and Packs, whose own prefix check can
+  // never match a path that starts "`..`", held nothing at all). Each
+  // file's OWN workspace folder is read once and cached, and that folder's
+  // OWN config -- never osdHome's -- is what its packages and its System/
+  // Packs membership are read against. A lib's own folder and a running
+  // workspace layer's own folder are found by an explicit RelativePattern
+  // rooted at `root` (osdHome) or the layer's own absolute folder
+  // respectively (see scanAll above), so they are always already under the
+  // root they are classified against and need no lookup here; a file with
+  // no owning workspace folder at all (that is exactly this case) falls
+  // back to `root`.
+  const configCache = new Map(); // workspace-folder root -> {layers, demoObjects}
+  const layersFor = (folderRoot) => {
+    if (!configCache.has(folderRoot)) {
+      const config = readTranspileConfig(folderRoot);
+      configCache.set(folderRoot, {layers: transpileLayers(config), demoObjects: demoFailureObjects(config)});
+    }
+    return configCache.get(folderRoot);
+  };
 
   const buildTree = async () => {
     const root = activeController?.launcher?.osdHome ?? osdHomeOf();
@@ -1555,6 +1594,7 @@ function testExplorer(output) {
     controller.items.replace([]);
     groupNodes.clear();
     objects.clear();
+    configCache.clear();
     if (root === undefined) return;
 
     const placed = [];
@@ -1565,14 +1605,29 @@ function testExplorer(output) {
       } catch {
         continue;
       }
-      // the cheap filter, done up front: a testclasses include with no
-      // FOR TESTING at all never becomes an item only to be found empty
-      // once expanded (lib.js hasTestMethods -- discover()'s own server
-      // round trip still filters per class/method the same way, below)
+      // the cheap filter, done up front: a testclasses include (or a PROG
+      // with no local test class at all) never becomes an item only to be
+      // found empty once expanded (lib.js hasTestMethods -- discover()'s
+      // own server round trip still filters per class/method the same way,
+      // below)
       if (!hasTestMethods(source)) continue;
       const object = objectOf(uri.fsPath);
       if (object === undefined) continue;
-      const classification = classifyTestPath(root, uri.fsPath, layers, workspaceLayers);
+      // the file's OWN workspace folder, not osdHome -- bugs 1/2/6 above
+      const ownRoot = vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath ?? root;
+      const {layers: ownLayers, demoObjects} = layersFor(ownRoot);
+      const classification = classifyTestPath(ownRoot, uri.fsPath, ownLayers, workspaceLayers);
+      // outside every known root, or hidden by that root's own
+      // exclude_filter (test/fixtures/, deploy/ is not a layer at all,
+      // a lib's own excluded corner) -- not part of the system, not listed
+      if (classification === undefined) continue;
+      // Item 4: a class or program abap_transpile.json's own `options.skip`
+      // already marks as deliberately failing gets its own sub-node under
+      // Project, so "Run" there stays green while the demo itself still
+      // runs and still fails when asked for on purpose.
+      if (classification.group === "project" && demoObjects.has(object.name)) {
+        classification.subgroup = "Demos (fail on purpose)";
+      }
       placed.push({uri, object, dir: path.dirname(uri.fsPath), classification});
     }
 
@@ -1646,7 +1701,7 @@ function testExplorer(output) {
     clearTimeout(rebuildTimer);
     rebuildTimer = setTimeout(() => { buildTree().catch((e) => output.appendLine(String(e.message ?? e))); }, 300);
   };
-  const watcher = vscode.workspace.createFileSystemWatcher("**/*.clas.testclasses.abap");
+  const watcher = vscode.workspace.createFileSystemWatcher(TEST_FILE_GLOB);
   watcher.onDidCreate(() => scheduleRebuild());
   watcher.onDidDelete(() => scheduleRebuild());
   watcher.onDidChange((uri) => {

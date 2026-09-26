@@ -110,6 +110,73 @@ object under it, the way the Testing API does by default for any parent
 handed to a run profile -- there is no special "run this group" code beyond
 expanding it to the objects it holds.
 
+*2026-09-26, same day, as seen with the packaged extension.* Six bugs, all
+fixed together:
+
+1/2/6. **Classify a file against its own workspace folder, never osdHome.**
+   The packaged install runs the system from a materialized copy of the
+   bundled seed under `context.globalStorageUri` (`resolveOsdHome()`), while
+   the window's own workspace folder is the checkout a person actually
+   opened and edits -- two different trees. `classifyTestPath(root, ...)`
+   was always called with `root = activeController?.launcher?.osdHome ??
+   osdHomeOf()`, so a project or a packs file `findFiles()` turned up (which
+   walks the open workspace, never osdHome) was classified relative to the
+   *wrong* tree: `path.relative` climbed out of osdHome and back down into
+   the workspace folder, landing on `classifyTestPath`'s own fallback branch
+   with a `relInGroup` starting `../../...`. `packageOf()` then read that
+   leading `..` as the sub-node's own name -- one node called ".." holding
+   every Project class -- and Packs, whose own prefix check can never match
+   a path that starts `..`, held nothing at all. The fix reads each found
+   file's own root with `vscode.workspace.getWorkspaceFolder(uri)` and reads
+   *that* folder's own `abap_transpile.json` (cached per root for the
+   build), rather than osdHome's; a lib's own folder and a running
+   workspace layer's own folder are already found by an explicit
+   `RelativePattern` rooted correctly, so they needed no change. Readers
+   (Q3), F8's dispatch (`RUN_TABLE`) and Data Preview (Q7) map a file to an
+   object by its own filename alone (`objectOf`/`adtObjectOf`/
+   `dataPreviewObjectOf`) and never call `path.relative` against osdHome at
+   all, so this bug never reached them -- checked, not assumed.
+2. **Packs empty** was the same bug (1), over a `packs/` file.
+3. **Only a file the build itself would read is listed.** A path outside
+   every one of `classifyTestPath`'s four roots (`deploy/`, a staging folder
+   for a system, never one of `input_folder`/`libs`/`packs`) now answers
+   `undefined` instead of falling into Project; a path *inside* a root but
+   hidden by that root's own `exclude_filter` (the top-level list for a
+   Project or a Packs file, the same list `tools/osd-transpile.mjs
+   listFiles()` applies to `input_folder`, packs included, once they are
+   layered in; the matching lib's own list for a System file, the same list
+   `loadLibs()` applies) is excluded the same way -- `test/fixtures/`
+   (`test/fixtures/adt-editor/zcl_editor.*`) and a lib's own excluded corner
+   (open-abap-core's `/src/tcp/`) both go through this, not the root check.
+   `transpileLayers()` now also carries `excludeFilter` (top-level) and each
+   lib's own, as `RegExp`s built the same case-insensitive, unanchored way
+   the build reads them.
+4. **A demo that fails on purpose no longer reddens "Run" on Project.**
+   ZOSD_TEST's `deliberate_failure` exists to prove a failure reaches a live
+   client, so it must still run and still fail when asked for -- only
+   `npm test`'s own build-time run needs to skip it, which
+   `abap_transpile.json`'s `options.skip` (`{object, class, method}`) already
+   does. `lib.js`'s `demoFailureObjects(config)` reads that same list (no
+   second marker to keep in step with it) and, for a Project-group class
+   whose name is in it, the Test Explorer puts it under its own
+   **Demos (fail on purpose)** sub-node instead of listing it flat.
+5. **A PROG's own local test class is found the same way a class's is.**
+   abapGit keeps a program's `FOR TESTING` classes inline in its
+   `*.prog.abap` (no `.testclasses.abap` split the way a class has), so the
+   scan glob widened from `**/*.clas.testclasses.abap` to
+   `**/{*.clas.testclasses.abap,*.prog.abap}` (`TEST_FILE_GLOB`, also the
+   file watcher's own pattern now); `objectOf`/`hasTestMethods`/
+   `classifyTestPath` already worked by suffix and needed no change, and
+   neither did `discover()`/`run()`, which already pass the object's own
+   `type` (`CLAS` or `PROG`) through to
+   `GET/POST .../unit/object[/run]?type=...` -- that route already accepts
+   both. `src/zosd_test/src/zosd_test_demo_prog.prog.abap` carries a small
+   passing local test class (`ltcl_zosd_test_demo_prog`, over the program's
+   own `lcl_counter`) as the worked example. **A function group's `FOR
+   TESTING` is a gap, not silently listed**: the same route refuses
+   `type=FUGR` with 400 ("cannot carry ABAP Unit tests here",
+   `tools/adt-facade.mjs`), so the Test Explorer does not scan for one.
+
 ## Q2b: calling an entity set
 
 *2026-09-25.* A CodeLens "▶ Call \<Set\>" over every `METHOD
