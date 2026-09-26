@@ -1134,21 +1134,31 @@ into `extension/osd/.seed-id`. The ID covers relative paths and file contents
 and excludes `.seed-id` itself. `ensureMaterializedHome()`
 (`editors/vscode/launcher.js`) uses that ID as the key for
 `<globalStorageUri>/osd-home-<seedId>/`; its `.osd-materialized` marker stores
-the same ID. A matching ID reuses the existing copy. A changed seed, even
-under the same extension version, gets a new copy and removes every other
-`osd-home-*` directory. `linkOrCopyTree()` hard-links regular files and keeps
-symlinks as symlinks, so the copy costs close to nothing on one filesystem,
-falling back to a real copy across a device boundary (`EXDEV`). `osd.home`,
-when set, still wins -- the
-dev path, unchanged, and the only path a checkout with no bundled
-`extension/osd/` (the symlinked dev install) ever takes. `build/` and
-`gen/` are then written inside that storage copy by the ordinary build,
-never inside `extension/osd/` itself. Pure-function tests in
-`test/vscode-launcher.mjs` package a small fake seed twice with an unchanged
-extension version and one changed seed file, then prove the ID changes, the
-second start rematerializes, and the old content copy is removed. The separate
-`test/vscode-vsix.mjs` check verifies the ID inside a real `.vsix` against its
-packaged seed content.
+the same ID. A matching ID reuses the existing copy, including any edits made
+since it was materialized. A changed seed, even under the same extension
+version, gets a new copy in its own seed-keyed directory. Every earlier home
+stays at its original path, whether edited or clean, so a server in another
+window can keep saving there. On a seed change, the extension shows a one-line
+notice with the previous home's path and the total size of all old working
+copies. It never deletes, renames, or tombstones
+materialized homes automatically. `osd: Remove old working copies` lists stale
+homes with their sizes and whether their content differs from the seed ID.
+Generated build files also count as differences; unreadable or unverifiable
+homes are labeled edited. The user selects homes and confirms deletion in a
+modal dialog. The command checks the current seed's home and the current
+window's live launcher again before deleting selected paths.
+
+`linkOrCopyTree()` copies regular files and keeps symlinks as symlinks. Files
+must have separate inodes because the Workbench's ADT save path writes them
+in place through `ObjectStore.write()`; a hard link would also change the
+packaged seed. `osd.home`, when set, still wins -- the dev path, unchanged,
+and the only path a checkout with no bundled `extension/osd/` (the symlinked
+dev install) ever takes. `build/` and `gen/` are then written inside that
+storage copy by the ordinary build, never inside `extension/osd/` itself.
+`test/vscode-launcher.mjs` proves A-to-B-to-A retains every home, checks the
+command's pure selection logic and verifies a late `ObjectStore.write()` still
+reaches an older home. `test/vscode-vsix.mjs` checks seed IDs in real `.vsix`
+packages and preservation of an edited home on a seed change.
 
 **Measured before** (2026-09-26, `output/` shipped, the state #105/#106
 left this in, version 0.1.1): `.vsix` 53.5 MB, unpacked 148.7 MB

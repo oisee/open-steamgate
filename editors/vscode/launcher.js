@@ -505,17 +505,14 @@ function terminate(child, {signal = "SIGTERM", graceMs = 15000} = {}) {
 // (the database, gen/, a rebuilt output/) lands there, never in the
 // extension folder and never in a workspace folder. ---------------------
 
-/** Recursively hard-links `src` into `dest`, falling back to a plain copy
- *  when the two are not on the same filesystem (EXDEV) -- a hard link costs
- *  nothing for a tree this size and is safe here because nothing under the
- *  materialized copy is ever edited in place; a rebuild always writes a
- *  NEW file (`build/by-input/<hash>/...`, a fresh `gen/`) rather than
- *  mutating one the seed still shares an inode with. A symlink in the seed
- *  is kept as a symlink, not followed -- `scripts/build-vsix.mjs` dereferences
- *  every symlink it packages (`copyReal`), so a real `.vsix` seed carries
- *  none today, but this stays general rather than assuming that forever
- *  (test/vscode-launcher.mjs's own fixture is a symlink for exactly this
- *  reason). */
+/** Recursively copies `src` into `dest`. Files must not share inodes with
+ *  the seed: Workbench saves reach ObjectStore.write(), which truncates and
+ *  writes source files in place. A hard link would therefore let an edit in
+ *  the writable home change the packaged seed and invalidate its ID. A
+ *  symlink in the seed is kept as a symlink, not followed --
+ *  `scripts/build-vsix.mjs` dereferences every symlink it packages
+ *  (`copyReal`), so a real `.vsix` seed carries none today, but this keeps
+ *  the tree copier general (the launcher test fixture includes one). */
 function linkOrCopyTree(src, dest) {
   const st = fs.lstatSync(src);
   if (st.isSymbolicLink()) {
@@ -530,18 +527,20 @@ function linkOrCopyTree(src, dest) {
     return;
   }
   try {
-    fs.linkSync(src, dest);
+    fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL);
   } catch (error) {
-    if (error?.code === "EEXIST") return;
-    fs.copyFileSync(src, dest);
+    if (error?.code !== "EEXIST") throw error;
   }
 }
 
 const SEED_ID_FILE = ".seed-id";
 const MATERIALIZED_MARKER = ".osd-materialized";
+const SEED_ID_PATTERN = /^[0-9a-f]{64}$/;
+const HOME_NAME_PATTERN = /^osd-home-[0-9a-f]{64}$/;
+const OLD_HOME_NAME_PATTERN = /^(?:osd-home-(?:[0-9a-f]{64}|previous(?:-(?:[0-9a-f]{64}|unknown)(?:-\d+)?)?)|\.osd-home-trash-[0-9a-f-]{36})$/;
 
-/** Stable SHA-256 of a seed tree's paths and file contents. The ID file is
- *  excluded so writing the result into the tree does not change the result. */
+/** Stable SHA-256 of a seed tree's paths and file contents. The seed ID and
+ *  materialization marker are excluded as launcher metadata. */
 function seedContentId(seedDir) {
   const hash = createHash("sha256");
   const record = (kind, rel, content = Buffer.alloc(0)) => {
@@ -558,7 +557,7 @@ function seedContentId(seedDir) {
     const entries = fs.readdirSync(dir).sort();
     if (rel !== "") record(0x44, rel);
     for (const name of entries) {
-      if (rel === "" && name === SEED_ID_FILE) continue;
+      if (rel === "" && (name === SEED_ID_FILE || name === MATERIALIZED_MARKER)) continue;
       const file = path.join(dir, name);
       const childRel = rel === "" ? name : path.join(rel, name);
       const stat = fs.lstatSync(file);
@@ -588,28 +587,109 @@ function materializedHomeDir(globalStorageDir, seedId) {
   return path.join(globalStorageDir, `osd-home-${seedId}`);
 }
 
-/** Materializes `seedDir` (a packaged extension's own `extension/osd/`)
- *  into `<globalStorageDir>/osd-home-<seedId>`. A matching marker reuses the
- *  copy; a changed ID gets a fresh copy and removes stale generations. */
-function ensureMaterializedHome(seedDir, globalStorageDir) {
+/** A best-effort indication for the explicit removal command. Generated
+ *  build files also count as changes; missing metadata is reported as edited. */
+function materializedHomeInfo(home) {
+  try {
+    if (!fs.lstatSync(home).isDirectory()) return {verifiedUnedited: false};
+    const marker = path.join(home, MATERIALIZED_MARKER);
+    if (!fs.lstatSync(marker).isFile()) return {verifiedUnedited: false};
+    const seedId = fs.readFileSync(marker, "utf8").trim();
+    if (!SEED_ID_PATTERN.test(seedId)) return {verifiedUnedited: false};
+    const seedIdFile = path.join(home, SEED_ID_FILE);
+    if (!fs.lstatSync(seedIdFile).isFile() || fs.readFileSync(seedIdFile, "utf8").trim() !== seedId) {
+      return {seedId, verifiedUnedited: false};
+    }
+    const directoryId = /^osd-home-([0-9a-f]{64})$/.exec(path.basename(home))?.[1];
+    if (directoryId !== undefined && directoryId !== seedId) return {seedId, verifiedUnedited: false};
+    return {seedId, verifiedUnedited: seedContentId(home) === seedId};
+  } catch {
+    return {verifiedUnedited: false};
+  }
+}
+
+/** A seed-change notice includes every stale home's size, including older
+ *  copies as well as the previous one. The caller supplies measured sizes. */
+function keptHomeNotice(home, oldHomes) {
+  const totalBytes = oldHomes.reduce((sum, oldHome) => sum + oldHome.size, 0);
+  const totalSize = totalBytes < 1024 * 1024
+    ? `${Math.ceil(totalBytes / 1024)} KiB` : `${(totalBytes / 1024 / 1024).toFixed(1)} MiB`;
+  return `previous working copy kept at ${home}; total size of all old working copies: ${totalSize}`;
+}
+
+function announceKeptHome(home, globalStorageDir, currentHome, options) {
+  const notice = keptHomeNotice(home, listOldHomeSizes(globalStorageDir, currentHome));
+  (options.onNotice ?? ((line) => console.warn(line)))(notice);
+}
+
+/** Callers supply direct children of global storage; only recognized home
+ *  directories that are neither current nor served can be selected. */
+function selectOldHomes(entries, currentHome, servedHome, selectedPaths) {
+  const protectedPaths = new Set([currentHome, servedHome].filter(Boolean).map((home) => path.resolve(home)));
+  const selected = selectedPaths === undefined ? undefined : new Set(selectedPaths.map((home) => path.resolve(home)));
+  return entries.filter(({path: home, isDirectory}) => isDirectory && OLD_HOME_NAME_PATTERN.test(path.basename(home)) &&
+    !protectedPaths.has(path.resolve(home)) && (selected === undefined || selected.has(path.resolve(home))));
+}
+
+function homeSize(home) {
+  let bytes = 0;
+  for (const entry of fs.readdirSync(home, {withFileTypes: true})) {
+    const child = path.join(home, entry.name);
+    if (entry.isDirectory()) bytes += homeSize(child);
+    else if (entry.isFile()) bytes += fs.lstatSync(child).size;
+  }
+  return bytes;
+}
+
+function listOldHomeSizes(globalStorageDir, currentHome, servedHome) {
+  if (!fs.existsSync(globalStorageDir)) return [];
+  const entries = fs.readdirSync(globalStorageDir).map((name) => {
+    const home = path.join(globalStorageDir, name);
+    return {path: home, isDirectory: fs.lstatSync(home).isDirectory()};
+  });
+  return selectOldHomes(entries, currentHome, servedHome).map(({path: home}) => ({
+    path: home,
+    size: homeSize(home),
+  }));
+}
+
+function listOldHomes(globalStorageDir, currentHome, servedHome) {
+  return listOldHomeSizes(globalStorageDir, currentHome, servedHome).map((home) => ({
+    ...home,
+    edited: !materializedHomeInfo(home.path).verifiedUnedited,
+  }));
+}
+
+/** Materializes a packaged seed into its own keyed directory. All other
+ *  working copies stay at their original paths, including older recoveries. */
+function ensureMaterializedHome(seedDir, globalStorageDir, options = {}) {
   const seedId = fs.readFileSync(path.join(seedDir, SEED_ID_FILE), "utf8").trim();
-  if (!/^[0-9a-f]{64}$/.test(seedId)) {
+  if (!SEED_ID_PATTERN.test(seedId)) {
     throw new Error(`Invalid packaged seed ID in ${path.join(seedDir, SEED_ID_FILE)}`);
   }
   const target = materializedHomeDir(globalStorageDir, seedId);
   fs.mkdirSync(globalStorageDir, {recursive: true});
-  for (const name of fs.readdirSync(globalStorageDir)) {
-    if (name.startsWith("osd-home-") && name !== `osd-home-${seedId}`) {
-      fs.rmSync(path.join(globalStorageDir, name), {recursive: true, force: true});
-    }
-  }
+  const existing = fs.existsSync(target);
   const marker = path.join(target, MATERIALIZED_MARKER);
-  if (isFile(marker) && fs.readFileSync(marker, "utf8").trim() === seedId) {
-    return target;
+  if (existing && (!isFile(marker) || fs.readFileSync(marker, "utf8").trim() !== seedId)) {
+    throw new Error(`Materialized home at ${target} has no matching seed marker; inspect it before retrying`);
   }
-  fs.rmSync(target, {recursive: true, force: true});
-  linkOrCopyTree(seedDir, target);
-  fs.writeFileSync(path.join(target, MATERIALIZED_MARKER), `${seedId}\n`);
+  if (!existing) {
+    linkOrCopyTree(seedDir, target);
+    fs.writeFileSync(marker, `${seedId}\n`);
+  }
+  let previous = options.previousHome;
+  if (previous && (path.dirname(path.resolve(previous)) !== path.resolve(globalStorageDir) ||
+      !HOME_NAME_PATTERN.test(path.basename(previous)))) previous = undefined;
+  if (previous === undefined && !existing) {
+    const older = fs.readdirSync(globalStorageDir).filter((name) => HOME_NAME_PATTERN.test(name) && name !== path.basename(target))
+      .map((name) => path.join(globalStorageDir, name)).filter((home) => fs.lstatSync(home).isDirectory())
+      .sort((a, b) => fs.statSync(b).birthtimeMs - fs.statSync(a).birthtimeMs);
+    previous = older[0];
+  }
+  if (previous && path.resolve(previous) !== path.resolve(target) && fs.existsSync(previous)) {
+    announceKeptHome(previous, globalStorageDir, target, options);
+  }
   return target;
 }
 
@@ -926,6 +1006,9 @@ module.exports = {
   materializedHomeDir,
   ensureMaterializedHome,
   MATERIALIZED_MARKER,
+  selectOldHomes,
+  listOldHomes,
+  keptHomeNotice,
   DATABASE_KINDS,
   defaultDedicatedName,
   databaseEnv,

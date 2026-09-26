@@ -179,6 +179,7 @@
       {"command": "osd.openSystemOverview", "title": "osd: Open System overview"},
       {"command": "osd.start", "title": "osd: Start (build + run this system)", "icon": "$(play)"},
       {"command": "osd.stop", "title": "osd: Stop", "icon": "$(primitive-square)"},
+      {"command": "osd.removeOldWorkingCopies", "title": "osd: Remove old working copies"},
       {"command": "osd.rebuildWarm", "title": "osd: Rebuild (warm)", "icon": "$(tools)"},
       {"command": "osd.rebuild", "title": "osd: Full rebuild (stop, build, start)"},
       {"command": "osd.fullRebuild", "title": "osd: Full rebuild (force build)", "icon": "$(tools)"},

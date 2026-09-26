@@ -14,7 +14,7 @@
 import {expect} from "chai";
 import {execFileSync} from "node:child_process";
 import {createRequire} from "node:module";
-import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, lstatSync} from "node:fs";
 import {basename, join} from "node:path";
 import {homedir, tmpdir} from "node:os";
 import {buildVsix, stampStagedPackage} from "../scripts/build-vsix.mjs";
@@ -103,10 +103,12 @@ describe("packaging changed seed content", function () {
 
       const firstHome = firstLauncher.ensureMaterializedHome(firstSeed, globalStorage);
       expect(readFileSync(join(firstHome, seedFile), "utf8")).to.equal("first packaged seed content\n");
+      writeFileSync(join(firstHome, seedFile), "user edit in the first materialized home\n");
       const secondHome = secondLauncher.ensureMaterializedHome(secondSeed, globalStorage);
       expect(secondHome).to.not.equal(firstHome);
       expect(readFileSync(join(secondHome, seedFile), "utf8")).to.equal("second packaged seed content\n");
-      expect(existsSync(firstHome), "materializing the second seed removes the old generation").to.equal(false);
+      expect(lstatSync(firstHome).isDirectory(), "the old write path stays available").to.equal(true);
+      expect(readFileSync(join(firstHome, seedFile), "utf8")).to.equal("user edit in the first materialized home\n");
 
       builtVsix = currentVsixFile;
       built = true;
