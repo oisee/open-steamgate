@@ -96,6 +96,27 @@ function log(msg) {
   console.log(`build-vsix: ${msg}`);
 }
 
+/** Stamps only the package.json inside the staged extension. A package
+ *  version is the tracked major.minor plus the checkout's commit count; local
+ *  edits deliberately do not affect the number. The seed content ID handles
+ *  freshness for dirty builds. */
+export function stampStagedPackage(stagedPackagePath, root = ROOT) {
+  const sourcePackage = JSON.parse(readFileSync(join(root, "editors", "vscode", "package.json"), "utf8"));
+  const match = /^(\d+)\.(\d+)\.\d+$/.exec(sourcePackage.version ?? "");
+  if (match === null) {
+    throw new Error(`build-vsix: expected a plain major.minor.patch version in editors/vscode/package.json, got ${sourcePackage.version}`);
+  }
+  const patch = execFileSync("git", ["rev-list", "--count", "HEAD"], {cwd: root, encoding: "utf8"}).trim();
+  if (!/^\d+$/.test(patch)) {
+    throw new Error(`build-vsix: git rev-list returned an invalid commit count: ${patch}`);
+  }
+  const dirty = execFileSync("git", ["status", "--porcelain"], {cwd: root, encoding: "utf8"}).trim().length > 0;
+  const pkg = JSON.parse(readFileSync(stagedPackagePath, "utf8"));
+  pkg.version = `${match[1]}.${match[2]}.${patch}`;
+  writeFileSync(stagedPackagePath, `${JSON.stringify(pkg, null, 2)}\n`);
+  return {pkg, dirty};
+}
+
 function dirSizeBytes(dir) {
   if (existsSync(dir) === false) return 0;
   const out = execFileSync("du", ["-sk", dir], {encoding: "utf8"});
@@ -366,12 +387,12 @@ export async function buildVsix() {
   ({minimatch} = await import("minimatch"));
   const {unfetched, describeUnfetched} = await import("../tools/osd-fetch.mjs");
 
-  const pkg = JSON.parse(readFileSync(join(EXT_DIR, "package.json"), "utf8"));
   rmSync(STAGE, {recursive: true, force: true});
   mkdirSync(STAGE, {recursive: true});
 
   const extensionDir = join(STAGE, "extension");
   copyExtensionFiles(extensionDir);
+  const {pkg, dirty} = stampStagedPackage(join(extensionDir, "package.json"));
   const seedRoot = join(extensionDir, "osd");
   // **An unfetched pack refuses the package, not the user's first start.**
   // The seed copies packs/ as the checkout has them; a pack whose sources
@@ -384,6 +405,9 @@ export async function buildVsix() {
   const modules = copySeedTree(seedRoot);
   const seedId = writeSeedId(seedRoot);
   log(`seed ID: ${seedId}`);
+  if (dirty) {
+    log(`dirty tree: version ${pkg.version} + seed ${seedId}`);
+  }
 
   writeFileSync(join(STAGE, "[Content_Types].xml"), contentTypesXml());
   writeFileSync(join(STAGE, "extension.vsixmanifest"), vsixManifestXml(pkg));

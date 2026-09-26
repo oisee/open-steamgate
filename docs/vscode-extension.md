@@ -1002,6 +1002,16 @@ file with `code --install-extension <vsix> --force`. The build still refuses
 to package while any pack is unfetched, so a successful install command has a
 complete bundled seed.
 
+The tracked `editors/vscode/package.json` keeps the release baseline (`0.1.6`)
+and supplies the major and minor for packaged builds. At packaging time, the
+build changes only the staged copy's patch to `git rev-list --count HEAD`;
+the tracked patch remains intact. Bump the major or minor by hand for a new
+release line. The stamped version appears in the VSIX manifest and
+`osd-vscode-<version>.vsix` filename, and `vsix:install` installs that exact
+file. Local edits do not change the commit count, so a dirty build keeps the
+same extension version; it logs that version with the content seed ID, which
+keys the materialized install to the actual packaged files.
+
 **What is in `extension/osd/`**, found by tracing rather than guessing:
 **not `output/`** -- see "two false starts, and a third" below for why a
 first design shipped it and a second one dropped it again; `src/`, `gen/`,

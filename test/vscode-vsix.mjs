@@ -14,16 +14,21 @@
 import {expect} from "chai";
 import {execFileSync} from "node:child_process";
 import {createRequire} from "node:module";
-import {existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
-import {homedir} from "node:os";
+import {homedir, tmpdir} from "node:os";
+import {stampStagedPackage} from "../scripts/build-vsix.mjs";
 
 const root = process.cwd();
 const VSIX_DIR = join(root, "build", "vsix");
-const vsixFile = existsSync(VSIX_DIR)
-  ? readdirSync(VSIX_DIR).find((f) => f.endsWith(".vsix"))
+const stagedPackagePath = join(VSIX_DIR, "stage", "extension", "package.json");
+const stagedVersion = existsSync(stagedPackagePath)
+  ? JSON.parse(readFileSync(stagedPackagePath, "utf8")).version
   : undefined;
-const built = vsixFile !== undefined;
+const vsixFiles = existsSync(VSIX_DIR) ? readdirSync(VSIX_DIR).filter((f) => f.endsWith(".vsix")) : [];
+const vsixFile = (stagedVersion === undefined ? undefined : `osd-vscode-${stagedVersion}.vsix`);
+const builtVsix = vsixFiles.includes(vsixFile) ? vsixFile : vsixFiles[0];
+const built = builtVsix !== undefined;
 
 const DEMO_WS = join(root, ".local", "b0-demo-ws");
 // **Outside the checkout, on purpose.** A scratch folder under this tree
@@ -32,6 +37,26 @@ const DEMO_WS = join(root, ".local", "b0-demo-ws");
 // 2026-09-26) still loads here and the test is green for a package that fails
 // in a user's globalStorage. Not /tmp either: it is a small tmpfs.
 const SCRATCH = join(process.env.OSD_VSIX_SCRATCH ?? join(homedir(), ".cache", "osd-vsix-test"));
+
+describe("packaging version stamp", function () {
+  it("stamps the staged package with the commit count and leaves the tracked package untouched", function () {
+    const trackedPath = join(root, "editors", "vscode", "package.json");
+    const trackedBefore = readFileSync(trackedPath, "utf8");
+    const [major, minor] = JSON.parse(trackedBefore).version.split(".");
+    const scratch = mkdtempSync(join(tmpdir(), "osd-vsix-version-"));
+    try {
+      const stagedPath = join(scratch, "package.json");
+      copyFileSync(trackedPath, stagedPath);
+      const {pkg} = stampStagedPackage(stagedPath, root);
+      const commitCount = execFileSync("git", ["rev-list", "--count", "HEAD"], {cwd: root, encoding: "utf8"}).trim();
+      expect(pkg.version).to.equal(`${major}.${minor}.${commitCount}`);
+      expect(JSON.parse(readFileSync(stagedPath, "utf8")).version).to.equal(pkg.version);
+      expect(readFileSync(trackedPath, "utf8")).to.equal(trackedBefore);
+    } finally {
+      rmSync(scratch, {recursive: true, force: true});
+    }
+  });
+});
 
 /** `.local/b0-demo-ws/src/zcl_b0_hello.clas.abap`: a workspace-layer fixture
  *  shaped like the one docs/vscode-extension.md's "Live smoke" describes by
@@ -76,9 +101,13 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
     rmSync(SCRATCH, {recursive: true, force: true});
     mkdirSync(SCRATCH, {recursive: true});
     unzipDir = join(SCRATCH, "unzipped");
-    execFileSync("unzip", ["-q", join(VSIX_DIR, vsixFile), "-d", unzipDir]);
+    execFileSync("unzip", ["-q", join(VSIX_DIR, builtVsix), "-d", unzipDir]);
 
     const extensionDir = join(unzipDir, "extension");
+    const packagedVersion = JSON.parse(readFileSync(join(extensionDir, "package.json"), "utf8")).version;
+    expect(builtVsix).to.equal(`osd-vscode-${packagedVersion}.vsix`);
+    expect(readFileSync(join(unzipDir, "extension.vsixmanifest"), "utf8"))
+      .to.contain(`Version="${packagedVersion}"`);
     const {Launcher, ensureMaterializedHome, seedContentId, SEED_ID_FILE} = createRequire(import.meta.url)(join(extensionDir, "launcher.js"));
     const seedDir = join(extensionDir, "osd");
     expect(existsSync(join(seedDir, "test", "run.mjs")), "the .vsix carries a runnable osd/ seed").to.equal(true);
