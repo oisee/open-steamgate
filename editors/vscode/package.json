@@ -47,6 +47,11 @@
           "type": "number",
           "default": 30,
           "description": "How often the ZOSD_DUMP heat (line decorations, explorer badges) is re-read. 0 turns the timer off; osd.run, osd.activate and \"osd: Refresh hotspots\" still refresh it."
+        },
+        "osd.tests.showSystem": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the Test Explorer's System group (the libraries abap_transpile.json's own \"libs\" pull in -- open-abap-core, abapgit, ... -- shown collapsed) is built at all. Off hides it and skips scanning those folders."
         }
       }
     },
