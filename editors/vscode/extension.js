@@ -15,7 +15,7 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   freestyleTableHtml, notebookFromJson, notebookToJson,
   hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText,
-  transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods} = require("./lib.js");
+  transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, progRunLens} = require("./lib.js");
 const {Launcher, ensureMaterializedHome} = require("./launcher.js");
 
 // Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
@@ -386,6 +386,11 @@ function activate(context) {
   // class, and the command it (and F8, above) both call.
   context.subscriptions.push(vscode.commands.registerCommand("osd.callEntitySet", (args) => callEntitySet(args, output)));
   context.subscriptions.push(entitySetLensProvider(output));
+  // gui-reports spike: "Open in VS Code" for a converted report, the same
+  // action F8 (RUN_TABLE.PROG) reaches, placed as a lens above its own
+  // REPORT line rather than asked for by name.
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openWebguiTransaction", (args) => openWebguiTransaction(args?.tcode, output)));
+  context.subscriptions.push(progLensProvider());
 
   // Q3 "Readers" (docs/vscode-extension.md): a lens "read by N · tests M ·
   // services K" over a class's or an interface's own definition line, and
@@ -728,8 +733,67 @@ async function run(output, classrunOutput) {
     await classrunObject(object.name, classrunOutput);
     return;
   }
+  if (action.kind === "webgui") {
+    await openWebguiTransaction(action.tcode, output);
+    return;
+  }
   output.appendLine(`osd run ${object.name}: ${action.text}`);
   vscode.window.showInformationMessage(`osd: ${action.text}`);
+}
+
+// ---- gui-reports spike (docs/gui-reports.md): F8 on a converted report
+// opens SAP Easy Access, at that report's transaction, in a webview panel
+// beside the editor rather than in the system browser "Open launchpad"
+// uses -- the ask was a panel inside VS Code, and a webview is the one VS
+// Code has.
+//
+// The panel does not carry a copy of the page: it iframes the running
+// osd's own URL, so the sapevent round trip (docs/webgui.md) runs exactly
+// as it does in a browser tab, clicks and all. The one real constraint is
+// what a webview's default Content-Security-Policy blocks by default (no
+// origin at all, same as any other webview until the page's own CSP names
+// one) and what "localhost" even means from inside the panel: under
+// Remote-WSL and Remote-SSH the webview itself renders in the local UI
+// process, on the other side of the remote/local boundary from the osd
+// server it is asking for, so a bare `http://localhost:<port>` is a
+// coincidence when it works (Remote-WSL's own automatic port forwarding)
+// and a dead port otherwise (Remote-SSH forwards nothing unless asked).
+// `vscode.env.asExternalUri` is VS Code's own answer to exactly that: it
+// hands back the URL this window's UI can actually reach, forwarding the
+// port first if that remote needs it, and is a no-op when nothing is
+// remote at all -- so this asks it rather than assuming osd's configured
+// URL already is the right one.
+async function openWebguiTransaction(tcode, output) {
+  const base = osd().url;
+  const target = vscode.Uri.parse(`${base}/sap/bc/gui/sap/its/webgui/?okcode=${encodeURIComponent(tcode)}`);
+  let external;
+  try {
+    external = await vscode.env.asExternalUri(target);
+  } catch (e) {
+    output.appendLine(`osd webgui ${tcode}: asExternalUri failed, using ${target.toString()} as typed (${String(e.message ?? e)})`);
+    external = target;
+  }
+  const panel = vscode.window.createWebviewPanel("osdWebgui", `Easy Access: ${tcode}`, vscode.ViewColumn.Beside, {
+    enableScripts: true,
+    retainContextWhenHidden: true,
+  });
+  panel.webview.html = webguiPanelHtml(external.toString(), tcode);
+}
+
+function webguiPanelHtml(url, tcode) {
+  // frame-src names the one origin this panel is allowed to embed; nothing
+  // else in the page runs a script of its own, so a strict default-src
+  // 'none' beside it costs nothing.
+  const origin = new URL(url).origin;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${xmlEscapeHtml(origin)}; style-src 'unsafe-inline';">
+<style>html,body{margin:0;height:100%;background:#1f4e79}iframe{border:0;width:100%;height:100%;display:block}</style>
+</head>
+<body><iframe src="${xmlEscapeHtml(url)}" title="${xmlEscapeHtml(tcode)}"></iframe></body>
+</html>`;
 }
 
 // ---- Q6b "Classrun": F9, ADT's "Run as ABAP Application (Console)" --
@@ -923,6 +987,33 @@ function entitySetLensProvider(output) {
     if (/_dpc_ext\.clas\.abap$/i.test(doc.fileName)) emitter.fire();
   });
   return {dispose: () => { registration.dispose(); onSave.dispose(); }};
+}
+
+// ---- gui-reports spike: a CodeLens "▶ Run in Easy Access (ZGUI_...)"
+// above a *.prog.abap's own REPORT line -- "Open in VS Code" for a
+// converted report, symmetric to F8 (RUN_TABLE.PROG in lib.js) rather than
+// a second way of deciding what to do. lib.js progRunLens does the
+// placement, tested without VS Code the same way entitySetLenses is; this
+// never asks the server whether the report was actually converted, for the
+// reason openWebguiTransaction's own comment gives.
+
+function progLensProvider() {
+  const provider = {
+    provideCodeLenses(document) {
+      const object = adtObjectOf(document.fileName);
+      if (object === undefined || object.type !== "PROG") return [];
+      const lens = progRunLens(document.getText(), object.name);
+      if (lens === undefined) return [];
+      const range = new vscode.Range(lens.line - 1, 0, lens.line - 1, 0);
+      return [new vscode.CodeLens(range, {
+        title: lens.title,
+        command: "osd.openWebguiTransaction",
+        arguments: [{tcode: lens.tcode}],
+      })];
+    },
+  };
+  const registration = vscode.languages.registerCodeLensProvider({pattern: "**/*.prog.abap"}, provider);
+  return {dispose: () => registration.dispose()};
 }
 
 /** `{service, set, kind}` (a lens's own command arguments, or F8's) into

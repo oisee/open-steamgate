@@ -18,9 +18,11 @@ const {objectOf, adtObjectOf, uriOf, fileOf, outcomes, abapFrame, parseCheckRepo
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
-  transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods} =
+  transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
+  progTcodeOf, progRunLens} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
 import {implementsClassrun as facadeImplementsClassrun} from "../tools/osd-classrun.mjs";
+import {namesOf as guiConvertNamesOf} from "../tools/osd-gui-convert.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -511,6 +513,27 @@ describe("editors/vscode: the extension's logic", function () {
     const text = hotspotHoverText({count: 3, lastAt: Date.parse("2026-09-25T12:00:00Z"), lastMessage: "Division by zero"});
     expect(text).to.equal("3 dumps, last 2026-09-25T12:00:00.000Z: Division by zero");
     expect(hotspotHoverText({count: 1, lastAt: 0, lastMessage: ""})).to.equal("1 dump, last an unknown time: (no message)");
+  });
+
+  // gui-reports spike (docs/gui-reports.md): F8/"Open in VS Code" on a
+  // converted report names the same transaction code
+  // tools/osd-gui-convert.mjs wires it under. Held to that tool's own
+  // namesOf() rather than to a literal, so the two cannot drift silently.
+  it("names a report's webgui transaction the way osd-gui-convert.mjs wires it", () => {
+    for (const program of ["ZGG_EX_001", "ZGG_EX_012", "ZGG_EX_043"]) {
+      expect(progTcodeOf(program)).to.equal(guiConvertNamesOf(program).tcode);
+    }
+    expect(progTcodeOf(undefined)).to.equal(undefined);
+    expect(progTcodeOf("")).to.equal(undefined);
+  });
+
+  it("places the run lens on a report's own REPORT line", () => {
+    const source = "REPORT zgg_ex_001.\n\nSTART-OF-SELECTION.\n  WRITE 'hello world'.\n";
+    const lens = progRunLens(source, "ZGG_EX_001");
+    expect(lens).to.deep.equal({line: 1, tcode: "ZGUI_GG_EX_001", title: "▶ Run in Easy Access (ZGUI_GG_EX_001)"});
+    // an include has no REPORT statement of its own: no lens rather than a
+    // wrong line
+    expect(progRunLens("* nothing but comments\n", "ZGG_EX_001_INC")).to.equal(undefined);
   });
 });
 

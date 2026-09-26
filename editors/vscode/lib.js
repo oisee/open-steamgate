@@ -500,6 +500,29 @@ function implementsClassrun(source) {
   return /^\s*INTERFACES\s+if_oo_adt_classrun\b/im.test(String(source ?? ""));
 }
 
+/** the transaction code tools/osd-gui-convert.mjs wires a converted report
+ *  under: `ZGUI_<base>`, base being the program name with a leading Z
+ *  stripped -- namesOf() there, kept in step by test/vscode-extension.mjs
+ *  rather than by a shared module (see the RUN_TABLE.PROG comment below). */
+function progTcodeOf(programName) {
+  const base = String(programName ?? "").replace(/^Z/i, "").toUpperCase();
+  return base === "" ? undefined : `ZGUI_${base}`;
+}
+
+/** `{line, tcode, title}` for the CodeLens above a *.prog.abap's own
+ *  `REPORT` statement (1-based line, VS Code's own convention for a
+ *  Range), or `undefined` for a program with no `REPORT` line at all (an
+ *  include) -- the "Open in VS Code" symmetric to F8 (RUN_TABLE.PROG),
+ *  placed once at parse time rather than asked for on every keypress. */
+function progRunLens(source, programName) {
+  const tcode = progTcodeOf(programName);
+  if (tcode === undefined) return undefined;
+  const lines = String(source ?? "").split(/\r\n|\r|\n/);
+  const at = lines.findIndex((line) => /^\s*REPORT\b/i.test(line));
+  if (at < 0) return undefined;
+  return {line: at + 1, tcode, title: `▶ Run in Easy Access (${tcode})`};
+}
+
 // ---- F8, "Run", by object type (SE80's own dispatch). What this build
 // already reaches stays concrete; every other type answers a `text`
 // describing the server work its turn would add, so the table gets one
@@ -537,7 +560,23 @@ const RUN_TABLE = {
     return {kind: "not-yet", text: "not yet: run as ABAP Application (Console) -- put IF_OO_ADT_CLASSRUN on this class (or give it ABAP Unit tests) for F8/F9 to do something"};
   },
   INTF: () => ({kind: "not-yet", text: "not yet: an interface has nothing of its own to run"}),
-  PROG: () => ({kind: "not-yet", text: "not yet: run a report -- no server route to run one headlessly yet"}),
+  // gui-reports spike (docs/gui-reports.md): a report converted by
+  // tools/osd-gui-convert.mjs is wired as a transaction named ZGUI_<base>,
+  // the same naming the generator uses (namesOf there, progTcodeOf here --
+  // duplicated on purpose rather than shared, since one is a build tool and
+  // the other ships inside the extension; test/vscode-extension.mjs holds
+  // them to the same answer for the three examples). F8 does not ask the
+  // server whether that transaction exists: it opens webgui at the code
+  // either way, and an unconverted report gets the same "Transaction ...
+  // does not exist" the real Easy Access screen would show, in the webview
+  // rather than in a dialog -- one fact, wherever it is read.
+  PROG: (ctx) => {
+    const tcode = progTcodeOf(ctx.name);
+    if (tcode === undefined) {
+      return {kind: "not-yet", text: "not yet: run a report -- no server route to run one headlessly yet"};
+    }
+    return {kind: "webgui", tcode};
+  },
   FUGR: () => ({kind: "not-yet", text: "not yet: a test form from GET /sap/bc/osd/rfc/functions/<NAME>, then POST /call"}),
   // Q7 (docs/vscode-extension.md): F8's data preview -- the façade's own
   // datapreview/ddic (TABL) or datapreview/cds (DDLS) route, the same one
@@ -1140,4 +1179,5 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
-  transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods};
+  transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
+  progTcodeOf, progRunLens};
