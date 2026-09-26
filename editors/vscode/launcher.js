@@ -292,8 +292,11 @@ function terminate(child, {signal = "SIGTERM", graceMs = 15000} = {}) {
  *  materialized copy is ever edited in place; a rebuild always writes a
  *  NEW file (`build/by-input/<hash>/...`, a fresh `gen/`) rather than
  *  mutating one the seed still shares an inode with. A symlink in the seed
- *  is kept as a symlink, not followed -- `extension/osd/output` (this
- *  seed's own `build/live/output` chain) is exactly that. */
+ *  is kept as a symlink, not followed -- `scripts/build-vsix.mjs` dereferences
+ *  every symlink it packages (`copyReal`), so a real `.vsix` seed carries
+ *  none today, but this stays general rather than assuming that forever
+ *  (test/vscode-launcher.mjs's own fixture is a symlink for exactly this
+ *  reason). */
 function linkOrCopyTree(src, dest) {
   const st = fs.lstatSync(src);
   if (st.isSymbolicLink()) {
