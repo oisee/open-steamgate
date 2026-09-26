@@ -156,6 +156,15 @@ CLASS zcl_osd_amdp_sbx IMPLEMENTATION.
     DATA lv_restr  TYPE string.
     DATA lv_path   TYPE string.
     DATA lx_root   TYPE REF TO cx_root.
+    DATA: BEGIN OF ls_cell,
+            status    TYPE string,
+            result    TYPE string,
+            error     TYPE string,
+            raw       TYPE string,
+            rows      TYPE string,
+            ms        TYPE string,
+            system_db TYPE string,
+          END OF ls_cell.
 
 *   /engine: the one question a caller outside this page asks -- can anything
 *   here run SQLScript? The launchpad greys its tile on the answer.
@@ -166,6 +175,50 @@ CLASS zcl_osd_amdp_sbx IMPLEMENTATION.
     IF lv_path = 'engine'.
       server->response->set_header_field( name = 'content-type' value = 'application/json' ).
       server->response->set_cdata( |\{"engine":"{ engine( ) }","destination":"AMDP","system_db":"{ sy-dbsys }"\}| ).
+      RETURN.
+    ENDIF.
+
+*   Notebook SQLScript cells use this same sandbox destination and result,
+*   without scraping the human-facing page. Refuse another database engine
+*   first: a configured HANA destination must not make a SQLite system look
+*   as though its own database ran the cell.
+    IF lv_path = 'cell'.
+      CLEAR ls_cell.
+      ls_cell-system_db = sy-dbsys.
+      server->response->set_header_field( name = 'content-type' value = 'application/json; charset=utf-8' ).
+      IF sy-dbsys <> 'HDB'.
+        ls_cell-status = 'error'.
+        ls_cell-error = |SQLScript notebook cells require a HANA system database; this system uses { sy-dbsys }.|.
+      ELSEIF server->request->get_header_field( '~request_method' ) <> 'POST'.
+        ls_cell-status = 'error'.
+        ls_cell-error = 'SQLScript notebook cells must be sent with POST'.
+      ELSE.
+        lv_body = server->request->get_cdata( ).
+        TRY.
+            CALL FUNCTION 'ZOSD_AMDP_SANDBOX' DESTINATION 'AMDP'
+              EXPORTING iv_body   = lv_body
+              IMPORTING ev_result = lv_result
+                        ev_error  = lv_error
+                        ev_raw    = lv_raw
+                        ev_rows   = lv_rows
+                        ev_ms     = lv_ms.
+          CATCH cx_root INTO lx_root.
+            lv_error = lx_root->get_text( ).
+        ENDTRY.
+        ls_cell-result = lv_result.
+        ls_cell-error = lv_error.
+        ls_cell-raw = lv_raw.
+        ls_cell-rows = lv_rows.
+        ls_cell-ms = lv_ms.
+        IF lv_error IS INITIAL.
+          ls_cell-status = 'ok'.
+        ELSE.
+          ls_cell-status = 'error'.
+        ENDIF.
+      ENDIF.
+      server->response->set_cdata( /ui2/cl_json=>serialize(
+        data = ls_cell
+        pretty_name = /ui2/cl_json=>pretty_mode-low_case ) ).
       RETURN.
     ENDIF.
 

@@ -22,7 +22,8 @@ No SAP system, no separate install, no terminal.
   `GET_ENTITYSET` / `GET_ENTITY` methods, and "read by N · tests M ·
   services K" over a class or interface's own definition line.
 - Short-dump hotspots as line decorations and Explorer badges.
-- `*.osdnb` SQL notebooks over the running system's own database.
+- `*.osdnb` notebooks with SQL cells over the system database, ABAP classrun
+  cells, and SQLScript cells through the AMDP sandbox on HANA.
 
 ## Requirements
 

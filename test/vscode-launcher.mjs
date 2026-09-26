@@ -12,7 +12,7 @@ import {createServer} from "node:net";
 import {spawn} from "node:child_process";
 import {mkdtempSync, mkdirSync, readdirSync, readlinkSync, rmSync, writeFileSync, existsSync, lstatSync, symlinkSync, readFileSync, statSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {delimiter, join} from "node:path";
 import {once} from "node:events";
 
 const {
@@ -310,10 +310,15 @@ describe("editors/vscode/launcher.js: ensureWorkspacePacks (tools/osd-packs.mjs'
     rmSync(wsDir, {recursive: true, force: true});
   });
 
-  it("returns undefined and writes nothing for no layers", () => {
+  it("keeps the permanent notebook scratch pack even with no workspace layers", async () => {
     const packsDir = ensureWorkspacePacks(storageDir, []);
-    expect(packsDir).to.equal(undefined);
-    expect(existsSync(join(storageDir, "packs"))).to.equal(false);
+    expect(packsDir).to.equal(join(storageDir, "packs"));
+    expect(readdirSync(packsDir)).to.deep.equal(["notebook-scratch"]);
+    const {packAt, packsOf} = await import("../tools/osd-packs.mjs");
+    const scratch = packAt(storageDir, join(packsDir, "notebook-scratch"));
+    expect(scratch.name).to.equal("notebook-scratch");
+    expect(scratch.abap).to.deep.equal([join(packsDir, "notebook-scratch", "src")]);
+    expect(packsOf(storageDir, {OSD_PACKS: packsDir}).map((p) => p.name)).to.deep.equal(["notebook-scratch"]);
   });
 
   it("writes a pack per layer, readable by tools/osd-packs.mjs, entirely under storageDir", async () => {
@@ -324,30 +329,35 @@ describe("editors/vscode/launcher.js: ensureWorkspacePacks (tools/osd-packs.mjs'
 
     const {packAt, packsOf} = await import("../tools/osd-packs.mjs");
     const entries = readdirSync(packsDir);
-    expect(entries).to.have.lengthOf(1);
-    const pack = packAt(storageDir, join(packsDir, entries[0]));
+    expect(entries).to.have.lengthOf(2);
+    const workspacePackName = entries.find((name) => name.startsWith("ws-"));
+    const pack = packAt(storageDir, join(packsDir, workspacePackName));
     expect(pack.abap).to.have.lengthOf(1);
     // the pack's ABAP folder really is the workspace's src/, reached through
     // the symlink this wrote -- not a copy, and nothing was written under
     // wsDir itself
-    expect(readlinkSync(join(packsDir, entries[0], "src"))).to.equal(join(wsDir, "src"));
+    expect(readlinkSync(join(packsDir, workspacePackName, "src"))).to.equal(join(wsDir, "src"));
     expect(pack.order).to.be.at.least(900);
 
     // OSD_PACKS naming the container finds it the way any other pack is found
     const found = packsOf(storageDir, {OSD_PACKS: packsDir});
-    expect(found.map((p) => p.name)).to.include(entries[0].toLowerCase());
+    expect(found.map((p) => p.name)).to.include(workspacePackName.toLowerCase());
+    expect(found.map((p) => p.name)).to.include("notebook-scratch");
 
     // nothing was written into the workspace folder itself
     expect(readdirSync(wsDir)).to.deep.equal(["src"]);
   });
 
-  it("rebuilds from scratch: a stale layer's pack disappears on the next call", () => {
+  it("removes stale workspace packs while preserving the notebook scratch files", () => {
     const {detectWorkspaceLayers: detect} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
     ensureWorkspacePacks(storageDir, detect([wsDir]));
-    expect(readdirSync(join(storageDir, "packs"))).to.have.lengthOf(1);
+    const scratchFile = join(storageDir, "packs", "notebook-scratch", "src", "cell.abap");
+    writeFileSync(scratchFile, "kept between starts");
+    expect(readdirSync(join(storageDir, "packs"))).to.have.lengthOf(2);
     const result = ensureWorkspacePacks(storageDir, []);
-    expect(result).to.equal(undefined);
-    expect(existsSync(join(storageDir, "packs"))).to.equal(false);
+    expect(result).to.equal(join(storageDir, "packs"));
+    expect(readdirSync(result)).to.deep.equal(["notebook-scratch"]);
+    expect(readFileSync(scratchFile, "utf8")).to.equal("kept between starts");
   });
 });
 
@@ -538,6 +548,42 @@ describe("editors/vscode/launcher.js: stop while building", function () {
 
 describe("editors/vscode/launcher.js: Launcher end to end (against this checkout)", function () {
   this.timeout(180000);
+
+  it("includes inherited packs and notebook scratch while honoring warm and debug settings", async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-env-"));
+    const badHome = mkdtempSync(join(tmpdir(), "osd-launcher-env-home-"));
+    const inheritedPacks = join(storageDir, "inherited-packs");
+    const oldPacks = process.env.OSD_PACKS;
+    const oldWarm = process.env.OSD_WARM;
+    const oldInspect = process.env.OSD_INSPECT;
+    const port = await pickInspectorPort();
+    const portRange = {from: port, to: port};
+    process.env.OSD_PACKS = inheritedPacks;
+    process.env.OSD_WARM = "1";
+    process.env.OSD_INSPECT = "9229";
+    const launcher = new Launcher({osdHome: badHome, storageDir, warm: "off", portRange});
+    try {
+      await rejects(launcher.start());
+      expect(launcher.env.OSD_PACKS).to.equal([inheritedPacks, join(storageDir, "packs")].join(delimiter));
+      expect(launcher.env.OSD_WARM).to.equal("0");
+      expect(launcher.env).not.to.have.property("OSD_INSPECT");
+      expect(existsSync(join(storageDir, "packs", "notebook-scratch", "src"))).to.equal(true);
+      const debuggerLauncher = new Launcher({osdHome: badHome, storageDir, warm: "off", debug: true, portRange});
+      await rejects(debuggerLauncher.start());
+      expect(debuggerLauncher.env.OSD_PACKS).to.equal([inheritedPacks, join(storageDir, "packs")].join(delimiter));
+      expect(debuggerLauncher.env.OSD_INSPECT).to.equal(String(debuggerLauncher.inspectPort));
+      expect(debuggerLauncher.env.OSD_WORKERS).to.equal("1");
+    } finally {
+      if (oldPacks === undefined) delete process.env.OSD_PACKS;
+      else process.env.OSD_PACKS = oldPacks;
+      if (oldWarm === undefined) delete process.env.OSD_WARM;
+      else process.env.OSD_WARM = oldWarm;
+      if (oldInspect === undefined) delete process.env.OSD_INSPECT;
+      else process.env.OSD_INSPECT = oldInspect;
+      rmSync(storageDir, {recursive: true, force: true});
+      rmSync(badHome, {recursive: true, force: true});
+    }
+  });
 
   it("starts the real system on a free port in 3531-3539, serves the demo, and stops leaving no process", async function () {
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-e2e-"));

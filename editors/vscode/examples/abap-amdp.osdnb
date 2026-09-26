@@ -1,0 +1,18 @@
+{
+  "cells": [
+    {
+      "kind": "markdown",
+      "value": "# ABAP and SQLScript notebook\n\nRun the ABAP cell with the osd notebook controller: its statements become the main method of `ZCL_OSD_NOTEBOOK_CELL`, then activate and run as a classrun. The SQLScript cell uses the AMDP sandbox and requires `osd.database.system = hana`."
+    },
+    {
+      "kind": "code",
+      "language": "abap",
+      "value": "DATA lt_demo TYPE STANDARD TABLE OF zstg_demo WITH DEFAULT KEY.\nDATA ls_demo TYPE zstg_demo.\n\nSELECT * FROM zstg_demo INTO TABLE lt_demo UP TO 5 ROWS.\nLOOP AT lt_demo INTO ls_demo.\n  out->write( ls_demo-travel_id ).\n  out->write( ls_demo-description ).\nENDLOOP."
+    },
+    {
+      "kind": "code",
+      "language": "sqlscript",
+      "value": "lt = SELECT 6*7 AS answer FROM dummy;\nSELECT * FROM :lt;"
+    }
+  ]
+}

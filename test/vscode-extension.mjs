@@ -15,7 +15,8 @@ import {tableDataDocument} from "../tools/adt-facade.mjs";
 const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseCheckReport, parseActivationResult, runActionFor,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
-  htmlEscape, freestyleRows, freestyleTableHtml, freestyleOutputItems, notebookFromJson, notebookToJson,
+  htmlEscape, freestyleRows, freestyleTableHtml, freestyleOutputItems, notebookAbapSource, amdpCellResult,
+  notebookFromJson, notebookToJson,
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
@@ -867,16 +868,40 @@ describe("editors/vscode: the extension's logic", function () {
     expect(items[0].value).to.not.contain("<script>");
   });
 
+  it("Q6a: an ABAP cell becomes the main method of the notebook classrun class", () => {
+    const source = notebookAbapSource("out->write( 'hello' ).\nLOOP AT lt_demo INTO ls_demo.\nENDLOOP.");
+    expect(source).to.contain("CLASS zcl_osd_notebook_cell DEFINITION");
+    expect(source).to.contain("METHOD if_oo_adt_classrun~main.");
+    expect(source).to.contain("    out->write( 'hello' ).\n    LOOP AT lt_demo INTO ls_demo.\n    ENDLOOP.");
+    expect(source).to.contain("ENDCLASS.");
+  });
+
+  it("Q6a: AMDP sandbox JSON becomes notebook rows or a clear engine message", () => {
+    expect(amdpCellResult({status: "ok", result: '[{"ANSWER":42}]', ms: "8"})).to.deep.equal({
+      columns: ["ANSWER"], rows: [{ANSWER: 42}], ms: 8, raw: undefined,
+    });
+    const sqlite = amdpCellResult({
+      status: "error", system_db: "sqlite",
+      error: "SQLScript notebook cells require a HANA system database; this system uses sqlite.",
+    });
+    expect(sqlite.error).to.contain("require a HANA system database");
+    expect(sqlite.error).to.contain("uses sqlite");
+  });
+
   it("Q6a: a notebook's own JSON becomes cells, code defaulting to sql, markdown its own kind", () => {
     const cells = notebookFromJson(JSON.stringify({cells: [
       {kind: "markdown", value: "# Demo"},
       {kind: "code", value: "SELECT 1"},
       {kind: "code", language: "sql", value: "SELECT 2"},
+      {kind: "code", language: "abap", value: "out->write( 'hello' )."},
+      {kind: "code", language: "sqlscript", value: "SELECT 1 FROM dummy;"},
     ]}));
     expect(cells).to.deep.equal([
       {kind: "markdown", language: "markdown", value: "# Demo"},
       {kind: "code", language: "sql", value: "SELECT 1"},
       {kind: "code", language: "sql", value: "SELECT 2"},
+      {kind: "code", language: "abap", value: "out->write( 'hello' )."},
+      {kind: "code", language: "sqlscript", value: "SELECT 1 FROM dummy;"},
     ]);
   });
 

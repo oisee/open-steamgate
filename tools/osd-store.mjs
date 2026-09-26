@@ -571,18 +571,28 @@ export class ObjectStore {
     return {...entry, include, source: readFileSync(join(this.root, entry.file), "utf8")};
   }
 
-  // a write lands a file; a new object goes to the first writable root
-  write(type, name, source, include = "main") {
+  // a write lands a file; a new object goes to the first writable root unless
+  // a caller with a specific layer (the notebook scratch pack) names one
+  write(type, name, source, include = "main", options = {}) {
     const meta = TYPES[type];
     if (meta === undefined) {
       throw new NotSupported(`object type ${type}`);
+    }
+    const requestedRoot = options.root === undefined ? undefined : this.roots.find((candidate) =>
+      resolve(this.root, candidate.path) === resolve(this.root, String(options.root)));
+    if (options.root !== undefined && (requestedRoot === undefined || requestedRoot.writable !== true)) {
+      throw new Error(`write target root ${options.root} is not a writable object-store root`);
     }
     let entry = this.find(type, name);
     if (entry !== undefined && entry.writable === false) {
       throw new ReadOnly(type, name);
     }
+    if (entry !== undefined && requestedRoot !== undefined &&
+        resolve(this.root, entry.root) !== resolve(this.root, requestedRoot.path)) {
+      throw new Error(`${type} ${name} already belongs to ${entry.root}, not ${requestedRoot.path}`);
+    }
     if (entry === undefined) {
-      const root = this.roots.find((r) => r.writable);
+      const root = requestedRoot ?? this.roots.find((r) => r.writable);
       const file = join(root.path, "osd", fileOf(name) + meta.ext);
       const packages = this.#packagesOf(file, root);
       entry = {type, name: String(name).toUpperCase(), file, root: root.path, writable: true, library: false,

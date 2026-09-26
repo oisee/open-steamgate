@@ -339,23 +339,33 @@ function packNameOf(folder) {
  *  workspace layer always sorts after the tree's own packs) plus a `src`
  *  symlink at the workspace folder's own ABAP folder. No copy, no new
  *  mechanism: `tools/osd-packs.mjs` reads this exactly like any other pack,
- *  which is why nothing in the transpiler or the store had to change.
+ *  alongside a persistent notebook scratch pack which is deliberately kept
+ *  when workspace layers are refreshed.
  *
  *  Nothing is written under `osdHome` or under a workspace folder -- the
  *  container lives entirely under `storageDir` (the extension's own
- *  storage) and is rebuilt from scratch on every call, so a workspace
- *  folder that closed does not leave a stale layer behind.
+ *  storage). Workspace layers are rebuilt on each call, so a closed folder
+ *  does not leave a stale layer behind; the scratch pack persists.
  *
- *  Returns the container directory to set `OSD_PACKS` to, or `undefined`
- *  when there are no layers (so a caller does not set `OSD_PACKS` to an
- *  empty directory for nothing). */
+ *  Returns the container directory to set `OSD_PACKS` to. The scratch pack
+ *  is present even with no workspace layers, so a notebook can write to a
+ *  root the already-running ObjectStore knew about at startup. */
 function ensureWorkspacePacks(storageDir, layers) {
   const packsRoot = path.join(storageDir, "packs");
-  fs.rmSync(packsRoot, {recursive: true, force: true});
-  if (layers.length === 0) {
-    return undefined;
-  }
   fs.mkdirSync(packsRoot, {recursive: true});
+  for (const name of fs.readdirSync(packsRoot)) {
+    if (name.startsWith("ws-")) {
+      fs.rmSync(path.join(packsRoot, name), {recursive: true, force: true});
+    }
+  }
+  const scratchDir = path.join(packsRoot, "notebook-scratch");
+  fs.mkdirSync(path.join(scratchDir, "src"), {recursive: true});
+  const scratchManifest = path.join(scratchDir, "osd-pack.json");
+  fs.writeFileSync(scratchManifest, JSON.stringify({
+    name: "notebook-scratch",
+    order: 10000,
+    description: "ABAP notebook cell source",
+  }, undefined, 2));
   layers.forEach((layer, i) => {
     const name = packNameOf(layer.folder);
     const dir = path.join(packsRoot, name);
@@ -684,7 +694,9 @@ class Launcher extends EventEmitter {
       this.inspectPort = await pickInspectorPort();
     }
     const dbEnv = databaseEnv(this.database);
-    const env = {
+    // RuntimePool gives every serving worker the same inspector port; a
+    // debugger session can follow one child only.
+    const env = debugSystemEnv({
       ...process.env,
       STG_PORT: String(port),
       ...dbEnv,
@@ -704,13 +716,9 @@ class Launcher extends EventEmitter {
       OSD_TLS_DIR: tlsDir,
       STG_SERVE: "child",
       ...warmEnvironment(this.warmMode),
-    };
-    // RuntimePool gives every serving worker the same inspector port; a
-    // debugger session can follow one child only.
-    Object.assign(env, debugSystemEnv(env, this.debug, this.inspectPort));
-    if (packsDir !== undefined) {
-      env.OSD_PACKS = packsDir;
-    }
+    }, this.debug, this.inspectPort);
+    env.OSD_PACKS = [process.env.OSD_PACKS, packsDir]
+      .filter((value) => value !== undefined && value !== "").join(path.delimiter);
     this.env = env;
     this.databaseLabel = describeDatabase(this.database);
 
