@@ -19,7 +19,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: preview-deployment
+  group: preview-deployment-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -28,6 +28,7 @@ jobs:
       github.event.action != 'closed'
       && (github.event_name != 'pull_request'
       || github.event.pull_request.head.repo.full_name == github.repository)
+      && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -137,31 +138,10 @@ jobs:
         # build, test, or screenshot step never replaces the last published
         # preview.
         if: ${{ success() }}
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./build/preview
-          destination_dir: ${{ env.PREVIEW_DIRECTORY }}
-          keep_files: true
-          commit_message: "Deploy ${{ env.PREVIEW_DIRECTORY }} from ${{ github.sha }}"
+        run: node scripts/pages-push.mjs publish "$PREVIEW_DIRECTORY" build/preview
       - name: Refresh the index of all published previews
         if: ${{ success() }}
-        run: |
-          set -euo pipefail
-          pages="$RUNNER_TEMP/gh-pages-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          # actions/checkout fetches only the triggering branch. Without an
-          # explicit destination this updates FETCH_HEAD, not origin/gh-pages.
-          git fetch origin gh-pages:refs/remotes/origin/gh-pages
-          git worktree add --detach "$pages" origin/gh-pages
-          node scripts/pages-index.mjs "$pages"
-          git -C "$pages" add index.html
-          if ! git -C "$pages" diff --cached --quiet -- index.html; then
-            git -C "$pages" config user.name "github-actions[bot]"
-            git -C "$pages" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git -C "$pages" commit -q -m "Refresh preview index"
-            git -C "$pages" push origin HEAD:gh-pages
-          fi
-          git worktree remove "$pages"
+        run: node scripts/pages-push.mjs index
       - name: Preview comment on the pull request
         if: github.event_name == 'pull_request'
         env:
@@ -190,22 +170,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: source
-      - uses: actions/checkout@v4
-        with:
-          ref: gh-pages
-          path: pages
       - name: Remove the preview directory
-        run: |
-          set -euo pipefail
-          dir="pr-${{ github.event.pull_request.number }}"
-          if [[ -d "pages/$dir" ]]; then
-            git -C pages rm -r -q "$dir"
-            node source/scripts/pages-index.mjs pages
-            git -C pages config user.name "github-actions[bot]"
-            git -C pages config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git -C pages add index.html
-            git -C pages commit -q -m "Remove $dir"
-            git -C pages push origin HEAD:gh-pages
-          fi
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/pages-push.mjs remove "pr-$PR_NUMBER"

@@ -19,10 +19,25 @@ CDN and the worker leaves everything but the service path to the network.
 
 `.github/workflows/preview.yml` builds, checks the build in headless Chromium
 (`playwright.preview.config.mjs`), takes the screenshots and publishes into the
-`gh-pages` branch (`peaceiris/actions-gh-pages`, one directory per deployment).
+`gh-pages` branch (one directory per deployment).
 After publishing or removing a preview, `scripts/pages-index.mjs` rebuilds the
 root index from the directories actually present on that branch. Thus old open
 PR previews remain directly linked and a closed PR leaves no stale link.
+
+The workflow uses a separate concurrency group for each PR number and for
+`refs/heads/main`. A PR build cannot displace a queued main deployment.
+`cancel-in-progress: false` lets a running build finish; GitHub still keeps
+only the newest pending run within one group. Every Pages write (publish,
+index refresh, or PR removal) goes through `scripts/pages-push.mjs`. It fetches
+the latest `gh-pages` tip, applies that write in a temporary worktree, and
+retries a rejected non-fast-forward push up to three times with a short delay.
+Each retry reapplies the change from the new tip; index refresh and removal
+regenerate the index there, so another PR's preview is retained.
+
+To redeploy main, open **Actions → preview deployment → Run workflow**, select
+the **main** branch, and run it. Equivalently, use
+`gh workflow run preview.yml --ref main`. Manual runs from other branches do
+not deploy; the main build and browser checks must pass before publication.
 
 ## Packs on the preview
 
