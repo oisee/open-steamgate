@@ -67,5 +67,9 @@
   "/osd/sql": {
     "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "sql", "needs": "state",
     "text": "the statement log and the bounded SELECT door this process holds"
+  },
+  "/osd/classrun": {
+    "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "classrun", "needs": "state",
+    "text": "the door a served (child) runtime answers F9 through: this process holds the live connection, so a classrun of an already-transpiled class runs here, the same dialog step and rollback-on-dump every other request gets"
   }
 }

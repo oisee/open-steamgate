@@ -181,6 +181,32 @@ export class Data {
     return body;
   }
 
+  // Q6b's own door: a served (child) runtime holds the live connection, so
+  // a classrun runs there -- tools/osd-serve.mjs `/osd/classrun`, the same
+  // shape as `#throughTheDoor` above for SQL. The façade still does the
+  // "does this class implement IF_OO_ADT_CLASSRUN" check itself
+  // (tools/osd-classrun.mjs `ClassRun#run`, off the source it already has),
+  // so the door only ever runs a class already known to be one.
+  async classrun(name, options = {}) {
+    if (this.runtime === undefined) {
+      const {runClassrun} = await import("./osd-classrun.mjs");
+      return runClassrun(this.root, name, options);
+    }
+    await this.runtime.ensure();
+    const answer = await fetch(`${this.runtime.url}/osd/classrun`, {
+      method: "POST",
+      headers: {"content-type": "application/json"},
+      body: JSON.stringify({name}),
+    });
+    const body = await answer.json().catch(() => ({}));
+    if (!answer.ok) {
+      const e = new Error(body?.error?.message ?? `the serving runtime answered ${answer.status}`);
+      e.code = body?.error?.code ?? "FAILED";
+      throw e;
+    }
+    return body;
+  }
+
   // what a table read is when the client names a table instead of writing SQL
   async table(name, options = {}) {
     const where = options.where === undefined || options.where === "" ? "" : ` WHERE ${options.where}`;

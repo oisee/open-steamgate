@@ -452,6 +452,22 @@ when the serving runtime has not been recycled yet; that is a consequence of
 the isolation, and the awaited publication is what keeps the two from
 disagreeing for long.
 
+**Classrun is a run, not a test.** `POST /sap/bc/adt/oo/classrun/{name}`
+(ADT's own F9, "Run as ABAP Application (Console)", `docs/vscode-extension.md`
+Q6b) instantiates a class declaring `INTERFACES if_oo_adt_classrun` and
+calls its `MAIN` with a console object of this repo's own,
+`ZCL_OSD_CLASSRUN_OUT` (`src/classrun/`), which formats a simple value, a
+structure and a table (rows, tab-separated) as it writes them. Unlike a test
+run above, it shares the one live connection every other request runs
+against -- a dialog step, commit or roll back, the work-process lock in
+between -- so a class that writes and then dumps leaves nothing
+half-written and the dump is recorded like any other
+(`tools/osd-dumps.mjs`). No `app:accept` and no compatibility-graph node
+gate it, matching the real system's own discovery. `tools/osd-classrun.mjs`
+does the work; when a served (child) runtime holds the connection instead
+of this process, it goes through a door of the same shape as the SQL one,
+`POST /osd/classrun` on `tools/osd-serve.mjs`.
+
 ## The serving runtime
 
 Node pins a module graph for the life of a process, and a process that has

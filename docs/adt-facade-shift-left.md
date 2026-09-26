@@ -334,7 +334,7 @@ boxes:
 | --- | --- | --- |
 | a **table or CDS entity** | Data Preview: `POST datapreview/ddic` (or freestyle SQL) | the runtime through the door first; **Go** once the rows are in a real file |
 | a **program** | hands off to SAP GUI over DIAG on `32NN` (`_NAVIGATION=X;D_WB_ACTION=EXECUTE`) | the Go DIAG stub (track C), later a runtime run |
-| a **class** with `if_oo_adt_classrun` | `oo/classrun` — not served today | the runtime, through the door, when it is added |
+| a **class** with `if_oo_adt_classrun` | `oo/classrun` — served (Q6b, 2026-09-26): `tools/osd-classrun.mjs`, `docs/vscode-extension.md` | the runtime, in-process when it holds the connection, through a door (`/osd/classrun`, `tools/osd-serve.mjs`) when a served (child) runtime does |
 
 The first row is the one asked about, and it is where the first draft was
 wrong. **(rev.)** The runtime's SQLite is sql.js: a WebAssembly database
@@ -410,6 +410,8 @@ IDs and bounded messages, each answered by the mode that owns it:
 | `structure(type, name)` | `structureOf` | compile | the class outline, until Go does it from statements |
 | `unit(type, name)` | `runDetached` | unit | the `runResult` tree the façade renders; one process per run |
 | `sql(select, max)` | `store.data().query` | serve | rows, bounded, from the live connection |
+
+Q6b (2026-09-26, `tools/osd-classrun.mjs`) adds an unplanned seventh: `classrun(name)` — `store.classrun().run`, serve mode, console text, dialog-stepped, dump-recorded on failure. Not folded into the count above because this table is the *planned* Go door; classrun arrived on the JS side directly, the same way `sql` already had, and a future port inherits it as a seventh call rather than a redesign of these six.
 
 Every result names the source revision and the generation it was computed
 against; that is the one field the current calls lack, and the one that

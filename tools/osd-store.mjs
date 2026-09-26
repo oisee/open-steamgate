@@ -1106,6 +1106,18 @@ export class ObjectStore {
     return this.tests;
   }
 
+  // ADT's F9, "Run as ABAP Application (Console)" (tools/osd-classrun.mjs):
+  // a class implementing IF_OO_ADT_CLASSRUN, run against the runtime this
+  // store already has -- no detached child, because a classrun IS a run of
+  // the application and shares the connection every other request does.
+  async classrun() {
+    if (this.classruns === undefined) {
+      const {ClassRun} = await import("./osd-classrun.mjs");
+      this.classruns = new ClassRun(this);
+    }
+    return this.classruns;
+  }
+
   // a write means the parse is stale, here and for anyone sharing this tree
   #forget() {
     this.ddlsEntityIndex = undefined;

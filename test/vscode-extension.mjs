@@ -13,8 +13,10 @@ const {objectOf, adtObjectOf, uriOf, fileOf, outcomes, abapFrame, parseCheckRepo
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson,
-  HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText} =
+  HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
+  implementsClassrun} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
+import {implementsClassrun as facadeImplementsClassrun} from "../tools/osd-classrun.mjs";
 
 describe("editors/vscode: the extension's logic", function () {
   it("names the object and include of an abapGit file", () => {
@@ -113,6 +115,38 @@ describe("editors/vscode: the extension's logic", function () {
     expect(runActionFor({type: "IWSV", name: "ZSTG_DEMO_SRV"}).text).to.equal("not yet: the Gateway client on the service document");
     expect(runActionFor({type: "SICF", name: "ZOSD_APP"}).kind).to.equal("not-yet");
     expect(runActionFor({type: "BOGUS", name: "X"}).text).to.contain("BOGUS");
+  });
+
+  // ---- Q6b "Classrun": F9, ADT's "Run as ABAP Application (Console)" --
+  // implementsClassrun (the buffer scan F8's dispatch and osd-classrun.mjs's
+  // server-side check both run) and the dispatch itself, held to the same
+  // shape lib.js's own RUN_TABLE test above holds every other kind to.
+  it("Q6b: a class buffer declaring IF_OO_ADT_CLASSRUN, off the source text alone", () => {
+    const demo = readFileSync(new URL("../src/classrun/zcl_osd_classrun_demo.clas.abap", import.meta.url), "utf8");
+    expect(implementsClassrun(demo)).to.equal(true);
+    expect(implementsClassrun("CLASS zcl_x DEFINITION.\nENDCLASS.")).to.equal(false);
+    // case- and whitespace-insensitive, the way an ABAP statement is
+    expect(implementsClassrun("  interfaces   if_oo_adt_classrun .")).to.equal(true);
+    // a class that merely names the interface in a comment does not count
+    expect(implementsClassrun("* interfaces if_oo_adt_classrun would go here")).to.equal(false);
+    // the two implementations (the editor's buffer scan and the façade's
+    // own file scan, tools/osd-classrun.mjs) agree on the same fixture
+    expect(facadeImplementsClassrun(demo)).to.equal(implementsClassrun(demo));
+  });
+
+  it("Q6b: F8 dispatches a no-tests classrun class to a run, tests still win, neither loses to the other", () => {
+    expect(runActionFor({type: "CLAS", name: "ZCL_OSD_CLASSRUN_DEMO"}, {hasUnitTests: false, hasClassrun: true}))
+      .to.deep.equal({kind: "classrun"});
+    // ABAP Unit still wins when a class happens to carry both
+    expect(runActionFor({type: "CLAS", name: "ZCL_OSD_CLASSRUN_DEMO"}, {hasUnitTests: true, hasClassrun: true}))
+      .to.deep.equal({kind: "unit"});
+    // neither: the same "not yet" as before Q6b existed
+    expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: false, hasClassrun: false}).kind)
+      .to.equal("not-yet");
+    // a DPC_EXT's own dispatch (Q2b) still comes first, classrun or not
+    const dpc = runActionFor({type: "CLAS", name: "ZCL_ZSTG_DEMO_DPC_EXT"}, {hasUnitTests: false, hasClassrun: true});
+    expect(dpc.kind).to.equal("not-yet");
+    expect(dpc.text).to.contain("get_entityset");
   });
 
   // ---- Q2b "Runner": the CodeLens over a SEGW _DPC_EXT class's own

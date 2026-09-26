@@ -199,6 +199,27 @@ class Osd {
     return {...freestyleRows(xml), ms, generation};
   }
 
+  /** Q6b "Classrun" (docs/vscode-extension.md): F9, "Run as ABAP Application
+   *  (Console)" -- POST tools/adt-facade.mjs `oo/classrun/<name>` with no
+   *  body, text/plain back: everything the class wrote through
+   *  `out->write( )`, or a trace after it if it dumped (still a 200, the
+   *  way ADT's own console shows a partial run). `request()` still throws
+   *  on an actual HTTP error -- not found, or a class that does not
+   *  implement IF_OO_ADT_CLASSRUN -- which is the caller's to catch, the
+   *  same distinction `entitySets()` / `readers()` above draw. Timed and
+   *  carries the generation like `freestyle()` above. */
+  async classrun(className) {
+    const startedAt = Date.now();
+    const res = await this.request(`/sap/bc/adt/oo/classrun/${encodeURIComponent(className)}`, {
+      method: "POST",
+      headers: {accept: "text/plain"},
+    });
+    const ms = Date.now() - startedAt;
+    const text = await res.text();
+    const generation = res.headers.get("x-osd-generation") ?? undefined;
+    return {text, ms, generation};
+  }
+
   /** Q4 "Hotspots" (docs/vscode-extension.md): counts per (object, line)
    *  and per object off ZOSD_DUMP -- the table tools/osd-dumps.mjs writes
    *  after a request's own rollback (tools/osd-serve.mjs `dump()`). No new
@@ -440,6 +461,16 @@ function keyOf(row) {
   return m === null ? undefined : m[1];
 }
 
+/** Q6b "Classrun": does this class's own source declare `INTERFACES
+ *  if_oo_adt_classrun`? The same test tools/osd-classrun.mjs runs against
+ *  the tracked file server-side; here it decides F8's dispatch (RUN_TABLE.CLAS)
+ *  off the buffer VS Code already has open, not necessarily saved -- the
+ *  same "the editor's own text, not the file" Ctrl+F2's check() already
+ *  works this way. */
+function implementsClassrun(source) {
+  return /^\s*INTERFACES\s+if_oo_adt_classrun\b/im.test(String(source ?? ""));
+}
+
 // ---- F8, "Run", by object type (SE80's own dispatch). What this build
 // already reaches stays concrete; every other type answers a `text`
 // describing the server work its turn would add, so the table gets one
@@ -465,7 +496,16 @@ const RUN_TABLE = {
     if (ctx.hasUnitTests) {
       return {kind: "unit"};
     }
-    return {kind: "not-yet", text: "not yet: run as ABAP Application (Console) -- IF_OO_ADT_CLASSRUN has no server route yet (docs/adt-facade-shift-left.md: oo/classrun, not served today)"};
+    // Q6b (docs/vscode-extension.md): a class with no tests that declares
+    // IF_OO_ADT_CLASSRUN runs as a console (oo/classrun, tools/adt-facade.mjs)
+    // -- ADT's own F9. `ctx.hasClassrun` is `implementsClassrun` below, run
+    // by the caller against the editor's buffer, the same way `ctx.hasUnitTests`
+    // is a file-system fact the caller supplies because lib.js touches
+    // neither.
+    if (ctx.hasClassrun) {
+      return {kind: "classrun"};
+    }
+    return {kind: "not-yet", text: "not yet: run as ABAP Application (Console) -- put IF_OO_ADT_CLASSRUN on this class (or give it ABAP Unit tests) for F8/F9 to do something"};
   },
   INTF: () => ({kind: "not-yet", text: "not yet: an interface has nothing of its own to run"}),
   PROG: () => ({kind: "not-yet", text: "not yet: run a report -- no server route to run one headlessly yet"}),
@@ -786,4 +826,5 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson,
-  HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText};
+  HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
+  implementsClassrun};

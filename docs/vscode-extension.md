@@ -37,7 +37,7 @@ control, so which language id it registers (if any) is not something a
 | Ctrl+F3 | Activate | `osd.activate` -- saves the file, then `activation` (~1835-1924); a failure's issues go to Problems, a pass shows the generation that now serves it (`X-OSD-Generation`) | -- |
 | Ctrl+Shift+F3 | Activate all inactive | -- | **left out**: `GET .../activation/inactiveobjects` always answers an empty list by design (`tools/adt-facade.mjs`, "nothing here is ever inactive: an object is what the file says") -- there is no inactive set on the server for this to activate |
 | F8 | Run | `osd.run` -- dispatched by object type (`lib.js` `RUN_TABLE` / `runActionFor`, SE80's own dispatch, table below); a class with ABAP Unit tests runs them (Test Explorer's `testing.runCurrentFile`) | see the table below |
-| F9 | Run as ABAP Application (Console) | -- | **left out**: no `oo/classrun` route exists (`docs/adt-facade-shift-left.md`: "`oo/classrun` -- not served today") -- binding it would invent server work instead of calling it |
+| F9 | Run as ABAP Application (Console) | `osd.classrun` -- the current class against `oo/classrun` (Q6b, below), output in its own Output channel "osd console" | -- |
 | Ctrl+Shift+F10 | Run ABAP Unit | the built-in `testing.runCurrentFile` | -- |
 | F5 / F6 / F7 / F8, while a debug session is active | Step Into / Step Over / Return / Continue | the built-in `workbench.action.debug.step{Into,Over,Out}` / `.continue`, remapped only `when inDebugMode && resourceExtname == .abap`, so a non-ABAP debug session keeps VS Code's own F5 continue / F10 step over / F11 step into | -- |
 | Ctrl+Shift+B | Toggle breakpoint | the built-in `editor.debug.action.toggleBreakpoint` | -- |
@@ -51,7 +51,8 @@ F8's dispatch by object type (`lib.js` `runActionFor`, held to this table by
 | CLAS, name ends `_DPC_EXT`, cursor inside a `<set>_get_entityset` / `<set>_get_entity` method | calls the set, the same as that method's CodeLens (Q2b, below) |
 | CLAS, name ends `_DPC_EXT` / `_MPC_EXT`, otherwise | not yet: the rest of a Gateway client |
 | CLAS, has an ABAP Unit test include | runs them (Test Explorer) |
-| CLAS, neither | not yet: `IF_OO_ADT_CLASSRUN` has no server route (see F9 above) |
+| CLAS, declares `IF_OO_ADT_CLASSRUN`, no tests | classrun (Q6b, below) -- ABAP Unit still wins when a class carries both |
+| CLAS, neither | not yet: put `IF_OO_ADT_CLASSRUN` on the class, or give it tests |
 | INTF | nothing of its own to run |
 | PROG | not yet: no server route to run a report headlessly |
 | FUGR | not yet: a test form from `GET /sap/bc/osd/rfc/functions/<NAME>`, then `POST /call` |
@@ -249,8 +250,91 @@ notebook of the type.
 `test/adt-facade.mjs`) also gets one round trip in `test/adt-devloop.mjs`,
 beside the other façade routes that suite drives through a CSRF session.
 
-Left for Q6b: ABAP cells (`IF_OO_ADT_CLASSRUN`-shaped, `classrun`) -- the F8
-table above already notes `oo/classrun` is not served today.
+## Q6b: classrun
+
+*2026-09-26.* ADT's own F9, "Run as ABAP Application (Console)":
+`POST /sap/bc/adt/oo/classrun/<name>` (`tools/adt-facade.mjs`), advertised
+in discovery the way the real system does it -- a plain collection, no
+`app:accept`, no compatibility-graph node
+(`.local/adt-corpus/latest/bodies/00009-response.xml` /
+`00008-response.xml`, the discovery and compatibility captures) --
+instantiates a class that declares `INTERFACES if_oo_adt_classrun` and
+calls its `MAIN` with a console object of this repo's own,
+`ZCL_OSD_CLASSRUN_OUT` (`src/classrun/`), implementing
+`IF_OO_ADT_CLASSRUN_OUT` the interface `main` takes. Both interfaces are
+open-abap-core's own (`src/classrun/if_oo_adt_classrun*.intf.abap`), an MIT
+library `abap_transpile.json` already pulls in whole -- they were not
+missing, so nothing here is a clean-room addition of the interfaces
+themselves, only of the OUT implementation and the route.
+
+`WRITE` is kept modest: a simple value becomes one line (`name = value`
+when a name is given), a structure becomes one `field: value, field: value`
+line, and an internal table becomes a header line of column names followed
+by one tab-separated line per row (its own line per row for an
+elementary-typed table); anything RTTI resolves to neither elem, struct nor
+table becomes a line saying WRITE does not format it, rather than dumping.
+The answer is always `text/plain`; a dump is still a 200, the way ADT's own
+console shows a partial run -- whatever the class had already written, then
+`Runtime error: <message> at <ABAP position>`.
+
+Unlike an ABAP Unit run (`tools/osd-unit.mjs`), which spawns a detached
+child with its own throwaway database because a test's writes must never
+land in the rows the application serves, a classrun **is** a run of the
+application: it shares the one live connection every other request runs
+against, wrapped the same way -- a dialog step
+(`tools/osd-dialog-step.mjs`), commit when the work is done, roll back when
+it dumps, the work-process lock in between. A dump is recorded exactly like
+a runtime dump (`tools/osd-dumps.mjs` `ZOSD_DUMP`), not swallowed; the
+console text already written survives the rollback because it lives in the
+OUT object's own memory, not in a row. `tools/osd-classrun.mjs`'s
+`ClassRun#run` (asked for through `store.classrun()`, the same lazy pattern
+as `store.unit()`) does the work when the façade holds the connection
+itself (inline mode, and every test here); when a served (child) runtime
+holds it instead (`STG_SERVE=child`, `npm start`'s and `test/run.mjs`'s own
+default), the façade forwards through a door of the same shape as the
+existing SQL one -- `POST /osd/classrun` on `tools/osd-serve.mjs`
+(`src/icf/nodes.json`, `Data#classrun` in `tools/osd-data.mjs`) -- because
+that is the process actually holding the connection there. Verified live on
+both: inline through the mocha suites below, served (child) mode by hand on
+a throwaway port (5, in the PR).
+
+**F9** (`osd.classrun`, its own Output channel "osd console") runs the
+current class standalone, and **F8** dispatches to it
+(`RUN_TABLE.CLAS`, `ctx.hasClassrun`) for a class that declares the
+interface and carries no ABAP Unit tests -- tests still win when a class
+happens to have both. `ctx.hasClassrun` is `implementsClassrun`
+(`editors/vscode/lib.js`), the same regex `tools/osd-classrun.mjs` runs
+server-side, over the editor's own buffer (not necessarily saved), the way
+`ctx.hasUnitTests` is a file-system fact and Ctrl+F2's check already reads
+the unsaved buffer.
+
+Not done: ABAP cells in the SQL notebook (Q6a). The obvious design -- a
+scratch class in a gitignored layer, written and activated per cell,
+classrun immediately -- runs into two facts of this tree rather than one:
+`ObjectStore#rootsOf` resolves the writable roots **once, at construction**
+(`tools/osd-store.mjs`), so a pack folder (`tools/osd-packs.mjs`,
+`OSD_PACKS`) has to exist on disk *before* the façade's process starts, not
+something a notebook cell can arrange against an already-running `osd`; and
+`ObjectStore#write` puts a brand-new object in the **first** writable root
+regardless (`this.roots.find((r) => r.writable)`), not a root a caller
+names, so even with the pack pre-existing, nothing hands a cell's scratch
+class to it without a small store change (an optional target root on
+`write()`). Under that, activating and classrunning the same class within
+one still-running process hits the fact `tools/osd-classrun.mjs` documents
+at length: Node pins a module graph for the life of a process, the same
+reason the serving runtime recycles into a new one after every activation
+rather than reload; measured directly on this worktree (occasional `lstat
+ENOENT` on a file the build had just written, naming the *previous*
+generation's hash even though `readlinkSync` in the same process already
+showed the new one) and the reason this repo's own classrun fixtures
+(`src/classrun/zcl_osd_classrun_demo.clas.abap`,
+`zcl_osd_classrun_dumper.clas.abap`) are ordinary tracked objects built by
+`npm run transpile`, not written by a test. The smallest fix that keeps
+"sources stay files, git is the only version layer" is two small, separate
+pieces of future work: an optional `root` on `ObjectStore#write` for a
+caller that already knows which one, and a permanently-declared (not
+pack-discovered) scratch root so a notebook does not need `OSD_PACKS` set
+before `osd` starts -- neither attempted here.
 
 ## Trying it
 
@@ -278,11 +362,18 @@ install.
   sources through `tools/segw-entityset-map.mjs` end to end; Q6a's
   `freestyleRows` / `freestyleTableHtml` / `htmlEscape` /
   `notebookFromJson` / `notebookToJson`, including a cell value carrying
-  `<` and `&`.
+  `<` and `&`; Q6b's `implementsClassrun` against the tracked demo fixture
+  and against a comment merely naming the interface, and `RUN_TABLE.CLAS`'s
+  classrun branch (tests still win over it, a DPC_EXT still wins over both).
 - `test/adt-devloop.mjs`: `core/http/segw/entitysets` against the real demo
   service, beside the other `core/http/*` routes; Q6a's `datapreview/
   freestyle` round trip (a SELECT over the demo data, through the same CSRF
-  session the rest of that suite uses).
+  session the rest of that suite uses); Q6b's `oo/classrun` against the
+  tracked demo class (a scalar and a table, formatted), a class that does
+  not implement the interface (400), an unknown class (404), discovery, and
+  the tracked dumper fixture's rollback-and-record path read back through
+  `ZOSD_DUMP` -- all against fixtures already transpiled before this
+  suite's `before()` boots, on purpose (see Q6b above).
 - `test/osd-child.mjs`: the extension's own client (`Osd`) against a real
   `npm start`, through the parent -- the doors, discovery, one method run
   with the CSRF round trip.
