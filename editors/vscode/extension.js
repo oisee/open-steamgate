@@ -14,7 +14,7 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   freestyleTableHtml, notebookFromJson, notebookToJson,
   hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun} = require("./lib.js");
-const {Launcher} = require("./launcher.js");
+const {Launcher, ensureMaterializedHome} = require("./launcher.js");
 
 // Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
 // *.osdnb file opens as (package.json `contributes.notebooks`) and the
@@ -44,6 +44,37 @@ function osdHomeOf() {
   const configured = vscode.workspace.getConfiguration("osd").get("home", "").trim();
   if (configured !== "") {
     return configured;
+  }
+  const folders = vscode.workspace.workspaceFolders;
+  return folders?.length === 1 ? folders[0].uri.fsPath : undefined;
+}
+
+/** Whether this install carries a bundled seed to run (a packaged .vsix,
+ *  `scripts/build-vsix.mjs`'s own `extension/osd/`) -- checked by a file
+ *  `test/run.mjs` itself needs, not by the directory merely existing,
+ *  which a dev install (the symlink from `editors/vscode/` onto this
+ *  checkout, `docs/vscode-extension.md`'s "remote/WSL note") never has. */
+function bundledSeedDir(context) {
+  const dir = path.join(context.extensionUri.fsPath, "osd");
+  return fs.existsSync(path.join(dir, "test", "run.mjs")) ? dir : undefined;
+}
+
+/** `osd.home` when set (the dev path, wins over everything); else, for a
+ *  packaged install, the bundled seed materialized once into this
+ *  extension's own storage (`ensureMaterializedHome`, launcher.js); else
+ *  the workspace folder when the window has exactly one (a dev install with
+ *  no bundled seed -- `osdHomeOf`'s own original fallback, unchanged for
+ *  that case). Async only because the materialize step is: on every OTHER
+ *  call it is a marker-file check and returns immediately. */
+async function resolveOsdHome(context) {
+  const configured = vscode.workspace.getConfiguration("osd").get("home", "").trim();
+  if (configured !== "") {
+    return configured;
+  }
+  const seedDir = bundledSeedDir(context);
+  if (seedDir !== undefined) {
+    const version = context.extension.packageJSON.version;
+    return ensureMaterializedHome(seedDir, context.globalStorageUri.fsPath, version);
   }
   const folders = vscode.workspace.workspaceFolders;
   return folders?.length === 1 ? folders[0].uri.fsPath : undefined;
@@ -87,8 +118,8 @@ class SystemController {
    *  one Launcher this controller drives. Throws when there is no osdHome
    *  to build -- callers show that as an error rather than starting nothing
    *  silently. */
-  ensureLauncher() {
-    const osdHome = osdHomeOf();
+  async ensureLauncher() {
+    const osdHome = await resolveOsdHome(this.context);
     if (osdHome === undefined) {
       throw new Error("osd.home is not set, and this window has no single workspace folder to default to");
     }
@@ -127,7 +158,7 @@ class SystemController {
   async start() {
     let launcher;
     try {
-      launcher = this.ensureLauncher();
+      launcher = await this.ensureLauncher();
     } catch (e) {
       vscode.window.showErrorMessage(`osd: ${String(e.message ?? e)}`);
       return;

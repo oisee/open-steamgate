@@ -10,7 +10,7 @@ import {expect} from "chai";
 import {createRequire} from "node:module";
 import {createServer} from "node:net";
 import {spawn} from "node:child_process";
-import {mkdtempSync, mkdirSync, readdirSync, readlinkSync, rmSync, writeFileSync, existsSync} from "node:fs";
+import {mkdtempSync, mkdirSync, readdirSync, readlinkSync, rmSync, writeFileSync, existsSync, lstatSync, symlinkSync, readFileSync, statSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {once} from "node:events";
@@ -19,6 +19,7 @@ const {
   PORT_RANGE, isFree, pickPort,
   looksLikeAbapGitFolder, detectWorkspaceLayers, packNameOf, ensureWorkspacePacks,
   waitForServing, servingOnce, terminate, Launcher,
+  linkOrCopyTree, materializedHomeDir, ensureMaterializedHome, MATERIALIZED_MARKER,
 } = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 
 // No chai-as-promised in this tree's node_modules, so a rejection is caught
@@ -289,5 +290,77 @@ describe("editors/vscode/launcher.js: Launcher end to end (against this checkout
       rmSync(storageDir, {recursive: true, force: true});
       rmSync(badHome, {recursive: true, force: true});
     }
+  });
+});
+
+// Packaging (docs/vscode-extension.md, "Packaging"): materializing a
+// packaged extension's bundled seed (`extension/osd/`) into the extension's
+// own writable storage, once per version. A small fake seed here, never the
+// real 100+ MB one -- what is under test is the copy mechanism and the
+// once/per-version/cleans-up-old-versions rules, not the seed's own size.
+describe("editors/vscode/launcher.js: linkOrCopyTree / ensureMaterializedHome (packaging)", function () {
+  let seedDir, storageDir;
+
+  beforeEach(() => {
+    seedDir = mkdtempSync(join(tmpdir(), "osd-seed-"));
+    mkdirSync(join(seedDir, "test"), {recursive: true});
+    writeFileSync(join(seedDir, "test", "run.mjs"), "// fake\n");
+    writeFileSync(join(seedDir, "top.txt"), "hello");
+    mkdirSync(join(seedDir, "node_modules", "x"), {recursive: true});
+    writeFileSync(join(seedDir, "node_modules", "x", "index.js"), "module.exports = 1;\n");
+    symlinkSync(join(seedDir, "node_modules"), join(seedDir, "output"), "dir");
+    storageDir = mkdtempSync(join(tmpdir(), "osd-storage-"));
+  });
+
+  afterEach(() => {
+    rmSync(seedDir, {recursive: true, force: true});
+    rmSync(storageDir, {recursive: true, force: true});
+  });
+
+  it("linkOrCopyTree hard-links regular files, keeps symlinks as symlinks, and recurses into directories", () => {
+    const dest = join(storageDir, "copy");
+    linkOrCopyTree(seedDir, dest);
+    expect(readFileSync(join(dest, "top.txt"), "utf8")).to.equal("hello");
+    expect(readFileSync(join(dest, "node_modules", "x", "index.js"), "utf8")).to.include("module.exports");
+    expect(lstatSync(join(dest, "output")).isSymbolicLink()).to.equal(true);
+    expect(readlinkSync(join(dest, "output"))).to.equal(join(seedDir, "node_modules"));
+    // a hard link shares the inode with its source (same filesystem, which
+    // storageDir and seedDir both are here, both under the same tmpdir)
+    const a = statSync(join(seedDir, "top.txt"));
+    const b = statSync(join(dest, "top.txt"));
+    expect(a.ino).to.equal(b.ino);
+  });
+
+  it("materializedHomeDir is one directory per version, under globalStorageDir", () => {
+    expect(materializedHomeDir(storageDir, "0.1.0")).to.equal(join(storageDir, "osd-home-0.1.0"));
+    expect(materializedHomeDir(storageDir, "0.2.0")).to.equal(join(storageDir, "osd-home-0.2.0"));
+  });
+
+  it("ensureMaterializedHome copies the seed once, and a second call is a no-op (marker file)", () => {
+    const target = ensureMaterializedHome(seedDir, storageDir, "0.1.0");
+    expect(target).to.equal(join(storageDir, "osd-home-0.1.0"));
+    expect(existsSync(join(target, "top.txt"))).to.equal(true);
+    expect(existsSync(join(target, MATERIALIZED_MARKER))).to.equal(true);
+
+    // add to the seed after the first materialize: a second call must NOT
+    // pick it up, because the marker says "already done for this version"
+    // (a hard link shares content with a file mutated in place, so a NEW
+    // file is what proves "no second copy happened" -- an edited existing
+    // one would prove nothing either way)
+    writeFileSync(join(seedDir, "added-later.txt"), "should not appear");
+    const again = ensureMaterializedHome(seedDir, storageDir, "0.1.0");
+    expect(again).to.equal(target);
+    expect(existsSync(join(target, "added-later.txt"))).to.equal(false);
+  });
+
+  it("a version change makes a new copy and removes the old one", () => {
+    const v1 = ensureMaterializedHome(seedDir, storageDir, "0.1.0");
+    expect(existsSync(v1)).to.equal(true);
+
+    writeFileSync(join(seedDir, "top.txt"), "v2 content");
+    const v2 = ensureMaterializedHome(seedDir, storageDir, "0.2.0");
+    expect(v2).to.equal(join(storageDir, "osd-home-0.2.0"));
+    expect(readFileSync(join(v2, "top.txt"), "utf8")).to.equal("v2 content");
+    expect(existsSync(v1)).to.equal(false, "the old version's copy must be gone");
   });
 });

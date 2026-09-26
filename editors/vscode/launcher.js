@@ -278,6 +278,77 @@ function terminate(child, {signal = "SIGTERM", graceMs = 15000} = {}) {
   });
 }
 
+// ---- materializing a bundled seed (packaging, docs/vscode-extension.md
+// "Packaging"): a packaged .vsix carries a runnable system tree at
+// `extension/osd/` (scripts/build-vsix.mjs). The install folder is
+// read-only in spirit -- an update wipes it -- so this copies it once into
+// the extension's own writable storage and everything the system writes
+// (the database, gen/, a rebuilt output/) lands there, never in the
+// extension folder and never in a workspace folder. ---------------------
+
+/** Recursively hard-links `src` into `dest`, falling back to a plain copy
+ *  when the two are not on the same filesystem (EXDEV) -- a hard link costs
+ *  nothing for a tree this size and is safe here because nothing under the
+ *  materialized copy is ever edited in place; a rebuild always writes a
+ *  NEW file (`build/by-input/<hash>/...`, a fresh `gen/`) rather than
+ *  mutating one the seed still shares an inode with. A symlink in the seed
+ *  is kept as a symlink, not followed -- `extension/osd/output` (this
+ *  seed's own `build/live/output` chain) is exactly that. */
+function linkOrCopyTree(src, dest) {
+  const st = fs.lstatSync(src);
+  if (st.isSymbolicLink()) {
+    fs.symlinkSync(fs.readlinkSync(src), dest);
+    return;
+  }
+  if (st.isDirectory()) {
+    fs.mkdirSync(dest, {recursive: true});
+    for (const name of fs.readdirSync(src)) {
+      linkOrCopyTree(path.join(src, name), path.join(dest, name));
+    }
+    return;
+  }
+  try {
+    fs.linkSync(src, dest);
+  } catch (error) {
+    if (error?.code === "EEXIST") return;
+    fs.copyFileSync(src, dest);
+  }
+}
+
+const MATERIALIZED_MARKER = ".osd-materialized";
+
+/** Where a packaged seed for `version` lands under the extension's own
+ *  `globalStorageDir` -- one directory per version, so an update (which
+ *  wipes the install folder, `extension/osd/` included) gets a fresh copy
+ *  rather than silently keeps serving the old one. */
+function materializedHomeDir(globalStorageDir, version) {
+  return path.join(globalStorageDir, `osd-home-${version}`);
+}
+
+/** Materializes `seedDir` (a packaged extension's own `extension/osd/`)
+ *  into `<globalStorageDir>/osd-home-<version>/`, once: a marker file says
+ *  a copy already happened, so a second start of the same version does
+ *  nothing here. Every OTHER `osd-home-*` directory is removed first, so a
+ *  previous version's copy does not sit there forever. Returns the
+ *  materialized directory, which is what a caller uses as `osdHome` from
+ *  here on -- `osdHome` itself is never written to again. */
+function ensureMaterializedHome(seedDir, globalStorageDir, version) {
+  const target = materializedHomeDir(globalStorageDir, version);
+  if (isFile(path.join(target, MATERIALIZED_MARKER))) {
+    return target;
+  }
+  fs.mkdirSync(globalStorageDir, {recursive: true});
+  for (const name of fs.readdirSync(globalStorageDir)) {
+    if (name.startsWith("osd-home-") && name !== `osd-home-${version}`) {
+      fs.rmSync(path.join(globalStorageDir, name), {recursive: true, force: true});
+    }
+  }
+  fs.rmSync(target, {recursive: true, force: true});
+  linkOrCopyTree(seedDir, target);
+  fs.writeFileSync(path.join(target, MATERIALIZED_MARKER), new Date().toISOString());
+  return target;
+}
+
 // ---- the launcher itself --------------------------------------------------
 
 /** One instance of the system, started and stopped by this object rather
@@ -441,4 +512,8 @@ module.exports = {
   servingOnce,
   terminate,
   Launcher,
+  linkOrCopyTree,
+  materializedHomeDir,
+  ensureMaterializedHome,
+  MATERIALIZED_MARKER,
 };
