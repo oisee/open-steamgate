@@ -25,7 +25,7 @@
 // basename and nothing above it.
 import {createConnection} from "node:net";
 import {release as kernelRelease} from "node:os";
-import {basename, join, resolve} from "node:path";
+import {basename, join, relative, resolve} from "node:path";
 import {readFileSync, readdirSync} from "node:fs";
 import {createRequire} from "node:module";
 import {DEFAULT_DATABASE} from "./sqlite-file-client.mjs";
@@ -166,6 +166,7 @@ export function appsOf(root, env = process.env) {
       handler: String(app.id ?? ""),
       text: String(app.title ?? app.id ?? folder.name),
       pack: folder.pack,
+      dir: folder.dir,
     });
   }
   return out;
@@ -173,12 +174,24 @@ export function appsOf(root, env = process.env) {
 
 /** the OData, ICF, push and UI5 services this tree serves, each with its pack */
 export function servicesOf(root, env = process.env) {
+  return serviceTree(root, env).map(({path, kind, handler, text, pack}) => ({path, kind, handler, text, pack}));
+}
+
+/**
+ * The same list with what an editor needs to go from a row to its source:
+ * the file that declares it (the IWSV, the SICF or SAPC object, the app's
+ * manifest folder), relative to the root, and for an OData service its MPC
+ * and external name. One inventory: servicesOf is this list with the five
+ * columns the status tables keep.
+ */
+export function serviceTree(root, env = process.env) {
   const out = [];
   const packs = packsOf(root, env);
   const packOf = (file) => {
     const at = resolve(root, file);
     return packs.find((p) => p.abap.some((f) => at.startsWith(resolve(f) + "/")))?.name ?? "";
   };
+  const rel = (file) => (file === undefined ? undefined : relative(root, resolve(root, file)));
   const folders = [...contentFoldersOf(root, env), "gen"].map((f) => join(root, f));
   for (const one of segwRegistrations(folders)) {
     out.push({
@@ -187,18 +200,23 @@ export function servicesOf(root, env = process.env) {
       handler: one.dpc ?? "",
       text: one.description ?? "",
       pack: packOf(one.file),
+      name: one.external,
+      mpc: one.mpc ?? "",
+      source: rel(one.file),
     });
   }
   for (const one of icfServices(root)) {
     if (one.handler === undefined) {
       continue;
     }
-    out.push({path: one.path, kind: "ICF", handler: one.handler, text: one.description ?? "", pack: packOf(one.source)});
+    out.push({path: one.path, kind: "ICF", handler: one.handler, text: one.description ?? "", pack: packOf(one.source),
+      name: one.name ?? one.path, source: rel(one.source)});
   }
   for (const one of pushChannels(root)) {
-    out.push({path: one.path, kind: "APC", handler: one.handler, text: one.description ?? "", pack: packOf(one.source)});
+    out.push({path: one.path, kind: "APC", handler: one.handler, text: one.description ?? "", pack: packOf(one.source),
+      name: one.name ?? one.path, source: rel(one.source)});
   }
-  out.push(...appsOf(root, env));
+  out.push(...appsOf(root, env).map(({dir, ...one}) => ({...one, name: one.handler, source: rel(dir)})));
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 
