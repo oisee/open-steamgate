@@ -83,6 +83,7 @@ import {
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 import {minimatch} from "minimatch";
+import {unfetched, describeUnfetched} from "../tools/osd-fetch.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const EXT_DIR = join(ROOT, "editors", "vscode");
@@ -346,6 +347,14 @@ export async function buildVsix() {
   const extensionDir = join(STAGE, "extension");
   copyExtensionFiles(extensionDir);
   const seedRoot = join(extensionDir, "osd");
+  // **An unfetched pack refuses the package, not the user's first start.**
+  // The seed copies packs/ as the checkout has them; a pack whose sources
+  // were never fetched (a new pack after a pull, 2026-09-26) shipped without
+  // them, and every install's first build then refused with UNFETCHED.
+  const missing = unfetched(ROOT);
+  if (missing.length > 0) {
+    throw new Error(`build-vsix: ${describeUnfetched(missing)}`);
+  }
   const modules = copySeedTree(seedRoot);
 
   writeFileSync(join(STAGE, "[Content_Types].xml"), contentTypesXml());
