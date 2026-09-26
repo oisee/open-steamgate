@@ -563,26 +563,23 @@ single object; `npm run probe` / `tools/osd-inputs.mjs` exist for a closure
 audit by hand and were not wired into the tree view.
 
 **The UI**: an Activity Bar container "OSD" (`views` id `osdTree`) with a
-tree of three roots — the state (`Stopped` / `Building…` / `Starting…` /
-`Running on :port, generation …`), **Layers** (the base `osdHome` plus
-every detected workspace folder), and **Services**, read off
-`ZOSD_STATUS_SRV`'s own `ServiceSet` (`GET
-/sap/opu/odata/sap/ZOSD_STATUS_SRV/ServiceSet?$format=json`) — the
-smallest existing mechanism named in the task, no new server route: that
-service already refreshes itself on every read
-(`test/start.mjs`'s `withFreshStatus` on `ZOSD_STATUS_SRV*`) and already
-lists every OData/ICF/APC/UI5 service the tree serves
-(`tools/osd-status.mjs` `servicesOf`). "osd: Open launchpad" opens
-`http://localhost:<port>/app/flp.html` with `vscode.env.openExternal`; a
-second, new status bar item (▶ / ■, left of the existing generation
-display, which assumes something is already serving) starts or stops the
-one `Launcher` this window drives, and the editor-title button on `.abap`
-files is `osd.run` (F8's own command) via `contributes.menus["editor/title"]`
-rather than new code. Once started, `osd.url` is written to the launched
-address (Workspace target when the window has a folder, Global otherwise)
-— every existing feature reads that setting fresh on every call
-(`osd()` in `extension.js`), so nothing else had to change for the rest of
-the extension to follow a self-started instance automatically.
+tree of four roots — the state (`Stopped` / `Building…` / `Starting…` /
+`Running on :port, generation …`), "▶ Open Fiori Launchpad", **Layers**
+(the base `osdHome` plus every detected workspace folder), and
+**Services**, grouped by kind ("Services tree", below). "osd: Open
+launchpad" opens `http://localhost:<port>/app/flp.html` with
+`vscode.env.openExternal` (the Launchpad node's own click; its
+context menu offers "Open launchpad inside VS Code" instead, the same
+webview pattern "Services tree" uses); a second, new status bar item
+(▶ / ■, left of the existing generation display, which assumes something
+is already serving) starts or stops the one `Launcher` this window
+drives, and the editor-title button on `.abap` files is `osd.run` (F8's
+own command) via `contributes.menus["editor/title"]` rather than new
+code. Once started, `osd.url` is written to the launched address
+(Workspace target when the window has a folder, Global otherwise) —
+every existing feature reads that setting fresh on every call (`osd()` in
+`extension.js`), so nothing else had to change for the rest of the
+extension to follow a self-started instance automatically.
 
 **Q6b's notebook gap does not fall out for free.** The storage layer this
 spike adds *is* a permanent, pre-existing pack directory once a workspace
@@ -597,6 +594,75 @@ cell meant. Next step, not attempted here: an optional `root` on
 launcher always creates (even with zero detected workspace layers) so a
 notebook has somewhere to write into without `OSD_PACKS` needing to be
 set to something new after the process is already up.
+
+## Services tree
+
+*2026-09-26.* Before this, "Services" was one flat list of every APP/APC/
+ICF/ODATA row `ZOSD_STATUS_SRV`'s own `ServiceSet` answered, nothing
+wired to a click (docs/ideas.md T8). Now it groups by kind, each group
+collapsed with a count — "OData (n)", "Apps (n)", "ICF (n)", "APC (n)",
+and any other kind the server returns gets a generic group (title-cased)
+rather than needing a code change first — rows inside a group sorted by
+path, labelled by the server's own text with the path dimmed
+(`TreeItem.description`). A row's own click opens it the way its kind
+allows: the app's page or the ICF node's URL, or the OData service
+document; APC never (a WebSocket URL does nothing opened as a page, only
+"Copy ws:// URL" on its context menu). The shared setting `osd.openIn`
+(`"browser"`, default, or `"vscode"`) decides *how* a click opens it —
+`vscode.env.openExternal` or a webview tab that iframes the running
+osd's own URL behind a `Content-Security-Policy` naming only that
+origin, the same pattern `openDataPreview` (Q7) and the gui-reports
+spike's `openWebguiTransaction` already use, reused here as
+`openInWebview`/`iframePanelHtml`. Every row's context menu offers "Copy
+URL" (APP/ICF/OData); OData also offers "Open $metadata"; APC offers
+"Copy ws:// URL" instead of either.
+
+`editors/vscode/lib.js` carries the pure half, tested without VS Code or
+a server in `test/vscode-extension.mjs`: `serviceGroupLabel`,
+`normalizeServiceSetRow`/`normalizeServiceRow` (the two row shapes below,
+into one), `groupServices`, `serviceLabel`, `serviceContextValue`,
+`serviceHttpUrl`/`serviceMetadataUrl`/`serviceWsUrl`, and
+`serviceClassNodes` (the next paragraph). `extension.js`'s
+`OsdTreeProvider` is the thin wrapping — `ServiceGroupItem`/
+`ServiceRowItem`/`ServiceClassItem`/`EntitySetItem`, `openServiceRow`/
+`copyServiceUrl`/`copyServiceWsUrl`/`openServiceMetadata`/
+`openServiceClass`/`openEntitySetMethod`.
+
+**Forward-compatible expansion.** osg-i7 is building a composing route,
+one `GET` under `/sap/bc/adt/core/http/…`, that lists everything a system
+serves as one tree — `{kind, name, path, text, pack, handler,
+handlerUri, mpc, mpcUri, app, source}` per row, already kind-typed (an
+APP row's own class-shaped field is `app`, a manifest id, never
+`handler`) — replacing five separate reads of `ZOSD_STATUS_SRV` with one
+shape an editor is built to read. It does not exist on `main` yet (open
+PR, `feat/services-tree`, `GET core/http/services`) — `grep -n
+"core/http" tools/adt-facade.mjs` on `main` shows every other `core/http/*`
+route this extension already uses (`unit/object`, `segw/entitysets`,
+`xref/readers`, ...) but not this one. So `lib.js`'s `Osd#services()`
+tries it first and falls back to `ServiceSet` on a 404, silently: this
+client is written to the row shape the route will answer, whether or not
+the server it happens to be talking to has it yet, with nothing to set
+either way. When it lands, three things follow with no further server
+work: a service row's `handlerUri`/`mpcUri` (the ADT class uri) lets a
+class node open by uri directly instead of a workspace glob on the name
+(`readerFilePattern`, the same lookup Q3's "read by" quick pick already
+falls back to); `source` names the declaring file (the `.iwsv.xml`, the
+`.sicf.xml`/`.apc.xml`, or the app's manifest folder) for a context
+action this extension does not offer yet ("Reveal source"); and a
+DAEMON/JOB/TRAN kind, once the route starts naming one, appears as its
+own group with no code change (`groupServices`'s own alphabetical
+fallback) and, if it carries a `handler`, a class node under it
+(`serviceClassNodes`'s own fallback for "everything but APP and OData").
+
+An OData row expands to its DPC then its MPC (`serviceClassNodes`,
+clicking either opens its source), plus, lazily, the entity sets Q2b's
+own map already answers for (`GET core/http/segw/entitysets?class=
+<DPC_EXT>`, fetched only once the row is actually expanded): each set's
+own click opens the DPC at the `<set>_get_entityset` / `<set>_get_entity`
+method's own line, reusing Q2b's `entitySetLenses` rather than a second
+way of finding it. An ICF or an APC row expands to its one handler class
+the same way. APP rows do not expand at all — an app has a manifest, not
+an ADT class.
 
 **Tests**: `test/vscode-launcher.mjs` (registered in `test/suites.json`) —
 pure: `pickPort`/`isFree` over the 3531-3539 range and its exhaustion,

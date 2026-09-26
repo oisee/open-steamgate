@@ -15,7 +15,8 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   freestyleTableHtml, notebookFromJson, notebookToJson,
   hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText,
-  transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, progRunLens} = require("./lib.js");
+  transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, progRunLens,
+  groupServices, serviceLabel, serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes} = require("./lib.js");
 const {Launcher, ensureMaterializedHome} = require("./launcher.js");
 
 // Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
@@ -210,37 +211,52 @@ class SystemController {
       vscode.window.showInformationMessage("osd: not running -- osd.start first");
       return;
     }
-    await vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${this.launcher.port}/app/flp.html`));
+    await openExternalOrOwn(`http://localhost:${this.launcher.port}/app/flp.html`);
+  }
+
+  /** The context-menu twin of openLaunchpad() above (docs/vscode-extension.md,
+   *  "Services tree"): always the webview iframe, regardless of `osd.openIn`
+   *  -- that setting is the *default* for a service row's own click, and the
+   *  Launchpad node's own click stays openLaunchpad() (the system browser)
+   *  unconditionally, so a person who wants it inside VS Code this once asks
+   *  for it by name rather than by a setting they would have to remember to
+   *  flip back. */
+  async openLaunchpadInVsCode() {
+    if (this.launcher?.state !== "running") {
+      vscode.window.showInformationMessage("osd: not running -- osd.start first");
+      return;
+    }
+    await openInWebview(`http://localhost:${this.launcher.port}/app/flp.html`, "osdLaunchpad", "Fiori Launchpad");
   }
 }
 
 /** The Activity Bar tree: state, the layers (base osdHome plus every
- *  detected workspace layer), and the Services this instance registers
- *  (ZOSD_STATUS_SRV's own ServiceSet -- the "smallest existing mechanism"
- *  the task named, no new server route). */
+ *  detected workspace layer), and the Services this instance registers,
+ *  grouped by kind (docs/vscode-extension.md, "Services tree") -- lib.js's
+ *  Osd#services() answers whichever of the two sources exists (the
+ *  composing route, docs/ideas.md T8, or ZOSD_STATUS_SRV's own ServiceSet),
+ *  already normalized; groupServices()/serviceLabel()/serviceClassNodes()
+ *  do the rest without needing to know which one it was. */
 class OsdTreeProvider {
   constructor(controller) {
     this.controller = controller;
     this.emitter = new vscode.EventEmitter();
     this.onDidChangeTreeData = this.emitter.event;
-    this.services = [];
+    this.groups = [];
     controller.onDidChange(() => {
       this.refreshServices().then(() => this.emitter.fire(), () => this.emitter.fire());
     });
   }
 
   async refreshServices() {
-    const launcher = this.controller.launcher;
-    if (launcher?.state !== "running") {
-      this.services = [];
+    if (this.controller.launcher?.state !== "running") {
+      this.groups = [];
       return;
     }
     try {
-      const res = await fetch(`http://localhost:${launcher.port}/sap/opu/odata/sap/ZOSD_STATUS_SRV/ServiceSet?$format=json`);
-      const body = await res.json();
-      this.services = (body?.d?.results ?? []).map((r) => ({path: r.Path, kind: r.Kind, text: r.Text}));
+      this.groups = groupServices(await osd().services());
     } catch {
-      this.services = [];
+      this.groups = [];
     }
   }
 
@@ -256,7 +272,13 @@ class OsdTreeProvider {
       return this.layerItems();
     }
     if (element.contextValue === "osd-services") {
-      return this.serviceItems();
+      return this.serviceGroupItems();
+    }
+    if (element instanceof ServiceGroupItem) {
+      return this.serviceRowItems(element.group);
+    }
+    if (element instanceof ServiceRowItem) {
+      return this.serviceClassItems(element.row);
     }
     return [];
   }
@@ -273,6 +295,11 @@ class OsdTreeProvider {
       state === "running" ? "pass-filled" : state === "stopped" ? "circle-large-outline" : "sync~spin");
     stateItem.contextValue = "osd-state";
 
+    const launchpad = new vscode.TreeItem("▶ Open Fiori Launchpad");
+    launchpad.contextValue = "osd-launchpad";
+    launchpad.iconPath = new vscode.ThemeIcon("link-external");
+    launchpad.command = {command: "osd.openLaunchpad", title: "Open Fiori Launchpad"};
+
     const layers = new vscode.TreeItem("Layers", vscode.TreeItemCollapsibleState.Expanded);
     layers.contextValue = "osd-layers";
     layers.iconPath = new vscode.ThemeIcon("layers");
@@ -281,7 +308,7 @@ class OsdTreeProvider {
     services.contextValue = "osd-services";
     services.iconPath = new vscode.ThemeIcon("plug");
 
-    return [stateItem, layers, services];
+    return [stateItem, launchpad, layers, services];
   }
 
   layerItems() {
@@ -298,18 +325,252 @@ class OsdTreeProvider {
     return items;
   }
 
-  serviceItems() {
+  serviceGroupItems() {
     if (this.controller.launcher?.state !== "running") {
       return [new vscode.TreeItem("(start the system to see its services)")];
     }
-    if (this.services.length === 0) {
-      return [new vscode.TreeItem("(none, or ZOSD_STATUS_SRV not reachable yet -- osd.refreshTree)")];
+    if (this.groups.length === 0) {
+      return [new vscode.TreeItem("(none, or nothing answered yet -- osd.refreshTree)")];
     }
-    return this.services.map((s) => {
-      const item = new vscode.TreeItem(`${s.kind}  ${s.path}`);
-      item.description = s.text;
-      return item;
-    });
+    return this.groups.map((group) => new ServiceGroupItem(group));
+  }
+
+  serviceRowItems(group) {
+    return group.rows.map((row) => new ServiceRowItem(row));
+  }
+
+  async serviceClassItems(row) {
+    const items = serviceClassNodes(row).map((node) => new ServiceClassItem(node));
+    if (row.kind !== "ODATA" || !row.handler) return items;
+    // Q2b's own map (tools/adt-facade.mjs core/http/segw/entitysets), lazily
+    // -- fetched only once this row is actually expanded, never eagerly for
+    // every OData row the group happens to list.
+    let map;
+    try {
+      map = await osd().entitySets(row.handler);
+    } catch {
+      return items;
+    }
+    if (map === undefined || !Array.isArray(map.sets) || map.sets.length === 0) return items;
+    let source;
+    try {
+      const files = await vscode.workspace.findFiles(readerFilePattern({type: "CLAS", name: row.handler}), EXCLUDE, 1);
+      if (files.length > 0) source = fs.readFileSync(files[0].fsPath, "utf8");
+    } catch {
+      source = undefined;
+    }
+    const lenses = source === undefined ? [] : entitySetLenses(source, map);
+    for (const set of map.sets) {
+      const lens = lenses.find((l) => l.set === set.set && l.kind === set.kind);
+      items.push(new EntitySetItem(row.handler, set, lens?.line));
+    }
+    return items;
+  }
+}
+
+/** One kind's own node ("OData (n)", "Apps (n)", ...), collapsed, its rows
+ *  fetched from `group.rows` -- no server round trip of its own, since
+ *  refreshServices() above already asked once for the whole tree. */
+class ServiceGroupItem extends vscode.TreeItem {
+  constructor(group) {
+    super(`${group.label} (${group.rows.length})`, vscode.TreeItemCollapsibleState.Collapsed);
+    this.group = group;
+    this.contextValue = "osd-service-group";
+    this.iconPath = new vscode.ThemeIcon("folder");
+  }
+}
+
+/** One service row: label/description from lib.js serviceLabel(), a click
+ *  that opens it the way its kind allows (APP/ICF/ODATA -- APC never, a
+ *  WebSocket URL does nothing on its own), and a contextValue
+ *  (serviceContextValue()) package.json's view/item/context matches to
+ *  offer exactly the actions that kind supports. Expandable for every kind
+ *  serviceClassNodes() answers at least one node for. */
+class ServiceRowItem extends vscode.TreeItem {
+  constructor(row) {
+    const {label, description} = serviceLabel(row);
+    const expandable = row.kind === "ODATA" || serviceClassNodes(row).length > 0;
+    super(label, expandable ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
+    this.row = row;
+    this.description = description;
+    this.contextValue = serviceContextValue(row.kind);
+    this.iconPath = new vscode.ThemeIcon(
+      row.kind === "APP" ? "browser" : row.kind === "ODATA" ? "database" : row.kind === "APC" ? "broadcast" : "plug");
+    if (row.kind === "APC") {
+      // a WebSocket URL does nothing opened as a page -- no default click,
+      // "Copy ws:// URL" (view/item/context) is the one action this row has
+    } else {
+      this.command = {command: "osd.openServiceRow", title: "Open", arguments: [row]};
+    }
+  }
+}
+
+/** A DPC/MPC/handler class node under a service row, or an entity set under
+ *  an OData row's own DPC (EntitySetItem below) -- both leaves, both a
+ *  click away from the source they name. */
+class ServiceClassItem extends vscode.TreeItem {
+  constructor(node) {
+    super(node.name, vscode.TreeItemCollapsibleState.None);
+    this.node = node;
+    this.contextValue = "osd-service-class";
+    this.iconPath = new vscode.ThemeIcon("symbol-class");
+    this.description = node.role.toUpperCase();
+    this.command = {command: "osd.openServiceClass", title: "Open source", arguments: [node]};
+  }
+}
+
+/** One entity set under an OData row's DPC, from `map.sets` (Osd#entitySets)
+ *  -- `line` is the `<set>_get_entityset` / `<set>_get_entity` method's own
+ *  line in the DPC's source when a workspace copy of it was found (lib.js
+ *  entitySetLenses, the same lookup Q2b's CodeLens already does),
+ *  `undefined` when it was not (the class opens at its top instead, rather
+ *  than the node doing nothing at all). */
+class EntitySetItem extends vscode.TreeItem {
+  constructor(dpcName, set, line) {
+    super(set.set, vscode.TreeItemCollapsibleState.None);
+    this.dpcName = dpcName;
+    this.set = set;
+    this.line = line;
+    this.contextValue = "osd-service-entityset";
+    this.iconPath = new vscode.ThemeIcon("symbol-field");
+    this.description = set.kind;
+    this.command = {command: "osd.openEntitySetMethod", title: "Open method", arguments: [dpcName, set, line]};
+  }
+}
+
+/** `osd.openIn` (docs/vscode-extension.md, "Services tree"): the shared
+ *  default for what a service row's own click does -- the system browser
+ *  (`vscode.env.openExternal`, this extension's default everywhere else,
+ *  e.g. openLaunchpad() above) or a webview tab inside VS Code, the same
+ *  iframe-over-CSP pattern openDataPreview() (Q7) and, for a running
+ *  system's own pages, the gui-reports spike's openWebguiTransaction()
+ *  already use: the panel carries no copy of the page, it iframes the
+ *  running osd's own URL, so whatever that page does (a click inside the
+ *  Fiori launchpad, a $batch request) runs exactly as it does in a
+ *  browser tab. `vscode.env.asExternalUri` is asked first either way --
+ *  under Remote-WSL/Remote-SSH a bare `http://localhost:<port>` is a
+ *  coincidence when it works and a dead port otherwise, the same reasoning
+ *  openWebguiTransaction's own comment gives. */
+async function openExternalOrOwn(url) {
+  let external;
+  try {
+    external = await vscode.env.asExternalUri(vscode.Uri.parse(url));
+  } catch {
+    external = vscode.Uri.parse(url);
+  }
+  await vscode.env.openExternal(external);
+}
+
+async function openInWebview(url, panelType, title) {
+  let external;
+  try {
+    external = await vscode.env.asExternalUri(vscode.Uri.parse(url));
+  } catch {
+    external = vscode.Uri.parse(url);
+  }
+  const panel = vscode.window.createWebviewPanel(panelType, title, vscode.ViewColumn.Beside, {
+    enableScripts: true,
+    retainContextWhenHidden: true,
+  });
+  panel.webview.html = iframePanelHtml(external.toString(), title);
+}
+
+/** frame-src names the one origin this panel is allowed to embed; nothing
+ *  else in the page runs a script of its own, so a strict default-src
+ *  'none' beside it costs nothing (the gui-reports spike's own
+ *  webguiPanelHtml, reused verbatim in shape). */
+function iframePanelHtml(url, title) {
+  const origin = new URL(url).origin;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${xmlEscapeHtml(origin)}; style-src 'unsafe-inline';">
+<style>html,body{margin:0;height:100%;background:#1f4e79}iframe{border:0;width:100%;height:100%;display:block}</style>
+</head>
+<body><iframe src="${xmlEscapeHtml(url)}" title="${xmlEscapeHtml(title)}"></iframe></body>
+</html>`;
+}
+
+async function openServiceRow(row) {
+  if (row === undefined || row.kind === "APC") return;
+  const url = serviceHttpUrl(row, osd().url);
+  const openIn = vscode.workspace.getConfiguration("osd").get("openIn", "browser");
+  if (openIn === "vscode") {
+    await openInWebview(url, "osdService", serviceLabel(row).label);
+  } else {
+    await openExternalOrOwn(url);
+  }
+}
+
+async function copyServiceUrl(item) {
+  const row = item?.row;
+  if (row === undefined) return;
+  await vscode.env.clipboard.writeText(serviceHttpUrl(row, osd().url));
+  vscode.window.setStatusBarMessage(`osd: copied ${row.path}`, 3000);
+}
+
+async function copyServiceWsUrl(item) {
+  const row = item?.row;
+  if (row === undefined) return;
+  await vscode.env.clipboard.writeText(serviceWsUrl(row, osd().url));
+  vscode.window.setStatusBarMessage(`osd: copied ${row.path} (ws://)`, 3000);
+}
+
+async function openServiceMetadata(item) {
+  const row = item?.row;
+  if (row === undefined) return;
+  const url = serviceMetadataUrl(row, osd().url);
+  const openIn = vscode.workspace.getConfiguration("osd").get("openIn", "browser");
+  if (openIn === "vscode") {
+    await openInWebview(url, "osdServiceMetadata", `${serviceLabel(row).label} $metadata`);
+  } else {
+    await openExternalOrOwn(url);
+  }
+}
+
+/** A DPC/MPC/handler class node's own click: a workspace glob on the name
+ *  (readerFilePattern, the same lookup Q3's "read by" quick pick already
+ *  uses), open at the top -- the composing route's own `handlerUri` names
+ *  the class the same way Check/Activate do, but this extension opens by
+ *  file, not by ADT uri, so the file glob is what every source path here
+ *  goes through regardless of which of the two sources answered. */
+async function openServiceClass(node, output) {
+  if (node?.name === undefined) return;
+  const pattern = readerFilePattern({type: "CLAS", name: node.name});
+  try {
+    const files = await vscode.workspace.findFiles(pattern, EXCLUDE, 1);
+    if (files.length === 0) {
+      vscode.window.showWarningMessage(`osd: ${node.name}'s file was not found in this workspace`);
+      return;
+    }
+    await vscode.window.showTextDocument(files[0]);
+  } catch (e) {
+    output?.appendLine(`osd open service class ${node.name}: ${String(e.message ?? e)}`);
+    vscode.window.showErrorMessage(`osd: ${String(e.message ?? e)}`);
+  }
+}
+
+/** An entity set node's own click: the same DPC file openServiceClass()
+ *  above opens, at the method's own line when one was found while building
+ *  the node, else at the top. */
+async function openEntitySetMethod(dpcName, set, line, output) {
+  const pattern = readerFilePattern({type: "CLAS", name: dpcName});
+  try {
+    const files = await vscode.workspace.findFiles(pattern, EXCLUDE, 1);
+    if (files.length === 0) {
+      vscode.window.showWarningMessage(`osd: ${dpcName}'s file was not found in this workspace`);
+      return;
+    }
+    const editor = await vscode.window.showTextDocument(files[0]);
+    if (typeof line === "number") {
+      const at = new vscode.Position(line - 1, 0);
+      editor.selection = new vscode.Selection(at, at);
+      editor.revealRange(new vscode.Range(at, at));
+    }
+  } catch (e) {
+    output?.appendLine(`osd open entity set ${dpcName} ${set?.set}: ${String(e.message ?? e)}`);
+    vscode.window.showErrorMessage(`osd: ${String(e.message ?? e)}`);
   }
 }
 
@@ -416,10 +677,22 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("osd.stop", () => controller.stop()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.rebuild", () => controller.rebuild()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpad", () => controller.openLaunchpad()));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpadInVsCode", () => controller.openLaunchpadInVsCode()));
   const treeProvider = new OsdTreeProvider(controller);
   context.subscriptions.push(vscode.window.registerTreeDataProvider("osdTree", treeProvider));
   context.subscriptions.push(vscode.commands.registerCommand("osd.refreshTree",
     () => treeProvider.refreshServices().then(() => treeProvider.emitter.fire(), () => treeProvider.emitter.fire())));
+
+  // Services tree (docs/vscode-extension.md, "Services tree"): a row's own
+  // click (osd.openServiceRow, gated by osd.openIn) and its view/item/context
+  // actions (package.json), plus a class or entity-set node's own click.
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceRow", (row) => openServiceRow(row)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.copyServiceUrl", (item) => copyServiceUrl(item)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.copyServiceWsUrl", (item) => copyServiceWsUrl(item)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceMetadata", (item) => openServiceMetadata(item)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceClass", (node) => openServiceClass(node, output)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openEntitySetMethod",
+    (dpcName, set, line) => openEntitySetMethod(dpcName, set, line, output)));
   context.subscriptions.push(startStopStatusBar(context, controller));
 }
 
