@@ -116,11 +116,10 @@ plus a `/gen/gui` entry it had no reason to have before (the same reason
 ## The three examples
 
 `packs/gui-examples` fetches exactly three files out of
-`oisee/open-abap-gui`'s `examples/` at the pinned commit
-(`31cc8b3177569afb66c88a4ec9fd2e640a353877`, the same commit
-`abap_transpile.json`'s `open-abap-gui` lib pins -- moving one without the
-other is exactly the trap `docs/prior-art.md`'s "Pages three pins" note is
-about, so both should move together). All three convert in **strict**
+`oisee/open-abap-gui`'s `examples/` at the commit recorded for
+`open-abap-gui` in [`libs.lock.json`](../libs.lock.json). The pack manifest
+uses that lock entry directly, so the fetched examples and transpiled library
+cannot drift apart. All three convert in **strict**
 mode, zero diagnostics.
 
 | report | what it is | proves |

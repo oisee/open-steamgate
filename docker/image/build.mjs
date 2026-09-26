@@ -3,6 +3,8 @@ import {readFileSync, mkdirSync, existsSync, chmodSync} from "node:fs";
 import {resolve} from "node:path";
 
 const sources = JSON.parse(readFileSync("docker/image/sources.json", "utf8"));
+const lock = JSON.parse(readFileSync("libs.lock.json", "utf8"));
+const libraries = new Map(lock.libraries.map((source) => [source.folder, source]));
 const run = (command, args, cwd = process.cwd()) => execFileSync(command, args, {cwd, stdio: "inherit"});
 function checkout(source, folder) {
   if (existsSync(folder)) throw new Error(`Build requires a fresh source folder: ${folder}`);
@@ -14,7 +16,7 @@ function checkout(source, folder) {
   const actual = execFileSync("git", ["-C", folder, "rev-parse", "HEAD"], {encoding: "utf8"}).trim();
   if (actual !== source.ref) throw new Error(`Source revision mismatch: ${source.repo}`);
 }
-checkout(sources.transpiler, "../transpiler");
+checkout(lock.transpiler, "../transpiler");
 run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], resolve("../transpiler"));
 for (const name of ["runtime", "transpiler", "extras", "cli"]) {
   run("npm", ["install", "--no-audit", "--no-fund"], resolve(`../transpiler/packages/${name}`));
@@ -26,7 +28,11 @@ chmodSync("../transpiler/packages/cli/abap_transpile", 0o755);
 for (const [name, folder] of [["runtime", "runtime"], ["transpiler", "transpiler"], ["transpiler-cli", "cli"]]) {
   run("node", ["tools/osd-link.mjs", name, `packages/${folder}`]);
 }
-for (const source of sources.libraries) checkout(source, `.local/lars/${source.folder}`);
+for (const source of sources.libraries) {
+  const pin = libraries.get(source.folder);
+  if (pin === undefined) throw new Error(`No libs.lock.json entry for ${source.folder}`);
+  checkout(pin, `.local/lars/${source.folder}`);
+}
 // No downloaded entertainment packs or captured media in the base image.
 run("npm", ["run", "transpile"]);
 run("node", ["docker/image/assemble.mjs", "/image"]);

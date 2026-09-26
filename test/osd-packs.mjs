@@ -38,7 +38,7 @@ describe("tools/osd-packs: a pack is a directory", () => {
 
   it("refuses a source without a folder or a repository, naming the manifest", () => {
     write("packs/half/osd-pack.json", JSON.stringify({sources: [{repo: "https://example.invalid/x"}]}));
-    expect(() => packsOf(root, {})).to.throw(BadPack, "a source needs a folder and a repo");
+    expect(() => packsOf(root, {})).to.throw(BadPack, "a source needs a folder and either a repo or a libs.lock.json library name");
   });
 
   it("reads a directory with a manifest, and takes its name and its folders from what is there", () => {

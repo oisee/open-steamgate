@@ -414,8 +414,8 @@ all of them: a performance change that alters one frame is wrong.
 - **`@abaplint/core`, from the mountains scene (2026-09-17)**:
   `ANOMALY-2026-09-17-character-literal-calc-type` — already fixed
   upstream by #4293 in 2.120.52; the pin was behind. `local/osd-build`
-  now takes `^2.120.54` (c148d363), and the preview's
-  `OSD_TRANSPILER_REF` has to move with it. Nothing to send.
+  now takes `^2.120.54` (c148d363), and the transpiler entry in
+  `libs.lock.json` has to move with it. Nothing to send.
 - **`@abaplint/transpiler`, from the last seven plasma frames (2026-09-17)**:
   `ANOMALY-2026-09-17-integer-division-not-rounded` — in calculation type
   `i` a system rounds every `/` to an integer before the next operation

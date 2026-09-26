@@ -1,7 +1,7 @@
 name: OSD Docker draft
 on:
   pull_request:
-    paths: ['docker/**', 'src/**', 'tools/**', 'test/**', 'package*.json', 'abap_transpile.json', '.github/workflows/docker-image.yml']
+    paths: ['docker/**', 'src/**', 'tools/**', 'test/**', 'package*.json', 'abap_transpile.json', 'libs.lock.json', '.github/workflows/docker-image.yml']
   push:
     branches: [feat/docker-image]
     tags: ['osd-image-*']

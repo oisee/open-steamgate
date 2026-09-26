@@ -9,8 +9,8 @@ HTTP status, JSON Content-Type and semantic JSON. Object order is ignored,
 array order and JSON types are retained, findings use RFC 6901 pointers, and
 only explicit, resolving, non-overlapping masks are accepted.
 
-JSON parsing uses only AJSON `core` v1.1.13 at pinned commit
-`e5e0fd043f5813ef5a271fcba4b327aa944c3224`, behind OSG-owned public types.
+JSON parsing uses only AJSON `core` v1.1.13 at the commit recorded in
+[`libs.lock.json`](../libs.lock.json), behind OSG-owned public types.
 AJSON's utility diff is deliberately not used: the regression matcher owns
 ordered arrays, empty-container presence, masks and deterministic findings.
 

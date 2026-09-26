@@ -385,13 +385,14 @@ like `open-abap-core` and the pack/delta half of abapGit: it is the substrate a
 program compiles against, not content this system serves.
 
 - URL: our fork, `https://github.com/oisee/open-abap-gui`; folder
-  `.local/lars/open-abap-gui`. The build pins **`31cc8b3`** (fork branch
+  `.local/lars/open-abap-gui`. The build uses the commit recorded for
+  `open-abap-gui` in `libs.lock.json` (fork branch
   `html-viewer-sapevent-r1`): one commit, the `sapevent` raise, on top of
   upstream `main` at **`8a5f474`** ("move files", #170). Until 2026-09-25 it
   pinned `0324e1c`, the same work on top of `ed96e89` plus a `show_url` fix
-  that upstream has since made its own way (#166). `OSD_GUI_REF` in the
-  workflows, `docker/image/sources.json` and `docker/image/assemble.mjs` carry
-  the pin; "How close" below describes it.
+  that upstream has since made its own way (#166). The bootstrap, workflows,
+  GUI examples pack and Docker image read the commit from the same lock entry;
+  "How close" below describes the patch.
 - Declared in `abap_transpile.json` (libs) and `abaplint.jsonc` (dependencies).
 - **Only `/src` comes in.** The repository also carries `/framework` — a
   dynpro host of its own — `/examples` (the example programs, `/scaffold`

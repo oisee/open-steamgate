@@ -25,6 +25,7 @@
     "test/telegram-notify.mjs",
     "test/batch-inserts.mjs",
     "test/bsp-app.mjs",
+    "test/bootstrap.mjs",
     "test/cds-cast.mjs",
     "test/cds-check.mjs",
     "test/cds-projection.mjs",
