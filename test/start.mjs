@@ -358,18 +358,23 @@ export function startServer(quiet) {
     // the child's loopback port. Forwarded by what the registry says that
     // host serves, so a door added there needs no line here.
     // /osd/serving is the child's answer plus what only this process knows:
-    // the warm build (tools/osd-warm.mjs), which lives here with the store
-    app.get("/osd/serving", async (req, res, next) => {
+    // the warm build (tools/osd-warm.mjs), which lives here with the store;
+    // still the declared node, forwarded like the others, with one field more
+    const withWarm = (proxy) => async (req, res, next) => {
+      if (req.method !== "GET") {
+        proxy(req, res, next);
+        return;
+      }
       try {
-        const answer = await fetch(`${runtime.url}/osd/serving`, {signal: AbortSignal.timeout(5000)});
+        const answer = await fetch(`${runtime.url}${req.originalUrl}`, {signal: AbortSignal.timeout(5000)});
         const body = await answer.json();
         res.status(answer.status).json({...body, warm: facade.store.warmStatus()});
       } catch {
-        next();
+        proxy(req, res, next);
       }
-    });
+    };
     for (const node of declaredNodeList.filter((n) => n.type === "HOST" && n.implementedIn === "tools/osd-serve.mjs")) {
-      app.all(node.path, odataProxy(runtime));
+      app.all(node.path, node.path === "/osd/serving" ? withWarm(odataProxy(runtime)) : odataProxy(runtime));
     }
     // STG_DEV=1: the disk is the other editor. A save becomes a check, a
     // build and a recycle of this runtime (tools/osd-dev.mjs), and the
