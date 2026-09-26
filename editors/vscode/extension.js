@@ -12,11 +12,12 @@ const fs = require("node:fs");
 const crypto = require("node:crypto");
 const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
-  freestyleTableHtml, notebookFromJson, notebookToJson,
+  freestyleTableHtml, freestyleOutputItems, notebookFromJson, notebookToJson,
   hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText,
   transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, demoFailureObjects, progRunLens,
   groupServices, serviceLabel, serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
+  webguiPanelHtml, runWebguiPanel,
   warmStatusText, activationBuildText, closureTestsText,
   presetSettings, isOpenSteamgateCheckout: isOpenSteamgateManifest, osdHomeChoice, osdStateContext, systemOverviewModel} = require("./lib.js");
 const {Launcher, ensureMaterializedHome, materializedHomeDir, detectWorkspaceLayers, databaseEnv, defaultDedicatedName, describeDatabase,
@@ -27,6 +28,10 @@ const {systemOverviewHtml} = require("./system-overview.js");
 // *.osdnb file opens as (package.json `contributes.notebooks`) and the
 // kernel that runs its cells.
 const NOTEBOOK_TYPE = "osd-sql-notebook";
+
+// One report panel per transaction code. F8 and the CodeLens both reach the
+// same command, so a second run should refresh the existing view in place.
+const webguiPanels = new Map();
 
 const EXCLUDE = "{**/node_modules/**,**/.local/**,**/output/**,**/gen/**,**/build/**}";
 
@@ -1624,36 +1629,18 @@ async function run(output, classrunOutput) {
 // remote at all -- so this asks it rather than assuming osd's configured
 // URL already is the right one.
 async function openWebguiTransaction(tcode, output) {
-  const base = osd().url;
-  const target = vscode.Uri.parse(`${base}/sap/bc/gui/sap/its/webgui/?okcode=${encodeURIComponent(tcode)}`);
-  let external;
-  try {
-    external = await vscode.env.asExternalUri(target);
-  } catch (e) {
-    output.appendLine(`osd webgui ${tcode}: asExternalUri failed, using ${target.toString()} as typed (${String(e.message ?? e)})`);
-    external = target;
-  }
-  const panel = vscode.window.createWebviewPanel("osdWebgui", `Easy Access: ${tcode}`, vscode.ViewColumn.Beside, {
-    enableScripts: true,
-    retainContextWhenHidden: true,
+  const baseUri = vscode.Uri.parse(osd().url);
+  await runWebguiPanel(tcode, baseUri, webguiPanels, {
+    createPanel: (name) => vscode.window.createWebviewPanel("osdWebgui", `Easy Access: ${name}`, vscode.ViewColumn.Beside, {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+    }),
+    // Resolve only the listener; the resource path and transaction command
+    // are added to the transport address after VS Code has forwarded it.
+    resolveBase: (uri) => vscode.env.asExternalUri(uri),
+    panelHtml: webguiPanelHtml,
+    onResolveError: (e) => output.appendLine(`osd webgui ${tcode}: asExternalUri failed, using ${baseUri.toString()} as typed (${String(e.message ?? e)})`),
   });
-  panel.webview.html = webguiPanelHtml(external.toString(), tcode);
-}
-
-function webguiPanelHtml(url, tcode) {
-  // frame-src names the one origin this panel is allowed to embed; nothing
-  // else in the page runs a script of its own, so a strict default-src
-  // 'none' beside it costs nothing.
-  const origin = new URL(url).origin;
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${xmlEscapeHtml(origin)}; style-src 'unsafe-inline';">
-<style>html,body{margin:0;height:100%;background:#1f4e79}iframe{border:0;width:100%;height:100%;display:block}</style>
-</head>
-<body><iframe src="${xmlEscapeHtml(url)}" title="${xmlEscapeHtml(tcode)}"></iframe></body>
-</html>`;
 }
 
 // ---- Q6b "Classrun": F9, ADT's "Run as ABAP Application (Console)" --
@@ -2493,10 +2480,8 @@ async function runSqlCell(controller, cell, executionOrder, output) {
     const result = await osd().freestyle(cell.document.getText(), rowLimit);
     const html = freestyleTableHtml(result.columns, result.rows, {ms: result.ms, generation: result.generation});
     await execution.replaceOutput([
-      new vscode.NotebookCellOutput([
-        vscode.NotebookCellOutputItem.text(html, "text/html"),
-        vscode.NotebookCellOutputItem.json(result.rows),
-      ]),
+      new vscode.NotebookCellOutput(freestyleOutputItems(html).map(({mime, value}) =>
+        vscode.NotebookCellOutputItem.text(value, mime))),
     ]);
     execution.end(true, Date.now());
   } catch (e) {

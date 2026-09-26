@@ -15,12 +15,12 @@ import {tableDataDocument} from "../tools/adt-facade.mjs";
 const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseCheckReport, parseActivationResult, runActionFor,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
-  htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson,
+  htmlEscape, freestyleRows, freestyleTableHtml, freestyleOutputItems, notebookFromJson, notebookToJson,
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
-  demoFailureObjects, progTcodeOf, progRunLens,
+  demoFailureObjects, progTcodeOf, webguiTransactionUrl, webguiPanelHtml, runWebguiPanel, progRunLens,
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
   serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
   warmStatusText, activationBuildText, closureTestsText,
@@ -611,6 +611,15 @@ describe("editors/vscode: the extension's logic", function () {
     expect(html).to.contain("0 rows · 3 ms</div>");
   });
 
+  it("Q6a: HTML is the only renderer, with an escaped raw JSON disclosure inside it", () => {
+    const rows = [{NAME: "<script>alert(1)</script>"}];
+    const items = freestyleOutputItems(freestyleTableHtml(["NAME"], rows));
+    expect(items.map((item) => item.mime)).to.deep.equal(["text/html"]);
+    expect(items[0].value).to.contain("<details><summary>raw JSON</summary><pre>");
+    expect(items[0].value).to.contain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(items[0].value).to.not.contain("<script>");
+  });
+
   it("Q6a: a notebook's own JSON becomes cells, code defaulting to sql, markdown its own kind", () => {
     const cells = notebookFromJson(JSON.stringify({cells: [
       {kind: "markdown", value: "# Demo"},
@@ -779,6 +788,52 @@ describe("editors/vscode: the extension's logic", function () {
     }
     expect(progTcodeOf(undefined)).to.equal(undefined);
     expect(progTcodeOf("")).to.equal(undefined);
+  });
+
+  it("builds the transaction URL after the externally reachable base, retaining its route prefix", () => {
+    const url = new URL(webguiTransactionUrl("https://forwarded.example/proxy/?ticket=forwarded", "ZGUI_GG_EX_012"));
+    expect(url.pathname).to.equal("/proxy/sap/bc/gui/sap/its/webgui/");
+    expect(url.searchParams.get("okcode")).to.equal("ZGUI_GG_EX_012");
+    expect(url.searchParams.get("ticket")).to.equal("forwarded");
+  });
+
+  it("reloads a report with distinct HTML on each F8 while keeping its transaction URL", () => {
+    const url = webguiTransactionUrl("https://forwarded.example/proxy/", "ZGUI_GG_EX_012");
+    const first = webguiPanelHtml(url, "ZGUI_GG_EX_012", 1);
+    const second = webguiPanelHtml(url, "ZGUI_GG_EX_012", 2);
+    expect(second).to.not.equal(first);
+    expect(first).to.contain(`src="${url}"`);
+    expect(second).to.contain(`src="${url}"`);
+  });
+
+  it("reserves one panel before concurrent external URI resolution and drops a stale result", async () => {
+    const panels = new Map();
+    const resolvers = [];
+    const created = [];
+    const createPanel = () => {
+      const panel = {webview: {html: ""}, reveals: 0, reveal() { this.reveals++; }, onDidDispose(fn) { this.dispose = fn; }};
+      created.push(panel);
+      return panel;
+    };
+    const deps = {createPanel, resolveBase: () => new Promise((resolve) => resolvers.push(resolve)), panelHtml: webguiPanelHtml};
+    const first = runWebguiPanel("ZGUI_GG_EX_012", "https://forwarded.example/", panels, deps);
+    const second = runWebguiPanel("ZGUI_GG_EX_012", "https://forwarded.example/", panels, deps);
+    expect(created).to.have.length(1);
+    expect(created[0].reveals).to.equal(1);
+    resolvers[1]("https://forwarded.example/");
+    await second;
+    const current = created[0].webview.html;
+    resolvers[0]("https://forwarded.example/");
+    await first;
+    expect(created[0].webview.html).to.equal(current);
+    expect(current).to.contain("ZGUI_GG_EX_012");
+    const third = runWebguiPanel("ZGUI_GG_EX_012", "https://forwarded.example/", panels, deps);
+    resolvers[2]("https://forwarded.example/");
+    await third;
+    expect(created).to.have.length(1);
+    expect(created[0].webview.html).to.not.equal(current);
+    created[0].dispose();
+    expect(panels.size).to.equal(0);
   });
 
   it("places the run lens on a report's own REPORT line", () => {

@@ -58,7 +58,7 @@ F8's dispatch by object type (`lib.js` `runActionFor`, held to this table by
 | CLAS, declares `IF_OO_ADT_CLASSRUN`, no tests | classrun (Q6b, below) -- ABAP Unit still wins when a class carries both |
 | CLAS, neither | not yet: put `IF_OO_ADT_CLASSRUN` on the class, or give it tests |
 | INTF | nothing of its own to run |
-| PROG | not yet: no server route to run a report headlessly |
+| PROG | opens its converted report's WebGUI transaction in a reusable VS Code panel (see `docs/gui-reports.md`) |
 | FUGR | not yet: a test form from `GET /sap/bc/osd/rfc/functions/<NAME>`, then `POST /call` |
 | TABL, DDLS | data preview (Q7, below) |
 | IWSV | not yet: the Gateway client on the service document |
@@ -354,14 +354,15 @@ Q6a adds no new server route). The answer is XML, column-oriented (one
 is that answer turned into an HTML table (`text/html`, escaped so a value
 carrying `<` or `&` renders as text) with a status line "N rows · M ms ·
 \<generation\>" (the generation off `X-OSD-Generation`, set on every façade
-answer), plus the same rows as `application/json` so VS Code's own JSON /
-table renderers work on them too. A refused statement (not a SELECT, or a
-database never built) becomes the cell's error output, the server's own
-message unwrapped. Command "osd: New SQL notebook" opens a fresh one-cell
-notebook of the type.
+answer). The HTML table is the only output item because VS Code chooses its
+JSON renderer ahead of HTML even when JSON comes second. A `raw JSON`
+disclosure in the HTML shows the same rows on demand. A refused statement
+(not a SELECT, or a database never built) becomes the cell's error output,
+the server's own message unwrapped. Command
+"osd: New SQL notebook" opens a fresh one-cell notebook of the type.
 
 `editors/vscode/lib.js` carries the pure half (`freestyleRows`,
-`freestyleTableHtml`, `htmlEscape`, `notebookFromJson`, `notebookToJson`,
+`freestyleTableHtml`, `freestyleOutputItems`, `htmlEscape`, `notebookFromJson`, `notebookToJson`,
 `Osd#freestyle`), tested without VS Code or a server in
 `test/vscode-extension.mjs`; the route itself (already exercised in
 `test/adt-facade.mjs`) also gets one round trip in `test/adt-devloop.mjs`,

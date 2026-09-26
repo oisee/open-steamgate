@@ -164,6 +164,16 @@ on a `*.prog.abap`'s own `REPORT` line -- "Open in VS Code" for a
 converted report, symmetric to F8 rather than a second command with its
 own idea of what to do.
 
+The extension resolves the configured listener with `vscode.env.asExternalUri`
+and then appends `/sap/bc/gui/sap/its/webgui/?okcode=<tcode>` to that base.
+This leaves the webgui resource and its direct-start command together in the
+iframe URL; `test/gui-reports.mjs` confirms the same `okcode` entry path by
+requesting it directly. F8 and the CodeLens share one panel per transaction
+code, reserved before the external URI lookup so concurrent runs cannot open
+two tabs. A later run reveals that panel and changes a run marker in its HTML
+to reload the iframe and start the report again. VS Code ignores assignments
+of identical HTML.
+
 The panel itself iframes the running osd's URL rather than carrying a copy
 of the page, so the sapevent round trip runs exactly as it does in a
 browser tab. Two things a webview needs that "Open launchpad"'s
@@ -178,11 +188,12 @@ browser tab. Two things a webview needs that "Open launchpad"'s
   is a coincidence when it resolves (Remote-WSL's own automatic port
   forwarding) and a dead port otherwise (Remote-SSH forwards nothing
   unless asked). `asExternalUri` is VS Code's own answer: it hands back
-  the URL this window's UI can actually reach, forwarding the port first
-  if that remote needs it, and is a no-op when nothing is remote. Not
-  measured against a real Remote-SSH window in this spike (no such window
-  was open); reasoned from the API's own contract, which is exactly what
-  it is documented to solve.
+  the base URL this window's UI can actually reach, forwarding the port
+  first if that remote needs it, and is a no-op when nothing is remote.
+  The extension adds the webgui path and `okcode` after resolving this base.
+  This was not measured against a real Remote-SSH window in this spike (no
+  such window was open); it follows the API's own contract, which is exactly
+  what it is documented to solve.
 
 ## Tests
 
@@ -199,7 +210,7 @@ and CI are the real gate for that and were run by hand for this spike) and
 an HTTP test, the browser played by hand the way `test/transaction.mjs`
 plays `ZOSD_NOTE`: `ZGUI_GG_EX_001` renders "hello world", `ZGUI_GG_EX_012`
 Executes and Cancels, `ZGUI_GG_EX_043` clicks a line. `test/vscode-extension.mjs`
-gained the two lib.js functions above. Both files are in
+checks the extension's pure transaction URL builder as well. Both files are in
 `test/suites.json`.
 
 ## Licence

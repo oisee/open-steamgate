@@ -743,6 +743,62 @@ function progTcodeOf(programName) {
   return base === "" ? undefined : `ZGUI_${base}`;
 }
 
+/** The Easy Access entry URL for a transaction. Build the path and its
+ *  `okcode` after VS Code has resolved the base for the local UI: the remote
+ *  port-forwarding URI is a transport address, while these are the webgui
+ *  resource and command that must reach it. */
+function webguiTransactionUrl(base, tcode) {
+  const url = new URL(String(base));
+  const root = url.pathname.replace(/\/+$/, "");
+  url.pathname = `${root}/sap/bc/gui/sap/its/webgui/`;
+  url.hash = "";
+  url.searchParams.set("okcode", String(tcode ?? ""));
+  return url.toString();
+}
+
+/** Keep the iframe URL intact, but change the document on every run. VS Code
+ *  ignores assignments of identical webview HTML, so a run number makes F8
+ *  reload the transaction even when the target URL has not changed. */
+function webguiPanelHtml(url, tcode, run) {
+  const origin = new URL(url).origin;
+  const attr = (value) => htmlEscape(value).replace(/"/g, "&quot;");
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${attr(origin)}; style-src 'unsafe-inline';">
+<style>html,body{margin:0;height:100%;background:#1f4e79}iframe{border:0;width:100%;height:100%;display:block}</style>
+</head>
+<body><iframe src="${attr(url)}" title="${attr(tcode)}" data-run="${run}"></iframe></body>
+</html>`;
+}
+
+/** Reserve a report's panel before the async URI lookup. Only the latest F8
+ *  may fill it: an earlier lookup can otherwise finish after a later run. */
+async function runWebguiPanel(tcode, baseUri, panels, {createPanel, resolveBase, panelHtml, onResolveError}) {
+  let entry = panels.get(tcode);
+  if (entry === undefined) {
+    const panel = createPanel(tcode);
+    entry = {panel, run: 0};
+    panels.set(tcode, entry);
+    panel.onDidDispose(() => {
+      if (panels.get(tcode) === entry) panels.delete(tcode);
+    });
+  } else {
+    entry.panel.reveal();
+  }
+  const run = ++entry.run;
+  let externalBase = baseUri;
+  try {
+    externalBase = await resolveBase(baseUri);
+  } catch (e) {
+    onResolveError?.(e);
+  }
+  if (panels.get(tcode) !== entry || entry.run !== run) return;
+  const target = webguiTransactionUrl(externalBase.toString(), tcode);
+  entry.panel.webview.html = panelHtml(target, tcode, run);
+}
+
 /** `{line, tcode, title}` for the CodeLens above a *.prog.abap's own
  *  `REPORT` statement (1-based line, VS Code's own convention for a
  *  Range), or `undefined` for a program with no `REPORT` line at all (an
@@ -1086,8 +1142,15 @@ function freestyleTableHtml(columns, rows, meta = {}) {
   const status = `${rows.length} row${rows.length === 1 ? "" : "s"} · ${meta.ms ?? 0} ms${generation === undefined ? "" : ` · ${generation}`}`;
   return `<div class="osd-sql-result">
 <table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>
+<details><summary>raw JSON</summary><pre>${htmlEscape(JSON.stringify(rows, null, 2))}</pre></details>
 <div class="osd-sql-status">${htmlEscape(status)}</div>
 </div>`;
+}
+
+/** VS Code prefers its JSON renderer even when HTML comes first. A single
+ *  HTML item makes the table the default; raw JSON is inside its disclosure. */
+function freestyleOutputItems(html) {
+  return [{mime: "text/html", value: html}];
 }
 
 // ---- Q4 "Hotspots": ZOSD_DUMP as line and file heat (docs/vscode-extension.md).
@@ -1639,13 +1702,13 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   warmStatusText, activationBuildText, closureTestsText,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
-  htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson,
+  htmlEscape, freestyleRows, freestyleTableHtml, freestyleOutputItems, notebookFromJson, notebookToJson,
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
   demoFailureObjects,
-  progTcodeOf, progRunLens,
+  progTcodeOf, webguiTransactionUrl, webguiPanelHtml, runWebguiPanel, progRunLens,
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
   serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
   PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext,
