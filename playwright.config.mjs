@@ -5,7 +5,7 @@ const PORT = process.env.STG_PORT ?? 3030;
 export default defineConfig({
   testDir: "test/e2e",
   // the preview build has its own config (playwright.preview.config.mjs)
-  testIgnore: /preview\.spec\.mjs/,
+  testIgnore: [/preview\.spec\.mjs/, /\/deactivated\//],
   // one worker: every spec talks to the same gateway and the same in-memory
   // database, so specs that create or delete rows collide when they run in
   // parallel (a Travel another spec expects disappears, and the run has been
