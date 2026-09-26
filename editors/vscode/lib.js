@@ -6,6 +6,103 @@
 
 const path = require("node:path");
 
+// Quick start's choices live here rather than in the command handler so a
+// future preset can add a row without duplicating its settings in UI code.
+const PRESETS = Object.freeze({
+  defaults: Object.freeze({home: "auto", database: "sqlite", warm: "auto", keymap: "abap"}),
+});
+
+function presetSettings(name) {
+  const preset = PRESETS[name];
+  if (preset === undefined) throw new Error(`unknown osd preset: ${name}`);
+  return {home: preset.home, database: preset.database, warm: preset.warm, keymap: preset.keymap};
+}
+
+/** The packaged extension normally runs its bundled copy. When the open-
+ *  steamgate checkout itself is one of the open folders, DX2's rule is to
+ *  make that checkout osd.home instead, so the extension edits the system
+ *  the user is looking at. */
+function isOpenSteamgateCheckout(manifest, markers = {}) {
+  return manifest?.name === "open-steamgate" && markers.buildScript === true && markers.vscodeExtension === true;
+}
+
+function osdHomeChoice({configuredHome = "", workspaces = [], bundledHome, bundledAvailable = false, homeMode = "auto"} = {}) {
+  if (String(configuredHome).trim() !== "") return {path: String(configuredHome).trim(), kind: "osd.home"};
+  const checkout = workspaces.find((folder) => folder.isOpenSteamgate === true);
+  if (homeMode === "open-steamgate") return checkout === undefined ? undefined : {path: checkout.path, kind: "osd.home"};
+  if (homeMode === "bundled") return bundledAvailable === true && bundledHome ? {path: bundledHome, kind: "bundled copy"} : undefined;
+  if (homeMode === "auto" && checkout !== undefined) return {path: checkout.path, kind: "osd.home"};
+  if (bundledAvailable === true && bundledHome) return {path: bundledHome, kind: "bundled copy"};
+  return workspaces.length === 1 ? {path: workspaces[0].path, kind: "osd.home"} : undefined;
+}
+
+/** Tree context values are also the menu selectors in package.json. */
+function osdStateContext(state) {
+  if (state === "stopped") return "osd-state-stopped";
+  if (state === "running") return "osd-state-running";
+  return "osd-state-building";
+}
+
+const SYSTEM_STATUS_SETS = Object.freeze({
+  system: "SystemSet",
+  processes: "ProcessSet",
+  ports: "PortSet",
+  services: "ServiceSet",
+  packs: "PackSet",
+  database: "DatabaseSet",
+});
+
+function odataV2Results(body) {
+  return body?.d?.results ?? (body?.d === undefined ? [] : [body.d]);
+}
+
+function firstStatusValue(rows, name) {
+  const row = (rows ?? []).find((one) => String(one.name ?? one.Name ?? "").toLowerCase() === name.toLowerCase());
+  return row?.value ?? row?.Value;
+}
+
+/** One pure page model for the tree's status row and the overview webview.
+ *  Values retain their source routes so the view explains what is measured
+ *  and can be reused by service details without reaching into VS Code. */
+function systemOverviewModel(input = {}) {
+  const launcher = input.launcher ?? {};
+  const serving = input.serving?.ready === true ? input.serving : undefined;
+  const status = input.status ?? {};
+  const databaseRows = status.database ?? [];
+  const engine = serving?.databaseIdentity?.engine ?? firstStatusValue(databaseRows, "Engine") ?? "unknown";
+  const storage = serving?.databaseIdentity?.storage ?? firstStatusValue(databaseRows, "Storage") ?? "unknown";
+  const databasePath = storage === "file" && serving?.database && serving.database !== ":memory:"
+    ? serving.database : undefined;
+  const port = launcher.port;
+  const baseUrl = input.baseUrl ?? (port === undefined ? undefined : `http://localhost:${port}`);
+  return {
+    state: input.state ?? "stopped",
+    running: input.state === "running",
+    home: {kind: input.homeKind ?? "osd.home", path: input.homePath ?? launcher.osdHome},
+    layers: (input.layers ?? launcher.layers ?? []).map((layer) => typeof layer === "string" ? layer : layer.folder),
+    listener: {port, url: baseUrl, source: "launcher"},
+    launchpadUrl: baseUrl === undefined ? undefined : `${baseUrl}/app/flp.html`,
+    database: {engine, storage, path: databasePath, source: "/osd/serving"},
+    warm: serving?.warm ?? {state: "unavailable"},
+    keymap: input.keymap ?? "abap",
+    status: {
+      system: status.system ?? [],
+      processes: status.processes ?? [],
+      ports: status.ports ?? [],
+      services: status.services ?? [],
+      packs: status.packs ?? [],
+      database: databaseRows,
+    },
+    sources: {
+      serving: "/osd/serving",
+      status: Object.fromEntries(Object.entries(SYSTEM_STATUS_SETS).map(([key, set]) =>
+        [key, `/sap/opu/odata/sap/ZOSD_STATUS_SRV/${set}?$format=json`])),
+      sysinfo: "/sap/bc/osd/sysinfo/",
+      launcher: "VS Code extension launcher state",
+    },
+  };
+}
+
 // abapGit file names: `zcl_x.clas.abap`, `zcl_x.clas.testclasses.abap`,
 // `zprog.prog.abap`; a namespace is `#ns#zcl_x`
 const FILE = /^(.+?)\.(clas|prog)(?:\.(locals_def|locals_imp|macros|testclasses))?\.abap$/i;
@@ -109,6 +206,17 @@ class Osd {
 
   serving() {
     return this.json("/osd/serving");
+  }
+
+  /** The status app's existing read-only OData sets, used by the shared
+   *  System overview page. The sysinfo app has no JSON representation, so
+   *  the page embeds `/sap/bc/osd/sysinfo/` separately. */
+  async systemStatus() {
+    const entries = await Promise.all(Object.entries(SYSTEM_STATUS_SETS).map(async ([key, set]) => {
+      const body = await this.json(`/sap/opu/odata/sap/ZOSD_STATUS_SRV/${set}?$format=json`);
+      return [key, odataV2Results(body)];
+    }));
+    return Object.fromEntries(entries);
   }
 
   dumps() {
@@ -1539,4 +1647,6 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   demoFailureObjects,
   progTcodeOf, progRunLens,
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
-  serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes};
+  serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
+  PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext,
+  SYSTEM_STATUS_SETS, odataV2Results, systemOverviewModel};

@@ -4,6 +4,7 @@
 // test/osd-child.mjs.
 import {expect} from "chai";
 import {readFileSync} from "node:fs";
+import {tmpdir} from "node:os";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {createRequire} from "node:module";
@@ -22,14 +23,264 @@ const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseChec
   demoFailureObjects, progTcodeOf, progRunLens,
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
   serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
-  warmStatusText, activationBuildText, closureTestsText} =
+  warmStatusText, activationBuildText, closureTestsText,
+  PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext, SYSTEM_STATUS_SETS,
+  odataV2Results, systemOverviewModel} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
+const {overviewStatusSection, systemOverviewHtml} = createRequire(import.meta.url)("../editors/vscode/system-overview.js");
 import {implementsClassrun as facadeImplementsClassrun} from "../tools/osd-classrun.mjs";
 import {namesOf as guiConvertNamesOf} from "../tools/osd-gui-convert.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(import.meta.url);
+const Module = require("node:module");
+
+function loadSystemController(vscodeApi) {
+  const extensionPath = require.resolve("../editors/vscode/extension.js");
+  delete require.cache[extensionPath];
+  const originalLoad = Module._load;
+  Module._load = function (request, parent, isMain) {
+    if (request === "vscode") return vscodeApi;
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  try {
+    return require(extensionPath).SystemController;
+  } finally {
+    Module._load = originalLoad;
+  }
+}
+
+function vscodeStub(settings = {}) {
+  class EventEmitter {
+    listeners = new Set();
+    event = (listener) => {
+      this.listeners.add(listener);
+      return {dispose: () => this.listeners.delete(listener)};
+    };
+    fire(value) {
+      for (const listener of this.listeners) listener(value);
+    }
+    dispose() {
+      this.listeners.clear();
+    }
+  }
+  class TreeItem {
+    constructor(label, collapsibleState) {
+      this.label = label;
+      this.collapsibleState = collapsibleState;
+    }
+  }
+  class ThemeIcon {
+    constructor(id) {
+      this.id = id;
+    }
+  }
+  const panels = [];
+  const externalUris = [];
+  return {
+    panels,
+    externalUris,
+    EventEmitter,
+    TreeItem,
+    ThemeIcon,
+    TreeItemCollapsibleState: {None: 0, Collapsed: 1, Expanded: 2},
+    ViewColumn: {Beside: 2},
+    ConfigurationTarget: {Workspace: 1, Global: 2},
+    Uri: {parse: (value) => ({toString: () => value})},
+    env: {asExternalUri: async (uri) => {
+      externalUris.push(uri.toString());
+      return uri;
+    }},
+    workspace: {
+      workspaceFolders: [],
+      getConfiguration: () => ({get: (name, fallback) => settings[name] ?? fallback, update: async () => {}}),
+    },
+    window: {
+      createWebviewPanel: (...args) => {
+        const panel = {
+          args,
+          webview: {html: ""},
+          onDidDispose: () => ({dispose() {}}),
+          reveal() {},
+        };
+        panels.push(panel);
+        return panel;
+      },
+      showInformationMessage() {},
+      showErrorMessage() {},
+    },
+  };
+}
+
+function controllerContext() {
+  return {
+    globalStorageUri: {fsPath: path.join(tmpdir(), "osd-controller-test")},
+    extensionUri: {fsPath: path.join(tmpdir(), "osd-controller-test-no-bundle")},
+    extension: {packageJSON: {version: "test"}},
+  };
+}
 
 describe("editors/vscode: the extension's logic", function () {
+  it("quick start applies its preset and restarts a running controller before opening the overview", async () => {
+    const api = vscodeStub();
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
+    controller.launcher = {state: "running"};
+    const calls = [];
+    controller.applyPreset = async (name) => calls.push(["preset", name]);
+    controller.stop = async () => {
+      calls.push(["stop"]);
+      controller.launcher.state = "stopped";
+    };
+    controller.start = async () => {
+      calls.push(["start"]);
+      controller.launcher.state = "running";
+      return true;
+    };
+    controller.openSystemOverview = async () => calls.push(["overview"]);
+
+    await controller.quickStart("defaults");
+
+    expect(calls).to.deep.equal([["preset", "defaults"], ["stop"], ["start"], ["overview"]]);
+  });
+
+  it("loads a running controller overview from its launcher port after osd.url changes", async () => {
+    const api = vscodeStub({url: "http://localhost:5999", home: "", keymap: "abap"});
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
+    controller.launcher = {
+      state: "running", port: 3542, osdHome: "/work/osd", homeKind: "osd.home", layers: [],
+      databaseLabel: "SQLite", generation: "abc123",
+    };
+    const oldFetch = globalThis.fetch;
+    const requested = [];
+    globalThis.fetch = async (url) => {
+      requested.push(String(url));
+      const body = String(url).endsWith("/osd/serving")
+        ? {ready: true, database: "/work/db/osd.sqlite", databaseIdentity: {engine: "sqlite", storage: "file"}, warm: {state: "primed"}}
+        : {d: {results: []}};
+      return {ok: true, status: 200, json: async () => body};
+    };
+    try {
+      await controller.openSystemOverview();
+    } finally {
+      globalThis.fetch = oldFetch;
+    }
+
+    expect(requested).to.have.lengthOf(7);
+    expect(requested.every((url) => url.startsWith("http://localhost:3542/"))).to.equal(true);
+    expect(requested.some((url) => url.startsWith("http://localhost:5999/"))).to.equal(false);
+    expect(api.externalUris).to.deep.equal([
+      "http://localhost:3542/sap/bc/osd/sysinfo/",
+      "http://localhost:3542/app/flp.html",
+    ]);
+    expect(api.panels[0].webview.html).to.contain("http://localhost:3542/app/flp.html");
+  });
+
+  it("keeps the quick-start preset, DX2 home rule, and state menus in pure logic", () => {
+    expect(Object.keys(PRESETS)).to.deep.equal(["defaults"]);
+    expect(presetSettings("defaults")).to.deep.equal({home: "auto", database: "sqlite", warm: "auto", keymap: "abap"});
+    expect(isOpenSteamgateCheckout({name: "open-steamgate"}, {buildScript: true, vscodeExtension: true})).to.equal(true);
+    expect(isOpenSteamgateCheckout({name: "another-project"}, {buildScript: true, vscodeExtension: true})).to.equal(false);
+    expect(osdHomeChoice({bundledHome: "/storage/osd", bundledAvailable: true,
+      workspaces: [{path: "/work/osd", isOpenSteamgate: true}]})).to.deep.equal({path: "/work/osd", kind: "osd.home"});
+    expect(osdHomeChoice({homeMode: "open-steamgate", bundledHome: "/storage/osd", bundledAvailable: true,
+      workspaces: [{path: "/work/osd", isOpenSteamgate: true}]})).to.deep.equal({path: "/work/osd", kind: "osd.home"});
+    expect(osdHomeChoice({bundledHome: "/storage/osd", bundledAvailable: true,
+      workspaces: [{path: "/work/app"}]})).to.deep.equal({path: "/storage/osd", kind: "bundled copy"});
+    expect(osdHomeChoice({configuredHome: "/configured/osd", bundledHome: "/storage/osd", bundledAvailable: true,
+      workspaces: [{path: "/work/osd", isOpenSteamgate: true}]})).to.deep.equal({path: "/configured/osd", kind: "osd.home"});
+    expect(["stopped", "running", "building", "starting"].map(osdStateContext)).to.deep.equal([
+      "osd-state-stopped", "osd-state-running", "osd-state-building", "osd-state-building",
+    ]);
+  });
+
+  it("builds an overview from the live serving and OData status values", () => {
+    const model = systemOverviewModel({
+      state: "running",
+      launcher: {port: 3542, osdHome: "/storage/osd", layers: [{folder: "/workspace/layer"}]},
+      homeKind: "bundled copy",
+      serving: {ready: true, database: "/storage/db/osd.sqlite", databaseIdentity: {engine: "sqlite", storage: "file"}, warm: {state: "primed", swaps: 2}},
+      status: {system: [{Sid: "OSD", GenServing: "abc123"}], processes: [{Pid: "42"}], ports: [{Port: "3542"}],
+        services: [{Path: "/app/flp.html"}], packs: [{Name: "demo"}], database: [{name: "Engine", value: "sqlite"}]},
+      baseUrl: "http://localhost:3542",
+      keymap: "abap",
+    });
+    expect(model).to.include({state: "running", running: true, keymap: "abap"});
+    expect(model.listener).to.include({port: 3542, url: "http://localhost:3542"});
+    expect(model.launchpadUrl).to.equal("http://localhost:3542/app/flp.html");
+    expect(model.home).to.deep.equal({kind: "bundled copy", path: "/storage/osd"});
+    expect(model.layers).to.deep.equal(["/workspace/layer"]);
+    expect(model.database).to.deep.equal({engine: "sqlite", storage: "file", path: "/storage/db/osd.sqlite", source: "/osd/serving"});
+    expect(model.warm).to.deep.equal({state: "primed", swaps: 2});
+    expect(model.status.services[0].Path).to.equal("/app/flp.html");
+    expect(model.sources.status).to.deep.equal({
+      system: "/sap/opu/odata/sap/ZOSD_STATUS_SRV/SystemSet?$format=json",
+      processes: "/sap/opu/odata/sap/ZOSD_STATUS_SRV/ProcessSet?$format=json",
+      ports: "/sap/opu/odata/sap/ZOSD_STATUS_SRV/PortSet?$format=json",
+      services: "/sap/opu/odata/sap/ZOSD_STATUS_SRV/ServiceSet?$format=json",
+      packs: "/sap/opu/odata/sap/ZOSD_STATUS_SRV/PackSet?$format=json",
+      database: "/sap/opu/odata/sap/ZOSD_STATUS_SRV/DatabaseSet?$format=json",
+    });
+    expect(model.sources.sysinfo).to.equal("/sap/bc/osd/sysinfo/");
+    const html = systemOverviewHtml(model, {sysinfoUrl: "http://localhost:3542/sap/bc/osd/sysinfo/"});
+    expect(html).to.contain("/storage/db/osd.sqlite");
+    expect(html).to.contain("primed");
+    expect(html).to.contain("System information app");
+    expect(html).to.contain("<iframe");
+    expect(overviewStatusSection("Services", model.status.services)).to.contain("/app/flp.html");
+
+    const stopped = systemOverviewModel({state: "stopped", homeKind: "osd.home", homePath: "/work/osd", layers: ["/work/app"]});
+    expect(stopped.running).to.equal(false);
+    expect(stopped.home.path).to.equal("/work/osd");
+    expect(systemOverviewHtml(stopped)).to.contain("Start system");
+    const statusFallback = systemOverviewModel({state: "running", launcher: {port: 3542}, status: {
+      database: [{Name: "Engine", Value: "sqlite"}, {Name: "Storage", Value: "file"}],
+    }});
+    expect(statusFallback.database).to.include({engine: "sqlite", storage: "file"});
+  });
+
+  it("validates every walkthrough markdown entry in package.json", () => {
+    const manifest = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
+    const walkthroughs = manifest.contributes.walkthroughs;
+    expect(walkthroughs).to.have.lengthOf(1);
+    expect(manifest.contributes.commands.some((command) => command.command === "osd.gettingStarted" && command.title === "osd: Getting started")).to.equal(true);
+    expect(manifest.contributes.commands.some((command) => command.command === "osd.quickStart")).to.equal(true);
+    expect(manifest.contributes.commands.some((command) => command.command === "osd.openSystemOverview")).to.equal(true);
+    const itemMenu = manifest.contributes.menus["view/item/context"];
+    for (const state of ["stopped", "running", "building"]) {
+      expect(itemMenu.some((item) => item.when.includes(`viewItem == osd-state-${state}`)), state).to.equal(true);
+    }
+    const stateItems = itemMenu.filter((item) => item.when.includes("viewItem == osd-state-"));
+    expect(stateItems.length).to.be.greaterThan(0);
+    expect(stateItems.every((item) => item.group !== "inline" && !item.group?.startsWith("inline@"))).to.equal(true);
+    const actionsFor = (state) => stateItems.filter((item) => item.when.includes(`viewItem == osd-state-${state}`)).map((item) => item.command);
+    expect(actionsFor("stopped")).to.include.members(["osd.start", "osd.fullRebuild"]);
+    expect(actionsFor("running")).to.include.members(["osd.stop", "osd.rebuildWarm", "osd.fullRebuild", "osd.openLaunchpad", "osd.openSystemLog"]);
+    expect(actionsFor("building")).to.include.members(["osd.openSystemLog", "osd.stop"]);
+    for (const walkthrough of walkthroughs) {
+      expect(walkthrough.steps[0].id).to.equal("quickStart");
+      for (const step of walkthrough.steps) {
+        expect(readFileSync(path.join(ROOT, "editors/vscode", step.media.markdown), "utf8")).not.to.equal("");
+      }
+    }
+  });
+
+  it("reads all six existing status OData sets for the overview", async () => {
+    const routes = [];
+    const client = new Osd("http://localhost:3531", async (url) => {
+      routes.push(new URL(url).pathname + new URL(url).search);
+      const set = new URL(url).pathname.split("/").at(-1).replace("Set", "").toLowerCase();
+      return {ok: true, json: async () => ({d: {results: [{set}]}})};
+    });
+    const status = await client.systemStatus();
+    expect(Object.keys(status)).to.deep.equal(Object.keys(SYSTEM_STATUS_SETS));
+    expect(status.system).to.deep.equal([{set: "system"}]);
+    expect(routes).to.have.lengthOf(6);
+    expect(routes).to.include("/sap/opu/odata/sap/ZOSD_STATUS_SRV/SystemSet?$format=json");
+    expect(odataV2Results({d: {Sid: "OSD"}})).to.deep.equal([{Sid: "OSD"}]);
+  });
+
   it("names the object and include of an abapGit file", () => {
     expect(objectOf("/x/zcl_a.clas.testclasses.abap")).to.deep.equal({type: "CLAS", name: "ZCL_A", base: "zcl_a", include: "testclasses"});
     expect(objectOf("zcl_a.clas.abap").include).to.equal("main");
