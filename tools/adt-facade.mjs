@@ -29,13 +29,14 @@ import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-prope
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
-import {ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
 import {segwRegistrations} from "./segw-registry.mjs";
 import {contentFoldersOf} from "./osd-packs.mjs";
 import {entitySetMapFor} from "./segw-entityset-map.mjs";
 import {testClassesIn} from "./osd-unit-run.mjs";
+import {serviceTree} from "./osd-status.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -1262,6 +1263,37 @@ export function adtRouter(options = {}) {
       refuse(res, missing ? 404 : 500,
         missing ? "ExceptionResourceNotFound" : "ExceptionTestRunFailed",
         error.message ?? String(error));
+    }
+  });
+
+  // Everything this system serves, as the tree an editor shows (the VS Code
+  // extension's grouped tree): OData services, UI5 apps, ICF nodes and push
+  // channels, one row each, with the class that answers and where the row is
+  // declared, so a node is a pointer to its source and one action. One
+  // inventory, the one the status tables and the webgui menu read
+  // (tools/osd-status.mjs serviceTree); an OData service's entity sets are
+  // not listed here but asked for when a node opens (segw/entitysets).
+  router.get(`${BASE}/core/http/services`, (req, res) => {
+    try {
+      const classUri = (name) => (name !== undefined && name !== "" && store.exists("CLAS", name) ? uriOf("CLAS", name) : undefined);
+      const rows = serviceTree(store.root).map((one) => ({
+        kind: one.kind,
+        name: one.name,
+        path: one.path,
+        text: one.text,
+        pack: one.pack,
+        handler: one.kind === "APP" ? undefined : one.handler,
+        handlerUri: one.kind === "APP" ? undefined : classUri(one.handler),
+        app: one.kind === "APP" ? one.handler : undefined,
+        mpc: one.mpc,
+        mpcUri: classUri(one.mpc),
+        source: one.source,
+      }));
+      const counts = {};
+      for (const row of rows) counts[row.kind] = (counts[row.kind] ?? 0) + 1;
+      res.type("application/json; charset=utf-8").send(JSON.stringify({services: rows, counts}));
+    } catch (e) {
+      refuse(res, 500, "ExceptionInternalError", String(e?.message ?? e));
     }
   });
 
