@@ -19,7 +19,7 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   groupServices, serviceLabel, serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
   warmStatusText, activationBuildText, closureTestsText} = require("./lib.js");
 const {Launcher, ensureMaterializedHome, databaseEnv, defaultDedicatedName, describeDatabase,
-  isOpenSteamgateCheckout, decideStartTarget} = require("./launcher.js");
+  isOpenSteamgateCheckout, decideStartTarget, classify, PORT_RANGE, isFree} = require("./launcher.js");
 
 // Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
 // *.osdnb file opens as (package.json `contributes.notebooks`) and the
@@ -313,10 +313,14 @@ class SystemController {
     const target = vscode.workspace.workspaceFolders?.length
       ? vscode.ConfigurationTarget.Workspace
       : vscode.ConfigurationTarget.Global;
-    await vscode.workspace.getConfiguration("osd").update("url", `http://localhost:${port}`, target);
+    try {
+      await vscode.workspace.getConfiguration("osd").update("url", `http://localhost:${port}`, target);
+    } catch (error) {
+      vscode.window.showErrorMessage(`osd: running on :${port}, but could not update osd.url: ${String(error.message ?? error)}`);
+    }
   }
 
-  async start() {
+  async start(options = {}) {
     if (this.launcher !== undefined && this.launcher.state !== "stopped") {
       vscode.window.showInformationMessage(`osd: already ${this.launcher.state}`);
       return;
@@ -332,28 +336,7 @@ class SystemController {
     this.emitter.fire();
     this.output.show(true);
     this.output.appendLine(`--- osd start: ${launcher.osdHome} (${launcher.databaseLabel}) ---`);
-    try {
-      const result = await launcher.start();
-      await this.#pointUrlAt(result.port);
-      vscode.window.setStatusBarMessage(
-        `osd: running on :${result.port} · ${launcher.databaseLabel}, generation ${String(result.generation).slice(0, 8)}`, 5000);
-    } catch (e) {
-      const message = String(e.message ?? e);
-      // test/setup.mjs's own stale-schema refusal (HANA, DuckDB with
-      // STG_DB_PATH) names its own fix in its message; surface that
-      // verbatim rather than just "start failed", and offer the one
-      // setting that applies it without the person hunting for it.
-      if (/STG_DB_FRESH/.test(message) && launcher.database?.kind === "hana") {
-        vscode.window.showErrorMessage(`osd start: ${message}`, "Set osd.database.hana.fresh and retry").then((choice) => {
-          if (choice === undefined) return;
-          vscode.workspace.getConfiguration("osd").update("database.hana.fresh", true, vscode.ConfigurationTarget.Workspace)
-            .then(() => this.start());
-        });
-      } else {
-        vscode.window.showErrorMessage(`osd start: ${message}`);
-      }
-    }
-    this.emitter.fire();
+    await this.#launch(launcher, options, "osd start");
   }
 
   async stop() {
@@ -364,19 +347,91 @@ class SystemController {
     this.emitter.fire();
   }
 
-  async rebuild() {
+  async rebuild(options = {}) {
     if (this.launcher === undefined) {
-      return this.start();
+      return this.start(options);
     }
     this.output.show(true);
     this.output.appendLine("--- osd rebuild (full: stop, build, start) ---");
     try {
-      await this.launcher.rebuild();
+      await this.launcher.rebuild(options);
       await this.#pointUrlAt(this.launcher.port);
     } catch (e) {
-      vscode.window.showErrorMessage(`osd rebuild: ${String(e.message ?? e)}`);
+      await this.#launcherError(this.launcher, e, "osd rebuild");
+      this.emitter.fire();
+      return;
     }
     this.emitter.fire();
+  }
+
+  async #launch(launcher, options, label) {
+    let result;
+    try {
+      result = await launcher.start(options);
+    } catch (error) {
+      await this.#launcherError(launcher, error, label);
+      this.emitter.fire();
+      return;
+    }
+    await this.#pointUrlAt(result.port);
+    vscode.window.setStatusBarMessage(
+      `osd: running on :${result.port} · ${launcher.databaseLabel}, generation ${String(result.generation).slice(0, 8)}`, 5000);
+    this.emitter.fire();
+  }
+
+  async #launcherError(launcher, error, label) {
+    const errorLog = typeof error?.logText === "string" ? error.logText : "";
+    const lastLog = typeof launcher?.lastLog === "string" ? launcher.lastLog : "";
+    const logText = errorLog.trim() ? errorLog : lastLog.trim() ? lastLog : "";
+    const message = String(error?.message ?? error);
+    // Keep the upstream shortcut for the launcher’s stale HANA schema case.
+    if (/STG_DB_FRESH/.test(message) && launcher.database?.kind === "hana") {
+      const choice = await vscode.window.showErrorMessage(`${label}: ${message}`, "Set osd.database.hana.fresh and retry");
+      if (choice !== undefined) {
+        await vscode.workspace.getConfiguration("osd").update("database.hana.fresh", true, vscode.ConfigurationTarget.Workspace);
+        await this.start();
+      }
+      return;
+    }
+    const issue = classify(logText, error);
+    const action = await vscode.window.showErrorMessage(`${label}: ${issue.message}`, ...issue.actions);
+    if (action === "Open log") {
+      this.output.show(true);
+    } else if (action === "Full rebuild") {
+      await this.rebuild({forceBuild: true});
+    } else if (action === "Fetch packs") {
+      this.output.show(true);
+      this.output.appendLine("--- osd fetch packs ---");
+      try {
+        await launcher.fetchPacks();
+        this.output.appendLine("--- osd restart after fetching packs ---");
+        await this.#launch(launcher, {}, "osd start after fetching packs");
+      } catch (fetchError) {
+        await this.#launcherError(launcher, fetchError, "osd fetch packs");
+      }
+    } else if (action === "Pick another port") {
+      const failureText = [logText, error?.code, error?.message ?? error].filter(Boolean).join(" ");
+      await this.#pickAnotherPort(launcher, failureText);
+    }
+  }
+
+  async #pickAnotherPort(launcher, logText) {
+    const previous = launcher.lastAttemptedPort ?? Number(logText.match(/(?:127\.0\.0\.1|localhost|\*|::):([0-9]+)/)?.[1]);
+    const choices = [];
+    for (let port = PORT_RANGE.from; port <= PORT_RANGE.to; port++) {
+      if (port !== previous && await isFree(port)) {
+        choices.push({label: `:${port}`, description: "available", port});
+      }
+    }
+    if (choices.length === 0) {
+      vscode.window.showErrorMessage(`osd: no other free port in ${PORT_RANGE.from}-${PORT_RANGE.to}`);
+      return;
+    }
+    const selected = await vscode.window.showQuickPick(choices, {placeHolder: "Pick another port for osd"});
+    if (selected === undefined) return;
+    this.output.show(true);
+    this.output.appendLine(`--- osd start on :${selected.port} ---`);
+    await this.#launch(launcher, {port: selected.port}, "osd start");
   }
 
   /** T7 "Rebuild (warm)" (docs/vscode-extension.md "Warm", the $(tools)

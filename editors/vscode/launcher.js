@@ -31,6 +31,24 @@ const path = require("node:path");
 // still has to say so explicitly.
 const PORT_RANGE = {from: 3531, to: 3539};
 
+/** Turn launcher/build output, plus an error when output is empty, into the
+ *  recovery actions the extension can offer. Kept pure so real log formats
+ *  and no-output failures pin the mapping without needing a VS Code host. */
+function classify(logText, error) {
+  const text = [
+    typeof logText === "string" ? logText : "",
+    typeof error?.code === "string" ? error.code : "",
+    typeof error?.message === "string" ? error.message : "",
+  ].filter(Boolean).join("\n");
+  if (/\bUNFETCHED\b/.test(text)) {
+    return {kind: "unfetched", message: "Some packs have not been fetched.", actions: ["Fetch packs"]};
+  }
+  if (/\bEADDRINUSE\b|address already in use|no free port/i.test(text)) {
+    return {kind: "port-in-use", message: "The osd port is already in use.", actions: ["Pick another port"]};
+  }
+  return {kind: "build-failed", message: "The build failed.", actions: ["Open log", "Full rebuild"]};
+}
+
 // ---- databases (docs/vscode-extension.md, "Databases") -------------------
 //
 // `test/setup.mjs` already picks a backend off `STG_DB` (file | postgres |
@@ -542,6 +560,7 @@ class Launcher extends EventEmitter {
     this.pid = undefined;
     this.generation = undefined;
     this.layers = [];
+    this.lastLog = "";
     // when this start() began -- the status bar's "warming up..." (T7)
     // shows that rather than "osd down" for a little while after this,
     // since the prime is synchronous and the façade answers nothing at all
@@ -555,6 +574,7 @@ class Launcher extends EventEmitter {
   }
 
   #log(line) {
+    this.lastLog = (this.lastLog + line).slice(-12000);
     this.emit("log", line);
   }
 
@@ -563,10 +583,11 @@ class Launcher extends EventEmitter {
    *  state back at "stopped", if the build fails or the server never comes
    *  up -- there is no half-started state a caller has to notice on their
    *  own. */
-  async start() {
+  async start(options = {}) {
     if (this.state !== "stopped") {
       throw new Error(`cannot start: already ${this.state}`);
     }
+    this.lastLog = "";
     fs.mkdirSync(this.storageDir, {recursive: true});
     this.startedAt = Date.now();
     this.#setState("building");
@@ -586,7 +607,27 @@ class Launcher extends EventEmitter {
       throw new Error("DuckDB needs the native module; not in this package");
     }
 
-    const port = await pickPort(this.portRange);
+    let port;
+    try {
+      if (options.port === undefined) {
+        port = await pickPort(this.portRange);
+      } else {
+        port = Number(options.port);
+        if (!Number.isInteger(port) || port < this.portRange.from || port > this.portRange.to) {
+          throw new Error(`port must be in ${this.portRange.from}-${this.portRange.to}`);
+        }
+        if (await isFree(port) === false) {
+          const error = new Error(`listen EADDRINUSE: address already in use 127.0.0.1:${port}`);
+          error.code = "EADDRINUSE";
+          throw error;
+        }
+      }
+      this.lastAttemptedPort = port;
+    } catch (error) {
+      this.#setState("stopped");
+      error.logText ??= this.lastLog;
+      throw error;
+    }
     const dbEnv = databaseEnv(this.database);
     const env = {
       ...process.env,
@@ -624,10 +665,20 @@ class Launcher extends EventEmitter {
     this.env = env;
     this.databaseLabel = describeDatabase(this.database);
 
-    const build = await runToCompletion(this.osdHome, "tools/osd-build.mjs", [], env, (line) => this.#log(line));
+    let build;
+    try {
+      build = await runToCompletion(this.osdHome, "tools/osd-build.mjs", options.forceBuild === true ? ["--force"] : [], env,
+        (line) => this.#log(line));
+    } catch (error) {
+      this.#setState("stopped");
+      error.logText ??= this.lastLog;
+      throw error;
+    }
     if (build.code !== 0) {
       this.#setState("stopped");
-      throw new Error(`build failed (exit ${build.code}): ${build.output.slice(-2000)}`);
+      const error = new Error(`build failed (exit ${build.code}): ${build.output.slice(-2000)}`);
+      error.logText = build.output;
+      throw error;
     }
 
     this.#setState("starting");
@@ -660,7 +711,7 @@ class Launcher extends EventEmitter {
       resolveExitedEarly = resolve;
     });
     child.on("exit", (code, signal) => {
-      const wasRunning = this.state !== "stopped";
+      const wasRunning = this.state === "running";
       this.child = undefined;
       this.port = undefined;
       this.pid = undefined;
@@ -677,7 +728,9 @@ class Launcher extends EventEmitter {
       serving = await Promise.race([
         waitForServing(port, {timeoutMs: this.timeoutMs}),
         exitedEarly.then(({code, signal}) => {
-          throw new Error(`osd exited before it started serving (code ${code ?? "?"}, signal ${signal ?? "?"}): ${recentOutput.trim().slice(-1000)}`);
+          const error = new Error(`osd exited before it started serving (code ${code ?? "?"}, signal ${signal ?? "?"}): ${recentOutput.trim().slice(-1000)}`);
+          error.logText = recentOutput;
+          throw error;
         }),
       ]);
     } catch (error) {
@@ -685,6 +738,7 @@ class Launcher extends EventEmitter {
       if (this.state !== "stopped") {
         this.#setState("stopped");
       }
+      error.logText ??= this.lastLog;
       throw error;
     }
     this.port = port;
@@ -709,9 +763,22 @@ class Launcher extends EventEmitter {
     // the "exit" handler above already reset the fields and the state
   }
 
-  async rebuild() {
+  async rebuild(options = {}) {
     await this.stop();
-    return this.start();
+    return this.start(options);
+  }
+
+  /** Fetch every pack source declared by this osdHome. The caller decides
+   *  when to restart after the fetch succeeds. */
+  async fetchPacks() {
+    const result = await runToCompletion(this.osdHome, "tools/osd-fetch.mjs", [], {...process.env, OSD_ROOT: this.osdHome},
+      (line) => this.#log(line));
+    if (result.code !== 0) {
+      const error = new Error(`fetch packs failed (exit ${result.code}): ${result.output.slice(-2000)}`);
+      error.logText = result.output;
+      throw error;
+    }
+    return result;
   }
 }
 
@@ -719,6 +786,7 @@ module.exports = {
   WARM_MEMORY_FLOOR_BYTES,
   shouldWarm,
   PORT_RANGE,
+  classify,
   isFree,
   pickPort,
   looksLikeAbapGitFolder,
