@@ -234,7 +234,7 @@ export function discoveryDocument(resources) {
 
   const collection = (r) => `    <app:collection href="${xmlEscape(r.href)}">
       <atom:title>${xmlEscape(r.title)}</atom:title>
-${(r.accept ?? []).map((a) => `      <app:accept>${xmlEscape(a)}</app:accept>`).join("\n")}${(r.accept ?? []).length === 0 ? "" : "\n"}${r.category === undefined ? "" : `      <atom:category term="${xmlEscape(r.category[0])}" scheme="${xmlEscape(r.category[1])}"/>\n`}${(r.templates ?? []).length === 0 ? `      <adtcomp:templateLinks/>\n` : `      <adtcomp:templateLinks>\n${r.templates.map(([rel, template]) => `        <adtcomp:templateLink rel="${xmlEscape(rel)}" template="${xmlEscape(template)}"/>`).join("\n")}\n      </adtcomp:templateLinks>\n`}    </app:collection>`;
+${(r.accept ?? []).map((a) => `      <app:accept>${xmlEscape(a)}</app:accept>`).join("\n")}${(r.accept ?? []).length === 0 ? "" : "\n"}${r.category === undefined ? "" : `      <atom:category term="${xmlEscape(r.category[0])}" scheme="${xmlEscape(r.category[1])}"/>\n`}${(r.templates ?? []).length === 0 ? `      <adtcomp:templateLinks/>\n` : `      <adtcomp:templateLinks>\n${r.templates.map(([rel, template, type]) => `        <adtcomp:templateLink rel="${xmlEscape(rel)}" template="${xmlEscape(template)}"${type === undefined ? "" : ` type="${xmlEscape(type)}"`}/>`).join("\n")}\n      </adtcomp:templateLinks>\n`}    </app:collection>`;
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <app:service xmlns:app="http://www.w3.org/2007/app"
@@ -350,6 +350,13 @@ const CATEGORY = {
   "programs/includes": ["includes", "http://www.sap.com/adt/categories/programs"],
   "oo/classes": ["classes", "http://www.sap.com/adt/categories/oo"],
   "oo/interfaces": ["interfaces", "http://www.sap.com/adt/categories/oo"],
+  // F9, "Run as ABAP Application (Console)". Read off a real system's own
+  // discovery (.local/adt-corpus/latest/bodies/00009-response.xml), not
+  // guessed: term "classrun", same scheme as the rest of COM.SAP.ADT.OO, no
+  // app:accept at all, and no compatibility-graph node gates it -- unlike
+  // checkruns/activation/abapunit, discovery alone is what a client checks
+  // before it shows F9.
+  "oo/classrun": ["classrun", "http://www.sap.com/adt/categories/oo"],
   "functions/groups": ["groups", "http://www.sap.com/adt/categories/functions"],
   "packages": ["devck", "http://www.sap.com/wbobj/packages"],
   "ddic/tables": ["tabldt", "http://www.sap.com/wbobj/dictionary"],
@@ -460,6 +467,12 @@ const TEMPLATE_LINKS = {
     ["http://www.sap.com/wbobj/raps/srvdsrv/source",
       "/sap/bc/adt/ddic/srvd/sources/{object_name}/source/main{?corrNr,lockHandle,version}"],
   ],
+  // the system's own template (a4h-corpus discovery): {classname} in the
+  // path, {?profilerId} a query parameter this façade accepts and ignores
+  // (no profiling here), type="text/plain" because the answer always is
+  "oo/classrun": [
+    ["http://www.sap.com/adt/relations/oo/classrun", "/sap/bc/adt/oo/classrun/{classname}{?profilerId}", "text/plain"],
+  ],
 };
 
 const WORKSPACE = (adt) => {
@@ -477,6 +490,7 @@ const TITLE = {
   "programs/includes": "Includes",
   "oo/classes": "Classes",
   "oo/interfaces": "Interfaces",
+  "oo/classrun": "Run a class",
   "ddic/ddl/sources": "CDS DDL Sources",
   "ddic/dataelements": "Data Element",
   "ddic/tables": "Database Table",
@@ -1624,6 +1638,48 @@ export function adtRouter(options = {}) {
       router.get(`${BASE}/${adt}/:name`, structure);
     }
   }
+
+  // ---- classrun: F9, "Run as ABAP Application (Console)" (docs/adt-facade.md).
+  //
+  // A resource, not a collection of named operations like checkruns or
+  // activation: POST the class name in the path, get back what it wrote as
+  // text/plain, whatever it did. No compatibility-graph node gates it (the
+  // real system's own graph, .local/adt-corpus/latest/bodies/00008-response.xml,
+  // has no "classrun" entry anywhere), so discovery's collection alone is
+  // what a client checks -- advertised above, `advertise("oo/classrun")`
+  // and the CATEGORY/TITLE/TEMPLATE_LINKS entries at the top of this file.
+  //
+  // A dump is still a 200, the way ADT's own console shows it: whatever the
+  // class had already written, then the trace, in one text/plain body. Only
+  // the request itself being wrong -- no such class, or a class that does
+  // not implement IF_OO_ADT_CLASSRUN, or nothing transpiled yet -- is an
+  // HTTP error, the same distinction `answered()` draws for every object
+  // read here.
+  advertise("oo/classrun");
+  router.post(`${BASE}/oo/classrun/:name`, async (req, res) => {
+    await rawBody(req);
+    try {
+      const runner = await store.classrun();
+      // `data` is the façade's own (whatever it shares its connection
+      // with), not `store.data()` -- see tools/osd-classrun.mjs for why a
+      // second one must not boot a second runtime
+      const result = await runner.run(req.params.name, {data});
+      res.status(200).type("text/plain; charset=utf-8").send(result.ok
+        ? result.text
+        : `${result.text}${result.text ? "\n\n" : ""}Runtime error: ${result.error.message} at ${result.error.where}`);
+    } catch (e) {
+      if (e instanceof NotFound) {
+        record?.(req, "object", e.message);
+        refuse(res, 404, "ExceptionResourceNotFound", e.message);
+      } else if (e?.code === "NOT_CLASSRUN") {
+        refuse(res, 400, "ExceptionInvalidRequest", e.message);
+      } else if (e?.code === "NOT_TRANSPILED" || e?.code === "NOT_SUPPORTED" || e?.code === "NOT_BUILT") {
+        refuse(res, 503, "ExceptionInternalError", e.message);
+      } else {
+        refuse(res, 500, "ExceptionInternalError", String(e?.message ?? e), {namespace: "org.open-steamgate.osd"});
+      }
+    }
+  });
 
   // ---- the development loop: lock, write, unlock, activate.
   //

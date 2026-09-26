@@ -192,6 +192,29 @@ hostNodes.sql = (a, node) => a.post(node.path, async function (req, res) {
   }
 });
 
+// Q6b's own door: F9 over a served (child) runtime. This process holds the
+// live connection, so a classrun answers here rather than through the
+// façade's own (empty, in child mode) globalThis.abap -- tools/osd-data.mjs
+// Data#classrun is the other end. The façade already checked the class
+// implements IF_OO_ADT_CLASSRUN before it ever asked; runClassrun repeats
+// the check off the compiled class itself, because this door has no store.
+hostNodes.classrun = (a, node) => a.post(node.path, async function (req, res) {
+  let asked;
+  try {
+    asked = JSON.parse(Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "{}");
+  } catch {
+    res.status(400).json({error: {code: "BAD_REQUEST", message: "a JSON body with name"}});
+    return;
+  }
+  try {
+    const {runClassrun} = await import("./osd-classrun.mjs");
+    res.json(await runClassrun(root, String(asked.name ?? ""), {generation: generationLabel()}));
+  } catch (e) {
+    res.status(e?.code === "NOT_TRANSPILED" ? 503 : e?.code === "NOT_CLASSRUN" ? 400 : 500)
+      .json({error: {code: e?.code ?? "FAILED", message: String(e?.message ?? e)}});
+  }
+});
+
 // and the declared ones attach, in the registry's order rather than in the
 // order the lines above happen to sit in
 const declared = nodes(root, {proxies: false});

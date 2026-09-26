@@ -12,7 +12,7 @@ const fs = require("node:fs");
 const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   freestyleTableHtml, notebookFromJson, notebookToJson,
-  hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText} = require("./lib.js");
+  hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun} = require("./lib.js");
 
 // Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
 // *.osdnb file opens as (package.json `contributes.notebooks`) and the
@@ -30,6 +30,12 @@ function osd() {
 function activate(context) {
   const output = vscode.window.createOutputChannel("osd");
   context.subscriptions.push(output);
+  // Q6b "Classrun" (docs/vscode-extension.md): F9's own channel, separate
+  // from "osd" above -- a class's console output is what somebody asked
+  // for, not a log line among the status bar's and F8's, and a second run
+  // should not have to be found again in the general channel's scrollback.
+  const classrunOutput = vscode.window.createOutputChannel("osd console");
+  context.subscriptions.push(classrunOutput);
   context.subscriptions.push(statusBar(context));
   context.subscriptions.push(testExplorer(output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.showDumps", () => showDumps(output)));
@@ -48,7 +54,13 @@ function activate(context) {
   context.subscriptions.push(diagnostics);
   context.subscriptions.push(vscode.commands.registerCommand("osd.check", () => check(diagnostics, output)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.activate", () => activateCurrent(diagnostics, output)));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.run", () => run(output)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.run", () => run(output, classrunOutput)));
+
+  // Q6b "Classrun" (docs/vscode-extension.md): F9, "Run as ABAP Application
+  // (Console)" -- osd.classrun on the current class, standalone (F9's own
+  // binding) or reached through F8's dispatch (run(), above) when the class
+  // implements IF_OO_ADT_CLASSRUN and has no ABAP Unit tests.
+  context.subscriptions.push(vscode.commands.registerCommand("osd.classrun", () => classrunCurrent(classrunOutput)));
 
   // Q2b "Runner" (docs/vscode-extension.md): a lens over each
   // `<set>_get_entityset` / `<set>_get_entity` method of a SEGW _DPC_EXT
@@ -316,11 +328,16 @@ async function activateCurrent(diagnostics, output) {
 // below), reach a real action; everything else answers the text of the
 // server work its turn would add.
 
-async function run(output) {
+async function run(output, classrunOutput) {
   const current = currentObject();
   if (current === undefined) return;
   const {editor, object} = current;
   const hasUnitTests = fs.existsSync(fileOf(path.dirname(editor.document.fileName), object, "testclasses"));
+  // Q6b: read straight off the buffer VS Code already has, not necessarily
+  // saved -- the same "the editor's own text" Ctrl+F2 already does for a
+  // check. Only asked for a CLAS; the regex would never match anything
+  // else, but there is no reason to run it over a table or a CDS view.
+  const hasClassrun = object.type === "CLAS" && implementsClassrun(editor.document.getText());
   let entitySet;
   if (object.type === "CLAS" && /_DPC_EXT$/i.test(object.name)) {
     const method = methodAtLine(editor.document.getText(), editor.selection.active.line);
@@ -336,7 +353,7 @@ async function run(output) {
       }
     }
   }
-  const action = runActionFor(object, {hasUnitTests, entitySet});
+  const action = runActionFor(object, {hasUnitTests, hasClassrun, entitySet});
   // Q4: a run is server work, so it is a point the table this object's own
   // heat comes from may have changed -- fire-and-forget, the same as the
   // timer, so F8 does not wait on it.
@@ -349,8 +366,43 @@ async function run(output) {
     await callEntitySet({service: action.service, set: action.set, kind: action.entityKind}, output);
     return;
   }
+  if (action.kind === "classrun") {
+    await classrunObject(object.name, classrunOutput);
+    return;
+  }
   output.appendLine(`osd run ${object.name}: ${action.text}`);
   vscode.window.showInformationMessage(`osd: ${action.text}`);
+}
+
+// ---- Q6b "Classrun": F9, ADT's "Run as ABAP Application (Console)" --
+// tools/adt-facade.mjs `oo/classrun`, one class at a time, its own output
+// channel so a run is not lost among the status bar's and F8's lines. A
+// dump still shows: the route answers 200 with what the class wrote and
+// then a trace, so the channel shows both rather than an error dialog with
+// nothing behind it.
+
+async function classrunCurrent(classrunOutput) {
+  const current = currentObject();
+  if (current === undefined) return;
+  const {object} = current;
+  if (object.type !== "CLAS") {
+    vscode.window.showInformationMessage(`osd: ${object.name} is not a class`);
+    return;
+  }
+  await classrunObject(object.name, classrunOutput);
+}
+
+async function classrunObject(name, classrunOutput) {
+  classrunOutput.show(true);
+  classrunOutput.appendLine(`--- classrun ${name} ---`);
+  try {
+    const {text, ms, generation} = await osd().classrun(name);
+    classrunOutput.appendLine(text);
+    classrunOutput.appendLine(`(${ms} ms${generation ? `, ${generation}` : ""})`);
+  } catch (e) {
+    classrunOutput.appendLine(`osd classrun ${name}: ${String(e.message ?? e)}`);
+    vscode.window.showErrorMessage(`osd classrun: ${String(e.message ?? e)}`);
+  }
 }
 
 // ---- Q2b "Runner": a CodeLens "▶ Call <Set>" above each

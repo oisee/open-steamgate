@@ -43,6 +43,7 @@ CLASS zcl_osd_scratch_user IMPLEMENTATION.
 ENDCLASS.
 `;
 
+
 describe("tools/adt-facade: the development loop", () => {
   let server;
   let port;
@@ -820,6 +821,78 @@ describe("tools/adt-facade: the development loop", () => {
       expect(xml).to.contain("<dataPreview:tableData");
       expect(xml).to.contain('dataPreview:name="TRAVEL_ID"');
       expect(xml).to.contain("<dataPreview:data>T0001</dataPreview:data>");
+    });
+  });
+
+  // Q6b "Classrun" (docs/vscode-extension.md, docs/adt-facade.md): ADT's F9,
+  // "Run as ABAP Application (Console)" -- POST /sap/bc/adt/oo/classrun/<name>,
+  // text/plain back. ZCL_OSD_CLASSRUN_DEMO (src/classrun/) is the tracked
+  // fixture every host builds, so this runs against the same object the
+  // live smoke and the VS Code extension's own fixture test use; the dump
+  // case below writes and activates a scratch class of its own, the way
+  // "activating" above does, because the tracked fixture never fails.
+  describe("Q6b: classrun", () => {
+    it("runs a class implementing IF_OO_ADT_CLASSRUN and answers what it wrote", async () => {
+      const res = await call("/oo/classrun/ZCL_OSD_CLASSRUN_DEMO", {method: "POST"});
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.contain("text/plain");
+      const text = await res.text();
+      expect(text).to.contain("hello from classrun");
+      // the table: a header of column names, then one tab-separated row per line
+      expect(text).to.match(/ID\tNAME/);
+      expect(text).to.contain("first");
+      expect(text).to.contain("second");
+    });
+
+    it("a class that does not implement IF_OO_ADT_CLASSRUN is refused, not silently run", async () => {
+      // written here rather than assumed from an earlier describe's own
+      // test, so this holds whether the suite runs whole or filtered
+      store.write("CLAS", SCRATCH, SOURCE);
+      const res = await call(`/oo/classrun/${SCRATCH}`, {method: "POST"});
+      expect(res.status).to.equal(400);
+      expect(await res.text()).to.contain("IF_OO_ADT_CLASSRUN");
+    });
+
+    it("an unknown class is 404, the same shape every other object read answers", async () => {
+      const res = await call("/oo/classrun/ZCL_NOT_A_THING_AT_ALL", {method: "POST"});
+      expect(res.status).to.equal(404);
+      expect(await res.text()).to.contain("exc:exception");
+    });
+
+    it("classrun is advertised in discovery, the system's own template (no accept types)", async () => {
+      const xml = await (await call("/discovery")).text();
+      expect(xml).to.contain('href="/sap/bc/adt/oo/classrun"');
+      expect(xml).to.contain('term="classrun" scheme="http://www.sap.com/adt/categories/oo"');
+      expect(xml).to.contain("/sap/bc/adt/oo/classrun/{classname}{?profilerId}");
+    });
+
+    // Q6b's own tracked fixture for this (src/classrun/zcl_osd_classrun_dumper.clas.abap)
+    // rather than a class written and activated in this test, on purpose:
+    // tools/osd-classrun.mjs shares this process's own live connection and
+    // module graph (it must, to run under the same dialog step every other
+    // request does), and Node pins that graph for the process's life, the
+    // same fact tools/osd-serve.mjs's own header documents for the whole
+    // project. A class transpiled a moment ago in THIS process is not
+    // guaranteed to import correctly yet; one that was already part of the
+    // tree when this suite's `before()` booted is.
+    it("a class that writes and then dumps: the output before it survives, the dump is recorded, nothing half-written", async function () {
+      this.timeout(30000);
+      const res = await call("/oo/classrun/ZCL_OSD_CLASSRUN_DUMPER", {method: "POST"});
+      expect(res.status).to.equal(200);
+      const text = await res.text();
+      expect(text).to.contain("before the dump");
+      expect(text).to.match(/Runtime error:.*ZERODIVIDE/i);
+
+      // the same table Q4's hotspots and Q6a's own notebook read
+      // (tools/osd-dumps.mjs ZOSD_DUMP): the dump this run just caused is in it
+      const sqlRes = await call("/datapreview/freestyle?rowNumber=5", {
+        method: "POST",
+        headers: {"content-type": "text/plain; charset=utf-8"},
+        body: "SELECT objname, runtime_error FROM zosd_dump WHERE objname = 'ZCL_OSD_CLASSRUN_DUMPER' ORDER BY dump_id DESC",
+      });
+      const sqlXml = await sqlRes.text();
+      expect(sqlXml).to.contain("ZCL_OSD_CLASSRUN_DUMPER");
+      expect(sqlXml.toUpperCase()).to.contain("ZERODIVIDE");
     });
   });
 });
