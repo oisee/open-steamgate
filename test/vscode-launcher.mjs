@@ -16,7 +16,7 @@ import {join} from "node:path";
 import {once} from "node:events";
 
 const {
-  PORT_RANGE, isFree, pickPort,
+  PORT_RANGE, isFree, pickPort, classify,
   looksLikeAbapGitFolder, isOpenSteamgateCheckout, decideStartTarget,
   detectWorkspaceLayers, packNameOf, ensureWorkspacePacks,
   waitForServing, servingOnce, terminate, Launcher,
@@ -60,6 +60,76 @@ describe("editors/vscode/launcher.js: ports", function () {
     } finally {
       await new Promise((r) => server.close(r));
     }
+  });
+
+  it("classifies an empty-log no-free-port launcher error", async () => {
+    const port = await pickPort({from: PORT_RANGE.from, to: PORT_RANGE.to});
+    const server = createServer();
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", resolve);
+    });
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-no-port-"));
+    const launcher = new Launcher({osdHome: process.cwd(), storageDir, portRange: {from: port, to: port}});
+    try {
+      const error = await rejects(launcher.start());
+      expect(error.logText).to.equal("");
+      expect(launcher.state).to.equal("stopped");
+      expect(classify(error.logText, error).actions).to.deep.equal(["Pick another port"]);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
+  it("classifies an empty-log selected-port EADDRINUSE launcher error", async () => {
+    const port = await pickPort({from: PORT_RANGE.from, to: PORT_RANGE.to});
+    const server = createServer();
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", resolve);
+    });
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-busy-port-"));
+    const launcher = new Launcher({osdHome: process.cwd(), storageDir});
+    try {
+      const error = await rejects(launcher.start({port}));
+      expect(error.code).to.equal("EADDRINUSE");
+      expect(error.logText).to.equal("");
+      expect(launcher.state).to.equal("stopped");
+      expect(classify(error.logText, error).actions).to.deep.equal(["Pick another port"]);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+});
+
+describe("editors/vscode/launcher.js: classify build and launcher logs", function () {
+  it("maps the real UNFETCHED refusal to fetching packs", () => {
+    const line = "osd-build: UNFETCHED: the build refuses: pack theirs fetches upstream from https://github.com/example/theirs at 0123456789ab and it is not there — run: node tools/osd-fetch.mjs";
+    expect(classify(line)).to.deep.equal({
+      kind: "unfetched",
+      message: "Some packs have not been fetched.",
+      actions: ["Fetch packs"],
+    });
+  });
+
+  it("maps a build's transpile failure to the log and full-rebuild actions", () => {
+    const line = "osd-build: FAILED: Syntax error in ZCL_BROKEN, zcl_broken.clas.abap:7";
+    expect(classify(line)).to.deep.equal({
+      kind: "build-failed",
+      message: "The build failed.",
+      actions: ["Open log", "Full rebuild"],
+    });
+  });
+
+  it("maps Node's EADDRINUSE startup line to choosing a different port", () => {
+    const line = "Error: listen EADDRINUSE: address already in use :::3531";
+    expect(classify(line)).to.deep.equal({
+      kind: "port-in-use",
+      message: "The osd port is already in use.",
+      actions: ["Pick another port"],
+    });
   });
 });
 

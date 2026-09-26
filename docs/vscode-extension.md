@@ -666,6 +666,16 @@ the base system, and their ABAP files are workspace layers. A development
 install without a packaged bundle already uses its single workspace folder as
 the system and does not offer an unavailable bundle choice.
 
+Launcher failures are classified from the build or server log, with the
+error code and message used when no log is available. An
+`UNFETCHED` build refusal offers **Fetch packs**, which runs
+`node tools/osd-fetch.mjs` in `osdHome` and starts the system again after a
+successful fetch. Other build failures offer **Open log** and **Full
+rebuild**; the latter runs `tools/osd-build.mjs --force` before starting.
+An `EADDRINUSE` failure offers **Pick another port** from the currently
+available ports in 3531–3539. The serving status tooltip includes
+`/osd/serving`'s `warm.reason` verbatim when `warm.state` is `cold`.
+
 **Q6b's notebook gap does not fall out for free.** The storage layer this
 spike adds *is* a permanent, pre-existing pack directory once a workspace
 layer exists, which is the missing half `docs/vscode-extension.md`
@@ -876,6 +886,8 @@ an ADT class.
 
 **Tests**: `test/vscode-launcher.mjs` (registered in `test/suites.json`) —
 pure: `pickPort`/`isFree` over the 3531-3539 range and its exhaustion,
+`classify(logText)` against the builder's `UNFETCHED` refusal, a transpile
+failure, and Node's `EADDRINUSE` line,
 `detectWorkspaceLayers`/`looksLikeAbapGitFolder` (`.abapgit.xml`, `src/
 *.clas.abap`, `src/*.prog.abap`, a `src/` with only XML is not a layer, a
 folder that does not exist is skipped), `packNameOf`'s stability,
