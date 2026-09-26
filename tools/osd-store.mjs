@@ -987,6 +987,24 @@ export class ObjectStore {
     return this.warmState;
   }
 
+  // What a client shows about the warm build (the VS Code extension's
+  // "warming up"): off, priming, primed, or cold with the reason it is
+  // cold, and what the process serving has taken.
+  warmStatus() {
+    const w = this.warm();
+    const c = w.compiler;
+    const state = w.on !== true ? "off" : w.priming !== undefined ? "priming" : c?.primed === true ? "primed" : "cold";
+    return {
+      state,
+      reason: state === "primed" || state === "priming" ? undefined : w.reason,
+      generation: c?.primed === true ? c.hash : undefined,
+      unverified: c === undefined ? [] : [...c.unverified],
+      swaps: this.served?.swaps ?? 0,
+      copies: c?.copies ?? 0,
+      lastVerify: w.last,
+    };
+  }
+
   // prime in the background; a failure leaves every build cold and says why
   warmUp() {
     const w = this.warm();

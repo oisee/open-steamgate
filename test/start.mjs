@@ -357,6 +357,17 @@ export function startServer(quiet) {
     // listener -- an editor's status bar, a dump list -- asks here, not at
     // the child's loopback port. Forwarded by what the registry says that
     // host serves, so a door added there needs no line here.
+    // /osd/serving is the child's answer plus what only this process knows:
+    // the warm build (tools/osd-warm.mjs), which lives here with the store
+    app.get("/osd/serving", async (req, res, next) => {
+      try {
+        const answer = await fetch(`${runtime.url}/osd/serving`, {signal: AbortSignal.timeout(5000)});
+        const body = await answer.json();
+        res.status(answer.status).json({...body, warm: facade.store.warmStatus()});
+      } catch {
+        next();
+      }
+    });
     for (const node of declaredNodeList.filter((n) => n.type === "HOST" && n.implementedIn === "tools/osd-serve.mjs")) {
       app.all(node.path, odataProxy(runtime));
     }
