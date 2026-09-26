@@ -3,6 +3,7 @@
 // answer means per method. The live half, against a real server, is in
 // test/osd-child.mjs.
 import {expect} from "chai";
+import express from "express";
 import {readFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import path from "node:path";
@@ -10,7 +11,8 @@ import {fileURLToPath} from "node:url";
 import {createRequire} from "node:module";
 import {checkReportDocument, activationSuccessDocument, activationFailureDocument, uriOf as facadeUriOf} from "../tools/adt-documents.mjs";
 import {entitySetMapFor} from "../tools/segw-entityset-map.mjs";
-import {tableDataDocument} from "../tools/adt-facade.mjs";
+import {adtRouter, tableDataDocument} from "../tools/adt-facade.mjs";
+import {ObjectStore} from "../tools/osd-store.mjs";
 
 const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseCheckReport, parseActivationResult, runActionFor,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
@@ -23,7 +25,8 @@ const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseChec
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
   demoFailureObjects, progTcodeOf, webguiTransactionUrl, webguiPanelHtml, runWebguiPanel, progRunLens,
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
-  serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
+  serviceContextValue, serviceActionContext, normalizeTransactionRow, appManifestDetails, httpTestFiles, closureTestNames,
+  dumpsForService, serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   warmStatusText, activationBuildText, closureTestsText,
   PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext, SYSTEM_STATUS_SETS,
   odataV2Results, systemOverviewModel,
@@ -54,6 +57,11 @@ function loadExtension(vscodeApi) {
 
 function loadSystemController(vscodeApi) {
   return loadExtension(vscodeApi).SystemController;
+}
+
+function loadTreeItems(vscodeApi) {
+  const {OsdTreeProvider, TransactionItem} = loadExtension(vscodeApi);
+  return {OsdTreeProvider, TransactionItem};
 }
 
 function vscodeStub(settings = {}) {
@@ -1296,12 +1304,10 @@ describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace la
 // The "OSD: System" panel's Services tree (docs/vscode-extension.md,
 // "Services tree"): grouping by kind, sorting inside a group, and the two
 // normalisers that turn either source's own row shape (ZOSD_STATUS_SRV's
-// ServiceSet today, the composing route's own `GET core/http/services`
-// tomorrow -- docs/ideas.md T8) into the one shape groupServices/
-// serviceLabel/serviceClassNodes read. No server, no VS Code: the live
-// round trip against a real osd (whichever route answers) is
-// test/osd-child.mjs; the route itself, when it exists, is
-// test/adt-devloop.mjs.
+// ServiceSet or the composing route's own `GET core/http/services`) into
+// the one shape groupServices/serviceLabel/serviceClassNodes read. Most
+// logic is pure; route coverage below uses an in-memory ObjectStore, while
+// the live round trip against a running osd is test/osd-child.mjs.
 describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)", function () {
   it("labels the four named kinds SEGW's own words, and title-cases a kind it has never seen", () => {
     expect(serviceGroupLabel("ODATA")).to.equal("OData");
@@ -1317,7 +1323,8 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     const icf = normalizeServiceSetRow({Path: "/sap/bc/osd/rfc/", Kind: "ICF", HandlerName: "ZCL_OSD_RFC", Text: "RFC channel", Pack: ""});
     expect(icf).to.deep.equal({
       kind: "ICF", name: undefined, path: "/sap/bc/osd/rfc/", text: "RFC channel", pack: undefined,
-      handler: "ZCL_OSD_RFC", handlerUri: undefined, app: undefined, mpc: undefined, mpcUri: undefined, source: undefined,
+      handler: "ZCL_OSD_RFC", handlerUri: undefined, handlerSource: undefined, app: undefined,
+      mpc: undefined, mpcUri: undefined, mpcSource: undefined, helpers: [], source: undefined,
     });
     const app = normalizeServiceSetRow({Path: "/app/flp.html#Travel-manage", Kind: "APP", HandlerName: "travels", Text: "Travels", Pack: "o4d"});
     expect(app.handler).to.equal(undefined);
@@ -1335,7 +1342,8 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     expect(odata).to.deep.equal({
       kind: "ODATA", name: "ZSTG_DEMO_SRV", path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV", text: "Demo", pack: undefined,
       handler: "ZCL_ZSTG_DEMO_DPC_EXT", handlerUri: "/sap/bc/adt/oo/classes/zcl_zstg_demo_dpc_ext",
-      app: undefined, mpc: "ZCL_ZSTG_DEMO_MPC_EXT", mpcUri: "/sap/bc/adt/oo/classes/zcl_zstg_demo_mpc_ext",
+      handlerSource: undefined, app: undefined, mpc: "ZCL_ZSTG_DEMO_MPC_EXT", mpcUri: "/sap/bc/adt/oo/classes/zcl_zstg_demo_mpc_ext",
+      mpcSource: undefined, helpers: [],
       source: "src/demo/zstg_demo.iwsv.xml",
     });
     const app = normalizeServiceRow({kind: "APP", path: "/app/index.html", text: "", handler: undefined, app: "travels"});
@@ -1370,6 +1378,19 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     expect(groupServices(undefined)).to.deep.equal([]);
   });
 
+  it("can regroup those same service rows by pack, keeping unpacked rows visible", () => {
+    const groups = groupServices([
+      {kind: "ODATA", pack: "o4d", path: "/z", text: "Z service"},
+      {kind: "APP", pack: "o4d", path: "/a", text: "A app"},
+      {kind: "ICF", pack: "zork", path: "/b", text: "B node"},
+      {kind: "APC", pack: undefined, path: "/c", text: "C channel"},
+    ], "pack");
+    expect(groups.map((g) => g.label)).to.deep.equal(["o4d", "Unpacked", "zork"]);
+    expect(groups[0].rows.map((r) => r.text)).to.deep.equal(["A app", "Z service"]);
+    expect(groups[1].rows.map((r) => r.kind)).to.deep.equal(["APC"]);
+    expect(groups.every((g) => g.groupBy === "pack")).to.equal(true);
+  });
+
   it("labels a row by its own text first, then its name, then its path -- the path always in description", () => {
     expect(serviceLabel({text: "Travels", name: "ZSTG_DEMO_SRV", path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"}))
       .to.deep.equal({label: "Travels", description: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"});
@@ -1387,6 +1408,31 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     expect(serviceContextValue("DAEMON")).to.equal("osd-service-daemon");
   });
 
+  it("advertises only URL, metadata, WebSocket, test, and source actions with real targets", () => {
+    expect(serviceActionContext({kind: "ODATA", path: "/odata"}, {sources: {dpc: {path: "dpc.abap"}}, testClasses: ["ZCL_TEST"]}))
+      .to.equal("osd-service-odata;url;metadata;test;source-dpc");
+    expect(serviceActionContext({kind: "APC", path: "/ws"}, {sources: {}, testClasses: []}))
+      .to.equal("osd-service-apc;url;ws");
+    expect(serviceActionContext({kind: "APP", path: ""}, {sources: {}, testClasses: []}))
+      .to.equal("osd-service-app");
+    expect(serviceActionContext({kind: "ODATA", path: "/odata"}, {sources: {dpc: {path: undefined}}, testClasses: []}))
+      .to.equal("osd-service-odata;url;metadata");
+  });
+
+  it("resolves Test and Source before a service row is first shown in the tree", async () => {
+    const api = vscodeStub();
+    const {OsdTreeProvider} = loadTreeItems(api);
+    const controller = {launcher: {state: "running"}, onDidChange: () => {}};
+    const row = {kind: "ODATA", path: "/sap/opu/odata/sap/ZDEMO", handler: "ZCL_DEMO_DPC_EXT"};
+    const provider = new OsdTreeProvider(controller, async () => ({sources: {dpc: {path: "src/demo.clas.abap"}}, testClasses: ["ZCL_TEST"]}));
+    try {
+      const [item] = await provider.serviceRowItems({rows: [row]});
+      expect(item.contextValue).to.equal("osd-service-odata;url;metadata;test;source-dpc");
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it("builds the URL a click or a context action opens: the plain path for APP/ICF/ODATA, $metadata beside it, ws:// for APC", () => {
     const base = "http://localhost:3591";
     const odata = {path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"};
@@ -1399,23 +1445,163 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     expect(serviceHttpUrl(app, base)).to.equal("http://localhost:3591/app/flp.html#Travel-manage");
   });
 
+  it("uses VS Code's external URI for a metadata link in a remote workspace", async () => {
+    const row = {path: "/sap/opu/odata/sap/ZDEMO"};
+    const externalized = [];
+    const url = await serviceMetadataExternalUrl(row, "http://localhost:3030", async (raw) => {
+      externalized.push(raw);
+      return "https://forwarded.example/sap/opu/odata/sap/ZDEMO/$metadata";
+    });
+    expect(externalized).to.deep.equal(["http://localhost:3030/sap/opu/odata/sap/ZDEMO/$metadata"]);
+    expect(url).to.equal("https://forwarded.example/sap/opu/odata/sap/ZDEMO/$metadata");
+  });
+
   it("expands an OData row to its DPC then its MPC, an ICF/APC row to its one handler, an APP row to nothing", () => {
     const odata = {kind: "ODATA", handler: "ZCL_X_DPC_EXT", handlerUri: "/sap/bc/adt/oo/classes/zcl_x_dpc_ext",
       mpc: "ZCL_X_MPC_EXT", mpcUri: "/sap/bc/adt/oo/classes/zcl_x_mpc_ext"};
     expect(serviceClassNodes(odata)).to.deep.equal([
-      {role: "dpc", name: "ZCL_X_DPC_EXT", uri: "/sap/bc/adt/oo/classes/zcl_x_dpc_ext"},
-      {role: "mpc", name: "ZCL_X_MPC_EXT", uri: "/sap/bc/adt/oo/classes/zcl_x_mpc_ext"},
+      {role: "dpc", name: "ZCL_X_DPC_EXT", uri: "/sap/bc/adt/oo/classes/zcl_x_dpc_ext", source: undefined},
+      {role: "mpc", name: "ZCL_X_MPC_EXT", uri: "/sap/bc/adt/oo/classes/zcl_x_mpc_ext", source: undefined},
     ]);
     // ServiceSet carries no uri at all -- still a node, just nothing to open by uri
     const icf = {kind: "ICF", handler: "ZCL_OSD_RFC", handlerUri: undefined};
-    expect(serviceClassNodes(icf)).to.deep.equal([{role: "handler", name: "ZCL_OSD_RFC", uri: undefined}]);
+    expect(serviceClassNodes(icf)).to.deep.equal([{role: "handler", name: "ZCL_OSD_RFC", uri: undefined, source: undefined}]);
     const apc = {kind: "APC", handler: "ZCL_OSD_APC_HANDLER", handlerUri: "/sap/bc/adt/oo/classes/zcl_osd_apc_handler"};
-    expect(serviceClassNodes(apc)).to.deep.equal([{role: "handler", name: "ZCL_OSD_APC_HANDLER", uri: "/sap/bc/adt/oo/classes/zcl_osd_apc_handler"}]);
+    expect(serviceClassNodes(apc)).to.deep.equal([{role: "handler", name: "ZCL_OSD_APC_HANDLER", uri: "/sap/bc/adt/oo/classes/zcl_osd_apc_handler", source: undefined}]);
     const app = {kind: "APP", app: "travels"};
     expect(serviceClassNodes(app)).to.deep.equal([]);
     // a kind this client has never seen, but that still carries a handler
     const daemon = {kind: "DAEMON", handler: "ZCL_OSD_DAEMON"};
-    expect(serviceClassNodes(daemon)).to.deep.equal([{role: "handler", name: "ZCL_OSD_DAEMON", uri: undefined}]);
+    expect(serviceClassNodes(daemon)).to.deep.equal([{role: "handler", name: "ZCL_OSD_DAEMON", uri: undefined, source: undefined}]);
+  });
+
+  it("keeps generated MPC helpers under their service row", () => {
+    const odata = {kind: "ODATA", handler: "ZCL_X_DPC_EXT", mpc: "ZCL_X_MPC_EXT", helpers: [
+      {role: "annotations", name: "ZCL_X_MPC_ANN", source: "gen/stg/x/zcl_x_mpc_ann.clas.abap"},
+      {role: "registry", name: "ZCL_STG_SEGW_REGISTRY", source: "gen/segw/zcl_stg_segw_registry.clas.abap"},
+    ]};
+    expect(serviceClassNodes(odata).map((node) => node.name)).to.deep.equal([
+      "ZCL_X_DPC_EXT", "ZCL_X_MPC_EXT", "ZCL_X_MPC_ANN", "ZCL_STG_SEGW_REGISTRY",
+    ]);
+    expect(serviceClassNodes({kind: "APP", app: "travel", helpers: [
+      {role: "registry", name: "ZCL_STG_BSP_REGISTRY", source: "gen/bsp/zcl_stg_bsp_registry.clas.abap"},
+    ]})).to.deep.equal([{role: "registry", name: "ZCL_STG_BSP_REGISTRY", uri: undefined,
+      source: "gen/bsp/zcl_stg_bsp_registry.clas.abap"}]);
+  });
+
+  it("resolves manifest identity, inbound intent, and dataSources to the OData service rows", () => {
+    const app = appManifestDetails({"sap.app": {
+      id: "stg.travel", title: "Travels", dataSources: {mainService: {uri: "../sap/opu/odata/sap/ZSTG_DEMO_SRV/"}},
+      crossNavigation: {inbounds: {"Travel-manage": {}, "Travel-display": {}}},
+    }}, {app: "stg.travel", source: "webapp"}, [
+      {kind: "ODATA", name: "ZSTG_DEMO_SRV", path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"},
+    ]);
+    expect(app).to.deep.equal({id: "stg.travel", title: "Travels", intent: "Travel-manage", folder: "webapp",
+      dataSources: [{key: "mainService", uri: "../sap/opu/odata/sap/ZSTG_DEMO_SRV/", service: "ZSTG_DEMO_SRV"}]});
+  });
+
+  it("collects HTTP test files by full service URL or a service URL assembled in source", () => {
+    expect(httpTestFiles([
+      {path: "test/e2e/travel.spec.mjs", source: `fetch(base + "/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet")`},
+      {path: "test/other.mjs", source: "ZSTG_DEMO_SRV but no OData request"},
+      {path: "test/http.mjs", source: "const url = '/sap/opu/odata/sap/ZOTHER_SRV'"},
+      {path: "test/other-service.mjs", source: "// ZSTG_DEMO_SRV is unrelated here\nfetch('/sap/opu/odata/sap/ZOTHER_SRV/Set')"},
+      {path: "test/assembled.mjs", source: "fetch('/sap/opu/odata/sap/' + 'ZSTG_DEMO_SRV' + '/Set')"},
+    ], "/sap/opu/odata/sap/ZSTG_DEMO_SRV", "ZSTG_DEMO_SRV")).to.deep.equal(["test/assembled.mjs", "test/e2e/travel.spec.mjs"]);
+  });
+
+  it("keeps non runnable report and dynpro transactions visible without an Open command", () => {
+    const {TransactionItem} = loadTreeItems(vscodeStub());
+    const report = new TransactionItem(normalizeTransactionRow({tcode: "ZREP", kind: "REPORT", runnable: false, reason: "unbound"}));
+    const dynpro = new TransactionItem(normalizeTransactionRow({tcode: "ZSCREEN", kind: "DYNPRO", runnable: false, reason: "missing screen"}));
+    const runnable = new TransactionItem(normalizeTransactionRow({tcode: "ZRUN", kind: "CLASS", runnable: true}));
+    expect(report.label).to.equal("ZREP");
+    expect(report.command).to.equal(undefined);
+    expect(dynpro.command).to.equal(undefined);
+    expect(runnable.command?.command).to.equal("osd.openWebguiTransaction");
+  });
+
+  it("unions closure tests and filters dumps whose mapped frames name the DPC or MPC", () => {
+    expect(closureTestNames({tests: ["ZCL_B", "ZCL_A"]}, {tests: ["ZCL_A", "ZCL_C"]})).to.deep.equal(["ZCL_A", "ZCL_B", "ZCL_C"]);
+    const row = {handler: "ZCL_X_DPC_EXT", mpc: "ZCL_X_MPC_EXT"};
+    expect(dumpsForService([
+      {frames: [{file: "src/demo/zcl_x_mpc_ext.clas.abap"}]},
+      {frames: [{file: "src/demo/zcl_other.clas.abap"}]},
+      {frames: []},
+    ], row)).to.have.lengthOf(1);
+  });
+
+  it("normalizes transaction registry reports and renders escaped service details with source links", () => {
+    expect(normalizeTransactionRow({tcode: "ZREP", text: "A report", kind: "REPORT", runnable: true, source: "gen/gui/zrep.tran.xml"}))
+      .to.include({tcode: "ZREP", kind: "REPORT", runnable: true, source: "gen/gui/zrep.tran.xml"});
+    const html = serviceDetailsHtml({row: {kind: "ODATA", text: "<Demo>", path: "/sap/opu/odata/sap/ZDEMO", handler: "ZCL_DEMO_DPC_EXT", mpc: "ZCL_DEMO_MPC_EXT"},
+      metadataUrl: "http://localhost/sap/opu/odata/sap/ZDEMO/$metadata",
+      sources: {dpc: {path: "src/zcl_demo_dpc_ext.clas.abap"}, mpc: {path: "src/zcl_demo_mpc_ext.clas.abap"}},
+      entitySets: [{set: "TravelSet", kind: "get_entityset"}],
+      closures: {dpc: {counts: {objects: 5, tests: 1}, tests: ["ZCL_TEST"]}, mpc: {counts: {objects: 4, tests: 0}, tests: []}},
+      readers: {dpc: {counts: {readers: 3, tests: 1}}, mpc: {counts: {readers: 1, tests: 0}}},
+      serving: {generation: "abc123", warm: {state: "primed"}}, dumps: [], httpTests: ["test/e2e/service.spec.mjs"]}, "testnonce");
+    expect(html).to.contain("&lt;Demo&gt;").and.to.contain("ABAP Unit by reference").and.to.contain("HTTP tests by URL");
+    expect(html).to.contain("TravelSet").and.to.contain("abc123").and.to.contain("data-source=\"dpc\"");
+    expect(html).to.contain("test/e2e/service.spec.mjs");
+  });
+});
+
+describe("editors/vscode/lib.js: service details data routes", () => {
+  it("reads xref closures and the transaction registry through their server routes", async () => {
+    const calls = [];
+    const client = new Osd("http://localhost:3620", async (url) => {
+      calls.push(url);
+      return {
+        ok: true, status: 200,
+        json: async () => url.includes("/transactions")
+          ? {transactions: [{tcode: "ZREP", text: "Converted report", kind: "CLASS", runnable: true, source: "gen/gui/zrep.tran.xml"}]}
+          : {type: "CLAS", name: "ZCL_DEMO_DPC_EXT", tests: ["ZCL_DEMO_TEST"], counts: {objects: 8, tests: 1}},
+      };
+    });
+    const closure = await client.closure("CLAS", "ZCL_DEMO_DPC_EXT");
+    const transactions = await client.transactions();
+    expect(closure.counts).to.deep.equal({objects: 8, tests: 1});
+    expect(transactions[0]).to.include({tcode: "ZREP", kind: "CLASS", source: "gen/gui/zrep.tran.xml"});
+    expect(calls[0]).to.equal("http://localhost:3620/sap/bc/adt/core/http/xref/closure?type=CLAS&name=ZCL_DEMO_DPC_EXT");
+    expect(calls[1]).to.equal("http://localhost:3620/sap/bc/adt/core/http/transactions");
+  });
+});
+
+describe("tools/adt-facade: service detail inventories", function () {
+  let server;
+  let base;
+
+  before(async function () {
+    const app = express();
+    const store = new ObjectStore({root: ROOT, libs: []});
+    app.use(adtRouter({store, data: {}, watch: false}).router);
+    server = app.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    base = `http://127.0.0.1:${server.address().port}/sap/bc/adt/core/http`;
+  });
+
+  after(async function () {
+    if (server?.listening) await new Promise((resolve) => server.close(resolve));
+  });
+
+  it("returns exact service class source paths and keeps generated helpers under OData/App rows", async () => {
+    const response = await fetch(`${base}/services`);
+    expect(response.status).to.equal(200);
+    const {services} = await response.json();
+    const demo = services.find((row) => row.kind === "ODATA" && row.name === "ZSTG_DEMO_SRV");
+    expect(demo.handlerSource).to.match(/\.clas\.abap$/);
+    expect(demo.mpcSource).to.match(/\.clas\.abap$/);
+    expect(demo.helpers).to.be.an("array");
+    expect(services.find((row) => row.kind === "APP").handlerSource).to.equal(undefined);
+  });
+
+  it("returns source-relative transaction registry rows including hand-declared transactions", async () => {
+    const response = await fetch(`${base}/transactions`);
+    expect(response.status).to.equal(200);
+    const {transactions} = await response.json();
+    expect(transactions.find((row) => row.tcode === "ZOSD_NOTE").source).to.equal("src/webgui/zosd_note.tran.xml");
+    expect(transactions.every((row) => row.source.endsWith(".tran.xml"))).to.equal(true);
   });
 });
 

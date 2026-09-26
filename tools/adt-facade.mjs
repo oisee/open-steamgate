@@ -21,7 +21,7 @@
 import {execFileSync} from "node:child_process";
 import express from "express";
 import {readFileSync, appendFileSync} from "node:fs";
-import {dirname, join} from "node:path";
+import {dirname, join, relative} from "node:path";
 import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions} from "./adt-session.mjs";
@@ -37,6 +37,7 @@ import {contentFoldersOf} from "./osd-packs.mjs";
 import {entitySetMapFor} from "./segw-entityset-map.mjs";
 import {testClassesIn} from "./osd-unit-run.mjs";
 import {serviceTree} from "./osd-status.mjs";
+import {transactions} from "./osd-tran-registry.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -1368,6 +1369,14 @@ export function adtRouter(options = {}) {
   router.get(`${BASE}/core/http/services`, (req, res) => {
     try {
       const classUri = (name) => (name !== undefined && name !== "" && store.exists("CLAS", name) ? uriOf("CLAS", name) : undefined);
+      const classSource = (name) => {
+        if (name === undefined || name === "") return undefined;
+        try {
+          return store.read("CLAS", name).file;
+        } catch {
+          return undefined;
+        }
+      };
       const rows = serviceTree(store.root).map((one) => ({
         kind: one.kind,
         name: one.name,
@@ -1376,14 +1385,42 @@ export function adtRouter(options = {}) {
         pack: one.pack,
         handler: one.kind === "APP" ? undefined : one.handler,
         handlerUri: one.kind === "APP" ? undefined : classUri(one.handler),
+        handlerSource: one.kind === "APP" ? undefined : classSource(one.handler),
         app: one.kind === "APP" ? one.handler : undefined,
         mpc: one.mpc,
         mpcUri: classUri(one.mpc),
+        mpcSource: classSource(one.mpc),
+        helpers: (one.kind === "ODATA" ? [
+          one.mpc?.replace(/_MPC_EXT$/i, "_MPC_ANN"),
+          "ZCL_STG_SEGW_REGISTRY", "ZCL_STG_SHLP_REGISTRY", "ZCL_STG_FM_REGISTRY",
+        ] : one.kind === "APP" ? ["ZCL_STG_BSP_REGISTRY"] : []).filter((name) => name && store.exists("CLAS", name)).map((name) => ({
+          name,
+          role: name.endsWith("_MPC_ANN") ? "annotations" : "registry",
+          uri: classUri(name),
+          source: classSource(name),
+        })),
         source: one.source,
       }));
       const counts = {};
       for (const row of rows) counts[row.kind] = (counts[row.kind] ?? 0) + 1;
       res.type("application/json; charset=utf-8").send(JSON.stringify({services: rows, counts}));
+    } catch (e) {
+      refuse(res, 500, "ExceptionInternalError", String(e?.message ?? e));
+    }
+  });
+
+  // The same transaction registry the WebGUI reads, including entries that
+  // cannot be entered in this runtime (reports and dynpros still belong in
+  // the developer's inventory). Source paths stay relative to the tree.
+  router.get(`${BASE}/core/http/transactions`, (req, res) => {
+    try {
+      const folders = [...contentFoldersOf(store.root), "gen"].map((folder) => join(store.root, folder));
+      const rows = transactions(folders).map((one) => ({
+        ...one,
+        file: undefined,
+        source: relative(store.root, one.file),
+      }));
+      res.type("application/json; charset=utf-8").send(JSON.stringify({transactions: rows}));
     } catch (e) {
       refuse(res, 500, "ExceptionInternalError", String(e?.message ?? e));
     }

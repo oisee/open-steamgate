@@ -3,7 +3,7 @@
   "displayName": "open-steamgate (osd)",
   "icon": "resources/icon.png",
   "description": "ABAP Unit in the Test Explorer, the serving generation and short dumps of a running osd",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "license": "MIT",
   "publisher": "open-steamgate",
@@ -71,7 +71,13 @@
           "type": "string",
           "enum": ["browser", "vscode"],
           "default": "browser",
-          "description": "Where a click on a Services tree row (App, ICF, OData) opens it: the system browser (vscode.env.openExternal), or a webview tab inside VS Code (an iframe of the running osd's own URL, the way the SEGW editor's and the gui-reports spike's own panels do it). APC rows have no default click either way -- a WebSocket URL does nothing opened as a page."
+          "description": "Where the inline Open action for an App, ICF, or OData row opens it: the system browser (vscode.env.openExternal), or a webview tab inside VS Code. A normal row click shows service details; APC has no page-open action."
+        },
+        "osd.services.groupBy": {
+          "type": "string",
+          "enum": ["kind", "pack"],
+          "default": "kind",
+          "description": "Group service rows by kind or pack in the OSD System tree."
         },
         "osd.database.system": {
           "type": "string",
@@ -180,9 +186,22 @@
       {"command": "osd.openLaunchpad", "title": "osd: Open launchpad", "icon": "$(rocket)"},
       {"command": "osd.openLaunchpadInVsCode", "title": "osd: Open launchpad inside VS Code"},
       {"command": "osd.refreshTree", "title": "osd: Refresh the view (no rebuild)", "icon": "$(refresh)"},
-      {"command": "osd.copyServiceUrl", "title": "osd: Copy URL"},
-      {"command": "osd.copyServiceWsUrl", "title": "osd: Copy ws:// URL"},
-      {"command": "osd.openServiceMetadata", "title": "osd: Open $metadata"}
+      {"command": "osd.groupServicesByKind", "title": "osd: Group services by kind", "icon": "$(list-tree)"},
+      {"command": "osd.groupServicesByPack", "title": "osd: Group services by pack", "icon": "$(package)"},
+      {"command": "osd.openHostDoor", "title": "osd: Open system endpoint"},
+      {"command": "osd.showServiceDetails", "title": "osd: Show service details"},
+      {"command": "osd.openServiceRow", "title": "Open", "icon": "$(play)"},
+      {"command": "osd.openServiceRowExternal", "title": "Open", "icon": "$(play)"},
+      {"command": "osd.testServiceClosure", "title": "Test"},
+      {"command": "osd.openServiceSourceDpc", "title": "Open DPC source"},
+      {"command": "osd.openServiceSourceMpc", "title": "Open MPC source"},
+      {"command": "osd.openServiceSourceHandler", "title": "Open handler source"},
+      {"command": "osd.openServiceSourceApp", "title": "Open app folder"},
+      {"command": "osd.openServiceSourceDeclaration", "title": "Open SICF/SAPC source"},
+      {"command": "osd.copyServiceUrl", "title": "Copy URL"},
+      {"command": "osd.copyServiceWsUrl", "title": "Copy WebSocket URL"},
+      {"command": "osd.openServiceMetadata", "title": "Open $metadata"},
+      {"command": "osd.copyServiceMetadata", "title": "Copy $metadata URL"}
     ],
     "menus": {
       "editor/title": [
@@ -195,6 +214,8 @@
         {"command": "osd.rebuildWarm", "when": "view == osdTree", "group": "navigation@3"},
         {"command": "osd.fullRebuild", "when": "view == osdTree", "group": "navigation@4"},
         {"command": "osd.refreshTree", "when": "view == osdTree", "group": "navigation@5"},
+        {"command": "osd.groupServicesByKind", "when": "view == osdTree && config.osd.services.groupBy == 'pack'", "group": "navigation@6"},
+        {"command": "osd.groupServicesByPack", "when": "view == osdTree && config.osd.services.groupBy == 'kind'", "group": "navigation@7"},
         {"command": "osd.openLaunchpad", "when": "view == osdTree", "group": "9_osd@1"},
         {"command": "osd.rebuild", "when": "view == osdTree", "group": "9_osd@2"}
       ],
@@ -208,9 +229,18 @@
         {"command": "osd.openSystemLog", "when": "view == osdTree && (viewItem == osd-state-running || viewItem == osd-state-building)", "group": "state@5"},
         {"command": "osd.stop", "when": "view == osdTree && viewItem == osd-state-building", "group": "state@6"},
         {"command": "osd.openLaunchpadInVsCode", "when": "view == osdTree && viewItem == osd-launchpad", "group": "inline"},
-        {"command": "osd.copyServiceUrl", "when": "view == osdTree && (viewItem == osd-service-app || viewItem == osd-service-icf || viewItem == osd-service-odata)", "group": "inline"},
-        {"command": "osd.openServiceMetadata", "when": "view == osdTree && viewItem == osd-service-odata", "group": "inline"},
-        {"command": "osd.copyServiceWsUrl", "when": "view == osdTree && viewItem == osd-service-apc", "group": "inline"}
+        {"command": "osd.openServiceRow", "when": "view == osdTree && (viewItem =~ /^osd-service-app(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-odata(;|$)/) && viewItem =~ /(^|;)url(;|$)/", "group": "inline"},
+        {"command": "osd.openServiceRowExternal", "when": "view == osdTree && (viewItem =~ /^osd-service-app(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-odata(;|$)/) && viewItem =~ /(^|;)url(;|$)/", "group": "1_open@1"},
+        {"command": "osd.openServiceMetadata", "when": "view == osdTree && viewItem =~ /^osd-service-odata(;|$)/ && viewItem =~ /(^|;)metadata(;|$)/", "group": "1_open@2"},
+        {"command": "osd.testServiceClosure", "when": "view == osdTree && (viewItem =~ /^osd-service-odata(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-apc(;|$)/) && viewItem =~ /(^|;)test(;|$)/", "group": "2_test@1"},
+        {"command": "osd.openServiceSourceDpc", "when": "view == osdTree && viewItem =~ /^osd-service-odata(;|$)/ && viewItem =~ /(^|;)source-dpc(;|$)/", "group": "3_source@1"},
+        {"command": "osd.openServiceSourceMpc", "when": "view == osdTree && viewItem =~ /^osd-service-odata(;|$)/ && viewItem =~ /(^|;)source-mpc(;|$)/", "group": "3_source@2"},
+        {"command": "osd.openServiceSourceHandler", "when": "view == osdTree && (viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-apc(;|$)/) && viewItem =~ /(^|;)source-handler(;|$)/", "group": "3_source@1"},
+        {"command": "osd.openServiceSourceApp", "when": "view == osdTree && viewItem =~ /^osd-service-app(;|$)/ && viewItem =~ /(^|;)source-app(;|$)/", "group": "3_source@1"},
+        {"command": "osd.openServiceSourceDeclaration", "when": "view == osdTree && (viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-apc(;|$)/) && viewItem =~ /(^|;)source-service(;|$)/", "group": "3_source@2"},
+        {"command": "osd.copyServiceUrl", "when": "view == osdTree && (viewItem =~ /^osd-service-app(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-odata(;|$)/) && viewItem =~ /(^|;)url(;|$)/", "group": "4_copy@1"},
+        {"command": "osd.copyServiceWsUrl", "when": "view == osdTree && viewItem =~ /^osd-service-apc(;|$)/ && viewItem =~ /(^|;)ws(;|$)/", "group": "4_copy@2"},
+        {"command": "osd.copyServiceMetadata", "when": "view == osdTree && viewItem =~ /^osd-service-odata(;|$)/ && viewItem =~ /(^|;)metadata(;|$)/", "group": "4_copy@3"}
       ]
     },
     "keybindings": [
