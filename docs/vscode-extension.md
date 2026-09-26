@@ -662,6 +662,131 @@ launcher always creates (even with zero detected workspace layers) so a
 notebook has somewhere to write into without `OSD_PACKS` needing to be
 set to something new after the process is already up.
 
+## Databases
+
+*2026-09-26.* B0 hard-coded `STG_DB=file`. The system already runs on
+PostgreSQL, HANA and DuckDB (`test/setup.mjs`, `docs/db-backends.md`) --
+this lets the extension pick which one, for the running system and,
+separately, for a Test Explorer run.
+
+**Two settings, not one.** `osd.database.system` (`sqlite` | `postgres` |
+`hana` | `duckdb`, default `sqlite`) is what `osd.start` runs on.
+`osd.database.tests` (`same` | `sqlite` | `postgres` | `hana` | `duckdb`,
+default `same`) is what a *test run* uses, when it should be a different
+one -- `system=sqlite`, `tests=hana` runs a live Fiori session on SQLite
+while the Test Explorer proves the same `_DPC_EXT` against a real HANA, in
+one window, with no second window and no second `osd.start`. Connection
+settings are plain, non-secret `settings.json`, per kind:
+`osd.database.postgres.{host,port,user,database}`,
+`osd.database.hana.{host,port,user,schema}`, and
+`osd.database.hana.fresh` (`STG_DB_FRESH`, below). Left empty, `host`/
+`port`/`user` fall through to the client's own default (`tools/hana-client.mjs`,
+`tools/postgres-client.mjs`) exactly as if the launcher were not involved
+at all; `database`/`schema` default to a name derived from `osd.home`
+(`OSD_<hash>` / `osd_<hash>`, `defaultDedicatedName` in `launcher.js`), so
+two windows on two different checkouts never collide in one shared HANA or
+PostgreSQL by writing into the same schema by accident.
+
+**A password is never a setting.** "osd: Set database password (HANA)" and
+"osd: Set database password (PostgreSQL)" (`vscode.window.showInputBox`
+with `password: true`) store it in `context.secrets` -- VS Code's own
+SecretStorage, not `settings.json`, not this repository. It is read back
+once, right before a launch or a test run, and travels only in that one
+process's environment (`HANA_PASSWORD` / `PGPASSWORD`), never in argv --
+`ps` on this host never shows it -- and, for a test run, in the JSON body
+of the façade request that starts it, never in the query string a server
+might log. Clearing the input box (an empty string) deletes the stored
+password rather than storing an empty one.
+
+**The env, one function, two callers.** `databaseEnv(config)`
+(`editors/vscode/launcher.js`) turns `{kind, host, port, user, database,
+schema, password, fresh}` into the `STG_DB`/`HANA_*`/`PG*` env
+`test/setup.mjs` reads, and only that -- unset fields leave the matching
+var unset. `osd.start` passes its result straight into the spawned
+`node test/run.mjs`'s environment, next to `STG_PORT` and the rest
+(unchanged for `sqlite`, which still gets `STG_DB_PATH` under this
+instance's own storage so a rebuild does not start from nothing; `duckdb`
+now gets the same treatment, `<storage>/db/osd.duckdb`). A Test Explorer
+run passes the same shape as `dbEnv` in `Osd#run`'s request body
+(`editors/vscode/lib.js`), read by `core/http/unit/object/run`
+(`unitRunDbEnv` in `tools/adt-facade.mjs`, an explicit allowlist of the env
+keys a body may set -- this is the one route in the façade that takes a
+body most callers never send, and it must not become a way to set an
+arbitrary env var in a spawned child) and handed to
+`tools/osd-unit.mjs`'s `runDetached` as `options.dbEnv`.
+
+**The detached run itself needed one change to take a different
+database.** `runDetached` always gave its child a throwaway SQLite file of
+its own -- the whole point of running detached is that a test's writes
+never land in the rows the live system answers from -- and did so
+unconditionally, even when the live system itself was already on HANA or
+PostgreSQL. `unitChildEnv` (`tools/osd-unit.mjs`) keeps that default
+exactly when no `dbEnv` is given, and only when `dbEnv.STG_DB` names
+`hana` or `postgres` skips the throwaway file: those two carry their own
+isolation (a dedicated schema or database the caller already chose), so
+nothing here should be layering a second, pointless one on top. `file` and
+`duckdb`, explicit or defaulted, still get the file. Tests:
+`test/osd-unit.mjs` (`unitChildEnv`, pure), `test/adt-facade.mjs`
+(`unitRunDbEnv`'s allowlist), `test/vscode-extension.mjs` (`Osd#run`'s
+body/headers), `test/vscode-launcher.mjs` (`databaseEnv`,
+`describeDatabase`, `defaultDedicatedName`, `duckdbAvailable`).
+
+**The stale-schema refusal surfaces, with its own fix.**
+`test/setup.mjs`'s HANA and DuckDB (persistent) branches refuse a schema
+this build did not stamp rather than silently reusing or dropping it, and
+name the fix in the thrown message: "Use a fresh HANA_SCHEMA, or explicitly
+recreate it with STG_DB_FRESH=1". That Error reaches the child's stderr
+and then a process exit -- never a "serving" answer -- so before this a
+person waiting on `osd.start` just saw "osd never answered ready" after
+the *full* build timeout, with the actual reason sitting unread in the
+Output channel. `Launcher.start()` now races `waitForServing` against the
+child's own exit and rejects immediately with the child's stderr tail when
+it exits first (`test/vscode-launcher.mjs`, "Launcher surfaces a child
+that exits before serving", a fake `test/run.mjs` standing in for the real
+one so the test needs no HANA). `SystemController.start()` recognizes
+`STG_DB_FRESH` in that message and offers "Set osd.database.hana.fresh and
+retry" on the error notification itself, rather than a person having to
+know the setting's name.
+
+**Found live, fixed on the way: a kept HANA schema died on its own check.**
+Verifying this against a real HANA (HANA Express, reached over the LAN --
+the reachability this task's own budget rules meant asking for it at all)
+surfaced a bug in code this task did not otherwise touch: `test/setup.mjs`'s
+HANA branch called `refuseUnmigratedHana(db, db.schema)` -- `db` itself,
+not `{query: (sql) => db.query(sql)}` like the DuckDB branch two lines
+above it does it. `refuseUnmigratedHana` destructures `query` off its first
+argument and calls it unbound, and `HanaDatabaseClient#query`'s very first
+line reads `this.trace`, so **every** connection to an already-built HANA
+schema (the ordinary case: a second run, or a second connection within one
+run, against a schema `STG_DB_FRESH` did not just drop) died with "Cannot
+read properties of undefined (reading 'trace')" before running a single
+test. Fixed by matching the DuckDB branch's own pattern; a regression test
+(`test/db-migrate.mjs`, "a query method that reads `this`") reproduces the
+trap with a plain object shaped the same way as `HanaDatabaseClient`, no
+`hdb` or real HANA needed to catch it again.
+
+**Packaging.** `hdb` (HANA) and `@abaplint/database-pg` (which pulls in
+`pg`, PostgreSQL) ship in the `.vsix` -- both pure JavaScript, confirmed by
+hand (`find node_modules/hdb node_modules/pg* -iname '*.node'` finds
+nothing; `hdb`'s only non-JS asset is `lz4-wasm-nodejs`'s `.wasm`, portable
+across platforms unlike a native `.node` addon). DuckDB's own native
+module (`@duckdb/node-api`) does **not** ship, unchanged from before this
+task (it was never on `RUNTIME_ROOTS`) -- `duckdbAvailable(osdHome)`
+checks for it before a build is even attempted, so `osd.database.system =
+duckdb` (or `tests = duckdb`) in a packaged install answers "DuckDB needs
+the native module; not in this package" instead of a build failure nobody
+asked for (`test/vscode-vsix.mjs`).
+
+**Status.** The tree's state row and the ▶/■ status bar's tooltip read
+`Launcher#databaseLabel` (`describeDatabase`, built from the config alone,
+so it never carries a password and is available before any connection is
+made) -- "Running on :3611 · SQLite", "· HANA (schema OSD_A1B2C3D4)". The
+generation status bar item (the one that answers even for an `osd.url` this
+window did not itself start) reads the SERVER's own
+`databaseIdentity.engine` off `/osd/serving` instead
+(`tools/osd-database-identity.mjs`, pre-existing, a bounded public
+vocabulary that never serializes the connection).
+
 ## Services tree
 
 *2026-09-26.* Before this, "Services" was one flat list of every APP/APC/

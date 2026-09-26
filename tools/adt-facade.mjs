@@ -534,6 +534,47 @@ function rawBody(req) {
   });
 }
 
+// Env keys a caller of `core/http/unit/object/run` may set for that run's
+// OWN database (tools/osd-unit.mjs `unitChildEnv`, "run tests on a
+// different database" -- docs/vscode-extension.md, "Databases"). An
+// allowlist, not "anything the body sends": this reaches a spawned child's
+// environment, and the route otherwise takes no body at all, so naming the
+// keys explicitly excludes nothing a legitimate caller needs.
+export const UNIT_RUN_DB_ENV_KEYS = new Set([
+  "STG_DB", "STG_DB_FRESH", "STG_DB_TRACE",
+  "HANA_HOST", "HANA_PORT", "HANA_USER", "HANA_PASSWORD", "HANA_SCHEMA",
+  "HXE_HOST", "HXE_PORT", "HXE_USER", "HXE_PASSWORD", "OSD_HANA_PASSWORD_FILE",
+  "PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE",
+]);
+
+/** `{dbEnv}` out of a JSON request body, filtered to the allowlist above.
+ *  `undefined` for no body, an unparsable body, or a body with no `dbEnv`
+ *  of its own -- every existing caller sends no body at all and this must
+ *  leave that alone. */
+export async function unitRunDbEnv(req) {
+  const body = await rawBody(req);
+  if (body.length === 0) {
+    return undefined;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(body.toString("utf8"));
+  } catch {
+    return undefined;
+  }
+  const dbEnv = parsed?.dbEnv;
+  if (dbEnv === null || typeof dbEnv !== "object") {
+    return undefined;
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(dbEnv)) {
+    if (UNIT_RUN_DB_ENV_KEYS.has(key) && typeof value === "string") {
+      out[key] = value;
+    }
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
+}
+
 const STARTED = new Date().toISOString();
 
 export function adtRouter(options = {}) {
@@ -1254,9 +1295,10 @@ export function adtRouter(options = {}) {
       return;
     }
     try {
+      const dbEnv = await unitRunDbEnv(req);
       const runner = await store.unit();
       const plan = runner.classes(type, name);
-      const run = await runner.runDetached(type, name, selectedUnitPlan(plan, testClass, method));
+      const run = await runner.runDetached(type, name, {...selectedUnitPlan(plan, testClass, method), dbEnv});
       res.type("application/json; charset=utf-8").send(JSON.stringify(run));
     } catch (error) {
       const missing = error instanceof NotFound || error?.code === "NOT_FOUND";

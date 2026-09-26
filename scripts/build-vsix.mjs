@@ -163,7 +163,21 @@ function copyExcludingTop(srcDir, destDir, exclude) {
 // it is no direct dependency of the root package.json (it arrives with dev
 // tooling), which is why a list of "what the server imports" missed it and
 // the first install in a real globalStorage failed on it (2026-09-26)
-const RUNTIME_ROOTS = ["@abaplint/core", "@abaplint/runtime", "@abaplint/transpiler", "@abaplint/database-sqlite", "express", "js-yaml"];
+//
+// hdb (tools/hana-client.mjs) and @abaplint/database-pg (tools/postgres-client.mjs,
+// which pulls in `pg`) are the VS Code extension's own "osd.database.system
+// = hana / postgres" (docs/vscode-extension.md, "Databases"): both pure
+// JavaScript, checked by hand -- `find node_modules/hdb node_modules/pg*
+// -iname '*.node'` finds nothing, and hdb's only non-JS asset is
+// lz4-wasm-nodejs's `.wasm` (portable, unlike a native `.node` addon).
+// DuckDB (`@duckdb/node-api`) is native and stays OUT on purpose, same as
+// before -- editors/vscode/launcher.js's `duckdbAvailable` answers a plain
+// sentence instead of a build failure when a packaged install is asked
+// for it.
+const RUNTIME_ROOTS = [
+  "@abaplint/core", "@abaplint/runtime", "@abaplint/transpiler", "@abaplint/database-sqlite",
+  "@abaplint/database-pg", "hdb", "express", "js-yaml",
+];
 
 function runtimeModuleClosure() {
   const lock = JSON.parse(readFileSync(join(ROOT, "package-lock.json"), "utf8"));

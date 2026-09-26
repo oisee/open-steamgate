@@ -64,7 +64,7 @@ ENDCLASS.
 describe("packaging: the .vsix installs and runs outside this checkout (docs/vscode-extension.md, Packaging)", function () {
   this.timeout(240000);
 
-  let launcher, port, unzipDir, storageDir, globalStorageDir;
+  let launcher, port, unzipDir, storageDir, globalStorageDir, osdHome, LauncherClass;
 
   before(async function () {
     if (!built) {
@@ -84,12 +84,20 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
 
     const seedDir = join(extensionDir, "osd");
     expect(existsSync(join(seedDir, "test", "run.mjs")), "the .vsix carries a runnable osd/ seed").to.equal(true);
+    // hdb and @abaplint/database-pg (-> pg) travel with the package (both
+    // pure JS, docs/vscode-extension.md "Packaging"); the native DuckDB
+    // module does not, on purpose.
+    expect(existsSync(join(seedDir, "node_modules", "hdb")), "hdb ships in the .vsix").to.equal(true);
+    expect(existsSync(join(seedDir, "node_modules", "@abaplint", "database-pg")),
+      "@abaplint/database-pg ships in the .vsix").to.equal(true);
+    expect(existsSync(join(seedDir, "node_modules", "@duckdb")), "DuckDB's native module does NOT ship in the .vsix").to.equal(false);
 
     globalStorageDir = join(SCRATCH, "globalStorage"); // stands in for context.globalStorageUri
     // osd.home unset: this is the packaged path, materializing the bundled
     // seed rather than pointing at a dev checkout.
-    const osdHome = ensureMaterializedHome(seedDir, globalStorageDir, pkg.version);
+    osdHome = ensureMaterializedHome(seedDir, globalStorageDir, pkg.version);
     expect(osdHome).to.not.equal(seedDir, "the launcher must run the materialized copy, never the install folder");
+    LauncherClass = Launcher;
 
     storageDir = join(SCRATCH, "instance-storage"); // stands in for storageDirFor()
     launcher = new Launcher({osdHome, storageDir, workspaceFolders: [DEMO_WS], timeoutMs: 180000});
@@ -119,6 +127,23 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
     expect(res.status).to.equal(200);
     const body = await res.json();
     expect(body.d.results.length).to.be.at.least(1);
+  });
+
+  it("osd.database.system = duckdb refuses with a plain sentence, in a packaged install", async function () {
+    if (!built) {
+      this.skip();
+    }
+    const duckLauncher = new LauncherClass({
+      osdHome, storageDir: join(SCRATCH, "duckdb-instance-storage"),
+      workspaceFolders: [], database: {kind: "duckdb"},
+    });
+    let error;
+    try {
+      await duckLauncher.start();
+    } catch (e) {
+      error = e;
+    }
+    expect(error?.message).to.equal("DuckDB needs the native module; not in this package");
   });
 
   it("classrun of the workspace layer's ZCL_B0_HELLO prints", async function () {

@@ -35,6 +35,39 @@ const DURATION = {SHORT: "short", MEDIUM: "medium", LONG: "long"};
 // what the program element calls the object
 const ADT_TYPE = {CLAS: "CLAS/OC", INTF: "INTF/OI", PROG: "PROG/P", FUGR: "FUGR/F"};
 
+/** The environment `runDetached` spawns its child with: its own database,
+ *  always. A run inherits the server's environment, and since the server
+ *  keeps its rows in a file by default, an inherited STG_DB=file would have
+ *  the test writing into the rows the application serves. So the run gets a
+ *  file of its own -- a copy of the base image, made by its own setup --
+ *  and the file goes when the run does. Isolation is the point of a
+ *  detached run; this keeps it, exactly as before, when `options.dbEnv` is
+ *  not given.
+ *
+ *  `options.dbEnv` is the VS Code extension's "run tests on a different
+ *  database" setting (docs/vscode-extension.md, "Databases"): tests can run
+ *  on HANA while the live system stays on SQLite, or the other way round.
+ *  It is a plain env-shaped object (`{STG_DB: "hana", HANA_SCHEMA: ...}`),
+ *  never argv, so a password in it never shows in `ps`. `hana` and
+ *  `postgres` carry their own isolation -- a dedicated schema or database
+ *  the caller already chose -- so they get none of the throwaway-file
+ *  machinery below and `dbEnv` is passed through as given; `file` and
+ *  `duckdb`, explicit or defaulted, still get a file of their own, the same
+ *  as the no-`dbEnv` path. */
+export function unitChildEnv(options = {}, parentEnv = process.env) {
+  const dbEnv = options.dbEnv;
+  const requested = dbEnv?.STG_DB ?? parentEnv.STG_DB;
+  const ownsFile = dbEnv === undefined || (requested !== "hana" && requested !== "postgres");
+  if (ownsFile === false) {
+    return {env: {...parentEnv, ...dbEnv}, ownPath: undefined};
+  }
+  const ownPath = join(tmpdir(), `osd-unit-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}.sqlite`);
+  return {
+    env: {...parentEnv, ...dbEnv, STG_DB: requested === "duckdb" ? "duckdb" : "file", STG_DB_PATH: ownPath},
+    ownPath,
+  };
+}
+
 export class UnitRun {
   constructor(store = new ObjectStore()) {
     this.store = store;
@@ -275,22 +308,19 @@ export class UnitRun {
       if (options.method !== undefined) {
         args.push("--method", options.method);
       }
-      // Its own database, always. A run inherits the server's environment,
-      // and since the server keeps its rows in a file by default, an
-      // inherited STG_DB=file would have the test writing into the rows the
-      // application serves. So the run gets a file of its own — a copy of
-      // the base image, made by its own setup — and the file goes when the
-      // run does. Isolation is the point of a detached run; this keeps it.
-      const own = join(tmpdir(), `osd-unit-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}.sqlite`);
+      const {env, ownPath} = unitChildEnv(options);
       const [cmd, ...argv] = unitCommand(new URL(import.meta.url).pathname, args);
       const child = spawn(cmd, argv, {
         cwd: this.store.root,
         stdio: ["pipe", "pipe", "pipe"],
-        env: {...process.env, STG_DB: process.env.STG_DB === "duckdb" ? "duckdb" : "file", STG_DB_PATH: own},
+        env,
       });
       const tidy = () => {
+        if (ownPath === undefined) {
+          return;
+        }
         for (const suffix of ["", "-wal", "-shm", ".forking"]) {
-          rmSync(own + suffix, {force: true});
+          rmSync(ownPath + suffix, {force: true});
         }
       };
       child.stdin.end(JSON.stringify(plan));

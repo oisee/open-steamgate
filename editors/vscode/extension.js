@@ -17,7 +17,7 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   dataPreviewObjectOf, tablHasMandt, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText,
   transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, demoFailureObjects, progRunLens,
   groupServices, serviceLabel, serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes} = require("./lib.js");
-const {Launcher, ensureMaterializedHome} = require("./launcher.js");
+const {Launcher, ensureMaterializedHome, databaseEnv, defaultDedicatedName, describeDatabase} = require("./launcher.js");
 
 // Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
 // *.osdnb file opens as (package.json `contributes.notebooks`) and the
@@ -103,6 +103,105 @@ function workspaceFoldersFor(osdHome) {
     .filter((f) => path.resolve(f) !== resolvedHome);
 }
 
+// ---- databases (docs/vscode-extension.md, "Databases") -------------------
+//
+// `osd.database.system` picks what the running system itself sits on;
+// `osd.database.tests` (default "same") lets a detached ABAP Unit run sit
+// on a DIFFERENT one -- system=sqlite, tests=hana runs a live Fiori session
+// on SQLite while the Test Explorer proves the same DPC against a real
+// HANA. Connection settings (host/port/user/database or schema) are plain
+// `settings.json`, per kind; a password is never one of them -- it lives in
+// `context.secrets`, put there by "osd: Set database password (HANA)" /
+// "(PostgreSQL)", and is read back only right before it is handed to a
+// process's own environment (launcher.js `databaseEnv`, never argv, never a
+// tracked file).
+
+const HANA_PASSWORD_SECRET = "osd.database.hana.password";
+const POSTGRES_PASSWORD_SECRET = "osd.database.postgres.password";
+
+/** `{kind, host, port, user, database, schema, password, fresh}` for
+ *  `kind` (one of DATABASE_KINDS), read from `osd.database.<kind>.*` and
+ *  `context.secrets`. `osdHome` names the dedicated schema/database this
+ *  window defaults to when the setting is left empty (launcher.js
+ *  `defaultDedicatedName`), so two windows on two different checkouts never
+ *  collide in one shared HANA or PostgreSQL by accident. */
+async function databaseConfigFor(context, kind, osdHome) {
+  const config = vscode.workspace.getConfiguration("osd");
+  if (kind === "sqlite" || kind === "duckdb") {
+    return {kind};
+  }
+  const dedicated = defaultDedicatedName(osdHome ?? "");
+  if (kind === "postgres") {
+    return {
+      kind,
+      host: config.get("database.postgres.host", "").trim() || undefined,
+      port: config.get("database.postgres.port", 0) || undefined,
+      user: config.get("database.postgres.user", "").trim() || undefined,
+      database: config.get("database.postgres.database", "").trim() || `osd_${dedicated}`,
+      password: await context.secrets.get(POSTGRES_PASSWORD_SECRET),
+    };
+  }
+  if (kind === "hana") {
+    return {
+      kind,
+      host: config.get("database.hana.host", "").trim() || undefined,
+      port: config.get("database.hana.port", 0) || undefined,
+      user: config.get("database.hana.user", "").trim() || undefined,
+      schema: config.get("database.hana.schema", "").trim() || `OSD_${dedicated.toUpperCase()}`,
+      fresh: config.get("database.hana.fresh", false) === true,
+      password: await context.secrets.get(HANA_PASSWORD_SECRET),
+    };
+  }
+  throw new Error(`osd.database: unknown kind "${kind}"`);
+}
+
+/** `osd.database.system`'s own config -- what the launcher starts on. */
+async function systemDatabaseConfig(context, osdHome) {
+  const kind = vscode.workspace.getConfiguration("osd").get("database.system", "sqlite");
+  return databaseConfigFor(context, kind, osdHome);
+}
+
+/** `osd.database.tests`'s own config, or `undefined` for "same" (the
+ *  default) -- exactly the façade route's own default when no `dbEnv` is
+ *  sent at all (tools/adt-facade.mjs, tools/osd-unit.mjs `unitChildEnv`):
+ *  a detached run's usual throwaway SQLite file. */
+async function testsDatabaseConfig(context, osdHome) {
+  const kind = vscode.workspace.getConfiguration("osd").get("database.tests", "same");
+  if (kind === "same") {
+    return undefined;
+  }
+  return databaseConfigFor(context, kind, osdHome);
+}
+
+/** The `env: {STG_DB, HANA_..., PG...}` a run of tests should carry with it
+ *  over `Osd#run`'s own request body, whatever `osd.database.tests` is
+ *  right now -- `undefined` for "same", which sends no body at all (the
+ *  route's default, unchanged). */
+async function testsDbEnv(context, osdHome) {
+  const config = await testsDatabaseConfig(context, osdHome);
+  return config === undefined ? undefined : databaseEnv(config);
+}
+
+async function setDatabasePassword(context, kind) {
+  const secretKey = kind === "hana" ? HANA_PASSWORD_SECRET : POSTGRES_PASSWORD_SECRET;
+  const value = await vscode.window.showInputBox({
+    title: `osd: ${kind === "hana" ? "HANA" : "PostgreSQL"} password`,
+    password: true,
+    ignoreFocusOut: true,
+    placeHolder: "leave empty to clear the stored password",
+  });
+  if (value === undefined) {
+    return; // cancelled
+  }
+  if (value === "") {
+    await context.secrets.delete(secretKey);
+    vscode.window.setStatusBarMessage(`osd: ${kind} password cleared`, 4000);
+    return;
+  }
+  await context.secrets.store(secretKey, value);
+  vscode.window.setStatusBarMessage(`osd: ${kind} password stored`, 4000);
+}
+
 /** Owns the one Launcher this window may have running, and the config
  *  update that makes every other feature (Test Explorer, the lenses, the
  *  notebook, hotspots, the existing status bar) follow it: setting `osd.url`
@@ -129,11 +228,13 @@ class SystemController {
     if (this.launcher !== undefined && this.launcher.osdHome === osdHome && this.launcher.state !== "stopped") {
       return this.launcher;
     }
+    const database = await systemDatabaseConfig(this.context, osdHome);
     if (this.launcher === undefined || this.launcher.osdHome !== osdHome) {
       const launcher = new Launcher({
         osdHome,
         storageDir: storageDirFor(this.context, osdHome),
         workspaceFolders: workspaceFoldersFor(osdHome),
+        database,
       });
       launcher.on("log", (line) => this.output.append(line));
       launcher.on("state", () => this.emitter.fire());
@@ -142,6 +243,12 @@ class SystemController {
         vscode.window.showWarningMessage(`osd: the system stopped unexpectedly (code ${code ?? "?"}, signal ${signal ?? "?"})`);
       });
       this.launcher = launcher;
+    } else {
+      // Same osdHome, stopped: pick up whatever osd.database.* is now,
+      // rather than what it was the last time this window started -- a
+      // setting change must not need a window reload to take effect.
+      this.launcher.database = database;
+      this.launcher.databaseLabel = describeDatabase(database);
     }
     return this.launcher;
   }
@@ -171,14 +278,27 @@ class SystemController {
       return;
     }
     this.output.show(true);
-    this.output.appendLine(`--- osd start: ${launcher.osdHome} ---`);
+    this.output.appendLine(`--- osd start: ${launcher.osdHome} (${launcher.databaseLabel}) ---`);
     try {
       const result = await launcher.start();
       await this.#pointUrlAt(result.port);
       vscode.window.setStatusBarMessage(
-        `osd: running on :${result.port}, generation ${String(result.generation).slice(0, 8)}`, 5000);
+        `osd: running on :${result.port} · ${launcher.databaseLabel}, generation ${String(result.generation).slice(0, 8)}`, 5000);
     } catch (e) {
-      vscode.window.showErrorMessage(`osd start: ${String(e.message ?? e)}`);
+      const message = String(e.message ?? e);
+      // test/setup.mjs's own stale-schema refusal (HANA, DuckDB with
+      // STG_DB_PATH) names its own fix in its message; surface that
+      // verbatim rather than just "start failed", and offer the one
+      // setting that applies it without the person hunting for it.
+      if (/STG_DB_FRESH/.test(message) && launcher.database?.kind === "hana") {
+        vscode.window.showErrorMessage(`osd start: ${message}`, "Set osd.database.hana.fresh and retry").then((choice) => {
+          if (choice === undefined) return;
+          vscode.workspace.getConfiguration("osd").update("database.hana.fresh", true, vscode.ConfigurationTarget.Workspace)
+            .then(() => this.start());
+        });
+      } else {
+        vscode.window.showErrorMessage(`osd start: ${message}`);
+      }
     }
     this.emitter.fire();
   }
@@ -287,7 +407,7 @@ class OsdTreeProvider {
     const launcher = this.controller.launcher;
     const state = launcher?.state ?? "stopped";
     const label = state === "running"
-      ? `Running on :${launcher.port}, generation ${String(launcher.generation).slice(0, 8)}`
+      ? `Running on :${launcher.port} · ${launcher.databaseLabel}, generation ${String(launcher.generation).slice(0, 8)}`
       : state === "stopped" ? "Stopped"
         : `${state[0].toUpperCase()}${state.slice(1)}…`;
     const stateItem = new vscode.TreeItem(label);
@@ -585,7 +705,7 @@ function startStopStatusBar(context, controller) {
     const state = controller.launcher?.state ?? "stopped";
     if (state === "running") {
       item.text = "$(primitive-square) osd";
-      item.tooltip = `osd is running on :${controller.launcher.port} -- click to stop`;
+      item.tooltip = `osd is running on :${controller.launcher.port} · ${controller.launcher.databaseLabel} -- click to stop`;
       item.command = "osd.stop";
     } else if (state === "stopped") {
       item.text = "$(play) osd";
@@ -617,8 +737,10 @@ function activate(context) {
   const classrunOutput = vscode.window.createOutputChannel("osd console");
   context.subscriptions.push(classrunOutput);
   context.subscriptions.push(statusBar(context));
-  context.subscriptions.push(testExplorer(output));
+  context.subscriptions.push(testExplorer(context, output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.showDumps", () => showDumps(output)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.setHanaPassword", () => setDatabasePassword(context, "hana")));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.setPostgresPassword", () => setDatabasePassword(context, "postgres")));
 
   // Q4 "Hotspots" (docs/vscode-extension.md): line decorations and an
   // explorer badge off ZOSD_DUMP, refreshed by command, by a timer and
@@ -703,6 +825,12 @@ let activeController;
 
 // ---- status bar: which generation the system serves, or that it is down
 
+// /osd/serving's own `databaseIdentity.engine` (tools/osd-database-identity.mjs):
+// a public, bounded vocabulary, never the connection -- read straight off
+// whatever osd.url points to, which need not be an instance this window
+// itself started (docs/vscode-extension.md, "Databases").
+const DB_ENGINE_LABEL = {sqlite: "SQLite", duckdb: "DuckDB", HDB: "HANA", postgres: "PostgreSQL"};
+
 function statusBar(context) {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10);
   item.command = "osd.showDumps";
@@ -714,8 +842,10 @@ function statusBar(context) {
       const dumps = await osd().dumps().catch(() => []);
       const generation = String(serving.generation ?? "?").slice(0, 8);
       const hot = serving.hot?.swaps ? ` +${serving.hot.swaps}` : "";
-      item.text = `$(server) osd ${generation}${hot}${dumps.length ? `  $(bug) ${dumps.length}` : ""}`;
-      item.tooltip = `${osd().url}\ngeneration ${serving.generation}\npid ${serving.pid}\n${dumps.length} short dump(s) -- click to list`;
+      const engine = serving.databaseIdentity?.engine;
+      const dbLabel = DB_ENGINE_LABEL[engine] ?? engine;
+      item.text = `$(server) osd ${generation}${hot}${dbLabel ? ` · ${dbLabel}` : ""}${dumps.length ? `  $(bug) ${dumps.length}` : ""}`;
+      item.tooltip = `${osd().url}\ngeneration ${serving.generation}\ndatabase ${dbLabel ?? "unknown"}\npid ${serving.pid}\n${dumps.length} short dump(s) -- click to list`;
       item.backgroundColor = dumpsSeen !== undefined && dumps.length > dumpsSeen
         ? new vscode.ThemeColor("statusBarItem.errorBackground") : undefined;
       dumpsSeen ??= dumps.length;
@@ -1454,7 +1584,7 @@ async function showReaders(found, output) {
 // object level, unchanged from before this: same object/class/method ids
 // (so a run's history still matches them), same discover()/run() shape.
 
-function testExplorer(output) {
+function testExplorer(context, output) {
   const controller = vscode.tests.createTestController("osd-abap-unit", "ABAP Unit (osd)");
   const objects = new Map(); // object item id -> {object, dir} -- unchanged meaning, any tree depth
   const groupNodes = new Map(); // group/subgroup/package id -> its TestItem
@@ -1748,6 +1878,12 @@ function testExplorer(output) {
 
   const runHandler = async (request, token) => {
     const run = controller.createTestRun(request);
+    // `osd.database.tests` (docs/vscode-extension.md, "Databases"): read
+    // once per run, not once per object -- it does not change mid-run, and
+    // a per-object read would mean one call to context.secrets per object.
+    // `undefined` for "same" sends no dbEnv at all, exactly the route's own
+    // default.
+    const dbEnv = await testsDbEnv(context, activeController?.launcher?.osdHome ?? osdHomeOf());
     // what was asked, expanded down to (or across) actual objects, then
     // grouped by object: the server runs one object at a time
     const asked = request.include ?? [...gather(controller.items)];
@@ -1782,7 +1918,7 @@ function testExplorer(output) {
         const methods = leaves(sel.item);
         methods.forEach((m) => run.started(m));
         try {
-          const answer = await osd().run(object, sel.testClass, sel.method);
+          const answer = await osd().run(object, sel.testClass, sel.method, dbEnv);
           const results = outcomes(answer, methods.map((m) => ({testClass: m.id.split("/")[1], method: m.id.split("/")[2]})));
           for (const m of methods) {
             const [, testClass, method] = m.id.split("/");

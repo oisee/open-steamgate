@@ -2,7 +2,7 @@ import {expect} from "chai";
 import express from "express";
 import {startServer} from "./start.mjs";
 import {nodeStructureDocument} from "../tools/adt-documents.mjs";
-import {adtRouter} from "../tools/adt-facade.mjs";
+import {adtRouter, unitRunDbEnv, UNIT_RUN_DB_ENV_KEYS} from "../tools/adt-facade.mjs";
 
 // The façade against the real server, the way a client meets it: the same
 // listener that serves OData also serves /sap/bc/adt/**, which is the whole
@@ -1317,5 +1317,44 @@ describe("tools/adt-facade: a host without a body parser", () => {
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+});
+
+// "run tests on a different database" (docs/vscode-extension.md,
+// "Databases"): `core/http/unit/object/run`'s own JSON body, sanitised to
+// UNIT_RUN_DB_ENV_KEYS before it ever reaches `runDetached` (and from there
+// a spawned child's environment) -- a fake `req` here, no server needed,
+// the same shape "a host without a body parser" above already uses for the
+// stream-reading fallback of `rawBody`.
+describe("tools/adt-facade: unitRunDbEnv (core/http/unit/object/run's dbEnv body)", () => {
+  const reqWith = (body) => ({body: Buffer.isBuffer(body) ? body : Buffer.from(body ?? "")});
+
+  it("no body at all -- every existing caller -- is undefined, not an error", async () => {
+    expect(await unitRunDbEnv(reqWith(undefined))).to.equal(undefined);
+    expect(await unitRunDbEnv(reqWith(""))).to.equal(undefined);
+  });
+
+  it("a body with no dbEnv, or one that is not JSON, is undefined", async () => {
+    expect(await unitRunDbEnv(reqWith(JSON.stringify({somethingElse: 1})))).to.equal(undefined);
+    expect(await unitRunDbEnv(reqWith("not json"))).to.equal(undefined);
+  });
+
+  it("keeps only the allowlisted keys, string-valued, and drops the rest", async () => {
+    const dbEnv = await unitRunDbEnv(reqWith(JSON.stringify({
+      dbEnv: {STG_DB: "hana", HANA_SCHEMA: "OSD_TEST", PATH: "/etc/passwd", NODE_OPTIONS: "--inspect", weird: 42},
+    })));
+    expect(dbEnv).to.deep.equal({STG_DB: "hana", HANA_SCHEMA: "OSD_TEST"});
+  });
+
+  it("UNIT_RUN_DB_ENV_KEYS covers every env var the HANA and PostgreSQL clients read", () => {
+    for (const key of ["STG_DB", "HANA_HOST", "HANA_PORT", "HANA_USER", "HANA_PASSWORD", "HANA_SCHEMA",
+      "PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE"]) {
+      expect(UNIT_RUN_DB_ENV_KEYS.has(key), key).to.equal(true);
+    }
+  });
+
+  it("an empty dbEnv, or one that is entirely filtered away, is undefined", async () => {
+    expect(await unitRunDbEnv(reqWith(JSON.stringify({dbEnv: {}})))).to.equal(undefined);
+    expect(await unitRunDbEnv(reqWith(JSON.stringify({dbEnv: {PATH: "/x"}})))).to.equal(undefined);
   });
 });
