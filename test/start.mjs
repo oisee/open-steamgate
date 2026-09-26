@@ -13,7 +13,7 @@ import {adtRouter} from "../tools/adt-facade.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
-import {credentials as tlsCredentials, fingerprint as tlsFingerprint, TLS_DIR} from "../tools/osd-tls.mjs";
+import {credentials as tlsCredentials, fingerprint as tlsFingerprint, dirOf as tlsDirOf} from "../tools/osd-tls.mjs";
 import {odataProxy, upgradeProxy} from "../tools/osd-proxy.mjs";
 import {devLoop} from "../tools/osd-dev.mjs";
 import {mountServices, services as icfServices, servicesFromRows, channels as pushChannels} from "../tools/osd-icf.mjs";
@@ -494,7 +494,7 @@ export function startServer(quiet) {
       console.log("No TLS: run `npm run osd:tls` to make a certificate, for a client that refuses plain HTTP");
     } else {
       console.log("HTTPS        on https://localhost:" + TLS_PORT + "  (self-signed, sha256 " + tlsFingerprint() + ")");
-      console.log("             the certificate is " + TLS_DIR + "/osd.crt; a client will ask once whether to trust it");
+      console.log("             the certificate is " + tlsDirOf(process.cwd()) + "/osd.crt; a client will ask once whether to trust it");
     }
   }
 

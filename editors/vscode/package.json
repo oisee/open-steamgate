@@ -11,8 +11,11 @@
   "main": "./extension.js",
   "activationEvents": [
     "workspaceContains:**/*.abap",
+    "workspaceContains:**/.abapgit.xml",
     "onNotebook:osd-sql-notebook",
-    "onCommand:osd.newSqlNotebook"
+    "onCommand:osd.newSqlNotebook",
+    "onCommand:osd.start",
+    "onView:osdTree"
   ],
   "contributes": {
     "configuration": {
@@ -21,7 +24,12 @@
         "osd.url": {
           "type": "string",
           "default": "http://localhost:3030",
-          "description": "The listener of a running osd (npm start, build/osd up)."
+          "description": "The listener of a running osd (npm start, build/osd up). Set automatically to the launched instance's own address while B0 (osd.start) is running one."
+        },
+        "osd.home": {
+          "type": "string",
+          "default": "",
+          "description": "B0 (docs/vscode-extension.md, \"B0 spike\"): the open-steamgate checkout osd.start builds and runs. Empty uses the workspace folder when the window has exactly one."
         },
         "osd.keymap": {
           "type": "string",
@@ -48,15 +56,41 @@
         "selector": [{"filenamePattern": "*.osdnb"}]
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {"id": "osd", "title": "OSD", "icon": "resources/osd.svg"}
+      ]
+    },
+    "views": {
+      "osd": [
+        {"id": "osdTree", "name": "System", "contextualTitle": "OSD"}
+      ]
+    },
     "commands": [
       {"command": "osd.showDumps", "title": "osd: Show short dumps"},
       {"command": "osd.refreshHotspots", "title": "osd: Refresh hotspots"},
       {"command": "osd.check", "title": "osd: Check"},
       {"command": "osd.activate", "title": "osd: Activate"},
-      {"command": "osd.run", "title": "osd: Run"},
+      {"command": "osd.run", "title": "osd: Run", "icon": "$(play)"},
       {"command": "osd.classrun", "title": "osd: Run as ABAP Application (Console)"},
-      {"command": "osd.newSqlNotebook", "title": "osd: New SQL notebook"}
+      {"command": "osd.newSqlNotebook", "title": "osd: New SQL notebook"},
+      {"command": "osd.start", "title": "osd: Start (build + run this system)", "icon": "$(play)"},
+      {"command": "osd.stop", "title": "osd: Stop", "icon": "$(primitive-square)"},
+      {"command": "osd.rebuild", "title": "osd: Rebuild", "icon": "$(refresh)"},
+      {"command": "osd.openLaunchpad", "title": "osd: Open launchpad", "icon": "$(link-external)"},
+      {"command": "osd.refreshTree", "title": "osd: Refresh System view", "icon": "$(refresh)"}
     ],
+    "menus": {
+      "editor/title": [
+        {"command": "osd.run", "when": "resourceExtname == .abap", "group": "navigation"}
+      ],
+      "view/title": [
+        {"command": "osd.start", "when": "view == osdTree", "group": "navigation@1"},
+        {"command": "osd.stop", "when": "view == osdTree", "group": "navigation@2"},
+        {"command": "osd.rebuild", "when": "view == osdTree", "group": "navigation@3"},
+        {"command": "osd.refreshTree", "when": "view == osdTree", "group": "navigation@4"}
+      ]
+    },
     "keybindings": [
       {"key": "ctrl+f2", "command": "osd.check", "when": "resourceExtname == .abap && config.osd.keymap == abap"},
       {"key": "ctrl+f3", "command": "osd.activate", "when": "resourceExtname == .abap && config.osd.keymap == abap"},

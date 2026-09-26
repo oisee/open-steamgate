@@ -38,8 +38,24 @@ function subjectAltName() {
   return "subjectAltName=" + names.join(",");
 }
 
+// B0 (docs/vscode-extension.md, "B0 spike"): a caller that starts the
+// system on somebody else's behalf -- the VS Code extension is the first
+// one -- must not write into `root`'s own `.local/tls` (that folder may be
+// shared, symlinked from a worktree's origin the way `tools/osd-worktree.mjs`
+// shares it, or simply not this caller's to put a key into) and must not
+// pick up a certificate that happens to be there either. OSD_TLS_DIR is the
+// override: when set, it names the directory outright and `root` is not
+// consulted at all.
 export function paths(root = process.cwd()) {
-  return {dir: join(root, TLS_DIR), key: join(root, TLS_DIR, KEY), cert: join(root, TLS_DIR, CERT)};
+  const dir = process.env.OSD_TLS_DIR ?? join(root, TLS_DIR);
+  return {dir, key: join(dir, KEY), cert: join(dir, CERT)};
+}
+
+// the directory a log line can name -- OSD_TLS_DIR when it is set, else the
+// tree-relative default; `paths()` above is the one place that decides this,
+// so this only reads it back rather than repeating the OSD_TLS_DIR check
+export function dirOf(root = process.cwd()) {
+  return paths(root).dir;
 }
 
 export function exists(root = process.cwd()) {

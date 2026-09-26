@@ -9,10 +9,12 @@
 const vscode = require("vscode");
 const path = require("node:path");
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   freestyleTableHtml, notebookFromJson, notebookToJson,
   hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun} = require("./lib.js");
+const {Launcher} = require("./launcher.js");
 
 // Q6a "Notebook SQL" (docs/vscode-extension.md): the notebook type a
 // *.osdnb file opens as (package.json `contributes.notebooks`) and the
@@ -25,6 +27,290 @@ function osd() {
   const url = vscode.workspace.getConfiguration("osd").get("url", "http://localhost:3030");
   if (osd.client?.url !== url.replace(/\/+$/, "")) osd.client = new Osd(url);
   return osd.client;
+}
+
+// ---- B0 "Pocket SAP" spike (docs/vscode-extension.md, "B0 spike"): the
+// extension starts and stops the system itself, over editors/vscode/launcher.js
+// (the pure half, unit-tested without VS Code in test/vscode-launcher.mjs).
+// Everything below is the VS Code glue: which folder is osdHome, where this
+// window's own storage is, the tree view, the status bar Start/Stop and
+// "Open launchpad".
+
+/** `osd.home` when set, else the workspace folder when the window has
+ *  exactly one -- the task's own resolution order. `undefined` when neither
+ *  applies (no workspace, or more than one folder and no setting), which
+ *  every caller below treats as "nothing to start". */
+function osdHomeOf() {
+  const configured = vscode.workspace.getConfiguration("osd").get("home", "").trim();
+  if (configured !== "") {
+    return configured;
+  }
+  const folders = vscode.workspace.workspaceFolders;
+  return folders?.length === 1 ? folders[0].uri.fsPath : undefined;
+}
+
+/** Every byte a launch needs beyond osdHome's own tracked files lives here:
+ *  the extension's own global storage, one subdirectory per osdHome (a
+ *  short hash of its path, so two different checkouts never share a
+ *  database or a TLS folder) -- never under osdHome and never under a
+ *  workspace folder. */
+function storageDirFor(context, osdHome) {
+  const hash = crypto.createHash("sha1").update(osdHome).digest("hex").slice(0, 16);
+  return path.join(context.globalStorageUri.fsPath, "osd-instance", hash);
+}
+
+/** The workspace folders to offer as layers, minus osdHome itself -- a
+ *  workspace that IS the open-steamgate checkout (the common case while
+ *  developing this extension) must never be layered on top of itself. */
+function workspaceFoldersFor(osdHome) {
+  const resolvedHome = osdHome === undefined ? undefined : path.resolve(osdHome);
+  return (vscode.workspace.workspaceFolders ?? [])
+    .map((f) => f.uri.fsPath)
+    .filter((f) => path.resolve(f) !== resolvedHome);
+}
+
+/** Owns the one Launcher this window may have running, and the config
+ *  update that makes every other feature (Test Explorer, the lenses, the
+ *  notebook, hotspots, the existing status bar) follow it: setting `osd.url`
+ *  to the launched address. `onDidChange` fires on every state change, for
+ *  the tree view and the ▶/■ status bar item to redraw from. */
+class SystemController {
+  constructor(context, output) {
+    this.context = context;
+    this.output = output;
+    this.launcher = undefined;
+    this.emitter = new vscode.EventEmitter();
+    this.onDidChange = this.emitter.event;
+  }
+
+  /** Builds (or rebuilds, if osdHome or the workspace folders changed) the
+   *  one Launcher this controller drives. Throws when there is no osdHome
+   *  to build -- callers show that as an error rather than starting nothing
+   *  silently. */
+  ensureLauncher() {
+    const osdHome = osdHomeOf();
+    if (osdHome === undefined) {
+      throw new Error("osd.home is not set, and this window has no single workspace folder to default to");
+    }
+    if (this.launcher !== undefined && this.launcher.osdHome === osdHome && this.launcher.state !== "stopped") {
+      return this.launcher;
+    }
+    if (this.launcher === undefined || this.launcher.osdHome !== osdHome) {
+      const launcher = new Launcher({
+        osdHome,
+        storageDir: storageDirFor(this.context, osdHome),
+        workspaceFolders: workspaceFoldersFor(osdHome),
+      });
+      launcher.on("log", (line) => this.output.append(line));
+      launcher.on("state", () => this.emitter.fire());
+      launcher.on("exit", ({code, signal}) => {
+        this.output.appendLine(`\n--- osd exited on its own (code ${code ?? "?"}, signal ${signal ?? "?"}) ---`);
+        vscode.window.showWarningMessage(`osd: the system stopped unexpectedly (code ${code ?? "?"}, signal ${signal ?? "?"})`);
+      });
+      this.launcher = launcher;
+    }
+    return this.launcher;
+  }
+
+  /** `osd.url` follows a launch: every existing feature that calls osd()
+   *  above reads that setting fresh on every call, so this alone is what
+   *  makes them all reach the instance this controller just started. A
+   *  single workspace folder gets the Workspace target so the setting does
+   *  not leak into the user's global settings across unrelated projects. */
+  async #pointUrlAt(port) {
+    const target = vscode.workspace.workspaceFolders?.length
+      ? vscode.ConfigurationTarget.Workspace
+      : vscode.ConfigurationTarget.Global;
+    await vscode.workspace.getConfiguration("osd").update("url", `http://localhost:${port}`, target);
+  }
+
+  async start() {
+    let launcher;
+    try {
+      launcher = this.ensureLauncher();
+    } catch (e) {
+      vscode.window.showErrorMessage(`osd: ${String(e.message ?? e)}`);
+      return;
+    }
+    if (launcher.state !== "stopped") {
+      vscode.window.showInformationMessage(`osd: already ${launcher.state}`);
+      return;
+    }
+    this.output.show(true);
+    this.output.appendLine(`--- osd start: ${launcher.osdHome} ---`);
+    try {
+      const result = await launcher.start();
+      await this.#pointUrlAt(result.port);
+      vscode.window.setStatusBarMessage(
+        `osd: running on :${result.port}, generation ${String(result.generation).slice(0, 8)}`, 5000);
+    } catch (e) {
+      vscode.window.showErrorMessage(`osd start: ${String(e.message ?? e)}`);
+    }
+    this.emitter.fire();
+  }
+
+  async stop() {
+    if (this.launcher === undefined) {
+      return;
+    }
+    await this.launcher.stop();
+    this.emitter.fire();
+  }
+
+  async rebuild() {
+    if (this.launcher === undefined) {
+      return this.start();
+    }
+    this.output.show(true);
+    this.output.appendLine("--- osd rebuild ---");
+    try {
+      await this.launcher.rebuild();
+      await this.#pointUrlAt(this.launcher.port);
+    } catch (e) {
+      vscode.window.showErrorMessage(`osd rebuild: ${String(e.message ?? e)}`);
+    }
+    this.emitter.fire();
+  }
+
+  async openLaunchpad() {
+    if (this.launcher?.state !== "running") {
+      vscode.window.showInformationMessage("osd: not running -- osd.start first");
+      return;
+    }
+    await vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${this.launcher.port}/app/flp.html`));
+  }
+}
+
+/** The Activity Bar tree: state, the layers (base osdHome plus every
+ *  detected workspace layer), and the Services this instance registers
+ *  (ZOSD_STATUS_SRV's own ServiceSet -- the "smallest existing mechanism"
+ *  the task named, no new server route). */
+class OsdTreeProvider {
+  constructor(controller) {
+    this.controller = controller;
+    this.emitter = new vscode.EventEmitter();
+    this.onDidChangeTreeData = this.emitter.event;
+    this.services = [];
+    controller.onDidChange(() => {
+      this.refreshServices().then(() => this.emitter.fire(), () => this.emitter.fire());
+    });
+  }
+
+  async refreshServices() {
+    const launcher = this.controller.launcher;
+    if (launcher?.state !== "running") {
+      this.services = [];
+      return;
+    }
+    try {
+      const res = await fetch(`http://localhost:${launcher.port}/sap/opu/odata/sap/ZOSD_STATUS_SRV/ServiceSet?$format=json`);
+      const body = await res.json();
+      this.services = (body?.d?.results ?? []).map((r) => ({path: r.Path, kind: r.Kind, text: r.Text}));
+    } catch {
+      this.services = [];
+    }
+  }
+
+  getTreeItem(element) {
+    return element;
+  }
+
+  getChildren(element) {
+    if (element === undefined) {
+      return this.rootItems();
+    }
+    if (element.contextValue === "osd-layers") {
+      return this.layerItems();
+    }
+    if (element.contextValue === "osd-services") {
+      return this.serviceItems();
+    }
+    return [];
+  }
+
+  rootItems() {
+    const launcher = this.controller.launcher;
+    const state = launcher?.state ?? "stopped";
+    const label = state === "running"
+      ? `Running on :${launcher.port}, generation ${String(launcher.generation).slice(0, 8)}`
+      : state === "stopped" ? "Stopped"
+        : `${state[0].toUpperCase()}${state.slice(1)}…`;
+    const stateItem = new vscode.TreeItem(label);
+    stateItem.iconPath = new vscode.ThemeIcon(
+      state === "running" ? "pass-filled" : state === "stopped" ? "circle-large-outline" : "sync~spin");
+    stateItem.contextValue = "osd-state";
+
+    const layers = new vscode.TreeItem("Layers", vscode.TreeItemCollapsibleState.Expanded);
+    layers.contextValue = "osd-layers";
+    layers.iconPath = new vscode.ThemeIcon("layers");
+
+    const services = new vscode.TreeItem("Services", vscode.TreeItemCollapsibleState.Collapsed);
+    services.contextValue = "osd-services";
+    services.iconPath = new vscode.ThemeIcon("plug");
+
+    return [stateItem, layers, services];
+  }
+
+  layerItems() {
+    const launcher = this.controller.launcher;
+    const osdHome = launcher?.osdHome ?? osdHomeOf();
+    const base = new vscode.TreeItem(osdHome === undefined ? "(osd.home not set, no single workspace folder)" : `base: ${osdHome}`);
+    base.iconPath = new vscode.ThemeIcon("folder-library");
+    const items = [base];
+    for (const layer of launcher?.layers ?? []) {
+      const item = new vscode.TreeItem(`workspace: ${layer.folder}`);
+      item.iconPath = new vscode.ThemeIcon("folder");
+      items.push(item);
+    }
+    return items;
+  }
+
+  serviceItems() {
+    if (this.controller.launcher?.state !== "running") {
+      return [new vscode.TreeItem("(start the system to see its services)")];
+    }
+    if (this.services.length === 0) {
+      return [new vscode.TreeItem("(none, or ZOSD_STATUS_SRV not reachable yet -- osd.refreshTree)")];
+    }
+    return this.services.map((s) => {
+      const item = new vscode.TreeItem(`${s.kind}  ${s.path}`);
+      item.description = s.text;
+      return item;
+    });
+  }
+}
+
+/** The ▶/■ status bar item: a second one from Q2's own generation display
+ *  above, because the two answer different questions -- "what is this osd
+ *  serving" versus "is a system running at all, and shall I start or stop
+ *  one" -- and B0 must work even when nothing is serving yet, which Q2's
+ *  item already assumes something is. */
+function startStopStatusBar(context, controller) {
+  const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 11);
+  const refresh = () => {
+    const state = controller.launcher?.state ?? "stopped";
+    if (state === "running") {
+      item.text = "$(primitive-square) osd";
+      item.tooltip = `osd is running on :${controller.launcher.port} -- click to stop`;
+      item.command = "osd.stop";
+    } else if (state === "stopped") {
+      item.text = "$(play) osd";
+      item.tooltip = "click to build and start osd (B0)";
+      item.command = "osd.start";
+    } else {
+      item.text = `$(sync~spin) osd ${state}`;
+      item.tooltip = `osd is ${state}`;
+      item.command = undefined;
+    }
+  };
+  refresh();
+  const off = controller.onDidChange(refresh);
+  item.show();
+  context.subscriptions.push({dispose: () => {
+    off.dispose();
+    item.dispose();
+  }});
+  return item;
 }
 
 function activate(context) {
@@ -79,7 +365,30 @@ function activate(context) {
   context.subscriptions.push(vscode.workspace.registerNotebookSerializer(NOTEBOOK_TYPE, sqlNotebookSerializer()));
   context.subscriptions.push(sqlNotebookController(output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.newSqlNotebook", newSqlNotebook));
+
+  // B0 "Pocket SAP" spike (docs/vscode-extension.md, "B0 spike"): the
+  // extension starts and stops the system itself. Its own Output channel,
+  // separate from "osd" above -- a build's and a server's own log is a
+  // different thing from what a check or an activation reports.
+  const systemOutput = vscode.window.createOutputChannel("osd system");
+  context.subscriptions.push(systemOutput);
+  const controller = new SystemController(context, systemOutput);
+  activeController = controller;
+  context.subscriptions.push(vscode.commands.registerCommand("osd.start", () => controller.start()));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.stop", () => controller.stop()));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.rebuild", () => controller.rebuild()));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpad", () => controller.openLaunchpad()));
+  const treeProvider = new OsdTreeProvider(controller);
+  context.subscriptions.push(vscode.window.registerTreeDataProvider("osdTree", treeProvider));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.refreshTree",
+    () => treeProvider.refreshServices().then(() => treeProvider.emitter.fire(), () => treeProvider.emitter.fire())));
+  context.subscriptions.push(startStopStatusBar(context, controller));
 }
+
+// the one controller this window's deactivate() stops, if any -- a plain
+// module-level slot rather than a class of its own, because there is never
+// more than one activate() per window
+let activeController;
 
 // ---- status bar: which generation the system serves, or that it is down
 
@@ -818,6 +1127,11 @@ async function runSqlCell(controller, cell, executionOrder, output) {
   }
 }
 
-function deactivate() {}
+// B0: a window that started the system stops it on the way out, rather than
+// leaving a build's server as an orphan the way closing a terminal would
+// not (VS Code awaits a returned promise here).
+async function deactivate() {
+  await activeController?.stop();
+}
 
 module.exports = {activate, deactivate};

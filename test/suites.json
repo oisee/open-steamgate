@@ -152,6 +152,7 @@
     "test/unit-run.mjs",
     "test/osd-dumps.mjs",
     "test/vscode-extension.mjs",
+    "test/vscode-launcher.mjs",
     "test/warm.mjs",
     "test/webgui.mjs",
     "test/write-boundary.mjs",
