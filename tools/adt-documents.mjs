@@ -1289,7 +1289,9 @@ export function activationSuccessDocument() {
 // a client reads an empty body as success and a document as failure, so a
 // document has to mean failure and nothing else.
 export function activationFailureDocument(objects) {
-  const message = (o, issue) => `    <msg:msg objDescr="${xmlEscape(o.name)}" type="E" line="${issue.line ?? 1}" href="${xmlEscape((uriOf(o.type, o.name) ?? "") + "/source/main#start=" + (issue.line ?? 1) + "," + (issue.column ?? 1))}" forceSupported="false">
+  // an issue's own severity (a warning is not an error), E when it has none
+  const type = (issue) => (/^w/i.test(String(issue.severity ?? "")) ? "W" : /^i/i.test(String(issue.severity ?? "")) ? "I" : "E");
+  const message = (o, issue) => `    <msg:msg objDescr="${xmlEscape(o.name)}" type="${type(issue)}" line="${issue.line ?? 1}" href="${xmlEscape((uriOf(o.type, o.name) ?? "") + "/source/main#start=" + (issue.line ?? 1) + "," + (issue.column ?? 1))}" forceSupported="false">
       <shortText><txt>${xmlEscape(issue.message)}</txt></shortText>
     </msg:msg>`;
 

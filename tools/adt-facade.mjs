@@ -1367,14 +1367,16 @@ export function adtRouter(options = {}) {
       return;
     }
     try {
+      const LIMIT = 5000;
       let closure = store.warm?.().compiler?.closureOf(type, name);
       let source = "warm";
+      let truncated = false;
       if (closure === undefined) {
         source = "xref";
         const typeOf = new Map(store.list().map((o) => [o.name, o.type]));
         const seen = new Set([name]);
         const todo = [name];
-        while (todo.length > 0 && seen.size < 5000) {
+        while (todo.length > 0 && seen.size < LIMIT) {
           const escaped = todo.pop().replace(/'/g, "''");
           const result = await data.query(
             `SELECT include FROM wbcrossgt WHERE otype = 'TY' AND name = '${escaped}' ` +
@@ -1387,6 +1389,8 @@ export function adtRouter(options = {}) {
             }
           }
         }
+        // a walk that stopped at the limit says so rather than looking whole
+        truncated = todo.length > 0;
         closure = [...seen].map((n) => ({type: n === name ? type : (typeOf.get(n) ?? "UNKNOWN"), name: n}));
       }
       const tests = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
@@ -1394,7 +1398,7 @@ export function adtRouter(options = {}) {
         .map((o) => ({...o, isTest: o.type === "CLAS" && tests.has(o.name)}))
         .sort((a, b) => a.name.localeCompare(b.name));
       res.type("application/json; charset=utf-8").send(JSON.stringify({
-        type, name, source,
+        type, name, source, truncated,
         closure: objects,
         tests: objects.filter((o) => o.isTest).map((o) => o.name),
         counts: {objects: objects.length, tests: objects.filter((o) => o.isTest).length},
@@ -1993,7 +1997,9 @@ export function adtRouter(options = {}) {
   const warmHeaders = (res, result) => {
     const t = result?.transpile ?? {};
     const w = store.warm?.();
-    res.set("X-OSD-Build", t.warm === true ? "warm" : `cold${w?.on === true && w.reason ? `; ${w.reason}` : ""}`.slice(0, 300));
+    // a header value is one line of printable ASCII, whatever a reason says
+    const header = (v) => String(v).replace(/[^\x20-\x7e]+/g, " ").slice(0, 300);
+    res.set("X-OSD-Build", header(t.warm === true ? "warm" : `cold${w?.on === true && w.reason ? `; ${w.reason}` : ""}`));
     if (result?.hot === true) res.set("X-OSD-Swap-Ms", String(result.ms));
     if (Array.isArray(t.closure)) {
       const tests = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
