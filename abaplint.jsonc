@@ -10,6 +10,14 @@
       "files": "/**/*.*"
     },
     {
+      // the converted reports and their ZIF_OSD_TRANSACTION wrappers
+      // (tools/osd-gui-convert.mjs, docs/gui-reports.md) -- not in
+      // "global" the way gen/tran is, the same reason gen/stg has its own
+      // entry rather than being added there
+      "folder": "/gen/gui",
+      "files": "/**/*.*"
+    },
+    {
       // everything but src/tcp: open-abap-apc carries the APC family, with
       // the five methods and the alias chain a real handler needs, and core
       // still has the two-method version. Two of the same file is an error,
@@ -83,7 +91,19 @@
       // upstream; naming them here costs three lines and keeps the rest out.
       "url": "https://github.com/oisee/open-abap-gui",
       "folder": "/.local/lars/open-abap-gui",
-      "files": "/{src/**/*.*,framework/zcl_gg_context_menu_state.clas.abap,framework/zcl_gg_host_html.clas.abap,framework/host/zcl_gg_host_surface.clas.abap}"
+      // gui-reports spike (docs/gui-reports.md): the converted-report bridge
+      // drives zcl_gg_host_runtime, which reaches nearly all of framework/ --
+      // node tools/osd-closure.mjs .local/lars/open-abap-gui/framework
+      // zcl_gg_host_runtime says 45 of 50. Kept as an explicit allow-list of
+      // subfolders (the open-abap-core entry above does the same for
+      // src/tcp) rather than framework/** with an exclude, both because a
+      // per-dependency exclude is not a key this file's other entries use
+      // and to leave framework/http and framework/assets out for the same
+      // reason abap_transpile.json does (docs/webgui.md: a dynpro host of
+      // its own, not this bridge's territory) -- *.clas.testclasses.abap
+      // never matches *.clas.abap, so a test class is never pulled in as a
+      // dependency by accident.
+      "files": "/{src/**/*.*,framework/{*.clas.abap,*.intf.abap,host/*.clas.abap}}"
     }
   ],
   "syntax": {
