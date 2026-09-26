@@ -254,14 +254,3 @@ revisit at the same time the `open-abap-odata` question is revisited.
   itself will not automatically bust a cached generation -- acceptable for
   a pinned-commit dependency, worth a line if the pin ever needs a manual
   bust.
-
-## An incident, for the record
-
-Two `pkill -f "node test/run.mjs"` calls during this spike's manual HTTP
-testing matched process names rather than PIDs, and one of them killed a
-`node test/run.mjs` that this session had not started (pid 36563, in the
-main checkout, command line `sh -c npm run transpile && node
-test/run.mjs`) alongside the one it meant to stop. The budget rule was
-"kill only pids you started"; a broad `pkill -f` cannot keep that promise
-when two checkouts run the same entry point under the same name. Whatever
-was using that server needs restarting by hand.
