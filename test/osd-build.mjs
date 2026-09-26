@@ -1,9 +1,9 @@
 import {expect} from "chai";
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {execFileSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
-import {build, hashOf, missingLibraries} from "../tools/osd-build.mjs";
+import {build, hashOf, liveHash, missingLibraries} from "../tools/osd-build.mjs";
 import {transpile} from "../tools/osd-transpile.mjs";
 
 // The builder over a tree of its own. What is cheap to check here is what
@@ -149,5 +149,59 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     }
     // and the map names its source the way the CLI names it, relative to the output
     expect(readFileSync(join(root, "output-lib", "zcl_one.clas.mjs.map"), "utf8")).to.contain("../src/zcl_one.clas.abap");
+  });
+});
+
+// Windows: a symlink to a directory needs an administrator or Developer Mode
+// there, a junction needs neither, so build/live, output/ and a generation's
+// roots are junctions on Windows (tools/osd-build.mjs linkDir). A junction's
+// target is absolute; OSD_DIR_LINK=junction takes that form here too, so the
+// path Windows takes is the path this test takes.
+describe("tools/osd-build: the links a generation is reached through, as junctions", function () {
+  this.timeout(120000);
+  let root;
+  let previous;
+  const clas = (n) => `CLASS zcl_junction DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    CLASS-METHODS n RETURNING VALUE(rv) TYPE i.\nENDCLASS.\nCLASS zcl_junction IMPLEMENTATION.\n  METHOD n.\n    rv = ${n}.\n  ENDMETHOD.\nENDCLASS.\n`;
+
+  before(() => {
+    previous = process.env.OSD_DIR_LINK;
+    process.env.OSD_DIR_LINK = "junction";
+    root = realpathSync(mkdtempSync(join(tmpdir(), "osd-junction-")));
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src", "zcl_junction.clas.abap"), clas(1));
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
+      input_folder: "src", input_filter: [], output_folder: "output", libs: [], write_unit_tests: true,
+      options: {ignoreSyntaxCheck: false, addFilenames: true, addCommonJS: true, unknownTypes: "compileError"},
+    }));
+    writeFileSync(join(root, "package.json"), "{}");
+    symlinkSync(resolve("node_modules"), join(root, "node_modules"), "dir");
+  });
+  after(() => {
+    if (previous === undefined) delete process.env.OSD_DIR_LINK;
+    else process.env.OSD_DIR_LINK = previous;
+    rmSync(root, {recursive: true, force: true});
+  });
+
+  it("builds, switches and resolves through absolute links", async () => {
+    const first = await build({root, generators: false});
+    const live = readlinkSync(join(root, "build", "live"));
+    expect(live.startsWith("/"), live).to.equal(true);
+    expect(live.endsWith(join("by-input", first.hash))).to.equal(true);
+    expect(liveHash(root)).to.equal(first.hash);
+    expect(readlinkSync(join(root, "output")).startsWith("/")).to.equal(true);
+    expect(readFileSync(join(root, "output", "zcl_junction.clas.mjs"), "utf8")).to.include("IntegerFactory.get(1)");
+
+    writeFileSync(join(root, "src", "zcl_junction.clas.abap"), clas(2));
+    const second = await build({root, generators: false});
+    expect(second.hash).to.not.equal(first.hash);
+    expect(liveHash(root)).to.equal(second.hash);
+    expect(readFileSync(join(root, "output", "zcl_junction.clas.mjs"), "utf8")).to.include("IntegerFactory.get(2)");
+  });
+
+  it("reads the live generation off a link with a trailing separator, as a junction reads back", () => {
+    const at = join(root, "build", "live");
+    rmSync(at);
+    symlinkSync(join(root, "build", "by-input", "abc123") + "/", at);
+    expect(liveHash(root)).to.equal("abc123");
   });
 });
