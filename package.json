@@ -10,6 +10,7 @@
     "transpile": "node tools/osd-build.mjs",
     "rebuild": "node tools/osd-build.mjs --force",
     "builds": "node tools/osd-build.mjs list",
+    "vsix": "node scripts/build-vsix.mjs",
     "binary": "bun scripts/build-binary.mjs",
     "binary:sea": "bun scripts/build-sea.mjs sea",
     "binary:bundle": "bun scripts/build-sea.mjs bundle",

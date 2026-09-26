@@ -535,35 +535,179 @@ before and after) — `tools/osd-runtime.mjs`'s own SIGTERM/SIGINT/SIGHUP
 handler reaps the grandchild before the parent exits, so the launcher only
 ever signals the one pid it spawned.
 
-**What packaging still needs**, none of it attempted here:
-- **Bundle size**: `output/` is prebuilt as part of `npm run transpile`
-  and this spike always rebuilds it from `src/`; a packaged extension
-  cannot ship `src/`, `node_modules`, `.local/lars/` and expect a build on
-  the user's machine to reproduce it, so either a prebuilt `output/`
-  (and `build/`) ships inside the `.vsix`, or the extension bundles (or
-  fetches) the whole tree it drives — ADR 0003 point 5 measured "no
-  native module loaded by default" and "`output/` is 64 MB", both of
-  which bound what "ship it" costs, but the spike itself never built a
-  `.vsix` to measure the real number.
-- **What stays in `osdHome` versus storage**: everything this spike wrote
-  is already storage-only (the database, the TLS directory, the pack
-  manifests); `osdHome` itself is only ever read, never written, by the
-  launcher — the open question packaging adds is whether `osdHome` is the
-  extension's own bundled copy of the tree (nothing to open separately) or
-  a checkout the user still has to clone (`osd.home` still has to point
-  somewhere).
-- **The remote/WSL note**: `code --extensionDevelopmentPath=...` is not
-  supported over a remote connection (SSH, a container, or — the case that
-  matters here, since this repository runs under WSL2 — the VS Code Server
-  a Remote-WSL window talks to), so a dev install there is a symlink from
-  `~/.vscode-server/extensions/<publisher>.<name>-<version>` to
-  `editors/vscode/`, picked up on the next window reload; this was not
-  exercised in this spike either (no VS Code window was opened by the
-  agent that wrote it), and packaging should turn it into a checked
-  script rather than a paragraph.
-- Marketplace metadata (an actual `publisher`, an icon that is not the
-  activity-bar glyph, a `README.md` for the listing, a `CHANGELOG.md`) —
-  explicitly out of scope for this spike per the task.
+## Packaging
+
+*2026-09-26.* One universal `.vsix` that carries the system inside it:
+`npm run vsix` (`scripts/build-vsix.mjs`) writes
+`build/vsix/osd-vscode-<version>.vsix`, built with the system `zip` CLI --
+not `vsce` -- as a plain zip of `[Content_Types].xml`, `extension.vsixmanifest`
+(both generated from `editors/vscode/package.json` the way `vsce` does,
+`Identity`/`DisplayName`/`Engine`/`ExtensionKind` read straight off it) and
+an `extension/` folder holding the extension's own files plus a runnable
+system tree at `extension/osd/`.
+
+**What is in `extension/osd/`**, found by tracing rather than guessing:
+`output/` (the current generation's real files, not the `build/live`
+symlink -- see "two false starts" below for why not the whole `build/`
+cache); `src/`, `gen/`, `packs/` (whole -- generators read pack content,
+not a layer list), `webapp/`, `tools/` (whole); `test/` minus `test/e2e/`
+and `test/fixtures/` (`abap_transpile.json`'s and `abaplint.jsonc`'s own
+exclude lists) -- not just `run.mjs`/`start.mjs`/`setup.mjs` and their own
+JS imports (grepped, including one dynamic import, `test/setup.mjs` ->
+`./seed.mjs`): `abaplint.jsonc`'s own `global.files` glob makes ALL of
+`test/` an input to the abaplint registry `tools/osd-store.mjs` builds at
+startup (`test/start.mjs`'s own `store.registry()` call, on the critical
+path to serving anything), non-JS ABAP fixtures under `test/unit/`
+included -- a fact a JS import graph can never surface, and the first of
+two things a dry read would have missed (below); `data/` (root seed rows,
+`tools/osd-packs.mjs`'s `dataDirsOf()`); `abap_transpile.json` and
+`abaplint.jsonc` themselves; the library sources they both name, at the
+exact relative paths (`.local/lars/<name>/...`), each trimmed to the
+lib's own `files` glob (abapGit, open-abap-gui, open-abap-odata, ajson,
+open-abap-apc) or, for a library with no `files` filter in either config
+(open-abap-core, express-icf-shim), everything except that library's own
+`node_modules/`, `output/` and `test/` -- its own build litter, never read
+by our transpile; `node_modules/`, traced from `package-lock.json`'s own
+dependency graph (lockfileVersion 3, flat `packages` map) starting at the
+five packages the run-time path actually imports (`@abaplint/core`,
+`@abaplint/runtime`, `@abaplint/transpiler`, `@abaplint/database-sqlite`,
+`express`) and walking `dependencies`/`optionalDependencies` -- 86 packages,
+46.1 MB, answered by npm's own resolution rather than a guess at "the
+transitive deps". `open-rfc` (live RFC) and `@duckdb/*` (not on the default
+path per this file) are left out on purpose, along with `.git`,
+`.local/worktrees`, `.local/corpus*`, every other `.local/lars/*` clone,
+Playwright, DuckDB, Postgres, docs, and every dev-only devDependency
+(webpack, mocha, chai, terser, the browserify shims).
+
+**Two false starts, kept here because the fix is the design.** The first
+version shipped `build/by-input/<hash>/` (the cache entry `output/` lives
+in) plus the `build/live` and root `output` symlinks, on the theory that a
+first build on the user's machine would recompute the SAME input hash
+and reuse it -- the ~19 s / ~4 s difference this spike measured. Trying it
+found two independent reasons this cannot work. `zip` without `-y`
+dereferences a symlink into a real directory when it archives one
+(confirmed by `unzip -l`: `build/live` came back as a directory, not a
+link), and `tools/osd-build.mjs`'s own live-switch has no fallback for
+that shape at `build/live` (unlike `output/`, which explicitly does) --
+`renameSync` throws `EISDIR` and the build fails outright. Separately, and
+enough on its own even with `-y`: the input hash is computed over each
+lib folder's WHOLE tree, not the `files` glob a lib entry restricts
+reading to (`tools/osd-build.mjs`'s `hashOf()`), so a lib trimmed to that
+glob (needed to keep the size down at all) never reproduces the hash of
+the untrimmed clone the shipped generation was built from -- the cache
+would miss on the first build regardless of the symlink problem. The fix
+is `copyOutput()`: ship `output/` alone, as plain files, nothing else
+under `build/`. `switchTo()` already tolerates exactly that shape on the
+first real build ("a real directory there is what every tree had before
+this existed", moved aside to `build/legacy-<ts>`), so this is not a
+special case taught to the build -- it is the case already there. A first
+start is therefore an ordinary full build, and a second start of the SAME
+materialized copy is fast because by then it has grown its own matching
+cache, the same way any other checkout's second build does.
+
+The second false start was a crash, not a design question: the packaged
+copy ran `tools/osd-build.mjs` to completion (1709 of the tree's 1727
+objects -- the trimmed libs cost a few unused files, nothing the build
+needs) and then `test/run.mjs` came up as far as "Listening on
+.../sap/opu/odata/sap/" before an uncaught `ENOENT` on `abaplint.jsonc` at
+the seed root -- read by `tools/osd-store.mjs`'s registry, never named in
+the task's own file list because it is not a JS import of anything.
+Copying it (and, per the paragraph above, the whole `test/` tree it
+requires) fixed it; a bare "trace the imports" pass would have missed
+both, which is why they are written down rather than folded quietly into
+the file list.
+
+**Materializing on first start** (`osd.home` unset, the packaged path):
+`ensureMaterializedHome()` (`editors/vscode/launcher.js`) copies
+`extension/osd/` into `<globalStorageUri>/osd-home-<version>/` once --
+`linkOrCopyTree()` hard-links every regular file and keeps a symlink as a
+symlink, so the copy costs close to nothing on one filesystem, falling
+back to a real copy across a device boundary (`EXDEV`). A marker file
+(`.osd-materialized`) makes a second call a no-op; a version change
+removes every OTHER `osd-home-*` directory first, so an update does not
+accumulate stale copies. `osd.home`, when set, still wins -- the
+dev path, unchanged, and the only path a checkout with no bundled
+`extension/osd/` (the symlinked dev install) ever takes. `build/` and
+`gen/` are then written inside that storage copy by the ordinary build,
+never inside `extension/osd/` itself. Pure-function tests: `test/vscode-launcher.mjs`
+("packaging" describe block) -- the hard-link/symlink shapes, the
+once-per-version rule, the old-version cleanup, all against a small fake
+seed, never the real 100+ MB one.
+
+**Measured** (this machine, `npm run vsix` then a direct run of
+`editors/vscode/launcher.js` against the unzipped `.vsix`, `osd.home`
+unset):
+
+| | |
+| --- | --- |
+| `.vsix` | 53.5 MB |
+| unpacked (`extension/osd/` + the extension's own files) | 148.7 MB |
+| -- `output/` (current generation, plain files, minus `*.mjs.map`) | 59.6 MB |
+| -- `node_modules/` (86 packages, traced from package-lock.json) | 46.1 MB |
+| -- `packs/` (o4d, zork, zvdb, lsd -- whole, media included) | 22.1 MB |
+| -- `src/` + `gen/` + `webapp/` + `tools/` + `test/` + `data/` | 13.2 MB |
+| -- `.local/lars/` (7 libraries, `files`-glob-trimmed where named) | 7.5 MB |
+| -- the extension's own files (`extension.js`, `lib.js`, `launcher.js`, `resources/`, `examples/`) | 0.1 MB |
+| first start (materialize + full build + serve) | 22.9 s (materialize 0.45 s, build+serve 22.4 s) |
+| second start, same materialized copy (cache hit) | 4.2 s (materialize ~0 -- marker file) |
+
+148.7 MB is under the ~150 MB the task set as a "stop and propose trims"
+line, so nothing was trimmed for size alone; `build-vsix.mjs` still warns
+past that line if a future change pushes it over, and the two candidates
+already named -- drop `packs/*/upstream` media (13 MB, the o4d demo's own
+images; the zork game data stays, since dropping it breaks the one thing
+that pack is for) and build `output/` on first start instead of shipping
+it (removing 59.6 MB from the `.vsix` at the cost of every first start
+paying the ~19-22 s full-transpile price this spike already measured,
+never only the ones that need it) -- are still there if it does.
+
+**Proving it runs outside this checkout**: `test/vscode-vsix.mjs`
+(registered in `test/suites.json`, skipped via `this.skip()` when
+`build/vsix` was never built, the same shape `test/osd-binary.mjs` already
+uses for the compiled binary) unzips the `.vsix` into a scratch folder
+under this checkout's own `.local/` (never `/tmp`), runs
+`ensureMaterializedHome()` against a scratch `globalStorageDir` with
+`osd.home` unset, and points `Launcher` at a workspace folder
+`.local/b0-demo-ws/` (gitignored, created by the test itself if missing:
+one abapGit-shaped class, `ZCL_B0_HELLO IMPLEMENTS IF_OO_ADT_CLASSRUN`,
+the same fixture this file's own "Live smoke" paragraph describes by
+hand). It checks `ZSTG_DEMO_SRV/TravelSet` answers and that `POST
+/sap/bc/adt/oo/classrun/ZCL_B0_HELLO` (the same CSRF/session round trip
+every other write in this extension already does) prints "hello from the
+B0 workspace layer", then stops and checks the spawned pid is actually
+gone. Passing, 2026-09-26.
+
+**Installed for real**: `code --install-extension build/vsix/osd-vscode-0.1.0.vsix`
+under this machine's Remote-WSL VS Code Server (the `code` on `PATH` here
+resolves to the Windows-side binary, which talks to the same server over
+the remote bridge) replaced the existing DEV install --
+`~/.vscode-server/extensions/open-steamgate.osd-vscode-0.1.0` had been a
+symlink to `editors/vscode/` (the usual dev-install shape this same file
+names above, since `--extensionDevelopmentPath` is not supported over a
+remote connection) -- with a real, extracted 149 MB copy carrying
+`extension/osd/`, `engines.vscode` and `extensionKind` read back correctly
+off its `package.json`. The dev symlink was restored afterward (`rm` the
+extracted copy, `ln -s .../editors/vscode` back in its place) so the usual
+edit-and-reload dev loop keeps working; anyone who wants the REAL install
+kept instead runs the `--install-extension` command above again and skips
+the `ln -s`.
+
+**`engines.vscode`**: `^1.101.0`. `tools/sqlite-file-client.mjs` (the
+`STG_DB=file` backend the launcher always selects) imports Node's own
+`node:sqlite`, which needs Node 22.5 or newer. Evidence:
+[ewanharris/vscode-versions](https://github.com/ewanharris/vscode-versions)
+(a maintained table of VS Code's own bundled Electron/Node/Chromium per
+release) shows 1.100.0 still on Node 20.19.0 and 1.101.0 (released
+2025-06-11) on Node 22.15.1 -- the first VS Code release with Node 22 at
+all, and already past 22.5. `extensionKind: ["workspace"]` is set too:
+the system has to run where the folder is, never only in a local UI host.
+
+**Left as gaps, not attempted here**: an actual marketplace `publisher`
+account and a `CHANGELOG.md` (explicitly out of scope per the task); an
+icon distinct from the activity-bar glyph; a non-WSL remote/SSH install
+proof (only Remote-WSL was exercised, on this machine); shrinking
+`packs/*/upstream` or building on first start instead of shipping
+`output/`, named above as the next trims if the size ever needs it.
 
 ## Next
 
