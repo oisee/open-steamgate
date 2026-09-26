@@ -980,6 +980,29 @@ not `vsce` -- as a plain zip of `[Content_Types].xml`, `extension.vsixmanifest`
 an `extension/` folder holding the extension's own files plus a runnable
 system tree at `extension/osd/`.
 
+Build it from a fresh checkout with Node 22.14+ or Node 24 (the repository's
+`.nvmrc` selects 24):
+
+```sh
+npm install
+npm run bootstrap
+npm run vsix
+```
+
+`npm run test:bootstrap-scratch` runs this sequence in a temporary clone
+outside the checkout and removes the clone afterward.
+
+Bootstrap reads `libs.lock.json` for the pinned library repositories and
+commits, fetches the packs named by their manifests, then runs the transpile to
+create `gen/`. A clone already at its locked commit is left untouched; a clone
+at another commit is reported without changing it. `npm run vsix` checks for
+installed dependencies, every library, and generated `gen/` before packaging;
+when one is missing it prints `run npm run bootstrap` as the next step. The
+preview and test workflows use the same lock for the patched libraries and
+transpiler. The Docker image build also reads the lock; `docker/image/sources.json`
+keeps its source inventory and licensing notes without a second copy of those
+commits.
+
 **What is in `extension/osd/`**, found by tracing rather than guessing:
 **not `output/`** -- see "two false starts, and a third" below for why a
 first design shipped it and a second one dropped it again; `src/`, `gen/`,

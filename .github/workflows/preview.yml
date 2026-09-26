@@ -32,15 +32,6 @@ jobs:
     timeout-minutes: 45
     env:
       PREVIEW_DIRECTORY: "${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}"
-      # The commit of the transpiler this deployment is pinned to, or empty
-      # to use whatever npm resolves. See the step below.
-      OSD_CORE_REF: "52ba51a5662b93bd5093a9c1adef64bd438ce7f0"
-      # The GUI substitutes, at the fork branch that raises sapevent on the
-      # HTML viewer (docs/webgui.md, backlog G.2). Without a folder the build
-      # clones the fork's default branch, which tracks upstream and does not
-      # have it, so the branch commit is pinned the same way as the core.
-      OSD_GUI_REF: "31cc8b3177569afb66c88a4ec9fd2e640a353877"
-      OSD_TRANSPILER_REF: "0263e42892063be5008eab42a5f836bc19385b82"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,6 +39,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Load the tracked source pins
+        run: node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
       # The public build needs a transpiler that is not on npm yet.
       #
       # Two of the fixes the media path rests on are still open pull
@@ -68,14 +61,11 @@ jobs:
       # So the deployment is pinned to a commit of an integration branch,
       # built here and linked the same way a developer links it. Pinned to a
       # SHA rather than a branch on purpose: a moving branch would make the
-      # public site depend on what somebody pushed this morning. Setting
-      # OSD_TRANSPILER_REF to an empty string turns the whole thing off and
-      # takes what npm gives. DEBT-2026-09-14-ci-pinned-transpiler: this
-      # comes out the day both pull requests are released.
+      # public site depend on what somebody pushed this morning. The SHA and
+      # repo are loaded from libs.lock.json at the start of the job.
       - name: Build the transpiler this deployment is pinned to
-        if: env.OSD_TRANSPILER_REF != ''
         run: |
-          git clone --filter=blob:none https://github.com/oisee/transpiler.git ../transpiler
+          git clone --filter=blob:none "$OSD_TRANSPILER_REPO" ../transpiler
           git -C ../transpiler checkout "$OSD_TRANSPILER_REF"
           # the root first: @types/node lives there, and tsc in each package
           # resolves it by walking up. --ignore-scripts because the root's
@@ -111,17 +101,8 @@ jobs:
       # runs, at a commit, into the folder abap_transpile.json names first.
       # DEBT-2026-09-14-ci-pinned-transpiler covers this pin as well: it
       # goes when the pull requests to open-abap-core are released.
-      - name: The library patches this deployment is pinned to
-        run: |
-          git clone --filter=blob:none https://github.com/oisee/open-abap-core.git .local/lars/open-abap-core
-          git -C .local/lars/open-abap-core checkout -q "$OSD_CORE_REF"
-          git clone --filter=blob:none https://github.com/oisee/open-abap-gui.git .local/lars/open-abap-gui
-          git -C .local/lars/open-abap-gui checkout -q "$OSD_GUI_REF"
-      # A preview is built in a clean checkout. The two patched libraries
-      # above are only part of the closure in abap_transpile.json; materialise
-      # every remaining pinned folder before the fail-fast build validates
-      # its inputs. Keep the list in the config rather than duplicating it in
-      # this workflow (the test job follows the same contract).
+      # Verify that every library folder named by the transpile config is at
+      # the ref in libs.lock.json before the fail-fast build validates inputs.
       - name: The library folders the preview reads
         run: |
           node tools/osd-libs.mjs

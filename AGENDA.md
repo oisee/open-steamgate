@@ -200,8 +200,8 @@ page), E.8 milestone 2 (a DIAG decoder in JavaScript) if wanted.
 
 1. `npm view @abaplint/runtime version` — a release above 2.13.87 carries
    #1862/#1864/#1867: drop those three commits from `local/osd-build`, take
-   the published runtime, move `OSD_TRANSPILER_REF` in
-   `.github/workflows/preview.yml`, and see Pages stay green.
+   the published runtime, update the transpiler entry in `libs.lock.json`,
+   and see Pages stay green.
 2. `gh pr view 1863 -R abaplint/transpiler`, `gh issue view 1866`, `gh issue
    view 4302 -R abaplint/abaplint` — any word from Lars decides whether
    #1866 becomes a PR and who fixes #4302.

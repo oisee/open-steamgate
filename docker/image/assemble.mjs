@@ -1,12 +1,13 @@
 import {cpSync, existsSync, mkdirSync, readFileSync, readlinkSync, readdirSync, symlinkSync, writeFileSync} from "node:fs";
 import {basename, join, resolve} from "node:path";
+import {approvedLicenseAssumption} from "./license-assumptions.mjs";
 
 const out = resolve(process.argv[2] ?? "/image");
 if (existsSync(out)) throw new Error(`Output must not exist: ${out}`);
 mkdirSync(out, {recursive: true});
 // Explicit roots: never copy .env, .git, local credentials, captures or databases.
 const roots = ["src", "gen", "data", "webapp", "test", "tools", "bin", "scripts", "docker/image",
-  "abap_transpile.json", "abaplint.jsonc", "package.json", "package-lock.json", "LICENSE", "node_modules"];
+  "abap_transpile.json", "abaplint.jsonc", "libs.lock.json", "package.json", "package-lock.json", "LICENSE", "node_modules"];
 const testOnly = new Set([
   "tools/adt-vsp-consume.go",
   "docker/image/rfc-probe.go",
@@ -42,9 +43,18 @@ cpSync(join("build", live), join(out, "build", live), {recursive: true, verbatim
 symlinkSync(live, join(out, "build", "live"));
 symlinkSync("build/live/output", join(out, "output"));
 const sources = JSON.parse(readFileSync("docker/image/sources.json", "utf8"));
-const {clients: _clients, probeSources: _probeSources, ...runtimeSources} = sources;
-const report = {sources: runtimeSources, libraries: [], npm: [], blockers: [], assumptions: []};
-for (const source of sources.libraries) {
+const lock = JSON.parse(readFileSync("libs.lock.json", "utf8"));
+const pins = new Map(lock.libraries.map((source) => [source.folder, source]));
+const runtimeLibraries = sources.libraries.map((source) => {
+  const pin = pins.get(source.folder);
+  if (pin === undefined) throw new Error(`No libs.lock.json entry for ${source.folder}`);
+  return {...pin, ...source};
+});
+const report = {
+  sources: {transpiler: lock.transpiler, libraries: runtimeLibraries},
+  libraries: [], npm: [], blockers: [], assumptions: [],
+};
+for (const source of runtimeLibraries) {
   const dir = `.local/lars/${source.folder}`;
   cpSync(dir, join(out, dir), {recursive: true, verbatimSymlinks: true, filter: path => ![".git", "node_modules"].includes(basename(path))});
   const files = readdirSync(dir).filter(name => /^(licen[cs]e|copying|notice)(\.|$)/i.test(name));
@@ -52,11 +62,7 @@ for (const source of sources.libraries) {
   const recognized = /^(?:The )?MIT License(?: \(MIT\))?\s*$/im.test(texts) && /Permission is hereby granted, free of charge/i.test(texts);
   report.libraries.push({...source, licenseFiles: files});
   if (source.licenseAssumption) {
-    const approved = new Map([
-      ["oisee/open-abap-odata", "bd9f1fb175e7b26678e48eb2e311a278a13ef91b"],
-      ["oisee/open-abap-gui", "31cc8b3177569afb66c88a4ec9fd2e640a353877"],
-    ]);
-    if (approved.get(source.repo) !== source.ref || source.licenseAssumption.license !== "MIT") {
+    if (!approvedLicenseAssumption(source)) {
       throw new Error("Unapproved license assumption");
     }
     report.assumptions.push({repo: source.repo, ref: source.ref, ...source.licenseAssumption});
@@ -66,7 +72,7 @@ for (const source of sources.libraries) {
 // The transpiler checkout is outside this source tree during build. Its three
 // shipped packages are copied through node_modules; extras is build-only and
 // must never slip into the runtime image without a separate license review.
-report.transpiler = {repo: sources.transpiler.repo, ref: sources.transpiler.ref, packages: []};
+report.transpiler = {...lock.transpiler, packages: []};
 for (const name of ["runtime", "transpiler", "cli"]) {
   const dir = `../transpiler/packages/${name}`;
   const meta = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
@@ -74,7 +80,7 @@ for (const name of ["runtime", "transpiler", "cli"]) {
   const licenseText = licenseFile ? readFileSync(join(dir, licenseFile), "utf8") : "";
   report.transpiler.packages.push({name: meta.name, license: meta.license, licenseFile});
   if (meta.license !== "MIT" || !/Permission is hereby granted, free of charge/i.test(licenseText)) {
-    report.blockers.push(`Review transpiler source license: ${meta.name}@${sources.transpiler.ref}`);
+    report.blockers.push(`Review transpiler source license: ${meta.name}@${lock.transpiler.ref}`);
   }
 }
 if (existsSync(join(out, "node_modules/@abaplint/transpiler-extras"))) {

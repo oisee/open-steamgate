@@ -75,20 +75,20 @@
 // See `docs/vscode-extension.md`, "Packaging", for the measured numbers this
 // produced and the trims proposed if the total ever creeps back up.
 import {execFileSync} from "node:child_process";
-import {createHash} from "node:crypto";
 import {
   cpSync, existsSync, mkdirSync, readdirSync, readFileSync,
   realpathSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
-import {minimatch} from "minimatch";
-import {unfetched, describeUnfetched} from "../tools/osd-fetch.mjs";
+import {describeVsixPreflight, vsixPreflightMissing} from "../tools/osd-lock.mjs";
+import {requireSupportedNode} from "../tools/osd-node-version.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const EXT_DIR = join(ROOT, "editors", "vscode");
 const BUILD_DIR = join(ROOT, "build", "vsix");
 const STAGE = join(BUILD_DIR, "stage");
+let minimatch;
 
 function log(msg) {
   console.log(`build-vsix: ${msg}`);
@@ -229,7 +229,7 @@ function copySeedTree(seedRoot) {
   for (const dir of ["src", "gen", "packs", "webapp", "tools", "data"]) {
     copyReal(join(ROOT, dir), join(seedRoot, dir));
   }
-  for (const file of ["abap_transpile.json", "abaplint.jsonc", "package.json"]) {
+  for (const file of ["abap_transpile.json", "abaplint.jsonc", "libs.lock.json", "package.json"]) {
     cpSync(join(ROOT, file), join(seedRoot, file));
   }
 
@@ -354,6 +354,16 @@ function vsixManifestXml(pkg) {
 // ---- entry point ------------------------------------------------------------
 
 export async function buildVsix() {
+  requireSupportedNode(process.versions.node, "build-vsix: ");
+  const preflight = describeVsixPreflight(vsixPreflightMissing(ROOT));
+  if (preflight !== undefined) {
+    const error = new Error(preflight);
+    error.code = "BOOTSTRAP_REQUIRED";
+    throw error;
+  }
+  ({minimatch} = await import("minimatch"));
+  const {unfetched, describeUnfetched} = await import("../tools/osd-fetch.mjs");
+
   const pkg = JSON.parse(readFileSync(join(EXT_DIR, "package.json"), "utf8"));
   rmSync(STAGE, {recursive: true, force: true});
   mkdirSync(STAGE, {recursive: true});
@@ -407,7 +417,8 @@ if (basename(process.argv[1] ?? "") === "build-vsix.mjs") {
   buildVsix().then(
     () => process.exit(0),
     (error) => {
-      console.error(String(error?.stack ?? error));
+      const message = String(error?.message ?? error).split(/\r?\n/)[0];
+      console.error(message.startsWith("build-vsix:") ? message : `build-vsix: ${message}`);
       process.exit(1);
     },
   );

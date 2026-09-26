@@ -33,6 +33,7 @@
 import {existsSync, readFileSync, readdirSync, statSync} from "node:fs";
 import {basename, isAbsolute, join, relative, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
+import {readLock} from "./osd-lock.mjs";
 
 export const MANIFEST = "osd-pack.json";
 export const PACKS_DIR = "packs";
@@ -85,14 +86,27 @@ export function packAt(root, dir) {
   // Declared here so the pack is reproducible from its manifest alone, and
   // so a build can tell a folder nobody fetched from one that is not there
   const sources = [declared.sources ?? []].flat().filter((s) => s !== null && typeof s === "object").map((s) => {
-    if (typeof s.folder !== "string" || s.folder === "" || typeof s.repo !== "string" || s.repo === "") {
-      throw new BadPack(dir, "a source needs a folder and a repo");
+    if (typeof s.folder !== "string" || s.folder === ""
+        || (typeof s.repo !== "string" && typeof s.lock !== "string")
+        || (s.lock === undefined && s.repo === "")) {
+      throw new BadPack(dir, "a source needs a folder and either a repo or a libs.lock.json library name");
+    }
+    let repo = s.repo;
+    let ref = String(s.ref ?? "main");
+    if (s.lock !== undefined) {
+      if (typeof s.lock !== "string" || s.repo !== undefined || s.ref !== undefined) {
+        throw new BadPack(dir, "a locked source cannot also set repo or ref");
+      }
+      const pin = readLock(root).libraries.find((lib) => lib.folder === s.lock);
+      if (pin === undefined) throw new BadPack(dir, `libs.lock.json has no library named ${s.lock}`);
+      repo = `https://github.com/${pin.repo}.git`;
+      ref = pin.ref;
     }
     return {
       folder: s.folder,
       dir: join(dir, s.folder),
-      repo: s.repo,
-      ref: String(s.ref ?? "main"),
+      repo,
+      ref,
       path: String(s.path ?? "src").replace(/^\/+|\/+$/g, ""),
       // what not to copy, as regular expressions over the path inside the
       // repository folder: a GUI-bound program, a test class, a file loader

@@ -426,11 +426,12 @@ The pictures are taken from the running thing:
 
 ## Run it
 
-Node 22 or 24.
+Node 22.14 or newer within major 22, or Node 24.x. `.nvmrc` selects Node 24.
 
 ```sh
 git clone https://github.com/oisee/open-steamgate && cd open-steamgate
 npm ci
+npm run bootstrap            # pinned library clones + packs, then generates gen/
 npm start                    # transpile + serve: http://localhost:3030/ is the launchpad
 npm run dev                  # the same, rebuilding and recycling as you edit ABAP
 npm test                     # abaplint + ABAP Unit + mocha over the wire
@@ -440,10 +441,16 @@ npm run start:duckdb         # the same on DuckDB (STG_DB_PATH=x.duckdb persists
 npm run unit:hana            # the same on a real HANA (see "ABAP in one database" below)
 npm run stg:compile -- src/demo/zstg_demo.stg.yaml --out gen/demo   # SEGW without the GUI
 npm run binary && build/osd up             # the same workbench as one Bun binary
+npm run vsix                  # package the VS Code extension after bootstrap
 ```
 
-The first transpile clones `open-abap-core`, `express-icf-shim` and our fork of
-`open-abap-odata` from GitHub unless `.local/` already holds them.
+`npm run bootstrap` reads `libs.lock.json`, clones the library set named by
+`abap_transpile.json` into `.local/lars/`, fetches the declared packs and runs
+the transpile so `gen/` exists. Existing library clones at their locked commit
+are left as they are; a clone at another commit is reported and kept untouched.
+Run bootstrap before `npm run vsix` from a fresh clone.
+`npm run test:bootstrap-scratch` repeats the install, bootstrap and VSIX build
+in a temporary clone outside the checkout, then removes it.
 
 ## ABAP and SQLScript in one database
 
