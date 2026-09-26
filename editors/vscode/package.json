@@ -43,6 +43,11 @@
           "default": 100,
           "description": "The row limit (rowNumber) a *.osdnb cell's SELECT is run with, against /sap/bc/adt/datapreview/freestyle."
         },
+        "osd.dataPreview.rowLimit": {
+          "type": "number",
+          "default": 100,
+          "description": "The row limit (rowNumber) F8's Data Preview on a TABL or a DDLS is run with, against /sap/bc/adt/datapreview/ddic or /cds."
+        },
         "osd.hotspots.refreshSeconds": {
           "type": "number",
           "default": 30,
@@ -88,7 +93,7 @@
     ],
     "menus": {
       "editor/title": [
-        {"command": "osd.run", "when": "resourceExtname == .abap", "group": "navigation"}
+        {"command": "osd.run", "when": "resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/", "group": "navigation"}
       ],
       "view/title": [
         {"command": "osd.start", "when": "view == osdTree", "group": "navigation@1"},
@@ -100,7 +105,7 @@
     "keybindings": [
       {"key": "ctrl+f2", "command": "osd.check", "when": "resourceExtname == .abap && config.osd.keymap == abap"},
       {"key": "ctrl+f3", "command": "osd.activate", "when": "resourceExtname == .abap && config.osd.keymap == abap"},
-      {"key": "f8", "command": "osd.run", "when": "resourceExtname == .abap && config.osd.keymap == abap && !inDebugMode"},
+      {"key": "f8", "command": "osd.run", "when": "resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && config.osd.keymap == abap && !inDebugMode"},
       {"key": "f9", "command": "osd.classrun", "when": "resourceExtname == .abap && config.osd.keymap == abap && !inDebugMode"},
       {"key": "ctrl+shift+f10", "command": "testing.runCurrentFile", "when": "resourceExtname == .abap && config.osd.keymap == abap"},
 

@@ -199,6 +199,35 @@ class Osd {
     return {...freestyleRows(xml), ms, generation};
   }
 
+  /** Q7 "F8 on a table or a CDS view" (docs/vscode-extension.md): the
+   *  façade's own datapreview/ddic (kind "TABL") or datapreview/cds (kind
+   *  "DDLS") route -- the same door ADT's own Data Preview uses, and the
+   *  one that already carries a DDIC field's label (tableDataDocument's
+   *  own dataPreview:description) and resolves a DDLS's own name the way
+   *  tools/adt-cds.mjs cdsEntityOf does, so this client hands it the CDS
+   *  entity's own name and never has to know its @AbapCatalog.sqlViewName.
+   *  `statement` is the SQL to run (lib.js dataPreviewQuery below); the
+   *  façade runs it as written, the same as freestyle() above. Timed and
+   *  carries the generation the same way; goes through request(), so a
+   *  name the store does not have throws with the façade's own message (a
+   *  404 naming the object, not swallowed into a client-side guess) and a
+   *  name it has but the database does not (an unsupported CDS join,
+   *  tools/cds2ddic.mjs's own skip) throws with the SQL engine's own
+   *  refusal -- neither reads as silently empty rows. */
+  async dataPreview(kind, name, statement, rowLimit) {
+    const route = kind === "DDLS" ? "cds" : "ddic";
+    const param = kind === "DDLS" ? "ddlSourceName" : "ddicEntityName";
+    const startedAt = Date.now();
+    const res = await this.request(
+      `/sap/bc/adt/datapreview/${route}?${param}=${encodeURIComponent(name)}&rowNumber=${encodeURIComponent(rowLimit)}`,
+      {method: "POST", headers: {"content-type": "text/plain; charset=utf-8"}, body: statement},
+    );
+    const ms = Date.now() - startedAt;
+    const xml = await res.text();
+    const generation = res.headers.get("x-osd-generation") ?? undefined;
+    return {...dataPreviewRows(xml), ms, generation};
+  }
+
   /** Q6b "Classrun" (docs/vscode-extension.md): F9, "Run as ABAP Application
    *  (Console)" -- POST tools/adt-facade.mjs `oo/classrun/<name>` with no
    *  body, text/plain back: everything the class wrote through
@@ -510,8 +539,16 @@ const RUN_TABLE = {
   INTF: () => ({kind: "not-yet", text: "not yet: an interface has nothing of its own to run"}),
   PROG: () => ({kind: "not-yet", text: "not yet: run a report -- no server route to run one headlessly yet"}),
   FUGR: () => ({kind: "not-yet", text: "not yet: a test form from GET /sap/bc/osd/rfc/functions/<NAME>, then POST /call"}),
-  TABL: () => ({kind: "not-yet", text: "not yet: data preview"}),
-  DDLS: () => ({kind: "not-yet", text: "not yet: data preview"}),
+  // Q7 (docs/vscode-extension.md): F8's data preview -- the façade's own
+  // datapreview/ddic (TABL) or datapreview/cds (DDLS) route, the same one
+  // ADT's own Data Preview uses. It resolves the name, and for a DDLS the
+  // twin view a CDS entity's own name reaches (tools/adt-cds.mjs
+  // cdsEntityOf) -- nothing here guesses a @AbapCatalog.sqlViewName.
+  // extension.js's openDataPreview does the rest; `ctx.name` is the file's
+  // own name (dataPreviewObjectOf below), not read off adtObjectOf, which
+  // knows neither type.
+  TABL: (ctx) => ({kind: "data-preview", objectType: "TABL", name: ctx.name}),
+  DDLS: (ctx) => ({kind: "data-preview", objectType: "DDLS", name: ctx.name}),
   IWSV: () => ({kind: "not-yet", text: "not yet: the Gateway client on the service document"}),
   SICF: () => ({kind: "not-yet", text: "not yet: open the node's URL"}),
 };
@@ -526,6 +563,106 @@ function runActionFor(object, ctx = {}) {
     return {kind: "not-yet", text: `not yet: ${object?.type ?? "this object"} has no F8 action`};
   }
   return entry({name: object?.name, ...ctx});
+}
+
+// ---- Q7 "F8 on a table or a CDS view" (docs/vscode-extension.md): the
+// rows the façade's own datapreview/ddic (a TABL) or datapreview/cds (a
+// DDLS) route answers, filtered to the runtime's own client the way a
+// real system's SADL would for a CDS view and Open SQL would not for a
+// plain SELECT (CLAUDE.md "Known traps": no implicit MANDT). Every
+// function here is pure -- extension.js's openDataPreview is the thin
+// wrapping, the same split Q2b/Q3/Q6a already use.
+
+const DATAPREVIEW_TABL_FILE = /^(.+?)\.tabl\.xml$/i;
+const DATAPREVIEW_DDLS_FILE = /^(.+?)\.ddls\.(?:asddls|xml)$/i;
+
+/** `{type, name}` for a file F8's data preview reaches: a TABL's own
+ *  `<table>.tabl.xml`, or a DDLS's `<view>.ddls.asddls` / its `.ddls.xml`
+ *  twin -- else undefined. adtObjectOf (above) does not know either type
+ *  (Check/Activate do not reach them), so `run()` asks this instead. The
+ *  name is the file's own base, upper-cased and namespace-mapped the same
+ *  way objectOf's is: for a TABL, the table the database has; for a DDLS,
+ *  the CDS entity's own name -- what tools/adt-cds.mjs cdsEntityOf and the
+ *  façade's datapreview/cds route resolve by, not the view's own
+ *  @AbapCatalog.sqlViewName, which this file never has to know. */
+function dataPreviewObjectOf(file) {
+  const base = path.basename(String(file ?? ""));
+  const tabl = DATAPREVIEW_TABL_FILE.exec(base);
+  if (tabl !== null) return {type: "TABL", name: tabl[1].replaceAll("#", "/").toUpperCase()};
+  const ddls = DATAPREVIEW_DDLS_FILE.exec(base);
+  if (ddls !== null) return {type: "DDLS", name: ddls[1].replaceAll("#", "/").toUpperCase()};
+  return undefined;
+}
+
+/** Whether a TABL's own abapGit XML (the file F8's data preview reads,
+ *  not necessarily saved -- the same "the buffer, not the file" rule
+ *  Ctrl+F2's check and Q6b's implementsClassrun already follow) carries a
+ *  MANDT field: a plain scan of its DD03P rows. A DDLS never reaches
+ *  this -- the CDS-name view tools/cds2ddic.mjs writes for one has no
+ *  MANDT column at all ("the CDS entity itself has no client... as on a
+ *  system", that file's own viewFieldsOf), so there is no column there to
+ *  filter by or to show. */
+function tablHasMandt(xmlSource) {
+  return /<FIELDNAME>MANDT<\/FIELDNAME>/i.test(String(xmlSource ?? ""));
+}
+
+// The runtime's own sy-mandt is fixed at 123 (tools/osd-identity.mjs
+// DEFAULT_CLIENT) -- and deliberately not the client the ADT façade itself
+// presents (identity().adt.client, "001", backlog G.1b: the façade's own
+// pretend system is allowed to differ from the data's own). Reading the
+// façade's client here would filter for the wrong one, so this is the
+// fixed constant CLAUDE.md's "Known traps" already names, with the reason
+// it is not read off the server instead.
+const MANDT_CLIENT = "123";
+
+/** The SQL a data-preview cell runs for `name` (dataPreviewObjectOf's own
+ *  shape): the whole object, filtered to MANDT_CLIENT when `hasMandt` and
+ *  not `allClients`. A DDLS caller always passes `hasMandt: false`
+ *  (tablHasMandt above never applies to one), so this never files a WHERE
+ *  MANDT a CDS-name view has no column to satisfy. */
+function dataPreviewQuery(name, {hasMandt = false, allClients = false} = {}) {
+  return hasMandt && !allClients ? `SELECT * FROM ${name} WHERE MANDT = '${MANDT_CLIENT}'` : `SELECT * FROM ${name}`;
+}
+
+/** The same query, as a row count -- run separately and only when the main
+ *  fetch came back exactly at the row cap (dataPreviewStatusText below),
+ *  because a COUNT(*) is the one query this feature asks the door for
+ *  twice rather than once. */
+function dataPreviewCountQuery(name, options) {
+  return dataPreviewQuery(name, options).replace(/^SELECT \*/, "SELECT COUNT(*) AS N");
+}
+
+/** "N rows" when the cap was not reached; "first N of M" once it was and a
+ *  cheap COUNT (dataPreviewCountQuery above) answered `total`; "first N
+ *  rows" when it was reached and no count was asked for (or it failed) --
+ *  a guessed total is worse than none. */
+function dataPreviewStatusText(shown, rowLimit, total) {
+  if (shown < rowLimit) return `${shown} row${shown === 1 ? "" : "s"}`;
+  if (total === undefined) return `first ${shown} rows`;
+  return `first ${shown} of ${total}`;
+}
+
+/** F8's data preview XML (tools/adt-facade.mjs tableDataDocument -- the
+ *  same document shape freestyleRows above reads) into `{columns: [{name,
+ *  label, key}], rows}`, `rows` shaped like freestyleRows' own. Unlike
+ *  plain freestyle, datapreview/ddic and datapreview/cds carry each
+ *  column's own DDIC label in dataPreview:description and whether it is a
+ *  key in dataPreview:keyAttribute -- read here rather than duplicating
+ *  freestyleRows' own row extraction. A column the façade did not
+ *  recognise (its own fallback metadata, name.toUpperCase() again) keeps
+ *  its bare name as the label rather than showing blank. */
+function dataPreviewRows(xml) {
+  const {columns: names, rows} = freestyleRows(xml);
+  const meta = new Map();
+  const metaRe = /<dataPreview:metadata\s+dataPreview:name="([^"]*)"([^>]*)\/>/g;
+  for (const m of String(xml ?? "").matchAll(metaRe)) {
+    const name = xmlUnescape(m[1]);
+    const label = xmlUnescape(m[2].match(/dataPreview:description="([^"]*)"/)?.[1] ?? "");
+    const key = m[2].match(/dataPreview:keyAttribute="([^"]*)"/)?.[1] === "true";
+    meta.set(name, {label: label || name, key});
+  }
+  const columns = names.map((name) => ({name, label: meta.get(name)?.label ?? name, key: meta.get(name)?.key === true}));
+  return {columns, rows};
 }
 
 /** The first frame of an alert that points into an ABAP file: `{file, line, column}`. */
@@ -1002,4 +1139,5 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson,
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
   implementsClassrun,
+  dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods};
