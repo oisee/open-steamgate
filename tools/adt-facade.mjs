@@ -1363,6 +1363,65 @@ export function adtRouter(options = {}) {
     }
   });
 
+  // Everything an edit of a class or interface reaches, transitively, and
+  // which of those carry tests: the tests an edit should run (B1). Answered
+  // from the warm registry's reverse index when it is primed -- always as
+  // fresh as the last build -- and otherwise by walking the seeded
+  // WBCROSSGT/WBCROSSGTX rows reader by reader, which are as fresh as the
+  // last start of the serving process. `source` says which one answered.
+  router.get(`${BASE}/core/http/xref/closure`, async (req, res) => {
+    const type = String(req.query.type ?? "").toUpperCase();
+    const name = String(req.query.name ?? "").toUpperCase();
+    if (!["CLAS", "INTF"].includes(type) || name === "") {
+      refuse(res, 400, "ExceptionInvalidRequest", "type (CLAS or INTF) and name are required");
+      return;
+    }
+    if (!store.exists(type, name)) {
+      refuse(res, 404, "ExceptionResourceNotFound", `${type} ${name} does not exist`);
+      return;
+    }
+    try {
+      const LIMIT = 5000;
+      let closure = store.warm?.().compiler?.closureOf(type, name);
+      let source = "warm";
+      let truncated = false;
+      if (closure === undefined) {
+        source = "xref";
+        const typeOf = new Map(store.list().map((o) => [o.name, o.type]));
+        const seen = new Set([name]);
+        const todo = [name];
+        while (todo.length > 0 && seen.size < LIMIT) {
+          const escaped = todo.pop().replace(/'/g, "''");
+          const result = await data.query(
+            `SELECT include FROM wbcrossgt WHERE otype = 'TY' AND name = '${escaped}' ` +
+            `UNION SELECT include FROM wbcrossgtx WHERE otype = 'TY' AND name = '${escaped}'`, {max: 5000});
+          for (const row of result.rows) {
+            const reader = String(row.include).toUpperCase();
+            if (!seen.has(reader)) {
+              seen.add(reader);
+              todo.push(reader);
+            }
+          }
+        }
+        // a walk that stopped at the limit says so rather than looking whole
+        truncated = todo.length > 0;
+        closure = [...seen].map((n) => ({type: n === name ? type : (typeOf.get(n) ?? "UNKNOWN"), name: n}));
+      }
+      const tests = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
+      const objects = closure
+        .map((o) => ({...o, isTest: o.type === "CLAS" && tests.has(o.name)}))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      res.type("application/json; charset=utf-8").send(JSON.stringify({
+        type, name, source, truncated,
+        closure: objects,
+        tests: objects.filter((o) => o.isTest).map((o) => o.name),
+        counts: {objects: objects.length, tests: objects.filter((o) => o.isTest).length},
+      }));
+    } catch (e) {
+      refuse(res, 500, "ExceptionInternalError", String(e?.message ?? e));
+    }
+  });
+
   // Ending a session. There is nothing to end — the session is a cookie and a
   // token — but a client that gets 404 here reports a failed logoff.
   router.delete(`${BASE}/core/http/sessions/:id`, (req, res) => res.status(200).end());
@@ -1986,6 +2045,25 @@ export function adtRouter(options = {}) {
     });
   });
 
+  // What an activation's build was, for a client that shows it (the VS Code
+  // extension, editors/vscode): warm or cold and why, how long the swap took,
+  // how many objects the change reached and which of them carry tests -- the
+  // tests an edit should run next. Headers, because ADT's activation document
+  // has no place for them and Eclipse ignores headers it does not know.
+  const warmHeaders = (res, result) => {
+    const t = result?.transpile ?? {};
+    const w = store.warm?.();
+    // a header value is one line of printable ASCII, whatever a reason says
+    const header = (v) => String(v).replace(/[^\x20-\x7e]+/g, " ").slice(0, 300);
+    res.set("X-OSD-Build", header(t.warm === true ? "warm" : `cold${w?.on === true && w.reason ? `; ${w.reason}` : ""}`));
+    if (result?.hot === true) res.set("X-OSD-Swap-Ms", String(result.ms));
+    if (Array.isArray(t.closure)) {
+      const tests = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
+      res.set("X-OSD-Closure", String(t.closure.length));
+      res.set("X-OSD-Closure-Tests", t.closure.filter((o) => o.type === "CLAS" && tests.has(o.name)).map((o) => o.name).join(",").slice(0, 4000));
+    }
+  };
+
   // ACTIVATE. An empty body means it activated; a document means it did not.
   // That is the convention and not our choice, so a document has to mean
   // failure and nothing else.
@@ -2019,6 +2097,18 @@ export function adtRouter(options = {}) {
           ));
           return;
         }
+      }
+      // With the warm registry primed (tools/osd-warm.mjs), a class or an
+      // interface is checked by the warm build itself: the transpiler checks
+      // what the change reaches and builds nothing when one is broken, and the
+      // issues come back per object, dependents included. The check below
+      // reparses the tree, ~3 s here, and stays for everything else.
+      const warm = store.warm?.();
+      if (options.transpileOnActivate !== false && warm?.compiler?.primed === true &&
+          named.every((o) => o.type === "CLAS" || o.type === "INTF")) {
+        checked = named.map((o) => store.warmActivation(o.type, o.name));
+        published = true;
+        return;
       }
       checked = named.map((o) => store.activate(o.type, o.name));
       const failed = checked.filter((r) => r.active === false);
@@ -2057,6 +2147,19 @@ export function adtRouter(options = {}) {
     // that has them.
     try {
       const result = await store.publish();
+      warmHeaders(res, result);
+      if (result?.ok === false && result.transpile?.check === true && (result.transpile.issues ?? []).length > 0) {
+        // the warm build refused: each object's own issues at their own lines,
+        // the activated ones first and listed even when their issues are all
+        // in the objects that read them
+        const byName = new Map(result.transpile.issues.map((o) => [`${o.type} ${o.name}`, o]));
+        const entries = [
+          ...named.map((o) => ({type: o.type, name: o.name, issues: byName.get(`${o.type} ${o.name}`)?.issues ?? []})),
+          ...result.transpile.issues.filter((o) => !named.some((n) => n.type === o.type && n.name === o.name)),
+        ];
+        res.status(200).type("application/xml").send(activationFailureDocument(entries));
+        return;
+      }
       if (result?.ok === false) {
         const why = result.error ?? result.transpile?.output ?? "the build after activation failed";
         res.status(200).type("application/xml").send(activationFailureDocument(

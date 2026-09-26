@@ -1387,13 +1387,13 @@ export class ObjectStore {
             const r = await w.compiler.build();
             return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, warm: true,
               modules: r.modules, hostHeld: r.hostHeld, from: r.from, stale: r.stale, steps: r.steps,
-              unverified: w.compiler.unverified.has(r.hash)};
+              closure: r.closure, unverified: w.compiler.unverified.has(r.hash)};
           } catch (error) {
             if (error.code !== "NOT_WARM") {
               // `check`: the transpiler refused the change; anything else
               // (BUSY, a disk that failed) is a build that did not happen
               return {ok: false, ms: Date.now() - started, objects: 0, warm: true, check: error.check === true,
-                output: String(error.output || error.message).slice(-2000), error: error.message};
+                issues: error.issues, output: String(error.output || error.message).slice(-2000), error: error.message};
             }
             w.reason = error.message;
             w.compiler.drop();

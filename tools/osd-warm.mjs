@@ -327,6 +327,33 @@ export class WarmCompiler {
     folders.set = (dir, entries) => (kept.has(dir) ? set(dir, entries) : folders);
   }
 
+  // What an edit of this object would rebuild: the object and, transitively,
+  // everything that reads it, from the reverse index -- without building.
+  // What the tests of an edit are (B1) is this list filtered to the classes
+  // that carry tests. undefined when the registry is not primed or does not
+  // hold the object.
+  closureOf(type, name) {
+    if (!this.primed) return undefined;
+    const obj = this.reg.getObject(type, name);
+    if (obj === undefined) return undefined;
+    return [...this.#closure([obj])].map((o) => ({type: o.getType(), name: o.getName()}));
+  }
+
+  // The issues the checked registry holds for these objects, with the line
+  // and column of each, for a client that shows them on the dependent's own
+  // file rather than as one "activation failed"
+  #issuesOf(objects) {
+    const out = [];
+    for (const o of objects) {
+      const issues = this.reg.findIssuesObject(o).map((i) => ({
+        message: i.getMessage(), key: i.getKey(), severity: String(i.getSeverity?.() ?? "Error"),
+        file: i.getFilename(), line: i.getStart().getRow(), column: i.getStart().getCol(),
+      }));
+      if (issues.length > 0) out.push({type: o.getType(), name: o.getName(), issues});
+    }
+    return out;
+  }
+
   // forget the registry; the next build is cold, and prime() starts again
   drop() {
     this.reg = undefined;
@@ -495,6 +522,7 @@ export class WarmCompiler {
         this.pending = stale;
         error.check = true;
         error.output = String(error.message);
+        error.issues = this.#issuesOf([...stale]);
         settled = true;
         throw error;
       }
@@ -582,7 +610,8 @@ export class WarmCompiler {
       settled = true;
       const steps = Object.fromEntries(marks.slice(1).map(([w, t], i) => [w, t - marks[i][1]]));
       return {ok: true, hash, cached, warm: true, live: true, ms: Date.now() - started, objects: this.files.size,
-        modules, hostHeld: modules.filter((m) => HOST_HELD.includes(m)), stale: stale.size, from, steps};
+        modules, hostHeld: modules.filter((m) => HOST_HELD.includes(m)), stale: stale.size, from, steps,
+        closure: [...stale].map((o) => ({type: o.getType(), name: o.getName()}))};
     } finally {
       unlock();
       // anything that went wrong after the registry took the edit, other than

@@ -529,6 +529,27 @@ describe("tools/adt-facade: the development loop", () => {
       expect(found.readers.map((r) => r.name)).to.deep.equal([...new Set(found.readers.map((r) => r.name))]);
     });
 
+    it("B1: names what an edit would reach, transitively, and which of it carries tests", async () => {
+      const res = await call("/core/http/xref/closure?type=CLAS&name=ZCL_ZSTG_DEMO_MPC_EXT");
+      expect(res.status).to.equal(200);
+      const found = await res.json();
+      // no warm registry in this suite: the seeded cross-reference answers
+      expect(found.source).to.equal("xref");
+      expect(found.truncated).to.equal(false);
+      const names = found.closure.map((o) => o.name);
+      // the class itself, its direct readers, and what reads those in turn
+      expect(names).to.include.members(["ZCL_ZSTG_DEMO_MPC_EXT", "ZCL_STG_PHASE0_TEST", "ZCL_ZSTG_DEMO_DPC_EXT"]);
+      expect(names.length).to.be.greaterThan(3);
+      expect(found.tests).to.include("ZCL_STG_PHASE0_TEST");
+      expect(found.tests).to.not.include("ZCL_ZSTG_DEMO_DPC_EXT");
+      expect(found.counts).to.deep.equal({objects: names.length, tests: found.tests.length});
+    });
+
+    it("B1: a closure of an unknown object is 404, of a program 400", async () => {
+      expect((await call("/core/http/xref/closure?type=CLAS&name=ZCL_NOPE_NEVER")).status).to.equal(404);
+      expect((await call("/core/http/xref/closure?type=PROG&name=ZCL_ZSTG_DEMO_MPC_EXT")).status).to.equal(400);
+    });
+
     it("Q3: an object nothing reads answers an empty list, not an error", async () => {
       const res = await call("/core/http/xref/readers?type=CLAS&name=ZCL_STG_TAB_ZSTG_STATUS");
       expect(res.status).to.equal(200);
