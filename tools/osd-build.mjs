@@ -644,14 +644,33 @@ export async function build(options = {}) {
   try {
     rmSync(tmp, {recursive: true, force: true});
     mkdirSync(join(tmp, "output"), {recursive: true});
-    const own = ownConfig(root, config, stack, join(tmp, "output"));
-    writeFileSync(join(tmp, "abap_transpile.json"), JSON.stringify(own, null, 2));
-
     // generators: false is for a tree with nothing to generate (a test's
     // tree of a few classes); every real build runs them
     if (options.generators !== false) {
       output += runGenerators(root, log);
     }
+    // **The layers are read again once gen/ is written.** gen/ is a layer, and
+    // an object it holds hides the one in src/ it was generated from (the AMDP
+    // bridge: gen/amdp/zcl_osd_amdp_demo over src/amdp/). Reading the layers
+    // only before the generators ran gave a fresh checkout's first build no
+    // such hiding -- gen/amdp did not exist yet -- so the transpiler got both
+    // copies of the class, and the same inputs built different bytes on the
+    // first build than on every later one (found by the warm build's premise
+    // check, tools/osd-warm.mjs prime, 2026-09-26).
+    const after = options.generators !== false ? layers(root, config) : stack;
+    if (after.duplicates.length > 0) {
+      const e = new Error(`the build refuses: ${describeDuplicates(after.duplicates)}`);
+      e.code = "DUPLICATE";
+      e.duplicates = after.duplicates;
+      throw e;
+    }
+    for (const {object, winner, hidden} of after.overridden) {
+      if (!stack.overridden.some((o) => o.object === object)) {
+        log(`overridden: ${object}: ${hidden.join(", ")} hidden by ${winner}`);
+      }
+    }
+    const own = ownConfig(root, config, after, join(tmp, "output"));
+    writeFileSync(join(tmp, "abap_transpile.json"), JSON.stringify(own, null, 2));
     // the transpile itself is a library call in this process (N3,
     // tools/osd-transpile.mjs): no node_modules/.bin, no second process,
     // no parsing a count out of its output
@@ -677,7 +696,7 @@ export async function build(options = {}) {
       // right; the working tree is not, and the next thing to read `gen/`
       // believes it.
       gen: genHash(root),
-      overridden: stack.overridden,
+      overridden: after.overridden,
     };
     writeFileSync(join(tmp, "manifest.json"), JSON.stringify(manifest, null, 2));
     // **The generation's own copy of the config described the process that
