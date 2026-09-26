@@ -21,7 +21,8 @@ const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseChec
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
   demoFailureObjects, progTcodeOf, progRunLens,
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
-  serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes} =
+  serviceContextValue, serviceHttpUrl, serviceMetadataUrl, serviceWsUrl, serviceClassNodes,
+  warmStatusText, activationBuildText, closureTestsText} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
 import {implementsClassrun as facadeImplementsClassrun} from "../tools/osd-classrun.mjs";
 import {namesOf as guiConvertNamesOf} from "../tools/osd-gui-convert.mjs";
@@ -877,5 +878,51 @@ describe("editors/vscode/lib.js: Osd#run's dbEnv (run tests on a different datab
     expect(post.url).to.not.contain("HANA_PASSWORD");
     expect(post.options.headers["content-type"]).to.equal("application/json");
     expect(JSON.parse(post.options.body)).to.deep.equal({dbEnv: {STG_DB: "hana", HANA_PASSWORD: "s3cret", HANA_SCHEMA: "OSD_TEST"}});
+  });
+});
+
+// ---- T7 "Rebuild (warm)" (docs/vscode-extension.md "Warm"): the pure
+// half of the status bar's, the tree's and Ctrl+F3's own text, off
+// /osd/serving's `warm` field (tools/osd-store.mjs warmStatus()) and an
+// activation's own build headers (activate()/activateMany(), tools/adt-
+// facade.mjs warmHeaders()) -- both real server shapes, held here rather
+// than re-derived from a running one.
+
+describe("editors/vscode: T7 warm status and build text", function () {
+  it("warmStatusText: nothing for off or no warm field at all", () => {
+    expect(warmStatusText(undefined)).to.equal(undefined);
+    expect(warmStatusText({state: "off"})).to.equal(undefined);
+  });
+
+  it("warmStatusText: warming up while priming, warm once primed", () => {
+    expect(warmStatusText({state: "priming"})).to.equal("warming up…");
+    expect(warmStatusText({state: "primed"})).to.equal("warm");
+  });
+
+  it("warmStatusText: cold with the reason exactly as the server gave it", () => {
+    expect(warmStatusText({state: "cold", reason: "the transpiler has no `only` option (abaplint/transpiler#1900)"}))
+      .to.equal("cold: the transpiler has no `only` option (abaplint/transpiler#1900)");
+    expect(warmStatusText({state: "cold"})).to.equal("cold: not primed");
+  });
+
+  it("activationBuildText: a warm build that swapped, one that recycled a host-held module, and a cold one", () => {
+    expect(activationBuildText({build: "warm", swapMs: 12})).to.equal("hot-swapped in 12 ms (warm)");
+    expect(activationBuildText({build: "warm", swapMs: undefined})).to.equal("recycled (host-held module)");
+    expect(activationBuildText({build: "cold"})).to.equal("cold build");
+    expect(activationBuildText({build: "cold; the transpiler has no `only` option (abaplint/transpiler#1900)"}))
+      .to.equal("cold build: the transpiler has no `only` option (abaplint/transpiler#1900)");
+  });
+
+  it("activationBuildText: undefined when the answer carried no X-OSD-Build at all", () => {
+    expect(activationBuildText({})).to.equal(undefined);
+    expect(activationBuildText(undefined)).to.equal(undefined);
+  });
+
+  it("closureTestsText: the count, or nothing for none or no closure at all", () => {
+    expect(closureTestsText({closureTests: ["ZCL_X_TESTCLASSES"]})).to.equal("1 test in the closure");
+    expect(closureTestsText({closureTests: ["ZCL_X", "ZCL_Y", "ZCL_Z"]})).to.equal("3 tests in the closure");
+    expect(closureTestsText({closureTests: []})).to.equal(undefined);
+    expect(closureTestsText({})).to.equal(undefined);
+    expect(closureTestsText(undefined)).to.equal(undefined);
   });
 });

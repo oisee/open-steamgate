@@ -19,7 +19,7 @@ import {entityOf} from "./ddls-entity.mjs";
 import {packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
 
-import {basename, dirname, join, relative} from "node:path";
+import {basename, dirname, join, relative, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {Data} from "./osd-data.mjs";
 import {ServingRuntime} from "./osd-runtime.mjs";
@@ -1003,6 +1003,41 @@ export class ObjectStore {
       copies: c?.copies ?? 0,
       lastVerify: w.last,
     };
+  }
+
+  // Every CLAS/INTF whose file on disk no longer hashes to what the warm
+  // registry was primed or last built from -- what "Rebuild (warm)"
+  // (editors/vscode) activates in one call, so a person never has to name
+  // the object themselves. Reuses the warm compiler's own digests
+  // (tools/osd-warm.mjs WarmCompiler#prime / #build), which are exactly the
+  // per-file hashes the live generation was built from: no second bookkeeping.
+  // undefined when the registry is not primed, which is the caller's cue to
+  // fall back to a cold rebuild rather than guess at a list this has no way
+  // to check.
+  changedObjects() {
+    const w = this.warm();
+    const c = w.compiler;
+    if (c?.primed !== true) return undefined;
+    const out = [];
+    for (const entry of this.#entries().values()) {
+      if (entry.type !== "CLAS" && entry.type !== "INTF") continue;
+      const file = resolve(this.root, entry.file);
+      let hash;
+      try {
+        hash = createHash("sha256").update(readFileSync(file)).digest("hex");
+      } catch {
+        continue;
+      }
+      if (c.digests.get(file) !== hash) {
+        // `base`: the lowercase file stem uriOf() (editors/vscode/lib.js)
+        // needs to build the object's own ADT uri -- the same shape
+        // adtObjectOf() derives from a file name, namespace `#ns#` form
+        // included, so activateMany() can be handed this list as is.
+        const base = basename(entry.file).replace(/\.(clas|intf)\.abap$/i, "");
+        out.push({type: entry.type, name: entry.name, base});
+      }
+    }
+    return out;
   }
 
   // prime in the background; a failure leaves every build cold and says why

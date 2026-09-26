@@ -1142,6 +1142,93 @@ hit rather than the ~20-23 s cold build it is today (2026-09-26,
 `vsix-prebuilt-generation` task; fallback (b) taken on Alice's call within
 the hour the task set aside for the portable-hash design).
 
+## Warm
+
+*2026-09-26 (T7).* B0 launches the whole system by itself; this makes the
+save-to-serving loop of a system it launched itself under `docs/warm-
+compile.md`'s ~0.5 s instead of the cold build's several seconds, and says
+so rather than leaving a person to guess whether Ctrl+F3 actually reached
+the running process.
+
+**`osd.warm`: `"auto"` (default), `"on"` or `"off"`.** The launcher
+(`editors/vscode/launcher.js`) sets `OSD_WARM=1` in the launched system's
+own env when the setting resolves to on -- `"auto"` is on at or above
+`WARM_MEMORY_FLOOR_BYTES` (4 GB; the prime measured about 0.7 GB,
+`docs/warm-compile.md`), off below it (`shouldWarm(mode, totalMemBytes =
+os.totalmem())`, pure and unit-tested at both sides of the floor,
+`test/vscode-launcher.mjs`). This only asks the launched system to *try*:
+whether it actually primes is `tools/osd-store.mjs` `warmUp()`'s own
+business, and on the pinned transpiler (no
+`abaplint/transpiler#1899`/`#1900`/`#1921`) it stays cold and says why --
+that reason is shown as the server gave it, not reworded.
+
+**Where it shows.** `/osd/serving`'s own `warm` field (`{state: off |
+priming | primed | cold, reason, generation, unverified, swaps, copies,
+lastVerify}`, `tools/osd-store.mjs` `warmStatus()`, #108) drives:
+- the status bar, alongside the existing generation and dump count --
+  `$(server) osd <gen> · warm +<swaps>` or `· cold: <reason>`, and, for the
+  first ~20 s after *this window's own* launch, `$(sync~spin) osd warming
+  up…` in place of "osd down" while the prime is still synchronous and the
+  façade answers nothing at all (`docs/warm-compile.md`'s own note on
+  that);
+- the tree's state row (`OsdTreeProvider`), the same text appended to
+  "Running on :port, generation …", polled every 5 s while running (the
+  prime finishing, or a swap happening, is not a controller state change,
+  so nothing else would tell the row it had gone stale);
+- both tooltips carry the rest: warm generation, `unverified` (a warm
+  build a cold comparison has not passed yet, `X-OSD-Generation:
+  <hash> warm-unverified`), `swaps`, `copies` (a warm build that had to
+  copy rather than hard-link, `#108`) and `lastVerify`.
+
+`editors/vscode/lib.js` `warmStatusText(warm)` is the pure text (`undefined`
+for `"off"` or no field at all -- most machines never turn this on, and a
+status bar that says so on every tick would be noise), tested against the
+real vocabulary in `test/vscode-extension.mjs`.
+
+**Ctrl+F3 says what it built.** `Osd#activate()`/`#activateMany()` read
+`X-OSD-Build`, `X-OSD-Swap-Ms`, `X-OSD-Closure` and `X-OSD-Closure-Tests`
+off the activation answer (`tools/adt-facade.mjs` `warmHeaders()`) into
+`{build, swapMs, closure, closureTests}`; `activationBuildText(result)`
+turns that into "hot-swapped in `<ms>` ms (warm)", "recycled (host-held
+module)" (a warm build with no swap header -- a `HOST_HELD` module
+recycled the process instead, `docs/warm-compile.md` "What the process
+holds itself", not a failure) or "cold build" / "cold build: `<reason>`".
+`closureTestsText(result)` is "`<n>` test(s) in the closure", kept on the
+result for a later use (B1) and shown in the status-bar message
+alongside the build text.
+
+**"Rebuild" (the `$(tools)` icon) is the warm path; "Full rebuild" (the
+view's own "…" menu) is the old `osd.rebuild`** (stop, build, start --
+unchanged, just moved and renamed so the icon slot is the fast path by
+default). `SystemController#rebuildWarm()`:
+1. not running -> falls back to `rebuild()`;
+2. `/osd/serving`'s `warm.state !== "primed"` -> falls back, and says the
+   reason;
+3. otherwise asks `GET /sap/bc/adt/core/http/changed` -- every CLAS/INTF
+   whose file no longer hashes to what the warm registry was primed or
+   last built from (`ObjectStore#changedObjects()`, reusing the warm
+   compiler's own per-file digests, `tools/osd-warm.mjs` `WarmCompiler`
+   -- no second bookkeeping). `objects: undefined` (not empty) means the
+   route itself could not tell, which falls back the same way; an empty
+   list means nothing to do;
+4. activates every changed object in **one** call
+   (`Osd#activateMany`) -- one build, and, warm, one swap, covers the
+   whole closure rather than one swap per object, the way a person
+   activating a whole change in ADT would.
+
+Every branch above either falls back to a full rebuild or returns having
+reported something; nothing here can dump or hang on a system that never
+primed -- the fallback runs the same `rebuild()` a plain "not running"
+does.
+
+**Tests**: pure logic in `test/vscode-extension.mjs` ("T7 warm status and
+build text") and `test/vscode-launcher.mjs` ("shouldWarm"); the live half
+in `test/vscode-warm.mjs`, against a real `node test/run.mjs` with
+`OSD_WARM=1`, an on-disk comment edit and `Osd#activate()` -- asserts a
+warm swap when the registry primed, and that the cold reason is surfaced,
+verbatim, when it did not (this checkout's pinned transpiler: `the
+transpiler has no \`only\` option (abaplint/transpiler#1900)`).
+
 ## Next
 
 - Smart F8 / Runner, the rest of it: create/update/delete entity, a function

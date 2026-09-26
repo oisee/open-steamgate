@@ -21,6 +21,7 @@ const {
   waitForServing, servingOnce, terminate, Launcher,
   linkOrCopyTree, materializedHomeDir, ensureMaterializedHome, MATERIALIZED_MARKER,
   DATABASE_KINDS, defaultDedicatedName, databaseEnv, describeDatabase, duckdbAvailable,
+  WARM_MEMORY_FLOOR_BYTES, shouldWarm,
 } = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 
 // No chai-as-promised in this tree's node_modules, so a rejection is caught
@@ -58,6 +59,36 @@ describe("editors/vscode/launcher.js: ports", function () {
     } finally {
       await new Promise((r) => server.close(r));
     }
+  });
+});
+
+// T7 (docs/vscode-extension.md "Warm"): osd.warm's own "auto" rule -- on
+// when this machine has at least WARM_MEMORY_FLOOR_BYTES of RAM (the prime
+// costs about 0.7 GB, docs/warm-compile.md), always/never for "on"/"off".
+// Pure: a number stands in for os.totalmem() rather than depending on the
+// runner's own memory.
+describe("editors/vscode/launcher.js: shouldWarm (osd.warm's auto rule)", function () {
+  it("WARM_MEMORY_FLOOR_BYTES is 4 GB", () => {
+    expect(WARM_MEMORY_FLOOR_BYTES).to.equal(4 * 1024 * 1024 * 1024);
+  });
+
+  it("\"on\" and \"off\" ignore the machine's memory", () => {
+    expect(shouldWarm("on", 0)).to.equal(true);
+    expect(shouldWarm("on", 1)).to.equal(true);
+    expect(shouldWarm("off", Number.MAX_SAFE_INTEGER)).to.equal(false);
+  });
+
+  it("\"auto\" is the memory floor: on at or above it, off below it", () => {
+    expect(shouldWarm("auto", WARM_MEMORY_FLOOR_BYTES)).to.equal(true);
+    expect(shouldWarm("auto", WARM_MEMORY_FLOOR_BYTES + 1)).to.equal(true);
+    expect(shouldWarm("auto", WARM_MEMORY_FLOOR_BYTES - 1)).to.equal(false);
+  });
+
+  it("defaults to the real machine's os.totalmem() when none is given", () => {
+    // whatever this runner has, the call must not throw and must answer a
+    // boolean -- the point is that the default argument works, not a
+    // specific verdict for this machine
+    expect(shouldWarm("auto")).to.be.a("boolean");
   });
 });
 

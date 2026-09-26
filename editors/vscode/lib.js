@@ -339,14 +339,52 @@ class Osd {
   /** Ctrl+F3: activate `object` (tools/adt-facade.mjs, `router.post(BASE/activation,
    *  ...)`). Awaits the object's own build, so the generation on the answer
    *  is the one that already serves it -- `X-OSD-Generation` on every osd
-   *  answer (docs/generations.md). */
-  async activate(object) {
-    const uri = uriOf(object);
+   *  answer (docs/generations.md). One name, through activateMany() below. */
+  activate(object) {
+    return this.activateMany([object]);
+  }
+
+  /** T7 "Rebuild (warm)" (docs/vscode-extension.md "Warm"): activate several
+   *  objects in one call, the way a person activating a whole change in ADT
+   *  would -- one build (and, warm, one swap) covers every object named,
+   *  rather than one swap per object. Same route and same document shape as
+   *  activate() above (which is just this with one name), and the same
+   *  build-headers on the answer: `build` ("warm" or "cold" -- "cold;
+   *  <reason>" folded into the reason -- tools/adt-facade.mjs warmHeaders()),
+   *  `swapMs` (present only for a warm build that actually swapped; absent
+   *  for a warm build the process recycled instead, a HOST_HELD module,
+   *  docs/warm-compile.md "What the process holds itself"), `closure` (how
+   *  many objects the change reached) and `closureTests` (the ones among
+   *  them that carry ABAP Unit, comma-list on the wire, an array here). */
+  async activateMany(objects) {
+    const refs = objects.map((o) =>
+      `<adtcore:objectReference adtcore:uri="${xmlEscape(uriOf(o))}" adtcore:name="${xmlEscape(o.name)}"/>`).join("");
     const body = `<?xml version="1.0" encoding="UTF-8"?>
-<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core"><adtcore:objectReference adtcore:uri="${xmlEscape(uri)}" adtcore:name="${xmlEscape(object.name)}"/></adtcore:objectReferences>`;
+<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core">${refs}</adtcore:objectReferences>`;
     const res = await this.request("/sap/bc/adt/activation", {method: "POST", headers: {"content-type": "application/xml"}, body});
     const generation = res.headers.get("x-osd-generation") ?? undefined;
-    return {...parseActivationResult(await res.text()), generation};
+    const build = res.headers.get("x-osd-build") ?? undefined;
+    const swapMs = res.headers.get("x-osd-swap-ms");
+    const closure = res.headers.get("x-osd-closure");
+    const closureTests = res.headers.get("x-osd-closure-tests");
+    return {
+      ...parseActivationResult(await res.text()),
+      generation,
+      build,
+      swapMs: swapMs === null || swapMs === undefined || swapMs === "" ? undefined : Number(swapMs),
+      closure: closure === null || closure === undefined || closure === "" ? undefined : Number(closure),
+      closureTests: closureTests ? closureTests.split(",").filter(Boolean) : [],
+    };
+  }
+
+  /** T7 "Rebuild (warm)": every CLAS/INTF this osd's warm registry says no
+   *  longer hashes to what it was primed or last built from
+   *  (tools/adt-facade.mjs `core/http/changed`, ObjectStore#changedObjects).
+   *  `objects: undefined` (not an empty array) when the registry is not
+   *  primed -- the caller's cue to fall back to a cold rebuild -- with
+   *  `reason` carrying why, verbatim from the server. */
+  changed() {
+    return this.json("/sap/bc/adt/core/http/changed");
   }
 }
 
@@ -417,6 +455,57 @@ function parseActivationResult(xml) {
     });
   }
   return {ok: false, issues};
+}
+
+// ---- T7 "Rebuild (warm)" (docs/vscode-extension.md "Warm"): turning
+// /osd/serving's `warm` field and an activation's own build headers into the
+// three or four words a status bar, a tree row or a message has room for.
+// Pure, so the shapes (docs/warm-compile.md's own vocabulary: off / priming
+// / primed / cold-with-a-reason, warm-but-recycled) are tested without a
+// server (test/vscode-extension.mjs).
+
+/** /osd/serving's `warm` field (tools/osd-store.mjs warmStatus()) into the
+ *  line the status bar and the tree's state row show: "warming up..." while
+ *  the prime is still running, "warm" once it is, "cold: <reason>"
+ *  otherwise -- the reason exactly as the server gave it (which transpiler
+ *  PR is missing, docs/warm-compile.md, or "OSD_WARM is not 1"). `undefined`
+ *  (no line at all) for `warm.state === "off"` or no `warm` field at all --
+ *  most machines never turn this on, and a status bar that says "off" on
+ *  every tick would be noise rather than news. */
+function warmStatusText(warm) {
+  if (warm === undefined || warm.state === "off") return undefined;
+  if (warm.state === "priming") return "warming up…";
+  if (warm.state === "primed") return "warm";
+  return `cold: ${warm.reason ?? "not primed"}`;
+}
+
+/** An activation's (or activateMany's) own build, off the headers
+ *  activate()/activateMany() already read into the result (`build`,
+ *  `swapMs`): "hot-swapped in <ms> ms (warm)", "recycled (host-held
+ *  module)" for a warm build with no swap header (docs/warm-compile.md
+ *  "What the process holds itself" -- a HOST_HELD module recycles the
+ *  process instead of swapping it, and that is not a failure), or "cold
+ *  build" / "cold build: <reason>" (tools/adt-facade.mjs warmHeaders()
+ *  folds `cold; <reason>` into one header value). `undefined` when the
+ *  answer carried no `X-OSD-Build` at all (an activation that never
+ *  reached publish(), such as a checked-only edit). */
+function activationBuildText(result) {
+  const build = result?.build;
+  if (build === undefined) return undefined;
+  if (build === "warm") {
+    return result.swapMs === undefined ? "recycled (host-held module)" : `hot-swapped in ${result.swapMs} ms (warm)`;
+  }
+  const reason = /^cold;\s*(.*)$/.exec(build)?.[1];
+  return reason ? `cold build: ${reason}` : "cold build";
+}
+
+/** "3 tests in the closure" (or nothing for none, or an empty string with no
+ *  closure at all) -- activateMany()'s own `closureTests`, kept on the
+ *  result for a later use (B1) and shown here as the one line the task
+ *  asks for. */
+function closureTestsText(result) {
+  const n = result?.closureTests?.length ?? 0;
+  return n === 0 ? undefined : `${n} test${n === 1 ? "" : "s"} in the closure`;
 }
 
 // ---- Q2b "Runner" (docs/vscode-extension.md, "Next"): call the entity set
@@ -1439,6 +1528,7 @@ function serviceClassNodes(row) {
 }
 
 module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
+  warmStatusText, activationBuildText, closureTestsText,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   htmlEscape, freestyleRows, freestyleTableHtml, notebookFromJson, notebookToJson,

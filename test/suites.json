@@ -155,6 +155,7 @@
     "test/vscode-extension.mjs",
     "test/vscode-launcher.mjs",
     "test/vscode-vsix.mjs",
+    "test/vscode-warm.mjs",
     "test/warm.mjs",
     "test/webgui.mjs",
     "test/write-boundary.mjs",
