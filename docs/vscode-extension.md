@@ -1047,13 +1047,14 @@ launcher always sets `OSD_PACKS` to its own storage, holding an empty
 machine, named the generation: a copy materialized from the prebuilt seed
 and started the launcher's way built cold (`built 11cf1308…`, measured).
 Now a pack that brings nothing (no input file in its ABAP folders, no
-data, ddic or webapp folder, no tiles) is not an input, and a folder with
-no input files does not name the generation (`tools/osd-build.mjs`
-`inputsOf`, `hashOf`; "input file" is what `NOT_AN_INPUT` leaves). A pack
-that holds anything still is an input, so a workspace pack builds cold as
-before. A tree with a folder that has no input files, or with a pack that
-brings none, names its generation differently once; any other tree keeps
-its names.
+data, ddic or webapp folder, no tiles) is not an input, and an input
+folder that contributes no file to the hash does not name the generation
+(`tools/osd-build.mjs` `inputsOf`, `hashOf`): an ABAP folder with no file
+`NOT_AN_INPUT` leaves, or any other input folder with no file at all. A
+pack that holds anything still is an input, so a workspace pack builds
+cold as before. A tree with such a folder, or with a pack that brings
+nothing, names its generation differently once; any other tree keeps its
+names.
 
 The generation's `manifest.json` in the seed has `builtAt` and `ms` fixed,
 so the same tree packaged twice makes the same seed ID (the materialized
