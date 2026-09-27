@@ -33,6 +33,7 @@ jobs:
       contents: write
     outputs:
       tag: ${{ steps.release.outputs.tag }}
+      scan_status: ${{ steps.leak.outputs.status }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -70,10 +71,12 @@ jobs:
           test -f "$vsix"
           node scripts/release-version.mjs "$RELEASE_TAG" "$vsix" --allow-untagged
           (cd build/vsix && sha256sum "osd-vscode-$version.vsix" > "osd-vscode-$version.vsix.sha256")
-      - name: Generate and scan release notes and README
+      - name: Generate and scan release notes, README and FILE_ID.DIZ
+        id: leak
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           LEAK_IDENTIFIERS_JSON: ${{ secrets.OSD_LEAK_IDENTIFIERS }}
+          DRAFT: ${{ inputs.draft }}
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#vscode-v}"
@@ -86,23 +89,26 @@ jobs:
             "osd-vscode-$version.vsix" \
             osd-linux-x64 osd-linux-arm64 osd-darwin-arm64 osd-windows-x64.exe \
             sqlite.yml duckdb.yml postgres.yml hana.yml > build/vsix/README.md
+          node scripts/release-readme.mjs --diz "$version" > build/vsix/FILE_ID.DIZ
           { cat build/vsix/release-notes.md; printf '\n'; cat build/vsix/README.md; } > build/vsix/release-body.md
           test -s build/vsix/release-notes.md
           test -s build/vsix/README.md
+          test -s build/vsix/FILE_ID.DIZ
           if [[ -n "$LEAK_IDENTIFIERS_JSON" ]]; then
             mkdir -p .local
             printf '%s' "$LEAK_IDENTIFIERS_JSON" > .local/leak-identifiers.json
           fi
           status=0
-          node tools/osd-leak-scan.mjs --paths build/vsix/release-notes.md build/vsix/README.md || status=$?
-          if [[ -n "$LEAK_IDENTIFIERS_JSON" ]]; then
-            if [[ "$status" -ne 0 ]]; then
-              echo "::error::Release leak scan must pass with the configured identifier list (exit $status)"
-              exit "$status"
-            fi
-          elif [[ "$status" -eq 2 ]]; then
+          node tools/osd-leak-scan.mjs --paths build/vsix/release-notes.md build/vsix/README.md build/vsix/FILE_ID.DIZ || status=$?
+          printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
+          if [[ "$status" -eq 2 && -z "$LEAK_IDENTIFIERS_JSON" && "$GITHUB_EVENT_NAME" == workflow_dispatch && "$DRAFT" == true ]]; then
             echo '::warning::OSD_LEAK_IDENTIFIERS is absent; the private name check did not run'
           elif [[ "$status" -ne 0 ]]; then
+            if [[ "$status" -eq 2 && -z "$LEAK_IDENTIFIERS_JSON" ]]; then
+              echo '::error::Add the OSD_LEAK_IDENTIFIERS secret or publish by hand after a local npm run leak'
+            else
+              echo "::error::Release leak scan must pass with the configured identifier list (exit $status)"
+            fi
             exit "$status"
           fi
       - name: Create or update prerelease and upload VSIX
@@ -113,12 +119,8 @@ jobs:
           set -euo pipefail
           version="${RELEASE_TAG#vscode-v}"
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            release_target="$(gh release view "$RELEASE_TAG" --json targetCommitish --jq .targetCommitish)"
-            commit="$(git rev-parse HEAD)"
-            if [[ "$release_target" != "$commit" ]]; then
-              echo "::error::Release $RELEASE_TAG targets $release_target, but this run builds $commit"
-              exit 1
-            fi
+            git fetch --tags --force
+            node scripts/release-version.mjs --check-target "$RELEASE_TAG"
             gh release edit "$RELEASE_TAG" --prerelease --title "$RELEASE_TAG" --notes-file build/vsix/release-body.md
           elif [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
             if [[ "$DRAFT" == false ]]; then
@@ -134,7 +136,8 @@ jobs:
           gh release upload "$RELEASE_TAG" --clobber \
             "build/vsix/osd-vscode-$version.vsix" \
             "build/vsix/osd-vscode-$version.vsix.sha256" \
-            build/vsix/README.md
+            build/vsix/README.md \
+            build/vsix/FILE_ID.DIZ
 
   binary:
     needs: vsix
@@ -176,12 +179,8 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/release-version.mjs "$RELEASE_TAG" --allow-untagged
-          release_target="$(gh release view "$RELEASE_TAG" --json targetCommitish --jq .targetCommitish)"
-          commit="$(git rev-parse HEAD)"
-          if [[ "$release_target" != "$commit" ]]; then
-            echo "::error::Release $RELEASE_TAG targets $release_target, but this run builds $commit"
-            exit 1
-          fi
+          git fetch --tags --force
+          node scripts/release-version.mjs --check-target "$RELEASE_TAG"
           mkdir -p build/release
           npm run binary -- "build/release/$ASSET" "$TARGET"
           (cd build/release && sha256sum "$ASSET" > "$ASSET.sha256")
@@ -204,12 +203,8 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/release-version.mjs "$RELEASE_TAG" --allow-untagged
-          release_target="$(gh release view "$RELEASE_TAG" --json targetCommitish --jq .targetCommitish)"
-          commit="$(git rev-parse HEAD)"
-          if [[ "$release_target" != "$commit" ]]; then
-            echo "::error::Release $RELEASE_TAG targets $release_target, but this run builds $commit"
-            exit 1
-          fi
+          git fetch --tags --force
+          node scripts/release-version.mjs --check-target "$RELEASE_TAG"
           export POSTGRES_PASSWORD=compose-validation-only
           export HANA_HOST=hana-validation-only
           export HANA_USER=hana-validation-only
@@ -229,6 +224,8 @@ jobs:
       RELEASE_TAG: ${{ needs.vsix.outputs.tag }}
       DRAFT: ${{ inputs.draft }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      LEAK_IDENTIFIERS_JSON: ${{ secrets.OSD_LEAK_IDENTIFIERS }}
+      SCAN_STATUS: ${{ needs.vsix.outputs.scan_status }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -236,12 +233,18 @@ jobs:
       - name: Publish completed prerelease
         run: |
           set -euo pipefail
-          release_target="$(gh release view "$RELEASE_TAG" --json targetCommitish --jq .targetCommitish)"
-          commit="$(git rev-parse HEAD)"
-          if [[ "$release_target" != "$commit" ]]; then
-            echo "::error::Release $RELEASE_TAG targets $release_target, but this run builds $commit"
-            exit 1
+          if [[ "$GITHUB_EVENT_NAME" == push || "$DRAFT" == false ]]; then
+            if [[ -z "$LEAK_IDENTIFIERS_JSON" ]]; then
+              echo '::error::Add the OSD_LEAK_IDENTIFIERS secret or publish by hand after a local npm run leak'
+              exit 1
+            fi
+            if [[ "$SCAN_STATUS" != 0 ]]; then
+              echo "::error::Publication requires a passing release leak scan (exit $SCAN_STATUS)"
+              exit 1
+            fi
           fi
+          git fetch --tags --force
+          node scripts/release-version.mjs --check-target "$RELEASE_TAG"
           if [[ "$GITHUB_EVENT_NAME" == push || "$DRAFT" == false ]]; then
             gh release edit "$RELEASE_TAG" --draft=false --prerelease
           fi

@@ -1,6 +1,6 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
-import {renderReadme} from "../scripts/release-readme.mjs";
+import {renderDiz, renderReadme} from "../scripts/release-readme.mjs";
 
 test("renders start and checksum instructions for a sample release asset list", () => {
   const readme = renderReadme([
@@ -19,4 +19,23 @@ test("renders start and checksum instructions for a sample release asset list", 
   assert.match(readme, /Get-FileHash/);
   assert.doesNotMatch(readme, /duckdb\.yml/);
   assert.throws(() => renderReadme(["unexpected.txt"]), /unknown release asset/);
+});
+
+test("FILE_ID.DIZ stays within classic BBS byte and line limits", () => {
+  const version = "0.1.1098";
+  const bytes = renderDiz(version);
+  const text = bytes.toString("ascii");
+  assert.ok(text.includes(version));
+  assert.match(text, /\.vsix/);
+  assert.match(text, /binaries/);
+  assert.match(text, /Compose/);
+  assert.match(text, /AIRSHIP/);
+  assert.match(text, /\r\n$/);
+  assert.equal(text.replaceAll("\r\n", "").includes("\n"), false);
+  assert.equal(text.replaceAll("\r\n", "").includes("\r"), false);
+  const lines = text.slice(0, -2).split("\r\n");
+  assert.ok(lines.length <= 10);
+  for (const line of lines) assert.ok(line.length <= 45);
+  for (const byte of bytes) assert.ok((byte >= 0x20 && byte <= 0x7e) || byte === 0x0d || byte === 0x0a);
+  assert.throws(() => renderDiz("not-a-version"), /numeric release version/);
 });

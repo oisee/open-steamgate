@@ -55,9 +55,29 @@ export function parseReleaseArgs(args) {
   return {tag: positional[0], vsix: positional[1], requireTag: !allowUntagged};
 }
 
+export function validateReleaseTarget({tag, head, tagCommit, release}) {
+  if (!/^vscode-v\d+\.\d+\.\d+$/.test(tag ?? "")) throw new Error("invalid release tag");
+  if (!/^[0-9a-f]{40}$/.test(head ?? "")) throw new Error("invalid checkout commit");
+  if (tagCommit) {
+    if (tagCommit !== head) throw new Error(`Release ${tag} tag resolves to ${tagCommit}, but this run builds ${head}`);
+  } else if (!release.isDraft || release.targetCommitish !== head) {
+    throw new Error(`Untagged release ${tag} must be a draft targeting ${head}; recorded target is ${release.targetCommitish}`);
+  }
+}
+
+export function checkReleaseTarget(tag) {
+  const head = git("rev-parse", "HEAD");
+  const release = JSON.parse(execFileSync("gh", ["release", "view", tag, "--json", "isDraft,targetCommitish"], {cwd: root, encoding: "utf8"}));
+  let tagCommit;
+  try { tagCommit = git("rev-parse", "--verify", `refs/tags/${tag}^{commit}`); }
+  catch { /* An untagged draft receives its tag when GitHub publishes it. */ }
+  validateReleaseTarget({tag, head, tagCommit, release});
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     if (process.argv[2] === "--suggest") console.log(suggestedTag());
+    else if (process.argv[2] === "--check-target") checkReleaseTarget(process.argv[3]);
     else {
       const {tag, vsix, requireTag} = parseReleaseArgs(process.argv.slice(2));
       console.log(checkReleaseVersion(tag, vsix, {requireTag}));

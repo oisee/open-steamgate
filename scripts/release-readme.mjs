@@ -72,7 +72,31 @@ export function renderReadme(assets) {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
+// Classic BBS FILE_ID.DIZ: printable 7-bit ASCII and CRLF only.
+export function renderDiz(version) {
+  if (!/^\d+\.\d+\.\d+$/.test(version ?? "")) throw new Error("pass a numeric release version");
+  const lines = [
+    `Open Steamgate ${version}`,
+    "Local OData v2 runtime for ABAP services",
+    "VS Code extension: .vsix",
+    "OSD binaries: Linux, macOS, Windows",
+    "Docker Compose: four database choices",
+    "",
+    "       ___",
+    "  ____/o  \\___",
+    " <___  AIRSHIP _>",
+    "     \\______ /",
+  ];
+  if (lines.length > 10 || lines.some((line) => line.length > 45 || !/^[\x20-\x7e]*$/.test(line))) {
+    throw new Error("release version does not fit FILE_ID.DIZ limits");
+  }
+  return Buffer.from(`${lines.join("\r\n")}\r\n`, "ascii");
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { process.stdout.write(renderReadme(process.argv.slice(2))); }
+  try {
+    const args = process.argv.slice(2);
+    process.stdout.write(args[0] === "--diz" ? renderDiz(args[1]) : renderReadme(args));
+  }
   catch (error) { console.error(`release-readme: ${error.message}`); process.exitCode = 1; }
 }

@@ -29,8 +29,12 @@ selected ref; any existing tag must point to that commit. The workflow uses
 `git push`. For an untagged draft, GitHub creates the tag when the draft is
 published. A dispatch with `draft=true` never publishes. To publish an existing
 draft through the workflow, rerun with `draft=false`; a new dispatch must
-first create the draft. An existing release is updated only when its target
-commit SHA equals the run's checkout commit. Same-named assets are uploaded
+first create the draft. An existing release is updated only when its commit
+matches the run's checkout commit. When the tag exists, the workflow fetches
+tags and compares the commit resolved from `refs/tags/<tag>^{commit}`. For an
+untagged draft, it requires the release's recorded `targetCommitish` to be
+the exact checkout SHA and the release to remain a draft. Same-named assets
+are uploaded
 with `--clobber` on every rerun. Do not move a published tag.
 
 The VSIX job installs dependencies with Node 24, runs `npm run bootstrap`
@@ -39,15 +43,17 @@ Before creating or editing a release, it generates notes from first-parent
 GitHub PR merge titles since the nearest previous `vscode-v*` tag. A merge
 commit without a title in its body gets its title from the PR API. Squash
 commits and manually copied changes have no PR merge commit and do not
-appear. The generated notes and release README pass through
+appear. The generated notes, release README, and `FILE_ID.DIZ` pass through
 `tools/osd-leak-scan.mjs --paths` before release creation. Configure the
-optional repository secret `OSD_LEAK_IDENTIFIERS` with the JSON content of
+repository secret `OSD_LEAK_IDENTIFIERS` with the JSON content of
 `.local/leak-identifiers.json` (an object whose keys name identifier kinds and
 whose values are arrays of private names). The VSIX job writes that content
-to the gitignored file on its runner and requires scan exit 0. When the secret
-is absent, exit 2 is accepted because structural checks passed, and the job
-emits a warning that the private name check did not run. A match (exit 1)
-always stops the release.
+to the gitignored file on its runner. A dispatch with `draft=true` may continue
+on scan exit 2 when this secret is absent; the job warns that the private
+name check did not run. Publication by tag push or dispatch with `draft=false`
+requires the secret and scan exit 0 over all three files. Without the secret,
+the workflow fails with instructions to add it or publish by hand after a
+local `npm run leak`. A match (exit 1) always stops the release.
 
 ## Assets
 
@@ -57,6 +63,7 @@ always stops the release.
 | `osd-linux-x64`, `osd-linux-arm64`, `osd-darwin-arm64`, `osd-windows-x64.exe`, each with `.sha256` | `npm run binary -- <output> <bun-target>` with Bun 1.4.2 |
 | `sqlite.yml`, `duckdb.yml`, `postgres.yml`, `hana.yml` | [Tracked Compose sources](../docker/compose/), validated with `docker compose config` |
 | `README.md` | Short instructions for starting every asset, also included in the release notes |
+| `FILE_ID.DIZ` | Classic BBS description generated from the version, with printable ASCII and CRLF lines |
 
 The binary and Compose jobs start after the VSIX job creates the draft.
 The final publish job needs all three upload jobs, so a failed upload leaves
