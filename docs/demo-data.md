@@ -40,8 +40,6 @@ process lock (`tools/osd-dialog-step.mjs`): committed when it returns, rolled
 back whole if it dumps, never beside another step. Measured over HTTP: a
 year in about 1.8 s, the same year again 17 ms.
 
-
-
 ## How a host calls it
 
 `tools/osd-demo-data.mjs` is the one module the Node hosts call. It passes

@@ -104,6 +104,22 @@ describe("analytics: NYC taxi cube through SADL", () => {
     expect(await synthetic()).to.equal(0);
   });
 
+  it("refuses a Year that is not a year with a 400 and writes nothing", async () => {
+    const synthetic = async () => Number(await (await fetch(S + "/Zc_Osd_TaxicubeSet/$count?$filter=FACTID ge '9000000000'")).text());
+    const before = await synthetic();
+    const head = await fetch(TAXI + "/", {headers: {"x-csrf-token": "fetch"}});
+    expect(head.status).to.equal(200);
+    const cookie = (head.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).join("; ");
+    // more than four digits would overflow TYPE i; letters are not digits
+    for (const year of ["12345678901", "abc"]) {
+      const res = await fetch(`${TAXI}/GenerateYear?Year=${year}`, {method: "POST",
+        headers: {"x-csrf-token": head.headers.get("x-csrf-token"), cookie, accept: "application/json"}});
+      expect(res.status, year).to.equal(400);
+      expect(JSON.stringify(await res.json()), year).to.match(/not a year/);
+    }
+    expect(await synthetic()).to.equal(before);
+  });
+
   async function plausibleYear() {
     const count = await (await fetch(S + "/Zc_Osd_TaxicubeSet/$count?$filter=FACTID ge '9000000000'")).text();
     expect(Number(count)).to.equal(20000);

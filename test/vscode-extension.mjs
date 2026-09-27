@@ -497,6 +497,15 @@ describe("editors/vscode: the extension's logic", function () {
       error = e;
     }
     expect(error?.message).to.equal('POST ZOSD_TAXI_SRV/ResetData: HTTP 400 -- Year "abc" is not a year');
+    // a token fetch that fails is said as that, not as the POST's 403
+    const refused = new Osd("http://localhost:3999/", async () => new Response("", {status: 403}));
+    error = undefined;
+    try {
+      await refused.odataAction("ZOSD_TAXI_SRV", "ResetData");
+    } catch (e) {
+      error = e;
+    }
+    expect(error?.message).to.equal("GET ZOSD_TAXI_SRV/: HTTP 403 -- no CSRF token");
   });
 
   it("quick start applies its preset and restarts a running controller before opening the overview", async () => {

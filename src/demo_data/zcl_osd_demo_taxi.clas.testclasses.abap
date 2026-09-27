@@ -127,6 +127,12 @@ CLASS ltcl_taxi IMPLEMENTATION.
     lv_c = zcl_osd_demo_taxi=>checksum( lt_c ).
     cl_abap_unit_assert=>assert_equals( act = lv_b exp = lv_a ).
     cl_abap_unit_assert=>assert_differs( act = lv_c exp = lv_a ).
+* pinned on Node with the weekday taken as ( date - typed epoch ); a
+* weekday that moves (date minus a char literal made every day a weekday
+* late) moves this number. Not yet measured on a system.
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_osd_demo_taxi=>checksum( zcl_osd_demo_taxi=>generate_year( iv_year = 2025 iv_rows = 3000 ) )
+      exp = 1065186561 ).
     lv_low = zcl_osd_demo_taxi=>year_low( 2024 ).
     lv_high = zcl_osd_demo_taxi=>year_high( 2024 ).
     LOOP AT lt_a INTO ls_fact.
