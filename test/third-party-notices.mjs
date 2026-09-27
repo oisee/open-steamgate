@@ -48,4 +48,18 @@ describe("VSIX staged third-party notices", function () {
       expect(readFileSync(out, "utf8")).to.contain(`License: MIT (maintainer override).\n\nNote: ${note}`);
     } finally { rmSync(root, {recursive: true, force: true}); }
   });
+  it("records the maintainer's MIT override for open-abap-gui and its converter verbatim", function () {
+    const root = mkdtempSync(join(tmpdir(), "osd-gui-notice-"));
+    const seed = join(root, "seed");
+    const path = ".local/lars/open-abap-gui";
+    const note = "LICENSE file reads 'todo', package.json licence empty, converter/ without a licence; treated as MIT by the open-steamgate maintainer, 2026-09-27";
+    try {
+      mkdirSync(join(seed, path), {recursive: true});
+      mkdirSync(join(root, path), {recursive: true});
+      writeFileSync(join(seed, "libs.lock.json"), JSON.stringify({libraries: [{folder: "open-abap-gui"}]}));
+      writeFileSync(join(root, path, "LICENSE"), "todo\n");
+      const report = inventoryThirdParties(seed, root);
+      expect(report.entries[0]).to.include({id: "MIT", note});
+    } finally { rmSync(root, {recursive: true, force: true}); }
+  });
 });

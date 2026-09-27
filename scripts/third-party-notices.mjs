@@ -8,6 +8,10 @@ const LICENSE_OVERRIDES = new Map([
     id: "MIT",
     note: "LICENSE file reads 'todo'; the author's intent is MIT; treated as MIT by the open-steamgate maintainer, 2026-09-27",
   }],
+  ...[".local/lars/open-abap-gui", ".local/lars/open-abap-gui/converter"].map((path) => [path, {
+    id: "MIT",
+    note: "LICENSE file reads 'todo', package.json licence empty, converter/ without a licence; treated as MIT by the open-steamgate maintainer, 2026-09-27",
+  }]),
 ]);
 const licenseName = (dir) => readdirSync(dir).find((name) => /^(?:licen[cs]e|copying)(?:\..*)?$/i.test(name));
 const metaAt = (dir) => {
