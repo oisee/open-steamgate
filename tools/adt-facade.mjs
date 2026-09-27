@@ -30,6 +30,7 @@ import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported, Conflict} from "./
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
 import {uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {portabilityWarnings} from "./amdp-gen.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
 import {segwRegistrations} from "./segw-registry.mjs";
@@ -2286,7 +2287,12 @@ export function adtRouter(options = {}) {
             source: o.source,
             include: o.include,
           });
-          return {uri: o.uri, issues: result.issues};
+          const source = o.source ?? (o.type === "CLAS" ? store.read(o.type, o.name)?.source : undefined);
+          const configured = process.env.STG_DB ?? "sqlite";
+          const engine = ["file", "memory", "sqljs"].includes(configured) ? "sqlite" : configured;
+          const warnings = o.type === "CLAS" && (o.include === undefined || o.include === "main") && source
+            ? portabilityWarnings(source, `${o.name.toLowerCase()}.clas.abap`, store, engine) : [];
+          return {uri: o.uri, issues: [...result.issues, ...warnings]};
         } catch (e) {
           // a check that could not run must not look like a check that found
           // nothing, or a client writes on the strength of it

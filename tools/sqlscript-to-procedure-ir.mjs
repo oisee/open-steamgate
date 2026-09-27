@@ -13,6 +13,9 @@ import {Body} from "./sqlscript/expressions/index.mjs";
 import {procedure, declareScalar, assignScalar, assignRelation, whileLoop, selectInto,
   ifElse, callProcedure, forCursor, forRange, UnsupportedSqlScript, assignable, writeTable} from "./sqlscript-procedure-ir.mjs";
 import {childBodies, containsRelationStatement, readsRelations} from "./sqlscript-blocks.mjs";
+import {lower} from "./sqlscript-lower.mjs";
+import {databaseDescriptor} from "./osd-database-identity.mjs";
+import {installNative} from "./sqljs-native.mjs";
 
 const upper = (value) => String(value).toUpperCase();
 
@@ -934,4 +937,41 @@ export function compileProcedure(method, types, options = {}) {
     if (error instanceof BindError) throw new UnsupportedSqlScript(error.message, error);
     throw error;
   }
+}
+
+// A SQLScript notebook cell shares the portable parser and lowerer with AMDP.
+export async function portableCell(body, client) {
+  const engine = databaseDescriptor(client).engine;
+  const label = `Portable AMDP (limited) on ${engine}`;
+  try {
+    if (!["sqlite", "duckdb", "postgres"].includes(engine)) {
+      throw new Error(`no portable SQLScript dialect for ${engine}`);
+    }
+    if (engine === "sqlite" && typeof client.native !== "function") installNative(client);
+    const ir = toIr(parse(new Body(), lex(body)), {catalogue: {}});
+    const {sql, params} = lower(ir.rel, engine);
+    const started = Date.now();
+    let answer;
+    try { answer = await client.native({sql, params}); }
+    catch (error) {
+      return {status: "error", code: "SQLSCRIPT_EXECUTION_ERROR",
+        error: String(error?.message ?? error), engine: label, system_db: engine};
+    }
+    const rows = answer.rows ?? [];
+    return {status: "ok", result: JSON.stringify(rows), rows: String(rows.length),
+      ms: String(Date.now() - started), engine: label, system_db: engine};
+  } catch (error) {
+    return {status: "error", code: "UNSUPPORTED_SQLSCRIPT",
+      error: `UNSUPPORTED_SQLSCRIPT: ${String(error?.message ?? error)}`,
+      engine: label, system_db: engine};
+  }
+}
+
+export function mountPortableCells(app, connection, run = (work) => work()) {
+  app.post("/sap/bc/osd/amdp/cell", async (req, res, next) => {
+    const client = connection();
+    if (databaseDescriptor(client).engine === "HDB") return next();
+    const body = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body ?? "");
+    res.json(await run(() => portableCell(body, client)));
+  });
 }

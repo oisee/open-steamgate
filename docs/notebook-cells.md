@@ -23,11 +23,13 @@ other ABAP. SQLScript cells use the AMDP sandbox already served at
   class through `ClassRun`. Calls are serialized because the notebook uses
   the single class `ZCL_OSD_NOTEBOOK_CELL` and Node replaces its loaded module
   graph on activation.
-- `src/amdp/zcl_osd_amdp_sbx.clas.abap`: the existing sandbox accepts a
+- `src/amdp/zcl_osd_amdp_sbx.clas.abap`: the existing HANA sandbox accepts a
   notebook request at `/sap/bc/osd/amdp/cell`, returning structured JSON
-  while the existing human-facing form stays as it is. The cell runs through
-  the sandbox's `AMDP` destination, on HANA. A non-HANA `sy-dbsys` is answered
-  with a direct requirement message before a destination call is attempted.
+  while the existing human-facing form stays as it is. HANA calls the
+  sandbox's `AMDP` destination.
+- `tools/sqlscript-to-procedure-ir.mjs`: the serving hosts intercept the
+  same cell route on SQLite, DuckDB and PostgreSQL. The portable parser and
+  lowerer run on the system database connection.
 - `editors/vscode/lib.js` and `extension.js`: `sql` continues through
   freestyle; `abap` is wrapped as `ZCL_OSD_NOTEBOOK_CELL`'s classrun main;
   `sqlscript` is sent to the AMDP cell route. Results and errors are rendered
@@ -48,8 +50,9 @@ other ABAP. SQLScript cells use the AMDP sandbox already served at
    active or inactive ADT state, or removes a first failed cell so the next
    launcher build can start. The extension
    replaces that cell's output with the returned text.
-3. For SQLScript, the sandbox creates, calls, and drops its throwaway
-   procedure as it does for its screen. The returned rows and duration
+3. For SQLScript on HANA, the sandbox creates, calls, and drops its throwaway
+   procedure as it does for its screen. Portable cells lower a relational
+   plan to one statement on the system database. The returned rows and duration
    appear as an HTML table with a raw JSON disclosure; an engine error
    becomes the cell's error output. The SQLScript source is not stored as
    an ABAP object.
@@ -61,17 +64,35 @@ HANA, the AMDP sandbox's existing `AMDP` destination runs SQLScript against
 that configured HANA service. When both `HANA_*` and `HXE_*` are set, HANA
 system mode selects `HANA_*`; other system modes retain the separate `HXE_*`
 sandbox connection. The sandbox keeps its own restricted execution
-identity. On SQLite, PostgreSQL, or DuckDB, `/sap/bc/osd/amdp/cell` returns a
-clear “SQLScript notebook cells require a HANA system database” response with
-the reported system database; it does not try an unrelated HANA destination
-or let a missing-driver exception escape. Plain SQL cells still use the
-selected system database through freestyle. pAMDP remains parked and is not
-part of this path.
+identity. On SQLite, PostgreSQL and DuckDB, the cell uses the portable SQLScript
+parser, binder and dialect lowerer on the selected system connection. Output
+names the engine. Unsupported syntax is returned as `UNSUPPORTED_SQLSCRIPT`
+with its reason. HANA continues to use the native eAMDP sandbox.
+
+## Portable AMDP: what is supported
+
+The `PORTABLE` function list in `tools/sqlscript-lower.mjs` is:
+`LOWER`, `UPPER`, `LENGTH`, `ABS`, `COALESCE`, `TRIM`, `LTRIM`, `RTRIM`,
+`SUM`, `MIN`, `MAX`, `COUNT`, `AVG`, `ROUND`. This list was generated
+from that Set; the dialect lowerer also has explicit measured rewrites and
+refusals for other functions. The portable procedure compiler supports
+SELECT, INSERT, UPDATE, DELETE and UPSERT, table functions and scalar OUTs
+within its typed signatures. The notebook cell currently accepts relational
+SELECT bodies, including table variables. It does not invent DDIC schemas
+for arbitrary database tables. Unsupported constructs return a named refusal,
+including `SYS.*` system views, XML and dynamic SQL. Check and Activate report
+portable refusals as warnings for non-HANA systems; HANA-only source can still
+activate, and a portable call can still refuse at runtime.
+
+These limits follow the measured observations in
+[portable AMDP, 2026-09-22](portable-amdp-2026-09-22.md) and the
+[pAMDP handover, 2026-09-24](handover-pamdp-2026-09-24.md).
+The [zvdb pack](../packs/zvdb/README.md) is the working showcase.
 
 ## Verification
 
 Pure tests cover target-root writes, notebook source construction and cell
-language round-tripping. The AMDP sandbox suite includes a SQLite refusal
-check to prove it returns a JSON message rather than crashing. HANA execution
+language round-tripping. The AMDP sandbox suite covers a portable SQLite
+result and a named refusal. HANA execution
 uses the sandbox destination and is exercised by the existing HANA-gated
 sandbox tests when HANA is configured.

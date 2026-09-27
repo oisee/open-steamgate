@@ -2296,7 +2296,13 @@ async function activateCurrent(diagnostics, output) {
   try {
     const result = await osd().activate(object);
     if (result.ok) {
-      diagnostics.delete(editor.document.uri);
+      try {
+        const reports = await osd().check(object, object.include, editor.document.getText());
+        diagnostics.set(editor.document.uri, reports.flatMap((r) => r.issues)
+          .map((i) => diagnosticAt(i.line, i.column, i.message, i.severity)));
+      } catch (error) {
+        output.appendLine(`osd activate ${object.name}: post-activation check: ${String(error.message ?? error)}`);
+      }
       const generation = String(result.generation ?? "?").slice(0, 8);
       // T7 (docs/vscode-extension.md "Warm"): what the build behind this
       // activation was, off X-OSD-Build/X-OSD-Swap-Ms -- "hot-swapped in
@@ -3333,7 +3339,7 @@ async function runNotebookCell(controller, cell, executionOrder, output) {
         const rowLimit = vscode.workspace.getConfiguration("osd").get("notebook.rowLimit", 100);
         result = await osd().freestyle(source, rowLimit);
       }
-      const html = freestyleTableHtml(result.columns, result.rows, {ms: result.ms, generation: result.generation});
+      const html = `${result.engine ? `<p>${htmlEscape(result.engine)}</p>` : ""}${freestyleTableHtml(result.columns, result.rows, {ms: result.ms, generation: result.generation})}`;
       await execution.replaceOutput([
         new vscode.NotebookCellOutput(freestyleOutputItems(html).map(({mime, value}) =>
           vscode.NotebookCellOutputItem.text(value, mime))),

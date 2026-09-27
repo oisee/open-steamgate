@@ -476,6 +476,7 @@ describe("editors/vscode: the extension's logic", function () {
     expect(html).to.contain("/storage/db/osd.sqlite");
     expect(html).to.contain("primed");
     expect(html).to.contain("System information app");
+    expect(html).to.contain("portable (limited) on sqlite");
     expect(html).to.contain("<iframe");
     expect(overviewStatusSection("Services", model.status.services)).to.contain("/app/flp.html");
     // OData plumbing is not shown: __metadata and all-deferred navigation columns
@@ -904,16 +905,20 @@ describe("editors/vscode: the extension's logic", function () {
     expect(source).to.contain("ENDCLASS.");
   });
 
-  it("Q6a: AMDP sandbox JSON becomes notebook rows or a clear engine message", () => {
-    expect(amdpCellResult({status: "ok", result: '[{"ANSWER":42}]', ms: "8"})).to.deep.equal({
+  it("Q6a: AMDP sandbox JSON keeps the engine label and a portable refusal", () => {
+    expect(amdpCellResult({status: "ok", result: '[{"ANSWER":42}]', ms: "8",
+      engine: "Portable AMDP (limited) on sqlite"})).to.deep.equal({
       columns: ["ANSWER"], rows: [{ANSWER: 42}], ms: 8, raw: undefined,
+      engine: "Portable AMDP (limited) on sqlite",
     });
     const sqlite = amdpCellResult({
       status: "error", system_db: "sqlite",
-      error: "SQLScript notebook cells require a HANA system database; this system uses sqlite.",
+      error: "UNSUPPORTED_SQLSCRIPT: CAST to INTEGER cannot raise in SQLite",
     });
-    expect(sqlite.error).to.contain("require a HANA system database");
-    expect(sqlite.error).to.contain("uses sqlite");
+    expect(sqlite.error).to.contain("UNSUPPORTED_SQLSCRIPT");
+    expect(sqlite.error).to.contain("CAST to INTEGER");
+    expect(amdpCellResult({status: "ok", result: "[]", system_db: "HDB"}).engine)
+      .to.equal("HANA (eAMDP)");
   });
 
   it("Q6a: a notebook's own JSON becomes cells, code defaulting to sql, markdown its own kind", () => {
@@ -957,7 +962,14 @@ describe("editors/vscode: the extension's logic", function () {
     expect(cells[1].value).to.equal("SELECT * FROM zosd_sys UP TO 10 ROWS");
     expect(cells[2].value).to.contain("raw JSON").and.to.contain("DX7")
       .and.to.contain("docs/notebook-cells.md").and.to.contain("SQLScript");
+    expect(cells[2].value).to.contain("SELECT bodies").and.to.contain("SQLite, DuckDB and PostgreSQL");
     expect(sqlNotebookStarter("SELECT * FROM zstg_demo")[1].value).to.equal("SELECT * FROM zstg_demo");
+  });
+
+  it("describes the current SQLScript cell scope in the example notebook", () => {
+    const example = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/examples/abap-amdp.osdnb"), "utf8"));
+    const intro = example.cells[0].value;
+    expect(intro).to.contain("SELECT bodies").and.to.contain("SQLite, DuckDB and PostgreSQL");
   });
 
   // ---- Q7 "F8 on a table or a CDS view": name resolution off the file

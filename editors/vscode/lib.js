@@ -1347,7 +1347,9 @@ function amdpCellResult(answer) {
   }
   const columns = rows.length > 0 && rows[0] !== null && typeof rows[0] === "object"
     ? Object.keys(rows[0]) : [];
-  return {columns, rows, ms: Number(answer.ms) || 0, raw: answer.raw};
+  const engine = answer.engine ?? (answer.system_db === "HDB" ? "HANA (eAMDP)" : undefined);
+  return {columns, rows, ms: Number(answer.ms) || 0, raw: answer.raw,
+    ...(engine === undefined ? {} : {engine})};
 }
 
 // ---- Q4 "Hotspots": ZOSD_DUMP as line and file heat (docs/vscode-extension.md).
@@ -1483,7 +1485,7 @@ function sqlNotebookStarter(statement) {
   return [
     {kind: "markdown", language: "markdown", value: "# Open SQL\nQuery the running osd system. Select the SQL cell and run it with the cell's Run button or Shift+Enter."},
     {kind: "code", language: "sql", value: statement ?? "SELECT * FROM zosd_sys UP TO 10 ROWS"},
-    {kind: "markdown", language: "markdown", value: "## More about SQL cells\nUse read-only Open SQL `SELECT` statements, including `WHERE`, `ORDER BY`, and `UP TO n ROWS`. The notebook limits returned rows with `osd.notebook.rowLimit`. Results come from the running system's database through the ADT freestyle preview route. Output shows a table with a **raw JSON** disclosure of the same rows. For executable ABAP and SQLScript cells, see DX7 and `docs/notebook-cells.md`; SQLScript requires HANA."},
+    {kind: "markdown", language: "markdown", value: "## More about SQL cells\nUse read-only Open SQL `SELECT` statements, including `WHERE`, `ORDER BY`, and `UP TO n ROWS`. The notebook limits returned rows with `osd.notebook.rowLimit`. Results come from the running system's database through the ADT freestyle preview route. Output shows a table with a **raw JSON** disclosure of the same rows. For executable ABAP and SQLScript cells, see DX7 and `docs/notebook-cells.md`. SQLScript notebook cells currently accept relational SELECT bodies, including table variables. They run as HANA (eAMDP) on HANA or Portable AMDP (limited) on SQLite, DuckDB and PostgreSQL; unsupported constructs return a reason."},
   ];
 }
 

@@ -28,6 +28,7 @@ import {Data} from "./osd-data.mjs";
 import {dumpOf} from "./osd-where.mjs";
 import {persistDump} from "./osd-dumps.mjs";
 import {serveSandboxConfig} from "./osd-sandbox-config.mjs";
+import {mountPortableCells} from "./sqlscript-to-procedure-ir.mjs";
 
 const started = Date.now();
 
@@ -86,6 +87,8 @@ const app = express();
 app.disable("x-powered-by");
 app.set("etag", false);
 app.use(express.raw({type: "*/*", limit: "16mb"}));
+mountPortableCells(app, () => globalThis.abap.context.databaseConnections.DEFAULT,
+  (work) => exclusive(work, "SQLScript notebook cell"));
 // every answer says which code produced it: the generation the supervisor
 // named when it started this process (the live build's hash)
 // -- or, after a warm swap (tools/osd-hot.mjs), the generation the swap

@@ -32,6 +32,8 @@ import {ObjectStore} from "./osd-store.mjs";
 import {ddicCatalogue, ddicKeys} from "./sqlscript-ddic-catalogue.mjs";
 import {parseTableFunction} from "./sqlscript/table-function-ddls.mjs";
 import {resolveType} from "./osd-type-graph.mjs";
+import {lower} from "./sqlscript-lower.mjs";
+import {project, scan} from "./sqlscript-ir.mjs";
 
 const DEFAULT_OUT = "gen/amdp";
 
@@ -148,6 +150,15 @@ const progXml = (name) => `<?xml version="1.0" encoding="utf-8"?>
 </abapGit>
 `;
 
+/** A FOR TABLE FUNCTION method borrows both its inputs and output from DDLS. */
+function methodSignature(method, store) {
+  if (method.tableFunction === undefined) return method;
+  let ddls;
+  try { ddls = store.read("DDLS", method.tableFunction)?.source; } catch { ddls = undefined; }
+  const tf = ddls === undefined ? undefined : parseTableFunction(ddls);
+  return tf === undefined ? method : {...method, parameters: tf.parameters, returns: tf.returns};
+}
+
 export function generate(folders, out = DEFAULT_OUT, options = {}) {
   const extras = typeSources(folders);
   // the runtime's object store; a test hands one over a fixture root
@@ -205,13 +216,7 @@ export function generate(folders, out = DEFAULT_OUT, options = {}) {
         // a method FOR TABLE FUNCTION takes its parameters and output from
         // the DDLS it names, read through the same store; a DDLS that is not
         // in the tree leaves the method as it was (refused by the compiler)
-        let method = m;
-        if (m.tableFunction !== undefined) {
-          let ddls;
-          try { ddls = store.read("DDLS", m.tableFunction)?.source; } catch { ddls = undefined; }
-          const tf = ddls === undefined ? undefined : parseTableFunction(ddls);
-          if (tf !== undefined) method = {...m, parameters: tf.parameters, returns: tf.returns};
-        }
+        const method = methodSignature(m, store);
         const resolveElement = (name) => {
           const found = resolveType(store, name);
           return found.KIND === "DTEL" && found.DATATYPE !== "" ? found : undefined;
@@ -262,4 +267,58 @@ if (basename(process.argv[1] ?? "") === "amdp-gen.mjs") {
     console.log(`amdp-gen: ${result.procedures.length} AMDP method(s) in ${result.classes.length} class(es) -> ${out}`);
     for (const p of result.procedures) console.log(`  ${p.module}  ${p.class}=>${p.method}  ${p.kind}  ${p.parameters.length} parameter(s)  body ${p.body.split("\n").length} lines`);
   }
+}
+
+/** Advisory only: HANA source remains valid even if a portable engine refuses it. */
+export function portabilityWarnings(source, filename, store, engine) {
+  if (!["sqlite", "duckdb", "postgres"].includes(engine) || !/BY\s+DATABASE\s+(?:PROCEDURE|FUNCTION)/i.test(source)) return [];
+  let parsed;
+  try { parsed = extract(source, filename); } catch { return []; }
+  const issues = [];
+  for (const method of parsed.methods) {
+    const offset = source.indexOf(method.body);
+    const firstLine = offset < 0 ? 1 : source.slice(0, offset).split("\n").length;
+    try {
+      const program = compileProcedure(methodSignature(method, store), parsed.types, {
+        catalogue: ddicCatalogue(store, method.usings), keys: ddicKeys(store, method.usings), store,
+        resolveType: (name) => {
+          const found = resolveType(store, name);
+          return found.KIND === "DTEL" && found.DATATYPE !== "" ? found : undefined;
+        },
+      });
+      const visit = (statements) => {
+        for (const statement of statements) {
+          try {
+            for (const relation of [statement.rel, statement.cursor, statement.write]) {
+              if (relation !== undefined) lower(relation, engine);
+            }
+            // The runtime sends scalar expressions that the host cannot handle
+            // through a one-column DUMMY projection. Check that dialect path as
+            // well, including declarations, loop bounds and branch conditions.
+            const expressions = [statement.initial, statement.expr, statement.condition,
+              statement.from, statement.to, ...(statement.defaults ?? []),
+              ...(statement.branches ?? []).map((branch) => branch.condition)];
+            for (const expr of expressions) {
+              if (expr !== undefined) lower(project(scan("DUMMY"), [{as: "V", expr}]), engine);
+            }
+            if (statement.body) visit(statement.body);
+            if (statement.otherwise) visit(statement.otherwise);
+            for (const branch of statement.branches ?? []) visit(branch.body ?? []);
+          } catch (error) {
+            // Dialect refusals have no parser location. The procedure IR keeps
+            // the syntax node on every statement, including nested writes.
+            error.line ??= statement.source?.line;
+            error.col ??= statement.source?.col;
+            throw error;
+          }
+        }
+      };
+      visit(program.body);
+    } catch (error) {
+      issues.push({severity: "W", line: firstLine + Math.max(0, (error?.line ?? 1) - 1),
+        column: error?.col ?? 1,
+        message: `Portable AMDP: not supported on ${engine}: ${String(error?.message ?? error)}`});
+    }
+  }
+  return issues;
 }

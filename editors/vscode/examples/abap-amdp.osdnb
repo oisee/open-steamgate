@@ -2,7 +2,7 @@
   "cells": [
     {
       "kind": "markdown",
-      "value": "# ABAP and SQLScript notebook\n\nRun the ABAP cell with the osd notebook controller: its statements become the main method of `ZCL_OSD_NOTEBOOK_CELL`, then activate and run as a classrun. The SQLScript cell uses the AMDP sandbox and requires `osd.database.system = hana`."
+      "value": "# ABAP and SQLScript notebook\n\nRun the ABAP cell with the osd notebook controller: its statements become the main method of `ZCL_OSD_NOTEBOOK_CELL`, then activate and run as a classrun. SQLScript notebook cells currently accept relational SELECT bodies, including table variables. They run as HANA (eAMDP) on HANA or Portable AMDP (limited) on SQLite, DuckDB and PostgreSQL. The broader portable AMDP procedure compiler supports SELECT, INSERT, UPDATE, DELETE, UPSERT, table functions and scalar OUTs; SYS.*, XML and dynamic SQL are refused. See docs/notebook-cells.md and packs/zvdb for measured support and a showcase."
     },
     {
       "kind": "code",

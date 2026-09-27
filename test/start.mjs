@@ -24,6 +24,7 @@ import {seedAtStartup} from "../tools/osd-xref-seed.mjs";
 import {snapshot as statusSnapshot} from "../tools/osd-status.mjs";
 import {request as httpRequest} from "node:http";
 import {serveSandboxConfig} from "../tools/osd-sandbox-config.mjs";
+import {mountPortableCells} from "../tools/sqlscript-to-procedure-ir.mjs";
 
 // Two shapes of one listener, and the difference is whether this process
 // contains an ABAP system.
@@ -91,6 +92,8 @@ export function startServer(quiet) {
   app.set("etag", false);
   // an IWPR of a real SEGW project is a few hundred KB (ImportSet takes it as JSON)
   app.use(express.raw({type: "*/*", limit: "16mb"}));
+  if (MODE === "inline") mountPortableCells(app, () => globalThis.abap.context.databaseConnections.DEFAULT,
+    (work) => dialogStep(work, "SQLScript notebook cell"));
 
   // **What this host answers is declared in src/icf/nodes.json.** It used to
   // be this list of app.get/app.use lines, which is how three hosts came to
