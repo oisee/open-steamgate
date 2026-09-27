@@ -932,3 +932,22 @@ key column and for a key twice, and raises before writing (HANA's key is NOT
 NULL; the repeated key is measured); fill values exist for C, D, P, I, INT8
 and STRING, and an UPSERT leaving out a column of another type is refused. `::ROWCOUNT`, `INSERT INTO :lt` and MERGE
 are not carried yet.
+
+## UTCL (`utclong`) at an AMDP boundary (measured on A4H, 2026-09-23)
+
+A throwaway class, called through `execute_abap`, deleted afterwards.
+
+| case | on A4H |
+| --- | --- |
+| `utclong` input `2026-09-23 12:34:56.1234567` | seen exactly: 7 fractional digits (100 ns), not NULL |
+| the initial `utclong` as input | not NULL, but `TO_NVARCHAR` gives `''`; `ADD_SECONDS(:iv, 1)` gives `0001-01-01 00:00:01.0000000`; handed back unchanged it is initial again in ABAP |
+| `TO_TIMESTAMP('0001-01-01 00:00:00')` into a `utclong` output | `0001-01-01 00:00:00.0000000`, a value -- **not** initial |
+| `CAST(NULL AS TIMESTAMP)` into a `utclong` output | initial |
+| `ADD_SECONDS(:iv, 1)` | works, and keeps the 7 digits |
+
+So HANA carries an "empty" timestamp that is distinct from the smallest
+date: it prints as `''`, computes as `0001-01-01 00:00:00`, and comes back
+to ABAP as the initial value; a NULL comes back as initial too. The
+portable engines have no such value (and DuckDB's TIMESTAMP stops at
+microseconds), so a portable UTCL has to be carried as its 27-character
+text with the empty value as `''` -- measured here, not built yet.

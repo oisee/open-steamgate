@@ -81,6 +81,51 @@ with the same options, so today every worker would try the same inspector
 port and only the first would get it -- debug with `OSD_WORKERS=1` (the
 default).
 
+## Which copy
+
+A breakpoint binds only in the file a loaded source map names. The
+transpiler writes each `sources` entry relative to the generation's own
+`build/by-input/<hash>/output`, so it always resolves inside the tree that
+built it -- the system's osdHome. Measured 2026-09-27 on this tree:
+`output/zcl_stg_url.clas.mjs.map` names
+`../../../../src/gateway/zcl_stg_url.clas.abap`, which resolves to
+`<osdHome>/src/gateway/zcl_stg_url.clas.abap` and nowhere else.
+
+That is correct for a checkout that runs itself, and it is exactly why
+breakpoints did not stop for a user whose running system was a different
+copy of the same file. Three ways to get there, all confirmed by reading the
+extension and the maps:
+
+- **The bundled copy with a checkout open.** A packaged install runs the
+  seed materialized in `globalStorage/osd-home-<seed>` (real copies, not
+  links -- `linkOrCopyTree`). The checkout in the window is a second tree
+  with the same file names. The attach configuration's
+  `sourceMapPathOverrides` covers workspace packs only, so nothing maps the
+  home's `src/` back to the checkout's.
+- **`osd.home` pointing at another checkout** than the one being edited.
+- **An object a later layer overrides** (`osd-build: overridden: ...`).
+  The hidden file is still on disk and still opens; the build compiled the
+  winner. On this tree, `packs/zvdb/src/zcl_vdb_100_hana.clas.abap` is
+  hidden by `gen/amdp/zcl_vdb_100_hana.clas.abap`.
+
+A fourth case is not a copy: a library's map (open-abap-core, the
+open-abap-odata interfaces) names a bare file name,
+`cl_abap_char_utilities.clas.abap`, which resolves inside `output/` to a
+file that does not exist, so no breakpoint binds in a library at all. On
+this tree 1696 modules carry 830 maps; 462 of those are library maps of
+that kind, and the ones left name 362 files that exist.
+
+The extension now says so instead of leaving a grey marker. When an OSD
+debug session starts, and whenever a breakpoint is added during one, each
+`.abap` breakpoint is checked against the set of files the running
+generation's maps name and that exist on disk (`runningAbapSources` in
+`editors/vscode/lib.js`: 362 files, a few tens of milliseconds here, cached
+per generation, pack storage paths mapped back to the workspace folder the
+same way the attach configuration maps them). A breakpoint outside that set gets one warning per file per
+generation, naming the copy that runs and offering to open it. The check
+does not move a breakpoint or change which copy runs; that stays the
+person's choice (**osd: Choose which system Start runs**, `osd.home`).
+
 ## Proof, without a VS Code UI
 
 **1. A thrown ABAP exception's stack already names the `.abap` line.**

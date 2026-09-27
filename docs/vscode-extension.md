@@ -642,6 +642,7 @@ and page. The persistent database may still contain old rows until its schema
 is reset; they are no longer seeded by that pack.
 Two distinct packs cannot share a pack name, and webapps whose derived BSP
 names collide at the 15-character limit fail the build with both owners named.
+Each pack BSP app rebases every OData data source whose URI names a service (`.../opu/odata/sap/<SRV>`) to `../../../../opu/odata/sap/<SRV>/`, relative to the BSP page. Annotation sources and URIs without a service name are carried unchanged.
 
 Shadowing is already said out loud by the build itself
 (`osd-build: overridden: CLAS X: <hidden files> hidden by <winner>`,
