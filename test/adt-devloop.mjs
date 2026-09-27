@@ -94,6 +94,9 @@ describe("tools/adt-facade: the development loop", () => {
     app.use(express.raw({type: "*/*", limit: "16mb"}));
     const facade = adtRouter({transpileOnActivate: false, data: new Data({client})});
     store = facade.store;
+    // registered here, not at load, so a run that filters this suite out
+    // installs no signal listener on its behalf
+    dropUndo = undoOnExit(removeScratch);
     app.use(facade.router);
     await new Promise((resolve) => {
       server = app.listen(0, resolve);
@@ -122,7 +125,7 @@ describe("tools/adt-facade: the development loop", () => {
       }
     }
   };
-  const dropUndo = undoOnExit(removeScratch);
+  let dropUndo = () => {};
 
   after(() => {
     server.close();

@@ -3,12 +3,11 @@ import {spawn} from "node:child_process";
 import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {pathToFileURL} from "node:url";
 
 // test/helpers/undo-on-exit.mjs, exercised the way it is needed: a child
 // that edits a file, registers the undo and is then interrupted before its
 // own `finally` could run. The file must be back as it was.
-const HELPER = pathToFileURL(new URL("./helpers/undo-on-exit.mjs", import.meta.url).pathname).href;
+const HELPER = new URL("./helpers/undo-on-exit.mjs", import.meta.url).href;
 
 function child(file, how) {
   const script = `
@@ -18,6 +17,10 @@ function child(file, how) {
     writeFileSync(file, "edited\\n");
     const undo = undoOnExit(() => writeFileSync(file, "original\\n"));
     const how = ${JSON.stringify(how)};
+    if (how === "other-listener") {
+      let calls = 0;
+      process.on("SIGTERM", () => { calls += 1; setTimeout(() => process.exit(40 + calls), 50); });
+    }
     if (how === "disposed") { undo(); process.exit(0); }
     if (how === "exit") process.exit(3);
     process.stdout.write("ready\\n");
@@ -55,6 +58,12 @@ describe("a test's edit of the tree is undone when the run is interrupted", func
       expect(result.signal).to.equal(signal);
     });
   }
+
+  it("leaves the ending to another listener of the signal, which then runs once", async () => {
+    const result = await finished(child(file, "other-listener"), "SIGTERM");
+    expect(readFileSync(file, "utf8")).to.equal("original\n");
+    expect(result.code, "exit 41: the other listener ran exactly once").to.equal(41);
+  });
 
   it("restores the file when the process exits without its finally", async () => {
     const result = await finished(child(file, "exit"));
