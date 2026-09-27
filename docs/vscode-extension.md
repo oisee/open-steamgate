@@ -1,5 +1,7 @@
 # A thin VS Code extension over a running osd (Q2)
 
+Release packaging and tag instructions: [VS Code prerelease by tag](release.md).
+
 *2026-09-25.* `editors/vscode/` is a VS Code extension that holds no ABAP
 and runs nothing itself. It is a client of one listener (`npm start`,
 `build/osd up`), set by the setting `osd.url` (default
