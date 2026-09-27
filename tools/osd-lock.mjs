@@ -73,13 +73,12 @@ export function vsixPreflightMissing(root = ".") {
   for (const lib of libraries) {
     if (!isUsableDirectory(lib.path)) missing.push(`${lib.folder}/`);
   }
-  if (!isUsableDirectory(join(root, "gen"))) missing.push("gen/");
   return missing;
 }
 
 export function describeVsixPreflight(missing) {
   if (missing.length === 0) return undefined;
-  return `build-vsix: missing ${missing.join(", ")}; run npm run bootstrap`;
+  return `build-vsix: missing ${missing.join(", ")}; run npm install and node tools/osd-libs.mjs as needed`;
 }
 
 export function githubWorkflowEnv(root = ".") {
