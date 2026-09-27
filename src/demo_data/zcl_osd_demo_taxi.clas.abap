@@ -551,6 +551,7 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
     FIELD-SYMBOLS <ls_zone> TYPE ty_zone.
     DATA lv_date TYPE d.
     DATA lv_first TYPE d.
+    DATA lv_epoch TYPE d VALUE '19000101'.
     DATA lv_n4 TYPE n LENGTH 4.
     DATA lv_rows TYPE i.
     DATA lv_doy TYPE i.
@@ -581,7 +582,7 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
       lv_doy = lv_date - lv_first + 1.
       lv_month = lv_date+4(2).
       " 1900-01-01 was a Monday
-      lv_weekday = ( lv_date - '19000101' ) MOD 7 + 1.
+      lv_weekday = ( lv_date - lv_epoch ) MOD 7 + 1.
       READ TABLE lt_week INTO lv_w INDEX lv_weekday.
       READ TABLE lt_season INTO lv_dev INDEX lv_month.
       IF ls_year-summer = abap_false.

@@ -33,7 +33,7 @@ test("browser SQLite preview makes a taxi year on request, serves its F4 values 
     const selectionId = (await row.getAttribute("aria-owns")).split(" ")[0];
     await page.locator(`[id="${selectionId}"]`).click();
     await dialog.getByRole("button", {name: "OK", exact: true}).click();
-    await expect(page.locator("body")).toContainText("Taxi trips (332)");
+    await expect(page.locator("body")).toContainText("Taxi trips (331)");
   } finally {
     await context.close();
     await rm(profile, {recursive: true, force: true});

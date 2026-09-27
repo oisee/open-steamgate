@@ -51,13 +51,16 @@ sap.ui.define([
           that._showYears();
         },
         error: function () {
+          // not "no data yet": the service did not answer
           that._years = [];
-          that._showYears();
+          that._strip.setType("Error");
+          that._strip.setText(that._i18n("YearsFailed"));
         }
       });
     },
 
     _showYears: function () {
+      this._strip.setType("Information");
       if (this._years.length === 0) {
         this._strip.setText(this._i18n("NoSampleData"));
       } else {

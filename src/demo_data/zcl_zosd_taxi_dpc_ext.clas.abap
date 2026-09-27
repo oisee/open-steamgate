@@ -48,7 +48,8 @@ CLASS zcl_zosd_taxi_dpc_ext IMPLEMENTATION.
         lv_text = key_value( it_key_tab = it_parameter
                              iv_name    = 'Year' ).
         CONDENSE lv_text.
-        IF lv_text IS INITIAL OR lv_text CN '0123456789'.
+* more than four digits is not a year, and would overflow TYPE i
+        IF lv_text IS INITIAL OR lv_text CN '0123456789' OR strlen( lv_text ) > 4.
           RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
             EXPORTING
               message = |Year "{ lv_text }" is not a year|.

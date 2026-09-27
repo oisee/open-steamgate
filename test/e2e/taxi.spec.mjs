@@ -69,14 +69,14 @@ async function taxiPage(page) {
   await page.locator(`[id="${selectionId}"]`).click();
   await help.getByRole("button", {name: "OK", exact: true}).click();
   await expect(page.locator("body")).toContainText("Adapt Filters (1)");
-  await expect(page.locator("body")).toContainText(full ? "Taxi trips (326)" : "Taxi trips (332)");
+  await expect(page.locator("body")).toContainText(full ? "Taxi trips (326)" : "Taxi trips (331)");
   expect(failures).toEqual([]);
 
   if (!full) {
     // and back: the confirmation is in the page, and names what goes
     await page.getByRole("button", {name: "Reset to minimal data"}).click();
     const confirm = page.getByRole("alertdialog");
-    await expect(confirm).toContainText("Remove 2025 (84 490 trips in 20 000 rows)?");
+    await expect(confirm).toContainText("Remove 2025 (83 894 trips in 20 000 rows)?");
     await confirm.getByRole("button", {name: "Remove"}).click();
     await expect(page.getByText(/No sample data yet/).first()).toBeVisible();
   }

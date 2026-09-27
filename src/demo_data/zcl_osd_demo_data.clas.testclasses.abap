@@ -1,9 +1,11 @@
 * ENSURE_TAXI and BOOT on ZOSD_TAXIFACT: idempotence, the knob, and the
 * rows that are not ours; GENERATE_YEAR, YEARS and RESET: a year at a time,
-* once per year, and back to the sample rows.
+* once per year, and back to the sample rows. Setup and teardown reset the
+* table, so run it on a scratch database: years made by hand are removed.
 CLASS ltcl_demo_data DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
 
   PRIVATE SECTION.
+    METHODS setup.
     METHODS teardown.
     METHODS ensure_is_idempotent FOR TESTING RAISING cx_static_check.
     METHODS real_rows_untouched FOR TESTING RAISING cx_static_check.
@@ -23,6 +25,12 @@ ENDCLASS.
 
 
 CLASS ltcl_demo_data IMPLEMENTATION.
+
+  METHOD setup.
+* every case starts from the sample rows alone
+    zcl_osd_demo_data=>ensure_taxi( iv_rows = 0 ).
+    zcl_osd_demo_data=>reset( ).
+  ENDMETHOD.
 
   METHOD teardown.
     zcl_osd_demo_data=>ensure_taxi( iv_rows = 0 ).
@@ -155,11 +163,21 @@ CLASS ltcl_demo_data IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD knob_leaves_years_alone.
+    DATA lv_report TYPE string.
     zcl_osd_demo_data=>generate_year( 2031 ).
     zcl_osd_demo_data=>boot( `40` ).
     cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 20040 ).
     zcl_osd_demo_data=>boot( `0` ).
     cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 20000 ).
+* the other DELETE: real rows outnumber the request, the month goes and
+* the year stays
+    zcl_osd_demo_data=>boot( `40` ).
+    zcl_osd_demo_data=>ensure_taxi( iv_rows = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 20000 ).
+* a reset names the sample month when its rows are among what goes
+    zcl_osd_demo_data=>boot( `40` ).
+    lv_report = zcl_osd_demo_data=>reset( ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_report exp = '*removed 20040*2031 and the sample month*' ).
   ENDMETHOD.
 
 ENDCLASS.

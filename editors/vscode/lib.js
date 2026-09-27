@@ -481,6 +481,21 @@ class Osd {
    *  of an exception: `{status, ms, url, body}`, `body` parsed from JSON
    *  when the answer is JSON, else `undefined` (the raw text stays in
    *  `text`). */
+  async odata(service, resource) {
+    const url = `/sap/opu/odata/sap/${service}/${resource}`;
+    const startedAt = Date.now();
+    const res = await this.fetch(this.url + url, {headers: {accept: "application/json"}});
+    const ms = Date.now() - startedAt;
+    const text = await res.text();
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = undefined;
+    }
+    return {status: res.status, ms, url, text, body};
+  }
+
   /** A POST function import of an OData service, with the CSRF token that
    *  service hands out (the gateway's, not the ADT facade's). Answers the
    *  function's value, the one field under "d"; an OData error is thrown
@@ -488,6 +503,7 @@ class Osd {
   async odataAction(service, name, parameters = {}) {
     const root = `${this.url}/sap/opu/odata/sap/${service}/`;
     const head = await this.fetch(root, {headers: {"x-csrf-token": "fetch"}});
+    if (!head.ok) throw new Error(`GET ${service}/: HTTP ${head.status} -- no CSRF token`);
     const cookies = typeof head.headers.getSetCookie === "function" ? head.headers.getSetCookie() : [];
     const query = new URLSearchParams(Object.entries(parameters).map(([key, value]) => [key, String(value)])).toString();
     const res = await this.fetch(`${root}${name}${query ? `?${query}` : ""}`, {method: "POST", headers: {
@@ -507,21 +523,6 @@ class Osd {
       throw new Error(`POST ${service}/${name}: HTTP ${res.status}${said ? ` -- ${said}` : ""}`);
     }
     return body?.d?.[name];
-  }
-
-  async odata(service, resource) {
-    const url = `/sap/opu/odata/sap/${service}/${resource}`;
-    const startedAt = Date.now();
-    const res = await this.fetch(this.url + url, {headers: {accept: "application/json"}});
-    const ms = Date.now() - startedAt;
-    const text = await res.text();
-    let body;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = undefined;
-    }
-    return {status: res.status, ms, url, text, body};
   }
 
   /** Q6a "Notebook SQL" (docs/vscode-extension.md): run one SQL statement

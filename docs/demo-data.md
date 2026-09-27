@@ -58,7 +58,7 @@ throws: a host that cannot make the rows starts without them.
 
 The knob, for a test or a screenshot that needs rows without a request:
 
-- `OSD_DEMO_ROWS` unset or empty: nothing (it was `C_DEFAULT_ROWS`, 20000,
+- `OSD_DEMO_ROWS` unset or empty: nothing (it was 20000 rows of the sample month
   until 2026-09-27).
 - `OSD_DEMO_ROWS=0`: no rows of the sample month, and any that are there are
   removed.

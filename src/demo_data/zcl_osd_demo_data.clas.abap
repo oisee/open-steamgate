@@ -32,7 +32,6 @@
 CLASS zcl_osd_demo_data DEFINITION PUBLIC FINAL CREATE PUBLIC.
 
   PUBLIC SECTION.
-    CONSTANTS c_default_rows TYPE i VALUE 20000.
 
     TYPES:
       BEGIN OF ty_year,
@@ -175,8 +174,11 @@ CLASS zcl_osd_demo_data IMPLEMENTATION.
     DATA ls_year TYPE ty_year.
     DATA lv_names TYPE string.
     DATA lv_rows TYPE i.
+    DATA lv_month TYPE i.
     lt_years = years( ).
     SELECT COUNT(*) FROM zosd_taxifact INTO lv_rows WHERE fact_id > zcl_osd_demo_taxi=>c_synthetic_min.
+    SELECT COUNT(*) FROM zosd_taxifact INTO lv_month
+      WHERE fact_id > zcl_osd_demo_taxi=>c_synthetic_min AND fact_id <= zcl_osd_demo_taxi=>c_month_max.
     IF lv_rows = 0.
       rv_report = `taxi: already minimal, only the sample rows; nothing removed`.
       RETURN.
@@ -188,8 +190,11 @@ CLASS zcl_osd_demo_data IMPLEMENTATION.
       ENDIF.
       lv_names = lv_names && |{ ls_year-year }|.
     ENDLOOP.
-    IF lv_names IS INITIAL.
-      lv_names = `the sample month`.
+    IF lv_month > 0.
+      IF lv_names IS NOT INITIAL.
+        lv_names = lv_names && ` and `.
+      ENDIF.
+      lv_names = lv_names && `the sample month`.
     ENDIF.
     rv_report = |taxi: removed { lv_rows } synthetic rows ({ lv_names }); the sample rows stay|.
   ENDMETHOD.
