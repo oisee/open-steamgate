@@ -18,7 +18,7 @@ const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseChec
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   htmlEscape, freestyleRows, freestyleTableHtml, freestyleOutputItems, notebookAbapSource, amdpCellResult,
-  notebookFromJson, notebookToJson,
+  notebookFromJson, notebookToJson, sqlNotebookStarter,
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
@@ -92,9 +92,13 @@ function vscodeStub(settings = {}) {
   }
   const panels = [];
   const externalUris = [];
+  const externalOpens = [];
+  const executedCommands = [];
   return {
     panels,
     externalUris,
+    externalOpens,
+    executedCommands,
     EventEmitter,
     TreeItem,
     ThemeIcon,
@@ -105,7 +109,8 @@ function vscodeStub(settings = {}) {
     env: {asExternalUri: async (uri) => {
       externalUris.push(uri.toString());
       return uri;
-    }},
+    }, openExternal: async (uri) => { externalOpens.push(uri); }},
+    commands: {executeCommand: async (...args) => { executedCommands.push(args); }},
     debug: {
       sessions: [],
       onDidTerminateDebugSession: () => ({dispose() {}}),
@@ -943,6 +948,18 @@ describe("editors/vscode: the extension's logic", function () {
     expect(notebookFromJson(text)).to.deep.equal(cells);
   });
 
+  it("opens the SQL door with explanatory markdown around a runnable base-table query", () => {
+    const cells = sqlNotebookStarter();
+    expect(cells.map((cell) => [cell.kind, cell.language])).to.deep.equal([
+      ["markdown", "markdown"], ["code", "sql"], ["markdown", "markdown"],
+    ]);
+    expect(cells[0].value).to.contain("Shift+Enter");
+    expect(cells[1].value).to.equal("SELECT * FROM zosd_sys UP TO 10 ROWS");
+    expect(cells[2].value).to.contain("raw JSON").and.to.contain("DX7")
+      .and.to.contain("docs/notebook-cells.md").and.to.contain("SQLScript");
+    expect(sqlNotebookStarter("SELECT * FROM zstg_demo")[1].value).to.equal("SELECT * FROM zstg_demo");
+  });
+
   // ---- Q7 "F8 on a table or a CDS view": name resolution off the file
   // alone (dataPreviewObjectOf), the MANDT filter SQL (dataPreviewQuery /
   // dataPreviewCountQuery), the row cap wording (dataPreviewStatusText)
@@ -1324,6 +1341,98 @@ describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace la
 // logic is pure; route coverage below uses an in-memory ObjectStore, while
 // the live round trip against a running osd is test/osd-child.mjs.
 describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)", function () {
+  it("single-clicking every produced node kind only shows details", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {OsdTreeProvider, EntitySetItem, clickTreeNode, clickTransaction} = loadExtension(api);
+    let launchpadOpens = 0;
+    let overviewOpens = 0;
+    const controller = {context: controllerContext(), launcher: {state: "running", port: 3591, databaseLabel: "SQLite",
+      generation: "abcdef12", osdHome: ROOT, layers: [{folder: "extra-layer"}]}, onDidChange: () => {},
+    openLaunchpad: () => { launchpadOpens++; }, openSystemOverview: () => { overviewOpens++; }};
+    const provider = new OsdTreeProvider(controller, async () => ({sources: {}, testClasses: []}));
+    const output = {appendLine() {}, show() {}};
+    provider.rows = [
+      {kind: "APP", path: "/app/flp.html", name: "App"},
+      {kind: "ODATA", path: "/sap/opu/odata/sap/ZTEST", name: "OData", handler: "ZCL_TEST_DPC", mpc: "ZCL_TEST_MPC"},
+      {kind: "ICF", path: "/sap/bc/test", name: "ICF", handler: "ZCL_TEST_ICF"},
+      {kind: "APC", path: "/sap/bc/apc/test", name: "APC", handler: "ZCL_TEST_APC"},
+    ];
+    provider.transactions = [normalizeTransactionRow({tcode: "ZCLICK_SINGLE", runnable: true}),
+      normalizeTransactionRow({tcode: "ZCLICK_DISABLED", runnable: false, reason: "no target"})];
+    const seen = new Set();
+    try {
+      const visit = async (item) => {
+        seen.add(item.contextValue?.split(";")[0] ?? "unknown");
+        if (item.command?.command === "osd.clickTreeNode") {
+          await clickTreeNode(item, provider, output);
+          if (item.route === "/osd/serving") expect(api.panels.at(-1).webview.html).to.contain("Serving status");
+        }
+        else if (item.command?.command === "osd.clickTransaction") await clickTransaction(item, output);
+        else if (item.command?.command === "osd.newSqlNotebook") {
+          expect(item.route).to.equal("/osd/sql");
+          await api.commands.executeCommand(item.command.command, ...(item.command.arguments ?? []));
+        }
+        else throw new Error(`Unclassified tree command: ${item.label}`);
+        for (const child of await provider.getChildren(item)) await visit(child);
+      };
+      for (const item of provider.getChildren()) await visit(item);
+      // EntitySetItem is produced when the live entity-set map answers.
+      await visit(new EntitySetItem("ZCL_TEST_DPC", {set: "TravelSet", kind: "GET_ENTITYSET"}, 12));
+      await provider.setServiceGrouping("pack");
+      for (const item of provider.serviceGroupItems()) {
+        seen.add("osd-service-pack-group");
+        await clickTreeNode(item, provider, output);
+      }
+      controller.launcher.state = "stopped";
+      const stoppedRoots = provider.getChildren();
+      await visit(stoppedRoots[0]);
+      for (const item of [stoppedRoots[3], stoppedRoots[5]]) {
+        for (const child of await provider.getChildren(item)) await visit(child);
+      }
+      controller.launcher.state = "building";
+      await visit(provider.getChildren()[0]);
+      expect([...seen]).to.include.members(["osd-state-running", "osd-launchpad", "osd-system-group", "osd-host-open",
+        "osd-host-dumps", "osd-host-sql", "osd-transactions", "osd-transaction-runnable", "osd-transaction",
+        "osd-layers", "osd-layer-base", "osd-layer-workspace", "osd-services", "osd-service-group", "osd-service-pack-group",
+        "osd-service-class", "osd-service-entityset", "osd-placeholder", "osd-state-stopped", "osd-state-building",
+        "osd-service-app", "osd-service-odata", "osd-service-icf", "osd-service-apc"]);
+      expect(api.externalOpens).to.have.lengthOf(0);
+      expect(api.executedCommands).to.deep.equal([["osd.newSqlNotebook"]]);
+      expect(launchpadOpens).to.equal(0);
+      expect(overviewOpens).to.equal(3);
+      expect(api.panels.filter((panel) => panel.args[0] === "osdWebgui")).to.have.lengthOf(0);
+
+      const serving = new api.TreeItem("Other endpoint");
+      serving.contextValue = "osd-host-open";
+      serving.route = "/osd/other";
+      await clickTreeNode(serving, provider, output);
+      expect(api.externalOpens).to.have.lengthOf(0);
+      await clickTreeNode(serving, provider, output);
+      expect(api.externalOpens).to.have.lengthOf(1);
+
+      const launchpad = new api.TreeItem("Another launchpad");
+      launchpad.contextValue = "osd-launchpad";
+      await clickTreeNode(launchpad, provider, output);
+      expect(launchpadOpens).to.equal(0);
+      await clickTreeNode(launchpad, provider, output);
+      expect(launchpadOpens).to.equal(1);
+    } finally {
+      provider.dispose();
+    }
+  });
+  it("keeps entity-set and entity clicks separate for the same DPC and set", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {EntitySetItem, clickTreeNode} = loadExtension(api);
+    const provider = {controller: {openSystemOverview() {}}};
+    let sourceLookups = 0;
+    api.workspace.findFiles = async () => { sourceLookups++; return []; };
+    const entitySet = new EntitySetItem("ZCL_CLICK_PAIR_DPC", {set: "TravelSet", kind: "get_entityset"}, 12);
+    const entity = new EntitySetItem("ZCL_CLICK_PAIR_DPC", {set: "TravelSet", kind: "get_entity"}, 20);
+    await clickTreeNode(entitySet, provider);
+    await clickTreeNode(entity, provider);
+    expect(sourceLookups).to.equal(0);
+    expect(api.panels.at(-1).webview.html).to.contain("TravelSet (get_entity)");
+  });
   it("labels the four named kinds SEGW's own words, and title-cases a kind it has never seen", () => {
     expect(serviceGroupLabel("ODATA")).to.equal("OData");
     expect(serviceGroupLabel("APP")).to.equal("Apps");

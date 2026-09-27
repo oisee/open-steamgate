@@ -12,7 +12,7 @@ const fs = require("node:fs");
 const crypto = require("node:crypto");
 const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
-  freestyleTableHtml, freestyleOutputItems, notebookAbapSource, notebookFromJson, notebookToJson,
+  freestyleTableHtml, freestyleOutputItems, notebookAbapSource, notebookFromJson, notebookToJson, sqlNotebookStarter, htmlEscape,
   hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText,
   transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, demoFailureObjects, progRunLens,
@@ -1081,7 +1081,7 @@ class OsdTreeProvider {
     stateItem.iconPath = new vscode.ThemeIcon(
       state === "running" ? "pass-filled" : state === "stopped" ? "circle-large-outline" : "sync~spin");
     stateItem.contextValue = osdStateContext(state);
-    stateItem.command = {command: "osd.openSystemOverview", title: "Open System overview"};
+    stateItem.command = treeClick(stateItem);
     if (this.warm !== undefined) {
       const lastVerify = this.warm.lastVerify === undefined ? "never"
         : `${this.warm.lastVerify.verdict ?? "?"} at ${this.warm.lastVerify.at ?? "?"}`;
@@ -1093,15 +1093,17 @@ class OsdTreeProvider {
     const launchpad = new vscode.TreeItem("▶ Open Fiori Launchpad");
     launchpad.contextValue = "osd-launchpad";
     launchpad.iconPath = new vscode.ThemeIcon("link-external");
-    launchpad.command = {command: "osd.openLaunchpad", title: "Open Fiori Launchpad"};
+    launchpad.command = treeClick(launchpad);
 
     const layers = new vscode.TreeItem("Layers", vscode.TreeItemCollapsibleState.Expanded);
     layers.contextValue = "osd-layers";
     layers.iconPath = new vscode.ThemeIcon("layers");
+    layers.command = treeClick(layers);
 
     const services = new vscode.TreeItem("Services", vscode.TreeItemCollapsibleState.Collapsed);
     services.contextValue = "osd-services";
     services.iconPath = new vscode.ThemeIcon("plug");
+    services.command = treeClick(services);
 
     const system = new SystemGroupItem();
     const transactions = new TransactionGroupItem(this.transactions);
@@ -1109,6 +1111,8 @@ class OsdTreeProvider {
     this.groupBy = grouping === "pack" ? "pack" : "kind";
     this.groups = groupServices(this.rows, this.groupBy);
 
+    system.command = treeClick(system);
+    transactions.command = treeClick(transactions);
     return [stateItem, launchpad, system, transactions, layers, services];
   }
 
@@ -1118,11 +1122,15 @@ class OsdTreeProvider {
     const osdHome = launcher?.osdHome ?? choice.path;
     const base = new vscode.TreeItem(osdHome === undefined ? "(osd.home not set, no single workspace folder)" : `base: ${osdHome}`);
     base.iconPath = new vscode.ThemeIcon("folder-library");
+    base.contextValue = "osd-layer-base";
+    base.command = treeClick(base);
     const items = [base];
     const layers = launcher?.layers ?? (osdHome === undefined ? [] : detectWorkspaceLayers(workspaceFoldersFor(osdHome)));
     for (const layer of layers) {
       const item = new vscode.TreeItem(`workspace: ${layer.folder}`);
       item.iconPath = new vscode.ThemeIcon("folder");
+      item.contextValue = "osd-layer-workspace";
+      item.command = treeClick(item);
       items.push(item);
     }
     return items;
@@ -1130,10 +1138,10 @@ class OsdTreeProvider {
 
   serviceGroupItems() {
     if (this.controller.launcher?.state !== "running") {
-      return [new vscode.TreeItem("(start the system to see its services)")];
+      return [treePlaceholder("(start the system to see its services)")];
     }
     if (this.groups.length === 0) {
-      return [new vscode.TreeItem("(none, or nothing answered yet -- osd.refreshTree)")];
+      return [treePlaceholder("(none, or nothing answered yet -- osd.refreshTree)")];
     }
     return this.groups.map((group) => new ServiceGroupItem(group));
   }
@@ -1156,8 +1164,8 @@ class OsdTreeProvider {
   }
 
   transactionItems() {
-    if (this.controller.launcher?.state !== "running") return [new vscode.TreeItem("(start the system to see transactions)")];
-    if (this.transactions.length === 0) return [new vscode.TreeItem("(no transactions registered)")];
+    if (this.controller.launcher?.state !== "running") return [treePlaceholder("(start the system to see transactions)")];
+    if (this.transactions.length === 0) return [treePlaceholder("(no transactions registered)")];
     return this.transactions.map((tran) => new TransactionItem(tran));
   }
 
@@ -1210,6 +1218,17 @@ class SystemGroupItem extends vscode.TreeItem {
   }
 }
 
+function treeClick(item) {
+  return {command: "osd.clickTreeNode", title: "Details", arguments: [item]};
+}
+
+function treePlaceholder(label) {
+  const item = new vscode.TreeItem(label);
+  item.contextValue = "osd-placeholder";
+  item.command = treeClick(item);
+  return item;
+}
+
 function systemDoorItems() {
   return [
     new HostDoorItem("Serving", "/osd/serving", "Generation and warm state", "open"),
@@ -1225,8 +1244,9 @@ class HostDoorItem extends vscode.TreeItem {
     this.contextValue = `osd-host-${action}`;
     this.description = description;
     this.iconPath = new vscode.ThemeIcon(action === "dumps" ? "warning" : action === "sql" ? "database" : "pulse");
-    this.command = {command: action === "dumps" ? "osd.showDumps" : action === "sql" ? "osd.newSqlNotebook" : "osd.openHostDoor", title: label,
-      arguments: [route]};
+    this.command = action === "sql"
+      ? {command: "osd.newSqlNotebook", title: "Open SQL notebook"}
+      : treeClick(this);
   }
 }
 
@@ -1260,6 +1280,7 @@ class ServiceGroupItem extends vscode.TreeItem {
     this.group = group;
     this.contextValue = "osd-service-group";
     this.iconPath = new vscode.ThemeIcon(group.groupBy === "pack" ? "package" : "folder");
+    this.command = treeClick(this);
   }
 }
 
@@ -1278,7 +1299,7 @@ class ServiceRowItem extends vscode.TreeItem {
       row.kind === "APP" ? "browser" : row.kind === "ODATA" ? "database" : row.kind === "APC" ? "broadcast" : "plug");
     // A single click selects details. The inline play action retains the
     // setting-controlled browser/webview open target.
-    this.command = {command: "osd.showServiceDetails", title: "Details", arguments: [this]};
+    this.command = treeClick(this);
   }
 }
 
@@ -1292,7 +1313,7 @@ class ServiceClassItem extends vscode.TreeItem {
     this.contextValue = "osd-service-class";
     this.iconPath = new vscode.ThemeIcon("symbol-class");
     this.description = node.role.toUpperCase();
-    this.command = {command: "osd.openServiceClass", title: "Open source", arguments: [node]};
+    this.command = treeClick(this);
   }
 }
 
@@ -1311,7 +1332,7 @@ class EntitySetItem extends vscode.TreeItem {
     this.contextValue = "osd-service-entityset";
     this.iconPath = new vscode.ThemeIcon("symbol-field");
     this.description = set.kind;
-    this.command = {command: "osd.openEntitySetMethod", title: "Open method", arguments: [dpcName, set, line]};
+    this.command = treeClick(this);
   }
 }
 
@@ -1577,6 +1598,54 @@ function clickTransaction(item, output) {
     return;
   }
   showTransactionDetails(item, output);
+}
+
+let treeClicks = new Map();
+
+/** The same 400 ms classifier as TRAN, for every other selectable row. */
+async function clickTreeNode(item, provider, output) {
+  if (!item) return;
+  const kind = item.contextValue?.split(";")[0] ?? "";
+  const identity = item.route ?? item.row?.path ?? item.node?.name ??
+    (item.dpcName ? `${item.dpcName}/${item.set?.set}/${item.set?.kind}` : undefined) ?? item.group?.label ?? item.label;
+  const key = `${kind}:${identity}`;
+  const classified = classifyTransactionClick(treeClicks, key, Date.now());
+  treeClicks = classified.clicks;
+  if (classified.action === "double") {
+    if (kind === "osd-launchpad") return provider.controller.openLaunchpad();
+    if (kind === "osd-host-open") return openHostDoor(item.route);
+    if (kind === "osd-host-dumps") return showDumps(output);
+    if (kind.startsWith("osd-service-") && item.row) return openServiceRow(item);
+    if (kind === "osd-service-class") return openServiceClass(item.node, output);
+    if (kind === "osd-service-entityset") return openEntitySetMethod(item.dpcName, item.set, item.line, output);
+  }
+  if (kind.startsWith("osd-state-")) return provider.controller.openSystemOverview();
+  if (item.row) return showServiceDetails(item, provider, output);
+  showTreeNodeDetails(item, output);
+}
+
+function showTreeNodeDetails(item, output) {
+  ensureDetailsPanel(output);
+  serviceDetailsItem = undefined;
+  transactionProgramSource = undefined;
+  serviceDetailsSelection += 1;
+  const kind = item.contextValue?.split(";")[0] ?? "";
+  const title = String(item.label ?? "OSD tree");
+  const explanation = kind === "osd-launchpad" ? "Fiori Launchpad for the running system. Double click to open it in the browser."
+    : kind === "osd-host-open" ? "Serving status, generation, database, and warm build state. Double click to open the endpoint."
+      : kind === "osd-host-dumps" ? "Short dumps collected from runtime errors. Double click to list them in Output."
+        : kind === "osd-system-group" ? "System endpoints for serving state, short dumps, and SQL. Expand to inspect them."
+          : kind === "osd-transactions" ? "Registered transactions. Expand to inspect each transaction and run runnable ones."
+            : kind === "osd-layers" ? "The base system and workspace layers that compose this instance."
+              : kind === "osd-layer-base" ? "Base system source folder used by this instance."
+                : kind === "osd-layer-workspace" ? "Workspace source layered over the base system."
+                  : kind === "osd-services" ? "Services registered by the running system, grouped by kind or pack."
+                    : kind === "osd-service-group" ? `Services in the ${item.group.label} group. Expand to inspect each service.`
+                      : kind === "osd-service-class" ? `${item.node.role.toUpperCase()} class ${item.node.name}. Double click to open its source file.`
+                        : kind === "osd-service-entityset" ? `Entity set ${item.set.set} (${item.set.kind}) in ${item.dpcName}. Double click to open its implementation method.`
+                          : "This row describes the current tree state. Expand its parent or refresh the tree when the system changes.";
+  serviceDetailsPanel.title = `${title} · Details`;
+  serviceDetailsPanel.webview.html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';"><style>body{font:13px var(--vscode-font-family);color:var(--vscode-foreground);padding:0 20px;max-width:1000px}h1{font-size:20px}</style></head><body><h1>${htmlEscape(title)}</h1><p>${htmlEscape(explanation)}</p></body></html>`;
 }
 
 async function openServiceSource(item, role, output) {
@@ -1901,6 +1970,7 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpad", () => controller.openLaunchpad()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpadInVsCode", () => controller.openLaunchpadInVsCode()));
   const treeProvider = new OsdTreeProvider(controller);
+  context.subscriptions.push(vscode.commands.registerCommand("osd.clickTreeNode", (item) => clickTreeNode(item, treeProvider, output)));
   context.subscriptions.push(treeProvider);
   context.subscriptions.push(vscode.window.registerTreeDataProvider("osdTree", treeProvider));
   context.subscriptions.push(vscode.commands.registerCommand("osd.refreshTree",
@@ -1935,6 +2005,7 @@ function activate(context) {
     serviceDetailsItem = undefined;
     transactionProgramSource = undefined;
     transactionClicks = new Map();
+    treeClicks = new Map();
   }});
   context.subscriptions.push(startStopStatusBar(context, controller));
 }
@@ -3183,12 +3254,11 @@ function sqlNotebookSerializer() {
 
 /** `osd.newSqlNotebook`'s own untitled notebook, and Q7's "Open in SQL
  *  notebook" button -- `statement` is the cell it opens with, ready to
- *  run; the command palette calls this with none, which keeps the
- *  original placeholder cell. */
+ *  run; the command palette and SQL tree node use the base status example. */
 async function newSqlNotebook(statement) {
-  const data = new vscode.NotebookData([
-    new vscode.NotebookCellData(vscode.NotebookCellKind.Code, statement ?? "SELECT * FROM zstg_demo", "sql"),
-  ]);
+  const data = new vscode.NotebookData(sqlNotebookStarter(statement).map((cell) => new vscode.NotebookCellData(
+    cell.kind === "markdown" ? vscode.NotebookCellKind.Markup : vscode.NotebookCellKind.Code,
+    cell.value, cell.language)));
   const doc = await vscode.workspace.openNotebookDocument(NOTEBOOK_TYPE, data);
   await vscode.window.showNotebookDocument(doc);
 }
@@ -3249,4 +3319,5 @@ async function deactivate() {
   await activeController?.stop();
 }
 
-module.exports = {activate, deactivate, SystemController, testExplorer, OsdTreeProvider, TransactionItem, transactionProgramPath, clickTransaction};
+module.exports = {activate, deactivate, SystemController, testExplorer, OsdTreeProvider, TransactionItem, EntitySetItem,
+  transactionProgramPath, clickTransaction, clickTreeNode};

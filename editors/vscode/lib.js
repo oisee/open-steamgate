@@ -1477,6 +1477,16 @@ function notebookToJson(cells) {
   return `${JSON.stringify(doc, undefined, 2)}\n`;
 }
 
+/** Initial cells for the SQL door. ZOSD_SYS is part of the base status
+ *  schema, so the example also works without any optional pack. */
+function sqlNotebookStarter(statement) {
+  return [
+    {kind: "markdown", language: "markdown", value: "# Open SQL\nQuery the running osd system. Select the SQL cell and run it with the cell's Run button or Shift+Enter."},
+    {kind: "code", language: "sql", value: statement ?? "SELECT * FROM zosd_sys UP TO 10 ROWS"},
+    {kind: "markdown", language: "markdown", value: "## More about SQL cells\nUse read-only Open SQL `SELECT` statements, including `WHERE`, `ORDER BY`, and `UP TO n ROWS`. The notebook limits returned rows with `osd.notebook.rowLimit`. Results come from the running system's database through the ADT freestyle preview route. Output shows a table with a **raw JSON** disclosure of the same rows. For executable ABAP and SQLScript cells, see DX7 and `docs/notebook-cells.md`; SQLScript requires HANA."},
+  ];
+}
+
 // abapGit's own extension per object type, so a reader's file can be found
 // without guessing at what generated it; a type this extension has no file
 // shape for (FUGR, TABL, DDLS, ...) opens nothing rather than a wrong guess
@@ -2110,7 +2120,7 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   htmlEscape, freestyleRows, freestyleTableHtml, freestyleOutputItems, notebookAbapSource, amdpCellResult,
-  notebookFromJson, notebookToJson,
+  notebookFromJson, notebookToJson, sqlNotebookStarter,
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,

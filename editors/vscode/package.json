@@ -203,6 +203,7 @@
       {"command": "osd.openHostDoor", "title": "osd: Open system endpoint"},
       {"command": "osd.showServiceDetails", "title": "osd: Show service details"},
       {"command": "osd.clickTransaction", "title": "osd: Transaction details"},
+      {"command": "osd.clickTreeNode", "title": "osd: Tree details"},
       {"command": "osd.runTransaction", "title": "Run", "icon": "$(play)"},
       {"command": "osd.openServiceRow", "title": "Open", "icon": "$(play)"},
       {"command": "osd.openServiceRowExternal", "title": "Open", "icon": "$(play)"},
