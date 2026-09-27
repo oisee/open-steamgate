@@ -428,7 +428,10 @@ describe("editors/vscode: the extension's logic", function () {
         sources: [path.relative(output, path.join(home, "src", "zcl_a.clas.abap")).replaceAll("\\", "/")], mappings: ""}));
       writeFileSync(path.join(output, "zcl_p.clas.mjs.map"), JSON.stringify({version: 3,
         sources: [path.relative(output, path.join(packSource, "zcl_p.clas.abap")).replaceAll("\\", "/")], mappings: ""}));
-      writeFileSync(path.join(output, "lib.intf.mjs"), "");
+      // a library's map names a bare file name, resolving inside output/ to nothing
+      writeFileSync(path.join(output, "zcl_lib.clas.mjs.map"), JSON.stringify({version: 3, sources: ["zcl_lib.clas.abap"], mappings: ""}));
+      mkdirSync(path.join(dir, "lib", "src"), {recursive: true});
+      writeFileSync(path.join(dir, "lib", "src", "zcl_lib.clas.abap"), "CLASS x DEFINITION.\n");
       symlinkSync(output, path.join(home, "output"), "dir");
 
       const running = runningAbapSources(home, {storageDir: storage, layers: [layer]});
@@ -444,6 +447,11 @@ describe("editors/vscode: the extension's logic", function () {
       const absent = breakpointWarning(path.join(checkout, "src", "zcl_b.clas.abap"), running);
       expect(absent.counterpart).to.equal(undefined);
       expect(absent.message).to.contain("no code of the running system maps back to zcl_b.clas.abap");
+
+      expect(running.files.size).to.equal(2);
+      const library = breakpointWarning(path.join(dir, "lib", "src", "zcl_lib.clas.abap"), running);
+      expect(library.counterpart).to.equal(undefined);
+      expect(library.message).to.contain("no code of the running system maps back to zcl_lib.clas.abap");
 
       expect(runningAbapSources(path.join(dir, "nothing-built"))).to.equal(undefined);
       expect(breakpointWarning(path.join(checkout, "src", "zcl_a.clas.abap"), undefined)).to.equal(undefined);

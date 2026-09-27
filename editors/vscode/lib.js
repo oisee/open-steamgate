@@ -192,8 +192,15 @@ function runningAbapSources(root, {storageDir, layers = []} = {}) {
     for (const entry of map.sources ?? []) {
       if (typeof entry !== "string" || !/\.abap$/i.test(entry)) continue;
       let file = entry.startsWith("file:") ? fileURLToPath(entry) : path.resolve(output, map.sourceRoot ?? "", entry);
-      const pack = mappings.find((m) => isInside(file, m.packSource));
-      if (pack !== undefined) file = path.join(pack.source, path.relative(pack.packSource, file));
+      const pack = mappings.find((m) => isInside(file, m.packSource) || isInside(file, realOrSelf(m.packSource)));
+      if (pack !== undefined) {
+        const base = isInside(file, pack.packSource) ? pack.packSource : realOrSelf(pack.packSource);
+        file = path.join(pack.source, path.relative(base, file));
+      }
+      // a library's map names a bare file name, which resolves inside
+      // output/ to nothing; a stale gen/ entry names a file since removed.
+      // Neither is a copy a breakpoint could be moved to.
+      if (!fs.existsSync(file)) continue;
       files.set(sourceKey(realOrSelf(file)), file);
     }
   }

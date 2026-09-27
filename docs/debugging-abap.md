@@ -108,17 +108,20 @@ extension and the maps:
   winner. On this tree, `packs/zvdb/src/zcl_vdb_100_hana.clas.abap` is
   hidden by `gen/amdp/zcl_vdb_100_hana.clas.abap`.
 
-A fourth case is not a copy: libraries (open-abap-core, the open-abap-odata
-interfaces) are transpiled without source maps -- 1696 modules, 830 maps
-on this tree -- so no breakpoint binds in them at all.
+A fourth case is not a copy: a library's map (open-abap-core, the
+open-abap-odata interfaces) names a bare file name,
+`cl_abap_char_utilities.clas.abap`, which resolves inside `output/` to a
+file that does not exist, so no breakpoint binds in a library at all. On
+this tree 1696 modules carry 830 maps; 462 of those are library maps of
+that kind, and the ones left name 362 files that exist.
 
 The extension now says so instead of leaving a grey marker. When an OSD
 debug session starts, and whenever a breakpoint is added during one, each
 `.abap` breakpoint is checked against the set of files the running
-generation's maps name (`runningAbapSources` in `editors/vscode/lib.js`:
-~865 files read in ~45 ms here, cached per generation, pack storage paths
-mapped back to the workspace folder the same way the attach configuration
-maps them). A breakpoint outside that set gets one warning per file per
+generation's maps name and that exist on disk (`runningAbapSources` in
+`editors/vscode/lib.js`: 362 files, a few tens of milliseconds here, cached
+per generation, pack storage paths mapped back to the workspace folder the
+same way the attach configuration maps them). A breakpoint outside that set gets one warning per file per
 generation, naming the copy that runs and offering to open it. The check
 does not move a breakpoint or change which copy runs; that stays the
 person's choice (**osd: Choose which system Start runs**, `osd.home`).

@@ -2012,7 +2012,10 @@ function breakpointGuard(context) {
       warned.add(file);
       const actions = warning.counterpart === undefined ? [] : ["Open the running copy"];
       vscode.window.showWarningMessage(`osd: ${warning.message}`, ...actions).then((picked) => {
-        if (picked !== undefined) vscode.window.showTextDocument(vscode.Uri.file(warning.counterpart));
+        if (picked !== undefined) return vscode.window.showTextDocument(vscode.Uri.file(warning.counterpart));
+        return undefined;
+      }).then(undefined, (e) => {
+        vscode.window.showErrorMessage(`osd: could not open ${warning.counterpart}: ${String(e?.message ?? e)}`);
       });
     }
   };
