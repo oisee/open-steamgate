@@ -1227,17 +1227,46 @@ and mode bits, and excludes `.seed-id` itself. `ensureMaterializedHome()`
 `<globalStorageUri>/osd-home-<seedId>/`; its `.osd-materialized` marker stores
 the same ID. A matching ID reuses the existing copy, including any edits made
 since it was materialized. A changed seed, even under the same extension
-version, gets a new copy in its own seed-keyed directory. Every earlier home
-stays at its original path, whether edited or clean, so a server in another
-window can keep saving there. On a seed change, the extension shows a one-line
-notice with the previous home's path and the total size of all old working
-copies. It never deletes, renames, or tombstones
-materialized homes automatically. `osd: Remove old working copies` lists stale
-homes with their sizes and whether their content differs from the seed ID.
-Generated build files also count as differences; unreadable or unverifiable
-homes are labeled edited. The user selects homes and confirms deletion in a
-modal dialog. The command checks the current seed's home and the current
-window's live launcher again before deleting selected paths.
+version, gets a new copy in its own seed-keyed directory. At extension
+activation, before this window starts a system, old seed-keyed homes are
+checked. Cleanup first renames each eligible old home to a unique quarantine
+name in the same storage directory, then checks its lock and contents again.
+If either changed, it restores the old path (or retains the quarantine path
+if the old path has been occupied). An old home whose contents still match
+its own seed ID is removed.
+For an edited home, the extension first saves changed and added files under
+`<globalStorageUri>/osd-saved-edits/<old-seed-id>-<yyyy-mm-dd>/files/`, with
+deleted file paths in `deleted.json`, then removes the old home. The saved
+folder also contains a complete `snapshot/`, so restoring the exact old copy
+does not require finding an older VSIX: copy `snapshot/` back to its original
+`osd-home-*` path. To apply just the edits to a seed, overlay `files/` and
+remove the paths in `deleted.json`. A home created before
+`.osd-seed-files.json` recorded the original file list gets only the complete
+snapshot. A notice for each saved copy has an
+**Open saved edits** button. Repeated saves on the same day get a numeric
+suffix, so an earlier save is never overwritten.
+
+A launcher writes a `.osd-serving-<pid>-<uuid>.lock` with its extension host
+PID while building, then records the server child PID as soon as it starts,
+and removes its lock on stop or server exit. Cleanup treats a lock as stale
+only when both PIDs are dead, and keeps a home with a live,
+unreadable, or malformed lock. The current seed's home is always kept.
+Only exact lock filenames are excluded from content checks; similarly named
+files such as `.osd-serving-notes` count as user edits.
+Cleanup also verifies the excluded seed metadata before removing an unedited
+home; changed metadata is saved with the home or causes it to be kept. This
+activation-only cleanup runs before this window starts its system. Quarantine
+blocks new opens through the old path, and per-home server locks protect known
+serving processes. A foreign process that already holds an open file descriptor
+into an unlocked old home can still write during deletion; that residual risk
+is accepted for this local development tool.
+Unreadable homes, failed hashes, and failed saves are kept. The manual
+`osd: Remove old working copies` command still lists old homes with sizes
+and whether their content differs from the seed ID. Generated build files
+also count as differences; unreadable or unverifiable homes are labeled
+edited. The user selects homes and confirms deletion in a modal dialog.
+The command checks the current seed's home and serving locks again before
+deleting selected paths.
 
 `linkOrCopyTree()` copies regular files and keeps symlinks as symlinks. Files
 must have separate inodes because the Workbench's ADT save path writes them
@@ -1246,10 +1275,11 @@ packaged seed. `osd.home`, when set, still wins -- the dev path, unchanged,
 and the only path a checkout with no bundled `extension/osd/` (the symlinked
 dev install) ever takes. `build/` and `gen/` are then written inside that
 storage copy by the ordinary build, never inside `extension/osd/` itself.
-`test/vscode-launcher.mjs` proves A-to-B-to-A retains every home, checks the
-command's pure selection logic and verifies a late `ObjectStore.write()` still
-reaches an older home. `test/vscode-vsix.mjs` checks seed IDs in real `.vsix`
-packages and preservation of an edited home on a seed change.
+`test/vscode-launcher.mjs` checks activation cleanup, edit saving, serving
+locks, the command's pure selection logic, and a late `ObjectStore.write()`
+through an older path before cleanup. `test/vscode-vsix.mjs` checks seed IDs
+in real `.vsix` packages and preservation of an edited home until activation
+cleanup runs.
 
 **Measured before** (2026-09-26, `output/` shipped, the state #105/#106
 left this in, version 0.1.1): `.vsix` 53.5 MB, unpacked 148.7 MB
