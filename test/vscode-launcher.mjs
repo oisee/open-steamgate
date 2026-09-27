@@ -16,6 +16,8 @@ import {delimiter, join} from "node:path";
 import {once} from "node:events";
 import {brotliCompressSync} from "node:zlib";
 import {ObjectStore} from "../tools/osd-store.mjs";
+// A lock name carries a random UUID; tests build fixed ones instead of spelling them out.
+const lockId = (n) => ["0".repeat(8), "0000", "4000", "8000", String(n).padStart(12, "0")].join("-");
 
 const {
   PORT_RANGE, isFree, pickPort, classify,
@@ -24,6 +26,7 @@ const {
   detectWorkspaceLayers, packNameOf, ensureWorkspacePacks,
   waitForServing, servingOnce, terminate, Launcher,
   linkOrCopyTree, materializedHomeDir, ensureMaterializedHome, selectOldHomes, listOldHomes, keptHomeNotice, MATERIALIZED_MARKER,
+  cleanupOldHomes, hasLiveServingLock, setServingChildPid, SERVING_LOCK_PREFIX,
   DATABASE_KINDS, defaultDedicatedName, databaseEnv, describeDatabase, duckdbAvailable,
   WARM_MEMORY_FLOOR_BYTES, shouldWarm, warmEnvironment,
   SEED_ID_FILE, seedContentId, writeSeedId,
@@ -694,7 +697,232 @@ describe("editors/vscode/launcher.js: linkOrCopyTree / ensureMaterializedHome (p
     expect(first).to.equal(second);
     expect(readFileSync(join(first, MATERIALIZED_MARKER), "utf8").trim()).to.equal(seedId);
     expect(readFileSync(join(first, "top.txt"), "utf8")).to.equal("hello");
+    expect(existsSync(join(first, ".osd-seed-files.json"))).to.equal(true);
     expect(readdirSync(storageDir).filter((name) => name.startsWith(".osd-home-extract-"))).to.deep.equal([]);
+    writeFileSync(join(first, "top.txt"), "archived seed edit\n");
+    const cleaned = cleanupOldHomes(storageDir, "f".repeat(64));
+    expect(cleaned.removed).to.deep.equal([first]);
+    expect(readFileSync(join(cleaned.saved[0], "files", "top.txt"), "utf8")).to.equal("archived seed edit\n");
+  });
+
+  function nextSeed() {
+    writeFileSync(join(seedDir, "top.txt"), "new seed");
+    const currentId = writeSeedId(seedDir);
+    const currentHome = ensureMaterializedHome(seedDir, storageDir);
+    return {currentId, currentHome};
+  }
+
+  it("deletes an unedited old home at activation and leaves the current home", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    const {currentId, currentHome} = nextSeed();
+    const result = cleanupOldHomes(storageDir, currentId);
+    expect(result.removed).to.deep.equal([oldHome]);
+    expect(result.saved).to.deep.equal([]);
+    expect(existsSync(oldHome)).to.equal(false);
+    expect(existsSync(currentHome)).to.equal(true);
+    expect(cleanupOldHomes(storageDir, currentId).removed).to.deep.equal([]);
+  });
+
+  it("saves an edited seed file list even when seed content is unchanged", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    const metadata = join(oldHome, ".osd-seed-files.json");
+    const edited = readFileSync(metadata, "utf8").replace('"files":', '"note":"user edit","files":');
+    writeFileSync(metadata, edited);
+    const {currentId} = nextSeed();
+    const result = cleanupOldHomes(storageDir, currentId);
+    expect(result.removed).to.deep.equal([oldHome]);
+    expect(result.saved).to.have.lengthOf(1);
+    expect(readFileSync(join(result.saved[0], "snapshot", ".osd-seed-files.json"), "utf8")).to.equal(edited);
+  });
+
+  it("saves excluded metadata changed after quarantine before removing the home", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    const {currentId} = nextSeed();
+    const result = cleanupOldHomes(storageDir, currentId, {onQuarantined: (quarantine) => {
+      writeFileSync(join(quarantine, ".osd-seed-files.json"), "late metadata edit\n");
+    }});
+    expect(result.removed).to.deep.equal([oldHome]);
+    expect(result.saved).to.have.lengthOf(1);
+    expect(readFileSync(join(result.saved[0], "snapshot", ".osd-seed-files.json"), "utf8"))
+      .to.equal("late metadata edit\n");
+  });
+
+  it("keeps a home whose excluded seed marker has extra content", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    writeFileSync(join(oldHome, SEED_ID_FILE), `${seedId}\nuser note\n`);
+    const {currentId} = nextSeed();
+    const result = cleanupOldHomes(storageDir, currentId);
+    expect(result.removed).to.deep.equal([]);
+    expect(existsSync(oldHome)).to.equal(true);
+  });
+
+  it("saves changed and added files and deleted paths before removing an edited home", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    writeFileSync(join(oldHome, "top.txt"), "user edit\n");
+    writeFileSync(join(oldHome, "added.txt"), "added by user\n");
+    rmSync(join(oldHome, "src", "zcl_materialized.clas.abap"));
+    const {currentId} = nextSeed();
+    const result = cleanupOldHomes(storageDir, currentId, {onSaved: (saved) => {
+      expect(existsSync(oldHome)).to.equal(false);
+      expect(readFileSync(join(saved, "snapshot", "top.txt"), "utf8")).to.equal("user edit\n");
+    }});
+    expect(result.removed).to.deep.equal([oldHome]);
+    expect(result.saved).to.have.lengthOf(1);
+    expect(readFileSync(join(result.saved[0], "files", "top.txt"), "utf8")).to.equal("user edit\n");
+    expect(readFileSync(join(result.saved[0], "snapshot", "top.txt"), "utf8")).to.equal("user edit\n");
+    expect(readFileSync(join(result.saved[0], "files", "added.txt"), "utf8")).to.equal("added by user\n");
+    expect(JSON.parse(readFileSync(join(result.saved[0], "deleted.json"), "utf8")))
+      .to.include("src/zcl_materialized.clas.abap");
+    expect(existsSync(oldHome)).to.equal(false);
+  });
+
+  it("keeps a home with a live serving pid lock", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    writeFileSync(join(oldHome, `${SERVING_LOCK_PREFIX}${process.pid}-${lockId(1)}.lock`), `${process.pid}\n`);
+    expect(hasLiveServingLock(oldHome)).to.equal(true);
+    const {currentId} = nextSeed();
+    expect(cleanupOldHomes(storageDir, currentId).removed).to.deep.equal([]);
+    expect(existsSync(oldHome)).to.equal(true);
+  });
+
+  it("writes a launcher lock while building and removes it on stop", async () => {
+    const home = ensureMaterializedHome(seedDir, storageDir);
+    mkdirSync(join(home, "tools"));
+    writeFileSync(join(home, "tools", "osd-build.mjs"), "setInterval(() => {}, 1000);\n");
+    const launcher = new Launcher({osdHome: home, storageDir: join(storageDir, "instance"), warm: "off"});
+    const starting = launcher.start();
+    try {
+      for (let tries = 0; launcher.buildChild === undefined && tries < 100; tries++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(launcher.buildChild).to.not.equal(undefined);
+      expect(hasLiveServingLock(home)).to.equal(true);
+      await launcher.stop();
+      expect(await starting).to.equal(undefined);
+      expect(readdirSync(home).filter((name) => name.startsWith(SERVING_LOCK_PREFIX))).to.deep.equal([]);
+    } finally {
+      await launcher.stop();
+    }
+  });
+
+  it("ignores a stale pid lock", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    writeFileSync(join(oldHome, `${SERVING_LOCK_PREFIX}999999999-${lockId(2)}.lock`), "999999999\n");
+    expect(hasLiveServingLock(oldHome)).to.equal(false);
+    const {currentId} = nextSeed();
+    expect(cleanupOldHomes(storageDir, currentId).removed).to.deep.equal([oldHome]);
+  });
+
+  it("keeps a home when a serving lock cannot be trusted", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    writeFileSync(join(oldHome, `${SERVING_LOCK_PREFIX}999999999-${lockId(3)}.lock`), "not a pid\n");
+    const {currentId} = nextSeed();
+    expect(hasLiveServingLock(oldHome)).to.equal(true);
+    expect(cleanupOldHomes(storageDir, currentId).removed).to.deep.equal([]);
+    expect(existsSync(oldHome)).to.equal(true);
+  });
+
+  it("keeps a home when the host died but its server child is alive", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    writeFileSync(join(oldHome, `${SERVING_LOCK_PREFIX}999999999-${lockId(4)}.lock`),
+      `999999999\n${process.pid}\n`);
+    const {currentId} = nextSeed();
+    expect(hasLiveServingLock(oldHome)).to.equal(true);
+    expect(cleanupOldHomes(storageDir, currentId).removed).to.deep.equal([]);
+    expect(existsSync(oldHome)).to.equal(true);
+  });
+
+  it("ignores a two-PID lock only after both processes die", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    writeFileSync(join(oldHome, `${SERVING_LOCK_PREFIX}999999998-${lockId(7)}.lock`),
+      "999999998\n999999999\n");
+    const {currentId} = nextSeed();
+    expect(hasLiveServingLock(oldHome)).to.equal(false);
+    expect(cleanupOldHomes(storageDir, currentId).removed).to.deep.equal([oldHome]);
+  });
+
+  it("records the server child PID alongside the host PID", () => {
+    const home = ensureMaterializedHome(seedDir, storageDir);
+    const lock = join(home, `${SERVING_LOCK_PREFIX}${process.pid}-${lockId(6)}.lock`);
+    writeFileSync(lock, `${process.pid}\n0\n`);
+    setServingChildPid(lock, 12345);
+    expect(readFileSync(lock, "utf8")).to.equal(`${process.pid}\n12345\n`);
+  });
+
+  it("saves a user file whose name only resembles a lock", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    writeFileSync(join(oldHome, ".osd-serving-notes"), "999999999\n");
+    const {currentId} = nextSeed();
+    const result = cleanupOldHomes(storageDir, currentId);
+    expect(result.saved).to.have.lengthOf(1);
+    expect(readFileSync(join(result.saved[0], "snapshot", ".osd-serving-notes"), "utf8")).to.equal("999999999\n");
+  });
+
+  it("restores the old path when a lock appears after quarantine", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    const {currentId} = nextSeed();
+    const result = cleanupOldHomes(storageDir, currentId, {onQuarantined: (quarantine) => {
+      expect(existsSync(oldHome)).to.equal(false);
+      expect(() => writeFileSync(join(oldHome, "late.txt"), "late write\n")).to.throw(/ENOENT/);
+      writeFileSync(join(quarantine, `${SERVING_LOCK_PREFIX}${process.pid}-${lockId(5)}.lock`),
+        `${process.pid}\n`);
+    }});
+    expect(result.removed).to.deep.equal([]);
+    expect(existsSync(oldHome)).to.equal(true);
+  });
+
+  it("restores the old path when content changes after quarantine", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    const {currentId} = nextSeed();
+    const result = cleanupOldHomes(storageDir, currentId, {onQuarantined: (quarantine) => {
+      expect(existsSync(oldHome)).to.equal(false);
+      writeFileSync(join(quarantine, "top.txt"), "late edit\n");
+    }});
+    expect(result.removed).to.deep.equal([]);
+    expect(readFileSync(join(oldHome, "top.txt"), "utf8")).to.equal("late edit\n");
+    expect(result.saved).to.deep.equal([]);
+  });
+
+  it("keeps an edited home when saving fails", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    writeFileSync(join(oldHome, "top.txt"), "user edit\n");
+    const {currentId} = nextSeed();
+    writeFileSync(join(storageDir, "osd-saved-edits"), "blocks the save directory");
+    const result = cleanupOldHomes(storageDir, currentId);
+    expect(result.removed).to.deep.equal([]);
+    expect(result.kept).to.have.lengthOf(1);
+    expect(readFileSync(join(oldHome, "top.txt"), "utf8")).to.equal("user edit\n");
+  });
+
+  it("keeps a home when its content hash cannot be verified", async () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    const alias = mkdtempSync(join(tmpdir(), "osd-sock-"));
+    symlinkSync(oldHome, join(alias, "home"), "dir");
+    const socket = createServer();
+    try {
+      await new Promise((resolve, reject) => {
+        socket.once("error", reject);
+        socket.listen(join(alias, "home", "x.sock"), resolve);
+      });
+      const {currentId} = nextSeed();
+      const result = cleanupOldHomes(storageDir, currentId);
+      expect(result.removed).to.deep.equal([]);
+      expect(result.kept).to.have.lengthOf(1);
+      expect(existsSync(oldHome)).to.equal(true);
+    } finally {
+      if (socket.listening) await new Promise((resolve) => socket.close(resolve));
+      rmSync(alias, {recursive: true, force: true});
+    }
+  });
+
+  it("keeps a legacy edited home by saving a complete snapshot", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    rmSync(join(oldHome, ".osd-seed-files.json"));
+    writeFileSync(join(oldHome, "top.txt"), "legacy edit\n");
+    const {currentId} = nextSeed();
+    const result = cleanupOldHomes(storageDir, currentId);
+    expect(readFileSync(join(result.saved[0], "snapshot", "top.txt"), "utf8")).to.equal("legacy edit\n");
+    expect(existsSync(oldHome)).to.equal(false);
   });
 
   it("linkOrCopyTree copies regular files, keeps symlinks as symlinks, and recurses into directories", () => {

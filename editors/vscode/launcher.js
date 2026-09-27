@@ -20,7 +20,7 @@
 const {spawn} = require("node:child_process");
 const {createServer} = require("node:net");
 const {EventEmitter} = require("node:events");
-const {createHash} = require("node:crypto");
+const {createHash, randomUUID} = require("node:crypto");
 const {request} = require("node:http");
 const fs = require("node:fs");
 const {createBrotliDecompress} = require("node:zlib");
@@ -536,12 +536,16 @@ function linkOrCopyTree(src, dest) {
 
 const SEED_ID_FILE = ".seed-id";
 const MATERIALIZED_MARKER = ".osd-materialized";
+const SEED_FILES_FILE = ".osd-seed-files.json";
+const SERVING_LOCK_PREFIX = ".osd-serving-";
+const SERVING_LOCK_PATTERN = /^\.osd-serving-[1-9][0-9]*-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.lock$/;
 const SEED_ID_PATTERN = /^[0-9a-f]{64}$/;
 const HOME_NAME_PATTERN = /^osd-home-[0-9a-f]{64}$/;
 const OLD_HOME_NAME_PATTERN = /^(?:osd-home-(?:[0-9a-f]{64}|previous(?:-(?:[0-9a-f]{64}|unknown)(?:-\d+)?)?)|\.osd-home-trash-[0-9a-f-]{36})$/;
 
-/** Stable SHA-256 of a seed tree's paths and file contents. The seed ID and
- *  materialization marker are excluded as launcher metadata. */
+/** Stable SHA-256 of a seed tree's paths and file contents. Root-level
+ * launcher metadata (ID, marker, original-file list and serving locks) is
+ * excluded. */
 function seedContentId(seedDir) {
   const hash = createHash("sha256");
   const record = (kind, rel, content = Buffer.alloc(0), mode = 0) => {
@@ -561,7 +565,8 @@ function seedContentId(seedDir) {
     const entries = fs.readdirSync(dir).sort();
     if (rel !== "") record(0x44, rel, Buffer.alloc(0), fs.lstatSync(dir).mode);
     for (const name of entries) {
-      if (rel === "" && (name === SEED_ID_FILE || name === MATERIALIZED_MARKER)) continue;
+      if (rel === "" && (name === SEED_ID_FILE || name === MATERIALIZED_MARKER ||
+        name === SEED_FILES_FILE || SERVING_LOCK_PATTERN.test(name))) continue;
       const file = path.join(dir, name);
       const childRel = rel === "" ? name : path.join(rel, name);
       const stat = fs.lstatSync(file);
@@ -571,6 +576,8 @@ function seedContentId(seedDir) {
         record(0x4c, childRel, Buffer.from(fs.readlinkSync(file), "utf8"));
       } else if (stat.isFile()) {
         record(0x46, childRel, fs.readFileSync(file), stat.mode);
+      } else {
+        throw new Error(`Unsupported file in working copy: ${file}`);
       }
     }
   };
@@ -589,6 +596,217 @@ function writeSeedId(seedDir) {
  *  content ID rather than extension version. */
 function materializedHomeDir(globalStorageDir, seedId) {
   return path.join(globalStorageDir, `osd-home-${seedId}`);
+}
+
+/** Paths and bytes from the original seed, retained so a later update can
+ * save only changed and added files, plus a list of deleted files. */
+function seedFiles(dir) {
+  const files = Object.create(null);
+  function visit(folder, rel = "") {
+    for (const name of fs.readdirSync(folder).sort()) {
+      if (rel === "" && (name === SEED_ID_FILE || name === MATERIALIZED_MARKER ||
+        name === SEED_FILES_FILE || SERVING_LOCK_PATTERN.test(name))) continue;
+      const childRel = rel ? `${rel}/${name}` : name;
+      const child = path.join(folder, name);
+      const stat = fs.lstatSync(child);
+      if (stat.isDirectory()) visit(child, childRel);
+      else if (stat.isFile()) files[childRel] = `file:${createHash("sha256").update(fs.readFileSync(child)).digest("hex")}`;
+      else if (stat.isSymbolicLink()) files[childRel] = `link:${fs.readlinkSync(child)}`;
+      else throw new Error(`Unsupported file in working copy: ${child}`);
+    }
+  }
+  visit(dir);
+  return files;
+}
+
+function matchesHomeMetadata(home, seedId, snapshot) {
+  const names = [SEED_ID_FILE, MATERIALIZED_MARKER, SEED_FILES_FILE];
+  const read = (dir, name) => {
+    const file = path.join(dir, name);
+    if (!fs.existsSync(file)) return undefined;
+    if (!fs.lstatSync(file).isFile()) return false;
+    return fs.readFileSync(file);
+  };
+  const expected = snapshot === undefined ? [
+    `${seedId}\n`,
+    `${seedId}\n`,
+    JSON.stringify({seedId, files: seedFiles(home)}) + "\n",
+  ] : names.map((name) => read(snapshot, name));
+  return names.every((name, index) => {
+    const actual = read(home, name);
+    return actual !== false && expected[index] !== false &&
+      (actual === undefined ? expected[index] === undefined :
+        expected[index] !== undefined && actual.equals(Buffer.from(expected[index])));
+  });
+}
+
+function acquireServingLock(home) {
+  if (!OLD_HOME_NAME_PATTERN.test(path.basename(home)) || !isFile(path.join(home, MATERIALIZED_MARKER))) return undefined;
+  const lock = path.join(home, `${SERVING_LOCK_PREFIX}${process.pid}-${randomUUID()}.lock`);
+  fs.writeFileSync(lock, `${process.pid}\n0\n`, {flag: "wx"});
+  return lock;
+}
+
+function setServingChildPid(lock, childPid) {
+  if (lock !== undefined && Number.isSafeInteger(childPid) && childPid > 0) {
+    fs.writeFileSync(lock, `${process.pid}\n${childPid}\n`);
+  }
+}
+
+/** An unreadable or malformed lock is a reason to retain the copy. */
+function hasLiveServingLock(home) {
+  for (const name of fs.readdirSync(home)) {
+    if (!SERVING_LOCK_PATTERN.test(name)) continue;
+    const file = path.join(home, name);
+    if (!fs.lstatSync(file).isFile()) return true;
+    const pids = fs.readFileSync(file, "utf8").trim().split("\n");
+    // A one-PID lock was written by older extension versions.
+    if (pids.length < 1 || pids.length > 2 ||
+      !pids.every((value, index) => (index === 1 && value === "0") ||
+        (/^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value))))) return true;
+    for (const value of pids) {
+      if (value === "0") continue;
+      try {
+        process.kill(Number(value), 0);
+        return true;
+      } catch (error) {
+        if (error.code !== "ESRCH") return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Save a restorable delta when the original file list exists. Homes made
+ * before this list was introduced get a complete snapshot instead. */
+function saveOldHome(home, globalStorageDir, seedId) {
+  const parent = path.join(globalStorageDir, "osd-saved-edits");
+  fs.mkdirSync(parent, {recursive: true});
+  const staging = fs.mkdtempSync(path.join(parent, ".saving-"));
+  try {
+    let original;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.join(home, SEED_FILES_FILE), "utf8"));
+      if (parsed.seedId !== seedId || typeof parsed.files !== "object" || parsed.files === null ||
+        Object.entries(parsed.files).some(([rel, value]) => typeof value !== "string" ||
+          path.isAbsolute(rel) || rel.split("/").some((part) => !part || part === ".." || part === "."))) {
+        throw new Error("invalid seed file list");
+      }
+      original = parsed.files;
+    } catch {
+      original = undefined;
+    }
+    if (original === undefined) {
+      linkOrCopyTree(home, path.join(staging, "snapshot"));
+      fs.writeFileSync(path.join(staging, "README.txt"),
+        "Complete snapshot of the old working copy. To restore it, copy snapshot/ back to its original osd-home directory.\n");
+    } else {
+      const now = seedFiles(home);
+      const deleted = Object.keys(original).filter((rel) => !Object.hasOwn(now, rel));
+      const changed = Object.keys(now).filter((rel) => now[rel] !== original[rel]);
+      // The delta is easy to inspect or apply to another seed. Keep the
+      // complete old tree too, so restoring does not depend on finding an
+      // older VSIX after an extension update.
+      linkOrCopyTree(home, path.join(staging, "snapshot"));
+      if (deleted.length === 0 && changed.length === 0) {
+        // A changed directory tree can differ from the seed without any
+        // changed file (for example an added empty directory).
+        fs.writeFileSync(path.join(staging, "README.txt"),
+          "Complete snapshot of the old working copy. To restore it, copy snapshot/ back to its original osd-home directory.\n");
+      } else {
+        for (const rel of changed) {
+          const dest = path.join(staging, "files", rel);
+          fs.mkdirSync(path.dirname(dest), {recursive: true});
+          linkOrCopyTree(path.join(home, rel), dest);
+        }
+        fs.writeFileSync(path.join(staging, "deleted.json"), JSON.stringify(deleted, null, 2) + "\n");
+        fs.writeFileSync(path.join(staging, "README.txt"),
+          `Edits from osd-home-${seedId}. Restore the exact old copy from snapshot/. To apply just the edits to a seed, overlay files/ and remove the paths in deleted.json.\n`);
+      }
+    }
+    const date = new Date().toISOString().slice(0, 10);
+    let dest = path.join(parent, `${seedId}-${date}`);
+    for (let suffix = 2; fs.existsSync(dest); suffix++) dest = path.join(parent, `${seedId}-${date}-${suffix}`);
+    fs.renameSync(staging, dest);
+    return dest;
+  } catch (error) {
+    fs.rmSync(staging, {recursive: true, force: true});
+    throw error;
+  }
+}
+
+/** Runs once during extension activation, before this window starts a
+ * launcher. Every candidate is independently checked and failures keep it. */
+function cleanupOldHomes(globalStorageDir, currentSeedId, {onSaved, onQuarantined} = {}) {
+  const result = {removed: [], saved: [], kept: []};
+  if (!SEED_ID_PATTERN.test(currentSeedId) || !fs.existsSync(globalStorageDir)) return result;
+  for (const name of fs.readdirSync(globalStorageDir)) {
+    if (!HOME_NAME_PATTERN.test(name) || name === `osd-home-${currentSeedId}`) continue;
+    const home = path.join(globalStorageDir, name);
+    try {
+      if (!fs.lstatSync(home).isDirectory() || hasLiveServingLock(home)) continue;
+      const seedId = name.slice("osd-home-".length);
+      if (fs.readFileSync(path.join(home, MATERIALIZED_MARKER), "utf8") !== `${seedId}\n` ||
+        fs.readFileSync(path.join(home, SEED_ID_FILE), "utf8") !== `${seedId}\n`) continue;
+      const contentId = seedContentId(home);
+      if (hasLiveServingLock(home)) continue;
+      // Rename in the same parent before copying or removing anything. A
+      // writer opening the old path now gets ENOENT; locks created just before
+      // the rename follow the tree and are caught by the checks below.
+      const quarantine = path.join(globalStorageDir, `.osd-home-trash-${randomUUID()}`);
+      fs.renameSync(home, quarantine);
+      let retained = true;
+      try {
+        quarantineCheck: {
+          onQuarantined?.(quarantine);
+          if (hasLiveServingLock(quarantine) ||
+            fs.readFileSync(path.join(quarantine, MATERIALIZED_MARKER), "utf8") !== `${seedId}\n` ||
+            fs.readFileSync(path.join(quarantine, SEED_ID_FILE), "utf8") !== `${seedId}\n` ||
+            seedContentId(quarantine) !== contentId) {
+            result.kept.push({home, error: new Error("lock or content changed during quarantine")});
+            break quarantineCheck;
+          }
+          const saved = contentId === seedId && matchesHomeMetadata(quarantine, seedId)
+            ? undefined : saveOldHome(quarantine, globalStorageDir, seedId);
+          if (hasLiveServingLock(quarantine)) {
+            result.kept.push({home, error: new Error("lock appeared during save")});
+            break quarantineCheck;
+          }
+          const expected = saved === undefined ? seedId : seedContentId(path.join(saved, "snapshot"));
+          if (seedContentId(quarantine) !== expected ||
+            !matchesHomeMetadata(quarantine, seedId, saved === undefined ? undefined : path.join(saved, "snapshot"))) {
+            result.kept.push({home, error: new Error("content changed during save")});
+            break quarantineCheck;
+          }
+          // Activation runs before our own server starts. Rename and serving
+          // locks protect path-based writers; a foreign process with an already
+          // open descriptor into this unlocked quarantine can still write now.
+          fs.rmSync(quarantine, {recursive: true});
+          retained = false;
+          result.removed.push(home);
+          if (saved !== undefined) {
+            result.saved.push(saved);
+            onSaved?.(saved);
+          }
+        }
+      } finally {
+        if (retained) {
+          if (!fs.existsSync(home)) {
+            try {
+              fs.renameSync(quarantine, home);
+            } catch (error) {
+              result.kept.push({home: quarantine, error});
+            }
+          } else {
+            result.kept.push({home: quarantine, error: new Error("old path occupied; retained quarantined home")});
+          }
+        }
+      }
+    } catch (error) {
+      result.kept.push({home, error});
+    }
+  }
+  return result;
 }
 
 /** A best-effort indication for the explicit removal command. Generated
@@ -693,6 +911,7 @@ function ensureMaterializedHome(seedDir, globalStorageDir, options = {}) {
         fs.writeFileSync(path.join(pending, SEED_ID_FILE), `${seedId}\n`);
         if (seedContentId(pending) !== seedId) throw new Error("Packaged seed content does not match its ID");
         fs.writeFileSync(path.join(pending, MATERIALIZED_MARKER), `${seedId}\n`);
+        fs.writeFileSync(path.join(pending, SEED_FILES_FILE), JSON.stringify({seedId, files: seedFiles(pending)}) + "\n");
         try {
           fs.renameSync(pending, target);
         } catch (error) {
@@ -711,6 +930,7 @@ function ensureMaterializedHome(seedDir, globalStorageDir, options = {}) {
   if (!existing) {
     linkOrCopyTree(seedDir, target);
     fs.writeFileSync(marker, `${seedId}\n`);
+    fs.writeFileSync(path.join(target, SEED_FILES_FILE), JSON.stringify({seedId, files: seedFiles(seedDir)}) + "\n");
   }
   return finishMaterializedHome(target, globalStorageDir, existing, options);
 }
@@ -782,9 +1002,14 @@ class Launcher extends EventEmitter {
     // while it runs (docs/warm-compile.md)
     this.startedAt = undefined;
     this.inspectPort = undefined;
+    this.servingLock = undefined;
   }
 
   #setState(state) {
+    if (state === "stopped" && this.servingLock !== undefined) {
+      try { fs.rmSync(this.servingLock); } catch { /* A leftover lock conservatively keeps the home. */ }
+      this.servingLock = undefined;
+    }
     this.state = state;
     this.emit("state", state);
   }
@@ -881,6 +1106,12 @@ class Launcher extends EventEmitter {
       .filter((value) => value !== undefined && value !== "").join(path.delimiter);
     this.env = env;
     this.databaseLabel = describeDatabase(this.database);
+    try {
+      this.servingLock = acquireServingLock(this.osdHome);
+    } catch (error) {
+      this.#setState("stopped");
+      throw error;
+    }
 
     let build;
     try {
@@ -911,6 +1142,9 @@ class Launcher extends EventEmitter {
     }
     let child;
     try {
+      // If the host dies between spawn and recording the child's PID, this
+      // malformed pending value makes another window keep the home.
+      if (this.servingLock !== undefined) fs.writeFileSync(this.servingLock, `${process.pid}\npending\n`);
       child = spawn(process.execPath, ["test/run.mjs"], {cwd: this.osdHome, env});
     } catch (error) {
       this.#setState("stopped");
@@ -919,6 +1153,15 @@ class Launcher extends EventEmitter {
     }
     this.child = child;
     this.pid = child.pid;
+    try {
+      setServingChildPid(this.servingLock, child.pid);
+    } catch (error) {
+      await terminate(child);
+      this.child = undefined;
+      this.pid = undefined;
+      this.#setState("stopped");
+      throw error;
+    }
     // The last few KB of what the server printed, kept only so a caller
     // who never gets a "serving" answer at all still sees WHY -- test/setup.mjs's
     // own stale-schema refusal ("Use a fresh HANA_SCHEMA, or explicitly
@@ -1197,6 +1440,11 @@ module.exports = {
   selectOldHomes,
   listOldHomes,
   keptHomeNotice,
+  cleanupOldHomes,
+  hasLiveServingLock,
+  setServingChildPid,
+  SERVING_LOCK_PREFIX,
+  SEED_FILES_FILE,
   DATABASE_KINDS,
   defaultDedicatedName,
   databaseEnv,

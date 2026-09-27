@@ -24,7 +24,8 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   warmStatusText, activationBuildText, closureTestsText,
   presetSettings, isOpenSteamgateCheckout: isOpenSteamgateManifest, osdHomeChoice, osdStateContext, systemOverviewModel,
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText} = require("./lib.js");
-const {Launcher, ensureMaterializedHome, materializedHomeDir, selectOldHomes, listOldHomes,
+const {Launcher, ensureMaterializedHome, materializedHomeDir, selectOldHomes, listOldHomes, cleanupOldHomes,
+  hasLiveServingLock,
   detectWorkspaceLayers, databaseEnv, defaultDedicatedName, describeDatabase,
   isOpenSteamgateCheckout: isOpenSteamgatePath, decideStartTarget, classify, PORT_RANGE, isFree,
   pickInspectorPort, SEED_ID_FILE} = require("./launcher.js");
@@ -285,7 +286,8 @@ async function removeOldWorkingCopies(context, controller) {
   };
   const servedHome = () => controller.launcher?.state !== "stopped" ? controller.launcher?.osdHome : undefined;
   try {
-    const homes = listOldHomes(storageDir, currentHome(), servedHome());
+    const homes = listOldHomes(storageDir, currentHome(), servedHome())
+      .filter((home) => !hasLiveServingLock(home.path));
     if (homes.length === 0) {
       await vscode.window.showInformationMessage("osd: No old working copies found.");
       return;
@@ -308,8 +310,13 @@ async function removeOldWorkingCopies(context, controller) {
       return {path: home, isDirectory: fs.lstatSync(home).isDirectory()};
     });
     const eligible = selectOldHomes(entries, currentHome(), servedHome(), selected);
-    for (const home of eligible) fs.rmSync(home.path, {recursive: true});
-    await vscode.window.showInformationMessage(`osd: Removed ${eligible.length} old working ${eligible.length === 1 ? "copy" : "copies"}.`);
+    let removed = 0;
+    for (const home of eligible) {
+      if (hasLiveServingLock(home.path)) continue;
+      fs.rmSync(home.path, {recursive: true});
+      removed++;
+    }
+    await vscode.window.showInformationMessage(`osd: Removed ${removed} old working ${removed === 1 ? "copy" : "copies"}.`);
   } catch (error) {
     await vscode.window.showErrorMessage(`osd: Could not remove old working copies: ${error.message}`);
   }
@@ -1929,6 +1936,24 @@ function breakpointToggleStatusBar(context) {
 function activate(context) {
   const output = vscode.window.createOutputChannel("osd");
   context.subscriptions.push(output);
+  // The cleanup is synchronous and precedes this window's own launcher.
+  // A live lock from another window protects its home.
+  try {
+    const seedDir = bundledSeedDir(context);
+    if (seedDir !== undefined) {
+      const seedId = fs.readFileSync(path.join(seedDir, SEED_ID_FILE), "utf8").trim();
+      const cleaned = cleanupOldHomes(context.globalStorageUri.fsPath, seedId, {onSaved: (saved) => {
+        void vscode.window.showInformationMessage(
+          `osd: Saved edits from an old working copy at ${saved}`, "Open saved edits")
+          .then((action) => {
+            if (action === "Open saved edits") return vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(saved));
+          }).catch((error) => output.appendLine(`Could not open saved edits ${saved}: ${error.message}`));
+      }});
+      for (const {home, error} of cleaned.kept) output.appendLine(`Kept old working copy ${home}: ${error.message}`);
+    }
+  } catch (error) {
+    output.appendLine(`Old working copy cleanup skipped: ${error.message}`);
+  }
   // Q6b "Classrun" (docs/vscode-extension.md): F9's own channel, separate
   // from "osd" above -- a class's console output is what somebody asked
   // for, not a log line among the status bar's and F8's, and a second run
