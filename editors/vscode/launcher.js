@@ -1365,9 +1365,19 @@ class Launcher extends EventEmitter {
       this.#setState("stopped");
       return;
     }
-    this.#ask(this.child, "stop");
+    const child = this.child;
+    if (this.#asked.get(child) === "abandoned") {
+      // a start that gave up is already terminating this child: the start
+      // failed before the stop, so it stays failed, and it gets no second
+      // signal from here -- wait for it to go
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise((resolve) => child.once("exit", resolve));
+      }
+      return;
+    }
+    this.#ask(child, "stop");
     this.#poll?.abort();
-    await terminate(this.child, {graceMs: STOP_GRACE_MS});
+    await terminate(child, {graceMs: STOP_GRACE_MS});
     // the "exit" handler above already reset the fields and the state
   }
 

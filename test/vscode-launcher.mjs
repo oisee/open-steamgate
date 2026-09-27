@@ -793,7 +793,7 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
     }
   });
 
-  it("a stop whose shutdown outlasts the start timeout is still a stop, not an error", async () => {
+  it("a stop that comes before the start timeout, with a shutdown that outlasts it, is still a stop", async () => {
     const osdHome = fakeHome();
     // never ready; on SIGTERM it takes longer to go than start() waits
     const armed = join(osdHome, "armed");
@@ -816,6 +816,45 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
       expect(await starting, "the stop's cancel, not a timeout error").to.equal(undefined);
       expect(exits).to.deep.equal([]);
       expect(lines.join("")).to.contain("--- osd stopped ---").and.not.contain("start abandoned");
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
+  it("a stop while a timed-out start is already shutting the child down: still that start's error, one SIGTERM", async () => {
+    const osdHome = fakeHome();
+    const armed = join(osdHome, "armed");
+    const twice = join(osdHome, "twice");
+    writeFileSync(join(osdHome, "test", "run.mjs"),
+      "import {writeFileSync} from 'node:fs';\n" +
+      "setInterval(() => {}, 1000);\n" +
+      "let signals = 0;\n" +
+      "process.on('SIGTERM', () => {\n" +
+      `  if (++signals > 1) { writeFileSync(${JSON.stringify(twice)}, 'twice'); return; }\n` +
+      "  setTimeout(() => process.exit(0), 2000);\n" +
+      "});\n" +
+      `writeFileSync(${JSON.stringify(armed)}, 'armed');\n`);
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 800});
+    const exits = [];
+    const lines = [];
+    launcher.on("exit", (e) => exits.push(e));
+    launcher.on("log", (l) => lines.push(l));
+    try {
+      const starting = launcher.start();
+      const failed = rejects(starting, /never answered ready/);
+      for (let i = 0; !existsSync(armed) && i < 500; i++) await new Promise((r) => setTimeout(r, 10));
+      // past the start's timeout, inside the child's 2 s shutdown
+      await new Promise((r) => setTimeout(r, 1500));
+      expect(launcher.state, "the timed-out start is still shutting down").to.equal("starting");
+      await launcher.stop();
+      await failed;
+      expect(launcher.state).to.equal("stopped");
+      expect(existsSync(twice), "one SIGTERM").to.equal(false);
+      expect(exits).to.deep.equal([]);
+      expect(lines.join("")).to.contain("--- osd start abandoned ---").and.not.contain("--- osd stopped ---");
     } finally {
       await launcher.stop();
       rmSync(osdHome, {recursive: true, force: true});
