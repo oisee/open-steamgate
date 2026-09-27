@@ -1,6 +1,7 @@
 import {expect} from "chai";
 import {readFileSync, writeFileSync} from "node:fs";
 import {ObjectStore} from "../tools/osd-store.mjs";
+import {undoOnExit} from "./helpers/undo-on-exit.mjs";
 
 // **A CDS view was checked by nobody**, which a screen with a Check button
 // turns from a gap into a lie.
@@ -24,11 +25,14 @@ const FILE = "src/cds/zc_osd_pack.ddls.asddls";
 
 function checkWith(mangle) {
   const original = readFileSync(FILE, "utf8");
+  // the edit is of a tracked file, so an interrupted run must not keep it
+  const undo = undoOnExit(() => writeFileSync(FILE, original));
   try {
     if (mangle !== undefined) writeFileSync(FILE, mangle(original));
     return new ObjectStore().check("DDLS", "ZC_OSD_PACK").issues;
   } finally {
     writeFileSync(FILE, original);
+    undo();
   }
 }
 

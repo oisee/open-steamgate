@@ -158,6 +158,7 @@
     "test/transaction.mjs",
     "test/type-graph.mjs",
     "test/unit-run.mjs",
+    "test/undo-on-exit.mjs",
     "test/osd-dumps.mjs",
     "test/vscode-extension.mjs",
     "test/vscode-debug.mjs",

@@ -6,6 +6,7 @@ import {join} from "node:path";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {Data} from "../tools/osd-data.mjs";
+import {undoOnExit} from "./helpers/undo-on-exit.mjs";
 
 // The state-changing half of the façade: lock, write, unlock, activate.
 //
@@ -111,15 +112,22 @@ describe("tools/adt-facade: the development loop", () => {
     context = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
   });
 
-  after(() => {
-    server.close();
-    // the scratch object is a file like any other, so it is removed like one
-    for (const name of [SCRATCH, CALLER]) {
-      const entry = store.find("CLAS", name);
+  // the scratch objects are files like any other, so they are removed like
+  // them -- in after(), and on an interrupted run, which never reaches it
+  const removeScratch = () => {
+    for (const name of [SCRATCH, CALLER, "ZCL_OSD_SCRATCH_TWO"]) {
+      const entry = store?.find("CLAS", name);
       if (entry !== undefined && existsSync(entry.file)) {
         rmSync(entry.file);
       }
     }
+  };
+  const dropUndo = undoOnExit(removeScratch);
+
+  after(() => {
+    server.close();
+    removeScratch();
+    dropUndo();
   });
 
   const base = () => `http://localhost:${port}/sap/bc/adt`;
