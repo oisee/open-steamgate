@@ -62,7 +62,7 @@ const isDir = (p) => {
 /** the directories to look in: <root>/packs, then what OSD_PACKS names */
 export function placesOf(root, env = process.env) {
   const places = [join(root, PACKS_DIR)];
-  for (const entry of (env.OSD_PACKS ?? "").split(/[:;]/).map((s) => s.trim()).filter((s) => s !== "")) {
+  for (const entry of (env.OSD_PACKS ?? "").split(delimiter).map((s) => s.trim()).filter((s) => s !== "")) {
     places.push(isAbsolute(entry) ? entry : join(root, entry));
   }
   return places;
@@ -184,9 +184,11 @@ export function packsOf(root, env = process.env) {
       }
       // a pack named twice is the same pack found twice (a container listed
       // as well as its parent); the first place wins and nothing is doubled
-      if (found.has(pack.name) === false) {
-        found.set(pack.name, pack);
+      const previous = found.get(pack.name);
+      if (previous !== undefined && resolve(previous.dir) !== resolve(pack.dir)) {
+        throw new BadPack(dir, `pack name ${pack.name} is also used by ${previous.dir}`);
       }
+      if (previous === undefined) found.set(pack.name, pack);
     }
   }
   return [...found.values()].sort((a, b) => a.order - b.order || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));

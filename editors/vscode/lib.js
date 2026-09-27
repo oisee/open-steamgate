@@ -5,6 +5,7 @@
 "use strict";
 
 const path = require("node:path");
+const fs = require("node:fs");
 const {pathToFileURL} = require("node:url");
 const {packNameOf} = require("./launcher.js");
 
@@ -123,14 +124,19 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
   const sourceMapPathOverrides = {};
   if (storageDir !== undefined && normalizedRoot !== undefined) {
     for (const layer of layers) {
-      const packSource = path.join(storageDir, "packs", packNameOf(layer.folder), "src");
-      const source = `${layer.srcDir.replaceAll("\\", "/").replace(/\/+$/, "")}/*`;
-      // The transpiler names each source relative to build/by-input/<generation>/output.
-      // js-debug applies overrides to that entry before resolving it to a file URL.
-      const generated = path.join(root, "build", "by-input", "generation", "output");
-      const relativeSource = path.relative(generated, packSource).replaceAll("\\", "/");
-      sourceMapPathOverrides[`${relativeSource}/*`] = source;
-      sourceMapPathOverrides[`${pathToFileURL(packSource).href}/*`] = source;
+      const manifest = layer.manifest ? JSON.parse(fs.readFileSync(layer.manifest, "utf8")) : undefined;
+      const folders = manifest ? [manifest.abap ?? (layer.srcDir === layer.folder ? "." : "src")].flat() : ["src"];
+      for (const folder of folders) {
+        const packSource = path.join(storageDir, "packs", packNameOf(layer.folder), folder);
+        const actualSource = manifest ? path.join(layer.folder, folder) : layer.srcDir;
+        const source = `${actualSource.replaceAll("\\", "/").replace(/\/+$/, "")}/*`;
+        // The transpiler names each source relative to build/by-input/<generation>/output.
+        // js-debug applies overrides to that entry before resolving it to a file URL.
+        const generated = path.join(root, "build", "by-input", "generation", "output");
+        const relativeSource = path.relative(generated, packSource).replaceAll("\\", "/");
+        sourceMapPathOverrides[`${relativeSource}/*`] = source;
+        sourceMapPathOverrides[`${pathToFileURL(packSource).href}/*`] = source;
+      }
     }
   }
   return {

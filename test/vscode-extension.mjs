@@ -4,7 +4,7 @@
 // test/osd-child.mjs.
 import {expect} from "chai";
 import express from "express";
-import {readFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
@@ -96,6 +96,7 @@ function vscodeStub(settings = {}) {
   const executedCommands = [];
   const sourceOpens = [];
   const sourceEditors = [];
+  const workspaceFolderEvents = new EventEmitter();
   return {
     panels,
     externalUris,
@@ -103,6 +104,7 @@ function vscodeStub(settings = {}) {
     executedCommands,
     sourceOpens,
     sourceEditors,
+    fireWorkspaceFoldersChanged: () => workspaceFolderEvents.fire(),
     EventEmitter,
     TreeItem,
     ThemeIcon,
@@ -125,6 +127,7 @@ function vscodeStub(settings = {}) {
     },
     workspace: {
       workspaceFolders: [],
+      onDidChangeWorkspaceFolders: workspaceFolderEvents.event,
       findFiles: async () => [{fsPath: "stub.clas.abap"}],
       openTextDocument: async (uri) => uri,
       getConfiguration: () => ({get: (name, fallback) => settings[name] ?? fallback, update: async () => {}}),
@@ -386,6 +389,21 @@ describe("editors/vscode: the extension's logic", function () {
       .to.equal("/work/project/src/*");
   });
 
+  it("maps a manifest's custom ABAP folder through the projected pack", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "osd-debug-pack-"));
+    try {
+      const manifest = path.join(dir, "osd-pack.json");
+      writeFileSync(manifest, JSON.stringify({name: "custom", abap: ["code"]}));
+      const layer = {folder: dir, srcDir: dir, manifest};
+      const config = debuggerConfiguration(9341, {root: "/installed/osd", storageDir: "/storage/osd", layers: [layer]});
+      const {packNameOf} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
+      const packSource = `/storage/osd/packs/${packNameOf(dir)}/code`;
+      expect(config.sourceMapPathOverrides[`file://${packSource}/*`]).to.equal(`${dir}/code/*`);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
   it("quick start applies its preset and restarts a running controller before opening the overview", async () => {
     const api = vscodeStub();
     const SystemController = loadSystemController(api);
@@ -407,6 +425,20 @@ describe("editors/vscode: the extension's logic", function () {
     await controller.quickStart("defaults");
 
     expect(calls).to.deep.equal([["preset", "defaults"], ["stop"], ["start"], ["overview"]]);
+  });
+
+  it("refreshes the launcher's workspace folders when VS Code changes them", () => {
+    const api = vscodeStub({home: ROOT});
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
+    const folder = path.join(tmpdir(), "osd-workspace-folder-event");
+    controller.launcher = {osdHome: ROOT, workspaceFolders: [folder], state: "running"};
+    let changes = 0;
+    controller.onDidChange(() => changes++);
+    api.workspace.workspaceFolders = [{uri: {fsPath: ROOT}}];
+    api.fireWorkspaceFoldersChanged();
+    expect(controller.launcher.workspaceFolders).to.deep.equal([]);
+    expect(changes).to.equal(1);
   });
 
   it("loads a running controller overview from its launcher port after osd.url changes", async () => {
@@ -1369,6 +1401,29 @@ describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace la
 // logic is pure; route coverage below uses an in-memory ObjectStore, while
 // the live round trip against a running osd is test/osd-child.mjs.
 describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)", function () {
+  it("renders a full workspace pack in the Layers tree", () => {
+    const folder = mkdtempSync(path.join(tmpdir(), "osd-tree-layer-"));
+    const api = vscodeStub({home: ROOT});
+    const {OsdTreeProvider} = loadExtension(api);
+    const controller = {context: controllerContext(), launcher: {state: "running", osdHome: ROOT,
+      layers: [{folder, manifest: path.join(folder, "osd-pack.json")}]}, onDidChange: () => {}};
+    const provider = new OsdTreeProvider(controller, async () => ({sources: {}, testClasses: []}));
+    try {
+      for (const dir of ["src/ddic", "data", "webapp"]) mkdirSync(path.join(folder, dir), {recursive: true});
+      writeFileSync(path.join(folder, "osd-pack.json"), JSON.stringify({tiles: [{title: "Demo"}]}));
+      writeFileSync(path.join(folder, "src", "zcl_demo.clas.abap"), "CLASS zcl_demo DEFINITION. ENDCLASS.");
+      writeFileSync(path.join(folder, "src", "ddic", "zdemo.tabl.xml"), "<abapGit/>");
+      writeFileSync(path.join(folder, "data", "zdemo.tabu.json"), "[]");
+      writeFileSync(path.join(folder, "webapp", "index.html"), "demo");
+      const row = provider.layerItems().find((item) => item.contextValue === "osd-layer-workspace");
+      expect(row.label).to.equal(`workspace: ${folder}`);
+      expect(row.description).to.equal(`ABAP 1 objects · data 1 tables · ddic 1 · webapp /app/${path.basename(folder).toLowerCase()}/ · tiles 1`);
+      expect(row.tooltip).to.contain(row.description);
+    } finally {
+      provider.dispose();
+      rmSync(folder, {recursive: true, force: true});
+    }
+  });
   it("single-clicking every produced leaf acts immediately while expandable nodes show details", async () => {
     const api = vscodeStub({home: ROOT});
     const {OsdTreeProvider, EntitySetItem, clickTreeNode, clickTransaction} = loadExtension(api);

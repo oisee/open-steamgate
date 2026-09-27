@@ -12,7 +12,7 @@
 // Every byte this writes lives under the caller's `storageDir`, never under
 // `osdHome` and never under a workspace folder: the database
 // (`STG_DB_PATH`), the TLS directory (`OSD_TLS_DIR`, new below) and the
-// generated pack manifests that add a workspace's ABAP as a layer (see
+// projected workspace packs (or generated ABAP-only manifests; see
 // `ensureWorkspacePacks`). Nothing here ever writes into a tracked file of
 // the system it starts.
 "use strict";
@@ -303,8 +303,8 @@ function decideStartTarget({configuredHome, workspaceFolder, workspaceIsOpenStea
   return {kind: "unavailable"};
 }
 
-/** `{folder, srcDir}` for every workspace folder that looks like an abapGit
- *  repository, `srcDir` being the folder actually handed to the transpiler
+/** `{folder, srcDir, manifest}` for every workspace pack or abapGit folder.
+ *  `srcDir` is the fallback folder for a workspace without a manifest,
  *  as an input (its own `src/` when there is one, else the folder itself --
  *  a repository whose ABAP sits at its own root rather than under `src/`).
  *  Pure: `folders` is a plain array of absolute paths, no `vscode.Uri`. */
@@ -314,11 +314,12 @@ function detectWorkspaceLayers(folders) {
     if (typeof folder !== "string" || isDir(folder) === false) {
       continue;
     }
-    if (looksLikeAbapGitFolder(folder) === false) {
+    const manifest = path.join(folder, "osd-pack.json");
+    if (isFile(manifest) === false && looksLikeAbapGitFolder(folder) === false) {
       continue;
     }
     const src = path.join(folder, "src");
-    out.push({folder, srcDir: isDir(src) ? src : folder});
+    out.push({folder, srcDir: isDir(src) ? src : folder, manifest: isFile(manifest) ? manifest : undefined});
   }
   return out;
 }
@@ -333,13 +334,53 @@ function packNameOf(folder) {
   return `ws-${base}-${hash}`;
 }
 
-/** Adds the detected workspace layers as the TOP layers of the system, the
- *  way `docs/CLAUDE.md`'s "a pack is a directory" already lets any folder
- *  do it: `OSD_PACKS` names a container directory, and this writes one
- *  small pack per layer into it -- an `osd-pack.json` (order 900+, so a
- *  workspace layer always sorts after the tree's own packs) plus a `src`
- *  symlink at the workspace folder's own ABAP folder. No copy, no new
- *  mechanism: `tools/osd-packs.mjs` reads this exactly like any other pack,
+function countFiles(dir, accept, seen = new Set()) {
+  if (!isDir(dir)) return 0;
+  const real = fs.realpathSync(dir);
+  if (seen.has(real)) return 0;
+  seen.add(real);
+  let count = 0;
+  for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory() || entry.isSymbolicLink() && isDir(file)) count += countFiles(file, accept, seen);
+    else if (accept(entry.name)) count++;
+  }
+  return count;
+}
+
+/** Contribution counts for the Layers tree, read from the workspace itself. */
+function layerContributions(layer) {
+  if (!layer.manifest) return {abap: countFiles(layer.srcDir, (name) => /\.abap$/i.test(name))};
+  const manifest = JSON.parse(fs.readFileSync(layer.manifest, "utf8"));
+  const named = (part, fallback) => part === false ? undefined : path.join(layer.folder, part ?? fallback);
+  const abapFolders = [manifest.abap ?? (isDir(path.join(layer.folder, "src")) ? "src" : ".")].flat();
+  const abap = abapFolders
+    .reduce((n, folder) => n + countFiles(named(folder, "src"), (name) => /\.abap$/i.test(name)), 0);
+  const data = countFiles(named(manifest.data, "data"), (name) => /\.tabu\.json$/i.test(name));
+  const firstAbap = abapFolders[0] ?? "src";
+  const ddic = countFiles(named(manifest.ddic, path.join(firstAbap, "ddic")),
+    (name) => /\.(tabl|dtel|doma|ttyp|view|shlp|enqu)\.xml$/i.test(name));
+  return {abap, data, ddic, webapp: isDir(named(manifest.webapp, "webapp")) ? `/app/${String(manifest.name ?? path.basename(layer.folder)).toLowerCase()}/` : undefined,
+    tiles: [manifest.tiles ?? []].flat().filter((tile) => tile && typeof tile === "object").length};
+}
+
+/** A manifest path must stay inside its workspace before we choose a link. */
+function workspacePackPath(folder, entry) {
+  if (typeof entry !== "string" || entry === "" || path.isAbsolute(entry) || path.win32.isAbsolute(entry)) {
+    throw new Error(`workspace pack path must be a nonempty relative path in ${folder}: ${String(entry)}`);
+  }
+  const parts = entry.replace(/\\/g, "/").split("/");
+  if (parts.includes("..")) {
+    throw new Error(`workspace pack path must not contain '..' in ${folder}: ${entry}`);
+  }
+  const normalized = path.normalize(parts.join(path.sep));
+  return normalized;
+}
+
+/** Projects detected workspace folders into an OSD_PACKS container. A folder
+ *  with a manifest keeps it and links all declared parts; one without it gets
+ *  the previous ABAP-only manifest and src link. tools/osd-packs.mjs reads
+ *  either exactly like any other pack,
  *  alongside a persistent notebook scratch pack which is deliberately kept
  *  when workspace layers are refreshed.
  *
@@ -371,12 +412,38 @@ function ensureWorkspacePacks(storageDir, layers) {
     const name = packNameOf(layer.folder);
     const dir = path.join(packsRoot, name);
     fs.mkdirSync(dir, {recursive: true});
-    fs.writeFileSync(path.join(dir, "osd-pack.json"), JSON.stringify({
-      name,
-      order: 900 + i,
-      description: `workspace layer: ${layer.folder}`,
-    }, undefined, 2));
-    fs.symlinkSync(layer.srcDir, path.join(dir, "src"), "dir");
+    if (layer.manifest) {
+      const manifest = JSON.parse(fs.readFileSync(layer.manifest, "utf8"));
+      // Projection changes the directory name; preserve the workspace's
+      // implicit pack name for app URLs and default tiles.
+      fs.writeFileSync(path.join(dir, "osd-pack.json"), JSON.stringify({name: path.basename(layer.folder), ...manifest}));
+      // Preserve every path the manifest names, including custom and ordered
+      // ABAP folders. A junction is required for directory links on Windows.
+      const folders = [manifest.abap ?? (isDir(path.join(layer.folder, "src")) ? "src" : "."), manifest.data ?? "data",
+        manifest.ddic ?? "ddic", manifest.webapp ?? "webapp",
+        ...[manifest.sources ?? []].flat().filter((source) => source && typeof source === "object")
+          .map((source) => source.folder)].flat();
+      const normalized = folders.filter((entry) => entry !== undefined && entry !== false)
+        .map((entry) => workspacePackPath(layer.folder, entry));
+      if (normalized.includes(".")) {
+        normalized.push(...fs.readdirSync(layer.folder).filter((entry) => entry !== "osd-pack.json"));
+      }
+      for (const entry of new Set(normalized)) {
+        if (entry === ".") continue;
+        const part = entry.split(path.sep)[0];
+        const target = path.join(layer.folder, part);
+        const link = path.join(dir, part);
+        if (fs.existsSync(target) && !fs.existsSync(link)) {
+          fs.symlinkSync(target, link, fs.statSync(target).isDirectory()
+            ? (process.platform === "win32" ? "junction" : "dir") : "file");
+        }
+      }
+    } else {
+      fs.writeFileSync(path.join(dir, "osd-pack.json"), JSON.stringify({
+        name, order: 900 + i, description: `workspace layer: ${layer.folder}`,
+      }, undefined, 2));
+      fs.symlinkSync(layer.srcDir, path.join(dir, "src"), process.platform === "win32" ? "junction" : "dir");
+    }
   });
   return packsRoot;
 }
@@ -1426,6 +1493,7 @@ module.exports = {
   detectWorkspaceLayers,
   packNameOf,
   ensureWorkspacePacks,
+  layerContributions,
   waitForServing,
   servingOnce,
   terminate,

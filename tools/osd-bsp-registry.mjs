@@ -178,7 +178,7 @@ export function packApps(root = ".", env = process.env) {
   for (const {pack, at, manifest} of packs) {
     const app = packAppName(pack);
     if (byName.has(app)) {
-      throw new Error(`packs ${byName.get(app)} and ${pack} both derive the BSP application name ${app}: rename one, or give it an entry in src/bsp/apps.json`);
+      throw new Error(`packs ${byName.get(app)} and ${pack} both derive the BSP application name ${app}: rename one pack`);
     }
     byName.set(app, pack);
     checkAppName(app);
@@ -371,7 +371,16 @@ export function generate(folders, out = "gen/bsp", root = process.cwd()) {
     sources.splice(generated === -1 ? 0 : generated + 1, 0, {kind: "apps", apps: orphanPacks});
   }
   const apps = winningByLayer(sources,
-    (source) => source.kind === "folder" ? applications([source.folder]) : source.apps,
+    (source) => {
+      const entries = source.kind === "folder" ? applications([source.folder]) : source.apps;
+      const seen = new Map();
+      for (const entry of entries) {
+        const name = entry.app.toUpperCase();
+        if (seen.has(name)) throw new Error(`BSP application ${name} is declared twice in one layer: ${seen.get(name)} and ${entry.file}`);
+        seen.set(name, entry.file);
+      }
+      return entries;
+    },
     (app) => app.app.toUpperCase());
   mkdirSync(out, {recursive: true});
   writeFileSync(join(out, "zcl_stg_bsp_registry.clas.abap"), registryClass(apps));

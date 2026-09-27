@@ -26,7 +26,7 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText} = require("./lib.js");
 const {Launcher, ensureMaterializedHome, materializedHomeDir, selectOldHomes, listOldHomes, cleanupOldHomes,
   hasLiveServingLock,
-  detectWorkspaceLayers, databaseEnv, defaultDedicatedName, describeDatabase,
+  detectWorkspaceLayers, layerContributions, databaseEnv, defaultDedicatedName, describeDatabase,
   isOpenSteamgateCheckout: isOpenSteamgatePath, decideStartTarget, classify, PORT_RANGE, isFree,
   pickInspectorPort, SEED_ID_FILE} = require("./launcher.js");
 const {systemOverviewHtml} = require("./system-overview.js");
@@ -487,6 +487,12 @@ class SystemController {
     }));
     this.emitter = new vscode.EventEmitter();
     this.onDidChange = this.emitter.event;
+    context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      if (this.launcher !== undefined) {
+        this.launcher.workspaceFolders = workspaceFoldersFor(this.launcher.osdHome);
+      }
+      this.emitter.fire();
+    }));
   }
 
   /** Builds (or rebuilds, if osdHome or the workspace folders changed) the
@@ -533,9 +539,9 @@ class SystemController {
       });
       this.launcher = launcher;
     } else {
-      // Same osdHome, stopped: pick up whatever osd.database.* is now,
-      // rather than what it was the last time this window started -- a
-      // setting change must not need a window reload to take effect.
+      // Same osdHome, stopped: pick up current folders and settings before
+      // the launcher's next projection and build.
+      this.launcher.workspaceFolders = workspaceFoldersFor(osdHome);
       this.launcher.database = database;
       this.launcher.databaseLabel = describeDatabase(database);
       this.launcher.warmMode = osdWarmModeOf();
@@ -1149,6 +1155,11 @@ class OsdTreeProvider {
     const layers = launcher?.layers ?? (osdHome === undefined ? [] : detectWorkspaceLayers(workspaceFoldersFor(osdHome)));
     for (const layer of layers) {
       const item = new vscode.TreeItem(`workspace: ${layer.folder}`);
+      const parts = layerContributions(layer);
+      item.description = [`ABAP ${parts.abap} objects`,
+        ...(layer.manifest ? [`data ${parts.data} tables`, `ddic ${parts.ddic}`,
+          ...(parts.webapp ? [`webapp ${parts.webapp}`] : []), `tiles ${parts.tiles}`] : [])].join(" · ");
+      item.tooltip = `${layer.folder}\n${item.description}`;
       item.iconPath = new vscode.ThemeIcon("folder");
       item.contextValue = "osd-layer-workspace";
       item.command = treeClick(item);

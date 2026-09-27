@@ -33,7 +33,7 @@ import {fileURLToPath} from "node:url";
 import {describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile} from "./osd-transpile.mjs";
-import {inputFoldersOf, webappsOf} from "./osd-packs.mjs";
+import {inputFoldersOf, packsOf, webappsOf} from "./osd-packs.mjs";
 import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand, hosted} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
@@ -125,16 +125,20 @@ function walk(dir, out = [], seen = new Set()) {
     }
     const p = join(dir, e.name);
     let directory = e.isDirectory();
+    let file = e.isFile();
     if (e.isSymbolicLink()) {
       try {
-        directory = statSync(p).isDirectory();
+        const target = statSync(p);
+        directory = target.isDirectory();
+        file = target.isFile();
       } catch {
         directory = false;
+        file = false;
       }
     }
     if (directory) {
       walk(p, out, seen);
-    } else if (e.isFile()) {
+    } else if (file) {
       out.push(p);
     }
   }
@@ -150,7 +154,10 @@ export function inputsOf(root, config = loadConfig(root)) {
   // JavaScript. Omitting it reused a generation whose registry named a page
   // but whose Web Repository object was not in the transpiled runtime.
   const bspFolders = [join(root, "webapp"), ...webappsOf(root).map((app) => app.dir)].filter(existsSync);
-  return {folders, libs, bspFolders, config: layout(root).config};
+  const packs = packsOf(root);
+  const packFiles = packs.map((pack) => join(pack.dir, "osd-pack.json"));
+  const packFolders = packs.flatMap((pack) => [pack.data, pack.ddic].filter(Boolean));
+  return {folders, libs, bspFolders, packFiles, packFolders, config: layout(root).config};
 }
 
 /**
@@ -342,6 +349,12 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
   }
   for (const dir of inputs.bspFolders ?? []) {
     folder("bsp", dir, () => walk(dir).sort());
+  }
+  for (const dir of inputs.packFolders ?? []) {
+    folder("pack", dir, () => walk(dir).sort());
+  }
+  for (const file of inputs.packFiles ?? []) {
+    h.update(`manifest ${relative(root, file)}\0`).update(digestOf(file)).update("\0");
   }
   // the generators that will actually run -- the files under node, the
   // binary itself when it is the binary, because it executes its own copies

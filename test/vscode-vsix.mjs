@@ -4,14 +4,12 @@
 // path, not the dev one) and a scratch storage directory standing in for
 // `context.globalStorageUri`. Every package build uses its own scratch output.
 //
-// Scratch defaults to ~/.cache/osd-vsix-test (outside the checkout, never
-// `/tmp`, a small tmpfs on this box) and is removed again at the end; the workspace layer
-// fixture (`.local/b0-demo-ws/`, named in docs/vscode-extension.md's own
-// "Live smoke") is created once if missing and left there, since it is
-// gitignored scratch by design and other sessions may reuse it.
+// Scratch defaults to ~/.cache/osd-vsix-test and can be set to a unique /tmp
+// directory with OSD_VSIX_SCRATCH. The workspace fixture lives under that
+// scratch directory and is removed with it.
 import {expect} from "chai";
 import {execFileSync} from "node:child_process";
-import {createRequire} from "node:module";
+import {createRequire, Module} from "node:module";
 import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync, lstatSync, symlinkSync, readdirSync} from "node:fs";
 import {basename, join} from "node:path";
 import {homedir, tmpdir} from "node:os";
@@ -37,7 +35,7 @@ function packagedPacks(archive) {
     .filter((name) => name !== undefined))].sort();
 }
 
-const DEMO_WS = join(root, ".local", "b0-demo-ws");
+let DEMO_WS;
 // **Outside the checkout, on purpose.** A scratch folder under this tree
 // resolves a bare import by walking up into the checkout's own node_modules,
 // so a package the .vsix forgot (js-yaml, found by the first real install,
@@ -50,6 +48,36 @@ function testScratch(name) {
 }
 function buildTestVsix(outputDir, env = {}) {
   return buildVsix({...env, OSD_VSIX_BROTLI_QUALITY: "4"}, outputDir);
+}
+function packagedController(extensionDir, workspace, home) {
+  class EventEmitter {
+    listeners = new Set();
+    event = (listener) => { this.listeners.add(listener); return {dispose: () => this.listeners.delete(listener)}; };
+    fire() { for (const listener of this.listeners) listener(); }
+  }
+  const folderEvents = new EventEmitter();
+  const api = {
+    EventEmitter,
+    TreeItem: class { constructor(label, collapsibleState) { this.label = label; this.collapsibleState = collapsibleState; } },
+    ConfigurationTarget: {Workspace: 1, Global: 2},
+    workspace: {
+      workspaceFolders: [{uri: {fsPath: workspace}}],
+      onDidChangeWorkspaceFolders: folderEvents.event,
+      getConfiguration: () => ({get: (key, fallback) => key === "home" ? home : fallback, update: async () => {}}),
+    },
+    debug: {onDidStartDebugSession: () => ({dispose() {}}), onDidTerminateDebugSession: () => ({dispose() {}})},
+    window: {setStatusBarMessage() {}, showInformationMessage() {}, showErrorMessage() {}, showWarningMessage() {}},
+  };
+  const requirePackaged = createRequire(import.meta.url);
+  const originalLoad = Module._load;
+  Module._load = function (request, parent, isMain) {
+    if (request === "vscode") return api;
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  let SystemController;
+  try { ({SystemController} = requirePackaged(join(extensionDir, "extension.js"))); }
+  finally { Module._load = originalLoad; }
+  return {api, SystemController};
 }
 beforeEach(function () {
   this.currentTest.vsixStartedAt = performance.now();
@@ -270,19 +298,21 @@ describe("packaging selected packs", function () {
   });
 });
 
-/** `.local/b0-demo-ws/src/zcl_b0_hello.clas.abap`: a workspace-layer fixture
- *  shaped like the one docs/vscode-extension.md's "Live smoke" describes by
- *  hand -- one abapGit-looking class implementing IF_OO_ADT_CLASSRUN, so
- *  `detectWorkspaceLayers` (editors/vscode/launcher.js) picks the folder up
- *  and classrun has something of the workspace's own to run. No `.clas.xml`
- *  sidecar: src/classrun/*.clas.abap in this same tree has none either, so
- *  it is not needed for a bare-tree transpile. */
+/** A full workspace pack with a class, DDIC table, TABU capture and webapp. */
 function ensureDemoWorkspace() {
   const file = join(DEMO_WS, "src", "zcl_b0_hello.clas.abap");
-  if (existsSync(file)) {
-    return;
-  }
-  mkdirSync(join(DEMO_WS, "src"), {recursive: true});
+  mkdirSync(join(DEMO_WS, "src", "ddic"), {recursive: true});
+  mkdirSync(join(DEMO_WS, "data"), {recursive: true});
+  mkdirSync(join(DEMO_WS, "webapp"), {recursive: true});
+  writeFileSync(join(DEMO_WS, "osd-pack.json"), JSON.stringify({
+    name: "b0-workspace", order: 950, abap: "src", data: "data", ddic: "src/ddic", webapp: "webapp",
+    tiles: [{id: "b0-workspace", title: "B0 workspace", url: "/app/b0-workspace/"}],
+  }));
+  writeFileSync(join(DEMO_WS, "src", "ddic", "zb0_pack_row.tabl.xml"),
+    readFileSync(join(root, "src", "ddic", "zstg_status.tabl.xml"), "utf8").replaceAll("ZSTG_STATUS", "ZB0_PACK_ROW"));
+  writeFileSync(join(DEMO_WS, "data", "zb0_pack_row.tabu.json"),
+    JSON.stringify([{MANDT: "100", STATUS: "A", STATUS_TEXT: "seeded workspace row"}]));
+  writeFileSync(join(DEMO_WS, "webapp", "index.html"), "<h1>B0 workspace page v1</h1>\n");
   writeFileSync(file, `CLASS zcl_b0_hello DEFINITION PUBLIC CREATE PUBLIC.
 * test/vscode-vsix.mjs's own fixture (docs/vscode-extension.md's "Live
 * smoke"): a workspace layer with one classrun-able class.
@@ -293,6 +323,8 @@ ENDCLASS.
 CLASS zcl_b0_hello IMPLEMENTATION.
   METHOD if_oo_adt_classrun~main.
     out->write( 'hello from the B0 workspace layer' ).
+    SELECT SINGLE status_text FROM zb0_pack_row INTO @DATA(lv_text) WHERE status = 'A'.
+    out->write( lv_text ).
   ENDMETHOD.
 ENDCLASS.
 `);
@@ -301,13 +333,13 @@ ENDCLASS.
 describe("packaging: the .vsix installs and runs outside this checkout (docs/vscode-extension.md, Packaging)", function () {
   this.timeout(240000);
 
-  let launcher, port, unzipDir, storageDir, globalStorageDir, osdHome, LauncherClass, scratch;
+  let launcher, controller, port, unzipDir, storageDir, globalStorageDir, osdHome, LauncherClass, scratch, workspaceApi;
 
   before(async function () {
     const setupStart = performance.now();
-    ensureDemoWorkspace();
-
     scratch = testScratch("live-smoke");
+    DEMO_WS = join(scratch, "workspace-pack");
+    ensureDemoWorkspace();
     const {out} = await buildTestVsix(join(scratch, "build"));
     unzipDir = join(scratch, "unzipped");
     execFileSync("unzip", ["-q", out, "-d", unzipDir]);
@@ -341,10 +373,14 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
     expect(osdHome).to.not.equal(seedDir, "the launcher must run the materialized copy, never the install folder");
     LauncherClass = Launcher;
 
-    storageDir = join(scratch, "instance-storage"); // stands in for storageDirFor()
-    launcher = new Launcher({osdHome, storageDir, workspaceFolders: [DEMO_WS], timeoutMs: 180000});
-    const result = await launcher.start();
-    port = result.port;
+    const packaged = packagedController(extensionDir, DEMO_WS, osdHome);
+    workspaceApi = packaged.api;
+    controller = new packaged.SystemController({subscriptions: [], globalStorageUri: {fsPath: globalStorageDir},
+      extensionUri: {fsPath: extensionDir}}, {append() {}, appendLine() {}, show() {}});
+    expect(await controller.start()).to.equal(true);
+    launcher = controller.launcher;
+    storageDir = launcher.storageDir;
+    port = launcher.port;
     expect(existsSync(join(osdHome, "gen", "stg", "zvdb_100")),
       "the first build must not regenerate an excluded pack's service").to.equal(false);
     console.log(`vsix live setup wall: ${((performance.now() - setupStart) / 1000).toFixed(3)} s`);
@@ -368,7 +404,7 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
     expect(body.d.results.length).to.be.at.least(1);
   });
 
-  it("serves the launchpad and returns only bundled pack tiles", async function () {
+  it("serves the launchpad and the workspace pack page and tile", async function () {
     const base = `http://localhost:${port}`;
     const front = await fetch(`${base}/`, {redirect: "manual"});
     expect(front.status).to.equal(302);
@@ -380,8 +416,14 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
     expect(tiles.status).to.equal(200);
     const expected = JSON.parse(readFileSync(join(osdHome, "packs", "zork", "osd-pack.json"), "utf8")).tiles ?? [];
     const actual = (await tiles.json()).tiles;
-    expect(actual).to.have.length(expected.length);
-    expect(actual.every((tile) => tile.pack === "zork")).to.equal(true);
+    expect(actual).to.have.length(expected.length + 1);
+    expect(actual.find((tile) => tile.pack === "b0-workspace")).to.include({id: "b0-workspace", url: "/app/b0-workspace/"});
+    const workspacePage = await fetch(`${base}/app/b0-workspace/`);
+    expect(workspacePage.status).to.equal(200);
+    expect(await workspacePage.text()).to.contain("B0 workspace page v1");
+    const {layerContributions} = createRequire(import.meta.url)(join(unzipDir, "extension", "launcher.js"));
+    expect(layerContributions(launcher.layers[0])).to.deep.equal({abap: 1, data: 1, ddic: 1,
+      webapp: "/app/b0-workspace/", tiles: 1});
   });
 
   it("osd.database.system = duckdb refuses with a plain sentence, in a packaged install", async function () {
@@ -411,5 +453,43 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
     expect(res.status).to.equal(200);
     const text = await res.text();
     expect(text).to.contain("hello from the B0 workspace layer");
+    expect(text).to.contain("seeded workspace row");
+  });
+
+  it("page edits change the generation, and closing the folder removes its class, page, and tile", async function () {
+    const original = launcher.generation;
+    await launcher.stop();
+    writeFileSync(join(DEMO_WS, "webapp", "index.html"), "<h1>B0 workspace page v2</h1>\n");
+    await launcher.start();
+    port = launcher.port;
+    expect(launcher.generation).to.not.equal(original);
+    expect(await (await fetch(`http://localhost:${port}/app/b0-workspace/`)).text()).to.contain("page v2");
+    const pageGeneration = launcher.generation;
+    await launcher.stop();
+    writeFileSync(join(DEMO_WS, "data", "zb0_pack_row.tabu.json"),
+      JSON.stringify([{MANDT: "100", STATUS: "A", STATUS_TEXT: "reseeded workspace row"}]));
+    await launcher.start();
+    port = launcher.port;
+    expect(launcher.generation).to.not.equal(pageGeneration);
+    const adt = `http://localhost:${port}/sap/bc/adt`;
+    const discover = await fetch(`${adt}/core/discovery`, {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
+    const context = (discover.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
+    const run = await fetch(`${adt}/oo/classrun/ZCL_B0_HELLO`, {method: "POST", headers: {
+      cookie: `sap-contextid=${context}`, "x-csrf-token": discover.headers.get("x-csrf-token"),
+      "x-sap-adt-sessiontype": "stateful",
+    }});
+    expect(run.status).to.equal(200);
+    expect(await run.text()).to.contain("reseeded workspace row");
+    workspaceApi.workspace.workspaceFolders = [];
+    await controller.stop();
+    expect(await controller.start()).to.equal(true);
+    port = controller.launcher.port;
+    expect(controller.launcher).to.equal(launcher);
+    expect(launcher.workspaceFolders).to.deep.equal([]);
+    expect((await fetch(`http://localhost:${port}/app/b0-workspace/`)).status).to.equal(404);
+    const tiles = (await (await fetch(`http://localhost:${port}/app/packs.json`)).json()).tiles;
+    expect(tiles.some((tile) => tile.pack === "b0-workspace")).to.equal(false);
+    const absent = await fetch(`http://localhost:${port}/sap/bc/adt/oo/classes/ZCL_B0_HELLO/source/main`);
+    expect(absent.status).to.not.equal(200);
   });
 });

@@ -22,6 +22,19 @@ describe("tools/osd-bsp-registry: a BSP application is an object, not a folder",
       rmSync(root, {recursive: true, force: true});
     }
   });
+  it("refuses two WAPA names in the same folder that declare one application", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-bsp-collision-"));
+    try {
+      mkdirSync(join(root, "src"), {recursive: true});
+      for (const name of ["one", "two"]) {
+        writeFileSync(join(root, "src", `${name}.wapa.xml`), "<APPLNAME>ZSHARED</APPLNAME>");
+      }
+      expect(() => generate([join(root, "src")], join(root, "out"), root))
+        .to.throw(/BSP application ZSHARED is declared twice in one layer/);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
   it("reads the pages the descriptor names, from the files abapGit would write", () => {
     const apps = applications(["src"]);
     expect(apps.length, "the tree carries at least one BSP application").to.be.greaterThan(0);
