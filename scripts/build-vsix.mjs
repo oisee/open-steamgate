@@ -390,7 +390,9 @@ export function copySeedTree(seedRoot, selectedPacks) {
  *  generation copied into a second materialized copy under another path,
  *  "reused" in 5.4 s with gen/ regenerated, 0.1 s with gen/ shipped too.
  *
- *  What ships is `build/by-input/<hash>/` and `gen/`, as real files. The
+ *  What ships is `build/by-input/<hash>/`, `gen/` and that generation's
+ *  cross-reference rows (`build/xref/<key>.json`, tools/osd-xref-seed.mjs),
+ *  as real files. The
  *  links the build makes (`build/live`, `output`, the generation's `test`)
  *  are dropped and made again by the first build; a seed that carries no
  *  symlink cannot fail to unpack where links need rights. `build/tmp/` is
@@ -412,8 +414,16 @@ function prebuildGeneration(seedRoot, env) {
   const manifestFile = join(live, "manifest.json");
   const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
   writeFileSync(manifestFile, JSON.stringify({...manifest, builtAt: "1970-01-01T00:00:00.000Z", ms: 0}, undefined, 2) + "\n");
+  // the cross-reference rows of this generation (tools/osd-xref-seed.mjs,
+  // build/xref/<key>.json): a first start seeds CROSS & co. from them
+  // instead of parsing the tree. Written by the seed's own module, in the
+  // tree as a first build leaves it (links included), so the key is the
+  // one a materialized copy computes after its build reuses the generation
+  execFileSync(process.execPath, ["--input-type=module", "-e",
+    'await (await import("./tools/osd-xref-seed.mjs")).rows(process.cwd());'],
+  {cwd: seedRoot, env: buildEnv, stdio: ["ignore", "pipe", "inherit"]});
   for (const name of readdirSync(join(seedRoot, "build"))) {
-    if (name !== "by-input") rmSync(join(seedRoot, "build", name), {recursive: true, force: true});
+    if (name !== "by-input" && name !== "xref") rmSync(join(seedRoot, "build", name), {recursive: true, force: true});
   }
   for (const name of readdirSync(join(seedRoot, "build", "by-input"))) {
     if (name !== hash) rmSync(join(seedRoot, "build", "by-input", name), {recursive: true, force: true});

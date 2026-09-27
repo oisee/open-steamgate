@@ -383,6 +383,9 @@ describe("packaging a prebuilt generation (T2, docs/ideas.md)", function () {
       expect(generations, "exactly one generation, as real files").to.have.length(1);
       expect(entries.some((entry) => entry.startsWith("gen/"))).to.equal(true);
       expect(entries.some((entry) => /^(output|build\/live)\/?$/.test(entry)), "no links: the first build makes them").to.equal(false);
+      // and the cross-reference rows of that generation, one file
+      const xref = entries.map((entry) => /^build\/xref\/([0-9a-f]{16})\.json$/.exec(entry)?.[1]).filter((key) => key !== undefined);
+      expect(xref, "one cross-reference cache").to.have.length(1);
 
       const unzipDir = join(scratch, "unzipped");
       execFileSync("unzip", ["-q", out, "-d", unzipDir]);
@@ -396,6 +399,12 @@ describe("packaging a prebuilt generation (T2, docs/ideas.md)", function () {
       const log = execFileSync(process.execPath, ["tools/osd-build.mjs"], {cwd: home, env, encoding: "utf8"});
       expect(log, "the first build of a materialized copy").to.match(new RegExp(`osd-build: reused ${generations[0]} `));
       expect(log).to.not.match(/osd-build: built /);
+      // the copy names the rows the way the seed did, so a first start seeds
+      // CROSS & co. from the file instead of parsing the tree (~5 s)
+      const key = execFileSync(process.execPath, ["--input-type=module", "-e",
+        'process.stdout.write(String(await (await import("./tools/osd-xref-seed.mjs")).cacheKey(process.cwd())));'],
+      {cwd: home, env, encoding: "utf8"});
+      expect(key, "the copy's cross-reference key").to.equal(xref[0]);
 
       // the same tree packaged again makes the same seed: the materialized
       // copy is keyed by it, so a rebuilt .vsix of an unchanged tree reuses it
