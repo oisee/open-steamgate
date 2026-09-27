@@ -88,6 +88,7 @@ import {fileURLToPath} from "node:url";
 import {describeVsixPreflight, vsixPreflightMissing} from "../tools/osd-lock.mjs";
 import {requireSupportedNode} from "../tools/osd-node-version.mjs";
 import {packAt} from "../tools/osd-packs.mjs";
+import {writeThirdPartyNotices} from "./third-party-notices.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const EXT_DIR = join(ROOT, "editors", "vscode");
@@ -96,12 +97,15 @@ let minimatch;
 const require = createRequire(import.meta.url);
 const {writeSeedId, writeTar} = require("../editors/vscode/launcher.js");
 
-/** Only named in-tree packs can enter the seed. An empty override means the
- * default; an unknown name is a typo, not a silently smaller package. */
+/** Only named in-tree packs can enter the seed. An empty override selects no
+ * packs; an unknown name is a typo, not a silently smaller package. */
 function vsixPacks(env = process.env) {
-  const names = env.OSD_VSIX_PACKS?.trim()
-    ? env.OSD_VSIX_PACKS.split(",").map((name) => name.trim())
-    : ["zork"];
+  const profile = env.OSD_VSIX_PROFILE ?? "default";
+  if (!["default", "marketplace", "web-probe"].includes(profile)) throw new Error(`build-vsix: unknown OSD_VSIX_PROFILE: ${profile}`);
+  const names = env.OSD_VSIX_PACKS !== undefined
+    ? (env.OSD_VSIX_PACKS.trim() ? env.OSD_VSIX_PACKS.split(",").map((name) => name.trim()) : [])
+    : profile === "marketplace" ? [] : ["zork"];
+  if (profile === "marketplace" && names.includes("zork")) throw new Error("build-vsix: Marketplace profile cannot include Zork");
   const selected = [];
   for (const name of names) {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
@@ -394,10 +398,11 @@ export async function stageSystemSeed(seedRoot, env = process.env) {
 
 // ---- the extension itself -------------------------------------------------
 
-function copyExtensionFiles(extensionDir) {
+function copyExtensionFiles(extensionDir, profile) {
   mkdirSync(extensionDir, {recursive: true});
   for (const entry of readdirSync(EXT_DIR, {withFileTypes: true})) {
     if (entry.name === "osd") continue; // never present here; guards a stray dev copy
+    if (profile === "marketplace" && entry.name === "dist") continue; // no web bundle before S2
     copyReal(join(EXT_DIR, entry.name), join(extensionDir, entry.name));
   }
   cpSync(join(ROOT, "LICENSE"), join(extensionDir, "LICENSE"));
@@ -425,26 +430,40 @@ function contentTypesXml() {
 `;
 }
 
-function vsixManifestXml(pkg) {
+function vsixManifestXml(pkg, prerelease = false) {
+  const escapeXml = (value) => String(value).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   const publisher = pkg.publisher ?? "oisee";
-  const identity = `${publisher}.${pkg.name}`;
-  const displayName = pkg.displayName ?? pkg.name;
-  const description = (pkg.description ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;");
-  const vscodeEngine = (pkg.engines?.vscode ?? "*").replace(/^\^|^~/, "");
-  const categories = (pkg.categories ?? []).join(",");
+  const displayName = escapeXml(pkg.displayName ?? pkg.name);
+  const description = escapeXml(pkg.description ?? "");
+  const vscodeEngine = escapeXml(pkg.engines?.vscode ?? "*");
+  const categories = escapeXml((pkg.categories ?? []).join(","));
+  const tags = escapeXml((pkg.keywords ?? []).join(","));
+  const extensionKind = escapeXml((pkg.extensionKind ?? ["workspace"]).join(","));
+  const source = escapeXml(typeof pkg.repository === "string" ? pkg.repository : pkg.repository?.url ?? "");
+  const support = escapeXml(typeof pkg.bugs === "string" ? pkg.bugs : pkg.bugs?.url ?? "");
+  const homepage = escapeXml(pkg.homepage ?? "");
   return `<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Language="en-US" Id="${pkg.name}" Version="${pkg.version}" Publisher="${publisher}" ${pkg.private ? "" : ""}/>
+    <Identity Language="en-US" Id="${escapeXml(pkg.name)}" Version="${escapeXml(pkg.version)}" Publisher="${escapeXml(publisher)}" />
     <DisplayName>${displayName}</DisplayName>
     <Description xml:space="preserve">${description}</Description>
-    <Tags></Tags>
+    <Tags>${tags}</Tags>
     <Categories>${categories}</Categories>
+    <GalleryFlags>Public</GalleryFlags>
     <License>extension/LICENSE</License>
+    <Icon>extension/${escapeXml(pkg.icon)}</Icon>
     <Properties>
       <Property Id="Microsoft.VisualStudio.Code.Engine" Value="${vscodeEngine}" />
       <Property Id="Microsoft.VisualStudio.Code.ExtensionDependencies" Value="" />
-      <Property Id="Microsoft.VisualStudio.Code.ExtensionKind" Value="workspace" />
+      <Property Id="Microsoft.VisualStudio.Code.ExtensionKind" Value="${extensionKind}" />
+      <Property Id="Microsoft.VisualStudio.Services.Links.Source" Value="${source}" />
+      <Property Id="Microsoft.VisualStudio.Services.Links.Support" Value="${support}" />
+      <Property Id="Microsoft.VisualStudio.Services.Links.Learn" Value="${homepage}" />
+      <Property Id="Microsoft.VisualStudio.Services.Branding.Color" Value="${escapeXml(pkg.galleryBanner?.color ?? "")}" />
+      <Property Id="Microsoft.VisualStudio.Services.Branding.Theme" Value="${escapeXml(pkg.galleryBanner?.theme ?? "")}" />
+      <Property Id="Microsoft.VisualStudio.Services.GitHubFlavoredMarkdown" Value="true" />
+${prerelease ? '      <Property Id="Microsoft.VisualStudio.Code.PreRelease" Value="true" />' : ""}
     </Properties>
   </Metadata>
   <Installation>
@@ -453,6 +472,10 @@ function vsixManifestXml(pkg) {
   <Dependencies/>
   <Assets>
     <Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true" />
+    <Asset Type="Microsoft.VisualStudio.Services.Content.Details" Path="extension/README.md" Addressable="true" />
+    <Asset Type="Microsoft.VisualStudio.Services.Content.Changelog" Path="extension/CHANGELOG.md" Addressable="true" />
+    <Asset Type="Microsoft.VisualStudio.Services.Content.License" Path="extension/LICENSE" Addressable="true" />
+    <Asset Type="Microsoft.VisualStudio.Services.Icons.Default" Path="extension/${escapeXml(pkg.icon)}" Addressable="true" />
   </Assets>
 </PackageManifest>
 `;
@@ -461,6 +484,7 @@ function vsixManifestXml(pkg) {
 // ---- entry point ------------------------------------------------------------
 
 export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
+  const profile = env.OSD_VSIX_PROFILE ?? "default";
   const qualityText = env.OSD_VSIX_BROTLI_QUALITY;
   const quality = qualityText === undefined ? 5 : Number(qualityText);
   if ((qualityText !== undefined && !/^(?:[0-9]|10|11)$/.test(String(qualityText))) ||
@@ -473,14 +497,21 @@ export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
   mkdirSync(stage, {recursive: true});
 
   const extensionDir = join(stage, "extension");
-  copyExtensionFiles(extensionDir);
+  copyExtensionFiles(extensionDir, profile);
   const {pkg, dirty} = stampStagedPackage(join(extensionDir, "package.json"));
+  if (profile === "marketplace") {
+    delete pkg.browser;
+    writeFileSync(join(extensionDir, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
+  }
   const seedRoot = join(buildDir, "seed-stage");
   rmSync(seedRoot, {recursive: true, force: true});
   // **An unfetched pack refuses the package, not the user's first start.**
   // A selected pack whose sources were never fetched would make every
   // install's first build refuse with UNFETCHED. Other packs do not ship.
   const {seedId, modules, selectedPacks} = await stageSystemSeed(seedRoot, env);
+  const notices = writeThirdPartyNotices(seedRoot, join(extensionDir, "THIRD-PARTY-NOTICES.md"), ROOT);
+  for (const issue of notices.issues) log(`LICENSE REVIEW: ${issue}`);
+  log(`third-party notices: ${notices.entries.length} components, ${notices.issues.length} item(s) for review`);
   log(`packs: ${selectedPacks.map((pack) => pack.name).join(", ")}`);
   const archiveDir = join(extensionDir, "osd");
   mkdirSync(archiveDir, {recursive: true});
@@ -499,7 +530,7 @@ export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
   }
 
   writeFileSync(join(stage, "[Content_Types].xml"), contentTypesXml());
-  writeFileSync(join(stage, "extension.vsixmanifest"), vsixManifestXml(pkg));
+  writeFileSync(join(stage, "extension.vsixmanifest"), vsixManifestXml(pkg, env.OSD_VSIX_PRERELEASE === "1"));
 
   const out = join(buildDir, `${pkg.name}-${pkg.version}.vsix`);
   rmSync(out, {force: true});
@@ -527,7 +558,7 @@ export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
     log("WARNING: unpacked size is over ~150 MB -- see docs/vscode-extension.md, Packaging, for the trims proposed.");
   }
 
-  return {out, vsixSize, unpackedTotal, breakdown, modules, pkg};
+  return {out, vsixSize, unpackedTotal, breakdown, modules, pkg, notices};
 }
 
 if (basename(process.argv[1] ?? "") === "build-vsix.mjs") {

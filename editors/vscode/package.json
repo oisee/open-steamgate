@@ -1,18 +1,24 @@
 {
   "name": "open-steamgate",
-  "displayName": "open-steamgate (osd)",
+  "displayName": "open-steamgate: local ABAP server",
   "icon": "resources/icon.png",
-  "description": "ABAP Unit in the Test Explorer, the serving generation and short dumps of a running osd",
+  "description": "A local ABAP application server in VS Code with OData, Fiori, ABAP Unit and debugging",
   "version": "0.2.0",
   "private": true,
   "license": "MIT",
+  "keywords": ["abap", "sap", "odata", "fiori", "gateway", "abapgit"],
+  "repository": {"type": "git", "url": "https://github.com/oisee/open-steamgate.git"},
+  "bugs": {"url": "https://github.com/oisee/open-steamgate/issues"},
+  "homepage": "https://github.com/oisee/open-steamgate#readme",
+  "galleryBanner": {"color": "#15233b", "theme": "dark"},
+  "files": ["extension.js", "launcher.js", "lib.js", "system-overview.js", "osd/**", "resources/**", "examples/**", "walkthrough/**", "media/**", "web/**", "README.md", "CHANGELOG.md", "LICENSE", "THIRD-PARTY-NOTICES.md"],
   "publisher": "oisee",
   "engines": {"vscode": "^1.101.0"},
   "extensionKind": ["workspace", "ui"],
   "capabilities": {
     "virtualWorkspaces": {"supported": "limited", "description": "The web gateway probe works in virtual workspaces; desktop filesystem commands need a local folder."}
   },
-  "categories": ["Testing", "Other"],
+  "categories": ["Programming Languages", "Testing", "Other"],
   "main": "./extension.js",
   "browser": "./dist/web/extension.js",
   "activationEvents": [

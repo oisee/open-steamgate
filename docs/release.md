@@ -1,5 +1,26 @@
 # VS Code prerelease
 
+For a local Marketplace candidate, run `npm run vsix:marketplace` after
+`npm run bootstrap`. This profile omits the Zork pack and the browser entry,
+adds the VS Code prerelease manifest property, and writes staged
+`THIRD-PARTY-NOTICES.md`. Review the build's `LICENSE REVIEW` lines before
+uploading anything. This command does not publish; the release workflow below
+continues to build its separate GitHub prerelease VSIX.
+
+## Marketplace screenshots
+
+Capture these in VS Code desktop with the window set to 1280x800. Save each
+as a PNG at the path shown, then add its HTTPS raw GitHub URL to
+`editors/vscode/README.md` in place of the matching pending-capture comment.
+
+| View to capture | PNG path |
+| --- | --- |
+| OSD Activity Bar tree with a service selected and its service card visible | `editors/vscode/media/screenshots/tree-service-card.png` |
+| Run with Debugger stopped on an ABAP source line, with the debug controls and variables visible | `editors/vscode/media/screenshots/debugger-abap-line.png` |
+
+The Fiori list report image at `editors/vscode/media/screenshots/fiori-list-report.png`
+is already a real capture and remains in the Marketplace README.
+
 The [release workflow](../.github/workflows/release.yml) publishes a GitHub
 prerelease. It does not publish to the VS Code Marketplace. The release tag
 must be `vscode-v<major>.<minor>.<patch>`. The major and minor come from

@@ -14,6 +14,7 @@
     "rebuild": "node tools/osd-build.mjs --force",
     "builds": "node tools/osd-build.mjs list",
     "vsix": "node scripts/build-vsix.mjs",
+    "vsix:marketplace": "OSD_VSIX_PROFILE=marketplace OSD_VSIX_PRERELEASE=1 node scripts/build-vsix.mjs",
     "prevsix": "node tools/osd-node-check.mjs",
     "vsix:install": "node scripts/install-vsix.mjs",
     "binary": "bun scripts/build-binary.mjs",
