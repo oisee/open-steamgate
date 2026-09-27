@@ -9,6 +9,7 @@ CLASS ltcl_taxi DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
     METHODS grain_and_marks FOR TESTING RAISING cx_static_check.
     METHODS pinned_checksum FOR TESTING RAISING cx_static_check.
     METHODS checksum_sees_texts FOR TESTING RAISING cx_static_check.
+    METHODS a_year_is_its_own FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 
@@ -105,6 +106,42 @@ CLASS ltcl_taxi IMPLEMENTATION.
     MODIFY lt_edit FROM ls_fact INDEX 1.
     lv_sum = zcl_osd_demo_taxi=>checksum( lt_edit ).
     cl_abap_unit_assert=>assert_differs( act = lv_sum exp = lv_base ).
+  ENDMETHOD.
+
+  METHOD a_year_is_its_own.
+    DATA lt_a TYPE zcl_osd_demo_taxi=>ty_facts.
+    DATA lt_b TYPE zcl_osd_demo_taxi=>ty_facts.
+    DATA lt_c TYPE zcl_osd_demo_taxi=>ty_facts.
+    DATA ls_fact TYPE zcl_osd_demo_taxi=>ty_fact.
+    DATA lv_low TYPE zcl_osd_demo_taxi=>ty_fact-fact_id.
+    DATA lv_high TYPE zcl_osd_demo_taxi=>ty_fact-fact_id.
+    DATA lv_a TYPE i.
+    DATA lv_b TYPE i.
+    DATA lv_c TYPE i.
+    lt_a = zcl_osd_demo_taxi=>generate_year( iv_year = 2024 iv_rows = 3000 ).
+    lt_b = zcl_osd_demo_taxi=>generate_year( iv_year = 2024 iv_rows = 3000 ).
+    lt_c = zcl_osd_demo_taxi=>generate_year( iv_year = 2023 iv_rows = 3000 ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_a ) exp = 3000 ).
+    lv_a = zcl_osd_demo_taxi=>checksum( lt_a ).
+    lv_b = zcl_osd_demo_taxi=>checksum( lt_b ).
+    lv_c = zcl_osd_demo_taxi=>checksum( lt_c ).
+    cl_abap_unit_assert=>assert_equals( act = lv_b exp = lv_a ).
+    cl_abap_unit_assert=>assert_differs( act = lv_c exp = lv_a ).
+* pinned on Node with the weekday taken as ( date - typed epoch ); a
+* weekday that moves (date minus a char literal made every day a weekday
+* late) moves this number. Not yet measured on a system.
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_osd_demo_taxi=>checksum( zcl_osd_demo_taxi=>generate_year( iv_year = 2025 iv_rows = 3000 ) )
+      exp = 1065186561 ).
+    lv_low = zcl_osd_demo_taxi=>year_low( 2024 ).
+    lv_high = zcl_osd_demo_taxi=>year_high( 2024 ).
+    LOOP AT lt_a INTO ls_fact.
+      cl_abap_unit_assert=>assert_true( boolc( ls_fact-fact_id > lv_low AND ls_fact-fact_id <= lv_high ) ).
+      cl_abap_unit_assert=>assert_equals( act = ls_fact-pickup_day(4) exp = '2024' ).
+    ENDLOOP.
+    cl_abap_unit_assert=>assert_true( boolc( lv_low > zcl_osd_demo_taxi=>c_month_max ) ).
+    cl_abap_unit_assert=>assert_char_cp( act = zcl_osd_demo_taxi=>profile( 2024 ) exp = '2024: *' ).
+    cl_abap_unit_assert=>assert_differs( act = zcl_osd_demo_taxi=>profile( 2023 ) exp = zcl_osd_demo_taxi=>profile( 2024 ) ).
   ENDMETHOD.
 
 ENDCLASS.

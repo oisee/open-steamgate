@@ -1,18 +1,44 @@
 # Demo data, made by ABAP on every host
 
-Every host starts with the same synthetic month of NYC taxi facts in
-`ZOSD_TAXIFACT`, so the taxi Analytical List Page has something to show on
-the Pi, in the browser preview and in OSGo without an import. The rows are
-made by ABAP, not by a script per host. The same classes run transpiled on
-Node, in the service worker, compiled to Go, and on a system. There is no
-per-host logic that could drift (CLAUDE.md, "a rule written once, next to its
-one caller, does not survive the second caller").
+**Since 2026-09-27 nothing is made at start.** The taxi Analytical List Page
+opens with the four TLC sample rows and a line saying no sample data is
+loaded yet; "Generate data" makes one synthetic year on request, "Reset to
+minimal data" removes every synthetic year. The same two calls are
+`ZOSD_TAXI_SRV`'s function imports (`GenerateYear`, `ResetData`), the VS Code
+commands **osd: Generate taxi data...** and **osd: Reset taxi data to
+minimal**, and the same actions on that service in the OSD tree. A packaged
+first start measured the old start-up month at 3.8 s of its ~14 s; it is 1 ms
+now. The rows are still made by ABAP, not by a script per host: the same
+classes run transpiled on Node, in the service worker, compiled to Go, and on
+a system, and no per-host logic can drift (CLAUDE.md, "a rule written once,
+next to its one caller, does not survive the second caller").
 
 | class | what it does | needs a table |
 | --- | --- | --- |
 | `ZCL_OSD_DEMO_RANDOM` | Park-Miller minimal standard, `fold` for checksums, weighted picks | no |
-| `ZCL_OSD_DEMO_TAXI` | the taxi rows as an internal table, `checksum`, `describe` | no |
-| `ZCL_OSD_DEMO_DATA` | `BOOT( knob )` and `ENSURE_TAXI( rows, seed )`: the rows in the table | ZOSD_TAXIFACT |
+| `ZCL_OSD_DEMO_TAXI` | the taxi rows as an internal table: `generate` (the sample month), `generate_year`, `profile`, `checksum`, `describe` | no |
+| `ZCL_OSD_DEMO_DATA` | `BOOT( knob )`, `ENSURE_TAXI( rows, seed )`, `YEARS`, `GENERATE_YEAR( year )`, `RESET`: the rows in the table | ZOSD_TAXIFACT |
+| `ZCL_ZOSD_TAXI_DPC_EXT` | `ZOSD_TAXI_SRV` (`src/demo_data/zosd_taxi.stg.yaml`): `YearSet`, `GenerateYear`, `ResetData`, handed to `ZCL_OSD_DEMO_DATA` | through it |
+
+## A year on request
+
+`GENERATE_YEAR( year )` writes about 20000 groups of one year, keys `9`, the
+year and five digits (`YEAR_LOW` / `YEAR_HIGH`), so years never touch each
+other or the sample month. A year that already has rows is left alone and
+the report says so ("2024 already has ... trips in 20000 rows; nothing
+written"). The rows are seeded by the year, so a year is the same rows on
+every host and in every screenshot, and each year has its own character from
+a few parameters of its own generator (`PROFILE`): a rising or falling trend
+over the months, a summer or a winter peak, a fare level between 90 and
+115 %, one borough half again as busy, and one event, a quiet month (a third
+of its trips) or a holiday week (twice as many). The data is synthetic and
+makes no claim about real NYC history; the app says so. `RESET` removes every
+synthetic row (`FACT_ID` above `C_SYNTHETIC_MIN`) and leaves the rows below
+it: the four TLC samples in `data/zosd_taxifact.tabu.json`, and anything an
+import added. Every call is one request, so one dialog step under the work
+process lock (`tools/osd-dialog-step.mjs`): committed when it returns, rolled
+back whole if it dumps, never beside another step. Measured over HTTP: a
+year in about 1.8 s, the same year again 17 ms.
 
 ## How a host calls it
 
@@ -28,11 +54,15 @@ throws: a host that cannot make the rows starts without them.
 | `web/preview-backend.mjs` (service worker) | `startBackend`; `resetBackend` too, once #60's reset fix is in |
 | OSGo (`tools/gogen`, branch `ultra/demodata`) | after `boot`, in a dialog step of its own (`go/cmd/osgo/main.go`) |
 
-The knob:
+The knob, for a test or a screenshot that needs rows without a request:
 
-- `OSD_DEMO_ROWS` unset or empty: `C_DEFAULT_ROWS`, 20000.
-- `OSD_DEMO_ROWS=0`: no synthetic rows, and any that are there are removed.
-- `OSD_DEMO_ROWS=n`: n rows, at most `C_MAX_ROWS` (200000).
+- `OSD_DEMO_ROWS` unset or empty: nothing (it was 20000 rows of the sample month
+  until 2026-09-27).
+- `OSD_DEMO_ROWS=0`: no rows of the sample month, and any that are there are
+  removed.
+- `OSD_DEMO_ROWS=n`: n rows of the sample month (January 2025), at most
+  `C_MAX_ROWS` (200000). The knob keeps to the sample month's keys
+  (`C_SYNTHETIC_MIN` to `C_MONTH_MAX`) and leaves the years alone.
 
 The browser preview has no environment, so the build's `OSD_DEMO_ROWS` is
 written into `web/generated/seed.mjs`.

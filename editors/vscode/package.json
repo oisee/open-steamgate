@@ -198,6 +198,8 @@
       {"command": "osd.run", "title": "osd: Run", "icon": "$(play)"},
       {"command": "osd.runWithDebugger", "title": "osd: Run with debugger", "icon": "$(debug)"},
       {"command": "osd.classrun", "title": "osd: Run as ABAP Application (Console)"},
+      {"command": "osd.generateTaxiData", "title": "osd: Generate taxi data..."},
+      {"command": "osd.resetTaxiData", "title": "osd: Reset taxi data to minimal"},
       {"command": "osd.classrunWithDebugger", "title": "osd: Run as ABAP Application with debugger"},
       {"command": "osd.callEntitySetWithDebugger", "title": "osd: Call EntitySet with debugger"},
       {"command": "osd.toggleBreakpoints", "title": "osd: Toggle ABAP breakpoints"},
@@ -261,6 +263,8 @@
       ],
       "view/item/context": [
         {"command": "osd.start", "when": "view == osdTree && viewItem == osd-state-stopped", "group": "state@1"},
+        {"command": "osd.generateTaxiData", "when": "view == osdTree && viewItem =~ /(^|;)taxi-data(;|$)/", "group": "taxi@1"},
+        {"command": "osd.resetTaxiData", "when": "view == osdTree && viewItem =~ /(^|;)taxi-data(;|$)/", "group": "taxi@2"},
         {"command": "osd.fullRebuild", "when": "view == osdTree && viewItem == osd-state-stopped", "group": "state@2"},
         {"command": "osd.chooseStartSystem", "when": "view == osdTree && viewItem =~ /^osd-state-/", "group": "state@9"},
         {"command": "osd.stop", "when": "view == osdTree && viewItem == osd-state-running", "group": "state@1"},

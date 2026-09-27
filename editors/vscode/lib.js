@@ -496,6 +496,35 @@ class Osd {
     return {status: res.status, ms, url, text, body};
   }
 
+  /** A POST function import of an OData service, with the CSRF token that
+   *  service hands out (the gateway's, not the ADT facade's). Answers the
+   *  function's value, the one field under "d"; an OData error is thrown
+   *  with its own message. */
+  async odataAction(service, name, parameters = {}) {
+    const root = `${this.url}/sap/opu/odata/sap/${service}/`;
+    const head = await this.fetch(root, {headers: {"x-csrf-token": "fetch"}});
+    if (!head.ok) throw new Error(`GET ${service}/: HTTP ${head.status} -- no CSRF token`);
+    const cookies = typeof head.headers.getSetCookie === "function" ? head.headers.getSetCookie() : [];
+    const query = new URLSearchParams(Object.entries(parameters).map(([key, value]) => [key, String(value)])).toString();
+    const res = await this.fetch(`${root}${name}${query ? `?${query}` : ""}`, {method: "POST", headers: {
+      accept: "application/json",
+      "x-csrf-token": head.headers.get("x-csrf-token") ?? "",
+      ...(cookies.length > 0 ? {cookie: cookies.map((c) => c.split(";")[0]).join("; ")} : {}),
+    }});
+    const text = await res.text();
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = undefined;
+    }
+    if (!res.ok) {
+      const said = body?.error?.message?.value ?? text.replace(/\s+/g, " ").trim().slice(0, 300);
+      throw new Error(`POST ${service}/${name}: HTTP ${res.status}${said ? ` -- ${said}` : ""}`);
+    }
+    return body?.d?.[name];
+  }
+
   /** Q6a "Notebook SQL" (docs/vscode-extension.md): run one SQL statement
    *  through the ADT façade's data preview (tools/adt-facade.mjs
    *  `datapreview/freestyle`, ~2358-2392): POST the statement as the
@@ -1973,7 +2002,31 @@ function serviceActionContext(row, capabilities = {}) {
   for (const role of ["dpc", "mpc", "handler", "app", "service"]) {
     if (capabilities.sources?.[role]?.path) flags.push(`source-${role}`);
   }
+  // the taxi demo's sample data: generate a year, reset (osd.generateTaxiData)
+  if (row?.name === "ZOSD_TAXI_SRV") flags.push("taxi-data");
   return [serviceContextValue(row?.kind), ...flags].join(";");
+}
+
+// ---- the taxi demo's sample data (ZOSD_TAXI_SRV): the two palette commands
+// and the tree action ask what these say, so the words are the app's
+// (webapp/taxi/i18n/i18n.properties)
+
+/** the most recent year without rows, this year first */
+function taxiDefaultYear(years = [], now = new Date()) {
+  const loaded = new Set(years.map((y) => Number(y.Year)));
+  let year = now.getFullYear();
+  while (loaded.has(year) && year > 1900) year -= 1;
+  return year;
+}
+
+/** what a reset would remove, as the question to ask; undefined when only
+ *  rows that are not synthetic are loaded and there is nothing to remove */
+function taxiResetPrompt(years = []) {
+  if (years.length === 0) return undefined;
+  const group = (n) => Number(n).toLocaleString("en-US").replace(/,/g, " ");
+  const trips = years.reduce((n, y) => n + Number(y.Trips), 0);
+  const rows = years.reduce((n, y) => n + Number(y.Rows), 0);
+  return `Remove ${years.map((y) => y.Year).join(", ")} (${group(trips)} trips in ${group(rows)} rows)? Rows that are not synthetic stay.`;
 }
 
 function normalizeTransactionRow(row) {
@@ -2367,4 +2420,4 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   transactionDetailsHtml, appManifestDetails, httpTestFiles, closureTestNames, dumpsForService,
   implementationMethodLine, serviceCardModel, serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext,
-  SYSTEM_STATUS_SETS, odataV2Results, systemOverviewModel};
+  SYSTEM_STATUS_SETS, odataV2Results, systemOverviewModel, taxiDefaultYear, taxiResetPrompt};

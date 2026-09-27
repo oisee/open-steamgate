@@ -1,12 +1,19 @@
 * ENSURE_TAXI and BOOT on ZOSD_TAXIFACT: idempotence, the knob, and the
-* rows that are not ours.
+* rows that are not ours; GENERATE_YEAR, YEARS and RESET: a year at a time,
+* once per year, and back to the sample rows. Setup and teardown reset the
+* table, so run it on a scratch database: years made by hand are removed.
 CLASS ltcl_demo_data DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
 
   PRIVATE SECTION.
+    METHODS setup.
     METHODS teardown.
     METHODS ensure_is_idempotent FOR TESTING RAISING cx_static_check.
     METHODS real_rows_untouched FOR TESTING RAISING cx_static_check.
     METHODS boot_knob FOR TESTING RAISING cx_static_check.
+    METHODS start_makes_nothing FOR TESTING RAISING cx_static_check.
+    METHODS years_add_up_once_each FOR TESTING RAISING cx_static_check.
+    METHODS reset_to_minimal FOR TESTING RAISING cx_static_check.
+    METHODS knob_leaves_years_alone FOR TESTING RAISING cx_static_check.
 
     METHODS real_rows
       RETURNING
@@ -19,8 +26,15 @@ ENDCLASS.
 
 CLASS ltcl_demo_data IMPLEMENTATION.
 
+  METHOD setup.
+* every case starts from the sample rows alone
+    zcl_osd_demo_data=>ensure_taxi( iv_rows = 0 ).
+    zcl_osd_demo_data=>reset( ).
+  ENDMETHOD.
+
   METHOD teardown.
     zcl_osd_demo_data=>ensure_taxi( iv_rows = 0 ).
+    zcl_osd_demo_data=>reset( ).
 * the real row real_rows_untouched inserts, also when an assertion stopped
 * that test before its own DELETE
     DELETE FROM zosd_taxifact WHERE fact_id = '8999999999'.
@@ -93,6 +107,77 @@ CLASS ltcl_demo_data IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 40 ).
     lv_report = zcl_osd_demo_data=>boot( `0` ).
     cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 0 ).
+  ENDMETHOD.
+
+* the start: no knob, no rows. It was 20000 rows of the sample month until
+* 2026-09-27; this fails if that comes back
+  METHOD start_makes_nothing.
+    DATA lv_report TYPE string.
+    lv_report = zcl_osd_demo_data=>boot( `` ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_report exp = '*nothing generated*' ).
+    cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 0 ).
+  ENDMETHOD.
+
+  METHOD years_add_up_once_each.
+    DATA lv_report TYPE string.
+    DATA lt_years TYPE zcl_osd_demo_data=>ty_years.
+    DATA ls_year TYPE zcl_osd_demo_data=>ty_year.
+    DATA lv_trips TYPE i.
+    lv_report = zcl_osd_demo_data=>generate_year( 2031 ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_report exp = '*2031 generated*20000 rows*' ).
+    lv_report = zcl_osd_demo_data=>generate_year( 2032 ).
+    cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 40000 ).
+    lt_years = zcl_osd_demo_data=>years( ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_years ) exp = 2 ).
+    READ TABLE lt_years INTO ls_year INDEX 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_year-year exp = 2031 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_year-rows exp = 20000 ).
+    lv_trips = ls_year-trips.
+* the same year again is a no-op that says so, and the other year stays
+    lv_report = zcl_osd_demo_data=>generate_year( 2031 ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_report exp = '*2031 already has*nothing written*' ).
+    cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 40000 ).
+    lt_years = zcl_osd_demo_data=>years( ).
+    READ TABLE lt_years INTO ls_year INDEX 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_year-trips exp = lv_trips ).
+    lv_report = zcl_osd_demo_data=>generate_year( 1800 ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_report exp = '*not a year*' ).
+  ENDMETHOD.
+
+  METHOD reset_to_minimal.
+    DATA lv_report TYPE string.
+    DATA lv_real TYPE i.
+    lv_real = real_rows( ).
+    zcl_osd_demo_data=>generate_year( 2031 ).
+    zcl_osd_demo_data=>generate_year( 2032 ).
+    lv_report = zcl_osd_demo_data=>reset( ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_report exp = '*removed 40000*2031, 2032*' ).
+    cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( act = real_rows( ) exp = lv_real ).
+    lv_report = zcl_osd_demo_data=>reset( ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_report exp = '*already minimal*' ).
+* and a year can be made again after it
+    lv_report = zcl_osd_demo_data=>generate_year( 2032 ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_report exp = '*2032 generated*' ).
+    cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 20000 ).
+  ENDMETHOD.
+
+  METHOD knob_leaves_years_alone.
+    DATA lv_report TYPE string.
+    zcl_osd_demo_data=>generate_year( 2031 ).
+    zcl_osd_demo_data=>boot( `40` ).
+    cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 20040 ).
+    zcl_osd_demo_data=>boot( `0` ).
+    cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 20000 ).
+* the other DELETE: real rows outnumber the request, the month goes and
+* the year stays
+    zcl_osd_demo_data=>boot( `40` ).
+    zcl_osd_demo_data=>ensure_taxi( iv_rows = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = synthetic_rows( ) exp = 20000 ).
+* a reset names the sample month when its rows are among what goes
+    zcl_osd_demo_data=>boot( `40` ).
+    lv_report = zcl_osd_demo_data=>reset( ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_report exp = '*removed 20040*2031 and the sample month*' ).
   ENDMETHOD.
 
 ENDCLASS.

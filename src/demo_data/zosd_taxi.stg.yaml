@@ -1,0 +1,33 @@
+# The taxi demo's sample data, as a service of its own: which years are
+# loaded, one more year on request, and back to the minimal rows. The taxi
+# app (webapp/taxi) reads the cube over ZSTG_SADL_SRV and uses this one only
+# for its data buttons; the VS Code extension calls the same two functions.
+# The rows are made by ZCL_OSD_DEMO_DATA; ZCL_ZOSD_TAXI_DPC_EXT (beside this
+# file) only hands the calls over. Each call is one request, so one dialog
+# step: committed when it returns, rolled back whole if it dumps, and never
+# beside another step (tools/osd-dialog-step.mjs).
+project: ZOSD_TAXI
+service: ZOSD_TAXI_SRV
+model: ZOSD_TAXI_MDL
+description: "taxi demo: synthetic sample data per year"
+
+entities:
+  Year:
+    set: YearSet
+    keys: [Year]
+    properties:
+      Year: {type: Int32, label: Year}
+      Rows: {type: Int32, label: Rows}
+      Trips: {type: Int32, label: Trips}
+      Profile: {type: String(200), label: Character}
+
+functions:
+  GenerateYear:
+    method: POST
+    # the report, one line: generated, or already there, or not a year
+    returns: {primitive: Edm.String}
+    parameters:
+      Year: {type: Int32}
+  ResetData:
+    method: POST
+    returns: {primitive: Edm.String}

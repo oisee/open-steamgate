@@ -1736,3 +1736,19 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream issue: none. Nothing is fixed here, and a different `sin` is a design question for the runtime, not a defect with a small patch.
 - Regression-test location: none yet; the six measured values belong in the test that comes with a fix.
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-27-action-label -- open-abap-odata's action and action-parameter interfaces have no SET_LABEL_FROM_TEXT_ELEMENT, which SEGW's generated MPC calls on both
+
+- Status: `open`
+- Discovery date: `2026-09-27`
+- Affected versions: open-abap-odata at `bd9f1fb` (the lib this tree pins)
+- Affected ABAP statement, runtime API or adapter: `/IWBEP/IF_MGW_ODATA_ACTION`, `/IWBEP/IF_MGW_ODATA_PARAMETER`: `SET_LABEL_FROM_TEXT_ELEMENT`
+- Minimal ABAP reproducer: any `*.stg.yaml` with a `functions:` block, compiled by `npm run stg:compile` and transpiled; the first one here was `src/demo_data/zosd_taxi.stg.yaml` (GenerateYear, ResetData)
+- Exact command used to run it: `node tools/osd-build.mjs` -> `check_syntax, Method "set_label_from_text_element" not found` on the generated MPC's `lo_action->...` and `lo_parameter->...` lines
+- Expected SAP behaviour: SEGW writes `lo_action->set_label_from_text_element(` for every action and one per input parameter, and A4H activated and served such an MPC (regenerated there 2026-09-19; `tools/segw-gen.mjs` "An open question" block). Properties, entity types and complex types have the method here too, through `/IWBEP/IF_MGW_ODATA_ITEM`
+- Actual open-abap behaviour: the two interfaces do not include `/IWBEP/IF_MGW_ODATA_ITEM` or an alias for the method, so the generated MPC does not pass the syntax check; no generated MPC with functions had been transpiled here before (the demo's MPC is hand-written)
+- Impact on open-steamgate: a service compiled from YAML with a function import does not build
+- Smallest safe workaround: keep that service's MPC in `src/` without the action and parameter label lines (`src/demo_data/zcl_zosd_taxi_mpc.clas.abap`, which says so in its header); `stg-compile --all` leaves an object `src/` holds alone
+- Upstream issue: none yet; the fix is an alias (or the item interface) on the two interfaces in open-abap-odata
+- Regression-test location: none yet; the taxi data service's own tests fail if its MPC stops building
+- Upstream version containing a fix: `unknown`
