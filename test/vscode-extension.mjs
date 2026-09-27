@@ -112,7 +112,8 @@ function vscodeStub(settings = {}) {
     }, openExternal: async (uri) => { externalOpens.push(uri); }},
     commands: {executeCommand: async (...args) => { executedCommands.push(args); }},
     debug: {
-      sessions: [],
+      // no `sessions`: the stable VS Code API has none (it crashed on a Mac)
+      onDidStartDebugSession: () => ({dispose() {}}),
       onDidTerminateDebugSession: () => ({dispose() {}}),
     },
     workspace: {
