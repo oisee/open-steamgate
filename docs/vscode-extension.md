@@ -361,7 +361,14 @@ JSON renderer ahead of HTML even when JSON comes second. A `raw JSON`
 disclosure in the HTML shows the same rows on demand. A refused statement
 (not a SELECT, or a database never built) becomes the cell's error output,
 the server's own message unwrapped. Command
-"osd: New SQL notebook" opens a fresh one-cell notebook of the type.
+"osd: New SQL notebook" and the System → SQL row open a notebook with a
+short Markdown introduction, a ready `SELECT * FROM zosd_sys UP TO 10 ROWS`
+cell, and a longer Markdown guide below it. `ZOSD_SYS` is part of the base
+status schema (`src/status/zosd_sys.tabl.xml`); no optional pack is needed.
+The guide explains the read-only Open SQL subset, row limit, table and raw
+JSON output, the running system as the data source, and the ABAP and SQLScript
+cell types (DX7, `docs/notebook-cells.md`). Opening from a data preview keeps
+its requested SQL statement in the middle cell.
 
 The same controller accepts `abap` and `sqlscript` code cells. An ABAP cell's
 statements are wrapped as the main method of `ZCL_OSD_NOTEBOOK_CELL`, written
@@ -886,6 +893,32 @@ the ABAP source only when that file exists. A second click on the same row
 within 400 ms runs a runnable transaction in Easy Access. The inline **Run**
 button and context-menu **Run** remain direct actions, without waiting for a
 second click. Non-runnable rows still show details but offer no Run action.
+
+Every tree row uses the same 400 ms second-click classifier as TRAN. Single
+clicks show what the row is in the reused details panel (or the System
+overview for the state row). A second click on the same row performs its
+primary action when there is one. The SQL door is an exception: its notebook
+is its explanation, so one click opens it. Inline buttons and context-menu
+commands still act immediately.
+
+| Node kind | Single click | Second click within 400 ms |
+| --- | --- | --- |
+| Stopped/running/building state | System overview | System overview |
+| Launchpad | Launchpad explanation | Open Launchpad in browser |
+| System group | Group explanation | No additional action |
+| Serving `/osd/serving` | Serving endpoint explanation | Open endpoint in browser |
+| Short dumps `/osd/dumps` | Dump explanation | List dumps in Output |
+| SQL `/osd/sql` | Open the SQL notebook and its guide | Another notebook if clicked again |
+| TRAN group | Group explanation | No additional action |
+| Runnable TRAN | Transaction details | Run in Easy Access |
+| Non-runnable TRAN | Transaction details and reason | No run |
+| Layers group, base layer, workspace layer | Layer explanation | No additional action |
+| Services root, kind group, pack group | Group explanation | No additional action |
+| APP, OData, ICF service row | Service details | Open service or app using `osd.openIn` |
+| APC service row | Service details | No page to open |
+| Service class (DPC, MPC, handler, generated helper) | Class role and source explanation | Open source file |
+| OData entity set | Set and method explanation | Open DPC method |
+| Empty/start-system placeholder | Why this group is empty | No additional action |
 
 Service rows are grouped by kind by default. Use the view title toggle to group
 them by pack; rows with no pack appear under **Unpacked**. The setting is
