@@ -14,7 +14,7 @@
 import {expect} from "chai";
 import {execFileSync} from "node:child_process";
 import {createRequire} from "node:module";
-import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, lstatSync} from "node:fs";
+import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, lstatSync, symlinkSync} from "node:fs";
 import {basename, join} from "node:path";
 import {homedir, tmpdir} from "node:os";
 import {buildVsix, stampStagedPackage} from "../scripts/build-vsix.mjs";
@@ -65,12 +65,17 @@ describe("packaging changed seed content", function () {
     const scratch = mkdtempSync(join(SCRATCH, "repackage-"));
     const sourceName = `.vsix-package-test-${process.pid}-${Date.now()}`;
     const sourceFile = join(root, "src", sourceName);
+    const linkName = `${sourceName}-link`;
+    const sourceLink = join(root, "src", linkName);
     const firstArchive = join(scratch, "first.vsix");
     const firstUnzip = join(scratch, "first");
     const secondUnzip = join(scratch, "second");
     const globalStorage = join(scratch, "globalStorage");
     try {
       writeFileSync(sourceFile, "first packaged seed content\n");
+      // npm's local transpiler build also contains .bin symlinks. Make the
+      // archive/hash disagreement reproducible even with published packages.
+      symlinkSync(sourceName, sourceLink);
       const first = await buildVsix();
       copyFileSync(first.out, firstArchive);
 
@@ -92,8 +97,13 @@ describe("packaging changed seed content", function () {
       const firstSeed = join(firstExtension, "osd");
       const secondSeed = join(secondExtension, "osd");
       const seedFile = join("src", sourceName);
+      const seedLink = join("src", linkName);
       expect(readFileSync(join(firstSeed, seedFile), "utf8")).to.equal("first packaged seed content\n");
       expect(readFileSync(join(secondSeed, seedFile), "utf8")).to.equal("second packaged seed content\n");
+      expect(readFileSync(join(firstSeed, seedLink), "utf8")).to.equal("first packaged seed content\n");
+      expect(readFileSync(join(secondSeed, seedLink), "utf8")).to.equal("second packaged seed content\n");
+      expect(lstatSync(join(VSIX_DIR, "stage", "extension", "osd", seedLink)).isFile(),
+        "staged symlinks must have the same file type as the archive").to.equal(true);
 
       const firstId = firstLauncher.seedContentId(firstSeed);
       const secondId = secondLauncher.seedContentId(secondSeed);
@@ -114,6 +124,7 @@ describe("packaging changed seed content", function () {
       built = true;
     } finally {
       rmSync(sourceFile, {force: true});
+      rmSync(sourceLink, {force: true});
       rmSync(scratch, {recursive: true, force: true});
     }
 

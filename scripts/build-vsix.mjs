@@ -77,7 +77,7 @@
 import {execFileSync} from "node:child_process";
 import {createRequire} from "node:module";
 import {
-  cpSync, existsSync, mkdirSync, readdirSync, readFileSync,
+  cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,
   realpathSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
 import {basename, dirname, join, relative, resolve} from "node:path";
@@ -127,15 +127,39 @@ function fmtMB(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Copies `src` to `dest`, following symlinks (`realpathSync`) so a seed
- *  never carries a symlink pointing outside itself -- `output` (a symlink
- *  chain to `build/by-input/<hash>/output`) and `.local/lars/open-abap-apc`
- *  (a symlink to a sibling checkout entirely outside this repo) are both
- *  cases of this in the tree we build from. */
+/** Copies from the real top-level source. Nested symlinks are normalized
+ *  after the seed is assembled: fs.cpSync preserves them even with
+ *  dereference=true, while zip follows them when making the archive. */
 function copyReal(src, dest, options = {}) {
   const real = realpathSync(src);
   mkdirSync(dirname(dest), {recursive: true});
   cpSync(real, dest, {recursive: true, dereference: true, ...options});
+}
+
+/** Make the staged seed match what `zip -r` actually ships. In particular,
+ *  a locally built transpiler has nested node_modules/.bin symlinks. zip
+ *  follows those links into regular files, so hashing the links themselves
+ *  would record a different tree from the one installed from the .vsix. */
+function materializeSeedLinks(seedRoot) {
+  const visit = (dir, activeTargets = new Set()) => {
+    for (const name of readdirSync(dir)) {
+      const file = join(dir, name);
+      const entry = lstatSync(file);
+      if (entry.isSymbolicLink()) {
+        const target = realpathSync(file);
+        const targetIsDir = statSync(target).isDirectory();
+        if (targetIsDir && activeTargets.has(target)) {
+          throw new Error(`build-vsix: recursive seed symlink at ${file}`);
+        }
+        rmSync(file);
+        cpSync(target, file, {recursive: true, dereference: true});
+        if (targetIsDir) visit(file, new Set([...activeTargets, target]));
+      } else if (entry.isDirectory()) {
+        visit(file, activeTargets);
+      }
+    }
+  };
+  visit(seedRoot);
 }
 
 /** Copies every file of `srcDir` whose path relative to `srcDir` (leading
@@ -403,6 +427,7 @@ export async function buildVsix() {
     throw new Error(`build-vsix: ${describeUnfetched(missing)}`);
   }
   const modules = copySeedTree(seedRoot);
+  materializeSeedLinks(seedRoot);
   const seedId = writeSeedId(seedRoot);
   log(`seed ID: ${seedId}`);
   if (dirty) {
