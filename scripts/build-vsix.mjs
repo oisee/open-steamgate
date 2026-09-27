@@ -404,7 +404,10 @@ function copyExtensionFiles(extensionDir, profile) {
     if (profile === "marketplace" && entry.name === "dist") continue; // no web bundle before S2
     copyReal(join(EXT_DIR, entry.name), join(extensionDir, entry.name));
   }
-  cpSync(join(ROOT, "LICENSE"), join(extensionDir, "LICENSE"));
+  // LICENSE.txt, as vsce names it: an OPC package gives every part a
+  // content type by its extension, and the Marketplace refuses a declared
+  // asset it cannot type ("declared ... but was not found in the package").
+  cpSync(join(ROOT, "LICENSE"), join(extensionDir, "LICENSE.txt"));
   if (existsSync(join(EXT_DIR, "README.md"))) {
     // already copied above by the directory loop
   }
@@ -412,21 +415,44 @@ function copyExtensionFiles(extensionDir, profile) {
 
 // ---- the two vsix manifests, generated from package.json like vsce does --
 
-function contentTypesXml() {
+const CONTENT_TYPES = {
+  json: "application/json", js: "application/javascript", mjs: "application/javascript",
+  cjs: "application/javascript", md: "text/markdown", txt: "text/plain", xml: "text/xml",
+  svg: "image/svg+xml", png: "image/png", vsixmanifest: "text/xml",
+};
+
+/** Every file in an OPC package needs a content type, looked up by its
+ *  extension, or the Marketplace cannot see it. The list is derived from
+ *  what was staged: a known type where there is one, otherwise
+ *  application/octet-stream (.br, .osdnb, .seed-id and whatever a later
+ *  change adds). */
+export function contentTypesXml(extensions = []) {
+  const all = [...new Set([...Object.keys(CONTENT_TYPES), ...extensions])].sort();
+  const lines = all.map((ext) => `<Default Extension="${ext}" ContentType="${CONTENT_TYPES[ext] ?? "application/octet-stream"}"/>`);
   return `<?xml version="1.0" encoding="utf-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-<Default Extension="json" ContentType="application/json"/>
-<Default Extension="js" ContentType="application/javascript"/>
-<Default Extension="mjs" ContentType="application/javascript"/>
-<Default Extension="cjs" ContentType="application/javascript"/>
-<Default Extension="md" ContentType="text/markdown"/>
-<Default Extension="txt" ContentType="text/plain"/>
-<Default Extension="xml" ContentType="text/xml"/>
-<Default Extension="svg" ContentType="image/svg+xml"/>
-<Default Extension="png" ContentType="image/png"/>
-<Default Extension="vsixmanifest" ContentType="text/xml"/>
+${lines.join("\n")}
 </Types>
 `;
+}
+
+/** The extensions of every file under dir; a file without one is an error,
+ *  since no Default entry can type it. */
+export function stagedExtensions(dir) {
+  const found = new Set();
+  const walk = (at) => {
+    for (const entry of readdirSync(at, {withFileTypes: true})) {
+      const path = join(at, entry.name);
+      if (entry.isDirectory()) { walk(path); continue; }
+      const dot = entry.name.lastIndexOf(".");
+      if (dot < 0 || dot === entry.name.length - 1) {
+        throw new Error(`build-vsix: ${relative(dir, path)} has no file extension, so the Marketplace cannot type it`);
+      }
+      found.add(entry.name.slice(dot + 1).toLowerCase());
+    }
+  };
+  walk(dir);
+  return [...found];
 }
 
 function vsixManifestXml(pkg, prerelease = false) {
@@ -450,7 +476,7 @@ function vsixManifestXml(pkg, prerelease = false) {
     <Tags>${tags}</Tags>
     <Categories>${categories}</Categories>
     <GalleryFlags>Public</GalleryFlags>
-    <License>extension/LICENSE</License>
+    <License>extension/LICENSE.txt</License>
     <Icon>extension/${escapeXml(pkg.icon)}</Icon>
     <Properties>
       <Property Id="Microsoft.VisualStudio.Code.Engine" Value="${vscodeEngine}" />
@@ -473,7 +499,7 @@ ${prerelease ? '      <Property Id="Microsoft.VisualStudio.Code.PreRelease" Valu
     <Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true" />
     <Asset Type="Microsoft.VisualStudio.Services.Content.Details" Path="extension/README.md" Addressable="true" />
     <Asset Type="Microsoft.VisualStudio.Services.Content.Changelog" Path="extension/CHANGELOG.md" Addressable="true" />
-    <Asset Type="Microsoft.VisualStudio.Services.Content.License" Path="extension/LICENSE" Addressable="true" />
+    <Asset Type="Microsoft.VisualStudio.Services.Content.License" Path="extension/LICENSE.txt" Addressable="true" />
     <Asset Type="Microsoft.VisualStudio.Services.Icons.Default" Path="extension/${escapeXml(pkg.icon)}" Addressable="true" />
   </Assets>
 </PackageManifest>
@@ -528,7 +554,7 @@ export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
     log(`dirty tree: version ${pkg.version} + seed ${seedId}`);
   }
 
-  writeFileSync(join(stage, "[Content_Types].xml"), contentTypesXml());
+  writeFileSync(join(stage, "[Content_Types].xml"), contentTypesXml(stagedExtensions(join(stage, "extension"))));
   writeFileSync(join(stage, "extension.vsixmanifest"), vsixManifestXml(pkg, env.OSD_VSIX_PRERELEASE === "1"));
 
   const out = join(buildDir, `${pkg.name}-${pkg.version}.vsix`);
