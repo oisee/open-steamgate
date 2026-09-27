@@ -62,7 +62,14 @@ Give the critic no history of how it was built.
 3. Breakpoint guard. 4. vg/test-cleanup (tests restore what they change).
 5. Quick wins: T2 (measure; skip if > 1 day), Q7 Fiori/SEGW in a VS Code tab,
    "osd: New pack here", Q5 osd tools as VS Code LM tools.
-6. Design doc only: background jobs (SUBMIT, JOB_OPEN/SUBMIT/CLOSE, events
+   (Inserted: vg/flp-pack-inbounds, airfleet's engine item, before Q7.)
+6. Focused launchpad, reduced (Alice, 2026-09-27): after Q5, and only after
+   re-judging it once Q7 exists (apps open from the OSD tree). If still
+   needed: when one pack with tiles is in the workspace, its tiles are the
+   first group, expanded; nothing is hidden (Travels carries chapter 3). A
+   taxi-seed switch only with a measured cost (start time or DB size),
+   otherwise dropped. Decision in that PR's "Decisions"; tell airfleet.
+7. Design doc only: background jobs (SUBMIT, JOB_OPEN/SUBMIT/CLOSE, events
    SM62/SM64, SM37-like view with breakpoint-in-job, spool-lite from WRITE),
    open question on imitating TBTCO/TBTCP, list of A4H probes (local, never
    from the cloud); model on docs/abap-daemons.md; draft PR.
