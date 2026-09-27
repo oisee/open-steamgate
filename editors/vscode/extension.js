@@ -528,9 +528,9 @@ class SystemController {
       });
       launcher.homeKind = choice.kind;
       launcher.on("log", (line) => this.output.append(line));
+      wirePageTabs(launcher);
       launcher.on("state", (state) => {
         if (state === "stopped") {
-          closePageTabs();
           this.debuggerTransition = this.debuggerTransition.then(() => this.applyDebuggerEvent({type: "system-stopped"}));
         }
         this.emitter.fire();
@@ -676,6 +676,8 @@ class SystemController {
       return;
     }
     await this.launcher.stop();
+    // Stop means the pages are gone; a rebuild (stop, then start) keeps them
+    closePageTabs();
     this.emitter.fire();
   }
 
@@ -1429,12 +1431,55 @@ function openTarget(where = "default") {
 // one tab per URL: a second click reveals the tab it already has
 const pageTabs = new Map();
 
-/** The system stopped: every page tab shows a page that is gone (and after a
- *  restart the same URL may be another generation, or another port's page
- *  would be a second tab), so they close with it. */
+/** Stop (or an exit nobody asked for): every page tab shows a page that is
+ *  gone, so they close with the system. A rebuild does not come here. */
 function closePageTabs() {
   for (const panel of [...pageTabs.values()]) panel.dispose();
   pageTabs.clear();
+}
+
+/** What a launcher's life means for the page tabs: an exit nobody asked for
+ *  closes them; "running" again (after a rebuild, which is stop-then-start
+ *  and keeps them) reloads them. Stop closes them in SystemController.stop(). */
+function wirePageTabs(launcher) {
+  launcher.on("state", (state) => {
+    if (state === "running") void reloadPageTabs(launcher.port);
+  });
+  launcher.on("exit", () => closePageTabs());
+}
+
+/** The details panel's "$metadata" / "in browser" links. */
+async function openDetailsMetadata(item, message) {
+  await openServiceMetadata(item, message?.where === "browser" ? "browser" : "default");
+}
+
+/** The system is serving again after a rebuild: each open page tab loads its
+ *  page anew (the new generation), moved to the new port if the port
+ *  changed, the way a person would reload a browser tab. */
+async function reloadPageTabs(port) {
+  for (const [url, panel] of [...pageTabs]) {
+    let next = url;
+    try {
+      const u = new URL(url);
+      if ((u.hostname === "localhost" || u.hostname === "127.0.0.1") && port !== undefined && u.port !== String(port)) {
+        u.port = String(port);
+        next = u.toString();
+      }
+    } catch {
+      continue;
+    }
+    if (next !== url) {
+      pageTabs.delete(url);
+      pageTabs.set(next, panel);
+    }
+    let external;
+    try {
+      external = await vscode.env.asExternalUri(vscode.Uri.parse(next));
+    } catch {
+      external = vscode.Uri.parse(next);
+    }
+    panel.webview.html = iframePanelHtml(external.toString(), panel.title ?? next);
+  }
 }
 
 /** The commands that open a page of the running system, registered in one
@@ -1467,7 +1512,8 @@ async function openPage(url, {title, panelType = "osdPage", where = "default"} =
   const panel = await openInWebview(url, panelType, title ?? url);
   pageTabs.set(url, panel);
   panel.onDidDispose(() => {
-    if (pageTabs.get(url) === panel) pageTabs.delete(url);
+    // by panel, not by URL: a rebuild may have moved it to another port
+    for (const [key, open] of pageTabs) if (open === panel) pageTabs.delete(key);
   });
   return panel;
 }
@@ -1688,7 +1734,7 @@ function ensureDetailsPanel(output) {
       return;
     }
     if (message?.command === "openMetadata") {
-      await openServiceMetadata(serviceDetailsItem, message.where === "browser" ? "browser" : "default");
+      await openDetailsMetadata(serviceDetailsItem, message);
       return;
     }
     if (message?.command !== "openSource") return;
@@ -3597,4 +3643,5 @@ async function deactivate() {
 }
 
 module.exports = {activate, deactivate, SystemController, testExplorer, OsdTreeProvider, TransactionItem, EntitySetItem,
-  transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs};
+  transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,
+  wirePageTabs, openDetailsMetadata};

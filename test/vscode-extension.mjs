@@ -3,6 +3,7 @@
 // answer means per method. The live half, against a real server, is in
 // test/osd-child.mjs.
 import {expect} from "chai";
+import {EventEmitter as NodeEventEmitter} from "node:events";
 import express from "express";
 import {mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -579,6 +580,8 @@ describe("editors/vscode: the extension's logic", function () {
       "http://localhost:3542/app/flp.html",
     ]);
     expect(api.panels[0].webview.html).to.contain("http://localhost:3542/app/flp.html");
+    expect(api.panels.find((panel) => panel.args[0] === "osdSystemOverview").args[3].enableCommandUris)
+      .to.include.members(["osd.openLaunchpad", "osd.openLaunchpadExternal"]);
   });
 
   it("keeps the quick-start preset, DX2 home rule, and state menus in pure logic", () => {
@@ -1701,7 +1704,12 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
       ["osd.openServiceRowExternal", "osd-service-app"]]) {
       const entries = items.filter((m) => m.command === external && m.when.includes(node));
       expect(entries.map((m) => m.group.split("@")[0]).sort(), external).to.deep.equal(["1_open", "inline"]);
-      expect(commands.get(external)).to.include({title: "Open in External Browser", icon: "$(link-external)"});
+      expect(commands.get(external).icon).to.equal("$(link-external)");
+      expect(commands.get(external).title).to.match(/in External Browser$/);
+    }
+    const palette = manifest.contributes.menus.commandPalette;
+    for (const command of ["osd.openHostDoorExternal", "osd.openServiceRowExternal", "osd.openServiceMetadataExternal"]) {
+      expect(palette.find((m) => m.command === command)?.when, command).to.equal("false");
     }
     expect(items.some((m) => m.command === "osd.openServiceMetadataExternal")).to.equal(true);
   });
@@ -1745,6 +1753,49 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     const third = await openPage("http://localhost:3591/osd/serving");
     expect(api.panels).to.have.lengthOf(4);
     expect(third.disposed).to.equal(false);
+  });
+
+  it("page tabs: a rebuild reloads them (on a new port too), Stop and an unasked exit close them", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {openPage, wirePageTabs, SystemController} = loadExtension(api);
+    const launcher = new NodeEventEmitter();
+    launcher.port = 3591;
+    wirePageTabs(launcher);
+    const tab = await openPage("http://localhost:3591/app/flp.html", {title: "Fiori Launchpad"});
+    tab.title = "Fiori Launchpad";
+    const before = tab.webview.html;
+    // rebuild: stop, then start on another port -- the tab stays and follows
+    launcher.emit("state", "stopped");
+    launcher.port = 3592;
+    launcher.emit("state", "running");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(tab.disposed).to.equal(false);
+    expect(tab.webview.html).to.not.equal(before);
+    expect(tab.webview.html).to.contain("http://localhost:3592/app/flp.html");
+    // the moved tab is found under its new URL
+    expect(await openPage("http://localhost:3592/app/flp.html")).to.equal(tab);
+    // an exit nobody asked for closes it
+    launcher.emit("exit", {code: 1});
+    expect(tab.disposed).to.equal(true);
+    // and Stop closes whatever is open
+    const again = await openPage("http://localhost:3592/osd/serving");
+    const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
+    controller.launcher = {stop: async () => {}};
+    await controller.stop();
+    expect(again.disposed).to.equal(true);
+  });
+
+  it("the details panel's $metadata links: a tab by default, the browser for 'in browser'", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {openDetailsMetadata} = loadExtension(api);
+    const item = {row: {kind: "ODATA", path: "/sap/opu/odata/sap/ZLEAF", name: "Leaf"}};
+    await openDetailsMetadata(item, {command: "openMetadata", where: "default"});
+    expect(api.panels.map((panel) => panel.args[0])).to.deep.equal(["osdServiceMetadata"]);
+    await openDetailsMetadata(item, {command: "openMetadata", where: "browser"});
+    expect(api.externalOpens).to.have.lengthOf(1);
+    // a transaction's details carry no service: nothing opens
+    await openDetailsMetadata(undefined, {command: "openMetadata"});
+    expect(api.panels).to.have.lengthOf(1);
   });
 
   it("keeps entity-set and entity clicks separate for the same DPC and set", async () => {
@@ -2096,6 +2147,7 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     // Q7: the $metadata link asks the extension (a VS Code tab by osd.openIn), with a browser twin
     expect(html).to.contain('data-metadata="default"').and.to.contain('data-metadata="browser"');
     expect(html).to.not.contain('target="_blank"');
+    expect(html).to.contain('closest("[data-metadata]")').and.to.contain('command:"openMetadata"');
   });
 });
 

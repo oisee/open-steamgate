@@ -217,7 +217,7 @@
       {"command": "osd.openSystemLog", "title": "osd: Open system log"},
       {"command": "osd.openLaunchpad", "title": "osd: Open launchpad", "icon": "$(rocket)"},
       {"command": "osd.openLaunchpadInVsCode", "title": "osd: Open launchpad inside VS Code"},
-      {"command": "osd.openLaunchpadExternal", "title": "Open in External Browser", "category": "osd", "icon": "$(link-external)"},
+      {"command": "osd.openLaunchpadExternal", "title": "Open launchpad in External Browser", "category": "osd", "icon": "$(link-external)"},
       {"command": "osd.openHostDoorExternal", "title": "Open in External Browser", "icon": "$(link-external)"},
       {"command": "osd.openServiceMetadataExternal", "title": "Open $metadata in External Browser", "icon": "$(link-external)"},
       {"command": "osd.refreshTree", "title": "osd: Refresh the view (no rebuild)", "icon": "$(refresh)"},

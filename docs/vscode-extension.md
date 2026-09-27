@@ -669,8 +669,9 @@ Browser" context item always use the browser, and "osd: Open launchpad
 inside VS Code" (the palette) always a tab. The System overview's
 "Open launchpad" / "Open in browser" buttons and the service details'
 `$metadata` / "in browser" links take the same two routes. Page tabs close
-when the system stops: the page they show is gone, and after a restart the
-same URL may be another generation; a second, new status bar item
+on Stop and when the system exits unasked (the page is gone); a rebuild,
+which is stop-then-start, keeps them and reloads each once the system
+serves again, on the new port if it moved; a second, new status bar item
 (▶ / ■, left of the existing generation display, which assumes something
 is already serving) starts or stops the one `Launcher` this window
 drives, and the editor-title button on `.abap` files is `osd.run` (F8's
@@ -911,8 +912,11 @@ rows offer no Run action.
 Leaf rows act on one click: source leaves open files, URL leaves open pages,
 and the SQL door opens its notebook. Expandable rows show details on one
 click and use the 400 ms second-click classifier for navigation. Inline
-buttons and context-menu commands act immediately. Browser-opening leaves
-say so in their tooltips.
+buttons and context-menu commands act immediately. A page-opening leaf's
+tooltip says where a click goes (it follows `osd.openIn`). "Reveal the same
+tab" below is the default; with `osd.openIn: browser` a second click opens
+the browser again. Easy Access transactions (Run) keep their own
+`osdWebgui` tabs and are not part of this rule.
 
 | Node kind | Single click | Second click within 400 ms |
 | --- | --- | --- |
