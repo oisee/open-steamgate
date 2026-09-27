@@ -104,8 +104,7 @@ function vsixPacks(env = process.env) {
   if (!["default", "marketplace", "web-probe"].includes(profile)) throw new Error(`build-vsix: unknown OSD_VSIX_PROFILE: ${profile}`);
   const names = env.OSD_VSIX_PACKS !== undefined
     ? (env.OSD_VSIX_PACKS.trim() ? env.OSD_VSIX_PACKS.split(",").map((name) => name.trim()) : [])
-    : profile === "marketplace" ? [] : ["zork"];
-  if (profile === "marketplace" && names.includes("zork")) throw new Error("build-vsix: Marketplace profile cannot include Zork");
+    : ["zork"];
   const selected = [];
   for (const name of names) {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {

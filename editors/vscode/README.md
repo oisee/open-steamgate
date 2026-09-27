@@ -29,6 +29,6 @@ VS Code 1.101 or newer is required. The system runs locally on desktop or in a R
 
 - Portable AMDP support is limited. HANA-specific SQLScript needs HANA, and some methods are not portable to SQLite.
 - Warm rebuild requires upstream transpiler fixes [#1900](https://github.com/abaplint/transpiler/pull/1900) and [#1921](https://github.com/abaplint/transpiler/pull/1921) to be released. Until then activation uses the cold build path.
-- The Marketplace build has no browser extension entry or Zork pack. The separate web gateway probe remains a development experiment.
+- The Marketplace build has no browser extension entry. The separate web gateway probe remains a development experiment.
 
 The extension is MIT licensed. Bundled dependency declarations and licence review items are in `THIRD-PARTY-NOTICES.md` inside the VSIX.

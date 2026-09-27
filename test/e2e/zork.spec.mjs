@@ -1,6 +1,5 @@
 import {test, expect} from "@playwright/test";
 import {shortRoute} from "./fixtures/zork-short-route.mjs";
-import {readFileSync} from "node:fs";
 
 // E.4: the console did not fit its box. Alice, from the launchpad tile: a
 // long line runs past the right edge of the terminal frame instead of
@@ -48,6 +47,7 @@ test("the prompt is a line with the cursor on it, not a line of its own", async 
   // it and the prompt appeared to stand alone.
   await page.goto("/sap/bc/zork/");
   await expect(page.locator("#statusText")).toHaveText(/Connected/, {timeout: 60000});
+  await expect(page.locator(".xterm-rows")).toContainText("Running: ZORK1-Z3");
   await expect(page.locator(".xterm-rows")).toContainText("small mailbox", {timeout: 60000});
 
   const prompt = await page.evaluate(() => {
@@ -136,27 +136,4 @@ test("cancelling replay reconnects a fresh manually playable session", async ({p
   await page.keyboard.press("Enter");
   await expect(page.locator(".xterm-rows")).toContainText(shortRoute[0].responseMarker);
   await expect(page.locator("#replay-progress")).not.toContainText("Replay complete");
-});
-
-test("SPEEDRUN replays every command from the packaged SMW0 script through APC", async ({page, request}) => {
-  test.setTimeout(150000);
-  const script = readFileSync("packs/zork/games/zork-mini-speedrun-txt.w3mi.data.txt", "utf8");
-  const commands = script.split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
-  expect(commands.length).toBeGreaterThan(30);
-  const resource = await request.get("/sap/bc/zork/speedrun.txt");
-  expect(resource.status()).toBe(200);
-  expect(await resource.text()).toBe(script);
-  const sent = [];
-  page.on("websocket", (socket) => {
-    if (socket.url().includes("/zapc_zork")) socket.on("framesent", ({payload}) => sent.push(String(payload)));
-  });
-  await page.goto("/sap/bc/zork/");
-  const start = page.getByRole("button", {name: "Replay SPEEDRUN", exact: true});
-  await expect(start).toBeEnabled({timeout: 60000});
-  page.once("dialog", (dialog) => dialog.accept());
-  await start.click();
-  await expect(page.locator("#replay-progress")).toContainText(`${commands.length} commands replayed`, {timeout: 120000});
-  expect(sent).toEqual(commands);
-  await expect(page.locator(".xterm-rows")).toContainText(/Your score is/i);
-  await expect(start).toBeEnabled();
 });

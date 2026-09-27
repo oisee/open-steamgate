@@ -1,7 +1,8 @@
 # VS Code prerelease
 
 For a local Marketplace candidate, run `npm run vsix:marketplace` after
-`npm run bootstrap`. This profile omits the Zork pack and the browser entry,
+`npm run bootstrap`. This profile includes the Zork pack with its Zork I story
+rebuilt from Microsoft's MIT source release, omits the browser entry,
 adds the VS Code prerelease manifest property, and writes staged
 `THIRD-PARTY-NOTICES.md`. Review the build's `LICENSE REVIEW` lines before
 uploading anything. This command does not publish; the release workflow below
