@@ -42,7 +42,7 @@
 //     the local carrier, not a claim about SAP.
 import {existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve} from "node:path";
-import {checkAppName, manifestFor} from "./osd-bsp-app.mjs";
+import {checkAppName, manifestFor, manifestRebased} from "./osd-bsp-app.mjs";
 import {generatorFoldersOf, packsOf, winningByLayer} from "./osd-packs.mjs";
 import {runsAs} from "./osd-main.mjs";
 
@@ -187,7 +187,13 @@ export function packApps(root = ".", env = process.env) {
       app,
       text: `pack ${pack}`,
       file: manifest,
-      pages: pages.map((page) => ({page, mime: mimeOf(page), content: readFileSync(join(at, page))})),
+      pages: pages.map((page) => ({
+        page,
+        mime: mimeOf(page),
+        content: page.endsWith("manifest.json")
+          ? Buffer.from(manifestRebased(readFileSync(join(at, page), "utf8")))
+          : readFileSync(join(at, page)),
+      })),
       missing: [],
     });
   }

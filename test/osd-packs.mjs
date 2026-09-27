@@ -113,6 +113,21 @@ describe("tools/osd-packs: a pack is a directory", () => {
     expect(packNodes(root, env).map((node) => node.path)).to.deep.equal(["/app/direct", "/app/vibes"]);
   });
 
+  it("rebases each pack OData source in the generated BSP manifest page", () => {
+    write("packs/vibes/webapp/manifest.json", JSON.stringify({"sap.app": {dataSources: {
+      first: {type: "OData", uri: "../../sap/opu/odata/sap/FIRST_SRV/"},
+      second: {type: "OData", uri: "/sap/opu/odata/sap/SECOND_SRV/"},
+      annotation: {type: "ODataAnnotation", uri: "/sap/opu/odata/sap/ANNO_SRV/"},
+      unnamed: {type: "OData", uri: "../../sap/opu/odata/sap/"},
+    }}}));
+    const page = packApps(root, {}).find((app) => app.app === "ZVIBES").pages.find((item) => item.page === "manifest.json");
+    const sources = JSON.parse(page.content.toString("utf8"))["sap.app"].dataSources;
+    expect(sources.first.uri).to.equal("../../../../opu/odata/sap/FIRST_SRV/");
+    expect(sources.second.uri).to.equal("../../../../opu/odata/sap/SECOND_SRV/");
+    expect(sources.annotation.uri).to.equal("/sap/opu/odata/sap/ANNO_SRV/");
+    expect(sources.unnamed.uri).to.equal("../../sap/opu/odata/sap/");
+  });
+
   it("refuses two webapp packs whose names collide at the BSP 15 character limit", () => {
     write("packs/first/osd-pack.json", JSON.stringify({name: "long-workspace-one"}));
     write("packs/first/webapp/index.html", "first");
