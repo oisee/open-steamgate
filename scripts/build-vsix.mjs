@@ -4,7 +4,7 @@
 // system `zip` CLI, not `vsce` -- of `[Content_Types].xml`,
 // `extension.vsixmanifest` (both generated from `editors/vscode/package.json`
 // the way vsce does) and an `extension/` folder holding the extension itself
-// plus a runnable system tree at `extension/osd/`.
+// plus a solid Brotli tar seed at `extension/osd/seed.tar.br`.
 //
 // What goes into `extension/osd/` is exactly what `node test/run.mjs` needs
 // at run time, found by tracing rather than guessing. **`output/` is NOT
@@ -76,6 +76,9 @@
 // produced and the trims proposed if the total ever creeps back up.
 import {execFileSync} from "node:child_process";
 import {createRequire} from "node:module";
+import {createReadStream, createWriteStream} from "node:fs";
+import {pipeline} from "node:stream/promises";
+import {createBrotliCompress, constants as zlibConstants} from "node:zlib";
 import {
   cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,
   realpathSync, rmSync, statSync, writeFileSync,
@@ -89,9 +92,9 @@ import {packAt} from "../tools/osd-packs.mjs";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const EXT_DIR = join(ROOT, "editors", "vscode");
 const BUILD_DIR = join(ROOT, "build", "vsix");
-const STAGE = join(BUILD_DIR, "stage");
 let minimatch;
-const {writeSeedId} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
+const require = createRequire(import.meta.url);
+const {writeSeedId, writeTar} = require("../editors/vscode/launcher.js");
 
 /** Only named in-tree packs can enter the seed. An empty override means the
  * default; an unknown name is a typo, not a silently smaller package. */
@@ -157,10 +160,9 @@ function copyReal(src, dest, options = {}) {
   cpSync(real, dest, {recursive: true, dereference: true, ...options});
 }
 
-/** Make the staged seed match what `zip -r` actually ships. In particular,
- *  a locally built transpiler has nested node_modules/.bin symlinks. zip
- *  follows those links into regular files, so hashing the links themselves
- *  would record a different tree from the one installed from the .vsix. */
+/** Make the staged seed match the regular files in the archive. In
+ *  particular, a locally built transpiler has nested node_modules/.bin
+ *  symlinks that must be materialized before hashing or archiving. */
 function materializeSeedLinks(seedRoot) {
   const visit = (dir, activeTargets = new Set()) => {
     for (const name of readdirSync(dir)) {
@@ -357,6 +359,17 @@ function copySeedTree(seedRoot, selectedPacks) {
   }
   log(`node_modules: ${modules.length} packages traced from package-lock.json`);
 
+  // These are dependency distribution maps. The ABAP debugger's maps are
+  // generated in output/ on first start, which is not part of this seed.
+  const dropMaps = (dir) => {
+    for (const entry of readdirSync(dir, {withFileTypes: true})) {
+      const file = join(dir, entry.name);
+      if (entry.isDirectory()) dropMaps(file);
+      else if (entry.name.endsWith(".map")) rmSync(file);
+    }
+  };
+  dropMaps(join(seedRoot, "node_modules"));
+
   return modules;
 }
 
@@ -428,7 +441,7 @@ function vsixManifestXml(pkg) {
 
 // ---- entry point ------------------------------------------------------------
 
-export async function buildVsix(env = process.env) {
+export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
   requireSupportedNode(process.versions.node, "build-vsix: ");
   const preflight = describeVsixPreflight(vsixPreflightMissing(ROOT));
   if (preflight !== undefined) {
@@ -440,13 +453,22 @@ export async function buildVsix(env = process.env) {
   const {describeUnfetched} = await import("../tools/osd-fetch.mjs");
   const selectedPacks = vsixPacks(env);
 
-  rmSync(STAGE, {recursive: true, force: true});
-  mkdirSync(STAGE, {recursive: true});
+  const qualityText = env.OSD_VSIX_BROTLI_QUALITY;
+  const quality = qualityText === undefined ? 5 : Number(qualityText);
+  if ((qualityText !== undefined && !/^(?:[0-9]|10|11)$/.test(String(qualityText))) ||
+      !Number.isInteger(quality) || quality < 0 || quality > 11) {
+    throw new Error("build-vsix: OSD_VSIX_BROTLI_QUALITY must be an integer from 0 to 11");
+  }
+  const buildDir = resolve(outputDir);
+  const stage = join(buildDir, "stage");
+  rmSync(stage, {recursive: true, force: true});
+  mkdirSync(stage, {recursive: true});
 
-  const extensionDir = join(STAGE, "extension");
+  const extensionDir = join(stage, "extension");
   copyExtensionFiles(extensionDir);
   const {pkg, dirty} = stampStagedPackage(join(extensionDir, "package.json"));
-  const seedRoot = join(extensionDir, "osd");
+  const seedRoot = join(buildDir, "seed-stage");
+  rmSync(seedRoot, {recursive: true, force: true});
   // **An unfetched pack refuses the package, not the user's first start.**
   // A selected pack whose sources were never fetched would make every
   // install's first build refuse with UNFETCHED. Other packs do not ship.
@@ -460,17 +482,28 @@ export async function buildVsix(env = process.env) {
   const modules = copySeedTree(seedRoot, selectedPacks);
   materializeSeedLinks(seedRoot);
   const seedId = writeSeedId(seedRoot);
+  const archiveDir = join(extensionDir, "osd");
+  mkdirSync(archiveDir, {recursive: true});
+  const tarFile = join(buildDir, "seed.tar");
+  writeTar(seedRoot, tarFile);
+  const tarSize = statSync(tarFile).size;
+  await pipeline(createReadStream(tarFile), createBrotliCompress({params: {
+    [zlibConstants.BROTLI_PARAM_QUALITY]: quality,
+    [zlibConstants.BROTLI_PARAM_SIZE_HINT]: tarSize,
+  }}), createWriteStream(join(archiveDir, "seed.tar.br")));
+  rmSync(tarFile);
+  writeFileSync(join(archiveDir, ".seed-id"), `${seedId}\n`);
   log(`seed ID: ${seedId}`);
   if (dirty) {
     log(`dirty tree: version ${pkg.version} + seed ${seedId}`);
   }
 
-  writeFileSync(join(STAGE, "[Content_Types].xml"), contentTypesXml());
-  writeFileSync(join(STAGE, "extension.vsixmanifest"), vsixManifestXml(pkg));
+  writeFileSync(join(stage, "[Content_Types].xml"), contentTypesXml());
+  writeFileSync(join(stage, "extension.vsixmanifest"), vsixManifestXml(pkg));
 
-  const out = join(BUILD_DIR, `osd-vscode-${pkg.version}.vsix`);
+  const out = join(buildDir, `osd-vscode-${pkg.version}.vsix`);
   rmSync(out, {force: true});
-  execFileSync("zip", ["-X", "-q", "-r", out, "[Content_Types].xml", "extension.vsixmanifest", "extension"], {cwd: STAGE});
+  execFileSync("zip", ["-X", "-q", "-r", out, "[Content_Types].xml", "extension.vsixmanifest", "extension"], {cwd: stage});
 
   const breakdown = {
     // no output/ entry: not shipped (fallback (b), see the top-of-file
@@ -480,7 +513,7 @@ export async function buildVsix(env = process.env) {
     "src/ + webapp/ + tools/ + test/ + data/": ["src", "webapp", "tools", "test", "data"]
       .reduce((sum, d) => sum + dirSizeBytes(join(seedRoot, d)), 0),
     ".local/lars/ (library sources)": dirSizeBytes(join(seedRoot, ".local")),
-    "extension.js/lib.js/launcher.js/resources/examples": dirSizeBytes(extensionDir) - dirSizeBytes(seedRoot),
+    "extension.js/lib.js/launcher.js/resources/examples": dirSizeBytes(extensionDir) - dirSizeBytes(archiveDir),
   };
   const unpackedTotal = Object.values(breakdown).reduce((a, b) => a + b, 0);
   const vsixSize = statSync(out).size;

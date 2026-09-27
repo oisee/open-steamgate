@@ -87,7 +87,7 @@ function workspaceDescriptors() {
  *  checkout, `docs/vscode-extension.md`'s "remote/WSL note") never has. */
 function bundledSeedDir(context) {
   const dir = path.join(context.extensionUri.fsPath, "osd");
-  return fs.existsSync(path.join(dir, "test", "run.mjs")) ? dir : undefined;
+  return fs.existsSync(path.join(dir, "seed.tar.br")) || fs.existsSync(path.join(dir, "test", "run.mjs")) ? dir : undefined;
 }
 
 function bundledHomeDir(context, seedDir) {
@@ -219,7 +219,7 @@ async function resolveStartTarget(context, launcher) {
   }
 
   if (target.kind === "ready" && target.source === "bundled") {
-    target.osdHome = materializeBundledHome(context, seedDir, launcher);
+    target.osdHome = await materializeBundledHome(context, seedDir, launcher);
   }
   return target;
 }
@@ -493,7 +493,7 @@ class SystemController {
       throw new Error("osd.home is not set, and this window has no single workspace folder to default to");
     }
     const osdHome = choice.kind === "bundled copy" && choice.materialized !== true
-      ? materializeBundledHome(this.context, choice.seedDir, this.launcher)
+      ? await materializeBundledHome(this.context, choice.seedDir, this.launcher)
       : choice.path;
     this.homeSource = choice.source;
     if (this.launcher !== undefined && this.launcher.osdHome === osdHome && this.launcher.state !== "stopped") {
