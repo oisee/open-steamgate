@@ -136,6 +136,17 @@ describe("tools/osd-packs: a pack is a directory", () => {
     expect(packsOf(root, {}).map((p) => p.name)).to.deep.equal(["early", "also", "vibes"]);
   });
 
+  it("selects only requested web packs across the build inputs", () => {
+    write("packs/early/osd-pack.json", JSON.stringify({order: 10}));
+    write("packs/early/src/zcl_early.clas.abap", CLASS("zcl_early"));
+    expect(packsOf(root, {OSD_WEB_PACKS: ""})).to.deep.equal([]);
+    expect(packsOf(root, {OSD_WEB_PACKS: "vibes"}).map((pack) => pack.name)).to.deep.equal(["vibes"]);
+    expect(inputFoldersOf(root, {input_folder: ["src", "gen"]}, {OSD_WEB_PACKS: "vibes"}))
+      .to.deep.equal(["src", "packs/vibes/src", "gen"]);
+    expect(dataDirsOf(root, {OSD_WEB_PACKS: ""})).to.deep.equal([]);
+    expect(packsOf(root, {OSD_WEB_PACKS: "all"}).map((pack) => pack.name)).to.deep.equal(["early", "vibes"]);
+  });
+
   it("finds a pack outside the tree, named on its own or by the directory that holds it", () => {
     mkdirSync(join(outside, "away", "src"), {recursive: true});
     writeFileSync(join(outside, "away", "osd-pack.json"), JSON.stringify({name: "away"}));
