@@ -16,6 +16,13 @@ export function schemaTables(ddl) {
     [...String(statement).matchAll(/\bCREATE\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map((match) => match[1].toUpperCase()));
 }
 
+// HANA's execute opens a transaction even for the DELETE in a reseed.
+export async function reseedExistingHana(db) {
+  const {reseedPackRows} = await import("./seed.mjs");
+  await reseedPackRows(db);
+  await db.commit();
+}
+
 async function requireCurrentSchema(db, ddl, backend, recovery) {
   const missing = await db.missingTables(schemaTables(ddl));
   if (missing.length === 0) return;
@@ -152,7 +159,7 @@ export async function setup(abap, schemas, insert) {
     installStoreDestination(abap);
     return;
   }
-  const {seedStatements} = await import("./seed.mjs");
+  const {seedStatements, reseedPackRows} = await import("./seed.mjs");
   // CALL FUNCTION ... DESTINATION: .local/rfc-destinations.json says which
   // name is local, replay, live or record (tools/rfc-replay.mjs); without
   // it 'NONE' and '' run here and any other name replays STG_RFC_CAPTURE
@@ -177,7 +184,10 @@ export async function setup(abap, schemas, insert) {
     await db.connect();
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     abap.builtin.sy.get().dbsys?.set(db.name);
-    if (await db.hasSchema(schemas.pg)) return;
+    if (await db.hasSchema(schemas.pg)) {
+      await reseedPackRows(db);
+      return;
+    }
     await db.beginTransaction();
     try {
       await db.execute(schemas.pg);
@@ -228,6 +238,7 @@ export async function setup(abap, schemas, insert) {
       // The DuckDB branch above already gets this right.
       const {refuseUnmigratedHana} = await import("../tools/osd-db-migrate.mjs");
       await refuseUnmigratedHana({query: (sql) => db.query(sql)}, db.schema);
+      await reseedExistingHana(db);
       return;
     }
     await db.execute(hanaSchema(schemas, ddicBinary));
@@ -261,6 +272,7 @@ export async function setup(abap, schemas, insert) {
       // repository catalog must follow the running generation. Otherwise a
       // new BSP page is in the registry while its WWWPARAMS object is absent.
       await upsertGeneratedMetadata(db, insert);
+      await reseedPackRows(db);
       return;
     }
     await db.execute(duckdbSchema(schemas));
@@ -313,6 +325,7 @@ export async function setup(abap, schemas, insert) {
       // follow it: an object a pack added since this file was made is put
       // in, one the pack dropped is taken out.
       await refreshGenerated(db, insert);
+      await reseedPackRows(db);
       return;
     }
     if (found !== undefined || existsSync(path) && (await db.query("SELECT COUNT(*) AS n FROM sqlite_master"))[0]?.n > 0) {
@@ -362,6 +375,7 @@ export async function setup(abap, schemas, insert) {
   const restored = await loadInto(db, schemas.sqlite);
   saveWhenAsked(db);
   if (restored === true) {
+    await reseedPackRows(db);
     return;
   }
   await db.execute(schemas.sqlite);

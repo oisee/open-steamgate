@@ -4,7 +4,7 @@
 // DDIC length because the runtime stores them padded (Character.set pads).
 // No abapGit dependency: the JSON is a plain array of row objects.
 import {readdirSync, readFileSync} from "node:fs";
-import {dataDirsOf, ddicDirsOf} from "../tools/osd-packs.mjs";
+import {dataDirsOf, ddicDirsOf, packsOf} from "../tools/osd-packs.mjs";
 import {join} from "node:path";
 
 function fieldLengths(tablXml) {
@@ -65,8 +65,19 @@ function quote(value, pad, isDate = false, hex = 0) {
   return "'" + s.replaceAll("'", "''") + "'";
 }
 
-// Every folder of seed rows, the tree's own and each pack's, in layer order
-// so a pack's rows for a table it shares are inserted after (backlog E.2).
+// A later layer owns the entire table, including when its capture is empty.
+// Resolve owners once so fresh seeding and reseeding choose identical rows.
+function ownedTables(root) {
+  const owners = new Map();
+  for (const dir of dataDirsOf(root)) {
+    for (const file of readdirSync(dir).sort()) {
+      if (file.endsWith(".tabu.json")) owners.set(file.slice(0, -".tabu.json".length).toLowerCase(), dir);
+    }
+  }
+  return owners;
+}
+
+// Every table is inserted from its final owner only.
 // Called with a folder it seeds only that one, which is what the tools do.
 export function seedStatements(dataDir, ddicDir) {
   if (dataDir !== undefined) {
@@ -74,16 +85,45 @@ export function seedStatements(dataDir, ddicDir) {
   }
   const root = process.env.OSD_ROOT ?? process.cwd();
   const ddic = ddicDirsOf(root);
-  return dataDirsOf(root).flatMap((dir) => seedFrom(dir, ddic));
+  const owners = ownedTables(root);
+  return dataDirsOf(root).flatMap((dir) => seedFrom(dir, ddic, owners));
 }
 
-function seedFrom(dataDir, ddicDirs) {
+// A pack owns every table named by its TABU captures. On an existing DB,
+// replace those tables' rows from the current captures at every start.
+export async function reseedPackRows(db) {
+  const root = process.env.OSD_ROOT ?? process.cwd();
+  const owners = ownedTables(root);
+  const packDirs = new Set(packsOf(root).map((pack) => pack.data).filter(Boolean));
+  const ddic = ddicDirsOf(root);
+  const tables = [...owners.keys()].filter((table) => packDirs.has(owners.get(table)));
+  let missing = [];
+  if (db.missingTables) {
+    missing = await db.missingTables(tables);
+  } else if (db.select) {
+    const result = await db.select({select: "SELECT name FROM sqlite_master WHERE type = 'table'"});
+    const present = new Set(result.rows.map((row) => String(row.name).toLowerCase()));
+    missing = tables.filter((table) => !present.has(table));
+  }
+  const absent = new Set(missing.map((table) => String(table).toLowerCase()));
+  for (const [table, dir] of owners) {
+    if (!/^[a-z0-9_]+$/i.test(table)) throw new Error(`invalid seed table ${table}`);
+    if (packDirs.has(dir) && !absent.has(table)) await db.execute(`DELETE FROM "${table}";`);
+  }
+  for (const dir of dataDirsOf(root)) {
+    if (packDirs.has(dir)) await db.execute(seedFrom(dir, ddic, owners, absent));
+  }
+}
+
+function seedFrom(dataDir, ddicDirs, owners, absent = new Set()) {
   const statements = [];
   for (const file of readdirSync(dataDir).sort()) {
     if (!file.endsWith(".tabu.json")) {
       continue;
     }
     const table = file.slice(0, -".tabu.json".length).toLowerCase();
+    if (owners && owners.get(table) !== dataDir) continue;
+    if (absent.has(table)) continue;
     const rows = JSON.parse(readFileSync(join(dataDir, file), "utf8"));
     let lengths = new Map();
     for (const dir of ddicDirs) {

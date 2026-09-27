@@ -96,6 +96,12 @@ export class OsdPostgresClient extends PostgresDatabaseClient {
     return true;
   }
 
+  async missingTables(expected) {
+    const result = await this.select({select: "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"});
+    const found = new Set(result.rows.map((row) => String(row.table_name).toUpperCase()));
+    return expected.filter((name) => !found.has(String(name).toUpperCase()));
+  }
+
   async stamp(schema) {
     await this.execute('CREATE TABLE osd_schema (fingerprint CHAR(16) NOT NULL)');
     await this.execute(`INSERT INTO osd_schema (fingerprint) VALUES ('${fingerprintOf(schema)}')`);

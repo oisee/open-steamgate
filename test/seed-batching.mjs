@@ -1,9 +1,110 @@
 import {expect} from "chai";
-import {readdirSync, readFileSync} from "node:fs";
+import {mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {SQLiteDatabaseClient} from "@abaplint/database-sqlite";
 import {join} from "node:path";
-import {seedStatements} from "./seed.mjs";
+import {reseedPackRows, seedStatements} from "./seed.mjs";
 import {dataDirsOf} from "../tools/osd-packs.mjs";
-import {schemaTables} from "./setup.mjs";
+import {save} from "../tools/osd-persist.mjs";
+import {reseedExistingHana, schemaTables, setup} from "./setup.mjs";
+
+describe("pack table ownership on fresh and existing databases", () => {
+  let root;
+  let priorRoot;
+  let priorAbap;
+  let priorPath;
+  let priorBackend;
+  let processListeners;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "osd-seed-owners-"));
+    priorRoot = process.env.OSD_ROOT;
+    priorAbap = globalThis.abap;
+    priorPath = process.env.STG_DB_PATH;
+    priorBackend = process.env.STG_DB;
+    processListeners = new Map(["beforeExit", "exit", "SIGTERM", "SIGINT"]
+      .map((event) => [event, new Set(process.listeners(event))]));
+    delete process.env.STG_DB;
+    process.env.OSD_ROOT = root;
+    globalThis.abap = {};
+    for (const [name, order, rows] of [["early", 10, [{id: "1", value: "early"}, {id: "2", value: "old"}]],
+      ["later", 20, [{id: "1", value: "later"}]]]) {
+      const dir = join(root, "packs", name);
+      mkdirSync(join(dir, "data"), {recursive: true});
+      writeFileSync(join(dir, "osd-pack.json"), JSON.stringify({name, order}));
+      writeFileSync(join(dir, "data", "zshared.tabu.json"), JSON.stringify(rows));
+    }
+  });
+  afterEach(() => {
+    for (const [event, originals] of processListeners) {
+      for (const listener of process.listeners(event)) {
+        if (!originals.has(listener)) process.removeListener(event, listener);
+      }
+    }
+    if (priorRoot === undefined) delete process.env.OSD_ROOT;
+    else process.env.OSD_ROOT = priorRoot;
+    if (priorAbap === undefined) delete globalThis.abap;
+    else globalThis.abap = priorAbap;
+    if (priorPath === undefined) delete process.env.STG_DB_PATH;
+    else process.env.STG_DB_PATH = priorPath;
+    if (priorBackend === undefined) delete process.env.STG_DB;
+    else process.env.STG_DB = priorBackend;
+    rmSync(root, {recursive: true, force: true});
+  });
+
+  it("lets the later pack own all rows on first start and each restart, without duplicate keys", async () => {
+    const db = new SQLiteDatabaseClient();
+    await db.connect();
+    await db.execute('CREATE TABLE zshared (id TEXT PRIMARY KEY, value TEXT);');
+    await db.execute(seedStatements());
+    const rows = async () => (await db.select({select: 'SELECT id, value FROM zshared ORDER BY id'})).rows;
+    expect(await rows()).to.deep.equal([{id: "1", value: "later"}]);
+    await db.execute("INSERT INTO zshared VALUES ('2', 'user');");
+    await reseedPackRows(db);
+    expect(await rows()).to.deep.equal([{id: "1", value: "later"}]);
+    await reseedPackRows(db);
+    expect(await rows()).to.deep.equal([{id: "1", value: "later"}]);
+  });
+
+  it("skips a pack table absent from an older database and still reseeds present tables", async () => {
+    writeFileSync(join(root, "packs", "later", "data", "zmissing.tabu.json"), JSON.stringify([{id: "1"}]));
+    const db = new SQLiteDatabaseClient();
+    await db.connect();
+    await db.execute('CREATE TABLE zshared (id TEXT PRIMARY KEY, value TEXT);');
+    await db.execute("INSERT INTO zshared VALUES ('1', 'stale');");
+    await reseedPackRows(db);
+    expect((await db.select({select: 'SELECT value FROM zshared'})).rows).to.deep.equal([{value: "later"}]);
+  });
+
+  it("commits HANA's reseed transaction so a second session can see its rows", async () => {
+    const pending = [];
+    const visible = [];
+    const db = {
+      execute: async (sql) => { pending.push(...[sql].flat()); },
+      commit: async () => { visible.push(...pending.splice(0)); },
+    };
+    await reseedExistingHana(db);
+    expect(pending).to.deep.equal([]);
+    expect(visible).to.deep.equal(['DELETE FROM "zshared";', ...seedStatements()]);
+  });
+
+  it("reseeds pack tables when setup restores a SQLite database", async () => {
+    process.env.STG_DB_PATH = join(root, "saved.sqlite");
+    const schema = {sqlite: ['CREATE TABLE zshared (id TEXT PRIMARY KEY, value TEXT);']};
+    const start = async () => {
+      const runtime = {builtin: {sy: {get: () => ({})}}, context: {databaseConnections: {}, RFCDestinations: {}}};
+      globalThis.abap = runtime;
+      await setup(runtime, schema, []);
+      return runtime.context.databaseConnections.DEFAULT;
+    };
+    const first = await start();
+    expect((await first.select({select: 'SELECT value FROM zshared'})).rows).to.deep.equal([{value: "later"}]);
+    save(first);
+    writeFileSync(join(root, "packs", "later", "data", "zshared.tabu.json"),
+      JSON.stringify([{id: "1", value: "edited"}]));
+    const restored = await start();
+    expect((await restored.select({select: 'SELECT value FROM zshared'})).rows).to.deep.equal([{value: "edited"}]);
+  });
+});
 
 describe("persistent backend schema guard", () => {
   it("extracts every generated table name without confusing indexes", () => {

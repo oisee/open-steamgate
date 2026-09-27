@@ -5,7 +5,7 @@ import {join} from "node:path";
 import {BadPack, contentFoldersOf, dataDirsOf, ddicDirsOf, generatorFoldersOf, inputFoldersOf, packAt, packRootsOf, packsOf, webappsOf} from "../tools/osd-packs.mjs";
 import {ObjectStore, rootsOf} from "../tools/osd-store.mjs";
 import {loadConfig} from "../tools/osd-build.mjs";
-import {packApps} from "../tools/osd-bsp-registry.mjs";
+import {generate as generateBsp, packApps} from "../tools/osd-bsp-registry.mjs";
 import {packNodes} from "../tools/osd-nodes.mjs";
 
 // A pack is a directory, not a rebuild (backlog E.2): ABAP, seed rows, a
@@ -113,6 +113,21 @@ describe("tools/osd-packs: a pack is a directory", () => {
     expect(packNodes(root, env).map((node) => node.path)).to.deep.equal(["/app/direct", "/app/vibes"]);
   });
 
+  it("refuses two webapp packs whose names collide at the BSP 15 character limit", () => {
+    write("packs/first/osd-pack.json", JSON.stringify({name: "long-workspace-one"}));
+    write("packs/first/webapp/index.html", "first");
+    write("packs/second/osd-pack.json", JSON.stringify({name: "long-workspace-two"}));
+    write("packs/second/webapp/index.html", "second");
+    expect(() => packApps(root, {})).to.throw(/packs long-workspace-one and long-workspace-two both derive the BSP application name ZLONG_WORKSPACE/);
+  });
+
+  it("lets a declared app in a later layer override a derived pack app", () => {
+    write("src/bsp/apps.json", JSON.stringify({ZVIBES: {folder: join(root, "webapp")}}));
+    write("webapp/index.html", "base");
+    const apps = generateBsp([join(root, "src")], join(root, "gen", "bsp"), root);
+    expect(apps.find((app) => app.app === "ZVIBES").pages[0].content.toString()).to.equal("base");
+  });
+
   it("orders by the manifest, then by name", () => {
     write("packs/early/osd-pack.json", JSON.stringify({order: 10}));
     write("packs/early/src/zcl_early.clas.abap", CLASS("zcl_early"));
@@ -129,6 +144,11 @@ describe("tools/osd-packs: a pack is a directory", () => {
     expect(packsOf(root, {OSD_PACKS: outside}).map((p) => p.name)).to.deep.equal(["away", "vibes"]);
     // the same pack reached two ways is one pack
     expect(packsOf(root, {OSD_PACKS: `${outside}:${join(outside, "away")}`}).map((p) => p.name)).to.deep.equal(["away", "vibes"]);
+  });
+
+  it("refuses two different directories with the same pack name", () => {
+    write("packs/other/osd-pack.json", JSON.stringify({name: "vibes"}));
+    expect(() => packsOf(root, {})).to.throw(BadPack, /pack name vibes is also used by/);
   });
 
   it("brings its seed rows, its table definitions and its page", () => {

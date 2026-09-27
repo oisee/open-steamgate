@@ -612,7 +612,7 @@ folder:
   3531). `test/start.mjs`'s log line that used to read `TLS_DIR` directly
   now reads `dirOf()` so it still names the right directory when
   `OSD_TLS_DIR` is set.
-- the generated pack manifests that add a workspace's ABAP as a top layer
+- the projected packs that add workspace content as a layer
   (below).
 
 **The layer mechanism is the existing one, unchanged: `OSD_PACKS` naming a
@@ -621,23 +621,27 @@ directory"). Nothing new was built for this — a pack is found either at
 `<root>/packs` or at whatever `OSD_PACKS` names, "a pack itself, or a
 container of packs", and the container form is exactly what a launcher that
 does not know in advance how many workspace folders there will be needs.
-For every open workspace folder that looks like an abapGit repository (a
-`.abapgit.xml` at its root, or `*.clas.abap` / `*.prog.abap` under `src/`
-— `detectWorkspaceLayers`), the launcher writes one small pack into
-`<storage>/packs/<name>/`: an `osd-pack.json` (`order: 900+`, so a
-workspace layer always sorts after the tree's own packs and wins a name it
-shares, "the later folder wins") and a `src` **symlink** at the folder's
-own `src/` (or at the folder itself, when its ABAP sits directly at its
-root) — no copy, and nothing is ever written under the workspace folder or
-under `osdHome`. Workspace packs are rebuilt on every `start()`, while the
-notebook scratch pack retains its files. A workspace folder that has since
-closed does not leave a stale layer serving code nobody can see any more.
-This was the smallest of the three
-options the task named: an env var for extra input folders does not exist
-(`input_folder` is a build-config field, not read from the environment),
-and the pack mechanism already does exactly what was needed, found by one
-extra directory and a two-line manifest rather than by touching
-`tools/osd-build.mjs` or `tools/osd-store.mjs` at all.
+An open workspace folder with `osd-pack.json` is a full pack. The launcher
+copies its manifest into `<storage>/packs/<name>/`, filling an omitted `name`
+with the workspace folder's name, and projects its
+declared paths through directory symlinks (junctions on Windows). Manifest
+`name`, `order`, `abap`, `data`, `ddic`, `webapp`, and `tiles` keep their usual
+pack meanings. A folder without a manifest still layers ABAP alone when it
+has `.abapgit.xml` or a class/program under `src/`; its generated manifest
+has order 900+. No workspace source is copied or changed. Layers shows the
+ABAP object count, seed table count, DDIC count, page URL, and tile count.
+
+The later layer that names a table in a TABU capture owns all of its rows.
+Fresh databases insert only that layer's capture; on an existing database,
+startup replaces that table's rows with the same capture, including when it
+is empty. Other business tables retain their rows. The generation hash
+includes the manifest, seed data, DDIC, ABAP, and webapp bytes, so an edit
+to a page or row produces a new generation.
+Closing the workspace folder and restarting removes its projected pack, tile,
+and page. The persistent database may still contain old rows until its schema
+is reset; they are no longer seeded by that pack.
+Two distinct packs cannot share a pack name, and webapps whose derived BSP
+names collide at the 15-character limit fail the build with both owners named.
 
 Shadowing is already said out loud by the build itself
 (`osd-build: overridden: CLAS X: <hidden files> hidden by <winner>`,
@@ -687,8 +691,9 @@ decision is `decideStartTarget()` in `editors/vscode/launcher.js`; its tests
 cover the checkout, configured-home, remembered-bundle and ordinary-workspace
 cases in `test/vscode-launcher.mjs`. The tree's state row and the ▶ / ■ status
 bar item show **from workspace** or **bundled copy** after a source is chosen.
-Other workspace folders keep the existing behavior: the packaged bundle is
-the base system, and their ABAP files are workspace layers. A development
+Other workspace folders use the packaged bundle as the base. A folder with
+`osd-pack.json` layers its full pack; a folder without one can still layer
+ABAP source alone. A development
 install without a packaged bundle already uses its single workspace folder as
 the system and does not offer an unavailable bundle choice.
 
@@ -1355,17 +1360,15 @@ service.
 (registered in `test/suites.json`, skipped via `this.skip()` when
 `build/vsix` was never built, the same shape `test/osd-binary.mjs` already
 uses for the compiled binary) unzips the `.vsix` into
-`~/.cache/osd-vsix-test` (never `/tmp`), runs
+`OSD_VSIX_SCRATCH` (or `~/.cache/osd-vsix-test` by default), runs
 `ensureMaterializedHome()` against a scratch `globalStorageDir` with
 `osd.home` unset, and points `Launcher` at a workspace folder
-`.local/b0-demo-ws/` (gitignored, created by the test itself if missing:
-one abapGit-shaped class, `ZCL_B0_HELLO IMPLEMENTS IF_OO_ADT_CLASSRUN`,
-the same fixture this file's own "Live smoke" paragraph describes by
-hand). It checks `ZSTG_DEMO_SRV/TravelSet` answers and that `POST
-/sap/bc/adt/oo/classrun/ZCL_B0_HELLO` (the same CSRF/session round trip
-every other write in this extension already does) prints "hello from the
-B0 workspace layer", then stops and checks the spawned pid is actually
-gone. Passing, 2026-09-26.
+in its scratch directory. The fixture has a manifest, classrun class, DDIC
+table, TABU row, webapp page, and launchpad tile. The test checks classrun
+and the seeded row, the page and tile, Layers contribution counts, a new
+generation and row after edits, and disappearance of the class, tile, and
+page after closing the folder and restarting. It stops its spawned process
+and removes the scratch directory.
 
 **Installed for real**: `code --install-extension build/vsix/osd-vscode-0.1.0.vsix`
 under this machine's Remote-WSL VS Code Server (the `code` on `PATH` here

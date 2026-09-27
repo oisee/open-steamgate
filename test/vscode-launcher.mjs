@@ -16,6 +16,7 @@ import {delimiter, join} from "node:path";
 import {once} from "node:events";
 import {brotliCompressSync} from "node:zlib";
 import {ObjectStore} from "../tools/osd-store.mjs";
+import {hashOf} from "../tools/osd-build.mjs";
 // A lock name carries a random UUID; tests build fixed ones instead of spelling them out.
 const lockId = (n) => ["0".repeat(8), "0000", "4000", "8000", String(n).padStart(12, "0")].join("-");
 
@@ -366,6 +367,110 @@ describe("editors/vscode/launcher.js: ensureWorkspacePacks (tools/osd-packs.mjs'
     expect(readdirSync(result)).to.deep.equal(["notebook-scratch"]);
     expect(readFileSync(scratchFile, "utf8")).to.equal("kept between starts");
   });
+
+  it("projects the workspace's own manifest and every declared part", async () => {
+    mkdirSync(join(wsDir, "rows"));
+    mkdirSync(join(wsDir, "pages"));
+    mkdirSync(join(wsDir, "defs"));
+    writeFileSync(join(wsDir, "rows", "ztest.tabu.json"), "[]");
+    writeFileSync(join(wsDir, "defs", "ztest.tabl.xml"), "<abapGit/>");
+    writeFileSync(join(wsDir, "pages", "index.html"), "hello");
+    const manifest = {name: "own-name", order: 42, abap: ["src"], data: "rows", ddic: "defs",
+      webapp: "pages", tiles: [{id: "own-tile", title: "Own tile"}]};
+    writeFileSync(join(wsDir, "osd-pack.json"), JSON.stringify(manifest));
+    const [layer] = detectWorkspaceLayers([wsDir]);
+    const packsDir = ensureWorkspacePacks(storageDir, [layer]);
+    const projected = join(packsDir, packNameOf(wsDir));
+    expect(JSON.parse(readFileSync(join(projected, "osd-pack.json"), "utf8"))).to.deep.equal(manifest);
+    const {packAt} = await import("../tools/osd-packs.mjs");
+    const pack = packAt(storageDir, projected);
+    expect(pack).to.include({name: "own-name", order: 42});
+    expect(pack.data).to.equal(join(projected, "rows"));
+    expect(pack.ddic).to.equal(join(projected, "defs"));
+    expect(pack.webapp).to.equal(join(projected, "pages"));
+    expect(pack.tiles[0].id).to.equal("own-tile");
+  });
+
+  it("projects ./ paths and hashes edits to data, DDIC, and webapp content", async () => {
+    for (const folder of ["rows", "ddic2", "web"]) mkdirSync(join(wsDir, folder));
+    const files = [
+      ["rows", "ztest.tabu.json", "[]"],
+      ["ddic2", "ztest.tabl.xml", "<abapGit/>"],
+      ["web", "index.html", "hello"],
+    ];
+    for (const [folder, name, content] of files) writeFileSync(join(wsDir, folder, name), content);
+    writeFileSync(join(wsDir, "osd-pack.json"), JSON.stringify({
+      name: "dot-paths", abap: "./src", data: "./rows", ddic: "./ddic2", webapp: "./web",
+    }));
+    const dir = join(ensureWorkspacePacks(storageDir, detectWorkspaceLayers([wsDir])), packNameOf(wsDir));
+    const {packAt} = await import("../tools/osd-packs.mjs");
+    const pack = packAt(storageDir, dir);
+    expect(pack.abap).to.deep.equal([join(dir, "src")]);
+    expect([pack.data, pack.ddic, pack.webapp]).to.deep.equal(["rows", "ddic2", "web"].map((f) => join(dir, f)));
+    const config = join(storageDir, "abap_transpile.json");
+    writeFileSync(config, "{}");
+    const inputs = {folders: pack.abap, libs: [], bspFolders: [pack.webapp],
+      packFolders: [pack.data, pack.ddic], packFiles: [join(dir, "osd-pack.json")], config};
+    const generation = () => hashOf(storageDir, inputs, {transpiler: "test"});
+    for (const [folder, name, original] of files) {
+      const projected = join(dir, folder, name);
+      expect(readFileSync(projected, "utf8")).to.equal(original);
+      const before = generation();
+      const changed = `${original} changed`;
+      writeFileSync(join(wsDir, folder, name), changed);
+      expect(readFileSync(projected, "utf8")).to.equal(changed);
+      expect(generation(), `${folder} edit changes the generation`).to.not.equal(before);
+    }
+  });
+
+  for (const field of ["abap", "data", "ddic", "webapp"]) {
+    it(`refuses empty, absolute, or escaping ${field} paths`, () => {
+      for (const [invalid, message] of [["", /nonempty relative path/], ["/tmp/outside", /nonempty relative path/],
+        ["../outside", /must not contain '\.\.'/], ["src/../rows", /must not contain '\.\.'/]]) {
+        writeFileSync(join(wsDir, "osd-pack.json"), JSON.stringify({[field]: invalid}));
+        expect(() => ensureWorkspacePacks(storageDir, detectWorkspaceLayers([wsDir]))).to.throw(message);
+      }
+    });
+  }
+
+  it("keeps the workspace folder's implicit name for its app and default tile", async () => {
+    mkdirSync(join(wsDir, "webapp"));
+    writeFileSync(join(wsDir, "webapp", "index.html"), "hello");
+    writeFileSync(join(wsDir, "osd-pack.json"), JSON.stringify({tiles: [{}]}));
+    const packsDir = ensureWorkspacePacks(storageDir, detectWorkspaceLayers([wsDir]));
+    const {packsOf, tilesOf, webappsOf} = await import("../tools/osd-packs.mjs");
+    const env = {OSD_PACKS: packsDir};
+    const name = wsDir.split("/").at(-1).toLowerCase();
+    const pack = packsOf(storageDir, env).find((item) => item.name === name);
+    expect(pack).to.exist;
+    expect(pack.name).to.not.equal(packNameOf(wsDir));
+    expect(tilesOf(storageDir, env)[0]).to.include({url: `/app/${name}/`, title: name});
+    expect(webappsOf(storageDir, env).find((app) => app.name === name)).to.exist;
+  });
+
+  for (const abap of [undefined, "."]) {
+    it(`projects root-level ABAP and hashes edits when abap is ${abap ?? "omitted"} and src is absent`, async () => {
+      rmSync(join(wsDir, "src"), {recursive: true});
+      const source = join(wsDir, "zcl_root.clas.abap");
+      writeFileSync(source, "CLASS zcl_root DEFINITION. ENDCLASS.");
+      writeFileSync(join(wsDir, "osd-pack.json"), JSON.stringify({name: "root-abap", ...(abap && {abap})}));
+      const [layer] = detectWorkspaceLayers([wsDir]);
+      const packsDir = ensureWorkspacePacks(storageDir, [layer]);
+      const dir = join(packsDir, packNameOf(wsDir));
+      const {packAt} = await import("../tools/osd-packs.mjs");
+      expect(packAt(storageDir, dir).abap).to.deep.equal([dir]);
+      expect(readFileSync(join(dir, "zcl_root.clas.abap"), "utf8")).to.contain("zcl_root");
+      const config = join(storageDir, "abap_transpile.json");
+      writeFileSync(config, "{}");
+      const inputs = {folders: [dir], libs: [], bspFolders: [], packFolders: [],
+        packFiles: [join(dir, "osd-pack.json")], config};
+      const generation = () => hashOf(storageDir, inputs, {transpiler: "test"});
+      const before = generation();
+      writeFileSync(source, "CLASS zcl_root DEFINITION. PUBLIC SECTION. ENDCLASS.");
+      expect(generation(), "editing root-level ABAP through the projected file link changes the generation")
+        .to.not.equal(before);
+    });
+  }
 });
 
 describe("editors/vscode/launcher.js: waitForServing / servingOnce", function () {
@@ -1064,5 +1169,20 @@ describe("editors/vscode/launcher.js: linkOrCopyTree / ensureMaterializedHome (p
     expect(() => ensureMaterializedHome(seedDir, storageDir)).to.throw(/no matching seed marker/);
     expect(readFileSync(join(target, "top.txt"), "utf8")).to.equal("unmarked user data");
     expect(readFileSync(join(legacy, "top.txt"), "utf8")).to.equal("old recovery");
+  });
+});
+
+describe("layerContributions: DDIC counts", function () {
+  it("counts a search help as a DDIC object of a workspace pack", function () {
+    const {layerContributions} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
+    const folder = mkdtempSync(join(tmpdir(), "osd-layer-ddic-"));
+    try {
+      mkdirSync(join(folder, "src", "ddic"), {recursive: true});
+      writeFileSync(join(folder, "osd-pack.json"), JSON.stringify({name: "ddic-count", abap: "src", ddic: "src/ddic"}));
+      writeFileSync(join(folder, "src", "ddic", "zx_row.tabl.xml"), "<x/>");
+      writeFileSync(join(folder, "src", "ddic", "zx_row_sh.shlp.xml"), "<x/>");
+      const counts = layerContributions({folder, manifest: join(folder, "osd-pack.json"), srcDir: join(folder, "src")});
+      expect(counts.ddic).to.equal(2);
+    } finally { rmSync(folder, {recursive: true, force: true}); }
   });
 });
