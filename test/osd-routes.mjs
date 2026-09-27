@@ -17,6 +17,18 @@ import {SAP_DELIVERED, WORKS_IN, declaredNodes, deliveredAt, nodes} from "../too
 // that is gone. Both numbers must be zero, and a new express route makes the
 // first one go red the moment it is written without a node beside it.
 describe("tools/osd-routes: one inventory, and what nothing explains", () => {
+  it("uses the later declaration for a host route", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-node-layers-"));
+    try {
+      for (const layer of ["src", "later"]) mkdirSync(join(root, layer, "icf"), {recursive: true});
+      writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: ["src", "later"]}));
+      writeFileSync(join(root, "src", "icf", "nodes.json"), JSON.stringify({"/demo": {handler: "old"}}));
+      writeFileSync(join(root, "later", "icf", "nodes.json"), JSON.stringify({"/demo": {handler: "new"}}));
+      expect(declaredNodes(root).map((node) => [node.path, node.handler])).to.deep.equal([["/demo", "new"]]);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
   it("every express registration is explained by a declared node", async () => {
     const {unexplained} = await drift();
     expect(unexplained.map((r) => `${r.host}:${r.line} ${r.path}`),

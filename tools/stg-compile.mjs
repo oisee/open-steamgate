@@ -51,7 +51,7 @@
 //       for: Travel
 //       parameters: {TravelId: String(8)}
 import {existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
-import {contentFoldersOf} from "./osd-packs.mjs";
+import {generatorFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {createHash} from "node:crypto";
 import {basename, dirname, join} from "node:path";
 import yaml from "js-yaml";
@@ -1080,7 +1080,7 @@ function walk(dir, out = []) {
   return out;
 }
 
-// `npm run transpile` step: every <name>.stg.yaml under src/ compiles into
+// `npm run transpile` step: every <name>.stg.yaml in the configured inputs compiles into
 // gen/stg/<project>/ (the classes, IWSV and IWMO; the registry reads gen/
 // too), except the files a developer already keeps under src/ by the same
 // name: the demo's hand-written classes and registration objects win, so
@@ -1099,15 +1099,17 @@ export function compileAll(root = "src", out = "gen/stg", libs = [], extraRoots 
   // A pack is source too. Looking only under `src/` made a hand-written
   // pack-local DPC_EXT invisible, so the empty generated skeleton in gen/
   // overrode it. Every model root contributes both models and owned objects.
-  const roots = [root, ...extraRoots.filter((d) => existsSync(d))];
-  const existingPaths = new Map(roots.flatMap((dir) => walk(dir)).map((f) => [objectOf(f), f]));
+  const roots = (Array.isArray(root) ? root : [root, ...extraRoots]).filter((d) => existsSync(d));
+  const existingPaths = new Map(winningByLayer(roots, (dir) => walk(dir), objectOf)
+    .map((file) => [objectOf(file), file]));
   const existing = new Set(existingPaths.keys());
-  const functionModules = loadFunctionGroups([...roots, ...libs]);
+  const functionModules = loadFunctionGroups([...libs, ...roots]);
   const report = [];
-  // src/ first, then the models another generator wrote (a CDS view published
-  // with @OData.publish, gen/cds/*.stg.yaml)
-  const files = roots.flatMap((d) => walk(d));
-  for (const file of files.filter((p) => p.endsWith(".stg.yaml")).sort()) {
+  // The configured layer order also applies to models another generator wrote
+  // (a CDS view published with @OData.publish, gen/cds/*.stg.yaml).
+  const files = winningByLayer(roots, (dir) => walk(dir).filter((p) => p.endsWith(".stg.yaml")),
+    (file) => readModel(readFileSync(file, "utf8"), basename(file)).project);
+  for (const file of files) {
     const result = compile(readFileSync(file, "utf8"), {file: basename(file), functionModules});
     const target = join(out, result.model.project.toLowerCase().replaceAll("/", "#"));
     const written = [];
@@ -1161,6 +1163,10 @@ export function compileAll(root = "src", out = "gen/stg", libs = [], extraRoots 
   return report;
 }
 
+export function compileConfiguredAll(root = process.env.OSD_ROOT ?? process.cwd(), out = "gen/stg", libs = [], env = process.env) {
+  return compileAll(generatorFoldersOf(root, env).map((f) => f === "gen" ? "gen/cds" : f), out, libs);
+}
+
 /** Everything a compiled project puts in a folder. Lifted out of the CLI
  *  because a second caller appeared: `osd-abapgit-zip` used to compile a
  *  YAML by spawning this file with `process.execPath`, which is the one
@@ -1185,7 +1191,7 @@ export function writeCompiled(result, out) {
 /** Compile one `.stg.yaml` into a folder, the way the command does. */
 export function compileFile(file, out, libs = []) {
   const result = compile(readFileSync(file, "utf8"),
-    {file: basename(file), functionModules: loadFunctionGroups([dirname(file), ...libs])});
+    {file: basename(file), functionModules: loadFunctionGroups([...libs, dirname(file)])});
   if (out !== undefined) {
     writeCompiled(result, out);
   }
@@ -1201,7 +1207,7 @@ if (process.argv[1] && /stg-compile\.mjs$/.test(process.argv[1])) {
   const out = args.includes("--out") ? args[args.indexOf("--out") + 1] : undefined;
   const libs = args.flatMap((a, i) => (a === "--lib" ? [args[i + 1]] : []));
   if (args.includes("--all")) {
-    for (const r of compileAll("src", "gen/stg", libs, ["gen/cds", ...contentFoldersOf(process.env.OSD_ROOT ?? process.cwd()).filter((f) => f !== "src")])) {
+    for (const r of compileConfiguredAll(process.env.OSD_ROOT ?? process.cwd(), "gen/stg", libs)) {
       if (r.removed === true) {
         console.log(`stg-compile: gen/stg/${r.project.toLowerCase()}: removed, no YAML declares it any more`);
         continue;
@@ -1217,7 +1223,7 @@ if (process.argv[1] && /stg-compile\.mjs$/.test(process.argv[1])) {
     console.error("usage: stg-compile.mjs <service.stg.yaml> [--out <dir>] [--lib <folder with *.fugr.xml>]... | --all (every src/**/*.stg.yaml into gen/stg/)");
     process.exit(2);
   }
-  const result = compile(readFileSync(file, "utf8"), {file: basename(file), functionModules: loadFunctionGroups([dirname(file), ...libs])});
+  const result = compile(readFileSync(file, "utf8"), {file: basename(file), functionModules: loadFunctionGroups([...libs, dirname(file)])});
   const m = result.model;
   console.log(`stg-compile: ${m.project} -> service ${m.service}, model ${m.model}: ${m.entities.length} entities, ${m.associations.length} associations, ${m.functions.length} function imports; classes ${Object.values(m.classes).join(", ")}`);
   for (const w of result.warnings) {

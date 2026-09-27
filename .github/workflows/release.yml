@@ -72,7 +72,7 @@ jobs:
           test -f "$vsix"
           node scripts/release-version.mjs "$RELEASE_TAG" "$vsix" --allow-untagged
           (cd build/vsix && sha256sum "osd-vscode-$version.vsix" > "osd-vscode-$version.vsix.sha256")
-      - name: Generate and scan release notes, README and FILE_ID.DIZ
+      - name: Generate and scan CHANGELOG, README and FILE_ID.DIZ
         id: leak
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
@@ -82,17 +82,17 @@ jobs:
           set -euo pipefail
           version="${RELEASE_TAG#vscode-v}"
           if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
-            node scripts/release-notes.mjs "$RELEASE_TAG" > build/vsix/release-notes.md
+            node scripts/release-notes.mjs "$RELEASE_TAG" > build/vsix/CHANGELOG.md
           else
-            node scripts/release-notes.mjs "$RELEASE_TAG" --to HEAD > build/vsix/release-notes.md
+            node scripts/release-notes.mjs "$RELEASE_TAG" --to HEAD > build/vsix/CHANGELOG.md
           fi
           node scripts/release-readme.mjs \
             "osd-vscode-$version.vsix" \
             osd-linux-x64 osd-linux-arm64 osd-darwin-arm64 osd-windows-x64.exe \
             sqlite.yml duckdb.yml postgres.yml hana.yml > build/vsix/README.md
           node scripts/release-readme.mjs --diz "$version" > build/vsix/FILE_ID.DIZ
-          { cat build/vsix/release-notes.md; printf '\n'; cat build/vsix/README.md; } > build/vsix/release-body.md
-          test -s build/vsix/release-notes.md
+          { cat build/vsix/README.md; printf '\nChanges: see CHANGELOG.md\n'; } > build/vsix/release-body.md
+          test -s build/vsix/CHANGELOG.md
           test -s build/vsix/README.md
           test -s build/vsix/FILE_ID.DIZ
           if [[ -n "$LEAK_IDENTIFIERS_JSON" ]]; then
@@ -100,7 +100,7 @@ jobs:
             printf '%s' "$LEAK_IDENTIFIERS_JSON" > .local/leak-identifiers.json
           fi
           status=0
-          node tools/osd-leak-scan.mjs --paths build/vsix/release-notes.md build/vsix/README.md build/vsix/FILE_ID.DIZ || status=$?
+          node tools/osd-leak-scan.mjs --paths build/vsix/CHANGELOG.md build/vsix/README.md build/vsix/FILE_ID.DIZ || status=$?
           printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
           full_scan=false
           if [[ "$status" -eq 0 && -n "$LEAK_IDENTIFIERS_JSON" ]]; then
@@ -160,6 +160,7 @@ jobs:
             "build/vsix/osd-vscode-$version.vsix" \
             "build/vsix/osd-vscode-$version.vsix.sha256" \
             build/vsix/README.md \
+            build/vsix/CHANGELOG.md \
             build/vsix/FILE_ID.DIZ
 
   binary:
@@ -196,6 +197,7 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: npm ci
+      - run: npm run bootstrap
       - name: Build and checksum the target binary
         env:
           TARGET: ${{ matrix.target }}
@@ -206,7 +208,7 @@ jobs:
           git fetch --tags --force
           node scripts/release-version.mjs --check-target "$RELEASE_TAG"
           mkdir -p build/release
-          npm run binary -- "build/release/$ASSET" "$TARGET"
+          npm run binary -- --seed "build/release/$ASSET" "$TARGET"
           (cd build/release && sha256sum "$ASSET" > "$ASSET.sha256")
           release_is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)
           if [[ "$release_is_draft" != true && "$FULL_SCAN" != true ]]; then

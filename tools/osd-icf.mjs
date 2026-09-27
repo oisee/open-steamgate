@@ -17,7 +17,7 @@
 // SEGW registry plays with `*.iwsv.xml`, for the same reason: the object in
 // the tree is the source of truth, and the registry is derived.
 import {existsSync, readdirSync, readFileSync, statSync} from "node:fs";
-import {inputFoldersOf} from "./osd-packs.mjs";
+import {generatorFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {basename,join} from "node:path";
 
 // Where a service node can live: the layers, which is what the store reads
@@ -25,9 +25,7 @@ import {basename,join} from "node:path";
 // It used to be a list of its own, ["src", "local", "test", "gen"], and a
 // pack that brought a *.sicf.xml was then invisible while its class was not.
 function ROOTS(root) {
-  const file = join(root, "abap_transpile.json");
-  const config = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {input_folder: ["src", "local", "test", "gen"]};
-  return [...new Set([...inputFoldersOf(root, config), "gen"])];
+  return generatorFoldersOf(root);
 }
 
 function walk(dir, out) {
@@ -172,36 +170,21 @@ export function channelOf(xml, source) {
 }
 
 function scan(root, options, suffix, parse) {
-  const found = [];
-  for (const dir of options.roots ?? ROOTS(root)) {
-    for (const file of walk(join(root, dir), [])) {
-      if (file.endsWith(suffix) === false) {
-        continue;
-      }
-      const one = parse(readFileSync(file, "utf8"), file);
-      if (one !== undefined) {
-        found.push(one);
-      }
-    }
-  }
-  return found;
+  const files = winningByLayer(options.roots ?? ROOTS(root),
+    (dir) => walk(join(root, dir), []).filter((file) => file.endsWith(suffix)),
+    (file) => basename(file).toUpperCase());
+  const objects = files.map((file) => parse(readFileSync(file, "utf8"), file)).filter(Boolean);
+  return winningByLayer([objects], (entries) => entries, (one) => one.path);
 }
 
 // One route per path, longest first.
 //
-// Two nodes can name one path — the same repository imported twice, or a
+// Two winning objects can name one path — the same repository imported twice, or a
 // narrowed copy of it beside the whole thing, which is how this turned up:
 // the same service mounted twice and which of the two answered was down to
-// the order express happened to match in. A system has one node per path, so
-// the first one found wins and the rest are dropped.
+// the order express happened to match in. The scan selects the later layer.
 function routes(found) {
-  const byPath = new Map();
-  for (const one of found.sort((a, b) => b.path.length - a.path.length)) {
-    if (byPath.has(one.path) === false) {
-      byPath.set(one.path, one);
-    }
-  }
-  return [...byPath.values()];
+  return found.sort((a, b) => b.path.length - a.path.length);
 }
 
 // the websocket applications a repository brought with it

@@ -7,6 +7,35 @@ import {generate, portabilityWarnings} from "../tools/amdp-gen.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 
 describe("AMDP in a content pack", () => {
+  it("generates one procedure from the winning class body", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-amdp-layer-"));
+    try {
+      const system = join(root, "system");
+      const user = join(root, "user");
+      mkdirSync(system);
+      mkdirSync(user);
+      const source = (value) => `
+CLASS zcl_layer_amdp DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES if_amdp_marker_hdb.
+    CLASS-METHODS answer IMPORTING VALUE(iv_n) TYPE i EXPORTING VALUE(ev_n) TYPE i.
+ENDCLASS.
+CLASS zcl_layer_amdp IMPLEMENTATION.
+  METHOD answer BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+    ev_n = :iv_n + ${value};
+  ENDMETHOD.
+ENDCLASS.\n`;
+      writeFileSync(join(system, "zcl_layer_amdp.clas.abap"), source(1));
+      writeFileSync(join(user, "zcl_layer_amdp.clas.abap"), source(2));
+      const made = generate([system, user], join(root, "gen"));
+      expect(made.classes).to.deep.equal(["zcl_layer_amdp.clas.abap"]);
+      expect(made.procedures).to.have.length(1);
+      expect(made.procedures[0].body).to.contain("ev_n = :iv_n + 2");
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
   it("discovers and rewrites a pack-local AMDP class", () => {
     const root = mkdtempSync(join(tmpdir(), "osd-amdp-pack-"));
     const src = join(root, "src");

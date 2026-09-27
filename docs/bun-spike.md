@@ -204,6 +204,12 @@ serving child (`osd serve`), the builder with the transpiler in-process
 (N3) and its generators (`osd gen <tool>`), detached ABAP Unit runs
 (`osd unit`). Measured end to end:
 
+The default build is checkout mode: it needs `npm ci` but no `.local/lars`
+and runs from an open-steamgate checkout. `npm run binary -- --seed` (or
+`OSD_BINARY_SEED=1 npm run binary`) embeds the system seed after
+`npm run bootstrap`; release binaries use this mode and can run away from
+the checkout. `osd doctor` reports the mode.
+
 | | |
 | --- | --- |
 | binary | 89.4 MB, built in 250–450 ms |
@@ -406,7 +412,7 @@ them on disk. So a Node release carries a closure of four packages
 (`@abaplint/runtime`, `@abaplint/database-sqlite`, `sql.js`,
 `temporal-polyfill`), which `make-release.mjs` puts there and says so.
 
-That is the honest scoreboard for the packaging question: **only the Bun
+That is the honest scoreboard for the packaging question: **only the seeded Bun
 binary is a single file in the strict sense.** The Node single executable
 is one file plus a package directory, which is exactly the
 "executable plus a versioned support directory" that Astra's vendoring

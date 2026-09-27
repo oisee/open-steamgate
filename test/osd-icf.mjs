@@ -1,6 +1,7 @@
 import {expect} from "chai";
 import {serviceOf, channelOf, handlerRows, mountServices, services, servicesFromRows, channels} from "../tools/osd-icf.mjs";
-import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
+import {mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync} from "node:fs";
+import {execFileSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import express from "express";
@@ -31,6 +32,25 @@ describe("tools/osd-icf: the table that says who answers where", () => {
    <CLASS_NAME>ZCL_O4D_APC_HANDLER</CLASS_NAME>
    <STATEFUL>X</STATEFUL>
  </HEADER><TEXT><DESCRIPTION>ZO4D Demo</DESCRIPTION></TEXT></SAPC></asx:values></asx:abap></abapGit>`;
+
+  it("reads imported routes and lets gen override a pack's matching object", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-icf-order-"));
+    const write = (file, body) => {
+      mkdirSync(join(root, file, ".."), {recursive: true});
+      writeFileSync(join(root, file), body);
+    };
+    try {
+      write("abap_transpile.json", JSON.stringify({input_folder: ["src", "imported", "test", "gen"]}));
+      write("imported/zimport.sicf.xml", SICF.replaceAll("zo4d_demo", "zimport").replaceAll("ZO4D_DEMO", "ZIMPORT"));
+      write("packs/vibes/osd-pack.json", "{}");
+      write("packs/vibes/src/zcollision.sicf.xml", SICF.replace("ZCL_O4D_HTTP_HANDLER", "ZCL_PACK"));
+      write("gen/zcollision.sicf.xml", SICF.replace("ZCL_O4D_HTTP_HANDLER", "ZCL_GEN"));
+      expect(services(root).find((s) => s.path === "/sap/bc/zimport")?.handler).to.equal("ZCL_O4D_HTTP_HANDLER");
+      expect(services(root).find((s) => s.path === "/sap/bc/zo4d_demo")?.handler).to.equal("ZCL_GEN");
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
 
   it("a service node is a path and the class that answers on it", () => {
     const service = serviceOf(SICF, "x");
@@ -227,6 +247,7 @@ describe("tools/osd-icf: the table that says who answers where", () => {
     const dir = mkdtempSync(join(tmpdir(), "osd-icf-"));
     try {
       mkdirSync(join(dir, "local", "demo"), {recursive: true});
+      writeFileSync(join(dir, "abap_transpile.json"), JSON.stringify({input_folder: ["local"]}));
       writeFileSync(join(dir, "local", "demo", "zo4d_demo.sapc.xml"), SAPC);
       const found = channels(dir);
       expect(found).to.have.length(1);
@@ -244,12 +265,68 @@ describe("tools/osd-icf: the table that says who answers where", () => {
     try {
       mkdirSync(join(dir, "local", "whole"), {recursive: true});
       mkdirSync(join(dir, "local", "narrow"), {recursive: true});
+      writeFileSync(join(dir, "abap_transpile.json"), JSON.stringify({input_folder: ["local"]}));
       writeFileSync(join(dir, "local", "whole", "a.sicf.xml"), SICF);
       writeFileSync(join(dir, "local", "narrow", "a.sicf.xml"), SICF);
       const found = services(dir).filter((s) => s.path === "/sap/bc/zo4d_demo");
       expect(found).to.have.length(1);
     } finally {
       rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
+  it("uses the later layer's handler for the same service path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-icf-layers-"));
+    try {
+      for (const layer of ["src", "later"]) mkdirSync(join(dir, layer));
+      writeFileSync(join(dir, "abap_transpile.json"), JSON.stringify({input_folder: ["src", "later"]}));
+      writeFileSync(join(dir, "src", "demo.sicf.xml"), SICF);
+      writeFileSync(join(dir, "later", "demo.sicf.xml"), SICF.replace("ZCL_O4D_HTTP_HANDLER", "ZCL_LATER_HANDLER"));
+      const found = services(dir).filter((service) => service.path === "/sap/bc/zo4d_demo");
+      expect(found).to.have.length(1);
+      expect(found[0].handler).to.equal("ZCL_LATER_HANDLER");
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
+  it("removes the old route when a later copy changes the SICF URL", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-icf-moved-"));
+    try {
+      for (const layer of ["src", "user"]) mkdirSync(join(dir, layer));
+      writeFileSync(join(dir, "src/demo.sicf.xml"), SICF);
+      writeFileSync(join(dir, "user/demo.sicf.xml"), SICF.replace("/sap/bc/zo4d_demo/", "/sap/bc/moved/"));
+      const found = services(dir, {roots: ["src", "user"]});
+      expect(found.map((service) => service.path)).to.deep.equal(["/sap/bc/moved"]);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+});
+
+describe("preview route layers", function () {
+  this.timeout(180000);
+
+  it("writes user ICF and APC overrides into the generated preview", async () => {
+    const layer = mkdtempSync(join(tmpdir(), "osd-preview-layer-"));
+    const generate = (layers) => execFileSync(process.execPath, ["scripts/build-preview.mjs"], {
+      env: {...process.env, OSD_PREVIEW_GENERATE_ONLY: "1", OSD_LAYERS: layers},
+      stdio: "pipe",
+    });
+    try {
+      const icf = readFileSync("src/icf/zstg_icf_demo.sicf.xml", "utf8");
+      const apc = readFileSync("src/apc/zstg_apc_demo.sapc.xml", "utf8");
+      mkdirSync(join(layer, "icf"));
+      mkdirSync(join(layer, "apc"));
+      writeFileSync(join(layer, "icf/zstg_icf_demo.sicf.xml"), icf.replaceAll("ZCL_STG_ICF_DEMO", "ZCL_USER_ICF"));
+      writeFileSync(join(layer, "apc/zstg_apc_demo.sapc.xml"), apc.replaceAll("ZCL_STG_APC_DEMO", "ZCL_USER_APC"));
+      generate(layer);
+      const {services: previewServices, channels: previewChannels} = await import(`../web/generated/services.mjs?layer=${Date.now()}`);
+      expect(previewServices.find((s) => s.path === "/sap/bc/zstg_icf_demo")?.handler).to.equal("ZCL_USER_ICF");
+      expect(previewChannels.find((c) => c.path === "/sap/bc/apc/sap/zstg_apc_demo")?.handler).to.equal("ZCL_USER_APC");
+    } finally {
+      rmSync(layer, {recursive: true, force: true});
+      generate("");
     }
   });
 });

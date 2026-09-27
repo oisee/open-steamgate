@@ -1,9 +1,14 @@
 import {expect} from "chai";
 import express from "express";
 import {createRequire} from "node:module";
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {delimiter, join} from "node:path";
 import {startServer} from "./start.mjs";
 import {nodeStructureDocument} from "../tools/adt-documents.mjs";
 import {adtRouter, unitRunDbEnv, unitRunOptions, UNIT_RUN_DB_ENV_KEYS} from "../tools/adt-facade.mjs";
+import {ObjectStore} from "../tools/osd-store.mjs";
+import {layerList} from "../tools/osd-host.mjs";
 
 const {pickInspectorPort} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 
@@ -13,6 +18,36 @@ const {pickInspectorPort} = createRequire(import.meta.url)("../editors/vscode/la
 const PORT = process.env.STG_PORT ?? 3030;
 const ADT = `http://localhost:${PORT}/sap/bc/adt`;
 const BASE_URL = `http://localhost:${PORT}`;
+
+describe("tools/adt-facade: user layer", () => {
+  it("reads the later --layer class through ADT", async () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-adt-layer-"));
+    const previous = process.env.OSD_LAYERS;
+    let server;
+    try {
+      mkdirSync(join(root, "src"));
+      mkdirSync(join(root, "user"));
+      writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: ["src"]}));
+      writeFileSync(join(root, "src", "zcl_layer_probe.clas.abap"), "CLASS zcl_layer_probe DEFINITION. ENDCLASS.\n");
+      writeFileSync(join(root, "user", "zcl_layer_probe.clas.abap"), "CLASS zcl_layer_probe DEFINITION. \" USER_LAYER\nENDCLASS.\n");
+      process.env.OSD_LAYERS = layerList(["--layer", "user"], {}, root).folders.join(delimiter);
+      const app = express();
+      app.use(adtRouter({store: new ObjectStore({root, libs: []}), data: {}, logMisses: false}).router);
+      server = await new Promise((resolve) => {
+        const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+      });
+      const url = `http://127.0.0.1:${server.address().port}/sap/bc/adt/oo/classes/ZCL_LAYER_PROBE/source/main`;
+      const response = await fetch(url);
+      expect(response.status).to.equal(200);
+      expect(await response.text()).to.contain("USER_LAYER");
+    } finally {
+      if (server) await new Promise((resolve) => server.close(resolve));
+      if (previous === undefined) delete process.env.OSD_LAYERS;
+      else process.env.OSD_LAYERS = previous;
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+});
 
 describe("tools/adt-facade: OSD answers ADT", () => {
   let server;

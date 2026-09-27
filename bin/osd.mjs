@@ -21,12 +21,25 @@
 import * as runtime from "@abaplint/runtime";
 import * as core from "@abaplint/core";
 import {Transpiler} from "@abaplint/transpiler";
+import * as guiConverter from "../.local/lars/open-abap-gui/converter/src/api.mjs";
 import * as setup from "../test/setup.mjs";
 import {dirname, resolve} from "node:path";
 import {createRequire} from "node:module";
-import {compiled, setHostModules} from "../tools/osd-host.mjs";
+import {compiled, setHostModules, dataDirOf, ensureBinaryHome, isCheckout, layerList} from "../tools/osd-host.mjs";
 
-const [, , mode = "up", ...rest] = process.argv;
+const embeddedSeed = typeof __OSD_BINARY_SEEDED__ !== "undefined" && __OSD_BINARY_SEEDED__;
+const [, , mode = "up", ...rawArgs] = process.argv;
+const {folders: userLayers, rest} = layerList(rawArgs);
+if (userLayers.length > 0) process.env.OSD_LAYERS = userLayers.join(process.platform === "win32" ? ";" : ":");
+if (compiled && !isCheckout(process.cwd()) && process.env.OSD_BINARY_HOME !== process.cwd()
+    && mode !== "ready" && mode !== "doctor") {
+  if (!embeddedSeed) throw new Error("checkout-mode binary requires an open-steamgate checkout; build with --seed for standalone use");
+  const home = await ensureBinaryHome(resolve(import.meta.dir, "osd-seed.tar.gz"), dataDirOf());
+  process.chdir(home);
+  process.env.OSD_ROOT = home;
+  process.env.OSD_BINARY_HOME = home;
+  console.log(`osd: system home ${home}`);
+}
 
 
 // how to start this program again, for every tool that starts a tool
@@ -67,7 +80,7 @@ if (typeof Bun !== "undefined") {
     },
   });
 }
-setHostModules({Transpiler, core, plugin: undefined, where: "bundled", version: "bundled"});
+setHostModules({Transpiler, core, guiConverter: embeddedSeed ? guiConverter : undefined, plugin: undefined, where: "bundled", version: "bundled"});
 
 const GENERATORS = {
   "osd-transpiler.mjs": () => import("../tools/osd-transpiler.mjs"),
@@ -90,6 +103,9 @@ const GENERATORS = {
 switch (mode) {
   case "up": {
     process.argv = [process.argv[0], "osd-host", ...rest];
+    const {main} = await import("../tools/osd-build.mjs");
+    const status = await main([]);
+    if (status !== 0) process.exit(status);
     await import("../test/run.mjs");
     break;
   }
@@ -146,6 +162,7 @@ switch (mode) {
     break;
   }
   case "doctor": {
+    console.log(`binary mode: ${embeddedSeed ? "seeded (embedded system seed)" : "checkout (no embedded system seed)"}`);
     // what the bundle did to the runtime: a class the runtime looks up by
     // its name must still carry that name after bundling
     const renamed = [];

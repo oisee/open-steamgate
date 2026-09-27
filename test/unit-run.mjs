@@ -1,4 +1,7 @@
 import {expect} from "chai";
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {testClassesIn, reported, missing} from "../tools/osd-unit-run.mjs";
 
 // **`npm run unit` printed OK whether it executed 156 test classes or none.**
@@ -19,6 +22,44 @@ import {testClassesIn, reported, missing} from "../tools/osd-unit-run.mjs";
 //   "Nothing ran" is the third value of a test run's verdict, the way "not
 //   measured" is the third value everywhere else in this tree.
 describe("a unit run can say it ran nothing", () => {
+  it("inventories pack and user test classes through the shared input order", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-unit-layers-"));
+    try {
+      writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: "src"}));
+      const put = (folder, name) => {
+        mkdirSync(join(root, folder), {recursive: true});
+        writeFileSync(join(root, folder, `${name}.clas.abap`), "class source");
+        writeFileSync(join(root, folder, `${name}.clas.testclasses.abap`), "test source");
+      };
+      put("src", "zcl_own");
+      put("packs/example/src", "zcl_pack");
+      writeFileSync(join(root, "packs/example/osd-pack.json"), "{}");
+      put("user", "zcl_user");
+      expect(testClassesIn(root, {OSD_LAYERS: "user"})).to.deep.equal(["ZCL_OWN", "ZCL_PACK", "ZCL_USER"]);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+  it("counts an include only when it belongs to the winning class copy", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-unit-winner-"));
+    try {
+      writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: ["src", "gen"]}));
+      for (const folder of ["src", "gen", "user"]) mkdirSync(join(root, folder), {recursive: true});
+      const put = (folder, name, include) => {
+        writeFileSync(join(root, folder, `${name}.clas.abap`), "class source");
+        if (include) writeFileSync(join(root, folder, `${name}.clas.testclasses.abap`), "test source");
+      };
+      put("src", "zcl_removed", true);
+      put("gen", "zcl_removed", false);
+      put("src", "zcl_added", false);
+      put("user", "zcl_added", true);
+      put("src", "zcl_hidden", true);
+      put("user", "zcl_hidden", false);
+      expect(testClassesIn(root, {OSD_LAYERS: "user"})).to.deep.equal(["ZCL_ADDED"]);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
   it("counts the test classes from the FILES, not from a generated index", () => {
     const inTree = testClassesIn();
     expect(inTree, "the tree has test classes").to.have.length.greaterThan(5);

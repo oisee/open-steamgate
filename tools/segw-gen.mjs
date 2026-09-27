@@ -1767,7 +1767,7 @@ if (process.argv[1] && /segw-gen\.mjs$/.test(process.argv[1])) {
   }
   const warnings = [];
   const {model, files, ext, skipped} = generate(readFileSync(join(folder, iwpr), "utf8"), {
-    superDefine: args.includes("--super-define"), functionModules: loadFunctionGroups([folder, ...libs]), warnings,
+    superDefine: args.includes("--super-define"), functionModules: loadFunctionGroups([...libs, folder]), warnings,
   });
   if (skipped) {
     console.log(`segw-gen: ${model.project}: ${skipped}`);

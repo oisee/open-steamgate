@@ -289,7 +289,7 @@ function libEntries() {
 
 // ---- stage layout ---------------------------------------------------------
 
-function copySeedTree(seedRoot, selectedPacks) {
+export function copySeedTree(seedRoot, selectedPacks) {
   mkdirSync(seedRoot, {recursive: true});
 
   // No output/: see the top-of-file comment (fallback (b) of the
@@ -373,6 +373,25 @@ function copySeedTree(seedRoot, selectedPacks) {
   return modules;
 }
 
+/** Shared staging for the VSIX and the standalone binary. */
+export async function stageSystemSeed(seedRoot, env = process.env) {
+  requireSupportedNode(process.versions.node, "system seed: ");
+  const preflight = describeVsixPreflight(vsixPreflightMissing(ROOT));
+  if (preflight !== undefined) throw new Error(preflight);
+  ({minimatch} = await import("minimatch"));
+  const {describeUnfetched} = await import("../tools/osd-fetch.mjs");
+  const selectedPacks = vsixPacks(env);
+  const missing = selectedPacks.flatMap((pack) => pack.missing.map((source) => ({
+    pack: pack.name, folder: source.folder, repo: source.repo, ref: source.ref,
+  })));
+  if (missing.length > 0) throw new Error(describeUnfetched(missing));
+  rmSync(seedRoot, {recursive: true, force: true});
+  const modules = copySeedTree(seedRoot, selectedPacks);
+  materializeSeedLinks(seedRoot);
+  const seedId = writeSeedId(seedRoot);
+  return {seedId, modules, selectedPacks};
+}
+
 // ---- the extension itself -------------------------------------------------
 
 function copyExtensionFiles(extensionDir) {
@@ -442,17 +461,6 @@ function vsixManifestXml(pkg) {
 // ---- entry point ------------------------------------------------------------
 
 export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
-  requireSupportedNode(process.versions.node, "build-vsix: ");
-  const preflight = describeVsixPreflight(vsixPreflightMissing(ROOT));
-  if (preflight !== undefined) {
-    const error = new Error(preflight);
-    error.code = "BOOTSTRAP_REQUIRED";
-    throw error;
-  }
-  ({minimatch} = await import("minimatch"));
-  const {describeUnfetched} = await import("../tools/osd-fetch.mjs");
-  const selectedPacks = vsixPacks(env);
-
   const qualityText = env.OSD_VSIX_BROTLI_QUALITY;
   const quality = qualityText === undefined ? 5 : Number(qualityText);
   if ((qualityText !== undefined && !/^(?:[0-9]|10|11)$/.test(String(qualityText))) ||
@@ -472,16 +480,8 @@ export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
   // **An unfetched pack refuses the package, not the user's first start.**
   // A selected pack whose sources were never fetched would make every
   // install's first build refuse with UNFETCHED. Other packs do not ship.
-  const missing = selectedPacks.flatMap((pack) => pack.missing.map((source) => ({
-    pack: pack.name, folder: source.folder, repo: source.repo, ref: source.ref,
-  })));
-  if (missing.length > 0) {
-    throw new Error(`build-vsix: ${describeUnfetched(missing)}`);
-  }
+  const {seedId, modules, selectedPacks} = await stageSystemSeed(seedRoot, env);
   log(`packs: ${selectedPacks.map((pack) => pack.name).join(", ")}`);
-  const modules = copySeedTree(seedRoot, selectedPacks);
-  materializeSeedLinks(seedRoot);
-  const seedId = writeSeedId(seedRoot);
   const archiveDir = join(extensionDir, "osd");
   mkdirSync(archiveDir, {recursive: true});
   const tarFile = join(buildDir, "seed.tar");

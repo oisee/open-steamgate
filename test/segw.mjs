@@ -1,10 +1,29 @@
 import {expect} from "chai";
-import {mkdtempSync, writeFileSync, rmSync} from "node:fs";
+import {mkdirSync, mkdtempSync, writeFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {delimiter, join} from "node:path";
+import {contentFoldersOf} from "../tools/osd-packs.mjs";
 import {segwRegistrations, registryClass} from "../tools/segw-registry.mjs";
 
 describe("tools/segw-registry: IWSV/IWMO -> service registry", () => {
+  it("uses the last user layer's SEGW registration once", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-segw-layers-"));
+    try {
+      for (const folder of ["src", "first", "second"]) mkdirSync(join(root, folder));
+      const xml = (dpc) => `<abapGit><_-IWBEP_-I_MGW_SRG><MODEL_TECH_NAME>ZLAYER_MDL</MODEL_TECH_NAME><MODEL_VERSION>0001</MODEL_VERSION></_-IWBEP_-I_MGW_SRG><_-IWBEP_-I_MGW_SRH><TECHNICAL_NAME>ZLAYER_SRV</TECHNICAL_NAME><VERSION>0001</VERSION><CLASS_NAME>${dpc}</CLASS_NAME></_-IWBEP_-I_MGW_SRH></abapGit>`;
+      for (const [folder, dpc] of [["src", "ZCL_SYSTEM_DPC"], ["first", "ZCL_FIRST_DPC"], ["second", "ZCL_SECOND_DPC"]]) {
+        writeFileSync(join(root, folder, "zlayer_srv.iwsv.xml"), xml(dpc));
+      }
+      writeFileSync(join(root, "src", "zlayer_mdl.iwmo.xml"), "<abapGit><_-IWBEP_-I_MGW_OHD><TECHNICAL_NAME>ZLAYER_MDL</TECHNICAL_NAME><VERSION>0001</VERSION><CLASS_NAME>ZCL_LAYER_MPC</CLASS_NAME></_-IWBEP_-I_MGW_OHD></abapGit>");
+      const env = {OSD_LAYERS: ["first", "second"].join(delimiter)};
+      const entries = segwRegistrations(contentFoldersOf(root, env).map((folder) => join(root, folder)));
+      expect(entries).to.have.length(1);
+      expect(entries[0]).to.include({dpc: "ZCL_SECOND_DPC", mpc: "ZCL_LAYER_MPC"});
+      expect(registryClass(entries)).to.contain("iv_dpc     = 'ZCL_SECOND_DPC'");
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
   it("reads the demo's registration objects", () => {
     const entries = segwRegistrations(["src"]);
     const demo = entries.find((e) => e.external === "ZSTG_DEMO_SRV");

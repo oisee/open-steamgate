@@ -523,11 +523,11 @@ ENDCLASS.
       expect(chosen.find("CLAS", "ZCL_OURS")).to.include({file: "gen/zcl_ours.clas.abap"});
     });
 
-    it("a tree without the config is read the old way", () => {
+    it("a tree without the config uses the build's src fallback", () => {
       rmSync(join(tree, "abap_transpile.json"));
       const own = new ObjectStore({root: tree, libs: []});
-      expect(own.roots.map((r) => r.path)).to.deep.equal(["src", "local", "test", "gen"]);
-      expect(own.find("CLAS", "ZCL_SHADOW")).to.include({file: "local/shadow/zcl_shadow.clas.abap"});
+      expect(own.roots.map((r) => r.path)).to.deep.equal(["src"]);
+      expect(own.find("CLAS", "ZCL_SHADOW")).to.equal(undefined);
     });
   });
 });

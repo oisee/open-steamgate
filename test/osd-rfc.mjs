@@ -1,6 +1,10 @@
 import {expect} from "chai";
 import {startServer} from "./start.mjs";
 import {callClass, functionModules, parseFunctionGroup, registryClass} from "../tools/osd-fm-registry.mjs";
+import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+import {generatorFoldersOf} from "../tools/osd-packs.mjs";
 
 // the port of the gateway under test: STG_PORT, as test/start.mjs reads it,
 // so sessions do not collide on 3030
@@ -8,6 +12,38 @@ const PORT = process.env.STG_PORT ?? 3030;
 const BASE = `http://localhost:${PORT}/sap/bc/osd/rfc`;
 
 describe("tools/osd-fm-registry: function groups -> what may be called", () => {
+  it("a user function group beats the generated AMDP group", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-fm-order-"));
+    try {
+      for (const layer of ["src", "gen", "user"]) mkdirSync(join(root, layer));
+      const xml = (label) => `<FUNCTIONS><item><FUNCNAME>Z_AMDP_ORDER</FUNCNAME><SHORT_TEXT>${label}</SHORT_TEXT></item></FUNCTIONS>`;
+      writeFileSync(join(root, "gen/zamdp_order.fugr.xml"), xml("generated AMDP"));
+      writeFileSync(join(root, "user/zamdp_order.fugr.xml"), xml("user"));
+      const folders = generatorFoldersOf(root, {OSD_LAYERS: "user"}).map((folder) => join(root, folder));
+      expect(functionModules(folders).find((fm) => fm.name === "Z_AMDP_ORDER").shortText).to.equal("user");
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+  it("uses the later layer's module declaration and implementation", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-fm-layer-"));
+    try {
+      const folders = [join(root, "system"), join(root, "user")];
+      for (const folder of folders) mkdirSync(folder);
+      const group = "zlayer";
+      const module = "Z_LAYER_CALL";
+      const xml = (remote, label) => `<FUNCTIONS><item><FUNCNAME>${module}</FUNCNAME><REMOTE_CALL>${remote}</REMOTE_CALL><SHORT_TEXT>${label}</SHORT_TEXT></item></FUNCTIONS>`;
+      writeFileSync(join(folders[0], `${group}.fugr.xml`), xml("", "system"));
+      writeFileSync(join(folders[1], `${group}.fugr.xml`), xml("R", "user"));
+      writeFileSync(join(folders[1], `${group}.fugr.${module.toLowerCase()}.abap`), "FUNCTION z_layer_call. ENDFUNCTION.\n");
+      const modules = functionModules(folders);
+      expect(modules).to.have.length(1);
+      expect(modules[0]).to.include({shortText: "user", remote: true, implemented: true, exposed: true});
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
   it("reads the demo group, and the remote flag is the gate", () => {
     const modules = functionModules(["src"]);
     const byName = Object.fromEntries(modules.map((fm) => [fm.name, fm]));

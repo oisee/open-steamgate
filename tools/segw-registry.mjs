@@ -13,8 +13,8 @@
 // e.g. "zui5_code_search_srv               0001.iwsv.xml"; the names are
 // taken from the XML, not from the file name.
 import {readdirSync, readFileSync, statSync, writeFileSync, mkdirSync} from "node:fs";
-import {contentFoldersOf} from "./osd-packs.mjs";
-import {join} from "node:path";
+import {generatorFoldersOf, winningByLayer} from "./osd-packs.mjs";
+import {basename, join} from "node:path";
 
 const OUT = "gen/segw";
 
@@ -48,25 +48,24 @@ function walk(dir, out = []) {
 export function segwRegistrations(folders) {
   const models = new Map();
   const services = [];
-  for (const folder of folders) {
-    for (const file of walk(folder)) {
-      const xml = readFileSync(file, "utf8");
-      if (/\.iwmo\.xml$/i.test(file)) {
-        const head = /<_-IWBEP_-I_MGW_OHD>[\s\S]*?<\/_-IWBEP_-I_MGW_OHD>/.exec(xml)?.[0] ?? xml;
-        models.set(tag(head, "TECHNICAL_NAME") + "/" + tag(head, "VERSION"), {
-          model: tag(head, "TECHNICAL_NAME"), version: tag(head, "VERSION"), mpc: tag(head, "CLASS_NAME"), file,
-        });
-      } else {
-        const group = /<_-IWBEP_-I_MGW_SRG>[\s\S]*?<\/_-IWBEP_-I_MGW_SRG>/.exec(xml)?.[0] ?? "";
-        const head = /<_-IWBEP_-I_MGW_SRH>[\s\S]*?<\/_-IWBEP_-I_MGW_SRH>/.exec(xml)?.[0] ?? xml;
-        services.push({
-          service: tag(head, "TECHNICAL_NAME"), version: tag(head, "VERSION"),
-          external: tag(head, "EXTERNAL_NAME") || tag(head, "TECHNICAL_NAME"),
-          dpc: tag(head, "CLASS_NAME"),
-          model: tag(group, "MODEL_TECH_NAME"), modelVersion: tag(group, "MODEL_VERSION"),
-          description: tag(xml, "DESCRIPTION"), file,
-        });
-      }
+  for (const file of winningByLayer(folders, (folder) => walk(folder),
+    (file) => basename(file).toLowerCase())) {
+    const xml = readFileSync(file, "utf8");
+    if (/\.iwmo\.xml$/i.test(file)) {
+      const head = /<_-IWBEP_-I_MGW_OHD>[\s\S]*?<\/_-IWBEP_-I_MGW_OHD>/.exec(xml)?.[0] ?? xml;
+      models.set(tag(head, "TECHNICAL_NAME") + "/" + tag(head, "VERSION"), {
+        model: tag(head, "TECHNICAL_NAME"), version: tag(head, "VERSION"), mpc: tag(head, "CLASS_NAME"), file,
+      });
+    } else {
+      const group = /<_-IWBEP_-I_MGW_SRG>[\s\S]*?<\/_-IWBEP_-I_MGW_SRG>/.exec(xml)?.[0] ?? "";
+      const head = /<_-IWBEP_-I_MGW_SRH>[\s\S]*?<\/_-IWBEP_-I_MGW_SRH>/.exec(xml)?.[0] ?? xml;
+      services.push({
+        service: tag(head, "TECHNICAL_NAME"), version: tag(head, "VERSION"),
+        external: tag(head, "EXTERNAL_NAME") || tag(head, "TECHNICAL_NAME"),
+        dpc: tag(head, "CLASS_NAME"),
+        model: tag(group, "MODEL_TECH_NAME"), modelVersion: tag(group, "MODEL_VERSION"),
+        description: tag(xml, "DESCRIPTION"), file,
+      });
     }
   }
   return services.map((s) => {
@@ -103,7 +102,7 @@ ENDCLASS.
 if (process.argv[1] && /segw-registry\.mjs$/.test(process.argv[1])) {
   const folders = process.argv.slice(2).filter((a) => !a.startsWith("--"));
   const list = process.argv.includes("--list");
-  const entries = segwRegistrations(folders.length > 0 ? folders : [...contentFoldersOf(process.env.OSD_ROOT ?? process.cwd()), "gen"]);
+  const entries = segwRegistrations(folders.length > 0 ? folders : generatorFoldersOf(process.env.OSD_ROOT ?? process.cwd()));
   for (const e of entries) {
     console.log(`segw-registry: ${e.external} -> MPC ${e.mpc || "?"}, DPC ${e.dpc || "?"}${e.description ? " (" + e.description + ")" : ""}`);
   }

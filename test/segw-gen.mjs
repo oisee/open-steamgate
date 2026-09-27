@@ -1,12 +1,29 @@
 import {expect} from "chai";
-import {readFileSync} from "node:fs";
+import {readFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {generate} from "../tools/segw-gen.mjs";
 import {loadFunctionGroups} from "../tools/segw-gen-mapping.mjs";
+import {functionModules} from "../tools/osd-fm-registry.mjs";
 
 // The generator is tested for real against the corpus in .local (the
 // classes SEGW made from the same IWPR must come out identical); this
 // fixture keeps the shape under test in the repository.
 describe("tools/segw-gen: IWPR -> _MPC/_DPC as SEGW writes them", () => {
+  it("a later function group removes modules omitted from that group", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-fugr-layers-"));
+    try {
+      for (const layer of ["first", "second"]) mkdirSync(join(root, layer));
+      const xml = (names) => `<abapGit><FUNCTIONS>${names.map((name) => `<item><FUNCNAME>${name}</FUNCNAME><REMOTE_CALL>R</REMOTE_CALL></item>`).join("")}</FUNCTIONS></abapGit>`;
+      writeFileSync(join(root, "first", "zshared.fugr.xml"), xml(["Z_REMOVED", "Z_KEPT"]));
+      writeFileSync(join(root, "second", "zshared.fugr.xml"), xml(["Z_KEPT"]));
+      const folders = [join(root, "first"), join(root, "second")];
+      expect(functionModules(folders).map((fm) => fm.name)).to.deep.equal(["Z_KEPT"]);
+      expect([...loadFunctionGroups(folders).keys()]).to.deep.equal(["Z_KEPT"]);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
   const {model, files, ext} = generate(readFileSync("test/fixtures/segw/zstg_mini.iwpr.xml", "utf8"));
 
   it("reads the project tree", () => {

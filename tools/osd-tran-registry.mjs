@@ -41,7 +41,7 @@
 //   and a transaction whose class is not in the tree gets no WHEN at all.
 import {readdirSync, readFileSync, statSync, writeFileSync, mkdirSync} from "node:fs";
 import {basename, join} from "node:path";
-import {contentFoldersOf} from "./osd-packs.mjs";
+import {generatorFoldersOf, winningByLayer} from "./osd-packs.mjs";
 
 const OUT = "gen/tran";
 
@@ -137,10 +137,11 @@ function refuse(tran, classes) {
 // every transaction below the folders, later folder winning a code the way
 // the layers do everywhere else (backlog E.1)
 export function transactions(folders) {
+  const files = winningByLayer(folders, (folder) => walk(folder),
+    (file) => basename(file).toUpperCase());
   const found = new Map();
   const classes = new Map();
-  for (const folder of folders) {
-    for (const file of walk(folder)) {
+  for (const file of files) {
       if (/\.clas\.abap$/i.test(file)) {
         const name = basename(file).replace(/\.clas\.abap$/i, "").toUpperCase();
         const source = readFileSync(file, "utf8");
@@ -154,7 +155,6 @@ export function transactions(folders) {
       if (one !== undefined) {
         found.set(one.tcode, one);
       }
-    }
   }
   return [...found.values()].map((tran) => {
     const reason = refuse(tran, classes);
@@ -272,7 +272,7 @@ ENDCLASS.
 if (process.argv[1] && /osd-tran-registry\.mjs$/.test(process.argv[1])) {
   const folders = process.argv.slice(2).filter((a) => !a.startsWith("--"));
   const list = process.argv.includes("--list");
-  const found = transactions(folders.length > 0 ? folders : [...contentFoldersOf(process.env.OSD_ROOT ?? process.cwd()), "gen"]);
+  const found = transactions(folders.length > 0 ? folders : generatorFoldersOf(process.env.OSD_ROOT ?? process.cwd()));
   for (const t of found) {
     const how = t.runnable ? `runs ${t.className}` : `refused: ${t.reason}`;
     console.log(`osd-tran-registry: ${t.tcode} (${t.kind}) -> ${how}${t.text ? " - " + t.text : ""}`);

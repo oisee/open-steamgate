@@ -41,8 +41,9 @@
 //     and `/UI5/CL_UI5_HTTP_HANDLER` serves it out of `O2PAGELINE`. W3MI is
 //     the local carrier, not a claim about SAP.
 import {existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
-import {basename, dirname, join} from "node:path";
+import {basename, dirname, join, relative, resolve} from "node:path";
 import {checkAppName, manifestFor} from "./osd-bsp-app.mjs";
+import {generatorFoldersOf, packsOf, winningByLayer} from "./osd-packs.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 // what a browser is told a page is. A BSP page carries no MIME in the
@@ -169,21 +170,12 @@ export function packAppName(pack) {
   return ("Z" + pack.toUpperCase().replace(/[^A-Z0-9]/g, "_")).slice(0, 15).replace(/_+$/, "");
 }
 
-export function packApps(root = ".") {
-  const packs = [];
-  for (const dir of ["packs", ...(process.env.OSD_PACKS ?? "").split(":").filter(Boolean)]) {
-    const at = join(root, dir);
-    if (existsSync(at) === false) continue;
-    for (const name of readdirSync(at)) {
-      const web = join(at, name, "webapp");
-      if (existsSync(join(at, name, "osd-pack.json")) && existsSync(web)) {
-        packs.push({pack: name, at: web});
-      }
-    }
-  }
+export function packApps(root = ".", env = process.env) {
+  const packs = packsOf(root, env).filter((pack) => pack.webapp !== undefined)
+    .map((pack) => ({pack: pack.name, at: pack.webapp, manifest: join(pack.dir, "osd-pack.json")}));
   const byName = new Map();
   const apps = [];
-  for (const {pack, at} of packs) {
+  for (const {pack, at, manifest} of packs) {
     const app = packAppName(pack);
     if (byName.has(app)) {
       throw new Error(`packs ${byName.get(app)} and ${pack} both derive the BSP application name ${app}: rename one, or give it an entry in src/bsp/apps.json`);
@@ -194,7 +186,7 @@ export function packApps(root = ".") {
     apps.push({
       app,
       text: `pack ${pack}`,
-      file: join(at, "..", "osd-pack.json"),
+      file: manifest,
       pages: pages.map((page) => ({page, mime: mimeOf(page), content: readFileSync(join(at, page))})),
       missing: [],
     });
@@ -282,27 +274,28 @@ export function w3miXml(app, page, mime) {
 }
 
 export function applications(folders) {
+  const files = winningByLayer(folders,
+    (folder) => walk(folder).filter((file) => file.endsWith(".wapa.xml")),
+    (file) => basename(file).toUpperCase());
   const apps = [];
-  for (const folder of folders) {
-    for (const file of walk(folder).filter((f) => f.endsWith(".wapa.xml"))) {
-      const xml = readFileSync(file, "utf8");
-      const app = /<APPLNAME>([^<]*)/.exec(xml)?.[1] ?? "";
-      const text = /<TEXT>([^<]*)/.exec(xml)?.[1] ?? app;
-      const at = dirname(file);
-      const prefix = `${app.toLowerCase()}.wapa.`;
-      const pages = [];
-      const missing = [];
-      for (const m of xml.matchAll(/<PAGENAME>([^<]*)<\/PAGENAME>/g)) {
-        const page = m[1];
-        const onDisk = join(at, prefix + page.replace(/^\./, "").replaceAll("/", "_-").toLowerCase());
-        if (existsSync(onDisk) === false) {
-          missing.push(page);
-          continue;
-        }
-        pages.push({page, mime: mimeOf(page), content: readFileSync(onDisk)});
+  for (const file of files) {
+    const xml = readFileSync(file, "utf8");
+    const app = /<APPLNAME>([^<]*)/.exec(xml)?.[1] ?? "";
+    const text = /<TEXT>([^<]*)/.exec(xml)?.[1] ?? app;
+    const at = dirname(file);
+    const prefix = `${app.toLowerCase()}.wapa.`;
+    const pages = [];
+    const missing = [];
+    for (const m of xml.matchAll(/<PAGENAME>([^<]*)<\/PAGENAME>/g)) {
+      const page = m[1];
+      const onDisk = join(at, prefix + page.replace(/^\./, "").replaceAll("/", "_-").toLowerCase());
+      if (existsSync(onDisk) === false) {
+        missing.push(page);
+        continue;
       }
-      apps.push({app, text, file, pages, missing});
+      pages.push({page, mime: mimeOf(page), content: readFileSync(onDisk)});
     }
+    apps.push({app, text, file, pages, missing});
   }
   return apps.sort((a, b) => (a.app < b.app ? -1 : 1));
 }
@@ -350,8 +343,36 @@ ENDCLASS.
 `;
 }
 
-export function generate(folders, out = "gen/bsp") {
-  const apps = [...applications(folders), ...declared(), ...packApps()];
+export function generate(folders, out = "gen/bsp", root = process.cwd()) {
+  const packs = packApps(root);
+  const sources = [];
+  let declaredAdded = false;
+  const usedPacks = new Set();
+  for (const folder of folders) {
+    sources.push({kind: "folder", folder});
+    if (!declaredAdded && relative(resolve(root, "src"), resolve(root, folder)) === "") {
+      sources.push({kind: "apps", apps: declared(join(root, "src/bsp/apps.json"))});
+      declaredAdded = true;
+    }
+    for (const app of packs) {
+      const packDir = resolve(dirname(app.file));
+      const rel = relative(packDir, resolve(root, folder));
+      if (!usedPacks.has(app.file) && rel !== "" && !rel.startsWith("..") && !rel.startsWith("/")) {
+        sources.push({kind: "apps", apps: [app]});
+        usedPacks.add(app.file);
+      }
+    }
+  }
+  if (!declaredAdded) sources.unshift({kind: "apps", apps: declared(join(root, "src/bsp/apps.json"))});
+  // A web-only pack has no ABAP folder; it still precedes explicit user layers.
+  const orphanPacks = packs.filter((app) => !usedPacks.has(app.file));
+  if (orphanPacks.length) {
+    const generated = sources.findIndex((source) => source.kind === "folder" && resolve(root, source.folder) === resolve(root, "gen"));
+    sources.splice(generated === -1 ? 0 : generated + 1, 0, {kind: "apps", apps: orphanPacks});
+  }
+  const apps = winningByLayer(sources,
+    (source) => source.kind === "folder" ? applications([source.folder]) : source.apps,
+    (app) => app.app.toUpperCase());
   mkdirSync(out, {recursive: true});
   writeFileSync(join(out, "zcl_stg_bsp_registry.clas.abap"), registryClass(apps));
 
@@ -397,7 +418,8 @@ export function generate(folders, out = "gen/bsp") {
 if (runsAs("osd-bsp-registry.mjs")) {
   const argv = process.argv.slice(2);
   const folders = argv.filter((a) => a.startsWith("--") === false);
-  const apps = generate(folders.length > 0 ? folders : ["src", "gen"]);
+  const root = process.env.OSD_ROOT ?? process.cwd();
+  const apps = generate(folders.length > 0 ? folders : generatorFoldersOf(root), join(root, "gen/bsp"), root);
   for (const a of apps) {
     const bytes = a.pages.reduce((n, p) => n + p.content.length, 0);
     console.log(`osd-bsp-registry: ${a.app}: ${a.pages.length} pages, ${bytes} bytes  (${basename(a.file)})`);

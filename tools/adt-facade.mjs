@@ -34,7 +34,7 @@ import {portabilityWarnings} from "./amdp-gen.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
 import {segwRegistrations} from "./segw-registry.mjs";
-import {contentFoldersOf} from "./osd-packs.mjs";
+import {generatorFoldersOf} from "./osd-packs.mjs";
 import {entitySetMapFor} from "./segw-entityset-map.mjs";
 import {testClassesIn} from "./osd-unit-run.mjs";
 import {serviceTree} from "./osd-status.mjs";
@@ -1415,7 +1415,7 @@ export function adtRouter(options = {}) {
   // the developer's inventory). Source paths stay relative to the tree.
   router.get(`${BASE}/core/http/transactions`, (req, res) => {
     try {
-      const folders = [...contentFoldersOf(store.root), "gen"].map((folder) => join(store.root, folder));
+      const folders = generatorFoldersOf(store.root).map((folder) => join(store.root, folder));
       const rows = transactions(folders).map((one) => ({
         ...one,
         file: undefined,
@@ -1442,7 +1442,7 @@ export function adtRouter(options = {}) {
       refuse(res, 400, "ExceptionInvalidRequest", "class is required");
       return;
     }
-    const folders = [...contentFoldersOf(store.root), "gen"].map((f) => join(store.root, f));
+    const folders = generatorFoldersOf(store.root).map((f) => join(store.root, f));
     const registrations = segwRegistrations(folders);
     const readSource = (className) => {
       try {
@@ -1509,7 +1509,7 @@ export function adtRouter(options = {}) {
         includes = result.rows.map((r) => String(r.include).toUpperCase());
       }
       const typeOf = new Map(store.list().map((o) => [o.name, o.type]));
-      const folders = [...contentFoldersOf(store.root), "gen"].map((f) => join(store.root, f));
+    const folders = generatorFoldersOf(store.root).map((f) => join(store.root, f));
       const registrations = segwRegistrations(folders);
       const testClasses = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
       const readers = [...new Set(includes)]

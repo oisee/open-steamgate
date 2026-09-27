@@ -1,11 +1,27 @@
 // BSP applications served by this system's own ABAP.
 import {expect} from "chai";
-import {mkdtempSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
+import {mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {W3MI_NAME_WIDTH, applications, generate, mimeOf, registryClass, w3miFile, w3miName} from "../tools/osd-bsp-registry.mjs";
+import {generatorFoldersOf} from "../tools/osd-packs.mjs";
 
 describe("tools/osd-bsp-registry: a BSP application is an object, not a folder", () => {
+  it("a user WAPA overrides a pack application of the same name", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-bsp-order-"));
+    try {
+      for (const dir of ["src", "packs/demo/src", "packs/demo/webapp", "user"]) mkdirSync(join(root, dir), {recursive: true});
+      writeFileSync(join(root, "packs/demo/osd-pack.json"), JSON.stringify({name: "demo"}));
+      writeFileSync(join(root, "packs/demo/webapp/index.html"), "pack page");
+      writeFileSync(join(root, "user/zdemo.wapa.xml"), "<APPLNAME>ZDEMO</APPLNAME><TEXT>user</TEXT><PAGENAME>index.html</PAGENAME>");
+      writeFileSync(join(root, "user/zdemo.wapa.index.html"), "user page");
+      const folders = generatorFoldersOf(root, {OSD_LAYERS: "user"}).map((folder) => join(root, folder));
+      const apps = generate(folders, join(root, "out"), root);
+      expect(apps.find((app) => app.app === "ZDEMO").pages[0].content.toString()).to.equal("user page");
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
   it("reads the pages the descriptor names, from the files abapGit would write", () => {
     const apps = applications(["src"]);
     expect(apps.length, "the tree carries at least one BSP application").to.be.greaterThan(0);

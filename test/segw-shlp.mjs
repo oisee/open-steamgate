@@ -1,7 +1,25 @@
 import {expect} from "chai";
+import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {searchHelps, parseSearchHelp, shlpRegistryClass} from "../tools/segw-shlp.mjs";
 
 describe("tools/segw-shlp: search help objects -> value help providers", () => {
+  it("selects the later search help before deciding whether to register it", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-shlp-layers-"));
+    try {
+      for (const layer of ["first", "second"]) mkdirSync(join(root, layer));
+      const xml = (simple, method) => `<abapGit><DD30V><SHLPNAME>ZSHARED</SHLPNAME><ISSIMPLE>${simple}</ISSIMPLE><SELMETHOD>${method}</SELMETHOD></DD30V></abapGit>`;
+      writeFileSync(join(root, "first", "zshared.shlp.xml"), xml("X", "ZOLD"));
+      writeFileSync(join(root, "second", "zshared.shlp.xml"), xml("", "ZNEW"));
+      const helps = searchHelps([join(root, "first"), join(root, "second")]);
+      expect(helps).to.have.length(1);
+      expect(helps[0]).to.include({selmethod: "ZNEW", simple: false});
+      expect(shlpRegistryClass(helps)).not.to.contain("iv_shlp_name = 'ZSHARED'");
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
   it("reads the demo's search help", () => {
     const helps = searchHelps(["src"]);
     const sh = helps.find((h) => h.name === "ZSTG_STATUS_SH");

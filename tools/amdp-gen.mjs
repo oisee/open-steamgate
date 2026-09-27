@@ -26,7 +26,7 @@ import {readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync}
 import {join, basename, dirname} from "node:path";
 import {createHash} from "node:crypto";
 import {extract, parameterType} from "./amdp-extract.mjs";
-import {contentFoldersOf} from "./osd-packs.mjs";
+import {contentFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {compileProcedure} from "./sqlscript-to-procedure-ir.mjs";
 import {ObjectStore} from "./osd-store.mjs";
 import {ddicCatalogue, ddicKeys} from "./sqlscript-ddic-catalogue.mjs";
@@ -61,17 +61,17 @@ function classFiles(folders) {
 
 /** the type sources a class may need: every interface beside it */
 function typeSources(folders) {
-  const out = [];
-  const walk = (dir) => {
-    if (!existsSync(dir)) return;
+  const walk = (dir, out = []) => {
+    if (!existsSync(dir)) return out;
     for (const e of readdirSync(dir, {withFileTypes: true})) {
       const p = join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (/\.intf\.abap$/i.test(e.name)) out.push(readFileSync(p, "utf8"));
+      if (e.isDirectory()) walk(p, out);
+      else if (/\.intf\.abap$/i.test(e.name)) out.push(p);
     }
+    return out;
   };
-  for (const f of folders) walk(f);
-  return out;
+  return winningByLayer(folders, (folder) => walk(folder, []),
+    (file) => basename(file).toUpperCase()).map((file) => readFileSync(file, "utf8"));
 }
 
 /** the ABAP of one rewritten method */
@@ -167,7 +167,8 @@ export function generate(folders, out = DEFAULT_OUT, options = {}) {
   const written = [];
   rmSync(out, {recursive: true, force: true});
 
-  for (const file of classFiles(folders)) {
+  for (const file of winningByLayer(folders, (folder) => classFiles([folder]),
+    (file) => basename(file).toUpperCase())) {
     const source = readFileSync(file, "utf8");
     if (!/BY\s+DATABASE\s+(PROCEDURE|FUNCTION)/i.test(source)) continue;
     const parsed = extract(source, basename(file), extras);

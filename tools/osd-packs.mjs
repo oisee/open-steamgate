@@ -31,7 +31,7 @@
 // whole procedure. The generation hash covers the input folders, so a new
 // pack is a new generation, which is what it should be.
 import {existsSync, readFileSync, readdirSync, statSync} from "node:fs";
-import {basename, isAbsolute, join, relative, resolve} from "node:path";
+import {basename, delimiter, isAbsolute, join, relative, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {readLock} from "./osd-lock.mjs";
 
@@ -39,6 +39,18 @@ export const MANIFEST = "osd-pack.json";
 export const PACKS_DIR = "packs";
 
 const slash = (p) => p.split("\\").join("/");
+
+/** Select one copy of each object from folders in layer order. Later folders win. */
+export function winningByLayer(folders, entriesIn, keyOf) {
+  const winners = new Map();
+  for (const folder of folders) {
+    for (const entry of entriesIn(folder)) {
+      winners.set(keyOf(entry), entry);
+    }
+  }
+  return [...winners.values()];
+}
+
 const isDir = (p) => {
   try {
     return statSync(p).isDirectory();
@@ -199,9 +211,17 @@ export function inputFoldersOf(root, config, env = process.env) {
   const packs = packsOf(root, env).flatMap((p) => p.abap.map((f) => folderOf(root, f)));
   const added = packs.filter((f) => listed.includes(f) === false);
   const generated = listed.lastIndexOf("gen");
-  return generated === -1
+  const system = generated === -1
     ? [...listed, ...added]
     : [...listed.slice(0, generated), ...added, ...listed.slice(generated)];
+  // The user's explicit layers are last, including after generated overlays.
+  // This is the same later-wins ordering as input_folder in the config.
+  return [...system, ...userFoldersOf(root, env)];
+}
+
+export function userFoldersOf(root, env = process.env) {
+  return (env.OSD_LAYERS ?? "").split(delimiter).filter(Boolean)
+    .map((folder) => folderOf(root, isAbsolute(folder) ? folder : resolve(root, folder)));
 }
 
 /** the roots a pack adds to the object store, with the package each lives in */
@@ -211,16 +231,19 @@ export function packRootsOf(root, env = process.env) {
   })));
 }
 
-/** The folders a generator reads: content, not every layer.
- *
- * The transpiler is handed test/ and gen/ as well, and a generator that
- * scanned those found a CDS fixture under test/fixtures whose table exists
- * nowhere and failed the build (2026-09-16). Content is this tree's src/ and
- * every pack's ABAP folder, which is what a pack may carry CDS or a SEGW
- * project in (backlog E.3). */
+/** Project the build's ordered layers onto generator inputs. The transpiler
+ * reads test/ for ABAP unit classes, but generators must skip its incomplete
+ * fixtures (notably a CDS view without its table). Other configured folders,
+ * including imports, retain their exact build precedence. */
+export function generatorFoldersOf(root, env = process.env) {
+  const file = join(root, "abap_transpile.json");
+  const config = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {input_folder: ["src"]};
+  return inputFoldersOf(root, config, env).filter((folder) => folder !== "test");
+}
+
+/** Content-only projection for generators that produce gen/. */
 export function contentFoldersOf(root, env = process.env) {
-  const own = ["src"].filter((f) => isDir(join(root, f)));
-  return [...own, ...packsOf(root, env).flatMap((p) => p.abap.map((f) => folderOf(root, f)))];
+  return generatorFoldersOf(root, env).filter((folder) => folder !== "gen");
 }
 
 /** every folder of seed rows: the tree's own, then each pack's */

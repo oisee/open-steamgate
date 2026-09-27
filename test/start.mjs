@@ -3,7 +3,7 @@ import {dialogStep, lockedClient} from "../tools/osd-dialog-step.mjs";
 import {ensureDemoData} from "../tools/osd-demo-data.mjs";
 import express from "express";
 import {existsSync} from "node:fs";
-import {tilesOf, webappsOf} from "../tools/osd-packs.mjs";
+import {generatorFoldersOf, tilesOf, webappsOf} from "../tools/osd-packs.mjs";
 import {mountRemoteServices} from "../tools/osd-remote-service.mjs";
 import {segwRegistrations} from "../tools/segw-registry.mjs";
 import {createServer as createHttpsServer} from "node:https";
@@ -144,7 +144,7 @@ export function startServer(quiet) {
   // registry has.
   // "local wins" asks the same registry the dispatcher asks, so a
   // destination can never shadow a service this system actually has
-  const ours = new Set(segwRegistrations(["src", "gen"]).map((r) => r.external || r.service));
+  const ours = new Set(segwRegistrations(generatorFoldersOf(process.cwd())).map((r) => r.external || r.service));
   const remote = mountRemoteServices(app, (name) => ours.has(name));
   if (remote.length > 0) {
     console.log(`remote services (a destination answers these): ${remote.join(", ")}`);
