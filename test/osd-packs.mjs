@@ -136,15 +136,20 @@ describe("tools/osd-packs: a pack is a directory", () => {
         edit: {semanticObject: "Vibe", action: "manage", title: "Edit vibes"},
         localized: {semanticObject: "Vibe", action: "translate", title: "{{appTitle}}"},
         broken: {semanticObject: "Vibe"},
+        dashed: {semanticObject: "Vibe-Pack", action: "display"},
+        wildcard: {semanticObject: "*", action: "display"},
       }},
     }}));
+    expect(packApps(root, {}).map((app) => app.app), "the url names the BSP application packApps serves").to.include("ZVIBES");
+    write("packs/garbled/osd-pack.json", JSON.stringify({}));
+    write("packs/garbled/webapp/manifest.json", "{ not json");
     write("packs/noid/osd-pack.json", JSON.stringify({}));
     write("packs/noid/webapp/manifest.json", JSON.stringify({"sap.app": {crossNavigation: {inbounds: {x: {semanticObject: "No", action: "id"}}}}}));
     write("packs/plain/osd-pack.json", JSON.stringify({}));
     write("packs/plain/webapp/index.html", "no manifest");
 
     const apps = packApplications(root, {});
-    expect(Object.keys(apps).sort(), "no action, no app id, no manifest: nothing").to.deep.equal(["Vibe-display", "Vibe-manage", "Vibe-translate"]);
+    expect(Object.keys(apps).sort(), "no action, a dash, a wildcard, no app id, no manifest, bad JSON: nothing").to.deep.equal(["Vibe-display", "Vibe-manage", "Vibe-translate"]);
     expect(apps["Vibe-display"]).to.deep.equal({
       title: "Vibes",
       description: "pack vibes",
@@ -155,7 +160,6 @@ describe("tools/osd-packs: a pack is a directory", () => {
     });
     expect(apps["Vibe-manage"].title).to.equal("Edit vibes");
     expect(apps["Vibe-translate"].title, "an i18n placeholder is not a title").to.equal("Vibes");
-    expect(packApps(root, {}).map((app) => app.app), "the url names the BSP application packApps serves").to.include("ZVIBES");
   });
 
   it("refuses two webapp packs whose names collide at the BSP 15 character limit", () => {

@@ -18,10 +18,11 @@ sap.ui.define([], function () {
   }
   // A tile's targetURL that is not a hash is followed as an outside link (the
   // launchpad opens it in a new window), so a pack tile written as this
-  // page's own intent, "/app/flp.html#Object-action", becomes "#Object-action"
+  // page's own intent -- "/app/flp.html#Object-action", "flp.html#...",
+  // "./flp.html#...", with or without a query -- becomes "#Object-action"
   // and navigates inside the shell like the built-in tiles.
   function tileTarget(value) {
-    var intent = /^\/app\/flp\.html(#[^#]+)$/.exec(value || "");
+    var intent = /^(?:\/app\/|\.\/)?flp\.html(?:\?[^#]*)?(#[^#]+)$/.exec(value || "");
     return intent ? intent[1] : atMount(value);
   }
   if (launchPage) {

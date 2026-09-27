@@ -79,6 +79,7 @@
     "test/osd-inputs.mjs",
     "test/osd-main.mjs",
     "test/osd-packs.mjs",
+    "test/flp-pack-intents.mjs",
     "test/osd-persist.mjs",
     "test/osd-proxy.mjs",
     "test/osd-queue-check.mjs",

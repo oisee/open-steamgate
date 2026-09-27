@@ -176,9 +176,11 @@ export function packAppName(pack) {
  *  an intent only from the applications it was booted with, so these are
  *  handed to webapp/flp.html through /app/packs.json before it boots. Each
  *  points at the pack's BSP application, the same derived name `packApps`
- *  serves, relative to /app/flp.html the way the built-in ones are. An
- *  inbound without an `sap.app.id` to load is skipped; the later pack wins
- *  an intent two packs declare, as the later layer wins a name. */
+ *  serves, relative to /app/flp.html the way the built-in ones are. An app
+ *  without an `sap.app.id` to load, or an inbound whose semantic object or
+ *  action is not a plain word (a dash, a "*", empty), gives nothing; the
+ *  later pack wins an intent two packs declare, as the later layer wins a
+ *  name. */
 export function packApplications(root = ".", env = process.env) {
   const applications = {};
   for (const pack of packsOf(root, env).filter((p) => p.webapp !== undefined)) {
@@ -193,7 +195,9 @@ export function packApplications(root = ".", env = process.env) {
     if (typeof app.id !== "string" || app.id === "") continue;
     const title = typeof app.title === "string" && !app.title.startsWith("{{") ? app.title : pack.name;
     for (const inbound of Object.values(app.crossNavigation?.inbounds ?? {})) {
-      if (typeof inbound?.semanticObject !== "string" || typeof inbound?.action !== "string") continue;
+      // the shell splits "#Object-action" at the first dash, and a wildcard
+      // or an empty part is no intent a tile can name
+      if (!/^\w+$/.test(inbound?.semanticObject ?? "") || !/^\w+$/.test(inbound?.action ?? "")) continue;
       applications[`${inbound.semanticObject}-${inbound.action}`] = {
         title: typeof inbound.title === "string" && !inbound.title.startsWith("{{") ? inbound.title : title,
         description: `pack ${pack.name}`,

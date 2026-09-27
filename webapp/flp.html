@@ -418,14 +418,17 @@
     // sandbox.js, synchronously on purpose: the boot must not start without
     // them. A built-in application keeps its intent and its component: a pack
     // declaring either again is skipped, since two apps under one component
-    // name would load whichever the loader found first. No server (a static
-    // preview without packs.json) leaves the list as it is.
+    // name would load whichever the loader found first. For the same reason
+    // one component is one app: every inbound of a pack app goes in, and a
+    // second pack naming that component at another URL does not. No server
+    // (a static preview without packs.json) leaves the list as it is.
     (function () {
       var applications = window["sap-ushell-config"].applications;
-      var components = {};
+      var builtIn = {};
       Object.keys(applications).forEach(function (intent) {
-        components[applications[intent].additionalInformation] = true;
+        builtIn[applications[intent].additionalInformation] = true;
       });
+      var fromPack = {};
       try {
         var request = new XMLHttpRequest();
         request.open("GET", "./packs.json", false);
@@ -433,11 +436,13 @@
         var fromPacks = request.status === 200 ? (JSON.parse(request.responseText).applications || {}) : {};
         Object.keys(fromPacks).forEach(function (intent) {
           var app = fromPacks[intent];
-          if (applications[intent] || components[app.additionalInformation]) {
+          var component = app.additionalInformation;
+          if (applications[intent] || builtIn[component] ||
+            (fromPack[component] !== undefined && fromPack[component] !== app.url)) {
             return;
           }
           applications[intent] = app;
-          components[app.additionalInformation] = true;
+          fromPack[component] = app.url;
         });
       } catch (e) {
         // no packs.json, or not JSON: the built-in applications are the whole list
