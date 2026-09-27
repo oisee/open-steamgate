@@ -394,9 +394,10 @@ export function copySeedTree(seedRoot, selectedPacks) {
  *  links the build makes (`build/live`, `output`, the generation's `test`)
  *  are dropped and made again by the first build; a seed that carries no
  *  symlink cannot fail to unpack where links need rights. `build/tmp/` is
- *  scratch. The build runs without OSD_PACKS, as a first start with no
- *  workspace pack does; a workspace pack is another input and builds cold,
- *  as before. */
+ *  scratch. The build runs without OSD_PACKS. A first start always has the
+ *  launcher's empty notebook-scratch pack, which names nothing since a pack
+ *  that brings nothing is not an input (tools/osd-build.mjs inputsOf); a
+ *  workspace pack with content is another input and builds cold, as before. */
 function prebuildGeneration(seedRoot, env) {
   const buildEnv = {...env};
   delete buildEnv.OSD_PACKS;
@@ -404,6 +405,13 @@ function prebuildGeneration(seedRoot, env) {
   execFileSync(process.execPath, ["tools/osd-build.mjs"], {cwd: seedRoot, env: buildEnv, stdio: ["ignore", "pipe", "inherit"]});
   const live = realpathSync(join(seedRoot, "build", "live"));
   const hash = basename(live);
+  // the generation's manifest records when and how long: the same tree
+  // packaged twice must make the same seed ID (the materialized copy is
+  // keyed by it), so both are fixed. builtAt only orders generations for
+  // pruning, and the shipped one is the oldest a copy will ever hold.
+  const manifestFile = join(live, "manifest.json");
+  const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+  writeFileSync(manifestFile, JSON.stringify({...manifest, builtAt: "1970-01-01T00:00:00.000Z", ms: 0}, undefined, 2) + "\n");
   for (const name of readdirSync(join(seedRoot, "build"))) {
     if (name !== "by-input") rmSync(join(seedRoot, "build", name), {recursive: true, force: true});
   }

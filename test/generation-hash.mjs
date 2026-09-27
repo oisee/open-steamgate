@@ -1,5 +1,6 @@
 import {expect} from "chai";
-import {writeFileSync, readFileSync, rmSync, mkdirSync} from "node:fs";
+import {writeFileSync, readFileSync, rmSync, mkdirSync, mkdtempSync} from "node:fs";
+import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {hashOf, generatorClosure, genHash} from "../tools/osd-build.mjs";
 
@@ -81,6 +82,38 @@ describe("a generation's name is a function of the tree, not of its build histor
 // a cache hit that finds it different runs the generators again. Measured
 // after: the reuse takes 2.4 s instead of 0.12 s, against 9.7 s for a full
 // build, and `gen/` comes out consistent.
+// **An empty pack named every generation it was near.** The VS Code
+// extension always adds an empty notebook-scratch pack from its own storage,
+// whose path differs per machine; hashing that path meant a generation built
+// anywhere else could never be reused (T2, the prebuilt .vsix generation).
+describe("a pack that brings nothing does not name the generation", () => {
+  const withPacks = (dir, fn) => {
+    const saved = process.env.OSD_PACKS;
+    process.env.OSD_PACKS = dir;
+    try {
+      return fn();
+    } finally {
+      if (saved === undefined) delete process.env.OSD_PACKS;
+      else process.env.OSD_PACKS = saved;
+    }
+  };
+
+  it("an empty pack under any path leaves the name as it was, and one file in it changes it", () => {
+    const before = withPacks("", () => hashOf(process.cwd()));
+    const storage = mkdtempSync(join(tmpdir(), "osd-empty-pack-"));
+    try {
+      const scratch = join(storage, "notebook-scratch");
+      mkdirSync(join(scratch, "src"), {recursive: true});
+      writeFileSync(join(scratch, "osd-pack.json"), JSON.stringify({name: "notebook-scratch", order: 10000}));
+      expect(withPacks(storage, () => hashOf(process.cwd())), "empty: builds nothing, names nothing").to.equal(before);
+      writeFileSync(join(scratch, "src", "zcl_cell.clas.abap"), "CLASS zcl_cell DEFINITION PUBLIC. ENDCLASS.\n");
+      expect(withPacks(storage, () => hashOf(process.cwd())), "with a class it is an input").to.not.equal(before);
+    } finally {
+      rmSync(storage, {recursive: true, force: true});
+    }
+  });
+});
+
 describe("a cache hit does not leave gen/ holding somebody else's edit", () => {
   it("genHash reads the content, so a changed file changes it", async () => {
     const {writeFileSync, rmSync, mkdirSync} = await import("node:fs");

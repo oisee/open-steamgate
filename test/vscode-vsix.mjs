@@ -387,14 +387,21 @@ describe("packaging a prebuilt generation (T2, docs/ideas.md)", function () {
       const unzipDir = join(scratch, "unzipped");
       execFileSync("unzip", ["-q", out, "-d", unzipDir]);
       const extensionDir = join(unzipDir, "extension");
-      const {ensureMaterializedHome} = createRequire(import.meta.url)(join(extensionDir, "launcher.js"));
+      const {ensureMaterializedHome, ensureWorkspacePacks} = createRequire(import.meta.url)(join(extensionDir, "launcher.js"));
       // another path than the one it was built under: the name must not depend on it
       const home = await ensureMaterializedHome(join(extensionDir, "osd"), join(scratch, "elsewhere", "globalStorage"));
-      const env = {...process.env};
-      delete env.OSD_PACKS;
+      // OSD_PACKS the way the launcher sets it on a first start with no
+      // workspace folder: its storage, holding the empty notebook-scratch pack
+      const env = {...process.env, OSD_PACKS: ensureWorkspacePacks(join(scratch, "elsewhere", "storage"), [])};
       const log = execFileSync(process.execPath, ["tools/osd-build.mjs"], {cwd: home, env, encoding: "utf8"});
       expect(log, "the first build of a materialized copy").to.match(new RegExp(`osd-build: reused ${generations[0]} `));
       expect(log).to.not.match(/osd-build: built /);
+
+      // the same tree packaged again makes the same seed: the materialized
+      // copy is keyed by it, so a rebuilt .vsix of an unchanged tree reuses it
+      const again = await buildTestVsix(join(scratch, "build-again"), {OSD_VSIX_PREBUILT: "1"});
+      const seedIdOf = (archive) => execFileSync("unzip", ["-p", archive, "extension/osd/.seed-id"], {encoding: "utf8"}).trim();
+      expect(seedIdOf(again.out)).to.equal(seedIdOf(out));
     } finally {
       rmSync(scratch, {recursive: true, force: true});
     }
