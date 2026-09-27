@@ -134,10 +134,13 @@ function vscodeStub(settings = {}) {
     },
     window: {
       createWebviewPanel: (...args) => {
+        const disposeListeners = [];
         const panel = {
           args,
           webview: {html: "", onDidReceiveMessage: () => ({dispose() {}})},
-          onDidDispose: () => ({dispose() {}}),
+          onDidDispose: (listener) => { disposeListeners.push(listener); return {dispose() {}}; },
+          disposed: false,
+          dispose() { this.disposed = true; for (const listener of disposeListeners) listener(); },
           reveal() {},
         };
         panels.push(panel);
@@ -630,6 +633,9 @@ describe("editors/vscode: the extension's logic", function () {
     expect(html).to.contain("System information app");
     expect(html).to.contain("portable (limited) on sqlite");
     expect(html).to.contain("<iframe");
+    // Q7: its launchpad buttons are the extension's own commands, not a browser link
+    expect(html).to.contain('href="command:osd.openLaunchpad"').and.to.contain('href="command:osd.openLaunchpadExternal"');
+    expect(html).to.not.contain('target="_blank"');
     expect(overviewStatusSection("Services", model.status.services)).to.contain("/app/flp.html");
     // OData plumbing is not shown: __metadata and all-deferred navigation columns
     const plumbed = [
@@ -1700,6 +1706,47 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     expect(items.some((m) => m.command === "osd.openServiceMetadataExternal")).to.equal(true);
   });
 
+  it("the registered open commands: the external ones use the browser with a tree item, the others osd.openIn", async () => {
+    const api = vscodeStub({home: ROOT});
+    const handlers = new Map();
+    api.commands.registerCommand = (command, handler) => { handlers.set(command, handler); return {dispose() {}}; };
+    const {registerOpenCommands} = loadExtension(api);
+    const launchpad = [];
+    const controller = {openLaunchpad: (where) => launchpad.push(where ?? "default"), openLaunchpadInVsCode: () => launchpad.push("vscode")};
+    registerOpenCommands({subscriptions: []}, controller);
+    const external = [["osd.openHostDoorExternal", {route: "/osd/serving"}],
+      ["osd.openServiceRowExternal", {row: {kind: "ICF", path: "/sap/bc/leaf", name: "Leaf"}}],
+      ["osd.openServiceMetadataExternal", {row: {kind: "ODATA", path: "/sap/opu/odata/sap/ZLEAF", name: "Leaf"}}]];
+    for (const [command, item] of external) {
+      const before = api.externalOpens.length;
+      await handlers.get(command)(item);
+      expect(api.externalOpens.length, command).to.equal(before + 1);
+    }
+    expect(api.panels, "an external action opens no tab").to.have.lengthOf(0);
+    await handlers.get("osd.openHostDoor")({route: "/osd/serving"});
+    await handlers.get("osd.openServiceMetadata")({row: {kind: "ODATA", path: "/sap/opu/odata/sap/ZLEAF", name: "Leaf"}});
+    expect(api.panels.map((panel) => panel.args[0])).to.deep.equal(["osdEndpoint", "osdServiceMetadata"]);
+    await handlers.get("osd.openLaunchpadExternal")();
+    await handlers.get("osd.openLaunchpad")();
+    await handlers.get("osd.openLaunchpadInVsCode")();
+    expect(launchpad).to.deep.equal(["browser", "default", "vscode"]);
+  });
+
+  it("a closed page tab is forgotten, and a stopped system closes its tabs", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {openPage, closePageTabs} = loadExtension(api);
+    const first = await openPage("http://localhost:3591/osd/serving");
+    first.dispose();
+    const second = await openPage("http://localhost:3591/osd/serving");
+    expect(second, "a new tab after the old one was closed").to.not.equal(first);
+    const other = await openPage("http://localhost:3591/app/flp.html");
+    closePageTabs();
+    expect([second.disposed, other.disposed]).to.deep.equal([true, true]);
+    const third = await openPage("http://localhost:3591/osd/serving");
+    expect(api.panels).to.have.lengthOf(4);
+    expect(third.disposed).to.equal(false);
+  });
+
   it("keeps entity-set and entity clicks separate for the same DPC and set", async () => {
     const api = vscodeStub({home: ROOT});
     const {EntitySetItem, clickTreeNode} = loadExtension(api);
@@ -2046,7 +2093,9 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     expect(html).to.contain("&lt;Demo&gt;").and.to.contain("ABAP Unit by reference").and.to.contain("HTTP tests by URL");
     expect(html).to.contain("TravelSet").and.to.contain("abc123").and.to.contain("data-source=\"dpc\"");
     expect(html).to.contain("test/e2e/service.spec.mjs");
-    expect(html).to.contain('title="Opens in your browser."\u003e$metadata</a>');
+    // Q7: the $metadata link asks the extension (a VS Code tab by osd.openIn), with a browser twin
+    expect(html).to.contain('data-metadata="default"').and.to.contain('data-metadata="browser"');
+    expect(html).to.not.contain('target="_blank"');
   });
 });
 

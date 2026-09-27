@@ -217,7 +217,7 @@
       {"command": "osd.openSystemLog", "title": "osd: Open system log"},
       {"command": "osd.openLaunchpad", "title": "osd: Open launchpad", "icon": "$(rocket)"},
       {"command": "osd.openLaunchpadInVsCode", "title": "osd: Open launchpad inside VS Code"},
-      {"command": "osd.openLaunchpadExternal", "title": "Open in External Browser", "icon": "$(link-external)"},
+      {"command": "osd.openLaunchpadExternal", "title": "Open in External Browser", "category": "osd", "icon": "$(link-external)"},
       {"command": "osd.openHostDoorExternal", "title": "Open in External Browser", "icon": "$(link-external)"},
       {"command": "osd.openServiceMetadataExternal", "title": "Open $metadata in External Browser", "icon": "$(link-external)"},
       {"command": "osd.refreshTree", "title": "osd: Refresh the view (no rebuild)", "icon": "$(refresh)"},
@@ -246,7 +246,10 @@
         {"command": "osd.webProbe", "when": "isWeb"},
         {"command": "osd.webReadProbe", "when": "isWeb"},
         {"command": "osd.webVerifyLastTravel", "when": "isWeb"},
-        {"command": "osd.webProbeView", "when": "isWeb"}
+        {"command": "osd.webProbeView", "when": "isWeb"},
+        {"command": "osd.openHostDoorExternal", "when": "false"},
+        {"command": "osd.openServiceRowExternal", "when": "false"},
+        {"command": "osd.openServiceMetadataExternal", "when": "false"}
       ],
       "editor/title": [
         {"command": "osd.run", "when": "resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/", "group": "navigation@1"},
@@ -282,8 +285,8 @@
         {"command": "osd.openHostDoorExternal", "when": "view == osdTree && viewItem == osd-host-open", "group": "1_open@1"},
         {"command": "osd.runTransaction", "when": "view == osdTree && viewItem == osd-transaction-runnable", "group": "inline"},
         {"command": "osd.runTransaction", "when": "view == osdTree && viewItem == osd-transaction-runnable", "group": "1_run@1"},
-        {"command": "osd.openServiceRow", "when": "view == osdTree && (viewItem =~ /^osd-service-app(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-odata(;|$)/) && viewItem =~ /(^|;)url(;|$)/", "group": "inline"},
-        {"command": "osd.openServiceRowExternal", "when": "view == osdTree && (viewItem =~ /^osd-service-app(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-odata(;|$)/) && viewItem =~ /(^|;)url(;|$)/", "group": "inline"},
+        {"command": "osd.openServiceRow", "when": "view == osdTree && (viewItem =~ /^osd-service-app(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-odata(;|$)/) && viewItem =~ /(^|;)url(;|$)/", "group": "inline@1"},
+        {"command": "osd.openServiceRowExternal", "when": "view == osdTree && (viewItem =~ /^osd-service-app(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-odata(;|$)/) && viewItem =~ /(^|;)url(;|$)/", "group": "inline@2"},
         {"command": "osd.openServiceRowExternal", "when": "view == osdTree && (viewItem =~ /^osd-service-app(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-odata(;|$)/) && viewItem =~ /(^|;)url(;|$)/", "group": "1_open@1"},
         {"command": "osd.openServiceMetadata", "when": "view == osdTree && viewItem =~ /^osd-service-odata(;|$)/ && viewItem =~ /(^|;)metadata(;|$)/", "group": "1_open@2"},
         {"command": "osd.openServiceMetadataExternal", "when": "view == osdTree && viewItem =~ /^osd-service-odata(;|$)/ && viewItem =~ /(^|;)metadata(;|$)/", "group": "1_open@3"},

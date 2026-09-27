@@ -665,7 +665,12 @@ dumps, and SQL doors. **TRAN** comes from the transaction registry.
 iframe of the running system's own page, one tab per URL, a second click
 reveals it), the system browser when the setting is `browser`; the
 Launchpad node's inline link-external action and its "Open in External
-Browser" context item always use the browser; a second, new status bar item
+Browser" context item always use the browser, and "osd: Open launchpad
+inside VS Code" (the palette) always a tab. The System overview's
+"Open launchpad" / "Open in browser" buttons and the service details'
+`$metadata` / "in browser" links take the same two routes. Page tabs close
+when the system stops: the page they show is gone, and after a restart the
+same URL may be another generation; a second, new status bar item
 (▶ / ■, left of the existing generation display, which assumes something
 is already serving) starts or stops the one `Launcher` this window
 drives, and the editor-title button on `.abap` files is `osd.run` (F8's

@@ -2364,7 +2364,7 @@ function serviceDetailsHtml(details, nonce = "") {
         <p class="muted">ABAP Unit by reference</p>${list(tests, (test) => `<li><code>${esc(test)}</code></li>`)}</section>`;
     };
     body += `<section><h2>OData</h2><p>DPC: ${esc(row.handler ?? "n/a")}</p><p>MPC: ${esc(row.mpc ?? "n/a")}</p>
-      <p><a href="${attr(metadataUrl ?? "")}" target="_blank" rel="noreferrer" title="Opens in your browser.">$metadata</a></p>
+      <p><a href="#" data-metadata="default" title="${attr(metadataUrl ?? "")}">$metadata</a> · <a href="#" data-metadata="browser">in browser</a></p>
       ${details.entitySetsError ? `<p class="error">Entity sets: ${esc(details.entitySetsError)}</p>` : ""}
       <h3>Model sources</h3>${list(details.card?.model, (target) => `<li>${cardLink(target)}</li>`)}
       <h3>Entity sets</h3>${list(details.card?.entitySets ?? details.entitySets ?? [], (set) => `<li><code>${esc(set.set)}</code>
@@ -2395,7 +2395,7 @@ function serviceDetailsHtml(details, nonce = "") {
       <p>Service declaration: ${sourceButton("service", row.kind === "APC" ? "Open SAPC source" : "Open SICF source", details.sources?.service)}</p></section>`;
   }
 
-  const script = `<script nonce="${attr(nonce)}">const vscode=acquireVsCodeApi();document.addEventListener("click",e=>{const b=e.target.closest("[data-path], [data-source]");if(!b)return;if(b.dataset.path)vscode.postMessage({command:"openCardPath",path:b.dataset.path,line:Number(b.dataset.line)});else vscode.postMessage({command:"openSource",role:b.dataset.source});});</script>`;
+  const script = `<script nonce="${attr(nonce)}">const vscode=acquireVsCodeApi();document.addEventListener("click",e=>{const m=e.target.closest("[data-metadata]");if(m){e.preventDefault();vscode.postMessage({command:"openMetadata",where:m.dataset.metadata});return;}const b=e.target.closest("[data-path], [data-source]");if(!b)return;if(b.dataset.path)vscode.postMessage({command:"openCardPath",path:b.dataset.path,line:Number(b.dataset.line)});else vscode.postMessage({command:"openSource",role:b.dataset.source});});</script>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${attr(nonce)}';"><style>
     body{font:13px var(--vscode-font-family);color:var(--vscode-foreground);padding:0 20px;max-width:1000px}h1{font-size:20px}h2{font-size:16px;margin-bottom:8px}section{border-top:1px solid var(--vscode-panel-border);padding:8px 0}button{color:var(--vscode-textLink-foreground);background:transparent;border:0;padding:0;text-decoration:underline;cursor:pointer}a{color:var(--vscode-textLink-foreground)}code{font-family:var(--vscode-editor-font-family)}ul{margin-top:6px}.muted{color:var(--vscode-descriptionForeground)}.error{color:var(--vscode-errorForeground)}
     </style></head><body>${body}${script}</body></html>`;
