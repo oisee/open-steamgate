@@ -27,10 +27,11 @@ Leave `tag` blank to derive the stamped version from that ref, and leave
 selected ref; any existing tag must point to that commit. The workflow uses
 `gh release create --draft --prerelease --target <commit>` and never runs
 `git push`. For an untagged draft, GitHub creates the tag when the draft is
-published. A dispatch with `draft=true` never publishes. To publish an existing
-draft through the workflow, rerun with `draft=false`; a new dispatch must
-first create the draft. An existing release is updated only when its commit
-matches the run's checkout commit. When the tag exists, the workflow fetches
+published. A dispatch with `draft=true` does not change the release's draft
+state. To publish an existing draft through the workflow, rerun with
+`draft=false`; a new dispatch must first create the draft. An existing release
+is updated only when its commit matches the run's checkout commit. When the
+tag exists, the workflow fetches
 tags and compares the commit resolved from `refs/tags/<tag>^{commit}`. For an
 untagged draft, it requires the release's recorded `targetCommitish` to be
 the exact checkout SHA and the release to remain a draft. Same-named assets
@@ -49,11 +50,15 @@ repository secret `OSD_LEAK_IDENTIFIERS` with the JSON content of
 `.local/leak-identifiers.json` (an object whose keys name identifier kinds and
 whose values are arrays of private names). The VSIX job writes that content
 to the gitignored file on its runner. A dispatch with `draft=true` may continue
-on scan exit 2 when this secret is absent; the job warns that the private
-name check did not run. Publication by tag push or dispatch with `draft=false`
-requires the secret and scan exit 0 over all three files. Without the secret,
-the workflow fails with instructions to add it or publish by hand after a
-local `npm run leak`. A match (exit 1) always stops the release.
+on scan exit 2 when this secret is absent only if the release is new or remains
+a draft; the job warns that the private name check did not run. Before editing
+or uploading assets to an existing published release, including on a
+`draft=true` dispatch, the workflow requires the secret and scan exit 0 over
+all three files. It checks release state again before each upload, so an
+exit-2 run stops if the release has since been published. Publication by tag
+push or dispatch with `draft=false` has the same full-scan requirement.
+Without the secret, the workflow fails with instructions to add it or publish
+by hand after a local `npm run leak`. A match (exit 1) always stops the release.
 
 ## Assets
 
