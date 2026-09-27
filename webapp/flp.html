@@ -408,6 +408,42 @@
       }
     };
 
+    // **A pack's own intents join the applications before the sandbox boots.**
+    //
+    // The sandbox resolves an intent only from the applications it was booted
+    // with; one added afterwards (launchpad.js adds the packs' tiles then)
+    // answered "could not be opened" (2026-09-17). So the intents a pack's
+    // manifest declares (crossNavigation.inbounds, served in ./packs.json by
+    // tools/osd-bsp-registry.mjs packApplications) are read here, before
+    // sandbox.js, synchronously on purpose: the boot must not start without
+    // them. A built-in application keeps its intent and its component: a pack
+    // declaring either again is skipped, since two apps under one component
+    // name would load whichever the loader found first. No server (a static
+    // preview without packs.json) leaves the list as it is.
+    (function () {
+      var applications = window["sap-ushell-config"].applications;
+      var components = {};
+      Object.keys(applications).forEach(function (intent) {
+        components[applications[intent].additionalInformation] = true;
+      });
+      try {
+        var request = new XMLHttpRequest();
+        request.open("GET", "./packs.json", false);
+        request.send();
+        var fromPacks = request.status === 200 ? (JSON.parse(request.responseText).applications || {}) : {};
+        Object.keys(fromPacks).forEach(function (intent) {
+          var app = fromPacks[intent];
+          if (applications[intent] || components[app.additionalInformation]) {
+            return;
+          }
+          applications[intent] = app;
+          components[app.additionalInformation] = true;
+        });
+      } catch (e) {
+        // no packs.json, or not JSON: the built-in applications are the whole list
+      }
+    })();
+
     // Land on the home intent rather than on no intent at all.
     //
     // Measured, not guessed (backlog E.5): opening this page with an empty

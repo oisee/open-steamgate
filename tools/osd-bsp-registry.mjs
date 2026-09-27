@@ -170,6 +170,43 @@ export function packAppName(pack) {
   return ("Z" + pack.toUpperCase().replace(/[^A-Z0-9]/g, "_")).slice(0, 15).replace(/_+$/, "");
 }
 
+/** The intents a pack's app declares (`sap.app.crossNavigation.inbounds`
+ *  in its `webapp/manifest.json`), as entries of the launchpad sandbox's
+ *  `applications`, keyed `<semanticObject>-<action>`. The sandbox resolves
+ *  an intent only from the applications it was booted with, so these are
+ *  handed to webapp/flp.html through /app/packs.json before it boots. Each
+ *  points at the pack's BSP application, the same derived name `packApps`
+ *  serves, relative to /app/flp.html the way the built-in ones are. An
+ *  inbound without an `sap.app.id` to load is skipped; the later pack wins
+ *  an intent two packs declare, as the later layer wins a name. */
+export function packApplications(root = ".", env = process.env) {
+  const applications = {};
+  for (const pack of packsOf(root, env).filter((p) => p.webapp !== undefined)) {
+    const file = join(pack.webapp, "manifest.json");
+    if (!existsSync(file)) continue;
+    let app;
+    try {
+      app = JSON.parse(readFileSync(file, "utf8"))["sap.app"] ?? {};
+    } catch {
+      continue;
+    }
+    if (typeof app.id !== "string" || app.id === "") continue;
+    const title = typeof app.title === "string" && !app.title.startsWith("{{") ? app.title : pack.name;
+    for (const inbound of Object.values(app.crossNavigation?.inbounds ?? {})) {
+      if (typeof inbound?.semanticObject !== "string" || typeof inbound?.action !== "string") continue;
+      applications[`${inbound.semanticObject}-${inbound.action}`] = {
+        title: typeof inbound.title === "string" && !inbound.title.startsWith("{{") ? inbound.title : title,
+        description: `pack ${pack.name}`,
+        additionalInformation: `SAPUI5.Component=${app.id}`,
+        applicationType: "URL",
+        url: `../sap/bc/ui5_ui5/sap/${packAppName(pack.name).toLowerCase()}/`,
+        navigationMode: "embedded",
+      };
+    }
+  }
+  return applications;
+}
+
 export function packApps(root = ".", env = process.env) {
   const packs = packsOf(root, env).filter((pack) => pack.webapp !== undefined)
     .map((pack) => ({pack: pack.name, at: pack.webapp, manifest: join(pack.dir, "osd-pack.json")}));

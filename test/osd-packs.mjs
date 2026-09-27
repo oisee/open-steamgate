@@ -5,7 +5,7 @@ import {join} from "node:path";
 import {BadPack, contentFoldersOf, dataDirsOf, ddicDirsOf, generatorFoldersOf, inputFoldersOf, packAt, packRootsOf, packsOf, webappsOf} from "../tools/osd-packs.mjs";
 import {ObjectStore, rootsOf} from "../tools/osd-store.mjs";
 import {loadConfig} from "../tools/osd-build.mjs";
-import {generate as generateBsp, packApps} from "../tools/osd-bsp-registry.mjs";
+import {generate as generateBsp, packApplications, packApps} from "../tools/osd-bsp-registry.mjs";
 import {packNodes} from "../tools/osd-nodes.mjs";
 
 // A pack is a directory, not a rebuild (backlog E.2): ABAP, seed rows, a
@@ -126,6 +126,36 @@ describe("tools/osd-packs: a pack is a directory", () => {
     expect(sources.second.uri).to.equal("../../../../opu/odata/sap/SECOND_SRV/");
     expect(sources.annotation.uri).to.equal("/sap/opu/odata/sap/ANNO_SRV/");
     expect(sources.unnamed.uri).to.equal("../../sap/opu/odata/sap/");
+  });
+
+  it("hands the launchpad each intent a pack app declares, pointed at its BSP application", () => {
+    write("packs/vibes/webapp/manifest.json", JSON.stringify({"sap.app": {
+      id: "osd.vibes", title: "Vibes",
+      crossNavigation: {inbounds: {
+        show: {semanticObject: "Vibe", action: "display"},
+        edit: {semanticObject: "Vibe", action: "manage", title: "Edit vibes"},
+        localized: {semanticObject: "Vibe", action: "translate", title: "{{appTitle}}"},
+        broken: {semanticObject: "Vibe"},
+      }},
+    }}));
+    write("packs/noid/osd-pack.json", JSON.stringify({}));
+    write("packs/noid/webapp/manifest.json", JSON.stringify({"sap.app": {crossNavigation: {inbounds: {x: {semanticObject: "No", action: "id"}}}}}));
+    write("packs/plain/osd-pack.json", JSON.stringify({}));
+    write("packs/plain/webapp/index.html", "no manifest");
+
+    const apps = packApplications(root, {});
+    expect(Object.keys(apps).sort(), "no action, no app id, no manifest: nothing").to.deep.equal(["Vibe-display", "Vibe-manage", "Vibe-translate"]);
+    expect(apps["Vibe-display"]).to.deep.equal({
+      title: "Vibes",
+      description: "pack vibes",
+      additionalInformation: "SAPUI5.Component=osd.vibes",
+      applicationType: "URL",
+      url: "../sap/bc/ui5_ui5/sap/zvibes/",
+      navigationMode: "embedded",
+    });
+    expect(apps["Vibe-manage"].title).to.equal("Edit vibes");
+    expect(apps["Vibe-translate"].title, "an i18n placeholder is not a title").to.equal("Vibes");
+    expect(packApps(root, {}).map((app) => app.app), "the url names the BSP application packApps serves").to.include("ZVIBES");
   });
 
   it("refuses two webapp packs whose names collide at the BSP 15 character limit", () => {

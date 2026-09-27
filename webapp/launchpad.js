@@ -35,10 +35,11 @@ sap.ui.define([], function () {
       }
       var group = {id: "packs", title: "Content packs", isPreset: true, isVisible: true, isGroupLocked: false, tiles: []};
       tiles.forEach(function (tile) {
-        // the tile goes straight to the pack's page: the sandbox resolves
-        // an intent from the applications it was booted with, and one
-        // added here, after the boot, answered "could not be opened"
-        // (2026-09-17). A targetURL that is not a hash is followed as is.
+        // an intent added here, after the boot, answered "could not be
+        // opened" (2026-09-17), so a tile's "#Object-action" works only for
+        // an intent the pack's manifest declares: flp.html boots with those
+        // (packs.json "applications"). A targetURL that is not a hash is
+        // followed as is.
         var kinds = {static: "StaticTile", dynamic: "DynamicTile", image: "ImageTile"};
         var properties = {
           title: tile.title,
