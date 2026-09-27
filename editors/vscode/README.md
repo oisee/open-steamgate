@@ -1,53 +1,34 @@
-# open-steamgate (osd)
+A local ABAP application server inside VS Code. No SAP or ADT connection needed.
 
-A local `/IWBEP/` OData v2 runtime for classic, code-based SEGW services --
-transpile real ABAP `_MPC_EXT` / `_DPC_EXT` classes, run them over SQLite,
-serve a Fiori Elements app -- packaged so it runs entirely inside VS Code.
-No SAP system, no separate install, no terminal.
+# open-steamgate
 
-## What it does
+Start a bundled ABAP runtime, explore its OData services, run ABAP Unit, and open local Fiori apps. The extension carries its own system seed and builds it on first start.
 
-- **▶ Start** builds and runs the whole system from inside the extension
-  (the "OSD" Activity Bar view): `▶`/`■` in the status bar, a tree of the
-  running state, the layers and the OData services it serves.
-- Open a folder holding abapGit ABAP (a `.abapgit.xml`, or
-  `src/*.clas.abap` / `*.prog.abap`) and it becomes a layer on top of the
-  bundled system automatically -- your classes run beside the demo's.
-- ABAP Unit in the built-in Test Explorer, one item per test class and
-  method.
-- `Ctrl+F2` Check, `Ctrl+F3` Activate, `F8` Run, `F9` Run as ABAP
-  Application (Console) over an `.abap` editor -- the SAP GUI / ADT
-  bindings, on by default (`osd.keymap`).
-- A CodeLens "▶ Call \<Set\>" over a SEGW `_DPC_EXT`'s own
-  `GET_ENTITYSET` / `GET_ENTITY` methods, and "read by N · tests M ·
-  services K" over a class or interface's own definition line.
-- Short-dump hotspots as line decorations and Explorer badges.
-- `*.osdnb` notebooks with SQL cells over the system database, ABAP classrun
-  cells, and SQLScript cells through the AMDP sandbox on HANA.
+<!-- real capture pending: OSD tree with a selected service card in VS Code desktop -->
 
-## Requirements
+![Fiori list report captured from the local demo](https://raw.githubusercontent.com/oisee/open-steamgate/main/editors/vscode/media/screenshots/fiori-list-report.png)
 
-Nothing to install beyond the extension itself: the runtime (Node's own
-`@abaplint/*` transpiler and runtime, `express`, the SQLite database) ships
-inside the `.vsix`. The first `▶ Start` copies it into VS Code's own
-extension storage and builds once (a few seconds); after that, an unchanged
-build reuses its own cache.
+<!-- real capture pending: VS Code desktop debugger stopped on an ABAP source line -->
 
-The full extension needs VS Code's bundled Node to support `node:sqlite` --
-practically, VS Code 1.101 or newer (the `engines.vscode` this
-extension declares) on desktop or in a Remote-WSL / Remote-SSH window.
-The separate web entry exists in VS Code for the Web for the gateway probe
-only; see `docs/vscode-web.md` for its commands and limits.
+## Quick start
 
-`osd.home` overrides the bundled copy with a checkout of your own (the
-development path); leave it empty to use what the extension ships.
+1. Install **open-steamgate** from the VS Code Marketplace, or install the downloaded `.vsix` with **Extensions: Install from VSIX...**.
+2. Open the **OSD** Activity Bar view and select **Start**. The first start builds the bundled system; later starts reuse its cache.
+3. Try the services in the tree, or open an ABAP project such as [osg-demo](https://github.com/oisee/osg-demo) as a workspace layer.
 
-## License
+VS Code 1.101 or newer is required. The system runs locally on desktop or in a Remote-WSL or Remote-SSH workspace. It does not need a SAP or ADT connection.
 
-MIT. See `LICENSE`.
+## What works
 
----
+- Start and stop the local server; inspect its services and generation in the OSD tree.
+- Run ABAP Unit in Test Explorer; check, activate, and run ABAP files with familiar keys.
+- Open local OData and Fiori apps, inspect short dumps, use SQL notebooks, and debug ABAP through VS Code's Node debugger.
+- Add an abapGit-style workspace layer over the bundled source.
 
-Part of [open-steamgate](https://github.com/oisee/open-steamgate).
-See `docs/vscode-extension.md` in that repository for the full design
-(Q1-Q6, "B0 spike", "Packaging").
+## Current limits
+
+- Portable AMDP support is limited. HANA-specific SQLScript needs HANA, and some methods are not portable to SQLite.
+- Warm rebuild requires upstream transpiler fixes [#1900](https://github.com/abaplint/transpiler/pull/1900) and [#1921](https://github.com/abaplint/transpiler/pull/1921) to be released. Until then activation uses the cold build path.
+- The Marketplace build has no browser extension entry or Zork pack. The separate web gateway probe remains a development experiment.
+
+The extension is MIT licensed. Bundled dependency declarations and licence review items are in `THIRD-PARTY-NOTICES.md` inside the VSIX.

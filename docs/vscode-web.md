@@ -1,6 +1,6 @@
 # VS Code for the Web gateway probe (P1)
 
-The `browser` entry of `editors/vscode/package.json` runs a separate extension in the VS Code web extension host. It bundles the prebuilt ABAP gateway and sql.js into one web worker script. The desktop `main` entry remains `extension.js`.
+The development and test-web `browser` entry of `editors/vscode/package.json` runs a separate extension in the VS Code web extension host. `npm run vsix:marketplace` removes that entry from its staged package until the web extension is ready for Marketplace distribution. It bundles the prebuilt ABAP gateway and sql.js into one web worker script. The desktop `main` entry remains `extension.js`.
 
 On activation, the web entry imports the preview backend, restores its sql.js database from IndexedDB, starts the gateway, and requests `$metadata`. It does not open an HTTP listener. `osd: Web probe` calls `handleRequest` in that worker: another `$metadata` GET (200), CSRF fetch, a uniquely named `TravelSet` POST (201), and a GET of the created row (200). **OSD Web Probe** output reports both activation start to the activation request's `$metadata` response and probe command start to its own `$metadata` response. `osd: Web verify last Travel` reads that row after a reload. `osd: Web probe view` opens a small webview that asks the extension for `$metadata` through `postMessage`; only that path is accepted by the bridge.
 

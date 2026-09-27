@@ -18,6 +18,8 @@ import {homedir, tmpdir} from "node:os";
 import {createReadStream} from "node:fs";
 import {brotliDecompressSync} from "node:zlib";
 import {buildVsix, stampStagedPackage} from "../scripts/build-vsix.mjs";
+import {inventoryThirdParties} from "../scripts/third-party-notices.mjs";
+import {tilesOf} from "../tools/osd-packs.mjs";
 const {writeTar, unpackTar} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 
 const root = process.cwd();
@@ -242,6 +244,27 @@ describe("packaging selected packs", function () {
     } finally {
       rmSync(saved, {recursive: true, force: true});
     }
+  });
+
+  it("builds a Marketplace archive without Zork or a web entry and inventories every staged package", async function () {
+    const scratch = testScratch("marketplace");
+    try {
+      const {out, notices} = await buildTestVsix(scratch, {OSD_VSIX_PROFILE: "marketplace", OSD_VSIX_PRERELEASE: "1"});
+      expect(packagedPacks(out)).to.deep.equal([]);
+      expect(execFileSync("unzip", ["-Z1", out], {encoding: "utf8"})).not.to.contain("extension/dist/web/");
+      expect(tilesOf(join(scratch, "seed-stage"))).to.deep.equal([]);
+      const pkg = JSON.parse(execFileSync("unzip", ["-p", out, "extension/package.json"], {encoding: "utf8"}));
+      expect(pkg).not.to.have.property("browser");
+      const manifest = execFileSync("unzip", ["-p", out, "extension.vsixmanifest"], {encoding: "utf8"});
+      expect(manifest).to.contain('Property Id="Microsoft.VisualStudio.Code.PreRelease" Value="true"');
+      expect(manifest).to.contain('<Icon>extension/resources/icon.png</Icon>');
+      expect(manifest).to.contain('Microsoft.VisualStudio.Services.Content.Details');
+      const staged = inventoryThirdParties(join(scratch, "seed-stage"), root);
+      expect(notices.entries.map((e) => e.path)).to.deep.equal(staged.entries.map((e) => e.path));
+      const text = execFileSync("unzip", ["-p", out, "extension/THIRD-PARTY-NOTICES.md"], {encoding: "utf8", maxBuffer: 8 * 1024 * 1024});
+      for (const entry of staged.entries) expect(text).to.contain(`## ${entry.name} — ${entry.path}`);
+      expect(text).to.contain("License: MIT (maintainer override).\n\nNote: LICENSE file reads 'todo'; the author's intent is MIT; treated as MIT by the open-steamgate maintainer, 2026-09-27");
+    } finally { rmSync(scratch, {recursive: true, force: true}); }
   });
 
   it("checks fetched sources only for selected packs", async function () {
