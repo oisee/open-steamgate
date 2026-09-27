@@ -756,6 +756,57 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
     }
   });
 
+  it("stop() while starting wins over a ready answer the child gives on its way out", async () => {
+    const osdHome = fakeHome();
+    // not ready until told to stop; then ready for a moment, then gone
+    const armed = join(osdHome, "armed");
+    writeFileSync(join(osdHome, "test", "run.mjs"),
+      "import {createServer} from 'node:http';\n" +
+      "import {writeFileSync} from 'node:fs';\n" +
+      "setInterval(() => {}, 1000);\n" +
+      "process.on('SIGTERM', () => {\n" +
+      "  createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'late'})); })" +
+      ".listen(Number(process.env.STG_PORT), '127.0.0.1');\n" +
+      "  setTimeout(() => process.exit(0), 1500);\n" +
+      "});\n" +
+      `writeFileSync(${JSON.stringify(armed)}, 'armed');\n`);
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    const exits = [];
+    launcher.on("exit", (e) => exits.push(e));
+    try {
+      const starting = launcher.start();
+      // the SIGTERM handler is installed: the ready answer will come
+      for (let i = 0; !existsSync(armed) && i < 500; i++) await new Promise((r) => setTimeout(r, 10));
+      expect(existsSync(armed)).to.equal(true);
+      await launcher.stop();
+      expect(await starting, "not a running system").to.equal(undefined);
+      expect(launcher.state).to.equal("stopped");
+      expect(exits).to.deep.equal([]);
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
+  it("a child that dies while starting is start()'s error, not also an \"exit\"", async () => {
+    const osdHome = fakeHome();
+    writeFileSync(join(osdHome, "test", "run.mjs"), "setTimeout(() => process.exit(3), 100);\n");
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    const exits = [];
+    launcher.on("exit", (e) => exits.push(e));
+    try {
+      await rejects(launcher.start(), /exited before it started serving \(code 3/);
+      expect(exits, "one popup, not two").to.deep.equal([]);
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
   it("a child killed from outside is still an unexpected exit", async () => {
     const osdHome = fakeHome();
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
