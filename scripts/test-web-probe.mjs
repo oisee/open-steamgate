@@ -284,13 +284,50 @@ try {
     if (!serviceDetails) await new Promise((resolveWait) => setTimeout(resolveWait, 500));
   }
   if (!serviceDetails) throw new Error("Single click did not open the service details panel");
+  const launch = await command(page, "osd: Open launchpad", "OSD_WEB_LAUNCHPAD");
+  if (!launch.opened) throw new Error("Launchpad command did not open a panel");
+  let launchFrame;
+  for (let attempt = 0; attempt < 90; attempt++) {
+    launchFrame = undefined;
+    for (const candidate of page.frames()) {
+      if (candidate !== page.mainFrame() && await candidate.getByText("Travels", {exact: true}).count().catch(() => 0)) {
+        launchFrame = candidate;
+        break;
+      }
+    }
+    if (launchFrame && await launchFrame.getByText("Travels", {exact: true}).count().catch(() => 0)) break;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 1000));
+  }
+  if (!launchFrame || !await launchFrame.getByText("Travels", {exact: true}).count()) {
+    for (const frame of page.frames()) {
+      if (frame === page.mainFrame()) continue;
+      console.log("Launchpad frame diagnostic", await frame.evaluate(() => ({
+        bridge: !!window.osdBridge, xhr: window.XMLHttpRequest.name,
+        text: document.body?.innerText?.slice(0, 1000),
+        html: document.body?.innerHTML?.slice(0, 1000),
+        ui5: !!window.sap?.ui, core: window.sap?.ui?.getCore?.().isInitialized?.(),
+        shell: !!window.sap?.ushell?.Container,
+        scripts: [...document.scripts].map((script) => script.src || script.textContent.slice(0, 70)).slice(-5),
+      })).catch(() => null));
+    }
+    console.log("Launchpad workbench diagnostic", (await page.locator("body").innerText()).slice(-1000));
+    console.log("Launchpad output diagnostic", await page.locator(".output-view").textContent().catch(() => ""));
+    throw new Error("Launchpad did not render the Travels tile");
+  }
+  await launchFrame.getByText("Travels", {exact: true}).first().click();
+  const firstRow = launchFrame.getByText("Berlin to Copenhagen", {exact: true});
+  const secondRow = launchFrame.getByText("Copenhagen to Aarhus", {exact: true});
+  await firstRow.waitFor({timeout: 30000});
+  await secondRow.waitFor({timeout: 30000});
+  await launchFrame.locator('img[src^="blob:"], [style*="blob:"]').first().waitFor({state: "attached", timeout: 30000});
+  console.log("Launchpad Travels list: Berlin to Copenhagen; Copenhagen to Aarhus");
   await page.keyboard.press("Control+Shift+P");
   const palette = page.locator(".quick-input-widget input").first();
   await palette.fill(">osd: Web probe");
   const choices = page.locator(".quick-input-list .monaco-list-row");
   await choices.filter({hasText: "osd: Web probe"}).first().waitFor({timeout: 30000});
   await palette.fill(">osd:");
-  const webCommands = ["osd: Web probe", "osd: Web read probe", "osd: Web verify last Travel", "osd: Web probe view", "osd: Refresh the view (no rebuild)"];
+  const webCommands = ["osd: Web probe", "osd: Web read probe", "osd: Web verify last Travel", "osd: Web probe view", "osd: Refresh the view (no rebuild)", "osd: Open launchpad"];
   for (const title of webCommands) await choices.filter({hasText: title}).first().waitFor({timeout: 30000});
   await page.locator(".quick-input-widget .quick-input-progress.done").waitFor({timeout: 30000});
   const paletteRows = await choices.allTextContents();
@@ -303,11 +340,15 @@ try {
   console.log("OSD tree: generation, grouped demo OData, service details; desktop commands hidden");
 
 
+
 } catch (error) {
   console.error(error);
   console.error("Workbench text:", (await page?.locator("body").innerText().catch(() => ""))?.slice(-3000));
   console.error("Output text:", await page?.locator(".output-view").textContent().catch(() => ""));
   console.error("Browser log:", browserLog.slice(-40).join("\n"));
+  for (const frame of page?.frames() ?? []) {
+    console.error("Frame:", frame.url(), (await frame.locator("body").innerText().catch(() => "")).slice(0, 2000));
+  }
   process.exitCode = 1;
 } finally {
   await context?.close();

@@ -367,6 +367,7 @@ function webviewRuntime(service) {
   // A later UI5 XHR adapter can install a constructor backed by this fetch.
   window.osdBridge = {fetch: bridgeFetch, installXHR: (factory) => { window.XMLHttpRequest = factory(bridgeFetch); }};
   const result = document.getElementById("result");
+  if (!result) return;
   const show = (name, value) => { result.textContent = `${name} ${JSON.stringify(value)}`; };
   const requireStatus = (answer, status, step) => {
     if (answer.status !== status) throw new Error(`${step}: ${answer.status} ${answer.statusText}`);
@@ -456,6 +457,146 @@ function webviewRuntime(service) {
   vscode.postMessage({type: "ready"});
 }
 
+// Install before the UI5 bootstrap. UI5's OData V2 model uses XHR while
+// launchpad helpers and newer clients use fetch. Static files stay native.
+function installLaunchpadTransport() {
+  const NativeXHR = window.XMLHttpRequest;
+  const nativeFetch = window.fetch.bind(window);
+  function gatewayPath(input) {
+    const url = new URL(input instanceof Request ? input.url : String(input), document.baseURI);
+    if (url.origin === "https://osd.invalid") return url.pathname + url.search;
+    if (url.origin !== location.origin && url.origin !== new URL(document.baseURI).origin) return null;
+    const match = /\/(sap\/(?:opu\/odata|bc)\/.*)$/i.exec(url.pathname);
+    return match ? "/" + match[1] + url.search : null;
+  }
+  window.fetch = (input, init) => {
+    if (new URL(input instanceof Request ? input.url : String(input), document.baseURI).pathname === "/appconfig/fioriSandboxConfig.json") {
+      return Promise.resolve(new Response("{}\n", {headers: {"content-type": "application/json"}}));
+    }
+    const path = gatewayPath(input);
+    return path === null ? nativeFetch(input, init) : window.osdBridge.fetch(path, init);
+  };
+  class GatewayXHR extends NativeXHR {
+    open(method, url, async = true, user, password) {
+      const path = gatewayPath(url);
+      const config = new URL(url, document.baseURI).pathname === "/appconfig/fioriSandboxConfig.json";
+      if (path === null && !config) return super.open(method, url, async, user, password);
+      if (async === false && !config) throw new Error("Synchronous gateway XHR is unavailable in the web version");
+      this.osd = {method, path, config, headers: new Headers(), readyState: 1,
+        status: 0, statusText: "", response: null, responseText: "", responseURL: ""};
+      for (const name of ["readyState", "status", "statusText", "response", "responseText", "responseURL"]) {
+        Object.defineProperty(this, name, {configurable: true, get: () => this.osd[name]});
+      }
+      this.dispatchEvent(new Event("readystatechange"));
+    }
+    setRequestHeader(name, value) {
+      if (this.osd) this.osd.headers.append(name, value);
+      else super.setRequestHeader(name, value);
+    }
+    getResponseHeader(name) { return this.osd ? this.osd.answer?.headers.get(name) ?? null : super.getResponseHeader(name); }
+    getAllResponseHeaders() {
+      return this.osd ? (this.osd.answer ? Array.from(this.osd.answer.headers, ([key, value]) => `${key}: ${value}\r\n`).join("") : "")
+        : super.getAllResponseHeaders();
+    }
+    abort() {
+      if (!this.osd) return super.abort();
+      this.osd.aborted = true;
+      this.dispatchEvent(new Event("abort"));
+      this.dispatchEvent(new Event("loadend"));
+    }
+    send(body) {
+      if (!this.osd) return super.send(body);
+      const state = this.osd;
+      const finish = async () => {
+        try {
+          state.answer = state.config
+            ? new Response("{}\n", {headers: {"content-type": "application/json"}})
+            : await window.osdBridge.fetch(state.path, {method: state.method, headers: state.headers, body});
+          if (state.aborted) return;
+          state.status = state.answer.status;
+          state.statusText = state.answer.statusText;
+          state.responseURL = state.config ? new URL("/appconfig/fioriSandboxConfig.json", document.baseURI).href
+            : new URL(state.path, "https://osd.invalid").href;
+          state.readyState = 2;
+          this.dispatchEvent(new Event("readystatechange"));
+          const bytes = await state.answer.arrayBuffer();
+          if (state.aborted) return;
+          state.readyState = 3;
+          this.dispatchEvent(new Event("readystatechange"));
+          if (this.responseType === "arraybuffer") state.response = bytes;
+          else if (this.responseType === "blob") state.response = new Blob([bytes], {type: state.answer.headers.get("content-type") ?? ""});
+          else {
+            state.responseText = new TextDecoder().decode(bytes);
+            state.response = this.responseType === "json" ? JSON.parse(state.responseText) : state.responseText;
+          }
+          state.readyState = 4;
+          this.dispatchEvent(new Event("readystatechange"));
+          this.dispatchEvent(new Event("load"));
+          this.dispatchEvent(new Event("loadend"));
+        } catch (error) {
+          state.readyState = 4;
+          this.dispatchEvent(new Event("readystatechange"));
+          this.dispatchEvent(new Event("error"));
+          this.dispatchEvent(new Event("loadend"));
+          console.error("Gateway XHR failed", error);
+        }
+      };
+      void finish();
+    }
+  }
+  window.XMLHttpRequest = GatewayXHR;
+  // Fiori binds photos to image sources and avatar background styles, neither
+  // of which calls fetch/XHR. Read those bytes over the bridge and use object
+  // URLs. A token per element prevents an older response winning a later update.
+  const imageTokens = new WeakMap();
+  function routeImages() {
+    for (const img of document.images) {
+      const path = gatewayPath(img.getAttribute("src") ?? "");
+      if (!path || imageTokens.get(img)?.path === path) continue;
+      const token = {path};
+      imageTokens.set(img, token);
+      window.osdBridge.fetch(path).then((response) => {
+        if (!response.ok) throw new Error(`Image ${path}: ${response.status}`);
+        return response.blob();
+      }).then((blob) => {
+        if (imageTokens.get(img) !== token) return;
+        const old = img.dataset.osdBlob;
+        const url = URL.createObjectURL(blob);
+        img.dataset.osdBlob = url;
+        img.src = url;
+        if (old) URL.revokeObjectURL(old);
+      }).catch((error) => console.error("Gateway image failed", error));
+    }
+    for (const element of document.querySelectorAll("[style]")) {
+      const image = element.style.backgroundImage;
+      const match = /^url\(["']?(.*?)["']?\)$/.exec(image);
+      if (!match) continue;
+      const path = gatewayPath(match[1]);
+      if (!path || imageTokens.get(element)?.path === path) continue;
+      const token = {path};
+      imageTokens.set(element, token);
+      window.osdBridge.fetch(path).then((response) => {
+        if (!response.ok) throw new Error(`Image ${path}: ${response.status}`);
+        return response.blob();
+      }).then((blob) => {
+        if (imageTokens.get(element) !== token) return;
+        const old = element.dataset.osdBlob;
+        const url = URL.createObjectURL(blob);
+        element.dataset.osdBlob = url;
+        element.style.backgroundImage = `url("${url}")`;
+        if (old) URL.revokeObjectURL(old);
+      }).catch((error) => console.error("Gateway background image failed", error));
+    }
+  }
+  new MutationObserver(routeImages).observe(document.documentElement, {
+    subtree: true, childList: true, attributes: true, attributeFilter: ["src", "style"],
+  });
+  // APC requires a live server. Fail explicitly for applications that try it.
+  window.WebSocket = class {
+    constructor() { throw new Error("WebSocket/APC is not available in the web version"); }
+  };
+}
+
 function webviewHtml(nonce) {
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'">
@@ -463,6 +604,32 @@ function webviewHtml(nonce) {
 <body><h1>OSD web gateway</h1><button id="run">Run write and batch probe</button>
 <button id="verify">Verify saved row</button><pre id="result">Waiting</pre>
 <script nonce="${nonce}">(${webviewRuntime.toString()})(${JSON.stringify(SERVICE)});</script></body></html>`;
+}
+
+async function launchpadHtml(webview, extensionUri, nonce) {
+  const app = vscode.Uri.joinPath(extensionUri, "dist", "web", "app");
+  const asset = (name) => webview.asWebviewUri(vscode.Uri.joinPath(app, ...name.split("/"))).toString();
+  const root = asset("").replace(/\/?$/, "/");
+  let html = new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(app, "flp.html")));
+  const directories = {
+    zosd_travel_app: "", zosd_booking_ap: "booking/", zosd_analytics: "analytics/",
+    zosd_taxi_anal: "taxi/", zosd_segw_app: "segw/", zosd_icf_app: "icf/",
+    zosd_status_app: "status/", zosg_workbench: "workbench/",
+  };
+  html = html.replace(/\.\.\/sap\/bc\/ui5_ui5\/sap\/(\w+)\//g, (match, name) =>
+    Object.hasOwn(directories, name) ? root + directories[name] : match);
+  // VS Code webviews do not serve relative files from their document URL.
+  // The base points UI5 modules, the manifest, packs.json and images at the
+  // copied app tree; OData paths are picked up by the transport above.
+  const csp = `default-src 'none'; script-src 'nonce-${nonce}' 'unsafe-eval' https://ui5.sap.com ${webview.cspSource}; style-src 'unsafe-inline' https://ui5.sap.com ${webview.cspSource}; img-src data: blob: https://ui5.sap.com ${webview.cspSource}; font-src data: https://ui5.sap.com ${webview.cspSource}; connect-src https://ui5.sap.com ${webview.cspSource}; frame-src ${webview.cspSource};`;
+  // Keep the runtime source out of the HTML parser. VS Code writes the page
+  // into its iframe with document.write; a JS regex can contain markup-like
+  // text that terminates an inline script while it parses that document.
+  const runtime = `(${webviewRuntime.toString()})(${JSON.stringify(SERVICE)});(${installLaunchpadTransport.toString()})();`;
+  const boot = `<meta http-equiv="Content-Security-Policy" content="${csp}"><base href="${root}"><script nonce="${nonce}">eval(atob(${JSON.stringify(base64FromBytes(encoder.encode(runtime)))}));</script>`;
+  html = html.replace(/<head>/i, `<head>${boot}`);
+  html = html.replace(/<script(?![^>]*\bnonce=)/gi, `<script nonce="${nonce}"`);
+  return html;
 }
 
 export async function activate(context) {
@@ -506,6 +673,20 @@ export async function activate(context) {
   context.subscriptions.push(tree, vscode.window.registerTreeDataProvider("osdTree", tree));
   context.subscriptions.push(vscode.commands.registerCommand("osd.refreshTree", () => tree.refresh()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.webServiceDetails", showServiceDetails));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpad", run("OSD_WEB_LAUNCHPAD", async () => {
+    const assets = vscode.Uri.joinPath(context.extensionUri, "dist", "web", "app");
+    const panel = vscode.window.createWebviewPanel("osdLaunchpad", "open-steamgate launchpad", vscode.ViewColumn.One,
+      {enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [assets]});
+    panel.webview.onDidReceiveMessage(async (message) => {
+      if (message?.type === "fetch" && Number.isSafeInteger(message.id)) {
+        const response = await bridgeRequest(message);
+        await panel.webview.postMessage({type: "fetch-result", id: message.id, response});
+      }
+    });
+    const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    panel.webview.html = await launchpadHtml(panel.webview, context.extensionUri, nonce);
+    return {opened: true};
+  })));
   try {
     const metadata = await send("GET", METADATA);
     required(metadata, 200, "activation $metadata");

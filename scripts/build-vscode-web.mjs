@@ -1,9 +1,9 @@
 import {createRequire} from "node:module";
 import {resolve, join} from "node:path";
-import {readFile, stat} from "node:fs/promises";
+import {cp, readFile, stat, writeFile} from "node:fs/promises";
 import {spawn} from "node:child_process";
 import {gzipSync} from "node:zlib";
-import {packAt} from "../tools/osd-packs.mjs";
+import {packAt, tilesOf, webappsOf} from "../tools/osd-packs.mjs";
 import {describeUnfetched} from "../tools/osd-fetch.mjs";
 
 const root = resolve(import.meta.dirname, "..");
@@ -48,6 +48,12 @@ const result = await new Promise((resolveBuild, reject) => webpack(config, (erro
   else resolveBuild(stats);
 }));
 console.log(result.toString({colors: false, preset: "minimal"}));
+const app = resolve(root, "editors/vscode/dist/web/app");
+await cp(resolve(root, "webapp"), app, {recursive: true});
+for (const pack of webappsOf(root, env)) {
+  await cp(pack.dir, join(app, pack.name), {recursive: true});
+}
+await writeFile(join(app, "packs.json"), JSON.stringify({tiles: tilesOf(root, env)}, null, 2) + "\n");
 const file = resolve(root, "editors/vscode/dist/web/extension.js");
 const bytes = (await stat(file)).size;
 const gzipBytes = gzipSync(await readFile(file)).byteLength;

@@ -269,7 +269,7 @@
         {"command": "osd.rebuild", "when": "!isWeb && !osd.web"},
         {"command": "osd.fullRebuild", "when": "!isWeb && !osd.web"},
         {"command": "osd.openSystemLog", "when": "!isWeb && !osd.web"},
-        {"command": "osd.openLaunchpad", "when": "!isWeb && !osd.web"},
+        {"command": "osd.openLaunchpad", "when": "!isWeb || osd.web"},
         {"command": "osd.openLaunchpadInVsCode", "when": "!isWeb && !osd.web"},
         {"command": "osd.openLaunchpadExternal", "when": "!isWeb && !osd.web"},
         {"command": "osd.groupServicesByKind", "when": "!isWeb && !osd.web"},
