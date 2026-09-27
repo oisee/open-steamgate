@@ -26,7 +26,9 @@ no code. Do not merge it into `main`.
 ## Other state not in the brief below
 
 - `s2c1` (vscode.dev: launchpad + Travels in the web) is WIP on i7,
-  `feat/…s2c1` (64e9086f). It is not in scope here.
+  `feat/web-launchpad-travels` (64e9086f; rebase it on main first). It is not in scope here.
+- osg-demo `feat/fleet-slice` (4fb0211) holds stoker's PLAN.md for parts A/B/C,
+  if pushed; read it before Objective 1, but this brief wins where the two differ.
 - The Marketplace extension `oisee.open-steamgate` 0.2.1122 is in review.
   Alice uploads 0.2.1127 as the update after that; it is not a task here.
 
