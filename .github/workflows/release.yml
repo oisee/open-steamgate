@@ -68,10 +68,10 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#vscode-v}"
-          vsix="build/vsix/osd-vscode-$version.vsix"
+          vsix="build/vsix/open-steamgate-$version.vsix"
           test -f "$vsix"
           node scripts/release-version.mjs "$RELEASE_TAG" "$vsix" --allow-untagged
-          (cd build/vsix && sha256sum "osd-vscode-$version.vsix" > "osd-vscode-$version.vsix.sha256")
+          (cd build/vsix && sha256sum "open-steamgate-$version.vsix" > "open-steamgate-$version.vsix.sha256")
       - name: Generate and scan CHANGELOG, README and FILE_ID.DIZ
         id: leak
         env:
@@ -87,7 +87,7 @@ jobs:
             node scripts/release-notes.mjs "$RELEASE_TAG" --to HEAD > build/vsix/CHANGELOG.md
           fi
           node scripts/release-readme.mjs \
-            "osd-vscode-$version.vsix" \
+            "open-steamgate-$version.vsix" \
             osd-linux-x64 osd-linux-arm64 osd-darwin-arm64 osd-windows-x64.exe \
             sqlite.yml duckdb.yml postgres.yml hana.yml > build/vsix/README.md
           node scripts/release-readme.mjs --diz "$version" > build/vsix/FILE_ID.DIZ
@@ -157,8 +157,8 @@ jobs:
             exit 1
           fi
           gh release upload "$RELEASE_TAG" --clobber \
-            "build/vsix/osd-vscode-$version.vsix" \
-            "build/vsix/osd-vscode-$version.vsix.sha256" \
+            "build/vsix/open-steamgate-$version.vsix" \
+            "build/vsix/open-steamgate-$version.vsix.sha256" \
             build/vsix/README.md \
             build/vsix/CHANGELOG.md \
             build/vsix/FILE_ID.DIZ

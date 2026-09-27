@@ -1,12 +1,12 @@
 {
-  "name": "osd-vscode",
+  "name": "open-steamgate",
   "displayName": "open-steamgate (osd)",
   "icon": "resources/icon.png",
   "description": "ABAP Unit in the Test Explorer, the serving generation and short dumps of a running osd",
   "version": "0.2.0",
   "private": true,
   "license": "MIT",
-  "publisher": "open-steamgate",
+  "publisher": "oisee",
   "engines": {"vscode": "^1.101.0"},
   "extensionKind": ["workspace", "ui"],
   "capabilities": {

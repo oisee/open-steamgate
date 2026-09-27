@@ -25,7 +25,7 @@ const trackedVersion = JSON.parse(readFileSync(join(root, "editors", "vscode", "
 const versionParts = /^(\d+)\.(\d+)\.\d+$/.exec(trackedVersion);
 if (versionParts === null) throw new Error(`expected a plain major.minor.patch version, got ${trackedVersion}`);
 const commitCount = execFileSync("git", ["rev-list", "--count", "HEAD"], {cwd: root, encoding: "utf8"}).trim();
-const currentVsixFile = `osd-vscode-${versionParts[1]}.${versionParts[2]}.${commitCount}.vsix`;
+const currentVsixFile = `open-steamgate-${versionParts[1]}.${versionParts[2]}.${commitCount}.vsix`;
 
 function packagedPacks(archive) {
   expect(execFileSync("unzip", ["-Z1", archive], {encoding: "utf8"})).to.contain("extension/osd/seed.tar.br");
@@ -314,7 +314,7 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
 
     const extensionDir = join(unzipDir, "extension");
     const packagedVersion = JSON.parse(readFileSync(join(extensionDir, "package.json"), "utf8")).version;
-    expect(basename(out)).to.equal(`osd-vscode-${packagedVersion}.vsix`);
+    expect(basename(out)).to.equal(`open-steamgate-${packagedVersion}.vsix`);
     expect(readFileSync(join(unzipDir, "extension.vsixmanifest"), "utf8"))
       .to.contain(`Version="${packagedVersion}"`);
     const {Launcher, ensureMaterializedHome, seedContentId, SEED_ID_FILE} = createRequire(import.meta.url)(join(extensionDir, "launcher.js"));

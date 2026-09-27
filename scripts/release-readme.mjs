@@ -11,7 +11,7 @@ export function renderReadme(assets) {
   const names = [...new Set(assets)];
   if (names.length === 0) throw new Error("pass at least one release asset");
   for (const name of names) {
-    if (!/^osd-vscode-\d+\.\d+\.\d+\.vsix$/.test(name) && !binaries.has(name) && !compose.has(name)) {
+    if (!/^open-steamgate-\d+\.\d+\.\d+\.vsix$/.test(name) && !binaries.has(name) && !compose.has(name)) {
       throw new Error(`unknown release asset: ${name}`);
     }
   }

@@ -20,7 +20,7 @@ describe("release notes and version checks", () => {
 
   it("parses --allow-untagged separately from an optional VSIX in both orders", () => {
     const tag = "vscode-v0.1.42";
-    const vsix = "build/vsix/osd-vscode-0.1.42.vsix";
+    const vsix = "build/vsix/open-steamgate-0.1.42.vsix";
     const expected = {tag, vsix, requireTag: false};
     assert.deepEqual(parseReleaseArgs([tag, "--allow-untagged", vsix]), expected);
     assert.deepEqual(parseReleaseArgs([tag, vsix, "--allow-untagged"]), expected);

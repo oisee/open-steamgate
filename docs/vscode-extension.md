@@ -1055,7 +1055,7 @@ in `REPORT.md` for this change.
 
 *2026-09-26.* One universal `.vsix` that carries the system inside it:
 `npm run vsix` (`scripts/build-vsix.mjs`) writes
-`build/vsix/osd-vscode-<version>.vsix`, built with the system `zip` CLI --
+`build/vsix/open-steamgate-<version>.vsix`, built with the system `zip` CLI --
 not `vsce` -- as a plain zip of `[Content_Types].xml`, `extension.vsixmanifest`
 (both generated from `editors/vscode/package.json` the way `vsce` does,
 `Identity`/`DisplayName`/`Engine`/`ExtensionKind` read straight off it) and
@@ -1098,7 +1098,7 @@ and supplies the major and minor for packaged builds. At packaging time, the
 build changes only the staged copy's patch to `git rev-list --count HEAD`;
 the tracked patch remains intact. Bump the major or minor by hand for a new
 release line. The stamped version appears in the VSIX manifest and
-`osd-vscode-<version>.vsix` filename, and `vsix:install` installs that exact
+`open-steamgate-<version>.vsix` filename, and `vsix:install` installs that exact
 file. Local edits do not change the commit count, so a dirty build keeps the
 same extension version; it logs that version with the content seed ID, which
 keys the materialized install to the actual packaged files.
