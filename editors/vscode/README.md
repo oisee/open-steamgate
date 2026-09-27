@@ -33,11 +33,11 @@ inside the `.vsix`. The first `▶ Start` copies it into VS Code's own
 extension storage and builds once (a few seconds); after that, an unchanged
 build reuses its own cache.
 
-VS Code's bundled Node must be new enough for `node:sqlite` --
-practically, a recent VS Code (1.88 or newer, the `engines.vscode` this
-extension declares) on desktop or in a Remote-WSL / Remote-SSH window
-(`extensionKind: ["workspace"]`: it always runs where the folder is, never
-only in a local UI host).
+The full extension needs VS Code's bundled Node to support `node:sqlite` --
+practically, VS Code 1.101 or newer (the `engines.vscode` this
+extension declares) on desktop or in a Remote-WSL / Remote-SSH window.
+The separate web entry exists in VS Code for the Web for the gateway probe
+only; see `docs/vscode-web.md` for its commands and limits.
 
 `osd.home` overrides the bundled copy with a checkout of your own (the
 development path); leave it empty to use what the extension ships.
