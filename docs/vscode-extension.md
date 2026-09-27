@@ -1033,6 +1033,55 @@ ever signals the one pid it spawned.
 
 ## Packaging
 
+**T2 prebuilt generation (2026-09-27).** `npm run vsix` now runs the seed's
+own `tools/osd-build.mjs` inside the staged seed and ships
+`build/by-input/<hash>/` and `gen/` as real files (no `build/live`, no
+`output`, no generation `test` link: the first build makes those). The
+portable-hash obstacle described below does not arise there: inside the
+staged seed the transpiler is a plain copy in the seed's `node_modules`,
+so `describeBuild()` says "published" with no path or git state, and the
+hash reads paths relative to the tree.
+
+One engine change was needed for a real first start to hit it. The
+launcher always sets `OSD_PACKS` to its own storage, holding an empty
+`notebook-scratch` pack, and that pack's manifest path, different on every
+machine, named the generation: a copy materialized from the prebuilt seed
+and started the launcher's way built cold (`built 11cf1308…`, measured).
+Now a pack that brings nothing (no input file in its ABAP folders, no
+data, ddic or webapp folder, no tiles) is not an input, and an input
+folder that contributes no file to the hash does not name the generation
+(`tools/osd-build.mjs` `inputsOf`, `hashOf`): an ABAP folder with no file
+`NOT_AN_INPUT` leaves, or any other input folder with no file at all. A
+pack that holds anything still is an input, so a workspace pack builds
+cold as before. A tree with such a folder, or with a pack that brings
+nothing, names its generation differently once; any other tree keeps its
+names.
+
+The generation's `manifest.json` in the seed has `builtAt` and `ms` fixed,
+so the same tree packaged twice makes the same seed ID (the materialized
+copy is keyed by it).
+
+Measured on a cloud container (Node 22.22) with a throwaway script that
+does what the launcher does (materialize, `OSD_PACKS` from
+`ensureWorkspacePacks(storage, [])`, `tools/osd-build.mjs`, then
+`test/run.mjs` until `ZSTG_DEMO_SRV/TravelSet` answers), default Zork
+package:
+
+| | materialize | build | serve | first start |
+| --- | ---: | ---: | ---: | ---: |
+| `OSD_VSIX_PREBUILT=0` | 1.9 s | 21.7 s (built) | 11.4 s | 35.0 s |
+| prebuilt (default) | 1.5 s | 0.35 s (reused) | 12.0 s | 13.8 s |
+
+`.vsix` 9.4 MB -> 11.9 MB at the default Brotli quality; unpacked, the
+prebuilt `build/` and `gen/` add 52 MB to each materialized copy (and to
+each saved snapshot of an old one). The ~4 s target was the build step
+alone; what remains of a first start is the first boot filling the
+database (demo data, the taxi facts), which a second start of the same copy
+does not pay. `OSD_VSIX_PREBUILT=0` packages without it; the vsix tests
+that only look at the archive's shape set it. The binary does not
+prebuild: it names generations by its own bytes (`generatorIdentity`), so
+a shipped generation could never be reused there.
+
 **T3 solid seed (2026-09-27).** The package now contains one
 `extension/osd/seed.tar.br` and `extension/osd/.seed-id` instead of separate
 seed files in the VSIX ZIP. The tar code in `launcher.js` writes regular files and directories

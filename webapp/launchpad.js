@@ -16,6 +16,15 @@ sap.ui.define([], function () {
   function atMount(value) {
     return value && value.charAt(0) === "/" ? ".." + value : value;
   }
+  // A tile's targetURL that is not a hash is followed as an outside link (the
+  // launchpad opens it in a new window), so a pack tile written as this
+  // page's own intent -- "/app/flp.html#Object-action", "flp.html#...",
+  // "./flp.html#...", with or without a query -- becomes "#Object-action"
+  // and navigates inside the shell like the built-in tiles.
+  function tileTarget(value) {
+    var intent = /^(?:\/app\/|\.\/)?flp\.html(?:\?[^#]*)?(#[^#]+)$/.exec(value || "");
+    return intent ? intent[1] : atMount(value);
+  }
   if (launchPage) {
     launchPage.groups = window["stg-launchpad-groups"] || [];
     launchPage.catalogs = [];
@@ -35,17 +44,18 @@ sap.ui.define([], function () {
       }
       var group = {id: "packs", title: "Content packs", isPreset: true, isVisible: true, isGroupLocked: false, tiles: []};
       tiles.forEach(function (tile) {
-        // the tile goes straight to the pack's page: the sandbox resolves
-        // an intent from the applications it was booted with, and one
-        // added here, after the boot, answered "could not be opened"
-        // (2026-09-17). A targetURL that is not a hash is followed as is.
+        // an intent added here, after the boot, answered "could not be
+        // opened" (2026-09-17), so a tile's "#Object-action" works only for
+        // an intent the pack's manifest declares: flp.html boots with those
+        // (packs.json "applications"). A targetURL that is not a hash is
+        // followed as is.
         var kinds = {static: "StaticTile", dynamic: "DynamicTile", image: "ImageTile"};
         var properties = {
           title: tile.title,
           subtitle: tile.subtitle || "",
           info: tile.info || tile.pack,
           icon: tile.icon,
-          targetURL: atMount(tile.url)
+          targetURL: tileTarget(tile.url)
         };
         if (tile.type === "dynamic") {
           properties.numberUnit = tile.numberUnit || "";
