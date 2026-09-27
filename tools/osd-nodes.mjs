@@ -33,7 +33,7 @@ import {existsSync, readFileSync, readdirSync} from "node:fs";
 import {join} from "node:path";
 import {channels, services} from "./osd-icf.mjs";
 import {remoteServices} from "./osd-destinations.mjs";
-import {inputFoldersOf} from "./osd-packs.mjs";
+import {generatorFoldersOf, packsOf, winningByLayer} from "./osd-packs.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 // Where a node works. A promise, so that "not yet" and "never" stay
@@ -105,9 +105,7 @@ export const SAP_DELIVERED = {
 export const deliveredAt = (path) => SAP_DELIVERED[path];
 
 function layers(root) {
-  const file = join(root, "abap_transpile.json");
-  const config = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {input_folder: ["src", "local", "test", "gen"]};
-  return [...new Set([...inputFoldersOf(root, config), "gen"])];
+  return generatorFoldersOf(root);
 }
 
 /** The nodes a layer declares for itself: the ones that are not SAP objects.
@@ -116,14 +114,11 @@ function layers(root) {
  *  carry a comment gets one anyway, and a reader that chokes on it would
  *  make the explanation cost a second file. */
 export function declaredNodes(root = ".") {
-  const found = [];
-  for (const dir of layers(root)) {
+  return winningByLayer(layers(root), (dir) => {
     const file = join(root, dir, DECLARED);
-    if (existsSync(file) === false) continue;
+    if (existsSync(file) === false) return [];
     const decl = JSON.parse(readFileSync(file, "utf8"));
-    for (const [path, d] of Object.entries(decl)) {
-      if (path.startsWith("_")) continue;
-      found.push({
+    return Object.entries(decl).filter(([path]) => !path.startsWith("_")).map(([path, d]) => ({
         path: path.replace(/\/+$/, "") || "/",
         type: d.type ?? "HOST",
         handler: d.handler,
@@ -140,10 +135,8 @@ export function declaredNodes(root = ".") {
         text: d.text,
         travels: false,
         source: file,
-      });
-    }
-  }
-  return found;
+      }));
+  }, (node) => node.path);
 }
 
 /** A pack's page under its own name: a HOST node nobody wrote down.
@@ -152,27 +145,17 @@ export function declaredNodes(root = ".") {
  *  osd-bsp-registry.mjs is: a pack already says its name and already carries
  *  a webapp/, and asking it to repeat that in a second file is the extra
  *  registry this whole track is removing. */
-export function packNodes(root = ".") {
-  const found = [];
-  for (const dir of ["packs", ...(process.env.OSD_PACKS ?? "").split(":").filter(Boolean)]) {
-    const at = join(root, dir);
-    if (existsSync(at) === false) continue;
-    for (const name of readdirSync(at)) {
-      if (existsSync(join(at, name, "osd-pack.json")) && existsSync(join(at, name, "webapp"))) {
-        found.push({
-          path: `/app/${name}`,
-          type: "HOST",
-          handler: "pack-static",
-          implementedIn: "test/start.mjs",
-          needs: "fs",
-          text: `express.static over the pack ${name}'s webapp/`,
-          travels: false,
-          source: join(at, name, "osd-pack.json"),
-        });
-      }
-    }
-  }
-  return found;
+export function packNodes(root = ".", env = process.env) {
+  return packsOf(root, env).filter((pack) => pack.webapp !== undefined).map((pack) => ({
+    path: `/app/${pack.name}`,
+    type: "HOST",
+    handler: "pack-static",
+    implementedIn: "test/start.mjs",
+    needs: "fs",
+    text: `express.static over the pack ${pack.name}'s webapp/`,
+    travels: false,
+    source: join(pack.dir, "osd-pack.json"),
+  }));
 }
 
 /** A binding: a service this registry lacks, answered by another system.

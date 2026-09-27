@@ -37,7 +37,8 @@
 // Lars's own HTTP adapter.
 import {readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, statSync} from "node:fs";
 import {basename, join, resolve} from "node:path";
-import {contentFoldersOf} from "./osd-packs.mjs";
+import {contentFoldersOf, winningByLayer} from "./osd-packs.mjs";
+import {hostModules} from "./osd-host.mjs";
 
 const DEFAULT_OUT = "gen/gui";
 const CONVERTER = "converter/src/api.mjs";
@@ -362,11 +363,12 @@ export function tranXml({wrapperClassName, tcode, title}) {
 
 export async function generate(folders, out = DEFAULT_OUT, options = {}) {
   const root = options.root ?? process.cwd();
-  const {convertProgram} = await import(resolve(root, LIB, CONVERTER));
+  const {convertProgram} = hostModules()?.guiConverter ?? await import(resolve(root, LIB, CONVERTER));
   const reports = [];
   rmSync(out, {recursive: true, force: true});
 
-  for (const file of reportFiles(folders)) {
+  for (const file of winningByLayer(folders, (folder) => reportFiles([folder]),
+    (file) => basename(file).replace(/\.prog\.abap$/i, "").toUpperCase())) {
     const source = readFileSync(file, "utf8");
     const programName = programNameOf(source);
     if (programName === undefined) {

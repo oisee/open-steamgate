@@ -1,5 +1,9 @@
 import {expect} from "chai";
 import {transactions} from "../tools/osd-tran-registry.mjs";
+import {generatorFoldersOf} from "../tools/osd-packs.mjs";
+import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {startServer} from "./start.mjs";
 // the port of the gateway under test: STG_PORT, as test/start.mjs reads it, so sessions do not collide on 3030
 const PORT = process.env.STG_PORT ?? 3030;
@@ -22,6 +26,22 @@ const PORT = process.env.STG_PORT ?? 3030;
 // The browser is played by hand here, the way test/sapevent.mjs plays it;
 // test/e2e/transaction.spec.mjs lets Chromium do it.
 const BASE = `http://localhost:${PORT}/sap/bc/gui/sap/its/webgui/`;
+
+describe("transaction generator layer order", () => {
+  it("a user transaction beats a generated transaction with the same object name", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-tran-order-"));
+    try {
+      for (const layer of ["src", "gen", "user"]) mkdirSync(join(root, layer));
+      const xml = (label) => `<TSTC><TCODE>Z_ORDER</TCODE></TSTC><TSTCT><TTEXT>${label}</TTEXT></TSTCT>`;
+      writeFileSync(join(root, "gen/z_order.tran.xml"), xml("generated"));
+      writeFileSync(join(root, "user/z_order.tran.xml"), xml("user"));
+      const folders = generatorFoldersOf(root, {OSD_LAYERS: "user"}).map((folder) => join(root, folder));
+      expect(transactions(folders).find((tran) => tran.tcode === "Z_ORDER").text).to.equal("user");
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+});
 
 // The document inside the HTML viewer's sandboxed iframe, with the attribute
 // escaping taken off. What the document escaped itself stays escaped, because

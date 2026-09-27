@@ -5,7 +5,7 @@
 // runtime has registered abap.DDIC.
 import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync} from "node:fs";
 import {dirname, join, resolve} from "node:path";
-import {contentFoldersOf} from "./osd-packs.mjs";
+import {contentFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
 import {runsAs} from "./osd-main.mjs";
 
@@ -22,10 +22,11 @@ function walk(dir, out = []) {
 }
 
 export function binaryDdIC(root = process.cwd()) {
-  const files = contentFoldersOf(root).flatMap((folder) => walk(resolve(root, folder)));
-  for (const lib of libraryFiles(root)) {
-    for (const file of lib.files) if (/\.(?:tabl|dtel)\.xml$/i.test(file)) files.push(file);
-  }
+  const libraries = libraryFiles(root).flatMap((lib) => lib.files)
+    .filter((file) => /\.(?:tabl|dtel)\.xml$/i.test(file));
+  const files = winningByLayer(["libraries", ...contentFoldersOf(root)],
+    (folder) => folder === "libraries" ? libraries : walk(resolve(root, folder)),
+    (file) => file.split(/[\\/]/).at(-1).toLowerCase());
 
   const elements = new Map();
   for (const file of files.filter((f) => /\.dtel\.xml$/i.test(f))) {

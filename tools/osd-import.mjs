@@ -158,7 +158,7 @@ export class Import {
       return false;
     }
     const config = JSON.parse(readFileSync(path, "utf8"));
-    const folders = Array.isArray(config.input_folder) ? config.input_folder : [];
+    const folders = config.input_folder === undefined ? [] : [config.input_folder].flat();
     if (folders.includes(target)) {
       return false;
     }

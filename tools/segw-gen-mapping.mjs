@@ -21,7 +21,8 @@
 // direction I/O) and /IWBEP/I_SBD_MR (the HIGH/LOW/OPTION/SIGN components
 // of a range table).
 import {readdirSync, readFileSync, statSync} from "node:fs";
-import {join} from "node:path";
+import {basename, join} from "node:path";
+import {winningByLayer} from "./osd-packs.mjs";
 
 // ---------------------------------------------------------- FUGR signatures
 
@@ -91,16 +92,13 @@ function walk(dir, out) {
   return out;
 }
 
-// every function module of every abapGit function group under the folders
+// every function module of the winning abapGit function groups
 export function loadFunctionGroups(dirs) {
   const all = new Map();
-  for (const dir of dirs) {
-    for (const file of walk(dir, [])) {
-      for (const [name, sig] of parseFunctionGroup(readFileSync(file, "utf8"))) {
-        if (!all.has(name)) {
-          all.set(name, {...sig, file});
-        }
-      }
+  for (const file of winningByLayer(dirs, (dir) => walk(dir, []),
+    (file) => basename(file).toUpperCase())) {
+    for (const [name, sig] of parseFunctionGroup(readFileSync(file, "utf8"))) {
+      all.set(name, {...sig, file});
     }
   }
   return all;

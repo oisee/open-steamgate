@@ -1,8 +1,8 @@
 import {expect} from "chai";
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {compile, compileAll, readModel} from "../tools/stg-compile.mjs";
+import {compile, compileAll, compileConfiguredAll, readModel} from "../tools/stg-compile.mjs";
 import {generate} from "../tools/segw-gen.mjs";
 import {loadFunctionGroups} from "../tools/segw-gen-mapping.mjs";
 import {buildModel, parseIwpr} from "../tools/segw-gen.mjs";
@@ -343,6 +343,28 @@ describe("stg-compile --all sweeps a project no YAML declares", () => {
 });
 
 describe("stg-compile --all treats packs as owned source", () => {
+  it("compiles only the project in the later layer regardless of path sorting", () => {
+    const root = mkdtempSync(join(tmpdir(), "stg-layer-"));
+    try {
+      const system = join(root, "z-system");
+      const user = join(root, "a-user");
+      const out = join(root, "gen");
+      mkdirSync(system);
+      mkdirSync(user);
+      const model = (service) => `project: ZLAYER\nservice: ${service}\nentities:\n  Item:\n    keys: [Id]\n    properties:\n      Id: String(8)\n`;
+      writeFileSync(join(system, "project.stg.yaml"), model("ZLAYER_SYSTEM"));
+      writeFileSync(join(user, "project.stg.yaml"), model("ZLAYER_USER"));
+      const report = compileAll(system, out, [], [user]);
+      expect(report.filter((r) => r.project === "ZLAYER")).to.have.length(1);
+      const winner = report.find((r) => r.project === "ZLAYER");
+      expect(winner).to.include({file: join(user, "project.stg.yaml"), service: "ZLAYER_USER"});
+      expect(readFileSync(join(out, "zlayer", winner.written.find((name) => name.endsWith(".iwsv.xml"))), "utf8"))
+        .to.contain("ZLAYER_USER");
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
   it("keeps a hand-written DPC_EXT beside a pack model", () => {
     const root = mkdtempSync(join(tmpdir(), "stg-pack-src-"));
     const own = join(root, "src");
@@ -357,6 +379,33 @@ describe("stg-compile --all treats packs as owned source", () => {
     const built = report.find((r) => r.project === "ZPACK");
     expect(built.kept).to.include("zcl_zpack_dpc_ext.clas.abap");
     expect(existsSync(join(out, "zpack", "zcl_zpack_dpc_ext.clas.abap"))).to.equal(false);
+  });
+});
+
+describe("stg-compile --all uses configured generator order", () => {
+  it("honors src when later or omitted, and projects gen onto gen/cds", () => {
+    const root = mkdtempSync(join(tmpdir(), "stg-order-"));
+    const previousCwd = process.cwd();
+    const model = (service, project = "ZORDER") => `project: ${project}\nservice: ${service}\nentities:\n  Item:\n    keys: [Id]\n    properties:\n      Id: String(8)\n`;
+    try {
+      process.chdir(root);
+      for (const folder of ["layer", "src", "gen/cds"]) mkdirSync(join(root, folder), {recursive: true});
+      writeFileSync(join(root, "layer", "order.stg.yaml"), model("ZORDER_LAYER"));
+      writeFileSync(join(root, "src", "order.stg.yaml"), model("ZORDER_SRC"));
+      writeFileSync(join(root, "gen/cds", "published.stg.yaml"), model("ZPUBLISHED_SRV", "ZPUBLISHED"));
+      const run = (folders) => {
+        writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: folders}));
+        compileConfiguredAll(root, "gen/stg", [], {});
+        const folder = join(root, "gen/stg/zorder");
+        return readFileSync(join(folder, readdirSync(folder).find((name) => name.endsWith(".iwsv.xml"))), "utf8");
+      };
+      expect(run(["layer", "src", "gen"])).to.contain("ZORDER_SRC");
+      expect(existsSync(join(root, "gen/stg/zpublished")), "gen/cds model").to.equal(true);
+      expect(run(["layer", "gen"])).to.contain("ZORDER_LAYER");
+    } finally {
+      process.chdir(previousCwd);
+      rmSync(root, {recursive: true, force: true});
+    }
   });
 });
 

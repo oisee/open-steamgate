@@ -16,7 +16,7 @@
 // The DDLS objects themselves stay out of the transpiler input (it rejects
 // the object type); abaplint lints them.
 import * as abaplint from "@abaplint/core";
-import {contentFoldersOf} from "./osd-packs.mjs";
+import {contentFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, rmSync, statSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {basename, join} from "node:path";
@@ -986,7 +986,9 @@ function main() {
   })));
   const mains = [];
   // every CDS view and every table of the repository, wherever it lives under src/
-  mains.push(...contentFoldersOf(process.env.OSD_ROOT ?? process.cwd()).flatMap((f) => walk(f)).filter((f) => /\.(ddls\.asddls|ddls\.xml|tabl\.xml|dtel\.xml|doma\.xml|ttyp\.xml)$/.test(f)));
+  mains.push(...winningByLayer(contentFoldersOf(process.env.OSD_ROOT ?? process.cwd()),
+    (folder) => walk(folder).filter((file) => /\.(ddls\.asddls|ddls\.xml|tabl\.xml|dtel\.xml|doma\.xml|ttyp\.xml)$/.test(file)),
+    (file) => basename(file).toLowerCase()));
   reg.addFiles(mem(mains));
   // and a library that is not there is SAID, not skipped: the output
   // changes without it, and a generator that shrugs at a missing dependency

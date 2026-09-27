@@ -40,11 +40,11 @@ with `--clobber` on every rerun. Do not move a published tag.
 
 The VSIX job installs dependencies with Node 24, runs `npm run bootstrap`
 for the pinned libraries and packs in `libs.lock.json`, and builds the VSIX.
-Before creating or editing a release, it generates notes from first-parent
+Before creating or editing a release, it generates CHANGELOG.md from first-parent
 GitHub PR merge titles since the nearest previous `vscode-v*` tag. A merge
 commit without a title in its body gets its title from the PR API. Squash
 commits and manually copied changes have no PR merge commit and do not
-appear. The generated notes, release README, and `FILE_ID.DIZ` pass through
+appear. The generated CHANGELOG.md, release README, and `FILE_ID.DIZ` pass through
 `tools/osd-leak-scan.mjs --paths` before release creation. Configure the
 repository secret `OSD_LEAK_IDENTIFIERS` with the JSON content of
 `.local/leak-identifiers.json` (an object whose keys name identifier kinds and
@@ -65,9 +65,10 @@ by hand after a local `npm run leak`. A match (exit 1) always stops the release.
 | Asset | Build or source |
 | --- | --- |
 | `osd-vscode-<version>.vsix` and `.sha256` | Universal VS Code extension, version checked against the tag |
-| `osd-linux-x64`, `osd-linux-arm64`, `osd-darwin-arm64`, `osd-windows-x64.exe`, each with `.sha256` | `npm run binary -- <output> <bun-target>` with Bun 1.4.2 |
+| `osd-linux-x64`, `osd-linux-arm64`, `osd-darwin-arm64`, `osd-windows-x64.exe`, each with `.sha256` | `npm run bootstrap`, then `npm run binary -- --seed <output> <bun-target>` with Bun 1.4.2 |
 | `sqlite.yml`, `duckdb.yml`, `postgres.yml`, `hana.yml` | [Tracked Compose sources](../docker/compose/), validated with `docker compose config` |
 | `README.md` | Short instructions for starting every asset, also included in the release notes |
+| `CHANGELOG.md` | Merged PR titles since the previous prerelease; the release body points to it |
 | `FILE_ID.DIZ` | Classic BBS description generated from the version, with printable ASCII and CRLF lines |
 
 The binary and Compose jobs start after the VSIX job creates the draft.
@@ -76,12 +77,25 @@ the draft unpublished. Rerun the workflow to fill or replace assets. An
 already published release is updated in place on reruns. Each checksum is
 `sha256sum` output with the corresponding asset basename.
 
-All four requested Bun targets cross-compiled on Linux x64 with Bun 1.4.2
+`npm run binary` defaults to checkout mode: it builds from a fresh checkout
+after `npm ci`, without `.local/lars` or an embedded system seed. Run that
+binary from an open-steamgate checkout. `--seed` (or `OSD_BINARY_SEED=1`)
+requires the bootstrapped libraries and packs and embeds the seed. Run
+`osd doctor` to see which mode a binary contains.
+
+The measured seeded Linux x64 binary is 109.5 MB (decimal). All four requested Bun targets cross-compiled on Linux x64 with Bun 1.4.2
 in the local release check. No target failed to build. Only Linux x64 was
 built on its native host; cross-compilation does not prove that Linux arm64,
 macOS arm64, or Windows x64 starts successfully. The binaries contain the
-host but need this repository's source, packs, and pinned libraries beside
-them to serve the system. The binary excludes the optional native DuckDB
+system seed, including source, selected packs, tools, data, and pinned library
+sources. On first start outside a checkout, the seed is copied into a
+content-keyed `osd-home-<seedId>` under `$XDG_DATA_HOME/open-steamgate` or
+`~/.local/share/open-steamgate` on Linux, `~/Library/Application Support/open-steamgate`
+on macOS, and `%LOCALAPPDATA%\\open-steamgate` on Windows. Existing copies and
+edits are retained. Run `osd up --layer <dir>` to add an ABAP folder above the
+seed; repeat the option or use `OSD_LAYERS` with the platform path separator.
+Copy an object's abapGit file from the materialized home into your layer to
+edit it. The binary excludes the optional native DuckDB
 module; the DuckDB Compose variant uses the Docker image instead.
 
 The Compose files use the image already published by the Docker multiarch

@@ -13,7 +13,9 @@
 // binary must hand over deliberately: bundled, they are static imports of
 // the entry, registered here, and tools/osd-transpile.mjs asks before it
 // resolves them from a node_modules that is not there.
-import {basename} from "node:path";
+import {basename, delimiter, isAbsolute, join, resolve} from "node:path";
+import {existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync} from "node:fs";
+import {homedir} from "node:os";
 
 // Bun uses /$bunfs/ on Unix and a virtual B:/~BUN/root path on Windows.
 export const compiled = typeof Bun !== "undefined" && /(?:\/\$bunfs\/|\/(?:~|%7E)BUN\/)/i.test(import.meta.url);
@@ -55,4 +57,75 @@ export function setHostModules(m) {
 }
 export function hostModules() {
   return modules;
+}
+
+// The embedded system seed and caller layers for the standalone binary.
+export function dataDirOf(platform = process.platform, env = process.env, home = homedir()) {
+  if (platform === "win32") return join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "open-steamgate");
+  if (platform === "darwin") return join(home, "Library", "Application Support", "open-steamgate");
+  return join(env.XDG_DATA_HOME || join(home, ".local", "share"), "open-steamgate");
+}
+
+export function layerList(args, env = process.env, cwd = process.cwd()) {
+  const cli = [];
+  const rest = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--layer") {
+      if (!args[i + 1] || args[i + 1].startsWith("--")) throw new Error("--layer needs a directory");
+      cli.push(args[++i]);
+    } else {
+      rest.push(args[i]);
+    }
+  }
+  const folders = [...(env.OSD_LAYERS || "").split(delimiter).filter(Boolean), ...cli]
+    .map((folder) => isAbsolute(folder) ? resolve(folder) : resolve(cwd, folder));
+  for (const folder of folders) {
+    if (!existsSync(folder) || !statSync(folder).isDirectory()) throw new Error(`layer is not a directory: ${folder}`);
+  }
+  return {folders, rest};
+}
+
+export function isCheckout(dir) {
+  return !existsSync(join(dir, ".osd-materialized")) && existsSync(join(dir, "abap_transpile.json"))
+    && existsSync(join(dir, "src")) && existsSync(join(dir, "tools"));
+}
+
+export async function ensureBinaryHome(archivePath, dataDir) {
+  const archiveBytes = await Bun.file(archivePath).bytes();
+  const archive = new Bun.Archive(archiveBytes);
+  const files = await archive.files();
+  const idFile = files.get(".seed-id") || files.get("./.seed-id");
+  if (!idFile) throw new Error("binary has no system seed ID");
+  const id = (await idFile.text()).trim();
+  if (!/^[0-9a-f]{64}$/.test(id)) throw new Error("binary has an invalid system seed ID");
+  const target = join(dataDir, `osd-home-${id}`);
+  const marker = join(target, ".osd-materialized");
+  mkdirSync(dataDir, {recursive: true});
+  if (existsSync(target)) {
+    if (!existsSync(marker) || readFileSync(marker, "utf8").trim() !== id) {
+      throw new Error(`materialized home has no matching seed marker: ${target}`);
+    }
+    return target;
+  }
+  const staging = join(dataDir, `.osd-home-${id}-${process.pid}`);
+  rmSync(staging, {recursive: true, force: true});
+  try {
+    await archive.extract(staging);
+    writeFileSync(join(staging, ".osd-materialized"), `${id}\n`);
+    // A concurrent first start can win the rename. Preserve that copy and
+    // never merge into an existing (possibly edited) working tree.
+    if (!existsSync(target)) {
+      try {
+        renameSync(staging, target);
+      } catch (error) {
+        if ((error?.code !== "EEXIST" && error?.code !== "ENOTEMPTY") || !existsSync(target)) throw error;
+      }
+    }
+    if (!existsSync(marker) || readFileSync(marker, "utf8").trim() !== id) {
+      throw new Error(`materialized home has no matching seed marker: ${target}`);
+    }
+  } finally {
+    rmSync(staging, {recursive: true, force: true});
+  }
+  return target;
 }

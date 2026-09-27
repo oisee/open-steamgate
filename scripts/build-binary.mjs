@@ -1,18 +1,25 @@
 // bin/osd.mjs as one executable, build/osd (SP4, docs/bun-spike.md part three).
 //
-// Run with bun: `bun scripts/build-binary.mjs [outfile] [target]`. Two things the bundler is
+// Run with bun: `bun scripts/build-binary.mjs [--seed] [outfile] [target]`. Two things the bundler is
 // told: DuckDB stays outside (native, optional), and @abaplint/core is ONE
 // module — the transpiler resolves its own copy from where it lives and the
 // entry another from here, same version, different files, and the
 // transpiler checks its registry with instanceof.
 import {createRequire} from "node:module";
+import {execFileSync} from "node:child_process";
+import {mkdirSync, rmSync} from "node:fs";
 import {resolve} from "node:path";
+import {stageSystemSeed} from "./build-vsix.mjs";
+import {describeVsixPreflight, vsixPreflightMissing} from "../tools/osd-lock.mjs";
 
 const require = createRequire(import.meta.url);
 const root = resolve(import.meta.dir, "..");
 const core = require.resolve("@abaplint/core");
-const outfile = process.argv[2] ?? resolve(root, "build", "osd");
-const target = process.argv[3];
+const args = process.argv.slice(2).filter((arg) => arg !== "--seed");
+const seeded = process.argv.includes("--seed") || process.env.OSD_BINARY_SEED === "1";
+if (args.length > 2) throw new Error("Usage: bun scripts/build-binary.mjs [--seed] [outfile] [target]");
+const outfile = args[0] ?? resolve(root, "build", "osd");
+const target = args[1];
 const releaseTargets = new Set([
   "bun-linux-x64-baseline", "bun-linux-arm64", "bun-windows-x64-baseline", "bun-darwin-arm64",
 ]);
@@ -20,19 +27,52 @@ if (target !== undefined && !releaseTargets.has(target)) {
   throw new Error(`Unsupported release target ${target}; expected one of ${[...releaseTargets].join(", ")}`);
 }
 const started = Date.now();
+let archive;
+let seedId;
+if (seeded) {
+  const preflight = describeVsixPreflight(vsixPreflightMissing(root));
+  if (preflight !== undefined) {
+    console.error(preflight.replace(/^build-vsix: missing (.*); run npm install and node tools\/osd-libs\.mjs as needed$/,
+      "build-binary --seed: missing $1; run npm run bootstrap"));
+    process.exit(1);
+  }
+  const stage = resolve(root, "build", "binary-seed");
+  const seedRoot = resolve(stage, "osd-seed");
+  archive = resolve(stage, "osd-seed.tar.gz");
+  let staged;
+  try {
+    staged = await stageSystemSeed(seedRoot);
+  } catch (error) {
+    console.error(String(error.message).replace(/^build-vsix: missing (.*); run npm install and node tools\/osd-libs\.mjs as needed$/,
+      "build-binary --seed: missing $1; run npm run bootstrap"));
+    process.exit(1);
+  }
+  seedId = staged.seedId;
+  mkdirSync(stage, {recursive: true});
+  rmSync(archive, {force: true});
+  execFileSync("tar", ["-czf", archive, "-C", seedRoot, "."]);
+}
 const result = await Bun.build({
   entrypoints: [resolve(root, "bin", "osd.mjs")],
   target: "bun",
-  compile: {...(target ? {target} : {}), outfile},
+  define: {__OSD_BINARY_SEEDED__: JSON.stringify(seeded)},
+  compile: {...(target ? {target} : {}), outfile, ...(archive ? {assets: [archive]} : {})},
   plugins: [{
     name: "one-core",
     setup(build) {
       build.onResolve({filter: /^@abaplint\/core$/}, () => ({path: core}));
+      if (!seeded) {
+        build.onResolve({filter: /\/\.local\/lars\/open-abap-gui\/converter\/src\/api\.mjs$/},
+          () => ({path: "gui-converter-on-checkout", namespace: "osd-stub"}));
+      }
       // DuckDB is native and optional, and a compiled bundle evaluates every
       // import at start, even one behind a dynamic import; the binary ships
       // without it and says so when asked for it
       build.onResolve({filter: /^@duckdb\/node-api$/}, () => ({path: "duckdb-absent", namespace: "osd-stub"}));
-      build.onLoad({filter: /.*/, namespace: "osd-stub"}, () => ({
+      build.onLoad({filter: /^gui-converter-on-checkout$/, namespace: "osd-stub"}, () => ({
+        contents: "export {};", loader: "js",
+      }));
+      build.onLoad({filter: /^duckdb-absent$/, namespace: "osd-stub"}, () => ({
         contents: 'export const DuckDBInstance = {create() { throw new Error("DuckDB is not part of the binary"); }}; export default {DuckDBInstance};',
         loader: "js",
       }));
@@ -59,3 +99,4 @@ if (!result.success) {
 }
 const size = (await Bun.file(outfile).size) / 1e6;
 console.log(`built ${outfile}${target ? ` for ${target}` : ""}: ${size.toFixed(1)} MB in ${Date.now() - started} ms`);
+console.log(seeded ? `system seed: ${seedId}` : "checkout mode: no embedded system seed");

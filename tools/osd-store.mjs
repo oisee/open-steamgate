@@ -16,8 +16,9 @@ import {existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unli
 import {createHash} from "node:crypto";
 import {parseDDLS, viewFieldsOf} from "./cds2ddic.mjs";
 import {entityOf} from "./ddls-entity.mjs";
-import {packRootsOf} from "./osd-packs.mjs";
+import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
+import {loadConfig} from "./osd-build.mjs";
 
 import {basename, dirname, join, relative, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
@@ -103,18 +104,6 @@ const FOLDER_PACKAGES = {
 // wanted. null means the roots are the roots.
 const SUPER_PACKAGE = null;
 
-const DEFAULT_ROOTS = [
-  {path: "src", writable: true, library: false},
-  // what was brought in from a repository: objects of the local system that
-  // nobody here wrote, so they are not in this repository's git, and our own
-  // source wins when a name is in both
-  {path: "local", writable: true, library: false, imported: true},
-  // ABAP unit test classes are objects of the system too, and the
-  // transpiler already builds from here
-  {path: "test", writable: true, library: false},
-  {path: "gen", writable: false, library: false},
-];
-
 // the open-abap clones beside us: a system's worth of standard objects,
 // read-only, and the reason a package tree looks inhabited
 // The libraries, as the BUILD reads them -- folder, `files` patterns and
@@ -161,7 +150,7 @@ const packageWord = (s) => s.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
 // abap_transpile.json, in its order, so that the index and the build resolve
 // a name to the same file (tools/osd-inputs.mjs: the later root wins in
 // both, the way a layer does; a library never wins over a root). A tree
-// without the config is read the old way. gen/ is never written by hand,
+// without the config uses the build's fallback. gen/ is never written by hand,
 // and what sits under local/ was imported, not written here.
 /** The exclusions that mean "this is not an object of this system".
  *
@@ -193,20 +182,13 @@ export function exclusionsOf(root) {
   }
 }
 
-export function rootsOf(root) {
-  let folders;
-  try {
-    folders = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8")).input_folder;
-  } catch {
-    return DEFAULT_ROOTS;
-  }
-  if (Array.isArray(folders) === false || folders.length === 0) {
-    return DEFAULT_ROOTS;
-  }
-  return [...folders.map((path) => ({
+export function rootsOf(root, env = process.env) {
+  const config = loadConfig(root);
+  const packs = new Map(packRootsOf(root, env).map((pack) => [pack.path, pack]));
+  return inputFoldersOf(root, config, env).map((path) => packs.get(path) ?? ({
     path, writable: path !== "gen", library: false,
     ...(path === "local" || path.startsWith("local/") ? {imported: true} : {}),
-  })), ...packRootsOf(root)];
+  }));
 }
 
 /**

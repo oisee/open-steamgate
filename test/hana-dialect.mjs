@@ -1,4 +1,7 @@
 import {expect} from "chai";
+import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {ABAP} from "@abaplint/runtime";
 import {binaryLiterals, hanaSchema, multiRowInsert} from "../tools/hana-client.mjs";
 import {binaryDdIC} from "../tools/osd-ddic-binary.mjs";
@@ -17,6 +20,26 @@ import {binaryDdIC} from "../tools/osd-ddic-binary.mjs";
 // the multi-row form is refused, `SELECT ... FROM DUMMY UNION ALL ...` is
 // accepted and the rows land.
 describe("the HANA dialect rewrite", () => {
+  it("uses only the winning table and data element for binary columns", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-binary-layers-"));
+    try {
+      mkdirSync(join(root, "src"));
+      mkdirSync(join(root, "packs", "over", "src"), {recursive: true});
+      writeFileSync(join(root, "packs", "over", "osd-pack.json"), "{}");
+      const table = (fields) => `<abapGit><TABNAME>ZBIN</TABNAME>${fields.map((name) => `<DD03P><FIELDNAME>${name}</FIELDNAME><ROLLNAME>ZBYTES</ROLLNAME></DD03P>`).join("")}</abapGit>`;
+      const element = (type) => `<abapGit><ROLLNAME>ZBYTES</ROLLNAME><DATATYPE>${type}</DATATYPE><LENG>4</LENG></abapGit>`;
+      writeFileSync(join(root, "src", "zbytes.dtel.xml"), element("RAW"));
+      writeFileSync(join(root, "src", "zbin.tabl.xml"), table(["REMOVED", "KEPT"]));
+      const winningElement = join(root, "packs", "over", "src", "zbytes.dtel.xml");
+      writeFileSync(winningElement, element("RAW"));
+      writeFileSync(join(root, "packs", "over", "src", "zbin.tabl.xml"), table(["KEPT"]));
+      expect(binaryDdIC(root).ZBIN).to.deep.equal({KEPT: "VARBINARY(4)"});
+      writeFileSync(winningElement, element("CHAR"));
+      expect(binaryDdIC(root).ZBIN).to.equal(undefined);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
   it("turns a multi-row VALUES into UNION ALL over DUMMY", () => {
     expect(multiRowInsert(`INSERT INTO "T" ("A","B") VALUES (1,2), (3,4)`))
       .to.equal(`INSERT INTO "T" ("A","B") SELECT 1,2 FROM DUMMY UNION ALL SELECT 3,4 FROM DUMMY`);

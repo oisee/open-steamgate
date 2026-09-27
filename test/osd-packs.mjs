@@ -2,8 +2,11 @@ import {expect} from "chai";
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {BadPack, contentFoldersOf, dataDirsOf, ddicDirsOf, inputFoldersOf, packAt, packRootsOf, packsOf, webappsOf} from "../tools/osd-packs.mjs";
-import {ObjectStore} from "../tools/osd-store.mjs";
+import {BadPack, contentFoldersOf, dataDirsOf, ddicDirsOf, generatorFoldersOf, inputFoldersOf, packAt, packRootsOf, packsOf, webappsOf} from "../tools/osd-packs.mjs";
+import {ObjectStore, rootsOf} from "../tools/osd-store.mjs";
+import {loadConfig} from "../tools/osd-build.mjs";
+import {packApps} from "../tools/osd-bsp-registry.mjs";
+import {packNodes} from "../tools/osd-nodes.mjs";
 
 // A pack is a directory, not a rebuild (backlog E.2): ABAP, seed rows, a
 // page and a manifest naming it, found at start and layered after the tree's
@@ -73,6 +76,43 @@ describe("tools/osd-packs: a pack is a directory", () => {
     expect(folders[2]).to.equal("gen");
   });
 
+  it("gives the store the build's exact root order, including user layers", () => {
+    write("user/zcl_ours.clas.abap", CLASS("zcl_ours"));
+    const env = {OSD_LAYERS: "user"};
+    const config = {input_folder: ["src", "gen"]};
+    expect(rootsOf(root, env).map((entry) => entry.path)).to.deep.equal(inputFoldersOf(root, config, env));
+    expect(rootsOf(root, env).at(-1)).to.include({path: "user", writable: true, library: false});
+  });
+
+  it("gives the store shared roots for scalar and empty input_folder values", () => {
+    for (const input_folder of ["src", []]) {
+      const config = {input_folder};
+      writeFileSync(join(root, "abap_transpile.json"), JSON.stringify(config));
+      const env = {OSD_LAYERS: "user"};
+      expect(rootsOf(root, env).map((entry) => entry.path)).to.deep.equal(inputFoldersOf(root, config, env));
+    }
+  });
+
+  it("uses the build fallback and shared pack and user order with no config file", () => {
+    rmSync(join(root, "abap_transpile.json"));
+    const env = {OSD_LAYERS: "user"};
+    const fallback = loadConfig(root);
+    expect(fallback.input_folder).to.equal("src");
+    expect(rootsOf(root, env).map((entry) => entry.path)).to.deep.equal(inputFoldersOf(root, fallback, env));
+    expect(rootsOf(root, env).map((entry) => entry.path)).to.deep.equal(["src", "packs/vibes/src", "user"]);
+  });
+
+  it("derives BSP apps and host nodes from packsOf, including a direct pack path", () => {
+    const direct = join(outside, "direct");
+    mkdirSync(join(direct, "webapp"), {recursive: true});
+    writeFileSync(join(direct, "osd-pack.json"), JSON.stringify({name: "direct", order: 1}));
+    writeFileSync(join(direct, "webapp", "index.html"), "direct page");
+    const env = {OSD_PACKS: direct};
+    expect(packApps(root, env).map((app) => app.app)).to.deep.equal(["ZDIRECT", "ZVIBES"]);
+    expect(packApps(root, env)[0].pages[0].content.toString()).to.equal("direct page");
+    expect(packNodes(root, env).map((node) => node.path)).to.deep.equal(["/app/direct", "/app/vibes"]);
+  });
+
   it("orders by the manifest, then by name", () => {
     write("packs/early/osd-pack.json", JSON.stringify({order: 10}));
     write("packs/early/src/zcl_early.clas.abap", CLASS("zcl_early"));
@@ -115,6 +155,15 @@ describe("tools/osd-packs: a pack is a directory", () => {
     expect(folders[0]).to.equal("src");
     expect(folders).to.have.length(2);
     expect(folders[1].endsWith("packs/vibes/src")).to.equal(true);
+  });
+
+  it("projects configured inputs, imports, packs, gen, then user layers", () => {
+    write("imported/zcl_imported.clas.abap", CLASS("zcl_imported"));
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: ["src", "imported", "test", "gen"]}));
+    mkdirSync(join(root, "user"));
+    expect(generatorFoldersOf(root, {OSD_LAYERS: "user"})).to.deep.equal([
+      "src", "imported", "packs/vibes/src", "gen", "user",
+    ]);
   });
 
   it("the object store shows a pack's objects, in the pack's own package", () => {

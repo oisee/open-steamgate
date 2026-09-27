@@ -33,7 +33,7 @@ import {liveHash} from "./osd-build.mjs";
 import {instances} from "./osd-runtime.mjs";
 import {services as icfServices, channels as pushChannels} from "./osd-icf.mjs";
 import {segwRegistrations} from "./segw-registry.mjs";
-import {contentFoldersOf, folderOf, packsOf, webappsOf} from "./osd-packs.mjs";
+import {generatorFoldersOf, folderOf, packsOf, webappsOf} from "./osd-packs.mjs";
 import {layers} from "./osd-inputs.mjs";
 import {identity} from "./osd-identity.mjs";
 import {databaseDescriptor} from "./osd-database-identity.mjs";
@@ -192,7 +192,7 @@ export function serviceTree(root, env = process.env) {
     return packs.find((p) => p.abap.some((f) => at.startsWith(resolve(f) + "/")))?.name ?? "";
   };
   const rel = (file) => (file === undefined ? undefined : relative(root, resolve(root, file)));
-  const folders = [...contentFoldersOf(root, env), "gen"].map((f) => join(root, f));
+  const folders = generatorFoldersOf(root, env).map((f) => join(root, f));
   for (const one of segwRegistrations(folders)) {
     out.push({
       path: `/sap/opu/odata/sap/${one.external}`,

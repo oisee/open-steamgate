@@ -12,6 +12,7 @@ import {basename,join} from "node:path";
 // a static import, so a compiled binary carries it: createRequire off
 // import.meta.url resolves nothing inside one (CLAUDE.md, "The binary")
 import * as abaplintCore from "@abaplint/core";
+import {contentFoldersOf, winningByLayer} from "./osd-packs.mjs";
 
 /** abap.<type> as a CDS `returns` list writes it -> the HANA column type */
 export function cdsType(text) {
@@ -39,20 +40,22 @@ export function cdsType(text) {
 /** every `define table function` under the folders */
 export function tableFunctions(folders) {
   const abaplint = abaplintCore;
-  const found = [];
-  const walk = (dir) => {
-    if (!existsSync(dir)) return;
+  const walk = (dir, found = []) => {
+    if (!existsSync(dir)) return found;
     for (const e of readdirSync(dir, {withFileTypes: true})) {
       const p = join(dir, e.name);
-      if (e.isDirectory()) { walk(p); continue; }
+      if (e.isDirectory()) { walk(p, found); continue; }
       if (!/\.ddls\.asddls$/i.test(e.name)) continue;
-      const source = readFileSync(p, "utf8");
-      if (!/define\s+table\s+function/i.test(source)) continue;
-      found.push({file: p, ...parseTableFunction(source, abaplint)});
+      found.push(p);
     }
+    return found;
   };
-  for (const f of folders) walk(f);
-  return found;
+  return winningByLayer(folders, (folder) => walk(folder, []),
+    (file) => basename(file).toUpperCase()).flatMap((file) => {
+    const source = readFileSync(file, "utf8");
+    return /define\s+table\s+function/i.test(source)
+      ? [{file, ...parseTableFunction(source, abaplint)}] : [];
+  });
 }
 
 /** the name, the parameters, the returns list and the implementing method.
@@ -114,8 +117,7 @@ export function check(tf, procedure) {
 }
 
 if (basename(process.argv[1] ?? "") === "amdp-tablefunc.mjs") {
-  const config = JSON.parse(readFileSync("abap_transpile.json", "utf8"));
-  const folders = config.input_folder.filter((f) => f === "src" || f.startsWith("packs/"));
+  const folders = contentFoldersOf(process.env.OSD_ROOT ?? process.cwd());
   const functions = tableFunctions(folders);
   const file = "gen/amdp/procedures.json";
   const procedures = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).procedures : [];

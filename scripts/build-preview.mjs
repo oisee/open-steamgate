@@ -13,7 +13,7 @@ import {join, resolve, dirname} from "node:path";
 import {fileURLToPath} from "node:url";
 import {seedStatements} from "../test/seed.mjs";
 import {services as icfServices, channels as apcChannels} from "../tools/osd-icf.mjs";
-import {folderOf, packsOf, tilesOf, webappsOf} from "../tools/osd-packs.mjs";
+import {generatorFoldersOf, packsOf, tilesOf, webappsOf} from "../tools/osd-packs.mjs";
 import {describeUnfetched, unfetched} from "../tools/osd-fetch.mjs";
 import {packsInfo, servicesOf} from "../tools/osd-status.mjs";
 import {identity} from "../tools/osd-identity.mjs";
@@ -43,7 +43,7 @@ if (missing.length > 0) {
   throw new Error(describeUnfetched(missing));
 }
 const packs = packsOf(root);
-const roots = [...new Set(["src", "local", "test", "gen", ...packs.flatMap((p) => p.abap.map((f) => folderOf(root, f)))])];
+const roots = generatorFoldersOf(root);
 console.log(`Packs: ${packs.length === 0 ? "(none)" : packs.map((p) => p.name).join(", ")}`);
 
 // the seed rows, and a build id that tells a stored browser database from a

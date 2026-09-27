@@ -1,8 +1,9 @@
 import {expect} from "chai";
-import {execFileSync, spawn} from "node:child_process";
-import {existsSync, readFileSync, readdirSync} from "node:fs";
+import {execFileSync, spawn, spawnSync} from "node:child_process";
+import {copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync} from "node:fs";
 import {dirname, join, relative, resolve} from "node:path";
 import {builtinModules} from "node:module";
+import {tmpdir} from "node:os";
 
 // The binary as a host of the same system (SP4, docs/bun-spike.md part
 // three). What bit once is measured here every time, so a quirk between
@@ -17,6 +18,50 @@ const root = process.cwd();
 const self = process.env.OSD_BINARY ? JSON.parse(process.env.OSD_BINARY) : [join(root, "build", "osd")];
 const [binary, ...prefix] = self;
 const built = existsSync(binary) || binary === "node" || binary === process.execPath;
+
+describe("binary build modes from a clean checkout", function () {
+  this.timeout(180000);
+  let checkout;
+
+  before(function () {
+    if (spawnSync("bun", ["--version"]).status !== 0) this.skip();
+    checkout = mkdtempSync(join(tmpdir(), "osd-binary-checkout-"));
+    // Only tracked files go into the fixture. In particular, no .local/lars
+    // or output from this developer's tree can make the build pass by accident.
+    const tracked = spawnSync("git", ["ls-files", "-z"], {cwd: root});
+    expect(tracked.status, tracked.stderr?.toString()).to.equal(0);
+    const names = tracked.stdout.toString().split("\0").filter(Boolean);
+    for (const name of names) {
+      const from = join(root, name);
+      const to = join(checkout, name);
+      mkdirSync(dirname(to), {recursive: true});
+      if (lstatSync(from).isSymbolicLink()) symlinkSync(readlinkSync(from), to);
+      else copyFileSync(from, to);
+    }
+    symlinkSync(join(root, "node_modules"), join(checkout, "node_modules"), "dir");
+  });
+
+  after(() => { if (checkout) rmSync(checkout, {recursive: true, force: true}); });
+
+  it("builds checkout mode without .local/lars and reports its mode", () => {
+    const output = join(checkout, "osd-test");
+    const build = spawnSync("bun", ["scripts/build-binary.mjs", output], {cwd: checkout, encoding: "utf8"});
+    expect(build.status, build.stderr).to.equal(0);
+    expect(build.stdout).to.contain("checkout mode: no embedded system seed");
+    const doctor = spawnSync(output, ["doctor"], {cwd: checkout, encoding: "utf8"});
+    expect(doctor.status, doctor.stderr).to.equal(0);
+    expect(doctor.stdout).to.contain("binary mode: checkout (no embedded system seed)");
+  });
+
+  it("gives one actionable preflight line when --seed has no libraries", () => {
+    const build = spawnSync("bun", ["scripts/build-binary.mjs", "--seed", join(checkout, "osd-seeded")],
+      {cwd: checkout, encoding: "utf8"});
+    expect(build.status).to.equal(1);
+    const lines = build.stderr.trim().split("\n");
+    expect(lines, build.stderr).to.have.length(1);
+    expect(lines[0]).to.match(/^build-binary --seed: missing .*\.local\/lars\/.*; run npm run bootstrap$/);
+  });
+});
 
 describe("the binary: the same system, one file", function () {
   this.timeout(180000);

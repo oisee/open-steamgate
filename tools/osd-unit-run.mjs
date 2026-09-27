@@ -28,11 +28,12 @@ import {spawn} from "node:child_process";
 import {readdirSync, readFileSync, existsSync, statSync, mkdtempSync, openSync, closeSync, rmSync} from "node:fs";
 import {basename, join} from "node:path";
 import {tmpdir} from "node:os";
+import {inputFoldersOf, winningByLayer} from "./osd-packs.mjs";
 
 /** every test class the tree holds, from the files rather than from an index */
-export function testClassesIn(root = process.cwd()) {
+export function testClassesIn(root = process.cwd(), env = process.env) {
   const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
-  const folders = (config.input_folder ?? []).map((f) => join(root, f)).filter(existsSync);
+  const folders = inputFoldersOf(root, config, env).map((f) => join(root, f)).filter(existsSync);
   // **The build's own exclusions, not a second list.** The first run of this
   // check named `ZCL_EDITOR` -- a fixture under `test/fixtures/`, with its
   // own `abaplint.jsonc` and an empty test class, which exists so the ADT
@@ -42,23 +43,31 @@ export function testClassesIn(root = process.cwd()) {
   // being read. One source of truth for what the build skips.
   const excluded = (config.exclude_filter ?? []).map((p) => new RegExp(p));
   const skip = (path) => excluded.some((re) => re.test("/" + path.slice(root.length + 1)));
-  const found = new Set();
+  const includes = new Map();
   const walk = (dir) => {
+    const sources = [];
     for (const e of readdirSync(dir, {withFileTypes: true})) {
       const path = join(dir, e.name);
       if (skip(path)) continue;
-      if (e.isDirectory()) walk(path);
+      if (e.isDirectory()) sources.push(...walk(path));
+      else if (e.name.endsWith(".clas.abap")) sources.push(path);
       else if (e.name.endsWith(".clas.testclasses.abap")) {
-        // a test include with no class beside it is not an object at all,
-        // and saying so here is cheaper than wondering later
-        const source = path.replace(/\.testclasses\.abap$/, ".abap");
-        found.add(basename(path, ".clas.testclasses.abap").toUpperCase() +
-          (existsSync(source) ? "" : "  (no .clas.abap beside it)"));
+        includes.set(path.replace(/\.testclasses\.abap$/, ".abap"), path);
       }
     }
+    return sources;
   };
-  for (const f of folders) {
-    if (statSync(f).isDirectory()) walk(f);
+  const winners = winningByLayer(folders, (folder) => {
+    return statSync(folder).isDirectory() ? walk(folder) : [];
+  }, (path) => basename(path, ".clas.abap").toUpperCase());
+  const found = new Set();
+  for (const source of winners) {
+    if (includes.has(source)) found.add(basename(source, ".clas.abap").toUpperCase());
+  }
+  const owned = new Set(winners.map((source) => basename(source, ".clas.abap").toUpperCase()));
+  for (const include of includes.values()) {
+    const name = basename(include, ".clas.testclasses.abap").toUpperCase();
+    if (!owned.has(name)) found.add(name + "  (no .clas.abap beside it)");
   }
   return [...found].sort();
 }

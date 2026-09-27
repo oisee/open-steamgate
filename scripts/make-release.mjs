@@ -211,20 +211,10 @@ if (existsSync(join(root, "node_modules", "hdb"))) {
 // pack (packs/o4d/upstream/) is a directory on disk and travels with it.
 // It used to copy .local/packs alone, which shipped an older demo than the
 // tree served (2026-09-17).
-const places = [join(root, "packs"), ...(process.env.OSD_PACKS ?? "").split(/[:;]/).map((s) => s.trim()).filter((s) => s !== "").map((s) => resolve(root, s))];
-const carried = new Set();
-for (const place of places) {
-  if (existsSync(place) === false) {
-    continue;
-  }
-  for (const entry of readdirSync(place).sort()) {
-    if (existsSync(join(place, entry, "osd-pack.json")) === false || carried.has(entry)) {
-      continue;
-    }
-    cpSync(join(place, entry), join(out, "packs", entry), {recursive: true, dereference: true});
-    carried.add(entry);
-    say(`pack ${entry}: ${join(place, entry)}`);
-  }
+const {packsOf} = await import(pathToFileURL(join(root, "tools", "osd-packs.mjs")).href);
+for (const pack of packsOf(root)) {
+  cpSync(pack.dir, join(out, "packs", pack.name), {recursive: true, dereference: true});
+  say(`pack ${pack.name}: ${pack.dir}`);
 }
 
 // one generation, and the link the runtime loads it through

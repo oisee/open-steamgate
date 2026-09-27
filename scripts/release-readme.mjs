@@ -18,7 +18,7 @@ export function renderReadme(assets) {
   const lines = [
     "# Start here",
     "",
-    "Pick the VSIX for VS Code, a Bun binary for a source checkout on your machine, or a Compose file for Docker. SQLite is the default Compose database.",
+    "Pick the VSIX for VS Code, a self-contained Bun binary, or a Compose file for Docker. SQLite is the default Compose database.",
     "",
   ];
   for (const name of names) {
@@ -33,20 +33,24 @@ export function renderReadme(assets) {
     } else if (binaries.has(name)) {
       if (name.endsWith(".exe")) {
         lines.push(
-          "Download this file into a bootstrapped open-steamgate source checkout, rename it to `osd.exe`, and run `.\\osd.exe up` from the checkout in PowerShell. Run `.\\osd.exe doctor` to check the bundled runtime.",
+          "Download this file into any folder, rename it to `osd.exe`, and run `.\\osd.exe up` in PowerShell. Run `.\\osd.exe doctor` to check the bundled runtime.",
           "",
         );
       } else {
         lines.push(
-          `Download this file into a bootstrapped open-steamgate source checkout. Run \`mv ${name} osd && chmod +x osd && ./osd up\` from the checkout; run \`./osd doctor\` to check the bundled runtime.`,
+          `Download this file into any folder. Run \`mv ${name} osd && chmod +x osd && ./osd up\`; run \`./osd doctor\` to check the bundled runtime.`,
           "",
         );
       }
       if (name === "osd-darwin-arm64") {
         lines.push("If macOS Gatekeeper quarantines the download, run `xattr -d com.apple.quarantine osd` after checking its checksum.", "");
       }
+      if (name === "osd-linux-x64") {
+        lines.push("Measured Linux x64 executable size: 109.5 MB (decimal, local Bun 1.4.2 build).", "");
+      }
       lines.push(
-        "Open `http://localhost:3030/`. The default SQLite database is `.local/db/osd.sqlite` under the directory where you start `osd`; a custom `STG_PORT` uses `.local/db/osd-<port>.sqlite`. The executable contains the host, while the checkout supplies system source, packs, and libraries (`npm run bootstrap` prepares them).",
+        "Open `http://localhost:3030/`. On first start outside a checkout, the binary copies its bundled system into a content-keyed `osd-home-<seedId>` under the user data directory: `$XDG_DATA_HOME/open-steamgate` or `~/.local/share/open-steamgate` on Linux, `~/Library/Application Support/open-steamgate` on macOS, `%LOCALAPPDATA%\\open-steamgate` on Windows. Later releases keep earlier working copies and user edits. The SQLite database lives in that working copy under `.local/db/`.",
+        "To override an ABAP object, copy its file from the materialized home's `src/` or `packs/` into your own folder, retaining its abapGit filename, then run `osd up --layer <folder>`. Repeat `--layer` for more folders, or set `OSD_LAYERS` to a platform path-list. Later layers win, and the build logs each override. A binary started inside a source checkout uses that checkout directly.",
         "",
       );
     } else {
@@ -82,12 +86,12 @@ export function renderDiz(version) {
     "OSD binaries: Linux, macOS, Windows",
     "Docker Compose: four database choices",
     "",
-    "       ___",
-    "  ____/o  \\___",
-    " <___  AIRSHIP _>",
-    "     \\______ /",
+    "  o O  _|_____________________",
+    " <|=|=|    ||    (o-o)       )",
+    "  \\___________________________/",
+    "          \\[_ooo_]/",
   ];
-  if (lines.length > 10 || lines.some((line) => line.length > 45 || !/^[\x20-\x7e]*$/.test(line))) {
+  if (lines.length > 10 || lines.some((line) => line.length > 40 || !/^[\x20-\x7e]*$/.test(line))) {
     throw new Error("release version does not fit FILE_ID.DIZ limits");
   }
   return Buffer.from(`${lines.join("\r\n")}\r\n`, "ascii");

@@ -29,7 +29,7 @@
 //   locked, it is not built.
 import {readdirSync, readFileSync, statSync, writeFileSync, mkdirSync} from "node:fs";
 import {basename, join} from "node:path";
-import {contentFoldersOf} from "./osd-packs.mjs";
+import {generatorFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {ObjectStore} from "./osd-store.mjs";
 import {typeGraph} from "./osd-type-graph.mjs";
 
@@ -141,31 +141,26 @@ function refuse(fm) {
 
 // every function module of every group below the folders
 export function functionModules(folders) {
-  const out = [];
-  const seen = new Set();
-  for (const folder of folders) {
-    for (const file of walk(folder)) {
-      const dir = file.slice(0, file.length - basename(file).length);
-      const group = basename(file).replace(/\.fugr\.xml$/i, "");
-      let beside = [];
-      try {
-        beside = readdirSync(dir);
-      } catch {
-        beside = [];
-      }
-      for (const fm of parseFunctionGroup(readFileSync(file, "utf8"), file)) {
-        if (seen.has(fm.name)) {
-          continue;
-        }
-        seen.add(fm.name);
-        fm.implemented = beside.includes(`${group}.fugr.${fm.name.toLowerCase()}.abap`);
-        fm.reason = refuse(fm);
-        fm.exposed = fm.remote && fm.reason === "";
-        out.push(fm);
-      }
+  const groups = winningByLayer(folders, (folder) => walk(folder),
+    (file) => basename(file).toUpperCase());
+  const modules = [];
+  for (const file of groups) {
+    const dir = file.slice(0, file.length - basename(file).length);
+    const group = basename(file).replace(/\.fugr\.xml$/i, "");
+    let beside = [];
+    try {
+      beside = readdirSync(dir);
+    } catch {
+      beside = [];
+    }
+    for (const fm of parseFunctionGroup(readFileSync(file, "utf8"), file)) {
+      fm.implemented = beside.includes(`${group}.fugr.${fm.name.toLowerCase()}.abap`);
+      fm.reason = refuse(fm);
+      fm.exposed = fm.remote && fm.reason === "";
+      modules.push(fm);
     }
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  return modules.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // ------------------------------------------------------------------ ABAP out
@@ -557,7 +552,7 @@ ENDCLASS.
 if (process.argv[1] && /osd-fm-registry\.mjs$/.test(process.argv[1])) {
   const folders = process.argv.slice(2).filter((a) => !a.startsWith("--"));
   const list = process.argv.includes("--list");
-  const modules = functionModules(folders.length > 0 ? folders : [...contentFoldersOf(process.env.OSD_ROOT ?? process.cwd()), "gen"]);
+  const modules = functionModules(folders.length > 0 ? folders : generatorFoldersOf(process.env.OSD_ROOT ?? process.cwd()));
   for (const fm of modules) {
     const how = fm.exposed ? "exposed" : fm.remote ? "refused: " + fm.reason : "local only";
     console.log(`osd-fm-registry: ${fm.name} (${fm.group}) -> ${how}, ${fm.parameters.length} parameters, ${fm.exceptions.length} exceptions`);
