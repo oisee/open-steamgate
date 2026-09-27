@@ -38,11 +38,15 @@ application. The intent comes from the app's own `webapp/manifest.json`,
 entry of the sandbox's `applications` (`SAPUI5.Component=<sap.app.id>`, the
 pack's BSP application `../sap/bc/ui5_ui5/sap/<name>/`), and `flp.html`
 reads them before the sandbox boots, since an intent added afterwards
-cannot be opened. Write the tile's `url` as `#Object-action` or as
-`/app/flp.html#Object-action` (the launchpad turns the latter into the
-former; a URL that is not a hash opens as an outside link, in a new
-window). An intent or a component id a built-in application already uses
-is not taken over by a pack: that inbound is skipped.
+cannot be opened. Write the tile's `url` as `#Object-action` or as this
+page with the intent (`/app/flp.html#Object-action`, `flp.html#...`,
+`./flp.html#...`, a query allowed before the hash); the launchpad turns the
+latter into the former, because a URL that is not a hash opens as an
+outside link, in a new window. Every inbound of a pack app is registered,
+except one whose semantic object or action is not a plain word (a dash, a
+`*`), one whose intent a built-in application already has, and one whose
+component id a built-in application already uses or another pack serves
+from another URL.
 
 ## Availability
 
