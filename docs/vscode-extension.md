@@ -1086,8 +1086,10 @@ D010INC from the file instead of parsing the tree. The key is portable for
 the same reason the generation's name is (tree-relative paths and contents);
 the vsix test checks a copy materialized elsewhere computes it. Measured on
 one package, the launcher's way, with and without the file in the copy:
-the cross-reference step 5069 ms -> 110 ms, start to the first `TravelSet`
-answer 10.0 s -> 5.0 s (2026-09-27, `vg/prebuilt-xref`).
+the cross-reference step 5069 ms -> 110 ms, and the serving child's start
+to the first `TravelSet` answer (the "serve" column above, in a separate
+run) 10.0 s -> 5.0 s (2026-09-27, `vg/prebuilt-xref`). The file is ~0.3 MB
+unpacked, inside the 52 MB above.
 
 `OSD_VSIX_PREBUILT=0` packages without it; the vsix tests
 that only look at the archive's shape set it. The binary does not

@@ -416,12 +416,19 @@ function prebuildGeneration(seedRoot, env) {
   writeFileSync(manifestFile, JSON.stringify({...manifest, builtAt: "1970-01-01T00:00:00.000Z", ms: 0}, undefined, 2) + "\n");
   // the cross-reference rows of this generation (tools/osd-xref-seed.mjs,
   // build/xref/<key>.json): a first start seeds CROSS & co. from them
-  // instead of parsing the tree. Written by the seed's own module, in the
-  // tree as a first build leaves it (links included), so the key is the
-  // one a materialized copy computes after its build reuses the generation
-  execFileSync(process.execPath, ["--input-type=module", "-e",
-    'await (await import("./tools/osd-xref-seed.mjs")).rows(process.cwd());'],
-  {cwd: seedRoot, env: buildEnv, stdio: ["ignore", "pipe", "inherit"]});
+  // instead of parsing the tree. Written by the seed's own module over the
+  // seed's own tree, gen/ as the copy's reused build leaves it, so the key
+  // is the one a materialized copy computes. rows() never throws when it
+  // cannot key or write the cache, so the file is checked here: a package
+  // without it would start ~5 s slower and nothing else would say so
+  const xrefKey = execFileSync(process.execPath, ["--input-type=module", "-e",
+    'const m = await import("./tools/osd-xref-seed.mjs"); await m.rows(process.cwd()); process.stdout.write(String(await m.cacheKey(process.cwd())));'],
+  {cwd: seedRoot, env: buildEnv, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"]}).trim();
+  const xrefFiles = existsSync(join(seedRoot, "build", "xref"))
+    ? readdirSync(join(seedRoot, "build", "xref")).filter((name) => name.endsWith(".json")) : [];
+  if (xrefFiles.length !== 1 || xrefFiles[0] !== `${xrefKey}.json`) {
+    throw new Error(`build-vsix: the cross-reference cache was not written for key ${xrefKey} (found: ${xrefFiles.join(", ") || "none"})`);
+  }
   for (const name of readdirSync(join(seedRoot, "build"))) {
     if (name !== "by-input" && name !== "xref") rmSync(join(seedRoot, "build", name), {recursive: true, force: true});
   }
