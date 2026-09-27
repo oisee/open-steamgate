@@ -6,7 +6,7 @@
   "version": "0.2.0",
   "private": true,
   "license": "MIT",
-  "keywords": ["abap", "sap", "odata", "fiori", "gateway", "abapgit"],
+  "keywords": ["abap", "sap", "odata", "fiori", "gateway", "abapgit", "amdp", "sqlscript", "eamdp", "pamdp", "hana", "abap unit"],
   "repository": {"type": "git", "url": "https://github.com/oisee/open-steamgate.git"},
   "bugs": {"url": "https://github.com/oisee/open-steamgate/issues"},
   "homepage": "https://github.com/oisee/open-steamgate#readme",
