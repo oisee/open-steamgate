@@ -7,7 +7,11 @@
 // plus a solid Brotli tar seed at `extension/osd/seed.tar.br`.
 //
 // What goes into `extension/osd/` is exactly what `node test/run.mjs` needs
-// at run time, found by tracing rather than guessing. **`output/` is NOT
+// at run time, found by tracing rather than guessing. **A prebuilt
+// generation IS shipped since T2 (2026-09-27, prebuildGeneration below):
+// built inside the staged seed, its name is portable.** The history that
+// follows is why shipping the CHECKOUT's `output/` could not work.
+// **`output/` is NOT
 // shipped** (fallback (b) of the vsix-prebuilt-generation task,
 // 2026-09-26; see docs/vscode-extension.md, "Packaging", for the numbers
 // and the portable-hash design this replaces): the first design shipped
@@ -295,12 +299,11 @@ function libEntries() {
 export function copySeedTree(seedRoot, selectedPacks) {
   mkdirSync(seedRoot, {recursive: true});
 
-  // No output/: see the top-of-file comment (fallback (b) of the
-  // vsix-prebuilt-generation task) for why shipping the current
-  // generation was tried and reverted. A first start transpiles cold.
-  // No gen/: it was produced with every checkout pack present and can carry
-  // generated ABAP/BSP files from packs excluded here. The first build
-  // regenerates it from the staged, selected inputs.
+  // No output/ and no gen/ from the checkout: the checkout's generation
+  // was built with every checkout pack present and can carry generated
+  // ABAP/BSP files from packs excluded here. stageSystemSeed() builds the
+  // seed's own generation and gen/ from the staged, selected inputs instead
+  // (T2, prebuildGeneration).
 
   for (const dir of ["src", "webapp", "tools", "data"]) {
     copyReal(join(ROOT, dir), join(seedRoot, dir));
@@ -376,8 +379,63 @@ export function copySeedTree(seedRoot, selectedPacks) {
   return modules;
 }
 
-/** Shared staging for the VSIX and the standalone binary. */
-export async function stageSystemSeed(seedRoot, env = process.env) {
+/** T2 (docs/ideas.md): build the seed's own generation at packaging time, so
+ *  a first start finds it and reuses it instead of transpiling cold.
+ *
+ *  The generation's name is portable once it is built INSIDE the staged
+ *  seed: the hash reads paths relative to the tree and the transpiler as a
+ *  plain copy in the seed's node_modules ("published", no path, no git
+ *  state), which is what a materialized copy on the user's machine
+ *  computes too. Measured 2026-09-27: cold first build 22.3 s; the same
+ *  generation copied into a second materialized copy under another path,
+ *  "reused" in 5.4 s with gen/ regenerated, 0.1 s with gen/ shipped too.
+ *
+ *  What ships is `build/by-input/<hash>/` and `gen/`, as real files. The
+ *  links the build makes (`build/live`, `output`, the generation's `test`)
+ *  are dropped and made again by the first build; a seed that carries no
+ *  symlink cannot fail to unpack where links need rights. `build/tmp/` is
+ *  scratch. The build runs without OSD_PACKS. A first start always has the
+ *  launcher's empty notebook-scratch pack, which names nothing since a pack
+ *  that brings nothing is not an input (tools/osd-build.mjs inputsOf); a
+ *  workspace pack with content is another input and builds cold, as before. */
+function prebuildGeneration(seedRoot, env) {
+  const buildEnv = {...env};
+  delete buildEnv.OSD_PACKS;
+  delete buildEnv.OSD_WARM;
+  execFileSync(process.execPath, ["tools/osd-build.mjs"], {cwd: seedRoot, env: buildEnv, stdio: ["ignore", "pipe", "inherit"]});
+  const live = realpathSync(join(seedRoot, "build", "live"));
+  const hash = basename(live);
+  // the generation's manifest records when and how long: the same tree
+  // packaged twice must make the same seed ID (the materialized copy is
+  // keyed by it), so both are fixed. builtAt only orders generations for
+  // pruning, and the shipped one is the oldest a copy will ever hold.
+  const manifestFile = join(live, "manifest.json");
+  const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+  writeFileSync(manifestFile, JSON.stringify({...manifest, builtAt: "1970-01-01T00:00:00.000Z", ms: 0}, undefined, 2) + "\n");
+  for (const name of readdirSync(join(seedRoot, "build"))) {
+    if (name !== "by-input") rmSync(join(seedRoot, "build", name), {recursive: true, force: true});
+  }
+  for (const name of readdirSync(join(seedRoot, "build", "by-input"))) {
+    if (name !== hash) rmSync(join(seedRoot, "build", "by-input", name), {recursive: true, force: true});
+  }
+  rmSync(join(seedRoot, "output"), {force: true});
+  const dropLinks = (dir) => {
+    for (const entry of readdirSync(dir, {withFileTypes: true})) {
+      const file = join(dir, entry.name);
+      if (entry.isSymbolicLink()) rmSync(file);
+      else if (entry.isDirectory()) dropLinks(file);
+    }
+  };
+  dropLinks(join(seedRoot, "build"));
+  dropLinks(join(seedRoot, "gen"));
+  return hash;
+}
+
+/** Shared staging for the VSIX and the standalone binary. The binary names
+ *  its generations by its own bytes (tools/osd-build.mjs generatorIdentity),
+ *  so a prebuilt generation could never be reused there: `prebuild` is the
+ *  VSIX's alone. */
+export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = false} = {}) {
   requireSupportedNode(process.versions.node, "system seed: ");
   const preflight = describeVsixPreflight(vsixPreflightMissing(ROOT));
   if (preflight !== undefined) throw new Error(preflight);
@@ -391,8 +449,9 @@ export async function stageSystemSeed(seedRoot, env = process.env) {
   rmSync(seedRoot, {recursive: true, force: true});
   const modules = copySeedTree(seedRoot, selectedPacks);
   materializeSeedLinks(seedRoot);
+  const generation = prebuild ? prebuildGeneration(seedRoot, env) : undefined;
   const seedId = writeSeedId(seedRoot);
-  return {seedId, modules, selectedPacks};
+  return {seedId, modules, selectedPacks, generation};
 }
 
 // ---- the extension itself -------------------------------------------------
@@ -533,7 +592,13 @@ export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
   // **An unfetched pack refuses the package, not the user's first start.**
   // A selected pack whose sources were never fetched would make every
   // install's first build refuse with UNFETCHED. Other packs do not ship.
-  const {seedId, modules, selectedPacks} = await stageSystemSeed(seedRoot, env);
+  // OSD_VSIX_PREBUILT=0 packages without a prebuilt generation (the first
+  // start then transpiles cold); the tests that only look at the archive's
+  // shape use it, since the build costs ~20 s per package.
+  const {seedId, modules, selectedPacks, generation} = await stageSystemSeed(seedRoot, env,
+    {prebuild: env.OSD_VSIX_PREBUILT !== "0"});
+  log(generation === undefined ? "generation: none prebuilt, a first start builds cold"
+    : `generation: ${generation} prebuilt, a first start reuses it`);
   const notices = writeThirdPartyNotices(seedRoot, join(extensionDir, "THIRD-PARTY-NOTICES.md"), ROOT);
   for (const issue of notices.issues) log(`LICENSE REVIEW: ${issue}`);
   log(`third-party notices: ${notices.entries.length} components, ${notices.issues.length} item(s) for review`);
@@ -569,6 +634,7 @@ export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
     "src/ + webapp/ + tools/ + test/ + data/": ["src", "webapp", "tools", "test", "data"]
       .reduce((sum, d) => sum + dirSizeBytes(join(seedRoot, d)), 0),
     ".local/lars/ (library sources)": dirSizeBytes(join(seedRoot, ".local")),
+    "build/ + gen/ (prebuilt generation)": ["build", "gen"].reduce((sum, d) => sum + dirSizeBytes(join(seedRoot, d)), 0),
     "extension.js/lib.js/launcher.js/resources/examples": dirSizeBytes(extensionDir) - dirSizeBytes(archiveDir),
   };
   const unpackedTotal = Object.values(breakdown).reduce((a, b) => a + b, 0);

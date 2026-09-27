@@ -154,7 +154,17 @@ export function inputsOf(root, config = loadConfig(root)) {
   // JavaScript. Omitting it reused a generation whose registry named a page
   // but whose Web Repository object was not in the transpiled runtime.
   const bspFolders = [join(root, "webapp"), ...webappsOf(root).map((app) => app.dir)].filter(existsSync);
-  const packs = packsOf(root);
+  // **A pack that brings nothing is not an input.** The VS Code extension
+  // always hands the build an empty notebook-scratch pack in its own storage
+  // (editors/vscode/launcher.js ensureWorkspacePacks), so its manifest's path,
+  // which differs per machine, named every generation -- and a generation
+  // prebuilt into the .vsix could never be reused (T2). An empty pack builds
+  // nothing, so it names nothing; the moment it holds an input file (the same
+  // rule hashOf applies to a folder: NOT_AN_INPUT files do not count) it is
+  // an input. A data, ddic or webapp folder, or a tile, keeps it one anyway.
+  const packs = packsOf(root).filter((pack) => pack.data !== undefined || pack.ddic !== undefined ||
+    pack.webapp !== undefined || pack.tiles.length > 0 ||
+    pack.abap.some((dir) => existsSync(dir) && walk(dir).some((f) => !NOT_AN_INPUT.test(f))));
   const packFiles = packs.map((pack) => join(pack.dir, "osd-pack.json"));
   const packFolders = packs.flatMap((pack) => [pack.data, pack.ddic].filter(Boolean));
   return {folders, libs, bspFolders, packFiles, packFolders, config: layout(root).config};
@@ -333,6 +343,8 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
       entries = list().map((f) => [f, digestOf(f)]);
       folders?.set(dir, entries);
     }
+    // an empty folder builds nothing, so its path does not name the generation
+    if (entries.length === 0) return;
     h.update(`${label} ${relative(root, dir)} ${entries.length}\0`);
     for (const [f, digest] of entries) {
       digests?.set(f, digest);
