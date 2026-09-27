@@ -88,7 +88,7 @@
           "type": "string",
           "enum": ["browser", "vscode"],
           "default": "browser",
-          "description": "Where the inline Open action for an App, ICF, or OData row opens it: the system browser (vscode.env.openExternal), or a webview tab inside VS Code. A normal row click shows service details; APC has no page-open action."
+          "description": "Where the inline Open action for an App, ICF, or OData row opens it: the system browser (vscode.env.openExternal), or a webview tab inside VS Code. A single click on an expandable row shows service details; on a leaf row (no children) it opens the row with this setting; APC has no page-open action."
         },
         "osd.services.groupBy": {
           "type": "string",

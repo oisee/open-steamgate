@@ -1113,6 +1113,7 @@ class OsdTreeProvider {
     const launchpad = new vscode.TreeItem("▶ Open Fiori Launchpad");
     launchpad.contextValue = "osd-launchpad";
     launchpad.iconPath = new vscode.ThemeIcon("link-external");
+    launchpad.tooltip = "Single click opens the Fiori Launchpad in your browser.";
     launchpad.command = treeClick(launchpad);
 
     const layers = new vscode.TreeItem("Layers", vscode.TreeItemCollapsibleState.Expanded);
@@ -1239,7 +1240,17 @@ class SystemGroupItem extends vscode.TreeItem {
 }
 
 function treeClick(item) {
-  return {command: "osd.clickTreeNode", title: "Details", arguments: [item]};
+  const kind = item.contextValue?.split(";")[0];
+  const leaf = item.collapsibleState === vscode.TreeItemCollapsibleState.None || item.collapsibleState === undefined;
+  const title = !leaf ? "Details"
+    : kind === "osd-launchpad" ? "Open Fiori Launchpad"
+      : kind === "osd-host-open" ? "Open endpoint"
+        : kind === "osd-host-dumps" ? "Show short dumps"
+          : kind === "osd-service-class" || kind === "osd-service-entityset" ? "Open source"
+            : kind === "osd-service-app" && item.row?.path ? "Open app"
+              : kind?.startsWith("osd-service-") && item.row?.path && item.row.kind !== "APC" ? "Open service"
+                : kind?.startsWith("osd-state-") ? "Open system overview" : "Details";
+  return {command: "osd.clickTreeNode", title, arguments: [item]};
 }
 
 function treePlaceholder(label) {
@@ -1263,6 +1274,7 @@ class HostDoorItem extends vscode.TreeItem {
     this.route = route;
     this.contextValue = `osd-host-${action}`;
     this.description = description;
+    if (action === "open") this.tooltip = "Single click opens this endpoint in your browser.";
     this.iconPath = new vscode.ThemeIcon(action === "dumps" ? "warning" : action === "sql" ? "database" : "pulse");
     this.command = action === "sql"
       ? {command: "osd.newSqlNotebook", title: "Open SQL notebook"}
@@ -1287,7 +1299,7 @@ class TransactionItem extends vscode.TreeItem {
     this.description = `${transaction.kind}${transaction.runnable ? " · runnable" : ""}`;
     this.tooltip = transaction.reason || transaction.source || transaction.tcode;
     this.iconPath = new vscode.ThemeIcon(transaction.kind === "REPORT" ? "symbol-file" : "play");
-    this.command = {command: "osd.clickTransaction", title: "Transaction details", arguments: [this]};
+    this.command = {command: "osd.clickTransaction", title: transaction.runnable ? "Run transaction" : "Transaction details", arguments: [this]};
   }
 }
 
@@ -1304,21 +1316,24 @@ class ServiceGroupItem extends vscode.TreeItem {
   }
 }
 
-/** One service row: a click selects its details panel, and capability flags
- *  control the context actions package.json contributes. Expandable for
- *  every kind serviceClassNodes() answers at least one node for. */
+/** One service row: an expandable click selects its details panel, and capability flags
+ *  control the context actions package.json contributes. A row expands when
+ *  serviceClassItems() can produce a class or entity-set child. */
 class ServiceRowItem extends vscode.TreeItem {
   constructor(row) {
     const {label, description} = serviceLabel(row);
-    const expandable = row.kind === "ODATA" || serviceClassNodes(row).length > 0;
+    const expandable = serviceClassNodes(row).length > 0;
     super(label, expandable ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
     this.row = row;
     this.description = description;
     this.contextValue = serviceActionContext(row, row.detailsCapabilities);
     this.iconPath = new vscode.ThemeIcon(
       row.kind === "APP" ? "browser" : row.kind === "ODATA" ? "database" : row.kind === "APC" ? "broadcast" : "plug");
-    // A single click selects details. The inline play action retains the
-    // setting-controlled browser/webview open target.
+    if (!expandable && row.kind !== "APC" && row.path) {
+      const target = vscode.workspace.getConfiguration("osd").get("openIn", "browser");
+      this.tooltip = target === "vscode" ? "Single click opens this page in VS Code."
+        : "Single click opens this page in your browser.";
+    }
     this.command = treeClick(this);
   }
 }
@@ -1649,6 +1664,10 @@ async function openTransactionProgram(source, output) {
 
 function clickTransaction(item, output) {
   if (!item?.transaction) return;
+  if (item.collapsibleState === vscode.TreeItemCollapsibleState.None) {
+    if (item.transaction.runnable) return openWebguiTransaction(item.transaction.tcode, output);
+    return showTransactionDetails(item, output);
+  }
   const classified = classifyTransactionClick(transactionClicks, item.transaction.tcode, Date.now());
   transactionClicks = classified.clicks;
   if (classified.action === "double") {
@@ -1660,10 +1679,21 @@ function clickTransaction(item, output) {
 
 let treeClicks = new Map();
 
-/** The same 400 ms classifier as TRAN, for every other selectable row. */
+/** Leaf actions are immediate; only rows with children use the classifier. */
 async function clickTreeNode(item, provider, output) {
   if (!item) return;
   const kind = item.contextValue?.split(";")[0] ?? "";
+  if (item.collapsibleState === vscode.TreeItemCollapsibleState.None || item.collapsibleState === undefined) {
+    if (kind === "osd-launchpad") return provider.controller.openLaunchpad();
+    if (kind === "osd-host-open") return openHostDoor(item.route);
+    if (kind === "osd-host-dumps") return showDumps(output);
+    if (kind.startsWith("osd-service-") && item.row?.path && item.row.kind !== "APC") return openServiceRow(item);
+    if (kind === "osd-service-class") return openServiceClass(item.node, output);
+    if (kind === "osd-service-entityset") return openEntitySetMethod(item.dpcName, item.set, item.line, output);
+    if (kind.startsWith("osd-state-")) return provider.controller.openSystemOverview();
+    if (item.row) return showServiceDetails(item, provider, output);
+    return showTreeNodeDetails(item, output);
+  }
   const identity = item.route ?? item.row?.path ?? item.node?.name ??
     (item.dpcName ? `${item.dpcName}/${item.set?.set}/${item.set?.kind}` : undefined) ?? item.group?.label ?? item.label;
   const key = `${kind}:${identity}`;
@@ -1677,7 +1707,6 @@ async function clickTreeNode(item, provider, output) {
     if (kind === "osd-service-class") return openServiceClass(item.node, output);
     if (kind === "osd-service-entityset") return openEntitySetMethod(item.dpcName, item.set, item.line, output);
   }
-  if (kind.startsWith("osd-state-")) return provider.controller.openSystemOverview();
   if (item.row) return showServiceDetails(item, provider, output);
   showTreeNodeDetails(item, output);
 }
@@ -1689,9 +1718,9 @@ function showTreeNodeDetails(item, output) {
   serviceDetailsSelection += 1;
   const kind = item.contextValue?.split(";")[0] ?? "";
   const title = String(item.label ?? "OSD tree");
-  const explanation = kind === "osd-launchpad" ? "Fiori Launchpad for the running system. Double click to open it in the browser."
-    : kind === "osd-host-open" ? "Serving status, generation, database, and warm build state. Double click to open the endpoint."
-      : kind === "osd-host-dumps" ? "Short dumps collected from runtime errors. Double click to list them in Output."
+  const explanation = kind === "osd-launchpad" ? "Fiori Launchpad for the running system. Click to open it in the browser."
+    : kind === "osd-host-open" ? "Serving status, generation, database, and warm build state. Click to open the endpoint."
+      : kind === "osd-host-dumps" ? "Short dumps collected from runtime errors. Click to list them in Output."
         : kind === "osd-system-group" ? "System endpoints for serving state, short dumps, and SQL. Expand to inspect them."
           : kind === "osd-transactions" ? "Registered transactions. Expand to inspect each transaction and run runnable ones."
             : kind === "osd-layers" ? "The base system and workspace layers that compose this instance."
@@ -1699,8 +1728,8 @@ function showTreeNodeDetails(item, output) {
                 : kind === "osd-layer-workspace" ? "Workspace source layered over the base system."
                   : kind === "osd-services" ? "Services registered by the running system, grouped by kind or pack."
                     : kind === "osd-service-group" ? `Services in the ${item.group.label} group. Expand to inspect each service.`
-                      : kind === "osd-service-class" ? `${item.node.role.toUpperCase()} class ${item.node.name}. Double click to open its source file.`
-                        : kind === "osd-service-entityset" ? `Entity set ${item.set.set} (${item.set.kind}) in ${item.dpcName}. Double click to open its implementation method.`
+                      : kind === "osd-service-class" ? `${item.node.role.toUpperCase()} class ${item.node.name}. Click to open its source file.`
+                        : kind === "osd-service-entityset" ? `Entity set ${item.set.set} (${item.set.kind}) in ${item.dpcName}. Click to open its implementation method.`
                           : "This row describes the current tree state. Expand its parent or refresh the tree when the system changes.";
   serviceDetailsPanel.title = `${title} · Details`;
   serviceDetailsPanel.webview.html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';"><style>body{font:13px var(--vscode-font-family);color:var(--vscode-foreground);padding:0 20px;max-width:1000px}h1{font-size:20px}</style></head><body><h1>${htmlEscape(title)}</h1><p>${htmlEscape(explanation)}</p></body></html>`;
