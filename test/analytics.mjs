@@ -4,6 +4,17 @@ import {startServer} from "./start.mjs";
 const PORT = process.env.STG_PORT ?? 3030;
 
 const S = `http://localhost:${PORT}/sap/opu/odata/sap/ZSTG_SADL_SRV`;
+const TAXI = `http://localhost:${PORT}/sap/opu/odata/sap/ZOSD_TAXI_SRV`;
+
+/** a POST function import of ZOSD_TAXI_SRV, with the CSRF token a write needs */
+async function taxiAction(call) {
+  const head = await fetch(TAXI + "/", {headers: {"x-csrf-token": "fetch"}});
+  const cookie = (head.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).join("; ");
+  const res = await fetch(`${TAXI}/${call}`, {method: "POST",
+    headers: {"x-csrf-token": head.headers.get("x-csrf-token"), cookie, accept: "application/json"}});
+  expect(res.status, call).to.equal(200);
+  return Object.values((await res.json()).d)[0];
+}
 
 // the analytical cube over the flight facts, the way an Analytical List Page
 // asks: $select on dimensions and measures, $orderby, $top, $inlinecount, $filter
@@ -72,9 +83,25 @@ describe("analytics: NYC taxi cube through SADL", () => {
     expect(rows.reduce((n, row) => n + Number(row.FARE), 0)).to.be.closeTo(99.4, 0.001);
   });
 
-  it("serves the synthetic month with a plausible shape", async () => {
-    // the host started with the default size (tools/osd-demo-data.mjs):
-    // 20000 synthetic groups, the same on every host for the same seed
+  it("serves a synthetic year, made on request, with a plausible shape", async function () {
+    // a year is ~20000 rows written in one request, about two seconds here
+    this.timeout(60000);
+    // nothing synthetic at start (ZCL_OSD_DEMO_DATA=>BOOT with no knob); one
+    // year on request over ZOSD_TAXI_SRV, and back to the sample rows after.
+    // 2025: fares at 101 %, a busier Bronx -- near the sample month the shape
+    // assertions below were written against
+    const synthetic = async () => Number(await (await fetch(S + "/Zc_Osd_TaxicubeSet/$count?$filter=FACTID ge '9000000000'")).text());
+    expect(await synthetic(), "the start makes no synthetic rows").to.equal(0);
+    expect(await taxiAction("GenerateYear?Year=2025")).to.match(/2025 generated/);
+    try {
+      await plausibleYear();
+    } finally {
+      expect(await taxiAction("ResetData")).to.match(/removed 20000/);
+    }
+    expect(await synthetic()).to.equal(0);
+  });
+
+  async function plausibleYear() {
     const count = await (await fetch(S + "/Zc_Osd_TaxicubeSet/$count?$filter=FACTID ge '9000000000'")).text();
     expect(Number(count)).to.equal(20000);
     const url = S + "/Zc_Osd_TaxicubeSet?$select=BOROUGH,TRIPS,FARE,TIP,DISTANCE&$filter=FACTID ge '9000000000'&$format=json";
@@ -99,5 +126,5 @@ describe("analytics: NYC taxi cube through SADL", () => {
     const hours = (await (await fetch(S + "/Zc_Osd_TaxicubeSet?$select=PICKUPHOUR,TRIPS&$filter=FACTID ge '9000000000'&$format=json")).json()).d.results;
     const h = Object.fromEntries(hours.map((row) => [row.PICKUPHOUR, row.TRIPS]));
     expect(h[18]).to.be.greaterThan(5 * h[4]);
-  });
+  }
 });

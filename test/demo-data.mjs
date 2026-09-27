@@ -9,8 +9,8 @@ import {mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 
-// what every host must hold for the default knob: the class's own answer,
-// measured on Node, OSGo and A4H (docs/demo-data.md)
+// the class's answer for its default size and seed, measured on Node, OSGo
+// and A4H (docs/demo-data.md); a host makes it only when the knob asks
 const DEFAULT = {rows: 20000, checksum: 163171580};
 const SYNTHETIC = "fact_id >= '9000000000'";
 const SUMS = `SELECT COUNT(*) AS n, SUM(trips) AS trips FROM zosd_taxifact WHERE ${SYNTHETIC}`;
@@ -27,14 +27,28 @@ describe("demo data: ZCL_OSD_DEMO_DATA on every host", function () {
     expect(got).to.deep.equal(DEFAULT);
   });
 
-  it("the inline host (test/start.mjs) makes them at start, beside the sample rows", async () => {
+  // Until 2026-09-27 every start made DEFAULT.rows synthetic rows (3.8 s of
+  // a packaged first start); a year is made on request now (ZOSD_TAXI_SRV).
+  // This fails if the start makes them again.
+  it("the inline host (test/start.mjs) makes none at start; the sample rows are there", async () => {
     const got = await child(`
       await import(${JSON.stringify(new URL("./start.mjs", import.meta.url).href)});
       const db = globalThis.abap.context.databaseConnections.DEFAULT;
       const s = (await db.select({select: ${JSON.stringify(SUMS)}})).rows[0];
       const real = (await db.select({select: "SELECT COUNT(*) AS n FROM zosd_taxifact WHERE fact_id < '9000000000'"})).rows[0];
-      process.send({n: {rows: Number(s.n), real: Number(real.n)}});`, {STG_SERVE: "inline"});
-    expect(got).to.deep.equal({rows: DEFAULT.rows, real: 4});
+      process.send({n: {rows: Number(s.n), real: Number(real.n)}});`, {STG_SERVE: "inline", OSD_DEMO_ROWS: ""});
+    expect(got).to.deep.equal({rows: 0, real: 4});
+  });
+
+  it("the serving runtime says it made none at start", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-demo-data-"));
+    try {
+      const started = await serve({STG_DB: "file", STG_DB_PATH: join(dir, "osd.sqlite"), OSD_DEMO_ROWS: ""});
+      expect(started.said.find((l) => l.startsWith("demo data:"))).to.match(/nothing generated at start/);
+      expect(started.rows).to.equal(0);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
   });
 
   it("the knob: OSD_DEMO_ROWS=0 leaves only the sample rows, a number sets the size", async () => {
