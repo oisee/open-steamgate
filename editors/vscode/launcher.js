@@ -1046,12 +1046,15 @@ function finishMaterializedHome(target, globalStorageDir, existing, options) {
  *  without this launcher asking it to: stop(), rebuild() and a start that
  *  gave up are not "exit", and a child that dies while starting is
  *  start()'s rejection instead). A stop() while "starting" makes start()
- *  resolve undefined, as a stop while "building" does. */
+ *  resolve undefined, as a stop while "building" does; the state reads
+ *  "stopped" once the child is gone, which is when stop() returns. */
 class Launcher extends EventEmitter {
   // why this launcher asked one of its own children to go ("stop" or
   // "abandoned"), per child and only while it was alive: a child that had
   // already died on its own is never marked, so its crash still warns
   #asked = new WeakMap();
+  // the readiness poll of the start in flight, so stop() can end it
+  #poll = undefined;
 
   #ask(child, reason) {
     if (child !== undefined && child.exitCode === null && child.signalCode === null) {
@@ -1254,7 +1257,7 @@ class Launcher extends EventEmitter {
     try {
       setServingChildPid(this.servingLock, child.pid);
     } catch (error) {
-      await terminate(child);
+      await terminate(child, {graceMs: STOP_GRACE_MS});
       this.child = undefined;
       this.pid = undefined;
       this.#setState("stopped");
@@ -1301,6 +1304,7 @@ class Launcher extends EventEmitter {
 
     let serving;
     const poll = new AbortController();
+    this.#poll = poll;
     try {
       serving = await Promise.race([
         waitForServing(port, {timeoutMs: this.timeoutMs, signal: poll.signal}),
@@ -1313,6 +1317,13 @@ class Launcher extends EventEmitter {
         }),
       ]);
     } catch (error) {
+      poll.abort();
+      if (this.#asked.get(child) === "stop") {
+        // stop() came first, ended the poll and is terminating the child
+        // itself: its cancel, not an error, and no second signal from here
+        await exitedEarly;
+        return undefined;
+      }
       this.#ask(child, "abandoned");
       await terminate(child, {graceMs: STOP_GRACE_MS});
       if (this.state !== "stopped") {
@@ -1322,6 +1333,7 @@ class Launcher extends EventEmitter {
       throw error;
     } finally {
       poll.abort();
+      if (this.#poll === poll) this.#poll = undefined;
     }
     // a stop that came while starting wins over a ready answer the child
     // gave on its way out: it is going away, it is not "running"
@@ -1354,6 +1366,7 @@ class Launcher extends EventEmitter {
       return;
     }
     this.#ask(this.child, "stop");
+    this.#poll?.abort();
     await terminate(this.child, {graceMs: STOP_GRACE_MS});
     // the "exit" handler above already reset the fields and the state
   }
