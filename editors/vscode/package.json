@@ -8,9 +8,13 @@
   "license": "MIT",
   "publisher": "open-steamgate",
   "engines": {"vscode": "^1.101.0"},
-  "extensionKind": ["workspace"],
+  "extensionKind": ["workspace", "ui"],
+  "capabilities": {
+    "virtualWorkspaces": {"supported": "limited", "description": "The web gateway probe works in virtual workspaces; desktop filesystem commands need a local folder."}
+  },
   "categories": ["Testing", "Other"],
   "main": "./extension.js",
+  "browser": "./dist/web/extension.js",
   "activationEvents": [
     "workspaceContains:**/*.abap",
     "workspaceContains:**/.abapgit.xml",
@@ -19,6 +23,9 @@
     "onCommand:osd.start",
     "onCommand:osd.quickStart",
     "onCommand:osd.gettingStarted",
+    "onCommand:osd.webProbe",
+    "onCommand:osd.webVerifyLastTravel",
+    "onCommand:osd.webProbeView",
     "onView:osdTree"
   ],
   "contributes": {
@@ -171,6 +178,9 @@
       ]
     },
     "commands": [
+      {"command": "osd.webProbe", "title": "osd: Web probe"},
+      {"command": "osd.webVerifyLastTravel", "title": "osd: Web verify last Travel"},
+      {"command": "osd.webProbeView", "title": "osd: Web probe view"},
       {"command": "osd.showDumps", "title": "osd: Show short dumps"},
       {"command": "osd.setHanaPassword", "title": "osd: Set database password (HANA)"},
       {"command": "osd.setPostgresPassword", "title": "osd: Set database password (PostgreSQL)"},
@@ -219,6 +229,11 @@
       {"command": "osd.copyServiceMetadata", "title": "Copy $metadata URL"}
     ],
     "menus": {
+      "commandPalette": [
+        {"command": "osd.webProbe", "when": "isWeb"},
+        {"command": "osd.webVerifyLastTravel", "when": "isWeb"},
+        {"command": "osd.webProbeView", "when": "isWeb"}
+      ],
       "editor/title": [
         {"command": "osd.run", "when": "resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/", "group": "navigation@1"},
         {"command": "osd.runWithDebugger", "when": "resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/", "group": "navigation@2"}

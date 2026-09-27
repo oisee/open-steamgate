@@ -23,7 +23,9 @@ class PreviewDate extends RealDate {
     return PREVIEW_INSTANT;
   }
 }
-globalThis.Date = PreviewDate;
+// The extension host shares its worker with VS Code. Its clock must stay real;
+// the preview service worker keeps the deterministic screenshot clock.
+if (globalThis.__stgPreviewFreezeTime !== false) globalThis.Date = PreviewDate;
 
 // The wall clock, for the one thing that must not be pinned.
 //
