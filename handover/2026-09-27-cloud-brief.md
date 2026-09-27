@@ -26,9 +26,10 @@ no code. Do not merge it into `main`.
 ## Other state not in the brief below
 
 - `s2c1` (vscode.dev: launchpad + Travels in the web) is WIP on i7,
-  `feat/web-launchpad-travels` (64e9086f; rebase it on main first). It is not in scope here.
-- osg-demo `feat/fleet-slice` (4fb0211) holds stoker's PLAN.md for parts A/B/C,
-  if pushed; read it before Objective 1, but this brief wins where the two differ.
+  `feat/web-launchpad-travels` (64e9086f, on origin; rebase it on main first). It is not in scope here.
+- osg-demo `feat/fleet-slice` (4fb0211) holds stoker's PLAN.md for parts A/B/C
+  (https://github.com/oisee/osg-demo/tree/feat/fleet-slice); build Objective 1
+  on that branch, and read it before Objective 1, but this brief wins where the two differ.
 - The Marketplace extension `oisee.open-steamgate` 0.2.1122 is in review.
   Alice uploads 0.2.1127 as the update after that; it is not a task here.
 
@@ -80,9 +81,9 @@ needs the change.
 ## Objective 0: engine fix, pack app manifest rebase (open-steamgate)
 
 **This fix already exists:** branch `fix/pack-app-manifest-rebase` (commit
-a7a12e69, critic-passed) is pushed to `origin` once the i7 session pushes
-it. If the branch is on origin, open a PR from it and check it against the
-spec below. Build it yourself only if the branch is absent.
+a7a12e69, critic-passed) is on `origin`
+(https://github.com/oisee/open-steamgate/tree/fix/pack-app-manifest-rebase).
+Open a PR from it, and check it against the spec below. Do not rebuild it.
 
 Branch `fix/pack-app-manifest-rebase`. `packApps` in
 `tools/osd-bsp-registry.mjs` copies a pack's `webapp/manifest.json`
