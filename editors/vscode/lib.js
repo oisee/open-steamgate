@@ -2060,6 +2060,138 @@ function serviceClassNodes(row) {
 const htmlAttrEscape = (text) => String(text ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
   .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
+/** One-based implementation line, excluding declarations and ABAP comments. */
+function implementationMethodLine(source, name) {
+  const wanted = String(name).toUpperCase();
+  const lines = String(source ?? "").split(/\r\n|\r|\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*\*/.test(line)) continue;
+    const match = /^\s*METHOD\s+(\S+)\s*\./i.exec(line);
+    if (match && match[1].toUpperCase() === wanted) return i + 1;
+  }
+  return undefined;
+}
+
+function implementationMethodBody(source, name) {
+  const lines = String(source ?? "").split(/\r\n|\r|\n/);
+  const start = implementationMethodLine(source, name);
+  if (!start) return "";
+  const end = lines.findIndex((line, index) => index >= start && /^\s*ENDMETHOD\s*\./i.test(line));
+  return lines.slice(start, end < 0 ? undefined : end).filter((line) => !/^\s*\*/.test(line)).join("\n");
+}
+
+const SET_OPERATIONS = ["GET_ENTITYSET", "GET_ENTITY", "CREATE_ENTITY", "UPDATE_ENTITY", "DELETE_ENTITY",
+  "GET_EXPANDED_ENTITY", "GET_EXPANDED_ENTITYSET", "CREATE_DEEP_ENTITY", "GET_STREAM", "UPDATE_STREAM"];
+const INTERFACE_OPERATIONS = new Set(SET_OPERATIONS.slice(5));
+
+/** Pure service-card links from source files already found in the checkout. */
+function serviceCardModel(row, sets = [], files = []) {
+  const serviceName = row.name || /^\/sap\/opu\/odata\/sap\/([^/?#]+)/i.exec(String(row.path ?? ""))?.[1];
+  const mpcName = row.mpc || String(row.handler ?? "").replace(/_DPC_EXT$/i, "_MPC_EXT");
+  const layerRank = (file) => file.path.startsWith("src/") ? 0 : file.path.startsWith("gen/") ? 1 : 2;
+  const ordered = [...files].sort((a, b) => layerRank(a) - layerRank(b) || a.path.localeCompare(b.path));
+  const sameLayer = (file, anchor) => anchor && file.path.slice(0, file.path.lastIndexOf("/")) === anchor.slice(0, anchor.lastIndexOf("/"));
+  const findFile = (name, anchor) => {
+    if (!name) return undefined;
+    const matches = ordered.filter((file) => path.basename(file.path).toLowerCase() === name.toLowerCase());
+    return matches.find((file) => file.path === anchor) ?? matches.find((file) => sameLayer(file, anchor)) ??
+      matches.find((file) => row.pack && file.path.startsWith(`packs/${row.pack}/src/`)) ?? matches[0];
+  };
+  const cls = (name, anchor) => name && findFile(`${name.toLowerCase()}.clas.abap`, anchor);
+  const link = (file, label, line) => file && ({label, path: file.path, line: line ?? 1});
+  const method = (file, name, label = name) => {
+    const line = file && implementationMethodLine(file.source, name);
+    return line && link(file, label, line);
+  };
+  const dpc = cls(row.handler, row.handlerSource);
+  const mpc = cls(mpcName, row.mpcSource ?? dpc?.path);
+  const mpcBase = cls(String(mpcName ?? "").replace(/_EXT$/i, ""), mpc?.path ?? dpc?.path);
+  const model = [method(mpcBase, "DEFINE", "MPC DEFINE"),
+    /_EXT$/i.test(mpcName ?? "") && method(mpc, "DEFINE", "MPC_EXT DEFINE")].filter(Boolean);
+  const ann = cls(String(mpcName ?? "").replace(/_MPC_EXT$/i, "_MPC_ANN"), mpc?.path);
+  if (ann) model.push(method(ann, "DEFINE", "MPC_ANN DEFINE") ?? link(ann, "MPC_ANN"));
+  const yaml = serviceName && ordered.find((f) => f.path.endsWith(".stg.yaml") && new RegExp(`^service:\\s*${String(serviceName).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "im").test(f.source));
+  if (yaml) model.push(link(yaml, ".stg.yaml", String(yaml.source).split(/\r\n|\r|\n/).findIndex((line) => /^service:\s*/i.test(line)) + 1));
+  const iwpr = serviceName && ordered.find((f) => f.path.endsWith(".iwpr.xml") && f.source.toUpperCase().includes(String(serviceName).toUpperCase()));
+  if (iwpr) model.push(link(iwpr, "IWPR"));
+  const sadl = `${mpcBase?.source ?? ""}\n${dpc?.source ?? ""}`;
+  const structures = new Map();
+  for (const match of sadl.matchAll(/<sadl:structure\s+name="([^"]+)"\s+dataSource="([^"]+)"/gi)) {
+    structures.set(`${match[1].toLowerCase()}set`, {set: `${match[1]}Set`, cds: match[2].toLowerCase()});
+  }
+  const knownSets = new Map(sets.map((set) => [String(set.set).toLowerCase(), set.set]));
+  const setConstants = new Map();
+  for (const match of String(mpcBase?.source ?? "").matchAll(/CONSTANTS\s+(\S+_set)\s+TYPE\s+\S*ty_e_med_entity_name\S*\s+VALUE\s+'([^']+)'/gi)) {
+    setConstants.set(match[1].toLowerCase(), match[2].toLowerCase());
+    if (!knownSets.has(match[2].toLowerCase())) knownSets.set(match[2].toLowerCase(), match[2]);
+  }
+  for (const [name, structure] of structures) if (!knownSets.has(name)) knownSets.set(name, structure.set);
+  const mediaSets = new Set();
+  for (const block of String(mpcBase?.source ?? "").matchAll(/^\s*METHOD\s+\S+\s*\.([\s\S]*?)^\s*ENDMETHOD\s*\./gim)) {
+    if (!/->set_is_media\s*\(/i.test(block[1])) continue;
+    const constant = /->create_entity_set\(\s*(\w+_set)\s*\)/i.exec(block[1])?.[1];
+    const set = constant && setConstants.get(constant.toLowerCase());
+    if (set) mediaSets.add(set);
+  }
+  const generic = [];
+  const interfaceTargets = new Map();
+  for (const operation of INTERFACE_OPERATIONS) {
+    const candidate = `/iwbep/if_mgw_appl_srv_runtime~${operation.toLowerCase()}`;
+    const target = method(dpc, candidate, operation);
+    if (!target) continue;
+    const body = implementationMethodBody(dpc.source, candidate);
+    const named = /\biv_entity_(?:set_)?name\b/i.test(body) ? [...knownSets.values()].filter((name) =>
+      new RegExp(`'${String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`, "i").test(body)) : [];
+    if (named.length) interfaceTargets.set(operation, {target, named: new Set(named.map((name) => name.toLowerCase()))});
+    else generic.push({...target, label: `${operation} generic (all sets)`});
+  }
+  const yamlEntity = (name) => {
+    if (!yaml) return "";
+    const blocks = yaml.source.split(/(?=^  [A-Za-z_][\w]*:\s*$)/m);
+    return blocks.find((block) => new RegExp(`^    set:\\s*${name}\\s*$`, "im").test(block)) ?? "";
+  };
+  const entitySets = [...knownSets.values()].map((name) => {
+    const prefix = String(name).toLowerCase();
+    const entityYaml = yamlEntity(name);
+    const operations = SET_OPERATIONS.map((operation) => {
+      const candidate = INTERFACE_OPERATIONS.has(operation)
+        ? `/iwbep/if_mgw_appl_srv_runtime~${operation.toLowerCase()}` : `${prefix}_${operation.toLowerCase()}`;
+      const found = INTERFACE_OPERATIONS.has(operation) ?
+        (interfaceTargets.get(operation)?.named.has(prefix) ? interfaceTargets.get(operation).target : undefined) :
+        method(dpc, candidate, operation);
+      return {name: operation, link: found, inherited: !found};
+    }).filter((operation) => !generic.some((target) => target.label.startsWith(`${operation.name} `)) &&
+      (!["GET_STREAM", "UPDATE_STREAM"].includes(operation.name) ||
+      /media:\s*true/i.test(entityYaml) || mediaSets.has(prefix)));
+    const cds = structures.get(prefix)?.cds;
+    const cdsFile = cds && findFile(`${cds}.ddls.asddls`, mpcBase?.path);
+    let generated;
+    if (cdsFile) {
+      const sqlView = /@AbapCatalog\.sqlViewName\s*:\s*['"]([^'"]+)['"]/i.exec(cdsFile.source)?.[1];
+      generated = sqlView && cls(`zcl_stg_cds_${sqlView}`);
+    }
+    const helps = files.filter((file) => file.path.endsWith(".shlp.xml") &&
+      new RegExp(`searchhelp:\\s*${path.basename(file.path, ".shlp.xml")}\\b`, "i").test(entityYaml));
+    const cdsLine = cdsFile && String(cdsFile.source).split(/\r\n|\r|\n/).findIndex((line) => /^\s*define\s+(?:view|entity)\s+/i.test(line)) + 1;
+    return {set: name, operations, sources: [link(cdsFile, "CDS source", cdsLine || 1),
+      generated && (method(generated, "zif_stg_cds_source~read", "Generated source class READ") ?? link(generated, "Generated source class")),
+      ...helps.map((file) => link(file, "Search help"))].filter(Boolean)};
+  });
+  const actions = [...(yaml?.source.matchAll(/^  ([\w]+):\s*\n\s+method:\s*(?:GET|POST)/gm) ?? [])].map((m) => m[1]);
+  if (!actions.length) for (const m of String(mpcBase?.source ?? "").matchAll(/create_action\(\s*'([^']+)'\s*\)/gi)) actions.push(m[1]);
+  const actionMethod = "/iwbep/if_mgw_appl_srv_runtime~execute_action";
+  const actionLink = method(dpc, actionMethod, "EXECUTE_ACTION");
+  const actionBody = implementationMethodBody(dpc?.source, actionMethod);
+  const namedActions = actions.filter((name) => /\biv_action_name\b/i.test(actionBody) &&
+    new RegExp(`'${String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`, "i").test(actionBody));
+  if (actionLink && !namedActions.length) generic.push({...actionLink, label: "EXECUTE_ACTION generic (all sets)"});
+  const functionImports = [...new Set(actions)].map((name) => ({name,
+    link: namedActions.includes(name) ? actionLink : undefined,
+  }));
+  return {model, entitySets, functionImports, generic};
+}
+
 function serviceDetailsHtml(details, nonce = "") {
   const row = details?.row ?? {};
   const esc = htmlEscape;
@@ -2068,6 +2200,9 @@ function serviceDetailsHtml(details, nonce = "") {
   const sourceButton = (role, label, source) => source?.path
     ? `<button type="button" data-source="${attr(role)}">${esc(label)}</button> <code>${esc(source.path)}</code>`
     : `<span class="muted">${esc(label)} source unavailable</span>`;
+  const cardLink = (target) => target?.path
+    ? `<button type="button" data-path="${attr(target.path)}" data-line="${attr(target.line ?? 1)}">${esc(target.label)}</button>`
+    : "";
   const list = (items, render) => (items?.length ? `<ul>${items.map(render).join("")}</ul>` : `<p class="muted">None found</p>`);
   let body = `<h1>${esc(heading)}</h1><p class="muted">${esc(row.kind ?? "")} · ${esc(row.path ?? "")}${row.pack ? ` · ${esc(row.pack)}` : ""}</p>`;
 
@@ -2084,7 +2219,12 @@ function serviceDetailsHtml(details, nonce = "") {
     body += `<section><h2>OData</h2><p>DPC: ${esc(row.handler ?? "n/a")}</p><p>MPC: ${esc(row.mpc ?? "n/a")}</p>
       <p><a href="${attr(metadataUrl ?? "")}" target="_blank" rel="noreferrer">$metadata</a></p>
       ${details.entitySetsError ? `<p class="error">Entity sets: ${esc(details.entitySetsError)}</p>` : ""}
-      <h3>Entity sets</h3>${list(details.entitySets ?? [], (set) => `<li><code>${esc(set.set)}</code> <span class="muted">${esc(set.kind)}</span></li>`)}</section>`;
+      <h3>Model sources</h3>${list(details.card?.model, (target) => `<li>${cardLink(target)}</li>`)}
+      <h3>Entity sets</h3>${list(details.card?.entitySets ?? details.entitySets ?? [], (set) => `<li><code>${esc(set.set)}</code>
+        ${set.sources?.length ? `<div>${set.sources.map(cardLink).join(" · ")}</div>` : ""}
+        ${set.operations ? `<ul>${set.operations.map((op) => `<li>${op.link ? cardLink(op.link) : `${esc(op.name)} <span class="muted">inherited (generic)</span>`}</li>`).join("")}</ul>` : `<span class="muted">${esc(set.kind)}</span>`}</li>`)}
+      <h3>Generic service methods</h3>${list(details.card?.generic, (target) => `<li>${cardLink(target)}</li>`)}
+      <h3>Function imports</h3>${list(details.card?.functionImports, (action) => `<li>${esc(action.name)}: ${action.link ? cardLink(action.link) : `<span class="muted">EXECUTE_ACTION inherited (generic)</span>`}</li>`)}</section>`;
     body += section("dpc", "DPC", row.handler, details.sources?.dpc, details.readers?.dpc, details.closures?.dpc);
     body += section("mpc", "MPC", row.mpc, details.sources?.mpc, details.readers?.mpc, details.closures?.mpc);
     const warm = details.serving?.warm;
@@ -2108,7 +2248,7 @@ function serviceDetailsHtml(details, nonce = "") {
       <p>Service declaration: ${sourceButton("service", row.kind === "APC" ? "Open SAPC source" : "Open SICF source", details.sources?.service)}</p></section>`;
   }
 
-  const script = `<script nonce="${attr(nonce)}">const vscode=acquireVsCodeApi();document.addEventListener("click",e=>{const b=e.target.closest("[data-source]");if(b)vscode.postMessage({command:"openSource",role:b.dataset.source});});</script>`;
+  const script = `<script nonce="${attr(nonce)}">const vscode=acquireVsCodeApi();document.addEventListener("click",e=>{const b=e.target.closest("[data-path], [data-source]");if(!b)return;if(b.dataset.path)vscode.postMessage({command:"openCardPath",path:b.dataset.path,line:Number(b.dataset.line)});else vscode.postMessage({command:"openSource",role:b.dataset.source});});</script>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${attr(nonce)}';"><style>
     body{font:13px var(--vscode-font-family);color:var(--vscode-foreground);padding:0 20px;max-width:1000px}h1{font-size:20px}h2{font-size:16px;margin-bottom:8px}section{border-top:1px solid var(--vscode-panel-border);padding:8px 0}button{color:var(--vscode-textLink-foreground);background:transparent;border:0;padding:0;text-decoration:underline;cursor:pointer}a{color:var(--vscode-textLink-foreground)}code{font-family:var(--vscode-editor-font-family)}ul{margin-top:6px}.muted{color:var(--vscode-descriptionForeground)}.error{color:var(--vscode-errorForeground)}
     </style></head><body>${body}${script}</body></html>`;
@@ -2130,6 +2270,6 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
   serviceContextValue, serviceActionContext, normalizeTransactionRow, transactionDetailsModel, classifyTransactionClick,
   transactionDetailsHtml, appManifestDetails, httpTestFiles, closureTestNames, dumpsForService,
-  serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
+  implementationMethodLine, serviceCardModel, serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext,
   SYSTEM_STATUS_SETS, odataV2Results, systemOverviewModel};

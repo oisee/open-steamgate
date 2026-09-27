@@ -18,7 +18,7 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, demoFailureObjects, progRunLens,
   groupServices, serviceLabel, serviceContextValue, serviceActionContext, normalizeTransactionRow,
   transactionDetailsModel, classifyTransactionClick, transactionDetailsHtml,
-  appManifestDetails, httpTestFiles, closureTestNames, dumpsForService, serviceDetailsHtml,
+  appManifestDetails, httpTestFiles, closureTestNames, dumpsForService, serviceCardModel, serviceDetailsHtml,
   serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   webguiPanelHtml, runWebguiPanel,
   warmStatusText, activationBuildText, closureTestsText,
@@ -1376,6 +1376,7 @@ async function openInWebview(url, panelType, title) {
 let serviceDetailsPanel;
 let serviceDetailsSelection = 0;
 let serviceDetailsItem;
+let serviceCardTargets = new Map();
 let transactionProgramSource;
 let transactionClicks = new Map();
 
@@ -1412,6 +1413,24 @@ function testSourcesForService(root, row) {
   };
   readTree(path.join(root, "test"));
   return httpTestFiles(collected, row.path, row.name);
+}
+
+function serviceCardFiles(root) {
+  const files = [];
+  const visit = (dir) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, {withFileTypes: true}); } catch { return; }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "build") continue;
+      const absolute = path.join(dir, entry.name);
+      if (entry.isDirectory()) visit(absolute);
+      else if (/\.(?:clas\.abap|stg\.yaml|iwpr\.xml|shlp\.xml|ddls\.asddls)$/i.test(entry.name)) {
+        try { files.push({path: path.relative(root, absolute).replaceAll(path.sep, "/"), source: fs.readFileSync(absolute, "utf8")}); } catch {}
+      }
+    }
+  };
+  for (const folder of ["src", "gen", "packs"]) visit(path.join(root, folder));
+  return files;
 }
 
 async function classSourcePath(row, role, root) {
@@ -1474,6 +1493,7 @@ async function serviceDetailsData(item, provider) {
       details.entitySets = [];
       details.entitySetsError = String(e.message ?? e);
     }
+    details.card = serviceCardModel(row, details.entitySets, serviceCardFiles(root));
     const [serving, dumps] = await Promise.allSettled([osd().serving(), osd().dumps()]);
     details.serving = serving.status === "fulfilled" ? serving.value : undefined;
     details.dumps = dumpsForService(dumps.status === "fulfilled" ? dumps.value : [], row);
@@ -1520,6 +1540,7 @@ async function showServiceDetails(item, provider, output) {
   if (!item?.row) return;
   ensureDetailsPanel(output);
   serviceDetailsItem = item;
+  serviceCardTargets = new Map();
   transactionProgramSource = undefined;
   const selection = ++serviceDetailsSelection;
   serviceDetailsPanel.title = `${serviceLabel(item.row).label} · Details`;
@@ -1528,6 +1549,12 @@ async function showServiceDetails(item, provider, output) {
     const details = await serviceDetailsData(item, provider);
     if (selection === serviceDetailsSelection && serviceDetailsPanel !== undefined) {
       const nonce = crypto.randomBytes(16).toString("base64");
+      serviceCardTargets = new Map([
+        ...details.card?.model ?? [],
+        ...details.card?.generic ?? [],
+        ...details.card?.entitySets.flatMap((set) => [...set.sources, ...set.operations.map((op) => op.link).filter(Boolean)]) ?? [],
+        ...details.card?.functionImports.map((item) => item.link).filter(Boolean) ?? [],
+      ].map((target) => [`${target.path}:${target.line}`, target]));
       serviceDetailsPanel.webview.html = serviceDetailsHtml(details, nonce);
     }
   } catch (e) {
@@ -1544,6 +1571,16 @@ function ensureDetailsPanel(output) {
     {viewColumn: vscode.ViewColumn.Beside, preserveFocus: true},
     {enableScripts: true, retainContextWhenHidden: false});
   serviceDetailsPanel.webview.onDidReceiveMessage(async (message) => {
+    if (message?.command === "openCardPath") {
+      const target = serviceCardTargets.get(`${message.path}:${message.line}`);
+      const absolute = target && sourcePath(serviceSourceRoot(), target.path);
+      if (!absolute) return;
+      const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(absolute)));
+      const at = new vscode.Position(Math.max(0, target.line - 1), 0);
+      editor.selection = new vscode.Selection(at, at);
+      editor.revealRange(new vscode.Range(at, at));
+      return;
+    }
     if (message?.command !== "openSource") return;
     if (message.role === "program") await openTransactionProgram(transactionProgramSource, output);
     else await openServiceSource(serviceDetailsItem, message.role, output);
@@ -1551,6 +1588,7 @@ function ensureDetailsPanel(output) {
   serviceDetailsPanel.onDidDispose(() => {
     serviceDetailsPanel = undefined;
     serviceDetailsItem = undefined;
+    serviceCardTargets = new Map();
     transactionProgramSource = undefined;
     serviceDetailsSelection += 1;
   });

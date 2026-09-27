@@ -927,6 +927,17 @@ one reused **Service details** webview. The panel is disposed when closed and
 does not retain its hidden context. Its sections are specific to each row:
 
 - **OData:** DPC and MPC source links, lazily loaded entity sets, `$metadata`,
+  and a source card. The model section opens `DEFINE` in the MPC and MPC_EXT,
+  the MPC annotation class when generated, the `.stg.yaml` and IWPR when
+  present. Each entity set lists DPC_EXT operation implementations and opens
+  the exact `METHOD` line. Shared interface methods appear under a set only
+  when their body names that set; methods naming no set appear once as
+  **generic (all sets)**. Operations without an override read **inherited
+  (generic)** and have no source link. Media sets include stream operations;
+  function imports have their own group with `EXECUTE_ACTION`. SADL sets link
+  to the CDS definition and generated source class when present; value-help
+  sets link to their search-help XML. The card also opens `$metadata`.
+  Source links appear when their files exist in `src/`, `gen/`, or `packs/`.
   reader and xref closure counts for each class, closure test classes labelled
   **ABAP Unit by reference**, matching files under `test/` and `test/e2e`
   labelled **HTTP tests by URL**, generation and `/osd/serving` warm state,
@@ -966,8 +977,8 @@ paths and the TSTCP parameter field used to identify parameter transactions.
 Pure view logic lives in `editors/vscode/lib.js` and is held without VS Code
 or a live server by `test/vscode-extension.mjs`: service normalization,
 kind/pack grouping, TRAN click classification and details, target-specific context actions, manifest data-source
-resolution, HTTP test matching, closure test union, dump filtering, and the
-details HTML renderer. It also checks the services and transaction routes
+resolution, HTTP test matching, closure test union, dump filtering, method-line
+resolution, service-card links, and the details HTML renderer. It also checks the services and transaction routes
 against a real in-memory `ObjectStore`. `extension.js` owns the webview and
 tree commands.
 

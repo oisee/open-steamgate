@@ -27,7 +27,7 @@ const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseChec
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
   serviceContextValue, serviceActionContext, normalizeTransactionRow, appManifestDetails, httpTestFiles, closureTestNames,
   transactionDetailsModel, classifyTransactionClick, transactionDetailsHtml,
-  dumpsForService, serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
+  dumpsForService, implementationMethodLine, serviceCardModel, serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   warmStatusText, activationBuildText, closureTestsText,
   PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext, SYSTEM_STATUS_SETS,
   odataV2Results, systemOverviewModel,
@@ -1759,6 +1759,90 @@ describe("editors/vscode/lib.js: service details data routes", () => {
     expect(transactions[0]).to.include({tcode: "ZREP", kind: "CLASS", source: "gen/gui/zrep.tran.xml"});
     expect(calls[0]).to.equal("http://localhost:3620/sap/bc/adt/core/http/xref/closure?type=CLAS&name=ZCL_DEMO_DPC_EXT");
     expect(calls[1]).to.equal("http://localhost:3620/sap/bc/adt/core/http/transactions");
+  });
+});
+
+describe("editors/vscode: service card source navigation", () => {
+  const source = (name) => ({path: name, source: readFileSync(path.join(ROOT, name), "utf8")});
+
+  it("resolves implementation lines case insensitively, including interface methods, skipping comments and declarations", () => {
+    const fixture = ["* METHOD x.", "  METHODS x REDEFINITION.", "  \" METHOD x.",
+      "  METHOD /iwbep/if_mgw_appl_srv_runtime~get_stream.", "  ENDMETHOD.", "  method X.", "  ENDMETHOD."].join("\n");
+    expect(implementationMethodLine(fixture, "X")).to.equal(6);
+    expect(implementationMethodLine(fixture, "/IWBEP/IF_MGW_APPL_SRV_RUNTIME~GET_STREAM")).to.equal(4);
+    expect(implementationMethodLine(fixture, "missing")).to.equal(undefined);
+  });
+
+  it("links SEGW operations and function imports to their exact demo DPC lines, and leaves inherited operations unlinked", () => {
+    const files = [source("src/demo/zcl_zstg_demo_dpc_ext.clas.abap"), source("src/demo/zcl_zstg_demo_mpc.clas.abap"),
+      source("src/demo/zcl_zstg_demo_mpc_ext.clas.abap"), source("src/demo/zstg_demo.stg.yaml"),
+      source("src/ddic/zstg_status_sh.shlp.xml"),
+      {path: "gen/stg/zstg_demo/zstg_demo.iwpr.xml", source: "<project>ZSTG_DEMO_SRV</project>"},
+      {path: "gen/stg/zstg_demo/zcl_zstg_demo_mpc_ann.clas.abap", source: "CLASS zcl_zstg_demo_mpc_ann IMPLEMENTATION.\n METHOD define.\n ENDMETHOD.\nENDCLASS."}];
+    const card = serviceCardModel({name: "ZSTG_DEMO_SRV", handler: "ZCL_ZSTG_DEMO_DPC_EXT", mpc: "ZCL_ZSTG_DEMO_MPC_EXT"},
+      [{set: "TravelSet"}, {set: "PhotoSet"}, {set: "StatusVHSet"}], files);
+    const op = (set, name) => card.entitySets.find((s) => s.set === set).operations.find((one) => one.name === name);
+    for (const [set, name, line] of [["TravelSet", "GET_ENTITYSET", 138], ["TravelSet", "CREATE_DEEP_ENTITY", 392],
+      ["PhotoSet", "GET_STREAM", 679]]) {
+      expect(op(set, name).link).to.include({path: "src/demo/zcl_zstg_demo_dpc_ext.clas.abap", line});
+    }
+    expect(op("TravelSet", "GET_EXPANDED_ENTITY")).to.include({inherited: true, link: undefined});
+    expect(op("BookingSet", "CREATE_DEEP_ENTITY")).to.include({inherited: true, link: undefined});
+    expect(card.functionImports.find((one) => one.name === "CancelTravel").link).to.include({line: 525});
+    expect(card.entitySets.find((s) => s.set === "StatusVHSet").sources[0].path).to.equal("src/ddic/zstg_status_sh.shlp.xml");
+    expect(card.model.map((one) => one.label)).to.include.members(["MPC DEFINE", "MPC_EXT DEFINE", "MPC_ANN DEFINE", ".stg.yaml", "IWPR"]);
+    const html = serviceDetailsHtml({row: {kind: "ODATA", name: "ZSTG_DEMO_SRV"}, card}, "nonce");
+    expect(html).to.contain('data-line="392"').and.to.contain("inherited (generic)").and.to.contain("Function imports");
+  });
+
+  it("maps a SADL set to its CDS definition and generated source class", () => {
+    const files = [source("src/demo_sadl/zcl_zstg_sadl_mpc.clas.abap"), source("src/demo_sadl/zcl_zstg_sadl_mpc_ext.clas.abap"),
+      source("src/demo_sadl/zcl_zstg_sadl_dpc_ext.clas.abap"), source("src/cds/zc_stg_travel.ddls.asddls"),
+      {path: "gen/cds/zcl_stg_cds_zvstgtravel.clas.abap", source: "CLASS zcl_stg_cds_zvstgtravel IMPLEMENTATION.\n METHOD zif_stg_cds_source~read.\n ENDMETHOD.\nENDCLASS."}];
+    const card = serviceCardModel({name: "ZSTG_SADL_SRV", handler: "ZCL_ZSTG_SADL_DPC_EXT", mpc: "ZCL_ZSTG_SADL_MPC_EXT"}, [], files);
+    const travel = card.entitySets.find((set) => set.set === "Zc_Stg_TravelSet");
+    expect(travel.sources.map((one) => one.path)).to.deep.equal([
+      "src/cds/zc_stg_travel.ddls.asddls", "gen/cds/zcl_stg_cds_zvstgtravel.clas.abap"]);
+    expect(travel.sources[1]).to.include({line: 2});
+  });
+
+  it("resolves a ServiceSet row from its URL without matching unrelated IWPR files", () => {
+    const row = normalizeServiceSetRow({Kind: "ODATA", Path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV/", HandlerName: "ZCL_ZSTG_DEMO_DPC_EXT"});
+    const files = [source("src/demo/zcl_zstg_demo_mpc.clas.abap"), source("src/demo/zcl_zstg_demo_mpc_ext.clas.abap"),
+      source("src/demo/zcl_zstg_demo_dpc_ext.clas.abap"),
+      {path: "gen/other/unrelated.iwpr.xml", source: "<project>UNRELATED_SRV</project>"}];
+    const card = serviceCardModel(row, [{set: "TravelSet"}], files);
+    expect(card.model.map((one) => one.label)).to.include("MPC DEFINE");
+    expect(card.model.map((one) => one.label)).not.to.include("IWPR");
+    expect(card.entitySets.find((one) => one.set === "TravelSet").operations.find((one) => one.name === "GET_ENTITYSET").link).to.include({line: 138});
+  });
+
+  it("uses known source paths and stable layer precedence for duplicate class names", () => {
+    const files = [
+      {path: "src/demo/zcl_sample_dpc_ext.clas.abap", source: "METHOD travelset_get_entityset.\nENDMETHOD."},
+      {path: "packs/other/src/zcl_sample_dpc_ext.clas.abap", source: "METHOD travelset_get_entityset.\nENDMETHOD."},
+      {path: "src/demo/zcl_sample_mpc.clas.abap", source: "METHOD define.\nENDMETHOD."},
+      {path: "packs/other/src/zcl_sample_mpc.clas.abap", source: "METHOD define.\nENDMETHOD."},
+    ];
+    const row = {handler: "ZCL_SAMPLE_DPC_EXT", handlerSource: "src/demo/zcl_sample_dpc_ext.clas.abap", mpc: "ZCL_SAMPLE_MPC_EXT", mpcSource: "src/demo/zcl_sample_mpc_ext.clas.abap"};
+    const card = serviceCardModel(row, [{set: "TravelSet"}], files);
+    expect(card.entitySets[0].operations[0].link.path).to.equal("src/demo/zcl_sample_dpc_ext.clas.abap");
+    expect(card.model[0].path).to.equal("src/demo/zcl_sample_mpc.clas.abap");
+    expect(serviceCardModel({handler: "ZCL_SAMPLE_DPC_EXT"}, [{set: "TravelSet"}], files).entitySets[0].operations[0].link.path)
+      .to.equal("src/demo/zcl_sample_dpc_ext.clas.abap");
+    const packed = normalizeServiceSetRow({Kind: "ODATA", Pack: "other", HandlerName: "ZCL_SAMPLE_DPC_EXT"});
+    const packedCard = serviceCardModel(packed, [{set: "TravelSet"}], files);
+    expect(packedCard.entitySets[0].operations[0].link.path).to.equal("packs/other/src/zcl_sample_dpc_ext.clas.abap");
+    expect(packedCard.model[0].path).to.equal("packs/other/src/zcl_sample_mpc.clas.abap");
+  });
+
+  it("shows an interface method without a named set once at service level", () => {
+    const files = [{path: "src/zcl_sample_dpc_ext.clas.abap", source: "METHOD /iwbep/if_mgw_appl_srv_runtime~get_expanded_entity.\n  RETURN.\nENDMETHOD."}];
+    const card = serviceCardModel({handler: "ZCL_SAMPLE_DPC_EXT"}, [{set: "TravelSet"}, {set: "BookingSet"}], files);
+    expect(card.generic.map((one) => one.label)).to.deep.equal(["GET_EXPANDED_ENTITY generic (all sets)"]);
+    expect(card.entitySets.every((set) => !set.operations.some((op) => op.name === "GET_EXPANDED_ENTITY"))).to.equal(true);
+    const html = serviceDetailsHtml({row: {kind: "ODATA"}, card});
+    expect(html).to.contain("GET_EXPANDED_ENTITY generic (all sets)");
   });
 });
 
