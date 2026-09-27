@@ -24,7 +24,7 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   warmStatusText, activationBuildText, closureTestsText,
   presetSettings, isOpenSteamgateCheckout: isOpenSteamgateManifest, osdHomeChoice, osdStateContext, systemOverviewModel,
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText,
-  runningAbapSources, breakpointWarning} = require("./lib.js");
+  runningAbapSources, breakpointWarning, taxiDefaultYear, taxiResetPrompt} = require("./lib.js");
 const {Launcher, ensureMaterializedHome, materializedHomeDir, selectOldHomes, listOldHomes, cleanupOldHomes,
   hasLiveServingLock,
   detectWorkspaceLayers, layerContributions, databaseEnv, defaultDedicatedName, describeDatabase,
@@ -2088,6 +2088,8 @@ function activate(context) {
   // binding) or reached through F8's dispatch (run(), above) when the class
   // implements IF_OO_ADT_CLASSRUN and has no ABAP Unit tests.
   context.subscriptions.push(vscode.commands.registerCommand("osd.classrun", () => classrunCurrent(classrunOutput)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.generateTaxiData", generateTaxiData));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.resetTaxiData", resetTaxiData));
   context.subscriptions.push(vscode.commands.registerCommand("osd.classrunWithDebugger", () => classrunCurrent(classrunOutput, true)));
 
   // Q2b "Runner" (docs/vscode-extension.md): a lens over each
@@ -2610,6 +2612,50 @@ async function classrunCurrent(classrunOutput, withDebugger = false) {
     return;
   }
   await classrunObject(object.name, classrunOutput, withDebugger);
+}
+
+// ---- the taxi demo's sample data (ZOSD_TAXI_SRV, src/demo_data/): nothing
+// is generated when the system starts; a year is made on request, from the
+// taxi app's own buttons, from here, or from the OSD tree's service node.
+
+async function taxiYears() {
+  const answer = await osd().odata("ZOSD_TAXI_SRV", "YearSet?$format=json");
+  if (answer.status !== 200) throw new Error(`ZOSD_TAXI_SRV/YearSet: HTTP ${answer.status}`);
+  return answer.body?.d?.results ?? [];
+}
+
+async function generateTaxiData() {
+  try {
+    const years = await taxiYears();
+    const text = await vscode.window.showInputBox({
+      title: "osd: Generate taxi data",
+      prompt: "A year of synthetic NYC taxi trips, about 20 000 rows, made up and not TLC figures. " +
+        (years.length ? `Loaded: ${years.map((y) => y.Year).join(", ")}.` : "No sample data yet."),
+      value: String(taxiDefaultYear(years)),
+      validateInput: (value) => /^(19|20)\d\d$/.test(value.trim()) ? undefined : "A year from 1900 to 2099",
+    });
+    if (text === undefined) return;
+    const report = await osd().odataAction("ZOSD_TAXI_SRV", "GenerateYear", {Year: text.trim()});
+    vscode.window.showInformationMessage(`osd: ${String(report).replace(/^taxi: /, "")}`);
+  } catch (e) {
+    vscode.window.showErrorMessage(`osd: taxi data: ${String(e.message ?? e)}`);
+  }
+}
+
+async function resetTaxiData() {
+  try {
+    const question = taxiResetPrompt(await taxiYears());
+    if (question === undefined) {
+      vscode.window.showInformationMessage("osd: No synthetic year is loaded; there is nothing to remove.");
+      return;
+    }
+    const picked = await vscode.window.showWarningMessage(question, {modal: true}, "Remove");
+    if (picked !== "Remove") return;
+    const report = await osd().odataAction("ZOSD_TAXI_SRV", "ResetData");
+    vscode.window.showInformationMessage(`osd: ${String(report).replace(/^taxi: /, "")}`);
+  } catch (e) {
+    vscode.window.showErrorMessage(`osd: taxi data: ${String(e.message ?? e)}`);
+  }
 }
 
 async function classrunObject(name, classrunOutput, withDebugger = false) {

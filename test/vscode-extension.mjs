@@ -30,7 +30,7 @@ const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseChec
   dumpsForService, implementationMethodLine, serviceCardModel, serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   warmStatusText, activationBuildText, closureTestsText,
   PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext, SYSTEM_STATUS_SETS,
-  odataV2Results, systemOverviewModel, runningAbapSources, breakpointWarning,
+  odataV2Results, systemOverviewModel, runningAbapSources, breakpointWarning, taxiDefaultYear, taxiResetPrompt,
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
 const {overviewStatusSection, systemOverviewHtml} = createRequire(import.meta.url)("../editors/vscode/system-overview.js");
@@ -458,6 +458,45 @@ describe("editors/vscode: the extension's logic", function () {
     } finally {
       rmSync(dir, {recursive: true, force: true});
     }
+  });
+
+  it("the taxi sample data: the next year to make, what a reset removes, and the tree's action", () => {
+    const now = new Date("2026-09-27T12:00:00Z");
+    expect(taxiDefaultYear([], now)).to.equal(2026);
+    expect(taxiDefaultYear([{Year: 2026}, {Year: 2025}, {Year: 2023}], now), "the most recent year without rows").to.equal(2024);
+    expect(taxiResetPrompt([])).to.equal(undefined);
+    expect(taxiResetPrompt([{Year: 2023, Trips: 87192, Rows: 20000}, {Year: 2024, Trips: 122665, Rows: 20000}]))
+      .to.equal("Remove 2023, 2024 (209 857 trips in 40 000 rows)? Rows that are not synthetic stay.");
+    expect(serviceActionContext({kind: "ODATA", name: "ZOSD_TAXI_SRV", path: "/sap/opu/odata/sap/ZOSD_TAXI_SRV"}))
+      .to.match(/(^|;)taxi-data(;|$)/);
+    expect(serviceActionContext({kind: "ODATA", name: "ZSTG_DEMO_SRV", path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"}))
+      .to.not.match(/taxi-data/);
+  });
+
+  it("calls a POST function import with the service's own CSRF token, and says an OData error in its words", async () => {
+    const seen = [];
+    const fake = async (url, options = {}) => {
+      seen.push({url, method: options.method ?? "GET", headers: options.headers ?? {}});
+      if ((options.headers ?? {})["x-csrf-token"] === "fetch") {
+        return new Response("", {status: 200, headers: {"x-csrf-token": "tok-1", "set-cookie": "sap-XSRF_OSD=abc; path=/"}});
+      }
+      if (url.includes("GenerateYear")) {
+        return new Response(JSON.stringify({d: {GenerateYear: "taxi: 2025 generated"}}), {status: 200});
+      }
+      return new Response(JSON.stringify({error: {message: {lang: "en", value: "Year \"abc\" is not a year"}}}), {status: 400});
+    };
+    const client = new Osd("http://localhost:3999/", fake);
+    expect(await client.odataAction("ZOSD_TAXI_SRV", "GenerateYear", {Year: 2025})).to.equal("taxi: 2025 generated");
+    expect(seen[0]).to.include({url: "http://localhost:3999/sap/opu/odata/sap/ZOSD_TAXI_SRV/", method: "GET"});
+    expect(seen[1]).to.include({url: "http://localhost:3999/sap/opu/odata/sap/ZOSD_TAXI_SRV/GenerateYear?Year=2025", method: "POST"});
+    expect(seen[1].headers).to.include({"x-csrf-token": "tok-1", cookie: "sap-XSRF_OSD=abc"});
+    let error;
+    try {
+      await client.odataAction("ZOSD_TAXI_SRV", "ResetData");
+    } catch (e) {
+      error = e;
+    }
+    expect(error?.message).to.equal('POST ZOSD_TAXI_SRV/ResetData: HTTP 400 -- Year "abc" is not a year');
   });
 
   it("quick start applies its preset and restarts a running controller before opening the overview", async () => {
