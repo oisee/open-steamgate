@@ -14,21 +14,6 @@ ENDCLASS.
 CLASS zcl_zork_http_handler IMPLEMENTATION.
 
   METHOD if_http_extension~handle_request.
-    DATA(lv_path) = server->request->get_header_field( '~path_info' ).
-    IF lv_path IS INITIAL.
-      lv_path = server->request->get_header_field( '~path' ).
-    ENDIF.
-    IF lv_path CP '*/speedrun.txt'.
-      DATA(lo_loader) = NEW zcl_ork_00_game_loader_smw0( ).
-      DATA(lv_script) = lo_loader->zif_ork_00_game_loader~load( 'ZORK-MINI-SPEEDRUN-TXT' ).
-      IF lv_script IS INITIAL.
-        server->response->set_status( code = 404 reason = 'Replay resource not found' ).
-        RETURN.
-      ENDIF.
-      server->response->set_header_field( name = 'Content-Type' value = 'text/plain; charset=utf-8' ).
-      server->response->set_data( lv_script ).
-      RETURN.
-    ENDIF.
     DATA(lv_html) = get_html( ).
 
     server->response->set_header_field(
@@ -75,7 +60,6 @@ CLASS zcl_zork_http_handler IMPLEMENTATION.
       |  <div id="terminal-container"><div id="terminal"></div></div>{ lv_n }| &&
       |  <div id="status">Status: <span id="statusText" class="disconnected">Connecting...</span></div>{ lv_n }| &&
       |  <div id="replay-controls">| &&
-      |    <button id="replay-speedrun" type="button" disabled>Replay SPEEDRUN</button> | &&
       |    <button id="replay-start" type="button" disabled>Replay short route</button> | &&
       |    <button id="replay-cancel" type="button" disabled>Cancel replay</button>| &&
       |    <div id="replay-progress" role="status" aria-live="polite">Manual play is available when connected.</div>| &&
@@ -111,7 +95,6 @@ CLASS zcl_zork_http_handler IMPLEMENTATION.
       |    \}{ lv_n }| &&
       |    function updateReplayButtons(ready) \{| &&
       |      document.getElementById('replay-start').disabled = !ready \|\| replaying;| &&
-      |      document.getElementById('replay-speedrun').disabled = !ready \|\| replaying;| &&
       |      document.getElementById('replay-cancel').disabled = !replaying;| &&
       |    \}{ lv_n }| &&
       |    function rejectPending(error) \{| &&
@@ -187,7 +170,7 @@ CLASS zcl_zork_http_handler IMPLEMENTATION.
       |      socket.send(command);| &&
       |      updateReplayButtons(false);| &&
       |    \}{ lv_n }| &&
-      |    async function startReplay(mode = 'short') \{| &&
+      |    async function startReplay() \{| &&
       |      if (replaying) return;| &&
       |      if (!confirm('Replay starts a fresh game and discards your current session. Continue?')) return;| &&
       |      replaying = true;| &&
@@ -199,16 +182,7 @@ CLASS zcl_zork_http_handler IMPLEMENTATION.
       |      term.clear();| &&
       |      setReplayProgress('Starting a fresh game...');| &&
       |      try \{| &&
-      |        let steps = replaySteps;| &&
-      |        if (mode === 'speedrun') \{| &&
-      |          setReplayProgress('Loading SPEEDRUN from SMW0...');| &&
-      |          const resource = await fetch('/sap/bc/zork/speedrun.txt', \{ signal: AbortSignal.timeout(15000) \});| &&
-      |          if (!resource.ok) throw new Error('SPEEDRUN resource: HTTP ' + resource.status);| &&
-      |          const text = await resource.text();| &&
-      |          steps = text.split(String.fromCharCode(10)).map(line => line.trim())| &&
-      |            .filter(line => line && !line.startsWith('#')).map(command => (\{command\}));| &&
-      |          if (!steps.length) throw new Error('SPEEDRUN is empty');| &&
-      |        \}| &&
+      |        const steps = replaySteps;| &&
       |        if (token !== replayToken) return;| &&
       |        await connect();| &&
       |        for (let i = 0; i < steps.length; i++) \{| &&
@@ -225,7 +199,7 @@ CLASS zcl_zork_http_handler IMPLEMENTATION.
       |          \}| &&
       |        \}| &&
       |        if (token !== replayToken) return;| &&
-      |        setReplayProgress('Replay complete: ' + steps.length + (mode === 'short' ? ' commands verified.' : ' commands replayed (SPEEDRUN, not a victory assertion).') + ' Continue playing manually.');| &&
+      |        setReplayProgress('Replay complete: ' + steps.length + ' commands verified. Continue playing manually.');| &&
       |      \} catch (error) \{| &&
       |        if (token === replayToken) setReplayProgress('Replay stopped: ' + error.message);| &&
       |      \} finally \{| &&
@@ -235,8 +209,7 @@ CLASS zcl_zork_http_handler IMPLEMENTATION.
       |        \}| &&
       |      \}| &&
       |    \}{ lv_n }| &&
-      |    document.getElementById('replay-start').addEventListener('click', () => startReplay('short'));| &&
-      |    document.getElementById('replay-speedrun').addEventListener('click', () => startReplay('speedrun'));| &&
+      |    document.getElementById('replay-start').addEventListener('click', startReplay);| &&
       |    document.getElementById('replay-cancel').addEventListener('click', () => \{| &&
       |      if (!replaying) return;| &&
       |      replayToken++;| &&

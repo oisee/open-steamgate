@@ -29,12 +29,16 @@ if (versionParts === null) throw new Error(`expected a plain major.minor.patch v
 const commitCount = execFileSync("git", ["rev-list", "--count", "HEAD"], {cwd: root, encoding: "utf8"}).trim();
 const currentVsixFile = `open-steamgate-${versionParts[1]}.${versionParts[2]}.${commitCount}.vsix`;
 
-function packagedPacks(archive) {
+function packagedSeedEntries(archive) {
   expect(execFileSync("unzip", ["-Z1", archive], {encoding: "utf8"})).to.contain("extension/osd/seed.tar.br");
   const compressed = execFileSync("unzip", ["-p", archive, "extension/osd/seed.tar.br"], {maxBuffer: 32 * 1024 * 1024});
-  const entries = execFileSync("tar", ["-tf", "-"], {
+  return execFileSync("tar", ["-tf", "-"], {
     input: brotliDecompressSync(compressed), encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
   });
+}
+
+function packagedPacks(archive) {
+  const entries = packagedSeedEntries(archive);
   return [...new Set(entries.split("\n").map((entry) => /^packs\/([^/]+)\//.exec(entry)?.[1])
     .filter((name) => name !== undefined))].sort();
 }
@@ -246,13 +250,17 @@ describe("packaging selected packs", function () {
     }
   });
 
-  it("builds a Marketplace archive without Zork or a web entry and inventories every staged package", async function () {
+  it("builds a Marketplace archive with Zork I, its notice, and no web entry", async function () {
     const scratch = testScratch("marketplace");
     try {
       const {out, notices} = await buildTestVsix(scratch, {OSD_VSIX_PROFILE: "marketplace", OSD_VSIX_PRERELEASE: "1"});
-      expect(packagedPacks(out)).to.deep.equal([]);
+      expect(packagedPacks(out)).to.deep.equal(["zork"]);
+      expect(packagedSeedEntries(out)).not.to.match(/(?:^|\/)zork-mini[^\n]*/m);
       expect(execFileSync("unzip", ["-Z1", out], {encoding: "utf8"})).not.to.contain("extension/dist/web/");
-      expect(tilesOf(join(scratch, "seed-stage"))).to.deep.equal([]);
+      expect(readFileSync(join(scratch, "seed-stage", "webapp", "flp.html"), "utf8")).to.contain('title: "Zork I (MIT source release)"');
+      expect(existsSync(join(scratch, "seed-stage", "packs", "zork", "src", "zork1-z3.w3mi.data.z3"))).to.equal(true);
+      expect(existsSync(join(scratch, "seed-stage", "packs", "zork", "games", "zork-mini-z3.w3mi.data.z3"))).to.equal(false);
+      expect(readdirSync(join(scratch, "seed-stage", "packs", "zork", "games"))).to.deep.equal([]);
       const pkg = JSON.parse(execFileSync("unzip", ["-p", out, "extension/package.json"], {encoding: "utf8"}));
       expect(pkg).not.to.have.property("browser");
       const manifest = execFileSync("unzip", ["-p", out, "extension.vsixmanifest"], {encoding: "utf8"});
@@ -263,6 +271,13 @@ describe("packaging selected packs", function () {
       expect(notices.entries.map((e) => e.path)).to.deep.equal(staged.entries.map((e) => e.path));
       const text = execFileSync("unzip", ["-p", out, "extension/THIRD-PARTY-NOTICES.md"], {encoding: "utf8", maxBuffer: 8 * 1024 * 1024});
       for (const entry of staged.entries) expect(text).to.contain(`## ${entry.name} — ${entry.path}`);
+      expect(text).to.contain("## Zork I story — packs/zork/src/zork1-z3.w3mi.data.z3");
+      expect(text).to.contain("Copyright (c) 2025 Microsoft");
+      expect(text).to.contain("## oisee/zork-abap interpreter — packs/zork/upstream");
+      expect(text).to.contain("Covers fetched folders: packs/zork/upstream, packs/zork/games.");
+      expect(text).to.contain("Copyright (c) 2025\n\nPermission is hereby granted, free of charge");
+      expect(text).to.contain("0c8d96b908f88fc3207e7f9a00bc43f724b32b6f");
+      expect(text).to.contain("Source release by Microsoft, 2025; no trademark rights are granted; rebuilt from the MIT-licensed ZIL source, not the historical binary");
       expect(text).to.contain("License: MIT (maintainer override).\n\nNote: LICENSE file reads 'todo'; the author's intent is MIT; treated as MIT by the open-steamgate maintainer, 2026-09-27");
     } finally { rmSync(scratch, {recursive: true, force: true}); }
   });

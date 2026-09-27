@@ -571,6 +571,7 @@ test("Zork plays in the bundle: shim, channel, stateful handler and SMW0", async
     // and it ran: the banner is the handler's own, the rest is the story
     // file out of SMW0 interpreted by the ABAP Z-machine
     await expect(page.getByText("Z-Machine V3 Interpreter in ABAP")).toBeVisible({timeout: 60000});
+    await expect(page.getByText("Running: ZORK1-Z3")).toBeVisible({timeout: 60000});
     await expect(page.getByText("West of House")).toBeVisible({timeout: 60000});
 
     // and it answers. Typed into the page's own terminal rather than pushed
