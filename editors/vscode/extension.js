@@ -518,6 +518,8 @@ class SystemController {
       if (this.launcher !== undefined && this.launcher.state !== "stopped") {
         await this.launcher.stop();
       }
+      // another home is another system: the old one's pages are gone
+      if (this.launcher !== undefined) closePageTabs();
       const launcher = new Launcher({
         osdHome,
         storageDir: storageDirFor(this.context, osdHome),
