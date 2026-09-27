@@ -41,6 +41,10 @@ test("selects the previous release tag and first-parent PR merges", () => {
     assert.match(notes, /Second improvement \(#2\)/);
     assert.doesNotMatch(notes, /First improvement/);
     assert.match(notes, /since vscode-v0\.1\.2/);
+    git("commit", "-q", "--allow-empty", "-m", "Unreleased change");
+    const draftNotes = generateNotes({cwd, tag: "vscode-v0.1.4", to: "HEAD"});
+    assert.match(draftNotes, /since vscode-v0\.1\.3/);
+    assert.doesNotMatch(draftNotes, /Second improvement/);
     const cli = execFileSync(process.execPath, ["scripts/release-notes.mjs", "--from", "vscode-v0.1.2", "--to", "vscode-v0.1.3"], {
       cwd: process.cwd(), encoding: "utf8",
       env: {...process.env, GIT_DIR: join(cwd, ".git"), GIT_WORK_TREE: cwd},

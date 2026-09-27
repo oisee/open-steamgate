@@ -4,7 +4,7 @@ import {execFileSync} from "node:child_process";
 import {resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
-const git = (cwd, ...args) => execFileSync("git", args, {cwd, encoding: "utf8"}).trim();
+const git = (cwd, ...args) => execFileSync("git", args, {cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}).trim();
 
 export function mergedPullRequests(log, titleFor = () => undefined) {
   const seen = new Set();
@@ -24,12 +24,13 @@ export function mergedPullRequests(log, titleFor = () => undefined) {
 export function generateNotes({cwd = process.cwd(), tag, from, to}) {
   if (tag) {
     if (!/^vscode-v\d+\.\d+\.\d+$/.test(tag)) throw new Error("invalid vscode-v tag");
-    to = `refs/tags/${tag}`;
+    const tagged = !to;
+    to ??= `refs/tags/${tag}`;
     git(cwd, "rev-parse", "--verify", `${to}^{commit}`);
     // The nearest older release reachable from this tag. A first release
     // covers the full first-parent history.
     try {
-      from = git(cwd, "describe", "--first-parent", "--tags", "--match", "vscode-v*", "--abbrev=0", `${to}^`);
+      from = git(cwd, "describe", "--first-parent", "--tags", "--match", "vscode-v*", "--abbrev=0", tagged ? `${to}^` : to);
     } catch {
       from = undefined;
     }
@@ -54,7 +55,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const args = process.argv.slice(2);
     const options = args[0] === "--from"
       ? {from: args[1], to: args[2] === "--to" ? args[3] : undefined}
-      : {tag: args[0]};
+      : {tag: args[0], to: args[1] === "--to" ? args[2] : undefined};
     process.stdout.write(generateNotes(options));
   } catch (error) {
     console.error(`release-notes: ${error.message}`);
