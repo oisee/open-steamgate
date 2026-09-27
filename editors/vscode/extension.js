@@ -17,6 +17,7 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   dataPreviewObjectOf, tablHasMandt, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText,
   transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, demoFailureObjects, progRunLens,
   groupServices, serviceLabel, serviceContextValue, serviceActionContext, normalizeTransactionRow,
+  transactionDetailsModel, classifyTransactionClick, transactionDetailsHtml,
   appManifestDetails, httpTestFiles, closureTestNames, dumpsForService, serviceDetailsHtml,
   serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   webguiPanelHtml, runWebguiPanel,
@@ -1242,13 +1243,11 @@ class TransactionItem extends vscode.TreeItem {
     const label = transaction.text ? `${transaction.tcode} · ${transaction.text}` : transaction.tcode;
     super(label, vscode.TreeItemCollapsibleState.None);
     this.transaction = transaction;
-    this.contextValue = "osd-transaction";
+    this.contextValue = transaction.runnable ? "osd-transaction-runnable" : "osd-transaction";
     this.description = `${transaction.kind}${transaction.runnable ? " · runnable" : ""}`;
     this.tooltip = transaction.reason || transaction.source || transaction.tcode;
     this.iconPath = new vscode.ThemeIcon(transaction.kind === "REPORT" ? "symbol-file" : "play");
-    if (transaction.runnable) {
-      this.command = {command: "osd.openWebguiTransaction", title: "Open transaction", arguments: [{tcode: transaction.tcode}]};
-    }
+    this.command = {command: "osd.clickTransaction", title: "Transaction details", arguments: [this]};
   }
 }
 
@@ -1356,6 +1355,8 @@ async function openInWebview(url, panelType, title) {
 let serviceDetailsPanel;
 let serviceDetailsSelection = 0;
 let serviceDetailsItem;
+let transactionProgramSource;
+let transactionClicks = new Map();
 
 function serviceSourceRoot() {
   return activeController?.launcher?.osdHome ?? osdHomeOf() ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -1496,19 +1497,9 @@ async function serviceDetailsData(item, provider) {
 
 async function showServiceDetails(item, provider, output) {
   if (!item?.row) return;
-  if (serviceDetailsPanel === undefined) {
-    serviceDetailsPanel = vscode.window.createWebviewPanel("osdServiceDetails", "Service details", vscode.ViewColumn.Beside,
-      {enableScripts: true, retainContextWhenHidden: false});
-    serviceDetailsPanel.webview.onDidReceiveMessage(async (message) => {
-      if (message?.command === "openSource") await openServiceSource(serviceDetailsItem, message.role, output);
-    });
-    serviceDetailsPanel.onDidDispose(() => {
-      serviceDetailsPanel = undefined;
-      serviceDetailsItem = undefined;
-      serviceDetailsSelection += 1;
-    });
-  }
+  ensureDetailsPanel(output);
   serviceDetailsItem = item;
+  transactionProgramSource = undefined;
   const selection = ++serviceDetailsSelection;
   serviceDetailsPanel.title = `${serviceLabel(item.row).label} · Details`;
   serviceDetailsPanel.webview.html = serviceDetailsHtml({row: item.row}, "loading");
@@ -1524,6 +1515,68 @@ async function showServiceDetails(item, provider, output) {
       serviceDetailsPanel.webview.html = serviceDetailsHtml({row: item.row, entitySetsError: String(e.message ?? e)}, crypto.randomBytes(16).toString("base64"));
     }
   }
+}
+
+function ensureDetailsPanel(output) {
+  if (serviceDetailsPanel !== undefined) return;
+  serviceDetailsPanel = vscode.window.createWebviewPanel("osdDetails", "Details",
+    {viewColumn: vscode.ViewColumn.Beside, preserveFocus: true},
+    {enableScripts: true, retainContextWhenHidden: false});
+  serviceDetailsPanel.webview.onDidReceiveMessage(async (message) => {
+    if (message?.command !== "openSource") return;
+    if (message.role === "program") await openTransactionProgram(transactionProgramSource, output);
+    else await openServiceSource(serviceDetailsItem, message.role, output);
+  });
+  serviceDetailsPanel.onDidDispose(() => {
+    serviceDetailsPanel = undefined;
+    serviceDetailsItem = undefined;
+    transactionProgramSource = undefined;
+    serviceDetailsSelection += 1;
+  });
+}
+
+/** Resolve the winning ABAP object path returned by the transaction route.
+ *  A stale or missing file never gets a link in the details panel. */
+function transactionProgramPath(row) {
+  const source = sourcePath(serviceSourceRoot(), row?.programSource);
+  if (!source) return undefined;
+  try { return fs.statSync(source).isFile() ? source : undefined; } catch { return undefined; }
+}
+
+function showTransactionDetails(item, output) {
+  if (!item?.transaction) return;
+  ensureDetailsPanel(output);
+  serviceDetailsItem = undefined;
+  const root = serviceSourceRoot();
+  const absolute = transactionProgramPath(item.transaction);
+  transactionProgramSource = absolute;
+  const relative = absolute && root ? path.relative(root, absolute).replaceAll(path.sep, "/") : undefined;
+  const details = transactionDetailsModel(item.transaction, relative);
+  serviceDetailsSelection += 1;
+  serviceDetailsPanel.title = `${details.tcode} · Details`;
+  serviceDetailsPanel.webview.html = transactionDetailsHtml(details, crypto.randomBytes(16).toString("base64"));
+}
+
+async function openTransactionProgram(source, output) {
+  if (!source || !fs.existsSync(source)) return;
+  try {
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(source));
+    await vscode.window.showTextDocument(document);
+  } catch (e) {
+    output?.appendLine(`osd open transaction source ${source}: ${String(e.message ?? e)}`);
+    vscode.window.showErrorMessage(`osd: ${String(e.message ?? e)}`);
+  }
+}
+
+function clickTransaction(item, output) {
+  if (!item?.transaction) return;
+  const classified = classifyTransactionClick(transactionClicks, item.transaction.tcode, Date.now());
+  transactionClicks = classified.clicks;
+  if (classified.action === "double") {
+    if (item.transaction.runnable) return openWebguiTransaction(item.transaction.tcode, output);
+    return;
+  }
+  showTransactionDetails(item, output);
 }
 
 async function openServiceSource(item, role, output) {
@@ -1804,6 +1857,9 @@ function activate(context) {
   // action F8 (RUN_TABLE.PROG) reaches, placed as a lens above its own
   // REPORT line rather than asked for by name.
   context.subscriptions.push(vscode.commands.registerCommand("osd.openWebguiTransaction", (args) => openWebguiTransaction(args?.tcode, output)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.clickTransaction", (item) => clickTransaction(item, output)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.runTransaction", (item) =>
+    item?.transaction?.runnable ? openWebguiTransaction(item.transaction.tcode, output) : undefined));
   context.subscriptions.push(progLensProvider());
 
   // Q3 "Readers" (docs/vscode-extension.md): a lens "read by N · tests M ·
@@ -1877,6 +1933,8 @@ function activate(context) {
     serviceDetailsPanel?.dispose();
     serviceDetailsPanel = undefined;
     serviceDetailsItem = undefined;
+    transactionProgramSource = undefined;
+    transactionClicks = new Map();
   }});
   context.subscriptions.push(startStopStatusBar(context, controller));
 }
@@ -3191,4 +3249,4 @@ async function deactivate() {
   await activeController?.stop();
 }
 
-module.exports = {activate, deactivate, SystemController, testExplorer, OsdTreeProvider, TransactionItem};
+module.exports = {activate, deactivate, SystemController, testExplorer, OsdTreeProvider, TransactionItem, transactionProgramPath, clickTransaction};

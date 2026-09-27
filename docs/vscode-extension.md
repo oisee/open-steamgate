@@ -878,7 +878,14 @@ group for `/osd/serving`, `/osd/dumps`, and `/osd/sql`, a **TRAN** group, and
 the service inventory. TRAN rows come from the same transaction registry the
 WebGUI uses; report transactions converted into registry entries appear here
 alongside hand-declared transactions. Entries the registry marks non-runnable
-stay visible with their reason, but have no Open command.
+stay visible with their reason. A single click on any TRAN row shows its code,
+text, kind (report, dialog, OO, or parameter transaction), starting program,
+class, or referenced transaction code, and package/layer in the reused details
+panel. **Go to program** opens
+the ABAP source only when that file exists. A second click on the same row
+within 400 ms runs a runnable transaction in Easy Access. The inline **Run**
+button and context-menu **Run** remain direct actions, without waiting for a
+second click. Non-runnable rows still show details but offer no Run action.
 
 Service rows are grouped by kind by default. Use the view title toggle to group
 them by pack; rows with no pack appear under **Unpacked**. The setting is
@@ -920,11 +927,12 @@ sets are requested lazily from
 `GET /sap/bc/adt/core/http/segw/entitysets?class=<DPC>`.
 ICF and APC rows expand to their handler. `GET
 /sap/bc/adt/core/http/transactions` reads all declared and generated
-`*.tran.xml` entries, including report wrappers, with relative source paths.
+`*.tran.xml` entries, including report wrappers, with relative declaration
+paths and the TSTCP parameter field used to identify parameter transactions.
 
 Pure view logic lives in `editors/vscode/lib.js` and is held without VS Code
 or a live server by `test/vscode-extension.mjs`: service normalization,
-kind/pack grouping, target-specific context actions, manifest data-source
+kind/pack grouping, TRAN click classification and details, target-specific context actions, manifest data-source
 resolution, HTTP test matching, closure test union, dump filtering, and the
 details HTML renderer. It also checks the services and transaction routes
 against a real in-memory `ObjectStore`. `extension.js` owns the webview and

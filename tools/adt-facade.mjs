@@ -1419,6 +1419,8 @@ export function adtRouter(options = {}) {
         ...one,
         file: undefined,
         source: relative(store.root, one.file),
+        ...store.locationOf(relative(store.root, one.file)),
+        programSource: store.find(one.className ? "CLAS" : "PROG", one.className || one.program)?.file,
       }));
       res.type("application/json; charset=utf-8").send(JSON.stringify({transactions: rows}));
     } catch (e) {

@@ -26,6 +26,7 @@ const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseChec
   demoFailureObjects, progTcodeOf, webguiTransactionUrl, webguiPanelHtml, runWebguiPanel, progRunLens,
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
   serviceContextValue, serviceActionContext, normalizeTransactionRow, appManifestDetails, httpTestFiles, closureTestNames,
+  transactionDetailsModel, classifyTransactionClick, transactionDetailsHtml,
   dumpsForService, serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   warmStatusText, activationBuildText, closureTestsText,
   PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext, SYSTEM_STATUS_SETS,
@@ -117,7 +118,7 @@ function vscodeStub(settings = {}) {
       createWebviewPanel: (...args) => {
         const panel = {
           args,
-          webview: {html: ""},
+          webview: {html: "", onDidReceiveMessage: () => ({dispose() {}})},
           onDidDispose: () => ({dispose() {}}),
           reveal() {},
         };
@@ -1524,15 +1525,85 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     ], "/sap/opu/odata/sap/ZSTG_DEMO_SRV", "ZSTG_DEMO_SRV")).to.deep.equal(["test/assembled.mjs", "test/e2e/travel.spec.mjs"]);
   });
 
-  it("keeps non runnable report and dynpro transactions visible without an Open command", () => {
+  it("keeps every transaction selectable and exposes Run only for runnable rows", () => {
     const {TransactionItem} = loadTreeItems(vscodeStub());
     const report = new TransactionItem(normalizeTransactionRow({tcode: "ZREP", kind: "REPORT", runnable: false, reason: "unbound"}));
     const dynpro = new TransactionItem(normalizeTransactionRow({tcode: "ZSCREEN", kind: "DYNPRO", runnable: false, reason: "missing screen"}));
     const runnable = new TransactionItem(normalizeTransactionRow({tcode: "ZRUN", kind: "CLASS", runnable: true}));
     expect(report.label).to.equal("ZREP");
-    expect(report.command).to.equal(undefined);
-    expect(dynpro.command).to.equal(undefined);
-    expect(runnable.command?.command).to.equal("osd.openWebguiTransaction");
+    expect(report.command?.command).to.equal("osd.clickTransaction");
+    expect(dynpro.command?.command).to.equal("osd.clickTransaction");
+    expect(runnable.command?.command).to.equal("osd.clickTransaction");
+    expect(report.contextValue).to.equal("osd-transaction");
+    expect(runnable.contextValue).to.equal("osd-transaction-runnable");
+  });
+
+  it("classifies a second TRAN click per node within 400 ms and resets after a run", () => {
+    let clicks = new Map();
+    const click = (node, at) => {
+      const result = classifyTransactionClick(clicks, node, at);
+      clicks = result.clicks;
+      return result.action;
+    };
+    expect(click("ZA", 1000)).to.equal("single");
+    expect(click("ZB", 1100)).to.equal("single");
+    expect(click("ZA", 1400)).to.equal("double");
+    expect(click("ZA", 1450)).to.equal("single");
+    expect(click("ZB", 1501)).to.equal("single");
+    expect(click("ZB", 1902)).to.equal("single");
+    expect(click("ZB", 1903)).to.equal("double");
+    expect(click("ZA", 2000)).to.equal("single");
+    expect(click("ZA", 1900)).to.equal("single"); // clock moved backwards
+  });
+
+  it("models report, dialog, OO and parameter TRAN details with a link only for a found program", () => {
+    const common = {tcode: "ZREP", text: "Report <demo>", source: "src/webgui/zrep.tran.xml", program: "ZREP_MAIN"};
+    const report = transactionDetailsModel({...common, kind: "REPORT"}, "src/webgui/zrep_main.prog.abap");
+    expect(report).to.include({kind: "Report transaction", target: "ZREP_MAIN", targetType: "Program",
+      package: "webgui", layer: "Project", programSource: "src/webgui/zrep_main.prog.abap"});
+    expect(transactionDetailsModel({...common, kind: "DYNPRO", dynpro: "100"}).kind).to.equal("Dialog transaction");
+    expect(transactionDetailsModel({...common, kind: "CLASS", className: "ZCL_REP", parameter: "\\CLASS=ZCL_REP"}))
+      .to.include({kind: "OO transaction", target: "ZCL_REP", targetType: "Class"});
+    expect(transactionDetailsModel({...common, parameter: "/*START"}).kind).to.equal("Parameter transaction");
+    const parameter = transactionDetailsModel({...common, program: "", parameter: "/*START WITH_ARGS"});
+    expect(parameter).to.include({kind: "Parameter transaction", target: "START", targetType: "Transaction", programSource: undefined});
+    expect(transactionDetailsHtml(parameter, "nonce")).to.contain("Transaction: <code>START</code>");
+    const missing = transactionDetailsModel({...common, source: "packs/demo/src/zrep.tran.xml"});
+    expect(missing).to.include({layer: "Pack demo", programSource: undefined});
+    expect(transactionDetailsHtml(report, "nonce")).to.contain("Go to program").and.to.contain("&lt;demo&gt;");
+    expect(transactionDetailsHtml(missing, "nonce")).not.to.contain("Go to program");
+  });
+
+  it("opens TRAN details from the tree command without taking tree focus, then runs on a second click", async () => {
+    const api = vscodeStub();
+    const {TransactionItem, clickTransaction} = loadExtension(api);
+    const item = new TransactionItem(normalizeTransactionRow({tcode: "ZDETAILS_FOCUS", text: "Focus test", runnable: true}));
+    expect(item.command.command).to.equal("osd.clickTransaction");
+    clickTransaction(...item.command.arguments);
+    expect(api.panels).to.have.lengthOf(1);
+    expect(api.panels[0].args[2]).to.include({viewColumn: api.ViewColumn.Beside, preserveFocus: true});
+    expect(api.panels[0].webview.html).to.contain("ZDETAILS_FOCUS");
+    await clickTransaction(...item.command.arguments);
+    expect(api.panels).to.have.lengthOf(2);
+    expect(api.panels[1].args[0]).to.equal("osdWebgui");
+    expect(api.panels[1].webview.html).to.contain("ZDETAILS_FOCUS");
+  });
+
+  it("resolves registered TRAN source files and omits a link when the registered file is gone", () => {
+    const {transactionProgramPath} = loadExtension(vscodeStub({home: ROOT}));
+    expect(transactionProgramPath({className: "ZCL_OSD_NOTE", programSource: "src/webgui/zcl_osd_note.clas.abap"}))
+      .to.equal(path.join(ROOT, "src/webgui/zcl_osd_note.clas.abap"));
+    expect(transactionProgramPath({program: "ZOSD_TEST_DEMO_PROG", programSource: "src/zosd_test/src/zosd_test_demo_prog.prog.abap"}))
+      .to.equal(path.join(ROOT, "src/zosd_test/src/zosd_test_demo_prog.prog.abap"));
+    expect(transactionProgramPath({className: "ZCL_OSD_NOTE", programSource: "src/webgui/deleted.clas.abap"}))
+      .to.equal(undefined);
+  });
+
+  it("contributes direct inline and context Run actions for runnable TRAN rows", () => {
+    const manifest = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
+    const actions = manifest.contributes.menus["view/item/context"].filter((entry) => entry.command === "osd.runTransaction");
+    expect(actions.map((entry) => entry.group)).to.deep.equal(["inline", "1_run@1"]);
+    expect(actions.every((entry) => entry.when.includes("osd-transaction-runnable"))).to.equal(true);
   });
 
   it("unions closure tests and filters dumps whose mapped frames name the DPC or MPC", () => {
@@ -1615,6 +1686,10 @@ describe("tools/adt-facade: service detail inventories", function () {
     expect(response.status).to.equal(200);
     const {transactions} = await response.json();
     expect(transactions.find((row) => row.tcode === "ZOSD_NOTE").source).to.equal("src/webgui/zosd_note.tran.xml");
+    expect(transactions.find((row) => row.tcode === "ZOSD_NOTE").parameter).to.contain("\\CLASS=ZCL_OSD_NOTE");
+    expect(transactions.find((row) => row.tcode === "ZOSD_NOTE")).to.include({
+      package: "$STG_WEBGUI", layer: "src", programSource: "src/webgui/zcl_osd_note.clas.abap",
+    });
     expect(transactions.every((row) => row.source.endsWith(".tran.xml"))).to.equal(true);
   });
 });
