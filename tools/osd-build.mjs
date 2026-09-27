@@ -159,9 +159,12 @@ export function inputsOf(root, config = loadConfig(root)) {
   // (editors/vscode/launcher.js ensureWorkspacePacks), so its manifest's path,
   // which differs per machine, named every generation -- and a generation
   // prebuilt into the .vsix could never be reused (T2). An empty pack builds
-  // nothing, so it names nothing; the moment it holds a file it is an input.
+  // nothing, so it names nothing; the moment it holds an input file (the same
+  // rule hashOf applies to a folder: NOT_AN_INPUT files do not count) it is
+  // an input. A data, ddic or webapp folder, or a tile, keeps it one anyway.
   const packs = packsOf(root).filter((pack) => pack.data !== undefined || pack.ddic !== undefined ||
-    pack.webapp !== undefined || pack.tiles.length > 0 || pack.abap.some((dir) => existsSync(dir) && walk(dir).length > 0));
+    pack.webapp !== undefined || pack.tiles.length > 0 ||
+    pack.abap.some((dir) => existsSync(dir) && walk(dir).some((f) => !NOT_AN_INPUT.test(f))));
   const packFiles = packs.map((pack) => join(pack.dir, "osd-pack.json"));
   const packFolders = packs.flatMap((pack) => [pack.data, pack.ddic].filter(Boolean));
   return {folders, libs, bspFolders, packFiles, packFolders, config: layout(root).config};
