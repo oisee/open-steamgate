@@ -465,7 +465,14 @@ class SystemController {
     this.debuggerState = {};
     this.debuggerStarts = new Map();
     this.debuggerTransition = Promise.resolve();
+    // The stable VS Code API has no list of running debug sessions (only
+    // start/terminate events), so the controller keeps its own.
+    this.debugSessions = new Set();
+    if (typeof vscode.debug.onDidStartDebugSession === "function") {
+      context.subscriptions.push(vscode.debug.onDidStartDebugSession((session) => { this.debugSessions.add(session); }));
+    }
     context.subscriptions.push(vscode.debug.onDidTerminateDebugSession((session) => {
+      this.debugSessions.delete(session);
       if (session.name === `OSD: ABAP (${this.debuggerState.systemPort})`) {
         this.debuggerState = debugAttachPlan(this.debuggerState,
           {type: "system-session-ended", port: this.debuggerState.systemPort}).state;
@@ -532,10 +539,16 @@ class SystemController {
     return this.launcher;
   }
 
+  /** Running debug sessions: VS Code's own list where a runtime has one,
+   *  otherwise the sessions this controller saw start and not yet end. */
+  runningDebugSessions() {
+    return Array.isArray(vscode.debug.sessions) ? vscode.debug.sessions : [...this.debugSessions];
+  }
+
   async applyDebuggerEvent(event) {
     if (event.type === "system-started" && this.debuggerState.systemPort !== undefined) {
       const name = `OSD: ABAP (${this.debuggerState.systemPort})`;
-      if (!vscode.debug.sessions.some((session) => session.name === name) && !this.debuggerStarts.has(name)) {
+      if (!this.runningDebugSessions().some((session) => session.name === name) && !this.debuggerStarts.has(name)) {
         this.debuggerState = debugAttachPlan(this.debuggerState,
           {type: "system-session-ended", port: this.debuggerState.systemPort}).state;
       }
@@ -548,12 +561,12 @@ class SystemController {
         storageDir: this.launcher?.storageDir, layers: this.launcher?.layers});
       const name = config.name;
       if (action.type === "stop") {
-        const session = vscode.debug.sessions.find((candidate) => candidate.name === name);
+        const session = this.runningDebugSessions().find((candidate) => candidate.name === name);
         if (session !== undefined) await vscode.debug.stopDebugging(session);
         this.debuggerStarts.delete(name);
         continue;
       }
-      if (vscode.debug.sessions.some((candidate) => candidate.name === name)) {
+      if (this.runningDebugSessions().some((candidate) => candidate.name === name)) {
         if (action.target === "system") {
           this.debuggerState = debugAttachPlan(this.debuggerState, {type: "system-attached", port: action.port}).state;
         }
