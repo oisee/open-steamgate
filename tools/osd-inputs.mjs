@@ -23,7 +23,6 @@
 // nothing and reports nothing), and an object hidden by a later layer.
 // Neither is an error; both are said out loud, here and in the builder's
 // log.
-import {fileURLToPath} from "node:url";
 import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
 import {resolve} from "node:path";
 import {inputFoldersOf} from "./osd-packs.mjs";
@@ -46,7 +45,10 @@ import {runsAs} from "./osd-main.mjs";
 let ROOT;
 const treeRoot = () => {
   if (ROOT === undefined) {
-    ROOT = fileURLToPath(new URL("../", import.meta.url));
+    // decodeURIComponent, not fileURLToPath: node:url in the preview bundle
+    // has no fileURLToPath, and a tree under "Application Support" arrives
+    // as "%20" in a URL.
+    ROOT = decodeURIComponent(new URL("../", import.meta.url).pathname);
   }
   return ROOT;
 };
