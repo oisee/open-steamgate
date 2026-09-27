@@ -68,6 +68,7 @@ function reapOnExit() {
       // In particular DuckDB must checkpoint before the container exits.
       await Promise.all([...CHILDREN].map(child => new Promise(resolve => {
         if (child.exitCode !== null || child.signalCode !== null) return resolve();
+        // editors/vscode/launcher.js STOP_GRACE_MS waits longer than this
         const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(); }, 55000);
         child.once("exit", () => { clearTimeout(timer); resolve(); });
         try { child.send({type: "quiesce", grace: 45000}); }

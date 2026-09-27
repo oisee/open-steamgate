@@ -519,6 +519,11 @@ async function waitForServing(port, options = {}) {
   const intervalMs = options.intervalMs ?? 300;
   const deadline = Date.now() + timeoutMs;
   for (;;) {
+    // the start race settled another way (the child exited, a stop): stop
+    // polling a port that is no longer ours
+    if (options.signal?.aborted) {
+      throw new Error("osd readiness poll cancelled");
+    }
     const serving = await servingOnce(port);
     if (serving?.ready === true && serving.generation !== undefined) {
       return serving;
@@ -530,6 +535,14 @@ async function waitForServing(port, options = {}) {
   }
 }
 
+// How long a stop waits before SIGKILL. tools/osd-runtime.mjs gives each
+// serving worker up to 45 s to quiesce and kills it at 55 s (a DuckDB file
+// must checkpoint); a SIGKILL of test/run.mjs before that skips its reaper
+// and can leave a worker holding the port and the database. So: above 55 s.
+const STOP_GRACE_MS = 60000;
+// what the start race answers when stop() ended the child it was waiting on
+const STOPPED_WHILE_STARTING = Symbol("stopped while starting");
+
 /** Sends `signal` to `child` and waits for it to actually exit, escalating
  *  to SIGKILL after `graceMs` -- the same shape `test/osd-child.mjs` already
  *  uses by hand for the same reason: a process that has not exited is a
@@ -540,9 +553,13 @@ function terminate(child, {signal = "SIGTERM", graceMs = 15000} = {}) {
   }
   return new Promise((resolve) => {
     let done = false;
+    let timer;
     const finish = () => {
       if (done === false) {
         done = true;
+        // a pending SIGKILL timer would keep the process alive for the
+        // whole grace after the child is already gone
+        clearTimeout(timer);
         resolve();
       }
     };
@@ -553,7 +570,7 @@ function terminate(child, {signal = "SIGTERM", graceMs = 15000} = {}) {
       finish();
       return;
     }
-    setTimeout(() => {
+    timer = setTimeout(() => {
       if (done === false) {
         try {
           child.kill("SIGKILL");
@@ -1025,9 +1042,26 @@ function finishMaterializedHome(target, globalStorageDir, existing, options) {
  *  "running", and back to "stopped" on stop() or on the child's own exit
  *  (a crash is not a state this pretends is still "running"). Emits "log"
  *  (a line of the build's or the server's own output), "state" (the new
- *  state) and "exit" ({code, signal}, only when the server process itself
- *  went away without stop() having been called). */
+ *  state) and "exit" ({code, signal}, only when a RUNNING server went away
+ *  without this launcher asking it to: stop(), rebuild() and a start that
+ *  gave up are not "exit", and a child that dies while starting is
+ *  start()'s rejection instead). A stop() while "starting" makes start()
+ *  resolve undefined, as a stop while "building" does; the state reads
+ *  "stopped" once the child is gone, which is when stop() returns. */
 class Launcher extends EventEmitter {
+  // why this launcher asked one of its own children to go ("stop" or
+  // "abandoned"), per child and only while it was alive: a child that had
+  // already died on its own is never marked, so its crash still warns
+  #asked = new WeakMap();
+  // the readiness poll of the start in flight, so stop() can end it
+  #poll = undefined;
+
+  #ask(child, reason) {
+    if (child !== undefined && child.exitCode === null && child.signalCode === null) {
+      this.#asked.set(child, reason);
+    }
+  }
+
   constructor(options = {}) {
     super();
     if (typeof options.osdHome !== "string" || options.osdHome === "") {
@@ -1223,7 +1257,7 @@ class Launcher extends EventEmitter {
     try {
       setServingChildPid(this.servingLock, child.pid);
     } catch (error) {
-      await terminate(child);
+      await terminate(child, {graceMs: STOP_GRACE_MS});
       this.child = undefined;
       this.pid = undefined;
       this.#setState("stopped");
@@ -1249,35 +1283,62 @@ class Launcher extends EventEmitter {
       resolveExitedEarly = resolve;
     });
     child.on("exit", (code, signal) => {
-      const wasRunning = this.state !== "stopped";
+      // an exit this launcher asked for (stop(), rebuild(), a start that
+      // gave up) is not news; only one nobody asked for is "exit"
+      const asked = this.#asked.get(child);
+      // only a running system that goes away unasked is "exit": one that dies
+      // while starting is start()'s own error, one popup rather than two
+      const unexpected = this.state === "running" && asked === undefined;
       this.child = undefined;
       this.port = undefined;
       this.pid = undefined;
       this.generation = undefined;
       this.#setState("stopped");
-      if (wasRunning) {
+      if (unexpected) {
         this.emit("exit", {code, signal});
+      } else if (asked !== undefined) {
+        this.#log(asked === "stop" ? "\n--- osd stopped ---\n" : "\n--- osd start abandoned ---\n");
       }
-      resolveExitedEarly({code, signal});
+      resolveExitedEarly({code, signal, asked});
     });
 
     let serving;
+    const poll = new AbortController();
+    this.#poll = poll;
     try {
       serving = await Promise.race([
-        waitForServing(port, {timeoutMs: this.timeoutMs}),
-        exitedEarly.then(({code, signal}) => {
+        waitForServing(port, {timeoutMs: this.timeoutMs, signal: poll.signal}),
+        exitedEarly.then(({code, signal, asked}) => {
+          // stopped while starting: a cancel, the way a stop while building is
+          if (asked === "stop") return STOPPED_WHILE_STARTING;
           const error = new Error(`osd exited before it started serving (code ${code ?? "?"}, signal ${signal ?? "?"}): ${recentOutput.trim().slice(-1000)}`);
           error.logText = recentOutput;
           throw error;
         }),
       ]);
     } catch (error) {
-      await terminate(child);
+      poll.abort();
+      if (this.#asked.get(child) === "stop") {
+        // stop() came first, ended the poll and is terminating the child
+        // itself: its cancel, not an error, and no second signal from here
+        await exitedEarly;
+        return undefined;
+      }
+      this.#ask(child, "abandoned");
+      await terminate(child, {graceMs: STOP_GRACE_MS});
       if (this.state !== "stopped") {
         this.#setState("stopped");
       }
       error.logText ??= this.lastLog;
       throw error;
+    } finally {
+      poll.abort();
+      if (this.#poll === poll) this.#poll = undefined;
+    }
+    // a stop that came while starting wins over a ready answer the child
+    // gave on its way out: it is going away, it is not "running"
+    if (serving === STOPPED_WHILE_STARTING || this.#asked.get(child) === "stop") {
+      return undefined;
     }
     this.port = port;
     this.generation = serving.generation;
@@ -1304,7 +1365,19 @@ class Launcher extends EventEmitter {
       this.#setState("stopped");
       return;
     }
-    await terminate(this.child);
+    const child = this.child;
+    if (this.#asked.get(child) === "abandoned") {
+      // a start that gave up is already terminating this child: the start
+      // failed before the stop, so it stays failed, and it gets no second
+      // signal from here -- wait for it to go
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise((resolve) => child.once("exit", resolve));
+      }
+      return;
+    }
+    this.#ask(child, "stop");
+    this.#poll?.abort();
+    await terminate(child, {graceMs: STOP_GRACE_MS});
     // the "exit" handler above already reset the fields and the state
   }
 
