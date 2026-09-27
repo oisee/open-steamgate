@@ -426,7 +426,7 @@ function contentTypesXml() {
 }
 
 function vsixManifestXml(pkg) {
-  const publisher = pkg.publisher ?? "open-steamgate";
+  const publisher = pkg.publisher ?? "oisee";
   const identity = `${publisher}.${pkg.name}`;
   const displayName = pkg.displayName ?? pkg.name;
   const description = (pkg.description ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;");
