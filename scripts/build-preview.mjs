@@ -14,6 +14,7 @@ import {fileURLToPath} from "node:url";
 import {seedStatements} from "../test/seed.mjs";
 import {services as icfServices, channels as apcChannels} from "../tools/osd-icf.mjs";
 import {generatorFoldersOf, packsOf, tilesOf, webappsOf} from "../tools/osd-packs.mjs";
+import {packApplications} from "../tools/osd-bsp-registry.mjs";
 import {describeUnfetched, unfetched} from "../tools/osd-fetch.mjs";
 import {packsInfo, servicesOf} from "../tools/osd-status.mjs";
 import {identity} from "../tools/osd-identity.mjs";
@@ -290,7 +291,7 @@ for (const pack of webappsOf(root)) {
     await deferBootstrap(entry, resolve(build, "app", pack.name, "index.html"), "../../", false);
   }
 }
-await writeFile(resolve(build, "app", "packs.json"), JSON.stringify({tiles: tilesOf(root)}, undefined, 2) + "\n", "utf8");
+await writeFile(resolve(build, "app", "packs.json"), JSON.stringify({tiles: tilesOf(root), applications: packApplications(root)}, undefined, 2) + "\n", "utf8");
 // the two entry pages: the Travels app alone, and the launchpad sandbox with
 // both apps; each boots UI5 only once the worker answers
 for (const page of ["index.html", "flp.html"]) {

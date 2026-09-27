@@ -4,6 +4,7 @@ import {ensureDemoData} from "../tools/osd-demo-data.mjs";
 import express from "express";
 import {existsSync} from "node:fs";
 import {generatorFoldersOf, tilesOf, webappsOf} from "../tools/osd-packs.mjs";
+import {packApplications} from "../tools/osd-bsp-registry.mjs";
 import {mountRemoteServices} from "../tools/osd-remote-service.mjs";
 import {segwRegistrations} from "../tools/segw-registry.mjs";
 import {createServer as createHttpsServer} from "node:https";
@@ -125,7 +126,7 @@ export function startServer(quiet) {
   // what the launchpad asks for at start: the tiles the packs declare, so a
   // pack appears on it without anybody editing webapp/flp.html (backlog E.2)
   hostNodes["pack-tiles"] = (a, node) => a.get(node.path, function (req, res) {
-    res.json({tiles: tilesOf(process.cwd())});
+    res.json({tiles: tilesOf(process.cwd()), applications: packApplications(process.cwd())});
   });
   // a pack brings its own static files, served under its name (backlog E.2).
   // One handler, many nodes: the nodes are DERIVED from the packs
