@@ -1,5 +1,5 @@
 {
-  "name": "osd-vscode",
+  "name": "open-steamgate",
   "displayName": "open-steamgate (osd)",
   "icon": "resources/icon.png",
   "description": "ABAP Unit in the Test Explorer, the serving generation and short dumps of a running osd",

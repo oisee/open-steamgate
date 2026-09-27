@@ -37,7 +37,7 @@ export function checkReleaseVersion(tag, vsix, {requireTag = true} = {}) {
     throw new Error(`tag ${tag} disagrees with stamped VSIX version ${version}; tag this commit as vscode-v${version}`);
   }
   if (vsix) {
-    if (basename(vsix) !== `osd-vscode-${version}.vsix`) {
+    if (basename(vsix) !== `open-steamgate-${version}.vsix`) {
       throw new Error(`VSIX filename ${basename(vsix)} disagrees with ${version}`);
     }
     const packaged = JSON.parse(execFileSync("unzip", ["-p", vsix, "extension/package.json"], {cwd: root, encoding: "utf8"}));

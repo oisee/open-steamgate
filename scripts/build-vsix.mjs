@@ -1,6 +1,6 @@
 // One universal .vsix that carries the system inside it (docs/vscode-extension.md,
 // "B0 spike", "What packaging still needs"). `npm run vsix` writes
-// `build/vsix/osd-vscode-<version>.vsix`: a plain zip -- built with the
+// `build/vsix/open-steamgate-<version>.vsix`: a plain zip -- built with the
 // system `zip` CLI, not `vsce` -- of `[Content_Types].xml`,
 // `extension.vsixmanifest` (both generated from `editors/vscode/package.json`
 // the way vsce does) and an `extension/` folder holding the extension itself
@@ -501,7 +501,7 @@ export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
   writeFileSync(join(stage, "[Content_Types].xml"), contentTypesXml());
   writeFileSync(join(stage, "extension.vsixmanifest"), vsixManifestXml(pkg));
 
-  const out = join(buildDir, `osd-vscode-${pkg.version}.vsix`);
+  const out = join(buildDir, `${pkg.name}-${pkg.version}.vsix`);
   rmSync(out, {force: true});
   execFileSync("zip", ["-X", "-q", "-r", out, "[Content_Types].xml", "extension.vsixmanifest", "extension"], {cwd: stage});
 

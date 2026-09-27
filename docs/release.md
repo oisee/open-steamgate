@@ -64,7 +64,7 @@ by hand after a local `npm run leak`. A match (exit 1) always stops the release.
 
 | Asset | Build or source |
 | --- | --- |
-| `osd-vscode-<version>.vsix` and `.sha256` | Universal VS Code extension, version checked against the tag |
+| `open-steamgate-<version>.vsix` and `.sha256` | Universal VS Code extension, version checked against the tag |
 | `osd-linux-x64`, `osd-linux-arm64`, `osd-darwin-arm64`, `osd-windows-x64.exe`, each with `.sha256` | `npm run bootstrap`, then `npm run binary -- --seed <output> <bun-target>` with Bun 1.4.2 |
 | `sqlite.yml`, `duckdb.yml`, `postgres.yml`, `hana.yml` | [Tracked Compose sources](../docker/compose/), validated with `docker compose config` |
 | `README.md` | Short instructions for starting every asset, also included in the release notes |

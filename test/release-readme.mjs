@@ -4,7 +4,7 @@ import {renderDiz, renderReadme} from "../scripts/release-readme.mjs";
 describe("release README and FILE_ID.DIZ", () => {
   it("renders start and checksum instructions for a sample release asset list", () => {
     const readme = renderReadme([
-      "osd-vscode-0.1.42.vsix", "osd-linux-x64", "osd-darwin-arm64",
+      "open-steamgate-0.1.42.vsix", "osd-linux-x64", "osd-darwin-arm64",
       "osd-windows-x64.exe", "sqlite.yml", "postgres.yml", "hana.yml",
     ]);
     assert.match(readme, /VS Code 1\.101 or newer/);
