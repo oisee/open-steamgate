@@ -29,9 +29,20 @@ The smallest registration is:
 
 At startup OSD serves the directory at `/app/example/`, exposes the declared
 tiles through `/app/packs.json`, and the sandbox FLP adds them to **Content
-packs**. A direct `url` works for UI5 and non-UI5 pages. Use an intent such as
-`#Travel-manage` only when the application is also declared in the shell's
-`applications` configuration; a tile alone does not register an intent target.
+packs**. A direct `url` works for UI5 and non-UI5 pages.
+
+A tile may also open the pack's app by intent, the way a Fiori launchpad
+does: tile -> `#Object-action` -> the app's `Component.js` from its BSP
+application. The intent comes from the app's own `webapp/manifest.json`,
+`sap.app.crossNavigation.inbounds`; `/app/packs.json` carries each as an
+entry of the sandbox's `applications` (`SAPUI5.Component=<sap.app.id>`, the
+pack's BSP application `../sap/bc/ui5_ui5/sap/<name>/`), and `flp.html`
+reads them before the sandbox boots, since an intent added afterwards
+cannot be opened. Write the tile's `url` as `#Object-action` or as
+`/app/flp.html#Object-action` (the launchpad turns the latter into the
+former; a URL that is not a hash opens as an outside link, in a new
+window). An intent or a component id a built-in application already uses
+is not taken over by a pack: that inbound is skipped.
 
 ## Availability
 

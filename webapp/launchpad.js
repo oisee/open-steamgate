@@ -16,6 +16,14 @@ sap.ui.define([], function () {
   function atMount(value) {
     return value && value.charAt(0) === "/" ? ".." + value : value;
   }
+  // A tile's targetURL that is not a hash is followed as an outside link (the
+  // launchpad opens it in a new window), so a pack tile written as this
+  // page's own intent, "/app/flp.html#Object-action", becomes "#Object-action"
+  // and navigates inside the shell like the built-in tiles.
+  function tileTarget(value) {
+    var intent = /^\/app\/flp\.html(#[^#]+)$/.exec(value || "");
+    return intent ? intent[1] : atMount(value);
+  }
   if (launchPage) {
     launchPage.groups = window["stg-launchpad-groups"] || [];
     launchPage.catalogs = [];
@@ -46,7 +54,7 @@ sap.ui.define([], function () {
           subtitle: tile.subtitle || "",
           info: tile.info || tile.pack,
           icon: tile.icon,
-          targetURL: atMount(tile.url)
+          targetURL: tileTarget(tile.url)
         };
         if (tile.type === "dynamic") {
           properties.numberUnit = tile.numberUnit || "";
