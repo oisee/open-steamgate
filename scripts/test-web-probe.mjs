@@ -206,6 +206,12 @@ try {
   console.log(`Activation to first $metadata: ${probe.activationToMetadataMs} ms`);
   console.log(`Command to $metadata response: ${probe.commandToMetadataMs} ms`);
 
+  const read = await command(page, "osd: Web read probe", "OSD_WEB_READ");
+  if (read.sql !== 200 || read.rows !== 5 || read.ddic !== 200 || read.cap !== 2 || read.invalid !== 400) {
+    throw new Error(`Web read probe failed: ${JSON.stringify(read)}`);
+  }
+  console.log(`Worker reads: SELECT ${read.rows} rows, DDIC ${read.ddic}, cap ${read.cap}, invalid ${read.invalid}`);
+
   await page.reload({waitUntil: "domcontentloaded"});
   await page.locator(".monaco-workbench").waitFor({timeout: 120000});
   const verified = await command(page, "osd: Web verify last Travel", "OSD_WEB_VERIFY");

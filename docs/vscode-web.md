@@ -8,6 +8,12 @@ On activation, the web entry imports the preview backend, restores its sql.js da
 
 Every modifying request exports the sql.js database to IndexedDB before the command returns. The stored database is keyed by the preview build ID so a new transpiled generation starts with its own seed. The last probe ID is also stored for the reload check.
 
+## Worker data reads (S2d1)
+
+The worker's `handleRequest` now answers `POST /osd/sql` with the same JSON fields as the desktop SQL door: `sql`, `columns`, `rows`, `count`, and `truncated`. JSON rows retain numbers and nulls. It also answers the desktop client routes `POST /sap/bc/adt/datapreview/freestyle`, `/ddic?ddicEntityName=...`, and `/cds?ddlSourceName=...` with the column-oriented XML consumed by the existing notebook and F8 parsers. DDIC and CDS names must exist as a table or view in the bundled database. The `rowNumber` query parameter sets the requested limit; the default is 100 and the worker ceiling is 1,000. `UP TO n ROWS` is rewritten, and the SQL is bounded before execution even when it already has a limit. Invalid SQL returns HTTP 400 with an error code and message (JSON on `/osd/sql`, XML on ADT routes). The ADT XML format represents cell values as text, as it does on desktop; the JSON door preserves types.
+
+`osd: Web read probe` runs a five-row Open SQL SELECT, a DDIC preview, a capped read, and an invalid statement through the live worker. `npm run web:vscode:test` invokes it in Chromium alongside the existing OData and persistence checks. Editor F8 and notebook UI wiring is the next wave.
+
 ## Build and test locally
 
 The repository's pinned ABAP libraries must be present in `.local/lars/` (`npm run bootstrap` fetches them into this checkout if needed). Then run:
@@ -23,6 +29,8 @@ The default web profile is **core+zork**, matching the default `.vsix` pack sele
 `web:vscode:test` first checks request bytes, path segments, and fetch-style content-type defaults in a test-only message-channel harness. It then runs `web:vscode`, so the browser exercises a fresh bundle. `web:vscode` transpiles the gateway, generates the preview's seed and service tables without building its service worker, and bundles `editors/vscode/dist/web/extension.js` with the preview webpack aliases and polyfills. It prints the bundle's bytes and MiB. The headless test uses `npx -y @vscode/test-web` and the repository's Playwright Chromium; it uses a temporary VS Code download and browser profile, removes them afterward, and installs nothing into this clone's symlinked `node_modules`. It invokes the worker probe, reloads and checks its row, then runs the webview's own metadata, CSRF, POST, GET, and `$batch` flow. The valid batch contains a GET and a changeset POST; the test reads the created row. It also fetches the demo PhotoSet image through the webview bridge and compares its SHA-256, byte length, content type, and content length with the gateway's direct answer. It reloads again and reads the webview-created row through the webview bridge. It prints both `$metadata` timings.
 
 For a manual session, run `npm run web:vscode`, then `npx -y @vscode/test-web --browser chromium --extensionDevelopmentPath ./editors/vscode` and use the three commands above. Keep an npm cache in a writable temporary directory if your normal npm cache is read-only.
+
+For a manual session, run `npm run web:vscode`, then `npx -y @vscode/test-web --browser chromium --extensionDevelopmentPath ./editors/vscode` and use the four commands above. Keep an npm cache in a writable temporary directory if your normal npm cache is read-only.
 
 ## Try in vscode.dev
 
