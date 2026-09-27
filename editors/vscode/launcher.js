@@ -1028,6 +1028,9 @@ function finishMaterializedHome(target, globalStorageDir, existing, options) {
  *  state) and "exit" ({code, signal}, only when the server process itself
  *  went away without stop() having been called). */
 class Launcher extends EventEmitter {
+  // set just before this launcher terminates its own child
+  #stopRequested = false;
+
   constructor(options = {}) {
     super();
     if (typeof options.osdHome !== "string" || options.osdHome === "") {
@@ -1220,6 +1223,8 @@ class Launcher extends EventEmitter {
     }
     this.child = child;
     this.pid = child.pid;
+    // a new child starts unasked-to-stop, whatever the last one left behind
+    this.#stopRequested = false;
     try {
       setServingChildPid(this.servingLock, child.pid);
     } catch (error) {
@@ -1249,14 +1254,20 @@ class Launcher extends EventEmitter {
       resolveExitedEarly = resolve;
     });
     child.on("exit", (code, signal) => {
-      const wasRunning = this.state !== "stopped";
+      // an exit this launcher asked for (stop(), rebuild(), a start that
+      // gave up) is not news; only one nobody asked for is "exit"
+      const requested = this.#stopRequested;
+      this.#stopRequested = false;
+      const unexpected = this.state !== "stopped" && !requested;
       this.child = undefined;
       this.port = undefined;
       this.pid = undefined;
       this.generation = undefined;
       this.#setState("stopped");
-      if (wasRunning) {
+      if (unexpected) {
         this.emit("exit", {code, signal});
+      } else if (requested) {
+        this.#log("\n--- osd stopped ---\n");
       }
       resolveExitedEarly({code, signal});
     });
@@ -1272,6 +1283,7 @@ class Launcher extends EventEmitter {
         }),
       ]);
     } catch (error) {
+      this.#stopRequested = true;
       await terminate(child);
       if (this.state !== "stopped") {
         this.#setState("stopped");
@@ -1304,6 +1316,7 @@ class Launcher extends EventEmitter {
       this.#setState("stopped");
       return;
     }
+    this.#stopRequested = true;
     await terminate(this.child);
     // the "exit" handler above already reset the fields and the state
   }

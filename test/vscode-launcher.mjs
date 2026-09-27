@@ -658,6 +658,75 @@ describe("editors/vscode/launcher.js: stop while building", function () {
   });
 });
 
+// Stop is not an accident: a stop the launcher was asked for emits no "exit"
+// (the extension turns "exit" into "the system stopped unexpectedly"), and
+// a child killed from outside still does. A fake `test/run.mjs` that answers
+// /osd/serving stands in for the real one.
+describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit", function () {
+  this.timeout(20000);
+  const fakeHome = () => {
+    const osdHome = mkdtempSync(join(tmpdir(), "osd-launcher-stop-home-"));
+    mkdirSync(join(osdHome, "tools"), {recursive: true});
+    mkdirSync(join(osdHome, "test"), {recursive: true});
+    writeFileSync(join(osdHome, "tools", "osd-build.mjs"), "process.exit(0);\n");
+    writeFileSync(join(osdHome, "test", "run.mjs"),
+      "import {createServer} from 'node:http';\n" +
+      "createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'fake'})); })" +
+      ".listen(Number(process.env.STG_PORT), '127.0.0.1');\n");
+    return osdHome;
+  };
+
+  for (const how of ["stop", "rebuild"]) {
+    it(`${how}(): no "exit", and the log says it stopped`, async () => {
+      const osdHome = fakeHome();
+      const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+      const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+      const exits = [];
+      const lines = [];
+      launcher.on("exit", (e) => exits.push(e));
+      launcher.on("log", (l) => lines.push(l));
+      try {
+        await launcher.start();
+        expect(launcher.state).to.equal("running");
+        if (how === "stop") {
+          await launcher.stop();
+          expect(launcher.state).to.equal("stopped");
+        } else {
+          await launcher.rebuild();
+          expect(launcher.state).to.equal("running");
+        }
+        expect(exits, "an intended stop is not an unexpected exit").to.deep.equal([]);
+        expect(lines.join("")).to.contain("--- osd stopped ---");
+      } finally {
+        await launcher.stop();
+        rmSync(osdHome, {recursive: true, force: true});
+        rmSync(storageDir, {recursive: true, force: true});
+      }
+    });
+  }
+
+  it("a child killed from outside is still an unexpected exit", async () => {
+    const osdHome = fakeHome();
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    const exits = [];
+    launcher.on("exit", (e) => exits.push(e));
+    try {
+      await launcher.start();
+      const gone = new Promise((resolve) => launcher.once("exit", resolve));
+      process.kill(launcher.pid, "SIGKILL");
+      await gone;
+      expect(exits).to.have.length(1);
+      expect(exits[0].signal).to.equal("SIGKILL");
+      expect(launcher.state).to.equal("stopped");
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+});
+
 describe("editors/vscode/launcher.js: Launcher end to end (against this checkout)", function () {
   this.timeout(180000);
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Stop (and Rebuild) no longer warn "the system stopped unexpectedly": a stop you asked for logs `--- osd stopped ---`, and only an exit nobody asked for warns.
 - Add **osd: Generate taxi data...** and **osd: Reset taxi data to minimal**, also on the taxi data service in the OSD tree: the system no longer makes taxi sample rows at start.
 - Ship the bundled system's generation prebuilt, so the first start reuses it instead of transpiling (build step 21.7 s -> 0.35 s measured; first start 35 s -> 14 s).
 - Warn when a breakpoint is set in an `.abap` file the running system does not run (another checkout, the bundled copy, or an overridden object), and offer to open the copy that runs.
