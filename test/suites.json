@@ -100,6 +100,8 @@
     "test/protocol-ni.mjs",
     "test/protocol-rfc.mjs",
     "test/protocol-sap-compress.mjs",
+    "test/release-notes.mjs",
+    "test/release-readme.mjs",
     "test/replay-compare.mjs",
     "test/rfc-live.mjs",
     "test/rfc-replay.mjs",

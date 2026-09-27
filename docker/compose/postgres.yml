@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: osd
+      POSTGRES_DB: osd
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U osd -d osd"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  osd:
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    init: true
+    environment:
+      STG_DB: postgres
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: osd
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment}
+      PGDATABASE: osd
+    ports:
+      - "3030:3030"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  pg-data:

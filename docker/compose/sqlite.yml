@@ -1,0 +1,13 @@
+services:
+  osd:
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    init: true
+    environment:
+      STG_DB: file
+    ports:
+      - "3030:3030"
+    volumes:
+      - osd-data:/data
+    restart: unless-stopped
+volumes:
+  osd-data:

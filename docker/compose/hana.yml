@@ -1,0 +1,16 @@
+# Connects to an existing HANA tenant. Supply connection values in the
+# environment; this file starts no HANA server and stores no credentials.
+services:
+  osd:
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    init: true
+    environment:
+      STG_DB: hana
+      HANA_HOST: ${HANA_HOST:?Set HANA_HOST in the environment}
+      HANA_PORT: ${HANA_PORT:-39017}
+      HANA_USER: ${HANA_USER:?Set HANA_USER in the environment}
+      HANA_PASSWORD: ${HANA_PASSWORD:?Set HANA_PASSWORD in the environment}
+      HANA_SCHEMA: ${HANA_SCHEMA:-OSD}
+    ports:
+      - "3030:3030"
+    restart: unless-stopped
