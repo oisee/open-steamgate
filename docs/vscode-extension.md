@@ -1088,7 +1088,7 @@ the vsix test checks a copy materialized elsewhere computes it. Measured on
 one package, the launcher's way, with and without the file in the copy:
 the cross-reference step 5069 ms -> 110 ms, and the serving child's start
 to the first `TravelSet` answer (the "serve" column above, in a separate
-run) 10.0 s -> 5.0 s (2026-09-27, `vg/prebuilt-xref`). The file is ~0.3 MB
+run) 10.0 s -> 5.0 s (measured 2026-09-27). The file is ~0.3 MB
 unpacked, inside the 52 MB above.
 
 `OSD_VSIX_PREBUILT=0` packages without it; the vsix tests

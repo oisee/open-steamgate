@@ -423,11 +423,13 @@ function prebuildGeneration(seedRoot, env) {
   // without it would start ~5 s slower and nothing else would say so
   const xrefKey = execFileSync(process.execPath, ["--input-type=module", "-e",
     'const m = await import("./tools/osd-xref-seed.mjs"); await m.rows(process.cwd()); process.stdout.write(String(await m.cacheKey(process.cwd())));'],
-  {cwd: seedRoot, env: buildEnv, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"]}).trim();
+  {cwd: seedRoot, env: buildEnv, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"]}).trim().split("\n").at(-1);
   const xrefFiles = existsSync(join(seedRoot, "build", "xref"))
     ? readdirSync(join(seedRoot, "build", "xref")).filter((name) => name.endsWith(".json")) : [];
   if (xrefFiles.length !== 1 || xrefFiles[0] !== `${xrefKey}.json`) {
-    throw new Error(`build-vsix: the cross-reference cache was not written for key ${xrefKey} (found: ${xrefFiles.join(", ") || "none"})`);
+    throw new Error(xrefKey === "undefined"
+      ? "build-vsix: cacheKey() gave no key for the seed (tools/osd-xref-seed.mjs), so the cross-reference cache cannot ship"
+      : `build-vsix: the cross-reference cache was not written for key ${xrefKey} (found: ${xrefFiles.join(", ") || "none"})`);
   }
   for (const name of readdirSync(join(seedRoot, "build"))) {
     if (name !== "by-input" && name !== "xref") rmSync(join(seedRoot, "build", name), {recursive: true, force: true});
