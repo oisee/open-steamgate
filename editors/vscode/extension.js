@@ -108,6 +108,76 @@ const START_HOME_YES = "Yes";
 const START_HOME_NO = "No, use the bundled copy (remembered)";
 const START_HOME_ALWAYS_ASK = "Always ask";
 
+/** The remembered "use the bundled copy" answer, as the visible workspace
+ *  setting osd.startSource. An answer an older build kept in workspace
+ *  storage is moved there once, so it can be seen and undone in Settings. */
+async function startSourcePreference(context) {
+  if (context.workspaceState.get(BUNDLED_HOME_PREFERENCE) === "bundled") {
+    await setStartSource("bundled");
+    await context.workspaceState.update(BUNDLED_HOME_PREFERENCE, undefined);
+  }
+  return vscode.workspace.getConfiguration("osd").get("startSource", "ask") === "bundled" ? "bundled" : undefined;
+}
+
+async function setStartSource(value) {
+  const target = vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+  await vscode.workspace.getConfiguration("osd").update("startSource", value, target);
+}
+
+/** osd: Choose which system Start runs -- the one place to leave "always
+ *  bundled", point Start at a checkout, or go back to asking. */
+async function chooseStartSystem(context, controller) {
+  const config = vscode.workspace.getConfiguration("osd");
+  const folders = vscode.workspace.workspaceFolders;
+  const workspaceFolder = folders?.length === 1 ? folders[0].uri.fsPath : undefined;
+  const checkout = workspaceFolder !== undefined && isOpenSteamgatePath(workspaceFolder);
+  const scope = folders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+  const home = config.get("home", "").trim();
+  const source = config.get("startSource", "ask");
+  const items = [];
+  if (bundledSeedDir(context)) {
+    items.push({label: "$(package) Bundled copy", description: home === "" && source === "bundled" ? "current" : "",
+      detail: "The system packaged in this extension, in its own working copy.", pick: "bundled"});
+  }
+  if (checkout) {
+    items.push({label: "$(folder) This workspace folder", description: home === workspaceFolder ? "current" : "",
+      detail: workspaceFolder, pick: "workspace"});
+  }
+  items.push({label: "$(folder-opened) Another open-steamgate checkout...", description: home !== "" && home !== workspaceFolder ? `current: ${home}` : "",
+    detail: "Pick a folder; it needs npm install and npm run bootstrap.", pick: "other"});
+  items.push({label: "$(question) Ask each time", description: home === "" && source === "ask" ? "current" : "",
+    detail: "Start asks when the open folder is an open-steamgate checkout; otherwise it runs the bundled copy.", pick: "ask"});
+  const chosen = await vscode.window.showQuickPick(items, {placeHolder: "Which system should osd: Start run?"});
+  if (!chosen) return;
+  if (chosen.pick === "bundled") {
+    await config.update("home", "", scope);
+    await setStartSource("bundled");
+  } else if (chosen.pick === "workspace") {
+    await config.update("home", workspaceFolder, vscode.ConfigurationTarget.Workspace);
+    await setStartSource("ask");
+  } else if (chosen.pick === "other") {
+    const picked = await vscode.window.showOpenDialog({canSelectFolders: true, canSelectFiles: false, canSelectMany: false,
+      openLabel: "Run this checkout"});
+    if (!picked?.length) return;
+    const dir = picked[0].fsPath;
+    if (!isOpenSteamgatePath(dir)) {
+      void vscode.window.showErrorMessage(`osd: ${dir} is not an open-steamgate checkout (no abap_transpile.json or tools/osd-build.mjs).`);
+      return;
+    }
+    await config.update("home", dir, scope);
+    await setStartSource("ask");
+  } else {
+    await config.update("home", "", scope);
+    await setStartSource("ask");
+  }
+  const restart = "Restart now";
+  const answer = await vscode.window.showInformationMessage("osd: the next Start runs the chosen system.", restart);
+  if (answer === restart) {
+    await controller.stop();
+    await controller.start();
+  }
+}
+
 /** Resolve the pure launcher decision against this VS Code window. A
  *  workspace checkout gets a choice only when a packaged bundled system is
  *  available; development installs without one already run the open folder
@@ -121,7 +191,7 @@ async function resolveStartTarget(context, launcher) {
   const checkout = workspaceFolder !== undefined &&
     (isOpenSteamgatePath(workspaceFolder) || descriptor?.isOpenSteamgate === true);
   const seedDir = bundledSeedDir(context);
-  const preference = context.workspaceState.get(BUNDLED_HOME_PREFERENCE);
+  const preference = await startSourcePreference(context);
   const facts = {configuredHome: configured, workspaceFolder, workspaceIsOpenSteamgate: checkout,
     bundledHome: seedDir, rememberedChoice: preference};
   let target = decideStartTarget(facts);
@@ -135,9 +205,9 @@ async function resolveStartTarget(context, launcher) {
       target = decideStartTarget({...facts, configuredHome: workspaceFolder});
     } else {
       if (answer === START_HOME_NO) {
-        await context.workspaceState.update(BUNDLED_HOME_PREFERENCE, "bundled");
+        await setStartSource("bundled");
       } else if (answer === START_HOME_ALWAYS_ASK) {
-        await context.workspaceState.update(BUNDLED_HOME_PREFERENCE, undefined);
+        await setStartSource("ask");
       } else {
         return {kind: "cancelled"};
       }
@@ -1764,6 +1834,8 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("osd.openSystemOverview", () => controller.openSystemOverview()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.removeOldWorkingCopies",
     () => removeOldWorkingCopies(context, controller)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.chooseStartSystem",
+    () => chooseStartSystem(context, controller)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.start", () => controller.start()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.stop", () => controller.stop()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.rebuild", () => controller.rebuild()));

@@ -35,6 +35,16 @@
           "default": "",
           "description": "The open-steamgate checkout osd.start builds and runs. On a packaged install, Start asks when the only workspace folder is an open-steamgate checkout; otherwise an empty value uses the bundled copy."
         },
+        "osd.startSource": {
+          "type": "string",
+          "enum": ["ask", "bundled"],
+          "enumDescriptions": [
+            "When the open workspace folder is an open-steamgate checkout and osd.home is empty, Start asks which system to run.",
+            "Always run the bundled copy, even when the open folder is an open-steamgate checkout (unless osd.home is set)."
+          ],
+          "default": "ask",
+          "description": "What Start runs when osd.home is empty. Change it with \"osd: Choose which system Start runs\"."
+        },
         "osd.keymap": {
           "type": "string",
           "enum": ["abap", "vscode"],
@@ -180,6 +190,7 @@
       {"command": "osd.start", "title": "osd: Start (build + run this system)", "icon": "$(play)"},
       {"command": "osd.stop", "title": "osd: Stop", "icon": "$(primitive-square)"},
       {"command": "osd.removeOldWorkingCopies", "title": "osd: Remove old working copies"},
+      {"command": "osd.chooseStartSystem", "title": "osd: Choose which system Start runs", "icon": "$(server-environment)"},
       {"command": "osd.rebuildWarm", "title": "osd: Rebuild (warm)", "icon": "$(tools)"},
       {"command": "osd.rebuild", "title": "osd: Full rebuild (stop, build, start)"},
       {"command": "osd.fullRebuild", "title": "osd: Full rebuild (force build)", "icon": "$(tools)"},
@@ -218,11 +229,13 @@
         {"command": "osd.groupServicesByKind", "when": "view == osdTree && config.osd.services.groupBy == 'pack'", "group": "navigation@6"},
         {"command": "osd.groupServicesByPack", "when": "view == osdTree && config.osd.services.groupBy == 'kind'", "group": "navigation@7"},
         {"command": "osd.openLaunchpad", "when": "view == osdTree", "group": "9_osd@1"},
-        {"command": "osd.rebuild", "when": "view == osdTree", "group": "9_osd@2"}
+        {"command": "osd.rebuild", "when": "view == osdTree", "group": "9_osd@2"},
+        {"command": "osd.chooseStartSystem", "when": "view == osdTree", "group": "9_osd@3"}
       ],
       "view/item/context": [
         {"command": "osd.start", "when": "view == osdTree && viewItem == osd-state-stopped", "group": "state@1"},
         {"command": "osd.fullRebuild", "when": "view == osdTree && viewItem == osd-state-stopped", "group": "state@2"},
+        {"command": "osd.chooseStartSystem", "when": "view == osdTree && viewItem =~ /^osd-state-/", "group": "state@9"},
         {"command": "osd.stop", "when": "view == osdTree && viewItem == osd-state-running", "group": "state@1"},
         {"command": "osd.rebuildWarm", "when": "view == osdTree && viewItem == osd-state-running", "group": "state@2"},
         {"command": "osd.fullRebuild", "when": "view == osdTree && viewItem == osd-state-running", "group": "state@3"},
