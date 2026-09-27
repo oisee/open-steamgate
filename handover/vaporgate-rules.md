@@ -63,6 +63,13 @@ Give the critic no history of how it was built.
 5. Quick wins: T2 (measure; skip if > 1 day), Q7 Fiori/SEGW in a VS Code tab,
    "osd: New pack here", Q5 osd tools as VS Code LM tools.
    (Inserted: vg/flp-pack-inbounds, airfleet's engine item, before Q7.)
+   (Inserted after T2, dell for Alice 2026-09-27, relay 19:55-20:03:
+    a. first-start phase breakdown, ms per phase on the relay;
+    b. taxi data on demand: nothing at start; 'Generate data' per year
+       (dialog, deterministic per-year character, idempotent, WP lock),
+       'Reset to minimal data' (in-page confirm, one LUW); app + OSD tree
+       + palette; tests per the relay spec;
+    c. stg-compile refuses a property with no column under a table: source.)
 6. Focused launchpad, reduced (Alice, 2026-09-27): after Q5, and only after
    re-judging it once Q7 exists (apps open from the OSD tree). If still
    needed: when one pack with tiles is in the workspace, its tiles are the
