@@ -2,10 +2,11 @@
 // Generate a reproducible semantic corpus for the ZVDB ANYDB/HANA oracle.
 // The float embeddings never enter ABAP: their signs become one bit each,
 // and both engines compare the exact same canonical uppercase hex value.
+import {fileURLToPath} from "node:url";
 import {readFileSync, writeFileSync, mkdirSync} from "node:fs";
 import {dirname, resolve} from "node:path";
 
-const root = resolve(new URL("../", import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const source = resolve(process.argv[2] ?? `${root}/packs/zvdb/fixtures/texts.json`);
 const target = resolve(process.argv[3] ?? `${root}/packs/zvdb/fixtures/corpus.embeddinggemma-256.json`);
 const model = process.env.OLLAMA_EMBED_MODEL ?? "embeddinggemma:300m-qat-q4_0";

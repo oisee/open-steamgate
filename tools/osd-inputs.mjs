@@ -45,7 +45,10 @@ import {runsAs} from "./osd-main.mjs";
 let ROOT;
 const treeRoot = () => {
   if (ROOT === undefined) {
-    ROOT = new URL("../", import.meta.url).pathname;
+    // decodeURIComponent, not fileURLToPath: node:url in the preview bundle
+    // has no fileURLToPath, and a tree under "Application Support" arrives
+    // as "%20" in a URL.
+    ROOT = decodeURIComponent(new URL("../", import.meta.url).pathname);
   }
   return ROOT;
 };

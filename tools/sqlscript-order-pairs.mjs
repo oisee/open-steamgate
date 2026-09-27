@@ -123,7 +123,7 @@ async function engines() {
   const {FileSqliteClient} = await import("./sqlite-file-client.mjs");
   const initSqlJs = (await import("sql.js")).default;
   const {installNative} = await import("./sqljs-native.mjs");
-  const SQL = await initSqlJs({locateFile: () => new URL("../node_modules/sql.js/dist/sql-wasm.wasm", import.meta.url).pathname});
+  const SQL = await initSqlJs({locateFile: () => fileURLToPath(new URL("../node_modules/sql.js/dist/sql-wasm.wasm", import.meta.url))});
   const sqljs = {sqlite: new SQL.Database()};
   installNative(sqljs);
   const duck = new DuckDBDatabaseClient({path: ":memory:"});

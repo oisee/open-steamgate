@@ -668,9 +668,14 @@ extension with `osd.home` unset asks before the first start: **"Run the system
 from this folder? (edits go to your files and git)"**. **Yes** writes that
 folder to the workspace's `osd.home` setting and starts it as the system.
 **No, use the bundled copy** starts the materialized bundled system and
-remembers that choice in VS Code workspace storage. **Always ask** uses the
-bundled copy for this start and clears the remembered choice, so the next
-Start asks again. Dismissing the prompt leaves the system stopped. The pure
+remembers that choice as the workspace setting `osd.startSource: "bundled"`
+(visible in Settings; an answer an older build kept in workspace storage is
+moved there on the next Start). **Always ask** uses the bundled copy for this
+start and sets `osd.startSource` back to `"ask"`, so the next Start asks
+again. **osd: Choose which system Start runs** (the tree's `...` menu and the
+state row's context menu) switches at any time: the bundled copy, this
+workspace folder, another checkout picked in a folder dialog (it sets
+`osd.home`), or "Ask each time"; it offers to restart the system. Dismissing the prompt leaves the system stopped. The pure
 decision is `decideStartTarget()` in `editors/vscode/launcher.js`; its tests
 cover the checkout, configured-home, remembered-bundle and ordinary-workspace
 cases in `test/vscode-launcher.mjs`. The tree's state row and the ▶ / ■ status

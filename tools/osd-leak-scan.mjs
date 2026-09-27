@@ -27,6 +27,7 @@
 // gitignored, and the scan says so when it is missing rather than passing
 // quietly: a check that silently loses half its patterns is the failure this
 // tool exists to prevent.
+import {fileURLToPath} from "node:url";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve, join, relative } from "node:path";
@@ -121,7 +122,7 @@ function packedAddresses(bytes) {
 // environment points, then in this repository — a sibling Go clone has no
 // `.local/` of its own and should not need one to be checked properly.
 function identifierList(root) {
-  const here = new URL("..", import.meta.url).pathname;
+  const here = fileURLToPath(new URL("..", import.meta.url));
   let commonCheckout;
   try {
     const commonGit = execFileSync(

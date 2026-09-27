@@ -25,10 +25,11 @@
 //   node tools/osd-replay.mjs compare <baseA> <baseB> [--log f]
 //
 // Exit 0 when the two agree, 1 when they differ, 2 when it could not ask.
+import {fileURLToPath} from "node:url";
 import {mkdirSync, readFileSync, writeFileSync, existsSync} from "node:fs";
 import {basename, join} from "node:path";
 
-export const DEFAULT_LOG = new URL("../test/request-log.json", import.meta.url).pathname;
+export const DEFAULT_LOG = fileURLToPath(new URL("../test/request-log.json", import.meta.url));
 
 /** The calls, as a file rather than a capture.
  *

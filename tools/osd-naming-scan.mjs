@@ -27,10 +27,11 @@
 //   node tools/osd-naming-scan.mjs [--json]
 //
 // Exit 0 clean, 1 with findings, 2 when it could not do its job.
+import {fileURLToPath} from "node:url";
 import {readFileSync, existsSync, readdirSync, statSync} from "node:fs";
 import {basename, join, relative, resolve} from "node:path";
 
-const ROOT = resolve(new URL("..", import.meta.url).pathname);
+const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 // The words, and the reason the list is short. Every one of these is a name
 // somebody else owns and we have no claim to. `ABAP` is deliberately **not**
