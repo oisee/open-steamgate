@@ -9,6 +9,8 @@ const decoder = new TextDecoder();
 let backendPromise;
 let requestQueue = Promise.resolve();
 let activationToMetadataMs;
+const STATUS = "/sap/opu/odata/sap/ZOSD_STATUS_SRV";
+const SERVICE_KINDS = [["ODATA", "OData"], ["APP", "Apps"], ["ICF", "ICF"], ["APC", "APC"]];
 
 function transaction(mode, work) {
   return new Promise((resolve, reject) => {
@@ -67,9 +69,9 @@ function gateway(request) {
   return result;
 }
 
-async function send(method, path, {headers = {}, body} = {}) {
+async function send(method, path, {headers = {}, body, search = ""} = {}) {
   const answer = await gateway({
-    method, path, headers: {
+    method, path, search, headers: {
       host: "osd.invalid", "x-forwarded-proto": "https", ...headers,
     }, body: body === undefined ? undefined : encoder.encode(JSON.stringify(body)),
   });
@@ -79,6 +81,106 @@ async function send(method, path, {headers = {}, body} = {}) {
 function required(answer, status, step) {
   if (answer.status !== status) {
     throw new Error(`${step}: expected ${status}, got ${answer.status}: ${answer.text.slice(0, 500)}`);
+  }
+}
+
+async function statusRows(set) {
+  const answer = await send("GET", `${STATUS}/${set}`, {search: "?$format=json", headers: {accept: "application/json"}});
+  required(answer, 200, set);
+  return JSON.parse(answer.text)?.d?.results ?? [];
+}
+
+function serviceName(row) {
+  if (row.Kind === "APP" && row.HandlerName) return row.HandlerName;
+  const parts = String(row.Path ?? "").split("/").filter(Boolean);
+  return parts.at(-1) ?? row.Path ?? "(unnamed)";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[char]);
+}
+
+function showServiceDetails(row) {
+  const name = serviceName(row);
+  const panel = vscode.window.createWebviewPanel("osdWebService", `OSD: ${name}`, vscode.ViewColumn.One);
+  panel.webview.html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<style>body{font:14px system-ui;padding:1rem;color:var(--vscode-foreground)}dt{font-weight:bold;margin-top:1rem}dd{margin:.25rem 0}</style></head>
+<body><h1>${escapeHtml(name)}</h1><dl><dt>Kind</dt><dd>${escapeHtml(row.Kind)}</dd><dt>URL</dt><dd>${escapeHtml(row.Path)}</dd></dl></body></html>`;
+}
+
+class WebTreeProvider {
+  constructor() {
+    this.emitter = new vscode.EventEmitter();
+    this.onDidChangeTreeData = this.emitter.event;
+    this.system = undefined;
+    this.services = [];
+    this.error = undefined;
+  }
+
+  dispose() { this.emitter.dispose(); }
+
+  async refresh() {
+    try {
+      const [systems, services] = await Promise.all([statusRows("SystemSet"), statusRows("ServiceSet")]);
+      this.system = systems[0];
+      this.services = services;
+      this.error = undefined;
+    } catch (error) {
+      this.error = String(error);
+    }
+    this.emitter.fire();
+  }
+
+  getTreeItem(item) { return item; }
+
+  getChildren(item) {
+    if (!item) {
+      const system = new vscode.TreeItem("System", vscode.TreeItemCollapsibleState.Expanded);
+      system.contextValue = "osd-web-system";
+      system.iconPath = new vscode.ThemeIcon("server-environment");
+      const services = new vscode.TreeItem("Services", vscode.TreeItemCollapsibleState.Expanded);
+      services.contextValue = "osd-web-services";
+      services.iconPath = new vscode.ThemeIcon("plug");
+      return [system, services];
+    }
+    if (item.contextValue === "osd-web-system") {
+      if (this.error) return [new vscode.TreeItem(`Status unavailable: ${this.error}`)];
+      if (!this.system) return [new vscode.TreeItem("Loading…")];
+      const generation = this.system.GenServing ?? this.system.GenLive ?? this.system.Generation;
+      return [
+        new vscode.TreeItem("In-browser gateway"),
+        new vscode.TreeItem(`Generation: ${generation ?? "unknown"}`),
+        new vscode.TreeItem("Database: sql.js + IndexedDB"),
+      ];
+    }
+    if (item.contextValue === "osd-web-services") {
+      if (this.error) return [new vscode.TreeItem(`Services unavailable: ${this.error}`)];
+      if (!this.system) return [new vscode.TreeItem("Loading…")];
+      const kinds = [...SERVICE_KINDS];
+      for (const row of this.services) {
+        if (!kinds.some(([kind]) => kind === row.Kind)) kinds.push([row.Kind, row.Kind || "Other"]);
+      }
+      return kinds.map(([kind, label]) => {
+        const rows = this.services.filter((row) => row.Kind === kind);
+        const group = new vscode.TreeItem(`${label} (${rows.length})`, vscode.TreeItemCollapsibleState.Collapsed);
+        group.contextValue = "osd-web-service-group";
+        group.kind = kind;
+        group.iconPath = new vscode.ThemeIcon("folder");
+        return group;
+      });
+    }
+    if (item.contextValue === "osd-web-service-group") {
+      return this.services.filter((row) => row.Kind === item.kind).sort((a, b) => a.Path.localeCompare(b.Path)).map((row) => {
+        const leaf = new vscode.TreeItem(serviceName(row), vscode.TreeItemCollapsibleState.None);
+        leaf.description = row.Path;
+        leaf.tooltip = row.Text || row.Path;
+        leaf.contextValue = "osd-web-service";
+        leaf.iconPath = new vscode.ThemeIcon(row.Kind === "ODATA" ? "database" : row.Kind === "APP" ? "browser" : row.Kind === "APC" ? "broadcast" : "plug");
+        leaf.command = {command: "osd.webServiceDetails", title: "Details", arguments: [row]};
+        return leaf;
+      });
+    }
+    return [];
   }
 }
 
@@ -141,6 +243,7 @@ document.getElementById('run').click();
 
 export async function activate(context) {
   const started = performance.now();
+  await vscode.commands.executeCommand("setContext", "osd.web", true);
   const output = vscode.window.createOutputChannel("OSD Web Probe");
   context.subscriptions.push(output);
   const run = (label, work) => async () => {
@@ -171,11 +274,16 @@ export async function activate(context) {
     });
     panel.webview.html = webviewHtml(nonce);
   }));
+  const tree = new WebTreeProvider();
+  context.subscriptions.push(tree, vscode.window.registerTreeDataProvider("osdTree", tree));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.refreshTree", () => tree.refresh()));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.webServiceDetails", showServiceDetails));
   try {
     const metadata = await send("GET", METADATA);
     required(metadata, 200, "activation $metadata");
     activationToMetadataMs = Math.round(performance.now() - started);
     output.appendLine(`OSD_WEB_READY ${JSON.stringify({activationToMetadataMs})}`);
+    await tree.refresh();
   } catch (error) {
     output.appendLine(`OSD_WEB_BOOT_ERROR ${String(error?.stack ?? error)}`);
     throw error;
