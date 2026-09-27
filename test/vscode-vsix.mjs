@@ -14,7 +14,7 @@
 import {expect} from "chai";
 import {execFileSync} from "node:child_process";
 import {createRequire} from "node:module";
-import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, lstatSync, symlinkSync} from "node:fs";
+import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync, lstatSync, symlinkSync} from "node:fs";
 import {basename, join} from "node:path";
 import {homedir, tmpdir} from "node:os";
 import {buildVsix, stampStagedPackage} from "../scripts/build-vsix.mjs";
@@ -28,6 +28,12 @@ const commitCount = execFileSync("git", ["rev-list", "--count", "HEAD"], {cwd: r
 const currentVsixFile = `osd-vscode-${versionParts[1]}.${versionParts[2]}.${commitCount}.vsix`;
 let builtVsix = existsSync(join(VSIX_DIR, currentVsixFile)) ? currentVsixFile : undefined;
 let built = builtVsix !== undefined;
+
+function packagedPacks(archive) {
+  const entries = execFileSync("unzip", ["-Z1", archive], {encoding: "utf8"});
+  return [...new Set(entries.split("\n").map((entry) => /^extension\/osd\/packs\/([^/]+)\//.exec(entry)?.[1])
+    .filter((name) => name !== undefined))].sort();
+}
 
 const DEMO_WS = join(root, ".local", "b0-demo-ws");
 // **Outside the checkout, on purpose.** A scratch folder under this tree
@@ -137,6 +143,67 @@ describe("packaging changed seed content", function () {
   });
 });
 
+describe("packaging selected packs", function () {
+  this.timeout(240000);
+
+  it("builds a Zork-only archive without checkout gen/", async function () {
+    const gen = join(root, "gen");
+    const scratch = mkdtempSync(join(root, ".local", "vsix-hidden-gen-"));
+    const hidden = join(scratch, "gen");
+    const hadGen = existsSync(gen);
+    if (hadGen) renameSync(gen, hidden);
+    try {
+      const {out} = await buildVsix({});
+      expect(packagedPacks(out)).to.deep.equal(["zork"]);
+    } finally {
+      if (hadGen) renameSync(hidden, gen);
+      rmSync(scratch, {recursive: true, force: true});
+    }
+  });
+
+  it("ships only zork by default and adds named packs with OSD_VSIX_PACKS", async function () {
+    const originalPacks = process.env.OSD_VSIX_PACKS;
+    try {
+      const defaultBuild = await buildVsix({});
+      expect(packagedPacks(defaultBuild.out)).to.deep.equal(["zork"]);
+
+      process.env.OSD_VSIX_PACKS = " zork, lsd ";
+      const expandedBuild = await buildVsix();
+      expect(packagedPacks(expandedBuild.out)).to.deep.equal(["lsd", "zork"]);
+    } finally {
+      if (originalPacks === undefined) delete process.env.OSD_VSIX_PACKS;
+      else process.env.OSD_VSIX_PACKS = originalPacks;
+      // The live smoke below must start from the default artifact.
+      const canonical = await buildVsix({});
+      builtVsix = basename(canonical.out);
+      built = true;
+    }
+  });
+
+  it("checks fetched sources only for selected packs", async function () {
+    const name = `vsix-guard-${process.pid}`;
+    const packDir = join(root, "packs", name);
+    mkdirSync(packDir);
+    try {
+      writeFileSync(join(packDir, "osd-pack.json"), JSON.stringify({
+        name, sources: [{folder: "upstream", repo: "https://example.invalid/missing", ref: "main"}],
+      }));
+      const defaultBuild = await buildVsix({});
+      expect(packagedPacks(defaultBuild.out)).to.deep.equal(["zork"]);
+
+      let error;
+      try {
+        await buildVsix({OSD_VSIX_PACKS: name});
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error?.message).to.contain(`pack ${name} fetches upstream`);
+    } finally {
+      rmSync(packDir, {recursive: true, force: true});
+    }
+  });
+});
+
 /** `.local/b0-demo-ws/src/zcl_b0_hello.clas.abap`: a workspace-layer fixture
  *  shaped like the one docs/vscode-extension.md's "Live smoke" describes by
  *  hand -- one abapGit-looking class implementing IF_OO_ADT_CLASSRUN, so
@@ -190,6 +257,7 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
     const {Launcher, ensureMaterializedHome, seedContentId, SEED_ID_FILE} = createRequire(import.meta.url)(join(extensionDir, "launcher.js"));
     const seedDir = join(extensionDir, "osd");
     expect(existsSync(join(seedDir, "test", "run.mjs")), "the .vsix carries a runnable osd/ seed").to.equal(true);
+    expect(existsSync(join(seedDir, "gen")), "the seed must not carry generated files from excluded packs").to.equal(false);
     // hdb and @abaplint/database-pg (-> pg) travel with the package (both
     // pure JS, docs/vscode-extension.md "Packaging"); the native DuckDB
     // module does not, on purpose.
@@ -212,6 +280,8 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
     launcher = new Launcher({osdHome, storageDir, workspaceFolders: [DEMO_WS], timeoutMs: 180000});
     const result = await launcher.start();
     port = result.port;
+    expect(existsSync(join(osdHome, "gen", "stg", "zvdb_100")),
+      "the first build must not regenerate an excluded pack's service").to.equal(false);
   });
 
   after(async function () {
@@ -236,6 +306,25 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
     expect(res.status).to.equal(200);
     const body = await res.json();
     expect(body.d.results.length).to.be.at.least(1);
+  });
+
+  it("serves the launchpad and returns only bundled pack tiles", async function () {
+    if (!built) {
+      this.skip();
+    }
+    const base = `http://localhost:${port}`;
+    const front = await fetch(`${base}/`, {redirect: "manual"});
+    expect(front.status).to.equal(302);
+    expect(front.headers.get("location")).to.equal("/app/flp.html");
+    const page = await fetch(`${base}/app/flp.html`);
+    expect(page.status).to.equal(200);
+    expect(await page.text()).to.contain("open-steamgate demo: launchpad");
+    const tiles = await fetch(`${base}/app/packs.json`);
+    expect(tiles.status).to.equal(200);
+    const expected = JSON.parse(readFileSync(join(osdHome, "packs", "zork", "osd-pack.json"), "utf8")).tiles ?? [];
+    const actual = (await tiles.json()).tiles;
+    expect(actual).to.have.length(expected.length);
+    expect(actual.every((tile) => tile.pack === "zork")).to.equal(true);
   });
 
   it("osd.database.system = duckdb refuses with a plain sentence, in a packaged install", async function () {

@@ -986,28 +986,31 @@ Build it from a fresh checkout with Node 22.14+ or Node 24 (the repository's
 
 ```sh
 npm install
-npm run bootstrap
+node tools/osd-libs.mjs
+node tools/osd-fetch.mjs zork
 npm run vsix
 ```
 
-`npm run test:bootstrap-scratch` runs this sequence in a temporary clone
-outside the checkout and removes the clone afterward.
+`npm run bootstrap` remains the full checkout setup: it fetches every pack and
+generates `gen/`. `npm run test:bootstrap-scratch` exercises that full path in
+a temporary clone outside the checkout and removes the clone afterward.
 
 Bootstrap reads `libs.lock.json` for the pinned library repositories and
 commits, fetches the packs named by their manifests, then runs the transpile to
 create `gen/`. A clone already at its locked commit is left untouched; a clone
 at another commit is reported without changing it. `npm run vsix` checks for
-installed dependencies, every library, and generated `gen/` before packaging;
-when one is missing it prints `run npm run bootstrap` as the next step. The
-preview and test workflows use the same lock for the patched libraries and
+installed dependencies and every library before packaging; `gen/` is generated
+on first start from the selected packs. Missing dependencies or libraries are
+reported with the setup commands. The preview and test workflows use the same
+lock for the patched libraries and
 transpiler. The Docker image build also reads the lock; `docker/image/sources.json`
 keeps its source inventory and licensing notes without a second copy of those
 commits.
 
 `npm run vsix:install` runs that same build and then installs the resulting
-file with `code --install-extension <vsix> --force`. The build still refuses
-to package while any pack is unfetched, so a successful install command has a
-complete bundled seed.
+file with `code --install-extension <vsix> --force`. The build refuses to
+package while a selected pack is unfetched, so a successful install command
+has a complete bundled seed.
 
 The tracked `editors/vscode/package.json` keeps the release baseline (`0.1.6`)
 and supplies the major and minor for packaged builds. At packaging time, the
@@ -1021,8 +1024,8 @@ keys the materialized install to the actual packaged files.
 
 **What is in `extension/osd/`**, found by tracing rather than guessing:
 **not `output/`** -- see "two false starts, and a third" below for why a
-first design shipped it and a second one dropped it again; `src/`, `gen/`,
-`packs/` (whole -- generators read pack content, not a layer list),
+first design shipped it and a second one dropped it again; `src/`,
+`packs/zork/` by default (set `OSD_VSIX_PACKS=zork,o4d` to include more),
 `webapp/`, `tools/` (whole); `test/` minus `test/e2e/`
 and `test/fixtures/` (`abap_transpile.json`'s and `abaplint.jsonc`'s own
 exclude lists) -- not just `run.mjs`/`start.mjs`/`setup.mjs` and their own
@@ -1050,7 +1053,10 @@ transitive deps". `open-rfc` (live RFC) and `@duckdb/*` (not on the default
 path per this file) are left out on purpose, along with `.git`,
 `.local/worktrees`, `.local/corpus*`, every other `.local/lars/*` clone,
 Playwright, DuckDB, Postgres, docs, and every dev-only devDependency
-(webpack, mocha, chai, terser, the browserify shims).
+(webpack, mocha, chai, terser, the browserify shims). The staged seed also
+omits `gen/`: the checkout's copy was generated with all packs present and
+contains code from excluded packs. The first build regenerates it from the
+pack selection in the installed seed.
 
 **Two false starts, and a third that settled it, kept here because the fix
 each time is the design.** The first version shipped `build/by-input/<hash>/`
@@ -1208,14 +1214,31 @@ the workspace-layer pack path `ensureWorkspacePacks()` writes under
 `storageDir` is itself a generation input; that is a measurement artefact
 of this spike, not a bug -- a real restart's `storageDir` does not move.)
 
-90.8 MB is under the ~150 MB the task set as a "stop and propose trims"
-line, so nothing further was trimmed for size alone; `build-vsix.mjs`
-still warns past that line if a future change pushes it over. The one
-candidate left (drop `packs/*/upstream` media, ~13 MB, the o4d demo's own
-images; the zork game data stays, since dropping it breaks the one thing
-that pack is for) is still there if it does. Building `output/` on first
-start instead of shipping it is no longer a candidate to weigh -- it is
-now simply what happens.
+90.8 MB was under the ~150 MB threshold; `build-vsix.mjs` still warns past
+that line. The later pack selection below removes the o4d media from the
+default package while leaving it available through `OSD_VSIX_PACKS`.
+
+**Pack selection, measured 2026-09-27** on the same checkout before and
+after the allowlist change, with all six local packs fetched. The figures
+are MiB (`build-vsix.mjs` prints them as MB):
+
+| | All six packs and `gen/` (before) | Zork only (default) |
+| --- | ---: | ---: |
+| `.vsix` | 34.6 | 17.7 |
+| unpacked | 93.8 | 67.3 |
+| `packs/` in the seed | 22.1 | 0.3 |
+| `gen/` in the seed | 4.7 | 0 |
+
+The default archive contains only `extension/osd/packs/zork/`; the 16.9 MiB
+archive reduction comes from leaving out `gui-examples`, `lsd`, `o4d`,
+`travels-a4h`, `zvdb`, and generated files made from them. `OSD_VSIX_PACKS`
+is a comma-separated list of in-tree pack names; the builder rejects unknown
+names and checks fetched sources only for the selected packs. `src/webgui/`
+remains part of `src/`.
+`test/vscode-vsix.mjs` checks both archive selections and starts the default
+archive after materializing it outside the checkout; the launchpad and
+`ZSTG_DEMO_SRV/TravelSet` answer, and the first build generates no zvdb
+service.
 
 **Proving it runs outside this checkout**: `test/vscode-vsix.mjs`
 (registered in `test/suites.json`, skipped via `this.skip()` when

@@ -1,7 +1,8 @@
 import {expect} from "chai";
-import {readFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {describeVsixPreflight, githubWorkflowEnv, librariesFromLock, readLock} from "../tools/osd-lock.mjs";
+import {describeVsixPreflight, githubWorkflowEnv, librariesFromLock, readLock, vsixPreflightMissing} from "../tools/osd-lock.mjs";
 import {nodeVersionProblem, requireSupportedNode} from "../tools/osd-node-version.mjs";
 import {packsOf} from "../tools/osd-packs.mjs";
 import {approvedLicenseAssumption} from "../docker/image/license-assumptions.mjs";
@@ -79,13 +80,31 @@ describe("fresh checkout bootstrap", () => {
     expect(warnings).to.have.length(3);
   });
 
-  it("turns missing VSIX prerequisites into one bootstrap instruction", () => {
-    const message = describeVsixPreflight(["node_modules/", ".local/lars/open-abap-core/", "gen/"]);
+  it("turns missing VSIX prerequisites into setup instructions", () => {
+    const message = describeVsixPreflight(["node_modules/", ".local/lars/open-abap-core/"]);
     expect(message).to.equal(
-      "build-vsix: missing node_modules/, .local/lars/open-abap-core/, gen/; run npm run bootstrap",
+      "build-vsix: missing node_modules/, .local/lars/open-abap-core/; run npm install and node tools/osd-libs.mjs as needed",
     );
     expect(message).not.to.contain("\n");
     expect(describeVsixPreflight([])).to.equal(undefined);
+  });
+
+  it("allows VSIX packaging without a generated tree", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "osd-vsix-preflight-"));
+    try {
+      writeFileSync(join(scratch, "libs.lock.json"), readFileSync(join(ROOT, "libs.lock.json")));
+      writeFileSync(join(scratch, "abap_transpile.json"), readFileSync(join(ROOT, "abap_transpile.json")));
+      mkdirSync(join(scratch, "node_modules"));
+      writeFileSync(join(scratch, "node_modules", "present"), "");
+      const {libraries} = librariesFromLock(scratch);
+      for (const lib of libraries) {
+        mkdirSync(lib.path, {recursive: true});
+        writeFileSync(join(lib.path, "present"), "");
+      }
+      expect(vsixPreflightMissing(scratch)).to.deep.equal([]);
+    } finally {
+      rmSync(scratch, {recursive: true, force: true});
+    }
   });
 
   it("limits temporary image license approvals to the reviewed fork commits", () => {

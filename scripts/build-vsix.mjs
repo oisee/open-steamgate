@@ -38,8 +38,8 @@
 // full build (measured below, ~20 s); a second start of the SAME
 // materialized copy is fast because by then it has grown its own matching
 // cache, the same way any other checkout's second build does.
-//   - `src/`, `gen/`, `packs/` (whole -- generators read pack content, not a
-//     layer list), `webapp/`, `tools/` (whole), `test/` minus `test/e2e/`
+//   - `src/`, selected `packs/` (zork by default; OSD_VSIX_PACKS selects
+//     more), `webapp/`, `tools/` (whole), `test/` minus `test/e2e/`
 //     and `test/fixtures/` (`abap_transpile.json`'s and `abaplint.jsonc`'s
 //     own exclude lists) -- not just `run.mjs`/`start.mjs`/`setup.mjs` and
 //     their JS imports (traced by grep, including one dynamic import,
@@ -84,6 +84,7 @@ import {basename, dirname, join, relative, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 import {describeVsixPreflight, vsixPreflightMissing} from "../tools/osd-lock.mjs";
 import {requireSupportedNode} from "../tools/osd-node-version.mjs";
+import {packAt} from "../tools/osd-packs.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const EXT_DIR = join(ROOT, "editors", "vscode");
@@ -91,6 +92,26 @@ const BUILD_DIR = join(ROOT, "build", "vsix");
 const STAGE = join(BUILD_DIR, "stage");
 let minimatch;
 const {writeSeedId} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
+
+/** Only named in-tree packs can enter the seed. An empty override means the
+ * default; an unknown name is a typo, not a silently smaller package. */
+function vsixPacks(env = process.env) {
+  const names = env.OSD_VSIX_PACKS?.trim()
+    ? env.OSD_VSIX_PACKS.split(",").map((name) => name.trim())
+    : ["zork"];
+  const selected = [];
+  for (const name of names) {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+      throw new Error(`build-vsix: invalid pack name in OSD_VSIX_PACKS: ${JSON.stringify(name)}`);
+    }
+    const pack = packAt(ROOT, join(ROOT, "packs", name));
+    if (pack === undefined || pack.name !== name) {
+      throw new Error(`build-vsix: unknown pack in OSD_VSIX_PACKS: ${name}`);
+    }
+    if (selected.some((other) => other.name === name) === false) selected.push(pack);
+  }
+  return selected;
+}
 
 function log(msg) {
   console.log(`build-vsix: ${msg}`);
@@ -266,15 +287,22 @@ function libEntries() {
 
 // ---- stage layout ---------------------------------------------------------
 
-function copySeedTree(seedRoot) {
+function copySeedTree(seedRoot, selectedPacks) {
   mkdirSync(seedRoot, {recursive: true});
 
   // No output/: see the top-of-file comment (fallback (b) of the
   // vsix-prebuilt-generation task) for why shipping the current
   // generation was tried and reverted. A first start transpiles cold.
+  // No gen/: it was produced with every checkout pack present and can carry
+  // generated ABAP/BSP files from packs excluded here. The first build
+  // regenerates it from the staged, selected inputs.
 
-  for (const dir of ["src", "gen", "packs", "webapp", "tools", "data"]) {
+  for (const dir of ["src", "webapp", "tools", "data"]) {
     copyReal(join(ROOT, dir), join(seedRoot, dir));
+  }
+  mkdirSync(join(seedRoot, "packs"), {recursive: true});
+  for (const pack of selectedPacks) {
+    copyReal(pack.dir, join(seedRoot, "packs", pack.name));
   }
   for (const file of ["abap_transpile.json", "abaplint.jsonc", "libs.lock.json", "package.json"]) {
     cpSync(join(ROOT, file), join(seedRoot, file));
@@ -400,7 +428,7 @@ function vsixManifestXml(pkg) {
 
 // ---- entry point ------------------------------------------------------------
 
-export async function buildVsix() {
+export async function buildVsix(env = process.env) {
   requireSupportedNode(process.versions.node, "build-vsix: ");
   const preflight = describeVsixPreflight(vsixPreflightMissing(ROOT));
   if (preflight !== undefined) {
@@ -409,7 +437,8 @@ export async function buildVsix() {
     throw error;
   }
   ({minimatch} = await import("minimatch"));
-  const {unfetched, describeUnfetched} = await import("../tools/osd-fetch.mjs");
+  const {describeUnfetched} = await import("../tools/osd-fetch.mjs");
+  const selectedPacks = vsixPacks(env);
 
   rmSync(STAGE, {recursive: true, force: true});
   mkdirSync(STAGE, {recursive: true});
@@ -419,14 +448,16 @@ export async function buildVsix() {
   const {pkg, dirty} = stampStagedPackage(join(extensionDir, "package.json"));
   const seedRoot = join(extensionDir, "osd");
   // **An unfetched pack refuses the package, not the user's first start.**
-  // The seed copies packs/ as the checkout has them; a pack whose sources
-  // were never fetched (a new pack after a pull, 2026-09-26) shipped without
-  // them, and every install's first build then refused with UNFETCHED.
-  const missing = unfetched(ROOT);
+  // A selected pack whose sources were never fetched would make every
+  // install's first build refuse with UNFETCHED. Other packs do not ship.
+  const missing = selectedPacks.flatMap((pack) => pack.missing.map((source) => ({
+    pack: pack.name, folder: source.folder, repo: source.repo, ref: source.ref,
+  })));
   if (missing.length > 0) {
     throw new Error(`build-vsix: ${describeUnfetched(missing)}`);
   }
-  const modules = copySeedTree(seedRoot);
+  log(`packs: ${selectedPacks.map((pack) => pack.name).join(", ")}`);
+  const modules = copySeedTree(seedRoot, selectedPacks);
   materializeSeedLinks(seedRoot);
   const seedId = writeSeedId(seedRoot);
   log(`seed ID: ${seedId}`);
@@ -446,7 +477,7 @@ export async function buildVsix() {
     // comment) -- a first start transpiles cold instead of hitting a cache.
     "node_modules/": dirSizeBytes(join(seedRoot, "node_modules")),
     "packs/": dirSizeBytes(join(seedRoot, "packs")),
-    "src/ + gen/ + webapp/ + tools/ + test/ + data/": ["src", "gen", "webapp", "tools", "test", "data"]
+    "src/ + webapp/ + tools/ + test/ + data/": ["src", "webapp", "tools", "test", "data"]
       .reduce((sum, d) => sum + dirSizeBytes(join(seedRoot, d)), 0),
     ".local/lars/ (library sources)": dirSizeBytes(join(seedRoot, ".local")),
     "extension.js/lib.js/launcher.js/resources/examples": dirSizeBytes(extensionDir) - dirSizeBytes(seedRoot),
