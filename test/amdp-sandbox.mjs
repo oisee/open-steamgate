@@ -75,21 +75,30 @@ describe("the AMDP sandbox", function () {
     expect(answer.system_db, "and the system database, which is a different thing").to.be.a("string");
   });
 
-  it("answers a notebook cell clearly when the system database is not HANA", async function () {
+  it("runs a supported notebook cell on the system database, with an honest engine label", async function () {
     const system = await (await fetch(BASE + "engine")).json();
     if (system.system_db === "HDB") this.skip();
     const res = await fetch(BASE + "cell", {
       method: "POST",
       headers: {"content-type": "text/plain", accept: "application/json"},
-      body: "SELECT 1 AS one FROM dummy;",
+      body: "lt = SELECT 42 AS answer FROM dummy; SELECT * FROM :lt;",
     });
     expect(res.status, "an unsupported engine is a handled result").to.equal(200);
     expect(res.headers.get("content-type")).to.contain("application/json");
     const answer = await res.json();
+    expect(answer.status).to.equal("ok");
+    expect(answer.engine).to.equal(`Portable AMDP (limited) on ${system.system_db.toLowerCase()}`);
+    expect(JSON.parse(answer.result)[0].ANSWER).to.equal(42);
+  });
+
+  it("returns a named portable refusal and its reason", async function () {
+    const system = await (await fetch(BASE + "engine")).json();
+    if (system.system_db !== "SQLITE") this.skip();
+    const answer = await (await fetch(BASE + "cell", {method: "POST", headers: {"content-type": "text/plain"},
+      body: "SELECT CAST('x' AS INTEGER) AS answer FROM dummy;"})).json();
     expect(answer.status).to.equal("error");
-    expect(answer.system_db).to.equal(system.system_db);
-    expect(answer.error).to.contain("SQLScript notebook cells require a HANA system database");
-    expect(answer.error).to.contain(`this system uses ${system.system_db}`);
+    expect(answer.code).to.equal("UNSUPPORTED_SQLSCRIPT");
+    expect(answer.error).to.contain("CAST to INTEGER cannot raise in SQLite");
   });
 
   // **Gated like the other two, and for the same reason.** It asserts where a

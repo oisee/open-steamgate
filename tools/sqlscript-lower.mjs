@@ -291,7 +291,7 @@ const AGGREGATES = new Set(["STRING_AGG", "GROUP_CONCAT"]);
  *  tie and DENSE_RANK does not, identically on all three. */
 const WINDOW = new Set(["ROW_NUMBER", "RANK", "DENSE_RANK"]);
 
-const PORTABLE = new Set([
+export const PORTABLE = new Set([
   "LOWER", "UPPER", "LENGTH", "ABS", "COALESCE", "TRIM", "LTRIM", "RTRIM",
   "SUM", "MIN", "MAX", "COUNT", "AVG",
   // measured 2026-09-19: ROUND(2.5) is 3 and ROUND(-2.5) is -3 on all three,

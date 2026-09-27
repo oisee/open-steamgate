@@ -82,6 +82,7 @@ ${factRow("Layers", layerText, "Workspace abapGit folders, after the base system
 ${factRow("HTTP port", running ? model.listener.port : "not running", "Extension launcher state")}
 ${factRow("Launchpad", model.launchpadUrl ?? "available after start", model.sources.serving)}
 ${factRow("Database", `${database.engine ?? "unknown"} · ${database.storage ?? "unknown"}`, model.sources.serving)}
+${factRow("AMDP:", database.engine === "HDB" || database.engine === "hana" ? "eAMDP on HANA" : `eAMDP on HANA · portable (limited) on ${database.engine ?? "unknown"}`, "docs/notebook-cells.md")}
 ${factRow("Database file", localDatabase, model.sources.serving)}
 ${factRow("Warm compile", warm, `${model.sources.serving}${model.warm?.reason ? ` · ${model.warm.reason}` : ""}`)}
 ${factRow("Keys", keys, "osd.keymap")}

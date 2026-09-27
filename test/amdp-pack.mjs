@@ -1,9 +1,10 @@
 import {expect} from "chai";
-import {mkdtempSync, mkdirSync, writeFileSync, readFileSync} from "node:fs";
+import {mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync} from "node:fs";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
 import {contentFoldersOf} from "../tools/osd-packs.mjs";
-import {generate} from "../tools/amdp-gen.mjs";
+import {generate, portabilityWarnings} from "../tools/amdp-gen.mjs";
+import {ObjectStore} from "../tools/osd-store.mjs";
 
 describe("AMDP in a content pack", () => {
   it("discovers and rewrites a pack-local AMDP class", () => {
@@ -37,6 +38,99 @@ ENDCLASS.\n`);
 });
 
 describe("amdp-gen reads a table function's DDLS through the runtime store by the entity it defines", () => {
+  it("warns when a scalar assignment cannot be lowered for SQLite", () => {
+    const source = `CLASS zcl_scalar_check DEFINITION PUBLIC CREATE PUBLIC.
+ PUBLIC SECTION.
+ INTERFACES if_amdp_marker_hdb.
+ CLASS-METHODS run EXPORTING VALUE(ev_result) TYPE i.
+ENDCLASS.
+CLASS zcl_scalar_check IMPLEMENTATION.
+ METHOD run BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+ ev_result = CAST('x' AS INTEGER);
+ ENDMETHOD.
+ENDCLASS.`;
+    const store = new ObjectStore({root: process.cwd(), roots: [], libs: []});
+    const warnings = portabilityWarnings(source, "zcl_scalar_check.clas.abap", store, "sqlite");
+    expect(warnings).to.have.length(1);
+    expect(warnings[0]).to.include({severity: "W", line: 8});
+    expect(warnings[0].message).to.contain("CAST to INTEGER cannot raise");
+  });
+
+  it("points a dialect refusal after an earlier statement to its own line", () => {
+    const source = `CLASS zcl_line_check DEFINITION PUBLIC CREATE PUBLIC.
+ PUBLIC SECTION.
+ INTERFACES if_amdp_marker_hdb.
+ CLASS-METHODS run EXPORTING VALUE(ev_result) TYPE i.
+ENDCLASS.
+CLASS zcl_line_check IMPLEMENTATION.
+ METHOD run BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+ ev_result = 1;
+ ev_result = CAST('x' AS INTEGER);
+ ENDMETHOD.
+ENDCLASS.`;
+    const store = new ObjectStore({root: process.cwd(), roots: [], libs: []});
+    const warnings = portabilityWarnings(source, "zcl_line_check.clas.abap", store, "sqlite");
+    expect(warnings).to.have.length(1);
+    expect(warnings[0]).to.include({severity: "W", line: 9});
+    expect(warnings[0].message).to.contain("CAST to INTEGER cannot raise");
+  });
+
+  it("checks dialect refusals inside write statements", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-amdp-write-check-"));
+    try {
+      const src = join(root, "src");
+      mkdirSync(src, {recursive: true});
+      writeFileSync(join(src, "zstg_write.tabl.xml"), `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_TABL" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <DD02V><TABNAME>ZSTG_WRITE</TABNAME><DDLANGUAGE>E</DDLANGUAGE><TABCLASS>TRANSP</TABCLASS></DD02V>
+   <DD03P_TABLE>
+    <DD03P><FIELDNAME>K</FIELDNAME><KEYFLAG>X</KEYFLAG><ADMINFIELD>0</ADMINFIELD><INTTYPE>X</INTTYPE><INTLEN>000004</INTLEN><NOTNULL>X</NOTNULL><DATATYPE>INT4</DATATYPE><LENG>000010</LENG></DD03P>
+   </DD03P_TABLE>
+  </asx:values>
+ </asx:abap>
+</abapGit>`);
+      const source = `CLASS zcl_write_check DEFINITION PUBLIC CREATE PUBLIC.
+ PUBLIC SECTION.
+ INTERFACES if_amdp_marker_hdb.
+ CLASS-METHODS run EXPORTING VALUE(ev_result) TYPE i.
+ENDCLASS.
+CLASS zcl_write_check IMPLEMENTATION.
+ METHOD run BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT USING zstg_write.
+ INSERT INTO zstg_write (k) VALUES (CAST('x' AS INTEGER));
+ ev_result = 1;
+ ENDMETHOD.
+ENDCLASS.`;
+      const store = new ObjectStore({root, roots: [{path: "src", package: "$WRITE", writable: false}], libs: []});
+      const warnings = portabilityWarnings(source, "zcl_write_check.clas.abap", store, "sqlite");
+      expect(warnings).to.have.length(1);
+      expect(warnings[0]).to.include({severity: "W", line: 8});
+      expect(warnings[0].message).to.contain("CAST to INTEGER cannot raise");
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("checks IF conditions with the same SQLite portability rules", () => {
+    const source = `CLASS zcl_condition_check DEFINITION PUBLIC CREATE PUBLIC.
+ PUBLIC SECTION.
+ INTERFACES if_amdp_marker_hdb.
+ CLASS-METHODS run EXPORTING VALUE(ev_result) TYPE i.
+ENDCLASS.
+CLASS zcl_condition_check IMPLEMENTATION.
+ METHOD run BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+ IF CAST('x' AS INTEGER) = 1 THEN
+   ev_result = 1;
+ END IF;
+ ENDMETHOD.
+ENDCLASS.`;
+    const store = new ObjectStore({root: process.cwd(), roots: [], libs: []});
+    const warnings = portabilityWarnings(source, "zcl_condition_check.clas.abap", store, "sqlite");
+    expect(warnings).to.have.length(1);
+    expect(warnings[0].message).to.contain("CAST to INTEGER cannot raise");
+  });
+
   it("a DDL source whose object name is not the entity still gives the method its RETURNS", async () => {
     const {ObjectStore} = await import("../tools/osd-store.mjs");
     const {rmSync} = await import("node:fs");
@@ -48,6 +142,7 @@ describe("amdp-gen reads a table function's DDLS through the runtime store by th
       // and the class names the entity, as FOR TABLE FUNCTION always does
       writeFileSync(join(src, "zstg_ddl_src.ddls.asddls"), `@EndUserText.label: 'x'
 define table function Zstg_Tf_Entity
+with parameters p_value : abap.int4
 returns { k : abap.int4; }
 implemented by method zcl_stg_tf_entity=>get;\n`);
       writeFileSync(join(src, "zcl_stg_tf_entity.clas.abap"), `
@@ -58,7 +153,7 @@ CLASS zcl_stg_tf_entity DEFINITION PUBLIC FINAL CREATE PUBLIC.
 ENDCLASS.
 CLASS zcl_stg_tf_entity IMPLEMENTATION.
   METHOD get BY DATABASE FUNCTION FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
-    RETURN SELECT 1 AS k FROM dummy;
+    RETURN SELECT :p_value AS k FROM dummy;
   ENDMETHOD.
 ENDCLASS.\n`);
       const store = new ObjectStore({root, roots: [{path: "src", package: "$ENTITY", writable: false}], libs: []});
@@ -67,6 +162,8 @@ ENDCLASS.\n`);
       expect(made.procedures).to.have.length(1);
       expect(made.procedures[0].portableRefusal, JSON.stringify(made.procedures[0].portableRefusal)).to.equal(undefined);
       expect(made.procedures[0].portable.outputSchema).to.deep.equal({K: {abap: "I"}});
+      expect(portabilityWarnings(readFileSync(join(src, "zcl_stg_tf_entity.clas.abap"), "utf8"),
+        "zcl_stg_tf_entity.clas.abap", store, "sqlite")).to.deep.equal([]);
     } finally {
       rmSync(root, {recursive: true, force: true});
     }
