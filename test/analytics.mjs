@@ -91,13 +91,16 @@ describe("analytics: NYC taxi cube through SADL", () => {
     // 2025: fares at 101 %, a busier Bronx -- near the sample month the shape
     // assertions below were written against
     const synthetic = async () => Number(await (await fetch(S + "/Zc_Osd_TaxicubeSet/$count?$filter=FACTID ge '9000000000'")).text());
-    expect(await synthetic(), "the start makes no synthetic rows").to.equal(0);
-    expect(await taxiAction("GenerateYear?Year=2025")).to.match(/2025 generated/);
+    expect(await synthetic(), "the start makes no synthetic rows (is OSD_DEMO_ROWS exported?)").to.equal(0);
+    let reset;
     try {
+      expect(await taxiAction("GenerateYear?Year=2025")).to.match(/2025 generated/);
       await plausibleYear();
     } finally {
-      expect(await taxiAction("ResetData")).to.match(/removed 20000/);
+      // no assertion here: a failing reset must not hide the first error
+      reset = await taxiAction("ResetData").catch((e) => String(e));
     }
+    expect(reset).to.match(/removed 20000/);
     expect(await synthetic()).to.equal(0);
   });
 

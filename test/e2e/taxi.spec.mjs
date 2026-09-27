@@ -1,6 +1,27 @@
 import {test, expect} from "@playwright/test";
 
+const TAXI = "/sap/opu/odata/sap/ZOSD_TAXI_SRV";
+
+/** ResetData over HTTP, whatever the page got to; never throws */
+async function resetTaxi(request) {
+  try {
+    const head = await request.get(TAXI + "/", {headers: {"x-csrf-token": "fetch"}});
+    await request.post(TAXI + "/ResetData", {headers: {"x-csrf-token": head.headers()["x-csrf-token"] ?? ""}});
+  } catch {
+    // the server may be gone; the database is in memory
+  }
+}
+
 test("NYC TLC analytical page renders chart and grouped table from OData", async ({page}) => {
+  try {
+    await taxiPage(page);
+  } finally {
+    // the year the page made goes, also when an assertion stopped it midway
+    if (process.env.OSD_TAXI_FULL !== "1") await resetTaxi(page.request);
+  }
+});
+
+async function taxiPage(page) {
   const calls = [];
   const failures = [];
   page.on("request", (request) => {
@@ -59,4 +80,4 @@ test("NYC TLC analytical page renders chart and grouped table from OData", async
     await confirm.getByRole("button", {name: "Remove"}).click();
     await expect(page.getByText(/No sample data yet/).first()).toBeVisible();
   }
-});
+}
