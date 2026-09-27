@@ -30,6 +30,7 @@
     "onCommand:osd.quickStart",
     "onCommand:osd.gettingStarted",
     "onCommand:osd.webProbe",
+    "onCommand:osd.webReadProbe",
     "onCommand:osd.webVerifyLastTravel",
     "onCommand:osd.webProbeView",
     "onView:osdTree"
@@ -185,6 +186,7 @@
     },
     "commands": [
       {"command": "osd.webProbe", "title": "osd: Web probe"},
+      {"command": "osd.webReadProbe", "title": "osd: Web read probe"},
       {"command": "osd.webVerifyLastTravel", "title": "osd: Web verify last Travel"},
       {"command": "osd.webProbeView", "title": "osd: Web probe view"},
       {"command": "osd.showDumps", "title": "osd: Show short dumps"},
@@ -237,6 +239,7 @@
     "menus": {
       "commandPalette": [
         {"command": "osd.webProbe", "when": "isWeb"},
+        {"command": "osd.webReadProbe", "when": "isWeb"},
         {"command": "osd.webVerifyLastTravel", "when": "isWeb"},
         {"command": "osd.webProbeView", "when": "isWeb"}
       ],

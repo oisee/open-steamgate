@@ -58,7 +58,7 @@ function gateway(request) {
   const result = requestQueue.then(async () => {
     const backend = await backendOf();
     const answer = await backend.handleRequest(request);
-    if (!["GET", "HEAD"].includes(request.method)) {
+    if (!["GET", "HEAD"].includes(request.method) && !request.path.startsWith("/sap/bc/adt/datapreview/") && request.path !== "/osd/sql") {
       await writeValue(backend.buildId, await backend.exportDatabase());
     }
     return answer;
@@ -131,6 +131,28 @@ async function bridgeRequest(message) {
   } catch (error) {
     return bridgeError(502, String(error?.message ?? error));
   }
+}
+
+async function readProbe() {
+  const post = (path, body, search = "") => gateway({method: "POST", path, search,
+    headers: {"content-type": path === "/osd/sql" ? "application/json" : "text/plain"},
+    body: encoder.encode(path === "/osd/sql" ? JSON.stringify(body) : body)});
+  const sql = await post("/osd/sql", {sql: "SELECT * FROM zstg_demo UP TO 5 ROWS", max: 100});
+  if (sql.status !== 200) throw new Error(`SQL read: ${sql.status} ${decoder.decode(sql.body)}`);
+  const result = JSON.parse(decoder.decode(sql.body));
+  if (result.rows.length !== 5 || !result.columns.includes("seats") ||
+      typeof result.rows[0].seats !== "number" || result.rows[0].travel_id !== "T0001") {
+    throw new Error("SQL read did not return five typed rows");
+  }
+  const ddic = await post("/sap/bc/adt/datapreview/ddic", "SELECT * FROM zstg_demo", "?ddicEntityName=ZSTG_DEMO&rowNumber=3");
+  const xml = decoder.decode(ddic.body);
+  if (ddic.status !== 200 || !xml.includes("<dataPreview:columns>") || !xml.includes("<dataPreview:data>")) throw new Error(`DDIC read: ${ddic.status} ${xml.slice(0, 300)}`);
+  const capped = await post("/osd/sql", {sql: "SELECT * FROM zstg_demo", max: 2});
+  if (capped.status !== 200 || JSON.parse(decoder.decode(capped.body)).rows.length !== 2) throw new Error("SQL row cap failed");
+  const invalid = await post("/osd/sql", {sql: "DELETE FROM zstg_demo"});
+  const refusal = JSON.parse(decoder.decode(invalid.body));
+  if (invalid.status !== 400 || refusal.error?.code !== "NOT_ALLOWED") throw new Error("Invalid SQL was not refused");
+  return {sql: sql.status, rows: result.rows.length, ddic: ddic.status, cap: 2, invalid: invalid.status};
 }
 
 function required(answer, status, step) {
@@ -358,6 +380,7 @@ export async function activate(context) {
     }
   };
   context.subscriptions.push(vscode.commands.registerCommand("osd.webProbe", run("OSD_WEB_PROBE", probe)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.webReadProbe", run("OSD_WEB_READ", readProbe)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.webVerifyLastTravel", run("OSD_WEB_VERIFY", verifyLastTravel)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.webProbeView", () => {
     const panel = vscode.window.createWebviewPanel("osdWebProbe", "OSD web gateway", vscode.ViewColumn.One, {enableScripts: true});
