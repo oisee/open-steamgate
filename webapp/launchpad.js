@@ -240,8 +240,8 @@ sap.ui.define([], function () {
       if (icon && icon.getAttribute("src") !== logo) {
         icon.setAttribute("src", logo);
       }
-      if (icon && icon.getAttribute("alt") !== "PASS logo") {
-        icon.setAttribute("alt", "PASS logo");
+      if (icon && icon.getAttribute("alt") !== "open-steamgate") {
+        icon.setAttribute("alt", "open-steamgate");
       }
     }
     new MutationObserver(update).observe(root, {

@@ -772,7 +772,7 @@ test("the launchpad carries the ABAP-served demos, wired to the ICF paths", asyn
     await expect(page.getByText("a Z-machine, in ABAP")).toBeVisible({timeout: 60000});
     await expect(page.getByText("a demo, in ABAP")).toBeVisible({timeout: 60000});
     const logo = page.locator("#shell-header-icon");
-    await expect(logo).toHaveAttribute("alt", "PASS logo");
+    await expect(logo).toHaveAttribute("alt", "open-steamgate");
     await expect(logo).toHaveAttribute("src", /\/app\/osd-airship\.svg$/);
     await expect.poll(() => logo.evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
     expect(await logo.evaluate((img) => ({width: img.clientWidth, height: img.clientHeight})))
@@ -996,7 +996,7 @@ test("the launchpad's console and network, characterised", async () => {
     // replaces the src. The browser cancels only that superseded request;
     // the replacement itself must load, and every other request must work.
     const logo = page.locator("#shell-header-icon");
-    await expect(logo).toHaveAttribute("alt", "PASS logo");
+    await expect(logo).toHaveAttribute("alt", "open-steamgate");
     await expect.poll(() => logo.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
     const missing = refused.filter((entry) => !/^net::ERR_ABORTED https:\/\/ui5\.sap\.com\/[^/]+\/resources\/sap\/ushell\/themes\/base\/img\/SAPLogo\.svg$/.test(entry));
     expect(missing, `the page asked for something it did not get:\n${missing.join("\n")}`).toHaveLength(0);

@@ -1,5 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="open-steamgate airship">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="36 -6 468 468" role="img" aria-label="open-steamgate">
   <title>open-steamgate airship</title>
+  <!-- The emblem's cream parts, with its dark lines cut out: drawn through a
+       luminance mask so it works on any background. -->
   <defs>
     <style>
       .c{fill:#F6F1E4}
@@ -7,10 +9,8 @@
       .ln{fill:none;stroke:#17191D;stroke-width:7;stroke-linecap:round;stroke-linejoin:round}
       .sp{fill:none;stroke:#F6F1E4;stroke-width:12;stroke-linecap:round}
     </style>
-  </defs>
+    <mask id="airship" maskUnits="userSpaceOnUse" x="0" y="-40" width="512" height="560">
 
-  <!-- ground -->
-  <rect x="0" y="0" width="512" height="512" class="d"/>
 
   <!-- speed lines -->
   <path class="sp" d="M88 204H150M58 226H104M72 262H100M46 282H92M72 318H104"/>
@@ -93,4 +93,8 @@
     <path d="M86 392 Q86 376 104 376 Q110 356 132 360 Q146 344 164 356 Q180 354 184 372 Q200 374 200 392 Z"/>
     <path d="M364 378 Q364 366 378 366 Q384 350 400 354 Q414 350 418 366 Q430 368 430 378 Z"/>
   </g>
+
+    </mask>
+  </defs>
+  <rect x="0" y="-40" width="512" height="560" fill="#1F2A33" mask="url(#airship)"/>
 </svg>
