@@ -1077,7 +1077,21 @@ prebuilt `build/` and `gen/` add 52 MB to each materialized copy (and to
 each saved snapshot of an old one). The ~4 s target was the build step
 alone; what remains of a first start is the first boot filling the
 database (demo data, the taxi facts), which a second start of the same copy
-does not pay. `OSD_VSIX_PREBUILT=0` packages without it; the vsix tests
+does not pay.
+
+The generation's cross-reference rows ship with it too
+(`build/xref/<key>.json`, `tools/osd-xref-seed.mjs`), written in the seed
+after its build, so the first start seeds CROSS, WBCROSSGT, WBCROSSGTX and
+D010INC from the file instead of parsing the tree. The key is portable for
+the same reason the generation's name is (tree-relative paths and contents);
+the vsix test checks a copy materialized elsewhere computes it. Measured on
+one package, the launcher's way, with and without the file in the copy:
+the cross-reference step 5069 ms -> 110 ms, and the serving child's start
+to the first `TravelSet` answer (the "serve" column above, in a separate
+run) 10.0 s -> 5.0 s (measured 2026-09-27). The file is ~0.3 MB
+unpacked, inside the 52 MB above.
+
+`OSD_VSIX_PREBUILT=0` packages without it; the vsix tests
 that only look at the archive's shape set it. The binary does not
 prebuild: it names generations by its own bytes (`generatorIdentity`), so
 a shipped generation could never be reused there.
