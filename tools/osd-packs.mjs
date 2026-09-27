@@ -191,7 +191,14 @@ export function packsOf(root, env = process.env) {
       if (previous === undefined) found.set(pack.name, pack);
     }
   }
-  return [...found.values()].sort((a, b) => a.order - b.order || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  // The web bundle runs transpilation and preview generation in child
+  // processes; this selection must reach every consumer of pack inputs.
+  const selected = env.OSD_WEB_PACKS;
+  const names = selected?.split(",").map((name) => name.trim());
+  const packs = selected === undefined || selected === "all"
+    ? [...found.values()]
+    : [...found.values()].filter((pack) => names.includes(pack.name));
+  return packs.sort((a, b) => a.order - b.order || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 /** a pack's ABAP folder as the build and the store name it: root-relative */

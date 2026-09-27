@@ -14,7 +14,9 @@ The repository's pinned ABAP libraries must be present in `.local/lars/` (`npm r
 npm run web:vscode:test
 ```
 
-`web:vscode:test` first runs `web:vscode`, so it always tests a fresh bundle. `web:vscode` transpiles the gateway, generates the preview's seed and service tables without building its service worker, and bundles `editors/vscode/dist/web/extension.js` with the preview webpack aliases and polyfills. It prints the bundle's bytes and MiB. The headless test uses `npx -y @vscode/test-web` and the repository's Playwright Chromium; it uses a temporary VS Code download and browser profile, removes them afterward, and installs nothing into this clone's symlinked `node_modules`. It invokes the probe in VS Code's command palette, checks 200/201/200 and the returned row, reloads the same Chromium page, checks the row again, and checks the webview bridge. It prints both `$metadata` timings.
+`web:vscode:test` first runs `web:vscode`, so it always tests a fresh bundle. `web:vscode` transpiles the gateway, generates the preview's seed and service tables without building its service worker, and bundles `editors/vscode/dist/web/extension.js` with the preview webpack aliases and polyfills. It prints raw and gzip byte counts. The headless test uses `npx -y @vscode/test-web` and the repository's Playwright Chromium; it uses a temporary VS Code download and browser profile, removes them afterward, and installs nothing into this clone's symlinked `node_modules`. It invokes the probe in VS Code's command palette, checks 200/201/200 and the returned row, reloads the same Chromium page, checks the row again, and checks the webview bridge. It prints both `$metadata` timings.
+
+The default web profile is **core+zork**, matching the default `.vsix` pack selection. Set `OSD_WEB_PACKS=` for **core** (no packs), `OSD_WEB_PACKS=zork` for **core+zork**, or `OSD_WEB_PACKS=all` for the previous build with every discovered pack. A comma separated list selects other in-tree packs. `OSD_VSIX_PACKS` is used when `OSD_WEB_PACKS` is unset, so the two builds can share one selection. Selection applies to transpilation, seed rows, services, and the bundle; an unknown pack or a selected pack with missing fetched assets fails the build.
 
 For a manual session, run `npm run web:vscode`, then `npx -y @vscode/test-web --browser chromium --extensionDevelopmentPath ./editors/vscode` and use the three commands above. Keep an npm cache in a writable temporary directory if your normal npm cache is read-only.
 
@@ -28,4 +30,10 @@ P1 proves one in-worker OData route, one webview fetch bridge, and IndexedDB per
 
 ## Measured here
 
-The pinned libraries were bootstrapped into this checkout before the build. The production webworker bundle is **44,852,884 bytes (42.78 MiB)**. In the final Chromium run, activation start to the activation request's `$metadata` response was **3,358 ms**; command start to the probe request's `$metadata` response was **7 ms**. The probe returned `$metadata` 200, POST 201, GET 200; after a page reload, GET returned the same row with 200. The webview bridge displayed `$metadata` with 200. These are local measurements, not a download or startup target.
+The pinned libraries and fetched pack assets were bootstrapped into this checkout. Each row is a fresh production bundle and a headless Chromium run of `web:vscode:test` on 2026-09-27. Gzip is measured over the emitted `extension.js` with Node's default gzip settings. Times are activation start to the activation request's first `$metadata` response. These are local measurements, not a download or startup target.
+
+| Profile | Packs | Raw bytes | Gzip bytes | Activation to first `$metadata` | Probe and reload |
+| --- | --- | ---: | ---: | ---: | --- |
+| Today's all-pack build (`OSD_WEB_PACKS=all`) | All six checkout packs | 44,856,537 | 4,662,639 | 3,340 ms | 200/201/200; reload GET 200, same row; webview 200 |
+| Core (`OSD_WEB_PACKS=`) | None | 34,255,462 | 3,357,844 | 3,053 ms | 200/201/200; reload GET 200, same row; webview 200 |
+| Core+Zork (default) | Zork | 34,596,002 | 3,402,266 | 2,989 ms | 200/201/200; reload GET 200, same row; webview 200 |

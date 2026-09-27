@@ -56,7 +56,7 @@
     "start:duckdb": "npm run transpile && STG_DB=duckdb node test/run.mjs",
     "start:hana": "npm run transpile && STG_DB=hana node test/run.mjs",
     "web:preview": "npm run transpile && node scripts/build-preview.mjs",
-    "web:vscode": "npm run transpile && OSD_PREVIEW_GENERATE_ONLY=1 node scripts/build-preview.mjs && node scripts/build-vscode-web.mjs",
+    "web:vscode": "node scripts/build-vscode-web.mjs",
     "web:vscode:test": "node scripts/test-web-probe.mjs",
     "web:preview:duckdb": "npm run transpile && OSD_PREVIEW_DB=duckdb node scripts/build-preview.mjs",
     "web:serve": "node scripts/serve-build.mjs",
