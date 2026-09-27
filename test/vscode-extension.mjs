@@ -1785,6 +1785,69 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     expect(again.disposed).to.equal(true);
   });
 
+  it("page tabs: a moved tab is forgotten when closed; a Stop racing a reload or a collision leaves no orphan", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {openPage, reloadPageTabs, closePageTabs} = loadExtension(api);
+    const moved = await openPage("http://localhost:3591/app/flp.html");
+    await reloadPageTabs(3592);
+    moved.dispose();
+    const fresh = await openPage("http://localhost:3592/app/flp.html");
+    expect(fresh, "a closed tab is not revealed again").to.not.equal(moved);
+    // a Stop while the reload awaits asExternalUri, with a second tab still to come
+    const second = await openPage("http://localhost:3592/osd/serving");
+    const reloading = reloadPageTabs(3593);
+    closePageTabs();
+    await reloading;
+    expect([fresh.disposed, second.disposed]).to.deep.equal([true, true]);
+    for (const page of ["app/flp.html", "osd/serving"]) {
+      const after = await openPage(`http://localhost:3593/${page}`);
+      expect(after.disposed, `${page}: not a tab the Stop closed`).to.equal(false);
+    }
+    // two tabs that would land on one URL: one is kept, the other closed, none untracked
+    closePageTabs();
+    const a = await openPage("http://localhost:3594/osd/serving");
+    const b = await openPage("http://localhost:3595/osd/serving");
+    await reloadPageTabs(3595);
+    expect([a.disposed, b.disposed]).to.deep.equal([true, false]);
+    closePageTabs();
+    expect(b.disposed, "Stop reaches every tab still open").to.equal(true);
+  });
+
+  it("page tabs through the real Launcher: a rebuild keeps and reloads them, Stop closes them", async function () {
+    this.timeout(20000);
+    const api = vscodeStub({home: ROOT});
+    const {openPage, SystemController} = loadExtension(api);
+    const {Launcher} = require("../editors/vscode/launcher.js");
+    const osdHome = mkdtempSync(path.join(tmpdir(), "osd-q7-home-"));
+    const storageDir = mkdtempSync(path.join(tmpdir(), "osd-q7-storage-"));
+    mkdirSync(path.join(osdHome, "tools"), {recursive: true});
+    mkdirSync(path.join(osdHome, "test"), {recursive: true});
+    writeFileSync(path.join(osdHome, "tools", "osd-build.mjs"), "process.exit(0);\n");
+    writeFileSync(path.join(osdHome, "test", "run.mjs"),
+      "import {createServer} from 'node:http';\n" +
+      "createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'fake'})); })" +
+      ".listen(Number(process.env.STG_PORT), '127.0.0.1');\n");
+    const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    controller.attachLauncher(launcher);
+    try {
+      await launcher.start();
+      const tab = await openPage(`http://localhost:${launcher.port}/app/flp.html`, {title: "Fiori Launchpad"});
+      tab.title = "Fiori Launchpad";
+      tab.webview.html = "stale";
+      await launcher.rebuild();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(tab.disposed, "a rebuild keeps the tab").to.equal(false);
+      expect(tab.webview.html, "and reloads it").to.contain(`http://localhost:${launcher.port}/app/flp.html`);
+      await controller.stop();
+      expect(tab.disposed, "Stop closes it").to.equal(true);
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
   it("the details panel's $metadata links: a tab by default, the browser for 'in browser'", async () => {
     const api = vscodeStub({home: ROOT});
     const {openDetailsMetadata} = loadExtension(api);

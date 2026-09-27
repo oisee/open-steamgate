@@ -527,19 +527,7 @@ class SystemController {
         debug: osdDebugEnabled() || forceDebug,
       });
       launcher.homeKind = choice.kind;
-      launcher.on("log", (line) => this.output.append(line));
-      wirePageTabs(launcher);
-      launcher.on("state", (state) => {
-        if (state === "stopped") {
-          this.debuggerTransition = this.debuggerTransition.then(() => this.applyDebuggerEvent({type: "system-stopped"}));
-        }
-        this.emitter.fire();
-      });
-      launcher.on("exit", ({code, signal}) => {
-        this.output.appendLine(`\n--- osd exited on its own (code ${code ?? "?"}, signal ${signal ?? "?"}) ---`);
-        vscode.window.showWarningMessage(`osd: the system stopped unexpectedly (code ${code ?? "?"}, signal ${signal ?? "?"})`);
-      });
-      this.launcher = launcher;
+      this.attachLauncher(launcher);
     } else {
       // Same osdHome, stopped: pick up current folders and settings before
       // the launcher's next projection and build.
@@ -669,6 +657,24 @@ class SystemController {
     this.output.show(true);
     this.output.appendLine(`--- osd start: ${launcher.osdHome} (${launcher.databaseLabel}) ---`);
     return this.#launch(launcher, launchOptions, "osd start");
+  }
+
+  /** Everything this controller listens to on its launcher, in one place
+   *  (so a test can drive a real Launcher through it). */
+  attachLauncher(launcher) {
+    launcher.on("log", (line) => this.output.append(line));
+    wirePageTabs(launcher);
+    launcher.on("state", (state) => {
+      if (state === "stopped") {
+        this.debuggerTransition = this.debuggerTransition.then(() => this.applyDebuggerEvent({type: "system-stopped"}));
+      }
+      this.emitter.fire();
+    });
+    launcher.on("exit", ({code, signal}) => {
+      this.output.appendLine(`\n--- osd exited on its own (code ${code ?? "?"}, signal ${signal ?? "?"}) ---`);
+      vscode.window.showWarningMessage(`osd: the system stopped unexpectedly (code ${code ?? "?"}, signal ${signal ?? "?"})`);
+    });
+    this.launcher = launcher;
   }
 
   async stop() {
@@ -1458,6 +1464,8 @@ async function openDetailsMetadata(item, message) {
  *  changed, the way a person would reload a browser tab. */
 async function reloadPageTabs(port) {
   for (const [url, panel] of [...pageTabs]) {
+    // closed (a Stop, or the person) since the snapshot: nothing to reload
+    if (pageTabs.get(url) !== panel) continue;
     let next = url;
     try {
       const u = new URL(url);
@@ -1469,7 +1477,13 @@ async function reloadPageTabs(port) {
       continue;
     }
     if (next !== url) {
+      const there = pageTabs.get(next);
       pageTabs.delete(url);
+      if (there !== undefined && there !== panel) {
+        // two tabs would now show one page: keep the one already there
+        panel.dispose();
+        continue;
+      }
       pageTabs.set(next, panel);
     }
     let external;
@@ -1478,7 +1492,14 @@ async function reloadPageTabs(port) {
     } catch {
       external = vscode.Uri.parse(next);
     }
-    panel.webview.html = iframePanelHtml(external.toString(), panel.title ?? next);
+    // a Stop while that was awaited closed it
+    if (pageTabs.get(next) !== panel) continue;
+    try {
+      panel.webview.html = iframePanelHtml(external.toString(), panel.title ?? next);
+    } catch {
+      // disposed under us: forget it
+      if (pageTabs.get(next) === panel) pageTabs.delete(next);
+    }
   }
 }
 
