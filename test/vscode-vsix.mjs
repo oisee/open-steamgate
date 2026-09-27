@@ -52,8 +52,10 @@ function testScratch(name) {
   mkdirSync(SCRATCH, {recursive: true});
   return mkdtempSync(join(SCRATCH, `${name}-`));
 }
+// OSD_VSIX_PREBUILT=0 unless a test asks: the prebuilt generation costs a
+// cold build (~20 s) per package, and only one test here is about it.
 function buildTestVsix(outputDir, env = {}) {
-  return buildVsix({...env, OSD_VSIX_BROTLI_QUALITY: "4"}, outputDir);
+  return buildVsix({OSD_VSIX_PREBUILT: "0", ...env, OSD_VSIX_BROTLI_QUALITY: "4"}, outputDir);
 }
 function packagedController(extensionDir, workspace, home) {
   class EventEmitter {
@@ -367,6 +369,37 @@ CLASS zcl_b0_hello IMPLEMENTATION.
 ENDCLASS.
 `);
 }
+
+describe("packaging a prebuilt generation (T2, docs/ideas.md)", function () {
+  this.timeout(240000);
+
+  it("ships the seed's own generation, and a first start elsewhere reuses it", async function () {
+    const scratch = testScratch("prebuilt");
+    try {
+      const {out} = await buildTestVsix(join(scratch, "build"), {OSD_VSIX_PREBUILT: "1"});
+      const entries = packagedSeedEntries(out).split("\n");
+      const generations = [...new Set(entries.map((entry) => /^build\/by-input\/([0-9a-f]{16})\//.exec(entry)?.[1])
+        .filter((hash) => hash !== undefined))];
+      expect(generations, "exactly one generation, as real files").to.have.length(1);
+      expect(entries.some((entry) => entry.startsWith("gen/"))).to.equal(true);
+      expect(entries.some((entry) => /^(output|build\/live)\/?$/.test(entry)), "no links: the first build makes them").to.equal(false);
+
+      const unzipDir = join(scratch, "unzipped");
+      execFileSync("unzip", ["-q", out, "-d", unzipDir]);
+      const extensionDir = join(unzipDir, "extension");
+      const {ensureMaterializedHome} = createRequire(import.meta.url)(join(extensionDir, "launcher.js"));
+      // another path than the one it was built under: the name must not depend on it
+      const home = await ensureMaterializedHome(join(extensionDir, "osd"), join(scratch, "elsewhere", "globalStorage"));
+      const env = {...process.env};
+      delete env.OSD_PACKS;
+      const log = execFileSync(process.execPath, ["tools/osd-build.mjs"], {cwd: home, env, encoding: "utf8"});
+      expect(log, "the first build of a materialized copy").to.match(new RegExp(`osd-build: reused ${generations[0]} `));
+      expect(log).to.not.match(/osd-build: built /);
+    } finally {
+      rmSync(scratch, {recursive: true, force: true});
+    }
+  });
+});
 
 describe("packaging: the .vsix installs and runs outside this checkout (docs/vscode-extension.md, Packaging)", function () {
   this.timeout(240000);

@@ -1032,6 +1032,37 @@ ever signals the one pid it spawned.
 
 ## Packaging
 
+**T2 prebuilt generation (2026-09-27).** `npm run vsix` now runs the seed's
+own `tools/osd-build.mjs` inside the staged seed and ships
+`build/by-input/<hash>/` and `gen/` as real files (no `build/live`, no
+`output`, no generation `test` link: the first build makes those). The
+portable-hash obstacle described below does not arise there: inside the
+staged seed the transpiler is a plain copy in the seed's `node_modules`,
+so `describeBuild()` says "published" with no path or git state, and the
+hash reads paths relative to the tree. The same seed staged under two
+different paths named the same generation, and a copy materialized under a
+third path reused it.
+
+Measured on a cloud container (Node 22.22) with a throwaway script that
+does what the launcher does (materialize, `tools/osd-build.mjs`, then
+`test/run.mjs` until `ZSTG_DEMO_SRV/TravelSet` answers), default Zork
+package:
+
+| | materialize | build | serve | first start |
+| --- | ---: | ---: | ---: | ---: |
+| `OSD_VSIX_PREBUILT=0` | 1.4 s | 23.1 s (built) | 12.0 s | 36.5 s |
+| prebuilt (default) | 1.9 s | 0.4 s (reused) | 13.4 s | 15.7 s |
+
+`.vsix` 9.4 MB -> 11.9 MB. The ~4 s target was the build step alone; what
+remains of a first start is the first boot filling the database (demo
+data, the taxi facts), which a second start of the same copy does not pay.
+A workspace pack is another input and still builds cold, as before;
+`OSD_PACKS` is unset for the prebuild because a first start with no pack
+runs without one. `OSD_VSIX_PREBUILT=0` packages without it; the vsix
+tests that only look at the archive's shape set it. The binary does not
+prebuild: it names generations by its own bytes (`generatorIdentity`),
+so a shipped generation could never be reused there.
+
 **T3 solid seed (2026-09-27).** The package now contains one
 `extension/osd/seed.tar.br` and `extension/osd/.seed-id` instead of separate
 seed files in the VSIX ZIP. The tar code in `launcher.js` writes regular files and directories
