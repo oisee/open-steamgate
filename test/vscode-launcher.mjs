@@ -14,6 +14,7 @@ import {mkdtempSync, mkdirSync, readdirSync, readlinkSync, rmSync, writeFileSync
 import {tmpdir} from "node:os";
 import {delimiter, join} from "node:path";
 import {once} from "node:events";
+import {brotliCompressSync} from "node:zlib";
 import {ObjectStore} from "../tools/osd-store.mjs";
 
 const {
@@ -26,6 +27,7 @@ const {
   DATABASE_KINDS, defaultDedicatedName, databaseEnv, describeDatabase, duckdbAvailable,
   WARM_MEMORY_FLOOR_BYTES, shouldWarm, warmEnvironment,
   SEED_ID_FILE, seedContentId, writeSeedId,
+  writeTar,
 } = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 
 // No chai-as-promised in this tree's node_modules, so a rejection is caught
@@ -677,6 +679,22 @@ describe("editors/vscode/launcher.js: linkOrCopyTree / ensureMaterializedHome (p
   afterEach(() => {
     rmSync(seedDir, {recursive: true, force: true});
     rmSync(storageDir, {recursive: true, force: true});
+  });
+
+  it("concurrent first starts publish one complete archived home", async () => {
+    rmSync(join(seedDir, "output"));
+    seedId = writeSeedId(seedDir);
+    const tar = join(storageDir, "seed.tar");
+    writeTar(seedDir, tar);
+    writeFileSync(join(seedDir, "seed.tar.br"), brotliCompressSync(readFileSync(tar)));
+    const [first, second] = await Promise.all([
+      Promise.resolve().then(() => ensureMaterializedHome(seedDir, storageDir)),
+      Promise.resolve().then(() => ensureMaterializedHome(seedDir, storageDir)),
+    ]);
+    expect(first).to.equal(second);
+    expect(readFileSync(join(first, MATERIALIZED_MARKER), "utf8").trim()).to.equal(seedId);
+    expect(readFileSync(join(first, "top.txt"), "utf8")).to.equal("hello");
+    expect(readdirSync(storageDir).filter((name) => name.startsWith(".osd-home-extract-"))).to.deep.equal([]);
   });
 
   it("linkOrCopyTree copies regular files, keeps symlinks as symlinks, and recurses into directories", () => {

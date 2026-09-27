@@ -1024,14 +1024,40 @@ ever signals the one pid it spawned.
 
 ## Packaging
 
+**T3 solid seed (2026-09-27).** The package now contains one
+`extension/osd/seed.tar.br` and `extension/osd/.seed-id` instead of separate
+seed files in the VSIX ZIP. The tar code in `launcher.js` writes regular files and directories
+with PAX paths for long names and their Unix modes. On first start the
+launcher streams Brotli decompression and tar extraction into the keyed
+`osd-home-<seedId>` directory, checks the unpacked tree's content ID, then
+writes its marker. An incomplete or mismatched extraction is removed. Existing
+homes are reused and older edited homes are kept as before. The ID covers
+paths, file bytes, and mode bits after seed symlinks have been materialized.
+
+Brotli is used for every package. The extension declares VS Code `^1.101.0`;
+[VS Code 1.101 release notes](https://code.visualstudio.com/updates/v1_101)
+say that release ships Electron 35 with Node 22.15.1. [Node's zlib
+documentation](https://nodejs.org/download/release/v22.15.0/docs/api/zlib.html)
+shows that `zstdDecompress` was added in 22.15.0, so the minimum VS Code
+runtime does have it, though it is experimental. T3 uses Brotli as the
+preferred stable format. The seed includes no `output/`.
+Its 23 preexisting `.map` files were all under `node_modules/` and are omitted
+now. Q1/DX5 ABAP debugger maps are made with the first transpile under
+`output/` and remain available in the materialized home.
+
+On this machine, the default Zork package measured 17.7 MiB before T3 and
+8.0 MiB after T3 (a 9.7 MiB reduction). The unpacked seed is 65.4 MiB.
+The first-start unpack time and end-to-end packaging test results are recorded
+in `REPORT.md` for this change.
+
 *2026-09-26.* One universal `.vsix` that carries the system inside it:
 `npm run vsix` (`scripts/build-vsix.mjs`) writes
 `build/vsix/osd-vscode-<version>.vsix`, built with the system `zip` CLI --
 not `vsce` -- as a plain zip of `[Content_Types].xml`, `extension.vsixmanifest`
 (both generated from `editors/vscode/package.json` the way `vsce` does,
 `Identity`/`DisplayName`/`Engine`/`ExtensionKind` read straight off it) and
-an `extension/` folder holding the extension's own files plus a runnable
-system tree at `extension/osd/`.
+an `extension/` folder holding the extension's own files plus the compressed
+system seed at `extension/osd/seed.tar.br`.
 
 Build it from a fresh checkout with Node 22.14+ or Node 24 (the repository's
 `.nvmrc` selects 24):
@@ -1074,7 +1100,7 @@ file. Local edits do not change the commit count, so a dirty build keeps the
 same extension version; it logs that version with the content seed ID, which
 keys the materialized install to the actual packaged files.
 
-**What is in `extension/osd/`**, found by tracing rather than guessing:
+**What the archive unpacks into `osd-home-<seedId>/`**, found by tracing rather than guessing:
 **not `output/`** -- see "two false starts, and a third" below for why a
 first design shipped it and a second one dropped it again; `src/`,
 `packs/zork/` by default (set `OSD_VSIX_PACKS=zork,o4d` to include more),
@@ -1194,9 +1220,9 @@ the second code path it needs. Backlogged rather than attempted under this
 task's one-hour budget for it.
 
 **Materializing on first start** (`osd.home` unset, the packaged path):
-packaging writes the SHA-256 content ID of the staged `extension/osd/` tree
+packaging writes the SHA-256 content ID of the staged seed tree
 into `extension/osd/.seed-id`. The ID covers relative paths and file contents
-and excludes `.seed-id` itself. `ensureMaterializedHome()`
+and mode bits, and excludes `.seed-id` itself. `ensureMaterializedHome()`
 (`editors/vscode/launcher.js`) uses that ID as the key for
 `<globalStorageUri>/osd-home-<seedId>/`; its `.osd-materialized` marker stores
 the same ID. A matching ID reuses the existing copy, including any edits made

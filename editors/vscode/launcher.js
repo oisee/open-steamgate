@@ -23,6 +23,7 @@ const {EventEmitter} = require("node:events");
 const {createHash} = require("node:crypto");
 const {request} = require("node:http");
 const fs = require("node:fs");
+const {createBrotliDecompress} = require("node:zlib");
 const os = require("node:os");
 const path = require("node:path");
 
@@ -543,7 +544,7 @@ const OLD_HOME_NAME_PATTERN = /^(?:osd-home-(?:[0-9a-f]{64}|previous(?:-(?:[0-9a
  *  materialization marker are excluded as launcher metadata. */
 function seedContentId(seedDir) {
   const hash = createHash("sha256");
-  const record = (kind, rel, content = Buffer.alloc(0)) => {
+  const record = (kind, rel, content = Buffer.alloc(0), mode = 0) => {
     const name = Buffer.from(rel.replaceAll(path.sep, "/"), "utf8");
     const header = Buffer.alloc(13);
     header[0] = kind;
@@ -551,11 +552,14 @@ function seedContentId(seedDir) {
     header.writeBigUInt64BE(BigInt(content.length), 5);
     hash.update(header);
     hash.update(name);
+    const modeBytes = Buffer.alloc(4);
+    modeBytes.writeUInt32BE(mode & 0o7777);
+    hash.update(modeBytes);
     hash.update(content);
   };
   const visit = (dir, rel = "") => {
     const entries = fs.readdirSync(dir).sort();
-    if (rel !== "") record(0x44, rel);
+    if (rel !== "") record(0x44, rel, Buffer.alloc(0), fs.lstatSync(dir).mode);
     for (const name of entries) {
       if (rel === "" && (name === SEED_ID_FILE || name === MATERIALIZED_MARKER)) continue;
       const file = path.join(dir, name);
@@ -566,7 +570,7 @@ function seedContentId(seedDir) {
       } else if (stat.isSymbolicLink()) {
         record(0x4c, childRel, Buffer.from(fs.readlinkSync(file), "utf8"));
       } else if (stat.isFile()) {
-        record(0x46, childRel, fs.readFileSync(file));
+        record(0x46, childRel, fs.readFileSync(file), stat.mode);
       }
     }
   };
@@ -674,10 +678,44 @@ function ensureMaterializedHome(seedDir, globalStorageDir, options = {}) {
   if (existing && (!isFile(marker) || fs.readFileSync(marker, "utf8").trim() !== seedId)) {
     throw new Error(`Materialized home at ${target} has no matching seed marker; inspect it before retrying`);
   }
+  const archive = path.join(seedDir, "seed.tar.br");
+  if (!existing && fs.existsSync(archive)) {
+    // Publish only a complete home. Concurrent starts extract separately;
+    // the first rename wins and the other reuses its verified result.
+    return (async () => {
+      const pending = fs.mkdtempSync(path.join(globalStorageDir, `.osd-home-extract-${seedId}-`));
+      let reused = false;
+      try {
+        const compressed = fs.createReadStream(archive);
+        const decompressed = createBrotliDecompress();
+        compressed.on("error", (error) => decompressed.destroy(error));
+        await unpackTar(compressed.pipe(decompressed), pending);
+        fs.writeFileSync(path.join(pending, SEED_ID_FILE), `${seedId}\n`);
+        if (seedContentId(pending) !== seedId) throw new Error("Packaged seed content does not match its ID");
+        fs.writeFileSync(path.join(pending, MATERIALIZED_MARKER), `${seedId}\n`);
+        try {
+          fs.renameSync(pending, target);
+        } catch (error) {
+          if (!fs.existsSync(target) || (error.code !== "EEXIST" && error.code !== "ENOTEMPTY")) throw error;
+          if (!isFile(marker) || fs.readFileSync(marker, "utf8").trim() !== seedId) {
+            throw new Error(`Materialized home at ${target} has no matching seed marker; inspect it before retrying`);
+          }
+          reused = true;
+        }
+      } finally {
+        fs.rmSync(pending, {recursive: true, force: true});
+      }
+      return finishMaterializedHome(target, globalStorageDir, reused, options);
+    })();
+  }
   if (!existing) {
     linkOrCopyTree(seedDir, target);
     fs.writeFileSync(marker, `${seedId}\n`);
   }
+  return finishMaterializedHome(target, globalStorageDir, existing, options);
+}
+
+function finishMaterializedHome(target, globalStorageDir, existing, options) {
   let previous = options.previousHome;
   if (previous && (path.dirname(path.resolve(previous)) !== path.resolve(globalStorageDir) ||
       !HOME_NAME_PATTERN.test(path.basename(previous)))) previous = undefined;
@@ -979,8 +1017,158 @@ class Launcher extends EventEmitter {
   }
 }
 
+// Small ustar/PAX archive for the packaged seed. No shell tar or npm module is
+// needed on the machine running VS Code.
+
+const BLOCK = 512;
+function octal(header, offset, length, value) {
+  const digits = value.toString(8);
+  if (digits.length > length - 1) throw new Error("tar field overflow");
+  header.write(digits.padStart(length - 1, "0") + "\0", offset, length, "ascii");
+}
+function header(name, size, mode, type) {
+  const h = Buffer.alloc(BLOCK);
+  h.write(name, 0, Math.min(Buffer.byteLength(name), 100), "utf8");
+  octal(h, 100, 8, mode & 0o7777);
+  octal(h, 108, 8, 0);
+  octal(h, 116, 8, 0);
+  octal(h, 124, 12, size);
+  octal(h, 136, 12, 0);
+  h.fill(32, 148, 156);
+  h.write(type, 156, 1, "ascii");
+  h.write("ustar\0", 257, 6, "ascii");
+  h.write("00", 263, 2, "ascii");
+  octal(h, 148, 8, h.reduce((sum, byte) => sum + byte, 0));
+  return h;
+}
+function paxPath(name) {
+  const value = `path=${name}\n`;
+  let length = Buffer.byteLength(value) + 3;
+  while (true) {
+    const next = Buffer.byteLength(`${length} ${value}`);
+    if (next === length) return Buffer.from(`${length} ${value}`);
+    length = next;
+  }
+}
+function pad(size) { return (BLOCK - size % BLOCK) % BLOCK; }
+
+function writeTar(root, out) {
+  const fd = fs.openSync(out, "w");
+  const write = (buffer) => fs.writeSync(fd, buffer);
+  const writeEntry = (rel, file) => {
+    const stat = fs.lstatSync(file);
+    if (!stat.isDirectory() && !stat.isFile()) throw new Error(`unsupported seed entry: ${rel}`);
+    const name = stat.isDirectory() ? `${rel}/` : rel;
+    if (Buffer.byteLength(name) > 100) {
+      const data = paxPath(name);
+      write(header("PaxHeader", data.length, 0o644, "x"));
+      write(data);
+      if (pad(data.length)) write(Buffer.alloc(pad(data.length)));
+    }
+    write(header(Buffer.byteLength(name) <= 100 ? name : "PaxFile", stat.isFile() ? stat.size : 0,
+      stat.mode, stat.isDirectory() ? "5" : "0"));
+    if (stat.isFile()) {
+      const input = fs.openSync(file, "r");
+      try {
+        const buffer = Buffer.alloc(64 * 1024);
+        let count;
+        while ((count = fs.readSync(input, buffer)) > 0) write(buffer.subarray(0, count));
+      } finally { fs.closeSync(input); }
+      if (pad(stat.size)) write(Buffer.alloc(pad(stat.size)));
+    }
+    if (stat.isDirectory()) for (const child of fs.readdirSync(file).sort()) writeEntry(`${rel}/${child}`, path.join(file, child));
+  };
+  try {
+    for (const name of fs.readdirSync(root).sort()) writeEntry(name, path.join(root, name));
+    write(Buffer.alloc(2 * BLOCK));
+  } finally { fs.closeSync(fd); }
+}
+
+function field(h, start, length) { return h.subarray(start, start + length).toString("utf8").replace(/\0.*$/s, ""); }
+function number(h, start, length) {
+  const raw = field(h, start, length).trim();
+  if (!/^[0-7]*$/.test(raw)) throw new Error("invalid tar number");
+  return raw ? parseInt(raw, 8) : 0;
+}
+function safePath(dest, name) {
+  if (!name || name.startsWith("/") || name.includes("\\") || /^[A-Za-z]:/.test(name)) throw new Error(`unsafe tar path: ${name}`);
+  const parts = name.split("/").filter(Boolean);
+  if (parts.some((part) => part === "." || part === "..")) throw new Error(`unsafe tar path: ${name}`);
+  return path.join(dest, ...parts);
+}
+
+async function unpackTar(chunks, dest) {
+  let pending = Buffer.alloc(0), entry, remaining = 0, padding = 0, pax, paxData = [];
+  const consume = (buffer) => {
+    while (buffer.length) {
+      if (remaining) {
+        const count = Math.min(remaining, buffer.length);
+        const part = buffer.subarray(0, count);
+        if (entry.type === "x") paxData.push(part);
+        else fs.writeSync(entry.fd, part);
+        buffer = buffer.subarray(count);
+        remaining -= count;
+        if (!remaining) {
+          if (entry.fd !== undefined) fs.closeSync(entry.fd);
+          if (entry.type === "x") {
+            const data = Buffer.concat(paxData).toString("utf8");
+            paxData = [];
+            const match = /^\d+ path=([^\n]+)\n$/.exec(data);
+            if (!match) throw new Error("unsupported PAX header");
+            pax = match[1];
+          }
+        }
+        continue;
+      }
+      if (padding) {
+        const count = Math.min(padding, buffer.length);
+        buffer = buffer.subarray(count);
+        padding -= count;
+        continue;
+      }
+      if (buffer.length < BLOCK) return buffer;
+      const h = buffer.subarray(0, BLOCK);
+      buffer = buffer.subarray(BLOCK);
+      if (h.every((byte) => byte === 0)) return Buffer.alloc(0);
+      const stored = number(h, 148, 8);
+      const copy = Buffer.from(h); copy.fill(32, 148, 156);
+      if (stored !== copy.reduce((sum, byte) => sum + byte, 0)) throw new Error("invalid tar checksum");
+      const type = field(h, 156, 1) || "0";
+      const size = number(h, 124, 12);
+      const mode = number(h, 100, 8);
+      const name = pax ?? [field(h, 345, 155), field(h, 0, 100)].filter(Boolean).join("/");
+      if (type !== "x") pax = undefined;
+      entry = {type};
+      if (type === "0" || type === "5") {
+        const target = safePath(dest, name);
+        if (type === "5") { fs.mkdirSync(target, {recursive: true, mode}); fs.chmodSync(target, mode); }
+        else {
+          fs.mkdirSync(path.dirname(target), {recursive: true});
+          entry.fd = fs.openSync(target, "wx", mode);
+          fs.fchmodSync(entry.fd, mode);
+        }
+      } else if (type !== "x") throw new Error(`unsupported tar type: ${type}`);
+      remaining = size;
+      padding = pad(size);
+      if (!remaining && entry.fd !== undefined) fs.closeSync(entry.fd);
+    }
+    return Buffer.alloc(0);
+  };
+  try {
+    for await (const chunk of chunks) {
+      pending = consume(Buffer.concat([pending, chunk]));
+    }
+    if (remaining || padding || pending.length) throw new Error("truncated tar archive");
+  } finally {
+    if (entry?.fd !== undefined && remaining) fs.closeSync(entry.fd);
+  }
+}
+
+
 module.exports = {
   WARM_MEMORY_FLOOR_BYTES,
+  writeTar,
+  unpackTar,
   shouldWarm,
   warmEnvironment,
   PORT_RANGE,
