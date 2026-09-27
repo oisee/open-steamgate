@@ -14,6 +14,7 @@ import {mkdtempSync, mkdirSync, readdirSync, readlinkSync, rmSync, writeFileSync
 import {tmpdir} from "node:os";
 import {delimiter, join} from "node:path";
 import {once} from "node:events";
+import {ObjectStore} from "../tools/osd-store.mjs";
 
 const {
   PORT_RANGE, isFree, pickPort, classify,
@@ -21,9 +22,10 @@ const {
   looksLikeAbapGitFolder, isOpenSteamgateCheckout, decideStartTarget,
   detectWorkspaceLayers, packNameOf, ensureWorkspacePacks,
   waitForServing, servingOnce, terminate, Launcher,
-  linkOrCopyTree, materializedHomeDir, ensureMaterializedHome, MATERIALIZED_MARKER,
+  linkOrCopyTree, materializedHomeDir, ensureMaterializedHome, selectOldHomes, listOldHomes, keptHomeNotice, MATERIALIZED_MARKER,
   DATABASE_KINDS, defaultDedicatedName, databaseEnv, describeDatabase, duckdbAvailable,
   WARM_MEMORY_FLOOR_BYTES, shouldWarm, warmEnvironment,
+  SEED_ID_FILE, seedContentId, writeSeedId,
 } = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 
 // No chai-as-promised in this tree's node_modules, so a rejection is caught
@@ -643,21 +645,33 @@ describe("editors/vscode/launcher.js: Launcher end to end (against this checkout
 
 // Packaging (docs/vscode-extension.md, "Packaging"): materializing a
 // packaged extension's bundled seed (`extension/osd/`) into the extension's
-// own writable storage, once per version. A small fake seed here, never the
-// real 100+ MB one -- what is under test is the copy mechanism and the
-// once/per-version/cleans-up-old-versions rules, not the seed's own size.
+// own writable storage, keyed by seed content. A small fake seed here, never the
+// real 100+ MB one -- what is under test is the copy mechanism, content-keyed
+// reuse and stale-generation cleanup, not the seed's own size.
+describe("editors/vscode/launcher.js: keptHomeNotice", function () {
+  it("sums every old copy, including earlier generations, and formats the total", () => {
+    expect(keptHomeNotice("/old/b", [{size: 512}, {size: 1024}, {size: 1024 * 1024}]))
+      .to.equal("previous working copy kept at /old/b; total size of all old working copies: 1.0 MiB");
+    expect(keptHomeNotice("/old/b", [{size: 512}, {size: 1024}]))
+      .to.equal("previous working copy kept at /old/b; total size of all old working copies: 2 KiB");
+  });
+});
+
 describe("editors/vscode/launcher.js: linkOrCopyTree / ensureMaterializedHome (packaging)", function () {
-  let seedDir, storageDir;
+  let seedDir, storageDir, seedId;
 
   beforeEach(() => {
     seedDir = mkdtempSync(join(tmpdir(), "osd-seed-"));
     mkdirSync(join(seedDir, "test"), {recursive: true});
     writeFileSync(join(seedDir, "test", "run.mjs"), "// fake\n");
     writeFileSync(join(seedDir, "top.txt"), "hello");
+    mkdirSync(join(seedDir, "src"), {recursive: true});
+    writeFileSync(join(seedDir, "src", "zcl_materialized.clas.abap"), "CLASS zcl_materialized DEFINITION. ENDCLASS.\n");
     mkdirSync(join(seedDir, "node_modules", "x"), {recursive: true});
     writeFileSync(join(seedDir, "node_modules", "x", "index.js"), "module.exports = 1;\n");
     symlinkSync(join(seedDir, "node_modules"), join(seedDir, "output"), "dir");
     storageDir = mkdtempSync(join(tmpdir(), "osd-storage-"));
+    seedId = writeSeedId(seedDir);
   });
 
   afterEach(() => {
@@ -665,50 +679,144 @@ describe("editors/vscode/launcher.js: linkOrCopyTree / ensureMaterializedHome (p
     rmSync(storageDir, {recursive: true, force: true});
   });
 
-  it("linkOrCopyTree hard-links regular files, keeps symlinks as symlinks, and recurses into directories", () => {
+  it("linkOrCopyTree copies regular files, keeps symlinks as symlinks, and recurses into directories", () => {
     const dest = join(storageDir, "copy");
     linkOrCopyTree(seedDir, dest);
     expect(readFileSync(join(dest, "top.txt"), "utf8")).to.equal("hello");
     expect(readFileSync(join(dest, "node_modules", "x", "index.js"), "utf8")).to.include("module.exports");
     expect(lstatSync(join(dest, "output")).isSymbolicLink()).to.equal(true);
     expect(readlinkSync(join(dest, "output"))).to.equal(join(seedDir, "node_modules"));
-    // a hard link shares the inode with its source (same filesystem, which
-    // storageDir and seedDir both are here, both under the same tmpdir)
+    // The writable materialized home must not share an inode with the seed.
     const a = statSync(join(seedDir, "top.txt"));
     const b = statSync(join(dest, "top.txt"));
-    expect(a.ino).to.equal(b.ino);
+    expect(a.ino).to.not.equal(b.ino);
   });
 
-  it("materializedHomeDir is one directory per version, under globalStorageDir", () => {
-    expect(materializedHomeDir(storageDir, "0.1.0")).to.equal(join(storageDir, "osd-home-0.1.0"));
-    expect(materializedHomeDir(storageDir, "0.2.0")).to.equal(join(storageDir, "osd-home-0.2.0"));
+  it("Workbench object-store saves in the materialized home leave the seed and its ID unchanged", () => {
+    const home = ensureMaterializedHome(seedDir, storageDir);
+    const source = "CLASS zcl_materialized DEFINITION.\nENDCLASS.\n* Workbench edit\n";
+    const store = new ObjectStore({
+      root: home,
+      roots: [{path: "src", writable: true, library: false}],
+      libs: [],
+      excluded: [],
+    });
+
+    // The ADT source PUT handler delegates to ObjectStore.write(), whose
+    // writeFileSync replaces the source in place (not through rename).
+    store.write("CLAS", "ZCL_MATERIALIZED", source);
+
+    expect(readFileSync(join(home, "src", "zcl_materialized.clas.abap"), "utf8")).to.equal(source);
+    expect(readFileSync(join(seedDir, "src", "zcl_materialized.clas.abap"), "utf8"))
+      .to.equal("CLASS zcl_materialized DEFINITION. ENDCLASS.\n");
+    expect(seedContentId(seedDir)).to.equal(seedId);
+    expect(readFileSync(join(seedDir, SEED_ID_FILE), "utf8").trim()).to.equal(seedId);
   });
 
-  it("ensureMaterializedHome copies the seed once, and a second call is a no-op (marker file)", () => {
-    const target = ensureMaterializedHome(seedDir, storageDir, "0.1.0");
-    expect(target).to.equal(join(storageDir, "osd-home-0.1.0"));
+  it("materializedHomeDir is keyed by the seed's content ID under globalStorageDir", () => {
+    expect(materializedHomeDir(storageDir, seedId)).to.equal(join(storageDir, `osd-home-${seedId}`));
+    expect(seedId).to.match(/^[0-9a-f]{64}$/);
+    expect(readFileSync(join(seedDir, SEED_ID_FILE), "utf8").trim()).to.equal(seedId);
+  });
+
+  it("ensureMaterializedHome reuses a copy only while the packaged seed ID matches", () => {
+    const target = ensureMaterializedHome(seedDir, storageDir);
+    expect(target).to.equal(join(storageDir, `osd-home-${seedId}`));
     expect(existsSync(join(target, "top.txt"))).to.equal(true);
-    expect(existsSync(join(target, MATERIALIZED_MARKER))).to.equal(true);
+    expect(readFileSync(join(target, MATERIALIZED_MARKER), "utf8").trim()).to.equal(seedId);
 
     // add to the seed after the first materialize: a second call must NOT
-    // pick it up, because the marker says "already done for this version"
+    // pick it up, because the marker says "already done for this seed ID"
     // (a hard link shares content with a file mutated in place, so a NEW
     // file is what proves "no second copy happened" -- an edited existing
     // one would prove nothing either way)
     writeFileSync(join(seedDir, "added-later.txt"), "should not appear");
-    const again = ensureMaterializedHome(seedDir, storageDir, "0.1.0");
+    const again = ensureMaterializedHome(seedDir, storageDir);
     expect(again).to.equal(target);
     expect(existsSync(join(target, "added-later.txt"))).to.equal(false);
   });
 
-  it("a version change makes a new copy and removes the old one", () => {
-    const v1 = ensureMaterializedHome(seedDir, storageDir, "0.1.0");
-    expect(existsSync(v1)).to.equal(true);
+  it("A-to-B-to-A keeps every home at its original path, including clean homes", () => {
+    const firstId = seedId;
+    const firstHome = ensureMaterializedHome(seedDir, storageDir);
+    writeFileSync(join(firstHome, "top.txt"), "edit in A");
 
-    writeFileSync(join(seedDir, "top.txt"), "v2 content");
-    const v2 = ensureMaterializedHome(seedDir, storageDir, "0.2.0");
-    expect(v2).to.equal(join(storageDir, "osd-home-0.2.0"));
-    expect(readFileSync(join(v2, "top.txt"), "utf8")).to.equal("v2 content");
-    expect(existsSync(v1)).to.equal(false, "the old version's copy must be gone");
+    writeFileSync(join(seedDir, "top.txt"), "seed B");
+    const secondId = writeSeedId(seedDir);
+    const notices = [];
+    const secondHome = ensureMaterializedHome(seedDir, storageDir, {
+      previousHome: firstHome, onNotice: (line) => notices.push(line),
+    });
+    expect(secondHome).to.equal(join(storageDir, `osd-home-${secondId}`));
+    expect(readFileSync(join(firstHome, "top.txt"), "utf8")).to.equal("edit in A");
+    expect(readFileSync(join(secondHome, "top.txt"), "utf8")).to.equal("seed B");
+    expect(notices).to.deep.equal([keptHomeNotice(firstHome, listOldHomes(storageDir, secondHome))]);
+
+    // A third seed does not remove an unedited B or the older edited A.
+    writeFileSync(join(seedDir, "top.txt"), "seed C");
+    writeSeedId(seedDir);
+    const thirdHome = ensureMaterializedHome(seedDir, storageDir, {previousHome: secondHome});
+    expect(readFileSync(join(secondHome, "top.txt"), "utf8")).to.equal("seed B");
+    expect(readFileSync(join(firstHome, "top.txt"), "utf8")).to.equal("edit in A");
+
+    writeFileSync(join(seedDir, "top.txt"), "hello");
+    expect(writeSeedId(seedDir)).to.equal(firstId);
+    const returnedHome = ensureMaterializedHome(seedDir, storageDir, {
+      previousHome: thirdHome, onNotice: (line) => notices.push(line),
+    });
+    expect(returnedHome).to.equal(firstHome);
+    expect(readFileSync(join(firstHome, "top.txt"), "utf8")).to.equal("edit in A");
+    expect(readFileSync(join(secondHome, "top.txt"), "utf8")).to.equal("seed B");
+    expect(readFileSync(join(thirdHome, "top.txt"), "utf8")).to.equal("seed C");
+    expect(notices.at(-1)).to.equal(keptHomeNotice(thirdHome, listOldHomes(storageDir, returnedHome)));
+    expect(readdirSync(storageDir).filter((name) => name.startsWith("osd-home-"))).to.have.lengthOf(3);
+  });
+
+  it("a save through a previous home's path still succeeds after a seed change", () => {
+    const oldHome = ensureMaterializedHome(seedDir, storageDir);
+    const store = new ObjectStore({
+      root: oldHome, roots: [{path: "src", writable: true, library: false}], libs: [], excluded: [],
+    });
+    writeFileSync(join(seedDir, "top.txt"), "next seed");
+    writeSeedId(seedDir);
+    ensureMaterializedHome(seedDir, storageDir);
+    store.write("CLAS", "ZCL_MATERIALIZED", "* save after reinstall\n");
+    expect(readFileSync(join(oldHome, "src", "zcl_materialized.clas.abap"), "utf8"))
+      .to.equal("* save after reinstall\n");
+  });
+
+  it("lists old homes with size and edited state, and selects only confirmed stale paths", () => {
+    const firstHome = ensureMaterializedHome(seedDir, storageDir);
+    const firstSize = listOldHomes(storageDir, "/outside/current")[0].size;
+    expect(firstSize).to.be.greaterThan(0);
+    writeFileSync(join(seedDir, "top.txt"), "seed B");
+    writeSeedId(seedDir);
+    const secondHome = ensureMaterializedHome(seedDir, storageDir);
+    const homes = listOldHomes(storageDir, secondHome);
+    expect(homes).to.have.lengthOf(1);
+    expect(homes[0]).to.include({path: firstHome, size: firstSize, edited: false});
+    writeFileSync(join(firstHome, "top.txt"), "edited A");
+    expect(listOldHomes(storageDir, secondHome)[0].edited).to.equal(true);
+
+    const entries = [firstHome, secondHome, join(storageDir, "osd-home-previous")]
+      .map((home) => ({path: home, isDirectory: true}));
+    const selected = selectOldHomes(entries, secondHome, firstHome, [firstHome, secondHome]);
+    expect(selected).to.deep.equal([]); // A is served; B is current.
+    expect(selectOldHomes(entries, secondHome, undefined, [firstHome, secondHome])
+      .map(({path}) => path)).to.deep.equal([firstHome]);
+    expect(selectOldHomes([...entries, {path: join(storageDir, "osd-home-other"), isDirectory: true}],
+      secondHome, undefined).map(({path}) => path)).to.deep.equal([firstHome, join(storageDir, "osd-home-previous")]);
+  });
+
+  it("leaves older recovery directories in place and refuses a conflicting current home", () => {
+    const legacy = join(storageDir, "osd-home-previous");
+    mkdirSync(legacy);
+    writeFileSync(join(legacy, "top.txt"), "old recovery");
+    const target = materializedHomeDir(storageDir, seedId);
+    mkdirSync(target);
+    writeFileSync(join(target, "top.txt"), "unmarked user data");
+    expect(() => ensureMaterializedHome(seedDir, storageDir)).to.throw(/no matching seed marker/);
+    expect(readFileSync(join(target, "top.txt"), "utf8")).to.equal("unmarked user data");
+    expect(readFileSync(join(legacy, "top.txt"), "utf8")).to.equal("old recovery");
   });
 });

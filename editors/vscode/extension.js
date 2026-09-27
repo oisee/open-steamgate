@@ -23,9 +23,10 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   warmStatusText, activationBuildText, closureTestsText,
   presetSettings, isOpenSteamgateCheckout: isOpenSteamgateManifest, osdHomeChoice, osdStateContext, systemOverviewModel,
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText} = require("./lib.js");
-const {Launcher, ensureMaterializedHome, materializedHomeDir, detectWorkspaceLayers, databaseEnv, defaultDedicatedName, describeDatabase,
+const {Launcher, ensureMaterializedHome, materializedHomeDir, selectOldHomes, listOldHomes,
+  detectWorkspaceLayers, databaseEnv, defaultDedicatedName, describeDatabase,
   isOpenSteamgateCheckout: isOpenSteamgatePath, decideStartTarget, classify, PORT_RANGE, isFree,
-  pickInspectorPort} = require("./launcher.js");
+  pickInspectorPort, SEED_ID_FILE} = require("./launcher.js");
 const {systemOverviewHtml} = require("./system-overview.js");
 
 // Q6a "Notebook SQL, ABAP and SQLScript" (docs/vscode-extension.md): the
@@ -88,6 +89,19 @@ function bundledSeedDir(context) {
   return fs.existsSync(path.join(dir, "test", "run.mjs")) ? dir : undefined;
 }
 
+function bundledHomeDir(context, seedDir) {
+  const seedId = fs.readFileSync(path.join(seedDir, SEED_ID_FILE), "utf8").trim();
+  if (!/^[0-9a-f]{64}$/.test(seedId)) throw new Error(`Invalid packaged seed ID in ${seedDir}`);
+  return materializedHomeDir(context.globalStorageUri.fsPath, seedId);
+}
+
+function materializeBundledHome(context, seedDir, launcher) {
+  return ensureMaterializedHome(seedDir, context.globalStorageUri.fsPath, {
+    previousHome: launcher?.osdHome,
+    onNotice: (line) => { void vscode.window.showInformationMessage(`osd: ${line}`); },
+  });
+}
+
 const BUNDLED_HOME_PREFERENCE = "osd.startHomePreference";
 const START_HOME_PROMPT = "Run the system from this folder? (edits go to your files and git)";
 const START_HOME_YES = "Yes";
@@ -99,7 +113,7 @@ const START_HOME_ALWAYS_ASK = "Always ask";
  *  available; development installs without one already run the open folder
  *  as their system. Choosing the bundle is remembered in workspace storage,
  *  while Always ask uses it this time and clears that preference. */
-async function resolveStartTarget(context) {
+async function resolveStartTarget(context, launcher) {
   const configured = vscode.workspace.getConfiguration("osd").get("home", "").trim();
   const folders = vscode.workspace.workspaceFolders;
   const workspaceFolder = folders?.length === 1 ? folders[0].uri.fsPath : undefined;
@@ -134,8 +148,7 @@ async function resolveStartTarget(context) {
   }
 
   if (target.kind === "ready" && target.source === "bundled") {
-    const version = context.extension.packageJSON.version;
-    target.osdHome = ensureMaterializedHome(seedDir, context.globalStorageUri.fsPath, version);
+    target.osdHome = materializeBundledHome(context, seedDir, launcher);
   }
   return target;
 }
@@ -153,14 +166,13 @@ function osdHomeChoiceFor(context, homeMode = "auto") {
   const configured = vscode.workspace.getConfiguration("osd").get("home", "").trim();
   const folders = workspaceDescriptors();
   const seedDir = bundledSeedDir(context);
-  const version = context.extension.packageJSON.version;
-  const bundledHome = seedDir === undefined ? undefined : materializedHomeDir(context.globalStorageUri.fsPath, version);
-  return {...(osdHomeChoice({configuredHome: configured, workspaces: folders, bundledHome, bundledAvailable: seedDir !== undefined, homeMode}) ?? {}), seedDir, version};
+  const bundledHome = seedDir === undefined ? undefined : bundledHomeDir(context, seedDir);
+  return {...(osdHomeChoice({configuredHome: configured, workspaces: folders, bundledHome, bundledAvailable: seedDir !== undefined, homeMode}) ?? {}), seedDir};
 }
 
 /** Mainline's first-start choice takes precedence in auto mode for a packaged
  *  install opened on the checkout. Other preset modes use DX2's pure choice. */
-async function resolveStartChoice(context, homeMode = "auto") {
+async function resolveStartChoice(context, homeMode = "auto", launcher) {
   if (homeMode === "auto") {
     const folders = vscode.workspace.workspaceFolders;
     const workspaceFolder = folders?.length === 1 ? folders[0].uri.fsPath : undefined;
@@ -168,7 +180,7 @@ async function resolveStartChoice(context, homeMode = "auto") {
     const checkout = workspaceFolder !== undefined &&
       (isOpenSteamgatePath(workspaceFolder) || descriptor?.isOpenSteamgate === true);
     if (checkout && bundledSeedDir(context) !== undefined) {
-      const target = await resolveStartTarget(context);
+      const target = await resolveStartTarget(context, launcher);
       if (target.kind === "cancelled") return target;
       if (target.kind === "ready") {
         return {
@@ -188,6 +200,48 @@ async function resolveStartChoice(context, homeMode = "auto") {
   const source = choice.kind === "bundled copy" ? "bundled"
     : choice.path === workspaceFolder ? "workspace" : "configured";
   return {...choice, source};
+}
+
+/** Explicit cleanup only: the selection and modal confirmation both finish
+ *  before any directory is removed. Re-read the current launcher afterward. */
+async function removeOldWorkingCopies(context, controller) {
+  const storageDir = context.globalStorageUri.fsPath;
+  const sizeLabel = (bytes) => bytes < 1024 * 1024
+    ? `${Math.ceil(bytes / 1024)} KiB` : `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+  const currentHome = () => {
+    const seedDir = bundledSeedDir(context);
+    return seedDir === undefined ? undefined : bundledHomeDir(context, seedDir);
+  };
+  const servedHome = () => controller.launcher?.state !== "stopped" ? controller.launcher?.osdHome : undefined;
+  try {
+    const homes = listOldHomes(storageDir, currentHome(), servedHome());
+    if (homes.length === 0) {
+      await vscode.window.showInformationMessage("osd: No old working copies found.");
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(homes.map((home) => ({
+      label: path.basename(home.path),
+      description: `${sizeLabel(home.size)} · edited: ${home.edited ? "yes or unknown" : "no"}`,
+      detail: home.path,
+      home,
+    })), {canPickMany: true, placeHolder: "Select old working copies to remove"});
+    if (!picked?.length) return;
+    const selected = picked.map((item) => item.home.path);
+    const answer = await vscode.window.showWarningMessage(
+      `Delete ${selected.length} old working ${selected.length === 1 ? "copy" : "copies"}?`,
+      {modal: true, detail: selected.join("\n")}, "Delete selected");
+    if (answer !== "Delete selected") return;
+
+    const entries = fs.readdirSync(storageDir).map((name) => {
+      const home = path.join(storageDir, name);
+      return {path: home, isDirectory: fs.lstatSync(home).isDirectory()};
+    });
+    const eligible = selectOldHomes(entries, currentHome(), servedHome(), selected);
+    for (const home of eligible) fs.rmSync(home.path, {recursive: true});
+    await vscode.window.showInformationMessage(`osd: Removed ${eligible.length} old working ${eligible.length === 1 ? "copy" : "copies"}.`);
+  } catch (error) {
+    await vscode.window.showErrorMessage(`osd: Could not remove old working copies: ${error.message}`);
+  }
 }
 
 /** Every byte a launch needs beyond osdHome's own tracked files lives here:
@@ -355,13 +409,13 @@ class SystemController {
    *  to build -- callers show that as an error rather than starting nothing
    *  silently. */
   async ensureLauncher(forceDebug = false) {
-    const choice = await resolveStartChoice(this.context, this.homeMode);
+    const choice = await resolveStartChoice(this.context, this.homeMode, this.launcher);
     if (choice?.kind === "cancelled") return undefined;
     if (choice?.path === undefined) {
       throw new Error("osd.home is not set, and this window has no single workspace folder to default to");
     }
     const osdHome = choice.kind === "bundled copy" && choice.materialized !== true
-      ? await ensureMaterializedHome(choice.seedDir, this.context.globalStorageUri.fsPath, choice.version)
+      ? materializeBundledHome(this.context, choice.seedDir, this.launcher)
       : choice.path;
     this.homeSource = choice.source;
     if (this.launcher !== undefined && this.launcher.osdHome === osdHome && this.launcher.state !== "stopped") {
@@ -369,6 +423,9 @@ class SystemController {
     }
     const database = await systemDatabaseConfig(this.context, osdHome);
     if (this.launcher === undefined || this.launcher.osdHome !== osdHome) {
+      if (this.launcher !== undefined && this.launcher.state !== "stopped") {
+        await this.launcher.stop();
+      }
       const launcher = new Launcher({
         osdHome,
         storageDir: storageDirFor(this.context, osdHome),
@@ -1705,6 +1762,8 @@ function activate(context) {
   }));
   context.subscriptions.push(vscode.commands.registerCommand("osd.quickStart", (preset) => controller.quickStart(preset ?? "defaults")));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openSystemOverview", () => controller.openSystemOverview()));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.removeOldWorkingCopies",
+    () => removeOldWorkingCopies(context, controller)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.start", () => controller.start()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.stop", () => controller.stop()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.rebuild", () => controller.rebuild()));
