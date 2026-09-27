@@ -23,6 +23,7 @@
 // nothing and reports nothing), and an object hidden by a later layer.
 // Neither is an error; both are said out loud, here and in the builder's
 // log.
+import {fileURLToPath} from "node:url";
 import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
 import {resolve} from "node:path";
 import {inputFoldersOf} from "./osd-packs.mjs";
@@ -45,7 +46,7 @@ import {runsAs} from "./osd-main.mjs";
 let ROOT;
 const treeRoot = () => {
   if (ROOT === undefined) {
-    ROOT = new URL("../", import.meta.url).pathname;
+    ROOT = fileURLToPath(new URL("../", import.meta.url));
   }
   return ROOT;
 };

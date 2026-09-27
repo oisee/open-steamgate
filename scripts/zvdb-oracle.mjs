@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Seed one canonical embedding corpus through OData, then require the
 // portable ABAP and HANA/AMDP implementations to return the same full order.
+import {fileURLToPath} from "node:url";
 import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
 
-const root = resolve(new URL("../", import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const base = (process.env.ZVDB_URL ?? process.argv[2] ?? "http://127.0.0.1:8050")
   .replace(/\/$/, "") + "/sap/opu/odata/sap/ZVDB_100_SRV";
 const corpusFile = resolve(process.env.ZVDB_CORPUS ?? process.argv[3]

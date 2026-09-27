@@ -18,6 +18,7 @@
 // gateway serves from. Which classes and methods exist comes from the
 // parse, not from the generated index, so a test that was written and not
 // yet transpiled is reported as such instead of silently missing.
+import {fileURLToPath} from "node:url";
 import {existsSync, readFileSync, rmSync} from "node:fs";
 import {unitCommand} from "./osd-host.mjs";
 import {spawn} from "node:child_process";
@@ -325,7 +326,7 @@ export class UnitRun {
         args.push("--method", options.method);
       }
       const {env, ownPath} = unitChildEnv(options);
-      const [cmd, ...argv] = unitCommand(new URL(import.meta.url).pathname, args);
+      const [cmd, ...argv] = unitCommand(fileURLToPath(new URL(import.meta.url)), args);
       const child = spawn(cmd, argv, {
         cwd: this.store.root,
         stdio: ["pipe", "pipe", "pipe"],

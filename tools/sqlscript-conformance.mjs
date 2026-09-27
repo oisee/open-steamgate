@@ -31,6 +31,7 @@
 //
 // The HANA column is measured on the machine that has HANA Express and
 // merged in; this file prints the columns it can reach.
+import {fileURLToPath} from "node:url";
 import {readFileSync, existsSync} from "node:fs";
 import {basename} from "node:path";
 import {isInvalid} from "./sqlscript-eager.mjs";
@@ -319,7 +320,7 @@ async function runHana() {
 async function runSqlJs() {
   const initSqlJs = (await import("sql.js")).default;
   const SQL = await initSqlJs({
-    locateFile: () => new URL("../node_modules/sql.js/dist/sql-wasm.wasm", import.meta.url).pathname,
+    locateFile: () => fileURLToPath(new URL("../node_modules/sql.js/dist/sql-wasm.wasm", import.meta.url)),
   });
   const db = new SQL.Database();
   BUILDS.sqljs = "sqlite " + db.exec("SELECT sqlite_version()")[0].values[0][0] + " (wasm)";

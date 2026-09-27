@@ -11,6 +11,7 @@
 //
 //   node tools/sqlscript/end-to-end.mjs            # the local engines
 //   node tools/sqlscript/end-to-end.mjs --hana     # and HANA Express
+import {fileURLToPath} from "node:url";
 import {lex} from "./lexer.mjs";
 import {parse} from "./combi.mjs";
 import {Body} from "./expressions/index.mjs";
@@ -69,7 +70,7 @@ export async function run({hana = false, body = BODY, catalogue = CATALOGUE} = {
 
   const {installNative} = await import("../sqljs-native.mjs");
   const initSqlJs = (await import("sql.js")).default;
-  const SQL = await initSqlJs({locateFile: () => new URL("../../node_modules/sql.js/dist/sql-wasm.wasm", import.meta.url).pathname});
+  const SQL = await initSqlJs({locateFile: () => fileURLToPath(new URL("../../node_modules/sql.js/dist/sql-wasm.wasm", import.meta.url))});
   const js = installNative({sqlite: new SQL.Database()});
   results.push(await onEngine("sqljs", js, "sqlite", (s) => `"${s}"`, body, catalogue));
 

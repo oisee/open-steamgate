@@ -2,10 +2,11 @@
 // Embed the same labeled MASSIVE subset with two models, evaluate float
 // cosine against one-bit sign vectors, and emit canonical corpora plus the
 // abapGit TABU rows that OSG and A4H ingest.
+import {fileURLToPath} from "node:url";
 import {readFileSync, writeFileSync, mkdirSync} from "node:fs";
 import {dirname, resolve} from "node:path";
 
-const root = resolve(new URL("../", import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const sourceFile = resolve(process.env.ZVDB_BENCHMARK_TEXTS
   ?? `${root}/packs/zvdb/fixtures/benchmark-texts.massive.json`);
 const outDir = resolve(process.env.ZVDB_BENCHMARK_DIR

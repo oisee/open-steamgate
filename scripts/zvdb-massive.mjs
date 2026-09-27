@@ -2,11 +2,12 @@
 // Select a small, deterministic, parallel multilingual benchmark from
 // Amazon MASSIVE 1.1. The source dataset is CC BY 4.0 and is not downloaded
 // by this script; point MASSIVE_DIR at its extracted data/ directory.
+import {fileURLToPath} from "node:url";
 import {createHash} from "node:crypto";
 import {readFileSync, writeFileSync, mkdirSync} from "node:fs";
 import {dirname, join, resolve} from "node:path";
 
-const root = resolve(new URL("../", import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const sourceDir = resolve(process.env.MASSIVE_DIR ?? process.argv[2] ?? "");
 const target = resolve(process.argv[3]
   ?? `${root}/packs/zvdb/fixtures/benchmark-texts.massive.json`);
