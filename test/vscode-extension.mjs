@@ -94,18 +94,25 @@ function vscodeStub(settings = {}) {
   const externalUris = [];
   const externalOpens = [];
   const executedCommands = [];
+  const sourceOpens = [];
+  const sourceEditors = [];
   return {
     panels,
     externalUris,
     externalOpens,
     executedCommands,
+    sourceOpens,
+    sourceEditors,
     EventEmitter,
     TreeItem,
     ThemeIcon,
     TreeItemCollapsibleState: {None: 0, Collapsed: 1, Expanded: 2},
     ViewColumn: {Beside: 2},
     ConfigurationTarget: {Workspace: 1, Global: 2},
-    Uri: {parse: (value) => ({toString: () => value})},
+    Uri: {parse: (value) => ({toString: () => value}), file: (fsPath) => ({fsPath})},
+    Position: class { constructor(line, character) { this.line = line; this.character = character; } },
+    Selection: class { constructor(start, end) { this.start = start; this.end = end; } },
+    Range: class { constructor(start, end) { this.start = start; this.end = end; } },
     env: {asExternalUri: async (uri) => {
       externalUris.push(uri.toString());
       return uri;
@@ -118,6 +125,8 @@ function vscodeStub(settings = {}) {
     },
     workspace: {
       workspaceFolders: [],
+      findFiles: async () => [{fsPath: "stub.clas.abap"}],
+      openTextDocument: async (uri) => uri,
       getConfiguration: () => ({get: (name, fallback) => settings[name] ?? fallback, update: async () => {}}),
     },
     window: {
@@ -133,6 +142,12 @@ function vscodeStub(settings = {}) {
       },
       showInformationMessage() {},
       showErrorMessage() {},
+      showTextDocument: async (uri) => {
+        sourceOpens.push(uri);
+        const editor = {revealRange() {}};
+        sourceEditors.push(editor);
+        return editor;
+      },
     },
   };
 }
@@ -1354,7 +1369,7 @@ describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace la
 // logic is pure; route coverage below uses an in-memory ObjectStore, while
 // the live round trip against a running osd is test/osd-child.mjs.
 describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)", function () {
-  it("single-clicking every produced node kind only shows details", async () => {
+  it("single-clicking every produced leaf acts immediately while expandable nodes show details", async () => {
     const api = vscodeStub({home: ROOT});
     const {OsdTreeProvider, EntitySetItem, clickTreeNode, clickTransaction} = loadExtension(api);
     let launchpadOpens = 0;
@@ -1363,22 +1378,32 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
       generation: "abcdef12", osdHome: ROOT, layers: [{folder: "extra-layer"}]}, onDidChange: () => {},
     openLaunchpad: () => { launchpadOpens++; }, openSystemOverview: () => { overviewOpens++; }};
     const provider = new OsdTreeProvider(controller, async () => ({sources: {}, testClasses: []}));
-    const output = {appendLine() {}, show() {}};
+    const output = {shown: 0, appendLine() {}, clear() {}, show() { this.shown++; }};
     provider.rows = [
       {kind: "APP", path: "/app/flp.html", name: "App"},
       {kind: "ODATA", path: "/sap/opu/odata/sap/ZTEST", name: "OData", handler: "ZCL_TEST_DPC", mpc: "ZCL_TEST_MPC"},
+      {kind: "ODATA", path: "/sap/opu/odata/sap/ZLEAF", name: "OData leaf"},
       {kind: "ICF", path: "/sap/bc/test", name: "ICF", handler: "ZCL_TEST_ICF"},
       {kind: "APC", path: "/sap/bc/apc/test", name: "APC", handler: "ZCL_TEST_APC"},
     ];
     provider.transactions = [normalizeTransactionRow({tcode: "ZCLICK_SINGLE", runnable: true}),
       normalizeTransactionRow({tcode: "ZCLICK_DISABLED", runnable: false, reason: "no target"})];
     const seen = new Set();
+    const expandableKinds = new Set();
+    const leafKinds = new Set();
     try {
       const visit = async (item) => {
-        seen.add(item.contextValue?.split(";")[0] ?? "unknown");
+        const kind = item.contextValue?.split(";")[0] ?? "unknown";
+        seen.add(kind);
+        const expandable = item.collapsibleState > api.TreeItemCollapsibleState.None;
+        (expandable ? expandableKinds : leafKinds).add(kind);
+        const externalBefore = api.externalOpens.length;
+        const sourcesBefore = api.sourceOpens.length;
+        const webguiBefore = api.panels.filter((panel) => panel.args[0] === "osdWebgui").length;
+        const launchpadBefore = launchpadOpens;
+        const dumpsBefore = output.shown;
         if (item.command?.command === "osd.clickTreeNode") {
           await clickTreeNode(item, provider, output);
-          if (item.route === "/osd/serving") expect(api.panels.at(-1).webview.html).to.contain("Serving status");
         }
         else if (item.command?.command === "osd.clickTransaction") await clickTransaction(item, output);
         else if (item.command?.command === "osd.newSqlNotebook") {
@@ -1386,6 +1411,40 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
           await api.commands.executeCommand(item.command.command, ...(item.command.arguments ?? []));
         }
         else throw new Error(`Unclassified tree command: ${item.label}`);
+        if (expandable) expect(api.externalOpens.length, `${kind} opened a browser`).to.equal(externalBefore);
+        if (kind === "osd-launchpad") {
+          expect(launchpadOpens).to.equal(launchpadBefore + 1);
+          expect(item.tooltip).to.match(/browser/i);
+          expect(item.command.title).to.equal("Open Fiori Launchpad");
+        }
+        if (kind === "osd-host-open") {
+          expect(api.externalOpens.length).to.equal(externalBefore + 1);
+          expect(item.tooltip).to.match(/browser/i);
+          expect(item.command.title).to.equal("Open endpoint");
+        }
+        if (kind === "osd-host-dumps") {
+          expect(output.shown).to.equal(dumpsBefore + 1);
+          expect(item.command.title).to.equal("Show short dumps");
+        }
+        if (kind === "osd-transaction-runnable") {
+          expect(api.panels.filter((panel) => panel.args[0] === "osdWebgui").length).to.equal(webguiBefore + 1);
+          expect(item.command.title).to.equal("Run transaction");
+        }
+        if (kind === "osd-service-app") {
+          expect(api.externalOpens.length).to.equal(externalBefore + 1);
+          expect(item.tooltip).to.match(/browser/i);
+          expect(item.command.title).to.equal("Open app");
+        }
+        if (kind === "osd-service-odata" && !expandable) {
+          expect(api.externalOpens.length).to.equal(externalBefore + 1);
+          expect(item.tooltip).to.match(/browser/i);
+          expect(item.command.title).to.equal("Open service");
+          expect(await provider.getChildren(item)).to.deep.equal([]);
+        }
+        if (kind === "osd-service-class" || kind === "osd-service-entityset")
+          expect(api.sourceOpens.length).to.equal(sourcesBefore + 1);
+        if (kind === "osd-service-class" || kind === "osd-service-entityset")
+          expect(item.command.title).to.equal("Open source");
         for (const child of await provider.getChildren(item)) await visit(child);
       };
       for (const item of provider.getChildren()) await visit(item);
@@ -1409,26 +1468,27 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
         "osd-layers", "osd-layer-base", "osd-layer-workspace", "osd-services", "osd-service-group", "osd-service-pack-group",
         "osd-service-class", "osd-service-entityset", "osd-placeholder", "osd-state-stopped", "osd-state-building",
         "osd-service-app", "osd-service-odata", "osd-service-icf", "osd-service-apc"]);
-      expect(api.externalOpens).to.have.lengthOf(0);
+      expect([...expandableKinds]).to.include.members(["osd-system-group", "osd-transactions", "osd-layers", "osd-services", "osd-service-group", "osd-service-odata"]);
+      expect([...leafKinds]).to.include.members(["osd-launchpad", "osd-host-open", "osd-host-dumps", "osd-host-sql", "osd-transaction-runnable", "osd-service-app", "osd-service-class", "osd-service-entityset"]);
       expect(api.executedCommands).to.deep.equal([["osd.newSqlNotebook"]]);
-      expect(launchpadOpens).to.equal(0);
+      expect(launchpadOpens).to.equal(1);
       expect(overviewOpens).to.equal(3);
-      expect(api.panels.filter((panel) => panel.args[0] === "osdWebgui")).to.have.lengthOf(0);
+      expect(api.panels.filter((panel) => panel.args[0] === "osdWebgui")).to.have.lengthOf(1);
 
       const serving = new api.TreeItem("Other endpoint");
       serving.contextValue = "osd-host-open";
       serving.route = "/osd/other";
       await clickTreeNode(serving, provider, output);
-      expect(api.externalOpens).to.have.lengthOf(0);
+      expect(api.externalOpens).to.have.lengthOf(4);
       await clickTreeNode(serving, provider, output);
-      expect(api.externalOpens).to.have.lengthOf(1);
+      expect(api.externalOpens).to.have.lengthOf(5);
 
       const launchpad = new api.TreeItem("Another launchpad");
       launchpad.contextValue = "osd-launchpad";
       await clickTreeNode(launchpad, provider, output);
-      expect(launchpadOpens).to.equal(0);
+      expect(launchpadOpens).to.equal(2);
       await clickTreeNode(launchpad, provider, output);
-      expect(launchpadOpens).to.equal(1);
+      expect(launchpadOpens).to.equal(3);
     } finally {
       provider.dispose();
     }
@@ -1438,13 +1498,36 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     const {EntitySetItem, clickTreeNode} = loadExtension(api);
     const provider = {controller: {openSystemOverview() {}}};
     let sourceLookups = 0;
-    api.workspace.findFiles = async () => { sourceLookups++; return []; };
+    api.workspace.findFiles = async () => { sourceLookups++; return [{fsPath: "stub.clas.abap"}]; };
     const entitySet = new EntitySetItem("ZCL_CLICK_PAIR_DPC", {set: "TravelSet", kind: "get_entityset"}, 12);
     const entity = new EntitySetItem("ZCL_CLICK_PAIR_DPC", {set: "TravelSet", kind: "get_entity"}, 20);
     await clickTreeNode(entitySet, provider);
     await clickTreeNode(entity, provider);
-    expect(sourceLookups).to.equal(0);
-    expect(api.panels.at(-1).webview.html).to.contain("TravelSet (get_entity)");
+    expect(sourceLookups).to.equal(2);
+    expect(api.sourceOpens).to.have.lengthOf(2);
+    expect(api.sourceOpens[1].fsPath).to.equal("stub.clas.abap");
+    expect(api.sourceEditors.map((editor) => editor.selection.start.line)).to.deep.equal([11, 19]);
+  });
+  it("opens a service leaf on one click and keeps expandable service navigation on double click", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {OsdTreeProvider, clickTreeNode} = loadExtension(api);
+    const controller = {context: controllerContext(), launcher: {state: "running", osdHome: ROOT}, onDidChange() {}};
+    const provider = new OsdTreeProvider(controller, async () => ({sources: {}, testClasses: []}));
+    try {
+      const [leaf] = await provider.serviceRowItems({rows: [{kind: "ICF", path: "/sap/bc/leaf", name: "Leaf"}]});
+      expect(leaf.collapsibleState).to.equal(api.TreeItemCollapsibleState.None);
+      expect(leaf.tooltip).to.match(/browser/i);
+      await clickTreeNode(leaf, provider);
+      expect(api.externalOpens).to.have.lengthOf(1);
+      const [expandable] = await provider.serviceRowItems({rows: [{kind: "ICF", path: "/sap/bc/parent", handler: "ZCL_PARENT"}]});
+      expect(expandable.collapsibleState).to.equal(api.TreeItemCollapsibleState.Collapsed);
+      await clickTreeNode(expandable, provider);
+      expect(api.externalOpens).to.have.lengthOf(1);
+      await clickTreeNode(expandable, provider);
+      expect(api.externalOpens).to.have.lengthOf(2);
+    } finally {
+      provider.dispose();
+    }
   });
   it("labels the four named kinds SEGW's own words, and title-cases a kind it has never seen", () => {
     expect(serviceGroupLabel("ODATA")).to.equal("OData");
@@ -1696,19 +1779,22 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     expect(transactionDetailsHtml(missing, "nonce")).not.to.contain("Go to program");
   });
 
-  it("opens TRAN details from the tree command without taking tree focus, then runs on a second click", async () => {
+  it("runs a TRAN leaf on one click and shows details for an expandable TRAN", async () => {
     const api = vscodeStub();
     const {TransactionItem, clickTransaction} = loadExtension(api);
     const item = new TransactionItem(normalizeTransactionRow({tcode: "ZDETAILS_FOCUS", text: "Focus test", runnable: true}));
     expect(item.command.command).to.equal("osd.clickTransaction");
-    clickTransaction(...item.command.arguments);
-    expect(api.panels).to.have.lengthOf(1);
-    expect(api.panels[0].args[2]).to.include({viewColumn: api.ViewColumn.Beside, preserveFocus: true});
-    expect(api.panels[0].webview.html).to.contain("ZDETAILS_FOCUS");
     await clickTransaction(...item.command.arguments);
-    expect(api.panels).to.have.lengthOf(2);
-    expect(api.panels[1].args[0]).to.equal("osdWebgui");
-    expect(api.panels[1].webview.html).to.contain("ZDETAILS_FOCUS");
+    expect(api.panels).to.have.lengthOf(1);
+    expect(api.panels[0].args[0]).to.equal("osdWebgui");
+    expect(api.panels[0].webview.html).to.contain("ZDETAILS_FOCUS");
+    const expandable = new TransactionItem(normalizeTransactionRow({tcode: "ZDETAILS_PROGRAM", runnable: true}));
+    expandable.collapsibleState = api.TreeItemCollapsibleState.Collapsed;
+    clickTransaction(expandable);
+    expect(api.panels.at(-1).args[2]).to.include({viewColumn: api.ViewColumn.Beside, preserveFocus: true});
+    expect(api.panels.at(-1).webview.html).to.contain("ZDETAILS_PROGRAM");
+    await clickTransaction(expandable);
+    expect(api.panels.at(-1).args[0]).to.equal("osdWebgui");
   });
 
   it("resolves registered TRAN source files and omits a link when the registered file is gone", () => {
@@ -1751,6 +1837,7 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     expect(html).to.contain("&lt;Demo&gt;").and.to.contain("ABAP Unit by reference").and.to.contain("HTTP tests by URL");
     expect(html).to.contain("TravelSet").and.to.contain("abc123").and.to.contain("data-source=\"dpc\"");
     expect(html).to.contain("test/e2e/service.spec.mjs");
+    expect(html).to.contain('title="Opens in your browser."\u003e$metadata</a>');
   });
 });
 

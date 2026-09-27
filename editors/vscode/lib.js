@@ -2219,7 +2219,7 @@ function serviceDetailsHtml(details, nonce = "") {
         <p class="muted">ABAP Unit by reference</p>${list(tests, (test) => `<li><code>${esc(test)}</code></li>`)}</section>`;
     };
     body += `<section><h2>OData</h2><p>DPC: ${esc(row.handler ?? "n/a")}</p><p>MPC: ${esc(row.mpc ?? "n/a")}</p>
-      <p><a href="${attr(metadataUrl ?? "")}" target="_blank" rel="noreferrer">$metadata</a></p>
+      <p><a href="${attr(metadataUrl ?? "")}" target="_blank" rel="noreferrer" title="Opens in your browser.">$metadata</a></p>
       ${details.entitySetsError ? `<p class="error">Entity sets: ${esc(details.entitySetsError)}</p>` : ""}
       <h3>Model sources</h3>${list(details.card?.model, (target) => `<li>${cardLink(target)}</li>`)}
       <h3>Entity sets</h3>${list(details.card?.entitySets ?? details.entitySets ?? [], (set) => `<li><code>${esc(set.set)}</code>

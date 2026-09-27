@@ -885,45 +885,48 @@ group for `/osd/serving`, `/osd/dumps`, and `/osd/sql`, a **TRAN** group, and
 the service inventory. TRAN rows come from the same transaction registry the
 WebGUI uses; report transactions converted into registry entries appear here
 alongside hand-declared transactions. Entries the registry marks non-runnable
-stay visible with their reason. A single click on any TRAN row shows its code,
+stay visible with their reason. A single click on a runnable TRAN leaf runs it
+in Easy Access. A non-runnable TRAN leaf shows its code,
 text, kind (report, dialog, OO, or parameter transaction), starting program,
 class, or referenced transaction code, and package/layer in the reused details
 panel. **Go to program** opens
-the ABAP source only when that file exists. A second click on the same row
-within 400 ms runs a runnable transaction in Easy Access. The inline **Run**
-button and context-menu **Run** remain direct actions, without waiting for a
-second click. Non-runnable rows still show details but offer no Run action.
+the ABAP source only when that file exists. If a TRAN has children, its first
+click shows details and a second click within 400 ms runs it. The inline
+**Run** button and context-menu **Run** remain direct actions. Non-runnable
+rows offer no Run action.
 
-Every tree row uses the same 400 ms second-click classifier as TRAN. Single
-clicks show what the row is in the reused details panel (or the System
-overview for the state row). A second click on the same row performs its
-primary action when there is one. The SQL door is an exception: its notebook
-is its explanation, so one click opens it. Inline buttons and context-menu
-commands still act immediately.
+Leaf rows act on one click: source leaves open files, URL leaves open pages,
+and the SQL door opens its notebook. Expandable rows show details on one
+click and use the 400 ms second-click classifier for navigation. Inline
+buttons and context-menu commands act immediately. Browser-opening leaves
+say so in their tooltips.
 
 | Node kind | Single click | Second click within 400 ms |
 | --- | --- | --- |
 | Stopped/running/building state | System overview | System overview |
-| Launchpad | Launchpad explanation | Open Launchpad in browser |
+| Launchpad leaf | Open Launchpad in browser | Open again |
 | System group | Group explanation | No additional action |
-| Serving `/osd/serving` | Serving endpoint explanation | Open endpoint in browser |
-| Short dumps `/osd/dumps` | Dump explanation | List dumps in Output |
+| Serving `/osd/serving` leaf | Open endpoint in browser | Open again |
+| Short dumps `/osd/dumps` leaf | List dumps in Output | List again |
 | SQL `/osd/sql` | Open the SQL notebook and its guide | Another notebook if clicked again |
 | TRAN group | Group explanation | No additional action |
-| Runnable TRAN | Transaction details | Run in Easy Access |
-| Non-runnable TRAN | Transaction details and reason | No run |
+| Runnable TRAN leaf | Run in Easy Access | Run again |
+| Expandable runnable TRAN | Transaction details | Run in Easy Access |
+| Non-runnable TRAN leaf | Transaction details and reason | No run |
 | Layers group, base layer, workspace layer | Layer explanation | No additional action |
 | Services root, kind group, pack group | Group explanation | No additional action |
-| APP, OData, ICF service row | Service details | Open service or app using `osd.openIn` |
+| Expandable APP, OData, ICF service row | Service details | Open service or app using `osd.openIn` |
+| APP, OData or ICF leaf with a URL (no children) | Open app or service using `osd.openIn` | Open again |
 | APC service row | Service details | No page to open |
-| Service class (DPC, MPC, handler, generated helper) | Class role and source explanation | Open source file |
-| OData entity set | Set and method explanation | Open DPC method |
+| Service class (DPC, MPC, handler, generated helper) leaf | Open source file | Open again |
+| OData entity set leaf | Open DPC method | Open again |
 | Empty/start-system placeholder | Why this group is empty | No additional action |
 
 Service rows are grouped by kind by default. Use the view title toggle to group
 them by pack; rows with no pack appear under **Unpacked**. The setting is
-`osd.services.groupBy`. A single click on an APP, OData, ICF, or APC row updates
-one reused **Service details** webview. The panel is disposed when closed and
+`osd.services.groupBy`. A single click on an expandable APP, OData, ICF, or APC
+row updates one reused **Service details** webview. A service leaf with a URL
+opens that URL directly. The panel is disposed when closed and
 does not retain its hidden context. Its sections are specific to each row:
 
 - **OData:** DPC and MPC source links, lazily loaded entity sets, `$metadata`,
