@@ -46,7 +46,7 @@ export function connection() {
     : process.env[`HXE_${key}`] ?? process.env[`HANA_${key}`];
   return {
     host: preferred("HOST") ?? "localhost",
-    port: Number(preferred("PORT") ?? 39017),
+    port: Number(preferred("PORT") ?? 39041), // the HXE tenant, tools/hana-client.mjs
     user: preferred("USER") ?? "SYSTEM",
     password: preferred("PASSWORD")
       ?? (found === undefined ? undefined : readFileSync(found, "utf8").trim()),

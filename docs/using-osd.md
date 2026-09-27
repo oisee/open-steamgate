@@ -367,7 +367,7 @@ You need a HANA for it. HANA Express in docker is enough:
 
 ```
 docker pull saplabs/hanaexpress:latest
-bash ~/hxe/run.sh                 # a few minutes to come up; ports 39013 / 39017
+bash ~/hxe/run.sh                 # a few minutes to come up; the tenant is on 39041
 ```
 
 Then write the method as you would on a system — `src/amdp/zcl_osd_amdp_demo`

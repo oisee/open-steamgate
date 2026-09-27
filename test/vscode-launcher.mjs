@@ -566,8 +566,8 @@ describe("editors/vscode/launcher.js: databases", function () {
 
   it("databaseEnv(hana) sets HANA_* and STG_DB_FRESH only when fresh is truthy", () => {
     expect(databaseEnv({kind: "hana"})).to.deep.equal({STG_DB: "hana"});
-    expect(databaseEnv({kind: "hana", host: "hxehost", port: 39017, user: "SYSTEM", schema: "OSD_ABCD1234"}))
-      .to.deep.equal({STG_DB: "hana", HANA_HOST: "hxehost", HANA_PORT: "39017", HANA_USER: "SYSTEM", HANA_SCHEMA: "OSD_ABCD1234"});
+    expect(databaseEnv({kind: "hana", host: "hxehost", port: 39041, user: "SYSTEM", schema: "OSD_ABCD1234"}))
+      .to.deep.equal({STG_DB: "hana", HANA_HOST: "hxehost", HANA_PORT: "39041", HANA_USER: "SYSTEM", HANA_SCHEMA: "OSD_ABCD1234"});
     expect(databaseEnv({kind: "hana", fresh: true})).to.deep.equal({STG_DB: "hana", STG_DB_FRESH: "1"});
     expect(databaseEnv({kind: "hana", fresh: false})).to.deep.equal({STG_DB: "hana"});
   });

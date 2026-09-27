@@ -127,7 +127,9 @@ container's writable layer, which is the lesson `~/dev/a4h/CLAUDE.md` paid for
 twice: the database then survives `docker rm` and Portainer's Recreate, and
 overlay2 does not copy a multi-gigabyte file in full on first write.
 
-Ports 39013 (SYSTEMDB), 39017 (tenant) and the instance's own ranges. None of
+Ports 39013 (nameserver), 39017 (SYSTEMDB SQL), 39041 (the HXE tenant, where
+the application's schemas go; corrected 2026-09-27 -- 39017 was called the
+tenant here and held them all) and the instance's own ranges. None of
 them collide with 30213/30215, which are the A4H instance forwarded from i5,
 nor with 3030, which is the showcase.
 
