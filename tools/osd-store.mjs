@@ -495,6 +495,16 @@ export class ObjectStore {
     return out.sort((a, b) => (a.type + a.name).localeCompare(b.type + b.name));
   }
 
+  /** Package and source layer for a declaration path that is not itself an
+   *  indexed ADT object (such as a *.tran.xml). */
+  locationOf(file) {
+    const relativeFile = String(file).replaceAll("\\", "/");
+    const root = this.roots.filter((candidate) => relativeFile.startsWith(`${candidate.path}/`))
+      .sort((a, b) => a.path.length - b.path.length).at(-1);
+    if (!root) return undefined;
+    return {package: this.#packagesOf(relativeFile, root).at(-1), layer: root.path};
+  }
+
   find(type, name) {
     const key = String(name).toUpperCase();
     const direct = this.#entries().get(`${type} ${key}`);

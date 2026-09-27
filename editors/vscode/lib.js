@@ -1877,9 +1877,60 @@ function normalizeTransactionRow(row) {
     tcode: String(row?.tcode ?? ""), text: String(row?.text ?? ""),
     program: String(row?.program ?? ""), dynpro: String(row?.dynpro ?? ""),
     className: String(row?.className ?? ""), method: String(row?.method ?? ""),
+    parameter: String(row?.parameter ?? ""),
     kind: String(row?.kind ?? ""), runnable: row?.runnable === true,
     reason: String(row?.reason ?? ""), source: String(row?.source ?? ""),
+    package: String(row?.package ?? ""), layer: String(row?.layer ?? ""),
+    programSource: String(row?.programSource ?? ""),
   };
+}
+
+/** The TRAN details content. `programSource` is supplied only after the
+ *  extension has verified that the class or program file exists. */
+function transactionDetailsModel(row, programSource) {
+  const source = String(row?.source ?? "").replaceAll("\\", "/");
+  const parts = source.split("/");
+  const isPack = parts[0] === "packs" && parts.length > 2;
+  const layer = isPack ? `Pack ${parts[1]}` : parts[0] === "gen" ? "Generated" : parts[0] === "src" ? "Project" : "Unknown";
+  const packagePath = isPack ? parts.slice(2).join("/") : source;
+  const parameterTarget = /^\/\*([^\s]+)/.exec(row?.parameter ?? "")?.[1];
+  const target = row?.className || parameterTarget || row?.program || row?.parameter || "";
+  const targetType = row?.className ? "Class" : parameterTarget || (!row?.program && row?.parameter) ? "Transaction" : "Program";
+  const kind = row?.className ? "OO transaction" : row?.parameter ? "Parameter transaction"
+    : row?.kind === "DYNPRO" || (row?.dynpro && row.dynpro !== "1000") ? "Dialog transaction" : "Report transaction";
+  return {
+    tcode: String(row?.tcode ?? ""), text: String(row?.text ?? ""), kind,
+    target, targetType,
+    package: row?.package || packageOf(packagePath) || "Unknown", layer: row?.layer || layer,
+    programSource: programSource || undefined,
+    runnable: row?.runnable === true, reason: String(row?.reason ?? ""),
+  };
+}
+
+/** A second click on the same node within 400 ms runs it. Expired clicks
+ *  are discarded, so the state stays small even as the tree changes. */
+function classifyTransactionClick(previousByNode, node, at, threshold = 400) {
+  const clicks = new Map([...previousByNode].filter(([, time]) => at >= time && at - time <= threshold));
+  if (clicks.has(node)) {
+    clicks.delete(node);
+    return {action: "double", clicks};
+  }
+  clicks.set(node, at);
+  return {action: "single", clicks};
+}
+
+function transactionDetailsHtml(details, nonce = "") {
+  const esc = htmlEscape;
+  const attr = htmlAttrEscape;
+  const link = details.programSource
+    ? `<button type="button" data-source="program">Go to program</button> <code>${esc(details.programSource)}</code>` : "";
+  const script = `<script nonce="${attr(nonce)}">const vscode=acquireVsCodeApi();document.addEventListener("click",e=>{if(e.target.closest("[data-source=program]"))vscode.postMessage({command:"openSource",role:"program"});});</script>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${attr(nonce)}';"><style>
+    body{font:13px var(--vscode-font-family);color:var(--vscode-foreground);padding:0 20px;max-width:1000px}h1{font-size:20px}section{border-top:1px solid var(--vscode-panel-border);padding:8px 0}button{color:var(--vscode-textLink-foreground);background:transparent;border:0;padding:0;text-decoration:underline;cursor:pointer}code{font-family:var(--vscode-editor-font-family)}.muted{color:var(--vscode-descriptionForeground)}
+    </style></head><body><h1>${esc(details.tcode)}</h1><p>${esc(details.text)}</p>
+    <section><p>Kind: ${esc(details.kind)}</p><p>${esc(details.targetType)}: <code>${esc(details.target || "n/a")}</code></p>
+    <p>Package: ${esc(details.package)} · Layer: ${esc(details.layer)}</p><p>${link}</p>
+    ${details.reason ? `<p class="muted">${esc(details.reason)}</p>` : ""}</section>${script}</body></html>`;
 }
 
 /** Read a UI5 manifest's identity and resolve each sap.app.dataSources URI
@@ -2067,7 +2118,8 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   demoFailureObjects,
   progTcodeOf, webguiTransactionUrl, webguiPanelHtml, runWebguiPanel, progRunLens,
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
-  serviceContextValue, serviceActionContext, normalizeTransactionRow, appManifestDetails, httpTestFiles, closureTestNames, dumpsForService,
+  serviceContextValue, serviceActionContext, normalizeTransactionRow, transactionDetailsModel, classifyTransactionClick,
+  transactionDetailsHtml, appManifestDetails, httpTestFiles, closureTestNames, dumpsForService,
   serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext,
   SYSTEM_STATUS_SETS, odataV2Results, systemOverviewModel};

@@ -107,6 +107,7 @@ export function transactionOf(xml, file) {
     dynpro,
     className: (oo.CLASS ?? "").toUpperCase(),
     method: (oo.METHOD ?? "").toUpperCase(),
+    parameter: text(block(xml, "TSTCP") ?? "", "PARAM"),
     webgui: text(block(xml, "TSTCC") ?? "", "S_WEBGUI"),
     file,
   };
