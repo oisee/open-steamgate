@@ -472,6 +472,20 @@ describe("editors/vscode: the extension's logic", function () {
     expect(html).to.contain("System information app");
     expect(html).to.contain("<iframe");
     expect(overviewStatusSection("Services", model.status.services)).to.contain("/app/flp.html");
+    // OData plumbing is not shown: __metadata and all-deferred navigation columns
+    const plumbed = [
+      {__metadata: {uri: "x"}, Name: "a", Pack: {__deferred: {uri: "y"}}},
+      {__metadata: {uri: "z"}, Name: "b", Pack: {__deferred: {uri: "w"}}},
+    ];
+    const table = overviewStatusSection("Services", plumbed);
+    expect(table).to.contain("<th>Name</th>");
+    expect(table).not.to.contain("__metadata");
+    expect(table).not.to.contain("__deferred");
+    // one row reads down as field / value
+    const single = overviewStatusSection("System", [{Sid: "OSG", Port: 3531}]);
+    expect(single).to.contain('class="record"');
+    expect(single).to.contain("<tr><th>Sid</th><td>OSG</td></tr>");
+    // sections are stacked, not two to a row
 
     const stopped = systemOverviewModel({state: "stopped", homeKind: "osd.home", homePath: "/work/osd", layers: ["/work/app"]});
     expect(stopped.running).to.equal(false);
