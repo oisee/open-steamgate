@@ -4,7 +4,7 @@ import {mkdtempSync, rmSync} from "node:fs";
 import {join} from "node:path";
 import {test} from "node:test";
 import {generateNotes, mergedPullRequests} from "../scripts/release-notes.mjs";
-import {expectedVersion} from "../scripts/release-version.mjs";
+import {expectedVersion, parseReleaseArgs} from "../scripts/release-version.mjs";
 
 test("reads PR titles from merge bodies, once per PR", () => {
   const log = [
@@ -16,6 +16,16 @@ test("reads PR titles from merge bodies, once per PR", () => {
   assert.deepEqual(mergedPullRequests(log), ["- Fix a thing (#9)", "- Add another thing (#8)"]);
   assert.deepEqual(mergedPullRequests("Merge pull request #5 from example/branch", () => "Title from API"), ["- Title from API (#5)"]);
   assert.equal(expectedVersion("0.1.6", "1095"), "0.1.1095");
+});
+
+test("parses --allow-untagged separately from an optional VSIX in both orders", () => {
+  const tag = "vscode-v0.1.42";
+  const vsix = "build/vsix/osd-vscode-0.1.42.vsix";
+  const expected = {tag, vsix, requireTag: false};
+  assert.deepEqual(parseReleaseArgs([tag, "--allow-untagged", vsix]), expected);
+  assert.deepEqual(parseReleaseArgs([tag, vsix, "--allow-untagged"]), expected);
+  assert.deepEqual(parseReleaseArgs([tag, "--allow-untagged"]), {tag, vsix: undefined, requireTag: false});
+  assert.deepEqual(parseReleaseArgs([tag, vsix]), {tag, vsix, requireTag: true});
 });
 
 test("selects the previous release tag and first-parent PR merges", () => {

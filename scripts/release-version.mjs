@@ -46,12 +46,22 @@ export function checkReleaseVersion(tag, vsix, {requireTag = true} = {}) {
   return version;
 }
 
+export function parseReleaseArgs(args) {
+  const allowUntagged = args.includes("--allow-untagged");
+  const positional = args.filter((arg) => arg !== "--allow-untagged");
+  if (positional.length > 2 || positional.some((arg) => arg.startsWith("--"))) {
+    throw new Error("usage: release-version.mjs <tag> [vsix] [--allow-untagged]");
+  }
+  return {tag: positional[0], vsix: positional[1], requireTag: !allowUntagged};
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     if (process.argv[2] === "--suggest") console.log(suggestedTag());
-    else console.log(checkReleaseVersion(process.argv[2], process.argv[3], {
-      requireTag: !process.argv.includes("--allow-untagged"),
-    }));
+    else {
+      const {tag, vsix, requireTag} = parseReleaseArgs(process.argv.slice(2));
+      console.log(checkReleaseVersion(tag, vsix, {requireTag}));
+    }
   } catch (error) {
     console.error(`release-version: ${error.message}`);
     process.exitCode = 1;

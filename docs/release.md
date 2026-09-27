@@ -19,18 +19,19 @@ git tag "$tag"
 git push origin "$tag"
 ```
 
-A `vscode-v*` tag push builds and publishes a prerelease. To prepare a draft
+A `vscode-v*` tag push builds a draft prerelease and publishes it only after
+the VSIX, binary, and Compose uploads all succeed. To prepare a draft
 without pushing a tag, run **VS Code prerelease** from the intended branch.
 Leave `tag` blank to derive the stamped version from that ref, and leave
 `draft` true. You may enter a tag, but it must match the version of the
 selected ref; any existing tag must point to that commit. The workflow uses
 `gh release create --draft --prerelease --target <commit>` and never runs
 `git push`. For an untagged draft, GitHub creates the tag when the draft is
-published. To publish an existing draft through the workflow, rerun with
-`draft=false`; a new dispatch must first create the draft. An existing
-release is updated and same-named assets are uploaded with `--clobber` on
-every rerun. Do not move
-a published tag.
+published. A dispatch with `draft=true` never publishes. To publish an existing
+draft through the workflow, rerun with `draft=false`; a new dispatch must
+first create the draft. An existing release is updated only when its target
+commit SHA equals the run's checkout commit. Same-named assets are uploaded
+with `--clobber` on every rerun. Do not move a published tag.
 
 The VSIX job installs dependencies with Node 24, runs `npm run bootstrap`
 for the pinned libraries and packs in `libs.lock.json`, and builds the VSIX.
@@ -39,9 +40,14 @@ GitHub PR merge titles since the nearest previous `vscode-v*` tag. A merge
 commit without a title in its body gets its title from the PR API. Squash
 commits and manually copied changes have no PR merge commit and do not
 appear. The generated notes and release README pass through
-`tools/osd-leak-scan.mjs --paths` before publication. In CI, exit status 2
-means the optional private identifier list is absent but structural checks
-passed; a match (status 1) stops publication.
+`tools/osd-leak-scan.mjs --paths` before release creation. Configure the
+optional repository secret `OSD_LEAK_IDENTIFIERS` with the JSON content of
+`.local/leak-identifiers.json` (an object whose keys name identifier kinds and
+whose values are arrays of private names). The VSIX job writes that content
+to the gitignored file on its runner and requires scan exit 0. When the secret
+is absent, exit 2 is accepted because structural checks passed, and the job
+emits a warning that the private name check did not run. A match (exit 1)
+always stops the release.
 
 ## Assets
 
@@ -52,10 +58,11 @@ passed; a match (status 1) stops publication.
 | `sqlite.yml`, `duckdb.yml`, `postgres.yml`, `hana.yml` | [Tracked Compose sources](../docker/compose/), validated with `docker compose config` |
 | `README.md` | Short instructions for starting every asset, also included in the release notes |
 
-The binary and Compose jobs start after the VSIX job creates the release.
-A failed later job can leave a partial draft or prerelease; rerun the workflow
-to fill or replace assets. Each checksum is `sha256sum` output with the
-corresponding asset basename.
+The binary and Compose jobs start after the VSIX job creates the draft.
+The final publish job needs all three upload jobs, so a failed upload leaves
+the draft unpublished. Rerun the workflow to fill or replace assets. An
+already published release is updated in place on reruns. Each checksum is
+`sha256sum` output with the corresponding asset basename.
 
 All four requested Bun targets cross-compiled on Linux x64 with Bun 1.4.2
 in the local release check. No target failed to build. Only Linux x64 was
