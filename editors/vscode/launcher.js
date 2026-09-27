@@ -534,6 +534,14 @@ async function waitForServing(port, options = {}) {
  *  to SIGKILL after `graceMs` -- the same shape `test/osd-child.mjs` already
  *  uses by hand for the same reason: a process that has not exited is a
  *  process that still holds the port and the database file. */
+// How long a stop waits before SIGKILL. tools/osd-runtime.mjs gives each
+// serving worker up to 45 s to quiesce and kills it at 55 s (a DuckDB file
+// must checkpoint); a SIGKILL of test/run.mjs before that skips its reaper
+// and can leave a worker holding the port and the database. So: above 55 s.
+const STOP_GRACE_MS = 60000;
+// what the start race answers when stop() ended the child it was waiting on
+const STOPPED_WHILE_STARTING = Symbol("stopped while starting");
+
 function terminate(child, {signal = "SIGTERM", graceMs = 15000} = {}) {
   if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
     return Promise.resolve();
@@ -1026,10 +1034,20 @@ function finishMaterializedHome(target, globalStorageDir, existing, options) {
  *  (a crash is not a state this pretends is still "running"). Emits "log"
  *  (a line of the build's or the server's own output), "state" (the new
  *  state) and "exit" ({code, signal}, only when the server process itself
- *  went away without stop() having been called). */
+ *  went away without this launcher asking it to: stop(), rebuild() and a
+ *  start that gave up are not "exit"). A stop() while "starting" makes
+ *  start() resolve undefined, as a stop while "building" does. */
 class Launcher extends EventEmitter {
-  // set just before this launcher terminates its own child
-  #stopRequested = false;
+  // why this launcher asked one of its own children to go ("stop" or
+  // "abandoned"), per child and only while it was alive: a child that had
+  // already died on its own is never marked, so its crash still warns
+  #asked = new WeakMap();
+
+  #ask(child, reason) {
+    if (child !== undefined && child.exitCode === null && child.signalCode === null) {
+      this.#asked.set(child, reason);
+    }
+  }
 
   constructor(options = {}) {
     super();
@@ -1223,8 +1241,6 @@ class Launcher extends EventEmitter {
     }
     this.child = child;
     this.pid = child.pid;
-    // a new child starts unasked-to-stop, whatever the last one left behind
-    this.#stopRequested = false;
     try {
       setServingChildPid(this.servingLock, child.pid);
     } catch (error) {
@@ -1256,9 +1272,8 @@ class Launcher extends EventEmitter {
     child.on("exit", (code, signal) => {
       // an exit this launcher asked for (stop(), rebuild(), a start that
       // gave up) is not news; only one nobody asked for is "exit"
-      const requested = this.#stopRequested;
-      this.#stopRequested = false;
-      const unexpected = this.state !== "stopped" && !requested;
+      const asked = this.#asked.get(child);
+      const unexpected = this.state !== "stopped" && asked === undefined;
       this.child = undefined;
       this.port = undefined;
       this.pid = undefined;
@@ -1266,30 +1281,35 @@ class Launcher extends EventEmitter {
       this.#setState("stopped");
       if (unexpected) {
         this.emit("exit", {code, signal});
-      } else if (requested) {
-        this.#log("\n--- osd stopped ---\n");
+      } else if (asked !== undefined) {
+        this.#log(asked === "stop" ? "\n--- osd stopped ---\n" : "\n--- osd start abandoned ---\n");
       }
-      resolveExitedEarly({code, signal});
+      resolveExitedEarly({code, signal, asked});
     });
 
     let serving;
     try {
       serving = await Promise.race([
         waitForServing(port, {timeoutMs: this.timeoutMs}),
-        exitedEarly.then(({code, signal}) => {
+        exitedEarly.then(({code, signal, asked}) => {
+          // stopped while starting: a cancel, the way a stop while building is
+          if (asked === "stop") return STOPPED_WHILE_STARTING;
           const error = new Error(`osd exited before it started serving (code ${code ?? "?"}, signal ${signal ?? "?"}): ${recentOutput.trim().slice(-1000)}`);
           error.logText = recentOutput;
           throw error;
         }),
       ]);
     } catch (error) {
-      this.#stopRequested = true;
-      await terminate(child);
+      this.#ask(child, "abandoned");
+      await terminate(child, {graceMs: STOP_GRACE_MS});
       if (this.state !== "stopped") {
         this.#setState("stopped");
       }
       error.logText ??= this.lastLog;
       throw error;
+    }
+    if (serving === STOPPED_WHILE_STARTING) {
+      return undefined;
     }
     this.port = port;
     this.generation = serving.generation;
@@ -1316,8 +1336,8 @@ class Launcher extends EventEmitter {
       this.#setState("stopped");
       return;
     }
-    this.#stopRequested = true;
-    await terminate(this.child);
+    this.#ask(this.child, "stop");
+    await terminate(this.child, {graceMs: STOP_GRACE_MS});
     // the "exit" handler above already reset the fields and the state
   }
 

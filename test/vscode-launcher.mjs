@@ -705,6 +705,57 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
     });
   }
 
+  // a child that never answers /osd/serving: "starting" for as long as we like
+  const silentHome = () => {
+    const osdHome = fakeHome();
+    writeFileSync(join(osdHome, "test", "run.mjs"), "setInterval(() => {}, 1000);\n");
+    return osdHome;
+  };
+
+  it("stop() while starting: start() resolves undefined, no \"exit\"", async () => {
+    const osdHome = silentHome();
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    const exits = [];
+    const lines = [];
+    launcher.on("exit", (e) => exits.push(e));
+    launcher.on("log", (l) => lines.push(l));
+    try {
+      const starting = launcher.start();
+      for (let i = 0; launcher.state !== "starting" && i < 200; i++) await new Promise((r) => setTimeout(r, 10));
+      expect(launcher.state).to.equal("starting");
+      await launcher.stop();
+      expect(await starting, "a cancel, not an error").to.equal(undefined);
+      expect(launcher.state).to.equal("stopped");
+      expect(exits).to.deep.equal([]);
+      expect(lines.join("")).to.contain("--- osd stopped ---");
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
+  it("a start that gives up says so, rejects, and is no \"exit\"", async () => {
+    const osdHome = silentHome();
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 1500});
+    const exits = [];
+    const lines = [];
+    launcher.on("exit", (e) => exits.push(e));
+    launcher.on("log", (l) => lines.push(l));
+    try {
+      await rejects(launcher.start());
+      expect(launcher.state).to.equal("stopped");
+      expect(exits).to.deep.equal([]);
+      expect(lines.join("")).to.contain("--- osd start abandoned ---");
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
   it("a child killed from outside is still an unexpected exit", async () => {
     const osdHome = fakeHome();
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
