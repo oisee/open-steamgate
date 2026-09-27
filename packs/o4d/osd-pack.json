@@ -10,7 +10,7 @@
     {
       "folder": "upstream",
       "repo": "https://github.com/oisee/vivid-vibes",
-      "ref": "1b9fe6202a819ee8fb51e7cef754429acff5d21c",
+      "ref": "9f45fe0b00c537643ff49c5ddf86838a42e130a0",
       "path": "src",
       "exclude": [
         "^zo4d_offline_export\\.prog\\.",

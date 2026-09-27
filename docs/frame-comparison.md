@@ -112,7 +112,13 @@ are not sorted before comparing to make them equal; the honest statement
 is that ABAP does not promise the order of equal keys, the kernel and the
 runtime pick differently, and a scene that wants a defined picture needs
 a second key (Astra, 2026-09-17). That is a change to the demo, not to
-the runtime, and is in the backlog.
+the runtime. **Done 2026-09-23** (vivid-vibes#5, pinned in `packs/o4d`):
+every depth sort of the six effects that have one (amigaball, amigaball2,
+sierpinski, sierpinski_tet, glenz, lowpoly) carries its append position as
+a second key, `SORT … BY z seq`. The same edit was activated in `$ZO4D` on
+A4H and amiga_ball, amiga_ball_2, sierpinski, sierpinski_tet and glitch
+were re-recorded there. A stable sort now gives the kernel's order, and a
+Go build of the demo matches all five frame for frame.
 
 Three conclusions the table supports. The pulse anomaly (#4302) is in
 every scene, so a fix in core moves every row at once; it also owns
