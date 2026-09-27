@@ -4,7 +4,7 @@
 // test/osd-child.mjs.
 import {expect} from "chai";
 import express from "express";
-import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
@@ -30,7 +30,7 @@ const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseChec
   dumpsForService, implementationMethodLine, serviceCardModel, serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   warmStatusText, activationBuildText, closureTestsText,
   PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext, SYSTEM_STATUS_SETS,
-  odataV2Results, systemOverviewModel,
+  odataV2Results, systemOverviewModel, runningAbapSources, breakpointWarning,
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText} =
   createRequire(import.meta.url)("../editors/vscode/lib.js");
 const {overviewStatusSection, systemOverviewHtml} = createRequire(import.meta.url)("../editors/vscode/system-overview.js");
@@ -399,6 +399,54 @@ describe("editors/vscode: the extension's logic", function () {
       const {packNameOf} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
       const packSource = `/storage/osd/packs/${packNameOf(dir)}/code`;
       expect(config.sourceMapPathOverrides[`file://${packSource}/*`]).to.equal(`${dir}/code/*`);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
+  it("names the copy a breakpoint binds in: the one the running generation's source maps name", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "osd-breakpoint-"));
+    try {
+      // a running home (the bundled copy's shape), a checkout of the same
+      // tree beside it, and one workspace pack compiled through storage
+      const home = path.join(dir, "home");
+      const checkout = path.join(dir, "checkout");
+      const storage = path.join(dir, "storage");
+      const workspace = path.join(dir, "work");
+      const layer = {folder: workspace, srcDir: path.join(workspace, "src")};
+      const {packNameOf} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
+      const packSource = path.join(storage, "packs", packNameOf(workspace), "src");
+      const output = path.join(home, "build", "by-input", "g1", "output");
+      for (const folder of [output, path.join(home, "src"), path.join(checkout, "src"), layer.srcDir, packSource]) {
+        mkdirSync(folder, {recursive: true});
+      }
+      for (const file of [path.join(home, "src", "zcl_a.clas.abap"), path.join(checkout, "src", "zcl_a.clas.abap"),
+        path.join(checkout, "src", "zcl_b.clas.abap"), path.join(layer.srcDir, "zcl_p.clas.abap")]) {
+        writeFileSync(file, "CLASS x DEFINITION.\n");
+      }
+      writeFileSync(path.join(output, "zcl_a.clas.mjs.map"), JSON.stringify({version: 3,
+        sources: [path.relative(output, path.join(home, "src", "zcl_a.clas.abap")).replaceAll("\\", "/")], mappings: ""}));
+      writeFileSync(path.join(output, "zcl_p.clas.mjs.map"), JSON.stringify({version: 3,
+        sources: [path.relative(output, path.join(packSource, "zcl_p.clas.abap")).replaceAll("\\", "/")], mappings: ""}));
+      writeFileSync(path.join(output, "lib.intf.mjs"), "");
+      symlinkSync(output, path.join(home, "output"), "dir");
+
+      const running = runningAbapSources(home, {storageDir: storage, layers: [layer]});
+      expect(running.generation).to.equal(realpathSync(output));
+      expect(breakpointWarning(path.join(home, "src", "zcl_a.clas.abap"), running)).to.equal(undefined);
+      expect(breakpointWarning(path.join(layer.srcDir, "zcl_p.clas.abap"), running)).to.equal(undefined);
+      expect(breakpointWarning(path.join(dir, "notes.txt"), running)).to.equal(undefined);
+
+      const other = breakpointWarning(path.join(checkout, "src", "zcl_a.clas.abap"), running, {home});
+      expect(other.counterpart).to.equal(path.join(home, "src", "zcl_a.clas.abap"));
+      expect(other.message).to.contain("will not be hit").and.contain(`runs ${path.join(home, "src", "zcl_a.clas.abap")}`);
+
+      const absent = breakpointWarning(path.join(checkout, "src", "zcl_b.clas.abap"), running);
+      expect(absent.counterpart).to.equal(undefined);
+      expect(absent.message).to.contain("no code of the running system maps back to zcl_b.clas.abap");
+
+      expect(runningAbapSources(path.join(dir, "nothing-built"))).to.equal(undefined);
+      expect(breakpointWarning(path.join(checkout, "src", "zcl_a.clas.abap"), undefined)).to.equal(undefined);
     } finally {
       rmSync(dir, {recursive: true, force: true});
     }

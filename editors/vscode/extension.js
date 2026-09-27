@@ -23,7 +23,8 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   webguiPanelHtml, runWebguiPanel,
   warmStatusText, activationBuildText, closureTestsText,
   presetSettings, isOpenSteamgateCheckout: isOpenSteamgateManifest, osdHomeChoice, osdStateContext, systemOverviewModel,
-  debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText} = require("./lib.js");
+  debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText,
+  runningAbapSources, breakpointWarning} = require("./lib.js");
 const {Launcher, ensureMaterializedHome, materializedHomeDir, selectOldHomes, listOldHomes, cleanupOldHomes,
   hasLiveServingLock,
   detectWorkspaceLayers, layerContributions, databaseEnv, defaultDedicatedName, describeDatabase,
@@ -1973,6 +1974,60 @@ function breakpointToggleStatusBar(context) {
   return item;
 }
 
+/** A breakpoint binds only in the file the running generation's source maps
+ *  name (docs/debugging-abap.md, "Which copy"). A checkout opened beside the
+ *  bundled copy, an `osd.home` pointing elsewhere, or an object a later
+ *  layer overrides all look like the right file and never stop. Checked when
+ *  an OSD debug session starts and when a breakpoint is added during one;
+ *  each file is named once per generation. */
+function breakpointGuard(context) {
+  let cached;
+  const warned = new Set();
+  const osdSessionActive = () => [...(activeController?.debugSessions ?? [])].some((session) => session.name.startsWith("OSD:"));
+  const running = () => {
+    const launcher = activeController?.launcher;
+    if (launcher === undefined || launcher.osdHome === undefined) return undefined;
+    let generation;
+    try {
+      generation = fs.realpathSync(path.join(launcher.osdHome, "output"));
+    } catch {
+      return undefined;
+    }
+    if (cached?.generation !== generation) {
+      cached = runningAbapSources(launcher.osdHome, {storageDir: launcher.storageDir, layers: launcher.layers});
+      warned.clear();
+    }
+    return cached;
+  };
+  const check = (breakpoints) => {
+    const files = breakpoints
+      .filter((bp) => bp instanceof vscode.SourceBreakpoint && bp.enabled && bp.location.uri.scheme === "file")
+      .map((bp) => bp.location.uri.fsPath)
+      .filter((file) => /\.abap$/i.test(file));
+    if (files.length === 0) return;
+    const sources = running();
+    for (const file of new Set(files)) {
+      const warning = breakpointWarning(file, sources, {home: activeController?.launcher?.osdHome});
+      if (warning === undefined || warned.has(file)) continue;
+      warned.add(file);
+      const actions = warning.counterpart === undefined ? [] : ["Open the running copy"];
+      vscode.window.showWarningMessage(`osd: ${warning.message}`, ...actions).then((picked) => {
+        if (picked !== undefined) vscode.window.showTextDocument(vscode.Uri.file(warning.counterpart));
+      });
+    }
+  };
+  if (typeof vscode.debug.onDidChangeBreakpoints === "function") {
+    context.subscriptions.push(vscode.debug.onDidChangeBreakpoints((event) => {
+      if (osdSessionActive()) check(event.added);
+    }));
+  }
+  if (typeof vscode.debug.onDidStartDebugSession === "function") {
+    context.subscriptions.push(vscode.debug.onDidStartDebugSession((session) => {
+      if (session.name.startsWith("OSD:")) check(vscode.debug.breakpoints ?? []);
+    }));
+  }
+}
+
 function activate(context) {
   const output = vscode.window.createOutputChannel("osd");
   context.subscriptions.push(output);
@@ -2002,6 +2057,7 @@ function activate(context) {
   context.subscriptions.push(classrunOutput);
   context.subscriptions.push(statusBar(context));
   breakpointToggleStatusBar(context);
+  breakpointGuard(context);
   context.subscriptions.push(testExplorer(context, output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.showDumps", () => showDumps(output)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.setHanaPassword", () => setDatabasePassword(context, "hana")));
