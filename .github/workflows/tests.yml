@@ -166,6 +166,9 @@ jobs:
       - name: ABAP Unit
         run: node tools/osd-unit-run.mjs
 
+      - name: BAL survives an OSD process restart
+        run: npm run test:bal-persist
+
       # **What is skipped is reported, not swallowed.** Several suites are
       # guarded on `.local/corpus*`, which is not in this repository and
       # never will be — it holds real customer projects. On a runner those
