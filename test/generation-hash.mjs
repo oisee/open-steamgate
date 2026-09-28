@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {writeFileSync, readFileSync, rmSync, mkdirSync, mkdtempSync} from "node:fs";
+import {writeFileSync, readFileSync, readdirSync, rmSync, mkdirSync, mkdtempSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {hashOf, generatorClosure, genHash} from "../tools/osd-build.mjs";
@@ -53,10 +53,11 @@ describe("a generation's name is a function of the tree, not of its build histor
     const names = closure.map((f) => f.split("/").pop());
     expect(names, "a listed generator").to.contain("cds2ddic.mjs");
     expect(names, "something a generator imports").to.contain("osd-packs.mjs");
+    expect(names, "the source-map shim changes generated JavaScript").to.contain("osd-source-map-starts.mjs");
     // editing a tool no generator reaches must not rename every generation
     expect(names).to.not.contain("osd-sql-trace-buffer.mjs");
     expect(closure.length, "a subset, computed rather than approximated by `all of tools/`")
-      .to.be.lessThan(60);
+      .to.be.lessThan(readdirSync("tools").filter((name) => name.endsWith(".mjs")).length);
   });
 
   it("and the closure is stable, so the hash does not depend on the order it was read", () => {
