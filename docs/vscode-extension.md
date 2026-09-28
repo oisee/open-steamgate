@@ -1568,8 +1568,8 @@ classrun open the running serving child's inspector on a free
 127.0.0.1 port (`/osd/inspector`, `tools/osd-inspector.mjs`) and start a
 Node attach session with the same source-map settings as
 [`docs/debugging-abap.md`](debugging-abap.md), with no restart. The
-session reconnects when that child recycles or a full rebuild starts it
-again. Once no `.abap` breakpoint is left and the session has ended, the
+session reconnects when that child recycles; a full rebuild ends it, and
+the new system is attached again when `.abap` breakpoints are waiting. Once no `.abap` breakpoint is left and the session has ended, the
 inspector is closed. `OSD_INSPECT=1` in VS Code's
 environment (or, for one release, an existing `"osd.debug": true`) opens
 it at start instead, and then it stays open. A debugger needs one work

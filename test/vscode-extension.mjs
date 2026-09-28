@@ -580,6 +580,11 @@ describe("editors/vscode: the extension's logic", function () {
 
   it("releases an inspector it opened once no .abap breakpoint is left, and keeps one opened at start", async () => {
     const api = debugApi();
+    let terminated;
+    api.debug.onDidTerminateDebugSession = (listener) => {
+      terminated = listener;
+      return {dispose() {}};
+    };
     const SystemController = loadSystemController(api);
     const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
     controller.launcher = fakeLauncher();
@@ -594,8 +599,10 @@ describe("editors/vscode: the extension's logic", function () {
     controller.debugSessions.add(session);
     expect(await controller.releaseDebugger(), "the session is still in use").to.equal(false);
     expect(controller.launcher.calls).to.deep.equal(["open"]);
-    controller.debugSessions.delete(session);
-    expect(await controller.releaseDebugger({sessionEnded: true})).to.equal(true);
+    // the session's own end is what releases it (the terminate handler)
+    terminated(session);
+    await controller.inspectorSteps;
+    await controller.inspectorSteps;
     expect(controller.launcher.calls).to.deep.equal(["open", "close"]);
     expect(controller.debuggerState.systemPort, "detached").to.equal(undefined);
     // a system started with its inspector (osd.debug, OSD_INSPECT=1) keeps it

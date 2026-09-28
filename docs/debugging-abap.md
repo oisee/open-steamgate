@@ -50,16 +50,23 @@ answered to callers on this machine only). The supervisor sends the child
 `node:inspector`'s `open(port, "127.0.0.1")` (`tools/osd-inspector.mjs`,
 which refuses any other host). Then the extension starts its Node attach
 session with the same source-map settings as before. The supervisor
-remembers the port, so a recycle, a warm activation's recycle or a full
-rebuild's new child opens it again at its start on the same port, and the
-attach session's `restart` option reconnects. Once no `.abap` breakpoint is
+remembers the port, so a recycle or a warm activation's recycle opens it
+again in the new child at its start on the same port, and the attach
+session's `restart` option reconnects. A full rebuild is a stop and a start
+of the whole system: the session ends with it, and the new system is given
+an inspector again only if `.abap` breakpoints are waiting (a Run with
+debugger without breakpoints is not re-attached). Once no `.abap` breakpoint is
 left **and** the attach session has ended, the inspector is closed again,
 so nothing stays open. Removing the last breakpoint while a request is
 paused, or during a Run with debugger, leaves the session attached until it
 is ended.
 
 The door is for a program on this machine and nothing else, because opening
-an inspector is running code in the process. It refuses a request that is
+an inspector is running code in the process. That includes every local
+user: like the other `/osd/*` doors it has no authentication, so on a
+shared machine anyone who can reach the loopback port can now open the
+inspector of any running system, where before only a system started with
+`osd.debug` had one. It refuses a request that is
 not from a loopback socket, one whose Host is not a loopback name (which a
 DNS-rebound page cannot fake), and one that comes from a web page (an
 `Origin`, or a `Sec-Fetch-Site` other than `none`). A POST must be
