@@ -81,6 +81,7 @@ function systemOverviewModel(input = {}) {
   return {
     state: input.state ?? "stopped",
     running: input.state === "running",
+    extensionVersion: input.extensionVersion,
     home: {kind: input.homeKind ?? "osd.home", path: input.homePath ?? launcher.osdHome},
     layers: (input.layers ?? launcher.layers ?? []).map((layer) => typeof layer === "string" ? layer : layer.folder),
     listener: {port, url: baseUrl, source: "launcher"},

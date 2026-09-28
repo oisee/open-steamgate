@@ -932,6 +932,7 @@ class SystemController {
       layers: layerFolders,
       keymap,
       baseUrl,
+      extensionVersion: require("./package.json").version,
     });
     let sysinfoUrl;
     if (state === "running" && baseUrl !== undefined) {
@@ -1195,7 +1196,7 @@ class OsdTreeProvider {
     const label = state === "running"
       ? `Running on :${launcher.port} · ${launcher.databaseLabel}, generation ${String(launcher.generation).slice(0, 8)}` +
         (warmText ? ` · ${warmText}` : "") + (swaps ? ` +${swaps}` : "") + sourceSuffix
-      : state === "stopped" ? `Stopped${sourceSuffix}`
+      : state === "stopped" ? `Stopped (click here!)${sourceSuffix}`
         : `${state[0].toUpperCase()}${state.slice(1)}…${sourceSuffix}`;
     const stateItem = new vscode.TreeItem(label);
     stateItem.iconPath = new vscode.ThemeIcon(

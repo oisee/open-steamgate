@@ -961,8 +961,10 @@ describe("editors/vscode: the extension's logic", function () {
         services: [{Path: "/app/flp.html"}], packs: [{Name: "demo"}], database: [{name: "Engine", value: "sqlite"}]},
       baseUrl: "http://localhost:3542",
       keymap: "abap",
+      extensionVersion: "0.2.0-test",
     });
     expect(model).to.include({state: "running", running: true, keymap: "abap"});
+    expect(model.extensionVersion).to.equal("0.2.0-test");
     expect(model.listener).to.include({port: 3542, url: "http://localhost:3542"});
     expect(model.launchpadUrl).to.equal("http://localhost:3542/app/flp.html");
     expect(model.home).to.deep.equal({kind: "bundled copy", path: "/storage/osd"});
@@ -981,6 +983,7 @@ describe("editors/vscode: the extension's logic", function () {
     expect(model.sources.sysinfo).to.equal("/sap/bc/osd/sysinfo/");
     const html = systemOverviewHtml(model, {sysinfoUrl: "http://localhost:3542/sap/bc/osd/sysinfo/"});
     expect(html).to.contain("/storage/db/osd.sqlite");
+    expect(html).to.contain("<strong>Extension version</strong><span>0.2.0-test</span>");
     expect(html).to.contain("primed");
     expect(html).to.contain("System information app");
     expect(html).to.contain("portable (limited) on sqlite");
@@ -1993,6 +1996,7 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
       }
       controller.launcher.state = "stopped";
       const stoppedRoots = provider.getChildren();
+      expect(stoppedRoots[0].label).to.match(/^Stopped \(click here!\)/);
       await visit(stoppedRoots[0]);
       for (const item of [stoppedRoots[3], stoppedRoots[5]]) {
         for (const child of await provider.getChildren(item)) await visit(child);
