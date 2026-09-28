@@ -125,6 +125,16 @@ export class RuntimePool {
     for (const runtime of this.runtimes) runtime.verified(generation);
   }
 
+  // one inspector is one port and one debugger: with several work
+  // processes a request may be served by one nobody is attached to, and a
+  // breakpoint would stop some requests and not others. Refused, not guessed
+  async inspector(request) {
+    if (this.runtimes.length !== 1 && request?.open === true) {
+      throw new Error(`a debugger needs one work process, and this system runs ${this.runtimes.length} (OSD_WORKERS=1)`);
+    }
+    return this.runtimes[0].inspector(request);
+  }
+
   async stop() {
     await Promise.all(this.runtimes.map((r) => r.stop()));
   }

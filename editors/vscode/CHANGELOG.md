@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Debugging switches itself on; `osd.debug` is gone. A breakpoint in an `.abap` file or **Run with debugger** opens the running system's inspector (127.0.0.1 only) and attaches, with no restart; the last `.abap` breakpoint removed closes it again. `OSD_INSPECT=1` opens it at start, and an existing `"osd.debug": true` is still read for one release.
 - Stop (and Rebuild) no longer warn "the system stopped unexpectedly": a stop you asked for logs `--- osd stopped ---`, and only an exit nobody asked for warns.
 - Add **osd: Generate taxi data...** and **osd: Reset taxi data to minimal**, also on the taxi data service in the OSD tree: the system no longer makes taxi sample rows at start.
 - Ship the bundled system's cross-reference rows with its prebuilt generation, so the first start seeds them from a file instead of parsing the tree (5.1 s -> 0.1 s measured).

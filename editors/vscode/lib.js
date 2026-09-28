@@ -267,7 +267,9 @@ function debugAttachPlan(state = {}, event = {}) {
       ],
     };
   }
-  if (event.type === "system-stopped") {
+  // stopped, or detached on purpose (the debugger on demand, released once
+  // no .abap breakpoint wants it): the session goes either way
+  if (event.type === "system-stopped" || event.type === "system-detach") {
     return {state: {systemPort: undefined}, actions: current === undefined ? [] : [{type: "stop", target: "system", port: current}]};
   }
   if (event.type === "unit-started" && Number.isInteger(event.port) && event.port >= 1 && event.port <= 65535) {

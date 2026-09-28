@@ -26,6 +26,7 @@ import {fileURLToPath} from "node:url";
 import {liveHash} from "./osd-build.mjs";
 import {serveCommand} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
+import {inspectPortOf} from "./osd-inspector.mjs";
 
 const CHILD = fileURLToPath(new URL("./osd-serve.mjs", import.meta.url));
 
@@ -103,6 +104,9 @@ export class ServingRuntime {
     this.epoch = 0;
     this.generation = undefined;
     this.child = undefined;
+    // the debugger on demand: undefined follows OSD_INSPECT, {port} is open,
+    // null is closed on request (inspector() below)
+    this.inspecting = undefined;
     this.ready = undefined;
     this.recycling = undefined;
     // the spawn in flight: a child exists before it says "ready", and
@@ -252,6 +256,47 @@ export class ServingRuntime {
     return done;
   }
 
+  // The debugger on demand (tools/osd-inspector.mjs). `open` opens the
+  // serving child's inspector on 127.0.0.1:<port> now, and every child this
+  // runtime starts afterwards -- a recycle, a restart -- opens it at its
+  // start on the same port, where a debugger attached with `restart` finds
+  // it again. `open: false` closes it and keeps it closed, OSD_INSPECT
+  // notwithstanding. Answers {open, port, url} ({pending: true} when no
+  // child is serving yet: the next one opens it).
+  async inspector({open, port} = {}) {
+    if (open === true && (!Number.isInteger(port) || port < 1 || port > 65535)) {
+      throw new Error(`invalid inspector port: ${port}`);
+    }
+    this.inspecting = open === true ? {port} : null;
+    const child = this.child;
+    if (this.running !== true || child === undefined) {
+      return {open: open === true, port: open === true ? port : undefined, pending: true};
+    }
+    const id = (this.inspectSeq = (this.inspectSeq ?? 0) + 1);
+    const done = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        child.off("message", onMessage);
+        reject(new Error("the serving process did not answer the inspector request within 10 s"));
+      }, 10000);
+      const onMessage = (message) => {
+        if (message?.type !== "inspector-done" || message.id !== id) {
+          return;
+        }
+        child.off("message", onMessage);
+        clearTimeout(timer);
+        if (message.ok === true) resolve(message);
+        else reject(new Error(message.error));
+      };
+      child.on("message", onMessage);
+      child.send({type: "inspector", id, open: open === true, port});
+    }).catch((error) => {
+      // not opened: the next child is not asked to open it either
+      if (open === true) this.inspecting = null;
+      throw error;
+    });
+    return {open: done.open, port: done.port, url: done.url};
+  }
+
   // a cold transpile of the same inputs gave the same bytes (osd-warm verify)
   verified(generation) {
     if (this.running === true && this.generation === generation) {
@@ -370,7 +415,11 @@ export class ServingRuntime {
       // So this is the child's env only, folded onto whatever NODE_OPTIONS
       // this instance already carries (this.env, then process.env) rather
       // than replacing it.
-      const inspectPort = process.env.OSD_INSPECT;
+      // ... or the inspector this runtime was asked to open (inspector()
+      // above), which a recycle carries to the next child; closed on
+      // request means closed, whatever the environment says
+      const inspectPort = this.inspecting === null ? undefined
+        : this.inspecting?.port ?? inspectPortOf(process.env.OSD_INSPECT);
       const nodeOptions = [
         this.env.NODE_OPTIONS ?? process.env.NODE_OPTIONS,
         inspectPort ? `--inspect=127.0.0.1:${inspectPort} --enable-source-maps` : undefined,

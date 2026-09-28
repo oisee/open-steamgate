@@ -193,4 +193,88 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     const odata = await fetch(`${BASE}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata`);
     expect(adt.headers.get("x-osd-generation")).to.equal(odata.headers.get("x-osd-generation"));
   });
+
+  // the debugger on demand (tools/osd-inspector.mjs): no osd.debug, no
+  // OSD_INSPECT, no restart -- the running child opens its inspector when
+  // asked, on 127.0.0.1 only, and closes it again
+  it("opens the serving child's inspector on request, on 127.0.0.1 only, and closes it", async () => {
+    await fetch(`${BASE}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata`);
+    const {createServer, connect} = await import("node:net");
+    const {networkInterfaces} = await import("node:os");
+    const port = await new Promise((resolve) => {
+      const probe = createServer().listen(0, "127.0.0.1", () => {
+        const free = probe.address().port;
+        probe.close(() => resolve(free));
+      });
+    });
+    const door = (body) => fetch(`${BASE}/osd/inspector`, {method: "POST", body: JSON.stringify(body)});
+    expect(await (await fetch(`${BASE}/osd/inspector`)).json()).to.deep.equal({open: false});
+    const opened = await door({open: true, port});
+    const answer = await opened.json();
+    expect(opened.status, JSON.stringify(answer)).to.equal(200);
+    expect(answer).to.include({open: true, port});
+    expect(answer.url).to.match(new RegExp(`^ws://127\\.0\\.0\\.1:${port}/`));
+    // a debugger finds it, and the target is the serving child, not the facade
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+    expect(targets).to.have.length(1);
+    expect(targets[0].title).to.match(/osd-serve|serve/);
+    expect(await (await fetch(`${BASE}/osd/inspector`)).json()).to.deep.equal({open: true, port});
+    // and a breakpoint set through it stops a real request: CDP, the protocol
+    // VS Code's js-debug speaks, on the gateway's URL parser, which every
+    // OData request passes through
+    const {readFileSync} = await import("node:fs");
+    const generated = readFileSync(join(process.cwd(), "output", "zcl_stg_url.clas.mjs"), "utf8").split("\n");
+    const lineNumber = generated.findIndex((line) => line.includes("static async parse(")) + 1;
+    expect(lineNumber, "the parser's first statement").to.be.greaterThan(0);
+    const cdp = new WebSocket(answer.url);
+    await new Promise((resolve, reject) => { cdp.onopen = resolve; cdp.onerror = reject; });
+    let seq = 0;
+    const waiting = new Map();
+    const events = [];
+    cdp.onmessage = ({data}) => {
+      const message = JSON.parse(data);
+      if (message.id !== undefined) waiting.get(message.id)?.(message);
+      else events.push(message);
+    };
+    const send = (method, params = {}) => new Promise((resolve) => {
+      const id = ++seq;
+      waiting.set(id, resolve);
+      cdp.send(JSON.stringify({id, method, params}));
+    });
+    await send("Debugger.enable");
+    const set = await send("Debugger.setBreakpointByUrl", {urlRegex: "zcl_stg_url\\.clas\\.mjs$", lineNumber});
+    expect(set.result?.locations, JSON.stringify(set)).to.have.length(1);
+    const request = fetch(`${BASE}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata`);
+    let paused;
+    for (let i = 0; i < 100 && paused === undefined; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      paused = events.find((e) => e.method === "Debugger.paused");
+    }
+    expect(paused?.params?.hitBreakpoints, "the request stopped on the breakpoint").to.deep.equal([set.result.breakpointId]);
+    await send("Debugger.removeBreakpoint", {breakpointId: set.result.breakpointId});
+    await send("Debugger.resume");
+    expect((await request).status, "and went on when resumed").to.equal(200);
+    cdp.close();
+    // and nothing answers on this machine's other addresses
+    const others = Object.values(networkInterfaces()).flat().filter((i) => i && !i.internal && i.family === "IPv4");
+    for (const {address} of others) {
+      const refused = await new Promise((resolve) => {
+        const socket = connect({host: address, port}, () => { socket.destroy(); resolve(false); });
+        socket.on("error", () => resolve(true));
+      });
+      expect(refused, `the inspector does not answer on ${address}`).to.equal(true);
+    }
+    const closed = await door({open: false});
+    expect(await closed.json()).to.include({open: false});
+    let reachable = true;
+    try {
+      await fetch(`http://127.0.0.1:${port}/json/list`);
+    } catch {
+      reachable = false;
+    }
+    expect(reachable, "closed means closed").to.equal(false);
+    const invalid = await door({open: true, port: 70000});
+    expect(invalid.status).to.equal(409);
+    expect((await invalid.json()).error).to.match(/invalid inspector port/);
+  });
 });

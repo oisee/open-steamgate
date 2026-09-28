@@ -34,15 +34,46 @@ for.
 
 ## VS Code extension-managed debugging
 
-Set `osd.debug` to `true` before using **osd: Start**. The launcher picks a
-free loopback inspector port, sets `OSD_INSPECT` only on the launched system,
-and starts VS Code's Node attach configuration itself. The child that serves
-ABAP is the process being debugged; the façade remains uninspected. A normal
-**Full rebuild** keeps the same port where it is free, so the attach session's
-`restart` option reconnects when the new serving child starts. Warm activation
-recycles that same child port and uses the same reconnect path. Debug launches
-use one serving worker because multiple workers cannot share one inspector
-port.
+**Debugging switches itself on; `osd.debug` is gone** (2026-09-28). A
+system is started without an inspector, and the first debug intent opens
+one in the running serving child, with no restart:
+
+- a breakpoint set (or enabled) in an `.abap` file while the system runs;
+- **Run with debugger**, the entity-set CodeLens's and classrun's debugger
+  variants (they run in the serving child);
+- a system started while `.abap` breakpoints are already set.
+
+The extension asks the launcher, which picks a free loopback port and posts
+`{open: true, port}` to the system's `/osd/inspector` door (`test/start.mjs`,
+answered to callers on this machine only). The supervisor sends the child
+`{type: "inspector"}` over the process channel, and the child calls
+`node:inspector`'s `open(port, "127.0.0.1")` (`tools/osd-inspector.mjs`,
+which refuses any other host). Then the extension starts its Node attach
+session with the same source-map settings as before. The supervisor
+remembers the port, so a recycle, a warm activation's recycle or a full
+rebuild's new child opens it again at its start on the same port, and the
+attach session's `restart` option reconnects. When the last `.abap`
+breakpoint is removed or disabled, or the attach session ends with none
+left, the extension detaches and the inspector is closed again, so nothing
+stays open.
+
+The acceptance is measured in `test/osd-child.mjs`. A system is started
+the normal way with no inspector, and the door opens one on 127.0.0.1 only;
+the machine's other addresses refuse the port. A CDP client (the protocol
+js-debug speaks) sets a breakpoint on the gateway's URL parser, and a real
+OData request pauses on it and answers 200 when resumed. Closed means the
+port no longer answers. `test/osd-runtime.mjs` shows the inspector survives
+a recycle and a close survives the next.
+
+The debugger needs one serving work process: with `OSD_WORKERS>1` a
+request can be served by a process nobody is attached to, so the door
+refuses rather than guessing.
+
+To have the inspector open **from the start**, which is the only way to stop
+in code that runs during boot, set `OSD_INSPECT=1` in the environment VS
+Code is started from. An existing `"osd.debug": true` in settings.json is
+still honoured the same way, silently, for one release. Such a system keeps
+its inspector: only one opened on demand is closed again.
 For a packaged install, workspace ABAP is compiled through symlinks in the
 extension's storage. The attach configuration maps those pack source-map URLs
 back to the workspace folders, so a breakpoint in the open editor binds to
@@ -53,24 +84,20 @@ gets `--inspect=127.0.0.1:<port>` and `--enable-source-maps`. The extension
 starts the attach session before requesting the detached run. The child uses
 `--inspect-brk`, so it waits at entry until the debugger has installed
 breakpoints; js-debug's `continueOnAttach` then resumes it. `test/vscode-debug.mjs`
-exercises this ordering against a real detached run. The Test Explorer's **Debug** profile always uses this
-path. With `osd.debug` enabled, the ordinary Test Explorer Run profile and F8
-unit runs also attach automatically.
+exercises this ordering against a real detached run. The Test Explorer's
+**Debug** profile always uses this path; its **Run** profile and F8's unit
+run attach only when the inspector is asked for at start (`OSD_INSPECT=1`).
 
-**Run with debugger** is available beside F8's ordinary Run action. The
-entity-set CodeLens and classrun command also have debugger variants; those
-execute in the persistent system, so that system must have been started by
-the extension with `osd.debug` enabled. Turning the setting on after a system
-has started takes effect on its next start. The status-bar item **Toggle ABAP
-breakpoints** runs VS Code's global breakpoint activation command;
-it leaves the breakpoint markers in place while temporarily disabling or
-reactivating them. VS Code does not expose this global activation state to
-extensions, so the item does not claim an on/off state that could disagree
-with the built-in toggle.
+The status-bar item **Toggle ABAP breakpoints** runs VS Code's global
+breakpoint activation command; it leaves the breakpoint markers in place
+while temporarily disabling or reactivating them. VS Code does not expose
+this global activation state to extensions, so the item does not claim an
+on/off state that could disagree with the built-in toggle.
 
-When `osd.debug` is false, the launcher removes inherited `OSD_INSPECT` from
-its child environment. Ordinary test children get no inspector flags unless
-the Debug profile or a debugger run command requested one.
+The launcher removes an inherited `OSD_INSPECT` from the system it starts,
+and sets its own when the inspector is asked for at start. Ordinary test
+children get no inspector flags unless the Debug profile or a debugger run
+command requested one. By hand, a number is a port and `1` is Node's 9229:
 
 ```
 OSD_INSPECT=9229 npm start
@@ -261,5 +288,10 @@ and `42` rather than `[object Object]` or throwing.
 - **A pooled server (`OSD_WORKERS>1`).** `RuntimePool` builds one
   `ServingRuntime` per worker from the same options, so `OSD_INSPECT` would
   point every worker's `NODE_OPTIONS` at the same port; the extension sets
-  `OSD_WORKERS=1` for its debug launches. A manually started debug server
+  `OSD_WORKERS=1` for its debug launches, and `/osd/inspector` refuses to
+  open one inspector for several workers. A manually started debug server
   still needs one worker.
+- **A compiled binary has no inspector to open.** Bun 1.3.11's
+  `node:inspector` exports `open`, and it throws "node:inspector is not yet
+  implemented in Bun" (checked by hand). The door answers with that reason
+  instead of pretending.

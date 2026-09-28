@@ -15,6 +15,7 @@
 import {dialogStep, exclusive} from "./osd-dialog-step.mjs";
 import {HotLoader, warmVerdict} from "./osd-hot.mjs";
 import {ensureDemoData} from "./osd-demo-data.mjs";
+import {inspectorRequest} from "./osd-inspector.mjs";
 import {databaseDescriptor} from "./osd-database-identity.mjs";
 import express from "express";
 import {join} from "node:path";
@@ -317,6 +318,19 @@ process.on("message", (message) => {
     process.send?.({type: "hot-done", id: message.id, ok: true, ...done, heap: process.memoryUsage().heapUsed});
   }, (error) => {
     process.send?.({type: "hot-done", id: message.id, ok: false, error: String(error?.stack ?? error)});
+  });
+});
+
+// the debugger on demand (tools/osd-inspector.mjs): the inspector opened or
+// closed while this process serves, so a breakpoint needs no restart.
+// node:inspector is imported when asked, not at the top: a host without it
+// (a compiled binary) must still boot, and answers the request with why not
+process.on("message", (message) => {
+  if (message?.type !== "inspector") {
+    return;
+  }
+  import("node:inspector").then((inspector) => inspector, () => undefined).then((inspector) => {
+    process.send?.(inspectorRequest(message, inspector));
   });
 });
 

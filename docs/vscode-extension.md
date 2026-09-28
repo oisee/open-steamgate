@@ -1561,24 +1561,27 @@ transpiler has no \`only\` option (abaplint/transpiler#1900)`).
 
 ## Debugging ABAP
 
-`osd.debug` defaults to `false`. When enabled before **osd: Start**, the
-launcher selects a free inspector port for the ABAP-serving child and the
-extension starts a Node attach session with the same source-map settings as
-[`docs/debugging-abap.md`](debugging-abap.md). The session reconnects when
-that child recycles or a full rebuild starts it again. Debug launches set
-`OSD_WORKERS=1`, since runtime workers cannot share one inspector port.
+Debugging switches itself on; `osd.debug` is gone from the settings. A
+breakpoint set in an `.abap` file while the system runs, **osd: Run with
+debugger**, or the debugger variants of the entity-set CodeLens and of
+classrun open the running serving child's inspector on a free
+127.0.0.1 port (`/osd/inspector`, `tools/osd-inspector.mjs`) and start a
+Node attach session with the same source-map settings as
+[`docs/debugging-abap.md`](debugging-abap.md), with no restart. The
+session reconnects when that child recycles or a full rebuild starts it
+again. The last `.abap` breakpoint removed, or the session ended with none
+left, detaches and closes the inspector. `OSD_INSPECT=1` in VS Code's
+environment (or, for one release, an existing `"osd.debug": true`) opens
+it at start instead, and then it stays open. A debugger needs one work
+process (`OSD_WORKERS=1`).
 For packaged installs, the attach profile maps source paths in generated
 workspace-layer packs back to the folder open in the editor.
 
 The Test Explorer has **Run** and **Debug** profiles. Debug starts the
 detached ABAP Unit child with its own free `--inspect-brk` port and
 `--enable-source-maps`; js-debug resumes it after attaching and installing
-breakpoints. With
-`osd.debug` enabled, ordinary Test Explorer runs and F8 unit runs use the
-same attach path automatically. F8 also has **osd: Run with debugger**;
-entity-set CodeLens and classrun each have a debugger variant. Those run in
-the serving child and need a system started by the extension with
-`osd.debug` enabled.
+breakpoints. With the inspector asked for at start, ordinary Test Explorer
+runs and F8 unit runs use the same attach path automatically.
 
 The status bar's **Toggle ABAP breakpoints** item calls VS Code's global
 breakpoint activation command. It stops or resumes reactions to breakpoints

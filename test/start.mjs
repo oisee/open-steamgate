@@ -16,6 +16,7 @@ import {Data} from "../tools/osd-data.mjs";
 import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
 import {credentials as tlsCredentials, fingerprint as tlsFingerprint, dirOf as tlsDirOf} from "../tools/osd-tls.mjs";
 import {odataProxy, upgradeProxy} from "../tools/osd-proxy.mjs";
+import {inspectPortOf} from "../tools/osd-inspector.mjs";
 import {devLoop} from "../tools/osd-dev.mjs";
 import {mountServices, services as icfServices, servicesFromRows, channels as pushChannels} from "../tools/osd-icf.mjs";
 import {mountChannels} from "../tools/osd-apc.mjs";
@@ -200,6 +201,45 @@ export function startServer(quiet) {
   // strange client at OSD, then read this to learn what it wanted
   hostNodes["not-served"] = (a, node) => a.get(node.path, function (req, res) {
     res.json([...facade.missed.values()].sort((a, b) => b.count - a.count));
+  });
+
+  // the debugger on demand (tools/osd-inspector.mjs): POST {open, port}
+  // opens or closes the serving child's inspector, GET says whether it is
+  // open. The inspector itself listens on 127.0.0.1 only, and this door
+  // answers only a caller on this machine: whoever may open an inspector
+  // may run code in the process.
+  hostNodes.inspector = (a, node) => a.all(node.path, async function (req, res) {
+    const remote = req.socket.remoteAddress ?? "";
+    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remote)) {
+      res.status(403).json({error: "the inspector is opened from this machine only"});
+      return;
+    }
+    if (runtime === undefined) {
+      res.status(409).json({error: "this listener serves inline, in its own process: start it with STG_SERVE=child, or with OSD_INSPECT=<port>"});
+      return;
+    }
+    if (req.method === "GET") {
+      const inspecting = (runtime.runtimes?.[0] ?? runtime).inspecting;
+      const port = inspecting === null ? undefined : inspecting?.port ?? inspectPortOf(process.env.OSD_INSPECT);
+      res.json({open: port !== undefined, port});
+      return;
+    }
+    if (req.method !== "POST") {
+      res.status(405).set("Allow", "GET, POST").end();
+      return;
+    }
+    let request;
+    try {
+      request = JSON.parse(Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "{}");
+    } catch {
+      res.status(400).json({error: "the body is not JSON: {\"open\": true, \"port\": <port>}"});
+      return;
+    }
+    try {
+      res.json(await runtime.inspector({open: request?.open === true, port: request?.port}));
+    } catch (e) {
+      res.status(409).json({error: String(e?.message ?? e)});
+    }
   });
 
   // and now everything the registry declares for this host, in its order

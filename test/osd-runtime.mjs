@@ -56,6 +56,41 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     expect(runtime.url).to.equal(undefined);
   });
 
+  // the debugger on demand: an inspector opened on the running child is
+  // opened again on the next one after a recycle, on the same port, which is
+  // what a debugger attached with `restart` reconnects to; closed stays closed
+  it("an inspector opened on request survives a recycle, and a close survives the next", async () => {
+    const {createServer: listen} = await import("node:net");
+    const port = await new Promise((resolve) => {
+      const probe = listen().listen(0, "127.0.0.1", () => {
+        const free = probe.address().port;
+        probe.close(() => resolve(free));
+      });
+    });
+    const targets = async () => {
+      try {
+        return (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).length;
+      } catch {
+        return 0;
+      }
+    };
+    const runtime = new ServingRuntime();
+    try {
+      await runtime.start();
+      expect(await runtime.inspector({open: true, port})).to.include({open: true, port});
+      expect(await targets()).to.equal(1);
+      const recycled = await runtime.recycle();
+      expect(await targets(), "the new process opened it at its start").to.equal(1);
+      expect(recycled.pid).to.be.a("number");
+      expect(await runtime.inspector({open: false})).to.include({open: false});
+      expect(await targets()).to.equal(0);
+      await runtime.recycle();
+      expect(await targets(), "and a closed inspector stays closed").to.equal(0);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
   // a wrong supervisor leaves children behind, and a child keeps mocha alive
   // long after the case has failed: whatever is left is killed here
   afterEach(() => {
@@ -450,5 +485,56 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
       delete process.env.OSD_INSPECT;
       await runtime.stop();
     }
+  });
+});
+
+describe("tools/osd-inspector: one request, one answer, loopback only", function () {
+  const fakeInspector = () => {
+    let url;
+    const calls = [];
+    return {
+      calls,
+      url: () => url,
+      open(port, host) { calls.push(["open", port, host]); url = `ws://${host}:${port}/x`; },
+      close() { calls.push(["close"]); url = undefined; },
+    };
+  };
+
+  it("opens on 127.0.0.1, moves to another port, closes; refuses another host and a bad port", async () => {
+    const {inspectorRequest} = await import("../tools/osd-inspector.mjs");
+    const inspector = fakeInspector();
+    expect(inspectorRequest({id: 1, open: true, port: 9300}, inspector))
+      .to.deep.equal({type: "inspector-done", id: 1, ok: true, open: true, url: "ws://127.0.0.1:9300/x", port: 9300});
+    // the same port again opens nothing twice
+    inspectorRequest({id: 2, open: true, port: 9300}, inspector);
+    expect(inspector.calls).to.deep.equal([["open", 9300, "127.0.0.1"]]);
+    expect(inspectorRequest({id: 3, open: true, port: 9301}, inspector).port).to.equal(9301);
+    expect(inspector.calls.slice(1)).to.deep.equal([["close"], ["open", 9301, "127.0.0.1"]]);
+    expect(inspectorRequest({id: 4, open: false}, inspector)).to.include({ok: true, open: false});
+    expect(inspector.url()).to.equal(undefined);
+    expect(inspectorRequest({id: 5, open: true, port: 9300, host: "0.0.0.0"}, inspector))
+      .to.include({ok: false, error: "the inspector listens on 127.0.0.1 only, not 0.0.0.0"});
+    expect(inspectorRequest({id: 6, open: true, port: 0}, inspector)).to.include({ok: false});
+    expect(inspectorRequest({id: 7, open: true, port: 9300}, undefined).error).to.match(/no V8 inspector/);
+  });
+
+  it("OSD_INSPECT: 1 is 9229, a number is that port, the rest is off", async () => {
+    const {inspectPortOf} = await import("../tools/osd-inspector.mjs");
+    expect(inspectPortOf("1")).to.equal(9229);
+    expect(inspectPortOf("true")).to.equal(9229);
+    expect(inspectPortOf("9333")).to.equal(9333);
+    for (const off of [undefined, "", "0", "false", "x", "70000"]) expect(inspectPortOf(off), String(off)).to.equal(undefined);
+  });
+
+  it("a pool of several work processes refuses to open one inspector", async () => {
+    const {RuntimePool} = await import("../tools/osd-pool.mjs");
+    const pool = new RuntimePool({size: 2});
+    let error;
+    try {
+      await pool.inspector({open: true, port: 9300});
+    } catch (e) {
+      error = e;
+    }
+    expect(String(error?.message)).to.match(/needs one work process, and this system runs 2/);
   });
 });
