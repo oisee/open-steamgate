@@ -31,6 +31,7 @@ import {dumpOf} from "./osd-where.mjs";
 import {persistDump} from "./osd-dumps.mjs";
 import {serveSandboxConfig} from "./osd-sandbox-config.mjs";
 import {mountPortableCells} from "./sqlscript-to-procedure-ir.mjs";
+import {batchMonitorHandler} from "./osd-batch-monitor.mjs";
 
 const started = Date.now();
 
@@ -211,6 +212,7 @@ function dump(error, request) {
 hostNodes.dumps = (a, node) => a.get(node.path, function (req, res) {
   res.json(dumps.slice().reverse());
 });
+hostNodes["batch-runs"] = (a, node) => a.get(node.path, batchMonitorHandler(root));
 
 // The end of a dialog step lives in tools/osd-dialog-step.mjs, because it is
 // the kernel's rule and every host that runs the ABAP needs it -- this one,

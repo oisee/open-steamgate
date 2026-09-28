@@ -447,8 +447,18 @@ export function startServer(quiet) {
         proxy(req, res, next);
       }
     };
+    const localBatch = (proxy) => (req, res, next) => {
+      const address = req.socket.remoteAddress ?? "";
+      if (address !== "::1" && !/^127\./.test(address) && !/^::ffff:127\./.test(address)) {
+        res.status(403).json({error: {code: "LOCAL_ONLY"}});
+        return;
+      }
+      proxy(req, res, next);
+    };
     for (const node of declaredNodeList.filter((n) => n.type === "HOST" && n.implementedIn === "tools/osd-serve.mjs")) {
-      app.all(node.path, node.path === "/osd/serving" ? withWarm(odataProxy(runtime)) : odataProxy(runtime));
+      const proxy = odataProxy(runtime);
+      app.all(node.path, node.path === "/osd/serving" ? withWarm(proxy)
+        : node.path === "/osd/batch-runs" ? localBatch(proxy) : proxy);
     }
     // STG_DEV=1: the disk is the other editor. A save becomes a check, a
     // build and a recycle of this runtime (tools/osd-dev.mjs), and the

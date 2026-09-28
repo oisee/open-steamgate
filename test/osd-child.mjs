@@ -10,6 +10,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {services} from "../tools/osd-icf.mjs";
 import {createRequire} from "node:module";
+import {BatchRuns} from "../tools/osd-batch-runs.mjs";
 
 const {Osd, objectOf, outcomes, unitRiskOf, unitDurationOf, runUnitQueue} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 
@@ -24,17 +25,22 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
   let cookie;
   let databaseDir;
   let testIdentity;
+  let monitorToken;
+  let operationsDb;
   const log = [];
 
   before(async () => {
     databaseDir = mkdtempSync(join(tmpdir(), "osd-child-"));
     testIdentity = `osd-child-${randomUUID()}`;
+    monitorToken = randomUUID().replaceAll("-", "");
+    operationsDb = join(databaseDir, "osd-operations.sqlite");
     const backend = process.env.STG_DB === "duckdb" ? "duckdb" : "file";
     child = spawn(process.execPath, ["test/run.mjs"], {
       // Always use a private file, never an inherited HANA connection.
       env: {...process.env, STG_DB: backend, STG_PORT: String(PORT), STG_TLS: "0", STG_SERVE: undefined,
         OSD_USER_FULL: testIdentity, STG_DB_BASE: join(databaseDir, "base"),
-        STG_DB_PATH: join(databaseDir, backend === "duckdb" ? "osd.duckdb" : "osd.sqlite")},
+        STG_DB_PATH: join(databaseDir, backend === "duckdb" ? "osd.duckdb" : "osd.sqlite"),
+        OSD_OPERATIONS_DB: operationsDb, OSD_BATCH_READ_TOKEN: monitorToken},
       stdio: ["ignore", "pipe", "pipe"],
     });
     delete child.spawnargs; // keep the env clean: STG_SERVE unset means run.mjs picks child
@@ -175,6 +181,21 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     const sql = await fetch(`${BASE}/osd/sql`, {method: "POST", headers: {"content-type": "application/json"},
       body: JSON.stringify({sql: "SELECT COUNT(*) AS n FROM zstg_demo"})});
     expect(sql.status, `/osd/sql: ${await sql.clone().text()}`).to.equal(200);
+  });
+
+  it("forwards the authorized batch monitor without exposing selection values", async () => {
+    const store = new BatchRuns(process.cwd(), {OSD_OPERATIONS_DB: operationsDb});
+    const queued = store.enqueue({program: "ZGG_EX_012", input: [{name: "P_DATE", value: "private-value"}]});
+    store.close();
+    expect((await fetch(`${BASE}/osd/batch-runs`)).status).to.equal(401);
+    const response = await fetch(`${BASE}/osd/batch-runs`, {
+      headers: {Authorization: `Bearer ${monitorToken}`},
+    });
+    expect(response.status, await response.clone().text()).to.equal(200);
+    expect(response.headers.get("x-osd-generation")).to.match(/^[0-9a-f]{16}$/);
+    const body = await response.json();
+    expect(body.runs.some((run) => run.id === queued.id)).to.equal(true);
+    expect(JSON.stringify(body)).not.to.include("private-value");
   });
 
   it("the VS Code extension's client discovers and runs one method through the parent", async () => {

@@ -222,6 +222,23 @@ submit a new one explicitly if appropriate. A richer doctor and supervised
 worker lifecycle are later steps. Direct synchronous `run` remains outside
 this BGR admission limit.
 
+## Local read API for saved runs
+
+`GET /osd/batch-runs` lists up to 50 recent runs (`?limit=1..200`).
+`?id=<run-id>` reads one record; `?id=<run-id>&output=1` reads its saved
+output after the SHA-256 check. Stored selection input values are omitted
+from run metadata; the report's detail and output may still contain business
+data or parameter values. Responses are not cached.
+
+The route is **disabled by default**. An instance owner may set a random
+`OSD_BATCH_READ_TOKEN` of at least 32 letters, digits, `_` or `-` before
+starting OSD. A caller sends `Authorization: Bearer <token>`. A missing token
+configuration returns 404; a missing or wrong bearer returns 401. This is a
+loopback-only, read-only operator door for trusted clients, not yet a Fiori
+browser login or a SAP jobs API. Keep the token out of URLs and logs. Enqueue,
+cancel, retry and job-definition operations are not available through it. A browser-facing
+monitor needs an explicit user/session authorization model first.
+
 ## The three examples
 
 `packs/gui-examples` fetches exactly three files out of
