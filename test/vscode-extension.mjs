@@ -724,6 +724,143 @@ describe("editors/vscode: the extension's logic", function () {
     expect(error?.message).to.equal("GET ZOSD_TAXI_SRV/: HTTP 403 -- no CSRF token");
   });
 
+  // the debugger on demand (docs/debugging-abap.md): no osd.debug before
+  // Start; "Run with debugger" or a breakpoint opens the inspector in the
+  // running system, and the last breakpoint gone closes it again
+  const debugApi = () => {
+    const api = vscodeStub();
+    class SourceBreakpoint {
+      constructor(file, enabled = true) {
+        this.enabled = enabled;
+        this.location = {uri: {scheme: "file", fsPath: file}};
+      }
+    }
+    api.SourceBreakpoint = SourceBreakpoint;
+    api.debug.breakpoints = [];
+    api.debug.started = [];
+    api.debug.startDebugging = async (folder, config) => {
+      api.debug.started.push(config);
+      return true;
+    };
+    api.debug.stopDebugging = async () => {};
+    return api;
+  };
+  const fakeLauncher = (fields = {}) => {
+    const calls = [];
+    return {
+      calls, state: "running", port: 3100, debug: false, inspectPort: undefined, inspectorOpen: false, osdHome: ROOT,
+      async openInspector() {
+        calls.push("open");
+        this.inspectPort = 9401;
+        this.inspectorOpen = true;
+        return 9401;
+      },
+      async closeInspector() {
+        calls.push("close");
+        this.inspectorOpen = false;
+        return true;
+      },
+      ...fields,
+    };
+  };
+
+  it("Run with debugger opens the inspector of a system started without one, and attaches", async () => {
+    const api = debugApi();
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
+    controller.launcher = fakeLauncher();
+    expect(await controller.attachSystemDebugger(), "without on-demand, nothing is opened").to.equal(false);
+    expect(controller.launcher.calls).to.deep.equal([]);
+    expect(await controller.attachSystemDebugger({onDemand: true})).to.equal(true);
+    expect(controller.launcher.calls).to.deep.equal(["open"]);
+    expect(api.debug.started.map((c) => [c.name, c.address, c.port, c.restart]))
+      .to.deep.equal([["OSD: ABAP (9401)", "127.0.0.1", 9401, true]]);
+    // asked again: already open, already attached
+    expect(await controller.attachSystemDebugger({onDemand: true})).to.equal(true);
+    expect(controller.launcher.calls).to.deep.equal(["open"]);
+  });
+
+  it("the debugger on demand says why it cannot attach: not running, or the door refused", async () => {
+    const api = debugApi();
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
+    expect(await controller.attachSystemDebugger({onDemand: true})).to.equal(false);
+    expect(controller.debuggerError).to.match(/not running; start it with osd: Start/);
+    controller.launcher = fakeLauncher({async openInspector() {
+      throw new Error("a debugger needs one work process, and this system runs 2 (OSD_WORKERS=1)");
+    }});
+    expect(await controller.attachSystemDebugger({onDemand: true})).to.equal(false);
+    expect(controller.debuggerError).to.equal("could not open the inspector: a debugger needs one work process, and this system runs 2 (OSD_WORKERS=1)");
+    expect(api.debug.started).to.deep.equal([]);
+  });
+
+  it("releases an inspector it opened once no .abap breakpoint is left, and keeps one opened at start", async () => {
+    const api = debugApi();
+    let terminated;
+    api.debug.onDidTerminateDebugSession = (listener) => {
+      terminated = listener;
+      return {dispose() {}};
+    };
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
+    controller.launcher = fakeLauncher();
+    await controller.attachSystemDebugger({onDemand: true});
+    api.debug.breakpoints = [new api.SourceBreakpoint("/w/src/zcl_osd_fleet_report.clas.abap")];
+    expect(await controller.releaseDebugger(), "a breakpoint still wants it").to.equal(false);
+    api.debug.breakpoints = [new api.SourceBreakpoint("/w/src/zcl_osd_fleet_report.clas.abap", false),
+      new api.SourceBreakpoint("/w/tools/x.mjs")];
+    // the last one gone while the session is attached (a paused request, a
+    // Run with debugger): it stays until the session ends
+    const session = {name: "OSD: ABAP (9401)"};
+    controller.debugSessions.add(session);
+    expect(await controller.releaseDebugger(), "the session is still in use").to.equal(false);
+    expect(controller.launcher.calls).to.deep.equal(["open"]);
+    // the session's own end is what releases it (the terminate handler)
+    terminated(session);
+    await controller.inspectorSteps;
+    await controller.inspectorSteps;
+    expect(controller.launcher.calls).to.deep.equal(["open", "close"]);
+    expect(controller.debuggerState.systemPort, "detached").to.equal(undefined);
+    // a system started with its inspector (osd.debug, OSD_INSPECT=1) keeps it
+    controller.launcher = fakeLauncher({debug: true, inspectPort: 9402, inspectorOpen: true});
+    expect(await controller.releaseDebugger()).to.equal(false);
+    expect(controller.launcher.calls).to.deep.equal([]);
+  });
+
+  it("a breakpoint set in an .abap file opens the debugger, the last one removed releases it", async () => {
+    const api = debugApi();
+    let handler;
+    api.debug.onDidChangeBreakpoints = (listener) => {
+      handler = listener;
+      return {dispose() {}};
+    };
+    const {debugOnDemand} = loadExtension(api);
+    const calls = [];
+    const controller = {
+      launcher: {state: "running"},
+      output: {appendLine() {}},
+      attachSystemDebugger: async (options) => { calls.push(["attach", options]); return true; },
+      releaseDebugger: async () => { calls.push(["release"]); return true; },
+    };
+    debugOnDemand({subscriptions: []}, () => controller);
+    const abap = new api.SourceBreakpoint("/w/src/zcl_osd_fleet_report.clas.abap");
+    handler({added: [new api.SourceBreakpoint("/w/tools/x.mjs")], removed: [], changed: []});
+    expect(calls, "not an .abap file").to.deep.equal([]);
+    handler({added: [abap], removed: [], changed: []});
+    handler({added: [], removed: [abap], changed: []});
+    handler({added: [], removed: [], changed: [new api.SourceBreakpoint("/w/src/zcl_osd_fleet_report.clas.abap", false)]});
+    expect(calls).to.deep.equal([["attach", {onDemand: true}], ["release"], ["release"]]);
+    controller.launcher.state = "stopped";
+    handler({added: [abap], removed: [], changed: []});
+    expect(calls, "nothing to attach to while stopped").to.have.length(3);
+  });
+
+  it("osd.debug is gone from the settings UI, and read silently for one release", () => {
+    const manifest = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
+    expect(manifest.contributes.configuration.properties).to.not.have.property("osd.debug");
+    expect(readFileSync(path.join(ROOT, "editors/vscode/extension.js"), "utf8")).to.contain('get("debug", false) === true');
+  });
+
   it("quick start applies its preset and restarts a running controller before opening the overview", async () => {
     const api = vscodeStub();
     const SystemController = loadSystemController(api);

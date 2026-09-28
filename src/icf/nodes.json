@@ -56,6 +56,10 @@
     "type": "HOST", "host": "test/start.mjs", "handler": "not-served", "needs": "state",
     "text": "what the facade could not answer, held in this process's memory"
   },
+  "/osd/inspector": {
+    "type": "HOST", "host": "test/start.mjs", "handler": "inspector", "needs": "state",
+    "text": "opens or closes the serving process's V8 inspector on 127.0.0.1 (tools/osd-inspector.mjs): a debugger on demand, no restart; answered to loopback callers only"
+  },
   "/osd/serving": {
     "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "serving", "needs": "state",
     "text": "which generation this process is serving: how a supervisor knows it is alive"
