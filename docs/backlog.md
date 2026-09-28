@@ -3418,7 +3418,8 @@ can be used. The fast path is an optimisation for systems that have it.
      └─ open, needs Alice: does a layer override the OBJECT (all its
         files) or single FILES? Overriding .clas.abap without .clas.xml
         is the case that decides it                                   [A]
-     └─ zip as a layer: an abapGit export unpacked into the cache
+     └─ zip as a layer: an abapGit export unpacked into the cache;
+        current behavior, write policy and related decisions: docs/source-layers.md
 1.6  the runtime half of packaging, in order                          [S]
      └─ measured first, built second: `bun tools/osd-serve.mjs`
         interpreted is the next cheap check, and it is where the %23

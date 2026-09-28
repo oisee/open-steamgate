@@ -5,6 +5,11 @@
 **Deciders:** Alice; vsp (client), open-steamgate (façade/serving), transpiler (store/runtime)
 **Context repos:** open-steamgate (OSD), vsp (the ADT client)
 
+For current source-layer behavior and the proposed immutable abapGit ZIP
+layer, see [Source layers](../source-layers.md). That map also records the
+open distinction between this ADR's process-local liveness counter and the
+later content identity proposed in [Generations](../generations.md).
+
 ## Context
 
 OSD (the Off-Stack Doppelgänger) has no SAP database of objects. Its objects

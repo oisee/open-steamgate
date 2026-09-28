@@ -5,6 +5,10 @@ becoming the live one, lets twenty runtimes run beside each other over
 their own data, and rolls back by moving a pointer. Designed 2026-09-16
 from the code as it is; every fact it rests on is in the first table.
 
+Source input types, their write behavior, and the proposed abapGit ZIP
+layer are mapped in [Source layers](source-layers.md). A source archive is an
+input to a generation; it is not itself a built generation.
+
 The short form: **immutable artefacts named by their content, and
 pointers to them.** The code gets that in one coordinate (a *generation*),
 the database in another (a *base image* and its forks), and an *instance*
