@@ -360,4 +360,5 @@ jobs:
             exit 1
           fi
           vsix="build/vsix/open-steamgate-${RELEASE_TAG#vscode-v}.vsix"
-          ./node_modules/.bin/vsce publish --pre-release --packagePath "$vsix"
+          npm exec --yes --package=@vscode/vsce@4.0.0 -- \
+            vsce publish --pre-release --packagePath "$vsix"
