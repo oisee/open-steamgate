@@ -27,13 +27,15 @@ of this ARM64 test or Stack; its published Docker image is AMD64-only.
 
 The core `draft` image has no optional packs. A separate `showcase-draft` image
 contains the pinned Vivid Vibes (`o4d`), Zork and Vector workbench (`zvdb`)
-packs, including their compiled ABAP, seed rows and web assets. In Portainer,
-set the Stack variable `OSD_TAG=showcase-draft` and redeploy; the Compose files
-already use that variable in the image name and pull on redeploy. The showcase
+packs, including their compiled ABAP, seed rows and web assets. The ready
+Compose files select `showcase-draft` by default. In Portainer, set the Stack
+variable `OSD_TAG=draft` to use the core image. The Compose files interpolate
+that variable in the image name and pull on redeploy. The showcase
 image is built with `OSD_IMAGE_PACKS=o4d,zork,zvdb`; changing a runtime
 environment variable alone cannot add these packs to the core image. A new
 Stack and database volume is the simplest first trial, since the vector pack
-adds a table to the database schema and an existing one is not migrated.
+adds a table to the database schema and an existing one is not migrated. For an
+existing HANA Stack, set a fresh `HANA_SCHEMA`, for example `OSD_SHOWCASE`.
 
 To publish a new showcase revision, manually run **OSD Docker draft** and
 **OSD ARM64 draft** on the same commit with `showcase=true` and `publish=true`.
@@ -104,8 +106,8 @@ prints `OSD_TAG`. The GHCR package must be public for anonymous Portainer pulls;
 otherwise add GHCR credentials in Portainer. No Docker Hub account is needed.
 The ready-image stacks set `pull_policy: always` for OSD, including the HXE
 initializer, so a redeployment checks GHCR instead of reusing a stale local
-`draft`. Existing Portainer stacks need their pasted YAML updated, or their
-`OSD_TAG` set to `draft` or a newer immutable architecture-specific tag.
+`showcase-draft`. Existing Portainer stacks need their pasted YAML updated, or
+their `OSD_TAG` set to `showcase-draft` or a newer immutable tag.
 The older `open-steamgate-protocols` GHCR package remains a historical
 artifact; these stacks neither pull it nor update it.
 

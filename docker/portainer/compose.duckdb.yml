@@ -1,8 +1,8 @@
 # Portainer: DuckDB demo, default instance 15 (8015/44315/3215/3315).
-# Set Stack variable OSD_TAG=showcase-draft for Vivid Vibes, Zork and Vector workbench.
+# Vivid Vibes, Zork and Vector workbench are included by default; set OSD_TAG=draft for core.
 services:
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-showcase-draft}
     pull_policy: always
     init: true
     environment:

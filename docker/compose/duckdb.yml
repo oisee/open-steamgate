@@ -1,6 +1,6 @@
 services:
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-showcase-draft}
     init: true
     environment:
       STG_DB: duckdb

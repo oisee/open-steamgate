@@ -1,5 +1,5 @@
 # Portainer: new PostgreSQL + OSD, default instance 19 (8019/44319/3219/3319).
-# Set Stack variable OSD_TAG=showcase-draft for Vivid Vibes, Zork and Vector workbench.
+# Vivid Vibes, Zork and Vector workbench are included by default; set OSD_TAG=draft for core.
 # Demo password is public; change POSTGRES_PASSWORD before first start outside
 # an isolated test network. PostgreSQL's SQL port is not published to host.
 services:
@@ -20,7 +20,7 @@ services:
     stop_grace_period: 60s
 
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-showcase-draft}
     pull_policy: always
     init: true
     environment:

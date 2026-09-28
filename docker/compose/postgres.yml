@@ -14,7 +14,7 @@ services:
       retries: 30
     restart: unless-stopped
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-showcase-draft}
     init: true
     environment:
       STG_DB: postgres
