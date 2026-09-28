@@ -44,6 +44,65 @@ const DEFAULT_OUT = "gen/gui";
 const CONVERTER = "converter/src/api.mjs";
 const LIB = ".local/lars/open-abap-gui";
 
+/** A closed dispatch table for one-shot batch execution. The host owns the
+ * report lifecycle; this registry only chooses a converter-proven report and
+ * returns its typed result. No transaction session or HTML is involved. */
+export function batchRegistrySource(reports) {
+  const known = reports.filter((entry) => entry.programName !== undefined);
+  const cases = known.map((entry) => `      WHEN ${abapLiteral(entry.programName)}.
+${entry.wired === true ? `        ls_host = zcl_gg_host=>run(
+          io_report = NEW ${entry.className.toLowerCase()}( )
+          iv_program = CONV #( lv_program )
+          it_input  = it_input
+          iv_batch  = abap_true ).` : `        rs_result-status = 'UNSUPPORTED'.
+        rs_result-detail = ${abapLiteral(entry.skipped ?? "conversion unsupported")}.
+        RETURN.`}`).join("\n");
+  return `CLASS zcl_osd_batch_report DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    TYPES: BEGIN OF ty_result,
+             status   TYPE string,
+             detail   TYPE string,
+             lines    TYPE zcl_gg_host_list=>ty_text_lines,
+             messages TYPE zcl_gg_host_session=>ty_messages,
+             terminal TYPE string,
+           END OF ty_result.
+    CLASS-METHODS run
+      IMPORTING
+        iv_program TYPE string
+        it_input TYPE zif_gg_selection_screen_types=>ty_values OPTIONAL
+      RETURNING VALUE(rs_result) TYPE ty_result.
+ENDCLASS.
+
+CLASS zcl_osd_batch_report IMPLEMENTATION.
+  METHOD run.
+    DATA lv_program TYPE string.
+    DATA ls_host TYPE zcl_gg_host=>ty_result.
+    lv_program = iv_program.
+    TRANSLATE lv_program TO UPPER CASE.
+    CASE lv_program.
+${cases}
+      WHEN OTHERS.
+        rs_result-status = 'UNKNOWN'.
+        rs_result-detail = |Report { iv_program } is not in the converted report registry|.
+        RETURN.
+    ENDCASE.
+    rs_result-lines = ls_host-lines.
+    rs_result-messages = ls_host-messages.
+    rs_result-terminal = ls_host-terminal.
+    IF ls_host-unsupported IS NOT INITIAL.
+      rs_result-status = 'UNSUPPORTED'.
+      rs_result-detail = ls_host-unsupported.
+    ELSEIF ls_host-selection_active = abap_true.
+      rs_result-status = 'SELECTION'.
+      rs_result-detail = 'Selection screen did not complete'.
+    ELSE.
+      rs_result-status = 'COMPLETED'.
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
+`;
+}
+
 /** every *.prog.abap under the given folders */
 function reportFiles(folders) {
   const out = [];
@@ -415,6 +474,8 @@ export async function generate(folders, out = DEFAULT_OUT, options = {}) {
     }
     reports.push(entry);
   }
+  mkdirSync(out, {recursive: true});
+  writeFileSync(join(out, "zcl_osd_batch_report.clas.abap"), batchRegistrySource(reports));
   return {reports};
 }
 
