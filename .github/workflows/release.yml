@@ -285,3 +285,80 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == push || "$DRAFT" == false ]]; then
             gh release edit "$RELEASE_TAG" --draft=false --prerelease
           fi
+
+  marketplace:
+    # A draft dispatch is useful for review, but must never publish to the
+    # Marketplace. Only the immutable tag-push path is a deployment trigger.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/vscode-v')
+    needs: [vsix, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      actions: read
+      contents: read
+    env:
+      RELEASE_TAG: ${{ needs.vsix.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run bootstrap
+      - name: Build the Marketplace prerelease VSIX
+        run: |
+          set -euo pipefail
+          npm run vsix:marketplace 2>&1 | tee "$RUNNER_TEMP/marketplace-build.log"
+          # These two placeholder licences have explicit maintainer overrides
+          # in third-party-notices.mjs. Any new issue needs a fresh review.
+          grep 'LICENSE REVIEW:' "$RUNNER_TEMP/marketplace-build.log" \
+            | sed 's/^.*LICENSE REVIEW: //' > "$RUNNER_TEMP/licence-review-actual.txt" || true
+          cat > "$RUNNER_TEMP/licence-review-accepted.txt" <<'EOF'
+          .local/lars/open-abap-gui: LICENSE file is a placeholder
+          .local/lars/open-abap-odata: LICENSE file is a placeholder
+          EOF
+          if ! diff -u "$RUNNER_TEMP/licence-review-accepted.txt" "$RUNNER_TEMP/licence-review-actual.txt"; then
+            echo '::error::Review new third-party licence issues before Marketplace publication'
+            exit 1
+          fi
+          vsix="build/vsix/open-steamgate-${RELEASE_TAG#vscode-v}.vsix"
+          node scripts/release-version.mjs "$RELEASE_TAG" "$vsix"
+          unzip -tq "$vsix"
+          unzip -p "$vsix" extension.vsixmanifest | grep -q 'Id="Microsoft.VisualStudio.Code.PreRelease" Value="true"'
+          if unzip -p "$vsix" extension/package.json | jq -e 'has("browser")' >/dev/null; then
+            echo '::error::Marketplace profile unexpectedly contains a browser entry'
+            exit 1
+          fi
+      - name: Wait for the tagged test workflow
+        run: |
+          set -euo pipefail
+          for attempt in {1..180}; do
+            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow tests.yml \
+              --commit "$GITHUB_SHA" --event push --limit 100 \
+              --json headBranch,status,conclusion)
+            result=$(jq -r --arg tag "$RELEASE_TAG" \
+              '[.[] | select(.headBranch == $tag) | "\(.status):\(.conclusion)"][0] // empty' <<< "$runs")
+            case "$result" in
+              completed:success) exit 0 ;;
+              completed:*) echo "::error::Tagged tests ended with $result"; exit 1 ;;
+            esac
+            sleep 20
+          done
+          echo '::error::Timed out waiting for tagged tests workflow'
+          exit 1
+      - name: Publish the built VSIX to Visual Studio Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$VSCE_PAT" ]]; then
+            echo '::error::Configure the VSCE_PAT Actions secret before publishing'
+            exit 1
+          fi
+          vsix="build/vsix/open-steamgate-${RELEASE_TAG#vscode-v}.vsix"
+          npm exec --yes --package=@vscode/vsce@4.0.0 -- \
+            vsce publish --pre-release --packagePath "$vsix"
