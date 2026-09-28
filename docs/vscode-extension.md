@@ -752,10 +752,18 @@ audit by hand and were not wired into the tree view.
 tree of state and launchpad items, **System**, **TRAN**, **Layers**, and
 **Services** ("Services tree", below). **System** contains the serving,
 dumps, and SQL doors. **TRAN** comes from the transaction registry.
-"osd: Open launchpad" opens `http://localhost:<port>/app/flp.html` with
-`vscode.env.openExternal` (the Launchpad node's own click; its
-context menu offers "Open launchpad inside VS Code" instead, the same
-webview pattern "Services tree" uses); a second, new status bar item
+"osd: Open launchpad" opens `http://localhost:<port>/app/flp.html` where
+`osd.openIn` says: a tab inside VS Code by default (Q7, 2026-09-27: an
+iframe of the running system's own page, one tab per URL, a second click
+reveals it), the system browser when the setting is `browser`; the
+Launchpad node's inline link-external action and its "Open in External
+Browser" context item always use the browser, and "osd: Open launchpad
+inside VS Code" (the palette) always a tab. The System overview's
+"Open launchpad" / "Open in browser" buttons and the service details'
+`$metadata` / "in browser" links take the same two routes. Page tabs close
+on Stop and when the system exits unasked (the page is gone); a rebuild,
+which is stop-then-start, keeps them and reloads each once the system
+serves again, on the new port if it moved; a second, new status bar item
 (▶ / ■, left of the existing generation display, which assumes something
 is already serving) starts or stops the one `Launcher` this window
 drives, and the editor-title button on `.abap` files is `osd.run` (F8's
@@ -996,15 +1004,18 @@ rows offer no Run action.
 Leaf rows act on one click: source leaves open files, URL leaves open pages,
 and the SQL door opens its notebook. Expandable rows show details on one
 click and use the 400 ms second-click classifier for navigation. Inline
-buttons and context-menu commands act immediately. Browser-opening leaves
-say so in their tooltips.
+buttons and context-menu commands act immediately. A page-opening leaf's
+tooltip says where a click goes (it follows `osd.openIn`). "Reveal the same
+tab" below is the default; with `osd.openIn: browser` a second click opens
+the browser again. Easy Access transactions (Run) keep their own
+`osdWebgui` tabs and are not part of this rule.
 
 | Node kind | Single click | Second click within 400 ms |
 | --- | --- | --- |
 | Stopped/running/building state | System overview | System overview |
-| Launchpad leaf | Open Launchpad in browser | Open again |
+| Launchpad leaf | Open Launchpad using `osd.openIn` (a VS Code tab by default) | Reveal the same tab |
 | System group | Group explanation | No additional action |
-| Serving `/osd/serving` leaf | Open endpoint in browser | Open again |
+| Serving `/osd/serving` leaf | Open endpoint using `osd.openIn` (a VS Code tab by default) | Reveal the same tab |
 | Short dumps `/osd/dumps` leaf | List dumps in Output | List again |
 | SQL `/osd/sql` | Open the SQL notebook and its guide | Another notebook if clicked again |
 | TRAN group | Group explanation | No additional action |
@@ -1014,7 +1025,7 @@ say so in their tooltips.
 | Layers group, base layer, workspace layer | Layer explanation | No additional action |
 | Services root, kind group, pack group | Group explanation | No additional action |
 | Expandable APP, OData, ICF service row | Service details | Open service or app using `osd.openIn` |
-| APP, OData or ICF leaf with a URL (no children) | Open app or service using `osd.openIn` | Open again |
+| APP, OData or ICF leaf with a URL (no children) | Open app or service using `osd.openIn` (a VS Code tab by default) | Reveal the same tab |
 | APC service row | Service details | No page to open |
 | Service class (DPC, MPC, handler, generated helper) leaf | Open source file | Open again |
 | OData entity set leaf | Open DPC method | Open again |
@@ -1051,9 +1062,11 @@ does not retain its hidden context. Its sections are specific to each row:
 - **ICF/APC:** path, handler and handler source, the SICF/SAPC declaration
   source, and HTTP or WebSocket protocol.
 
-The inline **▶ Open** action follows `osd.openIn` (`browser` or `vscode`). The
-context menu has **Open** (always the external browser), **Open $metadata**
-(following `osd.openIn`), **Test** (runs the
+The inline **▶ Open** action follows `osd.openIn` (`vscode`, the default, or
+`browser`); the inline link-external action beside it always opens the
+system browser. The context menu has **Open in External Browser**, **Open
+$metadata** (following `osd.openIn`), **Open $metadata in External
+Browser**, **Test** (runs the
 ABAP Unit classes found in the handler/DPC/MPC xref closures), **Source**
 (only source files or folders that exist), and **Copy** (only available URL,
 WebSocket URL, and `$metadata` URL targets). A row's context value is updated

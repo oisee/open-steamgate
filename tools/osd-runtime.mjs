@@ -69,7 +69,10 @@ function reapOnExit() {
       await Promise.all([...CHILDREN].map(child => new Promise(resolve => {
         if (child.exitCode !== null || child.signalCode !== null) return resolve();
         // editors/vscode/launcher.js STOP_GRACE_MS waits longer than this
-        const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(); }, 55000);
+        // a child still in the database step finishes it first (tools/osd-boot-guard.mjs):
+        // the boot limit, not the serving quiesce's 55 s, before it is killed
+        const limit = child.osdDatabaseStep === true ? (Number(process.env.OSD_BOOT_TIMEOUT_MS) || 15 * 60 * 1000) : 55000;
+        const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(); }, limit);
         child.once("exit", () => { clearTimeout(timer); resolve(); });
         try { child.send({type: "quiesce", grace: 45000}); }
         catch { child.kill("SIGTERM"); }
@@ -94,7 +97,12 @@ export class ServingRuntime {
     // which is why a recycle stops the old one first.
     this.database = options.database;
     this.env = options.env ?? {};
+    // how long a starting child may say NOTHING (no output, no message)
+    // before it counts as hung; a child that keeps saying it is booting
+    // (tools/osd-serve.mjs sends "booting" every 5 s) is waited for up to
+    // bootTimeout in all -- minutes on a remote HANA, not a request's 60 s
     this.timeout = options.timeout ?? 60000;
+    this.bootTimeout = options.bootTimeout ?? (Number(process.env.OSD_BOOT_TIMEOUT_MS) || 15 * 60 * 1000);
     this.grace = options.grace ?? 2000;
     // epoch counts the processes this supervisor started; generation names
     // the code the current one runs — the live generation's hash when there
@@ -318,6 +326,26 @@ export class ServingRuntime {
     // counted before the first await, so a recycle in progress sees it
     this.stops += 1;
     const stopping = (async () => {
+      // a child still booting is asked to go now rather than waited for: on
+      // a remote HANA its boot takes minutes (tools/osd-serve.mjs exits on
+      // "quiesce" until it serves)
+      // (SIGTERM rather than a message, which can arrive before the child
+      // listens: tools/osd-serve.mjs exits on it at once while booting, or
+      // at the end of the database step if it is in it)
+      const booting = this.bootingChild;
+      if (booting !== undefined && booting.exitCode === null && booting.signalCode === null) {
+        this.stoppedBooting = booting;
+        booting.kill("SIGTERM");
+        // outside the database step it goes at once and this is only the
+        // insistence; inside it, the child finishes the step first, however
+        // long a remote seed takes -- a hung one is still ended by the boot
+        // limit, which stays armed until it exits (not by the silence limit:
+        // the heartbeat is a timer and goes on while a HANA call hangs)
+        if (booting.osdDatabaseStep !== true) {
+          const kill = setTimeout(() => booting.kill("SIGKILL"), this.grace + 8000);
+          kill.unref?.();
+        }
+      }
       // a child still coming up would outlive a stop that only looked at the
       // ready one -- including the one a recycle has just started
       await this.starting?.catch(() => undefined);
@@ -433,11 +461,64 @@ export class ServingRuntime {
       // **Refused once it has gone, not when it was told to go.** Rejecting
       // at the kill ended the spawn in flight while the child still held
       // the database, and an ensure() in that window started another.
+      // **Silence, not slowness.** Two limits: `timeout` of silence (any
+      // output or message resets it) and `bootTimeout` in all. A boot that
+      // keeps talking is a boot, however long; one that says nothing for a
+      // minute is hung. Progress goes to the log every 30 s, so a person
+      // waiting on a remote database sees what it is doing.
       let timedOut;
-      const timer = setTimeout(() => {
-        timedOut = new NotServing(`the serving runtime did not answer within ${this.timeout} ms: ${out.slice(-2000)}`);
+      let phase = "starting";
+      const bootStarted = Date.now();
+      // what a proxy or /osd/serving can tell a client meanwhile
+      this.booting = {phase, since: bootStarted, pid: child.pid};
+      this.bootingChild = child;
+      const giveUp = (why) => {
+        timedOut = new NotServing(`the serving runtime ${why}: ${out.slice(-2000)}`);
         child.kill("SIGKILL");
-      }, this.timeout);
+      };
+      let timer;
+      // once "ready" (or gone) the boot is over: output after that is serving,
+      // and must never re-arm a limit meant for starting
+      let booted = false;
+      const heard = () => {
+        if (booted) return;
+        clearTimeout(timer);
+        timer = setTimeout(() => giveUp(`said nothing for ${this.timeout} ms while starting (last: ${phase})`), this.timeout);
+        timer.unref?.();
+      };
+      heard();
+      const deadline = setTimeout(() => giveUp(`did not start within ${this.bootTimeout} ms (last: ${phase})`), this.bootTimeout);
+      deadline.unref?.();
+      const progress = setInterval(() => {
+        console.log(`[runtime] still starting after ${Math.round((Date.now() - bootStarted) / 1000)} s: ${phase}`);
+      }, 30000);
+      progress.unref?.();
+      const stopTimers = () => {
+        booted = true;
+        if (this.bootingChild === child) {
+          this.booting = undefined;
+          this.bootingChild = undefined;
+        }
+        clearTimeout(timer);
+        clearTimeout(deadline);
+        clearInterval(progress);
+      };
+      child.stdout.on("data", heard);
+      child.stderr.on("data", heard);
+      child.on("message", (message) => {
+        if (message?.type === "booting" || message?.type === "say") {
+          // the step comes from "booting" only; a line said meanwhile is news,
+          // not the step (a seed's report would otherwise rename it)
+          if (message.type === "booting" && typeof message.phase === "string") {
+            phase = message.phase;
+            // in the database step a stop is waited out by the child
+            // (tools/osd-boot-guard.mjs), and must not be SIGKILLed meanwhile
+            child.osdDatabaseStep = message.database === true;
+            if (this.bootingChild === child) this.booting = {...this.booting, phase, last: message.last, database: child.osdDatabaseStep};
+          }
+          heard();
+        }
+      });
 
       // **`on`, not `once`, and that distinction cost every test in this
       // file.** The channel carried one kind of message for as long as it
@@ -455,8 +536,10 @@ export class ServingRuntime {
         if (message?.type !== "ready") {
           return;
         }
+        // given up on already: its "ready" comes too late to count
+        if (timedOut !== undefined) return;
         child.off("message", onMessage);
-        clearTimeout(timer);
+        stopTimers();
         this.died = undefined;
         this.child = child;
         this.port = message.port;
@@ -475,7 +558,7 @@ export class ServingRuntime {
       child.on("message", onMessage);
 
       child.once("exit", (code, signal) => {
-        clearTimeout(timer);
+        stopTimers();
         CHILDREN.delete(child);
         registryUpdate(this.root, (list) => list.filter((e) => e.pid !== child.pid));
         // a recycle and a stop clear this.child before the exit arrives, so
@@ -493,7 +576,10 @@ export class ServingRuntime {
         }
         // an exit before "ready" is a runtime that could not come up, and
         // the output is the only explanation anyone will get
-        reject(timedOut ?? new NotServing(`the serving runtime exited (${signal ?? code}) before it answered: ${out.slice(-2000)}`));
+        const stopped = this.stoppedBooting === child;
+        if (stopped) this.stoppedBooting = undefined;
+        reject(timedOut ?? (stopped ? new NotServing("stopped while starting")
+          : new NotServing(`the serving runtime exited (${signal ?? code}) before it answered: ${out.slice(-2000)}`)));
       });
     });
   }

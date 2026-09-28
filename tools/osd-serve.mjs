@@ -13,6 +13,7 @@
 // it is asked to. Started by hand it works too, which is how it is
 // debugged: `node tools/osd-serve.mjs 3099`.
 import {dialogStep, exclusive} from "./osd-dialog-step.mjs";
+import {bootGuard} from "./osd-boot-guard.mjs";
 import {HotLoader, warmVerdict} from "./osd-hot.mjs";
 import {ensureDemoData} from "./osd-demo-data.mjs";
 import {databaseDescriptor} from "./osd-database-identity.mjs";
@@ -32,6 +33,43 @@ import {mountPortableCells} from "./sqlscript-to-procedure-ir.mjs";
 
 const started = Date.now();
 
+// **Alive, and doing what.** A boot on a remote HANA can take minutes (the
+// seed inserts go over the network), and the supervisor used to give a
+// child 60 s from spawn to "ready" and then SIGKILL it -- and the next
+// request started it again from the top, forever (dell, 2026-09-27, 14
+// restarts in 900 s). So until "ready" the child says every few seconds
+// that it is still booting and which step it is in; the supervisor's limit
+// is on silence, not on the length of the boot (tools/osd-runtime.mjs).
+// The timer does not hold the process open.
+let bootPhase = "loading the generation";
+let bootPhaseSince = started;
+let bootLast = "";
+// only while the channel is open: after the supervisor is gone, send() emits
+// ERR_IPC_CHANNEL_CLOSED on `process`, which ends a child mid-seed
+const tell = (message) => {
+  if (process.connected) process.send(message);
+};
+// a stop during the boot goes at once, but waits out the database step
+// (tools/osd-boot-guard.mjs); the supervisor is told which, so it does not
+// SIGKILL a seed it has been asked to let finish
+const guard = bootGuard();
+const bootingMessage = () => ({type: "booting", phase: bootPhase, last: bootLast, database: guard.inDatabaseStep, ms: Date.now() - started});
+const booting = process.send === undefined ? undefined : setInterval(() => {
+  tell(bootingMessage());
+}, 5000);
+booting?.unref();
+process.once("disconnect", () => clearInterval(booting));
+// each step of the boot with how long the previous one took, said over the
+// channel so the supervisor prints it: per-step times on any host, the HANA
+// one included, without a profiler
+const bootStep = (name) => {
+  tell({type: "say", line: `boot: ${bootPhase} ${Date.now() - bootPhaseSince} ms`});
+  bootPhase = name;
+  bootPhaseSince = Date.now();
+  // the step at once, not at the next heartbeat
+  tell(bootingMessage());
+};
+
 // which tree this runtime serves, so one copy of this script can serve any
 // of them: a second worktree, a branch under test, an experiment on its own
 // port and its own database. The modules are loaded from there rather than
@@ -50,7 +88,11 @@ const {zcl_apc_host} = await from("zcl_apc_host.clas.mjs");
 // only this process can write the tables the service reads
 const {zcl_osd_status} = await from("zcl_osd_status.clas.mjs");
 
-await initializeABAP();
+bootStep("opening the database: DDL and seed rows (test/setup.mjs)");
+await guard.databaseStep(async () => {
+  tell(bootingMessage());
+  await initializeABAP();
+});
 // the ICF nodes into the tables a system keeps them in, by the rule in
 // docs/registry-drift.md: applied when an object arrives, never re-applied
 // over an edit. One module for all three hosts, because that is what the
@@ -67,9 +109,11 @@ await initializeABAP();
 // will be written by somebody who did not read this comment.
 const announce = (line) => {
   console.log(line);
-  process.send?.({type: "say", line});
+  tell({type: "say", line});
+  bootLast = line;
 };
 
+bootStep("applying the ICF registry");
 const registry = await applyAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root, say: announce});
 if (registry === undefined) {
   throw new Error("the ICF registry could not be applied, and the routes below come from it");
@@ -77,10 +121,13 @@ if (registry === undefined) {
 const icfRowsNow = await currentRows(globalThis.abap.context.databaseConnections.DEFAULT);
 // the cross-reference, derived from the files and cached per generation
 // (tools/osd-xref-seed.mjs): the same call every host makes
+bootStep("seeding the cross-reference");
 await seedAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root, say: announce});
+bootStep("registering services and search helps");
 await zcl_stg_segw_registry.register();
 await zcl_stg_shlp_registry.register();
 // the synthetic taxi facts, made by ZCL_OSD_DEMO_DATA (tools/osd-demo-data.mjs)
+bootStep("demo data");
 await ensureDemoData((await from("zcl_osd_demo_data.clas.mjs")).zcl_osd_demo_data, {say: announce});
 
 const app = express();
@@ -284,6 +331,10 @@ const server = app.listen(wanted, "127.0.0.1", () => {
     for (const s of icf) console.log(`ICF service  on http://127.0.0.1:${port}${s.path}  (${s.handler})`);
     for (const c of apc) console.log(`Push channel on ws://127.0.0.1:${port}${c.path}  (${c.handler})`);
   }
+  clearInterval(booting);
+  bootStep("serving");
+  // serving: the signals' defaults (or the file save's own handler) again
+  guard.serving();
   if (process.send !== undefined) {
     process.send({type: "ready", port, pid: process.pid, ms: Date.now() - started});
   } else {

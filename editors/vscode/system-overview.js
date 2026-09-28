@@ -49,7 +49,8 @@ function systemOverviewHtml(model, {sysinfoUrl} = {}) {
   const database = model.database ?? {};
   const localDatabase = database.path ?? (database.storage === "server" ? "External database server" : database.storage === "memory" ? "Process memory" : "No local file reported");
   const launchpad = model.launchpadUrl
-    ? `<a class="button secondary" href="${escapeHtml(model.launchpadUrl)}" target="_blank">Open launchpad</a>` : "";
+    ? `<a class="button secondary" href="command:osd.openLaunchpad" title="${escapeHtml(model.launchpadUrl)}">Open launchpad</a>` +
+      `<a class="button secondary" href="command:osd.openLaunchpadExternal">Open in browser</a>` : "";
   const startButton = running ? "" : `<a class="button start" href="command:osd.start">Start system</a>`;
   const sysinfo = running && sysinfoUrl
     ? `<iframe title="System information" src="${escapeHtml(sysinfoUrl)}"></iframe>`

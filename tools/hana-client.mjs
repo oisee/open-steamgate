@@ -112,6 +112,13 @@ function plain(value, dataType) {
   return value;
 }
 
+// HANA Express in docker (saplabs/hanaexpress): 3<nn>13 is the nameserver
+// (no SQL), 3<nn>17 is SYSTEMDB's SQL port, and the first tenant, HXE --
+// where the application's schemas belong -- answers on 3<nn>41. Measured
+// 2026-09-27 on the lab HXE: 39017 answers M_DATABASE = SYSTEMDB, 39041
+// answers HXE. On a VM install the tenant is 3<nn>15; set HANA_PORT there.
+export const HANA_TENANT_PORT = 39041;
+
 export function hanaConnection(input = {}) {
   // the same search as tools/amdp-run.mjs, and for the same reason: a
   // deployment is rebuilt by rsync --delete and a bundled module has no url
@@ -126,7 +133,7 @@ export function hanaConnection(input = {}) {
   const passwordFile = candidates.find((f) => existsSync(f)) ?? "";
   return {
     host: input.host ?? process.env.HANA_HOST ?? process.env.HXE_HOST ?? "localhost",
-    port: Number(input.port ?? process.env.HANA_PORT ?? process.env.HXE_PORT ?? 39017),
+    port: Number(input.port ?? process.env.HANA_PORT ?? process.env.HXE_PORT ?? HANA_TENANT_PORT),
     user: input.user ?? process.env.HANA_USER ?? process.env.HXE_USER ?? "SYSTEM",
     password: input.password ?? process.env.HANA_PASSWORD ?? process.env.HXE_PASSWORD
       ?? (passwordFile === "" ? undefined : readFileSync(passwordFile, "utf8").trim()),

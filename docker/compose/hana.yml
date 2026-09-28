@@ -7,7 +7,7 @@ services:
     environment:
       STG_DB: hana
       HANA_HOST: ${HANA_HOST:?Set HANA_HOST in the environment}
-      HANA_PORT: ${HANA_PORT:-39017}
+      HANA_PORT: ${HANA_PORT:-39041}
       HANA_USER: ${HANA_USER:?Set HANA_USER in the environment}
       HANA_PASSWORD: ${HANA_PASSWORD:?Set HANA_PASSWORD in the environment}
       HANA_SCHEMA: ${HANA_SCHEMA:-OSD}

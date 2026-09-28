@@ -488,6 +488,45 @@ describe("editors/vscode/launcher.js: waitForServing / servingOnce", function ()
     expect(await servingOnce(free)).to.equal(undefined);
   });
 
+  it("waitForServing waits past its timeout while the system answers 'starting' (a slow HANA boot)", async function () {
+    this.timeout(10000);
+    let ready = false;
+    const http = await import("node:http");
+    server = http.createServer((req, res) => {
+      res.writeHead(200, {"content-type": "application/json"});
+      res.end(JSON.stringify(ready ? {ready: true, generation: "cafe"} : {ready: false, starting: true, phase: "seeding"}));
+    });
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    port = server.address().port;
+    setTimeout(() => {
+      ready = true;
+    }, 2500);
+    const phases = [];
+    const serving = await waitForServing(port, {timeoutMs: 1000, intervalMs: 100, bootMs: 8000, onStarting: (s) => phases.push(s.phase)});
+    expect(serving).to.include({ready: true, generation: "cafe"});
+    expect(phases).to.include("seeding");
+  });
+
+  it("waitForServing gives up at the boot limit even while 'starting'", async function () {
+    this.timeout(10000);
+    const http = await import("node:http");
+    server = http.createServer((req, res) => {
+      res.writeHead(200, {"content-type": "application/json"});
+      res.end(JSON.stringify({ready: false, starting: true, phase: "seeding"}));
+    });
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    port = server.address().port;
+    const started = Date.now();
+    await rejects(waitForServing(port, {timeoutMs: 500, intervalMs: 100, bootMs: 1500}), /never answered ready/);
+    expect(Date.now() - started).to.be.within(1400, 4000);
+  });
+
   it("waitForServing resolves once /osd/serving answers ready:true with a generation", async function () {
     this.timeout(5000);
     let ready = false;
@@ -566,8 +605,8 @@ describe("editors/vscode/launcher.js: databases", function () {
 
   it("databaseEnv(hana) sets HANA_* and STG_DB_FRESH only when fresh is truthy", () => {
     expect(databaseEnv({kind: "hana"})).to.deep.equal({STG_DB: "hana"});
-    expect(databaseEnv({kind: "hana", host: "hxehost", port: 39017, user: "SYSTEM", schema: "OSD_ABCD1234"}))
-      .to.deep.equal({STG_DB: "hana", HANA_HOST: "hxehost", HANA_PORT: "39017", HANA_USER: "SYSTEM", HANA_SCHEMA: "OSD_ABCD1234"});
+    expect(databaseEnv({kind: "hana", host: "hxehost", port: 39041, user: "SYSTEM", schema: "OSD_ABCD1234"}))
+      .to.deep.equal({STG_DB: "hana", HANA_HOST: "hxehost", HANA_PORT: "39041", HANA_USER: "SYSTEM", HANA_SCHEMA: "OSD_ABCD1234"});
     expect(databaseEnv({kind: "hana", fresh: true})).to.deep.equal({STG_DB: "hana", STG_DB_FRESH: "1"});
     expect(databaseEnv({kind: "hana", fresh: false})).to.deep.equal({STG_DB: "hana"});
   });
