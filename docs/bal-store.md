@@ -3,8 +3,8 @@
 The `CL_BALI_*` facade in `src/bal` supports the measured fleet audit path:
 create a header with object, subobject and external ID; append free-text items
 with severity; save in the caller's ABAP transaction; find by descriptor; load
-by handle; and read items with their creation timestamps in insertion order. The header reports total and
-error item counts. `CX_BALI_RUNTIME` makes failed saves and missing exact-ID
+by handle; and read items with their creation timestamps in insertion order.
+The header reports total and error item counts. `CX_BALI_RUNTIME` makes failed saves and missing exact-ID
 searches visible to the caller.
 
 `ZCL_OSD_BAL_STORE` is the internal transaction-aware store. It writes
@@ -32,3 +32,14 @@ the public facade. `ZCL_OSD_BAL_STORE_TEST` includes a facade rollback check.
 Its ABAP Unit tests are marked `DANGEROUS` because they write database rows;
 ABAP Unit rolls its transaction back after each run, so the separate restart
 test supplies the durable assertion.
+
+## Upgrade boundary
+
+This source slice is for fresh demo databases. Adding the two BAL tables changes
+the generated schema; it is not an in-place upgrade for existing persistent
+instances. The current SQLite file startup moves a mismatched database to a
+`.drift` file and starts fresh (or refuses with `STG_DB_STRICT=1`). PostgreSQL,
+DuckDB and HANA refuse an old schema or missing tables. The browser's stored
+SQLite preview also has no upgrade path. Keep existing deployments on their
+pinned build until an additive migration is implemented and tested for each
+backend; do not publish this slice as an ordinary persistent-instance update.
