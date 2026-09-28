@@ -8,8 +8,11 @@
 // tree is built -- an HTTP test, the browser played by hand the way
 // test/transaction.mjs plays ZOSD_NOTE.
 import {expect} from "chai";
+import {rejects} from "node:assert/strict";
 import {createRequire} from "node:module";
-import {readFileSync} from "node:fs";
+import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {generate, namesOf, programNameOf} from "../tools/osd-gui-convert.mjs";
 import {startServer} from "./start.mjs";
 
@@ -69,6 +72,21 @@ describe("osd-gui-convert: three of Lars's example reports", () => {
       expect(classIssues, `${entry.className}: ${classIssues.map((i) => i.getMessage()).join("; ")}`).to.have.length(0);
       const wrapperIssues = structuralIssues(`${entry.wrapperClassName.toLowerCase()}.clas.abap`, readWritten(entry.wrapperClassName));
       expect(wrapperIssues, `${entry.wrapperClassName}: ${wrapperIssues.map((i) => i.getMessage()).join("; ")}`).to.have.length(0);
+    }
+  });
+
+  it("rejects two files declaring one REPORT before replacing generated output", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-gui-duplicate-"));
+    const out = join(dir, "generated");
+    try {
+      mkdirSync(out);
+      writeFileSync(join(out, "keep.txt"), "previous generation");
+      writeFileSync(join(dir, "first.prog.abap"), "REPORT z_same.\nWRITE 'one'.\n");
+      writeFileSync(join(dir, "second.prog.abap"), "REPORT z_same.\nWRITE 'two'.\n");
+      await rejects(generate([dir], out), /duplicate REPORT Z_SAME:.*first\.prog\.abap.*second\.prog\.abap/);
+      expect(readFileSync(join(out, "keep.txt"), "utf8")).to.equal("previous generation");
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
     }
   });
 });
