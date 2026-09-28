@@ -70,7 +70,7 @@ function systemOverviewHtml(model, {sysinfoUrl} = {}) {
 body{font:13px/1.55 var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-editor-background);padding:18px 24px;max-width:1100px;margin:auto}
 h1{font-size:22px;margin:0}.subtitle,.muted,small{color:var(--vscode-descriptionForeground)}
 .actions{display:flex;gap:10px;margin:14px 0 22px}.button{display:inline-block;padding:8px 15px;border-radius:4px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);text-decoration:none;font-weight:600}.button:hover{background:var(--vscode-button-hoverBackground)}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.button.start{font-size:16px;padding:12px 24px}
-h2{font-size:16px;margin:25px 0 10px;border-bottom:1px solid var(--vscode-panel-border);padding-bottom:5px}.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1px;background:var(--vscode-panel-border);border:1px solid var(--vscode-panel-border)}.fact{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;padding:10px;background:var(--vscode-editor-background);min-width:0}.fact span{overflow-wrap:anywhere}.fact small{grid-column:2;font-size:11px}
+h2{font-size:16px;margin:25px 0 10px;border-bottom:1px solid var(--vscode-panel-border);padding-bottom:5px}.facts{border:1px solid var(--vscode-panel-border)}.fact{display:flex;flex-direction:column;gap:2px;padding:10px;border-bottom:1px solid var(--vscode-panel-border);min-width:0}.fact:last-child{border-bottom:0}.fact span{overflow-wrap:anywhere}.fact small{font-size:11px}
 .columns{display:flex;flex-direction:column;gap:18px}.table-wrap{overflow:auto;max-height:380px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{text-align:left;vertical-align:top;padding:6px 9px;border:1px solid var(--vscode-panel-border)}th{white-space:nowrap}table.record th{width:1%;position:static}td{max-width:48ch;overflow-wrap:break-word}th{background:var(--vscode-sideBar-background);position:sticky;top:0}code{font-family:var(--vscode-editor-font-family)}pre{white-space:pre-wrap;margin:0}iframe{border:1px solid var(--vscode-panel-border);width:100%;height:420px;background:white}
 @media(max-width:700px){body{padding:12px}}
 </style></head><body>
@@ -78,6 +78,7 @@ h2{font-size:16px;margin:25px 0 10px;border-bottom:1px solid var(--vscode-panel-
 <div class="actions">${startButton}${launchpad}<a class="button secondary" href="${settingsLink}">Settings</a></div>
 <h2>What is set up and where to find it</h2>
 <div class="facts">
+${factRow("Extension version", model.extensionVersion ?? "unknown", "VS Code extension manifest")}
 ${factRow("System lives in", `${home.kind ?? "osd.home"}: ${home.path ?? "not selected"}`, "Extension launcher selection")}
 ${factRow("Layers", layerText, "Workspace abapGit folders, after the base system")}
 ${factRow("HTTP port", running ? model.listener.port : "not running", "Extension launcher state")}
