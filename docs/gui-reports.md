@@ -166,8 +166,36 @@ memory list, or spool. The lowering preserves source line counts so later
 statements keep their source-map rows; it refuses comments within the
 statement rather than removing them.
 
-The next job slice can consume this typed result, but must decide how to
-persist selection values, output and status before it queues work.
+## Saved one-shot runs
+
+`node tools/osd-batch-runs.mjs run ZGG_EX_012 P_DATE=20251231` runs a
+converter-supported report once with `sy-batch` set for that report and saves
+its result. `list` shows recent run IDs; `show <run-id>` opens a run and its
+list output after a process restart. The command invokes the same generated
+`ZCL_OSD_BATCH_REPORT=>RUN` registry as the synchronous `SUBMIT` bridge. It
+does not require a WebGUI session or create a scheduled job.
+
+Run metadata lives in a separate SQLite file, `.local/osd-operations.sqlite`
+in a checkout; `OSD_OPERATIONS_DB` overrides it. When `STG_DB_PATH` is set,
+the operations file sits beside the business database. The Docker image sets
+`OSD_OPERATIONS_DB=/data/osd-operations.sqlite`; the HANA and PostgreSQL
+Compose stacks now mount a named `/data` volume too. The VS Code launcher uses
+its per-instance storage directory, including when the business database is
+HANA or PostgreSQL. Output is an immutable JSON artifact under
+`batch-output/<run-id>.json`, bounded to 5 MiB and checked
+against its SHA-256 digest on read. A run row is written before execution and
+closed with `COMPLETED` or `FAILED`. An exception records result status `DUMP`;
+a process that dies during a run leaves `RUNNING` for a later doctor to
+classify. The operations database is independent of a replaceable build
+generation and the business database.
+
+Selection values are kept in the local operations file for eventual job
+execution; normal `list` and `show` output reveals names only. The file and
+artifacts are created with owner-only permissions. Anyone with direct access
+to the instance's operations files can read them, so they need the same
+protection as the instance's business data. This first slice has no public
+HTTP monitor, queue, retry or spool semantics. A future operations API needs
+an explicit authorization boundary before exposing saved parameters or output.
 
 ## The three examples
 

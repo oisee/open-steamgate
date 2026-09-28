@@ -967,6 +967,7 @@ describe("editors/vscode/launcher.js: Launcher end to end (against this checkout
       expect(debuggerLauncher.env.OSD_PACKS).to.equal([inheritedPacks, join(storageDir, "packs")].join(delimiter));
       expect(debuggerLauncher.env.OSD_INSPECT).to.equal(String(debuggerLauncher.inspectPort));
       expect(debuggerLauncher.env.OSD_WORKERS).to.equal("1");
+      expect(debuggerLauncher.env.OSD_OPERATIONS_DB).to.equal(join(storageDir, "operations", "osd-operations.sqlite"));
     } finally {
       if (oldPacks === undefined) delete process.env.OSD_PACKS;
       else process.env.OSD_PACKS = oldPacks;

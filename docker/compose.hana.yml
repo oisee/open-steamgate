@@ -62,6 +62,7 @@ services:
       - "32${INSTANCE:-17}:32${INSTANCE:-17}"
       - "33${INSTANCE:-17}:33${INSTANCE:-17}"
     volumes:
+      - osd-ops:/data
       - osd-tls:/opt/osd/.local/tls
     depends_on:
       hxe:
@@ -71,4 +72,5 @@ services:
 
 volumes:
   hana-data:
+  osd-ops:
   osd-tls:
