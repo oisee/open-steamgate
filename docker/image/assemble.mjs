@@ -1,6 +1,7 @@
 import {cpSync, existsSync, mkdirSync, readFileSync, readlinkSync, readdirSync, symlinkSync, writeFileSync} from "node:fs";
 import {basename, join, resolve} from "node:path";
 import {approvedLicenseAssumption} from "./license-assumptions.mjs";
+import {imagePacks} from "./packs.mjs";
 
 const out = resolve(process.argv[2] ?? "/image");
 if (existsSync(out)) throw new Error(`Output must not exist: ${out}`);
@@ -28,6 +29,11 @@ function browserOnly(path) {
   const normalized = path.replaceAll("\\", "/");
   return [...browserOnlyPackages].some((name) => normalized === name || normalized.endsWith("/" + name));
 }
+const selectedPacks = imagePacks(process.cwd(), process.env.OSD_IMAGE_PACKS ?? "");
+for (const pack of selectedPacks) {
+  cpSync(pack.dir, join(out, "packs", pack.name), {recursive: true, verbatimSymlinks: true});
+  if (pack.missing.length) throw new Error(`Pack ${pack.name} has unfetched sources`);
+}
 for (const entry of roots) {
   cpSync(entry, join(out, entry), {recursive: true,
     ...(entry === "node_modules" ? {dereference: true} : {verbatimSymlinks: true}),
@@ -52,6 +58,7 @@ const runtimeLibraries = sources.libraries.map((source) => {
 });
 const report = {
   sources: {transpiler: lock.transpiler, libraries: runtimeLibraries},
+  packs: selectedPacks.map((pack) => ({name: pack.name, sources: pack.sources.map((source) => ({repo: source.repo, ref: source.ref, path: source.path}))})),
   libraries: [], npm: [], blockers: [], assumptions: [],
 };
 for (const source of runtimeLibraries) {
