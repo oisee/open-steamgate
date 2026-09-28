@@ -3718,6 +3718,12 @@ open  revisions: reading them out of git instead of a system.
 
 ## 8. Housekeeping (S)
 
+CI ABAP Unit pooling: consider reusing the Test Explorer's RISK LEVEL scheduler
+only after proving isolated child databases and preserving the check that every
+test class in the tree ran. The last green CI run on 2026-09-28 spent 14 s in
+ABAP Unit versus 11 min 54 s in integration suites, so this is a lower-priority
+speed task than splitting the costly integration cases (`docs/ci-tests.md`).
+
 ```
 8.1  e2e data isolation, so the suite can run in parallel again
      └─ today: workers: 1, deterministic, 44 seconds
