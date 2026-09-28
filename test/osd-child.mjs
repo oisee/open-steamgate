@@ -302,7 +302,8 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     const events = [];
     cdp.onmessage = ({data}) => {
       const message = JSON.parse(data);
-      if (message.id !== undefined) waiting.get(message.id)?.(message);
+      const reply = Number.isSafeInteger(message.id) && waiting.get(message.id);
+      if (reply) reply(message);
       else events.push(message);
     };
     const send = (method, params = {}) => new Promise((resolve) => {
