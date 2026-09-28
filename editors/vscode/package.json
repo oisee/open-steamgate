@@ -143,7 +143,7 @@
         "osd.database.hana.port": {
           "type": "number",
           "default": 0,
-          "description": "HANA port. 0 uses the client's own default (HANA_PORT/HXE_PORT, else 39017)."
+          "description": "HANA port. 0 uses the client's own default (HANA_PORT/HXE_PORT, else 39041, the HANA Express tenant)."
         },
         "osd.database.hana.user": {
           "type": "string",
