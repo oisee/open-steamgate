@@ -66,6 +66,10 @@ live switch. Symlinked library content changes the generation hash.
 
 ## Follow-up: remove ambient mutable dependencies
 
+The proposed immutable library cache is related to, but separate from, the
+abapGit ZIP source-layer plan. [Source layers](source-layers.md) maps both
+and their different write behavior.
+
 Fail-fast makes the present model safe, but the final model should make the
 failure unusual:
 

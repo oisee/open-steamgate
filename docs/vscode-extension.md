@@ -1,6 +1,8 @@
 # A thin VS Code extension over a running osd (Q2)
 
 Release packaging and tag instructions: [VS Code prerelease by tag](release.md).
+Source-layer discovery, write behavior and the proposed ZIP layer are mapped
+in [Source layers](source-layers.md).
 
 *2026-09-25.* `editors/vscode/` is a VS Code extension that holds no ABAP
 and runs nothing itself. It is a client of one listener (`npm start`,
@@ -67,6 +69,11 @@ F8's dispatch by object type (`lib.js` `runActionFor`, held to this table by
 | SICF | not yet: open the node's URL |
 
 ## Test Explorer groups
+
+Open regression: [an `osg-demo` folder used as the workspace-layer root
+shows 0/0 tests](open-issues/osg-demo-test-explorer.md). The two known test
+classes contain `FOR TESTING`, but `classifyTestPath` rejects the empty
+layer-relative prefix. This is an extension issue, not a demo pull issue.
 
 *2026-09-26.* Before this, "ABAP Unit (osd)" was one flat list: every
 `*.clas.testclasses.abap` `findFiles()` turned up became a sibling, so a
