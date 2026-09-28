@@ -1330,6 +1330,23 @@ function dataPreviewStatusText(shown, rowLimit, total) {
   return `first ${shown} of ${total}`;
 }
 
+/** A stopped managed listener should not be contacted. An external osd.url
+ * remains usable even when this window's launcher is stopped. */
+function dataPreviewAvailability(state, managedUrl, currentUrl) {
+  if (state === "running" || state === undefined) return undefined;
+  if (state === "stopped" && managedUrl !== currentUrl) return undefined;
+  if (state === "stopped") return {message: "The osd system is stopped. Start it to preview data.", start: true};
+  return {message: `The osd system is ${state}. Refresh when it is running.`, start: false};
+}
+
+function dataPreviewError(error, url) {
+  const message = String(error?.message ?? error);
+  if (error instanceof TypeError && /fetch failed|failed to fetch/i.test(message)) {
+    return `Cannot reach osd at ${url}. Check that the system is running, or start it with osd: Start.`;
+  }
+  return message;
+}
+
 /** F8's data preview XML (tools/adt-facade.mjs tableDataDocument -- the
  *  same document shape freestyleRows above reads) into `{columns: [{name,
  *  label, key}], rows}`, `rows` shaped like freestyleRows' own. Unlike
@@ -2495,6 +2512,7 @@ module.exports = {unitRiskOf, unitDurationOf, unitSchedule, runUnitQueue, unitPo
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
+  dataPreviewAvailability, dataPreviewError,
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
   demoFailureObjects,
   progTcodeOf, webguiTransactionUrl, webguiPanelHtml, runWebguiPanel, progRunLens,

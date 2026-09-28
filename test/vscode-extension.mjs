@@ -23,6 +23,7 @@ const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseChec
   HOTSPOTS_SQL, hotspotsFromRows, hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText,
   implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, MANDT_CLIENT, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText, dataPreviewRows,
+  dataPreviewAvailability, dataPreviewError,
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
   demoFailureObjects, progTcodeOf, webguiTransactionUrl, webguiPanelHtml, runWebguiPanel, progRunLens,
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
@@ -1550,10 +1551,52 @@ describe("editors/vscode: the extension's logic", function () {
   });
 
   it("Q7: dataPreviewStatusText says the row cap only once there is something to say about it", () => {
+    expect(dataPreviewStatusText(0, 100)).to.equal("0 rows");
     expect(dataPreviewStatusText(24, 100)).to.equal("24 rows");
     expect(dataPreviewStatusText(1, 100)).to.equal("1 row");
     expect(dataPreviewStatusText(100, 100, 137)).to.equal("first 100 of 137");
     expect(dataPreviewStatusText(100, 100, undefined)).to.equal("first 100 rows");
+  });
+
+  it("Q7: a stopped or starting managed listener is actionable without a fetch", async () => {
+    for (const state of ["stopped", "starting"]) {
+      const api = vscodeStub({url: "http://localhost:3531"});
+      const {openDataPreview} = loadExtension(api);
+      let calls = 0;
+      await openDataPreview("TABL", "ZOSD_FLEET_VOY", true, {appendLine() {}}, {
+        launcher: {state}, managedUrl: "http://localhost:3531",
+        client: () => { calls++; throw new Error("must not fetch"); },
+      });
+      expect(calls).to.equal(0);
+      expect(api.panels[0].webview.html).to.contain(state === "stopped" ? "Start system" : "Refresh when it is running");
+    }
+  });
+
+  it("Q7: an external URL remains usable, and a successful empty table is not an error", async () => {
+    const api = vscodeStub({url: "http://localhost:4545"});
+    const {openDataPreview} = loadExtension(api);
+    let calls = 0;
+    await openDataPreview("TABL", "ZOSD_FLEET_VOY", true, {appendLine() {}}, {
+      launcher: {state: "stopped"}, managedUrl: "http://localhost:3531",
+      client: () => ({dataPreview: async () => { calls++; return {columns: [{name: "VOYAGE_ID", label: "Voyage", key: true}], rows: [], ms: 1}; }}),
+    });
+    expect(calls).to.equal(1);
+    expect(api.panels[0].webview.html).to.contain("0 rows").and.to.contain("Voyage");
+    expect(api.panels[0].webview.html).to.not.contain('class="osd-error"');
+  });
+
+  it("Q7: a connection refusal names the endpoint, while HTTP and SQL errors keep their details", async () => {
+    const api = vscodeStub({url: "http://localhost:3531"});
+    const {openDataPreview} = loadExtension(api);
+    await openDataPreview("TABL", "ZOSD_FLEET_VOY", false, {appendLine() {}}, {
+      launcher: undefined,
+      client: () => ({dataPreview: async () => { throw new TypeError("fetch failed"); }}),
+    });
+    expect(api.panels[0].webview.html).to.contain("Cannot reach osd at http://localhost:3531");
+    expect(dataPreviewError(new Error("POST /sap/bc/adt/datapreview/ddic: HTTP 404 -- missing table"), "http://localhost:3531"))
+      .to.contain("HTTP 404 -- missing table");
+    expect(dataPreviewError(new Error("SQL table missing"), "http://localhost:3531")).to.equal("SQL table missing");
+    expect(dataPreviewAvailability("stopped", "http://localhost:3531", "http://localhost:4545")).to.equal(undefined);
   });
 
   it("Q7: dataPreviewRows reads tableDataDocument's own labels and keys, off the real façade shape (datapreview/ddic and /cds)", () => {

@@ -15,6 +15,7 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   freestyleTableHtml, freestyleOutputItems, notebookAbapSource, notebookFromJson, notebookToJson, sqlNotebookStarter, htmlEscape,
   hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun,
   dataPreviewObjectOf, tablHasMandt, dataPreviewQuery, dataPreviewCountQuery, dataPreviewStatusText,
+  dataPreviewAvailability, dataPreviewError,
   transpileLayers, classifyTestPath, needsPackageSplit, packageOf, hasTestMethods, demoFailureObjects, progRunLens,
   groupServices, serviceLabel, serviceContextValue, serviceActionContext, normalizeTransactionRow,
   transactionDetailsModel, classifyTransactionClick, transactionDetailsHtml,
@@ -692,6 +693,7 @@ class SystemController {
       : vscode.ConfigurationTarget.Global;
     try {
       await vscode.workspace.getConfiguration("osd").update("url", `http://localhost:${port}`, target);
+      this.managedUrl = `http://localhost:${port}`;
     } catch (error) {
       vscode.window.showErrorMessage(`osd: running on :${port}, but could not update osd.url: ${String(error.message ?? error)}`);
     }
@@ -2913,20 +2915,28 @@ async function classrunObject(name, classrunOutput, withDebugger = false) {
 // route -- the one door this whole feature is told to prefer, and the one
 // that already exists for exactly "run this SQL and hand back a number".
 
-async function openDataPreview(objectType, name, hasMandt, output) {
+async function openDataPreview(objectType, name, hasMandt, output, options = {}) {
   const panel = vscode.window.createWebviewPanel("osdDataPreview", `Data Preview ${name}`, vscode.ViewColumn.Beside,
     {enableScripts: true, retainContextWhenHidden: true});
   let allClients = false;
   const load = async () => {
     const rowLimit = vscode.workspace.getConfiguration("osd").get("dataPreview.rowLimit", 100);
+    const url = vscode.workspace.getConfiguration("osd").get("url", "http://localhost:3030").replace(/\/+$/, "");
+    const launcher = Object.hasOwn(options, "launcher") ? options.launcher : activeController?.launcher;
+    const managedUrl = Object.hasOwn(options, "managedUrl") ? options.managedUrl : activeController?.managedUrl;
+    const unavailable = dataPreviewAvailability(launcher?.state, managedUrl, url);
+    if (unavailable !== undefined) {
+      panel.webview.html = dataPreviewHtml(name, {error: unavailable.message, start: unavailable.start});
+      return;
+    }
     panel.webview.html = dataPreviewHtml(name, {loading: true});
     const statement = dataPreviewQuery(name, {hasMandt, allClients});
     try {
-      const result = await osd().dataPreview(objectType, name, statement, rowLimit);
+      const result = await (options.client?.() ?? osd()).dataPreview(objectType, name, statement, rowLimit);
       let total;
       if (result.rows.length >= rowLimit) {
         try {
-          const count = await osd().freestyle(dataPreviewCountQuery(name, {hasMandt, allClients}), 1);
+          const count = await (options.client?.() ?? osd()).freestyle(dataPreviewCountQuery(name, {hasMandt, allClients}), 1);
           const first = count.rows[0] ?? {};
           total = Number(first.N ?? first.n ?? Object.values(first)[0]);
         } catch (e) {
@@ -2938,12 +2948,16 @@ async function openDataPreview(objectType, name, hasMandt, output) {
         statement, hasMandt, allClients, status: dataPreviewStatusText(result.rows.length, rowLimit, total),
       });
     } catch (e) {
-      output.appendLine(`osd data preview ${name}: ${String(e.message ?? e)}`);
-      panel.webview.html = dataPreviewHtml(name, {error: String(e.message ?? e)});
+      const message = dataPreviewError(e, url);
+      output.appendLine(`osd data preview ${name}: ${message}`);
+      panel.webview.html = dataPreviewHtml(name, {error: message});
     }
   };
   panel.webview.onDidReceiveMessage(async (message) => {
     if (message?.command === "refresh") {
+      await load();
+    } else if (message?.command === "start") {
+      await vscode.commands.executeCommand("osd.start");
       await load();
     } else if (message?.command === "toggleAllClients") {
       allClients = message.value === true;
@@ -2994,10 +3008,11 @@ function dataPreviewHtml(name, state = {}) {
   }
   if (state.error !== undefined) {
     return dataPreviewShell(name, `<p class="osd-error">${xmlEscapeHtml(state.error)}</p>
-<button id="refresh">Refresh</button>
+${state.start ? '<button id="start">Start system</button> ' : ""}<button id="refresh">Refresh</button>
 <script>
   const vscode = acquireVsCodeApi();
   document.getElementById("refresh").addEventListener("click", () => vscode.postMessage({command: "refresh"}));
+  document.getElementById("start")?.addEventListener("click", () => vscode.postMessage({command: "start"}));
 </script>`);
   }
   const shown = state.columns.filter((c) => state.allClients || c.name !== "MANDT");
@@ -3838,5 +3853,6 @@ async function deactivate() {
 }
 
 module.exports = {activate, deactivate, SystemController, debugOnDemand, testExplorer, OsdTreeProvider, TransactionItem, EntitySetItem,
+  openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,
   wirePageTabs, openDetailsMetadata};
