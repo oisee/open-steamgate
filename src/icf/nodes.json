@@ -68,6 +68,10 @@
     "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "dumps", "needs": "state",
     "text": "the runtime errors this process has collected, the way ST22 keeps them"
   },
+  "/osd/batch-runs": {
+    "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "batch-runs", "needs": "state",
+    "text": "opt-in, token-protected read access to saved batch runs and output"
+  },
   "/osd/sql": {
     "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "sql", "needs": "state",
     "text": "the statement log and the bounded SELECT door this process holds"

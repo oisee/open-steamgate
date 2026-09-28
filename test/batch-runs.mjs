@@ -4,7 +4,9 @@ import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
+import express from "express";
 import {BatchRuns, runPersistedBatch, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
+import {batchMonitorHandler} from "../tools/osd-batch-monitor.mjs";
 
 const root = resolve(".");
 
@@ -164,6 +166,43 @@ describe("durable one-shot batch runs", function () {
       expect(upgraded.enqueue({program: "ZGG_EX_012"}).state).to.equal("QUEUED");
     } finally {
       upgraded.close();
+    }
+  });
+
+  it("guards the read API and returns redacted runs plus digest-checked output", async () => {
+    const store = new BatchRuns(root, env);
+    const run = await runPersistedBatch(root,
+      {program: "ZGG_EX_012", input: [{name: "P_DATE", value: "private-value"}]},
+      store, async () => ({status: "COMPLETED", lines: ["visible list"]}));
+    store.close();
+    const token = randomUUID().replaceAll("-", "");
+    const app = express();
+    app.get("/osd/batch-runs", batchMonitorHandler(root, {...env, OSD_BATCH_READ_TOKEN: token}));
+    app.get("/closed", batchMonitorHandler(root, env));
+    const server = await new Promise((done) => {
+      const listener = app.listen(0, "127.0.0.1", () => done(listener));
+    });
+    try {
+      const url = `http://127.0.0.1:${server.address().port}`;
+      const auth = {Authorization: `Bearer ${token}`};
+      expect((await fetch(`${url}/closed`, {headers: auth})).status).to.equal(404);
+      expect((await fetch(`${url}/osd/batch-runs`)).status).to.equal(401);
+      expect((await fetch(`${url}/osd/batch-runs`, {headers: {Authorization: "Bearer wrong"}})).status).to.equal(401);
+      const listed = await fetch(`${url}/osd/batch-runs?limit=1`, {headers: auth});
+      expect(listed.status).to.equal(200);
+      expect(listed.headers.get("cache-control")).to.equal("no-store");
+      const body = await listed.json();
+      expect(body.runs.map((item) => item.id)).to.deep.equal([run.id]);
+      expect(JSON.stringify(body)).not.to.include("private-value");
+      const detail = await (await fetch(`${url}/osd/batch-runs?id=${run.id}`, {headers: auth})).json();
+      expect(detail.run.input).to.deep.equal([{name: "P_DATE"}]);
+      const output = await (await fetch(`${url}/osd/batch-runs?id=${run.id}&output=1`, {headers: auth})).json();
+      expect(output.output.lines).to.deep.equal(["visible list"]);
+      expect((await fetch(`${url}/osd/batch-runs?output=1`, {headers: auth})).status).to.equal(400);
+      writeFileSync(join(dir, "batch-output", `${run.id}.json`), "tampered");
+      expect((await fetch(`${url}/osd/batch-runs?id=${run.id}&output=1`, {headers: auth})).status).to.equal(500);
+    } finally {
+      await new Promise((done) => server.close(done));
     }
   });
 });
