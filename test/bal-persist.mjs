@@ -1,5 +1,5 @@
-// Persistence gate for the internal BAL store. Runs two OSD processes against
-// one disposable SQLite file: write in the first, read in the second.
+// Persistence gate for the public CL_BALI_* facade. Runs two OSD processes
+// against one disposable SQLite file: write in the first, read in the second.
 import {spawn, spawnSync} from "node:child_process";
 import {mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";

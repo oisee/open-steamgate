@@ -1,27 +1,34 @@
-# Application log persistence: internal first slice
+# Application log persistence: fleet BAL subset
 
-`ZCL_OSD_BAL_STORE` is an internal transaction-aware store for the measured
-fleet BAL scenario. It writes headers and ordered items to client-dependent
-`ZOSD_BAL_HDR` and `ZOSD_BAL_ITM` using the caller's ABAP database connection.
-It never commits. A caller can `COMMIT WORK` or `ROLLBACK WORK`; a failed save
-raises `ZCX_OSD_BAL`. The log handle is a UUID. `EXTERNAL_ID` is a search field,
-not a unique key. `FIND` raises a not-found error for an exact search with no
-match, matching the observed A4H behavior.
+The `CL_BALI_*` facade in `src/bal` supports the measured fleet audit path:
+create a header with object, subobject and external ID; append free-text items
+with severity; save in the caller's ABAP transaction; find by descriptor; load
+by handle; and read items in insertion order. The header reports total and
+error item counts. `CX_BALI_RUNTIME` makes failed saves and missing exact-ID
+searches visible to the caller.
 
-The A4H probe in [osg-demo](https://github.com/oisee/osg-demo/blob/main/docs/a4h-bal-probe.md)
-also measured a dedicated second-connection save. This store does **not**
-implement it. Its caller-owned transaction is the ordinary `SAVE_LOG` path.
+`ZCL_OSD_BAL_STORE` is the internal transaction-aware store. It writes
+client-dependent `ZOSD_BAL_HDR` and `ZOSD_BAL_ITM` rows and never commits.
+`EXTERNAL_ID` is a search field, not a unique key. The handle is a UUID. A
+caller can `COMMIT WORK` or `ROLLBACK WORK` after `SAVE_LOG`.
 
-`npm run test:bal-persist` builds this checkout, writes two success logs and
-one error log into a disposable SQLite file, stops OSD, starts a new process
-on that same file and reads all three logs with their item severity. The
-ABAP Unit tests of `ZCL_OSD_BAL_STORE_TEST` are marked `DANGEROUS` because
-they write database rows; the restart test provides the durable assertion
-because ABAP Unit rolls its transaction back after each run.
+This is a deliberately narrow compatibility surface. The caller-owned
+`SAVE_LOG` path is implemented. `SAVE_LOG_2ND_DB_CONNECTION`,
+`USE_2ND_DB_CONNECTION` and application-job assignment raise explicit
+unsupported errors. The `READ_ONLY_HEADER` flag is currently accepted but
+still returns the full log. Filters use exact object, subobject and external
+ID values; wildcard, range and timestamp filtering are not implemented.
+SAP customizing validation and other item types are outside this slice.
 
-This is not the public SAP-compatible `CL_BALI_*` contract yet. Before the
-fleet demo can use BAL, add the measured header, item, filter and DB interfaces
-on top of this store, validate `SAVE_LOG` rollback and read errors through
-that surface, and run the demo's two-success/one-error acceptance after
-restarting OSD. Wildcard filters, second connection, job assignment and
-general SLG0 customizing are outside this first storage slice.
+The [A4H probe](https://github.com/oisee/osg-demo/blob/main/docs/a4h-bal-probe.md)
+measured ordinary save, rollback, second-connection save and repeated external
+IDs. OSD matches the tested ordinary transaction and repeated-ID behavior;
+it does not yet match the second-connection path.
+
+`npm run test:bal-persist` builds OSD, writes two success logs and one error
+log through `CL_BALI_*` into a disposable SQLite file, stops OSD, starts a
+new process on the same file and reads all three logs and nine items through
+the public facade. `ZCL_OSD_BAL_STORE_TEST` includes a facade rollback check.
+Its ABAP Unit tests are marked `DANGEROUS` because they write database rows;
+ABAP Unit rolls its transaction back after each run, so the separate restart
+test supplies the durable assertion.

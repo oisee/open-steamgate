@@ -18,6 +18,7 @@ CLASS zcl_osd_bal_store DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_object TYPE ty_object
                 iv_subobject TYPE ty_subobject
                 iv_external_id TYPE ty_external_id
+                iv_handle TYPE ty_handle OPTIONAL
                 it_items TYPE tt_item
       RETURNING VALUE(rv_handle) TYPE ty_handle
       RAISING zcx_osd_bal.
@@ -52,12 +53,16 @@ CLASS zcl_osd_bal_store IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
-    TRY.
-        rv_handle = cl_system_uuid=>create_uuid_c32_static( ).
-      CATCH cx_uuid_error.
-        RAISE EXCEPTION TYPE zcx_osd_bal
-          EXPORTING iv_reason = 'Could not create a log handle'.
-    ENDTRY.
+    IF iv_handle IS INITIAL.
+      TRY.
+          rv_handle = cl_system_uuid=>create_uuid_c32_static( ).
+        CATCH cx_uuid_error.
+          RAISE EXCEPTION TYPE zcx_osd_bal
+            EXPORTING iv_reason = 'Could not create a log handle'.
+      ENDTRY.
+    ELSE.
+      rv_handle = iv_handle.
+    ENDIF.
 
     ls_header-mandt = sy-mandt.
     ls_header-log_id = rv_handle.

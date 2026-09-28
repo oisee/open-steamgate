@@ -1,0 +1,2 @@
+INTERFACE if_bali_item_setter PUBLIC.
+ENDINTERFACE.
