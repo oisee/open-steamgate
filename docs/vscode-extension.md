@@ -135,7 +135,8 @@ by what their test classes declare:
   schema there, and even a HARMLESS one writes while it boots: the
   cross-reference and the pack rows are reseeded. So two at once would
   delete each other's rows. The spec allowed HARMLESS in parallel there
-  ("reads only"); the boot is why it does not.
+  ("reads only"); the boot is why it does not. This is the extension's
+  rule: the façade still accepts runs at once from other clients.
 - A debug run stays one at a time: one debugger, one child.
 
 **The declaration is checked, not trusted** (`tools/osd-unit-risk.mjs`).

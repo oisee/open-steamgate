@@ -222,12 +222,16 @@ const hooks = new Map();
 let hookedClient;
 let unhooked;
 
-const WRITE_SQL = /^\s*(INSERT|UPDATE|DELETE|MERGE|UPSERT|REPLACE|TRUNCATE)\b(?:\s+(?:INTO|FROM|TABLE))?\s+["'`]?([\w/$]+)/i;
+// the verb, SQLite's "OR REPLACE"/"OR IGNORE", the INTO/FROM/TABLE word,
+// and a name that may be schema-qualified ("SCHEMA"."ZTAB": the last part)
+const WRITE_SQL = /^\s*(INSERT|UPDATE|DELETE|MERGE|UPSERT|REPLACE|TRUNCATE)\b(?:\s+OR\s+\w+)?(?:\s+(?:INTO|FROM|TABLE))?\s+((?:["'`]?[\w/$]+["'`]?\.)*["'`]?[\w/$]+)/i;
 
 /** the table a native SQL statement writes, or undefined for a read */
 export function nativeWriteOf(sql) {
   const match = WRITE_SQL.exec(String(sql));
-  return match === null ? undefined : {operation: match[1].toUpperCase(), table: match[2].toUpperCase()};
+  if (match === null) return undefined;
+  const table = match[2].split(".").pop().replace(/["'`]/g, "");
+  return {operation: match[1].toUpperCase(), table: table.toUpperCase()};
 }
 
 function tableOf(options) {

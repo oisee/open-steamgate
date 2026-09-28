@@ -103,6 +103,9 @@ describe("tools/osd-dialog-step: hooks at the database seam (B17)", function () 
     expect(nativeWriteOf("UPDATE ztab SET a = 1")).to.deep.equal({operation: "UPDATE", table: "ZTAB"});
     expect(nativeWriteOf("SELECT * FROM ztab")).to.equal(undefined);
     expect(nativeWriteOf("SAVEPOINT s1")).to.equal(undefined);
+    expect(nativeWriteOf("INSERT OR REPLACE INTO ztab VALUES (1)")).to.deep.equal({operation: "INSERT", table: "ZTAB"});
+    expect(nativeWriteOf('INSERT INTO "OSD_T1"."ZSTG_DEMO" VALUES (1)')).to.deep.equal({operation: "INSERT", table: "ZSTG_DEMO"});
+    expect(nativeWriteOf("TRUNCATE TABLE ztab")).to.deep.equal({operation: "TRUNCATE", table: "ZTAB"});
   });
 
   it("sees every write while a hook is active, fails it on a throw, and restores the client after", async () => {

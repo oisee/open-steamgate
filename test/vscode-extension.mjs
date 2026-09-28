@@ -493,7 +493,11 @@ describe("editors/vscode: the extension's logic", function () {
     };
     api.tests = {createTestController: () => controller};
     const {testExplorer} = loadExtension(api);
-    const {unitPoolSize} = require("../editors/vscode/lib.js");
+    // four CPUs, whatever the machine: a pool of one would pass this test
+    // with every object scheduled DANGEROUS
+    const os = require("node:os");
+    const originalCpus = os.cpus;
+    os.cpus = () => [{}, {}, {}, {}];
     const originalDiscover = Osd.prototype.discover;
     const originalRun = Osd.prototype.run;
     // ZCL_OSD_WEBGUI is the one that writes
@@ -517,11 +521,11 @@ describe("editors/vscode: the extension's logic", function () {
       const objects = [...controller.items.get("group:project").children].map(([, item]) => item);
       expect(objects.map((o) => o.id).sort()).to.deep.equal(["CLAS:ZCL_OSD_ABAP_TOKENS", "CLAS:ZCL_OSD_DEMO_RANDOM", "CLAS:ZCL_OSD_WEBGUI"]);
       await profiles.get("Run")({include: objects}, token);
-      const pool = unitPoolSize();
       const harmless = seen.filter(([name]) => name !== "ZCL_OSD_WEBGUI");
-      expect(Math.max(...harmless.map(([, n]) => n)), "the HARMLESS objects at once").to.equal(Math.min(2, pool));
+      expect(Math.max(...harmless.map(([, n]) => n)), "the HARMLESS objects at once").to.equal(2);
       expect(seen.at(-1), "the DANGEROUS one last, alone").to.deep.equal(["ZCL_OSD_WEBGUI", 1]);
     } finally {
+      os.cpus = originalCpus;
       explorer?.dispose();
       Osd.prototype.discover = originalDiscover;
       Osd.prototype.run = originalRun;
