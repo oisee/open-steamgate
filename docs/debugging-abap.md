@@ -72,8 +72,9 @@ DNS-rebound page cannot fake), and one that comes from a web page (an
 `Origin`, or a `Sec-Fetch-Site` other than `none`). A POST must be
 `application/json`. It answers the port, never the inspector's URL, whose
 uuid is what keeps a page off its WebSocket. The first version lacked the
-last three, and the critic of this change showed a page on the same machine
-opening the inspector through a rebound name and reading the URL back.
+last three, and the critic of this change traced (by reading, not by running
+a browser) how a page on the same machine could open the inspector through a
+rebound name and read the URL back.
 
 The acceptance is measured in `test/osd-child.mjs`. A system is started
 the normal way with no inspector, and the door opens one on 127.0.0.1 only;

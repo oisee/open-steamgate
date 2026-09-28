@@ -215,9 +215,9 @@ export function startServer(quiet) {
   //    cross-origin page cannot send without a preflight nobody answers;
   //  - the answer carries the port and not the inspector's URL, whose uuid
   //    is the one thing that keeps a page from its WebSocket.
-  // (Measured by the critic of this change: without the last three, a page
-  // on this machine opened the inspector through a rebound name and read
-  // the URL back.)
+  // (Traced by the critic of this change, by reading and not by running a
+  // browser: without the last three, a page on this machine could open the
+  // inspector through a rebound name and read the URL back.)
   hostNodes.inspector = (a, node) => a.all(node.path, async function (req, res) {
     const remote = req.socket.remoteAddress ?? "";
     const host = String(req.headers.host ?? "").replace(/:\d+$/, "");
