@@ -195,9 +195,32 @@ Selection values are kept in the local operations file for eventual job
 execution; normal `list` and `show` output reveals names only. The file and
 artifacts are created with owner-only permissions. Anyone with direct access
 to the instance's operations files can read them, so they need the same
-protection as the instance's business data. This first slice has no public
-HTTP monitor, queue, retry or spool semantics. A future operations API needs
+protection as the instance's business data. These slices have no public
+HTTP monitor, retry or spool semantics. A future operations API needs
 an explicit authorization boundary before exposing saved parameters or output.
+
+## One BGR worker
+
+`node tools/osd-batch-runs.mjs enqueue ZGG_EX_012 P_DATE=20260202` writes a
+durable `QUEUED` run without executing it. `work` claims and executes one
+queued run in its own process; `worker` stays up, polling for further work
+until SIGINT or SIGTERM. `list` and `show <run-id>` show the same saved status
+and output as a direct run. This is an explicit process to start for now; it
+is not yet supervised by the OSD launcher or exposed as SAP `JOB_OPEN` /
+`JOB_CLOSE`.
+
+A SQLite `BEGIN IMMEDIATE` claim admits at most one queued run at a time,
+even if two worker processes start together. FIFO uses enqueue time and row
+order. A queued run records the generation it was submitted against; if
+the worker sees a different generation, it records `GENERATION_CHANGED`
+without executing potentially changed code. A worker that dies mid-report
+leaves the run `RUNNING` and blocks later queue claims. After confirming the
+old worker process has stopped and inspecting possible business effects,
+`interrupt <run-id> --worker-confirmed-stopped` marks that run `INTERRUPTED`
+and lets the next queued run proceed. It never replays the interrupted run;
+submit a new one explicitly if appropriate. A richer doctor and supervised
+worker lifecycle are later steps. Direct synchronous `run` remains outside
+this BGR admission limit.
 
 ## The three examples
 

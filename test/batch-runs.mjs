@@ -1,8 +1,10 @@
 import {expect} from "chai";
+import {randomUUID} from "node:crypto";
 import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
-import {BatchRuns, runPersistedBatch} from "../tools/osd-batch-runs.mjs";
+import {DatabaseSync} from "node:sqlite";
+import {BatchRuns, runPersistedBatch, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
 
 const root = resolve(".");
 
@@ -82,6 +84,86 @@ describe("durable one-shot batch runs", function () {
       expect(reopened.output(started.id)).to.equal(undefined);
     } finally {
       reopened.close();
+    }
+  });
+
+  it("claims queued work in order and admits only one BGR run across connections", async () => {
+    const first = new BatchRuns(root, env);
+    const second = new BatchRuns(root, env);
+    try {
+      const a = first.enqueue({program: "ZGG_EX_012", input: [{name: "P_DATE", value: "20260101"}],
+        generation: "test-generation"});
+      const b = first.enqueue({program: "ZGG_EX_012", input: [{name: "P_DATE", value: "20260102"}],
+        generation: "test-generation"});
+      expect(a.state).to.equal("QUEUED");
+      expect(a.startedAt).to.equal(null);
+      const claim = first.claimNext();
+      expect(claim.kind).to.equal("claimed");
+      expect(claim.run.id).to.equal(a.id);
+      expect(claim.run.input[0].value).to.equal("20260101");
+      expect(second.claimNext()).to.deep.equal({kind: "busy", id: a.id});
+      first.finish(a.id, {status: "COMPLETED", lines: ["first"]});
+      expect(second.claimNext().run.id).to.equal(b.id);
+      second.finish(b.id, {status: "COMPLETED", lines: ["second"]});
+      expect(first.list().map((run) => run.state)).to.deep.equal(["COMPLETED", "COMPLETED"]);
+      expect(first.output(b.id).lines).to.deep.equal(["second"]);
+    } finally {
+      second.close();
+      first.close();
+    }
+  });
+
+  it("refuses to run queued work against a changed generation", async () => {
+    const store = new BatchRuns(root, env);
+    try {
+      const queued = store.enqueue({program: "ZGG_EX_012", generation: "obsolete"});
+      let called = false;
+      const outcome = await workQueuedBatch(root, store, async () => { called = true; });
+      expect(called).to.equal(false);
+      expect(outcome.kind).to.equal("failed");
+      expect(store.get(queued.id).resultStatus).to.equal("GENERATION_CHANGED");
+      expect(store.claimNext().kind).to.equal("empty");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("a worker crash leaves the claimed run visible and blocks another claim", () => {
+    const store = new BatchRuns(root, env);
+    const a = store.enqueue({program: "ZGG_EX_012"});
+    const b = store.enqueue({program: "ZGG_EX_012"});
+    expect(store.claimNext().run.id).to.equal(a.id);
+    store.close();
+    const reopened = new BatchRuns(root, env);
+    try {
+      expect(reopened.get(a.id).state).to.equal("RUNNING");
+      expect(reopened.claimNext()).to.deep.equal({kind: "busy", id: a.id});
+      expect(reopened.interruptQueued(a.id).state).to.equal("INTERRUPTED");
+      expect(reopened.claimNext().run.id).to.equal(b.id);
+      expect(() => reopened.interruptQueued(a.id)).to.throw(/not RUNNING/);
+    } finally {
+      reopened.close();
+    }
+  });
+
+  it("opens a saved-run database from the preceding slice without losing its rows", () => {
+    const old = new DatabaseSync(env.OSD_OPERATIONS_DB);
+    old.exec(`CREATE TABLE batch_runs (
+      id TEXT PRIMARY KEY, program TEXT NOT NULL, generation TEXT NOT NULL,
+      started_at TEXT NOT NULL, ended_at TEXT, state TEXT NOT NULL,
+      result_status TEXT, detail TEXT, input_json TEXT NOT NULL,
+      output_sha256 TEXT, output_bytes INTEGER
+    )`);
+    const id = randomUUID();
+    old.prepare("INSERT INTO batch_runs (id, program, generation, started_at, state, input_json) VALUES (?, 'ZGG_EX_012', 'old', '2026-09-28T00:00:00Z', 'RUNNING', '[]')").run(id);
+    old.close();
+    const upgraded = new BatchRuns(root, env);
+    try {
+      expect(upgraded.get(id).program).to.equal("ZGG_EX_012");
+      expect(upgraded.get(id).queuedAt).to.equal(null);
+      expect(upgraded.enqueue({program: "ZGG_EX_012"}).state).to.equal("QUEUED");
+    } finally {
+      upgraded.close();
     }
   });
 });
