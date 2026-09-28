@@ -119,21 +119,29 @@ The same generator also writes `ZCL_OSD_BATCH_REPORT` as a static registry of
 the reports it converted. `RUN( iv_program = ..., it_input = ... )` creates a
 fresh converted report and calls `ZCL_GG_HOST=>RUN` with `iv_batch = abap_true`.
 The result has separate list `lines`, `messages`, `terminal`, `status`, and
-`detail` fields. Status is `COMPLETED`, `SELECTION` if the selection screen
-remains active, `UNSUPPORTED` for a known report that could not be converted or
-for a host operation it cannot perform, and `UNKNOWN` for a name outside the
-registry. The caller receives no rendered HTML and no persistent report
-session. A supplied value is a row of
+`detail` and `navigation` fields. Status is `COMPLETED`, `SELECTION` if the
+selection screen remains active, `INCOMPLETE` if the host returned a terminal
+or navigation request that this one-shot call cannot resume, `UNSUPPORTED` for
+a known report that could not be converted or for a host operation it cannot
+perform, `INVALID_INPUT` for an undeclared or repeated selection field, and
+`UNKNOWN` for a name outside the registry. The caller receives no rendered
+HTML and no persistent report session. A supplied value is a row of
 `ZIF_GG_SELECTION_SCREEN_TYPES=>TY_VALUES` such as `P_DATE = 20251231`.
+Input names are checked against the converter's selection-screen metadata
+before the report runs; an unrecognized name cannot silently disappear.
 
 This is a supported converted report runner, not a generic ABAP `SUBMIT`.
 The registry is rebuilt from the winning content layers, and only generated
 static calls can execute. It has no scheduler, variants, spool, job log,
 cross-process continuation, or support for a report the converter skips.
+Two different files declaring the same `REPORT` name fail the generator before
+it replaces the previous output, since they would create duplicate dispatch
+arms and generated class names.
 `test/unit/zcl_osd_batch_runner_test.clas.testclasses.abap` executes the
 converted `ZGG_EX_012` twice: first with a supplied date, then with its own
 `INITIALIZATION` default, proving one call does not leak selection state into
-the next. It also checks unknown and known-but-unsupported names.
+the next. It also checks invalid input, unfinished host flow, and unknown and
+known-but-unsupported names.
 
 The next job slice can consume this typed result, but must decide how to
 persist selection values, output and status before it queues work.

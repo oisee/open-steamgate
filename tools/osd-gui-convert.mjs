@@ -50,11 +50,8 @@ const LIB = ".local/lars/open-abap-gui";
 export function batchRegistrySource(reports) {
   const known = reports.filter((entry) => entry.programName !== undefined);
   const cases = known.map((entry) => `      WHEN ${abapLiteral(entry.programName)}.
-${entry.wired === true ? `        ls_host = zcl_gg_host=>run(
-          io_report = NEW ${entry.className.toLowerCase()}( )
-          iv_program = CONV #( lv_program )
-          it_input  = it_input
-          iv_batch  = abap_true ).` : `        rs_result-status = 'UNSUPPORTED'.
+${entry.wired === true ? `        lo_report = NEW ${entry.className.toLowerCase()}( ).
+${[...new Set(entry.selectionNames ?? [])].map((name) => `        INSERT ${abapLiteral(name)} INTO TABLE lt_allowed.`).join("\n")}` : `        rs_result-status = 'UNSUPPORTED'.
         rs_result-detail = ${abapLiteral(entry.skipped ?? "conversion unsupported")}.
         RETURN.`}`).join("\n");
   return `CLASS zcl_osd_batch_report DEFINITION PUBLIC FINAL CREATE PUBLIC.
@@ -65,17 +62,25 @@ ${entry.wired === true ? `        ls_host = zcl_gg_host=>run(
              lines    TYPE zcl_gg_host_list=>ty_text_lines,
              messages TYPE zcl_gg_host_session=>ty_messages,
              terminal TYPE string,
+             navigation TYPE zif_gg_host_html_v1=>ty_navigation,
            END OF ty_result.
     CLASS-METHODS run
       IMPORTING
         iv_program TYPE string
         it_input TYPE zif_gg_selection_screen_types=>ty_values OPTIONAL
       RETURNING VALUE(rs_result) TYPE ty_result.
+    CLASS-METHODS result_of
+      IMPORTING is_host TYPE zcl_gg_host=>ty_result
+      RETURNING VALUE(rs_result) TYPE ty_result.
 ENDCLASS.
 
 CLASS zcl_osd_batch_report IMPLEMENTATION.
   METHOD run.
     DATA lv_program TYPE string.
+    DATA lv_name TYPE string.
+    DATA lt_allowed TYPE SORTED TABLE OF string WITH UNIQUE KEY table_line.
+    DATA lt_input TYPE zif_gg_selection_screen_types=>ty_values.
+    DATA lo_report TYPE REF TO zif_gg_report_v1.
     DATA ls_host TYPE zcl_gg_host=>ty_result.
     lv_program = iv_program.
     TRANSLATE lv_program TO UPPER CASE.
@@ -86,13 +91,45 @@ ${cases}
         rs_result-detail = |Report { iv_program } is not in the converted report registry|.
         RETURN.
     ENDCASE.
-    rs_result-lines = ls_host-lines.
-    rs_result-messages = ls_host-messages.
-    rs_result-terminal = ls_host-terminal.
-    IF ls_host-unsupported IS NOT INITIAL.
+    LOOP AT it_input INTO DATA(ls_input).
+      lv_name = ls_input-name.
+      TRANSLATE lv_name TO UPPER CASE.
+      IF NOT line_exists( lt_allowed[ table_line = lv_name ] ).
+        rs_result-status = 'INVALID_INPUT'.
+        rs_result-detail = |Unknown selection field { ls_input-name } for { lv_program }|.
+        RETURN.
+      ENDIF.
+      ls_input-name = lv_name.
+      INSERT ls_input INTO TABLE lt_input.
+      IF sy-subrc <> 0.
+        rs_result-status = 'INVALID_INPUT'.
+        rs_result-detail = |Selection field { lv_name } was supplied more than once|.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+    ls_host = zcl_gg_host=>run(
+      io_report = lo_report
+      iv_program = CONV #( lv_program )
+      it_input = lt_input
+      iv_batch = abap_true ).
+    rs_result = result_of( ls_host ).
+  ENDMETHOD.
+
+  METHOD result_of.
+    rs_result-lines = is_host-lines.
+    rs_result-messages = is_host-messages.
+    rs_result-terminal = is_host-terminal.
+    rs_result-navigation = is_host-navigation.
+    IF is_host-unsupported IS NOT INITIAL.
       rs_result-status = 'UNSUPPORTED'.
-      rs_result-detail = ls_host-unsupported.
-    ELSEIF ls_host-selection_active = abap_true.
+      rs_result-detail = is_host-unsupported.
+    ELSEIF is_host-terminal IS NOT INITIAL
+        OR is_host-navigation-kind IS NOT INITIAL
+        OR is_host-submit-program IS NOT INITIAL
+        OR is_host-transaction_call-tcode IS NOT INITIAL.
+      rs_result-status = 'INCOMPLETE'.
+      rs_result-detail = |Report requested { is_host-navigation-kind } { is_host-navigation-target } { is_host-terminal }|.
+    ELSEIF is_host-selection_active = abap_true.
       rs_result-status = 'SELECTION'.
       rs_result-detail = 'Selection screen did not complete'.
     ELSE.
@@ -424,12 +461,24 @@ export async function generate(folders, out = DEFAULT_OUT, options = {}) {
   const root = options.root ?? process.cwd();
   const {convertProgram} = hostModules()?.guiConverter ?? await import(resolve(root, LIB, CONVERTER));
   const reports = [];
+  const files = winningByLayer(folders, (folder) => reportFiles([folder]),
+    (file) => basename(file).replace(/\.prog\.abap$/i, "").toUpperCase());
+  const candidates = files.map((file) => {
+    const source = readFileSync(file, "utf8");
+    return {file, source, programName: programNameOf(source)};
+  });
+  const seen = new Map();
+  for (const candidate of candidates) {
+    if (candidate.programName === undefined) continue;
+    const previous = seen.get(candidate.programName);
+    if (previous !== undefined) {
+      throw new Error(`duplicate REPORT ${candidate.programName}: ${previous} and ${candidate.file}`);
+    }
+    seen.set(candidate.programName, candidate.file);
+  }
   rmSync(out, {recursive: true, force: true});
 
-  for (const file of winningByLayer(folders, (folder) => reportFiles([folder]),
-    (file) => basename(file).replace(/\.prog\.abap$/i, "").toUpperCase())) {
-    const source = readFileSync(file, "utf8");
-    const programName = programNameOf(source);
+  for (const {file, source, programName} of candidates) {
     if (programName === undefined) {
       reports.push({file, skipped: "no REPORT statement found"});
       continue;
@@ -454,7 +503,10 @@ export async function generate(folders, out = DEFAULT_OUT, options = {}) {
       usedMode = "partial/skeleton";
     }
     mkdirSync(out, {recursive: true});
-    const entry = {file, programName, ...names, mode: usedMode, supported: result.supported, diagnostics: result.diagnostics.length};
+    const selectionNames = (result.reportIR?.selections ?? [])
+      .flatMap((screen) => screen.elements ?? [])
+      .map((element) => element.name).filter(Boolean);
+    const entry = {file, programName, ...names, mode: usedMode, supported: result.supported, diagnostics: result.diagnostics.length, selectionNames};
     if (result.classSource !== undefined) {
       writeFileSync(join(out, `${names.className.toLowerCase()}.clas.abap`), result.classSource);
       for (const helper of result.helperSources ?? []) {

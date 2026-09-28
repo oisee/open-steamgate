@@ -3,6 +3,8 @@ CLASS ltcl_batch_report DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL H
     METHODS supplied_then_default FOR TESTING.
     METHODS unknown_report_is_explicit FOR TESTING.
     METHODS unsupported_report_is_explicit FOR TESTING.
+    METHODS unknown_selection_is_rejected FOR TESTING.
+    METHODS unfinished_flow_is_reported FOR TESTING.
 ENDCLASS.
 
 CLASS ltcl_batch_report IMPLEMENTATION.
@@ -40,5 +42,29 @@ CLASS ltcl_batch_report IMPLEMENTATION.
     DATA(ls_result) = zcl_osd_batch_report=>run( iv_program = 'ZOSD_TEST_DEMO_PLAIN' ).
     cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'UNSUPPORTED' ).
     cl_abap_unit_assert=>assert_initial( ls_result-lines ).
+  ENDMETHOD.
+
+  METHOD unknown_selection_is_rejected.
+    DATA lt_input TYPE zif_gg_selection_screen_types=>ty_values.
+    INSERT VALUE #( name = 'P_DTAE' value = '20251231' ) INTO TABLE lt_input.
+    DATA(ls_result) = zcl_osd_batch_report=>run(
+      iv_program = 'ZGG_EX_012'
+      it_input = lt_input ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'INVALID_INPUT' ).
+    cl_abap_unit_assert=>assert_initial( ls_result-lines ).
+  ENDMETHOD.
+
+  METHOD unfinished_flow_is_reported.
+    DATA ls_host TYPE zcl_gg_host=>ty_result.
+    ls_host-navigation-kind = 'SUBMIT'.
+    ls_host-navigation-target = 'Z_OTHER'.
+    DATA(ls_result) = zcl_osd_batch_report=>result_of( ls_host ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'INCOMPLETE' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-navigation-target exp = 'Z_OTHER' ).
+
+    CLEAR ls_host.
+    ls_host-terminal = 'LEAVE TO TRANSACTION'.
+    ls_result = zcl_osd_batch_report=>result_of( ls_host ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'INCOMPLETE' ).
   ENDMETHOD.
 ENDCLASS.
