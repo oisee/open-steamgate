@@ -159,11 +159,6 @@
           "type": "boolean",
           "default": false,
           "description": "STG_DB_FRESH=1: drop and rebuild osd.database.hana.schema on the next start instead of refusing a schema this build did not stamp. osd.start turns this on itself (and asks first) when a start fails with that refusal."
-        },
-        "osd.debug": {
-          "type": "boolean",
-          "default": false,
-          "description": "Attach VS Code's Node debugger to systems osd.start launches and to detached ABAP Unit children. The Test Explorer's Debug profile works when this is off; classrun and EntitySet debugger commands need a debug-enabled system already running."
         }
       }
     },

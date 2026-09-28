@@ -24,7 +24,8 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   warmStatusText, activationBuildText, closureTestsText,
   presetSettings, isOpenSteamgateCheckout: isOpenSteamgateManifest, osdHomeChoice, osdStateContext, systemOverviewModel,
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText,
-  runningAbapSources, breakpointWarning, taxiDefaultYear, taxiResetPrompt} = require("./lib.js");
+  runningAbapSources, breakpointWarning, taxiDefaultYear, taxiResetPrompt,
+  unitRiskOf, unitDurationOf, runUnitQueue, unitPoolSize, riskWarning} = require("./lib.js");
 const {Launcher, ensureMaterializedHome, materializedHomeDir, selectOldHomes, listOldHomes, cleanupOldHomes,
   hasLiveServingLock,
   detectWorkspaceLayers, layerContributions, databaseEnv, defaultDedicatedName, describeDatabase,
@@ -339,10 +340,23 @@ function osdWarmModeOf() {
   return vscode.workspace.getConfiguration("osd").get("warm", "auto");
 }
 
-/** `osd.debug` is read at each launch and each unit run so a settings change
- *  takes effect without reloading the extension. */
+/** Whether to open the inspector **at start** rather than on demand. The
+ *  debugger needs no setting any more: the first breakpoint in an .abap
+ *  file or "Run with debugger" opens it in the running system
+ *  (SystemController.attachSystemDebugger). `osd.debug` is gone from the
+ *  settings UI and an existing `"osd.debug": true` is still honoured, for
+ *  one release, silently (VS Code returns an undeclared key); the escape
+ *  hatch is OSD_INSPECT=1 in the environment VS Code was started from. */
 function osdDebugEnabled() {
-  return vscode.workspace.getConfiguration("osd").get("debug", false) === true;
+  return vscode.workspace.getConfiguration("osd").get("debug", false) === true
+    || /^(1|true)$/.test(process.env.OSD_INSPECT ?? "");
+}
+
+/** The enabled source breakpoints in .abap files: while there is one, the
+ *  debugger is wanted (docs/debugging-abap.md, "On demand"). */
+function abapBreakpoints(breakpoints = vscode.debug.breakpoints ?? [], {enabledOnly = true} = {}) {
+  return breakpoints.filter((bp) => bp instanceof vscode.SourceBreakpoint && (bp.enabled || !enabledOnly)
+    && bp.location?.uri?.scheme === "file" && /\.abap$/i.test(bp.location.uri.fsPath));
 }
 
 /** The workspace folders to offer as layers, minus osdHome itself -- a
@@ -484,6 +498,9 @@ class SystemController {
       if (session.name === `OSD: ABAP (${this.debuggerState.systemPort})`) {
         this.debuggerState = debugAttachPlan(this.debuggerState,
           {type: "system-session-ended", port: this.debuggerState.systemPort}).state;
+        // the debug session ended: an inspector opened on demand closes
+        // once no .abap breakpoint wants it either
+        this.releaseDebugger({sessionEnded: true}).catch((e) => this.output.appendLine(`osd debugger: ${String(e?.message ?? e)}`));
       }
     }));
     this.emitter = new vscode.EventEmitter();
@@ -600,10 +617,68 @@ class SystemController {
     return true;
   }
 
-  async attachSystemDebugger() {
-    if (this.launcher?.debug !== true || this.launcher.inspectPort === undefined) return false;
+  /** Attaches VS Code's debugger to the running system. With `onDemand`,
+   *  a system started without an inspector has it opened now, in the
+   *  running process (Launcher.openInspector -> /osd/inspector): no
+   *  osd.debug, no restart. Without it, attaches only to an inspector that
+   *  is already open. The reason a debugger could not attach is left in
+   *  `debuggerError` for the caller to show. */
+  // opening and closing the inspector one after another, in the order they
+  // were asked: a close in flight and a new breakpoint's open would otherwise
+  // reach the system on two connections, in either order
+  #inspectorStep(step) {
+    const next = (this.inspectorSteps ?? Promise.resolve()).then(step, step);
+    this.inspectorSteps = next.catch(() => undefined);
+    return next;
+  }
+
+  async attachSystemDebugger(options = {}) {
+    return this.#inspectorStep(() => this.#attachSystemDebugger(options));
+  }
+
+  async #attachSystemDebugger({onDemand = false} = {}) {
+    const launcher = this.launcher;
+    this.debuggerError = undefined;
+    if (launcher === undefined || launcher.state !== "running") {
+      this.debuggerError = "the system is not running; start it with osd: Start";
+      return false;
+    }
+    const open = launcher.inspectPort !== undefined && (launcher.debug === true || launcher.inspectorOpen === true);
+    if (!open) {
+      if (!onDemand) return false;
+      try {
+        await launcher.openInspector();
+      } catch (e) {
+        this.debuggerError = `could not open the inspector: ${String(e?.message ?? e)}`;
+        return false;
+      }
+      this.output.appendLine(`--- osd debugger: inspector opened on 127.0.0.1:${launcher.inspectPort} ---`);
+    }
     await this.debuggerTransition;
-    return this.applyDebuggerEvent({type: "system-started", enabled: true, port: this.launcher.inspectPort});
+    return this.applyDebuggerEvent({type: "system-started", enabled: true, port: launcher.inspectPort});
+  }
+
+  /** The other half of on demand: once no enabled .abap breakpoint is left
+   *  **and** the OSD: ABAP session has ended, close an inspector this window
+   *  opened. Removing the last breakpoint while the session is attached (a
+   *  paused request, a Run with debugger) leaves it attached; ending the
+   *  session then closes it. One opened at start (OSD_INSPECT=1, osd.debug)
+   *  stays. `sessionEnded` is said by the session's own end. */
+  async releaseDebugger(options = {}) {
+    return this.#inspectorStep(() => this.#releaseDebugger(options));
+  }
+
+  async #releaseDebugger({sessionEnded = false} = {}) {
+    const launcher = this.launcher;
+    if (launcher === undefined || launcher.debug === true || launcher.inspectorOpen !== true) return false;
+    if (abapBreakpoints().length > 0) return false;
+    const name = `OSD: ABAP (${launcher.inspectPort})`;
+    if (!sessionEnded && this.runningDebugSessions().some((session) => session.name === name)) return false;
+    await this.debuggerTransition;
+    await this.applyDebuggerEvent({type: "system-detach"});
+    const closed = await launcher.closeInspector();
+    if (closed) this.output.appendLine("--- osd debugger: inspector closed (no .abap breakpoint left) ---");
+    return closed;
   }
 
   /** `osd.url` follows a launch: every existing feature that calls osd()
@@ -720,7 +795,7 @@ class SystemController {
         : await launcher.start({...options, force});
       if (result === undefined) return false;
       await this.#pointUrlAt(launcher.port);
-      if (launcher.debug) await this.attachSystemDebugger();
+      await this.#attachAfterStart();
       this.emitter.fire();
       return true;
     } catch (e) {
@@ -741,11 +816,21 @@ class SystemController {
     }
     if (result === undefined) return false;
     await this.#pointUrlAt(result.port);
-    if (launcher.debug) await this.attachSystemDebugger();
+    await this.#attachAfterStart();
     vscode.window.setStatusBarMessage(
       `osd: running on :${result.port} · ${launcher.databaseLabel}, generation ${String(result.generation).slice(0, 8)}`, 5000);
     this.emitter.fire();
     return true;
+  }
+
+  // a system started with its inspector is attached to; one started
+  // without is given one now if .abap breakpoints are already waiting
+  async #attachAfterStart() {
+    const wanted = this.launcher?.debug === true || abapBreakpoints().length > 0;
+    if (!wanted) return;
+    if (await this.attachSystemDebugger({onDemand: true}) !== true && this.debuggerError !== undefined) {
+      this.output.appendLine(`osd debugger: ${this.debuggerError}`);
+    }
   }
 
   async #launcherError(launcher, error, label) {
@@ -2150,6 +2235,28 @@ function breakpointGuard(context) {
   }
 }
 
+/** The debugger on demand, driven by breakpoints: one set (or enabled) in
+ *  an .abap file while the system runs opens its inspector and attaches;
+ *  the last one removed (or disabled) closes it again once the debug
+ *  session has ended (releaseDebugger). Start needs no setting for any of it. */
+function debugOnDemand(context, controllerOf = () => activeController) {
+  if (typeof vscode.debug.onDidChangeBreakpoints !== "function") return;
+  context.subscriptions.push(vscode.debug.onDidChangeBreakpoints((event) => {
+    const controller = controllerOf();
+    if (controller?.launcher?.state !== "running") return;
+    const log = (e) => controller.output.appendLine(`osd debugger: ${String(e?.message ?? e)}`);
+    if (abapBreakpoints([...(event.added ?? []), ...(event.changed ?? [])]).length > 0) {
+      controller.attachSystemDebugger({onDemand: true}).then((attached) => {
+        if (attached !== true && controller.debuggerError !== undefined) log(controller.debuggerError);
+      }, log);
+      return;
+    }
+    if (abapBreakpoints([...(event.removed ?? []), ...(event.changed ?? [])], {enabledOnly: false}).length > 0) {
+      controller.releaseDebugger().catch(log);
+    }
+  }));
+}
+
 function activate(context) {
   const output = vscode.window.createOutputChannel("osd");
   context.subscriptions.push(output);
@@ -2180,6 +2287,7 @@ function activate(context) {
   context.subscriptions.push(statusBar(context));
   breakpointToggleStatusBar(context);
   breakpointGuard(context);
+  debugOnDemand(context);
   context.subscriptions.push(testExplorer(context, output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.showDumps", () => showDumps(output)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.setHanaPassword", () => setDatabasePassword(context, "hana")));
@@ -2602,9 +2710,10 @@ async function activateCurrent(diagnostics, output) {
 // server work its turn would add.
 
 async function requireDebugSystem(output, action) {
-  const attached = await activeController?.attachSystemDebugger();
+  const attached = await activeController?.attachSystemDebugger({onDemand: true});
   if (attached === true) return true;
-  const message = `${action} with debugger needs a system started by osd.start with osd.debug enabled; enable it and restart the system`;
+  const reason = activeController?.debuggerError ?? "the system is not running; start it with osd: Start";
+  const message = `${action} with debugger: ${reason}`;
   output.appendLine(`osd debugger: ${message}`);
   vscode.window.showWarningMessage(`osd: ${message}`);
   return false;
@@ -3285,7 +3394,16 @@ function testExplorer(context, output, {
     return configCache.get(folderRoot);
   };
 
+  // what each test class is scheduled as (the façade's check of its RISK
+  // LEVEL, tools/osd-unit-risk.mjs), by class item id; and a warning on the
+  // RISK LEVEL of a class that declares HARMLESS and reaches a write
+  const classSchedules = new Map();
+  const riskDiagnostics = vscode.languages?.createDiagnosticCollection?.("osd ABAP Unit risk");
   const buildTree = async () => {
+    // a rebuilt tree starts with no verdicts: an object is described again
+    // when it is expanded or run, and a deleted file keeps no warning
+    classSchedules.clear();
+    riskDiagnostics?.clear();
     const root = activeController?.launcher?.osdHome ?? osdHomeOf();
     const layers = transpileLayers(readTranspileConfig(root));
     const workspaceLayers = activeController?.launcher?.layers ?? [];
@@ -3359,12 +3477,22 @@ function testExplorer(context, output, {
     try {
       const found = await osd().discover(object);
       const classes = [];
+      const warnings = new Map();
       // a class without test methods (the global class of a test-only
       // object is listed too) has nothing to run
       for (const testClass of (found.classes ?? []).filter((c) => (c.methods ?? []).length > 0)) {
         const file = vscode.Uri.file(fileOf(dir, object, testClass.include));
         const classItem = controller.createTestItem(`${item.id}/${testClass.name}`, testClass.name, file);
         classItem.range = new vscode.Range(Math.max(0, testClass.line - 1), 0, Math.max(0, testClass.line - 1), 0);
+        classSchedules.set(classItem.id, {schedule: testClass.schedule, duration: testClass.durationCategory});
+        const warning = riskWarning(testClass, found);
+        if (warning !== undefined && riskDiagnostics !== undefined) {
+          const range = new vscode.Range(Math.max(0, testClass.line - 1), 0, Math.max(0, testClass.line - 1), 200);
+          const diagnostic = new vscode.Diagnostic(range, warning, vscode.DiagnosticSeverity?.Warning ?? 1);
+          diagnostic.source = "osd";
+          if (!warnings.has(file.fsPath)) warnings.set(file.fsPath, {uri: file, list: []});
+          warnings.get(file.fsPath).list.push(diagnostic);
+        }
         for (const m of testClass.methods ?? []) {
           const methodItem = controller.createTestItem(`${classItem.id}/${m.name}`, m.name, file);
           methodItem.range = new vscode.Range(Math.max(0, m.line - 1), 0, Math.max(0, m.line - 1), 0);
@@ -3374,6 +3502,11 @@ function testExplorer(context, output, {
       }
       item.children.replace(classes);
       item.error = undefined;
+      // this object's files: the warnings found now, and none left from before
+      for (const testClass of found.classes ?? []) {
+        const file = vscode.Uri.file(fileOf(dir, object, testClass.include));
+        riskDiagnostics?.set(file, warnings.get(file.fsPath)?.list ?? []);
+      }
     } catch (e) {
       item.error = String(e.message ?? e);
     } finally {
@@ -3480,44 +3613,80 @@ function testExplorer(context, output, {
       if (!byObject.has(sel.objectItem.id)) byObject.set(sel.objectItem.id, []);
       byObject.get(sel.objectItem.id).push(sel);
     }
+    // Cancel reaches the request in flight: an ordinary run used to pass no
+    // signal, so a cancelled Test Explorer run waited for the child it had
+    // already started (the façade kills the child when the request aborts)
+    const cancellation = new AbortController();
+    const cancelled = () => token.isCancellationRequested || cancellation.signal.aborted;
+    const subscription = token.onCancellationRequested?.(() => cancellation.abort());
+    const runSelection = async (sel, object, dir) => {
+      const methods = leaves(sel.item);
+      methods.forEach((m) => run.started(m));
+      try {
+        const inspectPort = useDebugger ? await pickUnitInspectorPort() : undefined;
+        if (cancelled()) {
+          methods.forEach((m) => run.skipped(m));
+          return;
+        }
+        const execute = (signal) => osd().run(object, sel.testClass, sel.method, dbEnv, inspectPort,
+          inspectPort !== undefined, signal);
+        const answer = inspectPort === undefined ? await execute(cancellation.signal) : await runWithDebuggerAttach(
+          () => attachUnitDebugger({type: "unit-started", port: inspectPort}), execute, token);
+        const results = outcomes(answer, methods.map((m) => ({testClass: m.id.split("/")[1], method: m.id.split("/")[2]})));
+        for (const m of methods) {
+          const [, testClass, method] = m.id.split("/");
+          const result = results.find((r) => r.testClass === testClass && r.method === method);
+          if (result === undefined) {
+            run.skipped(m);
+          } else if (result.passed) {
+            run.passed(m, result.ms);
+          } else {
+            run.failed(m, result.alerts.map((a) => message(a, dir, m)), result.ms);
+          }
+        }
+        run.appendOutput(`${object.name}: ${answer.counts?.passed ?? 0} passed, ${answer.counts?.failed ?? 0} failed in ${answer.ms ?? 0} ms\r\n`);
+      } catch (e) {
+        const text = new vscode.TestMessage(String(e.message ?? e));
+        methods.forEach((m) => run.errored(m, text));
+        output.appendLine(String(e.message ?? e));
+      }
+    };
+    // one unit per object: its selections in the order asked, its risk and
+    // duration from the classes it runs (what discover() learned)
+    const units = [];
     for (const [objectId, sels] of byObject) {
-      if (token.isCancellationRequested) break;
+      if (cancelled()) break;
       const objectItemOf = sels[0].objectItem;
       if (objectItemOf.children.size === 0) await discover(objectItemOf);
       const {object, dir} = objects.get(objectId);
+      const classIds = new Set();
       for (const sel of sels) {
-        if (token.isCancellationRequested) break;
-        const methods = leaves(sel.item);
-        methods.forEach((m) => run.started(m));
-        try {
-          const inspectPort = useDebugger ? await pickUnitInspectorPort() : undefined;
-          if (token.isCancellationRequested) {
-            methods.forEach((m) => run.skipped(m));
-            break;
-          }
-          const execute = (signal) => osd().run(object, sel.testClass, sel.method, dbEnv, inspectPort,
-            inspectPort !== undefined, signal);
-          const answer = inspectPort === undefined ? await execute() : await runWithDebuggerAttach(
-            () => attachUnitDebugger({type: "unit-started", port: inspectPort}), execute, token);
-          const results = outcomes(answer, methods.map((m) => ({testClass: m.id.split("/")[1], method: m.id.split("/")[2]})));
-          for (const m of methods) {
-            const [, testClass, method] = m.id.split("/");
-            const result = results.find((r) => r.testClass === testClass && r.method === method);
-            if (result === undefined) {
-              run.skipped(m);
-            } else if (result.passed) {
-              run.passed(m, result.ms);
-            } else {
-              run.failed(m, result.alerts.map((a) => message(a, dir, m)), result.ms);
-            }
-          }
-          run.appendOutput(`${object.name}: ${answer.counts?.passed ?? 0} passed, ${answer.counts?.failed ?? 0} failed in ${answer.ms ?? 0} ms\r\n`);
-        } catch (e) {
-          const text = new vscode.TestMessage(String(e.message ?? e));
-          methods.forEach((m) => run.errored(m, text));
-          output.appendLine(String(e.message ?? e));
-        }
+        if (sel.testClass !== undefined) classIds.add(`${objectId}/${sel.testClass}`);
+        else for (const [, child] of objectItemOf.children) classIds.add(child.id);
       }
+      const schedules = [...classIds].map((id) => classSchedules.get(id));
+      units.push({
+        key: objectId,
+        risk: unitRiskOf(schedules),
+        duration: unitDurationOf(schedules),
+        run: async () => {
+          for (const sel of sels) {
+            if (cancelled()) break;
+            await runSelection(sel, object, dir);
+          }
+        },
+      });
+    }
+    try {
+      // a debug run stays one at a time: one debugger, one child. So does a
+      // run on a shared database (osd.database.tests = HANA or PostgreSQL):
+      // every child there uses the one schema, and even a HARMLESS one
+      // writes while it boots (the cross-reference and the pack rows are
+      // reseeded), so two at once would delete each other's rows
+      const sharedDatabase = dbEnv?.STG_DB === "hana" || dbEnv?.STG_DB === "postgres";
+      await runUnitQueue(units, {poolSize: useDebugger || sharedDatabase ? 1 : unitPoolSize(), cancelled});
+    } finally {
+      subscription?.dispose?.();
     }
     run.end();
   };
@@ -3542,7 +3711,7 @@ function testExplorer(context, output, {
   controller.refreshHandler = async () => {
     await buildTree();
   };
-  return {dispose: () => { clearTimeout(rebuildTimer); watcher.dispose(); debugCurrentTests.dispose(); controller.dispose(); }};
+  return {dispose: () => { clearTimeout(rebuildTimer); watcher.dispose(); debugCurrentTests.dispose(); riskDiagnostics?.dispose(); controller.dispose(); }};
 }
 
 function* gather(collection) {
@@ -3665,6 +3834,6 @@ async function deactivate() {
   await activeController?.stop();
 }
 
-module.exports = {activate, deactivate, SystemController, testExplorer, OsdTreeProvider, TransactionItem, EntitySetItem,
+module.exports = {activate, deactivate, SystemController, debugOnDemand, testExplorer, OsdTreeProvider, TransactionItem, EntitySetItem,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,
   wirePageTabs, openDetailsMetadata};

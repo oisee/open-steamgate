@@ -480,6 +480,33 @@ function runToCompletion(cwd, script, args, env, onLine, onChild) {
   });
 }
 
+/** POST {open, port} to the system's /osd/inspector door (test/start.mjs,
+ *  tools/osd-inspector.mjs): the debugger on demand. Resolves the answer,
+ *  rejects with the system's own reason. */
+function inspectorOnce(port, body, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const req = request({hostname: "127.0.0.1", port, path: "/osd/inspector", method: "POST", timeout: timeoutMs,
+      headers: {"content-type": "application/json", "content-length": Buffer.byteLength(payload)}}, (res) => {
+      let text = "";
+      res.on("data", (d) => (text += d));
+      res.on("end", () => {
+        let answer;
+        try {
+          answer = JSON.parse(text);
+        } catch {
+          answer = undefined;
+        }
+        if (res.statusCode === 200 && answer !== undefined) resolve(answer);
+        else reject(new Error(answer?.error ?? `the inspector door answered ${res.statusCode}`));
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => req.destroy(new Error(`the inspector door did not answer within ${timeoutMs} ms`)));
+    req.end(payload);
+  });
+}
+
 /** One `GET /osd/serving` (tools/osd-serve.mjs, forwarded by test/start.mjs
  *  the way every other `/osd/*` door is), or `undefined` when nothing
  *  answers yet -- refused, reset, or the connection simply is not there.
@@ -1069,6 +1096,8 @@ class Launcher extends EventEmitter {
   #bootPhase = undefined;
   // the readiness poll of the start in flight, so stop() can end it
   #poll = undefined;
+  // the inspector open in flight (openInspector): one at a time
+  #opening = undefined;
 
   #ask(child, reason) {
     if (child !== undefined && child.exitCode === null && child.signalCode === null) {
@@ -1193,6 +1222,9 @@ class Launcher extends EventEmitter {
     if (this.debug && (this.inspectPort === undefined || await isFree(this.inspectPort) === false)) {
       this.inspectPort = await pickInspectorPort();
     }
+    // open from the start only when asked at start; otherwise it is opened
+    // on demand (openInspector) and a new system begins without one
+    this.inspectorOpen = this.debug;
     const dbEnv = databaseEnv(this.database);
     // RuntimePool gives every serving worker the same inspector port; a
     // debugger session can follow one child only.
@@ -1366,6 +1398,43 @@ class Launcher extends EventEmitter {
     this.generation = serving.generation;
     this.#setState("running");
     return {port: this.port, pid: this.pid, generation: this.generation, inspectPort: this.inspectPort};
+  }
+
+  /** The debugger on demand: opens the running system's inspector on this
+   *  launcher's inspector port (picked now if it has none, or if another
+   *  process took it), without a restart. Resolves the port. A system
+   *  started with the inspector already open answers at once. */
+  // One open at a time: a breakpoint and a start's own attach, or two
+  // quick clicks, would otherwise each pick a port and move the child's
+  // inspector between them, leaving the debugger on the one it left.
+  async openInspector() {
+    this.#opening ??= this.#openInspector().finally(() => {
+      this.#opening = undefined;
+    });
+    return this.#opening;
+  }
+
+  async #openInspector() {
+    if (this.state !== "running" || this.port === undefined) {
+      throw new Error("osd is not running: start it first (osd: Start)");
+    }
+    if (this.inspectorOpen === true && this.inspectPort !== undefined) return this.inspectPort;
+    if (this.inspectPort === undefined || await isFree(this.inspectPort) === false) {
+      this.inspectPort = await pickInspectorPort();
+    }
+    const answer = await inspectorOnce(this.port, {open: true, port: this.inspectPort});
+    this.inspectorOpen = answer.open === true;
+    return this.inspectPort;
+  }
+
+  /** Closes what openInspector() opened. A system started with the
+   *  inspector (osd.debug, OSD_INSPECT=1) keeps it: that was asked for. */
+  async closeInspector() {
+    if (this.debug === true || this.inspectorOpen !== true) return false;
+    this.inspectorOpen = false;
+    if (this.state !== "running" || this.port === undefined) return false;
+    await inspectorOnce(this.port, {open: false});
+    return true;
   }
 
   /** Stops both processes: the child this module spawned (`node
@@ -1591,6 +1660,7 @@ module.exports = {
   layerContributions,
   waitForServing,
   servingOnce,
+  inspectorOnce,
   terminate,
   Launcher,
   linkOrCopyTree,

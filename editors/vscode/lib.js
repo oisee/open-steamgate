@@ -267,13 +267,89 @@ function debugAttachPlan(state = {}, event = {}) {
       ],
     };
   }
-  if (event.type === "system-stopped") {
+  // stopped, or detached on purpose (the debugger on demand, released once
+  // no .abap breakpoint wants it): the session goes either way
+  if (event.type === "system-stopped" || event.type === "system-detach") {
     return {state: {systemPort: undefined}, actions: current === undefined ? [] : [{type: "stop", target: "system", port: current}]};
   }
   if (event.type === "unit-started" && Number.isInteger(event.port) && event.port >= 1 && event.port <= 65535) {
     return {state, actions: [{type: "attach", target: "unit", port: event.port, restart: false}]};
   }
   return {state, actions: []};
+}
+
+// ---- the Test Explorer's queue by RISK LEVEL (docs/vscode-extension.md,
+// "Running tests") --------------------------------------------------------
+//
+// An ABAP Unit class declares `RISK LEVEL HARMLESS | DANGEROUS | CRITICAL`
+// and `DURATION SHORT | MEDIUM | LONG`. The façade checks the declaration
+// (tools/osd-unit-risk.mjs) and says what each class is scheduled as; a
+// unit here is one object's selections, run in the order they were asked,
+// and its risk is the riskiest class it runs. HARMLESS units run
+// `poolSize` at a time, longest first; every other unit runs after them,
+// one at a time, also longest first.
+
+const DURATION_RANK = {long: 3, medium: 2, short: 1};
+
+/** The risk of one object's run: HARMLESS only when every class it runs is
+ *  scheduled HARMLESS; a class nobody could tell us about is DANGEROUS. */
+function unitRiskOf(schedules) {
+  if (schedules.length === 0 || schedules.some((s) => s?.schedule !== "harmless")) return "dangerous";
+  return "harmless";
+}
+
+/** The longest DURATION among a unit's classes, `short` when none say. */
+function unitDurationOf(schedules) {
+  return schedules.map((s) => s?.duration).filter((d) => DURATION_RANK[d] !== undefined)
+    .sort((a, b) => DURATION_RANK[b] - DURATION_RANK[a])[0] ?? "short";
+}
+
+/** The two queues: HARMLESS (parallel) and the rest (serial), each longest
+ *  first and otherwise in the order asked. */
+function unitSchedule(units) {
+  const byDuration = (a, b) => (DURATION_RANK[b.duration] ?? 1) - (DURATION_RANK[a.duration] ?? 1);
+  return {
+    parallel: units.filter((u) => u.risk === "harmless").sort(byDuration),
+    serial: units.filter((u) => u.risk !== "harmless").sort(byDuration),
+  };
+}
+
+/** Runs the units: the HARMLESS queue `poolSize` at a time, then the rest
+ *  one at a time. `unit.run()` reports its own results and does not throw;
+ *  `cancelled()` is asked before each unit starts. */
+async function runUnitQueue(units, {poolSize = 1, cancelled = () => false} = {}) {
+  const {parallel, serial} = unitSchedule(units);
+  let next = 0;
+  const worker = async () => {
+    while (next < parallel.length && !cancelled()) {
+      const unit = parallel[next++];
+      await unit.run();
+    }
+  };
+  await Promise.all(Array.from({length: Math.max(1, Math.min(poolSize, parallel.length))}, worker));
+  for (const unit of serial) {
+    if (cancelled()) break;
+    await unit.run();
+  }
+}
+
+/** The warning on a class that declares RISK LEVEL HARMLESS and whose
+ *  object's tests reach a write (the façade's `writes`), or undefined. */
+function riskWarning(testClass, found = {}) {
+  if (testClass?.riskLevelDeclared !== true || testClass.riskLevel !== "harmless" || testClass.schedule === "harmless") return undefined;
+  const first = found.writes?.[0];
+  if (first === undefined) return undefined;
+  const more = (found.writesTotal ?? found.writes.length) - 1;
+  return `RISK LEVEL HARMLESS, but the tests of ${found.object?.name ?? "this object"} reach a database write: `
+    + `${first.kind} in ${first.object} (${first.file}:${first.line})${more > 0 ? ` and ${more} more` : ""}. `
+    + "It runs one at a time, as DANGEROUS; declare RISK LEVEL DANGEROUS to say so.";
+}
+
+/** How many HARMLESS runs at once: one child process each, which boots its
+ *  own runtime and database. Measured on this tree (docs/vscode-extension.md,
+ *  "Running tests"); bounded by the machine. */
+function unitPoolSize(cpus = require("node:os").cpus().length) {
+  return Math.max(1, Math.min(4, cpus - 1));
 }
 
 /** Start the paused child request while VS Code attaches. A rejected attach
@@ -2401,7 +2477,7 @@ function serviceDetailsHtml(details, nonce = "") {
     </style></head><body>${body}${script}</body></html>`;
 }
 
-module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
+module.exports = {unitRiskOf, unitDurationOf, unitSchedule, runUnitQueue, unitPoolSize, riskWarning, objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText,
   packSourceMappings, runningAbapSources, breakpointWarning, sourceKey,
   warmStatusText, activationBuildText, closureTestsText,

@@ -11,7 +11,7 @@ import {join} from "node:path";
 import {services} from "../tools/osd-icf.mjs";
 import {createRequire} from "node:module";
 
-const {Osd, objectOf, outcomes} = createRequire(import.meta.url)("../editors/vscode/lib.js");
+const {Osd, objectOf, outcomes, unitRiskOf, unitDurationOf, runUnitQueue} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 
 const PORT = Number(process.env.STG_PORT ?? 3091) + 7;
 const BASE = `http://localhost:${PORT}`;
@@ -188,9 +188,163 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     expect(results.map((r) => [r.method, r.passed])).to.deep.equal([["A_PAIR", true]]);
   });
 
+  // The Test Explorer's queue by RISK LEVEL (tools/osd-unit-risk.mjs,
+  // editors/vscode/lib.js runUnitQueue), end to end: the façade says what
+  // each class is scheduled as, two HARMLESS objects run at once, the one
+  // that writes runs alone after them, and every outcome is what a serial
+  // run gives
+  it("runs HARMLESS test objects in parallel and the rest alone, with the results of a serial run", async () => {
+    const client = new Osd(BASE);
+    const names = ["ZCL_OSD_DEMO_RANDOM", "ZCL_OSD_ABAP_TOKENS", "ZCL_OSD_ICF_TEST"];
+    const described = {};
+    for (const name of names) {
+      const found = await client.discover({type: "CLAS", name});
+      described[name] = {found, schedules: found.classes.filter((c) => c.methods.length > 0)
+        .map((c) => ({schedule: c.schedule, duration: c.durationCategory}))};
+    }
+    expect(unitRiskOf(described.ZCL_OSD_DEMO_RANDOM.schedules)).to.equal("harmless");
+    expect(unitRiskOf(described.ZCL_OSD_ABAP_TOKENS.schedules)).to.equal("harmless");
+    // it declares HARMLESS and inserts: the check says so, with where
+    const icf = described.ZCL_OSD_ICF_TEST.found;
+    expect(unitRiskOf(described.ZCL_OSD_ICF_TEST.schedules)).to.equal("dangerous");
+    expect(icf.classes.some((c) => c.riskLevel === "harmless" && c.riskLevelDeclared && c.schedule === "dangerous")).to.equal(true);
+    expect(icf.writes[0]).to.include({object: "ZCL_OSD_ICF_TEST"});
+
+    const outcome = async (pooled) => {
+      let running = 0;
+      const seen = [];
+      const results = {};
+      const units = names.map((name) => ({
+        key: name,
+        risk: pooled ? unitRiskOf(described[name].schedules) : "dangerous",
+        duration: unitDurationOf(described[name].schedules),
+        run: async () => {
+          running += 1;
+          seen.push([name, running]);
+          try {
+            const answer = await client.run({type: "CLAS", name});
+            results[name] = answer.testClasses.map((c) => [c.name, c.testMethods.map((m) => [m.name, m.alerts.map((a) => a.title)])]);
+          } finally {
+            running -= 1;
+          }
+        },
+      }));
+      await runUnitQueue(units, {poolSize: pooled ? 2 : 1});
+      return {seen, results};
+    };
+    const pooled = await outcome(true);
+    const serial = await outcome(false);
+    expect(Math.max(...pooled.seen.filter(([name]) => name !== "ZCL_OSD_ICF_TEST").map(([, n]) => n)), "two HARMLESS at once").to.equal(2);
+    expect(pooled.seen.find(([name]) => name === "ZCL_OSD_ICF_TEST")[1], "the DANGEROUS one alone").to.equal(1);
+    expect(pooled.seen.at(-1)[0], "and after them").to.equal("ZCL_OSD_ICF_TEST");
+    expect(pooled.results).to.deep.equal(serial.results);
+  });
+
   it("an ADT answer names the same generation the child runs", async () => {
     const adt = await call("/core/discovery");
     const odata = await fetch(`${BASE}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata`);
     expect(adt.headers.get("x-osd-generation")).to.equal(odata.headers.get("x-osd-generation"));
+  });
+
+  // the debugger on demand (tools/osd-inspector.mjs): no osd.debug, no
+  // OSD_INSPECT, no restart -- the running child opens its inspector when
+  // asked, on 127.0.0.1 only, and closes it again
+  it("opens the serving child's inspector on request, on 127.0.0.1 only, and closes it", async () => {
+    await fetch(`${BASE}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata`);
+    const {createServer, connect} = await import("node:net");
+    const {networkInterfaces} = await import("node:os");
+    const port = await new Promise((resolve) => {
+      const probe = createServer().listen(0, "127.0.0.1", () => {
+        const free = probe.address().port;
+        probe.close(() => resolve(free));
+      });
+    });
+    const door = (body, headers = {}) => fetch(`${BASE}/osd/inspector`,
+      {method: "POST", headers: {"content-type": "application/json", ...headers}, body: JSON.stringify(body)});
+    // a web page, or anything that is not a program on this machine, is
+    // refused before anything opens: an Origin, a text/plain body (a CORS
+    // simple request), a Host that is not a loopback name (DNS rebinding)
+    const {request: httpRequest} = await import("node:http");
+    const rawPost = (headers) => new Promise((resolve, reject) => {
+      const req = httpRequest({hostname: "127.0.0.1", port: PORT, path: "/osd/inspector", method: "POST", headers}, (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode));
+      });
+      req.on("error", reject);
+      req.end(JSON.stringify({open: true, port}));
+    });
+    expect(await rawPost({"content-type": "application/json", origin: "http://evil.example"}), "Origin").to.equal(403);
+    expect(await rawPost({"content-type": "text/plain"}), "text/plain").to.equal(403);
+    expect(await rawPost({"content-type": "application/json", host: `rebound.example:${PORT}`}), "rebound Host").to.equal(403);
+    expect(await rawPost({"content-type": "application/json", "sec-fetch-site": "cross-site"}), "Sec-Fetch-Site").to.equal(403);
+    expect(await (await fetch(`${BASE}/osd/inspector`)).json()).to.deep.equal({open: false});
+    const opened = await door({open: true, port});
+    const answer = await opened.json();
+    expect(opened.status, JSON.stringify(answer)).to.equal(200);
+    expect(answer, "the port, never the inspector's URL").to.deep.equal({open: true, port});
+    // a debugger finds it, and the target is the serving child, not the facade
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+    expect(targets).to.have.length(1);
+    expect(targets[0].webSocketDebuggerUrl).to.match(new RegExp(`^ws://127\\.0\\.0\\.1:${port}/`));
+    expect(targets[0].title).to.match(/osd-serve|serve/);
+    expect(await (await fetch(`${BASE}/osd/inspector`)).json()).to.deep.equal({open: true, port});
+    // and a breakpoint set through it stops a real request: CDP, the protocol
+    // VS Code's js-debug speaks, on the gateway's URL parser, which every
+    // OData request passes through
+    const {readFileSync} = await import("node:fs");
+    const generated = readFileSync(join(process.cwd(), "output", "zcl_stg_url.clas.mjs"), "utf8").split("\n");
+    const lineNumber = generated.findIndex((line) => line.includes("static async parse(")) + 1;
+    expect(lineNumber, "the parser's first statement").to.be.greaterThan(0);
+    const cdp = new WebSocket(targets[0].webSocketDebuggerUrl);
+    await new Promise((resolve, reject) => { cdp.onopen = resolve; cdp.onerror = reject; });
+    let seq = 0;
+    const waiting = new Map();
+    const events = [];
+    cdp.onmessage = ({data}) => {
+      const message = JSON.parse(data);
+      const reply = Number.isSafeInteger(message.id) && waiting.get(message.id);
+      if (reply) reply(message);
+      else events.push(message);
+    };
+    const send = (method, params = {}) => new Promise((resolve) => {
+      const id = ++seq;
+      waiting.set(id, resolve);
+      cdp.send(JSON.stringify({id, method, params}));
+    });
+    await send("Debugger.enable");
+    const set = await send("Debugger.setBreakpointByUrl", {urlRegex: "zcl_stg_url\\.clas\\.mjs$", lineNumber});
+    expect(set.result?.locations, JSON.stringify(set)).to.have.length(1);
+    const request = fetch(`${BASE}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata`);
+    let paused;
+    for (let i = 0; i < 100 && paused === undefined; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      paused = events.find((e) => e.method === "Debugger.paused");
+    }
+    expect(paused?.params?.hitBreakpoints, "the request stopped on the breakpoint").to.deep.equal([set.result.breakpointId]);
+    await send("Debugger.removeBreakpoint", {breakpointId: set.result.breakpointId});
+    await send("Debugger.resume");
+    expect((await request).status, "and went on when resumed").to.equal(200);
+    cdp.close();
+    // and nothing answers on this machine's other addresses
+    const others = Object.values(networkInterfaces()).flat().filter((i) => i && !i.internal && i.family === "IPv4");
+    for (const {address} of others) {
+      const refused = await new Promise((resolve) => {
+        const socket = connect({host: address, port}, () => { socket.destroy(); resolve(false); });
+        socket.on("error", () => resolve(true));
+      });
+      expect(refused, `the inspector does not answer on ${address}`).to.equal(true);
+    }
+    const closed = await door({open: false});
+    expect(await closed.json()).to.include({open: false});
+    let reachable = true;
+    try {
+      await fetch(`http://127.0.0.1:${port}/json/list`);
+    } catch {
+      reachable = false;
+    }
+    expect(reachable, "closed means closed").to.equal(false);
+    const invalid = await door({open: true, port: 70000});
+    expect(invalid.status).to.equal(409);
+    expect((await invalid.json()).error).to.match(/invalid inspector port/);
   });
 });
