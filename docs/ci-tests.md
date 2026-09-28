@@ -31,7 +31,18 @@ The last successful `main` `tests` job (2026-09-28, run 36384869447) gives a run
 | Node browser smoke | 64 s |
 | DuckDB browser smoke | 13 s |
 
-The job took 914 s (15 min 14 s) end to end. Integration suites accounted for about 78% of it. The fast profile changes only that stage; it does not speed up the 14 s ABAP Unit stage. A same-runner after measurement is still needed before claiming a whole-job saving.
+The job took 914 s (15 min 14 s) end to end. Integration suites accounted for about 78% of it. The fast profile changes only that stage; it does not speed up the 14 s ABAP Unit stage.
+
+The first ordinary docs-only PR using the fast profile, #185 (run 36416356616, 2026-09-28), passed on a GitHub Ubuntu runner:
+
+| Step | Before: last green full `main` | After: fast #185 | Difference |
+| --- | ---: | ---: | ---: |
+| Integration suites | 714 s | 410 s | 304 s less |
+| ABAP Unit | 14 s | 11 s | 3 s less; no runner change intended |
+| Node browser smoke | 64 s | 66 s | 2 s more; unchanged tests |
+| Whole job | 914 s | 589 s | 325 s less (5 min 25 s) |
+
+These are two separate runner invocations; timing varies with runner load and the changed test tree. The fast run still executed 2,830 timed integration tests. Their measured wall times sum to 370.8 s; the suite step took 410 s including startup and other overhead. Its slowest individual test was a warm activation at 19.9 s; two deliberate boot/stop tests took 10.8 and 9.5 s. No remaining single test explains most of the 410 s.
 
 Local cached dependencies cannot measure `npm ci`, network clones, Actions image setup or Chromium download. The GitHub Actions UI reports each step's wall time. `tools/osd-suites.mjs` also prints per-test VSIX wall times, so a slow package case can be traced to its test. Do not treat the VSIX-only saving as a measured reduction of the whole CI job.
 
