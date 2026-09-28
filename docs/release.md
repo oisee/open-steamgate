@@ -23,7 +23,12 @@ The Fiori list report image at `editors/vscode/media/screenshots/fiori-list-repo
 is already a real capture and remains in the Marketplace README.
 
 The [release workflow](../.github/workflows/release.yml) publishes a GitHub
-prerelease. It does not publish to the VS Code Marketplace. The release tag
+prerelease. On a `vscode-v*` tag push, it also builds the separate Marketplace
+prerelease profile and publishes that VSIX to Visual Studio Marketplace after
+the GitHub release and tagged `tests` workflow pass. A manual draft dispatch
+never publishes to Marketplace. Configure the `VSCE_PAT` repository Actions
+secret for the `oisee` publisher; the job reads it only for the final publish
+step. The release tag
 must be `vscode-v<major>.<minor>.<patch>`. The major and minor come from
 `editors/vscode/package.json`; `scripts/build-vsix.mjs` stamps patch from
 `git rev-list --count HEAD`. The workflow checks the tag against that version
@@ -42,7 +47,12 @@ git push origin "$tag"
 ```
 
 A `vscode-v*` tag push builds a draft prerelease and publishes it only after
-the VSIX, binary, and Compose uploads all succeed. To prepare a draft
+the VSIX, binary, and Compose uploads all succeed. The Marketplace job then
+waits for the tagged tests workflow, checks the package version, zip integrity,
+prerelease manifest, browser entry, and licence review, and publishes the
+Marketplace profile with the same version. A failed Marketplace publication
+leaves the GitHub prerelease public and the Marketplace job red; rerun the
+tagged workflow after fixing the cause without moving the tag. To prepare a draft
 without pushing a tag, run **VS Code prerelease** from the intended branch.
 Leave `tag` blank to derive the stamped version from that ref, and leave
 `draft` true. You may enter a tag, but it must match the version of the
