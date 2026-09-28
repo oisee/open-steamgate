@@ -3862,7 +3862,8 @@ speed task than splitting the costly integration cases (`docs/ci-tests.md`).
      └─ only 9 objects use the parallel lane; the other 14 run alone, so
         measure the whole run as well as the HARMLESS lane
      └─ keep debug and shared HANA/Postgres test schemas at one: each child
-        writes startup seed rows even when its test declares HARMLESS
+        writes startup seed rows even when its test declares HARMLESS;
+        SQLite and DuckDB get a separate temporary database file per child
 ```
 
 ## 9. Upstream, outside this repository (T's, verbatim from them)
