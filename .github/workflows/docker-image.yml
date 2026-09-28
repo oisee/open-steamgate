@@ -11,6 +11,10 @@ on:
         description: Publish tested images to GHCR
         type: boolean
         default: false
+      showcase:
+        description: Include Vivid Vibes, Zork and Vector workbench packs
+        type: boolean
+        default: false
   schedule:
     - cron: '23 4 * * 1'
 permissions:
@@ -34,14 +38,18 @@ jobs:
           ACCEPT_SAP_LICENSE: 'YES' # compose config only; CI does not start HXE
         run: |
           node scripts/sync-spin.mjs --check
-          node --test docker/image/free-instance.test.mjs docker/image/terminal-svg.test.mjs
+          node --test docker/image/free-instance.test.mjs docker/image/terminal-svg.test.mjs docker/image/packs.test.mjs
           for db in sqlite duckdb hana postgres; do
             docker compose -f "docker/compose.$db.yml" config --quiet
           done
       - name: Build the single OSD image
+        env:
+          SHOWCASE: ${{ github.event_name == 'workflow_dispatch' && inputs.showcase }}
         run: |
           docker buildx create --use
-          docker buildx build --platform linux/amd64 --load --tag osd:ci --build-arg OSD_IMAGE_REVISION="$GITHUB_SHA" -f docker/image/Dockerfile .
+          packs=""
+          if [[ "$SHOWCASE" == true ]]; then packs="o4d,zork,zvdb"; fi
+          docker buildx build --platform linux/amd64 --load --tag osd:ci --build-arg OSD_IMAGE_REVISION="$GITHUB_SHA" --build-arg OSD_IMAGE_PACKS="$packs" -f docker/image/Dockerfile .
       - name: Check runtime license inventory
         run: |
           docker run --rm --entrypoint node osd:ci -e 'const r=require("./image-licenses.json"); console.log(JSON.stringify(r,null,2)); if(r.blockers.length) process.exit(1)'
@@ -51,6 +59,7 @@ jobs:
       - name: Compose startup, persistence, HTTP/HTTPS, SAP-TUI and ADT-over-RFC
         env:
           OSD_ACCEPTANCE_DIR: ${{ github.workspace }}/image-acceptance
+          OSD_EXPECT_SHOWCASE: ${{ github.event_name == 'workflow_dispatch' && inputs.showcase }}
         run: sh docker/image/smoke.sh
       - uses: actions/upload-artifact@v4
         if: always()
@@ -103,12 +112,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
+          SHOWCASE: ${{ github.event_name == 'workflow_dispatch' && inputs.showcase }}
         run: |
           registry="ghcr.io/${GITHUB_REPOSITORY,,}"
           tag="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          alias=docker-draft
+          if [[ "$SHOWCASE" == true ]]; then tag="$tag-showcase"; alias=showcase-amd64-draft; fi
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           docker tag osd:ci "$registry:$tag"
           docker push "$registry:$tag"
-          docker tag osd:ci "$registry:docker-draft"
-          docker push "$registry:docker-draft"
+          docker tag osd:ci "$registry:$alias"
+          docker push "$registry:$alias"
           printf 'OSD_TAG=%s\n' "$tag" >> "$GITHUB_STEP_SUMMARY"

@@ -12,6 +12,13 @@ const engine = process.env.STG_DB === 'hana' ? 'HDB' : process.env.STG_DB === 'd
 assert.ok(facts.some(row => row.Name === 'Engine' && row.Value === engine && row.Note === 'connected backend'));
 assert.ok(facts.some(row => row.Name === 'Storage' && row.Value === (['HDB', 'postgres'].includes(engine) ? 'server' : 'file')));
 const mode = process.argv[2] ?? 'create';
+if (process.env.OSD_EXPECT_SHOWCASE === 'true') {
+  for (const path of ['/sap/bc/zo4d_demo/', '/sap/bc/zork/', '/app/zvdb/',
+    '/sap/opu/odata/sap/ZVDB_100_SRV/$metadata']) {
+    const pack = await request(`${base}${path}`);
+    assert.equal(pack.status, 200, `${path}: ${await pack.text()}`);
+  }
+}
 if (mode === 'create') {
   const res = await request(`${service}/TravelSet`, {method: 'POST',
     headers: {'content-type': 'application/json', 'x-csrf-token': 'open-steamgate'},

@@ -8,6 +8,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --include=dev --include=optional --no-audit --no-fund
 COPY . .
 ARG OSD_IMAGE_REVISION=local
+ARG OSD_IMAGE_PACKS=""
 ENV OSD_IMAGE_REVISION=${OSD_IMAGE_REVISION}
 RUN node docker/image/build.mjs
 

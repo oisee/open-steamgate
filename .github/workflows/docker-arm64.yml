@@ -10,6 +10,10 @@ on:
         description: Publish the smoke-tested ARM64 draft
         type: boolean
         default: false
+      showcase:
+        description: Include Vivid Vibes, Zork and Vector workbench packs
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -30,9 +34,13 @@ jobs:
       - name: Validate Stack copies
         run: node scripts/sync-spin.mjs --check
       - name: Build native ARM64 OSD image
+        env:
+          SHOWCASE: ${{ github.event_name == 'workflow_dispatch' && inputs.showcase }}
         run: |
           docker buildx create --use
-          docker buildx build --platform linux/arm64 --load --tag osd:arm64-ci --build-arg OSD_IMAGE_REVISION="$GITHUB_SHA" -f docker/image/Dockerfile .
+          packs=""
+          if [[ "$SHOWCASE" == true ]]; then packs="o4d,zork,zvdb"; fi
+          docker buildx build --platform linux/arm64 --load --tag osd:arm64-ci --build-arg OSD_IMAGE_REVISION="$GITHUB_SHA" --build-arg OSD_IMAGE_PACKS="$packs" -f docker/image/Dockerfile .
           test "$(docker image inspect --format '{{.Architecture}}' osd:arm64-ci)" = arm64
           docker run --rm --entrypoint node osd:arm64-ci -p 'if (process.arch !== "arm64") process.exit(1)'
       - name: Check runtime license inventory
@@ -45,6 +53,7 @@ jobs:
         env:
           OSD_TEST_DATABASES: sqlite duckdb
           OSD_ACCEPTANCE_DIR: ${{ github.workspace }}/image-acceptance-arm64
+          OSD_EXPECT_SHOWCASE: ${{ github.event_name == 'workflow_dispatch' && inputs.showcase }}
         run: sh docker/image/smoke.sh osd:arm64-ci osd-probes:arm64-ci
       - uses: actions/upload-artifact@v4
         if: always()
@@ -60,12 +69,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
+          SHOWCASE: ${{ github.event_name == 'workflow_dispatch' && inputs.showcase }}
         run: |
           registry="ghcr.io/${GITHUB_REPOSITORY,,}"
           tag="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-arm64"
+          alias=arm64-draft
+          if [[ "$SHOWCASE" == true ]]; then tag="${tag%-arm64}-showcase-arm64"; alias=showcase-arm64-draft; fi
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           docker tag osd:arm64-ci "$registry:$tag"
           docker push "$registry:$tag"
-          docker tag osd:arm64-ci "$registry:arm64-draft"
-          docker push "$registry:arm64-draft"
+          docker tag osd:arm64-ci "$registry:$alias"
+          docker push "$registry:$alias"
           printf 'OSD_ARM64_TAG=%s\n' "$tag" >> "$GITHUB_STEP_SUMMARY"

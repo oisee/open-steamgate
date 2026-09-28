@@ -23,6 +23,24 @@ ADT/OData, and reused its persistent database after an image update. Full
 DIAG/RFC client acceptance on that particular Pi was not run. HXE is not part
 of this ARM64 test or Stack; its published Docker image is AMD64-only.
 
+## Optional showcase packs
+
+The core `draft` image has no optional packs. A separate `showcase-draft` image
+contains the pinned Vivid Vibes (`o4d`), Zork and Vector workbench (`zvdb`)
+packs, including their compiled ABAP, seed rows and web assets. In Portainer,
+set the Stack variable `OSD_TAG=showcase-draft` and redeploy; the Compose files
+already use that variable in the image name and pull on redeploy. The showcase
+image is built with `OSD_IMAGE_PACKS=o4d,zork,zvdb`; changing a runtime
+environment variable alone cannot add these packs to the core image. A new
+Stack and database volume is the simplest first trial, since the vector pack
+adds a table to the database schema and an existing one is not migrated.
+
+To publish a new showcase revision, manually run **OSD Docker draft** and
+**OSD ARM64 draft** on the same commit with `showcase=true` and `publish=true`.
+Each tests the selected image and publishes its unique tag. Run **OSD Docker
+multi-arch draft** with those two tags and `target=showcase-draft` to update
+the Portainer tag. Ordinary `draft` publication remains the core image.
+
 Short, complete Portainer stacks: [SQLite](../docker/compose.sqlite.yml),
 [DuckDB](../docker/compose.duckdb.yml), [HANA](../docker/compose.hana.yml),
 [PostgreSQL](../docker/compose.postgres.yml).

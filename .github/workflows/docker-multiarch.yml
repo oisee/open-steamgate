@@ -10,6 +10,11 @@ on:
         description: Exact tested linux/arm64 image tag
         type: string
         required: true
+      target:
+        description: Moving multi-platform tag to update
+        type: choice
+        options: [draft, showcase-draft]
+        default: draft
 permissions:
   contents: read
   packages: write
@@ -30,6 +35,7 @@ jobs:
         env:
           AMD64_TAG: ${{ inputs.amd64_tag }}
           ARM64_TAG: ${{ inputs.arm64_tag }}
+          TARGET: ${{ inputs.target }}
         run: |
           set -eu
           registry="ghcr.io/${GITHUB_REPOSITORY,,}"
@@ -40,6 +46,11 @@ jobs:
           arm64_revision="${ARM64_TAG#sha-}"
           arm64_revision="${arm64_revision%%-run-*}"
           test "$amd64_revision" = "$arm64_revision"
+          case "$TARGET" in
+            draft) [[ "$AMD64_TAG" != *-showcase && "$ARM64_TAG" != *-showcase-arm64 ]] ;;
+            showcase-draft) [[ "$AMD64_TAG" == *-showcase && "$ARM64_TAG" == *-showcase-arm64 ]] ;;
+            *) echo "Unknown target: $TARGET" >&2; exit 2 ;;
+          esac
           printf '%s\n' "$amd64_revision" | grep -Eq '^[0-9a-f]{40}$'
           amd64="$registry:$AMD64_TAG"
           arm64="$registry:$ARM64_TAG"
@@ -56,11 +67,12 @@ jobs:
           test "$(jq -r '.os + "/" + .architecture' arm64.json)" = linux/arm64
           test "$(jq -r '.config.Labels["org.opencontainers.image.revision"]' arm64.json)" = "$amd64_revision"
           multiarch_tag="sha-$amd64_revision-run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          if [[ "$TARGET" == showcase-draft ]]; then multiarch_tag="$multiarch_tag-showcase"; fi
           docker buildx imagetools create \
-            --tag "$registry:draft" \
+            --tag "$registry:$TARGET" \
             --tag "$registry:$multiarch_tag" \
             "$amd64" "$arm64"
-          docker buildx imagetools inspect "$registry:draft" --format '{{json .Manifest}}' | tee draft.json
+          docker buildx imagetools inspect "$registry:$TARGET" --format '{{json .Manifest}}' | tee draft.json
           jq -e --arg amd64 "$amd64_digest" --arg arm64 "$arm64_digest" '
             (.manifests | length) == 2 and
             any(.manifests[]; .digest == $amd64 and .platform.os == "linux" and .platform.architecture == "amd64") and
@@ -68,7 +80,7 @@ jobs:
           ' draft.json
           multiarch_digest="$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' draft.json)"
           {
-            printf 'MULTIARCH_TAG=%s\n\n' "$registry:draft"
+            printf 'MULTIARCH_TAG=%s\n\n' "$registry:$TARGET"
             printf 'PINNED_MULTIARCH_TAG=%s\n\n' "$registry:$multiarch_tag"
             printf 'MULTIARCH_DIGEST=%s\n\n' "$registry@$multiarch_digest"
             printf 'amd64 source: `%s`\n\n' "$amd64"

@@ -15,6 +15,13 @@ All four use the same ready OSD image, including DIAG/RFC. HANA's short-lived
 `hana-init` service uses that image too; `Exited (0)` is its successful state.
 The SQL server is a separate SAP image. No source compilation happens on start.
 
+For Vivid Vibes, Zork and Vector workbench, set the Stack environment variable
+`OSD_TAG=showcase-draft` before deploying. This selects the separately built
+image containing their compiled ABAP, data and web assets. Use `OSD_TAG=draft`
+for the core image. Start a new Stack or back up the existing database first:
+the Vector workbench adds a table, and changing the tag does not migrate an
+existing database schema.
+
 These files are generated copies of `docker/compose.*.yml`. Update the source
 files and run `node scripts/sync-spin.mjs`; CI verifies both copies and the
 full YAML blocks in [spin.md](../../docs/spin.md).

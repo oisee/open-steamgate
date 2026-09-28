@@ -62,6 +62,7 @@ Source: [docker/compose.sqlite.yml](../docker/compose.sqlite.yml).
 
 ```yaml
 # Portainer: SQLite demo, default instance 11 (8011/44311/3211/3311).
+# Set Stack variable OSD_TAG=showcase-draft for Vivid Vibes, Zork and Vector workbench.
 services:
   osd:
     image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
@@ -95,6 +96,7 @@ Source: [docker/compose.duckdb.yml](../docker/compose.duckdb.yml).
 
 ```yaml
 # Portainer: DuckDB demo, default instance 15 (8015/44315/3215/3315).
+# Set Stack variable OSD_TAG=showcase-draft for Vivid Vibes, Zork and Vector workbench.
 services:
   osd:
     image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
@@ -129,6 +131,7 @@ Source: [docker/compose.hana.yml](../docker/compose.hana.yml).
 
 ```yaml
 # Portainer: new HANA Express + OSD, instance 17. Set ACCEPT_SAP_LICENSE=YES.
+# Set Stack variable OSD_TAG=showcase-draft for Vivid Vibes, Zork and Vector workbench.
 # Demo password is a known default; change HANA_PASSWORD before first start
 # outside an isolated test network. HXE's SQL port is not published to host.
 services:
@@ -209,6 +212,7 @@ Source: [docker/compose.postgres.yml](../docker/compose.postgres.yml).
 
 ```yaml
 # Portainer: new PostgreSQL + OSD, default instance 19 (8019/44319/3219/3319).
+# Set Stack variable OSD_TAG=showcase-draft for Vivid Vibes, Zork and Vector workbench.
 # Demo password is public; change POSTGRES_PASSWORD before first start outside
 # an isolated test network. PostgreSQL's SQL port is not published to host.
 services:

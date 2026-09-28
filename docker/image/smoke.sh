@@ -52,7 +52,7 @@ for db in ${OSD_TEST_DATABASES:-sqlite duckdb postgres}; do
       compose stop
       compose up -d --pull never --wait --wait-timeout 900
     fi
-    compose exec -T -e PROTOCOL_HOST=127.0.0.1 osd node docker/image/probe.mjs "$phase" > "$report_dir/$db-$phase-persistence.log" 2>&1 || {
+    compose exec -T -e PROTOCOL_HOST=127.0.0.1 -e OSD_EXPECT_SHOWCASE="${OSD_EXPECT_SHOWCASE:-false}" osd node docker/image/probe.mjs "$phase" > "$report_dir/$db-$phase-persistence.log" 2>&1 || {
       cat "$report_dir/$db-$phase-persistence.log"
       exit 1
     }

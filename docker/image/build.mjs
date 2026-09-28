@@ -1,6 +1,10 @@
 import {execFileSync} from "node:child_process";
 import {readFileSync, mkdirSync, existsSync, chmodSync} from "node:fs";
 import {resolve} from "node:path";
+import {imagePacks} from "./packs.mjs";
+
+const selectedPacks = imagePacks(process.cwd(), process.env.OSD_IMAGE_PACKS ?? "");
+process.env.OSD_WEB_PACKS = selectedPacks.map((pack) => pack.name).join(",");
 
 const sources = JSON.parse(readFileSync("docker/image/sources.json", "utf8"));
 const lock = JSON.parse(readFileSync("libs.lock.json", "utf8"));
@@ -33,6 +37,8 @@ for (const source of sources.libraries) {
   if (pin === undefined) throw new Error(`No libs.lock.json entry for ${source.folder}`);
   checkout(pin, `.local/lars/${source.folder}`);
 }
-// No downloaded entertainment packs or captured media in the base image.
+// Fetch only the selected pinned pack sources. The empty default remains the
+// small core image; adding packs changes the compiled generation.
+if (selectedPacks.length) run("node", ["tools/osd-fetch.mjs"]);
 run("npm", ["run", "transpile"]);
 run("node", ["docker/image/assemble.mjs", "/image"]);
