@@ -32,6 +32,20 @@ import {mountPortableCells} from "./sqlscript-to-procedure-ir.mjs";
 
 const started = Date.now();
 
+// **Alive, and doing what.** A boot on a remote HANA can take minutes (the
+// seed inserts go over the network), and the supervisor used to give a
+// child 60 s from spawn to "ready" and then SIGKILL it -- and the next
+// request started it again from the top, forever (dell, 2026-09-27, 14
+// restarts in 900 s). So until "ready" the child says every few seconds
+// that it is still booting and which step it is in; the supervisor's limit
+// is on silence, not on the length of the boot (tools/osd-runtime.mjs).
+// The timer does not hold the process open.
+let bootPhase = "loading the generation";
+const booting = process.send === undefined ? undefined : setInterval(() => {
+  process.send?.({type: "booting", phase: bootPhase, ms: Date.now() - started});
+}, 5000);
+booting?.unref();
+
 // which tree this runtime serves, so one copy of this script can serve any
 // of them: a second worktree, a branch under test, an experiment on its own
 // port and its own database. The modules are loaded from there rather than
@@ -50,6 +64,7 @@ const {zcl_apc_host} = await from("zcl_apc_host.clas.mjs");
 // only this process can write the tables the service reads
 const {zcl_osd_status} = await from("zcl_osd_status.clas.mjs");
 
+bootPhase = "opening the database: DDL and seed rows (test/setup.mjs)";
 await initializeABAP();
 // the ICF nodes into the tables a system keeps them in, by the rule in
 // docs/registry-drift.md: applied when an object arrives, never re-applied
@@ -68,8 +83,10 @@ await initializeABAP();
 const announce = (line) => {
   console.log(line);
   process.send?.({type: "say", line});
+  bootPhase = line;
 };
 
+bootPhase = "applying the ICF registry";
 const registry = await applyAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root, say: announce});
 if (registry === undefined) {
   throw new Error("the ICF registry could not be applied, and the routes below come from it");
@@ -77,10 +94,13 @@ if (registry === undefined) {
 const icfRowsNow = await currentRows(globalThis.abap.context.databaseConnections.DEFAULT);
 // the cross-reference, derived from the files and cached per generation
 // (tools/osd-xref-seed.mjs): the same call every host makes
+bootPhase = "seeding the cross-reference";
 await seedAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root, say: announce});
+bootPhase = "registering services and search helps";
 await zcl_stg_segw_registry.register();
 await zcl_stg_shlp_registry.register();
 // the synthetic taxi facts, made by ZCL_OSD_DEMO_DATA (tools/osd-demo-data.mjs)
+bootPhase = "demo data";
 await ensureDemoData((await from("zcl_osd_demo_data.clas.mjs")).zcl_osd_demo_data, {say: announce});
 
 const app = express();
@@ -284,6 +304,7 @@ const server = app.listen(wanted, "127.0.0.1", () => {
     for (const s of icf) console.log(`ICF service  on http://127.0.0.1:${port}${s.path}  (${s.handler})`);
     for (const c of apc) console.log(`Push channel on ws://127.0.0.1:${port}${c.path}  (${c.handler})`);
   }
+  clearInterval(booting);
   if (process.send !== undefined) {
     process.send({type: "ready", port, pid: process.pid, ms: Date.now() - started});
   } else {

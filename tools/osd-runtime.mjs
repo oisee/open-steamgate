@@ -94,7 +94,12 @@ export class ServingRuntime {
     // which is why a recycle stops the old one first.
     this.database = options.database;
     this.env = options.env ?? {};
+    // how long a starting child may say NOTHING (no output, no message)
+    // before it counts as hung; a child that keeps saying it is booting
+    // (tools/osd-serve.mjs sends "booting" every 5 s) is waited for up to
+    // bootTimeout in all -- minutes on a remote HANA, not a request's 60 s
     this.timeout = options.timeout ?? 60000;
+    this.bootTimeout = options.bootTimeout ?? (Number(process.env.OSD_BOOT_TIMEOUT_MS) || 15 * 60 * 1000);
     this.grace = options.grace ?? 2000;
     // epoch counts the processes this supervisor started; generation names
     // the code the current one runs — the live generation's hash when there
@@ -433,11 +438,47 @@ export class ServingRuntime {
       // **Refused once it has gone, not when it was told to go.** Rejecting
       // at the kill ended the spawn in flight while the child still held
       // the database, and an ensure() in that window started another.
+      // **Silence, not slowness.** Two limits: `timeout` of silence (any
+      // output or message resets it) and `bootTimeout` in all. A boot that
+      // keeps talking is a boot, however long; one that says nothing for a
+      // minute is hung. Progress goes to the log every 30 s, so a person
+      // waiting on a remote database sees what it is doing.
       let timedOut;
-      const timer = setTimeout(() => {
-        timedOut = new NotServing(`the serving runtime did not answer within ${this.timeout} ms: ${out.slice(-2000)}`);
+      let phase = "starting";
+      const bootStarted = Date.now();
+      const giveUp = (why) => {
+        timedOut = new NotServing(`the serving runtime ${why}: ${out.slice(-2000)}`);
         child.kill("SIGKILL");
-      }, this.timeout);
+      };
+      let timer;
+      // once "ready" (or gone) the boot is over: output after that is serving,
+      // and must never re-arm a limit meant for starting
+      let booted = false;
+      const heard = () => {
+        if (booted) return;
+        clearTimeout(timer);
+        timer = setTimeout(() => giveUp(`said nothing for ${this.timeout} ms while starting (last: ${phase})`), this.timeout);
+      };
+      heard();
+      const deadline = setTimeout(() => giveUp(`did not start within ${this.bootTimeout} ms (last: ${phase})`), this.bootTimeout);
+      const progress = setInterval(() => {
+        console.log(`[runtime] still starting after ${Math.round((Date.now() - bootStarted) / 1000)} s: ${phase}`);
+      }, 30000);
+      progress.unref?.();
+      const stopTimers = () => {
+        booted = true;
+        clearTimeout(timer);
+        clearTimeout(deadline);
+        clearInterval(progress);
+      };
+      child.stdout.on("data", heard);
+      child.stderr.on("data", heard);
+      child.on("message", (message) => {
+        if (message?.type === "booting" || message?.type === "say") {
+          if (typeof (message.phase ?? message.line) === "string") phase = message.phase ?? message.line;
+          heard();
+        }
+      });
 
       // **`on`, not `once`, and that distinction cost every test in this
       // file.** The channel carried one kind of message for as long as it
@@ -456,7 +497,7 @@ export class ServingRuntime {
           return;
         }
         child.off("message", onMessage);
-        clearTimeout(timer);
+        stopTimers();
         this.died = undefined;
         this.child = child;
         this.port = message.port;
@@ -475,7 +516,7 @@ export class ServingRuntime {
       child.on("message", onMessage);
 
       child.once("exit", (code, signal) => {
-        clearTimeout(timer);
+        stopTimers();
         CHILDREN.delete(child);
         registryUpdate(this.root, (list) => list.filter((e) => e.pid !== child.pid));
         // a recycle and a stop clear this.child before the exit arrives, so

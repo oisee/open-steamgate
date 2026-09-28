@@ -452,3 +452,69 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     }
   });
 });
+
+// A boot on a remote HANA takes minutes; the supervisor used to SIGKILL a
+// child that had not said "ready" within 60 s, and the next request started
+// it again from the top (dell, 2026-09-27: 14 restarts in 900 s). The limit
+// is now on silence: a child that keeps saying it is booting (osd-serve sends
+// "booting" every 5 s) is waited for, up to an overall boot deadline.
+describe("tools/osd-runtime: a slow boot is waited for, a silent one is not", function () {
+  this.timeout(30000);
+  let dir;
+  // a stand-in for tools/osd-serve.mjs: talks every 200 ms if TALK=1, says
+  // "ready" after BOOT_MS (never, if unset), then stays up quietly
+  const fake = () => {
+    dir = mkdtempSync(join(tmpdir(), "osd-boot-"));
+    const file = join(dir, "serve.mjs");
+    writeFileSync(file, [
+      "const talk = process.env.TALK === '1' ? setInterval(() => process.send({type: 'booting', phase: 'seeding over the network'}), 200) : undefined;",
+      "if (process.env.BOOT_MS) setTimeout(() => { clearInterval(talk); process.send({type: 'ready', port: 1, pid: process.pid, ms: 0}); }, Number(process.env.BOOT_MS));",
+      "setInterval(() => {}, 1000);",
+      // asked to go (a stop's quiesce): go
+      "process.on('message', (m) => { if (m?.type === 'quiesce') process.exit(0); });",
+    ].join("\n"));
+    return [process.execPath, file];
+  };
+  afterEach(() => {
+    for (const child of liveChildren()) child.kill("SIGKILL");
+    if (dir) rmSync(dir, {recursive: true, force: true});
+  });
+
+  it("a boot longer than the silence limit, that keeps talking, starts", async () => {
+    const runtime = new ServingRuntime({command: fake(), timeout: 800, bootTimeout: 10000, env: {TALK: "1", BOOT_MS: "2500"}});
+    try {
+      const answer = await runtime.start();
+      expect(answer).to.include({started: true});
+      expect(runtime.running).to.equal(true);
+      // and once serving, quiet is not hung: the silence limit was the boot's
+      await new Promise((r) => setTimeout(r, 1500));
+      expect(runtime.running, "not killed for being quiet after ready").to.equal(true);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it("a child that says nothing is given up on after the silence limit", async () => {
+    const runtime = new ServingRuntime({command: fake(), timeout: 800, bootTimeout: 10000, env: {TALK: "0"}});
+    const started = Date.now();
+    let error;
+    try {
+      await runtime.start();
+    } catch (e) {
+      error = e;
+    }
+    expect(String(error?.message)).to.match(/said nothing for 800 ms while starting/);
+    expect(Date.now() - started).to.be.lessThan(5000);
+  });
+
+  it("a child that talks but never gets ready hits the boot deadline", async () => {
+    const runtime = new ServingRuntime({command: fake(), timeout: 800, bootTimeout: 2000, env: {TALK: "1"}});
+    let error;
+    try {
+      await runtime.start();
+    } catch (e) {
+      error = e;
+    }
+    expect(String(error?.message)).to.match(/did not start within 2000 ms \(last: seeding over the network\)/);
+  });
+});

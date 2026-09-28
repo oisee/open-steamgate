@@ -257,6 +257,15 @@ result names it; `/core/http/build` keeps naming the façade and gains a
 - **Windows paths.** This runs in WSL; the design assumes a POSIX
   filesystem for the rename-is-atomic guarantee, and says so rather than
   promising it everywhere.
+- **A boot that takes minutes** (2026-09-28). On a remote HANA the
+  seed goes over the network, and the supervisor used to SIGKILL a child
+  that had not said "ready" within 60 s -- the next request started it
+  again, forever (14 restarts in 900 s on the lab box). Now
+  `tools/osd-serve.mjs` sends `{type: "booting", phase}` every 5 s until
+  ready, and `ServingRuntime` gives up on **silence** (`timeout`, 60 s of
+  no output and no message) or on the whole boot (`bootTimeout`,
+  `OSD_BOOT_TIMEOUT_MS`, 15 min by default), logging `still starting after
+  N s: <phase>` every 30 s. Once ready, quiet is not hung.
 
 ---
 
