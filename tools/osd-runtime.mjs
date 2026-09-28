@@ -338,8 +338,9 @@ export class ServingRuntime {
         booting.kill("SIGTERM");
         // outside the database step it goes at once and this is only the
         // insistence; inside it, the child finishes the step first, however
-        // long a remote seed takes -- a hung one is still ended by the
-        // silence limit and the boot limit, which stay armed until it exits
+        // long a remote seed takes -- a hung one is still ended by the boot
+        // limit, which stays armed until it exits (not by the silence limit:
+        // the heartbeat is a timer and goes on while a HANA call hangs)
         if (booting.osdDatabaseStep !== true) {
           const kill = setTimeout(() => booting.kill("SIGKILL"), this.grace + 8000);
           kill.unref?.();

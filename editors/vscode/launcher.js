@@ -1317,6 +1317,8 @@ class Launcher extends EventEmitter {
     });
 
     let serving;
+    // each start logs its own steps, the first one too
+    this.#bootPhase = undefined;
     const poll = new AbortController();
     this.#poll = poll;
     try {
