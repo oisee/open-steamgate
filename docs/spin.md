@@ -3,7 +3,7 @@
 Want to try it without installing anything? Open the [browser demo](https://oisee.github.io/open-steamgate/main/app/flp.html).
 For your own server, the fastest route is one ready Docker image containing
 OSD and the DIAG/RFC stubs. The examples below are complete Portainer stacks:
-copy one block and deploy. The multi-platform `draft` tag supports
+copy one block and deploy. The multi-platform `showcase-draft` tag supports
 **Linux amd64** and **Linux arm64**; Docker selects the matching image.
 
 ## Portainer: paste one short stack
@@ -24,14 +24,18 @@ the first start if clients use that hostname. The certificate and, for SQLite
 or DuckDB, the database persist in named volumes. Keep each database variant
 in a different Stack; don't switch engines on an existing data volume.
 
-`draft` tracks the newest published multi-platform draft. For a repeatable
+`showcase-draft` tracks the newest published multi-platform showcase draft and
+includes Vivid Vibes, Zork and Vector workbench. Set the Stack variable
+`OSD_TAG=draft` for the core image. For a repeatable
 cross-platform test, set `OSD_TAG` to the unique `sha-…-run-…` tag from the successful
 [multi-arch workflow's summary](https://github.com/oisee/open-steamgate/actions/workflows/docker-multiarch.yml).
 The stacks request the OSD image from GHCR on each deployment, so an older
-locally cached `draft` is not silently reused. If a stack was already
+locally cached `showcase-draft` is not silently reused. If a stack was already
 pasted into Portainer, update its Web editor YAML or set `OSD_TAG` to a new
 immutable tag before redeploying; changing this document does not update an
-existing Portainer stack.
+existing Portainer stack. If an existing HANA Stack uses a core database schema,
+set `HANA_SCHEMA=OSD_SHOWCASE` (or another fresh schema) before selecting the
+showcase image. Existing schemas are not migrated automatically.
 The single image is public on GHCR; no registry credentials are needed.
 On a 64-bit ARM host, use the SQLite or DuckDB block unchanged. Do not use the HANA Express block there:
 its SAP image is pinned to `linux/amd64`. PostgreSQL is not yet part of the
@@ -62,10 +66,10 @@ Source: [docker/compose.sqlite.yml](../docker/compose.sqlite.yml).
 
 ```yaml
 # Portainer: SQLite demo, default instance 11 (8011/44311/3211/3311).
-# Set Stack variable OSD_TAG=showcase-draft for Vivid Vibes, Zork and Vector workbench.
+# Vivid Vibes, Zork and Vector workbench are included by default; set OSD_TAG=draft for core.
 services:
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-showcase-draft}
     pull_policy: always
     init: true
     environment:
@@ -96,10 +100,10 @@ Source: [docker/compose.duckdb.yml](../docker/compose.duckdb.yml).
 
 ```yaml
 # Portainer: DuckDB demo, default instance 15 (8015/44315/3215/3315).
-# Set Stack variable OSD_TAG=showcase-draft for Vivid Vibes, Zork and Vector workbench.
+# Vivid Vibes, Zork and Vector workbench are included by default; set OSD_TAG=draft for core.
 services:
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-showcase-draft}
     pull_policy: always
     init: true
     environment:
@@ -131,12 +135,13 @@ Source: [docker/compose.hana.yml](../docker/compose.hana.yml).
 
 ```yaml
 # Portainer: new HANA Express + OSD, instance 17. Set ACCEPT_SAP_LICENSE=YES.
-# Set Stack variable OSD_TAG=showcase-draft for Vivid Vibes, Zork and Vector workbench.
+# Vivid Vibes, Zork and Vector workbench are included by default; set OSD_TAG=draft for core.
+# Existing core schemas need a fresh HANA_SCHEMA (for example OSD_SHOWCASE).
 # Demo password is a known default; change HANA_PASSWORD before first start
 # outside an isolated test network. HXE's SQL port is not published to host.
 services:
   hana-init:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-showcase-draft}
     pull_policy: always
     user: "0:0"
     entrypoint: ["node", "docker/image/hana-init.mjs"]
@@ -173,7 +178,7 @@ services:
     stop_grace_period: 5m
 
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-showcase-draft}
     pull_policy: always
     init: true
     environment:
@@ -214,7 +219,7 @@ Source: [docker/compose.postgres.yml](../docker/compose.postgres.yml).
 
 ```yaml
 # Portainer: new PostgreSQL + OSD, default instance 19 (8019/44319/3219/3319).
-# Set Stack variable OSD_TAG=showcase-draft for Vivid Vibes, Zork and Vector workbench.
+# Vivid Vibes, Zork and Vector workbench are included by default; set OSD_TAG=draft for core.
 # Demo password is public; change POSTGRES_PASSWORD before first start outside
 # an isolated test network. PostgreSQL's SQL port is not published to host.
 services:
@@ -235,7 +240,7 @@ services:
     stop_grace_period: 60s
 
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-showcase-draft}
     pull_policy: always
     init: true
     environment:
@@ -294,11 +299,11 @@ the container became healthy and served ADT/OData with its existing database
 after an image update. HANA Express is not supported by this ARM64 recipe.
 
 On the Pi, check `uname -m` reports `aarch64` and `getconf LONG_BIT` reports
-`64`. In Portainer, paste the complete SQLite or DuckDB Stack above; `draft`
+`64`. In Portainer, paste the complete SQLite or DuckDB Stack above; `showcase-draft`
 selects ARM64 automatically. The default instances are 11 and 15. For a
 repeatable deployment, use an immutable `sha-…-arm64` tag from
 the [successful ARM64 workflow](https://github.com/oisee/open-steamgate/actions/workflows/docker-arm64.yml)
-instead of `draft`. No QEMU or host-wide emulator registration is needed
+instead of `showcase-draft`. No QEMU or host-wide emulator registration is needed
 on the Pi.
 
 Without Portainer, from a checkout of this repository on the Pi:
@@ -378,7 +383,7 @@ For an existing PostgreSQL database, set `STG_DB=postgres`, `PGHOST`, `PGPORT`,
 PostgreSQL-capable image published from commit `0d816d8` or newer; images
 published before it reject `STG_DB=postgres`. In Portainer, set `OSD_TAG` to
 the immutable tag from the successful Docker workflow run if you want to pin
-the exact tested image instead of tracking `draft`.
+the exact tested image instead of tracking `showcase-draft`.
 See [database backends](db-backends.md) for details.
 
 Leave `STG_PORT=8000 STG_TLS_PORT=44300 node test/run.mjs` running in the first

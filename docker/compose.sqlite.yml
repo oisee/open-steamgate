@@ -1,8 +1,8 @@
 # Portainer: SQLite demo, default instance 11 (8011/44311/3211/3311).
-# Set Stack variable OSD_TAG=showcase-draft for Vivid Vibes, Zork and Vector workbench.
+# Vivid Vibes, Zork and Vector workbench are included by default; set OSD_TAG=draft for core.
 services:
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-showcase-draft}
     pull_policy: always
     init: true
     environment:

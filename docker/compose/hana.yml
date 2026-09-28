@@ -1,8 +1,9 @@
 # Connects to an existing HANA tenant. Supply connection values in the
 # environment; this file starts no HANA server and stores no credentials.
+# Existing core schemas need a fresh HANA_SCHEMA (for example OSD_SHOWCASE).
 services:
   osd:
-    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-draft}
+    image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-showcase-draft}
     init: true
     environment:
       STG_DB: hana

@@ -121,8 +121,9 @@ edit it. The binary excludes the optional native DuckDB
 module; the DuckDB Compose variant uses the Docker image instead.
 
 The Compose files use the image already published by the Docker multiarch
-workflow, `ghcr.io/oisee/open-steamgate:draft`, by default. This moving image
-tag is independent of the VS Code tag. Set `OSD_TAG` to a tested
+workflow, `ghcr.io/oisee/open-steamgate:showcase-draft`, by default. This moving
+image tag includes the optional showcase packs and is independent of the VS Code
+tag. Set `OSD_TAG=draft` for the core image, or set it to a tested
 `sha-...-run-...` tag from the Docker publication workflow to pin it. SQLite
 is the default file backend. PostgreSQL starts a database in the stack and
 requires `POSTGRES_PASSWORD` in the caller's environment. HANA connects to
