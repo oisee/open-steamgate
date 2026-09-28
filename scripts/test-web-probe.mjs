@@ -286,8 +286,10 @@ try {
   if (!serviceDetails) throw new Error("Single click did not open the service details panel");
   await page.keyboard.press("Control+Shift+P");
   const palette = page.locator(".quick-input-widget input").first();
-  await palette.fill(">osd:");
+  await palette.fill(">osd: Web probe");
   const choices = page.locator(".quick-input-list .monaco-list-row");
+  await choices.filter({hasText: "osd: Web probe"}).first().waitFor({timeout: 30000});
+  await palette.fill(">osd:");
   const webCommands = ["osd: Web probe", "osd: Web read probe", "osd: Web verify last Travel", "osd: Web probe view", "osd: Refresh the view (no rebuild)"];
   for (const title of webCommands) await choices.filter({hasText: title}).first().waitFor({timeout: 30000});
   await page.locator(".quick-input-widget .quick-input-progress.done").waitFor({timeout: 30000});
@@ -299,6 +301,8 @@ try {
   }
   await page.keyboard.press("Escape");
   console.log("OSD tree: generation, grouped demo OData, service details; desktop commands hidden");
+
+
 } catch (error) {
   console.error(error);
   console.error("Workbench text:", (await page?.locator("body").innerText().catch(() => ""))?.slice(-3000));
