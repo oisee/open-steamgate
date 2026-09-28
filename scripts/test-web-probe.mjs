@@ -78,15 +78,18 @@ async function testTransportSeam() {
 
 await testTransportSeam();
 // Always rebuild before launching VS Code so this check exercises current sources.
-const build = spawn("npm", ["run", "web:vscode"], {cwd: root, stdio: "inherit"});
-const buildExit = await new Promise((resolveExit, reject) => {
-  build.on("error", reject);
-  build.on("close", resolveExit);
-});
-if (buildExit !== 0) throw new Error(`npm run web:vscode failed (exit ${buildExit})`);
+if (process.env.OSD_WEB_TEST_SKIP_BUILD !== "1") {
+  const build = spawn("npm", ["run", "web:vscode"], {cwd: root, stdio: "inherit"});
+  const buildExit = await new Promise((resolveExit, reject) => {
+    build.on("error", reject);
+    build.on("close", resolveExit);
+  });
+  if (buildExit !== 0) throw new Error(`npm run web:vscode failed (exit ${buildExit})`);
+}
 await stat(join(extension, "dist/web/extension.js")).catch(() => {
   throw new Error("Web extension bundle is missing after npm run web:vscode");
 });
+const {buildId} = await import("../web/generated/seed.mjs");
 
 async function freePort() {
   const server = createServer();
@@ -252,6 +255,54 @@ try {
     throw new Error(`Webview IndexedDB reload check failed: ${JSON.stringify(persisted)}`);
   }
   console.log(`Webview after reload: GET ${persisted.get}, same row ${persisted.id}`);
+  const osdActivity = page.locator(".activitybar .action-label[aria-label*='OSD']").first();
+  await osdActivity.waitFor({timeout: 120000});
+  await osdActivity.click();
+  const tree = page.locator(".pane-body .monaco-list-row");
+  await tree.filter({hasText: "System"}).first().waitFor({timeout: 120000});
+  await tree.filter({hasText: "In-browser gateway"}).first().waitFor({timeout: 120000});
+  await tree.filter({hasText: `Generation: ${buildId}`}).first().waitFor({timeout: 120000});
+  await tree.filter({hasText: "Database: sql.js + IndexedDB"}).first().waitFor({timeout: 120000});
+  await tree.filter({hasText: "Services"}).first().waitFor({timeout: 120000});
+  await tree.filter({hasText: /^OData \([1-9]/}).first().waitFor({timeout: 120000});
+  await tree.filter({hasText: /^OData \([1-9]/}).first().click();
+  const demo = tree.filter({hasText: "ZSTG_DEMO_SRV"}).first();
+  await demo.waitFor({timeout: 30000});
+  await tree.filter({hasText: "ZSTG_SADL_SRV"}).first().waitFor({timeout: 30000});
+  await demo.click();
+  let serviceDetails = false;
+  const detailsDeadline = Date.now() + 30000;
+  while (Date.now() < detailsDeadline && !serviceDetails) {
+    for (const frame of page.frames()) {
+      if (frame === page.mainFrame()) continue;
+      const body = await frame.locator("body").textContent({timeout: 1000}).catch(() => "");
+      if (body?.includes("ZSTG_DEMO_SRV") && body.includes("ODATA") && body.includes("/sap/opu/odata/sap/")) {
+        serviceDetails = true;
+        break;
+      }
+    }
+    if (!serviceDetails) await new Promise((resolveWait) => setTimeout(resolveWait, 500));
+  }
+  if (!serviceDetails) throw new Error("Single click did not open the service details panel");
+  await page.keyboard.press("Control+Shift+P");
+  const palette = page.locator(".quick-input-widget input").first();
+  await palette.fill(">osd: Web probe");
+  const choices = page.locator(".quick-input-list .monaco-list-row");
+  await choices.filter({hasText: "osd: Web probe"}).first().waitFor({timeout: 30000});
+  await palette.fill(">osd:");
+  const webCommands = ["osd: Web probe", "osd: Web read probe", "osd: Web verify last Travel", "osd: Web probe view", "osd: Refresh the view (no rebuild)"];
+  for (const title of webCommands) await choices.filter({hasText: title}).first().waitFor({timeout: 30000});
+  await page.locator(".quick-input-widget .quick-input-progress.done").waitFor({timeout: 30000});
+  const paletteRows = await choices.allTextContents();
+  const allowed = [...webCommands, "OSD: Focus on System View"];
+  const unexpected = paletteRows.filter((row) => !allowed.some((title) => row.includes(title)));
+  if (unexpected.length || paletteRows.length !== allowed.length) {
+    throw new Error(`Desktop-only or missing OSD commands in the web palette: ${JSON.stringify(paletteRows)}`);
+  }
+  await page.keyboard.press("Escape");
+  console.log("OSD tree: generation, grouped demo OData, service details; desktop commands hidden");
+
+
 } catch (error) {
   console.error(error);
   console.error("Workbench text:", (await page?.locator("body").innerText().catch(() => ""))?.slice(-3000));
