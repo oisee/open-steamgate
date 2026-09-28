@@ -2,7 +2,7 @@
 * is nothing but YAML (src/segw/zstg_segw.stg.yaml -> stg-compile -> classes
 * that delegate to SADL): create, read, update, delete over a DDIC table
 * without a line of hand-written DPC code
-CLASS ltcl_crud DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+CLASS ltcl_crud DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINAL.
   PRIVATE SECTION.
     CONSTANTS gc_base TYPE string VALUE '/sap/opu/odata/sap/ZSTG_SEGW_SRV'.
     METHODS setup.
@@ -205,7 +205,7 @@ ENDCLASS.
 
 * POST ImportSet with an IWPR file as Content: zcl_stg_segw_import parses
 * it and replaces the project's rows in every table
-CLASS ltcl_import DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
+CLASS ltcl_import DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT FINAL.
   PRIVATE SECTION.
     CONSTANTS gc_set TYPE string VALUE '/sap/opu/odata/sap/ZSTG_SEGW_SRV/ImportSet'.
     METHODS setup.

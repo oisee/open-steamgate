@@ -204,10 +204,12 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     }
     expect(unitRiskOf(described.ZCL_OSD_DEMO_RANDOM.schedules)).to.equal("harmless");
     expect(unitRiskOf(described.ZCL_OSD_ABAP_TOKENS.schedules)).to.equal("harmless");
-    // it declares HARMLESS and inserts: the check says so, with where
+    // ICF tests write the service registry and declare CRITICAL; the
+    // conservative reachability check still names the write.
     const icf = described.ZCL_OSD_ICF_TEST.found;
+    // The queue has two lanes: HARMLESS, then DANGEROUS/CRITICAL together.
     expect(unitRiskOf(described.ZCL_OSD_ICF_TEST.schedules)).to.equal("dangerous");
-    expect(icf.classes.some((c) => c.riskLevel === "harmless" && c.riskLevelDeclared && c.schedule === "dangerous")).to.equal(true);
+    expect(icf.classes.some((c) => c.riskLevel === "critical" && c.riskLevelDeclared && c.schedule === "critical")).to.equal(true);
     expect(icf.writes[0]).to.include({object: "ZCL_OSD_ICF_TEST"});
 
     const outcome = async (pooled) => {
@@ -235,7 +237,7 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     const pooled = await outcome(true);
     const serial = await outcome(false);
     expect(Math.max(...pooled.seen.filter(([name]) => name !== "ZCL_OSD_ICF_TEST").map(([, n]) => n)), "two HARMLESS at once").to.equal(2);
-    expect(pooled.seen.find(([name]) => name === "ZCL_OSD_ICF_TEST")[1], "the DANGEROUS one alone").to.equal(1);
+    expect(pooled.seen.find(([name]) => name === "ZCL_OSD_ICF_TEST")[1], "the CRITICAL one alone").to.equal(1);
     expect(pooled.seen.at(-1)[0], "and after them").to.equal("ZCL_OSD_ICF_TEST");
     expect(pooled.results).to.deep.equal(serial.results);
   });

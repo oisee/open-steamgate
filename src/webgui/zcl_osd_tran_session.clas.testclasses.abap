@@ -1,4 +1,4 @@
-CLASS ltcl_session DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+CLASS ltcl_session DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINAL.
 
 * The session store, without a server in front of it (backlog G.3).
 *

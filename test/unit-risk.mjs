@@ -38,13 +38,15 @@ describe("tools/osd-unit-risk: a declared RISK LEVEL against what the test reach
     expect(scheduledRisk({riskLevel: "critical", riskLevelDeclared: true}, [])).to.equal("critical");
   });
 
-  it("flags this tree's SEGW tests, which declare HARMLESS and write, and guards a class that reaches no write", async () => {
+  it("keeps writing SEGW tests DANGEROUS and a read-only test HARMLESS", async () => {
     const segw = await runner.withRisk(runner.classes("CLAS", "ZCL_STG_SEGW_TEST"));
     expect(segw.writesTotal).to.be.greaterThan(0);
     // the test's own statements are named first
     expect(segw.writes[0].object).to.equal("ZCL_STG_SEGW_TEST");
     const crud = segw.classes.find((c) => c.name === "LTCL_CRUD");
-    expect(crud).to.include({riskLevel: "harmless", riskLevelDeclared: true, schedule: "dangerous", guard: false});
+    expect(crud).to.include({riskLevel: "dangerous", riskLevelDeclared: true, schedule: "dangerous", guard: false});
+    const tree = segw.classes.find((c) => c.name === "LTCL_TREE");
+    expect(tree).to.include({riskLevel: "harmless", riskLevelDeclared: true, schedule: "dangerous", guard: false});
 
     const tokens = await runner.withRisk(runner.classes("CLAS", "ZCL_OSD_ABAP_TOKENS"));
     expect(tokens.writesTotal, JSON.stringify(tokens.writes)).to.equal(0);
@@ -57,9 +59,11 @@ describe("tools/osd-unit-risk: a declared RISK LEVEL against what the test reach
 
   // the runtime half, against real runs: a guarded class that writes fails
   // with the reason, one that does not passes as before
-  it("the runtime guard fails a HARMLESS class that writes, naming the table", async () => {
+  it("the runtime guard fails a misdeclared HARMLESS class that writes, naming the table", async () => {
     const plan = runner.classes("CLAS", "ZCL_STG_SEGW_TEST");
-    const guarded = {...plan, classes: plan.classes.map((c) => ({...c, guard: c.name === "LTCL_CRUD"}))};
+    // Simulate an incorrect declaration without making the real test unsafe.
+    const guarded = {...plan, classes: plan.classes.map((c) => c.name === "LTCL_CRUD"
+      ? {...c, riskLevel: "harmless", guard: true} : c)};
     const result = await runner.runDetached("CLAS", "ZCL_STG_SEGW_TEST", {plan: guarded, testClass: "LTCL_CRUD"});
     const alerts = result.testClasses[0].testMethods.flatMap((m) => m.alerts).concat(result.testClasses[0].alerts);
     const guard = alerts.filter((a) => a.kind === "riskLevel");
