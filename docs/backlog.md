@@ -3856,6 +3856,13 @@ speed task than splitting the costly integration cases (`docs/ci-tests.md`).
      └─ the lesson is 8.4's: a suite that goes green on a second run
         teaches everyone to run it twice, which is how a real failure gets
         waved through. This one was hiding a defect for a day
+8.8  measure a larger VS Code Test Explorer HARMLESS pool before raising its cap
+     └─ current default is min(4, cpus - 1); compare 4, 6 and 8 on the same
+        tree, recording total wall time, peak RSS, CPU and identical outcomes
+     └─ only 9 objects use the parallel lane; the other 14 run alone, so
+        measure the whole run as well as the HARMLESS lane
+     └─ keep debug and shared HANA/Postgres test schemas at one: each child
+        writes startup seed rows even when its test declares HARMLESS
 ```
 
 ## 9. Upstream, outside this repository (T's, verbatim from them)
