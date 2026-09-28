@@ -44,6 +44,12 @@ CLASS zcl_osd_bal_persist_read IMPLEMENTATION.
             out->write( |BAL read failed: message order or text lost for { lo_header->external_id }| ).
             RETURN.
           ENDIF.
+          IF ls_start-item->timestamp <> '20260928010203' OR
+              ls_count-item->timestamp IS INITIAL OR
+              ls_finish-item->timestamp IS INITIAL.
+            out->write( |BAL read failed: item timestamp lost for { lo_header->external_id }| ).
+            RETURN.
+          ENDIF.
           IF lo_header->external_id = 'OSD_RESTART_ERR' AND
               ( ls_finish-item->severity <> 'E' OR lo_header->number_error_items <> 1 ).
             out->write( 'BAL read failed: error severity lost' ).

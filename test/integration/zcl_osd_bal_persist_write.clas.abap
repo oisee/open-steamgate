@@ -16,7 +16,7 @@ CLASS zcl_osd_bal_persist_write IMPLEMENTATION.
       external_id = iv_external_id ).
     DATA(lo_log) = cl_bali_log=>create_with_header( header = lo_header ).
     lo_log->add_item( item = cl_bali_free_text_setter=>create(
-      text = 'started' severity = 'S' ) ).
+      text = 'started' severity = 'S' timestamp = '20260928010203' ) ).
     lo_log->add_item( item = cl_bali_free_text_setter=>create(
       text = '6 ships, 20 voyages' severity = 'I' ) ).
     lo_log->add_item( item = cl_bali_free_text_setter=>create(

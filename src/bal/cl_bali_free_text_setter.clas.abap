@@ -7,6 +7,7 @@ CLASS cl_bali_free_text_setter DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS create
       IMPORTING text TYPE string
                 severity TYPE ty_severity DEFAULT 'S'
+                timestamp TYPE timestamp OPTIONAL
       RETURNING VALUE(free_text) TYPE REF TO if_bali_free_text_setter.
 ENDCLASS.
 
@@ -15,6 +16,10 @@ CLASS cl_bali_free_text_setter IMPLEMENTATION.
     DATA(lo_item) = NEW cl_bali_free_text_setter( ).
     lo_item->text = text.
     lo_item->if_bali_item_getter~severity = severity.
+    lo_item->if_bali_item_getter~timestamp = timestamp.
+    IF lo_item->if_bali_item_getter~timestamp IS INITIAL.
+      GET TIME STAMP FIELD lo_item->if_bali_item_getter~timestamp.
+    ENDIF.
     free_text = lo_item.
   ENDMETHOD.
   METHOD if_bali_item_getter~get_message_text.

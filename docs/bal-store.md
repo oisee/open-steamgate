@@ -3,7 +3,7 @@
 The `CL_BALI_*` facade in `src/bal` supports the measured fleet audit path:
 create a header with object, subobject and external ID; append free-text items
 with severity; save in the caller's ABAP transaction; find by descriptor; load
-by handle; and read items in insertion order. The header reports total and
+by handle; and read items with their creation timestamps in insertion order. The header reports total and
 error item counts. `CX_BALI_RUNTIME` makes failed saves and missing exact-ID
 searches visible to the caller.
 
@@ -15,8 +15,8 @@ caller can `COMMIT WORK` or `ROLLBACK WORK` after `SAVE_LOG`.
 This is a deliberately narrow compatibility surface. The caller-owned
 `SAVE_LOG` path is implemented. `SAVE_LOG_2ND_DB_CONNECTION`,
 `USE_2ND_DB_CONNECTION` and application-job assignment raise explicit
-unsupported errors. The `READ_ONLY_HEADER` flag is currently accepted but
-still returns the full log. Filters use exact object, subobject and external
+unsupported errors. `READ_ONLY_HEADER` also raises an explicit unsupported
+error. Filters use exact object, subobject and external
 ID values; wildcard, range and timestamp filtering are not implemented.
 SAP customizing validation and other item types are outside this slice.
 

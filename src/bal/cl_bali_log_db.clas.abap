@@ -33,7 +33,8 @@ CLASS cl_bali_log_db IMPLEMENTATION.
       ENDIF.
       APPEND VALUE #(
         severity = ls_entry-item->severity
-        text = ls_entry-item->get_message_text( ) ) TO lt_items.
+        text = ls_entry-item->get_message_text( )
+        timestamp = ls_entry-item->timestamp ) TO lt_items.
     ENDLOOP.
     TRY.
         DATA(lv_handle) = zcl_osd_bal_store=>save(
@@ -56,6 +57,10 @@ CLASS cl_bali_log_db IMPLEMENTATION.
   METHOD if_bali_log_db~load_log.
     DATA ls_header TYPE zosd_bal_hdr.
     DATA lt_items TYPE zcl_osd_bal_store=>tt_persisted_item.
+    IF read_only_header = abap_true.
+      RAISE EXCEPTION TYPE cx_bali_runtime
+        EXPORTING iv_reason = 'Read-only header loading is not supported'.
+    ENDIF.
     TRY.
         zcl_osd_bal_store=>load( EXPORTING iv_handle = handle
           IMPORTING es_header = ls_header et_items = lt_items ).
@@ -69,13 +74,18 @@ CLASS cl_bali_log_db IMPLEMENTATION.
     log = cl_bali_log=>create_with_header( header = lo_header ).
     LOOP AT lt_items INTO DATA(ls_item).
       log->add_item( item = cl_bali_free_text_setter=>create(
-        text = CONV string( ls_item-message_text ) severity = ls_item-severity ) ).
+        text = CONV string( ls_item-message_text ) severity = ls_item-severity
+        timestamp = ls_item-created_at ) ).
     ENDLOOP.
     DATA(lo_concrete) = CAST cl_bali_log( log ).
     lo_concrete->bind_handle( handle = handle ).
   ENDMETHOD.
 
   METHOD if_bali_log_db~load_logs_via_filter.
+    IF read_only_header = abap_true.
+      RAISE EXCEPTION TYPE cx_bali_runtime
+        EXPORTING iv_reason = 'Read-only header loading is not supported'.
+    ENDIF.
     IF filter IS NOT BOUND.
       RAISE EXCEPTION TYPE cx_bali_runtime
         EXPORTING iv_reason = 'Application log filter is required'.

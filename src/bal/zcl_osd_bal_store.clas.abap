@@ -9,6 +9,7 @@ CLASS zcl_osd_bal_store DEFINITION PUBLIC FINAL CREATE PUBLIC.
     TYPES: BEGIN OF ty_item,
              severity TYPE c LENGTH 1,
              text     TYPE string,
+             timestamp TYPE timestamp,
            END OF ty_item.
     TYPES tt_item TYPE STANDARD TABLE OF ty_item WITH EMPTY KEY.
     TYPES tt_header TYPE STANDARD TABLE OF zosd_bal_hdr WITH EMPTY KEY.
@@ -85,8 +86,17 @@ CLASS zcl_osd_bal_store IMPLEMENTATION.
       ls_item-item_no = lv_number.
       ls_item-severity = ls_input-severity.
       ls_item-message_text = ls_input-text.
+      ls_item-created_at = ls_input-timestamp.
+      IF ls_item-created_at IS INITIAL.
+        GET TIME STAMP FIELD ls_item-created_at.
+      ENDIF.
       INSERT zosd_bal_itm FROM ls_item.
       IF sy-subrc <> 0.
+* Only lower item numbers were inserted by this call. A failed number may
+* already belong to another writer, so leave that row alone.
+        DELETE FROM zosd_bal_itm WHERE log_id = rv_handle
+          AND item_no < lv_number.
+        DELETE FROM zosd_bal_hdr WHERE log_id = rv_handle.
         RAISE EXCEPTION TYPE zcx_osd_bal
           EXPORTING iv_reason = 'Could not insert application log item'.
       ENDIF.
