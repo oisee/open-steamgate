@@ -79,6 +79,12 @@ reset) and in OSGo, through `tools/osd-demo-data.mjs` and one knob,
 `OSD_DEMO_ROWS` (default 20000, `0` for none). The rows are synthetic NYC
 taxi facts, FACT_ID 9000000001 and up; A4H, Node and OSGo gave the same
 first rows and checksum for the same class (docs/demo-data.md).
+Revised 2026-09-27 (vg/taxi-on-demand): nothing is generated at start
+(the phase took 3849 ms of a packaged first start). A year of synthetic
+trips is made on request -- the taxi app's "Generate data", `osd: Generate
+taxi data...`, or `POST ZOSD_TAXI_SRV/GenerateYear` -- and `ResetData`
+goes back to the four sample rows. `OSD_DEMO_ROWS` stays as an opt-in and
+covers only the sample month's keys (up to 9099999999), never a year.
 
 Open:
 - `ZCL_OSD_DEMO_DATA` has not run on a system: ZOSD_TAXIFACT could not be

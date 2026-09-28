@@ -642,6 +642,7 @@ and page. The persistent database may still contain old rows until its schema
 is reset; they are no longer seeded by that pack.
 Two distinct packs cannot share a pack name, and webapps whose derived BSP
 names collide at the 15-character limit fail the build with both owners named.
+Each pack BSP app rebases every OData data source whose URI names a service (`.../opu/odata/sap/<SRV>`) to `../../../../opu/odata/sap/<SRV>/`, relative to the BSP page. Annotation sources and URIs without a service name are carried unchanged.
 
 Shadowing is already said out loud by the build itself
 (`osd-build: overridden: CLAS X: <hidden files> hidden by <winner>`,
@@ -659,10 +660,18 @@ audit by hand and were not wired into the tree view.
 tree of state and launchpad items, **System**, **TRAN**, **Layers**, and
 **Services** ("Services tree", below). **System** contains the serving,
 dumps, and SQL doors. **TRAN** comes from the transaction registry.
-"osd: Open launchpad" opens `http://localhost:<port>/app/flp.html` with
-`vscode.env.openExternal` (the Launchpad node's own click; its
-context menu offers "Open launchpad inside VS Code" instead, the same
-webview pattern "Services tree" uses); a second, new status bar item
+"osd: Open launchpad" opens `http://localhost:<port>/app/flp.html` where
+`osd.openIn` says: a tab inside VS Code by default (Q7, 2026-09-27: an
+iframe of the running system's own page, one tab per URL, a second click
+reveals it), the system browser when the setting is `browser`; the
+Launchpad node's inline link-external action and its "Open in External
+Browser" context item always use the browser, and "osd: Open launchpad
+inside VS Code" (the palette) always a tab. The System overview's
+"Open launchpad" / "Open in browser" buttons and the service details'
+`$metadata` / "in browser" links take the same two routes. Page tabs close
+on Stop and when the system exits unasked (the page is gone); a rebuild,
+which is stop-then-start, keeps them and reloads each once the system
+serves again, on the new port if it moved; a second, new status bar item
 (▶ / ■, left of the existing generation display, which assumes something
 is already serving) starts or stops the one `Launcher` this window
 drives, and the editor-title button on `.abap` files is `osd.run` (F8's
@@ -903,15 +912,18 @@ rows offer no Run action.
 Leaf rows act on one click: source leaves open files, URL leaves open pages,
 and the SQL door opens its notebook. Expandable rows show details on one
 click and use the 400 ms second-click classifier for navigation. Inline
-buttons and context-menu commands act immediately. Browser-opening leaves
-say so in their tooltips.
+buttons and context-menu commands act immediately. A page-opening leaf's
+tooltip says where a click goes (it follows `osd.openIn`). "Reveal the same
+tab" below is the default; with `osd.openIn: browser` a second click opens
+the browser again. Easy Access transactions (Run) keep their own
+`osdWebgui` tabs and are not part of this rule.
 
 | Node kind | Single click | Second click within 400 ms |
 | --- | --- | --- |
 | Stopped/running/building state | System overview | System overview |
-| Launchpad leaf | Open Launchpad in browser | Open again |
+| Launchpad leaf | Open Launchpad using `osd.openIn` (a VS Code tab by default) | Reveal the same tab |
 | System group | Group explanation | No additional action |
-| Serving `/osd/serving` leaf | Open endpoint in browser | Open again |
+| Serving `/osd/serving` leaf | Open endpoint using `osd.openIn` (a VS Code tab by default) | Reveal the same tab |
 | Short dumps `/osd/dumps` leaf | List dumps in Output | List again |
 | SQL `/osd/sql` | Open the SQL notebook and its guide | Another notebook if clicked again |
 | TRAN group | Group explanation | No additional action |
@@ -921,7 +933,7 @@ say so in their tooltips.
 | Layers group, base layer, workspace layer | Layer explanation | No additional action |
 | Services root, kind group, pack group | Group explanation | No additional action |
 | Expandable APP, OData, ICF service row | Service details | Open service or app using `osd.openIn` |
-| APP, OData or ICF leaf with a URL (no children) | Open app or service using `osd.openIn` | Open again |
+| APP, OData or ICF leaf with a URL (no children) | Open app or service using `osd.openIn` (a VS Code tab by default) | Reveal the same tab |
 | APC service row | Service details | No page to open |
 | Service class (DPC, MPC, handler, generated helper) leaf | Open source file | Open again |
 | OData entity set leaf | Open DPC method | Open again |
@@ -958,9 +970,11 @@ does not retain its hidden context. Its sections are specific to each row:
 - **ICF/APC:** path, handler and handler source, the SICF/SAPC declaration
   source, and HTTP or WebSocket protocol.
 
-The inline **▶ Open** action follows `osd.openIn` (`browser` or `vscode`). The
-context menu has **Open** (always the external browser), **Open $metadata**
-(following `osd.openIn`), **Test** (runs the
+The inline **▶ Open** action follows `osd.openIn` (`vscode`, the default, or
+`browser`); the inline link-external action beside it always opens the
+system browser. The context menu has **Open in External Browser**, **Open
+$metadata** (following `osd.openIn`), **Open $metadata in External
+Browser**, **Test** (runs the
 ABAP Unit classes found in the handler/DPC/MPC xref closures), **Source**
 (only source files or folders that exist), and **Copy** (only available URL,
 WebSocket URL, and `$metadata` URL targets). A row's context value is updated
@@ -1031,6 +1045,69 @@ handler reaps the grandchild before the parent exits, so the launcher only
 ever signals the one pid it spawned.
 
 ## Packaging
+
+**T2 prebuilt generation (2026-09-27).** `npm run vsix` now runs the seed's
+own `tools/osd-build.mjs` inside the staged seed and ships
+`build/by-input/<hash>/` and `gen/` as real files (no `build/live`, no
+`output`, no generation `test` link: the first build makes those). The
+portable-hash obstacle described below does not arise there: inside the
+staged seed the transpiler is a plain copy in the seed's `node_modules`,
+so `describeBuild()` says "published" with no path or git state, and the
+hash reads paths relative to the tree.
+
+One engine change was needed for a real first start to hit it. The
+launcher always sets `OSD_PACKS` to its own storage, holding an empty
+`notebook-scratch` pack, and that pack's manifest path, different on every
+machine, named the generation: a copy materialized from the prebuilt seed
+and started the launcher's way built cold (`built 11cf1308…`, measured).
+Now a pack that brings nothing (no input file in its ABAP folders, no
+data, ddic or webapp folder, no tiles) is not an input, and an input
+folder that contributes no file to the hash does not name the generation
+(`tools/osd-build.mjs` `inputsOf`, `hashOf`): an ABAP folder with no file
+`NOT_AN_INPUT` leaves, or any other input folder with no file at all. A
+pack that holds anything still is an input, so a workspace pack builds
+cold as before. A tree with such a folder, or with a pack that brings
+nothing, names its generation differently once; any other tree keeps its
+names.
+
+The generation's `manifest.json` in the seed has `builtAt` and `ms` fixed,
+so the same tree packaged twice makes the same seed ID (the materialized
+copy is keyed by it).
+
+Measured on a cloud container (Node 22.22) with a throwaway script that
+does what the launcher does (materialize, `OSD_PACKS` from
+`ensureWorkspacePacks(storage, [])`, `tools/osd-build.mjs`, then
+`test/run.mjs` until `ZSTG_DEMO_SRV/TravelSet` answers), default Zork
+package:
+
+| | materialize | build | serve | first start |
+| --- | ---: | ---: | ---: | ---: |
+| `OSD_VSIX_PREBUILT=0` | 1.9 s | 21.7 s (built) | 11.4 s | 35.0 s |
+| prebuilt (default) | 1.5 s | 0.35 s (reused) | 12.0 s | 13.8 s |
+
+`.vsix` 9.4 MB -> 11.9 MB at the default Brotli quality; unpacked, the
+prebuilt `build/` and `gen/` add 52 MB to each materialized copy (and to
+each saved snapshot of an old one). The ~4 s target was the build step
+alone; what remains of a first start is the first boot filling the
+database (demo data, the taxi facts), which a second start of the same copy
+does not pay.
+
+The generation's cross-reference rows ship with it too
+(`build/xref/<key>.json`, `tools/osd-xref-seed.mjs`), written in the seed
+after its build, so the first start seeds CROSS, WBCROSSGT, WBCROSSGTX and
+D010INC from the file instead of parsing the tree. The key is portable for
+the same reason the generation's name is (tree-relative paths and contents);
+the vsix test checks a copy materialized elsewhere computes it. Measured on
+one package, the launcher's way, with and without the file in the copy:
+the cross-reference step 5069 ms -> 110 ms, and the serving child's start
+to the first `TravelSet` answer (the "serve" column above, in a separate
+run) 10.0 s -> 5.0 s (measured 2026-09-27). The file is ~0.3 MB
+unpacked, inside the 52 MB above.
+
+`OSD_VSIX_PREBUILT=0` packages without it; the vsix tests
+that only look at the archive's shape set it. The binary does not
+prebuild: it names generations by its own bytes (`generatorIdentity`), so
+a shipped generation could never be reused there.
 
 **T3 solid seed (2026-09-27).** The package now contains one
 `extension/osd/seed.tar.br` and `extension/osd/.seed-id` instead of separate

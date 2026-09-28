@@ -4,6 +4,7 @@ import {ensureDemoData} from "../tools/osd-demo-data.mjs";
 import express from "express";
 import {existsSync} from "node:fs";
 import {generatorFoldersOf, tilesOf, webappsOf} from "../tools/osd-packs.mjs";
+import {packApplications} from "../tools/osd-bsp-registry.mjs";
 import {mountRemoteServices} from "../tools/osd-remote-service.mjs";
 import {segwRegistrations} from "../tools/segw-registry.mjs";
 import {createServer as createHttpsServer} from "node:https";
@@ -14,7 +15,7 @@ import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
 import {credentials as tlsCredentials, fingerprint as tlsFingerprint, dirOf as tlsDirOf} from "../tools/osd-tls.mjs";
-import {odataProxy, upgradeProxy} from "../tools/osd-proxy.mjs";
+import {odataProxy, upgradeProxy, startingAnswer} from "../tools/osd-proxy.mjs";
 import {devLoop} from "../tools/osd-dev.mjs";
 import {mountServices, services as icfServices, servicesFromRows, channels as pushChannels} from "../tools/osd-icf.mjs";
 import {mountChannels} from "../tools/osd-apc.mjs";
@@ -125,7 +126,7 @@ export function startServer(quiet) {
   // what the launchpad asks for at start: the tiles the packs declare, so a
   // pack appears on it without anybody editing webapp/flp.html (backlog E.2)
   hostNodes["pack-tiles"] = (a, node) => a.get(node.path, function (req, res) {
-    res.json({tiles: tilesOf(process.cwd())});
+    res.json({tiles: tilesOf(process.cwd()), applications: packApplications(process.cwd())});
   });
   // a pack brings its own static files, served under its name (backlog E.2).
   // One handler, many nodes: the nodes are DERIVED from the packs
@@ -327,6 +328,12 @@ export function startServer(quiet) {
 
   // A refresh that fails never fails the read: see above.
   async function withFreshStatus(req, res, next) {
+    // still booting: no refresh (it would wait for the whole boot); the
+    // proxy then answers "starting"
+    if (runtime?.booting !== undefined && runtime.running !== true) {
+      next();
+      return;
+    }
     try {
       await refreshStatus();
     } catch (e) {
@@ -366,6 +373,12 @@ export function startServer(quiet) {
     const withWarm = (proxy) => async (req, res, next) => {
       if (req.method !== "GET") {
         proxy(req, res, next);
+        return;
+      }
+      // still booting: say so now, with the step, rather than hold the
+      // question for the boot (the VS Code launcher waits on this answer)
+      if (runtime.booting !== undefined && runtime.running !== true) {
+        res.status(200).json({...startingAnswer(runtime), warm: facade.store.warmStatus()});
         return;
       }
       try {

@@ -6,7 +6,7 @@
 
 const path = require("node:path");
 const fs = require("node:fs");
-const {pathToFileURL} = require("node:url");
+const {pathToFileURL, fileURLToPath} = require("node:url");
 const {packNameOf} = require("./launcher.js");
 
 // Quick start's choices live here rather than in the command handler so a
@@ -111,6 +111,26 @@ function systemOverviewModel(input = {}) {
 const FILE = /^(.+?)\.(clas|prog)(?:\.(locals_def|locals_imp|macros|testclasses))?\.abap$/i;
 const INCLUDE = {locals_def: "definitions", locals_imp: "implementations", macros: "macros", testclasses: "testclasses"};
 
+/** Each workspace pack's compiled source folder in the extension's storage
+ *  (`packSource`, what a source map names) and the folder it really is
+ *  (`source`, what the editor has open). The transpiler names each source
+ *  relative to build/by-input/<generation>/output (`relativeSource`). */
+function packSourceMappings({root, storageDir, layers = []} = {}) {
+  if (storageDir === undefined || root === undefined) return [];
+  const mappings = [];
+  for (const layer of layers) {
+    const manifest = layer.manifest ? JSON.parse(fs.readFileSync(layer.manifest, "utf8")) : undefined;
+    const folders = manifest ? [manifest.abap ?? (layer.srcDir === layer.folder ? "." : "src")].flat() : ["src"];
+    for (const folder of folders) {
+      const packSource = path.join(storageDir, "packs", packNameOf(layer.folder), folder);
+      const source = manifest ? path.join(layer.folder, folder) : layer.srcDir;
+      const generated = path.join(root, "build", "by-input", "generation", "output");
+      mappings.push({packSource, source, relativeSource: path.relative(generated, packSource).replaceAll("\\", "/")});
+    }
+  }
+  return mappings;
+}
+
 /** The Node attach configuration used by the extension and by
  *  docs/debugging-abap.md. `restart` lets vscode-js-debug reconnect when
  *  the supervised ABAP process recycles on the same inspector port. */
@@ -122,22 +142,11 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
   const buildRoot = normalizedRoot === undefined ? "${workspaceFolder}/build" : `${normalizedRoot}/build`;
   const modulesRoot = normalizedRoot === undefined ? "${workspaceFolder}/node_modules" : `${normalizedRoot}/node_modules`;
   const sourceMapPathOverrides = {};
-  if (storageDir !== undefined && normalizedRoot !== undefined) {
-    for (const layer of layers) {
-      const manifest = layer.manifest ? JSON.parse(fs.readFileSync(layer.manifest, "utf8")) : undefined;
-      const folders = manifest ? [manifest.abap ?? (layer.srcDir === layer.folder ? "." : "src")].flat() : ["src"];
-      for (const folder of folders) {
-        const packSource = path.join(storageDir, "packs", packNameOf(layer.folder), folder);
-        const actualSource = manifest ? path.join(layer.folder, folder) : layer.srcDir;
-        const source = `${actualSource.replaceAll("\\", "/").replace(/\/+$/, "")}/*`;
-        // The transpiler names each source relative to build/by-input/<generation>/output.
-        // js-debug applies overrides to that entry before resolving it to a file URL.
-        const generated = path.join(root, "build", "by-input", "generation", "output");
-        const relativeSource = path.relative(generated, packSource).replaceAll("\\", "/");
-        sourceMapPathOverrides[`${relativeSource}/*`] = source;
-        sourceMapPathOverrides[`${pathToFileURL(packSource).href}/*`] = source;
-      }
-    }
+  for (const {packSource, source, relativeSource} of packSourceMappings({root: normalizedRoot === undefined ? undefined : root, storageDir, layers})) {
+    // js-debug applies overrides to the map's own entry before resolving it to a file URL.
+    const target = `${source.replaceAll("\\", "/").replace(/\/+$/, "")}/*`;
+    sourceMapPathOverrides[`${relativeSource}/*`] = target;
+    sourceMapPathOverrides[`${pathToFileURL(packSource).href}/*`] = target;
   }
   return {
     name: `OSD: ${target === "unit" ? "ABAP Unit" : "ABAP"} (${port})`,
@@ -154,6 +163,83 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
     ...(Object.keys(sourceMapPathOverrides).length ? {sourceMapPathOverrides} : {}),
     customDescriptionGenerator: "this && this.get ? (this.getQualifiedName && this.getQualifiedName() ? this.getQualifiedName() + ' ' : '') + JSON.stringify(this.get()) : undefined",
   };
+}
+
+/** The `.abap` files the running generation was compiled from, read off its
+ *  own source maps (`<root>/output/*.mjs.map`), with a workspace pack's
+ *  storage copy mapped back to the folder the editor has open. This is the
+ *  set a breakpoint can bind in: js-debug binds a breakpoint by the path a
+ *  loaded source map names, so a breakpoint in any other copy of the same
+ *  file stays unbound (docs/debugging-abap.md, "Which copy"). Returns
+ *  undefined when there is no generation to read. */
+function runningAbapSources(root, {storageDir, layers = []} = {}) {
+  let output;
+  try {
+    output = fs.realpathSync(path.join(root, "output"));
+  } catch {
+    return undefined;
+  }
+  const mappings = packSourceMappings({root, storageDir, layers});
+  const files = new Map();
+  for (const name of fs.readdirSync(output).sort()) {
+    if (!name.endsWith(".mjs.map")) continue;
+    let map;
+    try {
+      map = JSON.parse(fs.readFileSync(path.join(output, name), "utf8"));
+    } catch {
+      continue;
+    }
+    for (const entry of map.sources ?? []) {
+      if (typeof entry !== "string" || !/\.abap$/i.test(entry)) continue;
+      let file = entry.startsWith("file:") ? fileURLToPath(entry) : path.resolve(output, map.sourceRoot ?? "", entry);
+      const pack = mappings.find((m) => isInside(file, m.packSource) || isInside(file, realOrSelf(m.packSource)));
+      if (pack !== undefined) {
+        const base = isInside(file, pack.packSource) ? pack.packSource : realOrSelf(pack.packSource);
+        file = path.join(pack.source, path.relative(base, file));
+      }
+      // a library's map names a bare file name, which resolves inside
+      // output/ to nothing; a stale gen/ entry names a file since removed.
+      // Neither is a copy a breakpoint could be moved to.
+      if (!fs.existsSync(file)) continue;
+      files.set(sourceKey(realOrSelf(file)), file);
+    }
+  }
+  return {generation: output, files};
+}
+
+function realOrSelf(file) {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return path.resolve(file);
+  }
+}
+
+function isInside(file, dir) {
+  const rel = path.relative(dir, file);
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+function sourceKey(file, platform = process.platform) {
+  return platform === "win32" || platform === "darwin" ? file.toLowerCase() : file;
+}
+
+/** Why a breakpoint in `file` will not be hit by the running system, or
+ *  undefined when it can be. `running` is runningAbapSources()'s result.
+ *  `counterpart` is the running system's copy of the same file name, when
+ *  there is exactly one. */
+function breakpointWarning(file, running, {home} = {}) {
+  if (running === undefined || !/\.abap$/i.test(file)) return undefined;
+  if (running.files.has(sourceKey(realOrSelf(file)))) return undefined;
+  const base = path.basename(file).toLowerCase();
+  const same = [...running.files.values()].filter((candidate) => path.basename(candidate).toLowerCase() === base);
+  const where = home === undefined ? "the running system" : `the running system (${home})`;
+  if (same.length === 1) {
+    return {file, counterpart: same[0],
+      message: `This breakpoint will not be hit: ${where} runs ${same[0]}, not this copy of ${path.basename(file)}.`};
+  }
+  return {file, counterpart: undefined,
+    message: `This breakpoint will not be hit: no code of ${where} maps back to ${path.basename(file)}.`};
 }
 
 /** Pure attach lifecycle policy. A supervised runtime restart keeps the
@@ -408,6 +494,35 @@ class Osd {
       body = undefined;
     }
     return {status: res.status, ms, url, text, body};
+  }
+
+  /** A POST function import of an OData service, with the CSRF token that
+   *  service hands out (the gateway's, not the ADT facade's). Answers the
+   *  function's value, the one field under "d"; an OData error is thrown
+   *  with its own message. */
+  async odataAction(service, name, parameters = {}) {
+    const root = `${this.url}/sap/opu/odata/sap/${service}/`;
+    const head = await this.fetch(root, {headers: {"x-csrf-token": "fetch"}});
+    if (!head.ok) throw new Error(`GET ${service}/: HTTP ${head.status} -- no CSRF token`);
+    const cookies = typeof head.headers.getSetCookie === "function" ? head.headers.getSetCookie() : [];
+    const query = new URLSearchParams(Object.entries(parameters).map(([key, value]) => [key, String(value)])).toString();
+    const res = await this.fetch(`${root}${name}${query ? `?${query}` : ""}`, {method: "POST", headers: {
+      accept: "application/json",
+      "x-csrf-token": head.headers.get("x-csrf-token") ?? "",
+      ...(cookies.length > 0 ? {cookie: cookies.map((c) => c.split(";")[0]).join("; ")} : {}),
+    }});
+    const text = await res.text();
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = undefined;
+    }
+    if (!res.ok) {
+      const said = body?.error?.message?.value ?? text.replace(/\s+/g, " ").trim().slice(0, 300);
+      throw new Error(`POST ${service}/${name}: HTTP ${res.status}${said ? ` -- ${said}` : ""}`);
+    }
+    return body?.d?.[name];
   }
 
   /** Q6a "Notebook SQL" (docs/vscode-extension.md): run one SQL statement
@@ -1887,7 +2002,31 @@ function serviceActionContext(row, capabilities = {}) {
   for (const role of ["dpc", "mpc", "handler", "app", "service"]) {
     if (capabilities.sources?.[role]?.path) flags.push(`source-${role}`);
   }
+  // the taxi demo's sample data: generate a year, reset (osd.generateTaxiData)
+  if (row?.name === "ZOSD_TAXI_SRV") flags.push("taxi-data");
   return [serviceContextValue(row?.kind), ...flags].join(";");
+}
+
+// ---- the taxi demo's sample data (ZOSD_TAXI_SRV): the two palette commands
+// and the tree action ask what these say, so the words are the app's
+// (webapp/taxi/i18n/i18n.properties)
+
+/** the most recent year without rows, this year first */
+function taxiDefaultYear(years = [], now = new Date()) {
+  const loaded = new Set(years.map((y) => Number(y.Year)));
+  let year = now.getFullYear();
+  while (loaded.has(year) && year > 1900) year -= 1;
+  return year;
+}
+
+/** what a reset would remove, as the question to ask; undefined when only
+ *  rows that are not synthetic are loaded and there is nothing to remove */
+function taxiResetPrompt(years = []) {
+  if (years.length === 0) return undefined;
+  const group = (n) => Number(n).toLocaleString("en-US").replace(/,/g, " ");
+  const trips = years.reduce((n, y) => n + Number(y.Trips), 0);
+  const rows = years.reduce((n, y) => n + Number(y.Rows), 0);
+  return `Remove ${years.map((y) => y.Year).join(", ")} (${group(trips)} trips in ${group(rows)} rows)? Rows that are not synthetic stay.`;
 }
 
 function normalizeTransactionRow(row) {
@@ -2225,7 +2364,7 @@ function serviceDetailsHtml(details, nonce = "") {
         <p class="muted">ABAP Unit by reference</p>${list(tests, (test) => `<li><code>${esc(test)}</code></li>`)}</section>`;
     };
     body += `<section><h2>OData</h2><p>DPC: ${esc(row.handler ?? "n/a")}</p><p>MPC: ${esc(row.mpc ?? "n/a")}</p>
-      <p><a href="${attr(metadataUrl ?? "")}" target="_blank" rel="noreferrer" title="Opens in your browser.">$metadata</a></p>
+      <p><a href="#" data-metadata="default" title="${attr(metadataUrl ?? "")}">$metadata</a> · <a href="#" data-metadata="browser">in browser</a></p>
       ${details.entitySetsError ? `<p class="error">Entity sets: ${esc(details.entitySetsError)}</p>` : ""}
       <h3>Model sources</h3>${list(details.card?.model, (target) => `<li>${cardLink(target)}</li>`)}
       <h3>Entity sets</h3>${list(details.card?.entitySets ?? details.entitySets ?? [], (set) => `<li><code>${esc(set.set)}</code>
@@ -2256,7 +2395,7 @@ function serviceDetailsHtml(details, nonce = "") {
       <p>Service declaration: ${sourceButton("service", row.kind === "APC" ? "Open SAPC source" : "Open SICF source", details.sources?.service)}</p></section>`;
   }
 
-  const script = `<script nonce="${attr(nonce)}">const vscode=acquireVsCodeApi();document.addEventListener("click",e=>{const b=e.target.closest("[data-path], [data-source]");if(!b)return;if(b.dataset.path)vscode.postMessage({command:"openCardPath",path:b.dataset.path,line:Number(b.dataset.line)});else vscode.postMessage({command:"openSource",role:b.dataset.source});});</script>`;
+  const script = `<script nonce="${attr(nonce)}">const vscode=acquireVsCodeApi();document.addEventListener("click",e=>{const m=e.target.closest("[data-metadata]");if(m){e.preventDefault();vscode.postMessage({command:"openMetadata",where:m.dataset.metadata});return;}const b=e.target.closest("[data-path], [data-source]");if(!b)return;if(b.dataset.path)vscode.postMessage({command:"openCardPath",path:b.dataset.path,line:Number(b.dataset.line)});else vscode.postMessage({command:"openSource",role:b.dataset.source});});</script>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${attr(nonce)}';"><style>
     body{font:13px var(--vscode-font-family);color:var(--vscode-foreground);padding:0 20px;max-width:1000px}h1{font-size:20px}h2{font-size:16px;margin-bottom:8px}section{border-top:1px solid var(--vscode-panel-border);padding:8px 0}button{color:var(--vscode-textLink-foreground);background:transparent;border:0;padding:0;text-decoration:underline;cursor:pointer}a{color:var(--vscode-textLink-foreground)}code{font-family:var(--vscode-editor-font-family)}ul{margin-top:6px}.muted{color:var(--vscode-descriptionForeground)}.error{color:var(--vscode-errorForeground)}
     </style></head><body>${body}${script}</body></html>`;
@@ -2264,6 +2403,7 @@ function serviceDetailsHtml(details, nonce = "") {
 
 module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText,
+  packSourceMappings, runningAbapSources, breakpointWarning, sourceKey,
   warmStatusText, activationBuildText, closureTestsText,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
@@ -2280,4 +2420,4 @@ module.exports = {objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes
   transactionDetailsHtml, appManifestDetails, httpTestFiles, closureTestNames, dumpsForService,
   implementationMethodLine, serviceCardModel, serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext,
-  SYSTEM_STATUS_SETS, odataV2Results, systemOverviewModel};
+  SYSTEM_STATUS_SETS, odataV2Results, systemOverviewModel, taxiDefaultYear, taxiResetPrompt};

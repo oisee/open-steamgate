@@ -47,6 +47,23 @@ describe("wire", () => {
     expect(page, "the launchpad asks for them").to.contain("packs.json");
   });
 
+  // The sandbox resolves an intent only from the applications it boots
+  // with, so a pack's intents have to be in the page's config before
+  // sandbox.js runs, not added by launchpad.js afterwards.
+  it("the launchpad boots with the intents the packs' apps declare", async () => {
+    const {applications} = await (await fetch(`http://localhost:${PORT}/app/packs.json`)).json();
+    expect(applications).to.be.an("object");
+    for (const [intent, app] of Object.entries(applications)) {
+      expect(intent).to.match(/^[^-]+-[^-]+$/);
+      expect(app.additionalInformation, intent).to.match(/^SAPUI5\.Component=/);
+      expect(app.url, intent).to.match(/^\.\.\/sap\/bc\/ui5_ui5\/sap\/z[a-z0-9_]+\/$/);
+    }
+    const flp = await (await fetch(`http://localhost:${PORT}/app/flp.html`)).text();
+    const read = flp.indexOf('"./packs.json", false');
+    expect(read, "flp.html reads packs.json synchronously").to.be.greaterThan(-1);
+    expect(read, "before the sandbox boots").to.be.lessThan(flp.indexOf("bootstrap/sandbox.js"));
+  });
+
   it("$metadata", async () => {
     const res = await fetch(BASE + "/$metadata");
     expect(res.status).to.equal(200);

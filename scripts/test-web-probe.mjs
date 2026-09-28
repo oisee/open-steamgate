@@ -1,14 +1,82 @@
 // End-to-end VS Code web extension check. @vscode/test-web serves VS Code;
 // Playwright drives one persistent Chromium profile through a page reload.
 import {spawn} from "node:child_process";
-import {mkdtemp, rm, stat} from "node:fs/promises";
+import {createHash} from "node:crypto";
+import {mkdtemp, readFile, rm, stat} from "node:fs/promises";
 import {createServer} from "node:net";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
+import {runInNewContext} from "node:vm";
 import {chromium} from "@playwright/test";
 
 const root = resolve(import.meta.dirname, "..");
 const extension = join(root, "editors/vscode");
+const source = await readFile(join(extension, "web/extension.mjs"), "utf8");
+
+// Test-only harness: execute the shipped functions with a fake message channel
+// and gateway. No test dispatch or synthetic response is bundled in the extension.
+async function testTransportSeam() {
+  const calls = [];
+  const bridgeSource = source.slice(source.indexOf("function bytesFromBase64"), source.indexOf("function required("));
+  const bridge = runInNewContext(`${bridgeSource}\nbridgeRequest`, {
+    Uint8Array, TextEncoder, Headers, atob, btoa,
+    encoder: new TextEncoder(),
+    gateway: async (request) => {
+      calls.push(request);
+      return {status: 200, headers: new Headers({"content-type": "application/octet-stream", "content-length": "4"}),
+        body: Uint8Array.from([0, 255, 13, 10])};
+    },
+  });
+  const body = Uint8Array.from([255, 254, 13, 0]);
+  const request = (path) => ({method: "POST", path, query: "?source=test", headers: [["content-type", "application/octet-stream"]],
+    body: Buffer.from(body).toString("base64")});
+  const allowed = "/sap/bc/assets/photo%2epng";
+  const answer = await bridge(request(allowed));
+  if (answer.status !== 200 || calls.length !== 1 || calls[0].path !== allowed ||
+      createHash("sha256").update(calls[0].body).digest("hex") !== createHash("sha256").update(body).digest("hex") ||
+      calls[0].search !== "?source=test" || calls[0].headers["content-type"] !== "application/octet-stream" ||
+      Buffer.from(answer.body, "base64").compare(Buffer.from([0, 255, 13, 10])) !== 0) {
+    throw new Error("Bridge byte forwarding, encoded-dot filename, or binary response changed");
+  }
+  for (const path of ["/sap/bc/../secret", "/sap/bc/%2e%2e/secret", "/sap/bc/%2e/secret",
+    "/sap/bc/dir%2fsecret", "/sap/bc/dir%5csecret", "/sap/bc/dir\\secret"]) {
+    const denied = await bridge(request(path));
+    if (denied.status !== 403 || calls.length !== 1) throw new Error(`Traversal reached gateway: ${path}`);
+  }
+  const malformed = await bridge(request("/sap/bc/photo%ZZ"));
+  if (malformed.status !== 400 || calls.length !== 1) throw new Error("Malformed path encoding must be 400 and never reach the gateway");
+  const listeners = [];
+  const sent = [];
+  const viewSource = source.slice(source.indexOf("function webviewRuntime("), source.indexOf("function webviewHtml("));
+  const viewWindow = {addEventListener: (_type, listener) => listeners.push(listener)};
+  const runtime = runInNewContext(`${viewSource}\nwebviewRuntime`, {
+    window: viewWindow, document: {getElementById: () => ({textContent: "", onclick: null})},
+    acquireVsCodeApi: () => ({postMessage: (message) => {
+      sent.push(message);
+      if (message.type === "fetch") queueMicrotask(() => listeners.forEach((listener) => listener({data: {type: "fetch-result",
+        id: message.id, response: {status: 204, statusText: "No Content", headers: [], body: ""}}})));
+    }}),
+    URL, URLSearchParams, Request, Response, Headers, Blob, TextEncoder, TextDecoder, Uint8Array,
+    ArrayBuffer, crypto, atob, btoa,
+  });
+  runtime("/sap/opu/odata/sap/ZSTG_DEMO_SRV");
+  const cases = [
+    {body: new URLSearchParams({word: "café"}), expected: "application/x-www-form-urlencoded;charset=UTF-8"},
+    {body: "café", expected: "text/plain;charset=UTF-8"},
+    {body: new Blob(["café"], {type: "application/example"}), expected: "application/example"},
+    {body: new Blob(["café"]), expected: ""},
+  ];
+  for (const entry of cases) for (const explicit of [false, true]) {
+    const expected = explicit ? "application/explicit" : entry.expected;
+    await viewWindow.osdBridge.fetch("$metadata", {method: "POST",
+      headers: explicit ? {"content-type": expected} : {}, body: entry.body});
+    const actual = new Headers(sent.at(-1).headers).get("content-type") ?? "";
+    if (actual !== expected) throw new Error(`Content-Type ${actual} != ${expected}`);
+  }
+  console.log("Test-only transport seam: bytes, path segments, content types passed");
+}
+
+await testTransportSeam();
 // Always rebuild before launching VS Code so this check exercises current sources.
 if (process.env.OSD_WEB_TEST_SKIP_BUILD !== "1") {
   const build = spawn("npm", ["run", "web:vscode"], {cwd: root, stdio: "inherit"});
@@ -68,9 +136,38 @@ async function command(page, title, marker) {
   const text = (await page.locator(".output-view .view-lines").textContent()).replaceAll("\u00a0", " ");
   const error = text.match(new RegExp(`${marker}_ERROR ([\\s\\S]*)`));
   if (error) throw new Error(error[1].slice(0, 2000));
-  const match = text.match(new RegExp(`${marker} (\\{[^}]+\\})`));
-  if (!match) throw new Error(`${marker} result missing from Output: ${text.slice(-2000)}`);
-  return JSON.parse(match[1]);
+  const start = text.indexOf(`${marker} {`);
+  if (start < 0) throw new Error(`${marker} result missing from Output: ${text.slice(-2000)}`);
+  const jsonStart = start + marker.length + 1;
+  for (let end = jsonStart + 1; end <= text.length; end++) {
+    if (text[end - 1] !== "}") continue;
+    try { return JSON.parse(text.slice(jsonStart, end)); } catch { /* nested object continues */ }
+  }
+  throw new Error(`${marker} result has incomplete JSON: ${text.slice(start, start + 2000)}`);
+}
+
+async function openProbeView(page) {
+  await page.keyboard.press("Control+Shift+P");
+  const input = page.locator(".quick-input-widget input").first();
+  await input.fill(">osd: Web probe view");
+  await page.locator(".quick-input-list .monaco-list-row").filter({hasText: "osd: Web probe view"}).first().click();
+  for (let attempt = 0; attempt < 120; attempt++) {
+    for (const frame of page.frames()) {
+      if (frame !== page.mainFrame() && await frame.locator("#run").count().catch(() => 0)) return frame;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 500));
+  }
+  throw new Error("Probe webview did not open");
+}
+
+async function webviewResult(frame, marker) {
+  await frame.waitForFunction((name) => {
+    const text = document.querySelector("#result")?.textContent ?? "";
+    return text.startsWith(name + " ") || text.startsWith("OSD_WEBVIEW_ERROR ");
+  }, marker, {timeout: 180000});
+  const value = await frame.locator("#result").textContent();
+  if (value.startsWith("OSD_WEBVIEW_ERROR")) throw new Error(value);
+  return JSON.parse(value.slice(marker.length + 1));
 }
 
 try {
@@ -105,9 +202,18 @@ try {
   if (!Number.isFinite(probe.activationToMetadataMs) || !Number.isFinite(probe.commandToMetadataMs)) {
     throw new Error(`Missing $metadata timing: ${JSON.stringify(probe)}`);
   }
+  if (probe.photo?.status !== 200 || !/^[0-9a-f]{64}$/.test(probe.photo.hash) || probe.photo.contentType !== "image/png") {
+    throw new Error(`Invalid direct gateway image: ${JSON.stringify(probe.photo)}`);
+  }
   console.log(`Probe: $metadata ${probe.metadata}, POST ${probe.post}, GET ${probe.get}, ${probe.id}`);
   console.log(`Activation to first $metadata: ${probe.activationToMetadataMs} ms`);
   console.log(`Command to $metadata response: ${probe.commandToMetadataMs} ms`);
+
+  const read = await command(page, "osd: Web read probe", "OSD_WEB_READ");
+  if (read.sql !== 200 || read.rows !== 5 || read.ddic !== 200 || read.cap !== 2 || read.invalid !== 400) {
+    throw new Error(`Web read probe failed: ${JSON.stringify(read)}`);
+  }
+  console.log(`Worker reads: SELECT ${read.rows} rows, DDIC ${read.ddic}, cap ${read.cap}, invalid ${read.invalid}`);
 
   await page.reload({waitUntil: "domcontentloaded"});
   await page.locator(".monaco-workbench").waitFor({timeout: 120000});
@@ -117,26 +223,38 @@ try {
   }
   console.log(`After reload: GET ${verified.get}, same row ${verified.id}`);
 
-  await page.keyboard.press("Control+Shift+P");
-  const input = page.locator(".quick-input-widget input").first();
-  await input.fill(">osd: Web probe view");
-  await page.locator(".quick-input-list .monaco-list-row").filter({hasText: "osd: Web probe view"}).first().click();
-  let bridged = false;
-  const deadline = Date.now() + 60000;
-  while (Date.now() < deadline && !bridged) {
-    for (const frame of page.frames()) {
-      if (frame === page.mainFrame()) continue;
-      const body = await frame.locator("body").textContent({timeout: 1000}).catch(() => "");
-      if (body?.includes("200") && body.includes("Edmx")) {
-        bridged = true;
-        break;
-      }
-    }
-    if (!bridged) await new Promise((resolveWait) => setTimeout(resolveWait, 500));
+  const frame = await openProbeView(page);
+  const photo = await frame.evaluate(async () => {
+    const response = await window.osdBridge.fetch("PhotoSet('T0001')/$value");
+    const bytes = await response.arrayBuffer();
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    return {status: response.status, hash: Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""),
+      bytes: bytes.byteLength, contentType: response.headers.get("content-type"),
+      contentLength: response.headers.get("content-length")};
+  });
+  if (JSON.stringify(photo) !== JSON.stringify(probe.photo)) {
+    throw new Error(`Binary bridge response differs from direct gateway: ${JSON.stringify({direct: probe.photo, bridged: photo})}`);
   }
-  if (!bridged) throw new Error("Webview postMessage bridge did not display $metadata 200");
-  console.log("Webview postMessage bridge: $metadata 200");
+  console.log(`Webview image: ${photo.bytes} bytes, ${photo.contentType}, SHA-256 ${photo.hash}`);
+  await frame.locator("#run").click();
+  const bridged = await webviewResult(frame, "OSD_WEBVIEW_PROBE");
+  if (bridged.metadata !== 200 || bridged.csrf !== 200 || bridged.post !== 201 ||
+      bridged.get !== 200 || bridged.filtered !== 200 || bridged.forbidden !== 403 ||
+      bridged.batch !== 202 || bridged.batchGet !== 200 ||
+      !bridged.token || !bridged.location?.includes(bridged.id) || !bridged.contentType?.includes("json")) {
+    throw new Error(`Invalid webview result: ${JSON.stringify(bridged)}`);
+  }
+  console.log(`Webview bridge: metadata ${bridged.metadata}, POST ${bridged.post}, batch ${bridged.batch}`);
 
+  await page.reload({waitUntil: "domcontentloaded"});
+  await page.locator(".monaco-workbench").waitFor({timeout: 120000});
+  const reloadedFrame = await openProbeView(page);
+  await reloadedFrame.locator("#verify").click();
+  const persisted = await webviewResult(reloadedFrame, "OSD_WEBVIEW_VERIFY");
+  if (persisted.get !== 200 || persisted.id !== bridged.id || persisted.description !== bridged.description) {
+    throw new Error(`Webview IndexedDB reload check failed: ${JSON.stringify(persisted)}`);
+  }
+  console.log(`Webview after reload: GET ${persisted.get}, same row ${persisted.id}`);
   const osdActivity = page.locator(".activitybar .action-label[aria-label*='OSD']").first();
   await osdActivity.waitFor({timeout: 120000});
   await osdActivity.click();
@@ -168,11 +286,9 @@ try {
   if (!serviceDetails) throw new Error("Single click did not open the service details panel");
   await page.keyboard.press("Control+Shift+P");
   const palette = page.locator(".quick-input-widget input").first();
-  await palette.fill(">osd: Web probe");
-  const choices = page.locator(".quick-input-list .monaco-list-row");
-  await choices.filter({hasText: "osd: Web probe"}).first().waitFor({timeout: 30000});
   await palette.fill(">osd:");
-  const webCommands = ["osd: Web probe", "osd: Web verify last Travel", "osd: Web probe view", "osd: Refresh the view (no rebuild)"];
+  const choices = page.locator(".quick-input-list .monaco-list-row");
+  const webCommands = ["osd: Web probe", "osd: Web read probe", "osd: Web verify last Travel", "osd: Web probe view", "osd: Refresh the view (no rebuild)"];
   for (const title of webCommands) await choices.filter({hasText: title}).first().waitFor({timeout: 30000});
   await page.locator(".quick-input-widget .quick-input-progress.done").waitFor({timeout: 30000});
   const paletteRows = await choices.allTextContents();
@@ -183,8 +299,6 @@ try {
   }
   await page.keyboard.press("Escape");
   console.log("OSD tree: generation, grouped demo OData, service details; desktop commands hidden");
-
-
 } catch (error) {
   console.error(error);
   console.error("Workbench text:", (await page?.locator("body").innerText().catch(() => ""))?.slice(-3000));

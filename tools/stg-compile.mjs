@@ -1100,7 +1100,11 @@ export function compileAll(root = "src", out = "gen/stg", libs = [], extraRoots 
   // pack-local DPC_EXT invisible, so the empty generated skeleton in gen/
   // overrode it. Every model root contributes both models and owned objects.
   const roots = (Array.isArray(root) ? root : [root, ...extraRoots]).filter((d) => existsSync(d));
-  const existingPaths = new Map(winningByLayer(roots, (dir) => walk(dir), objectOf)
+  // an object's .xml sorts after its .abap and would stand for it; the path
+  // is read as source (test/shadowed-objects.mjs), so within a folder the
+  // .abap is listed last and wins
+  const sourceLast = (a, b) => Number(a.endsWith(".abap")) - Number(b.endsWith(".abap"));
+  const existingPaths = new Map(winningByLayer(roots, (dir) => walk(dir).sort(sourceLast), objectOf)
     .map((file) => [objectOf(file), file]));
   const existing = new Set(existingPaths.keys());
   const functionModules = loadFunctionGroups([...libs, ...roots]);

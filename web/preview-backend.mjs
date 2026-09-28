@@ -14,9 +14,11 @@ import {seed, buildId, database, demoRows} from "./generated/seed.mjs";
 import {odata as odataServices, packs as packRows, sid as SID} from "./generated/status.mjs";
 import {registry as icfRegistry} from "./generated/icf.mjs";
 import {xref} from "./generated/xref.mjs";
+import {previewFields} from "./generated/preview-fields.mjs";
 import {applyRows as applyXref} from "../tools/osd-xref-seed.mjs";
 import {servicesFromRows, serviceForPath} from "../tools/osd-icf-routing.mjs";
 import {currentRows} from "../tools/osd-icf-apply.mjs";
+import {readRequest} from "./preview-runtime.mjs";
 
 // test/setup.mjs looks for this before it touches the file system: the seed
 // rows come from the bundle, the database from cache storage (or fresh).
@@ -404,7 +406,7 @@ export async function startBackend(stored, options = {}) {
 // an HTTP step gives the work process to an APC event, never to the next
 // request, which waits here for the shim's static server
 export function handleRequest(request) {
-  return serialized(() => invoke(request));
+  return serialized(async () => await readRequest(abap.context.databaseConnections.DEFAULT, request, previewFields) ?? invoke(request));
 }
 
 // Back to the seeded state: the transpiled runtime is kept, only the database

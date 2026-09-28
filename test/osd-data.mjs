@@ -1,6 +1,10 @@
 import {expect} from "chai";
+import initSqlJs from "sql.js";
+import {SQLiteDatabaseClient} from "@abaplint/database-sqlite";
 import {Data, NotAllowed, openSqlToSql} from "../tools/osd-data.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
+import {tableFieldsOf} from "../tools/adt-documents.mjs";
+import {cdsEntityOf} from "../tools/adt-cds.mjs";
 
 // The data of OSD: the rows a client sees when it asks for table contents,
 // out of the same database the ABAP runtime uses.
@@ -107,5 +111,89 @@ describe("tools/osd-data: the rows of the local system", function () {
     // no second boot: the same connection answers
     expect(await second.boot()).to.equal(client);
     expect((await second.query("SELECT status FROM zstg_status")).rows.length).to.be.greaterThan(0);
+  });
+});
+
+describe("web worker read engine", function () {
+  this.timeout(120000);
+  let readQuery;
+  let readRequest;
+  let db;
+  let client;
+  let previewFields;
+  before(async () => {
+    globalThis.__stgPreviewFreezeTime = false;
+    ({readQuery, readRequest} = await import("../web/preview-runtime.mjs"));
+    const SQL = await initSqlJs();
+    db = new SQL.Database();
+    db.run("CREATE TABLE zstg_demo (travel_id TEXT, amount INTEGER, optional TEXT)");
+    for (let i = 1; i <= 12; i++) db.run("INSERT INTO zstg_demo VALUES (?, ?, ?)", [`T${i}`, i * 10, i === 1 ? null : "hello  "]);
+    db.run("CREATE VIEW zc_stg_demo AS SELECT travel_id, amount FROM zstg_demo");
+    const store = new ObjectStore();
+    previewFields = {ddic: {ZSTG_DEMO: tableFieldsOf(store, store.read("TABL", "ZSTG_DEMO")).fields},
+      cds: {ZC_STG_BOOKING: cdsEntityOf(store, "ZC_STG_BOOKING").fields}};
+    client = {select: async ({select}) => {
+      const result = db.exec(select.replace(/~/g, "."));
+      return {rows: result.length ? result[0].values.map((values) => Object.fromEntries(result[0].columns.map((name, i) => [name, values[i]]))) : []};
+    }};
+  });
+  after(() => db.close());
+
+  it("rewrites UP TO and retains typed values including null", async () => {
+    const result = await readQuery(client, "SELECT travel_id amount optional FROM zstg_demo UP TO 5 ROWS", 100);
+    expect(result.rows).to.have.length(5);
+    expect(result.rows[0]).to.deep.equal({travel_id: "T1", amount: 10, optional: null});
+    expect(result.rows[1].optional).to.equal("hello");
+  });
+
+  it("answers DDIC and CDS routes in the desktop preview XML shape", async () => {
+    for (const [kind, name] of [["ddic", "ddicEntityName"], ["cds", "ddlSourceName"]]) {
+      const object = kind === "ddic" ? "ZSTG_DEMO" : "ZC_STG_DEMO";
+      const answer = await readRequest(client, {method: "POST", path: `/sap/bc/adt/datapreview/${kind}`,
+        search: `?${name}=${object}&rowNumber=2`, body: new TextEncoder().encode("")});
+      const xml = new TextDecoder().decode(answer.body);
+      expect(answer.status).to.equal(200);
+      expect(xml).to.contain('<dataPreview:metadata dataPreview:name="TRAVEL_ID"');
+      expect(xml).to.contain("<dataPreview:totalRows>2</dataPreview:totalRows>");
+      expect(xml).to.contain("<dataPreview:data>T1</dataPreview:data>");
+    }
+  });
+
+  it("uses dictionary keys, types and labels, and CDS element names", async () => {
+    const ddic = await readRequest(client, {method: "POST", path: "/sap/bc/adt/datapreview/ddic",
+      search: "?ddicEntityName=ZSTG_DEMO", body: new Uint8Array()}, previewFields);
+    const xml = new TextDecoder().decode(ddic.body);
+    expect(xml).to.match(/dataPreview:name="TRAVEL_ID"[^/]*dataPreview:keyAttribute="true"[^/]*dataPreview:colType="CHAR"[^/]*dataPreview:length="8"/);
+    const cdsClient = {select: async () => ({rows: [{TRAVELID: "T1"}]})};
+    const cds = await readRequest(cdsClient, {method: "POST", path: "/sap/bc/adt/datapreview/cds",
+      search: "?ddlSourceName=ZC_STG_BOOKING", body: new Uint8Array()}, previewFields);
+    expect(new TextDecoder().decode(cds.body)).to.match(/dataPreview:name="TRAVELID" dataPreview:camelCaseName="TravelId"[^/]*dataPreview:keyAttribute="true"/);
+  });
+
+  it("returns no rows for SQL zero limits with the actual SQLite adapter", async () => {
+    const actual = new SQLiteDatabaseClient();
+    const previousAbap = globalThis.abap;
+    globalThis.abap = {context: {}};
+    await actual.connect();
+    try {
+      await actual.execute("CREATE TABLE zero_test (value INTEGER); INSERT INTO zero_test VALUES (1)");
+      for (const sql of ["SELECT * FROM zero_test LIMIT 0", "SELECT * FROM zero_test UP TO 0 ROWS"]) {
+        const result = await readQuery(actual, sql, 10);
+        expect(result.rows, sql).to.deep.equal([]);
+        expect(result.count, sql).to.equal(0);
+      }
+    } finally {
+      await actual.disconnect();
+      globalThis.abap = previousAbap;
+    }
+  });
+
+  it("enforces the cap and returns a clear refusal", async () => {
+    expect((await readQuery(client, "SELECT * FROM zstg_demo", 2)).rows).to.have.length(2);
+    expect((await readQuery(client, "SELECT * FROM zstg_demo", 100000)).sql).to.match(/LIMIT 1000$/);
+    const refused = await readRequest(client, {method: "POST", path: "/osd/sql",
+      body: new TextEncoder().encode(JSON.stringify({sql: "DELETE FROM zstg_demo"}))});
+    expect(refused.status).to.equal(400);
+    expect(JSON.parse(new TextDecoder().decode(refused.body)).error.code).to.equal("NOT_ALLOWED");
   });
 });

@@ -59,6 +59,9 @@ CLASS zcl_osd_demo_taxi DEFINITION PUBLIC FINAL CREATE PUBLIC.
     " the lower bound of the synthetic range: every FACT_ID >= this is ours.
     " The value itself is never generated; the first row is 9000000001
     CONSTANTS c_synthetic_min TYPE n LENGTH 10 VALUE '9000000000'.
+    " the sample month's keys end below this; a year's keys (9 and the year,
+    " YEAR_LOW) start above it
+    CONSTANTS c_month_max TYPE n LENGTH 10 VALUE '9099999999'.
     CONSTANTS c_default_seed TYPE i VALUE 20250101.
     CONSTANTS c_max_rows TYPE i VALUE 200000.
 
@@ -70,6 +73,34 @@ CLASS zcl_osd_demo_taxi DEFINITION PUBLIC FINAL CREATE PUBLIC.
         iv_seed         TYPE i
       RETURNING
         VALUE(rt_facts) TYPE ty_facts.
+    " one year of synthetic trips, iv_rows groups over its days: the rows
+    " are the same for the same year on every host (seeded by the year), and
+    " each year has its own character (PROFILE). Keys are 9, the year and a
+    " five-digit counter, so one year never touches another's rows
+    CLASS-METHODS generate_year
+      IMPORTING
+        iv_year         TYPE i
+        iv_rows         TYPE i DEFAULT 20000
+      RETURNING
+        VALUE(rt_facts) TYPE ty_facts.
+    " what makes a year's rows its own, as one line of text: the trend, the
+    " season, the fare level, the busier borough and the one event
+    CLASS-METHODS profile
+      IMPORTING
+        iv_year        TYPE i
+      RETURNING
+        VALUE(rv_text) TYPE string.
+    " the synthetic key range of a year: 9YYYY00000 .. 9YYYY99999
+    CLASS-METHODS year_low
+      IMPORTING
+        iv_year       TYPE i
+      RETURNING
+        VALUE(rv_key) TYPE ty_fact-fact_id.
+    CLASS-METHODS year_high
+      IMPORTING
+        iv_year       TYPE i
+      RETURNING
+        VALUE(rv_key) TYPE ty_fact-fact_id.
     " a number over every row, in the order given: the key, the client,
     " day, hour, trips, cents of fare and tip, hundredths of a mile, the
     " zone (borough and name) and the payment -- every column
@@ -142,9 +173,47 @@ CLASS zcl_osd_demo_taxi DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_tip_spread TYPE i VALUE 11.
     CONSTANTS c_cash_tip TYPE i VALUE 3.
 
+    TYPES:
+      BEGIN OF ty_year,
+        slope      TYPE i,
+        summer     TYPE abap_bool,
+        amplitude  TYPE i,
+        fare_pct   TYPE i,
+        borough    TYPE c LENGTH 20,
+        event      TYPE i,
+        event_from TYPE i,
+        event_to   TYPE i,
+        event_pct  TYPE i,
+      END OF ty_year.
+    " the season around its mean, per month, in per cent: a summer year
+    " peaks in July; a winter year is the same curve upside down
+    CONSTANTS c_season TYPE string VALUE `-30 -25 -15 -5 5 15 20 18 5 -5 -15 -20`.
+    " the three holiday weeks an event year may spike in: day of year from, to
+    CONSTANTS c_holidays TYPE string VALUE `183 189 326 332 358 365`.
+
     CLASS-METHODS zones
       RETURNING
         VALUE(rt_zones) TYPE ty_zones.
+    CLASS-METHODS year_of
+      IMPORTING
+        iv_year        TYPE i
+      RETURNING
+        VALUE(rs_year) TYPE ty_year.
+    " the groups: iv_rows cells over the days given, each day weighted by
+    " it_days for how many groups it gets and by it_intensity for how many
+    " trips a group holds; keys iv_prefix then a counter, ten digits in all
+    CLASS-METHODS fill
+      IMPORTING
+        io_gen          TYPE REF TO zcl_osd_demo_random
+        it_day_names    TYPE ty_strings
+        it_days         TYPE zcl_osd_demo_random=>ty_ints
+        it_intensity    TYPE zcl_osd_demo_random=>ty_ints
+        it_zones        TYPE ty_zones
+        iv_rows         TYPE i
+        iv_fare_pct     TYPE i
+        iv_prefix       TYPE string
+      RETURNING
+        VALUE(rt_facts) TYPE ty_facts.
     CLASS-METHODS payment_name
       IMPORTING
         iv_payment     TYPE i
@@ -158,14 +227,55 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
 
   METHOD generate.
     DATA lo_gen TYPE REF TO zcl_osd_demo_random.
+    DATA lt_week TYPE zcl_osd_demo_random=>ty_ints.
+    DATA lt_days TYPE zcl_osd_demo_random=>ty_ints.
+    DATA lt_names TYPE ty_strings.
+    DATA lv_weekday TYPE i.
+    DATA lv_w TYPE i.
+    DATA lv_n2 TYPE n LENGTH 2.
+    DATA lv_name TYPE string.
+    DATA lv_rows TYPE i.
+
+    lv_rows = iv_rows.
+    IF lv_rows < 0.
+      lv_rows = 0.
+    ELSEIF lv_rows > c_max_rows.
+      lv_rows = c_max_rows.
+    ENDIF.
+    CREATE OBJECT lo_gen
+      EXPORTING
+        iv_seed = iv_seed.
+    lt_week = zcl_osd_demo_random=>curve( c_weekday_curve ).
+    DO c_days TIMES.
+      lv_weekday = ( sy-index - 1 + c_first_weekday ) MOD 7 + 1.
+      READ TABLE lt_week INTO lv_w INDEX lv_weekday.
+      APPEND lv_w TO lt_days.
+      lv_n2 = sy-index.
+      CONCATENATE c_month lv_n2 INTO lv_name.
+      APPEND lv_name TO lt_names.
+    ENDDO.
+    rt_facts = fill( io_gen       = lo_gen
+                     it_day_names = lt_names
+                     it_days      = lt_days
+                     it_intensity = lt_days
+                     it_zones     = zones( )
+                     iv_rows      = lv_rows
+                     iv_fare_pct  = 100
+                     iv_prefix    = `9` ).
+  ENDMETHOD.
+
+  METHOD fill.
     DATA lt_zones TYPE ty_zones.
     DATA ls_zone TYPE ty_zone.
     DATA lt_weights TYPE zcl_osd_demo_random=>ty_ints.
     DATA lt_zone_pick TYPE zcl_osd_demo_random=>ty_ints.
     DATA lt_hours TYPE zcl_osd_demo_random=>ty_ints.
     DATA lt_hour_pick TYPE zcl_osd_demo_random=>ty_ints.
-    DATA lt_week TYPE zcl_osd_demo_random=>ty_ints.
     DATA lt_days TYPE zcl_osd_demo_random=>ty_ints.
+    DATA lv_days TYPE i.
+    DATA lv_width TYPE i.
+    DATA lv_offset TYPE i.
+    DATA lv_name TYPE string.
     DATA lt_day_pick TYPE zcl_osd_demo_random=>ty_ints.
     DATA lt_pays TYPE zcl_osd_demo_random=>ty_ints.
     DATA lt_pay_pick TYPE zcl_osd_demo_random=>ty_ints.
@@ -175,7 +285,6 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
     DATA ls_fact TYPE ty_fact.
     DATA lv_rows TYPE i.
     DATA lv_w TYPE i.
-    DATA lv_weekday TYPE i.
     DATA lv_day TYPE i.
     DATA lv_hour TYPE i.
     DATA lv_slot TYPE i.
@@ -198,45 +307,34 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
     DATA lv_r2 TYPE i.
     DATA lv_key TYPE i.
     DATA lv_n9 TYPE n LENGTH 9.
-    DATA lv_n2 TYPE n LENGTH 2.
     DATA lv_c10 TYPE c LENGTH 10.
 
     lv_rows = iv_rows.
-    IF lv_rows < 0.
-      lv_rows = 0.
-    ELSEIF lv_rows > c_max_rows.
-      lv_rows = c_max_rows.
-    ENDIF.
-    CREATE OBJECT lo_gen
-      EXPORTING
-        iv_seed = iv_seed.
+    lt_days = it_days.
+    lv_days = lines( lt_days ).
+    lv_width = 10 - strlen( iv_prefix ).
+    lv_offset = 9 - lv_width.
 
-    lt_zones = zones( ).
+    lt_zones = it_zones.
     LOOP AT lt_zones INTO ls_zone.
       APPEND ls_zone-weight TO lt_weights.
     ENDLOOP.
     lt_zone_pick = zcl_osd_demo_random=>expand( lt_weights ).
     lt_hours = zcl_osd_demo_random=>curve( c_hour_curve ).
     lt_hour_pick = zcl_osd_demo_random=>expand( lt_hours ).
-    lt_week = zcl_osd_demo_random=>curve( c_weekday_curve ).
-    DO c_days TIMES.
-      lv_weekday = ( sy-index - 1 + c_first_weekday ) MOD 7 + 1.
-      READ TABLE lt_week INTO lv_w INDEX lv_weekday.
-      APPEND lv_w TO lt_days.
-    ENDDO.
     lt_day_pick = zcl_osd_demo_random=>expand( lt_days ).
     lt_pays = zcl_osd_demo_random=>curve( c_payment_split ).
     lt_pay_pick = zcl_osd_demo_random=>expand( lt_pays ).
     lt_pay_trips = zcl_osd_demo_random=>curve( c_payment_trips ).
 
     " how many groups each day-hour gets: a weighted draw per row
-    lv_count = c_days * 24.
+    lv_count = lv_days * 24.
     DO lv_count TIMES.
       APPEND 0 TO lt_count.
     ENDDO.
     DO lv_rows TIMES.
-      lv_day = lo_gen->pick( lt_day_pick ).
-      lv_hour = lo_gen->pick( lt_hour_pick ).
+      lv_day = io_gen->pick( lt_day_pick ).
+      lv_hour = io_gen->pick( lt_hour_pick ).
       lv_slot = ( lv_day - 1 ) * 24 + lv_hour.
       READ TABLE lt_count INTO lv_count INDEX lv_slot.
       lv_count = lv_count + 1.
@@ -256,8 +354,8 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
       DO lv_count TIMES.
         lv_found = 0.
         DO 30 TIMES.
-          lv_zone = lo_gen->pick( lt_zone_pick ).
-          lv_pay = lo_gen->pick( lt_pay_pick ).
+          lv_zone = io_gen->pick( lt_zone_pick ).
+          lv_pay = io_gen->pick( lt_pay_pick ).
           lv_cell = ( lv_zone - 1 ) * c_payments + lv_pay.
           READ TABLE lt_stamp INTO lv_stamp INDEX lv_cell.
           IF lv_stamp <> lv_slot.
@@ -292,29 +390,32 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
         " with the zone's weight, the hour, the weekday and the payment
         lv_key = lv_hour + 1.
         READ TABLE lt_hours INTO lv_hw INDEX lv_key.
-        READ TABLE lt_days INTO lv_dw INDEX lv_day.
+        READ TABLE it_intensity INTO lv_dw INDEX lv_day.
         READ TABLE lt_pay_trips INTO lv_pf INDEX lv_pay.
         lv_mean = ls_zone-weight * lv_hw * lv_dw * lv_pf DIV 800.
         " (one draw per statement, so that no host's order of evaluation
         " inside an expression can matter)
-        lv_r1 = lo_gen->draw( 1000 ).
-        lv_r2 = lo_gen->draw( 1000 ).
+        lv_r1 = io_gen->draw( 1000 ).
+        lv_r2 = io_gen->draw( 1000 ).
         lv_trips = 1 + lv_mean * ( lv_r1 + lv_r2 ) DIV 100000.
         " a trip of this group: its distance, then its fare
-        lv_r1 = lo_gen->draw( 81 ).
+        lv_r1 = io_gen->draw( 81 ).
         lv_miles = ls_zone-miles * ( 60 + lv_r1 ) DIV 100.
-        lv_r1 = lo_gen->draw( 100 ).
-        lv_r2 = lo_gen->draw( 26 ).
+        lv_r1 = io_gen->draw( 100 ).
+        lv_r2 = io_gen->draw( 26 ).
         IF ls_zone-flat > 0 AND lv_r1 < c_flat_share.
           lv_fare = ls_zone-flat.
         ELSE.
           lv_fare = c_fare_base + lv_miles * c_fare_per_mile DIV 100.
           lv_fare = lv_fare * ( 95 + lv_r2 ) DIV 100.
         ENDIF.
+        IF iv_fare_pct <> 100.
+          lv_fare = lv_fare * iv_fare_pct DIV 100.
+        ENDIF.
         lv_fare = lv_fare * lv_trips.
         " the tip: two draws for every group, used or not
-        lv_r1 = lo_gen->draw( 100 ).
-        lv_r2 = lo_gen->draw( c_tip_spread ).
+        lv_r1 = io_gen->draw( 100 ).
+        lv_r2 = io_gen->draw( c_tip_spread ).
         lv_tip = 0.
         IF lv_pay = 1 AND lv_r1 >= c_card_no_tip.
           lv_tip = lv_fare * ( c_tip_min + lv_r2 ) DIV 100.
@@ -327,10 +428,10 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
         " ZCL_OSD_DEMO_DATA puts sy-mandt in before it compares and writes
         lv_key = lines( rt_facts ) + 1.
         lv_n9 = lv_key.
-        CONCATENATE '9' lv_n9 INTO lv_c10.
+        CONCATENATE iv_prefix lv_n9+lv_offset(lv_width) INTO lv_c10.
         ls_fact-fact_id = lv_c10.
-        lv_n2 = lv_day.
-        CONCATENATE c_month lv_n2 INTO ls_fact-pickup_day.
+        READ TABLE it_day_names INTO lv_name INDEX lv_day.
+        ls_fact-pickup_day = lv_name.
         ls_fact-pickup_hour = lv_hour.
         ls_fact-borough = ls_zone-borough.
         ls_fact-pickup_zone = ls_zone-zone.
@@ -343,6 +444,186 @@ CLASS zcl_osd_demo_taxi IMPLEMENTATION.
         APPEND ls_fact TO rt_facts.
       ENDDO.
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD year_of.
+    DATA lo_gen TYPE REF TO zcl_osd_demo_random.
+    DATA lt_holidays TYPE zcl_osd_demo_random=>ty_ints.
+    DATA lv_pick TYPE i.
+    DATA lv_index TYPE i.
+    " the character of a year from its own generator, apart from the one
+    " that draws its rows, so neither changes when the other is tuned
+    CREATE OBJECT lo_gen
+      EXPORTING
+        iv_seed = iv_year.
+    rs_year-slope = lo_gen->draw( 7 ) - 3.
+    rs_year-summer = abap_false.
+    IF lo_gen->draw( 2 ) = 1.
+      rs_year-summer = abap_true.
+    ENDIF.
+    rs_year-amplitude = 10 + lo_gen->draw( 21 ).
+    rs_year-fare_pct = 90 + lo_gen->draw( 26 ).
+    lv_pick = lo_gen->draw( 4 ).
+    CASE lv_pick.
+      WHEN 0.
+        rs_year-borough = 'Manhattan'.
+      WHEN 1.
+        rs_year-borough = 'Brooklyn'.
+      WHEN 2.
+        rs_year-borough = 'Queens'.
+      WHEN OTHERS.
+        rs_year-borough = 'Bronx'.
+    ENDCASE.
+    " the one event: a quiet month (a third of its trips), or a holiday week
+    " with twice as many
+    rs_year-event = lo_gen->draw( 2 ).
+    IF rs_year-event = 0.
+      rs_year-event_from = lo_gen->draw( 12 ) + 1.
+      rs_year-event_to = rs_year-event_from.
+      rs_year-event_pct = 30.
+    ELSE.
+      lt_holidays = zcl_osd_demo_random=>curve( c_holidays ).
+      lv_index = lo_gen->draw( 3 ) * 2 + 1.
+      READ TABLE lt_holidays INTO rs_year-event_from INDEX lv_index.
+      lv_index = lv_index + 1.
+      READ TABLE lt_holidays INTO rs_year-event_to INDEX lv_index.
+      rs_year-event_pct = 200.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD profile.
+    DATA ls_year TYPE ty_year.
+    DATA lv_trend TYPE string.
+    DATA lv_season TYPE string.
+    DATA lv_event TYPE string.
+    DATA lv_month TYPE string.
+    DATA lt_months TYPE ty_strings.
+    ls_year = year_of( iv_year ).
+    IF ls_year-slope > 0.
+      lv_trend = `rising`.
+    ELSEIF ls_year-slope < 0.
+      lv_trend = `falling`.
+    ELSE.
+      lv_trend = `flat`.
+    ENDIF.
+    IF ls_year-summer = abap_true.
+      lv_season = `summer peak`.
+    ELSE.
+      lv_season = `winter peak`.
+    ENDIF.
+    IF ls_year-event = 0.
+      SPLIT `January February March April May June July August September October November December`
+        AT space INTO TABLE lt_months.
+      READ TABLE lt_months INTO lv_month INDEX ls_year-event_from.
+      lv_event = `a quiet ` && lv_month.
+    ELSEIF ls_year-event_from < 200.
+      lv_event = `a busy Fourth of July week`.
+    ELSEIF ls_year-event_from < 350.
+      lv_event = `a busy Thanksgiving week`.
+    ELSE.
+      lv_event = `a busy last week of December`.
+    ENDIF.
+    rv_text = |{ iv_year }: { lv_trend }, { lv_season }, fares at { ls_year-fare_pct } %, | &&
+      |busier { condense( val = ls_year-borough ) }, { lv_event }|.
+  ENDMETHOD.
+
+  METHOD year_low.
+    DATA lv_n4 TYPE n LENGTH 4.
+    lv_n4 = iv_year.
+    CONCATENATE '9' lv_n4 '00000' INTO rv_key.
+  ENDMETHOD.
+
+  METHOD year_high.
+    DATA lv_n4 TYPE n LENGTH 4.
+    lv_n4 = iv_year.
+    CONCATENATE '9' lv_n4 '99999' INTO rv_key.
+  ENDMETHOD.
+
+  METHOD generate_year.
+    DATA ls_year TYPE ty_year.
+    DATA lo_gen TYPE REF TO zcl_osd_demo_random.
+    DATA lt_week TYPE zcl_osd_demo_random=>ty_ints.
+    DATA lt_season TYPE zcl_osd_demo_random=>ty_ints.
+    DATA lt_days TYPE zcl_osd_demo_random=>ty_ints.
+    DATA lt_intensity TYPE zcl_osd_demo_random=>ty_ints.
+    DATA lt_names TYPE ty_strings.
+    DATA lt_zones TYPE ty_zones.
+    FIELD-SYMBOLS <ls_zone> TYPE ty_zone.
+    DATA lv_date TYPE d.
+    DATA lv_first TYPE d.
+    DATA lv_epoch TYPE d VALUE '19000101'.
+    DATA lv_n4 TYPE n LENGTH 4.
+    DATA lv_rows TYPE i.
+    DATA lv_doy TYPE i.
+    DATA lv_month TYPE i.
+    DATA lv_weekday TYPE i.
+    DATA lv_w TYPE i.
+    DATA lv_dev TYPE i.
+    DATA lv_factor TYPE i.
+    DATA lv_weight TYPE i.
+    DATA lv_name TYPE string.
+    DATA lv_prefix TYPE string.
+
+    lv_rows = iv_rows.
+    IF lv_rows < 0.
+      lv_rows = 0.
+    ELSEIF lv_rows > 99999.
+      lv_rows = 99999.
+    ENDIF.
+    ls_year = year_of( iv_year ).
+    lt_week = zcl_osd_demo_random=>curve( c_weekday_curve ).
+    lt_season = zcl_osd_demo_random=>curve( c_season ).
+    lv_n4 = iv_year.
+    CONCATENATE lv_n4 '0101' INTO lv_first.
+    lv_date = lv_first.
+    " every day of the year: its weekday weight, the month's trend and
+    " season, and the event, in tenths so that a quiet day still counts
+    WHILE lv_date(4) = lv_n4.
+      lv_doy = lv_date - lv_first + 1.
+      lv_month = lv_date+4(2).
+      " 1900-01-01 was a Monday
+      lv_weekday = ( lv_date - lv_epoch ) MOD 7 + 1.
+      READ TABLE lt_week INTO lv_w INDEX lv_weekday.
+      READ TABLE lt_season INTO lv_dev INDEX lv_month.
+      IF ls_year-summer = abap_false.
+        lv_dev = 0 - lv_dev.
+      ENDIF.
+      lv_factor = 100 + lv_dev * ls_year-amplitude DIV 20 + ls_year-slope * ( 2 * lv_month - 13 ).
+      IF lv_factor < 20.
+        lv_factor = 20.
+      ENDIF.
+      IF ( ls_year-event = 0 AND lv_month = ls_year-event_from )
+          OR ( ls_year-event = 1 AND lv_doy >= ls_year-event_from AND lv_doy <= ls_year-event_to ).
+        lv_factor = lv_factor * ls_year-event_pct DIV 100.
+      ENDIF.
+      lv_weight = lv_w * lv_factor DIV 10.
+      IF lv_weight < 1.
+        lv_weight = 1.
+      ENDIF.
+      APPEND lv_weight TO lt_days.
+      APPEND lv_w TO lt_intensity.
+      lv_name = lv_date.
+      APPEND lv_name TO lt_names.
+      lv_date = lv_date + 1.
+    ENDWHILE.
+
+    lt_zones = zones( ).
+    LOOP AT lt_zones ASSIGNING <ls_zone> WHERE borough = ls_year-borough.
+      <ls_zone>-weight = <ls_zone>-weight * 3 DIV 2.
+    ENDLOOP.
+
+    CREATE OBJECT lo_gen
+      EXPORTING
+        iv_seed = iv_year * 1000 + 1.
+    lv_prefix = `9` && lv_n4.
+    rt_facts = fill( io_gen       = lo_gen
+                     it_day_names = lt_names
+                     it_days      = lt_days
+                     it_intensity = lt_intensity
+                     it_zones     = lt_zones
+                     iv_rows      = lv_rows
+                     iv_fare_pct  = ls_year-fare_pct
+                     iv_prefix    = lv_prefix ).
   ENDMETHOD.
 
   METHOD checksum.

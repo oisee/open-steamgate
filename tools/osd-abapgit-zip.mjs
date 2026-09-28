@@ -187,21 +187,11 @@ export function preparePack(dir, out) {
   const webapp = resolve(root, declared.webapp ?? "webapp");
   if (existsSync(webapp)) {
     const app = packAppName(name);
-    const services = [...new Set(compiled.map((result) => result.model.service))];
-    let service = services.length === 1 ? services[0] : undefined;
-    const uiManifest = join(webapp, "manifest.json");
-    if (existsSync(uiManifest)) {
-      const json = JSON.parse(readFileSync(uiManifest, "utf8"));
-      const uris = Object.values(json["sap.app"]?.dataSources ?? {}).map((source) => source?.uri).filter(Boolean);
-      const named = uris.map((uri) => /\/sap\/opu\/odata\/sap\/([^/]+)\/?/i.exec(uri)?.[1]).filter(Boolean);
-      if (named.length > 0) service = named[0].toUpperCase();
-    }
     buildApp({
       from: webapp,
       app,
       out,
       text: String(declared.description ?? `pack ${name}`),
-      service,
     });
   }
 

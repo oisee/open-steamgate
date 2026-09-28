@@ -488,6 +488,45 @@ describe("editors/vscode/launcher.js: waitForServing / servingOnce", function ()
     expect(await servingOnce(free)).to.equal(undefined);
   });
 
+  it("waitForServing waits past its timeout while the system answers 'starting' (a slow HANA boot)", async function () {
+    this.timeout(10000);
+    let ready = false;
+    const http = await import("node:http");
+    server = http.createServer((req, res) => {
+      res.writeHead(200, {"content-type": "application/json"});
+      res.end(JSON.stringify(ready ? {ready: true, generation: "cafe"} : {ready: false, starting: true, phase: "seeding"}));
+    });
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    port = server.address().port;
+    setTimeout(() => {
+      ready = true;
+    }, 2500);
+    const phases = [];
+    const serving = await waitForServing(port, {timeoutMs: 1000, intervalMs: 100, bootMs: 8000, onStarting: (s) => phases.push(s.phase)});
+    expect(serving).to.include({ready: true, generation: "cafe"});
+    expect(phases).to.include("seeding");
+  });
+
+  it("waitForServing gives up at the boot limit even while 'starting'", async function () {
+    this.timeout(10000);
+    const http = await import("node:http");
+    server = http.createServer((req, res) => {
+      res.writeHead(200, {"content-type": "application/json"});
+      res.end(JSON.stringify({ready: false, starting: true, phase: "seeding"}));
+    });
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    port = server.address().port;
+    const started = Date.now();
+    await rejects(waitForServing(port, {timeoutMs: 500, intervalMs: 100, bootMs: 1500}), /never answered ready/);
+    expect(Date.now() - started).to.be.within(1400, 4000);
+  });
+
   it("waitForServing resolves once /osd/serving answers ready:true with a generation", async function () {
     this.timeout(5000);
     let ready = false;
@@ -566,8 +605,8 @@ describe("editors/vscode/launcher.js: databases", function () {
 
   it("databaseEnv(hana) sets HANA_* and STG_DB_FRESH only when fresh is truthy", () => {
     expect(databaseEnv({kind: "hana"})).to.deep.equal({STG_DB: "hana"});
-    expect(databaseEnv({kind: "hana", host: "hxehost", port: 39017, user: "SYSTEM", schema: "OSD_ABCD1234"}))
-      .to.deep.equal({STG_DB: "hana", HANA_HOST: "hxehost", HANA_PORT: "39017", HANA_USER: "SYSTEM", HANA_SCHEMA: "OSD_ABCD1234"});
+    expect(databaseEnv({kind: "hana", host: "hxehost", port: 39041, user: "SYSTEM", schema: "OSD_ABCD1234"}))
+      .to.deep.equal({STG_DB: "hana", HANA_HOST: "hxehost", HANA_PORT: "39041", HANA_USER: "SYSTEM", HANA_SCHEMA: "OSD_ABCD1234"});
     expect(databaseEnv({kind: "hana", fresh: true})).to.deep.equal({STG_DB: "hana", STG_DB_FRESH: "1"});
     expect(databaseEnv({kind: "hana", fresh: false})).to.deep.equal({STG_DB: "hana"});
   });
@@ -650,6 +689,249 @@ describe("editors/vscode/launcher.js: stop while building", function () {
       expect(await starting).to.equal(undefined);
       expect(launcher.state).to.equal("stopped");
       expect(existsSync(serverMarker)).to.equal(false);
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+});
+
+// Stop is not an accident: a stop the launcher was asked for emits no "exit"
+// (the extension turns "exit" into "the system stopped unexpectedly"), and
+// a child killed from outside still does. A fake `test/run.mjs` that answers
+// /osd/serving stands in for the real one.
+describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit", function () {
+  this.timeout(20000);
+  const fakeHome = () => {
+    const osdHome = mkdtempSync(join(tmpdir(), "osd-launcher-stop-home-"));
+    mkdirSync(join(osdHome, "tools"), {recursive: true});
+    mkdirSync(join(osdHome, "test"), {recursive: true});
+    writeFileSync(join(osdHome, "tools", "osd-build.mjs"), "process.exit(0);\n");
+    writeFileSync(join(osdHome, "test", "run.mjs"),
+      "import {createServer} from 'node:http';\n" +
+      "createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'fake'})); })" +
+      ".listen(Number(process.env.STG_PORT), '127.0.0.1');\n");
+    return osdHome;
+  };
+
+  for (const how of ["stop", "rebuild"]) {
+    it(`${how}(): no "exit", and the log says it stopped`, async () => {
+      const osdHome = fakeHome();
+      const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+      const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+      const exits = [];
+      const lines = [];
+      launcher.on("exit", (e) => exits.push(e));
+      launcher.on("log", (l) => lines.push(l));
+      try {
+        await launcher.start();
+        expect(launcher.state).to.equal("running");
+        if (how === "stop") {
+          await launcher.stop();
+          expect(launcher.state).to.equal("stopped");
+        } else {
+          await launcher.rebuild();
+          expect(launcher.state).to.equal("running");
+        }
+        expect(exits, "an intended stop is not an unexpected exit").to.deep.equal([]);
+        expect(lines.join("")).to.contain("--- osd stopped ---");
+      } finally {
+        await launcher.stop();
+        rmSync(osdHome, {recursive: true, force: true});
+        rmSync(storageDir, {recursive: true, force: true});
+      }
+    });
+  }
+
+  // a child that never answers /osd/serving: "starting" for as long as we like
+  const silentHome = () => {
+    const osdHome = fakeHome();
+    writeFileSync(join(osdHome, "test", "run.mjs"), "setInterval(() => {}, 1000);\n");
+    return osdHome;
+  };
+
+  it("stop() while starting: start() resolves undefined, no \"exit\"", async () => {
+    const osdHome = silentHome();
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    const exits = [];
+    const lines = [];
+    launcher.on("exit", (e) => exits.push(e));
+    launcher.on("log", (l) => lines.push(l));
+    try {
+      const starting = launcher.start();
+      for (let i = 0; launcher.state !== "starting" && i < 200; i++) await new Promise((r) => setTimeout(r, 10));
+      expect(launcher.state).to.equal("starting");
+      await launcher.stop();
+      expect(await starting, "a cancel, not an error").to.equal(undefined);
+      expect(launcher.state).to.equal("stopped");
+      expect(exits).to.deep.equal([]);
+      expect(lines.join("")).to.contain("--- osd stopped ---");
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
+  it("a start that gives up says so, rejects, and is no \"exit\"", async () => {
+    const osdHome = silentHome();
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 1500});
+    const exits = [];
+    const lines = [];
+    launcher.on("exit", (e) => exits.push(e));
+    launcher.on("log", (l) => lines.push(l));
+    try {
+      await rejects(launcher.start());
+      expect(launcher.state).to.equal("stopped");
+      expect(exits).to.deep.equal([]);
+      expect(lines.join("")).to.contain("--- osd start abandoned ---");
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
+  it("stop() while starting wins over a ready answer the child gives on its way out", async () => {
+    const osdHome = fakeHome();
+    // not ready until told to stop; then ready for a moment, then gone
+    const armed = join(osdHome, "armed");
+    writeFileSync(join(osdHome, "test", "run.mjs"),
+      "import {createServer} from 'node:http';\n" +
+      "import {writeFileSync} from 'node:fs';\n" +
+      "setInterval(() => {}, 1000);\n" +
+      "let signals = 0;\n" +
+      "process.on('SIGTERM', () => {\n" +
+      `  if (++signals > 1) { writeFileSync(${JSON.stringify(join(osdHome, "twice"))}, 'twice'); return; }\n` +
+      "  createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'late'})); })" +
+      ".listen(Number(process.env.STG_PORT), '127.0.0.1');\n" +
+      "  setTimeout(() => process.exit(0), 1500);\n" +
+      "});\n" +
+      `writeFileSync(${JSON.stringify(armed)}, 'armed');\n`);
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    const exits = [];
+    launcher.on("exit", (e) => exits.push(e));
+    try {
+      const starting = launcher.start();
+      // the SIGTERM handler is installed: the ready answer will come
+      for (let i = 0; !existsSync(armed) && i < 500; i++) await new Promise((r) => setTimeout(r, 10));
+      expect(existsSync(armed)).to.equal(true);
+      await launcher.stop();
+      expect(await starting, "not a running system").to.equal(undefined);
+      expect(launcher.state).to.equal("stopped");
+      expect(exits).to.deep.equal([]);
+      expect(existsSync(join(osdHome, "twice")), "one SIGTERM per stop").to.equal(false);
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
+  it("a stop that comes before the start timeout, with a shutdown that outlasts it, is still a stop", async () => {
+    const osdHome = fakeHome();
+    // never ready; on SIGTERM it takes longer to go than start() waits
+    const armed = join(osdHome, "armed");
+    writeFileSync(join(osdHome, "test", "run.mjs"),
+      "import {writeFileSync} from 'node:fs';\n" +
+      "setInterval(() => {}, 1000);\n" +
+      "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 1500));\n" +
+      `writeFileSync(${JSON.stringify(armed)}, 'armed');\n`);
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 1000});
+    const exits = [];
+    const lines = [];
+    launcher.on("exit", (e) => exits.push(e));
+    launcher.on("log", (l) => lines.push(l));
+    try {
+      const starting = launcher.start();
+      for (let i = 0; !existsSync(armed) && i < 500; i++) await new Promise((r) => setTimeout(r, 10));
+      expect(existsSync(armed)).to.equal(true);
+      await launcher.stop();
+      expect(await starting, "the stop's cancel, not a timeout error").to.equal(undefined);
+      expect(exits).to.deep.equal([]);
+      expect(lines.join("")).to.contain("--- osd stopped ---").and.not.contain("start abandoned");
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
+  it("a stop while a timed-out start is already shutting the child down: still that start's error, one SIGTERM", async () => {
+    const osdHome = fakeHome();
+    const armed = join(osdHome, "armed");
+    const twice = join(osdHome, "twice");
+    writeFileSync(join(osdHome, "test", "run.mjs"),
+      "import {writeFileSync} from 'node:fs';\n" +
+      "setInterval(() => {}, 1000);\n" +
+      "let signals = 0;\n" +
+      "process.on('SIGTERM', () => {\n" +
+      `  if (++signals > 1) { writeFileSync(${JSON.stringify(twice)}, 'twice'); return; }\n` +
+      "  setTimeout(() => process.exit(0), 2000);\n" +
+      "});\n" +
+      `writeFileSync(${JSON.stringify(armed)}, 'armed');\n`);
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 800});
+    const exits = [];
+    const lines = [];
+    launcher.on("exit", (e) => exits.push(e));
+    launcher.on("log", (l) => lines.push(l));
+    try {
+      const starting = launcher.start();
+      const failed = rejects(starting, /never answered ready/);
+      for (let i = 0; !existsSync(armed) && i < 500; i++) await new Promise((r) => setTimeout(r, 10));
+      // past the start's timeout, inside the child's 2 s shutdown
+      await new Promise((r) => setTimeout(r, 1500));
+      expect(launcher.state, "the timed-out start is still shutting down").to.equal("starting");
+      await launcher.stop();
+      await failed;
+      expect(launcher.state).to.equal("stopped");
+      expect(existsSync(twice), "one SIGTERM").to.equal(false);
+      expect(exits).to.deep.equal([]);
+      expect(lines.join("")).to.contain("--- osd start abandoned ---").and.not.contain("--- osd stopped ---");
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
+  it("a child that dies while starting is start()'s error, not also an \"exit\"", async () => {
+    const osdHome = fakeHome();
+    writeFileSync(join(osdHome, "test", "run.mjs"), "setTimeout(() => process.exit(3), 100);\n");
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    const exits = [];
+    launcher.on("exit", (e) => exits.push(e));
+    try {
+      await rejects(launcher.start(), /exited before it started serving \(code 3/);
+      expect(exits, "one popup, not two").to.deep.equal([]);
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
+  it("a child killed from outside is still an unexpected exit", async () => {
+    const osdHome = fakeHome();
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    const exits = [];
+    launcher.on("exit", (e) => exits.push(e));
+    try {
+      await launcher.start();
+      const gone = new Promise((resolve) => launcher.once("exit", resolve));
+      process.kill(launcher.pid, "SIGKILL");
+      await gone;
+      expect(exits).to.have.length(1);
+      expect(exits[0].signal).to.equal("SIGKILL");
+      expect(launcher.state).to.equal("stopped");
     } finally {
       await launcher.stop();
       rmSync(osdHome, {recursive: true, force: true});

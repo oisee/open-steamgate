@@ -46,6 +46,11 @@ async function stampOf(db) {
   }
 }
 
+// set once the seed is complete: before that, a stop must not export a
+// half-built database over the last good file (the boot can be stopped now,
+// tools/osd-serve.mjs); leaving the file as it was is the safe outcome
+let seeded = false;
+
 // written after the seed, so it travels with the bytes that are saved
 export async function stamp(db, schema) {
   if (databaseFile() === undefined) {
@@ -55,6 +60,7 @@ export async function stamp(db, schema) {
   await db.execute(`CREATE TABLE IF NOT EXISTS ${STAMP} ('fingerprint' NCHAR(16), 'at' NCHAR(32));`);
   await db.execute(`DELETE FROM ${STAMP};`);
   await db.execute(`INSERT INTO ${STAMP} ('fingerprint', 'at') VALUES ('${fingerprint}', '${new Date().toISOString()}');`);
+  seeded = true;
   return fingerprint;
 }
 
@@ -120,12 +126,15 @@ export async function loadInto(db, schema) {
     return false;
   }
   await db.connect(bytes);
+  // a file read whole was complete: saving it back is safe from here on
   if (schema === undefined) {
+    seeded = true;
     return true;
   }
   const wanted = fingerprintOf(schema);
   const found = await stampOf(db);
   if (found === wanted) {
+    seeded = true;
     return true;
   }
   // the rows in this file were made for other tables. Saying so is the
@@ -183,7 +192,7 @@ export function saveWhenAsked(db) {
   }
   let saved = false;
   const once = () => {
-    if (saved === true) {
+    if (saved === true || seeded === false) {
       return;
     }
     saved = true;

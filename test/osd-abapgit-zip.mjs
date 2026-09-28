@@ -127,6 +127,8 @@ entities:
       "sap.app": {
         dataSources: {
           main: {type: "OData", uri: "/sap/opu/odata/sap/ZPROBE_SRV/"},
+          other: {type: "OData", uri: "../../sap/opu/odata/sap/ZOTHER_SRV/"},
+          unnamed: {type: "OData", uri: "../../sap/opu/odata/sap/"},
         },
       },
     }));
@@ -142,6 +144,9 @@ entities:
     expect(readdirSync(objects)).to.include(icfNodeFile(app));
     const carriedManifest = JSON.parse(readFileSync(join(objects, pageFile(app, "manifest.json")), "utf8"));
     expect(carriedManifest["sap.app"].dataSources.main.uri).to.equal("../../../../opu/odata/sap/ZPROBE_SRV/");
+    expect(carriedManifest["sap.app"].dataSources.other.uri).to.equal("../../../../opu/odata/sap/ZOTHER_SRV/");
+    // a source that names no service is carried as written, not pointed at the pack's only service
+    expect(carriedManifest["sap.app"].dataSources.unnamed.uri).to.equal("../../sap/opu/odata/sap/");
 
     const made = layout(prepared.objects, out, "Pack probe", prepared.data, probe(
       "IWPR ZPROBE", "IWSV ZPROBE_SRV 0001", "IWMO ZPROBE_MDL 0001",

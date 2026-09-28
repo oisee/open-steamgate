@@ -391,14 +391,41 @@ describe("the AMDP destination fails where the calling ABAP can catch it", () =>
       Object.assign(process.env, {
         STG_DB: "hana", HANA_HOST: "system.example.invalid", HANA_PORT: "30115",
         HANA_USER: "SYSTEM_USER", HANA_PASSWORD: "system-secret",
-        HXE_HOST: "sandbox.example.invalid", HXE_PORT: "39017",
+        HXE_HOST: "sandbox.example.invalid", HXE_PORT: "39041",
         HXE_USER: "SANDBOX_USER", HXE_PASSWORD: "sandbox-secret",
       });
       expect(connection()).to.include({host: "system.example.invalid", port: 30115,
         user: "SYSTEM_USER", password: "system-secret"});
       process.env.STG_DB = "sqlite";
-      expect(connection()).to.include({host: "sandbox.example.invalid", port: 39017,
+      expect(connection()).to.include({host: "sandbox.example.invalid", port: 39041,
         user: "SANDBOX_USER", password: "sandbox-secret"});
+    } finally {
+      for (const name of names) {
+        if (before[name] === undefined) delete process.env[name];
+        else process.env[name] = before[name];
+      }
+    }
+  });
+
+  // HANA Express in docker answers SQL for SYSTEMDB on 39017 and for its
+  // tenant, HXE, on 39041; the application's schemas belong in the tenant.
+  // Until 2026-09-27 both defaults were 39017, and 23 schemas landed in
+  // SYSTEMDB on the lab HXE.
+  it("defaults to the HANA Express tenant (39041), not SYSTEMDB (39017)", async () => {
+    const {connection} = await import("../tools/amdp-run.mjs");
+    const {hanaConnection, HANA_TENANT_PORT} = await import("../tools/hana-client.mjs");
+    const names = ["STG_DB", "HANA_PORT", "HXE_PORT"];
+    const before = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+    try {
+      for (const name of names) delete process.env[name];
+      expect(HANA_TENANT_PORT).to.equal(39041);
+      expect(connection().port).to.equal(39041);
+      expect(hanaConnection().port).to.equal(39041);
+      process.env.STG_DB = "hana";
+      expect(connection().port).to.equal(39041);
+      // an explicit port still wins: a VM install's tenant is 3<nn>15
+      process.env.HANA_PORT = "30015";
+      expect(hanaConnection().port).to.equal(30015);
     } finally {
       for (const name of names) {
         if (before[name] === undefined) delete process.env[name];

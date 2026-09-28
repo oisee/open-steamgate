@@ -32,17 +32,48 @@
 CLASS zcl_osd_demo_data DEFINITION PUBLIC FINAL CREATE PUBLIC.
 
   PUBLIC SECTION.
-    CONSTANTS c_default_rows TYPE i VALUE 20000.
+
+    TYPES:
+      BEGIN OF ty_year,
+        year  TYPE i,
+        rows  TYPE i,
+        trips TYPE i,
+      END OF ty_year.
+    TYPES ty_years TYPE STANDARD TABLE OF ty_year WITH DEFAULT KEY.
 
     " what a host calls at start: iv_config is the host's knob
-    " (OSD_DEMO_ROWS) as text, empty for the default size, 0 for none
+    " (OSD_DEMO_ROWS) as text. Empty (the default) makes nothing: a year of
+    " rows is made on request (GENERATE_YEAR); n makes n rows of the one
+    " sample month, for a test that needs them without a request; 0 removes
+    " the synthetic rows
     CLASS-METHODS boot
       IMPORTING
         iv_config        TYPE string
       RETURNING
         VALUE(rv_report) TYPE string.
-    " exactly iv_rows synthetic rows of seed iv_seed, unless real rows
-    " already number at least iv_rows
+    " the years whose synthetic rows are present, oldest first, with their
+    " rows and trips (synthetic rows of the sample month, from an older start
+    " or the knob, are not a year and are not listed)
+    CLASS-METHODS years
+      RETURNING
+        VALUE(rt_years) TYPE ty_years.
+    " one year of synthetic rows (ZCL_OSD_DEMO_TAXI=>GENERATE_YEAR), unless
+    " that year has rows already: then nothing is written and the report
+    " says so. Other years are not touched. The caller owns the LUW
+    CLASS-METHODS generate_year
+      IMPORTING
+        iv_year          TYPE i
+      RETURNING
+        VALUE(rv_report) TYPE string.
+    " back to the minimal data: every synthetic row goes, the sample rows
+    " (below C_SYNTHETIC_MIN, data/zosd_taxifact.tabu.json) stay. Nothing to
+    " remove is reported, not an error. The caller owns the LUW
+    CLASS-METHODS reset
+      RETURNING
+        VALUE(rv_report) TYPE string.
+    " exactly iv_rows synthetic rows of seed iv_seed in the sample month's
+    " key range, unless real rows already number at least iv_rows; a year's
+    " rows (GENERATE_YEAR) are not touched
     CLASS-METHODS ensure_taxi
       IMPORTING
         iv_rows          TYPE i
@@ -61,7 +92,8 @@ CLASS zcl_osd_demo_data IMPLEMENTATION.
     lv_config = iv_config.
     CONDENSE lv_config.
     IF lv_config IS INITIAL.
-      lv_rows = c_default_rows.
+      rv_report = `taxi: nothing generated at start; a year of rows is made on request`.
+      RETURN.
     ELSEIF lv_config CO '0123456789'.
       IF strlen( lv_config ) > 7.
         lv_rows = zcl_osd_demo_taxi=>c_max_rows.
@@ -73,6 +105,98 @@ CLASS zcl_osd_demo_data IMPLEMENTATION.
       RETURN.
     ENDIF.
     rv_report = ensure_taxi( iv_rows = lv_rows ).
+  ENDMETHOD.
+
+  METHOD years.
+    TYPES:
+      BEGIN OF ty_row,
+        fact_id TYPE zcl_osd_demo_taxi=>ty_fact-fact_id,
+        trips   TYPE i,
+      END OF ty_row.
+    DATA lt_rows TYPE STANDARD TABLE OF ty_row WITH DEFAULT KEY.
+    DATA ls_row TYPE ty_row.
+    DATA ls_year TYPE ty_year.
+    DATA lv_n4 TYPE n LENGTH 4.
+    FIELD-SYMBOLS <ls_year> TYPE ty_year.
+    SELECT fact_id trips FROM zosd_taxifact INTO TABLE lt_rows
+      WHERE fact_id > zcl_osd_demo_taxi=>c_synthetic_min.
+    LOOP AT lt_rows INTO ls_row.
+      lv_n4 = ls_row-fact_id+1(4).
+      " the sample month's keys are 9000000001 and up: year 0, not a year
+      IF lv_n4 < '1900'.
+        CONTINUE.
+      ENDIF.
+      READ TABLE rt_years ASSIGNING <ls_year> WITH KEY year = lv_n4.
+      IF sy-subrc <> 0.
+        CLEAR ls_year.
+        ls_year-year = lv_n4.
+        APPEND ls_year TO rt_years ASSIGNING <ls_year>.
+      ENDIF.
+      <ls_year>-rows = <ls_year>-rows + 1.
+      <ls_year>-trips = <ls_year>-trips + ls_row-trips.
+    ENDLOOP.
+    SORT rt_years BY year.
+  ENDMETHOD.
+
+  METHOD generate_year.
+    DATA lt_new TYPE zcl_osd_demo_taxi=>ty_facts.
+    DATA lv_low TYPE zcl_osd_demo_taxi=>ty_fact-fact_id.
+    DATA lv_high TYPE zcl_osd_demo_taxi=>ty_fact-fact_id.
+    DATA lv_rows TYPE i.
+    DATA lv_trips TYPE i.
+    FIELD-SYMBOLS <ls_new> TYPE zcl_osd_demo_taxi=>ty_fact.
+    IF iv_year < 1900 OR iv_year > 2099.
+      rv_report = |taxi: { iv_year } is not a year this generator makes (1900 to 2099)|.
+      RETURN.
+    ENDIF.
+    lv_low = zcl_osd_demo_taxi=>year_low( iv_year ).
+    lv_high = zcl_osd_demo_taxi=>year_high( iv_year ).
+    SELECT COUNT(*) FROM zosd_taxifact INTO lv_rows WHERE fact_id BETWEEN lv_low AND lv_high.
+    IF lv_rows > 0.
+      SELECT SUM( trips ) FROM zosd_taxifact INTO lv_trips WHERE fact_id BETWEEN lv_low AND lv_high.
+      rv_report = |taxi: { iv_year } already has { lv_trips } trips in { lv_rows } rows; nothing written|.
+      RETURN.
+    ENDIF.
+    lt_new = zcl_osd_demo_taxi=>generate_year( iv_year ).
+    lv_trips = 0.
+    LOOP AT lt_new ASSIGNING <ls_new>.
+      <ls_new>-mandt = sy-mandt.
+      lv_trips = lv_trips + <ls_new>-trips.
+    ENDLOOP.
+    INSERT zosd_taxifact FROM TABLE lt_new.
+    lv_rows = lines( lt_new ).
+    rv_report = |taxi: { iv_year } generated, { lv_trips } trips in { lv_rows } rows (synthetic; | &&
+      |{ zcl_osd_demo_taxi=>profile( iv_year ) })|.
+  ENDMETHOD.
+
+  METHOD reset.
+    DATA lt_years TYPE ty_years.
+    DATA ls_year TYPE ty_year.
+    DATA lv_names TYPE string.
+    DATA lv_rows TYPE i.
+    DATA lv_month TYPE i.
+    lt_years = years( ).
+    SELECT COUNT(*) FROM zosd_taxifact INTO lv_rows WHERE fact_id > zcl_osd_demo_taxi=>c_synthetic_min.
+    SELECT COUNT(*) FROM zosd_taxifact INTO lv_month
+      WHERE fact_id > zcl_osd_demo_taxi=>c_synthetic_min AND fact_id <= zcl_osd_demo_taxi=>c_month_max.
+    IF lv_rows = 0.
+      rv_report = `taxi: already minimal, only the sample rows; nothing removed`.
+      RETURN.
+    ENDIF.
+    DELETE FROM zosd_taxifact WHERE fact_id > zcl_osd_demo_taxi=>c_synthetic_min.
+    LOOP AT lt_years INTO ls_year.
+      IF lv_names IS NOT INITIAL.
+        lv_names = lv_names && `, `.
+      ENDIF.
+      lv_names = lv_names && |{ ls_year-year }|.
+    ENDLOOP.
+    IF lv_month > 0.
+      IF lv_names IS NOT INITIAL.
+        lv_names = lv_names && ` and `.
+      ENDIF.
+      lv_names = lv_names && `the sample month`.
+    ENDIF.
+    rv_report = |taxi: removed { lv_rows } synthetic rows ({ lv_names }); the sample rows stay|.
   ENDMETHOD.
 
   METHOD ensure_taxi.
@@ -95,7 +219,7 @@ CLASS zcl_osd_demo_data IMPLEMENTATION.
     IF lv_rows > 0 AND lv_real >= lv_rows.
       " real rows are enough: synthetic ones beside them would be counted
       " twice by the cube, so any left from an earlier start go
-      DELETE FROM zosd_taxifact WHERE fact_id >= zcl_osd_demo_taxi=>c_synthetic_min.
+      DELETE FROM zosd_taxifact WHERE fact_id BETWEEN zcl_osd_demo_taxi=>c_synthetic_min AND zcl_osd_demo_taxi=>c_month_max.
       lv_n_old = sy-dbcnt.
       rv_report = |taxi: { lv_real } real rows, at least the { lv_rows } asked for; | &&
         |no synthetic rows, { lv_n_old } removed|.
@@ -106,7 +230,7 @@ CLASS zcl_osd_demo_data IMPLEMENTATION.
     LOOP AT lt_new ASSIGNING <ls_new>.
       <ls_new>-mandt = sy-mandt.
     ENDLOOP.
-    SELECT * FROM zosd_taxifact INTO TABLE lt_old WHERE fact_id >= zcl_osd_demo_taxi=>c_synthetic_min ORDER BY fact_id.
+    SELECT * FROM zosd_taxifact INTO TABLE lt_old WHERE fact_id BETWEEN zcl_osd_demo_taxi=>c_synthetic_min AND zcl_osd_demo_taxi=>c_month_max ORDER BY fact_id.
     lv_want = zcl_osd_demo_taxi=>checksum( lt_new ).
     lv_have = zcl_osd_demo_taxi=>checksum( lt_old ).
     lv_n_new = lines( lt_new ).
@@ -115,7 +239,7 @@ CLASS zcl_osd_demo_data IMPLEMENTATION.
       rv_report = |taxi: { lv_n_new } synthetic rows of seed { iv_seed } present (checksum { lv_want }); unchanged|.
       RETURN.
     ENDIF.
-    DELETE FROM zosd_taxifact WHERE fact_id >= zcl_osd_demo_taxi=>c_synthetic_min.
+    DELETE FROM zosd_taxifact WHERE fact_id BETWEEN zcl_osd_demo_taxi=>c_synthetic_min AND zcl_osd_demo_taxi=>c_month_max.
     IF lv_n_new > 0.
       INSERT zosd_taxifact FROM TABLE lt_new.
     ENDIF.

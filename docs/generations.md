@@ -257,6 +257,38 @@ result names it; `/core/http/build` keeps naming the façade and gains a
 - **Windows paths.** This runs in WSL; the design assumes a POSIX
   filesystem for the rename-is-atomic guarantee, and says so rather than
   promising it everywhere.
+- **A boot that takes minutes** (2026-09-28). On a remote HANA the
+  seed goes over the network, and the supervisor used to SIGKILL a child
+  that had not said "ready" within 60 s -- the next request started it
+  again, forever (14 restarts in 900 s on the lab box). Now
+  `tools/osd-serve.mjs` sends `{type: "booting", phase}` every 5 s until
+  ready, and `ServingRuntime` gives up on **silence** (`timeout`, 60 s of
+  no output and no message) or on the whole boot (`bootTimeout`,
+  `OSD_BOOT_TIMEOUT_MS`, 15 min by default), logging `still starting after
+  N s: <phase>` every 30 s. Once ready, quiet is not hung. Each step's time
+  is said as it ends (`boot: seeding the cross-reference 173 ms`), which is
+  how a slow step on a remote database is found. Meanwhile a request waits
+  up to 20 s (`OSD_STARTING_WAIT_MS`) and then hears `503 STG/STARTING`
+  with `Retry-After` and the step, `/osd/serving` answers `{ready: false,
+  starting: true, phase}` at once, and the VS Code launcher keeps waiting
+  while it hears that (its own 180 s is then a limit on not answering, up
+  to the same boot limit). A stop during the boot ends the child at once
+  (SIGTERM; nothing is serving yet) and the start rejects with "stopped
+  while starting", instead of waiting the boot out -- except inside the
+  database step, which it lets finish first: HANA commits a schema's
+  CREATEs on their own and its seed INSERTs not, so a child ended there
+  would leave tables a later boot takes for seeded (SIGTERM, SIGINT,
+  SIGHUP and "quiesce" alike, `tools/osd-boot-guard.mjs`; the child tells
+  the supervisor it is in that step, and neither `stop()` nor the
+  supervisor's own shutdown SIGKILLs it at the usual grace). This narrows
+  the window and does not close it: a crash, an OOM, a SIGKILL -- the
+  silence or boot limit, or the VS Code launcher's 60 s -- in the middle of
+  the seed still leaves such a schema, because HANA has no mark that says
+  the seed completed. That mark is the follow-up. For the same reason a
+  sql.js file is not saved on a stop before it is stamped (or was read
+  whole); the file database does have that mark. A pool is "starting" while any of its runtimes is; a status read
+  during a boot skips its refresh; a websocket whose page gave up during
+  the boot is not upgraded.
 
 ---
 

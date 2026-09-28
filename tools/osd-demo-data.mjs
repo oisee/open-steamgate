@@ -9,11 +9,13 @@
 // so the binary's `osd serve` / `osd up`) and web/preview-backend.mjs; OSGo
 // passes the same variable to the same method in go/cmd/osgo (tools/gogen).
 //
-//   OSD_DEMO_ROWS unset   the class's default size (C_DEFAULT_ROWS, 20000)
-//   OSD_DEMO_ROWS=0       no synthetic rows (and any present are removed)
-//   OSD_DEMO_ROWS=n       n synthetic rows, at most C_MAX_ROWS
+//   OSD_DEMO_ROWS unset   nothing is generated; a year of rows is made on
+//                         request (ZOSD_TAXI_SRV, docs/demo-data.md)
+//   OSD_DEMO_ROWS=0       no rows of the sample month (any present are removed)
+//   OSD_DEMO_ROWS=n       n rows of the sample month, at most C_MAX_ROWS
 //
-// Synthetic rows are FACT_ID 9000000001 and up; real and sample rows are
+// The knob covers the sample month's synthetic rows only (FACT_ID 9000000001
+// up to 9099999999); the years made on request, real and sample rows are
 // never touched. A second start with the same size writes nothing.
 import {dialogStep} from "./osd-dialog-step.mjs";
 

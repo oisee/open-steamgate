@@ -511,7 +511,7 @@ HANA Express in docker, on a machine with room for it:
 
 ```sh
 docker pull saplabs/hanaexpress:latest
-bash ~/hxe/run.sh                 # bind-mounted data, ports 39013 / 39017
+bash ~/hxe/run.sh                 # bind-mounted data; SQL to the tenant on 39041
 STG_DB=hana npm run unit:hana     # the ABAP unit suite against it
 ```
 

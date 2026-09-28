@@ -16,6 +16,11 @@
         "uri": "annotations/annotations.xml",
         "type": "ODataAnnotation",
         "settings": {"localUri": "annotations/annotations.xml"}
+      },
+      "taxiData": {
+        "uri": "../../sap/opu/odata/sap/ZOSD_TAXI_SRV/",
+        "type": "OData",
+        "settings": {"odataVersion": "2.0"}
       }
     },
     "crossNavigation": {
@@ -44,6 +49,28 @@
         "dataSource": "mainService",
         "preload": true,
         "settings": {"useBatch": true, "defaultCountMode": "Inline", "defaultBindingMode": "TwoWay", "refreshAfterChange": false}
+      },
+      "taxiData": {
+        "dataSource": "taxiData",
+        "settings": {"useBatch": false, "defaultCountMode": "None"}
+      }
+    },
+    "extends": {
+      "extensions": {
+        "sap.ui.controllerExtensions": {
+          "sap.suite.ui.generic.template.AnalyticalListPage.view.AnalyticalListPage": {
+            "controllerName": "stg.taxi.ext.controller.ListReportExt",
+            "sap.ui.generic.app": {
+              "Zc_Osd_TaxicubeSet": {
+                "EntitySet": "Zc_Osd_TaxicubeSet",
+                "Actions": {
+                  "GenerateData": {"id": "GenerateDataButton", "text": "{{GenerateData}}", "press": "onGenerateData", "requiresSelection": false, "global": true},
+                  "ResetData": {"id": "ResetDataButton", "text": "{{ResetData}}", "press": "onResetData", "requiresSelection": false, "global": true}
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
