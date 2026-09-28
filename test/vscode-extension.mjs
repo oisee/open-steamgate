@@ -1289,6 +1289,31 @@ describe("editors/vscode: the extension's logic", function () {
       .to.deep.equal({kind: "call-entityset", service: "ZSTG_DEMO_SRV", set: "TravelSet", entityKind: "get_entityset"});
   });
 
+  it("Q2b: STG-generated MPC set creation maps a workspace DPC method to F8 and CodeLens", () => {
+    const dpcSource = [
+      "CLASS zcl_zosd_fleet_dpc_ext IMPLEMENTATION.",
+      "  METHOD voyageset_get_entityset.",
+      "    DATA lv_ship_id TYPE string.",
+      "  ENDMETHOD.",
+      "ENDCLASS.",
+    ].join("\n");
+    const sources = new Map([
+      ["ZCL_ZOSD_FLEET_DPC_EXT", dpcSource],
+      ["ZCL_ZOSD_FLEET_MPC_EXT", "CLASS zcl_zosd_fleet_mpc_ext IMPLEMENTATION. ENDCLASS."],
+      ["ZCL_ZOSD_FLEET_MPC", "lo_entity_set = lo_entity_type->create_entity_set( 'VoyageSet' )."],
+    ]);
+    const registrations = [{dpc: "ZCL_ZOSD_FLEET_DPC_EXT", mpc: "ZCL_ZOSD_FLEET_MPC_EXT", external: "ZOSD_FLEET_SRV"}];
+    const map = entitySetMapFor("ZCL_ZOSD_FLEET_DPC_EXT", registrations, (name) => sources.get(name));
+    expect(map.sets).to.deep.equal([{method: "VOYAGESET_GET_ENTITYSET", kind: "get_entityset", set: "VoyageSet"}]);
+    const lenses = entitySetLenses(dpcSource, map);
+    expect(lenses.map((lens) => lens.title)).to.deep.equal(["▶ Call VoyageSet"]);
+    const method = methodAtLine(dpcSource, 2);
+    const set = map.sets.find((entry) => entry.method === method);
+    expect(runActionFor({type: "CLAS", name: "ZCL_ZOSD_FLEET_DPC_EXT"}, {
+      entitySet: {service: map.service, set: set.set, entityKind: set.kind},
+    })).to.deep.equal({kind: "call-entityset", service: "ZOSD_FLEET_SRV", set: "VoyageSet", entityKind: "get_entityset"});
+  });
+
   // ---- Q3 "Readers": the lens over a class's or interface's own definition
   // line, its title, the quick pick a click shows, and the file glob a
   // chosen reader opens.
