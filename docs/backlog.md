@@ -3864,6 +3864,19 @@ speed task than splitting the costly integration cases (`docs/ci-tests.md`).
      └─ keep debug and shared HANA/Postgres test schemas at one: each child
         writes startup seed rows even when its test declares HARMLESS;
         SQLite and DuckDB get a separate temporary database file per child
+8.9  isolated remote-database slots for ABAP Unit, if HANA/Postgres runs need parallelism
+     └─ propose server env OSD_UNIT_DB_SLOTS=1 by default, surfaced as a VS Code
+        setting; derive short, collision-resistant __UNIT_01..N names from the
+        configured HANA_SCHEMA or PGDATABASE, never using that base for tests
+     └─ lease one slot per child; return it only after verified reset on
+        completion, cancellation or failure, otherwise quarantine that slot;
+        a changed slot count takes effect after active runs drain
+     └─ HANA can use schemas; the current PostgreSQL client uses public in a
+        dedicated database, so PostgreSQL needs a pool of databases or a
+        deliberate client change before it can use schemas
+     └─ prove reset to a known seed after tests that COMMIT WORK, crash
+        recovery and schema-version checks before reusing slots; compare two
+        slots with serial wall time and the cost of reset on a real backend
 ```
 
 ## 9. Upstream, outside this repository (T's, verbatim from them)
