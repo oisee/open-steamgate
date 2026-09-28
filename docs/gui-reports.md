@@ -174,6 +174,8 @@ its result. `list` shows recent run IDs; `show <run-id>` opens a run and its
 list output after a process restart. The command invokes the same generated
 `ZCL_OSD_BATCH_REPORT=>RUN` registry as the synchronous `SUBMIT` bridge. It
 does not require a WebGUI session or create a scheduled job.
+The command starts its own runtime process; pass the same `STG_DB` and
+connection settings as the instance whose business rows it should use.
 
 Run metadata lives in a separate SQLite file, `.local/osd-operations.sqlite`
 in a checkout; `OSD_OPERATIONS_DB` overrides it. When `STG_DB_PATH` is set,
