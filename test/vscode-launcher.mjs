@@ -1468,3 +1468,59 @@ describe("layerContributions: DDIC counts", function () {
     } finally { rmSync(folder, {recursive: true, force: true}); }
   });
 });
+
+// the debugger on demand: the launcher asks the running system's door to
+// open its inspector on a port it picks, and closes only what it opened
+describe("editors/vscode/launcher.js: the inspector on demand", function () {
+  let server;
+  afterEach(() => server?.close());
+
+  it("opens through /osd/inspector on a free port, once; closes what it opened; says the door's reason", async () => {
+    const http = await import("node:http");
+    const requests = [];
+    let refuse;
+    server = http.createServer((req, res) => {
+      let text = "";
+      req.on("data", (d) => (text += d));
+      req.on("end", () => {
+        const body = JSON.parse(text);
+        requests.push([req.method, req.url, body]);
+        res.writeHead(refuse === undefined ? 200 : 409, {"content-type": "application/json"});
+        res.end(JSON.stringify(refuse === undefined ? {open: body.open, port: body.port} : {error: refuse}));
+      });
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-inspector-launcher-"));
+    try {
+      const launcher = new Launcher({osdHome: process.cwd(), storageDir});
+      await rejects(launcher.openInspector(), /not running: start it first/);
+      launcher.state = "running";
+      launcher.port = server.address().port;
+      const port = await launcher.openInspector();
+      expect(port).to.be.within(1, 65535);
+      expect(launcher.inspectorOpen).to.equal(true);
+      expect(await launcher.openInspector(), "open already: no second request").to.equal(port);
+      // two asks at once (a breakpoint and a start's own attach) are one open
+      launcher.inspectorOpen = false;
+      const both = await Promise.all([launcher.openInspector(), launcher.openInspector()]);
+      expect(both).to.deep.equal([port, port]);
+      expect(requests.filter(([, , body]) => body.open === true), "one POST for both").to.have.length(2);
+      expect(await launcher.closeInspector()).to.equal(true);
+      expect(requests).to.deep.equal([
+        ["POST", "/osd/inspector", {open: true, port}],
+        ["POST", "/osd/inspector", {open: true, port}],
+        ["POST", "/osd/inspector", {open: false}],
+      ]);
+      refuse = "a debugger needs one work process";
+      await rejects(launcher.openInspector(), /a debugger needs one work process/);
+      expect(launcher.inspectorOpen).to.equal(false);
+      // a system started with its inspector (osd.debug, OSD_INSPECT=1) keeps it
+      launcher.debug = true;
+      launcher.inspectorOpen = true;
+      expect(await launcher.closeInspector()).to.equal(false);
+      expect(requests).to.have.length(4);
+    } finally {
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+});

@@ -16,6 +16,7 @@ import {Data} from "../tools/osd-data.mjs";
 import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
 import {credentials as tlsCredentials, fingerprint as tlsFingerprint, dirOf as tlsDirOf} from "../tools/osd-tls.mjs";
 import {odataProxy, upgradeProxy, startingAnswer} from "../tools/osd-proxy.mjs";
+import {inspectPortOf} from "../tools/osd-inspector.mjs";
 import {devLoop} from "../tools/osd-dev.mjs";
 import {mountServices, services as icfServices, servicesFromRows, channels as pushChannels} from "../tools/osd-icf.mjs";
 import {mountChannels} from "../tools/osd-apc.mjs";
@@ -200,6 +201,63 @@ export function startServer(quiet) {
   // strange client at OSD, then read this to learn what it wanted
   hostNodes["not-served"] = (a, node) => a.get(node.path, function (req, res) {
     res.json([...facade.missed.values()].sort((a, b) => b.count - a.count));
+  });
+
+  // the debugger on demand (tools/osd-inspector.mjs): POST {open, port}
+  // opens or closes the serving child's inspector, GET says whether it is
+  // open. Whoever may open an inspector may run code in the process, so the
+  // door answers a program on this machine and nothing else:
+  //  - the socket is loopback;
+  //  - the Host is loopback too, which a DNS-rebound page cannot fake (its
+  //    Host is its own name);
+  //  - no browser: a request with an Origin, or a Sec-Fetch-Site other than
+  //    none, is a web page, and a POST must be application/json, which a
+  //    cross-origin page cannot send without a preflight nobody answers;
+  //  - the answer carries the port and not the inspector's URL, whose uuid
+  //    is the one thing that keeps a page from its WebSocket.
+  // (Traced by the critic of this change, by reading and not by running a
+  // browser: without the last three, a page on this machine could open the
+  // inspector through a rebound name and read the URL back.)
+  hostNodes.inspector = (a, node) => a.all(node.path, async function (req, res) {
+    const remote = req.socket.remoteAddress ?? "";
+    const host = String(req.headers.host ?? "").replace(/:\d+$/, "");
+    const site = req.headers["sec-fetch-site"];
+    const refused = !["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remote) ? "the inspector is opened from this machine only"
+      : !["localhost", "127.0.0.1", "[::1]"].includes(host) ? "the inspector is opened through a loopback name only"
+        : req.headers.origin !== undefined || (site !== undefined && site !== "none") ? "the inspector is not opened from a web page"
+          : req.method === "POST" && !/^application\/json\b/i.test(req.headers["content-type"] ?? "") ? "the inspector door takes application/json"
+            : undefined;
+    if (refused !== undefined) {
+      res.status(403).json({error: refused});
+      return;
+    }
+    if (runtime === undefined) {
+      res.status(409).json({error: "this listener serves inline, in its own process: start it with STG_SERVE=child, or with OSD_INSPECT=<port>"});
+      return;
+    }
+    if (req.method === "GET") {
+      const inspecting = (runtime.runtimes?.[0] ?? runtime).inspecting;
+      const port = inspecting === null ? undefined : inspecting?.port ?? inspectPortOf(process.env.OSD_INSPECT);
+      res.json({open: port !== undefined, port});
+      return;
+    }
+    if (req.method !== "POST") {
+      res.status(405).set("Allow", "GET, POST").end();
+      return;
+    }
+    let request;
+    try {
+      request = JSON.parse(Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "{}");
+    } catch {
+      res.status(400).json({error: "the body is not JSON: {\"open\": true, \"port\": <port>}"});
+      return;
+    }
+    try {
+      const answer = await runtime.inspector({open: request?.open === true, port: request?.port});
+      res.json({open: answer.open, port: answer.port, ...(answer.pending ? {pending: true} : {})});
+    } catch (e) {
+      res.status(409).json({error: String(e?.message ?? e)});
+    }
   });
 
   // and now everything the registry declares for this host, in its order

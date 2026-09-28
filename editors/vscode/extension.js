@@ -339,10 +339,23 @@ function osdWarmModeOf() {
   return vscode.workspace.getConfiguration("osd").get("warm", "auto");
 }
 
-/** `osd.debug` is read at each launch and each unit run so a settings change
- *  takes effect without reloading the extension. */
+/** Whether to open the inspector **at start** rather than on demand. The
+ *  debugger needs no setting any more: the first breakpoint in an .abap
+ *  file or "Run with debugger" opens it in the running system
+ *  (SystemController.attachSystemDebugger). `osd.debug` is gone from the
+ *  settings UI and an existing `"osd.debug": true` is still honoured, for
+ *  one release, silently (VS Code returns an undeclared key); the escape
+ *  hatch is OSD_INSPECT=1 in the environment VS Code was started from. */
 function osdDebugEnabled() {
-  return vscode.workspace.getConfiguration("osd").get("debug", false) === true;
+  return vscode.workspace.getConfiguration("osd").get("debug", false) === true
+    || /^(1|true)$/.test(process.env.OSD_INSPECT ?? "");
+}
+
+/** The enabled source breakpoints in .abap files: while there is one, the
+ *  debugger is wanted (docs/debugging-abap.md, "On demand"). */
+function abapBreakpoints(breakpoints = vscode.debug.breakpoints ?? [], {enabledOnly = true} = {}) {
+  return breakpoints.filter((bp) => bp instanceof vscode.SourceBreakpoint && (bp.enabled || !enabledOnly)
+    && bp.location?.uri?.scheme === "file" && /\.abap$/i.test(bp.location.uri.fsPath));
 }
 
 /** The workspace folders to offer as layers, minus osdHome itself -- a
@@ -484,6 +497,9 @@ class SystemController {
       if (session.name === `OSD: ABAP (${this.debuggerState.systemPort})`) {
         this.debuggerState = debugAttachPlan(this.debuggerState,
           {type: "system-session-ended", port: this.debuggerState.systemPort}).state;
+        // the debug session ended: an inspector opened on demand closes
+        // once no .abap breakpoint wants it either
+        this.releaseDebugger({sessionEnded: true}).catch((e) => this.output.appendLine(`osd debugger: ${String(e?.message ?? e)}`));
       }
     }));
     this.emitter = new vscode.EventEmitter();
@@ -600,10 +616,68 @@ class SystemController {
     return true;
   }
 
-  async attachSystemDebugger() {
-    if (this.launcher?.debug !== true || this.launcher.inspectPort === undefined) return false;
+  /** Attaches VS Code's debugger to the running system. With `onDemand`,
+   *  a system started without an inspector has it opened now, in the
+   *  running process (Launcher.openInspector -> /osd/inspector): no
+   *  osd.debug, no restart. Without it, attaches only to an inspector that
+   *  is already open. The reason a debugger could not attach is left in
+   *  `debuggerError` for the caller to show. */
+  // opening and closing the inspector one after another, in the order they
+  // were asked: a close in flight and a new breakpoint's open would otherwise
+  // reach the system on two connections, in either order
+  #inspectorStep(step) {
+    const next = (this.inspectorSteps ?? Promise.resolve()).then(step, step);
+    this.inspectorSteps = next.catch(() => undefined);
+    return next;
+  }
+
+  async attachSystemDebugger(options = {}) {
+    return this.#inspectorStep(() => this.#attachSystemDebugger(options));
+  }
+
+  async #attachSystemDebugger({onDemand = false} = {}) {
+    const launcher = this.launcher;
+    this.debuggerError = undefined;
+    if (launcher === undefined || launcher.state !== "running") {
+      this.debuggerError = "the system is not running; start it with osd: Start";
+      return false;
+    }
+    const open = launcher.inspectPort !== undefined && (launcher.debug === true || launcher.inspectorOpen === true);
+    if (!open) {
+      if (!onDemand) return false;
+      try {
+        await launcher.openInspector();
+      } catch (e) {
+        this.debuggerError = `could not open the inspector: ${String(e?.message ?? e)}`;
+        return false;
+      }
+      this.output.appendLine(`--- osd debugger: inspector opened on 127.0.0.1:${launcher.inspectPort} ---`);
+    }
     await this.debuggerTransition;
-    return this.applyDebuggerEvent({type: "system-started", enabled: true, port: this.launcher.inspectPort});
+    return this.applyDebuggerEvent({type: "system-started", enabled: true, port: launcher.inspectPort});
+  }
+
+  /** The other half of on demand: once no enabled .abap breakpoint is left
+   *  **and** the OSD: ABAP session has ended, close an inspector this window
+   *  opened. Removing the last breakpoint while the session is attached (a
+   *  paused request, a Run with debugger) leaves it attached; ending the
+   *  session then closes it. One opened at start (OSD_INSPECT=1, osd.debug)
+   *  stays. `sessionEnded` is said by the session's own end. */
+  async releaseDebugger(options = {}) {
+    return this.#inspectorStep(() => this.#releaseDebugger(options));
+  }
+
+  async #releaseDebugger({sessionEnded = false} = {}) {
+    const launcher = this.launcher;
+    if (launcher === undefined || launcher.debug === true || launcher.inspectorOpen !== true) return false;
+    if (abapBreakpoints().length > 0) return false;
+    const name = `OSD: ABAP (${launcher.inspectPort})`;
+    if (!sessionEnded && this.runningDebugSessions().some((session) => session.name === name)) return false;
+    await this.debuggerTransition;
+    await this.applyDebuggerEvent({type: "system-detach"});
+    const closed = await launcher.closeInspector();
+    if (closed) this.output.appendLine("--- osd debugger: inspector closed (no .abap breakpoint left) ---");
+    return closed;
   }
 
   /** `osd.url` follows a launch: every existing feature that calls osd()
@@ -720,7 +794,7 @@ class SystemController {
         : await launcher.start({...options, force});
       if (result === undefined) return false;
       await this.#pointUrlAt(launcher.port);
-      if (launcher.debug) await this.attachSystemDebugger();
+      await this.#attachAfterStart();
       this.emitter.fire();
       return true;
     } catch (e) {
@@ -741,11 +815,21 @@ class SystemController {
     }
     if (result === undefined) return false;
     await this.#pointUrlAt(result.port);
-    if (launcher.debug) await this.attachSystemDebugger();
+    await this.#attachAfterStart();
     vscode.window.setStatusBarMessage(
       `osd: running on :${result.port} · ${launcher.databaseLabel}, generation ${String(result.generation).slice(0, 8)}`, 5000);
     this.emitter.fire();
     return true;
+  }
+
+  // a system started with its inspector is attached to; one started
+  // without is given one now if .abap breakpoints are already waiting
+  async #attachAfterStart() {
+    const wanted = this.launcher?.debug === true || abapBreakpoints().length > 0;
+    if (!wanted) return;
+    if (await this.attachSystemDebugger({onDemand: true}) !== true && this.debuggerError !== undefined) {
+      this.output.appendLine(`osd debugger: ${this.debuggerError}`);
+    }
   }
 
   async #launcherError(launcher, error, label) {
@@ -2150,6 +2234,28 @@ function breakpointGuard(context) {
   }
 }
 
+/** The debugger on demand, driven by breakpoints: one set (or enabled) in
+ *  an .abap file while the system runs opens its inspector and attaches;
+ *  the last one removed (or disabled) closes it again once the debug
+ *  session has ended (releaseDebugger). Start needs no setting for any of it. */
+function debugOnDemand(context, controllerOf = () => activeController) {
+  if (typeof vscode.debug.onDidChangeBreakpoints !== "function") return;
+  context.subscriptions.push(vscode.debug.onDidChangeBreakpoints((event) => {
+    const controller = controllerOf();
+    if (controller?.launcher?.state !== "running") return;
+    const log = (e) => controller.output.appendLine(`osd debugger: ${String(e?.message ?? e)}`);
+    if (abapBreakpoints([...(event.added ?? []), ...(event.changed ?? [])]).length > 0) {
+      controller.attachSystemDebugger({onDemand: true}).then((attached) => {
+        if (attached !== true && controller.debuggerError !== undefined) log(controller.debuggerError);
+      }, log);
+      return;
+    }
+    if (abapBreakpoints([...(event.removed ?? []), ...(event.changed ?? [])], {enabledOnly: false}).length > 0) {
+      controller.releaseDebugger().catch(log);
+    }
+  }));
+}
+
 function activate(context) {
   const output = vscode.window.createOutputChannel("osd");
   context.subscriptions.push(output);
@@ -2180,6 +2286,7 @@ function activate(context) {
   context.subscriptions.push(statusBar(context));
   breakpointToggleStatusBar(context);
   breakpointGuard(context);
+  debugOnDemand(context);
   context.subscriptions.push(testExplorer(context, output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.showDumps", () => showDumps(output)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.setHanaPassword", () => setDatabasePassword(context, "hana")));
@@ -2602,9 +2709,10 @@ async function activateCurrent(diagnostics, output) {
 // server work its turn would add.
 
 async function requireDebugSystem(output, action) {
-  const attached = await activeController?.attachSystemDebugger();
+  const attached = await activeController?.attachSystemDebugger({onDemand: true});
   if (attached === true) return true;
-  const message = `${action} with debugger needs a system started by osd.start with osd.debug enabled; enable it and restart the system`;
+  const reason = activeController?.debuggerError ?? "the system is not running; start it with osd: Start";
+  const message = `${action} with debugger: ${reason}`;
   output.appendLine(`osd debugger: ${message}`);
   vscode.window.showWarningMessage(`osd: ${message}`);
   return false;
@@ -3665,6 +3773,6 @@ async function deactivate() {
   await activeController?.stop();
 }
 
-module.exports = {activate, deactivate, SystemController, testExplorer, OsdTreeProvider, TransactionItem, EntitySetItem,
+module.exports = {activate, deactivate, SystemController, debugOnDemand, testExplorer, OsdTreeProvider, TransactionItem, EntitySetItem,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,
   wirePageTabs, openDetailsMetadata};
