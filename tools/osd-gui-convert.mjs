@@ -68,7 +68,13 @@ ${[...new Set(entry.selectionNames ?? [])].map((name) => `        INSERT ${abapL
       IMPORTING
         iv_program TYPE string
         it_input TYPE zif_gg_selection_screen_types=>ty_values OPTIONAL
+        iv_batch TYPE abap_bool DEFAULT abap_true
       RETURNING VALUE(rs_result) TYPE ty_result.
+    CLASS-METHODS submit
+      IMPORTING
+        iv_program TYPE string
+        it_input TYPE zif_gg_selection_screen_types=>ty_values OPTIONAL
+        iv_batch TYPE abap_bool DEFAULT abap_false.
     CLASS-METHODS result_of
       IMPORTING is_host TYPE zcl_gg_host=>ty_result
       RETURNING VALUE(rs_result) TYPE ty_result.
@@ -111,8 +117,19 @@ ${cases}
       io_report = lo_report
       iv_program = CONV #( lv_program )
       it_input = lt_input
-      iv_batch = abap_true ).
+      iv_batch = iv_batch ).
     rs_result = result_of( ls_host ).
+  ENDMETHOD.
+
+  METHOD submit.
+    DATA(ls_result) = run(
+      iv_program = iv_program
+      it_input = it_input
+      iv_batch = iv_batch ).
+    IF ls_result-status <> 'COMPLETED'.
+      RAISE EXCEPTION NEW zcx_osd_submit(
+        iv_detail = |SUBMIT { iv_program }: { ls_result-status } { ls_result-detail }| ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD result_of.

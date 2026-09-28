@@ -144,6 +144,28 @@ converted `ZGG_EX_012` twice: first with a supplied date, then with its own
 the next. It also checks invalid input, unfinished host flow, and unknown and
 known-but-unsupported names.
 
+## Narrow synchronous SUBMIT
+
+`tools/osd-narrow-submit.mjs` lowers only `SUBMIT <static PROG> [WITH
+<field> = <scalar> ...] AND RETURN` in OSD's own ABAP sources before the
+upstream transpiler sees it. Each named scalar becomes a selection value for
+`ZCL_OSD_BATCH_REPORT=>SUBMIT`; a fresh report object is created. The target
+must be in the converter's registry and complete normally. A missing,
+unsupported, or incomplete target raises `ZCX_OSD_SUBMIT` with its status and
+detail. Dynamic program names, ranges, variants, `VIA JOB`, spool options,
+`EXPORTING LIST TO MEMORY`, and `SUBMIT` without `AND RETURN` fail at build
+time with the source file and line. Dependencies are not rewritten.
+
+The synchronous call passes the caller's `sy-batch` to the report host. The
+converted report reads it from its per-run context, as it does `sy-repid`;
+`ZOSD_SUB_CTX` and ABAP Unit exercise both dialog and batch contexts. This
+does not globally change `sy-batch` in the runtime or create a background
+process. The one-shot report's typed result is available through `RUN`, but
+this first `SUBMIT` slice does not yet forward its list to a dialog screen,
+memory list, or spool. The lowering preserves source line counts so later
+statements keep their source-map rows; it refuses comments within the
+statement rather than removing them.
+
 The next job slice can consume this typed result, but must decide how to
 persist selection values, output and status before it queues work.
 
