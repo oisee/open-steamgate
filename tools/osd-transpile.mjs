@@ -22,6 +22,7 @@ import {createRequire} from "node:module";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {hostModules} from "./osd-host.mjs";
+import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 
 // the transpiler package in use by this tree, and the core it was built
 // against. A tree with the library installed resolves it directly; a tree
@@ -38,7 +39,7 @@ export function modulesOf(root) {
   }
   const where = packageRootOf(main);
   const fromTranspiler = createRequire(join(where, "package.json"));
-  const {Transpiler} = fromTranspiler(where);
+  const {Transpiler, Chunk} = fromTranspiler(where);
   const core = fromTranspiler("@abaplint/core");
   let plugin;
   try {
@@ -47,7 +48,7 @@ export function modulesOf(root) {
   } catch {
     plugin = undefined;
   }
-  return {Transpiler, core, plugin, where, version: JSON.parse(readFileSync(join(where, "package.json"), "utf8")).version};
+  return {Transpiler, Chunk, core, plugin, where, version: JSON.parse(readFileSync(join(where, "package.json"), "utf8")).version};
 }
 
 function packageRootOf(file) {
@@ -223,7 +224,8 @@ export async function transpile(options = {}) {
   const log = options.log ?? (() => {});
   const started = Date.now();
   // a binary registered its bundled transpiler and core; a checkout resolves them
-  const {Transpiler, core, plugin, version} = options.modules ?? hostModules() ?? modulesOf(root);
+  const {Transpiler, Chunk, core, plugin, version} = options.modules ?? hostModules() ?? modulesOf(root);
+  if (config.write_source_map === true) mapStatementStarts(Chunk);
   const {files, skipped} = await loadFiles(root, config);
   log(`${files.length} files added from source, ${skipped} skipped`);
   const libs = await loadLibs(root, config, log);
