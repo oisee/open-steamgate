@@ -1,0 +1,5 @@
+CLASS zcl_osd_bal_store_test DEFINITION PUBLIC FINAL CREATE PUBLIC.
+ENDCLASS.
+
+CLASS zcl_osd_bal_store_test IMPLEMENTATION.
+ENDCLASS.
