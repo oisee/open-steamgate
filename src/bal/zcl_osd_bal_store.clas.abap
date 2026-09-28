@@ -94,9 +94,9 @@ CLASS zcl_osd_bal_store IMPLEMENTATION.
       IF sy-subrc <> 0.
 * Only lower item numbers were inserted by this call. A failed number may
 * already belong to another writer, so leave that row alone.
-        DELETE FROM zosd_bal_itm WHERE log_id = rv_handle
+        DELETE FROM zosd_bal_itm WHERE mandt = sy-mandt AND log_id = rv_handle
           AND item_no < lv_number.
-        DELETE FROM zosd_bal_hdr WHERE log_id = rv_handle.
+        DELETE FROM zosd_bal_hdr WHERE mandt = sy-mandt AND log_id = rv_handle.
         RAISE EXCEPTION TYPE zcx_osd_bal
           EXPORTING iv_reason = 'Could not insert application log item'.
       ENDIF.
@@ -110,16 +110,18 @@ CLASS zcl_osd_bal_store IMPLEMENTATION.
     ENDIF.
     IF iv_subobject IS INITIAL AND iv_external_id IS INITIAL.
       SELECT * FROM zosd_bal_hdr INTO TABLE rt_headers
-        WHERE log_object = iv_object.
+        WHERE mandt = sy-mandt AND log_object = iv_object.
     ELSEIF iv_external_id IS INITIAL.
       SELECT * FROM zosd_bal_hdr INTO TABLE rt_headers
-        WHERE log_object = iv_object AND subobject = iv_subobject.
+        WHERE mandt = sy-mandt AND log_object = iv_object
+          AND subobject = iv_subobject.
     ELSEIF iv_subobject IS INITIAL.
       SELECT * FROM zosd_bal_hdr INTO TABLE rt_headers
-        WHERE log_object = iv_object AND external_id = iv_external_id.
+        WHERE mandt = sy-mandt AND log_object = iv_object
+          AND external_id = iv_external_id.
     ELSE.
       SELECT * FROM zosd_bal_hdr INTO TABLE rt_headers
-        WHERE log_object = iv_object AND subobject = iv_subobject
+        WHERE mandt = sy-mandt AND log_object = iv_object AND subobject = iv_subobject
           AND external_id = iv_external_id.
     ENDIF.
     IF rt_headers IS INITIAL.
@@ -130,12 +132,14 @@ CLASS zcl_osd_bal_store IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD load.
-    SELECT SINGLE * FROM zosd_bal_hdr INTO es_header WHERE log_id = iv_handle.
+    SELECT SINGLE * FROM zosd_bal_hdr INTO es_header
+      WHERE mandt = sy-mandt AND log_id = iv_handle.
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE zcx_osd_bal
         EXPORTING iv_reason = 'No log found in the database'.
     ENDIF.
-    SELECT * FROM zosd_bal_itm INTO TABLE et_items WHERE log_id = iv_handle.
+    SELECT * FROM zosd_bal_itm INTO TABLE et_items
+      WHERE mandt = sy-mandt AND log_id = iv_handle.
     SORT et_items BY item_no.
   ENDMETHOD.
 ENDCLASS.

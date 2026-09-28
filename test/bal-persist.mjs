@@ -21,8 +21,10 @@ const port = await new Promise((resolve, reject) => {
 const base = `http://127.0.0.1:${port}`;
 const env = {...process.env, STG_PORT: String(port), STG_DB: "file", STG_DB_PATH: database};
 
-async function start() {
-  const child = spawn(process.execPath, ["test/run.mjs"], {cwd: root, env, stdio: ["ignore", "ignore", "inherit"]});
+async function start(client) {
+  const child = spawn(process.execPath, ["test/run.mjs"], {
+    cwd: root, env: {...env, OSD_CLIENT: client}, stdio: ["ignore", "ignore", "inherit"],
+  });
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`OSD exited during startup: ${child.exitCode}`);
@@ -60,13 +62,23 @@ async function classrun(name) {
 
 let child;
 try {
-  child = await start();
+  child = await start("123");
   const written = await classrun("ZCL_OSD_BAL_PERSIST_WRITE");
   if (!written.includes("Saved 3 BAL logs:")) throw new Error(`write failed: ${written}`);
+  const clientWritten = await classrun("ZCL_OSD_BAL_CLIENT_PROBE");
+  if (!clientWritten.includes("client 123 wrote log")) throw new Error(`client write failed: ${clientWritten}`);
   await stop(child);
   child = undefined;
 
-  child = await start();
+  child = await start("124");
+  const denied = await classrun("ZCL_OSD_BAL_CLIENT_PROBE");
+  if (!denied.includes("client 124 filter and handle denied")) {
+    throw new Error(`cross-client read failed: ${denied}`);
+  }
+  await stop(child);
+  child = undefined;
+
+  child = await start("123");
   const read = await classrun("ZCL_OSD_BAL_PERSIST_READ");
   for (const expected of [
     "OSD_RESTART_OK1: 3 items, final S",
@@ -76,7 +88,11 @@ try {
     if (!read.includes(expected)) throw new Error(`read after restart missing ${expected}: ${read}`);
   }
   if (read.includes("BAL read failed")) throw new Error(read);
-  console.log("BAL persistence: 3 logs and 9 items survived process restart");
+  const clientRead = await classrun("ZCL_OSD_BAL_CLIENT_PROBE");
+  if (!clientRead.includes("client 123 read succeeded")) {
+    throw new Error(`client read after restart failed: ${clientRead}`);
+  }
+  console.log("BAL persistence: 3 logs and 9 items survived process restart; client isolation verified");
 } finally {
   if (child) await stop(child);
   rmSync(scratch, {recursive: true, force: true});
