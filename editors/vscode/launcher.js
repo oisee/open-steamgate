@@ -517,7 +517,12 @@ function servingOnce(port) {
 async function waitForServing(port, options = {}) {
   const timeoutMs = options.timeoutMs ?? 180000;
   const intervalMs = options.intervalMs ?? 300;
-  const deadline = Date.now() + timeoutMs;
+  // a system that answers "starting" (a boot on a remote HANA takes
+  // minutes) is waited for, up to the runtime's own boot limit; the timeout
+  // above is then a limit on NOT answering, as tools/osd-runtime.mjs does
+  const bootMs = options.bootMs ?? (Number(process.env.OSD_BOOT_TIMEOUT_MS) || 15 * 60 * 1000);
+  const started = Date.now();
+  let deadline = started + timeoutMs;
   for (;;) {
     // the start race settled another way (the child exited, a stop): stop
     // polling a port that is no longer ours
@@ -527,6 +532,10 @@ async function waitForServing(port, options = {}) {
     const serving = await servingOnce(port);
     if (serving?.ready === true && serving.generation !== undefined) {
       return serving;
+    }
+    if (serving?.starting === true) {
+      deadline = Math.min(Math.max(deadline, Date.now() + timeoutMs), started + Math.max(bootMs, timeoutMs));
+      options.onStarting?.(serving);
     }
     if (Date.now() >= deadline) {
       throw new Error(`osd never answered ready on :${port} within ${timeoutMs} ms`);

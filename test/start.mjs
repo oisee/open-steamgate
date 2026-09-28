@@ -369,6 +369,13 @@ export function startServer(quiet) {
         proxy(req, res, next);
         return;
       }
+      // still booting: say so now, with the step, rather than hold the
+      // question for the boot (the VS Code launcher waits on this answer)
+      if (runtime.booting !== undefined && runtime.running !== true) {
+        const {phase, since} = runtime.booting;
+        res.status(200).json({ready: false, starting: true, phase, seconds: Math.round((Date.now() - since) / 1000)});
+        return;
+      }
       try {
         const answer = await fetch(`${runtime.url}${req.originalUrl}`, {signal: AbortSignal.timeout(5000)});
         const body = await answer.json();

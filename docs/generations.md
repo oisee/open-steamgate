@@ -265,7 +265,16 @@ result names it; `/core/http/build` keeps naming the façade and gains a
   ready, and `ServingRuntime` gives up on **silence** (`timeout`, 60 s of
   no output and no message) or on the whole boot (`bootTimeout`,
   `OSD_BOOT_TIMEOUT_MS`, 15 min by default), logging `still starting after
-  N s: <phase>` every 30 s. Once ready, quiet is not hung.
+  N s: <phase>` every 30 s. Once ready, quiet is not hung. Each step's time
+  is said as it ends (`boot: seeding the cross-reference 173 ms`), which is
+  how a slow step on a remote database is found. Meanwhile a request waits
+  up to 20 s (`OSD_STARTING_WAIT_MS`) and then hears `503 STG/STARTING`
+  with `Retry-After` and the step, `/osd/serving` answers `{ready: false,
+  starting: true, phase}` at once, and the VS Code launcher keeps waiting
+  while it hears that (its own 180 s is then a limit on not answering, up
+  to the same boot limit). A stop during the boot ends the child at once
+  (SIGTERM; nothing is serving yet) and the start rejects with "stopped
+  while starting", instead of waiting the boot out.
 
 ---
 

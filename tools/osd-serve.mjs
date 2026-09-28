@@ -41,10 +41,33 @@ const started = Date.now();
 // is on silence, not on the length of the boot (tools/osd-runtime.mjs).
 // The timer does not hold the process open.
 let bootPhase = "loading the generation";
+let bootPhaseSince = started;
+let bootLast = "";
+// only while the channel is open: after the supervisor is gone, send() emits
+// ERR_IPC_CHANNEL_CLOSED on `process`, which ends a child mid-seed
+const tell = (message) => {
+  if (process.connected) process.send(message);
+};
 const booting = process.send === undefined ? undefined : setInterval(() => {
-  process.send?.({type: "booting", phase: bootPhase, ms: Date.now() - started});
+  tell({type: "booting", phase: bootPhase, last: bootLast, ms: Date.now() - started});
 }, 5000);
 booting?.unref();
+process.once("disconnect", () => clearInterval(booting));
+// each step of the boot with how long the previous one took, said over the
+// channel so the supervisor prints it: per-step times on any host, the HANA
+// one included, without a profiler
+const bootStep = (name) => {
+  tell({type: "say", line: `boot: ${bootPhase} ${Date.now() - bootPhaseSince} ms`});
+  bootPhase = name;
+  bootPhaseSince = Date.now();
+};
+// asked to go while still booting: go. The serving quiesce below is only
+// installed once there is something to drain, and until then a stop waited
+// out the whole boot (on a remote HANA, minutes)
+let isServing = false;
+process.on("message", (message) => {
+  if (message?.type === "quiesce" && !isServing) process.exit(0);
+});
 
 // which tree this runtime serves, so one copy of this script can serve any
 // of them: a second worktree, a branch under test, an experiment on its own
@@ -64,7 +87,7 @@ const {zcl_apc_host} = await from("zcl_apc_host.clas.mjs");
 // only this process can write the tables the service reads
 const {zcl_osd_status} = await from("zcl_osd_status.clas.mjs");
 
-bootPhase = "opening the database: DDL and seed rows (test/setup.mjs)";
+bootStep("opening the database: DDL and seed rows (test/setup.mjs)");
 await initializeABAP();
 // the ICF nodes into the tables a system keeps them in, by the rule in
 // docs/registry-drift.md: applied when an object arrives, never re-applied
@@ -82,11 +105,11 @@ await initializeABAP();
 // will be written by somebody who did not read this comment.
 const announce = (line) => {
   console.log(line);
-  process.send?.({type: "say", line});
-  bootPhase = line;
+  tell({type: "say", line});
+  bootLast = line;
 };
 
-bootPhase = "applying the ICF registry";
+bootStep("applying the ICF registry");
 const registry = await applyAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root, say: announce});
 if (registry === undefined) {
   throw new Error("the ICF registry could not be applied, and the routes below come from it");
@@ -94,13 +117,13 @@ if (registry === undefined) {
 const icfRowsNow = await currentRows(globalThis.abap.context.databaseConnections.DEFAULT);
 // the cross-reference, derived from the files and cached per generation
 // (tools/osd-xref-seed.mjs): the same call every host makes
-bootPhase = "seeding the cross-reference";
+bootStep("seeding the cross-reference");
 await seedAtStartup(globalThis.abap.context.databaseConnections.DEFAULT, {root, say: announce});
-bootPhase = "registering services and search helps";
+bootStep("registering services and search helps");
 await zcl_stg_segw_registry.register();
 await zcl_stg_shlp_registry.register();
 // the synthetic taxi facts, made by ZCL_OSD_DEMO_DATA (tools/osd-demo-data.mjs)
-bootPhase = "demo data";
+bootStep("demo data");
 await ensureDemoData((await from("zcl_osd_demo_data.clas.mjs")).zcl_osd_demo_data, {say: announce});
 
 const app = express();
@@ -305,6 +328,8 @@ const server = app.listen(wanted, "127.0.0.1", () => {
     for (const c of apc) console.log(`Push channel on ws://127.0.0.1:${port}${c.path}  (${c.handler})`);
   }
   clearInterval(booting);
+  bootStep("serving");
+  isServing = true;
   if (process.send !== undefined) {
     process.send({type: "ready", port, pid: process.pid, ms: Date.now() - started});
   } else {

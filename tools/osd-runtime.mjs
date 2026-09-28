@@ -323,6 +323,18 @@ export class ServingRuntime {
     // counted before the first await, so a recycle in progress sees it
     this.stops += 1;
     const stopping = (async () => {
+      // a child still booting is asked to go now rather than waited for: on
+      // a remote HANA its boot takes minutes (tools/osd-serve.mjs exits on
+      // "quiesce" until it serves)
+      // (SIGTERM: a booting child has nothing to drain, and a message can
+      // arrive before it listens; the child installs no SIGTERM handler)
+      const booting = this.bootingChild;
+      if (booting !== undefined && booting.exitCode === null && booting.signalCode === null) {
+        this.stoppedBooting = booting;
+        booting.kill("SIGTERM");
+        const kill = setTimeout(() => booting.kill("SIGKILL"), this.grace + 8000);
+        kill.unref?.();
+      }
       // a child still coming up would outlive a stop that only looked at the
       // ready one -- including the one a recycle has just started
       await this.starting?.catch(() => undefined);
@@ -446,6 +458,9 @@ export class ServingRuntime {
       let timedOut;
       let phase = "starting";
       const bootStarted = Date.now();
+      // what a proxy or /osd/serving can tell a client meanwhile
+      this.booting = {phase, since: bootStarted, pid: child.pid};
+      this.bootingChild = child;
       const giveUp = (why) => {
         timedOut = new NotServing(`the serving runtime ${why}: ${out.slice(-2000)}`);
         child.kill("SIGKILL");
@@ -458,15 +473,21 @@ export class ServingRuntime {
         if (booted) return;
         clearTimeout(timer);
         timer = setTimeout(() => giveUp(`said nothing for ${this.timeout} ms while starting (last: ${phase})`), this.timeout);
+        timer.unref?.();
       };
       heard();
       const deadline = setTimeout(() => giveUp(`did not start within ${this.bootTimeout} ms (last: ${phase})`), this.bootTimeout);
+      deadline.unref?.();
       const progress = setInterval(() => {
         console.log(`[runtime] still starting after ${Math.round((Date.now() - bootStarted) / 1000)} s: ${phase}`);
       }, 30000);
       progress.unref?.();
       const stopTimers = () => {
         booted = true;
+        if (this.bootingChild === child) {
+          this.booting = undefined;
+          this.bootingChild = undefined;
+        }
         clearTimeout(timer);
         clearTimeout(deadline);
         clearInterval(progress);
@@ -475,7 +496,12 @@ export class ServingRuntime {
       child.stderr.on("data", heard);
       child.on("message", (message) => {
         if (message?.type === "booting" || message?.type === "say") {
-          if (typeof (message.phase ?? message.line) === "string") phase = message.phase ?? message.line;
+          // the step comes from "booting" only; a line said meanwhile is news,
+          // not the step (a seed's report would otherwise rename it)
+          if (message.type === "booting" && typeof message.phase === "string") {
+            phase = message.phase;
+            if (this.bootingChild === child) this.booting = {...this.booting, phase, last: message.last};
+          }
           heard();
         }
       });
@@ -496,6 +522,8 @@ export class ServingRuntime {
         if (message?.type !== "ready") {
           return;
         }
+        // given up on already: its "ready" comes too late to count
+        if (timedOut !== undefined) return;
         child.off("message", onMessage);
         stopTimers();
         this.died = undefined;
@@ -534,7 +562,10 @@ export class ServingRuntime {
         }
         // an exit before "ready" is a runtime that could not come up, and
         // the output is the only explanation anyone will get
-        reject(timedOut ?? new NotServing(`the serving runtime exited (${signal ?? code}) before it answered: ${out.slice(-2000)}`));
+        const stopped = this.stoppedBooting === child;
+        if (stopped) this.stoppedBooting = undefined;
+        reject(timedOut ?? (stopped ? new NotServing("stopped while starting")
+          : new NotServing(`the serving runtime exited (${signal ?? code}) before it answered: ${out.slice(-2000)}`)));
       });
     });
   }

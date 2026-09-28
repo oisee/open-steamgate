@@ -171,12 +171,19 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     } finally {
       await runtime.stop();
     }
-    // and a stop that arrives while one is still coming up stops it
+    // and a stop that arrives while one is still coming up stops it -- at
+    // once, rather than after its boot (minutes on a remote HANA): the start
+    // hears "stopped while starting" and no child is left
     const late = new ServingRuntime();
-    const coming = late.start();
+    const coming = late.start().catch((e) => e);
     await late.stop();
     const first = await coming;
-    expect(alive(first.pid), "the child that was coming up is stopped too").to.equal(false);
+    if (first instanceof Error) {
+      expect(first.message).to.equal("stopped while starting");
+    } else {
+      expect(alive(first.pid), "the child that was coming up is stopped too").to.equal(false);
+    }
+    expect(liveChildren().filter((c) => c.exitCode === null && c.signalCode === null), "no child is left").to.have.lengthOf(0);
   });
 
   it("a recycle is a new process, and the old one is gone", async () => {
@@ -481,17 +488,33 @@ describe("tools/osd-runtime: a slow boot is waited for, a silent one is not", fu
   });
 
   it("a boot longer than the silence limit, that keeps talking, starts", async () => {
-    const runtime = new ServingRuntime({command: fake(), timeout: 800, bootTimeout: 10000, env: {TALK: "1", BOOT_MS: "2500"}});
+    const runtime = new ServingRuntime({command: fake(), timeout: 2500, bootTimeout: 20000, env: {TALK: "1", BOOT_MS: "6000"}});
     try {
-      const answer = await runtime.start();
+      const starting = runtime.start();
+      await new Promise((r) => setTimeout(r, 1000));
+      // meanwhile a proxy or /osd/serving can say what it is doing
+      expect(runtime.booting?.phase).to.equal("seeding over the network");
+      const answer = await starting;
+      expect(runtime.booting, "not booting once ready").to.equal(undefined);
       expect(answer).to.include({started: true});
       expect(runtime.running).to.equal(true);
       // and once serving, quiet is not hung: the silence limit was the boot's
-      await new Promise((r) => setTimeout(r, 1500));
+      await new Promise((r) => setTimeout(r, 3500));
       expect(runtime.running, "not killed for being quiet after ready").to.equal(true);
     } finally {
       await runtime.stop();
     }
+  });
+
+  it("stop() while booting asks the child to go instead of waiting out its boot", async () => {
+    const runtime = new ServingRuntime({command: fake(), timeout: 2500, bootTimeout: 20000, env: {TALK: "1"}});
+    const starting = runtime.start().catch((e) => e);
+    await new Promise((r) => setTimeout(r, 800));
+    const before = Date.now();
+    await runtime.stop();
+    expect(Date.now() - before, "not the boot limit").to.be.lessThan(5000);
+    expect(await starting).to.be.an("error");
+    expect(runtime.booting).to.equal(undefined);
   });
 
   it("a child that says nothing is given up on after the silence limit", async () => {
@@ -516,5 +539,30 @@ describe("tools/osd-runtime: a slow boot is waited for, a silent one is not", fu
       error = e;
     }
     expect(String(error?.message)).to.match(/did not start within 2000 ms \(last: seeding over the network\)/);
+  });
+});
+
+describe("tools/osd-proxy: a request during a long boot is answered 'starting', not held", function () {
+  it("503 STG/STARTING with Retry-After and the step, while the boot goes on", async () => {
+    const {odataProxy} = await import("../tools/osd-proxy.mjs");
+    let finish;
+    const runtime = {
+      ensure: () => new Promise((resolve) => { finish = resolve; }),
+      booting: {phase: "seeding the cross-reference", since: Date.now() - 42000},
+    };
+    const sent = {headers: {}};
+    const res = {
+      headersSent: false,
+      status(code) { sent.status = code; return this; },
+      set(name, value) { sent.headers[name] = value; return this; },
+      type() { return this; },
+      send(body) { sent.body = JSON.parse(body); return this; },
+    };
+    await odataProxy(runtime, {startingWaitMs: 100})({originalUrl: "/sap/opu/odata/sap/X/", method: "GET", headers: {}}, res);
+    expect(sent.status).to.equal(503);
+    expect(sent.headers["Retry-After"]).to.equal("5");
+    expect(sent.body.error.code).to.equal("STG/STARTING");
+    expect(sent.body).to.include({starting: true, phase: "seeding the cross-reference", seconds: 42});
+    finish();
   });
 });

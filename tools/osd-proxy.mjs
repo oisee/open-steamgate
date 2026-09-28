@@ -100,6 +100,8 @@ export function forward(runtime, req, res) {
   });
 }
 
+const STARTING = Symbol("starting");
+
 export class NotForwardable extends Error {
   constructor(message) {
     super(message);
@@ -115,9 +117,30 @@ export class NotForwardable extends Error {
 // The crash is still not hidden: the generation in the answer is a new one,
 // and the supervisor keeps what killed the last one.
 export function odataProxy(runtime, options = {}) {
+  // how long a request waits for a runtime that is still booting before it
+  // hears "starting": a boot on a remote HANA takes minutes, and a request
+  // held for all of them is a socket nobody is reading any more
+  const wait = options.startingWaitMs ?? (Number(process.env.OSD_STARTING_WAIT_MS) || 20000);
   return async function (req, res) {
     try {
-      await runtime.ensure();
+      const ready = runtime.ensure();
+      let timer;
+      const late = new Promise((resolve) => {
+        timer = setTimeout(() => resolve(STARTING), wait);
+      });
+      const first = await Promise.race([ready, late]).finally(() => clearTimeout(timer));
+      if (first === STARTING) {
+        // the boot goes on; this request is answered
+        ready.catch(() => undefined);
+        const booting = runtime.booting;
+        const seconds = booting === undefined ? undefined : Math.round((Date.now() - booting.since) / 1000);
+        res.status(503).set("Retry-After", "5").type("application/json").send(JSON.stringify({
+          error: {code: "STG/STARTING", message: {lang: "en",
+            value: `the system is starting${seconds === undefined ? "" : ` (${seconds} s)`}: ${booting?.phase ?? "starting"}`}},
+          ready: false, starting: true, phase: booting?.phase, seconds,
+        }));
+        return;
+      }
       await forward(runtime, req, res);
     } catch (e) {
       if (res.headersSent) {
