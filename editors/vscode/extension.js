@@ -41,6 +41,7 @@ const NOTEBOOK_TYPE = "osd-sql-notebook";
 // One report panel per transaction code. F8 and the CodeLens both reach the
 // same command, so a second run should refresh the existing view in place.
 const webguiPanels = new Map();
+const MANAGED_URL_KEY = "osd.managedUrl";
 
 const EXCLUDE = "{**/node_modules/**,**/.local/**,**/output/**,**/gen/**,**/build/**}";
 
@@ -479,6 +480,7 @@ class SystemController {
     this.context = context;
     this.output = output;
     this.launcher = undefined;
+    this.managedUrl = context.workspaceState?.get(MANAGED_URL_KEY);
     this.homeSource = undefined;
     this.homeMode = "auto";
     this.homeKind = undefined;
@@ -694,6 +696,11 @@ class SystemController {
     try {
       await vscode.workspace.getConfiguration("osd").update("url", `http://localhost:${port}`, target);
       this.managedUrl = `http://localhost:${port}`;
+      try {
+        await this.context.workspaceState?.update(MANAGED_URL_KEY, this.managedUrl);
+      } catch (error) {
+        this.output.appendLine(`osd: could not remember the managed URL: ${String(error.message ?? error)}`);
+      }
     } catch (error) {
       vscode.window.showErrorMessage(`osd: running on :${port}, but could not update osd.url: ${String(error.message ?? error)}`);
     }
@@ -2922,8 +2929,9 @@ async function openDataPreview(objectType, name, hasMandt, output, options = {})
   const load = async () => {
     const rowLimit = vscode.workspace.getConfiguration("osd").get("dataPreview.rowLimit", 100);
     const url = vscode.workspace.getConfiguration("osd").get("url", "http://localhost:3030").replace(/\/+$/, "");
-    const launcher = Object.hasOwn(options, "launcher") ? options.launcher : activeController?.launcher;
-    const managedUrl = Object.hasOwn(options, "managedUrl") ? options.managedUrl : activeController?.managedUrl;
+    const controller = options.controller ?? activeController;
+    const launcher = Object.hasOwn(options, "launcher") ? options.launcher : controller?.launcher;
+    const managedUrl = Object.hasOwn(options, "managedUrl") ? options.managedUrl : controller?.managedUrl;
     const unavailable = dataPreviewAvailability(launcher?.state, managedUrl, url);
     if (unavailable !== undefined) {
       panel.webview.html = dataPreviewHtml(name, {error: unavailable.message, start: unavailable.start});

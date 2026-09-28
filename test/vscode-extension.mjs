@@ -1572,17 +1572,44 @@ describe("editors/vscode: the extension's logic", function () {
     }
   });
 
-  it("Q7: an external URL remains usable, and a successful empty table is not an error", async () => {
-    const api = vscodeStub({url: "http://localhost:4545"});
-    const {openDataPreview} = loadExtension(api);
+  it("Q7: the managed URL survives a controller reload and gates its stopped listener", async () => {
+    const saved = new Map();
+    const context = controllerContext();
+    context.workspaceState = {get: (key) => saved.get(key), update: async (key, value) => { saved.set(key, value); }};
+    const api = vscodeStub({url: "http://localhost:3531"});
+    api.window.setStatusBarMessage = () => {};
+    const {SystemController, openDataPreview} = loadExtension(api);
+    const output = {append() {}, appendLine() {}, show() {}};
+    const first = new SystemController(context, output);
+    first.launcher = {state: "stopped", osdHome: ROOT, databaseLabel: "SQLite", debug: false,
+      async start() { this.state = "running"; return {port: 3531, generation: "abc123"}; }};
+    first.ensureLauncher = async () => first.launcher;
+    expect(await first.start()).to.equal(true);
+    expect(saved.get("osd.managedUrl")).to.equal("http://localhost:3531");
+
+    const reloaded = new SystemController(context, output);
+    expect(reloaded.managedUrl).to.equal("http://localhost:3531");
     let calls = 0;
-    await openDataPreview("TABL", "ZOSD_FLEET_VOY", true, {appendLine() {}}, {
-      launcher: {state: "stopped"}, managedUrl: "http://localhost:3531",
-      client: () => ({dataPreview: async () => { calls++; return {columns: [{name: "VOYAGE_ID", label: "Voyage", key: true}], rows: [], ms: 1}; }}),
+    await openDataPreview("TABL", "ZOSD_FLEET_VOY", false, output, {
+      controller: reloaded, client: () => { calls++; throw new Error("must not fetch"); },
     });
-    expect(calls).to.equal(1);
-    expect(api.panels[0].webview.html).to.contain("0 rows").and.to.contain("Voyage");
-    expect(api.panels[0].webview.html).to.not.contain('class="osd-error"');
+    expect(calls).to.equal(0);
+    expect(api.panels[0].webview.html).to.contain("Start system");
+  });
+
+  it("Q7: an external URL remains usable, and a successful empty table is not an error", async () => {
+    for (const state of ["stopped", "starting", "stopping"]) {
+      const api = vscodeStub({url: "http://localhost:4545"});
+      const {openDataPreview} = loadExtension(api);
+      let calls = 0;
+      await openDataPreview("TABL", "ZOSD_FLEET_VOY", true, {appendLine() {}}, {
+        launcher: {state}, managedUrl: "http://localhost:3531",
+        client: () => ({dataPreview: async () => { calls++; return {columns: [{name: "VOYAGE_ID", label: "Voyage", key: true}], rows: [], ms: 1}; }}),
+      });
+      expect(calls, state).to.equal(1);
+      expect(api.panels[0].webview.html).to.contain("0 rows").and.to.contain("Voyage");
+      expect(api.panels[0].webview.html).to.not.contain('class="osd-error"');
+    }
   });
 
   it("Q7: a connection refusal names the endpoint, while HTTP and SQL errors keep their details", async () => {
@@ -1597,6 +1624,8 @@ describe("editors/vscode: the extension's logic", function () {
       .to.contain("HTTP 404 -- missing table");
     expect(dataPreviewError(new Error("SQL table missing"), "http://localhost:3531")).to.equal("SQL table missing");
     expect(dataPreviewAvailability("stopped", "http://localhost:3531", "http://localhost:4545")).to.equal(undefined);
+    expect(dataPreviewAvailability("starting", "http://localhost:3531", "http://localhost:4545")).to.equal(undefined);
+    expect(dataPreviewAvailability("stopping", "http://localhost:3531", "http://localhost:4545")).to.equal(undefined);
   });
 
   it("Q7: dataPreviewRows reads tableDataDocument's own labels and keys, off the real façade shape (datapreview/ddic and /cds)", () => {

@@ -1330,12 +1330,11 @@ function dataPreviewStatusText(shown, rowLimit, total) {
   return `first ${shown} of ${total}`;
 }
 
-/** A stopped managed listener should not be contacted. An external osd.url
- * remains usable even when this window's launcher is stopped. */
+/** An unavailable managed listener should not be contacted. An external
+ * osd.url remains usable at every state of this window's launcher. */
 function dataPreviewAvailability(state, managedUrl, currentUrl) {
-  if (state === "running" || state === undefined) return undefined;
-  if (state === "stopped" && managedUrl !== currentUrl) return undefined;
-  if (state === "stopped") return {message: "The osd system is stopped. Start it to preview data.", start: true};
+  if (managedUrl !== currentUrl || state === "running") return undefined;
+  if (state === "stopped" || state === undefined) return {message: "The osd system is stopped. Start it to preview data.", start: true};
   return {message: `The osd system is ${state}. Refresh when it is running.`, start: false};
 }
 
