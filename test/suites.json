@@ -90,6 +90,7 @@
     "test/osd-store.mjs",
     "test/osd-suites.mjs",
     "test/osd-unit.mjs",
+    "test/unit-risk.mjs",
     "test/osd-where.mjs",
     "test/osd-xref.mjs",
     "test/xref-seed.mjs",

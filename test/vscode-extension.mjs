@@ -381,6 +381,218 @@ describe("editors/vscode: the extension's logic", function () {
     }
   });
 
+  it("Cancel reaches an ordinary (non-debug) run: the request gets a signal and it is aborted", async () => {
+    const api = vscodeStub({home: ROOT, "tests.showSystem": false});
+    const source = path.join(ROOT, "src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
+    api.Uri.file = (fsPath) => ({fsPath});
+    api.Range = class { constructor() {} };
+    api.TestMessage = class { constructor(message) { this.message = message; } };
+    api.TestRunProfileKind = {Run: 1, Debug: 2};
+    api.workspace.findFiles = async () => [api.Uri.file(source)];
+    api.workspace.getWorkspaceFolder = () => ({uri: api.Uri.file(ROOT)});
+    api.workspace.createFileSystemWatcher = () => ({onDidCreate() {}, onDidDelete() {}, onDidChange() {}, dispose() {}});
+    api.commands = {registerCommand: () => ({dispose() {}})};
+    const collection = (parent) => {
+      const items = new Map();
+      return {
+        get size() { return items.size; },
+        get: (id) => items.get(id),
+        add(item) { item.parent = parent; items.set(item.id, item); },
+        replace(next) { items.clear(); next.forEach((item) => this.add(item)); },
+        [Symbol.iterator]: () => items[Symbol.iterator](),
+      };
+    };
+    const profiles = new Map();
+    const events = [];
+    const controller = {
+      items: collection(undefined),
+      createTestItem(id, label, uri) {
+        const item = {id, label, uri};
+        item.children = collection(item);
+        return item;
+      },
+      createRunProfile(name, kind, handler) { profiles.set(name, handler); },
+      createTestRun() {
+        return Object.fromEntries(["started", "passed", "failed", "skipped", "errored", "appendOutput", "end"]
+          .map((name) => [name, (item) => events.push([name, item?.id])]));
+      },
+      dispose() {},
+    };
+    api.tests = {createTestController: () => controller};
+    const {testExplorer} = loadExtension(api);
+    const originalDiscover = Osd.prototype.discover;
+    const originalRun = Osd.prototype.run;
+    const listeners = new Set();
+    const token = {
+      isCancellationRequested: false,
+      onCancellationRequested(listener) { listeners.add(listener); return {dispose: () => listeners.delete(listener)}; },
+      cancel() { this.isCancellationRequested = true; for (const listener of listeners) listener(); },
+    };
+    const signals = [];
+    Osd.prototype.discover = async () => ({classes: [{name: "LTCL_SCAN", include: "testclasses", line: 1, schedule: "harmless",
+      methods: [{name: "FIRST", line: 2}]}]});
+    Osd.prototype.run = (object, testClass, method, dbEnv, inspectPort, waitForDebugger, signal) => {
+      signals.push(signal);
+      return new Promise((resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("request aborted")), {once: true});
+        setImmediate(() => token.cancel());
+      });
+    };
+    let explorer;
+    try {
+      explorer = testExplorer(controllerContext(), {appendLine() {}}, {});
+      await controller.resolveHandler();
+      const object = controller.items.get("group:project").children.get("CLAS:ZCL_OSD_ABAP_TOKENS");
+      await controller.resolveHandler(object);
+      const methods = [...object.children.get("CLAS:ZCL_OSD_ABAP_TOKENS/LTCL_SCAN").children].map(([, item]) => item);
+      await Promise.race([profiles.get("Run")({include: methods}, token),
+        new Promise((resolve, reject) => setTimeout(() => reject(new Error("the run waited for the request it cancelled")), 3000))]);
+      expect(signals).to.have.length(1);
+      expect(signals[0], "an ordinary run passes a signal").to.be.instanceOf(AbortSignal);
+      expect(signals[0].aborted, "and Cancel aborts it").to.equal(true);
+      expect(events.filter(([name]) => name === "errored").map(([, id]) => id)).to.deep.equal([methods[0].id]);
+      expect(listeners.size, "the cancellation listener is removed").to.equal(0);
+    } finally {
+      explorer?.dispose();
+      Osd.prototype.discover = originalDiscover;
+      Osd.prototype.run = originalRun;
+    }
+  });
+
+  it("a Run over a mixed tree runs the HARMLESS objects at once and the DANGEROUS one alone, after them", async () => {
+    const api = vscodeStub({home: ROOT, "tests.showSystem": false});
+    const files = ["src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap", "src/demo_data/zcl_osd_demo_random.clas.testclasses.abap",
+      "src/webgui/zcl_osd_webgui.clas.testclasses.abap"].map((f) => path.join(ROOT, f));
+    api.Uri.file = (fsPath) => ({fsPath});
+    api.Range = class { constructor() {} };
+    api.TestMessage = class { constructor(message) { this.message = message; } };
+    api.TestRunProfileKind = {Run: 1, Debug: 2};
+    api.workspace.findFiles = async () => files.map((f) => api.Uri.file(f));
+    api.workspace.getWorkspaceFolder = () => ({uri: api.Uri.file(ROOT)});
+    api.workspace.createFileSystemWatcher = () => ({onDidCreate() {}, onDidDelete() {}, onDidChange() {}, dispose() {}});
+    api.commands = {registerCommand: () => ({dispose() {}})};
+    const collection = (parent) => {
+      const items = new Map();
+      return {
+        get size() { return items.size; },
+        get: (id) => items.get(id),
+        add(item) { item.parent = parent; items.set(item.id, item); },
+        replace(next) { items.clear(); next.forEach((item) => this.add(item)); },
+        [Symbol.iterator]: () => items[Symbol.iterator](),
+      };
+    };
+    const profiles = new Map();
+    const controller = {
+      items: collection(undefined),
+      createTestItem(id, label, uri) {
+        const item = {id, label, uri};
+        item.children = collection(item);
+        return item;
+      },
+      createRunProfile(name, kind, handler) { profiles.set(name, handler); },
+      createTestRun() {
+        return Object.fromEntries(["started", "passed", "failed", "skipped", "errored", "appendOutput", "end"].map((name) => [name, () => {}]));
+      },
+      dispose() {},
+    };
+    api.tests = {createTestController: () => controller};
+    const {testExplorer} = loadExtension(api);
+    // four CPUs, whatever the machine: a pool of one would pass this test
+    // with every object scheduled DANGEROUS
+    const os = require("node:os");
+    const originalCpus = os.cpus;
+    os.cpus = () => [{}, {}, {}, {}];
+    const originalDiscover = Osd.prototype.discover;
+    const originalRun = Osd.prototype.run;
+    // ZCL_OSD_WEBGUI is the one that writes
+    const schedule = {ZCL_OSD_ABAP_TOKENS: "harmless", ZCL_OSD_DEMO_RANDOM: "harmless", ZCL_OSD_WEBGUI: "dangerous"};
+    Osd.prototype.discover = async (object) => ({classes: [{name: "LTCL_T", include: "testclasses", line: 1,
+      schedule: schedule[object.name], durationCategory: "short", methods: [{name: "M", line: 2}]}]});
+    let running = 0;
+    const seen = [];
+    Osd.prototype.run = async (object) => {
+      running += 1;
+      seen.push([object.name, running]);
+      await new Promise((r) => setTimeout(r, 60));
+      running -= 1;
+      return {testClasses: [], counts: {passed: 0, failed: 0}};
+    };
+    const token = {isCancellationRequested: false, onCancellationRequested: () => ({dispose() {}})};
+    let explorer;
+    try {
+      explorer = testExplorer(controllerContext(), {appendLine() {}}, {});
+      await controller.resolveHandler();
+      const objects = [...controller.items.get("group:project").children].map(([, item]) => item);
+      expect(objects.map((o) => o.id).sort()).to.deep.equal(["CLAS:ZCL_OSD_ABAP_TOKENS", "CLAS:ZCL_OSD_DEMO_RANDOM", "CLAS:ZCL_OSD_WEBGUI"]);
+      await profiles.get("Run")({include: objects}, token);
+      const harmless = seen.filter(([name]) => name !== "ZCL_OSD_WEBGUI");
+      expect(Math.max(...harmless.map(([, n]) => n)), "the HARMLESS objects at once").to.equal(2);
+      expect(seen.at(-1), "the DANGEROUS one last, alone").to.deep.equal(["ZCL_OSD_WEBGUI", 1]);
+    } finally {
+      os.cpus = originalCpus;
+      explorer?.dispose();
+      Osd.prototype.discover = originalDiscover;
+      Osd.prototype.run = originalRun;
+    }
+  });
+
+  it("schedules by RISK LEVEL: HARMLESS units in a pool, longest first, the rest one at a time after", async () => {
+    const {unitRiskOf, unitDurationOf, unitSchedule, runUnitQueue, unitPoolSize, riskWarning} = require("../editors/vscode/lib.js");
+    expect(unitRiskOf([{schedule: "harmless"}, {schedule: "harmless"}])).to.equal("harmless");
+    expect(unitRiskOf([{schedule: "harmless"}, {schedule: "dangerous"}])).to.equal("dangerous");
+    expect(unitRiskOf([{schedule: "harmless"}, undefined]), "a class nobody described").to.equal("dangerous");
+    expect(unitRiskOf([])).to.equal("dangerous");
+    expect(unitDurationOf([{duration: "short"}, {duration: "long"}, {duration: "medium"}])).to.equal("long");
+    expect(unitDurationOf([undefined])).to.equal("short");
+    expect(unitPoolSize(1)).to.equal(1);
+    expect(unitPoolSize(3)).to.equal(2);
+    expect(unitPoolSize(32)).to.equal(4);
+    const plan = unitSchedule([
+      {key: "a", risk: "harmless", duration: "short"}, {key: "b", risk: "dangerous", duration: "short"},
+      {key: "c", risk: "harmless", duration: "long"}, {key: "d", risk: "critical", duration: "medium"},
+    ]);
+    expect(plan.parallel.map((u) => u.key)).to.deep.equal(["c", "a"]);
+    expect(plan.serial.map((u) => u.key)).to.deep.equal(["d", "b"]);
+
+    // run for real, with timers: at most `poolSize` HARMLESS at once, no
+    // other unit while any runs, and the rest strictly one after another
+    let running = 0;
+    let most = 0;
+    const log = [];
+    const unit = (key, risk, ms) => ({key, risk, duration: "short", run: async () => {
+      running += 1;
+      most = Math.max(most, running);
+      log.push(["start", key, risk, running]);
+      await new Promise((r) => setTimeout(r, ms));
+      running -= 1;
+      log.push(["end", key]);
+    }});
+    const started = Date.now();
+    await runUnitQueue([unit("h1", "harmless", 120), unit("d1", "dangerous", 30), unit("h2", "harmless", 120),
+      unit("h3", "harmless", 120), unit("d2", "critical", 30)], {poolSize: 3});
+    const elapsed = Date.now() - started;
+    expect(most, "three HARMLESS at once").to.equal(3);
+    for (const [event, key, risk, concurrent] of log.filter(([e]) => e === "start")) {
+      if (risk !== "harmless") expect(concurrent, `${key} ran alone`).to.equal(1);
+    }
+    const firstDangerous = log.findIndex(([e, , risk]) => e === "start" && risk !== "harmless");
+    expect(log.slice(firstDangerous).some(([e, , risk]) => e === "start" && risk === "harmless"), "no HARMLESS after the serial queue began").to.equal(false);
+    expect(elapsed, "the pool overlapped the HARMLESS runs").to.be.below(120 * 3 + 60);
+    // cancelled: nothing new starts
+    const ran = [];
+    let stop = false;
+    await runUnitQueue([{risk: "harmless", run: async () => { ran.push(1); stop = true; }}, {risk: "harmless", run: async () => ran.push(2)},
+      {risk: "dangerous", run: async () => ran.push(3)}], {poolSize: 1, cancelled: () => stop});
+    expect(ran).to.deep.equal([1]);
+
+    const found = {object: {name: "ZCL_X_TEST"}, writes: [{object: "ZCL_X_TEST", kind: "INSERT", file: "zcl_x_test.clas.testclasses.abap", line: 12}], writesTotal: 3};
+    expect(riskWarning({riskLevel: "harmless", riskLevelDeclared: true, schedule: "dangerous"}, found))
+      .to.equal("RISK LEVEL HARMLESS, but the tests of ZCL_X_TEST reach a database write: INSERT in ZCL_X_TEST (zcl_x_test.clas.testclasses.abap:12) and 2 more. It runs one at a time, as DANGEROUS; declare RISK LEVEL DANGEROUS to say so.");
+    expect(riskWarning({riskLevel: "harmless", riskLevelDeclared: false, schedule: "dangerous"}, found), "undeclared says nothing").to.equal(undefined);
+    expect(riskWarning({riskLevel: "dangerous", riskLevelDeclared: true, schedule: "dangerous"}, found)).to.equal(undefined);
+    expect(riskWarning({riskLevel: "harmless", riskLevelDeclared: true, schedule: "harmless"}, found)).to.equal(undefined);
+  });
+
   it("maps packaged workspace-layer source-map entries to the open folder", () => {
     const layer = {folder: "/work/project", srcDir: "/work/project/src"};
     const config = debuggerConfiguration(9341, {root: "/installed/osd", storageDir: "/storage/osd", layers: [layer]});

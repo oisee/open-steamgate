@@ -198,3 +198,105 @@ function installWait() {
   wait.osdStep = true;
   statements.wait = wait;
 }
+
+// **Hooks at the database seam** (docs/ideas.md B17): the one place a
+// write or a read by the ABAP can be watched, failed or redirected with
+// the ABAP none the wiser, the way a system's kernel sits below it. One
+// owner, this module, and every hook visible by name (activeHooks()), so an
+// interception is kernel mechanics and not hidden magic.
+//
+// First consumer: the ABAP Unit runtime guard (tools/osd-unit.mjs), which
+// fails a test that declares RISK LEVEL HARMLESS and writes. A hook is
+// {write(operation, table)}: called before a write reaches the client, and
+// a throw from it is the write's failure. What counts as a write: Open
+// SQL's insert/update/delete, and a data statement (INSERT, UPDATE, DELETE,
+// MERGE, UPSERT, REPLACE, TRUNCATE) sent through execute, native, write or
+// modifying -- the paths SQLScript and AMDP bodies take -- **into a table
+// the DDIC knows**. DDL is not a write here, and neither is a table the
+// DDIC does not know: a client's own scratch relations (DuckDB's views and
+// materialised tables for an AMDP read) are the kernel's, not the test's.
+// Only the DEFAULT connection is hooked. Reads are not hooked yet: the
+// consumers that need them (a readiness gate, the OSQL test environment)
+// add that half.
+const hooks = new Map();
+let hookedClient;
+let unhooked;
+
+// the verb, SQLite's "OR REPLACE"/"OR IGNORE", the INTO/FROM/TABLE word,
+// and a name that may be schema-qualified ("SCHEMA"."ZTAB": the last part)
+const WRITE_SQL = /^\s*(INSERT|UPDATE|DELETE|MERGE|UPSERT|REPLACE|TRUNCATE)\b(?:\s+OR\s+\w+)?(?:\s+(?:INTO|FROM|TABLE))?\s+((?:["'`]?[\w/$]+["'`]?\.)*["'`]?[\w/$]+)/i;
+
+/** the table a native SQL statement writes, or undefined for a read */
+export function nativeWriteOf(sql) {
+  const match = WRITE_SQL.exec(String(sql));
+  if (match === null) return undefined;
+  const table = match[2].split(".").pop().replace(/["'`]/g, "");
+  return {operation: match[1].toUpperCase(), table: table.toUpperCase()};
+}
+
+function tableOf(options) {
+  const table = options?.table;
+  return String(typeof table === "string" ? table : table?.name ?? table ?? "?").replace(/^["'`]|["'`]$/g, "").toUpperCase();
+}
+
+function writeSeen(operation, table) {
+  const ddic = globalThis.abap?.DDIC;
+  if (ddic !== undefined && ddic[table] === undefined) return;
+  for (const hook of hooks.values()) hook.write?.(operation, table);
+}
+
+const sqlOf = (argument) => (typeof argument === "string" ? argument : argument?.sql);
+
+function installHooks() {
+  const client = connection();
+  if (client === undefined || hookedClient === client) return;
+  removeHooks();
+  const originals = {};
+  for (const operation of ["insert", "update", "delete"]) {
+    if (typeof client[operation] !== "function") continue;
+    originals[operation] = client[operation];
+    client[operation] = function (options) {
+      writeSeen(operation.toUpperCase(), tableOf(options));
+      return originals[operation].call(this, options);
+    };
+  }
+  for (const operation of ["execute", "native", "write", "modifying"]) {
+    if (typeof client[operation] !== "function") continue;
+    originals[operation] = client[operation];
+    client[operation] = function (argument, ...rest) {
+      for (const one of Array.isArray(argument) ? argument : [argument]) {
+        const write = nativeWriteOf(sqlOf(one) ?? "");
+        if (write !== undefined) writeSeen(write.operation, write.table);
+      }
+      return originals[operation].call(this, argument, ...rest);
+    };
+  }
+  hookedClient = client;
+  unhooked = () => {
+    for (const [operation, original] of Object.entries(originals)) client[operation] = original;
+  };
+}
+
+function removeHooks() {
+  unhooked?.();
+  unhooked = undefined;
+  hookedClient = undefined;
+}
+
+/** Installs a hook under `name` (replacing one of that name) and returns
+ *  its removal. The client is patched while any hook is active and
+ *  restored when the last one goes. */
+export function hookDatabase(name, hook) {
+  hooks.set(name, hook);
+  installHooks();
+  return () => {
+    if (hooks.get(name) !== hook) return;
+    hooks.delete(name);
+    if (hooks.size === 0) removeHooks();
+  };
+}
+
+/** the names of the hooks active now */
+export function activeHooks() {
+  return [...hooks.keys()];
+}

@@ -24,7 +24,8 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   warmStatusText, activationBuildText, closureTestsText,
   presetSettings, isOpenSteamgateCheckout: isOpenSteamgateManifest, osdHomeChoice, osdStateContext, systemOverviewModel,
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText,
-  runningAbapSources, breakpointWarning, taxiDefaultYear, taxiResetPrompt} = require("./lib.js");
+  runningAbapSources, breakpointWarning, taxiDefaultYear, taxiResetPrompt,
+  unitRiskOf, unitDurationOf, runUnitQueue, unitPoolSize, riskWarning} = require("./lib.js");
 const {Launcher, ensureMaterializedHome, materializedHomeDir, selectOldHomes, listOldHomes, cleanupOldHomes,
   hasLiveServingLock,
   detectWorkspaceLayers, layerContributions, databaseEnv, defaultDedicatedName, describeDatabase,
@@ -3393,7 +3394,16 @@ function testExplorer(context, output, {
     return configCache.get(folderRoot);
   };
 
+  // what each test class is scheduled as (the façade's check of its RISK
+  // LEVEL, tools/osd-unit-risk.mjs), by class item id; and a warning on the
+  // RISK LEVEL of a class that declares HARMLESS and reaches a write
+  const classSchedules = new Map();
+  const riskDiagnostics = vscode.languages?.createDiagnosticCollection?.("osd ABAP Unit risk");
   const buildTree = async () => {
+    // a rebuilt tree starts with no verdicts: an object is described again
+    // when it is expanded or run, and a deleted file keeps no warning
+    classSchedules.clear();
+    riskDiagnostics?.clear();
     const root = activeController?.launcher?.osdHome ?? osdHomeOf();
     const layers = transpileLayers(readTranspileConfig(root));
     const workspaceLayers = activeController?.launcher?.layers ?? [];
@@ -3467,12 +3477,22 @@ function testExplorer(context, output, {
     try {
       const found = await osd().discover(object);
       const classes = [];
+      const warnings = new Map();
       // a class without test methods (the global class of a test-only
       // object is listed too) has nothing to run
       for (const testClass of (found.classes ?? []).filter((c) => (c.methods ?? []).length > 0)) {
         const file = vscode.Uri.file(fileOf(dir, object, testClass.include));
         const classItem = controller.createTestItem(`${item.id}/${testClass.name}`, testClass.name, file);
         classItem.range = new vscode.Range(Math.max(0, testClass.line - 1), 0, Math.max(0, testClass.line - 1), 0);
+        classSchedules.set(classItem.id, {schedule: testClass.schedule, duration: testClass.durationCategory});
+        const warning = riskWarning(testClass, found);
+        if (warning !== undefined && riskDiagnostics !== undefined) {
+          const range = new vscode.Range(Math.max(0, testClass.line - 1), 0, Math.max(0, testClass.line - 1), 200);
+          const diagnostic = new vscode.Diagnostic(range, warning, vscode.DiagnosticSeverity?.Warning ?? 1);
+          diagnostic.source = "osd";
+          if (!warnings.has(file.fsPath)) warnings.set(file.fsPath, {uri: file, list: []});
+          warnings.get(file.fsPath).list.push(diagnostic);
+        }
         for (const m of testClass.methods ?? []) {
           const methodItem = controller.createTestItem(`${classItem.id}/${m.name}`, m.name, file);
           methodItem.range = new vscode.Range(Math.max(0, m.line - 1), 0, Math.max(0, m.line - 1), 0);
@@ -3482,6 +3502,11 @@ function testExplorer(context, output, {
       }
       item.children.replace(classes);
       item.error = undefined;
+      // this object's files: the warnings found now, and none left from before
+      for (const testClass of found.classes ?? []) {
+        const file = vscode.Uri.file(fileOf(dir, object, testClass.include));
+        riskDiagnostics?.set(file, warnings.get(file.fsPath)?.list ?? []);
+      }
     } catch (e) {
       item.error = String(e.message ?? e);
     } finally {
@@ -3588,44 +3613,80 @@ function testExplorer(context, output, {
       if (!byObject.has(sel.objectItem.id)) byObject.set(sel.objectItem.id, []);
       byObject.get(sel.objectItem.id).push(sel);
     }
+    // Cancel reaches the request in flight: an ordinary run used to pass no
+    // signal, so a cancelled Test Explorer run waited for the child it had
+    // already started (the façade kills the child when the request aborts)
+    const cancellation = new AbortController();
+    const cancelled = () => token.isCancellationRequested || cancellation.signal.aborted;
+    const subscription = token.onCancellationRequested?.(() => cancellation.abort());
+    const runSelection = async (sel, object, dir) => {
+      const methods = leaves(sel.item);
+      methods.forEach((m) => run.started(m));
+      try {
+        const inspectPort = useDebugger ? await pickUnitInspectorPort() : undefined;
+        if (cancelled()) {
+          methods.forEach((m) => run.skipped(m));
+          return;
+        }
+        const execute = (signal) => osd().run(object, sel.testClass, sel.method, dbEnv, inspectPort,
+          inspectPort !== undefined, signal);
+        const answer = inspectPort === undefined ? await execute(cancellation.signal) : await runWithDebuggerAttach(
+          () => attachUnitDebugger({type: "unit-started", port: inspectPort}), execute, token);
+        const results = outcomes(answer, methods.map((m) => ({testClass: m.id.split("/")[1], method: m.id.split("/")[2]})));
+        for (const m of methods) {
+          const [, testClass, method] = m.id.split("/");
+          const result = results.find((r) => r.testClass === testClass && r.method === method);
+          if (result === undefined) {
+            run.skipped(m);
+          } else if (result.passed) {
+            run.passed(m, result.ms);
+          } else {
+            run.failed(m, result.alerts.map((a) => message(a, dir, m)), result.ms);
+          }
+        }
+        run.appendOutput(`${object.name}: ${answer.counts?.passed ?? 0} passed, ${answer.counts?.failed ?? 0} failed in ${answer.ms ?? 0} ms\r\n`);
+      } catch (e) {
+        const text = new vscode.TestMessage(String(e.message ?? e));
+        methods.forEach((m) => run.errored(m, text));
+        output.appendLine(String(e.message ?? e));
+      }
+    };
+    // one unit per object: its selections in the order asked, its risk and
+    // duration from the classes it runs (what discover() learned)
+    const units = [];
     for (const [objectId, sels] of byObject) {
-      if (token.isCancellationRequested) break;
+      if (cancelled()) break;
       const objectItemOf = sels[0].objectItem;
       if (objectItemOf.children.size === 0) await discover(objectItemOf);
       const {object, dir} = objects.get(objectId);
+      const classIds = new Set();
       for (const sel of sels) {
-        if (token.isCancellationRequested) break;
-        const methods = leaves(sel.item);
-        methods.forEach((m) => run.started(m));
-        try {
-          const inspectPort = useDebugger ? await pickUnitInspectorPort() : undefined;
-          if (token.isCancellationRequested) {
-            methods.forEach((m) => run.skipped(m));
-            break;
-          }
-          const execute = (signal) => osd().run(object, sel.testClass, sel.method, dbEnv, inspectPort,
-            inspectPort !== undefined, signal);
-          const answer = inspectPort === undefined ? await execute() : await runWithDebuggerAttach(
-            () => attachUnitDebugger({type: "unit-started", port: inspectPort}), execute, token);
-          const results = outcomes(answer, methods.map((m) => ({testClass: m.id.split("/")[1], method: m.id.split("/")[2]})));
-          for (const m of methods) {
-            const [, testClass, method] = m.id.split("/");
-            const result = results.find((r) => r.testClass === testClass && r.method === method);
-            if (result === undefined) {
-              run.skipped(m);
-            } else if (result.passed) {
-              run.passed(m, result.ms);
-            } else {
-              run.failed(m, result.alerts.map((a) => message(a, dir, m)), result.ms);
-            }
-          }
-          run.appendOutput(`${object.name}: ${answer.counts?.passed ?? 0} passed, ${answer.counts?.failed ?? 0} failed in ${answer.ms ?? 0} ms\r\n`);
-        } catch (e) {
-          const text = new vscode.TestMessage(String(e.message ?? e));
-          methods.forEach((m) => run.errored(m, text));
-          output.appendLine(String(e.message ?? e));
-        }
+        if (sel.testClass !== undefined) classIds.add(`${objectId}/${sel.testClass}`);
+        else for (const [, child] of objectItemOf.children) classIds.add(child.id);
       }
+      const schedules = [...classIds].map((id) => classSchedules.get(id));
+      units.push({
+        key: objectId,
+        risk: unitRiskOf(schedules),
+        duration: unitDurationOf(schedules),
+        run: async () => {
+          for (const sel of sels) {
+            if (cancelled()) break;
+            await runSelection(sel, object, dir);
+          }
+        },
+      });
+    }
+    try {
+      // a debug run stays one at a time: one debugger, one child. So does a
+      // run on a shared database (osd.database.tests = HANA or PostgreSQL):
+      // every child there uses the one schema, and even a HARMLESS one
+      // writes while it boots (the cross-reference and the pack rows are
+      // reseeded), so two at once would delete each other's rows
+      const sharedDatabase = dbEnv?.STG_DB === "hana" || dbEnv?.STG_DB === "postgres";
+      await runUnitQueue(units, {poolSize: useDebugger || sharedDatabase ? 1 : unitPoolSize(), cancelled});
+    } finally {
+      subscription?.dispose?.();
     }
     run.end();
   };
@@ -3650,7 +3711,7 @@ function testExplorer(context, output, {
   controller.refreshHandler = async () => {
     await buildTree();
   };
-  return {dispose: () => { clearTimeout(rebuildTimer); watcher.dispose(); debugCurrentTests.dispose(); controller.dispose(); }};
+  return {dispose: () => { clearTimeout(rebuildTimer); watcher.dispose(); debugCurrentTests.dispose(); riskDiagnostics?.dispose(); controller.dispose(); }};
 }
 
 function* gather(collection) {

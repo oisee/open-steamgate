@@ -28,6 +28,8 @@ import {resolveFrame} from "./osd-where.mjs";
 export {statementAfter} from "./osd-where.mjs";
 import {ObjectStore, NotFound} from "./osd-store.mjs";
 import {runsAs} from "./osd-main.mjs";
+import {UnitRisk, scheduledRisk} from "./osd-unit-risk.mjs";
+import {hookDatabase} from "./osd-dialog-step.mjs";
 
 // ADT's own words for what a class declares
 const RISK = {HARMLESS: "harmless", DANGEROUS: "dangerous", CRITICAL: "critical"};
@@ -124,6 +126,10 @@ export class UnitRun {
           localClass: definition.name,
           riskLevel: RISK[definition.riskLevel] ?? "harmless",
           durationCategory: DURATION[definition.duration] ?? "short",
+          // ADT reports an undeclared level as harmless; a scheduler must
+          // not believe that (tools/osd-unit-risk.mjs scheduledRisk)
+          riskLevelDeclared: RISK[definition.riskLevel] !== undefined,
+          durationDeclared: DURATION[definition.duration] !== undefined,
           include: includeOf(filename),
           source: filename,
           module: basename(filename).replace(/\.abap$/, ".mjs"),
@@ -134,6 +140,35 @@ export class UnitRun {
       }
     }
     return {object: entry, classes};
+  }
+
+  // The plan with what the declarations are checked against
+  // (tools/osd-unit-risk.mjs): the writes the object's tests reach, and per
+  // class the risk it is scheduled with and whether the runtime guard
+  // watches it -- a class declared HARMLESS in which the static check found
+  // nothing. A class the check flagged is scheduled DANGEROUS and not
+  // guarded: it says HARMLESS, the check says otherwise, and failing it for
+  // a write the check already reported would only fail it twice.
+  async withRisk(plan) {
+    this.risk ??= new UnitRisk(this.store);
+    let reached;
+    try {
+      reached = await this.risk.writesReached(plan.object.name);
+    } catch (error) {
+      // no cross-reference, no verdict: every class runs alone and unguarded,
+      // which is what an undeclared one gets, and the discovery still answers
+      return {...plan, writes: [], writesTotal: 0, riskError: String(error?.message ?? error),
+        classes: plan.classes.map((testClass) => ({...testClass, schedule: "dangerous", guard: false}))};
+    }
+    return {
+      ...plan,
+      writes: reached.writes,
+      writesTotal: reached.total,
+      classes: plan.classes.map((testClass) => {
+        const schedule = scheduledRisk(testClass, reached.writes);
+        return {...testClass, schedule, guard: schedule === "harmless"};
+      }),
+    };
   }
 
   // the run itself, in this process. Every method is timed and every throw
@@ -178,34 +213,49 @@ export class UnitRun {
         testClasses.push(testClass);
         continue;
       }
-      let local;
+      // The runtime guard (the first consumer of the database hooks,
+      // tools/osd-dialog-step.mjs): a class scheduled as HARMLESS runs with
+      // its writes to DDIC tables failing, from class_setup to
+      // class_teardown. The failure is a JavaScript error, not an ABAP
+      // exception, so a CATCH in the test does not swallow it.
+      const guarded = declared.guard === true;
+      const unguard = guarded ? hookDatabase("abap-unit-risk-guard", {
+        write(operation, table) {
+          throw new HarmlessWrote(declared.name, operation, table);
+        },
+      }) : undefined;
       try {
-        const module = await import(specifier(file));
-        local = module[declared.localClass];
-        if (local === undefined) {
-          throw new Error(`${declared.localClass} is not exported by ${declared.module}`);
+        let local;
+        try {
+          const module = await import(specifier(file));
+          local = module[declared.localClass];
+          if (local === undefined) {
+            throw new Error(`${declared.localClass} is not exported by ${declared.module}`);
+          }
+          if (local.class_setup) {
+            await local.class_setup();
+          }
+        } catch (error) {
+          testClass.alerts.push(this.#alert(error, "class_setup"));
+          testClasses.push(testClass);
+          continue;
         }
-        if (local.class_setup) {
-          await local.class_setup();
+
+        for (const method of declared.testMethods.filter(wantedMethod)) {
+          testClass.testMethods.push(await this.#method(local, method, options));
         }
-      } catch (error) {
-        testClass.alerts.push(this.#alert(error, "class_setup"));
+
+        try {
+          if (local.class_teardown) {
+            await local.class_teardown();
+          }
+        } catch (error) {
+          testClass.alerts.push(this.#alert(error, "class_teardown"));
+        }
         testClasses.push(testClass);
-        continue;
+      } finally {
+        unguard?.();
       }
-
-      for (const method of declared.testMethods.filter(wantedMethod)) {
-        testClass.testMethods.push(await this.#method(local, method, options));
-      }
-
-      try {
-        if (local.class_teardown) {
-          await local.class_teardown();
-        }
-      } catch (error) {
-        testClass.alerts.push(this.#alert(error, "class_teardown"));
-      }
-      testClasses.push(testClass);
     }
 
     const methods = testClasses.flatMap((c) => c.testMethods);
@@ -266,6 +316,7 @@ export class UnitRun {
   // a thrown thing becomes an alert, with the stack read back through the
   // source maps first
   #alert(error, where) {
+    if (error instanceof HarmlessWrote) return guardAlert(error.testClass, error.table, this.#stack(error));
     return alertOf(error, where, this.#stack(error));
   }
 
@@ -476,6 +527,27 @@ async function text(stream) {
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString("utf8");
+}
+
+// the runtime guard's refusal: a write by a class scheduled as HARMLESS
+export class HarmlessWrote extends Error {
+  constructor(testClass, operation, table) {
+    super(`RISK LEVEL HARMLESS but wrote to ${table}`);
+    this.testClass = testClass;
+    this.operation = operation;
+    this.table = table;
+  }
+}
+
+function guardAlert(testClass, table, stack = []) {
+  return {
+    kind: "riskLevel",
+    severity: "critical",
+    title: `RISK LEVEL HARMLESS but wrote to ${table}`,
+    details: [`${testClass} declares RISK LEVEL HARMLESS and ran in parallel with other tests; it wrote to ${table}.`,
+      "Declare RISK LEVEL DANGEROUS (or CRITICAL), or keep the test off the database."],
+    stack,
+  };
 }
 
 export class NotTranspiled extends Error {
