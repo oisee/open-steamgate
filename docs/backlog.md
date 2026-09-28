@@ -3865,18 +3865,24 @@ speed task than splitting the costly integration cases (`docs/ci-tests.md`).
         writes startup seed rows even when its test declares HARMLESS;
         SQLite and DuckDB get a separate temporary database file per child
 8.9  isolated remote-database slots for ABAP Unit, if HANA/Postgres runs need parallelism
-     └─ propose server env OSD_UNIT_DB_SLOTS=1 by default, surfaced as a VS Code
-        setting; derive short, collision-resistant __UNIT_01..N names from the
-        configured HANA_SCHEMA or PGDATABASE, never using that base for tests
+     └─ propose server cap OSD_UNIT_DB_SLOTS=1 by default and a VS Code
+        setting for the next test run; derive short, collision-resistant
+        __UNIT_01..N names from HANA_SCHEMA or PGDATABASE, leaving the base
+        untouched. No RZ10/RZ11-like editor exists today
+     └─ first prove HARMLESS can share one prepared read-only schema: skip
+        per-child startup reseed and retain the runtime write guard from
+        class_setup through class_teardown; verify no other boot writes
      └─ lease one slot per child; return it only after verified reset on
         completion, cancellation or failure, otherwise quarantine that slot;
         a changed slot count takes effect after active runs drain
      └─ HANA can use schemas; the current PostgreSQL client uses public in a
         dedicated database, so PostgreSQL needs a pool of databases or a
         deliberate client change before it can use schemas
-     └─ prove reset to a known seed after tests that COMMIT WORK, crash
-        recovery and schema-version checks before reusing slots; compare two
-        slots with serial wall time and the cost of reset on a real backend
+     └─ DANGEROUS tests with proven database-only effects may use isolated
+        slots; dynamic/unknown effects and CRITICAL stay serial by default.
+        A test can COMMIT WORK, so compare snapshot restore with drop/reseed
+        on a real backend; prove crash recovery and schema-version checks
+        before reusing a slot, then measure two slots against serial wall time
 ```
 
 ## 9. Upstream, outside this repository (T's, verbatim from them)
