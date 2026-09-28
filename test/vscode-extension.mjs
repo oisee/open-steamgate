@@ -588,7 +588,14 @@ describe("editors/vscode: the extension's logic", function () {
     expect(await controller.releaseDebugger(), "a breakpoint still wants it").to.equal(false);
     api.debug.breakpoints = [new api.SourceBreakpoint("/w/src/zcl_osd_fleet_report.clas.abap", false),
       new api.SourceBreakpoint("/w/tools/x.mjs")];
-    expect(await controller.releaseDebugger()).to.equal(true);
+    // the last one gone while the session is attached (a paused request, a
+    // Run with debugger): it stays until the session ends
+    const session = {name: "OSD: ABAP (9401)"};
+    controller.debugSessions.add(session);
+    expect(await controller.releaseDebugger(), "the session is still in use").to.equal(false);
+    expect(controller.launcher.calls).to.deep.equal(["open"]);
+    controller.debugSessions.delete(session);
+    expect(await controller.releaseDebugger({sessionEnded: true})).to.equal(true);
     expect(controller.launcher.calls).to.deep.equal(["open", "close"]);
     expect(controller.debuggerState.systemPort, "detached").to.equal(undefined);
     // a system started with its inspector (osd.debug, OSD_INSPECT=1) keeps it

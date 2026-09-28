@@ -480,10 +480,6 @@ function runToCompletion(cwd, script, args, env, onLine, onChild) {
   });
 }
 
-/** One `GET /osd/serving` (tools/osd-serve.mjs, forwarded by test/start.mjs
- *  the way every other `/osd/*` door is), or `undefined` when nothing
- *  answers yet -- refused, reset, or the connection simply is not there.
- *  Never throws: "not up yet" is the expected answer for most of a build. */
 /** POST {open, port} to the system's /osd/inspector door (test/start.mjs,
  *  tools/osd-inspector.mjs): the debugger on demand. Resolves the answer,
  *  rejects with the system's own reason. */
@@ -511,6 +507,10 @@ function inspectorOnce(port, body, timeoutMs = 15000) {
   });
 }
 
+/** One `GET /osd/serving` (tools/osd-serve.mjs, forwarded by test/start.mjs
+ *  the way every other `/osd/*` door is), or `undefined` when nothing
+ *  answers yet -- refused, reset, or the connection simply is not there.
+ *  Never throws: "not up yet" is the expected answer for most of a build. */
 function servingOnce(port) {
   return new Promise((resolve) => {
     const req = request({hostname: "127.0.0.1", port, path: "/osd/serving", method: "GET", timeout: 2000}, (res) => {
@@ -1082,6 +1082,8 @@ class Launcher extends EventEmitter {
   #asked = new WeakMap();
   // the readiness poll of the start in flight, so stop() can end it
   #poll = undefined;
+  // the inspector open in flight (openInspector): one at a time
+  #opening = undefined;
 
   #ask(child, reason) {
     if (child !== undefined && child.exitCode === null && child.signalCode === null) {
@@ -1380,7 +1382,17 @@ class Launcher extends EventEmitter {
    *  launcher's inspector port (picked now if it has none, or if another
    *  process took it), without a restart. Resolves the port. A system
    *  started with the inspector already open answers at once. */
+  // One open at a time: a breakpoint and a start's own attach, or two
+  // quick clicks, would otherwise each pick a port and move the child's
+  // inspector between them, leaving the debugger on the one it left.
   async openInspector() {
+    this.#opening ??= this.#openInspector().finally(() => {
+      this.#opening = undefined;
+    });
+    return this.#opening;
+  }
+
+  async #openInspector() {
     if (this.state !== "running" || this.port === undefined) {
       throw new Error("osd is not running: start it first (osd: Start)");
     }

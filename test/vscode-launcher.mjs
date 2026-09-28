@@ -1461,8 +1461,14 @@ describe("editors/vscode/launcher.js: the inspector on demand", function () {
       expect(port).to.be.within(1, 65535);
       expect(launcher.inspectorOpen).to.equal(true);
       expect(await launcher.openInspector(), "open already: no second request").to.equal(port);
+      // two asks at once (a breakpoint and a start's own attach) are one open
+      launcher.inspectorOpen = false;
+      const both = await Promise.all([launcher.openInspector(), launcher.openInspector()]);
+      expect(both).to.deep.equal([port, port]);
+      expect(requests.filter(([, , body]) => body.open === true), "one POST for both").to.have.length(2);
       expect(await launcher.closeInspector()).to.equal(true);
       expect(requests).to.deep.equal([
+        ["POST", "/osd/inspector", {open: true, port}],
         ["POST", "/osd/inspector", {open: true, port}],
         ["POST", "/osd/inspector", {open: false}],
       ]);
@@ -1473,7 +1479,7 @@ describe("editors/vscode/launcher.js: the inspector on demand", function () {
       launcher.debug = true;
       launcher.inspectorOpen = true;
       expect(await launcher.closeInspector()).to.equal(false);
-      expect(requests).to.have.length(3);
+      expect(requests).to.have.length(4);
     } finally {
       rmSync(storageDir, {recursive: true, force: true});
     }

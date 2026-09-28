@@ -267,6 +267,7 @@ export class ServingRuntime {
     if (open === true && (!Number.isInteger(port) || port < 1 || port > 65535)) {
       throw new Error(`invalid inspector port: ${port}`);
     }
+    const before = this.inspecting;
     this.inspecting = open === true ? {port} : null;
     const child = this.child;
     if (this.running !== true || child === undefined) {
@@ -290,8 +291,8 @@ export class ServingRuntime {
       child.on("message", onMessage);
       child.send({type: "inspector", id, open: open === true, port});
     }).catch((error) => {
-      // not opened: the next child is not asked to open it either
-      if (open === true) this.inspecting = null;
+      // not changed: the next child does what it would have done before
+      this.inspecting = before;
       throw error;
     });
     return {open: done.open, port: done.port, url: done.url};

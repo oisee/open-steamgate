@@ -52,10 +52,21 @@ which refuses any other host). Then the extension starts its Node attach
 session with the same source-map settings as before. The supervisor
 remembers the port, so a recycle, a warm activation's recycle or a full
 rebuild's new child opens it again at its start on the same port, and the
-attach session's `restart` option reconnects. When the last `.abap`
-breakpoint is removed or disabled, or the attach session ends with none
-left, the extension detaches and the inspector is closed again, so nothing
-stays open.
+attach session's `restart` option reconnects. Once no `.abap` breakpoint is
+left **and** the attach session has ended, the inspector is closed again,
+so nothing stays open. Removing the last breakpoint while a request is
+paused, or during a Run with debugger, leaves the session attached until it
+is ended.
+
+The door is for a program on this machine and nothing else, because opening
+an inspector is running code in the process. It refuses a request that is
+not from a loopback socket, one whose Host is not a loopback name (which a
+DNS-rebound page cannot fake), and one that comes from a web page (an
+`Origin`, or a `Sec-Fetch-Site` other than `none`). A POST must be
+`application/json`. It answers the port, never the inspector's URL, whose
+uuid is what keeps a page off its WebSocket. The first version lacked the
+last three, and the critic of this change showed a page on the same machine
+opening the inspector through a rebound name and reading the URL back.
 
 The acceptance is measured in `test/osd-child.mjs`. A system is started
 the normal way with no inspector, and the door opens one on 127.0.0.1 only;

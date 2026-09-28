@@ -499,7 +499,7 @@ class SystemController {
           {type: "system-session-ended", port: this.debuggerState.systemPort}).state;
         // the debug session ended: an inspector opened on demand closes
         // once no .abap breakpoint wants it either
-        this.releaseDebugger().catch((e) => this.output.appendLine(`osd debugger: ${String(e?.message ?? e)}`));
+        this.releaseDebugger({sessionEnded: true}).catch((e) => this.output.appendLine(`osd debugger: ${String(e?.message ?? e)}`));
       }
     }));
     this.emitter = new vscode.EventEmitter();
@@ -631,7 +631,20 @@ class SystemController {
    *  osd.debug, no restart. Without it, attaches only to an inspector that
    *  is already open. The reason a debugger could not attach is left in
    *  `debuggerError` for the caller to show. */
-  async attachSystemDebugger({onDemand = false} = {}) {
+  // opening and closing the inspector one after another, in the order they
+  // were asked: a close in flight and a new breakpoint's open would otherwise
+  // reach the system on two connections, in either order
+  #inspectorStep(step) {
+    const next = (this.inspectorSteps ?? Promise.resolve()).then(step, step);
+    this.inspectorSteps = next.catch(() => undefined);
+    return next;
+  }
+
+  async attachSystemDebugger(options = {}) {
+    return this.#inspectorStep(() => this.#attachSystemDebugger(options));
+  }
+
+  async #attachSystemDebugger({onDemand = false} = {}) {
     const launcher = this.launcher;
     this.debuggerError = undefined;
     if (launcher === undefined || launcher.state !== "running") {
@@ -654,12 +667,21 @@ class SystemController {
   }
 
   /** The other half of on demand: once no enabled .abap breakpoint is left
-   *  and no OSD: ABAP session runs, detach and close an inspector this
-   *  window opened. One opened at start (osd.debug, OSD_INSPECT=1) stays. */
-  async releaseDebugger() {
+   *  **and** the OSD: ABAP session has ended, close an inspector this window
+   *  opened. Removing the last breakpoint while the session is attached (a
+   *  paused request, a Run with debugger) leaves it attached; ending the
+   *  session then closes it. One opened at start (OSD_INSPECT=1, osd.debug)
+   *  stays. `sessionEnded` is said by the session's own end. */
+  async releaseDebugger(options = {}) {
+    return this.#inspectorStep(() => this.#releaseDebugger(options));
+  }
+
+  async #releaseDebugger({sessionEnded = false} = {}) {
     const launcher = this.launcher;
     if (launcher === undefined || launcher.debug === true || launcher.inspectorOpen !== true) return false;
     if (abapBreakpoints().length > 0) return false;
+    const name = `OSD: ABAP (${launcher.inspectPort})`;
+    if (!sessionEnded && this.runningDebugSessions().some((session) => session.name === name)) return false;
     await this.debuggerTransition;
     await this.applyDebuggerEvent({type: "system-detach"});
     const closed = await launcher.closeInspector();
@@ -2095,8 +2117,8 @@ function breakpointGuard(context) {
 
 /** The debugger on demand, driven by breakpoints: one set (or enabled) in
  *  an .abap file while the system runs opens its inspector and attaches;
- *  the last one removed (or disabled) detaches and closes it again, unless
- *  a debug session is still in use. Start needs no setting for any of it. */
+ *  the last one removed (or disabled) closes it again once the debug
+ *  session has ended (releaseDebugger). Start needs no setting for any of it. */
 function debugOnDemand(context, controllerOf = () => activeController) {
   if (typeof vscode.debug.onDidChangeBreakpoints !== "function") return;
   context.subscriptions.push(vscode.debug.onDidChangeBreakpoints((event) => {

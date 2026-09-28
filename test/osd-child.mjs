@@ -207,16 +207,33 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
         probe.close(() => resolve(free));
       });
     });
-    const door = (body) => fetch(`${BASE}/osd/inspector`, {method: "POST", body: JSON.stringify(body)});
+    const door = (body, headers = {}) => fetch(`${BASE}/osd/inspector`,
+      {method: "POST", headers: {"content-type": "application/json", ...headers}, body: JSON.stringify(body)});
+    // a web page, or anything that is not a program on this machine, is
+    // refused before anything opens: an Origin, a text/plain body (a CORS
+    // simple request), a Host that is not a loopback name (DNS rebinding)
+    const {request: httpRequest} = await import("node:http");
+    const rawPost = (headers) => new Promise((resolve, reject) => {
+      const req = httpRequest({hostname: "127.0.0.1", port: PORT, path: "/osd/inspector", method: "POST", headers}, (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode));
+      });
+      req.on("error", reject);
+      req.end(JSON.stringify({open: true, port}));
+    });
+    expect(await rawPost({"content-type": "application/json", origin: "http://evil.example"}), "Origin").to.equal(403);
+    expect(await rawPost({"content-type": "text/plain"}), "text/plain").to.equal(403);
+    expect(await rawPost({"content-type": "application/json", host: `rebound.example:${PORT}`}), "rebound Host").to.equal(403);
+    expect(await rawPost({"content-type": "application/json", "sec-fetch-site": "cross-site"}), "Sec-Fetch-Site").to.equal(403);
     expect(await (await fetch(`${BASE}/osd/inspector`)).json()).to.deep.equal({open: false});
     const opened = await door({open: true, port});
     const answer = await opened.json();
     expect(opened.status, JSON.stringify(answer)).to.equal(200);
-    expect(answer).to.include({open: true, port});
-    expect(answer.url).to.match(new RegExp(`^ws://127\\.0\\.0\\.1:${port}/`));
+    expect(answer, "the port, never the inspector's URL").to.deep.equal({open: true, port});
     // a debugger finds it, and the target is the serving child, not the facade
     const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
     expect(targets).to.have.length(1);
+    expect(targets[0].webSocketDebuggerUrl).to.match(new RegExp(`^ws://127\\.0\\.0\\.1:${port}/`));
     expect(targets[0].title).to.match(/osd-serve|serve/);
     expect(await (await fetch(`${BASE}/osd/inspector`)).json()).to.deep.equal({open: true, port});
     // and a breakpoint set through it stops a real request: CDP, the protocol
@@ -226,7 +243,7 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     const generated = readFileSync(join(process.cwd(), "output", "zcl_stg_url.clas.mjs"), "utf8").split("\n");
     const lineNumber = generated.findIndex((line) => line.includes("static async parse(")) + 1;
     expect(lineNumber, "the parser's first statement").to.be.greaterThan(0);
-    const cdp = new WebSocket(answer.url);
+    const cdp = new WebSocket(targets[0].webSocketDebuggerUrl);
     await new Promise((resolve, reject) => { cdp.onopen = resolve; cdp.onerror = reject; });
     let seq = 0;
     const waiting = new Map();
