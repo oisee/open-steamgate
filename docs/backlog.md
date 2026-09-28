@@ -3856,6 +3856,33 @@ speed task than splitting the costly integration cases (`docs/ci-tests.md`).
      └─ the lesson is 8.4's: a suite that goes green on a second run
         teaches everyone to run it twice, which is how a real failure gets
         waved through. This one was hiding a defect for a day
+8.8  measure a larger VS Code Test Explorer HARMLESS pool before raising its cap
+     └─ current default is min(4, cpus - 1); compare 4, 6 and 8 on the same
+        tree, recording total wall time, peak RSS, CPU and identical outcomes
+     └─ only 9 objects use the parallel lane; the other 14 run alone, so
+        measure the whole run as well as the HARMLESS lane
+     └─ keep debug and shared HANA/Postgres test schemas at one: each child
+        writes startup seed rows even when its test declares HARMLESS;
+        SQLite and DuckDB get a separate temporary database file per child
+8.9  isolated remote-database slots for ABAP Unit, if HANA/Postgres runs need parallelism
+     └─ propose server cap OSD_UNIT_DB_SLOTS=1 by default and a VS Code
+        setting for the next test run; derive short, collision-resistant
+        __UNIT_01..N names from HANA_SCHEMA or PGDATABASE, leaving the base
+        untouched. No RZ10/RZ11-like editor exists today
+     └─ first prove HARMLESS can share one prepared read-only schema: skip
+        per-child startup reseed and retain the runtime write guard from
+        class_setup through class_teardown; verify no other boot writes
+     └─ lease one slot per child; return it only after verified reset on
+        completion, cancellation or failure, otherwise quarantine that slot;
+        a changed slot count takes effect after active runs drain
+     └─ HANA can use schemas; the current PostgreSQL client uses public in a
+        dedicated database, so PostgreSQL needs a pool of databases or a
+        deliberate client change before it can use schemas
+     └─ DANGEROUS tests with proven database-only effects may use isolated
+        slots; dynamic/unknown effects and CRITICAL stay serial by default.
+        A test can COMMIT WORK, so compare snapshot restore with drop/reseed
+        on a real backend; prove crash recovery and schema-version checks
+        before reusing a slot, then measure two slots against serial wall time
 ```
 
 ## 9. Upstream, outside this repository (T's, verbatim from them)
