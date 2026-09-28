@@ -455,6 +455,79 @@ describe("editors/vscode: the extension's logic", function () {
     }
   });
 
+  it("a Run over a mixed tree runs the HARMLESS objects at once and the DANGEROUS one alone, after them", async () => {
+    const api = vscodeStub({home: ROOT, "tests.showSystem": false});
+    const files = ["src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap", "src/demo_data/zcl_osd_demo_random.clas.testclasses.abap",
+      "src/webgui/zcl_osd_webgui.clas.testclasses.abap"].map((f) => path.join(ROOT, f));
+    api.Uri.file = (fsPath) => ({fsPath});
+    api.Range = class { constructor() {} };
+    api.TestMessage = class { constructor(message) { this.message = message; } };
+    api.TestRunProfileKind = {Run: 1, Debug: 2};
+    api.workspace.findFiles = async () => files.map((f) => api.Uri.file(f));
+    api.workspace.getWorkspaceFolder = () => ({uri: api.Uri.file(ROOT)});
+    api.workspace.createFileSystemWatcher = () => ({onDidCreate() {}, onDidDelete() {}, onDidChange() {}, dispose() {}});
+    api.commands = {registerCommand: () => ({dispose() {}})};
+    const collection = (parent) => {
+      const items = new Map();
+      return {
+        get size() { return items.size; },
+        get: (id) => items.get(id),
+        add(item) { item.parent = parent; items.set(item.id, item); },
+        replace(next) { items.clear(); next.forEach((item) => this.add(item)); },
+        [Symbol.iterator]: () => items[Symbol.iterator](),
+      };
+    };
+    const profiles = new Map();
+    const controller = {
+      items: collection(undefined),
+      createTestItem(id, label, uri) {
+        const item = {id, label, uri};
+        item.children = collection(item);
+        return item;
+      },
+      createRunProfile(name, kind, handler) { profiles.set(name, handler); },
+      createTestRun() {
+        return Object.fromEntries(["started", "passed", "failed", "skipped", "errored", "appendOutput", "end"].map((name) => [name, () => {}]));
+      },
+      dispose() {},
+    };
+    api.tests = {createTestController: () => controller};
+    const {testExplorer} = loadExtension(api);
+    const {unitPoolSize} = require("../editors/vscode/lib.js");
+    const originalDiscover = Osd.prototype.discover;
+    const originalRun = Osd.prototype.run;
+    // ZCL_OSD_WEBGUI is the one that writes
+    const schedule = {ZCL_OSD_ABAP_TOKENS: "harmless", ZCL_OSD_DEMO_RANDOM: "harmless", ZCL_OSD_WEBGUI: "dangerous"};
+    Osd.prototype.discover = async (object) => ({classes: [{name: "LTCL_T", include: "testclasses", line: 1,
+      schedule: schedule[object.name], durationCategory: "short", methods: [{name: "M", line: 2}]}]});
+    let running = 0;
+    const seen = [];
+    Osd.prototype.run = async (object) => {
+      running += 1;
+      seen.push([object.name, running]);
+      await new Promise((r) => setTimeout(r, 60));
+      running -= 1;
+      return {testClasses: [], counts: {passed: 0, failed: 0}};
+    };
+    const token = {isCancellationRequested: false, onCancellationRequested: () => ({dispose() {}})};
+    let explorer;
+    try {
+      explorer = testExplorer(controllerContext(), {appendLine() {}}, {});
+      await controller.resolveHandler();
+      const objects = [...controller.items.get("group:project").children].map(([, item]) => item);
+      expect(objects.map((o) => o.id).sort()).to.deep.equal(["CLAS:ZCL_OSD_ABAP_TOKENS", "CLAS:ZCL_OSD_DEMO_RANDOM", "CLAS:ZCL_OSD_WEBGUI"]);
+      await profiles.get("Run")({include: objects}, token);
+      const pool = unitPoolSize();
+      const harmless = seen.filter(([name]) => name !== "ZCL_OSD_WEBGUI");
+      expect(Math.max(...harmless.map(([, n]) => n)), "the HARMLESS objects at once").to.equal(Math.min(2, pool));
+      expect(seen.at(-1), "the DANGEROUS one last, alone").to.deep.equal(["ZCL_OSD_WEBGUI", 1]);
+    } finally {
+      explorer?.dispose();
+      Osd.prototype.discover = originalDiscover;
+      Osd.prototype.run = originalRun;
+    }
+  });
+
   it("schedules by RISK LEVEL: HARMLESS units in a pool, longest first, the rest one at a time after", async () => {
     const {unitRiskOf, unitDurationOf, unitSchedule, runUnitQueue, unitPoolSize, riskWarning} = require("../editors/vscode/lib.js");
     expect(unitRiskOf([{schedule: "harmless"}, {schedule: "harmless"}])).to.equal("harmless");

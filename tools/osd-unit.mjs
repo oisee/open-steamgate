@@ -151,7 +151,15 @@ export class UnitRun {
   // a write the check already reported would only fail it twice.
   async withRisk(plan) {
     this.risk ??= new UnitRisk(this.store);
-    const reached = await this.risk.writesReached(plan.object.name);
+    let reached;
+    try {
+      reached = await this.risk.writesReached(plan.object.name);
+    } catch (error) {
+      // no cross-reference, no verdict: every class runs alone and unguarded,
+      // which is what an undeclared one gets, and the discovery still answers
+      return {...plan, writes: [], writesTotal: 0, riskError: String(error?.message ?? error),
+        classes: plan.classes.map((testClass) => ({...testClass, schedule: "dangerous", guard: false}))};
+    }
     return {
       ...plan,
       writes: reached.writes,
@@ -207,16 +215,15 @@ export class UnitRun {
       }
       // The runtime guard (the first consumer of the database hooks,
       // tools/osd-dialog-step.mjs): a class scheduled as HARMLESS runs with
-      // every write failing, from class_setup to class_teardown. A write
-      // the ABAP swallows (a CATCH around it) is still reported, after the
-      // method, so a guarded class cannot pass by hiding it.
-      const guard = declared.guard === true ? {wrote: undefined} : undefined;
-      const unguard = guard === undefined ? undefined : hookDatabase("abap-unit-risk-guard", {
+      // its writes to DDIC tables failing, from class_setup to
+      // class_teardown. The failure is a JavaScript error, not an ABAP
+      // exception, so a CATCH in the test does not swallow it.
+      const guarded = declared.guard === true;
+      const unguard = guarded ? hookDatabase("abap-unit-risk-guard", {
         write(operation, table) {
-          guard.wrote ??= table;
           throw new HarmlessWrote(declared.name, operation, table);
         },
-      });
+      }) : undefined;
       try {
         let local;
         try {
@@ -235,12 +242,7 @@ export class UnitRun {
         }
 
         for (const method of declared.testMethods.filter(wantedMethod)) {
-          const result = await this.#method(local, method, options);
-          if (guard?.wrote !== undefined && !result.alerts.some((a) => a.kind === "riskLevel")) {
-            result.alerts.push(guardAlert(declared.name, guard.wrote));
-          }
-          if (guard !== undefined) guard.wrote = undefined;
-          testClass.testMethods.push(result);
+          testClass.testMethods.push(await this.#method(local, method, options));
         }
 
         try {

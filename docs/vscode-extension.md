@@ -131,8 +131,11 @@ by what their test classes declare:
 - An object's own selections keep the order they were asked in, and an
   object's risk is its riskiest class that runs.
 - With a shared database for tests (`osd.database.tests` = HANA or
-  PostgreSQL), where every child uses the one schema, the same holds:
-  HARMLESS reads side by side, and nothing else runs meanwhile.
+  PostgreSQL), every object runs one at a time. Every child uses the one
+  schema there, and even a HARMLESS one writes while it boots: the
+  cross-reference and the pack rows are reseeded. So two at once would
+  delete each other's rows. The spec allowed HARMLESS in parallel there
+  ("reads only"); the boot is why it does not.
 - A debug run stays one at a time: one debugger, one child.
 
 **The declaration is checked, not trusted** (`tools/osd-unit-risk.mjs`).
@@ -152,12 +155,29 @@ declare HARMLESS. The other 9 run in parallel.
 
 **And guarded at runtime** (`tools/osd-unit.mjs`, the first consumer of the
 database hooks in `tools/osd-dialog-step.mjs`, docs/ideas.md B17). A class
-scheduled as HARMLESS runs with every write failing, from `class_setup` to
+scheduled as HARMLESS runs with its writes failing, from `class_setup` to
 `class_teardown`: `RISK LEVEL HARMLESS but wrote to <table>`, an alert of
-kind `riskLevel`. A write the ABAP catches is still reported after the
-method. A class the static check already flagged is not guarded: it runs
-alone, and failing it for a write the warning already names would fail it
-twice.
+kind `riskLevel`. The failure is a JavaScript error, not an ABAP exception,
+so a `CATCH` in the test does not swallow it. A class the static check
+already flagged is not guarded: it runs alone, and failing it for a write
+the warning already names would fail it twice.
+
+What the guard sees: Open SQL's insert, update and delete, and a data
+statement (`INSERT`, `UPDATE`, `DELETE`, `MERGE`, `UPSERT`, `REPLACE`,
+`TRUNCATE`) sent through the client's `execute`, `native`, `write` or
+`modifying`, which is how SQLScript and AMDP bodies write. It counts only a
+table the DDIC knows, and never DDL, so a client's own scratch relations
+(DuckDB's views for an AMDP read) are not a test's write. What it does not
+see: a secondary `CONNECTION`, which is not hooked. The static check does
+not read AMDP bodies either, so a HARMLESS test calling a writing AMDP is
+caught only by the guard.
+
+Where it applies: the Test Explorer's run route
+(`core/http/unit/object/run`). The Eclipse `testruns` route runs one object
+at a time and is not guarded. The schedules and warnings are what
+discovery said when an object was last expanded or run, or since the tree
+was rebuilt. An edit to production code a test reaches does not refresh
+them until then; the runtime guard always runs on the current code.
 
 What a system does, and what this adds: a system's client setting
 (`SAUNIT_CLIENT_SETUP`) says which risk levels may run in that client and
@@ -166,13 +186,22 @@ the levels, the durations, and running a class by its level. Added: the
 static check, the runtime guard, and "undeclared is DANGEROUS" for the
 scheduling (ADT still reports it as harmless).
 
-Measured on this tree (4 CPUs, 23 objects, a real server, 2026-09-28):
-one at a time 76.7 s, a pool of 2 60.6 s, a pool of 4 54.2 s. The outcomes
-of every object were identical in all three. The gain is bounded by the
-DANGEROUS half, which runs alone: 14 objects, about 50 s of the 77 (the 9 HARMLESS ones take 27 s one at a time and 8.6 s in a pool of 4).
-`test/osd-child.mjs` runs a mixed set end to end (two HARMLESS objects at
-once, the one that writes alone after them, the results of a serial run),
-and `test/unit-risk.mjs` holds the static check and the guard.
+Measured on this tree (4 CPUs, 23 objects, a real server, 2026-09-28),
+two runs:
+- first run: one at a time 76.7 s, a pool of 2 60.6 s, a pool of 4 54.2 s;
+- second run, after the fixes: one at a time 70.6 s, a pool of 3 (the
+  default on 4 CPUs) 57.4 s.
+
+The outcomes of every object were identical in all of them. The gain is
+bounded by the DANGEROUS half, which runs alone: 14 objects, about 50 s of
+the first serial run's 77. The 9 HARMLESS objects took 27 s one at a time
+and 8.6 s in a pool of 4 on their own.
+
+`test/osd-child.mjs` runs a mixed set end to end: two HARMLESS objects at
+once (counted as requests in flight from the client), the one that writes
+alone after them, and the results of a serial run.
+`test/vscode-extension.mjs` drives the Run profile over a mixed tree, and
+`test/unit-risk.mjs` holds the static check and the guard.
 
 *2026-09-26, same day, as seen with the packaged extension.* Six bugs, all
 fixed together:

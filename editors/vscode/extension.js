@@ -3167,7 +3167,16 @@ function testExplorer(context, output, {
     return configCache.get(folderRoot);
   };
 
+  // what each test class is scheduled as (the façade's check of its RISK
+  // LEVEL, tools/osd-unit-risk.mjs), by class item id; and a warning on the
+  // RISK LEVEL of a class that declares HARMLESS and reaches a write
+  const classSchedules = new Map();
+  const riskDiagnostics = vscode.languages?.createDiagnosticCollection?.("osd ABAP Unit risk");
   const buildTree = async () => {
+    // a rebuilt tree starts with no verdicts: an object is described again
+    // when it is expanded or run, and a deleted file keeps no warning
+    classSchedules.clear();
+    riskDiagnostics?.clear();
     const root = activeController?.launcher?.osdHome ?? osdHomeOf();
     const layers = transpileLayers(readTranspileConfig(root));
     const workspaceLayers = activeController?.launcher?.layers ?? [];
@@ -3235,11 +3244,6 @@ function testExplorer(context, output, {
     }
   };
 
-  // what each test class is scheduled as (the façade's check of its RISK
-  // LEVEL, tools/osd-unit-risk.mjs), by class item id; and a warning on the
-  // RISK LEVEL of a class that declares HARMLESS and reaches a write
-  const classSchedules = new Map();
-  const riskDiagnostics = vscode.languages?.createDiagnosticCollection?.("osd ABAP Unit risk");
   const discover = async (item) => {
     const {object, dir} = objects.get(item.id);
     item.busy = true;
@@ -3447,8 +3451,13 @@ function testExplorer(context, output, {
       });
     }
     try {
-      // a debug run stays one at a time: one debugger, one child
-      await runUnitQueue(units, {poolSize: useDebugger ? 1 : unitPoolSize(), cancelled});
+      // a debug run stays one at a time: one debugger, one child. So does a
+      // run on a shared database (osd.database.tests = HANA or PostgreSQL):
+      // every child there uses the one schema, and even a HARMLESS one
+      // writes while it boots (the cross-reference and the pack rows are
+      // reseeded), so two at once would delete each other's rows
+      const sharedDatabase = dbEnv?.STG_DB === "hana" || dbEnv?.STG_DB === "postgres";
+      await runUnitQueue(units, {poolSize: useDebugger || sharedDatabase ? 1 : unitPoolSize(), cancelled});
     } finally {
       subscription?.dispose?.();
     }

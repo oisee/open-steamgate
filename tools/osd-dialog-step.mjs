@@ -208,14 +208,21 @@ function installWait() {
 // First consumer: the ABAP Unit runtime guard (tools/osd-unit.mjs), which
 // fails a test that declares RISK LEVEL HARMLESS and writes. A hook is
 // {write(operation, table)}: called before a write reaches the client, and
-// a throw from it is the write's failure. Reads are not hooked yet: the
+// a throw from it is the write's failure. What counts as a write: Open
+// SQL's insert/update/delete, and a data statement (INSERT, UPDATE, DELETE,
+// MERGE, UPSERT, REPLACE, TRUNCATE) sent through execute, native, write or
+// modifying -- the paths SQLScript and AMDP bodies take -- **into a table
+// the DDIC knows**. DDL is not a write here, and neither is a table the
+// DDIC does not know: a client's own scratch relations (DuckDB's views and
+// materialised tables for an AMDP read) are the kernel's, not the test's.
+// Only the DEFAULT connection is hooked. Reads are not hooked yet: the
 // consumers that need them (a readiness gate, the OSQL test environment)
 // add that half.
 const hooks = new Map();
 let hookedClient;
 let unhooked;
 
-const WRITE_SQL = /^\s*(INSERT|UPDATE|DELETE|MERGE|UPSERT|REPLACE|TRUNCATE|DROP|CREATE|ALTER)\b(?:\s+(?:INTO|FROM|TABLE|OR\s+REPLACE))?\s+["'`]?([\w/$]+)/i;
+const WRITE_SQL = /^\s*(INSERT|UPDATE|DELETE|MERGE|UPSERT|REPLACE|TRUNCATE)\b(?:\s+(?:INTO|FROM|TABLE))?\s+["'`]?([\w/$]+)/i;
 
 /** the table a native SQL statement writes, or undefined for a read */
 export function nativeWriteOf(sql) {
@@ -229,8 +236,12 @@ function tableOf(options) {
 }
 
 function writeSeen(operation, table) {
+  const ddic = globalThis.abap?.DDIC;
+  if (ddic !== undefined && ddic[table] === undefined) return;
   for (const hook of hooks.values()) hook.write?.(operation, table);
 }
+
+const sqlOf = (argument) => (typeof argument === "string" ? argument : argument?.sql);
 
 function installHooks() {
   const client = connection();
@@ -245,14 +256,15 @@ function installHooks() {
       return originals[operation].call(this, options);
     };
   }
-  if (typeof client.execute === "function") {
-    originals.execute = client.execute;
-    client.execute = function (sql) {
-      for (const one of Array.isArray(sql) ? sql : [sql]) {
-        const write = nativeWriteOf(one);
+  for (const operation of ["execute", "native", "write", "modifying"]) {
+    if (typeof client[operation] !== "function") continue;
+    originals[operation] = client[operation];
+    client[operation] = function (argument, ...rest) {
+      for (const one of Array.isArray(argument) ? argument : [argument]) {
+        const write = nativeWriteOf(sqlOf(one) ?? "");
         if (write !== undefined) writeSeen(write.operation, write.table);
       }
-      return originals.execute.call(this, sql);
+      return originals[operation].call(this, argument, ...rest);
     };
   }
   hookedClient = client;

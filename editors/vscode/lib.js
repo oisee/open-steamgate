@@ -276,9 +276,6 @@ function debugAttachPlan(state = {}, event = {}) {
   return {state, actions: []};
 }
 
-/** Start the paused child request while VS Code attaches. A rejected attach
- * or a cancelled Test Explorer run aborts the HTTP request, which tells the
- * façade to kill that child. */
 // ---- the Test Explorer's queue by RISK LEVEL (docs/vscode-extension.md,
 // "Running tests") --------------------------------------------------------
 //
@@ -353,6 +350,9 @@ function unitPoolSize(cpus = require("node:os").cpus().length) {
   return Math.max(1, Math.min(4, cpus - 1));
 }
 
+/** Start the paused child request while VS Code attaches. A rejected attach
+ * or a cancelled Test Explorer run aborts the HTTP request, which tells the
+ * façade to kill that child. */
 async function runWithDebuggerAttach(attach, execute, token) {
   const cancellation = new AbortController();
   const subscription = token?.onCancellationRequested(() => cancellation.abort());

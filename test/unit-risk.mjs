@@ -72,6 +72,14 @@ describe("tools/osd-unit-risk: a declared RISK LEVEL against what the test reach
     expect(unguarded.ok, JSON.stringify(unguarded.testClasses[0].testMethods.flatMap((m) => m.alerts)).slice(0, 800)).to.equal(true);
   });
 
+  it("no cross-reference, no verdict: every class runs alone and unguarded, and discovery still answers", async () => {
+    const broken = new UnitRun(store);
+    broken.risk = {writesReached: async () => { throw new Error("no rows"); }};
+    const plan = await broken.withRisk(broken.classes("CLAS", "ZCL_OSD_ABAP_TOKENS"));
+    expect(plan.riskError).to.equal("no rows");
+    expect(plan.classes.every((c) => c.schedule === "dangerous" && c.guard === false)).to.equal(true);
+  });
+
   it("a guarded class that reaches no write passes", async () => {
     const plan = await runner.withRisk(runner.classes("CLAS", "ZCL_OSD_ABAP_TOKENS"));
     const result = await runner.runDetached("CLAS", "ZCL_OSD_ABAP_TOKENS", {plan});
@@ -129,5 +137,33 @@ describe("tools/osd-dialog-step: hooks at the database seam (B17)", function () 
     expect(activeHooks()).to.deep.equal([]);
     expect(client.insert, "restored").to.equal(original.insert);
     expect(client.execute).to.equal(original.execute);
+  });
+
+  it("counts a data statement into a DDIC table on every path, and not DDL or the client's own scratch tables", async () => {
+    const client = {
+      insert: async () => ({subrc: 0, dbcnt: 1}),
+      execute: async () => undefined,
+      native: async () => ({rows: []}),
+      write: async () => ({changes: 1}),
+      modifying: async () => undefined,
+    };
+    globalThis.abap = {context: {databaseConnections: {DEFAULT: client}}, DDIC: {ZSTG_DEMO: {}, ZOSD_SVC: {}}};
+    const seen = [];
+    const off = hookDatabase("watch", {write: (operation, table) => seen.push(`${operation} ${table}`)});
+    try {
+      await client.native({sql: 'INSERT INTO "ZSTG_DEMO" VALUES (?)', params: [1], expect: "none"});
+      await client.write({sql: "UPDATE zosd_svc SET text = ?", params: ["x"]});
+      await client.modifying("DELETE FROM ZSTG_DEMO");
+      // the kernel's own: DDL, and a table the DDIC does not know (DuckDB's
+      // relation for an AMDP read)
+      await client.execute('CREATE VIEW "osd_rel_1" AS SELECT 1');
+      await client.execute('DROP TABLE IF EXISTS "osd_rel_1"');
+      await client.native({sql: 'INSERT INTO "osd_rel_2" SELECT * FROM x', expect: "none"});
+      await client.insert({table: "osd_rel_3"});
+      await client.insert({table: "zstg_demo"});
+    } finally {
+      off();
+    }
+    expect(seen).to.deep.equal(["INSERT ZSTG_DEMO", "UPDATE ZOSD_SVC", "DELETE ZSTG_DEMO", "INSERT ZSTG_DEMO"]);
   });
 });
