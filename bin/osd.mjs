@@ -20,7 +20,7 @@
 // no module ends with, and the modes are dispatched here.
 import * as runtime from "@abaplint/runtime";
 import * as core from "@abaplint/core";
-import {Transpiler} from "@abaplint/transpiler";
+import {Transpiler, Chunk} from "@abaplint/transpiler";
 import * as guiConverter from "../.local/lars/open-abap-gui/converter/src/api.mjs";
 import * as setup from "../test/setup.mjs";
 import {dirname, resolve} from "node:path";
@@ -80,7 +80,7 @@ if (typeof Bun !== "undefined") {
     },
   });
 }
-setHostModules({Transpiler, core, guiConverter: embeddedSeed ? guiConverter : undefined, plugin: undefined, where: "bundled", version: "bundled"});
+setHostModules({Transpiler, Chunk, core, guiConverter: embeddedSeed ? guiConverter : undefined, plugin: undefined, where: "bundled", version: "bundled"});
 
 const GENERATORS = {
   "osd-transpiler.mjs": () => import("../tools/osd-transpiler.mjs"),

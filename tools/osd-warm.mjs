@@ -32,6 +32,7 @@ import {basename, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {generatorIdentity, hashOf, inputsOf, layout, liveHash, lock, linkRoots, ownConfig, prepare, rootsWanted, switchTo} from "./osd-build.mjs";
 import {describeBuild} from "./osd-transpiler.mjs";
+import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {hostModules, toolCommand} from "./osd-host.mjs";
 import {isBinaryFilename, listFiles, loadLibs, modulesOf, outputFiles, readAll} from "./osd-transpile.mjs";
@@ -248,7 +249,8 @@ export class WarmCompiler {
     this.reg = undefined;
     const root = this.root;
     const loaded = this.modules ?? hostModules() ?? modulesOf(root);
-    const {Transpiler, core, plugin} = loaded;
+    const {Transpiler, Chunk, core, plugin} = loaded;
+    mapStatementStarts(Chunk);
     // a checkout's transpiler can be relinked under a running process; a
     // binary's is inside it
     this.transpilerFile = loaded.where === undefined ? undefined : join(loaded.where, "package.json");

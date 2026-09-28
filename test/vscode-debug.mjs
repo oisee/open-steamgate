@@ -1,9 +1,12 @@
 import {expect} from "chai";
-import {readFileSync, readdirSync, realpathSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync} from "node:fs";
+import {spawn} from "node:child_process";
+import {tmpdir} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {pathToFileURL, fileURLToPath} from "node:url";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
+import {modulesOf, transpile} from "../tools/osd-transpile.mjs";
 import {createRequire} from "node:module";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -136,6 +139,79 @@ function breakpointFor(sourcePath, sourceLine, sourceColumn) {
 
 describe("VS Code debugger transport: detached ABAP Unit child", function () {
   this.timeout(180000);
+
+  it("maps a multiline call's executable start, before its final ABAP period", async () => {
+    const source = `CLASS zcl_probe DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS foo IMPORTING iv_text TYPE string.
+    METHODS run.
+ENDCLASS.
+CLASS zcl_probe IMPLEMENTATION.
+  METHOD foo.
+  ENDMETHOD.
+  METHOD run.
+    me->foo(
+      iv_text = 'hello'
+    ).
+  ENDMETHOD.
+ENDCLASS.`;
+    const dir = mkdtempSync(join(tmpdir(), "osd-statement-map-"));
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "src", "zcl_probe.clas.abap"), source);
+    const config = {input_folder: "src", output_folder: "output", input_filter: [".*\\.abap$"],
+      exclude_filter: [], libs: [], options: {}, write_source_map: true, write_unit_tests: false};
+    await transpile({root: dir, config, modules: modulesOf(ROOT)});
+    const module = join(dir, "output", "zcl_probe.clas.mjs");
+    const map = JSON.parse(readFileSync(module + ".map", "utf8"));
+    expect(resolve(dirname(module), map.sources[0])).to.equal(join(dir, "src", "zcl_probe.clas.abap"));
+    const position = generatedPosition(map.mappings, 0, 10, 4);
+    expect(position, "ABAP call line has a source-map position").to.not.equal(undefined);
+    const generated = readFileSync(module, "utf8").split("\n")[position.line - 1];
+    expect(generated.slice(position.column)).to.match(/^await this\.me\.get\(\)\.foo\(/);
+
+    const runner = join(dir, "runner.mjs");
+    const runtime = createRequire(import.meta.url).resolve("@abaplint/runtime");
+    const port = await pickInspectorPort();
+    writeFileSync(runner, `import runtime from ${JSON.stringify(pathToFileURL(runtime).href)};\n` +
+      `globalThis.abap = new runtime.ABAP();\n` +
+      `await import(${JSON.stringify(pathToFileURL(module).href)});\n` +
+      `await new abap.Classes.ZCL_PROBE().run();\n`);
+    const child = spawn(process.execPath, [`--inspect-brk=127.0.0.1:${port}`, "--enable-source-maps", runner],
+      {cwd: dir, stdio: "ignore"});
+    const exited = new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code) => resolve(code));
+    });
+    let client;
+    try {
+      const target = await inspectorTarget(port);
+      const socket = new WebSocket(target.webSocketDebuggerUrl);
+      await new Promise((resolve, reject) => {
+        socket.addEventListener("open", resolve, {once: true});
+        socket.addEventListener("error", reject, {once: true});
+      });
+      client = new InspectorClient(socket);
+      await client.send("Debugger.enable");
+      const breakpoint = await client.send("Debugger.setBreakpointByUrl", {
+        url: pathToFileURL(module).href, lineNumber: position.line - 1, columnNumber: position.column,
+      });
+      await client.send("Runtime.runIfWaitingForDebugger");
+      await client.waitFor("Debugger.paused"); // entry in runner.mjs
+      await client.send("Debugger.resume");
+      const hit = await client.waitFor("Debugger.paused");
+      expect(hit.hitBreakpoints).to.include(breakpoint.breakpointId);
+      expect(hit.callFrames[0].location.lineNumber).to.equal(position.line - 1);
+      await client.send("Debugger.resume");
+      client.socket.close();
+      client = undefined;
+      expect(await exited).to.equal(0);
+    } finally {
+      if (child.exitCode === null) child.kill("SIGTERM");
+      client?.socket.close();
+      await exited.catch(() => {});
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
 
   it("attaches over CDP and stops on an ABAP line in a test method", async () => {
     const sourcePath = join(ROOT, "src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
