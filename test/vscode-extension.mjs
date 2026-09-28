@@ -3,6 +3,7 @@
 // answer means per method. The live half, against a real server, is in
 // test/osd-child.mjs.
 import {expect} from "chai";
+import {EventEmitter as NodeEventEmitter} from "node:events";
 import express from "express";
 import {mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -134,10 +135,13 @@ function vscodeStub(settings = {}) {
     },
     window: {
       createWebviewPanel: (...args) => {
+        const disposeListeners = [];
         const panel = {
           args,
           webview: {html: "", onDidReceiveMessage: () => ({dispose() {}})},
-          onDidDispose: () => ({dispose() {}}),
+          onDidDispose: (listener) => { disposeListeners.push(listener); return {dispose() {}}; },
+          disposed: false,
+          dispose() { this.disposed = true; for (const listener of disposeListeners) listener(); },
           reveal() {},
         };
         panels.push(panel);
@@ -576,6 +580,8 @@ describe("editors/vscode: the extension's logic", function () {
       "http://localhost:3542/app/flp.html",
     ]);
     expect(api.panels[0].webview.html).to.contain("http://localhost:3542/app/flp.html");
+    expect(api.panels.find((panel) => panel.args[0] === "osdSystemOverview").args[3].enableCommandUris)
+      .to.include.members(["osd.openLaunchpad", "osd.openLaunchpadExternal"]);
   });
 
   it("keeps the quick-start preset, DX2 home rule, and state menus in pure logic", () => {
@@ -630,6 +636,9 @@ describe("editors/vscode: the extension's logic", function () {
     expect(html).to.contain("System information app");
     expect(html).to.contain("portable (limited) on sqlite");
     expect(html).to.contain("<iframe");
+    // Q7: its launchpad buttons are the extension's own commands, not a browser link
+    expect(html).to.contain('href="command:osd.openLaunchpad"').and.to.contain('href="command:osd.openLaunchpadExternal"');
+    expect(html).to.not.contain('target="_blank"');
     expect(overviewStatusSection("Services", model.status.services)).to.contain("/app/flp.html");
     // OData plumbing is not shown: __metadata and all-deferred navigation columns
     const plumbed = [
@@ -1559,6 +1568,7 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
         const externalBefore = api.externalOpens.length;
         const sourcesBefore = api.sourceOpens.length;
         const webguiBefore = api.panels.filter((panel) => panel.args[0] === "osdWebgui").length;
+        const panelsBefore = api.panels.length;
         const launchpadBefore = launchpadOpens;
         const dumpsBefore = output.shown;
         if (item.command?.command === "osd.clickTreeNode") {
@@ -1573,12 +1583,14 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
         if (expandable) expect(api.externalOpens.length, `${kind} opened a browser`).to.equal(externalBefore);
         if (kind === "osd-launchpad") {
           expect(launchpadOpens).to.equal(launchpadBefore + 1);
-          expect(item.tooltip).to.match(/browser/i);
+          expect(item.tooltip).to.match(/VS Code tab/);
           expect(item.command.title).to.equal("Open Fiori Launchpad");
         }
         if (kind === "osd-host-open") {
-          expect(api.externalOpens.length).to.equal(externalBefore + 1);
-          expect(item.tooltip).to.match(/browser/i);
+          // Q7: a VS Code tab by default, not the system browser
+          expect(api.externalOpens.length).to.equal(externalBefore);
+          expect(api.panels.slice(panelsBefore).map((panel) => panel.args[0])).to.deep.equal(["osdEndpoint"]);
+          expect(item.tooltip).to.match(/VS Code tab/);
           expect(item.command.title).to.equal("Open endpoint");
         }
         if (kind === "osd-host-dumps") {
@@ -1590,13 +1602,15 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
           expect(item.command.title).to.equal("Run transaction");
         }
         if (kind === "osd-service-app") {
-          expect(api.externalOpens.length).to.equal(externalBefore + 1);
-          expect(item.tooltip).to.match(/browser/i);
+          expect(api.externalOpens.length).to.equal(externalBefore);
+          expect(api.panels.slice(panelsBefore).map((panel) => panel.args[0])).to.deep.equal(["osdService"]);
+          expect(item.tooltip).to.match(/VS Code tab/);
           expect(item.command.title).to.equal("Open app");
         }
         if (kind === "osd-service-odata" && !expandable) {
-          expect(api.externalOpens.length).to.equal(externalBefore + 1);
-          expect(item.tooltip).to.match(/browser/i);
+          expect(api.externalOpens.length).to.equal(externalBefore);
+          expect(api.panels.slice(panelsBefore).map((panel) => panel.args[0])).to.deep.equal(["osdService"]);
+          expect(item.tooltip).to.match(/VS Code tab/);
           expect(item.command.title).to.equal("Open service");
           expect(await provider.getChildren(item)).to.deep.equal([]);
         }
@@ -1637,10 +1651,17 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
       const serving = new api.TreeItem("Other endpoint");
       serving.contextValue = "osd-host-open";
       serving.route = "/osd/other";
+      const externalBefore = api.externalOpens.length;
+      const endpointTabs = () => api.panels.filter((panel) => panel.args[0] === "osdEndpoint" && panel.webview.html.includes("/osd/other"));
+      let reveals = 0;
       await clickTreeNode(serving, provider, output);
-      expect(api.externalOpens).to.have.lengthOf(4);
+      expect(endpointTabs()).to.have.lengthOf(1);
+      endpointTabs()[0].reveal = () => { reveals++; };
+      // a second click reveals the tab it already has
       await clickTreeNode(serving, provider, output);
-      expect(api.externalOpens).to.have.lengthOf(5);
+      expect(endpointTabs()).to.have.lengthOf(1);
+      expect(reveals).to.equal(1);
+      expect(api.externalOpens).to.have.lengthOf(externalBefore);
 
       const launchpad = new api.TreeItem("Another launchpad");
       launchpad.contextValue = "osd-launchpad";
@@ -1652,6 +1673,194 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
       provider.dispose();
     }
   });
+  // Q7: a page opens in a VS Code tab by default, in the browser when
+  // osd.openIn says so, and always in the browser through the explicit
+  // external action; every tree node that opens a URL has that action inline
+  // and in its context menu.
+  it("routes page opens: a tab by default, the browser by setting or by the external action", async () => {
+    const url = "http://localhost:3591/app/flp.html";
+    const byDefault = vscodeStub({home: ROOT});
+    await loadExtension(byDefault).openPage(url, {title: "Fiori Launchpad"});
+    expect(byDefault.panels.map((panel) => panel.args[0])).to.deep.equal(["osdPage"]);
+    expect(byDefault.externalOpens).to.have.lengthOf(0);
+    const external = vscodeStub({home: ROOT});
+    await loadExtension(external).openPage(url, {where: "browser"});
+    expect(external.panels).to.have.lengthOf(0);
+    expect(external.externalOpens.map(String)).to.deep.equal([url]);
+    const bySetting = vscodeStub({home: ROOT, openIn: "browser"});
+    const {openPage} = loadExtension(bySetting);
+    await openPage(url);
+    expect(bySetting.externalOpens).to.have.lengthOf(1);
+    // an explicit "vscode" (osd.openLaunchpadInVsCode) wins over the setting
+    await openPage(url, {where: "vscode"});
+    expect(bySetting.panels).to.have.lengthOf(1);
+
+    const manifest = JSON.parse(readFileSync(new URL("../editors/vscode/package.json", import.meta.url), "utf8"));
+    expect(manifest.contributes.configuration.find?.((c) => c.properties?.["osd.openIn"])?.properties["osd.openIn"].default
+      ?? manifest.contributes.configuration.properties["osd.openIn"].default).to.equal("vscode");
+    const items = manifest.contributes.menus["view/item/context"];
+    const commands = new Map(manifest.contributes.commands.map((c) => [c.command, c]));
+    for (const [external, node] of [["osd.openLaunchpadExternal", "osd-launchpad"], ["osd.openHostDoorExternal", "osd-host-open"],
+      ["osd.openServiceRowExternal", "osd-service-app"]]) {
+      const entries = items.filter((m) => m.command === external && m.when.includes(node));
+      expect(entries.map((m) => m.group.split("@")[0]).sort(), external).to.deep.equal(["1_open", "inline"]);
+      expect(commands.get(external).icon).to.equal("$(link-external)");
+      expect(commands.get(external).title).to.match(/in External Browser$/);
+    }
+    const palette = manifest.contributes.menus.commandPalette;
+    for (const command of ["osd.openHostDoorExternal", "osd.openServiceRowExternal", "osd.openServiceMetadataExternal"]) {
+      expect(palette.find((m) => m.command === command)?.when, command).to.equal("false");
+    }
+    expect(items.some((m) => m.command === "osd.openServiceMetadataExternal")).to.equal(true);
+  });
+
+  it("the registered open commands: the external ones use the browser with a tree item, the others osd.openIn", async () => {
+    const api = vscodeStub({home: ROOT});
+    const handlers = new Map();
+    api.commands.registerCommand = (command, handler) => { handlers.set(command, handler); return {dispose() {}}; };
+    const {registerOpenCommands} = loadExtension(api);
+    const launchpad = [];
+    const controller = {openLaunchpad: (where) => launchpad.push(where ?? "default"), openLaunchpadInVsCode: () => launchpad.push("vscode")};
+    registerOpenCommands({subscriptions: []}, controller);
+    const external = [["osd.openHostDoorExternal", {route: "/osd/serving"}],
+      ["osd.openServiceRowExternal", {row: {kind: "ICF", path: "/sap/bc/leaf", name: "Leaf"}}],
+      ["osd.openServiceMetadataExternal", {row: {kind: "ODATA", path: "/sap/opu/odata/sap/ZLEAF", name: "Leaf"}}]];
+    for (const [command, item] of external) {
+      const before = api.externalOpens.length;
+      await handlers.get(command)(item);
+      expect(api.externalOpens.length, command).to.equal(before + 1);
+    }
+    expect(api.panels, "an external action opens no tab").to.have.lengthOf(0);
+    await handlers.get("osd.openHostDoor")({route: "/osd/serving"});
+    await handlers.get("osd.openServiceMetadata")({row: {kind: "ODATA", path: "/sap/opu/odata/sap/ZLEAF", name: "Leaf"}});
+    expect(api.panels.map((panel) => panel.args[0])).to.deep.equal(["osdEndpoint", "osdServiceMetadata"]);
+    await handlers.get("osd.openLaunchpadExternal")();
+    await handlers.get("osd.openLaunchpad")();
+    await handlers.get("osd.openLaunchpadInVsCode")();
+    expect(launchpad).to.deep.equal(["browser", "default", "vscode"]);
+  });
+
+  it("a closed page tab is forgotten, and a stopped system closes its tabs", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {openPage, closePageTabs} = loadExtension(api);
+    const first = await openPage("http://localhost:3591/osd/serving");
+    first.dispose();
+    const second = await openPage("http://localhost:3591/osd/serving");
+    expect(second, "a new tab after the old one was closed").to.not.equal(first);
+    const other = await openPage("http://localhost:3591/app/flp.html");
+    closePageTabs();
+    expect([second.disposed, other.disposed]).to.deep.equal([true, true]);
+    const third = await openPage("http://localhost:3591/osd/serving");
+    expect(api.panels).to.have.lengthOf(4);
+    expect(third.disposed).to.equal(false);
+  });
+
+  it("page tabs: a rebuild reloads them (on a new port too), Stop and an unasked exit close them", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {openPage, wirePageTabs, SystemController} = loadExtension(api);
+    const launcher = new NodeEventEmitter();
+    launcher.port = 3591;
+    wirePageTabs(launcher);
+    const tab = await openPage("http://localhost:3591/app/flp.html", {title: "Fiori Launchpad"});
+    tab.title = "Fiori Launchpad";
+    const before = tab.webview.html;
+    // rebuild: stop, then start on another port -- the tab stays and follows
+    launcher.emit("state", "stopped");
+    launcher.port = 3592;
+    launcher.emit("state", "running");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(tab.disposed).to.equal(false);
+    expect(tab.webview.html).to.not.equal(before);
+    expect(tab.webview.html).to.contain("http://localhost:3592/app/flp.html");
+    // the moved tab is found under its new URL
+    expect(await openPage("http://localhost:3592/app/flp.html")).to.equal(tab);
+    // an exit nobody asked for closes it
+    launcher.emit("exit", {code: 1});
+    expect(tab.disposed).to.equal(true);
+    // and Stop closes whatever is open
+    const again = await openPage("http://localhost:3592/osd/serving");
+    const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
+    controller.launcher = {stop: async () => {}};
+    await controller.stop();
+    expect(again.disposed).to.equal(true);
+  });
+
+  it("page tabs: a moved tab is forgotten when closed; a Stop racing a reload or a collision leaves no orphan", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {openPage, reloadPageTabs, closePageTabs} = loadExtension(api);
+    const moved = await openPage("http://localhost:3591/app/flp.html");
+    await reloadPageTabs(3592);
+    moved.dispose();
+    const fresh = await openPage("http://localhost:3592/app/flp.html");
+    expect(fresh, "a closed tab is not revealed again").to.not.equal(moved);
+    // a Stop while the reload awaits asExternalUri, with a second tab still to come
+    const second = await openPage("http://localhost:3592/osd/serving");
+    const reloading = reloadPageTabs(3593);
+    closePageTabs();
+    await reloading;
+    expect([fresh.disposed, second.disposed]).to.deep.equal([true, true]);
+    for (const page of ["app/flp.html", "osd/serving"]) {
+      const after = await openPage(`http://localhost:3593/${page}`);
+      expect(after.disposed, `${page}: not a tab the Stop closed`).to.equal(false);
+    }
+    // two tabs that would land on one URL: one is kept, the other closed, none untracked
+    closePageTabs();
+    const a = await openPage("http://localhost:3594/osd/serving");
+    const b = await openPage("http://localhost:3595/osd/serving");
+    await reloadPageTabs(3595);
+    expect([a.disposed, b.disposed]).to.deep.equal([true, false]);
+    closePageTabs();
+    expect(b.disposed, "Stop reaches every tab still open").to.equal(true);
+  });
+
+  it("page tabs through the real Launcher: a rebuild keeps and reloads them, Stop closes them", async function () {
+    this.timeout(20000);
+    const api = vscodeStub({home: ROOT});
+    const {openPage, SystemController} = loadExtension(api);
+    const {Launcher} = require("../editors/vscode/launcher.js");
+    const osdHome = mkdtempSync(path.join(tmpdir(), "osd-q7-home-"));
+    const storageDir = mkdtempSync(path.join(tmpdir(), "osd-q7-storage-"));
+    mkdirSync(path.join(osdHome, "tools"), {recursive: true});
+    mkdirSync(path.join(osdHome, "test"), {recursive: true});
+    writeFileSync(path.join(osdHome, "tools", "osd-build.mjs"), "process.exit(0);\n");
+    writeFileSync(path.join(osdHome, "test", "run.mjs"),
+      "import {createServer} from 'node:http';\n" +
+      "createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'fake'})); })" +
+      ".listen(Number(process.env.STG_PORT), '127.0.0.1');\n");
+    const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
+    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    controller.attachLauncher(launcher);
+    try {
+      await launcher.start();
+      const tab = await openPage(`http://localhost:${launcher.port}/app/flp.html`, {title: "Fiori Launchpad"});
+      tab.title = "Fiori Launchpad";
+      tab.webview.html = "stale";
+      await launcher.rebuild();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(tab.disposed, "a rebuild keeps the tab").to.equal(false);
+      expect(tab.webview.html, "and reloads it").to.contain(`http://localhost:${launcher.port}/app/flp.html`);
+      await controller.stop();
+      expect(tab.disposed, "Stop closes it").to.equal(true);
+    } finally {
+      await launcher.stop();
+      rmSync(osdHome, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+
+  it("the details panel's $metadata links: a tab by default, the browser for 'in browser'", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {openDetailsMetadata} = loadExtension(api);
+    const item = {row: {kind: "ODATA", path: "/sap/opu/odata/sap/ZLEAF", name: "Leaf"}};
+    await openDetailsMetadata(item, {command: "openMetadata", where: "default"});
+    expect(api.panels.map((panel) => panel.args[0])).to.deep.equal(["osdServiceMetadata"]);
+    await openDetailsMetadata(item, {command: "openMetadata", where: "browser"});
+    expect(api.externalOpens).to.have.lengthOf(1);
+    // a transaction's details carry no service: nothing opens
+    await openDetailsMetadata(undefined, {command: "openMetadata"});
+    expect(api.panels).to.have.lengthOf(1);
+  });
+
   it("keeps entity-set and entity clicks separate for the same DPC and set", async () => {
     const api = vscodeStub({home: ROOT});
     const {EntitySetItem, clickTreeNode} = loadExtension(api);
@@ -1675,15 +1884,17 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     try {
       const [leaf] = await provider.serviceRowItems({rows: [{kind: "ICF", path: "/sap/bc/leaf", name: "Leaf"}]});
       expect(leaf.collapsibleState).to.equal(api.TreeItemCollapsibleState.None);
-      expect(leaf.tooltip).to.match(/browser/i);
+      expect(leaf.tooltip).to.match(/VS Code tab/);
+      const serviceTabs = () => api.panels.filter((panel) => panel.args[0] === "osdService");
       await clickTreeNode(leaf, provider);
-      expect(api.externalOpens).to.have.lengthOf(1);
+      expect(serviceTabs()).to.have.lengthOf(1);
       const [expandable] = await provider.serviceRowItems({rows: [{kind: "ICF", path: "/sap/bc/parent", handler: "ZCL_PARENT"}]});
       expect(expandable.collapsibleState).to.equal(api.TreeItemCollapsibleState.Collapsed);
       await clickTreeNode(expandable, provider);
-      expect(api.externalOpens).to.have.lengthOf(1);
+      expect(serviceTabs()).to.have.lengthOf(1);
       await clickTreeNode(expandable, provider);
-      expect(api.externalOpens).to.have.lengthOf(2);
+      expect(serviceTabs()).to.have.lengthOf(2);
+      expect(api.externalOpens).to.have.lengthOf(0);
     } finally {
       provider.dispose();
     }
@@ -1996,7 +2207,10 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     expect(html).to.contain("&lt;Demo&gt;").and.to.contain("ABAP Unit by reference").and.to.contain("HTTP tests by URL");
     expect(html).to.contain("TravelSet").and.to.contain("abc123").and.to.contain("data-source=\"dpc\"");
     expect(html).to.contain("test/e2e/service.spec.mjs");
-    expect(html).to.contain('title="Opens in your browser."\u003e$metadata</a>');
+    // Q7: the $metadata link asks the extension (a VS Code tab by osd.openIn), with a browser twin
+    expect(html).to.contain('data-metadata="default"').and.to.contain('data-metadata="browser"');
+    expect(html).to.not.contain('target="_blank"');
+    expect(html).to.contain('closest("[data-metadata]")').and.to.contain('command:"openMetadata"');
   });
 });
 

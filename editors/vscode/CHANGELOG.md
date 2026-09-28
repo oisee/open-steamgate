@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The OSD tree opens its pages inside VS Code by default (the Fiori Launchpad, apps, services, `$metadata`, the `/osd/*` endpoints): one tab per page, reused on a second click. The launchpad, endpoint and service nodes have an inline link-external action, and every page node an "... in External Browser" context item, for the system browser. `osd.openIn: browser` restores the old default. The System overview's launchpad button and the details panel's `$metadata` link follow the same rule; page tabs close on Stop and reload after a rebuild.
 - Stop (and Rebuild) no longer warn "the system stopped unexpectedly": a stop you asked for logs `--- osd stopped ---`, and only an exit nobody asked for warns.
 - Add **osd: Generate taxi data...** and **osd: Reset taxi data to minimal**, also on the taxi data service in the OSD tree: the system no longer makes taxi sample rows at start.
 - Ship the bundled system's cross-reference rows with its prebuilt generation, so the first start seeds them from a file instead of parsing the tree (5.1 s -> 0.1 s measured).
