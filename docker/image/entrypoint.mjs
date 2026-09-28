@@ -5,6 +5,7 @@ import {setTimeout as delay} from "node:timers/promises";
 const env = process.env;
 if (!/^\d{2}$/.test(env.INSTANCE ?? "00")) throw new Error("INSTANCE must be two digits, e.g. 06");
 env.STG_DB ??= "file";
+env.OSD_OPERATIONS_DB ??= "/data/osd-operations.sqlite";
 if (!["file", "duckdb", "hana", "postgres"].includes(env.STG_DB)) throw new Error("STG_DB must be file, duckdb, hana or postgres");
 if (env.STG_DB === "duckdb" && Number(env.OSD_WORKERS ?? 1) !== 1) throw new Error("DuckDB requires OSD_WORKERS=1");
 if (env.STG_DB === "hana") {

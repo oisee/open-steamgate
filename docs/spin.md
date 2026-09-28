@@ -194,6 +194,7 @@ services:
       - "32${INSTANCE:-17}:32${INSTANCE:-17}"
       - "33${INSTANCE:-17}:33${INSTANCE:-17}"
     volumes:
+      - osd-ops:/data
       - osd-tls:/opt/osd/.local/tls
     depends_on:
       hxe:
@@ -203,6 +204,7 @@ services:
 
 volumes:
   hana-data:
+  osd-ops:
   osd-tls:
 ```
 
@@ -254,6 +256,7 @@ services:
       - "32${INSTANCE:-19}:32${INSTANCE:-19}"
       - "33${INSTANCE:-19}:33${INSTANCE:-19}"
     volumes:
+      - osd-ops:/data
       - osd-tls:/opt/osd/.local/tls
     depends_on:
       postgres:
@@ -263,6 +266,7 @@ services:
 
 volumes:
   pg-data:
+  osd-ops:
   osd-tls:
 ```
 

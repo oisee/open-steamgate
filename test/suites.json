@@ -26,6 +26,7 @@
     "test/demo-data.mjs",
     "test/telegram-notify.mjs",
     "test/batch-inserts.mjs",
+    "test/batch-runs.mjs",
     "test/bsp-app.mjs",
     "test/bootstrap.mjs",
     "test/cds-cast.mjs",

@@ -1238,6 +1238,7 @@ class Launcher extends EventEmitter {
       // have no file of their own; their location is the connection.
       ...(dbEnv.STG_DB === "file" ? {STG_DB_PATH: path.join(dbDir, "osd.sqlite")} : {}),
       ...(dbEnv.STG_DB === "duckdb" ? {STG_DB_PATH: path.join(dbDir, "osd.duckdb")} : {}),
+      OSD_OPERATIONS_DB: path.join(this.storageDir, "operations", "osd-operations.sqlite"),
       // No cert ever lands in `storageDir`'s TLS folder (it starts empty and
       // this launcher never runs `osd:tls`), so pointing OSD_TLS_DIR at it
       // is what makes plain HTTP the default: there is nothing to find, and
