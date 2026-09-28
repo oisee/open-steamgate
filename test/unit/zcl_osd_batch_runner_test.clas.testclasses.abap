@@ -5,6 +5,7 @@ CLASS ltcl_batch_report DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL H
     METHODS unsupported_report_is_explicit FOR TESTING.
     METHODS unknown_selection_is_rejected FOR TESTING.
     METHODS unfinished_flow_is_reported FOR TESTING.
+    METHODS leave_program_completes FOR TESTING.
 ENDCLASS.
 
 CLASS ltcl_batch_report IMPLEMENTATION.
@@ -64,6 +65,21 @@ CLASS ltcl_batch_report IMPLEMENTATION.
 
     CLEAR ls_host.
     ls_host-terminal = 'LEAVE TO TRANSACTION'.
+    ls_result = zcl_osd_batch_report=>result_of( ls_host ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'INCOMPLETE' ).
+  ENDMETHOD.
+
+  METHOD leave_program_completes.
+    DATA ls_host TYPE zcl_gg_host=>ty_result.
+    APPEND 'before exit' TO ls_host-lines.
+    ls_host-terminal = 'LEAVE PROGRAM'.
+    ls_host-navigation-kind = zcx_gg_control_flow=>kind_leave_program.
+    DATA(ls_result) = zcl_osd_batch_report=>result_of( ls_host ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'COMPLETED' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-lines[ 1 ] exp = 'before exit' ).
+
+*   An inconsistent navigation is still incomplete, even with the same text.
+    ls_host-navigation-kind = zcx_gg_control_flow=>kind_submit.
     ls_result = zcl_osd_batch_report=>result_of( ls_host ).
     cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'INCOMPLETE' ).
   ENDMETHOD.

@@ -123,8 +123,10 @@ ${cases}
     IF is_host-unsupported IS NOT INITIAL.
       rs_result-status = 'UNSUPPORTED'.
       rs_result-detail = is_host-unsupported.
-    ELSEIF is_host-terminal IS NOT INITIAL
-        OR is_host-navigation-kind IS NOT INITIAL
+    ELSEIF ( is_host-terminal IS NOT INITIAL
+        AND is_host-terminal <> 'LEAVE PROGRAM' )
+        OR ( is_host-navigation-kind IS NOT INITIAL
+        AND is_host-navigation-kind <> zcx_gg_control_flow=>kind_leave_program )
         OR is_host-submit-program IS NOT INITIAL
         OR is_host-transaction_call-tcode IS NOT INITIAL.
       rs_result-status = 'INCOMPLETE'.
