@@ -150,9 +150,12 @@ scheduled as DANGEROUS, and its class definition (the line that says
 `RISK LEVEL`, when the declaration fits on one) gets a warning naming the
 first write and how many more there are. The reach is per object, not per
 method, so it errs towards flagging: measured on this tree, 14 of the 23
-objects with tests reach a write or a dynamic call. Several of them rightly
-so: the SEGW, gateway, ICF and AMDP tests insert rows, and all of them
-declare HARMLESS. The other 9 run in parallel.
+objects with tests reach a write or a dynamic call. The classes that write
+application rows in the SEGW, gateway and AMDP tests declare DANGEROUS;
+ICF tests that alter the service registry declare CRITICAL. Read-only
+classes in the same object can still be scheduled as DANGEROUS by this
+object-level check; their HARMLESS declarations describe what they do.
+The other 9 objects run in parallel.
 
 **And guarded at runtime** (`tools/osd-unit.mjs`, the first consumer of the
 database hooks in `tools/osd-dialog-step.mjs`, docs/ideas.md B17). A class

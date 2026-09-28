@@ -1,4 +1,4 @@
-CLASS ltcl_amdp DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+CLASS ltcl_amdp DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINAL.
 * The point of the whole bridge in one assertion: ordinary ABAP calls an
 * ordinary method and the unchanged SQLScript body runs either natively in
 * HANA or through typed portable IR on DuckDB. The ABAP call site is the same.

@@ -5,7 +5,7 @@
 * lookup, and a lookup checked against whatever the tree happens to carry is
 * checked against a moving target. The rows' SHAPE comes from
 * tools/osd-icf-rows.mjs, which is checked against the objects separately.
-CLASS ltcl_lookup DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+CLASS ltcl_lookup DEFINITION FOR TESTING DURATION SHORT RISK LEVEL CRITICAL FINAL.
   PRIVATE SECTION.
     METHODS setup.
     METHODS teardown.
@@ -171,7 +171,7 @@ ENDCLASS.
 * writer is an OData update through the dispatcher and it has to inherit
 * the rule rather than reimplement it -- the shape osd-dialog-step already
 * cost this tree once, in three hosts.
-CLASS ltcl_screen DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+CLASS ltcl_screen DEFINITION FOR TESTING DURATION SHORT RISK LEVEL CRITICAL FINAL.
   PRIVATE SECTION.
     METHODS setup.
     METHODS teardown.

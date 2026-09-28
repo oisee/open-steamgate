@@ -2,7 +2,7 @@
 * rows that are not ours; GENERATE_YEAR, YEARS and RESET: a year at a time,
 * once per year, and back to the sample rows. Setup and teardown reset the
 * table, so run it on a scratch database: years made by hand are removed.
-CLASS ltcl_demo_data DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
+CLASS ltcl_demo_data DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT FINAL.
 
   PRIVATE SECTION.
     METHODS setup.

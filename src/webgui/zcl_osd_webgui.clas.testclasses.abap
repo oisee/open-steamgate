@@ -55,7 +55,7 @@ CLASS ltcl_okcode IMPLEMENTATION.
 ENDCLASS.
 
 
-CLASS ltcl_identity DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+CLASS ltcl_identity DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINAL.
 * The status bar, and the four identities it used to choose between.
 *
 * The screen printed "OSG (1) 100": a session number and a client that
