@@ -326,8 +326,9 @@ export class ServingRuntime {
       // a child still booting is asked to go now rather than waited for: on
       // a remote HANA its boot takes minutes (tools/osd-serve.mjs exits on
       // "quiesce" until it serves)
-      // (SIGTERM: a booting child has nothing to drain, and a message can
-      // arrive before it listens; the child installs no SIGTERM handler)
+      // (SIGTERM rather than a message, which can arrive before the child
+      // listens: tools/osd-serve.mjs exits on it at once while booting, or
+      // at the end of the database step if it is in it)
       const booting = this.bootingChild;
       if (booting !== undefined && booting.exitCode === null && booting.signalCode === null) {
         this.stoppedBooting = booting;

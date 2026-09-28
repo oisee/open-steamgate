@@ -475,7 +475,8 @@ describe("tools/osd-runtime: a slow boot is waited for, a silent one is not", fu
     const file = join(dir, "serve.mjs");
     writeFileSync(file, [
       "const talk = process.env.TALK === '1' ? setInterval(() => process.send({type: 'booting', phase: 'seeding over the network'}), 200) : undefined;",
-      "if (process.env.BOOT_MS) setTimeout(() => { clearInterval(talk); process.send({type: 'ready', port: 1, pid: process.pid, ms: 0}); }, Number(process.env.BOOT_MS));",
+      "if (process.env.BOOT_MS) setTimeout(() => { clearInterval(talk); process.send({type: 'ready', port: 1, pid: process.pid, ms: 0}); "
+        + "setTimeout(() => process.send({type: 'say', line: 'runtime error: after ready'}), 300); }, Number(process.env.BOOT_MS));",
       "setInterval(() => {}, 1000);",
       // asked to go (a stop's quiesce): go
       "process.on('message', (m) => { if (m?.type === 'quiesce') process.exit(0); });",
@@ -499,6 +500,8 @@ describe("tools/osd-runtime: a slow boot is waited for, a silent one is not", fu
       expect(answer).to.include({started: true});
       expect(runtime.running).to.equal(true);
       // and once serving, quiet is not hung: the silence limit was the boot's
+      // it said one line after ready and then nothing for longer than the
+      // silence limit: a serving child is not a booting one
       await new Promise((r) => setTimeout(r, 3500));
       expect(runtime.running, "not killed for being quiet after ready").to.equal(true);
     } finally {
@@ -564,5 +567,59 @@ describe("tools/osd-proxy: a request during a long boot is answered 'starting', 
     expect(sent.body.error.code).to.equal("STG/STARTING");
     expect(sent.body).to.include({starting: true, phase: "seeding the cross-reference", seconds: 42});
     finish();
+  });
+});
+
+describe("tools/osd-proxy: startingAnswer, the one shape of 'not yet'", function () {
+  it("names the step and its seconds while booting, 'recycling' during a recycle", async () => {
+    const {startingAnswer} = await import("../tools/osd-proxy.mjs");
+    expect(startingAnswer({booting: {phase: "demo data", since: Date.now() - 3000, last: "x"}}))
+      .to.deep.equal({ready: false, starting: true, phase: "demo data", seconds: 3, last: "x"});
+    expect(startingAnswer({recycling: Promise.resolve()})).to.include({ready: false, starting: true, phase: "recycling"});
+    expect(startingAnswer({})).to.include({phase: "starting"});
+  });
+
+  it("a pool is booting when one of its runtimes is", async () => {
+    const {RuntimePool} = await import("../tools/osd-pool.mjs");
+    const pool = new RuntimePool({size: 2});
+    expect(pool.booting).to.equal(undefined);
+    pool.runtimes[1].booting = {phase: "seeding", since: Date.now()};
+    expect(pool.booting).to.include({phase: "seeding"});
+  });
+});
+
+// A boot can be stopped now, and a sql.js file database is written on a
+// stop: before its seed is complete that would put a half-built database
+// over the last good file. So nothing is written until the file is stamped
+// (or was read whole).
+describe("tools/osd-persist: a half-built database is not saved on a stop", function () {
+  this.timeout(20000);
+  it("saves nothing before the stamp, and saves after it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-persist-seeded-"));
+    const file = join(dir, "osd.sqlite");
+    try {
+      const script = [
+        `const {saveWhenAsked, stamp} = await import(${JSON.stringify(new URL("../tools/osd-persist.mjs", import.meta.url).href)});`,
+        "const {existsSync} = await import('node:fs');",
+        "const db = {export: () => new Uint8Array([1, 2, 3]), execute: async () => undefined};",
+        "const once = saveWhenAsked(db);",
+        "once();",
+        `const before = existsSync(${JSON.stringify(file)});`,
+        "await stamp(db, 'CREATE TABLE t (a INT);');",
+        "once();",
+        `console.log(JSON.stringify({before, after: existsSync(${JSON.stringify(file)})}));`,
+        "process.exit(0);",
+      ].join("\n");
+      const out = await new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, ["--input-type=module", "-e", script], {env: {...process.env, STG_DB: "file", STG_DB_PATH: file}});
+        let text = "";
+        child.stdout.on("data", (d) => { text += d; });
+        child.stderr.on("data", (d) => { text += d; });
+        child.on("exit", (code) => (code === 0 ? resolve(text) : reject(new Error(text))));
+      });
+      expect(JSON.parse(out.trim().split("\n").at(-1))).to.deep.equal({before: false, after: true});
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
   });
 });

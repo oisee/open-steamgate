@@ -274,7 +274,14 @@ result names it; `/core/http/build` keeps naming the façade and gains a
   while it hears that (its own 180 s is then a limit on not answering, up
   to the same boot limit). A stop during the boot ends the child at once
   (SIGTERM; nothing is serving yet) and the start rejects with "stopped
-  while starting", instead of waiting the boot out.
+  while starting", instead of waiting the boot out -- except inside the
+  database step, which it lets finish first: HANA commits a schema's
+  CREATEs on their own and its seed INSERTs not, so a child ended there
+  would leave tables a later boot takes for seeded. For the same reason a
+  sql.js file is not saved on a stop before it is stamped (or was read
+  whole). A pool is "starting" while any of its runtimes is; a status read
+  during a boot skips its refresh; a websocket whose page gave up during
+  the boot is not upgraded.
 
 ---
 

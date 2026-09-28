@@ -102,6 +102,16 @@ export function forward(runtime, req, res) {
 
 const STARTING = Symbol("starting");
 
+/** What a client is told while nothing serves yet: the step of the boot in
+ *  flight (or "recycling"), how long it has been going, and the last line
+ *  it said. The same shape for a 503 and for /osd/serving. */
+export function startingAnswer(runtime) {
+  const booting = runtime.booting;
+  const phase = booting?.phase ?? (runtime.recycling !== undefined ? "recycling" : "starting");
+  const seconds = booting === undefined ? undefined : Math.round((Date.now() - booting.since) / 1000);
+  return {ready: false, starting: true, phase, seconds, last: booting?.last};
+}
+
 export class NotForwardable extends Error {
   constructor(message) {
     super(message);
@@ -132,12 +142,11 @@ export function odataProxy(runtime, options = {}) {
       if (first === STARTING) {
         // the boot goes on; this request is answered
         ready.catch(() => undefined);
-        const booting = runtime.booting;
-        const seconds = booting === undefined ? undefined : Math.round((Date.now() - booting.since) / 1000);
+        const answer = startingAnswer(runtime);
         res.status(503).set("Retry-After", "5").type("application/json").send(JSON.stringify({
           error: {code: "STG/STARTING", message: {lang: "en",
-            value: `the system is starting${seconds === undefined ? "" : ` (${seconds} s)`}: ${booting?.phase ?? "starting"}`}},
-          ready: false, starting: true, phase: booting?.phase, seconds,
+            value: `the system is ${answer.phase === "recycling" ? "recycling" : "starting"}${answer.seconds === undefined ? "" : ` (${answer.seconds} s)`}: ${answer.phase}`}},
+          ...answer,
         }));
         return;
       }
@@ -183,6 +192,9 @@ export function upgradeProxy(runtime, paths, log = () => {}) {
       socket.end("HTTP/1.1 503 Service Unavailable\r\n\r\n");
       return;
     }
+    // the page may have given up during a long boot: no upgrade (and no
+    // on_start in the child) for a socket nobody holds any more
+    if (socket.destroyed) return;
     const port = Number(new URL(chosen.url).port);
     const upstream = connect(port, "127.0.0.1", () => {
       const lines = [`${req.method} ${req.url} HTTP/${req.httpVersion}`];

@@ -523,6 +523,7 @@ async function waitForServing(port, options = {}) {
   const bootMs = options.bootMs ?? (Number(process.env.OSD_BOOT_TIMEOUT_MS) || 15 * 60 * 1000);
   const started = Date.now();
   let deadline = started + timeoutMs;
+  let lastPhase;
   for (;;) {
     // the start race settled another way (the child exited, a stop): stop
     // polling a port that is no longer ours
@@ -535,10 +536,12 @@ async function waitForServing(port, options = {}) {
     }
     if (serving?.starting === true) {
       deadline = Math.min(Math.max(deadline, Date.now() + timeoutMs), started + Math.max(bootMs, timeoutMs));
+      lastPhase = serving.phase ?? lastPhase;
       options.onStarting?.(serving);
     }
     if (Date.now() >= deadline) {
-      throw new Error(`osd never answered ready on :${port} within ${timeoutMs} ms`);
+      throw new Error(`osd never answered ready on :${port} within ${Date.now() - started} ms` +
+        (lastPhase === undefined ? "" : ` (last step: ${lastPhase})`));
     }
     await new Promise((r) => setTimeout(r, intervalMs));
   }
@@ -1062,6 +1065,8 @@ class Launcher extends EventEmitter {
   // "abandoned"), per child and only while it was alive: a child that had
   // already died on its own is never marked, so its crash still warns
   #asked = new WeakMap();
+  // the last boot step the system named, so the log says each once
+  #bootPhase = undefined;
   // the readiness poll of the start in flight, so stop() can end it
   #poll = undefined;
 
@@ -1316,7 +1321,13 @@ class Launcher extends EventEmitter {
     this.#poll = poll;
     try {
       serving = await Promise.race([
-        waitForServing(port, {timeoutMs: this.timeoutMs, signal: poll.signal}),
+        waitForServing(port, {timeoutMs: this.timeoutMs, signal: poll.signal, onStarting: (answer) => {
+          // the boot's step, once each, in the system's own log
+          if (answer.phase !== undefined && answer.phase !== this.#bootPhase) {
+            this.#bootPhase = answer.phase;
+            this.#log(`--- starting: ${answer.phase} ---\n`);
+          }
+        }}),
         exitedEarly.then(({code, signal, asked}) => {
           // stopped while starting: a cancel, the way a stop while building is
           if (asked === "stop") return STOPPED_WHILE_STARTING;

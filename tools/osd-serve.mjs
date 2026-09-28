@@ -60,14 +60,31 @@ const bootStep = (name) => {
   tell({type: "say", line: `boot: ${bootPhase} ${Date.now() - bootPhaseSince} ms`});
   bootPhase = name;
   bootPhaseSince = Date.now();
+  // the step at once, not at the next heartbeat
+  tell({type: "booting", phase: bootPhase, last: bootLast, ms: Date.now() - started});
 };
-// asked to go while still booting: go. The serving quiesce below is only
-// installed once there is something to drain, and until then a stop waited
-// out the whole boot (on a remote HANA, minutes)
+// **Asked to go while still booting: go -- but not in the middle of the
+// database step.** A HANA schema's CREATEs commit on their own and its seed
+// INSERTs do not, so a child ended there leaves tables that a later boot
+// takes for seeded and serves empty. There the request waits for the step
+// to finish (and on SIGKILL, the supervisor's last resort, nothing can).
+// Elsewhere in the boot there is nothing to drain. Once serving, the serving
+// quiesce below and the default SIGTERM take over again.
 let isServing = false;
+let inDatabaseStep = false;
+let exitAfterDatabaseStep = false;
+const goWhileBooting = () => {
+  if (isServing) return;
+  if (inDatabaseStep) {
+    exitAfterDatabaseStep = true;
+    return;
+  }
+  process.exit(0);
+};
 process.on("message", (message) => {
-  if (message?.type === "quiesce" && !isServing) process.exit(0);
+  if (message?.type === "quiesce") goWhileBooting();
 });
+process.on("SIGTERM", goWhileBooting);
 
 // which tree this runtime serves, so one copy of this script can serve any
 // of them: a second worktree, a branch under test, an experiment on its own
@@ -88,7 +105,10 @@ const {zcl_apc_host} = await from("zcl_apc_host.clas.mjs");
 const {zcl_osd_status} = await from("zcl_osd_status.clas.mjs");
 
 bootStep("opening the database: DDL and seed rows (test/setup.mjs)");
+inDatabaseStep = true;
 await initializeABAP();
+inDatabaseStep = false;
+if (exitAfterDatabaseStep) process.exit(0);
 // the ICF nodes into the tables a system keeps them in, by the rule in
 // docs/registry-drift.md: applied when an object arrives, never re-applied
 // over an edit. One module for all three hosts, because that is what the
@@ -330,6 +350,8 @@ const server = app.listen(wanted, "127.0.0.1", () => {
   clearInterval(booting);
   bootStep("serving");
   isServing = true;
+  // serving: a SIGTERM is the default again (or the file save's own handler)
+  process.off("SIGTERM", goWhileBooting);
   if (process.send !== undefined) {
     process.send({type: "ready", port, pid: process.pid, ms: Date.now() - started});
   } else {
