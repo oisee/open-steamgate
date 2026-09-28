@@ -11,6 +11,24 @@ export function mapStatementStarts(Chunk) {
   if (Chunk === undefined || Chunk.prototype[installed]) return;
   const original = Chunk.prototype.ensureStartMapping;
   if (typeof original !== "function") throw new Error("transpiler Chunk.ensureStartMapping is unavailable");
+  // Check the API and its behavior on a disposable chunk. If a later
+  // transpiler already fixes statement starts, leave its implementation
+  // alone; if its chunk shape changes, fail before producing misleading maps.
+  const probe = new Chunk("await call();");
+  if (probe.raw !== "await call();" || !Array.isArray(probe.mappings)
+      || typeof probe.originalPosition !== "function") {
+    throw new Error("transpiler Chunk source-map shape changed");
+  }
+  probe.mappings.push({source: "probe.abap", generated: {line: 1, column: 12}, original: {line: 3, column: 12}});
+  const token = {getRow: () => 1, getCol: () => 1};
+  const traversal = {getFilename: () => "probe.abap", isSourceMapEnabled: () => true};
+  if (original.call(probe, {getFirstToken: () => token}, traversal) !== probe) {
+    throw new Error("transpiler Chunk.ensureStartMapping return value changed");
+  }
+  if (probe.mappings.some((mapping) => mapping.generated.line === 1 && mapping.generated.column === 0)) {
+    Chunk.prototype[installed] = true;
+    return;
+  }
   Chunk.prototype.ensureStartMapping = function (statement, traversal) {
     const result = original.call(this, statement, traversal);
     if (this.raw !== "" && traversal.isSourceMapEnabled?.() !== false
