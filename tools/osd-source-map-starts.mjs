@@ -8,7 +8,10 @@
 const installed = Symbol.for("osd.statementStartSourceMaps");
 
 export function mapStatementStarts(Chunk) {
-  if (Chunk === undefined || Chunk.prototype[installed]) return;
+  if (Chunk === undefined || Chunk.prototype === undefined) {
+    throw new Error("transpiler Chunk export is unavailable for source maps");
+  }
+  if (Chunk.prototype[installed]) return;
   const original = Chunk.prototype.ensureStartMapping;
   if (typeof original !== "function") throw new Error("transpiler Chunk.ensureStartMapping is unavailable");
   // Check the API and its behavior on a disposable chunk. If a later
