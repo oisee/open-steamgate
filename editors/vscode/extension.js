@@ -534,6 +534,8 @@ class SystemController {
       if (this.launcher !== undefined && this.launcher.state !== "stopped") {
         await this.launcher.stop();
       }
+      // another home is another system: the old one's pages are gone
+      if (this.launcher !== undefined) closePageTabs();
       const launcher = new Launcher({
         osdHome,
         storageDir: storageDirFor(this.context, osdHome),
@@ -543,18 +545,7 @@ class SystemController {
         debug: osdDebugEnabled() || forceDebug,
       });
       launcher.homeKind = choice.kind;
-      launcher.on("log", (line) => this.output.append(line));
-      launcher.on("state", (state) => {
-        if (state === "stopped") {
-          this.debuggerTransition = this.debuggerTransition.then(() => this.applyDebuggerEvent({type: "system-stopped"}));
-        }
-        this.emitter.fire();
-      });
-      launcher.on("exit", ({code, signal}) => {
-        this.output.appendLine(`\n--- osd exited on its own (code ${code ?? "?"}, signal ${signal ?? "?"}) ---`);
-        vscode.window.showWarningMessage(`osd: the system stopped unexpectedly (code ${code ?? "?"}, signal ${signal ?? "?"})`);
-      });
-      this.launcher = launcher;
+      this.attachLauncher(launcher);
     } else {
       // Same osdHome, stopped: pick up current folders and settings before
       // the launcher's next projection and build.
@@ -744,11 +735,31 @@ class SystemController {
     return this.#launch(launcher, launchOptions, "osd start");
   }
 
+  /** Everything this controller listens to on its launcher, in one place
+   *  (so a test can drive a real Launcher through it). */
+  attachLauncher(launcher) {
+    launcher.on("log", (line) => this.output.append(line));
+    wirePageTabs(launcher);
+    launcher.on("state", (state) => {
+      if (state === "stopped") {
+        this.debuggerTransition = this.debuggerTransition.then(() => this.applyDebuggerEvent({type: "system-stopped"}));
+      }
+      this.emitter.fire();
+    });
+    launcher.on("exit", ({code, signal}) => {
+      this.output.appendLine(`\n--- osd exited on its own (code ${code ?? "?"}, signal ${signal ?? "?"}) ---`);
+      vscode.window.showWarningMessage(`osd: the system stopped unexpectedly (code ${code ?? "?"}, signal ${signal ?? "?"})`);
+    });
+    this.launcher = launcher;
+  }
+
   async stop() {
     if (this.launcher === undefined) {
       return;
     }
     await this.launcher.stop();
+    // Stop means the pages are gone; a rebuild (stop, then start) keeps them
+    closePageTabs();
     this.emitter.fire();
   }
 
@@ -944,7 +955,7 @@ class SystemController {
       const panel = vscode.window.createWebviewPanel("osdSystemOverview", "System overview", vscode.ViewColumn.Beside, {
         enableScripts: false,
         retainContextWhenHidden: true,
-        enableCommandUris: ["osd.start", "workbench.action.openSettings"],
+        enableCommandUris: ["osd.start", "workbench.action.openSettings", "osd.openLaunchpad", "osd.openLaunchpadExternal"],
       });
       this.overviewPanel = panel;
       panel.onDidDispose(() => {
@@ -1023,27 +1034,24 @@ class SystemController {
     }
   }
 
-  async openLaunchpad() {
+  async openLaunchpad(where = "default") {
     if (this.launcher?.state !== "running") {
       vscode.window.showInformationMessage("osd: not running -- osd.start first");
       return;
     }
-    await openExternalOrOwn(`http://localhost:${this.launcher.port}/app/flp.html`);
+    await openPage(`http://localhost:${this.launcher.port}/app/flp.html`, {title: "Fiori Launchpad", panelType: "osdLaunchpad", where});
   }
 
-  /** The context-menu twin of openLaunchpad() above (docs/vscode-extension.md,
-   *  "Services tree"): always the webview iframe, regardless of `osd.openIn`
-   *  -- that setting is the *default* for a service row's own click, and the
-   *  Launchpad node's own click stays openLaunchpad() (the system browser)
-   *  unconditionally, so a person who wants it inside VS Code this once asks
-   *  for it by name rather than by a setting they would have to remember to
-   *  flip back. */
+  /** "osd: Open launchpad inside VS Code" (the palette): always a VS Code
+   *  tab, whatever `osd.openIn` says -- the way to get the tab once when the
+   *  setting is "browser". openLaunchpad() follows the setting, and
+   *  osd.openLaunchpadExternal always uses the browser. */
   async openLaunchpadInVsCode() {
     if (this.launcher?.state !== "running") {
       vscode.window.showInformationMessage("osd: not running -- osd.start first");
       return;
     }
-    await openInWebview(`http://localhost:${this.launcher.port}/app/flp.html`, "osdLaunchpad", "Fiori Launchpad");
+    await openPage(`http://localhost:${this.launcher.port}/app/flp.html`, {title: "Fiori Launchpad", panelType: "osdLaunchpad", where: "vscode"});
   }
 }
 
@@ -1204,7 +1212,7 @@ class OsdTreeProvider {
     const launchpad = new vscode.TreeItem("▶ Open Fiori Launchpad");
     launchpad.contextValue = "osd-launchpad";
     launchpad.iconPath = new vscode.ThemeIcon("link-external");
-    launchpad.tooltip = "Single click opens the Fiori Launchpad in your browser.";
+    launchpad.tooltip = openTooltip("the Fiori Launchpad");
     launchpad.command = treeClick(launchpad);
 
     const layers = new vscode.TreeItem("Layers", vscode.TreeItemCollapsibleState.Expanded);
@@ -1370,7 +1378,7 @@ class HostDoorItem extends vscode.TreeItem {
     this.route = route;
     this.contextValue = `osd-host-${action}`;
     this.description = description;
-    if (action === "open") this.tooltip = "Single click opens this endpoint in your browser.";
+    if (action === "open") this.tooltip = openTooltip("this endpoint");
     this.iconPath = new vscode.ThemeIcon(action === "dumps" ? "warning" : action === "sql" ? "database" : "pulse");
     this.command = action === "sql"
       ? {command: "osd.newSqlNotebook", title: "Open SQL notebook"}
@@ -1426,9 +1434,7 @@ class ServiceRowItem extends vscode.TreeItem {
     this.iconPath = new vscode.ThemeIcon(
       row.kind === "APP" ? "browser" : row.kind === "ODATA" ? "database" : row.kind === "APC" ? "broadcast" : "plug");
     if (!expandable && row.kind !== "APC" && row.path) {
-      const target = vscode.workspace.getConfiguration("osd").get("openIn", "browser");
-      this.tooltip = target === "vscode" ? "Single click opens this page in VS Code."
-        : "Single click opens this page in your browser.";
+      this.tooltip = openTooltip("this page");
     }
     this.command = treeClick(this);
   }
@@ -1467,11 +1473,10 @@ class EntitySetItem extends vscode.TreeItem {
   }
 }
 
-/** `osd.openIn` (docs/vscode-extension.md, "Services tree"): the shared
- *  target for a service row's inline Open action -- the system browser
- *  (`vscode.env.openExternal`, this extension's default everywhere else,
- *  e.g. openLaunchpad() above) or a webview tab inside VS Code, the same
- *  iframe-over-CSP pattern openDataPreview() (Q7) and, for a running
+/** The system browser half of openPage() below (`vscode.env.openExternal`),
+ *  used when `osd.openIn` is "browser" or the person chose "Open in External
+ *  Browser". The other half is a webview tab inside VS Code, the same
+ *  iframe-over-CSP pattern openDataPreview() and, for a running
  *  system's own pages, the gui-reports spike's openWebguiTransaction()
  *  already use: the panel carries no copy of the page, it iframes the
  *  running osd's own URL, so whatever that page does (a click inside the
@@ -1502,6 +1507,129 @@ async function openInWebview(url, panelType, title) {
     retainContextWhenHidden: true,
   });
   panel.webview.html = iframePanelHtml(external.toString(), title);
+  return panel;
+}
+
+/** Where a page of the running system opens (Q7): `osd.openIn`, whose
+ *  default is a tab inside VS Code, unless the caller names a place -- the
+ *  inline $(link-external) action and "Open in External Browser" always say
+ *  "browser". A tree item's command gets no modifier keys, so Ctrl/Shift+
+ *  click cannot mean "outside"; the explicit action is the only way. */
+function openTarget(where = "default") {
+  if (where === "browser" || where === "vscode") return where;
+  return vscode.workspace.getConfiguration("osd").get("openIn", "vscode") === "browser" ? "browser" : "vscode";
+}
+
+// one tab per URL: a second click reveals the tab it already has
+const pageTabs = new Map();
+
+/** Stop (or an exit nobody asked for): every page tab shows a page that is
+ *  gone, so they close with the system. A rebuild does not come here. */
+function closePageTabs() {
+  for (const panel of [...pageTabs.values()]) panel.dispose();
+  pageTabs.clear();
+}
+
+/** What a launcher's life means for the page tabs: an exit nobody asked for
+ *  closes them; "running" again (after a rebuild, which is stop-then-start
+ *  and keeps them) reloads them. Stop closes them in SystemController.stop(). */
+function wirePageTabs(launcher) {
+  launcher.on("state", (state) => {
+    if (state === "running") void reloadPageTabs(launcher.port);
+  });
+  launcher.on("exit", () => closePageTabs());
+}
+
+/** The details panel's "$metadata" / "in browser" links. */
+async function openDetailsMetadata(item, message) {
+  await openServiceMetadata(item, message?.where === "browser" ? "browser" : "default");
+}
+
+/** The system is serving again after a rebuild: each open page tab loads its
+ *  page anew (the new generation), moved to the new port if the port
+ *  changed, the way a person would reload a browser tab. */
+async function reloadPageTabs(port) {
+  for (const [url, panel] of [...pageTabs]) {
+    // closed (a Stop, or the person) since the snapshot: nothing to reload
+    if (pageTabs.get(url) !== panel) continue;
+    let next = url;
+    try {
+      const u = new URL(url);
+      if ((u.hostname === "localhost" || u.hostname === "127.0.0.1") && port !== undefined && u.port !== String(port)) {
+        u.port = String(port);
+        next = u.toString();
+      }
+    } catch {
+      continue;
+    }
+    if (next !== url) {
+      const there = pageTabs.get(next);
+      pageTabs.delete(url);
+      if (there !== undefined && there !== panel) {
+        // two tabs would now show one page: keep the one already there
+        panel.dispose();
+        continue;
+      }
+      pageTabs.set(next, panel);
+    }
+    let external;
+    try {
+      external = await vscode.env.asExternalUri(vscode.Uri.parse(next));
+    } catch {
+      external = vscode.Uri.parse(next);
+    }
+    // a Stop while that was awaited closed it
+    if (pageTabs.get(next) !== panel) continue;
+    try {
+      panel.webview.html = iframePanelHtml(external.toString(), panel.title ?? next);
+    } catch {
+      // disposed under us: forget it
+      if (pageTabs.get(next) === panel) pageTabs.delete(next);
+    }
+  }
+}
+
+/** The commands that open a page of the running system, registered in one
+ *  place so the routing can be tested without activating the extension. */
+function registerOpenCommands(context, controller) {
+  const register = (command, handler) => context.subscriptions.push(vscode.commands.registerCommand(command, handler));
+  register("osd.openLaunchpad", () => controller.openLaunchpad());
+  register("osd.openLaunchpadInVsCode", () => controller.openLaunchpadInVsCode());
+  register("osd.openLaunchpadExternal", () => controller.openLaunchpad("browser"));
+  register("osd.openServiceRow", (item) => openServiceRow(item));
+  register("osd.openServiceRowExternal", (item) => openServiceRowExternal(item));
+  register("osd.openHostDoor", (route) => openHostDoor(route?.route ?? route));
+  register("osd.openHostDoorExternal", (item) => openHostDoor(item?.route ?? item, "browser"));
+  register("osd.openServiceMetadata", (item) => openServiceMetadata(item));
+  register("osd.openServiceMetadataExternal", (item) => openServiceMetadata(item, "browser"));
+}
+
+/** Every tree node that opens a URL comes through here. */
+async function openPage(url, {title, panelType = "osdPage", where = "default"} = {}) {
+  if (openTarget(where) === "browser") {
+    await openExternalOrOwn(url);
+    return undefined;
+  }
+  const open = pageTabs.get(url);
+  if (open !== undefined) {
+    if (title !== undefined) open.title = title;
+    open.reveal();
+    return open;
+  }
+  const panel = await openInWebview(url, panelType, title ?? url);
+  pageTabs.set(url, panel);
+  panel.onDidDispose(() => {
+    // by panel, not by URL: a rebuild may have moved it to another port
+    for (const [key, open] of pageTabs) if (open === panel) pageTabs.delete(key);
+  });
+  return panel;
+}
+
+/** The tooltip of a node that opens a page, saying where a click goes. */
+function openTooltip(what) {
+  return openTarget() === "vscode"
+    ? `Single click opens ${what} in a VS Code tab; the link-external action opens it in your browser.`
+    : `Single click opens ${what} in your browser (osd.openIn).`;
 }
 
 let serviceDetailsPanel;
@@ -1712,6 +1840,10 @@ function ensureDetailsPanel(output) {
       editor.revealRange(new vscode.Range(at, at));
       return;
     }
+    if (message?.command === "openMetadata") {
+      await openDetailsMetadata(serviceDetailsItem, message);
+      return;
+    }
     if (message?.command !== "openSource") return;
     if (message.role === "program") await openTransactionProgram(transactionProgramSource, output);
     else await openServiceSource(serviceDetailsItem, message.role, output);
@@ -1814,7 +1946,7 @@ function showTreeNodeDetails(item, output) {
   serviceDetailsSelection += 1;
   const kind = item.contextValue?.split(";")[0] ?? "";
   const title = String(item.label ?? "OSD tree");
-  const explanation = kind === "osd-launchpad" ? "Fiori Launchpad for the running system. Click to open it in the browser."
+  const explanation = kind === "osd-launchpad" ? "Fiori Launchpad for the running system. Click to open it."
     : kind === "osd-host-open" ? "Serving status, generation, database, and warm build state. Click to open the endpoint."
       : kind === "osd-host-dumps" ? "Short dumps collected from runtime errors. Click to list them in Output."
         : kind === "osd-system-group" ? "System endpoints for serving state, short dumps, and SQL. Expand to inspect them."
@@ -1870,27 +2002,19 @@ function iframePanelHtml(url, title) {
 </html>`;
 }
 
-async function openServiceRow(item) {
+async function openServiceRow(item, where = "default") {
   const row = item?.row ?? item;
-  if (row === undefined || row.kind === "APC") return;
-  const url = serviceHttpUrl(row, osd().url);
-  const openIn = vscode.workspace.getConfiguration("osd").get("openIn", "browser");
-  if (openIn === "vscode") {
-    await openInWebview(url, "osdService", serviceLabel(row).label);
-  } else {
-    await openExternalOrOwn(url);
-  }
+  if (row === undefined || row.kind === "APC" || !row.path) return;
+  await openPage(serviceHttpUrl(row, osd().url), {title: serviceLabel(row).label, panelType: "osdService", where});
 }
 
 async function openServiceRowExternal(item) {
-  const row = item?.row ?? item;
-  if (row === undefined || row.kind === "APC" || !row.path) return;
-  await openExternalOrOwn(serviceHttpUrl(row, osd().url));
+  await openServiceRow(item, "browser");
 }
 
-async function openHostDoor(route) {
+async function openHostDoor(route, where = "default") {
   if (!route) return;
-  await openExternalOrOwn(`${osd().url}${route}`);
+  await openPage(`${osd().url}${route}`, {title: route, panelType: "osdEndpoint", where});
 }
 
 async function copyServiceUrl(item) {
@@ -1915,15 +2039,10 @@ async function copyServiceMetadata(item) {
   vscode.window.setStatusBarMessage(`osd: copied ${row.path}/$metadata`, 3000);
 }
 
-async function openServiceMetadata(item) {
+async function openServiceMetadata(item, where = "default") {
   const row = item?.row ?? item;
   if (!row?.path || row.kind !== "ODATA") return;
-  const url = serviceMetadataUrl(row, osd().url);
-  if (vscode.workspace.getConfiguration("osd").get("openIn", "browser") === "vscode") {
-    await openInWebview(url, "osdServiceMetadata", `${serviceLabel(row).label} $metadata`);
-  } else {
-    await openExternalOrOwn(url);
-  }
+  await openPage(serviceMetadataUrl(row, osd().url), {title: `${serviceLabel(row).label} $metadata`, panelType: "osdServiceMetadata", where});
 }
 
 async function testServiceClosure(item, output) {
@@ -2251,9 +2370,12 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("osd.rebuildWarm", () => controller.rebuildWarm()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.fullRebuild", () => controller.fullRebuild()));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openSystemLog", () => controller.openLog()));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpad", () => controller.openLaunchpad()));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.openLaunchpadInVsCode", () => controller.openLaunchpadInVsCode()));
+  registerOpenCommands(context, controller);
   const treeProvider = new OsdTreeProvider(controller);
+  // the tooltips of page nodes say where a click goes: redraw them when that changes
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (e.affectsConfiguration("osd.openIn")) treeProvider.emitter.fire();
+  }));
   context.subscriptions.push(vscode.commands.registerCommand("osd.clickTreeNode", (item) => clickTreeNode(item, treeProvider, output)));
   context.subscriptions.push(treeProvider);
   context.subscriptions.push(vscode.window.registerTreeDataProvider("osdTree", treeProvider));
@@ -2263,10 +2385,9 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("osd.groupServicesByPack", () => treeProvider.setServiceGrouping("pack")));
 
   // Services tree (docs/vscode-extension.md, "Services tree"): a row's own
-  // click shows the reusable details webview. Inline Open uses osd.openIn;
-  // the context menu's Open is always the external browser.
-  context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceRow", (row) => openServiceRow(row)));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceRowExternal", (item) => openServiceRowExternal(item)));
+  // click shows the reusable details webview (on a leaf it opens the row).
+  // Open uses osd.openIn (a VS Code tab by default); the link-external
+  // action and "Open in External Browser" always use the system browser.
   context.subscriptions.push(vscode.commands.registerCommand("osd.showServiceDetails", (item) => showServiceDetails(item, treeProvider, output)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceSource", (item, role) => openServiceSource(item, role, output)));
   for (const [command, role] of [["osd.openServiceSourceDpc", "dpc"], ["osd.openServiceSourceMpc", "mpc"],
@@ -2274,12 +2395,10 @@ function activate(context) {
     ["osd.openServiceSourceDeclaration", "service"]]) {
     context.subscriptions.push(vscode.commands.registerCommand(command, (item) => openServiceSource(item, role, output)));
   }
-  context.subscriptions.push(vscode.commands.registerCommand("osd.openHostDoor", (route) => openHostDoor(route)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.testServiceClosure", (item) => testServiceClosure(item, output)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.copyServiceUrl", (item) => copyServiceUrl(item)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.copyServiceWsUrl", (item) => copyServiceWsUrl(item)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.copyServiceMetadata", (item) => copyServiceMetadata(item)));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceMetadata", (item) => openServiceMetadata(item)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceClass", (node) => openServiceClass(node, output)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openEntitySetMethod",
     (dpcName, set, line) => openEntitySetMethod(dpcName, set, line, output)));
@@ -3655,4 +3774,5 @@ async function deactivate() {
 }
 
 module.exports = {activate, deactivate, SystemController, debugOnDemand, testExplorer, OsdTreeProvider, TransactionItem, EntitySetItem,
-  transactionProgramPath, clickTransaction, clickTreeNode};
+  transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,
+  wirePageTabs, openDetailsMetadata};

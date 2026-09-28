@@ -15,7 +15,7 @@ import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
 import {credentials as tlsCredentials, fingerprint as tlsFingerprint, dirOf as tlsDirOf} from "../tools/osd-tls.mjs";
-import {odataProxy, upgradeProxy} from "../tools/osd-proxy.mjs";
+import {odataProxy, upgradeProxy, startingAnswer} from "../tools/osd-proxy.mjs";
 import {inspectPortOf} from "../tools/osd-inspector.mjs";
 import {devLoop} from "../tools/osd-dev.mjs";
 import {mountServices, services as icfServices, servicesFromRows, channels as pushChannels} from "../tools/osd-icf.mjs";
@@ -386,6 +386,12 @@ export function startServer(quiet) {
 
   // A refresh that fails never fails the read: see above.
   async function withFreshStatus(req, res, next) {
+    // still booting: no refresh (it would wait for the whole boot); the
+    // proxy then answers "starting"
+    if (runtime?.booting !== undefined && runtime.running !== true) {
+      next();
+      return;
+    }
     try {
       await refreshStatus();
     } catch (e) {
@@ -425,6 +431,12 @@ export function startServer(quiet) {
     const withWarm = (proxy) => async (req, res, next) => {
       if (req.method !== "GET") {
         proxy(req, res, next);
+        return;
+      }
+      // still booting: say so now, with the step, rather than hold the
+      // question for the boot (the VS Code launcher waits on this answer)
+      if (runtime.booting !== undefined && runtime.running !== true) {
+        res.status(200).json({...startingAnswer(runtime), warm: facade.store.warmStatus()});
         return;
       }
       try {

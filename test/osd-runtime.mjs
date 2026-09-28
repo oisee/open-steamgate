@@ -206,12 +206,19 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     } finally {
       await runtime.stop();
     }
-    // and a stop that arrives while one is still coming up stops it
+    // and a stop that arrives while one is still coming up stops it -- at
+    // once, rather than after its boot (minutes on a remote HANA): the start
+    // hears "stopped while starting" and no child is left
     const late = new ServingRuntime();
-    const coming = late.start();
+    const coming = late.start().catch((e) => e);
     await late.stop();
     const first = await coming;
-    expect(alive(first.pid), "the child that was coming up is stopped too").to.equal(false);
+    if (first instanceof Error) {
+      expect(first.message).to.equal("stopped while starting");
+    } else {
+      expect(alive(first.pid), "the child that was coming up is stopped too").to.equal(false);
+    }
+    expect(liveChildren().filter((c) => c.exitCode === null && c.signalCode === null), "no child is left").to.have.lengthOf(0);
   });
 
   it("a recycle is a new process, and the old one is gone", async () => {
@@ -536,5 +543,241 @@ describe("tools/osd-inspector: one request, one answer, loopback only", function
       error = e;
     }
     expect(String(error?.message)).to.match(/needs one work process, and this system runs 2/);
+  });
+});
+
+// A boot on a remote HANA takes minutes; the supervisor used to SIGKILL a
+// child that had not said "ready" within 60 s, and the next request started
+// it again from the top (dell, 2026-09-27: 14 restarts in 900 s). The limit
+// is now on silence: a child that keeps saying it is booting (osd-serve sends
+// "booting" every 5 s) is waited for, up to an overall boot deadline.
+describe("tools/osd-runtime: a slow boot is waited for, a silent one is not", function () {
+  this.timeout(30000);
+  let dir;
+  // a stand-in for tools/osd-serve.mjs: talks every 200 ms if TALK=1, says
+  // "ready" after BOOT_MS (never, if unset), then stays up quietly
+  const fake = () => {
+    dir = mkdtempSync(join(tmpdir(), "osd-boot-"));
+    const file = join(dir, "serve.mjs");
+    writeFileSync(file, [
+      "const talk = process.env.TALK === '1' ? setInterval(() => process.send({type: 'booting', phase: 'seeding over the network'}), 200) : undefined;",
+      "if (process.env.BOOT_MS) setTimeout(() => { clearInterval(talk); process.send({type: 'ready', port: 1, pid: process.pid, ms: 0}); "
+        + "setTimeout(() => process.send({type: 'say', line: 'runtime error: after ready'}), 300); }, Number(process.env.BOOT_MS));",
+      "setInterval(() => {}, 1000);",
+      // asked to go (a stop's quiesce): go
+      "process.on('message', (m) => { if (m?.type === 'quiesce') process.exit(0); });",
+      // DB=<ms>: in the database step, which a SIGTERM waits out (tools/osd-boot-guard.mjs)
+      "if (process.env.DB) { setInterval(() => process.send({type: 'booting', phase: 'opening the database', database: true}), 200); "
+        + "process.on('SIGTERM', () => setTimeout(() => process.exit(0), Number(process.env.DB))); }",
+    ].join("\n"));
+    return [process.execPath, file];
+  };
+  afterEach(() => {
+    for (const child of liveChildren()) child.kill("SIGKILL");
+    if (dir) rmSync(dir, {recursive: true, force: true});
+  });
+
+  it("a boot longer than the silence limit, that keeps talking, starts", async () => {
+    const runtime = new ServingRuntime({command: fake(), timeout: 2500, bootTimeout: 20000, env: {TALK: "1", BOOT_MS: "6000"}});
+    try {
+      const starting = runtime.start();
+      await new Promise((r) => setTimeout(r, 1000));
+      // meanwhile a proxy or /osd/serving can say what it is doing
+      expect(runtime.booting?.phase).to.equal("seeding over the network");
+      const answer = await starting;
+      expect(runtime.booting, "not booting once ready").to.equal(undefined);
+      expect(answer).to.include({started: true});
+      expect(runtime.running).to.equal(true);
+      // and once serving, quiet is not hung: the silence limit was the boot's
+      // it said one line after ready and then nothing for longer than the
+      // silence limit: a serving child is not a booting one
+      await new Promise((r) => setTimeout(r, 3500));
+      expect(runtime.running, "not killed for being quiet after ready").to.equal(true);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it("stop() while booting asks the child to go instead of waiting out its boot", async () => {
+    const runtime = new ServingRuntime({command: fake(), timeout: 2500, bootTimeout: 20000, env: {TALK: "1"}});
+    const starting = runtime.start().catch((e) => e);
+    await new Promise((r) => setTimeout(r, 800));
+    const before = Date.now();
+    await runtime.stop();
+    expect(Date.now() - before, "not the boot limit").to.be.lessThan(5000);
+    expect(await starting).to.be.an("error");
+    expect(runtime.booting).to.equal(undefined);
+  });
+
+  it("stop() in the database step lets the child finish it: no SIGKILL at grace + 8 s", async function () {
+    this.timeout(40000);
+    const runtime = new ServingRuntime({command: fake(), timeout: 5000, bootTimeout: 60000, grace: 0, env: {DB: "10000"}});
+    const starting = runtime.start().catch((e) => e);
+    await new Promise((r) => setTimeout(r, 800));
+    const [child] = liveChildren();
+    expect(runtime.booting?.database, "the supervisor knows").to.equal(true);
+    const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({code, signal})));
+    await runtime.stop();
+    expect(await exited, "ended by itself after the step, not killed").to.deep.equal({code: 0, signal: null});
+    expect(await starting).to.be.an("error");
+  });
+
+  it("a child that says nothing is given up on after the silence limit", async () => {
+    const runtime = new ServingRuntime({command: fake(), timeout: 800, bootTimeout: 10000, env: {TALK: "0"}});
+    const started = Date.now();
+    let error;
+    try {
+      await runtime.start();
+    } catch (e) {
+      error = e;
+    }
+    expect(String(error?.message)).to.match(/said nothing for 800 ms while starting/);
+    expect(Date.now() - started).to.be.lessThan(5000);
+  });
+
+  it("a child that talks but never gets ready hits the boot deadline", async () => {
+    const runtime = new ServingRuntime({command: fake(), timeout: 800, bootTimeout: 2000, env: {TALK: "1"}});
+    let error;
+    try {
+      await runtime.start();
+    } catch (e) {
+      error = e;
+    }
+    expect(String(error?.message)).to.match(/did not start within 2000 ms \(last: seeding over the network\)/);
+  });
+});
+
+describe("tools/osd-proxy: a request during a long boot is answered 'starting', not held", function () {
+  it("503 STG/STARTING with Retry-After and the step, while the boot goes on", async () => {
+    const {odataProxy} = await import("../tools/osd-proxy.mjs");
+    let finish;
+    const runtime = {
+      ensure: () => new Promise((resolve) => { finish = resolve; }),
+      booting: {phase: "seeding the cross-reference", since: Date.now() - 42000},
+    };
+    const sent = {headers: {}};
+    const res = {
+      headersSent: false,
+      status(code) { sent.status = code; return this; },
+      set(name, value) { sent.headers[name] = value; return this; },
+      type() { return this; },
+      send(body) { sent.body = JSON.parse(body); return this; },
+    };
+    await odataProxy(runtime, {startingWaitMs: 100})({originalUrl: "/sap/opu/odata/sap/X/", method: "GET", headers: {}}, res);
+    expect(sent.status).to.equal(503);
+    expect(sent.headers["Retry-After"]).to.equal("5");
+    expect(sent.body.error.code).to.equal("STG/STARTING");
+    expect(sent.body).to.include({starting: true, phase: "seeding the cross-reference", seconds: 42});
+    finish();
+  });
+});
+
+describe("tools/osd-proxy: startingAnswer, the one shape of 'not yet'", function () {
+  it("names the step and its seconds while booting, 'recycling' during a recycle", async () => {
+    const {startingAnswer} = await import("../tools/osd-proxy.mjs");
+    expect(startingAnswer({booting: {phase: "demo data", since: Date.now() - 3000, last: "x"}}))
+      .to.deep.equal({ready: false, starting: true, phase: "demo data", seconds: 3, last: "x"});
+    expect(startingAnswer({recycling: Promise.resolve()})).to.include({ready: false, starting: true, phase: "recycling"});
+    expect(startingAnswer({})).to.include({phase: "starting"});
+  });
+
+  it("a pool is booting when one of its runtimes is", async () => {
+    const {RuntimePool} = await import("../tools/osd-pool.mjs");
+    const pool = new RuntimePool({size: 2});
+    expect(pool.booting).to.equal(undefined);
+    pool.runtimes[1].booting = {phase: "seeding", since: Date.now()};
+    expect(pool.booting).to.include({phase: "seeding"});
+  });
+});
+
+// A boot can be stopped now, and a sql.js file database is written on a
+// stop: before its seed is complete that would put a half-built database
+// over the last good file. So nothing is written until the file is stamped
+// (or was read whole).
+describe("tools/osd-persist: a half-built database is not saved on a stop", function () {
+  this.timeout(20000);
+  it("saves nothing before the stamp, and saves after it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-persist-seeded-"));
+    const file = join(dir, "osd.sqlite");
+    try {
+      const script = [
+        `const {saveWhenAsked, stamp} = await import(${JSON.stringify(new URL("../tools/osd-persist.mjs", import.meta.url).href)});`,
+        "const {existsSync} = await import('node:fs');",
+        "const db = {export: () => new Uint8Array([1, 2, 3]), execute: async () => undefined};",
+        "const once = saveWhenAsked(db);",
+        "once();",
+        `const before = existsSync(${JSON.stringify(file)});`,
+        "await stamp(db, 'CREATE TABLE t (a INT);');",
+        "once();",
+        `console.log(JSON.stringify({before, after: existsSync(${JSON.stringify(file)})}));`,
+        "process.exit(0);",
+      ].join("\n");
+      const out = await new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, ["--input-type=module", "-e", script], {env: {...process.env, STG_DB: "file", STG_DB_PATH: file}});
+        let text = "";
+        child.stdout.on("data", (d) => { text += d; });
+        child.stderr.on("data", (d) => { text += d; });
+        child.on("exit", (code) => (code === 0 ? resolve(text) : reject(new Error(text))));
+      });
+      expect(JSON.parse(out.trim().split("\n").at(-1))).to.deep.equal({before: false, after: true});
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+});
+
+// the child's side: a stop during the boot goes at once, except in the
+// database step, where it is honoured when the step ends
+describe("tools/osd-boot-guard: a stop waits out the database step only", function () {
+  const setup = async () => {
+    const {EventEmitter} = await import("node:events");
+    const {bootGuard} = await import("../tools/osd-boot-guard.mjs");
+    const proc = new EventEmitter();
+    const exits = [];
+    const guard = bootGuard({proc, exit: (code) => exits.push(code)});
+    return {proc, exits, guard};
+  };
+
+  it("outside the step: SIGTERM, SIGINT, SIGHUP and quiesce each go at once", async () => {
+    for (const ask of ["SIGTERM", "SIGINT", "SIGHUP", "quiesce"]) {
+      const {proc, exits} = await setup();
+      if (ask === "quiesce") proc.emit("message", {type: "quiesce"});
+      else proc.emit(ask);
+      expect(exits, ask).to.deep.equal([0]);
+    }
+  });
+
+  it("inside the step: deferred to its end, also when the step throws", async () => {
+    const {proc, exits, guard} = await setup();
+    let finish;
+    const step = guard.databaseStep(() => new Promise((resolve) => { finish = resolve; }));
+    expect(guard.inDatabaseStep).to.equal(true);
+    proc.emit("SIGTERM");
+    proc.emit("message", {type: "quiesce"});
+    expect(exits, "not in the middle of the seed").to.deep.equal([]);
+    finish("done");
+    expect(await step).to.equal("done");
+    expect(guard.inDatabaseStep).to.equal(false);
+    expect(exits).to.deep.equal([0]);
+
+    const second = await setup();
+    const failing = second.guard.databaseStep(async () => {
+      second.proc.emit("SIGINT");
+      throw new Error("seed failed");
+    });
+    let error;
+    try { await failing; } catch (e) { error = e; }
+    expect(String(error?.message)).to.equal("seed failed");
+    expect(second.exits).to.deep.equal([0]);
+  });
+
+  it("a step nobody stopped does not exit; serving() hands the signals back", async () => {
+    const {proc, exits, guard} = await setup();
+    await guard.databaseStep(async () => undefined);
+    expect(exits).to.deep.equal([]);
+    guard.serving();
+    for (const signal of ["SIGTERM", "SIGINT", "SIGHUP", "message"]) {
+      expect(proc.listenerCount(signal), signal).to.equal(0);
+    }
   });
 });

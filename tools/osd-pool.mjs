@@ -54,6 +54,11 @@ export class RuntimePool {
     return this.primary.port;
   }
 
+  // the step of a runtime still booting, for "starting" answers
+  get booting() {
+    return this.runtimes.find((r) => r.booting !== undefined)?.booting;
+  }
+
   get running() {
     return this.primary.running;
   }

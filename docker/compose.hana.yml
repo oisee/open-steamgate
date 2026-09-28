@@ -31,7 +31,7 @@ services:
     sysctls:
       net.ipv4.ip_local_port_range: "40000 60999"
     healthcheck:
-      test: ["CMD-SHELL", "/usr/sap/HXE/HDB90/exe/hdbsql -n localhost:39017 -u SYSTEM -p \"$$HANA_PASSWORD\" 'SELECT 1 FROM DUMMY' >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "/usr/sap/HXE/HDB90/exe/hdbsql -n localhost:39041 -u SYSTEM -p \"$$HANA_PASSWORD\" 'SELECT 1 FROM DUMMY' >/dev/null 2>&1"]
       interval: 15s
       timeout: 10s
       start_period: 5m
@@ -50,7 +50,7 @@ services:
       STG_RFC_AUTH_MODE: "${STG_RFC_AUTH_MODE:-demo}"
       STG_DB: hana
       HANA_HOST: hxe
-      HANA_PORT: "39017"
+      HANA_PORT: "39041"
       HANA_USER: SYSTEM
       HANA_PASSWORD: "${HANA_PASSWORD:-OSD17_Demo!ChangeMe}"
       HANA_SCHEMA: "${HANA_SCHEMA:-OSD}"
