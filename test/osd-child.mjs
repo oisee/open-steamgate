@@ -11,7 +11,7 @@ import {join} from "node:path";
 import {services} from "../tools/osd-icf.mjs";
 import {createRequire} from "node:module";
 
-const {Osd, objectOf, outcomes} = createRequire(import.meta.url)("../editors/vscode/lib.js");
+const {Osd, objectOf, outcomes, unitRiskOf, unitDurationOf, runUnitQueue} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 
 const PORT = Number(process.env.STG_PORT ?? 3091) + 7;
 const BASE = `http://localhost:${PORT}`;
@@ -186,6 +186,58 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     expect(testClass.methods.map((m) => m.name)).to.include("A_PAIR");
     const results = outcomes(await client.run(object, "LTCL_FORM", "A_PAIR"));
     expect(results.map((r) => [r.method, r.passed])).to.deep.equal([["A_PAIR", true]]);
+  });
+
+  // The Test Explorer's queue by RISK LEVEL (tools/osd-unit-risk.mjs,
+  // editors/vscode/lib.js runUnitQueue), end to end: the façade says what
+  // each class is scheduled as, two HARMLESS objects run at once, the one
+  // that writes runs alone after them, and every outcome is what a serial
+  // run gives
+  it("runs HARMLESS test objects in parallel and the rest alone, with the results of a serial run", async () => {
+    const client = new Osd(BASE);
+    const names = ["ZCL_OSD_DEMO_RANDOM", "ZCL_OSD_ABAP_TOKENS", "ZCL_OSD_ICF_TEST"];
+    const described = {};
+    for (const name of names) {
+      const found = await client.discover({type: "CLAS", name});
+      described[name] = {found, schedules: found.classes.filter((c) => c.methods.length > 0)
+        .map((c) => ({schedule: c.schedule, duration: c.durationCategory}))};
+    }
+    expect(unitRiskOf(described.ZCL_OSD_DEMO_RANDOM.schedules)).to.equal("harmless");
+    expect(unitRiskOf(described.ZCL_OSD_ABAP_TOKENS.schedules)).to.equal("harmless");
+    // it declares HARMLESS and inserts: the check says so, with where
+    const icf = described.ZCL_OSD_ICF_TEST.found;
+    expect(unitRiskOf(described.ZCL_OSD_ICF_TEST.schedules)).to.equal("dangerous");
+    expect(icf.classes.some((c) => c.riskLevel === "harmless" && c.riskLevelDeclared && c.schedule === "dangerous")).to.equal(true);
+    expect(icf.writes[0]).to.include({object: "ZCL_OSD_ICF_TEST"});
+
+    const outcome = async (pooled) => {
+      let running = 0;
+      const seen = [];
+      const results = {};
+      const units = names.map((name) => ({
+        key: name,
+        risk: pooled ? unitRiskOf(described[name].schedules) : "dangerous",
+        duration: unitDurationOf(described[name].schedules),
+        run: async () => {
+          running += 1;
+          seen.push([name, running]);
+          try {
+            const answer = await client.run({type: "CLAS", name});
+            results[name] = answer.testClasses.map((c) => [c.name, c.testMethods.map((m) => [m.name, m.alerts.map((a) => a.title)])]);
+          } finally {
+            running -= 1;
+          }
+        },
+      }));
+      await runUnitQueue(units, {poolSize: pooled ? 2 : 1});
+      return {seen, results};
+    };
+    const pooled = await outcome(true);
+    const serial = await outcome(false);
+    expect(Math.max(...pooled.seen.filter(([name]) => name !== "ZCL_OSD_ICF_TEST").map(([, n]) => n)), "two HARMLESS at once").to.equal(2);
+    expect(pooled.seen.find(([name]) => name === "ZCL_OSD_ICF_TEST")[1], "the DANGEROUS one alone").to.equal(1);
+    expect(pooled.seen.at(-1)[0], "and after them").to.equal("ZCL_OSD_ICF_TEST");
+    expect(pooled.results).to.deep.equal(serial.results);
   });
 
   it("an ADT answer names the same generation the child runs", async () => {

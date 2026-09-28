@@ -1308,13 +1308,21 @@ export function adtRouter(options = {}) {
     }
     try {
       const runner = await store.unit();
-      const plan = runner.classes(type, name);
+      // the declarations and what they are checked against
+      // (tools/osd-unit-risk.mjs): a scheduler reads `schedule`, an editor
+      // shows `writes` on a HARMLESS class that reaches one
+      const plan = await runner.withRisk(runner.classes(type, name));
       res.type("application/json; charset=utf-8").send(JSON.stringify({
         object: {type: plan.object.type, name: plan.object.name},
+        writes: plan.writes,
+        writesTotal: plan.writesTotal,
         classes: plan.classes.map((testClass) => ({
           name: testClass.name,
           riskLevel: testClass.riskLevel,
+          riskLevelDeclared: testClass.riskLevelDeclared,
           durationCategory: testClass.durationCategory,
+          durationDeclared: testClass.durationDeclared,
+          schedule: testClass.schedule,
           include: testClass.include,
           line: testClass.line,
           column: testClass.column,
@@ -1346,7 +1354,8 @@ export function adtRouter(options = {}) {
     try {
       const {dbEnv, inspectPort, waitForDebugger} = await unitRunOptions(req);
       const runner = await store.unit();
-      const plan = runner.classes(type, name);
+      // with the risk: the child guards a class scheduled as HARMLESS
+      const plan = await runner.withRisk(runner.classes(type, name));
       const run = await runner.runDetached(type, name, {...selectedUnitPlan(plan, testClass, method), dbEnv, inspectPort,
         waitForDebugger, signal: cancellation.signal});
       res.type("application/json; charset=utf-8").send(JSON.stringify(run));

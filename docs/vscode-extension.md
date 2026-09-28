@@ -112,6 +112,68 @@ object under it, the way the Testing API does by default for any parent
 handed to a run profile -- there is no special "run this group" code beyond
 expanding it to the objects it holds.
 
+## Running tests: by RISK LEVEL
+
+*2026-09-28.* A run used to go one object at a time, and Cancel did not
+reach the object in flight: an ordinary run passed no abort signal, so the
+child it had started ran to its end. Now the signal goes with every request
+(the façade kills the child when the request aborts), and the objects run
+by what their test classes declare:
+
+- **HARMLESS** objects run in parallel, `min(4, cpus - 1)` at a time
+  (`lib.js` `unitPoolSize`), longest `DURATION` first. Each is its own child
+  process with its own throwaway database, so they cannot see each other's
+  rows.
+- **DANGEROUS** and **CRITICAL** objects run after them, one at a time,
+  also longest first. So does an object with a class that declares no
+  `RISK LEVEL` at all: ADT reports that as harmless, and a scheduler that
+  believed it would run unknown tests side by side.
+- An object's own selections keep the order they were asked in, and an
+  object's risk is its riskiest class that runs.
+- With a shared database for tests (`osd.database.tests` = HANA or
+  PostgreSQL), where every child uses the one schema, the same holds:
+  HARMLESS reads side by side, and nothing else runs meanwhile.
+- A debug run stays one at a time: one debugger, one child.
+
+**The declaration is checked, not trusted** (`tools/osd-unit-risk.mjs`).
+From the cross-reference (`WBCROSSGT`, `CROSS`), every object a test's
+object reaches is searched for statements that write:
+`INSERT`/`UPDATE`/`MODIFY`/`DELETE` on a table, `COMMIT WORK`,
+`CALL FUNCTION ... IN UPDATE TASK`, and a call this cannot follow (a dynamic
+method call, `CREATE OBJECT ... TYPE (name)`, a `CALL FUNCTION` whose name
+is not a literal). A class that declares HARMLESS and reaches one is
+scheduled as DANGEROUS, and its class definition (the line that says
+`RISK LEVEL`, when the declaration fits on one) gets a warning naming the
+first write and how many more there are. The reach is per object, not per
+method, so it errs towards flagging: measured on this tree, 14 of the 23
+objects with tests reach a write or a dynamic call. Several of them rightly
+so: the SEGW, gateway, ICF and AMDP tests insert rows, and all of them
+declare HARMLESS. The other 9 run in parallel.
+
+**And guarded at runtime** (`tools/osd-unit.mjs`, the first consumer of the
+database hooks in `tools/osd-dialog-step.mjs`, docs/ideas.md B17). A class
+scheduled as HARMLESS runs with every write failing, from `class_setup` to
+`class_teardown`: `RISK LEVEL HARMLESS but wrote to <table>`, an alert of
+kind `riskLevel`. A write the ABAP catches is still reported after the
+method. A class the static check already flagged is not guarded: it runs
+alone, and failing it for a write the warning already names would fail it
+twice.
+
+What a system does, and what this adds: a system's client setting
+(`SAUNIT_CLIENT_SETUP`) says which risk levels may run in that client and
+refuses the rest; it does not look at what a test does. Mirrored here:
+the levels, the durations, and running a class by its level. Added: the
+static check, the runtime guard, and "undeclared is DANGEROUS" for the
+scheduling (ADT still reports it as harmless).
+
+Measured on this tree (4 CPUs, 23 objects, a real server, 2026-09-28):
+one at a time 76.7 s, a pool of 2 60.6 s, a pool of 4 54.2 s. The outcomes
+of every object were identical in all three. The gain is bounded by the
+DANGEROUS half, which runs alone: 14 objects, about 50 s of the 77 (the 9 HARMLESS ones take 27 s one at a time and 8.6 s in a pool of 4).
+`test/osd-child.mjs` runs a mixed set end to end (two HARMLESS objects at
+once, the one that writes alone after them, the results of a serial run),
+and `test/unit-risk.mjs` holds the static check and the guard.
+
 *2026-09-26, same day, as seen with the packaged extension.* Six bugs, all
 fixed together:
 

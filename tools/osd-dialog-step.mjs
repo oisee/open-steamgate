@@ -198,3 +198,89 @@ function installWait() {
   wait.osdStep = true;
   statements.wait = wait;
 }
+
+// **Hooks at the database seam** (docs/ideas.md B17): the one place a
+// write or a read by the ABAP can be watched, failed or redirected with
+// the ABAP none the wiser, the way a system's kernel sits below it. One
+// owner, this module, and every hook visible by name (activeHooks()), so an
+// interception is kernel mechanics and not hidden magic.
+//
+// First consumer: the ABAP Unit runtime guard (tools/osd-unit.mjs), which
+// fails a test that declares RISK LEVEL HARMLESS and writes. A hook is
+// {write(operation, table)}: called before a write reaches the client, and
+// a throw from it is the write's failure. Reads are not hooked yet: the
+// consumers that need them (a readiness gate, the OSQL test environment)
+// add that half.
+const hooks = new Map();
+let hookedClient;
+let unhooked;
+
+const WRITE_SQL = /^\s*(INSERT|UPDATE|DELETE|MERGE|UPSERT|REPLACE|TRUNCATE|DROP|CREATE|ALTER)\b(?:\s+(?:INTO|FROM|TABLE|OR\s+REPLACE))?\s+["'`]?([\w/$]+)/i;
+
+/** the table a native SQL statement writes, or undefined for a read */
+export function nativeWriteOf(sql) {
+  const match = WRITE_SQL.exec(String(sql));
+  return match === null ? undefined : {operation: match[1].toUpperCase(), table: match[2].toUpperCase()};
+}
+
+function tableOf(options) {
+  const table = options?.table;
+  return String(typeof table === "string" ? table : table?.name ?? table ?? "?").replace(/^["'`]|["'`]$/g, "").toUpperCase();
+}
+
+function writeSeen(operation, table) {
+  for (const hook of hooks.values()) hook.write?.(operation, table);
+}
+
+function installHooks() {
+  const client = connection();
+  if (client === undefined || hookedClient === client) return;
+  removeHooks();
+  const originals = {};
+  for (const operation of ["insert", "update", "delete"]) {
+    if (typeof client[operation] !== "function") continue;
+    originals[operation] = client[operation];
+    client[operation] = function (options) {
+      writeSeen(operation.toUpperCase(), tableOf(options));
+      return originals[operation].call(this, options);
+    };
+  }
+  if (typeof client.execute === "function") {
+    originals.execute = client.execute;
+    client.execute = function (sql) {
+      for (const one of Array.isArray(sql) ? sql : [sql]) {
+        const write = nativeWriteOf(one);
+        if (write !== undefined) writeSeen(write.operation, write.table);
+      }
+      return originals.execute.call(this, sql);
+    };
+  }
+  hookedClient = client;
+  unhooked = () => {
+    for (const [operation, original] of Object.entries(originals)) client[operation] = original;
+  };
+}
+
+function removeHooks() {
+  unhooked?.();
+  unhooked = undefined;
+  hookedClient = undefined;
+}
+
+/** Installs a hook under `name` (replacing one of that name) and returns
+ *  its removal. The client is patched while any hook is active and
+ *  restored when the last one goes. */
+export function hookDatabase(name, hook) {
+  hooks.set(name, hook);
+  installHooks();
+  return () => {
+    if (hooks.get(name) !== hook) return;
+    hooks.delete(name);
+    if (hooks.size === 0) removeHooks();
+  };
+}
+
+/** the names of the hooks active now */
+export function activeHooks() {
+  return [...hooks.keys()];
+}
