@@ -277,9 +277,16 @@ result names it; `/core/http/build` keeps naming the façade and gains a
   while starting", instead of waiting the boot out -- except inside the
   database step, which it lets finish first: HANA commits a schema's
   CREATEs on their own and its seed INSERTs not, so a child ended there
-  would leave tables a later boot takes for seeded. For the same reason a
+  would leave tables a later boot takes for seeded (SIGTERM, SIGINT,
+  SIGHUP and "quiesce" alike, `tools/osd-boot-guard.mjs`; the child tells
+  the supervisor it is in that step, and neither `stop()` nor the
+  supervisor's own shutdown SIGKILLs it at the usual grace). This narrows
+  the window and does not close it: a crash, an OOM, a SIGKILL -- the
+  silence or boot limit, or the VS Code launcher's 60 s -- in the middle of
+  the seed still leaves such a schema, because HANA has no mark that says
+  the seed completed. That mark is the follow-up. For the same reason a
   sql.js file is not saved on a stop before it is stamped (or was read
-  whole). A pool is "starting" while any of its runtimes is; a status read
+  whole); the file database does have that mark. A pool is "starting" while any of its runtimes is; a status read
   during a boot skips its refresh; a websocket whose page gave up during
   the boot is not upgraded.
 

@@ -56,11 +56,11 @@ export async function stamp(db, schema) {
   if (databaseFile() === undefined) {
     return undefined;
   }
-  seeded = true;
   const fingerprint = fingerprintOf(schema);
   await db.execute(`CREATE TABLE IF NOT EXISTS ${STAMP} ('fingerprint' NCHAR(16), 'at' NCHAR(32));`);
   await db.execute(`DELETE FROM ${STAMP};`);
   await db.execute(`INSERT INTO ${STAMP} ('fingerprint', 'at') VALUES ('${fingerprint}', '${new Date().toISOString()}');`);
+  seeded = true;
   return fingerprint;
 }
 

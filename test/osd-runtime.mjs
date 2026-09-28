@@ -480,6 +480,9 @@ describe("tools/osd-runtime: a slow boot is waited for, a silent one is not", fu
       "setInterval(() => {}, 1000);",
       // asked to go (a stop's quiesce): go
       "process.on('message', (m) => { if (m?.type === 'quiesce') process.exit(0); });",
+      // DB=<ms>: in the database step, which a SIGTERM waits out (tools/osd-boot-guard.mjs)
+      "if (process.env.DB) { setInterval(() => process.send({type: 'booting', phase: 'opening the database', database: true}), 200); "
+        + "process.on('SIGTERM', () => setTimeout(() => process.exit(0), Number(process.env.DB))); }",
     ].join("\n"));
     return [process.execPath, file];
   };
@@ -518,6 +521,19 @@ describe("tools/osd-runtime: a slow boot is waited for, a silent one is not", fu
     expect(Date.now() - before, "not the boot limit").to.be.lessThan(5000);
     expect(await starting).to.be.an("error");
     expect(runtime.booting).to.equal(undefined);
+  });
+
+  it("stop() in the database step lets the child finish it: no SIGKILL at grace + 8 s", async function () {
+    this.timeout(40000);
+    const runtime = new ServingRuntime({command: fake(), timeout: 5000, bootTimeout: 60000, grace: 0, env: {DB: "10000"}});
+    const starting = runtime.start().catch((e) => e);
+    await new Promise((r) => setTimeout(r, 800));
+    const [child] = liveChildren();
+    expect(runtime.booting?.database, "the supervisor knows").to.equal(true);
+    const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({code, signal})));
+    await runtime.stop();
+    expect(await exited, "ended by itself after the step, not killed").to.deep.equal({code: 0, signal: null});
+    expect(await starting).to.be.an("error");
   });
 
   it("a child that says nothing is given up on after the silence limit", async () => {
@@ -620,6 +636,62 @@ describe("tools/osd-persist: a half-built database is not saved on a stop", func
       expect(JSON.parse(out.trim().split("\n").at(-1))).to.deep.equal({before: false, after: true});
     } finally {
       rmSync(dir, {recursive: true, force: true});
+    }
+  });
+});
+
+// the child's side: a stop during the boot goes at once, except in the
+// database step, where it is honoured when the step ends
+describe("tools/osd-boot-guard: a stop waits out the database step only", function () {
+  const setup = async () => {
+    const {EventEmitter} = await import("node:events");
+    const {bootGuard} = await import("../tools/osd-boot-guard.mjs");
+    const proc = new EventEmitter();
+    const exits = [];
+    const guard = bootGuard({proc, exit: (code) => exits.push(code)});
+    return {proc, exits, guard};
+  };
+
+  it("outside the step: SIGTERM, SIGINT, SIGHUP and quiesce each go at once", async () => {
+    for (const ask of ["SIGTERM", "SIGINT", "SIGHUP", "quiesce"]) {
+      const {proc, exits} = await setup();
+      if (ask === "quiesce") proc.emit("message", {type: "quiesce"});
+      else proc.emit(ask);
+      expect(exits, ask).to.deep.equal([0]);
+    }
+  });
+
+  it("inside the step: deferred to its end, also when the step throws", async () => {
+    const {proc, exits, guard} = await setup();
+    let finish;
+    const step = guard.databaseStep(() => new Promise((resolve) => { finish = resolve; }));
+    expect(guard.inDatabaseStep).to.equal(true);
+    proc.emit("SIGTERM");
+    proc.emit("message", {type: "quiesce"});
+    expect(exits, "not in the middle of the seed").to.deep.equal([]);
+    finish("done");
+    expect(await step).to.equal("done");
+    expect(guard.inDatabaseStep).to.equal(false);
+    expect(exits).to.deep.equal([0]);
+
+    const second = await setup();
+    const failing = second.guard.databaseStep(async () => {
+      second.proc.emit("SIGINT");
+      throw new Error("seed failed");
+    });
+    let error;
+    try { await failing; } catch (e) { error = e; }
+    expect(String(error?.message)).to.equal("seed failed");
+    expect(second.exits).to.deep.equal([0]);
+  });
+
+  it("a step nobody stopped does not exit; serving() hands the signals back", async () => {
+    const {proc, exits, guard} = await setup();
+    await guard.databaseStep(async () => undefined);
+    expect(exits).to.deep.equal([]);
+    guard.serving();
+    for (const signal of ["SIGTERM", "SIGINT", "SIGHUP", "message"]) {
+      expect(proc.listenerCount(signal), signal).to.equal(0);
     }
   });
 });

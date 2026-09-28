@@ -13,6 +13,7 @@
 // it is asked to. Started by hand it works too, which is how it is
 // debugged: `node tools/osd-serve.mjs 3099`.
 import {dialogStep, exclusive} from "./osd-dialog-step.mjs";
+import {bootGuard} from "./osd-boot-guard.mjs";
 import {HotLoader, warmVerdict} from "./osd-hot.mjs";
 import {ensureDemoData} from "./osd-demo-data.mjs";
 import {databaseDescriptor} from "./osd-database-identity.mjs";
@@ -48,8 +49,13 @@ let bootLast = "";
 const tell = (message) => {
   if (process.connected) process.send(message);
 };
+// a stop during the boot goes at once, but waits out the database step
+// (tools/osd-boot-guard.mjs); the supervisor is told which, so it does not
+// SIGKILL a seed it has been asked to let finish
+const guard = bootGuard();
+const bootingMessage = () => ({type: "booting", phase: bootPhase, last: bootLast, database: guard.inDatabaseStep, ms: Date.now() - started});
 const booting = process.send === undefined ? undefined : setInterval(() => {
-  tell({type: "booting", phase: bootPhase, last: bootLast, ms: Date.now() - started});
+  tell(bootingMessage());
 }, 5000);
 booting?.unref();
 process.once("disconnect", () => clearInterval(booting));
@@ -61,30 +67,8 @@ const bootStep = (name) => {
   bootPhase = name;
   bootPhaseSince = Date.now();
   // the step at once, not at the next heartbeat
-  tell({type: "booting", phase: bootPhase, last: bootLast, ms: Date.now() - started});
+  tell(bootingMessage());
 };
-// **Asked to go while still booting: go -- but not in the middle of the
-// database step.** A HANA schema's CREATEs commit on their own and its seed
-// INSERTs do not, so a child ended there leaves tables that a later boot
-// takes for seeded and serves empty. There the request waits for the step
-// to finish (and on SIGKILL, the supervisor's last resort, nothing can).
-// Elsewhere in the boot there is nothing to drain. Once serving, the serving
-// quiesce below and the default SIGTERM take over again.
-let isServing = false;
-let inDatabaseStep = false;
-let exitAfterDatabaseStep = false;
-const goWhileBooting = () => {
-  if (isServing) return;
-  if (inDatabaseStep) {
-    exitAfterDatabaseStep = true;
-    return;
-  }
-  process.exit(0);
-};
-process.on("message", (message) => {
-  if (message?.type === "quiesce") goWhileBooting();
-});
-process.on("SIGTERM", goWhileBooting);
 
 // which tree this runtime serves, so one copy of this script can serve any
 // of them: a second worktree, a branch under test, an experiment on its own
@@ -105,10 +89,10 @@ const {zcl_apc_host} = await from("zcl_apc_host.clas.mjs");
 const {zcl_osd_status} = await from("zcl_osd_status.clas.mjs");
 
 bootStep("opening the database: DDL and seed rows (test/setup.mjs)");
-inDatabaseStep = true;
-await initializeABAP();
-inDatabaseStep = false;
-if (exitAfterDatabaseStep) process.exit(0);
+await guard.databaseStep(async () => {
+  tell(bootingMessage());
+  await initializeABAP();
+});
 // the ICF nodes into the tables a system keeps them in, by the rule in
 // docs/registry-drift.md: applied when an object arrives, never re-applied
 // over an edit. One module for all three hosts, because that is what the
@@ -349,9 +333,8 @@ const server = app.listen(wanted, "127.0.0.1", () => {
   }
   clearInterval(booting);
   bootStep("serving");
-  isServing = true;
-  // serving: a SIGTERM is the default again (or the file save's own handler)
-  process.off("SIGTERM", goWhileBooting);
+  // serving: the signals' defaults (or the file save's own handler) again
+  guard.serving();
   if (process.send !== undefined) {
     process.send({type: "ready", port, pid: process.pid, ms: Date.now() - started});
   } else {

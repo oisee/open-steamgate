@@ -69,7 +69,10 @@ function reapOnExit() {
       await Promise.all([...CHILDREN].map(child => new Promise(resolve => {
         if (child.exitCode !== null || child.signalCode !== null) return resolve();
         // editors/vscode/launcher.js STOP_GRACE_MS waits longer than this
-        const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(); }, 55000);
+        // a child still in the database step finishes it first (tools/osd-boot-guard.mjs):
+        // the boot limit, not the serving quiesce's 55 s, before it is killed
+        const limit = child.osdDatabaseStep === true ? (Number(process.env.OSD_BOOT_TIMEOUT_MS) || 15 * 60 * 1000) : 55000;
+        const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(); }, limit);
         child.once("exit", () => { clearTimeout(timer); resolve(); });
         try { child.send({type: "quiesce", grace: 45000}); }
         catch { child.kill("SIGTERM"); }
@@ -333,8 +336,14 @@ export class ServingRuntime {
       if (booting !== undefined && booting.exitCode === null && booting.signalCode === null) {
         this.stoppedBooting = booting;
         booting.kill("SIGTERM");
-        const kill = setTimeout(() => booting.kill("SIGKILL"), this.grace + 8000);
-        kill.unref?.();
+        // outside the database step it goes at once and this is only the
+        // insistence; inside it, the child finishes the step first, however
+        // long a remote seed takes -- a hung one is still ended by the
+        // silence limit and the boot limit, which stay armed until it exits
+        if (booting.osdDatabaseStep !== true) {
+          const kill = setTimeout(() => booting.kill("SIGKILL"), this.grace + 8000);
+          kill.unref?.();
+        }
       }
       // a child still coming up would outlive a stop that only looked at the
       // ready one -- including the one a recycle has just started
@@ -501,7 +510,10 @@ export class ServingRuntime {
           // not the step (a seed's report would otherwise rename it)
           if (message.type === "booting" && typeof message.phase === "string") {
             phase = message.phase;
-            if (this.bootingChild === child) this.booting = {...this.booting, phase, last: message.last};
+            // in the database step a stop is waited out by the child
+            // (tools/osd-boot-guard.mjs), and must not be SIGKILLed meanwhile
+            child.osdDatabaseStep = message.database === true;
+            if (this.bootingChild === child) this.booting = {...this.booting, phase, last: message.last, database: child.osdDatabaseStep};
           }
           heard();
         }
