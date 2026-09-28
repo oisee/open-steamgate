@@ -14,6 +14,7 @@
 // class sources its own store already reads.
 
 const ENTITY_NAME_CONSTANT = /CONSTANTS\s+(\S+)\s+TYPE\s+\S*ty_e_med_entity_name\S*\s+VALUE\s+'([^']*)'/gi;
+const CREATE_ENTITY_SET = /->create_entity_set\s*\(\s*'([^']+)'/gi;
 const ENTITYSET_METHOD = /^[ \t]*METHOD\s+(\w+)_get_entityset\s*\.[ \t]*$/gim;
 const ENTITY_METHOD = /^[ \t]*METHOD\s+(\w+)_get_entity\s*\.[ \t]*$/gim;
 
@@ -48,7 +49,9 @@ export function entitySetMethodsOf(dpcSource) {
 }
 
 /** Each entity-set method of a DPC(_EXT) source, with the set's real name
- *  and case from the MPC's own constants: `[{method, kind, set}]`. SEGW
+ *  and case from the MPC's own constants or its create_entity_set calls:
+ *  `[{method, kind, set}]`. Classic SEGW MPCs declare the constants; STG
+ *  generated MPCs create their sets directly without those constants. SEGW
  *  lower-cases the set name into the method's prefix, so the match is
  *  case-insensitive against every constant's value -- `travelset_get_entityset`
  *  finds `TravelSet` however the constant naming it is spelled. A method
@@ -63,6 +66,9 @@ export function entitySetsOf(dpcSource, mpcSource) {
   const constants = entityNameConstantsOf(mpcSource);
   const byLower = new Map();
   for (const value of constants.values()) byLower.set(value.toLowerCase(), value);
+  for (const m of String(mpcSource ?? "").matchAll(CREATE_ENTITY_SET)) {
+    byLower.set(m[1].toLowerCase(), m[1]);
+  }
   const seen = new Set();
   const out = [];
   for (const {method, prefix, kind} of entitySetMethodsOf(dpcSource)) {
