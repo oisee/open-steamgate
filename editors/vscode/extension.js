@@ -1318,16 +1318,16 @@ class OsdTreeProvider {
     }
     if (map === undefined || !Array.isArray(map.sets) || map.sets.length === 0) return items;
     let source;
+    const sourceFile = await classSourcePath(row, "dpc", serviceSourceRoot());
     try {
-      const files = await vscode.workspace.findFiles(readerFilePattern({type: "CLAS", name: row.handler}), EXCLUDE, 1);
-      if (files.length > 0) source = fs.readFileSync(files[0].fsPath, "utf8");
+      if (sourceFile) source = fs.readFileSync(sourceFile, "utf8");
     } catch {
       source = undefined;
     }
     const lenses = source === undefined ? [] : entitySetLenses(source, map);
     for (const set of map.sets) {
       const lens = lenses.find((l) => l.set === set.set && l.kind === set.kind);
-      items.push(new EntitySetItem(row.handler, set, lens?.line));
+      items.push(new EntitySetItem(row.handler, set, lens?.line, sourceFile));
     }
     return items;
   }
@@ -1458,16 +1458,17 @@ class ServiceClassItem extends vscode.TreeItem {
 
 /** One entity set under an OData row's DPC, from `map.sets` (Osd#entitySets)
  *  -- `line` is the `<set>_get_entityset` / `<set>_get_entity` method's own
- *  line in the DPC's source when a workspace copy of it was found (lib.js
- *  entitySetLenses, the same lookup Q2b's CodeLens already does),
+ *  line in the DPC's source when it was found in the running base system
+ *  or a workspace layer (lib.js entitySetLenses, as for Q2b's CodeLens),
  *  `undefined` when it was not (the class opens at its top instead, rather
  *  than the node doing nothing at all). */
 class EntitySetItem extends vscode.TreeItem {
-  constructor(dpcName, set, line) {
+  constructor(dpcName, set, line, sourceFile) {
     super(set.set, vscode.TreeItemCollapsibleState.None);
     this.dpcName = dpcName;
     this.set = set;
     this.line = line;
+    this.sourceFile = sourceFile;
     this.contextValue = "osd-service-entityset";
     this.iconPath = new vscode.ThemeIcon("symbol-field");
     this.description = set.kind;
@@ -1919,7 +1920,7 @@ async function clickTreeNode(item, provider, output) {
     if (kind === "osd-host-dumps") return showDumps(output);
     if (kind.startsWith("osd-service-") && item.row?.path && item.row.kind !== "APC") return openServiceRow(item);
     if (kind === "osd-service-class") return openServiceClass(item.node, output);
-    if (kind === "osd-service-entityset") return openEntitySetMethod(item.dpcName, item.set, item.line, output);
+    if (kind === "osd-service-entityset") return openEntitySetMethod(item.dpcName, item.set, item.line, output, item.sourceFile);
     if (kind.startsWith("osd-state-")) return provider.controller.openSystemOverview();
     if (item.row) return showServiceDetails(item, provider, output);
     return showTreeNodeDetails(item, output);
@@ -1935,7 +1936,7 @@ async function clickTreeNode(item, provider, output) {
     if (kind === "osd-host-dumps") return showDumps(output);
     if (kind.startsWith("osd-service-") && item.row) return openServiceRow(item);
     if (kind === "osd-service-class") return openServiceClass(item.node, output);
-    if (kind === "osd-service-entityset") return openEntitySetMethod(item.dpcName, item.set, item.line, output);
+    if (kind === "osd-service-entityset") return openEntitySetMethod(item.dpcName, item.set, item.line, output, item.sourceFile);
   }
   if (item.row) return showServiceDetails(item, provider, output);
   showTreeNodeDetails(item, output);
@@ -2103,18 +2104,19 @@ async function openServiceClass(node, output) {
   }
 }
 
-/** An entity set node's own click: the same DPC file openServiceClass()
- *  above opens, at the method's own line when one was found while building
- *  the node, else at the top. */
-async function openEntitySetMethod(dpcName, set, line, output) {
-  const pattern = readerFilePattern({type: "CLAS", name: dpcName});
+/** An entity set node's own click: use the DPC source found while building
+ *  the node, including the running base system outside the open workspace.
+ *  The method line is optional; absent it, the class opens at its top. */
+async function openEntitySetMethod(dpcName, set, line, output, sourceFile) {
   try {
-    const files = await vscode.workspace.findFiles(pattern, EXCLUDE, 1);
-    if (files.length === 0) {
-      vscode.window.showWarningMessage(`osd: ${dpcName}'s file was not found in this workspace`);
+    const target = sourceFile && fs.existsSync(sourceFile) ? sourceFile
+      : await classSourcePath({handler: dpcName}, "dpc", serviceSourceRoot());
+    if (!target) {
+      vscode.window.showWarningMessage(`osd: ${dpcName}'s source file was not found in the running system or workspace`);
       return;
     }
-    const editor = await vscode.window.showTextDocument(files[0]);
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(target));
+    const editor = await vscode.window.showTextDocument(document);
     if (typeof line === "number") {
       const at = new vscode.Position(line - 1, 0);
       editor.selection = new vscode.Selection(at, at);

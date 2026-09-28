@@ -2243,6 +2243,36 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     expect(api.sourceOpens[1].fsPath).to.equal("stub.clas.abap");
     expect(api.sourceEditors.map((editor) => editor.selection.start.line)).to.deep.equal([11, 19]);
   });
+  it("opens an entity set in the running base system when only a pack is the VS Code workspace", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "osd-entityset-home-"));
+    const relative = "src/demo/zcl_zstg_demo_dpc_ext.clas.abap";
+    const target = path.join(home, relative);
+    mkdirSync(path.dirname(target), {recursive: true});
+    writeFileSync(target, "CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.\n  METHOD travelset_get_entityset.\n  ENDMETHOD.\nENDCLASS.\n");
+    const api = vscodeStub({home, url: "http://localhost:5999"});
+    api.workspace.workspaceFolders = [{uri: {fsPath: "/workspace/osg-demo"}}];
+    api.workspace.findFiles = async () => [];
+    const oldFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ok: true, status: 200, json: async () => ({sets: [
+      {set: "TravelSet", kind: "get_entityset", method: "TRAVELSET_GET_ENTITYSET"},
+    ]})});
+    const {OsdTreeProvider, clickTreeNode} = loadExtension(api);
+    const provider = new OsdTreeProvider({context: controllerContext(), launcher: {state: "running", osdHome: home}, onDidChange() {}},
+      async () => ({sources: {}, testClasses: []}));
+    try {
+      const row = {kind: "ODATA", handler: "ZCL_ZSTG_DEMO_DPC_EXT", handlerSource: relative};
+      const items = await provider.serviceClassItems(row);
+      const travel = items.find((item) => item.contextValue === "osd-service-entityset");
+      expect(travel.line).to.equal(2);
+      await clickTreeNode(travel, provider);
+      expect(api.sourceOpens.at(-1).fsPath).to.equal(target);
+      expect(api.sourceEditors.at(-1).selection.start.line).to.equal(1);
+    } finally {
+      provider.dispose();
+      globalThis.fetch = oldFetch;
+      rmSync(home, {recursive: true, force: true});
+    }
+  });
   it("opens a service leaf on one click and keeps expandable service navigation on double click", async () => {
     const api = vscodeStub({home: ROOT});
     const {OsdTreeProvider, clickTreeNode} = loadExtension(api);
