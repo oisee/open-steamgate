@@ -121,7 +121,8 @@ fresh converted report and calls `ZCL_GG_HOST=>RUN` with `iv_batch = abap_true`.
 The result has separate list `lines`, `messages`, `terminal`, `status`, and
 `detail` and `navigation` fields. Status is `COMPLETED`, `SELECTION` if the
 selection screen remains active, `INCOMPLETE` if the host returned a terminal
-or navigation request that this one-shot call cannot resume, `UNSUPPORTED` for
+or navigation request that this one-shot call cannot resume (`LEAVE PROGRAM`
+is a normal completion), `UNSUPPORTED` for
 a known report that could not be converted or for a host operation it cannot
 perform, `INVALID_INPUT` for an undeclared or repeated selection field, and
 `UNKNOWN` for a name outside the registry. The caller receives no rendered
