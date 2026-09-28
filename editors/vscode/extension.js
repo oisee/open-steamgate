@@ -3054,7 +3054,7 @@ function entitySetLensProvider(output) {
           command: "osd.callEntitySet",
           arguments: [args],
         }), new vscode.CodeLens(range, {
-          title: `$(debug) Call ${lens.set} with debugger`,
+          title: `$(debug) Attach debugger and call ${lens.set}`,
           command: "osd.callEntitySetWithDebugger",
           arguments: [args],
         })];
