@@ -114,9 +114,9 @@ function plain(value, dataType) {
 
 // HANA Express in docker (saplabs/hanaexpress): 3<nn>13 is the nameserver
 // (no SQL), 3<nn>17 is SYSTEMDB's SQL port, and the first tenant, HXE --
-// where the application's schemas belong -- answers on 3<nn>41. Measured 2026-09-27 on the lab HXE: 39017
-// answers M_DATABASE = SYSTEMDB, 39041 answers HXE. On a VM install the
-// tenant is 3<nn>15; set HANA_PORT there.
+// where the application's schemas belong -- answers on 3<nn>41. Measured
+// 2026-09-27 on the lab HXE: 39017 answers M_DATABASE = SYSTEMDB, 39041
+// answers HXE. On a VM install the tenant is 3<nn>15; set HANA_PORT there.
 export const HANA_TENANT_PORT = 39041;
 
 export function hanaConnection(input = {}) {

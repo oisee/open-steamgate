@@ -97,6 +97,9 @@ bash ~/hxe/run.sh
 docker logs -f hxe                            # "Startup finished!" — 169 s here
 ```
 
+`run.sh` must publish the tenant's SQL port, 39041, beside 39013 and 39017:
+that is where OSD and the tools connect by default (`HANA_TENANT_PORT`).
+
 The password file is read and the container keeps it; ours is in `.local/`,
 which is not tracked, and the client reads it from there when no
 `HANA_PASSWORD` is set.

@@ -13,6 +13,7 @@ import {readFileSync, existsSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import {basename,join} from "node:path";
 import {extract, procedure, parameterType} from "./amdp-extract.mjs";
+import {HANA_TENANT_PORT} from "./hana-client.mjs";
 
 const SCHEMA = process.env.HXE_SCHEMA ?? "OSD";
 
@@ -46,7 +47,8 @@ export function connection() {
     : process.env[`HXE_${key}`] ?? process.env[`HANA_${key}`];
   return {
     host: preferred("HOST") ?? "localhost",
-    port: Number(preferred("PORT") ?? 39041), // the HXE tenant, tools/hana-client.mjs
+    // the HANA Express tenant, not SYSTEMDB (tools/hana-client.mjs)
+    port: Number(preferred("PORT") ?? HANA_TENANT_PORT),
     user: preferred("USER") ?? "SYSTEM",
     password: preferred("PASSWORD")
       ?? (found === undefined ? undefined : readFileSync(found, "utf8").trim()),
