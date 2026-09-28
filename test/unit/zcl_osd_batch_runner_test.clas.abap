@@ -1,0 +1,5 @@
+CLASS zcl_osd_batch_runner_test DEFINITION PUBLIC FINAL CREATE PUBLIC.
+ENDCLASS.
+
+CLASS zcl_osd_batch_runner_test IMPLEMENTATION.
+ENDCLASS.
