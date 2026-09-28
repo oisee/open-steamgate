@@ -196,7 +196,7 @@
       {"command": "osd.generateTaxiData", "title": "osd: Generate taxi data..."},
       {"command": "osd.resetTaxiData", "title": "osd: Reset taxi data to minimal"},
       {"command": "osd.classrunWithDebugger", "title": "osd: Run as ABAP Application with debugger"},
-      {"command": "osd.callEntitySetWithDebugger", "title": "osd: Call EntitySet with debugger"},
+      {"command": "osd.callEntitySetWithDebugger", "title": "osd: Attach debugger and call EntitySet"},
       {"command": "osd.toggleBreakpoints", "title": "osd: Toggle ABAP breakpoints"},
       {"command": "osd.newSqlNotebook", "title": "osd: New SQL notebook"},
       {"command": "osd.gettingStarted", "title": "osd: Getting started"},

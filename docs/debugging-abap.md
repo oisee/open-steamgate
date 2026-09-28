@@ -43,6 +43,12 @@ one in the running serving child, with no restart:
   variants (they run in the serving child);
 - a system started while `.abap` breakpoints are already set.
 
+The entity-set **Attach debugger and call** action opens the inspector and
+attaches before making the same OData request as **Call**. It does not
+automatically pause at method entry. An enabled breakpoint can stop it;
+ordinary **Call** can stop there too because the extension attaches the
+debugger when an `.abap` breakpoint is set.
+
 The extension asks the launcher, which picks a free loopback port and posts
 `{open: true, port}` to the system's `/osd/inspector` door (`test/start.mjs`,
 answered to callers on this machine only). The supervisor sends the child
