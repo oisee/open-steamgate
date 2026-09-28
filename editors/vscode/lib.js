@@ -1825,7 +1825,13 @@ function classifyTestPath(root, absPath, layers, workspaceLayers = []) {
   let result;
   for (const wl of workspaceLayers ?? []) {
     const wlRel = relOf(root, wl.folder ?? wl.srcDir);
-    if (startsWithSegment(rel, wlRel)) {
+    // The opened folder can itself be the workspace layer. Its relative
+    // prefix is empty, which startsWithSegment deliberately rejects for
+    // ordinary configured roots; here every file below that folder belongs.
+    const inLayer = wlRel === ""
+      ? rel !== ".." && !rel.startsWith("../") && !path.isAbsolute(rel) && !path.win32.isAbsolute(rel)
+      : startsWithSegment(rel, wlRel);
+    if (inLayer) {
       result = {group: "workspace", subgroup: workspaceLayerName(wl), relInGroup: rel.slice(wlRel.length).replace(/^\//, "")};
       break;
     }

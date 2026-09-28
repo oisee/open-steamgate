@@ -1735,6 +1735,20 @@ describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace la
       {group: "workspace", subgroup: "open-abap-core", relInGroup: "src/http/cl_http_server.clas.testclasses.abap"});
   });
 
+  it("shows both osg-demo tests in Workspace layers when the opened folder is the layer root", () => {
+    const demoRoot = path.join(ROOT, "osg-demo");
+    const workspaceLayers = [{folder: demoRoot, srcDir: path.join(demoRoot, "src")}];
+    const demoLayers = {inputFolders: [], libs: [], excludeFilter: []};
+    for (const name of ["zosd_demo_hello", "zcl_osd_fleet_report"]) {
+      const relInGroup = `src/${name}.clas.testclasses.abap`;
+      expect(classifyTestPath(demoRoot, path.join(demoRoot, relInGroup), demoLayers, workspaceLayers)).to.deep.equal(
+        {group: "workspace", subgroup: "osg-demo", relInGroup});
+    }
+    // An empty layer-relative prefix must not admit a file beside the layer.
+    expect(classifyTestPath(demoRoot, path.join(ROOT, "other-demo/src/outsider.clas.testclasses.abap"), demoLayers,
+      workspaceLayers)).to.equal(undefined);
+  });
+
   it("is undefined for a path outside every known root, rather than falling into Project (deploy/ is a staging folder, not a layer)", () => {
     const docs = path.join(ROOT, "docs/vscode-extension.md");
     expect(classifyTestPath(ROOT, docs, layers)).to.equal(undefined);
