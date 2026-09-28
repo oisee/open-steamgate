@@ -23,6 +23,7 @@ import {tmpdir} from "node:os";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {hostModules} from "./osd-host.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
+import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 
 // the transpiler package in use by this tree, and the core it was built
 // against. A tree with the library installed resolves it directly; a tree
@@ -104,19 +105,20 @@ function matching(dir, patterns) {
 
 const regexps = (list) => (list ?? []).map((p) => new RegExp(p, "i"));
 
-export async function readAll(files, relativeTo) {
+export async function readAll(files, relativeTo, transform = (source) => source) {
   return files.map((filename) => ({
     filename: basename(filename),
     relative: relative(relativeTo, dirname(filename)),
-    contents: readFileSync(filename, isBinaryFilename(filename) ? "latin1" : "utf8"),
+    contents: transform(readFileSync(filename, isBinaryFilename(filename) ? "latin1" : "utf8"), basename(filename)),
   }));
 }
 
 // the input folders, filtered the way the CLI filters them: the regular
 // expressions of input_filter and exclude_filter over the absolute path
-export async function loadFiles(root, config) {
+export async function loadFiles(root, config, core) {
   const {wanted, skipped} = listFiles(root, config);
-  return {files: await readAll(wanted, resolve(root, config.output_folder)), skipped};
+  return {files: await readAll(wanted, resolve(root, config.output_folder),
+    (source, filename) => lowerNarrowSubmit(source, filename, core)), skipped};
 }
 
 // the same list, unread: a caller that keeps the files it read (a warm
@@ -226,7 +228,7 @@ export async function transpile(options = {}) {
   // a binary registered its bundled transpiler and core; a checkout resolves them
   const {Transpiler, Chunk, core, plugin, version} = options.modules ?? hostModules() ?? modulesOf(root);
   if (config.write_source_map === true) mapStatementStarts(Chunk);
-  const {files, skipped} = await loadFiles(root, config);
+  const {files, skipped} = await loadFiles(root, config, core);
   log(`${files.length} files added from source, ${skipped} skipped`);
   const libs = await loadLibs(root, config, log);
   const settings = {...config.options};

@@ -6,6 +6,9 @@ CLASS ltcl_batch_report DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL H
     METHODS unknown_selection_is_rejected FOR TESTING.
     METHODS unfinished_flow_is_reported FOR TESTING.
     METHODS leave_program_completes FOR TESTING.
+    METHODS static_submit_returns FOR TESTING.
+    METHODS static_submit_fails_loudly FOR TESTING.
+    METHODS context_is_per_run FOR TESTING.
 ENDCLASS.
 
 CLASS ltcl_batch_report IMPLEMENTATION.
@@ -82,5 +85,47 @@ CLASS ltcl_batch_report IMPLEMENTATION.
     ls_host-navigation-kind = zcx_gg_control_flow=>kind_submit.
     ls_result = zcl_osd_batch_report=>result_of( ls_host ).
     cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'INCOMPLETE' ).
+  ENDMETHOD.
+
+  METHOD static_submit_returns.
+    DATA lv_date TYPE d VALUE '20251231'.
+    SUBMIT zgg_ex_012 WITH p_date = lv_date AND RETURN.
+    SUBMIT zosd_sub_ctx AND RETURN.
+  ENDMETHOD.
+
+  METHOD static_submit_fails_loudly.
+    TRY.
+        SUBMIT z_no_such_report AND RETURN.
+        cl_abap_unit_assert=>fail( 'unknown report must not be silently skipped' ).
+      CATCH zcx_osd_submit INTO DATA(lx_submit).
+        FIND 'UNKNOWN' IN lx_submit->detail.
+        cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+        FIND 'UNKNOWN' IN lx_submit->get_text( ).
+        cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD context_is_per_run.
+    DATA lt_input TYPE zif_gg_selection_screen_types=>ty_values.
+    INSERT VALUE #( name = 'P_VALUE' value = 'SUPPLIED' ) INTO TABLE lt_input.
+    DATA(ls_batch) = zcl_osd_batch_report=>run(
+      iv_program = 'ZOSD_SUB_CTX'
+      it_input = lt_input
+      iv_batch = abap_true ).
+    DATA(ls_dialog) = zcl_osd_batch_report=>run(
+      iv_program = 'ZOSD_SUB_CTX'
+      iv_batch = abap_false ).
+    cl_abap_unit_assert=>assert_equals( act = ls_batch-status exp = 'COMPLETED' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_dialog-status exp = 'COMPLETED' ).
+    FIND 'BATCH' IN ls_batch-lines[ 1 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'ZOSD_SUB_CTX' IN ls_batch-lines[ 1 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'SUPPLIED' IN ls_batch-lines[ 1 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'DIALOG' IN ls_dialog-lines[ 1 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'DEFAULT' IN ls_dialog-lines[ 1 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
   ENDMETHOD.
 ENDCLASS.

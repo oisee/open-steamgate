@@ -36,6 +36,7 @@ import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {hostModules, toolCommand} from "./osd-host.mjs";
 import {isBinaryFilename, listFiles, loadLibs, modulesOf, outputFiles, readAll} from "./osd-transpile.mjs";
+import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 import {warmVerdict} from "./osd-hot.mjs";
 
 export {warmVerdict};
@@ -94,6 +95,9 @@ export function warmRule({path, before, after, amdpText = ""}) {
   }
   if (!SOURCE.test(name)) {
     return `${name}: not the source of a class or an interface`;
+  }
+  if (/\bSUBMIT\b/i.test(after)) {
+    return `${name}: a SUBMIT source is lowered during a cold build`;
   }
   if (AMDP.test(before) || AMDP.test(after)) {
     return `${name}: an AMDP body (amdp-gen reads it)`;
@@ -284,7 +288,8 @@ export class WarmCompiler {
       throw new NotWarm("a library is cloned from its URL rather than read from a folder");
     }
     const {wanted} = listFiles(root, own);
-    const read = await readAll(wanted, resolve(root, own.output_folder));
+    const read = await readAll(wanted, resolve(root, own.output_folder),
+      (source, filename) => lowerNarrowSubmit(source, filename, core));
     this.files = new Map(wanted.map((path, i) => [path, read[i]]));
     const libs = await loadLibs(root, own);
     const reg = new core.Registry();
