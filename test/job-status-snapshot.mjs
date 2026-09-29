@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {randomUUID} from "node:crypto";
+import {createHash, randomUUID} from "node:crypto";
 import {spawnSync} from "node:child_process";
 import {existsSync, mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -173,6 +173,67 @@ describe("private durable job status snapshot", function () {
     } finally { store.close(); }
     assert.throws(() => read("PRE_IDENTITY", "00000015"), {code: "JOB_LEGACY_UNSUPPORTED"});
     assert.equal(read("PRE_IDENTITY", "00000015", {...caller, client: "999"}), undefined);
+  });
+
+  it("detects Unicode historic names without SQLite's ASCII-only UPPER", () => {
+    edit((db) => db.prepare(`INSERT INTO zosd_job_outbox
+      (mandt, intent_id, sysid, source_db, jobname, jobcount, owner, program, step_count)
+      VALUES ('123', ?, 'OSG', ?, 'nächtlich', '00000017', 'DEVELOPER', 'Z_OLD', '00')`)
+      .run(randomUUID().replaceAll("-", ""), sourceDb));
+    assert.throws(() => read("NÄCHTLICH", "00000017"), {code: "JOB_LEGACY_UNSUPPORTED"});
+    const store = new BatchRuns(root, env);
+    try {
+      store.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb,
+        client: caller.client, sysid: caller.sid, owner: caller.user,
+        jobname: "nächtlich", jobcount: "00000018", program: "Z_OLD",
+        generation: "generation-1"});
+    } finally { store.close(); }
+    assert.throws(() => read("NÄCHTLICH", "00000018"), {code: "JOB_LEGACY_UNSUPPORTED"});
+  });
+
+  it("uses pending outbox with a real pre-multistep operations schema, then signals its imported run", () => {
+    reserve("V1_SCHEMA", "00000019");
+    const job = bind("V1_SCHEMA", "00000019", ["Z_OLD"]);
+    const old = new DatabaseSync(operationsDb);
+    try {
+      old.exec(`CREATE TABLE batch_runs (
+        id TEXT PRIMARY KEY, program TEXT NOT NULL, generation TEXT NOT NULL,
+        started_at TEXT NOT NULL, ended_at TEXT, state TEXT NOT NULL,
+        result_status TEXT, detail TEXT, input_json TEXT NOT NULL,
+        output_sha256 TEXT, output_bytes INTEGER, queued_at TEXT,
+        source_db TEXT, source_client TEXT, source_sysid TEXT, source_owner TEXT,
+        job_name TEXT, job_count TEXT);
+        CREATE TABLE batch_imports (
+          intent_id TEXT PRIMARY KEY, payload_sha256 TEXT NOT NULL, run_id TEXT NOT NULL);`);
+      assert.equal(read(job.name, job.count).phase, "OUTBOX");
+      const id = `${job.intentId.slice(0, 8)}-${job.intentId.slice(8, 12)}-${job.intentId.slice(12, 16)}-${job.intentId.slice(16, 20)}-${job.intentId.slice(20)}`;
+      const payload = JSON.stringify({sourceDb, client: caller.client, sysid: caller.sid,
+        jobname: job.name, jobcount: job.count, owner: caller.user,
+        program: "Z_OLD", generation: "generation-1"});
+      old.prepare("INSERT INTO batch_imports VALUES (?, ?, ?)")
+        .run(job.intentId, createHash("sha256").update(payload).digest("hex"), id);
+      old.prepare(`INSERT INTO batch_runs
+        (id, program, generation, started_at, state, input_json, queued_at,
+         source_db, source_client, source_sysid, source_owner, job_name, job_count)
+         VALUES (?, 'Z_OLD', 'generation-1', '', 'QUEUED', '[]', '2026-09-29T00:00:00Z',
+           ?, '123', 'OSG', 'DEVELOPER', 'V1_SCHEMA', '00000019')`).run(id, sourceDb);
+    } finally { old.close(); }
+    assert.throws(() => read(job.name, job.count), {code: "JOB_LEGACY_UNSUPPORTED"});
+    acknowledge(job);
+    assert.throws(() => read(job.name, job.count), {code: "JOB_LEGACY_UNSUPPORTED"});
+    const damaged = new DatabaseSync(operationsDb);
+    try {
+      const digest = damaged.prepare("SELECT payload_sha256 FROM batch_imports WHERE intent_id = ?")
+        .get(job.intentId).payload_sha256;
+      damaged.prepare("UPDATE batch_imports SET payload_sha256 = ? WHERE intent_id = ?")
+        .run("0".repeat(64), job.intentId);
+      assert.throws(() => read(job.name, job.count), {code: "JOB_SNAPSHOT_INCONSISTENT"});
+      damaged.prepare("UPDATE batch_imports SET payload_sha256 = ? WHERE intent_id = ?")
+        .run(digest, job.intentId);
+      damaged.exec("ALTER TABLE batch_runs ADD COLUMN step_count INTEGER NOT NULL DEFAULT 0");
+    }
+    finally { damaged.close(); }
+    assert.throws(() => read(job.name, job.count), {code: "JOB_SNAPSHOT_INCONSISTENT"});
   });
 
   it("prefers imported operations over still-pending outbox and survives acknowledgement and restart", () => {

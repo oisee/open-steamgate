@@ -87,12 +87,25 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
     WHERE type = 'table' AND name IN ('batch_imports', 'batch_runs', 'batch_run_steps')`)
     .all().map((row) => row.name));
   if (!tables.has("batch_imports")) {
-    if (tables.has("batch_runs") && db.prepare("SELECT 1 FROM batch_runs WHERE id = ?").get(id)) {
-      fail("operations run has no import ledger table");
+    if (tables.has("batch_runs")) {
+      const columns = new Set(db.prepare("PRAGMA table_info(batch_runs)").all().map((row) => row.name));
+      if (tables.has("batch_run_steps") !== columns.has("step_count")) fail("incomplete operations schema");
+      if (db.prepare("SELECT 1 FROM batch_runs WHERE id = ?").get(id)) {
+        fail("operations run has no import ledger table");
+      }
     }
     return undefined; // an older operations file may predate queued jobs
   }
-  if (!tables.has("batch_runs") || !tables.has("batch_run_steps")) fail("incomplete operations schema");
+  if (!tables.has("batch_runs")) fail("incomplete operations schema");
+  const columns = new Set(db.prepare("PRAGMA table_info(batch_runs)").all().map((row) => row.name));
+  const v1Columns = ["id", "program", "generation", "started_at", "ended_at", "state",
+    "result_status", "detail", "input_json", "output_sha256", "output_bytes", "queued_at",
+    "source_db", "source_client", "source_sysid", "source_owner", "job_name", "job_count"];
+  if (!v1Columns.every((column) => columns.has(column)) ||
+      tables.has("batch_run_steps") !== columns.has("step_count")) {
+    fail("incomplete operations schema");
+  }
+  const oldSchema = !tables.has("batch_run_steps");
   const ledger = db.prepare("SELECT run_id, payload_sha256 FROM batch_imports WHERE intent_id = ?").get(intentId);
   if (!ledger) {
     const stray = db.prepare("SELECT 1 FROM batch_runs WHERE id = ?").get(id);
@@ -107,6 +120,16 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
       value(run, "job_name").toUpperCase() !== value(identity, "jobname") ||
       value(run, "job_count") !== value(identity, "jobcount")) {
     fail("operations run disagrees with retained job identity or business instance");
+  }
+  const base = {sourceDb: run.source_db, client: run.source_client, sysid: run.source_sysid,
+    jobname: run.job_name, jobcount: run.job_count, owner: run.source_owner,
+    program: run.program, generation: run.generation};
+  if (oldSchema) {
+    if (outbox && outbox.steps.length !== 1) fail("old operations schema cannot contain ordered steps");
+    if (createHash("sha256").update(JSON.stringify(base)).digest("hex") !== ledger.payload_sha256) {
+      fail("old operations run differs from immutable import ledger payload");
+    }
+    throw new JobSnapshotError("JOB_LEGACY_UNSUPPORTED", "imported run needs the multistep operations migration");
   }
   const rows = db.prepare("SELECT * FROM batch_run_steps WHERE run_id = ? ORDER BY step_no").all(id);
   const legacy = run.step_count === 0 && rows.length === 0;
@@ -127,9 +150,6 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
   // Reconstruct the importer's versioned payload using the stored bytes, not
   // the canonical key used for identity lookup. Old imported names can be
   // lowercase even when migration uppercased the retained business key.
-  const base = {sourceDb: run.source_db, client: run.source_client, sysid: run.source_sysid,
-    jobname: run.job_name, jobcount: run.job_count, owner: run.source_owner,
-    program: run.program, generation: run.generation};
   const payload = legacy ? JSON.stringify(base) : JSON.stringify({version: 2, ...base,
     steps: rows.map((row) => ({number: row.step_no, program: row.program}))});
   if (createHash("sha256").update(payload).digest("hex") !== ledger.payload_sha256) {
@@ -151,10 +171,10 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
 }
 
 function checkPreIdentityJob(business, sourceDb, name, count, caller, root, env) {
-  const pending = business.prepare(`SELECT owner FROM zosd_job_outbox
-    WHERE mandt = ? AND UPPER(TRIM(jobname)) = ? AND TRIM(jobcount) = ?`)
-    .all(caller.client, name, count);
-  if (pending.some((row) => value(row, "owner") === caller.user)) {
+  const pending = business.prepare(`SELECT owner, jobname FROM zosd_job_outbox
+    WHERE mandt = ? AND TRIM(jobcount) = ?`).all(caller.client, count);
+  if (pending.some((row) => value(row, "jobname").toUpperCase() === name &&
+      value(row, "owner") === caller.user)) {
     throw new JobSnapshotError("JOB_LEGACY_UNSUPPORTED", "job predates retained identity; migrate before reading");
   }
   const file = operationsPath(root, env);
@@ -165,10 +185,11 @@ function checkPreIdentityJob(business, sourceDb, name, count, caller, root, env)
     const columns = new Set(db.prepare("PRAGMA table_info(batch_runs)").all().map((row) => row.name));
     if (!["source_db", "source_client", "source_sysid", "source_owner", "job_name", "job_count"]
       .every((column) => columns.has(column))) return;
-    const old = db.prepare(`SELECT source_owner FROM batch_runs WHERE source_db = ?
-      AND source_client = ? AND source_sysid = ? AND UPPER(TRIM(job_name)) = ?
-      AND TRIM(job_count) = ?`).all(sourceDb, caller.client, caller.sid, name, count);
-    if (old.some((row) => value(row, "source_owner") === caller.user)) {
+    const old = db.prepare(`SELECT source_owner, job_name FROM batch_runs WHERE source_db = ?
+      AND source_client = ? AND source_sysid = ? AND TRIM(job_count) = ?`)
+      .all(sourceDb, caller.client, caller.sid, count);
+    if (old.some((row) => value(row, "job_name").toUpperCase() === name &&
+        value(row, "source_owner") === caller.user)) {
       throw new JobSnapshotError("JOB_LEGACY_UNSUPPORTED", "job predates retained identity; migrate before reading");
     }
   });
