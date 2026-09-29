@@ -26,3 +26,34 @@ job log, list output or BAL entries. Authorization beyond the single
 configured runtime user remains separate work. A future multi-user host must
 supply authenticated per-session identity at this seam before exposing it to
 user-facing callers.
+
+## Bounded private read for doctor
+
+`ZOSD_JOB_READ` uses the same trusted identity and committed-state checks as
+`ZOSD_JOB_STATUS`. It reads the retained `ZOSD_JOB_IDENTITY` and outbox/step
+tables and, after import, the operations SQLite run, steps and technical log.
+It does not read or simulate `TBTCO`/`TBTCP`, or claim the signature or
+semantics of `BP_JOB_READ`, `BP_JOBLOG_READ` or `SHOW_JOBSTATE`. The first
+read-only doctor should use this private bridge. A standard-compatible facade
+remains separate work after its signatures and behavior are measured on A4H.
+
+Pass `IV_JOBNAME` and `IV_JOBCOUNT`; `IV_ITEM` chooses `HEADER` (default),
+`STEP` or `LOG`. `STEP` needs `IV_INDEX` from 1 through 16, and `LOG` needs
+1 through 2000. A header request takes no index. Each call returns the same
+header fields: phase, state, result status, step and log counts, creation,
+queue, start and end times, a predecessor job key or named event ID when
+configured (including after release), and `EV_HISTORICAL_GAP = 'X'` for older imported runs lacking their
+initial log rows. `STEP` adds its number, program, state, times and result
+status. `LOG` adds its sequence, optional step number, time, event, severity
+and a fixed technical message. The port validates each requested log row's
+timestamp and event-to-step relationship before returning it; corrupt rows
+raise `INCONSISTENT`. There is no source database path, generation,
+selection input, run detail, list output or BAL data in the result.
+
+The read-only reader caps the complete technical log at 2000 rows, even for a
+header request. An oversized log raises `TOO_LARGE`; an index outside the
+requested collection raises `BAD_KEY`. Other exceptions match the status
+bridge. All outputs are cleared on every call and every exception. A doctor
+can walk the indices, but each call is a fresh snapshot: a worker may advance
+the job between header, step and log calls. The doctor must report the fields
+as separately observed and reread the header if it needs a current summary.
