@@ -76,23 +76,24 @@ the system inside it.
 | F2 | Numeric kernels of the demo scenes as GLSL shaders | fun | |
 | F3 | abaplint's lexer and statement parser compiled from ABAP | fun | a self-hosting test of the compiler (~13,000 lines) |
 
-## Analysis and evidence-based refactoring (`docs/amdp-lift.md`)
+## Verified lift: evidence-based refactoring (`docs/verified-lift.md`)
 
-Branch `research/amdp-lift`, off the 0.3 beta path. Reviewed 2026-09-29 by
-codex-astra and a Fable critic before it was written down.
+Branch `research/verified-lift`, off the 0.3 beta path. Reviewed 2026-09-29 by
+codex-astra, a Fable critic and dell before it was written down.
 
 | id | idea | status | reason / next step |
 |---|---|---|---|
-| L1 | Fact export from abaplint (statements, reads, writes, resolved calls, table kinds and keys, DDIC buffering) into DuckDB, queried with SQL | research | the query layer, instead of a new language; first: counts per shape over abapGit and `src/` |
+| L1 | Semantic categories (Iteration, DbRead/Write, Call, Escape, Effect) and fact tables from abaplint into DuckDB, queried with SQL | research | the query layer, instead of a new engine; first: counts per shape over abapGit and `src/` |
+| L1a | A CFG (`succ`) for path obligations | research | abaplint removed its `StatementFlow`/`FlowGraph` in 2.113.206 (`a9bc3d5b`, 2025-09-20); the old MIT code is a start; learn why it went first |
 | L2 | Smells with closed-kind justifications (`#OSG justify`: kind, fragment hash, evidence record) | research | `"#EC CI_SEL_NESTED` shows how free text gets gamed; the checker refuses free text and a missing record |
 | L3 | Evidence matrix, obligation x way of closing it (static DDIC/code, differential local/HANA/A4H kernel, SQL trace, formal) | research | a test never becomes a proof; a recipe's level is its profile of closed cells |
 | L4 | ABAP-side observation harness: ABAP Unit writing a canonical state record (tables, work area after a miss, sy-subrc/sy-tabix, exceptions) | research | HTTP cannot see these; the same test on A4H is the only check of the transpiler itself |
 | L5 | SQL trace attributed to the ABAP statement / loop | research | `tools/osd-sql-trace.mjs` counts per run today |
-| L6 | Recipe 1: SELECT SINGLE in LOOP -> prefetch into HASHED + READ TABLE | research | rung 0, keeps the loop and its miss handling; stop if its obligations are mostly unknown without a CFG |
+| L6 | Recipe 1a: SELECT SINGLE in an iteration -> prefetch into HASHED + READ TABLE; 1b: -> JOIN | research | 1a first: rung 0, keeps the loop, its order and its miss handling; stop if the obligations are mostly unknown without a CFG |
 | L7 | Upstream: `db_operation_in_loop` reports every DB statement, SELECT...ENDSELECT, loop dependence; `unsecure_fae` checks the empty driver | candidate | lands in every ABAP CI; critic gate first |
 | L8 | AMDP recipes (COLLECT / AT NEW into GROUP BY) through eAMDP on HXE | research | after L6; AMDP only where one ABAP SQL statement cannot express it |
 | L9 | MAP_MERGE / PARALLEL EXECUTION / aRFC fan-out recipes | parked | 0 MAP_MERGE in the corpus; one work process here, so nothing parallel can be measured |
-| L10 | Pattern induction (anti-unification of LLM-found fragments) and a surface pattern language | parked | only if the fact tables prove too awkward to query |
+| L10 | Recipe languages: SmPL-like patch for humans, tree-sitter-query S-expressions as the canonical form, Refaster-style before/after ABAP classes as the test | research | each learnable in an hour; anti-unification only drafts a pattern |
 | L11 | Grammar inference of HANA SQLScript by oracle (Glade/Arvada style, `CREATE PROCEDURE` on HXE as the black box) | parked | parser acceptance, not semantics; never by inspecting SAP binaries |
 
 ## Parked elsewhere
@@ -102,7 +103,7 @@ codex-astra and a Fable critic before it was written down.
   Not needed by the refactoring track (Alice, 2026-09-29): eAMDP, the AMDP
   body run on HANA Express (`docs/amdp-in-hana.md`), executes the target
   side; the parser and IR matter only to its formal column
-  (`docs/amdp-lift.md`).
+  (`docs/verified-lift.md`).
 - The licence of open-abap-odata: parked (ADR 0003, consequences).
 
 ## Tails and small items
