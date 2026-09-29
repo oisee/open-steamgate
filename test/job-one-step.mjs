@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
@@ -33,6 +33,9 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
   const close = (count, options = {}) => invoke("JOB_CLOSE", {
     jobname: "OSD_ONE_STEP", jobcount: count, strtimmed: "X", ...options,
   }, ["job_was_released"]);
+  const status = (name, count) => invoke("ZOSD_JOB_STATUS", {
+    iv_jobname: name, iv_jobcount: count,
+  }, ["ev_phase", "ev_state", "ev_result_status", "ev_step_count"]);
   const schedule = () => dialogStep(async () => {
     const count = await open();
     await submit(count);
@@ -259,6 +262,169 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     expect(rows()).to.have.length(1);
     expect((await drainJobOutbox(store)).imported).to.equal(1);
     expect((await workQueuedBatch(root, store, async () => ({status: "COMPLETED"}))).kind).to.equal("completed");
+  });
+
+  it("reads committed OPEN but calls out the same-LUW and rolled-back OPEN", async () => {
+    let count;
+    await dialogStep(async () => {
+      count = await open("STATUS_OPEN");
+      await classic(() => status("STATUS_OPEN", count), "uncommitted");
+      await client.commit();
+    });
+    const priorOperations = process.env.OSD_OPERATIONS_DB;
+    const absentOperations = join(dir, "status-must-not-create.sqlite");
+    process.env.OSD_OPERATIONS_DB = absentOperations;
+    try {
+      const committed = await dialogStep(() => status("STATUS_OPEN", count));
+      expect(committed).to.deep.equal({ev_phase: "RESERVED", ev_state: "RESERVED",
+        ev_result_status: "", ev_step_count: "0"});
+      expect(existsSync(absentOperations)).to.equal(false);
+    } finally { process.env.OSD_OPERATIONS_DB = priorOperations; }
+    let rolledBack;
+    await dialogStep(async () => {
+      rolledBack = await open("STATUS_ROLLBACK");
+      await classic(() => status("STATUS_ROLLBACK", rolledBack), "uncommitted");
+      await client.rollback();
+    });
+    await dialogStep(() => classic(() => status("STATUS_ROLLBACK", rolledBack), "not_found"));
+  });
+
+  it("reads committed CLOSE, imported and completed phases without draining on read", async () => {
+    const name = "STATUS_CHAIN";
+    let count;
+    await dialogStep(async () => {
+      count = await open(name);
+      await submit(count, {jobname: name});
+      await close(count, {jobname: name});
+      await classic(() => status(name, count), "uncommitted");
+    });
+    const outbox = rows().find((row) => row.jobname.trim() === name && row.jobcount.trim() === count);
+    expect(outbox).to.exist;
+    const previous = process.env.OSD_OPERATIONS_DB;
+    const path = join(dir, "status-read-only.sqlite");
+    process.env.OSD_OPERATIONS_DB = path;
+    const scoped = new BatchRuns(root, process.env);
+    try {
+      const before = rows().length;
+      const ready = await dialogStep(() => status(name, count));
+      expect(ready.ev_phase).to.equal("OUTBOX");
+      expect(ready.ev_state).to.equal("READY");
+      expect(rows()).to.have.length(before);
+      expect(scoped.list()).to.have.length(0);
+      const run = scoped.importIntent({intentId: outbox.intent_id.trim(), sourceDb: dbPath,
+        client: "123", sysid: "OSG", owner: "DEVELOPER", jobname: name, jobcount: count,
+        program: "ZGG_EX_012", generation: outbox.generation.trim(),
+        steps: [{number: 1, program: "ZGG_EX_012"}]}).run;
+      const imported = await dialogStep(() => status(name, count));
+      expect(imported.ev_phase).to.equal("OPERATIONS");
+      expect(imported.ev_state).to.equal("QUEUED");
+      expect(rows()).to.have.length(before); // import-before-ack: status does not drain
+      expect(scoped.claimNext().run.id).to.equal(run.id);
+      scoped.finishStep(run.id, 1, {status: "COMPLETED", lines: []});
+      const finished = await dialogStep(() => status(name, count));
+      expect(finished.ev_state).to.equal("COMPLETED");
+      expect(finished.ev_result_status).to.equal("COMPLETED");
+      expect(finished.ev_step_count).to.equal("1");
+      expect((await drainJobOutbox(scoped)).imported).to.equal(1);
+      expect(rows()).to.have.length(before - 1);
+    } finally {
+      scoped.close();
+      process.env.OSD_OPERATIONS_DB = previous;
+    }
+  });
+
+  it("uses trusted identity and clears reused port outputs on errors", async () => {
+    const name = "STATUS_TRUST";
+    const count = await dialogStep(async () => {
+      const allocated = await open(name);
+      await client.commit();
+      return allocated;
+    });
+    const writer = new DatabaseSync(dbPath);
+    try {
+      writer.prepare(`INSERT INTO zosd_job_identity
+        (mandt, jobname, jobcount, owner, intent_id) VALUES ('123', 'FOREIGN_STATUS', '00000077', 'OTHER', '')`).run();
+    } finally { writer.close(); }
+    await dialogStep(async () => {
+      const importing = {ev_phase: box("stale"), ev_state: box("stale"),
+        ev_result_status: box("stale"), ev_step_count: box("stale"), ev_error_code: box("stale"),
+        ev_error: box("stale"), ev_program: box("stale"), ev_jobcount: box("stale")};
+      const call = (jobname, jobcount, overrides = {}) => abap.context.RFCDestinations.JOBS.call(
+        "ZOSD_JOB_PORT", {exporting: {iv_command: box("STATUS"), iv_jobname: box(jobname),
+          iv_jobcount: box(jobcount), iv_owner: box(overrides.owner ?? "OTHER"),
+          iv_client: box(overrides.client ?? "999")}, importing});
+      await call("MISSING_STATUS", "00000078");
+      expect(importing.ev_error_code.get()).to.equal("NOT_FOUND");
+      await call(name, count);
+      expect(importing.ev_error_code.get()).to.equal("");
+      expect(importing.ev_state.get()).to.equal("RESERVED");
+      await call("FOREIGN_STATUS", "00000077", {owner: "OTHER", client: "123"});
+      expect(importing.ev_error_code.get()).to.equal("FORBIDDEN");
+      expect(importing.ev_state.get()).to.equal("");
+      expect(importing.ev_phase.get()).to.equal("");
+      expect(importing.ev_error.get()).to.equal("");
+      expect(importing.ev_program.get()).to.equal("");
+      expect(importing.ev_jobcount.get()).to.equal("");
+      await classic(() => status("FOREIGN_STATUS", "00000077"), "forbidden");
+      await classic(() => status("MISSING_STATUS", "00000078"), "not_found");
+      await classic(() => status("STATUS_TRUST", "bad"), "bad_key");
+    });
+  });
+
+  it("reports an uncommitted deletion instead of stale committed status", async () => {
+    const name = "STATUS_DELETE";
+    const count = await dialogStep(async () => {
+      const allocated = await open(name);
+      await client.commit();
+      return allocated;
+    });
+    await dialogStep(async () => {
+      expect((await status(name, count)).ev_state).to.equal("RESERVED");
+      await client.beginTransaction();
+      client.db.prepare(`DELETE FROM zosd_job_identity
+        WHERE mandt = '123' AND jobname = ? AND jobcount = ?`).run(name, count);
+      await classic(() => status(name, count), "uncommitted");
+      await client.rollback();
+      expect((await status(name, count)).ev_state).to.equal("RESERVED");
+    });
+  });
+
+  it("distinguishes inconsistent, pre-identity legacy and unavailable stores", async () => {
+    const broken = "STATUS_BROKEN";
+    const writer = new DatabaseSync(dbPath);
+    try {
+      writer.prepare(`INSERT INTO zosd_job_identity
+        (mandt, jobname, jobcount, owner, intent_id)
+        VALUES ('123', ?, '00000088', 'DEVELOPER', ?)`).run(broken, randomUUID().replaceAll("-", ""));
+    } finally { writer.close(); }
+    await dialogStep(() => classic(() => status(broken, "00000088"), "inconsistent"));
+
+    const previous = process.env.OSD_OPERATIONS_DB;
+    const legacyPath = join(dir, "status-legacy.sqlite");
+    process.env.OSD_OPERATIONS_DB = legacyPath;
+    const legacy = new BatchRuns(root, process.env);
+    try {
+      legacy.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
+        client: "123", sysid: "OSG", owner: "DEVELOPER", jobname: "STATUS_LEGACY",
+        jobcount: "00000089", program: "ZGG_EX_012", generation: liveGeneration(root)});
+      await dialogStep(() => classic(() => status("STATUS_LEGACY", "00000089"), "legacy"));
+    } finally {
+      legacy.close();
+      process.env.OSD_OPERATIONS_DB = previous;
+    }
+    const priorMode = process.env.STG_DB;
+    process.env.STG_DB = "sqlite";
+    try { await dialogStep(() => classic(() => status("STATUS_LEGACY", "00000089"), "unavailable")); }
+    finally { process.env.STG_DB = priorMode; }
+  });
+
+  it("does not let the private status port run outside a dialog step", async () => {
+    try {
+      await abap.context.RFCDestinations.JOBS.call("ZOSD_JOB_PORT", {exporting: {
+        iv_command: box("STATUS"), iv_jobname: box("MISSING"), iv_jobcount: box("00000090"),
+      }, importing: {ev_error_code: box()}});
+      throw new Error("status port unexpectedly accepted a missing dialog step");
+    } catch (error) { expect(error.message).to.equal("JOB_* requires a dialog step"); }
   });
 
   it("commits one immutable intent, drains once, and executes one default-input report", async () => {

@@ -301,6 +301,10 @@ only controlled technical events: captured `WRITE` list output, BAL entries,
 selection values and report messages remain separate. The standard ABAP log
 function and its line format still require A4H measurement.
 
+The [private ABAP status bridge](job-read-bridge.md) exposes verified job
+metadata to ABAP without claiming the standard SAP read signatures. It does
+not return the technical log.
+
 ## Local read API for saved runs
 
 `GET /osd/batch-runs` lists up to 50 recent runs (`?limit=1..200`).
