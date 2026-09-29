@@ -87,7 +87,7 @@ import {
   cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,
   realpathSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
-import {basename, dirname, join, relative, resolve} from "node:path";
+import {basename, dirname, isAbsolute, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {describeVsixPreflight, vsixPreflightMissing} from "../tools/osd-lock.mjs";
 import {requireSupportedNode} from "../tools/osd-node-version.mjs";
@@ -384,10 +384,21 @@ export function copySeedTree(seedRoot, selectedPacks) {
  * must not ship those old files. Call this only after materializeSeedLinks,
  * so removal cannot follow a staged symlink back into the fetched source. */
 export function excludeStagedPackSources(seedRoot, selectedPacks) {
-  for (const pack of selectedPacks) {
-    for (const source of pack.sources) {
-      const folder = join(seedRoot, "packs", pack.name, source.folder);
-      const patterns = source.exclude.map((pattern) => new RegExp(pattern, "i"));
+  const within = (parent, child) => {
+    const path = relative(parent, child);
+    return path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+  };
+  const packsDir = realpathSync(join(seedRoot, "packs"));
+  // Validate every target before removing anything from the staged tree.
+  const plans = selectedPacks.flatMap((pack) => pack.sources.map((source) => {
+    const packDir = realpathSync(join(packsDir, pack.name));
+    const folder = realpathSync(join(packDir, source.folder));
+    if (!within(packsDir, packDir) || !within(packDir, folder)) {
+      throw new Error(`build-vsix: pack source escapes its staged pack: ${pack.name}/${source.folder}`);
+    }
+    return {folder, patterns: source.exclude.map((pattern) => new RegExp(pattern, "i"))};
+  }));
+  for (const {folder, patterns} of plans) {
       const visit = (dir, relativeDir = "") => {
         for (const entry of readdirSync(dir)) {
           const path = join(dir, entry);
@@ -404,7 +415,6 @@ export function excludeStagedPackSources(seedRoot, selectedPacks) {
         }
       };
       visit(folder);
-    }
   }
 }
 

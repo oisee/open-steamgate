@@ -15,7 +15,7 @@ import {basename, join} from "node:path";
 import {homedir, tmpdir} from "node:os";
 import {createReadStream} from "node:fs";
 import {brotliDecompressSync} from "node:zlib";
-import {buildVsix, stampStagedPackage} from "../scripts/build-vsix.mjs";
+import {buildVsix, excludeStagedPackSources, stampStagedPackage} from "../scripts/build-vsix.mjs";
 import {inventoryThirdParties} from "../scripts/third-party-notices.mjs";
 import {tilesOf} from "../tools/osd-packs.mjs";
 const {writeTar, unpackTar} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
@@ -338,6 +338,25 @@ describe("packaging selected packs", function () {
       rmSync(packDir, {recursive: true, force: true});
       rmSync(scratch, {recursive: true, force: true});
     }
+  });
+
+  it("refuses a traversing source folder before removing staged files", () => {
+    const scratch = testScratch("source-traversal");
+    const seed = join(scratch, "seed");
+    const safe = join(seed, "packs", "safe", "games");
+    const outside = join(seed, "outside");
+    mkdirSync(safe, {recursive: true});
+    mkdirSync(outside);
+    writeFileSync(join(safe, "zork-mini-old"), "still staged");
+    writeFileSync(join(outside, "zork-mini-important"), "outside pack");
+    try {
+      expect(() => excludeStagedPackSources(seed, [
+        {name: "safe", sources: [{folder: "games", exclude: ["^zork-mini"]}]},
+        {name: "safe", sources: [{folder: "../../outside", exclude: ["^zork-mini"]}]},
+      ])).to.throw(/escapes its staged pack/);
+      expect(existsSync(join(safe, "zork-mini-old"))).to.equal(true);
+      expect(readFileSync(join(outside, "zork-mini-important"), "utf8")).to.equal("outside pack");
+    } finally { rmSync(scratch, {recursive: true, force: true}); }
   });
 
   it("checks fetched sources only for selected packs", async function () {

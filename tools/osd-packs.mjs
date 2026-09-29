@@ -103,6 +103,9 @@ export function packAt(root, dir) {
         || (s.lock === undefined && s.repo === "")) {
       throw new BadPack(dir, "a source needs a folder and either a repo or a libs.lock.json library name");
     }
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(s.folder)) {
+      throw new BadPack(dir, `source folder must be a single directory name: ${s.folder}`);
+    }
     let repo = s.repo;
     let ref = String(s.ref ?? "main");
     if (s.lock !== undefined) {
