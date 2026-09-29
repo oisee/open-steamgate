@@ -120,6 +120,14 @@ CLASS ltcl_pcp IMPLEMENTATION.
         cl_abap_unit_assert=>fail( 'duplicate body type after empty value should raise' ).
       CATCH cx_ac_message_type_pcp_error.
     ENDTRY.
+    TRY.
+        cl_ac_message_type_pcp=>if_ac_message_type_pcp~deserialize(
+          'pcp-action:' && lv_lf
+          && 'pcp-action:MESSAGE' && lv_lf
+          && 'pcp-body-type:text' && lv_lf && lv_lf ).
+        cl_abap_unit_assert=>fail( 'duplicate action after empty value should raise' ).
+      CATCH cx_ac_message_type_pcp_error.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD carriage_return.
