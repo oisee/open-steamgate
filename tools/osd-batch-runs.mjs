@@ -1,7 +1,7 @@
 // Durable one-shot report runs. This is an operations store, separate from
 // the ABAP business database and from a replaceable transpiled generation.
 import {randomUUID, createHash} from "node:crypto";
-import {chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync} from "node:fs";
+import {chmodSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DatabaseSync} from "node:sqlite";
@@ -44,6 +44,14 @@ function publicRun(row, {revealInput = false} = {}) {
   };
 }
 
+function publicStep(row, {revealInput = false} = {}) {
+  return {number: row.step_no, program: row.program, state: row.state,
+    startedAt: row.started_at || null, endedAt: row.ended_at,
+    resultStatus: row.result_status, detail: row.detail,
+    input: revealInput ? JSON.parse(row.input_json) : JSON.parse(row.input_json).map(({name}) => ({name})),
+    outputSha256: row.output_sha256, outputBytes: row.output_bytes};
+}
+
 export class BatchRuns {
   constructor(root = process.cwd(), env = process.env) {
     this.path = operationsPath(root, env);
@@ -84,8 +92,18 @@ export class BatchRuns {
       if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "job_count")) {
         this.db.exec("ALTER TABLE batch_runs ADD COLUMN job_count TEXT");
       }
+      if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "step_count")) {
+        this.db.exec("ALTER TABLE batch_runs ADD COLUMN step_count INTEGER NOT NULL DEFAULT 0");
+      }
       this.db.exec(`CREATE TABLE IF NOT EXISTS batch_imports (
         intent_id TEXT PRIMARY KEY, payload_sha256 TEXT NOT NULL, run_id TEXT NOT NULL
+      )`);
+      this.db.exec(`CREATE TABLE IF NOT EXISTS batch_run_steps (
+        run_id TEXT NOT NULL, step_no INTEGER NOT NULL, program TEXT NOT NULL,
+        state TEXT NOT NULL, started_at TEXT, ended_at TEXT,
+        result_status TEXT, detail TEXT, input_json TEXT NOT NULL,
+        output_sha256 TEXT, output_bytes INTEGER,
+        PRIMARY KEY (run_id, step_no)
       )`);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -137,10 +155,19 @@ export class BatchRuns {
     const runId = `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
     const program = String(intent.program ?? "").trim().toUpperCase();
     if (!/^[A-Z][A-Z0-9_]{0,39}$/.test(program)) throw new TypeError("invalid report in outbox");
+    const steps = intent.steps === undefined ? undefined : intent.steps.map((step, i) => {
+      const name = String(step.program ?? "").trim().toUpperCase();
+      if (step.number !== i + 1 || !/^[A-Z][A-Z0-9_]{0,39}$/.test(name)) throw new TypeError("invalid ordered report step");
+      return {number: i + 1, program: name};
+    });
+    if (steps && (steps.length < 1 || steps.length > 16 || steps[0].program !== program)) {
+      throw new TypeError("invalid outbox step count or first report");
+    }
     const sourceDb = resolve(String(intent.sourceDb ?? ""));
-    const payload = JSON.stringify({sourceDb, client: intent.client, sysid: intent.sysid,
+    const base = {sourceDb, client: intent.client, sysid: intent.sysid,
       jobname: intent.jobname, jobcount: intent.jobcount, owner: intent.owner,
-      program, generation: intent.generation});
+      program, generation: intent.generation};
+    const payload = steps ? JSON.stringify({version: 2, ...base, steps}) : JSON.stringify(base);
     const digest = createHash("sha256").update(payload).digest("hex");
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -153,12 +180,17 @@ export class BatchRuns {
       const queuedAt = new Date().toISOString();
       this.db.prepare(`INSERT INTO batch_runs
         (id, program, generation, started_at, queued_at, state, input_json,
-         source_db, source_client, source_sysid, source_owner, job_name, job_count)
-        VALUES (?, ?, ?, '', ?, 'QUEUED', '[]', ?, ?, ?, ?, ?, ?)`).run(runId, program, String(intent.generation), queuedAt,
+         source_db, source_client, source_sysid, source_owner, job_name, job_count, step_count)
+        VALUES (?, ?, ?, '', ?, 'QUEUED', '[]', ?, ?, ?, ?, ?, ?, ?)`).run(runId, program, String(intent.generation), queuedAt,
           sourceDb, String(intent.client), String(intent.sysid), String(intent.owner),
-          String(intent.jobname), String(intent.jobcount));
+          String(intent.jobname), String(intent.jobcount), steps?.length ?? 0);
       this.db.prepare("INSERT INTO batch_imports (intent_id, payload_sha256, run_id) VALUES (?, ?, ?)")
         .run(id, digest, runId);
+      if (steps) {
+        const insert = this.db.prepare(`INSERT INTO batch_run_steps
+          (run_id, step_no, program, state, input_json) VALUES (?, ?, ?, ?, '[]')`);
+        for (const step of steps) insert.run(runId, step.number, step.program, step.number === 1 ? "READY" : "PENDING");
+      }
       this.db.exec("COMMIT");
       return {kind: "imported", run: this.get(runId)};
     } catch (error) {
@@ -186,15 +218,27 @@ export class BatchRuns {
         this.db.exec("COMMIT");
         return {kind: "busy", id: busy.id};
       }
-      const row = this.db.prepare(`SELECT id FROM batch_runs WHERE state = 'QUEUED'${scoped} ORDER BY queued_at, rowid LIMIT 1`).get(...params);
+      const row = this.db.prepare(`SELECT id, step_count FROM batch_runs WHERE state = 'QUEUED'${scoped} ORDER BY queued_at, rowid LIMIT 1`).get(...params);
       if (!row) {
         this.db.exec("COMMIT");
         return {kind: "empty"};
       }
-      this.db.prepare("UPDATE batch_runs SET state = 'RUNNING', started_at = ? WHERE id = ?")
+      const children = this.db.prepare("SELECT step_no, state FROM batch_run_steps WHERE run_id = ? ORDER BY step_no").all(row.id);
+      const ready = children.filter((item) => item.state === "READY");
+      if (row.step_count === 0 && children.length !== 0) throw new Error(`legacy queued run ${row.id} has unexpected steps`);
+      if (row.step_count > 0 && (children.length !== row.step_count || ready.length !== 1 ||
+          children.some((item, index) => item.step_no !== index + 1 ||
+            (index < ready[0]?.step_no - 1 ? item.state !== "COMPLETED" :
+              index > ready[0]?.step_no - 1 ? item.state !== "PENDING" : false)))) {
+        throw new Error(`queued run ${row.id} has inconsistent ordered steps`);
+      }
+      const step = ready[0];
+      this.db.prepare("UPDATE batch_runs SET state = 'RUNNING', started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END WHERE id = ?")
         .run(new Date().toISOString(), row.id);
+      if (step) this.db.prepare(`UPDATE batch_run_steps SET state = 'RUNNING', started_at = ?
+        WHERE run_id = ? AND step_no = ?`).run(new Date().toISOString(), row.id, step.step_no);
       this.db.exec("COMMIT");
-      return {kind: "claimed", run: this.get(row.id, {revealInput: true})};
+      return {kind: "claimed", run: this.get(row.id, {revealInput: true}), step: step?.step_no};
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -203,12 +247,20 @@ export class BatchRuns {
 
   interruptQueued(id) {
     if (!/^[0-9a-f-]{36}$/.test(String(id))) throw new TypeError("expected a queued run ID");
-    const changed = this.db.prepare(`UPDATE batch_runs SET state = 'INTERRUPTED',
-      result_status = 'INTERRUPTED', ended_at = ?,
-      detail = 'Worker stopped before recording a result; business effects must be inspected before resubmission'
-      WHERE id = ? AND state = 'RUNNING' AND queued_at IS NOT NULL`)
-      .run(new Date().toISOString(), id).changes;
-    if (changed !== 1) throw new Error(`queued run ${id} is not RUNNING`);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const changed = this.db.prepare(`UPDATE batch_runs SET state = 'INTERRUPTED',
+        result_status = 'INTERRUPTED', ended_at = ?,
+        detail = 'Worker stopped before recording a result; business effects must be inspected before resubmission'
+        WHERE id = ? AND state = 'RUNNING' AND queued_at IS NOT NULL`)
+        .run(new Date().toISOString(), id).changes;
+      if (changed !== 1) throw new Error(`queued run ${id} is not RUNNING`);
+      this.db.prepare(`UPDATE batch_run_steps SET state = 'INTERRUPTED', ended_at = ?,
+        result_status = 'INTERRUPTED' WHERE run_id = ? AND state = 'RUNNING'`).run(new Date().toISOString(), id);
+      this.db.prepare(`UPDATE batch_run_steps SET state = 'SKIPPED', ended_at = ?
+        WHERE run_id = ? AND state IN ('READY', 'PENDING')`).run(new Date().toISOString(), id);
+      this.db.exec("COMMIT");
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
     return this.get(id);
   }
 
@@ -228,7 +280,8 @@ export class BatchRuns {
     const file = join(this.artifacts, `${id}.json`);
     const temp = join(this.artifacts, `.${id}.${process.pid}.tmp`);
     writeFileSync(temp, body, {mode: 0o600, flag: "wx"});
-    renameSync(temp, file);
+    linkSync(temp, file);
+    unlinkSync(temp);
     const status = String(result.status ?? "FAILED");
     const state = status === "COMPLETED" ? "COMPLETED" : "FAILED";
     const changed = this.db.prepare(`UPDATE batch_runs SET ended_at = ?, state = ?, result_status = ?,
@@ -245,15 +298,90 @@ export class BatchRuns {
     return this.get(id);
   }
 
+  finishStep(id, number, result) {
+    const body = Buffer.from(JSON.stringify({lines: result.lines ?? [], messages: result.messages ?? [],
+      terminal: result.terminal ?? "", navigation: result.navigation ?? {}}));
+    if (body.length > MAX_OUTPUT_BYTES) {
+      const error = new Error(`batch output exceeds ${MAX_OUTPUT_BYTES} bytes`);
+      error.code = "OUTPUT_TOO_LARGE";
+      throw error;
+    }
+    const hash = createHash("sha256").update(body).digest("hex");
+    const file = join(this.artifacts, `${id}-${number}.json`);
+    const temp = join(this.artifacts, `.${id}-${number}.${process.pid}.tmp`);
+    writeFileSync(temp, body, {mode: 0o600, flag: "wx"});
+    linkSync(temp, file);
+    unlinkSync(temp);
+    const status = String(result.status ?? "FAILED");
+    const success = status === "COMPLETED";
+    const now = new Date().toISOString();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const changed = this.db.prepare(`UPDATE batch_run_steps SET state = ?, ended_at = ?,
+        result_status = ?, detail = ?, output_sha256 = ?, output_bytes = ?
+        WHERE run_id = ? AND step_no = ? AND state = 'RUNNING'`)
+        .run(success ? "COMPLETED" : "FAILED", now, status, String(result.detail ?? ""), hash, body.length, id, number).changes;
+      if (changed !== 1) throw new Error(`batch step ${id}/${number} is not running`);
+      const next = this.db.prepare("SELECT step_no FROM batch_run_steps WHERE run_id = ? AND step_no > ? ORDER BY step_no LIMIT 1")
+        .get(id, number);
+      if (success && next) {
+        const readied = this.db.prepare("UPDATE batch_run_steps SET state = 'READY' WHERE run_id = ? AND step_no = ? AND state = 'PENDING'")
+          .run(id, next.step_no).changes;
+        const queued = this.db.prepare("UPDATE batch_runs SET state = 'QUEUED' WHERE id = ? AND state = 'RUNNING'").run(id).changes;
+        if (readied !== 1 || queued !== 1) throw new Error(`batch step ${id}/${number} transition failed`);
+      } else {
+        if (!success) this.db.prepare(`UPDATE batch_run_steps SET state = 'SKIPPED', ended_at = ?
+          WHERE run_id = ? AND state = 'PENDING'`).run(now, id);
+        const terminal = this.db.prepare(`UPDATE batch_runs SET state = ?, ended_at = ?, result_status = ?, detail = ?,
+          output_sha256 = ?, output_bytes = ? WHERE id = ? AND state = 'RUNNING'`)
+          .run(success ? "COMPLETED" : "FAILED", now, status, String(result.detail ?? ""), hash, body.length, id).changes;
+        if (terminal !== 1) throw new Error(`batch run ${id} changed state during terminal step`);
+        const parent = join(this.artifacts, `${id}.json`);
+        const parentTemp = join(this.artifacts, `.${id}.${process.pid}.tmp`);
+        writeFileSync(parentTemp, body, {mode: 0o600, flag: "wx"});
+        linkSync(parentTemp, parent);
+        unlinkSync(parentTemp);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+    return this.get(id);
+  }
+
+  failStep(id, number, error) {
+    const now = new Date().toISOString();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const changed = this.db.prepare(`UPDATE batch_run_steps SET state = 'FAILED', ended_at = ?,
+        result_status = ?, detail = ? WHERE run_id = ? AND step_no = ? AND state = 'RUNNING'`)
+        .run(now, String(error?.code ?? "DUMP"), String(error?.message ?? error), id, number).changes;
+      if (changed !== 1) throw new Error(`batch step ${id}/${number} is not running`);
+      this.db.prepare(`UPDATE batch_run_steps SET state = 'SKIPPED', ended_at = ? WHERE run_id = ? AND state = 'PENDING'`)
+        .run(now, id);
+      const terminal = this.db.prepare(`UPDATE batch_runs SET state = 'FAILED', ended_at = ?, result_status = ?, detail = ?
+        WHERE id = ? AND state = 'RUNNING'`)
+        .run(now, String(error?.code ?? "DUMP"), String(error?.message ?? error), id).changes;
+      if (terminal !== 1) throw new Error(`batch run ${id} changed state during failure`);
+      this.db.exec("COMMIT");
+    } catch (failure) { this.db.exec("ROLLBACK"); throw failure; }
+    return this.get(id);
+  }
+
   get(id, options = {}) {
     if (!/^[0-9a-f-]{36}$/.test(String(id))) return undefined;
-    return publicRun(this.db.prepare("SELECT * FROM batch_runs WHERE id = ?").get(id), options);
+    const run = publicRun(this.db.prepare("SELECT * FROM batch_runs WHERE id = ?").get(id), options);
+    if (run) run.steps = this.steps(id, options);
+    return run;
+  }
+
+  steps(id, options = {}) {
+    return this.db.prepare("SELECT * FROM batch_run_steps WHERE run_id = ? ORDER BY step_no")
+      .all(id).map((row) => publicStep(row, options));
   }
 
   list(limit = 50) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new RangeError("limit must be 1..200");
     return this.db.prepare("SELECT * FROM batch_runs ORDER BY COALESCE(queued_at, started_at) DESC, id DESC LIMIT ?")
-      .all(limit).map((row) => publicRun(row));
+      .all(limit).map((row) => ({...publicRun(row), steps: this.steps(row.id)}));
   }
 
   output(id) {
@@ -262,6 +390,16 @@ export class BatchRuns {
     const bytes = readFileSync(join(this.artifacts, `${id}.json`));
     if (createHash("sha256").update(bytes).digest("hex") !== run.outputSha256) {
       throw new Error(`batch output ${id} failed its digest check`);
+    }
+    return JSON.parse(bytes.toString("utf8"));
+  }
+
+  stepOutput(id, number) {
+    const step = this.steps(id).find((item) => item.number === number);
+    if (!step?.outputSha256) return undefined;
+    const bytes = readFileSync(join(this.artifacts, `${id}-${number}.json`));
+    if (createHash("sha256").update(bytes).digest("hex") !== step.outputSha256) {
+      throw new Error(`batch step output ${id}/${number} failed its digest check`);
     }
     return JSON.parse(bytes.toString("utf8"));
   }
@@ -276,8 +414,14 @@ const plainMessage = (row) => Object.fromEntries(Object.entries(row.get()).map((
 
 // The same generated registry used by SUBMIT, with the same ABAP dialog-step
 // transaction boundary. Every invocation gets a fresh converted report.
-export async function runConvertedBatch(root, program, input = []) {
+export async function runConvertedBatch(root, program, input = [], expectedGeneration) {
   const answer = await dialogStep(async () => {
+    if (expectedGeneration !== undefined &&
+        (globalThis.abap?.context?.osdGeneration ?? liveGeneration(root)) !== expectedGeneration) {
+      const error = new Error(`Queued for ${expectedGeneration}; loaded generation changed before dispatch`);
+      error.code = "GENERATION_CHANGED";
+      throw error;
+    }
     // The initialized runtime owns the loaded generation. Resolving output/
     // here could follow a newly switched symlink before this process swaps.
     const report = globalThis.abap?.Classes?.ZCL_OSD_BATCH_REPORT;
@@ -328,18 +472,22 @@ export async function workQueuedBatch(root, store, execute = runConvertedBatch) 
   const next = store.claimNext(source ?? {legacyOnly: true});
   if (next.kind !== "claimed") return next;
   const {run} = next;
+  const step = next.step ? run.steps.find((item) => item.number === next.step) : undefined;
   const generation = globalThis.abap?.context?.osdGeneration ?? liveGeneration(root);
   if (run.generation !== generation) {
-    store.fail(run.id, {code: "GENERATION_CHANGED",
-      message: `Queued for ${run.generation}; worker runs ${generation}. Submit a new run after reviewing the change.`});
+    const error = {code: "GENERATION_CHANGED",
+      message: `Queued for ${run.generation}; worker runs ${generation}. Submit a new run after reviewing the change.`};
+    if (step) store.failStep(run.id, step.number, error);
+    else store.fail(run.id, error);
     return {kind: "failed", run: store.get(run.id)};
   }
   try {
-    const result = await execute(root, run.program, run.input);
-    const finished = store.finish(run.id, result);
-    return {kind: finished.state === "COMPLETED" ? "completed" : "failed", run: finished};
+    const result = await execute(root, step?.program ?? run.program, step?.input ?? run.input, run.generation);
+    const finished = step ? store.finishStep(run.id, step.number, result) : store.finish(run.id, result);
+    return {kind: finished.state === "QUEUED" ? "advanced" : finished.state === "COMPLETED" ? "completed" : "failed", run: finished};
   } catch (error) {
-    store.fail(run.id, error);
+    if (step) store.failStep(run.id, step.number, error);
+    else store.fail(run.id, error);
     return {kind: "failed", run: store.get(run.id)};
   }
 }
@@ -406,7 +554,7 @@ async function main(args) {
     while (!stopping) {
       if (process.env.STG_DB === "file") await drainJobOutbox(store);
       const result = await workQueuedBatch(root, store);
-      if (result.kind === "completed" || result.kind === "failed") {
+      if (result.kind === "completed" || result.kind === "failed" || result.kind === "advanced") {
         console.log(JSON.stringify(result));
       } else {
         await delay(250);

@@ -16,6 +16,26 @@ export function schemaTables(ddl) {
     [...String(statement).matchAll(/\bCREATE\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map((match) => match[1].toUpperCase()));
 }
 
+// The one-step JOB_* release added its outbox before it had ordered children.
+// This exact DDIC upgrade is additive; preserve its committed business rows
+// instead of taking the generic schema-drift path, which sets the file aside.
+export function migrateOneStepJobFile(native, found, wanted, ddl) {
+  if (found !== "213b4b76a4db329f") return false;
+  const columns = native.prepare("PRAGMA table_info(zosd_job_outbox)").all().map((row) => row.name);
+  const child = native.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'zosd_job_step'").get();
+  const create = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_step['"] /i.test(statement));
+  if (!columns.includes("intent_id") || columns.includes("step_count") || child || !create) return false;
+  native.exec("BEGIN IMMEDIATE");
+  try {
+    native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN step_count NCHAR(2)");
+    native.exec(create);
+    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
+      .run(wanted, new Date().toISOString());
+    native.exec("COMMIT");
+  } catch (error) { native.exec("ROLLBACK"); throw error; }
+  return true;
+}
+
 // HANA's execute opens a transaction even for the DELETE in a reseed.
 export async function reseedExistingHana(db) {
   const {reseedPackRows} = await import("./seed.mjs");
@@ -322,7 +342,8 @@ export async function setup(abap, schemas, insert) {
     db = new FileSqliteClient({trace: process.env.STG_DB_TRACE === "1", path});
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
-    const found = await db.stampedSchema();
+    let found = await db.stampedSchema();
+    if (migrateOneStepJobFile(db.db, found, wanted, schemas.sqlite)) found = wanted;
     if (found === wanted) {
       // the rows are already there, made for this DDIC. The tables the
       // generation writes at start (wwwparams: which SMW0 objects exist and

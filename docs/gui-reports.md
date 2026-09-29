@@ -209,14 +209,14 @@ and output as a direct run. This is an explicit process to start for now; it
 is not yet supervised by the OSD launcher. Its direct `enqueue` command is
 separate from the transactional ABAP job facade below.
 
-## One immediate JOB_OPEN / JOB_SUBMIT / JOB_CLOSE step
+## Immediate JOB_OPEN / JOB_SUBMIT / JOB_CLOSE report steps
 
 For a durable `STG_DB=file` instance, the common `JOB_OPEN` / `JOB_SUBMIT` /
-`JOB_CLOSE` call shape now schedules one converted static report. `JOB_SUBMIT`
-accepts no variant or ad hoc selection; the report runs with its own
+`JOB_CLOSE` call shape schedules up to 16 ordered converted static reports in
+one LUW. `JOB_SUBMIT` accepts no variant or ad hoc selection; each report runs with its own
 `INITIALIZATION` defaults. `JOB_CLOSE` requires `STRTIMMED = 'X'` and rejects
-date, time and target-system scheduling. Additional steps and external
-programs are refused. `JOBCOUNT` is an eight-digit handle for the current
+date, time and target-system scheduling. External programs are refused.
+`JOBCOUNT` is an eight-digit handle for the current
 dialog step; the durable run identity is a separate UUID. Exact SAP signatures,
 exception mapping and cross-dialog-step lifetime still require A4H measurement.
 The [SAP background programming guide](https://help.sap.com/docs/SAP_NETWEAVER_702/ff5bceb06c551014a400edb223056da3/4d94511b2cdb6c14e10000000a15822b.html)
@@ -225,15 +225,24 @@ variants until their lookup and execution are implemented.
 
 An open definition belongs to the current dialog step and disappears on
 `COMMIT WORK`, `ROLLBACK WORK`, `WAIT` (which commits), dump or step exit.
-`JOB_CLOSE` inserts immutable dispatch intent with Open SQL into
-`ZOSD_JOB_OUTBOX`, without committing its caller. `node tools/osd-batch-runs.mjs
-drain` reads only committed intent and imports it into the operations SQLite
-store. `work` and `worker` drain before claiming work. An import ledger keeps
-the outbox ID and payload digest: a crash after import but before business-DB
-acknowledgement retries the same run, and changed payload is refused.
+`JOB_CLOSE` inserts a parent dispatch intent and keyed ordered children with
+Open SQL into `ZOSD_JOB_OUTBOX` and `ZOSD_JOB_STEP`, without committing its caller.
+`node tools/osd-batch-runs.mjs drain` reads a committed parent and children
+from one snapshot and imports them into the operations SQLite store. `work`
+and `worker` drain before claiming work. An import ledger keeps the outbox ID
+and a versioned digest of all ordered steps: a crash after import but before
+business-DB acknowledgement retries the same run, and changed payload is
+refused. Parent and children are acknowledged in one business LUW. Legacy
+one-step intents retain their original digests. The one-step file SQLite
+outbox schema upgrades additively, preserving committed rows.
 The worker claims only rows for its business DB, client and SID. A mismatched
-build generation fails visibly before the report executes; an interrupted
-`RUNNING` run still needs manual review. The file SQLite adapter writes a
+build generation fails visibly before each report executes. One `work` call
+executes at most one step. A successful step atomically records its result,
+readies the next step and queues the parent again; the last step completes the
+parent. A failed step skips later steps. A crash before recording a step leaves
+the active step and parent `RUNNING` for manual review. Each step has its own
+immutable output artifact; the parent's output contains the last executed
+step. The file SQLite adapter writes a
 committed LUW to its WAL on disk; its `synchronous=NORMAL` setting gives
 process-crash recovery, not a power-loss guarantee. The in-memory/sql.js,
 DuckDB, HANA, PostgreSQL and browser modes reject this first scheduling slice
@@ -251,6 +260,12 @@ and lets the next queued run proceed. It never replays the interrupted run;
 submit a new one explicitly if appropriate. A richer doctor and supervised
 worker lifecycle are later steps. Direct synchronous `run` remains outside
 this BGR admission limit.
+
+Selection support is a later compatibility slice with three distinct cases:
+persisted report variants, RSPARAMS or range selections, and typed
+`PARAMETERS ... NO-DISPLAY` values (which can include tables). These steps
+store default selections only. Standard ABAP job read, state and log functions
+and an external scheduler API remain separate work.
 
 ## Local read API for saved runs
 

@@ -7,6 +7,7 @@ import {exclusive, currentStepToken} from "./osd-dialog-step.mjs";
 import {identity} from "./osd-identity.mjs";
 
 const value = (row, field) => String(row[field] ?? row[field.toUpperCase()] ?? "").trim();
+const sql = (text) => `'${String(text).replaceAll("'", "''")}'`;
 
 export async function drainJobOutbox(store, {env = process.env, afterImport} = {}) {
   if (currentStepToken() !== undefined) throw new Error("job outbox drain must run after the caller step commits");
@@ -19,8 +20,12 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
     const reader = new DatabaseSync(sourceDb, {readOnly: true});
     let rows;
     try {
+      reader.exec("BEGIN");
       rows = reader.prepare("SELECT * FROM zosd_job_outbox WHERE mandt = ? ORDER BY created_on, created_at, intent_id")
-        .all(who.client);
+        .all(who.client).map((row) => ({...row, steps: reader.prepare(
+          "SELECT step_no, program FROM zosd_job_step WHERE mandt = ? AND intent_id = ? ORDER BY step_no")
+          .all(who.client, value(row, "intent_id"))}));
+      reader.exec("COMMIT");
     } finally {
       reader.close();
     }
@@ -32,16 +37,48 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
         jobname: value(row, "jobname"), jobcount: value(row, "jobcount"),
         owner: value(row, "owner"), program: value(row, "program"),
         generation: value(row, "generation"),
+        steps: row.steps.map((step) => ({number: Number(value(step, "step_no")), program: value(step, "program")})),
+        stepCount: Number(value(row, "step_count")),
       };
       if (intent.sourceDb !== sourceDb || intent.client !== who.client || intent.sysid !== who.sid) {
         throw new Error(`outbox ${intent.intentId} belongs to another business instance`);
       }
+      // A v1 one-step intent has no child rows or count. Preserve its old
+      // import digest so an import-before-ack retry survives this upgrade.
+      const legacy = intent.stepCount === 0 && intent.steps.length === 0;
+      if (!legacy && (!Number.isInteger(intent.stepCount) || intent.stepCount < 1 || intent.stepCount > 16 ||
+          intent.steps.length !== intent.stepCount || intent.steps.some((step, i) => step.number !== i + 1) ||
+          intent.steps[0]?.program !== intent.program)) {
+        throw new Error(`outbox ${intent.intentId} has invalid ordered steps`);
+      }
+      if (legacy) delete intent.steps;
       store.importIntent(intent);
       await afterImport?.(intent); // test seam: process exit here must be safe
       try {
-        const quoted = intent.intentId.replaceAll("'", "''");
+        const idWhere = `mandt = ${sql(who.client)} AND intent_id = ${sql(intent.intentId)}`;
+        if (!legacy) {
+          let concurrent = false;
+          for (const step of intent.steps) {
+            const child = await client.delete({table: "zosd_job_step",
+              where: `${idWhere} AND step_no = ${sql(String(step.number).padStart(2, "0"))} AND program = ${sql(step.program)}`});
+            if (child.subrc === 0 && child.dbcnt === 1) continue;
+            await client.rollback();
+            const check = new DatabaseSync(sourceDb, {readOnly: true});
+            let pending;
+            try { pending = check.prepare(`SELECT 1 FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ?
+              UNION ALL SELECT 1 FROM zosd_job_step WHERE mandt = ? AND intent_id = ?`)
+              .get(who.client, intent.intentId, who.client, intent.intentId); } finally { check.close(); }
+            if (pending) throw new Error("outbox acknowledgement failed");
+            concurrent = true;
+            break;
+          }
+          if (concurrent) { imported += 1; continue; }
+        }
         const changed = await client.delete({table: "zosd_job_outbox",
-          where: `mandt = '${who.client}' AND intent_id = '${quoted}'`});
+          where: `${idWhere} AND sysid = ${sql(intent.sysid)} AND source_db = ${sql(intent.sourceDb)}
+            AND jobname = ${sql(intent.jobname)} AND jobcount = ${sql(intent.jobcount)}
+            AND owner = ${sql(intent.owner)} AND program = ${sql(intent.program)}
+            AND generation = ${sql(intent.generation)}${legacy ? "" : ` AND step_count = ${sql(String(intent.stepCount).padStart(2, "0"))}`}`});
         if (changed.subrc === 0 && changed.dbcnt === 1) {
           await client.commit();
         } else if (changed.subrc === 4) {
@@ -52,8 +89,9 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
           const check = new DatabaseSync(sourceDb, {readOnly: true});
           let pending;
           try {
-            pending = check.prepare("SELECT 1 FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ?")
-              .get(who.client, intent.intentId);
+            pending = check.prepare(`SELECT 1 FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ?
+              UNION ALL SELECT 1 FROM zosd_job_step WHERE mandt = ? AND intent_id = ?`)
+              .get(who.client, intent.intentId, who.client, intent.intentId);
           } finally { check.close(); }
           if (pending) throw new Error("outbox acknowledgement failed");
         } else {

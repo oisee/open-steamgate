@@ -7,6 +7,7 @@ import {DatabaseSync} from "node:sqlite";
 import express from "express";
 import {BatchRuns, runPersistedBatch, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
 import {batchMonitorHandler} from "../tools/osd-batch-monitor.mjs";
+import {migrateOneStepJobFile} from "./setup.mjs";
 
 const root = resolve(".");
 
@@ -19,6 +20,24 @@ describe("durable one-shot batch runs", function () {
     env = {...process.env, OSD_OPERATIONS_DB: join(dir, "operations.sqlite")};
   });
   afterEach(() => rmSync(dir, {recursive: true, force: true}));
+
+  it("migrates the one-step business outbox file additively", () => {
+    const db = new DatabaseSync(join(dir, "business.sqlite"));
+    try {
+      db.exec(`CREATE TABLE osd_schema (fingerprint TEXT, at TEXT);
+        INSERT INTO osd_schema VALUES ('213b4b76a4db329f', 'old');
+        CREATE TABLE zosd_job_outbox (mandt TEXT, intent_id TEXT, program TEXT);
+        INSERT INTO zosd_job_outbox VALUES ('123', 'saved-intent', 'ZGG_EX_012')`);
+      const create = `CREATE TABLE 'zosd_job_step' (mandt TEXT, intent_id TEXT, step_no TEXT, program TEXT,
+        PRIMARY KEY(mandt, intent_id, step_no))`;
+      expect(migrateOneStepJobFile(db, "213b4b76a4db329f", "new-fingerprint", [create])).to.equal(true);
+      expect(db.prepare("SELECT program FROM zosd_job_outbox WHERE intent_id = 'saved-intent'").get().program).to.equal("ZGG_EX_012");
+      expect(db.prepare("SELECT fingerprint FROM osd_schema").get().fingerprint).to.equal("new-fingerprint");
+      expect(db.prepare("PRAGMA table_info(zosd_job_outbox)").all().some((row) => row.name === "step_count")).to.equal(true);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM zosd_job_step").get().n).to.equal(0);
+      expect(migrateOneStepJobFile(db, "new-fingerprint", "new-fingerprint", [create])).to.equal(false);
+    } finally { db.close(); }
+  });
 
   it("reopens a finished run and its output on a fresh SQLite connection", async () => {
     const first = new BatchRuns(root, env);
