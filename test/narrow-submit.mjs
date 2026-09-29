@@ -119,16 +119,18 @@ describe("static narrow SUBMIT lowering", () => {
     expect(unknownStatements(after)).to.deep.equal([]);
   });
 
-  it("refuses WITH ... IN through VIA JOB and says why, instead of dropping the range", () => {
+  it("lowers WITH ... IN through VIA JOB with the synchronous range conversion", () => {
     const form = source("SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_number WITH s_date IN lt_range AND RETURN.");
-    expect(() => lowerNarrowSubmit(form, file, core)).to.throw("the job step input carries name/value pairs only");
+    const after = lowerNarrowSubmit(form, file, core);
+    expect(after).to.contain("submit_via_job( iv_program = 'ZGG_EX_012'");
+    expect(after).to.contain("( name = 'S_DATE' ranges = zcl_osd_submit_ranges=>of( lt_range ) )");
+    expect(unknownStatements(after)).to.deep.equal([]);
   });
 
   for (const form of [
     "SUBMIT (lv_program) AND RETURN.",
     "SUBMIT zgg_ex_012 VIA JOB lv_job AND RETURN.",
     "SUBMIT (lv_program) VIA JOB lv_job NUMBER lv_number AND RETURN.",
-    "SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_number WITH p_date IN lt_range AND RETURN.",
     "SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_number USING SELECTION-SET 'X' AND RETURN.",
     "SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_number TO SAP-SPOOL AND RETURN.",
     "SUBMIT zgg_ex_012 EXPORTING LIST TO MEMORY AND RETURN.",

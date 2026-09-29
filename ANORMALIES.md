@@ -1789,7 +1789,7 @@ for `zosd_status_app`, which has been deployed for a day.
 - Exact command used to run it: `node tools/osd-unit-run.mjs` with that row in `ltcl_batch_report->static_submit_passes_a_range`
 - Expected SAP behaviour: every option (EQ NE GT GE LT LE BT NB CP NP) with sign I or E; the value is in the range when it matches some I row (or there are no I rows) and matches no E row
 - Actual open-abap behaviour: `compareIn` handles I EQ, E EQ and I CP and throws `compareIn todo` for any other row. It returns true as soon as one row matches, so an E EQ row that the value does not equal makes the whole range true, even when no I row admits the value (`[I EQ 7, E EQ 4]` admits 1)
-- Impact on open-steamgate: `SUBMIT ... WITH sel IN range` passes the range correctly (`tools/osd-narrow-submit.mjs`, `zcl_osd_submit_ranges`), but a report that tests `IN` in ABAP only gets right answers for I EQ and I CP rows; BT and the other options dump
+- Impact on open-steamgate: synchronous and VIA JOB `SUBMIT ... WITH sel IN range` pass the range correctly (`tools/osd-narrow-submit.mjs`, `zcl_osd_submit_ranges`), but a report that tests `IN` in ABAP only gets right answers for I EQ and I CP rows; BT and the other options dump. The job input test checks transport of all ten options for both signs; its report execution comparison uses I EQ.
 - Smallest safe workaround: none here; the regression test uses I EQ rows only and says why
 - Upstream issue: not yet sent; a transpiler/runtime PR needs the critic gate and belongs to its own branch in `abaplint/transpiler`
 - Regression-test location: `test/unit/zcl_osd_batch_runner_test.clas.testclasses.abap` (`static_submit_passes_a_range`, `static_submit_range_is_checked`)

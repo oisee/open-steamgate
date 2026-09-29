@@ -25,6 +25,21 @@ describe("durable one-shot batch runs", function () {
   });
   afterEach(() => rmSync(dir, {recursive: true, force: true}));
 
+  it("retains every range option in an imported job step", () => {
+    const store = new BatchRuns(root, env);
+    try {
+      const ranges = ["I", "E"].flatMap((sign) =>
+        ["EQ", "NE", "GT", "GE", "LT", "LE", "BT", "NB", "CP", "NP"]
+          .map((option) => ({sign, option, low: "1", high: "9"})));
+      const {run} = store.importIntent({intentId: randomUUID().replaceAll("-", ""),
+        sourceDb: join(dir, "business.sqlite"), client: "123", sysid: "OSD",
+        owner: "DEVELOPER", jobname: "RANGES", jobcount: "00000001",
+        program: "ZOSD_SUB_RANGE", generation: "test",
+        steps: [{number: 1, program: "ZOSD_SUB_RANGE", input: [{name: "S_NUM", value: "", ranges}]}]});
+      expect(store.get(run.id, {revealInput: true}).steps[0].input[0].ranges).to.deep.equal(ranges);
+    } finally { store.close(); }
+  });
+
   it("adds retained job keys to an existing business DB and backfills pending intents", () => {
     const path = join(dir, "identity-upgrade.sqlite");
     const db = new DatabaseSync(path);
@@ -561,6 +576,25 @@ describe("durable one-shot batch runs", function () {
 });
 
 describe("job step input bounds", function () {
+  const options = ["EQ", "NE", "GT", "GE", "LT", "LE", "BT", "NB", "CP", "NP"];
+  it("round-trips every sign and option, and reads legacy name/value payloads", async function () {
+    const {jobInputJson} = await import("../tools/osd-job-input.mjs");
+    const ranges = ["I", "E"].flatMap((sign) => options.map((option) => ({sign, option, low: "1", high: "9"})));
+    expect(jobInputJson(JSON.stringify([{name: "S_NUM", value: "", ranges}]))).to.deep.equal([{name: "S_NUM", value: "", ranges}]);
+    expect(jobInputJson('[{"name":"P_DATE","value":"20251231"}]')).to.deep.equal([{name: "P_DATE", value: "20251231"}]);
+  });
+
+  it("accepts the largest range payload and rejects the next byte", async function () {
+    const {jobInputJson, JOB_INPUT_JSON_MAX} = await import("../tools/osd-job-input.mjs");
+    const ranges = Array.from({length: 20}, () => ({sign: "I", option: "EQ", low: "\u0001".repeat(255), high: "\u0001".repeat(255)}));
+    const input = Array.from({length: 20}, (_, i) => ({name: `S_${String(i).padStart(2, "0")}`, value: "\u0001".repeat(255), ranges}));
+    const json = JSON.stringify(input);
+    expect(json.length).to.be.at.most(JOB_INPUT_JSON_MAX);
+    expect(jobInputJson(json)).to.have.length(20);
+    expect(() => jobInputJson(" ".repeat(JOB_INPUT_JSON_MAX + 1))).to.throw(/too large/);
+    expect(() => jobInputJson(JSON.stringify([{name: "S_NUM", value: "", ranges: [...ranges, ranges[0]]}]))).to.throw(/at most 20/);
+  });
+
   it("accepts the largest valid input even when JSON escaping inflates it", async function () {
     const {jobInputJson, JOB_INPUT_JSON_MAX} = await import("../tools/osd-job-input.mjs");
     const input = Array.from({length: 20}, (_, i) => ({NAME: `P_${String(i).padStart(2, "0")}`, VALUE: "\u0001".repeat(255)}));
