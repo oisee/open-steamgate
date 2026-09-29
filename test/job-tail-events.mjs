@@ -50,6 +50,35 @@ describe("operations job tail events", () => {
     assert.equal(store.importIntent(intent("OTHER_CLIENT", "00000005", {client: "999", afterEvent})).run.state, "WAITING");
   });
 
+  it("binds ABAP predecessor events to the exact intent across recycled job keys", () => {
+    const old = intent("PARENT", "00000001");
+    const completed = store.importIntent(old).run;
+    store.claimNext();
+    store.finishStep(completed.id, 1, {status: "COMPLETED"});
+    const same = intent("CHILD", "00000002", {afterEvent: {
+      jobname: "PARENT", jobcount: "00000001", intentId: old.intentId}});
+    assert.equal(store.importIntent(same).run.state, "QUEUED");
+    const recycled = intent("NEW_CHILD", "00000003", {afterEvent: {
+      jobname: "PARENT", jobcount: "00000001", intentId: randomUUID().replaceAll("-", "")}});
+    assert.equal(store.importIntent(recycled).run.state, "WAITING");
+    assert.throws(() => store.importIntent({...same, afterEvent: recycled.afterEvent}), /changed after import/);
+  });
+
+  it("rejects an ambiguous legacy key after two completed intents reused it", () => {
+    const first = store.importIntent(intent("PARENT", "00000001")).run;
+    store.claimNext();
+    store.finishStep(first.id, 1, {status: "COMPLETED"});
+    const second = store.importIntent(intent("PARENT", "00000001")).run;
+    store.claimNext();
+    store.finishStep(second.id, 1, {status: "COMPLETED"});
+    assert.equal(eventCount(), 2);
+    assert.throws(() => store.importIntent(intent("OLD_CHILD", "00000003", {
+      afterEvent: {jobname: "PARENT", jobcount: "00000001"}})), /ambiguous predecessor job event/);
+    assert.equal(store.importIntent(intent("NEW_CHILD", "00000004", {
+      afterEvent: {jobname: "PARENT", jobcount: "00000001", intentId: second.id.replaceAll("-", "")}})).run.state,
+    "QUEUED");
+  });
+
   it("emits only after the last successful step", () => {
     const parent = store.importIntent(intent("PARENT", "00000001", {
       steps: [{number: 1, program: "Z_FIRST"}, {number: 2, program: "Z_SECOND"}]})).run;

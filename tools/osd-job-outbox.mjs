@@ -40,6 +40,13 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
         steps: row.steps.map((step) => ({number: Number(value(step, "step_no")), program: value(step, "program")})),
         stepCount: Number(value(row, "step_count")),
       };
+      const predName = value(row, "pred_jobname");
+      const predCount = value(row, "pred_jobcount");
+      const predIntent = value(row, "pred_intent_id");
+      if (predName || predCount || predIntent) {
+        if (!predName || !predCount || !predIntent) throw new Error(`outbox ${intent.intentId} has incomplete predecessor`);
+        intent.afterEvent = {jobname: predName, jobcount: predCount, intentId: predIntent};
+      }
       if (intent.sourceDb !== sourceDb || intent.client !== who.client || intent.sysid !== who.sid) {
         throw new Error(`outbox ${intent.intentId} belongs to another business instance`);
       }
@@ -78,7 +85,9 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
           where: `${idWhere} AND sysid = ${sql(intent.sysid)} AND source_db = ${sql(intent.sourceDb)}
             AND jobname = ${sql(intent.jobname)} AND jobcount = ${sql(intent.jobcount)}
             AND owner = ${sql(intent.owner)} AND program = ${sql(intent.program)}
-            AND generation = ${sql(intent.generation)}${legacy ? "" : ` AND step_count = ${sql(String(intent.stepCount).padStart(2, "0"))}`}`});
+            AND generation = ${sql(intent.generation)}${legacy ? "" : ` AND step_count = ${sql(String(intent.stepCount).padStart(2, "0"))}`}
+            AND pred_jobname = ${sql(predName)} AND pred_jobcount = ${sql(predCount)}
+            AND pred_intent_id = ${sql(predIntent)}`});
         if (changed.subrc === 0 && changed.dbcnt === 1) {
           await client.commit();
         } else if (changed.subrc === 4) {

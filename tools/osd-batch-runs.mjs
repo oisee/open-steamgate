@@ -11,6 +11,7 @@ import {drainJobOutbox} from "./osd-job-outbox.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 const MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
+const runIdOf = (id) => `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
 
 export function operationsPath(root = process.cwd(), env = process.env) {
   if (env.OSD_OPERATIONS_DB) return resolve(env.OSD_OPERATIONS_DB);
@@ -115,13 +116,19 @@ export class BatchRuns {
         this.db.exec("ALTER TABLE batch_runs ADD COLUMN after_job_name TEXT");
         this.db.exec("ALTER TABLE batch_runs ADD COLUMN after_job_count TEXT");
       }
+      if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "after_intent_id")) {
+        this.db.exec("ALTER TABLE batch_runs ADD COLUMN after_intent_id TEXT");
+      }
       this.db.exec(`CREATE TABLE IF NOT EXISTS batch_job_events (
         run_id TEXT PRIMARY KEY, source_db TEXT NOT NULL, source_client TEXT NOT NULL,
         source_sysid TEXT NOT NULL, source_owner TEXT NOT NULL,
         job_name TEXT NOT NULL, job_count TEXT NOT NULL, occurred_at TEXT NOT NULL
       )`);
-      this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS batch_job_events_key ON batch_job_events
-        (source_db, source_client, source_sysid, source_owner, job_name, job_count)`);
+      // The business database can be replaced at the same path. The event's
+      // run ID is the durable instance discriminator for ABAP dependencies.
+      this.db.exec("DROP INDEX IF EXISTS batch_job_events_key");
+      this.db.exec(`CREATE INDEX IF NOT EXISTS batch_job_events_key ON batch_job_events
+        (source_db, source_client, source_sysid, source_owner, job_name, job_count, run_id)`);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -165,8 +172,9 @@ export class BatchRuns {
         run.job_name, run.job_count, at);
     const waiting = this.db.prepare(`SELECT id, step_count FROM batch_runs WHERE state = 'WAITING'
       AND source_db = ? AND source_client = ? AND source_sysid = ? AND source_owner = ?
-      AND after_job_name = ? AND after_job_count = ?`).all(run.source_db, run.source_client,
-        run.source_sysid, run.source_owner, run.job_name, run.job_count);
+      AND after_job_name = ? AND after_job_count = ?
+      AND (after_intent_id IS NULL OR after_intent_id = ?)`).all(run.source_db, run.source_client,
+        run.source_sysid, run.source_owner, run.job_name, run.job_count, id);
     for (const child of waiting) {
       if (child.step_count > 0) {
         const ready = this.db.prepare(`UPDATE batch_run_steps SET state = 'READY'
@@ -227,17 +235,18 @@ export class BatchRuns {
     const sourceDb = resolve(String(intent.sourceDb ?? ""));
     const after = intent.afterEvent;
     if (after !== undefined && (!steps || typeof after !== "object" || after === null ||
-        Object.keys(after).sort().join(",") !== "jobcount,jobname" ||
+        !["jobcount,jobname", "intentId,jobcount,jobname"].includes(Object.keys(after).sort().join(",")) ||
         typeof after.jobname !== "string" || !after.jobname || after.jobname.length > 32 ||
         after.jobname !== after.jobname.trim() || after.jobname !== after.jobname.toUpperCase() ||
         !/^\d{8}$/.test(after.jobcount) ||
+        (after.intentId !== undefined && !/^[0-9a-f]{32}$/.test(after.intentId)) ||
         (after.jobname === intent.jobname && after.jobcount === intent.jobcount))) {
       throw new TypeError("invalid predecessor job event");
     }
     const base = {sourceDb, client: intent.client, sysid: intent.sysid,
       jobname: intent.jobname, jobcount: intent.jobcount, owner: intent.owner,
       program, generation: intent.generation};
-    const payload = after ? JSON.stringify({version: 3, ...base, steps, afterEvent: after}) :
+    const payload = after ? JSON.stringify({version: after.intentId ? 4 : 3, ...base, steps, afterEvent: after}) :
       steps ? JSON.stringify({version: 2, ...base, steps}) : JSON.stringify(base);
     const digest = createHash("sha256").update(payload).digest("hex");
     this.db.exec("BEGIN IMMEDIATE");
@@ -249,19 +258,23 @@ export class BatchRuns {
         return {kind: "duplicate", run: this.get(runId)};
       }
       const queuedAt = new Date().toISOString();
-      const released = !after || !!this.db.prepare(`SELECT 1 FROM batch_job_events
+      const matching = after ? this.db.prepare(`SELECT run_id FROM batch_job_events
         WHERE source_db = ? AND source_client = ? AND source_sysid = ? AND source_owner = ?
-        AND job_name = ? AND job_count = ?`).get(sourceDb, String(intent.client), String(intent.sysid),
-          String(intent.owner), after.jobname, after.jobcount);
+        AND job_name = ? AND job_count = ?
+        AND (? IS NULL OR run_id = ?) LIMIT 2`).all(sourceDb, String(intent.client), String(intent.sysid),
+          String(intent.owner), after.jobname, after.jobcount,
+          after.intentId ? runIdOf(after.intentId) : null, after.intentId ? runIdOf(after.intentId) : null) : [];
+      if (after && !after.intentId && matching.length > 1) throw new Error("ambiguous predecessor job event");
+      const released = !after || matching.length === 1;
       this.db.prepare(`INSERT INTO batch_runs
         (id, program, generation, started_at, queued_at, state, input_json,
          source_db, source_client, source_sysid, source_owner, job_name, job_count, step_count,
-         after_job_name, after_job_count)
-        VALUES (?, ?, ?, '', ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(runId, program, String(intent.generation), queuedAt,
+         after_job_name, after_job_count, after_intent_id)
+        VALUES (?, ?, ?, '', ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(runId, program, String(intent.generation), queuedAt,
           released ? "QUEUED" : "WAITING",
           sourceDb, String(intent.client), String(intent.sysid), String(intent.owner),
           String(intent.jobname), String(intent.jobcount), steps?.length ?? 0,
-          after?.jobname ?? null, after?.jobcount ?? null);
+          after?.jobname ?? null, after?.jobcount ?? null, after?.intentId ? runIdOf(after.intentId) : null);
       this.db.prepare("INSERT INTO batch_imports (intent_id, payload_sha256, run_id) VALUES (?, ?, ?)")
         .run(id, digest, runId);
       if (steps) {

@@ -59,6 +59,39 @@ export function migrateJobIdentityFile(native, found, wanted, ddl, fingerprintOf
   return true;
 }
 
+// The predecessor columns are additive. Existing committed outbox rows have
+// no dependency and keep their original import digest.
+export function beforeJobPredecessorDDL(ddl) {
+  const parent = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_outbox['"] /i.test(statement));
+  if (!parent) return ddl;
+  const previousParent = parent
+    .replace(/,\s*['"]pred_jobname['"]\s+NCHAR\(32\)\s+COLLATE RTRIM/i, "")
+    .replace(/,\s*['"]pred_jobcount['"]\s+NCHAR\(8\)\s+COLLATE RTRIM/i, "")
+    .replace(/,\s*['"]pred_intent_id['"]\s+NCHAR\(32\)\s+COLLATE RTRIM/i, "");
+  return ddl.map((statement) => statement === parent ? previousParent : statement);
+}
+
+export function migrateJobPredecessorFile(native, found, wanted, ddl, fingerprintOf) {
+  if (fingerprintOf(ddl) !== wanted) return false;
+  const previous = beforeJobPredecessorDDL(ddl);
+  if (fingerprintOf(previous) === wanted) return false;
+  if (fingerprintOf(previous) !== found) return false;
+  native.exec("BEGIN IMMEDIATE");
+  try {
+    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
+    if (current === wanted) { native.exec("COMMIT"); return true; }
+    if (current !== found) { native.exec("COMMIT"); return false; }
+    native.exec(`ALTER TABLE zosd_job_outbox ADD COLUMN pred_jobname NCHAR(32) COLLATE RTRIM`);
+    native.exec(`ALTER TABLE zosd_job_outbox ADD COLUMN pred_jobcount NCHAR(8) COLLATE RTRIM`);
+    native.exec(`ALTER TABLE zosd_job_outbox ADD COLUMN pred_intent_id NCHAR(32) COLLATE RTRIM`);
+    native.exec("UPDATE zosd_job_outbox SET pred_jobname = '', pred_jobcount = '', pred_intent_id = ''");
+    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
+      .run(wanted, new Date().toISOString());
+    native.exec("COMMIT");
+  } catch (error) { native.exec("ROLLBACK"); throw error; }
+  return true;
+}
+
 // HANA's execute opens a transaction even for the DELETE in a reseed.
 export async function reseedExistingHana(db) {
   const {reseedPackRows} = await import("./seed.mjs");
@@ -366,6 +399,10 @@ export async function setup(abap, schemas, insert) {
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     let found = await db.stampedSchema();
+    const beforePredecessor = beforeJobPredecessorDDL(schemas.sqlite);
+    const priorWanted = fingerprintOf(beforePredecessor);
+    if (migrateJobIdentityFile(db.db, found, priorWanted, beforePredecessor, fingerprintOf)) found = priorWanted;
+    if (migrateJobPredecessorFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
     if (migrateJobIdentityFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
     if (found === wanted) {
       // the rows are already there, made for this DDIC. The tables the

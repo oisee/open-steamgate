@@ -1,22 +1,43 @@
 # Private operations job tail events
 
-`BatchRuns.importIntent()` accepts an optional `afterEvent: {jobname, jobcount}`
-for an ordered, imported job. This is an operations-store seam only. The ABAP
-job functions and business outbox do not yet produce this field.
+`JOB_CLOSE` accepts a narrow standard predecessor start condition:
+`PRED_JOBNAME`, `PRED_JOBCOUNT`, and `PREDJOB_CHECKSTAT = 'X'`, with
+`STRTIMMED` empty. It requires an already closed predecessor under the same
+client and owner. `JOB_OPEN` and `JOB_SUBMIT` retain their existing roles.
+Other start conditions, `PREDJOB_CHECKSTAT` without `X`, and a predecessor
+already known to be terminal fail closed. The
+outbox records the predecessor's intent ID alongside its name and count.
+The importer sends `afterEvent: {jobname, jobcount, intentId}` to the
+operations store. `JOB_WAS_RELEASED = 'X'` means the dependent was accepted
+for scheduling; it may remain `WAITING` until predecessor success.
 
-The import ledger hashes a version 3 payload when `afterEvent` is present;
-version 1 and 2 hashes remain unchanged. An imported dependent enters
+`BatchRuns.importIntent()` also retains the older private
+`afterEvent: {jobname, jobcount}` form for existing callers.
+
+The import ledger hashes a version 4 payload for an ABAP predecessor with
+`intentId`, version 3 for the older private event form, and keeps version 1
+and 2 hashes unchanged. An imported dependent enters
 `WAITING` with all steps `PENDING` until the named predecessor has completed
 successfully in the same business database, client, system ID, and owner.
 The event ledger survives restart, so an import after the predecessor completed
 enters `QUEUED` immediately. Workers claim only `QUEUED` jobs.
 
-This private seam identifies a business instance by its database path, client,
-system ID and owner. If an ephemeral business database is replaced at the same
-path while the operations database is retained, an old completion event could
-match a recycled job key. Reset the operations database together with that
-business database. A persistent instance identifier is needed before exposing
-this dependency through an ABAP scheduling API.
+The ABAP path also matches the predecessor's retained intent ID. A replaced
+business database at the same path cannot release a new dependent from an old
+completion event with a recycled job name and count. The older private
+two-field seam does not have this protection; reset its operations database
+when replacing the business database. If multiple completed intents already
+share one key, a new two-field import is rejected as ambiguous; a previously
+released version 3 dependent still reads against the earliest retained event.
+
+SAP documents `PREDJOB_CHECKSTAT` as the success condition and describes a
+predecessor that is scheduled or released when the successor is scheduled.
+A bounded A4H probe confirmed the three import parameter names and accepted
+a future parent and dependent closed in one ABAP invocation; both remained
+scheduled with no child start time. It did not measure failure, late-completion
+or cross-owner behavior. The OSD importer can still catch a predecessor that
+completes after the dependent's valid `JOB_CLOSE` but before dependent import.
+See [SAP start condition documentation](https://help.sap.com/docs/SAP_NETWEAVER_700/12acb4f96c531014b9dad87356daf3a3/4d938f1c48846e73e10000000a15822b.html).
 
 The predecessor's terminal success, its single completion event, and release
 of waiting dependents commit in one operations SQLite transaction. A failed
