@@ -1,5 +1,5 @@
 FUNCTION job_close.
-*" IMPORTING JOBNAME JOBCOUNT STRTIMMED SDLSTRTDT SDLSTRTTM TARGETSYSTEM PRED_JOBNAME PRED_JOBCOUNT PREDJOB_CHECKSTAT
+*" IMPORTING JOBNAME JOBCOUNT STRTIMMED SDLSTRTDT SDLSTRTTM TARGETSYSTEM PRED_JOBNAME PRED_JOBCOUNT PREDJOB_CHECKSTAT EVENT_ID EVENT_PARAM EVENT_PERIODIC
 *" EXPORTING JOB_WAS_RELEASED
 *" EXCEPTIONS JOBNAME_MISSING JOB_NOTEX JOB_CLOSE_FAILED
   DATA lv_error TYPE string.
@@ -14,6 +14,9 @@ FUNCTION job_close.
   DATA lv_pred_name TYPE string.
   DATA lv_requested_name TYPE string.
   DATA lv_pred_state TYPE string.
+  DATA lv_event_name TYPE string.
+  DATA lv_source_instance TYPE string.
+  DATA lv_signal_seq TYPE string.
   DATA lv_step_index TYPE i.
   DATA ls_intent TYPE zosd_job_outbox.
   DATA ls_step TYPE zosd_job_step.
@@ -27,18 +30,28 @@ FUNCTION job_close.
   lv_requested_name = jobname.
   CONDENSE lv_requested_name.
   TRANSLATE lv_requested_name TO UPPER CASE.
+  lv_event_name = event_id.
+  CONDENSE lv_event_name.
+  TRANSLATE lv_event_name TO UPPER CASE.
   IF sdlstrtdt IS NOT INITIAL OR sdlstrttm IS NOT INITIAL
-      OR targetsystem IS NOT INITIAL.
+      OR targetsystem IS NOT INITIAL OR event_periodic IS NOT INITIAL.
     RAISE job_close_failed.
   ENDIF.
-  IF lv_pred_name IS INITIAL AND pred_jobcount IS INITIAL
+  IF lv_event_name IS NOT INITIAL.
+    IF strtimmed IS NOT INITIAL OR lv_pred_name IS NOT INITIAL
+        OR pred_jobcount IS NOT INITIAL OR predjob_checkstat IS NOT INITIAL
+        OR strlen( lv_event_name ) > 32 OR strlen( event_param ) > 64.
+      RAISE job_close_failed.
+    ENDIF.
+  ELSEIF lv_pred_name IS INITIAL AND pred_jobcount IS INITIAL
       AND predjob_checkstat IS INITIAL.
-    IF strtimmed <> 'X'.
+    IF strtimmed <> 'X' OR event_param IS NOT INITIAL.
       RAISE job_close_failed.
     ENDIF.
   ELSE.
     IF strtimmed IS NOT INITIAL OR lv_pred_name IS INITIAL
         OR pred_jobcount IS INITIAL OR predjob_checkstat <> 'X'
+        OR event_param IS NOT INITIAL
         OR lv_pred_name = lv_requested_name AND pred_jobcount = jobcount.
       RAISE job_close_failed.
     ENDIF.
@@ -63,20 +76,24 @@ FUNCTION job_close.
   CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'
     EXPORTING iv_command = 'CLOSE' iv_jobname = jobname
               iv_jobcount = jobcount iv_owner = sy-uname iv_client = sy-mandt
+              iv_event_id = lv_event_name
     IMPORTING ev_intent_id = lv_intent ev_jobname = lv_jobname ev_program = lv_program
               ev_step_count = lv_step_count
               ev_generation = lv_generation ev_source_db = lv_source
+              ev_source_instance = lv_source_instance ev_signal_seq = lv_signal_seq
               ev_error = lv_error.
   IF lv_error = 'Job definition not found in this LUW'.
     RAISE job_notex.
   ENDIF.
-  IF lv_error IS NOT INITIAL OR lv_intent IS INITIAL OR lv_jobname IS INITIAL.
+  IF lv_error IS NOT INITIAL OR lv_intent IS INITIAL OR lv_jobname IS INITIAL
+      OR lv_source_instance IS INITIAL.
     RAISE job_close_failed.
   ENDIF.
   ls_intent-mandt = sy-mandt.
   ls_intent-intent_id = lv_intent.
   ls_intent-sysid = sy-sysid.
   ls_intent-source_db = lv_source.
+  ls_intent-source_instance = lv_source_instance.
   ls_intent-jobname = lv_jobname.
   ls_intent-jobcount = jobcount.
   ls_intent-owner = sy-uname.
@@ -86,6 +103,11 @@ FUNCTION job_close.
   ls_intent-pred_jobname = lv_pred_name.
   ls_intent-pred_jobcount = pred_jobcount.
   ls_intent-pred_intent_id = lv_pred_intent.
+  ls_intent-event_id = lv_event_name.
+  ls_intent-event_param = event_param.
+  IF lv_event_name IS NOT INITIAL.
+    ls_intent-wait_seq = lv_signal_seq.
+  ENDIF.
   ls_intent-created_on = sy-datum.
   ls_intent-created_at = sy-uzeit.
   lv_step_index = 1.

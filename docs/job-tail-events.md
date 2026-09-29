@@ -30,6 +30,9 @@ when replacing the business database. If multiple completed intents already
 share one key, a new two-field import is rejected as ambiguous; a previously
 released version 3 dependent still reads against the earliest retained event.
 
+Named `BP_EVENT_RAISE` signals use a separate edge-triggered occurrence
+ledger; see [named events](job-named-events.md).
+
 SAP documents `PREDJOB_CHECKSTAT` as the success condition and describes a
 predecessor that is scheduled or released when the successor is scheduled.
 A bounded A4H probe confirmed the three import parameter names and accepted

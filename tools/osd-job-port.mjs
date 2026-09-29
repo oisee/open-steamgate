@@ -7,7 +7,7 @@ import {DatabaseSync} from "node:sqlite";
 import {resolve} from "node:path";
 import {currentStepToken, onStepLuwEnd} from "./osd-dialog-step.mjs";
 import {givenText, fill} from "./osd-destination.mjs";
-import {liveGeneration, operationsPath} from "./osd-batch-runs.mjs";
+import {BatchRuns, liveGeneration, operationsPath} from "./osd-batch-runs.mjs";
 import {identity} from "./osd-identity.mjs";
 import {readJobSnapshot} from "./osd-job-snapshot.mjs";
 
@@ -15,7 +15,7 @@ const pending = new WeakMap();
 const keyOf = (name, count) => `${name}\0${count}`;
 const statusFill = (signature, fields) => fill(signature, {
   EV_JOBCOUNT: "", EV_JOBNAME: "", EV_INTENT_ID: "", EV_PROGRAM: "",
-  EV_GENERATION: "", EV_SOURCE_DB: "", EV_ERROR: "",
+  EV_GENERATION: "", EV_SOURCE_DB: "", EV_SOURCE_INSTANCE: "", EV_SIGNAL_SEQ: "", EV_ERROR: "",
   EV_PHASE: "", EV_STATE: "", EV_RESULT_STATUS: "", EV_STEP_COUNT: "",
   EV_ERROR_CODE: "", ...fields,
 });
@@ -58,6 +58,8 @@ export class JobDestination {
     const jobname = givenText(signature, "IV_JOBNAME").toUpperCase();
     const count = givenText(signature, "IV_JOBCOUNT");
     const program = givenText(signature, "IV_PROGRAM").toUpperCase();
+    const eventId = givenText(signature, "IV_EVENT_ID").toUpperCase();
+    const eventParam = givenText(signature, "IV_EVENT_PARAM");
     const stepNo = Number(givenText(signature, "IV_STEP_NO"));
     const owner = givenText(signature, "IV_OWNER").toUpperCase();
     const client = givenText(signature, "IV_CLIENT");
@@ -137,6 +139,27 @@ export class JobDestination {
     }
     let answer;
     switch (command) {
+      case "EVENT": {
+        const sourceDb = resolve(db.path);
+        if (sourceDb.length > 255) { answer = {EV_ERROR: "Business database path exceeds outbox field length"}; break; }
+        const instance = db.db.prepare("SELECT id FROM zosd_job_source_instance LIMIT 1").get()?.id;
+        if (!/^[0-9a-f]{32}$/.test(instance ?? "")) {
+          answer = {EV_ERROR: "Business instance ID unavailable"}; break;
+        }
+        if (!/^[A-Z][A-Z0-9_]{0,31}$/.test(jobname) || eventParam.length > 64) {
+          answer = {EV_ERROR: "Invalid event ID or parameter"}; break;
+        }
+        const store = new BatchRuns(this.root, this.env);
+        try {
+          const who = identity(this.env);
+          store.importNamedEvent({intentId: randomUUID().replaceAll("-", ""), sourceDb,
+            sourceInstance: instance, client: who.client, sysid: who.sid, owner: who.user,
+            id: jobname, param: eventParam});
+          answer = {};
+        } catch (error) { answer = {EV_ERROR: String(error?.message ?? error)}; }
+        finally { store.close(); }
+        break;
+      }
       case "OPEN": {
         if (!jobname || jobname.length > 32) { answer = {EV_ERROR: "Invalid job name"}; break; }
         let number;
@@ -176,7 +199,21 @@ export class JobDestination {
         const job = jobs.get(key);
         if (!job || job.owner !== owner || job.client !== client) { answer = {EV_ERROR: "Job definition not found in this LUW"}; break; }
         if (!job.steps.length || job.closed) { answer = {EV_ERROR: "Job has no open report steps"}; break; }
+        if (eventId && !/^[A-Z][A-Z0-9_]{0,31}$/.test(eventId)) {
+          answer = {EV_ERROR: "Invalid event ID"}; break;
+        }
         if (resolve(db.path).length > 255) { answer = {EV_ERROR: "Business database path exceeds outbox field length"}; break; }
+        const instance = db.db.prepare("SELECT id FROM zosd_job_source_instance LIMIT 1").get()?.id;
+        if (!/^[0-9a-f]{32}$/.test(instance ?? "")) {
+          answer = {EV_ERROR: "Business instance ID unavailable"}; break;
+        }
+        let signalSeq;
+        if (eventId) {
+          const store = new BatchRuns(this.root, this.env);
+          try { signalSeq = store.reserveSignalSeq(); }
+          catch (error) { answer = {EV_ERROR: String(error?.message ?? error)}; break; }
+          finally { store.close(); }
+        }
         const intentId = randomUUID().replaceAll("-", "");
         const savepoint = `osd_job_${intentId}`;
         // Open SQL uses this same FileSqliteClient. A statement failure can
@@ -198,6 +235,8 @@ export class JobDestination {
           EV_STEP_COUNT: String(job.steps.length),
           EV_GENERATION: this.generation,
           EV_SOURCE_DB: resolve(db.path),
+          EV_SOURCE_INSTANCE: instance,
+          EV_SIGNAL_SEQ: signalSeq === undefined ? "" : String(signalSeq),
         };
         break;
       }

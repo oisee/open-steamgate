@@ -219,7 +219,8 @@ For a durable `STG_DB=file` instance, the common `JOB_OPEN` / `JOB_SUBMIT` /
 one LUW. `JOB_SUBMIT` accepts no variant or ad hoc selection; each report runs with its own
 `INITIALIZATION` defaults. `JOB_CLOSE` accepts `STRTIMMED = 'X'` or a
 same-owner predecessor with `PRED_JOBNAME`, `PRED_JOBCOUNT`, and
-`PREDJOB_CHECKSTAT = 'X'`; see [job tail events](job-tail-events.md). It rejects
+`PREDJOB_CHECKSTAT = 'X'`, or a named `EVENT_ID` wait; see
+[job tail events](job-tail-events.md) and [named events](job-named-events.md). It rejects
 date, time and target-system scheduling. External programs are refused.
 `JOBCOUNT` is an eight-digit handle for the current
 dialog step; the durable run identity is a separate UUID. Exact SAP signatures,

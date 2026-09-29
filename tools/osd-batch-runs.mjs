@@ -119,6 +119,24 @@ export class BatchRuns {
       if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "after_intent_id")) {
         this.db.exec("ALTER TABLE batch_runs ADD COLUMN after_intent_id TEXT");
       }
+      for (const column of ["source_instance", "wait_seq", "after_named_id", "after_named_param"]) {
+        if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((item) => item.name === column)) {
+          this.db.exec(`ALTER TABLE batch_runs ADD COLUMN ${column} ${column === "wait_seq" ? "INTEGER" : "TEXT"}`);
+        }
+      }
+      this.db.exec(`CREATE TABLE IF NOT EXISTS batch_named_events (
+        intent_id TEXT PRIMARY KEY, payload_sha256 TEXT NOT NULL,
+        source_db TEXT NOT NULL, source_instance TEXT NOT NULL,
+        source_client TEXT NOT NULL, source_sysid TEXT NOT NULL, source_owner TEXT NOT NULL,
+        event_id TEXT NOT NULL, event_param TEXT NOT NULL, signal_seq INTEGER NOT NULL,
+        occurred_at TEXT NOT NULL
+      )`);
+      this.db.exec(`CREATE INDEX IF NOT EXISTS batch_named_events_match ON batch_named_events
+        (source_db, source_instance, source_client, source_sysid, source_owner, event_id, signal_seq)`);
+      this.db.exec(`CREATE TABLE IF NOT EXISTS batch_signal_clock (last_seq INTEGER NOT NULL)`);
+      if (!this.db.prepare("SELECT 1 FROM batch_signal_clock LIMIT 1").get()) {
+        this.db.exec("INSERT INTO batch_signal_clock (last_seq) VALUES (0)");
+      }
       this.db.exec(`CREATE TABLE IF NOT EXISTS batch_job_events (
         run_id TEXT PRIMARY KEY, source_db TEXT NOT NULL, source_client TEXT NOT NULL,
         source_sysid TEXT NOT NULL, source_owner TEXT NOT NULL,
@@ -234,6 +252,15 @@ export class BatchRuns {
     }
     const sourceDb = resolve(String(intent.sourceDb ?? ""));
     const after = intent.afterEvent;
+    const named = intent.namedEvent;
+    if (named !== undefined && (after !== undefined || !steps || typeof named !== "object" || named === null ||
+        Object.keys(named).sort().join(",") !== "id,param,seq,sourceInstance" ||
+        typeof named.id !== "string" || !/^[A-Z][A-Z0-9_]{0,31}$/.test(named.id) ||
+        typeof named.param !== "string" || named.param.length > 64 ||
+        !/^[0-9a-f]{32}$/.test(named.sourceInstance) ||
+        !Number.isSafeInteger(named.seq) || named.seq < 1)) {
+      throw new TypeError("invalid named job event condition");
+    }
     if (after !== undefined && (!steps || typeof after !== "object" || after === null ||
         !["jobcount,jobname", "intentId,jobcount,jobname"].includes(Object.keys(after).sort().join(",")) ||
         typeof after.jobname !== "string" || !after.jobname || after.jobname.length > 32 ||
@@ -246,7 +273,8 @@ export class BatchRuns {
     const base = {sourceDb, client: intent.client, sysid: intent.sysid,
       jobname: intent.jobname, jobcount: intent.jobcount, owner: intent.owner,
       program, generation: intent.generation};
-    const payload = after ? JSON.stringify({version: after.intentId ? 4 : 3, ...base, steps, afterEvent: after}) :
+    const payload = named ? JSON.stringify({version: 5, ...base, steps, namedEvent: named}) :
+      after ? JSON.stringify({version: after.intentId ? 4 : 3, ...base, steps, afterEvent: after}) :
       steps ? JSON.stringify({version: 2, ...base, steps}) : JSON.stringify(base);
     const digest = createHash("sha256").update(payload).digest("hex");
     this.db.exec("BEGIN IMMEDIATE");
@@ -265,16 +293,24 @@ export class BatchRuns {
           String(intent.owner), after.jobname, after.jobcount,
           after.intentId ? runIdOf(after.intentId) : null, after.intentId ? runIdOf(after.intentId) : null) : [];
       if (after && !after.intentId && matching.length > 1) throw new Error("ambiguous predecessor job event");
-      const released = !after || matching.length === 1;
+      const namedReleased = named && !!this.db.prepare(`SELECT 1 FROM batch_named_events
+        WHERE source_db = ? AND source_instance = ? AND source_client = ? AND source_sysid = ?
+          AND source_owner = ? AND event_id = ? AND signal_seq > ?
+          AND (? = '' OR event_param = ?) LIMIT 1`).get(sourceDb, named.sourceInstance,
+          String(intent.client), String(intent.sysid), String(intent.owner), named.id,
+          named.seq, named.param, named.param);
+      const released = named ? namedReleased : !after || matching.length === 1;
       this.db.prepare(`INSERT INTO batch_runs
         (id, program, generation, started_at, queued_at, state, input_json,
          source_db, source_client, source_sysid, source_owner, job_name, job_count, step_count,
-         after_job_name, after_job_count, after_intent_id)
-        VALUES (?, ?, ?, '', ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(runId, program, String(intent.generation), queuedAt,
+         after_job_name, after_job_count, after_intent_id,
+         source_instance, wait_seq, after_named_id, after_named_param)
+        VALUES (?, ?, ?, '', ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(runId, program, String(intent.generation), queuedAt,
           released ? "QUEUED" : "WAITING",
           sourceDb, String(intent.client), String(intent.sysid), String(intent.owner),
           String(intent.jobname), String(intent.jobcount), steps?.length ?? 0,
-          after?.jobname ?? null, after?.jobcount ?? null, after?.intentId ? runIdOf(after.intentId) : null);
+          after?.jobname ?? null, after?.jobcount ?? null, after?.intentId ? runIdOf(after.intentId) : null,
+          named?.sourceInstance ?? null, named?.seq ?? null, named?.id ?? null, named?.param ?? null);
       this.db.prepare("INSERT INTO batch_imports (intent_id, payload_sha256, run_id) VALUES (?, ?, ?)")
         .run(id, digest, runId);
       if (steps) {
@@ -292,6 +328,62 @@ export class BatchRuns {
     }
   }
 
+  importNamedEvent(event) {
+    const id = String(event.intentId ?? "").toLowerCase();
+    const sourceDb = resolve(String(event.sourceDb ?? ""));
+    if (!/^[0-9a-f]{32}$/.test(id) || !/^[0-9a-f]{32}$/.test(event.sourceInstance) ||
+        !/^[A-Z][A-Z0-9_]{0,31}$/.test(event.id) ||
+        typeof event.param !== "string" || event.param.length > 64 ||
+        (event.seq !== undefined && (!Number.isSafeInteger(event.seq) || event.seq < 1))) {
+      throw new TypeError("invalid named event intent");
+    }
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const old = this.db.prepare("SELECT payload_sha256, signal_seq FROM batch_named_events WHERE intent_id = ?").get(id);
+      const seq = event.seq ?? old?.signal_seq ?? this.#nextSignalSeq();
+      const base = {sourceDb, sourceInstance: event.sourceInstance, client: event.client,
+        sysid: event.sysid, owner: event.owner, id: event.id, param: event.param, seq};
+      const digest = createHash("sha256").update(JSON.stringify({version: 1, ...base})).digest("hex");
+      if (old) {
+        if (old.payload_sha256 !== digest) throw new Error(`named event ${id} changed after import`);
+        this.db.exec("COMMIT");
+        return {kind: "duplicate"};
+      }
+      const at = new Date().toISOString();
+      this.db.prepare(`INSERT INTO batch_named_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, digest, sourceDb, event.sourceInstance, String(event.client), String(event.sysid),
+          String(event.owner), event.id, event.param, seq, at);
+      const waiting = this.db.prepare(`SELECT id, step_count FROM batch_runs WHERE state = 'WAITING'
+        AND source_db = ? AND source_instance = ? AND source_client = ? AND source_sysid = ?
+        AND source_owner = ? AND after_named_id = ? AND wait_seq < ?
+        AND (after_named_param = '' OR after_named_param = ?)`)
+        .all(sourceDb, event.sourceInstance, String(event.client), String(event.sysid),
+          String(event.owner), event.id, seq, event.param);
+      for (const child of waiting) {
+        const ready = this.db.prepare(`UPDATE batch_run_steps SET state = 'READY'
+          WHERE run_id = ? AND step_no = 1 AND state = 'PENDING'`).run(child.id).changes;
+        if (child.step_count < 1 || ready !== 1) throw new Error(`waiting job ${child.id} has no first pending step`);
+        this.db.prepare("UPDATE batch_runs SET state = 'QUEUED' WHERE id = ? AND state = 'WAITING'").run(child.id);
+      }
+      this.db.exec("COMMIT");
+      return {kind: "imported", released: waiting.length, seq};
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  #nextSignalSeq() {
+    this.db.exec("UPDATE batch_signal_clock SET last_seq = last_seq + 1");
+    return this.db.prepare("SELECT last_seq FROM batch_signal_clock").get().last_seq;
+  }
+
+  reserveSignalSeq() {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const seq = this.#nextSignalSeq();
+      this.db.exec("COMMIT");
+      return seq;
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
   // BEGIN IMMEDIATE makes two independent worker processes serialize the
   // decision. A RUNNING queued job blocks a second worker, even if its
   // process vanished: replay requires an explicit decision about side effects.
@@ -299,13 +391,15 @@ export class BatchRuns {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const scoped = source === undefined ? "" : source.legacyOnly ? " AND source_db IS NULL" :
-        " AND (source_db IS NULL OR (source_db = ? AND source_client = ? AND source_sysid = ? AND source_owner = ?))";
-      const params = source === undefined || source.legacyOnly ? [] : [source.db, source.client, source.sysid, source.owner];
+        " AND (source_db IS NULL OR (source_db = ? AND source_client = ? AND source_sysid = ? AND source_owner = ? AND (source_instance IS NULL OR source_instance = ?)))";
+      const params = source === undefined || source.legacyOnly ? [] :
+        [source.db, source.client, source.sysid, source.owner, source.instance ?? null];
       // A job for another owner cannot be claimed, but it still holds this
       // business instance's single worker until manually resolved.
       const busyScope = source === undefined ? "" : source.legacyOnly ? " AND source_db IS NULL" :
-        " AND (source_db IS NULL OR (source_db = ? AND source_client = ? AND source_sysid = ?))";
-      const busyParams = source === undefined || source.legacyOnly ? [] : [source.db, source.client, source.sysid];
+        " AND (source_db IS NULL OR (source_db = ? AND source_client = ? AND source_sysid = ? AND (source_instance IS NULL OR source_instance = ?)))";
+      const busyParams = source === undefined || source.legacyOnly ? [] :
+        [source.db, source.client, source.sysid, source.instance ?? null];
       const busy = this.db.prepare(`SELECT id FROM batch_runs WHERE state = 'RUNNING' AND queued_at IS NOT NULL${busyScope} LIMIT 1`).get(...busyParams);
       if (busy) {
         this.db.exec("COMMIT");
@@ -645,11 +739,18 @@ function resultRecordingError(runId, stepNumber, cause, executionError) {
 }
 
 export async function workQueuedBatch(root, store, execute = runConvertedBatch) {
-  const businessDb = globalThis.abap?.context?.databaseConnections?.DEFAULT?.path;
+  const businessClient = globalThis.abap?.context?.databaseConnections?.DEFAULT;
+  const businessDb = businessClient?.path;
   const sy = globalThis.abap?.builtin?.sy?.get?.();
+  let instance;
+  try {
+    if (businessClient?.db?.prepare("SELECT 1 FROM sqlite_master WHERE name = 'zosd_job_source_instance'").get()) {
+      instance = businessClient.db.prepare("SELECT id FROM zosd_job_source_instance LIMIT 1").get()?.id;
+    }
+  } catch { instance = undefined; }
   const source = businessDb && businessDb !== ":memory:" && sy ?
     {db: resolve(businessDb), client: String(sy.mandt.get()).trim(), sysid: String(sy.sysid.get()).trim(),
-      owner: String(sy.uname.get()).trim()} : undefined;
+      owner: String(sy.uname.get()).trim(), instance} : undefined;
   const next = store.claimNext(source ?? {legacyOnly: true});
   if (next.kind !== "claimed") return next;
   const {run} = next;
