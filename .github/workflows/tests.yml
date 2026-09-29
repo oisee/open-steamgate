@@ -55,29 +55,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Select VSIX test profile
-        run: |
-          if [[ "$GITHUB_EVENT_NAME" == schedule || "$GITHUB_EVENT_NAME" == workflow_dispatch || "$GITHUB_REF" == refs/tags/* ]]; then
-            echo OSD_CI_FULL_VSIX=1 >> "$GITHUB_ENV"
-            echo 'VSIX profile: full (scheduled, manual, or tag)' >> "$GITHUB_STEP_SUMMARY"
-          else
-            if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-              base='${{ github.event.pull_request.base.sha }}'
-            else
-              base='${{ github.event.before }}'
-            fi
-            if [[ "$base" =~ ^0+$ ]]; then
-              echo OSD_CI_FULL_VSIX=1 >> "$GITHUB_ENV"
-            else
-              git fetch --no-tags --depth=1 origin "$base"
-              node tools/osd-ci-vsix-profile.mjs "$base" "$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-            fi
-          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -104,18 +86,25 @@ jobs:
           bun scripts/build-binary.mjs "$RUNNER_TEMP/osd"
           "$RUNNER_TEMP/osd" doctor
 
+      # libs.lock.json includes the pinned repository and commit. Hashing the
+      # build script invalidates compiled output when its commands change.
+      # Outside the checkout, and absolute: actions/cache silently refuses to
+      # save a path with ".." in it ("Relative pathing '.' and '..' is not
+      # allowed"), which is how the first version of this cache never hit.
+      - name: Where the pinned transpiler lives
+        run: echo "TRANSPILER=$RUNNER_TEMP/transpiler" >> "$GITHUB_ENV"
+      - name: Restore the pinned transpiler build
+        id: transpiler_cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/transpiler
+          key: transpiler-v1-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('libs.lock.json') }}-${{ hashFiles('tools/osd-ci-transpiler-build.sh') }}
       - name: Build the transpiler this tree is pinned to
+        if: steps.transpiler_cache.outputs.cache-hit != 'true'
+        run: bash tools/osd-ci-transpiler-build.sh build
+      - name: Verify and link the pinned transpiler
         run: |
-          git clone --filter=blob:none "$OSD_TRANSPILER_REPO" ../transpiler
-          git -C ../transpiler checkout "$OSD_TRANSPILER_REF"
-          npm --prefix ../transpiler install --ignore-scripts --no-audit --no-fund
-          for package in runtime transpiler extras cli; do
-            npm --prefix "../transpiler/packages/$package" install --no-audit --no-fund
-          done
-          for package in runtime transpiler extras cli; do
-            npm --prefix "../transpiler/packages/$package" run compile
-          done
-          chmod +x ../transpiler/packages/cli/abap_transpile
+          bash tools/osd-ci-transpiler-build.sh verify
           node tools/osd-link.mjs transpiler packages/transpiler
           node tools/osd-link.mjs transpiler-cli packages/cli
           node tools/osd-link.mjs runtime packages/runtime
@@ -169,6 +158,76 @@ jobs:
       - name: BAL survives an OSD process restart
         run: npm run test:bal-persist
 
+      # Artifact belongs to this run, not to a generation-hash cache. Tar
+      # preserves the live/output links and executable modes that Actions
+      # artifacts would discard. The clone is relocated inside the checkout
+      # so npm ci in consumers supplies its package dependencies.
+      - name: Pack the built tree
+        run: |
+          mkdir -p .local/ci-artifact
+          tar -C "$RUNNER_TEMP" --exclude='node_modules' -cf - transpiler | tar -C .local/ci-artifact -xf -
+          node tools/osd-ci-artifact.mjs pack "$RUNNER_TEMP/built-tree.tar"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: built-tree
+          path: ${{ runner.temp }}/built-tree.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  suites:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Load the tracked source pins
+        run: node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: built-tree
+          path: ${{ runner.temp }}
+      - name: Restore and verify this run's build
+        run: |
+          tar -xf "$RUNNER_TEMP/built-tree.tar"
+          test -f gen/osd-ddic-binary.mjs
+          test -f output/init.mjs
+          test -f build/live/manifest.json
+          test -d .local/lars/open-abap-core
+          test -f .local/ci-artifact/transpiler/packages/transpiler/build/src/index.js
+          echo "TRANSPILER=$PWD/.local/ci-artifact/transpiler" >> "$GITHUB_ENV"
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler packages/transpiler
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler-cli packages/cli
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs runtime packages/runtime
+      - name: Select VSIX test profile
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == schedule || "$GITHUB_EVENT_NAME" == workflow_dispatch || "$GITHUB_REF" == refs/tags/* ]]; then
+            echo OSD_CI_FULL_VSIX=1 >> "$GITHUB_ENV"
+            echo 'VSIX profile: full (scheduled, manual, or tag)' >> "$GITHUB_STEP_SUMMARY"
+          else
+            if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+              base='${{ github.event.pull_request.base.sha }}'
+            else
+              base='${{ github.event.before }}'
+            fi
+            if [[ "$base" =~ ^0+$ ]]; then
+              echo OSD_CI_FULL_VSIX=1 >> "$GITHUB_ENV"
+            else
+              git fetch --no-tags --depth=1 origin "$base"
+              node tools/osd-ci-vsix-profile.mjs "$base" "$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+            fi
+          fi
       # **What is skipped is reported, not swallowed.** Several suites are
       # guarded on `.local/corpus*`, which is not in this repository and
       # never will be — it holds real customer projects. On a runner those
@@ -176,23 +235,69 @@ jobs:
       # green one. `--report-skips` prints what did not execute and why, so
       # "passed" here and "passed" on a workstation are different claims
       # that say which they are.
-      - name: The suites
+      - name: The suites, shard ${{ matrix.shard }}/4
         run: |
           if [[ "$OSD_CI_FULL_VSIX" == 1 ]]; then
-            node tools/osd-suites.mjs --report-skips
+            node tools/osd-suites.mjs --report-skips --shard "${{ matrix.shard }}/4"
           else
-            node tools/osd-suites.mjs --report-skips --grep 'packaging changed seed content|packaging selected packs|packaging a prebuilt generation|packaging: the \.vsix installs' --invert
+            node tools/osd-suites.mjs --report-skips --shard "${{ matrix.shard }}/4" --grep 'packaging changed seed content|packaging selected packs|packaging a prebuilt generation|packaging: the \.vsix installs' --invert
           fi
         env:
           STG_PORT: "3030"
 
+  e2e:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Load the tracked source pins
+        run: node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: built-tree
+          path: ${{ runner.temp }}
+      - name: Restore and verify this run's build
+        run: |
+          tar -xf "$RUNNER_TEMP/built-tree.tar"
+          test -f gen/osd-ddic-binary.mjs
+          test -f output/init.mjs
+          test -f build/live/manifest.json
+          test -d .local/lars/open-abap-core
+          test -f .local/ci-artifact/transpiler/packages/transpiler/build/src/index.js
+          echo "TRANSPILER=$PWD/.local/ci-artifact/transpiler" >> "$GITHUB_ENV"
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler packages/transpiler
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler-cli packages/cli
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs runtime packages/runtime
       # Keep the launchpad's core intents covered on the live Node shape
       # as well as in preview.yml's static Pages check.  This comes after the
-      # build and suites, so a broken main build fails before browser work;
+      # build, so a broken build fails before browser work;
       # preview.yml remains an independent job and only publishes after its
       # own browser check succeeds.
+      - name: Read the installed Playwright version
+        id: playwright_version
+        run: node -e 'console.log("version=" + require("./package-lock.json").packages["node_modules/@playwright/test"].version)' >> "$GITHUB_OUTPUT"
+      - name: Restore Chromium
+        id: chromium_cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: chromium-v1-${{ runner.os }}-${{ steps.playwright_version.outputs.version }}
       - name: Install Chromium for browser smoke tests
-        run: npx playwright install --with-deps chromium
+        run: |
+          if [[ "${{ steps.chromium_cache.outputs.cache-hit }}" == true ]]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
 
       - name: Launchpad, FCL, taxi F4 and APC smoke tests
         run: node scripts/run-e2e-isolated.mjs test/e2e/launchpad-navigation.spec.mjs test/e2e/fcl.spec.mjs test/e2e/listreport.spec.mjs test/e2e/taxi.spec.mjs test/e2e/zork.spec.mjs test/e2e/lsd.spec.mjs --config playwright.config.mjs
@@ -205,3 +310,16 @@ jobs:
         run: node scripts/run-e2e-isolated.mjs test/e2e/zvdb.spec.mjs --config playwright.config.mjs
         env:
           STG_DB: duckdb
+
+  test:
+    if: always()
+    needs: [build, suites, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every job to pass
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          SUITES_RESULT: ${{ needs.suites.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+        run: |
+          [[ "$BUILD_RESULT" == success && "$SUITES_RESULT" == success && "$E2E_RESULT" == success ]]

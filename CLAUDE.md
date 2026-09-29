@@ -140,7 +140,7 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 
 ## Working in the tree
 
-- `npm test` = `abaplint` + transpile + ABAP Unit (inside `output/index.mjs`)
+- `npm test` = transpile + `abaplint` + ABAP Unit (inside `output/index.mjs`)
   + mocha wire tests. `npm start` serves `/sap/opu/odata/sap/` on port 3030.
 - `abap_transpile.json` pulls open-abap-core, express-icf-shim and the
   interface part of **upstream** `open-abap/open-abap-odata` as libs.

@@ -1,0 +1,274 @@
+name: OSD Docker image
+
+on:
+  pull_request:
+    paths:
+      - 'docker/**'
+      - '**/Dockerfile*'
+      - 'package*.json'
+      - '.github/workflows/docker.yml'
+  push:
+    tags: ['vscode-v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish both tested profiles to GHCR (default is a dry run)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.publish)
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(github.event_name == 'pull_request' && '["amd64"]' || '["amd64","arm64"]') }}
+        profile: [core, showcase]
+    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate documentation and Compose
+        env:
+          ACCEPT_SAP_LICENSE: 'YES' # compose config only; CI does not start HXE
+        run: |
+          node scripts/sync-spin.mjs --check
+          node --test docker/image/free-instance.test.mjs docker/image/terminal-svg.test.mjs docker/image/packs.test.mjs
+          for db in sqlite duckdb hana postgres; do
+            docker compose -f "docker/compose.$db.yml" config --quiet
+          done
+      # Native runners only. No QEMU or binfmt registration is needed.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the profile for its native platform
+        env:
+          PROFILE: ${{ matrix.profile }}
+          PLATFORM: linux/${{ matrix.arch }}
+        run: |
+          packs=""
+          if [[ "$PROFILE" == showcase ]]; then packs='o4d,zork,zvdb'; fi
+          docker buildx build --platform "$PLATFORM" --provenance=false --load --tag osd:ci \
+            --build-arg OSD_IMAGE_REVISION="$GITHUB_SHA" --build-arg OSD_IMAGE_PACKS="$packs" \
+            -f docker/image/Dockerfile .
+          test "$(docker image inspect --format '{{.Architecture}}' osd:ci)" = "${PLATFORM#linux/}"
+          node_arch="${PLATFORM#linux/}"
+          if [[ "$node_arch" == amd64 ]]; then node_arch=x64; fi
+          docker run --rm -e EXPECTED_ARCH="$node_arch" --entrypoint node osd:ci \
+            -e 'if (process.arch !== process.env.EXPECTED_ARCH) process.exit(1)'
+      - name: Check runtime license inventory
+        run: |
+          docker run --rm --entrypoint node osd:ci -e 'const r=require("./image-licenses.json"); console.log(JSON.stringify(r,null,2)); if(r.blockers.length) process.exit(1)'
+          docker run --rm --entrypoint sh osd:ci -c 'test ! -e /opt/protocols && ! command -v go'
+      # Test clients only; this image is never published as the OSD runtime.
+      - name: Build external SAP-TUI and RFC acceptance clients
+        env:
+          PLATFORM: linux/${{ matrix.arch }}
+        run: docker buildx build --platform "$PLATFORM" --load --tag osd-probes:ci -f docker/image/Dockerfile.probes .
+      - name: Compose startup, persistence, HTTP/HTTPS, SAP-TUI and ADT-over-RFC
+        env:
+          OSD_TEST_DATABASES: ${{ matrix.arch == 'amd64' && 'sqlite duckdb postgres' || 'sqlite duckdb' }}
+          OSD_ACCEPTANCE_DIR: ${{ github.workspace }}/image-acceptance
+          OSD_EXPECT_SHOWCASE: ${{ matrix.profile == 'showcase' }}
+        run: sh docker/image/smoke.sh osd:ci osd-probes:ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: protocol-acceptance-${{ matrix.profile }}-${{ matrix.arch }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: image-acceptance/
+      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          image: osd:ci
+          output-file: osd.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Save SBOM and source/run provenance
+        run: |
+          node -e 'require("fs").writeFileSync("provenance.json",JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,attempt:process.env.GITHUB_RUN_ATTEMPT},null,2))'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-evidence-${{ matrix.profile }}-${{ matrix.arch }}
+          retention-days: 14
+          path: |
+            osd.spdx.json
+            provenance.json
+
+  publish:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        profile: [core, showcase]
+    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate documentation and Compose
+        env:
+          ACCEPT_SAP_LICENSE: 'YES' # compose config only; CI does not start HXE
+        run: |
+          node scripts/sync-spin.mjs --check
+          node --test docker/image/free-instance.test.mjs docker/image/terminal-svg.test.mjs docker/image/packs.test.mjs
+          for db in sqlite duckdb hana postgres; do
+            docker compose -f "docker/compose.$db.yml" config --quiet
+          done
+      # Native runners only. No QEMU or binfmt registration is needed.
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build the profile for its native platform
+        env:
+          PROFILE: ${{ matrix.profile }}
+          PLATFORM: linux/${{ matrix.arch }}
+        run: |
+          packs=""
+          if [[ "$PROFILE" == showcase ]]; then packs='o4d,zork,zvdb'; fi
+          registry="ghcr.io/${GITHUB_REPOSITORY,,}"
+          # Publish an untagged digest once, then test that exact image. Only the
+          # manifest job gives successful runs discoverable tags.
+          docker buildx build --platform "$PLATFORM" --provenance=false \
+            --build-arg OSD_IMAGE_REVISION="$GITHUB_SHA" --build-arg OSD_IMAGE_PACKS="$packs" \
+            --output "type=image,name=$registry,push=true,push-by-digest=true,name-canonical=true" \
+            --metadata-file image-metadata.json -f docker/image/Dockerfile .
+          digest="$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' image-metadata.json)"
+          docker pull "$registry@$digest"
+          docker tag "$registry@$digest" osd:ci
+          test "$(docker image inspect --format '{{.Architecture}}' osd:ci)" = "${PLATFORM#linux/}"
+          node_arch="${PLATFORM#linux/}"
+          if [[ "$node_arch" == amd64 ]]; then node_arch=x64; fi
+          docker run --rm -e EXPECTED_ARCH="$node_arch" --entrypoint node osd:ci \
+            -e 'if (process.arch !== process.env.EXPECTED_ARCH) process.exit(1)'
+      - name: Check runtime license inventory
+        run: |
+          docker run --rm --entrypoint node osd:ci -e 'const r=require("./image-licenses.json"); console.log(JSON.stringify(r,null,2)); if(r.blockers.length) process.exit(1)'
+          docker run --rm --entrypoint sh osd:ci -c 'test ! -e /opt/protocols && ! command -v go'
+      # Test clients only; this image is never published as the OSD runtime.
+      - name: Build external SAP-TUI and RFC acceptance clients
+        env:
+          PLATFORM: linux/${{ matrix.arch }}
+        run: docker buildx build --platform "$PLATFORM" --load --tag osd-probes:ci -f docker/image/Dockerfile.probes .
+      - name: Compose startup, persistence, HTTP/HTTPS, SAP-TUI and ADT-over-RFC
+        env:
+          OSD_TEST_DATABASES: ${{ matrix.arch == 'amd64' && 'sqlite duckdb postgres' || 'sqlite duckdb' }}
+          OSD_ACCEPTANCE_DIR: ${{ github.workspace }}/image-acceptance
+          OSD_EXPECT_SHOWCASE: ${{ matrix.profile == 'showcase' }}
+        run: sh docker/image/smoke.sh osd:ci osd-probes:ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: protocol-acceptance-${{ matrix.profile }}-${{ matrix.arch }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: image-acceptance/
+      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          image: osd:ci
+          output-file: osd.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Save SBOM and source/run provenance
+        run: |
+          node -e 'require("fs").writeFileSync("provenance.json",JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,attempt:process.env.GITHUB_RUN_ATTEMPT},null,2))'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-evidence-${{ matrix.profile }}-${{ matrix.arch }}
+          retention-days: 14
+          path: |
+            osd.spdx.json
+            provenance.json
+      - name: Record the tested digest
+        env:
+          PLATFORM: linux/${{ matrix.arch }}
+        run: |
+          registry="ghcr.io/${GITHUB_REPOSITORY,,}"
+          digest="$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' image-metadata.json)"
+          tested_id="$(docker image inspect --format '{{.Id}}' osd:ci)"
+          pushed_id="$(docker buildx imagetools inspect "$registry@$digest" --raw | jq -er '.config.digest')"
+          test "$tested_id" = "$pushed_id"
+          docker buildx imagetools inspect "$registry@$digest" --format '{{json .Image}}' > pushed-image.json
+          test "$(jq -r '.os + "/" + .architecture' pushed-image.json)" = "$PLATFORM"
+          test "$(jq -r '.config.Labels["org.opencontainers.image.revision"]' pushed-image.json)" = "$GITHUB_SHA"
+          mkdir -p digests
+          touch "digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.profile }}-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 3
+
+  manifest:
+    needs: publish
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [core, showcase]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-${{ matrix.profile }}-*
+          path: digests
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create and verify the multi-platform manifest
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          registry="ghcr.io/${GITHUB_REPOSITORY,,}"
+          amd64_file=(digests/digests-"$PROFILE"-amd64/*)
+          arm64_file=(digests/digests-"$PROFILE"-arm64/*)
+          test "${#amd64_file[@]}" = 1 && test "${#arm64_file[@]}" = 1
+          amd64_digest="sha256:${amd64_file[0]##*/}"
+          arm64_digest="sha256:${arm64_file[0]##*/}"
+          [[ "$amd64_digest" =~ ^sha256:[0-9a-f]{64}$ && "$arm64_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          if [[ "$GITHUB_REF" == refs/tags/vscode-v* ]]; then
+            version="${GITHUB_REF_NAME#vscode-v}"
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          else
+            version="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          fi
+          if [[ "$PROFILE" == showcase ]]; then
+            tags=(--tag "$registry:$version" --tag "$registry:showcase" --tag "$registry:latest" --tag "$registry:showcase-draft")
+            target=showcase-draft
+          else
+            tags=(--tag "$registry:$version-core" --tag "$registry:draft")
+            target=draft
+          fi
+          docker buildx imagetools create "${tags[@]}" "$registry@$amd64_digest" "$registry@$arm64_digest"
+          docker buildx imagetools inspect "$registry:$target" --format '{{json .Manifest}}' > manifest.json
+          jq -e --arg amd64 "$amd64_digest" --arg arm64 "$arm64_digest" '
+            (.manifests | length) == 2 and
+            any(.manifests[]; .digest == $amd64 and .platform.os == "linux" and .platform.architecture == "amd64") and
+            any(.manifests[]; .digest == $arm64 and .platform.os == "linux" and .platform.architecture == "arm64")
+          ' manifest.json
+          manifest_digest="$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' manifest.json)"
+          printf '%s: `%s@%s` (%s)\n' "$PROFILE" "$registry" "$manifest_digest" "$version" >> "$GITHUB_STEP_SUMMARY"
