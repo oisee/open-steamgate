@@ -54,6 +54,7 @@
     "test/generated-metadata.mjs",
     "test/gateway-regression-contract.mjs",
     "test/gui-reports.mjs",
+    "test/jobs-e2e.mjs",
     "test/job-one-step.mjs",
     "test/job-named-events.mjs",
     "test/job-tail-events.mjs",
