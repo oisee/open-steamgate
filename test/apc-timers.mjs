@@ -106,7 +106,7 @@ describe("stateful APC timers", function () {
         throw new Error("inactive stop did not raise");
       } catch (error) {
         expect(error.textid.get()).to.equal(abap.Classes.CX_ABAP_TIMER_ERROR.timer_object_not_active.get());
-        expect((await error.if_message$get_text()).get()).to.equal("Timer object is not active.");
+        expect((await error.if_message$get_text()).get()).to.equal("Timer objects is not active.");
       }
     } finally {
       timers.close();
@@ -223,7 +223,7 @@ describe("stateful APC timers", function () {
     socket.send("double:80:first");
     socket.send("stop:0:x");
     expect(await socket.until(4)).to.deep.equal([
-      "Timer object is not active.", "Timer object is already active.", "armed", "stopped",
+      "Timer objects is not active.", "Timer object is already active.", "armed", "stopped",
     ]);
     await sleep(100);
     expect(socket.messages()).to.have.length(4);

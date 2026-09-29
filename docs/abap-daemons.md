@@ -369,8 +369,8 @@ Re-armed from `ON_TIMEOUT` each time. Also measured: `START_TIMER` with 0
 and with -5 is accepted and the timer fires about 1.5 ms after the arming
 callback ends. `START_TIMER` twice on the same handler raises "Timer object
 is already active." and the first timer stands (it fired at 300.976 ms of
-300). `STOP_TIMER` on a handler with no timer raises "Timer object is not
-active."; on an armed one it succeeds and the timer never fires. A
+300). `STOP_TIMER` on a handler with no timer raises "Timer objects is not
+active." (sic); on an armed one it succeeds and the timer never fires. A
 handler object nobody else references still fires (the timer keeps it).
 1000 handler objects armed at 100 ms from one callback: all accepted, all
 1000 fired, in one batch. The only timestamps are the end of the arming
