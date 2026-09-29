@@ -9,6 +9,7 @@ import {liveGeneration} from "./osd-batch-runs.mjs";
 
 const pending = new WeakMap();
 const keyOf = (name, count) => `${name}\0${count}`;
+export const MAX_JOB_STEPS = 16;
 
 export class JobDestination {
   constructor(root = process.cwd(), env = process.env) {
@@ -24,6 +25,7 @@ export class JobDestination {
     const jobname = givenText(signature, "IV_JOBNAME").toUpperCase();
     const count = givenText(signature, "IV_JOBCOUNT");
     const program = givenText(signature, "IV_PROGRAM").toUpperCase();
+    const stepNo = Number(givenText(signature, "IV_STEP_NO"));
     const owner = givenText(signature, "IV_OWNER").toUpperCase();
     const client = givenText(signature, "IV_CLIENT");
     const db = globalThis.abap?.context?.databaseConnections?.DEFAULT;
@@ -44,15 +46,15 @@ export class JobDestination {
         let number;
         do { number = String(randomInt(100000000)).padStart(8, "0"); }
         while (jobs.has(keyOf(jobname, number)));
-        jobs.set(keyOf(jobname, number), {jobname, count: number, owner, client});
+        jobs.set(keyOf(jobname, number), {jobname, count: number, owner, client, steps: []});
         answer = {EV_JOBCOUNT: number};
         break;
       }
       case "SUBMIT": {
         const job = jobs.get(keyOf(jobname, count));
         if (!job || job.owner !== owner || job.client !== client) { answer = {EV_ERROR: "Job definition not found in this LUW"}; break; }
-        if (job.program) { answer = {EV_ERROR: "Only one report step is supported"}; break; }
-        job.program = program;
+        if (job.closed || job.steps.length >= MAX_JOB_STEPS) { answer = {EV_ERROR: "Job step limit reached or definition closed"}; break; }
+        job.steps.push(program);
         answer = {};
         break;
       }
@@ -60,15 +62,38 @@ export class JobDestination {
         const key = keyOf(jobname, count);
         const job = jobs.get(key);
         if (!job || job.owner !== owner || job.client !== client) { answer = {EV_ERROR: "Job definition not found in this LUW"}; break; }
-        if (!job.program) { answer = {EV_ERROR: "Job has no report step"}; break; }
+        if (!job.steps.length || job.closed) { answer = {EV_ERROR: "Job has no open report steps"}; break; }
         if (resolve(db.path).length > 255) { answer = {EV_ERROR: "Business database path exceeds outbox field length"}; break; }
-        jobs.delete(key);
+        job.closed = true;
+        job.intentId = randomUUID().replaceAll("-", "");
         answer = {
-          EV_INTENT_ID: randomUUID().replaceAll("-", ""),
-          EV_PROGRAM: job.program,
+          EV_INTENT_ID: job.intentId,
+          EV_PROGRAM: job.steps[0],
+          EV_STEP_COUNT: String(job.steps.length),
           EV_GENERATION: this.generation,
           EV_SOURCE_DB: resolve(db.path),
         };
+        break;
+      }
+      case "READ": {
+        const job = jobs.get(keyOf(jobname, count));
+        if (!job || !job.closed || job.owner !== owner || job.client !== client ||
+            job.intentId !== givenText(signature, "IV_INTENT_ID") ||
+            !Number.isInteger(stepNo) || stepNo < 1 || stepNo > job.steps.length) {
+          answer = {EV_ERROR: "Closed job step not found"}; break;
+        }
+        answer = {EV_PROGRAM: job.steps[stepNo - 1]};
+        break;
+      }
+      case "DONE": {
+        const key = keyOf(jobname, count);
+        const job = jobs.get(key);
+        if (!job || !job.closed || job.owner !== owner || job.client !== client ||
+            job.intentId !== givenText(signature, "IV_INTENT_ID")) {
+          answer = {EV_ERROR: "Closed job not found"}; break;
+        }
+        jobs.delete(key);
+        answer = {};
         break;
       }
       default: answer = {EV_ERROR: `Unknown job command ${command}`};

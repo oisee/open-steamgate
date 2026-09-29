@@ -1,9 +1,9 @@
 import {expect} from "chai";
-import {mkdtempSync, mkdirSync, rmSync, symlinkSync} from "node:fs";
+import {mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
-import {spawnSync} from "node:child_process";
+import {spawn, spawnSync} from "node:child_process";
 import {randomUUID} from "node:crypto";
 import {BatchRuns, liveGeneration, runConvertedBatch, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
 import {drainJobOutbox} from "../tools/osd-job-outbox.mjs";
@@ -40,6 +40,11 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
   const rows = () => {
     const reader = new DatabaseSync(dbPath, {readOnly: true});
     try { return reader.prepare("SELECT * FROM zosd_job_outbox").all(); }
+    finally { reader.close(); }
+  };
+  const stepRows = () => {
+    const reader = new DatabaseSync(dbPath, {readOnly: true});
+    try { return reader.prepare("SELECT * FROM zosd_job_step").all(); }
     finally { reader.close(); }
   };
   const classic = async (work, name) => {
@@ -96,6 +101,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       await client.rollback();
     });
     expect(rows()).to.have.length(0);
+    expect(stepRows()).to.have.length(0);
     expect((await drainJobOutbox(store)).imported).to.equal(0);
     expect(store.list()).to.have.length(0);
   });
@@ -182,6 +188,52 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     finally { clean.close(); }
     expect((await drainJobOutbox(store)).imported).to.equal(1);
     expect(rows()).to.have.length(0);
+    expect(store.list()).to.have.length(before + 1);
+  });
+
+  it("a handled child insert failure cannot leave a partial intent after caller COMMIT", async () => {
+    const writer = new DatabaseSync(dbPath);
+    try {
+      writer.exec(`CREATE TRIGGER refuse_second_step BEFORE INSERT ON zosd_job_step
+        WHEN NEW.step_no = '02' BEGIN SELECT RAISE(ABORT, 'second step refused'); END`);
+    } finally { writer.close(); }
+    try {
+      await dialogStep(async () => {
+        const count = await open();
+        await submit(count, {report: "ZGG_EX_001"});
+        await submit(count, {report: "ZGG_EX_012"});
+        await classic(() => close(count), "job_close_failed");
+        await client.commit();
+      });
+      expect(rows().filter((row) => row.mandt.trim() === "123")).to.have.length(0);
+      expect(stepRows().filter((row) => row.mandt.trim() === "123")).to.have.length(0);
+    } finally {
+      const clean = new DatabaseSync(dbPath);
+      try { clean.exec("DROP TRIGGER refuse_second_step"); } finally { clean.close(); }
+    }
+  });
+
+  it("a child acknowledgement failure rolls back deletes and retries one imported run", async () => {
+    await schedule();
+    const before = store.list().length;
+    const writer = new DatabaseSync(dbPath);
+    try {
+      writer.exec(`CREATE TRIGGER refuse_step_ack BEFORE DELETE ON zosd_job_step
+        BEGIN SELECT RAISE(ABORT, 'step ack refused'); END`);
+    } finally { writer.close(); }
+    try {
+      try { await drainJobOutbox(store); throw new Error("drain unexpectedly acknowledged child"); }
+      catch (error) { expect(error.message).to.equal("outbox acknowledgement failed"); }
+      expect(rows().filter((row) => row.mandt.trim() === "123")).to.have.length(1);
+      expect(stepRows().filter((row) => row.mandt.trim() === "123")).to.have.length(1);
+      expect(store.list()).to.have.length(before + 1);
+    } finally {
+      const clean = new DatabaseSync(dbPath);
+      try { clean.exec("DROP TRIGGER refuse_step_ack"); } finally { clean.close(); }
+    }
+    expect((await drainJobOutbox(store)).imported).to.equal(1);
+    expect(rows().filter((row) => row.mandt.trim() === "123")).to.have.length(0);
+    expect(stepRows().filter((row) => row.mandt.trim() === "123")).to.have.length(0);
     expect(store.list()).to.have.length(before + 1);
   });
 
@@ -368,13 +420,14 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     expect(rows().some((row) => row.intent_id.trim() === intent)).to.equal(true);
   });
 
-  it("rejects variants, unsupported reports, second steps, and non-immediate close", async () => {
+  it("rejects variants, unsupported reports, too many steps, and non-immediate close", async () => {
     const before = rows().length;
     await dialogStep(async () => {
       const count = await open();
       await classic(() => submit(count, {variant: "EXISTING"}), "job_submit_failed");
       await classic(() => submit(count, {report: "Z_NOT_REGISTERED"}), "program_missing");
       await submit(count);
+      for (let i = 1; i < 16; i++) await submit(count);
       await classic(() => submit(count), "job_submit_failed");
       await classic(() => close(count, {strtimmed: ""}), "job_close_failed");
       await close(count);
@@ -395,9 +448,238 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
         client: intent.mandt.trim(), sysid: intent.sysid.trim(),
         jobname: intent.jobname.trim(), jobcount: intent.jobcount.trim(),
         owner: intent.owner.trim(), program: intent.program.trim(), generation: intent.generation.trim(),
+        steps: [{number: 1, program: intent.program.trim()}],
       };
       expect(reopened.importIntent(base).kind).to.equal("duplicate");
-      expect(() => reopened.importIntent({...base, program: "Z_OTHER"})).to.throw(/changed after import/);
+      expect(() => reopened.importIntent({...base, program: "Z_OTHER",
+        steps: [{number: 1, program: "Z_OTHER"}]})).to.throw(/changed after import/);
     } finally { reopened.close(); }
+  });
+
+  it("imports ordered steps and executes only one step per worker call", async () => {
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "multi.sqlite")});
+    try {
+      await dialogStep(async () => {
+        const count = await open();
+        await submit(count, {report: "ZGG_EX_001"});
+        await submit(count, {report: "ZGG_EX_012"});
+        await submit(count, {report: "ZGG_EX_043"});
+        await close(count);
+      });
+      const committed = rows().find((row) => row.mandt.trim() === "123" && Number(row.step_count) === 3);
+      const reader = new DatabaseSync(dbPath, {readOnly: true});
+      try {
+        expect(reader.prepare("SELECT step_no, program FROM zosd_job_step ORDER BY step_no").all()
+          .map((item) => item.program.trim())).to.deep.equal(["ZGG_EX_001", "ZGG_EX_012", "ZGG_EX_043"]);
+      } finally { reader.close(); }
+      try {
+        await drainJobOutbox(scoped, {afterImport: () => { throw new Error("crash after multi import"); }});
+        throw new Error("drain unexpectedly finished");
+      } catch (error) { expect(error.message).to.equal("crash after multi import"); }
+      expect(stepRows()).to.have.length(3);
+      expect((await drainJobOutbox(scoped)).imported).to.equal(1);
+      expect(stepRows()).to.have.length(0);
+      const run = scoped.list()[0];
+      expect(run.steps.map((item) => item.state)).to.deep.equal(["READY", "PENDING", "PENDING"]);
+      const seen = [];
+      const execute = async (_root, program) => {
+        seen.push(program);
+        return {status: "COMPLETED", lines: [program]};
+      };
+      expect((await workQueuedBatch(root, scoped, execute)).kind).to.equal("advanced");
+      expect(seen).to.deep.equal(["ZGG_EX_001"]);
+      const firstStartedAt = scoped.get(run.id).startedAt;
+      expect(scoped.get(run.id).steps.map((item) => item.state)).to.deep.equal(["COMPLETED", "READY", "PENDING"]);
+      expect(scoped.stepOutput(run.id, 1).lines).to.deep.equal(["ZGG_EX_001"]);
+      const reopened = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "multi.sqlite")});
+      try {
+        expect((await workQueuedBatch(root, reopened, execute)).kind).to.equal("advanced");
+        expect(reopened.get(run.id).steps.map((item) => item.state)).to.deep.equal(["COMPLETED", "COMPLETED", "READY"]);
+        expect((await workQueuedBatch(root, reopened, execute)).kind).to.equal("completed");
+        expect(seen).to.deep.equal(["ZGG_EX_001", "ZGG_EX_012", "ZGG_EX_043"]);
+        expect(reopened.get(run.id).state).to.equal("COMPLETED");
+        expect(reopened.get(run.id).startedAt).to.equal(firstStartedAt);
+        expect(reopened.output(run.id).lines).to.deep.equal(["ZGG_EX_043"]);
+        expect(reopened.stepOutput(run.id, 2).lines).to.deep.equal(["ZGG_EX_012"]);
+        writeFileSync(join(dir, "batch-output", `${run.id}-1.json`), "tampered");
+        expect(() => reopened.stepOutput(run.id, 1)).to.throw(/digest check/);
+      } finally { reopened.close(); }
+      const base = {intentId: committed.intent_id.trim(), sourceDb: committed.source_db.trim(),
+        client: committed.mandt.trim(), sysid: committed.sysid.trim(),
+        jobname: committed.jobname.trim(), jobcount: committed.jobcount.trim(), owner: committed.owner.trim(),
+        program: "ZGG_EX_001", generation: committed.generation.trim(),
+        steps: ["ZGG_EX_001", "ZGG_EX_012", "ZGG_EX_043"].map((program, index) => ({number: index + 1, program}))};
+      expect(scoped.importIntent(base).kind).to.equal("duplicate");
+      expect(() => scoped.importIntent({...base, steps: [base.steps[0], {...base.steps[1], program: "ZGG_EX_043"}, base.steps[2]]}))
+        .to.throw(/changed after import/);
+    } finally { scoped.close(); }
+  });
+
+  it("fails one step, skips later steps, and redacts monitored selection values", async () => {
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "multi-fail.sqlite")});
+    try {
+      const base = {intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
+        client: "123", sysid: "OSG", jobname: "MULTI", jobcount: "00000001",
+        owner: "DEVELOPER", program: "ZGG_EX_001", generation: liveGeneration(root),
+        steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"},
+          {number: 3, program: "ZGG_EX_043"}]};
+      const run = scoped.importIntent(base).run;
+      let calls = 0;
+      const execute = async () => (++calls === 1 ? {status: "COMPLETED", lines: ["first"]} :
+        {status: "INVALID_INPUT", detail: "bad input", lines: ["second"]});
+      expect((await workQueuedBatch(root, scoped, execute)).kind).to.equal("advanced");
+      expect((await workQueuedBatch(root, scoped, execute)).kind).to.equal("failed");
+      expect(calls).to.equal(2);
+      expect(scoped.get(run.id).steps.map((item) => item.state)).to.deep.equal(["COMPLETED", "FAILED", "SKIPPED"]);
+      expect(scoped.stepOutput(run.id, 2).lines).to.deep.equal(["second"]);
+      expect((await workQueuedBatch(root, scoped)).kind).to.equal("empty");
+      scoped.db.prepare("UPDATE batch_run_steps SET input_json = ? WHERE run_id = ? AND step_no = 1")
+        .run(JSON.stringify([{name: "P_SECRET", value: "hidden-value"}]), run.id);
+      expect(JSON.stringify(scoped.list())).not.to.include("hidden-value");
+      expect(scoped.get(run.id).steps[0].input).to.deep.equal([{name: "P_SECRET"}]);
+    } finally { scoped.close(); }
+  });
+
+  it("leaves a crashed active step RUNNING and requires explicit interrupt", async () => {
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "multi-crash.sqlite")});
+    const base = {intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
+      client: "123", sysid: "OSG", jobname: "MULTI", jobcount: "00000002",
+      owner: "DEVELOPER", program: "ZGG_EX_001", generation: liveGeneration(root),
+      steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"}]};
+    try {
+      const run = scoped.importIntent(base).run;
+      expect(scoped.claimNext().step).to.equal(1); // process exits after claim, before recording report result
+      // The report's business LUW may already be committed at this point.
+      const writer = new DatabaseSync(dbPath);
+      try {
+        writer.exec("CREATE TABLE IF NOT EXISTS job_crash_effect (run_id TEXT)");
+        writer.prepare("INSERT INTO job_crash_effect VALUES (?)").run(run.id);
+      } finally { writer.close(); }
+      const reopened = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "multi-crash.sqlite")});
+      try {
+        const check = new DatabaseSync(dbPath, {readOnly: true});
+        try { expect(check.prepare("SELECT COUNT(*) AS n FROM job_crash_effect WHERE run_id = ?").get(run.id).n).to.equal(1); }
+        finally { check.close(); }
+        expect(reopened.claimNext()).to.deep.equal({kind: "busy", id: run.id});
+        expect(reopened.get(run.id).steps.map((item) => item.state)).to.deep.equal(["RUNNING", "PENDING"]);
+        expect(reopened.interruptQueued(run.id).steps.map((item) => item.state)).to.deep.equal(["INTERRUPTED", "SKIPPED"]);
+        expect(reopened.claimNext().kind).to.equal("empty");
+      } finally { reopened.close(); }
+    } finally { scoped.close(); }
+  });
+
+  it("never runs a queued multi-step parent whose READY child is missing", async () => {
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "multi-corrupt.sqlite")});
+    try {
+      const run = scoped.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
+        client: "123", sysid: "OSG", jobname: "MULTI", jobcount: "00000003", owner: "DEVELOPER",
+        program: "ZGG_EX_001", generation: liveGeneration(root),
+        steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"}]}).run;
+      scoped.db.prepare("UPDATE batch_run_steps SET state = 'PENDING' WHERE run_id = ?").run(run.id);
+      expect(() => scoped.claimNext()).to.throw(/inconsistent ordered steps/);
+      expect(scoped.get(run.id).state).to.equal("QUEUED");
+    } finally { scoped.close(); }
+  });
+
+  it("two worker processes cannot claim the same first step", async () => {
+    const path = join(dir, "multi-workers.sqlite");
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: path});
+    try {
+      const run = scoped.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
+        client: "123", sysid: "OSG", jobname: "MULTI", jobcount: "00000004", owner: "DEVELOPER",
+        program: "ZGG_EX_001", generation: liveGeneration(root),
+        steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"}]}).run;
+      const fixture = join(root, "test", "fixtures", "job-step-claim.mjs");
+      const claim = () => new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, [fixture, path], {cwd: root, env: {...process.env}});
+        let output = "", errors = "";
+        child.stdout.on("data", (part) => { output += part; });
+        child.stderr.on("data", (part) => { errors += part; });
+        child.on("error", reject);
+        child.on("close", (code) => code === 0 ? resolve(JSON.parse(output)) : reject(new Error(errors)));
+      });
+      const results = await Promise.all([claim(), claim()]);
+      expect(results.map((item) => item.kind).sort()).to.deep.equal(["busy", "claimed"]);
+      expect(results.find((item) => item.kind === "claimed").step).to.equal(1);
+      expect(scoped.get(run.id).steps.map((item) => item.state)).to.deep.equal(["RUNNING", "PENDING"]);
+    } finally { scoped.close(); }
+  });
+
+  it("reports a committed step transition even when another worker claims its successor immediately", async () => {
+    const path = join(dir, "step-transition-race.sqlite");
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: path});
+    const other = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: path});
+    try {
+      const run = scoped.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
+        client: "123", sysid: "OSG", jobname: "RACE", jobcount: "00000005", owner: "DEVELOPER",
+        program: "ZGG_EX_001", generation: liveGeneration(root),
+        steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"}]}).run;
+      const originalExec = scoped.db.exec.bind(scoped.db);
+      let armed = false;
+      scoped.db.exec = (statement) => {
+        const answer = originalExec(statement);
+        if (statement === "COMMIT" && armed) {
+          armed = false;
+          expect(other.claimNext().step).to.equal(2);
+        }
+        return answer;
+      };
+      const result = await workQueuedBatch(root, scoped, async () => {
+        armed = true;
+        return {status: "COMPLETED", lines: ["first"]};
+      });
+      expect(result.kind).to.equal("advanced");
+      expect(result.run.state).to.equal("QUEUED");
+      expect(result.run.steps.map((item) => item.state)).to.deep.equal(["COMPLETED", "READY"]);
+      expect(other.get(run.id).steps.map((item) => item.state)).to.deep.equal(["COMPLETED", "RUNNING"]);
+    } finally { other.close(); scoped.close(); }
+  });
+
+  it("records a step when node:sqlite exposes no isTransaction property", () => {
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "older-node.sqlite")});
+    try {
+      const run = scoped.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
+        client: "123", sysid: "OSG", jobname: "OLDER_NODE", jobcount: "00000007", owner: "DEVELOPER",
+        program: "ZGG_EX_001", generation: liveGeneration(root),
+        steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"}]}).run;
+      scoped.claimNext();
+      const native = scoped.db;
+      scoped.db = new Proxy(native, {get(target, key) {
+        if (key === "isTransaction") return undefined;
+        const member = Reflect.get(target, key, target);
+        return typeof member === "function" ? member.bind(target) : member;
+      }});
+      const transition = scoped.finishStep(run.id, 1, {status: "COMPLETED", lines: ["first"]});
+      expect(transition.kind).to.equal("advanced");
+      expect(transition.run.steps.map((item) => item.state)).to.deep.equal(["COMPLETED", "READY"]);
+      expect(scoped.get(run.id).steps.map((item) => item.state)).to.deep.equal(["COMPLETED", "READY"]);
+      expect(scoped.list()[0].state).to.equal("QUEUED");
+    } finally { scoped.close(); }
+  });
+
+  it("reads parent and child monitor states from one operations snapshot", () => {
+    const path = join(dir, "step-read-snapshot.sqlite");
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: path});
+    const other = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: path});
+    try {
+      const run = scoped.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
+        client: "123", sysid: "OSG", jobname: "SNAPSHOT", jobcount: "00000006", owner: "DEVELOPER",
+        program: "ZGG_EX_001", generation: liveGeneration(root),
+        steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"}]}).run;
+      scoped.claimNext();
+      const originalSteps = scoped.steps.bind(scoped);
+      let raced = false;
+      scoped.steps = (id, options) => {
+        if (!raced) {
+          raced = true;
+          expect(other.finishStep(run.id, 1, {status: "COMPLETED"}).kind).to.equal("advanced");
+        }
+        return originalSteps(id, options);
+      };
+      const view = scoped.get(run.id);
+      expect(view.state).to.equal("RUNNING");
+      expect(view.steps.map((item) => item.state)).to.deep.equal(["RUNNING", "PENDING"]);
+      expect(other.get(run.id).steps.map((item) => item.state)).to.deep.equal(["COMPLETED", "READY"]);
+    } finally { other.close(); scoped.close(); }
   });
 });
