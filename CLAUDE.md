@@ -19,6 +19,14 @@ navigation property), a launchpad sandbox (`webapp/flp.html`) with two apps
 and intent-based navigation, and read-only SADL (reference data source over CDS projections, with analytics
 annotations) work end to end (2026-09-12). The whole thing also runs in the
 browser as a preview deployment (service worker + sql.js, GitHub Pages).**
+**0.3 beta (freeze 2026-09-29 at `cabed25`).** On top of that: ABAP daemons
+steps 0–4 (dialog-step queue, PCP, timers, AMC in one process;
+`docs/abap-daemons.md`), background jobs (`JOB_OPEN`/`SUBMIT`/`CLOSE`,
+`SUBMIT … VIA JOB … WITH`, multi-step, durable keys, tail events, doctor),
+regression cases as `.http` with a frozen ABAP clock and UUIDs
+(`docs/regression-http-cases.md`), a VS Code extension on the Marketplace,
+and a CI of four shards that gates every publication on the tag's tests.
+The README's "Where it stands" table is the measured detail.
 `npm test` transpiles a SEGW-shaped demo MPC/DPC and serves it as OData v2
 over `src/gateway/` (URL parser, `$filter` → select-options, request context,
 entry provider, model info, JSON (de)serializer, dispatcher). A Fiori Elements
