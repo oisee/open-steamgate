@@ -1,6 +1,7 @@
 // Private read model for a future measured SAP job-read facade. Both files are
 // opened read-only; in particular a read never drains the outbox or ends an
 // ABAP caller's LUW. No list output, job log, or BAL data is exposed here.
+import {createHash} from "node:crypto";
 import {existsSync} from "node:fs";
 import {resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
@@ -32,7 +33,7 @@ function outboxSnapshot(db, identity, sourceDb, caller) {
   const parent = db.prepare("SELECT * FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ?")
     .get(caller.client, intentId);
   if (!parent) return undefined;
-  if (value(parent, "jobname") !== value(identity, "jobname") ||
+  if (value(parent, "jobname").toUpperCase() !== value(identity, "jobname") ||
       value(parent, "jobcount") !== value(identity, "jobcount") ||
       value(parent, "owner") !== value(identity, "owner") ||
       value(parent, "source_db") !== sourceDb || value(parent, "sysid") !== caller.sid) {
@@ -41,17 +42,20 @@ function outboxSnapshot(db, identity, sourceDb, caller) {
   const count = Number(value(parent, "step_count"));
   const rows = db.prepare(`SELECT step_no, program FROM zosd_job_step
     WHERE mandt = ? AND intent_id = ? ORDER BY step_no`).all(caller.client, intentId);
-  if (!Number.isInteger(count) || count < 1 || count > 16 || rows.length !== count ||
-      rows.some((row, index) => Number(value(row, "step_no")) !== index + 1 || !value(row, "program")) ||
-      value(parent, "program") !== value(rows[0], "program")) {
+  const legacy = count === 0 && rows.length === 0;
+  if (!value(parent, "program") || (!legacy &&
+      (!Number.isInteger(count) || count < 1 || count > 16 || rows.length !== count ||
+       rows.some((row, index) => Number(value(row, "step_no")) !== index + 1 || !value(row, "program")) ||
+       value(parent, "program") !== value(rows[0], "program")))) {
     fail("outbox has an invalid ordered step set");
   }
+  const programs = legacy ? [value(parent, "program")] : rows.map((row) => value(row, "program"));
   return {
     phase: "OUTBOX", state: "READY", program: value(parent, "program"),
     generation: value(parent, "generation"),
     createdOn: value(parent, "created_on"), createdAt: value(parent, "created_at"),
     queuedAt: null, startedAt: null, endedAt: null, resultStatus: null, detail: null,
-    steps: rows.map((row, index) => ({number: index + 1, program: value(row, "program"),
+    steps: programs.map((program, index) => ({number: index + 1, program,
       state: index === 0 ? "READY" : "PENDING", startedAt: null, endedAt: null,
       resultStatus: null, detail: null})),
   };
@@ -89,7 +93,7 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
     return undefined; // an older operations file may predate queued jobs
   }
   if (!tables.has("batch_runs") || !tables.has("batch_run_steps")) fail("incomplete operations schema");
-  const ledger = db.prepare("SELECT run_id FROM batch_imports WHERE intent_id = ?").get(intentId);
+  const ledger = db.prepare("SELECT run_id, payload_sha256 FROM batch_imports WHERE intent_id = ?").get(intentId);
   if (!ledger) {
     const stray = db.prepare("SELECT 1 FROM batch_runs WHERE id = ?").get(id);
     if (stray) fail("operations run has no import ledger");
@@ -100,21 +104,37 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
   if (!run) fail("import ledger has no operations run");
   if (value(run, "source_db") !== sourceDb || value(run, "source_client") !== caller.client ||
       value(run, "source_sysid") !== caller.sid || value(run, "source_owner") !== value(identity, "owner") ||
-      value(run, "job_name") !== value(identity, "jobname") ||
+      value(run, "job_name").toUpperCase() !== value(identity, "jobname") ||
       value(run, "job_count") !== value(identity, "jobcount")) {
     fail("operations run disagrees with retained job identity or business instance");
   }
   const rows = db.prepare("SELECT * FROM batch_run_steps WHERE run_id = ? ORDER BY step_no").all(id);
-  if (!Number.isInteger(run.step_count) || run.step_count < 1 || run.step_count > 16 ||
-      rows.length !== run.step_count || rows.some((row, index) =>
-        row.step_no !== index + 1 || !value(row, "program")) ||
-      value(run, "program") !== value(rows[0], "program")) {
+  const legacy = run.step_count === 0 && rows.length === 0;
+  if (!value(run, "program") || (!legacy &&
+      (!Number.isInteger(run.step_count) || run.step_count < 1 || run.step_count > 16 ||
+       rows.length !== run.step_count || rows.some((row, index) =>
+         row.step_no !== index + 1 || !value(row, "program")) ||
+       value(run, "program") !== value(rows[0], "program")))) {
     fail("operations run has an invalid ordered step set");
   }
-  const steps = rows.map((row) => ({number: row.step_no, program: value(row, "program"),
-    state: value(row, "state"), startedAt: row.started_at || null, endedAt: row.ended_at || null,
-    resultStatus: row.result_status ?? null, detail: row.detail ?? null}));
+  const steps = legacy ? [{number: 1, program: value(run, "program"), state: value(run, "state") === "QUEUED" ? "READY" : value(run, "state"),
+    startedAt: run.started_at || null, endedAt: run.ended_at ?? null,
+    resultStatus: run.result_status ?? null, detail: run.detail ?? null}] :
+    rows.map((row) => ({number: row.step_no, program: value(row, "program"),
+      state: value(row, "state"), startedAt: row.started_at || null, endedAt: row.ended_at || null,
+      resultStatus: row.result_status ?? null, detail: row.detail ?? null}));
   checkRunState(run.state, steps);
+  // Reconstruct the importer's versioned payload using the stored bytes, not
+  // the canonical key used for identity lookup. Old imported names can be
+  // lowercase even when migration uppercased the retained business key.
+  const base = {sourceDb: run.source_db, client: run.source_client, sysid: run.source_sysid,
+    jobname: run.job_name, jobcount: run.job_count, owner: run.source_owner,
+    program: run.program, generation: run.generation};
+  const payload = legacy ? JSON.stringify(base) : JSON.stringify({version: 2, ...base,
+    steps: rows.map((row) => ({number: row.step_no, program: row.program}))});
+  if (createHash("sha256").update(payload).digest("hex") !== ledger.payload_sha256) {
+    fail("operations run differs from immutable import ledger payload");
+  }
   if (outbox && (outbox.program !== value(run, "program") ||
       outbox.generation !== value(run, "generation") ||
       outbox.steps.length !== steps.length ||
@@ -130,22 +150,49 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
   };
 }
 
+function checkPreIdentityJob(business, sourceDb, name, count, caller, root, env) {
+  const pending = business.prepare(`SELECT owner FROM zosd_job_outbox
+    WHERE mandt = ? AND UPPER(TRIM(jobname)) = ? AND TRIM(jobcount) = ?`)
+    .all(caller.client, name, count);
+  if (pending.some((row) => value(row, "owner") === caller.user)) {
+    throw new JobSnapshotError("JOB_LEGACY_UNSUPPORTED", "job predates retained identity; migrate before reading");
+  }
+  const file = operationsPath(root, env);
+  if (!existsSync(file)) return;
+  readOnly(file, (db) => {
+    const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'batch_runs'").get();
+    if (!table) return;
+    const columns = new Set(db.prepare("PRAGMA table_info(batch_runs)").all().map((row) => row.name));
+    if (!["source_db", "source_client", "source_sysid", "source_owner", "job_name", "job_count"]
+      .every((column) => columns.has(column))) return;
+    const old = db.prepare(`SELECT source_owner FROM batch_runs WHERE source_db = ?
+      AND source_client = ? AND source_sysid = ? AND UPPER(TRIM(job_name)) = ?
+      AND TRIM(job_count) = ?`).all(sourceDb, caller.client, caller.sid, name, count);
+    if (old.some((row) => value(row, "source_owner") === caller.user)) {
+      throw new JobSnapshotError("JOB_LEGACY_UNSUPPORTED", "job predates retained identity; migrate before reading");
+    }
+  });
+}
+
 /** Return one job's durable metadata, or undefined if the key is unknown.
  * `caller` must come from trusted ABAP runtime identity, not request fields.
  */
 export function readJobSnapshot({sourceDb, jobName, jobCount, caller, root = process.cwd(), env = process.env} = {}) {
   const name = String(jobName ?? "").trim().toUpperCase();
   const count = String(jobCount ?? "").trim();
-  if (!sourceDb || !caller || !/^[A-Z0-9_]{1,32}$/.test(name) || !/^\d{8}$/.test(count) ||
-      !/^\d{3}$/.test(caller.client ?? "") || !/^[A-Z0-9_]{1,12}$/.test(caller.user ?? "") ||
-      !/^[A-Z0-9]{3}$/.test(caller.sid ?? "")) {
+  if (!sourceDb || !caller || !name || name.length > 32 || !/^\d{8}$/.test(count) ||
+      !caller.client || caller.client.length > 3 || !caller.user || caller.user.length > 12 ||
+      !caller.sid || caller.sid.length > 3) {
     throw new JobSnapshotError("JOB_READ_BAD_KEY", "invalid job key or trusted caller identity");
   }
   const source = resolve(sourceDb);
   return readOnly(source, (business) => {
     const identity = business.prepare(`SELECT * FROM zosd_job_identity
       WHERE mandt = ? AND jobname = ? AND jobcount = ?`).get(caller.client, name, count);
-    if (!identity) return undefined;
+    if (!identity) {
+      checkPreIdentityJob(business, source, name, count, caller, root, env);
+      return undefined;
+    }
     if (value(identity, "owner") !== caller.user) {
       throw new JobSnapshotError("JOB_READ_FORBIDDEN", "job belongs to another user");
     }

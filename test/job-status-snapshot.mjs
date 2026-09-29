@@ -44,14 +44,14 @@ describe("private durable job status snapshot", function () {
     });
     return {intentId, name, count, programs};
   };
-  const imported = (job) => {
+  const imported = (job, {legacy = false, jobname = job.name} = {}) => {
     const store = new BatchRuns(root, env);
     try {
       const answer = store.importIntent({intentId: job.intentId, sourceDb,
         client: caller.client, sysid: caller.sid, owner: caller.user,
-        jobname: job.name, jobcount: job.count, program: job.programs[0],
-        generation: "generation-1", steps: job.programs.map((program, index) =>
-          ({number: index + 1, program}))});
+        jobname, jobcount: job.count, program: job.programs[0],
+        generation: "generation-1", ...(legacy ? {} : {steps: job.programs.map((program, index) =>
+          ({number: index + 1, program}))})});
       return answer.run.id;
     } finally { store.close(); }
   };
@@ -117,6 +117,62 @@ describe("private durable job status snapshot", function () {
     try { old.exec("CREATE TABLE batch_runs (id TEXT PRIMARY KEY)"); }
     finally { old.close(); }
     assert.equal(read("OLD_STORE", "00000012").phase, "OUTBOX");
+  });
+
+  it("accepts names and runtime users allowed by the job producer", () => {
+    const who = {...caller, user: "OPS.USER-1"};
+    reserve("NIGHTLY - AUDIT", "00000013", who.user);
+    assert.equal(read("nightly - audit", "00000013", who).phase, "RESERVED");
+    const job = {name: "NIGHTLY - AUDIT", count: "00000013", programs: ["Z_ALPHA"],
+      intentId: randomUUID().replaceAll("-", "")};
+    edit((db) => {
+      db.prepare("UPDATE zosd_job_identity SET intent_id = ? WHERE jobname = ?")
+        .run(job.intentId, job.name);
+      db.prepare(`INSERT INTO zosd_job_outbox VALUES
+        ('123', ?, 'OSG', ?, ?, ?, ?, 'Z_ALPHA', '01', 'generation-1', '20260929', '091500')`)
+        .run(job.intentId, sourceDb, job.name, job.count, who.user);
+      db.prepare("INSERT INTO zosd_job_step VALUES ('123', ?, '01', 'Z_ALPHA')").run(job.intentId);
+    });
+    assert.equal(read(job.name, job.count, who).steps[0].program, "Z_ALPHA");
+    assert.throws(() => read(job.name, job.count, caller), {code: "JOB_READ_FORBIDDEN"});
+  });
+
+  it("synthesizes one step for migrated one-step intents and imported runs", () => {
+    reserve("LEGACY - ONE", "00000014");
+    const job = bind("LEGACY - ONE", "00000014", ["Z_OLD"]);
+    edit((db) => {
+      db.prepare("UPDATE zosd_job_outbox SET jobname = 'legacy - one', step_count = '00' WHERE intent_id = ?")
+        .run(job.intentId);
+      db.prepare("DELETE FROM zosd_job_step WHERE intent_id = ?").run(job.intentId);
+    });
+    assert.deepEqual(read(job.name, job.count).steps.map((step) => [step.number, step.program, step.state]),
+      [[1, "Z_OLD", "READY"]]);
+    const id = imported(job, {legacy: true, jobname: "legacy - one"});
+    assert.deepEqual(read(job.name, job.count).steps.map((step) => [step.number, step.program, step.state]),
+      [[1, "Z_OLD", "READY"]]);
+    acknowledge(job);
+    const store = new BatchRuns(root, env);
+    try {
+      assert.equal(store.claimNext().kind, "claimed");
+      assert.equal(read(job.name, job.count).steps[0].state, "RUNNING");
+      store.finish(id, {status: "COMPLETED", lines: ["old list"]});
+    } finally { store.close(); }
+    const done = read(job.name, job.count);
+    assert.equal(done.state, "COMPLETED");
+    assert.deepEqual(done.steps.map((step) => [step.number, step.program, step.state]),
+      [[1, "Z_OLD", "COMPLETED"]]);
+  });
+
+  it("reports pre-identity completed jobs explicitly as unsupported", () => {
+    const store = new BatchRuns(root, env);
+    try {
+      store.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb,
+        client: caller.client, sysid: caller.sid, owner: caller.user,
+        jobname: "PRE_IDENTITY", jobcount: "00000015", program: "Z_OLD",
+        generation: "generation-1"});
+    } finally { store.close(); }
+    assert.throws(() => read("PRE_IDENTITY", "00000015"), {code: "JOB_LEGACY_UNSUPPORTED"});
+    assert.equal(read("PRE_IDENTITY", "00000015", {...caller, client: "999"}), undefined);
   });
 
   it("prefers imported operations over still-pending outbox and survives acknowledgement and restart", () => {
@@ -205,6 +261,18 @@ describe("private durable job status snapshot", function () {
     try { orphan.prepare("DELETE FROM batch_imports WHERE intent_id = ?").run(noLedger.intentId); }
     finally { orphan.close(); }
     assert.throws(() => read(noLedger.name, noLedger.count), {code: "JOB_SNAPSHOT_INCONSISTENT"});
+
+    reserve("TAMPERED", "00000016");
+    const tampered = bind("TAMPERED", "00000016");
+    const tamperedId = imported(tampered);
+    acknowledge(tampered);
+    const changed = new DatabaseSync(operationsDb);
+    try {
+      changed.prepare("UPDATE batch_runs SET program = 'Z_FAKE' WHERE id = ?").run(tamperedId);
+      changed.prepare("UPDATE batch_run_steps SET program = 'Z_FAKE' WHERE run_id = ? AND step_no = 1")
+        .run(tamperedId);
+    } finally { changed.close(); }
+    assert.throws(() => read(tampered.name, tampered.count), {code: "JOB_SNAPSHOT_INCONSISTENT"});
   });
 
   it("limits reads to the current client and owner", () => {
