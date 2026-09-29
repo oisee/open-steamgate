@@ -1048,7 +1048,7 @@ cost here (the APC host, the RFC channel, the pool).
 | step | what | days |
 | --- | --- | --- |
 | 0 | read the signatures off A4H (P0) and run the probes P1 to P11, with Alice's go; write the results into this file and `ANORMALIES.md` (**done 2026-09-24, P8 the same day through an abapGit-created `SAMC`; three entries: `daemon-statics`, `daemon-creator-program`, `daemon-lazy-restart`**) | 1.5 |
-| 1 | **not in this work**: osg-i7's separate PR (the step queue in `tools/osd-dialog-step.mjs`, released during `WAIT`; APC callbacks through `dialogStep`; `/osd/sql` and the shim's static server inside the step). This work starts after it is merged | 0 |
+| 1 | **done** (#75). **Not in this work**: osg-i7's separate PR (the step queue in `tools/osd-dialog-step.mjs`, released during `WAIT`; APC callbacks through `dialogStep`; `/osd/sql` and the shim's static server inside the step). This work starts after it is merged | 0 |
 | 2 | **done** (#235, open-abap-apc#1): PCP interface, class and serialiser; P1 captured bytes tested, unmeasured cases marked for probes | 1 |
 | 3 | **done on Node for stateful APC**: `CL_ABAP_TIMER_MANAGER` contract and host hook, tested with socket frames and separate dialog steps; preview, OSGo and daemon restart policy remain later work | 1 |
 | 4 | **done in one Node process** for `serve` and the inline `test/start` host; `bin/osd.mjs serve` enters the same `osd-serve` setup, and `bin/osd.mjs up` enters `test/start`, so both binary routes install the broker through `mountChannels`. Typed TEXT/BINARY/PCP producer and receiver, context client/user, `SAMC` layer reader and send/start authority checks, delivery at `SEND`, echo suppression, released `WAIT FOR MESSAGING CHANNELS` and `WAIT UP TO`, and APC binding to a socket without `ON_MESSAGE` are covered. ABAP Unit covers delivery, rollback, echo, authority and types; `test/amc.mjs` covers a real bound websocket, an HTTP sender step, 1000 ordered messages, and scope filtering. Client scope means same client, user scope same client and username, system scope all subscribers; **cross-client/user behaviour was not measured on A4H**, so this is a design assumption. Program identity uses a generated class frame and fails closed when unavailable, including if a compiled binary loses that frame (see `ANOMALY-2026-09-29-amc-program-identity`). A host without the broker raises `CX_AMC_ERROR` with "AMC is not available in this host." at producer/consumer creation. Browser preview has no broker; best-effort preview AMC belongs to step 9. Filters, binary/PCP socket frames and the supervisor broker in step 6 remain unverified. APC binding behaviour was **not measured on A4H**; this is an implementation assumption. | 1.5 |
@@ -1058,6 +1058,8 @@ cost here (the APC host, the RFC channel, the pool).
 | 8 | OSGo: `DaemonStep` under `WorkProcess`, goroutine and channels, timers, the class-data check in gogen, restart from rows on process start; the same test file green | 1.5 |
 | 9 | the preview, best effort as described | 1 |
 | | **total** | **about 13.5** |
+
+At the 0.3 beta freeze (2026-09-29, `cabed25`) steps 0–4 are done and steps 5–9 are open.
 
 Steps 2 to 4 are useful without daemons: timers and AMC make stateful APC handlers that push on their
 own possible. A stop after step 4 leaves nothing half-built. Steps 5 and 6
