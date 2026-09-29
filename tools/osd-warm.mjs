@@ -206,7 +206,9 @@ const statKey = (file) => {
 // is recycled rather than swapped. test/warm.mjs keeps this list and the
 // imports of osd-serve.mjs the same.
 export const HOST_HELD = ["init.mjs", "cl_express_icf_shim.clas.mjs", "zcl_stg_segw_registry.clas.mjs",
-  "zcl_stg_shlp_registry.clas.mjs", "zcl_apc_host.clas.mjs", "zcl_osd_status.clas.mjs", "zcl_osd_demo_data.clas.mjs"];
+  "zcl_stg_shlp_registry.clas.mjs", "zcl_apc_host.clas.mjs", "zcl_osd_status.clas.mjs", "zcl_osd_demo_data.clas.mjs",
+  // held by a reference-case server (OSD_REFERENCE_CASES) for its UUID hook
+  "cl_system_uuid.clas.mjs"];
 
 // A generation's unchanged files are hard links of the live one's, which is
 // what makes a warm build cost what it rebuilds. Where the filesystem will
