@@ -43,7 +43,9 @@ function outboxSnapshot(db, identity, sourceDb, caller, currentSourceInstance) {
     fail("outbox parent disagrees with retained job identity or business instance");
   }
   const count = Number(value(parent, "step_count"));
-  const rows = db.prepare(`SELECT step_no, program, input_json FROM zosd_job_step
+  const hasInput = db.prepare("PRAGMA table_info(zosd_job_step)").all()
+    .some((column) => column.name.toLowerCase() === "input_json");
+  const rows = db.prepare(`SELECT step_no, program, ${hasInput ? "input_json" : "'' AS input_json"} FROM zosd_job_step
     WHERE mandt = ? AND intent_id = ? ORDER BY step_no`).all(caller.client, intentId);
   const legacy = count === 0 && rows.length === 0;
   if (!value(parent, "program") || (!legacy &&

@@ -22,9 +22,11 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
     let rows, sourceInstanceOnDisk;
     try {
       reader.exec("BEGIN");
+      const hasInput = reader.prepare("PRAGMA table_info(zosd_job_step)").all()
+        .some((column) => column.name.toLowerCase() === "input_json");
       rows = reader.prepare("SELECT * FROM zosd_job_outbox WHERE mandt = ? ORDER BY created_on, created_at, intent_id")
         .all(who.client).map((row) => ({...row, steps: reader.prepare(
-          "SELECT step_no, program, input_json FROM zosd_job_step WHERE mandt = ? AND intent_id = ? ORDER BY step_no")
+          `SELECT step_no, program, ${hasInput ? "input_json" : "'' AS input_json"} FROM zosd_job_step WHERE mandt = ? AND intent_id = ? ORDER BY step_no`)
           .all(who.client, value(row, "intent_id"))}));
       if (reader.prepare("SELECT 1 FROM sqlite_master WHERE name = 'zosd_job_source_instance'").get()) {
         sourceInstanceOnDisk = reader.prepare("SELECT id FROM zosd_job_source_instance LIMIT 1").get()?.id;
