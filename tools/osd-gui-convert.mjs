@@ -77,6 +77,10 @@ ${[...new Set(entry.selectionNames ?? [])].map((name) => `        INSERT ${abapL
         iv_program TYPE string
         it_input TYPE zif_gg_selection_screen_types=>ty_values OPTIONAL
         iv_batch TYPE abap_bool DEFAULT abap_false.
+    CLASS-METHODS submit_via_job
+      IMPORTING iv_program TYPE string iv_jobname TYPE string
+                iv_jobcount TYPE string
+                it_input TYPE zif_gg_selection_screen_types=>ty_values OPTIONAL.
     CLASS-METHODS supports
       IMPORTING iv_program TYPE string
       RETURNING VALUE(rv_supported) TYPE abap_bool.
@@ -142,6 +146,23 @@ ${cases}
     IF ls_result-status <> 'COMPLETED'.
       RAISE EXCEPTION NEW zcx_osd_submit(
         iv_detail = |SUBMIT { iv_program }: { ls_result-status } { ls_result-detail }| ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD submit_via_job.
+    DATA lv_error TYPE string.
+    DATA lv_input TYPE string.
+    IF supports( iv_program ) <> abap_true.
+      RAISE EXCEPTION NEW zcx_osd_submit( iv_detail = |SUBMIT { iv_program }: program_missing| ).
+    ENDIF.
+    lv_input = /ui2/cl_json=>serialize( data = it_input ).
+    CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'
+      EXPORTING iv_command = 'SUBMIT' iv_jobname = iv_jobname
+                iv_jobcount = iv_jobcount iv_program = iv_program
+                iv_input_json = lv_input iv_owner = sy-uname iv_client = sy-mandt
+      IMPORTING ev_error = lv_error.
+    IF lv_error IS NOT INITIAL.
+      RAISE EXCEPTION NEW zcx_osd_submit( iv_detail = |SUBMIT { iv_program }: { lv_error }| ).
     ENDIF.
   ENDMETHOD.
 

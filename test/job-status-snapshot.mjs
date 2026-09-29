@@ -111,6 +111,9 @@ describe("private durable job status snapshot", function () {
       {number: 2, program: "Z_BETA", state: "PENDING"},
       {number: 3, program: "Z_GAMMA", state: "PENDING"},
     ]);
+    assert.deepEqual(snapshot.steps.map((step) => step.input), [[], [], []]);
+    edit((db) => assert.equal(db.prepare("PRAGMA table_info(zosd_job_step)").all()
+      .some((column) => column.name === "input_json"), false));
     assert.equal(existsSync(operationsDb), false);
   });
 

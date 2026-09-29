@@ -146,13 +146,17 @@ known-but-unsupported names.
 
 ## Narrow synchronous SUBMIT
 
-`tools/osd-narrow-submit.mjs` lowers only `SUBMIT <static PROG> [WITH
-<field> = <scalar> ...] AND RETURN` in OSD's own ABAP sources before the
+`tools/osd-narrow-submit.mjs` lowers `SUBMIT <static PROG> [WITH
+<field> = <scalar> ...] AND RETURN` and `SUBMIT <static PROG> VIA JOB
+<jobname-ident> NUMBER <jobcount-ident> [WITH <field> = <scalar> ...] AND RETURN`
+in OSD's own ABAP sources before the
 upstream transpiler sees it. Each named scalar becomes a selection value for
 `ZCL_OSD_BATCH_REPORT=>SUBMIT`; a fresh report object is created. The target
 must be in the converter's registry and complete normally. A missing,
 unsupported, or incomplete target raises `ZCX_OSD_SUBMIT` with its status and
-detail. Dynamic program names, ranges, variants, `VIA JOB`, spool options,
+detail. The `VIA JOB` form appends a step to the current open job and raises
+`ZCX_OSD_SUBMIT` for an unsupported report or rejected step input. Dynamic
+program names, ranges, variants, spool options,
 `EXPORTING LIST TO MEMORY`, and `SUBMIT` without `AND RETURN` fail at build
 time with the source file and line. Dependencies are not rewritten.
 
@@ -216,8 +220,15 @@ separate from the transactional ABAP job facade below.
 
 For a durable `STG_DB=file` instance, the common `JOB_OPEN` / `JOB_SUBMIT` /
 `JOB_CLOSE` call shape schedules up to 16 ordered converted static reports in
-one LUW. `JOB_SUBMIT` accepts no variant or ad hoc selection; each report runs with its own
-`INITIALIZATION` defaults. `JOB_CLOSE` accepts `STRTIMMED = 'X'` or a
+one LUW. Plain `JOB_SUBMIT` accepts no variant or ad hoc selection. The static
+`SUBMIT ... VIA JOB ... NUMBER ... WITH` form accepts up to 20 scalar selection
+fields, each with an eight-character name and a value of at most 255 characters.
+Inputs are fixed at `JOB_CLOSE`, stored with the business step and imported into
+the operations step; steps without input use their `INITIALIZATION` defaults.
+An undeclared field fails the step with its field name in the result detail.
+The business step uses a `STRG` JSON column so the bounded payload fits one
+row without a child-table join; the SQLite, DuckDB, and HANA DDL generators
+already map `STRG`. `JOB_CLOSE` accepts `STRTIMMED = 'X'` or a
 same-owner predecessor with `PRED_JOBNAME`, `PRED_JOBCOUNT`, and
 `PREDJOB_CHECKSTAT = 'X'`, or a named `EVENT_ID` wait; see
 [job tail events](job-tail-events.md) and [named events](job-named-events.md). It rejects
@@ -273,7 +284,8 @@ this BGR admission limit.
 Selection support is a later compatibility slice with three distinct cases:
 persisted report variants, RSPARAMS or range selections, and typed
 `PARAMETERS ... NO-DISPLAY` values (which can include tables). These steps
-store default selections only. Standard ABAP job read, state and log functions
+store defaults unless the static `VIA JOB` form supplies bounded scalar values.
+Standard ABAP job read, state and log functions
 and an external scheduler API remain separate work.
 
 `tools/osd-job-snapshot.mjs` is a private read model for that future ABAP
@@ -283,7 +295,10 @@ imported operations rows with read-only SQLite connections. It prefers the
 verified operations row during import-before-ack and reports a missing or
 inconsistent durable record instead of guessing a state. A reserved `OPEN`
 has no steps; a committed outbox has ordered `READY`/`PENDING` steps; imported
-runs expose their saved per-step states. Reads never drain, commit the caller's
+runs expose their saved per-step states. `ZOSD_JOB_READ` and
+`ZOSD_JOB_DOCTOR` show each step's input, with values limited to 255 characters and explicit
+truncation markers if a longer stored value is encountered. Old step rows
+without input read as an empty selection list. Reads never drain, commit the caller's
 LUW, or open list artifacts. They expose neither a SAP job log nor BAL entries.
 Creation date/time currently comes from the outbox only and is unavailable
 after acknowledgement. Standard `BP_JOB_READ`, `SHOW_JOBSTATE` and

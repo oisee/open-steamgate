@@ -113,6 +113,11 @@ export async function migrateDuckdbFile(access, statements) {
   await access.execute("BEGIN TRANSACTION");
   try {
     const renamed = await migrateDuckdbColumns(access);
+    const columns = await access.query("SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'main' AND table_name = 'zosd_job_step'");
+    if (columns.length && !columns.some((row) => String(row.column_name).toLowerCase() === "input_json")) {
+      await access.execute('ALTER TABLE "zosd_job_step" ADD COLUMN "input_json" TEXT');
+      await access.execute("UPDATE zosd_job_step SET input_json = '[]'");
+    }
     const views = await refreshDuckdbViews(access, statements);
     await access.execute("COMMIT");
     return {renamed, ...views};
@@ -135,5 +140,10 @@ export async function refuseUnmigratedHana({query}, schema) {
   if (pending.length > 0) {
     const names = pending.map(({table, from, to}) => `${table}.${from} (now ${to})`).join(", ");
     throw new Error(`HANA schema ${schema} was made before a column rename: ${names}. It is not migrated; recreate it with STG_DB_FRESH=1 or use a new HANA_SCHEMA`);
+  }
+  const stepColumns = new Set(rows.filter((row) => String(row.table_name).toLowerCase() === "zosd_job_step")
+    .map((row) => String(row.column_name).toLowerCase()));
+  if (stepColumns.size && !stepColumns.has("input_json")) {
+    throw new Error(`HANA schema ${schema} lacks zosd_job_step.input_json; recreate it with STG_DB_FRESH=1 or use a new HANA_SCHEMA`);
   }
 }

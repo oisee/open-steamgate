@@ -5,6 +5,7 @@ FUNCTION job_close.
   DATA lv_error TYPE string.
   DATA lv_intent TYPE string.
   DATA lv_program TYPE string.
+  DATA lv_input_json TYPE string.
   DATA lv_generation TYPE string.
   DATA lv_source TYPE string.
   DATA lv_step_count TYPE string.
@@ -117,7 +118,8 @@ FUNCTION job_close.
       EXPORTING iv_command = 'READ' iv_jobname = jobname
                 iv_jobcount = jobcount iv_owner = sy-uname iv_client = sy-mandt
                 iv_intent_id = lv_intent iv_step_no = lv_step_no
-      IMPORTING ev_program = lv_program ev_error = lv_error.
+      IMPORTING ev_program = lv_program ev_input_json = lv_input_json
+                ev_error = lv_error.
     IF lv_error IS NOT INITIAL OR lv_program IS INITIAL.
       CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'
         EXPORTING iv_command = 'ABORT' iv_jobname = jobname
@@ -130,6 +132,7 @@ FUNCTION job_close.
     ls_step-intent_id = lv_intent.
     ls_step-step_no = lv_step_index.
     ls_step-program = lv_program.
+    ls_step-input_json = lv_input_json.
     INSERT zosd_job_step FROM ls_step.
     IF sy-subrc <> 0.
       CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'

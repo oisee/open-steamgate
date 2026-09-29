@@ -10,6 +10,7 @@ import {givenText, fill} from "./osd-destination.mjs";
 import {BatchRuns, liveGeneration, operationsPath} from "./osd-batch-runs.mjs";
 import {identity} from "./osd-identity.mjs";
 import {readJobSnapshot} from "./osd-job-snapshot.mjs";
+import {jobInputJson} from "./osd-job-input.mjs";
 
 const pending = new WeakMap();
 const keyOf = (name, count) => `${name}\0${count}`;
@@ -48,6 +49,7 @@ const readFill = (signature, fields) => fill(signature, {
   EV_QUEUED_AT: "", EV_STARTED_AT: "", EV_ENDED_AT: "",
   EV_WAIT_KIND: "", EV_WAIT_JOBNAME: "", EV_WAIT_JOBCOUNT: "",
   EV_WAIT_EVENT_ID: "", EV_STEP_NUMBER: "", EV_STEP_PROGRAM: "",
+  EV_INPUT_JSON: "",
   EV_STEP_STATE: "", EV_STEP_STARTED_AT: "", EV_STEP_ENDED_AT: "",
   EV_STEP_RESULT_STATUS: "", EV_LOG_SEQUENCE: "", EV_LOG_STEP: "",
   EV_LOG_AT: "", EV_LOG_EVENT: "", EV_LOG_SEVERITY: "", EV_LOG_TEXT: "",
@@ -168,6 +170,7 @@ export class JobDestination {
             } else if (item === "STEP") {
               const step = snapshot.steps[itemIndex - 1];
               readFill(signature, {...header, EV_STEP_NUMBER: String(step.number),
+                EV_INPUT_JSON: JSON.stringify(step.input ?? []),
                 EV_STEP_PROGRAM: step.program, EV_STEP_STATE: step.state,
                 EV_STEP_STARTED_AT: step.startedAt ?? "", EV_STEP_ENDED_AT: step.endedAt ?? "",
                 EV_STEP_RESULT_STATUS: step.resultStatus ?? ""});
@@ -269,7 +272,10 @@ export class JobDestination {
         const job = jobs.get(keyOf(jobname, count));
         if (!job || job.owner !== owner || job.client !== client) { answer = {EV_ERROR: "Job definition not found in this LUW"}; break; }
         if (job.closed || job.steps.length >= MAX_JOB_STEPS) { answer = {EV_ERROR: "Job step limit reached or definition closed"}; break; }
-        job.steps.push(program);
+        let input;
+        try { input = jobInputJson(givenText(signature, "IV_INPUT_JSON")); }
+        catch (error) { answer = {EV_ERROR: error.message}; break; }
+        job.steps.push({program, input});
         answer = {};
         break;
       }
@@ -310,7 +316,7 @@ export class JobDestination {
         answer = {
           EV_JOBNAME: jobname,
           EV_INTENT_ID: job.intentId,
-          EV_PROGRAM: job.steps[0],
+          EV_PROGRAM: job.steps[0].program,
           EV_STEP_COUNT: String(job.steps.length),
           EV_GENERATION: this.generation,
           EV_SOURCE_DB: resolve(db.path),
@@ -326,7 +332,8 @@ export class JobDestination {
             !Number.isInteger(stepNo) || stepNo < 1 || stepNo > job.steps.length) {
           answer = {EV_ERROR: "Closed job step not found"}; break;
         }
-        answer = {EV_PROGRAM: job.steps[stepNo - 1]};
+        answer = {EV_PROGRAM: job.steps[stepNo - 1].program,
+          EV_INPUT_JSON: JSON.stringify(job.steps[stepNo - 1].input)};
         break;
       }
       case "DONE": {

@@ -22,12 +22,19 @@ function replacement(statement, filename) {
   const words = statement.getTokens().map((token) => token.getStr());
   const line = statement.getStart().getRow();
   const unsupported = () => {
-    throw new Error(`${filename}:${line}: supported SUBMIT form is static PROG [WITH field = scalar ...] AND RETURN; got ${statement.concatTokens()}`);
+    throw new Error(`${filename}:${line}: supported SUBMIT forms are static PROG [WITH field = scalar ...] AND RETURN and static PROG VIA JOB ident NUMBER ident [WITH field = scalar ...] AND RETURN; got ${statement.concatTokens()}`);
   };
   if (words[0]?.toUpperCase() !== "SUBMIT" || !PROGRAM.test(words[1] ?? "") || words.at(-1) !== ".") unsupported();
   const program = words[1].toUpperCase();
   const values = [];
   let at = 2;
+  let job;
+  if (words[at]?.toUpperCase() === "VIA") {
+    if (words[at + 1]?.toUpperCase() !== "JOB" || !IDENT.test(words[at + 2] ?? "") ||
+        words[at + 3]?.toUpperCase() !== "NUMBER" || !IDENT.test(words[at + 4] ?? "")) unsupported();
+    job = {name: words[at + 2], count: words[at + 4]};
+    at += 5;
+  }
   while (words[at]?.toUpperCase() === "WITH") {
     const name = words[at + 1];
     const value = words[at + 3];
@@ -38,7 +45,8 @@ function replacement(statement, filename) {
   }
   if (words[at]?.toUpperCase() !== "AND" || words[at + 1]?.toUpperCase() !== "RETURN" || at + 2 !== words.length - 1) unsupported();
   const input = values.length === 0 ? "" : ` it_input = VALUE #( ${values.map(({name, value}) => `( name = '${name}' value = CONV string( ${value} ) )`).join(" ")} )`;
-  return `zcl_osd_batch_report=>submit( iv_program = '${program}'${input} iv_batch = sy-batch ).`;
+  return job ? `zcl_osd_batch_report=>submit_via_job( iv_program = '${program}' iv_jobname = ${job.name} iv_jobcount = ${job.count}${input} ).` :
+    `zcl_osd_batch_report=>submit( iv_program = '${program}'${input} iv_batch = sy-batch ).`;
 }
 
 export function lowerNarrowSubmit(source, filename, core) {
@@ -48,7 +56,8 @@ export function lowerNarrowSubmit(source, filename, core) {
   if (file === undefined) return source;
   const changes = [];
   for (const statement of file.getStatements()) {
-    if (statement.get().constructor.name !== "Submit") continue;
+    if (!/^(Submit|Unknown)$/.test(statement.get().constructor.name) ||
+        statement.getTokens()[0]?.getStr()?.toUpperCase() !== "SUBMIT") continue;
     const start = offsetAt(source, statement.getStart());
     const end = offsetAt(source, statement.getEnd());
     const original = source.slice(start, end);
