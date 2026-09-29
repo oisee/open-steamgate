@@ -6,16 +6,12 @@ listeners. The HANA Stack starts a separate SAP HANA Express container under
 SAP's terms. The `draft` tag is a multi-platform manifest for `linux/amd64`
 and `linux/arm64`; Docker selects the matching tested image automatically.
 
-An experimental ARM64 build runs in the separate **OSD ARM64 draft** workflow
-on a native `ubuntu-24.04-arm` runner. It builds the same Dockerfile for
-`linux/arm64`, checks its installed architecture and license inventories, then
-uses the existing Compose acceptance suite for SQLite and DuckDB, including
-OData persistence across a whole-stack restart, HTTPS, SAP-TUI on 32nn and
-ADT-over-RFC on 33nn. Only after these pass does it publish `arm64-draft`
-and an immutable `sha-…-arm64` tag. The separate multi-arch workflow verifies
-the platform of exact successful AMD64 and ARM64 tags before combining them as
-`draft`; it does not rebuild either image. To try it on a 64-bit Raspberry Pi
-host, use the normal SQLite or DuckDB Stack; see the
+The unified **OSD Docker image** workflow builds both profiles on native
+AMD64 and ARM64 runners. Each architecture checks its installed architecture,
+license inventory and Compose acceptance suite. ARM64 covers SQLite and DuckDB;
+AMD64 also covers PostgreSQL. The workflow combines the verified image digests
+into multi-platform tags. To try it on a 64-bit Raspberry Pi host, use the
+normal SQLite or DuckDB Stack; see the
 [Pi quick start and safe upgrade notes](spin.md#raspberry-pi-arm64).
 The CI acceptance run is on an ARM64 GitHub runner. Separately, SQLite ran on
 a Raspberry Pi 4 (2 GB, Debian 13 arm64): the container was healthy, served
@@ -37,11 +33,10 @@ Stack and database volume is the simplest first trial, since the vector pack
 adds a table to the database schema and an existing one is not migrated. For an
 existing HANA Stack, set a fresh `HANA_SCHEMA`, for example `OSD_SHOWCASE`.
 
-To publish a new showcase revision, manually run **OSD Docker draft** and
-**OSD ARM64 draft** on the same commit with `showcase=true` and `publish=true`.
-Each tests the selected image and publishes its unique tag. Run **OSD Docker
-multi-arch draft** with those two tags and `target=showcase-draft` to update
-the Portainer tag. Ordinary `draft` publication remains the core image.
+A `vscode-v*` release tag publishes both profiles after all four native
+builds pass. The same workflow can be dispatched with `publish=true` for a
+manual publication. A dispatch with the default `publish=false` is a dry run.
+See [Docker CI](docker-ci.md) for the job graph and tags.
 
 Short, complete Portainer stacks: [SQLite](../docker/compose.sqlite.yml),
 [DuckDB](../docker/compose.duckdb.yml), [HANA](../docker/compose.hana.yml),
@@ -70,8 +65,9 @@ This is a schema-bound wire client: automatic deep-type discovery via
 general RFC compatibility or TLS transport over RFC.
 
 Reports, raw ANSI, the rendered `diag.svg` screenshot, and RFC responses are in
-`.local/image-acceptance/`; CI uploads them as `protocol-acceptance` even on
-failure. Test-client binaries are not added to the runtime image.
+`.local/image-acceptance/` locally and `image-acceptance/` in CI; CI uploads them as
+`protocol-acceptance-<profile>-<arch>` even on failure. Test-client binaries
+are not added to the runtime image.
 On a sufficiently sized **Linux amd64** test host, after accepting SAP's license:
 
 ```sh
@@ -86,23 +82,15 @@ The Portainer defaults remain 11/15/17/19. Selection is advisory, not an atomic
 reservation: if another process claims a port before Compose binds it, startup
 fails without stopping the other process. Do not run against real data.
 
-The GitHub Actions **OSD Docker draft** workflow builds and tests on the draft
-branch and relevant PRs. PRs cannot publish. Pushes to `feat/docker-image`,
-tags `osd-image-*`, or a manual run with `publish=true` publish only after
-license inventory and smoke checks pass. The weekly scheduled run rebuilds
-and tests but does not publish. Schedules become active after merge to the
-default branch. A security update can use the manual publish path.
-
-The GHCR name is `ghcr.io/oisee/open-steamgate`. Each publication has a unique
-`sha-<commit>-run-<run-id>-<attempt>` tag and updates the convenience tag
-`docker-draft` for AMD64 or `arm64-draft` for ARM64. After both architectures
-pass at the same revision, **OSD Docker multi-arch draft** resolves their
-unique publication tags to digests and combines those digests under `draft`
-and a unique `sha-<commit>-run-<run-id>-<attempt>` multi-platform tag. The
-workflow retains an SPDX SBOM and a source/run provenance
-record as artifacts. It transfers the exact smoke-tested image to a separate
-publish job and verifies its ID; publication never rebuilds it. The action summary
-prints `OSD_TAG`. The GHCR package must be public for anonymous Portainer pulls;
+The [OSD Docker image workflow](docker-ci.md) runs on Docker-related PRs,
+`vscode-v*` release tags and manual dispatch. PRs and default dispatches do
+not log in or push. A publication uploads each architecture by untagged digest,
+pulls and smoke-tests that exact image, then releases its digest artifact only
+after the suite passes. The image config ID must match the tested local image.
+The manifest job assembles those digests and checks for both platforms.
+SPDX SBOMs, provenance records and acceptance logs are kept as artifacts. The
+action summary prints the published manifest digest. The GHCR package must be
+public for anonymous Portainer pulls;
 otherwise add GHCR credentials in Portainer. No Docker Hub account is needed.
 The ready-image stacks set `pull_policy: always` for OSD, including the HXE
 initializer, so a redeployment checks GHCR instead of reusing a stale local
