@@ -111,6 +111,17 @@ export class BatchRuns {
         severity TEXT NOT NULL, text TEXT NOT NULL,
         PRIMARY KEY (run_id, seq)
       )`);
+      if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "after_job_name")) {
+        this.db.exec("ALTER TABLE batch_runs ADD COLUMN after_job_name TEXT");
+        this.db.exec("ALTER TABLE batch_runs ADD COLUMN after_job_count TEXT");
+      }
+      this.db.exec(`CREATE TABLE IF NOT EXISTS batch_job_events (
+        run_id TEXT PRIMARY KEY, source_db TEXT NOT NULL, source_client TEXT NOT NULL,
+        source_sysid TEXT NOT NULL, source_owner TEXT NOT NULL,
+        job_name TEXT NOT NULL, job_count TEXT NOT NULL, occurred_at TEXT NOT NULL
+      )`);
+      this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS batch_job_events_key ON batch_job_events
+        (source_db, source_client, source_sysid, source_owner, job_name, job_count)`);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -141,6 +152,29 @@ export class BatchRuns {
       (run_id, seq, step_no, occurred_at, event_code, severity, text)
       VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM batch_job_log WHERE run_id = ?), ?, ?, ?, ?, ?)`)
       .run(id, id, step, at, event, ...message);
+  }
+
+  // Called within the terminal-success transaction. The event and all
+  // already imported dependents become visible together with completion.
+  #emitCompletion(id, at) {
+    const run = this.db.prepare(`SELECT source_db, source_client, source_sysid, source_owner,
+      job_name, job_count FROM batch_runs WHERE id = ?`).get(id);
+    if (!run?.source_db) return; // locally queued runs have no durable job identity
+    this.db.prepare(`INSERT INTO batch_job_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, run.source_db, run.source_client, run.source_sysid, run.source_owner,
+        run.job_name, run.job_count, at);
+    const waiting = this.db.prepare(`SELECT id, step_count FROM batch_runs WHERE state = 'WAITING'
+      AND source_db = ? AND source_client = ? AND source_sysid = ? AND source_owner = ?
+      AND after_job_name = ? AND after_job_count = ?`).all(run.source_db, run.source_client,
+        run.source_sysid, run.source_owner, run.job_name, run.job_count);
+    for (const child of waiting) {
+      if (child.step_count > 0) {
+        const ready = this.db.prepare(`UPDATE batch_run_steps SET state = 'READY'
+          WHERE run_id = ? AND step_no = 1 AND state = 'PENDING'`).run(child.id).changes;
+        if (ready !== 1) throw new Error(`waiting job ${child.id} has no first pending step`);
+      }
+      this.db.prepare("UPDATE batch_runs SET state = 'QUEUED' WHERE id = ? AND state = 'WAITING'").run(child.id);
+    }
   }
 
   start({program, input = [], generation = "unknown"}) {
@@ -191,10 +225,20 @@ export class BatchRuns {
       throw new TypeError("invalid outbox step count or first report");
     }
     const sourceDb = resolve(String(intent.sourceDb ?? ""));
+    const after = intent.afterEvent;
+    if (after !== undefined && (!steps || typeof after !== "object" || after === null ||
+        Object.keys(after).sort().join(",") !== "jobcount,jobname" ||
+        typeof after.jobname !== "string" || !after.jobname || after.jobname.length > 32 ||
+        after.jobname !== after.jobname.trim() || after.jobname !== after.jobname.toUpperCase() ||
+        !/^\d{8}$/.test(after.jobcount) ||
+        (after.jobname === intent.jobname && after.jobcount === intent.jobcount))) {
+      throw new TypeError("invalid predecessor job event");
+    }
     const base = {sourceDb, client: intent.client, sysid: intent.sysid,
       jobname: intent.jobname, jobcount: intent.jobcount, owner: intent.owner,
       program, generation: intent.generation};
-    const payload = steps ? JSON.stringify({version: 2, ...base, steps}) : JSON.stringify(base);
+    const payload = after ? JSON.stringify({version: 3, ...base, steps, afterEvent: after}) :
+      steps ? JSON.stringify({version: 2, ...base, steps}) : JSON.stringify(base);
     const digest = createHash("sha256").update(payload).digest("hex");
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -205,18 +249,26 @@ export class BatchRuns {
         return {kind: "duplicate", run: this.get(runId)};
       }
       const queuedAt = new Date().toISOString();
+      const released = !after || !!this.db.prepare(`SELECT 1 FROM batch_job_events
+        WHERE source_db = ? AND source_client = ? AND source_sysid = ? AND source_owner = ?
+        AND job_name = ? AND job_count = ?`).get(sourceDb, String(intent.client), String(intent.sysid),
+          String(intent.owner), after.jobname, after.jobcount);
       this.db.prepare(`INSERT INTO batch_runs
         (id, program, generation, started_at, queued_at, state, input_json,
-         source_db, source_client, source_sysid, source_owner, job_name, job_count, step_count)
-        VALUES (?, ?, ?, '', ?, 'QUEUED', '[]', ?, ?, ?, ?, ?, ?, ?)`).run(runId, program, String(intent.generation), queuedAt,
+         source_db, source_client, source_sysid, source_owner, job_name, job_count, step_count,
+         after_job_name, after_job_count)
+        VALUES (?, ?, ?, '', ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(runId, program, String(intent.generation), queuedAt,
+          released ? "QUEUED" : "WAITING",
           sourceDb, String(intent.client), String(intent.sysid), String(intent.owner),
-          String(intent.jobname), String(intent.jobcount), steps?.length ?? 0);
+          String(intent.jobname), String(intent.jobcount), steps?.length ?? 0,
+          after?.jobname ?? null, after?.jobcount ?? null);
       this.db.prepare("INSERT INTO batch_imports (intent_id, payload_sha256, run_id) VALUES (?, ?, ?)")
         .run(id, digest, runId);
       if (steps) {
         const insert = this.db.prepare(`INSERT INTO batch_run_steps
           (run_id, step_no, program, state, input_json) VALUES (?, ?, ?, ?, '[]')`);
-        for (const step of steps) insert.run(runId, step.number, step.program, step.number === 1 ? "READY" : "PENDING");
+        for (const step of steps) insert.run(runId, step.number, step.program,
+          step.number === 1 && released ? "READY" : "PENDING");
       }
       this.#appendJobLog(runId, null, "IMPORTED", queuedAt);
       this.db.exec("COMMIT");
@@ -340,6 +392,7 @@ export class BatchRuns {
       if (queued) {
         this.#appendJobLog(id, 1, success ? "STEP_COMPLETED" : "STEP_FAILED", endedAt);
         this.#appendJobLog(id, null, success ? "JOB_COMPLETED" : "JOB_FAILED", endedAt);
+        if (success) this.#emitCompletion(id, endedAt);
       }
       this.db.exec("COMMIT");
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
@@ -407,6 +460,7 @@ export class BatchRuns {
         if (terminal !== 1) throw new Error(`batch run ${id} changed state during terminal step`);
         this.#appendJobLog(id, number, success ? "STEP_COMPLETED" : "STEP_FAILED", now);
         this.#appendJobLog(id, null, success ? "JOB_COMPLETED" : "JOB_FAILED", now);
+        if (success) this.#emitCompletion(id, now);
         const parent = join(this.artifacts, `${id}.json`);
         const parentTemp = join(this.artifacts, `.${id}.${process.pid}.tmp`);
         writeFileSync(parentTemp, body, {mode: 0o600, flag: "wx"});

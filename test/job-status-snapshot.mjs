@@ -48,14 +48,14 @@ describe("private durable job status snapshot", function () {
     });
     return {intentId, name, count, programs};
   };
-  const imported = (job, {legacy = false, jobname = job.name} = {}) => {
+  const imported = (job, {legacy = false, jobname = job.name, afterEvent} = {}) => {
     const store = new BatchRuns(root, env);
     try {
       const answer = store.importIntent({intentId: job.intentId, sourceDb,
         client: caller.client, sysid: caller.sid, owner: caller.user,
         jobname, jobcount: job.count, program: job.programs[0],
         generation: "generation-1", ...(legacy ? {} : {steps: job.programs.map((program, index) =>
-          ({number: index + 1, program}))})});
+          ({number: index + 1, program}))}), ...(afterEvent ? {afterEvent} : {})});
       return answer.run.id;
     } finally { store.close(); }
   };
@@ -112,6 +112,26 @@ describe("private durable job status snapshot", function () {
       {number: 3, program: "Z_GAMMA", state: "PENDING"},
     ]);
     assert.equal(existsSync(operationsDb), false);
+  });
+
+  it("validates waiting and released dependency states against the event ledger", () => {
+    reserve("PARENT", "00000030");
+    const parent = bind("PARENT", "00000030", ["Z_ALPHA"]);
+    reserve("CHILD", "00000031");
+    const child = bind("CHILD", "00000031", ["Z_BETA"]);
+    const childId = imported(child, {afterEvent: {jobname: "PARENT", jobcount: "00000030"}});
+    assert.equal(read(child.name, child.count).state, "WAITING");
+    assert.equal(read(child.name, child.count).steps[0].state, "PENDING");
+    const store = new BatchRuns(root, env);
+    try {
+      const parentId = imported(parent);
+      assert.equal(store.claimNext().run.id, parentId);
+      store.finishStep(parentId, 1, {status: "COMPLETED"});
+      assert.equal(read(child.name, child.count).state, "QUEUED");
+      store.db.prepare("DELETE FROM batch_job_events WHERE run_id = ?").run(parentId);
+      assert.throws(() => read(child.name, child.count), {code: "JOB_SNAPSHOT_INCONSISTENT"});
+      assert.equal(store.get(childId).state, "QUEUED");
+    } finally { store.close(); }
   });
 
   it("reads a pending outbox with an older operations file", () => {
