@@ -22,6 +22,24 @@ func TestSAPGUINoLaunch(t *testing.T) {
 	}
 }
 
+func TestSAPGUIWrapperCarriesRealClientSetup(t *testing.T) {
+	wrapper, err := sapGUIWrapper()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wrapper.Items) < 40 {
+		t.Fatalf("wrapper has only %d items", len(wrapper.Items))
+	}
+	menu, userBlob := false, false
+	for _, item := range wrapper.Items {
+		menu = menu || item.Type == diag.ItemAPPL4 && item.ID == 0x0b && item.SID == 0x02 && len(item.Value) > 1000
+		userBlob = userBlob || item.Type == diag.ItemAPPL4 && item.ID == 0x04 && item.SID == 0x18 && len(item.Value) > 100
+	}
+	if !menu || !userBlob {
+		t.Fatalf("wrapper lacks client setup: menu=%v userBlob=%v", menu, userBlob)
+	}
+}
+
 func TestSAPGUISelectionValues(t *testing.T) {
 	useSAPGUITestSelections(t)
 	selection := ZCL_GG_HOST__TY_RESULT{

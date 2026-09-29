@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -85,6 +86,7 @@ func serveSAPGUI(listen string, launch bool, selection ZCL_GG_HOST__TY_RESULT, e
 		return fmt.Errorf("SAP GUI accept: %w", err)
 	}
 	defer conn.Close()
+	fmt.Fprintf(os.Stderr, "SAP GUI connected from %s\n", conn.RemoteAddr())
 	return runSAPGUISession(conn, selection, execute)
 }
 
@@ -115,9 +117,15 @@ func runSAPGUISession(conn net.Conn, selection ZCL_GG_HOST__TY_RESULT, execute f
 		}
 		if !shown {
 			shown = true
+			if message, parseErr := diag.ParseMessage(payload, len(payload) > diag.DPHeaderLen); parseErr != nil {
+				fmt.Fprintf(os.Stderr, "SAP GUI initial frame: %d bytes, parse warning: %v\n", len(payload), parseErr)
+			} else {
+				fmt.Fprintf(os.Stderr, "SAP GUI initial frame: %d bytes, %d DIAG items\n", len(payload), len(diag.ParseItems(message.Body)))
+			}
 			if err := sendSAPGUIScreen(conn, screen, nil); err != nil {
 				return err
 			}
+			fmt.Fprintln(os.Stderr, "SAP GUI selection screen sent")
 			continue
 		}
 
@@ -135,6 +143,7 @@ func runSAPGUISession(conn net.Conn, selection ZCL_GG_HOST__TY_RESULT, execute f
 		if err := sendSAPGUIScreen(conn, sapGUIResultScreen(result), result.messages); err != nil {
 			return err
 		}
+		fmt.Fprintln(os.Stderr, "SAP GUI report result sent")
 	}
 	return endSAPGUISession(conn)
 }
@@ -261,7 +270,10 @@ func sapGUIResultScreen(result ZCL_GG_HOST__TY_RESULT) *frame.Screen {
 }
 
 func sendSAPGUIScreen(conn net.Conn, screen *frame.Screen, messages []ZIF_GG_SESSION_TYPES_V1__TY_MESSAGE) error {
-	server := diag.LogonScreen()
+	server, err := sapGUIWrapper()
+	if err != nil {
+		return err
+	}
 	for i := range server.Items {
 		item := &server.Items[i]
 		if item.Type == diag.ItemAPPL4 && item.ID == 0x09 && item.SID == 0x02 {
