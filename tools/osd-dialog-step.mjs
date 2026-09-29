@@ -88,6 +88,12 @@ export function currentStepToken() {
   return token !== undefined && token.dialog === true && token.done !== true && token === holder ? token : undefined;
 }
 
+// A timer created by ABAP inherits its arming step's AsyncLocalStorage.
+// Its expiry is a new event, including when the old step is still running.
+export function outsideStepContext(work) {
+  return steps === undefined ? work() : steps.exit(work);
+}
+
 export function onStepLuwEnd(callback) {
   const token = currentStepToken();
   if (token === undefined) throw new Error("a dialog step is required");

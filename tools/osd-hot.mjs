@@ -117,6 +117,8 @@ export class HotLoader {
 // calls this under its work-process lock.
 export async function applyRuntimeHotSwap(hot, message, abap = globalThis.abap) {
   const done = await hot.swap(message);
+  const {cancelAllApcTimers} = await import("./osd-apc-timers.mjs");
+  cancelAllApcTimers();
   await abap.Classes["ZCL_STG_MODEL_INFO"]?.clear?.();
   if (abap.context.RFCDestinations?.JOBS) {
     abap.context.RFCDestinations.JOBS.generation = message.generation;

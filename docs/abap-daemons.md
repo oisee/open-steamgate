@@ -669,6 +669,14 @@ its mechanism is the first thing step 5 has to demonstrate.
 - **Timers.** `setTimeout` per armed timer, whose expiry is posted into the
   instance's mailbox, never run directly, so `ON_TIMEOUT` cannot overlap
   `ON_MESSAGE`. Timers belong to the generation: a recycle drops them.
+  Step 3 now proves this for **stateful APC on Node**: the API declarations
+  and exception live in `open-abap-apc`; `tools/osd-apc-timers.mjs` binds one
+  manager to each socket session. Expiry enters the session's promise queue
+  and then `dialogStep`, with its work-process lock and commit/rollback rule.
+  Closing the socket cancels every armed timer; a hot generation swap cancels
+  armed timers in the old load. The browser preview's channels and OSGo do
+  not yet use this hook. A process recycle drops timers with the process;
+  restoring them is the later daemon restart work.
 - **`SEND` and `ATTACH` from a request.** A request in child A sends to a
   daemon in child B: the ABAP client manager hands the PCP text to the host,
   the host posts it to the supervisor over the IPC channel the child already
@@ -1036,8 +1044,8 @@ cost here (the APC host, the RFC channel, the pool).
 | --- | --- | --- |
 | 0 | read the signatures off A4H (P0) and run the probes P1 to P11, with Alice's go; write the results into this file and `ANORMALIES.md` (**done 2026-09-24, P8 the same day through an abapGit-created `SAMC`; three entries: `daemon-statics`, `daemon-creator-program`, `daemon-lazy-restart`**) | 1.5 |
 | 1 | **not in this work**: osg-i7's separate PR (the step queue in `tools/osd-dialog-step.mjs`, released during `WAIT`; APC callbacks through `dialogStep`; `/osd/sql` and the shim's static server inside the step). This work starts after it is merged | 0 |
-| 2 | **done locally on `feat/pcp` and `feat/daemon-pcp`**: PCP interface, class and serialiser; P1 captured bytes tested, unmeasured cases marked for probes | 1 |
-| 3 | timers: `CL_ABAP_TIMER_MANAGER` and the host hook, first inside stateful APC sessions (no daemon needed to prove them) | 1 |
+| 2 | **done** (#235, open-abap-apc#1): PCP interface, class and serialiser; P1 captured bytes tested, unmeasured cases marked for probes | 1 |
+| 3 | **done on Node for stateful APC**: `CL_ABAP_TIMER_MANAGER` contract and host hook, tested with socket frames and separate dialog steps; preview, OSGo and daemon restart policy remain later work | 1 |
 | 4 | AMC in one process: producer, consumer, `WAIT FOR MESSAGING CHANNELS`, the APC binding delivering to a socket, the `SAMC` reader | 1.5 |
 | 5 | the daemon host (ABAP), the client manager, the Node driver (mailbox on the shared step queue, restart policy from P3/P4), the class-data guard (first proving it, as our own post-processing pass in `tools/osd-transpile.mjs`, never sent upstream; the accessor only as a prototype), the registry (D9) | 2 |
 | 6 | the stable layer on Node: mailboxes and the AMC broker in the supervisor, IPC to the children, the pool, the swap phase in `recycle()`, the ack after commit and the message-ID dedup, restart from the registry | 2.5 |
@@ -1050,6 +1058,17 @@ Steps 2 to 4 are useful without daemons: timers and AMC make stateful APC handle
 own possible. A stop after step 4 leaves nothing half-built. Steps 5 and 6
 are where state outliving a call begins, and should start only after the
 decisions below.
+
+The step 3 tests pin the P2 observations: one armed timer per handler object,
+both error texts, zero and negative delays, a handler held only by the timer,
+1,000 handlers, due-time order, cancellation and no timeout inside its arming
+callback. They also check the local host rule: timeout work is serialized and
+a dumping timeout rolls back only its own step. Exact timer lateness and
+interleaving across work processes remain assumptions based on P2 and the
+Node event loop, not a new A4H measurement. The return parameter is named
+`r_timer_manager` here; probe **TIMER1** must read its real name, the exact
+`session_type_not_supported` text ID value and reason field from A4H before
+claiming those details as system-identical.
 
 ---
 
