@@ -43,10 +43,11 @@ export function apcTimerSession(abap, deliver, failure) {
     session.armed.set(handler, entry);
     entry.timer = setTimeout(() => outsideStepContext(() => {
       if (session.closed || session.armed.get(handler) !== entry) return;
-      session.armed.delete(handler);
       // The timer callback never runs on the clock's stack. It takes the
       // session mailbox, then the one work process, like an APC message.
       deliver(() => step(async () => {
+        if (session.closed || session.armed.get(handler) !== entry) return;
+        session.armed.delete(handler);
         await handler.if_abap_timer_handler$on_timeout();
       })).catch(failure);
     }), timeout);

@@ -202,6 +202,19 @@ export async function serveChannel(options) {
       await drain();
     }))
     : {step: dialogStep, close() {}};
+  let closed = false;
+  shut = (code, reason) => {
+    if (closed) return;
+    closed = true;
+    timers.close();
+    if (live === false) return;
+    const body = Buffer.alloc(2 + Buffer.byteLength(reason ?? ""));
+    body.writeUInt16BE(code, 0);
+    body.write(reason ?? "", 2);
+    socket.end(frame(body, OP.close));
+  };
+  socket.on("error", () => shut(1011, "socket error"));
+  socket.on("close", () => shut(1000, "socket closed"));
 
   // The handler runs before the upgrade, not after.
   //
@@ -230,6 +243,7 @@ export async function serveChannel(options) {
     log?.(`APC ${channel.path} (${channel.handler}): ${why}`);
     return undefined;
   }
+  if (closed) return undefined;
   if (accepted === false) {
     timers.close();
     socket.end("HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nthe handler refused the connection");
@@ -254,18 +268,6 @@ export async function serveChannel(options) {
   pending = [];
 
   let buffer = Buffer.isBuffer(head) && head.length > 0 ? Buffer.from(head) : Buffer.alloc(0);
-  let closed = false;
-  shut = (code, reason) => {
-    if (closed === true) {
-      return;
-    }
-    closed = true;
-    timers.close();
-    const body = Buffer.alloc(2 + Buffer.byteLength(reason ?? ""));
-    body.writeUInt16BE(code, 0);
-    body.write(reason ?? "", 2);
-    socket.end(frame(body, OP.close));
-  };
 
   // one conversation at a time: a stateful handler is a single object, and
   // two messages in flight would interleave inside it
@@ -298,15 +300,6 @@ export async function serveChannel(options) {
         return;
       }
     }
-  });
-
-  socket.on("error", () => {
-    closed = true;
-    timers.close();
-  });
-  socket.on("close", () => {
-    closed = true;
-    timers.close();
   });
 
   return {send, close: shut};

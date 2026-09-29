@@ -16,6 +16,7 @@ CLASS zcl_osd_timer_probe IMPLEMENTATION.
     DATA lv_label TYPE string.
     DATA lo_timer TYPE REF TO if_abap_timer_manager.
     DATA lo_handler TYPE REF TO zcl_osd_timer_signal.
+    DATA lo_target TYPE REF TO zcl_osd_timer_signal.
     DATA lo_error TYPE REF TO cx_abap_timer_error.
 
     lv_text = i_message->get_text( ).
@@ -51,6 +52,23 @@ CLASS zcl_osd_timer_probe IMPLEMENTATION.
           CATCH cx_abap_timer_error INTO lo_error.
             send( io_messages = i_message_manager iv_text = lo_error->get_text( ) ).
         ENDTRY.
+      WHEN 'rearm'.
+        CREATE OBJECT lo_handler EXPORTING io_messages = i_message_manager iv_label = 'tick' iv_action = 'rearm'.
+        lo_timer->start_timer( i_timer_handler = lo_handler i_timeout = 0 ).
+        send( io_messages = i_message_manager iv_text = 'armed' ).
+      WHEN 'stop-other'.
+        CREATE OBJECT lo_target EXPORTING io_messages = i_message_manager iv_label = 'target'.
+        lo_timer->start_timer( i_timer_handler = lo_target i_timeout = 50 ).
+        CREATE OBJECT lo_handler EXPORTING io_messages = i_message_manager iv_label = 'controller'
+          iv_action = 'stop' io_target = lo_target.
+        lo_timer->start_timer( i_timer_handler = lo_handler i_timeout = 0 ).
+        send( io_messages = i_message_manager iv_text = 'armed' ).
+      WHEN 'bulk'.
+        DO 1000 TIMES.
+          CREATE OBJECT lo_handler EXPORTING io_messages = i_message_manager iv_label = 'bulk'.
+          lo_timer->start_timer( i_timer_handler = lo_handler i_timeout = 0 ).
+        ENDDO.
+        send( io_messages = i_message_manager iv_text = 'armed' ).
     ENDCASE.
   ENDMETHOD.
 

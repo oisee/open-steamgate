@@ -674,7 +674,10 @@ its mechanism is the first thing step 5 has to demonstrate.
   manager to each socket session. Expiry enters the session's promise queue
   and then `dialogStep`, with its work-process lock and commit/rollback rule.
   Closing the socket cancels every armed timer; a hot generation swap cancels
-  armed timers in the old load. The browser preview's channels and OSGo do
+  armed timers in the old load, including expiries waiting for a dialog step.
+  `STOP_TIMER` can cancel one of those due timers before its callback begins.
+  Socket close during `ON_START` also releases the session before the start
+  finishes. The browser preview's channels and OSGo do
   not yet use this hook. A process recycle drops timers with the process;
   restoring them is the later daemon restart work.
 - **`SEND` and `ATTACH` from a request.** A request in child A sends to a
@@ -1059,11 +1062,14 @@ own possible. A stop after step 4 leaves nothing half-built. Steps 5 and 6
 are where state outliving a call begins, and should start only after the
 decisions below.
 
-The step 3 tests pin the P2 observations: one armed timer per handler object,
-both error texts, zero and negative delays, a handler held only by the timer,
-1,000 handlers, due-time order, cancellation and no timeout inside its arming
-callback. They also check the local host rule: timeout work is serialized and
-a dumping timeout rolls back only its own step. Exact timer lateness and
+The step 3 tests pin one armed timer per handler object, both error texts,
+zero and negative delays, a handler held only by the timer, and that the first
+timer still fires after a duplicate start raises. ABAP callbacks rearm their
+own handler, stop another handler, and arm 1,000 handlers. A Node manager test
+checks that a due timer cannot enter its arming callback. Socket and Node
+manager tests check cancellation on close, swap, and stop before dispatch.
+Timeout work is serialized, and a dumping timeout rolls back only its own step.
+The host tests observe the order of their selected delays; exact timer lateness and
 interleaving across work processes remain assumptions based on P2 and the
 Node event loop, not a new A4H measurement. The return parameter is named
 `r_timer_manager` here; probe **TIMER1** must read its real name, the exact

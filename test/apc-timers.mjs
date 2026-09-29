@@ -58,6 +58,65 @@ describe("stateful APC timers", function () {
     });
     return socket;
   }
+  async function dueBehindLock(action) {
+    const abap = globalThis.abap;
+    let fired = 0;
+    const timers = apcTimerSession(abap, (work) => work(), (error) => { throw error; });
+    const handler = {if_abap_timer_handler$on_timeout: async () => { fired++; }};
+    await timers.step(() => timers.session.manager.if_abap_timer_manager$start_timer({
+      i_timer_handler: {get: () => handler}, i_timeout: {get: () => 0},
+    }));
+    let unlock;
+    let locked;
+    const lockReady = new Promise((resolve) => { locked = resolve; });
+    const lock = dialogStep(async () => {
+      locked();
+      await new Promise((resolve) => { unlock = resolve; });
+    });
+    await lockReady;
+    const deadline = Date.now() + 1000;
+    while (workProcess().waiting === 0 && Date.now() < deadline) await sleep(1);
+    expect(workProcess().waiting).to.be.greaterThan(0);
+    await action(timers, handler);
+    unlock();
+    await lock;
+    await sleep(20);
+    expect(fired).to.equal(0);
+    timers.close();
+  }
+
+  it("releases startup timers when the socket closes before on_start completes", async () => {
+    let fired = false;
+    let resume;
+    let entered;
+    const started = new Promise((resolve) => { entered = resolve; });
+    class SlowHost extends Host {
+      async open(...args) {
+        const manager = globalThis.abap.Classes.CL_ABAP_TIMER_MANAGER;
+        const ref = await manager.get_timer_manager();
+        await ref.get().if_abap_timer_manager$start_timer({
+          i_timer_handler: {get: () => ({if_abap_timer_handler$on_timeout: async () => { fired = true; }})},
+          i_timeout: {get: () => 0},
+        });
+        entered();
+        await new Promise((resolve) => { resume = resolve; });
+        return super.open(...args);
+      }
+    }
+    const socket = new Socket();
+    const serving = serveChannel({
+      req: {headers: {"sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ=="}, url: "/timers"},
+      socket, head: Buffer.alloc(0), host: SlowHost,
+      channel: {path: "/timers", name: "TIMERS", handler: "ZCL_OSD_TIMER_PROBE", stateful: true},
+    });
+    await started;
+    socket.end();
+    resume();
+    await serving;
+    await sleep(20);
+    expect(fired).to.equal(false);
+    expect(socket.writes).to.have.length(0);
+  });
 
   it("fires after arming returns, in due order, including zero, negative and an unreferenced handler", async () => {
     const socket = await channel();
@@ -82,11 +141,44 @@ describe("stateful APC timers", function () {
     ]);
     await sleep(100);
     expect(socket.messages()).to.have.length(4);
+    socket.send("double:15:first-survives");
+    expect((await socket.until(7)).slice(4)).to.deep.equal([
+      "Timer object is already active.", "armed", "first-survives",
+    ]);
     socket.send("arm:100:closed");
-    await socket.until(5);
+    await socket.until(8);
     socket.end();
     await sleep(120);
+    expect(socket.messages()).to.have.length(8);
+  });
+
+  it("cancels a due callback before dispatch on close", async () => {
+    await dueBehindLock(async (timers) => timers.close());
+  });
+  it("cancels a due callback before dispatch on swap", async () => {
+    await dueBehindLock(async () => applyRuntimeHotSwap({swap: async () => ({swaps: 1})},
+      {generation: "timer-due-next"}, globalThis.abap));
+  });
+  it("lets STOP_TIMER cancel a due callback before dispatch", async () => {
+    await dueBehindLock(async (timers, handler) => {
+      await timers.session.manager.if_abap_timer_manager$stop_timer({i_timer_handler: {get: () => handler}});
+    });
+  });
+
+  it("rearms and stops timers through ABAP callbacks, and arms 1000 ABAP handlers", async () => {
+    const socket = await channel();
+    socket.send("rearm:0:x");
+    expect(await socket.until(3)).to.deep.equal(["armed", "tick", "tick"]);
+    socket.send("stop-other:0:x");
+    expect((await socket.until(5)).slice(3)).to.deep.equal(["armed", "controller"]);
+    await sleep(65);
     expect(socket.messages()).to.have.length(5);
+    socket.send("bulk:0:x");
+    const messages = await socket.until(1006, 10000);
+    expect(messages[5]).to.equal("armed");
+    expect(messages.slice(6)).to.have.length(1000);
+    expect(messages.slice(6).every((message) => message === "bulk")).to.equal(true);
+    socket.end();
   });
 
   it("runs a timeout under the work-process lock and rolls back only the dumping timeout", async () => {
