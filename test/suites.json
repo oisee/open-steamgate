@@ -3,6 +3,7 @@
   "files": [
     "test/anormalies-ids.mjs",
     "test/abap-types.mjs",
+    "test/apc-timers.mjs",
     "test/adt-devloop.mjs",
     "test/adt-editor.mjs",
     "test/adt-facade.mjs",

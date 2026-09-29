@@ -16,6 +16,7 @@ import {describe} from "./osd-describe.mjs";
 // every APC event is a dialog step of its own: it waits for the work
 // process, commits when it is done and rolls back when it dumps -- the rule
 // the HTTP steps had and these did not (tools/osd-dialog-step.mjs)
+import {apcTimerSession} from "./osd-apc-timers.mjs";
 import {dialogStep} from "./osd-dialog-step.mjs";
 export {describe};
 
@@ -186,6 +187,34 @@ export async function serveChannel(options) {
       send(row.get());
     }
   };
+  let shut = () => {};
+  let turn = Promise.resolve();
+  const queue = (work) => {
+    turn = turn.then(work).catch((e) => {
+      log?.(`APC ${channel.path} (${channel.handler}): ${describe(e)}`);
+      shut(1011, "handler failed");
+    });
+    return turn;
+  };
+  const timers = channel.stateful === true
+    ? apcTimerSession(abap, (work) => queue(async () => {
+      await work();
+      await drain();
+    }))
+    : {step: dialogStep, close() {}};
+  let closed = false;
+  shut = (code, reason) => {
+    if (closed) return;
+    closed = true;
+    timers.close();
+    if (live === false) return;
+    const body = Buffer.alloc(2 + Buffer.byteLength(reason ?? ""));
+    body.writeUInt16BE(code, 0);
+    body.write(reason ?? "", 2);
+    socket.end(frame(body, OP.close));
+  };
+  socket.on("error", () => shut(1011, "socket error"));
+  socket.on("close", () => shut(1000, "socket closed"));
 
   // The handler runs before the upgrade, not after.
   //
@@ -194,7 +223,7 @@ export async function serveChannel(options) {
   // "this channel is here", and if the class is not in this runtime, or the
   // handler refuses the connection, that is knowable now and should be said
   // in the language the client is still speaking — HTTP.
-  const start = () => dialogStep(async () => {
+  const start = () => timers.step(async () => {
     await host.constructor_({
       iv_handler: new abap.types.String().set(channel.handler),
       it_fields: fieldsOf(req.url, options.host),
@@ -208,12 +237,15 @@ export async function serveChannel(options) {
   try {
     accepted = await start();
   } catch (e) {
+    timers.close();
     const why = String(e?.message?.get?.() ?? e?.message ?? e);
-    socket.end(`HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\n\r\n${channel.handler}: ${why}`);
+    if (!closed) socket.end(`HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\n\r\n${channel.handler}: ${why}`);
     log?.(`APC ${channel.path} (${channel.handler}): ${why}`);
     return undefined;
   }
+  if (closed) return undefined;
   if (accepted === false) {
+    timers.close();
     socket.end("HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nthe handler refused the connection");
     return undefined;
   }
@@ -236,29 +268,9 @@ export async function serveChannel(options) {
   pending = [];
 
   let buffer = Buffer.isBuffer(head) && head.length > 0 ? Buffer.from(head) : Buffer.alloc(0);
-  let closed = false;
-  const shut = (code, reason) => {
-    if (closed === true) {
-      return;
-    }
-    closed = true;
-    const body = Buffer.alloc(2 + Buffer.byteLength(reason ?? ""));
-    body.writeUInt16BE(code, 0);
-    body.write(reason ?? "", 2);
-    socket.end(frame(body, OP.close));
-  };
 
   // one conversation at a time: a stateful handler is a single object, and
   // two messages in flight would interleave inside it
-  let turn = Promise.resolve();
-  const queue = (work) => {
-    turn = turn.then(work).catch((e) => {
-      log?.(`APC ${channel.path} (${channel.handler}): ${describe(e)}`);
-      shut(1011, "handler failed");
-    });
-    return turn;
-  };
-
   socket.on("data", (chunk) => {
     buffer = buffer.length === 0 ? chunk : Buffer.concat([buffer, chunk]);
     for (;;) {
@@ -275,26 +287,19 @@ export async function serveChannel(options) {
       buffer = parsed.rest;
       if (parsed.opcode === OP.text) {
         const text = parsed.payload.toString("utf8");
-        queue(() => dialogStep(async () => {
+        queue(() => timers.step(async () => {
           await host.message({iv_text: new abap.types.String().set(text)});
           await drain();
         }));
       } else if (parsed.opcode === OP.ping) {
         socket.write(frame(parsed.payload, OP.pong));
       } else if (parsed.opcode === OP.close) {
-        queue(() => dialogStep(async () => {
+        queue(() => timers.step(async () => {
           await host.close({iv_reason: new abap.types.String().set("closed by the client"), iv_code: new abap.types.Integer().set(1000)});
         })).finally(() => shut(1000, "bye"));
         return;
       }
     }
-  });
-
-  socket.on("error", () => {
-    closed = true;
-  });
-  socket.on("close", () => {
-    closed = true;
   });
 
   return {send, close: shut};
