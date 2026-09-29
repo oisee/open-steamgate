@@ -12,7 +12,9 @@ const SELECTION = /^[A-Z_][A-Z0-9_]*$/i;
 // A data object the caller passes: a name with component, instance and
 // static access (`ls-f`, `lo->a`, `zcl=>c`, chained), or a literal.
 const OPERAND = /^(?:[A-Z_][A-Z0-9_]*(?:(?:-|->|=>)[A-Z_][A-Z0-9_]*)*|'(?:[^']|'')*'|`[^`]*`|-?\d+(?:\.\d+)?)$/i;
-const JOINERS = new Set(["Dash", "InstanceArrow", "StaticArrow"]);
+// WDash is a minus with a space before it: in `WITH p = -3` it joins the
+// number after it; before a name it makes `-x`, which OPERAND refuses.
+const JOINERS = new Set(["Dash", "WDash", "InstanceArrow", "StaticArrow"]);
 
 function offsetAt(source, position) {
   let offset = 0;

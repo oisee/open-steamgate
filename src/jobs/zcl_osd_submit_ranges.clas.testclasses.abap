@@ -4,8 +4,17 @@ CLASS ltcl_ranges DEFINITION FINAL FOR TESTING
 
   PRIVATE SECTION.
     TYPES ty_dates TYPE RANGE OF d.
+    TYPES ty_numbers TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+    TYPES: BEGIN OF ty_half,
+             sign   TYPE c LENGTH 1,
+             option TYPE c LENGTH 2,
+           END OF ty_half.
+    TYPES ty_halves TYPE STANDARD TABLE OF ty_half WITH DEFAULT KEY.
     METHODS typed_rows_become_strings FOR TESTING.
     METHODS empty_range_stays_empty FOR TESTING.
+    METHODS empty_non_range_is_refused FOR TESTING.
+    METHODS empty_half_range_is_refused FOR TESTING.
+    METHODS filled_non_range_is_refused FOR TESTING.
 ENDCLASS.
 
 
@@ -44,6 +53,35 @@ CLASS ltcl_ranges IMPLEMENTATION.
   METHOD empty_range_stays_empty.
     DATA lt_dates TYPE ty_dates.
     cl_abap_unit_assert=>assert_initial( zcl_osd_submit_ranges=>of( lt_dates ) ).
+  ENDMETHOD.
+
+  METHOD empty_non_range_is_refused.
+* empty, so no row would ever be looked at: the type must be checked
+    DATA lt_numbers TYPE ty_numbers.
+    TRY.
+        zcl_osd_submit_ranges=>of( lt_numbers ).
+        cl_abap_unit_assert=>fail( 'an empty table of integers is not a range' ).
+      CATCH zcx_osd_submit.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD empty_half_range_is_refused.
+    DATA lt_halves TYPE ty_halves.
+    TRY.
+        zcl_osd_submit_ranges=>of( lt_halves ).
+        cl_abap_unit_assert=>fail( 'a table without LOW and HIGH is not a range' ).
+      CATCH zcx_osd_submit.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD filled_non_range_is_refused.
+    DATA lt_numbers TYPE ty_numbers.
+    APPEND 1 TO lt_numbers.
+    TRY.
+        zcl_osd_submit_ranges=>of( lt_numbers ).
+        cl_abap_unit_assert=>fail( 'a filled table of integers is not a range' ).
+      CATCH zcx_osd_submit.
+    ENDTRY.
   ENDMETHOD.
 
 ENDCLASS.

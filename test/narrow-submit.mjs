@@ -91,6 +91,17 @@ describe("static narrow SUBMIT lowering", () => {
     expect(after.split("\n").length).to.equal(before.split("\n").length);
   });
 
+  it("takes a negative numeric literal", () => {
+    const after = lowerNarrowSubmit(source("SUBMIT zgg_ex_012 WITH p_count = -3 AND RETURN."), file, core);
+    expect(after).to.contain("( name = 'P_COUNT' value = CONV string( -3 ) )");
+    expect(unknownStatements(after)).to.deep.equal([]);
+  });
+
+  it("refuses a negated name, which is not a data object", () => {
+    expect(() => lowerNarrowSubmit(source("SUBMIT zgg_ex_012 WITH p_count = -lv_x AND RETURN."), file, core))
+      .to.throw("supported SUBMIT form");
+  });
+
   it("takes a namespaced report name up to 40 characters", () => {
     const name = "/OSDNS/ZREPORT_WITH_A_LONG_NAME_OF_40";
     expect(name.length).to.be.at.most(40);

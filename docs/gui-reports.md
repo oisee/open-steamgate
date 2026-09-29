@@ -159,7 +159,9 @@ them.
   - each scalar becomes a selection value;
   - each `IN` range becomes the selection's ranges through
     `ZCL_OSD_SUBMIT_RANGES=>OF`, which reads SIGN/OPTION/LOW/HIGH off any range
-    table and dumps rather than return an empty range for a table without them.
+    table. It checks the line type first and raises `ZCX_OSD_SUBMIT` for a table
+    without those columns, even an empty one, rather than return an empty range
+    that would admit everything.
 - **Execution:** the synchronous form calls `ZCL_OSD_BATCH_REPORT=>SUBMIT`,
   and a fresh report object is created. The target must be in the converter's
   registry and complete normally. A missing, unsupported or incomplete target
