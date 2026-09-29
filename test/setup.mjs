@@ -1,5 +1,5 @@
 import {SQLiteDatabaseClient} from "@abaplint/database-sqlite";
-import {randomUUID} from "node:crypto";
+import {randomBytes} from "node:crypto";
 import {bootIdentity} from "../tools/osd-identity.mjs";
 import {installTrim} from "../tools/sql-literals.mjs";
 import {installSqlTrace, fileSink} from "../tools/osd-sql-trace.mjs";
@@ -131,7 +131,7 @@ export function ensureJobEventMetadata(native) {
     native.exec(`CREATE TABLE IF NOT EXISTS zosd_job_source_instance (id TEXT PRIMARY KEY)`);
     if (!native.prepare("SELECT id FROM zosd_job_source_instance LIMIT 1").get()) {
       native.prepare("INSERT INTO zosd_job_source_instance (id) VALUES (?)")
-        .run(randomUUID().replaceAll("-", ""));
+        .run(randomBytes(16).toString("hex"));
     }
     native.exec("COMMIT");
   } catch (error) { native.exec("ROLLBACK"); throw error; }
