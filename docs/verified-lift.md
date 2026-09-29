@@ -52,6 +52,7 @@ Three independent reviews agreed on three points:
 | `tools/osd-xref.mjs` | **Object-level**, from token scans, shaped like CROSS / WBCROSSGT. No method-level edges, no reads or writes per unit, no control flow, no effect summaries. |
 | SQL trace | `tools/osd-sql-trace.mjs` wraps the one database seam; an entry is `{n, op, sql, ms, ...}`. Counts per run; **no attribution to an ABAP statement or loop**. B17 (`docs/ideas.md`) is the interception layer it belongs to; #182 computes object-level reach to DB writes for the risk check, with known blind spots (a dynamic call "may write"). |
 | Regression comparator | `docs/devux-gateway-regression-contract.md` is stable; the `.http` runner of #238 is not. It sees **wire** observations only. |
+| gogen IR (branches `spike/go-backend`, `feat/gogen-ir-json`) | A typed, structured IR from the Go-backend spike (`tools/gogen/frontend.mjs`): `loop` / `do` / `while` / `select_loop` / `if` / `case` / `try`; jumps `exit` / `continue` / `return` / `raise`; DB nodes `select_single`, `select_loop`, `select_table`, `db_write`, ...; itab nodes `read_key`, `read_seckey`, `delete_where`, ...; `pos: {file, row}` per statement; JSON export per class with input hashes (`feat/gogen-ir-json`). **Not on `main`**: both branches fork at `9db735de` (2026-09-23), `spike/go-backend` is 237 commits ahead and 348 behind. Its README calls it "a measurement, not a product"; ADR 0004 accepts OSGo as the product runtime. Refuses what it has not measured (`Unsupported`, a caller of a refused method is refused); `CHECK` is not lowered. Coverage of a real corpus is not measured; over OSG and its libraries (821 classes) it leaves 3306 statement stubs. |
 | tree-sitter grammar for ABAP | `kennyhml/tree-sitter-abap` exists (active in 2026-09); maturity not measured. |
 | Corpus of real ABAP loops | **Thin.** The local SAP corpus is AMDP bodies and SEGW samples. abapGit (public) gives SELECT in LOOP in 18 files, READ TABLE in LOOP in 87, FAE in 9, BINARY SEARCH in 11, COLLECT in 7 (crude count). |
 
@@ -332,13 +333,27 @@ Obligations of the form "on every path from A to B there is no X" are
 statements about paths, not nesting; `... when != X` in Coccinelle is exactly
 this.
 
-**Source: ours.** abaplint had `StatementFlow` / `FlowGraph` and removed them
-in 2.113.206 (section 2). The old code at `a9bc3d5b^` is MIT and a starting
-point; first find out why it was removed (a known gap is cheaper to learn from
-the history than to rediscover). Its coverage to check: CHECK by context,
-EXIT / CONTINUE in nested loops, RAISE / CATCH, LEAVE. If upstream wants it
-back, it goes back through the critic gate; if not, it lives in the fact
-exporter.
+**Source: decided by measurement, sprint 0.** Two candidates:
+
+- **The gogen IR** (section 2): control constructs, DB and itab operations
+  are already typed nodes with the semantics the backends execute, and a DELETE
+  inside a LOOP holds its loop. Three gaps: positions are per row, not per
+  statement (chained or same-line statements collide); `CHECK` is not
+  lowered; which statements inside a `try` can throw is not marked (the
+  conservative rule: an edge to each fitting CATCH from every call and every
+  statement that can raise a runtime exception). And it refuses what it has
+  not measured, so every refused method is an *unknown* for the analysis.
+- **A walk over the abaplint structure tree**, which parses everything the
+  corpus contains. abaplint had such a CFG (`StatementFlow` / `FlowGraph`)
+  and removed it in 2.113.206 (section 2) with no reason given; the old code
+  at `a9bc3d5b^` (MIT) is a start. Coverage to check: CHECK by context, EXIT /
+  CONTINUE in nested loops, RAISE / CATCH, LEAVE.
+
+The rule: if the gogen front end compiles most candidate methods of the
+corpus, the gogen IR is the source and the old `FlowGraph` cross-checks it on
+the overlap; if it does not, the structure-tree walk is the source and the
+gogen IR enriches what it compiles. The track does not wait for OSGo to reach
+`main`, and does not depend on a spike being kept.
 
 The export is the table `succ`; an obligation `A ... when != X ... B`
 compiles into "no path A -> X -> B", two reachabilities in recursive CTEs.
@@ -517,9 +532,11 @@ from the open corpus.
 2. Candidates per shape; the share whose obligations close from DDIC and
    code; the share with provable purity. These three numbers decide whether
    the query layer is worth building.
-3. The CFG: read why abaplint removed its flow module, take the old code as a
-   start, export `succ`, move "absence of X" obligations from lexical
-   "between" to reachability.
+3. The CFG: measure the gogen front end's coverage of the candidate methods
+   (abapGit, `src/`) beside the three numbers of item 2, uncovered methods
+   counted as unknown; choose the source by the rule of 4.3; export `succ`
+   (from the gogen IR JSON if it wins); move "absence of X" obligations from
+   lexical "between" to reachability.
 4. The observation harness: ABAP Unit -> canonical record -> the regression
    matcher; the evidence record format (3.5); the checker that
    `#OSG justify ... measured:<id>` resolves; the record format aligned with B18 first.
@@ -549,8 +566,14 @@ when F-IR is reached.
 
 ## 10. Not checked yet
 
-- Why abaplint removed `StatementFlow` / `FlowGraph`, and what the old code
-  covered.
+- Why abaplint removed `StatementFlow` / `FlowGraph`: the release is titled
+  "bugfixes" (#3701) and removes 1334 lines with the language server's
+  `dumpStatementFlows`; nothing in the abaplint organisation replaces it.
+  Only Lars can say; ask only if it matters. What the old code covered is
+  still to read.
+- The gogen front end's coverage of a real corpus (sprint 0, item 3).
+- Whether the gogen IR becomes the long-term IR: it follows OSGo (ADR 0004)
+  and is not on `main`.
 - The maturity of `kennyhml/tree-sitter-abap`.
 - duckpgq (SQL/PGQ in DuckDB).
 - Tabling in Tau Prolog and Trealla.
