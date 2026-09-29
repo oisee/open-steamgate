@@ -31,6 +31,13 @@ Use a synthetic public fixture in CI; validate private inputs locally without
 committing their bytes, credentials or converted output. The current runtime
 transpiles ABAP to JavaScript; a Go output target is a separate research item.
 
+## General ABAP transformation runtime
+
+Track named Simple Transformations and XSLT separately from the application
+ZIP/XML converter. The current implementation handles `CALL TRANSFORMATION
+ID`; a staged compatibility plan and A4H comparison corpus are in
+[ABAP transformation runtime](open-issues/abap-transformations.md).
+
 ---
 
 # Where it stands, and what is next — 2026-09-19
