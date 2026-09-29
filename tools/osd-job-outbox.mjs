@@ -19,11 +19,13 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
     const sourceDb = resolve(client.path);
     const who = identity(env);
     const reader = new DatabaseSync(sourceDb, {readOnly: true});
-    let rows, sourceInstanceOnDisk;
+    let rows, sourceInstanceOnDisk, hasTail;
     try {
       reader.exec("BEGIN");
       const hasInput = reader.prepare("PRAGMA table_info(zosd_job_step)").all()
         .some((column) => column.name.toLowerCase() === "input_json");
+      hasTail = reader.prepare("PRAGMA table_info(zosd_job_outbox)").all()
+        .some((column) => column.name.toLowerCase() === "tail_event_id");
       rows = reader.prepare("SELECT * FROM zosd_job_outbox WHERE mandt = ? ORDER BY created_on, created_at, intent_id")
         .all(who.client).map((row) => ({...row, steps: reader.prepare(
           `SELECT step_no, program, ${hasInput ? "input_json" : "'' AS input_json"} FROM zosd_job_step WHERE mandt = ? AND intent_id = ? ORDER BY step_no`)
@@ -53,6 +55,8 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
       const sourceInstance = value(row, "source_instance");
       const eventId = value(row, "event_id");
       const eventParam = value(row, "event_param");
+      const tailId = value(row, "tail_event_id");
+      const tailParam = value(row, "tail_event_param");
       const waitSeqText = value(row, "wait_seq");
       const waitSeq = Number(waitSeqText);
       if (predName || predCount || predIntent) {
@@ -71,6 +75,10 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
           throw new Error(`outbox ${intent.intentId} has invalid named event condition`);
         }
         intent.namedEvent = {id: eventId, param: eventParam, sourceInstance, seq: waitSeq};
+      }
+      if (tailId || tailParam) {
+        if (!tailId || !sourceInstance) throw new Error(`outbox ${intent.intentId} has invalid tail event`);
+        intent.tailEvent = {id: tailId, param: tailParam, sourceInstance};
       }
       // A v1 one-step intent has no child rows or count. Preserve its old
       // import digest so an import-before-ack retry survives this upgrade.
@@ -113,7 +121,9 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
             AND COALESCE(source_instance, '') = ${sql(sourceInstance)}
             AND COALESCE(wait_seq, '') = ${sql(waitSeqText)}
             AND COALESCE(event_id, '') = ${sql(eventId)}
-            AND COALESCE(event_param, '') = ${sql(eventParam)}`});
+            AND COALESCE(event_param, '') = ${sql(eventParam)}${hasTail ? `
+            AND COALESCE(tail_event_id, '') = ${sql(tailId)}
+            AND COALESCE(tail_event_param, '') = ${sql(tailParam)}` : ""}`});
         if (changed.subrc === 0 && changed.dbcnt === 1) {
           await client.commit();
         } else if (changed.subrc === 4) {

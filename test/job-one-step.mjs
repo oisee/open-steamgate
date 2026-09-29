@@ -71,6 +71,21 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       });
     } catch (error) { throw new Error(error.detail?.get?.() || error.message, {cause: error}); }
   };
+  const viaProgram = async (program, name, count, input) => {
+    const types = abap.Classes.ZIF_GG_SELECTION_SCREEN_TYPES;
+    const values = types.ty_values.clone();
+    for (const item of input) {
+      const row = types.ty_value.clone();
+      row.get().name.set(item.name);
+      row.get().value.set(item.value);
+      values.append(row);
+    }
+    try {
+      await abap.Classes.ZCL_OSD_BATCH_REPORT.submit_via_job({
+        iv_program: box(program), iv_jobname: box(name), iv_jobcount: box(count), it_input: values,
+      });
+    } catch (error) { throw new Error(error.detail?.get?.() || error.message, {cause: error}); }
+  };
   const rows = () => {
     const reader = new DatabaseSync(dbPath, {readOnly: true});
     try { return reader.prepare("SELECT * FROM zosd_job_outbox").all(); }
@@ -1500,5 +1515,79 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     expect((await workQueuedBatch(root, scoped)).kind).to.equal("failed");
     expect(scoped.get(run.id).steps[0].detail).to.include("Unknown selection field P_OTHER");
     scoped.close();
+  });
+
+  it("runs the voyage and readiness reports through a committed tail event after restart", async () => {
+    const prior = process.env.OSD_OPERATIONS_DB;
+    process.env.OSD_OPERATIONS_DB = join(dir, "fleet-chain-success.sqlite");
+    let scoped = new BatchRuns(root, process.env);
+    const runId = "FLEET_RUN_17";
+    const parentName = "FLEET_VOYAGE_OK";
+    const childName = "FLEET_READY_OK";
+    try {
+      let parentCount, childCount;
+      await dialogStep(async () => {
+        parentCount = await open(parentName);
+        await viaProgram("ZOSD_VOYAGE", parentName, parentCount, [{name: "P_RUN", value: runId}]);
+        await close(parentCount, {jobname: parentName, tail_event_id: "VOYAGE_DONE",
+          tail_event_param: runId});
+        childCount = await open(childName);
+        await viaProgram("ZOSD_READY", childName, childCount, [{name: "P_RUN", value: runId}]);
+        await close(childCount, {jobname: childName, strtimmed: "",
+          event_id: "VOYAGE_DONE", event_param: runId});
+      });
+      expect((await drainJobOutbox(scoped)).imported).to.equal(2);
+      expect(await dialogStep(() => doctor(childName, childCount))).to.include("Wait: event VOYAGE_DONE");
+      expect(await dialogStep(() => doctor(childName, childCount))).to.include("WAITING");
+      expect((await workQueuedBatch(root, scoped)).kind).to.equal("completed");
+      expect(await dialogStep(() => doctor(parentName, parentCount))).to.include("Tail: VOYAGE_DONE/FLEET_RUN_17 published");
+      scoped.close();
+      scoped = new BatchRuns(root, process.env);
+      expect(scoped.list().find((run) => run.jobName === childName).state).to.equal("QUEUED");
+      expect((await workQueuedBatch(root, scoped)).kind).to.equal("completed");
+      expect(await dialogStep(() => doctor(childName, childCount))).to.include("HEALTHY: completed");
+      expect(scoped.db.prepare("SELECT COUNT(*) AS n FROM batch_named_events WHERE event_id = 'VOYAGE_DONE'").get().n)
+        .to.equal(1);
+      expect(scoped.list().filter((run) => run.jobName === childName)).to.have.length(1);
+    } finally {
+      scoped.close();
+      if (prior === undefined) delete process.env.OSD_OPERATIONS_DB;
+      else process.env.OSD_OPERATIONS_DB = prior;
+    }
+  });
+
+  it("leaves readiness waiting and diagnoses a failed voyage", async () => {
+    const prior = process.env.OSD_OPERATIONS_DB;
+    process.env.OSD_OPERATIONS_DB = join(dir, "fleet-chain-failed.sqlite");
+    const scoped = new BatchRuns(root, process.env);
+    const runId = "FLEET_RUN_FAIL";
+    const parentName = "FLEET_VOYAGE_FAIL";
+    const childName = "FLEET_READY_WAIT";
+    try {
+      let parentCount, childCount;
+      await dialogStep(async () => {
+        parentCount = await open(parentName);
+        await viaProgram("ZOSD_VOYAGE", parentName, parentCount,
+          [{name: "P_RUN", value: runId}, {name: "P_FAIL", value: "X"}]);
+        await close(parentCount, {jobname: parentName, tail_event_id: "VOYAGE_DONE",
+          tail_event_param: runId});
+        childCount = await open(childName);
+        await viaProgram("ZOSD_READY", childName, childCount, [{name: "P_RUN", value: runId}]);
+        await close(childCount, {jobname: childName, strtimmed: "",
+          event_id: "VOYAGE_DONE", event_param: runId});
+      });
+      await drainJobOutbox(scoped);
+      expect((await workQueuedBatch(root, scoped)).kind).to.equal("failed");
+      expect(scoped.list().find((run) => run.jobName === childName).state).to.equal("WAITING");
+      expect(scoped.db.prepare("SELECT COUNT(*) AS n FROM batch_named_events WHERE event_id = 'VOYAGE_DONE'").get().n)
+        .to.equal(0);
+      expect(await dialogStep(() => doctor(parentName, parentCount))).to.include("REVIEW: failed");
+      expect(await dialogStep(() => doctor(parentName, parentCount))).to.include("Tail: VOYAGE_DONE/FLEET_RUN_FAIL not published");
+      expect(await dialogStep(() => doctor(childName, childCount))).to.include("WAITING");
+    } finally {
+      scoped.close();
+      if (prior === undefined) delete process.env.OSD_OPERATIONS_DB;
+      else process.env.OSD_OPERATIONS_DB = prior;
+    }
   });
 });

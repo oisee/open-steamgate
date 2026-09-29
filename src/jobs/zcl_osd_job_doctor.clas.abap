@@ -169,6 +169,8 @@ CLASS zcl_osd_job_doctor IMPLEMENTATION.
     DATA lv_wait_name TYPE string.
     DATA lv_wait_count TYPE string.
     DATA lv_wait_event TYPE string.
+    DATA lv_tail_event TYPE string.
+    DATA lv_tail_param TYPE string.
     DATA lv_number TYPE string.
     DATA lv_program TYPE string.
     DATA lv_step_state TYPE string.
@@ -212,6 +214,7 @@ CLASS zcl_osd_job_doctor IMPLEMENTATION.
                 ev_ended_at = lv_ended ev_wait_kind = lv_wait_kind
                 ev_wait_jobname = lv_wait_name ev_wait_jobcount = lv_wait_count
                 ev_wait_event_id = lv_wait_event
+                ev_tail_event_id = lv_tail_event ev_tail_event_param = lv_tail_param
       EXCEPTIONS not_found = 1 forbidden = 2 inconsistent = 3
                  legacy = 4 uncommitted = 5 too_large = 6
                  unavailable = 7 bad_key = 8 OTHERS = 9.
@@ -230,6 +233,15 @@ CLASS zcl_osd_job_doctor IMPLEMENTATION.
       APPEND |Wait: event { lv_wait_event }| TO rt_lines.
     ELSEIF lv_wait_kind IS NOT INITIAL.
       APPEND |Wait: { lv_wait_kind }| TO rt_lines.
+    ENDIF.
+    IF lv_tail_event IS NOT INITIAL.
+      IF lv_state = 'COMPLETED'.
+        APPEND |Tail: { lv_tail_event }/{ lv_tail_param } published| TO rt_lines.
+      ELSEIF lv_state = 'FAILED' OR lv_state = 'INTERRUPTED'.
+        APPEND |Tail: { lv_tail_event }/{ lv_tail_param } not published| TO rt_lines.
+      ELSE.
+        APPEND |Tail: { lv_tail_event }/{ lv_tail_param } pending| TO rt_lines.
+      ENDIF.
     ENDIF.
     IF lv_gap IS NOT INITIAL.
       APPEND |Historical gap: { lv_gap }; technical history may be incomplete| TO rt_lines.

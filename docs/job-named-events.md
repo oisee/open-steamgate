@@ -46,3 +46,8 @@ measure all SAP exception mappings or simultaneous scheduling races.
 The signal schedules a report; it does not guarantee exactly-once report
 execution. A worker stopped after business effects but before result
 recording still needs operator review.
+
+For a success-only event owned by a background job, use the private
+`JOB_CLOSE` tail parameters described in [job tail events](job-tail-events.md).
+That occurrence is recorded with the confirmed terminal result, after the
+report's business dialog step commits.

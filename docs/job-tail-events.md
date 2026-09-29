@@ -53,3 +53,28 @@ This is a durable scheduling signal, **not exactly-once report execution**.
 The report's business transaction and the operations SQLite transaction are
 separate. A process can stop after business effects commit and before result
 recording. The worker does not automatically replay a `RUNNING` job.
+
+## Job-owned named tail event
+
+The private `JOB_CLOSE` extension accepts `TAIL_EVENT_ID` and
+`TAIL_EVENT_PARAM` alongside any supported start condition. The ID follows
+the named-event ID subset; the parameter is at most 64 characters. The
+configuration is part of the committed outbox intent and its immutable v6
+import digest. A report must not call `BP_EVENT_RAISE` for this purpose:
+that call writes immediately and survives the report's rollback.
+
+After the final report step returns `COMPLETED`, its dialog step has already
+committed business writes and BAL. The worker then records terminal success,
+the named occurrence, and release of matching waiting jobs in one operations
+SQLite transaction. The occurrence uses the source intent ID as its unique
+delivery identity. A failed or interrupted job has no occurrence. If result
+recording fails, the run stays `RUNNING` for operator review; it is not
+replayed automatically. There is no gap between a committed result and event
+publication: both become visible at the same SQLite commit. A process restart
+after that commit sees the one retained occurrence and the queued successor.
+
+`ZOSD_JOB_READ` exposes the configured tail ID and parameter. The doctor
+reports it as pending, published, or not published based on the verified
+terminal result and occurrence ledger. The `ZOSD_VOYAGE` and `ZOSD_READY`
+reports are synthetic engine fixtures: they carry the same `P_RUN` input,
+and the voyage accepts `P_FAIL = X` to leave readiness waiting.

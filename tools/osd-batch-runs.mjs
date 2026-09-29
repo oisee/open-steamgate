@@ -125,6 +125,11 @@ export class BatchRuns {
           this.db.exec(`ALTER TABLE batch_runs ADD COLUMN ${column} ${column === "wait_seq" ? "INTEGER" : "TEXT"}`);
         }
       }
+      for (const column of ["tail_event_id", "tail_event_param"]) {
+        if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((item) => item.name === column)) {
+          this.db.exec(`ALTER TABLE batch_runs ADD COLUMN ${column} TEXT`);
+        }
+      }
       this.db.exec(`CREATE TABLE IF NOT EXISTS batch_named_events (
         intent_id TEXT PRIMARY KEY, payload_sha256 TEXT NOT NULL,
         source_db TEXT NOT NULL, source_instance TEXT NOT NULL,
@@ -184,7 +189,7 @@ export class BatchRuns {
   // already imported dependents become visible together with completion.
   #emitCompletion(id, at) {
     const run = this.db.prepare(`SELECT source_db, source_client, source_sysid, source_owner,
-      job_name, job_count FROM batch_runs WHERE id = ?`).get(id);
+      job_name, job_count, source_instance, tail_event_id, tail_event_param FROM batch_runs WHERE id = ?`).get(id);
     if (!run?.source_db) return; // locally queued runs have no durable job identity
     this.db.prepare(`INSERT INTO batch_job_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, run.source_db, run.source_client, run.source_sysid, run.source_owner,
@@ -201,6 +206,30 @@ export class BatchRuns {
         if (ready !== 1) throw new Error(`waiting job ${child.id} has no first pending step`);
       }
       this.db.prepare("UPDATE batch_runs SET state = 'QUEUED' WHERE id = ? AND state = 'WAITING'").run(child.id);
+    }
+    if (run.tail_event_id) {
+      if (!run.source_instance) throw new Error(`tail event ${id} has no source instance`);
+      const seq = this.#nextSignalSeq();
+      const event = {sourceDb: run.source_db, sourceInstance: run.source_instance,
+        client: run.source_client, sysid: run.source_sysid, owner: run.source_owner,
+        id: run.tail_event_id, param: run.tail_event_param, seq};
+      const digest = createHash("sha256").update(JSON.stringify({version: 1, ...event})).digest("hex");
+      this.db.prepare(`INSERT INTO batch_named_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id.replaceAll("-", ""), digest, run.source_db, run.source_instance,
+          run.source_client, run.source_sysid, run.source_owner, run.tail_event_id,
+          run.tail_event_param, seq, at);
+      const namedWaiting = this.db.prepare(`SELECT id, step_count FROM batch_runs WHERE state = 'WAITING'
+        AND source_db = ? AND source_instance = ? AND source_client = ? AND source_sysid = ?
+        AND source_owner = ? AND after_named_id = ? AND wait_seq < ?
+        AND (after_named_param = '' OR after_named_param = ?)`)
+        .all(run.source_db, run.source_instance, run.source_client, run.source_sysid,
+          run.source_owner, run.tail_event_id, seq, run.tail_event_param);
+      for (const child of namedWaiting) {
+        const ready = this.db.prepare(`UPDATE batch_run_steps SET state = 'READY'
+          WHERE run_id = ? AND step_no = 1 AND state = 'PENDING'`).run(child.id).changes;
+        if (child.step_count < 1 || ready !== 1) throw new Error(`waiting job ${child.id} has no first pending step`);
+        this.db.prepare("UPDATE batch_runs SET state = 'QUEUED' WHERE id = ? AND state = 'WAITING'").run(child.id);
+      }
     }
   }
 
@@ -255,6 +284,15 @@ export class BatchRuns {
     const sourceDb = resolve(String(intent.sourceDb ?? ""));
     const after = intent.afterEvent;
     const named = intent.namedEvent;
+    const tail = intent.tailEvent;
+    if (tail !== undefined && (!steps || typeof tail !== "object" || tail === null ||
+        Object.keys(tail).sort().join(",") !== "id,param,sourceInstance" ||
+        typeof tail.id !== "string" || !/^[A-Z][A-Z0-9_]{0,31}$/.test(tail.id) ||
+        typeof tail.param !== "string" || tail.param.length > 64 ||
+        typeof tail.sourceInstance !== "string" || !/^[0-9a-f]{32}$/.test(tail.sourceInstance) ||
+        (named && tail.sourceInstance !== named.sourceInstance))) {
+      throw new TypeError("invalid job tail event");
+    }
     if (named !== undefined && (after !== undefined || !steps || typeof named !== "object" || named === null ||
         Object.keys(named).sort().join(",") !== "id,param,seq,sourceInstance" ||
         typeof named.id !== "string" || !/^[A-Z][A-Z0-9_]{0,31}$/.test(named.id) ||
@@ -275,7 +313,8 @@ export class BatchRuns {
     const base = {sourceDb, client: intent.client, sysid: intent.sysid,
       jobname: intent.jobname, jobcount: intent.jobcount, owner: intent.owner,
       program, generation: intent.generation};
-    const payload = named ? JSON.stringify({version: 5, ...base, steps, namedEvent: named}) :
+    const payload = tail ? JSON.stringify({version: 6, ...base, steps, afterEvent: after, namedEvent: named, tailEvent: tail}) :
+      named ? JSON.stringify({version: 5, ...base, steps, namedEvent: named}) :
       after ? JSON.stringify({version: after.intentId ? 4 : 3, ...base, steps, afterEvent: after}) :
       steps ? JSON.stringify({version: 2, ...base, steps}) : JSON.stringify(base);
     const digest = createHash("sha256").update(payload).digest("hex");
@@ -306,13 +345,14 @@ export class BatchRuns {
         (id, program, generation, started_at, queued_at, state, input_json,
          source_db, source_client, source_sysid, source_owner, job_name, job_count, step_count,
          after_job_name, after_job_count, after_intent_id,
-         source_instance, wait_seq, after_named_id, after_named_param)
-        VALUES (?, ?, ?, '', ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(runId, program, String(intent.generation), queuedAt,
+         source_instance, wait_seq, after_named_id, after_named_param, tail_event_id, tail_event_param)
+        VALUES (?, ?, ?, '', ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(runId, program, String(intent.generation), queuedAt,
           released ? "QUEUED" : "WAITING",
           sourceDb, String(intent.client), String(intent.sysid), String(intent.owner),
           String(intent.jobname), String(intent.jobcount), steps?.length ?? 0,
           after?.jobname ?? null, after?.jobcount ?? null, after?.intentId ? runIdOf(after.intentId) : null,
-          named?.sourceInstance ?? null, named?.seq ?? null, named?.id ?? null, named?.param ?? null);
+          named?.sourceInstance ?? tail?.sourceInstance ?? null, named?.seq ?? null,
+          named?.id ?? null, named?.param ?? null, tail?.id ?? null, tail?.param ?? null);
       this.db.prepare("INSERT INTO batch_imports (intent_id, payload_sha256, run_id) VALUES (?, ?, ?)")
         .run(id, digest, runId);
       if (steps) {

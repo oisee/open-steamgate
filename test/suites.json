@@ -54,6 +54,7 @@
     "test/job-one-step.mjs",
     "test/job-named-events.mjs",
     "test/job-tail-events.mjs",
+    "test/job-tail-after-commit.mjs",
     "test/job-status-snapshot.mjs",
     "test/hana-dialect.mjs",
     "test/journal.mjs",
