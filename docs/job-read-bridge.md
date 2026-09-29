@@ -21,7 +21,8 @@ cannot yet see, or has staged deletion of a previously committed key. After
 rollback, the committed state is read again. The private port clears every
 output on every call so a reused ABAP value cannot retain a prior result.
 
-This bridge returns metadata only. Ordered job log, list output, BAL and
-authorization beyond the single configured runtime user remain separate
-work. A future multi-user host must supply authenticated per-session identity
-at this seam before exposing it to user-facing callers.
+This bridge returns metadata only; it does not return the ordered technical
+job log, list output or BAL entries. Authorization beyond the single
+configured runtime user remains separate work. A future multi-user host must
+supply authenticated per-session identity at this seam before exposing it to
+user-facing callers.
