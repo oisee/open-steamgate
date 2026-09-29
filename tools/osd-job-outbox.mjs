@@ -42,7 +42,9 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
         const quoted = intent.intentId.replaceAll("'", "''");
         const changed = await client.delete({table: "zosd_job_outbox",
           where: `mandt = '${who.client}' AND intent_id = '${quoted}'`});
-        if (changed.subrc !== 0 && changed.subrc !== 4) throw new Error("outbox acknowledgement failed");
+        // FileSqliteClient reports subrc=4 for both no matching row and SQL
+        // errors (including an aborting trigger). Neither proves the ack.
+        if (changed.subrc !== 0 || changed.dbcnt !== 1) throw new Error("outbox acknowledgement failed");
         await client.commit();
       } catch (error) {
         await client.rollback();

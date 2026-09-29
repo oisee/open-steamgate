@@ -3,10 +3,12 @@ import {mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
+import {spawnSync} from "node:child_process";
 import {randomUUID} from "node:crypto";
 import {BatchRuns, liveGeneration, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
 import {drainJobOutbox} from "../tools/osd-job-outbox.mjs";
 import {dialogStep, exclusive} from "../tools/osd-dialog-step.mjs";
+import {applyRuntimeHotSwap} from "../tools/osd-hot.mjs";
 
 const root = resolve(".");
 
@@ -147,6 +149,48 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     expect(store.list()).to.have.length(before + 1);
   });
 
+  it("an acknowledgement SQL error leaves intent for idempotent retry", async () => {
+    await schedule();
+    const before = store.list().length;
+    const writer = new DatabaseSync(dbPath);
+    try {
+      writer.exec(`CREATE TRIGGER refuse_job_ack BEFORE DELETE ON zosd_job_outbox
+        BEGIN SELECT RAISE(ABORT, 'ack refused'); END`);
+    } finally { writer.close(); }
+    try {
+      await drainJobOutbox(store);
+      throw new Error("drain unexpectedly acknowledged intent");
+    } catch (error) { expect(error.message).to.equal("outbox acknowledgement failed"); }
+    expect(rows()).to.have.length(1);
+    expect(store.list()).to.have.length(before + 1);
+    const clean = new DatabaseSync(dbPath);
+    try { clean.exec("DROP TRIGGER refuse_job_ack"); }
+    finally { clean.close(); }
+    expect((await drainJobOutbox(store)).imported).to.equal(1);
+    expect(rows()).to.have.length(0);
+    expect(store.list()).to.have.length(before + 1);
+  });
+
+  it("a killed importer leaves a committed row for a restarted process to acknowledge once", async () => {
+    await schedule();
+    const before = store.list().length;
+    const fixture = join(root, "test", "fixtures", "job-outbox-restart.mjs");
+    const child = (mode) => spawnSync(process.execPath, [fixture, mode], {
+      cwd: root, env: {...process.env}, encoding: "utf8", timeout: 120000,
+    });
+    const crashed = child("crash");
+    expect(crashed.error, String(crashed.error)).to.equal(undefined);
+    expect(crashed.status, crashed.stderr).to.equal(73);
+    expect(rows()).to.have.length(1);
+    expect(store.list()).to.have.length(before + 1);
+    const restarted = child("retry");
+    expect(restarted.error, String(restarted.error)).to.equal(undefined);
+    expect(restarted.status, restarted.stderr).to.equal(0);
+    expect(JSON.parse(restarted.stdout.trim())).to.deep.equal({imported: 1});
+    expect(rows()).to.have.length(0);
+    expect(store.list()).to.have.length(before + 1);
+  });
+
   it("an operations import failure keeps the outbox row and exposes no new run", async () => {
     await schedule();
     const before = store.list().length;
@@ -159,6 +203,23 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       expect(store.list()).to.have.length(before);
     } finally { store.importIntent = original; }
     expect((await drainJobOutbox(store)).imported).to.equal(1);
+  });
+
+  it("an operations failure after run insertion rolls back run and import ledger together", () => {
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "atomic.sqlite")});
+    const intent = {intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
+      client: "123", sysid: "OSG", jobname: "ATOMIC", jobcount: "00000001",
+      owner: "DEVELOPER", program: "ZGG_EX_012", generation: liveGeneration(root)};
+    try {
+      scoped.db.exec(`CREATE TRIGGER refuse_import_ledger BEFORE INSERT ON batch_imports
+        BEGIN SELECT RAISE(ABORT, 'ledger refused'); END`);
+      expect(() => scoped.importIntent(intent)).to.throw(/ledger refused/);
+      expect(scoped.list()).to.have.length(0);
+      expect(scoped.db.prepare("SELECT COUNT(*) AS n FROM batch_imports").get().n).to.equal(0);
+      scoped.db.exec("DROP TRIGGER refuse_import_ledger");
+      expect(scoped.importIntent(intent).kind).to.equal("imported");
+      expect(scoped.list()).to.have.length(1);
+    } finally { scoped.close(); }
   });
 
   it("invalidates pending definitions on explicit rollback and across steps", async () => {
@@ -174,6 +235,21 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       await client.commit();
       await classic(() => submit(count), "job_notex");
     });
+  });
+
+  it("WAIT commits and abandons the caller's pending definition while another step runs", async () => {
+    let started;
+    const ready = new Promise((resolve) => { started = resolve; });
+    let count;
+    const waiting = dialogStep(async () => {
+      count = await open();
+      started();
+      await abap.statements.wait({seconds: box("0.05")});
+      await classic(() => submit(count), "job_notex");
+    }, "waiting job caller");
+    await ready;
+    await dialogStep(() => classic(() => submit(count), "job_notex"), "other job caller");
+    await waiting;
   });
 
   it("refuses to open a job in a read-only work-process reservation", async () => {
@@ -207,6 +283,31 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       expect(mismatch.run.id).to.equal(stale.id);
       expect(mismatch.run.resultStatus).to.equal("GENERATION_CHANGED");
     } finally { scoped.close(); }
+  });
+
+  it("a successful hot swap updates scheduling and worker generation together", async () => {
+    const jobs = abap.context.RFCDestinations.JOBS;
+    const old = jobs.generation;
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "warm.sqlite")});
+    try {
+      await applyRuntimeHotSwap({swap: async () => ({swaps: 1})}, {generation: "warm-g2"}, abap);
+      expect(jobs.generation).to.equal("warm-g2");
+      expect(abap.context.osdGeneration).to.equal("warm-g2");
+      try {
+        await applyRuntimeHotSwap({swap: async () => { throw new Error("swap failed"); }},
+          {generation: "warm-g3"}, abap);
+        throw new Error("failed swap unexpectedly succeeded");
+      } catch (error) { expect(error.message).to.equal("swap failed"); }
+      expect(jobs.generation).to.equal("warm-g2");
+      await schedule();
+      expect(rows().find((row) => row.mandt.trim() === "123").generation.trim()).to.equal("warm-g2");
+      expect((await drainJobOutbox(scoped)).imported).to.equal(1);
+      expect((await workQueuedBatch(root, scoped, async () => ({status: "COMPLETED"}))).kind).to.equal("completed");
+    } finally {
+      jobs.generation = old;
+      abap.context.osdGeneration = old;
+      scoped.close();
+    }
   });
 
   it("drains only the current business client from a shared database", async () => {

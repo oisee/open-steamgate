@@ -166,8 +166,7 @@ export async function setup(abap, schemas, insert) {
   const {installRfcDestinations} = await import("../tools/rfc-replay.mjs");
   await installRfcDestinations(abap, {trace: process.env.STG_RFC_TRACE === "1"});
   // This branch is Node-only; keep node:sqlite out of the preview bundle.
-  const jobPortModule = "../tools/osd-job-port.mjs";
-  const {JobDestination} = await import(/* webpackIgnore: true */ jobPortModule);
+  const {JobDestination} = await import(/* webpackIgnore: true */ "../tools/osd-job-port.mjs");
   const jobs = new JobDestination(process.cwd(), process.env);
   abap.context.RFCDestinations["JOBS"] = jobs;
   abap.context.osdGeneration = jobs.generation;
