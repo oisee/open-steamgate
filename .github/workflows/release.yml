@@ -280,7 +280,10 @@ jobs:
     timeout-minutes: 65
     permissions:
       actions: read
-      contents: read
+      # write, not read: `--check-target` reads the release the vsix job just
+      # created, and a draft release is invisible to a read-only token
+      # (vscode-v0.2.1282 stopped here with `gh release view` failing).
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
