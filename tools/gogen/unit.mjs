@@ -8,6 +8,7 @@ import {compileProgram} from "./frontend.mjs";
 import {emitGo, referencedClasses} from "./emit-go.mjs";
 import {reconcile} from "./unit-results.mjs";
 import {home} from "./home.mjs";
+import {inputFoldersOf} from "../osd-packs.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -15,6 +16,9 @@ const values = (flag) => args.flatMap((x, i) => x === flag ? [args[i + 1]] : [])
 const selected = new Set(values("--class").map((x) => x.toUpperCase()));
 const out = values("--out")[0] ?? join(here, ".out", "unit");
 const fixture = values("--fixture")[0];
+const config = JSON.parse(readFileSync(join(home, "abap_transpile.json"), "utf8"));
+const skipped = new Set((config.options?.skip ?? config.skip ?? []).map((s) =>
+  `${s.object}/${s.class}/${s.method}`.toUpperCase()));
 const walk = (dir) => !existsSync(dir) ? [] : readdirSync(dir, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
   .flatMap((e) => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
 const sourceFolders = fixture ? [fixture] : [join(home, "test", "unit"), join(home, "src")];
@@ -49,10 +53,12 @@ if (!selected.size && !fixture) {
 }
 const libDirs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/framework", "open-abap-odata/src", "ajson/src/core"]
   .map((x) => join(home, ".local", "lars", x)).filter(existsSync);
-const folders = [...sourceFolders, ...(fixture ? [] : [join(home, "gen")]), ...libDirs].filter(existsSync);
-const available = new Set(folders.flatMap(walk).filter((f) => /\.(clas|intf)\.abap$/.test(f))
+const folders = [...(fixture ? sourceFolders : inputFoldersOf(home, config).map((f) => join(home, f))), ...libDirs].filter(existsSync);
+const excluded = (config.exclude_filter ?? []).map((p) => new RegExp(p));
+const skip = (file) => excluded.some((re) => re.test("/" + file.slice(home.length + 1)));
+const available = new Set(folders.flatMap(walk).filter((f) => !skip(f) && /\.(clas|intf)\.abap$/.test(f))
   .map((f) => f.split("/").at(-1).split(".")[0].replaceAll("#", "/").toUpperCase()));
-const sourceByName = new Map(folders.flatMap(walk).filter((f) => /\.clas\.abap$/.test(f))
+const sourceByName = new Map(folders.flatMap(walk).filter((f) => !skip(f) && /\.clas\.abap$/.test(f))
   .map((f) => [f.split("/").at(-1).split(".")[0].replaceAll("#", "/").toUpperCase(), f]));
 
 function callsIn(node, out) {
@@ -84,7 +90,7 @@ while (sourceQueue.length) {
 }
 let program;
 for (let round = 0; round < 12; round++) {
-  program = compileProgram({folders, objects: [...wanted], tolerant: true, includeTests: new Set(owners)});
+  program = compileProgram({folders, objects: [...wanted], tolerant: true, includeTests: new Set(owners), skip});
   const refs = new Set(referencedClasses(program));
   for (const name of wanted) {
     const sup = program.reg.getObject("CLAS", name)?.getDefinition()?.getSuperClass();
@@ -117,7 +123,9 @@ function testsOf(program) {
           const why = cls?.stubs.find((x) => x.name === method)?.reason
             ?? program.skipped.find((x) => x.startsWith(`${owner}:${testclass}=>${method}:`))
             ?? (compiled ? "" : "test method missing from generated class");
-          rows.push({class: owner, testclass, method, status: compiled ? "READY" : "NOT_COMPILED", message: why});
+          const skip = skipped.has(`${owner}/${testclass}/${method}`);
+          rows.push({class: owner, testclass, method, status: skip ? "SKIPPED" : compiled ? "READY" : "NOT_COMPILED",
+            message: skip ? "skipped due to configuration" : why});
         }
       }
     }
@@ -153,8 +161,9 @@ for (const row of rows) if (row.status === "READY") {
   row.alerts = [...new Set([row.method, "SETUP", "TEARDOWN", "CLASS_SETUP", "CLASS_TEARDOWN"]
     .flatMap((method) => alertsOf(`${name}=>${method}`)).filter(Boolean))];
 }
-// No DB fixture is opened by this runner yet. Exclude a test if its class or
-// a reachable method does SQL, including methods in other compiled classes.
+// A test whose method or hooks reach SQL gets a fresh in-memory database for
+// its class. Schema and generated object rows come from the same transpiler
+// DatabaseSetup the Node init uses; TABU rows use test/seed.mjs.
 const sql = /^(select_|sql_|db_|insert_db|update_db|delete_db|modify_db|commit_work|rollback_work)/i;
 function needsDb(key, seen = new Set()) {
   if (seen.has(key)) return false;
@@ -176,16 +185,16 @@ function needsDb(key, seen = new Set()) {
 }
 for (const row of rows) if (row.status === "READY") {
   const key = `${row.class}:${row.testclass}`;
-  if ([row.method, "SETUP", "CLASS_SETUP"].some((m) => needsDb(`${key}=>${m}`))) {
-    row.status = "NEEDS_DB";
-    row.message = "requires a seeded, isolated database for this test class";
+  if ([row.method, "SETUP", "TEARDOWN", "CLASS_SETUP", "CLASS_TEARDOWN"].some((m) => needsDb(`${key}=>${m}`))) {
+    row.db = true;
   }
 }
 
 const goName = (x) => x.toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 const ready = rows.filter((x) => x.status === "READY");
 const groups = [...Map.groupBy(ready, (r) => `${r.class}:${r.testclass}`)].map(([key, methods]) => ({key, methods}));
-const generated = ["package main", "", "import (\"encoding/json\"; \"fmt\"; \"os\"; \"osg/gogen/abap\")", "",
+const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; \"fmt\"; \"os\"; \"osg/gogen/abap\")", "",
+  "//go:embed zz_db.json", "var dbScript []byte", "",
   "type result struct { Class string `json:\"class\"`; Testclass string `json:\"testclass\"`; Method string `json:\"method\"`; Status string `json:\"status\"`; Message string `json:\"message\"` }",
   "func caught(f func()) (msg string) { defer func() { if x := recover(); x != nil { msg = fmt.Sprint(x) } }(); f(); return }",
   "func main() { results := []result{}", "s := &abap.Session{}"];
@@ -196,7 +205,8 @@ for (const {key, methods} of groups) {
   const special = (name, receiver) => c.methods.some((m) => m.name === name)
     ? `${receiver}.${goName(name)}(s)` : "";
   generated.push("{", "classError := \"\"");
-  if (c.methods.some((m) => m.name === "CLASS_SETUP")) generated.push(`classError = caught(func(){ ${T}_CLASS_SETUP(s) })`);
+  if (methods.some((m) => m.db)) generated.push("classError = caught(func(){ if err := abap.OpenDB(dbScript); err != nil { panic(err) } })");
+  if (c.methods.some((m) => m.name === "CLASS_SETUP")) generated.push(`if classError == "" { classError = caught(func(){ ${T}_CLASS_SETUP(s) }) }`);
   for (const row of methods) {
     generated.push(`{ r := result{Class:${JSON.stringify(owner)}, Testclass:${JSON.stringify(local)}, Method:${JSON.stringify(row.method)}, Status:"SUCCESS"}`,
       "if classError != \"\" { r.Status = \"FAILED\"; r.Message = \"class_setup: \" + classError } else {",
@@ -217,6 +227,13 @@ const dir = join(here, "go", "cmd", "unit");
 mkdirSync(dir, {recursive: true});
 writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
 writeFileSync(join(dir, "zz_main.go"), generated.join("\n") + "\n");
+if (ready.some((r) => r.db)) {
+  const {DatabaseSetup} = await import(`${home}/node_modules/@abaplint/transpiler/build/src/db/index.js`);
+  const {seedStatements} = await import(`${home}/test/seed.mjs`);
+  process.env.OSD_ROOT ??= home;
+  const db = new DatabaseSetup(program.reg).run();
+  writeFileSync(join(dir, "zz_db.json"), JSON.stringify([...db.schemas.sqlite, ...db.insert, ...seedStatements()]));
+} else writeFileSync(join(dir, "zz_db.json"), "[]");
 const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.class)).size, rows};
 writeFileSync(join(out, "plan.json"), JSON.stringify(summary, null, 2));
 if (!ready.length || args.includes("--build-only")) { console.log(JSON.stringify(summary)); process.exit(ready.length ? 0 : 2); }

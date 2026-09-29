@@ -35,10 +35,12 @@ const norm = (r) => ({class: String(r.class ?? r.class_name).toUpperCase(),
   status: String(r.status).toUpperCase(), message: String(r.message ?? "").trim()});
 const node = new Map(rawNode.map(norm).filter((r) => owners.has(r.class)).map((r) => [key(r), r]));
 const gorows = new Map(result.rows.map(norm).filter((r) => owners.has(r.class)).map((r) => [key(r), r]));
-const methods = {same: [], different: [], nodeOnly: [], goOnly: []};
+const methods = {same: [], different: [], nodeOnly: [], goOnly: [], skipped: []};
 for (const [k, n] of node) {
   const g = gorows.get(k);
-  if (!g || g.status === "NOT_COMPILED" || g.status === "NEEDS_DB") methods.nodeOnly.push({key: k, node: n, go: g});
+  if (n.status === "SKIPPED" && g?.status === "SKIPPED") methods.skipped.push({key: k, node: n, go: g});
+  else if (n.status === "SKIPPED" || g?.status === "SKIPPED") methods.different.push({key: k, node: n, go: g});
+  else if (!g || g.status === "NOT_COMPILED" || g.status === "NEEDS_DB") methods.nodeOnly.push({key: k, node: n, go: g});
   else if (g.status === n.status && g.message === n.message) methods.same.push(k);
   else methods.different.push({key: k, node: n, go: g});
 }
@@ -49,7 +51,8 @@ for (const owner of owners) {
   const rows = result.rows.filter((r) => r.class === owner);
   const first = rows.find((r) => r.status === "NOT_COMPILED" || r.status === "NEEDS_DB");
   if (first) notCompiled.push({class: owner, reason: `${first.status}: ${first.message}`});
-  else if (rows.length) compiled.push(owner);
+  else if (rows.some((r) => r.status === "SUCCESS" || r.status === "FAILED")) compiled.push(owner);
+  else if (rows.length && rows.every((r) => r.status === "SKIPPED")) notCompiled.push({class: owner, reason: "all methods skipped by configuration"});
   else notCompiled.push({class: owner, reason: "no test methods discovered"});
 }
 const summary = {classes: {compiled, notCompiled}, methods};
