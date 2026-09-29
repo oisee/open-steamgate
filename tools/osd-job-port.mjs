@@ -9,9 +9,16 @@ import {currentStepToken, onStepLuwEnd} from "./osd-dialog-step.mjs";
 import {givenText, fill} from "./osd-destination.mjs";
 import {liveGeneration, operationsPath} from "./osd-batch-runs.mjs";
 import {identity} from "./osd-identity.mjs";
+import {readJobSnapshot} from "./osd-job-snapshot.mjs";
 
 const pending = new WeakMap();
 const keyOf = (name, count) => `${name}\0${count}`;
+const statusFill = (signature, fields) => fill(signature, {
+  EV_JOBCOUNT: "", EV_JOBNAME: "", EV_INTENT_ID: "", EV_PROGRAM: "",
+  EV_GENERATION: "", EV_SOURCE_DB: "", EV_ERROR: "",
+  EV_PHASE: "", EV_STATE: "", EV_RESULT_STATUS: "", EV_STEP_COUNT: "",
+  EV_ERROR_CODE: "", ...fields,
+});
 export const MAX_JOB_STEPS = 16;
 const MAX_COUNT = 100000000;
 
@@ -56,7 +63,70 @@ export class JobDestination {
     const client = givenText(signature, "IV_CLIENT");
     const db = globalThis.abap?.context?.databaseConnections?.DEFAULT;
     if (this.env.STG_DB !== "file" || !db?.path || db.path === ":memory:") {
-      fill(signature, {EV_ERROR: "JOB_* requires a durable STG_DB=file business database"});
+      if (command === "STATUS") statusFill(signature, {EV_ERROR_CODE: "UNAVAILABLE"});
+      else fill(signature, {EV_ERROR: "JOB_* requires a durable STG_DB=file business database"});
+      return;
+    }
+    if (command === "STATUS") {
+      // Caller-supplied IV_OWNER and IV_CLIENT are deliberately ignored.
+      // The configured identity also boots sy-uname/mandt/sysid in this host.
+      const who = identity(this.env);
+      const sourceDb = resolve(db.path);
+      const name = jobname.trim().toUpperCase();
+      if (!name || name.length > 32 || !/^\d{8}$/.test(count)) {
+        statusFill(signature, {EV_ERROR_CODE: "BAD_KEY"});
+        return;
+      }
+      const transient = pending.get(token)?.get(keyOf(name, count));
+      if (transient) {
+        statusFill(signature, {EV_ERROR_CODE: transient.owner === who.user && transient.client === who.client ?
+          "UNCOMMITTED" : "FORBIDDEN"});
+        return;
+      }
+      try {
+        const snapshot = readJobSnapshot({sourceDb, jobName: name, jobCount: count,
+          caller: {client: who.client, user: who.user, sid: who.sid},
+          root: this.root, env: this.env});
+        // The durable reader uses a second, read-only connection. Its absence
+        // can mean an OPEN/CLOSE still staged in this caller's SQLite LUW.
+        // Inspect the *existing* business connection without ending that LUW.
+        const local = db.db.prepare(`SELECT owner, intent_id FROM zosd_job_identity
+          WHERE mandt = ? AND jobname = ? AND jobcount = ?`).get(who.client, name, count);
+        if (local && String(local.owner ?? "").trim() !== who.user) {
+          statusFill(signature, {EV_ERROR_CODE: "FORBIDDEN"});
+        } else if ((local && (!snapshot || String(local.intent_id ?? "").trim() !== (snapshot.intentId ?? ""))) ||
+            (!local && snapshot)) {
+          statusFill(signature, {EV_ERROR_CODE: "UNCOMMITTED"});
+        } else if (!snapshot) {
+          statusFill(signature, {EV_ERROR_CODE: "NOT_FOUND"});
+        } else {
+          statusFill(signature, {EV_PHASE: snapshot.phase, EV_STATE: snapshot.state,
+            EV_RESULT_STATUS: snapshot.resultStatus ?? "", EV_STEP_COUNT: String(snapshot.steps.length)});
+        }
+      } catch (error) {
+        let code = {
+          JOB_READ_BAD_KEY: "BAD_KEY", JOB_READ_FORBIDDEN: "FORBIDDEN",
+          JOB_SNAPSHOT_INCONSISTENT: "INCONSISTENT", JOB_LEGACY_UNSUPPORTED: "LEGACY",
+        }[error?.code] ?? "UNAVAILABLE";
+        // An unfinished caller update can make its local identity differ
+        // from the committed one even when the latter's snapshot is broken.
+        if (code === "INCONSISTENT") {
+          try {
+            const local = db.db.prepare(`SELECT owner, intent_id FROM zosd_job_identity
+              WHERE mandt = ? AND jobname = ? AND jobcount = ?`).get(who.client, name, count);
+            const reader = new DatabaseSync(sourceDb, {readOnly: true});
+            let committed;
+            try {
+              committed = reader.prepare(`SELECT owner, intent_id FROM zosd_job_identity
+                WHERE mandt = ? AND jobname = ? AND jobcount = ?`).get(who.client, name, count);
+            } finally { reader.close(); }
+            const same = (row) => row && ["owner", "intent_id"].map((key) =>
+              String(row[key] ?? "").trim()).join("\0");
+            if (same(local) !== same(committed)) code = "UNCOMMITTED";
+          } catch { code = "UNAVAILABLE"; }
+        }
+        statusFill(signature, {EV_ERROR_CODE: code});
+      }
       return;
     }
     let jobs = pending.get(token);
