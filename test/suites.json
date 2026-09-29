@@ -24,6 +24,7 @@
     "test/analytics.mjs",
     "test/taxi-import.mjs",
     "test/demo-data.mjs",
+    "test/http-codelens.mjs",
     "test/telegram-notify.mjs",
     "test/batch-inserts.mjs",
     "test/batch-runs.mjs",
