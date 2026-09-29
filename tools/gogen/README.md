@@ -510,16 +510,23 @@ Parameters accept their ABAP name (`--p-name`) or the short spelling
 (`--name`); non-checkbox parameters become positionals in declaration order.
 A repeated select-option flag becomes `I/EQ` range rows. In JSON, scalar array
 items do the same, while an object can carry `sign`, `option`, `low`, and
-`high` (with `BT` inferred when `high` is present). With no arguments the same
-screen is presented as a terminal form; comma-separated select-option input
-becomes `I/EQ` rows.
+`high` (with `BT` inferred when `high` is present). With no arguments and a
+real terminal, the same screen is presented by the `termgui` tcell driver:
+Tab/arrows move focus, text fields have a caret, Space toggles a checkbox,
+Enter executes, Esc cancels, and mouse clicks move focus. Piped stdin uses a
+deterministic line form instead. Comma-separated select-option input becomes
+`I/EQ` rows in either form. The interaction model is the one proved in
+sap-tui, but the driver consumes the host-neutral report screen rather than
+DIAG atoms.
 
-The first host is intentionally narrow: report lists and messages are emitted,
-but the terminal form is line-oriented rather than the tcell UI from sap-tui,
-and frontend file/environment services have not yet been mapped. The next seam
-is a shared interactive screen driver which can render the existing
-open-diag-go frame model in a terminal without coupling the ABAP application
-to DIAG or HTTP.
+For native applications the local process is the frontend. The compiled
+`CL_GUI_FRONTEND_SERVICES` maps `FILE_EXIST`, `DIRECTORY_EXIST`,
+`FILE_GET_SIZE`, `GUI_UPLOAD`, `GUI_DOWNLOAD`, the temporary directory and
+current directory onto the OS. Text upload/download moves through the ABAP
+internal table; binary mode accepts tables of `x`/`xstring`. The small
+`ZCL_OSABAP_RUNTIME=>GETENV( name )` facade exposes one process environment
+variable without returning the entire environment. `apps/io/zio.prog.abap`
+is the executable example.
 
 Focused check: `node --test tools/gogen/osabap.test.mjs`; the keyed-table
 runtime primitive used by the converted lifecycle is also covered by

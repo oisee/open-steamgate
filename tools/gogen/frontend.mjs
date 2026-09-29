@@ -631,6 +631,17 @@ const NATIVE = new Map([
   ["CL_ABAP_GZIP=>COMPRESS_BINARY", {fn: "abap.DeflateRaw", args: ["RAW_IN:xstring", "&GZIP_OUT:xstring", "&GZIP_OUT_LEN:i"]}],
   ["CL_ABAP_GZIP=>DECOMPRESS_BINARY", {fn: "abap.InflateRaw", args: ["GZIP_IN:xstring", "&RAW_OUT:xstring", "&RAW_OUT_LEN:i"]}],
   ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~ENCODE_BASE64", {fn: "abap.EncodeBase64", args: ["UNENCODED:string"]}],
+  // Native application host: the browser implementation of these classic
+  // frontend services is intentionally inert. In a compiled command the
+  // frontend is the local machine, so files and directories map to the OS.
+  ["CL_GUI_FRONTEND_SERVICES=>GET_TEMP_DIRECTORY", {fn: "abap.FrontendTempDirectory", args: ["&TEMP_DIR:string"]}],
+  ["CL_GUI_FRONTEND_SERVICES=>DIRECTORY_GET_CURRENT", {fn: "abap.FrontendCurrentDirectory", args: ["&CURRENT_DIRECTORY:string"]}],
+  ["CL_GUI_FRONTEND_SERVICES=>FILE_EXIST", {fn: "abap.FrontendFileExist", args: ["FILE:string"]}],
+  ["CL_GUI_FRONTEND_SERVICES=>DIRECTORY_EXIST", {fn: "abap.FrontendDirectoryExist", args: ["DIRECTORY:string"]}],
+  ["CL_GUI_FRONTEND_SERVICES=>FILE_GET_SIZE", {fn: "abap.FrontendFileSize", args: ["FILE_NAME:string", "&FILE_SIZE:i"]}],
+  ["CL_GUI_FRONTEND_SERVICES=>GUI_UPLOAD", {fn: "abap.FrontendUpload", args: ["FILENAME:string", "FILETYPE:c", "&FILELENGTH:i", "&HEADER:xstring", "&DATA_TAB:data"]}],
+  ["CL_GUI_FRONTEND_SERVICES=>GUI_DOWNLOAD", {fn: "abap.FrontendDownload", args: ["FILENAME:string", "FILETYPE:string", "BIN_FILESIZE:i", "WRITE_LF:c", "APPEND:c", "DATA_TAB:data"]}],
+  ["ZCL_OSABAP_RUNTIME=>GETENV", {fn: "abap.FrontendGetenv", args: ["NAME:string"]}],
 ]);
 
 /*
@@ -5418,6 +5429,9 @@ function call(chain, ctx, statement, hint) {
 
 function defaultValue(p, ctx) {
   let t = p.default;
+  // SPACE is a built-in value, not an attribute of the class which declares
+  // the method. GUI_UPLOAD's optional CODEPAGE uses exactly this default.
+  if (/^space$/i.test(t)) return convert({e: "chars", value: "", type: C(1)}, p.type);
   // a constant of the class or interface that declares the method, by its
   // plain name: its VALUE, a literal
   if (/^[a-z_][\w]*$/i.test(t) && !/^abap_(true|false)$/i.test(t) && p.defaultOwner !== undefined) {

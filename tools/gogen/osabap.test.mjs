@@ -3,6 +3,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {execFileSync, spawnSync} from "node:child_process";
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 
@@ -38,4 +40,22 @@ test("unknown options fail instead of becoming report input", () => {
   const result = run(["--unknown"]);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /unknown option --unknown/);
+});
+
+test("native frontend reads environment and copies a text file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "osabap-frontend-"));
+  try {
+    const input = join(dir, "input.txt");
+    const output = join(dir, "output.txt");
+    writeFileSync(input, "one\ntwo\n");
+    execFileSync(process.execPath, [builder, join(here, "apps", "io", "zio.prog.abap")], {stdio: "inherit"});
+    const result = spawnSync(binary, ["--input", input, "--output", output], {
+      encoding: "utf8", env: {...process.env, OSABAP_TEST_ENV: "works"},
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "Copied 2 lines 8 bytes\nEnv works\n");
+    assert.equal(readFileSync(output, "utf8"), "one\ntwo\n");
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
 });

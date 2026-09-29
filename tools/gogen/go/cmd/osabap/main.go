@@ -6,11 +6,13 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"osg/gogen/abap"
+	"osg/gogen/termgui"
 )
 
 func hostRun(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, batch, present string) ZCL_GG_HOST__TY_RESULT {
@@ -23,6 +25,7 @@ func hostRun(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_
 func main() {
 	var result ZCL_GG_HOST__TY_RESULT
 	failed := false
+	cancelled := false
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -38,10 +41,25 @@ func main() {
 		} else {
 			var screen ZCL_GG_HOST__TY_RESULT
 			abap.DialogStep(func() { screen = hostRun(s, report, nil, "", "X") })
-			input = terminalInput(screen)
+			if termgui.Available() {
+				var err error
+				input, err = graphicalInput(screen)
+				if errors.Is(err, termgui.ErrCancelled) {
+					cancelled = true
+					return
+				}
+				if err != nil {
+					panic(err)
+				}
+			} else {
+				input = terminalInput(screen)
+			}
 			abap.DialogStep(func() { result = hostRun(s, report, input, "", "") })
 		}
 	}()
+	if cancelled {
+		return
+	}
 	if failed {
 		os.Exit(1)
 	}
@@ -55,6 +73,55 @@ func main() {
 		fmt.Fprintln(os.Stderr, "unsupported:", result.unsupported)
 		os.Exit(2)
 	}
+}
+
+func graphicalInput(screen ZCL_GG_HOST__TY_RESULT) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, error) {
+	current := map[string]selectionInput{}
+	for _, v := range screen.values {
+		current[strings.TrimSpace(v.name)] = selectionInput{value: strings.TrimSpace(v.value), ranges: v.ranges}
+	}
+	form := termgui.Form{Title: appProgram + " — selection screen"}
+	for _, e := range screen.elements {
+		name := strings.TrimSpace(e.name)
+		if name == "" || (e.kind != "PARAMETER" && e.kind != "CHECKBOX" && e.kind != "SELECT_OPTION") {
+			continue
+		}
+		input := current[name]
+		field := termgui.Field{Name: name, Label: strings.TrimSpace(e.text), Value: input.value, Width: int(e.visible_length)}
+		switch e.kind {
+		case "CHECKBOX":
+			field.Kind = termgui.Checkbox
+		case "SELECT_OPTION":
+			field.Kind = termgui.Ranges
+			parts := make([]string, 0, len(input.ranges))
+			for _, r := range input.ranges {
+				parts = append(parts, strings.TrimSpace(r.low))
+			}
+			field.Value = strings.Join(parts, ",")
+		default:
+			field.Kind = termgui.Text
+		}
+		form.Fields = append(form.Fields, field)
+	}
+	fields, err := termgui.Run(form)
+	if err != nil {
+		return nil, err
+	}
+	for _, field := range fields {
+		if field.Kind == termgui.Ranges {
+			input := current[field.Name]
+			input.ranges = nil
+			if strings.TrimSpace(field.Value) != "" {
+				for _, value := range strings.Split(field.Value, ",") {
+					input.ranges = append(input.ranges, ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE{sign: "I", option: "EQ", low: strings.TrimSpace(value)})
+				}
+			}
+			current[field.Name] = input
+		} else {
+			current[field.Name] = selectionInput{value: field.Value}
+		}
+	}
+	return selectionValues(current), nil
 }
 
 func commandInput(args []string) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, bool) {
