@@ -27,8 +27,8 @@ in a different Stack; don't switch engines on an existing data volume.
 `showcase-draft` tracks the newest published multi-platform showcase draft and
 includes Vivid Vibes, Zork and Vector workbench. Set the Stack variable
 `OSD_TAG=draft` for the core image. For a repeatable
-cross-platform test, set `OSD_TAG` to the unique `sha-…-run-…` tag from the successful
-[multi-arch workflow's summary](https://github.com/oisee/open-steamgate/actions/workflows/docker-multiarch.yml).
+cross-platform test, set `OSD_TAG` to the version tag from the successful
+[Docker image workflow's summary](https://github.com/oisee/open-steamgate/actions/workflows/docker.yml).
 The stacks request the OSD image from GHCR on each deployment, so an older
 locally cached `showcase-draft` is not silently reused. If a stack was already
 pasted into Portainer, update its Web editor YAML or set `OSD_TAG` to a new
@@ -301,8 +301,8 @@ after an image update. HANA Express is not supported by this ARM64 recipe.
 On the Pi, check `uname -m` reports `aarch64` and `getconf LONG_BIT` reports
 `64`. In Portainer, paste the complete SQLite or DuckDB Stack above; `showcase-draft`
 selects ARM64 automatically. The default instances are 11 and 15. For a
-repeatable deployment, use an immutable `sha-…-arm64` tag from
-the [successful ARM64 workflow](https://github.com/oisee/open-steamgate/actions/workflows/docker-arm64.yml)
+repeatable deployment, use the version tag from
+the [successful Docker image workflow](https://github.com/oisee/open-steamgate/actions/workflows/docker.yml)
 instead of `showcase-draft`. No QEMU or host-wide emulator registration is needed
 on the Pi.
 

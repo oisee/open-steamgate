@@ -130,11 +130,11 @@ Copy an object's abapGit file from the materialized home into your layer to
 edit it. The binary excludes the optional native DuckDB
 module; the DuckDB Compose variant uses the Docker image instead.
 
-The Compose files use the image already published by the Docker multiarch
+The Compose files use the image published by the OSD Docker image
 workflow, `ghcr.io/oisee/open-steamgate:showcase-draft`, by default. This moving
-image tag includes the optional showcase packs and is independent of the VS Code
-tag. Set `OSD_TAG=draft` for the core image, or set it to a tested
-`sha-...-run-...` tag from the Docker publication workflow to pin it. SQLite
+image tag includes the optional showcase packs. Set `OSD_TAG=draft` for the core
+image, or set it to a tested version tag from the Docker image workflow to pin
+it. SQLite
 is the default file backend. PostgreSQL starts a database in the stack and
 requires `POSTGRES_PASSWORD` in the caller's environment. HANA connects to
 an existing tenant and requires `HANA_HOST`, `HANA_USER`, and
