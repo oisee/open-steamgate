@@ -21,6 +21,16 @@ import {dialogStep} from "./osd-dialog-step.mjs";
 import {installAmc} from "./osd-amc.mjs";
 export {describe};
 
+export async function deliverAmcPublication(publication, isClosed, sendFrame) {
+  if (isClosed()) return;
+  if (publication.type === "BINARY") {
+    if (!isClosed()) sendFrame(Buffer.from(publication.message.get(), "hex"), OP.binary);
+  } else if (publication.type === "PCP") {
+    const encoded = await publication.message.if_ac_message_type_pcp$serialize();
+    if (!isClosed()) sendFrame(encoded.get());
+  } else if (!isClosed()) sendFrame(publication.message);
+}
+
 // the constant RFC 6455 §1.3 defines; it exists so a server cannot answer a
 // handshake by accident
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -244,15 +254,11 @@ export async function serveChannel(options) {
           app: binding.application_id.get(), path: binding.channel_id.get(),
           extension: binding.extension_id.get(),
           program: channel.handler.toUpperCase().padEnd(30, "=") + "CP",
-          session: timers.session, receive: (publication) => {
-            last = last.then(async () => {
-              if (closed) return;
-              if (publication.type === "BINARY") sendFrame(Buffer.from(publication.message.get(), "hex"), OP.binary);
-              else if (publication.type === "PCP") {
-                const encoded = await publication.message.if_ac_message_type_pcp$serialize();
-                sendFrame(encoded.get());
-              } else sendFrame(publication.message);
-            }).catch((e) => log?.(`APC AMC delivery: ${describe(e)}`));
+          session: timers.session,
+          client: abap.builtin.sy.get().mandt.get(), username: abap.builtin.sy.get().uname.get(),
+          receive: (publication) => {
+            last = last.then(() => deliverAmcPublication(publication, () => closed, sendFrame))
+              .catch((e) => log?.(`APC AMC delivery: ${describe(e)}`));
           },
         }));
       }

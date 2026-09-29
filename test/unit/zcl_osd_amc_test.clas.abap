@@ -3,6 +3,7 @@ CLASS zcl_osd_amc_test DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS send_many IMPORTING iv_count TYPE i RAISING cx_amc_error.
     INTERFACES if_amc_message_receiver_text.
     METHODS wait_up_to RETURNING VALUE(rv_count) TYPE i RAISING cx_amc_error.
+    METHODS wait_for_message RETURNING VALUE(rv_count) TYPE i RAISING cx_amc_error.
   PRIVATE SECTION.
     DATA mv_count TYPE i.
 ENDCLASS.
@@ -29,6 +30,16 @@ CLASS zcl_osd_amc_test IMPLEMENTATION.
       i_application_id = 'ZOSD_AMC_TEST' i_channel_id = '/text' ).
     lo_producer->send( 'plain wait' ).
     WAIT UP TO '0.2' SECONDS.
+    rv_count = mv_count.
+    lo_consumer->stop_message_delivery( me ).
+  ENDMETHOD.
+
+  METHOD wait_for_message.
+    DATA lo_consumer TYPE REF TO if_amc_message_consumer.
+    lo_consumer = cl_amc_channel_manager=>create_message_consumer(
+      i_application_id = 'ZOSD_AMC_TEST' i_channel_id = '/text' ).
+    lo_consumer->start_message_delivery( me ).
+    WAIT FOR MESSAGING CHANNELS UNTIL mv_count = 1 UP TO 3 SECONDS.
     rv_count = mv_count.
     lo_consumer->stop_message_delivery( me ).
   ENDMETHOD.

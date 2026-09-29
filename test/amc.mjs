@@ -1,7 +1,7 @@
 import {createServer} from "node:http";
 import {expect} from "chai";
-import {mountChannels} from "../tools/osd-apc.mjs";
-import {AmcBroker, amcChannels, callerProgram, parseSamc} from "../tools/osd-amc.mjs";
+import {deliverAmcPublication, mountChannels} from "../tools/osd-apc.mjs";
+import {AmcBroker, amcChannels, callerProgram, installAmc, parseSamc} from "../tools/osd-amc.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {readFileSync} from "node:fs";
 
@@ -27,6 +27,42 @@ describe("AMC in one Node process", function () {
     expect(amcChannels().find((row) => row.path === "/text")).to.include({applicationId: "ZOSD_AMC_TEST"});
     expect(callerProgram("at x (/tmp/zcl_osd_amc_test.clas.testclasses.mjs:1:1)"))
       .to.equal(sender);
+  });
+
+  it("delivers client and user scopes only to matching subscriptions, system to all", () => {
+    const program = "ZCL_OSD_AMC_TEST==============CP";
+    const channels = ["C", "U", "S"].map((scope) => ({
+      applicationId: "SCOPE", path: `/${scope.toLowerCase()}`, type: "TEXT", scope,
+      authorities: [{path: `/${scope.toLowerCase()}`, program, activity: "S"},
+        {path: `/${scope.toLowerCase()}`, program, activity: "R"}],
+    }));
+    const broker = new AmcBroker(channels);
+    for (const [scope, expected] of [["C", ["same", "other user"]],
+      ["U", ["same"]], ["S", ["same", "other user", "other client"]]]) {
+      const received = [];
+      for (const [label, client, username] of [["same", "123", "ALICE"],
+        ["other user", "123", "BOB"], ["other client", "456", "ALICE"]]) {
+        broker.subscribe({app: "SCOPE", path: `/${scope.toLowerCase()}`, program,
+          client, username, receive: () => received.push(label)});
+      }
+      broker.send({app: "SCOPE", path: `/${scope.toLowerCase()}`, program,
+        type: "TEXT", message: "one", client: "123", username: "ALICE"});
+      expect(received, `${scope} scope`).to.deep.equal(expected);
+    }
+  });
+
+  it("does not write an AMC PCP frame when the socket closes during serialization", async () => {
+    let finish;
+    let closed = false;
+    const written = [];
+    const publication = {type: "PCP", message: {
+      if_ac_message_type_pcp$serialize: () => new Promise((resolve) => { finish = resolve; }),
+    }};
+    const delivery = deliverAmcPublication(publication, () => closed, (frame) => written.push(frame));
+    closed = true;
+    finish({get: () => "late"});
+    await delivery;
+    expect(written).to.deep.equal([]);
   });
 
   it("delivers 1000 ordered ABAP SENDs from an HTTP step to a bound real websocket", async () => {
@@ -84,5 +120,47 @@ describe("AMC in one Node process", function () {
     const object = new Sender();
     const count = await dialogStep(() => object.wait_up_to());
     expect(count.get()).to.equal(1);
+  });
+
+  it("releases an HTTP step during WAIT FOR MESSAGING CHANNELS and wakes on SEND", async () => {
+    const {initializeABAP} = await import("../output/init.mjs");
+    const Sender = (await import("../output/zcl_osd_amc_test.clas.mjs")).zcl_osd_amc_test;
+    await initializeABAP();
+    const abap = globalThis.abap;
+    const broker = installAmc(abap);
+    const order = [];
+    const server = createServer((req, res) => {
+      const work = req.url === "/wait" ? () => new Sender().wait_for_message()
+        : req.url === "/send" ? () => Sender.send_many({iv_count: new abap.types.Integer().set(1)})
+          : async () => undefined;
+      dialogStep(work).then((result) => {
+        order.push(req.url);
+        res.writeHead(200).end(String(result?.get?.() ?? "ok"));
+      }).catch((error) => res.writeHead(500).end(String(error)));
+    });
+    mountChannels(server, [], {});
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const waiting = fetch(`${base}/wait`);
+      const deadline = Date.now() + 1000;
+      while (![...broker.subscribers].some((sub) => sub.active && sub.receiver) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect([...broker.subscribers].some((sub) => sub.active && sub.receiver)).to.equal(true);
+      const second = await fetch(`${base}/second`, {signal: AbortSignal.timeout(1500)});
+      expect(second.status).to.equal(200);
+      expect(order).to.deep.equal(["/second"]);
+      const sent = await fetch(`${base}/send`);
+      expect(sent.status).to.equal(200);
+      const first = await waiting;
+      const answer = await first.text();
+      expect(first.status, answer).to.equal(200);
+      expect(answer).to.equal("1");
+      expect(order).to.deep.equal(["/second", "/send", "/wait"]);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });

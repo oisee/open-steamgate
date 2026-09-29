@@ -64,9 +64,9 @@ export class AmcBroker {
     return row;
   }
 
-  subscribe({app, path, program, session, receive, extension = ""}) {
+  subscribe({app, path, program, session, receive, extension = "", client, username}) {
     const channel = this.channel(app, path, "R", program);
-    const subscription = {channel, session, receive, extension, pending: [], active: true};
+    const subscription = {channel, session, receive, extension, client, username, pending: [], active: true};
     this.subscribers.add(subscription);
     return {
       subscription,
@@ -80,6 +80,8 @@ export class AmcBroker {
     const publication = {type, message, client, username};
     for (const sub of this.subscribers) {
       if (!sub.active || sub.channel !== channel || sub.extension !== extension) continue;
+      if ((channel.scope === "C" || channel.scope === "U") && sub.client !== client) continue;
+      if (channel.scope === "U" && sub.username !== username) continue;
       if (suppressEcho && sub.session === session) continue;
       if (sub.receive) sub.receive(publication);
       else sub.pending.push(publication);
@@ -167,7 +169,8 @@ export function installAmc(abap, root = process.cwd()) {
       const receiver = value(i_receiver);
       this.osdSubscriptions ??= new Map();
       this.osdSubscriptions.get(receiver)?.close();
-      const subscription = broker.subscribe({...details, program: program(), receive: undefined});
+      const subscription = broker.subscribe({...details, program: program(), receive: undefined,
+        client: abap.builtin.sy.get().mandt.get(), username: abap.builtin.sy.get().uname.get()});
       subscription.subscription.receiver = receiver;
       this.osdSubscriptions.set(receiver, subscription);
     });
