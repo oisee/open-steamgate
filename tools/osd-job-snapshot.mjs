@@ -1,6 +1,7 @@
 // Private read model for a future measured SAP job-read facade. Both files are
 // opened read-only; in particular a read never drains the outbox or ends an
-// ABAP caller's LUW. No list output, job log, or BAL data is exposed here.
+// ABAP caller's LUW. No list output or BAL data is exposed here; technical
+// log rows are opt-in for the private log reader only.
 import {createHash} from "node:crypto";
 import {existsSync} from "node:fs";
 import {resolve} from "node:path";
@@ -10,6 +11,7 @@ import {operationsPath} from "./osd-batch-runs.mjs";
 const value = (row, field) => String(row?.[field] ?? "").trim();
 const fail = (reason) => { throw new JobSnapshotError("JOB_SNAPSHOT_INCONSISTENT", reason); };
 const runIdOf = (id) => `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
+const MAX_LOG_ROWS = 2000;
 
 export class JobSnapshotError extends Error {
   constructor(code, message) {
@@ -170,6 +172,19 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
   };
 }
 
+function technicalLogSnapshot(db, intentId) {
+  const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'batch_job_log'").get();
+  const rows = table ? db.prepare(`SELECT seq, step_no, occurred_at, event_code, severity, text
+    FROM batch_job_log WHERE run_id = ? ORDER BY seq LIMIT ?`).all(runIdOf(intentId), MAX_LOG_ROWS + 1) : [];
+  if (rows.length > MAX_LOG_ROWS) {
+    throw new JobSnapshotError("JOB_LOG_TOO_LARGE", "job log exceeds bounded private read");
+  }
+  if (rows.some((row, index) => row.seq !== index + 1)) fail("job log sequence has a gap");
+  const entries = rows.map((row) => ({sequence: row.seq, step: row.step_no,
+    at: row.occurred_at, event: row.event_code, severity: row.severity, text: row.text}));
+  return {entries, historicalGap: entries[0]?.event !== "IMPORTED"};
+}
+
 function checkPreIdentityJob(business, sourceDb, name, count, caller, root, env) {
   const pending = business.prepare(`SELECT owner, jobname FROM zosd_job_outbox
     WHERE mandt = ? AND TRIM(jobcount) = ?`).all(caller.client, count);
@@ -198,7 +213,8 @@ function checkPreIdentityJob(business, sourceDb, name, count, caller, root, env)
 /** Return one job's durable metadata, or undefined if the key is unknown.
  * `caller` must come from trusted ABAP runtime identity, not request fields.
  */
-export function readJobSnapshot({sourceDb, jobName, jobCount, caller, root = process.cwd(), env = process.env} = {}) {
+export function readJobSnapshot({sourceDb, jobName, jobCount, caller, root = process.cwd(),
+  env = process.env, includeTechnicalLog = false} = {}) {
   const name = String(jobName ?? "").trim().toUpperCase();
   const count = String(jobCount ?? "").trim();
   if (!sourceDb || !caller || !name || name.length > 32 || !/^\d{8}$/.test(count) ||
@@ -231,8 +247,11 @@ export function readJobSnapshot({sourceDb, jobName, jobCount, caller, root = pro
     }
     const outbox = outboxSnapshot(business, identity, source, caller);
     const operationsFile = operationsPath(root, env);
-    const imported = existsSync(operationsFile) ?
-      readOnly(operationsFile, (operations) => operationsSnapshot(operations, identity, source, caller, outbox)) : undefined;
+    const imported = existsSync(operationsFile) ? readOnly(operationsFile, (operations) => {
+      const snapshot = operationsSnapshot(operations, identity, source, caller, outbox);
+      if (!snapshot || !includeTechnicalLog) return snapshot;
+      return {...snapshot, technicalLog: technicalLogSnapshot(operations, intentId)};
+    }) : undefined;
     if (!outbox && !imported) fail("bound job has neither outbox nor operations row");
     return {...base, ...(imported ?? outbox)};
   });

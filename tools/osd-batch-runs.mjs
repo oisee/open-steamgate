@@ -129,7 +129,8 @@ export class BatchRuns {
       IMPORTED: ["I", "Job imported for dispatch"],
       STEP_STARTED: ["I", "Report step started"],
       STEP_COMPLETED: ["I", "Report step completed"],
-      STEP_FAILED: ["E", "Report step failed"],
+      STEP_FAILED: ["E", "Step failed or result recording failed; review detail and business effects"],
+      STEP_INTERRUPTED: ["E", "Worker stopped before recording the step result; review business effects"],
       JOB_COMPLETED: ["I", "Job completed"],
       JOB_FAILED: ["E", "Job failed"],
       JOB_INTERRUPTED: ["E", "Worker stopped before recording a result; review business effects"],
@@ -290,12 +291,17 @@ export class BatchRuns {
         WHERE id = ? AND state = 'RUNNING' AND queued_at IS NOT NULL`)
         .run(endedAt, id).changes;
       if (changed !== 1) throw new Error(`queued run ${id} is not RUNNING`);
+      const activeStep = this.db.prepare(`SELECT step_no FROM batch_run_steps
+        WHERE run_id = ? AND state = 'RUNNING'`).all(id);
       const active = this.db.prepare(`UPDATE batch_run_steps SET state = 'INTERRUPTED', ended_at = ?,
         result_status = 'INTERRUPTED' WHERE run_id = ? AND state = 'RUNNING'`).run(endedAt, id).changes;
       const stepCount = this.db.prepare("SELECT step_count FROM batch_runs WHERE id = ?").get(id).step_count;
-      if (active !== (stepCount > 0 ? 1 : 0)) throw new Error(`queued run ${id} has inconsistent active step`);
+      if (active !== (stepCount > 0 ? 1 : 0) || activeStep.length !== active) {
+        throw new Error(`queued run ${id} has inconsistent active step`);
+      }
       this.db.prepare(`UPDATE batch_run_steps SET state = 'SKIPPED', ended_at = ?
         WHERE run_id = ? AND state IN ('READY', 'PENDING')`).run(endedAt, id);
+      this.#appendJobLog(id, activeStep[0]?.step_no ?? 1, "STEP_INTERRUPTED", endedAt);
       this.#appendJobLog(id, null, "JOB_INTERRUPTED", endedAt);
       this.db.exec("COMMIT");
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }

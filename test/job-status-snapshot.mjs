@@ -397,7 +397,7 @@ describe("private durable job status snapshot", function () {
         ["IMPORTED", "STEP_STARTED"]);
       store.interruptQueued(crashedId);
       assert.deepEqual(log(crashed.name, crashed.count).entries.map(({event}) => event),
-        ["IMPORTED", "STEP_STARTED", "JOB_INTERRUPTED"]);
+        ["IMPORTED", "STEP_STARTED", "STEP_INTERRUPTED", "JOB_INTERRUPTED"]);
     } finally { store.close(); }
   });
 
@@ -470,6 +470,40 @@ describe("private durable job status snapshot", function () {
       assert.deepEqual(log(job.name, job.count).entries.map(({event}) => event), ["STEP_STARTED"]);
       assert.equal(log(job.name, job.count).historicalGap, true);
     } finally { reopened.close(); }
+  });
+
+  it("records the second active step when a restarted worker is interrupted", () => {
+    reserve("LOG_LATE_CRASH", "00000030");
+    const job = bind("LOG_LATE_CRASH", "00000030");
+    const id = imported(job);
+    const first = new BatchRuns(root, env);
+    try {
+      first.claimNext();
+      first.finishStep(id, 1, {status: "COMPLETED", lines: []});
+    } finally { first.close(); }
+    const second = new BatchRuns(root, env);
+    try {
+      assert.equal(second.claimNext().step, 2);
+    } finally { second.close(); }
+    const restarted = new BatchRuns(root, env);
+    try {
+      restarted.interruptQueued(id);
+      assert.deepEqual(log(job.name, job.count).entries.slice(-2).map(({step, event}) => [step, event]),
+        [[2, "STEP_INTERRUPTED"], [null, "JOB_INTERRUPTED"]]);
+    } finally { restarted.close(); }
+  });
+
+  it("refuses a mutated imported payload when reading its log", () => {
+    reserve("LOG_TAMPER", "00000031");
+    const job = bind("LOG_TAMPER", "00000031");
+    const id = imported(job);
+    assert.equal(read(job.name, job.count).phase, "OPERATIONS");
+    const writer = new DatabaseSync(operationsDb);
+    try {
+      writer.prepare("UPDATE batch_run_steps SET program = 'Z_OTHER' WHERE run_id = ? AND step_no = 2")
+        .run(id);
+    } finally { writer.close(); }
+    assert.throws(() => log(job.name, job.count), {code: "JOB_SNAPSHOT_INCONSISTENT"});
   });
 
   it("rolls back a new import if its first log entry cannot be stored", () => {

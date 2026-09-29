@@ -284,8 +284,9 @@ The operations SQLite store keeps a small technical job log for imported
 jobs. Import, claim, step completion/failure and job completion/failure or
 manual interruption append ordered rows in the same transaction as their
 state changes; a repeated outbox import adds no second entry. The private
-`readJobLog` reader checks the retained identity and owner, then rechecks the
-operations run and import ledger with the log rows in one read-only snapshot.
+`readJobLog` reader checks the retained identity and owner, then validates the
+operations run, steps and import digest with the log rows in one read-only
+operations snapshot.
 It does not drain work or end the ABAP caller's LUW. A read can observe a later
 transition than an earlier separate status read. Older imported runs without
 log rows report a historical gap rather than invented entries. The read is
