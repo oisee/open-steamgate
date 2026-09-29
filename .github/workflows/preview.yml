@@ -136,12 +136,18 @@ jobs:
           fi
       - name: Check the sql.js build in a browser
         run: npx playwright test --config playwright.preview.config.mjs
-      # The build directory is replaced here. Only the DuckDB-Wasm build below
-      # is published, and only if its own browser check passes. The previous
-      # gh-pages/main stays active if either build or check fails.
+      # On main the build directory is replaced here: only the DuckDB-Wasm
+      # build below is published, and only if its own browser check passes.
+      # The previous gh-pages/main stays active if either build or check
+      # fails. A pull request publishes the sql.js build it has just checked
+      # and skips the second build (Alice, 2026-09-29): it was about 4.5 of
+      # the job's 10 minutes, and Portable AMDP is still checked on every
+      # push to main.
       - name: Build Pages with DuckDB-Wasm and Portable AMDP
+        if: github.event_name != 'pull_request'
         run: OSD_PREVIEW_DB=duckdb node scripts/build-preview.mjs
       - name: Check Portable AMDP in the Pages build
+        if: github.event_name != 'pull_request'
         run: OSD_PREVIEW_DB=duckdb npx playwright test --config playwright.preview.config.mjs
       - name: Screenshots
         run: node scripts/capture-screenshots.mjs
