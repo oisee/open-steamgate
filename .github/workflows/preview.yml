@@ -64,11 +64,16 @@ jobs:
       # SHA rather than a branch on purpose: a moving branch would make the
       # public site depend on what somebody pushed this morning. The SHA and
       # repo are loaded from libs.lock.json at the start of the job.
+      # Outside the checkout, and absolute: actions/cache silently refuses to
+      # save a path with ".." in it ("Relative pathing '.' and '..' is not
+      # allowed"), which is how the first version of this cache never hit.
+      - name: Where the pinned transpiler lives
+        run: echo "TRANSPILER=$RUNNER_TEMP/transpiler" >> "$GITHUB_ENV"
       - name: Restore the pinned transpiler build
         id: transpiler_cache
         uses: actions/cache@v4
         with:
-          path: ../transpiler
+          path: ${{ runner.temp }}/transpiler
           key: transpiler-v1-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('libs.lock.json') }}-${{ hashFiles('tools/osd-ci-transpiler-build.sh') }}
       - name: Build the transpiler this deployment is pinned to
         if: steps.transpiler_cache.outputs.cache-hit != 'true'

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-clone="../transpiler"
+# Absolute on CI ($RUNNER_TEMP/transpiler): actions/cache refuses a path with "..".
+clone="${TRANSPILER:-../transpiler}"
 case "${1:-}" in
   build)
     git clone --filter=blob:none "$OSD_TRANSPILER_REPO" "$clone"
