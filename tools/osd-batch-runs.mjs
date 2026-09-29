@@ -548,7 +548,7 @@ export async function runPersistedBatch(root, request, store, execute = runConve
       result = await execute(root, run.program, run.input);
     } catch (error) {
       try { store.fail(run.id, error); }
-      catch (recordError) { throw resultRecordingError(run.id, undefined, recordError); }
+      catch (recordError) { throw resultRecordingError(run.id, undefined, recordError, error); }
       throw Object.assign(error, {runId: run.id});
     }
     try { return store.finish(run.id, result); }
@@ -558,12 +558,13 @@ export async function runPersistedBatch(root, request, store, execute = runConve
   }
 }
 
-function resultRecordingError(runId, stepNumber, cause) {
+function resultRecordingError(runId, stepNumber, cause, executionError) {
   const step = stepNumber === undefined ? "" : ` step ${stepNumber}`;
   const error = new Error(`Could not confirm result for batch run ${runId}${step}; inspect its state and business effects before resubmission.`, {cause});
   error.code = "RESULT_RECORDING_FAILED";
   error.runId = runId;
   if (stepNumber !== undefined) error.stepNumber = stepNumber;
+  if (executionError !== undefined) Object.defineProperty(error, "executionError", {value: executionError});
   return error;
 }
 
@@ -581,8 +582,10 @@ export async function workQueuedBatch(root, store, execute = runConvertedBatch) 
   if (run.generation !== generation) {
     const error = {code: "GENERATION_CHANGED",
       message: `Queued for ${run.generation}; worker runs ${generation}. Submit a new run after reviewing the change.`};
-    if (step) store.failStep(run.id, step.number, error);
-    else store.fail(run.id, error);
+    try {
+      if (step) store.failStep(run.id, step.number, error);
+      else store.fail(run.id, error);
+    } catch (recordError) { throw resultRecordingError(run.id, step?.number, recordError); }
     return {kind: "failed", run: store.get(run.id)};
   }
   let result;
@@ -592,7 +595,7 @@ export async function workQueuedBatch(root, store, execute = runConvertedBatch) 
     try {
       if (step) store.failStep(run.id, step.number, error);
       else store.fail(run.id, error);
-    } catch (recordError) { throw resultRecordingError(run.id, step?.number, recordError); }
+    } catch (recordError) { throw resultRecordingError(run.id, step?.number, recordError, error); }
     return {kind: "failed", run: store.get(run.id)};
   }
   try {

@@ -215,6 +215,69 @@ describe("durable one-shot batch runs", function () {
     }
   });
 
+  it("reports a legacy generation rejection that cannot be recorded with its run ID", async () => {
+    const store = new BatchRuns(root, env);
+    try {
+      const run = store.enqueue({program: "ZGG_EX_012", generation: "obsolete"});
+      store.db.exec(`CREATE TRIGGER reject_failed_job BEFORE INSERT ON batch_job_log
+        WHEN NEW.event_code = 'JOB_FAILED' BEGIN SELECT RAISE(FAIL, 'log unavailable'); END`);
+      let called = false;
+      let caught;
+      try { await workQueuedBatch(root, store, async () => { called = true; }); }
+      catch (error) { caught = error; }
+      expect(called).to.equal(false);
+      expect(caught).to.include({code: "RESULT_RECORDING_FAILED", runId: run.id});
+      expect(store.get(run.id).state).to.equal("RUNNING");
+      expect(store.claimNext()).to.deep.equal({kind: "busy", id: run.id});
+    } finally { store.close(); }
+  });
+
+  it("reports a multi-step generation rejection that cannot be recorded with its step number", async () => {
+    const store = new BatchRuns(root, env);
+    const previous = globalThis.abap;
+    const sourceDb = join(dir, "business.sqlite");
+    globalThis.abap = {context: {databaseConnections: {DEFAULT: {path: sourceDb}}, osdGeneration: "new"},
+      builtin: {sy: {get: () => ({mandt: {get: () => "123"}, sysid: {get: () => "OSD"},
+        uname: {get: () => "DEVELOPER"}})}}};
+    try {
+      const {run} = store.importIntent({intentId: randomUUID().replaceAll("-", ""),
+        sourceDb, client: "123", sysid: "OSD", owner: "DEVELOPER", jobname: "CHAIN",
+        jobcount: "00000002", program: "ZGG_EX_012", generation: "old",
+        steps: [{number: 1, program: "ZGG_EX_012"}, {number: 2, program: "ZGG_EX_012"}]});
+      store.db.exec(`CREATE TRIGGER reject_failed_step BEFORE INSERT ON batch_job_log
+        WHEN NEW.event_code = 'JOB_FAILED' BEGIN SELECT RAISE(FAIL, 'log unavailable'); END`);
+      let called = false;
+      let caught;
+      try { await workQueuedBatch(root, store, async () => { called = true; }); }
+      catch (error) { caught = error; }
+      expect(called).to.equal(false);
+      expect(caught).to.include({code: "RESULT_RECORDING_FAILED", runId: run.id, stepNumber: 1});
+      expect(store.get(run.id).state).to.equal("RUNNING");
+      expect(store.get(run.id).steps.map((step) => step.state)).to.deep.equal(["RUNNING", "PENDING"]);
+      expect(store.claimNext().kind).to.equal("busy");
+    } finally {
+      globalThis.abap = previous;
+      store.close();
+    }
+  });
+
+  it("preserves the execution error when recording that failure also fails", async () => {
+    const store = new BatchRuns(root, env);
+    try {
+      const run = store.enqueue({program: "ZGG_EX_012", generation: liveGeneration(root)});
+      store.db.exec(`CREATE TRIGGER reject_failed_execution BEFORE INSERT ON batch_job_log
+        WHEN NEW.event_code = 'JOB_FAILED' BEGIN SELECT RAISE(FAIL, 'log unavailable'); END`);
+      const executionError = new Error("report's private diagnostic");
+      let caught;
+      try { await workQueuedBatch(root, store, async () => { throw executionError; }); }
+      catch (error) { caught = error; }
+      expect(caught).to.include({code: "RESULT_RECORDING_FAILED", runId: run.id});
+      expect(caught.executionError).to.equal(executionError);
+      expect(caught.message).not.to.include("private diagnostic");
+      expect(store.get(run.id).state).to.equal("RUNNING");
+    } finally { store.close(); }
+  });
+
   it("leaves a completed report step RUNNING when recording its result fails, without replay after restart", async () => {
     const store = new BatchRuns(root, env);
     const before = globalThis.abap;
