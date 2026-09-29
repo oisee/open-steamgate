@@ -227,6 +227,14 @@ level aware) writes the state into a canonical record, and the records are
 compared by the regression-contract matcher once it is a module. The same
 test through ADT on A4H is D-kernel. The record is the evidence record of 3.5.
 
+**Align before building:** stoker's B18 (the `.http` contract with `@osd.*`,
+the determinism core, reference records) already defines a record. The
+canonical state record takes its format from there rather than inventing a
+second one (dell, 2026-09-29). D-kernel runs through the vsp MCP `test`
+action (ABAP Unit on A4H over ADT), which is a different path from B18's
+harvest of reference results out of cluster tables; both only when Alice
+asks.
+
 ### 3.9 The HXE parser: clean-room only
 
 HXE binaries are not decompiled or inspected: the licence forbids it, and
@@ -514,7 +522,7 @@ from the open corpus.
    "between" to reachability.
 4. The observation harness: ABAP Unit -> canonical record -> the regression
    matcher; the evidence record format (3.5); the checker that
-   `#OSG justify ... measured:<id>` resolves.
+   `#OSG justify ... measured:<id>` resolves; the record format aligned with B18 first.
 5. Recipe 1a (prefetch) in the format of 4.5, up to D-hana with the
    transpiler on the HANA backend, the Refaster class as its test; then 1b
    (JOIN).
