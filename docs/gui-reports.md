@@ -206,8 +206,38 @@ durable `QUEUED` run without executing it. `work` claims and executes one
 queued run in its own process; `worker` stays up, polling for further work
 until SIGINT or SIGTERM. `list` and `show <run-id>` show the same saved status
 and output as a direct run. This is an explicit process to start for now; it
-is not yet supervised by the OSD launcher or exposed as SAP `JOB_OPEN` /
-`JOB_CLOSE`.
+is not yet supervised by the OSD launcher. Its direct `enqueue` command is
+separate from the transactional ABAP job facade below.
+
+## One immediate JOB_OPEN / JOB_SUBMIT / JOB_CLOSE step
+
+For a durable `STG_DB=file` instance, the common `JOB_OPEN` / `JOB_SUBMIT` /
+`JOB_CLOSE` call shape now schedules one converted static report. `JOB_SUBMIT`
+accepts no variant or ad hoc selection; the report runs with its own
+`INITIALIZATION` defaults. `JOB_CLOSE` requires `STRTIMMED = 'X'` and rejects
+date, time and target-system scheduling. Additional steps and external
+programs are refused. `JOBCOUNT` is an eight-digit handle for the current
+dialog step; the durable run identity is a separate UUID. Exact SAP signatures,
+exception mapping and cross-dialog-step lifetime still require A4H measurement.
+The [SAP background programming guide](https://help.sap.com/docs/SAP_NETWEAVER_702/ff5bceb06c551014a400edb223056da3/4d94511b2cdb6c14e10000000a15822b.html)
+documents `JOB_SUBMIT` with a report variant; this subset deliberately refuses
+variants until their lookup and execution are implemented.
+
+An open definition belongs to the current dialog step and disappears on
+`COMMIT WORK`, `ROLLBACK WORK`, `WAIT` (which commits), dump or step exit.
+`JOB_CLOSE` inserts immutable dispatch intent with Open SQL into
+`ZOSD_JOB_OUTBOX`, without committing its caller. `node tools/osd-batch-runs.mjs
+drain` reads only committed intent and imports it into the operations SQLite
+store. `work` and `worker` drain before claiming work. An import ledger keeps
+the outbox ID and payload digest: a crash after import but before business-DB
+acknowledgement retries the same run, and changed payload is refused.
+The worker claims only rows for its business DB, client and SID. A mismatched
+build generation fails visibly before the report executes; an interrupted
+`RUNNING` run still needs manual review. The file SQLite adapter writes a
+committed LUW to its WAL on disk; its `synchronous=NORMAL` setting gives
+process-crash recovery, not a power-loss guarantee. The in-memory/sql.js,
+DuckDB, HANA, PostgreSQL and browser modes reject this first scheduling slice
+until their persistence and transaction boundaries are proven.
 
 A SQLite `BEGIN IMMEDIATE` claim admits at most one queued run at a time,
 even if two worker processes start together. FIFO uses enqueue time and row

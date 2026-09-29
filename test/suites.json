@@ -50,6 +50,7 @@
     "test/generated-metadata.mjs",
     "test/gateway-regression-contract.mjs",
     "test/gui-reports.mjs",
+    "test/job-one-step.mjs",
     "test/hana-dialect.mjs",
     "test/journal.mjs",
     "test/leak-scan.mjs",

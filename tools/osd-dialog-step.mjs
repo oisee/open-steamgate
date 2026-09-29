@@ -80,6 +80,47 @@ function release() {
  *  store (the preview) any holder counts, as before */
 const mine = () => (steps === undefined ? holder !== undefined : holder !== undefined && steps.getStore() === holder);
 
+// Host services with pending ABAP definitions may keep data only for the
+// current execution. The browser has no AsyncLocalStorage: fail closed there
+// rather than treating every request as one caller.
+export function currentStepToken() {
+  const token = steps?.getStore();
+  return token !== undefined && token.dialog === true && token.done !== true && token === holder ? token : undefined;
+}
+
+export function onStepLuwEnd(callback) {
+  const token = currentStepToken();
+  if (token === undefined) throw new Error("a dialog step is required");
+  installLuwEndHooks();
+  (token.luwEnd ??= new Set()).add(callback);
+  return () => token.luwEnd?.delete(callback);
+}
+
+function endLuw(token = currentStepToken()) {
+  if (token === undefined) return;
+  const callbacks = token.luwEnd;
+  token.luwEnd = undefined;
+  for (const callback of callbacks ?? []) callback();
+}
+
+let luwHookedClient;
+function installLuwEndHooks() {
+  const client = connection();
+  if (client === luwHookedClient) return;
+  luwHookedClient = client;
+  for (const operation of ["commit", "rollback"]) {
+    const original = client[operation];
+    if (typeof original !== "function") continue;
+    client[operation] = async function (...args) {
+      try {
+        return await original.apply(this, args);
+      } finally {
+        endLuw();
+      }
+    };
+  }
+}
+
 /** the queue, for a status page and for tests: who waits, and for how long
  *  the work process has been held */
 export function workProcess() {
@@ -101,7 +142,7 @@ setInterval?.(() => {
 
 /** the work process, without the commit bracket: for a read of the shared
  *  connection that is not a step of its own (the data preview's SQL door) */
-export async function exclusive(work, what) {
+export async function exclusive(work, what, {dialog = false} = {}) {
   installWait();
   // a step inside a step would wait for itself; said, not hung. A timer the
   // step left behind carries its context past its end, and is no nesting
@@ -109,11 +150,12 @@ export async function exclusive(work, what) {
   if (outer !== undefined && outer.done !== true) {
     throw new Error(`a nested dialog step${what === undefined ? "" : ` (${what})`}: the step that would run it holds the work process`);
   }
-  const token = {what};
+  const token = {what, dialog};
   await acquire(token);
   try {
     return steps === undefined ? await work() : await steps.run(token, work);
   } finally {
+    endLuw(token);
     token.done = true;
     release();
   }
@@ -136,17 +178,20 @@ export async function dialogStep(work, what) {
     try {
       const result = await work();
       await connection().commit?.();
+      endLuw();
       return result;
     } catch (e) {
       await connection().rollback?.();
+      endLuw();
       throw e;
     }
-  }, what);
+  }, what, {dialog: true});
 }
 
 async function commitAll() {
   const connections = globalThis.abap.context.databaseConnections;
   for (const name of Object.keys(connections)) await connections[name].commit?.();
+  endLuw();
 }
 
 /** WAIT inside a step: the runtime's semantics (sy-subrc 0, or 8 when the
