@@ -67,35 +67,29 @@ CLASS ltcl_pcp IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true( xsdbool( lv_wire CS 'pcp-body-type:binary' ) ).
     lo_message = cl_ac_message_type_pcp=>deserialize( lv_wire ).
     cl_abap_unit_assert=>assert_equals( act = lo_message->get_binary( ) exp = '0001FF' ).
-    TRY.
-        lo_message->get_text( ).
-        cl_abap_unit_assert=>fail( 'binary GET_TEXT should raise' ).
-      CATCH cx_ac_message_type_pcp_error.
-    ENDTRY.
+    cl_abap_unit_assert=>assert_equals( act = lo_message->get_text( ) exp = '' ).
     lo_message->set_text( 'again' ).
     cl_abap_unit_assert=>assert_equals( act = lo_message->get_text( ) exp = 'again' ).
-    TRY.
-        lo_message->get_binary( ).
-        cl_abap_unit_assert=>fail( 'text GET_BINARY should raise' ).
-      CATCH cx_ac_message_type_pcp_error.
-    ENDTRY.
+    cl_abap_unit_assert=>assert_equals( act = lo_message->get_binary( ) exp = '' ).
   ENDMETHOD.
 
   METHOD malformed.
+    DATA lv_exists TYPE abap_bool.
     TRY.
         cl_ac_message_type_pcp=>deserialize( 'bad' ).
         cl_abap_unit_assert=>fail( 'missing separator should raise' ).
       CATCH cx_ac_message_type_pcp_error.
     ENDTRY.
-    TRY.
-        cl_ac_message_type_pcp=>deserialize(
-          'pcp-action:MESSAGE' && cl_abap_char_utilities=>newline
-          && 'pcp-body-type:text' && cl_abap_char_utilities=>newline
-          && 'broken' && cl_abap_char_utilities=>newline
-          && cl_abap_char_utilities=>newline ).
-        cl_abap_unit_assert=>fail( 'header without colon should raise' ).
-      CATCH cx_ac_message_type_pcp_error.
-    ENDTRY.
+    DATA(lo_message) = cl_ac_message_type_pcp=>deserialize(
+      'pcp-action:MESSAGE' && cl_abap_char_utilities=>newline
+      && 'broken' && cl_abap_char_utilities=>newline
+      && 'b:2' && cl_abap_char_utilities=>newline
+      && cl_abap_char_utilities=>newline && 'body' ).
+    lo_message->get_field( EXPORTING i_name = 'b' IMPORTING e_exists = lv_exists ).
+    cl_abap_unit_assert=>assert_equals( act = lv_exists exp = abap_false ).
+    cl_abap_unit_assert=>assert_equals( act = lo_message->get_text( ) exp = 'body' ).
+    lo_message = cl_ac_message_type_pcp=>deserialize( 'pcp-action:MESSAGE' ).
+    cl_abap_unit_assert=>assert_equals( act = lo_message->get_text( ) exp = '' ).
   ENDMETHOD.
 
   METHOD assumed_escaping.
@@ -107,27 +101,30 @@ CLASS ltcl_pcp IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true( xsdbool( lv_wire CS 'path:a\\b\:c' ) ).
     lo_message = cl_ac_message_type_pcp=>deserialize( lv_wire ).
     cl_abap_unit_assert=>assert_equals( act = lo_message->serialize( ) exp = lv_wire ).
+    lo_message->set_field( i_name = 'a:b' i_value = 'line' && cl_abap_char_utilities=>newline && 'next' ).
+    lv_wire = lo_message->serialize( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_wire CS 'a\:b:line\nnext' ) ).
+    lo_message = cl_ac_message_type_pcp=>deserialize( lv_wire ).
+    cl_abap_unit_assert=>assert_equals( act = lo_message->get_field( 'a:b' )
+      exp = 'line' && cl_abap_char_utilities=>newline && 'next' ).
+    lo_message = cl_ac_message_type_pcp=>deserialize(
+      'pcp-action:MESSAGE' && cl_abap_char_utilities=>newline
+      && 'odd:\q' && cl_abap_char_utilities=>newline && cl_abap_char_utilities=>newline ).
+    cl_abap_unit_assert=>assert_equals( act = lo_message->get_field( 'odd' ) exp = '\q' ).
   ENDMETHOD.
 
   METHOD duplicate_empty_header.
     DATA lv_lf TYPE string.
+    DATA lt_fields TYPE if_ac_message_type_pcp=>tt_pcp_fields.
     lv_lf = cl_abap_char_utilities=>newline.
-    TRY.
-        cl_ac_message_type_pcp=>if_ac_message_type_pcp~deserialize(
-          'pcp-action:MESSAGE' && lv_lf
-          && 'pcp-body-type:' && lv_lf
-          && 'pcp-body-type:text' && lv_lf && lv_lf ).
-        cl_abap_unit_assert=>fail( 'duplicate body type after empty value should raise' ).
-      CATCH cx_ac_message_type_pcp_error.
-    ENDTRY.
-    TRY.
-        cl_ac_message_type_pcp=>if_ac_message_type_pcp~deserialize(
-          'pcp-action:' && lv_lf
-          && 'pcp-action:MESSAGE' && lv_lf
-          && 'pcp-body-type:text' && lv_lf && lv_lf ).
-        cl_abap_unit_assert=>fail( 'duplicate action after empty value should raise' ).
-      CATCH cx_ac_message_type_pcp_error.
-    ENDTRY.
+    DATA(lo_message) = cl_ac_message_type_pcp=>if_ac_message_type_pcp~deserialize(
+      'pcp-action:MESSAGE' && lv_lf
+      && 'pcp-body-type:text' && lv_lf
+      && 'pcp-body-type:text' && lv_lf
+      && 'a:1' && lv_lf && 'a:2' && lv_lf && lv_lf && 'body' ).
+    lo_message->get_fields( CHANGING c_fields = lt_fields ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_fields ) exp = 4 ).
+    cl_abap_unit_assert=>assert_equals( act = lo_message->get_text( ) exp = 'body' ).
   ENDMETHOD.
 
   METHOD carriage_return.
@@ -143,24 +140,13 @@ CLASS ltcl_pcp IMPLEMENTATION.
       CATCH cx_ac_message_type_pcp_error.
     ENDTRY.
     lo_message->set_field( i_name = 'a' i_value = 'x' && lv_cr && 'y' ).
-    TRY.
-        lo_message->serialize( ).
-        cl_abap_unit_assert=>fail( 'carriage return in field value should raise' ).
-      CATCH cx_ac_message_type_pcp_error.
-    ENDTRY.
-    TRY.
-        cl_ac_message_type_pcp=>if_ac_message_type_pcp~deserialize(
-          'pcp-action:MESSAGE' && lv_lf && 'pcp-body-type:text' && lv_lf
-          && 'a' && lv_cr && 'b:1' && lv_lf && lv_lf ).
-        cl_abap_unit_assert=>fail( 'carriage return in parsed field name should raise' ).
-      CATCH cx_ac_message_type_pcp_error.
-    ENDTRY.
-    TRY.
-        cl_ac_message_type_pcp=>if_ac_message_type_pcp~deserialize(
-          'pcp-action:MESSAGE' && lv_lf && 'pcp-body-type:text' && lv_lf
-          && 'a:x' && lv_cr && 'y' && lv_lf && lv_lf ).
-        cl_abap_unit_assert=>fail( 'carriage return in parsed field value should raise' ).
-      CATCH cx_ac_message_type_pcp_error.
-    ENDTRY.
+    DATA(lv_wire) = lo_message->serialize( ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_wire CS 'a:x' && lv_cr && 'y' ) ).
+    lo_message = cl_ac_message_type_pcp=>deserialize( lv_wire ).
+    cl_abap_unit_assert=>assert_equals( act = lo_message->get_field( 'a' ) exp = 'x' && lv_cr && 'y' ).
+    lo_message = cl_ac_message_type_pcp=>if_ac_message_type_pcp~deserialize(
+      'pcp-action:MESSAGE' && lv_lf && 'pcp-body-type:text' && lv_lf
+      && 'a' && lv_cr && 'b:1' && lv_lf && lv_lf ).
+    cl_abap_unit_assert=>assert_equals( act = lo_message->get_field( 'a' && lv_cr && 'b' ) exp = '1' ).
   ENDMETHOD.
 ENDCLASS.

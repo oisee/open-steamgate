@@ -12,7 +12,9 @@ CLASS ltcl_timer IMPLEMENTATION.
         cl_abap_unit_assert=>fail( 'timer manager outside APC session' ).
       CATCH cx_abap_timer_error INTO lo_error.
         cl_abap_unit_assert=>assert_equals(
-          act = lo_error->reason exp = 'session_type_not_supported' ).
+          act = lo_error->textid exp = cx_abap_timer_error=>session_type_not_supported ).
+        cl_abap_unit_assert=>assert_equals(
+          act = lo_error->get_text( ) exp = 'Session type is not supported.' ).
     ENDTRY.
   ENDMETHOD.
 ENDCLASS.
