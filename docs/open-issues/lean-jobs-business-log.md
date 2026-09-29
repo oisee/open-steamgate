@@ -54,7 +54,10 @@ their separate logs after restart. Then run connected chains: on success both
 finish, while a controlled upstream failure leaves the dependent chain
 waiting. Check captured list, business log, event lineage and doctor
 diagnosis across a process restart. Check that duplicate tail delivery
-cannot run the successor twice. Then decide whether `SUBMIT ... VIA JOB` and
+cannot run the successor twice. Static `SUBMIT ... VIA JOB ... NUMBER ... WITH`
+now carries bounded immutable scalar input to each converted report step;
+dynamic programs, ranges, selection variants, and spool options remain unsupported.
+Then decide whether broader `SUBMIT ... VIA JOB` forms and
 SAP-shaped BAL/spool adapters are worth adding. Keep the initial supported
 PROG registry and selection syntax narrow.
 

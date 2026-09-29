@@ -30,6 +30,14 @@ describe("static narrow SUBMIT lowering", () => {
     expect(after.split("\n").length).to.equal(before.split("\n").length);
   });
 
+  it("lowers static VIA JOB with bounded scalar selections", () => {
+    const before = source("SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_count WITH p_date = lv_date AND RETURN.");
+    const after = lowerNarrowSubmit(before, file, core);
+    expect(after).to.contain("submit_via_job( iv_program = 'ZGG_EX_012' iv_jobname = lv_job iv_jobcount = lv_count");
+    expect(after).to.contain("( name = 'P_DATE' value = CONV string( lv_date ) )");
+    expect(after.split("\n").length).to.equal(before.split("\n").length);
+  });
+
   it("does not rewrite comments or string literals", () => {
     const before = source("* SUBMIT zgg_ex_012 AND RETURN.\n    DATA lv_text TYPE string VALUE 'SUBMIT zgg_ex_012 AND RETURN.'.");
     expect(lowerNarrowSubmit(before, file, core)).to.equal(before);
@@ -47,7 +55,11 @@ describe("static narrow SUBMIT lowering", () => {
 
   for (const form of [
     "SUBMIT (lv_program) AND RETURN.",
-    "SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_number AND RETURN.",
+    "SUBMIT zgg_ex_012 VIA JOB lv_job AND RETURN.",
+    "SUBMIT (lv_program) VIA JOB lv_job NUMBER lv_number AND RETURN.",
+    "SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_number WITH p_date IN lt_range AND RETURN.",
+    "SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_number USING SELECTION-SET 'X' AND RETURN.",
+    "SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_number TO SAP-SPOOL AND RETURN.",
     "SUBMIT zgg_ex_012 EXPORTING LIST TO MEMORY AND RETURN.",
     "SUBMIT zgg_ex_012 WITH p_date = lv_date.",
     "SUBMIT zgg_ex_012 WITH p_date IN lt_range AND RETURN.",

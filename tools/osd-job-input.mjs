@@ -15,7 +15,7 @@ export function jobInput(input) {
     }
     const name = row[keys.find((key) => key.toUpperCase() === "NAME")];
     const value = row[keys.find((key) => key.toUpperCase() === "VALUE")];
-    if (typeof name !== "string" || !/^[A-Z_][A-Z0-9_]{0,7}$/.test(name.toUpperCase()) ||
+    if (typeof name !== "string" || !/^[A-Z_][A-Z0-9_]{0,7}$/.test(name) ||
         typeof value !== "string" || value.length > 255) throw new TypeError("Invalid job input name or value (max 255 characters)");
     const upper = name.toUpperCase();
     if (seen.has(upper)) throw new TypeError(`Duplicate job input field ${upper}`);

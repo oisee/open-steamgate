@@ -8,6 +8,7 @@ CLASS ltcl_batch_report DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL H
     METHODS leave_program_completes FOR TESTING.
     METHODS static_submit_returns FOR TESTING.
     METHODS static_submit_fails_loudly FOR TESTING.
+    METHODS job_submit_checks_registry FOR TESTING.
     METHODS context_is_per_run FOR TESTING.
 ENDCLASS.
 
@@ -101,6 +102,18 @@ CLASS ltcl_batch_report IMPLEMENTATION.
         FIND 'UNKNOWN' IN lx_submit->detail.
         cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
         FIND 'UNKNOWN' IN lx_submit->get_text( ).
+        cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD job_submit_checks_registry.
+    TRY.
+        zcl_osd_batch_report=>submit_via_job(
+          iv_program = 'Z_NO_SUCH_REPORT'
+          iv_jobname = 'TEST' iv_jobcount = '00000001' ).
+        cl_abap_unit_assert=>fail( 'unknown job report must be rejected' ).
+      CATCH zcx_osd_submit INTO DATA(lx_submit).
+        FIND 'program_missing' IN lx_submit->detail.
         cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
     ENDTRY.
   ENDMETHOD.

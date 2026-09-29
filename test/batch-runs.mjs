@@ -9,6 +9,7 @@ import {BatchRuns, liveGeneration, runPersistedBatch, workQueuedBatch} from "../
 import {drainJobOutbox} from "../tools/osd-job-outbox.mjs";
 import {batchMonitorHandler} from "../tools/osd-batch-monitor.mjs";
 import {beforeJobPredecessorDDL, ensureJobEventMetadata, migrateJobEventFile,
+  migrateJobStepInputFile,
   migrateJobIdentityFile, migrateJobPredecessorFile} from "./setup.mjs";
 import {fingerprintOf} from "../tools/osd-persist.mjs";
 
@@ -166,6 +167,8 @@ describe("durable one-shot batch runs", function () {
     const old = [oldParent, step];
     const wanted = [parent, step];
     const eventWanted = [eventParent, step];
+    const inputStep = step.replace("program TEXT", "program TEXT, 'input_json' TEXT COLLATE RTRIM");
+    const inputWanted = [eventParent, inputStep];
     const oldAbap = globalThis.abap;
     const store = new BatchRuns(root, env);
     try {
@@ -178,6 +181,8 @@ describe("durable one-shot batch runs", function () {
       db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(fingerprintOf(old));
       expect(migrateJobPredecessorFile(db, fingerprintOf(old), fingerprintOf(wanted), wanted, fingerprintOf)).to.equal(true);
       expect(migrateJobEventFile(db, fingerprintOf(wanted), fingerprintOf(eventWanted), eventWanted, fingerprintOf)).to.equal(true);
+      expect(migrateJobStepInputFile(db, fingerprintOf(eventWanted), fingerprintOf(inputWanted), inputWanted, fingerprintOf)).to.equal(true);
+      expect(db.prepare("SELECT input_json FROM zosd_job_step").get().input_json).to.equal("[]");
       ensureJobEventMetadata(db);
       const client = {path: sourceDb,
         async delete({table, where}) {

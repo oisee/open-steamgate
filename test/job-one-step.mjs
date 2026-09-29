@@ -42,7 +42,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
   }, ["ev_phase", "ev_state", "ev_step_count", "ev_log_count", "ev_historical_gap",
     "ev_wait_kind", "ev_wait_jobname", "ev_wait_jobcount", "ev_wait_event_id",
     "ev_created_on", "ev_created_at", "ev_queued_at", "ev_started_at", "ev_ended_at",
-    "ev_step_number", "ev_step_program", "ev_step_state",
+    "ev_step_number", "ev_step_program", "ev_step_state", "ev_input_json",
     "ev_log_sequence", "ev_log_at", "ev_log_event", "ev_log_text"]);
   const doctor = async (name, count, limit = "50") => {
     const table = await abap.Classes.ZCL_OSD_JOB_DOCTOR.inspect({
@@ -56,6 +56,21 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     await submit(count);
     expect((await close(count)).job_was_released).to.equal("X");
   }, "schedule one report");
+  const viaJob = async (name, count, input = []) => {
+    const types = abap.Classes.ZIF_GG_SELECTION_SCREEN_TYPES;
+    const values = types.ty_values.clone();
+    for (const item of input) {
+      const row = types.ty_value.clone();
+      row.get().name.set(item.name);
+      row.get().value.set(item.value);
+      values.append(row);
+    }
+    try {
+      await abap.Classes.ZCL_OSD_BATCH_REPORT.submit_via_job({
+        iv_program: box("ZGG_EX_012"), iv_jobname: box(name), iv_jobcount: box(count), it_input: values,
+      });
+    } catch (error) { throw new Error(error.detail?.get?.() || error.message, {cause: error}); }
+  };
   const rows = () => {
     const reader = new DatabaseSync(dbPath, {readOnly: true});
     try { return reader.prepare("SELECT * FROM zosd_job_outbox").all(); }
@@ -1429,5 +1444,61 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       expect(view.steps.map((item) => item.state)).to.deep.equal(["RUNNING", "PENDING"]);
       expect(other.get(run.id).steps.map((item) => item.state)).to.deep.equal(["COMPLETED", "READY"]);
     } finally { other.close(); scoped.close(); }
+  });
+  it("commits VIA JOB input, reads it, and runs it after a worker process restart", async () => {
+    const name = "OSD_INPUT_VALUE";
+    const inputDb = join(dir, "input-value.sqlite");
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: inputDb});
+    let count;
+    await dialogStep(async () => {
+      count = await open(name);
+      await abap.Classes.ZCL_OSD_JOB_INPUT_PROBE.schedule({
+        iv_jobname: box(name), iv_jobcount: box(count), iv_value: box("20251231"),
+      });
+      await close(count, {jobname: name});
+    });
+    expect(stepRows().find((row) => row.program.trim() === "ZGG_EX_012")?.input_json)
+      .to.include("20251231");
+    expect(JSON.parse((await dialogStep(() => readJob(name, count, "STEP", "1"))).ev_input_json))
+      .to.deep.equal([{name: "P_DATE", value: "20251231"}]);
+    expect(await dialogStep(() => doctor(name, count))).to.include("P_DATE=20251231");
+    await drainJobOutbox(scoped);
+    const child = spawnSync(process.execPath, [join(root, "test", "fixtures", "job-step-run.mjs")], {
+      cwd: root, env: {...process.env, OSD_OPERATIONS_DB: inputDb}, encoding: "utf8", timeout: 120000,
+    });
+    expect(child.status, child.stderr).to.equal(0);
+    const run = scoped.list().find((item) => item.jobName === name);
+    expect(run.state).to.equal("COMPLETED");
+    expect(scoped.stepOutput(run.id, 1).lines.join(" ")).to.include("20251231");
+    await dialogStep(async () => {
+      const defaultCount = await open("OSD_INPUT_DEFAULT");
+      await submit(defaultCount, {jobname: "OSD_INPUT_DEFAULT"});
+      await close(defaultCount, {jobname: "OSD_INPUT_DEFAULT"});
+    });
+    await drainJobOutbox(scoped);
+    const defaultRun = scoped.list().find((item) => item.jobName === "OSD_INPUT_DEFAULT");
+    expect((await workQueuedBatch(root, scoped)).kind).to.equal("completed");
+    expect(scoped.stepOutput(defaultRun.id, 1).lines.join(" ")).not.to.include("20251231");
+    scoped.close();
+  });
+
+  it("fails an undeclared field at execution and rejects an overlong value at SUBMIT", async () => {
+    const name = "OSD_INPUT_INVALID";
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "input-invalid.sqlite")});
+    let count;
+    await dialogStep(async () => {
+      count = await open(name);
+      try {
+        await viaJob(name, count, [{name: "P_DATE", value: "X".repeat(256)}]);
+        throw new Error("overlong input accepted");
+      } catch (error) { expect(String(error)).to.match(/255/); }
+      await viaJob(name, count, [{name: "P_OTHER", value: "X"}]);
+      await close(count, {jobname: name});
+    });
+    await drainJobOutbox(scoped);
+    const run = scoped.list().find((item) => item.jobName === name);
+    expect((await workQueuedBatch(root, scoped)).kind).to.equal("failed");
+    expect(scoped.get(run.id).steps[0].detail).to.include("Unknown selection field P_OTHER");
+    scoped.close();
   });
 });

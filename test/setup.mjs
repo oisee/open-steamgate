@@ -125,6 +125,29 @@ export function migrateJobEventFile(native, found, wanted, ddl, fingerprintOf) {
   return true;
 }
 
+export function beforeJobStepInputDDL(ddl) {
+  return ddl.map((statement) => /^CREATE TABLE ['"]zosd_job_step['"] /i.test(statement) ?
+    statement.replace(/,\s*['"]input_json['"]\s+TEXT(?:\s+COLLATE\s+RTRIM)?/i, "") : statement);
+}
+
+export function migrateJobStepInputFile(native, found, wanted, ddl, fingerprintOf) {
+  if (fingerprintOf(ddl) !== wanted) return false;
+  const previous = beforeJobStepInputDDL(ddl);
+  if (fingerprintOf(previous) === wanted || fingerprintOf(previous) !== found) return false;
+  native.exec("BEGIN IMMEDIATE");
+  try {
+    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
+    if (current === wanted) { native.exec("COMMIT"); return true; }
+    if (current !== found) { native.exec("COMMIT"); return false; }
+    native.exec("ALTER TABLE zosd_job_step ADD COLUMN input_json TEXT COLLATE RTRIM");
+    native.exec("UPDATE zosd_job_step SET input_json = '[]'");
+    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
+      .run(wanted, new Date().toISOString());
+    native.exec("COMMIT");
+  } catch (error) { native.exec("ROLLBACK"); throw error; }
+  return true;
+}
+
 export function ensureJobEventMetadata(native) {
   native.exec("BEGIN IMMEDIATE");
   try {
@@ -444,13 +467,16 @@ export async function setup(abap, schemas, insert) {
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     let found = await db.stampedSchema();
-    const beforeEvent = beforeJobEventDDL(schemas.sqlite);
+    const beforeInput = beforeJobStepInputDDL(schemas.sqlite);
+    const inputPriorWanted = fingerprintOf(beforeInput);
+    const beforeEvent = beforeJobEventDDL(beforeInput);
     const eventPriorWanted = fingerprintOf(beforeEvent);
     const beforePredecessor = beforeJobPredecessorDDL(beforeEvent);
     const priorWanted = fingerprintOf(beforePredecessor);
     if (migrateJobIdentityFile(db.db, found, priorWanted, beforePredecessor, fingerprintOf)) found = priorWanted;
     if (migrateJobPredecessorFile(db.db, found, eventPriorWanted, beforeEvent, fingerprintOf)) found = eventPriorWanted;
-    if (migrateJobEventFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
+    if (migrateJobEventFile(db.db, found, inputPriorWanted, beforeInput, fingerprintOf)) found = inputPriorWanted;
+    if (migrateJobStepInputFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
     if (found === wanted) {
       // the rows are already there, made for this DDIC. The tables the
       // generation writes at start (wwwparams: which SMW0 objects exist and
