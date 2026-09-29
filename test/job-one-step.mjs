@@ -454,6 +454,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
         expect(diagnosis).to.include("Step 1: ZGG_EX_012 FAILED");
         expect(diagnosis).to.include("latest entries");
         expect(diagnosis).to.include("JOB_FAILED");
+        expect((await drainJobOutbox(scoped)).imported).to.equal(1);
       } finally { scoped.close(); }
     } finally { process.env.OSD_OPERATIONS_DB = previous; }
   });
