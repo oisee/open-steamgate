@@ -36,6 +36,9 @@ export function apcTimerSession(abap, deliver, failure) {
     });
   };
   session.manager.if_abap_timer_manager$start_timer = async ({i_timer_handler, i_timeout}) => {
+    // A closing socket can overtake a pending on_start. There is no session
+    // left to receive an error or an expiry, so a late start is a no-op.
+    if (session.closed) return;
     const handler = i_timer_handler.get();
     if (session.armed.has(handler)) return error("Timer object is already active.");
     const timeout = Math.max(0, Number(i_timeout.get()));

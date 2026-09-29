@@ -118,6 +118,64 @@ describe("stateful APC timers", function () {
     expect(socket.writes).to.have.length(0);
   });
 
+  it("does not arm a timer requested after the socket closes during on_start", async () => {
+    let resume;
+    let entered;
+    let timeoutReads = 0;
+    let fired = false;
+    const started = new Promise((resolve) => { entered = resolve; });
+    class SlowHost extends Host {
+      async open(...args) {
+        const ref = await globalThis.abap.Classes.CL_ABAP_TIMER_MANAGER.get_timer_manager();
+        entered();
+        await new Promise((resolve) => { resume = resolve; });
+        await ref.get().if_abap_timer_manager$start_timer({
+          i_timer_handler: {get: () => ({if_abap_timer_handler$on_timeout: async () => { fired = true; }})},
+          i_timeout: {get: () => { timeoutReads++; return 100; }},
+        });
+        return super.open(...args);
+      }
+    }
+    const socket = new Socket();
+    const serving = serveChannel({
+      req: {headers: {"sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ=="}, url: "/timers"},
+      socket, head: Buffer.alloc(0), host: SlowHost,
+      channel: {path: "/timers", name: "TIMERS", handler: "ZCL_OSD_TIMER_PROBE", stateful: true},
+    });
+    await started;
+    socket.end();
+    resume();
+    await serving;
+    await sleep(120);
+    expect(timeoutReads, "a closed session must not schedule a timer").to.equal(0);
+    expect(fired).to.equal(false);
+    expect(socket.writes).to.have.length(0);
+  });
+
+  it("does not write a startup error after the socket closes", async () => {
+    let resume;
+    let entered;
+    const started = new Promise((resolve) => { entered = resolve; });
+    class FailingHost extends Host {
+      async open() {
+        entered();
+        await new Promise((resolve) => { resume = resolve; });
+        throw new Error("startup failed");
+      }
+    }
+    const socket = new Socket();
+    const serving = serveChannel({
+      req: {headers: {"sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ=="}, url: "/timers"},
+      socket, head: Buffer.alloc(0), host: FailingHost,
+      channel: {path: "/timers", name: "TIMERS", handler: "ZCL_OSD_TIMER_PROBE", stateful: true},
+    });
+    await started;
+    socket.end();
+    resume();
+    await serving;
+    expect(socket.writes).to.have.length(0);
+  });
+
   it("fires after arming returns, in due order, including zero, negative and an unreferenced handler", async () => {
     const socket = await channel();
     const started = Date.now();

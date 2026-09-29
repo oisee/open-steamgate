@@ -239,7 +239,7 @@ export async function serveChannel(options) {
   } catch (e) {
     timers.close();
     const why = String(e?.message?.get?.() ?? e?.message ?? e);
-    socket.end(`HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\n\r\n${channel.handler}: ${why}`);
+    if (!closed) socket.end(`HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\n\r\n${channel.handler}: ${why}`);
     log?.(`APC ${channel.path} (${channel.handler}): ${why}`);
     return undefined;
   }
