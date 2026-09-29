@@ -44,6 +44,13 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     "ev_created_on", "ev_created_at", "ev_queued_at", "ev_started_at", "ev_ended_at",
     "ev_step_number", "ev_step_program", "ev_step_state",
     "ev_log_sequence", "ev_log_at", "ev_log_event", "ev_log_text"]);
+  const doctor = async (name, count, limit = "50") => {
+    const table = await abap.Classes.ZCL_OSD_JOB_DOCTOR.inspect({
+      iv_jobname: box(name), iv_jobcount: box(count),
+      iv_warn_seconds: box("3600"), iv_log_limit: box(limit),
+    });
+    return table.array().map((line) => line.get()).join("\n");
+  };
   const schedule = () => dialogStep(async () => {
     const count = await open();
     await submit(count);
@@ -360,6 +367,12 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       expect(header.ev_phase).to.equal("OUTBOX");
       expect(header.ev_step_count).to.equal("1");
       expect(header.ev_log_count).to.equal("0");
+      const diagnosis = await dialogStep(() => doctor(name, count));
+      expect(diagnosis).to.include("OUTBOX");
+      expect(diagnosis).to.include("committed intent awaits import");
+      expect(diagnosis).to.include("Step 1: ZGG_EX_012");
+      expect(diagnosis).to.include("Technical log (0 of 0 entries");
+      expect(diagnosis).to.include("Each read is a separate snapshot");
       expect((await dialogStep(() => readJob(name, count, "STEP", "1"))).ev_step_program)
         .to.equal("ZGG_EX_012");
       expect(rows()).to.have.length(before);
@@ -382,6 +395,10 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
         expect(done.ev_step_state).to.equal("COMPLETED");
         expect(JSON.stringify(done)).not.to.include("private output");
         expect((await dialogStep(() => readJob(name, count))).ev_log_count).to.equal("4");
+        const latest = await dialogStep(() => doctor(name, count, "2"));
+        expect(latest).to.include("latest entries");
+        expect(latest).to.include("2 earlier log entries omitted");
+        expect(latest).to.include("JOB_COMPLETED");
         scoped.db.prepare("UPDATE batch_job_log SET occurred_at = ? WHERE run_id = ? AND seq = 1")
           .run(dbPath, run.id);
         await dialogStep(() => classic(() => readJob(name, count, "LOG", "1"), "inconsistent"));
@@ -402,6 +419,35 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
         } catch (error) { scoped.db.exec("ROLLBACK"); throw error; }
         await dialogStep(() => classic(() => readJob(name, count), "too_large"));
         expect((await drainJobOutbox(scoped)).imported).to.equal(1);
+      } finally { scoped.close(); }
+    } finally { process.env.OSD_OPERATIONS_DB = previous; }
+  });
+
+  it("diagnoses an operations failure from its terminal technical event", async () => {
+    const name = "DOCTOR_FAILED";
+    let count;
+    await dialogStep(async () => {
+      count = await open(name);
+      await submit(count, {jobname: name});
+      await close(count, {jobname: name});
+    });
+    const outbox = rows().find((row) => row.jobname.trim() === name && row.jobcount.trim() === count);
+    const previous = process.env.OSD_OPERATIONS_DB;
+    process.env.OSD_OPERATIONS_DB = join(dir, "doctor-failed-operations.sqlite");
+    try {
+      const scoped = new BatchRuns(root, process.env);
+      try {
+        const run = scoped.importIntent({intentId: outbox.intent_id.trim(), sourceDb: dbPath,
+          client: "123", sysid: "OSG", owner: "DEVELOPER", jobname: name, jobcount: count,
+          program: "ZGG_EX_012", generation: outbox.generation.trim(),
+          steps: [{number: 1, program: "ZGG_EX_012"}]}).run;
+        scoped.claimNext();
+        scoped.finishStep(run.id, 1, {status: "FAILED", lines: []});
+        const diagnosis = await dialogStep(() => doctor(name, count, "1"));
+        expect(diagnosis).to.include("REVIEW: failed or interrupted; no automatic replay");
+        expect(diagnosis).to.include("Step 1: ZGG_EX_012 FAILED");
+        expect(diagnosis).to.include("latest entries");
+        expect(diagnosis).to.include("JOB_FAILED");
       } finally { scoped.close(); }
     } finally { process.env.OSD_OPERATIONS_DB = previous; }
   });
