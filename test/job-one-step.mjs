@@ -373,6 +373,12 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       expect(diagnosis).to.include("Step 1: ZGG_EX_012");
       expect(diagnosis).to.include("Technical log (0 of 0 entries");
       expect(diagnosis).to.include("Each read is a separate snapshot");
+      const report = await runConvertedBatch(root, "ZOSD_JOB_DOCTOR", [
+        {name: "P_NAME", value: name}, {name: "P_COUNT", value: count},
+      ]);
+      expect(report.status).to.equal("COMPLETED");
+      expect(report.lines.join("\n")).to.include(`Job ${name}/${count}: OUTBOX`);
+      expect(report.lines.join("\n")).to.include("Step 1: ZGG_EX_012");
       expect((await dialogStep(() => readJob(name, count, "STEP", "1"))).ev_step_program)
         .to.equal("ZGG_EX_012");
       expect(rows()).to.have.length(before);

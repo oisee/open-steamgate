@@ -11,6 +11,9 @@ CLASS zcl_osd_job_doctor DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_warn_seconds TYPE string DEFAULT '3600'
                 iv_log_limit TYPE string DEFAULT '50'
       RETURNING VALUE(rt_lines) TYPE ty_lines.
+    CLASS-METHODS for_list
+      IMPORTING it_lines TYPE ty_lines
+      RETURNING VALUE(rt_lines) TYPE ty_lines.
   PRIVATE SECTION.
     CLASS-METHODS error_name
       IMPORTING iv_subrc TYPE sy-subrc
@@ -39,6 +42,26 @@ CLASS zcl_osd_job_doctor IMPLEMENTATION.
       WHEN OTHERS.
         rv_name = 'UNKNOWN'.
     ENDCASE.
+  ENDMETHOD.
+
+  METHOD for_list.
+    DATA lv_line TYPE string.
+    DATA lv_offset TYPE i.
+    DATA lv_chunk TYPE i.
+    LOOP AT it_lines INTO lv_line.
+      lv_offset = 0.
+      DO.
+        IF lv_offset >= strlen( lv_line ).
+          EXIT.
+        ENDIF.
+        lv_chunk = strlen( lv_line ) - lv_offset.
+        IF lv_chunk > 70.
+          lv_chunk = 70.
+        ENDIF.
+        APPEND lv_line+lv_offset(lv_chunk) TO rt_lines.
+        lv_offset = lv_offset + lv_chunk.
+      ENDDO.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD assess.
