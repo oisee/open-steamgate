@@ -1474,7 +1474,7 @@ describe("layerContributions: DDIC counts", function () {
 // open its inspector on a port it picks, and closes only what it opened
 describe("editors/vscode/launcher.js: the inspector on demand", function () {
   let server;
-  afterEach(() => server?.close());
+  afterEach(() => server && new Promise((resolve) => server.close(resolve)));
 
   it("opens through /osd/inspector on a free port, once; closes what it opened; says the door's reason", async () => {
     const http = await import("node:http");

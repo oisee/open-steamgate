@@ -25,9 +25,7 @@ describe("analytics: ZC_STG_FLIGHTCUBE through SADL", () => {
     server = startServer(true);
   });
 
-  after(() => {
-    server.close();
-  });
+  after(() => server.close());
 
   it("$metadata marks the cube and its dimensions and measures", async () => {
     const res = await fetch(S + "/$metadata");
@@ -61,7 +59,7 @@ describe("analytics: ZC_STG_FLIGHTCUBE through SADL", () => {
 describe("analytics: NYC taxi cube through SADL", () => {
   let server;
   before(() => { server = startServer(true); });
-  after(() => { server.close(); });
+  after(() => server.close());
 
   it("exposes real dimensions and additive measures in the OData metadata", async () => {
     const xml = await (await fetch(S + "/$metadata")).text();

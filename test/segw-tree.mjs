@@ -163,9 +163,7 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
     server = startServer(true);
   });
 
-  after(() => {
-    server.close();
-  });
+  after(() => server.close());
 
   it("pulls the seeded project as the file it was imported from", async () => {
     const xml = readFileSync("test/fixtures/segw/zstg_mapped.iwpr.xml", "utf8");

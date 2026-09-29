@@ -105,9 +105,7 @@ describe("webgui: a transaction node that runs, and keeps its session", () => {
     server = startServer(true);
   });
 
-  after(() => {
-    server.close();
-  });
+  after(() => server.close());
 
   // ------------------------------------------------------------- the registry
 

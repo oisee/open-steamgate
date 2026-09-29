@@ -102,9 +102,7 @@ describe("the RFC channel over HTTP", () => {
     server = startServer(true);
   });
 
-  after(() => {
-    server.close();
-  });
+  after(() => server.close());
 
   const get = (path) => fetch(`${BASE}${path}`);
   const post = (path, body) => fetch(`${BASE}${path}`, {method: "POST", body});

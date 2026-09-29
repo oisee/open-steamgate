@@ -155,9 +155,7 @@ describe("webgui: converted reports run as transactions (docs/gui-reports.md)", 
     server = startServer(true);
   });
 
-  after(() => {
-    server.close();
-  });
+  after(() => server.close());
 
   it("ZGUI_GG_EX_001: a plain WRITE report renders its list, no click needed", async () => {
     const doc = await enter("ZGUI_GG_EX_001");

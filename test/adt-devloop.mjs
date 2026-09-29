@@ -127,8 +127,8 @@ describe("tools/adt-facade: the development loop", () => {
   };
   let dropUndo = () => {};
 
-  after(() => {
-    server.close();
+  after(async () => {
+    await server.close();
     removeScratch();
     dropUndo();
   });
@@ -990,8 +990,8 @@ describe("tools/adt-facade: publication state", function () {
     context = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
   });
 
-  after(() => {
-    server?.close();
+  after(async () => {
+    await server?.close();
     rmSync(root, {recursive: true, force: true});
   });
 
@@ -1062,8 +1062,8 @@ describe("tools/adt-facade: notebook scratch after failed activation", function 
     context = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
   });
 
-  after(() => {
-    server?.close();
+  after(async () => {
+    await server?.close();
     rmSync(root, {recursive: true, force: true});
   });
 
@@ -1150,9 +1150,9 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     context = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
   });
 
-  after(() => {
+  after(async () => {
     store.unwatch();
-    server.close();
+    await server.close();
     rmSync(root, {recursive: true, force: true});
   });
 

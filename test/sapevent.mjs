@@ -95,9 +95,7 @@ describe("sapevent: a click in abapGit's markup comes back into ABAP", () => {
     doc = frameDocument(page);
   });
 
-  after(() => {
-    server.close();
-  });
+  after(() => server.close());
 
   it("renders abapGit's document inside a sandboxed HTML viewer, its sapevents rewritten", () => {
     expect(page).to.contain('title="HTML viewer"');
