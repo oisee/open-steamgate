@@ -8,7 +8,8 @@ import express from "express";
 import {BatchRuns, liveGeneration, runPersistedBatch, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
 import {drainJobOutbox} from "../tools/osd-job-outbox.mjs";
 import {batchMonitorHandler} from "../tools/osd-batch-monitor.mjs";
-import {beforeJobPredecessorDDL, migrateJobIdentityFile, migrateJobPredecessorFile} from "./setup.mjs";
+import {beforeJobPredecessorDDL, ensureJobEventMetadata, migrateJobEventFile,
+  migrateJobIdentityFile, migrateJobPredecessorFile} from "./setup.mjs";
 import {fingerprintOf} from "../tools/osd-persist.mjs";
 
 const root = resolve(".");
@@ -157,9 +158,14 @@ describe("durable one-shot batch runs", function () {
     const parent = oldParent.replace("generation TEXT", `generation TEXT,
       'pred_jobname' NCHAR(32) COLLATE RTRIM, 'pred_jobcount' NCHAR(8) COLLATE RTRIM,
       'pred_intent_id' NCHAR(32) COLLATE RTRIM`);
+    const eventParent = parent.replace("'pred_intent_id' NCHAR(32) COLLATE RTRIM",
+      `'pred_intent_id' NCHAR(32) COLLATE RTRIM,
+       'source_instance' NCHAR(32) COLLATE RTRIM, 'wait_seq' NCHAR(16),
+       'event_id' NCHAR(32) COLLATE RTRIM, 'event_param' NCHAR(64) COLLATE RTRIM`);
     const step = `CREATE TABLE 'zosd_job_step' (mandt TEXT, intent_id TEXT, step_no TEXT, program TEXT)`;
     const old = [oldParent, step];
     const wanted = [parent, step];
+    const eventWanted = [eventParent, step];
     const oldAbap = globalThis.abap;
     const store = new BatchRuns(root, env);
     try {
@@ -171,6 +177,8 @@ describe("durable one-shot batch runs", function () {
       db.prepare(`INSERT INTO zosd_job_step VALUES ('123', ?, '01', 'Z_FIRST')`).run(intentId);
       db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(fingerprintOf(old));
       expect(migrateJobPredecessorFile(db, fingerprintOf(old), fingerprintOf(wanted), wanted, fingerprintOf)).to.equal(true);
+      expect(migrateJobEventFile(db, fingerprintOf(wanted), fingerprintOf(eventWanted), eventWanted, fingerprintOf)).to.equal(true);
+      ensureJobEventMetadata(db);
       const client = {path: sourceDb,
         async delete({table, where}) {
           const changed = db.prepare(`DELETE FROM ${table} WHERE ${where}`).run().changes;
@@ -183,6 +191,20 @@ describe("durable one-shot batch runs", function () {
       expect(db.prepare("SELECT COUNT(*) AS n FROM zosd_job_step").get().n).to.equal(0);
       expect(store.list().map((run) => run.jobName)).to.deep.equal(["OLD_PENDING"]);
     } finally { globalThis.abap = oldAbap; store.close(); db.close(); }
+  });
+
+  it("assigns a new source instance when a business file is replaced at the same path", () => {
+    const path = join(dir, "replaced-business.sqlite");
+    const first = new DatabaseSync(path);
+    ensureJobEventMetadata(first);
+    const original = first.prepare("SELECT id FROM zosd_job_source_instance").get().id;
+    first.close();
+    rmSync(path);
+    const second = new DatabaseSync(path);
+    try {
+      ensureJobEventMetadata(second);
+      expect(second.prepare("SELECT id FROM zosd_job_source_instance").get().id).to.not.equal(original);
+    } finally { second.close(); }
   });
 
   it("reopens a finished run and its output on a fresh SQLite connection", async () => {

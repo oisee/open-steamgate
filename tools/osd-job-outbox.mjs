@@ -18,13 +18,16 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
     const sourceDb = resolve(client.path);
     const who = identity(env);
     const reader = new DatabaseSync(sourceDb, {readOnly: true});
-    let rows;
+    let rows, sourceInstanceOnDisk;
     try {
       reader.exec("BEGIN");
       rows = reader.prepare("SELECT * FROM zosd_job_outbox WHERE mandt = ? ORDER BY created_on, created_at, intent_id")
         .all(who.client).map((row) => ({...row, steps: reader.prepare(
           "SELECT step_no, program FROM zosd_job_step WHERE mandt = ? AND intent_id = ? ORDER BY step_no")
           .all(who.client, value(row, "intent_id"))}));
+      if (reader.prepare("SELECT 1 FROM sqlite_master WHERE name = 'zosd_job_source_instance'").get()) {
+        sourceInstanceOnDisk = reader.prepare("SELECT id FROM zosd_job_source_instance LIMIT 1").get()?.id;
+      }
       reader.exec("COMMIT");
     } finally {
       reader.close();
@@ -43,12 +46,27 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
       const predName = value(row, "pred_jobname");
       const predCount = value(row, "pred_jobcount");
       const predIntent = value(row, "pred_intent_id");
+      const sourceInstance = value(row, "source_instance");
+      const eventId = value(row, "event_id");
+      const eventParam = value(row, "event_param");
+      const waitSeqText = value(row, "wait_seq");
+      const waitSeq = Number(waitSeqText);
       if (predName || predCount || predIntent) {
         if (!predName || !predCount || !predIntent) throw new Error(`outbox ${intent.intentId} has incomplete predecessor`);
         intent.afterEvent = {jobname: predName, jobcount: predCount, intentId: predIntent};
       }
       if (intent.sourceDb !== sourceDb || intent.client !== who.client || intent.sysid !== who.sid) {
         throw new Error(`outbox ${intent.intentId} belongs to another business instance`);
+      }
+      if (sourceInstance && sourceInstance !== sourceInstanceOnDisk) {
+        throw new Error(`outbox ${intent.intentId} belongs to another source instance`);
+      }
+      if (eventId || eventParam || waitSeq > 0) {
+        if (!eventId || !sourceInstance || intent.afterEvent ||
+            !Number.isSafeInteger(waitSeq) || waitSeq < 1) {
+          throw new Error(`outbox ${intent.intentId} has invalid named event condition`);
+        }
+        intent.namedEvent = {id: eventId, param: eventParam, sourceInstance, seq: waitSeq};
       }
       // A v1 one-step intent has no child rows or count. Preserve its old
       // import digest so an import-before-ack retry survives this upgrade.
@@ -87,7 +105,11 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
             AND owner = ${sql(intent.owner)} AND program = ${sql(intent.program)}
             AND generation = ${sql(intent.generation)}${legacy ? "" : ` AND step_count = ${sql(String(intent.stepCount).padStart(2, "0"))}`}
             AND pred_jobname = ${sql(predName)} AND pred_jobcount = ${sql(predCount)}
-            AND pred_intent_id = ${sql(predIntent)}`});
+            AND pred_intent_id = ${sql(predIntent)}
+            AND COALESCE(source_instance, '') = ${sql(sourceInstance)}
+            AND COALESCE(wait_seq, '') = ${sql(waitSeqText)}
+            AND COALESCE(event_id, '') = ${sql(eventId)}
+            AND COALESCE(event_param, '') = ${sql(eventParam)}`});
         if (changed.subrc === 0 && changed.dbcnt === 1) {
           await client.commit();
         } else if (changed.subrc === 4) {

@@ -33,6 +33,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
   const close = (count, options = {}) => invoke("JOB_CLOSE", {
     jobname: "OSD_ONE_STEP", jobcount: count, strtimmed: "X", ...options,
   }, ["job_was_released"]);
+  const raiseEvent = (eventid, eventparm = "") => invoke("BP_EVENT_RAISE", {eventid, eventparm});
   const status = (name, count) => invoke("ZOSD_JOB_STATUS", {
     iv_jobname: name, iv_jobcount: count,
   }, ["ev_phase", "ev_state", "ev_result_status", "ev_step_count"]);
@@ -890,6 +891,85 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       expect((await drainJobOutbox(scoped)).imported).to.equal(2);
       expect(scoped.list().find((run) => run.jobName === "PRED_SAME_CHILD").state).to.equal("WAITING");
     } finally { scoped.close(); }
+  });
+
+  it("raises a named event immediately, never replays an earlier raise, and fans out by parameter", async () => {
+    await dialogStep(async () => {
+      await open("EVENT_UNCOMMITTED_OPEN");
+      await raiseEvent("OSD_READY_A", "A");
+      expect(identityRows("EVENT_UNCOMMITTED_OPEN")).to.have.length(0);
+      await client.rollback(); // SAP BP_EVENT_RAISE survives the caller's rollback.
+    });
+    expect(identityRows("EVENT_UNCOMMITTED_OPEN")).to.have.length(0);
+    const scheduleEvent = async (name, param) => dialogStep(async () => {
+      const count = await open(name);
+      await submit(count, {jobname: name});
+      expect((await close(count, {jobname: name, strtimmed: "", event_id: "OSD_READY_A",
+        event_param: param})).job_was_released).to.equal("X");
+      return count;
+    });
+    const specific = await scheduleEvent("NAMED_SPECIFIC", "A");
+    const blank = await scheduleEvent("NAMED_BLANK", "");
+    const other = await scheduleEvent("NAMED_OTHER", "B");
+    expect((await drainJobOutbox(store)).imported).to.equal(3);
+    for (const name of ["NAMED_SPECIFIC", "NAMED_BLANK", "NAMED_OTHER"]) {
+      expect(store.list().find((run) => run.jobName === name).state).to.equal("WAITING");
+    }
+    expect((await dialogStep(() => status("NAMED_SPECIFIC", specific))).ev_state).to.equal("WAITING");
+    await dialogStep(async () => {
+      await raiseEvent("OSD_READY_A", "");
+      await client.rollback();
+    });
+    expect(store.list().find((run) => run.jobName === "NAMED_BLANK").state).to.equal("QUEUED");
+    expect(store.list().find((run) => run.jobName === "NAMED_SPECIFIC").state).to.equal("WAITING");
+    await dialogStep(() => raiseEvent("OSD_READY_A", "A"));
+    expect(store.list().find((run) => run.jobName === "NAMED_SPECIFIC").state).to.equal("QUEUED");
+    expect(store.list().find((run) => run.jobName === "NAMED_OTHER").state).to.equal("WAITING");
+    expect((await dialogStep(() => status("NAMED_BLANK", blank))).ev_state).to.equal("QUEUED");
+    expect((await dialogStep(() => status("NAMED_OTHER", other))).ev_state).to.equal("WAITING");
+  });
+
+  it("catches a raise after committed CLOSE even when the dependent imports later", async () => {
+    let count;
+    await dialogStep(async () => {
+      count = await open("NAMED_LATE_IMPORT");
+      await submit(count, {jobname: "NAMED_LATE_IMPORT"});
+      await close(count, {jobname: "NAMED_LATE_IMPORT", strtimmed: "",
+        event_id: "OSD_LATE_SIGNAL", event_param: "X"});
+    });
+    await dialogStep(() => raiseEvent("OSD_LATE_SIGNAL", "X"));
+    const pending = rows().find((row) => row.jobname.trim() === "NAMED_LATE_IMPORT");
+    expect(pending).to.exist;
+    try {
+      await drainJobOutbox(store, {afterImport: (intent) => {
+        if (intent.jobname === "NAMED_LATE_IMPORT") throw new Error("crash after named import");
+      }});
+      throw new Error("drain unexpectedly acknowledged named wait");
+    } catch (error) { expect(error.message).to.equal("crash after named import"); }
+    expect(rows().some((row) => row.jobname.trim() === "NAMED_LATE_IMPORT")).to.equal(true);
+    const reopened = new BatchRuns(root, process.env);
+    try { expect((await drainJobOutbox(reopened)).imported).to.equal(1); }
+    finally { reopened.close(); }
+    expect(store.list().find((run) => run.jobName === "NAMED_LATE_IMPORT").state).to.equal("QUEUED");
+    expect((await dialogStep(() => status("NAMED_LATE_IMPORT", count))).ev_state).to.equal("QUEUED");
+  });
+
+  it("rejects periodic and mixed named start conditions without closing the definition", async () => {
+    await dialogStep(async () => {
+      const count = await open("NAMED_INVALID");
+      await submit(count, {jobname: "NAMED_INVALID"});
+      await classic(() => close(count, {jobname: "NAMED_INVALID", strtimmed: "",
+        event_id: "OSD_SIGNAL", event_periodic: "X"}), "job_close_failed");
+      await classic(() => close(count, {jobname: "NAMED_INVALID", event_id: "OSD_SIGNAL"}), "job_close_failed");
+      await classic(() => close(count, {jobname: "NAMED_INVALID", strtimmed: "",
+        event_param: "A"}), "job_close_failed");
+      await classic(() => close(count, {jobname: "NAMED_INVALID", strtimmed: "",
+        event_id: "BAD EVENT"}), "job_close_failed");
+      await classic(() => raiseEvent("bad event name"), "raise_failed");
+      await close(count, {jobname: "NAMED_INVALID", strtimmed: "", event_id: "OSD_SIGNAL"});
+      await client.rollback();
+    });
+    expect(rows().some((row) => row.jobname.trim() === "NAMED_INVALID")).to.equal(false);
   });
 
   it("keeps imported ledger across a fresh operations connection and rejects changed payload", async () => {

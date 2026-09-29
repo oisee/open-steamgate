@@ -1,4 +1,5 @@
 import {SQLiteDatabaseClient} from "@abaplint/database-sqlite";
+import {randomUUID} from "node:crypto";
 import {bootIdentity} from "../tools/osd-identity.mjs";
 import {installTrim} from "../tools/sql-literals.mjs";
 import {installSqlTrace, fileSink} from "../tools/osd-sql-trace.mjs";
@@ -90,6 +91,50 @@ export function migrateJobPredecessorFile(native, found, wanted, ddl, fingerprin
     native.exec("COMMIT");
   } catch (error) { native.exec("ROLLBACK"); throw error; }
   return true;
+}
+
+export function beforeJobEventDDL(ddl) {
+  const parent = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_outbox['"] /i.test(statement));
+  if (!parent) return ddl;
+  const previousParent = parent
+    .replace(/,\s*['"]source_instance['"]\s+NCHAR\(32\)\s+COLLATE RTRIM/i, "")
+    .replace(/,\s*['"]wait_seq['"]\s+NCHAR\(16\)/i, "")
+    .replace(/,\s*['"]event_id['"]\s+NCHAR\(32\)\s+COLLATE RTRIM/i, "")
+    .replace(/,\s*['"]event_param['"]\s+NCHAR\(64\)\s+COLLATE RTRIM/i, "");
+  return ddl.map((statement) => statement === parent ? previousParent : statement);
+}
+
+export function migrateJobEventFile(native, found, wanted, ddl, fingerprintOf) {
+  if (fingerprintOf(ddl) !== wanted) return false;
+  const previous = beforeJobEventDDL(ddl);
+  if (fingerprintOf(previous) === wanted || fingerprintOf(previous) !== found) return false;
+  native.exec("BEGIN IMMEDIATE");
+  try {
+    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
+    if (current === wanted) { native.exec("COMMIT"); return true; }
+    if (current !== found) { native.exec("COMMIT"); return false; }
+    native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN source_instance NCHAR(32) COLLATE RTRIM");
+    native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN wait_seq NCHAR(16)");
+    native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN event_id NCHAR(32) COLLATE RTRIM");
+    native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN event_param NCHAR(64) COLLATE RTRIM");
+    native.exec("UPDATE zosd_job_outbox SET source_instance = '', wait_seq = '', event_id = '', event_param = ''");
+    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
+      .run(wanted, new Date().toISOString());
+    native.exec("COMMIT");
+  } catch (error) { native.exec("ROLLBACK"); throw error; }
+  return true;
+}
+
+export function ensureJobEventMetadata(native) {
+  native.exec("BEGIN IMMEDIATE");
+  try {
+    native.exec(`CREATE TABLE IF NOT EXISTS zosd_job_source_instance (id TEXT PRIMARY KEY)`);
+    if (!native.prepare("SELECT id FROM zosd_job_source_instance LIMIT 1").get()) {
+      native.prepare("INSERT INTO zosd_job_source_instance (id) VALUES (?)")
+        .run(randomUUID().replaceAll("-", ""));
+    }
+    native.exec("COMMIT");
+  } catch (error) { native.exec("ROLLBACK"); throw error; }
 }
 
 // HANA's execute opens a transaction even for the DELETE in a reseed.
@@ -399,11 +444,13 @@ export async function setup(abap, schemas, insert) {
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     let found = await db.stampedSchema();
-    const beforePredecessor = beforeJobPredecessorDDL(schemas.sqlite);
+    const beforeEvent = beforeJobEventDDL(schemas.sqlite);
+    const eventPriorWanted = fingerprintOf(beforeEvent);
+    const beforePredecessor = beforeJobPredecessorDDL(beforeEvent);
     const priorWanted = fingerprintOf(beforePredecessor);
     if (migrateJobIdentityFile(db.db, found, priorWanted, beforePredecessor, fingerprintOf)) found = priorWanted;
-    if (migrateJobPredecessorFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
-    if (migrateJobIdentityFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
+    if (migrateJobPredecessorFile(db.db, found, eventPriorWanted, beforeEvent, fingerprintOf)) found = eventPriorWanted;
+    if (migrateJobEventFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
     if (found === wanted) {
       // the rows are already there, made for this DDIC. The tables the
       // generation writes at start (wwwparams: which SMW0 objects exist and
@@ -412,6 +459,7 @@ export async function setup(abap, schemas, insert) {
       // in, one the pack dropped is taken out.
       await refreshGenerated(db, insert);
       await reseedPackRows(db);
+      ensureJobEventMetadata(db.db);
       return;
     }
     if (found !== undefined || existsSync(path) && (await db.query("SELECT COUNT(*) AS n FROM sqlite_master"))[0]?.n > 0) {
@@ -447,6 +495,7 @@ export async function setup(abap, schemas, insert) {
         console.error(`the base image could not be written: ${error?.message ?? error}`);
       }
     }
+    ensureJobEventMetadata(db.db);
     return;
   }
   db = installTrim(new SQLiteDatabaseClient());

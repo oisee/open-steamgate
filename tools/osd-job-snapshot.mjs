@@ -55,18 +55,29 @@ function outboxSnapshot(db, identity, sourceDb, caller) {
   const afterName = value(parent, "pred_jobname");
   const afterCount = value(parent, "pred_jobcount");
   const afterIntent = value(parent, "pred_intent_id");
+  const namedId = value(parent, "event_id");
+  const namedParam = value(parent, "event_param");
+  const sourceInstance = value(parent, "source_instance");
+  const waitSeqText = value(parent, "wait_seq");
   if ((afterName || afterCount || afterIntent) &&
       (!afterName || !/^\d{8}$/.test(afterCount) || !/^[0-9a-f]{32}$/.test(afterIntent))) {
     fail("outbox has an incomplete predecessor key");
   }
+  if (namedId && (afterName || !/^[A-Z][A-Z0-9_]{0,31}$/.test(namedId) ||
+      !/^[0-9a-f]{32}$/.test(sourceInstance) || namedParam.length > 64 ||
+      !Number.isSafeInteger(Number(waitSeqText)) || Number(waitSeqText) < 1)) {
+    fail("outbox has an invalid named event condition");
+  }
   return {
-    phase: "OUTBOX", state: "READY", program: value(parent, "program"),
+    phase: "OUTBOX", state: namedId ? "WAITING" : "READY", program: value(parent, "program"),
     generation: value(parent, "generation"),
     createdOn: value(parent, "created_on"), createdAt: value(parent, "created_at"),
     afterEvent: afterName ? {jobname: afterName, jobcount: afterCount, intentId: afterIntent} : null,
+    namedEvent: namedId ? {id: namedId, param: namedParam, sourceInstance,
+      seq: Number(waitSeqText)} : null,
     queuedAt: null, startedAt: null, endedAt: null, resultStatus: null, detail: null,
     steps: programs.map((program, index) => ({number: index + 1, program,
-      state: index === 0 ? "READY" : "PENDING", startedAt: null, endedAt: null,
+      state: index === 0 && !namedId ? "READY" : "PENDING", startedAt: null, endedAt: null,
       resultStatus: null, detail: null})),
   };
 }
@@ -169,6 +180,10 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
   const afterName = run.after_job_name ?? null;
   const afterCount = run.after_job_count ?? null;
   const afterIntent = run.after_intent_id ?? null;
+  const namedId = run.after_named_id ?? null;
+  const namedParam = run.after_named_param ?? null;
+  const namedInstance = run.source_instance ?? null;
+  const waitSeq = run.wait_seq ?? null;
   if ((afterName === null) !== (afterCount === null)) fail("incomplete predecessor event key");
   if (afterName !== null && (!afterName || afterName.length > 32 || afterName !== afterName.trim() ||
       afterName !== afterName.toUpperCase() || !/^\d{8}$/.test(afterCount) || legacy)) {
@@ -177,14 +192,32 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
   if (afterIntent !== null && (afterName === null || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(afterIntent))) {
     fail("invalid predecessor intent ID");
   }
-  const versioned = afterName === null ? payload : JSON.stringify({version: afterIntent ? 4 : 3, ...base,
+  if (namedId !== null && (afterName !== null || !/^[A-Z][A-Z0-9_]{0,31}$/.test(namedId) ||
+      typeof namedParam !== "string" || namedParam.length > 64 ||
+      !/^[0-9a-f]{32}$/.test(namedInstance ?? "") || !Number.isSafeInteger(waitSeq) || waitSeq < 1)) {
+    fail("invalid named event condition");
+  }
+  const versioned = namedId !== null ? JSON.stringify({version: 5, ...base,
+    steps: rows.map((row) => ({number: row.step_no, program: row.program})),
+    namedEvent: {id: namedId, param: namedParam, sourceInstance: namedInstance, seq: waitSeq}}) :
+    afterName === null ? payload : JSON.stringify({version: afterIntent ? 4 : 3, ...base,
     steps: rows.map((row) => ({number: row.step_no, program: row.program})),
     afterEvent: afterIntent ? {jobname: afterName, jobcount: afterCount,
       intentId: afterIntent.replaceAll("-", "")} : {jobname: afterName, jobcount: afterCount}});
   if (createHash("sha256").update(versioned).digest("hex") !== ledger.payload_sha256) {
     fail("operations run differs from immutable import ledger payload");
   }
-  if (run.state === "WAITING" && afterName === null) fail("waiting run has no predecessor event");
+  if (run.state === "WAITING" && afterName === null && namedId === null) fail("waiting run has no event condition");
+  if (namedId !== null) {
+    const namedTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'batch_named_events'").get();
+    if (!namedTable) fail("dependent run has no named event ledger");
+    const raised = db.prepare(`SELECT 1 FROM batch_named_events WHERE source_db = ?
+      AND source_instance = ? AND source_client = ? AND source_sysid = ? AND source_owner = ?
+      AND event_id = ? AND signal_seq > ? AND (? = '' OR event_param = ?) LIMIT 1`)
+      .get(sourceDb, namedInstance, caller.client, caller.sid, caller.user,
+        namedId, waitSeq, namedParam, namedParam);
+    if (!!raised === (run.state === "WAITING")) fail("named event dependency state disagrees with occurrence ledger");
+  }
   if (afterName !== null) {
     const eventTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'batch_job_events'").get();
     if (!eventTable) fail("dependent run has no event ledger");
@@ -215,6 +248,11 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
         ((outbox.afterEvent?.jobname ?? null) !== afterName ||
          (outbox.afterEvent?.jobcount ?? null) !== afterCount ||
          (outbox.afterEvent?.intentId ?? null) !== (afterIntent?.replaceAll("-", "") ?? null))) ||
+      ((outbox.namedEvent || namedId) &&
+        ((outbox.namedEvent?.id ?? null) !== namedId ||
+         (outbox.namedEvent?.param ?? null) !== namedParam ||
+         (outbox.namedEvent?.sourceInstance ?? null) !== namedInstance ||
+         (outbox.namedEvent?.seq ?? null) !== waitSeq)) ||
       outbox.steps.length !== steps.length ||
       outbox.steps.some((step, index) => step.program !== steps[index].program))) {
     fail("imported run disagrees with still-pending outbox");
