@@ -44,6 +44,13 @@ describe("tools/osd-packs: a pack is a directory", () => {
     expect(() => packsOf(root, {})).to.throw(BadPack, "a source needs a folder and either a repo or a libs.lock.json library name");
   });
 
+  it("refuses source folders that can escape the pack", () => {
+    for (const folder of ["../outside", "..\\outside", "..", "/outside"]) {
+      write("packs/half/osd-pack.json", JSON.stringify({sources: [{folder, repo: "https://example.invalid/x"}]}));
+      expect(() => packsOf(root, {}), folder).to.throw(BadPack, /source folder must be a single directory name/);
+    }
+  });
+
   it("reads a directory with a manifest, and takes its name and its folders from what is there", () => {
     const packs = packsOf(root, {});
     expect(packs.map((p) => p.name)).to.deep.equal(["vibes"]);

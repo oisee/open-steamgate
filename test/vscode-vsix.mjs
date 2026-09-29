@@ -15,7 +15,7 @@ import {basename, join} from "node:path";
 import {homedir, tmpdir} from "node:os";
 import {createReadStream} from "node:fs";
 import {brotliDecompressSync} from "node:zlib";
-import {buildVsix, stampStagedPackage} from "../scripts/build-vsix.mjs";
+import {buildVsix, excludeStagedPackSources, stampStagedPackage} from "../scripts/build-vsix.mjs";
 import {inventoryThirdParties} from "../scripts/third-party-notices.mjs";
 import {tilesOf} from "../tools/osd-packs.mjs";
 const {writeTar, unpackTar} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
@@ -309,6 +309,53 @@ describe("packaging selected packs", function () {
       expect(text).to.contain("0c8d96b908f88fc3207e7f9a00bc43f724b32b6f");
       expect(text).to.contain("Source release by Microsoft, 2025; no trademark rights are granted; rebuilt from the MIT-licensed ZIL source, not the historical binary");
       expect(text).to.contain("License: MIT (maintainer override).\n\nNote: LICENSE file reads 'todo'; the author's intent is MIT; treated as MIT by the open-steamgate maintainer, 2026-09-27");
+    } finally { rmSync(scratch, {recursive: true, force: true}); }
+  });
+
+  it("excludes stale fetched files from a symlinked source without changing the source", async function () {
+    const name = `vsix-stale-${process.pid}`;
+    const packDir = join(root, "packs", name);
+    const scratch = testScratch("stale-source");
+    const fetched = join(scratch, "fetched-games");
+    mkdirSync(packDir);
+    mkdirSync(join(packDir, "src"));
+    mkdirSync(fetched);
+    writeFileSync(join(fetched, "zork-mini-z3.w3mi.data.z3"), "old excluded game");
+    writeFileSync(join(fetched, "kept-game.w3mi.data.z3"), "selected game");
+    writeFileSync(join(packDir, "osd-pack.json"), JSON.stringify({
+      name, abap: ["src"], sources: [{folder: "games", repo: "https://example.invalid/games",
+        ref: "0000000000000000000000000000000000000000", path: "src/games", exclude: ["^zork-mini"]}],
+    }));
+    symlinkSync(fetched, join(packDir, "games"), "dir");
+    try {
+      const {out} = await buildTestVsix(join(scratch, "build"), {OSD_VSIX_PACKS: name});
+      const entries = packagedSeedEntries(out);
+      expect(entries).to.contain(`packs/${name}/games/kept-game.w3mi.data.z3`);
+      expect(entries).not.to.contain(`packs/${name}/games/zork-mini-z3.w3mi.data.z3`);
+      expect(existsSync(join(fetched, "zork-mini-z3.w3mi.data.z3"))).to.equal(true);
+      expect(existsSync(join(packDir, "games", "kept-game.w3mi.data.z3"))).to.equal(true);
+    } finally {
+      rmSync(packDir, {recursive: true, force: true});
+      rmSync(scratch, {recursive: true, force: true});
+    }
+  });
+
+  it("refuses a traversing source folder before removing staged files", () => {
+    const scratch = testScratch("source-traversal");
+    const seed = join(scratch, "seed");
+    const safe = join(seed, "packs", "safe", "games");
+    const outside = join(seed, "outside");
+    mkdirSync(safe, {recursive: true});
+    mkdirSync(outside);
+    writeFileSync(join(safe, "zork-mini-old"), "still staged");
+    writeFileSync(join(outside, "zork-mini-important"), "outside pack");
+    try {
+      expect(() => excludeStagedPackSources(seed, [
+        {name: "safe", sources: [{folder: "games", exclude: ["^zork-mini"]}]},
+        {name: "safe", sources: [{folder: "../../outside", exclude: ["^zork-mini"]}]},
+      ])).to.throw(/escapes its staged pack/);
+      expect(existsSync(join(safe, "zork-mini-old"))).to.equal(true);
+      expect(readFileSync(join(outside, "zork-mini-important"), "utf8")).to.equal("outside pack");
     } finally { rmSync(scratch, {recursive: true, force: true}); }
   });
 
