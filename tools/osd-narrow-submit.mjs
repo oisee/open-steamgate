@@ -4,9 +4,15 @@
 // Parse statements with abaplint so comments and string literals are never
 // mistaken for an operator. Keep the line count stable for source maps.
 
-const IDENT = /^[A-Z_][A-Z0-9_]*(?:-[A-Z0-9_]+)*$/i;
-const PROGRAM = /^[A-Z][A-Z0-9_]*$/i;
-const SCALAR = /^(?:[A-Z_][A-Z0-9_]*(?:-[A-Z0-9_]+)*|'(?:[^']|'')*'|`[^`]*`|\d+(?:\.\d+)?)$/i;
+// A report name, a namespaced one included; SAP allows 40 characters.
+const PROGRAM = /^(?:\/[A-Z0-9_]+\/)?[A-Z][A-Z0-9_]*$/i;
+const PROGRAM_MAX = 40;
+// A selection name as SELECT-OPTIONS / PARAMETERS declare it.
+const SELECTION = /^[A-Z_][A-Z0-9_]*$/i;
+// A data object the caller passes: a name with component, instance and
+// static access (`ls-f`, `lo->a`, `zcl=>c`, chained), or a literal.
+const OPERAND = /^(?:[A-Z_][A-Z0-9_]*(?:(?:-|->|=>)[A-Z_][A-Z0-9_]*)*|'(?:[^']|'')*'|`[^`]*`|-?\d+(?:\.\d+)?)$/i;
+const JOINERS = new Set(["Dash", "InstanceArrow", "StaticArrow"]);
 
 function offsetAt(source, position) {
   let offset = 0;
@@ -18,35 +24,87 @@ function offsetAt(source, position) {
   return offset + position.getCol() - 1;
 }
 
+// abaplint splits `ls_x-field` and `lo_job->name` into three tokens each. A
+// SUBMIT operand is one data object, so tokens joined by `-`, `->` or `=>`
+// with no space between them become one word again.
+function wordsOf(statement) {
+  const words = [];
+  let last;
+  for (const token of statement.getTokens()) {
+    const kind = token.constructor.name;
+    const touches = last !== undefined && token.getStart().getRow() === last.getStart().getRow()
+      && token.getStart().getCol() === last.getStart().getCol() + last.getStr().length;
+    if (touches && (JOINERS.has(kind) || JOINERS.has(last.constructor.name))) {
+      words[words.length - 1] += token.getStr();
+    } else {
+      words.push(token.getStr());
+    }
+    last = token;
+  }
+  return words;
+}
+
 function replacement(statement, filename) {
-  const words = statement.getTokens().map((token) => token.getStr());
+  const words = wordsOf(statement);
   const line = statement.getStart().getRow();
-  const unsupported = () => {
-    throw new Error(`${filename}:${line}: supported SUBMIT forms are static PROG [WITH field = scalar ...] AND RETURN and static PROG VIA JOB ident NUMBER ident [WITH field = scalar ...] AND RETURN; got ${statement.concatTokens()}`);
+  const unsupported = (why) => {
+    throw new Error(`${filename}:${line}: supported SUBMIT forms are a static program with, in any order, `
+      + `[VIA JOB job NUMBER count] and [WITH sel = value | WITH sel IN range ...], then AND RETURN`
+      + `${why ? ` (${why})` : ""}; got ${statement.concatTokens()}`);
   };
-  if (words[0]?.toUpperCase() !== "SUBMIT" || !PROGRAM.test(words[1] ?? "") || words.at(-1) !== ".") unsupported();
+  const upper = (at) => words[at]?.toUpperCase();
+  if (upper(0) !== "SUBMIT" || !PROGRAM.test(words[1] ?? "") || words[1].length > PROGRAM_MAX || words.at(-1) !== ".") unsupported();
   const program = words[1].toUpperCase();
   const values = [];
-  let at = 2;
   let job;
-  if (words[at]?.toUpperCase() === "VIA") {
-    if (words[at + 1]?.toUpperCase() !== "JOB" || !IDENT.test(words[at + 2] ?? "") ||
-        words[at + 3]?.toUpperCase() !== "NUMBER" || !IDENT.test(words[at + 4] ?? "")) unsupported();
-    job = {name: words[at + 2], count: words[at + 4]};
-    at += 5;
+  let at = 2;
+  while (!(upper(at) === "AND" && upper(at + 1) === "RETURN" && at + 2 === words.length - 1)) {
+    if (upper(at) === "VIA") {
+      if (job !== undefined) unsupported("VIA JOB twice");
+      if (upper(at + 1) !== "JOB" || !OPERAND.test(words[at + 2] ?? "")
+          || upper(at + 3) !== "NUMBER" || !OPERAND.test(words[at + 4] ?? "")) unsupported();
+      job = {name: words[at + 2], count: words[at + 4]};
+      at += 5;
+    } else if (upper(at) === "WITH") {
+      const name = words[at + 1];
+      const operator = upper(at + 2);
+      const value = words[at + 3];
+      if (!SELECTION.test(name ?? "") || !["=", "EQ", "IN"].includes(operator) || !OPERAND.test(value ?? "")) unsupported();
+      if (values.some((row) => row.name === name.toUpperCase())) unsupported(`${name.toUpperCase()} given twice`);
+      values.push({name: name.toUpperCase(), value, range: operator === "IN"});
+      at += 4;
+    } else {
+      unsupported();
+    }
   }
-  while (words[at]?.toUpperCase() === "WITH") {
-    const name = words[at + 1];
-    const value = words[at + 3];
-    if (!IDENT.test(name ?? "") || words[at + 2] !== "=" || !SCALAR.test(value ?? "")) unsupported();
-    if (values.some((row) => row.name === name.toUpperCase())) unsupported();
-    values.push({name: name.toUpperCase(), value});
-    at += 4;
+  // A job step's input is stored as name/value pairs, so a range would be
+  // lost on the way to the job. Refused here rather than dropped there.
+  if (job !== undefined && values.some((row) => row.range)) {
+    unsupported("WITH ... IN through VIA JOB: the job step input carries name/value pairs only");
   }
-  if (words[at]?.toUpperCase() !== "AND" || words[at + 1]?.toUpperCase() !== "RETURN" || at + 2 !== words.length - 1) unsupported();
-  const input = values.length === 0 ? "" : ` it_input = VALUE #( ${values.map(({name, value}) => `( name = '${name}' value = CONV string( ${value} ) )`).join(" ")} )`;
+  const rows = values.map(({name, value, range}) => range
+    ? `( name = '${name}' ranges = zcl_osd_submit_ranges=>of( ${value} ) )`
+    : `( name = '${name}' value = CONV string( ${value} ) )`);
+  const input = rows.length === 0 ? "" : ` it_input = VALUE #( ${rows.join(" ")} )`;
   return job ? `zcl_osd_batch_report=>submit_via_job( iv_program = '${program}' iv_jobname = ${job.name} iv_jobcount = ${job.count}${input} ).` :
     `zcl_osd_batch_report=>submit( iv_program = '${program}'${input} iv_batch = sy-batch ).`;
+}
+
+// The lowered call takes the statement's first line. A comment the developer
+// wrote inside the statement stays on the line it was on, so neither the
+// comment nor the line count is lost.
+function withComments(lowered, comments, startRow, lineCount, indent) {
+  const lines = [lowered, ...Array(lineCount - 1).fill("")];
+  for (const token of comments) {
+    const index = token.getStart().getRow() - startRow;
+    const text = token.getStr();
+    if (index === 0) {
+      lines[0] += ` "${text.replace(/^["*]\s?/, " ")}`;
+    } else {
+      lines[index] = text.startsWith("*") ? text : `${indent}${text}`;
+    }
+  }
+  return lines.join("\n");
 }
 
 export function lowerNarrowSubmit(source, filename, core) {
@@ -61,15 +119,11 @@ export function lowerNarrowSubmit(source, filename, core) {
     const start = offsetAt(source, statement.getStart());
     const end = offsetAt(source, statement.getEnd());
     const original = source.slice(start, end);
-    // A comment inside a multi-line statement is part of the developer's
-    // source, so ask for it to be moved above instead of deleting it. A
-    // literal may contain a quote character and is not a comment.
-    if (file.getTokens().some((token) => token.constructor.name === "Comment"
-        && offsetAt(source, token.getStart()) >= start
-        && offsetAt(source, token.getStart()) < end)) {
-      throw new Error(`${filename}:${statement.getStart().getRow()}: move comments above SUBMIT before lowering it`);
-    }
-    const lowered = replacement(statement, filename) + "\n".repeat((original.match(/\n/g) ?? []).length);
+    const comments = file.getTokens().filter((token) => token.constructor.name === "Comment"
+      && offsetAt(source, token.getStart()) >= start && offsetAt(source, token.getStart()) < end);
+    const indent = " ".repeat(Math.max(0, statement.getStart().getCol() - 1));
+    const lowered = withComments(replacement(statement, filename), comments,
+      statement.getStart().getRow(), (original.match(/\n/g) ?? []).length + 1, indent);
     changes.push({start, end, lowered});
   }
   for (const change of changes.reverse()) {

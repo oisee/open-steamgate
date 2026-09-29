@@ -1778,3 +1778,19 @@ for `zosd_status_app`, which has been deployed for a day.
 - Actual open-abap behaviour: each subscription records its client and username. `C` delivers within the same client, `U` within the same client and username, and `S` to all subscribers. These are design assumptions awaiting cross-client/user A4H probes.
 - Impact on open-steamgate: cross-identity routing may differ from a system until P6/P8 is measured with another logon.
 - Regression-test location: `test/amc.mjs` covers each scope with three subscriber identities.
+
+### ANOMALY-2026-09-29-runtime-in-options — `x IN range` evaluates only I EQ, E EQ and I CP, and E EQ alone decides
+
+- Status: `open` (upstream, no workaround here)
+- Discovery date: `2026-09-29`
+- Affected versions: `@abaplint/runtime 2.13.89` (`build/src/compare/in.js`), as pinned in this tree
+- Affected ABAP statement, runtime API or adapter: the logical expression `dobj IN range_tab` outside Open SQL (`IF`, `CHECK`, `LOOP ... WHERE`); `SELECT ... WHERE f IN range` goes through Open SQL and is not affected
+- Minimal ABAP reproducer: `src/osd/zosd_sub_range.prog.abap` with a range row `I BT 3 5`, run through `SUBMIT zosd_sub_range WITH s_num IN lt_range ...`
+- Exact command used to run it: `node tools/osd-unit-run.mjs` with that row in `ltcl_batch_report->static_submit_passes_a_range`
+- Expected SAP behaviour: every option (EQ NE GT GE LT LE BT NB CP NP) with sign I or E; the value is in the range when it matches some I row (or there are no I rows) and matches no E row
+- Actual open-abap behaviour: `compareIn` handles I EQ, E EQ and I CP and throws `compareIn todo` for any other row. It returns true as soon as one row matches, so an E EQ row that the value does not equal makes the whole range true, even when no I row admits the value (`[I EQ 7, E EQ 4]` admits 1)
+- Impact on open-steamgate: `SUBMIT ... WITH sel IN range` passes the range correctly (`tools/osd-narrow-submit.mjs`, `zcl_osd_submit_ranges`), but a report that tests `IN` in ABAP only gets right answers for I EQ and I CP rows; BT and the other options dump
+- Smallest safe workaround: none here; the regression test uses I EQ rows only and says why
+- Upstream issue: not yet sent; a transpiler/runtime PR needs the critic gate and belongs to its own branch in `abaplint/transpiler`
+- Regression-test location: `test/unit/zcl_osd_batch_runner_test.clas.testclasses.abap` (`static_submit_passes_a_range`, `static_submit_range_is_checked`)
+- Upstream version containing a fix: unknown
