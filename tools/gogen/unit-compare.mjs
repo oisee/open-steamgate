@@ -1,5 +1,5 @@
-// Compare method outcomes from the transpiler's structured Unit runner with
-// gogen's. Run `npm run transpile` first, or pass --node-json <file>.
+// Compare per-method outcomes from the transpiler's ordinary Unit lifecycle
+// with gogen's. Run `npm run transpile` first, or pass --node-json <file>.
 import {spawnSync} from "node:child_process";
 import {existsSync, readFileSync} from "node:fs";
 import {join} from "node:path";
@@ -10,26 +10,31 @@ const value = (flag) => args[args.indexOf(flag) + 1];
 const classes = args.flatMap((x, i) => x === "--class" ? [args[i + 1].toUpperCase()] : []);
 const nodeJson = args.includes("--node-json") ? value("--node-json") : join(home, "output", "output.json");
 if (!args.includes("--node-json")) {
-  const script = join(home, "output", "_unit_open.mjs");
-  if (!existsSync(script)) throw new Error("output/_unit_open.mjs is absent; run npm run transpile first");
-  const run = spawnSync("node", ["--expose-gc", "--import", "./tools/osd-unit-bootstrap.mjs", script], {
+  const script = join(home, "output", "index.mjs");
+  if (!existsSync(script)) throw new Error("output/index.mjs is absent; run npm run transpile first");
+  const run = spawnSync("node", ["--expose-gc", join(home, "tools", "gogen", "node-unit-results.mjs"), "--out", nodeJson,
+    ...classes.flatMap((c) => ["--class", c])], {
     cwd: home, encoding: "utf8", timeout: 300000, maxBuffer: 20e6,
   });
   if (run.status !== 0) throw new Error(`Node Unit run failed: ${run.stderr || run.stdout || run.error?.message}`);
 }
 const rawNode = JSON.parse(readFileSync(nodeJson, "utf8"));
-const go = spawnSync("node", [join(home, "tools", "gogen", "unit.mjs"), ...classes.flatMap((c) => ["--class", c])], {
-  cwd: home, encoding: "utf8", timeout: 300000, maxBuffer: 20e6,
-});
-if (!go.stdout) throw new Error(`Go Unit runner produced no results: ${go.stderr || go.error?.message}`);
-const result = JSON.parse(go.stdout);
+let result;
+if (args.includes("--go-json")) result = JSON.parse(readFileSync(value("--go-json"), "utf8"));
+else {
+  const go = spawnSync("node", [join(home, "tools", "gogen", "unit.mjs"), ...classes.flatMap((c) => ["--class", c])], {
+    cwd: home, encoding: "utf8", timeout: 900000, maxBuffer: 20e6,
+  });
+  if (!go.stdout) throw new Error(`Go Unit runner produced no results: ${go.stderr || go.error?.message}`);
+  result = JSON.parse(go.stdout);
+}
 const owners = new Set(classes.length ? classes : result.rows.map((r) => r.class));
 const key = (r) => `${r.class}/${r.testclass}/${r.method}`;
 const norm = (r) => ({class: String(r.class ?? r.class_name).toUpperCase(),
   testclass: String(r.testclass ?? r.testclass_name).toUpperCase(), method: String(r.method ?? r.method_name).toUpperCase(),
   status: String(r.status).toUpperCase(), message: String(r.message ?? "").trim()});
 const node = new Map(rawNode.map(norm).filter((r) => owners.has(r.class)).map((r) => [key(r), r]));
-const gorows = new Map(result.rows.map(norm).map((r) => [key(r), r]));
+const gorows = new Map(result.rows.map(norm).filter((r) => owners.has(r.class)).map((r) => [key(r), r]));
 const methods = {same: [], different: [], nodeOnly: [], goOnly: []};
 for (const [k, n] of node) {
   const g = gorows.get(k);

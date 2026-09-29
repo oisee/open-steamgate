@@ -23,6 +23,30 @@ const sources = sourceFolders.flatMap(walk)
 const owners = [...new Set(sources.map((f) => f.split("/").at(-1).replace(/\.clas\.testclasses\.abap$/, "").toUpperCase()))]
   .filter((o) => selected.size === 0 || selected.has(o));
 if (selected.size && owners.length !== selected.size) throw new Error(`unknown test owner: ${[...selected].filter((x) => !owners.includes(x)).join(", ")}`);
+// One bad generated method must not hide every other owner's verdict. Keep
+// this sequential: cmd/unit is the compiler's scratch package, and the Go
+// runtime has process-global class constructors.
+if (!selected.size && !fixture) {
+  const rows = [];
+  for (const owner of owners) {
+    const child = spawnSync("node", [join(here, "unit.mjs"), "--class", owner, "--out", join(out, owner.toLowerCase())], {
+      cwd: home, encoding: "utf8", timeout: 180000, maxBuffer: 20e6, env: process.env,
+    });
+    if (!child.stdout) {
+      rows.push({class: owner, status: "NOT_COMPILED", message: child.stderr || child.error?.message || `exit ${child.status}`});
+      continue;
+    }
+    try { rows.push(...JSON.parse(child.stdout).rows); }
+    catch { rows.push({class: owner, status: "NOT_COMPILED", message: child.stderr || "invalid child result"}); }
+  }
+  const compiled = owners.filter((owner) => {
+    const own = rows.filter((r) => r.class === owner);
+    return own.some((r) => r.status === "SUCCESS" || r.status === "FAILED")
+      && own.every((r) => r.status !== "NOT_COMPILED");
+  });
+  console.log(JSON.stringify({classes: owners.length, compiled: compiled.length, rows}));
+  process.exit(rows.some((r) => r.status === "FAILED") ? 1 : rows.some((r) => r.status === "NOT_COMPILED" || r.status === "NEEDS_DB") ? 2 : 0);
+}
 const libDirs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/framework", "open-abap-odata/src", "ajson/src/core"]
   .map((x) => join(home, ".local", "lars", x)).filter(existsSync);
 const folders = [...sourceFolders, ...(fixture ? [] : [join(home, "gen")]), ...libDirs].filter(existsSync);
@@ -45,7 +69,19 @@ function callsIn(node, out) {
 
 // Grow from actual compiled references, not every object in a library. The
 // registry sees the entire library, so an omitted class remains typeable.
-let wanted = new Set([...owners, "CL_ABAP_UNIT_ASSERT"]);
+let wanted = new Set([...owners, "CL_ABAP_UNIT_ASSERT", "KERNEL_CX_ASSERT"]);
+const sourceQueue = [...wanted];
+while (sourceQueue.length) {
+  const name = sourceQueue.shift();
+  const file = sourceByName.get(name);
+  if (!file) continue;
+  const testFile = owners.includes(name) ? sources.find((f) => f.split("/").at(-1).startsWith(name.toLowerCase() + ".")) : undefined;
+  const contents = readFileSync(file, "utf8") + (testFile ? "\n" + readFileSync(testFile, "utf8") : "");
+  for (const ref of contents.matchAll(/\b(?:ZCL|ZCX|CL|CX)_[A-Z0-9_]+\b/gi)) {
+    const target = ref[0].toUpperCase();
+    if (available.has(target) && !wanted.has(target)) { wanted.add(target); sourceQueue.push(target); }
+  }
+}
 let program;
 for (let round = 0; round < 12; round++) {
   program = compileProgram({folders, objects: [...wanted], tolerant: true, includeTests: new Set(owners)});
@@ -53,11 +89,6 @@ for (let round = 0; round < 12; round++) {
   for (const name of wanted) {
     const sup = program.reg.getObject("CLAS", name)?.getDefinition()?.getSuperClass();
     if (sup) refs.add(sup.toUpperCase());
-    const file = sourceByName.get(name);
-    if (file) {
-      const contents = readFileSync(file, "utf8") + (owners.includes(name) ? "\n" + readFileSync(sources.find((f) => f.split("/").at(-1).startsWith(name.toLowerCase() + ".")), "utf8") : "");
-      for (const ref of contents.matchAll(/\b(?:ZCL|ZCX|CL|CX)_[A-Z0-9_]+\b/gi)) refs.add(ref[0].toUpperCase());
-    }
   }
   for (const c of program.classes) {
     if (c.super) refs.add(c.super);
@@ -96,6 +127,32 @@ function testsOf(program) {
 
 const rows = testsOf(program);
 const classes = new Map(program.classes.map((c) => [c.name, c]));
+function alertsOf(key, seen = new Set()) {
+  if (seen.has(key)) return [];
+  seen.add(key);
+  const [name, method] = key.split("=>");
+  const cls = classes.get(name);
+  const m = cls?.methods.find((x) => x.name === method);
+  if (!m) return cls?.stubs.find((x) => x.name === method)?.reason ? [cls.stubs.find((x) => x.name === method).reason] : [];
+  const alerts = [];
+  const visit = (n) => {
+    if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+    if (!n || typeof n !== "object") return;
+    if (n.s === "stub") alerts.push(n.reason);
+    if (n.e === "call") {
+      const target = n.owner ?? (n.receiver?.type?.k === "ref" ? n.receiver.type.name : name);
+      if (target) alerts.push(...alertsOf(`${target}=>${n.method}`, seen));
+    }
+    for (const [k, v] of Object.entries(n)) if (k !== "type") visit(v);
+  };
+  visit(m.body);
+  return alerts;
+}
+for (const row of rows) if (row.status === "READY") {
+  const name = `${row.class}:${row.testclass}`;
+  row.alerts = [...new Set([row.method, "SETUP", "TEARDOWN", "CLASS_SETUP", "CLASS_TEARDOWN"]
+    .flatMap((method) => alertsOf(`${name}=>${method}`)).filter(Boolean))];
+}
 // No DB fixture is opened by this runner yet. Exclude a test if its class or
 // a reachable method does SQL, including methods in other compiled classes.
 const sql = /^(select_|sql_|db_|insert_db|update_db|delete_db|modify_db|commit_work|rollback_work)/i;
