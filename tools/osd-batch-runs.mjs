@@ -347,7 +347,7 @@ export class BatchRuns {
       }
       // Capture the outcome while this writer still owns the transaction.
       // Another worker may claim the newly READY step immediately after COMMIT.
-      const run = this.get(id);
+      const run = this.readRun(id);
       this.db.exec("COMMIT");
       return {kind: transition, run};
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
@@ -373,7 +373,6 @@ export class BatchRuns {
   }
 
   readSnapshot(work) {
-    if (this.db.isTransaction) return work();
     this.db.exec("BEGIN");
     try {
       const answer = work();
@@ -384,11 +383,15 @@ export class BatchRuns {
 
   get(id, options = {}) {
     if (!/^[0-9a-f-]{36}$/.test(String(id))) return undefined;
-    return this.readSnapshot(() => {
-      const run = publicRun(this.db.prepare("SELECT * FROM batch_runs WHERE id = ?").get(id), options);
-      if (run) run.steps = this.steps(id, options);
-      return run;
-    });
+    return this.readSnapshot(() => this.readRun(id, options));
+  }
+
+  // Internal caller already owns BEGIN IMMEDIATE. Public get() takes its own
+  // read snapshot, without relying on Node's newer DatabaseSync.isTransaction.
+  readRun(id, options = {}) {
+    const run = publicRun(this.db.prepare("SELECT * FROM batch_runs WHERE id = ?").get(id), options);
+    if (run) run.steps = this.steps(id, options);
+    return run;
   }
 
   steps(id, options = {}) {

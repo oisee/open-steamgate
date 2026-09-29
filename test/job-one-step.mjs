@@ -635,6 +635,28 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     } finally { other.close(); scoped.close(); }
   });
 
+  it("records a step when node:sqlite exposes no isTransaction property", () => {
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "older-node.sqlite")});
+    try {
+      const run = scoped.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
+        client: "123", sysid: "OSG", jobname: "OLDER_NODE", jobcount: "00000007", owner: "DEVELOPER",
+        program: "ZGG_EX_001", generation: liveGeneration(root),
+        steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"}]}).run;
+      scoped.claimNext();
+      const native = scoped.db;
+      scoped.db = new Proxy(native, {get(target, key) {
+        if (key === "isTransaction") return undefined;
+        const member = Reflect.get(target, key, target);
+        return typeof member === "function" ? member.bind(target) : member;
+      }});
+      const transition = scoped.finishStep(run.id, 1, {status: "COMPLETED", lines: ["first"]});
+      expect(transition.kind).to.equal("advanced");
+      expect(transition.run.steps.map((item) => item.state)).to.deep.equal(["COMPLETED", "READY"]);
+      expect(scoped.get(run.id).steps.map((item) => item.state)).to.deep.equal(["COMPLETED", "READY"]);
+      expect(scoped.list()[0].state).to.equal("QUEUED");
+    } finally { scoped.close(); }
+  });
+
   it("reads parent and child monitor states from one operations snapshot", () => {
     const path = join(dir, "step-read-snapshot.sqlite");
     const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: path});
