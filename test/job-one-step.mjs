@@ -198,7 +198,16 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     let attempts = 0;
     jobs.candidate = () => { attempts += 1; return 73; };
     try {
-      await dialogStep(() => classic(() => open("IDENTITY_INSERT_FAILURE"), "cant_create_job"));
+      await dialogStep(async () => {
+        const returned = box();
+        await classic(() => abap.FunctionModules.JOB_OPEN({
+          exporting: {jobname: box("IDENTITY_INSERT_FAILURE")},
+          importing: {jobcount: returned},
+        }), "cant_create_job");
+        expect(returned.get()).to.equal("");
+        await classic(() => submit("00000073", {jobname: "IDENTITY_INSERT_FAILURE"}), "job_notex");
+        await classic(() => close("00000073", {jobname: "IDENTITY_INSERT_FAILURE"}), "job_notex");
+      });
       expect(attempts).to.equal(1);
       expect(identityRows("IDENTITY_INSERT_FAILURE")).to.have.length(0);
     } finally {
@@ -206,6 +215,19 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       const clean = new DatabaseSync(dbPath);
       try { clean.exec("DROP TRIGGER fail_identity_insert"); } finally { clean.close(); }
     }
+  });
+
+  it("rejects an invalid private ABORT instead of silently continuing", async () => {
+    await dialogStep(async () => {
+      try {
+        await abap.context.RFCDestinations.JOBS.call("ZOSD_JOB_PORT", {exporting: {
+          iv_command: box("ABORT"), iv_jobname: box("MISSING"),
+          iv_jobcount: box("00000073"), iv_owner: box("DEVELOPER"),
+          iv_client: box("123"), iv_intent_id: box("missing"),
+        }});
+        throw new Error("invalid ABORT unexpectedly succeeded");
+      } catch (error) { expect(error.message).to.equal("Closed job savepoint not found"); }
+    });
   });
 
   it("uses one canonical name for a lower-case padded caller and the retained key", async () => {

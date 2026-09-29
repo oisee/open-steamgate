@@ -158,7 +158,9 @@ export class JobDestination {
         const job = jobs.get(key);
         if (!job || !job.closed || !job.savepoint || job.owner !== owner || job.client !== client ||
             job.intentId !== givenText(signature, "IV_INTENT_ID")) {
-          answer = {EV_ERROR: "Closed job not found"}; break;
+          // ABAP callers do not import EV_ERROR on a cleanup call. Throw so
+          // an invalid cleanup cannot be mistaken for a handled CLOSE.
+          throw new Error("Closed job savepoint not found");
         }
         db.db.exec(`ROLLBACK TO SAVEPOINT ${job.savepoint}`);
         db.db.exec(`RELEASE SAVEPOINT ${job.savepoint}`);
