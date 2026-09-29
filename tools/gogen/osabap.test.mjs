@@ -13,6 +13,9 @@ const builder = join(here, "osabap.mjs");
 const binary = join(here, ".out", "osabap");
 
 execFileSync(process.execPath, [builder], {stdio: "inherit"});
+execFileSync("go", ["test", "-tags", "nodatabase", "./cmd/osabap"], {
+  cwd: join(here, "go"), stdio: "inherit",
+});
 
 const run = (args, input) => spawnSync(binary, args, {encoding: "utf8", input});
 

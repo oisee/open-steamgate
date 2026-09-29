@@ -1,6 +1,7 @@
 // osabap runs one converted ABAP report as a native command. Arguments fill
 // the report selection screen; with no arguments, a terminal form presents
-// the same screen before the report lifecycle continues.
+// the same screen before the report lifecycle continues. --sapgui presents it
+// to a real SAP GUI over DIAG instead.
 package main
 
 import (
@@ -35,7 +36,21 @@ func main() {
 		}()
 		s := &abap.Session{}
 		report := newReport(s)
-		input, headless := commandInput(os.Args[1:])
+		sapGUI, listen, args := sapGUIOption(os.Args[1:])
+		input, headless := commandInput(args)
+		if sapGUI {
+			var screen ZCL_GG_HOST__TY_RESULT
+			abap.DialogStep(func() { screen = hostRun(s, report, input, "", "X") })
+			if err := serveSAPGUI(listen, screen, func(values []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE) ZCL_GG_HOST__TY_RESULT {
+				var out ZCL_GG_HOST__TY_RESULT
+				abap.DialogStep(func() { out = hostRun(s, report, values, "", "") })
+				return out
+			}); err != nil {
+				panic(err)
+			}
+			cancelled = true // the result lived in SAP GUI, not on stdout
+			return
+		}
 		if headless {
 			abap.DialogStep(func() { result = hostRun(s, report, input, "X", "") })
 		} else {
@@ -283,6 +298,7 @@ func usage() {
 		fmt.Printf(" <%s>", strings.ToLower(strings.TrimPrefix(name, "P_")))
 	}
 	fmt.Println(" [options]")
+	fmt.Println("  --sapgui[=ADDR]   serve the selection screen to SAP GUI (default 127.0.0.1:3232)")
 	for _, name := range appSelectionNames {
 		opt := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(name, "P_"), "_", "-"))
 		if appRanges[name] {

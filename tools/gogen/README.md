@@ -521,6 +521,30 @@ deterministic line form instead. Comma-separated select-option input becomes
 sap-tui, but the driver consumes the host-neutral report screen rather than
 DIAG atoms.
 
+`--sapgui` serves that same host-neutral screen over NI/DIAG to one real SAP
+GUI, using the public `open-diag-go` screen and protocol packages. It starts no
+SAP application server and performs no logon: the command itself is the local
+dispatcher endpoint. By default it binds loopback port 3232:
+
+```
+.out/osabap --sapgui
+# SAP Logon -> Custom Application Server
+# Application Server: 127.0.0.1
+# Instance Number:    32
+# System ID:          OSG
+```
+
+`--sapgui=127.0.0.1:3201` selects another address (the low two port digits are
+the instance number). Report flags may follow `--sapgui` and become initial
+field values. The GUI receives the selection parameters, checkboxes and the
+comma-separated select-option shorthand; F8, Enter or the Execute button runs
+the ordinary report lifecycle, and the next screen contains its messages and
+`WRITE` lines. Back or closing the window sends a clean DIAG EOC/EOP and exits
+the command. The first vertical slice shows one bounded result page; paging
+and the full SAP multiple-selection dialog remain frontend work. Keep the
+listener on `127.0.0.1`: this deliberately small rogue-DIAG endpoint has no SAP
+logon, SNC or authorization layer.
+
 For native applications the local process is the frontend. The compiled
 `CL_GUI_FRONTEND_SERVICES` maps `FILE_EXIST`, `DIRECTORY_EXIST`,
 `FILE_GET_SIZE`, `GUI_UPLOAD`, `GUI_DOWNLOAD`, the temporary directory and
