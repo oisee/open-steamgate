@@ -86,18 +86,25 @@ jobs:
           bun scripts/build-binary.mjs "$RUNNER_TEMP/osd"
           "$RUNNER_TEMP/osd" doctor
 
+      # libs.lock.json includes the pinned repository and commit. Hashing the
+      # build script invalidates compiled output when its commands change.
+      # Outside the checkout, and absolute: actions/cache silently refuses to
+      # save a path with ".." in it ("Relative pathing '.' and '..' is not
+      # allowed"), which is how the first version of this cache never hit.
+      - name: Where the pinned transpiler lives
+        run: echo "TRANSPILER=$RUNNER_TEMP/transpiler" >> "$GITHUB_ENV"
+      - name: Restore the pinned transpiler build
+        id: transpiler_cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/transpiler
+          key: transpiler-v1-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('libs.lock.json') }}-${{ hashFiles('tools/osd-ci-transpiler-build.sh') }}
       - name: Build the transpiler this tree is pinned to
+        if: steps.transpiler_cache.outputs.cache-hit != 'true'
+        run: bash tools/osd-ci-transpiler-build.sh build
+      - name: Verify and link the pinned transpiler
         run: |
-          git clone --filter=blob:none "$OSD_TRANSPILER_REPO" ../transpiler
-          git -C ../transpiler checkout "$OSD_TRANSPILER_REF"
-          npm --prefix ../transpiler install --ignore-scripts --no-audit --no-fund
-          for package in runtime transpiler extras cli; do
-            npm --prefix "../transpiler/packages/$package" install --no-audit --no-fund
-          done
-          for package in runtime transpiler extras cli; do
-            npm --prefix "../transpiler/packages/$package" run compile
-          done
-          chmod +x ../transpiler/packages/cli/abap_transpile
+          bash tools/osd-ci-transpiler-build.sh verify
           node tools/osd-link.mjs transpiler packages/transpiler
           node tools/osd-link.mjs transpiler-cli packages/cli
           node tools/osd-link.mjs runtime packages/runtime
@@ -158,7 +165,7 @@ jobs:
       - name: Pack the built tree
         run: |
           mkdir -p .local/ci-artifact
-          tar -C .. --exclude='node_modules' -cf - transpiler | tar -C .local/ci-artifact -xf -
+          tar -C "$RUNNER_TEMP" --exclude='node_modules' -cf - transpiler | tar -C .local/ci-artifact -xf -
           node tools/osd-ci-artifact.mjs pack "$RUNNER_TEMP/built-tree.tar"
       - uses: actions/upload-artifact@v4
         with:
@@ -275,8 +282,22 @@ jobs:
       # build, so a broken build fails before browser work;
       # preview.yml remains an independent job and only publishes after its
       # own browser check succeeds.
+      - name: Read the installed Playwright version
+        id: playwright_version
+        run: node -e 'console.log("version=" + require("./package-lock.json").packages["node_modules/@playwright/test"].version)' >> "$GITHUB_OUTPUT"
+      - name: Restore Chromium
+        id: chromium_cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: chromium-v1-${{ runner.os }}-${{ steps.playwright_version.outputs.version }}
       - name: Install Chromium for browser smoke tests
-        run: npx playwright install --with-deps chromium
+        run: |
+          if [[ "${{ steps.chromium_cache.outputs.cache-hit }}" == true ]]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
 
       - name: Launchpad, FCL, taxi F4 and APC smoke tests
         run: node scripts/run-e2e-isolated.mjs test/e2e/launchpad-navigation.spec.mjs test/e2e/fcl.spec.mjs test/e2e/listreport.spec.mjs test/e2e/taxi.spec.mjs test/e2e/zork.spec.mjs test/e2e/lsd.spec.mjs --config playwright.config.mjs
