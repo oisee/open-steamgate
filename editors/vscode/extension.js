@@ -33,6 +33,7 @@ const {Launcher, ensureMaterializedHome, materializedHomeDir, selectOldHomes, li
   isOpenSteamgateCheckout: isOpenSteamgatePath, decideStartTarget, classify, PORT_RANGE, isFree,
   pickInspectorPort, SEED_ID_FILE} = require("./launcher.js");
 const {systemOverviewHtml} = require("./system-overview.js");
+const {requestBlocks, resolveRequest, servicePathOf} = require("./http-lens.js");
 
 // Q6a "Notebook SQL, ABAP and SQLScript" (docs/vscode-extension.md): the
 // notebook type a *.osdnb file opens as and the controller for its cells.
@@ -2338,6 +2339,7 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("osd.callEntitySetWithDebugger", (args) =>
     args === undefined ? run(output, classrunOutput, true) : callEntitySet({...args, withDebugger: true}, output)));
   context.subscriptions.push(entitySetLensProvider(output));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.httpLensInfo", () => {}));
   // gui-reports spike: "Open in VS Code" for a converted report, the same
   // action F8 (RUN_TABLE.PROG) reaches, placed as a lens above its own
   // REPORT line rather than asked for by name.
@@ -2367,6 +2369,10 @@ function activate(context) {
   context.subscriptions.push(systemOutput);
   const controller = new SystemController(context, systemOutput);
   activeController = controller;
+  // Registered after the controller exists, so the lens refreshes when it
+  // starts, stops or rebuilds; a default argument read before this line
+  // would have been undefined.
+  context.subscriptions.push(httpLensProvider(output, controller));
   context.subscriptions.push(vscode.commands.registerCommand("osd.gettingStarted", () => {
     const {publisher, name} = context.extension.packageJSON;
     return vscode.commands.executeCommand("workbench.action.openWalkthrough", `${publisher}.${name}#gettingStarted`, false);
@@ -2414,7 +2420,7 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("osd.copyServiceMetadata", (item) => copyServiceMetadata(item)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openServiceClass", (node) => openServiceClass(node, output)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.openEntitySetMethod",
-    (dpcName, set, line) => openEntitySetMethod(dpcName, set, line, output)));
+    (dpcName, set, line, sourceFile) => openEntitySetMethod(dpcName, set, line, output, sourceFile)));
   context.subscriptions.push({dispose: () => {
     serviceDetailsPanel?.dispose();
     serviceDetailsPanel = undefined;
@@ -2430,6 +2436,14 @@ function activate(context) {
 // module-level slot rather than a class of its own, because there is never
 // more than one activate() per window
 let activeController;
+const servingAvailabilityListeners = new Set();
+let servingAvailable;
+
+function setServingAvailability(available) {
+  if (available === servingAvailable) return;
+  servingAvailable = available;
+  for (const listener of servingAvailabilityListeners) listener();
+}
 
 // ---- status bar: which generation the system serves, or that it is down
 
@@ -2447,6 +2461,7 @@ function statusBar(context) {
   const tick = async () => {
     try {
       const serving = await osd().serving();
+      setServingAvailability(true);
       const dumps = await osd().dumps().catch(() => []);
       const generation = String(serving.generation ?? "?").slice(0, 8);
       const warm = serving.warm;
@@ -2469,6 +2484,7 @@ function statusBar(context) {
         ? new vscode.ThemeColor("statusBarItem.errorBackground") : undefined;
       dumpsSeen ??= dumps.length;
     } catch {
+      setServingAvailability(false);
       // T7: right after a launch the façade answers nothing at all while the
       // warm registry primes synchronously (docs/warm-compile.md), for up to
       // about the ~9 s that was measured -- "warming up..." rather than
@@ -3054,6 +3070,67 @@ ${state.start ? '<button id="start">Start system</button> ' : ""}<button id="ref
 // tested without VS Code); this asks the server for the class's own map
 // (tools/adt-facade.mjs `core/http/segw/entitysets`) and turns what it
 // finds into `vscode.CodeLens`es.
+
+function httpLensProvider(output, controller = activeController) {
+  const emitter = new vscode.EventEmitter();
+  const registration = vscode.languages.registerCodeLensProvider({pattern: "**/*.http"}, {
+    onDidChangeCodeLenses: emitter.event,
+    async provideCodeLenses(document) {
+      const requests = requestBlocks(document.getText());
+      if (!requests.length) return [];
+      let rows;
+      try { rows = await osd().services(); } catch {
+        return requests.map(({line}) => new vscode.CodeLens(new vscode.Range(line - 1, 0, line - 1, 0),
+          {title: "start the system to resolve", command: "osd.httpLensInfo"}));
+      }
+      const maps = new Map();
+      const sources = new Map();
+      const root = serviceSourceRoot();
+      const lenses = [];
+      for (const request of requests) {
+        const service = servicePathOf(request.url ?? "")?.service;
+        const row = rows.find((one) => one.kind === "ODATA" &&
+          String(one.name ?? /\/sap\/opu\/odata\/sap\/([^/]+)/i.exec(one.path ?? "")?.[1] ?? "").toUpperCase() === service?.toUpperCase());
+        let map;
+        const sourceByClass = {};
+        if (request.method === "GET" && row?.handler) {
+          if (!maps.has(row.handler)) {
+            try { maps.set(row.handler, await osd().entitySets(row.handler)); }
+            catch (e) { output.appendLine(`osd http lens ${row.handler}: ${String(e.message ?? e)}`); maps.set(row.handler, undefined); }
+          }
+          map = maps.get(row.handler);
+          if (map) {
+            const ext = row.handler.toUpperCase();
+            const base = ext.replace(/_EXT$/, "");
+            for (const name of new Set([ext, base])) {
+              if (!sources.has(name)) {
+                const beside = name === base && row.handlerSource
+                  ? sourcePath(root, path.join(path.dirname(row.handlerSource), `${base.toLowerCase()}.clas.abap`)) : undefined;
+                const file = beside ?? await classSourcePath(name === ext ? row : {handler: name}, "dpc", root);
+                let source;
+                try { if (file) source = fs.readFileSync(file, "utf8"); } catch {}
+                sources.set(name, source === undefined ? undefined : {path: file, source});
+              }
+              sourceByClass[name] = sources.get(name);
+            }
+          }
+        }
+        const lens = resolveRequest(request, rows, map, sourceByClass);
+        const command = lens.path ? {title: lens.title, command: "osd.openEntitySetMethod",
+          arguments: [lens.owner, lens.set, lens.methodLine, lens.path]} : {title: lens.title, command: "osd.httpLensInfo"};
+        lenses.push(new vscode.CodeLens(new vscode.Range(lens.line - 1, 0, lens.line - 1, 0), command));
+      }
+      return lenses;
+    },
+  });
+  const onState = controller?.onDidChange(() => emitter.fire());
+  const onServing = () => emitter.fire();
+  servingAvailabilityListeners.add(onServing);
+  const onConfig = vscode.workspace.onDidChangeConfiguration((event) => {
+    if (event.affectsConfiguration("osd.url")) emitter.fire();
+  });
+  return {dispose: () => { registration.dispose(); onState?.dispose(); onConfig.dispose(); servingAvailabilityListeners.delete(onServing); emitter.dispose(); }};
+}
 
 function entitySetLensProvider(output) {
   const emitter = new vscode.EventEmitter();
@@ -3861,6 +3938,7 @@ async function deactivate() {
 }
 
 module.exports = {activate, deactivate, SystemController, debugOnDemand, testExplorer, OsdTreeProvider, TransactionItem, EntitySetItem,
+  httpLensProvider, openEntitySetMethod, statusBar,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,
   wirePageTabs, openDetailsMetadata};

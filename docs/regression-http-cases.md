@@ -75,6 +75,8 @@ Rolling back a case's LUW is not real isolation today:
 
 ## CodeLens in `.http`: from URL to code
 
+The forward CodeLens now resolves plain entity-set and keyed GET requests to the owning DPC method and source line, labelled as a static prediction.
+
 - **Forward lens,** above each request: service → registration (IWSV → DPC, IWMO → MPC) → entity set → the **owning** method (`_DPC_EXT` if redefined, otherwise `_DPC`) and its line, plus the data source behind it (hand-written DPC, SADL over a table or CDS, an RFC-mapped module, a search help) and the case's last result.
 - **Reverse lens,** on the DPC method: "covered by N cases, M red", counted from the latest stored results only.
 - **Static resolution is a candidate, not an observation.** It is enough for plain `GET /Set` and `GET /Set(key)`. It is wrong or incomplete for:

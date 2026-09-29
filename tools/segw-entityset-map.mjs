@@ -72,7 +72,13 @@ export function entitySetsOf(dpcSource, mpcSource) {
   const seen = new Set();
   const out = [];
   for (const {method, prefix, kind} of entitySetMethodsOf(dpcSource)) {
-    const set = byLower.get(prefix.toLowerCase());
+    // SEGW cuts the set-derived part of a method name to 16 characters.
+    // A 16-character prefix is usable only when it identifies one model set.
+    const matches = prefix.length === 16
+      ? [...byLower.entries()].filter(([name]) => name.startsWith(prefix.toLowerCase())) : [];
+    const set = prefix.length === 16
+      ? (matches.length === 1 ? matches[0][1] : undefined)
+      : byLower.get(prefix.toLowerCase());
     if (set === undefined) continue;
     const key = `${kind} ${method}`;
     if (seen.has(key)) continue;
