@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
-import {mkdtempSync, rmSync} from "node:fs";
+import {existsSync, mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {BatchRuns} from "../tools/osd-batch-runs.mjs";
 
 describe("job-owned named tail event", () => {
+  it("keeps synthetic fleet reports in the integration input", () => {
+    for (const name of ["zosd_voyage", "zosd_ready"]) {
+      for (const extension of ["abap", "xml"]) {
+        const file = `${name}.prog.${extension}`;
+        assert.equal(existsSync(join("src", "jobs", file)), false);
+        assert.equal(existsSync(join("test", "integration", file)), true);
+      }
+    }
+  });
   let dir, store, env;
   const uuid = () => randomUUID().replaceAll("-", "");
   const instance = uuid();

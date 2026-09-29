@@ -43,9 +43,10 @@
 // materialized copy is fast because by then it has grown its own matching
 // cache, the same way any other checkout's second build does.
 //   - `src/`, selected `packs/` (zork by default; OSD_VSIX_PACKS selects
-//     more), `webapp/`, `tools/` (whole), `test/` minus `test/e2e/`
-//     and `test/fixtures/` (`abap_transpile.json`'s and `abaplint.jsonc`'s
-//     own exclude lists) -- not just `run.mjs`/`start.mjs`/`setup.mjs` and
+//     more), `webapp/`, `tools/` (whole), `test/` minus `test/e2e/`,
+//     `test/fixtures/`, and the two synthetic fleet reports. The directories
+//     match `abap_transpile.json`'s and `abaplint.jsonc`'s exclude lists --
+//     not just `run.mjs`/`start.mjs`/`setup.mjs` and
 //     their JS imports (traced by grep, including one dynamic import,
 //     `test/setup.mjs` -> `./seed.mjs`): `abaplint.jsonc`'s own
 //     `global.files` glob makes ALL of `test/` an input to the abaplint
@@ -331,7 +332,10 @@ export function copySeedTree(seedRoot, selectedPacks) {
     recursive: true,
     filter: (src) => {
       const rel = relative(join(ROOT, "test"), src);
-      return rel !== "e2e" && rel !== "fixtures" && rel.startsWith(`e2e${"/"}`) === false && rel.startsWith(`fixtures${"/"}`) === false;
+      // These reports exercise orchestration locally; they are not product programs.
+      return rel !== "e2e" && rel !== "fixtures" && rel.startsWith(`e2e${"/"}`) === false &&
+        rel.startsWith(`fixtures${"/"}`) === false &&
+        !/^integration[/\\]zosd_(voyage|ready)\.prog\.(abap|xml)$/.test(rel);
     },
   });
 

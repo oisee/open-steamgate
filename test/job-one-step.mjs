@@ -1549,6 +1549,40 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       expect(scoped.db.prepare("SELECT COUNT(*) AS n FROM batch_named_events WHERE event_id = 'VOYAGE_DONE'").get().n)
         .to.equal(1);
       expect(scoped.list().filter((run) => run.jobName === childName)).to.have.length(1);
+      const event = scoped.db.prepare("SELECT * FROM batch_named_events WHERE event_id = 'VOYAGE_DONE'").get();
+      for (const [column, damaged] of [["source_client", "999"], ["payload_sha256", "0".repeat(64)]]) {
+        scoped.db.prepare(`UPDATE batch_named_events SET ${column} = ? WHERE intent_id = ?`)
+          .run(damaged, event.intent_id);
+        expect(await dialogStep(() => doctor(parentName, parentCount))).to.include("INCONSISTENT");
+        scoped.db.prepare(`UPDATE batch_named_events SET ${column} = ? WHERE intent_id = ?`)
+          .run(event[column], event.intent_id);
+      }
+    } finally {
+      scoped.close();
+      if (prior === undefined) delete process.env.OSD_OPERATIONS_DB;
+      else process.env.OSD_OPERATIONS_DB = prior;
+    }
+  });
+
+  it("warns that a running tail job may have committed business effects", async () => {
+    const name = "FLEET_RUNNING_REVIEW";
+    const prior = process.env.OSD_OPERATIONS_DB;
+    process.env.OSD_OPERATIONS_DB = join(dir, "fleet-running-review.sqlite");
+    const scoped = new BatchRuns(root, process.env);
+    try {
+      let count;
+      await dialogStep(async () => {
+        count = await open(name);
+        await viaProgram("ZOSD_VOYAGE", name, count, [{name: "P_RUN", value: "RUN_REVIEW"}]);
+        await close(count, {jobname: name, tail_event_id: "VOYAGE_DONE",
+          tail_event_param: "RUN_REVIEW"});
+      });
+      await drainJobOutbox(scoped);
+      scoped.claimNext();
+      const diagnosis = await dialogStep(() => doctor(name, count));
+      expect(diagnosis).to.include("MAY already have committed");
+      expect(diagnosis).to.include("inspect");
+      expect(diagnosis).to.include("before resubmission");
     } finally {
       scoped.close();
       if (prior === undefined) delete process.env.OSD_OPERATIONS_DB;

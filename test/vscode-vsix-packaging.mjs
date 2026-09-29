@@ -122,6 +122,13 @@ describe("packaging selected packs", function () {
       const {out, notices} = await buildTestVsix(scratch, {OSD_VSIX_PROFILE: "marketplace", OSD_VSIX_PRERELEASE: "1"});
       expect(packagedPacks(out)).to.deep.equal(["zork"]);
       expect(packagedSeedEntries(out)).not.to.match(/(?:^|\/)zork-mini[^\n]*/m);
+      for (const name of ["zosd_voyage", "zosd_ready"]) {
+        for (const ext of ["abap", "xml"]) {
+          const rel = `test/integration/${name}.prog.${ext}`;
+          expect(existsSync(join(scratch, "seed-stage", rel))).to.equal(false);
+          expect(packagedSeedEntries(out)).not.to.contain(rel);
+        }
+      }
       expect(execFileSync("unzip", ["-Z1", out], {encoding: "utf8"})).not.to.contain("extension/dist/web/");
       expect(readFileSync(join(scratch, "seed-stage", "webapp", "flp.html"), "utf8")).to.contain('title: "Zork I (MIT source release)"');
       expect(existsSync(join(scratch, "seed-stage", "packs", "zork", "src", "zork1-z3.w3mi.data.z3"))).to.equal(true);

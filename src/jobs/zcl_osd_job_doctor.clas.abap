@@ -242,6 +242,9 @@ CLASS zcl_osd_job_doctor IMPLEMENTATION.
       ELSE.
         APPEND |Tail: { lv_tail_event }/{ lv_tail_param } pending| TO rt_lines.
       ENDIF.
+      IF lv_state = 'RUNNING'.
+        APPEND 'REVIEW: business effects MAY already have committed; inspect them before resubmission' TO rt_lines.
+      ENDIF.
     ENDIF.
     IF lv_gap IS NOT INITIAL.
       APPEND |Historical gap: { lv_gap }; technical history may be incomplete| TO rt_lines.

@@ -239,11 +239,21 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
     fail("operations run differs from immutable import ledger payload");
   }
   if (tailId !== null) {
-    const event = db.prepare("SELECT event_id, event_param, source_instance FROM batch_named_events WHERE intent_id = ?")
+    const event = db.prepare("SELECT * FROM batch_named_events WHERE intent_id = ?")
       .get(intentId);
+    const occurrence = event && {sourceDb: event.source_db, sourceInstance: event.source_instance,
+      client: event.source_client, sysid: event.source_sysid, owner: event.source_owner,
+      id: event.event_id, param: event.event_param, seq: event.signal_seq};
+    const digest = occurrence && createHash("sha256")
+      .update(JSON.stringify({version: 1, ...occurrence})).digest("hex");
     if (!!event !== (run.state === "COMPLETED") ||
         (event && (event.event_id !== tailId || event.event_param !== tailParam ||
-          event.source_instance !== namedInstance))) fail("tail event disagrees with confirmed result");
+          event.source_instance !== namedInstance || event.source_db !== sourceDb ||
+          event.source_client !== caller.client || event.source_sysid !== caller.sid ||
+          event.source_owner !== caller.user || !Number.isSafeInteger(event.signal_seq) ||
+          event.signal_seq < 1 || event.payload_sha256 !== digest))) {
+      fail("tail event disagrees with confirmed result");
+    }
   }
   if (run.state === "WAITING" && afterName === null && namedId === null) fail("waiting run has no event condition");
   if (namedId !== null) {

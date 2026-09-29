@@ -77,4 +77,7 @@ after that commit sees the one retained occurrence and the queued successor.
 reports it as pending, published, or not published based on the verified
 terminal result and occurrence ledger. The `ZOSD_VOYAGE` and `ZOSD_READY`
 reports are synthetic engine fixtures: they carry the same `P_RUN` input,
-and the voyage accepts `P_FAIL = X` to leave readiness waiting.
+and the voyage accepts `P_FAIL = X` to leave readiness waiting. They live in
+`test/integration/` for local transpile and tests; VSIX staging excludes them.
+For a `RUNNING` tail job, the doctor warns that business effects may already
+have committed and must be inspected before resubmission.
