@@ -489,6 +489,9 @@ reason, content type and body, and OSG's HTTP layer adds
 
 ## Native report commands (OSABAP), 2026-09-29
 
+The detailed architecture, lifecycle, frontend modes, Windows build, DIAG
+session and current boundaries are in [`docs/osabap-native.md`](../../docs/osabap-native.md).
+
 `node tools/gogen/osabap.mjs [path/to/zreport.prog.abap]` converts a classic
 executable report through open-abap-gui, compiles the report lifecycle and its
 small host closure with gogen, and writes the stripped self-contained binary
