@@ -64,6 +64,10 @@ function outboxSnapshot(db, identity, sourceDb, caller) {
 }
 
 function checkRunState(state, steps) {
+  if (state === "WAITING") {
+    if (steps.some((step) => step.state !== "PENDING")) fail("waiting run has an active step");
+    return;
+  }
   const active = steps.findIndex((step) => step.state === (state === "QUEUED" ? "READY" : "RUNNING"));
   if (state === "QUEUED" || state === "RUNNING") {
     if (active < 0 || steps.some((step, i) => step.state !==
@@ -154,8 +158,35 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
   // lowercase even when migration uppercased the retained business key.
   const payload = legacy ? JSON.stringify(base) : JSON.stringify({version: 2, ...base,
     steps: rows.map((row) => ({number: row.step_no, program: row.program}))});
-  if (createHash("sha256").update(payload).digest("hex") !== ledger.payload_sha256) {
+  const afterName = run.after_job_name ?? null;
+  const afterCount = run.after_job_count ?? null;
+  if ((afterName === null) !== (afterCount === null)) fail("incomplete predecessor event key");
+  if (afterName !== null && (!afterName || afterName.length > 32 || afterName !== afterName.trim() ||
+      afterName !== afterName.toUpperCase() || !/^\d{8}$/.test(afterCount) || legacy)) {
+    fail("invalid predecessor event key");
+  }
+  const versioned = afterName === null ? payload : JSON.stringify({version: 3, ...base,
+    steps: rows.map((row) => ({number: row.step_no, program: row.program})),
+    afterEvent: {jobname: afterName, jobcount: afterCount}});
+  if (createHash("sha256").update(versioned).digest("hex") !== ledger.payload_sha256) {
     fail("operations run differs from immutable import ledger payload");
+  }
+  if (run.state === "WAITING" && afterName === null) fail("waiting run has no predecessor event");
+  if (afterName !== null) {
+    const eventTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'batch_job_events'").get();
+    if (!eventTable) fail("dependent run has no event ledger");
+    const event = db.prepare(`SELECT e.run_id, p.state, p.source_db AS parent_db,
+      p.source_client AS parent_client, p.source_sysid AS parent_sysid,
+      p.source_owner AS parent_owner, p.job_name AS parent_name, p.job_count AS parent_count
+      FROM batch_job_events e LEFT JOIN batch_runs p ON p.id = e.run_id
+      WHERE e.source_db = ? AND e.source_client = ?
+      AND e.source_sysid = ? AND e.source_owner = ? AND e.job_name = ? AND e.job_count = ?`).get(
+        sourceDb, caller.client, caller.sid, caller.user, afterName, afterCount);
+    if (event && (event.state !== "COMPLETED" || event.parent_db !== sourceDb ||
+        event.parent_client !== caller.client || event.parent_sysid !== caller.sid ||
+        event.parent_owner !== caller.user || event.parent_name !== afterName ||
+        event.parent_count !== afterCount)) fail("completion event disagrees with predecessor run");
+    if (!!event === (run.state === "WAITING")) fail("dependency state disagrees with completion event");
   }
   if (outbox && (outbox.program !== value(run, "program") ||
       outbox.generation !== value(run, "generation") ||
