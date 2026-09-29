@@ -49,6 +49,8 @@ const LIB = ".local/lars/open-abap-gui";
  * returns its typed result. No transaction session or HTML is involved. */
 export function batchRegistrySource(reports) {
   const known = reports.filter((entry) => entry.programName !== undefined);
+  const supported = known.filter((entry) => entry.wired === true)
+    .map((entry) => `      WHEN ${abapLiteral(entry.programName)}. rv_supported = abap_true.`).join("\n");
   const cases = known.map((entry) => `      WHEN ${abapLiteral(entry.programName)}.
 ${entry.wired === true ? `        lo_report = NEW ${entry.className.toLowerCase()}( ).
 ${[...new Set(entry.selectionNames ?? [])].map((name) => `        INSERT ${abapLiteral(name)} INTO TABLE lt_allowed.`).join("\n")}` : `        rs_result-status = 'UNSUPPORTED'.
@@ -75,12 +77,23 @@ ${[...new Set(entry.selectionNames ?? [])].map((name) => `        INSERT ${abapL
         iv_program TYPE string
         it_input TYPE zif_gg_selection_screen_types=>ty_values OPTIONAL
         iv_batch TYPE abap_bool DEFAULT abap_false.
+    CLASS-METHODS supports
+      IMPORTING iv_program TYPE string
+      RETURNING VALUE(rv_supported) TYPE abap_bool.
     CLASS-METHODS result_of
       IMPORTING is_host TYPE zcl_gg_host=>ty_result
       RETURNING VALUE(rs_result) TYPE ty_result.
 ENDCLASS.
 
 CLASS zcl_osd_batch_report IMPLEMENTATION.
+  METHOD supports.
+    DATA lv_program TYPE string.
+    lv_program = iv_program.
+    TRANSLATE lv_program TO UPPER CASE.
+    CASE lv_program.
+${supported}
+    ENDCASE.
+  ENDMETHOD.
   METHOD run.
     DATA lv_program TYPE string.
     DATA lv_name TYPE string.

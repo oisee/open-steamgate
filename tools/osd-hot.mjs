@@ -111,3 +111,16 @@ export class HotLoader {
     return {ms: Date.now() - started, modules: modules.length, swaps: n};
   }
 }
+
+// Keep the ABAP job facade and the worker's generation fence on the same
+// code generation the hot loader actually installed. The serving process
+// calls this under its work-process lock.
+export async function applyRuntimeHotSwap(hot, message, abap = globalThis.abap) {
+  const done = await hot.swap(message);
+  await abap.Classes["ZCL_STG_MODEL_INFO"]?.clear?.();
+  if (abap.context.RFCDestinations?.JOBS) {
+    abap.context.RFCDestinations.JOBS.generation = message.generation;
+  }
+  abap.context.osdGeneration = message.generation;
+  return done;
+}

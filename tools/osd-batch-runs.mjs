@@ -7,6 +7,7 @@ import {pathToFileURL} from "node:url";
 import {DatabaseSync} from "node:sqlite";
 import {setTimeout as delay} from "node:timers/promises";
 import {dialogStep} from "./osd-dialog-step.mjs";
+import {drainJobOutbox} from "./osd-job-outbox.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 const MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
@@ -35,6 +36,7 @@ function publicRun(row, {revealInput = false} = {}) {
   const input = JSON.parse(row.input_json);
   return {
     id: row.id, program: row.program, generation: row.generation,
+    jobName: row.job_name ?? null, jobCount: row.job_count ?? null,
     queuedAt: row.queued_at, startedAt: row.started_at || null, endedAt: row.ended_at,
     state: row.state, resultStatus: row.result_status, detail: row.detail,
     input: revealInput ? input : input.map(({name}) => ({name})),
@@ -53,7 +55,9 @@ export class BatchRuns {
       id TEXT PRIMARY KEY, program TEXT NOT NULL, generation TEXT NOT NULL,
       started_at TEXT NOT NULL, ended_at TEXT, state TEXT NOT NULL,
       result_status TEXT, detail TEXT, input_json TEXT NOT NULL,
-      output_sha256 TEXT, output_bytes INTEGER, queued_at TEXT
+      output_sha256 TEXT, output_bytes INTEGER, queued_at TEXT,
+      source_db TEXT, source_client TEXT, source_sysid TEXT, source_owner TEXT,
+      job_name TEXT, job_count TEXT
     )`);
     // Existing operations files from the saved-run slice stay readable.
     // Serialize the check and ALTER: two first-start workers can arrive together.
@@ -62,6 +66,27 @@ export class BatchRuns {
       if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "queued_at")) {
         this.db.exec("ALTER TABLE batch_runs ADD COLUMN queued_at TEXT");
       }
+      if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "source_db")) {
+        this.db.exec("ALTER TABLE batch_runs ADD COLUMN source_db TEXT");
+      }
+      if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "source_client")) {
+        this.db.exec("ALTER TABLE batch_runs ADD COLUMN source_client TEXT");
+      }
+      if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "source_sysid")) {
+        this.db.exec("ALTER TABLE batch_runs ADD COLUMN source_sysid TEXT");
+      }
+      if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "source_owner")) {
+        this.db.exec("ALTER TABLE batch_runs ADD COLUMN source_owner TEXT");
+      }
+      if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "job_name")) {
+        this.db.exec("ALTER TABLE batch_runs ADD COLUMN job_name TEXT");
+      }
+      if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "job_count")) {
+        this.db.exec("ALTER TABLE batch_runs ADD COLUMN job_count TEXT");
+      }
+      this.db.exec(`CREATE TABLE IF NOT EXISTS batch_imports (
+        intent_id TEXT PRIMARY KEY, payload_sha256 TEXT NOT NULL, run_id TEXT NOT NULL
+      )`);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -102,18 +127,66 @@ export class BatchRuns {
     return this.get(run.id);
   }
 
+  // The ledger and queued run are one SQLite transaction. A retry after an
+  // operations commit but before the business outbox acknowledgement verifies
+  // the immutable intent and returns the existing run, even if its lifecycle
+  // has since advanced. The ledger is retained if run retention changes.
+  importIntent(intent) {
+    const id = String(intent.intentId ?? "").toLowerCase();
+    if (!/^[0-9a-f]{32}$/.test(id)) throw new TypeError("invalid outbox intent ID");
+    const runId = `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
+    const program = String(intent.program ?? "").trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9_]{0,39}$/.test(program)) throw new TypeError("invalid report in outbox");
+    const sourceDb = resolve(String(intent.sourceDb ?? ""));
+    const payload = JSON.stringify({sourceDb, client: intent.client, sysid: intent.sysid,
+      jobname: intent.jobname, jobcount: intent.jobcount, owner: intent.owner,
+      program, generation: intent.generation});
+    const digest = createHash("sha256").update(payload).digest("hex");
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const old = this.db.prepare("SELECT payload_sha256, run_id FROM batch_imports WHERE intent_id = ?").get(id);
+      if (old) {
+        if (old.payload_sha256 !== digest || old.run_id !== runId) throw new Error(`outbox intent ${id} changed after import`);
+        this.db.exec("COMMIT");
+        return {kind: "duplicate", run: this.get(runId)};
+      }
+      const queuedAt = new Date().toISOString();
+      this.db.prepare(`INSERT INTO batch_runs
+        (id, program, generation, started_at, queued_at, state, input_json,
+         source_db, source_client, source_sysid, source_owner, job_name, job_count)
+        VALUES (?, ?, ?, '', ?, 'QUEUED', '[]', ?, ?, ?, ?, ?, ?)`).run(runId, program, String(intent.generation), queuedAt,
+          sourceDb, String(intent.client), String(intent.sysid), String(intent.owner),
+          String(intent.jobname), String(intent.jobcount));
+      this.db.prepare("INSERT INTO batch_imports (intent_id, payload_sha256, run_id) VALUES (?, ?, ?)")
+        .run(id, digest, runId);
+      this.db.exec("COMMIT");
+      return {kind: "imported", run: this.get(runId)};
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   // BEGIN IMMEDIATE makes two independent worker processes serialize the
   // decision. A RUNNING queued job blocks a second worker, even if its
   // process vanished: replay requires an explicit decision about side effects.
-  claimNext() {
+  claimNext(source) {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const busy = this.db.prepare("SELECT id FROM batch_runs WHERE state = 'RUNNING' AND queued_at IS NOT NULL LIMIT 1").get();
+      const scoped = source === undefined ? "" : source.legacyOnly ? " AND source_db IS NULL" :
+        " AND (source_db IS NULL OR (source_db = ? AND source_client = ? AND source_sysid = ? AND source_owner = ?))";
+      const params = source === undefined || source.legacyOnly ? [] : [source.db, source.client, source.sysid, source.owner];
+      // A job for another owner cannot be claimed, but it still holds this
+      // business instance's single worker until manually resolved.
+      const busyScope = source === undefined ? "" : source.legacyOnly ? " AND source_db IS NULL" :
+        " AND (source_db IS NULL OR (source_db = ? AND source_client = ? AND source_sysid = ?))";
+      const busyParams = source === undefined || source.legacyOnly ? [] : [source.db, source.client, source.sysid];
+      const busy = this.db.prepare(`SELECT id FROM batch_runs WHERE state = 'RUNNING' AND queued_at IS NOT NULL${busyScope} LIMIT 1`).get(...busyParams);
       if (busy) {
         this.db.exec("COMMIT");
         return {kind: "busy", id: busy.id};
       }
-      const row = this.db.prepare("SELECT id FROM batch_runs WHERE state = 'QUEUED' ORDER BY queued_at, rowid LIMIT 1").get();
+      const row = this.db.prepare(`SELECT id FROM batch_runs WHERE state = 'QUEUED'${scoped} ORDER BY queued_at, rowid LIMIT 1`).get(...params);
       if (!row) {
         this.db.exec("COMMIT");
         return {kind: "empty"};
@@ -204,18 +277,21 @@ const plainMessage = (row) => Object.fromEntries(Object.entries(row.get()).map((
 // The same generated registry used by SUBMIT, with the same ABAP dialog-step
 // transaction boundary. Every invocation gets a fresh converted report.
 export async function runConvertedBatch(root, program, input = []) {
-  const {zcl_osd_batch_report} = await import(pathToFileURL(join(resolve(root), "output", "zcl_osd_batch_report.clas.mjs")).href);
-  const {zif_gg_selection_screen_types} = await import(pathToFileURL(join(resolve(root), "output", "zif_gg_selection_screen_types.intf.mjs")).href);
-  const values = zif_gg_selection_screen_types.ty_values.clone();
-  for (const item of inputOf(input)) {
-    const row = zif_gg_selection_screen_types.ty_value.clone();
-    row.get().name.set(item.name);
-    row.get().value.set(item.value);
-    values.append(row);
-  }
-  const answer = await dialogStep(() => zcl_osd_batch_report.run({
-    iv_program: program, it_input: values, iv_batch: "X",
-  }), `batch report ${program}`);
+  const answer = await dialogStep(async () => {
+    // The initialized runtime owns the loaded generation. Resolving output/
+    // here could follow a newly switched symlink before this process swaps.
+    const report = globalThis.abap?.Classes?.ZCL_OSD_BATCH_REPORT;
+    const types = globalThis.abap?.Classes?.ZIF_GG_SELECTION_SCREEN_TYPES;
+    if (!report || !types) throw new Error("batch report runtime is not initialized");
+    const values = types.ty_values.clone();
+    for (const item of inputOf(input)) {
+      const row = types.ty_value.clone();
+      row.get().name.set(item.name);
+      row.get().value.set(item.value);
+      values.append(row);
+    }
+    return report.run({iv_program: program, it_input: values, iv_batch: "X"});
+  }, `batch report ${program}`);
   const fields = answer.get();
   return {
     status: fields.status.get(), detail: fields.detail.get(),
@@ -244,10 +320,15 @@ export async function runPersistedBatch(root, request, store, execute = runConve
 }
 
 export async function workQueuedBatch(root, store, execute = runConvertedBatch) {
-  const next = store.claimNext();
+  const businessDb = globalThis.abap?.context?.databaseConnections?.DEFAULT?.path;
+  const sy = globalThis.abap?.builtin?.sy?.get?.();
+  const source = businessDb && businessDb !== ":memory:" && sy ?
+    {db: resolve(businessDb), client: String(sy.mandt.get()).trim(), sysid: String(sy.sysid.get()).trim(),
+      owner: String(sy.uname.get()).trim()} : undefined;
+  const next = store.claimNext(source ?? {legacyOnly: true});
   if (next.kind !== "claimed") return next;
   const {run} = next;
-  const generation = liveGeneration(root);
+  const generation = globalThis.abap?.context?.osdGeneration ?? liveGeneration(root);
   if (run.generation !== generation) {
     store.fail(run.id, {code: "GENERATION_CHANGED",
       message: `Queued for ${run.generation}; worker runs ${generation}. Submit a new run after reviewing the change.`});
@@ -267,8 +348,8 @@ async function main(args) {
   const root = resolve(process.env.OSD_ROOT ?? process.cwd());
   process.chdir(root);
   const [command, ...rest] = args;
-  if (!["run", "enqueue", "work", "worker", "list", "show", "interrupt"].includes(command)) {
-    console.error("usage: node tools/osd-batch-runs.mjs run|enqueue <PROG> [NAME=value ...] | work | worker | list | show <run-id> | interrupt <run-id> --worker-confirmed-stopped");
+  if (!["run", "enqueue", "work", "worker", "drain", "list", "show", "interrupt"].includes(command)) {
+    console.error("usage: node tools/osd-batch-runs.mjs run|enqueue <PROG> [NAME=value ...] | drain | work | worker | list | show <run-id> | interrupt <run-id> --worker-confirmed-stopped");
     return 2;
   }
   const store = new BatchRuns(root);
@@ -309,7 +390,12 @@ async function main(args) {
     }
     const {initializeABAP} = await import(pathToFileURL(join(root, "output", "init.mjs")).href);
     await initializeABAP();
+    if (command === "drain") {
+      console.log(JSON.stringify(await drainJobOutbox(store), null, 2));
+      return 0;
+    }
     if (command === "work") {
+      if (process.env.STG_DB === "file") await drainJobOutbox(store);
       const result = await workQueuedBatch(root, store);
       console.log(JSON.stringify(result, null, 2));
       return result.kind === "failed" ? 1 : 0;
@@ -318,6 +404,7 @@ async function main(args) {
     process.on("SIGINT", () => { stopping = true; });
     process.on("SIGTERM", () => { stopping = true; });
     while (!stopping) {
+      if (process.env.STG_DB === "file") await drainJobOutbox(store);
       const result = await workQueuedBatch(root, store);
       if (result.kind === "completed" || result.kind === "failed") {
         console.log(JSON.stringify(result));

@@ -14,7 +14,7 @@
 // debugged: `node tools/osd-serve.mjs 3099`.
 import {dialogStep, exclusive} from "./osd-dialog-step.mjs";
 import {bootGuard} from "./osd-boot-guard.mjs";
-import {HotLoader, warmVerdict} from "./osd-hot.mjs";
+import {HotLoader, applyRuntimeHotSwap, warmVerdict} from "./osd-hot.mjs";
 import {ensureDemoData} from "./osd-demo-data.mjs";
 import {inspectorRequest} from "./osd-inspector.mjs";
 import {databaseDescriptor} from "./osd-database-identity.mjs";
@@ -360,14 +360,13 @@ process.on("message", (message) => {
     return;
   }
   exclusive(async () => {
-    const done = await hot.swap(message);
-    // the gateway keeps each service's model, built from its MPC, for the
-    // life of the process; a swapped MPC is read again at the next request
-    await globalThis.abap.Classes["ZCL_STG_MODEL_INFO"]?.clear?.();
-    return done;
-  }, "a warm swap").then((done) => {
+    const done = await applyRuntimeHotSwap(hot, message);
+    // Every consumer of this process's loaded code changes generation under
+    // the same work-process lock, before the next ABAP step can start.
     generation = message.generation;
     unverified = message.verified !== true;
+    return done;
+  }, "a warm swap").then((done) => {
     process.send?.({type: "hot-done", id: message.id, ok: true, ...done, heap: process.memoryUsage().heapUsed});
   }, (error) => {
     process.send?.({type: "hot-done", id: message.id, ok: false, error: String(error?.stack ?? error)});

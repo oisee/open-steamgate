@@ -165,6 +165,11 @@ export async function setup(abap, schemas, insert) {
   // it 'NONE' and '' run here and any other name replays STG_RFC_CAPTURE
   const {installRfcDestinations} = await import("../tools/rfc-replay.mjs");
   await installRfcDestinations(abap, {trace: process.env.STG_RFC_TRACE === "1"});
+  // This branch is Node-only; keep node:sqlite out of the preview bundle.
+  const {JobDestination} = await import(/* webpackIgnore: true */ "../tools/osd-job-port.mjs");
+  const jobs = new JobDestination(process.cwd(), process.env);
+  abap.context.RFCDestinations["JOBS"] = jobs;
+  abap.context.osdGeneration = jobs.generation;
   // AMDP: a method whose body is SQLScript has been rewritten by
   // tools/amdp-gen.mjs into CALL FUNCTION ... DESTINATION 'AMDP', and this is
   // where that destination is answered (docs/amdp-in-hana.md). It is
