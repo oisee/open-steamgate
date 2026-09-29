@@ -1752,3 +1752,18 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream issue: none yet; the fix is an alias (or the item interface) on the two interfaces in open-abap-odata
 - Regression-test location: none yet; the taxi data service's own tests fail if its MPC stops building
 - Upstream version containing a fix: `unknown`
+### ANOMALY-2026-09-29-amc-program-identity — AMC authority checks need the ABAP caller's program
+
+- Status: `open` (Node class calls covered, other callers fail closed)
+- Discovery date: `2026-09-29`
+- Affected versions: the pinned open-abap runtime and the one-process AMC host in `tools/osd-amc.mjs`
+- Affected ABAP statement, runtime API or adapter: `CL_AMC_CHANNEL_MANAGER` at `SEND` and `START_MESSAGE_DELIVERY`; `sy-cprog` is the runtime's fixed `OPEN_ABAP_TODO`, not the caller's program.
+- Minimal ABAP reproducer: `test/unit/zcl_osd_amc_test.clas.testclasses.abap` calls `START_MESSAGE_DELIVERY` and `SEND` from a class pool named in `src/amc/zstg_amc_test.samc.xml`.
+- Exact command used to run it: `npm run unit` with the AMC host installed by `tools/osd-unit-bootstrap.mjs`; removing that bootstrap raises `CX_AMC_ERROR` from the library's unimplemented manager body.
+- Expected SAP behaviour: a `SAMC` channel's `PROGRAM_ID` and activity authorise the executing program. P8 observed checks at `SEND` and `START_MESSAGE_DELIVERY`.
+- Actual open-abap behaviour: the Node host can identify a directly executing generated class module from its stack frame and turn that class name into the class-pool program ID. It cannot reliably identify report, function group, dynamic or bundled callers this way, and the runtime's `sy-cprog` does not fill the gap. Those callers receive `CX_AMC_ERROR` rather than a guessed identity.
+- Impact on open-steamgate: the tested Node class and APC paths work; AMC callers without a generated class frame cannot pass a `SAMC` authority check. The compiled binary and browser preview are not claimed.
+- Smallest safe workaround: none. The kernel needs an execution-context program identity independent of source paths before this is general.
+- Upstream issue: none yet; the one-process AMC adapter is ours.
+- Regression-test location: `test/amc.mjs` (program mapping and refused send), `test/unit/zcl_osd_amc_test.clas.testclasses.abap` (authorised and unauthorised sends).
+- Upstream version containing a fix: none.

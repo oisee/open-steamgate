@@ -544,11 +544,10 @@ reason: the probes ran under one logon.
     a plain `WAIT UP TO` / `UNTIL` inside a step (commit, release the work
     process, sleep or poll every 500 ms). The receiver runs while the step
     is released, so it must take the work process back first: a receiver
-    call is a step of its own. `KERNEL_PUSH_CHANNELS=>wait` does not go
-    through `installWait` today and does not release the lock, so it has to
-    be brought under the same rule before it can deliver. The local exit of
-    `WAIT FOR MESSAGING CHANNELS` at the time limit also differs from a
-    system (`ANOMALY-2026-09-24-wait-for-channels-subrc`). What was measured
+    call is a step of its own. In the one-process Node AMC host,
+    `KERNEL_PUSH_CHANNELS=>wait` now goes through the released wait and
+    times out with `sy-subrc = 8`. The older runtime still differs without
+    AMC installed (`ANOMALY-2026-09-24-wait-for-channels-subrc`). What was measured
     of deployment is `ZCL_ABAPGIT_OBJECT_SAMC->DESERIALIZE` called
     directly, not an abapGit zip or repository pull; the demo's
     `ZOSD_TICKER` would take the zip route, and once #79 lands (the zip
@@ -1052,7 +1051,7 @@ cost here (the APC host, the RFC channel, the pool).
 | 1 | **not in this work**: osg-i7's separate PR (the step queue in `tools/osd-dialog-step.mjs`, released during `WAIT`; APC callbacks through `dialogStep`; `/osd/sql` and the shim's static server inside the step). This work starts after it is merged | 0 |
 | 2 | **done** (#235, open-abap-apc#1): PCP interface, class and serialiser; P1 captured bytes tested, unmeasured cases marked for probes | 1 |
 | 3 | **done on Node for stateful APC**: `CL_ABAP_TIMER_MANAGER` contract and host hook, tested with socket frames and separate dialog steps; preview, OSGo and daemon restart policy remain later work | 1 |
-| 4 | AMC in one process: producer, consumer, `WAIT FOR MESSAGING CHANNELS`, the APC binding delivering to a socket, the `SAMC` reader | 1.5 |
+| 4 | **done on Node in one process**: typed TEXT/BINARY/PCP producer and receiver, context client/user, `SAMC` layer reader and send/start authority checks, delivery at `SEND`, echo suppression, released `WAIT FOR MESSAGING CHANNELS` and `WAIT UP TO`, and APC binding to a socket without `ON_MESSAGE`. ABAP Unit covers delivery, rollback, echo, authority and types; `test/amc.mjs` covers a real bound websocket, an HTTP sender step and 1000 ordered messages. Program identity comes from a generated class module frame and fails closed where no frame exists (see `ANOMALY-2026-09-29-amc-program-identity`). Cross-client/user scope, filters, binary/PCP socket frames, browser preview, compiled binary and the supervisor broker in step 6 are not verified. APC binding behaviour was **not measured on A4H**; this is an implementation assumption. | 1.5 |
 | 5 | the daemon host (ABAP), the client manager, the Node driver (mailbox on the shared step queue, restart policy from P3/P4), the class-data guard (first proving it, as our own post-processing pass in `tools/osd-transpile.mjs`, never sent upstream; the accessor only as a prototype), the registry (D9) | 2 |
 | 6 | the stable layer on Node: mailboxes and the AMC broker in the supervisor, IPC to the children, the pool, the swap phase in `recycle()`, the ack after commit and the message-ID dedup, restart from the registry | 2.5 |
 | 7 | status list and `ps`; the demo, its page and `test/daemon.mjs` | 1.5 |

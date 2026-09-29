@@ -89,6 +89,16 @@ export class AmcBroker {
 
 let broker;
 const defaultSession = {id: "local"};
+const sessionIds = new WeakMap();
+let nextSessionId = 1;
+function sessionId(session) {
+  let id = sessionIds.get(session);
+  if (id === undefined) {
+    id = `osd-amc-${nextSessionId++}`;
+    sessionIds.set(session, id);
+  }
+  return id;
+}
 export function callerProgram(stack = new Error().stack) {
   for (const line of String(stack).split("\n")) {
     const match = /([a-z][a-z0-9_]+)\.clas(?:\.testclasses)?\.mjs(?:[:?]|$)/i.exec(line);
@@ -142,7 +152,8 @@ export function installAmc(abap, root = process.cwd()) {
       extension: value(input.i_channel_extension_id) ?? "", session: currentStepToken() ?? defaultSession, program: program()});
     return new abap.types.ABAPObject({qualifiedName: "IF_AMC_MESSAGE_CONSUMER"}).set(object);
   });
-  Manager.get_consumer_session_id = async () => new abap.types.String().set(String((currentStepToken() ?? defaultSession).id ?? ""));
+  Manager.get_consumer_session_id = async () =>
+    new abap.types.String().set(sessionId(currentStepToken() ?? defaultSession));
   for (const type of ["text", "binary", "pcp"]) {
     Producer.prototype[`if_amc_message_producer_${type}$send`] = async function ({i_message}) { return wrap(() => {
       const details = props.get(this);
@@ -153,15 +164,18 @@ export function installAmc(abap, root = process.cwd()) {
   Consumer.prototype.if_amc_message_consumer$start_message_delivery = async function ({i_receiver}) {
     return wrap(() => {
       const details = props.get(this);
-      this.osdSubscription?.close();
       const receiver = value(i_receiver);
-      this.osdSubscription = broker.subscribe({...details, program: program(), receive: undefined});
-      this.osdSubscription.subscription.receiver = receiver;
+      this.osdSubscriptions ??= new Map();
+      this.osdSubscriptions.get(receiver)?.close();
+      const subscription = broker.subscribe({...details, program: program(), receive: undefined});
+      subscription.subscription.receiver = receiver;
+      this.osdSubscriptions.set(receiver, subscription);
     });
   };
-  Consumer.prototype.if_amc_message_consumer$stop_message_delivery = async function () {
-    this.osdSubscription?.close();
-    this.osdSubscription = undefined;
+  Consumer.prototype.if_amc_message_consumer$stop_message_delivery = async function ({i_receiver}) {
+    const receiver = value(i_receiver);
+    this.osdSubscriptions?.get(receiver)?.close();
+    this.osdSubscriptions?.delete(receiver);
   };
   return broker;
 }

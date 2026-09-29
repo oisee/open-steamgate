@@ -12,13 +12,18 @@ describe("AMC in one Node process", function () {
     const xml = readFileSync("src/amc/zstg_amc_test.samc.xml", "utf8");
     const rows = parseSamc(xml, "fixture");
     expect(rows.map((row) => [row.path, row.type, row.scope]))
-      .to.deep.equal([["/text", "TEXT", "C"], ["/denied", "TEXT", "C"]]);
+      .to.deep.equal([["/text", "TEXT", "C"], ["/denied", "TEXT", "C"],
+        ["/binary", "BINARY", "C"], ["/pcp", "PCP", "C"]]);
     const broker = new AmcBroker(rows);
     const sender = "ZCL_OSD_AMC_TEST==============CP";
     expect(() => broker.send({app: "ZOSD_AMC_TEST", path: "/denied", program: sender, type: "TEXT", message: "no"}))
       .to.throw("not authorised");
     expect(() => broker.send({app: "ZOSD_AMC_TEST", path: "/missing", program: sender, type: "TEXT", message: "no"}))
       .to.throw("not defined");
+    expect(() => broker.subscribe({app: "ZOSD_AMC_TEST", path: "/missing", program: sender, receive: () => {}}))
+      .to.throw("not defined");
+    expect(() => broker.subscribe({app: "ZOSD_AMC_TEST", path: "/text", program: "ZCL_UNKNOWN===================CP", receive: () => {}}))
+      .to.throw("not authorised");
     expect(amcChannels().find((row) => row.path === "/text")).to.include({applicationId: "ZOSD_AMC_TEST"});
     expect(callerProgram("at x (/tmp/zcl_osd_amc_test.clas.testclasses.mjs:1:1)"))
       .to.equal(sender);
@@ -70,5 +75,14 @@ describe("AMC in one Node process", function () {
       socket.close();
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+
+  it("dispatches a receiver during WAIT UP TO with a new dialog step", async () => {
+    const {initializeABAP} = await import("../output/init.mjs");
+    const Sender = (await import("../output/zcl_osd_amc_test.clas.mjs")).zcl_osd_amc_test;
+    await initializeABAP();
+    const object = new Sender();
+    const count = await dialogStep(() => object.wait_up_to());
+    expect(count.get()).to.equal(1);
   });
 });
