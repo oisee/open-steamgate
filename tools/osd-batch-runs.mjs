@@ -391,13 +391,15 @@ export class BatchRuns {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const scoped = source === undefined ? "" : source.legacyOnly ? " AND source_db IS NULL" :
-        " AND (source_db IS NULL OR (source_db = ? AND source_client = ? AND source_sysid = ? AND source_owner = ?))";
-      const params = source === undefined || source.legacyOnly ? [] : [source.db, source.client, source.sysid, source.owner];
+        " AND (source_db IS NULL OR (source_db = ? AND source_client = ? AND source_sysid = ? AND source_owner = ? AND (source_instance IS NULL OR source_instance = ?)))";
+      const params = source === undefined || source.legacyOnly ? [] :
+        [source.db, source.client, source.sysid, source.owner, source.instance ?? null];
       // A job for another owner cannot be claimed, but it still holds this
       // business instance's single worker until manually resolved.
       const busyScope = source === undefined ? "" : source.legacyOnly ? " AND source_db IS NULL" :
-        " AND (source_db IS NULL OR (source_db = ? AND source_client = ? AND source_sysid = ?))";
-      const busyParams = source === undefined || source.legacyOnly ? [] : [source.db, source.client, source.sysid];
+        " AND (source_db IS NULL OR (source_db = ? AND source_client = ? AND source_sysid = ? AND (source_instance IS NULL OR source_instance = ?)))";
+      const busyParams = source === undefined || source.legacyOnly ? [] :
+        [source.db, source.client, source.sysid, source.instance ?? null];
       const busy = this.db.prepare(`SELECT id FROM batch_runs WHERE state = 'RUNNING' AND queued_at IS NOT NULL${busyScope} LIMIT 1`).get(...busyParams);
       if (busy) {
         this.db.exec("COMMIT");
@@ -737,11 +739,18 @@ function resultRecordingError(runId, stepNumber, cause, executionError) {
 }
 
 export async function workQueuedBatch(root, store, execute = runConvertedBatch) {
-  const businessDb = globalThis.abap?.context?.databaseConnections?.DEFAULT?.path;
+  const businessClient = globalThis.abap?.context?.databaseConnections?.DEFAULT;
+  const businessDb = businessClient?.path;
   const sy = globalThis.abap?.builtin?.sy?.get?.();
+  let instance;
+  try {
+    if (businessClient?.db?.prepare("SELECT 1 FROM sqlite_master WHERE name = 'zosd_job_source_instance'").get()) {
+      instance = businessClient.db.prepare("SELECT id FROM zosd_job_source_instance LIMIT 1").get()?.id;
+    }
+  } catch { instance = undefined; }
   const source = businessDb && businessDb !== ":memory:" && sy ?
     {db: resolve(businessDb), client: String(sy.mandt.get()).trim(), sysid: String(sy.sysid.get()).trim(),
-      owner: String(sy.uname.get()).trim()} : undefined;
+      owner: String(sy.uname.get()).trim(), instance} : undefined;
   const next = store.claimNext(source ?? {legacyOnly: true});
   if (next.kind !== "claimed") return next;
   const {run} = next;

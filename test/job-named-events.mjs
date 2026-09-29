@@ -46,6 +46,15 @@ describe("durable named job events", () => {
     finally { reopened.close(); }
   });
 
+  it("orders an accepted uncommitted close before a concurrent raise", () => {
+    const waitSeq = store.reserveSignalSeq();
+    assert.equal(waitSeq, 1);
+    const raised = store.importNamedEvent({...event(0), seq: undefined});
+    assert.equal(raised.seq, 2);
+    assert.equal(raised.released, 0);
+    assert.equal(store.importIntent(job(waitSeq)).run.state, "QUEUED");
+  });
+
   it("deduplicates a direct raise ID without advancing the durable clock", () => {
     const raised = {...event(0), seq: undefined};
     assert.equal(store.importNamedEvent(raised).seq, 1);
@@ -77,6 +86,21 @@ describe("durable named job events", () => {
     assert.equal(store.importNamedEvent(event(5)).released, 1);
     assert.equal(store.get(alice.id).state, "QUEUED");
     for (const run of [bob, otherInstance, otherClient]) assert.equal(store.get(run.id).state, "WAITING");
+  });
+
+  it("does not claim or let a prior instance's running job block a replacement", () => {
+    const old = store.importIntent(job(1)).run;
+    store.importNamedEvent(event(2));
+    const source = {db: base().sourceDb, client: "123", sysid: "OSG", owner: "ALICE"};
+    assert.equal(store.claimNext({...source, instance: sourceInstance}).run.id, old.id);
+    const nextInstance = uuid();
+    assert.equal(store.claimNext({...source, instance: nextInstance}).kind, "empty");
+    const newEvent = {...event(4), sourceInstance: nextInstance};
+    store.importNamedEvent(newEvent);
+    const replacement = store.importIntent(job(3, "A", {namedEvent: {
+      id: "DONE", param: "A", sourceInstance: nextInstance, seq: 3}})).run;
+    assert.equal(replacement.state, "QUEUED");
+    assert.equal(store.claimNext({...source, instance: nextInstance}).run.id, replacement.id);
   });
 
   it("rolls the occurrence and fanout back when release fails", () => {

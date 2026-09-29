@@ -13,7 +13,8 @@ and a later `ROLLBACK WORK` does not undo the raise. Event IDs in this subset
 are uppercase letters, digits and underscores, at most 32 characters;
 parameters are at most 64 characters and retain case. There is no event
 catalog yet: a valid event with no waiters succeeds, and
-`EVENTID_DOES_NOT_EXIST` is not raised. Failed storage raises `RAISE_FAILED`.
+`EVENTID_DOES_NOT_EXIST` is not raised. Empty IDs raise `EVENTID_MISSING`,
+invalid IDs raise `BAD_EVENTID`, and failed storage raises `RAISE_FAILED`.
 
 Matching is scoped to the business database instance, client, system ID and
 owner. A blank waiting parameter matches any raised parameter. A blank
@@ -27,7 +28,12 @@ raise releases only waits with a smaller number. Consequently, a raise before
 recognized even if the business outbox imports later. An occurrence releases
 all matching waits in one operations transaction. A unique business-instance
 ID stored in the business database prevents a replacement file at the same
-path from matching old waits. The outbox import ledger hashes the named wait
+path from matching or claiming old waits; an old running job does not block a
+new instance. The ordering point is the accepted `JOB_CLOSE` call, before its
+business LUW commits. If another LUW raises the event after that call but
+before the close commits, the eventual committed waiter can be released. A
+rolled-back close has no durable waiter. The A4H probe did not measure this
+cross-LUW race. The outbox import ledger hashes the named wait
 as version 5; versions 1–4 retain their existing digests. Waiting jobs and
 occurrences survive restart.
 

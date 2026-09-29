@@ -30,7 +30,7 @@ function readOnly(path, work) {
   } finally { db.close(); }
 }
 
-function outboxSnapshot(db, identity, sourceDb, caller) {
+function outboxSnapshot(db, identity, sourceDb, caller, currentSourceInstance) {
   const intentId = value(identity, "intent_id");
   const parent = db.prepare("SELECT * FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ?")
     .get(caller.client, intentId);
@@ -65,7 +65,8 @@ function outboxSnapshot(db, identity, sourceDb, caller) {
   }
   if (namedId && (afterName || !/^[A-Z][A-Z0-9_]{0,31}$/.test(namedId) ||
       !/^[0-9a-f]{32}$/.test(sourceInstance) || namedParam.length > 64 ||
-      !Number.isSafeInteger(Number(waitSeqText)) || Number(waitSeqText) < 1)) {
+      !Number.isSafeInteger(Number(waitSeqText)) || Number(waitSeqText) < 1 ||
+      sourceInstance !== currentSourceInstance)) {
     fail("outbox has an invalid named event condition");
   }
   return {
@@ -105,7 +106,7 @@ function checkRunState(state, steps) {
   } else fail("unknown operations run state");
 }
 
-function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
+function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourceInstance) {
   const intentId = value(identity, "intent_id");
   const id = runIdOf(intentId);
   const tables = new Set(db.prepare(`SELECT name FROM sqlite_master
@@ -194,7 +195,8 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
   }
   if (namedId !== null && (afterName !== null || !/^[A-Z][A-Z0-9_]{0,31}$/.test(namedId) ||
       typeof namedParam !== "string" || namedParam.length > 64 ||
-      !/^[0-9a-f]{32}$/.test(namedInstance ?? "") || !Number.isSafeInteger(waitSeq) || waitSeq < 1)) {
+      !/^[0-9a-f]{32}$/.test(namedInstance ?? "") || !Number.isSafeInteger(waitSeq) || waitSeq < 1 ||
+      namedInstance !== currentSourceInstance)) {
     fail("invalid named event condition");
   }
   const versioned = namedId !== null ? JSON.stringify({version: 5, ...base,
@@ -318,6 +320,9 @@ export function readJobSnapshot({sourceDb, jobName, jobCount, caller, root = pro
   }
   const source = resolve(sourceDb);
   return readOnly(source, (business) => {
+    const currentSourceInstance = business.prepare(`SELECT 1 FROM sqlite_master
+      WHERE type = 'table' AND name = 'zosd_job_source_instance'`).get() ?
+      business.prepare("SELECT id FROM zosd_job_source_instance LIMIT 1").get()?.id : undefined;
     const identity = business.prepare(`SELECT * FROM zosd_job_identity
       WHERE mandt = ? AND jobname = ? AND jobcount = ?`).get(caller.client, name, count);
     if (!identity) {
@@ -339,10 +344,10 @@ export function readJobSnapshot({sourceDb, jobName, jobCount, caller, root = pro
         generation: null, createdOn: null, createdAt: null, queuedAt: null,
         startedAt: null, endedAt: null, resultStatus: null, detail: null, steps: []};
     }
-    const outbox = outboxSnapshot(business, identity, source, caller);
+    const outbox = outboxSnapshot(business, identity, source, caller, currentSourceInstance);
     const operationsFile = operationsPath(root, env);
     const imported = existsSync(operationsFile) ? readOnly(operationsFile, (operations) => {
-      const snapshot = operationsSnapshot(operations, identity, source, caller, outbox);
+      const snapshot = operationsSnapshot(operations, identity, source, caller, outbox, currentSourceInstance);
       if (!snapshot || !includeTechnicalLog) return snapshot;
       return {...snapshot, technicalLog: technicalLogSnapshot(operations, intentId)};
     }) : undefined;

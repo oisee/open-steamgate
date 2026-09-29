@@ -965,11 +965,47 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
         event_param: "A"}), "job_close_failed");
       await classic(() => close(count, {jobname: "NAMED_INVALID", strtimmed: "",
         event_id: "BAD EVENT"}), "job_close_failed");
-      await classic(() => raiseEvent("bad event name"), "raise_failed");
+      await classic(() => raiseEvent("bad event name"), "bad_eventid");
+      await classic(() => raiseEvent(""), "eventid_missing");
       await close(count, {jobname: "NAMED_INVALID", strtimmed: "", event_id: "OSD_SIGNAL"});
       await client.rollback();
     });
     expect(rows().some((row) => row.jobname.trim() === "NAMED_INVALID")).to.equal(false);
+  });
+
+  it("does not run a queued named job after the business instance ID changes", async () => {
+    const scopedEnv = {...process.env, OSD_OPERATIONS_DB: join(dir, "named-replaced.sqlite")};
+    const scoped = new BatchRuns(root, scopedEnv);
+    const previousOperationsDb = process.env.OSD_OPERATIONS_DB;
+    process.env.OSD_OPERATIONS_DB = scopedEnv.OSD_OPERATIONS_DB;
+    try {
+      await dialogStep(async () => {
+        const count = await open("NAMED_REPLACED");
+        await submit(count, {jobname: "NAMED_REPLACED"});
+        await close(count, {jobname: "NAMED_REPLACED", strtimmed: "",
+          event_id: "OSD_REPLACED"});
+      });
+      await drainJobOutbox(scoped);
+      await dialogStep(() => raiseEvent("OSD_REPLACED"));
+      const run = scoped.list().find((item) => item.jobName === "NAMED_REPLACED");
+      expect(run.state).to.equal("QUEUED");
+      const originalInstance = client.db.prepare("SELECT id FROM zosd_job_source_instance").get().id;
+      client.db.prepare("UPDATE zosd_job_source_instance SET id = ?")
+        .run(randomUUID().replaceAll("-", ""));
+      try {
+        await classic(() => dialogStep(() => status("NAMED_REPLACED", run.jobCount)), "inconsistent");
+        expect((await workQueuedBatch(root, scoped, async () => {
+          throw new Error("old instance job executed");
+        })).kind).to.equal("empty");
+        expect(scoped.get(run.id).state).to.equal("QUEUED");
+      } finally {
+        client.db.prepare("UPDATE zosd_job_source_instance SET id = ?").run(originalInstance);
+      }
+      expect((await workQueuedBatch(root, scoped, async () => ({status: "COMPLETED"}))).kind).to.equal("completed");
+    } finally {
+      process.env.OSD_OPERATIONS_DB = previousOperationsDb;
+      scoped.close();
+    }
   });
 
   it("keeps imported ledger across a fresh operations connection and rejects changed payload", async () => {
