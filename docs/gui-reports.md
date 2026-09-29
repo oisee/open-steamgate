@@ -169,8 +169,6 @@ them.
   appends a step to the current open job and raises `ZCX_OSD_SUBMIT` for an
   unsupported report or rejected step input.
 - **Fails at build time**, with the source file and line:
-  - `WITH ... IN` together with `VIA JOB`: a job step's input is stored as
-    name/value pairs, so the range would be lost on the way;
   - dynamic program names, variants, spool options, `EXPORTING LIST TO
     MEMORY`, `SUBMIT` without `AND RETURN`, and a selection or `VIA JOB`
     given twice.
@@ -241,8 +239,13 @@ separate from the transactional ABAP job facade below.
 For a durable `STG_DB=file` instance, the common `JOB_OPEN` / `JOB_SUBMIT` /
 `JOB_CLOSE` call shape schedules up to 16 ordered converted static reports in
 one LUW. Plain `JOB_SUBMIT` accepts no variant or ad hoc selection. The static
-`SUBMIT ... VIA JOB ... NUMBER ... WITH` form accepts up to 20 scalar selection
-fields, each with an eight-character name and a value of at most 255 characters.
+`SUBMIT ... VIA JOB ... NUMBER ... WITH` accepts up to 20 selection fields,
+each with an eight-character name and a value of at most 255 characters.
+`WITH sel IN range` stores up to 20 SIGN/OPTION/LOW/HIGH rows per field;
+LOW and HIGH are limited to 255 characters each. The job input JSON limit is
+computed from these field and range bounds, including JSON escaping. Older
+name/value-only steps remain readable. The worker reconstructs the same
+selection ranges used by synchronous `SUBMIT`.
 Inputs are fixed at `JOB_CLOSE`, stored with the business step and imported into
 the operations step; steps without input use their `INITIALIZATION` defaults.
 An undeclared field fails the step with its field name in the result detail.

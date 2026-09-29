@@ -134,6 +134,8 @@ FUNCTION bp_job_select.
         lv_status = 'A'.
       WHEN 'RUNNING'.
         lv_status = 'R'.
+      WHEN 'READY'.
+        lv_status = 'Y'.
       WHEN 'QUEUED'.
         lv_status = 'Y'.
       WHEN 'WAITING'.

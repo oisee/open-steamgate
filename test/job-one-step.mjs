@@ -79,6 +79,14 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       const row = types.ty_value.clone();
       row.get().name.set(item.name);
       row.get().value.set(item.value);
+      for (const range of item.ranges ?? []) {
+        const entry = types.ty_range.clone();
+        entry.get().sign.set(range.sign);
+        entry.get().option.set(range.option);
+        entry.get().low.set(range.low);
+        entry.get().high.set(range.high);
+        row.get().ranges.append(entry);
+      }
       values.append(row);
     }
     try {
@@ -1477,7 +1485,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     expect(stepRows().find((row) => row.program.trim() === "ZGG_EX_012")?.input_json)
       .to.include("20251231");
     expect(JSON.parse((await dialogStep(() => readJob(name, count, "STEP", "1"))).ev_input_json))
-      .to.deep.equal([{name: "P_DATE", value: "20251231"}]);
+      .to.deep.equal([{name: "P_DATE", value: "20251231", ranges: []}]);
     expect(await dialogStep(() => doctor(name, count))).to.include("P_DATE=20251231");
     await drainJobOutbox(scoped);
     const child = spawnSync(process.execPath, [join(root, "test", "fixtures", "job-step-run.mjs")], {
@@ -1496,6 +1504,50 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     const defaultRun = scoped.list().find((item) => item.jobName === "OSD_INPUT_DEFAULT");
     expect((await workQueuedBatch(root, scoped)).kind).to.equal("completed");
     expect(scoped.stepOutput(defaultRun.id, 1).lines.join(" ")).not.to.include("20251231");
+    scoped.close();
+  });
+
+  it("runs a stored SELECT-OPTIONS range with the same rows as a synchronous report", async () => {
+    // I EQ uses the runtime's supported IN path; other options round-trip in
+    // batch-runs but report evaluation awaits ANOMALY-2026-09-29-runtime-in-options.
+    const name = "OSD_INPUT_RANGE";
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "input-range.sqlite")});
+    const input = [{name: "S_NUM", value: "", ranges: [{sign: "I", option: "EQ", low: "7", high: ""}]},
+      {name: "P_EXP", value: "1"}];
+    const types = abap.Classes.ZIF_GG_SELECTION_SCREEN_TYPES;
+    const values = types.ty_values.clone();
+    for (const item of input) {
+      const row = types.ty_value.clone();
+      row.get().name.set(item.name);
+      row.get().value.set(item.value);
+      for (const range of item.ranges ?? []) {
+        const entry = types.ty_range.clone();
+        entry.get().sign.set(range.sign);
+        entry.get().option.set(range.option);
+        entry.get().low.set(range.low);
+        entry.get().high.set(range.high);
+        row.get().ranges.append(entry);
+      }
+      values.append(row);
+    }
+    const direct = await dialogStep(() => abap.Classes.ZCL_OSD_BATCH_REPORT.run({
+      iv_program: box("ZOSD_SUB_RANGE"), it_input: values, iv_batch: "X",
+    }));
+    expect(direct.get().status.get()).to.equal("COMPLETED");
+    const directLines = direct.get().lines.array().map((line) => line.get());
+    let count;
+    await dialogStep(async () => {
+      count = await open(name);
+      await viaProgram("ZOSD_SUB_RANGE", name, count, input);
+      await close(count, {jobname: name});
+    });
+    const stored = JSON.parse(stepRows().find((row) => row.program.trim() === "ZOSD_SUB_RANGE").input_json);
+    expect(stored.find((row) => row.name === "S_NUM").ranges).to.deep.equal(input[0].ranges);
+    await drainJobOutbox(scoped);
+    const run = scoped.list().find((item) => item.jobName === name);
+    expect((await workQueuedBatch(root, scoped)).kind).to.equal("completed");
+    expect(scoped.stepOutput(run.id, 1), JSON.stringify(scoped.get(run.id))).to.exist;
+    expect(scoped.stepOutput(run.id, 1).lines).to.deep.equal(directLines);
     scoped.close();
   });
 
@@ -1649,7 +1701,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     const ret = new abap.types.Integer().set(77);
     await dialogStep(() => abap.FunctionModules.BP_JOB_READ({
       exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
-        job_read_opcode: new abap.types.Integer().set(1)},
+        job_read_opcode: new abap.types.Integer().set(19)},
       importing: {job_read_jobhead: header}, changing: {ret},
     }));
     expect(ret.get()).to.equal(0);
@@ -1664,10 +1716,26 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     }));
     await dialogStep(() => abap.FunctionModules.BP_JOB_READ({
       exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
-        job_read_opcode: new abap.types.Integer().set(2)},
+        job_read_opcode: new abap.types.Integer().set(20)},
       tables: {job_read_steplist: steps},
     }));
     expect(steps.array().map((step) => step.get().progname.get().trim())).to.deep.equal(["ZGG_EX_012"]);
+    for (const [opcode, stepCount] of [[19, 0], [20, 1], [35, 1], [36, 1], [37, 0]]) {
+      steps.clear();
+      await dialogStep(() => abap.FunctionModules.BP_JOB_READ({
+        exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
+          job_read_opcode: new abap.types.Integer().set(opcode)},
+        importing: {job_read_jobhead: header}, tables: {job_read_steplist: steps},
+      }));
+      expect(header.get().status.get(), `opcode ${opcode}`).to.equal("F");
+      expect(steps.array(), `opcode ${opcode}`).to.have.length(stepCount);
+    }
+    for (const opcode of [0, 1, 2, 18, 21, 34, 38, 999]) {
+      await classic(() => dialogStep(() => abap.FunctionModules.BP_JOB_READ({
+        exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
+          job_read_opcode: new abap.types.Integer().set(opcode)},
+      })), "invalid_opcode");
+    }
     const selector = new abap.types.Structure({
       jobname: new abap.types.Character(32).set(name), username: new abap.types.Character(12),
       preliminary: new abap.types.Character(1), scheduled: new abap.types.Character(1),
@@ -1725,13 +1793,13 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     steps.clear();
     await dialogStep(() => abap.FunctionModules.BP_JOB_READ({
       exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
-        job_read_opcode: new abap.types.Integer().set(2), job_step_number: new abap.types.Integer().set(1)},
+        job_read_opcode: new abap.types.Integer().set(20), job_step_number: new abap.types.Integer().set(1)},
       tables: {job_read_steplist: steps},
     }));
     expect(steps.array()).to.have.length(1);
     await classic(() => dialogStep(() => abap.FunctionModules.BP_JOB_READ({
       exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
-        job_read_opcode: new abap.types.Integer().set(2), job_step_number: new abap.types.Integer().set(2)},
+        job_read_opcode: new abap.types.Integer().set(20), job_step_number: new abap.types.Integer().set(2)},
       tables: {job_read_steplist: steps},
     })), "job_doesnt_have_steps");
     await dialogStep(async () => {

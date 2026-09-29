@@ -21,7 +21,7 @@ export function operationsPath(root = process.cwd(), env = process.env) {
 }
 
 function inputOf(input) {
-  if (!Array.isArray(input)) throw new TypeError("input must be an array of {name, value}");
+  if (!Array.isArray(input)) throw new TypeError("input must be an array of selection values");
   const names = new Set();
   return input.map((row) => {
     if (row === null || typeof row !== "object" || !/^[A-Za-z][A-Za-z0-9_]{0,29}$/.test(row.name)
@@ -29,7 +29,11 @@ function inputOf(input) {
     const name = row.name.toUpperCase();
     if (names.has(name)) throw new TypeError(`duplicate selection field ${name}`);
     names.add(name);
-    return {name, value: row.value};
+    if (row.ranges === undefined) return {name, value: row.value};
+    if (!Array.isArray(row.ranges)) throw new TypeError("selection ranges must be an array");
+    return {name, value: row.value, ranges: row.ranges.map((range) => ({
+      sign: range.sign, option: range.option, low: range.low, high: range.high,
+    }))};
   });
 }
 
@@ -736,6 +740,14 @@ export async function runConvertedBatch(root, program, input = [], expectedGener
       const row = types.ty_value.clone();
       row.get().name.set(item.name);
       row.get().value.set(item.value);
+      for (const range of item.ranges ?? []) {
+        const entry = types.ty_range.clone();
+        entry.get().sign.set(range.sign);
+        entry.get().option.set(range.option);
+        entry.get().low.set(range.low);
+        entry.get().high.set(range.high);
+        row.get().ranges.append(entry);
+      }
       values.append(row);
     }
     return report.run({iv_program: program, it_input: values, iv_batch: "X"});

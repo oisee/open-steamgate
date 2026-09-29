@@ -79,11 +79,6 @@ function replacement(statement, filename) {
       unsupported();
     }
   }
-  // A job step's input is stored as name/value pairs, so a range would be
-  // lost on the way to the job. Refused here rather than dropped there.
-  if (job !== undefined && values.some((row) => row.range)) {
-    unsupported("WITH ... IN through VIA JOB: the job step input carries name/value pairs only");
-  }
   const rows = values.map(({name, value, range}) => range
     ? `( name = '${name}' ranges = zcl_osd_submit_ranges=>of( ${value} ) )`
     : `( name = '${name}' value = CONV string( ${value} ) )`);

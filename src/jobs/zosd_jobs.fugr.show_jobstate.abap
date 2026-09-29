@@ -24,6 +24,8 @@ FUNCTION show_jobstate.
       aborted = 'X'.
     WHEN 'RUNNING'.
       running = 'X'.
+    WHEN 'READY'.
+      ready = 'X'.
     WHEN 'QUEUED'.
       ready = 'X'.
     WHEN 'WAITING'.
