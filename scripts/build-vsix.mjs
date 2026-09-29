@@ -379,6 +379,35 @@ export function copySeedTree(seedRoot, selectedPacks) {
   return modules;
 }
 
+/** Apply the pack's current fetch exclusions to the staged copy. A local
+ * fetched folder may predate an exclusion added to osd-pack.json; packaging
+ * must not ship those old files. Call this only after materializeSeedLinks,
+ * so removal cannot follow a staged symlink back into the fetched source. */
+export function excludeStagedPackSources(seedRoot, selectedPacks) {
+  for (const pack of selectedPacks) {
+    for (const source of pack.sources) {
+      const folder = join(seedRoot, "packs", pack.name, source.folder);
+      const patterns = source.exclude.map((pattern) => new RegExp(pattern, "i"));
+      const visit = (dir, relativeDir = "") => {
+        for (const entry of readdirSync(dir)) {
+          const path = join(dir, entry);
+          const relativePath = relativeDir ? `${relativeDir}/${entry}` : entry;
+          const kind = lstatSync(path);
+          if (kind.isSymbolicLink()) {
+            throw new Error(`build-vsix: staged source still has a symlink: ${relativePath}`);
+          }
+          if (patterns.some((pattern) => pattern.test(relativePath))) {
+            rmSync(path, {recursive: true, force: true});
+          } else if (kind.isDirectory()) {
+            visit(path, relativePath);
+          }
+        }
+      };
+      visit(folder);
+    }
+  }
+}
+
 /** T2 (docs/ideas.md): build the seed's own generation at packaging time, so
  *  a first start finds it and reuses it instead of transpiling cold.
  *
@@ -468,6 +497,7 @@ export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = f
   rmSync(seedRoot, {recursive: true, force: true});
   const modules = copySeedTree(seedRoot, selectedPacks);
   materializeSeedLinks(seedRoot);
+  excludeStagedPackSources(seedRoot, selectedPacks);
   const generation = prebuild ? prebuildGeneration(seedRoot, env) : undefined;
   const seedId = writeSeedId(seedRoot);
   return {seedId, modules, selectedPacks, generation};

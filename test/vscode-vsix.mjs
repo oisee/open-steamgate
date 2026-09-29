@@ -312,6 +312,34 @@ describe("packaging selected packs", function () {
     } finally { rmSync(scratch, {recursive: true, force: true}); }
   });
 
+  it("excludes stale fetched files from a symlinked source without changing the source", async function () {
+    const name = `vsix-stale-${process.pid}`;
+    const packDir = join(root, "packs", name);
+    const scratch = testScratch("stale-source");
+    const fetched = join(scratch, "fetched-games");
+    mkdirSync(packDir);
+    mkdirSync(join(packDir, "src"));
+    mkdirSync(fetched);
+    writeFileSync(join(fetched, "zork-mini-z3.w3mi.data.z3"), "old excluded game");
+    writeFileSync(join(fetched, "kept-game.w3mi.data.z3"), "selected game");
+    writeFileSync(join(packDir, "osd-pack.json"), JSON.stringify({
+      name, abap: ["src"], sources: [{folder: "games", repo: "https://example.invalid/games",
+        ref: "0000000000000000000000000000000000000000", path: "src/games", exclude: ["^zork-mini"]}],
+    }));
+    symlinkSync(fetched, join(packDir, "games"), "dir");
+    try {
+      const {out} = await buildTestVsix(join(scratch, "build"), {OSD_VSIX_PACKS: name});
+      const entries = packagedSeedEntries(out);
+      expect(entries).to.contain(`packs/${name}/games/kept-game.w3mi.data.z3`);
+      expect(entries).not.to.contain(`packs/${name}/games/zork-mini-z3.w3mi.data.z3`);
+      expect(existsSync(join(fetched, "zork-mini-z3.w3mi.data.z3"))).to.equal(true);
+      expect(existsSync(join(packDir, "games", "kept-game.w3mi.data.z3"))).to.equal(true);
+    } finally {
+      rmSync(packDir, {recursive: true, force: true});
+      rmSync(scratch, {recursive: true, force: true});
+    }
+  });
+
   it("checks fetched sources only for selected packs", async function () {
     const name = `vsix-guard-${process.pid}`;
     const packDir = join(root, "packs", name);
