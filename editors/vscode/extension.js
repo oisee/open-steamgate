@@ -2340,7 +2340,6 @@ function activate(context) {
     args === undefined ? run(output, classrunOutput, true) : callEntitySet({...args, withDebugger: true}, output)));
   context.subscriptions.push(entitySetLensProvider(output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.httpLensInfo", () => {}));
-  context.subscriptions.push(httpLensProvider(output));
   // gui-reports spike: "Open in VS Code" for a converted report, the same
   // action F8 (RUN_TABLE.PROG) reaches, placed as a lens above its own
   // REPORT line rather than asked for by name.
@@ -2370,6 +2369,10 @@ function activate(context) {
   context.subscriptions.push(systemOutput);
   const controller = new SystemController(context, systemOutput);
   activeController = controller;
+  // Registered after the controller exists, so the lens refreshes when it
+  // starts, stops or rebuilds; a default argument read before this line
+  // would have been undefined.
+  context.subscriptions.push(httpLensProvider(output, controller));
   context.subscriptions.push(vscode.commands.registerCommand("osd.gettingStarted", () => {
     const {publisher, name} = context.extension.packageJSON;
     return vscode.commands.executeCommand("workbench.action.openWalkthrough", `${publisher}.${name}#gettingStarted`, false);
