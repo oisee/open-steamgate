@@ -70,7 +70,7 @@ func newReport(s *abap.Session) *${className} { return New_${className}(s) }
 `);
 
 execFileSync("gofmt", ["-w", dir], {stdio: "inherit"});
-execFileSync("go", ["build", "-trimpath", "-ldflags=-s -w", "-o", bin, "./cmd/osabap"], {
+execFileSync("go", ["build", "-tags", "nodatabase", "-trimpath", "-ldflags=-s -w", "-o", bin, "./cmd/osabap"], {
   cwd: join(here, "go"), stdio: "inherit",
 });
 console.log(`osabap: ${name}, ${program.classes.length} classes, ${program.partial.length} statement stubs -> ${bin}`);

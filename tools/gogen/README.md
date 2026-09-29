@@ -493,7 +493,9 @@ reason, content type and body, and OSG's HTTP layer adds
 executable report through open-abap-gui, compiles the report lifecycle and its
 small host closure with gogen, and writes the stripped self-contained binary
 to `.out/osabap`. This is deliberately a different host from OSGo: it has no
-HTTP, OData or Fiori entry point.
+HTTP, OData or Fiori entry point. It is built with the `nodatabase` tag, so the
+SQLite driver and modernc/libc are not linked; a report which reaches Open SQL
+gets an explicit host error instead of silently opening a database.
 
 The selection screen is the command contract. For the checked-in `ZHELLO`
 sample these invocations all enter the same `INITIALIZATION` / selection-screen
