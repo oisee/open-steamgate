@@ -150,6 +150,16 @@ describe("durable one-shot batch runs", function () {
     }
   });
 
+  it("does not turn a synchronous saved run into a background job log", () => {
+    const store = new BatchRuns(root, env);
+    try {
+      const run = store.start({program: "ZGG_EX_012"});
+      store.finish(run.id, {status: "COMPLETED", lines: ["list only"]});
+      expect(store.db.prepare("SELECT COUNT(*) AS n FROM batch_job_log WHERE run_id = ?")
+        .get(run.id).n).to.equal(0);
+    } finally { store.close(); }
+  });
+
   it("keeps an interrupted run visible for a later doctor", () => {
     const first = new BatchRuns(root, env);
     const started = first.start({program: "ZGG_EX_012"});

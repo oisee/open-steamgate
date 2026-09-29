@@ -105,6 +105,12 @@ export class BatchRuns {
         output_sha256 TEXT, output_bytes INTEGER,
         PRIMARY KEY (run_id, step_no)
       )`);
+      this.db.exec(`CREATE TABLE IF NOT EXISTS batch_job_log (
+        run_id TEXT NOT NULL, seq INTEGER NOT NULL, step_no INTEGER,
+        occurred_at TEXT NOT NULL, event_code TEXT NOT NULL,
+        severity TEXT NOT NULL, text TEXT NOT NULL,
+        PRIMARY KEY (run_id, seq)
+      )`);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -115,6 +121,27 @@ export class BatchRuns {
   }
 
   close() { this.db.close(); }
+
+  // Call only inside the transaction that changes the corresponding run or
+  // step. BEGIN IMMEDIATE serializes sequence allocation across workers.
+  #appendJobLog(id, step, event, at = new Date().toISOString()) {
+    const messages = {
+      IMPORTED: ["I", "Job imported for dispatch"],
+      STEP_STARTED: ["I", "Report step started"],
+      STEP_COMPLETED: ["I", "Report step completed"],
+      STEP_FAILED: ["E", "Step failed or result recording failed; review detail and business effects"],
+      STEP_INTERRUPTED: ["E", "Worker stopped before recording the step result; review business effects"],
+      JOB_COMPLETED: ["I", "Job completed"],
+      JOB_FAILED: ["E", "Job failed"],
+      JOB_INTERRUPTED: ["E", "Worker stopped before recording a result; review business effects"],
+    };
+    const message = messages[event];
+    if (!message) throw new Error(`invalid job log event ${event}`);
+    this.db.prepare(`INSERT INTO batch_job_log
+      (run_id, seq, step_no, occurred_at, event_code, severity, text)
+      VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM batch_job_log WHERE run_id = ?), ?, ?, ?, ?, ?)`)
+      .run(id, id, step, at, event, ...message);
+  }
 
   start({program, input = [], generation = "unknown"}) {
     if (typeof program !== "string" || !/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(program)) {
@@ -191,6 +218,7 @@ export class BatchRuns {
           (run_id, step_no, program, state, input_json) VALUES (?, ?, ?, ?, '[]')`);
         for (const step of steps) insert.run(runId, step.number, step.program, step.number === 1 ? "READY" : "PENDING");
       }
+      this.#appendJobLog(runId, null, "IMPORTED", queuedAt);
       this.db.exec("COMMIT");
       return {kind: "imported", run: this.get(runId)};
     } catch (error) {
@@ -233,10 +261,17 @@ export class BatchRuns {
         throw new Error(`queued run ${row.id} has inconsistent ordered steps`);
       }
       const step = ready[0];
-      this.db.prepare("UPDATE batch_runs SET state = 'RUNNING', started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END WHERE id = ?")
-        .run(new Date().toISOString(), row.id);
-      if (step) this.db.prepare(`UPDATE batch_run_steps SET state = 'RUNNING', started_at = ?
-        WHERE run_id = ? AND step_no = ?`).run(new Date().toISOString(), row.id, step.step_no);
+      const startedAt = new Date().toISOString();
+      const claimed = this.db.prepare(`UPDATE batch_runs SET state = 'RUNNING',
+        started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END
+        WHERE id = ? AND state = 'QUEUED'`).run(startedAt, row.id).changes;
+      if (claimed !== 1) throw new Error(`queued run ${row.id} changed before claim`);
+      if (step) {
+        const active = this.db.prepare(`UPDATE batch_run_steps SET state = 'RUNNING', started_at = ?
+          WHERE run_id = ? AND step_no = ? AND state = 'READY'`).run(startedAt, row.id, step.step_no).changes;
+        if (active !== 1) throw new Error(`queued step ${row.id}/${step.step_no} changed before claim`);
+      }
+      this.#appendJobLog(row.id, step?.step_no ?? 1, "STEP_STARTED", startedAt);
       this.db.exec("COMMIT");
       return {kind: "claimed", run: this.get(row.id, {revealInput: true}), step: step?.step_no};
     } catch (error) {
@@ -249,16 +284,25 @@ export class BatchRuns {
     if (!/^[0-9a-f-]{36}$/.test(String(id))) throw new TypeError("expected a queued run ID");
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      const endedAt = new Date().toISOString();
       const changed = this.db.prepare(`UPDATE batch_runs SET state = 'INTERRUPTED',
         result_status = 'INTERRUPTED', ended_at = ?,
         detail = 'Worker stopped before recording a result; business effects must be inspected before resubmission'
         WHERE id = ? AND state = 'RUNNING' AND queued_at IS NOT NULL`)
-        .run(new Date().toISOString(), id).changes;
+        .run(endedAt, id).changes;
       if (changed !== 1) throw new Error(`queued run ${id} is not RUNNING`);
-      this.db.prepare(`UPDATE batch_run_steps SET state = 'INTERRUPTED', ended_at = ?,
-        result_status = 'INTERRUPTED' WHERE run_id = ? AND state = 'RUNNING'`).run(new Date().toISOString(), id);
+      const activeStep = this.db.prepare(`SELECT step_no FROM batch_run_steps
+        WHERE run_id = ? AND state = 'RUNNING'`).all(id);
+      const active = this.db.prepare(`UPDATE batch_run_steps SET state = 'INTERRUPTED', ended_at = ?,
+        result_status = 'INTERRUPTED' WHERE run_id = ? AND state = 'RUNNING'`).run(endedAt, id).changes;
+      const stepCount = this.db.prepare("SELECT step_count FROM batch_runs WHERE id = ?").get(id).step_count;
+      if (active !== (stepCount > 0 ? 1 : 0) || activeStep.length !== active) {
+        throw new Error(`queued run ${id} has inconsistent active step`);
+      }
       this.db.prepare(`UPDATE batch_run_steps SET state = 'SKIPPED', ended_at = ?
-        WHERE run_id = ? AND state IN ('READY', 'PENDING')`).run(new Date().toISOString(), id);
+        WHERE run_id = ? AND state IN ('READY', 'PENDING')`).run(endedAt, id);
+      this.#appendJobLog(id, activeStep[0]?.step_no ?? 1, "STEP_INTERRUPTED", endedAt);
+      this.#appendJobLog(id, null, "JOB_INTERRUPTED", endedAt);
       this.db.exec("COMMIT");
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
     return this.get(id);
@@ -283,18 +327,40 @@ export class BatchRuns {
     linkSync(temp, file);
     unlinkSync(temp);
     const status = String(result.status ?? "FAILED");
-    const state = status === "COMPLETED" ? "COMPLETED" : "FAILED";
-    const changed = this.db.prepare(`UPDATE batch_runs SET ended_at = ?, state = ?, result_status = ?,
-      detail = ?, output_sha256 = ?, output_bytes = ? WHERE id = ? AND state = 'RUNNING'`)
-      .run(new Date().toISOString(), state, status, String(result.detail ?? ""), hash, body.length, id).changes;
-    if (changed !== 1) throw new Error(`batch run ${id} changed state while its output was written`);
+    const success = status === "COMPLETED";
+    const state = success ? "COMPLETED" : "FAILED";
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const endedAt = new Date().toISOString();
+      const changed = this.db.prepare(`UPDATE batch_runs SET ended_at = ?, state = ?, result_status = ?,
+        detail = ?, output_sha256 = ?, output_bytes = ? WHERE id = ? AND state = 'RUNNING'`)
+        .run(endedAt, state, status, String(result.detail ?? ""), hash, body.length, id).changes;
+      if (changed !== 1) throw new Error(`batch run ${id} changed state while its output was written`);
+      const queued = this.db.prepare("SELECT queued_at FROM batch_runs WHERE id = ?").get(id).queued_at !== null;
+      if (queued) {
+        this.#appendJobLog(id, 1, success ? "STEP_COMPLETED" : "STEP_FAILED", endedAt);
+        this.#appendJobLog(id, null, success ? "JOB_COMPLETED" : "JOB_FAILED", endedAt);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
     return this.get(id);
   }
 
   fail(id, error) {
-    this.db.prepare(`UPDATE batch_runs SET ended_at = ?, state = 'FAILED',
-      result_status = ?, detail = ? WHERE id = ? AND state = 'RUNNING'`)
-      .run(new Date().toISOString(), String(error?.code ?? "DUMP"), String(error?.message ?? error), id);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const endedAt = new Date().toISOString();
+      const changed = this.db.prepare(`UPDATE batch_runs SET ended_at = ?, state = 'FAILED',
+        result_status = ?, detail = ? WHERE id = ? AND state = 'RUNNING'`)
+        .run(endedAt, String(error?.code ?? "DUMP"), String(error?.message ?? error), id).changes;
+      if (changed !== 1) throw new Error(`batch run ${id} is not running`);
+      const queued = this.db.prepare("SELECT queued_at FROM batch_runs WHERE id = ?").get(id).queued_at !== null;
+      if (queued) {
+        this.#appendJobLog(id, 1, "STEP_FAILED", endedAt);
+        this.#appendJobLog(id, null, "JOB_FAILED", endedAt);
+      }
+      this.db.exec("COMMIT");
+    } catch (failure) { this.db.exec("ROLLBACK"); throw failure; }
     return this.get(id);
   }
 
@@ -330,6 +396,7 @@ export class BatchRuns {
           .run(id, next.step_no).changes;
         const queued = this.db.prepare("UPDATE batch_runs SET state = 'QUEUED' WHERE id = ? AND state = 'RUNNING'").run(id).changes;
         if (readied !== 1 || queued !== 1) throw new Error(`batch step ${id}/${number} transition failed`);
+        this.#appendJobLog(id, number, "STEP_COMPLETED", now);
         transition = "advanced";
       } else {
         if (!success) this.db.prepare(`UPDATE batch_run_steps SET state = 'SKIPPED', ended_at = ?
@@ -338,6 +405,8 @@ export class BatchRuns {
           output_sha256 = ?, output_bytes = ? WHERE id = ? AND state = 'RUNNING'`)
           .run(success ? "COMPLETED" : "FAILED", now, status, String(result.detail ?? ""), hash, body.length, id).changes;
         if (terminal !== 1) throw new Error(`batch run ${id} changed state during terminal step`);
+        this.#appendJobLog(id, number, success ? "STEP_COMPLETED" : "STEP_FAILED", now);
+        this.#appendJobLog(id, null, success ? "JOB_COMPLETED" : "JOB_FAILED", now);
         const parent = join(this.artifacts, `${id}.json`);
         const parentTemp = join(this.artifacts, `.${id}.${process.pid}.tmp`);
         writeFileSync(parentTemp, body, {mode: 0o600, flag: "wx"});
@@ -367,6 +436,8 @@ export class BatchRuns {
         WHERE id = ? AND state = 'RUNNING'`)
         .run(now, String(error?.code ?? "DUMP"), String(error?.message ?? error), id).changes;
       if (terminal !== 1) throw new Error(`batch run ${id} changed state during failure`);
+      this.#appendJobLog(id, number, "STEP_FAILED", now);
+      this.#appendJobLog(id, null, "JOB_FAILED", now);
       this.db.exec("COMMIT");
     } catch (failure) { this.db.exec("ROLLBACK"); throw failure; }
     return this.get(id);

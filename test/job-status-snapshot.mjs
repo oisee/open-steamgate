@@ -6,6 +6,7 @@ import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
 import {BatchRuns} from "../tools/osd-batch-runs.mjs";
+import {readJobLog} from "../tools/osd-job-log.mjs";
 import {readJobSnapshot} from "../tools/osd-job-snapshot.mjs";
 
 const root = resolve(".");
@@ -14,6 +15,9 @@ const caller = {client: "123", user: "DEVELOPER", sid: "OSG"};
 describe("private durable job status snapshot", function () {
   let dir, sourceDb, operationsDb, env;
   const read = (jobName, jobCount, who = caller) => readJobSnapshot({
+    sourceDb, jobName, jobCount, caller: who, root, env,
+  });
+  const log = (jobName, jobCount, who = caller) => readJobLog({
     sourceDb, jobName, jobCount, caller: who, root, env,
   });
   const edit = (work) => {
@@ -342,5 +346,179 @@ describe("private durable job status snapshot", function () {
     assert.equal(read("PRIVATE", "00000008", {...caller, client: "999"}), undefined);
     assert.throws(() => read("PRIVATE", "00000008", {...caller, user: "OTHER"}),
       {code: "JOB_READ_FORBIDDEN"});
+  });
+
+  it("keeps two ordered steps and their technical log across a restart", () => {
+    reserve("LOG_CHAIN", "00000020");
+    const job = bind("LOG_CHAIN", "00000020");
+    assert.deepEqual(log(job.name, job.count), {phase: "OUTBOX", entries: [], historicalGap: false});
+    const id = imported(job);
+    acknowledge(job);
+    const first = new BatchRuns(root, env);
+    try {
+      first.claimNext();
+      first.finishStep(id, 1, {status: "COMPLETED", lines: ["secret list"],
+        messages: [{text: "arbitrary application message"}]});
+    } finally { first.close(); }
+    const second = new BatchRuns(root, env);
+    try {
+      second.claimNext();
+      second.finishStep(id, 2, {status: "COMPLETED", lines: ["secret list 2"]});
+    } finally { second.close(); }
+    assert.deepEqual(log(job.name, job.count).entries.map(({sequence, step, event}) =>
+      [sequence, step, event]), [
+      [1, null, "IMPORTED"], [2, 1, "STEP_STARTED"], [3, 1, "STEP_COMPLETED"],
+      [4, 2, "STEP_STARTED"], [5, 2, "STEP_COMPLETED"], [6, null, "JOB_COMPLETED"],
+    ]);
+    assert.equal(JSON.stringify(log(job.name, job.count)).includes("secret list"), false);
+    assert.equal(JSON.stringify(log(job.name, job.count)).includes("arbitrary application message"), false);
+    assert.equal(log(job.name, job.count).historicalGap, false);
+    assert.equal(log(job.name, job.count, {...caller, client: "999"}), undefined);
+    assert.throws(() => log(job.name, job.count, {...caller, user: "OTHER"}),
+      {code: "JOB_READ_FORBIDDEN"});
+  });
+
+  it("logs failure and interruption without creating synthetic completion", () => {
+    reserve("LOG_FAILED", "00000021");
+    const failed = bind("LOG_FAILED", "00000021", ["Z_A", "Z_B", "Z_C"]);
+    const failedId = imported(failed);
+    const store = new BatchRuns(root, env);
+    try {
+      store.claimNext();
+      store.failStep(failedId, 1, new Error("private failure detail"));
+      assert.deepEqual(log(failed.name, failed.count).entries.map(({event}) => event),
+        ["IMPORTED", "STEP_STARTED", "STEP_FAILED", "JOB_FAILED"]);
+      assert.equal(JSON.stringify(log(failed.name, failed.count)).includes("private failure detail"), false);
+      reserve("LOG_CRASH", "00000022");
+      const crashed = bind("LOG_CRASH", "00000022");
+      const crashedId = imported(crashed);
+      assert.equal(store.claimNext().run.id, crashedId);
+      assert.deepEqual(log(crashed.name, crashed.count).entries.map(({event}) => event),
+        ["IMPORTED", "STEP_STARTED"]);
+      store.interruptQueued(crashedId);
+      assert.deepEqual(log(crashed.name, crashed.count).entries.map(({event}) => event),
+        ["IMPORTED", "STEP_STARTED", "STEP_INTERRUPTED", "JOB_INTERRUPTED"]);
+    } finally { store.close(); }
+  });
+
+  it("does not repeat import entries or commit an uncommitted caller job", () => {
+    reserve("LOG_RETRY", "00000023");
+    const job = bind("LOG_RETRY", "00000023");
+    imported(job);
+    imported(job);
+    assert.deepEqual(log(job.name, job.count).entries.map(({event}) => event), ["IMPORTED"]);
+    edit((db) => {
+      db.exec("BEGIN");
+      db.prepare(`INSERT INTO zosd_job_identity VALUES
+        ('123', 'LOG_UNCOMMITTED', '00000024', 'DEVELOPER', '')`).run();
+      assert.equal(log("LOG_UNCOMMITTED", "00000024"), undefined);
+      db.exec("ROLLBACK");
+    });
+    assert.equal(log("LOG_UNCOMMITTED", "00000024"), undefined);
+  });
+
+  it("rolls back a step transition when the technical log insert fails", () => {
+    reserve("LOG_ATOMIC", "00000025");
+    const job = bind("LOG_ATOMIC", "00000025");
+    const id = imported(job);
+    const store = new BatchRuns(root, env);
+    try {
+      store.claimNext();
+      store.db.exec(`CREATE TRIGGER refuse_completed_log BEFORE INSERT ON batch_job_log
+        WHEN NEW.event_code = 'STEP_COMPLETED' BEGIN SELECT RAISE(FAIL, 'log refused'); END`);
+      assert.throws(() => store.finishStep(id, 1, {status: "COMPLETED", lines: []}), /log refused/);
+      assert.equal(store.get(id).state, "RUNNING");
+      assert.deepEqual(store.get(id).steps.map(({state}) => state), ["RUNNING", "PENDING"]);
+      assert.deepEqual(log(job.name, job.count).entries.map(({event}) => event),
+        ["IMPORTED", "STEP_STARTED"]);
+    } finally { store.close(); }
+  });
+
+  it("logs an imported legacy one-step job atomically through finish and fail", () => {
+    for (const [name, count, success] of [["OLD_DONE", "00000026", true],
+      ["OLD_FAIL", "00000027", false]]) {
+      reserve(name, count);
+      const job = bind(name, count, ["Z_OLD"]);
+      edit((db) => {
+        db.prepare("UPDATE zosd_job_outbox SET step_count = '00' WHERE intent_id = ?").run(job.intentId);
+        db.prepare("DELETE FROM zosd_job_step WHERE intent_id = ?").run(job.intentId);
+      });
+      const id = imported(job, {legacy: true});
+      const store = new BatchRuns(root, env);
+      try {
+        assert.equal(store.claimNext().run.id, id);
+        if (success) store.finish(id, {status: "COMPLETED", lines: ["private list"]});
+        else store.fail(id, new Error("private failure"));
+        assert.deepEqual(log(name, count).entries.map(({event}) => event),
+          ["IMPORTED", "STEP_STARTED", success ? "STEP_COMPLETED" : "STEP_FAILED",
+            success ? "JOB_COMPLETED" : "JOB_FAILED"]);
+      } finally { store.close(); }
+    }
+  });
+
+  it("reopens an old operations DB with an explicit historical log gap", () => {
+    reserve("LOG_HISTORY", "00000028");
+    const job = bind("LOG_HISTORY", "00000028");
+    const id = imported(job);
+    const db = new DatabaseSync(operationsDb);
+    try { db.exec("DROP TABLE batch_job_log"); } finally { db.close(); }
+    const reopened = new BatchRuns(root, env);
+    try {
+      assert.deepEqual(log(job.name, job.count),
+        {phase: "OPERATIONS", entries: [], historicalGap: true});
+      assert.equal(reopened.claimNext().run.id, id);
+      assert.deepEqual(log(job.name, job.count).entries.map(({event}) => event), ["STEP_STARTED"]);
+      assert.equal(log(job.name, job.count).historicalGap, true);
+    } finally { reopened.close(); }
+  });
+
+  it("records the second active step when a restarted worker is interrupted", () => {
+    reserve("LOG_LATE_CRASH", "00000030");
+    const job = bind("LOG_LATE_CRASH", "00000030");
+    const id = imported(job);
+    const first = new BatchRuns(root, env);
+    try {
+      first.claimNext();
+      first.finishStep(id, 1, {status: "COMPLETED", lines: []});
+    } finally { first.close(); }
+    const second = new BatchRuns(root, env);
+    try {
+      assert.equal(second.claimNext().step, 2);
+    } finally { second.close(); }
+    const restarted = new BatchRuns(root, env);
+    try {
+      restarted.interruptQueued(id);
+      assert.deepEqual(log(job.name, job.count).entries.slice(-2).map(({step, event}) => [step, event]),
+        [[2, "STEP_INTERRUPTED"], [null, "JOB_INTERRUPTED"]]);
+    } finally { restarted.close(); }
+  });
+
+  it("refuses a mutated imported payload when reading its log", () => {
+    reserve("LOG_TAMPER", "00000031");
+    const job = bind("LOG_TAMPER", "00000031");
+    const id = imported(job);
+    assert.equal(read(job.name, job.count).phase, "OPERATIONS");
+    const writer = new DatabaseSync(operationsDb);
+    try {
+      writer.prepare("UPDATE batch_run_steps SET program = 'Z_OTHER' WHERE run_id = ? AND step_no = 2")
+        .run(id);
+    } finally { writer.close(); }
+    assert.throws(() => log(job.name, job.count), {code: "JOB_SNAPSHOT_INCONSISTENT"});
+  });
+
+  it("rolls back a new import if its first log entry cannot be stored", () => {
+    const store = new BatchRuns(root, env);
+    try {
+      store.db.exec(`CREATE TRIGGER refuse_import_log BEFORE INSERT ON batch_job_log
+        WHEN NEW.event_code = 'IMPORTED' BEGIN SELECT RAISE(FAIL, 'log refused'); END`);
+      const intentId = randomUUID().replaceAll("-", "");
+      assert.throws(() => store.importIntent({intentId, sourceDb, client: caller.client,
+        sysid: caller.sid, owner: caller.user, jobname: "LOG_IMPORT_FAIL",
+        jobcount: "00000029", program: "Z_A", generation: "generation-1",
+        steps: [{number: 1, program: "Z_A"}]}), /log refused/);
+      assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM batch_runs").get().n, 0);
+      assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM batch_imports").get().n, 0);
+      assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM batch_run_steps").get().n, 0);
+    } finally { store.close(); }
   });
 });
