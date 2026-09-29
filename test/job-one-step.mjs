@@ -1,11 +1,11 @@
 import {expect} from "chai";
-import {mkdtempSync, rmSync} from "node:fs";
+import {mkdtempSync, mkdirSync, rmSync, symlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
 import {spawnSync} from "node:child_process";
 import {randomUUID} from "node:crypto";
-import {BatchRuns, liveGeneration, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
+import {BatchRuns, liveGeneration, runConvertedBatch, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
 import {drainJobOutbox} from "../tools/osd-job-outbox.mjs";
 import {dialogStep, exclusive} from "../tools/osd-dialog-step.mjs";
 import {applyRuntimeHotSwap} from "../tools/osd-hot.mjs";
@@ -14,7 +14,7 @@ const root = resolve(".");
 
 describe("one-step standard JOB_* facade and committed outbox", function () {
   this.timeout(120000);
-  let dir, dbPath, envBefore, abapBefore, abap, client, store;
+  let dir, dbPath, envBefore, abapBefore, contextBefore, abap, client, store;
   const box = (value = "") => new abap.types.String().set(value);
   const invoke = async (name, input, outputs = []) => {
     const importing = Object.fromEntries(outputs.map((key) => [key, box()]));
@@ -56,10 +56,18 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     envBefore = {STG_DB: process.env.STG_DB, STG_DB_PATH: process.env.STG_DB_PATH,
       OSD_OPERATIONS_DB: process.env.OSD_OPERATIONS_DB};
     abapBefore = globalThis.abap;
+    if (abapBefore?.context) contextBefore = {
+      databaseConnections: {...abapBefore.context.databaseConnections},
+      RFCDestinations: {...abapBefore.context.RFCDestinations},
+      osdGeneration: abapBefore.context.osdGeneration,
+    };
     process.env.STG_DB = "file";
     process.env.STG_DB_PATH = dbPath;
     process.env.OSD_OPERATIONS_DB = join(dir, "operations.sqlite");
-    await import("../output/init.mjs");
+    const {initializeABAP} = await import("../output/init.mjs");
+    // The integration runner already imported init through test/start.mjs.
+    // Import caching alone would reuse its database and disconnect it below.
+    await initializeABAP();
     abap = globalThis.abap;
     client = abap.context.databaseConnections.DEFAULT;
     store = new BatchRuns(root, process.env);
@@ -67,6 +75,12 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
   after(async () => {
     store?.close();
     await client?.disconnect?.();
+    if (abapBefore === abap && contextBefore) {
+      abap.context.databaseConnections = contextBefore.databaseConnections;
+      abap.context.RFCDestinations = contextBefore.RFCDestinations;
+      if (contextBefore.osdGeneration === undefined) delete abap.context.osdGeneration;
+      else abap.context.osdGeneration = contextBefore.osdGeneration;
+    }
     globalThis.abap = abapBefore;
     for (const [key, value] of Object.entries(envBefore ?? {})) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
@@ -167,6 +181,23 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     try { clean.exec("DROP TRIGGER refuse_job_ack"); }
     finally { clean.close(); }
     expect((await drainJobOutbox(store)).imported).to.equal(1);
+    expect(rows()).to.have.length(0);
+    expect(store.list()).to.have.length(before + 1);
+  });
+
+  it("accepts a row another drainer acknowledged after the same intent was imported", async () => {
+    await schedule();
+    const before = store.list().length;
+    const fixture = join(root, "test", "fixtures", "job-outbox-restart.mjs");
+    const result = await drainJobOutbox(store, {afterImport: () => {
+      const child = spawnSync(process.execPath, [fixture, "retry"], {
+        cwd: root, env: {...process.env}, encoding: "utf8", timeout: 120000,
+      });
+      expect(child.error, String(child.error)).to.equal(undefined);
+      expect(child.status, child.stderr).to.equal(0);
+      expect(JSON.parse(child.stdout.trim())).to.deep.equal({imported: 1});
+    }});
+    expect(result.imported).to.equal(1);
     expect(rows()).to.have.length(0);
     expect(store.list()).to.have.length(before + 1);
   });
@@ -308,6 +339,20 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       abap.context.osdGeneration = old;
       scoped.close();
     }
+  });
+
+  it("runs the loaded report when the output symlink switches before execution", async () => {
+    const fakeRoot = join(dir, "switched-root");
+    const first = join(fakeRoot, "g1", "output");
+    const second = join(fakeRoot, "g2", "output");
+    mkdirSync(first, {recursive: true});
+    mkdirSync(second, {recursive: true});
+    symlinkSync(first, join(fakeRoot, "output"), "dir");
+    rmSync(join(fakeRoot, "output"));
+    symlinkSync(second, join(fakeRoot, "output"), "dir");
+    const result = await runConvertedBatch(fakeRoot, "ZGG_EX_012");
+    expect(result.status).to.equal("COMPLETED");
+    expect(result.lines.length).to.be.greaterThan(0);
   });
 
   it("drains only the current business client from a shared database", async () => {

@@ -277,18 +277,21 @@ const plainMessage = (row) => Object.fromEntries(Object.entries(row.get()).map((
 // The same generated registry used by SUBMIT, with the same ABAP dialog-step
 // transaction boundary. Every invocation gets a fresh converted report.
 export async function runConvertedBatch(root, program, input = []) {
-  const {zcl_osd_batch_report} = await import(pathToFileURL(join(resolve(root), "output", "zcl_osd_batch_report.clas.mjs")).href);
-  const {zif_gg_selection_screen_types} = await import(pathToFileURL(join(resolve(root), "output", "zif_gg_selection_screen_types.intf.mjs")).href);
-  const values = zif_gg_selection_screen_types.ty_values.clone();
-  for (const item of inputOf(input)) {
-    const row = zif_gg_selection_screen_types.ty_value.clone();
-    row.get().name.set(item.name);
-    row.get().value.set(item.value);
-    values.append(row);
-  }
-  const answer = await dialogStep(() => zcl_osd_batch_report.run({
-    iv_program: program, it_input: values, iv_batch: "X",
-  }), `batch report ${program}`);
+  const answer = await dialogStep(async () => {
+    // The initialized runtime owns the loaded generation. Resolving output/
+    // here could follow a newly switched symlink before this process swaps.
+    const report = globalThis.abap?.Classes?.ZCL_OSD_BATCH_REPORT;
+    const types = globalThis.abap?.Classes?.ZIF_GG_SELECTION_SCREEN_TYPES;
+    if (!report || !types) throw new Error("batch report runtime is not initialized");
+    const values = types.ty_values.clone();
+    for (const item of inputOf(input)) {
+      const row = types.ty_value.clone();
+      row.get().name.set(item.name);
+      row.get().value.set(item.value);
+      values.append(row);
+    }
+    return report.run({iv_program: program, it_input: values, iv_batch: "X"});
+  }, `batch report ${program}`);
   const fields = answer.get();
   return {
     status: fields.status.get(), detail: fields.detail.get(),
