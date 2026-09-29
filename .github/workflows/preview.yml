@@ -64,25 +64,18 @@ jobs:
       # SHA rather than a branch on purpose: a moving branch would make the
       # public site depend on what somebody pushed this morning. The SHA and
       # repo are loaded from libs.lock.json at the start of the job.
+      - name: Restore the pinned transpiler build
+        id: transpiler_cache
+        uses: actions/cache@v4
+        with:
+          path: ../transpiler
+          key: transpiler-v1-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('libs.lock.json') }}-${{ hashFiles('tools/osd-ci-transpiler-build.sh') }}
       - name: Build the transpiler this deployment is pinned to
+        if: steps.transpiler_cache.outputs.cache-hit != 'true'
+        run: bash tools/osd-ci-transpiler-build.sh build
+      - name: Verify and link the pinned transpiler
         run: |
-          git clone --filter=blob:none "$OSD_TRANSPILER_REPO" ../transpiler
-          git -C ../transpiler checkout "$OSD_TRANSPILER_REF"
-          # the root first: @types/node lives there, and tsc in each package
-          # resolves it by walking up. --ignore-scripts because the root's
-          # own "install" script calls npm install again.
-          npm --prefix ../transpiler install --ignore-scripts --no-audit --no-fund
-          for package in runtime transpiler extras cli; do
-            npm --prefix "../transpiler/packages/$package" install --no-audit --no-fund
-          done
-          for package in runtime transpiler extras cli; do
-            npm --prefix "../transpiler/packages/$package" run compile
-          done
-          # the bin is recorded in git as 100644. It is executable on a
-          # developer's machine because npm sets that bit when it installs a
-          # package, and a clone never went through npm. Locally nothing
-          # notices; on a runner it is "abap_transpile: Permission denied".
-          chmod +x ../transpiler/packages/cli/abap_transpile
+          bash tools/osd-ci-transpiler-build.sh verify
           # three packages, not two: the transpile is a library call into
           # @abaplint/transpiler (tools/osd-transpile.mjs), and with only the
           # CLI linked the published transpiler did the work - every W3MI
@@ -120,7 +113,22 @@ jobs:
       # changes database, but it must not silently lose coverage of the
       # original browser runtime.
       - run: npm run web:preview
-      - run: npx playwright install --with-deps chromium
+      - name: Read the installed Playwright version
+        id: playwright_version
+        run: node -e 'console.log("version=" + require("./package-lock.json").packages["node_modules/@playwright/test"].version)' >> "$GITHUB_OUTPUT"
+      - name: Restore Chromium
+        id: chromium_cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: chromium-v1-${{ runner.os }}-${{ steps.playwright_version.outputs.version }}
+      - name: Install Chromium and system dependencies
+        run: |
+          if [[ "${{ steps.chromium_cache.outputs.cache-hit }}" == true ]]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
       - name: Check the sql.js build in a browser
         run: npx playwright test --config playwright.preview.config.mjs
       # The build directory is replaced here. Only the DuckDB-Wasm build below
