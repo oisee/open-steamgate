@@ -79,6 +79,10 @@ function release() {
 /** is the code asking the step that holds the work process? Without a
  *  store (the preview) any holder counts, as before */
 const mine = () => (steps === undefined ? holder !== undefined : holder !== undefined && steps.getStore() === holder);
+let waitPump;
+export function registerWaitPump(callback) {
+  waitPump = callback;
+}
 
 // Host services with pending ABAP definitions may keep data only for the
 // current execution. The browser has no AsyncLocalStorage: fail closed there
@@ -220,7 +224,11 @@ function installWait() {
       await commitAll();
       release();
       try {
-        await new Promise((r) => setTimeout(r, timeout));
+        const until = Date.now() + timeout;
+        while (Date.now() < until) {
+          await new Promise((r) => setTimeout(r, Math.min(100, until - Date.now())));
+          await waitPump?.(token);
+        }
       } finally {
         await acquire(token);
       }
@@ -241,6 +249,7 @@ function installWait() {
         // polled while rolled out, without the work process: a system asks
         // it after the roll-in; here it reads only this step's own memory
         await new Promise((r) => setTimeout(r, Math.min(500, remaining)));
+        await waitPump?.(token);
       }
     } finally {
       if (released === true) await acquire(token);
