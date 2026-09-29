@@ -1827,3 +1827,670 @@ for `zosd_status_app`, which has been deployed for a day.
 - Impact: callers that depend on `Z` cannot reproduce it locally yet.
 - Smallest safe workaround: leave `Z` unmapped until its state and flags are measured.
 - Measurement: sandbox behaviour probe, 2026-09-29; see `docs/job-standard-fms.md`.
+
+### ANOMALY-2026-09-24-escape-json-string-control-characters — `escape( format = e_json_string )` leaves control characters other than a newline raw
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime 2.13.89` (`builtin/escape.ts`, the `e_json_string` case)
+- Affected ABAP statement, runtime API or adapter: `escape( val = v format = cl_abap_format=>e_json_string )`, which open-abap-core's `/UI2/CL_JSON=>SERIALIZE_INT` uses for every c and string it writes
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_jsesc.clas.abap` (branch `ultra/parity-wave1`)
+- Exact command used to run it: **measured on A4H, 2026-09-24**, the class as it stands in an ABAP Unit probe ($ZOSG_TMP_0050, deleted afterwards); the runtime side read from `escape.ts`
+- Expected SAP behaviour: `\` and `"` escaped; U+0008 U+0009 U+000A U+000C U+000D as `\b \t \n \f \r`; every other character below U+0020 as `\u00XX` with upper-case hex (`\u0000`, `\u000B`, `\u001F`); `/`, `'`, U+007F and everything beyond ASCII (U+2028 included) unchanged; a c operand without its trailing blanks
+- Actual open-abap behaviour: only `\`, `"` and U+000A are escaped; a tab, a carriage return and every other control character reach the JSON raw, which makes the document invalid JSON
+- Impact on open-steamgate: a string with a tab or a CR in it (source code through the RFC channel, a message text) serializes to JSON a browser's `JSON.parse` refuses on Node and not on a system or on OSGo, which follows A4H (`go/abap/strings.go` EscapeJSONString)
+- Smallest safe workaround: none in ABAP; the Go and JS backends of tools/gogen follow A4H
+- Upstream issue: not reported yet (goes through the critic gate with the next batch)
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_JSESC
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-24-empty-string-to-date — an empty string moved into a `d` is eight blanks, not the initial date
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime 2.13.89` (`types/date.ts`, `set` of a string)
+- Affected ABAP statement, runtime API or adapter: `lv_d = lv_string` and the same move into a field symbol bound to a `d`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_genmovd.clas.abap` (branch `ultra/parity-wave1`)
+- Exact command used to run it: **measured on A4H, 2026-09-24** in an ABAP Unit probe ($ZOSG_TMP_0050, deleted afterwards); the runtime side read from `date.ts`
+- Expected SAP behaviour: a string into a `d` is its first eight characters, blank-filled when shorter, and an **empty** string is the initial date `00000000` (IS INITIAL true). Into a `t` the same with six, and a shorter string is filled with zeros (`abc` is `abc000`; the runtime does this one right)
+- Actual open-abap behaviour: `Date.set("")` pads with blanks, so the date is eight blanks, IS INITIAL false
+- Impact on open-steamgate: an absent date in a JSON body or an OData request that reaches a `d` through a string is not initial on Node; OSGo follows A4H (`go/abap/conv.go` S2D)
+- Smallest safe workaround: `IF lv_s IS INITIAL. CLEAR lv_d. ELSE. lv_d = lv_s. ENDIF.`
+- Upstream issue: not reported yet (goes through the critic gate with the next batch)
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_GENMOVD
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-24-byte-compare-x-length — two `x` fields of different lengths are unequal in the transpiler runtime; a system pads the shorter with 00
+
+- Status: `open` (the Go and JS backends of tools/gogen answer as A4H does)
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`compare/eq.js`: two `Hex` of different lengths are equal only when both are initial; `lt` / `gt` compare the hex text)
+- Affected ABAP statement, runtime API or adapter: `=`, `<>`, `<`, `>` between `x LENGTH m` and `x LENGTH n`, m <> n
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_xcmp.clas.abap`, segment `g` of `RUN1` (`lv_x1 = 'AB'. lv_x2 = 'AB00'. lv_x1 = lv_x2 ...`)
+- Exact command used to run it: A4H, the same bodies as ABAP Unit probes ZCL_GOGEN_T_XCMP, _XCMP2, _XCMP3 in `$ZOSG_TMP_0480` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core, `run( )` called from Node (scratch runner, not tracked); the Go and JS backends: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: `g:10010101101` -- `x'AB' = x'AB00'` is true and `x'AB' < x'AB00'` false (the shorter operand is padded with 00 on the right); the rest of the class matches the transpiler: an `xstring` against an `xstring` or an `x` compares the bytes in order and a prefix is the smaller (`x'AB' < xstring AB00`); against `c` or `string` the byte operand becomes its upper-case hex digits and the comparison is one of characters (`x'FF' <> 'ff'`, `x'FF' < 'ff'`, `x'00' <> '0'`, an empty xstring `= ' '`)
+- Actual open-abap behaviour: `g:01010101101` -- `x'AB' = x'AB00'` false, `x'AB' < x'AB00'` true
+- Impact on open-steamgate: none found (ZCL_OSD_GIT compares xstrings with c literals, which both runtimes answer alike)
+- Smallest safe workaround: none needed
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, `compare/eq`, `lt`, `gt` for `Hex`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XCMP
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-byte-compare-numeric — an `x` or `xstring` against an `i` or `n` is not read as a number in the transpiler runtime
+
+- Status: `open` (the Go and JS backends of tools/gogen answer as A4H does)
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`compare/eq.js`, `lt.js`, `gt.js`)
+- Affected ABAP statement, runtime API or adapter: `=`, `<`, `>` between an `x` / `xstring` and an `i` (literal or field) or an `n`; all of them activate on A4H
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_xcmpn.clas.abap`
+- Exact command used to run it: as ANOMALY-2026-09-24-byte-compare-x-length (A4H probes ZCL_GOGEN_T_XCMP2=>NUM, ZCL_GOGEN_T_XCMP3=>LONG, =>LONG2 in `$ZOSG_TMP_0480`)
+- Expected SAP behaviour: `xi:1111110 xn:1 xsi:111 l:1111 l2:11` -- the byte operand is an integer of its last four bytes, 00 on the left, signed: `x'0A' = 10`, `x'0100' = 256`, `x'FF' = 255` (not -1), `x'FFFFFFFF' = -1`, `x LENGTH 5 '0100000002' = 2`, `x'00FFFFFFFF' = -1`; an `xstring` the same by its run-time length (`FFFF = 65535`, empty `= 0`); `x'0A' = n '0010'`
+- Actual open-abap behaviour: `xi:1110110 xn:0 xsi:000 l:0000 l2:00` -- `x'FFFFFFFF' = -1` is false, `x'0A' = n '0010'` is false, and every `xstring` against a number is false
+- Impact on open-steamgate: none found (no OSG source compares bytes with a number)
+- Smallest safe workaround: none needed
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, comparisons of `Hex` / `XString` with numbers)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XCMPN
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-byte-to-i-move — an empty `xstring` moved into an `i` is NaN, and more than four bytes are not cut, in the transpiler runtime
+
+- Status: `open` (the Go and JS backends of tools/gogen answer as A4H does)
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (the move of `Hex` / `XString` into `Integer` parses the whole hex text)
+- Affected ABAP statement, runtime API or adapter: `lv_i = lv_x.` / `lv_i = lv_xstring.`; in OSG `ZCL_ABAPGIT_CONVERT=>XSTRING_TO_INT` (abapGit's pack header, four bytes: not affected)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_xmovi.clas.abap`
+- Exact command used to run it: A4H, the same class as an ABAP Unit probe in `$ZOSG_TMP_0481` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core, `run( )` called from Node (scratch runner, not tracked); the Go and JS backends: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: `a:11 b:-1 c:255 d:258 e:0 f:-2147483648 g:-2 h:255 x5:2 xs5:2` -- the last four bytes, 00 on the left, a signed int32; an empty xstring is 0; no exception for five bytes
+- Actual open-abap behaviour: `... e:NaN ... x5:4294967298 xs5:4294967298` -- an empty xstring gives NaN, and five bytes give a value no `i` can hold
+- Impact on open-steamgate: none found (abapGit converts exactly four bytes)
+- Smallest safe workaround: none needed
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, move of `Hex` / `XString` into `Integer`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XMOVI
+- Upstream version containing a fix: none yet
+
+The five `ANOMALY-2026-09-24-httpc-*` entries (`CL_HTTP_CLIENT`: body-latin1, failure-dumps, timeout-ignored, status-code-field, post-url-query) were measured on a system; the measured versions are on main (PR #84).
+
+### ANOMALY-2026-09-24-find-section — `FIND ... IN SECTION` and an empty `FIND` pattern differ from A4H in the transpiler runtime
+
+- Status: `open` (the Go and JS backends of tools/gogen answer as A4H does; the transpiler runtime does not)
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/transpiler` / `@abaplint/runtime` as installed in the main checkout (2.13.89)
+- Affected ABAP statement, runtime API or adapter: `FIND [FIRST OCCURRENCE OF] p IN SECTION [OFFSET o] [LENGTH l] OF s [MATCH OFFSET m] [MATCH LENGTH n]`; `FIND '' IN s`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_findsec.clas.abap` (`s` is `ab<cd<e`, one `sec( )` call per case)
+- Exact command used to run it: A4H ABAP Unit probe ZCL_GOGEN_T_FINDSEC in `$ZOSG_TMP_0041` (deleted); the transpiler side by transpiling the same class with open-abap-core and calling `sec( )` per case (scratch runner, not tracked)
+- Expected SAP behaviour: MATCH OFFSET counts from the start of `s`; `OFFSET -1`, an offset past the end, `LENGTH` below -1 and a section past the end raise `CX_SY_RANGE_OUT_OF_BOUNDS`; `LENGTH -1` is the rest of `s`; `SECTION LENGTH 3 OF s` finds `<` at 2; an empty pattern is found at the section's start with length 0 (`FIND '' IN s MATCH OFFSET o MATCH LENGTH l` over `abc` is 0/0/0).
+- Actual open-abap behaviour: any `SECTION ... LENGTH` form (`OFFSET o LENGTH l OF`, `LENGTH l OF`) takes the wrong operand as the subject: with `OFFSET` it throws a JavaScript `TypeError` (`blah.substr is not a function`), without it the FIND answers 4 where A4H finds (`j`); `OFFSET -1` is sy-subrc 4, not an exception; an empty pattern sets sy-subrc 0 and leaves MATCH OFFSET and MATCH LENGTH as they were (`p: 0/99/98` against A4H `0/1/0`).
+- Impact on open-steamgate: none today: `ZCL_STG_SADL_DEF` uses `IN SECTION OFFSET o OF` with valid offsets, which the transpiler answers correctly. A LENGTH section anywhere in OSG's ABAP would crash on Node.
+- Smallest safe workaround: none needed in `src/`; avoid `IN SECTION ... LENGTH` in ABAP meant for the Node hosts.
+- Upstream issue: not drafted (abaplint/transpiler, `statements/find.ts` reads `IN SECTION OFFSET` only).
+- Regression-test location: `tools/gogen/semantics.mjs` (`ZCL_GOGEN_T_FINDSEC`)
+- Upstream version containing a fix: unknown
+
+### ANOMALY-2026-09-23-w3mi-edges — WWWDATA_IMPORT and SCMS_BINARY_TO_XSTRING differ from A4H at their edges
+
+- Status: `open` (the Go host of tools/gogen answers as A4H does; the open-abap-core functions do not)
+- Discovery date: `2026-09-23`
+- Affected versions: open-abap-core `zw3mi` and `zscms` function groups as held in `.local/lars/open-abap-core` (fork branch with #1218)
+- Affected ABAP statement, runtime API or adapter: `CALL FUNCTION 'WWWDATA_IMPORT'`, `CALL FUNCTION 'SCMS_BINARY_TO_XSTRING'`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_w3mi.clas.abap` (A4H ran the same calls over an object of its own, found with a SELECT on WWWPARAMS)
+- Exact command used to run it: A4H ABAP Unit probe ZCL_GOGEN_T_W3MI in `$ZOSG_TMP_0230` (deleted); locally `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: A4H answered `miss:2/1 rel:1/0 hit:0 rowsdiff:0 pad:00/255 exact:0/X five:5/X zero:0 over:0/0 neg:0/0 empty:0/0`. An unknown object is `IMPORT_ERROR` and **MIME keeps the rows it had**; a `RELID` other than `MI` is `WRONG_OBJECT_TYPE`; `SCMS_BINARY_TO_XSTRING` with `INPUT_LENGTH` 0 or negative returns an **empty** buffer, with more than there is the whole of it, with an empty table an empty (cleared) buffer.
+- Actual open-abap behaviour: `WWWDATA_IMPORT` clears MIME before it looks the object up, so a miss empties the caller's table; it never reads `RELID`; `SCMS_BINARY_TO_XSTRING` cuts only when `0 < INPUT_LENGTH * 2 < length`, so 0 or a negative length returns **everything**.
+- Impact on open-steamgate: small. The packs pass the size WWWPARAMS holds, which is never 0 for a real object; a caller that retries into the same table after a miss sees it emptied.
+- Smallest safe workaround: none needed in `src/`; the Go host (`tools/gogen/go/abap/w3mi.go`) implements the measured rules.
+- Upstream issue: not drafted; it belongs with the pending open-abap-core PRs for these two function groups.
+- Regression-test location: `tools/gogen/semantics.mjs` (`ZCL_GOGEN_T_W3MI`)
+- Upstream version containing a fix: unknown
+
+### ANOMALY-2026-09-23-dynamic-create-ctor-params — abaplint checks `CREATE OBJECT ... TYPE (name)` against the static type's constructor
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/core` 2.120.55
+- Affected ABAP statement, runtime API or adapter: `CREATE OBJECT ref TYPE (name)` without `EXPORTING`, where the static type of `ref` has a constructor with a mandatory parameter
+- Minimal ABAP reproducer: an abstract class `zcl_base` with `METHODS constructor IMPORTING iv_tag TYPE string`, a subclass `zcl_sub` whose own `constructor` takes no parameters, and `DATA lo TYPE REF TO zcl_base. CREATE OBJECT lo TYPE ('ZCL_SUB').`
+- Exact command used to run it: `node tools/gogen/semantics.mjs` with that statement in `tools/gogen/testdata/zcl_gogen_t_inh.clas.abap` (the front end runs abaplint's syntax check first)
+- Expected SAP behaviour: measured on A4H ($ZOSG_TMP_0017, 2026-09-23, deleted after): the class activates, and the statement creates a `zcl_sub` and runs `zcl_sub`'s constructor. The class is not known until run time, so neither is its constructor
+- Actual open-abap behaviour: abaplint reports `constructor parameter "IV_TAG" must be supplied`. `validateParameters` in `5_syntax/statements/create_object.js` looks up `CONSTRUCTOR` on the static type even when the type is dynamic
+- Impact on open-steamgate: none on the served path so far (the gateway's own dynamic creates target types whose constructors take no parameters); it blocks a test from saying what A4H accepts
+- Smallest safe workaround: the test creates the object into a reference of the subclass's type and widens it afterwards; no code works around it
+- Upstream: **needs an issue** in abaplint (the check should skip the parameter validation when the type is dynamic)
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_INH (the A4H-only line `abl:` is left out of the local copy until abaplint accepts it)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-string-statements — SPLIT, REPLACE and the string functions differ from A4H in eight places
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/transpiler` 2.13.89, `@abaplint/runtime` 2.13.89, open-abap-core as cloned under `.local/lars/`
+- Affected ABAP statement, runtime API or adapter: `SPLIT ... INTO f1 f2`, `REPLACE ... IN SECTION`, `REPLACE ... WITH` a regex replacement, `REPLACE` into a c field, `REPLACE ALL OCCURRENCES OF ''`, `repeat( )`, `replace( occ = )`, `shift_right( )`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_str{split,repl,fn,cond,loop}.clas.abap`, each a static `RUN` returning a string; the same code ran on A4H as ABAP Unit probes in `$ZOSG_TMP_0130` (deleted after)
+- Exact command used to run it: the testdata classes through `new Transpiler({unknownTypes: "runtimeError"}).runRaw(files)` and the generated `init.mjs`, `RUN` called per class (the harness of `tools/gogen/run.mjs`, without open-abap-core)
+- Expected SAP behaviour (A4H, 2026-09-23), against actual open-abap behaviour:
+  1. `SPLIT` into a c field too short for its piece cuts it and sets sy-subrc 4; open-abap cuts and sets 0 (`trunc:ab/d/4` against `trunc:ab/d/0`).
+  2. `REPLACE ... IN SECTION OFFSET o LENGTH l OF s` replaces only inside the section; open-abap ignores the section and replaces in the whole string (`sect:abca-c` against `sect:a-ca-c`).
+  3. In a regex replacement `$0` is the whole match; open-abap passes the text to JavaScript's `String.replace`, which has no `$0` (`groups:baabbaab` against `groups:ba$0ba$0`).
+  4. `REPLACE` into a c field whose result is longer than the field cuts it and sets sy-subrc 2 (a cut of trailing blanks only is 0); open-abap sets 0 (`ctrunc:aXYZ/2` against `aXYZ/0`).
+  5. `REPLACE ALL OCCURRENCES OF ''` (also `OF ' '`, a c blank being empty) raises `CX_SY_REPLACE_INFINITE_LOOP`, which `CATCH cx_root` takes; open-abap throws a plain JavaScript `Error("REPLACE, zero length input")`, and open-abap-core has no class `CX_SY_REPLACE_INFINITE_LOOP`, so abaplint refuses a `CATCH` that names it.
+  6. `repeat( val = ' ' occ = 3 )` is empty, because a c argument loses its trailing blanks; open-abap gives three blanks.
+  7. `replace( ... occ = 2 )` replaces the second occurrence and `occ = -1` the last; open-abap replaces nothing for either (`r2:abca-cabc rm1:abcabca-c` against `abcabcabc` twice).
+  8. `shift_right( )` is implemented; open-abap raises `Error("shift_right todo")`.
+  Not counted here: `a|aX` in `aXbX` takes `aX` on A4H (POSIX, leftmost-longest) and `a` in JavaScript's `RegExp` (leftmost-first). That is the regex engine, shared by the open-abap runtime and by gogen's JS backend, noted in `tools/gogen/semantics.mjs`, and not an open-abap anomaly.
+- Impact on open-steamgate: the SEGW generator and the gateway call `replace( ... occ = 0 )`, `repeat( )` and two-target `SPLIT` on string targets, where the two runtimes agree; nothing on the served path is known to hit the eight differences. The Go backend (`tools/gogen`) follows A4H in all eight; for item 5 its front end holds the superclass A4H gives the class (`CX_DYNAMIC_CHECK`), so `CATCH cx_dynamic_check` and `CATCH cx_root` take it there too (`ZCL_GOGEN_T_STRLOOP`).
+- Smallest safe workaround: none needed on the served path; do not rely on `IN SECTION`, `occ` other than 0 or 1, or `$0` in code that also runs on open-abap
+- Upstream issue: **needs an issue** in `abaplint/transpiler` (the runtime items) and one in `open-abap-core` (the missing class); not sent, the critic pass the upstream rule asks for comes first
+- Regression-test location: `tools/gogen/semantics.mjs` (EXPECT for ZCL_GOGEN_T_STRSPLIT, _STRREPL, _STRFN, _STRCOND, _STRLOOP, _STREDGE, _STRMOVE, _STRLINES)
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-23-interface-data-value — abaplint accepts `VALUE` on an interface's `DATA`
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/core` 2.120.55
+- Affected ABAP statement, runtime API or adapter: `DATA x TYPE i VALUE 5.` inside `INTERFACE ... ENDINTERFACE`
+- Minimal ABAP reproducer: `INTERFACE lif_ia. DATA mv_count TYPE i VALUE 5. ENDINTERFACE.` and a class implementing it
+- Exact command used to run it: `node tools/gogen/semantics.mjs` with the VALUE in `tools/gogen/testdata/zif_gogen_t_ia.intf.abap` (the front end runs abaplint's syntax check first)
+- Expected SAP behaviour: measured on A4H ($ZOSG_TMP_0120, 2026-09-23, deleted after): the include does not activate, "VALUE cannot be used with attributes (except constants) within interfaces."
+- Actual open-abap behaviour: abaplint reports nothing; the gogen front end used to read `zif~attr` inside the implementing class as a CONSTANT with that value (silently wrong: a write to it was lost)
+- Impact on open-steamgate: none on the served path; the gogen front end now refuses such an attribute (a statement stub that dumps), since the source could never run on a system
+- Smallest safe workaround: none needed; do not write VALUE there
+- Upstream: **needs an issue** in abaplint (a syntax error for VALUE on interface DATA / CLASS-DATA)
+- Regression-test location: `tools/gogen/semantics.mjs`, the refusal check over `tools/gogen/testdata-refused/` (ZCL_GOGEN_T_RF line 12 must answer the VALUE message; an attribute named `value` must still compile)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-catch-after-superclass — abaplint accepts a `CATCH` of a class after a `CATCH` of its superclass
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/core` 2.120.55
+- Affected ABAP statement, runtime API or adapter: `TRY ... CATCH zcx_base ... CATCH zcx_sub ... ENDTRY` where `zcx_sub` inherits from `zcx_base`
+- Minimal ABAP reproducer: two exception classes, `zcx_base INHERITING FROM cx_static_check` and `zcx_sub INHERITING FROM zcx_base`, and `TRY. RAISE EXCEPTION TYPE zcx_sub. CATCH zcx_base. r = 'base'. CATCH zcx_sub. r = 'sub'. ENDTRY.`
+- Exact command used to run it: the front end of `tools/gogen` (`compileProgram`, which runs abaplint's syntax check first) on that class
+- Expected SAP behaviour: measured on A4H ($ZOSG_TMP_0117, 2026-09-23, deleted after): the class does not activate, "The exception class LCX_SUB cannot be used in the CATCH clause, since a CATCH clause already exists in the same TRY BLOCK and this clause uses the superclass LCX_BASE."
+- Actual open-abap behaviour: abaplint reports nothing and the program compiles; the second `CATCH` can never be taken
+- Impact on open-steamgate: none on the served path (the gateway's `TRY`s list subclasses first); a program that would not activate on a system runs here
+- Smallest safe workaround: `tools/gogen` refuses such a `TRY` (a statement stub, `CATCH x after a CATCH of its superclass`); the transpiler path has no workaround
+- Upstream: **needs an issue** in abaplint (a syntax error in `5_syntax/structures/try.js` or the `CATCH` statement check)
+- Regression-test location: none that runs: the pinned probe `ZCL_GOGEN_T_RAISE` in `tools/gogen/semantics.mjs` leaves the line out because it cannot be activated on A4H
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-interface-read-only — abaplint does not check writes to a READ-ONLY interface attribute
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/core` 2.120.55
+- Affected ABAP statement, runtime API or adapter: a write to `DATA x TYPE i READ-ONLY` of an interface: `lo_intf->x = 1`, `lo_obj->zif~x = 1` outside the implementing class, `lo_intf->x = 1` inside it
+- Minimal ABAP reproducer: `INTERFACE lif_ia. DATA mv_ro TYPE i READ-ONLY. ENDINTERFACE.`, a class `lcl_obj` implementing it, and elsewhere `DATA lo_i TYPE REF TO lif_ia. lo_i = NEW lcl_obj( ). lo_i->mv_ro = 1.`
+- Exact command used to run it: the testdata of ZCL_GOGEN_T_IA with that line added, through `compileProgram` of `tools/gogen/frontend.mjs`
+- Expected SAP behaviour: measured on A4H ($ZOSG_TMP_0120, 2026-09-23, deleted after): "Write access to the READ-ONLY attribute "MV_RO" is not allowed outside the class/interface." for a write through an interface reference (also inside the implementing class) and for `lo_obj->lif_ia~mv_ro = 1` outside the class; writes through `me`, through a reference of the class's own type inside the class, and in a subclass activate
+- Actual open-abap behaviour: abaplint reports nothing; its `ClassAttribute` of an interface carries no `read_only` in `getMeta()` at all (a class's own READ-ONLY attribute does)
+- Impact on open-steamgate: none on the served path; the gogen front end reads READ-ONLY off the DATA statement itself and refuses such a write
+- Smallest safe workaround: the front end's own check (`intfRefAttribute`, `classRefIntfAttribute` in `tools/gogen/frontend.mjs`)
+- Upstream: **needs an issue** in abaplint (keep READ-ONLY in an interface attribute's meta and check writes against it)
+- Regression-test location: the READ-ONLY writes that do activate are in ZCL_GOGEN_T_IA (`tools/gogen/semantics.mjs`); the refusals are the check over `tools/gogen/testdata-refused/` in the same script (ZCL_GOGEN_T_RF lines 13, 14 and 17)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-describe-deep-structure — `DESCRIBE FIELD ... TYPE` of a deep structure is `u` in the transpiler runtime, `v` on a system
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/runtime` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `DESCRIBE FIELD s TYPE k` where `s` is a structure holding a string, a table or a reference
+- Minimal ABAP reproducer: `TYPES: BEGIN OF ty, name TYPE string, n TYPE i, END OF ty. DATA ls TYPE ty. DATA lv_k TYPE c LENGTH 1. DESCRIBE FIELD ls TYPE lv_k.`
+- Exact command used to run it: the runtime's `abap.statements.describe` called on a `Structure` of `String` + `Integer` and on one of `Integer` + `Character(2)` from a Node script against `node_modules/@abaplint/runtime` (both answer `u`); on A4H the same statement in `tools/gogen/testdata/zcl_gogen_t_jsgeneric.clas.abap`
+- Expected SAP behaviour: measured on A4H ($ZOSG_TMP_0150, 2026-09-23, deleted after): `v` for the structure with a string (deep), `u` for the flat one (`cl_abap_typedescr=>typekind_struct2` / `typekind_struct1`)
+- Actual open-abap behaviour: `u` for every structure (`statements/describe.js`: `input.field instanceof types_1.Structure` sets `"u"` with no look at the components)
+- Impact on open-steamgate: code that branches on the type kind of a structure (`typekind_struct2`) takes the flat branch on a deep one; nothing on the served path is known to do so. The gogen backends (Go and JS) answer `v` / `u` as A4H does
+- Smallest safe workaround: none needed in gogen; the transpiler runtime would have to look at the components (string, xstring, table, reference, or a deep structure inside)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `describe`)
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_JSGENERIC (`kinds:...vhl ... flat:u`)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-dbwrite-insert-table-duplicate — `INSERT dbtab FROM TABLE` with a duplicate key returns sy-subrc 4 instead of raising
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/transpiler` 2.13.89, `@abaplint/runtime` 2.13.89, `@abaplint/database-sqlite`
+- Affected ABAP statement, runtime API or adapter: `INSERT dbtab FROM TABLE itab` without `ACCEPTING DUPLICATE KEYS` (`runtime/src/statements/insert_database.ts`)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_dbw.clas.abap` (table `zgogen_t_dbw.tabl.xml` beside it): row A present, then `INSERT zgogen_t_dbw FROM TABLE lt` with B, A, C inside a `TRY ... CATCH cx_sy_open_sql_db`
+- Exact command used to run it: the class and the table transpiled on their own with open-abap-core as the one lib (`npx abap_transpile`) and `run` called over `SQLiteDatabaseClient`, in a scratch folder
+- Expected SAP behaviour: measured on A4H ($ZOSG_TMP_0140, 2026-09-23, deleted after): `CX_SY_OPEN_SQL_DB` is raised, sy-subrc and sy-dbcnt are left as they were (7/7 before, 7/7 in the CATCH), and **every row without a duplicate is written all the same** (B, C, and a D after a second duplicate). Two rows with the same key inside the table: one written, then the exception. With `ACCEPTING DUPLICATE KEYS`: sy-subrc 4, sy-dbcnt the rows written, no exception. An empty table: 0/0
+- Actual open-abap behaviour: no exception; every statement behaves as with `ACCEPTING DUPLICATE KEYS` (`tab:4 /2`), because the runtime inserts row by row and folds the sy-subrc of each into a maximum
+- Impact on open-steamgate: a DPC that relies on the exception to reject a batch (or on a `CATCH` to report it) sees success with sy-subrc 4 and goes on
+- Smallest safe workaround: none in code; do not rely on the exception
+- Upstream: **needs an issue** in abaplint/transpiler
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_DBW (the A4H answer is in the comment above its EXPECT; the gogen backends refuse database writes until the relational IR has the nodes)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-dbwrite-update-from-table — `UPDATE dbtab FROM TABLE itab` is compiled as `UPDATE dbtab FROM wa`
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/transpiler` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `UPDATE dbtab FROM TABLE itab`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_dbw.clas.abap`, `updtab`
+- Exact command used to run it: as for ANOMALY-2026-09-23-dbwrite-insert-table-duplicate
+- Expected SAP behaviour: A4H, rows A (present) and Y (absent): sy-subrc 4, sy-dbcnt 1, A updated
+- Actual open-abap behaviour: the generated code reads the key fields off the table itself (`lt.get().mandt`) and dies with `Error: table, no header line`
+- Impact on open-steamgate: any mass update dumps
+- Smallest safe workaround: `LOOP AT itab INTO wa. UPDATE dbtab FROM wa. ENDLOOP.` (sy-subrc / sy-dbcnt then need summing by hand)
+- Upstream: **needs an issue** in abaplint/transpiler
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_DBW (comment)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-dbwrite-delete-from-wa — `DELETE dbtab FROM wa` is compiled as a DELETE on an internal table
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/core` as used by `@abaplint/transpiler` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `DELETE dbtab FROM wa`, which abaplint's parser classifies as `DeleteInternal` (it cannot tell it from `DELETE itab FROM idx` without the dictionary)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_dbw.clas.abap`, `delmiss` and `del`
+- Exact command used to run it: as for ANOMALY-2026-09-23-dbwrite-insert-table-duplicate
+- Expected SAP behaviour: A4H: a missing key gives sy-subrc 4, sy-dbcnt 0; a present one 0 / 1
+- Actual open-abap behaviour: `abap.statements.deleteInternal(zgogen_t_dbw, {from: ls})`, which throws `ReferenceError: zgogen_t_dbw is not defined`
+- Impact on open-steamgate: the form dumps wherever it is used; the gogen front end sees the same `DeleteInternal` and checks the dictionary for the name before treating it as a database delete
+- Smallest safe workaround: `DELETE FROM dbtab WHERE <key> = wa-<key> ...`
+- Upstream: **needs an issue** in abaplint (the statement) or the transpiler (resolve by the dictionary)
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_DBW (comment)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-dbwrite-delete-from-table — `DELETE dbtab FROM TABLE itab` matches every field, and reports the last row only
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`statements/delete_database.ts`)
+- Affected ABAP statement, runtime API or adapter: `DELETE dbtab FROM TABLE itab` (and `DELETE dbtab FROM wa` once it compiles)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_dbw.clas.abap`, `deltab`: rows D (present, `val` 11 in the database, 18 in the work area) and Q (absent)
+- Exact command used to run it: as for ANOMALY-2026-09-23-dbwrite-insert-table-duplicate
+- Expected SAP behaviour: A4H: the rows are found by their **primary key**: D deleted, sy-subrc 4 (Q), sy-dbcnt 1
+- Actual open-abap behaviour: the WHERE is built from every component of the row, so D is not found because its `val` differs; sy-subrc and sy-dbcnt are those of the last row alone (4 / 0)
+- Impact on open-steamgate: a mass delete with work areas that carry anything but the key deletes nothing and says so only through sy-subrc
+- Smallest safe workaround: clear the non-key fields of the rows first, or delete with `WHERE` on the key
+- Upstream: **needs an issue** in abaplint/transpiler
+- Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_DBW (comment)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-23-select-count-dbcnt — sy-dbcnt after `SELECT COUNT(*) ... INTO n` is 1 here and the count on a system
+
+- Status: `open`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/runtime` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `SELECT COUNT(*) FROM dbtab INTO n`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_dbw.clas.abap`, the `rb` note (ROLLBACK WORK leaves sy-dbcnt alone, measured, so it shows what the SELECT before it set)
+- Exact command used to run it: as for ANOMALY-2026-09-23-dbwrite-insert-table-duplicate
+- Expected SAP behaviour: A4H: sy-dbcnt 4 after counting 4 rows
+- Actual open-abap behaviour: sy-dbcnt 1 (one result row)
+- Impact on open-steamgate: none known; found on the way, not looked for
+- Smallest safe workaround: read the count, not sy-dbcnt
+- Upstream: **needs an issue** in abaplint/transpiler, after one more measurement that counts a number other than the rows of the previous statement
+- Regression-test location: none yet
+- Upstream version containing a fix: none yet
+
+The same run also showed an `INSERT` taking `mandt` from the work area (999 written; A4H writes the logon client, 001 there): that is ANOMALY-2026-09-11-no-implicit-mandt, not a new entry.
+
+### ANOMALY-2026-09-23-ranges-expand-in — the transpiler runtime's `col IN range` knows five row forms, ORs them all, and reads a CP pattern as LIKE unescaped
+
+- Status: `workaround`
+- Discovery date: `2026-09-23`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`build/src/expand_in.js`, `expandIN`)
+- Affected ABAP statement, runtime API or adapter: `SELECT ... WHERE col IN rt_range` (a ranges table of SIGN / OPTION / LOW / HIGH)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_selcnt.clas.abap` (I CP 'A*' with E EQ 'AB'); through the gateway, `GET /sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$filter=Seats%20gt%201` (the demo DPC turns the filter into a range)
+- Exact command used to run it: `curl` against a running OSG (`npm start`, the transpiler runtime) and `node tools/gogen/gateway.mjs --compare <origin> <path>` for the Go backend; the runtime's source read in `node_modules/@abaplint/runtime/build/src/expand_in.js`
+- Expected SAP behaviour: measured on A4H by foreman-dell (`test/fixtures/ir-pairs/a4h-ranges.json`, 80 cases): every SIGN I / E and OPTION EQ NE GT GE LT LE BT NB CP NP; I rows OR'ed, AND NOT the OR of the E rows; CP with `+` for one character, `#` escaping, a literal `%` / `_` matched literally; a lower-case or initial SIGN / OPTION an uncatchable dump
+- Actual open-abap behaviour: only `I EQ`, `I NE`, `I GE`, `I LE`, `I CP` are rendered; any other row (every E row, GT, LT, BT, NB, NP) throws `IN, <sign> <option> not supported`, which OSG answers as a 500 (`$filter=Seats gt 1`, `Status ne 'A'`, `TravelId ge ... and TravelId le ...`: 500 on OSG, 200 with A4H's rows through the Go backend). CP becomes `LIKE` with `*` replaced by `%` and nothing else: `+` and `#` are not read, and a literal `%` or `_` in the pattern is a wildcard (A4H's `50%_off*` would match `50X_off`). Every row, I or E, is joined with OR
+- Impact on open-steamgate: an OData `$filter` whose range has any other form fails the request on the Node host; a CP pattern with `_`, `%`, `+` or `#` selects other rows than a system
+- Smallest safe workaround: the Go backend (`tools/gogen`) carries the IR's rangesPredicate (`tools/ir-ranges.mjs`, ported in `go/abap/ranges.go`, checked against `ranges.json` and replayed against `a4h-ranges.json`); the Node host has none
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `expandIN`)
+- Regression-test location: `tools/gogen/go/abap/ranges_test.go` (the rules), `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SELCNT / ZCL_GOGEN_T_SELDUMP
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-select-loop-sy — `SELECT ... ENDSELECT` in the transpiler runtime leaves sy-subrc and sy-dbcnt as the whole SELECT set them
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/transpiler` 2.13.89 (`build/src/structures/select.js`, `SelectTranspiler`), `@abaplint/runtime` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `SELECT ... FROM dbtab INTO wa ... ENDSELECT` (the loop form), with or without `EXIT`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_selloop.clas.abap` (two rows of `ZGOGEN_T_DBW`)
+- Exact command used to run it: A4H, the same class with `ZGOGEN_T_DBW` in `$ZOSG_TMP_0195` through an ABAP Unit probe (2026-09-24, both deleted after); the transpiler: `abap_transpile` 2.13.89 over the class, the table and open-abap-core, run with `@abaplint/database-sqlite`; the Go backend: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: A4H answered `n:2 in:1/0,2/0, after:0/2 exit:0/1/A exitmiss:0/1 none:4/0/QQQ cont:0/2/2 corr:5/A elem:A/2 exit2:0/2`: each pass starts with sy-subrc 0 and sy-dbcnt the rows read so far, whatever the body left on the pass before; after ENDSELECT, or an EXIT out of the loop, sy-subrc 0 and sy-dbcnt the rows read, even when the body's last statement set sy-subrc 4; without a row 4 / 0 and the work area untouched. The same statements over T000 (two clients) answered the same shape.
+- Actual open-abap behaviour: `n:2 in:2/0,2/4, after:4/2 exit:0/2/A exitmiss:4/2 none:4/0/QQQ cont:0/2/2 corr:5/A elem:   A/2 exit2:0/2`. The rows are read with one `SELECT ... INTO TABLE` before the loop, which sets sy-subrc and sy-dbcnt once (sy-dbcnt the total from the first pass on, also after an EXIT at the first row); nothing in the loop sets sy again, so a pass sees what the body left on the one before and the loop ends with it. The elementary target of `SELECT id ... INTO lv_id` (c10) printed with three leading blanks in the template; not investigated further.
+- Impact on open-steamgate: an ABAP loop that counts with sy-dbcnt or tests sy-subrc after ENDSELECT behaves differently on the Node host than on a system. `ZCL_OSD_WEBGUI=>MENU` and `ZCL_OSD_STATUS=>SNAPSHOT` use the loop form but test neither.
+- Smallest safe workaround: the Go backend (`tools/gogen`, `select_loop`) sets sy as A4H does; the Node host has none
+- Upstream: **needs an issue** in abaplint/transpiler (`SelectTranspiler`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SELLOOP
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-packed-decimals — the transpiler runtime computes packed numbers with decimals in floating point and rounds, converts and overflows them differently from a system
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/transpiler` 2.13.89, `@abaplint/runtime` 2.13.89 (`types/packed.js`, `operators/*`, `types/integer8.js`, `templateFormatting`)
+- Affected ABAP statement, runtime API or adapter: every statement with a `p LENGTH n DECIMALS d` operand or target: moves into and out of p, arithmetic of calculation type p, `DIV` / `MOD`, string templates of p (`DECIMALS =`, `ALIGN`), `abs( )` / `frac( )` of p
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_pdconv.clas.abap`, `_pdcalc`, `_pdfmt`, `_pdprec`, `_pdcmp`, `_pdtpl` (each prints one line)
+- Exact command used to run it: A4H, the same classes as ABAP Unit probes in `$ZOSG_TMP_0270` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the classes and open-abap-core, each `lv_x.set(...)` statement of the output wrapped so that a JavaScript `RangeError` / `TypeError` prints `!JS` and the run goes on; the Go and JS backends of `tools/gogen`: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: the EXPECT lines of `tools/gogen/semantics.mjs` (A4H's answers). The rules they pin: `+ - *` exact, `/` to 31 significant digits, 63 integer digits in between, commercial rounding into the field, `CX_SY_ARITHMETIC_OVERFLOW` after arithmetic and `CX_SY_CONVERSION_OVERFLOW` after a move, c -> p with a trailing sign and no exponent, f -> p through seventeen significant digits, `DIV` / `MOD` with a remainder never negative, p -> c right aligned with a sign place, p -> n rounded and unsigned, a string compared with an i converted to i
+- Actual open-abap behaviour, where it differs from A4H (A4H in brackets):
+  - c -> p(3,2): `'12.5-'` NN (-12.50); `'1E2'` 100.00 (NN); `'999.995'` and `'1000'` 1000.00 (CO); `'- 1'` NN (-1.00); string `` `1e1` `` 10.00 (NN)
+  - f -> p(3,2): -0.125 -0.12 (-0.13); 2.675 2.68 (2.67); 999.995, 1000 and 1E300 no overflow (CO), 1E300 written out as 300 digits
+  - i 1000 into p(3,2) 1000.00 (CO); p(8,3) -> p(8,2): 1.255 1.25 (1.26), -1.255 -1.25 (-1.26); -2.50 into p(8,0) -2 (-3); 999.995 into p(3,2) 1000.00 (CO)
+  - p 3000000000 into i: no overflow (CO); p -2.50 into int8: `RangeError` (-3)
+  - p 0.10 into f, in a template: 0.1000000000000000 (0.10000000000000001)
+  - p into c(8): `1.5`, `-1.5`, `0` (`   1.50`, `   1.50-`, `   0.00`); into c(3) `123` (`*67`); into c(4)/(5)/(3) of -1.50 `-1.5`, `-1.5`, `-1.` (`1.50-`, `*50-`, `*0-`); p into n(4) 12.50 `0012` (0013), -12.5 `0-12` (0013), 12345.6 `2345` (2346)
+  - -7 / 2 into p(8,0) -3 (-4); `1 / 3 * 3` and every `/` whose result is multiplied again: `RangeError` (the quotient is a JS float handed to `BigInt`)
+  - DIV / MOD of 7.5 and -7.5 by 2 and -2: 3.00/2.00, -4.00/1.00, -4.00/1.00, 3.00/2.00 (3.00/1.50, -3.00/1.50, -4.00/0.50, 4.00/0.50); 7.5 MOD '0.4' 0.00 (0.30); -7 DIV -2 into p -4 (-3)
+  - no overflow anywhere: 31 nines + 1 into p(16,0) 9999999999999999635896294965248 (AO); 5 * 1000 into p(3,2) 5000.00 (AO)
+  - `lv_s = '-0.4'. IF lv_s < 0` true (false); `lv_s = '2.6'. IF lv_s = 3` false (true)
+  - int8 5000000000 / 3 into p(8,2) 1666666666.00 (1666666666.67)
+  - templates: `DECIMALS = 0` of 1.25 and 2.50 prints 1.25 and 2.50 (1, 3); `WIDTH = 8 ALIGN = RIGHT` `1.50    ` (`    1.50`); `abs( )` / `frac( )` of -1.5 print 1.5 / -0.5 (1.50, -0.50); p arithmetic in a template prints sixteen decimals (`2.2500000000000000` for 1.25 + 1, A4H 2.25)
+  - equal to A4H: plain templates of p fields, comparisons of p, generic data (DESCRIBE, move to string, IS INITIAL, writes through a field symbol), the products, 1 / 3 and 2 / 3 into p(8,2) and p(16,14), the character-operand calculation type (`'7' / 2 * 2` into i is 7)
+- Impact on open-steamgate: every DEC amount on the Node host (`ZSTG_FLIGHTFACT-PRICE`, `ZOSD_TAXIFACT-FARE`) is computed in doubles; sums, divisions and roundings of amounts can differ from a system in the last digit, and a value that overflows its field on a system is stored
+- Smallest safe workaround: none on the Node host; the Go and JS backends of `tools/gogen` compute p as A4H does (`go/abap/packed.go`, `js/abap.mjs`)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `Packed` and the operators); large, several issues rather than one
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_PDCONV, _PDCALC, _PDFMT, _PDPREC, _PDCMP, _PDTPL, _PDTPLM; `go test ./abap -run Packed` in `tools/gogen/go`
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-arith-compared-with-string — abaplint accepts an arithmetic expression compared with a character operand, which does not activate on a system
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/core` as used by OSG's lint (2.13.89 transpiler toolchain)
+- Affected ABAP statement, runtime API or adapter: a comparison `arith_expr op char_operand`, e.g. `IF lv_i * 86400 * 1000 > lv_s.` with `lv_s TYPE string`
+- Minimal ABAP reproducer: `DATA lv_i TYPE i. DATA lv_s TYPE string. IF lv_i * 2 > lv_s. ENDIF.`
+- Exact command used to run it: A4H, creating `ZCL_GOGEN_T_PDCMP` in `$ZOSG_TMP_0270` with that line (2026-09-24): activation refused
+- Expected SAP behaviour: syntax error "An arithmetic expression cannot be compared with the non-numeric operand "LV_S". However, "+ LV_S" can be used." (`lv_s + 0` activates; the comparison then runs in calculation type p)
+- Actual open-abap behaviour: abaplint reports nothing; OSG's own `src/gateway/zcl_stg_entry_provider.clas.abap` `CONVERT_VALUE` has `IF lv_ms < 0 OR lv_days * 86400 * 1000 > lv_ms.` with `lv_ms TYPE string`, which would not activate on a system
+- Impact on open-steamgate: the entry provider's `/Date(ms)/` branch cannot be deployed to a system as it is; the Go backend refuses that comparison with the system's reason (statement stub)
+- Smallest safe workaround: none applied (OSG source, `+ 0` or a p variable for `lv_ms` fixes it; not changed from this branch)
+- Upstream: **needs an issue** in abaplint/abaplint (syntax check of comparisons)
+- Regression-test location: `tools/gogen` front end, `compare( )` (the refusal); the activating form in `ZCL_GOGEN_T_PDCMP`
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-create-data-name-case — `CREATE DATA ... TYPE STANDARD TABLE OF (name)` with a lower-case name raises in the transpiler runtime and works on a system
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`statements/create_data.js`)
+- Affected ABAP statement, runtime API or adapter: `CREATE DATA dref TYPE STANDARD TABLE OF (name)` (and `TYPE (name)`) with `name` not in upper case
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_crdyn.clas.abap` (`lv_name = 't000'.`)
+- Exact command used to run it: A4H, the same class as an ABAP Unit probe in `$ZOSG_TMP_0270` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core; the Go backend: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: A4H answered `a:0/h b:u/0[] c:2 lower:ok unknown:err kept:0`: the name is found in any case (unlike `CREATE OBJECT ... TYPE (name)`, where lower case is CX_SY_CREATE_OBJECT_ERROR), an unknown name is CX_SY_CREATE_DATA_ERROR and leaves the reference as it was
+- Actual open-abap behaviour: `a:0/h b:u/0[] c:2 lower:err unknown:err kept:2`: `'t000'` raises CX_SY_CREATE_DATA_ERROR, so the reference still holds the table of two rows filled before
+- Impact on open-steamgate: none today (the producers, `ZCL_OAO_SHLP_DDIC` among them, pass DDIC names in upper case); a name taken from a URL or a lower-case constant would fail on the Node host and work on a system
+- Smallest safe workaround: none needed yet; the Go backend looks the name up in any case (`go/abap/tables.go` `TableByName`)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `createData`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_CRDYN
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-dynamic-where-pasted — the transpiler runtime pastes `WHERE (cond)` into the SQL text, where a system parses it against the table
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (a dynamic condition of `SELECT ... WHERE (lv_where)` goes into the statement text as it stands)
+- Affected ABAP statement, runtime API or adapter: `SELECT ... FROM <table>|(name) ... WHERE (lv_where)`; in OSG the generated readers `gen/cds/zcl_stg_tab_*` / `zcl_stg_cds_*` (SE16 and the SADL DPC go through them) and open-abap-odata's `zcl_oao_shlp_ddic` (value helps)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_dsel.clas.abap` (`1 = 1`, `id='A'`); through the gateway, `GET /sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_TravelcubeSet?$filter=STATUS%20eq%20%27AX%27`, `GET /sap/opu/odata/sap/ZSTG_DEMO_SRV/StatusVHSet`, `GET /sap/bc/osd/se16/?t=ZSTG_DEMO&f_seats=%3E1`
+- Exact command used to run it: OSG on Node (`test/run.mjs`, main 42755c5) and the Go backend (`tools/gogen/osgo.mjs`, branch ultra/osqlwhere) side by side, the same requests with `curl`
+- Expected SAP behaviour: measured on A4H over SFLIGHT (docs/osql-where.md, open-steamgate #47): a literal is converted to the column's type (a CHAR literal cut to the column, `'LH X'` against CHAR3 is `'LH'`; NUMC zero-padded; a quoted number against INT4 is the number, a letter an uncatchable runtime error); `1 = 1` and an unknown column raise CX_SY_DYNAMIC_OSQL_SEMANTICS, `carrid='LH'` and `!=` CX_SY_DYNAMIC_OSQL_SYNTAX; AND binds tighter than OR
+- Actual open-abap behaviour: the string reaches SQLite unparsed. `STATUS eq 'AX'` against CHAR1 finds nothing on Node (the Go backend, cutting as A4H does, finds the two `A` rows); `1 = 1` reads every row on Node where a system raises (StatusVHSet answers on Node and is CX_SY_DYNAMIC_OSQL_SEMANTICS on the Go backend, because `zcl_oao_shlp_ddic` still writes `'1 = 1'` for an empty condition); `SEATS = '>1'` (SE16, a typed-in `>1`) compares an INTEGER with text and finds nothing on Node, where the measurement names no outcome for that shape (the Go backend refuses it, NOT_COMPILED, "number format"). Every literal is text in the statement rather than bound
+- Impact on open-steamgate: a condition that is not in SQLite's own dialect, or one a system would refuse, answers differently on the Node host; a value help whose reader writes `1 = 1` works on Node and not on a system
+- Smallest safe workaround: the Go backend parses the condition with the port of `tools/ir-osql-where.mjs` (`tools/gogen/go/abap/osqlwhere.go`, checked against `test/fixtures/ir-pairs/osql-where.json` in four dialects) and binds every text; `zcl_oao_shlp_ddic` should leave an empty condition empty, as cds2ddic does since #48 (an upstream fix in open-abap-odata)
+- Not an anomaly, for the record: a read without ORDER BY answers the rows in another order on the two hosts (SE16 over ZOSD_TAXIFACT, ZSTG_STATUS, ZSTG_SBD_MP; Zc_Osd_TaxicubeSet): the Go backend's `MANDT = '123'` lets SQLite walk the primary key, Node scans in insertion order. Neither order is promised, on a system either
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, dynamic WHERE); open-abap-odata `zcl_oao_shlp_ddic` (`'1 = 1'`)
+- Regression-test location: `tools/gogen/go/abap/osqlwhere_test.go` (the pairs), `tools/gogen/semantics.mjs` ZCL_GOGEN_T_DSEL / ZCL_GOGEN_T_DSELX
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-secondary-key-duplicates — the transpiler runtime orders a non-unique sorted secondary key oldest first, keeps a stale copy after a change in place, and misses a READ with sy-subrc 8 and sy-tabix 0
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`types/table.js` `getSecondaryIndex`, `statements/loop.js`, `statements/read_table.js`), `@abaplint/transpiler` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `LOOP AT itab ... USING KEY k [WHERE ...]` and `READ TABLE itab ... WITH KEY k COMPONENTS ...` over a standard table with `WITH [NON-]UNIQUE SORTED KEY k`; open-abap-core's `/UI2/CL_JSON` parser (`LCL_PARSER`, `key_parent` non-unique) reads a JSON array's members through such a key
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_seckey.clas.abap` (five appended rows with repeated `p`, a sixth appended, `p` of one row changed through a field symbol, READs that hit and miss)
+- Exact command used to run it: A4H, the same class in `$ZOSG_TMP_0420` through an ABAP Unit probe (2026-09-24; the probe's DUPORD method also ran `INSERT ... INDEX 1` and a table with only the non-unique key: `a:3/1,2/2,1/3, b:3/1,2/2,1/3, c:5/1,4/2,3/3,2/4,1/5, d:..., e:5,4,3,2,1,`); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core, run with `@abaplint/database-sqlite`; the Go and JS backends: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: A4H answered (before the READ INDEX 2 was added) `w:5/3,3/4,1/5, after:5 app:0/3,5/4,3/5,1/6, mod:4/1,3/2,2/3, all:0/1,5/2,4/3,3/4,2/5,1/6, ru:0/3/4 rp:0/0/4 rmiss:8/0/7 rlow:4/0/1 rfs:0/4/3`: rows with an equal key come newest first (by when the row was created: a row inserted at index 1 after the others comes before them, a row whose key was changed in place keeps its place among the new duplicates); sy-tabix is the position in the key's order; a READ that finds nothing leaves the target alone, sets sy-tabix to where the value would go, and sy-subrc 4 when that is before a row, 8 when it is past the last one
+- Actual open-abap behaviour: `w:1/3,3/4,5/5, after:5 app:1/3,3/4,5/5,0/6, mod:2/1,4/2,3/4, all:0/1,5/2,4/3,3/4,2/5,1/6, ru:0/3/4 rp:0/5/5 rmiss:8/5/0 rlow:8/5/0 rfs:0/4/3`. The key is a stable sort of a copy, so duplicates come oldest first; the copy is cached per key and not rebuilt after a key changed through a field symbol (`mod` skips position 3 and `rp` answers the row whose key is no longer `b`); a miss is always sy-subrc 8 with sy-tabix 0
+- Impact on open-steamgate: `/UI2/CL_JSON=>DESERIALIZE` in open-abap-core takes a JSON array's members through the non-unique `key_parent`, so on a system this parser would fill an internal table from an array in reverse order; on the Node host it keeps the array's order. `ZCL_OSD_STATUS=>REFRESH` numbers the database facts in that order (`ZOSD_DB-SEQ`), so the Go backend, which follows A4H, lists DatabaseSet the other way round from the Node host; the other status tables are read with ORDER BY and do not show it
+- Measured again 2026-09-24 by the reviewer of ultra/json (`$ZOSG_TMP_0421`): the rule holds for 3000 duplicates, built lazily or incrementally (newest first); after `SORT ... BY ('N') DESCENDING` through a generic parameter the key keeps creation order (`3/1,2/2,1/3` while the primary order is 3,2,1), and a copy `lt2 = lt` keeps that order too; an `INSERT ... INDEX 1` through a generic parameter comes first. The front end refuses SORT and INSERT INDEX on generic tables, so keyGuard cannot be passed that way. The fix round (`$ZOSG_TMP_0422`) added: sy-tabix after ENDLOOP of a `LOOP ... USING KEY` is its value before the loop (`before:2 ... after:2`, and `2/4` after a loop with no pass), on A4H and on the transpiler alike; the testdata class now reads INDEX 2 before its first loop, so its line says `after:2`, which the old line (`after:5`) could not tell from the last pass's position
+- Smallest safe workaround: the Go and JS backends of `tools/gogen` order and read sorted secondary keys as A4H does (`go/abap/seckey.go`, `js/abap.mjs` keyOrder / keyRead), and refuse `INSERT ... INDEX`, `SORT` and `DELETE` on a table with a non-unique sorted key (where "created" and "primary index" part ways) and hashed secondary keys; the Node host has none. The parser in open-abap-core relies on the oldest-first order it gets; a fix of the runtime would reverse its arrays unless the parser stops reading members through `key_parent`
+- Upstream: **needs an issue** in abaplint/transpiler (runtime secondary keys); open-abap-core `/UI2/CL_JSON` `LCL_PARSER=>MEMBERS` (depends on the runtime's order)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SECKEY
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-create-data-like-line-generic — abaplint accepts `CREATE DATA ref LIKE LINE OF data` for a `TYPE data` parameter, which does not activate on a system; open-abap-core's `/UI2/CL_JSON` relies on it
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/core` / `@abaplint/transpiler` 2.13.89; open-abap-core `/UI2/CL_JSON=>_DESERIALIZE` (`#ui2#cl_json.clas.abap`, the `kind_table` branch)
+- Affected ABAP statement, runtime API or adapter: `CREATE DATA ref LIKE LINE OF data` where `data` is a generic parameter (`TYPE data` / `TYPE any`), not a table type
+- Minimal ABAP reproducer: a method `m CHANGING data TYPE data` whose body is `DATA ref TYPE REF TO data. CREATE DATA ref LIKE LINE OF data.`
+- Exact command used to run it: A4H, the method added to the ABAP Unit probe include of `ZCL_GOGEN_T_SECKEY` in `$ZOSG_TMP_0420` through ADT (2026-09-24): the syntax check refused the save; the transpiler: the same method in `/UI2/CL_JSON` is transpiled and runs on every Node host (the line type of the table the parameter holds at run time)
+- Expected SAP behaviour: a syntax error, `"DATA" is not an internal table.`; the form that activates is `ASSIGN data TO <at>` (`<at> TYPE ANY TABLE`) and `CREATE DATA ref LIKE LINE OF <at>`, which A4H runs as expected (`ZCL_GOGEN_T_JSONGEN`)
+- Actual open-abap behaviour: abaplint reports nothing; the transpiled code creates a line of whatever table the parameter holds
+- Impact on open-steamgate: `/UI2/CL_JSON=>DESERIALIZE` into a structure with a table component (`ZCL_OSD_STATUS=>REFRESH`, the system status) would not activate on a system as open-abap-core writes it. The Go backend refuses the statement everywhere but in `/UI2/CL_JSON=>_DESERIALIZE`, where it is compiled with the transpiler's meaning (`tools/gogen/frontend.mjs` `TRANSPILER_MEANING`), so that the status tables are written on OSGo; a decision for the foreman, not a rule
+- Smallest safe workaround: the exception in `TRANSPILER_MEANING`; the fix is upstream, one line in open-abap-core (`LIKE LINE OF <at>` after `ASSIGN data TO <at>`, which the method does two lines later anyway), after which the exception goes
+- Upstream: **needs an issue** in abaplint (the syntax check) and a PR in open-abap-core (`/UI2/CL_JSON=>_DESERIALIZE`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_JSONGEN (the form that activates)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-rtti-lengths — `describe_by_data` in open-abap-core gives an f a length of 0 and an f or a p an output length of 0
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core `CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA` (the `Float` and `Packed` branches), `@abaplint/runtime` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `cl_abap_typedescr=>describe_by_data( )` of an `f` or a `p` field: `length`, `cl_abap_elemdescr->output_length`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_rtti.clas.abap`
+- Exact command used to run it: A4H, the same class under the name `ZCL_GOGEN_T_SECKEY` in `$ZOSG_TMP_0420` through an ABAP Unit probe (2026-09-24); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core; the Go backend: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: `f:E/F/0/8/\TYPE=F/F//24 ... p:E/P/2/8/17` (an f is 8 bytes with output length 24; a p LENGTH 8 DECIMALS 2 has output length 17). The rest of the line is the same on both: `c3:E/C/0/6/3 n4:E/N/0/8/4 x2:E/X/0/2/4 d:E/D/0/16/\TYPE=D/D//8 ...`
+- Actual open-abap behaviour: `f:E/F/0/0/\TYPE=F/F//0 ... p:E/P/2/8/0`
+- Impact on open-steamgate: none known; nothing in the tree reads the length of an f or the output length of a p
+- Smallest safe workaround: none needed on the Node host; the Go backend's `describe_by_data` (a host function, `emit-go.mjs` `nativeRttiData`) gives A4H's values
+- Upstream: **needs an issue** in open-abap-core (`CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_RTTI
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-secondary-key-unique-duplicate — the transpiler runtime appends a row that repeats a unique sorted secondary key's value; a system raises CX_SY_ITAB_DUPLICATE_KEY
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`statements/append.js`, `types/table.js`), `@abaplint/transpiler` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `APPEND wa TO itab` where itab is a standard table `WITH UNIQUE SORTED KEY k` and wa repeats a value of k; open-abap-core's `/UI2/CL_JSON` parser keeps its nodes in such a table (`key_full_name`, `key_full_name_upper`), so a JSON object whose member names differ only in case, or in `-` against `_`, repeats a key
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_seckeydup.clas.abap` (one row appended, a second with the same `u` appended inside TRY ... CATCH cx_sy_itab_duplicate_key)
+- Exact command used to run it: A4H, the same statements in `ZCL_GOGEN_T_REFEQ2` (`$ZOSG_TMP_0422`) through an ABAP Unit probe (2026-09-24); the transpiler: `abap_transpile` 2.13.89 over the same class and open-abap-core (`.local/ultra-wip/json/tp`)
+- Expected SAP behaviour: the APPEND raises the catchable `CX_SY_ITAB_DUPLICATE_KEY`, text "A row was to be added that would have produced a duplicate of the key K_U."; the row is not added
+- Actual open-abap behaviour: the row is appended (`appended:2`), nothing is raised
+- Impact on open-steamgate: a status snapshot POSTed to `/sap/bc/osd/status/` with keys differing only in case (`{"system":{"sid":..,"Sid":..}}`) answers `{"rows":1}` on the Node host; on a system the parser would raise, and `/UI2/CL_JSON=>DESERIALIZE` does not catch it. The Go and JS backends refuse the APPEND (NOT_COMPILED, a 500 on OSGo), naming the exception, since they do not raise it
+- Smallest safe workaround: none on the Node host; the refusal in `go/abap/seckey.go` UniqueKeyCheck and `js/abap.mjs` uniqueKeyCheck. Raising the exception there is the next step once `CX_SY_ITAB_DUPLICATE_KEY` is compiled into the program
+- Upstream: **needs an issue** in abaplint/transpiler (runtime unique secondary keys)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SECKEYDUP
+
+### ANOMALY-2026-09-24-sort-default-key — `SORT itab` without BY leaves a table of structures unsorted in the transpiler runtime
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`build/src/statements/sort.js`, `sort` without `by`: whole rows compared with `lt`)
+- Affected ABAP statement, runtime API or adapter: `SORT itab [DESCENDING]` without BY on a STANDARD TABLE of structures WITH DEFAULT KEY
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_sortk.clas.abap` (the part after `key:`)
+- Exact command used to run it: A4H, the same class in `$ZOSG_TMP_0400` through an ABAP Unit probe (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core, `run()` called with `@abaplint/database-sqlite` (`.local/ultra-wip/itab/tp`); the Go and JS backends: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: A4H sorts by the default key, which for a row `name c(2), n i, s string` is `name` and `s` (the character-like components; the i is not part of it): `key:A2z;a9a;a3y;a4y;a5y;b1x;`. Rows of an elementary type sort by the line, strings by code point with "a" before "a " (`s:<><B><C><a><a ><b>`).
+- Actual open-abap behaviour: `key:b1x;a3y;a4y;a5y;a9a;A2z;`, the order the table already had. The elementary cases, `STABLE BY` and mixed directions are equal to A4H.
+- Impact on open-steamgate: none seen on a served path; the OSG classes that sort without BY (`ZCL_STG_SEGW_EXPORT=>TAGS`, `ZCL_STG_SEGW_GEN_DPC=>MPC_XML`) sort string tables
+- Smallest safe workaround: the Go and JS backends of `tools/gogen` sort by the default key (frontend.mjs, `SORT`; the table type carries its primary key as `skey`); components of other types than c and string in a default key are refused there until measured
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `sort`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SORTK
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-select-aggregate-position — `SELECT COUNT( * ) col ... INTO TABLE` by position writes 0 for the aggregate in the transpiler runtime
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`build/src/statements/select.js`, the result columns moved into the target)
+- Affected ABAP statement, runtime API or adapter: `SELECT COUNT( * ) id val FROM dbtab INTO TABLE itab ... GROUP BY id val` (an aggregate without AS, first in the field list, the target filled by position)
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_grpby.clas.abap` (the part after `two:`)
+- Exact command used to run it: as ANOMALY-2026-09-24-sort-default-key (ZCL_GOGEN_T_GRPBY, with the table ZGOGEN_T_DBW in `$ZOSG_TMP_0400`)
+- Expected SAP behaviour: `two:3,AB2=1,B2=1,C2=1`, each group counted into the first component
+- Actual open-abap behaviour: `two:3,AB2=0,B2=0,C2=0`. The rest of the class (GROUP BY with `COUNT( * ) AS cnt`, INTO CORRESPONDING FIELDS, MAX / MIN / SUM, no rows: sy-subrc 4, sy-dbcnt 0) is equal to A4H.
+- Impact on open-steamgate: none on a served path (`ZCL_STG_TRAVEL_CALC` names its count `AS booked`)
+- Smallest safe workaround: the Go backend lowers the aggregate through the relational IR and projects the result back into the order of the field list (frontend.mjs, `groupedColumns`)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `select`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_GRPBY
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-generic-arith — arithmetic with a generic operand is not computed in the calculation type of its run-time types in the transpiler runtime
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`build/src/operators/*`, `_parse.js`)
+- Affected ABAP statement, runtime API or adapter: `lv_i = <any> / 2 * 2`, `<any_target> = lv_i / 2 * 2` and the like: a field symbol TYPE any as operand or as target
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_genar.clas.abap`
+- Exact command used to run it: as ANOMALY-2026-09-24-sort-default-key (ZCL_GOGEN_T_GENAR); each arithmetic statement of the transpiled class wrapped so that a JavaScript exception prints `!JS` and the run goes on
+- Expected SAP behaviour: `i:8,70,7.00 i8:8 p:8,1.88 c:7 s:7 n:7 f:8 ti:8,-3 tp:7.00,1.75`: the calculation type the static rule gives for the types the operands and the target have at run time (an i: `/` rounds in between, so 7 / 2 * 2 is 8; a c, string, n or p operand, or a p target: p, 7; an f: f, 7.5 rounded into the i: 8)
+- Actual open-abap behaviour: `i:7,70,7.00!JS i8:70 p:8,1.88 c:7 s:7 n:7 f:7 ti:7,-3 tp:7.00,1.75`: an i operand and an i target compute without rounding in between (7 instead of 8), an f likewise, and an int8 operand throws `TypeError: val.get is not a function`
+- Impact on open-steamgate: `ZCL_STG_TRAVEL_CALC` (the virtual elements of `ZC_STG_TRAVEL`) computes `<lv_seats> * 100 / gc_capacity` and `<lv_seats> - ls_booked-booked`, where the difference does not show for the seed rows (Node and the Go backend answer Zc_Stg_TravelSet byte for byte alike); a `/` whose quotient is not whole, inside such an expression, would compute another value on Node than on a system
+- Smallest safe workaround: the Go and JS backends of `tools/gogen` compile one branch per calculation type and choose it at run time (frontend.mjs `genericArith`, go/abap/genarith.go `CalcKind`). Deliberately refused, as NOT_COMPILED when reached, because not measured: a c or string target of an all-integer expression (the static rule would make it p), and any operand or target of a kind other than i, int8, f, p, c, string or n, with or without an f beside it
+- Upstream: **needs an issue** in abaplint/transpiler (runtime operators)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_GENAR
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-uccpi-255 — open-abap-core's `CL_ABAP_CONV_OUT_CE=>UCCPI` weighs the high byte by 255
+
+- Status: `workaround`
+- Discovery date: `2026-09-24`
+- Affected versions: open-abap-core at 4eec777 (`src/conv/cl_abap_conv_out_ce.clas.abap`, `uccpi`: `ret = ret + lv_hex+1(1) * 255`)
+- Affected ABAP statement, runtime API or adapter: `cl_abap_conv_out_ce=>uccpi( c )` for a character above U+00FF
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_uccp.clas.abap`
+- Exact command used to run it: as ANOMALY-2026-09-24-sort-default-key (ZCL_GOGEN_T_UCCP, measured in `$ZOSG_TMP_0400`)
+- Expected SAP behaviour: `A/1/65279` (the code point of U+FEFF). The same probe with `uccp( '00e4' )` gave 0 on A4H: lower-case hex is no hex digit to the c -> x move inside `uccp`, which open-abap-core's `uccp` also does, so that is not part of this entry
+- Actual open-abap behaviour: `A/1/65025` (0xFE * 255 + 0xFF)
+- Impact on open-steamgate: none seen; OSG calls `uccp( 'FEFF' )` (the BOM of `ZCL_STG_SEGW_GEN`) and not `uccpi` above U+00FF
+- Smallest safe workaround: the Go and JS backends compute `uccpi` natively (`abap.Uccp`)
+- Upstream: **needs a PR** in open-abap-core (`* 256`), through the fork, as open-abap-core takes PRs
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_UCCP
+
+### ANOMALY-2026-09-24-class-events — the transpiler runtime dispatches class events in another order, twice, to handlers added on the way, and passes the actual by reference
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`SET HANDLER`, `RAISE EVENT`)
+- Affected ABAP statement, runtime API or adapter: `SET HANDLER h->m [FOR obj | FOR ALL INSTANCES] [ACTIVATION act]`, `RAISE EVENT e EXPORTING p = v`
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_events.clas.abap` and `zcl_gogen_t_events2.clas.abap` (with `zif_gogen_t_evi`, `zcx_gogen_t_rnochk`)
+- Exact command used to run it: A4H, the same classes as ABAP Unit probes in `$ZOSG_TMP_0440` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the classes and open-abap-core, `RUN` called from Node; the Go backend: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: A4H answered, for EVENTS, `none:[] order:a.p(2,s)b.q(2)c.p(2,s) other:[] twice:a.p(4,s) off:b.p(5,s) again:a.p(6,s)b.p(6,s) var:a.p(7,s) kill:a.kill kill2:a.kill add:a.add add2:a.addc.p(11,s) boom:a.boom.caught val:a.m(5,105)b.m(105,205) all:a.q(13)c.p(13,x)b.p(14,y)a.q(14)c.p(14,y) both:b.p(15,y)c.p(15,y)a.q(15)c.p(15,y) offone:b.p(16,y)a.q(16)c.p(16,y) offall:b.p(18,y) stat:static(19,s) sev:a.s(20)b.s(20) sev2:b.s(21) intf:a.i(hi,s)` and for EVENTS2 `revive:a.revive allfirst:b.p(2,s)c.p(2,s) nest:a.n1(a.n2()b.p(2,s))b.p(1,s) self:a.self3b.p(3,s)b.p(4,s) rev:c.p(5,s)a.p(5,s)b.q(5)b.p(5,s) back:a.p(6,s)b.p(6,s)c.p(6,s) holes:b.q(7)b.p(7,s)a.q(7) holes2:b.q(8)b.p(8,s)a.q(8)`. The rules read off it: a handler registered twice is called once; the handlers of one sender are a table with holes (a deactivation frees its place, a new registration takes the lowest free one, else it is appended); FOR the sender before FOR ALL INSTANCES whatever the order of registration; a dispatch calls what was active when it started and still is when reached (one added or reactivated on the way is not called); the actual of an event parameter is read anew for each handler (`val`); an exception out of a handler ends the dispatch. A4H-only probe (`ZCL_GOGEN_T_EVGC`, weak references): a registration FOR an object keeps the handler alive as long as the sender lives and does not keep the sender; FOR ALL INSTANCES and a static event keep the handler; a deactivated one is released; a division by zero in a handler arrives as CX_SY_NO_HANDLER (the handler declares no RAISING); SET HANDLER with an initial handler or FOR an initial reference is a runtime abortion CATCH does not take
+- Actual open-abap behaviour: EVENTS `... twice:a.p(4,s)a.p(4,s) ... again:b.p(6,s)a.p(6,s) ... add:a.addc.p(10,s) add2:a.addc.p(11,s)c.p(11,s) ... val:a.m(105,105)b.m(205,205) all:a.q(13)c.p(13,x)a.q(14)b.p(14,y)c.p(14,y) both:a.q(15)b.p(15,y)c.p(15,y)c.p(15,y) offone:a.q(16)b.p(16,y)c.p(16,y) ... sev2: ...` and EVENTS2 `revive:a.revivec.p(1,s) allfirst:c.p(2,s)b.p(2,s) ... self:a.self3b.p(3,s) ... back:b.p(6,s)a.p(6,s)c.p(6,s) holes:b.q(7)a.q(7) holes2:b.q(8)a.q(8)`: a duplicate registration is called twice; a re-registration goes to the end; a handler added or reactivated during a dispatch is called in it; FOR ALL INSTANCES before FOR the sender; the actual is the caller's variable (a change by one handler shows as the next handler's parameter and its own); deactivating one static handler (`sev2`) removes both; a handler that deactivates itself leaves out a later handler on the next dispatch (`self`); a deactivation among three removes another handler's registration too (`holes`)
+- Impact on open-steamgate: the WEBGUI's GUI control substitutes (open-abap-gui, `cl_gui_html_viewer` raising `sapevent`, abapGit's viewer re-raising it) register one handler per sender, so the sapevent round trip answers the same on both hosts; code that registers a handler twice, reorders handlers or relies on the order against FOR ALL INSTANCES would not
+- Smallest safe workaround: none on Node; the Go backend and the IR's JS emitter implement the measured rules (`tools/gogen/go/abap/events.go`, `js/abap.mjs` setHandler / raiseEvent)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, SET HANDLER / RAISE EVENT)
+- Also (fix round, 2026-09-24, `$ZOSG_TMP_0441`): `zcl_gogen_t_events3.clas.abap` (with `zcl_gogen_t_evb`, `zcl_gogen_t_evs`) answered `all:b(base)s(sub)b(sub)s(sub2)b(sub2) one:s(sub2)` on A4H: a handler FOR EVENT e OF a subclass, registered FOR ALL INSTANCES, is called for senders of that subclass only, whatever the static type of the raising reference. The transpiler runtime does not get there: `SET HANDLER h->on_s h->on_b FOR ALL INSTANCES ACTIVATION abap_false` raises `ABAPEventing.setHandler: deactivation of multiple methods not supported, todo`
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_EVENTS, ZCL_GOGEN_T_EVENTS2, ZCL_GOGEN_T_EVENTS3
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-concatenate-cut-subrc — `CONCATENATE` into a c field too short leaves sy-subrc 0 in the transpiler runtime
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`statements/concatenate`)
+- Affected ABAP statement, runtime API or adapter: `CONCATENATE a b INTO c` with `c` of type c shorter than the result
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_wgui1.clas.abap` (`CONCATENATE 'ab' 'cd' INTO lv_c3.`)
+- Exact command used to run it: A4H, the same class as an ABAP Unit probe in `$ZOSG_TMP_0440` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89; the Go backend: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: `[abc]4`: the result is cut to the field and sy-subrc is 4
+- Actual open-abap behaviour: `[abc]0`: cut, and sy-subrc 0. Everything else in the class (line_exists, NS / CN, reference comparison, a SORTED table's INSERT INTO TABLE leaving sy-tabix alone, APPEND ... ASSIGNING, the other CONCATENATE forms, FIND ALL OCCURRENCES ... MATCH COUNT with a CL_ABAP_REGEX object, escape( ) for an HTML attribute) answered as A4H
+- Impact on open-steamgate: none found in OSG's code, which concatenates into strings
+- Smallest safe workaround: none needed; the Go backend sets 4 (`abap.ConcatFit`)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, CONCATENATE)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_WGUI1
+- See also: ANOMALY-2026-09-24-concatenate-subrc, the same runtime statement measured from the other side (no cut: A4H sets 0; `concatenate.js` never writes sy-subrc, so the 0 above is the value the statement before left)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-sorted-read-miss-tabix — a key READ that misses on a SORTED table sets sy-tabix one row short in the transpiler runtime
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`statements/read_table`)
+- Affected ABAP statement, runtime API or adapter: `READ TABLE <sorted> ... WITH [TABLE] KEY ...` that finds nothing, where the key's first component is given
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_sortrd.clas.abap`
+- Exact command used to run it: A4H, the same class as an ABAP Unit probe in `$ZOSG_TMP_0441` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core, `RUN` called from Node; the Go backend: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: `hit:0/3/3 mid:4/3/c first:4/1 past:8/5 tk:4/3,8/5 fs:4/4 nf:8/5 nonkey:0/4,4/0 kv:0/3 lead:0/1/1,0/3/3,4/2,8/5,4/1 second:0/3,4/0 tk2:4/4 line:4/2/f,0/2/q,8/3`: a miss is sy-subrc 4 with sy-tabix the row the key would go before, or sy-subrc 8 with sy-tabix lines + 1 when it would go after the last row; a key given only in components outside the table key is a linear search, a miss 4/0; a miss leaves the work area alone
+- Actual open-abap behaviour: `... past:8/4 tk:4/3,8/4 ... nf:8/4 ... lead:0/1/1,0/3/3,4/1,8/4,4/1 ... tk2:4/3 line:4/2/f,0/2/q,8/2`: past the last row sy-tabix is lines, not lines + 1; a miss inside a leading part of a two-component key (`a = '1' b = '2'` between `11` and `13`) and a miss of the whole two-component key point one row too early
+- Impact on open-steamgate: none found; code that uses sy-tabix after a miss to `INSERT ... INDEX sy-tabix` into a sorted table would place the row wrong or dump
+- Smallest safe workaround: none needed; the Go backend and the IR's JS emitter follow A4H (a miss with a key part and a component outside the key, `ZCL_GOGEN_T_SORTRD2`, had no rule derivable from the measurements and is refused)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, READ TABLE on sorted tables)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SORTRD, ZCL_GOGEN_T_SORTRD2
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-sorted-importing-standard — abaplint accepts a STANDARD table for an IMPORTING parameter typed SORTED, which does not activate on a system
+
+- Status: `open`
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/core` as used by `abap_transpile` 2.13.89
+- Affected ABAP statement, runtime API or adapter: a method call passing a STANDARD table to `IMPORTING it TYPE <sorted table type>`
+- Minimal ABAP reproducer: `tools/gogen/testdata-refused/zcl_gogen_t_rf_sort.clas.abap`, its last line (`show( lt_t )`)
+- Exact command used to run it: A4H, `$ZOSG_TMP_0441` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89
+- Expected SAP behaviour: the class does not activate: "LT_T is not type-compatible with formal parameter IT". Without that line A4H answers `mv:ab vl:cd rk:dc empty:0 back:2`: a move and a VALUE into a SORTED table sort the rows, a move between SORTED tables of different keys re-sorts them
+- Actual open-abap behaviour: abaplint reports nothing, the transpiler writes it and the run answers `mv:ab vl:cd rk:dc empty:0 back:2 pm:cd`. The moves themselves answer as A4H
+- Impact on open-steamgate: none found; a source that passes this check here may fail to activate on a system
+- Smallest safe workaround: none needed; the Go backend refuses the call (and, for now, every move or VALUE that would fill a SORTED table from rows in another order)
+- Upstream: **needs an issue** in abaplint/abaplint (check_syntax, parameter type compatibility)
+- Regression-test location: `tools/gogen/semantics.mjs` REFUSED_SORT
+
+### ANOMALY-2026-09-24-concatenate-subrc — `CONCATENATE` leaves sy-subrc as it was in the transpiler runtime
+
+- Status: `open` (the Go backend of `tools/gogen` sets it; nothing depends on it in OSG yet)
+- Discovery date: `2026-09-24`
+- Affected versions: `@abaplint/runtime` 2.13.89 (`statements/concatenate.js` never writes `sy-subrc`)
+- Affected ABAP statement, runtime API or adapter: `CONCATENATE ... INTO t [IN BYTE MODE]`; in OSG the SMW0 loaders of the Zork and ZO4D packs (`zcl_ork_00_game_loader_smw0`, `zcl_ork_00_script_loader_smw0`, `zcl_o4d_image_handler`), which glue `WWWDATA_IMPORT`'s rows together this way
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_bytecat.clas.abap` (a `READ TABLE ... INDEX 1` on an empty table sets sy-subrc 4, then `CONCATENATE lv_xs lv_x INTO lv_xs IN BYTE MODE`)
+- Exact command used to run it: A4H, the same class as an ABAP Unit probe in `$ZOSG_TMP_0460` (2026-09-24, deleted after); the transpiler: `abap_transpile` 2.13.89 over the class and open-abap-core, `run( )` called from Node; the Go and JS backends: `node tools/gogen/semantics.mjs`
+- Expected SAP behaviour: A4H `cat:FFAB00CD00/5/0 zeros:0000AB00CD00/6 empty:0/0` -- sy-subrc 0 after the statement (4 is only for a target of fixed length that cut the result); an `x` operand keeps its trailing 00 bytes in byte mode
+- Actual open-abap behaviour: `cat:FFAB00CD00/5/4 zeros:0000AB00CD00/6 empty:0/4` -- the bytes are right, sy-subrc is whatever the statement before left
+- Impact on open-steamgate: none seen; a program that checks sy-subrc after CONCATENATE into a fixed-length field reads the previous statement's code
+- Smallest safe workaround: none needed in OSG; the Go backend writes sy-subrc 0 (`concat_bytes` in `tools/gogen/emit-go.mjs` / `emit-js.mjs`)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, `concatenate`)
+- Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_BYTECAT
+- See also: ANOMALY-2026-09-24-concatenate-cut-subrc (a c target that cuts the result: 4 on A4H)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-24-float-template-digits — an `f` in a string template has sixteen fraction digits in the transpiler runtime, seventeen significant digits on a system
+
+- Status: `open` (the Go backend formats as A4H does; the Node host answers the other digits)
+- Discovery date: `2026-09-24` (as a difference between the hosts; the A4H format was measured 2026-09-23 for `tools/gogen`)
+- Affected versions: `@abaplint/runtime` 2.13.89 (`template_formatting.js`: a `Float` that is not whole is `raw.toFixed(16)`)
+- Affected ABAP statement, runtime API or adapter: `|{ f }|` without formatting options; in OSG every number of the ZO4D channel's JSON (`zcl_o4d_apc_handler`: `"fps":{ mo_demo->get_fps( ) }`, every frame's coordinates)
+- Minimal ABAP reproducer: `DATA f TYPE f. f = 152 * 16 / 60. rv = |{ f }|.`; the fifteen values of `tools/gogen/go/abap/fmtf_test.go`
+- Exact command used to run it: the ZO4D push channel on OSG (Node, `test/run.mjs`, main 42755c5) and on OSGo (branch ultra/packs) side by side, the same commands (`.local/ultra-packs-pw/wscmp.mjs`, `get_megademo` then frames); A4H: the 2026-09-23 measurement behind `FmtF` (README "The f format of a string template")
+- Expected SAP behaviour: seventeen significant digits, always positional, trailing zeros dropped: `40.533333333333331`, `0.39473684210526316`, `0.015625`
+- Actual open-abap behaviour: sixteen digits after the point whatever the magnitude, zeros kept: `40.5333333333333314`, `0.3947368421052632`, `0.0156250000000000`; a small number loses significant digits (`0.0246710526315789` for `0.024671052631578948`)
+- Impact on open-steamgate: the demo's JSON differs from A4H's in the last digits of most numbers; the page parses them back, so nothing on the screen changes. A value re-read with fewer significant digits is not the same double
+- Smallest safe workaround: none in OSG; compare frames numerically (`NUMERIC=1` in the comparison script)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime, template formatting of `f`)
+- Regression-test location: `tools/gogen/go/abap/fmtf_test.go`
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-25-zip-read-int4 — open-abap-core's `CL_ABAP_ZIP=>LOAD` overflows `i` in `LCL_STREAM=>READ_INT4`, and the transpiler runtime lets it through
+
+- Status: `open`
+- Discovery date: `2026-09-25`
+- Affected versions: open-abap-core (`src/abap/cl_abap_zip.clas.locals_imp.abap`, as cloned in `.local/lars/open-abap-core`); `@abaplint/runtime` 2.13.89
+- Affected ABAP statement, runtime API or adapter: `LCL_STREAM=>READ_INT4` (and `READ_INT2`'s pattern): `DO 4 TIMES. ... lv_factor = lv_factor * 256. ENDDO.`, which after the fourth byte computes 256 ** 4 into an `i`; `CL_ABAP_ZIP=>LOAD` calls it for every header
+- Minimal ABAP reproducer: `DATA lv_factor TYPE i VALUE 1. DO 4 TIMES. lv_factor = lv_factor * 256. ENDDO.`
+- Exact command used to run it: `node tools/gogen/semantics.mjs` on branch ultra/parity-wave2 with a LOAD in ZCL_GOGEN_T_ZIP (taken out again): Go stops with `CX_SY_ARITHMETIC_OVERFLOW in * at cl_abap_zip.clas.locals_imp.abap:63`
+- Expected SAP behaviour: `CX_SY_ARITHMETIC_OVERFLOW` (the rule measured on A4H for ANOMALY-2026-09-23-epoch-ms-overflow: `i` arithmetic is range checked). SAP's own `CL_ABAP_ZIP=>LOAD` is other code and not affected
+- Actual open-abap behaviour: the JavaScript runtime computes 4294967296 into the `i` and LOAD works on Node
+- Impact on open-steamgate: none today; OSG saves zips (SEGW `RepoSet`, `CL_ABAP_ZIP=>SAVE`) and loads none. A host that checks `i` (OSGo) cannot LOAD a zip through open-abap-core
+- Smallest safe workaround: none needed yet; the fix is one line upstream (multiply only while bytes remain)
+- Upstream: **needs an issue** in open-abap/open-abap-core (the method), and the runtime's missing range check is the one ANOMALY-2026-09-23-epoch-ms-overflow already names
+- Regression-test location: none yet (ZCL_GOGEN_T_ZIP pins SAVE only)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-29-gogen-ir-pairs-behind-main — the Go runtime of gogen does not yet do 20 IR pairs main added after it was branched
+
+- Status: `open` (a strict known-gap list; the port is the next gogen PR)
+- Discovery date: `2026-09-29`
+- Affected versions: `tools/gogen/go/abap` as landed from `spike/osabap-app` (branched from main at `9db735de`, 2026-09-23)
+- Affected ABAP statement, runtime API or adapter: Open SQL `WHERE` over packed and RAW columns and `UPSERT ... SELECT`, lowered by the Go runtime and compared with `test/fixtures/ir-pairs/osql-where.json` and `writes.json`
+- Minimal ABAP reproducer: the named pairs in those two files
+- Exact command used to run it: `cd tools/gogen/go && go test ./abap/ -run 'TestOsqlWherePairs|TestWritesPairs' -v`
+- Expected SAP behaviour: as the pairs record it, measured for the Node IR in main #47 and #55 (packed literals), #66 (RAW columns: data errors as outcomes, the PostgreSQL bytea parameter) and #64 (`UPSERT ... SELECT`)
+- Actual open-abap behaviour: 18 WHERE pairs and 2 write pairs fail in Go (4 packed, 14 RAW, 2 UPSERT ... SELECT); the RAW data errors panic where the pairs expect an outcome
+- Impact on open-steamgate: the Go runtime is not yet a drop-in for those statements; the Node runtime is unaffected
+- Smallest safe workaround: none; `tools/gogen/go/abap/knowngaps_test.go` lists exactly these 20. A listed pair that starts to pass, or any other failure, turns the test red, so the list cannot hide a new difference or outlive a fixed one
+- Upstream issue: not upstream; the port of the three features to Go is the next gogen PR, which removes the entries
+- Regression-test location: `tools/gogen/go/abap/osqlwhere_test.go`, `writes_test.go`, `knowngaps_test.go`
+- Upstream version containing a fix: not applicable

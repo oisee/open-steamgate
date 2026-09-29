@@ -1,0 +1,5 @@
+{
+  "input_folder": ["src", "gen"],
+  "libs": [{"folder": "/lib", "files": "/src/**"}],
+  "not_in_system": ["/src/skip/"]
+}

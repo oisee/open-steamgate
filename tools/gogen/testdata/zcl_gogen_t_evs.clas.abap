@@ -1,0 +1,6 @@
+* A subclass of ZCL_GOGEN_T_EVB for ZCL_GOGEN_T_EVENTS3; it adds nothing.
+CLASS zcl_gogen_t_evs DEFINITION PUBLIC INHERITING FROM zcl_gogen_t_evb CREATE PUBLIC.
+ENDCLASS.
+
+CLASS zcl_gogen_t_evs IMPLEMENTATION.
+ENDCLASS.

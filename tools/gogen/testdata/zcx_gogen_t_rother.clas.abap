@@ -1,0 +1,5 @@
+CLASS zcx_gogen_t_rother DEFINITION PUBLIC INHERITING FROM cx_static_check CREATE PUBLIC.
+ENDCLASS.
+
+CLASS zcx_gogen_t_rother IMPLEMENTATION.
+ENDCLASS.
