@@ -21,7 +21,7 @@ describe("tools/adt-session: the token dance", () => {
     port = server.address().port;
   });
 
-  after(() => server.close());
+  after(() => new Promise((resolve) => server.close(resolve)));
 
   const call = (path, options = {}) => fetch(`http://localhost:${port}${path}`, options);
 

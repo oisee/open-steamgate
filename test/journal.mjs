@@ -84,9 +84,11 @@ describe("comparison: against a live system", function () {
     await new Promise((resolve) => twin.listen(0, resolve));
   });
 
-  after(() => {
-    twin.close();
-    server.close();
+  after(async () => {
+    await Promise.all([
+      new Promise((resolve) => twin.close(resolve)),
+      server.close(),
+    ]);
   });
 
   const journal = [

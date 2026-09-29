@@ -112,9 +112,11 @@ describe("src/zosd_test: the reference package of every type the façade shows",
     }
   });
 
-  after(() => {
-    server?.close();
-    gateway?.close();
+  after(async () => {
+    await Promise.all([
+      server && new Promise((resolve) => server.close(resolve)),
+      gateway?.close(),
+    ]);
   });
 
   const base = () => `http://127.0.0.1:${port}/sap/bc/adt`;

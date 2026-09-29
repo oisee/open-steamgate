@@ -29,9 +29,7 @@ describe("webgui: Easy Success, the screen SAP calls Easy Access", () => {
     page = await (await fetch(BASE)).text();
   });
 
-  after(() => {
-    server.close();
-  });
+  after(() => server.close());
 
   it("answers on the ITS webgui path, as the Easy Success screen", async () => {
     const res = await fetch(BASE);

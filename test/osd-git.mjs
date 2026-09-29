@@ -134,9 +134,7 @@ describe("tools/osd-git: a clone, with no git binary in the path", function () {
     url = `http://127.0.0.1:${server.address().port}/repo`;
   });
 
-  after(() => {
-    server?.close();
-  });
+  after(() => server?.close());
 
   // ---------------------------------------------------------------- the tests
 

@@ -42,7 +42,7 @@ describe("the AMDP sandbox", function () {
   // exits, which in a run of thirty files looks like a hang in whichever file
   // happens to come next.
   after(async () => {
-    server?.close();
+    await server?.close();
     await globalThis.abap?.context?.RFCDestinations?.AMDP?.close?.();
   });
 

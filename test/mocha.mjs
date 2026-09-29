@@ -12,9 +12,7 @@ describe("wire", () => {
     server = startServer(true);
   });
 
-  after(() => {
-    server.close();
-  });
+  after(() => server.close());
 
   // The front door is the launchpad: every app and every demo the system
   // serves is a tile on it, the UI5 ones as components and the ABAP-written

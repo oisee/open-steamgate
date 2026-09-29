@@ -826,9 +826,26 @@ export async function runProcedure(program, {
   const containsTableCall = (node) => {
     if (node === null || typeof node !== "object") return false;
     if (scanned.has(node)) return scanned.get(node);
-    const found = node.rel === "tfcall" || Object.values(node).some((value) => (Array.isArray(value) ? value.some(containsTableCall) : containsTableCall(value)));
-    scanned.set(node, found);
-    return found;
+    const pending = new WeakSet();
+    const stack = [{node, done: false}];
+    while (stack.length > 0) {
+      const frame = stack.pop();
+      const current = frame.node;
+      if (scanned.has(current)) continue;
+      if (frame.done) {
+        scanned.set(current, current.rel === "tfcall" || Object.values(current).some(
+          (value) => value !== null && typeof value === "object" && scanned.get(value) === true));
+        pending.delete(current);
+        continue;
+      }
+      if (pending.has(current)) continue;
+      pending.add(current);
+      stack.push({node: current, done: true});
+      for (const value of Object.values(current)) {
+        if (value !== null && typeof value === "object" && !scanned.has(value)) stack.push({node: value, done: false});
+      }
+    }
+    return scanned.get(node);
   };
   // the names a call's relation was held under, dropped at the next
   // statement: by then whatever read them has frozen the relation itself
