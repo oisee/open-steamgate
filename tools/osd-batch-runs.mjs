@@ -543,16 +543,29 @@ export async function runPersistedBatch(root, request, store, execute = runConve
   store ??= new BatchRuns(root);
   try {
     const run = store.start({...request, generation: request.generation ?? liveGeneration(root)});
+    let result;
     try {
-      const result = await execute(root, run.program, run.input);
-      return store.finish(run.id, result);
+      result = await execute(root, run.program, run.input);
     } catch (error) {
-      store.fail(run.id, error);
+      try { store.fail(run.id, error); }
+      catch (recordError) { throw resultRecordingError(run.id, undefined, recordError, error); }
       throw Object.assign(error, {runId: run.id});
     }
+    try { return store.finish(run.id, result); }
+    catch (error) { throw resultRecordingError(run.id, undefined, error); }
   } finally {
     if (owned) store.close();
   }
+}
+
+function resultRecordingError(runId, stepNumber, cause, executionError) {
+  const step = stepNumber === undefined ? "" : ` step ${stepNumber}`;
+  const error = new Error(`Could not confirm result for batch run ${runId}${step}; inspect its state and business effects before resubmission.`, {cause});
+  error.code = "RESULT_RECORDING_FAILED";
+  error.runId = runId;
+  if (stepNumber !== undefined) error.stepNumber = stepNumber;
+  if (executionError !== undefined) Object.defineProperty(error, "executionError", {value: executionError});
+  return error;
 }
 
 export async function workQueuedBatch(root, store, execute = runConvertedBatch) {
@@ -569,20 +582,27 @@ export async function workQueuedBatch(root, store, execute = runConvertedBatch) 
   if (run.generation !== generation) {
     const error = {code: "GENERATION_CHANGED",
       message: `Queued for ${run.generation}; worker runs ${generation}. Submit a new run after reviewing the change.`};
-    if (step) store.failStep(run.id, step.number, error);
-    else store.fail(run.id, error);
+    try {
+      if (step) store.failStep(run.id, step.number, error);
+      else store.fail(run.id, error);
+    } catch (recordError) { throw resultRecordingError(run.id, step?.number, recordError); }
+    return {kind: "failed", run: store.get(run.id)};
+  }
+  let result;
+  try {
+    result = await execute(root, step?.program ?? run.program, step?.input ?? run.input, run.generation);
+  } catch (error) {
+    try {
+      if (step) store.failStep(run.id, step.number, error);
+      else store.fail(run.id, error);
+    } catch (recordError) { throw resultRecordingError(run.id, step?.number, recordError, error); }
     return {kind: "failed", run: store.get(run.id)};
   }
   try {
-    const result = await execute(root, step?.program ?? run.program, step?.input ?? run.input, run.generation);
     if (step) return store.finishStep(run.id, step.number, result);
     const finished = store.finish(run.id, result);
     return {kind: finished.state === "COMPLETED" ? "completed" : "failed", run: finished};
-  } catch (error) {
-    if (step) store.failStep(run.id, step.number, error);
-    else store.fail(run.id, error);
-    return {kind: "failed", run: store.get(run.id)};
-  }
+  } catch (error) { throw resultRecordingError(run.id, step?.number, error); }
 }
 
 async function main(args) {
