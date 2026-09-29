@@ -57,3 +57,8 @@ bridge. All outputs are cleared on every call and every exception. A doctor
 can walk the indices, but each call is a fresh snapshot: a worker may advance
 the job between header, step and log calls. The doctor must report the fields
 as separately observed and reread the header if it needs a current summary.
+
+The header also returns the private job-owned `EV_TAIL_EVENT_ID` and
+`EV_TAIL_EVENT_PARAM` when configured. The reader verifies the v6 import
+digest and checks that a completed run has its exact named occurrence, while
+a failed or interrupted run has none. A disagreement is `INCONSISTENT`.

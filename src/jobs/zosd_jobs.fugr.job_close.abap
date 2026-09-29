@@ -1,5 +1,5 @@
 FUNCTION job_close.
-*" IMPORTING JOBNAME JOBCOUNT STRTIMMED SDLSTRTDT SDLSTRTTM TARGETSYSTEM PRED_JOBNAME PRED_JOBCOUNT PREDJOB_CHECKSTAT EVENT_ID EVENT_PARAM EVENT_PERIODIC
+*" IMPORTING JOBNAME JOBCOUNT STRTIMMED SDLSTRTDT SDLSTRTTM TARGETSYSTEM PRED_JOBNAME PRED_JOBCOUNT PREDJOB_CHECKSTAT EVENT_ID EVENT_PARAM EVENT_PERIODIC TAIL_EVENT_ID TAIL_EVENT_PARAM
 *" EXPORTING JOB_WAS_RELEASED
 *" EXCEPTIONS JOBNAME_MISSING JOB_NOTEX JOB_CLOSE_FAILED
   DATA lv_error TYPE string.
@@ -16,6 +16,7 @@ FUNCTION job_close.
   DATA lv_requested_name TYPE string.
   DATA lv_pred_state TYPE string.
   DATA lv_event_name TYPE string.
+  DATA lv_tail_name TYPE string.
   DATA lv_source_instance TYPE string.
   DATA lv_signal_seq TYPE string.
   DATA lv_step_index TYPE i.
@@ -34,6 +35,19 @@ FUNCTION job_close.
   lv_event_name = event_id.
   CONDENSE lv_event_name.
   TRANSLATE lv_event_name TO UPPER CASE.
+  lv_tail_name = tail_event_id.
+  CONDENSE lv_tail_name.
+  TRANSLATE lv_tail_name TO UPPER CASE.
+  IF lv_tail_name IS INITIAL AND tail_event_param IS NOT INITIAL.
+    RAISE job_close_failed.
+  ENDIF.
+  IF lv_tail_name IS NOT INITIAL.
+    IF strlen( lv_tail_name ) > 32 OR strlen( tail_event_param ) > 64
+        OR lv_tail_name CN 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'
+        OR lv_tail_name+0(1) CN 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.
+      RAISE job_close_failed.
+    ENDIF.
+  ENDIF.
   IF sdlstrtdt IS NOT INITIAL OR sdlstrttm IS NOT INITIAL
       OR targetsystem IS NOT INITIAL OR event_periodic IS NOT INITIAL.
     RAISE job_close_failed.
@@ -106,6 +120,8 @@ FUNCTION job_close.
   ls_intent-pred_intent_id = lv_pred_intent.
   ls_intent-event_id = lv_event_name.
   ls_intent-event_param = event_param.
+  ls_intent-tail_event_id = lv_tail_name.
+  ls_intent-tail_event_param = tail_event_param.
   IF lv_event_name IS NOT INITIAL.
     ls_intent-wait_seq = lv_signal_seq.
   ENDIF.

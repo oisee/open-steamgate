@@ -49,6 +49,7 @@ const readFill = (signature, fields) => fill(signature, {
   EV_QUEUED_AT: "", EV_STARTED_AT: "", EV_ENDED_AT: "",
   EV_WAIT_KIND: "", EV_WAIT_JOBNAME: "", EV_WAIT_JOBCOUNT: "",
   EV_WAIT_EVENT_ID: "", EV_STEP_NUMBER: "", EV_STEP_PROGRAM: "",
+  EV_TAIL_EVENT_ID: "", EV_TAIL_EVENT_PARAM: "",
   EV_INPUT_JSON: "",
   EV_STEP_STATE: "", EV_STEP_STARTED_AT: "", EV_STEP_ENDED_AT: "",
   EV_STEP_RESULT_STATUS: "", EV_LOG_SEQUENCE: "", EV_LOG_STEP: "",
@@ -163,7 +164,9 @@ export class JobDestination {
               EV_HISTORICAL_GAP: snapshot.technicalLog?.historicalGap ? "X" : "",
               EV_CREATED_ON: snapshot.createdOn ?? "", EV_CREATED_AT: snapshot.createdAt ?? "",
               EV_QUEUED_AT: snapshot.queuedAt ?? "", EV_STARTED_AT: snapshot.startedAt ?? "",
-              EV_ENDED_AT: snapshot.endedAt ?? "", ...wait};
+              EV_ENDED_AT: snapshot.endedAt ?? "",
+              EV_TAIL_EVENT_ID: snapshot.tailEvent?.id ?? "",
+              EV_TAIL_EVENT_PARAM: snapshot.tailEvent?.param ?? "", ...wait};
             if (item === "STEP" && itemIndex > snapshot.steps.length ||
                 item === "LOG" && itemIndex > entries.length) {
               readFill(signature, {EV_ERROR_CODE: "BAD_KEY"});

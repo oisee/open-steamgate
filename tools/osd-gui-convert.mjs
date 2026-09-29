@@ -600,7 +600,9 @@ if (basename(process.argv[1] ?? "") === "osd-gui-convert.mjs") {
     process.exit(0);
   }
   const out = args.includes("--out") ? args[args.indexOf("--out") + 1] : DEFAULT_OUT;
-  const folders = contentFoldersOf(process.cwd());
+  // Local integration reports are an input to this generator when present.
+  // The VSIX seed omits those reports, so its generation has no demo entries.
+  const folders = [...contentFoldersOf(process.cwd()), join(process.cwd(), "test/integration")];
   const {reports} = await generate(folders, out);
   if (reports.length === 0) {
     console.log("osd-gui-convert: no *.prog.abap found");

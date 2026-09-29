@@ -4,7 +4,8 @@ FUNCTION zosd_job_read.
   CLEAR: ev_phase, ev_state, ev_result_status, ev_step_count,
          ev_log_count, ev_historical_gap, ev_created_on, ev_created_at,
          ev_queued_at, ev_started_at, ev_ended_at, ev_wait_kind,
-         ev_wait_jobname, ev_wait_jobcount, ev_wait_event_id, ev_step_number,
+         ev_wait_jobname, ev_wait_jobcount, ev_wait_event_id,
+         ev_tail_event_id, ev_tail_event_param, ev_step_number,
          ev_step_program, ev_input_json, ev_step_state, ev_step_started_at, ev_step_ended_at,
          ev_step_result_status, ev_log_sequence, ev_log_step, ev_log_at,
          ev_log_event, ev_log_severity, ev_log_text.
@@ -19,7 +20,9 @@ FUNCTION zosd_job_read.
               ev_queued_at = ev_queued_at ev_started_at = ev_started_at
               ev_ended_at = ev_ended_at ev_wait_kind = ev_wait_kind
               ev_wait_jobname = ev_wait_jobname ev_wait_jobcount = ev_wait_jobcount
-              ev_wait_event_id = ev_wait_event_id ev_step_number = ev_step_number
+              ev_wait_event_id = ev_wait_event_id
+              ev_tail_event_id = ev_tail_event_id ev_tail_event_param = ev_tail_event_param
+              ev_step_number = ev_step_number
               ev_step_program = ev_step_program ev_input_json = ev_input_json
               ev_step_state = ev_step_state
               ev_step_started_at = ev_step_started_at ev_step_ended_at = ev_step_ended_at

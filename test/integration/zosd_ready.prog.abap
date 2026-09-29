@@ -1,0 +1,6 @@
+REPORT zosd_ready.
+
+PARAMETERS p_run TYPE c LENGTH 32 OBLIGATORY.
+
+START-OF-SELECTION.
+  WRITE: / 'Readiness', p_run.

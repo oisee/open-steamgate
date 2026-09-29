@@ -60,6 +60,8 @@ function outboxSnapshot(db, identity, sourceDb, caller, currentSourceInstance) {
   const afterIntent = value(parent, "pred_intent_id");
   const namedId = value(parent, "event_id");
   const namedParam = value(parent, "event_param");
+  const tailId = value(parent, "tail_event_id");
+  const tailParam = value(parent, "tail_event_param");
   const sourceInstance = value(parent, "source_instance");
   const waitSeqText = value(parent, "wait_seq");
   if ((afterName || afterCount || afterIntent) &&
@@ -72,6 +74,10 @@ function outboxSnapshot(db, identity, sourceDb, caller, currentSourceInstance) {
       sourceInstance !== currentSourceInstance)) {
     fail("outbox has an invalid named event condition");
   }
+  if ((tailId || tailParam) && (!/^[A-Z][A-Z0-9_]{0,31}$/.test(tailId) ||
+      tailParam.length > 64 || sourceInstance !== currentSourceInstance)) {
+    fail("outbox has an invalid tail event");
+  }
   return {
     phase: "OUTBOX", state: namedId ? "WAITING" : "READY", program: value(parent, "program"),
     generation: value(parent, "generation"),
@@ -79,6 +85,7 @@ function outboxSnapshot(db, identity, sourceDb, caller, currentSourceInstance) {
     afterEvent: afterName ? {jobname: afterName, jobcount: afterCount, intentId: afterIntent} : null,
     namedEvent: namedId ? {id: namedId, param: namedParam, sourceInstance,
       seq: Number(waitSeqText)} : null,
+    tailEvent: tailId ? {id: tailId, param: tailParam, sourceInstance} : null,
     queuedAt: null, startedAt: null, endedAt: null, resultStatus: null, detail: null,
     steps: programs.map((program, index) => ({number: index + 1, program,
       input: legacy ? [] : jobInputJson(rows[index].input_json),
@@ -193,6 +200,8 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
   const namedId = run.after_named_id ?? null;
   const namedParam = run.after_named_param ?? null;
   const namedInstance = run.source_instance ?? null;
+  const tailId = run.tail_event_id ?? null;
+  const tailParam = run.tail_event_param ?? null;
   const waitSeq = run.wait_seq ?? null;
   if ((afterName === null) !== (afterCount === null)) fail("incomplete predecessor event key");
   if (afterName !== null && (!afterName || afterName.length > 32 || afterName !== afterName.trim() ||
@@ -208,7 +217,18 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
       namedInstance !== currentSourceInstance)) {
     fail("invalid named event condition");
   }
-  const versioned = namedId !== null ? JSON.stringify({version: 5, ...base,
+  if (tailId !== null && (!/^[A-Z][A-Z0-9_]{0,31}$/.test(tailId) ||
+      typeof tailParam !== "string" || tailParam.length > 64 ||
+      namedInstance !== currentSourceInstance)) fail("invalid tail event");
+  const versioned = tailId !== null ? JSON.stringify({version: 6, ...base,
+    steps: payloadSteps,
+    afterEvent: afterName === null ? undefined : afterIntent ?
+      {jobname: afterName, jobcount: afterCount, intentId: afterIntent.replaceAll("-", "")} :
+      {jobname: afterName, jobcount: afterCount},
+    namedEvent: namedId === null ? undefined :
+      {id: namedId, param: namedParam, sourceInstance: namedInstance, seq: waitSeq},
+    tailEvent: {id: tailId, param: tailParam, sourceInstance: namedInstance}}) :
+    namedId !== null ? JSON.stringify({version: 5, ...base,
     steps: payloadSteps,
     namedEvent: {id: namedId, param: namedParam, sourceInstance: namedInstance, seq: waitSeq}}) :
     afterName === null ? payload : JSON.stringify({version: afterIntent ? 4 : 3, ...base,
@@ -217,6 +237,23 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
       intentId: afterIntent.replaceAll("-", "")} : {jobname: afterName, jobcount: afterCount}});
   if (createHash("sha256").update(versioned).digest("hex") !== ledger.payload_sha256) {
     fail("operations run differs from immutable import ledger payload");
+  }
+  if (tailId !== null) {
+    const event = db.prepare("SELECT * FROM batch_named_events WHERE intent_id = ?")
+      .get(intentId);
+    const occurrence = event && {sourceDb: event.source_db, sourceInstance: event.source_instance,
+      client: event.source_client, sysid: event.source_sysid, owner: event.source_owner,
+      id: event.event_id, param: event.event_param, seq: event.signal_seq};
+    const digest = occurrence && createHash("sha256")
+      .update(JSON.stringify({version: 1, ...occurrence})).digest("hex");
+    if (!!event !== (run.state === "COMPLETED") ||
+        (event && (event.event_id !== tailId || event.event_param !== tailParam ||
+          event.source_instance !== namedInstance || event.source_db !== sourceDb ||
+          event.source_client !== caller.client || event.source_sysid !== caller.sid ||
+          event.source_owner !== caller.user || !Number.isSafeInteger(event.signal_seq) ||
+          event.signal_seq < 1 || event.payload_sha256 !== digest))) {
+      fail("tail event disagrees with confirmed result");
+    }
   }
   if (run.state === "WAITING" && afterName === null && namedId === null) fail("waiting run has no event condition");
   if (namedId !== null) {
@@ -264,6 +301,10 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
          (outbox.namedEvent?.param ?? null) !== namedParam ||
          (outbox.namedEvent?.sourceInstance ?? null) !== namedInstance ||
          (outbox.namedEvent?.seq ?? null) !== waitSeq)) ||
+      ((outbox.tailEvent || tailId) &&
+        ((outbox.tailEvent?.id ?? null) !== tailId ||
+         (outbox.tailEvent?.param ?? null) !== tailParam ||
+         (outbox.tailEvent?.sourceInstance ?? null) !== namedInstance)) ||
       outbox.steps.length !== steps.length ||
       outbox.steps.some((step, index) => step.program !== steps[index].program ||
         JSON.stringify(step.input) !== JSON.stringify(steps[index].input)))) {
@@ -277,6 +318,7 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
     resultStatus: run.result_status ?? null, detail: run.detail ?? null, steps,
     afterEvent: afterName === null ? null : {jobname: afterName, jobcount: afterCount},
     namedEvent: namedId === null ? null : {id: namedId},
+    tailEvent: tailId === null ? null : {id: tailId, param: tailParam},
   };
 }
 
