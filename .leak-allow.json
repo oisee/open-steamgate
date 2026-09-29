@@ -62,6 +62,16 @@
       "reason": "Выдуманный uuid в тесте нормализатора W.1: он обязан быть формы uuid, иначе тест не доказывает, что нормализатор ловит uuid. Цифры набраны от руки (1111/2222/…), ничего не идентифицируют. Прятать их от сканера переписыванием на лету было бы хуже записи здесь."
     },
     {
+      "file": "test/fixtures/http-cases/clock-read.http",
+      "value": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "reason": "Hand-written UUID input for the synthetic read-only regression service; the repeated hex digits identify no session or system."
+    },
+    {
+      "file": "test/fixtures/http-cases/clock-read.golden.json",
+      "value": "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+      "reason": "Expected uppercase form of the hand-written synthetic UUID in clock-read.http."
+    },
+    {
       "file": "test/third-party-notices.mjs",
       "value": "172.23.207.80",
       "reason": "Ложное срабатывание: байты ac17cf50 внутри SHA-256 текста MIT-лицензии zork-abap (3bed...a91d), это хэш, а не адрес."

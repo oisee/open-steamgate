@@ -56,7 +56,9 @@ Accept: application/json
 A frozen clock and frozen UUIDs are what make a golden trustworthy without masks. The hooks go on the ABAP-visible sources, never on a global `Date`:
 
 - **Clock.** The runtime's `getTime` fills `sy-datum`, `sy-datlo`, `sy-uzeit`, `sy-timlo` and `GET TIME STAMP`. A case provider serves those, and refreshes the `sy` fields at the entry of every dialog step. `CL_ABAP_TSTMP` only does arithmetic; `CL_ABAP_CONTEXT_INFO` reads `sy`.
+- The implemented provider is `tools/osd-case-determinism.mjs`. In the disposable case server, it replaces that runtime instance's `abap.statements.getTime` inside the serialized dialog step for one request, refreshes `sy`, and restores the real statement and `sy` before releasing the step. It leaves `Date` untouched, so host elapsed time and deadlines continue to advance.
 - **UUIDs.** open-abap-core's `CL_SYSTEM_UUID` calls `crypto.randomUUID`. A case supplies an ordered sequence (`# @osd.uuid …`), and running out of it, or leaving entries unused, fails the case. No `GUID_CREATE` implementation exists yet, so a case that reaches it is ineligible.
+- The provider replaces `CL_SYSTEM_UUID.CRYPTO.randomUUID` on the loaded class only during the case request. The server reports how many values were used, and the runner rejects unused values even if an HTTP response was already sent.
 - **Host time stays real:** work-process age, `WAIT` deadlines, `GET RUN TIME`, watchdogs and network timeouts.
 - **Out of scope for v1.** Cases that reach these are marked ineligible, not trusted:
   - APC;
@@ -91,6 +93,27 @@ The forward CodeLens now resolves plain entity-set and keyed GET requests to the
 - **Remote reference.** ADT alone plausibly suffices. `/IWBEP/I_MGW_SRH` and `/IWBEP/I_MGW_OHD` hold the DPC and MPC class names, as our IWSV and IWMO exports show. The hub-to-backend join is unverified.
 - A known gap in the existing map: SEGW truncates generated method names to 16 characters, so matching a set name to a method prefix can miss.
 
+## Remote lookup: measured on the SAP sandbox (2026-09-29)
+
+These are read-only ADT SQL probes, run by dell with Alice's authorisation. Tables and fields are the contract. No SAP-delivered service or class names are recorded here.
+
+| Table | Key | What the lookup reads |
+|---|---|---|
+| `/IWBEP/I_MGW_SRH` (backend service, IWSV) | `TECHNICAL_NAME` CHAR35, `VERSION` NUMC4 | `CLASS_NAME` CHAR30 = the runtime `_DPC_EXT`; `NAMESPACE` CHAR10; `EXTERNAL_NAME` CHAR40; `EXT_4_TECH_NAME`/`EXT_4_VERSION` = the service it extends |
+| `/IWBEP/I_MGW_OHD` (backend model, IWMO) | `TECHNICAL_NAME` CHAR32, `VERSION` NUMC4 | `CLASS_NAME` CHAR30 = the `_MPC_EXT` |
+| `/IWBEP/I_MGW_SRG` (service group → model) | all four fields: `GROUP_TECH_NAME`, `GROUP_VERSION`, `MODEL_TECH_NAME`, `MODEL_VERSION` | the model of a service |
+| `/IWFND/I_MED_SRH` (hub registration) | `SRV_IDENTIFIER` CHAR40, `IS_ACTIVE` | `OBJECT_NAME` CHAR35 = the hub name, which may be an alias; `NAMESPACE`; `SERVICE_NAME` CHAR40 + `SERVICE_VERSION` = the backend service |
+
+The join, verified on six active customer rows:
+- `hub.SRV_IDENTIFIER = OBJECT_NAME || '_' || SERVICE_VERSION`.
+- The backend key is **`NAMESPACE || SERVICE_NAME`**, not `SERVICE_NAME` alone: `concat(hub.namespace, hub.service_name) = backend.technical_name AND backend.version = hub.service_version` matched all six, and the join without the namespace matched none. `backend.EXTERNAL_NAME = hub.SERVICE_NAME`.
+- Hub aliases are real. One hub row carried a Z-prefixed `OBJECT_NAME` for a namespaced backend service. So resolution goes URL → hub row → backend row → `CLASS_NAME`, and never by matching the URL to a backend name as a string.
+
+Still open:
+- The model hop `SRG → OHD` has not been run yet.
+- For an aliased row, it is unverified whether the URL path uses `OBJECT_NAME` or `NAMESPACE`/`SERVICE_NAME`. Resolve both, and prefer the hub row.
+- Probes 3–4, the `$expand` call stack and whether `$batch` calls `CHANGESET_BEGIN`/`PROCESS`/`END`, need a debugger session and come later.
+
 ## Producing cases
 
 | Source | Gives | Still needed |
@@ -120,12 +143,14 @@ Captures are never tracked. The best use beyond regression, per unit of effort, 
 
 ## Order of work
 
-1. **Spike: one GET through our own parser.** A plain `.http` case goes to two pinned generations on separately seeded, disposable state.
+1. **Done: one GET through our own parser.** `tools/osd-http-case.mjs` parses the bounded format; `tools/osd-reference-generation.mjs` sends a plain `.http` case to two pinned generations on separately seeded, disposable business and operations databases. The server loads the addressed generation's `output/` directly without switching `build/live`.
    - Its golden holds an **unmasked** ABAP-derived timestamp, and a UUID if the endpoint makes one, driven by `# @osd.clock` and `# @osd.uuid`.
    - Exits: 0 equal, 1 difference, 2 error. The generation header is checked.
    - Negative controls:
      - a mutated timestamp or UUID in the golden goes red;
      - two cases back to back in one process, with distinct clocks and UUIDs, then an unscoped call must show real time.
+   - The fixture is `test/fixtures/http-cases/clock-read.http` and its sibling golden. The dedicated read-only `ZOSD_REF_SRV/ClockSet('CLOCK')` returns an ABAP-derived `ObservedAt` and `CL_SYSTEM_UUID`-derived `Token`; both stay unmasked in the golden. The service is defined by `src/regression/zosd_ref.stg.yaml` and registered through `stg-compile --all`.
+   - Run `npm run transpile`, then `HASH=$(basename "$(readlink build/live)")` and `node tools/osd-reference-generation.mjs test/fixtures/http-cases/clock-read.http "$HASH" "$HASH"`. Run the checks with `node tools/osd-unit-run.mjs` and `npx mocha test/http-case.mjs test/reference-generation.mjs test/replay-compare.mjs test/osd-suites.mjs test/stg-compile.mjs`.
 2. **In parallel, a small PR: the `.http` forward CodeLens** for `GET /Set` and `/Set(key)`. It opens the owning method, shows "unresolved" for any other shape and "last: not run" until results are stored. Test: `test/http-codelens.mjs`.
 3. **Conformance** of the `.http` subset and the `@osd` annotations against REST Client, httpYac and JetBrains.
 4. **One fiori_automator session** imported as a reviewed draft, with `# osd.source` hints validated against the registry.
@@ -134,7 +159,7 @@ Captures are never tracked. The best use beyond regression, per unit of effort, 
 
 ## Probes on the SAP sandbox (Alice's yes first; none have been run)
 
-1. The DDIC fields and keys of the service registration tables. For one service on the hub and on the backend, read through ADT SQL: the IWSV → IWMO join and the system alias.
+1. ~~The DDIC fields and keys of the service registration tables, and the hub → backend join.~~ Done 2026-09-29; see "Remote lookup" above. The `SRG → OHD` model hop is still to run.
 2. Fetch `_DPC_EXT`, `_DPC` and MPC, and compare the method lines with a prediction.
 3. Debug one `$expand` request and compare the prediction with the real stack.
 4. Does a SAP `$batch` call `CHANGESET_BEGIN`/`PROCESS`/`END`?

@@ -1,0 +1,8 @@
+### Observe the ABAP clock and UUID provider
+# @name clock_read
+# @osd.id clock.read
+# @osd.kind read
+# @osd.clock 2026-09-21T10:00:00.000Z
+# @osd.uuid aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+GET {{baseUrl}}/sap/opu/odata/sap/ZOSD_REF_SRV/ClockSet('CLOCK')
+Accept: application/json

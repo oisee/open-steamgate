@@ -1,0 +1,19 @@
+# A small read-only service for deterministic HTTP regression cases.
+# Its values come from ABAP at request time; it owns no business data.
+project: ZOSD_REF
+service: ZOSD_REF_SRV
+model: ZOSD_REF_MDL
+description: "ABAP clock and UUID regression reference"
+
+entities:
+  Clock:
+    set: ClockSet
+    keys: [Id]
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: [R, Q]
+    properties:
+      Id: {type: String(8), readonly: true, label: Id}
+      ObservedAt: {type: String(20), field: OBSERVED_AT, readonly: true, label: Observed at}
+      Token: {type: String(36), readonly: true, label: Token}

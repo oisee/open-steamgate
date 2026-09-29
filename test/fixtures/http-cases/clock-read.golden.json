@@ -1,0 +1,15 @@
+{
+  "status": 200,
+  "body": {
+    "d": {
+      "__metadata": {
+        "id": "http://reference.local/sap/opu/odata/sap/ZOSD_REF_SRV/ClockSet('CLOCK')",
+        "uri": "http://reference.local/sap/opu/odata/sap/ZOSD_REF_SRV/ClockSet('CLOCK')",
+        "type": "ZOSD_REF_SRV.Clock"
+      },
+      "Id": "CLOCK",
+      "ObservedAt": "2026-09-21T10:00:00Z",
+      "Token": "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+    }
+  }
+}

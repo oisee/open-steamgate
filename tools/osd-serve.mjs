@@ -32,6 +32,7 @@ import {persistDump} from "./osd-dumps.mjs";
 import {serveSandboxConfig} from "./osd-sandbox-config.mjs";
 import {mountPortableCells} from "./sqlscript-to-procedure-ir.mjs";
 import {batchMonitorHandler} from "./osd-batch-monitor.mjs";
+import {withAbapCase} from "./osd-case-determinism.mjs";
 
 const started = Date.now();
 
@@ -78,7 +79,10 @@ const bootStep = (name) => {
 // from next to this file, which is what would otherwise pin an instance to
 // the checkout the script happens to live in.
 const root = process.env.OSD_ROOT ?? process.cwd();
-const from = (file) => import(pathToFileURL(join(root, "output", file)).href);
+// A reference run pins the module tree explicitly. It never changes build/live.
+const output = process.env.OSD_OUTPUT ?? join(root, "output");
+const from = (file) => import(pathToFileURL(join(output, file)).href);
+const referenceCases = process.env.OSD_REFERENCE_CASES ? JSON.parse(process.env.OSD_REFERENCE_CASES) : null;
 
 const {initializeABAP} = await from("init.mjs");
 const {cl_express_icf_shim} = await from("cl_express_icf_shim.clas.mjs");
@@ -95,6 +99,7 @@ await guard.databaseStep(async () => {
   tell(bootingMessage());
   await initializeABAP();
 });
+const uuidClass = referenceCases ? (await from("cl_system_uuid.clas.mjs")).cl_system_uuid : undefined;
 // the ICF nodes into the tables a system keeps them in, by the rule in
 // docs/registry-drift.md: applied when an object arrives, never re-applied
 // over an edit. One module for all three hosts, because that is what the
@@ -303,12 +308,34 @@ const icf = mountServices(app, (args) => dialogStep(() => cl_express_icf_shim.ru
 
 app.all("/sap/opu/odata/sap/*", async function (req, res) {
   try {
-    await dialogStep(() => cl_express_icf_shim.run({
-      req,
-      res,
-      class: "ZCL_STG_HTTP_HANDLER",
-      base: new globalThis.abap.types.String().set("/sap/opu/odata/sap"),
-    }));
+    const caseId = req.get("X-OSD-Case");
+    const reference = referenceCases?.[caseId];
+    if (referenceCases && caseId && !reference) {
+      res.status(400).json({error: "unknown X-OSD-Case"});
+      return;
+    }
+    let uuidUsed = 0;
+    if (reference) {
+      const writeHead = res.writeHead;
+      res.writeHead = function (...args) {
+        res.setHeader("X-OSD-UUID-Used", String(uuidUsed));
+        return writeHead.apply(this, args);
+      };
+    }
+    await dialogStep(() => {
+      const serve = () => cl_express_icf_shim.run({
+        req,
+        res,
+        class: "ZCL_STG_HTTP_HANDLER",
+        base: new globalThis.abap.types.String().set("/sap/opu/odata/sap"),
+      });
+      return reference
+        ? withAbapCase(globalThis.abap, uuidClass, {...reference, onUuidUsed: (n) => { uuidUsed = n; }}, async () => {
+          if (reference.probeDelayMs) await new Promise((done) => setTimeout(done, reference.probeDelayMs));
+          return serve();
+        })
+        : serve();
+    });
   } catch (e) {
     // a runtime error is not an ABAP exception the dispatcher can catch;
     // answer rather than leave the client hanging
