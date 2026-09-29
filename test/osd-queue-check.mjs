@@ -1,5 +1,7 @@
 // The tool that keeps the queue honest, kept honest.
 import {expect} from "chai";
+import {spawnSync} from "node:child_process";
+import {resolve} from "node:path";
 import {alone, contradictions, sentenceAround, withoutNames} from "../tools/osd-queue-check.mjs";
 
 // This tool exists because both sessions found the queue stale twice in one
@@ -10,6 +12,14 @@ import {alone, contradictions, sentenceAround, withoutNames} from "../tools/osd-
 describe("tools/osd-queue-check: what a line claims about an issue", () => {
   const ref = (text, number, repo = "abaplint/abaplint") =>
     ({file: "docs/x.md", line: 1, text, number, repo});
+
+  it("reports no references separately from an unavailable tracker", () => {
+    const result = spawnSync(process.execPath,
+      [resolve("tools/osd-queue-check.mjs"), "docs/nonexistent-queue-check-input.md"],
+      {encoding: "utf8"});
+    expect(result.status).to.equal(3);
+    expect(result.stderr).to.contain("no references found");
+  });
 
   it("a line that calls a merged item open is a contradiction", () => {
     const out = contradictions([ref("abaplint #4311 is still open", 4311)], () => "merged");

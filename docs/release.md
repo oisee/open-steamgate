@@ -47,8 +47,10 @@ git push origin "$tag"
 ```
 
 A `vscode-v*` tag push builds a draft prerelease and publishes it only after
-the VSIX, binary, and Compose uploads all succeed. The Marketplace job then
-waits for the tagged tests workflow, checks the package version, zip integrity,
+the VSIX, binary, and Compose uploads all succeed and the complete tagged
+`tests.yml` push run passes for the tag's exact commit. The shared gate
+resolves one run ID and follows it; failure, cancellation, or a 60-minute
+timeout leaves the release in draft. The Marketplace job then checks package version and zip integrity,
 prerelease manifest, browser entry, and licence review, and publishes the
 Marketplace profile with the same version. A failed Marketplace publication
 leaves the GitHub prerelease public and the Marketplace job red; rerun the
@@ -58,10 +60,11 @@ Leave `tag` blank to derive the stamped version from that ref, and leave
 `draft` true. You may enter a tag, but it must match the version of the
 selected ref; any existing tag must point to that commit. The workflow uses
 `gh release create --draft --prerelease --target <commit>` and never runs
-`git push`. For an untagged draft, GitHub creates the tag when the draft is
-published. A dispatch with `draft=true` does not change the release's draft
-state. To publish an existing draft through the workflow, rerun with
-`draft=false`; a new dispatch must first create the draft. An existing release
+`git push`. A dispatch with `draft=true` does not change the release's draft
+state. To publish an existing draft through the workflow, push its tag and
+pass tagged tests on that commit, then rerun with `draft=false`. An untagged
+draft cannot be published by dispatch because no tagged test run exists for it.
+A new dispatch must first create the draft. An existing release
 is updated only when its commit matches the run's checkout commit. When the
 tag exists, the workflow fetches
 tags and compares the commit resolved from `refs/tags/<tag>^{commit}`. For an
@@ -104,10 +107,16 @@ by hand after a local `npm run leak`. A match (exit 1) always stops the release.
 | `FILE_ID.DIZ` | Classic BBS description generated from the version, with printable ASCII and CRLF lines |
 
 The binary and Compose jobs start after the VSIX job creates the draft.
-The final publish job needs all three upload jobs, so a failed upload leaves
-the draft unpublished. Rerun the workflow to fill or replace assets. An
+The final publish job needs all three upload jobs and the tagged test gate,
+so a failed upload or test leaves the draft unpublished. A draft-only dispatch
+skips the tagged test wait. Rerun the workflow to fill or replace assets. An
 already published release is updated in place on reruns. Each checksum is
 `sha256sum` output with the corresponding asset basename.
+
+On a rerun against an already public release, the VSIX, binary, and Compose
+jobs require a successful `tests.yml` push run for the tag's exact commit
+before editing the release or replacing an asset. A draft-only dispatch can
+still build and upload to a draft without waiting for tagged tests.
 
 `npm run binary` defaults to checkout mode: it builds from a fresh checkout
 after `npm ci`, without `.local/lars` or an embedded system seed. Run that

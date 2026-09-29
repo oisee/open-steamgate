@@ -6,6 +6,18 @@ on:
       - 'docker/**'
       - '**/Dockerfile*'
       - 'package*.json'
+      - 'LICENSE'
+      - 'abap_transpile.json'
+      - 'libs.lock.json'
+      - 'abaplint.jsonc'
+      - 'src/**'
+      - 'tools/**'
+      - 'test/**'
+      - 'data/**'
+      - 'webapp/**'
+      - 'bin/**'
+      - 'scripts/**'
+      - 'packs/**'
       - '.github/workflows/docker.yml'
   push:
     tags: ['vscode-v*']
@@ -141,8 +153,8 @@ jobs:
           packs=""
           if [[ "$PROFILE" == showcase ]]; then packs='o4d,zork,zvdb'; fi
           registry="ghcr.io/${GITHUB_REPOSITORY,,}"
-          # Publish an untagged digest once, then test that exact image. Only the
-          # manifest job gives successful runs discoverable tags.
+          # Publish an untagged digest once, then test that exact image. Digests
+          # may exist before tagged tests pass; only manifest creates discoverable tags.
           docker buildx build --platform "$PLATFORM" --provenance=false \
             --build-arg OSD_IMAGE_REVISION="$GITHUB_SHA" --build-arg OSD_IMAGE_PACKS="$packs" \
             --output "type=image,name=$registry,push=true,push-by-digest=true,name-canonical=true" \
@@ -222,11 +234,28 @@ jobs:
       matrix:
         profile: [core, showcase]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 85
     permissions:
+      actions: read
       contents: read
       packages: write
     steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push'
+        with:
+          fetch-depth: 0
+      - name: Require tagged tests before exposing image tags
+        if: github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag_sha="$(git rev-parse "refs/tags/$GITHUB_REF_NAME^{commit}")"
+          if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "Tag $GITHUB_REF_NAME resolves to $tag_sha, but images were built from $GITHUB_SHA" >&2
+            exit 1
+          fi
+          node tools/osd-ci-wait-tests.mjs "$GITHUB_REF_NAME" "$tag_sha"
       - uses: docker/setup-buildx-action@v3
       - uses: actions/download-artifact@v4
         with:
