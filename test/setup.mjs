@@ -256,7 +256,7 @@ export async function setup(abap, schemas, insert) {
   // In the browser there is no environment; the build wrote the id into the
   // bundle and the backend hands it over here.
   bootIdentity(abap, preview?.env ?? globalThis.process?.env ?? {});
-  if (globalThis.process?.versions?.node && abap.Classes.CL_AMC_CHANNEL_MANAGER) {
+  if (globalThis.process?.versions?.node && abap.Classes?.CL_AMC_CHANNEL_MANAGER) {
     const {installAmc} = await import("../tools/osd-amc.mjs");
     installAmc(abap);
   }
