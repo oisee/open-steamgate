@@ -280,6 +280,9 @@ Creation date/time currently comes from the outbox only and is unavailable
 after acknowledgement. Standard `BP_JOB_READ`, `SHOW_JOBSTATE` and
 `BP_JOBLOG_READ` still require measured A4H signatures and behavior.
 
+The [private ABAP status bridge](job-read-bridge.md) exposes this verified
+metadata to ABAP without claiming the standard SAP read signatures.
+
 ## Local read API for saved runs
 
 `GET /osd/batch-runs` lists up to 50 recent runs (`?limit=1..200`).
