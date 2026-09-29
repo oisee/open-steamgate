@@ -280,8 +280,24 @@ Creation date/time currently comes from the outbox only and is unavailable
 after acknowledgement. Standard `BP_JOB_READ`, `SHOW_JOBSTATE` and
 `BP_JOBLOG_READ` still require measured A4H signatures and behavior.
 
-The [private ABAP status bridge](job-read-bridge.md) exposes this verified
-metadata to ABAP without claiming the standard SAP read signatures.
+The operations SQLite store keeps a small technical job log for imported
+jobs. Import, claim, step completion/failure and job completion/failure or
+manual interruption append ordered rows in the same transaction as their
+state changes; a repeated outbox import adds no second entry. The private
+`readJobLog` reader checks the retained identity and owner, then validates the
+operations run, steps and import digest with the log rows in one read-only
+operations snapshot.
+It does not drain work or end the ABAP caller's LUW. A read can observe a later
+transition than an earlier separate status read. Older imported runs without
+log rows report a historical gap rather than invented entries. The read is
+bounded at 2000 rows and fails explicitly beyond that size. This log contains
+only controlled technical events: captured `WRITE` list output, BAL entries,
+selection values and report messages remain separate. The standard ABAP log
+function and its line format still require A4H measurement.
+
+The [private ABAP status bridge](job-read-bridge.md) exposes verified job
+metadata to ABAP without claiming the standard SAP read signatures. It does
+not return the technical log.
 
 ## Local read API for saved runs
 
