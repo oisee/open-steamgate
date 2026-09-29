@@ -217,7 +217,9 @@ separate from the transactional ABAP job facade below.
 For a durable `STG_DB=file` instance, the common `JOB_OPEN` / `JOB_SUBMIT` /
 `JOB_CLOSE` call shape schedules up to 16 ordered converted static reports in
 one LUW. `JOB_SUBMIT` accepts no variant or ad hoc selection; each report runs with its own
-`INITIALIZATION` defaults. `JOB_CLOSE` requires `STRTIMMED = 'X'` and rejects
+`INITIALIZATION` defaults. `JOB_CLOSE` accepts `STRTIMMED = 'X'` or a
+same-owner predecessor with `PRED_JOBNAME`, `PRED_JOBCOUNT`, and
+`PREDJOB_CHECKSTAT = 'X'`; see [job tail events](job-tail-events.md). It rejects
 date, time and target-system scheduling. External programs are refused.
 `JOBCOUNT` is an eight-digit handle for the current
 dialog step; the durable run identity is a separate UUID. Exact SAP signatures,

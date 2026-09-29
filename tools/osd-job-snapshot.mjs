@@ -52,10 +52,18 @@ function outboxSnapshot(db, identity, sourceDb, caller) {
     fail("outbox has an invalid ordered step set");
   }
   const programs = legacy ? [value(parent, "program")] : rows.map((row) => value(row, "program"));
+  const afterName = value(parent, "pred_jobname");
+  const afterCount = value(parent, "pred_jobcount");
+  const afterIntent = value(parent, "pred_intent_id");
+  if ((afterName || afterCount || afterIntent) &&
+      (!afterName || !/^\d{8}$/.test(afterCount) || !/^[0-9a-f]{32}$/.test(afterIntent))) {
+    fail("outbox has an incomplete predecessor key");
+  }
   return {
     phase: "OUTBOX", state: "READY", program: value(parent, "program"),
     generation: value(parent, "generation"),
     createdOn: value(parent, "created_on"), createdAt: value(parent, "created_at"),
+    afterEvent: afterName ? {jobname: afterName, jobcount: afterCount, intentId: afterIntent} : null,
     queuedAt: null, startedAt: null, endedAt: null, resultStatus: null, detail: null,
     steps: programs.map((program, index) => ({number: index + 1, program,
       state: index === 0 ? "READY" : "PENDING", startedAt: null, endedAt: null,
@@ -160,14 +168,19 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
     steps: rows.map((row) => ({number: row.step_no, program: row.program}))});
   const afterName = run.after_job_name ?? null;
   const afterCount = run.after_job_count ?? null;
+  const afterIntent = run.after_intent_id ?? null;
   if ((afterName === null) !== (afterCount === null)) fail("incomplete predecessor event key");
   if (afterName !== null && (!afterName || afterName.length > 32 || afterName !== afterName.trim() ||
       afterName !== afterName.toUpperCase() || !/^\d{8}$/.test(afterCount) || legacy)) {
     fail("invalid predecessor event key");
   }
-  const versioned = afterName === null ? payload : JSON.stringify({version: 3, ...base,
+  if (afterIntent !== null && (afterName === null || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(afterIntent))) {
+    fail("invalid predecessor intent ID");
+  }
+  const versioned = afterName === null ? payload : JSON.stringify({version: afterIntent ? 4 : 3, ...base,
     steps: rows.map((row) => ({number: row.step_no, program: row.program})),
-    afterEvent: {jobname: afterName, jobcount: afterCount}});
+    afterEvent: afterIntent ? {jobname: afterName, jobcount: afterCount,
+      intentId: afterIntent.replaceAll("-", "")} : {jobname: afterName, jobcount: afterCount}});
   if (createHash("sha256").update(versioned).digest("hex") !== ledger.payload_sha256) {
     fail("operations run differs from immutable import ledger payload");
   }
@@ -175,13 +188,21 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
   if (afterName !== null) {
     const eventTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'batch_job_events'").get();
     if (!eventTable) fail("dependent run has no event ledger");
-    const event = db.prepare(`SELECT e.run_id, p.state, p.source_db AS parent_db,
+    const events = db.prepare(`SELECT e.run_id, p.state, p.source_db AS parent_db,
       p.source_client AS parent_client, p.source_sysid AS parent_sysid,
       p.source_owner AS parent_owner, p.job_name AS parent_name, p.job_count AS parent_count
       FROM batch_job_events e LEFT JOIN batch_runs p ON p.id = e.run_id
       WHERE e.source_db = ? AND e.source_client = ?
-      AND e.source_sysid = ? AND e.source_owner = ? AND e.job_name = ? AND e.job_count = ?`).get(
-        sourceDb, caller.client, caller.sid, caller.user, afterName, afterCount);
+      AND e.source_sysid = ? AND e.source_owner = ? AND e.job_name = ? AND e.job_count = ?
+      AND (? IS NULL OR e.run_id = ?) ORDER BY e.rowid LIMIT 2`).all(
+        sourceDb, caller.client, caller.sid, caller.user, afterName, afterCount, afterIntent, afterIntent);
+    if (events.length > 1 && (afterIntent !== null || run.state === "WAITING")) {
+      fail("ambiguous predecessor completion events");
+    }
+    // Historical v3 dependents were released by the first matching event
+    // under the original unique-key ledger. Preserve that binding on read
+    // after a later business instance reuses the same key.
+    const event = events[0];
     if (event && (event.state !== "COMPLETED" || event.parent_db !== sourceDb ||
         event.parent_client !== caller.client || event.parent_sysid !== caller.sid ||
         event.parent_owner !== caller.user || event.parent_name !== afterName ||
@@ -190,6 +211,10 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox) {
   }
   if (outbox && (outbox.program !== value(run, "program") ||
       outbox.generation !== value(run, "generation") ||
+      ((outbox.afterEvent || afterIntent) &&
+        ((outbox.afterEvent?.jobname ?? null) !== afterName ||
+         (outbox.afterEvent?.jobcount ?? null) !== afterCount ||
+         (outbox.afterEvent?.intentId ?? null) !== (afterIntent?.replaceAll("-", "") ?? null))) ||
       outbox.steps.length !== steps.length ||
       outbox.steps.some((step, index) => step.program !== steps[index].program))) {
     fail("imported run disagrees with still-pending outbox");

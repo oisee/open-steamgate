@@ -134,6 +134,31 @@ describe("private durable job status snapshot", function () {
     } finally { store.close(); }
   });
 
+  it("keeps a released v3 child readable after another run reuses its predecessor key", () => {
+    reserve("PARENT", "00000030");
+    const parent = bind("PARENT", "00000030", ["Z_ALPHA"]);
+    reserve("CHILD", "00000031");
+    const child = bind("CHILD", "00000031", ["Z_BETA"]);
+    const store = new BatchRuns(root, env);
+    try {
+      const first = imported(parent);
+      imported(child, {afterEvent: {jobname: "PARENT", jobcount: "00000030"}});
+      store.claimNext();
+      store.finishStep(first, 1, {status: "COMPLETED"});
+      assert.equal(read(child.name, child.count).state, "QUEUED");
+      const activeChild = store.claimNext().run.id;
+      store.finishStep(activeChild, 1, {status: "COMPLETED"});
+      const later = store.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb,
+        client: caller.client, sysid: caller.sid, owner: caller.user,
+        jobname: "PARENT", jobcount: "00000030", program: "Z_ALPHA",
+        generation: "generation-1", steps: [{number: 1, program: "Z_ALPHA"}]}).run;
+      store.claimNext();
+      store.finishStep(later.id, 1, {status: "COMPLETED"});
+      assert.equal(read(child.name, child.count).state, "COMPLETED");
+      assert.equal(log(child.name, child.count).entries.at(-1).event, "JOB_COMPLETED");
+    } finally { store.close(); }
+  });
+
   it("reads a pending outbox with an older operations file", () => {
     reserve("OLD_STORE", "00000012");
     bind("OLD_STORE", "00000012");

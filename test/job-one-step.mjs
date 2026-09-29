@@ -781,6 +781,117 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     expect(rows()).to.have.length(before);
   });
 
+  it("schedules a JOB_CLOSE predecessor through the committed outbox and releases after success", async () => {
+    const scopedEnv = {...process.env, OSD_OPERATIONS_DB: join(dir, "predecessor.sqlite")};
+    const scoped = new BatchRuns(root, scopedEnv);
+    try {
+      let parentCount;
+      await dialogStep(async () => {
+        parentCount = await open("PRED_PARENT");
+        await submit(parentCount, {jobname: "PRED_PARENT"});
+        expect((await close(parentCount, {jobname: "PRED_PARENT"})).job_was_released).to.equal("X");
+      });
+      const parent = rows().find((row) => row.jobname.trim() === "PRED_PARENT");
+      let childCount;
+      await dialogStep(async () => {
+        childCount = await open("PRED_CHILD");
+        await submit(childCount, {jobname: "PRED_CHILD"});
+        const pred = {jobname: "PRED_CHILD", strtimmed: "", pred_jobname: "PRED_PARENT",
+          pred_jobcount: parentCount, predjob_checkstat: "X"};
+        await classic(() => close(childCount, {...pred, predjob_checkstat: ""}), "job_close_failed");
+        await classic(() => close(childCount, {...pred, strtimmed: "X"}), "job_close_failed");
+        expect((await close(childCount, pred)).job_was_released).to.equal("X");
+      });
+      const child = rows().find((row) => row.jobname.trim() === "PRED_CHILD");
+      expect(child.pred_jobname.trim()).to.equal("PRED_PARENT");
+      expect(child.pred_jobcount.trim()).to.equal(parentCount);
+      expect(child.pred_intent_id.trim()).to.equal(parent.intent_id.trim());
+      try {
+        await drainJobOutbox(scoped, {afterImport: (intent) => {
+          if (intent.jobname === "PRED_CHILD") throw new Error("crash after dependent import");
+        }});
+        throw new Error("drain unexpectedly acknowledged dependent");
+      } catch (error) { expect(error.message).to.equal("crash after dependent import"); }
+      expect(rows().some((row) => row.jobname.trim() === "PRED_CHILD")).to.equal(true);
+      const previousStatusDb = process.env.OSD_OPERATIONS_DB;
+      process.env.OSD_OPERATIONS_DB = scopedEnv.OSD_OPERATIONS_DB;
+      try { expect((await dialogStep(() => status("PRED_CHILD", childCount))).ev_state).to.equal("WAITING"); }
+      finally { process.env.OSD_OPERATIONS_DB = previousStatusDb; }
+      const pendingPredecessorIntents = () => rows().filter((row) =>
+        ["PRED_PARENT", "PRED_CHILD"].includes(row.jobname.trim()));
+      const pendingBeforeRetry = pendingPredecessorIntents().length;
+      expect((await drainJobOutbox(scoped)).imported).to.equal(pendingBeforeRetry);
+      expect(pendingPredecessorIntents()).to.have.length(0);
+      expect(scoped.list().filter((run) => ["PRED_PARENT", "PRED_CHILD"].includes(run.jobName)))
+        .to.have.length(2);
+      const waiting = scoped.list().find((run) => run.jobName === "PRED_CHILD");
+      expect(waiting.state).to.equal("WAITING");
+      expect(waiting.steps[0].state).to.equal("PENDING");
+      const restarted = new BatchRuns(root, scopedEnv);
+      try {
+        expect(restarted.get(waiting.id).state).to.equal("WAITING");
+        expect((await workQueuedBatch(root, restarted, async () => ({status: "COMPLETED"}))).kind).to.equal("completed");
+        expect(restarted.get(waiting.id).state).to.equal("QUEUED");
+        const previousOperationsDb = process.env.OSD_OPERATIONS_DB;
+        process.env.OSD_OPERATIONS_DB = scopedEnv.OSD_OPERATIONS_DB;
+        try {
+          await dialogStep(async () => {
+            const lateCount = await open("PRED_TOO_LATE");
+            await submit(lateCount, {jobname: "PRED_TOO_LATE"});
+            await classic(() => close(lateCount, {jobname: "PRED_TOO_LATE", strtimmed: "",
+              pred_jobname: "PRED_PARENT", pred_jobcount: parentCount,
+              predjob_checkstat: "X"}), "job_close_failed");
+            await client.rollback();
+          });
+        } finally { process.env.OSD_OPERATIONS_DB = previousOperationsDb; }
+        expect((await workQueuedBatch(root, restarted, async () => ({status: "COMPLETED"}))).kind).to.equal("completed");
+      } finally { restarted.close(); }
+    } finally { scoped.close(); }
+  });
+
+  it("rejects an unknown predecessor and rolls back a valid dependent", async () => {
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "pred-rollback.sqlite")});
+    try {
+      let parentCount;
+      await dialogStep(async () => {
+        parentCount = await open("PRED_ROLLBACK_PARENT");
+        await submit(parentCount, {jobname: "PRED_ROLLBACK_PARENT"});
+        await close(parentCount, {jobname: "PRED_ROLLBACK_PARENT"});
+      });
+      const before = rows().length;
+      await dialogStep(async () => {
+        const count = await open("PRED_ROLLBACK_CHILD");
+        await submit(count, {jobname: "PRED_ROLLBACK_CHILD"});
+        const pred = {jobname: "PRED_ROLLBACK_CHILD", strtimmed: "",
+          pred_jobname: "PRED_ROLLBACK_PARENT", pred_jobcount: parentCount, predjob_checkstat: "X"};
+        await classic(() => close(count, {...pred, pred_jobcount: "99999999"}), "job_close_failed");
+        await close(count, pred);
+        await client.rollback();
+      });
+      expect(rows()).to.have.length(before);
+      expect((await drainJobOutbox(scoped)).imported).to.equal(1);
+      expect(scoped.list()).to.have.length(1);
+    } finally { scoped.close(); }
+  });
+
+  it("accepts parent and dependent CLOSE in one LUW, then imports both committed intents", async () => {
+    const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "pred-same-luw.sqlite")});
+    try {
+      await dialogStep(async () => {
+        const parentCount = await open("PRED_SAME_PARENT");
+        await submit(parentCount, {jobname: "PRED_SAME_PARENT"});
+        await close(parentCount, {jobname: "PRED_SAME_PARENT"});
+        const childCount = await open("PRED_SAME_CHILD");
+        await submit(childCount, {jobname: "PRED_SAME_CHILD"});
+        await close(childCount, {jobname: "PRED_SAME_CHILD", strtimmed: "",
+          pred_jobname: "PRED_SAME_PARENT", pred_jobcount: parentCount,
+          predjob_checkstat: "X"});
+      });
+      expect((await drainJobOutbox(scoped)).imported).to.equal(2);
+      expect(scoped.list().find((run) => run.jobName === "PRED_SAME_CHILD").state).to.equal("WAITING");
+    } finally { scoped.close(); }
+  });
+
   it("keeps imported ledger across a fresh operations connection and rejects changed payload", async () => {
     await schedule();
     const intent = rows().find((row) => row.mandt.trim() === "123");

@@ -1,5 +1,5 @@
 FUNCTION job_close.
-*" IMPORTING JOBNAME JOBCOUNT STRTIMMED SDLSTRTDT SDLSTRTTM TARGETSYSTEM
+*" IMPORTING JOBNAME JOBCOUNT STRTIMMED SDLSTRTDT SDLSTRTTM TARGETSYSTEM PRED_JOBNAME PRED_JOBCOUNT PREDJOB_CHECKSTAT
 *" EXPORTING JOB_WAS_RELEASED
 *" EXCEPTIONS JOBNAME_MISSING JOB_NOTEX JOB_CLOSE_FAILED
   DATA lv_error TYPE string.
@@ -10,6 +10,10 @@ FUNCTION job_close.
   DATA lv_step_count TYPE string.
   DATA lv_step_no TYPE string.
   DATA lv_jobname TYPE string.
+  DATA lv_pred_intent TYPE string.
+  DATA lv_pred_name TYPE string.
+  DATA lv_requested_name TYPE string.
+  DATA lv_pred_state TYPE string.
   DATA lv_step_index TYPE i.
   DATA ls_intent TYPE zosd_job_outbox.
   DATA ls_step TYPE zosd_job_step.
@@ -17,9 +21,44 @@ FUNCTION job_close.
   IF jobname IS INITIAL.
     RAISE jobname_missing.
   ENDIF.
-  IF strtimmed <> 'X' OR sdlstrtdt IS NOT INITIAL OR sdlstrttm IS NOT INITIAL
+  lv_pred_name = pred_jobname.
+  CONDENSE lv_pred_name.
+  TRANSLATE lv_pred_name TO UPPER CASE.
+  lv_requested_name = jobname.
+  CONDENSE lv_requested_name.
+  TRANSLATE lv_requested_name TO UPPER CASE.
+  IF sdlstrtdt IS NOT INITIAL OR sdlstrttm IS NOT INITIAL
       OR targetsystem IS NOT INITIAL.
     RAISE job_close_failed.
+  ENDIF.
+  IF lv_pred_name IS INITIAL AND pred_jobcount IS INITIAL
+      AND predjob_checkstat IS INITIAL.
+    IF strtimmed <> 'X'.
+      RAISE job_close_failed.
+    ENDIF.
+  ELSE.
+    IF strtimmed IS NOT INITIAL OR lv_pred_name IS INITIAL
+        OR pred_jobcount IS INITIAL OR predjob_checkstat <> 'X'
+        OR lv_pred_name = lv_requested_name AND pred_jobcount = jobcount.
+      RAISE job_close_failed.
+    ENDIF.
+    SELECT SINGLE intent_id FROM zosd_job_identity INTO lv_pred_intent
+      WHERE mandt = sy-mandt AND jobname = lv_pred_name
+        AND jobcount = pred_jobcount AND owner = sy-uname.
+    IF sy-subrc <> 0 OR lv_pred_intent IS INITIAL.
+      RAISE job_close_failed.
+    ENDIF.
+    CALL FUNCTION 'ZOSD_JOB_STATUS'
+      EXPORTING iv_jobname = lv_pred_name iv_jobcount = pred_jobcount
+      IMPORTING ev_state = lv_pred_state
+      EXCEPTIONS uncommitted = 1 OTHERS = 2.
+    IF sy-subrc > 1.
+      RAISE job_close_failed.
+    ENDIF.
+    IF sy-subrc = 0 AND ( lv_pred_state = 'COMPLETED'
+        OR lv_pred_state = 'FAILED' OR lv_pred_state = 'INTERRUPTED' ).
+      RAISE job_close_failed.
+    ENDIF.
   ENDIF.
   CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'
     EXPORTING iv_command = 'CLOSE' iv_jobname = jobname
@@ -44,6 +83,9 @@ FUNCTION job_close.
   ls_intent-program = lv_program.
   ls_intent-step_count = lv_step_count.
   ls_intent-generation = lv_generation.
+  ls_intent-pred_jobname = lv_pred_name.
+  ls_intent-pred_jobcount = pred_jobcount.
+  ls_intent-pred_intent_id = lv_pred_intent.
   ls_intent-created_on = sy-datum.
   ls_intent-created_at = sy-uzeit.
   lv_step_index = 1.

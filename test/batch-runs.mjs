@@ -6,8 +6,9 @@ import {join, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
 import express from "express";
 import {BatchRuns, liveGeneration, runPersistedBatch, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
+import {drainJobOutbox} from "../tools/osd-job-outbox.mjs";
 import {batchMonitorHandler} from "../tools/osd-batch-monitor.mjs";
-import {migrateJobIdentityFile} from "./setup.mjs";
+import {beforeJobPredecessorDDL, migrateJobIdentityFile, migrateJobPredecessorFile} from "./setup.mjs";
 import {fingerprintOf} from "../tools/osd-persist.mjs";
 
 const root = resolve(".");
@@ -93,6 +94,95 @@ describe("durable one-shot batch runs", function () {
         .to.equal(true);
       expect(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'zosd_job_step'").get()).to.exist;
     } finally { db.close(); }
+  });
+
+  it("adds predecessor columns to a stamped business DB without touching old intents", () => {
+    const db = new DatabaseSync(join(dir, "pred-upgrade.sqlite"));
+    try {
+      const oldParent = `CREATE TABLE 'zosd_job_outbox' ('mandt' NCHAR(3) COLLATE RTRIM,
+        'intent_id' NCHAR(32) COLLATE RTRIM, 'step_count' NCHAR(2))`;
+      const parent = oldParent.replace("'step_count' NCHAR(2)",
+        `'step_count' NCHAR(2), 'pred_jobname' NCHAR(32) COLLATE RTRIM,
+        'pred_jobcount' NCHAR(8) COLLATE RTRIM, 'pred_intent_id' NCHAR(32) COLLATE RTRIM`);
+      const old = [oldParent];
+      const wanted = [parent];
+      db.exec(`CREATE TABLE osd_schema (fingerprint TEXT, at TEXT);
+        CREATE TABLE zosd_job_outbox (mandt NCHAR(3), intent_id NCHAR(32), step_count NCHAR(2));
+        INSERT INTO zosd_job_outbox VALUES ('123', 'old-intent', '01')`);
+      db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(fingerprintOf(old));
+      expect(migrateJobPredecessorFile(db, fingerprintOf(old), fingerprintOf(wanted), wanted, fingerprintOf)).to.equal(true);
+      expect(db.prepare("SELECT * FROM zosd_job_outbox").get()).to.include({intent_id: "old-intent", pred_jobname: ""});
+      expect(db.prepare("SELECT fingerprint FROM osd_schema").get().fingerprint).to.equal(fingerprintOf(wanted));
+      expect(migrateJobPredecessorFile(db, fingerprintOf(old), fingerprintOf(wanted), wanted, fingerprintOf)).to.equal(true);
+    } finally { db.close(); }
+  });
+
+  it("composes one-step and multistep identity upgrades before predecessor columns", () => {
+    for (const oldKind of ["one-step", "multistep"]) {
+      const db = new DatabaseSync(join(dir, `pred-${oldKind}.sqlite`));
+      try {
+        const parent = `CREATE TABLE 'zosd_job_outbox' ('mandt' NCHAR(3) COLLATE RTRIM,
+          'intent_id' NCHAR(32) COLLATE RTRIM, 'jobname' TEXT, 'jobcount' TEXT,
+          'owner' TEXT, 'step_count' NCHAR(2), 'pred_jobname' NCHAR(32) COLLATE RTRIM,
+          'pred_jobcount' NCHAR(8) COLLATE RTRIM, 'pred_intent_id' NCHAR(32) COLLATE RTRIM)`;
+        const beforePred = beforeJobPredecessorDDL([parent])[0];
+        const oneStepParent = beforePred.replace(/, 'step_count' NCHAR\(2\)/, "");
+        const step = "CREATE TABLE 'zosd_job_step' (mandt TEXT, intent_id TEXT, step_no TEXT)";
+        const identity = `CREATE TABLE 'zosd_job_identity' (mandt TEXT, jobname TEXT, jobcount TEXT,
+          owner TEXT, intent_id TEXT, PRIMARY KEY(mandt, jobname, jobcount))`;
+        const wanted = [parent, step, identity];
+        const v3 = beforeJobPredecessorDDL(wanted);
+        const old = oldKind === "one-step" ? [oneStepParent] : [beforePred, step];
+        db.exec(`CREATE TABLE osd_schema (fingerprint TEXT, at TEXT);
+          CREATE TABLE zosd_job_outbox (mandt TEXT, intent_id TEXT, jobname TEXT, jobcount TEXT,
+            owner TEXT${oldKind === "one-step" ? "" : ", step_count NCHAR(2)"});
+          INSERT INTO zosd_job_outbox (mandt, intent_id, jobname, jobcount, owner)
+            VALUES ('123', 'old-intent', 'PARENT', '00000004', 'DEVELOPER')`);
+        if (oldKind === "multistep") db.exec(step);
+        db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(fingerprintOf(old));
+        expect(migrateJobIdentityFile(db, fingerprintOf(old), fingerprintOf(v3), v3, fingerprintOf)).to.equal(true);
+        expect(migrateJobPredecessorFile(db, fingerprintOf(v3), fingerprintOf(wanted), wanted, fingerprintOf)).to.equal(true);
+        expect(db.prepare("SELECT pred_jobname, pred_jobcount, pred_intent_id FROM zosd_job_outbox").get())
+          .to.deep.equal({pred_jobname: "", pred_jobcount: "", pred_intent_id: ""});
+      } finally { db.close(); }
+    }
+  });
+
+  it("imports and acknowledges a pending pre-predecessor outbox row after migration", async () => {
+    const sourceDb = join(dir, "pending-upgrade.sqlite");
+    const db = new DatabaseSync(sourceDb);
+    const oldParent = `CREATE TABLE 'zosd_job_outbox' (mandt TEXT, intent_id TEXT PRIMARY KEY,
+      sysid TEXT, source_db TEXT, jobname TEXT, jobcount TEXT, owner TEXT,
+      program TEXT, step_count TEXT, generation TEXT, created_on TEXT, created_at TEXT)`;
+    const parent = oldParent.replace("generation TEXT", `generation TEXT,
+      'pred_jobname' NCHAR(32) COLLATE RTRIM, 'pred_jobcount' NCHAR(8) COLLATE RTRIM,
+      'pred_intent_id' NCHAR(32) COLLATE RTRIM`);
+    const step = `CREATE TABLE 'zosd_job_step' (mandt TEXT, intent_id TEXT, step_no TEXT, program TEXT)`;
+    const old = [oldParent, step];
+    const wanted = [parent, step];
+    const oldAbap = globalThis.abap;
+    const store = new BatchRuns(root, env);
+    try {
+      db.exec(`CREATE TABLE osd_schema (fingerprint TEXT, at TEXT); ${oldParent}; ${step};`);
+      const intentId = randomUUID().replaceAll("-", "");
+      db.prepare(`INSERT INTO zosd_job_outbox VALUES
+        ('123', ?, 'OSG', ?, 'OLD_PENDING', '00000001', 'DEVELOPER',
+         'Z_FIRST', '01', 'generation-1', '20260929', '091500')`).run(intentId, sourceDb);
+      db.prepare(`INSERT INTO zosd_job_step VALUES ('123', ?, '01', 'Z_FIRST')`).run(intentId);
+      db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(fingerprintOf(old));
+      expect(migrateJobPredecessorFile(db, fingerprintOf(old), fingerprintOf(wanted), wanted, fingerprintOf)).to.equal(true);
+      const client = {path: sourceDb,
+        async delete({table, where}) {
+          const changed = db.prepare(`DELETE FROM ${table} WHERE ${where}`).run().changes;
+          return {subrc: changed === 1 ? 0 : 4, dbcnt: changed};
+        },
+        async commit() {}, async rollback() {}};
+      globalThis.abap = {context: {databaseConnections: {DEFAULT: client}}};
+      expect((await drainJobOutbox(store, {env: {...env, STG_DB: "file"}})).imported).to.equal(1);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM zosd_job_outbox").get().n).to.equal(0);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM zosd_job_step").get().n).to.equal(0);
+      expect(store.list().map((run) => run.jobName)).to.deep.equal(["OLD_PENDING"]);
+    } finally { globalThis.abap = oldAbap; store.close(); db.close(); }
   });
 
   it("reopens a finished run and its output on a fresh SQLite connection", async () => {
