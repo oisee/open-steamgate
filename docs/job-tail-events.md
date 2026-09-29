@@ -11,6 +11,13 @@ successfully in the same business database, client, system ID, and owner.
 The event ledger survives restart, so an import after the predecessor completed
 enters `QUEUED` immediately. Workers claim only `QUEUED` jobs.
 
+This private seam identifies a business instance by its database path, client,
+system ID and owner. If an ephemeral business database is replaced at the same
+path while the operations database is retained, an old completion event could
+match a recycled job key. Reset the operations database together with that
+business database. A persistent instance identifier is needed before exposing
+this dependency through an ABAP scheduling API.
+
 The predecessor's terminal success, its single completion event, and release
 of waiting dependents commit in one operations SQLite transaction. A failed
 or interrupted predecessor emits no completion event. A multi-step predecessor
