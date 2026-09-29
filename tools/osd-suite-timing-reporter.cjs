@@ -1,0 +1,32 @@
+// Mocha's normal spec output, with elapsed wall time for each suite file.
+const {writeFileSync} = require("node:fs");
+const Mocha = require("mocha");
+const {isAbsolute, relative} = require("node:path");
+
+module.exports = class SuiteTimingReporter extends Mocha.reporters.Spec {
+  constructor(runner, options) {
+    super(runner, options);
+    const timings = {};
+    let current;
+    let began;
+    const finish = () => {
+      if (current) timings[current] = (timings[current] ?? 0) + Number(process.hrtime.bigint() - began) / 1e9;
+    };
+    runner.on("suite", (suite) => {
+      if (!suite.file || !suite.parent?.root) return;
+      const file = (isAbsolute(suite.file) ? relative(process.cwd(), suite.file) : suite.file).replace(/^\.\//, "");
+      if (file === current) return;
+      finish();
+      current = file;
+      began = process.hrtime.bigint();
+    });
+    runner.on("end", () => {
+      finish();
+      writeFileSync(process.env.OSD_SUITE_TIMINGS_FILE, JSON.stringify({
+        measuredAt: new Date().toISOString(),
+        note: "Local wall time; relative weights only. Includes suite hooks and work between files.",
+        seconds: Object.fromEntries(Object.entries(timings).sort(([a], [b]) => a.localeCompare(b))),
+      }, null, 2) + "\n");
+    });
+  }
+}
