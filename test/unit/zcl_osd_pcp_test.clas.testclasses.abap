@@ -5,6 +5,8 @@ CLASS ltcl_pcp DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS binary_body FOR TESTING RAISING cx_static_check.
     METHODS malformed FOR TESTING RAISING cx_static_check.
     METHODS assumed_escaping FOR TESTING RAISING cx_static_check.
+    METHODS duplicate_empty_header FOR TESTING RAISING cx_static_check.
+    METHODS carriage_return FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_pcp IMPLEMENTATION.
@@ -25,7 +27,7 @@ CLASS ltcl_pcp IMPLEMENTATION.
       && 'b:x\:y' && lv_lf && lv_lf
       && 'hello' && lv_lf && 'world'.
     cl_abap_unit_assert=>assert_equals( act = lo_message->serialize( ) exp = lv_expected ).
-    lo_message = cl_ac_message_type_pcp=>deserialize( lv_expected ).
+    lo_message = cl_ac_message_type_pcp=>if_ac_message_type_pcp~deserialize( lv_expected ).
     cl_abap_unit_assert=>assert_equals( act = lo_message->serialize( ) exp = lv_expected ).
     cl_abap_unit_assert=>assert_equals( act = lo_message->get_text( )
       exp = 'hello' && lv_lf && 'world' ).
@@ -105,5 +107,52 @@ CLASS ltcl_pcp IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true( xsdbool( lv_wire CS 'path:a\\b\:c' ) ).
     lo_message = cl_ac_message_type_pcp=>deserialize( lv_wire ).
     cl_abap_unit_assert=>assert_equals( act = lo_message->serialize( ) exp = lv_wire ).
+  ENDMETHOD.
+
+  METHOD duplicate_empty_header.
+    DATA lv_lf TYPE string.
+    lv_lf = cl_abap_char_utilities=>newline.
+    TRY.
+        cl_ac_message_type_pcp=>if_ac_message_type_pcp~deserialize(
+          'pcp-action:MESSAGE' && lv_lf
+          && 'pcp-body-type:' && lv_lf
+          && 'pcp-body-type:text' && lv_lf && lv_lf ).
+        cl_abap_unit_assert=>fail( 'duplicate body type after empty value should raise' ).
+      CATCH cx_ac_message_type_pcp_error.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD carriage_return.
+    DATA lo_message TYPE REF TO if_ac_message_type_pcp.
+    DATA lv_cr TYPE string.
+    DATA lv_lf TYPE string.
+    lv_cr = cl_abap_char_utilities=>cr_lf(1).
+    lv_lf = cl_abap_char_utilities=>newline.
+    lo_message = cl_ac_message_type_pcp=>create( ).
+    TRY.
+        lo_message->set_field( i_name = 'a' && lv_cr && 'b' i_value = '1' ).
+        cl_abap_unit_assert=>fail( 'carriage return in field name should raise' ).
+      CATCH cx_ac_message_type_pcp_error.
+    ENDTRY.
+    lo_message->set_field( i_name = 'a' i_value = 'x' && lv_cr && 'y' ).
+    TRY.
+        lo_message->serialize( ).
+        cl_abap_unit_assert=>fail( 'carriage return in field value should raise' ).
+      CATCH cx_ac_message_type_pcp_error.
+    ENDTRY.
+    TRY.
+        cl_ac_message_type_pcp=>if_ac_message_type_pcp~deserialize(
+          'pcp-action:MESSAGE' && lv_lf && 'pcp-body-type:text' && lv_lf
+          && 'a' && lv_cr && 'b:1' && lv_lf && lv_lf ).
+        cl_abap_unit_assert=>fail( 'carriage return in parsed field name should raise' ).
+      CATCH cx_ac_message_type_pcp_error.
+    ENDTRY.
+    TRY.
+        cl_ac_message_type_pcp=>if_ac_message_type_pcp~deserialize(
+          'pcp-action:MESSAGE' && lv_lf && 'pcp-body-type:text' && lv_lf
+          && 'a:x' && lv_cr && 'y' && lv_lf && lv_lf ).
+        cl_abap_unit_assert=>fail( 'carriage return in parsed field value should raise' ).
+      CATCH cx_ac_message_type_pcp_error.
+    ENDTRY.
   ENDMETHOD.
 ENDCLASS.

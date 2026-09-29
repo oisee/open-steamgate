@@ -152,9 +152,10 @@ case sensitive, replacement keeps position, reserved headers cannot be set as
 application fields, colons in names and newlines in values raise, and values
 escape backslash as `\\`. Binary bodies use base64 under `pcp-body-type:binary`;
 cross-type getters and malformed input raise. These choices need PCP1 to PCP3
-probes before being treated as SAP-compatible. The transpiler emits no callable
-static function for `IF_AC_MESSAGE_TYPE_PCP=>DESERIALIZE`, so callers currently
-use `CL_AC_MESSAGE_TYPE_PCP=>DESERIALIZE` (anomaly logged). The preview's
+probes before being treated as SAP-compatible. The static interface method is
+called through its implementing class as
+`CL_AC_MESSAGE_TYPE_PCP=>IF_AC_MESSAGE_TYPE_PCP~DESERIALIZE( )`; the PCP ABAP
+Unit test exercises this call in the transpiled runtime. The preview's
 `serialized()` is a request mutex, not a PCP serializer; there is no JS PCP
 wire path to compare yet.
 
