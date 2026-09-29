@@ -188,8 +188,11 @@ HANA or PostgreSQL. Output is an immutable JSON artifact under
 against its SHA-256 digest on read. A run row is written before execution and
 closed with `COMPLETED` or `FAILED`. An exception records result status `DUMP`;
 a process that dies during a run leaves `RUNNING` for a later doctor to
-classify. The operations database is independent of a replaceable build
-generation and the business database.
+classify. If report execution completes but saving its output or status fails,
+the run also remains `RUNNING`; the command reports `RESULT_RECORDING_FAILED`
+with the run ID. Its business effects may already have happened, so inspect
+them before submitting a replacement. The operations database is independent
+of a replaceable build generation and the business database.
 
 Selection values are kept in the local operations file for eventual job
 execution; normal `list` and `show` output reveals names only. The file and
@@ -242,7 +245,10 @@ readies the next step and queues the parent again; the last step completes the
 parent. A failed step skips later steps. A crash before recording a step leaves
 the active step and parent `RUNNING` for manual review. Each step has its own
 immutable output artifact; the parent's output contains the last executed
-step. The file SQLite adapter writes a
+step. A failure while recording the result has the same `RUNNING` review
+state and does not replay the step. An output file written before a failed
+operations transaction may be orphaned; only a digest recorded in the run
+row makes it an acknowledged result. The file SQLite adapter writes a
 committed LUW to its WAL on disk; its `synchronous=NORMAL` setting gives
 process-crash recovery, not a power-loss guarantee. The in-memory/sql.js,
 DuckDB, HANA, PostgreSQL and browser modes reject this first scheduling slice
