@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
-import {mkdtempSync, rmSync} from "node:fs";
+import {existsSync, mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {BatchRuns} from "../tools/osd-batch-runs.mjs";
@@ -63,6 +63,21 @@ describe("operations job tail events", () => {
     store.finishStep(parent.id, 2, {status: "COMPLETED"});
     assert.equal(eventCount(), 1);
     assert.equal(store.get(child.id).state, "QUEUED");
+  });
+
+  it("rejects parent finish and fail while imported ordered steps are active", () => {
+    const parent = store.importIntent(intent("PARENT", "00000001", {
+      steps: [{number: 1, program: "Z_FIRST"}, {number: 2, program: "Z_SECOND"}]})).run;
+    const child = store.importIntent(intent("CHILD", "00000002", {
+      afterEvent: {jobname: "PARENT", jobcount: "00000001"}})).run;
+    store.claimNext();
+    assert.throws(() => store.finish(parent.id, {status: "COMPLETED"}), /requires step result recording/);
+    assert.throws(() => store.fail(parent.id, new Error("dump")), /requires step result recording/);
+    assert.equal(existsSync(join(dir, "batch-output", `${parent.id}.json`)), false);
+    assert.equal(store.get(parent.id).state, "RUNNING");
+    assert.deepEqual(store.get(parent.id).steps.map((step) => step.state), ["RUNNING", "PENDING"]);
+    assert.equal(store.get(child.id).state, "WAITING");
+    assert.equal(eventCount(), 0);
   });
 
   it("does not emit an event or release a dependent on terminal failure", () => {

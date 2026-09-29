@@ -361,8 +361,11 @@ export class BatchRuns {
   }
 
   finish(id, result) {
-    const row = this.db.prepare("SELECT state FROM batch_runs WHERE id = ?").get(id);
+    const row = this.db.prepare("SELECT state, step_count FROM batch_runs WHERE id = ?").get(id);
     if (!row || row.state !== "RUNNING") throw new Error(`batch run ${id} is not running`);
+    // Refuse before writing a parent artifact, then check again in the write
+    // transaction: only finishStep may settle an imported ordered job.
+    if (row.step_count > 0) throw new Error(`batch run ${id} requires step result recording`);
     const body = Buffer.from(JSON.stringify({
       lines: result.lines ?? [], messages: result.messages ?? [],
       terminal: result.terminal ?? "", navigation: result.navigation ?? {},
@@ -383,6 +386,9 @@ export class BatchRuns {
     const state = success ? "COMPLETED" : "FAILED";
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      if (this.db.prepare("SELECT step_count FROM batch_runs WHERE id = ?").get(id)?.step_count > 0) {
+        throw new Error(`batch run ${id} requires step result recording`);
+      }
       const endedAt = new Date().toISOString();
       const changed = this.db.prepare(`UPDATE batch_runs SET ended_at = ?, state = ?, result_status = ?,
         detail = ?, output_sha256 = ?, output_bytes = ? WHERE id = ? AND state = 'RUNNING'`)
@@ -402,6 +408,9 @@ export class BatchRuns {
   fail(id, error) {
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      if (this.db.prepare("SELECT step_count FROM batch_runs WHERE id = ?").get(id)?.step_count > 0) {
+        throw new Error(`batch run ${id} requires step result recording`);
+      }
       const endedAt = new Date().toISOString();
       const changed = this.db.prepare(`UPDATE batch_runs SET ended_at = ?, state = 'FAILED',
         result_status = ?, detail = ? WHERE id = ? AND state = 'RUNNING'`)
