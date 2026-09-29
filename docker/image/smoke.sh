@@ -47,9 +47,11 @@ for db in ${OSD_TEST_DATABASES:-sqlite duckdb postgres}; do
   fi
   for phase in create read; do
     if [ "$phase" = read ]; then
-      # Restart the whole stack, including the database server for HXE.
-      # Keep volumes: the record written in the previous phase must survive.
-      compose stop
+      # Recreate the whole stack, including the database server for HXE.
+      # Keep named volumes: the record written in the previous phase must survive.
+      # A stopped container can still be shutting down when Compose calls it
+      # "Running" on the next up, then exits without starting a new runtime.
+      compose down --timeout 300
       compose up -d --pull never --wait --wait-timeout 900
     fi
     compose exec -T -e PROTOCOL_HOST=127.0.0.1 -e OSD_EXPECT_SHOWCASE="${OSD_EXPECT_SHOWCASE:-false}" osd node docker/image/probe.mjs "$phase" > "$report_dir/$db-$phase-persistence.log" 2>&1 || {
