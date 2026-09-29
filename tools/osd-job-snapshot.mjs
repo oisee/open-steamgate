@@ -7,6 +7,7 @@ import {existsSync} from "node:fs";
 import {resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
 import {operationsPath} from "./osd-batch-runs.mjs";
+import {jobInputJson} from "./osd-job-input.mjs";
 
 const value = (row, field) => String(row?.[field] ?? "").trim();
 const fail = (reason) => { throw new JobSnapshotError("JOB_SNAPSHOT_INCONSISTENT", reason); };
@@ -42,7 +43,7 @@ function outboxSnapshot(db, identity, sourceDb, caller, currentSourceInstance) {
     fail("outbox parent disagrees with retained job identity or business instance");
   }
   const count = Number(value(parent, "step_count"));
-  const rows = db.prepare(`SELECT step_no, program FROM zosd_job_step
+  const rows = db.prepare(`SELECT step_no, program, input_json FROM zosd_job_step
     WHERE mandt = ? AND intent_id = ? ORDER BY step_no`).all(caller.client, intentId);
   const legacy = count === 0 && rows.length === 0;
   if (!value(parent, "program") || (!legacy &&
@@ -78,6 +79,7 @@ function outboxSnapshot(db, identity, sourceDb, caller, currentSourceInstance) {
       seq: Number(waitSeqText)} : null,
     queuedAt: null, startedAt: null, endedAt: null, resultStatus: null, detail: null,
     steps: programs.map((program, index) => ({number: index + 1, program,
+      input: legacy ? [] : jobInputJson(rows[index].input_json),
       state: index === 0 && !namedId ? "READY" : "PENDING", startedAt: null, endedAt: null,
       resultStatus: null, detail: null})),
   };
@@ -166,18 +168,23 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
        value(run, "program") !== value(rows[0], "program")))) {
     fail("operations run has an invalid ordered step set");
   }
-  const steps = legacy ? [{number: 1, program: value(run, "program"), state: value(run, "state") === "QUEUED" ? "READY" : value(run, "state"),
+  const steps = legacy ? [{number: 1, program: value(run, "program"), input: [], state: value(run, "state") === "QUEUED" ? "READY" : value(run, "state"),
     startedAt: run.started_at || null, endedAt: run.ended_at ?? null,
     resultStatus: run.result_status ?? null, detail: run.detail ?? null}] :
-    rows.map((row) => ({number: row.step_no, program: value(row, "program"),
+    rows.map((row) => ({number: row.step_no, program: value(row, "program"), input: jobInputJson(row.input_json),
       state: value(row, "state"), startedAt: row.started_at || null, endedAt: row.ended_at || null,
       resultStatus: row.result_status ?? null, detail: row.detail ?? null}));
   checkRunState(run.state, steps);
   // Reconstruct the importer's versioned payload using the stored bytes, not
   // the canonical key used for identity lookup. Old imported names can be
   // lowercase even when migration uppercased the retained business key.
+  const payloadSteps = rows.map((row) => {
+    const input = jobInputJson(row.input_json);
+    return input.length ? {number: row.step_no, program: row.program, input} :
+      {number: row.step_no, program: row.program};
+  });
   const payload = legacy ? JSON.stringify(base) : JSON.stringify({version: 2, ...base,
-    steps: rows.map((row) => ({number: row.step_no, program: row.program}))});
+    steps: payloadSteps});
   const afterName = run.after_job_name ?? null;
   const afterCount = run.after_job_count ?? null;
   const afterIntent = run.after_intent_id ?? null;
@@ -200,10 +207,10 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
     fail("invalid named event condition");
   }
   const versioned = namedId !== null ? JSON.stringify({version: 5, ...base,
-    steps: rows.map((row) => ({number: row.step_no, program: row.program})),
+    steps: payloadSteps,
     namedEvent: {id: namedId, param: namedParam, sourceInstance: namedInstance, seq: waitSeq}}) :
     afterName === null ? payload : JSON.stringify({version: afterIntent ? 4 : 3, ...base,
-    steps: rows.map((row) => ({number: row.step_no, program: row.program})),
+    steps: payloadSteps,
     afterEvent: afterIntent ? {jobname: afterName, jobcount: afterCount,
       intentId: afterIntent.replaceAll("-", "")} : {jobname: afterName, jobcount: afterCount}});
   if (createHash("sha256").update(versioned).digest("hex") !== ledger.payload_sha256) {
@@ -256,7 +263,8 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
          (outbox.namedEvent?.sourceInstance ?? null) !== namedInstance ||
          (outbox.namedEvent?.seq ?? null) !== waitSeq)) ||
       outbox.steps.length !== steps.length ||
-      outbox.steps.some((step, index) => step.program !== steps[index].program))) {
+      outbox.steps.some((step, index) => step.program !== steps[index].program ||
+        JSON.stringify(step.input) !== JSON.stringify(steps[index].input)))) {
     fail("imported run disagrees with still-pending outbox");
   }
   return {

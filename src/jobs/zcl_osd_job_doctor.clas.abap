@@ -175,6 +175,9 @@ CLASS zcl_osd_job_doctor IMPLEMENTATION.
     DATA lv_step_start TYPE string.
     DATA lv_step_end TYPE string.
     DATA lv_step_result TYPE string.
+    DATA lv_input_json TYPE string.
+    DATA lt_input TYPE zif_gg_selection_screen_types=>ty_values.
+    DATA lv_input_value TYPE string.
     DATA lv_sequence TYPE string.
     DATA lv_log_step TYPE string.
     DATA lv_log_at TYPE string.
@@ -260,6 +263,7 @@ CLASS zcl_osd_job_doctor IMPLEMENTATION.
         EXPORTING iv_jobname = iv_jobname iv_jobcount = iv_jobcount
                   iv_item = 'STEP' iv_index = lv_index
         IMPORTING ev_step_number = lv_number ev_step_program = lv_program
+                  ev_input_json = lv_input_json
                   ev_step_state = lv_step_state ev_step_started_at = lv_step_start
                   ev_step_ended_at = lv_step_end
                   ev_step_result_status = lv_step_result
@@ -271,6 +275,20 @@ CLASS zcl_osd_job_doctor IMPLEMENTATION.
         RETURN.
       ENDIF.
       APPEND |Step { lv_number }: { lv_program } { lv_step_state } result={ lv_step_result } start={ lv_step_start } end={ lv_step_end }| TO rt_lines.
+      CLEAR lt_input.
+      IF lv_input_json IS NOT INITIAL.
+        /ui2/cl_json=>deserialize( EXPORTING json = lv_input_json
+                                   CHANGING data = lt_input ).
+      ENDIF.
+      LOOP AT lt_input INTO DATA(ls_input).
+        lv_input_value = ls_input-value.
+        IF strlen( lv_input_value ) > 255.
+          lv_input_value = lv_input_value+0(255).
+          APPEND |  { ls_input-name }={ lv_input_value } [truncated]| TO rt_lines.
+        ELSE.
+          APPEND |  { ls_input-name }={ lv_input_value }| TO rt_lines.
+        ENDIF.
+      ENDLOOP.
     ENDDO.
     IF lv_logs IS INITIAL OR lv_logs CN '0123456789'.
       APPEND 'ERROR: invalid log count in snapshot' TO rt_lines.

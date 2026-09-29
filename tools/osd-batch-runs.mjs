@@ -9,6 +9,7 @@ import {setTimeout as delay} from "node:timers/promises";
 import {dialogStep} from "./osd-dialog-step.mjs";
 import {drainJobOutbox} from "./osd-job-outbox.mjs";
 import {runsAs} from "./osd-main.mjs";
+import {jobInput} from "./osd-job-input.mjs";
 
 const MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
 const runIdOf = (id) => `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
@@ -245,7 +246,8 @@ export class BatchRuns {
     const steps = intent.steps === undefined ? undefined : intent.steps.map((step, i) => {
       const name = String(step.program ?? "").trim().toUpperCase();
       if (step.number !== i + 1 || !/^[A-Z][A-Z0-9_]{0,39}$/.test(name)) throw new TypeError("invalid ordered report step");
-      return {number: i + 1, program: name};
+      const input = jobInput(step.input ?? []);
+      return input.length ? {number: i + 1, program: name, input} : {number: i + 1, program: name};
     });
     if (steps && (steps.length < 1 || steps.length > 16 || steps[0].program !== program)) {
       throw new TypeError("invalid outbox step count or first report");
@@ -315,9 +317,9 @@ export class BatchRuns {
         .run(id, digest, runId);
       if (steps) {
         const insert = this.db.prepare(`INSERT INTO batch_run_steps
-          (run_id, step_no, program, state, input_json) VALUES (?, ?, ?, ?, '[]')`);
+          (run_id, step_no, program, state, input_json) VALUES (?, ?, ?, ?, ?)`);
         for (const step of steps) insert.run(runId, step.number, step.program,
-          step.number === 1 && released ? "READY" : "PENDING");
+          step.number === 1 && released ? "READY" : "PENDING", JSON.stringify(step.input ?? []));
       }
       this.#appendJobLog(runId, null, "IMPORTED", queuedAt);
       this.db.exec("COMMIT");
