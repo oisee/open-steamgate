@@ -1,0 +1,287 @@
+// osabap runs one converted ABAP report as a native command. Arguments fill
+// the report selection screen; with no arguments, a terminal form presents
+// the same screen before the report lifecycle continues.
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+
+	"osg/gogen/abap"
+)
+
+func hostRun(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, batch, present string) ZCL_GG_HOST__TY_RESULT {
+	empty := []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE(nil)
+	return ZCL_GG_HOST_RUN(s, report, nil, appProgram, "1000", "", 0, batch,
+		&input, &empty, &empty, "ONLI", "", "", "", "", 0, 1, "", "", "", 0,
+		"", "", "", "", "", present, "", &ZIF_GG_HOST_HTML_V1__TY_NAVIGATION{}, &ZIF_GG_SESSION_TYPES_V1__TY_SUBMIT{})
+}
+
+func main() {
+	var result ZCL_GG_HOST__TY_RESULT
+	failed := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintln(os.Stderr, "osabap:", r)
+				failed = true
+			}
+		}()
+		s := &abap.Session{}
+		report := newReport(s)
+		input, headless := commandInput(os.Args[1:])
+		if headless {
+			abap.DialogStep(func() { result = hostRun(s, report, input, "X", "") })
+		} else {
+			var screen ZCL_GG_HOST__TY_RESULT
+			abap.DialogStep(func() { screen = hostRun(s, report, nil, "", "X") })
+			input = terminalInput(screen)
+			abap.DialogStep(func() { result = hostRun(s, report, input, "", "") })
+		}
+	}()
+	if failed {
+		os.Exit(1)
+	}
+	for _, m := range result.messages {
+		fmt.Fprintln(os.Stderr, strings.TrimSpace(m.text))
+	}
+	for _, line := range result.lines {
+		fmt.Println(strings.TrimRight(line, " "))
+	}
+	if result.unsupported != "" {
+		fmt.Fprintln(os.Stderr, "unsupported:", result.unsupported)
+		os.Exit(2)
+	}
+}
+
+func commandInput(args []string) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, bool) {
+	values := map[string]selectionInput{}
+	positionals := []string{}
+	params := ""
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--help" || arg == "-h" {
+			usage()
+			os.Exit(0)
+		}
+		if arg == "--params" {
+			if i+1 >= len(args) {
+				panic(fmt.Errorf("--params needs JSON or @file"))
+			}
+			i++
+			params = args[i]
+			continue
+		}
+		if strings.HasPrefix(arg, "--params=") {
+			params = strings.TrimPrefix(arg, "--params=")
+			continue
+		}
+		if strings.HasPrefix(arg, "--") {
+			key, value, hasValue := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
+			name, checkbox := selectionName(key)
+			if name == "" {
+				panic(fmt.Errorf("unknown option --%s", key))
+			}
+			if !hasValue && checkbox {
+				value = "X"
+			} else if !hasValue {
+				if i+1 >= len(args) {
+					panic(fmt.Errorf("--%s needs a value", key))
+				}
+				i++
+				value = args[i]
+			}
+			setOption(values, name, value)
+			continue
+		}
+		positionals = append(positionals, arg)
+	}
+	if params != "" {
+		raw := []byte(params)
+		if strings.HasPrefix(params, "@") {
+			var err error
+			raw, err = os.ReadFile(strings.TrimPrefix(params, "@"))
+			if err != nil {
+				panic(err)
+			}
+		}
+		fromJSON := map[string]any{}
+		if err := json.Unmarshal(raw, &fromJSON); err != nil {
+			panic(fmt.Errorf("--params: %w", err))
+		}
+		for key, rawValue := range fromJSON {
+			name, checkbox := selectionName(key)
+			if name == "" {
+				panic(fmt.Errorf("--params: unknown selection field %s", key))
+			}
+			if appRanges[name] {
+				if _, setByFlag := values[name]; !setByFlag {
+					values[name] = selectionInput{ranges: jsonRanges(name, rawValue)}
+				}
+				continue
+			}
+			value := fmt.Sprint(rawValue)
+			if checkbox {
+				if b, ok := rawValue.(bool); ok {
+					if b {
+						value = "X"
+					} else {
+						value = ""
+					}
+				}
+			}
+			if _, setByFlag := values[name]; !setByFlag {
+				values[name] = selectionInput{value: value}
+			}
+		}
+	}
+	for i, arg := range positionals {
+		if i >= len(appPositionals) {
+			panic(fmt.Errorf("unexpected positional argument %q", arg))
+		}
+		values[appPositionals[i]] = selectionInput{value: arg}
+	}
+	return selectionValues(values), len(args) > 0
+}
+
+func selectionName(option string) (string, bool) {
+	want := strings.ToUpper(strings.ReplaceAll(option, "-", "_"))
+	for _, name := range appSelectionNames {
+		short := strings.TrimPrefix(name, "P_")
+		if want == name || want == short {
+			return name, appCheckboxes[name]
+		}
+	}
+	return "", false
+}
+
+type selectionInput struct {
+	value  string
+	ranges []ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE
+}
+
+func setOption(values map[string]selectionInput, name, value string) {
+	if appRanges[name] {
+		input := values[name]
+		input.ranges = append(input.ranges, ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE{sign: "I", option: "EQ", low: value})
+		values[name] = input
+		return
+	}
+	values[name] = selectionInput{value: value}
+}
+
+func jsonRanges(name string, raw any) []ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE {
+	items, ok := raw.([]any)
+	if !ok {
+		items = []any{raw}
+	}
+	out := make([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE, 0, len(items))
+	for _, item := range items {
+		r := ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE{sign: "I", option: "EQ"}
+		if object, ok := item.(map[string]any); ok {
+			fields := map[string]string{}
+			for key, value := range object {
+				fields[strings.ToUpper(key)] = fmt.Sprint(value)
+			}
+			r.sign = strings.ToUpper(fields["SIGN"])
+			if r.sign == "" {
+				r.sign = "I"
+			}
+			r.option = strings.ToUpper(fields["OPTION"])
+			r.low, r.high = fields["LOW"], fields["HIGH"]
+			if r.option == "" {
+				if r.high != "" {
+					r.option = "BT"
+				} else {
+					r.option = "EQ"
+				}
+			}
+		} else {
+			r.low = fmt.Sprint(item)
+		}
+		if r.low == "" && r.option != "EQ" {
+			panic(fmt.Errorf("--params: %s range needs low", name))
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+func usage() {
+	fmt.Printf("usage: %s", strings.ToLower(appProgram))
+	for _, name := range appPositionals {
+		fmt.Printf(" <%s>", strings.ToLower(strings.TrimPrefix(name, "P_")))
+	}
+	fmt.Println(" [options]")
+	for _, name := range appSelectionNames {
+		opt := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(name, "P_"), "_", "-"))
+		if appRanges[name] {
+			fmt.Printf("  --%-16s %s range (repeatable)\n", opt, name)
+		} else if appCheckboxes[name] {
+			fmt.Printf("  --%-16s %s checkbox\n", opt, name)
+		} else {
+			fmt.Printf("  --%-16s %s value\n", opt, name)
+		}
+	}
+	fmt.Println("  --params JSON|@file")
+}
+
+func selectionValues(values map[string]selectionInput) []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE {
+	out := make([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, 0, len(values))
+	for _, name := range appSelectionNames {
+		if input, ok := values[name]; ok {
+			out = append(out, ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE{name: name, value: input.value, ranges: input.ranges})
+		}
+	}
+	return out
+}
+
+func terminalInput(screen ZCL_GG_HOST__TY_RESULT) []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE {
+	current := map[string]selectionInput{}
+	for _, v := range screen.values {
+		current[strings.TrimSpace(v.name)] = selectionInput{value: strings.TrimSpace(v.value), ranges: v.ranges}
+	}
+	fmt.Printf("\n%s — selection screen\n\n", appProgram)
+	in := bufio.NewReader(os.Stdin)
+	for _, e := range screen.elements {
+		name := strings.TrimSpace(e.name)
+		if name == "" || (e.kind != "PARAMETER" && e.kind != "CHECKBOX" && e.kind != "SELECT_OPTION") {
+			continue
+		}
+		input := current[name]
+		def := input.value
+		if appRanges[name] {
+			parts := make([]string, 0, len(input.ranges))
+			for _, r := range input.ranges {
+				parts = append(parts, strings.TrimSpace(r.low))
+			}
+			def = strings.Join(parts, ",")
+		}
+		fmt.Printf("%-18s [%s]: ", strings.TrimSpace(e.text), def)
+		line, _ := in.ReadString('\n')
+		line = strings.TrimSpace(line)
+		if line != "" {
+			if appRanges[name] {
+				input.ranges = nil
+				for _, value := range strings.Split(line, ",") {
+					input.ranges = append(input.ranges, ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE{sign: "I", option: "EQ", low: strings.TrimSpace(value)})
+				}
+				current[name] = input
+				continue
+			}
+			if e.kind == "CHECKBOX" {
+				if strings.EqualFold(line, "y") || strings.EqualFold(line, "yes") || line == "1" || strings.EqualFold(line, "true") {
+					line = "X"
+				} else {
+					line = ""
+				}
+			}
+			current[name] = selectionInput{value: line}
+		}
+	}
+	fmt.Println()
+	return selectionValues(current)
+}

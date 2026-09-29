@@ -103,7 +103,7 @@ function cloneName(t) {
   if (!CLONES.has(key)) CLONES.set(key, {name: `clone_${CLONES.size}`, type: t});
   return CLONES.get(key).name;
 }
-const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "refattr"]);
+const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key", "refattr"]);
 /** a value moved out of a place: a table (or a structure holding one) is copied */
 /** one condition of an internal table's WHERE over the row `row`
  * (ultra/itab: a nested component and IS [NOT] INITIAL read through fx) */
@@ -869,6 +869,12 @@ function place(p, ctx) {
     case "row": {
       const b = place(p.base, ctx);
       return `${b}[abap.Idx(len(${b}), ${expr(p.index, ctx)})]`;
+    }
+    case "row_key": {
+      const b = place(p.base, ctx);
+      const n = ctx.loop++;
+      const keys = p.keys.map((k) => (k.line ? `r${n} == ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} == ${expr(k.value, ctx)}`)).join(" && ");
+      return `(*abap.RowByKey(&${b}, func(r${n} ${goType(p.type)}) bool { return ${keys} }))`;
     }
     default: throw new Error(`not a place: ${p.e}`);
   }
@@ -1648,6 +1654,9 @@ ${t}	}`));
     case "rollback_work": return [`${t}abap.RollbackWork(s)`];
     case "exit": return [`${t}${leave(ctx, 2)}`];
     case "continue": return [`${t}${leave(ctx, 3)}`];
+    // CHECK continues the innermost loop, or leaves the processing block
+    // when it stands outside one.
+    case "check": return [`${t}if !(${cond(st.cond, ctx)}) { ${leave(ctx, 3)} }`];
     // a RETURN inside a loop that appends through builders writes the
     // strings back first (parity-wave1: ZCL_STG_JSON=>READ_STRING appended a
     // 750 KB value a character at a time and returned from inside the loop,
@@ -1668,7 +1677,7 @@ const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.Sqr
 
 function expr(e, ctx) {
   switch (e.e) {
-    case "var": case "attr": case "static": case "field": case "fs": case "row": case "refattr": return place(e, ctx);
+    case "var": case "attr": case "static": case "field": case "fs": case "row": case "row_key": case "refattr": return place(e, ctx);
     case "zero": return zero(e.type) === "nil" ? `(${goType(e.type)})(nil)` : zero(e.type);
     case "case_fn": return `abap.${e.upper ? "ToUpper" : "ToLower"}(${expr(e.x, ctx)})`;
     case "table_lit": return `${goType(e.type)}{${e.rows.map((r) => copied(expr(r, ctx), r.type, r)).join(", ")}}`;

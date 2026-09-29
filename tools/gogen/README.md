@@ -487,6 +487,44 @@ reason, content type and body, and OSG's HTTP layer adds
 `dataserviceversion: 2.0` and `; charset=utf-8` on top:
 `{"error":{"code":"STG/ENTITY_SET_NOT_FOUND","message":{"lang":"en","value":"Entity set NoSuchSet does not exist in ZSTG_DEMO_SRV"}}}`.
 
+## Native report commands (OSABAP), 2026-09-29
+
+`node tools/gogen/osabap.mjs [path/to/zreport.prog.abap]` converts a classic
+executable report through open-abap-gui, compiles the report lifecycle and its
+small host closure with gogen, and writes the stripped self-contained binary
+to `.out/osabap`. This is deliberately a different host from OSGo: it has no
+HTTP, OData or Fiori entry point.
+
+The selection screen is the command contract. For the checked-in `ZHELLO`
+sample these invocations all enter the same `INITIALIZATION` / selection-screen
+events / `START-OF-SELECTION` lifecycle:
+
+```
+.out/osabap Alice
+.out/osabap --name Alice --loud --s-tag one --s-tag two
+.out/osabap --params '{"P_NAME":"Alice","P_LOUD":true,"S_TAG":["one","two"]}'
+.out/osabap --params @arguments.json
+```
+
+Parameters accept their ABAP name (`--p-name`) or the short spelling
+(`--name`); non-checkbox parameters become positionals in declaration order.
+A repeated select-option flag becomes `I/EQ` range rows. In JSON, scalar array
+items do the same, while an object can carry `sign`, `option`, `low`, and
+`high` (with `BT` inferred when `high` is present). With no arguments the same
+screen is presented as a terminal form; comma-separated select-option input
+becomes `I/EQ` rows.
+
+The first host is intentionally narrow: report lists and messages are emitted,
+but the terminal form is line-oriented rather than the tcell UI from sap-tui,
+and frontend file/environment services have not yet been mapped. The next seam
+is a shared interactive screen driver which can render the existing
+open-diag-go frame model in a terminal without coupling the ABAP application
+to DIAG or HTTP.
+
+Focused check: `node --test tools/gogen/osabap.test.mjs`; the keyed-table
+runtime primitive used by the converted lifecycle is also covered by
+`go test ./abap -run RowByKey` from `tools/gogen/go`.
+
 ## OSGo host, 2026-09-23
 
 `node tools/gogen/osgo.mjs` (heavy: all 822 classes, run it under the

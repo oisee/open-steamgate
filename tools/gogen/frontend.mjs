@@ -1734,7 +1734,13 @@ function structure(node, ctx) {
       // (ultra/events) LOOP ... TRANSPORTING NO FIELDS and the like have no target
       if (!lt?.findFirstExpression(Expressions.Target)) throw new Unsupported(`LOOP form: ${text}`);
       into = lvalue(lt.findFirstExpression(Expressions.Target), ctx);
-      if (!sameType(into.type, table.type.row)) throw new Unsupported(`LOOP ... INTO a ${into.type.k} over rows of ${table.type.row.k}`);
+      // Moving a fixed character row into a string is lossless; both are
+      // represented as strings here, and ABAP trims the fixed row at its
+      // declared edge rather than requiring identical static types.
+      if (!sameType(into.type, table.type.row)
+          && !(into.type.k === "string" && charlike(table.type.row))) {
+        throw new Unsupported(`LOOP ... INTO a ${into.type.k} over rows of ${table.type.row.k}`);
+      }
     }
     void fsNode;
     const bound = (kw) => {
@@ -2379,6 +2385,11 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.Exit)) return {s: "exit"};
   if (isStmt(node, Statements.Continue)) return {s: "continue"};
   if (isStmt(node, Statements.Return)) return {s: "return"};
+  if (isStmt(node, Statements.Check)) {
+    const condition = node.findDirectExpression(Expressions.Cond);
+    if (!condition) throw new Unsupported(`CHECK form: ${text}`);
+    return {s: "check", cond: cond(condition, ctx)};
+  }
   // FIELD-SYMBOLS: declared from the scope like DATA
   if (isStmt(node, Statements.FieldSymbol)) return undefined;
   if (isStmt(node, Statements.ModifyInternal)) {
@@ -2889,12 +2900,30 @@ function refAttribute(base, attrNode, ctx, write = false) {
   return {e: "refattr", base, name, type: typeOf(a.getType(), `${base.type.name}->${name}`, ctx.program)};
 }
 
-/** tab[ n ]: the row at an index; a missing row raises CX_SY_ITAB_LINE_NOT_FOUND */
+/** tab[ n ] or tab[ component = value ... ]: the addressed row; a missing
+ * row raises CX_SY_ITAB_LINE_NOT_FOUND. Keyed expressions use the same
+ * component/value subset as line_exists and READ TABLE WITH KEY. */
 function rowOf(place, te, ctx) {
   if (place.type.k !== "table") throw new Unsupported(`a table expression on a ${place.type.k}`);
-  const inner = te.getChildren().filter((c) => !isTok(c));
-  if (inner.length !== 1 || !isExpr(inner[0], Expressions.Source)) throw new Unsupported(`table expression with a key: ${te.concatTokens()}`);
-  return {e: "row", base: place, index: convert(source(inner[0], ctx, I), I), type: place.type.row};
+  const inner = te.getChildren().filter((c) => !isTok(c, "[") && !isTok(c, "]"));
+  if (inner.length === 1 && isExpr(inner[0], Expressions.Source)) {
+    return {e: "row", base: place, index: convert(source(inner[0], ctx, I), I), type: place.type.row};
+  }
+  const keys = [];
+  for (let i = 0; i < inner.length; i += 3) {
+    const comp = inner[i];
+    if (!isExpr(comp, Expressions.ComponentChainSimple) || !isTok(inner[i + 1], "=") || !isExpr(inner[i + 2], Expressions.Source)) {
+      throw new Unsupported(`table expression with a key: ${te.concatTokens()}`);
+    }
+    const cname = upper(comp.concatTokens());
+    if (cname === "TABLE_LINE") keys.push({line: true, value: convert(source(inner[i + 2], ctx, place.type.row), place.type.row)});
+    else {
+      const f = fieldOf(ctx, place.type.row, cname, te.concatTokens());
+      keys.push({name: f.name, value: convert(source(inner[i + 2], ctx, f.type), f.type)});
+    }
+  }
+  if (keys.length === 0) throw new Unsupported(`table expression with a key: ${te.concatTokens()}`);
+  return {e: "row_key", base: place, keys, type: place.type.row};
 }
 
 /* ------------------------------------------------------ interface attributes */
@@ -5886,6 +5915,12 @@ function compareValues(op, l, r, ctx) {
     return {c: "cmp", op, l: convert(l, calc), r: convert(r, calc), type: calc};
   }
   if (charlike(l.type) && charlike(r.type)) return {c: "cmp", op, l: convert(l, S), r: convert(r, S), type: S};
+  // NUMC against character text compares its stored digits as text. The
+  // selection-screen renderer joins a screen number (n4) with an optional
+  // tab screen held as string; neither side is arithmetic here.
+  if ([l.type, r.type].every((t) => charlike(t) || t.k === "n")) {
+    return {c: "cmp", op, l: convert(l, S), r: convert(r, S), type: S};
+  }
   // n with n of one length: their digits in order, which is their numeric
   // order (A4H: 9000000017 > 9000000000, ZCL_GOGEN_T_NUMC); other lengths
   // are not measured

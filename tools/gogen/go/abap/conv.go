@@ -429,6 +429,17 @@ func Idx(n int, i int32) int {
 	return int(i) - 1
 }
 
+// RowByKey is a keyed internal-table expression. It returns the actual slice
+// row so a component or the whole expression remains an assignable place.
+func RowByKey[T any](table *[]T, match func(T) bool) *T {
+	for i := range *table {
+		if match((*table)[i]) {
+			return &(*table)[i]
+		}
+	}
+	panic(ArithmeticError{"CX_SY_ITAB_LINE_NOT_FOUND", "table expression"})
+}
+
 // InsertAt is INSERT ... INDEX i for a checked 1-based index.
 func InsertAt[T any](s []T, i int32, v T) []T {
 	var zero T
