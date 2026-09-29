@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_DTEL" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <DD04V>
+    <ROLLNAME>ZGOGEN_T_OLA</ROLLNAME>
+    <DDLANGUAGE>E</DDLANGUAGE>
+    <DOMNAME>ZGOGEN_T_OLA</DOMNAME>
+    <DDTEXT>gogen testdata</DDTEXT>
+    <REFKIND>D</REFKIND>
+    <DTELMASTER>E</DTELMASTER>
+   </DD04V>
+  </asx:values>
+ </asx:abap>
+</abapGit>

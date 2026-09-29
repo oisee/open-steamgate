@@ -1,0 +1,73 @@
+name: gogen
+
+# The Go backend of the ABAP runtime (tools/gogen, docs in its README): the
+# generator's Go runtime and its tests, and the semantics harness that runs
+# the same ABAP as Go and as IR-as-JS against A4H-measured answers.
+#
+# A job of its own, path-filtered, so a change to it never slows or reds the
+# main tests workflow, and a change elsewhere does not start a Go toolchain.
+#
+# `go test ./abap/...` and not `go build ./...`: cmd/bench compiles only
+# after tools/gogen/run.mjs has generated its `Call`, so a plain build of the
+# module fails by design. The pairs in test/fixtures/ir-pairs are shared with
+# the Node IR, so a change there runs this too; the 20 pairs main learned
+# after gogen branched are a strict known-gap list (knowngaps_test.go,
+# ANORMALIES gogen-ir-pairs-behind-main) that turns red if one starts to pass.
+
+on:
+  pull_request:
+    paths:
+      - 'tools/gogen/**'
+      - 'test/fixtures/ir-pairs/**'
+      - 'src/demo_data/**'
+      - '.github/workflows/gogen.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/gogen/**'
+      - 'test/fixtures/ir-pairs/**'
+      - 'src/demo_data/**'
+      - '.github/workflows/gogen.yml'
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gogen-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gogen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: tools/gogen/go/go.sum
+      - name: Load the tracked source pins
+        run: node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+      # the semantics harness compiles the ABAP it runs together with
+      # open-abap-core, read from .local/lars like every other build
+      - name: The library folders
+        run: |
+          node tools/osd-libs.mjs
+          node tools/osd-libs.mjs --check
+      - name: Go vet and tests
+        working-directory: tools/gogen/go
+        run: |
+          go vet ./abap/
+          go test ./abap/...
+      - name: Semantics, Go and IR-as-JS against the measured answers
+        run: node tools/gogen/semantics.mjs

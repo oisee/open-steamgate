@@ -1,0 +1,12 @@
+CLASS zcl_gogen_t_pdtplm DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+
+CLASS zcl_gogen_t_pdtplm IMPLEMENTATION.
+  METHOD run.
+    DATA lv_p2 TYPE p LENGTH 8 DECIMALS 2.
+    lv_p2 = '1.25'.
+    rv = |,{ lv_p2 * 2 }|.
+  ENDMETHOD.
+ENDCLASS.

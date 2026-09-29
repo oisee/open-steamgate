@@ -1,0 +1,3 @@
+INTERFACE zif_gogen_t_iadc PUBLIC.
+  DATA mv TYPE i.
+ENDINTERFACE.
