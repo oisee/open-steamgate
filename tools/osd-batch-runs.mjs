@@ -316,6 +316,7 @@ export class BatchRuns {
     const success = status === "COMPLETED";
     const now = new Date().toISOString();
     this.db.exec("BEGIN IMMEDIATE");
+    let transition;
     try {
       const changed = this.db.prepare(`UPDATE batch_run_steps SET state = ?, ended_at = ?,
         result_status = ?, detail = ?, output_sha256 = ?, output_bytes = ?
@@ -329,6 +330,7 @@ export class BatchRuns {
           .run(id, next.step_no).changes;
         const queued = this.db.prepare("UPDATE batch_runs SET state = 'QUEUED' WHERE id = ? AND state = 'RUNNING'").run(id).changes;
         if (readied !== 1 || queued !== 1) throw new Error(`batch step ${id}/${number} transition failed`);
+        transition = "advanced";
       } else {
         if (!success) this.db.prepare(`UPDATE batch_run_steps SET state = 'SKIPPED', ended_at = ?
           WHERE run_id = ? AND state = 'PENDING'`).run(now, id);
@@ -341,10 +343,14 @@ export class BatchRuns {
         writeFileSync(parentTemp, body, {mode: 0o600, flag: "wx"});
         linkSync(parentTemp, parent);
         unlinkSync(parentTemp);
+        transition = success ? "completed" : "failed";
       }
+      // Capture the outcome while this writer still owns the transaction.
+      // Another worker may claim the newly READY step immediately after COMMIT.
+      const run = this.get(id);
       this.db.exec("COMMIT");
+      return {kind: transition, run};
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
-    return this.get(id);
   }
 
   failStep(id, number, error) {
@@ -366,11 +372,23 @@ export class BatchRuns {
     return this.get(id);
   }
 
+  readSnapshot(work) {
+    if (this.db.isTransaction) return work();
+    this.db.exec("BEGIN");
+    try {
+      const answer = work();
+      this.db.exec("COMMIT");
+      return answer;
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
   get(id, options = {}) {
     if (!/^[0-9a-f-]{36}$/.test(String(id))) return undefined;
-    const run = publicRun(this.db.prepare("SELECT * FROM batch_runs WHERE id = ?").get(id), options);
-    if (run) run.steps = this.steps(id, options);
-    return run;
+    return this.readSnapshot(() => {
+      const run = publicRun(this.db.prepare("SELECT * FROM batch_runs WHERE id = ?").get(id), options);
+      if (run) run.steps = this.steps(id, options);
+      return run;
+    });
   }
 
   steps(id, options = {}) {
@@ -380,8 +398,8 @@ export class BatchRuns {
 
   list(limit = 50) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new RangeError("limit must be 1..200");
-    return this.db.prepare("SELECT * FROM batch_runs ORDER BY COALESCE(queued_at, started_at) DESC, id DESC LIMIT ?")
-      .all(limit).map((row) => ({...publicRun(row), steps: this.steps(row.id)}));
+    return this.readSnapshot(() => this.db.prepare("SELECT * FROM batch_runs ORDER BY COALESCE(queued_at, started_at) DESC, id DESC LIMIT ?")
+      .all(limit).map((row) => ({...publicRun(row), steps: this.steps(row.id)})));
   }
 
   output(id) {
@@ -483,8 +501,9 @@ export async function workQueuedBatch(root, store, execute = runConvertedBatch) 
   }
   try {
     const result = await execute(root, step?.program ?? run.program, step?.input ?? run.input, run.generation);
-    const finished = step ? store.finishStep(run.id, step.number, result) : store.finish(run.id, result);
-    return {kind: finished.state === "QUEUED" ? "advanced" : finished.state === "COMPLETED" ? "completed" : "failed", run: finished};
+    if (step) return store.finishStep(run.id, step.number, result);
+    const finished = store.finish(run.id, result);
+    return {kind: finished.state === "COMPLETED" ? "completed" : "failed", run: finished};
   } catch (error) {
     if (step) store.failStep(run.id, step.number, error);
     else store.fail(run.id, error);

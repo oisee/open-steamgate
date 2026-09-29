@@ -8,6 +8,7 @@ import express from "express";
 import {BatchRuns, runPersistedBatch, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
 import {batchMonitorHandler} from "../tools/osd-batch-monitor.mjs";
 import {migrateOneStepJobFile} from "./setup.mjs";
+import {fingerprintOf} from "../tools/osd-persist.mjs";
 
 const root = resolve(".");
 
@@ -22,20 +23,37 @@ describe("durable one-shot batch runs", function () {
   afterEach(() => rmSync(dir, {recursive: true, force: true}));
 
   it("migrates the one-step business outbox file additively", () => {
-    const db = new DatabaseSync(join(dir, "business.sqlite"));
+    const path = join(dir, "business.sqlite");
+    const db = new DatabaseSync(path);
     try {
-      db.exec(`CREATE TABLE osd_schema (fingerprint TEXT, at TEXT);
-        INSERT INTO osd_schema VALUES ('213b4b76a4db329f', 'old');
-        CREATE TABLE zosd_job_outbox (mandt TEXT, intent_id TEXT, program TEXT);
-        INSERT INTO zosd_job_outbox VALUES ('123', 'saved-intent', 'ZGG_EX_012')`);
+      const oldParent = "CREATE TABLE 'zosd_job_outbox' (mandt TEXT, intent_id TEXT, program TEXT)";
+      const parent = "CREATE TABLE 'zosd_job_outbox' (mandt TEXT, intent_id TEXT, program TEXT, 'step_count' NCHAR(2))";
       const create = `CREATE TABLE 'zosd_job_step' (mandt TEXT, intent_id TEXT, step_no TEXT, program TEXT,
         PRIMARY KEY(mandt, intent_id, step_no))`;
-      expect(migrateOneStepJobFile(db, "213b4b76a4db329f", "new-fingerprint", [create])).to.equal(true);
+      const other = "CREATE TABLE other_business_table (id TEXT)";
+      const old = [oldParent, other];
+      const ddl = [parent, create, other];
+      const previous = fingerprintOf(old);
+      const wanted = fingerprintOf(ddl);
+      db.exec(`CREATE TABLE osd_schema (fingerprint TEXT, at TEXT);
+        CREATE TABLE zosd_job_outbox (mandt TEXT, intent_id TEXT, program TEXT);
+        INSERT INTO zosd_job_outbox VALUES ('123', 'saved-intent', 'ZGG_EX_012')`);
+      db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(previous);
+      // A different target DDIC still follows the ordinary drift path.
+      const unrelated = [...ddl, "CREATE TABLE unrelated_change (id TEXT)"];
+      expect(migrateOneStepJobFile(db, previous, fingerprintOf(unrelated), unrelated, fingerprintOf)).to.equal(false);
+      expect(db.prepare("SELECT fingerprint FROM osd_schema").get().fingerprint).to.equal(previous);
+      expect(db.prepare("PRAGMA table_info(zosd_job_outbox)").all().some((row) => row.name === "step_count")).to.equal(false);
+      expect(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'zosd_job_step'").get()).to.equal(undefined);
+      expect(migrateOneStepJobFile(db, previous, wanted, ddl, fingerprintOf)).to.equal(true);
       expect(db.prepare("SELECT program FROM zosd_job_outbox WHERE intent_id = 'saved-intent'").get().program).to.equal("ZGG_EX_012");
-      expect(db.prepare("SELECT fingerprint FROM osd_schema").get().fingerprint).to.equal("new-fingerprint");
+      expect(db.prepare("SELECT fingerprint FROM osd_schema").get().fingerprint).to.equal(wanted);
       expect(db.prepare("PRAGMA table_info(zosd_job_outbox)").all().some((row) => row.name === "step_count")).to.equal(true);
       expect(db.prepare("SELECT COUNT(*) AS n FROM zosd_job_step").get().n).to.equal(0);
-      expect(migrateOneStepJobFile(db, "new-fingerprint", "new-fingerprint", [create])).to.equal(false);
+      // A second process may still hold the pre-migration stamp it read.
+      const second = new DatabaseSync(path);
+      try { expect(migrateOneStepJobFile(second, previous, wanted, ddl, fingerprintOf)).to.equal(true); }
+      finally { second.close(); }
     } finally { db.close(); }
   });
 

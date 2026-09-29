@@ -16,17 +16,32 @@ export function schemaTables(ddl) {
     [...String(statement).matchAll(/\bCREATE\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map((match) => match[1].toUpperCase()));
 }
 
-// The one-step JOB_* release added its outbox before it had ordered children.
-// This exact DDIC upgrade is additive; preserve its committed business rows
-// instead of taking the generic schema-drift path, which sets the file aside.
-export function migrateOneStepJobFile(native, found, wanted, ddl) {
-  if (found !== "213b4b76a4db329f") return false;
-  const columns = native.prepare("PRAGMA table_info(zosd_job_outbox)").all().map((row) => row.name);
-  const child = native.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'zosd_job_step'").get();
+// Reverse only this release's two DDIC additions to prove the existing file
+// has the exact predecessor schema. Other DDIC changes must use drift handling.
+// The fingerprint function is supplied by the file-DB branch below so browser
+// preview builds do not statically pull the Node-only persistence module in.
+export function migrateOneStepJobFile(native, found, wanted, ddl, fingerprintOf) {
+  const parent = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_outbox['"] /i.test(statement));
   const create = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_step['"] /i.test(statement));
-  if (!columns.includes("intent_id") || columns.includes("step_count") || child || !create) return false;
+  const oldParent = parent?.replace(/,\s*['"]step_count['"]\s+NCHAR\(2\)/i, "");
+  if (!create || !parent || oldParent === parent || fingerprintOf(ddl) !== wanted) return false;
+  const predecessor = ddl.filter((statement) => statement !== create)
+    .map((statement) => statement === parent ? oldParent : statement);
+  const oldFingerprint = fingerprintOf(predecessor);
+  if (found !== oldFingerprint) return false;
   native.exec("BEGIN IMMEDIATE");
   try {
+    // A second startup may have read the old stamp before the first committed.
+    // Recheck under the writer lock and accept its completed migration.
+    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
+    if (current === wanted) { native.exec("COMMIT"); return true; }
+    if (current !== oldFingerprint) { native.exec("COMMIT"); return false; }
+    const columns = native.prepare("PRAGMA table_info(zosd_job_outbox)").all().map((row) => row.name);
+    const child = native.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'zosd_job_step'").get();
+    if (!columns.includes("intent_id") || columns.includes("step_count") || child) {
+      native.exec("COMMIT");
+      return false;
+    }
     native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN step_count NCHAR(2)");
     native.exec(create);
     native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
@@ -343,7 +358,7 @@ export async function setup(abap, schemas, insert) {
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     let found = await db.stampedSchema();
-    if (migrateOneStepJobFile(db.db, found, wanted, schemas.sqlite)) found = wanted;
+    if (migrateOneStepJobFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
     if (found === wanted) {
       // the rows are already there, made for this DDIC. The tables the
       // generation writes at start (wwwparams: which SMW0 objects exist and
