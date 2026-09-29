@@ -26,7 +26,7 @@
     "dbs": "node tools/osd-db.mjs list",
     "unit": "npm run transpile && echo RUNNING && node tools/osd-unit-run.mjs",
     "integration": "node tools/osd-suites.mjs",
-    "test": "npm run lint && npm run unit && npm run integration",
+    "test": "npm run transpile && npm run lint && node tools/osd-unit-run.mjs && npm run integration",
     "test:bal-persist": "node test/bal-persist.mjs",
     "verify": "npm test && npm run e2e && npm run e2e:preview",
     "verify:showcase": "node scripts/verify-showcase.mjs",
