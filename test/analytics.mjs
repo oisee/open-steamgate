@@ -48,6 +48,25 @@ describe("analytics: ZC_STG_FLIGHTCUBE through SADL", () => {
     expect(Number(rows[0].REVENUE)).to.equal(1710);
   });
 
+  // the same cube published with @OData.publish: true (tools/cds2ddic.mjs
+  // writes gen/cds/zc_stg_flightcube_cds.stg.yaml): a published cube
+  // aggregates too, which it did not until 2026-09-28 -- the published
+  // entity set carried no sap:semantics="aggregate", so $select returned
+  // every fact row
+  it("a cube published with @OData.publish groups and sums the same way, and says so in $metadata", async () => {
+    const P = `http://localhost:${PORT}/sap/opu/odata/sap/ZC_STG_FLIGHTCUBE_CDS`;
+    const xml = await (await fetch(P + "/$metadata")).text();
+    expect(xml).to.match(/EntitySet Name="ZC_STG_FLIGHTCUBE"[^>]*sap:semantics="aggregate"/);
+    expect(xml).to.match(/Name="AIRLINE"[^>]*sap:aggregation-role="dimension"/);
+    expect(xml).to.match(/Name="REVENUE"[^>]*sap:aggregation-role="measure"/);
+    const res = await fetch(P + "/ZC_STG_FLIGHTCUBE?$select=AIRLINE,SEATS,REVENUE&$orderby=AIRLINE&$format=json");
+    expect(res.status).to.equal(200);
+    const rows = (await res.json()).d.results;
+    expect(rows.map((r) => r.AIRLINE)).to.deep.equal(["AA", "BA", "LH", "SQ"]);
+    expect(rows[0].SEATS).to.equal(12);
+    expect(Number(rows[0].REVENUE)).to.equal(1710);
+  });
+
   it("filters on a dimension, orders by a measure, pages and counts", async () => {
     const res = await fetch(S + "/Zc_Stg_FlightcubeSet?$select=AIRLINE,FLIGHTMONTH,SEATS&$filter=STATUS eq 'A'&$orderby=SEATS desc,AIRLINE&$top=2&$inlinecount=allpages&$format=json");
     expect(res.status).to.equal(200);
