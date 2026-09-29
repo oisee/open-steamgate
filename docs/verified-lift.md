@@ -536,7 +536,21 @@ from the open corpus.
    (abapGit, `src/`) beside the three numbers of item 2, uncovered methods
    counted as unknown; choose the source by the rule of 4.3; export `succ`
    (from the gogen IR JSON if it wins); move "absence of X" obligations from
-   lexical "between" to reachability.
+   lexical "between" to reachability. How the coverage is counted:
+   - **Refusal propagation off.** gogen refuses a method that calls a refused
+     one; for an intraprocedural CFG the callee is an opaque `call` node with
+     unknown effects, so propagation would make gogen lose unfairly. Per
+     candidate: the fragment's own statements lowered, callees unknown.
+   - **One ratio per run, with its denominator**: stubs / statements seen, over
+     everything and over candidate methods only. The README's 3306 stubs over
+     821 classes has no denominator.
+   - **Read the IR JSON documents** (`feat/gogen-ir-json`), never call
+     `frontend.mjs`: the track then depends on a document format, not on a
+     spike 348 commits behind `main` being merged or rebased.
+   - **`CHECK`**, if lowered: CONTINUE inside LOOP, DO, WHILE and SELECT ...
+     ENDSELECT, leaving the procedure outside them. `CHECK` directly in `LOOP
+     AT SCREEN` and in report event blocks is measured on A4H before it is
+     relied on.
 4. The observation harness: ABAP Unit -> canonical record -> the regression
    matcher; the evidence record format (3.5); the checker that
    `#OSG justify ... measured:<id>` resolves; the record format aligned with B18 first.
