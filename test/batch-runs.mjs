@@ -37,7 +37,7 @@ describe("durable one-shot batch runs", function () {
         CREATE TABLE zosd_job_outbox (mandt TEXT, intent_id TEXT, jobname TEXT, jobcount TEXT,
           owner TEXT, step_count NCHAR(2));
         CREATE TABLE zosd_job_step (mandt TEXT, intent_id TEXT, step_no TEXT);
-        INSERT INTO zosd_job_outbox VALUES ('123', 'old-intent', 'SAVED', '00000004', 'DEVELOPER', '01')`);
+        INSERT INTO zosd_job_outbox VALUES ('123', 'old-intent', '  saved ', '00000004', 'DEVELOPER', '01')`);
       db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(fingerprintOf(old));
       expect(migrateJobIdentityFile(db, fingerprintOf(old), fingerprintOf(wanted), wanted, fingerprintOf)).to.equal(true);
       expect(db.prepare("SELECT * FROM zosd_job_identity").get()).to.include({
@@ -63,7 +63,7 @@ describe("durable one-shot batch runs", function () {
           owner TEXT, step_count NCHAR(2));
         CREATE TABLE zosd_job_step (mandt TEXT, intent_id TEXT, step_no TEXT);
         INSERT INTO zosd_job_outbox VALUES ('123', 'one', 'SAVED', '00000004', 'DEVELOPER', '01');
-        INSERT INTO zosd_job_outbox VALUES ('123', 'two', 'saved', '00000004', 'DEVELOPER', '01')`);
+        INSERT INTO zosd_job_outbox VALUES ('123', 'two', ' saved ', '00000004', 'DEVELOPER', '01')`);
       db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(fingerprintOf(old));
       expect(() => migrateJobIdentityFile(db, fingerprintOf(old), fingerprintOf(wanted), wanted, fingerprintOf))
         .to.throw(/UNIQUE constraint failed/);

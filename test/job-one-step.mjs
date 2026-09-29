@@ -151,7 +151,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     const legacyStore = new BatchRuns(root, legacyEnv);
     try {
       legacyStore.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
-        client: "123", sysid: "OSG", jobname: "IDENTITY_LEGACY", jobcount: legacyCount,
+        client: "123", sysid: "OSG", jobname: "  identity_legacy ", jobcount: legacyCount,
         owner: "DEVELOPER", program: "ZGG_EX_012", generation: liveGeneration(root)});
     } finally { legacyStore.close(); }
     const writer = new DatabaseSync(dbPath);
@@ -186,11 +186,33 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     } finally { jobs.candidate = old; }
   });
 
-  it("uses one canonical name for a lower-case caller and the retained key", async () => {
+  it("does not retry an INSERT failure that did not collide with a retained key", async () => {
+    const writer = new DatabaseSync(dbPath);
+    try {
+      writer.exec(`CREATE TRIGGER fail_identity_insert BEFORE INSERT ON zosd_job_identity
+        WHEN NEW.jobname = 'IDENTITY_INSERT_FAILURE'
+        BEGIN SELECT RAISE(ABORT, 'identity insert refused'); END`);
+    } finally { writer.close(); }
+    const jobs = abap.context.RFCDestinations.JOBS;
+    const old = jobs.candidate;
+    let attempts = 0;
+    jobs.candidate = () => { attempts += 1; return 73; };
+    try {
+      await dialogStep(() => classic(() => open("IDENTITY_INSERT_FAILURE"), "cant_create_job"));
+      expect(attempts).to.equal(1);
+      expect(identityRows("IDENTITY_INSERT_FAILURE")).to.have.length(0);
+    } finally {
+      jobs.candidate = old;
+      const clean = new DatabaseSync(dbPath);
+      try { clean.exec("DROP TRIGGER fail_identity_insert"); } finally { clean.close(); }
+    }
+  });
+
+  it("uses one canonical name for a lower-case padded caller and the retained key", async () => {
     const count = await dialogStep(async () => {
-      const value = await open("identity_mixed");
-      await submit(value, {jobname: "identity_mixed"});
-      await close(value, {jobname: "identity_mixed"});
+      const value = await open("  identity_mixed  ");
+      await submit(value, {jobname: "  identity_mixed  "});
+      await close(value, {jobname: "  identity_mixed  "});
       return value;
     });
     const row = identityRows("IDENTITY_MIXED").find((item) => item.jobcount.trim() === count);
@@ -317,6 +339,34 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     expect(reserved[0].intent_id.trim()).to.equal("");
     expect(rows().some((row) => row.jobname.trim() === "IDENTITY_BIND_FAILURE")).to.equal(false);
     expect(stepRows()).to.have.length(beforeSteps);
+  });
+
+  it("rolls back a partially applied SQLite bind without undoing earlier caller work", async () => {
+    const writer = new DatabaseSync(dbPath);
+    try {
+      writer.exec(`CREATE TRIGGER fail_partial_bind AFTER UPDATE OF intent_id ON zosd_job_identity
+        WHEN NEW.jobname = 'IDENTITY_PARTIAL' AND NEW.intent_id <> ''
+        BEGIN SELECT RAISE(FAIL, 'bind failed after update'); END`);
+    } finally { writer.close(); }
+    let earlier, failed;
+    const beforeSteps = stepRows().length;
+    try {
+      await dialogStep(async () => {
+        earlier = await open("IDENTITY_EARLIER");
+        failed = await open("IDENTITY_PARTIAL");
+        await submit(failed, {jobname: "IDENTITY_PARTIAL"});
+        await classic(() => close(failed, {jobname: "IDENTITY_PARTIAL"}), "job_close_failed");
+        await client.commit();
+      });
+      expect(identityRows("IDENTITY_EARLIER").find((row) => row.jobcount.trim() === earlier)).to.exist;
+      expect(identityRows("IDENTITY_PARTIAL").find((row) => row.jobcount.trim() === failed)?.intent_id.trim())
+        .to.equal("");
+      expect(rows().some((row) => row.jobname.trim() === "IDENTITY_PARTIAL")).to.equal(false);
+      expect(stepRows()).to.have.length(beforeSteps);
+    } finally {
+      const clean = new DatabaseSync(dbPath);
+      try { clean.exec("DROP TRIGGER fail_partial_bind"); } finally { clean.close(); }
+    }
   });
 
   it("a child acknowledgement failure rolls back deletes and retries one imported run", async () => {

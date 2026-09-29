@@ -45,8 +45,13 @@ export function migrateJobIdentityFile(native, found, wanted, ddl, fingerprintOf
       native.exec(step);
     }
     native.exec(identity);
-    native.exec(`INSERT INTO zosd_job_identity (mandt, jobname, jobcount, owner, intent_id)
-      SELECT mandt, UPPER(jobname), jobcount, owner, intent_id FROM zosd_job_outbox`);
+    const insertIdentity = native.prepare(`INSERT INTO zosd_job_identity
+      (mandt, jobname, jobcount, owner, intent_id) VALUES (?, ?, ?, ?, ?)`);
+    for (const row of native.prepare(`SELECT mandt, jobname, jobcount, owner, intent_id
+      FROM zosd_job_outbox`).all()) {
+      insertIdentity.run(row.mandt, String(row.jobname ?? "").trim().toUpperCase(),
+        row.jobcount, row.owner, row.intent_id);
+    }
     native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
       .run(wanted, new Date().toISOString());
     native.exec("COMMIT");

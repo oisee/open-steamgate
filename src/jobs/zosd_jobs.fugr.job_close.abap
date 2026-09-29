@@ -17,8 +17,6 @@ FUNCTION job_close.
   IF jobname IS INITIAL.
     RAISE jobname_missing.
   ENDIF.
-  lv_jobname = jobname.
-  TRANSLATE lv_jobname TO UPPER CASE.
   IF strtimmed <> 'X' OR sdlstrtdt IS NOT INITIAL OR sdlstrttm IS NOT INITIAL
       OR targetsystem IS NOT INITIAL.
     RAISE job_close_failed.
@@ -26,14 +24,14 @@ FUNCTION job_close.
   CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'
     EXPORTING iv_command = 'CLOSE' iv_jobname = jobname
               iv_jobcount = jobcount iv_owner = sy-uname iv_client = sy-mandt
-    IMPORTING ev_intent_id = lv_intent ev_program = lv_program
+    IMPORTING ev_intent_id = lv_intent ev_jobname = lv_jobname ev_program = lv_program
               ev_step_count = lv_step_count
               ev_generation = lv_generation ev_source_db = lv_source
               ev_error = lv_error.
   IF lv_error = 'Job definition not found in this LUW'.
     RAISE job_notex.
   ENDIF.
-  IF lv_error IS NOT INITIAL OR lv_intent IS INITIAL.
+  IF lv_error IS NOT INITIAL OR lv_intent IS INITIAL OR lv_jobname IS INITIAL.
     RAISE job_close_failed.
   ENDIF.
   ls_intent-mandt = sy-mandt.
@@ -57,7 +55,10 @@ FUNCTION job_close.
                 iv_intent_id = lv_intent iv_step_no = lv_step_no
       IMPORTING ev_program = lv_program ev_error = lv_error.
     IF lv_error IS NOT INITIAL OR lv_program IS INITIAL.
-      DELETE FROM zosd_job_step WHERE mandt = sy-mandt AND intent_id = lv_intent.
+      CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'
+        EXPORTING iv_command = 'ABORT' iv_jobname = jobname
+                  iv_jobcount = jobcount iv_owner = sy-uname iv_client = sy-mandt
+                  iv_intent_id = lv_intent.
       RAISE job_close_failed.
     ENDIF.
     CLEAR ls_step.
@@ -67,14 +68,30 @@ FUNCTION job_close.
     ls_step-program = lv_program.
     INSERT zosd_job_step FROM ls_step.
     IF sy-subrc <> 0.
-      DELETE FROM zosd_job_step WHERE mandt = sy-mandt AND intent_id = lv_intent.
+      CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'
+        EXPORTING iv_command = 'ABORT' iv_jobname = jobname
+                  iv_jobcount = jobcount iv_owner = sy-uname iv_client = sy-mandt
+                  iv_intent_id = lv_intent.
       RAISE job_close_failed.
     ENDIF.
     lv_step_index = lv_step_index + 1.
   ENDWHILE.
   INSERT zosd_job_outbox FROM ls_intent.
   IF sy-subrc <> 0.
-    DELETE FROM zosd_job_step WHERE mandt = sy-mandt AND intent_id = lv_intent.
+    CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'
+      EXPORTING iv_command = 'ABORT' iv_jobname = jobname
+                iv_jobcount = jobcount iv_owner = sy-uname iv_client = sy-mandt
+                iv_intent_id = lv_intent.
+    RAISE job_close_failed.
+  ENDIF.
+  UPDATE zosd_job_identity SET intent_id = lv_intent
+    WHERE mandt = sy-mandt AND jobname = lv_jobname AND jobcount = jobcount
+      AND owner = sy-uname AND intent_id = space.
+  IF sy-subrc <> 0 OR sy-dbcnt <> 1.
+    CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'
+      EXPORTING iv_command = 'ABORT' iv_jobname = jobname
+                iv_jobcount = jobcount iv_owner = sy-uname iv_client = sy-mandt
+                iv_intent_id = lv_intent.
     RAISE job_close_failed.
   ENDIF.
   CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'
@@ -83,18 +100,10 @@ FUNCTION job_close.
               iv_intent_id = lv_intent
     IMPORTING ev_error = lv_error.
   IF lv_error IS NOT INITIAL.
-    DELETE FROM zosd_job_outbox WHERE mandt = sy-mandt AND intent_id = lv_intent.
-    DELETE FROM zosd_job_step WHERE mandt = sy-mandt AND intent_id = lv_intent.
-    RAISE job_close_failed.
-  ENDIF.
-* No fallible port call follows this binding. Every handled earlier failure
-* leaves the reservation unbound before the caller can COMMIT.
-  UPDATE zosd_job_identity SET intent_id = lv_intent
-    WHERE mandt = sy-mandt AND jobname = lv_jobname AND jobcount = jobcount
-      AND owner = sy-uname AND intent_id = space.
-  IF sy-subrc <> 0 OR sy-dbcnt <> 1.
-    DELETE FROM zosd_job_outbox WHERE mandt = sy-mandt AND intent_id = lv_intent.
-    DELETE FROM zosd_job_step WHERE mandt = sy-mandt AND intent_id = lv_intent.
+    CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'
+      EXPORTING iv_command = 'ABORT' iv_jobname = jobname
+                iv_jobcount = jobcount iv_owner = sy-uname iv_client = sy-mandt
+                iv_intent_id = lv_intent.
     RAISE job_close_failed.
   ENDIF.
   job_was_released = 'X'.

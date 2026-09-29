@@ -6,10 +6,14 @@ reservation in the caller's LUW. A duplicate key selects a new count, up to
 64 attempts. Rollback removes the reservation; a committed open without a
 close keeps its count permanently. The private port's `CANCEL` discards only
 the failed candidate in the current dialog step.
+The private port returns the canonical name (trimmed and upper case) to both
+`JOB_OPEN` and `JOB_CLOSE`, so the reservation and outbox use the same key.
 
 `JOB_CLOSE` writes every step and the outbox parent, then binds the existing
-reservation to the intent in that same LUW. Its handled failure paths remove
-partial outbox rows. A successful outbox acknowledgement deletes the dispatch
+reservation to the intent in that same LUW. A private savepoint surrounds
+these writes. Handled failures roll back to it, including SQLite statements
+whose trigger changed a row before reporting failure, while preserving earlier
+caller writes in the LUW. A successful outbox acknowledgement deletes the dispatch
 rows and leaves the identity row. The reservation's owner is checked when
 binding; the key is scoped by client and the business database containing it.
 

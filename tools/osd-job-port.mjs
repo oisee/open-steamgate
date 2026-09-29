@@ -25,10 +25,14 @@ function legacyCountUsed(root, env, sourceDb, client, name, count) {
   const reader = new DatabaseSync(path, {readOnly: true});
   try {
     const table = reader.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'batch_runs'").get();
-    if (!table || !reader.prepare("PRAGMA table_info(batch_runs)").all().some((row) => row.name === "source_db")) return false;
-    return !!reader.prepare(`SELECT 1 FROM batch_runs WHERE source_db = ? AND source_client = ?
-      AND source_sysid = ? AND job_name = ? AND job_count = ? LIMIT 1`)
-      .get(sourceDb, client, identity(env).sid, name, count);
+    if (!table) return false;
+    const columns = new Set(reader.prepare("PRAGMA table_info(batch_runs)").all().map((row) => row.name));
+    if (!["source_db", "source_client", "source_sysid", "job_name", "job_count"]
+      .every((column) => columns.has(column))) return false;
+    return reader.prepare(`SELECT job_name FROM batch_runs WHERE source_db = ? AND source_client = ?
+      AND source_sysid = ? AND job_count = ?`)
+      .all(sourceDb, client, identity(env).sid, count)
+      .some((row) => String(row.job_name ?? "").trim().toUpperCase() === name);
   } finally { reader.close(); }
 }
 
@@ -76,7 +80,7 @@ export class JobDestination {
         }
         if (!number) { answer = {EV_ERROR: "Could not allocate a job count"}; break; }
         jobs.set(keyOf(jobname, number), {jobname, count: number, owner, client, steps: []});
-        answer = {EV_JOBCOUNT: number};
+        answer = {EV_JOBCOUNT: number, EV_JOBNAME: jobname};
         break;
       }
       case "CANCEL": {
@@ -103,9 +107,22 @@ export class JobDestination {
         if (!job || job.owner !== owner || job.client !== client) { answer = {EV_ERROR: "Job definition not found in this LUW"}; break; }
         if (!job.steps.length || job.closed) { answer = {EV_ERROR: "Job has no open report steps"}; break; }
         if (resolve(db.path).length > 255) { answer = {EV_ERROR: "Business database path exceeds outbox field length"}; break; }
+        const intentId = randomUUID().replaceAll("-", "");
+        const savepoint = `osd_job_${intentId}`;
+        // Open SQL uses this same FileSqliteClient. A statement failure can
+        // leave SQLite changes behind (RAISE(FAIL)); only a savepoint can
+        // undo the entire CLOSE without undoing earlier caller writes.
+        try {
+          await db.beginTransaction();
+          db.db.exec(`SAVEPOINT ${savepoint}`);
+        } catch {
+          answer = {EV_ERROR: "Could not begin job close"}; break;
+        }
         job.closed = true;
-        job.intentId = randomUUID().replaceAll("-", "");
+        job.intentId = intentId;
+        job.savepoint = savepoint;
         answer = {
+          EV_JOBNAME: jobname,
           EV_INTENT_ID: job.intentId,
           EV_PROGRAM: job.steps[0],
           EV_STEP_COUNT: String(job.steps.length),
@@ -127,10 +144,24 @@ export class JobDestination {
       case "DONE": {
         const key = keyOf(jobname, count);
         const job = jobs.get(key);
-        if (!job || !job.closed || job.owner !== owner || job.client !== client ||
+        if (!job || !job.closed || !job.savepoint || job.owner !== owner || job.client !== client ||
             job.intentId !== givenText(signature, "IV_INTENT_ID")) {
           answer = {EV_ERROR: "Closed job not found"}; break;
         }
+        db.db.exec(`RELEASE SAVEPOINT ${job.savepoint}`);
+        jobs.delete(key);
+        answer = {};
+        break;
+      }
+      case "ABORT": {
+        const key = keyOf(jobname, count);
+        const job = jobs.get(key);
+        if (!job || !job.closed || !job.savepoint || job.owner !== owner || job.client !== client ||
+            job.intentId !== givenText(signature, "IV_INTENT_ID")) {
+          answer = {EV_ERROR: "Closed job not found"}; break;
+        }
+        db.db.exec(`ROLLBACK TO SAVEPOINT ${job.savepoint}`);
+        db.db.exec(`RELEASE SAVEPOINT ${job.savepoint}`);
         jobs.delete(key);
         answer = {};
         break;
