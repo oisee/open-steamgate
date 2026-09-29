@@ -85,6 +85,34 @@ describe("stateful APC timers", function () {
     timers.close();
   }
 
+  it("raises the measured text IDs for duplicate start and inactive stop", async () => {
+    const abap = globalThis.abap;
+    const timers = apcTimerSession(abap, (work) => work(), (error) => { throw error; });
+    const manager = timers.session.manager;
+    const handler = {if_abap_timer_handler$on_timeout: async () => {}};
+    const args = {i_timer_handler: {get: () => handler}, i_timeout: {get: () => 1000}};
+    try {
+      await timers.step(() => manager.if_abap_timer_manager$start_timer(args));
+      try {
+        await timers.step(() => manager.if_abap_timer_manager$start_timer(args));
+        throw new Error("duplicate start did not raise");
+      } catch (error) {
+        expect(error.textid.get()).to.equal(abap.Classes.CX_ABAP_TIMER_ERROR.timer_already_active.get());
+        expect((await error.if_message$get_text()).get()).to.equal("Timer object is already active.");
+      }
+      await timers.step(() => manager.if_abap_timer_manager$stop_timer({i_timer_handler: args.i_timer_handler}));
+      try {
+        await timers.step(() => manager.if_abap_timer_manager$stop_timer({i_timer_handler: args.i_timer_handler}));
+        throw new Error("inactive stop did not raise");
+      } catch (error) {
+        expect(error.textid.get()).to.equal(abap.Classes.CX_ABAP_TIMER_ERROR.timer_object_not_active.get());
+        expect((await error.if_message$get_text()).get()).to.equal("Timer object is not active.");
+      }
+    } finally {
+      timers.close();
+    }
+  });
+
   it("releases startup timers when the socket closes before on_start completes", async () => {
     let fired = false;
     let resume;
@@ -195,7 +223,7 @@ describe("stateful APC timers", function () {
     socket.send("double:80:first");
     socket.send("stop:0:x");
     expect(await socket.until(4)).to.deep.equal([
-      "Timer objects is not active.", "Timer object is already active.", "armed", "stopped",
+      "Timer object is not active.", "Timer object is already active.", "armed", "stopped",
     ]);
     await sleep(100);
     expect(socket.messages()).to.have.length(4);

@@ -322,7 +322,10 @@ the text above is marked.*
   ID in the errors of P11.
 - **Timers.** `CL_ABAP_TIMER_MANAGER=>GET_TIMER_MANAGER( )` raises
   `CX_ABAP_TIMER_ERROR` (`session_type_not_supported`) outside a
-  non-blocking session (stateful APC, daemon), read from its source.
+  non-blocking session (stateful APC, daemon). Measured on the sandbox
+  2026-09-29: the exception constructor accepts `TEXTID` and `PREVIOUS`,
+  and `GET_TEXT` resolves the `SESSION_TYPE_NOT_SUPPORTED`,
+  `TIMER_ALREADY_ACTIVE`, and `TIMER_OBJECT_NOT_ACTIVE` text IDs.
   `IF_ABAP_TIMER_MANAGER~START_TIMER( i_timer_handler TYPE REF TO
   if_abap_timer_handler, i_timeout TYPE i )` and `STOP_TIMER(
   i_timer_handler )`: **no timer ID and no context**; the handler object is
@@ -366,8 +369,8 @@ Re-armed from `ON_TIMEOUT` each time. Also measured: `START_TIMER` with 0
 and with -5 is accepted and the timer fires about 1.5 ms after the arming
 callback ends. `START_TIMER` twice on the same handler raises "Timer object
 is already active." and the first timer stands (it fired at 300.976 ms of
-300). `STOP_TIMER` on a handler with no timer raises "Timer objects is not
-active." (sic); on an armed one it succeeds and the timer never fires. A
+300). `STOP_TIMER` on a handler with no timer raises "Timer object is not
+active."; on an armed one it succeeds and the timer never fires. A
 handler object nobody else references still fires (the timer keeps it).
 1000 handler objects armed at 100 ms from one callback: all accepted, all
 1000 fired, in one batch. The only timestamps are the end of the arming
@@ -1072,9 +1075,18 @@ Timeout work is serialized, and a dumping timeout rolls back only its own step.
 The host tests observe the order of their selected delays; exact timer lateness and
 interleaving across work processes remain assumptions based on P2 and the
 Node event loop, not a new A4H measurement. The return parameter is named
-`r_timer_manager` here; probe **TIMER1** must read its real name, the exact
-`session_type_not_supported` text ID value and reason field from A4H before
-claiming those details as system-identical.
+`r_timer_manager`; the sandbox probe on 2026-09-29 confirmed that name and
+the three timer text IDs. The exception has no `REASON` parameter.
+
+PCP behavior measured on the sandbox 2026-09-29: field names are case
+sensitive; `SET_FIELD` replaces an existing field in place and rejects
+`pcp-action`. Serialization escapes backslash, colon, and LF in values,
+and colon in names. CR and tab survive a value round trip. `GET_TEXT` on a
+binary message and `GET_BINARY` on a text message return empty values.
+Deserialization accepts a missing blank separator and empty body, retains
+duplicate fields, preserves unknown escapes such as `\q`, and drops a
+malformed header together with the next header line. A missing `pcp-action`
+still raises `CX_AC_MESSAGE_TYPE_PCP_ERROR`.
 
 ---
 

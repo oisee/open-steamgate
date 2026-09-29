@@ -30,9 +30,9 @@ export function apcTimerSession(abap, deliver, failure) {
     for (const entry of session.armed.values()) clearTimeout(entry.timer);
     session.armed.clear();
   };
-  const error = async (reason) => {
+  const error = async (textid) => {
     throw await new abap.Classes.CX_ABAP_TIMER_ERROR().constructor_({
-      reason: new abap.types.String().set(reason),
+      textid,
     });
   };
   session.manager.if_abap_timer_manager$start_timer = async ({i_timer_handler, i_timeout}) => {
@@ -40,7 +40,7 @@ export function apcTimerSession(abap, deliver, failure) {
     // left to receive an error or an expiry, so a late start is a no-op.
     if (session.closed) return;
     const handler = i_timer_handler.get();
-    if (session.armed.has(handler)) return error("Timer object is already active.");
+    if (session.armed.has(handler)) return error(abap.Classes.CX_ABAP_TIMER_ERROR.timer_already_active);
     const timeout = Math.max(0, Number(i_timeout.get()));
     const entry = {handler};
     session.armed.set(handler, entry);
@@ -58,7 +58,7 @@ export function apcTimerSession(abap, deliver, failure) {
   session.manager.if_abap_timer_manager$stop_timer = async ({i_timer_handler}) => {
     const handler = i_timer_handler.get();
     const entry = session.armed.get(handler);
-    if (entry === undefined) return error("Timer objects is not active.");
+    if (entry === undefined) return error(abap.Classes.CX_ABAP_TIMER_ERROR.timer_object_not_active);
     clearTimeout(entry.timer);
     session.armed.delete(handler);
   };
