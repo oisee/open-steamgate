@@ -5,6 +5,7 @@
 import {expect} from "chai";
 import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards} from "../tools/osd-suites.mjs";
 import {readFileSync} from "node:fs";
+import {spawnSync} from "node:child_process";
 
 describe("tools/osd-suites: a run says what it could not see", () => {
   it("names every absent input and why it mattered", () => {
@@ -38,10 +39,18 @@ describe("tools/osd-suites: a run says what it could not see", () => {
 // drift always takes: the one that reads as progress.
 describe("the suite list against the tree", () => {
   it("names every file under test/ that has suites in it", () => {
-    const listed = JSON.parse(readFileSync("test/suites.json", "utf8")).files;
+    const {files, groups} = JSON.parse(readFileSync("test/suites.json", "utf8"));
+    const listed = [...files, ...Object.values(groups).flat()];
     const drift = listDrift(suitesOnDisk("test"), listed);
     expect(drift.unlisted, `suites nobody runs: ${drift.unlisted.join(", ")}`).to.deep.equal([]);
     expect(drift.absent, `named but not there: ${drift.absent.join(", ")}`).to.deep.equal([]);
+  });
+
+  it("accepts the helper without a describe and lists packaging in its named group", () => {
+    expect(hasSuites(readFileSync("test/helpers/vsix.mjs", "utf8"))).to.equal(false);
+    const {files, groups} = JSON.parse(readFileSync("test/suites.json", "utf8"));
+    expect(groups.packaging).to.deep.equal(["test/vscode-vsix-packaging.mjs"]);
+    expect(files).not.to.include(groups.packaging[0]);
   });
 
   it("counts a file as a suite by the describe in it, not by a list of exceptions", () => {
@@ -77,6 +86,12 @@ describe("suite sharding", () => {
     const all = assignShards(files, seconds, 4).flatMap((shard) => shard.files);
     expect(all.slice().sort()).to.deep.equal(files.slice().sort());
     expect(new Set(all).size).to.equal(files.length);
+    expect(all).not.to.include("test/vscode-vsix-packaging.mjs");
+  });
+  it("rejects an unknown group", () => {
+    const run = spawnSync(process.execPath, ["tools/osd-suites.mjs", "--group", "missing"], {encoding: "utf8"});
+    expect(run.status).to.equal(2);
+    expect(run.stderr).to.contain("unknown suite group missing");
   });
   it("covers every file exactly once and assigns unknown files the median weight", () => {
     const files = ["a", "b", "c", "d", "new"];

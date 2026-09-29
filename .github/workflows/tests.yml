@@ -56,6 +56,8 @@ concurrency:
 
 jobs:
   build:
+    outputs:
+      vsix_profile: ${{ steps.vsix_profile.outputs.profile }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -174,6 +176,33 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Select VSIX test profile
+        id: vsix_profile
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == schedule || "$GITHUB_EVENT_NAME" == workflow_dispatch || "$GITHUB_REF" == refs/tags/* ]]; then
+            profile=full
+            echo 'VSIX profile: full (scheduled, manual, or tag)' >> "$GITHUB_STEP_SUMMARY"
+          else
+            if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+              base='${{ github.event.pull_request.base.sha }}'
+            else
+              base='${{ github.event.before }}'
+            fi
+            if [[ "$base" =~ ^0+$ ]]; then
+              profile=full
+            else
+              git fetch --no-tags --depth=1 origin "$base"
+              decision="$(node tools/osd-ci-vsix-profile.mjs "$base" "$(git rev-parse HEAD)")"
+              case "$decision" in
+                OSD_CI_FULL_VSIX=1) profile=full ;;
+                OSD_CI_FULL_VSIX=0) profile=fast ;;
+                *) echo "unexpected VSIX profile decision: $decision" >&2; exit 1 ;;
+              esac
+            fi
+            echo "VSIX profile: $profile" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "profile=$profile" >> "$GITHUB_OUTPUT"
+
   suites:
     needs: build
     runs-on: ubuntu-latest
@@ -210,24 +239,6 @@ jobs:
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler packages/transpiler
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler-cli packages/cli
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs runtime packages/runtime
-      - name: Select VSIX test profile
-        run: |
-          if [[ "$GITHUB_EVENT_NAME" == schedule || "$GITHUB_EVENT_NAME" == workflow_dispatch || "$GITHUB_REF" == refs/tags/* ]]; then
-            echo OSD_CI_FULL_VSIX=1 >> "$GITHUB_ENV"
-            echo 'VSIX profile: full (scheduled, manual, or tag)' >> "$GITHUB_STEP_SUMMARY"
-          else
-            if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-              base='${{ github.event.pull_request.base.sha }}'
-            else
-              base='${{ github.event.before }}'
-            fi
-            if [[ "$base" =~ ^0+$ ]]; then
-              echo OSD_CI_FULL_VSIX=1 >> "$GITHUB_ENV"
-            else
-              git fetch --no-tags --depth=1 origin "$base"
-              node tools/osd-ci-vsix-profile.mjs "$base" "$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-            fi
-          fi
       # **What is skipped is reported, not swallowed.** Several suites are
       # guarded on `.local/corpus*`, which is not in this repository and
       # never will be — it holds real customer projects. On a runner those
@@ -236,12 +247,45 @@ jobs:
       # "passed" here and "passed" on a workstation are different claims
       # that say which they are.
       - name: The suites, shard ${{ matrix.shard }}/4
+        run: node tools/osd-suites.mjs --report-skips --shard "${{ matrix.shard }}/4"
+        env:
+          STG_PORT: "3030"
+
+  packaging:
+    needs: build
+    if: needs.build.outputs.vsix_profile == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Load the tracked source pins
+        run: node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: built-tree
+          path: ${{ runner.temp }}
+      - name: Restore and verify this run's build
         run: |
-          if [[ "$OSD_CI_FULL_VSIX" == 1 ]]; then
-            node tools/osd-suites.mjs --report-skips --shard "${{ matrix.shard }}/4"
-          else
-            node tools/osd-suites.mjs --report-skips --shard "${{ matrix.shard }}/4" --grep 'packaging changed seed content|packaging selected packs|packaging a prebuilt generation|packaging: the \.vsix installs' --invert
-          fi
+          tar -xf "$RUNNER_TEMP/built-tree.tar"
+          test -f gen/osd-ddic-binary.mjs
+          test -f output/init.mjs
+          test -f build/live/manifest.json
+          test -d .local/lars/open-abap-core
+          test -f .local/ci-artifact/transpiler/packages/transpiler/build/src/index.js
+          echo "TRANSPILER=$PWD/.local/ci-artifact/transpiler" >> "$GITHUB_ENV"
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler packages/transpiler
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler-cli packages/cli
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs runtime packages/runtime
+      - name: VSIX packaging group
+        run: node tools/osd-suites.mjs --report-skips --group packaging
         env:
           STG_PORT: "3030"
 
@@ -313,7 +357,7 @@ jobs:
 
   test:
     if: always()
-    needs: [build, suites, e2e]
+    needs: [build, suites, packaging, e2e]
     runs-on: ubuntu-latest
     steps:
       - name: Require every job to pass
@@ -321,5 +365,11 @@ jobs:
           BUILD_RESULT: ${{ needs.build.result }}
           SUITES_RESULT: ${{ needs.suites.result }}
           E2E_RESULT: ${{ needs.e2e.result }}
+          PACKAGING_RESULT: ${{ needs.packaging.result }}
+          VSIX_PROFILE: ${{ needs.build.outputs.vsix_profile }}
         run: |
           [[ "$BUILD_RESULT" == success && "$SUITES_RESULT" == success && "$E2E_RESULT" == success ]]
+          case "$VSIX_PROFILE:$PACKAGING_RESULT" in
+            full:success|fast:skipped) ;;
+            *) echo "unexpected VSIX profile/job result: $VSIX_PROFILE:$PACKAGING_RESULT" >&2; exit 1 ;;
+          esac

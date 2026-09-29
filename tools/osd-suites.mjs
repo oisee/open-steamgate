@@ -113,6 +113,7 @@ if (invoked === false) {
 } else {
 const listed = JSON.parse(readFileSync(fileURLToPath(new URL("../test/suites.json", import.meta.url)), "utf8"));
 const files = listed.files ?? [];
+const groups = listed.groups ?? {};
 if (files.length === 0) {
   console.error("test/suites.json lists no suites -- that is not a pass, it is an empty run");
   process.exit(2);
@@ -124,7 +125,7 @@ if (files.length === 0) {
 // the same way the list itself is resolved: both sides of a comparison must
 // be found by the same rule, or the checker answers about two trees
 const TESTS = fileURLToPath(new URL("../test", import.meta.url));
-const drift = listDrift(suitesOnDisk(TESTS).map((p) => `test/${p.slice(TESTS.length + 1)}`), files);
+const drift = listDrift(suitesOnDisk(TESTS).map((p) => `test/${p.slice(TESTS.length + 1)}`), [...files, ...Object.values(groups).flat()]);
 if (drift.unlisted.length > 0 || drift.absent.length > 0) {
   for (const p of drift.unlisted) console.error(`osd-suites: ${p} has suites in it and test/suites.json does not name it`);
   for (const p of drift.absent) console.error(`osd-suites: test/suites.json names ${p}, which is not there`);
@@ -145,17 +146,21 @@ const takeOption = (name) => {
 try {
   const shardSpec = takeOption("--shard");
   const listSpec = takeOption("--list-shard");
+  const groupName = takeOption("--group");
   const timingsFile = takeOption("--timings");
   if (shardSpec && listSpec) throw new Error("choose --shard or --list-shard");
+  if (groupName && (shardSpec || listSpec)) throw new Error("choose --group or --shard/--list-shard");
+  if (groupName && !Object.hasOwn(groups, groupName)) throw new Error(`unknown suite group ${groupName}`);
   const shard = parseShard(shardSpec ?? listSpec ?? "1/1");
   const weights = JSON.parse(readFileSync(fileURLToPath(new URL("../test/suite-timings.json", import.meta.url)), "utf8")).seconds;
-  const selected = assignShards(files, weights, shard.count)[shard.index].files;
+  const selected = groupName ? groups[groupName] : assignShards(files, weights, shard.count)[shard.index].files;
   if (listSpec) {
     for (const file of selected) console.log(file);
     process.exit(0);
   }
   if (selected.length === 0) throw new Error(`shard ${shard.index + 1}/${shard.count} has no suites`);
   const extra = argv.filter((a) => a !== "--report-skips");
+  if (!groupName && Object.keys(groups).length > 0) console.log(`osd-suites: groups not run: ${Object.keys(groups).sort().join(", ")}`);
   const absent = report ? reportSkips() : [];
   const reporter = timingsFile ? ["--reporter", fileURLToPath(new URL("./osd-suite-timing-reporter.cjs", import.meta.url))] : [];
   const env = timingsFile ? {...process.env, OSD_SUITE_TIMINGS_FILE: timingsFile} : process.env;
