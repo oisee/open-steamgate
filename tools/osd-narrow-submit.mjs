@@ -88,7 +88,7 @@ function replacement(statement, filename) {
     ? `( name = '${name}' ranges = zcl_osd_submit_ranges=>of( ${value} ) )`
     : `( name = '${name}' value = CONV string( ${value} ) )`);
   const input = rows.length === 0 ? "" : ` it_input = VALUE #( ${rows.join(" ")} )`;
-  return job ? `zcl_osd_batch_report=>submit_via_job( iv_program = '${program}' iv_jobname = ${job.name} iv_jobcount = ${job.count}${input} ).` :
+  return job ? `zcl_osd_batch_report=>submit_via_job( iv_program = '${program}' iv_jobname = ${job.name} iv_jobcount = ${job.count} iv_authcknam = sy-uname${input} ).` :
     `zcl_osd_batch_report=>submit( iv_program = '${program}'${input} iv_batch = sy-batch ).`;
 }
 

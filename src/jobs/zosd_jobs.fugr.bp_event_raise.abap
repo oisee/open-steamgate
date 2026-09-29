@@ -15,6 +15,9 @@ FUNCTION bp_event_raise.
   IF strlen( eventparm ) > 64.
     RAISE raise_failed.
   ENDIF.
+  IF target_instance IS NOT INITIAL OR target_mode IS NOT INITIAL.
+    RAISE raise_failed.
+  ENDIF.
   CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'
     EXPORTING iv_command = 'EVENT' iv_jobname = lv_name
               iv_event_param = eventparm iv_owner = sy-uname iv_client = sy-mandt

@@ -44,6 +44,7 @@ describe("static narrow SUBMIT lowering", () => {
     const after = lowerNarrowSubmit(before, file, core);
     expect(after).to.contain("submit_via_job( iv_program = 'ZGG_EX_012' iv_jobname = lv_job iv_jobcount = lv_count");
     expect(after).to.contain("( name = 'P_DATE' value = CONV string( lv_date ) )");
+    expect(after).to.contain("iv_authcknam = sy-uname");
     expect(after.split("\n").length).to.equal(before.split("\n").length);
   });
 

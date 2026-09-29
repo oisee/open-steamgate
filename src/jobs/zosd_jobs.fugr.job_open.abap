@@ -8,8 +8,14 @@ FUNCTION job_open.
   DATA lv_insert_subrc TYPE i.
   DATA ls_identity TYPE zosd_job_identity.
   DATA ls_existing TYPE zosd_job_identity.
+  ret = 0.
   IF jobname IS INITIAL.
     RAISE jobname_missing.
+  ENDIF.
+  IF delanfrep IS NOT INITIAL OR jobgroup IS NOT INITIAL
+      OR sdlstrtdt IS NOT INITIAL OR sdlstrttm IS NOT INITIAL
+      OR jobclass IS NOT INITIAL OR check_jobclass IS NOT INITIAL.
+    RAISE invalid_job_data.
   ENDIF.
   DO 64 TIMES.
     CLEAR: jobcount, lv_error, lv_jobname.

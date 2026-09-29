@@ -79,7 +79,7 @@ ${[...new Set(entry.selectionNames ?? [])].map((name) => `        INSERT ${abapL
         iv_batch TYPE abap_bool DEFAULT abap_false.
     CLASS-METHODS submit_via_job
       IMPORTING iv_program TYPE string iv_jobname TYPE string
-                iv_jobcount TYPE string
+                iv_jobcount TYPE string iv_authcknam TYPE tbtcjob-sdluname
                 it_input TYPE zif_gg_selection_screen_types=>ty_values OPTIONAL.
     CLASS-METHODS supports
       IMPORTING iv_program TYPE string
@@ -152,6 +152,9 @@ ${cases}
   METHOD submit_via_job.
     DATA lv_error TYPE string.
     DATA lv_input TYPE string.
+    IF iv_authcknam <> sy-uname.
+      RAISE EXCEPTION NEW zcx_osd_submit( iv_detail = 'SUBMIT authorization user mismatch' ).
+    ENDIF.
     IF supports( iv_program ) <> abap_true.
       RAISE EXCEPTION NEW zcx_osd_submit( iv_detail = |SUBMIT { iv_program }: program_missing| ).
     ENDIF.

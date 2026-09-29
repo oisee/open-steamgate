@@ -23,6 +23,7 @@ FUNCTION job_close.
   DATA ls_intent TYPE zosd_job_outbox.
   DATA ls_step TYPE zosd_job_step.
   CLEAR job_was_released.
+  ret = 0.
   IF jobname IS INITIAL.
     RAISE jobname_missing.
   ENDIF.
@@ -49,7 +50,31 @@ FUNCTION job_close.
     ENDIF.
   ENDIF.
   IF sdlstrtdt IS NOT INITIAL OR sdlstrttm IS NOT INITIAL
-      OR targetsystem IS NOT INITIAL OR event_periodic IS NOT INITIAL.
+      OR laststrtdt IS NOT INITIAL OR laststrttm IS NOT INITIAL.
+    RAISE invalid_startdate.
+  ENDIF.
+  IF targetsystem IS NOT INITIAL OR targetserver IS NOT INITIAL
+      OR targetgroup IS NOT INITIAL.
+    RAISE invalid_target.
+  ENDIF.
+  IF time_zone IS NOT INITIAL.
+    RAISE invalid_time_zone.
+  ENDIF.
+  IF sdlstrtdt IS NOT INITIAL OR sdlstrttm IS NOT INITIAL
+      OR targetsystem IS NOT INITIAL OR event_periodic IS NOT INITIAL
+      OR at_opmode IS NOT INITIAL OR at_opmode_periodic IS NOT INITIAL
+      OR calendar_id IS NOT INITIAL OR laststrtdt IS NOT INITIAL
+      OR laststrttm IS NOT INITIAL OR prddays IS NOT INITIAL
+      OR prdhours IS NOT INITIAL OR prdmins IS NOT INITIAL
+      OR prdmonths IS NOT INITIAL OR prdweeks IS NOT INITIAL
+      OR startdate_restriction IS NOT INITIAL
+      OR start_on_workday_not_before IS NOT INITIAL
+      OR start_on_workday_nr IS NOT INITIAL OR workday_count_direction IS NOT INITIAL
+      OR recipient_obj IS NOT INITIAL OR targetserver IS NOT INITIAL
+      OR targetgroup IS NOT INITIAL OR inherit_recipient IS NOT INITIAL
+      OR inherit_target IS NOT INITIAL OR register_child IS NOT INITIAL
+      OR email_notification IS NOT INITIAL OR time_zone IS NOT INITIAL
+      OR dont_release IS NOT INITIAL OR direct_start IS NOT INITIAL.
     RAISE job_close_failed.
   ENDIF.
   IF lv_event_name IS NOT INITIAL.
@@ -99,6 +124,9 @@ FUNCTION job_close.
               ev_error = lv_error.
   IF lv_error = 'Job definition not found in this LUW'.
     RAISE job_notex.
+  ENDIF.
+  IF lv_error = 'Job has no open report steps'.
+    RAISE job_nosteps.
   ENDIF.
   IF lv_error IS NOT INITIAL OR lv_intent IS INITIAL OR lv_jobname IS INITIAL
       OR lv_source_instance IS INITIAL.
