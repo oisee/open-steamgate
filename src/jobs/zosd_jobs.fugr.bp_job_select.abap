@@ -1,0 +1,85 @@
+FUNCTION bp_job_select.
+  DATA ls_identity TYPE zosd_job_identity.
+  DATA ls_job TYPE tbtcjob.
+  DATA lv_state TYPE string.
+  DATA lv_phase TYPE string.
+  DATA lv_status TYPE c LENGTH 1.
+  DATA lv_selected TYPE c LENGTH 1.
+  CLEAR: jobsel_param_out, local_client, nr_of_jobs_found.
+  IF jobselect_dialog <> 'N'.
+    RAISE invalid_dialog_type.
+  ENDIF.
+  IF enddate IS NOT INITIAL OR endtime IS NOT INITIAL
+      OR adk_mode IS NOT INITIAL OR ( selection IS NOT INITIAL AND selection <> 'AL' )
+      OR ( only_this_subsystem IS NOT INITIAL AND only_this_subsystem <> 'Y' ).
+    RAISE selection_canceled.
+  ENDIF.
+  jobsel_param_out = jobsel_param_in.
+  local_client = 'X'.
+  SELECT * FROM zosd_job_identity INTO ls_identity
+    WHERE mandt = sy-mandt AND owner = sy-uname.
+    IF jobsel_param_in-jobname IS NOT INITIAL
+        AND ls_identity-jobname <> jobsel_param_in-jobname.
+      CONTINUE.
+    ENDIF.
+    IF jobsel_param_in-username IS NOT INITIAL
+        AND ls_identity-owner <> jobsel_param_in-username.
+      CONTINUE.
+    ENDIF.
+    CALL FUNCTION 'ZOSD_JOB_STATUS'
+      EXPORTING iv_jobname = ls_identity-jobname iv_jobcount = ls_identity-jobcount
+      IMPORTING ev_phase = lv_phase ev_state = lv_state
+      EXCEPTIONS OTHERS = 1.
+    IF sy-subrc <> 0.
+      CONTINUE.
+    ENDIF.
+    CASE lv_state.
+      WHEN 'COMPLETED'.
+        lv_status = 'F'.
+      WHEN 'FAILED'.
+        lv_status = 'A'.
+      WHEN 'INTERRUPTED'.
+        lv_status = 'A'.
+      WHEN 'RUNNING'.
+        lv_status = 'R'.
+      WHEN 'QUEUED'.
+        lv_status = 'Y'.
+      WHEN 'WAITING'.
+        lv_status = 'S'.
+      WHEN OTHERS.
+        lv_status = 'P'.
+    ENDCASE.
+    lv_selected = space.
+    IF jobsel_param_in-preliminary IS NOT INITIAL OR jobsel_param_in-scheduled IS NOT INITIAL
+        OR jobsel_param_in-ready IS NOT INITIAL OR jobsel_param_in-running IS NOT INITIAL
+        OR jobsel_param_in-finished IS NOT INITIAL OR jobsel_param_in-aborted IS NOT INITIAL.
+      CASE lv_status.
+        WHEN 'P'.
+          lv_selected = jobsel_param_in-preliminary.
+        WHEN 'S'.
+          lv_selected = jobsel_param_in-scheduled.
+        WHEN 'Y'.
+          lv_selected = jobsel_param_in-ready.
+        WHEN 'R'.
+          lv_selected = jobsel_param_in-running.
+        WHEN 'F'.
+          lv_selected = jobsel_param_in-finished.
+        WHEN 'A'.
+          lv_selected = jobsel_param_in-aborted.
+      ENDCASE.
+      IF lv_selected IS INITIAL.
+        CONTINUE.
+      ENDIF.
+    ENDIF.
+    CLEAR ls_job.
+    ls_job-jobname = ls_identity-jobname.
+    ls_job-jobcount = ls_identity-jobcount.
+    ls_job-sdluname = ls_identity-owner.
+    ls_job-status = lv_status.
+    APPEND ls_job TO jobselect_joblist.
+    nr_of_jobs_found = nr_of_jobs_found + 1.
+  ENDSELECT.
+  IF nr_of_jobs_found = 0.
+    RAISE no_jobs_found.
+  ENDIF.
+ENDFUNCTION.

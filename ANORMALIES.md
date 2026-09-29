@@ -1794,3 +1794,15 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream issue: not yet sent; a transpiler/runtime PR needs the critic gate and belongs to its own branch in `abaplint/transpiler`
 - Regression-test location: `test/unit/zcl_osd_batch_runner_test.clas.testclasses.abap` (`static_submit_passes_a_range`, `static_submit_range_is_checked`)
 - Upstream version containing a fix: unknown
+
+### ANOMALY-2026-09-29-job-standard-facade — narrow local job FMs accept standard signatures but reject unsupported semantics
+
+- Status: `open`
+- Discovery date: `2026-09-29`
+- Affected adapter: `ZOSD_JOBS` implementations of `JOB_OPEN`, `JOB_SUBMIT`, `JOB_CLOSE`, `BP_EVENT_RAISE`, `BP_JOB_READ`, and `BP_JOB_SELECT`
+- Expected SAP behaviour: scheduled and periodic starts, job class/group, external programs, targets, and selection options follow their documented FM semantics.
+- Actual local behaviour: nonempty unsupported options raise the nearest declared failure exception; exact local-owner selection is supported. `BP_JOB_READ` opcodes 1/2 and one-letter statuses are provisional.
+- Impact: callers depending on those options activate but receive a declared exception; the provisional read opcodes require measurement before they are portable.
+- Smallest safe workaround: use immediate, predecessor, or named-event ABAP report jobs and the private `ZOSD_JOB_READ` bridge for exact local reads. The `TAIL_EVENT_ID`/`TAIL_EVENT_PARAM` extension on `JOB_CLOSE` does not exist on SAP and code using it will not activate there.
+- Measurement: see `.local/REPORT-jobs-j1.md` (private) and `docs/job-standard-fms.md` (public facts and assumptions).
+- Regression-test location: `src/jobs/zcl_osd_job_doctor.clas.testclasses.abap`, `test/job-one-step.mjs`.

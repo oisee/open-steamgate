@@ -293,6 +293,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     expect((await workQueuedBatch(root, store, async () => ({status: "COMPLETED"}))).kind).to.equal("completed");
   });
 
+
   it("an explicit commit preserves intent even when the following work dumps", async () => {
     try {
       await dialogStep(async () => {
@@ -1624,4 +1625,63 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       else process.env.OSD_OPERATIONS_DB = prior;
     }
   });
+  it("polls SHOW_JOBSTATE and reads the finished standard header", async () => {
+    const name = "STANDARD_READ";
+    const count = await dialogStep(async () => {
+      const value = await open(name);
+      expect((await invoke("JOB_SUBMIT", {jobname: name, jobcount: value,
+        report: "ZGG_EX_012"}, ["step_number"])).step_number).to.equal("1");
+      await close(value, {jobname: name});
+      return value;
+    });
+    expect((await drainJobOutbox(store)).imported).to.equal(1);
+    const finished = async () => (await dialogStep(() => invoke("SHOW_JOBSTATE",
+      {jobname: name, jobcount: count}, ["finished", "running", "ready", "scheduled"]))).finished;
+    for (let attempt = 0; attempt < 100 && await finished() !== "X"; attempt += 1) {
+      await workQueuedBatch(root, store, async () => ({status: "COMPLETED"}));
+    }
+    expect(await finished()).to.equal("X");
+    const header = new abap.types.Structure({
+      jobname: new abap.types.Character(32), jobcount: new abap.types.Character(8),
+      status: new abap.types.Character(1), sdluname: new abap.types.Character(12),
+    });
+    await dialogStep(() => abap.FunctionModules.BP_JOB_READ({
+      exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
+        job_read_opcode: new abap.types.Integer().set(1)},
+      importing: {job_read_jobhead: header},
+    }));
+    expect(header.get().jobname.get().trim()).to.equal(name);
+    expect(header.get().status.get()).to.equal("F");
+    const table = (row) => new abap.types.Table(row, {withHeader: false, keyType: "DEFAULT",
+      primaryKey: {name: "primary_key", type: "STANDARD", keyFields: [], isUnique: false}, secondary: []});
+    const jobs = table(header.clone());
+    const steps = table(new abap.types.Structure({
+      jobname: new abap.types.Character(32), jobcount: new abap.types.Character(8),
+      stepcount: new abap.types.Character(6), progname: new abap.types.Character(40),
+    }));
+    await dialogStep(() => abap.FunctionModules.BP_JOB_READ({
+      exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
+        job_read_opcode: new abap.types.Integer().set(2)},
+      tables: {job_read_steplist: steps},
+    }));
+    expect(steps.array().map((step) => step.get().progname.get().trim())).to.deep.equal(["ZGG_EX_012"]);
+    const selector = new abap.types.Structure({
+      jobname: new abap.types.Character(32).set(name), username: new abap.types.Character(12),
+      preliminary: new abap.types.Character(1), scheduled: new abap.types.Character(1),
+      ready: new abap.types.Character(1), running: new abap.types.Character(1),
+      finished: new abap.types.Character(1).set("X"), aborted: new abap.types.Character(1),
+    });
+    const found = new abap.types.Integer();
+    await dialogStep(() => abap.FunctionModules.BP_JOB_SELECT({
+      exporting: {jobselect_dialog: box("N"), jobsel_param_in: selector},
+      importing: {nr_of_jobs_found: found}, tables: {jobselect_joblist: jobs},
+    }));
+    expect(found.get()).to.equal(1);
+    expect(jobs.array()[0].get().status.get()).to.equal("F");
+    await dialogStep(async () => {
+      const empty = await open("STANDARD_NO_STEPS");
+      await classic(() => close(empty, {jobname: "STANDARD_NO_STEPS"}), "job_nosteps");
+    });
+  });
+
 });

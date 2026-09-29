@@ -279,7 +279,7 @@ export class JobDestination {
         try { input = jobInputJson(givenText(signature, "IV_INPUT_JSON")); }
         catch (error) { answer = {EV_ERROR: error.message}; break; }
         job.steps.push({program, input});
-        answer = {};
+        answer = {EV_STEP_COUNT: String(job.steps.length)};
         break;
       }
       case "CLOSE": {

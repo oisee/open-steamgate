@@ -11,6 +11,11 @@ FUNCTION job_open.
   IF jobname IS INITIAL.
     RAISE jobname_missing.
   ENDIF.
+  IF delanfrep IS NOT INITIAL OR jobgroup IS NOT INITIAL
+      OR sdlstrtdt IS NOT INITIAL OR sdlstrttm IS NOT INITIAL
+      OR jobclass IS NOT INITIAL OR check_jobclass IS NOT INITIAL.
+    RAISE invalid_job_data.
+  ENDIF.
   DO 64 TIMES.
     CLEAR: jobcount, lv_error, lv_jobname.
     CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'

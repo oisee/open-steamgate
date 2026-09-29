@@ -62,3 +62,6 @@ The header also returns the private job-owned `EV_TAIL_EVENT_ID` and
 `EV_TAIL_EVENT_PARAM` when configured. The reader verifies the v6 import
 digest and checks that a completed run has its exact named occurrence, while
 a failed or interrupted run has none. A disagreement is `INCONSISTENT`.
+
+The public-name facade and its provisional SAP status mapping are described in
+[job-standard-fms.md](job-standard-fms.md).
