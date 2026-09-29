@@ -21,7 +21,8 @@
 //
 //   node tools/osd-queue-check.mjs [docs/upstream.md docs/backlog.md …]
 //
-// Exit 0 nothing contradicted, 1 contradictions, 2 could not ask.
+// Exit 0 nothing contradicted, 1 contradictions, 2 could not ask,
+// 3 no references found.
 import {readFileSync, existsSync} from "node:fs";
 import {execFileSync} from "node:child_process";
 
@@ -190,7 +191,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (refs.length === 0) {
     // the same rule the leak scan had to learn: reading nothing is not a pass
     console.error("osd-queue-check: no references found - that is not 'clean', it is 'nothing was read'");
-    process.exit(2);
+    process.exit(3);
   }
   const bad = contradictions(refs);
   const said = bad.filter((b) => b.said !== undefined);

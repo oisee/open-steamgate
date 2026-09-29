@@ -30,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
+      actions: read
       contents: write
     outputs:
       tag: ${{ steps.release.outputs.tag }}
@@ -37,6 +38,7 @@ jobs:
       full_scan: ${{ steps.leak.outputs.full_scan }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -139,6 +141,11 @@ jobs:
               echo '::error::An existing published release requires OSD_LEAK_IDENTIFIERS and scanner exit 0 before editing or uploading'
               exit 1
             fi
+            if [[ "$release_is_draft" != true ]]; then
+              # A rerun may edit a public release only after this tag's tests pass.
+              tag_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+              node tools/osd-ci-wait-tests.mjs "$RELEASE_TAG" "$tag_sha"
+            fi
             gh release edit "$RELEASE_TAG" --prerelease --title "$RELEASE_TAG" --notes-file build/vsix/release-body.md
           elif [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
             if [[ "$DRAFT" == false ]]; then
@@ -155,6 +162,10 @@ jobs:
           if [[ "$release_is_draft" != true && "$FULL_SCAN" != true ]]; then
             echo '::error::An existing published release requires OSD_LEAK_IDENTIFIERS and scanner exit 0 before editing or uploading'
             exit 1
+          fi
+          if [[ "$release_is_draft" != true ]]; then
+            tag_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+            node tools/osd-ci-wait-tests.mjs "$RELEASE_TAG" "$tag_sha"
           fi
           gh release upload "$RELEASE_TAG" --clobber \
             "build/vsix/open-steamgate-$version.vsix" \
@@ -180,11 +191,13 @@ jobs:
           - target: bun-windows-x64-baseline
             asset: osd-windows-x64.exe
     permissions:
+      actions: read
       contents: write
     env:
       RELEASE_TAG: ${{ needs.vsix.outputs.tag }}
       FULL_SCAN: ${{ needs.vsix.outputs.full_scan }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -215,6 +228,10 @@ jobs:
             echo '::error::An existing published release requires OSD_LEAK_IDENTIFIERS and scanner exit 0 before uploading'
             exit 1
           fi
+          if [[ "$release_is_draft" != true ]]; then
+            tag_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+            node tools/osd-ci-wait-tests.mjs "$RELEASE_TAG" "$tag_sha"
+          fi
           gh release upload "$RELEASE_TAG" --clobber "build/release/$ASSET" "build/release/$ASSET.sha256"
 
   compose:
@@ -222,11 +239,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      actions: read
       contents: write
     env:
       RELEASE_TAG: ${{ needs.vsix.outputs.tag }}
       FULL_SCAN: ${{ needs.vsix.outputs.full_scan }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -248,11 +267,38 @@ jobs:
               echo '::error::An existing published release requires OSD_LEAK_IDENTIFIERS and scanner exit 0 before uploading'
               exit 1
             fi
+            if [[ "$release_is_draft" != true ]]; then
+              tag_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+              node tools/osd-ci-wait-tests.mjs "$RELEASE_TAG" "$tag_sha"
+            fi
             gh release upload "$RELEASE_TAG" --clobber "docker/compose/$db.yml"
           done
 
+  tagged_tests:
+    needs: vsix
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require the tagged tests run before publication
+        if: github.event_name == 'push' || !inputs.draft
+        env:
+          RELEASE_TAG: ${{ needs.vsix.outputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          node scripts/release-version.mjs --check-target "$RELEASE_TAG"
+          tag_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          node tools/osd-ci-wait-tests.mjs "$RELEASE_TAG" "$tag_sha"
+
   publish:
-    needs: [vsix, binary, compose]
+    needs: [vsix, binary, compose, tagged_tests]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -333,23 +379,6 @@ jobs:
             echo '::error::Marketplace profile unexpectedly contains a browser entry'
             exit 1
           fi
-      - name: Wait for the tagged test workflow
-        run: |
-          set -euo pipefail
-          for attempt in {1..180}; do
-            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow tests.yml \
-              --commit "$GITHUB_SHA" --event push --limit 100 \
-              --json headBranch,status,conclusion)
-            result=$(jq -r --arg tag "$RELEASE_TAG" \
-              '[.[] | select(.headBranch == $tag) | "\(.status):\(.conclusion)"][0] // empty' <<< "$runs")
-            case "$result" in
-              completed:success) exit 0 ;;
-              completed:*) echo "::error::Tagged tests ended with $result"; exit 1 ;;
-            esac
-            sleep 20
-          done
-          echo '::error::Timed out waiting for tagged tests workflow'
-          exit 1
       - name: Publish the built VSIX to Visual Studio Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
