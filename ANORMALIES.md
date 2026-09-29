@@ -1752,3 +1752,29 @@ for `zosd_status_app`, which has been deployed for a day.
 - Upstream issue: none yet; the fix is an alias (or the item interface) on the two interfaces in open-abap-odata
 - Regression-test location: none yet; the taxi data service's own tests fail if its MPC stops building
 - Upstream version containing a fix: `unknown`
+### ANOMALY-2026-09-29-amc-program-identity — AMC authority checks need the ABAP caller's program
+
+- Status: `open` (Node class calls covered, other callers fail closed)
+- Discovery date: `2026-09-29`
+- Affected versions: the pinned open-abap runtime and the one-process AMC host in `tools/osd-amc.mjs`
+- Affected ABAP statement, runtime API or adapter: `CL_AMC_CHANNEL_MANAGER` at `SEND` and `START_MESSAGE_DELIVERY`; `sy-cprog` is the runtime's fixed `OPEN_ABAP_TODO`, not the caller's program.
+- Minimal ABAP reproducer: `test/unit/zcl_osd_amc_test.clas.testclasses.abap` calls `START_MESSAGE_DELIVERY` and `SEND` from a class pool named in `src/amc/zstg_amc_test.samc.xml`.
+- Exact command used to run it: `npm run unit` with the AMC host installed by `tools/osd-unit-bootstrap.mjs`; the library's `npm run unit` checks that creating a producer or consumer without a broker raises `CX_AMC_ERROR` with "AMC is not available in this host."
+- Expected SAP behaviour: a `SAMC` channel's `PROGRAM_ID` and activity authorise the executing program. P8 observed checks at `SEND` and `START_MESSAGE_DELIVERY`.
+- Actual open-abap behaviour: the Node host can identify a directly executing generated class module from its stack frame and turn that class name into the class-pool program ID. It cannot reliably identify report, function group, dynamic or bundled callers this way, and the runtime's `sy-cprog` does not fill the gap. Those callers receive `CX_AMC_ERROR` rather than a guessed identity. The compiled binary's `serve` and `up` routes install the same broker through `mountChannels`, but if bundling removes the generated class frame, authority checks fail closed.
+- Impact on open-steamgate: the tested Node class and APC paths work; AMC callers without a generated class frame cannot pass a `SAMC` authority check. Browser preview has no broker until step 9 and producer/consumer creation raises the explicit unavailable-host error.
+- Smallest safe workaround: none. The kernel needs an execution-context program identity independent of source paths before this is general.
+- Upstream issue: none yet; the one-process AMC adapter is ours.
+- Regression-test location: `test/amc.mjs` (program mapping and refused send), `test/unit/zcl_osd_amc_test.clas.testclasses.abap` (authorised and unauthorised sends).
+- Upstream version containing a fix: none.
+
+### ANOMALY-2026-09-29-amc-scope-assumption — AMC cross-identity delivery has no A4H measurement
+
+- Status: `open` (local policy implemented, system semantics unmeasured)
+- Discovery date: `2026-09-29`
+- Affected versions: one-process AMC host in `tools/osd-amc.mjs`
+- Affected runtime API: `SAMC` scope `C`, `U` and `S` when producer and subscriber differ by client or username.
+- Expected SAP behaviour: not established by P8; its one logon observed delivery only within one client and user.
+- Actual open-abap behaviour: each subscription records its client and username. `C` delivers within the same client, `U` within the same client and username, and `S` to all subscribers. These are design assumptions awaiting cross-client/user A4H probes.
+- Impact on open-steamgate: cross-identity routing may differ from a system until P6/P8 is measured with another logon.
+- Regression-test location: `test/amc.mjs` covers each scope with three subscriber identities.

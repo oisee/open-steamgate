@@ -123,6 +123,7 @@
     "\\.mjs$",
     "\\.cjs$",
     "\\.sapc\\.xml$",
+    "\\.samc\\.xml$",
     "\\.ddls\\.",
     "\\.stg\\.yaml$"
   ],

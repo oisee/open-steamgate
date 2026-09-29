@@ -93,7 +93,7 @@ if (basename(process.argv[1] ?? "") === "osd-unit-run.mjs") {
   let code;
   let captured;
   try {
-    const child = spawn("node", ["--expose-gc", "output/index.mjs"], {stdio: ["inherit", fd, "inherit"]});
+    const child = spawn("node", ["--expose-gc", "--import", "./tools/osd-unit-bootstrap.mjs", "output/index.mjs"], {stdio: ["inherit", fd, "inherit"]});
     code = await new Promise((resolve) => child.on("close", resolve));
     closeSync(fd);
     captured = readFileSync(capturePath, "utf8");

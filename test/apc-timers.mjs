@@ -43,10 +43,15 @@ describe("stateful APC timers", function () {
   this.timeout(30000);
   let Host;
   before(async () => {
-    const {initializeABAP} = await import("../output/init.mjs");
+    // The canonical inline boot, not a raw initializeABAP(): a raw boot
+    // replaces abap.context.databaseConnections.DEFAULT with a fresh empty
+    // database, so a suite that runs after this one in the same mocha
+    // process (a shard) finds no cross-reference rows. test/adt-facade.mjs
+    // failed that way on CI. test/adt-devloop.mjs explains the rule; this
+    // follows it: test/start.mjs boots once per process, seeds included.
+    await import("./start.mjs");
     Host = (await import("../output/zcl_apc_host.clas.mjs")).zcl_apc_host;
     await import("../output/zcl_osd_timer_probe.clas.mjs");
-    await initializeABAP();
   });
   async function channel() {
     const socket = new Socket();

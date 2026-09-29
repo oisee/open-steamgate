@@ -6,7 +6,7 @@
   "libraries": [
     { "folder": "open-abap-core", "repo": "oisee/open-abap-core", "ref": "52ba51a5662b93bd5093a9c1adef64bd438ce7f0" },
     { "folder": "express-icf-shim", "repo": "open-abap/express-icf-shim", "ref": "c1fc36026f69eb0ae7d1830d304e1e1923e9a9a3" },
-    { "folder": "open-abap-apc", "repo": "oisee/open-abap-apc", "ref": "98bc239b805faa7e3c96c7838e43d32391bffb8d" },
+    { "folder": "open-abap-apc", "repo": "oisee/open-abap-apc", "ref": "7def7d600e61c406c45a10e18a6c67dc8abf8e96" },
     { "folder": "abapgit", "repo": "abapGit/abapGit", "ref": "3b6485b5d0b09ef3861006b966e68542446721ce" },
     { "folder": "open-abap-gui", "repo": "oisee/open-abap-gui", "ref": "31cc8b3177569afb66c88a4ec9fd2e640a353877" },
     { "folder": "open-abap-odata", "repo": "oisee/open-abap-odata", "ref": "bd9f1fb175e7b26678e48eb2e311a278a13ef91b" },

@@ -18,7 +18,18 @@ import {describe} from "./osd-describe.mjs";
 // the HTTP steps had and these did not (tools/osd-dialog-step.mjs)
 import {apcTimerSession} from "./osd-apc-timers.mjs";
 import {dialogStep} from "./osd-dialog-step.mjs";
+import {installAmc} from "./osd-amc.mjs";
 export {describe};
+
+export async function deliverAmcPublication(publication, isClosed, sendFrame) {
+  if (isClosed()) return;
+  if (publication.type === "BINARY") {
+    if (!isClosed()) sendFrame(Buffer.from(publication.message.get(), "hex"), OP.binary);
+  } else if (publication.type === "PCP") {
+    const encoded = await publication.message.if_ac_message_type_pcp$serialize();
+    if (!isClosed()) sendFrame(encoded.get());
+  } else if (!isClosed()) sendFrame(publication.message);
+}
 
 // the constant RFC 6455 §1.3 defines; it exists so a server cannot answer a
 // handshake by accident
@@ -174,13 +185,14 @@ export async function serveChannel(options) {
   // messages wait here and go out the moment the connection is real.
   let pending = [];
   let live = false;
-  const send = (text) => {
+  const sendFrame = (payload, opcode = OP.text) => {
     if (live === false) {
-      pending.push(text);
+      pending.push([payload, opcode]);
       return;
     }
-    socket.write(frame(text, OP.text));
+    socket.write(frame(payload, opcode));
   };
+  const send = (text) => sendFrame(text);
   const drain = async () => {
     const pushed = await host.drain();
     for (const row of pushed.array()) {
@@ -203,9 +215,11 @@ export async function serveChannel(options) {
     }))
     : {step: dialogStep, close() {}};
   let closed = false;
+  const subscriptions = [];
   shut = (code, reason) => {
     if (closed) return;
     closed = true;
+    for (const subscription of subscriptions) subscription.close();
     timers.close();
     if (live === false) return;
     const body = Buffer.alloc(2 + Buffer.byteLength(reason ?? ""));
@@ -230,6 +244,25 @@ export async function serveChannel(options) {
     });
     const accepted = await host.open();
     await drain();
+    if (accepted.get() === "X" && typeof host.bindings === "function") {
+      const broker = installAmc(abap, options.root);
+      const bindings = await host.bindings();
+      for (const row of bindings.array()) {
+        const binding = row.get();
+        let last = Promise.resolve();
+        subscriptions.push(broker.subscribe({
+          app: binding.application_id.get(), path: binding.channel_id.get(),
+          extension: binding.extension_id.get(),
+          program: channel.handler.toUpperCase().padEnd(30, "=") + "CP",
+          session: timers.session,
+          client: abap.builtin.sy.get().mandt.get(), username: abap.builtin.sy.get().uname.get(),
+          receive: (publication) => {
+            last = last.then(() => deliverAmcPublication(publication, () => closed, sendFrame))
+              .catch((e) => log?.(`APC AMC delivery: ${describe(e)}`));
+          },
+        }));
+      }
+    }
     return accepted.get() === "X";
   });
 
@@ -262,8 +295,8 @@ export async function serveChannel(options) {
   ].join("\r\n"));
 
   live = true;
-  for (const text of pending) {
-    socket.write(frame(text, OP.text));
+  for (const [payload, opcode] of pending) {
+    socket.write(frame(payload, opcode));
   }
   pending = [];
 
@@ -309,6 +342,7 @@ export async function serveChannel(options) {
 // event. A path nothing declared is refused rather than left hanging, because
 // a socket that neither opens nor closes is the worst answer available.
 export function mountChannels(server, channels, options = {}) {
+  installAmc(globalThis.abap, options.root);
   if (channels.length === 0) {
     return [];
   }
@@ -321,7 +355,7 @@ export function mountChannels(server, channels, options = {}) {
       return;
     }
     // an upgrade that throws must not take the listener with it
-    serveChannel({req, socket, head, channel, log: options.log, host: options.host})
+    serveChannel({req, socket, head, channel, log: options.log, host: options.host, root: options.root})
       .catch((e) => {
         options.log?.(`APC ${channel.path}: ${e?.message ?? e}`);
         socket.destroy();
