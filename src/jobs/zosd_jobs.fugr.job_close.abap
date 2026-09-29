@@ -9,6 +9,7 @@ FUNCTION job_close.
   DATA lv_source TYPE string.
   DATA lv_step_count TYPE string.
   DATA lv_step_no TYPE string.
+  DATA lv_jobname TYPE string.
   DATA lv_step_index TYPE i.
   DATA ls_intent TYPE zosd_job_outbox.
   DATA ls_step TYPE zosd_job_step.
@@ -16,6 +17,8 @@ FUNCTION job_close.
   IF jobname IS INITIAL.
     RAISE jobname_missing.
   ENDIF.
+  lv_jobname = jobname.
+  TRANSLATE lv_jobname TO UPPER CASE.
   IF strtimmed <> 'X' OR sdlstrtdt IS NOT INITIAL OR sdlstrttm IS NOT INITIAL
       OR targetsystem IS NOT INITIAL.
     RAISE job_close_failed.
@@ -37,7 +40,7 @@ FUNCTION job_close.
   ls_intent-intent_id = lv_intent.
   ls_intent-sysid = sy-sysid.
   ls_intent-source_db = lv_source.
-  ls_intent-jobname = jobname.
+  ls_intent-jobname = lv_jobname.
   ls_intent-jobcount = jobcount.
   ls_intent-owner = sy-uname.
   ls_intent-program = lv_program.
@@ -80,6 +83,16 @@ FUNCTION job_close.
               iv_intent_id = lv_intent
     IMPORTING ev_error = lv_error.
   IF lv_error IS NOT INITIAL.
+    DELETE FROM zosd_job_outbox WHERE mandt = sy-mandt AND intent_id = lv_intent.
+    DELETE FROM zosd_job_step WHERE mandt = sy-mandt AND intent_id = lv_intent.
+    RAISE job_close_failed.
+  ENDIF.
+* No fallible port call follows this binding. Every handled earlier failure
+* leaves the reservation unbound before the caller can COMMIT.
+  UPDATE zosd_job_identity SET intent_id = lv_intent
+    WHERE mandt = sy-mandt AND jobname = lv_jobname AND jobcount = jobcount
+      AND owner = sy-uname AND intent_id = space.
+  IF sy-subrc <> 0 OR sy-dbcnt <> 1.
     DELETE FROM zosd_job_outbox WHERE mandt = sy-mandt AND intent_id = lv_intent.
     DELETE FROM zosd_job_step WHERE mandt = sy-mandt AND intent_id = lv_intent.
     RAISE job_close_failed.

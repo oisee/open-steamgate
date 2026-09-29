@@ -2,20 +2,42 @@
 // destination uses the current dialog-step token; no definition is process
 // global or allowed to survive COMMIT, ROLLBACK, WAIT, dump, or step exit.
 import {randomUUID, randomInt} from "node:crypto";
+import {existsSync} from "node:fs";
+import {DatabaseSync} from "node:sqlite";
 import {resolve} from "node:path";
 import {currentStepToken, onStepLuwEnd} from "./osd-dialog-step.mjs";
 import {givenText, fill} from "./osd-destination.mjs";
-import {liveGeneration} from "./osd-batch-runs.mjs";
+import {liveGeneration, operationsPath} from "./osd-batch-runs.mjs";
+import {identity} from "./osd-identity.mjs";
 
 const pending = new WeakMap();
 const keyOf = (name, count) => `${name}\0${count}`;
 export const MAX_JOB_STEPS = 16;
+const MAX_COUNT = 100000000;
+
+// Older outbox rows can have been acknowledged before the identity table was
+// introduced. The operations run row currently has no retention policy and
+// must be kept for these pre-upgrade counts. A future run retention change
+// must first move those keys into the permanent business identity table.
+function legacyCountUsed(root, env, sourceDb, client, name, count) {
+  const path = operationsPath(root, env);
+  if (!existsSync(path)) return false;
+  const reader = new DatabaseSync(path, {readOnly: true});
+  try {
+    const table = reader.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'batch_runs'").get();
+    if (!table || !reader.prepare("PRAGMA table_info(batch_runs)").all().some((row) => row.name === "source_db")) return false;
+    return !!reader.prepare(`SELECT 1 FROM batch_runs WHERE source_db = ? AND source_client = ?
+      AND source_sysid = ? AND job_name = ? AND job_count = ? LIMIT 1`)
+      .get(sourceDb, client, identity(env).sid, name, count);
+  } finally { reader.close(); }
+}
 
 export class JobDestination {
   constructor(root = process.cwd(), env = process.env) {
     this.root = root;
     this.env = env;
     this.generation = liveGeneration(root);
+    this.candidate = () => randomInt(MAX_COUNT);
   }
 
   async call(_name, signature) {
@@ -44,10 +66,27 @@ export class JobDestination {
       case "OPEN": {
         if (!jobname || jobname.length > 32) { answer = {EV_ERROR: "Invalid job name"}; break; }
         let number;
-        do { number = String(randomInt(100000000)).padStart(8, "0"); }
-        while (jobs.has(keyOf(jobname, number)));
+        // A bounded search also handles deterministic collision probes and a
+        // saturated namespace without trapping an ABAP caller indefinitely.
+        for (let i = 0; i < 64; i++) {
+          number = String(this.candidate()).padStart(8, "0");
+          if (!jobs.has(keyOf(jobname, number)) &&
+              !legacyCountUsed(this.root, this.env, resolve(db.path), client, jobname, number)) break;
+          number = undefined;
+        }
+        if (!number) { answer = {EV_ERROR: "Could not allocate a job count"}; break; }
         jobs.set(keyOf(jobname, number), {jobname, count: number, owner, client, steps: []});
         answer = {EV_JOBCOUNT: number};
+        break;
+      }
+      case "CANCEL": {
+        const key = keyOf(jobname, count);
+        const job = jobs.get(key);
+        if (!job || job.owner !== owner || job.client !== client || job.closed || job.steps.length) {
+          answer = {EV_ERROR: "Transient job candidate not found"}; break;
+        }
+        jobs.delete(key);
+        answer = {};
         break;
       }
       case "SUBMIT": {

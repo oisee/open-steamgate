@@ -16,34 +16,37 @@ export function schemaTables(ddl) {
     [...String(statement).matchAll(/\bCREATE\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map((match) => match[1].toUpperCase()));
 }
 
-// Reverse only this release's two DDIC additions to prove the existing file
-// has the exact predecessor schema. Other DDIC changes must use drift handling.
-// The fingerprint function is supplied by the file-DB branch below so browser
-// preview builds do not statically pull the Node-only persistence module in.
-export function migrateOneStepJobFile(native, found, wanted, ddl, fingerprintOf) {
+// Add the permanent job key to the previous business schema without moving
+// useful rows aside. Backfill unacknowledged intents before a new OPEN can
+// allocate their count. The operations ledger covers already acknowledged
+// pre-upgrade intents at candidate selection time.
+export function migrateJobIdentityFile(native, found, wanted, ddl, fingerprintOf) {
+  const identity = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_identity['"] /i.test(statement));
+  const step = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_step['"] /i.test(statement));
   const parent = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_outbox['"] /i.test(statement));
-  const create = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_step['"] /i.test(statement));
-  const oldParent = parent?.replace(/,\s*['"]step_count['"]\s+NCHAR\(2\)/i, "");
-  if (!create || !parent || oldParent === parent || fingerprintOf(ddl) !== wanted) return false;
-  const predecessor = ddl.filter((statement) => statement !== create)
+  if (!identity || !step || !parent || fingerprintOf(ddl) !== wanted) return false;
+  const oldParent = parent.replace(/,\s*['"]step_count['"]\s+NCHAR\(2\)/i, "");
+  const previous = ddl.filter((statement) => statement !== identity);
+  const oneStep = previous.filter((statement) => statement !== step)
     .map((statement) => statement === parent ? oldParent : statement);
-  const oldFingerprint = fingerprintOf(predecessor);
-  if (found !== oldFingerprint) return false;
+  const prior = fingerprintOf(previous) === found ? "multistep" :
+    fingerprintOf(oneStep) === found && oldParent !== parent ? "one-step" : undefined;
+  if (!prior) return false;
   native.exec("BEGIN IMMEDIATE");
   try {
-    // A second startup may have read the old stamp before the first committed.
-    // Recheck under the writer lock and accept its completed migration.
     const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
     if (current === wanted) { native.exec("COMMIT"); return true; }
-    if (current !== oldFingerprint) { native.exec("COMMIT"); return false; }
-    const columns = native.prepare("PRAGMA table_info(zosd_job_outbox)").all().map((row) => row.name);
-    const child = native.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'zosd_job_step'").get();
-    if (!columns.includes("intent_id") || columns.includes("step_count") || child) {
-      native.exec("COMMIT");
-      return false;
+    if (current !== found) { native.exec("COMMIT"); return false; }
+    if (native.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'zosd_job_identity'").get()) {
+      native.exec("COMMIT"); return false;
     }
-    native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN step_count NCHAR(2)");
-    native.exec(create);
+    if (prior === "one-step") {
+      native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN step_count NCHAR(2)");
+      native.exec(step);
+    }
+    native.exec(identity);
+    native.exec(`INSERT INTO zosd_job_identity (mandt, jobname, jobcount, owner, intent_id)
+      SELECT mandt, UPPER(jobname), jobcount, owner, intent_id FROM zosd_job_outbox`);
     native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
       .run(wanted, new Date().toISOString());
     native.exec("COMMIT");
@@ -358,7 +361,7 @@ export async function setup(abap, schemas, insert) {
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     let found = await db.stampedSchema();
-    if (migrateOneStepJobFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
+    if (migrateJobIdentityFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
     if (found === wanted) {
       // the rows are already there, made for this DDIC. The tables the
       // generation writes at start (wwwparams: which SMW0 objects exist and

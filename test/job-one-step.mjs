@@ -9,6 +9,7 @@ import {BatchRuns, liveGeneration, runConvertedBatch, workQueuedBatch} from "../
 import {drainJobOutbox} from "../tools/osd-job-outbox.mjs";
 import {dialogStep, exclusive} from "../tools/osd-dialog-step.mjs";
 import {applyRuntimeHotSwap} from "../tools/osd-hot.mjs";
+import {JobDestination} from "../tools/osd-job-port.mjs";
 
 const root = resolve(".");
 
@@ -45,6 +46,12 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
   const stepRows = () => {
     const reader = new DatabaseSync(dbPath, {readOnly: true});
     try { return reader.prepare("SELECT * FROM zosd_job_step").all(); }
+    finally { reader.close(); }
+  };
+  const identityRows = (name) => {
+    const reader = new DatabaseSync(dbPath, {readOnly: true});
+    try { return reader.prepare("SELECT * FROM zosd_job_identity WHERE mandt = '123' AND jobname = ?")
+      .all(name); }
     finally { reader.close(); }
   };
   const classic = async (work, name) => {
@@ -102,6 +109,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     });
     expect(rows()).to.have.length(0);
     expect(stepRows()).to.have.length(0);
+    expect(identityRows("OSD_ONE_STEP")).to.have.length(0);
     expect((await drainJobOutbox(store)).imported).to.equal(0);
     expect(store.list()).to.have.length(0);
   });
@@ -118,6 +126,79 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     } catch (error) { expect(error.message).to.equal("unhandled dump"); }
     expect(rows()).to.have.length(0);
     expect((await drainJobOutbox(store)).imported).to.equal(0);
+  });
+
+  it("reserves a count on OPEN, retains abandoned commits, and releases rollback", async () => {
+    let rolledBack;
+    await dialogStep(async () => {
+      rolledBack = await open("IDENTITY_ROLLBACK");
+      await client.rollback();
+    });
+    expect(identityRows("IDENTITY_ROLLBACK")).to.have.length(0);
+    let abandoned;
+    await dialogStep(async () => { abandoned = await open("IDENTITY_ABANDONED"); });
+    expect(identityRows("IDENTITY_ABANDONED").map((row) => row.jobcount.trim())).to.deep.equal([abandoned]);
+    expect(identityRows("IDENTITY_ABANDONED")[0].intent_id.trim()).to.equal("");
+    expect(rolledBack).to.match(/^\d{8}$/);
+  });
+
+  it("retries reserved and legacy completed counts, including after port restart", async () => {
+    const old = abap.context.RFCDestinations.JOBS;
+    const legacyCount = "00000017";
+    const reservedCount = "00000018";
+    const freshCount = "00000019";
+    const legacyEnv = {...process.env, OSD_OPERATIONS_DB: join(dir, "identity-legacy-operations.sqlite")};
+    const legacyStore = new BatchRuns(root, legacyEnv);
+    try {
+      legacyStore.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
+        client: "123", sysid: "OSG", jobname: "IDENTITY_LEGACY", jobcount: legacyCount,
+        owner: "DEVELOPER", program: "ZGG_EX_012", generation: liveGeneration(root)});
+    } finally { legacyStore.close(); }
+    const writer = new DatabaseSync(dbPath);
+    try {
+      writer.prepare(`INSERT INTO zosd_job_identity (mandt, jobname, jobcount, owner, intent_id)
+        VALUES ('123', 'IDENTITY_LEGACY', ?, 'DEVELOPER', '')`).run(reservedCount);
+    } finally { writer.close(); }
+    const restarted = new JobDestination(root, legacyEnv);
+    const numbers = [17, 18, 19];
+    restarted.candidate = () => numbers.shift() ?? 19;
+    abap.context.RFCDestinations.JOBS = restarted;
+    try {
+      const count = await dialogStep(() => open("IDENTITY_LEGACY"));
+      expect(count).to.equal(freshCount);
+      expect(identityRows("IDENTITY_LEGACY").map((row) => row.jobcount.trim()).sort())
+        .to.deep.equal([reservedCount, freshCount]);
+    } finally { abap.context.RFCDestinations.JOBS = old; }
+  });
+
+  it("serializes concurrent OPEN calls against the same retained business key", async () => {
+    const jobs = abap.context.RFCDestinations.JOBS;
+    const old = jobs.candidate;
+    const numbers = [41, 41, 42];
+    jobs.candidate = () => numbers.shift() ?? 42;
+    try {
+      const counts = await Promise.all([
+        dialogStep(() => open("IDENTITY_PARALLEL")),
+        dialogStep(() => open("IDENTITY_PARALLEL")),
+      ]);
+      expect(counts).to.deep.equal(["00000041", "00000042"]);
+      expect(identityRows("IDENTITY_PARALLEL")).to.have.length(2);
+    } finally { jobs.candidate = old; }
+  });
+
+  it("uses one canonical name for a lower-case caller and the retained key", async () => {
+    const count = await dialogStep(async () => {
+      const value = await open("identity_mixed");
+      await submit(value, {jobname: "identity_mixed"});
+      await close(value, {jobname: "identity_mixed"});
+      return value;
+    });
+    const row = identityRows("IDENTITY_MIXED").find((item) => item.jobcount.trim() === count);
+    expect(row?.intent_id.trim()).to.match(/^[0-9a-f]{32}$/);
+    expect(rows().find((item) => item.intent_id.trim() === row.intent_id.trim())?.jobname.trim())
+      .to.equal("IDENTITY_MIXED");
+    expect((await drainJobOutbox(store)).imported).to.equal(1);
+    expect((await workQueuedBatch(root, store, async () => ({status: "COMPLETED"}))).kind).to.equal("completed");
   });
 
   it("an explicit commit preserves intent even when the following work dumps", async () => {
@@ -140,9 +221,13 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     const before = store.list().length;
     await schedule();
     expect(rows()).to.have.length(1);
+    const committed = rows()[0];
     expect(store.list()).to.have.length(before);
     expect((await drainJobOutbox(store)).imported).to.equal(1);
     expect(rows()).to.have.length(0);
+    expect(identityRows("OSD_ONE_STEP").find((row) =>
+      row.jobcount.trim() === committed.jobcount.trim())?.intent_id.trim())
+      .to.equal(committed.intent_id.trim());
     expect((await drainJobOutbox(store)).imported).to.equal(0);
     const queued = store.list().find((run) => run.state === "QUEUED");
     expect(queued.jobName).to.equal("OSD_ONE_STEP");
@@ -199,18 +284,39 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     } finally { writer.close(); }
     try {
       await dialogStep(async () => {
-        const count = await open();
-        await submit(count, {report: "ZGG_EX_001"});
-        await submit(count, {report: "ZGG_EX_012"});
-        await classic(() => close(count), "job_close_failed");
+        const count = await open("CLOSE_FAILURE");
+        await submit(count, {jobname: "CLOSE_FAILURE", report: "ZGG_EX_001"});
+        await submit(count, {jobname: "CLOSE_FAILURE", report: "ZGG_EX_012"});
+        await classic(() => close(count, {jobname: "CLOSE_FAILURE"}), "job_close_failed");
         await client.commit();
       });
       expect(rows().filter((row) => row.mandt.trim() === "123")).to.have.length(0);
       expect(stepRows().filter((row) => row.mandt.trim() === "123")).to.have.length(0);
+      const reserved = identityRows("CLOSE_FAILURE");
+      expect(reserved).to.have.length(1);
+      expect(reserved[0].intent_id.trim()).to.equal("");
     } finally {
       const clean = new DatabaseSync(dbPath);
       try { clean.exec("DROP TRIGGER refuse_second_step"); } finally { clean.close(); }
     }
+  });
+
+  it("a failed reservation bind leaves no outbox rows after a handled CLOSE and COMMIT", async () => {
+    let count;
+    const beforeSteps = stepRows().length;
+    await dialogStep(async () => {
+      count = await open("IDENTITY_BIND_FAILURE");
+      await submit(count, {jobname: "IDENTITY_BIND_FAILURE"});
+      await client.execute(`UPDATE zosd_job_identity SET owner = 'OTHER'
+        WHERE mandt = '123' AND jobname = 'IDENTITY_BIND_FAILURE' AND jobcount = '${count}'`);
+      await classic(() => close(count, {jobname: "IDENTITY_BIND_FAILURE"}), "job_close_failed");
+      await client.commit();
+    });
+    const reserved = identityRows("IDENTITY_BIND_FAILURE");
+    expect(reserved).to.have.length(1);
+    expect(reserved[0].intent_id.trim()).to.equal("");
+    expect(rows().some((row) => row.jobname.trim() === "IDENTITY_BIND_FAILURE")).to.equal(false);
+    expect(stepRows()).to.have.length(beforeSteps);
   });
 
   it("a child acknowledgement failure rolls back deletes and retries one imported run", async () => {

@@ -7,7 +7,7 @@ import {DatabaseSync} from "node:sqlite";
 import express from "express";
 import {BatchRuns, runPersistedBatch, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
 import {batchMonitorHandler} from "../tools/osd-batch-monitor.mjs";
-import {migrateOneStepJobFile} from "./setup.mjs";
+import {migrateJobIdentityFile} from "./setup.mjs";
 import {fingerprintOf} from "../tools/osd-persist.mjs";
 
 const root = resolve(".");
@@ -22,38 +22,76 @@ describe("durable one-shot batch runs", function () {
   });
   afterEach(() => rmSync(dir, {recursive: true, force: true}));
 
-  it("migrates the one-step business outbox file additively", () => {
-    const path = join(dir, "business.sqlite");
+  it("adds retained job keys to an existing business DB and backfills pending intents", () => {
+    const path = join(dir, "identity-upgrade.sqlite");
     const db = new DatabaseSync(path);
     try {
-      const oldParent = "CREATE TABLE 'zosd_job_outbox' (mandt TEXT, intent_id TEXT, program TEXT)";
-      const parent = "CREATE TABLE 'zosd_job_outbox' (mandt TEXT, intent_id TEXT, program TEXT, 'step_count' NCHAR(2))";
-      const create = `CREATE TABLE 'zosd_job_step' (mandt TEXT, intent_id TEXT, step_no TEXT, program TEXT,
-        PRIMARY KEY(mandt, intent_id, step_no))`;
-      const other = "CREATE TABLE other_business_table (id TEXT)";
-      const old = [oldParent, other];
-      const ddl = [parent, create, other];
-      const previous = fingerprintOf(old);
-      const wanted = fingerprintOf(ddl);
+      const parent = `CREATE TABLE 'zosd_job_outbox' (mandt TEXT, intent_id TEXT, jobname TEXT,
+        jobcount TEXT, owner TEXT, 'step_count' NCHAR(2))`;
+      const step = "CREATE TABLE 'zosd_job_step' (mandt TEXT, intent_id TEXT, step_no TEXT)";
+      const identity = `CREATE TABLE 'zosd_job_identity' (mandt TEXT, jobname TEXT, jobcount TEXT,
+        owner TEXT, intent_id TEXT, PRIMARY KEY(mandt, jobname, jobcount))`;
+      const old = [parent, step];
+      const wanted = [...old, identity];
       db.exec(`CREATE TABLE osd_schema (fingerprint TEXT, at TEXT);
-        CREATE TABLE zosd_job_outbox (mandt TEXT, intent_id TEXT, program TEXT);
-        INSERT INTO zosd_job_outbox VALUES ('123', 'saved-intent', 'ZGG_EX_012')`);
-      db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(previous);
-      // A different target DDIC still follows the ordinary drift path.
-      const unrelated = [...ddl, "CREATE TABLE unrelated_change (id TEXT)"];
-      expect(migrateOneStepJobFile(db, previous, fingerprintOf(unrelated), unrelated, fingerprintOf)).to.equal(false);
-      expect(db.prepare("SELECT fingerprint FROM osd_schema").get().fingerprint).to.equal(previous);
-      expect(db.prepare("PRAGMA table_info(zosd_job_outbox)").all().some((row) => row.name === "step_count")).to.equal(false);
-      expect(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'zosd_job_step'").get()).to.equal(undefined);
-      expect(migrateOneStepJobFile(db, previous, wanted, ddl, fingerprintOf)).to.equal(true);
-      expect(db.prepare("SELECT program FROM zosd_job_outbox WHERE intent_id = 'saved-intent'").get().program).to.equal("ZGG_EX_012");
-      expect(db.prepare("SELECT fingerprint FROM osd_schema").get().fingerprint).to.equal(wanted);
-      expect(db.prepare("PRAGMA table_info(zosd_job_outbox)").all().some((row) => row.name === "step_count")).to.equal(true);
-      expect(db.prepare("SELECT COUNT(*) AS n FROM zosd_job_step").get().n).to.equal(0);
-      // A second process may still hold the pre-migration stamp it read.
-      const second = new DatabaseSync(path);
-      try { expect(migrateOneStepJobFile(second, previous, wanted, ddl, fingerprintOf)).to.equal(true); }
-      finally { second.close(); }
+        CREATE TABLE zosd_job_outbox (mandt TEXT, intent_id TEXT, jobname TEXT, jobcount TEXT,
+          owner TEXT, step_count NCHAR(2));
+        CREATE TABLE zosd_job_step (mandt TEXT, intent_id TEXT, step_no TEXT);
+        INSERT INTO zosd_job_outbox VALUES ('123', 'old-intent', 'SAVED', '00000004', 'DEVELOPER', '01')`);
+      db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(fingerprintOf(old));
+      expect(migrateJobIdentityFile(db, fingerprintOf(old), fingerprintOf(wanted), wanted, fingerprintOf)).to.equal(true);
+      expect(db.prepare("SELECT * FROM zosd_job_identity").get()).to.include({
+        jobname: "SAVED", jobcount: "00000004", intent_id: "old-intent"});
+      expect(db.prepare("SELECT * FROM zosd_job_outbox").get().intent_id).to.equal("old-intent");
+      expect(migrateJobIdentityFile(db, fingerprintOf(old), fingerprintOf(wanted), wanted, fingerprintOf)).to.equal(true);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM zosd_job_identity").get().n).to.equal(1);
+    } finally { db.close(); }
+  });
+
+  it("refuses an identity upgrade with two old intents sharing one business key", () => {
+    const db = new DatabaseSync(join(dir, "identity-conflict.sqlite"));
+    try {
+      const parent = `CREATE TABLE 'zosd_job_outbox' (mandt TEXT, intent_id TEXT, jobname TEXT,
+        jobcount TEXT, owner TEXT, 'step_count' NCHAR(2))`;
+      const step = "CREATE TABLE 'zosd_job_step' (mandt TEXT, intent_id TEXT, step_no TEXT)";
+      const identity = `CREATE TABLE 'zosd_job_identity' (mandt TEXT, jobname TEXT, jobcount TEXT,
+        owner TEXT, intent_id TEXT, PRIMARY KEY(mandt, jobname, jobcount))`;
+      const old = [parent, step];
+      const wanted = [...old, identity];
+      db.exec(`CREATE TABLE osd_schema (fingerprint TEXT, at TEXT);
+        CREATE TABLE zosd_job_outbox (mandt TEXT, intent_id TEXT, jobname TEXT, jobcount TEXT,
+          owner TEXT, step_count NCHAR(2));
+        CREATE TABLE zosd_job_step (mandt TEXT, intent_id TEXT, step_no TEXT);
+        INSERT INTO zosd_job_outbox VALUES ('123', 'one', 'SAVED', '00000004', 'DEVELOPER', '01');
+        INSERT INTO zosd_job_outbox VALUES ('123', 'two', 'saved', '00000004', 'DEVELOPER', '01')`);
+      db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(fingerprintOf(old));
+      expect(() => migrateJobIdentityFile(db, fingerprintOf(old), fingerprintOf(wanted), wanted, fingerprintOf))
+        .to.throw(/UNIQUE constraint failed/);
+      expect(db.prepare("SELECT fingerprint FROM osd_schema").get().fingerprint).to.equal(fingerprintOf(old));
+      expect(db.prepare("SELECT COUNT(*) AS n FROM zosd_job_outbox").get().n).to.equal(2);
+      expect(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'zosd_job_identity'").get()).to.equal(undefined);
+    } finally { db.close(); }
+  });
+
+  it("upgrades the earlier one-step schema directly while retaining its intent", () => {
+    const db = new DatabaseSync(join(dir, "identity-one-step.sqlite"));
+    try {
+      const oldParent = `CREATE TABLE 'zosd_job_outbox' (mandt TEXT, intent_id TEXT, jobname TEXT,
+        jobcount TEXT, owner TEXT)`;
+      const parent = oldParent.replace("owner TEXT)", "owner TEXT, 'step_count' NCHAR(2))");
+      const step = "CREATE TABLE 'zosd_job_step' (mandt TEXT, intent_id TEXT, step_no TEXT)";
+      const identity = `CREATE TABLE 'zosd_job_identity' (mandt TEXT, jobname TEXT, jobcount TEXT,
+        owner TEXT, intent_id TEXT, PRIMARY KEY(mandt, jobname, jobcount))`;
+      const wanted = [parent, step, identity];
+      db.exec(`CREATE TABLE osd_schema (fingerprint TEXT, at TEXT);
+        CREATE TABLE zosd_job_outbox (mandt TEXT, intent_id TEXT, jobname TEXT, jobcount TEXT, owner TEXT);
+        INSERT INTO zosd_job_outbox VALUES ('123', 'old', 'SAVED', '00000005', 'DEVELOPER')`);
+      db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(fingerprintOf([oldParent]));
+      expect(migrateJobIdentityFile(db, fingerprintOf([oldParent]), fingerprintOf(wanted), wanted, fingerprintOf)).to.equal(true);
+      expect(db.prepare("SELECT intent_id FROM zosd_job_identity").get().intent_id).to.equal("old");
+      expect(db.prepare("PRAGMA table_info(zosd_job_outbox)").all().some((column) => column.name === "step_count"))
+        .to.equal(true);
+      expect(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'zosd_job_step'").get()).to.exist;
     } finally { db.close(); }
   });
 
