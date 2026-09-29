@@ -146,19 +146,39 @@ known-but-unsupported names.
 
 ## Narrow synchronous SUBMIT
 
-`tools/osd-narrow-submit.mjs` lowers `SUBMIT <static PROG> [WITH
-<field> = <scalar> ...] AND RETURN` and `SUBMIT <static PROG> VIA JOB
-<jobname-ident> NUMBER <jobcount-ident> [WITH <field> = <scalar> ...] AND RETURN`
-in OSD's own ABAP sources before the
-upstream transpiler sees it. Each named scalar becomes a selection value for
-`ZCL_OSD_BATCH_REPORT=>SUBMIT`; a fresh report object is created. The target
-must be in the converter's registry and complete normally. A missing,
-unsupported, or incomplete target raises `ZCX_OSD_SUBMIT` with its status and
-detail. The `VIA JOB` form appends a step to the current open job and raises
-`ZCX_OSD_SUBMIT` for an unsupported report or rejected step input. Dynamic
-program names, ranges, variants, spool options,
-`EXPORTING LIST TO MEMORY`, and `SUBMIT` without `AND RETURN` fail at build
-time with the source file and line. Dependencies are not rewritten.
+`tools/osd-narrow-submit.mjs` lowers `SUBMIT <static PROG>`, followed in any
+order by an optional `VIA JOB <job> NUMBER <count>` and any number of `WITH
+<sel> = <value>` (or `EQ`) and `WITH <sel> IN <range>`, and then `AND RETURN`.
+It does this in OSD's own ABAP sources before the upstream transpiler sees
+them.
+- **Program:** static, and may be namespaced (`/NS/REPORT`, up to 40
+  characters).
+- **Operands:** a job name, a count, a value and a range may be any data
+  object: `ls-comp`, `lo->attr` and `zcl=>static` included, or a literal.
+- **Selections:**
+  - each scalar becomes a selection value;
+  - each `IN` range becomes the selection's ranges through
+    `ZCL_OSD_SUBMIT_RANGES=>OF`, which reads SIGN/OPTION/LOW/HIGH off any range
+    table. It checks the line type first and raises `ZCX_OSD_SUBMIT` for a table
+    without those columns, even an empty one, rather than return an empty range
+    that would admit everything.
+- **Execution:** the synchronous form calls `ZCL_OSD_BATCH_REPORT=>SUBMIT`,
+  and a fresh report object is created. The target must be in the converter's
+  registry and complete normally. A missing, unsupported or incomplete target
+  raises `ZCX_OSD_SUBMIT` with its status and detail. The `VIA JOB` form
+  appends a step to the current open job and raises `ZCX_OSD_SUBMIT` for an
+  unsupported report or rejected step input.
+- **Fails at build time**, with the source file and line:
+  - `WITH ... IN` together with `VIA JOB`: a job step's input is stored as
+    name/value pairs, so the range would be lost on the way;
+  - dynamic program names, variants, spool options, `EXPORTING LIST TO
+    MEMORY`, `SUBMIT` without `AND RETURN`, and a selection or `VIA JOB`
+    given twice.
+
+Dependencies are not rewritten. A report that tests `x IN range` in ABAP is
+limited by the runtime, which evaluates only I EQ, E EQ and I CP rows
+(ANORMALIES, runtime-in-options); `SELECT ... WHERE f IN range` is not
+affected.
 
 The synchronous call passes the caller's `sy-batch` to the report host. The
 converted report reads it from its per-run context, as it does `sy-repid`;
@@ -167,8 +187,8 @@ does not globally change `sy-batch` in the runtime or create a background
 process. The one-shot report's typed result is available through `RUN`, but
 this first `SUBMIT` slice does not yet forward its list to a dialog screen,
 memory list, or spool. The lowering preserves source line counts so later
-statements keep their source-map rows; it refuses comments within the
-statement rather than removing them.
+statements keep their source-map rows. A comment inside the statement stays
+on its own line; one on the statement's first line follows the lowered call.
 
 ## Saved one-shot runs
 
