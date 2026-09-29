@@ -415,7 +415,7 @@ function componentInterfaces(reg, intf, seen = new Set()) {
 // NATIVE below) carry the deserialize path ZCL_OSD_STATUS=>REFRESH takes
 // parity-wave2: CL_ABAP_ZIP (LCL_STREAM: the zip's bytes and its CRC-32),
 // the SEGW RepoSet zip
-const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM", "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CL_ABAP_ZIP"]);
+const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM", "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CL_ABAP_ZIP", "CL_ABAP_UNIT_ASSERT"]);
 // the definitions of the local classes compiled, by their compiled name
 const LOCAL_DEFS = new Map();
 // a class's definition: a global class of the registry, or a local class of
