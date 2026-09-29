@@ -23,6 +23,7 @@ FUNCTION job_close.
   DATA ls_intent TYPE zosd_job_outbox.
   DATA ls_step TYPE zosd_job_step.
   CLEAR job_was_released.
+  ret = 0.
   IF jobname IS INITIAL.
     RAISE jobname_missing.
   ENDIF.

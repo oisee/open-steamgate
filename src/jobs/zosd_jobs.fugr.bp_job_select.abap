@@ -5,6 +5,16 @@ FUNCTION bp_job_select.
   DATA lv_phase TYPE string.
   DATA lv_status TYPE c LENGTH 1.
   DATA lv_selected TYPE c LENGTH 1.
+  DATA ls_name_range TYPE njrange.
+  DATA ls_user_range TYPE unrange.
+  DATA lv_name_include TYPE abap_bool.
+  DATA lv_name_match TYPE abap_bool.
+  DATA lv_name_exclude TYPE abap_bool.
+  DATA lv_user_include TYPE abap_bool.
+  DATA lv_user_match TYPE abap_bool.
+  DATA lv_user_exclude TYPE abap_bool.
+  DATA lv_row_match TYPE abap_bool.
+  ret = 0.
   CLEAR: jobsel_param_out, local_client, nr_of_jobs_found.
   IF jobselect_dialog <> 'N'.
     RAISE invalid_dialog_type.
@@ -25,6 +35,88 @@ FUNCTION bp_job_select.
     IF jobsel_param_in-username IS NOT INITIAL
         AND ls_identity-owner <> jobsel_param_in-username.
       CONTINUE.
+    ENDIF.
+    IF jobname_ext_sel IS SUPPLIED AND jobname_ext_sel IS NOT INITIAL.
+      CLEAR: lv_name_include, lv_name_match, lv_name_exclude.
+      LOOP AT jobname_ext_sel INTO ls_name_range.
+        IF ( ls_name_range-sign <> 'I' AND ls_name_range-sign <> 'E' )
+            OR ( ls_name_range-option <> 'EQ' AND ls_name_range-option <> 'CP'
+              AND ls_name_range-option <> 'BT' ) OR ls_name_range-low IS INITIAL
+            OR ( ls_name_range-option = 'BT' AND ls_name_range-high IS INITIAL ).
+          RAISE jobname_missing.
+        ENDIF.
+        IF ls_name_range-sign = 'I'.
+          lv_name_include = abap_true.
+        ENDIF.
+        lv_row_match = abap_false.
+        CASE ls_name_range-option.
+          WHEN 'EQ'.
+            IF ls_identity-jobname = ls_name_range-low.
+              lv_row_match = abap_true.
+            ENDIF.
+          WHEN 'CP'.
+            IF ls_identity-jobname CP ls_name_range-low.
+              lv_row_match = abap_true.
+            ENDIF.
+          WHEN 'BT'.
+            IF ls_identity-jobname >= ls_name_range-low
+                AND ls_identity-jobname <= ls_name_range-high.
+              lv_row_match = abap_true.
+            ENDIF.
+        ENDCASE.
+        IF lv_row_match = abap_true.
+          IF ls_name_range-sign = 'E'.
+            lv_name_exclude = abap_true.
+          ELSE.
+            lv_name_match = abap_true.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+      IF lv_name_exclude = abap_true OR
+          ( lv_name_include = abap_true AND lv_name_match = abap_false ).
+        CONTINUE.
+      ENDIF.
+    ENDIF.
+    IF username_ext_sel IS SUPPLIED AND username_ext_sel IS NOT INITIAL.
+      CLEAR: lv_user_include, lv_user_match, lv_user_exclude.
+      LOOP AT username_ext_sel INTO ls_user_range.
+        IF ( ls_user_range-sign <> 'I' AND ls_user_range-sign <> 'E' )
+            OR ( ls_user_range-option <> 'EQ' AND ls_user_range-option <> 'CP'
+              AND ls_user_range-option <> 'BT' ) OR ls_user_range-low IS INITIAL
+            OR ( ls_user_range-option = 'BT' AND ls_user_range-high IS INITIAL ).
+          RAISE username_missing.
+        ENDIF.
+        IF ls_user_range-sign = 'I'.
+          lv_user_include = abap_true.
+        ENDIF.
+        lv_row_match = abap_false.
+        CASE ls_user_range-option.
+          WHEN 'EQ'.
+            IF ls_identity-owner = ls_user_range-low.
+              lv_row_match = abap_true.
+            ENDIF.
+          WHEN 'CP'.
+            IF ls_identity-owner CP ls_user_range-low.
+              lv_row_match = abap_true.
+            ENDIF.
+          WHEN 'BT'.
+            IF ls_identity-owner >= ls_user_range-low
+                AND ls_identity-owner <= ls_user_range-high.
+              lv_row_match = abap_true.
+            ENDIF.
+        ENDCASE.
+        IF lv_row_match = abap_true.
+          IF ls_user_range-sign = 'E'.
+            lv_user_exclude = abap_true.
+          ELSE.
+            lv_user_match = abap_true.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+      IF lv_user_exclude = abap_true OR
+          ( lv_user_include = abap_true AND lv_user_match = abap_false ).
+        CONTINUE.
+      ENDIF.
     ENDIF.
     CALL FUNCTION 'ZOSD_JOB_STATUS'
       EXPORTING iv_jobname = ls_identity-jobname iv_jobcount = ls_identity-jobcount

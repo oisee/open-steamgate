@@ -145,7 +145,7 @@ CLASS ltcl_batch_report IMPLEMENTATION.
     TRY.
         zcl_osd_batch_report=>submit_via_job(
           iv_program = 'Z_NO_SUCH_REPORT'
-          iv_jobname = 'TEST' iv_jobcount = '00000001' ).
+          iv_jobname = 'TEST' iv_jobcount = '00000001' iv_authcknam = sy-uname ).
         cl_abap_unit_assert=>fail( 'unknown job report must be rejected' ).
       CATCH zcx_osd_submit INTO DATA(lx_submit).
         FIND 'program_missing' IN lx_submit->detail.

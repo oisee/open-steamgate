@@ -74,7 +74,12 @@ CLASS ltcl_job_doctor IMPLEMENTATION.
     CALL FUNCTION 'JOB_SUBMIT'
       EXPORTING jobname = lv_name jobcount = lv_count authcknam = sy-uname
                 extpgm_name = 'external'
-      EXCEPTIONS job_submit_failed = 1 OTHERS = 2.
+      EXCEPTIONS bad_xpgflags = 1 OTHERS = 2.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
+    CALL FUNCTION 'JOB_SUBMIT'
+      EXPORTING jobname = lv_name jobcount = lv_count authcknam = sy-uname
+                report = 'ZGG_EX_012' priparams = 'printer'
+      EXCEPTIONS bad_priparams = 1 OTHERS = 2.
     cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
     CALL FUNCTION 'JOB_SUBMIT'
       EXPORTING jobname = lv_name jobcount = lv_count authcknam = sy-uname

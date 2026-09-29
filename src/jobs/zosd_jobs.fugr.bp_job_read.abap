@@ -9,6 +9,7 @@ FUNCTION bp_job_read.
   DATA lv_index TYPE i.
   DATA lv_index_text TYPE string.
   DATA ls_step TYPE tbtcstep.
+  ret = 0.
   CLEAR: job_read_jobhead, joblog_attributes, epp_attributes,
          email_notification.
   IF job_read_opcode <> lc_header AND job_read_opcode <> lc_with_steps.
@@ -43,11 +44,18 @@ FUNCTION bp_job_read.
     WHEN OTHERS.
       job_read_jobhead-status = 'P'.
   ENDCASE.
+  IF job_step_number IS NOT INITIAL AND job_step_number > lv_count.
+    RAISE job_doesnt_have_steps.
+  ENDIF.
   IF job_read_opcode = lc_header.
     RETURN.
   ENDIF.
   lv_index = 1.
   WHILE lv_index <= lv_count.
+    IF job_step_number IS NOT INITIAL AND lv_index <> job_step_number.
+      lv_index = lv_index + 1.
+      CONTINUE.
+    ENDIF.
     lv_index_text = lv_index.
     CALL FUNCTION 'ZOSD_JOB_READ'
       EXPORTING iv_jobname = job_read_jobname iv_jobcount = job_read_jobcount

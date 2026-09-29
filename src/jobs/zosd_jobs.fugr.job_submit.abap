@@ -4,21 +4,29 @@ FUNCTION job_submit.
   DATA lv_error TYPE string.
   DATA lv_program TYPE string.
   DATA lv_step_count TYPE string.
+  DATA lv_auth_user TYPE string.
+  lv_auth_user = sy-uname.
   IF jobname IS INITIAL.
     RAISE jobname_missing.
   ENDIF.
   IF report IS NOT INITIAL AND ( commandname IS NOT INITIAL OR extpgm_name IS NOT INITIAL ).
     RAISE prog_abap_and_extpg_set.
   ENDIF.
-  IF report IS INITIAL OR commandname IS NOT INITIAL OR extpgm_name IS NOT INITIAL
-      OR variant IS NOT INITIAL OR ( authcknam IS NOT INITIAL AND authcknam <> sy-uname )
-      OR arcparams IS NOT INITIAL OR operatingsystem IS NOT INITIAL
-      OR extpgm_param IS NOT INITIAL OR extpgm_set_trace_on IS NOT INITIAL
-      OR extpgm_system IS NOT INITIAL OR extpgm_rfcdest IS NOT INITIAL
+  IF priparams IS NOT INITIAL.
+    RAISE bad_priparams.
+  ENDIF.
+  IF commandname IS NOT INITIAL OR extpgm_name IS NOT INITIAL
+      OR operatingsystem IS NOT INITIAL OR extpgm_param IS NOT INITIAL
+      OR extpgm_set_trace_on IS NOT INITIAL OR extpgm_system IS NOT INITIAL
+      OR extpgm_rfcdest IS NOT INITIAL
       OR ( extpgm_stderr_in_joblog IS NOT INITIAL AND extpgm_stderr_in_joblog <> 'X' )
       OR ( extpgm_stdout_in_joblog IS NOT INITIAL AND extpgm_stdout_in_joblog <> 'X' )
-      OR ( extpgm_wait_for_termination IS NOT INITIAL AND extpgm_wait_for_termination <> 'X' )
-      OR priparams IS NOT INITIAL OR ( language IS NOT INITIAL AND language <> sy-langu ).
+      OR ( extpgm_wait_for_termination IS NOT INITIAL AND extpgm_wait_for_termination <> 'X' ).
+    RAISE bad_xpgflags.
+  ENDIF.
+  IF report IS INITIAL
+      OR variant IS NOT INITIAL OR authcknam <> lv_auth_user
+      OR arcparams IS NOT INITIAL OR ( language IS NOT INITIAL AND language <> sy-langu ).
     RAISE job_submit_failed.
   ENDIF.
   lv_program = report.

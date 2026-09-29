@@ -16,8 +16,8 @@ nonempty values require further measurement before they can be supported.
 
 `SHOW_JOBSTATE` returns one `X` flag from the bridge snapshot. `BP_JOB_READ`
 returns the header and, for the provisional with-steps opcode, a bounded step
-list. `BP_JOB_SELECT` selects the current owner's visible retained jobs with
-`JOBSELECT_DIALOG = 'N'`. It accepts exact job name and user filters plus preliminary, scheduled, ready, running, finished, and aborted status flags, and raises `NO_JOBS_FOUND` for an empty result.
+list. A noninitial `JOB_STEP_NUMBER` returns only that step; a number beyond the step count raises `JOB_DOESNT_HAVE_STEPS` (assumed, to be measured). `BP_JOB_SELECT` selects the current owner's visible retained jobs with
+`JOBSELECT_DIALOG = 'N'`. It accepts exact job name and user filters, `NJRANGE` and `UNRANGE` selection tables (`EQ`, `CP`, `BT`, include and exclude), plus preliminary, scheduled, ready, running, finished, and aborted status flags, and raises `NO_JOBS_FOUND` for an empty result.
 
 The local one-character header status mapping is **assumed, to be measured**:
 
@@ -39,7 +39,6 @@ shapes are open measurements.
 `TAIL_EVENT_ID` and `TAIL_EVENT_PARAM` on `JOB_CLOSE` are private extensions.
 A program that passes them will not activate against the real SAP FM.
 
-For compatibility with earlier local jobs, this facade still permits omitted
-`AUTHCKNAM` on `JOB_SUBMIT`; the measured SAP signature requires it.
+`AUTHCKNAM` is mandatory on `JOB_SUBMIT`, as measured. Callers pass `sy-uname`; another user is rejected. `PRIPARAMS` raises `BAD_PRIPARAMS`; external-program flags raise `BAD_XPGFLAGS`, and a report combined with an external program raises `PROG_ABAP_AND_EXTPG_SET`.
 
 Closing a valid job with no submitted report step raises `JOB_NOSTEPS`.

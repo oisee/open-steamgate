@@ -28,7 +28,8 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
   const open = async (name = "OSD_ONE_STEP") =>
     (await invoke("JOB_OPEN", {jobname: name}, ["jobcount"])).jobcount;
   const submit = (count, options = {}) => invoke("JOB_SUBMIT", {
-    jobname: "OSD_ONE_STEP", jobcount: count, report: "ZGG_EX_012", ...options,
+    jobname: "OSD_ONE_STEP", jobcount: count, report: "ZGG_EX_012",
+    authcknam: abap.builtin.sy.get().uname.get().trim(), ...options,
   });
   const close = (count, options = {}) => invoke("JOB_CLOSE", {
     jobname: "OSD_ONE_STEP", jobcount: count, strtimmed: "X", ...options,
@@ -67,7 +68,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     }
     try {
       await abap.Classes.ZCL_OSD_BATCH_REPORT.submit_via_job({
-        iv_program: box("ZGG_EX_012"), iv_jobname: box(name), iv_jobcount: box(count), it_input: values,
+        iv_program: box("ZGG_EX_012"), iv_jobname: box(name), iv_jobcount: box(count), iv_authcknam: box(abap.builtin.sy.get().uname.get().trim()), it_input: values,
       });
     } catch (error) { throw new Error(error.detail?.get?.() || error.message, {cause: error}); }
   };
@@ -82,7 +83,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     }
     try {
       await abap.Classes.ZCL_OSD_BATCH_REPORT.submit_via_job({
-        iv_program: box(program), iv_jobname: box(name), iv_jobcount: box(count), it_input: values,
+        iv_program: box(program), iv_jobname: box(name), iv_jobcount: box(count), iv_authcknam: box(abap.builtin.sy.get().uname.get().trim()), it_input: values,
       });
     } catch (error) { throw new Error(error.detail?.get?.() || error.message, {cause: error}); }
   };
@@ -1630,7 +1631,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     const count = await dialogStep(async () => {
       const value = await open(name);
       expect((await invoke("JOB_SUBMIT", {jobname: name, jobcount: value,
-        report: "ZGG_EX_012"}, ["step_number"])).step_number).to.equal("1");
+        report: "ZGG_EX_012", authcknam: abap.builtin.sy.get().uname.get().trim()}, ["step_number"])).step_number).to.equal("1");
       await close(value, {jobname: name});
       return value;
     });
@@ -1645,11 +1646,13 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       jobname: new abap.types.Character(32), jobcount: new abap.types.Character(8),
       status: new abap.types.Character(1), sdluname: new abap.types.Character(12),
     });
+    const ret = new abap.types.Integer().set(77);
     await dialogStep(() => abap.FunctionModules.BP_JOB_READ({
       exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
         job_read_opcode: new abap.types.Integer().set(1)},
-      importing: {job_read_jobhead: header},
+      importing: {job_read_jobhead: header}, changing: {ret},
     }));
+    expect(ret.get()).to.equal(0);
     expect(header.get().jobname.get().trim()).to.equal(name);
     expect(header.get().status.get()).to.equal("F");
     const table = (row) => new abap.types.Table(row, {withHeader: false, keyType: "DEFAULT",
@@ -1677,11 +1680,70 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       importing: {nr_of_jobs_found: found}, tables: {jobselect_joblist: jobs},
     }));
     expect(found.get()).to.equal(1);
+    const nameRange = table(new abap.types.Structure({
+      sign: new abap.types.Character(1), option: new abap.types.Character(2),
+      low: new abap.types.Character(32), high: new abap.types.Character(32),
+    }));
+    const userRange = table(new abap.types.Structure({
+      sign: new abap.types.Character(1), option: new abap.types.Character(2),
+      low: new abap.types.Character(12), high: new abap.types.Character(12),
+    }));
+    const nameRow = nameRange.getRowType().clone();
+    nameRow.get().sign.set("I");
+    nameRow.get().option.set("CP");
+    nameRow.get().low.set("STANDARD_*");
+    nameRange.append(nameRow);
+    const userRow = userRange.getRowType().clone();
+    userRow.get().sign.set("I");
+    userRow.get().option.set("EQ");
+    userRow.get().low.set(abap.builtin.sy.get().uname.get().trim());
+    userRange.append(userRow);
+    jobs.clear();
+    await dialogStep(() => abap.FunctionModules.BP_JOB_SELECT({
+      exporting: {jobselect_dialog: box("N"), jobsel_param_in: selector},
+      importing: {nr_of_jobs_found: found},
+      tables: {jobselect_joblist: jobs, jobname_ext_sel: nameRange, username_ext_sel: userRange},
+    }));
+    expect(found.get()).to.equal(1);
     expect(jobs.array()[0].get().status.get()).to.equal("F");
+    nameRow.get().option.set("BT");
+    nameRow.get().low.set("STANDARD_A");
+    nameRow.get().high.set("STANDARD_Z");
+    nameRange.clear();
+    nameRange.append(nameRow);
+    userRow.get().option.set("CP");
+    userRow.get().low.set("DEV*");
+    userRange.clear();
+    userRange.append(userRow);
+    jobs.clear();
+    await dialogStep(() => abap.FunctionModules.BP_JOB_SELECT({
+      exporting: {jobselect_dialog: box("N"), jobsel_param_in: selector},
+      importing: {nr_of_jobs_found: found},
+      tables: {jobselect_joblist: jobs, jobname_ext_sel: nameRange, username_ext_sel: userRange},
+    }));
+    expect(found.get()).to.equal(1);
+    steps.clear();
+    await dialogStep(() => abap.FunctionModules.BP_JOB_READ({
+      exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
+        job_read_opcode: new abap.types.Integer().set(2), job_step_number: new abap.types.Integer().set(1)},
+      tables: {job_read_steplist: steps},
+    }));
+    expect(steps.array()).to.have.length(1);
+    await classic(() => dialogStep(() => abap.FunctionModules.BP_JOB_READ({
+      exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
+        job_read_opcode: new abap.types.Integer().set(2), job_step_number: new abap.types.Integer().set(2)},
+      tables: {job_read_steplist: steps},
+    })), "job_doesnt_have_steps");
     await dialogStep(async () => {
       const empty = await open("STANDARD_NO_STEPS");
       await classic(() => close(empty, {jobname: "STANDARD_NO_STEPS"}), "job_nosteps");
     });
   });
+
+  it("accepts DDIC typed customer JOB_* and SHOW_JOBSTATE calls", async () => {
+    const result = await dialogStep(() => abap.Classes.ZCL_OSD_JOB_TYPED_PROBE.run());
+    expect(result.get().trim()).to.match(/^\d{8}$/);
+  });
+
 
 });

@@ -1801,8 +1801,18 @@ for `zosd_status_app`, which has been deployed for a day.
 - Discovery date: `2026-09-29`
 - Affected adapter: `ZOSD_JOBS` implementations of `JOB_OPEN`, `JOB_SUBMIT`, `JOB_CLOSE`, `BP_EVENT_RAISE`, `BP_JOB_READ`, and `BP_JOB_SELECT`
 - Expected SAP behaviour: scheduled and periodic starts, job class/group, external programs, targets, and selection options follow their documented FM semantics.
-- Actual local behaviour: nonempty unsupported options raise the nearest declared failure exception; exact local-owner selection is supported. `BP_JOB_READ` opcodes 1/2 and one-letter statuses are provisional.
+- Actual local behaviour: nonempty unsupported options raise declared exceptions; local-owner selection supports exact fields and `EQ`/`CP`/`BT` include/exclude ranges. `BP_JOB_READ` opcodes 1/2 and one-letter statuses are provisional.
 - Impact: callers depending on those options activate but receive a declared exception; the provisional read opcodes require measurement before they are portable.
 - Smallest safe workaround: use immediate, predecessor, or named-event ABAP report jobs and the private `ZOSD_JOB_READ` bridge for exact local reads. The `TAIL_EVENT_ID`/`TAIL_EVENT_PARAM` extension on `JOB_CLOSE` does not exist on SAP and code using it will not activate there.
 - Measurement: see `.local/REPORT-jobs-j1.md` (private) and `docs/job-standard-fms.md` (public facts and assumptions).
 - Regression-test location: `src/jobs/zcl_osd_job_doctor.clas.testclasses.abap`, `test/job-one-step.mjs`.
+
+### ANOMALY-2026-09-29-job-ret-and-step-number — standard job facade output details need measurement
+
+- Status: `open` (local assumptions implemented)
+- Discovery date: `2026-09-29`
+- Affected adapter: `JOB_OPEN`, `JOB_CLOSE`, `BP_JOB_READ`, `BP_JOB_SELECT`
+- Expected SAP behaviour: the four FMs expose optional changing `RET` of type `I`; the precise value semantics and `BP_JOB_READ` step-number error behavior are unmeasured.
+- Actual local behaviour: successful calls set `RET` to zero. A noninitial `JOB_STEP_NUMBER` returns only that step, and an index beyond the step count raises `JOB_DOESNT_HAVE_STEPS`.
+- Impact: callers relying on other `RET` meanings or edge cases need a sandbox measurement.
+- Regression-test location: `test/job-one-step.mjs`.

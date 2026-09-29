@@ -8,6 +8,7 @@ FUNCTION job_open.
   DATA lv_insert_subrc TYPE i.
   DATA ls_identity TYPE zosd_job_identity.
   DATA ls_existing TYPE zosd_job_identity.
+  ret = 0.
   IF jobname IS INITIAL.
     RAISE jobname_missing.
   ENDIF.
