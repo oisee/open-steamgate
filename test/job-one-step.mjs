@@ -817,7 +817,13 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       process.env.OSD_OPERATIONS_DB = scopedEnv.OSD_OPERATIONS_DB;
       try { expect((await dialogStep(() => status("PRED_CHILD", childCount))).ev_state).to.equal("WAITING"); }
       finally { process.env.OSD_OPERATIONS_DB = previousStatusDb; }
-      expect((await drainJobOutbox(scoped)).imported).to.equal(1);
+      const pendingPredecessorIntents = () => rows().filter((row) =>
+        ["PRED_PARENT", "PRED_CHILD"].includes(row.jobname.trim()));
+      const pendingBeforeRetry = pendingPredecessorIntents().length;
+      expect((await drainJobOutbox(scoped)).imported).to.equal(pendingBeforeRetry);
+      expect(pendingPredecessorIntents()).to.have.length(0);
+      expect(scoped.list().filter((run) => ["PRED_PARENT", "PRED_CHILD"].includes(run.jobName)))
+        .to.have.length(2);
       const waiting = scoped.list().find((run) => run.jobName === "PRED_CHILD");
       expect(waiting.state).to.equal("WAITING");
       expect(waiting.steps[0].state).to.equal("PENDING");
