@@ -84,6 +84,29 @@ export function reportSkips(optional = OPTIONAL, say = console.log) {
   return absent;
 }
 
+export function assignShards(files, seconds, count) {
+  if (!Number.isInteger(count) || count < 1) throw new Error("shard count must be positive");
+  const known = Object.values(seconds).filter((n) => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
+  const median = known.length ? (known[Math.floor((known.length - 1) / 2)] + known[Math.floor(known.length / 2)]) / 2 : 1;
+  const shards = Array.from({length: count}, () => ({files: [], seconds: 0}));
+  for (const file of [...files].sort((a, b) => (seconds[b] ?? median) - (seconds[a] ?? median) || a.localeCompare(b))) {
+    const target = shards.reduce((best, shard) => shard.seconds < best.seconds ? shard : best);
+    target.files.push(file);
+    target.seconds += seconds[file] ?? median;
+  }
+  const position = new Map(files.map((file, index) => [file, index]));
+  for (const shard of shards) shard.files.sort((a, b) => position.get(a) - position.get(b));
+  return shards;
+}
+
+function parseShard(spec) {
+  const match = /^(\d+)\/(\d+)$/.exec(spec ?? "");
+  if (!match || +match[1] < 1 || +match[2] < 1 || +match[1] > +match[2]) {
+    throw new Error(`invalid shard ${spec}; expected i/N with 1 <= i <= N`);
+  }
+  return {index: +match[1] - 1, count: +match[2]};
+}
+
 const invoked = process.argv[1] !== undefined && process.argv[1].endsWith("osd-suites.mjs");
 if (invoked === false) {
   // imported for its reporter; the runner below is the command's job
@@ -111,16 +134,39 @@ if (drift.unlisted.length > 0 || drift.absent.length > 0) {
 
 const argv = process.argv.slice(2);
 const report = argv.includes("--report-skips");
-const extra = argv.filter((a) => a !== "--report-skips");
-const absent = report ? reportSkips() : [];
-
-const result = spawnSync("npx", ["mocha", ...files, ...extra], {stdio: "inherit"});
-
-// again at the end, because the thing that decides what a number means must
-// not be the thing that scrolled off the top
-if (report && absent.length > 0) {
-  console.log(`\nosd-suites: the above ran WITHOUT ${absent.map(([p]) => p).join(", ")}.`);
-  console.log("            A pass here is narrower than a pass on a tree that has them.");
+const takeOption = (name) => {
+  const at = argv.indexOf(name);
+  if (at < 0) return undefined;
+  const value = argv[at + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${name} needs a value`);
+  argv.splice(at, 2);
+  return value;
+};
+try {
+  const shardSpec = takeOption("--shard");
+  const listSpec = takeOption("--list-shard");
+  const timingsFile = takeOption("--timings");
+  if (shardSpec && listSpec) throw new Error("choose --shard or --list-shard");
+  const shard = parseShard(shardSpec ?? listSpec ?? "1/1");
+  const weights = JSON.parse(readFileSync(fileURLToPath(new URL("../test/suite-timings.json", import.meta.url)), "utf8")).seconds;
+  const selected = assignShards(files, weights, shard.count)[shard.index].files;
+  if (listSpec) {
+    for (const file of selected) console.log(file);
+    process.exit(0);
+  }
+  if (selected.length === 0) throw new Error(`shard ${shard.index + 1}/${shard.count} has no suites`);
+  const extra = argv.filter((a) => a !== "--report-skips");
+  const absent = report ? reportSkips() : [];
+  const reporter = timingsFile ? ["--reporter", fileURLToPath(new URL("./osd-suite-timing-reporter.cjs", import.meta.url))] : [];
+  const env = timingsFile ? {...process.env, OSD_SUITE_TIMINGS_FILE: timingsFile} : process.env;
+  const result = spawnSync("npx", ["mocha", ...selected, ...reporter, ...extra], {stdio: "inherit", env});
+  if (report && absent.length > 0) {
+    console.log(`\nosd-suites: the above ran WITHOUT ${absent.map(([p]) => p).join(", ")}.`);
+    console.log("            A pass here is narrower than a pass on a tree that has them.");
+  }
+  process.exit(result.status === null ? 1 : result.status);
+} catch (error) {
+  console.error(`osd-suites: ${error.message}`);
+  process.exit(2);
 }
-process.exit(result.status === null ? 1 : result.status);
 }

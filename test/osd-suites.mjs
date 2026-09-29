@@ -3,7 +3,7 @@
 // does -- and a reporter checked only where everything is present reports on
 // the specimen made for it.
 import {expect} from "chai";
-import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites} from "../tools/osd-suites.mjs";
+import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards} from "../tools/osd-suites.mjs";
 import {readFileSync} from "node:fs";
 
 describe("tools/osd-suites: a run says what it could not see", () => {
@@ -66,5 +66,27 @@ describe("the suite list against the tree", () => {
     expect(listDrift(["test/a.mjs"], []).unlisted).to.deep.equal(["test/a.mjs"]);
     expect(listDrift([], ["test/gone.mjs"]).absent).to.deep.equal(["test/gone.mjs"]);
     expect(listDrift(["test/a.mjs"], ["./test/a.mjs"]), "a leading ./ is the same file").to.deep.equal({unlisted: [], absent: []});
+  });
+});
+
+
+describe("suite sharding", () => {
+  it("partitions the real list into four disjoint shards", () => {
+    const files = JSON.parse(readFileSync("test/suites.json", "utf8")).files;
+    const seconds = JSON.parse(readFileSync("test/suite-timings.json", "utf8")).seconds;
+    const all = assignShards(files, seconds, 4).flatMap((shard) => shard.files);
+    expect(all.slice().sort()).to.deep.equal(files.slice().sort());
+    expect(new Set(all).size).to.equal(files.length);
+  });
+  it("covers every file exactly once and assigns unknown files the median weight", () => {
+    const files = ["a", "b", "c", "d", "new"];
+    const shards = assignShards(files, {a: 20, b: 8, c: 4, d: 2}, 4);
+    const all = shards.flatMap((shard) => shard.files);
+    expect(all.slice().sort()).to.deep.equal(files.slice().sort());
+    expect(new Set(all).size).to.equal(files.length);
+    expect(all).to.include("new");
+    expect(shards.reduce((sum, shard) => sum + shard.seconds, 0)).to.equal(40);
+    expect(assignShards(files.slice().reverse(), {a: 20, b: 8, c: 4, d: 2}, 4).map((s) => s.files.slice().sort()))
+      .to.deep.equal(shards.map((s) => s.files.slice().sort()));
   });
 });

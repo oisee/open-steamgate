@@ -46,9 +46,48 @@ These are two separate runner invocations; timing varies with runner load and th
 
 Local cached dependencies cannot measure `npm ci`, network clones, Actions image setup or Chromium download. The GitHub Actions UI reports each step's wall time. `tools/osd-suites.mjs` also prints per-test VSIX wall times, so a slow package case can be traced to its test. Do not treat the VSIX-only saving as a measured reduction of the whole CI job.
 
+## Parallel suite workflow
+
+The `tests` workflow has one `build` job that prepares the pinned transpiler, fetched packs and libraries, transpiles, lints, runs ABAP Unit and checks BAL across a restart. It uploads a tar of that run's built tree. Four independent `suites` jobs and one `e2e` browser job restore the same tar and run concurrently. A final job named `test` succeeds only when `build`, all four matrix jobs and `e2e` succeeded. This keeps the check name stable for branch protection.
+
+The tar preserves `build/live` and `output` symlinks and executable bits, which a plain Actions artifact would lose. Each consumer runs `npm ci` with the setup-node cache, restores the pinned transpiler clone under `.local/ci-artifact/transpiler`, and relinks its compiled packages. Its Git metadata stays in the tar so diagnostics can identify the exact pin. The tar also contains `gen/`, `build/`, `.local/lars/`, and every fetched pack source folder from the pack manifests. A missing `gen/`, `output/`, live manifest, library folder, or transpiler build fails the restore step before tests start. The artifact is produced by this workflow run; a generation hash cache cannot accidentally supply another run's build. With four runners the measured weights are about 186 s per suite job, allowing them to overlap with browser work after the build job.
+
+`tools/osd-suites.mjs --shard i/4` sorts files by measured wall time, longest first, then gives each file to the shard with the smallest assigned total. Ties use path order, so assignments are stable; each shard runs its assigned files in list order. A suite without a timing gets the median measured time and still runs. `--list-shard i/4` prints the assignment without running Mocha. Every invocation checks the complete `test/suites.json` against files on disk before selecting a shard, and `--report-skips` still names optional inputs absent on that runner. The ordinary VSIX profile still omits its four slow packaging groups; scheduled, manual, tag and packaging changes use the full profile.
+
+To refresh the weights after building the tree and choosing a free port, run `STG_PORT=<free-port> node tools/osd-suites.mjs --timings test/suite-timings.json`. Run the complete list, without `--grep` or `--shard`. The reporter records each file's elapsed wall time including its hooks and inter-file overhead. Commit the new JSON and update the table below. These are local relative weights, not a CI wall-time prediction; runner load, profiles and suite interactions can change them.
+
+### Per-file integration timing, 2026-09-29
+
+Measurement: local, relative weights only. The full integration run used a free `STG_PORT` and the pinned transpiler. Total and the 20 longest files:
+
+The full local run reported 2,938 passing, 36 pending and 15 failing tests. The failures came from a read-only home cache, local binary/CLI setup and an occupied fixed port; the VSIX packaging cases then passed in a focused run with a writable temporary scratch directory. The `test/vscode-vsix.mjs` weight below is from that focused run (183.5 s), replacing its 0.1 s from the interrupted cases in the full run. These measurements are weights for balancing, not a green integration result.
+
+| Suite file | Wall time |
+| --- | ---: |
+| `test/vscode-vsix.mjs` | 183.5 s |
+| `test/adt-devloop.mjs` | 107.6 s |
+| `test/osd-runtime.mjs` | 81.1 s |
+| `test/vscode-warm.mjs` | 62.0 s |
+| `test/xref-seed.mjs` | 32.8 s |
+| `test/store-destination.mjs` | 26.3 s |
+| `test/vscode-launcher.mjs` | 25.8 s |
+| `test/cds-check.mjs` | 25.7 s |
+| `test/osd-unit.mjs` | 24.1 s |
+| `test/osd-child.mjs` | 18.2 s |
+| `test/demo-data.mjs` | 15.1 s |
+| `test/segw-tree.mjs` | 12.5 s |
+| `test/vscode-debug.mjs` | 10.5 s |
+| `test/osd-icf.mjs` | 10.0 s |
+| `test/unit-risk.mjs` | 9.6 s |
+| `test/osd-db.mjs` | 8.5 s |
+| `test/osd-store.mjs` | 8.5 s |
+| `test/osd-icf-runtime.mjs` | 6.3 s |
+| `test/zosd-test.mjs` | 6.1 s |
+| `test/database-identity-host.mjs` | 5.3 s |
+| **All 176 files** | **743.2 s (12.4 min)** |
+
 ## Next speed work
 
 1. Record the times for transpiler preparation, transpile, lint, ABAP Unit, non-VSIX integration and browser smoke on the same runner before changing them.
 2. The Test Explorer pool does not speed up CI's ABAP Unit command: CI calls `tools/osd-unit-run.mjs`, which launches one `output/index.mjs`. Only consider parallel CI ABAP Unit after isolated databases and the baseline time are measured.
 3. Cache the compiled pinned transpiler across workflows by its lock SHA if its outputs can be reproduced and validated. The `tests` and `preview` workflows currently prepare it separately.
-4. Shard integration suites only after each shard has separate database files, ports and generated output. Plain Mocha parallel mode would race over this checkout.
