@@ -88,6 +88,17 @@ export class AmcBroker {
 }
 
 let broker;
+const defaultSession = {id: "local"};
+export function callerProgram(stack = new Error().stack) {
+  for (const line of String(stack).split("\n")) {
+    const match = /([a-z][a-z0-9_]+)\.clas(?:\.testclasses)?\.mjs(?:[:?]|$)/i.exec(line);
+    if (!match) continue;
+    const name = match[1].toUpperCase();
+    if (name === "CL_AMC_CHANNEL_MANAGER" || name.startsWith("ZCL_AMC_")) continue;
+    return name.padEnd(30, "=") + "CP";
+  }
+  return undefined;
+}
 export function installAmc(abap, root = process.cwd()) {
   const Manager = abap.Classes.CL_AMC_CHANNEL_MANAGER;
   if (!Manager || Manager.osdAmcInstalled) return broker;
@@ -95,17 +106,22 @@ export function installAmc(abap, root = process.cwd()) {
   Manager.osdAmcInstalled = true;
   registerWaitPump((session) => drainAmcSession(abap, session));
   if (abap.Classes.KERNEL_PUSH_CHANNELS) {
-    abap.Classes.KERNEL_PUSH_CHANNELS.wait = async ({seconds, cond}) =>
-      abap.statements.wait({seconds, cond});
+    abap.Classes.KERNEL_PUSH_CHANNELS.wait = async ({seconds, cond}) => {
+      if (currentStepToken()) return abap.statements.wait({seconds, cond});
+      const until = Date.now() + Number(seconds?.get?.() ?? seconds) * 1000;
+      while (Date.now() < until) {
+        if (cond() === true) { abap.builtin.sy.get().subrc.set(0); return; }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await drainAmcSession(abap, defaultSession);
+      }
+      abap.builtin.sy.get().subrc.set(8);
+    };
   }
   const Producer = abap.Classes.ZCL_AMC_PRODUCER;
   const Consumer = abap.Classes.ZCL_AMC_CONSUMER;
   const props = new WeakMap();
   const value = (x) => x?.get?.() ?? x;
-  const program = () => {
-    const repid = String(abap.builtin.sy.get().repid.get()).trim().toUpperCase();
-    return repid && repid !== "OPEN_ABAP_TODO" ? repid : undefined;
-  };
+  const program = () => callerProgram();
   const error = async (reason) => {
     throw await new abap.Classes.CX_AMC_ERROR().constructor_({iv_reason: new abap.types.String().set(reason)});
   };
@@ -117,20 +133,20 @@ export function installAmc(abap, root = process.cwd()) {
     const object = new Producer();
     props.set(object, {app: value(input.i_application_id), path: value(input.i_channel_id),
       extension: value(input.i_channel_extension_id) ?? "", suppressEcho: value(input.i_suppress_echo) === "X",
-      session: currentStepToken(), program: program()});
+      session: currentStepToken() ?? defaultSession, program: program()});
     return new abap.types.ABAPObject({qualifiedName: "IF_AMC_MESSAGE_PRODUCER"}).set(object);
   });
   Manager.create_message_consumer = async (input) => wrap(() => {
     const object = new Consumer();
     props.set(object, {app: value(input.i_application_id), path: value(input.i_channel_id),
-      extension: value(input.i_channel_extension_id) ?? "", session: currentStepToken(), program: program()});
+      extension: value(input.i_channel_extension_id) ?? "", session: currentStepToken() ?? defaultSession, program: program()});
     return new abap.types.ABAPObject({qualifiedName: "IF_AMC_MESSAGE_CONSUMER"}).set(object);
   });
-  Manager.get_consumer_session_id = async () => new abap.types.String().set(String(currentStepToken()?.id ?? ""));
+  Manager.get_consumer_session_id = async () => new abap.types.String().set(String((currentStepToken() ?? defaultSession).id ?? ""));
   for (const type of ["text", "binary", "pcp"]) {
     Producer.prototype[`if_amc_message_producer_${type}$send`] = async function ({i_message}) { return wrap(() => {
       const details = props.get(this);
-      broker.send({...details, type: type.toUpperCase(), message: value(i_message),
+      broker.send({...details, program: program(), type: type.toUpperCase(), message: value(i_message),
         client: abap.builtin.sy.get().mandt.get(), username: abap.builtin.sy.get().uname.get()});
     }); };
   }
@@ -139,7 +155,7 @@ export function installAmc(abap, root = process.cwd()) {
       const details = props.get(this);
       this.osdSubscription?.close();
       const receiver = value(i_receiver);
-      this.osdSubscription = broker.subscribe({...details, receive: undefined});
+      this.osdSubscription = broker.subscribe({...details, program: program(), receive: undefined});
       this.osdSubscription.subscription.receiver = receiver;
     });
   };

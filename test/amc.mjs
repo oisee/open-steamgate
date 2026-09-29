@@ -1,0 +1,74 @@
+import {createServer} from "node:http";
+import {expect} from "chai";
+import {mountChannels} from "../tools/osd-apc.mjs";
+import {AmcBroker, amcChannels, callerProgram, parseSamc} from "../tools/osd-amc.mjs";
+import {dialogStep} from "../tools/osd-dialog-step.mjs";
+import {readFileSync} from "node:fs";
+
+describe("AMC in one Node process", function () {
+  this.timeout(30000);
+
+  it("reads SAMC channels and exact send/receive authorisations", () => {
+    const xml = readFileSync("src/amc/zstg_amc_test.samc.xml", "utf8");
+    const rows = parseSamc(xml, "fixture");
+    expect(rows.map((row) => [row.path, row.type, row.scope]))
+      .to.deep.equal([["/text", "TEXT", "C"], ["/denied", "TEXT", "C"]]);
+    const broker = new AmcBroker(rows);
+    const sender = "ZCL_OSD_AMC_TEST==============CP";
+    expect(() => broker.send({app: "ZOSD_AMC_TEST", path: "/denied", program: sender, type: "TEXT", message: "no"}))
+      .to.throw("not authorised");
+    expect(() => broker.send({app: "ZOSD_AMC_TEST", path: "/missing", program: sender, type: "TEXT", message: "no"}))
+      .to.throw("not defined");
+    expect(amcChannels().find((row) => row.path === "/text")).to.include({applicationId: "ZOSD_AMC_TEST"});
+    expect(callerProgram("at x (/tmp/zcl_osd_amc_test.clas.testclasses.mjs:1:1)"))
+      .to.equal(sender);
+  });
+
+  it("delivers 1000 ordered ABAP SENDs from an HTTP step to a bound real websocket", async () => {
+    const {initializeABAP} = await import("../output/init.mjs");
+    const Host = (await import("../output/zcl_apc_host.clas.mjs")).zcl_apc_host;
+    const Sender = (await import("../output/zcl_osd_amc_test.clas.mjs")).zcl_osd_amc_test;
+    await import("../output/zcl_osd_amc_socket.clas.mjs");
+    await initializeABAP();
+    const abap = globalThis.abap;
+    const server = createServer((req, res) => {
+      if (req.url !== "/emit") { res.writeHead(404).end(); return; }
+      dialogStep(() => Sender.send_many({iv_count: new abap.types.Integer().set(1000)}))
+        .then(() => res.writeHead(204).end())
+        .catch((error) => res.writeHead(500).end(String(error?.reason?.get?.() ?? error)));
+    });
+    mountChannels(server, [{
+      path: "/ws-amc", name: "ZOSD_AMC_TEST", handler: "ZCL_OSD_AMC_SOCKET", stateful: false,
+    }], {host: Host, log: (line) => { throw new Error(line); }});
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws-amc`);
+    const messages = [];
+    let wake;
+    socket.addEventListener("message", (event) => {
+      messages.push(String(event.data));
+      wake?.();
+    });
+    try {
+      await new Promise((resolve, reject) => {
+        socket.addEventListener("open", resolve, {once: true});
+        socket.addEventListener("error", reject, {once: true});
+      });
+      const response = await fetch(`http://127.0.0.1:${port}/emit`);
+      expect(response.status).to.equal(204);
+      const until = Date.now() + 10000;
+      while (messages.length < 1000 && Date.now() < until) {
+        await new Promise((resolve) => {
+          wake = resolve;
+          setTimeout(resolve, 20);
+        });
+      }
+      expect(messages.length).to.equal(1000);
+      expect(messages.map((message) => message.trim()))
+        .to.deep.equal(Array.from({length: 1000}, (_, index) => String(index + 1)));
+    } finally {
+      socket.close();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});
