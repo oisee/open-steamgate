@@ -12,6 +12,8 @@ describe("CI VSIX profile", () => {
   it("checks a package identity or payload change in full", () => {
     expect(needsFullVsix(["editors/vscode/package.json"], before, {...before, version: "0.3.0"})).to.equal(true);
     expect(needsFullVsix(["scripts/build-vsix.mjs"], before, before)).to.equal(true);
+    expect(needsFullVsix(["test/vscode-vsix-packaging.mjs"], before, before)).to.equal(true);
+    expect(needsFullVsix(["test/helpers/vsix.mjs"], before, before)).to.equal(true);
     expect(needsFullVsix(["packs/zork/games/zork1-z3.w3mi.data.z3"], before, before)).to.equal(true);
   });
 

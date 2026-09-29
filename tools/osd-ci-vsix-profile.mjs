@@ -6,7 +6,8 @@ import {execFileSync} from "node:child_process";
 const packagingPaths = [
   /^scripts\/build-(?:vsix|binary)\.mjs$/,
   /^editors\/vscode\/(?:launcher\.js|resources\/)/,
-  /^test\/vscode-vsix\.mjs$/,
+  /^test\/vscode-vsix(?:-packaging)?\.mjs$/,
+  /^test\/helpers\/vsix\.mjs$/,
   /^tools\/(?:osd-(?:build|fetch|inputs|lock|packs|xref-seed)|osd-ci-vsix-profile)\.mjs$/,
   /^packs\/[^/]+\/osd-pack\.json$/,
   /^packs\/zork\//,

@@ -177,5 +177,8 @@
     "test/webgui.mjs",
     "test/write-boundary.mjs",
     "test/zosd-test.mjs"
-  ]
+  ],
+  "groups": {
+    "packaging": ["test/vscode-vsix-packaging.mjs"]
+  }
 }

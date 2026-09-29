@@ -1,6 +1,6 @@
 {
-  "measuredAt": "2026-09-29T08:28:27.032Z",
-  "note": "Local wall time; relative weights only. Full integration on 2026-09-29; VSIX remeasured alone after scratch directory permission blocked it in the full run.",
+  "measuredAt": "2026-09-29T10:35:30.653Z",
+  "note": "Local wall time; relative weights only. VSIX fast and packaging files measured separately after splitting; other files from the 2026-09-29 full integration run.",
   "seconds": {
     "test/abap-types.mjs": 0.02842507,
     "test/adt-devloop.mjs": 107.630187476,
@@ -170,7 +170,8 @@
     "test/vscode-debug.mjs": 10.510102482,
     "test/vscode-extension.mjs": 1.259811052,
     "test/vscode-launcher.mjs": 25.840575278,
-    "test/vscode-vsix.mjs": 183.513292622,
+    "test/vscode-vsix-packaging.mjs": 159.531059274,
+    "test/vscode-vsix.mjs": 0.040375492,
     "test/vscode-warm.mjs": 62.006111291,
     "test/vsix-content-types.mjs": 0.001485209,
     "test/warm.mjs": 0.02375387,
