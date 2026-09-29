@@ -15,7 +15,8 @@ const name = basename(report).replace(/\.prog\.abap$/i, "").toUpperCase();
 const className = `ZCL_OSABAP_${name.replace(/^Z/, "")}`;
 const generated = join(here, ".out", "osabap-abap");
 const dir = join(here, "go", "cmd", "osabap");
-const bin = join(here, ".out", "osabap");
+const targetGOOS = process.env.GOOS || (process.platform === "win32" ? "windows" : "");
+const bin = join(here, ".out", targetGOOS === "windows" ? "osabap.exe" : "osabap");
 
 rmSync(generated, {recursive: true, force: true});
 mkdirSync(generated, {recursive: true});

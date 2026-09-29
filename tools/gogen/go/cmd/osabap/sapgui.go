@@ -14,6 +14,11 @@ import (
 
 const defaultSAPGUIListen = "127.0.0.1:3232"
 
+const (
+	maxSAPGUIFrames  = 64
+	maxSAPGUISession = 5 * time.Minute
+)
+
 type sapGUIField struct {
 	name     string
 	kind     string
@@ -25,13 +30,16 @@ type sapGUIField struct {
 // interpreted as report selection parameters. --sapgui=ADDR is useful when
 // instance 32 is already occupied; the port's low two digits are the SAP
 // instance number.
-func sapGUIOption(args []string) (bool, string, []string) {
-	enabled, listen := false, defaultSAPGUIListen
+func sapGUIOption(args []string) (bool, bool, string, []string) {
+	enabled, launch, listen := false, true, defaultSAPGUIListen
 	rest := make([]string, 0, len(args))
 	for _, arg := range args {
 		switch {
 		case arg == "--sapgui":
 			enabled = true
+		case arg == "--sapgui-no-launch":
+			enabled = true
+			launch = false
 		case strings.HasPrefix(arg, "--sapgui="):
 			enabled = true
 			listen = strings.TrimPrefix(arg, "--sapgui=")
@@ -42,10 +50,10 @@ func sapGUIOption(args []string) (bool, string, []string) {
 			rest = append(rest, arg)
 		}
 	}
-	return enabled, listen, rest
+	return enabled, launch, listen, rest
 }
 
-func serveSAPGUI(listen string, selection ZCL_GG_HOST__TY_RESULT, execute func([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE) ZCL_GG_HOST__TY_RESULT) error {
+func serveSAPGUI(listen string, launch bool, selection ZCL_GG_HOST__TY_RESULT, execute func([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE) ZCL_GG_HOST__TY_RESULT) error {
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return fmt.Errorf("SAP GUI listen %s: %w", listen, err)
@@ -61,6 +69,16 @@ func serveSAPGUI(listen string, selection ZCL_GG_HOST__TY_RESULT, execute func([
 	}
 	fmt.Printf("OS/ABAP %s waiting for SAP GUI\n", appProgram)
 	fmt.Printf("Application Server: %s\nInstance Number:    %02d\nSystem ID:          OSG\n", host, instance)
+	if launch {
+		clientHost := host
+		if clientHost == "0.0.0.0" || clientHost == "::" {
+			clientHost = "127.0.0.1"
+		}
+		if err := startSAPGUI(clientHost, port, instance); err != nil {
+			return fmt.Errorf("launching SAP GUI: %w (use --sapgui-no-launch for a remote or manual client)", err)
+		}
+		fmt.Println("SAP GUI launched")
+	}
 
 	conn, err := ln.Accept()
 	if err != nil {
@@ -71,13 +89,19 @@ func serveSAPGUI(listen string, selection ZCL_GG_HOST__TY_RESULT, execute func([
 }
 
 func runSAPGUISession(conn net.Conn, selection ZCL_GG_HOST__TY_RESULT, execute func([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE) ZCL_GG_HOST__TY_RESULT) error {
+	if err := conn.SetDeadline(time.Now().Add(maxSAPGUISession)); err != nil {
+		return err
+	}
 	screen, fields := sapGUISelectionScreen(selection)
 	shown, resultShown := false, false
-	for {
+	for frames := 0; frames < maxSAPGUIFrames; frames++ {
 		payload, err := readNIFrame(conn)
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				return nil
+			}
+			if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+				return endSAPGUISession(conn)
 			}
 			return err
 		}
@@ -112,6 +136,7 @@ func runSAPGUISession(conn net.Conn, selection ZCL_GG_HOST__TY_RESULT, execute f
 			return err
 		}
 	}
+	return endSAPGUISession(conn)
 }
 
 func sapGUISelectionScreen(result ZCL_GG_HOST__TY_RESULT) (*frame.Screen, []sapGUIField) {
@@ -268,6 +293,7 @@ func sapGUIExit(items []diag.Item) bool {
 }
 
 func endSAPGUISession(conn net.Conn) error {
+	_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
 	header := diag.Header{ComFlag: diag.FlagTermEOC | diag.FlagTermEOP, MsgInfo: 0x01}
 	if err := writeNIFrame(conn, header.Bytes()); err != nil {
 		return err

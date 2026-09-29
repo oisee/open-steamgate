@@ -9,13 +9,21 @@ import (
 )
 
 func TestSAPGUIOptionIsSeparateFromReportArguments(t *testing.T) {
-	enabled, listen, rest := sapGUIOption([]string{"--name", "Alice", "--sapgui=127.0.0.1:3201", "--loud"})
-	if !enabled || listen != "127.0.0.1:3201" || strings.Join(rest, " ") != "--name Alice --loud" {
-		t.Fatalf("option: enabled=%v listen=%q rest=%q", enabled, listen, rest)
+	enabled, launch, listen, rest := sapGUIOption([]string{"--name", "Alice", "--sapgui=127.0.0.1:3201", "--loud"})
+	if !enabled || !launch || listen != "127.0.0.1:3201" || strings.Join(rest, " ") != "--name Alice --loud" {
+		t.Fatalf("option: enabled=%v launch=%v listen=%q rest=%q", enabled, launch, listen, rest)
+	}
+}
+
+func TestSAPGUINoLaunch(t *testing.T) {
+	enabled, launch, listen, rest := sapGUIOption([]string{"--sapgui-no-launch"})
+	if !enabled || launch || listen != defaultSAPGUIListen || len(rest) != 0 {
+		t.Fatalf("option: enabled=%v launch=%v listen=%q rest=%q", enabled, launch, listen, rest)
 	}
 }
 
 func TestSAPGUISelectionValues(t *testing.T) {
+	useSAPGUITestSelections(t)
 	selection := ZCL_GG_HOST__TY_RESULT{
 		elements: []ZCL_GG_HOST_SCREEN__TY_ELEMENT{
 			{kind: "PARAMETER", name: "P_NAME", text: "Name", visible_length: 30},
@@ -44,6 +52,7 @@ func TestSAPGUISelectionValues(t *testing.T) {
 }
 
 func TestSAPGUISessionSelectionExecuteAndEnd(t *testing.T) {
+	useSAPGUITestSelections(t)
 	server, client := net.Pipe()
 	defer client.Close()
 	selection := ZCL_GG_HOST__TY_RESULT{
@@ -113,4 +122,15 @@ func TestSAPGUISessionSelectionExecuteAndEnd(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
+}
+
+func useSAPGUITestSelections(t *testing.T) {
+	t.Helper()
+	oldNames, oldCheckboxes, oldRanges := appSelectionNames, appCheckboxes, appRanges
+	appSelectionNames = []string{"P_NAME", "P_LOUD", "S_TAG"}
+	appCheckboxes = map[string]bool{"P_LOUD": true}
+	appRanges = map[string]bool{"S_TAG": true}
+	t.Cleanup(func() {
+		appSelectionNames, appCheckboxes, appRanges = oldNames, oldCheckboxes, oldRanges
+	})
 }

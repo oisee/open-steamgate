@@ -524,7 +524,8 @@ DIAG atoms.
 `--sapgui` serves that same host-neutral screen over NI/DIAG to one real SAP
 GUI, using the public `open-diag-go` screen and protocol packages. It starts no
 SAP application server and performs no logon: the command itself is the local
-dispatcher endpoint. By default it binds loopback port 3232:
+dispatcher endpoint. By default it binds loopback port 3232 and launches the
+platform's installed SAP GUI client:
 
 ```
 .out/osabap --sapgui
@@ -535,15 +536,27 @@ dispatcher endpoint. By default it binds loopback port 3232:
 ```
 
 `--sapgui=127.0.0.1:3201` selects another address (the low two port digits are
-the instance number). Report flags may follow `--sapgui` and become initial
-field values. The GUI receives the selection parameters, checkboxes and the
-comma-separated select-option shorthand; F8, Enter or the Execute button runs
-the ordinary report lifecycle, and the next screen contains its messages and
-`WRITE` lines. Back or closing the window sends a clean DIAG EOC/EOP and exits
-the command. The first vertical slice shows one bounded result page; paging
-and the full SAP multiple-selection dialog remain frontend work. Keep the
-listener on `127.0.0.1`: this deliberately small rogue-DIAG endpoint has no SAP
-logon, SNC or authorization layer.
+the instance number). Windows starts `sapgui.exe <host> <instance>`; macOS
+opens the `com.sap.platin` bundle with a Java GUI connection string. Set
+`OSABAP_SAPGUI` to an explicit client executable, or use
+`--sapgui-no-launch` when a remote/manual client should connect. Report flags
+may follow `--sapgui` and become initial field values. The GUI receives the
+selection parameters, checkboxes and the comma-separated select-option
+shorthand; F8, Enter or the Execute button runs the ordinary report lifecycle,
+and the next screen contains its messages and `WRITE` lines. Back or closing
+the window sends a clean DIAG EOC/EOP and exits the command. A connected
+session is capped at five minutes, 64 frames and 64 MiB per frame. The first
+vertical slice shows one bounded result page; paging and the full SAP
+multiple-selection dialog remain frontend work. Keep the listener on
+`127.0.0.1`: this deliberately small rogue-DIAG endpoint has no SAP logon, SNC
+or authorization layer.
+
+Cross-compile the self-contained command for a Windows 11 ARM guest with:
+
+```
+GOOS=windows GOARCH=arm64 node tools/gogen/osabap.mjs path/to/report.prog.abap
+# -> tools/gogen/.out/osabap.exe
+```
 
 For native applications the local process is the frontend. The compiled
 `CL_GUI_FRONTEND_SERVICES` maps `FILE_EXIST`, `DIRECTORY_EXIST`,
