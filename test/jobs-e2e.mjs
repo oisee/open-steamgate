@@ -144,6 +144,14 @@ describe("compiled ABAP jobs end to end", function () {
     }
   });
 
+  it("shows a committed JOB_OPEN reservation as preliminary", async () => {
+    const name = "E2E_PRELIMINARY";
+    const count = await dialogStep(() => open(name));
+    const state = await dialogStep(() => invoke("SHOW_JOBSTATE",
+      {jobname: name, jobcount: count}, ["preliminary", "ready", "running", "finished"]));
+    expect(state).to.deep.equal({preliminary: "X", ready: "", running: "", finished: ""});
+  });
+
   it("runs standard JOB_* and reads status, header, steps and name selection", async () => {
     const name = "E2E_STANDARD";
     const count = await dialogStep(async () => {
@@ -151,19 +159,49 @@ describe("compiled ABAP jobs end to end", function () {
       const added = await invoke("JOB_SUBMIT", {jobname: name, jobcount: value,
         report: "ZGG_EX_012", authcknam: abap.builtin.sy.get().uname.get().trim()}, ["step_number"]);
       expect(added.step_number).to.equal("1");
-      await close(name, value);
+      expect((await invoke("JOB_CLOSE", {jobname: name, jobcount: value,
+        strtimmed: "X"}, ["job_was_released"])).job_was_released).to.equal("X");
       return value;
     });
+    const state = () => dialogStep(() => invoke("SHOW_JOBSTATE",
+      {jobname: name, jobcount: count}, ["preliminary", "finished", "running", "ready", "scheduled"]));
+    expect((await state()).ready).to.equal("X");
+    const readyHeader = headerType();
+    await dialogStep(() => abap.FunctionModules.BP_JOB_READ({
+      exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
+        job_read_opcode: new abap.types.Integer().set(19)},
+      importing: {job_read_jobhead: readyHeader},
+    }));
+    expect(readyHeader.get().status.get()).to.equal("Y");
+    const readySelector = new abap.types.Structure({
+      jobname: new abap.types.Character(32).set(name),
+      username: new abap.types.Character(12), preliminary: new abap.types.Character(1),
+      scheduled: new abap.types.Character(1),
+      ready: new abap.types.Character(1).set("X"),
+      running: new abap.types.Character(1), finished: new abap.types.Character(1),
+      aborted: new abap.types.Character(1),
+    });
+    const readyJobs = table(headerType());
+    await dialogStep(() => abap.FunctionModules.BP_JOB_SELECT({
+      exporting: {jobselect_dialog: box("N"), jobsel_param_in: readySelector},
+      tables: {jobselect_joblist: readyJobs},
+    }));
+    expect(readyJobs.array().map((row) => row.get().status.get())).to.deep.equal(["Y"]);
     expect((await drainJobOutbox(store)).imported).to.equal(1);
-    const state = async () => (await dialogStep(() => invoke("SHOW_JOBSTATE",
-      {jobname: name, jobcount: count}, ["finished", "running", "ready", "scheduled"]))).finished;
-    for (let i = 0; i < 20 && await state() !== "X"; i += 1) await work();
-    expect(await state()).to.equal("X");
+    expect((await state()).ready).to.equal("X");
+    for (let i = 0; i < 20 && (await state()).finished !== "X"; i += 1) {
+      const pending = work();
+      for (let poll = 0; poll < 10 && run(name)?.state === "RUNNING"; poll += 1) {
+        expect((await state()).running).to.equal("X");
+      }
+      await pending;
+    }
+    expect((await state()).finished).to.equal("X");
     const header = headerType();
     const ret = new abap.types.Integer().set(1);
     await dialogStep(() => abap.FunctionModules.BP_JOB_READ({
       exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
-        job_read_opcode: new abap.types.Integer().set(1)},
+        job_read_opcode: new abap.types.Integer().set(19)},
       importing: {job_read_jobhead: header}, changing: {ret},
     }));
     expect(ret.get()).to.equal(0);
@@ -174,7 +212,7 @@ describe("compiled ABAP jobs end to end", function () {
     }));
     await dialogStep(() => abap.FunctionModules.BP_JOB_READ({
       exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),
-        job_read_opcode: new abap.types.Integer().set(2)},
+        job_read_opcode: new abap.types.Integer().set(20)},
       tables: {job_read_steplist: steps},
     }));
     expect(steps.array().map((row) => row.get().progname.get().trim())).to.deep.equal(["ZGG_EX_012"]);

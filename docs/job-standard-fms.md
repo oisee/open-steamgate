@@ -14,12 +14,19 @@ program values raise the respective call's failure exception instead of being
 ignored. Empty optional parameters are accepted. Some optional types and
 nonempty values require further measurement before they can be supported.
 
-`SHOW_JOBSTATE` returns one `X` flag from the bridge snapshot. `BP_JOB_READ`
-returns the header and, for the provisional with-steps opcode, a bounded step
+`SHOW_JOBSTATE` returns one `X` flag from the live bridge snapshot. The sandbox
+reported `RUNNING` while the job table still held status `Y`; callers should
+not infer the flag from a previously read table row. `BP_JOB_READ`
+returns the header and, for the with-steps opcodes, a bounded step
 list. A noninitial `JOB_STEP_NUMBER` returns only that step; a number beyond the step count raises `JOB_DOESNT_HAVE_STEPS` (assumed, to be measured). `BP_JOB_SELECT` selects the current owner's visible retained jobs with
 `JOBSELECT_DIALOG = 'N'`. It accepts exact job name and user filters, `NJRANGE` and `UNRANGE` selection tables (`EQ`, `CP`, `BT`, include and exclude), plus preliminary, scheduled, ready, running, finished, and aborted status flags, and raises `NO_JOBS_FOUND` for an empty result.
 
-The local one-character header status mapping is **assumed, to be measured**:
+The one-character status sequence was measured on the sandbox on 2026-09-29:
+`P` after `JOB_OPEN` and submit, `Y` after immediate `JOB_CLOSE`, `R` while
+running, and `F` when finished. The system also had jobs with `A` (aborted),
+`S` (released, waiting for its start time), and `Z`; these were not seen in
+this run. Locally, `S` also represents a start condition, predecessor, or
+event wait. `Z` remains unmapped (see ANORMALIES).
 
 | Bridge state | Status | SHOW_JOBSTATE flag |
 | --- | --- | --- |
@@ -30,9 +37,11 @@ The local one-character header status mapping is **assumed, to be measured**:
 | `COMPLETED` | `F` | `FINISHED` |
 | `FAILED`, `INTERRUPTED` | `A` | `ABORTED` |
 
-`BP_JOB_READ` currently assigns opcode 1 to header and 2 to header plus steps.
-**These numbers are provisional and require a sandbox measurement.** Other
-opcodes raise `INVALID_OPCODE`. The compact local DDIC structures contain
+Sandbox measurement on 2026-09-29: `BP_JOB_READ` accepts opcode 19 (header
+only), 20 (header and steps), 35 and 36 (steps), and 37 (no steps). The facade
+maps 35 and 36 like 20, and 37 like 19; the probe established step-list
+presence but did not distinguish the other fields of those opcodes. Every
+other opcode raises `INVALID_OPCODE`. The compact local DDIC structures contain
 only fields consumed by this facade; their remaining widths and complete SAP
 shapes are open measurements.
 
@@ -42,3 +51,5 @@ A program that passes them will not activate against the real SAP FM.
 `AUTHCKNAM` is mandatory on `JOB_SUBMIT`, as measured. Callers pass `sy-uname`; another user is rejected. `PRIPARAMS` raises `BAD_PRIPARAMS`; external-program flags raise `BAD_XPGFLAGS`, and a report combined with an external program raises `PROG_ABAP_AND_EXTPG_SET`.
 
 Closing a valid job with no submitted report step raises `JOB_NOSTEPS`.
+Immediate `JOB_CLOSE` (`STRTIMMED = 'X'`) exports `JOB_WAS_RELEASED = 'X'`,
+as measured on the sandbox on 2026-09-29.

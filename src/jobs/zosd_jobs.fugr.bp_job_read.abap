@@ -1,7 +1,11 @@
 FUNCTION bp_job_read.
-* TODO-measure: BP_JOB_READ numeric opcodes on A4H; constants are provisional.
-  CONSTANTS lc_header TYPE i VALUE 1.
-  CONSTANTS lc_with_steps TYPE i VALUE 2.
+* Measured on the sandbox 2026-09-29. 35/36 and 37 share the observed
+* step-list behaviour of 20 and 19 respectively.
+  CONSTANTS lc_header TYPE i VALUE 19.
+  CONSTANTS lc_with_steps TYPE i VALUE 20.
+  CONSTANTS lc_steps_35 TYPE i VALUE 35.
+  CONSTANTS lc_steps_36 TYPE i VALUE 36.
+  CONSTANTS lc_header_37 TYPE i VALUE 37.
   DATA lv_state TYPE string.
   DATA lv_phase TYPE string.
   DATA lv_count TYPE string.
@@ -12,7 +16,9 @@ FUNCTION bp_job_read.
   ret = 0.
   CLEAR: job_read_jobhead, joblog_attributes, epp_attributes,
          email_notification.
-  IF job_read_opcode <> lc_header AND job_read_opcode <> lc_with_steps.
+  IF job_read_opcode <> lc_header AND job_read_opcode <> lc_with_steps
+      AND job_read_opcode <> lc_steps_35 AND job_read_opcode <> lc_steps_36
+      AND job_read_opcode <> lc_header_37.
     RAISE invalid_opcode.
   ENDIF.
   CALL FUNCTION 'ZOSD_JOB_READ'
@@ -37,6 +43,8 @@ FUNCTION bp_job_read.
       job_read_jobhead-status = 'A'.
     WHEN 'RUNNING'.
       job_read_jobhead-status = 'R'.
+    WHEN 'READY'.
+      job_read_jobhead-status = 'Y'.
     WHEN 'QUEUED'.
       job_read_jobhead-status = 'Y'.
     WHEN 'WAITING'.
@@ -47,7 +55,7 @@ FUNCTION bp_job_read.
   IF job_step_number IS NOT INITIAL AND job_step_number > lv_count.
     RAISE job_doesnt_have_steps.
   ENDIF.
-  IF job_read_opcode = lc_header.
+  IF job_read_opcode = lc_header OR job_read_opcode = lc_header_37.
     RETURN.
   ENDIF.
   lv_index = 1.
