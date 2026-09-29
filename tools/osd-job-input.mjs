@@ -24,9 +24,16 @@ export function jobInput(input) {
   });
 }
 
+// The raw bound must admit every input jobInput( ) accepts: 20 fields, each a
+// name of at most 8 characters and a value of at most 255 characters that
+// JSON may escape as \uXXXX (6 characters each), plus the object syntax.
+// A tighter raw cap rejected valid input (20 values of control characters
+// serialize to 31,131 characters); this one only stops abuse before parsing.
+export const JOB_INPUT_JSON_MAX = 20 * (255 * 6 + 8 + 64) + 2;
+
 export function jobInputJson(json) {
   if (json === "" || json === null || json === undefined) return [];
-  if (typeof json !== "string" || json.length > 12000) throw new TypeError("Job input payload too large");
+  if (typeof json !== "string" || json.length > JOB_INPUT_JSON_MAX) throw new TypeError("Job input payload too large");
   try { return jobInput(JSON.parse(json)); }
   catch (error) {
     if (error instanceof SyntaxError) throw new TypeError("Invalid job input JSON", {cause: error});

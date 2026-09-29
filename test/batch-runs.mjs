@@ -559,3 +559,23 @@ describe("durable one-shot batch runs", function () {
     }
   });
 });
+
+describe("job step input bounds", function () {
+  it("accepts the largest valid input even when JSON escaping inflates it", async function () {
+    const {jobInputJson, JOB_INPUT_JSON_MAX} = await import("../tools/osd-job-input.mjs");
+    const input = Array.from({length: 20}, (_, i) => ({NAME: `P_${String(i).padStart(2, "0")}`, VALUE: "\u0001".repeat(255)}));
+    const json = JSON.stringify(input);
+    expect(json.length).to.be.above(12000);
+    expect(json.length).to.be.at.most(JOB_INPUT_JSON_MAX);
+    const parsed = jobInputJson(json);
+    expect(parsed).to.have.length(20);
+    expect(parsed[19]).to.deep.equal({name: "P_19", value: "\u0001".repeat(255)});
+  });
+
+  it("still rejects what exceeds the field bounds and oversized raw payloads", async function () {
+    const {jobInputJson, JOB_INPUT_JSON_MAX} = await import("../tools/osd-job-input.mjs");
+    expect(() => jobInputJson(JSON.stringify([{NAME: "P_X", VALUE: "x".repeat(256)}]))).to.throw(/max 255/);
+    expect(() => jobInputJson(JSON.stringify(Array.from({length: 21}, (_, i) => ({NAME: `P${i}`, VALUE: "v"}))))).to.throw(/at most 20/);
+    expect(() => jobInputJson(" ".repeat(JOB_INPUT_JSON_MAX + 1))).to.throw(/too large/);
+  });
+});
