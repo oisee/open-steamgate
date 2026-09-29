@@ -134,9 +134,9 @@ with the widest use.
 
 | SAP name | role | open-abap today |
 | --- | --- | --- |
-| `IF_AC_MESSAGE_TYPE_PCP` | Push Channel Protocol message: a set of name/value fields and a body (text or binary) | absent |
-| `CL_AC_MESSAGE_TYPE_PCP` | `CREATE` returns one; `SET_FIELD` / `GET_FIELD` / `GET_FIELDS`, `SET_TEXT` / `GET_TEXT`, `SET_BINARY` / `GET_BINARY`, and the serialised form | absent |
-| the wire form | fields as `name:value` lines, an empty line, the body; the WebSocket subprotocol `v10.pcp.sap.com`. **Captured in P1: LF line ends, `pcp-action` and `pcp-body-type` first, `:` in a value escaped as `\:`** | absent |
+| `IF_AC_MESSAGE_TYPE_PCP` | Push Channel Protocol message: a set of name/value fields and a body (text or binary) | implemented in `open-abap-apc` on `feat/pcp` |
+| `CL_AC_MESSAGE_TYPE_PCP` | `CREATE` returns one; `SET_FIELD` / `GET_FIELD` / `GET_FIELDS`, `SET_TEXT` / `GET_TEXT`, `SET_BINARY` / `GET_BINARY`, and the serialised form | implemented in `open-abap-apc` on `feat/pcp` |
+| the wire form | fields as `name:value` lines, an empty line, the body; the WebSocket subprotocol `v10.pcp.sap.com`. **Captured in P1: LF line ends, `pcp-action` and `pcp-body-type` first, `:` in a value escaped as `\:`** | P1 bytes covered by ABAP Unit |
 
 PCP is the one piece that must be exactly right on the wire, because it is
 what a page reads. It is also the piece that makes the generation rule
@@ -144,6 +144,19 @@ cheap: a PCP message is plain data with a canonical text form, so it can be
 queued outside a generation, written to a table and replayed into the next
 one. The serialiser is pure ABAP and testable against a byte string
 captured on A4H.
+
+Step 2 implements the P0 interface declaration and the P1 text byte string in
+`open-abap-apc`; the engine's `zcl_osd_pcp_test` checks serialization and
+round trip. The other behaviour has not been measured on A4H: field names are
+case sensitive, replacement keeps position, reserved headers cannot be set as
+application fields, colons in names and newlines in values raise, and values
+escape backslash as `\\`. Binary bodies use base64 under `pcp-body-type:binary`;
+cross-type getters and malformed input raise. These choices need PCP1 to PCP3
+probes before being treated as SAP-compatible. The transpiler emits no callable
+static function for `IF_AC_MESSAGE_TYPE_PCP=>DESERIALIZE`, so callers currently
+use `CL_AC_MESSAGE_TYPE_PCP=>DESERIALIZE` (anomaly logged). The preview's
+`serialized()` is a request mutex, not a PCP serializer; there is no JS PCP
+wire path to compare yet.
 
 ### AMC
 
@@ -1022,7 +1035,7 @@ cost here (the APC host, the RFC channel, the pool).
 | --- | --- | --- |
 | 0 | read the signatures off A4H (P0) and run the probes P1 to P11, with Alice's go; write the results into this file and `ANORMALIES.md` (**done 2026-09-24, P8 the same day through an abapGit-created `SAMC`; three entries: `daemon-statics`, `daemon-creator-program`, `daemon-lazy-restart`**) | 1.5 |
 | 1 | **not in this work**: osg-i7's separate PR (the step queue in `tools/osd-dialog-step.mjs`, released during `WAIT`; APC callbacks through `dialogStep`; `/osd/sql` and the shim's static server inside the step). This work starts after it is merged | 0 |
-| 2 | PCP: `IF_AC_MESSAGE_TYPE_PCP`, `CL_AC_MESSAGE_TYPE_PCP`, the serialiser, tested against captured bytes | 1 |
+| 2 | **done locally on `feat/pcp` and `feat/daemon-pcp`**: PCP interface, class and serialiser; P1 captured bytes tested, unmeasured cases marked for probes | 1 |
 | 3 | timers: `CL_ABAP_TIMER_MANAGER` and the host hook, first inside stateful APC sessions (no daemon needed to prove them) | 1 |
 | 4 | AMC in one process: producer, consumer, `WAIT FOR MESSAGING CHANNELS`, the APC binding delivering to a socket, the `SAMC` reader | 1.5 |
 | 5 | the daemon host (ABAP), the client manager, the Node driver (mailbox on the shared step queue, restart policy from P3/P4), the class-data guard (first proving it, as our own post-processing pass in `tools/osd-transpile.mjs`, never sent upstream; the accessor only as a prototype), the registry (D9) | 2 |

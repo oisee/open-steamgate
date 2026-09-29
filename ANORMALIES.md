@@ -29,6 +29,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-09-29-pcp-interface-static -- interface class method has no runtime dispatch
+
+- Status: `workaround`
+- Discovery date: `2026-09-29`
+- Affected versions: pinned `@abaplint/transpiler-cli` in this worktree
+- Affected ABAP statement, runtime API or adapter: `if_ac_message_type_pcp=>deserialize( ... )`
+- Minimal ABAP reproducer: `test/unit/zcl_osd_pcp_test.clas.testclasses.abap` with its `cl_ac_message_type_pcp=>deserialize` calls changed to `if_ac_message_type_pcp=>deserialize`
+- Exact command used to inspect it: `npm run transpile` in `.local/lars/open-abap-apc`, then inspect `output/if_ac_message_type_pcp.intf.mjs` and `output/cl_ac_message_type_pcp.clas.mjs`
+- Expected SAP behaviour: the P0 interface contract declares a class method callable through the interface.
+- Actual open-abap behaviour: the generated interface contains method metadata but no static `deserialize` function; the implementing class contains `if_ac_message_type_pcp$deserialize`.
+- Impact on open-steamgate: calling the interface method in a transpiled program cannot dispatch to the implementation.
+- Smallest safe workaround: call `cl_ac_message_type_pcp=>deserialize`, which forwards to the interface implementation in the library.
+- Upstream issue: none yet; this is recorded pending an isolated transpiler reproducer.
+- Regression-test location: `test/unit/zcl_osd_pcp_test.clas.testclasses.abap` exercises the class entry point.
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-24-daemon-statics -- a daemon's class data is its own session's on a system, and the process's here
 
 - Status: `open` (by design; decision D4 in `docs/abap-daemons.md`)
