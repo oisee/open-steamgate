@@ -267,6 +267,19 @@ persisted report variants, RSPARAMS or range selections, and typed
 store default selections only. Standard ABAP job read, state and log functions
 and an external scheduler API remain separate work.
 
+`tools/osd-job-snapshot.mjs` is a private read model for that future ABAP
+facade. Given a trusted caller's client, user and SID plus `JOBNAME` and
+`JOBCOUNT`, it reads the retained business identity, committed outbox and
+imported operations rows with read-only SQLite connections. It prefers the
+verified operations row during import-before-ack and reports a missing or
+inconsistent durable record instead of guessing a state. A reserved `OPEN`
+has no steps; a committed outbox has ordered `READY`/`PENDING` steps; imported
+runs expose their saved per-step states. Reads never drain, commit the caller's
+LUW, or open list artifacts. They expose neither a SAP job log nor BAL entries.
+Creation date/time currently comes from the outbox only and is unavailable
+after acknowledgement. Standard `BP_JOB_READ`, `SHOW_JOBSTATE` and
+`BP_JOBLOG_READ` still require measured A4H signatures and behavior.
+
 ## Local read API for saved runs
 
 `GET /osd/batch-runs` lists up to 50 recent runs (`?limit=1..200`).
