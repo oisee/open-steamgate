@@ -265,6 +265,8 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
     createdAt: outbox?.createdAt ?? null, queuedAt: run.queued_at ?? null,
     startedAt: run.started_at || null, endedAt: run.ended_at ?? null,
     resultStatus: run.result_status ?? null, detail: run.detail ?? null, steps,
+    afterEvent: afterName === null ? null : {jobname: afterName, jobcount: afterCount},
+    namedEvent: namedId === null ? null : {id: namedId},
   };
 }
 

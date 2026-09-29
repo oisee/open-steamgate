@@ -13,10 +13,44 @@ import {readJobSnapshot} from "./osd-job-snapshot.mjs";
 
 const pending = new WeakMap();
 const keyOf = (name, count) => `${name}\0${count}`;
+const technicalText = Object.freeze({
+  IMPORTED: "Job imported for dispatch", STEP_STARTED: "Report step started",
+  STEP_COMPLETED: "Report step completed",
+  STEP_FAILED: "Step failed or result recording failed; review detail and business effects",
+  STEP_INTERRUPTED: "Worker stopped before recording the step result; review business effects",
+  JOB_COMPLETED: "Job completed", JOB_FAILED: "Job failed",
+  JOB_INTERRUPTED: "Worker stopped before recording a result; review business effects",
+});
+function validTechnicalLogEntry(log, stepCount) {
+  const stepEvent = log.event?.startsWith("STEP_");
+  const expectedSeverity = log.event?.includes("FAILED") || log.event?.includes("INTERRUPTED") ? "E" : "I";
+  const at = log.at;
+  let validTime = false;
+  if (typeof at === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(at)) {
+    const date = new Date(at);
+    validTime = !Number.isNaN(date.getTime()) && date.toISOString() === at;
+  }
+  return Object.hasOwn(technicalText, log.event) && log.text === technicalText[log.event] &&
+    log.severity === expectedSeverity && validTime &&
+    (stepEvent ? Number.isInteger(log.step) && log.step >= 1 && log.step <= stepCount : log.step === null);
+}
 const statusFill = (signature, fields) => fill(signature, {
   EV_JOBCOUNT: "", EV_JOBNAME: "", EV_INTENT_ID: "", EV_PROGRAM: "",
   EV_GENERATION: "", EV_SOURCE_DB: "", EV_SOURCE_INSTANCE: "", EV_SIGNAL_SEQ: "", EV_ERROR: "",
   EV_PHASE: "", EV_STATE: "", EV_RESULT_STATUS: "", EV_STEP_COUNT: "",
+  EV_ERROR_CODE: "", ...fields,
+});
+const readFill = (signature, fields) => fill(signature, {
+  EV_JOBCOUNT: "", EV_JOBNAME: "", EV_INTENT_ID: "", EV_PROGRAM: "",
+  EV_GENERATION: "", EV_SOURCE_DB: "", EV_SOURCE_INSTANCE: "", EV_SIGNAL_SEQ: "", EV_ERROR: "",
+  EV_PHASE: "", EV_STATE: "", EV_RESULT_STATUS: "", EV_STEP_COUNT: "",
+  EV_LOG_COUNT: "", EV_HISTORICAL_GAP: "", EV_CREATED_ON: "", EV_CREATED_AT: "",
+  EV_QUEUED_AT: "", EV_STARTED_AT: "", EV_ENDED_AT: "",
+  EV_WAIT_KIND: "", EV_WAIT_JOBNAME: "", EV_WAIT_JOBCOUNT: "",
+  EV_WAIT_EVENT_ID: "", EV_STEP_NUMBER: "", EV_STEP_PROGRAM: "",
+  EV_STEP_STATE: "", EV_STEP_STARTED_AT: "", EV_STEP_ENDED_AT: "",
+  EV_STEP_RESULT_STATUS: "", EV_LOG_SEQUENCE: "", EV_LOG_STEP: "",
+  EV_LOG_AT: "", EV_LOG_EVENT: "", EV_LOG_SEVERITY: "", EV_LOG_TEXT: "",
   EV_ERROR_CODE: "", ...fields,
 });
 export const MAX_JOB_STEPS = 16;
@@ -66,49 +100,94 @@ export class JobDestination {
     const db = globalThis.abap?.context?.databaseConnections?.DEFAULT;
     if (this.env.STG_DB !== "file" || !db?.path || db.path === ":memory:") {
       if (command === "STATUS") statusFill(signature, {EV_ERROR_CODE: "UNAVAILABLE"});
+      else if (command === "READ_JOB") readFill(signature, {EV_ERROR_CODE: "UNAVAILABLE"});
       else fill(signature, {EV_ERROR: "JOB_* requires a durable STG_DB=file business database"});
       return;
     }
-    if (command === "STATUS") {
+    if (command === "STATUS" || command === "READ_JOB") {
+      const response = command === "READ_JOB" ? readFill : statusFill;
+      const item = givenText(signature, "IV_ITEM").toUpperCase() || "HEADER";
+      const indexText = givenText(signature, "IV_INDEX");
+      const itemIndex = Number(indexText);
+      if (command === "READ_JOB" && (!["HEADER", "STEP", "LOG"].includes(item) ||
+          (item === "HEADER" && indexText) ||
+          (item === "STEP" && (!/^\d+$/.test(indexText) || itemIndex < 1 || itemIndex > MAX_JOB_STEPS)) ||
+          (item === "LOG" && (!/^\d+$/.test(indexText) || itemIndex < 1 || itemIndex > 2000)))) {
+        readFill(signature, {EV_ERROR_CODE: "BAD_KEY"});
+        return;
+      }
       // Caller-supplied IV_OWNER and IV_CLIENT are deliberately ignored.
       // The configured identity also boots sy-uname/mandt/sysid in this host.
       const who = identity(this.env);
       const sourceDb = resolve(db.path);
       const name = jobname.trim().toUpperCase();
       if (!name || name.length > 32 || !/^\d{8}$/.test(count)) {
-        statusFill(signature, {EV_ERROR_CODE: "BAD_KEY"});
+        response(signature, {EV_ERROR_CODE: "BAD_KEY"});
         return;
       }
       const transient = pending.get(token)?.get(keyOf(name, count));
       if (transient) {
-        statusFill(signature, {EV_ERROR_CODE: transient.owner === who.user && transient.client === who.client ?
+        response(signature, {EV_ERROR_CODE: transient.owner === who.user && transient.client === who.client ?
           "UNCOMMITTED" : "FORBIDDEN"});
         return;
       }
       try {
         const snapshot = readJobSnapshot({sourceDb, jobName: name, jobCount: count,
           caller: {client: who.client, user: who.user, sid: who.sid},
-          root: this.root, env: this.env});
+          root: this.root, env: this.env, includeTechnicalLog: command === "READ_JOB"});
         // The durable reader uses a second, read-only connection. Its absence
         // can mean an OPEN/CLOSE still staged in this caller's SQLite LUW.
         // Inspect the *existing* business connection without ending that LUW.
         const local = db.db.prepare(`SELECT owner, intent_id FROM zosd_job_identity
           WHERE mandt = ? AND jobname = ? AND jobcount = ?`).get(who.client, name, count);
         if (local && String(local.owner ?? "").trim() !== who.user) {
-          statusFill(signature, {EV_ERROR_CODE: "FORBIDDEN"});
+          response(signature, {EV_ERROR_CODE: "FORBIDDEN"});
         } else if ((local && (!snapshot || String(local.intent_id ?? "").trim() !== (snapshot.intentId ?? ""))) ||
             (!local && snapshot)) {
-          statusFill(signature, {EV_ERROR_CODE: "UNCOMMITTED"});
+          response(signature, {EV_ERROR_CODE: "UNCOMMITTED"});
         } else if (!snapshot) {
-          statusFill(signature, {EV_ERROR_CODE: "NOT_FOUND"});
+          response(signature, {EV_ERROR_CODE: "NOT_FOUND"});
         } else {
-          statusFill(signature, {EV_PHASE: snapshot.phase, EV_STATE: snapshot.state,
-            EV_RESULT_STATUS: snapshot.resultStatus ?? "", EV_STEP_COUNT: String(snapshot.steps.length)});
+          const base = {EV_PHASE: snapshot.phase, EV_STATE: snapshot.state,
+            EV_RESULT_STATUS: snapshot.resultStatus ?? "", EV_STEP_COUNT: String(snapshot.steps.length)};
+          if (command === "STATUS") statusFill(signature, base);
+          else {
+            const entries = snapshot.technicalLog?.entries ?? [];
+            const wait = snapshot.afterEvent ? {EV_WAIT_KIND: "AFTER_JOB",
+              EV_WAIT_JOBNAME: snapshot.afterEvent.jobname,
+              EV_WAIT_JOBCOUNT: snapshot.afterEvent.jobcount} : snapshot.namedEvent ?
+              {EV_WAIT_KIND: "NAMED_EVENT", EV_WAIT_EVENT_ID: snapshot.namedEvent.id} : {};
+            const header = {...base, EV_LOG_COUNT: String(entries.length),
+              EV_HISTORICAL_GAP: snapshot.technicalLog?.historicalGap ? "X" : "",
+              EV_CREATED_ON: snapshot.createdOn ?? "", EV_CREATED_AT: snapshot.createdAt ?? "",
+              EV_QUEUED_AT: snapshot.queuedAt ?? "", EV_STARTED_AT: snapshot.startedAt ?? "",
+              EV_ENDED_AT: snapshot.endedAt ?? "", ...wait};
+            if (item === "STEP" && itemIndex > snapshot.steps.length ||
+                item === "LOG" && itemIndex > entries.length) {
+              readFill(signature, {EV_ERROR_CODE: "BAD_KEY"});
+            } else if (item === "STEP") {
+              const step = snapshot.steps[itemIndex - 1];
+              readFill(signature, {...header, EV_STEP_NUMBER: String(step.number),
+                EV_STEP_PROGRAM: step.program, EV_STEP_STATE: step.state,
+                EV_STEP_STARTED_AT: step.startedAt ?? "", EV_STEP_ENDED_AT: step.endedAt ?? "",
+                EV_STEP_RESULT_STATUS: step.resultStatus ?? ""});
+            } else if (item === "LOG") {
+              const log = entries[itemIndex - 1];
+              if (!validTechnicalLogEntry(log, snapshot.steps.length)) {
+                readFill(signature, {EV_ERROR_CODE: "INCONSISTENT"});
+              }
+              else readFill(signature, {...header, EV_LOG_SEQUENCE: String(log.sequence),
+                EV_LOG_STEP: log.step == null ? "" : String(log.step), EV_LOG_AT: log.at,
+                EV_LOG_EVENT: log.event, EV_LOG_SEVERITY: log.severity,
+                EV_LOG_TEXT: technicalText[log.event]});
+            } else readFill(signature, header);
+          }
         }
       } catch (error) {
         let code = {
           JOB_READ_BAD_KEY: "BAD_KEY", JOB_READ_FORBIDDEN: "FORBIDDEN",
           JOB_SNAPSHOT_INCONSISTENT: "INCONSISTENT", JOB_LEGACY_UNSUPPORTED: "LEGACY",
+          JOB_LOG_TOO_LARGE: "TOO_LARGE",
         }[error?.code] ?? "UNAVAILABLE";
         // An unfinished caller update can make its local identity differ
         // from the committed one even when the latter's snapshot is broken.
@@ -127,7 +206,7 @@ export class JobDestination {
             if (same(local) !== same(committed)) code = "UNCOMMITTED";
           } catch { code = "UNAVAILABLE"; }
         }
-        statusFill(signature, {EV_ERROR_CODE: code});
+        response(signature, {EV_ERROR_CODE: code});
       }
       return;
     }

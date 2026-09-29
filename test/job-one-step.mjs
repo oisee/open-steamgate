@@ -37,6 +37,13 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
   const status = (name, count) => invoke("ZOSD_JOB_STATUS", {
     iv_jobname: name, iv_jobcount: count,
   }, ["ev_phase", "ev_state", "ev_result_status", "ev_step_count"]);
+  const readJob = (name, count, item = "HEADER", index = "") => invoke("ZOSD_JOB_READ", {
+    iv_jobname: name, iv_jobcount: count, iv_item: item, iv_index: index,
+  }, ["ev_phase", "ev_state", "ev_step_count", "ev_log_count", "ev_historical_gap",
+    "ev_wait_kind", "ev_wait_jobname", "ev_wait_jobcount", "ev_wait_event_id",
+    "ev_created_on", "ev_created_at", "ev_queued_at", "ev_started_at", "ev_ended_at",
+    "ev_step_number", "ev_step_program", "ev_step_state",
+    "ev_log_sequence", "ev_log_at", "ev_log_event", "ev_log_text"]);
   const schedule = () => dialogStep(async () => {
     const count = await open();
     await submit(count);
@@ -332,6 +339,113 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       scoped.close();
       process.env.OSD_OPERATIONS_DB = previous;
     }
+  });
+
+  it("reads bounded private step and technical log metadata without draining work", async () => {
+    const name = "READ_JOB_CHAIN";
+    let count;
+    await dialogStep(async () => {
+      count = await open(name);
+      await submit(count, {jobname: name});
+      await close(count, {jobname: name});
+      await classic(() => readJob(name, count), "uncommitted");
+    });
+    const outbox = rows().find((row) => row.jobname.trim() === name && row.jobcount.trim() === count);
+    const previous = process.env.OSD_OPERATIONS_DB;
+    const path = join(dir, "read-job-operations.sqlite");
+    process.env.OSD_OPERATIONS_DB = path;
+    try {
+      const before = rows().length;
+      const header = await dialogStep(() => readJob(name, count));
+      expect(header.ev_phase).to.equal("OUTBOX");
+      expect(header.ev_step_count).to.equal("1");
+      expect(header.ev_log_count).to.equal("0");
+      expect((await dialogStep(() => readJob(name, count, "STEP", "1"))).ev_step_program)
+        .to.equal("ZGG_EX_012");
+      expect(rows()).to.have.length(before);
+      expect(existsSync(path)).to.equal(false);
+      const scoped = new BatchRuns(root, process.env);
+      try {
+        const run = scoped.importIntent({intentId: outbox.intent_id.trim(), sourceDb: dbPath,
+          client: "123", sysid: "OSG", owner: "DEVELOPER", jobname: name, jobcount: count,
+          program: "ZGG_EX_012", generation: outbox.generation.trim(),
+          steps: [{number: 1, program: "ZGG_EX_012"}]}).run;
+        const log = await dialogStep(() => readJob(name, count, "LOG", "1"));
+        expect(log.ev_log_count).to.equal("1");
+        expect(log.ev_log_event).to.equal("IMPORTED");
+        expect(log.ev_log_text).to.equal("Job imported for dispatch");
+        expect(JSON.stringify(log)).not.to.include(dbPath);
+        expect(rows()).to.have.length(before);
+        expect(scoped.claimNext().run.id).to.equal(run.id);
+        scoped.finishStep(run.id, 1, {status: "COMPLETED", lines: ["private output"]});
+        const done = await dialogStep(() => readJob(name, count, "STEP", "1"));
+        expect(done.ev_step_state).to.equal("COMPLETED");
+        expect(JSON.stringify(done)).not.to.include("private output");
+        expect((await dialogStep(() => readJob(name, count))).ev_log_count).to.equal("4");
+        scoped.db.prepare("UPDATE batch_job_log SET occurred_at = ? WHERE run_id = ? AND seq = 1")
+          .run(dbPath, run.id);
+        await dialogStep(() => classic(() => readJob(name, count, "LOG", "1"), "inconsistent"));
+        scoped.db.prepare("UPDATE batch_job_log SET occurred_at = ? WHERE run_id = ? AND seq = 1")
+          .run(log.ev_log_at, run.id);
+        scoped.db.prepare("UPDATE batch_job_log SET step_no = 1 WHERE run_id = ? AND seq = 1")
+          .run(run.id);
+        await dialogStep(() => classic(() => readJob(name, count, "LOG", "1"), "inconsistent"));
+        scoped.db.prepare("UPDATE batch_job_log SET step_no = NULL WHERE run_id = ? AND seq = 1")
+          .run(run.id);
+        scoped.db.exec("BEGIN");
+        try {
+          const append = scoped.db.prepare(`INSERT INTO batch_job_log
+            (run_id, seq, step_no, occurred_at, event_code, severity, text)
+            VALUES (?, ?, NULL, ?, 'JOB_COMPLETED', 'I', 'Job completed')`);
+          for (let seq = 5; seq <= 2001; seq++) append.run(run.id, seq, new Date().toISOString());
+          scoped.db.exec("COMMIT");
+        } catch (error) { scoped.db.exec("ROLLBACK"); throw error; }
+        await dialogStep(() => classic(() => readJob(name, count), "too_large"));
+        expect((await drainJobOutbox(scoped)).imported).to.equal(1);
+      } finally { scoped.close(); }
+    } finally { process.env.OSD_OPERATIONS_DB = previous; }
+  });
+
+  it("bounds private read ordinals and clears reused port fields after an error", async () => {
+    const name = "READ_JOB_CLEAR";
+    const count = await dialogStep(async () => {
+      const allocated = await open(name);
+      await client.commit();
+      return allocated;
+    });
+    await dialogStep(async () => {
+      const importing = {ev_state: box("stale"), ev_step_program: box("stale"),
+        ev_log_text: box("stale"), ev_source_db: box("private path"),
+        ev_error_code: box("stale")};
+      const call = (item, index) => abap.context.RFCDestinations.JOBS.call(
+        "ZOSD_JOB_PORT", {exporting: {iv_command: box("READ_JOB"),
+          iv_jobname: box(name), iv_jobcount: box(count), iv_item: box(item),
+          iv_index: box(index)}, importing});
+      await call("HEADER", "");
+      expect(importing.ev_state.get()).to.equal("RESERVED");
+      expect(importing.ev_source_db.get()).to.equal("");
+      await call("STEP", "17");
+      expect(importing.ev_error_code.get()).to.equal("BAD_KEY");
+      expect(importing.ev_state.get()).to.equal("");
+      expect(importing.ev_step_program.get()).to.equal("");
+      expect(importing.ev_log_text.get()).to.equal("");
+      expect(importing.ev_source_db.get()).to.equal("");
+      await call("LOG", "2001");
+      expect(importing.ev_error_code.get()).to.equal("BAD_KEY");
+      await classic(() => readJob(name, count, "LOG", "1"), "bad_key");
+      await client.beginTransaction();
+      client.db.prepare(`DELETE FROM zosd_job_identity
+        WHERE mandt = '123' AND jobname = ? AND jobcount = ?`).run(name, count);
+      await classic(() => readJob(name, count), "uncommitted");
+      await client.rollback();
+    });
+    const writer = new DatabaseSync(dbPath);
+    try {
+      writer.prepare(`INSERT INTO zosd_job_identity
+        (mandt, jobname, jobcount, owner, intent_id)
+        VALUES ('123', 'FOREIGN_READ', '00000096', 'OTHER', '')`).run();
+    } finally { writer.close(); }
+    await dialogStep(() => classic(() => readJob("FOREIGN_READ", "00000096"), "forbidden"));
   });
 
   it("uses trusted identity and clears reused port outputs on errors", async () => {
@@ -807,6 +921,12 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       expect(child.pred_jobname.trim()).to.equal("PRED_PARENT");
       expect(child.pred_jobcount.trim()).to.equal(parentCount);
       expect(child.pred_intent_id.trim()).to.equal(parent.intent_id.trim());
+      const waitingOutbox = await dialogStep(() => readJob("PRED_CHILD", childCount));
+      expect(waitingOutbox.ev_wait_kind).to.equal("AFTER_JOB");
+      expect(waitingOutbox.ev_wait_jobname).to.equal("PRED_PARENT");
+      expect(waitingOutbox.ev_wait_jobcount).to.equal(parentCount);
+      expect(waitingOutbox.ev_created_on).to.match(/^\d{8}$/);
+      expect(waitingOutbox.ev_queued_at).to.equal("");
       try {
         await drainJobOutbox(scoped, {afterImport: (intent) => {
           if (intent.jobname === "PRED_CHILD") throw new Error("crash after dependent import");
@@ -836,6 +956,10 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
         const previousOperationsDb = process.env.OSD_OPERATIONS_DB;
         process.env.OSD_OPERATIONS_DB = scopedEnv.OSD_OPERATIONS_DB;
         try {
+          const released = await dialogStep(() => readJob("PRED_CHILD", childCount));
+          expect(released.ev_state).to.equal("QUEUED");
+          expect(released.ev_wait_kind).to.equal("AFTER_JOB");
+          expect(released.ev_wait_jobname).to.equal("PRED_PARENT");
           await dialogStep(async () => {
             const lateCount = await open("PRED_TOO_LATE");
             await submit(lateCount, {jobname: "PRED_TOO_LATE"});
