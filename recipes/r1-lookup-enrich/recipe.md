@@ -17,8 +17,8 @@ The shape, in the semantic-patch form of `docs/verified-lift.md` 4.4:
 |---|---|---|
 | the loop body is that one statement | anything else may depend on the order of reads | `tools/lift.mjs model` (shape) |
 | the generated names are free | `lt_lookup` / `<ls_lookup>` declared twice would not compile, or would alias the row | `tools/lift.mjs model` (names) |
-| `K1..Kn` is the whole primary key of `D` without the client | then at most one row answers, so the hashed table can be unique and "which row" is not a question | `tools/lift.mjs model` against the table's DDIC: transparent, no includes, the client left out only as the first key field of a client-dependent table |
-| each `R-ki` has the type of `Ki` | `FOR ALL ENTRIES` needs compatible operands ([SAP documentation](https://help.sap.com/doc/abapdocu_752_index_htm/7.52/en-US/abenwhere_logexp_itab.htm)) and `READ TABLE` compares after conversion | open (listed in the model's `open`): needs the type-aware model (L1) |
+| `K1..Kn` is the whole primary key of `D` without the client | then at most one row answers, so the hashed table can be unique and "which row" is not a question | `tools/lift.mjs model` against the DDIC as abaplint resolves it (key includes expanded, data element to domain for CLNT): transparent, the client left out only as the first field and key of a client-dependent table |
+| each `R-ki` has the type of `Ki` | `FOR ALL ENTRIES` needs compatible operands ([SAP documentation](https://help.sap.com/doc/abapdocu_752_index_htm/7.52/en-US/abenwhere_logexp_itab.htm)) and `READ TABLE` compares after conversion | `tools/lift.mjs model`: the row's type from abaplint's syntax against the column's from the DDIC, same kind, length and decimals; a row the syntax cannot resolve leaves it in `open` |
 | a miss leaves `R-ci` as it was | `SELECT SINGLE` that finds nothing does not touch its target | differential test `a_miss_keeps_the_old_value`, checked failing with a miss that clears; the same on A4H's kernel (2026-09-30) |
 | no rows, no read | `FOR ALL ENTRIES` over an empty table reads the whole table | the `IS NOT INITIAL` guard; visible only in cost, so `test/lift-r1.mjs` counts the database calls (0) |
 | a key asked twice | `FOR ALL ENTRIES` drops duplicates | differential test `the_same_key_twice` |
@@ -60,3 +60,21 @@ obligations.
 | this tree, `src/` | 154 | 379 | 4 | 1 | 0 |
 
 In abapGit the loops reached through an own method add 40% to what the rule reports.
+
+## What stops the rest
+
+`node tools/lift.mjs survey <folder>` puts every method with a `SELECT SINGLE`
+in a loop through `model` and counts the refusals by obligation and sub-kind
+(2026-09-30; DDIC from `src`, open-abap-core and the corpus itself):
+
+| corpus | candidates | accepted | refused by |
+|---|---|---|---|
+| abapGit | 13 | 0 | `shape/body` 7, `shape/loop-where` 2, `shape/loop-into` 2, `shape/loop-table` 1, `shape/loops` 1 |
+| spacelab | 2 | 0 | `shape/loop-other` 2 |
+| this tree, `src/` | 1 | 1 (the demo) | |
+
+No candidate got as far as the key: real loops do more than the one
+SELECT. The widening that pays first is `shape/body` -- other statements
+beside the SELECT, which needs a data-flow obligation (they do not read what
+the SELECT writes before it is written, and do not write what it reads) --
+then `LOOP ... INTO` and `LOOP ... WHERE`, which are mechanical.

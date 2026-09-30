@@ -4,6 +4,9 @@
 //   node tools/lift.mjs find <folder>...          database work inside loops, counted
 //   node tools/lift.mjs model <file.abap> <method> [--ddic <folder>]...
 //                                                 the R1 model of that method's loop, or why not
+//   node tools/lift.mjs survey <folder> [--ddic <folder>]... [--list]
+//                                                 R1 over every method with SELECT SINGLE in a loop:
+//                                                 how many are accepted, and the refusals by obligation
 //
 // `find` counts two things abaplint's db_operation_in_loop does not tell
 // apart: a database statement written inside LOOP/DO/WHILE, and a loop that
@@ -12,7 +15,8 @@
 //
 // `model` is what a recipe's template renders from. It refuses rather than
 // guesses: every obligation it checks is named in the refusal, and the ones it
-// cannot check yet are listed in recipes/r1-lookup-enrich/recipe.md.
+// did not check are listed in the model's `open`. The key and the types come
+// from abaplint's own DDIC resolution and syntax, not from a parse of ours.
 
 import {createRequire} from "node:module";
 import {readFileSync, readdirSync} from "node:fs";
@@ -115,67 +119,111 @@ export function find(folder) {
   return result;
 }
 
-// The primary key of a transparent table from its abapGit XML. The client
-// column is left out only where the table is client-dependent and the column
-// is its first key field of type CLNT; any other layout is refused, never
-// guessed, because dropping a real key field makes SELECT SINGLE ambiguous.
-export function primaryKey(table, ddicFolders) {
-  const name = `${table.toLowerCase()}.tabl.xml`;
-  for (const folder of ddicFolders) {
-    const hit = walk(folder, /\.tabl\.xml$/).find((p) => basename(p) === name);
-    if (!hit) continue;
-    const xml = readFileSync(hit, "utf8");
-    if (!/<TABCLASS>TRANSP</.test(xml)) throw new Refusal("full key", `${table} is not a transparent table`);
-    const fields = [...xml.matchAll(/<DD03P>([\s\S]*?)<\/DD03P>/g)].map((m) => ({
-      name: /<FIELDNAME>([^<]+)</.exec(m[1])[1].toLowerCase(),
-      key: /<KEYFLAG>X</.test(m[1]),
-      datatype: /<DATATYPE>(\w+)</.exec(m[1])?.[1],
-      mandt: /<ROLLNAME>MANDT</.test(m[1]),
-      include: /<FIELDNAME>\.INCLU/.test(m[1]),
-    }));
-    if (fields.some((f) => f.include)) throw new Refusal("full key", `${table} has includes; their key fields are not resolved`);
-    // a client column is CLNT, or data element MANDT with no type of its own
-    for (const f of fields) {
-      if (f.mandt && f.datatype && f.datatype !== "CLNT") {
-        throw new Refusal("full key", `${table}-${f.name} has data element MANDT but type ${f.datatype}`);
-      }
-      f.client = f.datatype === "CLNT" || f.mandt;
+// Where a table's key and its types come from. A provider takes the registry
+// and a table name and answers {keys: [{column, type}]}, undefined when the
+// table is not its to answer, or a Refusal when it is and the key is not
+// unambiguous. One provider now: the DDIC as abaplint resolves it (key
+// includes and appends expanded, data elements and domains followed). CDS
+// views and a database catalog are later providers of the same shape.
+export const DEFAULT_DDIC = ["src", ".local/lars/open-abap-core/src"];
+const DDIC_FILES = /\.(tabl|dtel|doma|view|ttyp)\.xml$/;
+const unresolved = (type) => type instanceof abaplint.BasicTypes.UnknownType || type instanceof abaplint.BasicTypes.VoidType;
+
+function ddicKey(registry, table) {
+  const t = registry.getObject("TABL", table.toUpperCase());
+  if (!t) return undefined;
+  if (t.getTableCategory() !== "TRANSP") throw new Refusal("full key", `${table} is not a transparent table`);
+  const type = t.parseType(registry);
+  if (!(type instanceof abaplint.BasicTypes.StructureType)) throw new Refusal("full key", `${table} does not resolve: ${type.getQualifiedName?.() ?? type.constructor.name}`);
+  const components = new Map(type.getComponents().map((c) => [c.name.toUpperCase(), c.type]));
+  const keys = t.listKeys(registry).map((k) => k.toUpperCase());
+  const missing = keys.find((k) => !components.has(k) || unresolved(components.get(k)));
+  if (missing) throw new Refusal("full key", `${table}-${missing} does not resolve in the DDIC given`);
+
+  // A client column is CLNT: by its own type, or by its data element's.
+  const raw = new Map((t.getFields() ?? []).map((f) => [f.FIELDNAME.toUpperCase(), f]));
+  const isClient = (name) => {
+    const field = raw.get(name);
+    const rollname = field ? field.ROLLNAME : components.get(name).getDDICName?.();
+    if (field?.ROLLNAME === "MANDT" && field.DATATYPE && field.DATATYPE !== "CLNT") {
+      throw new Refusal("full key", `${table}-${name} has data element MANDT but type ${field.DATATYPE}`);
     }
-    const keys = fields.filter((f) => f.key);
-    if (/<CLIDEP>X</.test(xml)) {
-      if (!fields[0]?.client || !fields[0].key) {
-        throw new Refusal("full key", `${table} is client-dependent but its first field is not the client key field`);
-      }
-      keys.shift();
+    if (field?.DATATYPE === "CLNT") return true;
+    if (!rollname) return false;
+    const dtel = registry.getObject("DTEL", rollname.toUpperCase());
+    return dtel ? dtel.getDataType(registry) === "CLNT" : rollname.toUpperCase() === "MANDT";
+  };
+  // CLIDEP is the one flag abaplint does not expose
+  if (/<CLIDEP>X</.test(t.getXML() ?? "")) {
+    const first = type.getComponents()[0]?.name.toUpperCase();
+    if (first !== keys[0] || !isClient(first)) {
+      throw new Refusal("full key", `${table} is client-dependent but its first field is not the client key field`);
     }
-    const stray = keys.find((f) => f.client);
-    if (stray) throw new Refusal("full key", `${table} has a second client-typed key field ${stray.name}`);
-    return keys.map((f) => f.name);
+    keys.shift();
   }
-  return undefined;
+  const stray = keys.find(isClient);
+  if (stray) throw new Refusal("full key", `${table} has a second client-typed key field ${stray.toLowerCase()}`);
+  return {keys: keys.map((k) => ({column: k.toLowerCase(), type: components.get(k)}))};
 }
 
+const KEY_PROVIDERS = [ddicKey];
+
+function registryFor(ddicFolders, sources) {
+  // abaplint's newest syntax: it reads 7.02 code as well, and corpora are not 7.02
+  const registry = new abaplint.Registry(new abaplint.Config(JSON.stringify({
+    ...abaplint.Config.getDefault().get(), syntax: {...abaplint.Config.getDefault().get().syntax, errorNamespace: "."}})));
+  for (const folder of ddicFolders) {
+    let files = [];
+    try {
+      files = walk(folder, DDIC_FILES);
+    } catch {
+      continue;
+    }
+    for (const path of files) registry.addFile(new abaplint.MemoryFile(basename(path), readFileSync(path, "utf8")));
+  }
+  for (const file of sources) registry.addFile(new abaplint.MemoryFile(file.name, file.source));
+  registry.parse();
+  return registry;
+}
+
+// Two types are the same for a key comparison when they are of one kind and
+// have the same length and decimals; anything else converts, and a converted
+// comparison is a different comparison.
+function sameType(a, b) {
+  return a.constructor === b.constructor
+    && a.getLength?.() === b.getLength?.()
+    && a.getDecimals?.() === b.getDecimals?.();
+}
+const describe = (type) => `${type.constructor.name.replace(/Type$/, "")}${type.getLength ? `(${type.getLength()})` : ""}`;
+
+// A refusal names the obligation; a sub-kind after a slash ("shape/body")
+// says which part of it, so a survey can count what to widen first. The
+// message starts with the obligation alone.
 class Refusal extends Error {
   constructor(obligation, detail) {
-    super(`${obligation}: ${detail}`);
+    super(`${obligation.split("/")[0]}: ${detail}`);
     this.obligation = obligation;
   }
 }
 
 // The R1 model of the one loop in `method`, or a Refusal naming the obligation.
-export function modelR1(path, method, ddicFolders) {
+export function modelR1(path, method, ddicFolders = DEFAULT_DDIC) {
   return modelR1FromSource(basename(path), readFileSync(path, "utf8"), method, ddicFolders);
 }
 
 const LOOKUP = "lt_lookup";
 const HIT = "<ls_lookup>";
 
-export function modelR1FromSource(name, source, method, ddicFolders) {
-  const [file] = parseSources([{name, source}]);
+export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DDIC) {
+  const registry = registryFor(ddicFolders, [{name, source}]);
+  const object = registry.getObjects().find((o) => o instanceof abaplint.ABAPObject && o.getABAPFiles().some((f) => f.getFilename() === name));
+  const file = object?.getABAPFiles().find((f) => f.getFilename() === name);
+  if (!file) throw new Refusal("shape/parse", `${name} does not parse as an ABAP object`);
+  if (!file.getStructure()) throw new Refusal("shape/parse", `${name} does not parse: ${file.getStatements().find((st) => st.get() instanceof abaplint.Unknown)?.concatTokens().slice(0, 80) ?? "no structure"}`);
   const m = file.getStructure()?.findAllStructures(Structures.Method).find((s) => methodName(s) === method.toLowerCase());
   if (!m) throw new Refusal("shape", `no method ${method} in ${name}`);
   const loops = m.findAllStructures(Structures.Loop);
-  if (loops.length !== 1) throw new Refusal("shape", `${loops.length} loops in ${method}, R1 takes one`);
+  if (loops.length !== 1) throw new Refusal("shape/loops", `${loops.length} loops in ${method}, R1 takes one`);
   const loop = loops[0];
   // The method sees its own body and its signature; a parameter of that name
   // counts as much as a local declaration.
@@ -189,23 +237,27 @@ export function modelR1FromSource(name, source, method, ddicFolders) {
 
   const head = loop.getFirstStatement().concatTokens().replace(/\s+/g, " ");
   const at = /^LOOP AT (\w+) ASSIGNING (<\w+>)\.$/i.exec(head);
-  if (!at) throw new Refusal("shape", `the loop is not LOOP AT itab ASSIGNING <fs>: ${head}`);
+  if (!at) {
+    const kind = / WHERE /i.test(head) ? "shape/loop-where" : / INTO /i.test(head) ? "shape/loop-into"
+      : /^LOOP AT \w+ ASSIGNING/i.test(head) ? "shape/loop-other" : "shape/loop-table";
+    throw new Refusal(kind, `the loop is not LOOP AT itab ASSIGNING <fs>: ${head}`);
+  }
   const [, table, row] = at;
 
   const body = loop.findAllStatementNodes().slice(1, -1);
   if (body.length !== 1 || !(body[0].get() instanceof Statements.Select)) {
-    throw new Refusal("shape", "the loop body is not one SELECT");
+    throw new Refusal("shape/body", `the loop body is ${body.length} statements, not one SELECT`);
   }
   const select = body[0].concatTokens().replace(/\s+/g, " ");
   const parts = /^SELECT SINGLE ([\w ]+?) FROM (\w+) INTO (\S+) WHERE (.+)\.$/i.exec(select);
-  if (!parts) throw new Refusal("shape", `not SELECT SINGLE cols FROM dbtab INTO target WHERE ...: ${select}`);
+  if (!parts) throw new Refusal("shape/select", `not SELECT SINGLE cols FROM dbtab INTO target WHERE ...: ${select}`);
   const [, columnList, dbtab, into, where] = parts;
   const columns = columnList.trim().split(" ").map((c) => c.toLowerCase());
   const targets = into.startsWith("(") ? into.slice(1, -1).split(",").map((t) => t.trim()) : [into];
-  if (columns.length !== targets.length) throw new Refusal("shape", "columns and targets differ in number");
+  if (columns.length !== targets.length) throw new Refusal("shape/select", "columns and targets differ in number");
   const fields = columns.map((column, i) => {
     const t = new RegExp(`^${row.replace(/[<>]/g, "\\$&")}-(\\w+)$`, "i").exec(targets[i]);
-    if (!t) throw new Refusal("shape", `target ${targets[i]} is not a component of ${row}`);
+    if (!t) throw new Refusal("shape/select", `target ${targets[i]} is not a component of ${row}`);
     return {column, component: t[1].toLowerCase()};
   });
 
@@ -214,13 +266,38 @@ export function modelR1FromSource(name, source, method, ddicFolders) {
     if (!c) throw new Refusal("full key", `condition "${condition.trim()}" is not column = ${row}-component`);
     return {column: c[1].toLowerCase(), component: c[2].toLowerCase()};
   });
-  const primary = primaryKey(dbtab, ddicFolders);
-  if (!primary) throw new Refusal("full key", `no DDIC for ${dbtab} in ${ddicFolders.join(", ")}`);
+  let resolved;
+  for (const provider of KEY_PROVIDERS) {
+    resolved = provider(registry, dbtab);
+    if (resolved) break;
+  }
+  if (!resolved) throw new Refusal("full key", `no provider knows ${dbtab} (DDIC from ${ddicFolders.join(", ")})`);
+  const primary = resolved.keys.map((k) => k.column);
   const asked = keys.map((k) => k.column);
   if (asked.length !== primary.length || primary.some((k) => !asked.includes(k))) {
     throw new Refusal("full key", `WHERE names ${asked.join(", ")}; the primary key of ${dbtab} is ${primary.join(", ")}`);
   }
   keys.sort((a, b) => primary.indexOf(a.column) - primary.indexOf(b.column));
+
+  // Key types: the row's component against the column, where the syntax
+  // resolves the row. Unresolved stays open; resolved and different refuses.
+  const open = ["no concurrent writes to the table during the loop", "reads confined to one client"];
+  const syntax = new abaplint.SyntaxLogic(registry, object).run();
+  const rowType = syntax.spaghetti.lookupPosition(body[0].getStart(), name)?.findVariable(row)?.getType();
+  const rowComponents = rowType instanceof abaplint.BasicTypes.StructureType
+    ? new Map(rowType.getComponents().map((c) => [c.name.toLowerCase(), c.type])) : undefined;
+  const typesKnown = rowComponents && keys.every((k) => rowComponents.has(k.component) && !unresolved(rowComponents.get(k.component)));
+  if (typesKnown) {
+    for (const k of keys) {
+      const column = resolved.keys.find((r) => r.column === k.column).type;
+      const component = rowComponents.get(k.component);
+      if (!sameType(column, component)) {
+        throw new Refusal("key types", `${row}-${k.component} is ${describe(component)}, ${dbtab}-${k.column} is ${describe(column)}`);
+      }
+    }
+  } else {
+    open.unshift("key types equal column types");
+  }
 
   return {
     recipe: "R1",
@@ -229,17 +306,56 @@ export function modelR1FromSource(name, source, method, ddicFolders) {
     fields,
     lookup: LOOKUP,
     hit: HIT,
-    // checked here: shape, full key against the DDIC, names. Not checked: the
-    // obligations recipes/r1-lookup-enrich/recipe.md lists as open.
-    open: ["key types equal column types", "no concurrent writes to the table during the loop",
-      "reads confined to one client"],
+    // checked here: shape, names, full key and (where the row resolves) key
+    // types against the DDIC. Not checked: what `open` lists.
+    open,
   };
+}
+
+// Every method of every class in `folder` whose loop holds a SELECT SINGLE,
+// put through R1: what a recipe can take today, and what stops the rest.
+export function survey(folder, ddicFolders = DEFAULT_DDIC) {
+  const result = {folder, candidates: 0, accepted: 0, refused: {}, cases: []};
+  for (const path of walk(folder, /\.clas\.abap$/)) {
+    const source = readFileSync(path, "utf8");
+    const [file] = parseSources([{name: basename(path), source}]);
+    for (const method of file?.getStructure()?.findAllStructures(Structures.Method) ?? []) {
+      const hit = loopsOf(method).some((l) => l.findAllStatementNodes()
+        .some((st) => st.get() instanceof Statements.Select && /^SELECT SINGLE /i.test(st.concatTokens())));
+      if (!hit) continue;
+      result.candidates++;
+      const where = `${basename(path)}:${methodName(method)}`;
+      try {
+        modelR1FromSource(basename(path), source, methodName(method), ddicFolders);
+        result.accepted++;
+        result.cases.push({where, accepted: true});
+      } catch (e) {
+        if (!(e instanceof Refusal)) throw e;
+        result.refused[e.obligation] = (result.refused[e.obligation] ?? 0) + 1;
+        result.cases.push({where, refused: e.message});
+      }
+    }
+  }
+  return result;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [command, ...args] = process.argv.slice(2);
   if (command === "find") {
     for (const folder of args) console.log(JSON.stringify(find(folder)));
+  } else if (command === "survey") {
+    const ddic = [];
+    let list = false;
+    const rest = [];
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "--ddic") ddic.push(args[++i]);
+      else if (args[i] === "--list") list = true;
+      else rest.push(args[i]);
+    }
+    const r = survey(rest[0], ddic.length ? ddic : DEFAULT_DDIC);
+    const {cases, ...counts} = r;
+    console.log(JSON.stringify(counts));
+    if (list) for (const c of cases) console.log(`  ${c.where}  ${c.accepted ? "ACCEPTED" : c.refused}`);
   } else if (command === "model") {
     const ddic = [];
     const rest = [];
@@ -248,14 +364,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       else rest.push(args[i]);
     }
     try {
-      console.log(JSON.stringify(modelR1(rest[0], rest[1], ddic.length ? ddic : ["src"]), null, 2));
+      console.log(JSON.stringify(modelR1(rest[0], rest[1], ddic.length ? ddic : DEFAULT_DDIC), null, 2));
     } catch (e) {
       if (!(e instanceof Refusal)) throw e;
       console.error(`R1 refused -- ${e.message}`);
       process.exit(1);
     }
   } else {
-    console.error("usage: node tools/lift.mjs find <folder>... | model <file.abap> <method> [--ddic <folder>]...");
+    console.error("usage: node tools/lift.mjs find <folder>... | model <file.abap> <method> [--ddic <folder>]... | survey <folder> [--ddic <folder>]... [--list]");
     process.exit(2);
   }
 }

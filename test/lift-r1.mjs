@@ -8,7 +8,7 @@ import {expect} from "chai";
 import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {find, modelR1, modelR1FromSource} from "../tools/lift.mjs";
+import {DEFAULT_DDIC, find, modelR1, modelR1FromSource} from "../tools/lift.mjs";
 
 const DEMO = "src/lift/zcl_osd_lift_r1_demo.clas.abap";
 const TEMPLATE = "recipes/r1-lookup-enrich/template.tpl";
@@ -45,7 +45,7 @@ describe("verified lift R1: lookup-enrich", function () {
   }
 
   it("the model is read out of BEFORE, the key checked against the DDIC", () => {
-    const model = modelR1(DEMO, "before", ["src"]);
+    const model = modelR1(DEMO, "before");
     expect(model.source).to.deep.equal({
       table: "zosd_lift_txt",
       keys: [{column: "kind", component: "kind"}, {column: "code", component: "code"}],
@@ -87,49 +87,65 @@ ENDCLASS.`;
   for (const [what, body, declarations, reason, parameters, method = "m"] of refusals) {
     it(`R1 refuses ${what}, naming the obligation`, () => {
       const run = body === null
-        ? () => modelR1(DEMO, "after", ["src"])
-        : () => modelR1FromSource("zcl_fx.clas.abap", fixture(body, declarations, parameters), method, ["src"]);
+        ? () => modelR1(DEMO, "after")
+        : () => modelR1FromSource("zcl_fx.clas.abap", fixture(body, declarations, parameters), method);
       expect(run).to.throw(reason);
     });
   }
 
   // The key is read off the DDIC only where its layout is unambiguous.
-  const table = (clidep, fields) => `<abapGit><asx:abap><asx:values><DD02V><TABNAME>ZOSD_LIFT_TXT</TABNAME>
-<TABCLASS>TRANSP</TABCLASS>${clidep ? "<CLIDEP>X</CLIDEP>" : ""}</DD02V><DD03P_TABLE>${fields.map((f) => `<DD03P>${f}</DD03P>`).join("")}
-</DD03P_TABLE></asx:values></asx:abap></abapGit>`;
+  const table = (name, category, clidep, fields) => `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_TABL" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <DD02V><TABNAME>${name}</TABNAME><DDLANGUAGE>E</DDLANGUAGE><TABCLASS>${category}</TABCLASS>${clidep ? "<CLIDEP>X</CLIDEP>" : ""}</DD02V>
+   <DD03P_TABLE>${fields.map((f) => `<DD03P>${f}</DD03P>`).join("")}</DD03P_TABLE>
+  </asx:values>
+ </asx:abap>
+</abapGit>`;
+  const char = (name, length, key) => `<FIELDNAME>${name}</FIELDNAME>${key ? "<KEYFLAG>X</KEYFLAG>" : ""}<INTTYPE>C</INTTYPE><INTLEN>${String(length * 2).padStart(6, "0")}</INTLEN><DATATYPE>CHAR</DATATYPE><LENG>${String(length).padStart(6, "0")}</LENG>`;
+  const MANDT = "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME><COMPTYPE>E</COMPTYPE>";
+  // the demo's table, laid out differently; the DDIC is the fixture's folder
+  // plus open-abap-core's (data element MANDT)
+  const withDdic = (files, run) => {
+    const dir = mkdtempSync(join(tmpdir(), "lift-ddic-"));
+    try {
+      for (const [name, xml] of Object.entries(files)) writeFileSync(join(dir, name), xml);
+      return run([dir, ...DEFAULT_DDIC.filter((d) => d !== "src")]);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  };
   const layouts = [
-    ["a client-dependent table whose first key field is not the client", table(true, [
-      "<FIELDNAME>KIND</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>",
-      "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME>",
-      "<FIELDNAME>CODE</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>"]), /first field is not the client key field/],
-    ["a client-independent table with a client-typed key field", table(false, [
-      "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME>",
-      "<FIELDNAME>KIND</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>",
-      "<FIELDNAME>CODE</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>"]), /client-typed key field mandt/],
-    ["a table with an include", table(true, [
-      "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME>",
-      "<FIELDNAME>.INCLUDE</FIELDNAME><KEYFLAG>X</KEYFLAG>"]), /has includes/],
-    ["a non-key column before the client", table(true, [
-      "<FIELDNAME>NOTE</FIELDNAME><DATATYPE>CHAR</DATATYPE>",
-      "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME>",
-      "<FIELDNAME>KIND</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>",
-      "<FIELDNAME>CODE</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>"]), /first field is not the client/],
-    ["data element MANDT with a type that is not CLNT", table(true, [
-      "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME><DATATYPE>CHAR</DATATYPE>",
-      "<FIELDNAME>KIND</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>",
-      "<FIELDNAME>CODE</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>"]), /MANDT but type CHAR/],
+    ["a client-dependent table whose first key field is not the client",
+      [char("KIND", 4, true), MANDT, char("CODE", 10, true), char("TEXT", 40)], true, /first field is not the client key field/],
+    ["a client-independent table with a client-typed key field",
+      [MANDT, char("KIND", 4, true), char("CODE", 10, true), char("TEXT", 40)], false, /client-typed key field mandt/],
+    ["a non-key column before the client (no layout SAP allows either)",
+      [char("NOTE", 4), MANDT, char("KIND", 4, true), char("CODE", 10, true), char("TEXT", 40)], true, /^full key: zosd_lift_txt does not resolve/], // abaplint itself will not lay out a key after a non-key field,
+    ["data element MANDT with a type that is not CLNT",
+      [MANDT + "<DATATYPE>CHAR</DATATYPE><LENG>000003</LENG><INTTYPE>C</INTTYPE><INTLEN>000006</INTLEN>", char("KIND", 4, true), char("CODE", 10, true), char("TEXT", 40)], true, /MANDT but type CHAR/],
   ];
-  for (const [what, xml, reason] of layouts) {
+  for (const [what, fields, clidep, reason] of layouts) {
     it(`R1 refuses ${what}`, () => {
-      const dir = mkdtempSync(join(tmpdir(), "lift-ddic-"));
-      try {
-        writeFileSync(join(dir, "zosd_lift_txt.tabl.xml"), xml);
-        expect(() => modelR1(DEMO, "before", [dir])).to.throw(reason);
-      } finally {
-        rmSync(dir, {recursive: true, force: true});
-      }
+      withDdic({"zosd_lift_txt.tabl.xml": table("ZOSD_LIFT_TXT", "TRANSP", clidep, fields)},
+        (ddic) => expect(() => modelR1(DEMO, "before", ddic)).to.throw(reason));
     });
   }
+
+  it("R1 reads a key that comes through an include, as abaplint expands it", () => {
+    const model = withDdic({
+      "zosd_lift_key.tabl.xml": table("ZOSD_LIFT_KEY", "INTTAB", false, [char("KIND", 4), char("CODE", 10)]),
+      "zosd_lift_txt.tabl.xml": table("ZOSD_LIFT_TXT", "TRANSP", true,
+        [MANDT, "<FIELDNAME>.INCLUDE</FIELDNAME><KEYFLAG>X</KEYFLAG><PRECFIELD>ZOSD_LIFT_KEY</PRECFIELD><COMPTYPE>S</COMPTYPE>", char("TEXT", 40)]),
+    }, (ddic) => modelR1(DEMO, "before", ddic));
+    expect(model.source.keys.map((k) => k.column)).to.deep.equal(["kind", "code"]);
+    expect(model.open).to.not.include("key types equal column types");
+  });
+
+  it("R1 refuses a table no provider knows", () => {
+    withDdic({}, (ddic) => expect(() => modelR1(DEMO, "before", ddic)).to.throw(/^full key: no provider knows zosd_lift_txt/));
+  });
 
   // find: which calls are to the class's own database-reading method.
   const receivers = [
@@ -166,13 +182,23 @@ ENDCLASS.`);
   }
 
   it("the fixture itself is accepted, so the refusals above are about their one change", () => {
-    const model = modelR1FromSource("zcl_fx.clas.abap", fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`), "m", ["src"]);
-    expect(model.open).to.have.members(["key types equal column types",
-      "no concurrent writes to the table during the loop", "reads confined to one client"]);
+    const model = modelR1FromSource("zcl_fx.clas.abap", fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`), "m");
+    // the key types were checked against the DDIC, so they are not open
+    expect(model.open).to.have.members(["no concurrent writes to the table during the loop", "reads confined to one client"]);
+  });
+
+  it("R1 refuses a key component whose type differs from the column", () => {
+    const source = fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`).replace("kind TYPE c LENGTH 4", "kind TYPE c LENGTH 5");
+    expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(/^key types: <ls_row>-kind is Character\(5\), zosd_lift_txt-kind is Character\(4\)/);
+  });
+
+  it("a row the syntax cannot resolve leaves the key types open instead of guessing", () => {
+    const source = fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`).replace("kind TYPE c LENGTH 4", "kind TYPE zsomething_unknown");
+    expect(modelR1FromSource("zcl_fx.clas.abap", source, "m").open).to.include("key types equal column types");
   });
 
   it("the generated region of AFTER is exactly what the template renders", async () => {
-    const {text, trace} = await render(modelR1(DEMO, "before", ["src"]));
+    const {text, trace} = await render(modelR1(DEMO, "before"));
     expect(region(readFileSync(DEMO, "utf8"))).to.equal(text);
     // the line that copies the value traces to the template line of the
     // field loop and to the first value on it
