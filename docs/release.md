@@ -75,6 +75,14 @@ with `--clobber` on every rerun. Do not move a published tag.
 
 The VSIX job installs dependencies with Node 24, runs `npm run bootstrap`
 for the pinned libraries and packs in `libs.lock.json`, and builds the VSIX.
+The system seed is assembled by `scripts/build-vsix.mjs` from the traced
+`node_modules` closure. Before this change, that copied the published npm
+`@abaplint/transpiler` and `@abaplint/runtime`; the release jobs did not link
+the fork. The seeded binary uses the same `stageSystemSeed()` function and
+had the same issue, even though CI tests link the fork. There was no licence
+exclusion: the fork and upstream transpiler both declare MIT. Release builds
+now compile and link the `libs.lock.json` fork before bootstrap, for the VSIX,
+seeded binary, and Marketplace profile.
 Before creating or editing a release, it generates CHANGELOG.md from first-parent
 GitHub PR merge titles since the nearest previous `vscode-v*` tag. A merge
 commit without a title in its body gets its title from the PR API. Squash
