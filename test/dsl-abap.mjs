@@ -65,6 +65,25 @@ describe("ABAP declaration L1", function () {
     expect(method.parameters[4]["@type"]).to.include({resolved: true, built_in: "STRING"});
   });
 
+  // merge critic on #297: a table of an unknown row was reported resolved
+  it("does not call a table or structure resolved when a part of it is not", () => {
+    const nested = join(folder, "zcl_dsl_nested.clas.abap");
+    writeFileSync(nested, `CLASS zcl_dsl_nested DEFINITION PUBLIC FINAL.
+  PUBLIC SECTION.
+    TYPES: BEGIN OF ty_half, ok TYPE i, bad TYPE zfx_missing, END OF ty_half.
+    DATA mt_rows TYPE STANDARD TABLE OF zfx_missing WITH DEFAULT KEY.
+    DATA ms_half TYPE ty_half.
+    DATA mt_ints TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+ENDCLASS.
+CLASS zcl_dsl_nested IMPLEMENTATION.
+ENDCLASS.
+`);
+    const cls = abapModel([nested], {ddic: ["src"]}).classes[0];
+    const byName = Object.fromEntries(cls.attributes.map((a) => [a.name, a["@type"].resolved]));
+    expect(byName).to.deep.equal({mt_rows: false, ms_half: false, mt_ints: true});
+    expect(cls.types.find((t) => t.name === "ty_half")["@type"].resolved).to.equal(false);
+  });
+
   it("includes superclass and interface declarations with their own source positions", () => {
     const base = join(folder, "zcl_dsl_base.clas.abap");
     const child = join(folder, "zcl_dsl_child.clas.abap");

@@ -17,6 +17,19 @@ export class Refusal extends Error {
 
 export const unresolved = (type) => type instanceof abaplint.BasicTypes.UnknownType
   || type instanceof abaplint.BasicTypes.VoidType;
+// Resolved all the way down: a table of an unknown row, or a structure with an
+// unknown component, is not a resolved type even though its outer type is
+// known. Used where the model states `resolved: true`.
+export function unresolvedDeep(type, seen = new Set()) {
+  if (!type || unresolved(type)) return true;
+  if (seen.has(type)) return false;
+  seen.add(type);
+  const BT = abaplint.BasicTypes;
+  if (type instanceof BT.TableType) return unresolvedDeep(type.getRowType(), seen);
+  if (type instanceof BT.StructureType) return type.getComponents().some((c) => unresolvedDeep(c.type, seen));
+  if (type instanceof BT.DataReference) return unresolvedDeep(type.getType(), seen);
+  return false;
+}
 
 function walk(dir) {
   const out = [];
@@ -137,7 +150,7 @@ const BUILTIN = new Map([
 // is the authority; the syntax name only survives where that type is unknown.
 DDIC_PROVIDER.type = (registry, type, name) => {
   const abapType = type?.getQualifiedName?.() || name;
-  if (!type || unresolved(type)) return {resolved: false, abap_type: name ?? abapType ?? "unknown"};
+  if (!type || unresolvedDeep(type)) return {resolved: false, abap_type: name ?? abapType ?? "unknown"};
   const result = {resolved: true};
   const builtIn = BUILTIN.get(type.constructor.name);
   if (builtIn) result.built_in = builtIn;
