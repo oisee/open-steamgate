@@ -1294,6 +1294,9 @@ something already shipped (then it is a must of the current release, like the ro
   **Done 2026-09-30 (stoker): both keep them.** In the second test class the counter reads 3 where A4H reads 1,
   on Node and on Go alike. See `ANOMALY-2026-09-30-unit-statics-across-test-classes`, with the fixture in
   `test/fixtures/unit-statics/`. The Go half of the fix is U4 step 2 below; the Node half needs a transpiler issue.
+- nice (foreman-dell, after U3 wave 3): the Go generator refuses to read another class's public static attribute in
+  an expression (`cl_abap_unit_assert=>assert_equals( act = zcl_x=>gv_attr … )` is NOT_COMPILED, alert
+  `ZCL_X=>GV_ATTR`). `--fixture` mode also reports a failed assertion as `KERNEL_CX_ASSERT` without its text.
 - should: U4 step 1, process sharding of ABAP Unit on Go.
 - should: U4 step 2, Session-owned statics/DB/LUW, one goroutine per test class on a copy of the seed image; statics
   reset per test class as on A4H.

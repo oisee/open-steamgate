@@ -9,8 +9,8 @@ ENDCLASS.
 
 CLASS ltc_a IMPLEMENTATION.
   METHOD m1_first.
-    cl_abap_unit_assert=>assert_equals( act = zcl_osd_statics_test=>bump( ) exp = 1 ).
     cl_abap_unit_assert=>assert_equals( act = zcl_osd_statics_test=>constructed( ) exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_statics_test=>bump( ) exp = 1 ).
   ENDMETHOD.
 
   METHOD m2_second.
@@ -26,8 +26,8 @@ ENDCLASS.
 
 CLASS ltc_b IMPLEMENTATION.
   METHOD m1_first.
-    cl_abap_unit_assert=>assert_equals( act = zcl_osd_statics_test=>bump( ) exp = 1 ).
     cl_abap_unit_assert=>assert_equals( act = zcl_osd_statics_test=>constructed( ) exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_statics_test=>bump( ) exp = 1 ).
   ENDMETHOD.
 
   METHOD m2_second.
