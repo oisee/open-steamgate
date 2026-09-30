@@ -45,6 +45,9 @@ const ranges = selections.filter((element) => element.kind === "select-option")
   .map((element) => element.name.toUpperCase());
 
 const core = join(home, ".local", "lars", "open-abap-core", "src");
+const rttiObjects = readdirSync(join(core, "rtti"))
+  .filter((file) => /^cl_abap_.*\.clas\.abap$/i.test(file))
+  .map((file) => file.replace(/\.clas\.abap$/i, ""));
 const appRuntime = join(here, "apps", "runtime");
 const hostObjects = [join(gui, "framework"), join(gui, "framework", "host")]
   .flatMap((folder) => readdirSync(folder)
@@ -52,7 +55,7 @@ const hostObjects = [join(gui, "framework"), join(gui, "framework", "host")]
     .map((file) => file.replace(/\.clas\.abap$/i, "")));
 const program = compileProgram({
   folders: [generated, appRuntime, join(gui, "framework"), join(gui, "src"), core],
-  objects: [className.toLowerCase(), ...hostObjects, "zcl_gg_workbench_utility",
+  objects: [className.toLowerCase(), ...hostObjects, ...rttiObjects, "zcl_gg_workbench_utility",
     "cl_gui_control", "cl_gui_container", "cl_gui_cfw", "cl_gui_frontend_services", "zcl_osabap_runtime"],
   skip: (path) => /\.testclasses\.abap$/i.test(path),
 });
