@@ -27,16 +27,20 @@ func OpenDB(script []byte) error {
 	if err != nil {
 		return err
 	}
+	defer func() { if err != nil { _ = d.Close() } }()
 	d.SetMaxOpenConns(1)
 	for i, st := range stmts {
-		if _, err := d.Exec(st); err != nil {
-			return fmt.Errorf("statement %d: %w: %.200s", i, err, st)
+		if _, execErr := d.Exec(st); execErr != nil {
+			err = fmt.Errorf("statement %d: %w: %.200s", i, execErr, st)
+			return err
 		}
 	}
-	if err := prepareStore(d); err != nil {
+	if err = prepareStore(d); err != nil {
 		return err
 	}
+	previous := db
 	db = d
+	if previous != nil { _ = previous.Close() }
 	return nil
 }
 

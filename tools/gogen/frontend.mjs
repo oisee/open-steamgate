@@ -16,6 +16,7 @@ import {lower as lowerRelation} from "../sqlscript-lower.mjs";
 import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
 import * as WIR from "../ir-writes.mjs";
 import {parseSamc} from "../osd-amc.mjs";
+import {lowerNarrowSubmit} from "../osd-narrow-submit.mjs";
 import {createRequire} from "node:module";
 import {readFileSync, readdirSync, existsSync} from "node:fs";
 import {join} from "node:path";
@@ -29,6 +30,12 @@ const {Rearranger} = require("@abaplint/transpiler/build/src/rearranger");
 const {Nodes, Statements, Structures, Expressions, BasicTypes} = abaplint;
 
 export class Unsupported extends Error {}
+// A class outside the program is named, so a closure can add it and retry
+// instead of refusing the caller for good.
+function notInProgram(ctx, cls, message) {
+  ctx.program.missing.add(cls);
+  return new Unsupported(message);
+}
 
 export const I = {k: "i"};
 export const F = {k: "f"};
@@ -128,7 +135,13 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
       const path = join(dir, e.name);
       if (e.isDirectory()) walk(path);
       else if (skip(path)) continue;
-      else if (/\.(abap|xml)$/i.test(e.name)) reg.addFile(new abaplint.MemoryFile(e.name, readFileSync(path, "utf8")));
+      else if (e.name.toLowerCase().endsWith(".clas.testclasses.abap") && includeTests !== true
+          && !includeTests?.has?.(objName(e.name).toUpperCase())) continue;
+      else if (/\.(abap|xml)$/i.test(e.name)) {
+        const source = readFileSync(path, "utf8");
+        reg.addFile(new abaplint.MemoryFile(e.name, wanted.includes(objName(e.name))
+          ? lowerNarrowSubmit(source, e.name, abaplint) : source));
+      }
       // a CDS view's source: its SQL view name, for the table registry
       else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push(readFileSync(path, "utf8"));
     }
@@ -148,7 +161,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   for (const e of errors) broken.add(objName(e.getFilename()));
   if (broken.size > 0) wanted.splice(0, wanted.length, ...wanted.filter((w) => !broken.has(w)));
 
-  const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], wanted: new Set(wanted.map(upper)),
+  const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], missing: new Set(), wanted: new Set(wanted.map(upper)),
     interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
   program.supplied = suppliedParams(reg, program.wanted);
   PROGRAM = program;
@@ -408,8 +421,8 @@ function suppliedParams(reg, wanted) {
       const found = [...m.concatTokens().matchAll(/(\w+)\s+IS\s+(?:NOT\s+)?SUPPLIED/gi)].map((x) => upper(x[1]));
       if (found.length === 0) continue;
       const name = upper(m.findFirstExpression(Expressions.MethodName).concatTokens());
-      if (name.includes("~")) continue;
-      const key = `${declaringClass(reg, upper(obj.getName()), name, "method") ?? upper(obj.getName())}=>${name}`;
+      const key = name.includes("~") ? `${name.split("~")[0]}=>${name.split("~")[1]}`
+        : `${declaringClass(reg, upper(obj.getName()), name, "method") ?? upper(obj.getName())}=>${name}`;
       out.set(key, new Set([...(out.get(key) ?? []), ...found]));
     }
   }
@@ -447,7 +460,7 @@ function componentInterfaces(reg, intf, seen = new Set()) {
 // NATIVE below) carry the deserialize path ZCL_OSD_STATUS=>REFRESH takes
 // parity-wave2: CL_ABAP_ZIP (LCL_STREAM: the zip's bytes and its CRC-32),
 // the SEGW RepoSet zip
-const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM", "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CL_ABAP_ZIP", "CL_ABAP_UNIT_ASSERT"]);
+const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM", "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CL_ABAP_ZIP", "CL_ABAP_UNIT_ASSERT", "ZCL_AJSON"]);
 // the definitions of the local classes compiled, by their compiled name
 const LOCAL_DEFS = new Map();
 // a class's definition: a global class of the registry, or a local class of
@@ -465,6 +478,9 @@ function localClasses(reg, obj, includeTests = false) {
     if (!testInclude && !LOCAL_CLASSES.has(owner)) continue;
     for (const info of file.getInfo().listClassDefinitions()) {
       const local = upper(info.name);
+      // AJSON's parser is the only local path needed by PARSE. Its mutator
+      // locals implement local interfaces that the compiler cannot model.
+      if (owner === "ZCL_AJSON" && !["LCL_JSON_PARSER", "LCL_UTILS"].includes(local)) continue;
       const def = findScope(top, "class_definition", local)?.findClassDefinition(local);
       if (def === undefined) continue;
       out.push({
@@ -1096,7 +1112,7 @@ function typeOf(t, where, program) {
     // a hashed one is refused where it is used
     const secondary = (t.getOptions().secondary ?? []).map((k) => ({name: upper(k.name), sorted: String(k.type).toUpperCase() === "SORTED",
       hashed: String(k.type).toUpperCase() === "HASHED", unique: k.isUnique === true, comps: k.keyFields.map(upper)}));
-    if (secondary.length && access !== "STANDARD") throw new Unsupported(`${where}: secondary keys on a ${access} table`);
+    if (secondary.length && access === "HASHED") throw new Unsupported(`${where}: secondary keys on a ${access} table`);
     // ultra/itab: the primary key, for SORT without BY: "default", the
     // component names of a user key, or [] for an empty one
     if (access === "STANDARD") {
@@ -1117,7 +1133,8 @@ function typeOf(t, where, program) {
       const o = t.getOptions();
       const key = (o.primaryKey?.keyFields ?? []).map(upper);
       if (key.length === 0) throw new Unsupported(`${where}: SORTED table without a key`);
-      return {k: "table", row, sorted: key, unique: !!o.primaryKey?.isUnique};
+      return secondary.length ? {k: "table", row, sorted: key, unique: !!o.primaryKey?.isUnique, secondary}
+        : {k: "table", row, sorted: key, unique: !!o.primaryKey?.isUnique};
     }
     throw new Unsupported(`${where}: ${access} tables`);
   }
@@ -1274,7 +1291,8 @@ function classIr(ctx0, obj) {
         ...p.getChanging().map((x) => param(x, "changing"))];
       signatures.set(name, {
         name, static: isStatic, private: m.getVisibility?.() === 1, abstract: m.isAbstract?.() ?? false,
-        params: prefix ? own : withSupplied(program, `${declaringClass(reg, className, name, "method") ?? className}=>${name}`, own),
+        params: withSupplied(program, prefix ? `${prefix.slice(0, -1)}=>${upper(m.getName())}`
+          : `${declaringClass(reg, className, name, "method") ?? className}=>${name}`, own),
         returning: ret === undefined ? null : {name: upper(ret.getName()), type: typeOf(ret.getType(), where, program)},
       });
     } catch (e) {
@@ -2040,12 +2058,23 @@ function statement(node, ctx) {
       if (target.type.k !== "x") throw new Unsupported(`SHIFT LEFT CIRCULAR IN BYTE MODE of a ${target.type.k}`);
       return {s: "shift_left_circ_bytes", target};
     }
+    // SHIFT s LEFT DELETING LEADING mask on a string or a c: the leading
+    // characters that are in the mask go (the runtime's shift.js); a c mask
+    // keeps its trailing blanks, so `space` deletes blanks. A c target is
+    // stored without trailing blanks, so nothing is padded here.
+    if (/^SHIFT\s+\S+\s+LEFT\s+DELETING\s+LEADING\s/i.test(text)) {
+      const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      if (target.type.k !== "string" && target.type.k !== "c") throw new Unsupported(`SHIFT LEFT DELETING LEADING of a ${target.type.k}`);
+      const mask = source(node.findDirectExpression(Expressions.Source), ctx);
+      if (mask.type.k !== "c" && mask.type.k !== "string") throw new Unsupported(`SHIFT ... DELETING LEADING a ${mask.type.k}`);
+      return {s: "shift_left_leading", target, mask: convert(mask, S), maskLen: mask.type.k === "c" ? mask.type.len ?? 1 : undefined};
+    }
     if (!/^SHIFT\s+\S+\s+RIGHT\s+DELETING\s+TRAILING\s/i.test(text)) throw new Unsupported(`statement Shift: ${text}`);
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (target.type.k !== "string") throw new Unsupported(`SHIFT RIGHT DELETING TRAILING of a ${target.type.k}`);
     const mask = source(node.findDirectExpression(Expressions.Source), ctx);
     if (mask.type.k !== "c" && mask.type.k !== "string") throw new Unsupported(`SHIFT ... DELETING TRAILING a ${mask.type.k}`);
-    return {s: "shift_right_trailing", target, mask: convert(mask, S)};
+    return {s: "shift_right_trailing", target, mask: convert(mask, S), maskLen: mask.type.k === "c" ? mask.type.len ?? 1 : undefined};
   }
   // CONCATENATE a b ... INTO t IN BYTE MODE, t an xstring and every operand
   // an x or an xstring (ultra/packs: the SMW0 loaders of Zork and ZO4D glue
@@ -2175,7 +2204,7 @@ function statement(node, ctx) {
     const respecting = /\bRESPECTING\s+BLANKS\b/i.test(text);
     const lines = /^CONCATENATE\s+LINES\s+OF\b/i.test(text);
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
-    if (target.type.k !== "string" && target.type.k !== "c") throw new Unsupported(`CONCATENATE into a ${target.type.k}`);
+    if (!["string", "c", "n", "d"].includes(target.type.k)) throw new Unsupported(`CONCATENATE into a ${target.type.k}`);
     const piece = (x) => {
       if (x.type.k === "c") return respecting ? {e: "padc", x, n: x.type.len, type: S} : convert(x, S);
       if (["string", "n", "d", "t"].includes(x.type.k)) return convert(x, S);
@@ -2392,6 +2421,15 @@ function statement(node, ctx) {
     keyGuard(table.type, "SORT");
     refuseSorted(table, "SORT of");
     return {s: "sort", table, keys};
+  }
+  if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+ADJACENT\s+DUPLICATES\s+FROM\s+\S+\s+COMPARING\s+ALL\s+FIELDS\s*\.?$/i.test(text)) {
+    const name = /^DELETE\s+ADJACENT\s+DUPLICATES\s+FROM\s+(\S+)/i.exec(text)[1];
+    const table = variable(name, ctx);
+    if (table.type.k !== "table" || table.type.hashed || table.type.row.k !== "struct") throw new Unsupported(`DELETE ADJACENT DUPLICATES from a ${table.type.k}`);
+    keyGuard(table.type, "DELETE ADJACENT DUPLICATES");
+    const fields = ctx.program.structs.get(table.type.row.go)?.fields ?? [];
+    if (!fields.length || fields.some((f) => !["string", "c", "n", "d", "t", "i", "int8", "f"].includes(f.type.k))) throw new Unsupported(`DELETE ADJACENT DUPLICATES of a row with deep or unsupported fields`);
+    return {s: "delete_adjacent", table, fields: fields.map((f) => f.name)};
   }
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+\S+\s+WHERE\s+/i.test(text)) {
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
@@ -2926,6 +2964,8 @@ function initialValue(node, ctx) {
   if (src === undefined) throw new Unsupported(`VALUE of ${name}`);
   let v;
   if (isExpr(src, Expressions.Constant)) v = sourceOperand(src, ctx);
+  else if (upper(src.concatTokens()) === "ABAP_TRUE") v = {e: "chars", value: "X", type: C(1)};
+  else if (upper(src.concatTokens()) === "ABAP_FALSE") v = {e: "chars", value: "", type: C(1)};
   // parity-wave2: VALUE <a constant of the method> (CL_ABAP_ZIP's
   // LCL_STREAM: crc TYPE x LENGTH 4 VALUE mffffffff), a bare name
   else if (isExpr(src, Expressions.SimpleFieldChain) && src.getChildren().length === 1) v = variable(upper(src.concatTokens()), ctx);
@@ -2991,6 +3031,10 @@ function isVariableName(name, ctx) {
 
 function findAttribute(ctx, n) {
   if (n === "ME" || n === "SUPER") return undefined;
+  const alias = aliasTarget(ctx.reg, ctx.className, n);
+  if (alias?.includes("~") && ownInterfaceAttributes(ctx.program, alias.split("~")[0]).some((a) => a.name === alias)) {
+    return ownIntfAttribute(ctx, alias);
+  }
   // instance and static attributes are declared in the class definition's
   // scope, constants and interface constants show in the implementation's
   const impl = findScope(ctx.spaghetti.getTop(), "class_implementation", ctx.scopeName ?? ctx.className);
@@ -3062,10 +3106,16 @@ function refAttribute(base, attrNode, ctx, write = false) {
   const name = upper(attrNode.concatTokens());
   // a class the program does not compile is an empty struct in Go: its
   // attribute is refused here, in this method, not left to fail the build
-  if (!ctx.program.wanted.has(base.type.name)) throw new Unsupported(`${base.type.name}->${name}: the class is not compiled in this program`);
+  if (!ctx.program.wanted.has(base.type.name)) throw notInProgram(ctx, base.type.name, `${base.type.name}->${name}: the class is not compiled in this program`);
   const a = [base.type.name, ...ancestors(ctx.reg, base.type.name)].map((c) => clasDef(ctx.reg, c)?.getAttributes().getInstance()
     .find((x) => upper(x.getName()) === name)).find(Boolean);
-  if (a === undefined) throw new Unsupported(`${base.type.name}->${name}: not an instance attribute`);
+  if (a === undefined) {
+    const alias = aliasTarget(ctx.reg, base.type.name, name);
+    if (alias?.includes("~") && ownInterfaceAttributes(ctx.program, alias.split("~")[0]).some((x) => x.name === alias)) {
+      return classRefIntfAttribute(base, alias, ctx, write);
+    }
+    throw new Unsupported(`${base.type.name}->${name}: not an instance attribute`);
+  }
   return {e: "refattr", base, name, type: typeOf(a.getType(), `${base.type.name}->${name}`, ctx.program)};
 }
 
@@ -3236,7 +3286,7 @@ function classRefIntfAttribute(base, name, ctx, write) {
 
 /* --------------------------------------------------------------- expressions */
 
-const SY = {"SY-INDEX": "Index", "SY-TABIX": "Tabix", "SY-SUBRC": "Subrc", "SY-DBCNT": "Dbcnt"};
+const SY = {"SY-INDEX": "Index", "SY-TABIX": "Tabix", "SY-SUBRC": "Subrc", "SY-DBCNT": "Dbcnt", "SY-FDPOS": "Fdpos"};
 const CONSTRUCTORS = new Set(["VALUE", "CONV", "NEW", "REF", "COND", "SWITCH", "EXACT", "CORRESPONDING", "REDUCE", "FILTER", "CAST", "BOOLC", "XSDBOOL"]);
 
 /**
@@ -3343,6 +3393,14 @@ function source(node, ctx, outer, hint = outer) {
   const sk = node?.getChildren?.() ?? [];
   if (sk.length === 3 && isExpr(sk[0], Expressions.MethodCallChain) && isExpr(sk[1], Expressions.Arrow) && isExpr(sk[2], Expressions.AttributeChain)) return descrAttr(sk[0], sk[2], ctx);
   if (!hasArith(node)) return arith(node, ctx, undefined, hint);
+  if (outer?.k === "d") {
+    const parts = items(node);
+    if (parts.length === 3 && ["+", "-"].includes(parts[1].op) && parts[0].node && parts[2].node) {
+      const date = sourceOperand(parts[0].node, ctx);
+      const days = sourceOperand(parts[2].node, ctx);
+      if (date.type.k === "d" && days.type.k === "i") return {e: "date_add", date, days, subtract: parts[1].op === "-", type: outer};
+    }
+  }
   const bits = hasBitOp(node);
   if (bits) {
     // BIT-AND / BIT-OR / BIT-XOR of two x fields of one length, byte by byte
@@ -3363,7 +3421,9 @@ function source(node, ctx, outer, hint = outer) {
   }
   // ultra/itab: a generic operand or a generic target decides the
   // calculation type at run time (genericArith)
-  if (outer?.k === "data" || leafTypes(node, ctx).some((t) => t.k === "data")) return genericArith(node, ctx, outer);
+  const genericLeaves = leafTypes(node, ctx).some((t) => t.k === "data");
+  if (outer?.k === "data" && !genericLeaves && !ctx.genTarget) return convert(source(node, ctx), outer);
+  if (outer?.k === "data" || genericLeaves) return genericArith(node, ctx, outer);
   // an x target computes as i and the i result is converted into it
   // (measured on A4H 2026-09-23 for i MOD 256 into x LENGTH 1: 255 and -1
   // both give FF, 300 gives 2C)
@@ -3473,7 +3533,11 @@ function genericArith(node, ctx, outer) {
 /** a ComponentChain (a-b-c) read off a structured value */
 function componentsOf(v, chain, ctx) {
   for (const c of chain.getChildren()) {
-    if (isTok(c, "-")) continue;
+    if (c.concatTokens() === "-") continue;
+    if (isExpr(c, Expressions.ComponentChain) || isExpr(c, Expressions.ComponentChainSimple)) {
+      v = componentsOf(v, c, ctx);
+      continue;
+    }
     if (!isExpr(c, Expressions.ComponentName)) throw new Unsupported(`component chain ${chain.concatTokens()}`);
     const f = fieldOf(ctx, v.type, c.concatTokens(), chain.concatTokens());
     v = {e: "field", base: v, name: f.name, type: f.type};
@@ -3560,6 +3624,7 @@ function fieldChain(n, ctx) {
   if (SY[text] !== undefined) return {e: "sy", field: SY[text], type: I};
   // the logon client: the transpiler runtime's constant (abap.Mandt)
   if (text === "SY-MANDT") return {e: "sy_mandt", type: C(3)};
+  if (text === "SY-BATCH") return {e: "chars", value: "", type: C(1)};
   // who the system is and its clock, as the host says (abap.SysID / UName,
   // the identity tools/osd-identity.mjs gives the Node boot: OSG, DEVELOPER;
   // date and time in UTC, as the transpiler runtime has them)
@@ -3811,7 +3876,7 @@ function constructor(c, ctx, inferred) {
   if (c.kw === "NEW") {
     const to = namedType(c.typeNode, ctx, inferred);
     if (to.k !== "ref") throw new Unsupported(`NEW of a ${to.k}: ${c.text}`);
-    if (!ctx.program.wanted.has(to.name)) throw new Unsupported(`NEW ${to.name}: the class is not compiled in this program`);
+    if (!ctx.program.wanted.has(to.name)) throw notInProgram(ctx, to.name, `NEW ${to.name}: the class is not compiled in this program`);
     const sig = constructorSignature(ctx, to.name);
     const given = new Map();
     const body = c.body;
@@ -3866,7 +3931,8 @@ function methodSignature(ctx, owner, name) {
     const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
       ...p.getChanging().map((x) => param(x, "changing"))];
     sig = {name, static: m.isStatic?.() ?? false,
-      params: intf ? own : withSupplied(ctx.program, `${declaringClass(ctx.reg, defOwner, meth, "method") ?? defOwner}=>${meth}`, own),
+      params: withSupplied(ctx.program, intf ? `${intf}=>${meth}`
+        : `${declaringClass(ctx.reg, defOwner, meth, "method") ?? defOwner}=>${meth}`, own),
       returning: ret === undefined ? null : {name: upper(ret.getName()), type: typeOf(ret.getType(), key, ctx.program)}};
   } catch (e) {
     if (!(e instanceof Unsupported)) throw e;
@@ -3993,6 +4059,7 @@ function writeIrType(t, where) {
   // the build-time check of a write stands a STRING in for it (irCheck). A
   // RAWSTRING column is not written yet: not measured
   if (t.k === "x") return RIR.T.bytes(t.len ?? 1);
+  if (t.k === "xstring") return RIR.T.bytes();
   // a DEC column: its digits and decimals, as sqlIrType counts them; bound
   // as the decimal text of the work area's p (tools/ir-writes.mjs
   // packedText, taken from main, where the P initial value was added;
@@ -4054,6 +4121,11 @@ function sqlHost(src, trailing, ctx, text) {
  * to the column's type and bound at run time */
 function sqlValue(v, ct, ir, acc, set = false) {
   if (ct.k === "x") return rawValue(v, ct, ir, acc, set);
+  if (ct.k === "xstring" && set) {
+    if (v.type.k !== "xstring" && v.type.k !== "x") throw new Unsupported(`UPDATE of an xstring column from a ${v.type.k}`);
+    acc.hosts.push({xstring: true, v});
+    return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir);
+  }
   if (v.e === "chars" && ct.k === "c" && v.value.length <= (ct.len ?? 1)) return RIR.lit(v.value, ir);
   if (v.e === "int" && ct.k === "i") return RIR.lit(v.value, ir);
   // a character value that may not fit the column: convert( ) would cut it,
@@ -4105,6 +4177,14 @@ function sqlCompare(p, ctx, tb, acc) {
   if (!isExpr(kids[0], Expressions.SQLFieldName) || kids[0].concatTokens().includes("~")) throw new Unsupported(`WHERE compare: ${text}`);
   const col = upper(kids[0].concatTokens());
   const ct = tb.colType(col);
+  // The parser leaves LIKE as tokens rather than SQLCompareOperator. The
+  // SEGW cleanup tests use a quoted pattern; keep other forms refused.
+  const like = /^[\w/]+\s+(NOT\s+)?LIKE\s+'((?:''|[^'])*)'$/i.exec(text);
+  if (like) {
+    if (ct.k !== "c" && ct.k !== "string") throw new Unsupported(`WHERE LIKE on a ${ct.k} column: ${text}`);
+    return RIR.like(RIR.col(lowName(col), sqlIrType(ct)),
+      RIR.lit(like[2].replaceAll("''", "'"), RIR.T.str), undefined, !!like[1]);
+  }
   const inn = p.findDirectExpression(Expressions.SQLIn);
   if (inn) {
     if (kids.length !== 2 || kids[1] !== inn) throw new Unsupported(`WHERE IN form: ${text}`);
@@ -4198,7 +4278,7 @@ function loweredArgs(lowered, acc) {
     const m = /^@@host:(\d+)@@$/.exec(String(p.name ?? ""));
     if (m) {
       const h = acc.hosts[Number(m[1])];
-      return h.fit !== undefined ? {host: h.v, fit: h.fit} : h.xhex !== undefined ? {host: h.v, xhex: h.xhex}
+      return h.fit !== undefined ? {host: h.v, fit: h.fit} : h.xstring ? {host: h.v, xstring: true} : h.xhex !== undefined ? {host: h.v, xhex: h.xhex}
         : h.xexact !== undefined ? {host: h.v, xexact: h.xexact} : {host: h};
     }
     if (p.name === "SY-MANDT") return {mandt: true};
@@ -4805,7 +4885,8 @@ function assignStatement(node, ctx, text) {
   const fsName = upper(node.findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
   const fsType = ctx.fieldSymbols?.get(fsName);
   if (!fsType) throw new Unsupported(`ASSIGN to ${fsName || "?"}`);
-  if (fsType.k === "struct" && !/\b(CASTING|INCREMENT|RANGE|COMPONENT)\b/i.test(text)) {
+  if (["struct", "table", "string", "c", "i", "n", "d", "t", "x", "xstring"].includes(fsType.k)
+      && !/\b(CASTING|INCREMENT|RANGE|COMPONENT)\b/i.test(text)) {
     // ASSIGN ref->* TO <typed>: the reference must point at a value of that
     // structure; one of another Go type (an ABAP-compatible structure of
     // another name included) is refused at run time, not moved by layout
@@ -4937,7 +5018,7 @@ function createObject(node, ctx) {
   const written = clsNode ? upper(clsNode.concatTokens()) : target.type.name;
   // a local class of this class's owner (LOCAL_CLASSES), by its compiled name
   const cls = ctx.program.locals?.get(`${ctx.owner ?? ctx.className}|${written}`) ?? written;
-  if (!ctx.program.wanted.has(cls)) throw new Unsupported(`CREATE OBJECT ${cls}: the class is not compiled in this program`);
+  if (!ctx.program.wanted.has(cls)) throw notInProgram(ctx, cls, `CREATE OBJECT ${cls}: the class is not compiled in this program`);
   const sig = constructorSignature(ctx, cls);
   const given = new Map();
   for (const p of params?.findAllExpressions(Expressions.ParameterS) ?? []) {
@@ -4970,7 +5051,7 @@ function raiseException(node, ctx, text) {
   const clsNode = node.findDirectExpression(Expressions.ClassName);
   if (clsNode) {
     const cls = upper(clsNode.concatTokens());
-    if (!ctx.program.wanted.has(cls)) throw new Unsupported(`RAISE EXCEPTION TYPE ${cls}: the class is not compiled in this program`);
+    if (!ctx.program.wanted.has(cls)) throw notInProgram(ctx, cls, `RAISE EXCEPTION TYPE ${cls}: the class is not compiled in this program`);
     const params = node.findDirectExpression(Expressions.ParameterListS);
     const given = new Map();
     for (const p of params?.findAllExpressions(Expressions.ParameterS) ?? []) {
@@ -5087,7 +5168,7 @@ function setHandler(node, ctx, text) {
     if (mname.includes("~")) throw new Unsupported(`SET HANDLER of an interface method: ${ms.concatTokens()}`);
     const at = declaringClass(ctx.reg, owner, mname, "method");
     if (!at) throw new Unsupported(`SET HANDLER: ${owner} has no method ${mname}`);
-    if (!ctx.program.wanted.has(at)) throw new Unsupported(`SET HANDLER: ${at} is not compiled in this program`);
+    if (!ctx.program.wanted.has(at)) throw notInProgram(ctx, at, `SET HANDLER: ${at} is not compiled in this program`);
     const mdef = declaredMethod(ctx.reg, at, mname);
     if (!mdef?.isEventHandler?.()) throw new Unsupported(`SET HANDLER: ${at}=>${mname} is not an event handler`);
     const ev = eventInfo(ctx, upper(mdef.getEventClass()), mdef.getEventName());
@@ -5116,7 +5197,7 @@ function setHandler(node, ctx, text) {
     const of = upper(mdef.getEventClass());
     let filter = null;
     if (forAll && of !== ev.decl && !ctx.reg.getObject("INTF", of)) {
-      if (!ctx.program.wanted.has(of)) throw new Unsupported(`SET HANDLER ... FOR ALL INSTANCES: ${of} is not compiled in this program`);
+      if (!ctx.program.wanted.has(of)) throw notInProgram(ctx, of, `SET HANDLER ... FOR ALL INSTANCES: ${of} is not compiled in this program`);
       filter = of;
     }
     handlers.push({call, obj, me: !obj && !sig.static, key: sig.static ? `${at}=>${mname}` : mname, event: ev.key, filter});
@@ -5197,8 +5278,13 @@ function valueBody(body, to, ctx, text) {
     }
     // ultra/events (fix round): VALUE for a SORTED table places the rows in
     // key order and raises on a duplicate; the literal keeps source order
-    if (to.sorted && rows.length > 0) throw new Unsupported(`VALUE with rows for a SORTED table`);
-    return {e: "table_lit", rows, type: to};
+    const literal = {e: "table_lit", rows, type: to};
+    if (to.sorted && rows.length > 0) {
+      const fields = ctx.program.structs.get(to.row.go)?.fields ?? [];
+      if (to.row.k !== "struct" || to.sorted.some((name) => !fields.some((f) => f.name === name && ["string", "c", "n", "d", "t", "i", "int8"].includes(f.type.k)))) throw new Unsupported(`VALUE with rows for a SORTED table with an unsupported key`);
+      return {e: "sorted_move", x: literal, keys: to.sorted, unique: to.unique, type: to};
+    }
+    return literal;
   }
   if (to.k !== "struct") throw new Unsupported(`VALUE for a ${to.k}: ${text}`);
   const fields = [];
@@ -5382,7 +5468,7 @@ function call(chain, ctx, statement, hint) {
   if (kids.length === 3 && upper(kids[0].concatTokens()) === "SUPER" && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall)) {
     // SUPER->m( ): the superclass's implementation, not a virtual call
     sup = ancestors(ctx.reg, ctx.className)[0];
-    if (!sup || !ctx.program.wanted.has(sup)) throw new Unsupported(`SUPER-> in ${ctx.className}: the superclass is not compiled in this program`);
+    if (!sup || !ctx.program.wanted.has(sup)) throw notInProgram(ctx, sup, `SUPER-> in ${ctx.className}: the superclass is not compiled in this program`);
     mc = kids[2];
   } else if (kids.length === 1 && isExpr(kids[0], Expressions.MethodCall)) {
     mc = kids[0];
@@ -5398,7 +5484,7 @@ function call(chain, ctx, statement, hint) {
   } else if (kids.length === 3 && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall) && !isExpr(kids[0], Expressions.MethodCall)) {
     receiver = isExpr(kids[0], Expressions.FieldChain) || isExpr(kids[0], Expressions.SourceField) ? fieldChain(kids[0], ctx) : null;
     if (receiver === null || receiver.type.k !== "ref") throw new Unsupported(`call through ${kids[0].concatTokens()}`);
-    if (!receiver.type.intf && !ctx.program.wanted.has(receiver.type.name)) throw new Unsupported(`call on a ${receiver.type.name}, which is not compiled in this program`);
+    if (!receiver.type.intf && !ctx.program.wanted.has(receiver.type.name)) throw notInProgram(ctx, receiver.type.name, `call on a ${receiver.type.name}, which is not compiled in this program`);
     owner = receiver.type.name;
     mc = kids[2];
   } else if ((kids.length > 3 || isExpr(kids[0], Expressions.MethodCall)) && isTok(kids[kids.length - 2], "->") && isExpr(kids[kids.length - 1], Expressions.MethodCall)) {
@@ -5409,7 +5495,7 @@ function call(chain, ctx, statement, hint) {
       findFirstExpression: (t) => head.map((k) => (isTok(k) ? undefined : isExpr(k, t) ? k : k.findFirstExpression(t))).find(Boolean)};
     receiver = call(prefix, ctx, false);
     if (receiver.type.k !== "ref") throw new Unsupported(`call through a ${receiver.type.k}: ${chain.concatTokens()}`);
-    if (!receiver.type.intf && !ctx.program.wanted.has(receiver.type.name)) throw new Unsupported(`call on a ${receiver.type.name}, which is not compiled in this program`);
+    if (!receiver.type.intf && !ctx.program.wanted.has(receiver.type.name)) throw notInProgram(ctx, receiver.type.name, `call on a ${receiver.type.name}, which is not compiled in this program`);
     owner = receiver.type.name;
     mc = kids[kids.length - 1];
   } else {
@@ -5547,7 +5633,7 @@ function call(chain, ctx, statement, hint) {
   if (sig.unsupported) throw new Unsupported(`${owner ? owner + "=>" : ""}${name} was skipped: ${sig.unsupported}`);
   if (!statement && sig.returning === null) throw new Unsupported(`${name} has no RETURNING, cannot be an operand`);
   if (owner !== null && receiver === null && !sig.static) throw new Unsupported(`${owner}=>${name}: an instance method called statically`);
-  if (owner !== null && receiver === null && !ctx.program.wanted.has(owner)) throw new Unsupported(`${owner}=>${name}: ${owner} is not compiled in this program`);
+  if (owner !== null && receiver === null && !ctx.program.wanted.has(owner)) throw notInProgram(ctx, owner, `${owner}=>${name}: ${owner} is not compiled in this program`);
   const importing = sig.params.filter((p) => p.dir === "importing");
   const given = new Map();
   const targets = new Map();
@@ -5601,7 +5687,11 @@ function call(chain, ctx, statement, hint) {
         if (p.optional) return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
         throw new Unsupported(`${name}: parameter ${p.name} not supplied`);
       }
-      return {name: p.name, supplied: true, dir: "importing", byValue: p.byValue, type: p.type, value: convert(source(s, ctx, p.type), p.type)};
+      const actual = source(s, ctx, p.type);
+      if (p.type.k === "table" && p.type.sorted && !actual.type.sorted) {
+        throw new Unsupported(`${name}: a STANDARD table is not type-compatible with SORTED parameter ${p.name} (A4H refusal)`);
+      }
+      return {name: p.name, supplied: true, dir: "importing", byValue: p.byValue, type: p.type, value: convert(actual, p.type)};
     }
     const t = targets.get(p.name);
     if (t === undefined) return {dir: p.dir, place: null, type: p.type};
@@ -5931,7 +6021,13 @@ export function convert(expr, to) {
   // raises on a duplicate of a unique key), which no emitter does, so a
   // table of another kind or key refuses here; out of a SORTED table into a
   // STANDARD one the rows keep their order, which is what a slice does
-  if (to.k === "table" && from.k === "table" && to.sorted && !sameSort(from, to)) throw new Unsupported(`a move into a SORTED table from a table of another kind or key`);
+  if (to.k === "table" && from.k === "table" && to.sorted && !sameSort(from, to)) {
+    if (!sameType(from.row, to.row) || to.row.k !== "struct") throw new Unsupported(`a move into a SORTED table from a table of another kind or key`);
+    const fields = PROGRAM?.structs.get(to.row.go)?.fields ?? [];
+    const keys = to.sorted.map((name) => fields.find((f) => f.name === name));
+    if (keys.some((k) => !k || !["string", "c", "n", "d", "t", "i", "int8"].includes(k.type.k))) throw new Unsupported(`a move into a SORTED table with a key outside the subset`);
+    return {e: "sorted_move", x: expr, keys: to.sorted, unique: to.unique, type: to};
+  }
   if (to.k === "table" && from.k === "table" && sameType(from.row, to.row)) return expr;
   // two structures of one technical type (the same components in the same
   // order, each of the same type and length; names may differ): a move is
@@ -6064,9 +6160,20 @@ function compare(node, ctx) {
     return not ? {c: "not", x: r} : r;
   }
   const opNode = node.findDirectExpression(Expressions.CompareOperator);
-  if (sources.length !== 2 || opNode === undefined) throw new Unsupported(`comparison ${node.concatTokens()}`);
-  const opText = upper(opNode.concatTokens());
+  const opText = upper(opNode?.concatTokens() ?? (upper(kids[1]?.concatTokens()) === "IN" ? "IN" : ""));
+  if (sources.length !== 2 || !opText) throw new Unsupported(`comparison ${node.concatTokens()}`);
   const op = OPS[opText] ?? opText;
+  if (op === "IN") {
+    const value = source(sources[0], ctx);
+    const range = source(sources[1], ctx);
+    const fields = range.type.k === "table" && range.type.row.k === "struct"
+      ? ctx.program.structs.get(range.type.row.go)?.fields ?? [] : [];
+    const byName = new Map(fields.map((f) => [f.name, f]));
+    if (value.type.k !== "i" || !["SIGN", "OPTION", "LOW", "HIGH"].every((n) => byName.has(n))
+        || byName.get("LOW").type.k !== "i" || byName.get("HIGH").type.k !== "i") throw new Unsupported(`IN range outside the integer selection subset: ${node.concatTokens()}`);
+    const result = {c: "in_range", value, range};
+    return not ? {c: "not", x: result} : result;
+  }
   if (op === "CO" || op === "CS" || op === "CN" || op === "NS") {
     // measured on A4H: CO is true for an empty operand; CS ignores case and
     // an empty pattern is always found; trailing blanks count in a string,
@@ -6241,6 +6348,9 @@ function compareValues(op, l, r, ctx) {
   if (numeric(l.type) || numeric(r.type)) {
     const calc = l.type.k === "f" || r.type.k === "f" ? F : l.type.k === "int8" || r.type.k === "int8" ? INT8 : I;
     return {c: "cmp", op, l: convert(l, calc), r: convert(r, calc), type: calc};
+  }
+  if ((l.type.k === "d" && charlike(r.type)) || (r.type.k === "d" && charlike(l.type))) {
+    return {c: "cmp", op, l: convert(l, S), r: convert(r, S), type: S};
   }
   if (charlike(l.type) && charlike(r.type)) return {c: "cmp", op, l: convert(l, S), r: convert(r, S), type: S};
   // NUMC against character text compares its stored digits as text. The

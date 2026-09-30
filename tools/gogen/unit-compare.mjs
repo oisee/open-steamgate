@@ -58,14 +58,38 @@ const goRows = result.rows.map((r) => {
 const owners = new Set(classes.length ? classes : [...nodeRows, ...goRows].map((r) => r.class));
 const node = new Map(nodeRows.filter((r) => owners.has(r.class)).map((r) => [key(r), r]));
 const gorows = new Map(goRows.filter((r) => owners.has(r.class)).map((r) => [key(r), r]));
-const methods = {same: [], different: [], nodeOnly: [], goOnly: [], skipped: []};
+// Reviewed against the assertion in each ABAP Unit method and the mixed-client
+// seed. Keep exact messages so a new failure cannot inherit an exception.
+const searchHelpRefusal = 'CX_SY_DYNAMIC_OSQL_SEMANTICS in SELECT * FROM (mv_selmethod) INTO CORRESPONDING FIELDS OF TABLE <lt_rows> WHERE (lv_where) ORDER BY PRIMARY KEY.: a literal on the left of a condition ("1" at 0) is not a column';
+const knownNodeAnomalies = new Map([
+  ["ZCL_STG_GATEWAY_TEST/LTCL_DISPATCH/STATUS_VALUE_HELP", ["ANOMALY-2026-09-24-dynamic-where-pasted", "upstream search-help library emits 1 = 1 for an empty WHERE; A4H raises semantics", searchHelpRefusal]],
+  ["ZCL_STG_SHLP_TEST/LTCL_SHLP/ALL_STATUSES_SORTED", ["ANOMALY-2026-09-24-dynamic-where-pasted", "upstream search-help library emits 1 = 1 for an empty WHERE; A4H raises semantics", searchHelpRefusal]],
+  ["ZCL_STG_GATEWAY_TEST/LTCL_DISPATCH/ENTITY_SET", ["ANOMALY-2026-09-11-no-implicit-mandt", "the assertion expects client 001 travel T0009 in the four-row entity set", "Expected abap_true at zcl_stg_gateway_test.clas.testclasses.abap:383"]],
+  ["ZCL_STG_GATEWAY_TEST/LTCL_DISPATCH/PAGING_AND_INLINECOUNT", ["ANOMALY-2026-09-11-no-implicit-mandt", "the four-row ordering assertion includes T0009 and changes the page", "Expected abap_true at zcl_stg_gateway_test.clas.testclasses.abap:399"]],
+  ["ZCL_STG_GATEWAY_TEST/LTCL_DISPATCH/COUNT", ["ANOMALY-2026-09-11-no-implicit-mandt", "Node counts four seeded travels; the logon client has three", "Expected '4', got '3'"]],
+  ["ZCL_STG_GATEWAY_TEST/LTCL_FILTER/THROUGH_DISPATCHER", ["ANOMALY-2026-09-11-no-implicit-mandt", "the filtered result expects other-client T0009", "Expected abap_true at zcl_stg_gateway_test.clas.testclasses.abap:735"]],
+  ["ZCL_STG_GATEWAY_TEST/LTCL_SADL/ENTITY_SET_WITH_FILTER", ["ANOMALY-2026-09-11-no-implicit-mandt", "the filtered result expects T0009 and a four-row count", "Expected abap_true at zcl_stg_gateway_test.clas.testclasses.abap:1758"]],
+  ["ZCL_STG_GATEWAY_TEST/LTCL_SADL/ANALYTICS_GROUP_BY", ["ANOMALY-2026-09-11-no-implicit-mandt", "the grouped seats include the other-client travel", "Expected abap_true at zcl_stg_gateway_test.clas.testclasses.abap:1806"]],
+  ["ZCL_STG_GATEWAY_TEST/LTCL_ODC/QUERY_OPTIONS_TRAVEL_ALONG", ["ANOMALY-2026-09-11-no-implicit-mandt", "the page explicitly expects other-client T0009", "Expected abap_true at zcl_stg_gateway_test.clas.testclasses.abap:1961"]],
+  ["ZCL_STG_PHASE0_TEST/LTCL_PHASE0/ENTITYSET_READS_SQLITE", ["ANOMALY-2026-09-11-no-implicit-mandt", "the assertion documents four rows versus three in client 123", "Expected '4', got '3'"]],
+  ["ZCL_STG_PHASE0_TEST/LTCL_PHASE0/ENTITYSET_SELECT_OPTIONS", ["ANOMALY-2026-09-11-no-implicit-mandt", "the filter includes T0009, giving two rows instead of one", "Expected '2', got '1'"]],
+  ["ZCL_STG_GATEWAY_TEST/LTCL_FUNCTION_IMPORT/PRIMITIVE_RETURNING_ACTION", ["ANOMALY-2026-09-11-no-implicit-mandt", "the action counts three active travels including T0009; client 123 has two", "Expected '{\"d\":{\"TravelCount\":3}}', got '{\"d\":{\"TravelCount\":2}}'"]],
+  ["ZCL_OSD_BATCH_RUNNER_TEST/LTCL_BATCH_REPORT/STATIC_SUBMIT_RANGE_BT_AND_E", ["ANOMALY-2026-09-29-runtime-in-options", "Node compareIn throws on BT with E EQ; Go executes the measured range", ""]],
+]);
+const methods = {same: [], different: [], nodeAnomaly: [], nodeOnly: [], goOnly: [], skipped: []};
 for (const [k, n] of node) {
   const g = gorows.get(k);
   if (n.status === "SKIPPED" && g?.status === "SKIPPED") methods.skipped.push({key: k, node: n, go: g});
   else if (n.status === "SKIPPED" || g?.status === "SKIPPED") methods.different.push({key: k, node: n, go: g});
   else if (!g || g.status === "NOT_COMPILED" || g.status === "NEEDS_DB") methods.nodeOnly.push({key: k, node: n, go: g});
   else if (g.status === n.status && g.message === n.message) methods.same.push(k);
-  else methods.different.push({key: k, node: n, go: g});
+  else {
+    const known = knownNodeAnomalies.get(k);
+    if (known && g?.message === known[2] &&
+        (known[0].includes("runtime-in-options") ? n.message === "compareIn todo" && g.status === "SUCCESS" : n.status === "SUCCESS" && g.status === "FAILED")) {
+      methods.nodeAnomaly.push({key: k, entry: known[0], why: known[1], node: n, go: g});
+    } else methods.different.push({key: k, node: n, go: g});
+  }
 }
 for (const [k, g] of gorows) if (!node.has(k)) methods.goOnly.push({key: k, go: g});
 const compiled = [];

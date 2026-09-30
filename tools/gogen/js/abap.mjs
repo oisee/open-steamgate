@@ -320,6 +320,23 @@ export function Find(v, sub, off) {
 }
 export const CO = (a, b) => [...a].every((c) => b.includes(c));
 export const CS = (a, b) => b === "" || a.toUpperCase().includes(b.toUpperCase());
+export function DateAdd(date, days) {
+  if (!/^\d{8}$/.test(date) || date < "15821015" || !Number.isInteger(days)) throw notCompiled("date arithmetic: date or days outside the measured range");
+  const y = Number(date.slice(0, 4)), m = Number(date.slice(4, 6)), d = Number(date.slice(6));
+  const t = new Date(0);
+  t.setUTCFullYear(y, m - 1, d);
+  if (t.getUTCFullYear() !== y || t.getUTCMonth() !== m - 1 || t.getUTCDate() !== d) throw notCompiled("date arithmetic: an invalid date");
+  t.setUTCDate(t.getUTCDate() + days);
+  const out = `${String(t.getUTCFullYear()).padStart(4, "0")}${String(t.getUTCMonth() + 1).padStart(2, "0")}${String(t.getUTCDate()).padStart(2, "0")}`;
+  if (out < "15821015" || out > "99991231") throw notCompiled("date arithmetic: a result outside the measured range");
+  return out;
+}
+export function CSWithPos(s, a, b) {
+  const upper = a.toUpperCase();
+  const pos = upper.indexOf(b.toUpperCase());
+  s.sy.fdpos = pos < 0 ? upper.length : pos;
+  return pos >= 0;
+}
 // i into a string, as A4H moves it: 42 is "42 ", -5 is "5-"
 export const IToString = (v) => (v < 0 ? `${-v}-` : `${v} `);
 // NUMC moves, as go/abap/conv.go IToN / CToN (A4H, ZCL_GOGEN_T_NUMC): the
@@ -1034,6 +1051,14 @@ export function ShiftRightTrailing(s, mask) {
   let n = r.length;
   while (n > 0 && mask.includes(r[n - 1])) n -= 1;
   return " ".repeat(r.length - n) + r.slice(0, n).join("");
+}
+
+// SHIFT s LEFT DELETING LEADING mask on a string or a c (see go/abap/shift.go)
+export function ShiftLeftLeading(s, mask) {
+  const r = [...s];
+  let i = 0;
+  while (i < r.length && mask.includes(r[i])) i += 1;
+  return r.slice(i).join("");
 }
 
 // sy-mandt: the transpiler runtime's logon client (see go/abap/select.go, ANORMALIES)
