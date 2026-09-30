@@ -90,6 +90,7 @@
     "runtime:published": "npm install @abaplint/runtime && node tools/osd-transpiler.mjs",
     "parked": "node tools/osd-parked.mjs",
     "leak": "node tools/osd-leak-scan.mjs .",
+    "where": "node tools/osd-where-is.mjs",
     "notify:setup": "node tools/osd-telegram-notify.mjs setup",
     "notify:send-test": "node tools/osd-telegram-notify.mjs send-test",
     "notify:milestone": "node tools/osd-telegram-notify.mjs milestone",
