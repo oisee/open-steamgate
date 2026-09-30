@@ -74,6 +74,8 @@ jobs:
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
       - run: npm run bootstrap
       - run: npm run vsix
+      - name: Check the bundled transpiler and runtime
+        run: node scripts/verify-vsix-transpiler.mjs build/vsix/*.vsix
       - name: Check package version and checksum
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
@@ -399,6 +401,7 @@ jobs:
         run: |
           set -euo pipefail
           npm run vsix:marketplace 2>&1 | tee "$RUNNER_TEMP/marketplace-build.log"
+          node scripts/verify-vsix-transpiler.mjs build/vsix/*.vsix
           # These two placeholder licences have explicit maintainer overrides
           # in third-party-notices.mjs. Any new issue needs a fresh review.
           grep 'LICENSE REVIEW:' "$RUNNER_TEMP/marketplace-build.log" \
