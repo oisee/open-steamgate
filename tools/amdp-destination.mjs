@@ -46,10 +46,12 @@ function lostConnection(error) {
 
 function safeError(error, settings = {}) {
   let message = String(error?.AMDP_REASON ?? error?.message ?? error);
-  // Driver errors may echo a URL, a DSN, or a connection string. Remove
-  // key=value fields first, then credentials wherever they occur elsewhere.
-  message = message.replace(/([\w.-]+\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s;&]+)/g, "$1[redacted]");
-  for (const secret of [settings.password, settings.user].filter(Boolean)) {
+  // Driver errors may echo a URL, a DSN, or a connection string. Remove the
+  // credential fields of those (a SQL diagnostic's `x=1` stays readable),
+  // then the known credentials wherever they occur elsewhere.
+  message = message.replace(/(\b(?:password|passwd|pwd|user|uid|userid|username|secret|token)\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s;&]+)/gi, "$1[redacted]");
+  message = message.replace(/(\/\/)[^/\s:@]+:[^/\s@]+@/g, "$1[redacted]@");
+  for (const secret of [settings.password, settings.user, ...(settings.secrets ?? [])].filter(Boolean)) {
     for (const spelling of [String(secret), encodeURIComponent(String(secret)), encodeURI(String(secret))]) {
       if (spelling) message = message.replace(new RegExp(spelling.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "[redacted]");
     }
@@ -392,6 +394,8 @@ export class AmdpDestination {
 
     const user = process.env.OSD_AMDP_SANDBOX_USER ?? defaultSandboxUser();
     const password = sandboxPassword();
+    // errors of the sandbox connection must hide this password too
+    this.sandboxPassword = password;
     // provisioning needs the privileged connection, and only the first time
     await this.#connect();
     const exists = await this.#exec(
@@ -476,7 +480,7 @@ export class AmdpDestination {
       // The engine's words, with credentials removed. EV_ERROR carries the position moved
       // back into the person's own line numbering. EV_RAW retains the engine's
       // original line numbers for diagnostics.
-      const raw = safeError(e, this.settings);
+      const raw = safeError(e, {...this.settings, secrets: [this.sandboxPassword]});
       say("EV_RAW", raw);
       say("EV_ERROR", raw.replace(/line (\d+)/g, (m, n) => `line ${Number(n) - SANDBOX_OFFSET}`));
     } finally {
@@ -489,7 +493,7 @@ export class AmdpDestination {
     try {
       return await this.#call(name, signature);
     } catch (error) {
-      await refuse(safeError(error, this.settings), name);
+      await refuse(safeError(error, {...this.settings, secrets: [this.sandboxPassword]}), name);
     }
   }
 

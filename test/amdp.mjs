@@ -110,6 +110,21 @@ describe("AMDP HANA session recovery", () => {
     });
   }
 
+  it("redacts the sandbox password and keeps a SQL diagnostic readable", async () => {
+    const target = destination(() => {
+      const client = fake();
+      client.exec = (sql, cb) => (sql.startsWith("CALL ")
+        ? cb(new Error("sql syntax error near x=1: line 2 col 3 (sbx-secret)")) : cb(null, {}));
+      return client;
+    });
+    target.sandboxPassword = "sbx-secret";
+    let message;
+    try { await target.call("ZTEST", {}); } catch (error) { message = error.message; }
+    expect(message, message).to.contain("near x=1: line 2 col 3");
+    expect(message, message).not.to.contain("sbx-secret");
+    await target.close();
+  });
+
   it("reconnects a session killed between calls and redeploys", async () => {
     const clients = [fake()];
     clients[0].readyState = "connected";
