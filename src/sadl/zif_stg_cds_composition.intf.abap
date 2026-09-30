@@ -6,7 +6,7 @@ INTERFACE zif_stg_cds_composition PUBLIC.
 * deleted and locked with its parent. We enter that vocabulary through the
 * CDS annotation rather than through a behaviour definition, because
 * abaplint parses @ObjectModel in full and a BDEF with one regular
-* expression -- the decision is in docs/backlog.md B.2.
+* expression -- the decision is in docs/backlog/gogen-osgo.md B.2.
 *
 * Only a generated source class whose view has at least one
 * @ObjectModel.association.type: [#TO_COMPOSITION_CHILD] implements this.

@@ -63,4 +63,4 @@ PROG registry and selection syntax narrow.
 
 Related design: [GUI reports](../gui-reports.md),
 [ABAP daemons](../abap-daemons.md), and
-[the backlog](../backlog.md).
+[the backlog](../backlog/README.md).

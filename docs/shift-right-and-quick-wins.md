@@ -175,7 +175,7 @@ ABAP, or a refactor — has a referee.
 ## No shift: quick wins per module
 
 The modules are the split document's. The sources are the repository's
-own records: `docs/backlog.md` (tracks A–D and the standing list),
+own records: `docs/backlog/README.md` (tracks A–D and the standing list),
 `ANORMALIES.md` (26 open), `docs/adt-surface.md` ("what it does not answer
 yet"), and the oracle corpus (`.local/adt-corpus`, 2,180 exchanges, three
 sides: `a4h`, `osd`, `vscode`). Size is in session-days at the pace
@@ -377,6 +377,6 @@ that improve the system whichever way it goes.
 - [`adt-facade-shift-left.md`](adt-facade-shift-left.md) — the left direction, estimated
 - [`architecture-split-astra.md`](architecture-split-astra.md) — its independent review
 - [`architecture-split.md`](architecture-split.md) — the modules this ranks by
-- [`backlog.md`](backlog.md) — tracks A–D and the standing list, the source of most rows above
+- [`backlog/README.md`](backlog/README.md) — tracks A–D and the standing list, the source of most rows above
 - [`adt-surface.md`](adt-surface.md) — what the façade answers and refuses, and why the disk is the other editor
 - [`diag-notes.md`](diag-notes.md) — what the DIAG stub still needs

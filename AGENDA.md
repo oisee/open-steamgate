@@ -4,7 +4,7 @@ The living board: what is decided, what is open, what is next. Dated analyses go
 in `docs/` as `YYYY-MM-DD-topic.md`.
 
 > The open list, as a tree with owners and external dependencies, is
-> [`docs/backlog.md`](docs/backlog.md). This file stays the narrative: what
+> [`docs/backlog/README.md`](docs/backlog/README.md). This file stays the narrative: what
 > was decided and why.
 
 ## Names a system reserves: ZONE, HANDLER, SECTION, PARAMETER (2026-09-24)

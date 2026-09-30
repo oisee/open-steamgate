@@ -231,7 +231,7 @@ say(`generation: ${basename(live)}`);
 // `/sap/bc/adt/core/http/build` answers `commit` by asking git, and a
 // release directory is not a checkout -- so a deployment reported
 // `"unknown"` and the rule the two targets are supposed to share ("the i7
-// follows Pages, both show the same commit", docs/backlog.md) could not be
+// follows Pages, both show the same commit", docs/backlog/pages-preview.md) could not be
 // checked on the half that matters. It was not checked for weeks, because
 // the field existed and read like a measurement.
 const commit = (process.env.GITHUB_SHA ?? execFileSync("git", ["rev-parse", "HEAD"],

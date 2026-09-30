@@ -554,5 +554,5 @@ a missing period is reported as the *next* statement not existing in
 prints what it rebuilt and why it refused when a check failed.
 
 See also: [`generations.md`](generations.md) for what a generation is and how
-the dev loop decides, [`backlog.md`](backlog.md) for what is not done, and
+the dev loop decides, [`backlog/README.md`](backlog/README.md) for what is not done, and
 [`bun-spike.md`](bun-spike.md) for the packaging measurements.

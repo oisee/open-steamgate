@@ -6,7 +6,7 @@ decision gate at the end, and what follows the gate in either case.
 
 **Conventions.** A **sprint** is one calendar week and **four session-days
 of the S lane**; the T, V, R and A lanes run beside it, as in
-[`backlog.md`](backlog.md) (S open-steamgate, T the transpiler session,
+[`backlog/README.md`](backlog/README.md) (S open-steamgate, T the transpiler session,
 V vsp, R open-rfc-go, A Alice). A **spike** is a time-boxed question whose
 output is a *measurement and a written answer* — a note in `docs/` or an
 entry in `ANORMALIES.md` — never a feature; when the box runs out, the
@@ -238,4 +238,4 @@ Nothing else in the six weeks waits on a decision.
 
 - [`shift-right-and-quick-wins.md`](shift-right-and-quick-wins.md) — the four sets this schedules
 - [`adt-facade-shift-left.md`](adt-facade-shift-left.md) — the left report; its phase 0 is sprints 1–3 here
-- [`backlog.md`](backlog.md) — the standing list and the lanes
+- [`backlog/README.md`](backlog/README.md) — the standing list and the lanes

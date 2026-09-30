@@ -21,7 +21,7 @@ CLASS zcl_osd_st05 DEFINITION PUBLIC CREATE PUBLIC.
 *
 * Off until somebody asks: a server that traces before it was asked is a
 * server that pays for it. Measured, the wrapper costs 0.02 us a call while
-* idle (docs/backlog.md, G.10 wave two).
+* idle (docs/backlog/webgui.md, G.10 wave two).
   PUBLIC SECTION.
     INTERFACES if_http_extension.
   PROTECTED SECTION.
