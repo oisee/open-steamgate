@@ -37,6 +37,21 @@ func DecodeText(encoding string, ignoreErrors bool, data string) string {
 			panic(NotCompiled("CL_ABAP_CONV_IN_CE=>CONVERT", "bytes that are not UTF-8"))
 		}
 		return data
+	case "iso-8859-1":
+		// TextDecoder uses the Windows-1252 table for this encoding label.
+		var control = [...]rune{
+			'€', '�', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '�', 'Ž', '�',
+			'�', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '�', 'ž', 'Ÿ',
+		}
+		runes := make([]rune, len(data))
+		for i := range data {
+			b := data[i]
+			runes[i] = rune(b)
+			if b >= 0x80 && b <= 0x9f {
+				runes[i] = control[b-0x80]
+			}
+		}
+		return string(runes)
 	case "utf16le", "utf-16le":
 		if len(data)%2 != 0 {
 			panic(NotCompiled("CL_ABAP_CONV_IN_CE=>CONVERT", "an odd number of UTF-16 bytes"))
