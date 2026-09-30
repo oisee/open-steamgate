@@ -2,11 +2,12 @@
 // Render an imported IWPR's MPC class with its L1 provenance sidecar.
 import {readFileSync, mkdirSync, writeFileSync} from "node:fs";
 import {basename, join} from "node:path";
+import {randomBytes} from "node:crypto";
 import {pathToFileURL} from "node:url";
 import {readSpec, tableName} from "./segw-tables.mjs";
 
-export async function renderProject(file, out) {
-  const project = `ZDSL${process.pid.toString(36).toUpperCase()}`;
+export async function renderProject(file, out, {project = `ZDSL${randomBytes(6).toString("hex").toUpperCase()}`} = {}) {
+  if (!/^Z[A-Z0-9_]{1,31}$/.test(project)) throw new Error(`invalid temporary project ${project}`);
   const xml = readFileSync(file, "utf8").replace(/<PROJECT>[^<]+<\/PROJECT>/g, `<PROJECT>${project}</PROJECT>`);
   if (!xml.includes(`<PROJECT>${project}</PROJECT>`)) throw new Error("IWPR has no project rows");
   await import("../test/start.mjs");
@@ -16,6 +17,8 @@ export async function renderProject(file, out) {
   }
   const box = (value) => new abap.types.String().set(value);
   const db = abap.context.databaseConnections.DEFAULT;
+  const existing = await db.select({select: `SELECT project FROM ${tableName("SBD_PR").toLowerCase()} WHERE project = '${project}'`});
+  if (existing.rows.length) throw new Error(`project ${project} already exists`);
   try {
     const response = await abap.Classes.ZCL_STG_DISPATCHER.dispatch({
       iv_method: box("POST"),
@@ -42,7 +45,7 @@ export async function renderProject(file, out) {
     writeFileSync(traceFile, sidecar);
     console.log(`abap profile: ${findings.length} finding(s)`);
     for (const finding of findings) console.log(`${finding.severity} ${finding.line} ${finding.rule}: ${finding.text} (${finding.node})`);
-    return {abapFile, traceFile, findings};
+    return {abapFile, traceFile, findings, project};
   } finally {
     for (const tag of Object.keys(readSpec())) {
       await db.execute(`DELETE FROM ${tableName(tag).toLowerCase()} WHERE project = '${project}'`);

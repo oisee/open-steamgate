@@ -138,18 +138,43 @@ functions:
       const model = await abap.Classes.ZCL_STG_SEGW_GEN.build_model({iv_project: box(project)});
       const source = (await abap.Classes.ZCL_STG_SEGW_GEN.mpc_source({is_model: model})).get();
       const legacy = (await abap.Classes.ZCL_STG_SEGW_GEN.mpc_source_legacy({is_model: model})).get();
-      expect(source, `${project} DSL versus legacy`).to.equal(legacy);
       const projectJson = await abap.Classes.ZCL_OSD_DSL_MPC.project_model({is_model: model});
+      const data = JSON.parse((await abap.Classes.ZCL_OSD_DSL_MPC.project_model_json({is_model: model})).get());
+      const inspect = (value, path = "$") => {
+        if (typeof value === "string") {
+          expect(value, `${project} ${path} contains a line break`).not.to.match(/[\r\n]/);
+          expect(value, `${project} ${path} contains ABAP code`).not.to.match(/\b(?:types?|data|constants?|methods?|class|endclass|endmethod)\b.*[.,]|->/i);
+        } else if (Array.isArray(value)) value.forEach((item, i) => inspect(item, `${path}[${i}]`));
+        else if (value && typeof value === "object") Object.entries(value).forEach(([key, item]) => inspect(item, `${path}.${key}`));
+      };
+      inspect(data);
+      expect(source, `${project} DSL versus legacy`).to.equal(legacy);
       const whole = await abap.Classes.ZCL_OSD_DSL_MPC.render_class({is_model: model});
       const wholeText = (await abap.Classes.ZCL_OSD_TPL.to_string({is_result: whole})).get();
       const mismatch = [...wholeText].findIndex((ch, i) => ch !== source[i]);
       expect(wholeText, `${project} whole class at ${mismatch}: ${JSON.stringify(wholeText.slice(mismatch - 70, mismatch + 120))} vs ${JSON.stringify(source.slice(mismatch - 70, mismatch + 120))}`).to.equal(source);
       const wholeTraces = whole.get().trace.array();
+      const wholeLines = whole.get().lines.array().map((line) => line.get());
       expect(wholeTraces.length, `${project} whole trace count`).to.equal(whole.get().lines.array().length);
       for (const trace of wholeTraces) {
         const path = trace.get().path.get();
         const node = (await abap.Classes.ZCL_OSD_DSL_TRACE.node_of({io_model: projectJson, iv_path: box(path)})).get();
         expect(node, `${project} whole trace ${path}`).to.not.equal("");
+      }
+      for (const block of [...data.first_type, ...data.other_types]) {
+        expect(block.kind, `${project} ${block["@id"]} type kind`).to.be.oneOf(["ddic", "inline"]);
+        expect(block.name, `${project} ${block["@id"]} type name`).to.be.a("string").and.not.empty;
+        if (block.kind === "ddic") expect(block.ddic, `${project} ${block["@id"]} DDIC reference`).to.be.a("string").and.not.empty;
+        for (const component of block.components) {
+          expect(component["@id"], `${project} ${block["@id"]} component id`).to.match(/\/(property|parameter)\//);
+          const line = `${component.name} type ${component.abap_type},`;
+          const matches = wholeLines.flatMap((text, i) => text.trim() === line ? [i] : []);
+          expect(matches.length, `${project} type component ${component["@id"]}`).to.be.greaterThan(0);
+          const traced = await Promise.all(matches.map(async (i) =>
+            (await abap.Classes.ZCL_OSD_DSL_TRACE.node_of({io_model: projectJson, iv_path: box(wholeTraces[i].get().path.get())})).get()));
+          expect(traced, `${project} type line ${line}`).to.include(component["@id"]);
+          expect(traced, `${project} type line ${line} must not trace only to its parent`).not.to.include(block["@id"]);
+        }
       }
       const findings = (await abap.Classes.ZCL_OSD_DSL_PROFILE.check({iv_profile: box("abap"), iv_strict: box(""), is_result: whole, io_model: projectJson})).array();
       expect(findings.filter((f) => f.get().severity.get() === "E"), `${project} profile errors`).to.deep.equal([]);
@@ -243,7 +268,8 @@ functions:
   it("writes the class and one trace entry per line", async () => {
     const folder = mkdtempSync(join(tmpdir(), "dsl-mpc-"));
     try {
-      const {abapFile, traceFile, findings} = await renderProject(FIXTURES[0], folder);
+      const {abapFile, traceFile, findings, project} = await renderProject(FIXTURES[0], folder);
+      expect(project).to.match(/^ZDSL[0-9A-F]{12}$/);
       const source = readFileSync(abapFile, "utf8");
       const sidecar = JSON.parse(readFileSync(traceFile, "utf8"));
       expect(sidecar.generator).to.equal("dsl-mpc");
@@ -252,6 +278,19 @@ functions:
       expect(sidecar.lines.length).to.equal(source.trimEnd().split("\n").length);
       expect(sidecar.lines.every((line, index) => line.line === index + 1 && line.node)).to.equal(true);
       expect(findings.filter((finding) => finding.severity === "E")).to.deep.equal([]);
+    } finally {
+      rmSync(folder, {recursive: true, force: true});
+    }
+  });
+
+  it("refuses a temporary project name already in use", async () => {
+    const project = await importProject(FIXTURES[2]);
+    const folder = mkdtempSync(join(tmpdir(), "dsl-mpc-collision-"));
+    try {
+      let error;
+      try { await renderProject(FIXTURES[2], folder, {project}); }
+      catch (caught) { error = caught; }
+      expect(error?.message).to.equal(`project ${project} already exists`);
     } finally {
       rmSync(folder, {recursive: true, force: true});
     }

@@ -67,6 +67,7 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
       && `<_-IWBEP_-I_SBO_PR><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>pp-1</NODE_UUID><PARENT_UUID>et-1</PARENT_UUID><NAME>TravelId</NAME><IS_KEY>X</IS_KEY><EDM_CORE_TYPE>Edm.String</EDM_CORE_TYPE><PROP_PRECISION>2</PROP_PRECISION><MAX_LENGTH>20</MAX_LENGTH><CREATABLE>X</CREATABLE><UPDATABLE>X</UPDATABLE><SORTABLE>X</SORTABLE><SEMANTICS>url</SEMANTICS><AS_ETAG>X</AS_ETAG></_-IWBEP_-I_SBO_PR>` && lv_nl
       && `<_-IWBEP_-I_SBO_PR><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>pp-2</NODE_UUID><PARENT_UUID>et-1</PARENT_UUID><NAME>Address</NAME><COMPLEX_TYPE>ct-1</COMPLEX_TYPE></_-IWBEP_-I_SBO_PR>` && lv_nl
       && `<_-IWBEP_-I_SBO_PR><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>pp-3</NODE_UUID><PARENT_UUID>ct-1</PARENT_UUID><NAME>Street</NAME><EDM_CORE_TYPE>Edm.String</EDM_CORE_TYPE><MAX_LENGTH>40</MAX_LENGTH><CREATABLE>X</CREATABLE><SEMANTICS>email</SEMANTICS></_-IWBEP_-I_SBO_PR>` && lv_nl
+      && `<_-IWBEP_-I_SBO_PR><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>pp-4</NODE_UUID><PARENT_UUID>et-2</PARENT_UUID><NAME>Content</NAME><EDM_CORE_TYPE>Edm.String</EDM_CORE_TYPE><MAX_LENGTH>20</MAX_LENGTH></_-IWBEP_-I_SBO_PR>` && lv_nl
       && `</_-IWBEP_-I_SBO_PR>` && lv_nl
       && `<_-IWBEP_-I_SBO_PRT><_-IWBEP_-I_SBO_PRT><PROJECT>ZUT_DSL</PROJECT><SYLANGU>E</SYLANGU><NODE_UUID>pp-1</NODE_UUID><PROP_LABEL>Travel</PROP_LABEL></_-IWBEP_-I_SBO_PRT></_-IWBEP_-I_SBO_PRT>` && lv_nl
       && `<_-IWBEP_-I_SBO_ES>` && lv_nl
@@ -141,6 +142,15 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
       cl_abap_unit_assert=>assert_equals(
         exp = `complex/Address`
         act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `begin of ADDRESS` ) ).
+      cl_abap_unit_assert=>assert_equals(
+        exp = `complex/Address/property/Street`
+        act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `STREET type` ) ).
+      cl_abap_unit_assert=>assert_equals(
+        exp = `entity/Media/property/Content`
+        act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `CONTENT type` ) ).
+      cl_abap_unit_assert=>assert_equals(
+        exp = `action/LookupAddress/parameter/TravelId`
+        act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `TRAVEL_ID type` ) ).
       cl_abap_unit_assert=>assert_equals(
         exp = `constant/ADDRESS`
         act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `constants GC_ADDRESS` ) ).
