@@ -682,6 +682,9 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
     DATA lv_indent TYPE string.
     DATA lv_template TYPE string.
     DATA lv_ctx_path TYPE string.
+    DATA lv_saved_indent TYPE string.
+    DATA lv_mark_lines TYPE i.
+    DATA lv_mark_len TYPE i.
     FIELD-SYMBOLS <ls_tpl> TYPE ty_parsed.
 
     READ TABLE mt_parsed INDEX iv_tpl ASSIGNING <ls_tpl>.
@@ -822,6 +825,9 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
             lv_partial_count = lines( <ls_tpl>-tokens ).
             lv_indent = iv_indent && ls_token-indent.
             " a standalone call starts a fresh source line: indent it
+            lv_saved_indent = mv_pending_indent.
+            lv_mark_lines = lines( mt_lines ).
+            lv_mark_len = strlen( mv_current ).
             IF ls_token-standalone = abap_true.
               mv_pending_indent = lv_indent.
             ENDIF.
@@ -833,9 +839,17 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
                           iv_indent = lv_indent ).
             mv_depth = mv_depth - 1.
             " after a standalone call the caller continues on a fresh source line
-            " of its own: its indentation, not the partial's
-            IF ls_token-standalone = abap_true AND mv_current IS INITIAL.
-              mv_pending_indent = iv_indent.
+            " of its own: its indentation, not the partial's; after an inline call
+            " it is still on the same source line: the indentation it had, if
+            " nothing was written meanwhile, else none
+            IF ls_token-standalone = abap_true.
+              IF mv_current IS INITIAL.
+                mv_pending_indent = iv_indent.
+              ENDIF.
+            ELSEIF lines( mt_lines ) = lv_mark_lines AND strlen( mv_current ) = lv_mark_len.
+              mv_pending_indent = lv_saved_indent.
+            ELSE.
+              CLEAR mv_pending_indent.
             ENDIF.
             READ TABLE mt_parsed INDEX iv_tpl ASSIGNING <ls_tpl>.
           ENDIF.

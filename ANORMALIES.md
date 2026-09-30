@@ -2640,11 +2640,15 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 
   ```sh
   git clone https://github.com/abaplint/transpiler && cd transpiler
+  git checkout 5ecf76bb2f352fa38668c82b577a8368d239051f     # the merge of #1935: fix and tests
   npm run install && npm run compile
-  npx mocha --timeout 60000 -g "CONCATENATE LINES OF"
+  npx mocha --timeout 60000 -g "CONCATENATE LINES OF"       # passes
+  git checkout 5ecf76bb^1 -- packages/runtime/src/statements/concatenate.ts
+  npm run compile
+  npx mocha --timeout 60000 -g "CONCATENATE LINES OF"       # the string-row test fails
   ```
 
-  on a commit with the tests of #1935 and without its runtime change, the string-row test fails (`2` and `a-b` instead of `3` and `a -b`); with the change it passes
+  Without the runtime change the string-row test gets `2` and `a-b` instead of `3` and `a -b`
 - Expected SAP behaviour: `a b`. ABAP keyword documentation 7.50, CONCATENATE, `RESPECTING BLANKS`: "If this addition is not used, the blanks are respected for data type string only." Not measured on A4H
 - Actual open-abap behaviour: the LINES branch calls `trimEnd()` on every row; the non-LINES branch trims only `Character` operands
 - Impact on open-steamgate: none in `src/` or `packs/*/src` (no `CONCATENATE LINES OF` there, grep 2026-09-30); found through abap_mustache, whose `join_strings` uses it over a `string_table`

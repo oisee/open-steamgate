@@ -33,6 +33,8 @@ CLASS ltcl_osd_tpl DEFINITION FOR TESTING
     METHODS lone_cr_at_end_kept FOR TESTING RAISING cx_static_check.
     METHODS inline_partial_not_indented FOR TESTING RAISING cx_static_check.
     METHODS inline_return_not_indented FOR TESTING RAISING cx_static_check.
+    METHODS inline_return_after_literal FOR TESTING RAISING cx_static_check.
+    METHODS inline_empty_keeps_indent FOR TESTING RAISING cx_static_check.
     METHODS newline_value_claims_path FOR TESTING RAISING cx_static_check.
     METHODS missing_partial_at_limit FOR TESTING RAISING cx_static_check.
     METHODS arguments_are_inherited FOR TESTING RAISING cx_static_check.
@@ -561,6 +563,26 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       exp = `main:1: filter pad needs one width from 1 to 255`
       act = error_text( iv_template = `{{v | pad 256}}` iv_json = `{"v":"a"}` ) ).
+  ENDMETHOD.
+
+
+  METHOD inline_return_after_literal.
+    DATA lt_partials TYPE zcl_osd_tpl=>tt_partials.
+    lt_partials = partial( iv_name = `p` iv_template = `{{>q}}X` ).
+    APPEND LINES OF partial( iv_name = `q` iv_template = `a` && nl( ) ) TO lt_partials.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `  a` && nl( ) && `XEND`
+      act = text( iv_template = `  {{>p}}` && nl( ) && `END` iv_json = `{}` it_partials = lt_partials ) ).
+  ENDMETHOD.
+
+  METHOD inline_empty_keeps_indent.
+    DATA lt_partials TYPE zcl_osd_tpl=>tt_partials.
+    " an inline partial that writes nothing leaves the line's indentation in place
+    lt_partials = partial( iv_name = `p` iv_template = `{{>q}}X` && nl( ) ).
+    APPEND LINES OF partial( iv_name = `q` iv_template = `` ) TO lt_partials.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `  X` && nl( ) && `END`
+      act = text( iv_template = `  {{>p}}` && nl( ) && `END` iv_json = `{}` it_partials = lt_partials ) ).
   ENDMETHOD.
 
 ENDCLASS.
