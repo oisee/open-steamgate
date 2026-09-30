@@ -62,6 +62,44 @@ describe("object versions from git", function () {
   it("names the author as a SAP user, never an e-mail", () => {
     expect(sapUserOf("Alice V.")).to.equal("ALICEV");
     expect(sapUserOf("")).to.equal("UNKNOWN");
+    // the Go host drops non-ASCII the same way (JS would upper-case ß to SS)
+    expect(sapUserOf("Jörg Strauß")).to.equal("JRGSTRAU");
     expect(sapUserOf("someone@example.com")).to.not.include("@");
+  });
+
+  it("keeps a merge, cuts at a copy, reads a non-ASCII path", () => {
+    const repo = mkdtempSync(join(tmpdir(), "osd-history-merge-"));
+    const g = (...args) => execFileSync("git", args, {cwd: repo, stdio: ["ignore", "pipe", "pipe"]});
+    try {
+      g("init", "-q", "-b", "main");
+      g("config", "user.name", "Test Author");
+      g("config", "user.email", "test@example.invalid");
+      mkdirSync(join(repo, "src"));
+      const a = join(repo, "src", "za.prog.abap");
+      writeFileSync(a, "a\nb\nc\nd\ne\n");
+      g("add", ".");
+      g("commit", "-q", "-m", "one");
+      g("checkout", "-q", "-b", "side");
+      writeFileSync(a, "a\nB side\nc\nd\ne\n");
+      g("commit", "-q", "-am", "side");
+      g("checkout", "-q", "main");
+      writeFileSync(a, "a\nB main\nc\nd\ne\n");
+      g("commit", "-q", "-am", "main");
+      try { g("merge", "-q", "side"); } catch { /* the conflict, resolved by hand */ }
+      writeFileSync(a, "a\nB resolved\nc\nd\ne\n");
+      g("commit", "-q", "-am", "merge resolved");
+      writeFileSync(join(repo, "src", "zé.prog.abap"), "a\nB resolved\nc\nd\ne\nf\n");
+      g("add", ".");
+      g("commit", "-q", "-m", "copy");
+
+      const [newest] = gitObjectHistory(repo, "src/za.prog.abap").entries;
+      expect(newest.subject).to.equal("merge resolved");
+      expect(gitObjectRevisionAt(repo, "src/za.prog.abap", newest.revision).source).to.include("B resolved");
+      const copy = gitObjectHistory(repo, "src/zé.prog.abap").entries;
+      expect(copy.map((e) => [e.subject, e.path])).to.deep.equal([["copy", "src/zé.prog.abap"]]);
+      expect(gitObjectRevisionAt(repo, "src/zé.prog.abap", copy[0].revision).path).to.equal("src/zé.prog.abap");
+    } finally {
+      rmSync(repo, {recursive: true, force: true});
+    }
   });
 });

@@ -17,9 +17,11 @@ the Go host (`tools/gogen/go/abap/store_history.go`):
 
 - **The object's file comes from the object store.** It is the file of the winning layer.
 - **History follows renames** (`git log --follow`). A version from before a rename is read at the path it had then.
+- **A merge that changed the file is a version**, compared with its first parent (`--diff-merges=first-parent`), so the newest version is what HEAD holds even after a resolved conflict.
+- **A copy begins a history.** `--follow` also follows a copy into its source; a class made by copying another would inherit the other's commits, so the history stops at the commit that made the copy.
 - **`ZOSD_REVISION_S` fields:**
   - `REVISION` (the full SHA) and `SHORT` (12 characters);
-  - `AUTHOR`: the commit author as a SAP-style user name (upper case, `A-Z0-9_`, at most 12 characters), never an e-mail;
+  - `AUTHOR`: the commit author (after `.mailmap`) as a SAP-style user name (non-ASCII dropped, then upper case, `A-Z0-9_`, at most 12 characters), never an e-mail;
   - `DATE` and `TIME` in UTC, like a system's `DATUM`/`ZEIT`;
   - `SUBJECT` (80 characters).
 - **No history is said out loud.** For an untracked or ignored file, a pack fetched without its `.git`, or a tree that is not a git worktree, `EV_NOTE` says `no history: <reason>` and `EV_COUNT` stays empty. An empty list would read as "never changed".

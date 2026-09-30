@@ -189,7 +189,8 @@ export class StoreDestination {
   // read as "never changed".
   #history(type, name, signature) {
     const entry = this.store.read(type, name);
-    const limit = Number(givenText(signature, "IV_LIMIT")) || 50;
+    const asked = Number(givenText(signature, "IV_LIMIT"));
+    const limit = Number.isInteger(asked) && asked > 0 ? asked : 50;
     const history = gitObjectHistory(this.store.root, entry.file, limit);
     if (history.available !== true) {
       return {EV_FILE: String(entry.file ?? ""), EV_NOTE: `no history: ${history.reason}`, EV_COUNT: ""};
@@ -375,7 +376,7 @@ const EMPTY = {
 
 /** A git author as a SAP user name: upper case, A-Z 0-9 _, at most 12 */
 export function sapUserOf(author) {
-  const user = String(author ?? "").toUpperCase().replace(/[^A-Z0-9_]/g, "").slice(0, 12);
+  const user = String(author ?? "").replace(/[^A-Za-z0-9_]/g, "").toUpperCase().slice(0, 12);
   return user === "" ? "UNKNOWN" : user;
 }
 

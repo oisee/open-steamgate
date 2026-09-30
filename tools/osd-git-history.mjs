@@ -135,8 +135,8 @@ export function gitObjectRevision(root, file, revision) {
 
 /**
  * The versions of one object file, newest first: every commit that changed
- * it, followed across renames (`git log --follow`), each with the path the
- * file had in that commit. A file git does not track -- untracked, ignored,
+ * it (a merge by its first-parent diff), followed across renames (`git log
+ * --follow`) and cut at a copy, each with the path the file had in that commit. A file git does not track -- untracked, ignored,
  * a pack fetched without its .git, a tree that is no worktree -- has no
  * history, and says why: an empty list would read as "never changed".
  */
@@ -155,14 +155,20 @@ export function gitObjectHistory(root, file, limit = 50) {
   } catch {
     return unavailable(`${file} is not tracked by git`);
   }
-  const text = rawGit(root, ["log", "--follow", "-n", String(limit),
-    "--format=%x1e%H%x00%an%x00%aI%x00%s", "--name-only", "HEAD", "--", file]);
-  const entries = text.split("\x1e").map((record) => record.trim()).filter(Boolean).map((record) => {
+  const text = rawGit(root, ["--literal-pathspecs", "-c", "core.quotePath=false", "log", "--follow",
+    "--diff-merges=first-parent", "--name-status", "-n", String(limit),
+    "--format=%x1e%H%x00%aN%x00%aI%x00%s", "HEAD", "--", file]);
+  const entries = [];
+  for (const record of text.split("\x1e").map((r) => r.trim()).filter(Boolean)) {
     const lines = record.split("\n");
     const [revision, author, authoredAt, subject] = lines[0].split("\x00");
-    const path = lines.slice(1).map((line) => line.trim()).filter(Boolean).pop() ?? file;
-    return {revision, short: revision.slice(0, 12), author, authoredAt, subject, path};
-  });
+    const change = (lines.slice(1).map((line) => line.trim()).filter(Boolean).pop() ?? "").split("\t");
+    const path = change.length > 1 ? change[change.length - 1] : file;
+    entries.push({revision, short: revision.slice(0, 12), author, authoredAt, subject, path});
+    // --follow also follows a copy; what came before it is another object's
+    // history, so the object's own history begins at the copy
+    if (change[0].startsWith("C")) break;
+  }
   if (entries.length === 0) {
     // added to the index and never committed: tracked, and still no version
     return unavailable(`${file} has no commit yet`);

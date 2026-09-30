@@ -32,12 +32,13 @@ func storeGit(root string, args ...string) (string, error) {
 	return out.String(), nil
 }
 
-var storeNotUser = regexp.MustCompile(`[^A-Z0-9_]`)
+var storeNotUser = regexp.MustCompile(`[^A-Za-z0-9_]`)
 
 // storeSapUser is a git author as a SAP user name: upper case, A-Z 0-9 _,
-// at most 12, never an e-mail (the Node host's sapUserOf).
+// at most 12, never an e-mail (the Node host's sapUserOf). Non-ASCII is
+// dropped before upper-casing, since JS and Go upper-case it differently.
 func storeSapUser(author string) string {
-	u := storeNotUser.ReplaceAllString(strings.ToUpper(author), "")
+	u := strings.ToUpper(storeNotUser.ReplaceAllString(author, ""))
 	if len(u) > 12 {
 		u = u[:12]
 	}
@@ -48,7 +49,8 @@ func storeSapUser(author string) string {
 }
 
 // storeHistory is gitObjectHistory of tools/osd-git-history.mjs: the commits
-// that changed file, newest first, followed across renames. The reason is
+// that changed file, newest first (a merge by its first-parent diff),
+// followed across renames and cut at a copy. The reason is
 // set, and the list nil, when git has no history for it.
 func storeHistory(root, file string, limit int) ([]StoreRevision, string) {
 	if out, err := storeGit(root, "rev-parse", "--is-inside-work-tree"); err != nil || strings.TrimSpace(out) != "true" {
@@ -60,8 +62,9 @@ func storeHistory(root, file string, limit int) ([]StoreRevision, string) {
 	if _, err := storeGit(root, "ls-files", "--error-unmatch", "--", file); err != nil {
 		return nil, file + " is not tracked by git"
 	}
-	out, err := storeGit(root, "log", "--follow", "-n", strconv.Itoa(limit),
-		"--format=%x1e%H%x00%an%x00%aI%x00%s", "--name-only", "HEAD", "--", file)
+	out, err := storeGit(root, "--literal-pathspecs", "-c", "core.quotePath=false", "log", "--follow",
+		"--diff-merges=first-parent", "--name-status", "-n", strconv.Itoa(limit),
+		"--format=%x1e%H%x00%aN%x00%aI%x00%s", "HEAD", "--", file)
 	if err != nil {
 		return nil, "git history is unavailable for this object store"
 	}
@@ -76,11 +79,16 @@ func storeHistory(root, file string, limit int) ([]StoreRevision, string) {
 		if len(f) < 4 {
 			continue
 		}
-		path := file
+		last := ""
 		for _, l := range lines[1:] {
 			if l = strings.TrimSpace(l); l != "" {
-				path = l
+				last = l
 			}
+		}
+		change := strings.Split(last, "\t")
+		path := file
+		if len(change) > 1 {
+			path = change[len(change)-1]
 		}
 		r := StoreRevision{REVISION: f[0], AUTHOR: storeSapUser(f[1]), SUBJECT: f[3], DATE: "00000000", TIME: "000000", path: path}
 		r.SHORT = r.REVISION
@@ -95,6 +103,11 @@ func storeHistory(root, file string, limit int) ([]StoreRevision, string) {
 			r.DATE, r.TIME = u.Format("20060102"), u.Format("150405")
 		}
 		revs = append(revs, r)
+		// --follow also follows a copy; what came before it is another
+		// object's history, so the object's own history begins at the copy
+		if strings.HasPrefix(change[0], "C") {
+			break
+		}
 	}
 	if len(revs) == 0 {
 		// added to the index and never committed: tracked, and still no version
