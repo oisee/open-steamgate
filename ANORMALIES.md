@@ -168,7 +168,7 @@ WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 
 ### ANOMALY-2026-09-24-httpc-body-latin1 -- open-abap-core's `CL_HTTP_CLIENT` sends the request body one byte per UTF-16 code unit; a system sends UTF-8, whatever charset the request names
 
-- Status: `open`, **measured on an ABAP 7.5x system 2026-09-24** (the Go host of tools/gogen does what Node does, on purpose: Node is its oracle)
+- Status: `fixed upstream: open-abap/open-abap-core#1268, merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035`; before: open, **measured on an ABAP 7.5x system 2026-09-24** (the Go host of tools/gogen does what Node does, on purpose: Node is its oracle)
 - Discovery date: `2026-09-24`
 - Affected versions: open-abap-core 4eec777 (still in 3f22182) (`src/http/cl_http_client.clas.abap`, `IF_HTTP_CLIENT~SEND`: `req.write(requestBody, "binary")` of `get_cdata( )`, `content-length` from `lv_body.get().length`)
 - Affected ABAP statement, runtime API or adapter: `IF_HTTP_CLIENT~SEND` with a body set by `request->set_cdata( )`; `request->get_cdata( )` after `request->set_data( )`
@@ -178,13 +178,13 @@ WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 - Actual open-abap behaviour: the euro sign goes out as the single byte `AC` (each UTF-16 code unit written as its low byte), `content-length` counts UTF-16 code units, so a non-Latin-1 body is both corrupted and cut short; a body `set_data` filled with bytes that are not UTF-8 raises `CX_SY_CONVERSION_CODEPAGE` in `get_cdata` before anything is sent
 - Impact on open-steamgate: any request body outside Latin-1 is corrupted on the wire; ZCL_OSD_GIT's upload-pack request is ASCII and is not affected
 - Smallest safe workaround: none in OSG (a caller can `set_data( cl_abap_codepage=>convert_to( text ) )` itself, which is what a system does anyway)
-- Upstream: [open-abap/open-abap-core#1268](https://github.com/open-abap/open-abap-core/pull/1268) (branch `httpc-body-utf8`), opened 2026-09-25, not merged: send the bytes of `request->get_data( )`, which are UTF-8 for a `set_cdata` body, with `content-length` from their length; `get_cdata` of bytes that are not UTF-8 answers empty
+- Upstream: [open-abap/open-abap-core#1268](https://github.com/open-abap/open-abap-core/pull/1268) (branch `httpc-body-utf8`), opened 2026-09-25, not merged at the time: send the bytes of `request->get_data( )`, which are UTF-8 for a `set_cdata` body, with `content-length` from their length; `get_cdata` of bytes that are not UTF-8 answers empty. Fixed upstream by [open-abap/open-abap-core#1268](https://github.com/open-abap/open-abap-core/pull/1268), merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035.
 - Regression-test location: `tools/gogen/httpc.mjs` on spike/go-backend (Node and Go compared, not against a system); the system side is the probe sources above
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `open-abap/open-abap-core` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### ANOMALY-2026-09-24-httpc-failure-dumps -- a failed `CL_HTTP_CLIENT` request is an uncatchable error on Node; a system returns from SEND and fails RECEIVE with a classic exception
 
-- Status: `open`, **measured on an ABAP 7.5x system 2026-09-24** (the Go host dumps where Node does)
+- Status: `fixed upstream: open-abap/open-abap-core#1271, merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035`; before: open, **measured on an ABAP 7.5x system 2026-09-24** (the Go host dumps where Node does)
 - Discovery date: `2026-09-24`
 - Affected versions: open-abap-core 4eec777 (still in 3f22182) (`IF_HTTP_CLIENT~SEND`: the promise rejects out of a `WRITE '@KERNEL'` line; `SEND` and `RECEIVE` end in `sy-subrc = 0. " workaround for classic exceptions`; `GET_LAST_ERROR` answers the status code and `'todo_open_abap'`)
 - Affected ABAP statement, runtime API or adapter: `client->send( EXCEPTIONS http_communication_failure = 1 http_invalid_state = 2 http_processing_failed = 3 ... )`, `client->receive( EXCEPTIONS ... )`, `client->get_last_error( )`
@@ -205,9 +205,9 @@ WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 - Actual open-abap behaviour: a JavaScript error no `CATCH` takes (a dump) for the refused, TLS, scheme and header-newline cases; the classic exceptions are never raised and sy-subrc is 0 whenever the call returns; `get_last_error` has no message
 - Impact on open-steamgate: ZCL_OSD_GIT (and any client) cannot report an unreachable remote; the dialog step dumps; our own calls had no `EXCEPTIONS` either, so ZCL_OSD_GIT dumped on a system too and needed `EXCEPTIONS http_communication_failure = 1 ...` on its SEND/RECEIVE whatever upstream does. It has them now (`ZCL_OSD_GIT=>EXCHANGE`, PR #84): on a system an unreachable remote is a `zcx_abapgit_exception` with `get_last_error`'s text; here it still dumps until the upstream fix
 - Smallest safe workaround: `EXCEPTIONS` on every SEND and RECEIVE of our own ABAP (ZCL_OSD_GIT has them); it is right on a system and changes nothing here until the upstream fix
-- Upstream: [open-abap/open-abap-core#1271](https://github.com/open-abap/open-abap-core/pull/1271) (branch `httpc-communication-failure`), opened 2026-09-25, not merged: catch the request's error in `SEND`, keep it, and let `RECEIVE` set sy-subrc 1 with the message in `get_last_error`; the response status the ICM invents (404/500/400) is secondary. Classic exceptions from a method in the transpiler are the underlying gap the source comment names
+- Upstream: [open-abap/open-abap-core#1271](https://github.com/open-abap/open-abap-core/pull/1271) (branch `httpc-communication-failure`), opened 2026-09-25, not merged at the time: catch the request's error in `SEND`, keep it, and let `RECEIVE` set sy-subrc 1 with the message in `get_last_error`; the response status the ICM invents (404/500/400) is secondary. Classic exceptions from a method in the transpiler are the underlying gap the source comment names. Fixed upstream by [open-abap/open-abap-core#1271](https://github.com/open-abap/open-abap-core/pull/1271), merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035.
 - Regression-test location: `tools/gogen/httpc.mjs` on spike/go-backend; the system side is the probe source above
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `open-abap/open-abap-core` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### ANOMALY-2026-09-24-httpc-timeout-ignored -- `SEND`'s `TIMEOUT` is ignored by open-abap-core's `CL_HTTP_CLIENT`; a system ends RECEIVE after that many seconds
 
@@ -227,7 +227,7 @@ WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 
 ### ANOMALY-2026-09-24-httpc-status-code-field -- the response of open-abap-core's `CL_HTTP_CLIENT` has no `~status_code` header field; a system's has it and five more pseudo fields
 
-- Status: `open`, **measured on an ABAP 7.5x system 2026-09-24** (the Go host does the same)
+- Status: `fixed upstream: open-abap/open-abap-core#1269, merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035`; before: open, **measured on an ABAP 7.5x system 2026-09-24** (the Go host does the same)
 - Discovery date: `2026-09-24`
 - Affected versions: open-abap-core 4eec777 (still in 3f22182) (`IF_HTTP_CLIENT~SEND` sets `mv_status` and the header fields Node returns; no pseudo field)
 - Affected ABAP statement, runtime API or adapter: `client->response->get_header_field( '~status_code' )`, `~status_reason`, `~server_protocol`, `get_header_fields( )`; `get_status( )` itself answers on both
@@ -237,13 +237,13 @@ WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 - Actual open-abap behaviour: `~status_code`, `~status_reason` and `~server_protocol` are empty and `get_header_fields( )` has no `~` field; `get_status( )` gives the code and an empty reason
 - Impact on open-steamgate: ZCL_OSD_GIT's 4xx/5xx check read `~status_code` and never fired, on Node or on OSGo, so an error answer was parsed as refs
 - Smallest safe workaround: read `get_status( )` instead, in the ABAP that is ours: ZCL_OSD_GIT does since PR #84 and refuses anything but a 2xx (a 3xx with its `Location`), and an advertisement that is not `application/x-git-upload-pack-advertisement` (`test/osd-git.mjs`: a 404, a 301 and an HTML page, each red before)
-- Upstream: [open-abap/open-abap-core#1269](https://github.com/open-abap/open-abap-core/pull/1269) (branch `httpc-status-fields`), opened 2026-09-25, not merged: set `~status_code`, `~status_reason` (Node's `statusMessage`) and `~server_protocol` on the response, and `get_status`'s reason
+- Upstream: [open-abap/open-abap-core#1269](https://github.com/open-abap/open-abap-core/pull/1269) (branch `httpc-status-fields`), opened 2026-09-25, not merged at the time: set `~status_code`, `~status_reason` (Node's `statusMessage`) and `~server_protocol` on the response, and `get_status`'s reason. Fixed upstream by [open-abap/open-abap-core#1269](https://github.com/open-abap/open-abap-core/pull/1269), merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035.
 - Regression-test location: `tools/gogen/httpc.mjs` on spike/go-backend; the system side is the probe source above
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `open-abap/open-abap-core` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### ANOMALY-2026-09-24-httpc-post-url-query -- open-abap-core moves the query of a POST's URL into the body even when the program set a body; a system does that only for a POST without one
 
-- Status: `open`, **measured on an ABAP 7.5x system 2026-09-24**; narrowed: the case `tools/gogen/httpc.mjs` records (`query-post`, a POST with no body) does on a system what it does here, except the content type (the Go host does the same as Node)
+- Status: `fixed upstream: open-abap/open-abap-core#1270, merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035`; before: open, **measured on an ABAP 7.5x system 2026-09-24**; narrowed: the case tools/gogen/httpc.mjs records (query-post, a POST with no body) does on a system what it does here, except the content type (the Go host does the same as Node)
 - Discovery date: `2026-09-24`
 - Affected versions: open-abap-core 4eec777 (still in 3f22182) (`CREATE_BY_URL` splits the query off into form fields with `cl_http_utility=>set_query`; `SEND` writes the form fields of a POST into the body with `set_cdata`, whether or not a body was set, and sets no content type for them)
 - Affected ABAP statement, runtime API or adapter: `cl_http_client=>create_by_url( 'http://h/p?a=1' )` followed by `request->set_method( 'POST' )`, a body or none, and `send( )`
@@ -256,9 +256,9 @@ WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 - Actual open-abap behaviour: a POST always gets the fields as its body, replacing a body set before (`set_cdata`), with no query on the request line and no `content-type`
 - Impact on open-steamgate: none found (git's smart HTTP puts `?service=` on GETs only)
 - Smallest safe workaround: none in OSG
-- Upstream: [open-abap/open-abap-core#1270](https://github.com/open-abap/open-abap-core/pull/1270) (branch `httpc-post-query`), opened 2026-09-25, not merged, narrow: when a POST has a body, put the fields on the URL as for GET; when it has none, keep writing them into the body and add `content-type: application/x-www-form-urlencoded` unless one is set. PUT and other methods were not measured
+- Upstream: [open-abap/open-abap-core#1270](https://github.com/open-abap/open-abap-core/pull/1270) (branch `httpc-post-query`), opened 2026-09-25, not merged at the time, narrow: when a POST has a body, put the fields on the URL as for GET; when it has none, keep writing them into the body and add `content-type: application/x-www-form-urlencoded` unless one is set. PUT and other methods were not measured. Fixed upstream by [open-abap/open-abap-core#1270](https://github.com/open-abap/open-abap-core/pull/1270), merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035.
 - Regression-test location: `tools/gogen/httpc.mjs` on spike/go-backend; the system side is the probe sources above
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `open-abap/open-abap-core` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### ANOMALY-2026-09-23-div-mod-negative-divisor — DIV and MOD can be wrong when the divisor is negative
 
@@ -1503,7 +1503,7 @@ for `zosd_status_app`, which has been deployed for a day.
 
 ### ANOMALY-2026-09-23-amdp-method-options — abaplint drops the whole class definition when an AMDP method uses an OPTIONS clause other than READ-ONLY
 
-- Status: `open`
+- Status: `fixed upstream: gone in @abaplint/core 2.120.62; verified 2026-09-30 by running the reproducer`; before: open
 - Discovery date: `2026-09-23`
 - Affected versions: `@abaplint/core` 2.120.55 (as installed; `npm ls @abaplint/core`)
 - Affected ABAP statement, runtime API or adapter: `METHOD … BY DATABASE PROCEDURE|FUNCTION FOR HDB LANGUAGE SQLSCRIPT OPTIONS …` — the statement accepts `OPTIONS READ-ONLY` and nothing else; `OPTIONS SUPPRESS SYNTAX ERRORS`, `OPTIONS READ-ONLY SUPPRESS SYNTAX ERRORS`, `OPTIONS DETERMINISTIC` and `OPTIONS CDS SESSION CLIENT p_clnt` are all reported as "Statement does not exist in the configured ABAP version (or a parser error)". `LANGUAGE LLANG` and `BY DATABASE GRAPH WORKSPACE` are refused the same way.
@@ -1530,9 +1530,9 @@ for `zosd_status_app`, which has been deployed for a day.
 - Impact on open-steamgate: measured on the A4H AMDP export, 17 of 181 AMDP classes lose their definition, 12 of them on exactly this clause (`SUPPRESS SYNTAX ERRORS` ×11, `DETERMINISTIC` ×1; the other 5 are GRAPH WORKSPACE and LLANG). Among them the classes of one package whose functions 15 corpus bodies call. The extractor (`tools/amdp-extract.mjs`) then had no signature for any of their methods, and a body's own `:it_configuration` was refused as an unknown table variable.
 - Smallest safe workaround: `tools/amdp-extract.mjs` reads the method definitions as text (`definitionsByText`) when abaplint hands back no class definition, and for a single method abaplint dropped from a definition it did read; a section the reader cannot read whole yields no parameters for that method; the coverage instrument cross-checks that reader against abaplint on every class abaplint does read and prints the count of disagreements, so the fallback is measured where it is not the only source. It is gated, not preferred: abaplint resolves what the text reader cannot (types from includes, aliases, inheritance), and a runtime refusal on disagreement would make abaplint's right answer depend on the weaker parser (foreman-dell).
 - The same clause in the **definition** has the same effect on that one method: `METHODS m AMDP OPTIONS READ-ONLY IMPORTING VALUE(iv) TYPE i EXPORTING VALUE(ev) TYPE i.` is a parser error, the class definition survives without `m`, and `m` has no parameters (two documentation demo classes and a family of compiler fixtures: 10 methods on the export, found by the cross-check below). `METHODS: a …, b ….` chains are fine.
-- Upstream issue: **needs an issue** in `abaplint/abaplint` (the statement grammars `MethodImplementation` / `BY DATABASE` and `MethodDef` / `AMDP OPTIONS`); not yet filed — goes out through the critic gate. `oisee` has no push rights there, so it is a fork PR or an issue.
+- Upstream issue: was marked needs-issue in `abaplint/abaplint` (the statement grammars `MethodImplementation` / `BY DATABASE` and `MethodDef` / `AMDP OPTIONS`); not yet filed — goes out through the critic gate. `oisee` has no push rights there, so it is a fork PR or an issue. Fixed upstream in @abaplint/core 2.120.62; verified 2026-09-30 by running the reproducer. The reproducer parses in @abaplint/core 2.120.62 and still fails in 2.120.55; no issue was filed.
 - Regression-test location: `test/sqlscript-table-function.mjs` ("method definitions read as text …" and "is what extract() falls back to …" — the second one carries the reproducer's shape and must start passing through abaplint, with the fallback no longer firing, once the grammar knows the clause)
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: `@abaplint/core 2.120.62` (was: unknown)
 
 ### ANOMALY-2026-09-23-amdp-scalar-optional — our compiler and abaplint accept OPTIONAL on an AMDP scalar input, which the kernel refuses
 
@@ -1674,7 +1674,7 @@ for `zosd_status_app`, which has been deployed for a day.
 
 ### ANOMALY-2026-09-24-c-to-x — a character value moved into an x keeps the characters after a non-hex one in the transpiler runtime
 
-- Status: `reported` (transpiler#1857, fix offered in PR #1895)
+- Status: `fixed upstream: abaplint/transpiler#1895, merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d`; before: reported (transpiler#1857, fix offered in PR #1895)
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/runtime` 2.13.89 (`Hex.set` of a character value takes it as it stands and pads with 0)
 - Affected ABAP statement, runtime API or adapter: `x = string`, `x = c` (and `UPDATE ... SET raw = string`, ANOMALY-2026-09-24-raw-columns)
@@ -1684,9 +1684,9 @@ for `zosd_status_app`, which has been deployed for a day.
 - Actual open-abap behaviour: into x LENGTH 4, `ABG10000`, `AB CD000`, `0a1B0000` and `AB    00` (the blanks of the c kept), none of them hex; into an xstring the same as A4H
 - Impact on open-steamgate: none seen; the zvdb DPC upper-cases and validates VectorHex before the move
 - Smallest safe workaround: the IR writes a RAW by the A4H rule (`tools/ir-writes.mjs` bindValue); the Go backend has it too (`go/abap/conv.go` CToX)
-- Upstream: [abaplint/transpiler#1857](https://github.com/abaplint/transpiler/issues/1857) (a related, older issue about conversion type c; the measured table is in a comment of 2026-09-24), fix offered as [PR #1895](https://github.com/abaplint/transpiler/pull/1895)
+- Upstream: [abaplint/transpiler#1857](https://github.com/abaplint/transpiler/issues/1857) (a related, older issue about conversion type c; the measured table is in a comment of 2026-09-24), fix offered as [PR #1895](https://github.com/abaplint/transpiler/pull/1895). Fixed upstream by [abaplint/transpiler#1895](https://github.com/abaplint/transpiler/pull/1895), merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d.
 - Regression-test location: `test/ir-writes.mjs` ("binds a RAW as its upper-case hex"); on `spike/go-backend` `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XCONV
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `abaplint/transpiler` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### NOTE-2026-09-25-warm-swap-class-constructor — a warm swap runs a class constructor when the class is loaded, a system runs it at the first access
 
@@ -1704,7 +1704,7 @@ for `zosd_status_app`, which has been deployed for a day.
 
 ### ANOMALY-2026-09-25-in-process-numbering — a second transpile in one process numbers the temporary names on from the first, so a dev-loop build is not reproducible
 
-- Status: `reported` (fix offered as abaplint/transpiler#1899)
+- Status: `fixed upstream: abaplint/transpiler#1899, merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d`; before: reported (fix offered as abaplint/transpiler#1899)
 - Discovery date: `2026-09-25` (foreman-dell, measuring the dev loop on main 03f0fa0)
 - Affected versions: `@abaplint/transpiler` at the pinned 0263e428 and on npm
 - Affected ABAP statement, runtime API or adapter: `Transpiler.run` called more than once in one process (the dev loop's and ADT activation's cold build run in the façade process, `tools/osd-store.mjs` transpile)
@@ -1712,8 +1712,8 @@ for `zosd_status_app`, which has been deployed for a day.
 - Actual open-abap behaviour: `UniqueIdentifier`'s counters (`unique1…`, `indexBackup1…`) carry on from the earlier run, so `osd-build --force` over a generation the dev loop built in-process reported "NOT reproducible: 415 of 2524 files differ"; the binary's forced rebuilds were byte-identical.
 - Impact on open-steamgate: a generation the dev loop built cold differs from a fresh build of the same inputs in the temporary names only; what runs is the same. The warm build (`tools/osd-warm.mjs`) needs the fix and refuses without it.
 - Smallest safe workaround: none in the tree; a build in a fresh process (`npm run transpile`, `osd build`) is reproducible.
-- Upstream issue: [abaplint/transpiler#1898](https://github.com/abaplint/transpiler/issues/1898), fix offered as [PR #1899](https://github.com/abaplint/transpiler/pull/1899)
-- Upstream version containing a fix: none yet
+- Upstream issue: [abaplint/transpiler#1898](https://github.com/abaplint/transpiler/issues/1898), fix offered as [PR #1899](https://github.com/abaplint/transpiler/pull/1899). Fixed upstream by [abaplint/transpiler#1899](https://github.com/abaplint/transpiler/pull/1899), merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d.
+- Upstream version containing a fix: `abaplint/transpiler` main (merged 2026-09-25); first release not checked (was: none yet)
 - Regression-test location: `packages/transpiler/test/unique_identifier.ts` in #1899; here `test/warm.mjs`, whose real path is verified against a cold transpile in a separate process
 
 ### ANOMALY-2026-09-23-sin-cos-libm — `sin` / `cos` are the C library's on a system and V8's (fdlibm) here, and differ in the last bit
@@ -1830,7 +1830,7 @@ for `zosd_status_app`, which has been deployed for a day.
 
 ### ANOMALY-2026-09-24-escape-json-string-control-characters — `escape( format = e_json_string )` leaves control characters other than a newline raw
 
-- Status: `open`
+- Status: `fixed upstream: abaplint/transpiler#1902, merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d`; before: open
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/runtime 2.13.89` (`builtin/escape.ts`, the `e_json_string` case)
 - Affected ABAP statement, runtime API or adapter: `escape( val = v format = cl_abap_format=>e_json_string )`, which open-abap-core's `/UI2/CL_JSON=>SERIALIZE_INT` uses for every c and string it writes
@@ -1840,13 +1840,13 @@ for `zosd_status_app`, which has been deployed for a day.
 - Actual open-abap behaviour: only `\`, `"` and U+000A are escaped; a tab, a carriage return and every other control character reach the JSON raw, which makes the document invalid JSON
 - Impact on open-steamgate: a string with a tab or a CR in it (source code through the RFC channel, a message text) serializes to JSON a browser's `JSON.parse` refuses on Node and not on a system or on OSGo, which follows A4H (`go/abap/strings.go` EscapeJSONString)
 - Smallest safe workaround: none in ABAP; the Go and JS backends of tools/gogen follow A4H
-- Upstream issue: not reported yet (goes through the critic gate with the next batch)
+- Upstream issue: not reported yet (goes through the critic gate with the next batch). Fixed upstream by [abaplint/transpiler#1902](https://github.com/abaplint/transpiler/pull/1902), merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d.
 - Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_JSESC
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: `abaplint/transpiler` main (merged 2026-09-25); first release not checked (was: unknown)
 
 ### ANOMALY-2026-09-24-empty-string-to-date — an empty string moved into a `d` is eight blanks, not the initial date
 
-- Status: `open`
+- Status: `fixed upstream: abaplint/transpiler#1904, merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d`; before: open
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/runtime 2.13.89` (`types/date.ts`, `set` of a string)
 - Affected ABAP statement, runtime API or adapter: `lv_d = lv_string` and the same move into a field symbol bound to a `d`
@@ -1856,13 +1856,13 @@ for `zosd_status_app`, which has been deployed for a day.
 - Actual open-abap behaviour: `Date.set("")` pads with blanks, so the date is eight blanks, IS INITIAL false
 - Impact on open-steamgate: an absent date in a JSON body or an OData request that reaches a `d` through a string is not initial on Node; OSGo follows A4H (`go/abap/conv.go` S2D)
 - Smallest safe workaround: `IF lv_s IS INITIAL. CLEAR lv_d. ELSE. lv_d = lv_s. ENDIF.`
-- Upstream issue: not reported yet (goes through the critic gate with the next batch)
+- Upstream issue: not reported yet (goes through the critic gate with the next batch). Fixed upstream by [abaplint/transpiler#1904](https://github.com/abaplint/transpiler/pull/1904), merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d.
 - Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_GENMOVD
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: `abaplint/transpiler` main (merged 2026-09-25); first release not checked (was: unknown)
 
 ### ANOMALY-2026-09-24-byte-compare-x-length — two `x` fields of different lengths are unequal in the transpiler runtime; a system pads the shorter with 00
 
-- Status: `open` (the Go and JS backends of tools/gogen answer as A4H does)
+- Status: `fixed upstream: abaplint/transpiler#1908, merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d`; before: open (the Go and JS backends of tools/gogen answer as A4H does)
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/runtime` 2.13.89 (`compare/eq.js`: two `Hex` of different lengths are equal only when both are initial; `lt` / `gt` compare the hex text)
 - Affected ABAP statement, runtime API or adapter: `=`, `<>`, `<`, `>` between `x LENGTH m` and `x LENGTH n`, m <> n
@@ -1872,9 +1872,9 @@ for `zosd_status_app`, which has been deployed for a day.
 - Actual open-abap behaviour: `g:01010101101` -- `x'AB' = x'AB00'` false, `x'AB' < x'AB00'` true
 - Impact on open-steamgate: none found (ZCL_OSD_GIT compares xstrings with c literals, which both runtimes answer alike)
 - Smallest safe workaround: none needed
-- Upstream: **needs an issue** in abaplint/transpiler (runtime, `compare/eq`, `lt`, `gt` for `Hex`)
+- Upstream: was marked needs-issue in abaplint/transpiler (runtime, `compare/eq`, `lt`, `gt` for `Hex`). Fixed upstream by [abaplint/transpiler#1908](https://github.com/abaplint/transpiler/pull/1908), merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d.
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XCMP
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `abaplint/transpiler` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### ANOMALY-2026-09-24-byte-compare-numeric — an `x` or `xstring` against an `i` or `n` is not read as a number in the transpiler runtime
 
@@ -1894,7 +1894,7 @@ for `zosd_status_app`, which has been deployed for a day.
 
 ### ANOMALY-2026-09-24-byte-to-i-move — an empty `xstring` moved into an `i` is NaN, and more than four bytes are not cut, in the transpiler runtime
 
-- Status: `open` (the Go and JS backends of tools/gogen answer as A4H does)
+- Status: `fixed upstream: abaplint/transpiler#1906, merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d`; before: open (the Go and JS backends of tools/gogen answer as A4H does)
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/runtime` 2.13.89 (the move of `Hex` / `XString` into `Integer` parses the whole hex text)
 - Affected ABAP statement, runtime API or adapter: `lv_i = lv_x.` / `lv_i = lv_xstring.`; in OSG `ZCL_ABAPGIT_CONVERT=>XSTRING_TO_INT` (abapGit's pack header, four bytes: not affected)
@@ -1904,9 +1904,9 @@ for `zosd_status_app`, which has been deployed for a day.
 - Actual open-abap behaviour: `... e:NaN ... x5:4294967298 xs5:4294967298` -- an empty xstring gives NaN, and five bytes give a value no `i` can hold
 - Impact on open-steamgate: none found (abapGit converts exactly four bytes)
 - Smallest safe workaround: none needed
-- Upstream: **needs an issue** in abaplint/transpiler (runtime, move of `Hex` / `XString` into `Integer`)
+- Upstream: was marked needs-issue in abaplint/transpiler (runtime, move of `Hex` / `XString` into `Integer`). Fixed upstream by [abaplint/transpiler#1906](https://github.com/abaplint/transpiler/pull/1906), merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d.
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_XMOVI
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `abaplint/transpiler` main (merged 2026-09-25); first release not checked (was: none yet)
 
 The five `ANOMALY-2026-09-24-httpc-*` entries (`CL_HTTP_CLIENT`: body-latin1, failure-dumps, timeout-ignored, status-code-field, post-url-query) were measured on a system; the measured versions are on main (PR #84).
 
@@ -1928,7 +1928,7 @@ The five `ANOMALY-2026-09-24-httpc-*` entries (`CL_HTTP_CLIENT`: body-latin1, fa
 
 ### ANOMALY-2026-09-23-w3mi-edges — WWWDATA_IMPORT and SCMS_BINARY_TO_XSTRING differ from A4H at their edges
 
-- Status: `open` (the Go host of tools/gogen answers as A4H does; the open-abap-core functions do not)
+- Status: `fixed upstream: open-abap/open-abap-core#1265 and open-abap/open-abap-core#1266, merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035`; before: open (the Go host of tools/gogen answers as A4H does; the open-abap-core functions do not)
 - Discovery date: `2026-09-23`
 - Affected versions: open-abap-core `zw3mi` and `zscms` function groups as held in `.local/lars/open-abap-core` (fork branch with #1218)
 - Affected ABAP statement, runtime API or adapter: `CALL FUNCTION 'WWWDATA_IMPORT'`, `CALL FUNCTION 'SCMS_BINARY_TO_XSTRING'`
@@ -1938,13 +1938,13 @@ The five `ANOMALY-2026-09-24-httpc-*` entries (`CL_HTTP_CLIENT`: body-latin1, fa
 - Actual open-abap behaviour: `WWWDATA_IMPORT` clears MIME before it looks the object up, so a miss empties the caller's table; it never reads `RELID`; `SCMS_BINARY_TO_XSTRING` cuts only when `0 < INPUT_LENGTH * 2 < length`, so 0 or a negative length returns **everything**.
 - Impact on open-steamgate: small. The packs pass the size WWWPARAMS holds, which is never 0 for a real object; a caller that retries into the same table after a miss sees it emptied.
 - Smallest safe workaround: none needed in `src/`; the Go host (`tools/gogen/go/abap/w3mi.go`) implements the measured rules.
-- Upstream issue: not drafted; it belongs with the pending open-abap-core PRs for these two function groups.
+- Upstream issue: not drafted; it belongs with the pending open-abap-core PRs for these two function groups. Fixed upstream by [open-abap/open-abap-core#1265](https://github.com/open-abap/open-abap-core/pull/1265) and [open-abap/open-abap-core#1266](https://github.com/open-abap/open-abap-core/pull/1266), merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035.
 - Regression-test location: `tools/gogen/semantics.mjs` (`ZCL_GOGEN_T_W3MI`)
-- Upstream version containing a fix: unknown
+- Upstream version containing a fix: `open-abap/open-abap-core` main (merged 2026-09-25); first release not checked (was: unknown)
 
 ### ANOMALY-2026-09-23-dynamic-create-ctor-params — abaplint checks `CREATE OBJECT ... TYPE (name)` against the static type's constructor
 
-- Status: `open`
+- Status: `fixed upstream: gone in @abaplint/core 2.120.62; verified 2026-09-30 by running the reproducer`; before: open
 - Discovery date: `2026-09-23`
 - Affected versions: `@abaplint/core` 2.120.55
 - Affected ABAP statement, runtime API or adapter: `CREATE OBJECT ref TYPE (name)` without `EXPORTING`, where the static type of `ref` has a constructor with a mandatory parameter
@@ -1954,13 +1954,13 @@ The five `ANOMALY-2026-09-24-httpc-*` entries (`CL_HTTP_CLIENT`: body-latin1, fa
 - Actual open-abap behaviour: abaplint reports `constructor parameter "IV_TAG" must be supplied`. `validateParameters` in `5_syntax/statements/create_object.js` looks up `CONSTRUCTOR` on the static type even when the type is dynamic
 - Impact on open-steamgate: none on the served path so far (the gateway's own dynamic creates target types whose constructors take no parameters); it blocks a test from saying what A4H accepts
 - Smallest safe workaround: the test creates the object into a reference of the subclass's type and widens it afterwards; no code works around it
-- Upstream: **needs an issue** in abaplint (the check should skip the parameter validation when the type is dynamic)
+- Upstream: was marked needs-issue in abaplint (the check should skip the parameter validation when the type is dynamic). Fixed upstream in @abaplint/core 2.120.62; verified 2026-09-30 by running the reproducer. The finding is gone in @abaplint/core 2.120.62; no issue was filed.
 - Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_INH (the A4H-only line `abl:` is left out of the local copy until abaplint accepts it)
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `@abaplint/core 2.120.62` (was: none yet)
 
 ### ANOMALY-2026-09-23-string-statements — SPLIT, REPLACE and the string functions differ from A4H in eight places
 
-- Status: `open`
+- Status: `partly fixed upstream: open-abap-core#1261 adds the exception class; runtime items 1 to 8 remain`; before: open
 - Discovery date: `2026-09-23`
 - Affected versions: `@abaplint/transpiler` 2.13.89, `@abaplint/runtime` 2.13.89, open-abap-core as cloned under `.local/lars/`
 - Affected ABAP statement, runtime API or adapter: `SPLIT ... INTO f1 f2`, `REPLACE ... IN SECTION`, `REPLACE ... WITH` a regex replacement, `REPLACE` into a c field, `REPLACE ALL OCCURRENCES OF ''`, `repeat( )`, `replace( occ = )`, `shift_right( )`
@@ -1978,9 +1978,9 @@ The five `ANOMALY-2026-09-24-httpc-*` entries (`CL_HTTP_CLIENT`: body-latin1, fa
   Not counted here: `a|aX` in `aXbX` takes `aX` on A4H (POSIX, leftmost-longest) and `a` in JavaScript's `RegExp` (leftmost-first). That is the regex engine, shared by the open-abap runtime and by gogen's JS backend, noted in `tools/gogen/semantics.mjs`, and not an open-abap anomaly.
 - Impact on open-steamgate: the SEGW generator and the gateway call `replace( ... occ = 0 )`, `repeat( )` and two-target `SPLIT` on string targets, where the two runtimes agree; nothing on the served path is known to hit the eight differences. The Go backend (`tools/gogen`) follows A4H in all eight; for item 5 its front end holds the superclass A4H gives the class (`CX_DYNAMIC_CHECK`), so `CATCH cx_dynamic_check` and `CATCH cx_root` take it there too (`ZCL_GOGEN_T_STRLOOP`).
 - Smallest safe workaround: none needed on the served path; do not rely on `IN SECTION`, `occ` other than 0 or 1, or `$0` in code that also runs on open-abap
-- Upstream issue: **needs an issue** in `abaplint/transpiler` (the runtime items) and one in `open-abap-core` (the missing class); not sent, the critic pass the upstream rule asks for comes first
+- Upstream issue: **needs an issue** in `abaplint/transpiler` (the runtime items) and one in `open-abap-core` (the missing class); not sent, the critic pass the upstream rule asks for comes first. Partly fixed upstream: [open-abap/open-abap-core#1261](https://github.com/open-abap/open-abap-core/pull/1261) (merged 2026-09-25) adds `CX_SY_REPLACE_INFINITE_LOOP`; verified 2026-09-30 against open-abap-core main caad035 and abaplint/transpiler main 78e700d. Runtime items 1 to 8 are still wrong; item 2 now answers `abc-`, not `a-ca-c`.
 - Regression-test location: `tools/gogen/semantics.mjs` (EXPECT for ZCL_GOGEN_T_STRSPLIT, _STRREPL, _STRFN, _STRCOND, _STRLOOP, _STREDGE, _STRMOVE, _STRLINES)
-- Upstream version containing a fix: `unknown`
+- Upstream version containing a fix: the exception class in `open-abap-core` main; none yet for the runtime items (was: unknown)
 
 ### ANOMALY-2026-09-23-interface-data-value — abaplint accepts `VALUE` on an interface's `DATA`
 
@@ -2032,7 +2032,7 @@ The five `ANOMALY-2026-09-24-httpc-*` entries (`CL_HTTP_CLIENT`: body-latin1, fa
 
 ### ANOMALY-2026-09-23-describe-deep-structure — `DESCRIBE FIELD ... TYPE` of a deep structure is `u` in the transpiler runtime, `v` on a system
 
-- Status: `open`
+- Status: `fixed upstream: abaplint/transpiler#1910, merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d`; before: open
 - Discovery date: `2026-09-23`
 - Affected versions: `@abaplint/runtime` 2.13.89
 - Affected ABAP statement, runtime API or adapter: `DESCRIBE FIELD s TYPE k` where `s` is a structure holding a string, a table or a reference
@@ -2042,13 +2042,13 @@ The five `ANOMALY-2026-09-24-httpc-*` entries (`CL_HTTP_CLIENT`: body-latin1, fa
 - Actual open-abap behaviour: `u` for every structure (`statements/describe.js`: `input.field instanceof types_1.Structure` sets `"u"` with no look at the components)
 - Impact on open-steamgate: code that branches on the type kind of a structure (`typekind_struct2`) takes the flat branch on a deep one; nothing on the served path is known to do so. The gogen backends (Go and JS) answer `v` / `u` as A4H does
 - Smallest safe workaround: none needed in gogen; the transpiler runtime would have to look at the components (string, xstring, table, reference, or a deep structure inside)
-- Upstream: **needs an issue** in abaplint/transpiler (runtime `describe`)
+- Upstream: was marked needs-issue in abaplint/transpiler (runtime `describe`). Fixed upstream by [abaplint/transpiler#1910](https://github.com/abaplint/transpiler/pull/1910), merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d.
 - Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_JSGENERIC (`kinds:...vhl ... flat:u`)
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `abaplint/transpiler` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### ANOMALY-2026-09-23-dbwrite-insert-table-duplicate — `INSERT dbtab FROM TABLE` with a duplicate key returns sy-subrc 4 instead of raising
 
-- Status: `open`
+- Status: `fixed upstream: abaplint/transpiler#1919, merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d`; before: open
 - Discovery date: `2026-09-23`
 - Affected versions: `@abaplint/transpiler` 2.13.89, `@abaplint/runtime` 2.13.89, `@abaplint/database-sqlite`
 - Affected ABAP statement, runtime API or adapter: `INSERT dbtab FROM TABLE itab` without `ACCEPTING DUPLICATE KEYS` (`runtime/src/statements/insert_database.ts`)
@@ -2058,9 +2058,9 @@ The five `ANOMALY-2026-09-24-httpc-*` entries (`CL_HTTP_CLIENT`: body-latin1, fa
 - Actual open-abap behaviour: no exception; every statement behaves as with `ACCEPTING DUPLICATE KEYS` (`tab:4 /2`), because the runtime inserts row by row and folds the sy-subrc of each into a maximum
 - Impact on open-steamgate: a DPC that relies on the exception to reject a batch (or on a `CATCH` to report it) sees success with sy-subrc 4 and goes on
 - Smallest safe workaround: none in code; do not rely on the exception
-- Upstream: **needs an issue** in abaplint/transpiler
+- Upstream: was marked needs-issue in abaplint/transpiler. Fixed upstream by [abaplint/transpiler#1919](https://github.com/abaplint/transpiler/pull/1919), merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d.
 - Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_DBW (the A4H answer is in the comment above its EXPECT; the gogen backends refuse database writes until the relational IR has the nodes)
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `abaplint/transpiler` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### ANOMALY-2026-09-23-dbwrite-update-from-table — `UPDATE dbtab FROM TABLE itab` is compiled as `UPDATE dbtab FROM wa`
 
@@ -2096,7 +2096,7 @@ The five `ANOMALY-2026-09-24-httpc-*` entries (`CL_HTTP_CLIENT`: body-latin1, fa
 
 ### ANOMALY-2026-09-23-dbwrite-delete-from-table — `DELETE dbtab FROM TABLE itab` matches every field, and reports the last row only
 
-- Status: `open`
+- Status: `fixed upstream: abaplint/transpiler#1918, merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d`; before: open
 - Discovery date: `2026-09-23`
 - Affected versions: `@abaplint/runtime` 2.13.89 (`statements/delete_database.ts`)
 - Affected ABAP statement, runtime API or adapter: `DELETE dbtab FROM TABLE itab` (and `DELETE dbtab FROM wa` once it compiles)
@@ -2106,9 +2106,9 @@ The five `ANOMALY-2026-09-24-httpc-*` entries (`CL_HTTP_CLIENT`: body-latin1, fa
 - Actual open-abap behaviour: the WHERE is built from every component of the row, so D is not found because its `val` differs; sy-subrc and sy-dbcnt are those of the last row alone (4 / 0)
 - Impact on open-steamgate: a mass delete with work areas that carry anything but the key deletes nothing and says so only through sy-subrc
 - Smallest safe workaround: clear the non-key fields of the rows first, or delete with `WHERE` on the key
-- Upstream: **needs an issue** in abaplint/transpiler
+- Upstream: was marked needs-issue in abaplint/transpiler. Fixed upstream by [abaplint/transpiler#1918](https://github.com/abaplint/transpiler/pull/1918), merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d.
 - Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_DBW (comment)
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `abaplint/transpiler` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### ANOMALY-2026-09-23-select-count-dbcnt — sy-dbcnt after `SELECT COUNT(*) ... INTO n` is 1 here and the count on a system
 
@@ -2130,7 +2130,7 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 
 ### ANOMALY-2026-09-23-ranges-expand-in — the transpiler runtime's `col IN range` knows five row forms, ORs them all, and reads a CP pattern as LIKE unescaped
 
-- Status: `workaround`
+- Status: `partly fixed upstream: abaplint/transpiler#1920 and #1928 (SIGN and OPTION in the runtime); the SQL path remains`; before: workaround
 - Discovery date: `2026-09-23`
 - Affected versions: `@abaplint/runtime` 2.13.89 (`build/src/expand_in.js`, `expandIN`)
 - Affected ABAP statement, runtime API or adapter: `SELECT ... WHERE col IN rt_range` (a ranges table of SIGN / OPTION / LOW / HIGH)
@@ -2140,9 +2140,9 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Actual open-abap behaviour: only `I EQ`, `I NE`, `I GE`, `I LE`, `I CP` are rendered; any other row (every E row, GT, LT, BT, NB, NP) throws `IN, <sign> <option> not supported`, which OSG answers as a 500 (`$filter=Seats gt 1`, `Status ne 'A'`, `TravelId ge ... and TravelId le ...`: 500 on OSG, 200 with A4H's rows through the Go backend). CP becomes `LIKE` with `*` replaced by `%` and nothing else: `+` and `#` are not read, and a literal `%` or `_` in the pattern is a wildcard (A4H's `50%_off*` would match `50X_off`). Every row, I or E, is joined with OR
 - Impact on open-steamgate: an OData `$filter` whose range has any other form fails the request on the Node host; a CP pattern with `_`, `%`, `+` or `#` selects other rows than a system
 - Smallest safe workaround: the Go backend (`tools/gogen`) carries the IR's rangesPredicate (`tools/ir-ranges.mjs`, ported in `go/abap/ranges.go`, checked against `ranges.json` and replayed against `a4h-ranges.json`); the Node host has none
-- Upstream: **needs an issue** in abaplint/transpiler (runtime `expandIN`)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `expandIN`). Partly fixed upstream: [abaplint/transpiler#1920](https://github.com/abaplint/transpiler/pull/1920) (merged 2026-09-25) and [#1928](https://github.com/abaplint/transpiler/pull/1928) (merged 2026-09-30) make the runtime's `col IN range` know every SIGN and OPTION; verified 2026-09-30 against abaplint/transpiler main 78e700d. Still open: the SQL path throws on `E CP` / `NP` and does not escape `+ # % _`, and that part still needs an issue.
 - Regression-test location: `tools/gogen/go/abap/ranges_test.go` (the rules), `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SELCNT / ZCL_GOGEN_T_SELDUMP
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `abaplint/transpiler` main for the runtime part (first release not checked); none yet for the SQL path (was: none yet)
 
 ### ANOMALY-2026-09-24-select-loop-sy — `SELECT ... ENDSELECT` in the transpiler runtime leaves sy-subrc and sy-dbcnt as the whole SELECT set them
 
@@ -2162,7 +2162,7 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 
 ### ANOMALY-2026-09-24-packed-decimals — the transpiler runtime computes packed numbers with decimals in floating point and rounds, converts and overflows them differently from a system
 
-- Status: `workaround`
+- Status: `partly fixed upstream: abaplint/transpiler#1885, #1923 and #1924 cover pieces; the rest remains`; before: workaround
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/transpiler` 2.13.89, `@abaplint/runtime` 2.13.89 (`types/packed.js`, `operators/*`, `types/integer8.js`, `templateFormatting`)
 - Affected ABAP statement, runtime API or adapter: every statement with a `p LENGTH n DECIMALS d` operand or target: moves into and out of p, arithmetic of calculation type p, `DIV` / `MOD`, string templates of p (`DECIMALS =`, `ALIGN`), `abs( )` / `frac( )` of p
@@ -2185,9 +2185,9 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
   - equal to A4H: plain templates of p fields, comparisons of p, generic data (DESCRIBE, move to string, IS INITIAL, writes through a field symbol), the products, 1 / 3 and 2 / 3 into p(8,2) and p(16,14), the character-operand calculation type (`'7' / 2 * 2` into i is 7)
 - Impact on open-steamgate: every DEC amount on the Node host (`ZSTG_FLIGHTFACT-PRICE`, `ZOSD_TAXIFACT-FARE`) is computed in doubles; sums, divisions and roundings of amounts can differ from a system in the last digit, and a value that overflows its field on a system is stored
 - Smallest safe workaround: none on the Node host; the Go and JS backends of `tools/gogen` compute p as A4H does (`go/abap/packed.go`, `js/abap.mjs`)
-- Upstream: **needs an issue** in abaplint/transpiler (runtime `Packed` and the operators); large, several issues rather than one
+- Upstream: **needs an issue** in abaplint/transpiler (runtime `Packed` and the operators); large, several issues rather than one. Partly fixed upstream: [abaplint/transpiler#1885](https://github.com/abaplint/transpiler/pull/1885) (DIV and MOD with a negative divisor, merged 2026-09-23), [#1923](https://github.com/abaplint/transpiler/pull/1923) (`round( )`, merged 2026-09-29) and [#1924](https://github.com/abaplint/transpiler/pull/1924) (`nmin( )` / `nmax( )` type, merged 2026-09-29); verified 2026-09-30 against abaplint/transpiler main 78e700d. The rest is open.
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_PDCONV, _PDCALC, _PDFMT, _PDPREC, _PDCMP, _PDTPL, _PDTPLM; `go test ./abap -run Packed` in `tools/gogen/go`
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: pieces in `abaplint/transpiler` main (first release not checked); none yet for the rest (was: none yet)
 
 ### ANOMALY-2026-09-24-arith-compared-with-string — abaplint accepts an arithmetic expression compared with a character operand, which does not activate on a system
 
@@ -2240,7 +2240,7 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 
 ### ANOMALY-2026-09-24-secondary-key-duplicates — the transpiler runtime orders a non-unique sorted secondary key oldest first, keeps a stale copy after a change in place, and misses a READ with sy-subrc 8 and sy-tabix 0
 
-- Status: `workaround`
+- Status: `partly fixed upstream: abaplint/transpiler#1916 (the miss) and open-abap-core#1262 (the parser no longer depends on the order); duplicate order and the stale key copy remain`; before: workaround
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/runtime` 2.13.89 (`types/table.js` `getSecondaryIndex`, `statements/loop.js`, `statements/read_table.js`), `@abaplint/transpiler` 2.13.89
 - Affected ABAP statement, runtime API or adapter: `LOOP AT itab ... USING KEY k [WHERE ...]` and `READ TABLE itab ... WITH KEY k COMPONENTS ...` over a standard table with `WITH [NON-]UNIQUE SORTED KEY k`; open-abap-core's `/UI2/CL_JSON` parser (`LCL_PARSER`, `key_parent` non-unique) reads a JSON array's members through such a key
@@ -2251,13 +2251,13 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Impact on open-steamgate: `/UI2/CL_JSON=>DESERIALIZE` in open-abap-core takes a JSON array's members through the non-unique `key_parent`, so on a system this parser would fill an internal table from an array in reverse order; on the Node host it keeps the array's order. `ZCL_OSD_STATUS=>REFRESH` numbers the database facts in that order (`ZOSD_DB-SEQ`), so the Go backend, which follows A4H, lists DatabaseSet the other way round from the Node host; the other status tables are read with ORDER BY and do not show it
 - Measured again 2026-09-24 by the reviewer of ultra/json (`$ZOSG_TMP_0421`): the rule holds for 3000 duplicates, built lazily or incrementally (newest first); after `SORT ... BY ('N') DESCENDING` through a generic parameter the key keeps creation order (`3/1,2/2,1/3` while the primary order is 3,2,1), and a copy `lt2 = lt` keeps that order too; an `INSERT ... INDEX 1` through a generic parameter comes first. The front end refuses SORT and INSERT INDEX on generic tables, so keyGuard cannot be passed that way. The fix round (`$ZOSG_TMP_0422`) added: sy-tabix after ENDLOOP of a `LOOP ... USING KEY` is its value before the loop (`before:2 ... after:2`, and `2/4` after a loop with no pass), on A4H and on the transpiler alike; the testdata class now reads INDEX 2 before its first loop, so its line says `after:2`, which the old line (`after:5`) could not tell from the last pass's position
 - Smallest safe workaround: the Go and JS backends of `tools/gogen` order and read sorted secondary keys as A4H does (`go/abap/seckey.go`, `js/abap.mjs` keyOrder / keyRead), and refuse `INSERT ... INDEX`, `SORT` and `DELETE` on a table with a non-unique sorted key (where "created" and "primary index" part ways) and hashed secondary keys; the Node host has none. The parser in open-abap-core relies on the oldest-first order it gets; a fix of the runtime would reverse its arrays unless the parser stops reading members through `key_parent`
-- Upstream: **needs an issue** in abaplint/transpiler (runtime secondary keys); open-abap-core `/UI2/CL_JSON` `LCL_PARSER=>MEMBERS` (depends on the runtime's order)
+- Upstream: **needs an issue** in abaplint/transpiler (runtime secondary keys); open-abap-core `/UI2/CL_JSON` `LCL_PARSER=>MEMBERS` (depends on the runtime's order). Partly fixed upstream: [abaplint/transpiler#1916](https://github.com/abaplint/transpiler/pull/1916) fixed the miss, and [open-abap/open-abap-core#1262](https://github.com/open-abap/open-abap-core/pull/1262) removed `/UI2/CL_JSON`'s dependence on the order (both merged 2026-09-25); verified 2026-09-30 against abaplint/transpiler main 78e700d and open-abap-core main caad035. Still open: the order of duplicates and the stale key copy.
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SECKEY
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: the miss in `abaplint/transpiler` main (first release not checked); none yet for the rest (was: none yet)
 
 ### ANOMALY-2026-09-24-create-data-like-line-generic — abaplint accepts `CREATE DATA ref LIKE LINE OF data` for a `TYPE data` parameter, which does not activate on a system; open-abap-core's `/UI2/CL_JSON` relies on it
 
-- Status: `workaround`
+- Status: `fixed upstream: open-abap/open-abap-core#1267, merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035`; before: workaround
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/core` / `@abaplint/transpiler` 2.13.89; open-abap-core `/UI2/CL_JSON=>_DESERIALIZE` (`#ui2#cl_json.clas.abap`, the `kind_table` branch)
 - Affected ABAP statement, runtime API or adapter: `CREATE DATA ref LIKE LINE OF data` where `data` is a generic parameter (`TYPE data` / `TYPE any`), not a table type
@@ -2267,13 +2267,13 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Actual open-abap behaviour: abaplint reports nothing; the transpiled code creates a line of whatever table the parameter holds
 - Impact on open-steamgate: `/UI2/CL_JSON=>DESERIALIZE` into a structure with a table component (`ZCL_OSD_STATUS=>REFRESH`, the system status) would not activate on a system as open-abap-core writes it. The Go backend refuses the statement everywhere but in `/UI2/CL_JSON=>_DESERIALIZE`, where it is compiled with the transpiler's meaning (`tools/gogen/frontend.mjs` `TRANSPILER_MEANING`), so that the status tables are written on OSGo; a decision for the foreman, not a rule
 - Smallest safe workaround: the exception in `TRANSPILER_MEANING`; the fix is upstream, one line in open-abap-core (`LIKE LINE OF <at>` after `ASSIGN data TO <at>`, which the method does two lines later anyway), after which the exception goes
-- Upstream: **needs an issue** in abaplint (the syntax check) and a PR in open-abap-core (`/UI2/CL_JSON=>_DESERIALIZE`)
+- Upstream: was marked needs-issue in abaplint (the syntax check) and a PR in open-abap-core (`/UI2/CL_JSON=>_DESERIALIZE`). Fixed upstream by [open-abap/open-abap-core#1267](https://github.com/open-abap/open-abap-core/pull/1267), merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035. The syntax check: @abaplint/core 2.120.62 now reports "data is not an internal table" for the reproducer. The TRANSPILER_MEANING exception this entry names can now be removed (not done in this change).
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_JSONGEN (the form that activates)
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `@abaplint/core 2.120.62` (the syntax check) and open-abap-core main (`/UI2/CL_JSON`) (was: none yet)
 
 ### ANOMALY-2026-09-24-rtti-lengths — `describe_by_data` in open-abap-core gives an f a length of 0 and an f or a p an output length of 0
 
-- Status: `open`
+- Status: `fixed upstream: open-abap/open-abap-core#1264, merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035`; before: open
 - Discovery date: `2026-09-24`
 - Affected versions: open-abap-core `CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA` (the `Float` and `Packed` branches), `@abaplint/runtime` 2.13.89
 - Affected ABAP statement, runtime API or adapter: `cl_abap_typedescr=>describe_by_data( )` of an `f` or a `p` field: `length`, `cl_abap_elemdescr->output_length`
@@ -2283,9 +2283,9 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Actual open-abap behaviour: `f:E/F/0/0/\TYPE=F/F//0 ... p:E/P/2/8/0`
 - Impact on open-steamgate: none known; nothing in the tree reads the length of an f or the output length of a p
 - Smallest safe workaround: none needed on the Node host; the Go backend's `describe_by_data` (a host function, `emit-go.mjs` `nativeRttiData`) gives A4H's values
-- Upstream: **needs an issue** in open-abap-core (`CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA`)
+- Upstream: was marked needs-issue in open-abap-core (`CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA`). Fixed upstream by [open-abap/open-abap-core#1264](https://github.com/open-abap/open-abap-core/pull/1264), merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035.
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_RTTI
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `open-abap/open-abap-core` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### ANOMALY-2026-09-24-secondary-key-unique-duplicate — the transpiler runtime appends a row that repeats a unique sorted secondary key's value; a system raises CX_SY_ITAB_DUPLICATE_KEY
 
@@ -2304,7 +2304,7 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 
 ### ANOMALY-2026-09-24-sort-default-key — `SORT itab` without BY leaves a table of structures unsorted in the transpiler runtime
 
-- Status: `workaround`
+- Status: `fixed upstream: abaplint/transpiler#1912, merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d`; before: workaround
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/runtime` 2.13.89 (`build/src/statements/sort.js`, `sort` without `by`: whole rows compared with `lt`)
 - Affected ABAP statement, runtime API or adapter: `SORT itab [DESCENDING]` without BY on a STANDARD TABLE of structures WITH DEFAULT KEY
@@ -2314,9 +2314,9 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Actual open-abap behaviour: `key:b1x;a3y;a4y;a5y;a9a;A2z;`, the order the table already had. The elementary cases, `STABLE BY` and mixed directions are equal to A4H.
 - Impact on open-steamgate: none seen on a served path; the OSG classes that sort without BY (`ZCL_STG_SEGW_EXPORT=>TAGS`, `ZCL_STG_SEGW_GEN_DPC=>MPC_XML`) sort string tables
 - Smallest safe workaround: the Go and JS backends of `tools/gogen` sort by the default key (frontend.mjs, `SORT`; the table type carries its primary key as `skey`); components of other types than c and string in a default key are refused there until measured
-- Upstream: **needs an issue** in abaplint/transpiler (runtime `sort`)
+- Upstream: was marked needs-issue in abaplint/transpiler (runtime `sort`). Fixed upstream by [abaplint/transpiler#1912](https://github.com/abaplint/transpiler/pull/1912), merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d.
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SORTK
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `abaplint/transpiler` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### ANOMALY-2026-09-24-select-aggregate-position — `SELECT COUNT( * ) col ... INTO TABLE` by position writes 0 for the aggregate in the transpiler runtime
 
@@ -2352,7 +2352,7 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 
 ### ANOMALY-2026-09-24-uccpi-255 — open-abap-core's `CL_ABAP_CONV_OUT_CE=>UCCPI` weighs the high byte by 255
 
-- Status: `workaround`
+- Status: `fixed upstream: open-abap/open-abap-core#1263, merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035`; before: workaround
 - Discovery date: `2026-09-24`
 - Affected versions: open-abap-core at 4eec777 (`src/conv/cl_abap_conv_out_ce.clas.abap`, `uccpi`: `ret = ret + lv_hex+1(1) * 255`)
 - Affected ABAP statement, runtime API or adapter: `cl_abap_conv_out_ce=>uccpi( c )` for a character above U+00FF
@@ -2362,7 +2362,8 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Actual open-abap behaviour: `A/1/65025` (0xFE * 255 + 0xFF)
 - Impact on open-steamgate: none seen; OSG calls `uccp( 'FEFF' )` (the BOM of `ZCL_STG_SEGW_GEN`) and not `uccpi` above U+00FF
 - Smallest safe workaround: the Go and JS backends compute `uccpi` natively (`abap.Uccp`)
-- Upstream: **needs a PR** in open-abap-core (`* 256`), through the fork, as open-abap-core takes PRs
+- Upstream: was marked needs-PR in open-abap-core (`* 256`), through the fork, as open-abap-core takes PRs. Fixed upstream by [open-abap/open-abap-core#1263](https://github.com/open-abap/open-abap-core/pull/1263), merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035.
+- Upstream version containing a fix: `open-abap/open-abap-core` main (merged 2026-09-25); first release not checked
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_UCCP
 
 ### ANOMALY-2026-09-24-class-events — the transpiler runtime dispatches class events in another order, twice, to handlers added on the way, and passes the actual by reference
@@ -2384,7 +2385,7 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 
 ### ANOMALY-2026-09-24-concatenate-cut-subrc — `CONCATENATE` into a c field too short leaves sy-subrc 0 in the transpiler runtime
 
-- Status: `open`
+- Status: `fixed upstream: abaplint/transpiler#1914, merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d`; before: open
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/runtime` 2.13.89 (`statements/concatenate`)
 - Affected ABAP statement, runtime API or adapter: `CONCATENATE a b INTO c` with `c` of type c shorter than the result
@@ -2394,14 +2395,14 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Actual open-abap behaviour: `[abc]0`: cut, and sy-subrc 0. Everything else in the class (line_exists, NS / CN, reference comparison, a SORTED table's INSERT INTO TABLE leaving sy-tabix alone, APPEND ... ASSIGNING, the other CONCATENATE forms, FIND ALL OCCURRENCES ... MATCH COUNT with a CL_ABAP_REGEX object, escape( ) for an HTML attribute) answered as A4H
 - Impact on open-steamgate: none found in OSG's code, which concatenates into strings
 - Smallest safe workaround: none needed; the Go backend sets 4 (`abap.ConcatFit`)
-- Upstream: **needs an issue** in abaplint/transpiler (runtime, CONCATENATE)
+- Upstream: was marked needs-issue in abaplint/transpiler (runtime, CONCATENATE). Fixed upstream by [abaplint/transpiler#1914](https://github.com/abaplint/transpiler/pull/1914), merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d.
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_WGUI1
 - See also: ANOMALY-2026-09-24-concatenate-subrc, the same runtime statement measured from the other side (no cut: A4H sets 0; `concatenate.js` never writes sy-subrc, so the 0 above is the value the statement before left)
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `abaplint/transpiler` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### ANOMALY-2026-09-24-sorted-read-miss-tabix — a key READ that misses on a SORTED table sets sy-tabix one row short in the transpiler runtime
 
-- Status: `open`
+- Status: `fixed upstream: abaplint/transpiler#1916, merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d`; before: open
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/runtime` 2.13.89 (`statements/read_table`)
 - Affected ABAP statement, runtime API or adapter: `READ TABLE <sorted> ... WITH [TABLE] KEY ...` that finds nothing, where the key's first component is given
@@ -2411,9 +2412,9 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Actual open-abap behaviour: `... past:8/4 tk:4/3,8/4 ... nf:8/4 ... lead:0/1/1,0/3/3,4/1,8/4,4/1 ... tk2:4/3 line:4/2/f,0/2/q,8/2`: past the last row sy-tabix is lines, not lines + 1; a miss inside a leading part of a two-component key (`a = '1' b = '2'` between `11` and `13`) and a miss of the whole two-component key point one row too early
 - Impact on open-steamgate: none found; code that uses sy-tabix after a miss to `INSERT ... INDEX sy-tabix` into a sorted table would place the row wrong or dump
 - Smallest safe workaround: none needed; the Go backend and the IR's JS emitter follow A4H (a miss with a key part and a component outside the key, `ZCL_GOGEN_T_SORTRD2`, had no rule derivable from the measurements and is refused)
-- Upstream: **needs an issue** in abaplint/transpiler (runtime, READ TABLE on sorted tables)
+- Upstream: was marked needs-issue in abaplint/transpiler (runtime, READ TABLE on sorted tables). Fixed upstream by [abaplint/transpiler#1916](https://github.com/abaplint/transpiler/pull/1916), merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d.
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_SORTRD, ZCL_GOGEN_T_SORTRD2
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `abaplint/transpiler` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### ANOMALY-2026-09-24-sorted-importing-standard — abaplint accepts a STANDARD table for an IMPORTING parameter typed SORTED, which does not activate on a system
 
@@ -2432,7 +2433,7 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 
 ### ANOMALY-2026-09-24-concatenate-subrc — `CONCATENATE` leaves sy-subrc as it was in the transpiler runtime
 
-- Status: `open` (the Go backend of `tools/gogen` sets it; nothing depends on it in OSG yet)
+- Status: `fixed upstream: abaplint/transpiler#1914, merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d`; before: open (the Go backend of tools/gogen sets it; nothing depends on it in OSG yet)
 - Discovery date: `2026-09-24`
 - Affected versions: `@abaplint/runtime` 2.13.89 (`statements/concatenate.js` never writes `sy-subrc`)
 - Affected ABAP statement, runtime API or adapter: `CONCATENATE ... INTO t [IN BYTE MODE]`; in OSG the SMW0 loaders of the Zork and ZO4D packs (`zcl_ork_00_game_loader_smw0`, `zcl_ork_00_script_loader_smw0`, `zcl_o4d_image_handler`), which glue `WWWDATA_IMPORT`'s rows together this way
@@ -2442,10 +2443,10 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Actual open-abap behaviour: `cat:FFAB00CD00/5/4 zeros:0000AB00CD00/6 empty:0/4` -- the bytes are right, sy-subrc is whatever the statement before left
 - Impact on open-steamgate: none seen; a program that checks sy-subrc after CONCATENATE into a fixed-length field reads the previous statement's code
 - Smallest safe workaround: none needed in OSG; the Go backend writes sy-subrc 0 (`concat_bytes` in `tools/gogen/emit-go.mjs` / `emit-js.mjs`)
-- Upstream: **needs an issue** in abaplint/transpiler (runtime, `concatenate`)
+- Upstream: was marked needs-issue in abaplint/transpiler (runtime, `concatenate`). Fixed upstream by [abaplint/transpiler#1914](https://github.com/abaplint/transpiler/pull/1914), merged 2026-09-25; verified 2026-09-30 by running the reproducer against abaplint/transpiler main 78e700d.
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_BYTECAT
 - See also: ANOMALY-2026-09-24-concatenate-cut-subrc (a c target that cuts the result: 4 on A4H)
-- Upstream version containing a fix: none yet
+- Upstream version containing a fix: `abaplint/transpiler` main (merged 2026-09-25); first release not checked (was: none yet)
 
 ### ANOMALY-2026-09-24-float-template-digits — an `f` in a string template has sixteen fraction digits in the transpiler runtime, seventeen significant digits on a system
 
@@ -2524,7 +2525,7 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Actual open-abap behaviour: `throw new Error("OpenDataset, not supported, transpiler")` for every statement
 - Impact on open-steamgate: no report that reads or writes a file ran; osabap had no file I/O
 - Smallest safe workaround: the pinned hook, with the host `tools/osd-dataset.mjs` installed by `test/setup.mjs`
-- Upstream: abaplint/transpiler, branch `dataset-hook` (not pushed yet), one PR when Lars has room
+- Upstream: abaplint/transpiler, branch `dataset-hook` (not pushed yet), one PR when Lars has room. Sent 2026-09-30 as [abaplint/transpiler#1936](https://github.com/abaplint/transpiler/pull/1936) from the branch `dataset-hook`, open; the local pin stays until it is released.
 - Regression-test location: `test/dataset.mjs` (the host), `test/statements/dataset.ts` upstream (the statements, 19 cases)
 - Upstream version containing a fix: none yet
 
