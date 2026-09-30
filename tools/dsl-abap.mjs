@@ -40,6 +40,37 @@ function syntaxType(registry, type, name) {
   return {resolved: false, abap_type: name ?? "unknown"};
 }
 
+function literalType(registry, type, name) {
+  for (const provider of TYPE_PROVIDERS) {
+    const result = provider.literalType?.(registry, type, name);
+    if (result) return result;
+  }
+  return {resolved: false, reason: `${name ?? "type"} has no literal type provider`};
+}
+
+function literalText(expression) {
+  const constant = expression?.findFirstExpression(Expressions.Constant);
+  if (!constant || constant.findFirstExpression(Expressions.ConcatenatedConstant)) return undefined;
+  if (!constant.findFirstExpression(Expressions.ConstantString)
+    && !constant.findFirstExpression(Expressions.Integer)) return undefined;
+  const raw = constant.concatTokens();
+  if ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith("`") && raw.endsWith("`"))) {
+    const quote = raw[0];
+    return raw.slice(1, -1).replaceAll(quote + quote, quote);
+  }
+  return raw;
+}
+
+function valueFields(registry, type, expression, prefix, name) {
+  if (!expression) return {};
+  const value = literalText(expression);
+  if (value === undefined) return {[`${prefix}_expr`]: expression.findFirstExpression(Expressions.SimpleFieldChain)?.concatTokens() ?? expression.concatTokens()};
+  const resolved = literalType(registry, type, name);
+  return resolved.resolved === false
+    ? {[prefix]: value, literal_type: resolved}
+    : {[prefix]: value, [`${prefix}@type`]: resolved};
+}
+
 function typeName(node) {
   return node?.findAllExpressions(Expressions.TypeName)?.[0]?.concatTokens().toLowerCase();
 }
@@ -54,8 +85,10 @@ function methodNode(registry, file, name, method, statement) {
   const params = method.getParameters().getAll().map((param) => {
     const paramName = param.getName().toLowerCase();
     const expression = parsed.find((node) => nameOf(node.findDirectExpression(Expressions.MethodParamName)) === paramName);
+    const defaultExpression = method.getParameters().getParameterDefault(param.getName());
     return declaration(registry, file, param, `${methodId}/param/${paramName}`, {
       name: paramName, kind: param.getMeta().find((meta) => ["importing", "exporting", "changing", "returning"].includes(meta)),
+      ...valueFields(registry, param.getType(), defaultExpression, "default", typeName(expression)),
     }, typeName(expression));
   }).sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
   return at(file, method, methodId, {name: method.getName().toLowerCase(), visibility: abaplint.Visibility[method.getVisibility()].toLowerCase(),
@@ -79,9 +112,16 @@ function objectModel(registry, object, sourcePath) {
     const statement = methodStatements.find((st) => nameOf(st.findDirectExpression(Expressions.MethodName)) === method.getName().toLowerCase());
     return methodNode(registry, sourcePath, id, method, statement);
   });
-  const attributes = [...definition.getAttributes().getAll()].map((attribute) =>
-    declaration(registry, sourcePath, attribute, `${id}/attribute/${attribute.getName().toLowerCase()}`,
-      {name: attribute.getName().toLowerCase()}, undefined));
+  const attributes = [...definition.getAttributes().getAll(), ...definition.getAttributes().getConstants()].map((attribute) => {
+    const statement = statements.find((st) => st.get() instanceof Statements.Constant
+      && nameOf(st.findFirstExpression(Expressions.DefinitionName)) === attribute.getName().toLowerCase());
+    const isConstant = attribute.getMeta().includes("read_only") && attribute.getMeta().includes("static") && !!statement;
+    const expression = statement?.findFirstExpression(Expressions.Value);
+    return declaration(registry, sourcePath, attribute, `${id}/attribute/${attribute.getName().toLowerCase()}`,
+      {name: attribute.getName().toLowerCase(), ...(isConstant ? {constant: true,
+        declared_type: typeName(statement),
+        ...valueFields(registry, attribute.getType(), expression, "value", typeName(statement))} : {})}, undefined);
+  });
   const types = [...definition.getTypeDefinitions().getAll()].map((entry) => {
     const type = entry.type;
     return declaration(registry, sourcePath, type, `${id}/type/${type.getName().toLowerCase()}`,
@@ -137,17 +177,39 @@ export function methodTableModel(model, className) {
       `${param.kind} ${param.name}: ${displayType(param["@type"])}`).join(", ")}))}]};
 }
 
-export async function renderMethodTable(model, className) {
+export function constantsModel(model, className) {
+  const cls = model.classes.find((entry) => entry.name === className.toLowerCase());
+  if (!cls) throw new Error(`class ${className} not found`);
+  const names = {CHAR: "c", NUMC: "n", INT4: "i", INT8: "int8", DEC: "p", STRG: "string",
+    RAW: "x", DATS: "d", TIMS: "t"};
+  return {classes: [{...cls, constants: cls.attributes.filter((attribute) => attribute.constant && attribute["value@type"])
+    .map((attribute) => {
+      const type = attribute["@type"];
+      const basic = attribute.declared_type ?? type.data_element ?? type.abap_type ?? names[attribute["value@type"].built_in];
+      const isDDIC = !["c", "n", "i", "int8", "p", "string", "x", "d", "t"].includes(basic);
+      const length = !isDDIC && ["CHAR", "NUMC", "DEC", "RAW"].includes(type.built_in)
+        ? ` LENGTH ${type.length}` : "";
+      const decimals = type.built_in === "DEC" && !isDDIC ? ` DECIMALS ${type.decimals}` : "";
+      return {...attribute, declaration_type: `${basic}${length}${decimals}`};
+    })}]};
+}
+
+async function renderRecipe(data, template) {
   await import("../test/start.mjs");
   await import("../output/zcl_osd_tpl.clas.mjs");
   await import("../output/zcl_ajson.clas.mjs");
   const abap = globalThis.abap;
   const box = (value) => new abap.types.String().set(value);
-  const data = methodTableModel(model, className);
   const json = await abap.Classes.ZCL_AJSON.parse({iv_json: box(JSON.stringify(data))});
-  const result = await abap.Classes.ZCL_OSD_TPL.render({
-    iv_template: box(readFileSync("recipes/abap-methods/template.tpl", "utf8")), ii_data: json,
-  });
+  let result;
+  try {
+    result = await abap.Classes.ZCL_OSD_TPL.render({
+      iv_template: box(readFileSync(template, "utf8")), ii_data: json,
+    });
+  } catch (error) {
+    if (error.text?.get) throw new Error(error.text.get(), {cause: error});
+    throw error;
+  }
   const text = (await abap.Classes.ZCL_OSD_TPL.to_string({is_result: result})).get();
   const trace = result.get().trace.array().map((entry) => ({
     line: entry.get().line.get(), template_line: entry.get().template_line.get(), path: entry.get().path.get(),
@@ -164,10 +226,18 @@ export async function renderMethodTable(model, className) {
   return {text, trace: trace.map((entry) => ({...entry, node: nodeAt(entry.path)}))};
 }
 
+export async function renderMethodTable(model, className) {
+  return renderRecipe(methodTableModel(model, className), "recipes/abap-methods/template.tpl");
+}
+
+export async function renderConstants(model, className) {
+  return renderRecipe(constantsModel(model, className), "recipes/abap-constants/template.tpl");
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [command, ...args] = process.argv.slice(2);
-  if (command !== "model") {
-    console.error("Usage: node tools/dsl-abap.mjs model <folder>... [--ddic <folder>]... [--class <name>]");
+  if (!["model", "render-constants"].includes(command)) {
+    console.error("Usage: node tools/dsl-abap.mjs <model|render-constants> <folder>... [--ddic <folder>]... [--class <name>]");
     process.exitCode = 2;
   } else {
     try {
@@ -179,13 +249,26 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         else folders.push(args[i]);
       }
       if (!folders.length) throw new Error("at least one ABAP folder is required");
+      if (command === "render-constants" && !className) throw new Error("render-constants needs --class");
       const model = abapModel(folders, {ddic: ddic.length ? ddic : DEFAULT_DDIC});
       if (className) {
         model.classes = model.classes.filter((cls) => cls.name === className);
         if (!model.classes.length) throw new Error(`class ${className} not found`);
         model.interfaces = [];
       }
-      console.log(JSON.stringify(model, null, 2));
+      if (command === "model") console.log(JSON.stringify(model, null, 2));
+      else {
+        // Runtime bootstrap has diagnostics; keep stdout a single JSON result.
+        const originalLog = console.log;
+        let rendered;
+        try {
+          console.log = (...items) => console.error(...items);
+          rendered = await renderConstants(model, className);
+        } finally {
+          console.log = originalLog;
+        }
+        console.log(JSON.stringify(rendered, null, 2));
+      }
     } catch (error) {
       console.error(error.message);
       process.exitCode = 1;

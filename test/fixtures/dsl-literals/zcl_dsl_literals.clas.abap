@@ -1,0 +1,25 @@
+CLASS zcl_dsl_literals DEFINITION PUBLIC FINAL.
+  PUBLIC SECTION.
+    CONSTANTS c_char_de TYPE zlit_char VALUE 'Ab'.
+    CONSTANTS c_char TYPE c LENGTH 3 VALUE 'xyz'.
+    CONSTANTS c_numc TYPE zlit_numc VALUE '0042'.
+    CONSTANTS c_int1 TYPE zlit_int1 VALUE 255.
+    CONSTANTS c_int4 TYPE i VALUE 00042.
+    CONSTANTS c_int8 TYPE int8 VALUE 9223372036854775807.
+    CONSTANTS c_dec_de TYPE zlit_dec VALUE '1.50'.
+    CONSTANTS c_dec14 TYPE zlit_dec14 VALUE '1.25'.
+    CONSTANTS c_dec TYPE p LENGTH 8 DECIMALS 2 VALUE '12.34'.
+    CONSTANTS c_string TYPE string VALUE `hello`.
+    CONSTANTS c_raw TYPE x LENGTH 2 VALUE '0a1b'.
+    CONSTANTS c_date TYPE d VALUE '20260930'.
+    CONSTANTS c_time TYPE t VALUE '123456'.
+    CONSTANTS c_ref TYPE i VALUE c_int4.
+    CONSTANTS c_xstring TYPE xstring VALUE '00'.
+    CONSTANTS c_float TYPE f VALUE '1.0'.
+    CONSTANTS c_decfloat TYPE decfloat16 VALUE '1.0'.
+    METHODS m IMPORTING iv_code TYPE zlit_char DEFAULT 'A'.
+ENDCLASS.
+CLASS zcl_dsl_literals IMPLEMENTATION.
+  METHOD m.
+  ENDMETHOD.
+ENDCLASS.

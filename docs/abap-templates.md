@@ -49,6 +49,9 @@ trace belongs inside the renderer, not around it.
 `literal` uses the original value's `@type` object (`built_in`, `length`, `decimals`) even after
 earlier filters change its text. Missing metadata and unknown built-in types are errors with the
 template and line, for example `main:3: literal needs x@type`.
+The ABAP L1 model supplies this sibling for literal constant values and parameter defaults.
+Unsupported types and nonliteral expressions have no filter type, so consumers must select only
+values with `value@type` or `default@type` before rendering them with `literal`.
 
 | `built_in` | output | validation |
 |---|---|---|

@@ -55,9 +55,14 @@ sibling `x@type` object (`built_in`, `length`, `decimals`) in the data, never fr
 text; a value without one is an error, not a fallback. Filters apply left to right to the text,
 and `literal` uses the original value's type.
 
-Today the caller supplies `x@type`; the tests build it by hand. Writing it from the resolved DDIC
-type into the L1 model beside each value a template may print as a literal is the model's next
-step, and until then no model does.
+The ABAP L1 model writes `value@type` for literal constant values and `default@type` for literal
+parameter defaults. It reads data-element DDIC names where available and otherwise uses the
+resolved built-in type. Packed lengths are converted from bytes to DDIC digits. A constant
+reference or expression is `value_expr` without `value@type`; a type the filter cannot accept has
+`literal_type: {resolved: false, reason}` and no `@type`. The display `@type` keeps its own shape.
+`recipes/abap-constants/template.tpl` renders the literal constants through the filter with a
+trace for every output line. `node tools/dsl-abap.mjs render-constants <source> --ddic <folder>
+--class <name>` prints the rendered text and trace as JSON.
 
 ## The trace as a sidecar
 
