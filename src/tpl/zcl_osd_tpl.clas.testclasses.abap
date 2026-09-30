@@ -64,6 +64,7 @@ CLASS ltcl_osd_tpl DEFINITION FOR TESTING
     METHODS literal_raw_length FOR TESTING.
     METHODS literal_argument FOR TESTING.
     METHODS literal_composition FOR TESTING RAISING cx_static_check.
+    METHODS literal_not_scalar FOR TESTING.
     METHODS utf8_passes_through FOR TESTING RAISING cx_static_check.
     METHODS utf8 IMPORTING iv_hex TYPE xstring RETURNING VALUE(rv) TYPE string.
 
@@ -832,6 +833,22 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       exp = `  X` && nl( ) && `END`
       act = text( iv_template = `  {{>p}}` && nl( ) && `END` iv_json = `{}` it_partials = lt_partials ) ).
+  ENDMETHOD.
+
+  METHOD literal_not_scalar.
+    " an object, an array and null are refused rather than printed as ''
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs a text or a number`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":{"a":1},"x@type":{"built_in":"CHAR","length":3}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs a text or a number`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":[1],"x@type":{"built_in":"CHAR","length":3}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs a text or a number`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":null,"x@type":{"built_in":"CHAR","length":3}}` ) ).
   ENDMETHOD.
 
 ENDCLASS.

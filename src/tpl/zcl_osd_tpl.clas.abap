@@ -1213,6 +1213,13 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
     IF iv_check_only = abap_true.
       RETURN.
     ENDIF.
+    " an object, an array or null has no literal form; its text would be empty
+    CASE mi_data->get_node_type( iv_path ).
+      WHEN zif_ajson_types=>node_type-string OR zif_ajson_types=>node_type-number.
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE zcx_osd_tpl
+          EXPORTING text = |{ iv_where }: literal { iv_name } needs a text or a number|.
+    ENDCASE.
 
     lv_length = mi_data->get( join( iv_path = lv_type_path iv_name = `length` ) ).
     lv_decimals = mi_data->get( join( iv_path = lv_type_path iv_name = `decimals` ) ).

@@ -5,7 +5,7 @@
 `ZCL_OSD_TPL` (`src/tpl/`) renders a Mustache-style template over a JSON tree (`zif_ajson`) into
 lines of code, and gives every output line a **trace entry**: the template, the template line and the
 data path it came from. It is plain ABAP, so the same class runs in `npm test`, in OSGo and on a
-system through abapGit. Unit tests sit beside the class (`zcl_osd_tpl.clas.testclasses.abap`, 41
+system through abapGit. Unit tests sit beside the class (`zcl_osd_tpl.clas.testclasses.abap`, 65
 methods), as `src/regression/` does.
 
 ## Why
