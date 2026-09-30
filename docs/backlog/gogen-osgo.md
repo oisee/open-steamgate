@@ -1224,3 +1224,87 @@ Today there is none. Each case has its own logic:
   - A SELECT with a JOIN touching a lazy table: fill whole first.
   - Sorting and paging over a partial `by_key` fill: only keys asked are present, which is correct for a
     by-key read and wrong for a scan. A scan falls back to whole.
+
+## Parallel ABAP Unit and the next runtimes (2026-09-30, planned for 0.5 / 0.6)
+
+Alice, 2026-09-30. It follows U3 (Go ABAP Unit parity with Node, 0 DIFFERENT).
+
+**0.5 -- parallel ABAP Unit on Go (U4).**
+- Step 1: process sharding. The test binary runs N times, and each process takes its share of classes. Each process
+  has its own in-memory SQLite, so they share nothing.
+- Step 2: goroutines. The seed runs once into a template database, and each unit gets its own copy of that image
+  (serialize/deserialize, the backup API or `VACUUM INTO`; check the Go driver). The global `db`/`conn()` (`luw.go`,
+  `db.go`) and the class statics move into the Session.
+- The unit of isolation is the **test class**. Measured on A4H 2026-09-30 with two local test classes and a class
+  with CLASS-DATA plus a class constructor: each test class gets a fresh internal session (statics reset, class
+  constructor run again), and the test methods of one class share statics.
+- Our Node and Go runners probably keep statics across test classes: a parity gap with SAP. Check it, write an
+  ANORMALIES entry and fix both runners.
+- Verify with `go test -race`. Measure Node, Go serial, Go xN with one instrument.
+- The same step-2 refactor (Session instead of globals) is the first half of a multi-work-process OSGo server.
+
+**0.6 -- IR-JS parity as a third column.** `unit-compare` shows Node / Go / IR-JS. `emit-js.mjs` already runs the
+semantics harness, so DB-free tests (template engine, AJSON, parsers, compares) come first. DB tests need IR-JS on
+the same `DatabaseClient` seam, a separate and larger step. ADR 0004 still holds: IR-JS is an oracle, not a runtime.
+
+**0.6 -- the Go side of host relations: in-memory tables read in place.** `tools/ir-host-relation.mjs` (#56/#57) is
+the contract agreed with the Go runtime on 2026-09-24. An AMDP IN table or a FOR ALL ENTRIES itab reaches the plan as
+a relation for one call. JS is the reference and copies the rows once; the Go client was to answer with a **SQLite
+virtual table over the host's own memory**, and that part was never built (no vtab under `tools/gogen/go`).
+- The precondition is stable row storage in Go tables (U3 wave 3, 2026-09-30: references to rows survive inserts,
+  appends and deletes).
+- Gate: `tools/ir-host-relation-pairs.mjs`.
+- Scope: per call only, which is the decision already taken. There is no shared state between ABAP and a SQL engine
+  beyond one call.
+- The wider proposal, one DB IR for both runtimes (`docs/pamdp-ir-portability.md`, 2026-09-23), is still a
+  proposal awaiting Alice, and pAMDP is parked. The vtab does not depend on it.
+
+**0.6 -- OSGo as a server with several work processes.** A shared database (not copies), several connections
+(SQLite WAL / DuckDB / Postgres), one transaction per dialog step. Serialise only where SAP does (ENQUEUE, V2 update),
+replacing today's single FIFO work-process lock. Built on the 0.5 Session refactor.
+
+**Noted:** `zcl_stg_segw_gen=>mpc_source` through the DSL (#293) takes 3.6 s against 0.94 s before on the largest
+project in OSG, while the same engine on A4H is ~4x faster. That makes it a runtime performance case to profile.
+
+## Release plan with priorities (2026-09-30)
+
+Alice, 2026-09-30: every item per release is marked.
+- **must**: the release does not ship without it.
+- **should**: expected; deferred only with a stated reason.
+- **nice**: if time allows.
+- **generous**: only if we are being really generous.
+
+**The rule that makes this work:** a release is tagged when its **must** items are done, and nothing else blocks it.
+An unfinished should/nice/generous item moves to the next release with one line of reason; it never holds a tag.
+A new idea found during a release goes in as nice or generous for a later one, unless it is a correctness bug in
+something already shipped (then it is a must of the current release, like the row references in 0.4).
+
+**0.4** (the next tag, on Alice's yes)
+- must: U3 wave 3 merged. Go ABAP Unit parity with Node at 0 DIFFERENT, with the 12 reviewed nodeAnomaly rows.
+- must: stable row references in Go tables, and NOT_COMPILED and dumps uncatchable by ABAP CATCH (the last wave-3
+  blocker; also a possible silent bug on main).
+- must: the release draft built by CI, and its artefacts checked by content.
+- should: the honest speed measurement, Node vs Go on the whole intersection, one instrument.
+- nice: accept ADR 0005 (lazy table providers). It is a decision, not code.
+
+**0.5**
+- must: O, program -> binary. F4 and dialogs in the TUI, Open SQL in the native build, `osd run ZREPORT` = F8.
+- must: check and record in ANORMALIES whether our Node/Go runners keep class statics across test classes (A4H
+  resets them per test class).
+- should: U4 step 1, process sharding of ABAP Unit on Go.
+- should: U4 step 2, Session-owned statics/DB/LUW, one goroutine per test class on a copy of the seed image; statics
+  reset per test class as on A4H.
+- should: lazy tables slices 1-2 (ADR 0005): the xref into the registry as eager, then lazy.
+- nice: VRSD / `SVRS_*` over git on the registry (stoker; after ADR 0005 is accepted).
+- nice: D, daemons DX: `osd samc --derive/--check` on DSL L1, CodeLens from the trace sidecar.
+- nice: Node ABAP Unit in worker_threads, one DB copy each.
+
+**0.6**
+- should: the Go side of host relations. A SQLite virtual table over stable Go rows, per call, gated by
+  `ir-host-relation-pairs.mjs`.
+- should: OSGo server with several work processes, on a shared DB with one transaction per dialog step.
+- nice: IR-JS as a third `unit-compare` column, DB-free tests first.
+- nice: profile the #293 slowdown (MPC through the DSL: 3.6 s against 0.94 s in OSG).
+- generous: IR-JS on the database seam, so DB tests run too.
+- generous: one DB IR for both runtimes (`docs/pamdp-ir-portability.md`, a proposal; pAMDP parked).
+- generous: the lazy-table status group (needs the pooled snapshot design first).
