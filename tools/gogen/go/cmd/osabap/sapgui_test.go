@@ -6,19 +6,26 @@ import (
 	"testing"
 
 	"github.com/oisee/open-diag-go/pkg/diag"
+
+	"osg/gogen/reportargs"
 )
 
 func TestSAPGUIOptionIsSeparateFromReportArguments(t *testing.T) {
-	enabled, launch, listen, rest := sapGUIOption([]string{"--name", "Alice", "--sapgui=127.0.0.1:3201", "--loud"})
-	if !enabled || !launch || listen != "127.0.0.1:3201" || strings.Join(rest, " ") != "--name Alice --loud" {
-		t.Fatalf("option: enabled=%v launch=%v listen=%q rest=%q", enabled, launch, listen, rest)
+	cli, err := reportargs.Parse([]string{"--name", "Alice", "-sapgui=127.0.0.1:3201", "--loud"}, hostFlags,
+		reportargs.Report{Names: []string{"P_NAME", "P_LOUD"}, Checkboxes: map[string]bool{"P_LOUD": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled, launch, listen := sapGUIOption(cli.Host)
+	if !enabled || !launch || listen != "127.0.0.1:3201" || len(cli.Options) != 2 {
+		t.Fatalf("option: enabled=%v launch=%v listen=%q options=%v", enabled, launch, listen, cli.Options)
 	}
 }
 
 func TestSAPGUINoLaunch(t *testing.T) {
-	enabled, launch, listen, rest := sapGUIOption([]string{"--sapgui-no-launch"})
-	if !enabled || launch || listen != defaultSAPGUIListen || len(rest) != 0 {
-		t.Fatalf("option: enabled=%v launch=%v listen=%q rest=%q", enabled, launch, listen, rest)
+	enabled, launch, listen := sapGUIOption([]reportargs.Arg{{Name: "sapgui-no-launch"}})
+	if !enabled || launch || listen != defaultSAPGUIListen {
+		t.Fatalf("option: enabled=%v launch=%v listen=%q", enabled, launch, listen)
 	}
 }
 

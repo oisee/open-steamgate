@@ -11,6 +11,8 @@ import (
 
 	"github.com/oisee/open-diag-go/pkg/diag"
 	"github.com/oisee/open-diag-go/pkg/frame"
+
+	"osg/gogen/reportargs"
 )
 
 const defaultSAPGUIListen = "127.0.0.1:3232"
@@ -27,31 +29,24 @@ type sapGUIField struct {
 	initial  selectionInput
 }
 
-// sapGUIOption removes the frontend switch before the remaining arguments are
-// interpreted as report selection parameters. --sapgui=ADDR is useful when
+// sapGUIOption reads the frontend switch from the host flags. -sapgui=ADDR is useful when
 // instance 32 is already occupied; the port's low two digits are the SAP
 // instance number.
-func sapGUIOption(args []string) (bool, bool, string, []string) {
+func sapGUIOption(host []reportargs.Arg) (bool, bool, string) {
 	enabled, launch, listen := false, true, defaultSAPGUIListen
-	rest := make([]string, 0, len(args))
-	for _, arg := range args {
-		switch {
-		case arg == "--sapgui":
+	for _, flag := range host {
+		switch flag.Name {
+		case "sapgui":
 			enabled = true
-		case arg == "--sapgui-no-launch":
+			if flag.HasValue {
+				listen = flag.Value
+			}
+		case "sapgui-no-launch":
 			enabled = true
 			launch = false
-		case strings.HasPrefix(arg, "--sapgui="):
-			enabled = true
-			listen = strings.TrimPrefix(arg, "--sapgui=")
-			if listen == "" {
-				panic(fmt.Errorf("--sapgui needs a listen address after ="))
-			}
-		default:
-			rest = append(rest, arg)
 		}
 	}
-	return enabled, launch, listen, rest
+	return enabled, launch, listen
 }
 
 func serveSAPGUI(listen string, launch bool, selection ZCL_GG_HOST__TY_RESULT, execute func([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE) ZCL_GG_HOST__TY_RESULT) error {

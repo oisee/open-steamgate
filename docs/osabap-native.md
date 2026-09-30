@@ -10,7 +10,7 @@ screen through three frontends:
 | --- | --- | --- |
 | `osabap` | terminal form/TUI | interactive local use |
 | `osabap [values and flags]` | headless CLI | scripts, pipes and CI |
-| `osabap --sapgui` | real SAP GUI over NI/DIAG | classic desktop interaction |
+| `osabap -sapgui` | real SAP GUI over NI/DIAG | classic desktop interaction |
 
 This is deliberately not the OSGo application server. The generated command
 does not contain HTTP, OData, Fiori or SQLite. It is built with the
@@ -92,6 +92,31 @@ After the frontend collects values, the second host call uses function code
 This is the native equivalent of supplying a selection table to `SUBMIT ...
 AND RETURN`: the report is not rewritten as a separate command-line program.
 
+## Two namespaces: report options and host flags
+
+The command line has two namespaces that never meet (Alice, 2026-09-30):
+
+- **Two dashes are the report's.** The selection screen is the command's
+  interface: `--name Bob`, `--s-tag a --s-tag b`, `--loud` for a checkbox,
+  and each field also by its full name (`--p-name`, `--s-tag`). A value may
+  start with a dash (`--num -5`). After a bare `--`, everything is positional.
+- **One dash is the host's:** `-db FILE`, `-params JSON|@file`, `-allow-read DIR`,
+  `-allow-write DIR`, `-dataset-home DIR`, `-dataset-audit FILE`,
+  `-sapgui[=ADDR]`, `-sapgui-no-launch`, `-help` (or `-h`).
+
+A report with `PARAMETERS p_db` has its own `--db` next to the host's `-db`,
+and a flag the host gains later cannot take a name away from a report that
+is already built. Errors name the way out:
+- `-5` alone asks for `--name -5`;
+- `--help` points to `-help`;
+- an unknown `--x` lists the report's options, and an unknown `-x` lists the
+  host's flags.
+
+For one release, the old double-dash spelling of a host flag (`--db`,
+`--allow-read`, ...) is still accepted, with a line on stderr, as long as the
+report has no option of that name. The reader is
+`tools/gogen/go/reportargs`, which `osd run` shares.
+
 ## Headless CLI
 
 For `ZHELLO`, these are equivalent inputs:
@@ -99,8 +124,8 @@ For `ZHELLO`, these are equivalent inputs:
 ```sh
 osabap Alice --loud --s-tag one --s-tag two
 osabap --name Alice --loud --s-tag one --s-tag two
-osabap --params '{"P_NAME":"Alice","P_LOUD":true,"S_TAG":["one","two"]}'
-osabap --params @arguments.json
+osabap -params '{"P_NAME":"Alice","P_LOUD":true,"S_TAG":["one","two"]}'
+osabap -params @arguments.json
 ```
 
 Rules:
@@ -111,7 +136,7 @@ Rules:
 - repeated select-option flags become `I/EQ` range rows;
 - JSON range objects may specify `sign`, `option`, `low` and `high`;
 - `BT` is inferred when a JSON range has `high` but no `option`;
-- explicit flags win over values from `--params`;
+- explicit flags win over values from `-params`;
 - unknown flags and excess positionals fail instead of being ignored.
 
 Supplying any report argument selects headless mode. Output lines go to stdout,
@@ -126,21 +151,21 @@ native dataset sandbox. With no access flags, every open is refused with
 environment variables set. Grant only the directories a report needs:
 
 ```sh
-osabap --allow-read ./input --allow-write ./output --input ./input/source.txt --output ./output/copy.txt
+osabap -allow-read ./input -allow-write ./output --input ./input/source.txt --output ./output/copy.txt
 ```
 
-`--allow-read DIR` and `--allow-write DIR` repeat to add roots, one directory
+`-allow-read DIR` and `-allow-write DIR` repeat to add roots, one directory
 per flag. A write root
-also permits reads. `--dataset-home DIR` resolves relative DATASET names from
+also permits reads. `-dataset-home DIR` resolves relative DATASET names from
 that directory; otherwise the first write root, then the first read root, is
-the base. `--dataset-audit FILE` appends JSON lines for OPEN and DELETE decisions
+the base. `-dataset-audit FILE` appends JSON lines for OPEN and DELETE decisions
 only when FILE is inside a write root; an outside path creates no audit file.
 Relative audit names use the same base as relative DATASET names.
 Each option accepts either `--option value` or `--option=value`. Paths outside
 the granted roots, including `..` escapes, are refused. These flags govern
 DATASET statements; frontend service file methods have their own host API.
 
-## Open SQL and the --db file
+## Open SQL and the -db file
 
 A report may bring tables of its own: the `.tabl.xml` files (and any
 `.dtel.xml`, `.doma.xml`, `.ttyp.xml`) beside the report file are compiled
@@ -149,23 +174,23 @@ host, go into the binary. `tools/gogen/apps/notes/` is the sample:
 
 ```sh
 node tools/gogen/osabap.mjs tools/gogen/apps/notes/znotes.prog.abap
-osabap --db notes.db --add "first note"      # 1 first note
-osabap --db notes.db --add "second note"     # the first run's row is still there
-osabap --add x                               # refused: run it with --db FILE
+osabap -db notes.db --add "first note"      # 1 first note
+osabap -db notes.db --add "second note"     # the first run's row is still there
+osabap --add x                               # refused: run it with -db FILE
 ```
 
-- `--db FILE` opens the SQLite file, creating it with the report's tables
+- `-db FILE` opens the SQLite file, creating it with the report's tables
   when it is missing (`abap.OpenDBFile`, the one `osgo --db` uses). Each
   dialog step is a database LUW: `COMMIT WORK` and `ROLLBACK WORK` behave as
   on a system, and a dump rolls the step back.
-- A report with tables and no `--db` has no database. Its first statement
+- A report with tables and no `-db` has no database. Its first statement
   refuses and names the flag. There is never a silent in-memory database
   whose rows vanish at exit.
 - A file laid out by another build of the tables (a column changed, a table
   added) is refused, not used: the file carries a mark of the schema that
   created it.
 - A report without tables is built without a database driver and refuses
-  `--db`.
+  `-db`.
 
 Which Open SQL forms compile is measured, not claimed:
 `node tools/gogen/osabap-sql-corpus.mjs` compiles each of the 18 forms in
@@ -200,7 +225,7 @@ That keeps the no-argument path testable through pipes.
 ## SAP GUI mode
 
 ```sh
-osabap --sapgui
+osabap -sapgui
 ```
 
 The command binds `127.0.0.1:3232` before starting the client. Port 3232 is
@@ -216,21 +241,21 @@ Platform launchers are small build-tagged files:
 - another platform can set `OSABAP_SAPGUI` to its client executable.
 
 `OSABAP_SAPGUI` also overrides client discovery on Windows and macOS. Use
-`--sapgui-no-launch` to listen without starting a client, for example when
+`-sapgui-no-launch` to listen without starting a client, for example when
 testing the launch command separately:
 
 ```powershell
-.\osabap.exe --sapgui-no-launch
+.\osabap.exe -sapgui-no-launch
 & "C:\Program Files\SAP\FrontEnd\SAPGUI\sapgui.exe" 127.0.0.1 32
 ```
 
-An alternate listener is accepted as `--sapgui=127.0.0.1:3201`. Direct
+An alternate listener is accepted as `-sapgui=127.0.0.1:3201`. Direct
 Windows launch derives the DIAG port from the final two digits as instance 01.
 
 Report flags can accompany the frontend switch and prefill its fields:
 
 ```powershell
-.\osabap.exe --sapgui --name Alice --loud
+.\osabap.exe -sapgui --name Alice --loud
 ```
 
 ### DIAG session
@@ -305,7 +330,7 @@ text file through these ABAP APIs.
 The spike intentionally implements a small application runtime, not a whole
 SAP system:
 
-- Open SQL only on the report's own tables, through `--db` (12 of 18 corpus forms compile; see above);
+- Open SQL only on the report's own tables, through `-db` (12 of 18 corpus forms compile; see above);
 - no OData, HTTP, ICF or Fiori host;
 - one selection screen and one execution per process;
 - select-options in interactive frontends currently use comma-separated

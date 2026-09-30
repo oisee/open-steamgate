@@ -115,18 +115,18 @@ SAP system. The selection screen is the command-line contract:
 node tools/gogen/osabap.mjs tools/gogen/apps/hello/zhello.prog.abap   # -> tools/gogen/.out/osabap
 tools/gogen/.out/osabap Alice                        # parameters in declaration order
 tools/gogen/.out/osabap --name Alice --loud --s-tag one --s-tag two  # a repeated select-option = I/EQ rows
-tools/gogen/.out/osabap --params @arguments.json     # or all of it as JSON
+tools/gogen/.out/osabap -params @arguments.json     # or all of it as JSON
 tools/gogen/.out/osabap                              # no arguments, a terminal: the selection screen as a TUI
-tools/gogen/.out/osabap --sapgui                     # the same screen to a real SAP GUI over DIAG, on 127.0.0.1
+tools/gogen/.out/osabap -sapgui                     # the same screen to a real SAP GUI over DIAG, on 127.0.0.1
 GOOS=windows GOARCH=arm64 node tools/gogen/osabap.mjs report.prog.abap   # cross-compiles
 ```
 
 The usual lifecycle runs: `INITIALIZATION`, the selection-screen events,
 `START-OF-SELECTION`, `WRITE` to stdout. `CL_GUI_FRONTEND_SERVICES` maps to the
 local file system. `OPEN DATASET` works inside the roots you allow
-(`--allow-read ./in --allow-write ./out`). A report with tables of its own
+(`-allow-read ./in -allow-write ./out`). A report with tables of its own
 (their `.tabl.xml` beside the report) keeps its rows in the SQLite file
-`--db notes.db` names, created with those tables when missing; 12 of the 18
+`-db notes.db` names, created with those tables when missing; 12 of the 18
 Open SQL forms of `tools/gogen/apps/sql-corpus` compile so far. The samples are in
 [`tools/gogen/apps/`](tools/gogen/apps), and the details are in
 [`docs/osabap-native.md`](docs/osabap-native.md).

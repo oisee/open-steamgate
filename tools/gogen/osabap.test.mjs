@@ -27,7 +27,7 @@ test("positionals and repeatable select-option flags", () => {
 
 test("named flags and JSON ranges use the same report lifecycle", () => {
   const ranges = ["one", {low: "a", high: "z"}, {sign: "E", option: "CP", low: "tmp*"}];
-  const result = run(["--name", "Bob", "--loud", "--params", JSON.stringify({S_TAG: ranges})]);
+  const result = run(["--name", "Bob", "--loud", "-params", JSON.stringify({S_TAG: ranges})]);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, "Hello BOB\nTags 3\n");
 });
@@ -42,13 +42,36 @@ test("no arguments presents the selection screen", () => {
 test("unknown options fail instead of becoming report input", () => {
   const result = run(["--unknown"]);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /unknown option --unknown/);
+  assert.match(result.stderr, /unknown report option --unknown; the report's options are --name .*--s-tag/);
+  const flag = run(["-unknown"]);
+  assert.equal(flag.status, 1);
+  assert.match(flag.stderr, /unknown flag -unknown; the host's flags are -help .*-db/);
+});
+
+// two namespaces: one dash for the host, two for the report (Alice, 2026-09-30)
+test("host flags take one dash, report options two", () => {
+  const help = run(["-help"]);
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /report options[\s\S]*--name[\s\S]*host flags \(one dash\):[\s\S]*-allow-read DIR/);
+  const doubleHelp = run(["--help"]);
+  assert.equal(doubleHelp.status, 1);
+  assert.match(doubleHelp.stderr, /-help shows the usage/);
+  const negative = run(["-5"]);
+  assert.equal(negative.status, 1);
+  assert.match(negative.stderr, /goes after its option, as in --name -5/);
+  const value = run(["--name", "-5"]);
+  assert.equal(value.status, 0, value.stderr);
+  assert.match(value.stdout, /^Hello -5/);
+  // the old double-dash spelling of a host flag, for one release, with a warning
+  const old = run(["--name", "Ann", "--allow-read", tmpdir()]);
+  assert.equal(old.status, 0, old.stderr);
+  assert.match(old.stderr, /--allow-read is -allow-read now/);
 });
 
 test("help describes dataset grants", () => {
-  const result = run(["--help"]);
+  const result = run(["-help"]);
   assert.equal(result.status, 0, result.stderr);
-  for (const flag of ["--allow-read", "--allow-write", "--dataset-home", "--dataset-audit"]) {
+  for (const flag of ["-allow-read", "-allow-write", "-dataset-home", "-dataset-audit"]) {
     assert.ok(result.stdout.includes(flag), flag);
   }
 });
@@ -85,7 +108,7 @@ test("native DATASET copy obeys read, write and path grants", () => {
     writeFileSync(input, content);
     execFileSync(process.execPath, [builder, join(here, "apps", "dataset", "zdataset.prog.abap")], {stdio: "inherit"});
 
-    const allowed = run(["--allow-read", inputDir, "--allow-write", outputDir, "--dataset-audit", audit, "--input", input, "--output", output]);
+    const allowed = run(["-allow-read", inputDir, "-allow-write", outputDir, "-dataset-audit", audit, "--input", input, "--output", output]);
     assert.equal(allowed.status, 0, allowed.stderr);
     assert.match(allowed.stdout, /Copied\s+2 lines, at byte\s+8/);
     assert.match(allowed.stdout, /Head 6F6E65\s+3/);
@@ -94,21 +117,21 @@ test("native DATASET copy obeys read, write and path grants", () => {
     rmSync(output);
 
     const escapedAudit = join(dir, "escaped-audit.ndjson");
-    const auditOutsideRoot = run(["--allow-read", inputDir, "--allow-write", outputDir,
-      "--dataset-audit", escapedAudit, "--input", input, "--output", output]);
+    const auditOutsideRoot = run(["-allow-read", inputDir, "-allow-write", outputDir,
+      "-dataset-audit", escapedAudit, "--input", input, "--output", output]);
     assert.equal(auditOutsideRoot.status, 0, auditOutsideRoot.stderr);
     assert.equal(existsSync(escapedAudit), false);
     rmSync(output);
 
     const linkedAudit = join(outputDir, "linked-audit.ndjson");
     symlinkSync(escapedAudit, linkedAudit);
-    const auditViaLink = run(["--allow-read", inputDir, "--allow-write", outputDir,
-      "--dataset-audit", linkedAudit, "--input", input, "--output", output]);
+    const auditViaLink = run(["-allow-read", inputDir, "-allow-write", outputDir,
+      "-dataset-audit", linkedAudit, "--input", input, "--output", output]);
     assert.equal(auditViaLink.status, 0, auditViaLink.stderr);
     assert.equal(existsSync(escapedAudit), false);
     rmSync(output);
 
-    const joinedRoots = run(["--allow-read", `${outputDir}${delimiter}${inputDir}`, "--allow-write", outputDir,
+    const joinedRoots = run(["-allow-read", `${outputDir}${delimiter}${inputDir}`, "-allow-write", outputDir,
       "--input", input, "--output", output]);
     assert.equal(joinedRoots.status, 1);
     assert.match(joinedRoots.stderr, /one directory per flag/);
@@ -121,19 +144,19 @@ test("native DATASET copy obeys read, write and path grants", () => {
     assert.match(denied.stdout, /^Refused Permission denied/);
     assert.equal(existsSync(output), false);
 
-    const wrongReadRoot = run(["--allow-read", outputDir, "--allow-write", outputDir,
+    const wrongReadRoot = run(["-allow-read", outputDir, "-allow-write", outputDir,
       "--input", input, "--output", output]);
     assert.equal(wrongReadRoot.status, 0, wrongReadRoot.stderr);
     assert.match(wrongReadRoot.stdout, /^Refused Permission denied/);
     assert.equal(existsSync(output), false);
 
-    const readOnly = run(["--allow-read", inputDir, "--input", input, "--output", output]);
+    const readOnly = run(["-allow-read", inputDir, "--input", input, "--output", output]);
     assert.equal(readOnly.status, 0, readOnly.stderr);
     assert.match(readOnly.stdout, /Refused/);
     assert.equal(existsSync(output), false);
 
     const escaped = join(dir, "escape.txt");
-    const escape = run(["--allow-read", inputDir, "--allow-write", outputDir, "--dataset-home", outputDir,
+    const escape = run(["-allow-read", inputDir, "-allow-write", outputDir, "-dataset-home", outputDir,
       "--input", input, "--output", "../escape.txt"]);
     assert.equal(escape.status, 0, escape.stderr);
     assert.match(escape.stdout, /Refused/);
@@ -141,7 +164,7 @@ test("native DATASET copy obeys read, write and path grants", () => {
 
     const unicode = "one\nGrüße 世界\n\nlast\n";
     writeFileSync(input, unicode);
-    const unicodeCopy = run(["--allow-read", inputDir, "--allow-write", outputDir,
+    const unicodeCopy = run(["-allow-read", inputDir, "-allow-write", outputDir,
       "--input", input, "--output", output]);
     assert.equal(unicodeCopy.status, 0, unicodeCopy.stderr);
     assert.equal(readFileSync(output, "utf8"), unicode);
@@ -163,19 +186,19 @@ test("a report's own table lives in the --db file", () => {
     cpSync(join(here, "apps", "notes"), app, {recursive: true});
     const report = join(app, "znotes.prog.abap");
     execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
-    const help = run(["--help"]);
-    assert.match(help.stdout, /--db FILE .*ZNOTES/);
+    const help = run(["-help"]);
+    assert.match(help.stdout, /-db FILE .*ZNOTES/);
 
     const without = run(["--add", "hello"]);
     assert.equal(without.status, 1);
-    assert.match(without.stderr, /znotes keeps its rows in tables \(ZNOTES\): run it with --db FILE/);
+    assert.match(without.stderr, /znotes keeps its rows in tables \(ZNOTES\): run it with -db FILE/);
 
     const file = join(dir, "notes.db");
-    const first = run(["--db", file, "--add", "hello"]);
+    const first = run(["-db", file, "--add", "hello"]);
     assert.equal(first.status, 0, first.stderr);
     assert.equal(first.stdout, "1 hello\n1 notes\n");
     // a second run of the command finds the first run's row
-    const second = run(["--db", file, "--add", "second note"]);
+    const second = run(["-db", file, "--add", "second note"]);
     assert.equal(second.status, 0, second.stderr);
     assert.equal(second.stdout, "1 hello\n2 second note\n2 notes\n");
 
@@ -184,11 +207,11 @@ test("a report's own table lives in the --db file", () => {
     assert.equal(existsSync(`${file}-wal`), false);
     const copy = join(dir, "copy.db");
     cpSync(file, copy);
-    const fromCopy = run(["--db", copy, "--add", "third"]);
+    const fromCopy = run(["-db", copy, "--add", "third"]);
     assert.equal(fromCopy.status, 0, fromCopy.stderr);
     assert.equal(fromCopy.stdout, "1 hello\n2 second note\n3 third\n3 notes\n");
 
-    const odd = run(["--db", join(dir, "we?ird.db"), "--add", "x"]);
+    const odd = run(["-db", join(dir, "we?ird.db"), "--add", "x"]);
     assert.equal(odd.status, 1);
     assert.match(odd.stderr, /a file name with \?, # or % is not accepted/);
 
@@ -196,7 +219,7 @@ test("a report's own table lives in the --db file", () => {
     const tabl = join(app, "znotes.tabl.xml");
     writeFileSync(tabl, readFileSync(tabl, "utf8").replace("<LENG>000080</LENG>", "<LENG>000120</LENG>").replace("<INTLEN>000160</INTLEN>", "<INTLEN>000240</INTLEN>"));
     execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
-    const drifted = run(["--db", file, "--add", "x"]);
+    const drifted = run(["-db", file, "--add", "x"]);
     assert.equal(drifted.status, 1);
     assert.match(drifted.stderr, /seeded by another build/);
   } finally {
@@ -206,7 +229,7 @@ test("a report's own table lives in the --db file", () => {
 
 test("a report without tables refuses --db", () => {
   execFileSync(process.execPath, [builder], {stdio: "inherit"});
-  const result = run(["Alice", "--db", join(tmpdir(), "osabap-never.db")]);
+  const result = run(["Alice", "-db", join(tmpdir(), "osabap-never.db")]);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /--db: ZHELLO has no tables of its own/);
+  assert.match(result.stderr, /-db: ZHELLO has no tables of its own/);
 });

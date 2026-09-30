@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"osg/gogen/abap"
+	"osg/gogen/reportargs"
 	"osg/gogen/termgui"
 )
 
@@ -37,10 +38,11 @@ func main() {
 		}()
 		s := &abap.Session{}
 		report := newReport(s)
-		sapGUI, launchSAPGUI, listen, args := sapGUIOption(os.Args[1:])
-		args = datasetOptions(args)
-		args = dbOption(args)
-		input, headless := commandInput(args)
+		cli := commandLine(os.Args[1:])
+		sapGUI, launchSAPGUI, listen := sapGUIOption(cli.Host)
+		datasetOptions(cli.Host)
+		dbOption(cli.Host)
+		input, headless := commandInput(cli)
 		if sapGUI {
 			var screen ZCL_GG_HOST__TY_RESULT
 			abap.DialogStep(func() { screen = hostRun(s, report, input, "", "X") })
@@ -96,44 +98,56 @@ func main() {
 	}
 }
 
-// datasetOptions consumes host flags before selection-screen flags are parsed.
-// Install a fresh sandbox even when the parent process carries dataset env vars.
-func datasetOptions(args []string) []string {
+// hostFlags are the host's, one dash each (reportargs): two namespaces, so a
+// report option of the same name (--db for P_DB) never meets them
+var hostFlags = []reportargs.HostFlag{
+	{Name: "db", Value: reportargs.Required},
+	{Name: "allow-read", Value: reportargs.Required},
+	{Name: "allow-write", Value: reportargs.Required},
+	{Name: "dataset-home", Value: reportargs.Required},
+	{Name: "dataset-audit", Value: reportargs.Required},
+	{Name: "params", Value: reportargs.Required},
+	{Name: "sapgui", Value: reportargs.Optional},
+	{Name: "sapgui-no-launch", Value: reportargs.NoValue},
+}
+
+// commandLine reads the arguments once; -help prints the usage and ends here
+func commandLine(args []string) reportargs.Result {
+	cli, err := reportargs.Parse(args, hostFlags, reportargs.Report{Names: appSelectionNames, Checkboxes: appCheckboxes})
+	if err != nil {
+		panic(err)
+	}
+	for _, warning := range cli.Warnings {
+		fmt.Fprintln(os.Stderr, "osabap:", warning)
+	}
+	if cli.Help {
+		usage()
+		os.Exit(0)
+	}
+	return cli
+}
+
+// datasetOptions installs a fresh sandbox from the dataset flags, even when
+// the parent process carries dataset env vars.
+func datasetOptions(host []reportargs.Arg) {
 	var read, write []string
 	var home, audit string
-	var rest []string
-	for i := 0; i < len(args); i++ {
-		key, value, inline := strings.Cut(args[i], "=")
-		switch key {
-		case "--allow-read", "--allow-write", "--dataset-home", "--dataset-audit":
-			if !inline {
-				i++
-				if i >= len(args) {
-					panic(fmt.Errorf("%s needs a value", key))
-				}
-				value = args[i]
+	for _, flag := range host {
+		switch flag.Name {
+		case "allow-read":
+			if strings.ContainsRune(flag.Value, filepath.ListSeparator) {
+				panic(fmt.Errorf("-allow-read accepts one directory per flag"))
 			}
-			if value == "" {
-				panic(fmt.Errorf("%s needs a non-empty value", key))
+			read = append(read, flag.Value)
+		case "allow-write":
+			if strings.ContainsRune(flag.Value, filepath.ListSeparator) {
+				panic(fmt.Errorf("-allow-write accepts one directory per flag"))
 			}
-			switch key {
-			case "--allow-read":
-				if strings.ContainsRune(value, filepath.ListSeparator) {
-					panic(fmt.Errorf("%s accepts one directory per flag", key))
-				}
-				read = append(read, value)
-			case "--allow-write":
-				if strings.ContainsRune(value, filepath.ListSeparator) {
-					panic(fmt.Errorf("%s accepts one directory per flag", key))
-				}
-				write = append(write, value)
-			case "--dataset-home":
-				home = value
-			case "--dataset-audit":
-				audit = value
-			}
-		default:
-			rest = append(rest, args[i])
+			write = append(write, flag.Value)
+		case "dataset-home":
+			home = flag.Value
+		case "dataset-audit":
+			audit = flag.Value
 		}
 	}
 	// SandboxFromEnv owns audit creation and root normalization. These values
@@ -149,7 +163,6 @@ func datasetOptions(args []string) []string {
 		}
 	}
 	abap.SetDatasetHost(abap.SandboxFromEnv())
-	return rest
 }
 
 func graphicalInput(screen ZCL_GG_HOST__TY_RESULT) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, error) {
@@ -201,49 +214,22 @@ func graphicalInput(screen ZCL_GG_HOST__TY_RESULT) ([]ZIF_GG_SELECTION_SCREEN_TY
 	return selectionValues(current), nil
 }
 
-func commandInput(args []string) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, bool) {
+func commandInput(cli reportargs.Result) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, bool) {
 	values := map[string]selectionInput{}
-	positionals := []string{}
 	params := ""
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--help" || arg == "-h" {
-			usage()
-			closeDB()
-			os.Exit(0)
+	for _, flag := range cli.Host {
+		if flag.Name == "params" {
+			params = flag.Value
 		}
-		if arg == "--params" {
-			if i+1 >= len(args) {
-				panic(fmt.Errorf("--params needs JSON or @file"))
-			}
-			i++
-			params = args[i]
-			continue
-		}
-		if strings.HasPrefix(arg, "--params=") {
-			params = strings.TrimPrefix(arg, "--params=")
-			continue
-		}
-		if strings.HasPrefix(arg, "--") {
-			key, value, hasValue := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
-			name, checkbox := selectionName(key)
-			if name == "" {
-				panic(fmt.Errorf("unknown option --%s", key))
-			}
-			if !hasValue && checkbox {
-				value = "X"
-			} else if !hasValue {
-				if i+1 >= len(args) {
-					panic(fmt.Errorf("--%s needs a value", key))
-				}
-				i++
-				value = args[i]
-			}
-			setOption(values, name, value)
-			continue
-		}
-		positionals = append(positionals, arg)
 	}
+	for _, option := range cli.Options {
+		value := option.Value
+		if !option.HasValue && appCheckboxes[option.Name] {
+			value = "X"
+		}
+		setOption(values, option.Name, value)
+	}
+	positionals := cli.Positionals
 	if params != "" {
 		raw := []byte(params)
 		if strings.HasPrefix(params, "@") {
@@ -255,12 +241,12 @@ func commandInput(args []string) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, boo
 		}
 		fromJSON := map[string]any{}
 		if err := json.Unmarshal(raw, &fromJSON); err != nil {
-			panic(fmt.Errorf("--params: %w", err))
+			panic(fmt.Errorf("-params: %w", err))
 		}
 		for key, rawValue := range fromJSON {
 			name, checkbox := selectionName(key)
 			if name == "" {
-				panic(fmt.Errorf("--params: unknown selection field %s", key))
+				panic(fmt.Errorf("-params: unknown selection field %s", key))
 			}
 			if appRanges[name] {
 				if _, setByFlag := values[name]; !setByFlag {
@@ -289,7 +275,7 @@ func commandInput(args []string) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, boo
 		}
 		values[appPositionals[i]] = selectionInput{value: arg}
 	}
-	return selectionValues(values), len(args) > 0
+	return selectionValues(values), len(cli.Options) > 0 || len(cli.Positionals) > 0 || params != ""
 }
 
 func selectionName(option string) (string, bool) {
@@ -360,16 +346,8 @@ func usage() {
 	for _, name := range appPositionals {
 		fmt.Printf(" <%s>", strings.ToLower(strings.TrimPrefix(name, "P_")))
 	}
-	fmt.Println(" [options]")
-	fmt.Println("  --sapgui[=ADDR]   launch SAP GUI and serve it the selection screen (default 127.0.0.1:3232)")
-	fmt.Println("  --sapgui-no-launch serve SAP GUI without launching a local client")
-	fmt.Println("  --allow-read DIR  allow DATASET reads within DIR (repeatable)")
-	fmt.Println("  --allow-write DIR allow DATASET writes within DIR (repeatable; also readable)")
-	fmt.Println("  --dataset-home DIR base for relative DATASET names")
-	fmt.Println("  --dataset-audit FILE append OPEN/DELETE decisions inside a write root")
-	if len(appTables) > 0 {
-		fmt.Printf("  --db FILE         keep the rows of %s in the SQLite FILE (created when missing)\n", strings.Join(appTables, ", "))
-	}
+	fmt.Println(" [--report options] [-host flags]")
+	fmt.Println("report options (the selection screen; also by full name, --p-name / --s-name):")
 	for _, name := range appSelectionNames {
 		opt := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(name, "P_"), "_", "-"))
 		if appRanges[name] {
@@ -380,7 +358,19 @@ func usage() {
 			fmt.Printf("  --%-16s %s value\n", opt, name)
 		}
 	}
-	fmt.Println("  --params JSON|@file")
+	fmt.Println("  --                 everything after is positional")
+	fmt.Println("host flags (one dash):")
+	if len(appTables) > 0 {
+		fmt.Printf("  -db FILE           keep the rows of %s in the SQLite FILE (created when missing)\n", strings.Join(appTables, ", "))
+	}
+	fmt.Println("  -params JSON|@file  the selection screen as JSON")
+	fmt.Println("  -allow-read DIR     allow DATASET reads within DIR (repeatable)")
+	fmt.Println("  -allow-write DIR    allow DATASET writes within DIR (repeatable; also readable)")
+	fmt.Println("  -dataset-home DIR   base for relative DATASET names")
+	fmt.Println("  -dataset-audit FILE append OPEN/DELETE decisions inside a write root")
+	fmt.Println("  -sapgui[=ADDR]      launch SAP GUI and serve it the selection screen (default 127.0.0.1:3232)")
+	fmt.Println("  -sapgui-no-launch   serve SAP GUI without launching a local client")
+	fmt.Println("  -help               this text")
 }
 
 func selectionValues(values map[string]selectionInput) []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE {
@@ -440,48 +430,33 @@ func terminalInput(screen ZCL_GG_HOST__TY_RESULT) []ZIF_GG_SELECTION_SCREEN_TYPE
 	return selectionValues(current)
 }
 
-// dbOption takes --db FILE: the SQLite file a report with tables of its own
+// dbOption takes -db FILE: the SQLite file a report with tables of its own
 // keeps its rows in, created with the report's tables when it is missing
 // (abap.OpenDBFile, which refuses a file another build laid out). A report
 // with no tables has no database and refuses the flag; one with tables and
 // no --db has no database either, and its first statement says so.
-func dbOption(args []string) []string {
-	var rest []string
+func dbOption(host []reportargs.Arg) {
 	path := ""
-	for i := 0; i < len(args); i++ {
-		key, value, inline := strings.Cut(args[i], "=")
-		if key != "--db" {
-			rest = append(rest, args[i])
-			continue
+	for _, flag := range host {
+		if flag.Name == "db" {
+			path = flag.Value
 		}
-		if !inline {
-			i++
-			if i >= len(args) {
-				panic(fmt.Errorf("--db needs a file"))
-			}
-			value = args[i]
-		}
-		if value == "" {
-			panic(fmt.Errorf("--db needs a non-empty file name"))
-		}
-		path = value
 	}
 	if path == "" {
-		return rest
+		return
 	}
 	if len(appTables) == 0 {
-		panic(fmt.Errorf("--db: %s has no tables of its own", appProgram))
+		panic(fmt.Errorf("-db: %s has no tables of its own", appProgram))
 	}
 	// the path goes into a file: URI, where these would be read as its syntax
 	// (a '?' would cut the name short and create another file)
 	if strings.ContainsAny(path, "?#%") {
-		panic(fmt.Errorf("--db %s: a file name with ?, # or %% is not accepted", path))
+		panic(fmt.Errorf("-db %s: a file name with ?, # or %% is not accepted", path))
 	}
 	if _, err := abap.OpenDBFile(path, appSchema); err != nil {
-		panic(fmt.Errorf("--db %s: %w", path, err))
+		panic(fmt.Errorf("-db %s: %w", path, err))
 	}
 	dbOpen = true
-	return rest
 }
 
 var dbOpen bool
@@ -501,7 +476,7 @@ func closeDB() {
 // the runtime only knows that no database was opened
 func withoutDB(r any) any {
 	if len(appTables) > 0 && strings.Contains(fmt.Sprint(r), "the host did not open a database") {
-		return fmt.Sprintf("%s keeps its rows in tables (%s): run it with --db FILE", strings.ToLower(appProgram), strings.Join(appTables, ", "))
+		return fmt.Sprintf("%s keeps its rows in tables (%s): run it with -db FILE", strings.ToLower(appProgram), strings.Join(appTables, ", "))
 	}
 	return r
 }
