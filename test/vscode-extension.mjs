@@ -2082,6 +2082,28 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     } finally { provider.dispose(); }
   });
 
+  it("labels a manifest-named workspace pack with its workspace folder", async () => {
+    const folder = mkdtempSync(path.join(tmpdir(), "osd-workspace-pack-"));
+    const manifest = path.join(folder, "osd-pack.json");
+    writeFileSync(manifest, JSON.stringify({name: "declared-pack"}));
+    const original = Osd.prototype.services;
+    Osd.prototype.services = async () => [{kind: "ODATA", name: "ZWORK_SRV", path: "/sap/opu/odata/sap/ZWORK_SRV", pack: "declared-pack"}];
+    const api = vscodeStub({home: ROOT});
+    const {OsdTreeProvider} = loadExtension(api);
+    const controller = {context: controllerContext(), launcher: {state: "running", layers: [{folder, manifest}]}, onDidChange: () => {}};
+    const provider = new OsdTreeProvider(controller);
+    try {
+      await provider.refreshServices();
+      expect(provider.rows[0].layer).to.equal(`workspace ${path.basename(folder)}`);
+      await provider.setServiceOption("groupBy", "layer");
+      expect(provider.serviceGroupItems()[0].label).to.equal(`workspace ${path.basename(folder)} (1)`);
+    } finally {
+      provider.dispose();
+      Osd.prototype.services = original;
+      rmSync(folder, {recursive: true, force: true});
+    }
+  });
+
   it("removes duplicate registrations of one OData endpoint while keeping the winning row", () => {
     const path = "/sap/opu/odata/sap/ZOSD_TEST_SRV";
     expect(uniqueServices([

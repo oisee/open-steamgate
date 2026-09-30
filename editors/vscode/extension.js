@@ -1136,8 +1136,15 @@ class OsdTreeProvider {
       return;
     }
     try {
-      const workspacePacks = new Map((this.controller.launcher?.layers ?? []).map((layer) =>
-        [packNameOf(layer.folder), `workspace ${path.basename(layer.folder)}`]));
+      const workspacePacks = new Map();
+      for (const layer of this.controller.launcher?.layers ?? []) {
+        const label = `workspace ${path.basename(layer.folder)}`;
+        workspacePacks.set(packNameOf(layer.folder), label);
+        if (layer.manifest) {
+          const manifest = JSON.parse(fs.readFileSync(layer.manifest, "utf8"));
+          workspacePacks.set(String(manifest.name ?? path.basename(layer.folder)).toLowerCase(), label);
+        }
+      }
       this.rows = (await osd().services()).map((row) => ({...row, layer: workspacePacks.get(row.pack) ?? row.pack ?? "base"}));
       for (const row of this.rows) {
         const saved = this.capabilitiesByRow.get(serviceRowKey(row));
