@@ -405,8 +405,18 @@ func readDatasetBytes(s *Session, f *openDataset, target Data, max int, setActua
 // GetDatasetPosition is GET DATASET name POSITION pos.
 func GetDatasetPosition(s *Session, name string, pos Data) {
 	f := opened(s, name, "GET DATASET")
-	v := f.pos
-	MoveData(pos, Data{P: &v, T: TInt8})
+	switch pos.T.Kind {
+	case '8':
+		*pos.P.(*int64) = f.pos
+	case 'I':
+		if f.pos > 1<<31-1 {
+			panic(ArithmeticError{Class: "CX_SY_CONVERSION_OVERFLOW", Op: "GET DATASET POSITION"})
+		}
+		*pos.P.(*int32) = int32(f.pos)
+	default:
+		v := int32(f.pos)
+		MoveData(pos, Data{P: &v, T: TI})
+	}
 	s.Sy.Subrc = 0
 }
 

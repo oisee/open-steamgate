@@ -1149,6 +1149,22 @@ function stmtLines(st, ctx, d) {
     // ultra/events: SET HANDLER, one registration per handler (the names
     // Ev* are mixed case, so no ABAP name, all upper or all lower, meets them)
     case "get_timestamp": return [`${t}${place(st.target, ctx)} = abap.TimeStamp(${st.dec})`];
+    // X0 (go/abap/dataset.go)
+    case "dataset_open": {
+      const fields = [`Mode: ${JSON.stringify(st.mode)}`, `Binary: ${st.binary}`];
+      if (st.message) fields.push(`Message: abap.Ptr(${expr(st.message, ctx)})`);
+      if (st.position) fields.push(`Position: abap.Ptr(${expr(st.position, ctx)})`);
+      return [`${t}abap.OpenDataset(s, ${expr(st.name, ctx)}, abap.DatasetOpen{${fields.join(", ")}})`];
+    }
+    case "dataset_close": return [`${t}abap.CloseDataset(s, ${expr(st.name, ctx)})`];
+    case "dataset_delete": return [`${t}abap.DeleteDataset(s, ${expr(st.name, ctx)})`];
+    case "dataset_transfer":
+      return [`${t}abap.Transfer(s, ${expr(st.src, ctx)}, ${expr(st.name, ctx)}, ${st.length ? `int(${expr(st.length, ctx)})` : "-1"}, ${st.noEndOfLine})`];
+    case "dataset_read":
+      return [`${t}abap.ReadDataset(s, ${expr(st.name, ctx)}, ${expr(st.target, ctx)}, ${st.max ? `int(${expr(st.max, ctx)})` : "-1"}, ${st.actual ? `abap.Ptr(${expr(st.actual, ctx)})` : "nil"})`];
+    case "dataset_get_position": return [`${t}abap.GetDatasetPosition(s, ${expr(st.name, ctx)}, ${expr(st.position, ctx)})`];
+    case "dataset_set_position":
+      return [`${t}abap.SetDatasetPosition(s, ${expr(st.name, ctx)}, ${st.position ? expr(st.position, ctx) : "0"}, ${st.position === null})`];
     case "set_handler": {
       const lines = [`${t}func() {`];
       lines.push(`${t}\tEvFor := ${st.forObj ? `any(${expr(st.forObj, ctx)})` : "any(nil)"}`, `${t}\t_ = EvFor`);
