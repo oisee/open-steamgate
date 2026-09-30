@@ -4692,3 +4692,40 @@ discoverable too, but do not call either surface SE80. Do not iframe code-server
 until WebSocket upgrades, service workers, CSP, cookies and logout have browser
 coverage. Add Playwright checks for the configured link, new-tab navigation and
 the disabled/absent state when no workbench URL is configured.
+
+### Three vector engines on a HANA deployment, and the eAMDP session that goes stale (2026-09-30)
+
+Seen on a HANA-backed deployment (status: Engine HDB): the zvdb Vector Workbench with engine **HANA** answers
+"HANA failed: Connection closed". Read from the code (`packs/zvdb`, `tools/amdp-destination.mjs`,
+`tools/amdp-run.mjs`, `tools/osd-status.mjs`):
+
+- The **HANA** engine is eAMDP: `search_db` (`BY DATABASE PROCEDURE FOR HDB`) is rewritten by `tools/amdp-gen.mjs`
+  into a call of the `'AMDP'` destination, and `AmdpDestination` runs it on HANA over **its own** `hdb` session
+  (credentials from `HANA_*`/`HXE_*` or `~/.osd/hxe-password`), not over the system's `HanaDatabaseClient`.
+- That session is opened once, cached, and never validated or reopened. A socket the server or a proxy dropped
+  (idle timeout, HANA restart) fails on the next call with hdb's raw "Connection closed"; only the first connect is
+  wrapped. The status page reads the system connection, so it says HDB while the eAMDP session is dead or points
+  elsewhere. The page's hint "available only when OSD itself uses HANA" is a client-side text, not a check.
+
+**Fix (small, do first):** the destination validates its session before use and reconnects once on a closed/reset
+socket, and reports a refused connection in words (host/schema, not credentials); better, it reuses the system's HANA
+connection when the system database is HANA and the schema matches. Test with a session killed between two calls.
+
+**Then: three engines selectable on HANA**, each labelled truthfully in `SearchResultSet-Engine`:
+- **ANYDB**: portable Open SQL through the DB seam (works on every engine today).
+- **eAMDP**: the AMDP body executed natively on HANA through the destination (today's "HANA").
+- **pAMDP**: the same SQLScript lowered to the portable engine. Today it runs only when the system database is
+  DuckDB (`#portable`), and pAMDP is parked (`docs/ideas.md`). On HANA it would need the IR executed on a local
+  DuckDB copy or a HANA SQL lowering; decide when pAMDP is unparked. Until then the page must say why it is grey.
+- `Component.js` enables AMDP only for duckdb and HANA only for HDB; derive both from what the server reports it
+  can run, not from the status fact.
+
+### Pages preview: build on releases, not on every merge (2026-09-30)
+
+Today `preview.yml` runs on every pull request (sql.js build + browser check + `pr-<n>/`, about 4.6 min) and on every
+push to main (full build incl. DuckDB-Wasm/Portable AMDP, about 9.2 min) and republishes `main/` on each merge; the
+browser checks gate the publish, so a broken build does not replace the page, but the public preview moves with
+every merge and the minutes are spent each time. Proposal (Alice): publish the public `main/` preview from release
+tags (`vscode-v*`, prerelease included) or a manual dispatch, so the preview always matches a released version;
+PR previews opt-in (a `preview` label) instead of on every PR. Keep the browser checks as the publish gate. Measure
+the CI minutes saved over a week before and after.
