@@ -31,7 +31,7 @@ lo_source->close( ).
 
 Each `READ` is bounded by its two parameters: `IV_MAX` bytes of compressed
 input read from the source (default 64 KiB) and `IV_MAX_OUT` bytes of output
-returned (default 1 MiB; a deflate match may add up to 258 bytes more). When
+returned (default 1 MiB; a deflate match may add up to 257 bytes more). When
 the output limit stops the decoder, the rest of what was read waits inside it
 and the next `READ` reads nothing new until it is used up. Besides that the
 decoder keeps its history (32 to 64 KiB, briefly one stored step more), and
@@ -90,7 +90,8 @@ ZIP64 either. Names are decoded as UTF-8 whether or not the entry sets the
 UTF-8 flag; a name that is not valid UTF-8 becomes empty. Of two entries
 with the same name, `OPEN` takes the first. The end-of-directory record is
 taken only where its comment ends the archive exactly, so a comment that
-contains its signature is not mistaken for it.
+contains its signature is not mistaken for it, and an archive with bytes
+after its comment is refused.
 
 ## Go build
 

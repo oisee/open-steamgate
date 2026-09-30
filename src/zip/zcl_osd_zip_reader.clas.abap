@@ -46,7 +46,7 @@ CLASS zcl_osd_zip_reader DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RAISING   zcx_osd_zip.
     "! The next piece of the open entry. Memory per call is bounded by both
     "! limits: IV_MAX bytes of compressed input read, IV_MAX_OUT bytes of
-    "! output returned (about: a deflate match may add up to 258). A piece may
+    "! output returned (a deflate match may add up to 257 more). A piece may
     "! be empty before the end; loop until IS_EOF.
     METHODS read
       IMPORTING iv_max         TYPE i DEFAULT 65536
@@ -340,14 +340,15 @@ CLASS zcl_osd_zip_reader IMPLEMENTATION.
     ELSE.
       rv_data = lv_data.
     ENDIF.
-    mo_crc->update( rv_data ).
-    mv_produced = mv_produced + xstrlen( rv_data ).
     " more than the directory promised: a damaged entry or a bomb, stopped
-    " as soon as it shows and not at its end
-    IF mv_produced > ms_entry-size.
+    " as soon as it shows and not at its end (compared before adding, so a
+    " size near the limit of i cannot overflow the count)
+    IF xstrlen( rv_data ) > ms_entry-size - mv_produced.
       mv_open = abap_false.
       fail( |{ ms_entry-name }: more than the { ms_entry-size } bytes the directory gives| ).
     ENDIF.
+    mo_crc->update( rv_data ).
+    mv_produced = mv_produced + xstrlen( rv_data ).
     IF mv_left = 0 AND lv_paused = abap_false.
       finish_entry( ).
     ENDIF.
