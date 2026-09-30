@@ -740,14 +740,14 @@ class Osd {
   async services() {
     try {
       const body = await this.json("/sap/bc/adt/core/http/services");
-      return (body?.services ?? []).map(normalizeServiceRow);
+      return uniqueServices((body?.services ?? []).map(normalizeServiceRow));
     } catch (e) {
       if (!/HTTP 404/.test(String(e.message ?? e))) throw e;
     }
     const res = await this.fetch(`${this.url}/sap/opu/odata/sap/ZOSD_STATUS_SRV/ServiceSet?$format=json`);
     if (!res.ok) throw new Error(`GET ZOSD_STATUS_SRV/ServiceSet: HTTP ${res.status}`);
     const body = await res.json();
-    return (body?.d?.results ?? []).map(normalizeServiceSetRow);
+    return uniqueServices((body?.d?.results ?? []).map(normalizeServiceSetRow));
   }
 
   /** Every transaction declaration, including reports and dynpros the
@@ -2048,9 +2048,40 @@ function normalizeServiceRow(row) {
  *  has never named, alphabetically -- "a generic group, so new kinds
  *  appear without code changes". Each group's own rows sorted by path,
  *  the way the flat list this replaces already read top to bottom. */
-function groupServices(rows, groupBy = "kind") {
+function uniqueServices(rows) {
+  const byEndpoint = new Map();
+  for (const row of rows ?? []) byEndpoint.set(`${row.kind}\n${String(row.path ?? "").replace(/\/+$/, "").toLowerCase()}`, row);
+  return [...byEndpoint.values()];
+}
+
+function serviceTechnicalName(row) {
+  if (row.kind === "ODATA") return row.name || String(row.path ?? "").replace(/\/+$/, "").split("/").pop() || row.handler || row.path;
+  if (row.kind === "ICF" || row.kind === "APC") return row.handler || row.name || row.path;
+  return row.name || row.app || row.handler || row.path;
+}
+
+function serviceLayer(row) {
+  return row.layer || row.pack || "base";
+}
+
+function groupServices(rows, groupBy = "kind", sortBy = "name", hideBase = false) {
+  const visible = uniqueServices(rows).filter((row) => !hideBase || serviceLayer(row) !== "base");
+  const compare = (a, b) => {
+    const value = (row) => sortBy === "path" ? row.path : sortBy === "description" ? row.text || serviceTechnicalName(row) : serviceTechnicalName(row);
+    return String(value(a) ?? "").localeCompare(String(value(b) ?? "")) || String(a.path ?? "").localeCompare(String(b.path ?? ""));
+  };
+  if (groupBy === "layer") {
+    const layers = new Map();
+    for (const row of visible) {
+      const layer = serviceLayer(row);
+      if (!layers.has(layer)) layers.set(layer, []);
+      layers.get(layer).push(row);
+    }
+    const keys = [...layers.keys()].sort((a, b) => a === "base" ? -1 : b === "base" ? 1 : a.startsWith("workspace ") ? -1 : b.startsWith("workspace ") ? 1 : a.localeCompare(b));
+    return keys.map((layer) => ({key: layer, label: layer, groupBy: "layer", groups: groupServices(layers.get(layer), "kind", sortBy)}));
+  }
   const byKind = new Map();
-  for (const row of rows ?? []) {
+  for (const row of visible) {
     const key = groupBy === "pack" ? (row.pack ?? "") : row.kind;
     const list = byKind.get(key) ?? [];
     list.push(row);
@@ -2059,14 +2090,14 @@ function groupServices(rows, groupBy = "kind") {
   if (groupBy === "pack") {
     return [...byKind.keys()].sort((a, b) => (a || "Unpacked").localeCompare(b || "Unpacked")).map((pack) => ({
       key: pack, pack: pack || undefined, groupBy, label: pack || "Unpacked",
-      rows: [...byKind.get(pack)].sort((a, b) => serviceLabel(a).label.localeCompare(serviceLabel(b).label) || a.path.localeCompare(b.path)),
+      rows: [...byKind.get(pack)].sort(compare),
     }));
   }
   const known = SERVICE_GROUP_ORDER.filter((k) => byKind.has(k));
   const rest = [...byKind.keys()].filter((k) => !SERVICE_GROUP_ORDER.includes(k)).sort();
   return [...known, ...rest].map((kind) => ({
     key: kind, kind, groupBy: "kind", label: serviceGroupLabel(kind),
-    rows: [...byKind.get(kind)].sort((a, b) => a.path.localeCompare(b.path)),
+    rows: [...byKind.get(kind)].sort(compare),
   }));
 }
 
@@ -2074,9 +2105,12 @@ function groupServices(rows, groupBy = "kind") {
  *  own tree item shows: the server's own text first, falling back to the
  *  row's name or its path when a row carries no text at all -- the path
  *  always goes in `description`, never folded into the label itself. */
-function serviceLabel(row) {
-  const label = row.text !== undefined && row.text !== "" ? row.text : (row.name ?? row.path);
-  return {label, description: row.path};
+function serviceLabel(row, labelBy = "name") {
+  const name = serviceTechnicalName(row);
+  const description = row.text || name;
+  return labelBy === "description"
+    ? {label: description, description: name === description ? "" : name}
+    : {label: name, description: description === name ? "" : description};
 }
 
 /** `osd-service-<kind>`, lower-cased -- one contextValue per kind so
@@ -2442,7 +2476,7 @@ function serviceDetailsHtml(details, nonce = "") {
   const row = details?.row ?? {};
   const esc = htmlEscape;
   const attr = htmlAttrEscape;
-  const heading = serviceLabel(row).label;
+  const heading = serviceLabel(row, "description").label;
   const sourceButton = (role, label, source) => source?.path
     ? `<button type="button" data-source="${attr(role)}">${esc(label)}</button> <code>${esc(source.path)}</code>`
     : `<span class="muted">${esc(label)} source unavailable</span>`;
@@ -2515,7 +2549,7 @@ module.exports = {unitRiskOf, unitDurationOf, unitSchedule, runUnitQueue, unitPo
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
   demoFailureObjects,
   progTcodeOf, webguiTransactionUrl, webguiPanelHtml, runWebguiPanel, progRunLens,
-  SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
+  SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel, uniqueServices,
   serviceContextValue, serviceActionContext, normalizeTransactionRow, transactionDetailsModel, classifyTransactionClick,
   transactionDetailsHtml, appManifestDetails, httpTestFiles, closureTestNames, dumpsForService,
   implementationMethodLine, serviceCardModel, serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
