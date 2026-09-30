@@ -1,6 +1,9 @@
 // Property documents observed on the program and CDS base resources.
 // They are different representations from /objectstructure. Publish source
-// and package links we can serve, not SAP-only history/GUI/enhancement links.
+// and package links we can serve, not SAP-only GUI/enhancement links. The
+// versions link is served (tools/adt-versions.mjs) and sits first, where the
+// recorded A4H corpus has it: source/main/versions on a program, versions
+// on a CDS source; no type, title or adtcore attribute.
 const escape = (value) => String(value ?? "").replaceAll("&", "&amp;")
   .replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 
@@ -39,7 +42,7 @@ ${intf ? ' xmlns:abapoo="http://www.sap.com/adt/oo"' : ""}
  adtcore:createdBy="${who}" adtcore:changedBy="${who}" adtcore:responsible="${who}"
  abapsource:sourceUri="source/main" abapsource:fixPointArithmetic="${program || intf}"
  abapsource:activeUnicodeCheck="${program || intf}">
-  <atom:link href="source/main" rel="http://www.sap.com/adt/relations/source" type="text/plain"/>
+${program || !intf ? `  <atom:link href="${program ? "source/main/versions" : "versions"}" rel="http://www.sap.com/adt/relations/versions"/>\n` : ""}  <atom:link href="source/main" rel="http://www.sap.com/adt/relations/source" type="text/plain"/>
   <adtcore:packageRef adtcore:name="${escape(object.package)}" adtcore:type="DEVC/K"
    adtcore:uri="/sap/bc/adt/packages/${encodeURIComponent(String(object.package ?? "").toLowerCase())}"/>
 ${program || intf ? `  <abapsource:syntaxConfiguration><abapsource:language>

@@ -38,9 +38,43 @@ lv_old = zcl_osd_versions=>source_at( iv_type = `CLAS` iv_name = `ZCL_X`
 
 A host without an object store raises `ZCX_OSD_VERSIONS` with "no object store here". That covers a system without the `STORE` destination and a built binary without its tree.
 
+## The ADT versions feed
+
+Eclipse's Revision History and "Compare With", and vsp's revisions, read the
+same git history over ADT (`tools/adt-versions.mjs`, routes in
+`tools/adt-facade.mjs`).
+
+- **Where.** A program, include, function module or other source:
+  `<object>/source/main/versions`. A class, per include:
+  `<class>/includes/<main|definitions|implementations|macros|testclasses>/versions`,
+  and an interface at `includes/main/versions` (where vsp asks). A CDS source
+  also answers at `<object>/versions`.
+- **Linked where A4H links it.** The program document and each class include
+  carry `<atom:link href="…/versions" rel="http://www.sap.com/adt/relations/versions"/>`
+  as their first link, with no type, title or `adtcore` attribute; a CDS source
+  links `versions`. This placement is read off the recorded A4H corpus.
+- **Numbering, as measured on A4H** (a local object has one version, 00000,
+  the active source, dated at its last activation). Here:
+  - `00000` is the working tree. Its date and author are the last commit's when
+    the file is unchanged since, otherwise the file's modification time and the
+    system's user.
+  - Each commit that changed the file is `00001`..`n`, oldest first, so a number
+    stays with its commit as history grows. The title is the commit subject.
+  - An object git has no history for has `00000` only, the way a local object
+    on a system does, and the response says why in `X-OSD-History`.
+- **Each version** reads back at `<feed>/<yyyymmddhhmmss>/<nnnnn>/content` as
+  `text/plain`: the URI shape A4H writes. The timestamp segment is informational;
+  the number selects the version. A number the feed does not list is 404, never
+  the active source.
+- **Not yet checked against a raw A4H capture.** The feed's XML is built from
+  what the clients read (abap-adt-api: `atom:content@src`, `atom:title`,
+  `atom:updated`, `atom:author/atom:name`; vsp: also `atom:id`) and the facts a
+  probe returned through vsp. The recorded corpus has the links but no feed and
+  no content exchange. No transport link is written, since the facade serves no
+  transport requests and a link that 404s is worse than none.
+
 ## Next, on the same service
 
-- **ADT versions feed.** `.../source/main/versions`, so Revision History and "Compare with…" work in Eclipse and vsp.
-- **`SVRS_*` substitutes.** `SVRS_GET_VERSION_DIRECTORY_46` and `SVRS_GET_REPS_FROM_OBJECT` return VRSD-shaped rows: the short SHA in `KORRNUM`, version 00000 as the active one. Their signatures are measured on A4H first, and they are built on the lazy table providers once that ADR is accepted.
+- **`SVRS_*` substitutes.** `SVRS_GET_VERSION_DIRECTORY_46` and `SVRS_GET_REPS_FROM_OBJECT` return VRSD-shaped rows: version 00000 as the active one, commits as 00001..n like the feed, the short SHA in `KORRNUM` (A4H writes `LOCAL` there for a local object), `VERSMODE` `U`. They are built on the lazy table providers once that ADR is accepted.
 
-Tests: `test/store-history.mjs` (Node), `store_history_test.go` (Go), and `test/unit/zcl_osd_versions_test` (ABAP, on both hosts).
+Tests: `test/store-history.mjs` and `test/adt-versions.mjs` (Node), `store_history_test.go` (Go), and `test/unit/zcl_osd_versions_test` (ABAP, on both hosts).
