@@ -409,8 +409,21 @@ export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DD
     const reads = syntax.spaghetti.listReadPositions(name);
     const inStatement = (ref, st) => !ref.getStart().isBefore(st.getStart()) && !ref.getStart().isAfter(st.getEnd());
     const tokens = (st) => st.getTokens().map((t) => t.getStr().toLowerCase());
+    const sysField = (ts, field) => ts.some((t, i) => t === "sy" && ts[i + 1] === "-" && ts[i + 2] === field);
+    // The prefetch reads every row's key before the loop, so the loop table
+    // may not be touched anywhere in the body: a write through it, even after
+    // the read, can change the key of a later row (conservative: any mention)
+    for (const st of body.filter((_, i) => i !== position)) {
+      if (tokens(st).includes(table)) {
+        throw new Refusal("key not written before the read", `${st.concatTokens()} touches the loop table ${table}`);
+      }
+    }
     for (const st of body.slice(0, position)) {
       const ts = tokens(st);
+      // the prefetch sets sy-subrc and sy-dbcnt before the loop starts
+      if (sysField(ts, "subrc") || sysField(ts, "dbcnt")) {
+        throw new Refusal("system fields before the read", `${st.concatTokens()} reads a system field the prefetch sets`);
+      }
       if ((st.get() instanceof Statements.Assign && ts.includes(row))
         || (st.get() instanceof Statements.ModifyInternal && ts.includes(table))) {
         throw new Refusal("key not written before the read", `${st.concatTokens()} may alias or modify the key`);

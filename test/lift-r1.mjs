@@ -423,6 +423,19 @@ ENDCLASS.`);
     });
   }
 
+  // merge critic on #290: the loop table written through a table expression,
+  // and system fields read before the lookup, were accepted
+  for (const [what, extra, reason] of [
+    ["the loop table written in the body", "      ct_rows[ 1 ]-kind = 'DIFF'.", /^key not written before the read: .*touches the loop table ct_rows/],
+    ["sy-dbcnt read before the lookup", "      <ls_row>-text = sy-dbcnt.", /^system fields before the read: /],
+    ["sy-subrc read before the lookup", "      IF sy-subrc = 0. ENDIF.", /^system fields before the read: /],
+  ]) {
+    it(`R1b refuses ${what}`, () => {
+      const source = fixture(`${extra}\n${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`);
+      expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(reason);
+    });
+  }
+
   it("the generated region of AFTER is exactly what the template renders", async () => {
     const {text, trace} = await render(modelR1(DEMO, "before"));
     expect(region(readFileSync(DEMO, "utf8"))).to.equal(text);
