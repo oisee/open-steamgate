@@ -46,6 +46,21 @@ func TestCmpDataA4HFacts(t *testing.T) {
 		{"x'0010' = f16", gx("\x00\x10", 2), gf(16), 0},
 		{"x'0010' = p16.00", gx("\x00\x10", 2), gp("16.00"), 0},
 		{"x'AB' = x(2)'AB00'", gx("\xab", 1), gx("\xab\x00", 2), 0},
+		// probe 2: longer x fields drop their leading bytes, the last 8
+		// (int8) or 4 (i, and p / f through the i value) read signed
+		{"x(9)'01..00' = int8 0", gx("\x01\x00\x00\x00\x00\x00\x00\x00\x00", 9), gi8(0), 0},
+		{"x(9)'01..00' = i 0", gx("\x01\x00\x00\x00\x00\x00\x00\x00\x00", 9), gi(0), 0},
+		{"x(9)'..01' = int8 1", gx("\x00\x00\x00\x00\x00\x00\x00\x00\x01", 9), gi8(1), 0},
+		{"x(5)'0100000000' = i 0", gx("\x01\x00\x00\x00\x00", 5), gi(0), 0},
+		{"x(5)'..01' = i 1", gx("\x00\x00\x00\x00\x01", 5), gi(1), 0},
+		{"x'FFFFFFFF' = i -1", gx("\xff\xff\xff\xff", 4), gi(-1), 0},
+		{"x(9)'01..00' = p 0", gx("\x01\x00\x00\x00\x00\x00\x00\x00\x00", 9), gpn("0", 8, 0), 0},
+		{"x(5)'01..00' = p 0", gx("\x01\x00\x00\x00\x00", 5), gpn("0", 8, 0), 0},
+		{"x(5)'01..00' = f 0", gx("\x01\x00\x00\x00\x00", 5), gf(0), 0},
+		{"x(5)'..10' = p 16", gx("\x00\x00\x00\x00\x10", 5), gpn("16", 8, 0), 0},
+		// probe 2: n against x as exact numbers, never cut to an int64
+		{"n(20)'9..9' > x'00'", gnn("99999999999999999999"), gx("\x00", 1), 1},
+		{"n'00016' = x'0010'", gnn("00016"), gx("\x00\x10", 2), 0},
 		// d and t with numbers; d with c
 		{"d'20260101' < i20260101", gd("20260101"), gi(20260101), -1},
 		{"d'20260101' = i739618", gd("20260101"), gi(739618), 0},

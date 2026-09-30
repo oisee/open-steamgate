@@ -120,8 +120,7 @@ func CmpData(a, b Data) int {
 	case isByte(kb) && (ka == 'C' || ka == 'g'):
 		return strings.Compare(*a.P.(*string), XToHex(*b.P.(*string)))
 	case isByte(ka) && kb == 'N', isByte(kb) && ka == 'N':
-		x, y := byteOrNum(a), byteOrNum(b)
-		return sign3(x < y, x > y)
+		return CmpP(byteOrN(a), byteOrN(b))
 	case isNum(ka) && isNum(kb):
 		if ka == 'F' || kb == 'F' {
 			x, y := dataF(a), dataF(b)
@@ -140,10 +139,10 @@ func CmpData(a, b Data) int {
 	panic(NotCompiled("comparison", "a generic value of type kind "+string(ka)+" with one of type kind "+string(kb)))
 }
 
-func isStruct(k byte) bool  { return k == 'u' || k == 'v' }
-func isNum(k byte) bool     { return k == 'I' || k == '8' || k == 'P' || k == 'F' }
-func isByte(k byte) bool    { return k == 'X' || k == 'y' }
-func isText(k byte) bool    { return k == 'C' || k == 'g' || k == 'D' || k == 'T' }
+func isStruct(k byte) bool { return k == 'u' || k == 'v' }
+func isNum(k byte) bool    { return k == 'I' || k == '8' || k == 'P' || k == 'F' }
+func isByte(k byte) bool   { return k == 'X' || k == 'y' }
+func isText(k byte) bool   { return k == 'C' || k == 'g' || k == 'D' || k == 'T' }
 
 // textOf: a d or t never set (a structure field, "") as its zeros
 func textOf(d Data) string {
@@ -159,27 +158,14 @@ func textOf(d Data) string {
 	return v
 }
 
-// byteOrNum: a byte operand's last four bytes as a signed i (00 on the
-// left), or the number an i, int8 or n holds
-func byteOrNum(d Data) int64 {
-	switch d.T.Kind {
-	case 'X', 'y':
-		b := *d.P.(*string)
-		if len(b) > 4 {
-			b = b[len(b)-4:]
-		}
-		var u uint32
-		for i := 0; i < len(b); i++ {
-			u = u<<8 | uint32(b[i])
-		}
-		return int64(int32(u))
-	case 'I':
-		return int64(*d.P.(*int32))
-	case '8':
-		return *d.P.(*int64)
+// byteOrN: of an x or xstring against an n, the x's last four bytes as a
+// signed i, and the n's digits as an exact number, however many (A4H:
+// n(20)'99999999999999999999' > x'00', n'00016' = x'0010')
+func byteOrN(d Data) string {
+	if isByte(d.T.Kind) {
+		return strconv.FormatInt(bytesInt(*d.P.(*string), 'I'), 10)
 	}
-	v, _ := strconv.ParseInt(pText(pParse(DataP(d))), 10, 64)
-	return v
+	return DataP(d)
 }
 
 func dataF(d Data) float64 {

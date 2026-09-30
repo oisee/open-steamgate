@@ -12,7 +12,7 @@ func toNumber(k byte) bool {
 }
 
 // cmpAsNumber compares the numeric n with o converted to n's type: a c,
-// string or n by its text (i5 = s'4.9', rounded; i0 = c''), an x by its
+// string or n by its text (i5 = s'4.9', rounded; i0 = c”), an x by its
 // bytes as an integer, a d as its days since 00010101 (d'20260101' =
 // i739618), a t as its seconds (t'000010' = i10).
 func cmpAsNumber(n, o Data) int {
