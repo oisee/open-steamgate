@@ -102,12 +102,18 @@ let DESCS = new Map();
 let NAMED = new Map();
 let STRUCTDEFS = new Map();
 let HELPER_IMPORTS = new Set();
-/** a host function named <package>.<Name> outside package abap: its package
- * (tools/gogen/go/<package>) is imported by the program that calls it */
-function helperImport(fn) {
-  const pkg = /^([a-z][a-z0-9]*)\./.exec(fn ?? "")?.[1];
-  if (pkg !== undefined && pkg !== "abap") HELPER_IMPORTS.add(pkg);
-}
+// A helper package is imported under an alias ident() can never produce (a
+// lower-case first letter and an inner capital), so an ABAP local or
+// parameter of the same name cannot shadow it: `tstmp` in CL_ABAP_TSTMP did.
+const helperAlias = (name) => `h${name[0].toUpperCase()}${name.slice(1)}`;
+// a host function named pkg.Fn (frontend NATIVE / KERNEL rows): pkg other than
+// abap is a helper package, imported and called through its alias
+const helperFn = (fn) => {
+  const m = /^([a-z][a-z0-9]*)\.(\w+)$/.exec(fn);
+  if (!m || m[1] === "abap") return fn;
+  HELPER_IMPORTS.add(m[1]);
+  return `${helperAlias(m[1])}.${m[2]}`;
+};
 function needsCopy(t) {
   if (t?.k === "table") return true;
   if (t?.k === "struct") return (STRUCTDEFS.get(t.go)?.fields ?? []).some((f) => needsCopy(f.type));
@@ -408,7 +414,7 @@ export function emitGo(program, pkg = "main", layers = null) {
   // a RESET line becomes a //line back to this file at the line after it
   for (let i = 0; i < out.length; i += 1) if (out[i] === RESET) out[i] = `//line zz_generated.go:${i + 2}`;
   out[out.indexOf("\u0000helper-imports")] = [...HELPER_IMPORTS].sort()
-    .map((name) => `\t"osg/gogen/${name}"`).join("\n");
+    .map((name) => `\t${helperAlias(name)} "osg/gogen/${name}"`).join("\n");
   const generated = out.join("\n") + "\n";
   // ident() is also used by the JS emitter in this process. A layered Go
   // emission must not change its spelling for the next consumer.
@@ -1135,7 +1141,7 @@ function stmtLines(st, ctx, d) {
     case "assign":
       if (st.target.e === "substr_target") {
         HELPER_IMPORTS.add("subwrite");
-        return [`${t}${place(st.target.base, ctx)} = subwrite.X(${expr(st.target.base, ctx)}, ${st.target.off ? expr(st.target.off, ctx) : "0"}, ${expr(st.target.len, ctx)}, ${expr(st.value, ctx)})`];
+        return [`${t}${place(st.target.base, ctx)} = hSubwrite.X(${expr(st.target.base, ctx)}, ${st.target.off ? expr(st.target.off, ctx) : "0"}, ${expr(st.target.len, ctx)}, ${expr(st.value, ctx)})`];
       }
       if (ctx.builders?.has(st.target.name) && isAppend(st, st.target.name)) {
         const parts = [];
@@ -1301,7 +1307,7 @@ function stmtLines(st, ctx, d) {
     case "call_fm": {
       // CALL FUNCTION of a module the host implements (frontend NATIVE_FM):
       // every actual as generic data, the module's classic exceptions by name
-      const call = `${st.fn}(s, map[string]abap.Data{${st.args.map((x) => `${JSON.stringify(x.name)}: ${expr(x.value, ctx)}`).join(", ")}})`;
+      const call = `${helperFn(st.fn)}(s, map[string]abap.Data{${st.args.map((x) => `${JSON.stringify(x.name)}: ${expr(x.value, ctx)}`).join(", ")}})`;
       if (!st.exceptions) return [`${t}${call}`];
       const m = Object.entries(st.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
       return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(st.name)}, map[string]int32{${m}}, ${st.exceptions.others})`,
@@ -1309,21 +1315,19 @@ function stmtLines(st, ctx, d) {
     }
     case "native": {
       const m = ctx.method;
-      helperImport(st.fn);
       // a host function with arguments of its own (frontend NATIVE / KERNEL):
       // "&" places are pointers it writes; a kernel line inside a body (stmt)
       // returns nothing
       if (st.args) {
-        const call = `${st.fn}(${["s", ...st.args.map((a) => (a.ref ? `&${place(a.value, ctx)}` : expr(a.value, ctx)))].join(", ")})`;
+        const call = `${helperFn(st.fn)}(${["s", ...st.args.map((a) => (a.ref ? `&${place(a.value, ctx)}` : expr(a.value, ctx)))].join(", ")})`;
         return [`${t}${!st.stmt && m.returning ? "return " : ""}${call}`];
       }
-      return [`${t}${m.returning ? "return " : ""}${st.fn}(${["s", ...(st.me ? ["me"] : []), ...m.params.map((p) => ident(p.name))].join(", ")})`];
+      return [`${t}${m.returning ? "return " : ""}${helperFn(st.fn)}(${["s", ...(st.me ? ["me"] : []), ...m.params.map((p) => ident(p.name))].join(", ")})`];
     }
     // a JavaScript for (...) { of kernel code, as a range over what the host
     // function returns; each pair is written to the binds before the body
     case "kernel_loop":
-      helperImport(st.fn);
-      return [`${t}for _, kv := range ${st.fn}(${["s", ...st.args.map((a) => (a.ref ? `&${place(a.value, ctx)}` : expr(a.value, ctx)))].join(", ")}) {`,
+      return [`${t}for _, kv := range ${helperFn(st.fn)}(${["s", ...st.args.map((a) => (a.ref ? `&${place(a.value, ctx)}` : expr(a.value, ctx)))].join(", ")}) {`,
         ...st.binds.map((b, i) => `${t}\t${place(b, ctx)} = kv[${i}]`),
         ...st.body.flatMap((x) => stmt(x, ctx, d + 1)), `${t}}`];
     case "raise":
@@ -1576,7 +1580,7 @@ ${t}	}`));
       HELPER_IMPORTS.add("shiftleft");
       const p = place(st.target, ctx);
       const mask = st.maskLen !== undefined ? `abap.PadC(${expr(st.mask, ctx)}, ${st.maskLen})` : expr(st.mask, ctx);
-      return [`${t}${p} = shiftleft.Leading(${p}, ${mask})`];
+      return [`${t}${p} = hShiftleft.Leading(${p}, ${mask})`];
     }
     // CONCATENATE ... IN BYTE MODE into an xstring (ultra/packs): the bytes
     // joined, the operands read before the target is written
@@ -1928,7 +1932,7 @@ function expr(e, ctx) {
       if (e.op === "**") return `abap.PowF(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       return `(${expr(e.l, ctx)} ${e.op} ${expr(e.r, ctx)})`;
     case "conv": return conv(e, ctx);
-    case "date_add": HELPER_IMPORTS.add("datearith"); return `datearith.Add(${expr(e.date, ctx)}, ${e.subtract ? "-" : ""}${expr(e.days, ctx)})`;
+    case "date_add": HELPER_IMPORTS.add("datearith"); return `hDatearith.Add(${expr(e.date, ctx)}, ${e.subtract ? "-" : ""}${expr(e.days, ctx)})`;
     case "sorted_move": {
       const names = e.keys.map((k) => ident(k));
       const less = names.map((k) => `if x.${k} != y.${k} { return x.${k} < y.${k} }`).join("; ");
@@ -1943,8 +1947,8 @@ function expr(e, ctx) {
     case "exc_class": return `("\\\\CLASS=" + ${expr(e.x, ctx)}.Class)`;
     case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr(e.max, ctx)})`;
     case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
-    case "find_occ": HELPER_IMPORTS.add("charsearch"); return `charsearch.FindOcc(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${expr(e.occ, ctx)})`;
-    case "reverse": HELPER_IMPORTS.add("charsearch"); return `charsearch.Reverse(${expr(e.x, ctx)})`;
+    case "find_occ": HELPER_IMPORTS.add("charsearch"); return `hCharsearch.FindOcc(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${expr(e.occ, ctx)})`;
+    case "reverse": HELPER_IMPORTS.add("charsearch"); return `hCharsearch.Reverse(${expr(e.x, ctx)})`;
     case "xstrlen": return `int32(len(${expr(e.x, ctx)}))`;
     case "uccpi": return `abap.Uccpi(${expr(e.x, ctx)})`;
     case "substr": {
@@ -2123,7 +2127,7 @@ function cond(c, ctx) {
       return `func() bool { rows${n} := ${expr(c.range, ctx)}; hasI${n}, hit${n} := false, false; for _, r${n} := range rows${n} { match${n} := false; switch r${n}.${ident("OPTION")} { case "EQ": match${n} = ${expr(c.value, ctx)} == r${n}.${ident("LOW")}; case "BT": match${n} = ${expr(c.value, ctx)} >= r${n}.${ident("LOW")} && ${expr(c.value, ctx)} <= r${n}.${ident("HIGH")}; default: panic(abap.NotCompiled("IN range", "selection option other than EQ or BT")) }; if r${n}.${ident("SIGN")} == "I" { hasI${n} = true; if match${n} { hit${n} = true } } else if r${n}.${ident("SIGN")} == "E" { if match${n} { return false } } else { panic(abap.NotCompiled("IN range", "selection sign other than I or E")) } }; return !hasI${n} || hit${n} }()`;
     }
     case "co": return `abap.CO(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
-    case "cs": HELPER_IMPORTS.add("charsearch"); return `charsearch.WithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
+    case "cs": HELPER_IMPORTS.add("charsearch"); return `hCharsearch.WithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp":
