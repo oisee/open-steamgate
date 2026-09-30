@@ -358,12 +358,21 @@ CLASS zcl_stg_json IMPLEMENTATION.
       ENDIF.
       cv_off = cv_off + 1.
       IF lv_stack IS INITIAL AND ( iv_json+lv_start(1) = '{' OR iv_json+lv_start(1) = '[' ).
-        RETURN.
+        EXIT.
       ENDIF.
     ENDWHILE.
     IF lv_stack IS NOT INITIAL.
       RAISE EXCEPTION TYPE zcx_stg_error
         EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Unclosed JSON value'.
+    ENDIF.
+    IF iv_json+lv_start(1) = '{'.
+      lv_off = cv_off - lv_start.
+      lv_token = iv_json+lv_start(lv_off).
+      parse_object( lv_token ).
+    ELSEIF iv_json+lv_start(1) = '['.
+      lv_off = cv_off - lv_start.
+      lv_token = iv_json+lv_start(lv_off).
+      parse_array( lv_token ).
     ENDIF.
     IF iv_json+lv_start(1) <> '{' AND iv_json+lv_start(1) <> '['.
       lv_off = cv_off - lv_start.

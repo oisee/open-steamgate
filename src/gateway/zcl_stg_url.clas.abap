@@ -93,10 +93,10 @@ CLASS zcl_stg_url IMPLEMENTATION.
     IF lv_off < strlen( lv_rest ) AND lv_rest+lv_off(1) = '/'.
       lv_off = lv_off + 1.
       IF lv_off < strlen( lv_rest ).
-        IF lv_rest+lv_off = '$count'.
+        IF lv_rest+lv_off = '$count' OR lv_rest+lv_off = '$count/'.
           rs_request-is_count = abap_true.
           lv_off = strlen( lv_rest ).
-        ELSEIF lv_rest+lv_off = '$value'.
+        ELSEIF lv_rest+lv_off = '$value' OR lv_rest+lv_off = '$value/'.
           rs_request-is_value = abap_true.
           lv_off = strlen( lv_rest ).
         ELSE.
@@ -105,10 +105,10 @@ CLASS zcl_stg_url IMPLEMENTATION.
                    CHANGING cv_off = lv_off ).
           IF lv_off < strlen( lv_rest ) AND lv_rest+lv_off(1) = '/'.
             lv_off = lv_off + 1.
-            IF lv_rest+lv_off = '$count'.
+            IF lv_rest+lv_off = '$count' OR lv_rest+lv_off = '$count/'.
               rs_request-is_count = abap_true.
               lv_off = strlen( lv_rest ).
-            ELSEIF lv_rest+lv_off = '$value'.
+            ELSEIF lv_rest+lv_off = '$value' OR lv_rest+lv_off = '$value/'.
               rs_request-is_value = abap_true.
               lv_off = strlen( lv_rest ).
             ENDIF.

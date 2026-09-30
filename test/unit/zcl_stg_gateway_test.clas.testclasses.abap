@@ -3,6 +3,7 @@ CLASS ltcl_url DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS entity_set FOR TESTING RAISING cx_static_check.
     METHODS entity_with_key FOR TESTING RAISING cx_static_check.
     METHODS count FOR TESTING RAISING cx_static_check.
+    METHODS count_value_trailing_slash FOR TESTING RAISING cx_static_check.
     METHODS metadata_and_root FOR TESTING RAISING cx_static_check.
     METHODS keys_named FOR TESTING RAISING cx_static_check.
     METHODS quoted_key FOR TESTING RAISING cx_static_check.
@@ -135,6 +136,16 @@ CLASS ltcl_url IMPLEMENTATION.
                                         exp = abap_true ).
   ENDMETHOD.
 
+  METHOD count_value_trailing_slash.
+    DATA ls_request TYPE zcl_stg_url=>ty_request.
+    ls_request = zcl_stg_url=>parse( '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet/$count/' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-is_count exp = abap_true ).
+    ls_request = zcl_stg_url=>parse( '/sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet(''T0001'')/$value/' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-is_value exp = abap_true ).
+    ls_request = zcl_stg_url=>parse( '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(''T0001'')/to_Bookings/$count/' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-is_count exp = abap_true ).
+  ENDMETHOD.
+
   METHOD metadata_and_root.
     DATA ls_request TYPE zcl_stg_url=>ty_request.
 
@@ -170,6 +181,7 @@ CLASS ltcl_json DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS escape FOR TESTING RAISING cx_static_check.
     METHODS surrogate FOR TESTING RAISING cx_static_check.
     METHODS number_and_nested FOR TESTING RAISING cx_static_check.
+    METHODS malformed_nested FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_json IMPLEMENTATION.
@@ -229,6 +241,22 @@ CLASS ltcl_json IMPLEMENTATION.
     TRY.
         zcl_stg_json=>parse_array( '[{"N":1}' ).
         cl_abap_unit_assert=>fail( 'array must close' ).
+      CATCH zcx_stg_error INTO lx_error.
+        cl_abap_unit_assert=>assert_equals( act = lx_error->status exp = 400 ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD malformed_nested.
+    DATA lx_error TYPE REF TO zcx_stg_error.
+    TRY.
+        zcl_stg_json=>parse_object( '{"Child":{"N":01}}' ).
+        cl_abap_unit_assert=>fail( 'nested leading zero must be rejected' ).
+      CATCH zcx_stg_error INTO lx_error.
+        cl_abap_unit_assert=>assert_equals( act = lx_error->status exp = 400 ).
+    ENDTRY.
+    TRY.
+        zcl_stg_json=>parse_array( '[{"N":1,}]' ).
+        cl_abap_unit_assert=>fail( 'nested trailing comma must be rejected' ).
       CATCH zcx_stg_error INTO lx_error.
         cl_abap_unit_assert=>assert_equals( act = lx_error->status exp = 400 ).
     ENDTRY.
@@ -885,6 +913,9 @@ CLASS ltcl_batch DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINA
     METHODS changeset_ok FOR TESTING RAISING cx_static_check.
     METHODS changeset_fails_as_a_whole FOR TESTING RAISING cx_static_check.
     METHODS boundary_missing_is_400 FOR TESTING RAISING cx_static_check.
+    METHODS folded_headers FOR TESTING RAISING cx_static_check.
+    METHODS lf_only FOR TESTING RAISING cx_static_check.
+    METHODS media_mime_in_changeset FOR TESTING RAISING cx_static_check.
 
     METHODS crlf
       IMPORTING
@@ -1067,6 +1098,52 @@ CLASS ltcl_batch IMPLEMENTATION.
                                                 iv_content_type = 'text/plain' ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status
                                         exp = 400 ).
+  ENDMETHOD.
+
+  METHOD folded_headers.
+    DATA lt_parts TYPE zcl_stg_batch=>ty_parts.
+    DATA ls_part TYPE zcl_stg_batch=>ty_part.
+    DATA ls_request TYPE zcl_stg_batch=>ty_request.
+    DATA ls_header TYPE ihttpnvp.
+    DATA lv_body TYPE string.
+    lv_body = crlf( `--b|Content-Type: application/http| X-Test: ignored||GET TravelSet HTTP/1.1|Accept: application/| json|` &&
+                    cl_abap_char_utilities=>horizontal_tab && `more|||--b--|` ).
+    lt_parts = zcl_stg_batch=>parse( iv_body = lv_body iv_boundary = 'b' ).
+    READ TABLE lt_parts INDEX 1 INTO ls_part.
+    READ TABLE ls_part-requests INDEX 1 INTO ls_request.
+    READ TABLE ls_request-headers WITH KEY name = 'accept' INTO ls_header.
+    cl_abap_unit_assert=>assert_equals( act = ls_header-value exp = 'application/ json more' ).
+  ENDMETHOD.
+
+  METHOD lf_only.
+    DATA lt_parts TYPE zcl_stg_batch=>ty_parts.
+    DATA ls_part TYPE zcl_stg_batch=>ty_part.
+    DATA ls_request TYPE zcl_stg_batch=>ty_request.
+    DATA lv_body TYPE string.
+    lv_body = `--b` && cl_abap_char_utilities=>newline &&
+              `Content-Type: application/http` && cl_abap_char_utilities=>newline &&
+              cl_abap_char_utilities=>newline && `GET TravelSet HTTP/1.1` &&
+              cl_abap_char_utilities=>newline && cl_abap_char_utilities=>newline &&
+              cl_abap_char_utilities=>newline && `--b--` && cl_abap_char_utilities=>newline.
+    lt_parts = zcl_stg_batch=>parse( iv_body = lv_body iv_boundary = 'b' ).
+    READ TABLE lt_parts INDEX 1 INTO ls_part.
+    READ TABLE ls_part-requests INDEX 1 INTO ls_request.
+    cl_abap_unit_assert=>assert_equals( act = ls_request-method exp = 'GET' ).
+  ENDMETHOD.
+
+  METHOD media_mime_in_changeset.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lv_body TYPE string.
+    lv_body = crlf( `--b|Content-Type: multipart/mixed; boundary=cs||--cs|Content-Type: application/http||` &&
+                    `PUT PhotoSet('T0002')/$value HTTP/1.1|Content-Type: image/jpeg||JPEG|--cs--||--b--|` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'POST'
+                                                iv_path = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/$batch'
+                                                iv_body = lv_body
+                                                iv_content_type = 'multipart/mixed; boundary=b' ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'HTTP/1.1 204 No Content' ) ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path = '/sap/opu/odata/sap/ZSTG_DEMO_SRV/PhotoSet(''T0002'')/$value' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-content_type exp = 'image/jpeg' ).
   ENDMETHOD.
 
 ENDCLASS.

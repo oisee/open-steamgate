@@ -192,9 +192,9 @@ CLASS zcl_stg_batch IMPLEMENTATION.
       lv_valid = abap_false.
       IF lv_pos = 0.
         lv_valid = abap_true.
-      ELSEIF lv_pos >= 2.
-        lv_end = lv_pos - 2.
-        IF iv_body+lv_end(2) = '0D0A'.
+      ELSE.
+        lv_end = lv_pos - 1.
+        IF iv_body+lv_end(1) = '0A'.
           lv_valid = abap_true.
         ENDIF.
       ENDIF.
@@ -209,9 +209,13 @@ CLASS zcl_stg_batch IMPLEMENTATION.
       WHILE lv_after < lv_len AND ( iv_body+lv_after(1) = '20' OR iv_body+lv_after(1) = '09' ).
         lv_after = lv_after + 1.
       ENDWHILE.
-      IF lv_after + 1 >= lv_len.
+      IF lv_after >= lv_len.
         lv_valid = abap_false.
-      ELSEIF iv_body+lv_after(2) <> '0D0A'.
+      ELSEIF iv_body+lv_after(1) = '0A'.
+        lv_after = lv_after + 1.
+      ELSEIF lv_after + 1 < lv_len AND iv_body+lv_after(2) = '0D0A'.
+        lv_after = lv_after + 2.
+      ELSE.
         lv_valid = abap_false.
       ENDIF.
       IF lv_valid = abap_false.
@@ -219,7 +223,13 @@ CLASS zcl_stg_batch IMPLEMENTATION.
         CONTINUE.
       ENDIF.
       IF lv_start > 0.
-        lv_end = lv_pos - 2.
+        lv_end = lv_pos - 1.
+        IF lv_end > lv_start.
+          lv_slice_len = lv_end - 1.
+          IF iv_body+lv_slice_len(1) = '0D'.
+            lv_end = lv_end - 1.
+          ENDIF.
+        ENDIF.
         IF lv_end >= lv_start.
           lv_slice_len = lv_end - lv_start.
           APPEND iv_body+lv_start(lv_slice_len) TO rt_chunks.
@@ -228,7 +238,7 @@ CLASS zcl_stg_batch IMPLEMENTATION.
       IF lv_closing = abap_true.
         RETURN.
       ENDIF.
-      lv_start = lv_after + 2.
+      lv_start = lv_after.
       lv_scan = lv_start.
     ENDWHILE.
     RAISE EXCEPTION TYPE zcx_stg_error
@@ -241,9 +251,11 @@ CLASS zcl_stg_batch IMPLEMENTATION.
     DATA ls_hdr   TYPE ihttpnvp.
     DATA lv_index TYPE i.
     DATA lv_head TYPE string.
-    DATA lv_sep TYPE xstring VALUE '0D0A0D0A'.
+    DATA lv_sep_len TYPE i.
     DATA lv_colon TYPE i.
     DATA lv_head_x TYPE xstring.
+    DATA lv_first TYPE c LENGTH 1.
+    DATA lv_trim TYPE string.
 
     CLEAR et_headers.
     CLEAR ev_rest.
@@ -251,13 +263,21 @@ CLASS zcl_stg_batch IMPLEMENTATION.
       ev_rest = iv_chunk+2.
       RETURN.
     ENDIF.
-    WHILE lv_index + 4 <= xstrlen( iv_chunk ).
-      IF iv_chunk+lv_index(4) = lv_sep.
+    IF xstrlen( iv_chunk ) >= 1 AND iv_chunk(1) = '0A'.
+      ev_rest = iv_chunk+1.
+      RETURN.
+    ENDIF.
+    WHILE lv_index + 2 <= xstrlen( iv_chunk ).
+      IF lv_index + 4 <= xstrlen( iv_chunk ) AND iv_chunk+lv_index(4) = '0D0A0D0A'.
+        lv_sep_len = 4.
+        EXIT.
+      ELSEIF iv_chunk+lv_index(2) = '0A0A'.
+        lv_sep_len = 2.
         EXIT.
       ENDIF.
       lv_index = lv_index + 1.
     ENDWHILE.
-    IF lv_index + 4 > xstrlen( iv_chunk ).
+    IF lv_sep_len = 0.
       RAISE EXCEPTION TYPE zcx_stg_error
         EXPORTING status = 400 code = 'STG/BAD_BATCH' message = 'Missing multipart header separator'.
     ENDIF.
@@ -267,6 +287,25 @@ CLASS zcl_stg_batch IMPLEMENTATION.
       WITH cl_abap_char_utilities=>newline.
     SPLIT lv_head AT cl_abap_char_utilities=>newline INTO TABLE lt_lines.
     LOOP AT lt_lines INTO lv_line.
+      IF lv_line IS NOT INITIAL.
+        lv_first = lv_line(1).
+        IF lv_first = space OR lv_first = cl_abap_char_utilities=>horizontal_tab.
+          IF et_headers IS INITIAL.
+            RAISE EXCEPTION TYPE zcx_stg_error
+              EXPORTING status = 400 code = 'STG/BAD_BATCH' message = 'Orphan multipart header continuation'.
+          ENDIF.
+          lv_trim = lv_line.
+          SHIFT lv_trim LEFT DELETING LEADING space.
+          WHILE lv_trim IS NOT INITIAL AND lv_trim(1) = cl_abap_char_utilities=>horizontal_tab.
+            lv_trim = lv_trim+1.
+            SHIFT lv_trim LEFT DELETING LEADING space.
+          ENDWHILE.
+          READ TABLE et_headers INDEX lines( et_headers ) INTO ls_hdr.
+          ls_hdr-value = |{ ls_hdr-value } { lv_trim }|.
+          MODIFY et_headers FROM ls_hdr INDEX lines( et_headers ).
+          CONTINUE.
+        ENDIF.
+      ENDIF.
       CLEAR ls_hdr.
       FIND FIRST OCCURRENCE OF ':' IN lv_line MATCH OFFSET lv_colon.
       IF sy-subrc <> 0.
@@ -280,7 +319,7 @@ CLASS zcl_stg_batch IMPLEMENTATION.
       SHIFT ls_hdr-value LEFT DELETING LEADING space.
       APPEND ls_hdr TO et_headers.
     ENDLOOP.
-    lv_index = lv_index + 4.
+    lv_index = lv_index + lv_sep_len.
     ev_rest = iv_chunk+lv_index.
   ENDMETHOD.
 
@@ -300,7 +339,7 @@ CLASS zcl_stg_batch IMPLEMENTATION.
     DATA lv_version      TYPE string.
     DATA lv_rest         TYPE xstring.
     DATA lv_off          TYPE i.
-    DATA lv_lf           TYPE xstring VALUE '0D0A'.
+    DATA lv_line_end TYPE i.
     DATA lv_line_x TYPE xstring.
 
 * part headers (Content-Type: application/http ...), blank line, then the
@@ -309,20 +348,28 @@ CLASS zcl_stg_batch IMPLEMENTATION.
                    IMPORTING et_headers = lt_part_headers
                              ev_rest    = lv_http ).
 
-    WHILE lv_off + 2 <= xstrlen( lv_http ).
-      IF lv_http+lv_off(2) = lv_lf.
+    WHILE lv_off < xstrlen( lv_http ).
+      IF lv_http+lv_off(1) = '0A'.
         EXIT.
       ENDIF.
       lv_off = lv_off + 1.
     ENDWHILE.
-    IF lv_off + 2 > xstrlen( lv_http ) OR lv_off = 0.
+    IF lv_off >= xstrlen( lv_http ) OR lv_off = 0.
       RAISE EXCEPTION TYPE zcx_stg_error
         EXPORTING
           status  = 400
           code    = 'STG/BAD_BATCH'
           message = 'Batch part without a request line'.
     ENDIF.
-    lv_line_x = lv_http(lv_off).
+    lv_line_end = lv_off.
+    IF lv_line_end > 0.
+      lv_line_end = lv_line_end - 1.
+      IF lv_http+lv_line_end(1) = '0D'.
+        lv_line_x = lv_http(lv_line_end).
+      ELSE.
+        lv_line_x = lv_http(lv_off).
+      ENDIF.
+    ENDIF.
     lv_line = cl_abap_codepage=>convert_from( lv_line_x ).
     SPLIT lv_line AT space INTO rs_request-method rs_request-url lv_version.
     rs_request-method = to_upper( rs_request-method ).
@@ -334,7 +381,7 @@ CLASS zcl_stg_batch IMPLEMENTATION.
           message = |Bad request line in batch: { lv_line }|.
     ENDIF.
 
-    lv_off = lv_off + 2.
+    lv_off = lv_off + 1.
     lv_rest = lv_http+lv_off.
     IF lv_rest IS NOT INITIAL.
       split_headers( EXPORTING iv_chunk   = lv_rest
@@ -425,7 +472,9 @@ CLASS zcl_stg_batch IMPLEMENTATION.
                                                 it_options = lt_options
                                                 iv_host    = iv_host
                                                 iv_body    = is_request-body
-                                                iv_body_x  = is_request-body_x ).
+                                                iv_body_x  = is_request-body_x
+                                                iv_content_type = header( it_headers = is_request-headers
+                                                                          iv_name = 'content-type' ) ).
   ENDMETHOD.
 
   METHOD byte_length.
