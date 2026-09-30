@@ -2601,6 +2601,7 @@ function statement(node, ctx) {
     // NON-UNIQUE key goes is not measured): the row goes before the first
     // row with a greater key, not at all when one has the same key
     if (table.type.sorted) {
+      if (refInto) throw new Unsupported("INSERT INTO SORTED TABLE REFERENCE INTO: rows are stored in a Go slice; later inserts or deletes can move the row, so a retained reference is unsafe");
       if (!table.type.unique) throw new Unsupported(`INSERT INTO TABLE of a SORTED table with a NON-UNIQUE key`);
       const line = table.type.sorted.length === 1 && table.type.sorted[0] === "TABLE_LINE";
       const sortKeys = line ? [{line: true, type: table.type.row}] : table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));

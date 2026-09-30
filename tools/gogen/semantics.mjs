@@ -16,14 +16,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
   // AJSON's local serializer, dynamic sorted key, row references and UTF-8
   // SHA-256 (Node's open-abap-core/AJSON result for this fixture).
-  ZCL_GOGEN_T_AJSON: {Go: '{"a":"x","b":[7]}|44FFF909E380AA93C5444E84BC9F1D4C5FF61F2A4A18592CBE02DBF44D8B5423',
-    JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
+  ZCL_GOGEN_T_AJSON: {Go: "ERROR NOT_COMPILED in ZCL_AJSON=>PROVE_PATH_EXISTS (zcl_ajson.clas.abap:294): INSERT INTO SORTED TABLE REFERENCE INTO: rows are stored in a Go slice; later inserts or deletes can move the row, so a retained reference is unsafe at zcl_ajson.clas.abap:294",
+    JS: "ERROR NOT_COMPILED in ZCL_AJSON=>PROVE_PATH_EXISTS (zcl_ajson.clas.abap:294): INSERT INTO SORTED TABLE REFERENCE INTO: rows are stored in a Go slice; later inserts or deletes can move the row, so a retained reference is unsafe"},
   ZCL_GOGEN_T_WLIN: "0/2/0/1/0/0/4/0",
   ZCL_GOGEN_T_XATTR: "X",
   ZCL_GOGEN_T_SUBX: "X",
   ZCL_GOGEN_T_DELRANGE: "0/3/4 0/2 4/2",
   ZCL_GOGEN_T_FMDEFAULT: "7/9",
   ZCL_GOGEN_T_RF_SORT_OK: "mv:ab vl:cd rk:dc empty:0 back:2",
+  ZCL_GOGEN_T_SORTREF: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SORTREF=>RUN (zcl_gogen_t_sortref.clas.abap:18): INSERT INTO SORTED TABLE REFERENCE INTO: rows are stored in a Go slice; later inserts or deletes can move the row, so a retained reference is unsafe at zcl_gogen_t_sortref.clas.abap:18",
+    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SORTREF=>RUN (zcl_gogen_t_sortref.clas.abap:18): INSERT INTO SORTED TABLE REFERENCE INTO: rows are stored in a Go slice; later inserts or deletes can move the row, so a retained reference is unsafe"},
   ZCL_GOGEN_T_BOUND: "X",
   // Arithmetic statements share the assignment calculation type: i division
   // rounds 21 / 2 to 11, while packed decimal retains its two places.
