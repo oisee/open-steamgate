@@ -126,6 +126,9 @@ module.exports = {
     // becomes the sentence the screen shows -- "no object store here" --
     // rather than a crash. Same shape as the AMDP destination above.
     new webpack.IgnorePlugin({resourceRegExp: /osd-store\.mjs$/}),
+    // and git, which HISTORY / REVISION import on the call: a preview has no
+    // worktree and no child_process, and never gets that far (no store)
+    new webpack.IgnorePlugin({resourceRegExp: /osd-git-history\.mjs$/}),
     new webpack.ProvidePlugin({
       Buffer: ["buffer", "Buffer"],
       process: "process/browser",

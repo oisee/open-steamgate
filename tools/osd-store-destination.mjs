@@ -27,7 +27,6 @@
 import {given, givenText, fill} from "./osd-destination.mjs";
 import {snapshotOf, changedSince} from "./osd-generation-diff.mjs";
 import {objectOf} from "./osd-inputs.mjs";
-import {gitObjectHistory, gitObjectRevisionAt} from "./osd-git-history.mjs";
 import {basename, join} from "node:path";
 
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
@@ -111,8 +110,8 @@ export class StoreDestination {
         case "WRITE": return this.#write(type, name, include, source, started);
         case "CHECK": return this.#check(type, name, include, source, started);
         case "ACTIVATE": return await this.#activate(type, name, started);
-        case "HISTORY": return this.#history(type, name, signature);
-        case "REVISION": return this.#revision(type, name, givenText(signature, "IV_REVISION"));
+        case "HISTORY": return await this.#history(type, name, signature);
+        case "REVISION": return await this.#revision(type, name, givenText(signature, "IV_REVISION"));
       }
     } catch (error) {
       // the store's own refusals -- NotFound, ReadOnly, NotSupported -- are
@@ -187,7 +186,10 @@ export class StoreDestination {
   // author is a SAP-style user name, never an e-mail. Outside git the answer
   // says "no history" and why, and EV_COUNT stays empty: a count of 0 would
   // read as "never changed".
-  #history(type, name, signature) {
+  // git is loaded on the call, not with the module: the preview bundles this
+  // destination and has no child_process (webpack.config.cjs ignores it)
+  async #history(type, name, signature) {
+    const {gitObjectHistory} = await import("./osd-git-history.mjs");
     const entry = this.store.read(type, name);
     const asked = Number(givenText(signature, "IV_LIMIT"));
     const limit = Number.isInteger(asked) && asked > 0 ? asked : 50;
@@ -202,7 +204,8 @@ export class StoreDestination {
     };
   }
 
-  #revision(type, name, revision) {
+  async #revision(type, name, revision) {
+    const {gitObjectRevisionAt} = await import("./osd-git-history.mjs");
     const entry = this.store.read(type, name);
     const found = gitObjectRevisionAt(this.store.root, entry.file, revision);
     return {EV_SOURCE: found.source, EV_FILE: found.path, EV_VERSION: revision.toLowerCase().slice(0, 12)};
