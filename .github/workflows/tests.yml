@@ -355,9 +355,57 @@ jobs:
         env:
           STG_DB: duckdb
 
+  # **OSGo, the Go host of OSG, answers one request** (tools/gogen, part b):
+  # every object of this build's tree compiled to Go, the packages of the
+  # host vetted and tested, and one request through ZCL_STG_DISPATCHER that
+  # must answer 200 with the demo's entity sets. From the build job's tree,
+  # so the pinned transpiler and the fetched packs are the suites' own
+  # (osg-build.mjs refuses an unfetched pack). OSG's suites against OSGo are
+  # osgo-parity in gogen.yml, on request.
+  osgo-host:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: tools/gogen/go/go.sum
+      - uses: actions/download-artifact@v4
+        with:
+          name: built-tree
+          path: ${{ runner.temp }}
+      - name: Restore and verify this run's build
+        run: |
+          tar -xf "$RUNNER_TEMP/built-tree.tar"
+          test -f build/live/manifest.json
+          test -d .local/lars/open-abap-core
+          test -f .local/ci-artifact/transpiler/packages/transpiler/build/src/index.js
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler packages/transpiler
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs runtime packages/runtime
+      - name: Go vet and tests of the host packages
+        working-directory: tools/gogen/go
+        run: |
+          go vet ./apc/ ./cmd/apcprobe/ ./cmd/storecmp/
+          go test ./apc/...
+      - name: Media rows
+        run: node --test tools/gogen/media.test.mjs
+      - name: One request of OSG's gateway through Go
+        run: |
+          out=$(node tools/gogen/gateway.mjs) || { echo "$out"; exit 1; }
+          echo "$out"
+          grep -q '^200 OK$' <<<"$out"
+          grep -q '"EntitySets":\["TravelSet"' <<<"$out"
+
   test:
     if: always()
-    needs: [build, suites, packaging, e2e]
+    needs: [build, suites, packaging, e2e, osgo-host]
     runs-on: ubuntu-latest
     steps:
       - name: Require every job to pass
@@ -365,10 +413,11 @@ jobs:
           BUILD_RESULT: ${{ needs.build.result }}
           SUITES_RESULT: ${{ needs.suites.result }}
           E2E_RESULT: ${{ needs.e2e.result }}
+          OSGO_RESULT: ${{ needs.osgo-host.result }}
           PACKAGING_RESULT: ${{ needs.packaging.result }}
           VSIX_PROFILE: ${{ needs.build.outputs.vsix_profile }}
         run: |
-          [[ "$BUILD_RESULT" == success && "$SUITES_RESULT" == success && "$E2E_RESULT" == success ]]
+          [[ "$BUILD_RESULT" == success && "$SUITES_RESULT" == success && "$E2E_RESULT" == success && "$OSGO_RESULT" == success ]]
           case "$VSIX_PROFILE:$PACKAGING_RESULT" in
             full:success|fast:skipped) ;;
             *) echo "unexpected VSIX profile/job result: $VSIX_PROFILE:$PACKAGING_RESULT" >&2; exit 1 ;;
