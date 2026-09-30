@@ -38,23 +38,35 @@ enough:
    inside `/data/in`). A last component that is a symlink pointing nowhere is
    refused: opening it for writing would create the file at the link's
    target, wherever that is (the critic reproduced exactly that).
-3. The file is opened with `O_NOFOLLOW`, and on Linux the path the
-   descriptor actually landed on (`/proc/self/fd`) is checked against the
-   roots again, which catches a parent directory swapped for a symlink
-   between the check and the open. Where the platform cannot say what a
-   descriptor opened, that race is not closed; the sandbox is a guard for
-   programs, not a boundary against a local attacker who can write inside a
-   root at the same time.
+3. The open and the unlink resolve the path beneath the root in the same
+   call that acts on it, so a parent directory swapped for a symlink between
+   the checks above and the open cannot take a create, a truncate or an
+   unlink outside. On Go every root is an `os.Root`, held from the first
+   use, and each OPEN and DELETE goes through the one that holds the path
+   (`openat` one component at a time with `O_NOFOLLOW` on Linux,
+   `O_NOFOLLOW_ANY` on Windows). Node has no `openat`, so on Linux the
+   host walks down from the root one directory at a time, opening each as
+   `/proc/self/fd/<parent>/<name>` with `O_NOFOLLOW | O_DIRECTORY`, and
+   creates or unlinks the last name relative to the last directory it holds;
+   a swapped directory fails its step and the open is refused. Both hosts
+   have a test that swaps the directory at exactly that moment and checks
+   that nothing appeared or disappeared outside; before this change the
+   create landed outside and was only refused afterwards.
 
-FOR OUTPUT truncates only after that check, so a lost race cannot empty a
-file outside the roots (it can at most leave an empty new one there).
-DELETE removes the entry the program named -- a link, not what it points
-at -- and a link that points out of the roots is not deleted at all.
+FOR OUTPUT truncates only after the open. DELETE removes the entry the
+program named -- a link, not what it points at -- and a link that points out
+of the roots is not deleted at all.
 
-On Windows neither `O_NOFOLLOW` nor a descriptor's path is available: the
-lexical and real-path checks stand alone, with no race protection, and root
-comparison is case-sensitive although the file system is not -- not
-verified there, so treat a Windows host as checked, not sandboxed.
+Where Node has no `/proc/self/fd` (macOS, Windows, a Linux without `/proc`
+mounted) the lexical and real-path checks stand alone and that race is open;
+on Windows root comparison is also case-sensitive although the file system
+is not, not verified there. Treat a Node host off Linux as checked, not
+sandboxed. The Go host holds the root directories open from the first use;
+Node opens the root again for each call, with `O_NOFOLLOW`, and refuses when
+the descriptor did not land on the root's real path, so a root renamed and
+replaced by a link meanwhile is refused too. The sandbox is a guard for
+programs; the race is closed because it cost little, not because a local
+attacker is the model.
 
 A refused or failed OPEN reports the reason without the resolved path; the
 audit log has the path.

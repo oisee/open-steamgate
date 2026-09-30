@@ -33,7 +33,7 @@ export function rootsOf(value, delimiter = ":") {
  * system resolves it against its own directory. `audit(entry)` is called
  * for every OPEN and DELETE, allowed or not.
  */
-export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
+export function sandboxDatasetHost({read = [], write = [], home, audit, beforeOpen} = {}) {
   let fs;
   let path;
   let resolvedRoots;
@@ -122,6 +122,55 @@ export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
     return within(real, roots) ? {real, named: named ?? real} : {refused: `${name} is outside the dataset roots`};
   };
 
+  /**
+   * The parent of real, walked down from the outermost root that holds it
+   * one directory at a time, each step opened relative to the descriptor of
+   * the one before (/proc/self/fd/<dir>/<name>, O_NOFOLLOW | O_DIRECTORY):
+   * openat in all but name, which Node does not have. A directory swapped
+   * for a symlink after the path checks fails its step (ELOOP / ENOTDIR)
+   * instead of taking the open or the unlink outside, as os.Root does on
+   * the Go side. Undefined where /proc/self/fd is not there (not Linux):
+   * the path checks and the descriptor check below stand alone.
+   */
+  const parentBeneath = async (real, roots) => {
+    const root = roots.filter((r) => within(real, [r])).sort((a, b) => a.length - b.length)[0];
+    if (root === undefined || real === root) {
+      return undefined;
+    }
+    const c = fs.constants;
+    let dir;
+    try {
+      dir = await fs.open(root, c.O_RDONLY | c.O_DIRECTORY | c.O_NOFOLLOW);
+    } catch (error) {
+      return {moved: error.code ?? String(error)};
+    }
+    // the root itself swapped between the checks and here: the descriptor
+    // says where it landed, and a different directory is refused rather than
+    // walked (docs/dataset.md: a root's parent is still outside the promise)
+    const landed = await openedPath(dir);
+    if (landed === undefined) {
+      await dir.close();
+      return undefined;
+    }
+    if (landed !== root) {
+      await dir.close();
+      return {moved: "ELOOP"};
+    }
+    const parts = path.relative(root, real).split(path.sep);
+    const base = parts.pop();
+    try {
+      for (const part of parts) {
+        const next = await fs.open(`/proc/self/fd/${dir.fd}/${part}`, c.O_RDONLY | c.O_DIRECTORY | c.O_NOFOLLOW);
+        await dir.close();
+        dir = next;
+      }
+    } catch (error) {
+      await dir.close();
+      return {moved: error.code ?? String(error)};
+    }
+    return {dir, entry: `/proc/self/fd/${dir.fd}/${base}`};
+  };
+
   /** what the descriptor really opened, where the platform can say (Linux) */
   const openedPath = async (handle) => {
     try {
@@ -153,7 +202,22 @@ export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
         // OUTPUT truncates only after the descriptor is checked below
         const flags = (mode === "INPUT" ? c.O_RDONLY : mode === "OUTPUT" ? c.O_RDWR | c.O_CREAT
           : mode === "APPENDING" ? c.O_RDWR | c.O_CREAT : c.O_RDWR) | (c.O_NOFOLLOW ?? 0);
-        handle = await fs.open(where.real, flags, 0o644);
+        await beforeOpen?.();
+        const parent = await parentBeneath(where.real, writing ? roots.write : roots.read);
+        if (parent?.moved !== undefined) {
+          // a directory removed meanwhile is missing, not an escape
+          if (parent.moved === "ENOENT") {
+            note({op: "OPEN", name, mode, allowed: false, why: "no such directory"});
+            return {message: "No such file or directory"};
+          }
+          note({op: "OPEN", name, mode, allowed: false, why: "moved outside the dataset roots while opening"});
+          return {message: `Permission denied: ${name} is outside the dataset roots`};
+        }
+        try {
+          handle = await fs.open(parent?.entry ?? where.real, flags, 0o644);
+        } finally {
+          await parent?.dir.close();
+        }
         // a parent swapped for a symlink between the check and the open is
         // caught here, by the path the descriptor ended up on
         const actual = await openedPath(handle);
@@ -173,6 +237,7 @@ export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
           handle = undefined;
         }
       } catch (error) {
+        await handle?.close().catch(() => {});
         note({op: "OPEN", name, mode, allowed: false, why: error.code ?? String(error)});
         // the code only: an OS message carries the resolved path
         return {message: error.code === "ENOENT" ? "No such file or directory" : error.code === "ELOOP" ? `Permission denied: ${name} is a symbolic link` : (error.code ?? "error")};
@@ -209,7 +274,17 @@ export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
       try {
         // unlink does not follow the last component: what the program named
         // goes, a link and not the file it points at
-        await fs.unlink(where.named);
+        await beforeOpen?.();
+        const parent = await parentBeneath(where.named, roots.write);
+        if (parent?.moved !== undefined) {
+          note({op: "DELETE", name, allowed: false, why: parent.moved === "ENOENT" ? "no such directory" : "moved outside the dataset roots while deleting"});
+          return false;
+        }
+        try {
+          await fs.unlink(parent?.entry ?? where.named);
+        } finally {
+          await parent?.dir.close();
+        }
         note({op: "DELETE", name, allowed: true, path: where.named});
         return true;
       } catch (error) {
