@@ -148,6 +148,8 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
 
 ## Working in the tree
 
+- Register integration suites in feature fragments under `test/suites.d/`; `tools/osd-suites.mjs` merges and checks them.
+
 - `npm test` = transpile + `abaplint` + ABAP Unit (inside `output/index.mjs`)
   + mocha wire tests. `npm start` serves `/sap/opu/odata/sap/` on port 3030.
 - `abap_transpile.json` pulls open-abap-core, express-icf-shim and the

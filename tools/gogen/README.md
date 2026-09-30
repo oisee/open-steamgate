@@ -1287,7 +1287,7 @@ on its own above).
 
 ## Parity with OSG on Node: OSG's own suites against OSGo (ultra/parity, 2026-09-24)
 
-`tools/gogen/parity.mjs` runs the HTTP-level suites of `test/suites.json`
+`tools/gogen/parity.mjs` runs the HTTP-level suites of `test/suites.d/*.json`
 against OSG on Node and against the osgo binary, the same test files, a fresh
 server per suite file and backend. Those suites call `startServer()` from
 `test/start.mjs` in their own process and then fetch `localhost:STG_PORT`; a

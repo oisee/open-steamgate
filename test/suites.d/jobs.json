@@ -1,0 +1,13 @@
+{
+  "files": [
+    "test/telegram-notify.mjs",
+    "test/batch-runs.mjs",
+    "test/jobs-e2e.mjs",
+    "test/job-one-step.mjs",
+    "test/job-named-events.mjs",
+    "test/job-tail-events.mjs",
+    "test/job-tail-after-commit.mjs",
+    "test/job-status-snapshot.mjs",
+    "test/osd-queue-check.mjs"
+  ]
+}

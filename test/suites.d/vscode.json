@@ -1,0 +1,19 @@
+{
+  "files": [
+    "test/ci-vsix-profile.mjs",
+    "test/release-notes.mjs",
+    "test/third-party-notices.mjs",
+    "test/vsix-content-types.mjs",
+    "test/release-readme.mjs",
+    "test/vscode-extension.mjs",
+    "test/vscode-debug.mjs",
+    "test/vscode-launcher.mjs",
+    "test/vscode-vsix.mjs",
+    "test/vscode-warm.mjs"
+  ],
+  "groups": {
+    "packaging": [
+      "test/vscode-vsix-packaging.mjs"
+    ]
+  }
+}

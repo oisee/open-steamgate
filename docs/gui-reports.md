@@ -460,7 +460,7 @@ an HTTP test, the browser played by hand the way `test/transaction.mjs`
 plays `ZOSD_NOTE`: `ZGUI_GG_EX_001` renders "hello world", `ZGUI_GG_EX_012`
 Executes and Cancels, `ZGUI_GG_EX_043` clicks a line. `test/vscode-extension.mjs`
 checks the extension's pure transaction URL builder as well. Both files are in
-`test/suites.json`.
+`test/suites.d/*.json`.
 
 ## Licence
 

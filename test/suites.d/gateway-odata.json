@@ -1,0 +1,27 @@
+{
+  "files": [
+    "test/demo-data.mjs",
+    "test/batch-inserts.mjs",
+    "test/conformance.mjs",
+    "test/database-identity.mjs",
+    "test/db-migrate.mjs",
+    "test/database-identity-host.mjs",
+    "test/gateway-regression-contract.mjs",
+    "test/http-case.mjs",
+    "test/mocha.mjs",
+    "test/reference-generation.mjs",
+    "test/replay-compare.mjs",
+    "test/rfc-live.mjs",
+    "test/rfc-replay.mjs",
+    "test/sapevent.mjs",
+    "test/se16.mjs",
+    "test/seed-batching.mjs",
+    "test/sql-trace-buffer.mjs",
+    "test/sql-trace.mjs",
+    "test/sqlite-file-client.mjs",
+    "test/store-destination.mjs",
+    "test/store-exclusions.mjs",
+    "test/transaction.mjs",
+    "test/write-boundary.mjs"
+  ]
+}

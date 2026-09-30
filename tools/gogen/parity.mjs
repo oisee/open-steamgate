@@ -35,7 +35,7 @@
 // says which and why. --reuse-node takes it whatever it says (a warning),
 // --fresh-node never takes it.
 //
-// How a suite reaches its server: 16 files of test/suites.json call
+// How a suite reaches its server: 16 files of test/suites.d/*.json call
 // startServer() from test/start.mjs, which builds an express host in the
 // suite's own process, and then fetch http://localhost:STG_PORT. The harness
 // runs mocha with a module hook (parity/hooks.mjs) that turns test/start.mjs
@@ -47,7 +47,7 @@
 //
 // Score = tests passing on OSGo / tests passing on Node, over the tests that
 // passed on Node and sent at least one request there. Every other suite of
-// test/suites.json is in-process (it imports output/ or a tool directly) and
+// test/suites.d/*.json is in-process (it imports output/ or a tool directly) and
 // is counted, not run (mocha --dry-run), as "not applicable"; the count is
 // kept in the reference's meta and reused with it.
 //
@@ -64,6 +64,7 @@ import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSy
 import {availableParallelism} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {home} from "./home.mjs";
+import {loadSuites} from "../osd-suites.mjs";
 
 const here = import.meta.dirname;
 const arg = (name, dflt) => {
@@ -97,7 +98,7 @@ const e2e = flag("e2e") && !fast;
 const mocha = join(root, "node_modules", "mocha", "bin", "mocha.js");
 mkdirSync(join(out, "runs"), {recursive: true});
 
-const listed = JSON.parse(readFileSync(join(root, "test", "suites.json"), "utf8")).files;
+const listed = loadSuites(root).files;
 // an HTTP suite: it starts the gateway through test/start.mjs, statically
 const isHttp = (f) => {
   const text = readFileSync(join(root, f), "utf8");

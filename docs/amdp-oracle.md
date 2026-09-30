@@ -87,6 +87,6 @@ is the worked one, five cases over `ZCL_OSD_AMDP_DEMO=>SQUARES` including the
 empty and the negative count. Recordings go under `.local/`; `compare` exits
 non-zero when anything diverged, so it can be a gate.
 
-Suite: `test/amdp-oracle.mjs` (in `test/suites.json`, so `npm run integration`
+Suite: `test/amdp-oracle.mjs` (in `test/suites.d/*.json`, so `npm run integration`
 runs it). It needs no HANA — the live half is `calibrate`, run by hand where
 there is one.
