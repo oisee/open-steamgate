@@ -717,7 +717,7 @@ function stmt(st, ctx, d) {
         if (k.type.k === "p") return `{ const c = abap.CmpP(${xv}, ${yv}); if (c !== 0) return c * ${k.desc ? -1 : 1}; }`;
         return `if (${xv} !== ${yv}) return (${xv} < ${yv} ? -1 : 1) * ${k.desc ? -1 : 1};`;
       });
-      return [`${t}${tb}.sort((x, y) => { ${cmp.join(" ")} return 0; });`];
+      return [`${t}${tb}.sort((x, y) => { ${cmp.join(" ")} return 0; });`, `${t}abap.bumpTable(${tb});`];
     }
     // ultra/itab: APPEND LINES OF, as emit-go
     case "append_lines": {
@@ -732,7 +732,7 @@ function stmt(st, ctx, d) {
       const v = st.value.e === "lrow" ? (composite(st.value.type) ? `abap.copy(r${n})` : `r${n}`) : expr(st.value, ctx);
       ctx.lrow = saved;
       out.push(`${t}  for (let i${n} = lo${n}; i${n} <= hi${n}; i${n}++) { const r${n} = src${n}[i${n} - 1]; ${tb}.push(${v}); }`,
-        `${t}  s.sy.tabix = ${tb}.length;`, `${t}}`);
+        `${t}  if (lo${n} <= hi${n}) abap.bumpTable(${tb});`, `${t}  s.sy.tabix = ${tb}.length;`, `${t}}`);
       return out;
     }
     // ultra/events: INSERT INTO TABLE of a SORTED table with a unique key (emit-go)
@@ -744,7 +744,7 @@ function stmt(st, ctx, d) {
       return [`${t}{`, `${t}  const v${n} = ${st.value.e === "lrow" && composite(st.value.type) ? `abap.copy(${expr(st.value, ctx)})` : moved(st.value, ctx)};`, `${t}  const cmp${n} = (r${n}) => { ${cmp} return 0; };`,
         `${t}  let pos${n} = ${tb}.length; s.sy.subrc = 0;`,
         `${t}  for (let i = 0; i < ${tb}.length; i++) { const c = cmp${n}(${tb}[i]); if (c === 0) { s.sy.subrc = 4; break; } if (c > 0) { pos${n} = i; break; } }`,
-        `${t}  if (s.sy.subrc === 0) { ${tb}.splice(pos${n}, 0, v${n});${st.refInto ? ` ${place(st.refInto, ctx)} = abap.cell(${tb}[pos${n}], ${desc(st.table.type.row)}, ${tb});` : ""} }`, `${t}}`];
+        `${t}  if (s.sy.subrc === 0) { ${tb}.splice(pos${n}, 0, v${n}); abap.bumpTable(${tb});${st.refInto ? ` ${place(st.refInto, ctx)} = abap.cell(${tb}[pos${n}], ${desc(st.table.type.row)}, ${tb});` : ""} }`, `${t}}`];
     }
     case "insert_lines_sorted": {
       const n = ctx.loop++;
@@ -757,9 +757,9 @@ function stmt(st, ctx, d) {
     case "insert_table": {
       const tb = place(st.table, ctx);
       const v = `ins${ctx.loop++}`;
-      if (!st.unique) return [`${t}${tb}.push(${moved(st.value, ctx)}); s.sy.subrc = 0;`];
+      if (!st.unique) return [`${t}${tb}.push(${moved(st.value, ctx)}); abap.bumpTable(${tb}); s.sy.subrc = 0;`];
       return [`${t}{`, `${t}  const ${v} = ${moved(st.value, ctx)};`,
-        `${t}  if (${st.keys ? `${tb}.some((r) => ${st.keys.map((k) => `r.${ident(k)} === ${v}.${ident(k)}`).join(" && ")})` : `${tb}.includes(${v})`}) { s.sy.subrc = 4; } else { ${tb}.push(${v}); s.sy.subrc = 0; }`, `${t}}`];
+        `${t}  if (${st.keys ? `${tb}.some((r) => ${st.keys.map((k) => `r.${ident(k)} === ${v}.${ident(k)}`).join(" && ")})` : `${tb}.includes(${v})`}) { s.sy.subrc = 4; } else { ${tb}.push(${v}); abap.bumpTable(${tb}); s.sy.subrc = 0; }`, `${t}}`];
     }
     case "assert":
       return [`${t}if (!(${cond(st.cond, ctx)})) throw new abap.AbapError("ASSERTION_FAILED", ${JSON.stringify(st.text)});`];
