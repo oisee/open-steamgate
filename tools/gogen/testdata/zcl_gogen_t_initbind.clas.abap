@@ -1,0 +1,21 @@
+CLASS zcl_gogen_t_initbind DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+  PRIVATE SECTION.
+    TYPES ty_tab TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+    CLASS-METHODS probe CHANGING ct TYPE ANY TABLE.
+ENDCLASS.
+CLASS zcl_gogen_t_initbind IMPLEMENTATION.
+  METHOD probe.
+    FIELD-SYMBOLS <row> TYPE any.
+    APPEND INITIAL LINE TO ct ASSIGNING <row>.
+    DELETE ct INDEX 1.
+    DATA out TYPE i.
+    out = <row>.
+  ENDMETHOD.
+  METHOD run.
+    DATA lt TYPE ty_tab.
+    probe( CHANGING ct = lt ).
+    rv = `no dump`.
+  ENDMETHOD.
+ENDCLASS.

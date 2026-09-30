@@ -388,9 +388,9 @@ func AppendInitialData(t Data) (Data, int) {
 	if t.T.Append == nil {
 		panic(NotCompiled("APPEND INITIAL LINE", "to a generic table that is not a standard table"))
 	}
-	row := t.T.Append(t.P)
+	t.T.Append(t.P)
 	BumpTable(t.P)
-	return Data{P: row, T: t.T.Row}, n + 1
+	return Row(t, n), n + 1
 }
 
 // DescrLength is cl_abap_typedescr=>describe_by_data( x )->length: the
