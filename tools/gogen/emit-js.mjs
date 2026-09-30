@@ -738,7 +738,7 @@ function stmt(st, ctx, d) {
       const n = ctx.loop++;
       const get = (r, k) => (k.line ? r : `${r}.${ident(k.name)}`);
       const cmp = st.keys.map((k) => `if (${get(`r${n}`, k)} !== ${get(`v${n}`, k)}) return ${get(`r${n}`, k)} > ${get(`v${n}`, k)} ? 1 : -1;`).join(" ");
-      return [`${t}{`, `${t}  const v${n} = ${moved(st.value, ctx)};`, `${t}  const cmp${n} = (r${n}) => { ${cmp} return 0; };`,
+      return [`${t}{`, `${t}  const v${n} = ${st.value.e === "lrow" && composite(st.value.type) ? `abap.copy(${expr(st.value, ctx)})` : moved(st.value, ctx)};`, `${t}  const cmp${n} = (r${n}) => { ${cmp} return 0; };`,
         `${t}  let pos${n} = ${tb}.length; s.sy.subrc = 0;`,
         `${t}  for (let i = 0; i < ${tb}.length; i++) { const c = cmp${n}(${tb}[i]); if (c === 0) { s.sy.subrc = 4; break; } if (c > 0) { pos${n} = i; break; } }`,
         `${t}  if (s.sy.subrc === 0) { ${tb}.splice(pos${n}, 0, v${n});${st.refInto ? ` ${place(st.refInto, ctx)} = abap.cell(${tb}[pos${n}], ${desc(st.table.type.row)}, ${tb});` : ""} }`, `${t}}`];
@@ -960,7 +960,7 @@ function expr(e, ctx) {
       const names = e.keys.map((k) => ident(k));
       const cmp = names.map((k) => `if (x.${k} !== y.${k}) return x.${k} < y.${k} ? -1 : 1;`).join(" ");
       const same = names.map((k) => `v[i-1].${k} === v[i].${k}`).join(" && ");
-      return `(() => { const v = ${expr(e.x, ctx)}.slice().sort((x,y) => { ${cmp} return 0; }); ${e.unique ? `for (let i=1; i<v.length; i++) if (${same}) throw new abap.AbapError("NOT_COMPILED", "SORTED table move: a duplicate primary key");` : ""} return v; })()`;
+      return `(() => { const v = abap.copy(${expr(e.x, ctx)}).sort((x,y) => { ${cmp} return 0; }); ${e.unique ? `for (let i=1; i<v.length; i++) if (${same}) throw new abap.AbapError("NOT_COMPILED", "SORTED table move: a duplicate primary key");` : ""} return v; })()`;
     }
     case "fn": return fn(e, ctx);
     case "lines": return `${expr(e.table, ctx)}.length`;

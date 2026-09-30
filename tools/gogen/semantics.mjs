@@ -28,6 +28,11 @@ const EXPECT = {
   ZCL_GOGEN_T_FMDEFAULT: "7/9",
   ZCL_GOGEN_T_RF_SORT_OK: "mv:ab vl:cd rk:dc empty:0 back:2",
   ZCL_GOGEN_T_SORTREF: "m:9 a:2",
+  ZCL_GOGEN_T_COPYROWS: "1/2",
+  ZCL_GOGEN_T_COPYROUTES: "111119",
+  ZCL_GOGEN_T_COPYBASE: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYBASE=>RUN (zcl_gogen_t_copybase.clas.abap:18): VALUE for a table with BASE src at zcl_gogen_t_copybase.clas.abap:18", JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYBASE=>RUN (zcl_gogen_t_copybase.clas.abap:18): VALUE for a table with BASE src"},
+  ZCL_GOGEN_T_COPYINSERT: "1",
+  ZCL_GOGEN_T_COPY: "copy a:2,1 b:3,50 struct a:1 b:60 alias it:3,99 after:3,99",
   ZCL_GOGEN_T_SECREF: "0/7",
   ZCL_GOGEN_T_BOUND: "X",
   // Arithmetic statements share the assignment calculation type: i division

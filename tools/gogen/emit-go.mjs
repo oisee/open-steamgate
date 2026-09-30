@@ -1523,7 +1523,7 @@ ${t}	}`));
       const n = ctx.loop++;
       const get = (r, k) => (k.line ? r : `${r}.${ident(k.name)}`);
       const cmp = st.keys.map((k) => `if a, b := ${get(`r${n}`, k)}, ${get(`v${n}`, k)}; a != b { if a > b { c${n} = 1 } else { c${n} = -1 }; goto done${n} }`);
-      return [`${t}{`, `${t}	v${n} := ${copied(st.value.e === "lrow" ? rowValue(st.table.type, expr(st.value, ctx)) : expr(st.value, ctx), st.value.type, st.value)}`, `${t}	pos${n} := len(${tb})`, `${t}	s.Sy.Subrc = 0`,
+      return [`${t}{`, `${t}	v${n} := ${st.value.e === "lrow" && needsCopy(st.value.type) ? `${cloneName(st.value.type)}(${rowValue(st.table.type, expr(st.value, ctx))})` : copied(st.value.e === "lrow" ? rowValue(st.table.type, expr(st.value, ctx)) : expr(st.value, ctx), st.value.type, st.value)}`, `${t}	pos${n} := len(${tb})`, `${t}	s.Sy.Subrc = 0`,
         `${t}	for i${n}, r${n} := range ${tb} {`, `${t}		c${n} := 0`, ...cmp.map((x) => `${t}		${x}`), `${t}	done${n}:`,
         `${t}		if c${n} == 0 {`, `${t}			s.Sy.Subrc = 4`, `${t}			break`, `${t}		}`,
         `${t}		if c${n} > 0 {`, `${t}			pos${n} = i${n}`, `${t}			break`, `${t}		}`, `${t}	}`,
@@ -1957,7 +1957,7 @@ function expr(e, ctx) {
       const names = e.keys.map((k) => ident(k));
       const less = names.map((k) => `if x.${k} != y.${k} { return x.${k} < y.${k} }`).join("; ");
       const same = names.map((k) => `v[i-1].${k} == v[i].${k}`).join(" && ");
-      return `func() ${goType(e.type)} { v := append(${goType(e.type)}(nil), ${expr(e.x, ctx)}...); sort.SliceStable(v, func(a,b int) bool { x,y := v[a],v[b]; ${less}; return false }); ${e.unique ? `for i:=1; i<len(v); i++ { if ${same} { panic(abap.NotCompiled("SORTED table move", "a duplicate primary key")) } };` : ""} return v }()`;
+      return `func() ${goType(e.type)} { v := ${cloneName(e.type)}(${expr(e.x, ctx)}); sort.SliceStable(v, func(a,b int) bool { x,y := v[a],v[b]; ${less}; return false }); ${e.unique ? `for i:=1; i<len(v); i++ { if ${same} { panic(abap.NotCompiled("SORTED table move", "a duplicate primary key")) } };` : ""} return v }()`;
     }
     case "fn": return fn(e, ctx);
     case "lines": return `int32(len(${expr(e.table, ctx)}))`;
