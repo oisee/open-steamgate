@@ -1,7 +1,7 @@
 // Compare per-method outcomes from the instrumented Node Unit lifecycle
 // with gogen's. Run `npm run transpile` first, or pass --node-json <file>.
 import {spawnSync} from "node:child_process";
-import {closeSync, existsSync, mkdtempSync, openSync, readFileSync} from "node:fs";
+import {closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {home} from "./home.mjs";
@@ -20,7 +20,7 @@ if (!args.includes("--node-json")) {
     ...classes.flatMap((c) => ["--class", c])], {
     cwd: home, encoding: "utf8", timeout: timeoutMs, maxBuffer: 20e6,
   });
-  if (run.signal) throw new Error(`Node Unit run stopped by ${run.signal} after ${timeoutMs} ms (GOGEN_COMPARE_TIMEOUT_MS)`);
+  if (run.signal) throw new Error(`Node Unit run stopped by ${run.signal}: ${run.error?.code === "ETIMEDOUT" ? `timeout after ${timeoutMs} ms (GOGEN_COMPARE_TIMEOUT_MS)` : run.error?.message ?? "killed"}`);
   if (run.status !== 0) throw new Error(`Node Unit run failed: ${run.stderr || run.stdout || run.error?.message}`);
 }
 const rawNode = JSON.parse(readFileSync(nodeJson, "utf8"));
@@ -30,16 +30,18 @@ else {
   // The Go results go to a file, not a pipe: a full inventory prints more than
   // a pipe buffer holds, and a run cut short by the timeout must say so
   // instead of failing later on half a JSON document.
-  const goJson = join(mkdtempSync(join(tmpdir(), "gogen-compare-")), "go.json");
+  const goDir = mkdtempSync(join(tmpdir(), "gogen-compare-"));
+  const goJson = join(goDir, "go.json");
   const out = openSync(goJson, "w");
   const go = spawnSync("node", [join(home, "tools", "gogen", "unit.mjs"), ...classes.flatMap((c) => ["--class", c])], {
     cwd: home, stdio: ["ignore", out, "pipe"], encoding: "utf8", timeout: timeoutMs, maxBuffer: 20e6,
   });
   closeSync(out);
-  if (go.signal) throw new Error(`Go Unit runner stopped by ${go.signal} after ${timeoutMs} ms (GOGEN_COMPARE_TIMEOUT_MS); partial output in ${goJson}`);
+  if (go.signal) throw new Error(`Go Unit runner stopped by ${go.signal}: ${go.error?.code === "ETIMEDOUT" ? `timeout after ${timeoutMs} ms (GOGEN_COMPARE_TIMEOUT_MS)` : go.error?.message ?? "killed"}; partial output kept in ${goJson}`);
   const text = readFileSync(goJson, "utf8");
   if (!text.trim()) throw new Error(`Go Unit runner produced no results: ${go.stderr || go.error?.message}`);
   result = JSON.parse(text);
+  rmSync(goDir, {recursive: true, force: true});
 }
 const key = (r) => `${r.class}/${r.testclass}/${r.method}`;
 const norm = (r) => ({class: String(r.class ?? r.class_name).toUpperCase(),
