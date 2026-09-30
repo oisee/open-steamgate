@@ -25,14 +25,29 @@ Nothing is readable or writable until a root says so:
 |---|---|
 | `OSD_DATASET_READ` | directories a program may read, separated by `:` (`;` on Windows) |
 | `OSD_DATASET_WRITE` | directories it may write, create and delete in; readable too |
-| `OSD_DATASET_HOME` | where a relative name resolves; default the first write root, else the first read root |
+| `OSD_DATASET_HOME` | where a relative name resolves; default the first write root that exists, else the first read root |
 | `OSD_DATASET_AUDIT` | a file that gets one JSON line per OPEN and DELETE, allowed or not |
 
-Every name is resolved to its real path -- `..` and symlinks followed --
-before it is compared with the roots' real paths, and the file is then opened
-by that real path, so neither `../../etc/passwd` nor a symlink planted inside
-a root reaches outside it. A root is matched as a directory, not a prefix:
-`/data/in2` is not inside `/data/in`.
+Three checks stand between a name and the disk, because each alone was not
+enough:
+
+1. The name as written must lie inside a root before anything is looked up,
+   so a refusal never tells a program which directories exist elsewhere.
+2. The name is resolved to its real path -- `..` and symlinks followed -- and
+   compared with the roots' real paths as directories (`/data/in2` is not
+   inside `/data/in`). A last component that is a symlink pointing nowhere is
+   refused: opening it for writing would create the file at the link's
+   target, wherever that is (the critic reproduced exactly that).
+3. The file is opened with `O_NOFOLLOW`, and on Linux the path the
+   descriptor actually landed on (`/proc/self/fd`) is checked against the
+   roots again, which catches a parent directory swapped for a symlink
+   between the check and the open. Where the platform cannot say what a
+   descriptor opened, that race is not closed; the sandbox is a guard for
+   programs, not a boundary against a local attacker who can write inside a
+   root at the same time.
+
+A refused or failed OPEN reports the reason without the resolved path; the
+audit log has the path.
 
 A refusal is what a system answers when a file cannot be opened: sy-subrc 8
 and the reason in `MESSAGE`. A system's own authority check raises
@@ -66,7 +81,7 @@ one by stoker), before any line was written:
 | OPEN of an open file | CX_SY_FILE_OPEN |
 | CLOSE of a file not open | sy-subrc 0 |
 | DELETE of a missing file / of an open one | 4 / 0, and the open one is closed |
-| FOR APPENDING / UPDATE / OUTPUT | at the end / at 0 without truncating / truncating |
+| FOR APPENDING / UPDATE / OUTPUT | at the end / at 0 without truncating, a missing file is 8 / truncating |
 | SET DATASET POSITION 0, END OF FILE | reread / position = size, READ rc 4 |
 
 Refused by name rather than ignored: LEGACY and NON-UNICODE, CODE PAGE,

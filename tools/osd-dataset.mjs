@@ -67,37 +67,69 @@ export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
     }
   };
 
-  /** the real path a name stands for, when it lies inside one of `roots` */
-  const place = async (name, roots) => {
+  const within = (candidate, roots) => roots.some((root) =>
+    candidate === root || candidate.startsWith(root.endsWith(path.sep) ? root : root + path.sep));
+
+  /**
+   * The real path a name stands for, when it lies inside one of `roots`.
+   * Three checks, because each alone was not enough: the name as written is
+   * inside a root before anything is looked up on the disk (a refusal must
+   * not tell a caller which directories exist elsewhere); the path with its
+   * symlinks followed is inside a root; and a name whose last component is
+   * a symlink pointing nowhere is refused, since opening it for writing
+   * would create the file at the link's target, wherever that is.
+   */
+  const place = async (name, roots, given) => {
     if (roots.length === 0) {
       return {refused: "no dataset root allows this (OSD_DATASET_READ / OSD_DATASET_WRITE)"};
     }
     if (name.includes("\0")) {
       return {refused: "a NUL in the name"};
     }
-    const base = home ?? write[0] ?? read[0];
+    // relative names resolve against the first root that exists (write
+    // before read), the same for every mode
+    const base = home ?? resolvedRoots.write[0] ?? resolvedRoots.read[0];
     const wanted = path.resolve(base ?? ".", name);
-    // Follow what exists: the file itself when it is there, else its
-    // directory. A symlink that points out of the root is then outside it.
+    const lexical = given.map((r) => path.resolve(r));
+    if (!within(wanted, lexical) && !within(wanted, roots)) {
+      return {refused: `${name} is outside the dataset roots`};
+    }
     let real;
     try {
       real = await fs.realpath(wanted);
     } catch {
+      let link = false;
+      try {
+        link = (await fs.lstat(wanted)).isSymbolicLink();
+      } catch {
+        // nothing there at all: a new file
+      }
+      if (link) {
+        return {refused: `${name} is a symbolic link that points nowhere`};
+      }
       try {
         real = path.join(await fs.realpath(path.dirname(wanted)), path.basename(wanted));
       } catch {
-        return {missing: true, real: wanted};
+        return {missing: true};
       }
     }
-    const inside = roots.some((root) => real === root || real.startsWith(root.endsWith(path.sep) ? root : root + path.sep));
-    return inside ? {real} : {refused: `${name} is outside the dataset roots`};
+    return within(real, roots) ? {real} : {refused: `${name} is outside the dataset roots`};
+  };
+
+  /** what the descriptor really opened, where the platform can say (Linux) */
+  const openedPath = async (handle) => {
+    try {
+      return await fs.readlink(`/proc/self/fd/${handle.fd}`);
+    } catch {
+      return undefined;
+    }
   };
 
   return {
     async open(name, mode) {
       const roots = await load();
       const writing = WRITE_MODES.has(mode);
-      const where = await place(name, writing ? roots.write : roots.read);
+      const where = await place(name, writing ? roots.write : roots.read, writing ? write : [...read, ...write]);
       if (where.refused !== undefined) {
         note({op: "OPEN", name, mode, allowed: false, why: where.refused});
         return {message: `Permission denied: ${where.refused}`};
@@ -108,19 +140,32 @@ export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
       }
       let handle;
       try {
-        const flags = mode === "INPUT" ? "r" : mode === "OUTPUT" ? "w" : mode === "APPENDING" ? "a+" : "r+";
-        handle = await fs.open(where.real, flags);
-        // opened by its real path: a symlink swapped in after the check is
-        // not followed a second time
+        const c = fs.constants;
+        // no O_APPEND for APPENDING: the runtime starts it at the end and
+        // writes at its own position, which is the same on every platform
+        // (pwrite ignores the offset under O_APPEND on Linux, not everywhere)
+        const flags = (mode === "INPUT" ? c.O_RDONLY : mode === "OUTPUT" ? c.O_RDWR | c.O_CREAT | c.O_TRUNC
+          : mode === "APPENDING" ? c.O_RDWR | c.O_CREAT : c.O_RDWR) | (c.O_NOFOLLOW ?? 0);
+        handle = await fs.open(where.real, flags, 0o644);
+        // a parent swapped for a symlink between the check and the open is
+        // caught here, by the path the descriptor ended up on
+        const actual = await openedPath(handle);
+        if (actual !== undefined && !within(actual, writing ? roots.write : roots.read)) {
+          await handle.close();
+          note({op: "OPEN", name, mode, allowed: false, why: "moved outside the dataset roots while opening"});
+          return {message: `Permission denied: ${name} is outside the dataset roots`};
+        }
         if ((await handle.stat()).isDirectory()) {
           // a directory opens on a system too (FOR INPUT IN BINARY MODE is 0
-          // there, measured), and then reads nothing
+          // there, measured), and then reads nothing; the write modes cannot
+          // open one at all
           await handle.close();
           handle = undefined;
         }
       } catch (error) {
         note({op: "OPEN", name, mode, allowed: false, why: error.code ?? String(error)});
-        return {message: error.code === "ENOENT" ? "No such file or directory" : `${error.code ?? "error"}: ${error.message}`};
+        // the code only: an OS message carries the resolved path
+        return {message: error.code === "ENOENT" ? "No such file or directory" : error.code === "ELOOP" ? `Permission denied: ${name} is a symbolic link` : (error.code ?? "error")};
       }
       note({op: "OPEN", name, mode, allowed: true, path: where.real});
       if (handle === undefined) {
@@ -133,8 +178,6 @@ export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
           return buffer.subarray(0, bytesRead);
         },
         async write(position, bytes) {
-          // APPENDING opens with "a+", where the OS puts every write at the
-          // end whatever the position says, which is what APPENDING means
           await handle.write(bytes, 0, bytes.length, position);
         },
         async size() {
@@ -148,7 +191,7 @@ export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
 
     async delete(name) {
       const roots = await load();
-      const where = await place(name, roots.write);
+      const where = await place(name, roots.write, write);
       if (where.refused !== undefined || where.missing === true) {
         note({op: "DELETE", name, allowed: false, why: where.refused ?? "no such directory"});
         return false;
@@ -180,7 +223,7 @@ export function memoryDatasetHost(files = new Map()) {
     files,
     async open(name, mode) {
       if (!files.has(name)) {
-        if (mode === "INPUT") {
+        if (mode === "INPUT" || mode === "UPDATE") {
           return {message: "No such file or directory"};
         }
         files.set(name, new Uint8Array(0));

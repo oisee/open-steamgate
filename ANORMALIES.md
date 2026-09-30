@@ -2514,7 +2514,7 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 
 ### ANOMALY-2026-09-30-dataset-not-supported — every DATASET statement throws "not supported" in the transpiler
 
-- Status: `pinned locally; upstream: backlog` (the hook is on `oisee/transpiler` `local/osd-build-2026-09-30` at `ddb0a993`; the same commit, 19e174d on branch `dataset-hook`, passed the critic gate and waits for the maintainer's capacity)
+- Status: `pinned locally; upstream: backlog` (the hook is on `oisee/transpiler` `local/osd-build-2026-09-30` at `ddb0a993`; the same change as a single commit on branch `dataset-hook` off abaplint/transpiler main passed the critic gate and waits for the maintainer's capacity)
 - Discovery date: `2026-09-30`
 - Affected versions: `@abaplint/transpiler` and `@abaplint/runtime` up to 2.13.93 on npm and abaplint/transpiler main at dd83da9
 - Affected ABAP statement, runtime API or adapter: `OPEN DATASET`, `READ DATASET`, `TRANSFER`, `CLOSE DATASET`, `DELETE DATASET`, `GET DATASET`, `SET DATASET` (TRUNCATE and SORT are unchanged)

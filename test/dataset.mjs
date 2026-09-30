@@ -11,9 +11,11 @@ import {join} from "node:path";
 import {ABAP} from "@abaplint/runtime";
 import {sandboxDatasetHost, memoryDatasetHost, rootsOf} from "../tools/osd-dataset.mjs";
 
-const abap = new ABAP();
-globalThis.abap ??= abap;
-const run = globalThis.abap;
+// The runtime's statements read the global `abap` (sy-subrc, the exception
+// classes). The suites share one process, so this file brings an instance of
+// its own and puts the previous one back: it neither reads nor clears the
+// host that test/setup.mjs installed for the others.
+const run = new ABAP();
 const T = run.types;
 
 const str = (v) => new T.String().set(v);
@@ -25,6 +27,15 @@ async function open(name, mode, binary = true, message) {
 }
 
 describe("DATASET host (X0)", function () {
+  let previous;
+  before(() => {
+    previous = globalThis.abap;
+    globalThis.abap = run;
+  });
+  after(() => {
+    globalThis.abap = previous;
+  });
+
   let base;
   let readRoot;
   let writeRoot;
@@ -84,6 +95,29 @@ describe("DATASET host (X0)", function () {
     expect(await open(join(readRoot, "link.txt"), "INPUT")).to.equal(8);
     expect(await open(join(writeRoot, "dir", "planted.txt"), "OUTPUT")).to.equal(8);
     expect(existsSync(join(outside, "planted.txt"))).to.equal(false);
+  });
+
+  it("a dangling symlink in a write root does not create its target", async () => {
+    symlinkSync(join(outside, "created.txt"), join(writeRoot, "dangling.txt"));
+    for (const mode of ["OUTPUT", "APPENDING", "UPDATE"]) {
+      expect(await open(join(writeRoot, "dangling.txt"), mode), mode).to.equal(8);
+    }
+    expect(existsSync(join(outside, "created.txt"))).to.equal(false);
+  });
+
+  it("a refusal outside the roots does not tell whether a directory exists", async () => {
+    const one = str("");
+    const two = str("");
+    await open(join(base, "no-such-dir", "x.txt"), "INPUT", true, one);
+    await open(join(outside, "none.txt"), "INPUT", true, two);
+    expect(one.get()).to.contain("Permission denied");
+    expect(two.get()).to.contain("Permission denied");
+  });
+
+  it("UPDATE of a missing file is sy-subrc 8, on disk and in memory", async () => {
+    expect(await open(join(writeRoot, "none.bin"), "UPDATE")).to.equal(8);
+    run.context.dataset = memoryDatasetHost();
+    expect(await open("/mem/none.bin", "UPDATE")).to.equal(8);
   });
 
   it("a name that is only a prefix of a root is not inside it", async () => {
