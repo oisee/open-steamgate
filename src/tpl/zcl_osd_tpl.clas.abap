@@ -1316,6 +1316,15 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
         ENDIF.
         rv_text = `'` && to_upper( iv_text ) && `'`.
     ENDCASE.
+    " what the type allows must also be one ABAP literal: on one source line,
+    " and at most 255 characters between the delimiters once quotes are doubled
+    IF lv_error IS INITIAL AND rv_text(1) CA |'`|.
+      IF iv_text CA |{ cl_abap_char_utilities=>newline }{ cl_abap_char_utilities=>cr_lf(1) }|.
+        lv_error = `cannot be one ABAP literal: it has a line break`.
+      ELSEIF strlen( rv_text ) - 2 > 255.
+        lv_error = `cannot be one ABAP literal: longer than 255 characters`.
+      ENDIF.
+    ENDIF.
     IF lv_error IS NOT INITIAL.
       RAISE EXCEPTION TYPE zcx_osd_tpl
         EXPORTING text = |{ iv_where }: literal { iv_name } { lv_error }|.

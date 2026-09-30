@@ -5,7 +5,7 @@
 `ZCL_OSD_TPL` (`src/tpl/`) renders a Mustache-style template over a JSON tree (`zif_ajson`) into
 lines of code, and gives every output line a **trace entry**: the template, the template line and the
 data path it came from. It is plain ABAP, so the same class runs in `npm test`, in OSGo and on a
-system through abapGit. Unit tests sit beside the class (`zcl_osd_tpl.clas.testclasses.abap`, 65
+system through abapGit. Unit tests sit beside the class (`zcl_osd_tpl.clas.testclasses.abap`, 66
 methods), as `src/regression/` does.
 
 ## Why
@@ -44,7 +44,7 @@ trace belongs inside the renderer, not around it.
 | `{{> p name=path ...}}` | partial with arguments: `name` resolves to `path` inside the partial and in the partials it calls; an inner argument of the same name wins |
 | `{{@index}}`, `{{#@first}}`, `{{^@last}}` | the nearest loop: 1-based index (like `sy-tabix`), first and last item |
 | `{{name \| lower}}`, `\| upper`, `\| pad 20` | filters, applied left to right; checked whether or not the value exists; `pad` takes one width from 1 to 255 |
-| `{{name \| literal}}` | ABAP literal using the model's sibling `name@type`; takes no argument and composes with other filters |
+| `{{name \| literal}}` | ABAP literal using the model's sibling `name@type`; takes no argument and composes with other filters; a value that would need a line break or more than 255 characters between the delimiters (quotes doubled) is refused |
 
 `literal` uses the original value's `@type` object (`built_in`, `length`, `decimals`) even after
 earlier filters change its text. Missing metadata and unknown built-in types are errors with the

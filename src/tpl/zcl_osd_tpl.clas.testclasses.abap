@@ -65,6 +65,7 @@ CLASS ltcl_osd_tpl DEFINITION FOR TESTING
     METHODS literal_argument FOR TESTING.
     METHODS literal_composition FOR TESTING RAISING cx_static_check.
     METHODS literal_not_scalar FOR TESTING.
+    METHODS literal_one_source_literal FOR TESTING.
     METHODS utf8_passes_through FOR TESTING RAISING cx_static_check.
     METHODS utf8 IMPORTING iv_hex TYPE xstring RETURNING VALUE(rv) TYPE string.
 
@@ -849,6 +850,29 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
       exp = `main:1: literal x needs a text or a number`
       act = error_text( iv_template = `{{x | literal}}`
                         iv_json = `{"x":null,"x@type":{"built_in":"CHAR","length":3}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_one_source_literal.
+    DATA lv_json TYPE string.
+    " a line break cannot stand inside an ABAP literal
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x cannot be one ABAP literal: it has a line break`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"a\nb","x@type":{"built_in":"STRG"}}` ) ).
+    " 255 characters fit, 256 do not
+    lv_json = `{"x":"` && repeat( val = `a` occ = 255 ) && `","x@type":{"built_in":"STRG"}}`.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `|` && repeat( val = `a` occ = 255 ) && `|`
+      act = replace( val = text( iv_template = `{{x | literal}}` iv_json = lv_json ) sub = '`' with = `|` occ = 0 ) ).
+    lv_json = `{"x":"` && repeat( val = `a` occ = 256 ) && `","x@type":{"built_in":"STRG"}}`.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x cannot be one ABAP literal: longer than 255 characters`
+      act = error_text( iv_template = `{{x | literal}}` iv_json = lv_json ) ).
+    " doubling the quotes counts: 200 quote characters become 400
+    lv_json = `{"x":"` && repeat( val = `'` occ = 200 ) && `","x@type":{"built_in":"CHAR","length":200}}`.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x cannot be one ABAP literal: longer than 255 characters`
+      act = error_text( iv_template = `{{x | literal}}` iv_json = lv_json ) ).
   ENDMETHOD.
 
 ENDCLASS.
