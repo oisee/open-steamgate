@@ -35,6 +35,12 @@ CLASS zcl_osd_dsl_mpc DEFINITION PUBLIC FINAL CREATE PRIVATE.
       RETURNING VALUE(rs_result) TYPE zcl_osd_tpl=>ty_result
       RAISING cx_static_check.
   PRIVATE SECTION.
+    " the entity model as JSON text; project_model_json splices it in as it is
+    " rather than parsing it and serialising the tree again
+    CLASS-METHODS entity_json
+      IMPORTING is_type TYPE zcl_stg_segw_gen=>ty_entity_type
+                iv_mpc TYPE string
+      RETURNING VALUE(rv_json) TYPE string.
     CLASS-METHODS flag_text IMPORTING iv_flag TYPE abap_bool RETURNING VALUE(rv_text) TYPE string.
     CLASS-METHODS quoted IMPORTING iv_text TYPE string RETURNING VALUE(rv_text) TYPE string.
     CLASS-METHODS method_template
@@ -55,6 +61,10 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD entity_model.
+    ri_model = zcl_ajson=>parse( entity_json( is_type = is_type iv_mpc = iv_mpc ) ).
+  ENDMETHOD.
+
+  METHOD entity_json.
     DATA lv_json TYPE string.
     DATA ls_prop TYPE zcl_stg_segw_gen=>ty_property.
     DATA ls_set TYPE zcl_stg_segw_gen=>ty_entity_set.
@@ -120,8 +130,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
         && `,"subscribable":` && quoted( zcl_stg_segw_gen=>ab( ls_set-subscribable ) )
         && `,"filter_required":` && quoted( zcl_stg_segw_gen=>ab( ls_set-filter_required ) ) && `}`.
     ENDLOOP.
-    lv_json = lv_json && `],"has_texts":` && quoted( flag_text( lv_has_label ) ) && `}`.
-    ri_model = zcl_ajson=>parse( lv_json ).
+    rv_json = lv_json && `],"has_texts":` && quoted( flag_text( lv_has_label ) ) && `}`.
   ENDMETHOD.
 
   METHOD entity_template.
@@ -228,7 +237,6 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
     DATA lv_first TYPE abap_bool.
     DATA lv_inner TYPE abap_bool.
     DATA ls_type TYPE zcl_stg_segw_gen=>ty_entity_type.
-    DATA lo_entity TYPE REF TO zif_ajson.
     DATA ls_ct TYPE zcl_stg_segw_gen=>ty_complex_type.
     DATA ls_prop TYPE zcl_stg_segw_gen=>ty_property.
     DATA ls_aso TYPE zcl_stg_segw_gen=>ty_association.
@@ -617,8 +625,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
       APPEND ls_impl TO lt_impl.
     ENDIF.
     LOOP AT is_model-entity_types INTO ls_type.
-      lo_entity = entity_model( is_type = ls_type iv_mpc = is_model-mpc ).
-      lv_block = lo_entity->stringify( ).
+      lv_block = entity_json( is_type = ls_type iv_mpc = is_model-mpc ).
       ls_impl-name = `DEFINE_` && ls_type-define_stem.
       ls_impl-content = substring( val = lv_block len = strlen( lv_block ) - 1 )
         && `,"is_entity":"X"}`.
