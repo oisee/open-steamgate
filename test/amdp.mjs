@@ -80,7 +80,7 @@ describe("AMDP HANA session recovery", () => {
       return client;
     });
     let message;
-    try { await target.call("ZTEST", {}); } catch (error) { message = error.message; }
+    try { await target.call("ZTEST", {}); } catch (error) { message = error.AMDP_REASON ?? error.message; }
     expect(message).to.contain("invalid SQLScript");
     expect(message).not.to.contain("secret-password");
     expect(connects).to.equal(1);
@@ -102,7 +102,7 @@ describe("AMDP HANA session recovery", () => {
         return client;
       }, configured);
       let message;
-      try { await target.call("ZTEST", {}); } catch (error) { message = error.message; }
+      try { await target.call("ZTEST", {}); } catch (error) { message = error.AMDP_REASON ?? error.message; }
       expect(message).to.contain("invalid SQLScript");
       expect(message, message).not.to.match(/secret/i);
       expect(connects).to.equal(1);
@@ -119,7 +119,7 @@ describe("AMDP HANA session recovery", () => {
     });
     target.sandboxPassword = "sbx-secret";
     let message;
-    try { await target.call("ZTEST", {}); } catch (error) { message = error.message; }
+    try { await target.call("ZTEST", {}); } catch (error) { message = error.AMDP_REASON ?? error.message; }
     expect(message, message).to.contain("near x=1: line 2 col 3");
     expect(message, message).not.to.contain("sbx-secret");
     await target.close();
@@ -148,7 +148,7 @@ describe("AMDP HANA session recovery", () => {
     await target.call("ZTEST", {});
     target.client.readyState = "closed";
     let message;
-    try { await target.call("ZTEST", {}); } catch (error) { message = error.message; }
+    try { await target.call("ZTEST", {}); } catch (error) { message = error.AMDP_REASON ?? error.message; }
     expect(message).to.contain("hana.example:39041").and.contain("schema OSD").and.contain("refused");
     expect(message).not.to.contain("secret-user").and.not.to.contain("secret-password");
     expect(connects).to.equal(2);
@@ -166,7 +166,7 @@ describe("AMDP HANA session recovery", () => {
     target.client = resetClient();
     target.client.readyState = "connected";
     let message;
-    try { await target.call("ZTEST", {}); } catch (error) { message = error.message; }
+    try { await target.call("ZTEST", {}); } catch (error) { message = error.AMDP_REASON ?? error.message; }
     expect(message).to.contain("hana.example:39041").and.contain("schema OSD").and.contain("socket hang up");
     expect(message).not.to.contain("secret-user").and.not.to.contain("secret-password");
     expect(connects).to.equal(2);
@@ -187,7 +187,7 @@ describe("AMDP HANA session recovery", () => {
     await target.call("ZTEST", {});
     clients[0].readyState = "closed";
     let message;
-    try { await target.call("ZTEST", {}); } catch (error) { message = error.message; }
+    try { await target.call("ZTEST", {}); } catch (error) { message = error.AMDP_REASON ?? error.message; }
     expect(message).to.contain("Connection closed").and.contain("hana.example:39041");
     expect(message).not.to.contain("secret-password");
     expect(clients).to.have.length(2);
@@ -210,7 +210,7 @@ describe("AMDP HANA session recovery", () => {
   it("reports an initial dial failure without credentials", async () => {
     const target = destination(() => fake((cb) => cb(new Error("refused secret-user secret-password"))));
     let message;
-    try { await target.call("ZTEST", {}); } catch (error) { message = error.message; }
+    try { await target.call("ZTEST", {}); } catch (error) { message = error.AMDP_REASON ?? error.message; }
     expect(message).to.contain("hana.example:39041").and.contain("schema OSD").and.contain("refused");
     expect(message).not.to.contain("secret-user").and.not.to.contain("secret-password");
   });
