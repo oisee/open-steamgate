@@ -20,7 +20,10 @@ import {readFileSync, readdirSync, existsSync} from "node:fs";
 import {join} from "node:path";
 
 const require = createRequire(import.meta.url);
-const abaplint = require("@abaplint/core");
+// The transpiler's database setup and rearranger use its own @abaplint/core.
+// Keep registry objects from that same copy so instanceof checks find tables.
+const transpilerRequire = createRequire(require.resolve("@abaplint/transpiler/package.json"));
+const abaplint = transpilerRequire("@abaplint/core");
 const {Rearranger} = require("@abaplint/transpiler/build/src/rearranger");
 const {Nodes, Statements, Structures, Expressions, BasicTypes} = abaplint;
 
@@ -597,6 +600,8 @@ const NATIVE = new Map([
   // open-abap-core's INT (a seed given to CREATE is ignored there too)
   ["CL_ABAP_TSTMP=>SUBTRACT", {fn: "abap.TstmpSubtract", args: ["TSTMP1:p", "TSTMP2:p"]}],
   ["CL_ABAP_RANDOM=>INT", {fn: "abap.RandomInt31", args: []}],
+  // crypto.randomUUID() on Node (go/abap/uuid.go); CREATE_UUID_* are ABAP around it
+  ["CL_SYSTEM_UUID=>RANDOM", {fn: "abap.UUIDRandom", args: []}],
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "Native_DESCRIBE_BY_NAME"],
   // ultra/json: the descriptor of a value (emit-go nativeRttiData), and the
   // JSON.parse half of open-abap-core's JSON reader (go/abap/jsonparse.go);
@@ -604,11 +609,16 @@ const NATIVE = new Map([
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "Native_DESCRIBE_BY_DATA"],
   ["CL_SXML_STRING_READER:LCL_JSON_PARSER=>PARSE", "Native_JSON_PARSE"],
   ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~UNESCAPE_URL", "abap.UnescapeURL"],
+  // the value text of CL_ABAP_UNIT_ASSERT's messages: Object.keys( ) of a
+  // structure and an object's constructor name are @KERNEL lines in
+  // open-abap-core's LCL_DUMP (go/abap/unitdump.go)
+  ["CL_ABAP_UNIT_ASSERT:LCL_DUMP=>TO_STRING", "abap.UnitDumpToString"],
+  ["CL_ABAP_UNIT_ASSERT:LCL_DUMP=>DUMP_STRUCTURE", "abap.UnitDumpStructure"],
   // bytes as base64, RFC 4648 with padding (A4H 2026-09-24, ZCL_GOGEN_T_B64);
-  // the LSD channel sends the show this way (ultra/packs). decode_x_base64
-  // stays kernel code: what a system does with text that is not base64 is
-  // not measured
+  // the LSD channel sends the show this way (ultra/packs). Invalid base64
+  // behavior on a system has not been measured.
   ["CL_HTTP_UTILITY=>ENCODE_X_BASE64", "abap.EncodeXBase64"],
+  ["CL_HTTP_UTILITY=>DECODE_X_BASE64", "abap.DecodeXBase64"],
   ["ZCL_OAO_RFC_DESTINATION=>REGISTER_LOCAL", "abap.RegisterLocalDestination"],
   // get_text( ) of an exception without a T100 message or a text id: the
   // fallback text, which A4H gives too (2026-09-23); anything else dumps
@@ -976,7 +986,7 @@ const nativeMeSig = (program, key, name) => {
 function typeOf(t, where, program) {
   // generic data: TYPE any / data / ANY TABLE, and data references. A
   // generic value is a binding to a typed slot (abap.Data in Go)
-  if (t instanceof BasicTypes.AnyType || t instanceof BasicTypes.DataType) return {k: "data"};
+  if (t instanceof BasicTypes.AnyType || t instanceof BasicTypes.DataType || t instanceof BasicTypes.SimpleType) return {k: "data"};
   if (t instanceof BasicTypes.TableType && (t.getRowType() instanceof BasicTypes.AnyType || t.getRowType() instanceof BasicTypes.DataType)) return {k: "data", table: true};
   if (t instanceof BasicTypes.DataReference) return {k: "dref"};
   // REF TO object: the root of every class, any object fits
@@ -1230,11 +1240,19 @@ function classIr(ctx0, obj) {
     }
     throw new Unsupported(`${className}: where REDEFINITION ${nm} comes from is not in the program`);
   };
+  // METHODS get_text REDEFINITION where get_text is a superclass's ALIASES
+  // for if_message~get_text: the method redefined is the interface method,
+  // and its implementation (METHOD get_text) is compiled under that name
+  const redefinedAlias = new Map();
   for (const m of def.getMethodDefinitions().getAll()) {
     if (!m.isRedefinition()) { addSig(m, "", m.isStatic()); continue; }
+    const nm = upper(m.getName());
+    const target = nm.includes("~") ? undefined : aliasTarget(reg, className, nm);
+    if (target?.includes("~")) redefinedAlias.set(nm, target);
     let o;
-    try { o = origin(m); } catch (e) { if (!(e instanceof Unsupported)) throw e; signatures.set(upper(m.getName()), {name: upper(m.getName()), unsupported: e.message}); continue; }
-    addSig(Object.assign(Object.create(Object.getPrototypeOf(o)), o, {getName: () => m.getName()}), "", m.isStatic());
+    const as = target?.includes("~") ? {getName: () => target} : m;
+    try { o = origin(as); } catch (e) { if (!(e instanceof Unsupported)) throw e; signatures.set(upper(as.getName()), {name: upper(as.getName()), unsupported: e.message}); continue; }
+    addSig(Object.assign(Object.create(Object.getPrototypeOf(o)), o, {getName: () => as.getName()}), "", m.isStatic());
   }
   const implemented = [...new Set(def.getImplementing().flatMap((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))]))];
   // an interface a superclass already implements (itself or through an
@@ -1274,7 +1292,8 @@ function classIr(ctx0, obj) {
     : tree.findAllStructures(Structures.ClassImplementation).filter((ci) => upper(ci.findFirstExpression(Expressions.ClassName).concatTokens()) === obj.local)
       .flatMap((ci) => ci.findAllStructures(Structures.Method));
   for (const node of methodNodes) {
-    const name = upper(node.findFirstExpression(Expressions.MethodName).concatTokens());
+    const written = upper(node.findFirstExpression(Expressions.MethodName).concatTokens());
+    const name = redefinedAlias.get(written) ?? written;
     const sig = signatures.get(name);
     const skip = (why) => {
       program.skipped.push(`${className}=>${name}: ${why}`);
@@ -1975,6 +1994,25 @@ function statement(node, ctx) {
     if (/\bID\b/i.test(node.concatTokens())) throw new Unsupported(`ASSERT with a checkpoint group: ${node.concatTokens()}`);
     return {s: "assert", cond: cond(node.findDirectExpression(Expressions.Cond), ctx), text: node.concatTokens()};
   }
+  if ([Statements.Add, Statements.Subtract, Statements.Multiply, Statements.Divide].some((kind) => isStmt(node, kind))) {
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const operand = source(node.findDirectExpression(Expressions.Source), ctx);
+    const kinds = [target.type.k, operand.type.k];
+    if (!kinds.every((k) => ["i", "int8", "p", "f", "c", "string", "n", "x"].includes(k))) {
+      throw new Unsupported(`arithmetic statement types ${kinds.join(" and ")}: ${text}`);
+    }
+    // As in an assignment expression, the target takes part in choosing the
+    // calculation type. Character operands and packed targets calculate in
+    // packed decimal; an x field enters as an integer.
+    const calc = kinds.includes("f") ? F
+      : kinds.some((k) => ["p", "c", "string", "n"].includes(k)) ? P31
+        : kinds.includes("int8") ? INT8 : I;
+    const op = isStmt(node, Statements.Add) ? "+" : isStmt(node, Statements.Subtract) ? "-"
+      : isStmt(node, Statements.Multiply) ? "*" : "/";
+    const left = convert(target, calc);
+    const right = convert(operand, calc);
+    return {s: "assign", target, value: convert({e: "bin", op, l: left, r: right, type: calc}, target.type)};
+  }
   if (isStmt(node, Statements.Move)) {
     const targets = node.findDirectExpressions(Expressions.Target);
     if (targets.length !== 1) throw new Unsupported("chained assignment");
@@ -2278,6 +2316,16 @@ function statement(node, ctx) {
     if (!cc) throw new Unsupported(`DELETE form: ${text}`);
     keyGuard(table.type, "DELETE");
     return {s: "delete_where", table, where: whereOf(cc, table.type.row, ctx, text)};
+  }
+  if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+TABLE\s+\S+\s+WITH\s+TABLE\s+KEY\s+/i.test(text)) {
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const key = /^DELETE\s+TABLE\s+\S+\s+WITH\s+TABLE\s+KEY\s+(\w+)\s*=\s*([\w-]+)\s*\.?$/i.exec(text);
+    const keyExpr = node.getChildren().find((x) => x.concatTokens().trim() === `${key?.[1]} = ${key?.[2]}`);
+    const value = keyExpr?.getChildren()[2];
+    if (!key || !value || table.type.k !== "table" || table.type.row.k !== "struct") throw new Unsupported(`DELETE form: ${text}`);
+    const field = fieldOf(ctx, table.type.row, key[1], text);
+    keyGuard(table.type, "DELETE TABLE");
+    return {s: "delete_key", table, key: field.name, value: convert(source(value, ctx, field.type), field.type)};
   }
   // ultra/itab: DELETE itab, the short form inside LOOP AT itab: the
   // current row goes and the loop goes on with the row after it (A4H
@@ -3657,8 +3705,8 @@ function constructor(c, ctx, inferred) {
       if (p.suppliedOf) return {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: given.has(p.suppliedOf) ? "X" : "", type: p.type}};
       const src = given.get(p.name);
       if (src === undefined) {
-        if (p.default !== undefined) return {dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
-        if (p.optional) return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
+        if (p.default !== undefined) return {name: p.name, supplied: false, dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
+        if (p.optional) return {name: p.name, supplied: false, dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
         throw new Unsupported(`NEW ${to.name}: ${p.name} not supplied`);
       }
       return {dir: "importing", byValue: p.byValue, type: p.type, value: convert(source(src, ctx, p.type), p.type)};
@@ -4810,8 +4858,8 @@ function raiseException(node, ctx, text) {
       if (p.suppliedOf) return {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: given.has(p.suppliedOf) ? "X" : "", type: p.type}};
       const src = given.get(p.name);
       if (src === undefined) {
-        if (p.default !== undefined) return {dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
-        if (p.optional) return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
+        if (p.default !== undefined) return {name: p.name, supplied: false, dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
+        if (p.optional) return {name: p.name, supplied: false, dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
         throw new Unsupported(`RAISE EXCEPTION TYPE ${cls}: ${p.name} not supplied`);
       }
       return {dir: "importing", byValue: p.byValue, type: p.type, value: convert(source(src, ctx, p.type), p.type)};
@@ -5195,6 +5243,12 @@ function call(chain, ctx, statement, hint) {
     const body = nk.slice(3, -1).find((c) => !isTok(c)) ?? null;
     return constructor({kw: "NEW", typeNode: nk[1], body, text: chain.concatTokens()}, ctx, hint);
   }
+  if (isExpr(kids[0], Expressions.Cast)) {
+    if (kids.length !== 1) throw new Unsupported(`a call on a CAST result: ${chain.concatTokens()}`);
+    const ck = kids[0].getChildren();
+    const body = ck.slice(3, -1).find((c) => isExpr(c, Expressions.Source));
+    return constructor({kw: "CAST", typeNode: ck[1], body, text: chain.concatTokens()}, ctx, hint);
+  }
   let receiver = null;
   let owner = null;
   let sup = null;
@@ -5423,7 +5477,7 @@ function call(chain, ctx, statement, hint) {
         if (p.optional) return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
         throw new Unsupported(`${name}: parameter ${p.name} not supplied`);
       }
-      return {dir: "importing", byValue: p.byValue, type: p.type, value: convert(source(s, ctx, p.type), p.type)};
+      return {name: p.name, supplied: true, dir: "importing", byValue: p.byValue, type: p.type, value: convert(source(s, ctx, p.type), p.type)};
     }
     const t = targets.get(p.name);
     if (t === undefined) return {dir: p.dir, place: null, type: p.type};
@@ -5452,6 +5506,9 @@ function call(chain, ctx, statement, hint) {
 
 function defaultValue(p, ctx) {
   let t = p.default;
+  // A system field in a signature default is read when the call is made.
+  // ASSERT_SUBRC's ACT defaults to sy-subrc.
+  if (SY[upper(t)] !== undefined) return convert({e: "sy", field: SY[upper(t)], type: I}, p.type);
   // SPACE is a built-in value, not an attribute of the class which declares
   // the method. GUI_UPLOAD's optional CODEPAGE uses exactly this default.
   if (/^space$/i.test(t)) return convert({e: "chars", value: "", type: C(1)}, p.type);
@@ -5785,6 +5842,10 @@ function compare(node, ctx) {
     if (v.type.k === "dref") {
       const r = {c: "initial", x: v};
       return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? r : {c: "not", x: r};
+    }
+    if (v.type.k === "data") {
+      const r = {c: "data_bound", x: v};
+      return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? {c: "not", x: r} : r;
     }
     if (v.type.k !== "ref") throw new Unsupported(`IS BOUND of a ${v.type.k}`);
     const r = {c: "initial", x: v};

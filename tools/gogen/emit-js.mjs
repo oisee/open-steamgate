@@ -777,6 +777,13 @@ function stmt(st, ctx, d) {
       return [`${t}{`, `${t}  const kept${n} = ${tb}.filter((r${n}) => !(${keep}));`,
         `${t}  s.sy.subrc = kept${n}.length < ${tb}.length ? 0 : 4;`, `${t}  ${tb} = kept${n};`, `${t}}`];
     }
+    case "delete_key": {
+      const tb = place(st.table, ctx);
+      const n = ctx.loop++;
+      return [`${t}{`, `${t}  const key${n} = ${expr(st.value, ctx)};`, `${t}  s.sy.subrc = 4;`,
+        `${t}  const i${n} = ${tb}.findIndex((r${n}) => r${n}.${ident(st.key)} === key${n});`,
+        `${t}  if (i${n} >= 0) { ${tb}.splice(i${n}, 1); s.sy.subrc = 0; }`, `${t}}`];
+    }
     // ultra/itab: DELETE itab inside LOOP AT itab, as emit-go
     case "delete_current": {
       const tb = place(st.table, ctx);
@@ -1079,6 +1086,7 @@ function cond(c, ctx) {
     // two object references (ultra/json refeq; ultra/events: undefined and
     // null are both the initial reference)
     case "refeq": return `((${expr(c.l, ctx)} ?? null) ${c.op === "=" ? "===" : "!=="} (${expr(c.r, ctx)} ?? null))`;
+    case "data_bound": return `abap.DataBound(${expr(c.x, ctx)})`;
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;
       if (c.x.type.k === "dref") return `(${expr(c.x, ctx)} === null)`;

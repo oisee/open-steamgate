@@ -14,6 +14,22 @@ import (
 type Raised struct {
 	Obj   any
 	Class string
+	// AssertionQuitNo records the QUIT value of the call that raised this
+	// assertion, so a test runner can decide what its teardown does next.
+	AssertionQuitNo bool
+}
+
+// WithAssertQuit attaches the explicit QUIT value to an assertion failure.
+func WithAssertQuit(quit int32, f func()) {
+	defer func() {
+		if x := recover(); x != nil {
+			if r, ok := AsRaised(x); ok && r.Class == "KERNEL_CX_ASSERT" {
+				r.AssertionQuitNo = quit == 0
+			}
+			panic(x)
+		}
+	}()
+	f()
 }
 
 func (r *Raised) Error() string { return "UNCAUGHT_EXCEPTION " + r.Class }

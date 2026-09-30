@@ -905,6 +905,34 @@ func EncodeXBase64(s *Session, unencoded string) string {
 	return base64.StdEncoding.EncodeToString([]byte(unencoded))
 }
 
+// DecodeXBase64 is CL_HTTP_UTILITY=>DECODE_X_BASE64. An xstring is stored
+// as raw bytes in the Go runtime, so the decoded bytes can be returned as a
+// string without the hex conversion used by the Node transpiler runtime.
+func DecodeXBase64(s *Session, encoded string) string {
+	// Buffer.from(s, "base64") accepts both alphabets, ignores non-alphabet
+	// bytes, stops at padding, and decodes the final unpadded group.
+	clean := make([]byte, 0, len(encoded))
+	for i := 0; i < len(encoded); i++ {
+		c := encoded[i]
+		if c == '=' {
+			break
+		}
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '+' || c == '/':
+			clean = append(clean, c)
+		case c == '-':
+			clean = append(clean, '+')
+		case c == '_':
+			clean = append(clean, '/')
+		}
+	}
+	if len(clean)%4 == 1 {
+		clean = clean[:len(clean)-1]
+	}
+	b, _ := base64.RawStdEncoding.DecodeString(string(clean))
+	return string(b)
+}
+
 // CP is the pattern match, measured on A4H (2026-09-23): * is any run, + any
 // one character, # makes the next character literal and case-sensitive;
 // everything else compares ignoring case. A c pattern stored empty was all

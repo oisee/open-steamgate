@@ -18,8 +18,16 @@ func TestUnitDump(t *testing.T) {
 		{"structure", Data{P: &st, T: gcPairT}, "a: x, n: 7"},
 		{"table", Data{P: &rows, T: gcTabT}, "[itab]"},
 		{"d never set", Data{P: &d, T: TD}, "00000000"},
-		{"initial object", Data{P: &o, T: TObj}, "[object, ]"},
 	}
+	t.Run("initial object throws", func(t *testing.T) {
+		defer func() {
+			x := recover()
+			if e, ok := x.(ArithmeticError); !ok || e.Class != "OBJECTS_OBJREF_NOT_ASSIGNED" {
+				t.Errorf("initial object panic = %v, want OBJECTS_OBJREF_NOT_ASSIGNED", x)
+			}
+		}()
+		UnitDumpToString(nil, Data{P: &o, T: TObj})
+	})
 	for _, c := range cases {
 		if got := UnitDumpToString(nil, c.v); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)

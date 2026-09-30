@@ -850,6 +850,12 @@ export function IsInitialData(d) {
   }
 }
 
+export function DataBound(d) {
+  if (d === null) return false;
+  if (d.t.kind === "l" || d.t.kind === "r") return d.get() != null;
+  throw new AbapError("NOT_COMPILED", `IS BOUND: a generic value of type kind ${d.t.kind}`);
+}
+
 // A structure or table written through generic data is written in place, as
 // Go writes through the pointer: the object in the slot stays the same
 // object, so a typed field symbol holding it (LOOP ASSIGNING, READ TABLE

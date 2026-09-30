@@ -26,7 +26,11 @@ func UnitDumpToString(s *Session, v Data) string {
 	case 'h':
 		return "[itab]"
 	case 'r':
-		return "[object, " + jsClassName(refTarget(v)) + "]"
+		obj := refTarget(v)
+		if refNil(obj) {
+			panic(ArithmeticError{"OBJECTS_OBJREF_NOT_ASSIGNED", "LCL_DUMP=>TO_STRING"})
+		}
+		return "[object, " + jsClassName(obj) + "]"
 	case 'D', 'T':
 		return textOf(v)
 	case 'N':

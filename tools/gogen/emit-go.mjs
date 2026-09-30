@@ -867,8 +867,16 @@ function leave(ctx, code) {
 /** an IMPORTING argument: a composite by reference goes as a pointer, by VALUE as a clone */
 function importingArg(a, ctx) {
   if (a.byValue === undefined || !composite(a.type)) return expr(a.value, ctx);
-  if (!a.byValue) return PLACES.has(a.value.e) ? `&${place(a.value, ctx)}` : `abap.Ptr(${expr(a.value, ctx)})`;
+  if (!a.byValue) return addressable(a.value) ? `&${place(a.value, ctx)}` : `abap.Ptr(${expr(a.value, ctx)})`;
   return copied(expr(a.value, ctx), a.value.type, a.value);
+}
+
+// A component of a temporary structure is readable but Go cannot take its
+// address. Keep the temporary alive in a box for a by-reference argument.
+function addressable(x) {
+  if (!PLACES.has(x.e)) return false;
+  if (x.e === "field" || x.e === "row" || x.e === "row_key") return addressable(x.base);
+  return true;
 }
 
 function place(p, ctx) {
@@ -1123,18 +1131,20 @@ function stmtLines(st, ctx, d) {
       if (st.call.e === "nop_call") return [];
       const c = st.call;
       const run = c.receiving ? `${place(c.receiving, ctx)} = ${expr(c, ctx)}` : expr(c, ctx);
+      const quit = c.owner === "CL_ABAP_UNIT_ASSERT" ? c.args.find((a) => a.name === "QUIT" && a.supplied) : null;
+      const marked = quit ? `abap.WithAssertQuit(${expr(quit.value, ctx)}, func() { ${run} })` : run;
       // ultra/events: a c field passed to a generic TYPE c keeps its length
       const fits = c.args.filter((a) => a.fitc).map((a) => `${t}${place(a.place, ctx)} = abap.CFit(${place(a.place, ctx)}, ${a.fitc})`);
       if (fits.length) {
-        if (!c.exceptions) return [`${t}${run}`, ...fits];
+        if (!c.exceptions) return [`${t}${marked}`, ...fits];
         const m = Object.entries(c.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
         return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(c.callee)}, map[string]int32{${m}}, ${c.exceptions.others})`,
-          `${t}\t${run}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`, ...fits];
+          `${t}\t${marked}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`, ...fits];
       }
-      if (!c.exceptions) return [`${t}${run}`];
+      if (!c.exceptions) return [`${t}${marked}`];
       const m = Object.entries(c.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
       return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(c.callee)}, map[string]int32{${m}}, ${c.exceptions.others})`,
-        `${t}\t${run}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
+        `${t}\t${marked}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
     }
     // ultra/events: SET HANDLER, one registration per handler (the names
     // Ev* are mixed case, so no ABAP name, all upper or all lower, meets them)
@@ -1645,6 +1655,14 @@ ${t}	}`));
         `${t}\t\t\tkept${n} = append(kept${n}, r${n})`, `${t}\t\t}`, `${t}\t}`,
         `${t}\ts.Sy.Subrc = 4`, `${t}\tif len(kept${n}) < len(${tb}) {`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}\t${tb} = kept${n}`, `${t}}`];
     }
+    case "delete_key": {
+      const n = ctx.loop++;
+      const tb = place(st.table, ctx);
+      return [`${t}{`, `${t}\tkey${n} := ${expr(st.value, ctx)}`, `${t}\ts.Sy.Subrc = 4`,
+        `${t}\tfor i${n}, r${n} := range ${tb} {`, `${t}\t\tif r${n}.${ident(st.key)} == key${n} {`,
+        `${t}\t\t\t${tb} = append(${tb}[:i${n}], ${tb}[i${n}+1:]...)`,
+        `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
+    }
     // ultra/itab: DELETE itab inside LOOP AT itab: the current row goes and
     // the loop index steps back, so the next pass reads the row after it
     case "delete_current": {
@@ -1794,7 +1812,7 @@ function expr(e, ctx) {
         : `case '${code}': return ${expr(b, ctx)}`));
       return `func() ${goType(e.type)} { switch ${sel} { ${arms.join("; ")} }; panic(abap.NotCompiled("arithmetic", ${JSON.stringify(`calculation type of ${e.text} with these operands: not measured`)})) }()`;
     }
-    case "wrap": return `abap.Data{P: ${PLACES.has(e.x.e) ? `&${place(e.x, ctx)}` : `abap.Ptr(${expr(e.x, ctx)})`}, T: ${desc(e.x.type)}}`;
+    case "wrap": return `abap.Data{P: ${addressable(e.x) ? `&${place(e.x, ctx)}` : `abap.Ptr(${expr(e.x, ctx)})`}, T: ${desc(e.x.type)}}`;
     case "unwrap": return unwrapTo(e.type, expr(e.x, ctx));
     case "unwrap_chars": return `abap.DataChars(${expr(e.x, ctx)})`;
     case "fae_row": return `fae${e.n}`;
@@ -1911,6 +1929,13 @@ function cond(c, ctx) {
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp":
+      // a generic operand (frontend compareValues, unwrap_chars): the pair
+      // decides the comparison type, so both go to abap.CmpData as data
+      if (c.l.e === "unwrap_chars" || c.r.e === "unwrap_chars") {
+        const side = (x) => (x.e === "unwrap_chars" ? expr(x.x, ctx) : `abap.StrData(${expr(x, ctx)})`);
+        if (c.op === "=" || c.op === "<>") return `${c.op === "=" ? "" : "!"}abap.DataEq(${side(c.l)}, ${side(c.r)})`;
+        return `abap.CmpData(${side(c.l)}, ${side(c.r)}) ${c.op} 0`;
+      }
       if (c.type?.k === "p") return `abap.CmpP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} 0`;
       return `${expr(c.l, ctx)} ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} ${expr(c.r, ctx)}`;
     // abap.RefEq: two initial references of different static types are equal (ultra/json fix round)
@@ -1935,6 +1960,7 @@ function cond(c, ctx) {
       return `func() bool { for _, r${n} := range ${expr(c.table, ctx)} { if ${keys} { return true } }; return false }()`;
     }
     case "assigned": return c.fs.type.k === "data" ? `(${ident(c.fs.name)}.P != nil)` : `(${ident(c.fs.name)} != nil)`;
+    case "data_bound": return `abap.DataBound(${expr(c.x, ctx)})`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;
     case "or": return `(${cond(c.l, ctx)} || ${cond(c.r, ctx)})`;
     case "not": return `!(${cond(c.x, ctx)})`;
