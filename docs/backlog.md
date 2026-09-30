@@ -4729,3 +4729,23 @@ every merge and the minutes are spent each time. Proposal (Alice): publish the p
 tags (`vscode-v*`, prerelease included) or a manual dispatch, so the preview always matches a released version;
 PR previews opt-in (a `preview` label) instead of on every PR. Keep the browser checks as the publish gate. Measure
 the CI minutes saved over a week before and after.
+
+### gogen Go runtime: split `go/abap` into self-contained packages (2026-09-30)
+
+Rule (Alice): new Go runtime work is idiomatic Go (channels, `select`, context deadlines) in its own small package
+under `tools/gogen/go/<name>` with its own tests (`-race` where concurrent); generated code depends on those packages,
+never the reverse. First instance: `tools/gogen/go/amc` (the AMC broker). Why: the Go build cache is per package,
+so small packages compile and cache independently (the layered build of #254 took the ABAP Unit inventory from
+7:25 to 37 s cold / 17 s warm), and an agent can hold one small package in its head.
+
+Refactoring backlog: move out of the `go/abap` monolith, one PR each, behaviour unchanged, measured before/after
+(cold + warm `go build` of the osgo host and the unit runner, `go test` time):
+`dataset` (DATASET host + sandbox), `sxml`/`xml` helpers, `cmp` (generic comparison, `gencmp*.go`), `codepage`/`conv`,
+`gzip`/`zip`, `osql` (where/writes/select), `unitdump`. Keep the public surface the emitter calls stable or change the
+emitter in the same PR; `semantics.mjs`, the unit runner compare and the osgo-host smoke are the gates.
+
+Tooling: `gopls` (not installed here yet: `go install golang.org/x/tools/gopls@latest`) for rename / extract /
+"move declarations to a new file"-style code actions from the CLI; `gomvpkg` or plain `git mv` + `goimports` for
+moving files between packages; `golangci-lint` and `goimports` are installed. GoLand's refactorings (Move across
+packages, Change Signature) are available through its built-in MCP server when an IDE session is running on a
+workstation -- optional, useful for large moves; never a CI dependency.
