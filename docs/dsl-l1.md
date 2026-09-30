@@ -48,14 +48,16 @@ Counts are ABAP characters (UTF-16 code units), as the engine already counts.
 
 ## Filters that know types
 
-Filters stay small and pure. The type-aware ones read `@type` of the value they get:
+Built: the `literal` filter of `ZCL_OSD_TPL` (`docs/abap-templates.md` has its type table).
+`{{x | literal}}` writes the value of `x` as an ABAP literal in the form its DDIC type needs, and
+refuses (with template and line) a value that does not fit the type. The type is read from a
+sibling `x@type` object (`built_in`, `length`, `decimals`) in the data, never from the value's
+text; a value without one is an error, not a fallback. Filters apply left to right to the text,
+and `literal` uses the original value's type.
 
-- `literal`: an ABAP literal in the form the type needs (`'X'` for CHAR, `` `x` `` for STRING,
-  a number without quotes for INT/DEC, `'20260930'` for DATS).
-- `abap_bool`: `abap_true` / `abap_false` from a boolean model field.
-
-A filter given a value without `@type` where it needs one is an error with its trace entry, not a
-fallback.
+Today the caller supplies `x@type`; the tests build it by hand. Writing it from the resolved DDIC
+type into the L1 model beside each value a template may print as a literal is the model's next
+step, and until then no model does.
 
 ## The trace as a sidecar
 
