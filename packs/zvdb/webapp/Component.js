@@ -144,7 +144,7 @@ sap.ui.define([
           state.setProperty("/message", mapped.length + " nearest texts, sorted by " + engine + " rank.");
         }, error: function (error) {
           state.setProperty("/results", []);
-          var hint = engine === "HANA" ? " Native HANA AMDP is available only when OSD itself uses HANA."
+          var hint = engine === "HANA" ? " Native HANA AMDP needs a reachable HANA destination; check its connection settings."
             : engine === "AMDP" ? " The original SQLScript runs through Portable-AMDP on DuckDB." : "";
           state.setProperty("/message", engine + " failed: " + errorText(error) + hint);
         }});

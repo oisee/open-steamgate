@@ -130,6 +130,12 @@ Seen on a HANA-backed deployment (status: Engine HDB): the zvdb Vector Workbench
 socket, and reports a refused connection in words (host/schema, not credentials); better, it reuses the system's HANA
 connection when the system database is HANA and the schema matches. Test with a session killed between two calls.
 
+**Fix done (2026-09-30):** eAMDP checks the cached hdb session, reconnects and redeploys once after a closed/reset
+connection, and retries the call once. Connect failures name the host, port, schema and sanitized driver error.
+It keeps a separate session even when the system database is HANA: `HanaDatabaseClient` disables autocommit for the
+ABAP LUW, while eAMDP's procedure DDL and calls currently use their own session. Sharing it would let deployment
+affect the caller's transaction. The vector page now points to the HANA destination when its call fails.
+
 **Then: three engines selectable on HANA**, each labelled truthfully in `SearchResultSet-Engine`:
 - **ANYDB**: portable Open SQL through the DB seam (works on every engine today).
 - **eAMDP**: the AMDP body executed natively on HANA through the destination (today's "HANA").

@@ -9,6 +9,113 @@ import {expect} from "chai";
 import {readFileSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import {extract, procedure, hanaType, parameterType, localTypes} from "../tools/amdp-extract.mjs";
+import {AmdpDestination} from "../tools/amdp-destination.mjs";
+
+describe("AMDP HANA session recovery", () => {
+  const settings = {host: "hana.example", port: 39041, user: "secret-user", password: "secret-password"};
+  const p = {module: "ZTEST", class: "ZCL_TEST", method: "RUN", kind: "procedure",
+    language: "SQLSCRIPT", body: "SELECT 1 FROM DUMMY;", parameters: [], hash: "one"};
+  const destination = (createClient) => new AmdpDestination({
+    procedures: new Map([[p.module, p]]), settings: async () => settings, createClient,
+    database: () => undefined,
+  });
+  const fake = (onConnect = (cb) => cb()) => ({
+    readyState: "new", statements: [],
+    connect(cb) { onConnect((error) => { if (!error) this.readyState = "connected"; cb(error); }); },
+    exec(sql, cb) { this.statements.push(sql); cb(null, {}); },
+    end() { this.readyState = "closed"; },
+  });
+
+  it("reconnects a session killed between calls and redeploys", async () => {
+    const clients = [fake()];
+    clients[0].readyState = "connected";
+    const target = destination(() => { const c = fake(); clients.push(c); return c; });
+    target.client = clients[0];
+    await target.call("ZTEST", {});
+    clients[0].readyState = "closed";
+    await target.call("ZTEST", {});
+    expect(clients).to.have.length(2);
+    expect(clients[1].statements.some((sql) => sql.startsWith("CREATE PROCEDURE"))).to.equal(true);
+    expect(clients[1].statements.some((sql) => sql.startsWith("CALL "))).to.equal(true);
+    await target.close();
+  });
+
+  it("reports a refused reconnect with endpoint and schema, without credentials", async () => {
+    const initial = fake();
+    initial.readyState = "connected";
+    let connects = 1;
+    const target = destination(() => { connects++; return fake((cb) => cb(new Error("refused secret-user secret-password"))); });
+    target.client = initial;
+    await target.call("ZTEST", {});
+    target.client.readyState = "closed";
+    let message;
+    try { await target.call("ZTEST", {}); } catch (error) { message = error.message; }
+    expect(message).to.contain("hana.example:39041").and.contain("schema OSD").and.contain("refused");
+    expect(message).not.to.contain("secret-user").and.not.to.contain("secret-password");
+    expect(connects).to.equal(2);
+  });
+
+  it("retries a socket reset once and reports a second failure without credentials", async () => {
+    const resetClient = () => {
+      const c = fake();
+      c.exec = (sql, cb) => sql.startsWith("CALL ")
+        ? cb(Object.assign(new Error("socket hang up secret-user secret-password"), {code: "ECONNRESET"})) : cb(null, {});
+      return c;
+    };
+    let connects = 1;
+    const target = destination(() => { connects++; return resetClient(); });
+    target.client = resetClient();
+    target.client.readyState = "connected";
+    let message;
+    try { await target.call("ZTEST", {}); } catch (error) { message = error.message; }
+    expect(message).to.contain("hana.example:39041").and.contain("schema OSD").and.contain("socket hang up");
+    expect(message).not.to.contain("secret-user").and.not.to.contain("secret-password");
+    expect(connects).to.equal(2);
+    await target.close();
+  });
+
+  it("does not reconnect twice when the replacement session also fails", async () => {
+    const clients = [fake()];
+    clients[0].readyState = "connected";
+    const target = destination(() => {
+      const c = fake();
+      c.exec = (sql, cb) => sql.startsWith("CALL ")
+        ? cb(Object.assign(new Error("Connection closed secret-password"), {code: "EHDBCLOSE"})) : cb(null, {});
+      clients.push(c);
+      return c;
+    });
+    target.client = clients[0];
+    await target.call("ZTEST", {});
+    clients[0].readyState = "closed";
+    let message;
+    try { await target.call("ZTEST", {}); } catch (error) { message = error.message; }
+    expect(message).to.contain("Connection closed").and.contain("hana.example:39041");
+    expect(message).not.to.contain("secret-password");
+    expect(clients).to.have.length(2);
+    await target.close();
+  });
+
+  it("recognizes a driver connection code without a recognizable message", async () => {
+    const first = fake();
+    first.readyState = "connected";
+    first.exec = (sql, cb) => sql.startsWith("CALL ")
+      ? cb(Object.assign(new Error("write failed"), {code: "EPIPE"})) : cb(null, {});
+    let connects = 0;
+    const target = destination(() => { connects++; return fake(); });
+    target.client = first;
+    await target.call("ZTEST", {});
+    expect(connects).to.equal(1);
+    await target.close();
+  });
+
+  it("reports an initial dial failure without credentials", async () => {
+    const target = destination(() => fake((cb) => cb(new Error("refused secret-user secret-password"))));
+    let message;
+    try { await target.call("ZTEST", {}); } catch (error) { message = error.message; }
+    expect(message).to.contain("hana.example:39041").and.contain("schema OSD").and.contain("refused");
+    expect(message).not.to.contain("secret-user").and.not.to.contain("secret-password");
+  });
+});
 
 // The fixtures are kept as .abap.txt, not .abap: test/ is an input folder of
 // the build, and a file that looks like a class gets transpiled -- an AMDP

@@ -38,6 +38,20 @@ async function hanaSettings() {
 
 const SCHEMA = process.env.HANA_SCHEMA ?? process.env.HXE_SCHEMA ?? "OSD";
 
+function lostConnection(error) {
+  return ["EHDBCLOSE", "EHDBCONNECT", "EHDBOPENCONN", "EHDBTIMEOUT", "EHDBINIT",
+    "ECONNRESET", "ECONNABORTED", "EPIPE"].includes(error?.code) ||
+    /connection closed|socket hang up|connection reset|broken pipe/i.test(String(error?.message ?? ""));
+}
+
+function safeConnectionError(error, settings) {
+  let message = String(error?.message ?? error);
+  for (const secret of [settings.password, settings.user].filter(Boolean)) {
+    message = message.split(String(secret)).join("[redacted]");
+  }
+  return `AMDP: HANA connection to ${settings.host}:${settings.port}, schema ${SCHEMA} failed: ${message.slice(0, 200)}`;
+}
+
 export const amdpSessionSchema = (schema = SCHEMA) => [
   `CREATE SCHEMA "${schema}"`,
   `SET SCHEMA "${schema}"`,
@@ -183,6 +197,8 @@ export class AmdpDestination {
     this.trace = options.trace === true;
     this.procedures = options.procedures ?? loadProcedures(this.folder);
     this.client = undefined;
+    this.settingsProvider = options.settings ?? hanaSettings;
+    this.createClient = options.createClient;
     // The application database is looked up at call time: setup installs the
     // destination before every backend branch has connected. Keeping this a
     // provider also proves that portable AMDP uses the caller's connection,
@@ -194,13 +210,14 @@ export class AmdpDestination {
   }
 
   async #connect() {
-    if (this.client !== undefined) return this.client;
+    if (this.client !== undefined && this.client.readyState === "connected") return this.client;
+    if (this.client !== undefined) this.#forgetClient();
     // A host that was built without a HANA driver -- the browser preview,
     // where the bundle leaves hdb and tools/amdp-run.mjs out -- still has this
     // destination, because a developer needs "there is no HANA here" rather
     // than "unknown destination AMDP". Say that, rather than fail on an
     // undefined import.
-    const settings = await hanaSettings();
+    const settings = await this.settingsProvider();
     if (settings === undefined) {
       await refuse("AMDP: this build has no HANA driver (the browser preview); an AMDP method needs a " +
         "database that speaks SQLScript");
@@ -217,28 +234,32 @@ export class AmdpDestination {
       await refuse("AMDP: no HANA is configured here -- set HXE_HOST / HXE_PASSWORD, or put the " +
         "password in ~/.osd/hxe-password. An AMDP method needs a database that speaks SQLScript");
     }
-    const hdb = (await import("hdb")).default;
-    this.client = hdb.createClient(settings);
+    this.settings = settings;
     try {
+      const createClient = this.createClient ?? (await import("hdb")).default.createClient;
+      this.client = createClient(settings);
       await new Promise((resolve, reject) => this.client.connect((e) => (e ? reject(e) : resolve())));
+      const [createSchema, setSchema] = amdpSessionSchema();
+      await this.#exec(createSchema).catch(() => undefined);
+      await this.#exec(setSchema);
     } catch (reason) {
-      // the driver's own words, through the same door, so that a HANA that is
-      // configured and unreachable is catchable too and not only a missing one
-      this.client = undefined;
-      await refuse(`AMDP: the configured HANA did not answer: ${String(reason?.message ?? reason).slice(0, 120)}`);
+      this.#forgetClient();
+      await refuse(safeConnectionError(reason, settings));
     }
     // This is a separate HANA session from the system DatabaseClient. An
     // AMDP body names DDIC tables without a schema, just as it does on ABAP;
     // SQL SECURITY INVOKER resolves those names in this session's current
     // schema. Without SET SCHEMA it is the login user's schema (SYSTEM), and
     // a perfectly deployed procedure cannot see the system's own tables.
-    const [createSchema, setSchema] = amdpSessionSchema();
-    await this.#exec(createSchema).catch(() => undefined);
-    await this.#exec(setSchema);
-    // the privileged settings, kept for the restricted-user path below, which
-    // runs only after this has succeeded
-    this.settings = settings;
+    // The privileged settings are also used by the restricted-user path below.
     return this.client;
+  }
+
+  #forgetClient() {
+    try { this.client?.end(); } catch { /* already closed */ }
+    this.client = undefined;
+    // A server restart may have removed the procedures; rebuild them on the new session.
+    this.deployed.clear();
   }
 
   #exec(sql) {
@@ -437,9 +458,6 @@ export class AmdpDestination {
     if (database?.name === "duckdb") {
       return this.#portable(p, signature, database);
     }
-    await this.#connect();
-    await this.#deploy(p);
-
     const {call} = await import("./amdp-run.mjs");
     const inputs = {};
     for (const x of p.parameters) {
@@ -449,20 +467,40 @@ export class AmdpDestination {
       // the runtime's typed value -> plain JSON the runner can bind
       inputs[x.name] = typeof given.array === "function" ? given.array().map((row) => plainRow(row)) : given.get();
     }
-    let result;
-    if (p.kind === "function") {
-      // a table function is queried, not called
-      const args = p.parameters.filter((x) => x.direction === "IN")
-        .map((x) => `${x.name} => ${literal(inputs[x.name])}`).join(", ");
-      const rows = await this.#exec(
-        `SELECT * FROM "${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"(${args})`);
-      const returning = p.parameters.find((x) => x.direction === "RETURNING");
-      result = {[returning?.name ?? "rt"]: (rows.find(Array.isArray) ?? []).map((row) =>
-        Object.fromEntries(Object.entries(row).map(([k, v]) =>
-          [k.toLowerCase(), abapDateTime(Buffer.isBuffer(v) ? v.toString("utf8") : v)])))};
-    } else {
+    // A visibly closed cached session already spends this call's one reconnect.
+    // A socket can also die while still reporting "connected"; that case gets
+    // the retry below after the first operation fails.
+    const reconnecting = this.client !== undefined && this.client.readyState !== "connected";
+    const invoke = async () => {
+      await this.#connect();
+      await this.#deploy(p);
+      if (p.kind === "function") {
+        // a table function is queried, not called
+        const args = p.parameters.filter((x) => x.direction === "IN")
+          .map((x) => `${x.name} => ${literal(inputs[x.name])}`).join(", ");
+        const rows = await this.#exec(
+          `SELECT * FROM "${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"(${args})`);
+        const returning = p.parameters.find((x) => x.direction === "RETURNING");
+        return {[returning?.name ?? "rt"]: (rows.find(Array.isArray) ?? []).map((row) =>
+          Object.fromEntries(Object.entries(row).map(([k, v]) =>
+            [k.toLowerCase(), abapDateTime(Buffer.isBuffer(v) ? v.toString("utf8") : v)])))};
+      }
       const method = {name: p.method, parameters: p.parameters.map((x) => ({...x, abapType: x.hanaType}))};
-      result = await call(this.client, `"${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"`, method, inputs, undefined);
+      return call(this.client, `"${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"`, method, inputs, undefined);
+    };
+    let result;
+    try {
+      result = await invoke();
+    } catch (error) {
+      if (!lostConnection(error)) throw error;
+      if (reconnecting) await refuse(safeConnectionError(error, this.settings));
+      this.#forgetClient();
+      try {
+        result = await invoke();
+      } catch (retryError) {
+        if (lostConnection(retryError)) await refuse(safeConnectionError(retryError, this.settings));
+        throw retryError;
+      }
     }
 
     for (const x of p.parameters) {
