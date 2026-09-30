@@ -13,7 +13,7 @@ import {basename, join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DEFAULT_DDIC, registryFor} from "../tools/dsl-ddic.mjs";
 import {buildRule, checkRule, compileRule, describeCases, evaluate, misfit, RuleError, stepValue} from "../tools/dsl-l2.mjs";
-import {bump, compareValues} from "../tools/dsl-l2-eval.mjs";
+import {bump, caseDiscriminates, compareValues, conditionOf} from "../tools/dsl-l2-eval.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
@@ -277,9 +277,11 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
   const key = (name) => field(name, "<KEYFLAG>X</KEYFLAG><INTTYPE>C</INTTYPE><INTLEN>000008</INTLEN><NOTNULL>X</NOTNULL><DATATYPE>CHAR</DATATYPE><LENG>000004</LENG>");
   const keyInt = (name) => field(name, "<KEYFLAG>X</KEYFLAG><ROLLNAME>ZOSD_L2_T_I1</ROLLNAME><NOTNULL>X</NOTNULL><COMPTYPE>E</COMPTYPE>");
   const elem = (name, rollname) => field(name, `<ROLLNAME>${rollname}</ROLLNAME><COMPTYPE>E</COMPTYPE>`);
+  const typed = (name, type, length) => field(name, `<DATATYPE>${type}</DATATYPE><LENG>${String(length).padStart(6, "0")}</LENG>`);
   const FIXTURE = {
-    "zosd_l2_numa.tabl.xml": tableXml("ZOSD_L2_NUMA", [key("ID"), elem("LVL", "ZOSD_L2_T_I1")]),
-    "zosd_l2_numb.tabl.xml": tableXml("ZOSD_L2_NUMB", [key("ID"), keyInt("SEQ"), elem("AMT", "ZOSD_L2_T_DEC"), elem("CNT", "ZOSD_L2_T_I1")]),
+    "zosd_l2_numa.tabl.xml": tableXml("ZOSD_L2_NUMA", [key("ID"), elem("LVL", "ZOSD_L2_T_I1"), typed("N4", "NUMC", 4), typed("CODE", "CHAR", 10)]),
+    "zosd_l2_numb.tabl.xml": tableXml("ZOSD_L2_NUMB", [key("ID"), keyInt("SEQ"), elem("AMT", "ZOSD_L2_T_DEC"), elem("CNT", "ZOSD_L2_T_I1"),
+      typed("N6", "NUMC", 6), typed("C4", "CHAR", 4)]),
     "zosd_l2_t_i1.dtel.xml": dtel("ZOSD_L2_T_I1", "INT1", 3, 0),
     "zosd_l2_t_dec.dtel.xml": dtel("ZOSD_L2_T_DEC", "DEC", 5, 2),
   };
@@ -664,6 +666,159 @@ examples:
       const run = spawnSync(process.execPath, ["tools/dsl-l2.mjs", "cases", RULE], {encoding: "utf8"});
       expect(run.status, run.stderr).to.equal(0);
       expect(run.stdout.trim()).to.equal(text.trim());
+    });
+  });
+
+  describe("a derived case must discriminate", () => {
+    const head = (name, where, seq = "1") => `rule: ${name}
+class: zcl_l2_${name.replaceAll("-", "_")}
+title: a rule whose conditions share a field
+for: ZOSD_L2_NUMA as n
+forbid:
+  exists: ZOSD_L2_NUMB as m
+  where: ${where}
+alert: "{n.id} {m.seq}"
+boundaries: auto
+examples:
+  - name: fires
+    date: 20261001
+    rows:
+      ZOSD_L2_NUMA: [{id: A001, lvl: 1}]
+      ZOSD_L2_NUMB: [{id: A001, seq: ${seq}, amt: 1.00, cnt: 0}]
+    expect: ["A001 ${seq}"]
+`;
+    let reg;
+    before(() => { reg = registryFor([fixtureDdic(), ".local/lars/open-abap-core/src"], []); });
+    const compile = (name, text) => {
+      const f = join(scratch, `${name}.l2.yaml`);
+      writeFileSync(f, text);
+      return compileRule(f, {registry: reg});
+    };
+    const rowsOf = (t) => Object.fromEntries(t.tables.map((x) => [x.table, x.rows.map((r) => Object.fromEntries(r.fields.map((f) => [f.column, f.value])))]));
+    const discriminating = (model) => model.cases.filter((c) => c.derived.condition !== "forbid").every((c) =>
+      caseDiscriminates(model, conditionOf(model, c.derived.condition), rowsOf(c), {date: c.date.value}));
+
+    it("critic 1: b.id = a.id and b.id <> 'X': the cases of <> 'X' keep b.id as tested, and <> 'Y' is caught", () => {
+      const text = head("critic-one", "m.id = n.id and m.id <> 'X'");
+      const model = compile("critic-one", text);
+      expect(discriminating(model)).to.equal(true);
+      const mine = model.cases.filter((c) => c.derived.condition === "forbid/where/2");
+      const idOf = (c) => rowsOf(c).zosd_l2_numb[0].id;
+      expect(mine.length + model.skipped.filter((k) => k.condition.startsWith("m.id <> 'X'")).length).to.equal(3);
+      for (const k of model.skipped) expect(k.reason).to.match(/^does not isolate |^no /);
+      // the tested value is kept: the eq case has b.id = X, the ne case b.id != X
+      expect(mine.map((c) => [c.derived.kind, idOf(c) === "X"])).to.deep.include.members([["eq", true]]);
+      const mutated = compile("critic-one-y", text.replace("m.id <> 'X'", "m.id <> 'Y'").replace("class: zcl_l2_critic_one", "class: zcl_l2_critic_oney"));
+      const caught = mine.some((c) => JSON.stringify(evaluate(mutated, rowsOf(c), {date: c.date.value})) !== JSON.stringify(c.expect.map((e) => e.value)));
+      expect(caught, "some emitted case distinguishes <> 'Y' from <> 'X'").to.equal(true);
+    });
+
+    it("critic 2: b.id = a.id and b.seq <= 1: the second exists row still satisfies the where, so two alerts", () => {
+      const model = compile("critic-two", head("critic-two", "m.id = n.id and m.seq <= 1"));
+      expect(discriminating(model)).to.equal(true);
+      const two = model.cases.find((c) => c.method === "b_exists_two");
+      if (two) expect(two.expect, "two alerts").to.have.length(2);
+      else expect(model.skipped.map((k) => k.reason).join("\n")).to.match(/does not isolate/);
+      expect(two, "it is emitted here: seq 0 satisfies <= 1").to.not.equal(undefined);
+      expect(rowsOf(two).zosd_l2_numb.map((r) => r.seq)).to.deep.equal(["1", "0"]);
+    });
+
+    it("a rule whose exists key cannot vary lists the two case as skipped with a reason", () => {
+      const model = compile("critic-three", head("critic-three", "m.id = n.id and m.seq = 1"));
+      expect(model.cases.map((c) => c.method)).to.not.include("b_exists_two");
+      expect(model.skipped.map((k) => k.reason).join("\n")).to.match(/does not isolate the exists/);
+    });
+
+    it("the guard itself: rows that no mutant of the condition changes do not discriminate", () => {
+      const model = compile("guard", head("guard", "m.id = n.id and m.seq <= 1"));
+      const cond = conditionOf(model, "forbid/where/2");
+      const params = {date: "20261001"};
+      const row = {zosd_l2_numa: [{id: "A001", lvl: "1"}], zosd_l2_numb: [{id: "A001", seq: "1", amt: "1.00", cnt: "0"}]};
+      expect(caseDiscriminates(model, cond, row, params), "seq = 1 sits on the boundary").to.equal(true);
+      const far = {zosd_l2_numa: [{id: "A001", lvl: "1"}], zosd_l2_numb: [{id: "A001", seq: "100", amt: "1.00", cnt: "0"}]};
+      expect(caseDiscriminates(model, cond, far, params), "seq = 100: dropping the condition or testing = changes the result").to.equal(true);
+      const nothing = {zosd_l2_numa: [{id: "A001", lvl: "1"}], zosd_l2_numb: []};
+      expect(caseDiscriminates(model, cond, nothing, params), "no exists row: nothing to decide").to.equal(false);
+    });
+
+    it("every derived case of the demo and of the synthetic rule discriminates", () => {
+      expect(discriminating(compileRule(RULE, {registry}))).to.equal(true);
+      const agree = compile("disc-agree", `rule: disc-agree
+class: zcl_l2_disc_agree
+title: t
+for: ZOSD_L2_NUMA as n
+when: n.lvl >= 3 and n.lvl <> 7
+forbid:
+  exists: ZOSD_L2_NUMB as m
+  where: m.id = n.id and m.amt <= 12.5 and m.cnt < n.lvl
+alert: "{n.id} {m.seq}"
+boundaries: auto
+examples:
+  - name: fires
+    date: 20261001
+    rows:
+      ZOSD_L2_NUMA: [{id: A001, lvl: 5}]
+      ZOSD_L2_NUMB: [{id: A001, seq: 1, amt: 10.50, cnt: 2}]
+    expect: ["A001 1"]
+`);
+      expect(discriminating(agree)).to.equal(true);
+    });
+  });
+
+  describe("field-to-field types and NUMC", () => {
+    const rule = (name, when, where, alert, rows) => `rule: ${name}
+class: zcl_l2_${name.replaceAll("-", "_")}
+title: t
+for: ZOSD_L2_NUMA as n
+${when}forbid:
+  exists: ZOSD_L2_NUMB as m
+  where: ${where}
+alert: "${alert}"
+boundaries: auto
+examples:
+  - name: fires
+    date: 20261001
+    rows:
+      ZOSD_L2_NUMA: [${rows[0]}]
+      ZOSD_L2_NUMB: [${rows[1]}]
+    expect: [${rows[2]}]
+`;
+    let reg;
+    before(() => { reg = registryFor([fixtureDdic(), ".local/lars/open-abap-core/src"], []); });
+    const file = (name, text) => { const f = join(scratch, `${name}.l2.yaml`); writeFileSync(f, text); return f; };
+
+    for (const [what, where, message] of [
+      ["NUMC 6 against NUMC 4", "m.id = n.id and m.n6 = n.n4", /m\.n6 is NUMC 6, n\.n4 is NUMC 4; a field-to-field comparison needs the same type, length and decimals/],
+      ["CHAR 4 against CHAR 10", "m.id = n.id and m.c4 = n.code", /m\.c4 is CHAR 4, n\.code is CHAR 10; a field-to-field/],
+    ]) {
+      it(`${what} is refused at the where line`, () => {
+        const f = file(`s1-${what.replace(/\W+/g, "")}`, rule("s1", "", where, "{n.id}", ["{id: A001, lvl: 1}", "{id: A001, seq: 1}", '"A001"']));
+        const line = readFileSync(f, "utf8").split("\n").findIndex((l) => /^\s+where:/.test(l)) + 1;
+        expect(() => compileRule(f, {registry: reg})).to.throw(RuleError, new RegExp(`:${line}: `));
+        expect(() => compileRule(f, {registry: reg})).to.throw(RuleError, message);
+      });
+    }
+
+    const NUMC_RULE = () => rule("numc-short", "when: n.n4 = '12'\n", "m.id = n.id", "{n.id} {n.n4}",
+      ["{id: A001, lvl: 1, n4: '12'}", "{id: A001, seq: 1}", '"A001 0012"']);
+
+    it("a short NUMC literal, example value and hole read as the DDIC length: the expect is the padded text", () => {
+      const model = compileRule(file("numc-short", NUMC_RULE()), {registry: reg});
+      expect(model.cases.length).to.be.greaterThan(3);
+      for (const c of model.cases.filter((x) => x.expect.length)) expect(c.expect[0].value).to.match(/^A001 (0012|0011|0013)$/);
+      expect(model.cases.find((c) => c.method === "b_n4_eq").expect.map((e) => e.value)).to.deep.equal(["A001 0012"]);
+    });
+
+    it("and ABAP agrees on every case of it", async () => {
+      const f = file("numc-abap", NUMC_RULE().replace("zcl_l2_numc_short", "zcl_l2_numc_abap"));
+      const {results, messages} = await runRule(f, "zcl_l2_numc_abap", {ruleRegistry: reg, fixture: true,
+        tables: ["zosd_l2_numa.tabl.xml", "zosd_l2_numb.tabl.xml", "zosd_l2_t_i1.dtel.xml", "zosd_l2_t_dec.dtel.xml"], tableDir: join(scratch, "num-ddic")});
+      expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+    });
+
+    it("an example name that makes the comparison message too long for a literal is refused", () => {
+      const f = file("long-name", NUMC_RULE().replace("name: fires", `name: a${"!".repeat(225)}b`));
+      expect(() => compileRule(f, {registry: reg})).to.throw(RuleError, /example name with the comparison message/);
     });
   });
 

@@ -33,6 +33,7 @@ export function canonical(type, text) {
   const kind = kindOf(type);
   if (kind === "int") return String(BigInt(text));
   if (kind === "dec") return formatDecimal(scaled(text, type.decimals ?? 0), type.decimals ?? 0);
+  if (type.built_in === "NUMC" && /^[0-9]*$/.test(text)) return text.padStart(type.length ?? 1, "0");
   return text;
 }
 
@@ -216,7 +217,7 @@ export function evaluate(model, rows, params = {}) {
   const tables = lower(rows);
   const schema = model.ddic;
   const fieldsOf = (table) => schema[table].fields;
-  const valueOf = (table, row, column) => row[column] ?? initialValue(fieldsOf(table)[column]);
+  const valueOf = (table, row, column) => canonical(fieldsOf(table)[column], row[column] ?? initialValue(fieldsOf(table)[column]));
   const ordered = (table) => [...(tables[table] ?? [])].sort((x, y) => {
     for (const key of schema[table].keys) {
       const c = compareValues(fieldsOf(table)[key], valueOf(table, x, key), fieldsOf(table)[key], valueOf(table, y, key));
@@ -287,6 +288,37 @@ function alertsOf(model, rows, params) {
   return evaluate(model, rows, params);
 }
 
+// Gives the fields of `table` that `conditions` constrain values that satisfy them
+// (the row's other fields stay); a reason when none does.
+function solveRow(model, params, rows, alias, table, conditions, keep = false) {
+  const row = rows[table][0];
+  const byColumn = new Map();
+  for (const c of conditions.filter((x) => x.cmp.alias === alias)) {
+    if (!byColumn.has(c.cmp.column)) byColumn.set(c.cmp.column, []);
+    byColumn.get(c.cmp.column).push(c.cmp);
+  }
+  for (const [column, list] of byColumn) {
+    const type = model.ddic[table].fields[column];
+    const target = (cmp) => cmp.rhs.kind === "literal" ? cmp.rhs.value : cmp.rhs.kind === "param" ? params[cmp.rhs.name]
+      : rows[model.for.table][0][cmp.rhs.column] ?? initialValue(cmp.rhs.type);
+    const candidates = [];
+    for (const cmp of list) {
+      const v = target(cmp);
+      candidates.push(v, isOrdered(type) ? stepValue(type, v, 1) : bump(v, 1), isOrdered(type) ? stepValue(type, v, -1) : bump(v, -1));
+    }
+    if (keep) candidates.unshift(row[column]);
+    candidates.push(row[column], initialValue(type));
+    const ok = (value) => list.every((cmp) => {
+      const c = compareValues(type, value, cmp.rhs.kind === "field" ? cmp.rhs.type : type, target(cmp));
+      return {"=": c === 0, "<>": c !== 0, "<": c < 0, ">": c > 0, "<=": c <= 0, ">=": c >= 0}[cmp.op];
+    });
+    const pick = candidates.find((value) => value !== undefined && ok(value));
+    if (pick === undefined) return `no value of ${table}-${column} satisfies ${list.map((c) => c.rhs.kind === "field" ? `${c.op} ${c.rhs.alias}.${c.rhs.column}` : `${c.op} ${target(c)}`).join(" and ")}`;
+    row[column] = pick;
+  }
+  return undefined;
+}
+
 // One row per table that satisfies every condition, so that in the cases
 // only the condition under test decides: the first example's first rows when
 // they do, else rows generated from the field types. Undefined with a reason
@@ -298,7 +330,7 @@ function baseRows(model, params, example) {
     let seed = 1;
     for (const [column, type] of Object.entries(fields)) {
       if (column === client) continue;
-      row[column] = given[column] ?? defaultValue(type, seed++);
+      row[column] = canonical(type, given[column] ?? defaultValue(type, seed++));
     }
     return row;
   };
@@ -309,46 +341,57 @@ function baseRows(model, params, example) {
     if (alertsOf(model, rows, params).length === 1) return {rows};
   }
   const rows = {[outer.table]: [fullRow(outer.table)], [inner.table]: [fullRow(inner.table)]};
-  const solve = (alias, table, conditions) => {
-    const row = rows[table][0];
-    const byColumn = new Map();
-    for (const c of conditions.filter((x) => x.cmp.alias === alias)) {
-      if (!byColumn.has(c.cmp.column)) byColumn.set(c.cmp.column, []);
-      byColumn.get(c.cmp.column).push(c.cmp);
-    }
-    for (const [column, list] of byColumn) {
-      const type = model.ddic[table].fields[column];
-      const target = (cmp) => cmp.rhs.kind === "literal" ? cmp.rhs.value : cmp.rhs.kind === "param" ? params[cmp.rhs.name]
-        : rows[model.for.table][0][cmp.rhs.column] ?? initialValue(cmp.rhs.type);
-      const candidates = [];
-      for (const cmp of list) {
-        const v = target(cmp);
-        candidates.push(v, isOrdered(type) ? stepValue(type, v, 1) : bump(v, 1), isOrdered(type) ? stepValue(type, v, -1) : bump(v, -1));
-      }
-      candidates.push(row[column], initialValue(type));
-      const ok = (value) => list.every((cmp) => {
-        const c = compareValues(type, value, cmp.rhs.kind === "field" ? cmp.rhs.type : type, target(cmp));
-        return {"=": c === 0, "<>": c !== 0, "<": c < 0, ">": c > 0, "<=": c <= 0, ">=": c >= 0}[cmp.op];
-      });
-      const pick = candidates.find((value) => value !== undefined && ok(value));
-      if (pick === undefined) return `no value of ${table}-${column} satisfies ${list.map((c) => c.rhs.kind === "field" ? `${c.op} ${c.rhs.alias}.${c.rhs.column}` : `${c.op} ${target(c)}`).join(" and ")}`;
-      row[column] = pick;
-    }
-    return undefined;
-  };
-  const why = solve(outer.alias, outer.table, model.when.conditions) ?? solve(inner.alias, inner.table, model.forbid.conditions);
+  const why = solveRow(model, params, rows, outer.alias, outer.table, model.when.conditions)
+    ?? solveRow(model, params, rows, inner.alias, inner.table, model.forbid.conditions);
   if (why) return {why};
   if (alertsOf(model, rows, params).length !== 1) return {why: "generated rows do not make the rule fire exactly once"};
   return {rows};
 }
 
 // After a case changed a field, the join equalities that are not under test
-// hold again: the inner field takes the outer field's value.
-function rejoin(model, rows, except) {
+// hold again, and the tested value stays: a changed outer field is followed by
+// the inner field of each equality on it; a changed inner field is followed
+// by the outer field of each equality on it (the other row is adjusted, the
+// value under test is not).
+function rejoin(model, rows, except, changedTable, changedColumn) {
+  const outer = rows[model.for.table][0], inner = rows[model.forbid.table][0];
   for (const c of model.forbid.conditions) {
     if (c === except || c.cmp.rhs.kind !== "field" || c.cmp.op !== "=") continue;
-    rows[model.forbid.table][0][c.cmp.column] = rows[model.for.table][0][c.cmp.rhs.column];
+    if (changedTable === model.forbid.table && c.cmp.column === changedColumn) outer[c.cmp.rhs.column] = inner[c.cmp.column];
+    else inner[c.cmp.column] = outer[c.cmp.rhs.column];
   }
+}
+
+const OPERATORS = ["=", "<>", "<", ">", "<=", ">="];
+
+// the model with one condition replaced by `cmp`, or dropped when null
+function withCondition(model, cond, cmp) {
+  const swap = (list) => list.flatMap((c) => c !== cond ? [c] : cmp ? [{...c, cmp}] : []);
+  return {...model, when: {...model.when, conditions: swap(model.when.conditions)},
+    forbid: {...model.forbid, conditions: swap(model.forbid.conditions)}};
+}
+
+// the variants of a condition a translation could get wrong: every other
+// operator, the literal or parameter one step either way, the condition gone
+function mutantsOf(cond, params) {
+  const cmp = cond.cmp;
+  const out = [null, ...OPERATORS.filter((op) => op !== cmp.op).map((op) => ({...cmp, op}))];
+  if (cmp.rhs.kind !== "field") {
+    const value = cmp.rhs.kind === "literal" ? cmp.rhs.value : params[cmp.rhs.name];
+    for (const dir of [-1, 1]) {
+      const shifted = isOrdered(cmp.type) ? stepValue(cmp.type, value, dir) : bump(value, dir);
+      if (shifted !== undefined) out.push({...cmp, rhs: {kind: "literal", value: shifted}});
+    }
+  }
+  return out;
+}
+
+// A case discriminates when some mutant of the condition it targets gives
+// other alerts on its rows than the rule does: otherwise it would pass
+// whether the translation of that condition is right or wrong.
+export function caseDiscriminates(model, cond, rows, params) {
+  const expected = JSON.stringify(evaluate(model, rows, params));
+  return mutantsOf(cond, params).some((cmp) => JSON.stringify(evaluate(withCondition(model, cond, cmp), rows, params)) !== expected);
 }
 
 // Every case for the selected conditions, in rule order:
@@ -386,7 +429,12 @@ export function deriveCases(model, references, {date, example, reserved = new Se
     const setField = (value) => {
       const rows = clone(base.rows);
       rows[table][0][cmp.column] = value;
-      rejoin(model, rows, cond);
+      rejoin(model, rows, cond, table, cmp.column);
+      // a changed outer value may break the other conditions on the exists row
+      // (m.cnt < n.lvl): keep the tested value and adjust the other row
+      if (table === model.for.table) {
+        solveRow(model, params, rows, model.forbid.alias, model.forbid.table, model.forbid.conditions.filter((c) => c !== cond), true);
+      }
       return rows;
     };
     const reference_value = canonical(type, cmp.rhs.kind === "literal" ? cmp.rhs.value : cmp.rhs.kind === "param" ? params[cmp.rhs.name]
@@ -400,7 +448,13 @@ export function deriveCases(model, references, {date, example, reserved = new Se
     const methods = name(cond.text, columnTags, variants.map(([s]) => s), cond.rule_line);
     for (const [suffix, value] of variants) {
       if (value === undefined) { skipped.push({condition: cond.text, reason: `no ${suffix} value: the type has no step that way`}); delete methods[suffix]; continue; }
-      add(reference, cond.rule_line, suffix, methods, cond.text, setField(value));
+      const rows = setField(value);
+      if (!caseDiscriminates(model, cond, rows, params)) {
+        skipped.push({condition: `${cond.text} (${suffix})`, reason: `does not isolate ${cond.text}`});
+        delete methods[suffix];
+        continue;
+      }
+      add(reference, cond.rule_line, suffix, methods, cond.text, rows);
     }
   }
   // two structural cases of the exists
@@ -409,17 +463,24 @@ export function deriveCases(model, references, {date, example, reserved = new Se
   const zero = clone(base.rows);
   zero[model.forbid.table] = [];
   add("forbid", model.forbid.exists_line, "zero", structural, `exists ${model.forbid.table.toUpperCase()} as ${model.forbid.alias}`, zero);
-  const two = clone(base.rows);
-  const fixed = new Set(model.forbid.conditions.filter((c) => c.cmp.op === "=").map((c) => c.cmp.column));
+  // two exists rows for one for row: the second differs in a key field, by a
+  // value that still satisfies the whole where, so that both rows alert
   const inner = model.ddic[model.forbid.table];
-  const key = inner.keys.find((k) => !fixed.has(k));
-  const second = {...two[model.forbid.table][0]};
-  const next = key === undefined ? undefined : different(inner.fields[key], second[key]);
-  if (next === undefined) skipped.push({condition: `exists ${model.forbid.table}`, reason: "every key field of the exists table is fixed by an equality; no second row"});
-  else {
-    second[key] = next;
-    two[model.forbid.table].push(second);
-    add("forbid", model.forbid.exists_line, "two", structural, `exists ${model.forbid.table.toUpperCase()} as ${model.forbid.alias}`, two);
+  const existsLabel = `exists ${model.forbid.table.toUpperCase()} as ${model.forbid.alias}`;
+  let two;
+  for (const key of inner.keys) {
+    const type = inner.fields[key];
+    const first = base.rows[model.forbid.table][0][key];
+    const candidates = [different(type, first), stepValue(type, first, -1), stepValue(type, first, 1), bump(first, 1), bump(first, -1)];
+    for (const next of candidates) {
+      if (next === undefined || compareValues(type, next, type, first) === 0) continue;
+      const rows = clone(base.rows);
+      rows[model.forbid.table].push({...rows[model.forbid.table][0], [key]: next});
+      if (alertsOf(model, rows, params).length === 2) { two = rows; break; }
+    }
+    if (two) break;
   }
+  if (!two) skipped.push({condition: `exists ${model.forbid.table}`, reason: "does not isolate the exists: no second row with another key value satisfies the whole where (two alerts)"});
+  else add("forbid", model.forbid.exists_line, "two", structural, existsLabel, two);
   return {cases, skipped};
 }

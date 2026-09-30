@@ -173,6 +173,17 @@ field that satisfies every condition on it). The check date is the first example
 changes one field, then restores the join equalities that are not under test. The expected alerts
 come from the interpreter.
 
+**A case must discriminate.** Before a case is emitted the compiler evaluates its rows with
+mutants of the condition it targets (every other operator, the literal or parameter one step
+either way, the condition dropped); if none changes the alerts, the case would pass whether the
+translation is right or wrong, so it is not emitted and is listed under `skipped` ("does not
+isolate <condition>"). A changed field keeps its tested value and the other row is adjusted
+(the inner field of a join follows an outer one and the other way round; other conditions on the
+exists row are re-solved). The `two` case picks a second key value that still satisfies the whole
+`where` and needs exactly two alerts, else it is skipped. A field-to-field comparison needs equal
+type, length and decimals (the query compares columns, the nested form a converted host value).
+NUMC values, literals and alert holes are read at the DDIC length (`'12'` in NUMC 4 is `0012`).
+
 The cases become test methods `b_<column>_<lt|eq|gt|ne|blank|match|nomatch|zero|two>`, in the test
 class after the hand-written examples; `<column>` is the field (`<alias>_<column>` when two
 conditions name the same field, `c<n>` when that is too long), the whole name at most 30

@@ -18,7 +18,7 @@ import {join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import yaml from "js-yaml";
 import {DEFAULT_DDIC, DDIC_PROVIDER, Refusal, registryFor} from "./dsl-ddic.mjs";
-import {INT_RANGE, INTEGERS, PACKED, allReferences, deriveCases, evaluate} from "./dsl-l2-eval.mjs";
+import {INT_RANGE, INTEGERS, PACKED, allReferences, canonical, deriveCases, evaluate} from "./dsl-l2-eval.mjs";
 
 export {evaluate, stepValue} from "./dsl-l2-eval.mjs";
 
@@ -420,8 +420,11 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
       if (right.kind === "literal") {
         const why = misfit(right.value, type, right.quoted);
         if (why) fail(`${left.text} is ${typeText(type)}; ${why}`);
-        return {...node, is_literal: true, value: right.value, "value@type": type,
-          cmp: {...cmpBase, rhs: {kind: "literal", value: right.value}}};
+        // a NUMC literal is the column's own text ('12' in NUMC 4 is '0012'): a system
+        // converts it, the database of this runtime would compare the digits as written
+        const value = type.built_in === "NUMC" ? canonical(type, right.value) : right.value;
+        return {...node, is_literal: true, value, "value@type": type,
+          cmp: {...cmpBase, rhs: {kind: "literal", value}}};
       }
       if (right.kind === "param") {
         if (type.built_in !== "DATS") fail(`${left.text} is ${typeText(type)}, $date is DATS`);
@@ -429,7 +432,11 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
           cmp: {...cmpBase, rhs: {kind: "param", name: right.name}}};
       }
       const other = fieldOf(right, scope, fail).field.literal;
-      if (other.built_in !== type.built_in) fail(`${left.text} is ${typeText(type)}, ${right.text} is ${typeText(other)}`);
+      // the query compares the columns on the database, the nested form a host value
+      // converted to the column's type: only identical types mean the same thing
+      if (other.built_in !== type.built_in || other.length !== type.length || other.decimals !== type.decimals) {
+        fail(`${left.text} is ${typeText(type)}, ${right.text} is ${typeText(other)}; a field-to-field comparison needs the same type, length and decimals`);
+      }
       return {...node, is_literal: false, ref: `${wa(right.alias)}-${right.field}`, sref: `${right.alias}~${right.field}`,
         cmp: {...cmpBase, rhs: {kind: "field", alias: right.alias, column: right.field, type: other}}};
     });
@@ -500,6 +507,8 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     const label = need(example.name, `${base}/name`, "the example's name");
     const labelWhy = misfit(label, {built_in: "STRG"});
     if (labelWhy) failAt(line(`${base}/name`))(`example name: ${labelWhy}`);
+    const refWhy = misfit(`${label} (check against check_reference)`, {built_in: "STRG"});
+    if (refWhy) failAt(line(`${base}/name`))(`example name with the comparison message: ${refWhy}`);
     const method = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
     if (!/^[a-z]/.test(method) || method.length > 30) failAt(line(`${base}/name`))(`example name ${JSON.stringify(label)} gives method ${method}, which is not an ABAP name of at most 30 characters`);
     if (methods.has(method) || ["teardown", "assert_alerts"].includes(method)) failAt(line(`${base}/name`))(`example name ${JSON.stringify(label)} gives method ${method} a second time`);
@@ -633,6 +642,8 @@ function caseNode(model, c) {
       })};
   }).filter(Boolean);
   const label = c.label;
+  const refWhy = misfit(`${label} (check against check_reference)`, STRG);
+  if (refWhy) throw new Error(`derived case ${c.method}: ${refWhy}`);
   return {"@id": id, rule_line: ruleLine, name: label, method: c.method, label, "label@type": STRG,
     ref_label: `${label} (check against check_reference)`, "ref_label@type": STRG,
     derived: {condition: c.condition, kind: c.kind},
