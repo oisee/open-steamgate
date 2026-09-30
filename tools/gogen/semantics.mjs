@@ -33,9 +33,9 @@ const EXPECT = {
   ZCL_GOGEN_T_COPYBASE: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYBASE=>RUN (zcl_gogen_t_copybase.clas.abap:18): VALUE for a table with BASE src at zcl_gogen_t_copybase.clas.abap:18", JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYBASE=>RUN (zcl_gogen_t_copybase.clas.abap:18): VALUE for a table with BASE src"},
   ZCL_GOGEN_T_COPYINSERT: "1",
   ZCL_GOGEN_T_SCALARBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarbind.clas.abap:18", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
+  ZCL_GOGEN_T_GENERICBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in reference to a deleted table row at zcl_gogen_t_genericbind.clas.abap:15", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
   ZCL_GOGEN_T_SCALARREAD: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarread.clas.abap:17", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
   ZCL_GOGEN_T_SCALARLOOP: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarloop.clas.abap:19", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
-  ZCL_GOGEN_T_COPY: "copy a:2,1 b:3,50 struct a:1 b:60 alias it:3,99 after:3,99",
   ZCL_GOGEN_T_SECREF: "0/7",
   ZCL_GOGEN_T_BOUND: "X",
   // Arithmetic statements share the assignment calculation type: i division

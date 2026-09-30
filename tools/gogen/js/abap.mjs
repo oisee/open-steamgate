@@ -780,6 +780,7 @@ export function DeleteIndex(d, i) {
   const n = Lines(d);
   if (i < 1 || i > n) return false;
   d.get().splice(i - 1, 1);
+  bumpTable(d.get());
   return true;
 }
 
@@ -817,7 +818,13 @@ export function NewLine(t) {
 // row i (from 0) of a generic table, bound to the row itself
 export function Row(d, i) {
   const a = d.get();
-  return {get: () => a[i], set: (v) => { a[i] = v; }, t: d.t.row};
+  const version = tableVersion(a);
+  const value = a[i];
+  const check = () => {
+    if (d.get() !== a || tableVersion(a) !== version || i >= a.length || (value !== null && typeof value === "object" && a[i] !== value))
+      throw new AbapError("GETWA_NOT_ASSIGNED", "table row binding after structural mutation");
+  };
+  return {get: () => { check(); return a[i]; }, set: (v) => { check(); a[i] = v; }, t: d.t.row};
 }
 
 const tableVersions = new WeakMap();

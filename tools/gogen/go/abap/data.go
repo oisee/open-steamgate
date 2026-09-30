@@ -173,6 +173,7 @@ func DeleteIndex(d Data, i int32) bool {
 		return false
 	}
 	d.T.Delete(d.P, int(i-1))
+	BumpTable(d.P)
 	return true
 }
 
@@ -194,7 +195,13 @@ func AppendData(t, v Data) int {
 }
 
 // Row is row i (from 0) of a generic table, bound to the row itself.
-func Row(d Data, i int) Data { return Data{P: d.T.At(d.P, i), T: d.T.Row} }
+func Row(d Data, i int) Data {
+	row := d.T.At(d.P, i)
+	version := tableVersion(d.P)
+	return Data{P: row, T: d.T.Row, Valid: func() bool {
+		return tableVersion(d.P) == version && i < d.T.Lines(d.P) && d.T.At(d.P, i) == row
+	}}
+}
 
 // DataString is a generic elementary value moved into a string.
 func DataString(d Data) string {
