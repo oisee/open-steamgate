@@ -913,4 +913,11 @@ async function main(args) {
   }
 }
 
-if (runsAs("osd-batch-runs.mjs")) process.exitCode = await main(process.argv.slice(2));
+// No top-level await here: main() loads output/init.mjs, whose setup imports
+// tools/osd-job-port.mjs, which imports this module. With `await main()` at
+// the top level this module never finishes evaluating, the cyclic import
+// waits for it forever and Node exits 13 ("unsettled top-level await").
+if (runsAs("osd-batch-runs.mjs")) {
+  main(process.argv.slice(2)).then((code) => { process.exitCode = code; },
+    (error) => { console.error(error); process.exitCode = 1; });
+}
