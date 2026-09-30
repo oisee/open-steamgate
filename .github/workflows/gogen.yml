@@ -10,9 +10,9 @@ name: gogen
 # `go test ./abap/...` and not `go build ./...`: cmd/bench compiles only
 # after tools/gogen/run.mjs has generated its `Call`, so a plain build of the
 # module fails by design. The pairs in test/fixtures/ir-pairs are shared with
-# the Node IR, so a change there runs this too; the 20 pairs main learned
-# after gogen branched are a strict known-gap list (knowngaps_test.go,
-# ANORMALIES gogen-ir-pairs-behind-main) that turns red if one starts to pass.
+# the Node IR, so a change there runs this too: a pair main adds that the Go
+# runtime does not do yet goes into the strict known-gap list
+# (knowngaps_test.go, empty today), which turns red if one starts to pass.
 
 on:
   pull_request:

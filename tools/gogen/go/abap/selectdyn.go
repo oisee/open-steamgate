@@ -106,6 +106,8 @@ func osqlWhereFailure(q *DynSelect, err error) {
 		panic(ArithmeticError{x.Abap(), q.Stmt + ": " + x.Message})
 	case OsqlWhereSemantics:
 		panic(ArithmeticError{x.Abap(), q.Stmt + ": " + x.Message})
+	case OsqlWhereData:
+		panic(ArithmeticError{x.Abap(), q.Stmt + ": " + x.Message})
 	case OsqlWhereDump:
 		// uncatchable on A4H; its runtime error's name was not read there
 		panic(ArithmeticError{"DYNAMIC_OSQL_RUNTIME_ERROR", q.Stmt + ": " + x.Message})

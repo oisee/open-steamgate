@@ -2481,7 +2481,7 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 
 ### ANOMALY-2026-09-29-gogen-ir-pairs-behind-main — the Go runtime of gogen does not yet do 20 IR pairs main added after it was branched
 
-- Status: `open` (a strict known-gap list; the port is the next gogen PR)
+- Status: `fixed` (2026-09-30, branch `feat/gogen-known-gaps`: all 104 WHERE and 16 write pairs pass in Go, the known-gap list is empty)
 - Discovery date: `2026-09-29`
 - Affected versions: `tools/gogen/go/abap` as landed from `spike/osabap-app` (branched from main at `9db735de`, 2026-09-23)
 - Affected ABAP statement, runtime API or adapter: Open SQL `WHERE` over packed and RAW columns and `UPSERT ... SELECT`, lowered by the Go runtime and compared with `test/fixtures/ir-pairs/osql-where.json` and `writes.json`
@@ -2490,7 +2490,8 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Expected SAP behaviour: as the pairs record it, measured for the Node IR in main #47 and #55 (packed literals), #66 (RAW columns: data errors as outcomes, the PostgreSQL bytea parameter) and #64 (`UPSERT ... SELECT`)
 - Actual open-abap behaviour: 18 WHERE pairs and 2 write pairs fail in Go (4 packed, 14 RAW, 2 UPSERT ... SELECT); the RAW data errors panic where the pairs expect an outcome
 - Impact on open-steamgate: the Go runtime is not yet a drop-in for those statements; the Node runtime is unaffected
-- Smallest safe workaround: none; `tools/gogen/go/abap/knowngaps_test.go` lists exactly these 20. A listed pair that starts to pass, or any other failure, turns the test red, so the list cannot hide a new difference or outlive a fixed one
-- Upstream issue: not upstream; the port of the three features to Go is the next gogen PR, which removes the entries
+- Smallest safe workaround: while open, `tools/gogen/go/abap/knowngaps_test.go` listed exactly these 20 (a listed pair that starts to pass, or any other failure, turns the test red); the list is empty now
+- Upstream issue: not upstream; ported to Go on `feat/gogen-known-gaps`, which removed the entries
+- Fix: the Go placeholders follow `tools/sqlscript-lower.mjs` again (SQLite binds a packed value as `CAST(? AS NUMERIC)` and an integer as `CAST(? AS INTEGER)` -- the latter covered by no pair, Go binds integers as int64 anyway --, DuckDB as `CAST(? AS DECIMAL(n,d))`, PostgreSQL a RAW(n) as `varchar(2n)`); a RAW literal that is not exactly its 2n upper-case hex digits is `OsqlWhereData` (CX_SY_OPEN_SQL_DATA_ERROR, catchable from a dynamic SELECT as before) rather than a panic; `UPSERT ... SELECT` and an upsert's `fill` columns render as `lower()` does for SQLite. `knownGaps` stays, empty, for the next time main's pairs run ahead
 - Regression-test location: `tools/gogen/go/abap/osqlwhere_test.go`, `writes_test.go`, `knowngaps_test.go`
 - Upstream version containing a fix: not applicable
