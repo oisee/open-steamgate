@@ -317,7 +317,7 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
     startedAt: run.started_at || null, endedAt: run.ended_at ?? null,
     resultStatus: run.result_status ?? null, detail: run.detail ?? null, steps,
     afterEvent: afterName === null ? null : {jobname: afterName, jobcount: afterCount},
-    namedEvent: namedId === null ? null : {id: namedId},
+    namedEvent: namedId === null ? null : {id: namedId, param: namedParam},
     tailEvent: tailId === null ? null : {id: tailId, param: tailParam},
   };
 }

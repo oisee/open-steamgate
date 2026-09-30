@@ -19,7 +19,7 @@ reported `RUNNING` while the job table still held status `Y`; callers should
 not infer the flag from a previously read table row. `BP_JOB_READ`
 returns the header and, for the with-steps opcodes, a bounded step
 list. A noninitial `JOB_STEP_NUMBER` returns only that step; a number beyond the step count raises `JOB_DOESNT_HAVE_STEPS` (assumed, to be measured). `BP_JOB_SELECT` selects the current owner's visible retained jobs with
-`JOBSELECT_DIALOG = 'N'`. It accepts exact job name and user filters, `NJRANGE` and `UNRANGE` selection tables (`EQ`, `CP`, `BT`, include and exclude), plus preliminary, scheduled, ready, running, finished, and aborted status flags, and raises `NO_JOBS_FOUND` for an empty result.
+`JOBSELECT_DIALOG = 'N'`. It accepts exact job name and user filters, `NJRANGE` and `UNRANGE` selection tables (`EQ`, `CP`, `BT`, include and exclude), plus the `PRELIM`, `SCHEDUL`, `READY`, `RUNNING`, `FINISHED`, and `ABORTED` status flags. It matches `JOBCOUNT` exactly, `ABAPNAME` against known report steps, and `EVENTID`/`EVENTPARM` against named-event waits. A noninitial `JOBGROUP`, date/time bound, `NO_DATE`, or `WITH_PRED` raises `SELECTION_CANCELED` with that field in the message. An empty result raises `NO_JOBS_FOUND`.
 
 The one-character status sequence was measured on the sandbox on 2026-09-29:
 `P` after `JOB_OPEN` and submit, `Y` after immediate `JOB_CLOSE`, `R` while
@@ -41,9 +41,7 @@ Sandbox measurement on 2026-09-29: `BP_JOB_READ` accepts opcode 19 (header
 only), 20 (header and steps), 35 and 36 (steps), and 37 (no steps). The facade
 maps 35 and 36 like 20, and 37 like 19; the probe established step-list
 presence but did not distinguish the other fields of those opcodes. Every
-other opcode raises `INVALID_OPCODE`. The compact local DDIC structures contain
-only fields consumed by this facade; their remaining widths and complete SAP
-shapes are open measurements.
+other opcode raises `INVALID_OPCODE`. `BTCSELECT` has the sandbox-measured 19-field shape (2026-09-30). Other compact local DDIC structures retain only fields consumed by the facade; their full SAP shapes remain open measurements.
 
 `TAIL_EVENT_ID` and `TAIL_EVENT_PARAM` on `JOB_CLOSE` are private extensions.
 A program that passes them will not activate against the real SAP FM.
