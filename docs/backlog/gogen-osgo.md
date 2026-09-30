@@ -1265,3 +1265,41 @@ replacing today's single FIFO work-process lock. Built on the 0.5 Session refact
 
 **Noted:** `zcl_stg_segw_gen=>mpc_source` through the DSL (#293) takes 3.6 s against 0.94 s before on the largest
 project in OSG, while the same engine on A4H is ~4x faster. That makes it a runtime performance case to profile.
+
+## Release plan with priorities (2026-09-30)
+
+Alice, 2026-09-30: every item per release is marked.
+- **must**: the release does not ship without it.
+- **should**: expected; deferred only with a stated reason.
+- **nice**: if time allows.
+- **generous**: only if we are being really generous.
+
+**0.4** (the next tag, on Alice's yes)
+- must: U3 wave 3 merged. Go ABAP Unit parity with Node at 0 DIFFERENT, with the 12 reviewed nodeAnomaly rows.
+- must: stable row references in Go tables, and NOT_COMPILED and dumps uncatchable by ABAP CATCH (the last wave-3
+  blocker; also a possible silent bug on main).
+- must: the release draft built by CI, and its artefacts checked by content.
+- should: the honest speed measurement, Node vs Go on the whole intersection, one instrument.
+- nice: accept ADR 0005 (lazy table providers). It is a decision, not code.
+
+**0.5**
+- must: O, program -> binary. F4 and dialogs in the TUI, Open SQL in the native build, `osd run ZREPORT` = F8.
+- must: check and record in ANORMALIES whether our Node/Go runners keep class statics across test classes (A4H
+  resets them per test class).
+- should: U4 step 1, process sharding of ABAP Unit on Go.
+- should: U4 step 2, Session-owned statics/DB/LUW, one goroutine per test class on a copy of the seed image; statics
+  reset per test class as on A4H.
+- should: lazy tables slices 1-2 (ADR 0005): the xref into the registry as eager, then lazy.
+- nice: VRSD / `SVRS_*` over git on the registry (stoker; after ADR 0005 is accepted).
+- nice: D, daemons DX: `osd samc --derive/--check` on DSL L1, CodeLens from the trace sidecar.
+- nice: Node ABAP Unit in worker_threads, one DB copy each.
+
+**0.6**
+- should: the Go side of host relations. A SQLite virtual table over stable Go rows, per call, gated by
+  `ir-host-relation-pairs.mjs`.
+- should: OSGo server with several work processes, on a shared DB with one transaction per dialog step.
+- nice: IR-JS as a third `unit-compare` column, DB-free tests first.
+- nice: profile the #293 slowdown (MPC through the DSL: 3.6 s against 0.94 s in OSG).
+- generous: IR-JS on the database seam, so DB tests run too.
+- generous: one DB IR for both runtimes (`docs/pamdp-ir-portability.md`, a proposal; pAMDP parked).
+- generous: the lazy-table status group (needs the pooled snapshot design first).
