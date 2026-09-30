@@ -12,6 +12,7 @@
 | **One binary (Bun)** | download `osd-linux-x64` / `osd-linux-arm64` / `osd-darwin-arm64` / `osd-windows-x64.exe` from [Releases](https://github.com/oisee/open-steamgate/releases), then `mv osd-linux-x64 osd && chmod +x osd && ./osd up` | `http://localhost:3030/` |
 | **VS Code** | install [open-steamgate: local ABAP server](https://marketplace.visualstudio.com/items?itemName=oisee.open-steamgate), or the `.vsix` from [Releases](https://github.com/oisee/open-steamgate/releases) via *Extensions: Install from VSIX…*; then run **osd: Start** | the OSD tree in VS Code |
 | **Node, from source** | `npm ci && npm run bootstrap && npm start` (Node 22.14+ or 24) | `http://localhost:3030/` |
+| **Your report as a CLI tool** | `node tools/gogen/osabap.mjs zmy_report.prog.abap`, then `tools/gogen/.out/osabap` (needs Go 1.26) | a native binary, no server ([below](#abap-as-a-language-for-command-line-tools)) |
 
 Each release also carries `sqlite.yml`, `duckdb.yml` and `postgres.yml`; start one with `docker compose -f sqlite.yml up -d`. `./osd doctor` checks a downloaded binary.
 
@@ -101,6 +102,36 @@ runtime differs from SAP, written down before any workaround.
 | **Instruments** | Comparing two systems (responses, SQL at the seam, a branch of a whole system), `.http` regression cases with a frozen clock, and a frame-by-frame oracle against a real system | [`docs/regression-http-cases.md`](docs/regression-http-cases.md), [`docs/frame-comparison.md`](docs/frame-comparison.md) |
 | **Packs and delivery** | A pack is a directory (`osd-pack.json`: ABAP, tables, rows, pages, tiles) layered over the tree. There is one Bun binary (`build/osd`), a relocatable release directory, Docker for amd64 and arm64, the browser preview on GitHub Pages, and a CI that gates every publication on the tag's tests | [`docs/using-osd.md`](docs/using-osd.md), [`docs/preview-deployments.md`](docs/preview-deployments.md) |
 | **Tests** | `npm test` = transpile + abaplint + ABAP Unit + mocha over the wire, plus Playwright for the apps. A unit run fails when a test class in the tree did not run | |
+
+## ABAP as a language for command-line tools
+
+`gogen` compiles ABAP to Go (**OSGo**; building needs Go 1.26). Two hosts come out of it.
+
+**A report becomes a native command.** `osabap` takes a classic executable
+report and builds one self-contained binary with no server, no database and no
+SAP system. The selection screen is the command-line contract:
+
+```sh
+node tools/gogen/osabap.mjs tools/gogen/apps/hello/zhello.prog.abap   # -> tools/gogen/.out/osabap
+tools/gogen/.out/osabap Alice                        # parameters in declaration order
+tools/gogen/.out/osabap --name Alice --loud --s-tag one --s-tag two  # a repeated select-option = I/EQ rows
+tools/gogen/.out/osabap --params @arguments.json     # or all of it as JSON
+tools/gogen/.out/osabap                              # no arguments, a terminal: the selection screen as a TUI
+tools/gogen/.out/osabap --sapgui                     # the same screen to a real SAP GUI over DIAG, on 127.0.0.1
+GOOS=windows GOARCH=arm64 node tools/gogen/osabap.mjs report.prog.abap   # cross-compiles
+```
+
+The usual lifecycle runs: `INITIALIZATION`, the selection-screen events,
+`START-OF-SELECTION`, `WRITE` to stdout. `CL_GUI_FRONTEND_SERVICES` maps to the
+local file system. `OPEN DATASET` works inside the roots you allow
+(`--allow-read ./in --allow-write ./out`). There is no Open SQL in this host
+yet: a report that selects gets an explicit error. The samples are in
+[`tools/gogen/apps/`](tools/gogen/apps), and the details are in
+[`docs/osabap-native.md`](docs/osabap-native.md).
+
+**The whole system in Go.** `node tools/gogen/osgo.mjs` builds `tools/gogen/.out/osgo`, the
+complete OSD (ICF, Gateway, the apps, SQLite) as one Go binary. The same ABAP
+Unit tests run on Node and on Go, method by method, and must agree.
 
 ## Architecture
 
