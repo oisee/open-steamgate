@@ -161,6 +161,23 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   for (const e of errors) broken.add(objName(e.getFilename()));
   if (broken.size > 0) wanted.splice(0, wanted.length, ...wanted.filter((w) => !broken.has(w)));
 
+  // A literal CALL FUNCTION is a dependency on its function group. The
+  // registry already knows each module's group; include it before signatures
+  // are built, including calls made by a module in another group.
+  const fmGroups = new Map();
+  for (const g of reg.getObjects()) if (g instanceof abaplint.Objects.FunctionGroup) {
+    for (const m of g.getModules()) fmGroups.set(upper(m.getName()), g.getName().toLowerCase());
+  }
+  for (let i = 0; i < wanted.length; i++) {
+    const obj = reg.getObject("CLAS", wanted[i]) ?? reg.getObject("FUGR", wanted[i]);
+    for (const file of obj?.getABAPFiles() ?? []) {
+      for (const match of file.getRaw().matchAll(/\bCALL\s+FUNCTION\s+'([^']+)'/gi)) {
+        const group = fmGroups.get(upper(match[1]));
+        if (group && !wanted.includes(group)) wanted.push(group);
+      }
+    }
+  }
+
   const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], missing: new Set(), wanted: new Set(wanted.map(upper)),
     interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
   program.supplied = suppliedParams(reg, program.wanted);
@@ -551,9 +568,10 @@ function functionGroupSignatures(ctx0, g) {
         const type = p.direction === "tables" && it instanceof BasicTypes.TableType
           ? {k: "table", row: typeOf(it.getRowType(), `${where} ${pn}`, program), skey: "default"} : typeOf(it, `${where} ${pn}`, program);
         if (p.direction === "tables" && type.k !== "table") throw new Unsupported(`${name}: TABLES ${pn} is a ${type.k}`);
-        if (p.defaultValue !== undefined) throw new Unsupported(`${name}: parameter ${pn} has a DEFAULT, not in the subset`);
         const dir = p.direction === "tables" ? "changing" : p.direction;
-        return {name: pn, dir, byValue: p.direction === "tables" ? false : p.passByValue, type, optional: p.optional || p.direction === "exporting", tables: p.direction === "tables"};
+        return {name: pn, dir, byValue: p.direction === "tables" ? false : p.passByValue, type,
+          default: p.defaultValue, optional: p.optional || p.defaultValue !== undefined || p.direction === "exporting" || p.direction === "tables",
+          tables: p.direction === "tables"};
       });
       sig = {name, static: true, private: false, abstract: false, params, returning: null, fm: true};
     } catch (e) {
@@ -1032,6 +1050,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       if (targets.has(p.name)) throw new Unsupported(`CALL FUNCTION '${name}': importing ${p.name} passed as ${targets.get(p.name).kw}`);
       const s = given.get(p.name);
       if (s === undefined) {
+        if (p.default !== undefined) return {dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
         if (p.optional) return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
         throw new Unsupported(`CALL FUNCTION '${name}': parameter ${p.name} not supplied`);
       }
@@ -1046,13 +1065,16 @@ function compiledFunctionCall(node, ctx, text, name) {
       return {dir: p.dir, place: null, type: p.type};
     }
     const t = got.target;
-    if (!sameType(t.type, p.type)) throw new Unsupported(`CALL FUNCTION '${name}': ${want} ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
-    if (!p.byValue) return {dir: p.dir, place: t, type: p.type};
+    const direct = sameType(t.type, p.type);
+    if (!direct && !(charlike(t.type) && charlike(p.type))) {
+      throw new Unsupported(`CALL FUNCTION '${name}': ${want} ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
+    }
+    if (!p.byValue && direct) return {dir: p.dir, place: t, type: p.type};
     const tmp = {e: "var", name: `FMV_${ctx.temps++}`, type: p.type};
     ctx.locals.set(tmp.name, p.type);
-    if (p.dir === "changing") before.push({s: "assign", target: tmp, value: t});
+    if (p.dir === "changing") before.push({s: "assign", target: tmp, value: convert(t, p.type)});
     else before.push({s: "clear", target: tmp});
-    after.push({s: "assign", target: t, value: tmp});
+    after.push({s: "assign", target: t, value: convert(tmp, t.type)});
     return {dir: p.dir, place: tmp, type: p.type};
   });
   const call = {s: "call", call: {e: "call", method: name, static: true, owner, receiver: null, sup: null, args, type: {k: "void"}, exceptions, receiving: null, callee: name}};

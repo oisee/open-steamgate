@@ -8,7 +8,7 @@
     <SOBJ_NAME>SAPLZGOGEN_T_FG</SOBJ_NAME>
    </INCLUDES>
    <FUNCTIONS>
-    <item>
+   <item>
      <FUNCNAME>ZGOGEN_T_FM</FUNCNAME>
      <SHORT_TEXT>gogen testdata: parameters and a classic exception</SHORT_TEXT>
      <IMPORT>
@@ -50,6 +50,12 @@
        <EXCEPTION>BOOM</EXCEPTION>
       </RSEXC>
      </EXCEPTION>
+    </item>
+    <item>
+     <FUNCNAME>ZGOGEN_T_DEF</FUNCNAME>
+     <SHORT_TEXT>gogen fixture: importing default</SHORT_TEXT>
+     <IMPORT><RSIMP><PARAMETER>IV_N</PARAMETER><TYP>I</TYP><DEFAULT>7</DEFAULT></RSIMP></IMPORT>
+     <EXPORT><RSEXP><PARAMETER>EV_N</PARAMETER><TYP>I</TYP></RSEXP></EXPORT>
     </item>
    </FUNCTIONS>
   </asx:values>
