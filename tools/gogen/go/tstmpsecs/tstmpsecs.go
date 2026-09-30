@@ -1,6 +1,8 @@
-// Package tstmp is the part of CL_ABAP_TSTMP that open-abap-core writes as
+// Package tstmpsecs is the part of CL_ABAP_TSTMP that open-abap-core writes as
 // kernel code and the Go runtime answers.
-package tstmp
+// (Not "tstmp": that is the parameter of SUBTRACTSECS itself, and a Go
+// package named like a local of the calling method is shadowed there.)
+package tstmpsecs
 
 import (
 	"fmt"

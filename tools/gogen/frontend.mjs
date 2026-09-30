@@ -638,7 +638,7 @@ const NATIVE = new Map([
   // open-abap-core's INT (a seed given to CREATE is ignored there too)
   ["CL_ABAP_TSTMP=>SUBTRACT", {fn: "abap.TstmpSubtract", args: ["TSTMP1:p", "TSTMP2:p"]}],
   // the time stamp SECS seconds earlier, as open-abap-core's ADD computes it (go/tstmp)
-  ["CL_ABAP_TSTMP=>SUBTRACTSECS", {fn: "tstmp.SubtractSecs", args: ["TSTMP:p", "SECS:i"]}],
+  ["CL_ABAP_TSTMP=>SUBTRACTSECS", {fn: "tstmpsecs.SubtractSecs", args: ["TSTMP:p", "SECS:i"]}],
   ["CL_ABAP_RANDOM=>INT", {fn: "abap.RandomInt31", args: []}],
   // crypto.randomUUID() on Node (go/abap/uuid.go); CREATE_UUID_* are ABAP around it
   ["CL_SYSTEM_UUID=>RANDOM", {fn: "abap.UUIDRandom", args: []}],

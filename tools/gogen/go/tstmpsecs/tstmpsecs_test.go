@@ -1,4 +1,4 @@
-package tstmp
+package tstmpsecs
 
 import (
 	"testing"
