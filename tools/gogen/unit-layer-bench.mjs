@@ -15,7 +15,7 @@ const median = (xs) => [...xs].sort((a, b) => a - b)[1];
 const results = {};
 
 function run(label, index, source) {
-  if (source) writeFileSync(source, `${"* gogen build benchmark\n".repeat(index + 1)}${original.get(source)}`);
+  if (source) writeFileSync(source, `${"* gogen build benchmark\n".repeat(index + 11)}${original.get(source)}`);
   const out = join(root, `${label}-${index}`);
   mkdirSync(out, {recursive: true});
   const timeFile = join(out, "time.txt");
@@ -33,10 +33,12 @@ function run(label, index, source) {
   const t = summary.timingMs;
   return {wallSeconds, peakRssKiB, frontendMs: t.frontendClosureRounds.reduce((a, b) => a + b, 0),
     rounds: t.frontendClosureRounds.length, emitMs: t.emit, goBuildMs: t.goBuild, runMs: t.run,
-    coreRebuilt: label === "app" ? /compile .*generated\/core/.test(readFileSync(join(out, "go-build-x.log"), "utf8")) : undefined};
+    coreRebuilt: label === "app" ? /compile .*generated\/core/.test(readFileSync(join(out, "go-build-x.log"), "utf8")) : undefined,
+    appRebuilt: label === "app" ? /compile .*generated\/app/.test(readFileSync(join(out, "go-build-x.log"), "utf8")) : undefined};
 }
 
 try {
+  run("warm-prep", 0, null);
   for (const [label, source] of [["cold", null], ["warm", null], ["app", app], ["unit", unit]]) {
     const runs = [];
     for (let i = 0; i < 3; i++) {

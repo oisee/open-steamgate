@@ -381,7 +381,7 @@ export function emitGo(program, pkg = "main", layers = null) {
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_DATA"))) out.push(...nativeRttiData(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_JSON_PARSE"))) out.push(...nativeJsonParse());
   out.push(...nativeCodepage(classes));
-  out.push(...tableRegistry(program));
+  out.push(...tableRegistry(layers?.tables ? {...program, tables: layers.tables} : program));
   // descriptors first: their Copy asks for clone functions
   const descs = descFuncs();
   out.push(...cloneFuncs());

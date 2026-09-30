@@ -69,6 +69,8 @@ const sourceByName = new Map(folders.flatMap(walk).filter((f) => !skip(f) && /\.
   .map((f) => [f.split("/").at(-1).split(".")[0].replaceAll("#", "/").toUpperCase(), f]));
 const objectByName = new Map(folders.flatMap(walk).filter((f) => !skip(f) && /\.(clas|intf)\.abap$/.test(f))
   .map((f) => [f.split("/").at(-1).split(".")[0].replaceAll("#", "/").toUpperCase(), f]));
+const typeFileByName = new Map(folders.flatMap(walk).filter((f) => !skip(f) && /\.(tabl|ttyp|dtel|doma)\.xml$/.test(f))
+  .map((f) => [f.split("/").at(-1).split(".")[0].replaceAll("#", "/").toUpperCase(), f]));
 
 function callsIn(node, out) {
   if (Array.isArray(node)) { for (const n of node) callsIn(n, out); return out; }
@@ -215,14 +217,30 @@ const layer = new Map(program.classes.map((c) => {
     : file && libDirs.some((dir) => file.startsWith(dir + "/")) ? 0 : 1];
 }));
 const initialLayer = new Map(layer);
+const goSymbol = (name) => {
+  const id = String(name).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
+  return id.startsWith("_") ? `N${id}` : id;
+};
+const classSymbols = [...layer].map(([name, tier]) => ({name, symbol: goSymbol(name), tier})).sort((a, b) => b.symbol.length - a.symbol.length);
+const sourceLayer = (file) => file && libDirs.some((dir) => file.startsWith(dir + "/")) ? 0 : 1;
 const interfaceLayer = new Map([...program.interfaceMethods.keys()].map((name) => {
   const file = objectByName.get(name);
   return [name, file && libDirs.some((dir) => file.startsWith(dir + "/")) ? 0 : 1];
 }));
-const structLayer = new Map([...program.structs.keys()].map((name) => [name, 0]));
+const structLayer = new Map([...program.structs].map(([name, st]) => {
+  const owner = classSymbols.find(({symbol}) => name.startsWith(symbol + "__"));
+  const ddic = typeFileByName.get(st.qname ?? name);
+  return [name, owner?.tier ?? (ddic ? sourceLayer(ddic) : 0)];
+}));
 const typeLayer = (t) => !t ? 0 : t.k === "table" ? typeLayer(t.row)
   : t.k === "struct" ? (structLayer.get(t.go) ?? 0)
     : t.k === "ref" ? (t.intf ? interfaceLayer.get(t.name) : layer.get(t.name)) ?? 0 : 0;
+const bodyTypeLayer = (node) => {
+  if (Array.isArray(node)) return Math.max(0, ...node.map(bodyTypeLayer));
+  if (!node || typeof node !== "object") return 0;
+  return Math.max(typeLayer(node.type), ...Object.entries(node)
+    .filter(([key]) => key !== "type").map(([, value]) => bodyTypeLayer(value)));
+};
 const classRefs = (c) => {
   const refs = new Set(referencedClasses({...program, classes: [c], structs: new Map()}));
   if (c.super) refs.add(c.super);
@@ -259,7 +277,9 @@ let promoted = true;
 while (promoted) {
   promoted = false;
   for (const [name, st] of program.structs) {
-    const next = Math.max(structLayer.get(name), ...st.fields.map((f) => typeLayer(f.type)));
+    const owner = classSymbols.find(({symbol}) => name.startsWith(symbol + "__"));
+    const next = Math.max(structLayer.get(name), owner ? layer.get(owner.name) : 0,
+      ...st.fields.map((f) => typeLayer(f.type)));
     if (next > structLayer.get(name)) { structLayer.set(name, next); promoted = true; }
   }
   for (const [name, sigs] of program.interfaceMethods) {
@@ -275,6 +295,7 @@ while (promoted) {
       next = Math.max(next, typeLayer(m.returning?.type));
       for (const p of m.params ?? []) next = Math.max(next, typeLayer(p.type));
       for (const l of m.locals ?? []) next = Math.max(next, typeLayer(l.type));
+      next = Math.max(next, bodyTypeLayer(m.body));
     }
     if (next > layer.get(c.name)) { layer.set(c.name, next); promoted = true; }
   }
@@ -303,22 +324,23 @@ function writeGeneratedGo(dir) {
   const coreInterfaces = new Set([...interfaceLayer].filter(([, i]) => i === 0).map(([name]) => name));
   const appInterfaces = new Set([...interfaceLayer].filter(([, i]) => i === 1).map(([name]) => name));
   const structsAt = (i) => new Map([...program.structs].filter(([name]) => structLayer.get(name) === i));
+  const tablesAt = (i) => (program.tables ?? []).filter((t) => typeLayer(t.row) === i);
   const constsAt = (i) => new Map([...program.consts].filter(([name, c]) => {
-    const owner = [...layer.keys()].find((cls) => name.startsWith(cls.replace(/[^A-Z0-9_]/g, "_") + "__"));
-    return Math.max(owner ? layer.get(owner) : 0, typeLayer(c.type)) === i;
+    const owner = classSymbols.find(({symbol}) => name.startsWith(symbol + "__"));
+    return Math.max(owner ? layer.get(owner.name) : 0, typeLayer(c.type)) === i;
   }));
   writeFileSync(join(coreDir, "zz_generated.go"), emitGo(program, "core", {
-    classes: layerClasses[0], structs: structsAt(0), consts: constsAt(0),
+    classes: layerClasses[0], structs: structsAt(0), consts: constsAt(0), tables: tablesAt(0),
     interfaces: coreInterfaces, events: eventsFor(0), externalClasses: new Set([...allClassNames].filter((n) => !coreNames.has(n))),
     marker: "GogenCoreLayer",
   }));
   writeFileSync(join(appDir, "zz_generated.go"), emitGo(program, "app", {
-    classes: layerClasses[1], structs: structsAt(1), consts: constsAt(1),
+    classes: layerClasses[1], structs: structsAt(1), consts: constsAt(1), tables: tablesAt(1),
     interfaces: appInterfaces, events: eventsFor(1), externalClasses: new Set([...allClassNames].filter((n) => !appNames.has(n))),
     imports: ["osg/gogen/generated/core"], importMarkers: ["GogenCoreLayer"], marker: "GogenAppLayer",
   }));
   writeFileSync(join(dir, "zz_generated.go"), emitGo(program, "main", {
-    classes: layerClasses[2], structs: structsAt(2), consts: constsAt(2),
+    classes: layerClasses[2], structs: structsAt(2), consts: constsAt(2), tables: tablesAt(2),
     interfaces: new Set(), events: eventsFor(2), externalClasses: new Set([...allClassNames].filter((n) => layer.get(n) < 2)),
     imports: ["osg/gogen/generated/core", "osg/gogen/generated/app"],
     importMarkers: ["GogenCoreLayer", "GogenAppLayer"],
@@ -375,6 +397,7 @@ const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.cl
 writeFileSync(join(out, "plan.json"), JSON.stringify(summary, null, 2));
 if (!ready.length || args.includes("--build-only")) { console.log(JSON.stringify(summary)); process.exit(ready.length ? 0 : 2); }
 const bin = join(out, "unit");
+if (process.env.GOGEN_GO_BUILD_X) writeFileSync(join(out, "go-build-x.log"), "");
 // The Go compiler can reject a method that the IR frontend accepted. Find
 // its ABAP source position, retain its typed signature, and emit a method
 // that raises NOT_COMPILED when reached. The next build reports any further
