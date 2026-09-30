@@ -136,12 +136,16 @@ function ddicKey(registry, table) {
   const type = t.parseType(registry);
   if (!(type instanceof abaplint.BasicTypes.StructureType)) throw new Refusal("full key", `${table} does not resolve: ${type.getQualifiedName?.() ?? type.constructor.name}`);
   const components = new Map(type.getComponents().map((c) => [c.name.toUpperCase(), c.type]));
+  const raw = keyFields(registry, table, t);
   const keys = t.listKeys(registry).map((k) => k.toUpperCase());
   const missing = keys.find((k) => !components.has(k) || unresolved(components.get(k)));
   if (missing) throw new Refusal("full key", `${table}-${missing} does not resolve in the DDIC given`);
+  const extra = [...raw.keys()].find((k) => !keys.includes(k));
+  if (extra || raw.size !== keys.length) {
+    throw new Refusal("full key", `${table}: abaplint lists ${keys.join(", ")}, the key fields are ${[...raw.keys()].join(", ")}`);
+  }
 
   // A client column is CLNT: by its own type, or by its data element's.
-  const raw = new Map((t.getFields() ?? []).map((f) => [f.FIELDNAME.toUpperCase(), f]));
   const isClient = (name) => {
     const field = raw.get(name);
     const rollname = field ? field.ROLLNAME : components.get(name).getDDICName?.();
@@ -163,7 +167,39 @@ function ddicKey(registry, table) {
   }
   const stray = keys.find(isClient);
   if (stray) throw new Refusal("full key", `${table} has a second client-typed key field ${stray.toLowerCase()}`);
-  return {keys: keys.map((k) => ({column: k.toLowerCase(), type: components.get(k)}))};
+  return {keys: keys.map((k) => ({column: k.toLowerCase(), type: components.get(k), ddic: ddicType(registry, raw.get(k))}))};
+}
+
+// The key fields of a table as its DD03P rows, key includes expanded by hand.
+// abaplint 2.120.55 cannot be trusted with this alone: listKeys drops a key
+// include it cannot find, and a suffixed one (.INCLU-xxx) altogether, and
+// parseType skips a missing CI_/SI_ include, so the key it reports can be a
+// prefix of the real one and still look complete. Every key include must
+// resolve here, recursively, or the key is not known.
+function keyFields(registry, table, t, out = new Map(), seen = new Set()) {
+  for (const field of t.getFields() ?? []) {
+    if (field.KEYFLAG !== "X") continue;
+    const name = field.FIELDNAME.toUpperCase();
+    if (name === ".INCLUDE" || name.startsWith(".INCLU-")) {
+      if (name !== ".INCLUDE") throw new Refusal("full key", `${table} has a key include with a suffix (${field.FIELDNAME})`);
+      const include = field.PRECFIELD && registry.getObject("TABL", field.PRECFIELD.toUpperCase());
+      if (!include) throw new Refusal("full key", `${table} has a key include ${field.PRECFIELD ?? "(no name)"} that is not in the DDIC given`);
+      if (seen.has(include.getName())) throw new Refusal("full key", `${table} includes ${include.getName()} in a cycle`);
+      // every field of a key include is key, whatever its own flags say
+      const all = (include.getFields() ?? []).map((f) => ({...f, KEYFLAG: "X"}));
+      keyFields(registry, table, {getFields: () => all}, out, new Set([...seen, include.getName()]));
+    } else if (!name.startsWith(".")) {
+      out.set(name, field);
+    }
+  }
+  return out;
+}
+
+// The DDIC built-in type of a field: its own, or its data element's.
+function ddicType(registry, field) {
+  if (!field) return undefined;
+  if (field.DATATYPE) return field.DATATYPE.toUpperCase();
+  return field.ROLLNAME ? registry.getObject("DTEL", field.ROLLNAME.toUpperCase())?.getDataType(registry)?.toUpperCase() : undefined;
 }
 
 const KEY_PROVIDERS = [ddicKey];
@@ -279,25 +315,55 @@ export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DD
   }
   keys.sort((a, b) => primary.indexOf(a.column) - primary.indexOf(b.column));
 
-  // Key types: the row's component against the column, where the syntax
-  // resolves the row. Unresolved stays open; resolved and different refuses.
+  // Key types. FOR ALL ENTRIES reads `table-component`, so the components are
+  // the loop table's row's, not the field symbol's: the two are checked to
+  // agree, then each key is compared on its own. A key whose type does not
+  // resolve stays open; one that resolves and differs refuses, whatever the
+  // others do.
   const open = ["no concurrent writes to the table during the loop", "reads confined to one client"];
   const syntax = new abaplint.SyntaxLogic(registry, object).run();
-  const rowType = syntax.spaghetti.lookupPosition(body[0].getStart(), name)?.findVariable(row)?.getType();
-  const rowComponents = rowType instanceof abaplint.BasicTypes.StructureType
-    ? new Map(rowType.getComponents().map((c) => [c.name.toLowerCase(), c.type])) : undefined;
-  const typesKnown = rowComponents && keys.every((k) => rowComponents.has(k.component) && !unresolved(rowComponents.get(k.component)));
-  if (typesKnown) {
-    for (const k of keys) {
-      const column = resolved.keys.find((r) => r.column === k.column).type;
-      const component = rowComponents.get(k.component);
-      if (!sameType(column, component)) {
-        throw new Refusal("key types", `${row}-${k.component} is ${describe(component)}, ${dbtab}-${k.column} is ${describe(column)}`);
+  const scope = syntax.spaghetti.lookupPosition(body[0].getStart(), name);
+  const componentsOf = (type) => type instanceof abaplint.BasicTypes.StructureType
+    ? new Map(type.getComponents().map((c) => [c.name.toLowerCase(), c.type])) : undefined;
+  const tableType = scope?.findVariable(table)?.getType();
+  const lineType = tableType instanceof abaplint.BasicTypes.TableType ? tableType.getRowType() : undefined;
+  if (tableType?.isGeneric?.() || lineType?.isGeneric?.()) {
+    throw new Refusal("shape/generic-table", `${table} is typed generically; FOR ALL ENTRIES needs its components`);
+  }
+  const line = componentsOf(lineType);
+  const symbol = componentsOf(scope?.findVariable(row)?.getType());
+  const touched = [...new Set([...keys.map((k) => k.component), ...fields.map((f) => f.component)])];
+  if (line) {
+    for (const component of touched) {
+      if (!line.has(component)) throw new Refusal("shape/row", `${table} has no component ${component}; ${row} is not typed like its line`);
+      const own = symbol?.get(component);
+      const theirs = line.get(component);
+      if (symbol && (!own || (!unresolved(own) && !unresolved(theirs) && !sameType(own, theirs)))) {
+        throw new Refusal("shape/row", `${row}-${component} is not ${table}-${component}; ${row} is not typed like its line`);
       }
     }
-  } else {
-    open.unshift("key types equal column types");
   }
+  let keysOpen = !line;
+  for (const k of keys) {
+    const column = resolved.keys.find((r) => r.column === k.column);
+    const component = line?.get(k.component);
+    if (!component || unresolved(component)) {
+      keysOpen = true;
+      continue;
+    }
+    if (!sameType(column.type, component)) {
+      throw new Refusal("key types", `${table}-${k.component} is ${describe(component)}, ${dbtab}-${k.column} is ${describe(column.type)}`);
+    }
+    // abaplint gives INT1, INT2 and INT4 one IntegerType with no width, so
+    // equal constructors do not prove equal types there: only INT4 against
+    // an integer that is not a narrower DDIC type counts as known
+    if (component instanceof abaplint.BasicTypes.IntegerType) {
+      const ddicName = component.getDDICName?.();
+      const theirs = ddicName ? registry.getObject("DTEL", ddicName.toUpperCase())?.getDataType(registry)?.toUpperCase() : "INT4";
+      if (column.ddic !== "INT4" || theirs !== "INT4") keysOpen = true;
+    }
+  }
+  if (keysOpen) open.unshift("key types equal column types");
 
   return {
     recipe: "R1",

@@ -2752,3 +2752,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: abaplint/transpiler, backlog (Lars is busy this week); a change would build one statement per block with the WHERE repeated under OR, keeping the empty-table branch
 - Regression-test location: `test/lift-r1.mjs` ("AFTER does too, on this runtime" pins 50 and fails when blocking arrives)
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-abaplint-key-include-dropped — abaplint reports a key without the key includes it cannot resolve
+
+- Status: `open` (worked around in `tools/lift.mjs`; upstream: needs an issue)
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/core` 2.120.55 (`build/src/objects/table.js`, `listKeys` and `parseType`)
+- Affected ABAP statement, runtime API or adapter: none at run time; the DDIC resolution a tool reads a table's primary key from (`Table.listKeys(reg)`, `Table.parseType(reg)`)
+- Minimal ABAP reproducer: a transparent table whose DD03P has key fields `KIND`, `CODE` and a key `.INCLUDE` of `CI_LIFT_MISSING`, which is not in the registry; or a key include named `.INCLU-_X` that is
+- Exact command used to run it: `npx mocha test/lift-r1.mjs` ("R1 refuses a key include the DDIC given does not hold", "R1 refuses a suffixed key include")
+- Expected SAP behaviour: every field of a key include is a key field, a suffixed include (`.INCLU-<suffix>`) included; a table whose include cannot be activated is not active, so its key is not known
+- Actual open-abap behaviour: `listKeys` expands only a field named exactly `.INCLUDE`, and only when the include resolves to a structure; an unresolved include and every suffixed key include are left out without a message. `parseType` skips a missing `CI_`/`SI_` include (it returns an unknown type for any other missing include). The key it reports can therefore be a strict prefix of the real one and look complete
+- Impact on open-steamgate: verified lift R1 took the key from abaplint and certified a partial key as the full primary key, so the generated hashed lookup could lose rows (critic r1d on #271)
+- Smallest safe workaround: `tools/lift.mjs` walks the DD03P key fields itself, requires every key include to be in the DDIC given (recursively, no suffix) and refuses when the field list differs from `listKeys`
+- Upstream: abaplint/abaplint, needs an issue (Lars is busy: backlog)
+- Regression-test location: `test/lift-r1.mjs` (the two tests above; both fail against the provider without the check)
+- Upstream version containing a fix: none yet
