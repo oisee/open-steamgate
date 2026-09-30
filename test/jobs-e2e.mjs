@@ -72,6 +72,13 @@ describe("compiled ABAP jobs end to end", function () {
     return jobs.array().map((row) => ({name: row.get().jobname.get().trim(),
       count: row.get().jobcount.get().trim(), status: row.get().status.get()}));
   };
+  const expectSelectFailure = async (selector, code, field) => {
+    let failure;
+    try { await selectJobs(selector); } catch (error) { failure = error; }
+    expect(failure, `BP_JOB_SELECT should raise ${code}`).to.exist;
+    expect(String(failure.classic ?? failure.message).toLowerCase()).to.include(code);
+    if (field) expect(abap.builtin.sy.get().msgv1.get().trim()).to.equal(field);
+  };
 
   before(async () => {
     dir = mkdtempSync(join(tmpdir(), "osd-jobs-e2e-"));
@@ -294,26 +301,50 @@ describe("compiled ABAP jobs end to end", function () {
     prelim.get().prelim.set("X");
     expect(await selectJobs(prelim)).to.deep.equal([{name: preliminary,
       count: preliminaryCount, status: "P"}]);
+    const patterned = selectorType();
+    patterned.get().jobname.set("E2E_SELECT_*");
+    expect(await selectJobs(patterned)).to.deep.equal([
+      {name: waiting, count: waitingCount, status: "S"},
+      {name: preliminary, count: preliminaryCount, status: "P"},
+    ]);
+    patterned.get().jobname.set("E2E_SELECT_+VENT*");
+    expect(await selectJobs(patterned)).to.deep.equal([
+      {name: waiting, count: waitingCount, status: "S"},
+    ]);
+    patterned.get().jobname.set("E2E_SELECT_MISSING*");
+    await expectSelectFailure(patterned, "no_jobs_found");
     const schedul = selectorType();
     schedul.get().jobname.set(waiting);
     schedul.get().jobcount.set(waitingCount);
     schedul.get().schedul.set("X");
     expect(await selectJobs(schedul)).to.have.length(1);
+    const username = abap.builtin.sy.get().uname.get().trim();
+    schedul.get().username.set(`${username.slice(0, 1)}*`);
+    expect(await selectJobs(schedul)).to.have.length(1);
+    schedul.get().username.set("NO_SUCH_USER*");
+    await expectSelectFailure(schedul, "no_jobs_found");
+    schedul.get().username.set("");
     schedul.get().abapname.set("ZGG_EX_012");
     expect(await selectJobs(schedul)).to.have.length(1);
+    schedul.get().abapname.set("ZGG_EX_MISSING");
+    await expectSelectFailure(schedul, "no_jobs_found");
+    schedul.get().abapname.set("ZGG_EX_012");
     schedul.get().eventid.set("E2E_SELECT_SIGNAL");
     expect(await selectJobs(schedul)).to.have.length(1);
+    schedul.get().eventid.set("E2E_OTHER_SIGNAL");
+    await expectSelectFailure(schedul, "no_jobs_found");
+    schedul.get().eventid.set("E2E_SELECT_SIGNAL");
     schedul.get().eventparm.set("A");
     expect(await selectJobs(schedul)).to.deep.equal([{name: waiting,
       count: waitingCount, status: "S"}]);
+    schedul.get().eventparm.set("B");
+    await expectSelectFailure(schedul, "no_jobs_found");
+    schedul.get().eventparm.set("A");
     schedul.get().jobcount.set("99999999");
-    try { await selectJobs(schedul); throw new Error("expected no_jobs_found"); }
-    catch (error) { expect(String(error.classic ?? error.message)).to.include("no_jobs_found"); }
+    await expectSelectFailure(schedul, "no_jobs_found");
     schedul.get().jobcount.set(waitingCount);
     schedul.get().from_date.set("20260930");
-    try { await selectJobs(schedul); throw new Error("expected selection_canceled"); }
-    catch (error) { expect(String(error.classic ?? error.message)).to.include("selection_canceled"); }
-    expect(abap.builtin.sy.get().msgv1.get().trim()).to.equal("FROM_DATE");
+    await expectSelectFailure(schedul, "selection_canceled", "FROM_DATE");
   });
 
   it("records a failing report as ABORTED with a job log line", async () => {

@@ -79,17 +79,27 @@ FUNCTION bp_job_select.
   local_client = 'X'.
   SELECT * FROM zosd_job_identity INTO ls_identity
     WHERE mandt = sy-mandt AND owner = sy-uname.
-    IF jobsel_param_in-jobname IS NOT INITIAL
-        AND ls_identity-jobname <> jobsel_param_in-jobname.
-      CONTINUE.
+    IF jobsel_param_in-jobname IS NOT INITIAL.
+      IF jobsel_param_in-jobname CS '*'.
+        IF ls_identity-jobname NP jobsel_param_in-jobname.
+          CONTINUE.
+        ENDIF.
+      ELSEIF ls_identity-jobname <> jobsel_param_in-jobname.
+        CONTINUE.
+      ENDIF.
     ENDIF.
     IF jobsel_param_in-jobcount IS NOT INITIAL
         AND ls_identity-jobcount <> jobsel_param_in-jobcount.
       CONTINUE.
     ENDIF.
-    IF jobsel_param_in-username IS NOT INITIAL
-        AND ls_identity-owner <> jobsel_param_in-username.
-      CONTINUE.
+    IF jobsel_param_in-username IS NOT INITIAL.
+      IF jobsel_param_in-username CS '*'.
+        IF ls_identity-owner NP jobsel_param_in-username.
+          CONTINUE.
+        ENDIF.
+      ELSEIF ls_identity-owner <> jobsel_param_in-username.
+        CONTINUE.
+      ENDIF.
     ENDIF.
     IF jobname_ext_sel IS SUPPLIED AND jobname_ext_sel IS NOT INITIAL.
       CLEAR: lv_name_include, lv_name_match, lv_name_exclude.
