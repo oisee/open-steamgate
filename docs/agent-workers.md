@@ -43,7 +43,8 @@ rounds the chosen candidate took to reach MERGE.
 | | Sonnet | 21 min | 57, many | codex: 6/10, 2 P2; Claude: 7/10, 3 P2 + 1 shared | yes | in progress |
 
 The L1 rows are from the run log; the L2 s2 rows are from the critic reports of the same day (the slice is
-still in its fix round). Fix rounds took 1.8 to 9 minutes (four measured).
+still in its fix round). Fix rounds took 1.8 to 9.1 minutes: 3.8 and 1.9 (L1 s10), 1.8 (L1 s11), 9.1 (L2 s1, the
+worker's own run time).
 
 After L2 s2 the parallel runs stopped (below).
 
@@ -98,7 +99,7 @@ table above grows.
 | worker: well-specified slice with a clear test list (a build step, a checker) | Claude Sonnet | codex `gpt-6-sol` | chosen on L1 s11 (54 tests and 1 P2 vs 15 and 3) and L2 s2 (7/10 vs 4/10 by the Claude critic, equal test counts). 2 slices |
 | worker: small, mechanical or time-critical slice (a fix, a rename, a wiring change) | codex `gpt-6-sol` | a Claude critic | about a minute faster on the small L1 slices with leaner diffs, slower on the larger L2 slices; more P2s in round 1 in three of four. 4 slices |
 | worker: hard reasoning, e.g. semantics and edge-case proofs | codex `gpt-6-luna`, xhigh | a Claude critic | **not measured yet**; first run is recipe R2. Revisit after it |
-| fix round after a critic | the same worker that wrote the slice | the same critic, round 2 | keeps its context; fix rounds took 1.8–9 min. 4 measured |
+| fix round after a critic | the same worker that wrote the slice | the same critic, round 2 | keeps its context; fix rounds took 1.8–9.1 min. 4 measured, listed under the table |
 | merge critic of a codex worker | a Claude Opus read-only subagent, asked for concrete counterexample rules or inputs | the owner reads the verdict against the diff | on L2 s2 it found 7 P2s where codex found 4 on the same diff, each with a reproducer. 1 slice, both candidates |
 | merge critic of a Claude worker | codex `gpt-6-sol`, medium, read-only | the owner | found a real P2 in every Claude candidate (4 of 4), and missed two on L2 s2 that the Claude critic found. Consider adding a Claude critic for high-stakes slices |
 | tie-breaker, when a critic keeps raising P3s as P2 | the other family's critic, one round | the owner decides | good-enough bar; stops a nagging critic without dropping a real finding |
