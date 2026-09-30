@@ -199,8 +199,9 @@ functions:
 
   it("refuses a rendered 256-character ABAP line with its position", async () => {
     const project = await importProject("long rendered line", readFileSync(FIXTURES[2], "utf8"));
-    const renderer = abap.Classes.ZCL_OSD_DSL_MPC.render_class;
-    abap.Classes.ZCL_OSD_DSL_MPC.render_class = async (...args) => {
+    // generate renders through render_model (one model, built once)
+    const renderer = abap.Classes.ZCL_OSD_DSL_MPC.render_model;
+    abap.Classes.ZCL_OSD_DSL_MPC.render_model = async (...args) => {
       const result = await renderer.call(abap.Classes.ZCL_OSD_DSL_MPC, ...args);
       result.get().lines.array()[0].set("X".repeat(256));
       return result;
@@ -215,14 +216,15 @@ functions:
       expect(error?.message?.get(), "GenerateSet must reject the profile error").to.match(
         /line_length.*line 1, template line \d+, node [^:]+: Line exceeds 255 characters/);
     } finally {
-      abap.Classes.ZCL_OSD_DSL_MPC.render_class = renderer;
+      abap.Classes.ZCL_OSD_DSL_MPC.render_model = renderer;
     }
   });
 
   it("returns non-ASCII comment warnings beside generated files", async () => {
     const project = await importProject("warning line", readFileSync(FIXTURES[2], "utf8"));
-    const renderer = abap.Classes.ZCL_OSD_DSL_MPC.render_class;
-    abap.Classes.ZCL_OSD_DSL_MPC.render_class = async (...args) => {
+    // generate renders through render_model (one model, built once)
+    const renderer = abap.Classes.ZCL_OSD_DSL_MPC.render_model;
+    abap.Classes.ZCL_OSD_DSL_MPC.render_model = async (...args) => {
       const result = await renderer.call(abap.Classes.ZCL_OSD_DSL_MPC, ...args);
       result.get().lines.array()[0].set("*é");
       return result;
@@ -234,7 +236,7 @@ functions:
       const warnings = JSON.parse(warningsFile.get().content.get()).warnings;
       expect(warnings).to.deep.include({line: 1, template_line: 1, node: `project/${project}`, rule: "non_ascii", text: "Character outside 7-bit ASCII"});
     } finally {
-      abap.Classes.ZCL_OSD_DSL_MPC.render_class = renderer;
+      abap.Classes.ZCL_OSD_DSL_MPC.render_model = renderer;
     }
   });
 
