@@ -48,6 +48,16 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Build and link the pinned transpiler and runtime
+        run: |
+          node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+          echo "TRANSPILER=$RUNNER_TEMP/transpiler" >> "$GITHUB_ENV"
+      - run: bash tools/osd-ci-transpiler-build.sh build
+      - run: |
+          node tools/osd-link.mjs transpiler packages/transpiler
+          node tools/osd-link.mjs transpiler-cli packages/cli
+          node tools/osd-link.mjs runtime packages/runtime
+          node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
       - name: Select and validate release tag
         id: release
         env:
@@ -210,6 +220,16 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: npm ci
+      - name: Build and link the pinned transpiler and runtime
+        run: |
+          node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+          echo "TRANSPILER=$RUNNER_TEMP/transpiler" >> "$GITHUB_ENV"
+      - run: bash tools/osd-ci-transpiler-build.sh build
+      - run: |
+          node tools/osd-link.mjs transpiler packages/transpiler
+          node tools/osd-link.mjs transpiler-cli packages/cli
+          node tools/osd-link.mjs runtime packages/runtime
+          node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
       - run: npm run bootstrap
       - name: Build and checksum the target binary
         env:
@@ -364,6 +384,16 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Build and link the pinned transpiler and runtime
+        run: |
+          node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+          echo "TRANSPILER=$RUNNER_TEMP/transpiler" >> "$GITHUB_ENV"
+      - run: bash tools/osd-ci-transpiler-build.sh build
+      - run: |
+          node tools/osd-link.mjs transpiler packages/transpiler
+          node tools/osd-link.mjs transpiler-cli packages/cli
+          node tools/osd-link.mjs runtime packages/runtime
+          node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
       - run: npm run bootstrap
       - name: Build the Marketplace prerelease VSIX
         run: |

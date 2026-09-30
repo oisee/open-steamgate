@@ -83,6 +83,18 @@ had the same issue, even though CI tests link the fork. There was no licence
 exclusion: the fork and upstream transpiler both declare MIT. Release builds
 now compile and link the `libs.lock.json` fork before bootstrap, for the VSIX,
 seeded binary, and Marketplace profile.
+
+The locked fork commit still lacks `only` and marks the whole registry dirty
+on a second run. The shared transpiler build applies
+`tools/osd-transpiler-only.patch` to that commit before compilation; the
+release jobs also link its `@abaplint/core` into the host so the registry and
+transpiler use the same class identities. The
+archive check requires the compiled option and the runtime DATASET host, plus
+the lockfile ref stamped into the seed. The transpiler and runtime distributions
+are copied without their build-time `node_modules`, sources, and tests; their
+runtime dependency closure is already staged from the root lockfile. The local
+VSIX measured 13.2 MiB before and 13.2 MiB after this change (unpacked 133.9
+to 134.3 MiB, Node 24, default Zork pack).
 Before creating or editing a release, it generates CHANGELOG.md from first-parent
 GitHub PR merge titles since the nearest previous `vscode-v*` tag. A merge
 commit without a title in its body gets its title from the PR API. Squash

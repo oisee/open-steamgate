@@ -104,7 +104,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/transpiler
-          key: transpiler-v1-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('libs.lock.json') }}-${{ hashFiles('tools/osd-ci-transpiler-build.sh') }}
+          key: transpiler-v1-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('libs.lock.json') }}-${{ hashFiles('tools/osd-ci-transpiler-build.sh', 'tools/osd-transpiler-only.patch') }}
       - name: Build the transpiler this tree is pinned to
         if: steps.transpiler_cache.outputs.cache-hit != 'true'
         run: bash tools/osd-ci-transpiler-build.sh build
@@ -114,6 +114,7 @@ jobs:
           node tools/osd-link.mjs transpiler packages/transpiler
           node tools/osd-link.mjs transpiler-cli packages/cli
           node tools/osd-link.mjs runtime packages/runtime
+          node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
           node tools/osd-transpiler.mjs
 
       # The build refuses a pack that was not fetched, so this is not
