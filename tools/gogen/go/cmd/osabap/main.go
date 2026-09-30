@@ -31,7 +31,7 @@ func main() {
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Fprintln(os.Stderr, "osabap:", r)
+				fmt.Fprintln(os.Stderr, "osabap:", withoutDB(r))
 				failed = true
 			}
 		}()
@@ -39,6 +39,7 @@ func main() {
 		report := newReport(s)
 		sapGUI, launchSAPGUI, listen, args := sapGUIOption(os.Args[1:])
 		args = datasetOptions(args)
+		args = dbOption(args)
 		input, headless := commandInput(args)
 		if sapGUI {
 			var screen ZCL_GG_HOST__TY_RESULT
@@ -74,6 +75,9 @@ func main() {
 			abap.DialogStep(func() { result = hostRun(s, report, input, "", "") })
 		}
 	}()
+	// the --db file is whole only once it is closed: it is opened in WAL mode,
+	// and until the last connection closes, the rows live in <file>-wal
+	closeDB()
 	if cancelled {
 		return
 	}
@@ -205,6 +209,7 @@ func commandInput(args []string) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, boo
 		arg := args[i]
 		if arg == "--help" || arg == "-h" {
 			usage()
+			closeDB()
 			os.Exit(0)
 		}
 		if arg == "--params" {
@@ -362,6 +367,9 @@ func usage() {
 	fmt.Println("  --allow-write DIR allow DATASET writes within DIR (repeatable; also readable)")
 	fmt.Println("  --dataset-home DIR base for relative DATASET names")
 	fmt.Println("  --dataset-audit FILE append OPEN/DELETE decisions inside a write root")
+	if len(appTables) > 0 {
+		fmt.Printf("  --db FILE         keep the rows of %s in the SQLite FILE (created when missing)\n", strings.Join(appTables, ", "))
+	}
 	for _, name := range appSelectionNames {
 		opt := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(name, "P_"), "_", "-"))
 		if appRanges[name] {
@@ -430,4 +438,70 @@ func terminalInput(screen ZCL_GG_HOST__TY_RESULT) []ZIF_GG_SELECTION_SCREEN_TYPE
 	}
 	fmt.Println()
 	return selectionValues(current)
+}
+
+// dbOption takes --db FILE: the SQLite file a report with tables of its own
+// keeps its rows in, created with the report's tables when it is missing
+// (abap.OpenDBFile, which refuses a file another build laid out). A report
+// with no tables has no database and refuses the flag; one with tables and
+// no --db has no database either, and its first statement says so.
+func dbOption(args []string) []string {
+	var rest []string
+	path := ""
+	for i := 0; i < len(args); i++ {
+		key, value, inline := strings.Cut(args[i], "=")
+		if key != "--db" {
+			rest = append(rest, args[i])
+			continue
+		}
+		if !inline {
+			i++
+			if i >= len(args) {
+				panic(fmt.Errorf("--db needs a file"))
+			}
+			value = args[i]
+		}
+		if value == "" {
+			panic(fmt.Errorf("--db needs a non-empty file name"))
+		}
+		path = value
+	}
+	if path == "" {
+		return rest
+	}
+	if len(appTables) == 0 {
+		panic(fmt.Errorf("--db: %s has no tables of its own", appProgram))
+	}
+	// the path goes into a file: URI, where these would be read as its syntax
+	// (a '?' would cut the name short and create another file)
+	if strings.ContainsAny(path, "?#%") {
+		panic(fmt.Errorf("--db %s: a file name with ?, # or %% is not accepted", path))
+	}
+	if _, err := abap.OpenDBFile(path, appSchema); err != nil {
+		panic(fmt.Errorf("--db %s: %w", path, err))
+	}
+	dbOpen = true
+	return rest
+}
+
+var dbOpen bool
+
+// closeDB checkpoints the --db file: the last connection closing folds the
+// WAL back into it, so the file alone holds every row
+func closeDB() {
+	if dbOpen {
+		dbOpen = false
+		if err := abap.DB().Close(); err != nil {
+			fmt.Fprintln(os.Stderr, "osabap: closing the --db file:", err)
+		}
+	}
+}
+
+// withoutDB names the way out when a report with tables ran without --db:
+// the runtime only knows that no database was opened
+func withoutDB(r any) any {
+	if len(appTables) > 0 && strings.Contains(fmt.Sprint(r), "the host did not open a database") {
+		return fmt.Sprintf("%s keeps its rows in tables (%s): run it with --db FILE", strings.ToLower(appProgram), strings.Join(appTables, ", "))
+	}
+	return r
 }

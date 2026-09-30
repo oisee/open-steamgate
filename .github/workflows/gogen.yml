@@ -97,7 +97,7 @@ jobs:
       # converter, from the pinned clone osd-libs made), run with flags,
       # ranges, no arguments and the native frontend
       - name: osabap, a report as a native command
-        run: node --test tools/gogen/osabap.test.mjs
+        run: node --test tools/gogen/osabap.test.mjs tools/gogen/osabap-sql-corpus.test.mjs
 
   unit-inventory:
     runs-on: ubuntu-latest

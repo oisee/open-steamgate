@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {execFileSync, spawnSync} from "node:child_process";
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {delimiter, dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -148,4 +148,65 @@ test("native DATASET copy obeys read, write and path grants", () => {
   } finally {
     rmSync(dir, {recursive: true, force: true});
   }
+});
+
+// A report with a table of its own (apps/notes: ZNOTES beside the report):
+// its rows live in the SQLite file --db names, created with the report's
+// tables when missing; without --db it refuses and names the flag; the file
+// alone holds the rows once the command ends; a file laid out by another
+// build of the table is refused rather than used. The report is built from
+// a copy, so the tracked table is never edited.
+test("a report's own table lives in the --db file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "osabap-db-"));
+  try {
+    const app = join(dir, "notes");
+    cpSync(join(here, "apps", "notes"), app, {recursive: true});
+    const report = join(app, "znotes.prog.abap");
+    execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
+    const help = run(["--help"]);
+    assert.match(help.stdout, /--db FILE .*ZNOTES/);
+
+    const without = run(["--add", "hello"]);
+    assert.equal(without.status, 1);
+    assert.match(without.stderr, /znotes keeps its rows in tables \(ZNOTES\): run it with --db FILE/);
+
+    const file = join(dir, "notes.db");
+    const first = run(["--db", file, "--add", "hello"]);
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(first.stdout, "1 hello\n1 notes\n");
+    // a second run of the command finds the first run's row
+    const second = run(["--db", file, "--add", "second note"]);
+    assert.equal(second.status, 0, second.stderr);
+    assert.equal(second.stdout, "1 hello\n2 second note\n2 notes\n");
+
+    // the file alone is the data: no -wal left behind, and a copy of just
+    // the file reads back every row
+    assert.equal(existsSync(`${file}-wal`), false);
+    const copy = join(dir, "copy.db");
+    cpSync(file, copy);
+    const fromCopy = run(["--db", copy, "--add", "third"]);
+    assert.equal(fromCopy.status, 0, fromCopy.stderr);
+    assert.equal(fromCopy.stdout, "1 hello\n2 second note\n3 third\n3 notes\n");
+
+    const odd = run(["--db", join(dir, "we?ird.db"), "--add", "x"]);
+    assert.equal(odd.status, 1);
+    assert.match(odd.stderr, /a file name with \?, # or % is not accepted/);
+
+    // the same table with a longer TEXT: the file was laid out by another build
+    const tabl = join(app, "znotes.tabl.xml");
+    writeFileSync(tabl, readFileSync(tabl, "utf8").replace("<LENG>000080</LENG>", "<LENG>000120</LENG>").replace("<INTLEN>000160</INTLEN>", "<INTLEN>000240</INTLEN>"));
+    execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
+    const drifted = run(["--db", file, "--add", "x"]);
+    assert.equal(drifted.status, 1);
+    assert.match(drifted.stderr, /seeded by another build/);
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
+
+test("a report without tables refuses --db", () => {
+  execFileSync(process.execPath, [builder], {stdio: "inherit"});
+  const result = run(["Alice", "--db", join(tmpdir(), "osabap-never.db")]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--db: ZHELLO has no tables of its own/);
 });

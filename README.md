@@ -124,8 +124,10 @@ GOOS=windows GOARCH=arm64 node tools/gogen/osabap.mjs report.prog.abap   # cross
 The usual lifecycle runs: `INITIALIZATION`, the selection-screen events,
 `START-OF-SELECTION`, `WRITE` to stdout. `CL_GUI_FRONTEND_SERVICES` maps to the
 local file system. `OPEN DATASET` works inside the roots you allow
-(`--allow-read ./in --allow-write ./out`). There is no Open SQL in this host
-yet: a report that selects gets an explicit error. The samples are in
+(`--allow-read ./in --allow-write ./out`). A report with tables of its own
+(their `.tabl.xml` beside the report) keeps its rows in the SQLite file
+`--db notes.db` names, created with those tables when missing; 12 of the 18
+Open SQL forms of `tools/gogen/apps/sql-corpus` compile so far. The samples are in
 [`tools/gogen/apps/`](tools/gogen/apps), and the details are in
 [`docs/osabap-native.md`](docs/osabap-native.md).
 
