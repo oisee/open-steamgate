@@ -12,12 +12,18 @@ The shape, in the semantic-patch form of `docs/verified-lift.md` 4.4 (on the res
 + <template.tpl>
 ```
 
+The `+` side is a generated region: in `ZCL_OSD_LIFT_R1_DEMO` it stands between
+`" osd:gen r1-lookup-enrich from=before begin` and `" osd:gen r1-lookup-enrich end`
+(and `from=before_mixed` for R1b), and `node tools/dsl-regions.mjs check src/lift`
+regenerates it from the model of the `from=` method and fails when it drifts
+(`docs/dsl-l1.md`, "Generated regions").
+
 **Obligations**, each closed by a named check:
 
 | obligation | why | closed by |
 |---|---|---|
 | R1 has one body statement; R1b has one SELECT among other statements | the lookup must be unique and its position known | `tools/lift.mjs model` (shape) |
-| R1b places the read at the SELECT's statement index | statements before and after retain their order | `position`, `before`, and `after` from abaplint's statement tree; generated-region test |
+| R1b places the read at the SELECT's statement index | statements before and after retain their order | `position`, `before`, and `after` from abaplint's statement tree; generated region, `node tools/dsl-regions.mjs check src/lift` |
 | a key component is not written before the SELECT | prefetch uses the original key | abaplint write positions; aliases, method calls carrying the row, and MODIFY of the loop table refuse conservatively |
 | no later read of `sy-dbcnt` | READ TABLE does not set it | abaplint read positions; `sy-subrc` remains set by READ TABLE |
 | no other database statement in the body | its order relative to the prefetch can matter | `tools/lift.mjs model` (database statement classes) |
