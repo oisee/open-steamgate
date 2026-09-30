@@ -5,7 +5,7 @@
 `ZCL_OSD_TPL` (`src/tpl/`) renders a Mustache-style template over a JSON tree (`zif_ajson`) into
 lines of code, and gives every output line a **trace entry**: the template, the template line and the
 data path it came from. It is plain ABAP, so the same class runs in `npm test`, in OSGo and on a
-system through abapGit. Unit tests sit beside the class (`zcl_osd_tpl.clas.testclasses.abap`, 29
+system through abapGit. Unit tests sit beside the class (`zcl_osd_tpl.clas.testclasses.abap`, 38
 methods), as `src/regression/` does.
 
 ## Why
@@ -16,20 +16,18 @@ the generation DSL of verified lift (`docs/verified-lift.md`). What the generato
 say, for a line of output, **where it came from**. Without that, a diff between a regenerated object
 and the one on a system is a list of lines, not a list of causes.
 
-SAP ships a template engine of its own, the Code Composer: object type `CMPT`, which abapGit
-serializes ([abapGit#888](https://github.com/abapGit/abapGit/issues/888)), rendered by
-`CL_CMP_COMPOSER`, a class marked for SAP-internal use
-([se80.co.uk](https://www.se80.co.uk/sap-oop/?class=cl_cmp_composer)). Its language was measured on
-A4H with our own templates (a local corpus of 54 cases); supporting that syntax is parked as ideas
-T22, and the core below keeps room for it. Our engine has no SAP dependency and runs on a system as
-an ordinary Z class.
+SAP ships a template engine of its own, the Code Composer, whose templates are repository objects
+of type `CMPT` that abapGit serializes ([abapGit#888](https://github.com/abapGit/abapGit/issues/888));
+its renderer is marked for SAP-internal use. Its language was measured on A4H with our own
+templates (a local corpus of 54 cases); supporting that syntax is parked as ideas T22. Our engine
+has no SAP dependency and runs on a system as an ordinary Z class.
 
 ## Measured before building
 
 `sbcgua/abap_mustache` (MIT) runs here as a scratch pack: 21 of its test methods passed after two
 workarounds, which are upstream defects now in `ANORMALIES.md`
-(`ANOMALY-2026-09-30-macro-argument-dollar`, abaplint/abaplint#4342;
-`ANOMALY-2026-09-30-concatenate-lines-string-trim`, abaplint/transpiler#1935). Writing our own
+(`ANOMALY-2026-09-30-macro-argument-dollar`, [abaplint/abaplint#4342](https://github.com/abaplint/abaplint/pull/4342);
+`ANOMALY-2026-09-30-concatenate-lines-string-trim`, [abaplint/transpiler#1935](https://github.com/abaplint/transpiler/pull/1935); both merged). Writing our own
 engine found a third (`ANOMALY-2026-09-30-find-section-length`). abap_mustache lacks the trace, and a
 trace belongs inside the renderer, not around it.
 
@@ -43,9 +41,9 @@ trace belongs inside the renderer, not around it.
 | `{{^x}}...{{/x}}` | when `x` is missing or false |
 | `{{! ...}}` | comment |
 | `{{> p}}` | partial, indented by the blanks in front of a standalone tag |
-| `{{> p name=path ...}}` | partial with arguments: `name` resolves to `path` inside the partial |
+| `{{> p name=path ...}}` | partial with arguments: `name` resolves to `path` inside the partial and in the partials it calls; an inner argument of the same name wins |
 | `{{@index}}`, `{{#@first}}`, `{{^@last}}` | the nearest loop: 1-based index (like `sy-tabix`), first and last item |
-| `{{name \| lower}}`, `\| upper`, `\| pad 20` | filters, applied left to right; an unknown filter is an error |
+| `{{name \| lower}}`, `\| upper`, `\| pad 20` | filters, applied left to right; checked whether or not the value exists; `pad` takes one width from 1 to 255 |
 
 A section, inverted, close, comment or partial tag alone on its line takes the line with it, newline
 included (the Mustache "standalone" rule, judged on the source, so it holds for consecutive lines and
@@ -67,7 +65,8 @@ Errors (`ZCX_OSD_TPL`) name the template and the line: `main:2: section a not cl
 `ty_result-trace` has one entry per output line: `line`, `template` (a partial is its own template),
 `template_line`, `path`. The first text on a line opens its entry and gives the template line; the
 first **value** on the line names the path, so `  METHODS {{name}}.` traces to `/methods/2/name`. The
-pieces of a multi-line value all keep the line of their tag.
+pieces of a multi-line value all keep the line of their tag, and a value that is only a newline still
+names the path of the line it ends; an empty value names nothing.
 
 ## Planned, not built
 

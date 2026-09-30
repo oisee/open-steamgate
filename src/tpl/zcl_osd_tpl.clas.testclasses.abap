@@ -30,6 +30,15 @@ CLASS ltcl_osd_tpl DEFINITION FOR TESTING
     METHODS unclosed_section_is_error FOR TESTING.
     METHODS unclosed_tag_names_template FOR TESTING.
     METHODS array_of_eleven_in_order FOR TESTING RAISING cx_static_check.
+    METHODS lone_cr_at_end_kept FOR TESTING RAISING cx_static_check.
+    METHODS inline_partial_not_indented FOR TESTING RAISING cx_static_check.
+    METHODS inline_return_not_indented FOR TESTING RAISING cx_static_check.
+    METHODS newline_value_claims_path FOR TESTING RAISING cx_static_check.
+    METHODS missing_partial_at_limit FOR TESTING RAISING cx_static_check.
+    METHODS arguments_are_inherited FOR TESTING RAISING cx_static_check.
+    METHODS shadowed_first_segment FOR TESTING RAISING cx_static_check.
+    METHODS nested_loop_metadata FOR TESTING RAISING cx_static_check.
+    METHODS filters_checked_without_value FOR TESTING.
 
     METHODS data
       IMPORTING
@@ -452,6 +461,106 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       exp = `1 2 3 4 5 6 7 8 9 10 11 `
       act = text( iv_template = `{{#n}}{{.}} {{/n}}` iv_json = `{"n":[1,2,3,4,5,6,7,8,9,10,11]}` ) ).
+  ENDMETHOD.
+
+
+  METHOD lone_cr_at_end_kept.
+    cl_abap_unit_assert=>assert_equals(
+      exp = cl_abap_char_utilities=>cr_lf(1)
+      act = text( iv_template = `{{!c}}` && cl_abap_char_utilities=>cr_lf(1) iv_json = `{}` ) ).
+  ENDMETHOD.
+
+  METHOD inline_partial_not_indented.
+    DATA lt_partials TYPE zcl_osd_tpl=>tt_partials.
+    lt_partials = partial( iv_name = `p` iv_template = `{{v}}{{>q}}` ).
+    APPEND LINES OF partial( iv_name = `q` iv_template = `b` ) TO lt_partials.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `  a` && nl( ) && `bEND`
+      act = text( iv_template = `  {{>p}}` && nl( ) && `END` iv_json = `{"v":"a\n"}` it_partials = lt_partials ) ).
+  ENDMETHOD.
+
+  METHOD inline_return_not_indented.
+    DATA lt_partials TYPE zcl_osd_tpl=>tt_partials.
+    lt_partials = partial( iv_name = `p` iv_template = `{{>q}}X` ).
+    APPEND LINES OF partial( iv_name = `q` iv_template = `{{v}}` ) TO lt_partials.
+    cl_abap_unit_assert=>assert_equals(
+      exp = nl( ) && `XEND`
+      act = text( iv_template = `  {{>p}}` && nl( ) && `END` iv_json = `{"v":"\n"}` it_partials = lt_partials ) ).
+  ENDMETHOD.
+
+  METHOD newline_value_claims_path.
+    DATA ls_result TYPE zcl_osd_tpl=>ty_result.
+    DATA ls_trace TYPE zcl_osd_tpl=>ty_trace.
+    ls_result = zcl_osd_tpl=>render(
+      iv_template = `X{{v}}{{w}}`
+      ii_data     = data( `{"v":"\n","w":"b"}` ) ).
+    READ TABLE ls_result-trace INDEX 1 INTO ls_trace.
+    cl_abap_unit_assert=>assert_equals( exp = `/v` act = ls_trace-path ).
+    READ TABLE ls_result-trace INDEX 2 INTO ls_trace.
+    cl_abap_unit_assert=>assert_equals( exp = `/w` act = ls_trace-path ).
+  ENDMETHOD.
+
+  METHOD missing_partial_at_limit.
+    DATA lt_partials TYPE zcl_osd_tpl=>tt_partials.
+    DATA lv_i TYPE i.
+    DATA lv_template TYPE string.
+    DO 50 TIMES.
+      lv_i = sy-index - 1.
+      IF lv_i < 49.
+        lv_template = |{ '{{' }>p{ lv_i + 1 }{ '}}' }|.
+      ELSE.
+        lv_template = `{{>missing}}.`.
+      ENDIF.
+      APPEND LINES OF partial( iv_name = |p{ lv_i }| iv_template = lv_template ) TO lt_partials.
+    ENDDO.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `.`
+      act = text( iv_template = `{{>p0}}` iv_json = `{}` it_partials = lt_partials ) ).
+  ENDMETHOD.
+
+  METHOD arguments_are_inherited.
+    DATA lt_partials TYPE zcl_osd_tpl=>tt_partials.
+    " a partial without arguments sees its caller's arguments
+    lt_partials = partial( iv_name = `p` iv_template = `{{>q}}` ).
+    APPEND LINES OF partial( iv_name = `q` iv_template = `{{x}}` ) TO lt_partials.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `bound`
+      act = text( iv_template = `{{>p x=a}}` iv_json = `{"x":"root","a":"bound"}` it_partials = lt_partials ) ).
+    " forwarded and renamed, and dotted through the alias
+    CLEAR lt_partials.
+    lt_partials = partial( iv_name = `p` iv_template = `{{>q y=x}}` ).
+    APPEND LINES OF partial( iv_name = `q` iv_template = `{{y.name}}/{{x.name}}` ) TO lt_partials.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `in/in`
+      act = text( iv_template = `{{>p x=o}}` iv_json = `{"o":{"name":"in"},"x":{"name":"out"}}` it_partials = lt_partials ) ).
+  ENDMETHOD.
+
+  METHOD shadowed_first_segment.
+    cl_abap_unit_assert=>assert_equals(
+      exp = ``
+      act = text( iv_template = `{{#a}}{{b.c}}{{/a}}` iv_json = `{"b":{"c":"outer"},"a":{"b":{}}}` ) ).
+  ENDMETHOD.
+
+  METHOD nested_loop_metadata.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `1/true/false;2/false/true;`
+      act = text( iv_template = `{{#n}}{{#o}}{{@index}}/{{@first}}/{{@last}};{{/o}}{{/n}}`
+                  iv_json     = `{"n":[{"o":{"k":1}},{"o":{"k":2}}]}` ) ).
+  ENDMETHOD.
+
+  METHOD filters_checked_without_value.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: unknown filter "shout"`
+      act = error_text( iv_template = `{{missing | shout}}` iv_json = `{}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: filter upper takes no argument`
+      act = error_text( iv_template = `{{v | upper junk}}` iv_json = `{"v":"a"}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: filter pad needs one width from 1 to 255`
+      act = error_text( iv_template = `{{v | pad 2147483648}}` iv_json = `{"v":"a"}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: filter pad needs one width from 1 to 255`
+      act = error_text( iv_template = `{{v | pad 256}}` iv_json = `{"v":"a"}` ) ).
   ENDMETHOD.
 
 ENDCLASS.

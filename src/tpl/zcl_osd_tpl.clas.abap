@@ -80,6 +80,7 @@ CLASS zcl_osd_tpl DEFINITION PUBLIC FINAL CREATE PRIVATE.
       END OF ty_alias,
       tt_aliases TYPE STANDARD TABLE OF ty_alias WITH DEFAULT KEY,
       BEGIN OF ty_frame,
+        " empty path: an overlay of partial arguments, not a data context
         path    TYPE string,
         index   TYPE i,
         count   TYPE i,
@@ -235,6 +236,16 @@ CLASS zcl_osd_tpl DEFINITION PUBLIC FINAL CREATE PRIVATE.
         iv_text        TYPE string
       RETURNING
         VALUE(rv_text) TYPE string.
+
+    CLASS-METHODS context_path
+      IMPORTING
+        it_frames      TYPE tt_frames
+      RETURNING
+        VALUE(rv_path) TYPE string.
+
+    METHODS claim_path
+      IMPORTING
+        iv_path TYPE string.
 
     CLASS-METHODS join
       IMPORTING
@@ -493,7 +504,8 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
 
       lv_before = substring( val = iv_source off = lv_ls len = <ls_token>-start - lv_ls ).
       lv_after = substring( val = iv_source off = <ls_token>-end len = lv_le - <ls_token>-end ).
-      IF strlen( lv_after ) > 0 AND substring( val = lv_after off = strlen( lv_after ) - 1 ) = cl_abap_char_utilities=>cr_lf(1).
+      IF lv_le < lv_len AND strlen( lv_after ) > 0
+          AND substring( val = lv_after off = strlen( lv_after ) - 1 ) = cl_abap_char_utilities=>cr_lf(1).
         lv_after = substring( val = lv_after len = strlen( lv_after ) - 1 ).
       ENDIF.
       IF is_blank( lv_before ) = abap_false OR is_blank( lv_after ) = abap_false.
@@ -669,12 +681,12 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
     DATA ls_arg TYPE ty_ref.
     DATA lv_indent TYPE string.
     DATA lv_template TYPE string.
+    DATA lv_ctx_path TYPE string.
     FIELD-SYMBOLS <ls_tpl> TYPE ty_parsed.
-    FIELD-SYMBOLS <ls_top> TYPE ty_frame.
 
     READ TABLE mt_parsed INDEX iv_tpl ASSIGNING <ls_tpl>.
     lv_template = <ls_tpl>-name.
-    READ TABLE it_frames INDEX lines( it_frames ) ASSIGNING <ls_top>.
+    lv_ctx_path = context_path( it_frames ).
 
     lv_index = iv_from.
     WHILE lv_index <= iv_to.
@@ -687,7 +699,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
           emit_static( iv_tpl    = iv_tpl
                        iv_from   = ls_token-start
                        iv_to     = ls_token-end
-                       iv_path   = <ls_top>-path
+                       iv_path   = lv_ctx_path
                        iv_indent = iv_indent ).
 
         WHEN c_kind-var OR c_kind-raw.
@@ -699,6 +711,8 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
             SPLIT lv_text AT `|` INTO TABLE lt_filters.
             lv_name = trim( substring( val = lv_name len = lv_bar ) ).
           ENDIF.
+          " filters are checked whether or not the value exists
+          apply_filters( iv_text = `` it_filters = lt_filters iv_where = lv_where ).
           ls_ref = resolve( iv_name = lv_name it_frames = it_frames ).
           IF ls_ref-found = abap_true.
             IF ls_ref-is_meta = abap_true.
@@ -773,41 +787,42 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
         WHEN c_kind-partial.
           lt_words = split_words( ls_token-name ).
           READ TABLE lt_words INDEX 1 INTO lv_word.
-          IF mv_depth >= c_max_depth.
-            RAISE EXCEPTION TYPE zcx_osd_tpl
-              EXPORTING
-                text = |{ lv_where }: partials nested deeper than { c_max_depth }|.
-          ENDIF.
           lv_partial = partial_index( lv_word ).
           IF lv_partial > 0.
-            " arguments name=path bind names for the partial
+            IF mv_depth >= c_max_depth.
+              RAISE EXCEPTION TYPE zcx_osd_tpl
+                EXPORTING
+                  text = |{ lv_where }: partials nested deeper than { c_max_depth }|.
+            ENDIF.
+            " arguments name=path: an overlay frame on top of the caller's stack;
+            " without arguments the stack stays as it is
             lt_inner = it_frames.
-            CLEAR ls_frame.
-            ls_frame-path = <ls_top>-path.
-            ls_frame-index = <ls_top>-index.
-            ls_frame-count = <ls_top>-count.
-            LOOP AT lt_words INTO lv_word FROM 2.
-              lv_eq = find( val = lv_word sub = `=` ).
-              IF lv_eq <= 0.
-                RAISE EXCEPTION TYPE zcx_osd_tpl
-                  EXPORTING
-                    text = |{ lv_where }: partial argument "{ lv_word }" is not name=path|.
-              ENDIF.
-              ls_arg = resolve( iv_name = substring( val = lv_word off = lv_eq + 1 ) it_frames = it_frames ).
-              IF ls_arg-found = abap_false OR ls_arg-is_meta = abap_true.
-                RAISE EXCEPTION TYPE zcx_osd_tpl
-                  EXPORTING
-                    text = |{ lv_where }: partial argument "{ lv_word }" not found|.
-              ENDIF.
-              ls_alias-name = substring( val = lv_word len = lv_eq ).
-              ls_alias-path = ls_arg-path.
-              APPEND ls_alias TO ls_frame-aliases.
-            ENDLOOP.
-            APPEND ls_frame TO lt_inner.
+            IF lines( lt_words ) > 1.
+              CLEAR ls_frame.
+              LOOP AT lt_words INTO lv_word FROM 2.
+                lv_eq = find( val = lv_word sub = `=` ).
+                IF lv_eq <= 0.
+                  RAISE EXCEPTION TYPE zcx_osd_tpl
+                    EXPORTING
+                      text = |{ lv_where }: partial argument "{ lv_word }" is not name=path|.
+                ENDIF.
+                ls_arg = resolve( iv_name = substring( val = lv_word off = lv_eq + 1 ) it_frames = it_frames ).
+                IF ls_arg-found = abap_false OR ls_arg-is_meta = abap_true.
+                  RAISE EXCEPTION TYPE zcx_osd_tpl
+                    EXPORTING
+                      text = |{ lv_where }: partial argument "{ lv_word }" not found|.
+                ENDIF.
+                ls_alias-name = substring( val = lv_word len = lv_eq ).
+                ls_alias-path = ls_arg-path.
+                APPEND ls_alias TO ls_frame-aliases.
+              ENDLOOP.
+              APPEND ls_frame TO lt_inner.
+            ENDIF.
             READ TABLE mt_parsed INDEX lv_partial ASSIGNING <ls_tpl>.
             lv_partial_count = lines( <ls_tpl>-tokens ).
             lv_indent = iv_indent && ls_token-indent.
-            IF mv_current IS INITIAL.
+            " a standalone call starts a fresh source line: indent it
+            IF ls_token-standalone = abap_true.
               mv_pending_indent = lv_indent.
             ENDIF.
             mv_depth = mv_depth + 1.
@@ -817,8 +832,9 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
                           it_frames = lt_inner
                           iv_indent = lv_indent ).
             mv_depth = mv_depth - 1.
-            " back in the caller: its own indentation, not the partial's
-            IF mv_current IS INITIAL.
+            " after a standalone call the caller continues on a fresh source line
+            " of its own: its indentation, not the partial's
+            IF ls_token-standalone = abap_true AND mv_current IS INITIAL.
               mv_pending_indent = iv_indent.
             ENDIF.
             READ TABLE mt_parsed INDEX iv_tpl ASSIGNING <ls_tpl>.
@@ -881,6 +897,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
       ENDIF.
       put_text( iv_text = substring( val = iv_text off = lv_pos len = lv_nl - lv_pos )
                 iv_template = iv_template iv_line = iv_line iv_path = iv_path iv_is_value = abap_true ).
+      claim_path( iv_path ).
       end_line( iv_template = iv_template iv_line = iv_line iv_path = iv_path ).
       lv_pos = lv_nl + 1.
     ENDWHILE.
@@ -891,7 +908,6 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
 * The first text of a line opens its trace entry; the first value on the line
 * then names the path (the node the line is about).
     DATA ls_trace TYPE ty_trace.
-    FIELD-SYMBOLS <ls_trace> TYPE ty_trace.
 
     IF iv_text IS INITIAL.
       RETURN.
@@ -906,10 +922,8 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
       mv_path_from_value = iv_is_value.
       mv_current = mv_pending_indent && mv_current.
       CLEAR mv_pending_indent.
-    ELSEIF iv_is_value = abap_true AND mv_path_from_value = abap_false.
-      READ TABLE mt_trace INDEX lines( mt_trace ) ASSIGNING <ls_trace>.
-      <ls_trace>-path = iv_path.
-      mv_path_from_value = abap_true.
+    ELSEIF iv_is_value = abap_true.
+      claim_path( iv_path ).
     ENDIF.
     mv_current = mv_current && iv_text.
     mv_last_newline = abap_false.
@@ -949,9 +963,8 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
     FIELD-SYMBOLS <ls_frame> TYPE ty_frame.
 
     IF iv_name = `.`.
-      READ TABLE it_frames INDEX lines( it_frames ) ASSIGNING <ls_frame>.
       rs_ref-found = abap_true.
-      rs_ref-path = <ls_frame>-path.
+      rs_ref-path = context_path( it_frames ).
       rs_ref-truthy = is_truthy( rs_ref-path ).
       RETURN.
     ENDIF.
@@ -1001,9 +1014,11 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
         lv_candidate = ls_alias-path.
         EXIT.
       ENDIF.
-      lv_candidate = join( iv_path = <ls_frame>-path iv_name = lv_first ).
-      IF mi_data->exists( lv_candidate ) = abap_true.
-        EXIT.
+      IF <ls_frame>-path IS NOT INITIAL.
+        lv_candidate = join( iv_path = <ls_frame>-path iv_name = lv_first ).
+        IF mi_data->exists( lv_candidate ) = abap_true.
+          EXIT.
+        ENDIF.
       ENDIF.
       CLEAR lv_candidate.
       lv_index = lv_index - 1.
@@ -1069,34 +1084,49 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
 
 
   METHOD apply_filters.
-* lower, upper, pad <n> (blanks on the right up to n characters).
+* lower and upper take no argument; pad takes one width from 1 to 255 and adds
+* blanks on the right up to it. Checked even when there is no value.
     DATA lv_filter TYPE string.
     DATA lt_words TYPE string_table.
     DATA lv_name TYPE string.
     DATA lv_arg TYPE string.
     DATA lv_width TYPE i.
+    DATA lv_count TYPE i.
 
     rv_text = iv_text.
     LOOP AT it_filters INTO lv_filter.
       lt_words = split_words( lv_filter ).
+      lv_count = lines( lt_words ).
       CLEAR: lv_name, lv_arg.
       READ TABLE lt_words INDEX 1 INTO lv_name.
       READ TABLE lt_words INDEX 2 INTO lv_arg.
       CASE lv_name.
-        WHEN `lower`.
-          rv_text = to_lower( rv_text ).
-        WHEN `upper`.
-          rv_text = to_upper( rv_text ).
-        WHEN `pad`.
-          IF lv_arg IS INITIAL OR lv_arg CN `0123456789`.
+        WHEN `lower` OR `upper`.
+          IF lv_count <> 1.
             RAISE EXCEPTION TYPE zcx_osd_tpl
               EXPORTING
-                text = |{ iv_where }: filter pad needs a width|.
+                text = |{ iv_where }: filter { lv_name } takes no argument|.
+          ENDIF.
+          IF lv_name = `lower`.
+            rv_text = to_lower( rv_text ).
+          ELSE.
+            rv_text = to_upper( rv_text ).
+          ENDIF.
+        WHEN `pad`.
+          IF lv_count <> 2 OR lv_arg CN `0123456789` OR strlen( lv_arg ) > 3.
+            RAISE EXCEPTION TYPE zcx_osd_tpl
+              EXPORTING
+                text = |{ iv_where }: filter pad needs one width from 1 to 255|.
           ENDIF.
           lv_width = lv_arg.
-          WHILE strlen( rv_text ) < lv_width.
-            rv_text = rv_text && ` `.
-          ENDWHILE.
+          IF lv_width < 1 OR lv_width > 255.
+            RAISE EXCEPTION TYPE zcx_osd_tpl
+              EXPORTING
+                text = |{ iv_where }: filter pad needs one width from 1 to 255|.
+          ENDIF.
+          IF strlen( rv_text ) < lv_width.
+            rv_text = rv_text && repeat( val = ` ` occ = lv_width - strlen( rv_text ) ).
+          ENDIF.
         WHEN OTHERS.
           RAISE EXCEPTION TYPE zcx_osd_tpl
             EXPORTING
@@ -1115,6 +1145,37 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
     REPLACE ALL OCCURRENCES OF `<` IN rv_text WITH `&lt;`.
     REPLACE ALL OCCURRENCES OF `>` IN rv_text WITH `&gt;`.
     REPLACE ALL OCCURRENCES OF `"` IN rv_text WITH `&quot;`.
+  ENDMETHOD.
+
+
+  METHOD context_path.
+* The nearest frame that is a data context (argument overlays have none).
+    DATA lv_index TYPE i.
+    FIELD-SYMBOLS <ls_frame> TYPE ty_frame.
+
+    lv_index = lines( it_frames ).
+    WHILE lv_index > 0.
+      READ TABLE it_frames INDEX lv_index ASSIGNING <ls_frame>.
+      IF <ls_frame>-path IS NOT INITIAL.
+        rv_path = <ls_frame>-path.
+        RETURN.
+      ENDIF.
+      lv_index = lv_index - 1.
+    ENDWHILE.
+    rv_path = `/`.
+  ENDMETHOD.
+
+
+  METHOD claim_path.
+* The first value on a line names the line's path (an empty value claims nothing).
+    FIELD-SYMBOLS <ls_trace> TYPE ty_trace.
+
+    IF mv_traced = abap_false OR mv_path_from_value = abap_true.
+      RETURN.
+    ENDIF.
+    READ TABLE mt_trace INDEX lines( mt_trace ) ASSIGNING <ls_trace>.
+    <ls_trace>-path = iv_path.
+    mv_path_from_value = abap_true.
   ENDMETHOD.
 
 
