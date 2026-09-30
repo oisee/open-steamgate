@@ -1571,7 +1571,10 @@ const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONV
   // a dynamic WHERE A4H refused (go/abap osqlwhere.go, tools/ir-osql-where.mjs)
   "CX_SY_DYNAMIC_OSQL_SYNTAX",
   // CALL FUNCTION ... DESTINATION 'AMDP' on a host without HANA (callFunction)
-  "CX_SY_DYN_CALL_ILLEGAL_FUNC"];
+  "CX_SY_DYN_CALL_ILLEGAL_FUNC",
+  // the DATASET statements (go/abap/dataset.go): READ or TRANSFER on a file
+  // not open, TRANSFER on one opened FOR INPUT; OPEN of an open file
+  "CX_SY_FILE_OPEN_MODE", "CX_SY_FILE_OPEN"];
 // the superclass of a runtime exception the registry does not hold, read
 // off A4H (CX_SY_REPLACE_INFINITE_LOOP inheriting from CX_DYNAMIC_CHECK), and
 // CX_SY_OPEN_SQL_DATA_ERROR from CX_SY_OPEN_SQL_ERROR (its definition on
@@ -2404,6 +2407,13 @@ function statement(node, ctx) {
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (!charlike(target.type)) throw new Unsupported("TRANSLATE of a non-character field");
     return {s: "translate", target, upper: upper(m[1]) === "UPPER"};
+  }
+  // X0: the DATASET statements, as the transpiler's runtime does them
+  // (go/abap/dataset.go, docs/dataset.md): the file system behind the
+  // sandbox of OSD_DATASET_READ / OSD_DATASET_WRITE
+  if ([Statements.OpenDataset, Statements.CloseDataset, Statements.DeleteDataset, Statements.Transfer,
+    Statements.ReadDataset, Statements.GetDataset, Statements.SetDataset].some((k) => isStmt(node, k))) {
+    return datasetStatement(node, ctx, text);
   }
   // ultra/events: GET TIME STAMP FIELD ts into a TIMESTAMP p(8,0) or a
   // TIMESTAMPL p(11,7): UTC, as sy-datum and sy-uzeit are here
@@ -5594,6 +5604,81 @@ export function packedLiteral(text, to) {
   const padded = digits.padStart(dec + 1, "0");
   const out = dec > 0 ? `${padded.slice(0, -dec)}.${padded.slice(-dec)}` : padded;
   return neg && v !== 0n ? `-${out}` : out;
+}
+
+/**
+ * OPEN / CLOSE / DELETE / READ / GET / SET DATASET and TRANSFER (X0). Each
+ * operand is found by the keywords right in front of it -- the statement's
+ * own tokens, never the text of an operand, which is the lesson of the
+ * transpiler's version (a variable lv_type is no TYPE addition) -- and an
+ * addition the runtime does not do is refused by name.
+ */
+function datasetStatement(node, ctx, text) {
+  const operands = [];
+  const words = [];
+  let keywords = [];
+  for (const c of node.getChildren()) {
+    if (c instanceof Nodes.TokenNode) {
+      const w = upper(c.getFirstToken().getStr());
+      keywords.push(w);
+      words.push(w);
+    } else {
+      operands.push({keywords, node: c});
+      keywords = [];
+    }
+  }
+  // abaplint splits UTF-8, NON-UNICODE and BYTE-ORDER into three tokens
+  const joined = ` ${words.join(" ").replace(/ - /g, "-")} `;
+  const has = (w) => joined.includes(` ${w} `);
+  const after = (w, notAfter = []) => {
+    const want = w.split(" ");
+    return operands.slice(1).find((o) => o.keywords.slice(-want.length).join(" ") === w
+      && !notAfter.includes(o.keywords[o.keywords.length - want.length - 1]))?.node;
+  };
+  // GET DATASET's name is a Target in the grammar, read here like a source
+  const source = (n, to) => convert(isExpr(n, Expressions.Target) ? lvalue(n, ctx) : sourceOperand(n, ctx), to);
+  const target = (n) => convert(lvalue(n, ctx), {k: "data"});
+  // a position or length from a number; a character operand would need a
+  // conversion the Go emitter has no rule for (c/n/string -> int8), and an
+  // Error there fails the whole program, so it is refused here, in one method
+  const number = (n, to, what) => {
+    const v = isExpr(n, Expressions.Target) ? lvalue(n, ctx) : sourceOperand(n, ctx);
+    if (!["i", "int8", "p", "f"].includes(v.type.k)) throw new Unsupported(`${what} of type ${v.type.k}`);
+    return convert(v, to);
+  };
+  if (isStmt(node, Statements.OpenDataset)) {
+    for (const w of ["CODE PAGE", "TYPE", "FILTER", "REPLACEMENT CHARACTER", "WITH BYTE-ORDER MARK", "SKIPPING BYTE-ORDER MARK",
+      "WITH SMART LINEFEED", "WITH NATIVE LINEFEED", "WITH UNIX LINEFEED", "WITH WINDOWS LINEFEED", "IGNORING CONVERSION ERRORS",
+      "IN LEGACY", "NON-UNICODE"]) {
+      if (has(w) || after(w) !== undefined) throw new Unsupported(`OPEN DATASET ... ${w}`);
+    }
+    const mode = ["INPUT", "OUTPUT", "APPENDING", "UPDATE"].find((m) => has(`FOR ${m}`)) ?? "INPUT";
+    const message = after("MESSAGE");
+    const position = after("AT POSITION");
+    return {s: "dataset_open", name: source(operands[0].node, S), mode, binary: has("BINARY MODE"),
+      message: message ? target(message) : null, position: position ? number(position, INT8, "OPEN DATASET ... AT POSITION") : null};
+  }
+  if (isStmt(node, Statements.CloseDataset)) return {s: "dataset_close", name: source(operands[0].node, S)};
+  if (isStmt(node, Statements.DeleteDataset)) return {s: "dataset_delete", name: source(operands[0].node, S)};
+  if (isStmt(node, Statements.Transfer)) {
+    const length = after("LENGTH");
+    return {s: "dataset_transfer", src: source(operands[0].node, {k: "data"}), name: source(after("TO"), S),
+      length: length ? number(length, I, "TRANSFER ... LENGTH") : null, noEndOfLine: has("NO END OF LINE")};
+  }
+  if (isStmt(node, Statements.ReadDataset)) {
+    const max = after("MAXIMUM LENGTH");
+    const actual = after("ACTUAL LENGTH") ?? after("LENGTH", ["MAXIMUM", "ACTUAL"]);
+    return {s: "dataset_read", name: source(operands[0].node, S), target: target(after("INTO")),
+      max: max ? number(max, I, "READ DATASET ... MAXIMUM LENGTH") : null, actual: actual ? target(actual) : null};
+  }
+  if (isStmt(node, Statements.GetDataset)) {
+    if (after("ATTRIBUTES") !== undefined) throw new Unsupported("GET DATASET ... ATTRIBUTES");
+    const position = after("POSITION");
+    if (position === undefined) throw new Unsupported(`GET DATASET form: ${text}`);
+    return {s: "dataset_get_position", name: source(operands[0].node, S), position: target(position)};
+  }
+  const position = after("POSITION");
+  return {s: "dataset_set_position", name: source(operands[0].node, S), position: position ? number(position, INT8, "SET DATASET ... POSITION") : null};
 }
 
 export function convert(expr, to) {

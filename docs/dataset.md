@@ -99,8 +99,20 @@ TYPE, FILTER, IGNORING CONVERSION ERRORS, byte-order marks, linefeed
 options, MAXIMUM LENGTH in TEXT MODE, GET DATASET ATTRIBUTES; a structure or
 a number as the field. TRUNCATE DATASET and SORT still throw.
 
+## Go
+
+`tools/gogen/go/abap/dataset.go` is the same runtime and the same sandbox
+over the same variables, and gogen lowers the seven statements to it
+(`frontend.mjs` `datasetStatement`, `emit-go.mjs`). The semantics harness
+runs `ZCL_GOGEN_T_DATASET` in a temporary write root and compares it with
+the answers A4H gave; the JS backend of gogen has no file system and says
+so (NOT_COMPILED). An embedding program can also install a host of its own
+with `abap.SetDatasetHost`.
+
 ## Not yet
 
-- The Go runtime (`tools/gogen/go/abap`) has no DATASET yet; the same host
-  rules come next over `os`.
-- osabap gets `--allow-read` / `--allow-write` on top of this (track O).
+- osabap: the report converter of open-abap-gui does not pass the DATASET
+  statements through yet, so a report that uses them is refused before
+  gogen sees it; `--allow-read` / `--allow-write` will set the two roots
+  (track O).
+- TRUNCATE DATASET, SORT, the additions refused above.

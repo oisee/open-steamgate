@@ -174,6 +174,9 @@ const EXPECT = {
   // (130A312A63646160F8FF1F00 for 1254327601040000FFFF), Go its own
   ZCL_GOGEN_T_GZIP: {Go: "rt:11/8 e:11/0 big:11/1000 small:1 z:11223344/4 s:11223344/4",
     JS: "ERROR NOT_COMPILED in abap.DeflateRaw: a host function of the Go runtime"},
+  // X0: measured on A4H (docs/dataset.md); the JS backend has no file system
+  ZCL_GOGEN_T_DATASET: {Go: "t:61620A6364200A r:0/a/1 r:0/b/1 r:4//0 p:3 x:0/00FF0D/3 x:4/0A4100/2 x:4/000000/0 c:6100620020002000 m:8/No such file or directory e:open_mode d:0",
+    JS: "ERROR NOT_COMPILED in DATASET: the JS backend has no file system (the Go host has the sandbox of go/abap/dataset.go)"},
   ZCL_GOGEN_T_B64: {Go: "b1:/w== b2://4= b3:+/+/ b0:[]", JS: "ERROR NOT_COMPILED in abap.EncodeXBase64: a host function of the Go runtime"},
   // SHIFT s RIGHT DELETING TRAILING mask on a string: the length stays, the
   // masked tail goes and blanks come in on the left; a blank stops it
@@ -751,7 +754,12 @@ const {storeConfig} = await import("./store.mjs");
 const storeFacts = JSON.stringify(await storeConfig(storeTree, {storeModule: `${home}/tools/osd-store.mjs`}));
 writeFileSync(join(dir, "main.go"), `package main\n\nimport (\n\t_ "embed"\n\t"fmt"\n\t"runtime/debug"\n\t"strings"\n\n\t"osg/gogen/abap"\n)\n\n//go:embed zz_db.json\nvar dbScript []byte\n\n// abapLine is the first frame of the stack that is ABAP source: the stack\n// of the first panic when a TRY passed it on\nfunc abapLine(r any) string {\n\tst := string(debug.Stack())\n\tif w, ok := r.(*abap.Rethrown); ok {\n\t\tst = w.Stack\n\t}\n\tfor _, l := range strings.Split(st, "\\n") {\n\t\tl = strings.TrimSpace(l)\n\t\tif i := strings.Index(l, ".abap:"); i > 0 {\n\t\t\tif j := strings.IndexAny(l[i:], " +"); j > 0 {\n\t\t\t\tl = l[:i+j]\n\t\t\t}\n\t\t\treturn l[strings.LastIndex(l, "/")+1:]\n\t\t}\n\t}\n\treturn "?"\n}\n\nfunc main() {\n\tif err := abap.OpenDB(dbScript); err != nil {\n\t\tpanic(err)\n\t}\n\tif err := abap.SetMediaDir(${JSON.stringify(join(here, "testdata", "media"))}); err != nil {\n\t\tpanic(err)\n\t}\n\tif err := abap.SetStore(${JSON.stringify(storeTree)}, []byte(${JSON.stringify(storeFacts)}), ""); err != nil {\n\t\tpanic(err)\n\t}\n${objects.map((o) => `\tfunc() {\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\tfmt.Printf("${o.toUpperCase()}\\tERROR %v at %s\\n", r, abapLine(r))\n\t\t\t}\n\t\t}()\n\t\tvar out string\n\t\tabap.DialogStep(func() { out = ${funcName(o.toUpperCase(), "RUN")}(&abap.Session{}) })\n\t\tfmt.Printf("${o.toUpperCase()}\\t%s\\n", out)\n\t}()`).join("\n")}\n}\n`);
 execFileSync("gofmt", ["-w", dir]);
-const goOut = execFileSync("go", ["run", "./cmd/semantics"], {cwd: join(here, "go")}).toString();
+// a write root of its own for the DATASET cases, relative names land in it
+const datasetRoot = join(here, ".out", "dataset-root");
+rmSync(datasetRoot, {recursive: true, force: true});
+mkdirSync(datasetRoot, {recursive: true});
+const goOut = execFileSync("go", ["run", "./cmd/semantics"], {cwd: join(here, "go"),
+  env: {...process.env, OSD_DATASET_READ: "", OSD_DATASET_WRITE: datasetRoot, OSD_DATASET_HOME: ""}}).toString();
 writeFileSync(join(out, "t.mjs"), emitJs(program));
 copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
 const m = await import(pathToFileURL(join(out, "t.mjs")).href);
