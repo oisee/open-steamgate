@@ -1291,6 +1291,9 @@ something already shipped (then it is a must of the current release, like the ro
 - must: O, program -> binary. F4 and dialogs in the TUI, Open SQL in the native build, `osd run ZREPORT` = F8.
 - must: check and record in ANORMALIES whether our Node/Go runners keep class statics across test classes (A4H
   resets them per test class).
+  **Done 2026-09-30 (stoker): both keep them.** In the second test class the counter reads 3 where A4H reads 1,
+  on Node and on Go alike. See `ANOMALY-2026-09-30-unit-statics-across-test-classes`, with the fixture in
+  `test/fixtures/unit-statics/`. The Go half of the fix is U4 step 2 below; the Node half needs a transpiler issue.
 - should: U4 step 1, process sharding of ABAP Unit on Go.
 - should: U4 step 2, Session-owned statics/DB/LUW, one goroutine per test class on a copy of the seed image; statics
   reset per test class as on A4H.
