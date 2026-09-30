@@ -2,7 +2,7 @@
 // in the same forks. A changed lock ref needs its own license review.
 const approved = new Map([
   ["oisee/open-abap-odata", "bd9f1fb175e7b26678e48eb2e311a278a13ef91b"],
-  ["oisee/open-abap-gui", "31cc8b3177569afb66c88a4ec9fd2e640a353877"],
+  ["oisee/open-abap-gui", "238c5bfe8fd9cbc2d52e98bed650aaabfa61dc30"],
 ]);
 
 export function approvedLicenseAssumption(source) {
