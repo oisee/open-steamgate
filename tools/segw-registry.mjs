@@ -71,7 +71,10 @@ export function segwRegistrations(folders) {
   return services.map((s) => {
     const model = models.get(s.model + "/" + s.modelVersion);
     return {...s, mpc: model?.mpc ?? "", modelFile: model?.file};
-  }).sort((a, b) => a.service.localeCompare(b.service));
+  }).sort((a, b) => {
+    const layerOf = (file) => folders.findLastIndex((folder) => file.startsWith(folder + "/"));
+    return layerOf(a.file) - layerOf(b.file) || a.service.localeCompare(b.service);
+  });
 }
 
 export function registryClass(entries) {

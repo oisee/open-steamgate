@@ -195,9 +195,11 @@ export function serviceTree(root, env = process.env) {
   const rel = (file) => (file === undefined ? undefined : relative(root, resolve(root, file)));
   const folders = generatorFoldersOf(root, env).map((f) => join(root, f));
   // Different IWSV filenames can declare the same external endpoint across
-  // layers. The later registration wins, just as the later input layer does.
+  // layers. segwRegistrations preserves layer order, so the later one wins.
   const registrations = new Map();
-  for (const one of segwRegistrations(folders)) registrations.set(one.external.toLowerCase(), one);
+  for (const one of segwRegistrations(folders)) {
+    registrations.set(one.external.toLowerCase(), one);
+  }
   for (const one of registrations.values()) {
     out.push({
       path: `/sap/opu/odata/sap/${one.external}`,

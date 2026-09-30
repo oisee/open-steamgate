@@ -256,6 +256,17 @@ describe("tools/osd-status: the system as one JSON object", () => {
     expect(found[0].handler).to.equal("ZCL_NEW_DPC_EXT");
   });
 
+  it("chooses the later layer for an endpoint even when its technical name sorts first", () => {
+    const registration = (technical, handler) =>
+      `<abapGit><_-IWBEP_-I_MGW_SRH><TECHNICAL_NAME>${technical}</TECHNICAL_NAME><VERSION>0001</VERSION>` +
+      `<EXTERNAL_NAME>ZSHARED_SRV</EXTERNAL_NAME><CLASS_NAME>${handler}</CLASS_NAME></_-IWBEP_-I_MGW_SRH></abapGit>`;
+    write("src/zzz_base.iwsv.xml", registration("ZZZ_BASE", "ZCL_BASE_DPC"));
+    write("gen/aaa_override.iwsv.xml", registration("AAA_OVERRIDE", "ZCL_OVERRIDE_DPC"));
+    const found = servicesOf(root, {}).filter((row) => row.kind === "ODATA" && row.path.endsWith("/ZSHARED_SRV"));
+    expect(found).to.have.length(1);
+    expect(found[0].handler).to.equal("ZCL_OVERRIDE_DPC");
+  });
+
   // The UI5 apps of the tree come out of their own manifests, so the menu
   // and the status app read one list: `sap.app.id` is the component that
   // answers, `title` is what it is called, and the path is the launchpad

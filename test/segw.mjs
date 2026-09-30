@@ -24,6 +24,20 @@ describe("tools/segw-registry: IWSV/IWMO -> service registry", () => {
       rmSync(root, {recursive: true, force: true});
     }
   });
+  it("registers duplicate external endpoints in layer order regardless of technical name", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-segw-endpoint-"));
+    try {
+      for (const folder of ["src", "overlay"]) mkdirSync(join(root, folder));
+      const xml = (technical, dpc) => `<abapGit><_-IWBEP_-I_MGW_SRH><TECHNICAL_NAME>${technical}</TECHNICAL_NAME>` +
+        `<EXTERNAL_NAME>ZSHARED_SRV</EXTERNAL_NAME><CLASS_NAME>${dpc}</CLASS_NAME></_-IWBEP_-I_MGW_SRH></abapGit>`;
+      writeFileSync(join(root, "src", "zzz_base.iwsv.xml"), xml("ZZZ_BASE", "ZCL_BASE_DPC"));
+      writeFileSync(join(root, "overlay", "aaa_override.iwsv.xml"), xml("AAA_OVERRIDE", "ZCL_OVERRIDE_DPC"));
+      const entries = segwRegistrations([join(root, "src"), join(root, "overlay")]);
+      expect(entries.map((entry) => entry.dpc)).to.deep.equal(["ZCL_BASE_DPC", "ZCL_OVERRIDE_DPC"]);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
   it("reads the demo's registration objects", () => {
     const entries = segwRegistrations(["src"]);
     const demo = entries.find((e) => e.external === "ZSTG_DEMO_SRV");
