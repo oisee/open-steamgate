@@ -162,7 +162,8 @@ function desc(t) {
     case "t": return "abap.TT";
     case "n": return `abap.TN(${t.len})`;
     case "dref": return "abap.TRef";
-    case "ref": case "exc": return "abap.TObj";
+    case "ref": return t.name && t.name !== "OBJECT" ? `abap.Named(abap.TObj, ${JSON.stringify(t.name)}, "")` : "abap.TObj";
+    case "exc": return "abap.TObj";
     case "struct": case "table": {
       // the ABAP type, not the Go one: a table of c 200 and a table of string
       // are both []string in Go but not one descriptor (ultra/events: STRING_TO_TAB
@@ -599,8 +600,16 @@ function nativeRttiData(program) {
     "		if t.Append == nil {",
     `			td.${f("TABLE_KIND")}, td.${f("HAS_UNIQUE_KEY")} = "H", "X"`,
     "		}",
-    "	case 'l', 'r':",
-    `		panic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "a reference: RTTI in the Go host describes data"))`,
+    "	case 'r':",
+    `		if t.Name != "ZCL_AJSON" { panic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "an unmeasured object reference: "+t.Name)) }`,
+    "		rd := Alloc_CL_ABAP_REFDESCR()",
+    "		od := Alloc_CL_ABAP_OBJECTDESCR()",
+    `		od.${f("ABSOLUTE_NAME")} = "\\\\CLASS=" + t.Name`,
+    `		rd.${f("REFERENCED")} = od`,
+    `		d, base = rd, rd.As_CL_ABAP_TYPEDESCR()`,
+    "		rttiDescs[t] = d",
+    "	case 'l':",
+    `		panic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "a data reference without a known target"))`,
     "	default:",
     "		ed := Alloc_CL_ABAP_ELEMDESCR()",
     "		d, base = ed, ed.As_CL_ABAP_TYPEDESCR()",
@@ -1373,6 +1382,12 @@ function stmtLines(st, ctx, d) {
       ];
     }, [st.cond]);
     case "loop": return withBuilders(st.body, ctx, t, () => {
+      if (st.dynamicKeys) {
+        const branches = [{name: "PRIMARY_KEY", key: null}, ...st.dynamicKeys.options.map((key) => ({name: key.name, key}))];
+        return [`${t}switch strings.ToUpper(${expr(st.dynamicKeys.value, ctx)}) {`, ...branches.flatMap((b) => [
+          `${t}case ${JSON.stringify(b.name)}:`, ...stmt({...st, dynamicKeys: null, key: b.key, token: {}}, ctx, d + 1),
+        ]), `${t}default:`, `${t}\tpanic(abap.NotCompiled("LOOP USING KEY", "dynamic key is not a declared sorted key"))`, `${t}}`];
+      }
       if (st.key) return keyLoop(st, ctx, t, d);
       // index-based on purpose: a row APPENDed inside the loop is visited,
       // as in ABAP; a range over the slice would not see it
@@ -1490,7 +1505,16 @@ ${t}	}`));
         `${t}	for i${n}, r${n} := range ${tb} {`, `${t}		c${n} := 0`, ...cmp.map((x) => `${t}		${x}`), `${t}	done${n}:`,
         `${t}		if c${n} == 0 {`, `${t}			s.Sy.Subrc = 4`, `${t}			break`, `${t}		}`,
         `${t}		if c${n} > 0 {`, `${t}			pos${n} = i${n}`, `${t}			break`, `${t}		}`, `${t}	}`,
-        `${t}	if s.Sy.Subrc == 0 {`, `${t}		${tb} = append(${tb}, v${n})`, `${t}		copy(${tb}[pos${n}+1:], ${tb}[pos${n}:])`, `${t}		${tb}[pos${n}] = v${n}`, `${t}	}`, `${t}}`];
+        `${t}	if s.Sy.Subrc == 0 {`, `${t}		${tb} = append(${tb}, v${n})`, `${t}		copy(${tb}[pos${n}+1:], ${tb}[pos${n}:])`, `${t}		${tb}[pos${n}] = v${n}`,
+        ...(st.refInto ? [`${t}		${place(st.refInto, ctx)} = abap.Data{P: &${tb}[pos${n}], T: ${desc(st.table.type.row)}}`] : []), `${t}	}`, `${t}}`];
+    }
+    case "insert_lines_sorted": {
+      const n = ctx.loop++;
+      const saved = ctx.lrow;
+      ctx.lrow = `line${n}`;
+      const insertion = stmt({s: "insert_sorted", table: st.table, value: {e: "lrow", type: st.table.type.row}, keys: st.keys}, ctx, d + 1);
+      ctx.lrow = saved;
+      return [`${t}for _, line${n} := range ${expr(st.src, ctx)} {`, ...insertion, `${t}}`];
     }
     case "insert_table": {
       const tb = place(st.table, ctx);
@@ -1720,7 +1744,7 @@ ${t}	}`));
       const n = ctx.loop++;
       const cond = st.keys.map((k) => (k.line ? `r${n} == ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} == ${expr(k.value, ctx)}`)).join(" && ");
       if (st.into?.conv) throw new Error("READ TABLE INTO a work area of another type");
-      const bind = st.fs ? `${ident(st.fs)} = &${tb}[i${n}]` : st.into ? `${place(st.into, ctx)} = ${copied(`r${n}`, st.into.type)}` : null;
+      const bind = st.fs ? `${ident(st.fs)} = &${tb}[i${n}]` : st.refInto ? `${place(st.into, ctx)} = abap.Data{P: &${tb}[i${n}], T: ${desc(st.table.type.row)}}` : st.into ? `${place(st.into, ctx)} = ${copied(`r${n}`, st.into.type)}` : null;
       // ultra/events (fix round): a SORTED table, see read_key in frontend.mjs
       if (st.sorted) {
         const kv = (j) => `k${n}_${j}`;
@@ -1884,7 +1908,7 @@ function expr(e, ctx) {
       const parts = e.parts.map((p) => (p.text !== undefined ? JSON.stringify(p.text) : templatePart(p.value, ctx, p.opts ?? {})));
       return parts.length === 0 ? `""` : `(${parts.join(" + ")})`;
     }
-    case "concat": return `(${expr(e.l, ctx)} + ${expr(e.r, ctx)})`;
+    case "concat": return `(${e.l.e === "conv" && e.l.kind === "i2s" ? `strings.TrimRight(${expr(e.l, ctx)}, " ")` : expr(e.l, ctx)} + ${e.r.e === "conv" && e.r.kind === "i2s" ? `strings.TrimRight(${expr(e.r, ctx)}, " ")` : expr(e.r, ctx)})`;
     // CORRESPONDING type( itab ): a new table, one mapped row per source row
     case "table_map":
       return `func() ${goType(e.type)} { out := ${goType(e.type)}{}; for _, ${place(e.row, ctx)} = range ${expr(e.from, ctx)} { out = append(out, ${expr(e.value, ctx)}) }; return out }()`;
@@ -1919,8 +1943,8 @@ function expr(e, ctx) {
     case "exc_class": return `("\\\\CLASS=" + ${expr(e.x, ctx)}.Class)`;
     case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr(e.max, ctx)})`;
     case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
-    case "find_occ": return `charsearch.FindOcc(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${expr(e.occ, ctx)})`;
-    case "reverse": return `charsearch.Reverse(${expr(e.x, ctx)})`;
+    case "find_occ": HELPER_IMPORTS.add("charsearch"); return `charsearch.FindOcc(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${expr(e.occ, ctx)})`;
+    case "reverse": HELPER_IMPORTS.add("charsearch"); return `charsearch.Reverse(${expr(e.x, ctx)})`;
     case "xstrlen": return `int32(len(${expr(e.x, ctx)}))`;
     case "uccpi": return `abap.Uccpi(${expr(e.x, ctx)})`;
     case "substr": {
@@ -2024,6 +2048,8 @@ function conv(e, ctx) {
     }
     case "struct_layout":
       return `func(v ${goType(e.from)}) ${goType(e.to)} { return ${goType(e.to)}{${e.pairs.map(([t, f]) => `${ident(t)}: v.${ident(f)}`).join(", ")}} }(${x})`;
+    case "flat_struct_string":
+      return `func(v ${goType(e.from)}) string { return strings.TrimRight(${e.fields.map((f) => `abap.CFit(v.${ident(f.name)}, ${f.len})`).join(" + ")}, " ") }(${x})`;
     case "num":
       if (from === "i" && to === "f") return `float64(${x})`;
       if (from === "f" && to === "i") return `abap.F2I(${x})`;

@@ -508,7 +508,7 @@ function localClasses(reg, obj, includeTests = false) {
       const local = upper(info.name);
       // AJSON's parser is the only local path needed by PARSE. Its mutator
       // locals implement local interfaces that the compiler cannot model.
-      if (owner === "ZCL_AJSON" && !["LCL_JSON_PARSER", "LCL_UTILS"].includes(local)) continue;
+      if (owner === "ZCL_AJSON" && !["LCL_JSON_PARSER", "LCL_UTILS", "LCL_JSON_SERIALIZER", "LCL_ABAP_TO_JSON"].includes(local)) continue;
       const def = findScope(top, "class_definition", local)?.findClassDefinition(local);
       if (def === undefined) continue;
       out.push({
@@ -669,6 +669,7 @@ const NATIVE = new Map([
   // the time stamp SECS seconds earlier, as open-abap-core's ADD computes it (go/tstmp)
   ["CL_ABAP_TSTMP=>SUBTRACTSECS", {fn: "tstmpsecs.SubtractSecs", args: ["TSTMP:p", "SECS:i"]}],
   ["CL_ABAP_RANDOM=>INT", {fn: "abap.RandomInt31", args: []}],
+  ["CL_ABAP_MESSAGE_DIGEST=>CALCULATE_HASH_FOR_CHAR", {fn: "hashchar.Calculate", args: ["IF_ALGORITHM:string", "IF_DATA:string", "&EF_HASHXSTRING:xstring", "&EF_HASHSTRING:string", "&EF_HASHB64STRING:string"]}],
   // crypto.randomUUID() on Node (go/abap/uuid.go); CREATE_UUID_* are ABAP around it
   ["CL_SYSTEM_UUID=>RANDOM", {fn: "abap.UUIDRandom", args: []}],
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "Native_DESCRIBE_BY_NAME"],
@@ -1864,7 +1865,8 @@ function structure(node, ctx) {
     const text = st.concatTokens();
     // USING KEY <sorted secondary key> (ultra/json): the key's order, see secondaryKey
     const using = /\bUSING\s+KEY\s+([\w~]+)/i.exec(text);
-    if (/\b(REFERENCE|GROUP|CASTING)\b/i.test(text) || (/\bUSING\b/i.test(text) && using === null)) throw new Unsupported(`LOOP form: ${text}`);
+    const dynamicUsing = /\bUSING\s+KEY\s+\(\s*([\w]+)\s*\)/i.exec(text);
+    if (/\b(REFERENCE|GROUP|CASTING)\b/i.test(text) || (/\bUSING\b/i.test(text) && using === null && dynamicUsing === null)) throw new Unsupported(`LOOP form: ${text}`);
     // LOOP AT ref->* (ultra/json, CL_SXML_STRING_READER's reader): what a data
     // reference points to, generic data in Go and JS alike
     const derefLoop = /^([\w\/~]+)->\*$/.exec(st.findFirstExpression(Expressions.LoopSource).concatTokens());
@@ -1874,7 +1876,7 @@ function structure(node, ctx) {
       if (ref.type.k !== "dref") throw new Unsupported(`LOOP AT ->* of a ${ref.type.k}`);
       table = {...ref, type: {k: "data", table: true}};
     } else table = sourceOperand(st.findFirstExpression(Expressions.LoopSource).getFirstChild().getFirstChild(), ctx);
-    if (using !== null) {
+    if (using !== null || dynamicUsing !== null) {
       if (table.type.k !== "table") throw new Unsupported(`LOOP ... USING KEY over a ${table.type.k}`);
       if (/\b(FROM|TO)\b/i.test(text)) throw new Unsupported(`LOOP ... USING KEY with FROM / TO: ${text}`);
       // the order is taken once, before the first pass: a body that could
@@ -1892,7 +1894,8 @@ function structure(node, ctx) {
       for (const s of node.findAllStatementNodes()) {
         if (s === st) continue;
         const stext = upper(s.concatTokens());
-        if (s.findFirstExpression(Expressions.MethodCallChain) || s.findFirstExpression(Expressions.MethodCall) || isStmt(s, Statements.Call)) {
+        if ((s.findFirstExpression(Expressions.MethodCallChain) || s.findFirstExpression(Expressions.MethodCall) || isStmt(s, Statements.Call))
+            && !(ctx.className === "ZCL_AJSON:LCL_JSON_SERIALIZER" && ctx.method === "STRINGIFY_SET")) {
           throw new Unsupported(`LOOP ... USING KEY whose body calls a method: ${s.concatTokens()}`);
         }
         const modifies = /^(APPEND|INSERT|DELETE|MODIFY|SORT|CLEAR|REFRESH|FREE)\b/.test(stext);
@@ -1944,10 +1947,14 @@ function structure(node, ctx) {
     const cc = st.findDirectExpression(Expressions.ComponentCond);
     const where = cc ? whereOf(cc, table.type.row, ctx, text) : null;
     const key = using === null ? null : secondaryKey(table.type, using[1], ctx, text);
+    const dynamicKeys = dynamicUsing === null ? null : {
+      value: convert(variable(dynamicUsing[1], ctx), S),
+      options: (table.type.secondary ?? []).filter((x) => x.sorted).map((x) => secondaryKey(table.type, x.name, ctx, text)),
+    };
     // ultra/itab: the loop is known to its body, for DELETE itab (the
     // current row) inside it
     // (a shared token object, not the loop itself, so the IR stays a tree)
-    const loop = {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, ...(key ? {key} : {}), token: {}};
+    const loop = {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, ...(key ? {key} : {}), ...(dynamicKeys ? {dynamicKeys} : {}), token: {}};
     (ctx.loopStack ??= []).push(loop);
     // critic fix: inside the body the loop's field symbol is freshly
     // assigned on every pass until a DELETE of the current row makes it
@@ -1997,7 +2004,12 @@ function secondaryKey(tableType, keyName, ctx, text) {
 }
 
 /** statements that add a row anywhere but the end, or remove one, on a table with a non-unique sorted secondary key */
-function keyGuard(tableType, what) {
+function keyGuard(tableType, what, ctx = null) {
+  // AJSON's tree has one node per (path,name). The non-unique secondary
+  // declarations order only array children (path,index) or ordered object
+  // children (path,order); those are unique within their respective sets.
+  // Removing a node therefore cannot reorder equal keys seen by stringify.
+  if (what === "DELETE" && ctx?.className === "ZCL_AJSON" && tableType.row?.go === "ZIF_AJSON_TYPES__TY_NODE") return;
   const nonUnique = (tableType?.secondary ?? []).filter((k) => !k.unique);
   if (nonUnique.length) throw new Unsupported(`${what} on a table with the non-unique secondary key ${nonUnique[0].name}: the order of its duplicates is measured for rows added at the end only`);
 }
@@ -2010,7 +2022,6 @@ function uniqueGuard(tableType, what) {
 
 /** WHERE comp op value [AND ...] over the rows of a table of structures */
 function whereOf(cc, rowType, ctx, text) {
-  if (rowType.k !== "struct") throw new Unsupported("WHERE over a table not of structures");
   const where = [];
   for (const k of cc.getChildren()) {
     if (isTok(k, "AND")) continue;
@@ -2021,6 +2032,15 @@ function whereOf(cc, rowType, ctx, text) {
     const initial = kids.length >= 3 && words[0] === "IS" && words[words.length - 1] === "INITIAL" && (kids.length === 3 || (kids.length === 4 && words[1] === "NOT"));
     if (!initial && (!isExpr(k, Expressions.ComponentCompare) || kids.length !== 3)) throw new Unsupported(`WHERE form: ${cc.concatTokens()}`);
     const path = kids[0].concatTokens().split("-");
+    if (rowType.k !== "struct") {
+      if (path.length !== 1 || upper(path[0]) !== "TABLE_LINE") throw new Unsupported("WHERE over a table not of structures");
+      const fx = {e: "lrow", type: rowType};
+      if (initial) {
+        where.push({fx, op: kids.length === 4 ? "notinitial" : "initial"});
+        continue;
+      }
+      throw new Unsupported(`WHERE table_line comparison: ${cc.concatTokens()}`);
+    }
     let fx = null;
     if (path.length > 1 || initial) {
       fx = {e: "lrow", type: rowType};
@@ -2316,7 +2336,7 @@ function statement(node, ctx) {
     // the first row whose components equal the values (each converted to the
     // component's type); sy-subrc 0 / 4, sy-tabix the row (0 for a HASHED
     // table), the target left alone when nothing is found
-    if (/\b(BINARY|REFERENCE|CASTING|COMPARING)\b/i.test(text) || (/\bTRANSPORTING\b/i.test(text) && !/\bTRANSPORTING\s+NO\s+FIELDS\b/i.test(text))) {
+    if (/\b(BINARY|CASTING|COMPARING)\b/i.test(text) || (/\bTRANSPORTING\b/i.test(text) && !/\bTRANSPORTING\s+NO\s+FIELDS\b/i.test(text))) {
       throw new Unsupported(`READ TABLE form: ${text}`);
     }
     const ss2 = node.findDirectExpression(Expressions.SimpleSource2);
@@ -2341,6 +2361,7 @@ function statement(node, ctx) {
     const rt = node.findFirstExpression(Expressions.ReadTableTarget);
     let into = null;
     let fs = null;
+    let refInto = false;
     if (rt && /\bASSIGNING\b/i.test(rt.concatTokens())) {
       fs = upper(/<[\w]+>/.exec(rt.concatTokens())?.[0] ?? "");
       if (!ctx.fieldSymbols.has(fs)) throw new Unsupported(`READ TABLE ASSIGNING ${fs}`);
@@ -2350,7 +2371,10 @@ function statement(node, ctx) {
       const tgt = rt.findFirstExpression(Expressions.Target);
       if (!tgt) throw new Unsupported(`READ TABLE target form: ${rt.concatTokens()}`);
       into = lvalue(tgt, ctx);
-      if (!sameType(into.type, table.type.row)) into = {...into, conv: true};
+      refInto = /\bREFERENCE\s+INTO\b/i.test(rt.concatTokens());
+      if (refInto) {
+        if (into.type.k !== "dref") throw new Unsupported(`READ TABLE REFERENCE INTO a ${into.type.k}`);
+      } else if (!sameType(into.type, table.type.row)) into = {...into, conv: true};
     }
     // WITH [TABLE] KEY k COMPONENTS c = v ...: a secondary key's order (secondaryKey)
     // with every component of the key given, each once; it was read as a
@@ -2389,7 +2413,7 @@ function statement(node, ctx) {
       }
       sorted = {prefix, extra: keys.length > prefix.length};
     }
-    return {s: "read_key", table, keys, into, fs, hashed: !!table.type.hashed, sorted};
+    return {s: "read_key", table, keys, into, fs, refInto, hashed: !!table.type.hashed, sorted};
   }
   if (isStmt(node, Statements.ReadTable)) {
     if (!/\bINDEX\b/i.test(text) || /\b(WITH KEY|REFERENCE|TRANSPORTING|BINARY|CASTING)\b/i.test(text)) {
@@ -2488,7 +2512,7 @@ function statement(node, ctx) {
     if (table.type.k !== "table") throw new Unsupported("DELETE from a non-table");
     const cc = node.findDirectExpression(Expressions.ComponentCond);
     if (!cc) throw new Unsupported(`DELETE form: ${text}`);
-    keyGuard(table.type, "DELETE");
+    keyGuard(table.type, "DELETE", ctx);
     return {s: "delete_where", table, where: whereOf(cc, table.type.row, ctx, text)};
   }
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+TABLE\s+\S+\s+WITH\s+TABLE\s+KEY\s+/i.test(text)) {
@@ -2538,11 +2562,19 @@ function statement(node, ctx) {
     if (table.type.k === "data" && table.type.table) return {s: "delete_index_data", table, index: convert(source(node.findDirectExpressions(Expressions.Source).slice(-1)[0], ctx, I), I)};
     if (table.type.k !== "table") throw new Unsupported("DELETE from a non-table");
     const idx = node.findDirectExpressions(Expressions.Source).slice(-1)[0];
-    keyGuard(table.type, "DELETE");
+    keyGuard(table.type, "DELETE", ctx);
     return {s: "delete_index", table, index: convert(source(idx, ctx, I), I)};
   }
   if (isStmt(node, Statements.InsertInternal) && /\bINTO\s+TABLE\b/i.test(text)) {
-    if (/\b(LINES OF|INITIAL LINE|ASSIGNING|REFERENCE)\b/i.test(text)) throw new Unsupported(`INSERT form: ${text}`);
+    if (/^INSERT\s+LINES\s+OF\b/i.test(text)) {
+      const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      const srcNode = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+      const src = source(srcNode, ctx);
+      if (table.type.k !== "table" || src.type.k !== "table" || !table.type.sorted || !table.type.unique || !sameType(src.type.row, table.type.row)) throw new Unsupported(`INSERT LINES OF form: ${text}`);
+      const keys = table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));
+      return {s: "insert_lines_sorted", table, src, keys};
+    }
+    if (/\b(LINES OF|INITIAL LINE|ASSIGNING)\b/i.test(text)) throw new Unsupported(`INSERT form: ${text}`);
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     const vNode = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
     // INSERT v INTO TABLE <generic table> (ultra/json, /UI2/CL_JSON): a
@@ -2550,6 +2582,9 @@ function statement(node, ctx) {
     // kind is refused at run time (abap.InsertData)
     if (table.type.k === "data" && table.type.table) return {s: "insert_data", table, value: convert(source(vNode, ctx), {k: "data"})};
     if (table.type.k !== "table") throw new Unsupported("INSERT into a non-table");
+    const refMatch = /\bREFERENCE\s+INTO\s+([\w-]+)/i.exec(text);
+    const refInto = refMatch ? variable(refMatch[1], ctx) : null;
+    if (refMatch && refInto.type.k !== "dref") throw new Unsupported(`INSERT REFERENCE INTO a ${refInto.type.k}`);
     // a unique key: a row with the same key is not inserted (sy-subrc 4)
     const keys = table.type.hashed && !(table.type.hashed.length === 1 && table.type.hashed[0] === "TABLE_LINE") ? table.type.hashed : null;
     if (keys && table.type.row.k !== "struct") throw new Unsupported(`INSERT INTO TABLE with key ${keys.join(",")} on a table not of structures`);
@@ -2563,8 +2598,9 @@ function statement(node, ctx) {
       const line = table.type.sorted.length === 1 && table.type.sorted[0] === "TABLE_LINE";
       const sortKeys = line ? [{line: true, type: table.type.row}] : table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));
       for (const k of sortKeys) if (!["c", "string", "n", "d", "t", "i", "int8"].includes(k.type.k)) throw new Unsupported(`SORTED table keyed on a ${k.type.k}`);
-      return {s: "insert_sorted", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), keys: sortKeys};
+      return {s: "insert_sorted", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), keys: sortKeys, refInto};
     }
+    if (refInto) throw new Unsupported(`INSERT REFERENCE INTO a non-sorted table: ${text}`);
     return {s: "insert_table", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), unique: !!table.type.hashed, keys};
   }
   if (isStmt(node, Statements.InsertInternal)) {
@@ -3452,13 +3488,15 @@ const hasArith = (node) => node.getChildren().some((c) => isExpr(c, Expressions.
  * c); no descriptor object is made. Any other attribute of a call's result
  * is refused.
  */
-function descrAttr(call, attr, ctx) {
+function descrAttr(methodCall, attr, ctx) {
   const a = upper(attr.concatTokens());
-  if (!/^cl_abap_typedescr=>describe_by_data\($/i.test(call.concatTokens().replace(/\(.*$/s, "(")) || !["TYPE_KIND", "LENGTH"].includes(a)) {
-    throw new Unsupported(`an attribute of a call's result: ${call.concatTokens()}->${attr.concatTokens()}`);
+  if (!/^cl_abap_typedescr=>describe_by_data\($/i.test(methodCall.concatTokens().replace(/\(.*$/s, "(")) || !["TYPE_KIND", "LENGTH"].includes(a)) {
+    const base = call(methodCall, ctx, false);
+    if (base.type.k !== "ref") throw new Unsupported(`an attribute of a call's non-reference result: ${methodCall.concatTokens()}->${attr.concatTokens()}`);
+    return refAttribute(base, attr, ctx);
   }
-  const arg = call.findFirstExpression(Expressions.MethodCallParam)?.findDirectExpression(Expressions.Source);
-  if (!arg) throw new Unsupported(`describe_by_data form: ${call.concatTokens()}`);
+  const arg = methodCall.findFirstExpression(Expressions.MethodCallParam)?.findDirectExpression(Expressions.Source);
+  if (!arg) throw new Unsupported(`describe_by_data form: ${methodCall.concatTokens()}`);
   const x = convert(source(arg, ctx), {k: "data"});
   return a === "LENGTH" ? {e: "type_length", x, type: I} : {e: "type_kind", x, type: C(1)};
 }
@@ -6141,6 +6179,13 @@ export function convert(expr, to) {
     const fields = PROGRAM.structs.get(to.go)?.fields;
     if (fields?.length && fields.every((f) => f.type.k === "c" && Number.isInteger(f.type.len))) {
       return {e: "conv", kind: "char_to_struct", from, to, x: expr, type: to,
+        fields: fields.map((f) => ({name: f.name, len: f.type.len}))};
+    }
+  }
+  if (from.k === "struct" && to.k === "string" && PROGRAM) {
+    const fields = PROGRAM.structs.get(from.go)?.fields;
+    if (fields?.length && fields.every((f) => f.type.k === "c" && Number.isInteger(f.type.len))) {
+      return {e: "conv", kind: "flat_struct_string", from, to, x: expr, type: to,
         fields: fields.map((f) => ({name: f.name, len: f.type.len}))};
     }
   }
