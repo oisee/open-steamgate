@@ -1,5 +1,10 @@
-CLASS ltcl_dsl_mpc DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
+* DANGEROUS: imported_project writes a project through ImportSet; setup and
+* teardown remove its rows, so the unit database is left as it was found.
+CLASS ltcl_dsl_mpc DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT FINAL.
   PRIVATE SECTION.
+    METHODS setup.
+    METHODS teardown.
+    METHODS clean.
     METHODS seeded_project FOR TESTING RAISING cx_static_check.
     METHODS imported_project FOR TESTING RAISING cx_static_check.
     METHODS compare_project IMPORTING iv_project TYPE string RAISING cx_static_check.
@@ -7,6 +12,25 @@ CLASS ltcl_dsl_mpc DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FIN
 ENDCLASS.
 
 CLASS ltcl_dsl_mpc IMPLEMENTATION.
+  METHOD setup.
+    clean( ).
+  ENDMETHOD.
+
+  METHOD teardown.
+    clean( ).
+  ENDMETHOD.
+
+  METHOD clean.
+    DELETE FROM zstg_sbd_ga WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbd_pr WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbd_prt WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbo_et WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbo_ct WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbo_pr WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbo_prt WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbo_es WHERE project = 'ZUT_DSL'.
+  ENDMETHOD.
+
   METHOD fixture.
     DATA lv_nl TYPE string.
     lv_nl = cl_abap_char_utilities=>newline.
@@ -51,9 +75,8 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
   METHOD seeded_project.
     DATA ls_model TYPE zcl_stg_segw_gen=>ty_model.
     ls_model = zcl_stg_segw_gen=>build_model( 'ZSTG_MAPPED' ).
-    IF ls_model-entity_types IS NOT INITIAL.
-      compare_project( 'ZSTG_MAPPED' ).
-    ENDIF.
+    cl_abap_unit_assert=>assert_not_initial( act = ls_model-entity_types msg = `ZSTG_MAPPED is not seeded` ).
+    compare_project( 'ZSTG_MAPPED' ).
   ENDMETHOD.
 
   METHOD compare_project.
