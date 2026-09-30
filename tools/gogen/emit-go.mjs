@@ -102,6 +102,12 @@ let DESCS = new Map();
 let NAMED = new Map();
 let STRUCTDEFS = new Map();
 let HELPER_IMPORTS = new Set();
+/** a host function named <package>.<Name> outside package abap: its package
+ * (tools/gogen/go/<package>) is imported by the program that calls it */
+function helperImport(fn) {
+  const pkg = /^([a-z][a-z0-9]*)\./.exec(fn ?? "")?.[1];
+  if (pkg !== undefined && pkg !== "abap") HELPER_IMPORTS.add(pkg);
+}
 function needsCopy(t) {
   if (t?.k === "table") return true;
   if (t?.k === "struct") return (STRUCTDEFS.get(t.go)?.fields ?? []).some((f) => needsCopy(f.type));
@@ -394,8 +400,8 @@ export function emitGo(program, pkg = "main", layers = null) {
   out.push(...descs);
   // a RESET line becomes a //line back to this file at the line after it
   for (let i = 0; i < out.length; i += 1) if (out[i] === RESET) out[i] = `//line zz_generated.go:${i + 2}`;
-  out[out.indexOf("\u0000helper-imports")] = ["datearith", "charsearch", "shiftleft"]
-    .filter((name) => HELPER_IMPORTS.has(name)).map((name) => `\t"osg/gogen/${name}"`).join("\n");
+  out[out.indexOf("\u0000helper-imports")] = [...HELPER_IMPORTS].sort()
+    .map((name) => `\t"osg/gogen/${name}"`).join("\n");
   const generated = out.join("\n") + "\n";
   // ident() is also used by the JS emitter in this process. A layered Go
   // emission must not change its spelling for the next consumer.
@@ -1283,6 +1289,7 @@ function stmtLines(st, ctx, d) {
     }
     case "native": {
       const m = ctx.method;
+      helperImport(st.fn);
       // a host function with arguments of its own (frontend NATIVE / KERNEL):
       // "&" places are pointers it writes; a kernel line inside a body (stmt)
       // returns nothing
@@ -1295,6 +1302,7 @@ function stmtLines(st, ctx, d) {
     // a JavaScript for (...) { of kernel code, as a range over what the host
     // function returns; each pair is written to the binds before the body
     case "kernel_loop":
+      helperImport(st.fn);
       return [`${t}for _, kv := range ${st.fn}(${["s", ...st.args.map((a) => (a.ref ? `&${place(a.value, ctx)}` : expr(a.value, ctx)))].join(", ")}) {`,
         ...st.binds.map((b, i) => `${t}\t${place(b, ctx)} = kv[${i}]`),
         ...st.body.flatMap((x) => stmt(x, ctx, d + 1)), `${t}}`];

@@ -628,7 +628,7 @@ export function readClass(folder) {
 }
 
 // ultra/events: the host functions whose TYPE p parameters are read as p(16,7) (typeOf)
-const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT"]);
+const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT", "CL_ABAP_TSTMP=>SUBTRACTSECS"]);
 /** methods whose ABAP is kernel code in the transpiler runtime, and the host function that does their work */
 const NATIVE = new Map([
   // ultra/events (the WEBGUI's transaction sessions, ZCL_OSD_TRAN_SESSION):
@@ -637,6 +637,8 @@ const NATIVE = new Map([
   // system's is a p with decimals); a random integer 0 .. 2^31-2 as
   // open-abap-core's INT (a seed given to CREATE is ignored there too)
   ["CL_ABAP_TSTMP=>SUBTRACT", {fn: "abap.TstmpSubtract", args: ["TSTMP1:p", "TSTMP2:p"]}],
+  // the time stamp SECS seconds earlier, as open-abap-core's ADD computes it (go/tstmp)
+  ["CL_ABAP_TSTMP=>SUBTRACTSECS", {fn: "tstmp.SubtractSecs", args: ["TSTMP:p", "SECS:i"]}],
   ["CL_ABAP_RANDOM=>INT", {fn: "abap.RandomInt31", args: []}],
   // crypto.randomUUID() on Node (go/abap/uuid.go); CREATE_UUID_* are ABAP around it
   ["CL_SYSTEM_UUID=>RANDOM", {fn: "abap.UUIDRandom", args: []}],
@@ -717,6 +719,8 @@ const NATIVE = new Map([
  *   {bound}               a line of that loop whose work the binds do
  */
 const KERNEL = new Map([
+  // the class name of an object as the transpiler runtime names it (go/classname)
+  ["CL_ABAP_CLASSDESCR=>GET_CLASS_NAME|lv_name.set(p_object.get().constructor.INTERNAL_NAME);", {fn: "classname.Internal", args: ["P_OBJECT:ref", "&LV_NAME:string"]}],
   ["CL_EXPRESS_ICF_SHIM=>RUN|lv_classname.set(INPUT.class);", {fn: "abap.ICFClass", args: ["REQ:data", "&LV_CLASSNAME:string"]}],
   ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_xstr.set(INPUT.req.body.toString(\"hex\").toUpperCase());", {fn: "abap.ICFRequestBody", args: ["REQ:data", "&LV_XSTR:xstring"]}],
   ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_str.set(INPUT.req.method);", {fn: "abap.ICFRequestMethod", args: ["REQ:data", "&LV_STR:string"]}],
@@ -1078,6 +1082,8 @@ function typeOf(t, where, program) {
   // signature cannot say; only the host functions listed in P_GENERIC take
   // one, as p(16,7), which holds a TIMESTAMP and a TIMESTAMPL exactly
   if (t instanceof BasicTypes.PGenericType && P_GENERIC.has(String(where).split(" ")[0])) return {k: "p", len: 16, dec: 7};
+  // TYPE numeric of the same host functions (a count of seconds): taken as i
+  if (t instanceof BasicTypes.NumericGenericType && P_GENERIC.has(String(where).split(" ")[0])) return I;
   // p: declared, initial, copied and compared with initial only, as its
   // decimal text; any arithmetic or conversion is refused until packed
   // numbers are measured on A4H
