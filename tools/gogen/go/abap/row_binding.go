@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 	"weak"
 )
 
@@ -12,25 +13,107 @@ import (
 // retains the table. A binding retains its own table while it is in scope.
 var tableVersions sync.Map // weak.Pointer[byte] -> *atomic.Uint64
 
+type versionCacheEntry struct {
+	key  uintptr
+	w    weak.Pointer[byte]
+	cell *atomic.Uint64 // nil means no binding existed at gen
+	gen  uint64
+}
+
+const versionCacheSize = 256
+
+var versionCache [versionCacheSize]atomic.Pointer[versionCacheEntry]
+var versionGeneration atomic.Uint64
+var versionCreateMu sync.Mutex
+
+func versionSlot(ptr *byte) *atomic.Pointer[versionCacheEntry] {
+	key := uintptr(unsafe.Pointer(ptr))
+	// Table headers are aligned; mix the high bits into the slot index.
+	key ^= key >> 11
+	key ^= key >> 21
+	return &versionCache[key&(versionCacheSize-1)]
+}
+
+func cachedVersion(ptr *byte) (*atomic.Uint64, bool) {
+	e := versionSlot(ptr).Load()
+	if e == nil || e.key != uintptr(unsafe.Pointer(ptr)) || e.w.Value() != ptr {
+		return nil, false
+	}
+	if e.cell == nil {
+		gen := versionGeneration.Load()
+		if gen&1 != 0 || e.gen != gen {
+			return nil, false
+		}
+	}
+	return e.cell, true
+}
+
+func cacheVersion(ptr *byte, w weak.Pointer[byte], cell *atomic.Uint64, gen uint64) {
+	versionSlot(ptr).Store(&versionCacheEntry{key: uintptr(unsafe.Pointer(ptr)), w: w, cell: cell, gen: gen})
+}
+
 func versionCell(table any) *atomic.Uint64 {
 	ptr := (*byte)(reflect.ValueOf(table).UnsafePointer())
+	if cell, ok := cachedVersion(ptr); ok && cell != nil {
+		runtime.KeepAlive(table)
+		return cell
+	}
 	key := weak.Make(ptr)
 	if v, ok := tableVersions.Load(key); ok {
-		return v.(*atomic.Uint64)
+		cell := v.(*atomic.Uint64)
+		cacheVersion(ptr, key, cell, 0)
+		runtime.KeepAlive(table)
+		return cell
 	}
-	v, loaded := tableVersions.LoadOrStore(key, new(atomic.Uint64))
-	if !loaded {
-		runtime.AddCleanup(ptr, func(k weak.Pointer[byte]) { tableVersions.Delete(k) }, key)
+	versionCreateMu.Lock()
+	if v, ok := tableVersions.Load(key); ok {
+		versionCreateMu.Unlock()
+		cell := v.(*atomic.Uint64)
+		cacheVersion(ptr, key, cell, 0)
+		runtime.KeepAlive(table)
+		return cell
 	}
-	return v.(*atomic.Uint64)
+	// Odd generations reject negative hits while the cell is being published.
+	versionGeneration.Add(1)
+	cell := new(atomic.Uint64)
+	tableVersions.Store(key, cell)
+	versionGeneration.Add(1)
+	versionCreateMu.Unlock()
+	runtime.AddCleanup(ptr, func(k weak.Pointer[byte]) { tableVersions.Delete(k) }, key)
+	cacheVersion(ptr, key, cell, 0)
+	runtime.KeepAlive(table)
+	return cell
 }
 
 func tableVersion(table any) uint64 { return versionCell(table).Load() }
 
 func BumpTable(table any) {
-	if v, ok := tableVersions.Load(weak.Make((*byte)(reflect.ValueOf(table).UnsafePointer()))); ok {
-		v.(*atomic.Uint64).Add(1)
+	ptr := (*byte)(reflect.ValueOf(table).UnsafePointer())
+	if cell, ok := cachedVersion(ptr); ok {
+		if cell != nil {
+			cell.Add(1)
+		}
+		runtime.KeepAlive(table)
+		return
 	}
+	key := weak.Make(ptr)
+	for {
+		gen := versionGeneration.Load()
+		if gen&1 != 0 {
+			continue
+		}
+		if v, ok := tableVersions.Load(key); ok {
+			cell := v.(*atomic.Uint64)
+			cacheVersion(ptr, key, cell, 0)
+			cell.Add(1)
+			break
+		}
+		if gen == versionGeneration.Load() {
+			cacheVersion(ptr, key, nil, gen)
+			break
+		}
+	}
+	runtime.KeepAlive(table)
 }
 
 // RowBinding owns its validation token; binding another symbol to the same
