@@ -1991,6 +1991,25 @@ function statement(node, ctx) {
     if (/\bID\b/i.test(node.concatTokens())) throw new Unsupported(`ASSERT with a checkpoint group: ${node.concatTokens()}`);
     return {s: "assert", cond: cond(node.findDirectExpression(Expressions.Cond), ctx), text: node.concatTokens()};
   }
+  if ([Statements.Add, Statements.Subtract, Statements.Multiply, Statements.Divide].some((kind) => isStmt(node, kind))) {
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const operand = source(node.findDirectExpression(Expressions.Source), ctx);
+    const kinds = [target.type.k, operand.type.k];
+    if (!kinds.every((k) => ["i", "int8", "p", "f", "c", "string", "n", "x"].includes(k))) {
+      throw new Unsupported(`arithmetic statement types ${kinds.join(" and ")}: ${text}`);
+    }
+    // As in an assignment expression, the target takes part in choosing the
+    // calculation type. Character operands and packed targets calculate in
+    // packed decimal; an x field enters as an integer.
+    const calc = kinds.includes("f") ? F
+      : kinds.some((k) => ["p", "c", "string", "n"].includes(k)) ? P31
+        : kinds.includes("int8") ? INT8 : I;
+    const op = isStmt(node, Statements.Add) ? "+" : isStmt(node, Statements.Subtract) ? "-"
+      : isStmt(node, Statements.Multiply) ? "*" : "/";
+    const left = convert(target, calc);
+    const right = convert(operand, calc);
+    return {s: "assign", target, value: convert({e: "bin", op, l: left, r: right, type: calc}, target.type)};
+  }
   if (isStmt(node, Statements.Move)) {
     const targets = node.findDirectExpressions(Expressions.Target);
     if (targets.length !== 1) throw new Unsupported("chained assignment");
