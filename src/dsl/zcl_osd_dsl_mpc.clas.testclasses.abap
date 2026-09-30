@@ -37,6 +37,15 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
     DELETE FROM zstg_sbo_pr WHERE project = 'ZUT_DSL'.
     DELETE FROM zstg_sbo_prt WHERE project = 'ZUT_DSL'.
     DELETE FROM zstg_sbo_es WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbo_aso WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbo_rc WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbo_at WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbo_np WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbo_fi WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbo_fit WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbo_fp WHERE project = 'ZUT_DSL'.
+    DELETE FROM zstg_sbo_fpt WHERE project = 'ZUT_DSL'.
+
   ENDMETHOD.
 
   METHOD fixture.
@@ -57,12 +66,20 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
       && `<_-IWBEP_-I_SBO_PR>` && lv_nl
       && `<_-IWBEP_-I_SBO_PR><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>pp-1</NODE_UUID><PARENT_UUID>et-1</PARENT_UUID><NAME>TravelId</NAME><IS_KEY>X</IS_KEY><EDM_CORE_TYPE>Edm.String</EDM_CORE_TYPE><PROP_PRECISION>2</PROP_PRECISION><MAX_LENGTH>20</MAX_LENGTH><CREATABLE>X</CREATABLE><UPDATABLE>X</UPDATABLE><SORTABLE>X</SORTABLE><SEMANTICS>url</SEMANTICS><AS_ETAG>X</AS_ETAG></_-IWBEP_-I_SBO_PR>` && lv_nl
       && `<_-IWBEP_-I_SBO_PR><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>pp-2</NODE_UUID><PARENT_UUID>et-1</PARENT_UUID><NAME>Address</NAME><COMPLEX_TYPE>ct-1</COMPLEX_TYPE></_-IWBEP_-I_SBO_PR>` && lv_nl
+      && `<_-IWBEP_-I_SBO_PR><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>pp-3</NODE_UUID><PARENT_UUID>ct-1</PARENT_UUID><NAME>Street</NAME><EDM_CORE_TYPE>Edm.String</EDM_CORE_TYPE><MAX_LENGTH>40</MAX_LENGTH><CREATABLE>X</CREATABLE><SEMANTICS>email</SEMANTICS></_-IWBEP_-I_SBO_PR>` && lv_nl
       && `</_-IWBEP_-I_SBO_PR>` && lv_nl
       && `<_-IWBEP_-I_SBO_PRT><_-IWBEP_-I_SBO_PRT><PROJECT>ZUT_DSL</PROJECT><SYLANGU>E</SYLANGU><NODE_UUID>pp-1</NODE_UUID><PROP_LABEL>Travel</PROP_LABEL></_-IWBEP_-I_SBO_PRT></_-IWBEP_-I_SBO_PRT>` && lv_nl
       && `<_-IWBEP_-I_SBO_ES>` && lv_nl
       && `<_-IWBEP_-I_SBO_ES><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>es-1</NODE_UUID><NAME>TravelSet</NAME><ENTITY_TYPE>et-1</ENTITY_TYPE><CREATABLE>X</CREATABLE></_-IWBEP_-I_SBO_ES>` && lv_nl
       && `<_-IWBEP_-I_SBO_ES><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>es-2</NODE_UUID><NAME>TravelAltSet</NAME><ENTITY_TYPE>et-1</ENTITY_TYPE></_-IWBEP_-I_SBO_ES>` && lv_nl
       && `</_-IWBEP_-I_SBO_ES>` && lv_nl
+      && `<_-IWBEP_-I_SBO_ASO><_-IWBEP_-I_SBO_ASO><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>aso-1</NODE_UUID><NAME>TravelToMedia</NAME><LEFT_END_GUID>et-1</LEFT_END_GUID><RIGHT_END_GUID>et-2</RIGHT_END_GUID><LEFT_END_CARD>1</LEFT_END_CARD><RIGHT_END_CARD>N</RIGHT_END_CARD></_-IWBEP_-I_SBO_ASO></_-IWBEP_-I_SBO_ASO>` && lv_nl
+      && `<_-IWBEP_-I_SBO_RC><_-IWBEP_-I_SBO_RC><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>rc-1</NODE_UUID><NAME>TravelId</NAME><ASSOCIATION_GUID>aso-1</ASSOCIATION_GUID><PRINCIPAL_PROP_R>pp-1</PRINCIPAL_PROP_R><DEPENDENT_PROP_R>pp-1</DEPENDENT_PROP_R></_-IWBEP_-I_SBO_RC></_-IWBEP_-I_SBO_RC>` && lv_nl
+      && `<_-IWBEP_-I_SBO_NP><_-IWBEP_-I_SBO_NP><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>np-1</NODE_UUID><NAME>to_Media</NAME><ENTITY_GUID>et-1</ENTITY_GUID><RELATION_GUID>aso-1</RELATION_GUID><TECH_NAME>TO_MEDIA</TECH_NAME></_-IWBEP_-I_SBO_NP></_-IWBEP_-I_SBO_NP>` && lv_nl
+      && `<_-IWBEP_-I_SBO_FI><_-IWBEP_-I_SBO_FI><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>fi-1</NODE_UUID><NAME>LookupAddress</NAME><HTTP_METHOD>GET</HTTP_METHOD><RETURN_TYPE_KIND>CTYP</RETURN_TYPE_KIND><RETURN_REF_TYPE>ct-1</RETURN_REF_TYPE><RETURN_CARD>1</RETURN_CARD><ACTION_FOR>et-1</ACTION_FOR></_-IWBEP_-I_SBO_FI></_-IWBEP_-I_SBO_FI>` && lv_nl
+      && `<_-IWBEP_-I_SBO_FIT><_-IWBEP_-I_SBO_FIT><PROJECT>ZUT_DSL</PROJECT><SYLANGU>E</SYLANGU><NODE_UUID>fi-1</NODE_UUID><FI_LABEL>Lookup address</FI_LABEL></_-IWBEP_-I_SBO_FIT></_-IWBEP_-I_SBO_FIT>` && lv_nl
+      && `<_-IWBEP_-I_SBO_FP><_-IWBEP_-I_SBO_FP><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>fp-1</NODE_UUID><NAME>TravelId</NAME><FUNCTION_IMPORT>fi-1</FUNCTION_IMPORT><ABAP_FIELD>TRAVEL_ID</ABAP_FIELD><EDM_CORE_TYPE>Edm.String</EDM_CORE_TYPE><MAX_LENGTH>8</MAX_LENGTH></_-IWBEP_-I_SBO_FP></_-IWBEP_-I_SBO_FP>` && lv_nl
+      && `<_-IWBEP_-I_SBO_FPT><_-IWBEP_-I_SBO_FPT><PROJECT>ZUT_DSL</PROJECT><SYLANGU>E</SYLANGU><NODE_UUID>fp-1</NODE_UUID><FI_PARAM_LABEL>Travel key</FI_PARAM_LABEL></_-IWBEP_-I_SBO_FPT></_-IWBEP_-I_SBO_FPT>` && lv_nl
       && `</asx:values></asx:abap></abapGit>` && lv_nl.
   ENDMETHOD.
 
@@ -100,8 +117,38 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
     DATA lv_length TYPE i.
     DATA lv_count TYPE i.
     DATA lo_json TYPE REF TO zif_ajson.
+    DATA lt_methods TYPE string_table.
+    DATA lv_method TYPE string.
     ls_model = zcl_stg_segw_gen=>build_model( iv_project ).
     lv_source = zcl_stg_segw_gen=>mpc_source( ls_model ).
+    IF iv_project = 'ZUT_DSL'.
+      ls_result = zcl_osd_dsl_mpc=>render_class( ls_model ).
+      cl_abap_unit_assert=>assert_equals(
+        act = zcl_osd_tpl=>to_string( ls_result ) exp = lv_source msg = 'whole MPC class' ).
+      lo_json = zcl_osd_dsl_mpc=>project_model( ls_model ).
+      cl_abap_unit_assert=>assert_equals(
+        exp = `complex/Address/property/Street/type`
+        act = lo_json->get( '/complex_types/1/properties/1/@type/@id' ) ).
+      READ TABLE ls_model-entity_types INTO ls_type WITH KEY name = 'Travel'.
+      cl_abap_unit_assert=>assert_subrc( ).
+      CLEAR ls_type-entity_sets.
+      lo_json = zcl_osd_dsl_mpc=>entity_model( is_type = ls_type iv_mpc = ls_model-mpc ).
+      cl_abap_unit_assert=>assert_equals( exp = 'X' act = lo_json->get( '/has_texts' ) ).
+      lo_json = zcl_osd_dsl_mpc=>project_model( ls_model ).
+      cl_abap_unit_assert=>assert_equals(
+        exp = `complex/Address`
+        act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `begin of ADDRESS` ) ).
+      cl_abap_unit_assert=>assert_equals(
+        exp = `constant/ADDRESS`
+        act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `constants GC_ADDRESS` ) ).
+      cl_abap_unit_assert=>assert_equals(
+        exp = `declaration/DEFINE_COMPLEXTYPES`
+        act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `methods DEFINE_COMPLEXTYPES` ) ).
+      cl_abap_unit_assert=>assert_equals(
+        exp = `entity/Travel/property/TravelId`
+        act = node_of_line( is_result = ls_result io_json = lo_json
+                            iv_needle = `create_property( iv_property_name = 'TravelId'` ) ).
+    ENDIF.
     IF iv_project = 'ZUT_DSL'.
       cl_abap_unit_assert=>assert_equals( act = lines( ls_model-entity_types ) exp = 3 ).
       cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `set_is_media( 'X' )` ) ).
@@ -114,7 +161,75 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
       cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `set_semantic( 'url' )` ) ).
       cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `set_sortable( abap_true )` ) ).
       cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `set_as_etag( )` ) ).
+      cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `create_ref_constraint( )` ) ).
+      cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `create_navigation_property(` ) ).
+      cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `set_return_complex_type( 'Address' )` ) ).
+      cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `bind_input_structure(` ) ).
     ENDIF.
+    APPEND 'DEFINE' TO lt_methods.
+    APPEND 'DEFINE_COMPLEXTYPES' TO lt_methods.
+    APPEND 'DEFINE_ASSOCIATIONS' TO lt_methods.
+    APPEND 'DEFINE_ACTIONS' TO lt_methods.
+    APPEND 'GET_LAST_MODIFIED' TO lt_methods.
+    APPEND 'LOAD_TEXT_ELEMENTS' TO lt_methods.
+    lo_json = zcl_osd_dsl_mpc=>project_model( ls_model ).
+    LOOP AT lt_methods INTO lv_method.
+      FIND `  method ` && lv_method && `.` IN lv_source MATCH OFFSET lv_start.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      FIND `  endmethod.` IN SECTION OFFSET lv_start OF lv_source MATCH OFFSET lv_end.
+      cl_abap_unit_assert=>assert_subrc( ).
+      lv_length = lv_end - lv_start + strlen( `  endmethod.` ) + 1.
+      lv_expected = substring( val = lv_source off = lv_start len = lv_length ).
+      ls_result = zcl_osd_dsl_mpc=>render_method( is_model = ls_model iv_method = lv_method ).
+      lv_actual = zcl_osd_tpl=>to_string( ls_result ).
+      cl_abap_unit_assert=>assert_equals( act = lv_actual exp = lv_expected msg = lv_method ).
+      cl_abap_unit_assert=>assert_equals( act = lines( ls_result-trace ) exp = lines( ls_result-lines ) ).
+      LOOP AT ls_result-trace INTO ls_trace.
+        IF ls_trace-path <> `/`.
+          cl_abap_unit_assert=>assert_true( act = lo_json->exists( ls_trace-path ) msg = ls_trace-path ).
+        ENDIF.
+        cl_abap_unit_assert=>assert_not_initial(
+          act = zcl_osd_dsl_trace=>node_of( io_model = lo_json iv_path = ls_trace-path )
+          msg = lv_method ).
+      ENDLOOP.
+      IF iv_project = 'ZUT_DSL'.
+        CASE lv_method.
+          WHEN 'DEFINE'.
+            cl_abap_unit_assert=>assert_equals(
+              exp = `entity/Travel`
+              act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `define_travel( ).` ) ).
+          WHEN 'DEFINE_COMPLEXTYPES'.
+            cl_abap_unit_assert=>assert_equals(
+              exp = `complex/Address/property/Street`
+              act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `create_property( iv_property_name  = 'Street'` ) ).
+            " the complex property's semantics line is reached and is its own
+            cl_abap_unit_assert=>assert_equals(
+              exp = `complex/Address/property/Street`
+              act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `set_semantic( 'email' )` ) ).
+          WHEN 'DEFINE_ASSOCIATIONS'.
+            cl_abap_unit_assert=>assert_equals(
+              exp = `association/TravelToMedia`
+              act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `iv_association_name = 'TravelToMedia'` ) ).
+            cl_abap_unit_assert=>assert_equals(
+              exp = `navigation/Travel/to_Media`
+              act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `iv_property_name  = 'to_Media'` ) ).
+          WHEN 'DEFINE_ACTIONS'.
+            cl_abap_unit_assert=>assert_equals(
+              exp = `action/LookupAddress/parameter/TravelId`
+              act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `create_input_parameter(` ) ).
+          WHEN 'GET_LAST_MODIFIED'.
+            cl_abap_unit_assert=>assert_equals(
+              exp = `project/ZUT_DSL`
+              act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `lc_gen_date_time` ) ).
+          WHEN 'LOAD_TEXT_ELEMENTS'.
+            cl_abap_unit_assert=>assert_equals(
+              exp = `text/Travel/TravelId`
+              act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `artifact_name          = 'TravelId'` ) ).
+        ENDCASE.
+      ENDIF.
+    ENDLOOP.
     LOOP AT ls_model-entity_types INTO ls_type.
       lv_count = lv_count + 1.
       FIND `  method DEFINE_` && ls_type-define_stem && `.` IN lv_source MATCH OFFSET lv_start.
