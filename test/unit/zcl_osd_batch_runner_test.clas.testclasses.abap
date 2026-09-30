@@ -11,6 +11,7 @@ CLASS ltcl_batch_report DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL H
     METHODS static_submit_fails_loudly FOR TESTING.
     METHODS static_submit_passes_a_range FOR TESTING.
     METHODS static_submit_range_is_checked FOR TESTING.
+    METHODS static_submit_range_bt_and_e FOR TESTING.
     METHODS job_submit_checks_registry FOR TESTING.
     METHODS context_is_per_run FOR TESTING.
 ENDCLASS.
@@ -98,9 +99,8 @@ CLASS ltcl_batch_report IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD static_submit_passes_a_range.
-* I EQ rows only: the runtime's IN handles I EQ, E EQ and I CP and throws
-* for BT and the rest (ANORMALIES, runtime-in-options). What this proves is
-* that the range reaches the report, which the lowering is responsible for.
+* That the range reaches the report, which the lowering is responsible for;
+* static_submit_range_bt_and_e covers the options IN evaluates.
     DATA lt_range TYPE ty_numbers.
     DATA ls_range LIKE LINE OF lt_range.
     ls_range-sign = 'I'.
@@ -111,6 +111,27 @@ CLASS ltcl_batch_report IMPLEMENTATION.
     APPEND ls_range TO lt_range.
 * two of 1 to 10, checked inside the report
     SUBMIT zosd_sub_range WITH s_num IN lt_range WITH p_exp = 2 AND RETURN.
+  ENDMETHOD.
+
+  METHOD static_submit_range_bt_and_e.
+* I BT 3 7 and E EQ 5 admit 3, 4, 6 and 7: a BT row is evaluated and an E
+* row only excludes. Both failed in the runtime before abaplint/transpiler
+* #1928 (ANORMALIES, runtime-in-options): BT threw, and an E EQ row the value
+* did not equal admitted it on its own.
+    DATA lt_range TYPE ty_numbers.
+    DATA ls_range LIKE LINE OF lt_range.
+    ls_range-sign = 'I'.
+    ls_range-option = 'BT'.
+    ls_range-low = 3.
+    ls_range-high = 7.
+    APPEND ls_range TO lt_range.
+    CLEAR ls_range.
+    ls_range-sign = 'E'.
+    ls_range-option = 'EQ'.
+    ls_range-low = 5.
+    APPEND ls_range TO lt_range.
+
+    SUBMIT zosd_sub_range WITH s_num IN lt_range WITH p_exp = 4 AND RETURN.
   ENDMETHOD.
 
   METHOD static_submit_range_is_checked.
