@@ -44,15 +44,18 @@ Eclipse's Revision History and "Compare With", and vsp's revisions, read the
 same git history over ADT (`tools/adt-versions.mjs`, routes in
 `tools/adt-facade.mjs`).
 
-- **Where.** A program, include, function module or other source:
+- **Where.** A program, include or other source object (not yet a function module):
   `<object>/source/main/versions`. A class, per include:
   `<class>/includes/<main|definitions|implementations|macros|testclasses>/versions`,
   and an interface at `includes/main/versions` (where vsp asks). A CDS source
-  also answers at `<object>/versions`.
+  also answers at `<object>/versions`. A class include that has no file of its
+  own has `00000` only, never its main include's history.
 - **Linked where A4H links it.** The program document and each class include
   carry `<atom:link href="…/versions" rel="http://www.sap.com/adt/relations/versions"/>`
   as their first link, with no type, title or `adtcore` attribute; a CDS source
-  links `versions`. This placement is read off the recorded A4H corpus.
+  links `versions`. This placement is read off the recorded A4H corpus, which
+  has no interface document, so an interface carries no link yet (vsp asks
+  `includes/main/versions` directly; abap-adt-api needs the link).
 - **Numbering, as measured on A4H** (a local object has one version, 00000,
   the active source, dated at its last activation). Here:
   - `00000` is the working tree. Its date and author are the last commit's when

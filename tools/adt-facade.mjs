@@ -1811,17 +1811,17 @@ export function adtRouter(options = {}) {
       const part = store.read(type, req.params.name, include);
       const base = `${BASE}/${adt}/${encodeURIComponent(String(req.params.name).toLowerCase())}` +
         (include === undefined ? "/source/main/versions" : `/includes/${include}/versions`);
-      const feed = objectVersions(store.root, part.file, identity.userName);
+      const feed = objectVersions(store.root, part.empty ? undefined : part.file, identity.userName);
       if (feed.note !== "") res.set("X-OSD-History", `none: ${feed.note}`);
       // exactly A4H's header: a string body would get "; charset=utf-8" added
       res.set("Content-Type", "application/atom+xml;type=feed");
-      sendEntity(req, res, Buffer.from(versionsFeedDocument(store.find(type, req.params.name).name, type, base, feed)));
+      sendEntity(req, res, Buffer.from(versionsFeedDocument(part.name, type, base, feed)));
     });
     const versionContent = (req, res, include) => answer(res, () => {
       const part = store.read(type, req.params.name, include);
       let source;
       try {
-        source = versionSource(store.root, part.file, req.params.version, part.source);
+        source = versionSource(store.root, part.empty ? undefined : part.file, req.params.version, part.source);
       } catch (error) {
         throw new NotFound(type, `${req.params.name} version ${req.params.version} (${error.message})`);
       }

@@ -550,7 +550,8 @@ export class ObjectStore {
       throw new NotFound(type, name);
     }
     if (type === "CLAS" && include !== "main") {
-      const suffix = INCLUDES[include];
+      // own keys only: "constructor" or "toString" is no include
+      const suffix = Object.hasOwn(INCLUDES, include) ? INCLUDES[include] : undefined;
       if (suffix === undefined) {
         throw new NotFound(type, `${name} include ${include}`);
       }

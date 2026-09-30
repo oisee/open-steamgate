@@ -27,9 +27,16 @@ const stampOf = (date) => date.toISOString().slice(0, 19).replace(/[-T:]/g, "");
 /**
  * The versions of a file, newest first: 00000 (the working tree) and one
  * per commit that changed it. `user` names the active version's author
- * when the working tree differs from the last commit.
+ * when the working tree differs from the last commit. `file` undefined is
+ * a class include that has no file: 00000 only.
  */
 export function objectVersions(root, file, user) {
+  if (file === undefined) {
+    // a class include with no file yet: it has no past, and its main
+    // include's commits are not its versions
+    return {versions: [{version: "00000", stamp: ACTIVE_STAMP, date: new Date(0), author: user, title: ""}],
+      note: "the include has no file"};
+  }
   const history = gitObjectHistory(root, file, ALL);
   const commits = history.available === true ? history.entries : [];
   let modified = true;
@@ -112,6 +119,7 @@ export function versionSource(root, file, version, active) {
     throw new Error(`${version} is not a version number`);
   }
   if (version === "00000") return active;
+  if (file === undefined) throw new Error("the include has no file, so no version but 00000");
   const history = gitObjectHistory(root, file, ALL);
   const commits = history.available === true ? history.entries : [];
   const index = commits.length - Number(version);

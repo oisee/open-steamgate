@@ -45,6 +45,7 @@ describe("tools/adt-facade: versions of an object out of git", function () {
     writeFileSync(join(root, "src", "zver.prog.abap"), "REPORT zver.\nWRITE 'one'.\n");
     writeFileSync(join(root, "src", "zcl_ver.clas.abap"), "CLASS zcl_ver DEFINITION. ENDCLASS.\nCLASS zcl_ver IMPLEMENTATION. ENDCLASS.\n");
     writeFileSync(join(root, "src", "zcl_ver.clas.locals_imp.abap"), "* one\n");
+    writeFileSync(join(root, "src", "zver_cds.ddls.asddls"), "define view entity ZVER_CDS as select from t000 { mandt }\n");
     git("add", ".");
     git("commit", "-q", "-m", "first");
     writeFileSync(join(root, "src", "zver.prog.abap"), "REPORT zver.\nWRITE 'two'.\n");
@@ -93,6 +94,32 @@ describe("tools/adt-facade: versions of an object out of git", function () {
     const imp = entries((await get("/sap/bc/adt/oo/classes/zcl_ver/includes/implementations/versions")).text);
     expect(imp.map((e) => e.id)).to.deep.equal(["00000", "00002", "00001"]);
     expect((await get(imp[2].src)).text).to.equal("* one\n");
+  });
+
+  it("dates and signs 00000 by the last commit when clean, by the working tree when edited", async () => {
+    const clean = entries((await get("/sap/bc/adt/oo/classes/zcl_ver/includes/main/versions")).text);
+    expect(clean[0].author).to.equal("TESTAUTHOR");
+    expect(clean[0].updated).to.equal(clean[1].updated);
+    const edited = entries((await get("/sap/bc/adt/programs/programs/zver/source/main/versions")).text);
+    expect(edited[0].author).to.equal(identity().adt.userName);
+  });
+
+  it("gives a class include with no file 00000 only, never the main include's history", async () => {
+    const feed = await fetch(new URL("/sap/bc/adt/oo/classes/zcl_ver/includes/testclasses/versions", base));
+    expect(feed.headers.get("x-osd-history")).to.match(/no file/);
+    const list = entries(await feed.text());
+    expect(list.map((e) => e.id)).to.deep.equal(["00000"]);
+    expect((await get(list[0].src.replace("/00000/", "/00001/"))).status).to.equal(404);
+    expect((await get("/sap/bc/adt/oo/classes/zcl_ver/includes/constructor/versions")).status).to.equal(404);
+  });
+
+  it("serves a CDS source's versions at <object>/versions and links them there", async () => {
+    const list = entries((await get("/sap/bc/adt/ddic/ddl/sources/zver_cds/versions")).text);
+    expect(list.map((e) => e.id)).to.deep.equal(["00000", "00001"]);
+    expect((await get(list[1].src)).text).to.include("ZVER_CDS");
+    const doc = await fetch(new URL("/sap/bc/adt/ddic/ddl/sources/zver_cds", base),
+      {headers: {accept: "application/vnd.sap.adt.ddlSource+xml"}});
+    expect(await doc.text()).to.match(/<atom:link href="versions" rel="http:\/\/www\.sap\.com\/adt\/relations\/versions"\/>/);
   });
 
   it("gives an object git has no history for its active version only, and says why", async () => {
