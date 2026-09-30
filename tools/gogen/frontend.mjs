@@ -15,6 +15,7 @@ import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
 import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
 import * as WIR from "../ir-writes.mjs";
+import {parseSamc} from "../osd-amc.mjs";
 import {createRequire} from "node:module";
 import {readFileSync, readdirSync, existsSync} from "node:fs";
 import {join} from "node:path";
@@ -85,6 +86,26 @@ const cdsViewsByRegistry = new WeakMap();
  */
 // skip(path): a file not to load, for a layered build where a later folder
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
+/**
+ * The AMC channels of the SAMC objects in the program's folders, the later
+ * folder winning a name both hold (as tools/osd-amc.mjs amcChannels reads
+ * the layers): what the Go broker is defined with (go/amc)
+ */
+function samcOf(folders) {
+  const byName = new Map();
+  const walk = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir, {withFileTypes: true}); } catch { return; }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (e.isDirectory()) walk(join(dir, e.name));
+      else if (e.name.toLowerCase().endsWith(".samc.xml")) byName.set(e.name.toUpperCase(), join(dir, e.name));
+    }
+  };
+  for (const f of folders) walk(f);
+  const rows = [...byName.values()].flatMap((file) => parseSamc(readFileSync(file, "utf8"), file));
+  return [...new Map(rows.map((r) => [`${r.applicationId}|${r.path}`, r])).values()];
+}
+
 export function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
@@ -192,6 +213,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   program.exceptionSupers = exceptionSupers(reg, program);
   program.cdsViews = cdsViewsByRegistry.get(reg) ?? {};
   program.tables = tableRegistry(reg, program);
+  program.amcChannels = samcOf(folders);
   return program;
 }
 
@@ -767,6 +789,48 @@ function nativeArgs(specs, ctx) {
   });
 }
 
+/*
+ * AMC on the Go host (go/amc, docs/abap-daemons.md): the methods
+ * open-abap-apc leaves to a host -- CL_AMC_CHANNEL_MANAGER's statics, the
+ * producer's SENDs, the consumer's START/STOP -- are bodies that call the
+ * broker, as tools/osd-amc.mjs patches them on Node. A refusal comes back as
+ * text and is raised as CX_AMC_ERROR with that reason, the way the Node host
+ * raises it. Who is calling is decided when the program is compiled: every
+ * method that names the AMC API enters its class pool on the session while
+ * it runs (amcProgram below), where Node reads the class off the call stack.
+ */
+const AMC_HOST = new Map([
+  ["CL_AMC_CHANNEL_MANAGER=>CREATE_MESSAGE_PRODUCER", {op: "create_producer", cls: "ZCL_AMC_PRODUCER",
+    args: {APP: "I_APPLICATION_ID", PATH: "I_CHANNEL_ID", EXT: "I_CHANNEL_EXTENSION_ID", COMM: "I_COMMUNICATION_TYPE", ECHO: "I_SUPPRESS_ECHO"}}],
+  ["CL_AMC_CHANNEL_MANAGER=>CREATE_MESSAGE_CONSUMER", {op: "create_consumer", cls: "ZCL_AMC_CONSUMER",
+    args: {APP: "I_APPLICATION_ID", PATH: "I_CHANNEL_ID", EXT: "I_CHANNEL_EXTENSION_ID"}}],
+  ["CL_AMC_CHANNEL_MANAGER=>GET_CONSUMER_SESSION_ID", {op: "session_id", args: {}}],
+  ["ZCL_AMC_PRODUCER=>IF_AMC_MESSAGE_PRODUCER_TEXT~SEND", {op: "send", type: "TEXT", args: {MESSAGE: "I_MESSAGE"}}],
+  ["ZCL_AMC_PRODUCER=>IF_AMC_MESSAGE_PRODUCER_BINARY~SEND", {op: "send", type: "BINARY", args: {MESSAGE: "I_MESSAGE"}}],
+  ["ZCL_AMC_PRODUCER=>IF_AMC_MESSAGE_PRODUCER_PCP~SEND", {op: "send", type: "PCP", args: {MESSAGE: "I_MESSAGE"}}],
+  ["ZCL_AMC_CONSUMER=>IF_AMC_MESSAGE_CONSUMER~START_MESSAGE_DELIVERY", {op: "start", args: {RECEIVER: "I_RECEIVER"}}],
+  ["ZCL_AMC_CONSUMER=>IF_AMC_MESSAGE_CONSUMER~STOP_MESSAGE_DELIVERY", {op: "stop", args: {RECEIVER: "I_RECEIVER"}}],
+]);
+// a method that names one of these calls the AMC API
+const AMC_CALLER = /\b(CL_AMC_CHANNEL_MANAGER|IF_AMC_MESSAGE_PRODUCER\w*|IF_AMC_MESSAGE_CONSUMER)\b/i;
+// the program the SAMC authorities name: a class's class pool
+const amcProgramOf = (cls) => upper(cls).padEnd(30, "=") + "CP";
+
+/** the body of an AMC host method, and CX_AMC_ERROR for its refusals */
+function amcMethod(spec, ctx) {
+  const args = Object.fromEntries(Object.entries(spec.args).map(([k, n]) => [k, variable(n, ctx)]));
+  const err = {e: "var", name: "LV_AMC_ERROR", type: S};
+  const sig = constructorSignature(ctx, "CX_AMC_ERROR");
+  const ctorArgs = sig.map((p) => {
+    if (p.suppliedOf) return {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: p.suppliedOf === "IV_REASON" ? "X" : "", type: p.type}};
+    if (p.name === "IV_REASON") return {name: p.name, dir: "importing", byValue: p.byValue, type: p.type, value: convert(err, p.type)};
+    if (p.default !== undefined) return {name: p.name, supplied: false, dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
+    return {name: p.name, supplied: false, dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
+  });
+  const raise = {s: "raise", value: {e: "new", cls: "CX_AMC_ERROR", args: ctorArgs, type: {k: "ref", name: "CX_AMC_ERROR"}}, cls: "CX_AMC_ERROR"};
+  return {s: "amc", op: spec.op, cls: spec.cls, type: spec.type, args, err, raise};
+}
+
 /**
  * Function modules whose work is the host's: the kernel services of a
  * system that open-abap-core writes as '@KERNEL' JavaScript, called with
@@ -1312,6 +1376,17 @@ function classIr(ctx0, obj) {
         pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
       continue;
     }
+    if (AMC_HOST.has(`${className}=>${name}`)) {
+      const actx = {program, reg, className, scopeName, method: name, sig, signatures, spaghetti, locals: new Map([["LV_AMC_ERROR", S]]), fieldSymbols: new Map()};
+      // the host classes the body makes are references, so a closure grown
+      // from references (unit.mjs, referencedClasses) compiles them
+      const hostRefs = {create_producer: "ZCL_AMC_PRODUCER", create_consumer: "ZCL_AMC_CONSUMER", start: "ZCL_AMC_MESSAGE_CONTEXT"};
+      const spec = AMC_HOST.get(`${className}=>${name}`);
+      const locals = [{name: "LV_AMC_ERROR", type: S}, ...(hostRefs[spec.op] ? [{name: "LO_AMC_HOST", type: {k: "ref", name: hostRefs[spec.op], intf: false}}] : [])];
+      cls.methods.push({...sig, locals, fieldSymbols: [], calls: [], body: [amcMethod(spec, actx)],
+        pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+      continue;
+    }
     if (NATIVE.has(`${className}=>${name}`)) {
       const native = NATIVE.get(`${className}=>${name}`);
       // {fn, args}: the host function takes the places and values named
@@ -1349,6 +1424,7 @@ function classIr(ctx0, obj) {
       compiled.unshift(...ctx.inits);
       const ir = {...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
         body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}};
+      if (AMC_CALLER.test(node.concatTokens())) ir.amcProgram = amcProgramOf(ctx.owner);
       if (name === "CONSTRUCTOR") cls.constructor = ir; else cls.methods.push(ir);
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;
@@ -2407,6 +2483,14 @@ function statement(node, ctx) {
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (!charlike(target.type)) throw new Unsupported("TRANSLATE of a non-character field");
     return {s: "translate", target, upper: upper(m[1]) === "UPPER"};
+  }
+  // WAIT FOR MESSAGING CHANNELS UNTIL c UP TO n SECONDS: deliver AMC
+  // messages to this session until c holds (0) or the time is up (8)
+  if (isStmt(node, Statements.Wait) && /^WAIT\s+FOR\s+MESSAGING\s+CHANNELS\s+UNTIL\b/i.test(text)) {
+    if (/\bPUSH\s+CHANNELS\b|\bASYNCHRONOUS\s+TASKS\b/i.test(text)) throw new Unsupported(`WAIT FOR more than MESSAGING CHANNELS: ${text}`);
+    const up = node.findDirectExpression(Expressions.Source);
+    if (!up) throw new Unsupported(`WAIT FOR MESSAGING CHANNELS without UP TO: ${text}`);
+    return {s: "amc_wait", cond: cond(node.findDirectExpression(Expressions.Cond), ctx), seconds: convert(sourceOperand(up, ctx), {k: "f"})};
   }
   // X0: the DATASET statements, as the transpiler's runtime does them
   // (go/abap/dataset.go, docs/dataset.md): the file system behind the

@@ -2543,3 +2543,36 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: not upstream, this is our host
 - Regression-test location: `test/dataset.mjs` ("with no root, everything is refused")
 - Upstream version containing a fix: not applicable
+
+### ANOMALY-2026-09-30-amc-caller-identity — the Go host names the AMC caller when compiling, Node reads it off the stack
+
+- Status: `open` (by design; the two agree on every case measured)
+- Discovery date: `2026-09-30`
+- Affected versions: `tools/osd-amc.mjs` (Node) and `tools/gogen/go/amc` with `frontend.mjs` `AMC_CALLER` (Go)
+- Affected ABAP statement, runtime API or adapter: the SAMC authority check of `CL_AMC_CHANNEL_MANAGER`, `IF_AMC_MESSAGE_PRODUCER_*~SEND` and `IF_AMC_MESSAGE_CONSUMER~START_MESSAGE_DELIVERY`
+- Minimal ABAP reproducer: `test/unit/zcl_osd_amc_test.clas.testclasses.abap` `unauthorised_send`
+- Exact command used to run it: `node tools/gogen/unit-compare.mjs --class ZCL_OSD_AMC_TEST`
+- Expected SAP behaviour: the program in whose code the call stands is checked against the SAMC authorities (its class pool, `ZCL_X====...CP`)
+- Actual open-abap behaviour: Node takes the nearest `*.clas(.testclasses).mjs` frame on the JavaScript stack that is not the AMC classes; Go marks at compile time every method whose source names the AMC API and enters its owner's class pool on the session while it runs, the innermost one being the caller. A call made through a helper method that does not itself name the API is attributed to the helper's caller on Go and to the helper on Node
+- Impact on open-steamgate: none on the suite (8 of 8 the same); a program that wraps the AMC calls in a helper class authorised separately would see a difference
+- Smallest safe workaround: authorise the class that names the API
+- Upstream: not upstream; host code
+- Regression-test location: `ZCL_OSD_AMC_TEST` on both hosts (`unit-compare.mjs`), `tools/gogen/go/amc` `TestAuthority`
+- Upstream version containing a fix: not applicable
+
+### ANOMALY-2026-09-30-amc-go-wait-holds-work-process — WAIT FOR MESSAGING CHANNELS keeps the Go work process
+
+- Status: `open`
+- Discovery date: `2026-09-30`
+- Affected versions: `tools/gogen/go/amc` `Wait` as emitted by `emit-go.mjs` `amc_wait`
+- Affected ABAP statement, runtime API or adapter: `WAIT FOR MESSAGING CHANNELS UNTIL ... UP TO ... SECONDS` in a step that holds `abap.WorkProcess` (an APC or ICF step of osgo)
+- Minimal ABAP reproducer: a handler that WAITs for a message another request sends
+- Exact command used to run it: not in a suite yet; the unit run holds no work process and is not affected
+- Expected SAP behaviour: WAIT rolls the session out, and other work runs meanwhile (docs/abap-daemons.md: "WAIT releases WorkProcess")
+- Actual open-abap behaviour: the waiting goroutine keeps the mutex, so a producer in another step runs only after the WAIT ends or times out
+- Impact on open-steamgate: the unit run and single-session use are exact; cross-request AMC on osgo is delayed by up to the WAIT's timeout
+- Smallest safe workaround: none needed for the suite; release the work process around the select in `amc.Wait` (a hook the generated code passes) when osgo serves AMC across requests
+- Upstream: not upstream; host code
+- Regression-test location: none yet
+- Upstream version containing a fix: none yet
+

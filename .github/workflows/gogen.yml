@@ -87,8 +87,10 @@ jobs:
       - name: Go vet and tests
         working-directory: tools/gogen/go
         run: |
-          go vet ./abap/ ./termgui/
+          go vet ./abap/ ./termgui/ ./amc/
           go test ./abap/... ./termgui/...
+          # the AMC broker is concurrent by nature: its tests run under the race detector
+          go test -race ./amc/...
       - name: Semantics, Go and IR-as-JS against the measured answers
         run: node tools/gogen/semantics.mjs
       # osabap: a report built into a native command (open-abap-gui's

@@ -367,7 +367,9 @@ for (const {key, methods} of groups) {
   const special = (name, receiver) => c.methods.some((m) => m.name === name)
     ? `${receiver}.${goName(name)}(s)` : "";
   generated.push("{", ...(c.methods.some((m) => m.name === "CLASS_TEARDOWN") ? ["groupStart := len(results)"] : []), "classError := \"\"", "stopClass := false");
-  if (methods.some((m) => m.db)) generated.push("classError = caught(func(){ if err := abap.OpenDB(dbScript); err != nil { panic(err) } })");
+  // one LUW chain as the Node unit run has (abap.BeginUnitLUW): COMMIT and
+  // ROLLBACK WORK end it, nothing between the methods does
+  if (methods.some((m) => m.db)) generated.push("classError = caught(func(){ if err := abap.OpenDB(dbScript); err != nil { panic(err) }; abap.BeginUnitLUW() })");
   if (c.methods.some((m) => m.name === "CLASS_SETUP")) generated.push(`if classError == "" { classError = caught(func(){ ${T}_CLASS_SETUP(s) }) }`);
   for (const row of methods) {
     generated.push(`{ r := result{Class:${JSON.stringify(owner)}, Testclass:${JSON.stringify(local)}, Method:${JSON.stringify(row.method)}, Status:"SUCCESS"}`,

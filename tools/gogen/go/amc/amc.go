@@ -88,6 +88,7 @@ type Broker struct {
 	inboxes  map[any]*inbox
 	ids      map[any]string
 	nextID   int
+	binds    *bindings
 }
 
 // New is an empty broker with these channels.
@@ -123,6 +124,12 @@ func (b *Broker) Define(channels ...Channel) {
 	for i := range channels {
 		c := channels[i]
 		c.App, c.Path, c.Type = strings.ToUpper(c.App), strings.ToLower(c.Path), strings.ToUpper(c.Type)
+		// a channel defined again keeps its identity: the subscriptions made
+		// before hold it, and a new object would orphan them
+		if old := b.channels[keyOf(c.App, c.Path)]; old != nil {
+			*old = c
+			continue
+		}
 		b.channels[keyOf(c.App, c.Path)] = &c
 	}
 }
@@ -369,3 +376,105 @@ func (b *Broker) Wait(session any, cond func() bool, timeout time.Duration, deli
 		}
 	}
 }
+
+// ---- what the generated code keeps here ----
+
+// Producer is what CREATE_MESSAGE_PRODUCER bound a producer object to.
+type Producer struct {
+	App, Path, Extension string
+	SuppressEcho         bool
+}
+
+// Consumer is what CREATE_MESSAGE_CONSUMER bound a consumer object to.
+type Consumer struct {
+	App, Path, Extension string
+}
+
+type bindings struct {
+	mu     sync.Mutex
+	values map[any]any
+	subs   map[[2]any]*Subscription
+	stack  map[any][]string
+}
+
+func (b *Broker) bind() *bindings {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.binds == nil {
+		b.binds = &bindings{values: map[any]any{}, subs: map[[2]any]*Subscription{}, stack: map[any][]string{}}
+	}
+	return b.binds
+}
+
+// Bind keeps v for the object obj (a producer or a consumer); Bound gives it back.
+func (b *Broker) Bind(obj, v any) {
+	bs := b.bind()
+	bs.mu.Lock()
+	bs.values[obj] = v
+	bs.mu.Unlock()
+}
+
+// Bound is what Bind kept for obj, or nil.
+func (b *Broker) Bound(obj any) any {
+	bs := b.bind()
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+	return bs.values[obj]
+}
+
+// Track is START_MESSAGE_DELIVERY's bookkeeping: the subscription of a
+// consumer for a receiver, replacing (and stopping) one it had before.
+func (b *Broker) Track(consumer, receiver any, sub *Subscription) {
+	bs := b.bind()
+	bs.mu.Lock()
+	old := bs.subs[[2]any{consumer, receiver}]
+	bs.subs[[2]any{consumer, receiver}] = sub
+	bs.mu.Unlock()
+	old.Stop()
+}
+
+// Untrack is STOP_MESSAGE_DELIVERY.
+func (b *Broker) Untrack(consumer, receiver any) {
+	bs := b.bind()
+	bs.mu.Lock()
+	old := bs.subs[[2]any{consumer, receiver}]
+	delete(bs.subs, [2]any{consumer, receiver})
+	bs.mu.Unlock()
+	old.Stop()
+}
+
+// Enter records that the program is calling the AMC API in session until
+// the returned func runs: the compiled counterpart of tools/osd-amc.mjs
+// reading the calling class off the stack. Caller is the innermost one.
+func (b *Broker) Enter(session any, program string) func() {
+	bs := b.bind()
+	bs.mu.Lock()
+	bs.stack[session] = append(bs.stack[session], program)
+	bs.mu.Unlock()
+	return func() {
+		bs.mu.Lock()
+		st := bs.stack[session]
+		if len(st) > 0 {
+			bs.stack[session] = st[:len(st)-1]
+		}
+		if len(bs.stack[session]) == 0 {
+			delete(bs.stack, session)
+		}
+		bs.mu.Unlock()
+	}
+}
+
+// Caller is the program of the innermost Enter in session, or "".
+func (b *Broker) Caller(session any) string {
+	bs := b.bind()
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+	st := bs.stack[session]
+	if len(st) == 0 {
+		return ""
+	}
+	return st[len(st)-1]
+}
+
+// Seconds is UP TO n SECONDS as a duration.
+func Seconds(n float64) time.Duration { return time.Duration(n * float64(time.Second)) }

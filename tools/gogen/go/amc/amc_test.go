@@ -249,3 +249,56 @@ func TestCurrentAndUse(t *testing.T) {
 	}
 	Use(old)
 }
+
+func TestBindingsAndCaller(t *testing.T) {
+	b := testBroker()
+	a := &session{}
+	if b.Caller(a) != "" {
+		t.Fatal("caller before Enter")
+	}
+	outer := b.Enter(a, "ZCL_OUTER=====================CP")
+	inner := b.Enter(a, "ZCL_INNER=====================CP")
+	if b.Caller(a) != "ZCL_INNER=====================CP" {
+		t.Fatal(b.Caller(a))
+	}
+	inner()
+	if b.Caller(a) != "ZCL_OUTER=====================CP" {
+		t.Fatal(b.Caller(a))
+	}
+	outer()
+	p := &struct{ x int }{}
+	b.Bind(p, Producer{App: "A", Path: "/p"})
+	if b.Bound(p).(Producer).Path != "/p" {
+		t.Fatal("bind")
+	}
+	consumer, receiver := &struct{ y int }{}, "r"
+	s1, _ := b.Subscribe("ZOSD_AMC_TEST", "/text", "", at(a, "001", "A"), receiver)
+	s2, _ := b.Subscribe("ZOSD_AMC_TEST", "/text", "", at(a, "001", "A"), receiver)
+	b.Track(consumer, receiver, s1)
+	b.Track(consumer, receiver, s2)
+	if s1.active.Load() || !s2.active.Load() {
+		t.Fatal("a second START did not replace the first")
+	}
+	b.Untrack(consumer, receiver)
+	if s2.active.Load() {
+		t.Fatal("STOP left it active")
+	}
+	if Seconds(1.5) != 1500*time.Millisecond {
+		t.Fatal("seconds")
+	}
+}
+
+// the generated code defines the channels at every CREATE; a subscription
+// made before a later Define still receives (found running ZCL_OSD_AMC_TEST)
+func TestDefineAgainKeepsSubscriptions(t *testing.T) {
+	b := testBroker()
+	a := &session{}
+	b.Subscribe("ZOSD_AMC_TEST", "/text", "", at(a, "001", "A"), "r")
+	b.Define(Channel{App: "ZOSD_AMC_TEST", Path: "/text", Type: "TEXT", Scope: "C", Auth: []Authority{
+		{Path: "/text", Program: ProgramOf("ZCL_OSD_AMC_TEST"), Activity: "S"}, {Path: "/text", Program: ProgramOf("ZCL_OSD_AMC_TEST"), Activity: "R"}}})
+	b.Publish("ZOSD_AMC_TEST", "/text", "", at(&session{}, "001", "A"), false, Message{Type: "TEXT", Payload: "x"})
+	var g got
+	if !b.Pump(a, g.deliver) || g.n() != 1 {
+		t.Fatal("a Define after Subscribe orphaned the subscription")
+	}
+}
