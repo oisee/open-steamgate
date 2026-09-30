@@ -3,7 +3,7 @@
   "displayName": "open-steamgate: local ABAP server",
   "icon": "resources/icon.png",
   "description": "A local ABAP application server in VS Code with OData, Fiori, ABAP Unit and debugging",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "license": "MIT",
   "keywords": ["abap", "sap", "odata", "fiori", "gateway", "abapgit", "amdp", "sqlscript", "eamdp", "pamdp", "hana", "abap unit"],
