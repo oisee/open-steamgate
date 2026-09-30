@@ -1,49 +1,61 @@
 package abap
 
 import (
+	"reflect"
+	"runtime"
 	"sync"
 	"sync/atomic"
+	"weak"
 )
 
-// A table version invalidates bindings when a delete or insert can change
-// which logical row occupies a value-slice slot. The key is the table variable,
-// so aliases through generic Data share the same version.
-var tableVersions sync.Map
-var boundRows sync.Map
+// Weak keys let a table header and its version cell die together. No map value
+// retains the table. A binding retains its own table while it is in scope.
+var tableVersions sync.Map // weak.Pointer[byte] -> *atomic.Uint64
 
 func versionCell(table any) *atomic.Uint64 {
-	if v, ok := tableVersions.Load(table); ok {
+	ptr := (*byte)(reflect.ValueOf(table).UnsafePointer())
+	key := weak.Make(ptr)
+	if v, ok := tableVersions.Load(key); ok {
 		return v.(*atomic.Uint64)
 	}
-	v, _ := tableVersions.LoadOrStore(table, new(atomic.Uint64))
+	v, loaded := tableVersions.LoadOrStore(key, new(atomic.Uint64))
+	if !loaded {
+		runtime.AddCleanup(ptr, func(k weak.Pointer[byte]) { tableVersions.Delete(k) }, key)
+	}
 	return v.(*atomic.Uint64)
 }
 
-func tableVersion(table any) uint64 {
-	return versionCell(table).Load()
-}
+func tableVersion(table any) uint64 { return versionCell(table).Load() }
 
 func BumpTable(table any) {
-	if v, ok := tableVersions.Load(table); ok {
+	if v, ok := tableVersions.Load(weak.Make((*byte)(reflect.ValueOf(table).UnsafePointer()))); ok {
 		v.(*atomic.Uint64).Add(1)
 	}
 }
 
-func BindRow[T any](table *[]T, index int) *T {
-	row := &(*table)[index]
-	version := tableVersion(table)
-	boundRows.Store(row, func() bool {
-		return tableVersion(table) == version && index < len(*table) && &(*table)[index] == row
-	})
-	return row
+// RowBinding owns its validation token; binding another symbol to the same
+// slice slot cannot change this one. Access needs no global map lookup.
+type RowBinding[T any] struct {
+	row     *T
+	table   *[]T
+	version *atomic.Uint64
+	at      uint64
+	index   int
 }
 
-func CheckedRowPtr[T any](row *T) *T {
-	if row == nil {
+func BindRow[T any](table *[]T, index int) *RowBinding[T] {
+	cell := versionCell(table)
+	return &RowBinding[T]{row: &(*table)[index], table: table, version: cell, at: cell.Load(), index: index}
+}
+
+func DirectBinding[T any](row *T) *RowBinding[T] { return &RowBinding[T]{row: row} }
+
+func CheckedRowPtr[T any](b *RowBinding[T]) *T {
+	if b == nil || b.row == nil {
 		panic(ArithmeticError{"GETWA_NOT_ASSIGNED", "unassigned field symbol"})
 	}
-	if valid, ok := boundRows.Load(row); ok && !valid.(func() bool)() {
+	if b.table != nil && (b.version.Load() != b.at || b.index >= len(*b.table) || &(*b.table)[b.index] != b.row) {
 		panic(ArithmeticError{"GETWA_NOT_ASSIGNED", "table row binding after structural mutation"})
 	}
-	return row
+	return b.row
 }

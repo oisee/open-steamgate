@@ -910,7 +910,7 @@ function method(cls, m) {
   // the RETURNING parameter starts at its initial value too (the JS emitter's
   // let r = zero(t)); Go's named result starts at Go's zero value
   if (m.returning && !isGoZero(zero(m.returning.type))) lines.push(`\t${ident(m.returning.name)} = ${zero(m.returning.type)}`);
-  for (const f of m.fieldSymbols ?? []) lines.push(`\tvar ${ident(f.name)} ${f.type.k === "data" ? "" : "*"}${goType(f.type)}`, `\t_ = ${ident(f.name)}`);
+  for (const f of m.fieldSymbols ?? []) lines.push(`\tvar ${ident(f.name)} ${f.type.k === "data" ? "abap.Data" : f.type.k === "struct" ? `*${goType(f.type)}` : `*abap.RowBinding[${goType(f.type)}]`}`, `\t_ = ${ident(f.name)}`);
   const ctx = {cls, loop: 0, inCtor: m.name === "CONSTRUCTOR", method: m};
   lines.push(...m.body.flatMap((st) => stmt(st, ctx, 1)));
   lines.push("\treturn", "}");
@@ -1557,7 +1557,7 @@ ${t}	}`));
     case "assign_deref":
       return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident(st.fs.name)} = r`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_deref_typed":
-      return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident(st.fs.name)} = abap.DerefAs[${goType(st.fs.type)}](r, ${JSON.stringify(st.text)})`,
+      return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident(st.fs.name)} = ${st.fs.type.k === "struct" ? `abap.DerefAs[${goType(st.fs.type)}](r, ${JSON.stringify(st.text)})` : `abap.DirectBinding(abap.DerefAs[${goType(st.fs.type)}](r, ${JSON.stringify(st.text)}))`}`,
         `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_data":
       return [`${t}${ident(st.fs.name)} = ${expr(st.value, ctx)}`];

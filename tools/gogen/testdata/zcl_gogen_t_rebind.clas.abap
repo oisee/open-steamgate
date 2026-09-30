@@ -1,0 +1,20 @@
+CLASS zcl_gogen_t_rebind DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+  PRIVATE SECTION.
+    TYPES ty_tab TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+ENDCLASS.
+CLASS zcl_gogen_t_rebind IMPLEMENTATION.
+  METHOD run.
+    DATA lt TYPE ty_tab.
+    DATA v TYPE i.
+    FIELD-SYMBOLS <old> TYPE i.
+    FIELD-SYMBOLS <new> TYPE i.
+    v = 1. APPEND v TO lt.
+    v = 2. APPEND v TO lt.
+    READ TABLE lt INDEX 1 ASSIGNING <old>.
+    DELETE lt INDEX 1.
+    READ TABLE lt INDEX 1 ASSIGNING <new>.
+    rv = |{ <old> }|.
+  ENDMETHOD.
+ENDCLASS.
