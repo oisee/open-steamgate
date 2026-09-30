@@ -5,6 +5,7 @@
 // files, so they are imported here through ImportSet, as the editor does.
 import {expect} from "chai";
 import {readFileSync} from "node:fs";
+import {readSpec, tableName} from "../tools/segw-tables.mjs";
 
 const FIXTURES = [
   "test/fixtures/segw/zstg_label.iwpr.xml",
@@ -27,8 +28,21 @@ describe("DSL L1: MPC entity methods from the model, byte for byte", function ()
     await import("../output/zcl_stg_dispatcher.clas.mjs");
   });
 
+  // Each fixture is imported under a project name of this test's own, so the
+  // projects other suites seed or push (ZSTG_MAPPED, ZSTG_MINI, ...) are not
+  // touched, and every row it wrote is deleted afterwards.
+  const OWN = "ZUTDSL";
+  let imported = 0;
+  after(async () => {
+    const db = abap.context.databaseConnections.DEFAULT;
+    for (const tag of Object.keys(readSpec())) {
+      await db.execute(`DELETE FROM ${tableName(tag).toLowerCase()} WHERE project LIKE '${OWN}%'`);
+    }
+  });
+
   async function importProject(path) {
-    const xml = readFileSync(path, "utf8");
+    const project = `${OWN}${++imported}`;
+    const xml = readFileSync(path, "utf8").replace(/<PROJECT>[^<]+<\/PROJECT>/g, `<PROJECT>${project}</PROJECT>`);
     const response = await abap.Classes.ZCL_STG_DISPATCHER.dispatch({
       iv_method: box("POST"),
       iv_path: box("/sap/opu/odata/sap/ZSTG_SEGW_SRV/ImportSet"),
@@ -36,7 +50,7 @@ describe("DSL L1: MPC entity methods from the model, byte for byte", function ()
     });
     const status = response.get().status.get();
     expect([200, 201], `${path}: ${response.get().body.get().slice(0, 300)}`).to.include(status);
-    return /<PROJECT>([^<]+)<\/PROJECT>/.exec(xml)[1];
+    return project;
   }
 
   // No fixture file has a property with semantics, a complex property or a
