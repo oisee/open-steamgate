@@ -381,7 +381,7 @@ function readSecKey(st, ctx, t) {
   const tb = expr(st.table, ctx);
   const vals = `[${st.values.map((v) => expr(v, ctx)).join(", ")}]`;
   const cmp = st.key.comps.map((c, j) => `abap.cmpKey(r.${ident(c.name)}, v${n}[${j}])`).join(" || ") + " || 0";
-  const bind = st.fs ? `${ident(st.fs)} = ${tb}[i${n}];` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${tb}[i${n}])` : `${tb}[i${n}]`};` : "";
+  const bind = st.fs ? `${ident(st.fs)} = ${tb}[i${n}];` : st.refInto ? `${place(st.into, ctx)} = abap.cell(${tb}[i${n}], ${desc(st.table.type.row)});` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${tb}[i${n}])` : `${tb}[i${n}]`};` : "";
   return [`${t}{`, `${t}  const v${n} = ${vals};`,
     `${t}  const [i${n}, pos${n}, sub${n}] = abap.keyRead(${tb}, (r) => ${cmp}, ${st.key.unique ? JSON.stringify(st.key.name) : `""`});`,
     `${t}  if (sub${n} === 0) { ${bind} }`, `${t}  s.sy.subrc = sub${n}; s.sy.tabix = pos${n};`, `${t}}`];

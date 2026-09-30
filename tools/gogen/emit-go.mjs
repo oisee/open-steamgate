@@ -1066,7 +1066,7 @@ function readSecKey(st, ctx, t) {
   const tb = expr(st.table, ctx);
   const vals = st.values.map((v, j) => `${t}\tv${n}_${j} := ${expr(v, ctx)}`);
   const cmp = st.key.comps.map((c, j) => `if c := abap.${c.num ? "CmpNum" : "CmpS"}(${tb}[i].${ident(c.name)}, v${n}_${j}); c != 0 {\n${t}\t\treturn c\n${t}\t}`);
-  const bind = st.fs ? `${ident(st.fs)} = &${tb}[i${n}]` : st.into ? `${place(st.into, ctx)} = ${copied(`${tb}[i${n}]`, st.into.type)}` : null;
+  const bind = st.fs ? `${ident(st.fs)} = &${tb}[i${n}]` : st.refInto ? `${place(st.into, ctx)} = abap.Data{P: &${tb}[i${n}], T: ${desc(st.table.type.row)}}` : st.into ? `${place(st.into, ctx)} = ${copied(`${tb}[i${n}]`, st.into.type)}` : null;
   return [`${t}{`, ...vals,
     `${t}\ti${n}, pos${n}, sub${n} := abap.KeyRead(len(${tb}), func(i int) int {\n${t}\t${cmp.join(`\n${t}\t`)}\n${t}\treturn 0\n${t}\t}, ${st.key.unique ? JSON.stringify(st.key.name) : `""`})`,
     `${t}\tif sub${n} == 0 {`, ...(bind ? [`${t}\t\t${bind}`] : []), `${t}\t}`, `${t}\t_ = i${n}`,

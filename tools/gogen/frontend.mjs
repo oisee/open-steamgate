@@ -2396,7 +2396,7 @@ function statement(node, ctx) {
       }
       // the values in the key's own order
       const values = key.comps.map((c) => keys.find((x) => x.name === c.name).value);
-      return {s: "read_seckey", table, key, values, into, fs};
+      return {s: "read_seckey", table, key, values, into, fs, refInto};
     }
     // ultra/events (fix round): a SORTED table is searched by its key (A4H
     // 2026-09-24, ZCL_GOGEN_T_SORTRD). The key components given from the

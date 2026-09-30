@@ -26,6 +26,7 @@ const EXPECT = {
   ZCL_GOGEN_T_RF_SORT_OK: "mv:ab vl:cd rk:dc empty:0 back:2",
   ZCL_GOGEN_T_SORTREF: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SORTREF=>RUN (zcl_gogen_t_sortref.clas.abap:18): INSERT INTO SORTED TABLE REFERENCE INTO: rows are stored in a Go slice; later inserts or deletes can move the row, so a retained reference is unsafe at zcl_gogen_t_sortref.clas.abap:18",
     JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SORTREF=>RUN (zcl_gogen_t_sortref.clas.abap:18): INSERT INTO SORTED TABLE REFERENCE INTO: rows are stored in a Go slice; later inserts or deletes can move the row, so a retained reference is unsafe"},
+  ZCL_GOGEN_T_SECREF: "0/7",
   ZCL_GOGEN_T_BOUND: "X",
   // Arithmetic statements share the assignment calculation type: i division
   // rounds 21 / 2 to 11, while packed decimal retains its two places.
