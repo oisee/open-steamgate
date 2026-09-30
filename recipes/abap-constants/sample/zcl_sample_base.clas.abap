@@ -1,0 +1,8 @@
+CLASS zcl_sample_base DEFINITION PUBLIC.
+  PUBLIC SECTION.
+    METHODS describe RETURNING VALUE(rv_text) TYPE string.
+ENDCLASS.
+CLASS zcl_sample_base IMPLEMENTATION.
+  METHOD describe.
+  ENDMETHOD.
+ENDCLASS.

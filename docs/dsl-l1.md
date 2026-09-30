@@ -1,6 +1,6 @@
 # DSL L1: the typed generation model
 
-Status: MPC class rendering implemented through slice 5, 2026-09-30. Built on the template engine of `docs/abap-templates.md` (L0, PR #266).
+Status: MPC class rendering implemented through slice 5, recipes as build units (`dsl build`) in slice 11, 2026-09-30. Built on the template engine of `docs/abap-templates.md` (L0, PR #266).
 
 ## Where it sits
 
@@ -145,6 +145,49 @@ registry in `tools/dsl-regions.mjs` (`RECIPES`) says how each recipe builds its 
 
 `test/dsl-regions.mjs` covers each of these; `test/lift-r1.mjs` reads its regions through the
 same parser (`region(source, from)`).
+
+## Recipes as build units
+
+A recipe is a folder under `recipes/` with a `recipe.json`, and `node tools/dsl-build.mjs` (`npm run
+dsl:build`) builds it the way a class is built: compiled, linked, checked, with the error at build time
+and `<recipe>/<file>:<line>` in it.
+
+```json
+{"template": "template.tpl", "partials": {"name": "file.tpl"}, "model": "abap-methods",
+ "profile": "text", "schema": "schema.json"}
+```
+
+`model` names the provider, a small registry in `tools/dsl-build.mjs` (`lift-r1`, `abap-methods`,
+`abap-constants`) that maps it to the function building the model and to its sample input(s): the R1
+demo class for `lift-r1`, a `sample/` folder beside the two ABAP recipes. `profile` is `abap`, `sqlscript`
+or `text`. `schema` is the model's shape: `"scalar"`, `{"object": {field: shape}}`, `{"array": shape}`.
+
+| step | what it does |
+|---|---|
+| compile | parses the template and every partial with the engine's grammar: a tag never closed, an empty or blank-containing name, a close without or of the wrong open, a section not closed, an unknown filter or a bad `pad`/`lower`/`literal` argument, a partial argument that is not `name=path` |
+| link | resolves `{{> p}}` by name against `partials` (missing and cyclic are errors) and every tag name against the schema **in its section context**: sections push the array item or the object, a dotted name finds its first part in the nearest frame that has it (as the engine does), `.` is the context, `@index`/`@first`/`@last` need a loop around them, a partial is linked in the context of each caller with its arguments as aliases, and `x \| literal` needs `x@type` beside `x`. A miss is `recipe/template.tpl:3: {{name}} is not a field of classes[].constants[]` |
+| render | builds each sample model, renders it through `ZCL_OSD_TPL` (partials handed in), runs the profile over the result; an engine refusal or a profile error carries the template, the template line and the model node from the trace |
+
+`--check` adds the schema drift check: the schema is the union of the shapes of the provider's real
+output on its samples, committed as `schema.json`, and the check fails on a field the output has and the
+schema lacks, on a field the schema has and the output never produces, and on a field of another shape.
+So the schema can neither fall behind the provider nor carry a field nobody writes. After a provider
+change, `node tools/dsl-build.mjs schema <recipe> --write` rewrites it and the diff is reviewed. `--static`
+stops after link (no runtime needed); the exit status is 1 on any error.
+
+**The scanner is a reimplementation, on purpose.** The engine's parse is private and runs only inside a
+render over data, and a build step that needs the transpiled runtime to read a template's syntax cannot
+run before the transpile. The tag scanner (about 80 lines) is therefore in JavaScript, and
+`test/dsl-build.mjs` holds it to the engine: sixteen refusal cases are rendered through `ZCL_OSD_TPL`
+and must be refused with the same line and text, what the engine renders must compile, and every
+recipe's template renders over its samples. One difference is deliberate: the engine checks a filter or
+a partial only where it renders one, the build checks every tag, and a partial that is not declared is an
+error here where the engine prints nothing.
+
+**Where it runs.** Not inside `npm run transpile`: the render step needs the transpiled
+`ZCL_OSD_TPL`, and the generators of that step run before it exists. It is `npm run dsl:build` and the
+suite `test/dsl-build.mjs` (listed in `test/suites.d/infra-misc.json`), which CI runs with every other
+integration suite, so a recipe that stops building fails the tag's tests.
 
 ## Steps
 

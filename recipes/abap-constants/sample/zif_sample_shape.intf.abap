@@ -1,0 +1,4 @@
+INTERFACE zif_sample_shape PUBLIC.
+  CONSTANTS c_kind TYPE c LENGTH 6 VALUE 'shape'.
+  METHODS area RETURNING VALUE(rv_area) TYPE i.
+ENDINTERFACE.

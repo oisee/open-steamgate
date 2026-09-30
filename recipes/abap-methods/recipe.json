@@ -1,0 +1,7 @@
+{
+  "template": "template.tpl",
+  "partials": {},
+  "model": "abap-methods",
+  "profile": "text",
+  "schema": "schema.json"
+}
