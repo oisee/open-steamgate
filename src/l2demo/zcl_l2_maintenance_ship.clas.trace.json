@@ -2,7 +2,7 @@
  "generator": "dsl-l2",
  "rule": "src/l2demo/maintenance_ship.l2.yaml",
  "template": "recipes/l2-check/template.tpl",
- "model": "sha256:bb6947f8b4bd9bc716df54fec67981d9b524f2f5528a573e5fb6d38cdd13e310",
+ "model": "sha256:d5041d71c291b0cbec2007d2d42966e1b59938f3629f9718bdb3a40f43d2cbfb",
  "lines": [
   {
    "line": 1,

@@ -60,9 +60,15 @@ Checked against the DDIC (`tools/dsl-ddic.mjs`, abaplint's registry, `DDIC_PROVI
   other way round is mirrored); the other side is a literal, `$date`, or a field of the outer
   alias, never a second field of the same table;
 - both sides have compatible DDIC types: the same built-in type field against field, DATS against
-  `$date`, and a literal that fits the field (a CHAR literal no longer than the field, a DATS
-  literal eight digits, a number only for integer and packed types);
+  `$date`, and a literal that fits the field by the rules of the engine's `literal` filter (a
+  CHAR literal no longer than the field, a DATS literal eight digits, an integer within the range
+  of INT1/INT2/INT4/INT8, a packed number within its digits and decimals, one source line and at
+  most 255 characters once quotes are doubled). The rules are written twice, in the filter and in
+  `misfit`, so that an error names the rule line; `test/dsl-l2.mjs` runs boundary values of every
+  type through both and fails when they disagree;
 - every `{hole}` names a field of a declared alias;
+- a rule carries its proof: it has at least one example, and every example states `expect`
+  (`expect: []` when it expects no alert; a missing key is an error);
 - example rows name only the rule's own tables, give every key field, and their values fit.
 
 The YAML is read by js-yaml (the reader `tools/stg-compile.mjs` uses) with its FAILSAFE schema,
@@ -78,17 +84,22 @@ the line of the key holding it.
    `rule_line`. Every literal carries its sibling `@type` in DDIC terms (`value@type`,
    `date@type`, `label@type`), so the templates print it with `| literal`. Names the templates
    print (`lt_<alias>`, `ls_<alias>`, `mt_<table>`, test method names) are decided here.
+   A table node carries the line where its table enters the rule (`for:` or `exists:`).
 2. **ABAP** through `ZCL_OSD_TPL`: `recipes/l2-check/template.tpl` renders `ZCL_L2_<RULE>` with
    `check( iv_date ) RETURNING rt_alerts TYPE string_table` (Open SQL, ABAP 7.02, one WHERE
    condition per line so each line traces to its own node); `recipes/l2-check-test/template.tpl`
    renders its test class: one method per example that inserts the example's rows, calls `check`,
    compares the alerts with `expect` order-insensitively, and deletes its rows again in
-   `teardown` (RISK LEVEL DANGEROUS, the rule's own tables only). Both pass the `abap` profile
+   `teardown` (RISK LEVEL DANGEROUS, the rule's own tables only). The generated SELECTs carry no MANDT condition:
+   that is correct ABAP, because on a system the kernel adds the logon client to Open SQL. This
+   runtime is single-client by a settled decision (ANORMALIES `no-implicit-mandt`, upstream
+   abaplint/transpiler#606), so do not add a MANDT condition to the template. Both pass the `abap` profile
    (`ZCL_OSD_DSL_PROFILE`); `build` exits nonzero on an error finding.
 3. **Trace**: `<class>.clas.trace.json` (and `<class>.clas.testclasses.trace.json`), one entry per
    output line: `line` -> `template_line` -> `node` (the nearest `@id` on the data path) ->
    `rule_line`. The `AND dep_date > iv_date` line of the demo traces to the rule's `where:` line,
-   the alert text lines to its `alert:` line.
+   the alert text lines to its `alert:` line, and in the test class the `check( iv_date = ... )`
+   call to its example's `date:` line.
 4. **Proof**: the generated test class runs with every other ABAP Unit test. `test/dsl-l2.mjs`
    builds a copy of the rule with `>` changed to `>=`, transpiles it alone and runs its examples:
    the example departing on the check date fails, so the examples really test the rule.

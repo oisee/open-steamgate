@@ -40,7 +40,6 @@ CLASS ltcl_examples IMPLEMENTATION.
 {{#tables}}
     DATA {{wa}} TYPE {{table}}.
 {{/tables}}
-    DATA lv_date TYPE d.
     DATA lt_act TYPE string_table.
     DATA lt_exp TYPE string_table.
 {{#tables}}
@@ -59,8 +58,7 @@ CLASS ltcl_examples IMPLEMENTATION.
 {{#expect}}
     APPEND {{value | literal}} TO lt_exp.
 {{/expect}}
-    lv_date = {{date | literal}}.
-    lt_act = {{class}}=>check( lv_date ).
+    lt_act = {{date.call}}( iv_date = {{date.value | literal}} ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = {{label | literal}} ).
   ENDMETHOD.
 {{/examples}}

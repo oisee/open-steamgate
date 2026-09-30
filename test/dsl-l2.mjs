@@ -10,7 +10,7 @@ import {tmpdir} from "node:os";
 import {basename, join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DEFAULT_DDIC, registryFor} from "../tools/dsl-ddic.mjs";
-import {buildRule, checkRule, compileRule, RuleError} from "../tools/dsl-l2.mjs";
+import {buildRule, checkRule, compileRule, misfit, RuleError} from "../tools/dsl-l2.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
@@ -99,6 +99,26 @@ describe("DSL L2 slice 1: a rule, its generated check and its examples", functio
     });
   });
 
+  describe("a rule carries its proof", () => {
+    const refused = (name, text, message, at) => {
+      const file = join(scratch, `${name}.l2.yaml`);
+      writeFileSync(file, text);
+      const where = relative(process.cwd(), file).split(sep).join("/");
+      const line = text.split("\n").findIndex((l) => at.test(l)) + 1;
+      expect(() => compileRule(file, {registry})).to.throw(RuleError, new RegExp(`^${where.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:${line}: ${message}`));
+    };
+    const head = RULE_TEXT.slice(0, RULE_TEXT.indexOf("examples:"));
+
+    it("no examples key", () => refused("no-examples", head, "a rule needs examples", /^rule:/));
+    it("an empty list of examples", () => refused("empty-examples", `${head}examples: []\n`, "a rule needs at least one example", /^examples:/));
+    it("an example without expect", () => {
+      const from = "    expect: []\n  - name: departs on the check date";
+      expect(RULE_TEXT).to.include(from);
+      refused("no-expect", RULE_TEXT.replace(from, "  - name: departs on the check date"),
+        "example \"past voyage is fine\" has no expect", /^\s+- name: past voyage is fine/);
+    });
+  });
+
   describe("trace", () => {
     const abap = readFileSync(join(OUT, `${CLASS}.clas.abap`), "utf8").split("\n");
     const trace = JSON.parse(readFileSync(join(OUT, `${CLASS}.clas.trace.json`), "utf8"));
@@ -126,6 +146,171 @@ describe("DSL L2 slice 1: a rule, its generated check and its examples", functio
       const e = entry(/`: in maintenance, voyage `/);
       expect(e.node).to.match(/\/alert\/text\/\d+$/);
       expect(e.rule_line).to.equal(ruleLine(/^alert:/));
+    });
+  });
+
+  describe("trace of the test class", () => {
+    const abap = readFileSync(join(OUT, `${CLASS}.clas.testclasses.abap`), "utf8").split("\n");
+    const trace = JSON.parse(readFileSync(join(OUT, `${CLASS}.clas.testclasses.trace.json`), "utf8"));
+    const ruleLineOf = (re) => {
+      const line = abap.findIndex((l) => re.test(l)) + 1;
+      expect(line, `a line matching ${re}`).to.be.greaterThan(0);
+      return trace.lines.find((e) => e.line === line).rule_line;
+    };
+
+    it("each example's check call traces to that example's date line", () => {
+      const calls = abap.map((l, i) => [i + 1, l]).filter(([, l]) => /=>check\( iv_date = '\d{8}' \)/.test(l));
+      const dates = RULE_TEXT.split("\n").map((l, i) => [i + 1, l]).filter(([, l]) => /^\s+date: /.test(l));
+      const names = [...RULE_TEXT.matchAll(/- name: (.+)/g)].map((m) => m[1]);
+      expect(calls.length).to.equal(5);
+      expect(dates.length).to.equal(5);
+      calls.forEach(([line], k) => {
+        expect(trace.lines.find((e) => e.line === line)).to.include({
+          node: `rule/maintenance-ship-no-future-voyage/example/${names[k]}/date`, rule_line: dates[k][0]});
+      });
+    });
+
+    it("a table's declaration and teardown trace to where the table enters the rule", () => {
+      const forLine = ruleLine(/^for:/), existsLine = ruleLine(/^\s+exists:/);
+      expect(ruleLineOf(/DATA mt_zosd_l2_ship TYPE/)).to.equal(forLine);
+      expect(ruleLineOf(/DELETE zosd_l2_ship FROM TABLE/)).to.equal(forLine);
+      expect(ruleLineOf(/DATA mt_zosd_l2_voy TYPE/)).to.equal(existsLine);
+      expect(ruleLineOf(/DELETE zosd_l2_voy FROM TABLE/)).to.equal(existsLine);
+    });
+  });
+
+  describe("integer ranges and packed precision (a fixture table)", () => {
+    const dtel = (name, type, length, decimals) => `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_DTEL" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DD04V><ROLLNAME>${name}</ROLLNAME><DATATYPE>${type}</DATATYPE><LENG>${String(length).padStart(6, "0")}</LENG><DECIMALS>${String(decimals).padStart(6, "0")}</DECIMALS></DD04V></asx:values></asx:abap>
+</abapGit>
+`;
+    const field = (name, inner) => `<DD03P><FIELDNAME>${name}</FIELDNAME>${inner}</DD03P>`;
+    const TABLE = `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_TABL" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <DD02V><TABNAME>ZOSD_L2_NUM</TABNAME><DDLANGUAGE>E</DDLANGUAGE><TABCLASS>TRANSP</TABCLASS><CLIDEP>X</CLIDEP></DD02V>
+   <DD03P_TABLE>${[
+    field("MANDT", "<KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME><NOTNULL>X</NOTNULL><COMPTYPE>E</COMPTYPE>"),
+    field("ID", "<KEYFLAG>X</KEYFLAG><INTTYPE>C</INTTYPE><INTLEN>000008</INTLEN><NOTNULL>X</NOTNULL><DATATYPE>CHAR</DATATYPE><LENG>000004</LENG>"),
+    field("LVL", "<ROLLNAME>ZOSD_L2_T_I1</ROLLNAME><COMPTYPE>E</COMPTYPE>"),
+    field("AMT", "<ROLLNAME>ZOSD_L2_T_DEC</ROLLNAME><COMPTYPE>E</COMPTYPE>"),
+  ].join("")}</DD03P_TABLE>
+  </asx:values>
+ </asx:abap>
+</abapGit>
+`;
+    const RULE_NUM = `rule: numeric-fixture
+class: zcl_l2_numeric_fixture
+title: numeric fixture
+for: ZOSD_L2_NUM as n
+when: n.lvl = 3
+forbid:
+  exists: ZOSD_L2_NUM as m
+  where: m.id = n.id and m.amt > 12.5
+alert: "{n.id} {m.amt}"
+examples:
+  - name: one
+    date: 20261001
+    rows:
+      ZOSD_L2_NUM:
+        - {id: A001, lvl: 3, amt: 999.99}
+    expect: []
+`;
+    let ddic, numRegistry;
+    before(() => {
+      ddic = join(scratch, "num-ddic");
+      mkdirSync(ddic, {recursive: true});
+      writeFileSync(join(ddic, "zosd_l2_num.tabl.xml"), TABLE);
+      writeFileSync(join(ddic, "zosd_l2_t_i1.dtel.xml"), dtel("ZOSD_L2_T_I1", "INT1", 3, 0));
+      writeFileSync(join(ddic, "zosd_l2_t_dec.dtel.xml"), dtel("ZOSD_L2_T_DEC", "DEC", 5, 2));
+      numRegistry = registryFor([ddic, ".local/lars/open-abap-core/src"], []);
+    });
+    const numRule = (name, from, to) => {
+      expect(RULE_NUM).to.include(from);
+      const file = join(scratch, `${name}.l2.yaml`);
+      writeFileSync(file, RULE_NUM.replace(from, to));
+      return file;
+    };
+
+    it("the fixture rule compiles, with the DDIC types on its literals", () => {
+      const model = compileRule(numRule("num-ok", "", ""), {registry: numRegistry});
+      expect(model.when.conditions[0]["value@type"]).to.deep.equal({built_in: "INT1"});
+      expect(model.forbid.conditions[1]["value@type"]).to.deep.equal({built_in: "DEC", length: 5, decimals: 2});
+    });
+
+    const cases = [
+      ["INT1 above 255", "n.lvl = 3", "n.lvl = 256", /^n\.lvl is INT1; 256 is out of range for INT1/, /^when:/],
+      ["INT1 below 0", "n.lvl = 3", "n.lvl = -1", /^n\.lvl is INT1; -1 is out of range for INT1/, /^when:/],
+      ["DEC 5,2 with four integer digits", "m.amt > 12.5", "m.amt > 1000", /^m\.amt is DEC 5,2; 1000 exceeds the precision of DEC 5,2/, /^\s+where:/],
+      ["DEC 5,2 with three decimals", "m.amt > 12.5", "m.amt > 1.234", /^m\.amt is DEC 5,2; 1\.234 exceeds the precision of DEC 5,2/, /^\s+where:/],
+      ["an example row out of INT1 range", "lvl: 3, amt", "lvl: 300, amt", /^ZOSD_L2_NUM-LVL is INT1; 300 is out of range/, /^\s+- \{id: A001/],
+      ["an example row beyond DEC precision", "amt: 999.99", "amt: 1000.00", /^ZOSD_L2_NUM-AMT is DEC 5,2; 1000\.00 exceeds the precision/, /^\s+- \{id: A001/],
+    ];
+    cases.forEach(([what, from, to, message, at], i) => {
+      it(what, () => {
+        const file = numRule(`num${i}`, from, to);
+        const where = relative(process.cwd(), file).split(sep).join("/");
+        const line = readFileSync(file, "utf8").split("\n").findIndex((l) => at.test(l)) + 1;
+        let error;
+        try {
+          compileRule(file, {registry: numRegistry});
+        } catch (e) {
+          error = e;
+        }
+        expect(error, "an error").to.be.instanceOf(RuleError);
+        expect(error.message.startsWith(`${where}:${line}: `), error.message).to.equal(true);
+        expect(error.message.slice(`${where}:${line}: `.length)).to.match(message);
+      });
+    });
+  });
+
+  describe("the compiler's literal check agrees with the engine's literal filter", () => {
+    const long = (n, c = "a") => c.repeat(n);
+    const BOUNDARIES = [
+      [{built_in: "INT1"}, ["0", "255", "256", "-0", "-1", "007", "1.5", "", "x"]],
+      [{built_in: "INT2"}, ["32767", "32768", "-32768", "-32769"]],
+      [{built_in: "INT4"}, ["2147483647", "2147483648", "-2147483648", "-2147483649", "00002147483647"]],
+      [{built_in: "INT8"}, ["9223372036854775807", "9223372036854775808", "-9223372036854775808", "-9223372036854775809"]],
+      [{built_in: "DEC", length: 5, decimals: 2}, ["999.99", "1000", "-999.99", "0.12", "0.123", "00123.45", "12.30", "1e3", "", "12."]],
+      [{built_in: "DEC", length: 2, decimals: 2}, ["0.12", "1.2", "0", "00.99"]],
+      [{built_in: "QUAN", length: 3, decimals: 0}, ["999", "1000", "1.0"]],
+      [{built_in: "CHAR", length: 3}, ["abc", "abcd", "", "a'b"]],
+      [{built_in: "CHAR", length: 300}, [long(255), long(256), long(128, "'"), long(127, "'")]],
+      [{built_in: "NUMC", length: 4}, ["0012", "12a", "", "12345"]],
+      [{built_in: "DATS", length: 8}, ["20261001", "2026100", "2026100a"]],
+      [{built_in: "TIMS", length: 6}, ["235959", "23595"]],
+      [{built_in: "STRG"}, ["x", long(255), long(256), long(128, "`"), "a\nb", "a\rb"]],
+      [{built_in: "SSTR", length: 3}, ["abc", "abcd"]],
+      [{built_in: "RAW", length: 2}, ["0a1b", "0a1", "0a1b2c", "zz", ""]],
+    ];
+
+    it("accepts and refuses the same boundary values", async () => {
+      await import("./start.mjs");
+      await import("../output/zcl_osd_tpl.clas.mjs");
+      await import("../output/zcl_ajson.clas.mjs");
+      const abap = globalThis.abap;
+      const box = (value) => new abap.types.String().set(value);
+      const disagreements = [];
+      let count = 0;
+      for (const [type, values] of BOUNDARIES) {
+        for (const value of values) {
+          const json = await abap.Classes.ZCL_AJSON.parse({iv_json: box(JSON.stringify({v: value, "v@type": type}))});
+          let engine = true;
+          try {
+            await abap.Classes.ZCL_OSD_TPL.render({iv_template: box("{{v | literal}}"), ii_data: json});
+          } catch (error) {
+            if (!error.text?.get) throw error;
+            engine = false;
+          }
+          const compiler = misfit(value, type) === undefined;
+          count++;
+          if (engine !== compiler) disagreements.push(`${JSON.stringify(type)} ${JSON.stringify(value)}: engine ${engine}, compiler ${compiler}`);
+        }
+      }
+      expect(count).to.be.greaterThan(60);
+      expect(disagreements).to.deep.equal([]);
     });
   });
 

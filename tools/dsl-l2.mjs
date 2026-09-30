@@ -250,10 +250,15 @@ function tableInfo(registry, name, fail) {
   const components = type.getComponents?.() ?? [];
   const clientDependent = /<CLIDEP>X</.test(object.getXML() ?? "");
   const client = clientDependent ? components[0]?.name.toLowerCase() : undefined;
+  // the data element by name from the field's DD03P row: abaplint's
+  // component type does not carry it, and without it an integer or packed
+  // field has no resolved width
+  const rollnames = new Map((object.getFields() ?? []).filter((f) => f.ROLLNAME && !f.FIELDNAME.startsWith("."))
+    .map((f) => [f.FIELDNAME.toLowerCase(), f.ROLLNAME]));
   const fields = new Map();
   for (const component of components) {
     const column = component.name.toLowerCase();
-    fields.set(column, {column, literal: DDIC_PROVIDER.literalType(registry, component.type, undefined)});
+    fields.set(column, {column, literal: DDIC_PROVIDER.literalType(registry, component.type, rollnames.get(column))});
   }
   return {table: name, fields, client, keys: key.keys.map((k) => k.column)};
 }
@@ -263,27 +268,57 @@ const INTEGERS = new Set(["INT1", "INT2", "INT4", "INT8"]);
 const PACKED = new Set(["DEC", "CURR", "QUAN"]);
 export const DATE_TYPE = {built_in: "DATS", length: 8};
 
-const typeText = (type) => `${type.built_in}${type.length === undefined ? "" : ` ${type.length}`}`;
+const typeText = (type) => `${type.built_in}${type.length === undefined ? "" : ` ${type.length}`}${type.decimals === undefined ? "" : `,${type.decimals}`}`;
 
 // Whether a value (the text written, quotes removed) fits a DDIC type; the
-// reason why not, or undefined. The same rules the `literal` filter applies,
-// checked here so the error names the rule file and line.
+// reason why not, or undefined. These are the rules of the `literal` filter
+// (ZCL_OSD_TPL, METHOD literal), checked here so that the error names the
+// rule file and line instead of surfacing in the render. `quoted` is the rule
+// language's own: a character-like field takes a quoted literal.
+// test/dsl-l2.mjs runs boundary values through both and asserts they agree.
+const QUOTED_TYPES = new Set(["CHAR", "NUMC", "CLNT", "LANG", "CUKY", "UNIT", "ACCP", "DATS", "TIMS"]);
+const INT_RANGE = {INT1: [0n, 255n], INT2: [-32768n, 32767n], INT4: [-2147483648n, 2147483647n],
+  INT8: [-9223372036854775808n, 9223372036854775807n]};
+
 export function misfit(value, type, quoted = true) {
   const b = type.built_in;
-  if (CHAR_LIKE.has(b) || ["NUMC", "DATS", "TIMS", "RAW"].includes(b)) {
+  const length = type.length ?? 0;
+  let literal;
+  if (QUOTED_TYPES.has(b)) {
     if (!quoted) return `${typeText(type)} takes a quoted literal, not the number ${value}`;
-    if (type.length !== undefined && !["STRG", "RAW"].includes(b) && value.length > type.length) {
-      return `'${value}' is ${value.length} characters, longer than ${typeText(type)}`;
-    }
-    if (b === "NUMC" && !/^[0-9]*$/.test(value)) return `'${value}' is not digits for NUMC`;
+    if (value.length > length) return `'${value}' is ${value.length} characters, longer than ${typeText(type)}`;
+    if (b === "NUMC" && !/^[0-9]+$/.test(value)) return `'${value}' is not digits for NUMC`;
     if (b === "DATS" && !/^[0-9]{8}$/.test(value)) return `'${value}' is not a date (DATS, 8 digits YYYYMMDD)`;
     if (b === "TIMS" && !/^[0-9]{6}$/.test(value)) return `'${value}' is not a time (TIMS, 6 digits HHMMSS)`;
-    if (b === "RAW" && (!/^([0-9A-Fa-f]{2})*$/.test(value) || value.length / 2 > type.length)) return `'${value}' is not ${typeText(type)} hex`;
+    literal = value.replaceAll("'", "''");
+  } else if (b === "STRG" || b === "SSTR") {
+    if (b === "SSTR" && type.length !== undefined && value.length > length) return `'${value}' is ${value.length} characters, longer than ${typeText(type)}`;
+    literal = value.replaceAll("`", "``");
+  } else if (INT_RANGE[b]) {
+    if (!/^-?[0-9]+$/.test(value)) return `${value} is not an integer for ${b}`;
+    const [low, high] = INT_RANGE[b];
+    const n = BigInt(value);
+    if (n < low || n > high) return `${value} is out of range for ${b} (${low}..${high})`;
     return undefined;
+  } else if (PACKED.has(b)) {
+    if (!/^-?[0-9]+(\.[0-9]+)?$/.test(value)) return `${value} is not a number for ${b}`;
+    const [whole, fraction = ""] = value.replace(/^-/, "").split(".");
+    const integer = whole.replace(/^0+(?=.)/, "") === "0" ? "" : whole.replace(/^0+(?=.)/, "");
+    const decimals = type.decimals ?? 0;
+    if (fraction.length > decimals || integer.length > length - decimals) {
+      return `${value} exceeds the precision of ${b} ${length},${decimals}`;
+    }
+    literal = value;
+  } else if (b === "RAW") {
+    if (value.length % 2 !== 0 || value.length / 2 > length || !/^[0-9A-Fa-f]*$/.test(value)) return `'${value}' is not ${typeText(type)} hex`;
+    literal = value;
+  } else {
+    return `${b} is not a type a rule can compare`;
   }
-  if (INTEGERS.has(b)) return /^-?[0-9]+$/.test(value) ? undefined : `${value} is not an integer for ${b}`;
-  if (PACKED.has(b)) return /^-?[0-9]+(\.[0-9]+)?$/.test(value) ? undefined : `${value} is not a number for ${b}`;
-  return `${b} is not a type a rule can compare`;
+  // one ABAP literal: one source line, at most 255 characters between the quotes
+  if (/[\n\r]/.test(value)) return "a literal cannot hold a line break";
+  if (literal.length > 255) return `the literal is ${literal.length} characters once quotes are doubled; ABAP allows 255`;
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +436,8 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
   let texts = 0, holes = 0;
   const parts = parseAlert(alertText, alertFail).map((part) => {
     if (part.kind === "text") {
+      const why = misfit(part.value, {built_in: "STRG"});
+      if (why) alertFail(`alert text: ${why}`);
       return {"@id": `${id}/alert/text/${++texts}`, rule_line: line("alert"), is_text: true,
         value: part.value, "value@type": {built_in: "STRG"}};
     }
@@ -411,15 +448,22 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
   if (!parts.length) alertFail("alert is empty");
 
   // examples: rows of the rule's own tables, the date, the alerts expected
-  const ruleTables = [outer.info, ...(inner.table === outer.table ? [] : [inner.info])];
+  // each table where it enters the rule: `for`, or `forbid.exists`
+  const ruleTables = [{...outer.info, rule_line: line("for")},
+    ...(inner.table === outer.table ? [] : [{...inner.info, rule_line: line("forbid/exists")}])];
   const testName = (table) => ({itab: `mt_${table.toLowerCase()}`, wa: `ls_${table.toLowerCase()}`});
   const methods = new Set();
+  // a rule carries its proof: examples, each saying what it expects
+  if (doc.examples === undefined) failAt(line("rule"))("a rule needs examples: none are given");
+  if (Array.isArray(doc.examples) && !doc.examples.length) failAt(line("examples"))("a rule needs at least one example");
   const examples = need(doc.examples, "examples", "a list of examples", "list").map((example, e) => {
     const base = `examples/${e}`;
     const fail = failAt(line(base));
     need(example, base, "a mapping with name, date, rows and expect", "map");
     for (const key of Object.keys(example)) if (!["name", "date", "rows", "expect"].includes(key)) failAt(line(`${base}/${key}`))(`unknown key ${key} in an example`);
     const label = need(example.name, `${base}/name`, "the example's name");
+    const labelWhy = misfit(label, {built_in: "STRG"});
+    if (labelWhy) failAt(line(`${base}/name`))(`example name: ${labelWhy}`);
     const method = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
     if (!/^[a-z]/.test(method) || method.length > 30) failAt(line(`${base}/name`))(`example name ${JSON.stringify(label)} gives method ${method}, which is not an ABAP name of at most 30 characters`);
     if (methods.has(method) || ["teardown", "assert_alerts"].includes(method)) failAt(line(`${base}/name`))(`example name ${JSON.stringify(label)} gives method ${method} a second time`);
@@ -456,15 +500,19 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
           return {"@id": rowId, rule_line: line(rpath), fields};
         })};
     });
-    const expect = example.expect === undefined ? [] : need(example.expect, `${base}/expect`, "a list of alert lines", "list");
+    if (example.expect === undefined) fail(`example ${JSON.stringify(label)} has no expect; write expect: [] when it expects no alert`);
+    const expect = need(example.expect, `${base}/expect`, "a list of alert lines", "list");
     return {"@id": exampleId, rule_line: line(base), name: label, method, label, "label@type": {built_in: "STRG"},
-      date, "date@type": DATE_TYPE, tables: exampleTables,
+      date: {"@id": `${exampleId}/date`, rule_line: line(`${base}/date`), value: date, "value@type": DATE_TYPE,
+        call: `${className}=>check`},
+      tables: exampleTables,
       expect: expect.map((value, x) => {
         if (typeof value !== "string") failAt(line(`${base}/expect/${x}`))("an expected alert is one line of text");
+        const why = misfit(value, {built_in: "STRG"});
+        if (why) failAt(line(`${base}/expect/${x}`))(`expected alert: ${why}`);
         return {"@id": `${exampleId}/expect/${x + 1}`, rule_line: line(`${base}/expect/${x}`), value, "value@type": {built_in: "STRG"}};
       })};
   });
-  if (!examples.length) failAt(line("examples"))("a rule needs at least one example");
 
   return {
     "@id": id, rule_line: line("rule"), rule: name, title, source: where, class: className,
@@ -474,7 +522,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     forbid: {"@id": `${id}/forbid`, rule_line: line("forbid"), table: inner.table.toLowerCase(), alias: inner.alias,
       itab: `lt_${inner.alias}`, wa: wa(inner.alias), conditions: forbid},
     alert: {"@id": `${id}/alert`, rule_line: line("alert"), parts},
-    tables: ruleTables.map((info) => ({"@id": `${id}/table/${info.table.toLowerCase()}`, rule_line: line("for"),
+    tables: ruleTables.map((info) => ({"@id": `${id}/table/${info.table.toLowerCase()}`, rule_line: info.rule_line,
       table: info.table.toLowerCase(), ...testName(info.table)})),
     examples,
   };

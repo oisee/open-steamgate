@@ -39,7 +39,6 @@ CLASS ltcl_examples IMPLEMENTATION.
   METHOD flagged.
     DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
     DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
-    DATA lv_date TYPE d.
     DATA lt_act TYPE string_table.
     DATA lt_exp TYPE string_table.
     CLEAR ls_zosd_l2_ship.
@@ -57,15 +56,13 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
     INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
     APPEND `S001 Albatross: in maintenance, voyage V00001 departs 20261005` TO lt_exp.
-    lv_date = '20261001'.
-    lt_act = zcl_l2_maintenance_ship=>check( lv_date ).
+    lt_act = zcl_l2_maintenance_ship=>check( iv_date = '20261001' ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `flagged` ).
   ENDMETHOD.
 
   METHOD past_voyage_is_fine.
     DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
     DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
-    DATA lv_date TYPE d.
     DATA lt_act TYPE string_table.
     DATA lt_exp TYPE string_table.
     CLEAR ls_zosd_l2_ship.
@@ -82,15 +79,13 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_voy-dep_date = '20260920'.
     APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
     INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
-    lv_date = '20261001'.
-    lt_act = zcl_l2_maintenance_ship=>check( lv_date ).
+    lt_act = zcl_l2_maintenance_ship=>check( iv_date = '20261001' ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `past voyage is fine` ).
   ENDMETHOD.
 
   METHOD departs_on_the_check_date.
     DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
     DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
-    DATA lv_date TYPE d.
     DATA lt_act TYPE string_table.
     DATA lt_exp TYPE string_table.
     CLEAR ls_zosd_l2_ship.
@@ -107,15 +102,13 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_voy-dep_date = '20261001'.
     APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
     INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
-    lv_date = '20261001'.
-    lt_act = zcl_l2_maintenance_ship=>check( lv_date ).
+    lt_act = zcl_l2_maintenance_ship=>check( iv_date = '20261001' ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `departs on the check date` ).
   ENDMETHOD.
 
   METHOD ship_in_service_is_fine.
     DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
     DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
-    DATA lv_date TYPE d.
     DATA lt_act TYPE string_table.
     DATA lt_exp TYPE string_table.
     CLEAR ls_zosd_l2_ship.
@@ -132,15 +125,13 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_voy-dep_date = '20261005'.
     APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
     INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
-    lv_date = '20261001'.
-    lt_act = zcl_l2_maintenance_ship=>check( lv_date ).
+    lt_act = zcl_l2_maintenance_ship=>check( iv_date = '20261001' ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship in service is fine` ).
   ENDMETHOD.
 
   METHOD one_alert_per_voyage.
     DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
     DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
-    DATA lv_date TYPE d.
     DATA lt_act TYPE string_table.
     DATA lt_exp TYPE string_table.
     CLEAR ls_zosd_l2_ship.
@@ -184,8 +175,7 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND `S003 Petrel: in maintenance, voyage V00007 departs 20261002` TO lt_exp.
     APPEND `S001 Albatross: in maintenance, voyage V00006 departs 20261003` TO lt_exp.
     APPEND `S001 Albatross: in maintenance, voyage V00005 departs 20261010` TO lt_exp.
-    lv_date = '20261001'.
-    lt_act = zcl_l2_maintenance_ship=>check( lv_date ).
+    lt_act = zcl_l2_maintenance_ship=>check( iv_date = '20261001' ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `one alert per voyage` ).
   ENDMETHOD.
 ENDCLASS.
