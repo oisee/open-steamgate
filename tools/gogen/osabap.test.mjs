@@ -71,8 +71,7 @@ test("native frontend reads environment and copies a text file", () => {
   }
 });
 
-const datasetLowering = readFileSync(join(here, "frontend.mjs"), "utf8").includes("Statements.OpenDataset");
-test("native DATASET copy obeys read, write and path grants", {skip: datasetLowering ? false : "gogen DATASET lowering from PR #261 is not merged"}, () => {
+test("native DATASET copy obeys read, write and path grants", () => {
   const dir = mkdtempSync(join(tmpdir(), "osabap-dataset-"));
   try {
     const inputDir = join(dir, "in");
@@ -82,12 +81,14 @@ test("native DATASET copy obeys read, write and path grants", {skip: datasetLowe
     const input = join(inputDir, "source.txt");
     const output = join(outputDir, "copy.txt");
     const audit = join(dir, "audit.ndjson");
-    const content = "one\nGrüße 世界\n\nlast\n";
+    const content = "one\ntwo\n";
     writeFileSync(input, content);
     execFileSync(process.execPath, [builder, join(here, "apps", "dataset", "zdataset.prog.abap")], {stdio: "inherit"});
 
     const allowed = run(["--allow-read", inputDir, "--allow-write", outputDir, "--dataset-audit", audit, "--input", input, "--output", output]);
     assert.equal(allowed.status, 0, allowed.stderr);
+    assert.match(allowed.stdout, /Copied\s+2 lines, at byte\s+8/);
+    assert.match(allowed.stdout, /Head 6F6E65\s+3/);
     assert.equal(readFileSync(output, "utf8"), content);
     assert.match(readFileSync(audit, "utf8"), /"allowed":true/);
     rmSync(output);
@@ -96,7 +97,13 @@ test("native DATASET copy obeys read, write and path grants", {skip: datasetLowe
       encoding: "utf8", env: {...process.env, OSD_DATASET_READ: inputDir, OSD_DATASET_WRITE: outputDir},
     });
     assert.equal(denied.status, 0, denied.stderr);
-    assert.match(denied.stdout, /Refused/);
+    assert.match(denied.stdout, /^Refused Permission denied/);
+    assert.equal(existsSync(output), false);
+
+    const wrongReadRoot = run(["--allow-read", outputDir, "--allow-write", outputDir,
+      "--input", input, "--output", output]);
+    assert.equal(wrongReadRoot.status, 0, wrongReadRoot.stderr);
+    assert.match(wrongReadRoot.stdout, /^Refused Permission denied/);
     assert.equal(existsSync(output), false);
 
     const readOnly = run(["--allow-read", inputDir, "--input", input, "--output", output]);
@@ -110,6 +117,13 @@ test("native DATASET copy obeys read, write and path grants", {skip: datasetLowe
     assert.equal(escape.status, 0, escape.stderr);
     assert.match(escape.stdout, /Refused/);
     assert.equal(existsSync(escaped), false);
+
+    const unicode = "one\nGrüße 世界\n\nlast\n";
+    writeFileSync(input, unicode);
+    const unicodeCopy = run(["--allow-read", inputDir, "--allow-write", outputDir,
+      "--input", input, "--output", output]);
+    assert.equal(unicodeCopy.status, 0, unicodeCopy.stderr);
+    assert.equal(readFileSync(output, "utf8"), unicode);
   } finally {
     rmSync(dir, {recursive: true, force: true});
   }
