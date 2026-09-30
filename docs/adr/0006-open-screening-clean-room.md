@@ -37,10 +37,12 @@ Three things are true at once:
 2. **Public → private is allowed; private → public never**, including paraphrase, structure and
    numbering. The public track does not read, quote, paraphrase or "sanitise" private material; the
    private side may use the public machinery.
-3. **Who writes the public rules.** A session that has read any private screening material,
-   including summaries or syntheses of it, never authors public screening specs; it may review them for leaks
-   only. This rules out the sessions that drafted this ADR. Authors are fresh sessions whose only
-   inputs are the public sources named in the spec.
+3. **How public rules are written.** While a public screening spec is written, no private material
+   is opened or quoted; every rule, threshold and example traces to the spec's `sources:` header
+   (a public URL, an abapedia link, or "synthetic"); a separate session reviews it for leaks and
+   resemblance. The clean room protects against moving specifics (rules, thresholds, names,
+   numbering, structure), not against a general picture of the domain: a session that once saw a
+   summary keeps only that picture, and BIS concepts are public anyway (Alice, 2026-09-30).
 3a. **Every public spec carries a `sources:` header** (URLs, abapedia links). The critic checks
    that each rule, threshold and example traces to a listed public source or is marked synthetic;
    "from memory" is refused.
@@ -76,7 +78,7 @@ Three things are true at once:
   only on a toy.
 - The public examples are synthetic and generic by construction; they will be simpler than a real
   production rule set. That is the price of being publishable.
-- Two sessions' knowledge now matters: who has read what. The specification header records it.
+- What a spec used is recorded in its `sources:` header, and a separate session checks it.
 - The private repository keeps its own, stricter rule. This ADR does not relax it; it opens a
   separate, clean door on the public side.
 
