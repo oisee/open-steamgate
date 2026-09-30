@@ -1781,7 +1781,7 @@ for `zosd_status_app`, which has been deployed for a day.
 
 ### ANOMALY-2026-09-29-runtime-in-options — `x IN range` evaluates only I EQ, E EQ and I CP, and E EQ alone decides
 
-- Status: `open` (upstream, no workaround here)
+- Status: `fixed` (2026-09-30: abaplint/transpiler#1928, merged upstream as ac55899212; this tree pins `oisee/transpiler` `local/osd-build-2026-09-30` at `085ab4a9`, upstream main plus two local fixes, until the fix is on npm)
 - Discovery date: `2026-09-29`
 - Affected versions: `@abaplint/runtime 2.13.89` (`build/src/compare/in.js`), as pinned in this tree
 - Affected ABAP statement, runtime API or adapter: the logical expression `dobj IN range_tab` outside Open SQL (`IF`, `CHECK`, `LOOP ... WHERE`); `SELECT ... WHERE f IN range` goes through Open SQL and is not affected
@@ -1790,10 +1790,10 @@ for `zosd_status_app`, which has been deployed for a day.
 - Expected SAP behaviour: every option (EQ NE GT GE LT LE BT NB CP NP) with sign I or E; the value is in the range when it matches some I row (or there are no I rows) and matches no E row
 - Actual open-abap behaviour: `compareIn` handles I EQ, E EQ and I CP and throws `compareIn todo` for any other row. It returns true as soon as one row matches, so an E EQ row that the value does not equal makes the whole range true, even when no I row admits the value (`[I EQ 7, E EQ 4]` admits 1)
 - Impact on open-steamgate: synchronous and VIA JOB `SUBMIT ... WITH sel IN range` pass the range correctly (`tools/osd-narrow-submit.mjs`, `zcl_osd_submit_ranges`), but a report that tests `IN` in ABAP only gets right answers for I EQ and I CP rows; BT and the other options dump. The job input test checks transport of all ten options for both signs; its report execution comparison uses I EQ.
-- Smallest safe workaround: none here; the regression test uses I EQ rows only and says why
-- Upstream issue: not yet sent; a transpiler/runtime PR needs the critic gate and belongs to its own branch in `abaplint/transpiler`
-- Regression-test location: `test/unit/zcl_osd_batch_runner_test.clas.testclasses.abap` (`static_submit_passes_a_range`, `static_submit_range_is_checked`)
-- Upstream version containing a fix: unknown
+- Smallest safe workaround: none was needed after the fix; `static_submit_range_bt_and_e` runs `I BT 3 7` with `E EQ 5` and expects 4 hits, and fails on the old pin with `compareIn todo`
+- Upstream issue: abaplint/transpiler#1928 (branch `compare-in-all-options`, every option, I rows admit, E rows only exclude; critic SEND, Regression 17/17)
+- Regression-test location: `test/unit/zcl_osd_batch_runner_test.clas.testclasses.abap` (`static_submit_passes_a_range`, `static_submit_range_is_checked`, `static_submit_range_bt_and_e`)
+- Upstream version containing a fix: abaplint/transpiler main from ac55899212 (2026-09-30); not yet published to npm (2.13.93 is the latest at that date)
 
 ### ANOMALY-2026-09-29-job-standard-facade — narrow local job FMs accept standard signatures but reject unsupported semantics
 
