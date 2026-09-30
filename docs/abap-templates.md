@@ -1,7 +1,12 @@
 # An ABAP template engine with a traceable output
 
-*Design note, 2026-09-30, branch `feat/abap-templates`. Nothing below is built yet unless it names a file
-that exists.*
+*Design note, 2026-09-30, branch `feat/abap-templates`.*
+
+**Built** (`src/tpl/zcl_osd_tpl.clas.abap`, 12 unit tests): the tokenizer with line numbers, the standalone
+rule, sections over arrays and objects, inverted sections, comments, partials with indentation, dotted
+names, the HTML escaper as an option, errors naming template and line, and the trace (one entry per output
+line: template, template line, data path). **Not built yet:** the profiles, regions, the JSON sidecar for
+the trace, and the Mustache spec conformance run.
 
 ## Why
 
