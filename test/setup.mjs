@@ -256,6 +256,18 @@ export async function setup(abap, schemas, insert) {
   // In the browser there is no environment; the build wrote the id into the
   // bundle and the backend hands it over here.
   bootIdentity(abap, preview?.env ?? globalThis.process?.env ?? {});
+  // OPEN DATASET (X0, docs/dataset.md): the disk behind OSD_DATASET_READ /
+  // OSD_DATASET_WRITE, refusing everything when neither is set; in the
+  // browser preview a file system in memory, gone with the page
+  {
+    const {installDataset, memoryDatasetHost} = await import("../tools/osd-dataset.mjs");
+    if (preview !== undefined || globalThis.process?.versions?.node === undefined) {
+      abap.context.dataset = memoryDatasetHost();
+      abap.context.datasets ??= {};
+    } else {
+      await installDataset(abap);
+    }
+  }
   if (globalThis.process?.versions?.node && abap.Classes?.CL_AMC_CHANNEL_MANAGER) {
     const {installAmc} = await import("../tools/osd-amc.mjs");
     installAmc(abap);

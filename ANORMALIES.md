@@ -2511,3 +2511,35 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: **needs an issue** in abaplint/transpiler (Unit runner exception handling)
 - Regression-test location: `tools/gogen/unit.test.mjs` lifecycle fixture
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-dataset-not-supported — every DATASET statement throws "not supported" in the transpiler
+
+- Status: `pinned locally; upstream: backlog` (the hook is on `oisee/transpiler` `local/osd-build-2026-09-30` at `ddb0a993`; the same change as a single commit on branch `dataset-hook` off abaplint/transpiler main passed the critic gate and waits for the maintainer's capacity)
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/transpiler` and `@abaplint/runtime` up to 2.13.93 on npm and abaplint/transpiler main at dd83da9
+- Affected ABAP statement, runtime API or adapter: `OPEN DATASET`, `READ DATASET`, `TRANSFER`, `CLOSE DATASET`, `DELETE DATASET`, `GET DATASET`, `SET DATASET` (TRUNCATE and SORT are unchanged)
+- Minimal ABAP reproducer: `OPEN DATASET 'f' FOR INPUT IN BINARY MODE.`
+- Exact command used to run it: any transpile and run of the reproducer
+- Expected SAP behaviour: as measured on A4H on 2026-09-30 by two throwaway probes (docs/dataset.md lists every case): text mode UTF-8 lines, the last without LF, a CR kept, C without trailing blanks; binary mode UTF-16LE for character-like fields; ACTUAL LENGTH, sy-subrc 0/4/8; CX_SY_FILE_OPEN_MODE for READ or TRANSFER on a file not open and TRANSFER on one opened FOR INPUT; CX_SY_FILE_OPEN for OPEN twice; DELETE of an open file closes it
+- Actual open-abap behaviour: `throw new Error("OpenDataset, not supported, transpiler")` for every statement
+- Impact on open-steamgate: no report that reads or writes a file ran; osabap had no file I/O
+- Smallest safe workaround: the pinned hook, with the host `tools/osd-dataset.mjs` installed by `test/setup.mjs`
+- Upstream: abaplint/transpiler, branch `dataset-hook` (not pushed yet), one PR when Lars has room
+- Regression-test location: `test/dataset.mjs` (the host), `test/statements/dataset.ts` upstream (the statements, 19 cases)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-dataset-authority — the sandbox refuses with sy-subrc 8, where a system's S_DATASET check raises CX_SY_FILE_AUTHORITY
+
+- Status: `open` (by design until measured)
+- Discovery date: `2026-09-30`
+- Affected versions: `tools/osd-dataset.mjs` as introduced for X0
+- Affected ABAP statement, runtime API or adapter: `OPEN DATASET` / `DELETE DATASET` on a name outside `OSD_DATASET_READ` / `OSD_DATASET_WRITE`
+- Minimal ABAP reproducer: `OPEN DATASET '/etc/passwd' FOR INPUT IN TEXT MODE ENCODING UTF-8 MESSAGE lv_msg.` with no roots set
+- Exact command used to run it: any unit run or server started without the two variables
+- Expected SAP behaviour: not measured -- the A4H probe user has full authority, so the authority denial could not be produced there; SAP documents CX_SY_FILE_AUTHORITY for a failed S_DATASET check
+- Actual open-abap behaviour: sy-subrc 8 and MESSAGE `Permission denied: <name> is outside the dataset roots`; DELETE outside a write root is sy-subrc 4
+- Impact on open-steamgate: a program that CATCHes CX_SY_FILE_AUTHORITY sees no exception and reads sy-subrc instead; one that checks sy-subrc after OPEN, the common shape, behaves as on a missing file
+- Smallest safe workaround: the measured "cannot open" shape was chosen deliberately; revisit when a user without S_DATASET can be probed
+- Upstream: not upstream, this is our host
+- Regression-test location: `test/dataset.mjs` ("with no root, everything is refused")
+- Upstream version containing a fix: not applicable
