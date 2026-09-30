@@ -187,9 +187,10 @@ export function servicesOf(root, env = process.env) {
 export function serviceTree(root, env = process.env) {
   const out = [];
   const packs = packsOf(root, env);
+  const owners = layers(root, undefined, env).owner;
   const packOf = (file) => {
     const at = resolve(root, file);
-    return packs.find((p) => p.abap.some((f) => at.startsWith(resolve(f) + "/")))?.name ?? "";
+    return packs.find((p) => p.abap.some((f) => at === resolve(f) || at.startsWith(resolve(f) + "/")))?.name ?? "";
   };
   const rel = (file) => (file === undefined ? undefined : relative(root, resolve(root, file)));
   const folders = generatorFoldersOf(root, env).map((f) => join(root, f));
@@ -203,7 +204,7 @@ export function serviceTree(root, env = process.env) {
       kind: "ODATA",
       handler: one.dpc ?? "",
       text: one.description ?? "",
-      pack: packOf(one.file),
+      pack: packOf(owners.get(`CLAS ${one.dpc.toUpperCase()}`) ?? ""),
       name: one.external,
       mpc: one.mpc ?? "",
       source: rel(one.file),

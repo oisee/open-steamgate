@@ -2,8 +2,10 @@ import {expect} from "chai";
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {createRequire} from "node:module";
 import {childDatabaseFacts, databaseFacts, hostKind, packsInfo, platformFacts, portsOf, servicesOf, snapshot, socketsOn} from "../tools/osd-status.mjs";
 import {databaseDescriptor} from "../tools/osd-database-identity.mjs";
+const {groupServices} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 
 // The snapshot the facade posts to ZCL_OSD_STATUS=>REFRESH. The contract is
 // the JSON below and the Fiori app is built against it, so these tests say
@@ -233,6 +235,16 @@ describe("tools/osd-status: the system as one JSON object", () => {
     expect(found).to.deep.include({path: "/sap/bc/zsrv", kind: "ICF", handler: "ZCL_SRV_HANDLER", text: "", pack: ""});
     expect(found).to.deep.include({path: "/sap/bc/zvibes", kind: "ICF", handler: "ZCL_VIBES", text: "", pack: "vibes"});
     expect(found).to.deep.include({path: "/sap/bc/apc/sap/zchan", kind: "APC", handler: "ZCL_CHAN", text: "", pack: ""});
+  });
+
+  it("keeps a base registration visible when its handler is overridden by a workspace pack", () => {
+    write("src/zcl_zdemo_dpc_ext.clas.abap", "CLASS zcl_zdemo_dpc_ext DEFINITION PUBLIC CREATE PUBLIC. ENDCLASS.");
+    write("packs/workspace/osd-pack.json", JSON.stringify({name: "workspace-pack"}));
+    write("packs/workspace/src/zcl_zdemo_dpc_ext.clas.abap", "CLASS zcl_zdemo_dpc_ext DEFINITION PUBLIC CREATE PUBLIC. ENDCLASS.");
+    const service = servicesOf(root, {}).find((row) => row.kind === "ODATA" && row.path.endsWith("/ZDEMO_SRV"));
+    expect(service.pack).to.equal("workspace-pack");
+    expect(groupServices([service], "layer", "name", true).flatMap((group) => group.groups.flatMap((kind) => kind.rows)))
+      .to.deep.equal([service]);
   });
 
   it("lists one OData endpoint when two registration files declare the same external service", () => {
