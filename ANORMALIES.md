@@ -2593,3 +2593,146 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Regression-test location: none yet
 - Upstream version containing a fix: none yet
 
+### ANOMALY-2026-09-30-macro-argument-dollar — abaplint cannot parse a macro call whose argument contains "$`" or "$'"
+
+- Status: `fixed upstream` in `@abaplint/core` 2.120.62; this tree still locks 2.120.55 and gets it with the next lock update
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/core` 2.120.55 (this tree) and 2.120.61 (upstream `main`, 2026-09-30), `abap/2_statements/expand_macros`
+- Affected ABAP statement, runtime API or adapter: a call of a `DEFINE` macro whose literal argument contains `$` followed by a backtick or a quote
+- Minimal ABAP reproducer:
+
+  ```abap
+  DEFINE m.
+    WRITE &1.
+  END-OF-DEFINITION.
+  m `$`.
+  ```
+
+- Exact command used to run it: save the four lines as `zmacro.prog.abap` and run
+  `node -e "const a=require('@abaplint/core');const r=new a.Registry().addFile(new a.MemoryFile('zmacro.prog.abap',require('fs').readFileSync('zmacro.prog.abap','utf8'))).parse();console.log(r.findIssues().filter(i=>i.getKey()==='parser_error').map(i=>i.getMessage()))"`
+  in this tree; it prints one `parser_error`. Without the macro (`WRITE ` + the literal) there is none.
+- Expected SAP behaviour: the macro expands to ``WRITE `$`.``; sbcgua/abap_mustache has such calls in its unit tests, and that code is maintained on SAP systems. Not measured on A4H
+- Actual open-abap behaviour: `expandContents` substitutes the placeholders with `str.replace(reg, input)`; a string replacement reads `` $` `` and `$'` as "the text before / after the match", so the argument is spliced with the macro body and the statement does not parse
+- Impact on open-steamgate: none in OSG's code; a library that uses such macros does not build
+- Smallest safe workaround: none in the tree; avoid `$` next to a quote in macro arguments
+- Upstream: [abaplint/abaplint#4342](https://github.com/abaplint/abaplint/pull/4342) (fork PR from oisee/abaplint, after the critic gate), merged 2026-09-30: `str.replace(reg, () => input)` plus a test in `packages/core/test/abap/macros.ts`
+- Regression-test location: upstream, `packages/core/test/abap/macros.ts`
+- Upstream version containing a fix: `@abaplint/core` 2.120.62 (checked in the npm tarball: `expand_macros.js` line 204)
+
+### ANOMALY-2026-09-30-concatenate-lines-string-trim — `CONCATENATE LINES OF` drops trailing blanks of string rows in the transpiler runtime
+
+- Status: `fixed upstream`, merged 2026-09-30, not yet released (`@abaplint/runtime` 2.13.94 predates the merge)
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/runtime` 2.13.89 (this tree) and abaplint/transpiler `main` 3251a8c (2.13.94); `statements/concatenate`, the LINES branch
+- Affected ABAP statement, runtime API or adapter: `CONCATENATE LINES OF itab INTO str [SEPARATED BY sep]` without `RESPECTING BLANKS`, rows of type `string`
+- Minimal ABAP reproducer:
+
+  ```abap
+  DATA lt TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+  DATA lv TYPE string.
+  APPEND `a ` TO lt.
+  APPEND `b` TO lt.
+  CONCATENATE LINES OF lt INTO lv.
+  ASSERT lv = `a b`.
+  ```
+
+- Exact command used to run it:
+
+  ```sh
+  git clone https://github.com/abaplint/transpiler && cd transpiler
+  git checkout 5ecf76bb2f352fa38668c82b577a8368d239051f     # the merge of #1935: fix and tests
+  npm run install && npm run compile
+  npx mocha --timeout 60000 -g "CONCATENATE LINES OF"       # passes
+  git checkout 5ecf76bb^1 -- packages/runtime/src/statements/concatenate.ts
+  npm run compile
+  npx mocha --timeout 60000 -g "CONCATENATE LINES OF"       # the string-row test fails
+  ```
+
+  Without the runtime change the string-row test gets `2` and `a-b` instead of `3` and `a -b`
+- Expected SAP behaviour: `a b`. ABAP keyword documentation 7.50, CONCATENATE, `RESPECTING BLANKS`: "If this addition is not used, the blanks are respected for data type string only." Not measured on A4H
+- Actual open-abap behaviour: the LINES branch calls `trimEnd()` on every row; the non-LINES branch trims only `Character` operands
+- Impact on open-steamgate: none in `src/` or `packs/*/src` (no `CONCATENATE LINES OF` there, grep 2026-09-30); found through abap_mustache, whose `join_strings` uses it over a `string_table`
+- Smallest safe workaround: join with a loop and `&&`, or add `RESPECTING BLANKS`
+- Upstream: [abaplint/transpiler#1935](https://github.com/abaplint/transpiler/pull/1935) (branch in the repository, after the critic and a heads-up to stoker), merged 2026-09-30; Regression 17 of 17 green in the bot table, performance unchanged. Not pinned locally: nothing here needs it
+- Regression-test location: upstream, `test/statements/concatenate.ts`
+- Upstream version containing a fix: none released yet
+
+### ANOMALY-2026-09-30-write-date-unformatted — `WRITE d TO c` leaves a date unformatted while `|{ d DATE = ENVIRONMENT }|` formats it, in the transpiler runtime
+
+- Status: `open`
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/runtime` 2.13.89 with open-abap-core `52ba51a5` (`libs.lock.json` on `main` at `ae0ad3e9`)
+- Affected ABAP statement, runtime API or adapter: `WRITE <date> TO <c field>` against a string template with `DATE = ENVIRONMENT`
+- Minimal ABAP reproducer:
+
+  ```abap
+  DATA d TYPE d VALUE '20230528'.
+  DATA c TYPE c LENGTH 20.
+  WRITE d TO c LEFT-JUSTIFIED.
+  ASSERT c = |{ d DATE = ENVIRONMENT }|.
+  ```
+
+- Exact command used to run it: save as `test/unit/zcl_tmp_date_probe.clas.abap` and `test/unit/zcl_tmp_date_probe.clas.testclasses.abap`, run `npm run unit`, delete both:
+
+  ```abap
+  CLASS zcl_tmp_date_probe DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  ENDCLASS.
+  CLASS zcl_tmp_date_probe IMPLEMENTATION.
+  ENDCLASS.
+  ```
+
+  ```abap
+  CLASS ltcl DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
+    PRIVATE SECTION.
+      METHODS date FOR TESTING.
+  ENDCLASS.
+  CLASS ltcl IMPLEMENTATION.
+    METHOD date.
+      DATA d TYPE d VALUE '20230528'.
+      DATA c TYPE c LENGTH 20.
+      WRITE d TO c LEFT-JUSTIFIED.
+      cl_abap_unit_assert=>assert_equals( exp = |{ d DATE = ENVIRONMENT }| act = c ).
+    ENDMETHOD.
+  ENDCLASS.
+  ```
+
+  The assertion fails with `05/28/2023` against `20230528` (first seen as abap_mustache's `find_value_date_and_time`)
+- Expected SAP behaviour: both follow the user's date format, so the assertion holds. Not measured on A4H
+- Actual open-abap behaviour: `WRITE ... TO` gives the internal `20230528`; the string template gives `05/28/2023`
+- Impact on open-steamgate: none found; generated text must not depend on user formats anyway (`docs/abap-templates.md`)
+- Smallest safe workaround: format dates explicitly, never through `ENVIRONMENT` or `WRITE TO`
+- Upstream: undecided until an A4H probe says which of the two differs from a system
+- Regression-test location: none yet
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-find-section-length — `FIND ... IN SECTION OFFSET o LENGTH l OF dobj` searches `l` instead of `dobj` in the transpiler
+
+- Status: `open`, pinned locally by a workaround; upstream: backlog
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/transpiler` 2.13.89 (the FIND statement transpiler)
+- Affected ABAP statement, runtime API or adapter: `FIND sub IN SECTION OFFSET off LENGTH len OF dobj MATCH OFFSET moff`
+- Minimal ABAP reproducer:
+
+  ```abap
+  DATA lv_text TYPE string VALUE `ab{{cd`.
+  DATA lv_len TYPE i.
+  DATA lv_off TYPE i.
+  lv_len = strlen( lv_text ).
+  FIND `{{` IN SECTION OFFSET 0 LENGTH lv_len OF lv_text MATCH OFFSET lv_off.
+  ASSERT sy-subrc = 0 AND lv_off = 2.
+  ```
+
+- Exact command used to run it (in this tree, prints the generated call):
+
+  ```sh
+  node --input-type=module -e "import {Transpiler} from '@abaplint/transpiler'; const src = 'REPORT zfind.\nDATA lv_text TYPE string VALUE \`ab{{cd\`.\nDATA lv_len TYPE i.\nDATA lv_off TYPE i.\nlv_len = strlen( lv_text ).\nFIND \`{{\` IN SECTION OFFSET 0 LENGTH lv_len OF lv_text MATCH OFFSET lv_off.\n'; const r = await new Transpiler({ignoreSyntaxCheck: true}).runRaw([{filename: 'zfind.prog.abap', contents: src}]); for (const o of r.objects) console.log(o.chunk.getCode().split('\n').filter(l => l.includes('statements.find')).join('\n'));"
+  ```
+
+  It prints `abap.statements.find(lv_len, {find: ..., sectionOffset: abap.IntegerFactory.get(0), offset: lv_off, length: lv_len});`: it searches `lv_len` and would write the match length into it
+- Expected SAP behaviour: the search runs in `dobj` from `off` for `len` characters (ABAP keyword documentation, FIND, `IN SECTION`). Not measured on A4H
+- Actual open-abap behaviour: the `LENGTH` operand becomes both the searched field and the MATCH LENGTH target; nothing is found in the text
+- Impact on open-steamgate: the template engine's first tokenizer found no tags. The two other `IN SECTION` uses (`src/sadl/zcl_stg_sadl_def.clas.abap:101,105`) have no `LENGTH` and transpile correctly
+- Smallest safe workaround: the `find( val = ... sub = ... off = ... )` builtin, as `zcl_osd_tpl` does
+- Upstream: backlog (Lars is busy this week); needs an issue or a PR in abaplint/transpiler after the critic and a heads-up to stoker
+- Regression-test location: none yet
+- Upstream version containing a fix: none yet
