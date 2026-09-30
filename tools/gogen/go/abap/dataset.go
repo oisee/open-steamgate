@@ -447,6 +447,14 @@ type Sandbox struct {
 	CreatePerm  os.FileMode
 	once        sync.Once
 	read, write []string
+	// one os.Root per real root: every open and unlink goes through the
+	// root that holds the path, so the kernel resolves it beneath that
+	// directory in the same call that creates or opens the file. A parent
+	// swapped for a symlink between the path checks and the open cannot
+	// take a create outside (openat per component with O_NOFOLLOW on
+	// Linux, O_NOFOLLOW_ANY on Windows); the path checks stay for the
+	// refusal messages and the audit
+	handles map[string]*os.Root
 }
 
 // SandboxFromEnv is the sandbox of OSD_DATASET_READ / OSD_DATASET_WRITE /
@@ -505,6 +513,15 @@ func (sb *Sandbox) roots() ([]string, []string) {
 		for _, r := range sb.Write {
 			if p := real(r); p != "" {
 				sb.write = append(sb.write, p)
+			}
+		}
+		sb.handles = map[string]*os.Root{}
+		for _, p := range sb.read {
+			if _, ok := sb.handles[p]; ok {
+				continue
+			}
+			if h, err := os.OpenRoot(p); err == nil {
+				sb.handles[p] = h
 			}
 		}
 	})
@@ -590,6 +607,36 @@ func (sb *Sandbox) place(name string, roots, given []string) (real, named, refus
 	return real, named, "", false
 }
 
+// datasetSwap runs between the path checks and the open or unlink; only
+// the tests set it, to stand in for another process at that moment
+var datasetSwap func()
+
+// beneath is the os.Root of the outermost of roots that holds path, and
+// path relative to it; the outermost, so that a symlink from a nested
+// root into the one around it resolves as the path checks allowed it
+func (sb *Sandbox) beneath(path string, roots []string) (*os.Root, string, bool) {
+	best := ""
+	for _, r := range roots {
+		if within(path, []string{r}) && sb.handles[r] != nil && (best == "" || len(r) < len(best)) {
+			best = r
+		}
+	}
+	if best == "" {
+		return nil, "", false
+	}
+	rel, err := filepath.Rel(best, path)
+	if err != nil {
+		return nil, "", false
+	}
+	return sb.handles[best], rel, true
+}
+
+// escaped: os.Root refused a path that resolved outside it (the error has
+// no exported value)
+func escaped(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "path escapes from parent")
+}
+
 // Open opens name for mode inside the roots.
 func (sb *Sandbox) Open(name string, mode DatasetMode) (DatasetHandle, string) {
 	read, write := sb.roots()
@@ -620,11 +667,23 @@ func (sb *Sandbox) Open(name string, mode DatasetMode) (DatasetHandle, string) {
 	default:
 		flags = os.O_RDWR
 	}
+	if datasetSwap != nil {
+		datasetSwap()
+	}
+	root, rel, ok := sb.beneath(real, roots)
+	if !ok {
+		sb.note(map[string]any{"op": "OPEN", "name": name, "mode": string(mode), "allowed": false, "why": "no open root holds it"})
+		return nil, "Permission denied: " + name + " is outside the dataset roots"
+	}
 	perm := sb.CreatePerm
 	if perm == 0 {
 		perm = 0o644
 	}
-	fh, err := os.OpenFile(real, flags|noFollow, perm)
+	fh, err := root.OpenFile(rel, flags, perm)
+	if escaped(err) {
+		sb.note(map[string]any{"op": "OPEN", "name": name, "mode": string(mode), "allowed": false, "why": "moved outside the dataset roots while opening"})
+		return nil, "Permission denied: " + name + " is outside the dataset roots"
+	}
 	if err != nil {
 		sb.note(map[string]any{"op": "OPEN", "name": name, "mode": string(mode), "allowed": false, "why": err.Error()})
 		// the reason only: an OS message carries the resolved path
@@ -637,13 +696,6 @@ func (sb *Sandbox) Open(name string, mode DatasetMode) (DatasetHandle, string) {
 			return nil, "Permission denied"
 		}
 		return nil, "error"
-	}
-	// a parent swapped for a symlink between the check and the open: the path
-	// the descriptor really landed on, where the platform can say (Linux)
-	if actual, err := os.Readlink("/proc/self/fd/" + itoa(int(fh.Fd()))); err == nil && !within(actual, roots) {
-		fh.Close()
-		sb.note(map[string]any{"op": "OPEN", "name": name, "mode": string(mode), "allowed": false, "why": "moved outside the dataset roots while opening"})
-		return nil, "Permission denied: " + name + " is outside the dataset roots"
 	}
 	if mode == DatasetOutput {
 		if err := fh.Truncate(0); err != nil {
@@ -668,7 +720,15 @@ func (sb *Sandbox) Delete(name string) bool {
 		sb.note(map[string]any{"op": "DELETE", "name": name, "allowed": false})
 		return false
 	}
-	if err := os.Remove(named); err != nil {
+	if datasetSwap != nil {
+		datasetSwap()
+	}
+	root, rel, ok := sb.beneath(named, write)
+	if !ok {
+		sb.note(map[string]any{"op": "DELETE", "name": name, "allowed": false})
+		return false
+	}
+	if err := root.Remove(rel); err != nil {
 		sb.note(map[string]any{"op": "DELETE", "name": name, "allowed": false, "why": err.Error()})
 		return false
 	}

@@ -265,3 +265,36 @@ func TestDatasetDeleteLinkAndTruncate(t *testing.T) {
 		t.Fatalf("OUTPUT did not truncate: %q", got)
 	}
 }
+
+// A directory inside the write root swapped for a symlink to a directory
+// outside it after the path checks and before the open: the create must
+// not land outside, and the unlink must not remove a file there.
+func TestDatasetParentSwappedWhileOpening(t *testing.T) {
+	f := newDatasetFixture(t)
+	sub := filepath.Join(f.out, "sub")
+	os.Mkdir(sub, 0o755)
+	os.WriteFile(filepath.Join(sub, "old.txt"), []byte("x\n"), 0o644)
+	os.WriteFile(filepath.Join(f.beyond, "old.txt"), []byte("keep\n"), 0o644)
+	swap := func() {
+		os.RemoveAll(sub)
+		if err := os.Symlink(f.beyond, sub); err != nil {
+			t.Fatal(err)
+		}
+	}
+	datasetSwap = swap
+	t.Cleanup(func() { datasetSwap = nil })
+	name := filepath.Join(sub, "new.txt")
+	if rc, msg := f.open(name, DatasetOutput, false); rc == 0 || !strings.Contains(msg, "outside the dataset roots") {
+		t.Fatalf("OUTPUT through a swapped parent: rc %d %q", rc, msg)
+	}
+	if _, err := os.Lstat(filepath.Join(f.beyond, "new.txt")); err == nil {
+		t.Fatal("the create landed outside the root")
+	}
+	os.Remove(sub)
+	os.Mkdir(sub, 0o755)
+	os.WriteFile(filepath.Join(sub, "old.txt"), []byte("x\n"), 0o644)
+	DeleteDataset(f.s, filepath.Join(sub, "old.txt"))
+	if got, _ := os.ReadFile(filepath.Join(f.beyond, "old.txt")); string(got) != "keep\n" {
+		t.Fatalf("the unlink removed a file outside the root: %q", got)
+	}
+}

@@ -133,6 +133,30 @@ describe("DATASET host (X0)", function () {
     expect(readFileSync(join(writeRoot, "target.txt"), "utf8")).to.equal("y\n");
   });
 
+  it("a parent swapped for a symlink after the checks takes no create and no unlink outside (Linux)", async function () {
+    if (!existsSync("/proc/self/fd")) {
+      this.skip();
+    }
+    const sub = join(writeRoot, "sub");
+    const reset = () => {
+      rmSync(sub, {recursive: true, force: true});
+      mkdirSync(sub);
+      writeFileSync(join(sub, "old.txt"), "x\n");
+    };
+    writeFileSync(join(outside, "old.txt"), "keep\n");
+    const host = sandboxDatasetHost({write: [writeRoot], beforeOpen: () => {
+      rmSync(sub, {recursive: true, force: true});
+      symlinkSync(outside, sub);
+    }});
+    reset();
+    const opened = await host.open(join(sub, "new.txt"), "OUTPUT");
+    expect(opened.message).to.match(/outside the dataset roots/);
+    expect(existsSync(join(outside, "new.txt"))).to.equal(false);
+    reset();
+    expect(await host.delete(join(sub, "old.txt"))).to.equal(false);
+    expect(readFileSync(join(outside, "old.txt"), "utf8")).to.equal("keep\n");
+  });
+
   it("a name that is only a prefix of a root is not inside it", async () => {
     mkdirSync(readRoot + "2");
     writeFileSync(join(readRoot + "2", "b.txt"), "b\n");
