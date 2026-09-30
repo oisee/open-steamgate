@@ -86,7 +86,12 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
         ENDIF.
         IF lv_comment = abap_false.
           IF lv_quote IS NOT INITIAL.
-            IF lv_char = lv_quote.
+            IF lv_quote = '|' AND lv_char = '\'.
+              " a string template escapes with a backslash, not by doubling
+              lv_pos = lv_pos + 1.
+            ELSEIF lv_quote = '|' AND lv_char = '|'.
+              CLEAR lv_quote.
+            ELSEIF lv_char = lv_quote.
               IF lv_next = lv_quote.
                 lv_pos = lv_pos + 1.
               ELSE.
@@ -94,6 +99,10 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
               ENDIF.
             ENDIF.
           ELSEIF lv_char = `'` OR lv_char = '`'.
+            lv_quote = lv_char.
+          ELSEIF iv_profile = 'abap' AND lv_char = '|'.
+            " a string template is a literal too; an embedded { expression } is
+            " counted as part of it
             lv_quote = lv_char.
           ELSEIF iv_profile = 'abap' AND lv_char = '"'.
             lv_comment = abap_true.
