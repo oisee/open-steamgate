@@ -30,8 +30,9 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
     DATA lv_len TYPE i.
     DATA lv_char TYPE c LENGTH 1.
     DATA lv_next TYPE c LENGTH 1.
-    DATA lv_quote TYPE c LENGTH 1.
-    DATA lv_brace TYPE i.
+    DATA lv_stack TYPE string.
+    DATA lv_top TYPE string.
+    DATA lv_depth TYPE i.
     DATA lv_escaped TYPE abap_bool.
     DATA lv_comment TYPE abap_bool.
     DATA lv_soft TYPE abap_bool.
@@ -64,8 +65,9 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
           APPEND ls_finding TO rt_finding.
         ENDIF.
       ENDIF.
-      CLEAR lv_quote.
-      CLEAR lv_brace.
+      " a small lexer with a stack of contexts, top last: ' and ` quotes,
+      " | string template text, { its expression (code); empty = code
+      CLEAR lv_stack.
       lv_escaped = abap_false.
       lv_comment = abap_false.
       IF iv_profile = 'abap' AND lv_len > 0 AND lv_line(1) = '*'.
@@ -78,51 +80,52 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
         IF lv_pos + 1 < lv_len.
           lv_next = substring( val = lv_line off = lv_pos + 1 len = 1 ).
         ENDIF.
+        CLEAR lv_top.
+        lv_depth = strlen( lv_stack ).
+        IF lv_depth > 0.
+          lv_top = substring( val = lv_stack off = lv_depth - 1 len = 1 ).
+        ENDIF.
         IF lv_char > lv_ascii_limit.
           ls_finding-rule = 'non_ascii'.
           ls_finding-text = 'Character outside 7-bit ASCII'.
           ls_finding-severity = 'E'.
-          " inside a string template's { expression } it is code again
-          IF ( lv_comment = abap_true OR ( lv_quote IS NOT INITIAL AND lv_brace = 0 ) )
+          IF ( lv_comment = abap_true OR lv_top = `'` OR lv_top = '`' OR lv_top = '|' )
               AND iv_strict = abap_false.
             ls_finding-severity = 'W'.
           ENDIF.
           APPEND ls_finding TO rt_finding.
         ENDIF.
-        IF lv_comment = abap_false.
-          IF lv_escaped = abap_true.
-            " the character after a backslash in a string template is text;
-            " it was checked above like any other
-            lv_escaped = abap_false.
-          ELSEIF lv_quote = '|' AND lv_brace > 0.
-            IF lv_char = '{'.
-              lv_brace = lv_brace + 1.
-            ELSEIF lv_char = '}'.
-              lv_brace = lv_brace - 1.
+        IF lv_comment = abap_true.
+          " the rest of the line is comment
+        ELSEIF lv_escaped = abap_true.
+          lv_escaped = abap_false.
+        ELSEIF lv_top = `'` OR lv_top = '`'.
+          IF lv_char = lv_top.
+            IF lv_next = lv_top.
+              lv_pos = lv_pos + 1.
+            ELSE.
+              lv_stack = substring( val = lv_stack len = lv_depth - 1 ).
             ENDIF.
-          ELSEIF lv_quote IS NOT INITIAL.
-            IF lv_quote = '|' AND lv_char = '\'.
-              " a string template escapes with a backslash, not by doubling
-              lv_escaped = abap_true.
-            ELSEIF lv_quote = '|' AND lv_char = '{'.
-              lv_brace = 1.
-            ELSEIF lv_quote = '|' AND lv_char = '|'.
-              CLEAR lv_quote.
-            ELSEIF lv_char = lv_quote.
-              IF lv_next = lv_quote.
-                lv_pos = lv_pos + 1.
-              ELSE.
-                CLEAR lv_quote.
-              ENDIF.
-            ENDIF.
-          ELSEIF lv_char = `'` OR lv_char = '`'.
-            lv_quote = lv_char.
+          ENDIF.
+        ELSEIF lv_top = '|'.
+          IF lv_char = '\'.
+            lv_escaped = abap_true.
+          ELSEIF lv_char = '{'.
+            lv_stack = lv_stack && '{'.
+          ELSEIF lv_char = '|'.
+            lv_stack = substring( val = lv_stack len = lv_depth - 1 ).
+          ENDIF.
+        ELSE.
+          " code: top level or inside a template's { expression }
+          IF lv_char = `'` OR lv_char = '`'.
+            lv_stack = lv_stack && lv_char.
           ELSEIF iv_profile = 'abap' AND lv_char = '|'.
-            " a string template is a literal too, except its { expressions }
-            lv_quote = lv_char.
-          ELSEIF iv_profile = 'abap' AND lv_char = '"'.
+            lv_stack = lv_stack && '|'.
+          ELSEIF lv_top = '{' AND lv_char = '}'.
+            lv_stack = substring( val = lv_stack len = lv_depth - 1 ).
+          ELSEIF lv_top IS INITIAL AND iv_profile = 'abap' AND lv_char = '"'.
             lv_comment = abap_true.
-          ELSEIF iv_profile = 'sqlscript' AND lv_char = '-' AND lv_next = '-'.
+          ELSEIF lv_top IS INITIAL AND iv_profile = 'sqlscript' AND lv_char = '-' AND lv_next = '-'.
             lv_comment = abap_true.
           ENDIF.
         ENDIF.

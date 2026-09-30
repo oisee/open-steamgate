@@ -23,7 +23,10 @@ CLASS ltcl_profile IMPLEMENTATION.
     APPEND `lv = |x` && lv_nonascii && `\|y|.` TO ls_result-lines.
     " right after the backslash, and inside { }, which is code
     APPEND `lv = |\` && lv_nonascii && `{ a` && lv_nonascii && ` }|.` TO ls_result-lines.
-    DO 7 TIMES.
+    " a brace inside a quoted literal in an expression is not a brace; a
+    " quote inside an expression is a literal again
+    APPEND `lv = |{ '{' }` && lv_nonascii && `{ '` && lv_nonascii && `' }|.` TO ls_result-lines.
+    DO 8 TIMES.
       ls_trace-line = sy-index.
       ls_trace-template_line = sy-index + 10.
       ls_trace-path = '/'.
@@ -31,7 +34,7 @@ CLASS ltcl_profile IMPLEMENTATION.
     ENDDO.
     lt_findings = zcl_osd_dsl_profile=>check( iv_profile = 'abap' iv_strict = abap_false
                                                is_result = ls_result io_model = lo_model ).
-    cl_abap_unit_assert=>assert_equals( act = lines( lt_findings ) exp = 8 ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_findings ) exp = 10 ).
     READ TABLE lt_findings INDEX 1 INTO ls_finding.
     cl_abap_unit_assert=>assert_equals( act = ls_finding-rule exp = 'line_length' ).
     cl_abap_unit_assert=>assert_equals( act = ls_finding-line exp = 1 ).
@@ -64,6 +67,12 @@ CLASS ltcl_profile IMPLEMENTATION.
     READ TABLE lt_findings INDEX 8 INTO ls_finding.
     cl_abap_unit_assert=>assert_equals( act = ls_finding-severity exp = 'E' ).
     cl_abap_unit_assert=>assert_equals( act = ls_finding-line exp = 7 ).
+    READ TABLE lt_findings INDEX 9 INTO ls_finding.
+    cl_abap_unit_assert=>assert_equals( act = ls_finding-severity exp = 'W' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_finding-line exp = 8 ).
+    READ TABLE lt_findings INDEX 10 INTO ls_finding.
+    cl_abap_unit_assert=>assert_equals( act = ls_finding-severity exp = 'W' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_finding-line exp = 8 ).
     lt_findings = zcl_osd_dsl_profile=>check( iv_profile = 'abap' iv_strict = abap_true
                                                is_result = ls_result io_model = lo_model ).
     READ TABLE lt_findings INDEX 3 INTO ls_finding.
