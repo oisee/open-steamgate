@@ -1259,9 +1259,22 @@ virtual table over the host's own memory**, and that part was never built (no vt
 - The wider proposal, one DB IR for both runtimes (`docs/pamdp-ir-portability.md`, 2026-09-23), is still a
   proposal awaiting Alice, and pAMDP is parked. The vtab does not depend on it.
 
-**0.6 -- OSGo as a server with several work processes.** A shared database (not copies), several connections
-(SQLite WAL / DuckDB / Postgres), one transaction per dialog step. Serialise only where SAP does (ENQUEUE, V2 update),
-replacing today's single FIFO work-process lock. Built on the 0.5 Session refactor.
+**0.6 -- the OSGo dispatcher: hot generation swap behind a stable front, then several work processes.** One track,
+two halves of one architecture (Alice, 2026-09-30, joining her 2026-09-23 reload decision with the multi-WP server).
+The 2026-09-23 precondition, "not before OSGo parity with OSG on JS", is met by U3 (0 DIFFERENT).
+1. Generation gate around the dialog step (the smallest first step of 2026-09-23): count the active steps, stop
+   admitting new ones, drain, tag each session with its generation. A new generation is a new Go binary; the
+   old one drains.
+2. The dispatcher proxy: small and stable, it holds HTTP, WS, session -> generation and ENQUEUE. New sessions and
+   stateless requests go to the newest binary; an open session stays pinned to its generation, and an old binary
+   retires when its last session ends (no roll-area serialisation). The cut is at the entry of the call stack
+   (request, WS message, GUI step), never per class.
+3. Several work processes inside one generation: N goroutines on a shared database outside the process (SQLite WAL
+   first, then DuckDB / Postgres), one transaction per dialog step; serialise only where SAP does (ENQUEUE, V2 update),
+   replacing today's single FIFO lock. Built on the 0.5 Session refactor.
+4. "Icicles" (2026-09-23): one small binary per entry point, routed by path. An optimisation after the rest.
+Shared prerequisites: DB out of process and shared, Session instead of globals, cut at the entry. Derived tables
+filled lazily (ADR 0005) must then publish atomically across processes, not per process (astra's review, 2026-09-30).
 
 **Noted:** `zcl_stg_segw_gen=>mpc_source` through the DSL (#293) takes 3.6 s against 0.94 s before on the largest
 project in OSG, while the same engine on A4H is ~4x faster. That makes it a runtime performance case to profile.
@@ -1302,7 +1315,10 @@ something already shipped (then it is a must of the current release, like the ro
 **0.6**
 - should: the Go side of host relations. A SQLite virtual table over stable Go rows, per call, gated by
   `ir-host-relation-pairs.mjs`.
-- should: OSGo server with several work processes, on a shared DB with one transaction per dialog step.
+- should: the OSGo dispatcher track, step 1, the generation gate around the dialog step.
+- should: the OSGo dispatcher track, steps 2-3, the dispatcher proxy with generation-pinned sessions, then several
+  work processes on a shared DB.
+- generous: the OSGo dispatcher track, step 4, icicles (one binary per entry point).
 - nice: IR-JS as a third `unit-compare` column, DB-free tests first.
 - nice: profile the #293 slowdown (MPC through the DSL: 3.6 s against 0.94 s in OSG).
 - generous: IR-JS on the database seam, so DB tests run too.
