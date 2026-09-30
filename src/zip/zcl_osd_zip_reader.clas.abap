@@ -380,12 +380,16 @@ CLASS zcl_osd_zip_reader IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD read_all.
+    " the pieces are joined once: joining each to the rest copies what came
+    " before, and a large entry grew quadratically
+    DATA lt_pieces TYPE STANDARD TABLE OF xstring WITH DEFAULT KEY.
     DATA lv_piece TYPE xstring.
     open( iv_name ).
     WHILE mv_eof = abap_false.
       lv_piece = read( ).
-      CONCATENATE rv_data lv_piece INTO rv_data IN BYTE MODE.
+      APPEND lv_piece TO lt_pieces.
     ENDWHILE.
+    CONCATENATE LINES OF lt_pieces INTO rv_data IN BYTE MODE.
   ENDMETHOD.
 
 ENDCLASS.

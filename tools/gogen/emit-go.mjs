@@ -1608,7 +1608,14 @@ ${t}	}`));
       return [`${t}if len(${p}) > 0 {`, `${t}\t${p} = ${p}[1:] + ${p}[:1]`, `${t}}`];
     }
     case "concat_bytes":
+      if (st.table) {
+        return [`${t}${place(st.target, ctx)} = func() string { var b []string; for _, ConcatRowStored := range ${expr(st.table, ctx)} { ConcatRow := ${rowValue(st.table.type, "ConcatRowStored")}; b = append(b, ${expr(st.row, ctx)}) }; return strings.Join(b, "") }()`, `${t}s.Sy.Subrc = 0`];
+      }
       if (st.fixed !== undefined) return [`${t}${place(st.target, ctx)}, s.Sy.Subrc = abap.CatBytesX(${st.fixed}, ${st.parts.map((x) => expr(x, ctx)).join(" + ")})`];
+      // x = x + y grows x where it lies (abap.AppendBytes), not by a copy of x
+      if (st.parts.length === 2 && expr(st.parts[0], ctx) === place(st.target, ctx)) {
+        return [`${t}${place(st.target, ctx)} = abap.AppendBytes(${place(st.target, ctx)}, ${expr(st.parts[1], ctx)})`, `${t}s.Sy.Subrc = 0`];
+      }
       return [`${t}${place(st.target, ctx)} = ${st.parts.map((x) => expr(x, ctx)).join(" + ")}`, `${t}s.Sy.Subrc = 0`];
     case "condense": {
       const p = place(st.target, ctx);

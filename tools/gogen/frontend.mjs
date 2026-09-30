@@ -2164,8 +2164,15 @@ function statement(node, ctx) {
   // stay refused in byte mode; character mode is ultra/events' CONCATENATE
   // further down.
   if (isStmt(node, Statements.Concatenate) && /\bIN\s+BYTE\s+MODE\b/i.test(text)) {
-    if (!/\bIN\s+BYTE\s+MODE\s*\.?$/i.test(text) || /\b(SEPARATED|RESPECTING|LINES\s+OF)\b/i.test(text)) throw new Unsupported(`CONCATENATE form: ${text}`);
+    if (!/\bIN\s+BYTE\s+MODE\s*\.?$/i.test(text) || /\b(SEPARATED|RESPECTING)\b/i.test(text)) throw new Unsupported(`CONCATENATE form: ${text}`);
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    // CONCATENATE LINES OF itab INTO xstr IN BYTE MODE: the rows joined once,
+    // the way a reader gathers its pieces without copying the whole each time
+    if (/^CONCATENATE\s+LINES\s+OF\b/i.test(text)) {
+      const table = source(node.findDirectExpressions(Expressions.SimpleSource3)[0] ?? node.findDirectExpression(Expressions.Source), ctx);
+      if (target.type.k !== "xstring" || table?.type.k !== "table" || table.type.row.k !== "xstring") throw new Unsupported(`CONCATENATE form: ${text}`);
+      return {s: "concat_bytes", target, table, row: {e: "temp", name: "ConcatRow", type: table.type.row}};
+    }
     // parity-wave2: into an x of fixed length (A4H 2026-09-24,
     // ZCL_GOGEN_T_BYTECATX): padded with 00 on the right and sy-subrc 0,
     // cut to the length and sy-subrc 4 when longer; the operands, the target
