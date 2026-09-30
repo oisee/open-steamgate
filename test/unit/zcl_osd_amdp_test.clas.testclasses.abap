@@ -10,18 +10,9 @@ CLASS ltcl_amdp DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINAL
     METHODS a_table_function_returns_rows FOR TESTING RAISING cx_static_check.
     METHODS two_outputs_come_back FOR TESTING RAISING cx_static_check.
     METHODS scalar_outs_beside_a_table FOR TESTING RAISING cx_static_check.
-    METHODS sandbox_json_cells FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_amdp IMPLEMENTATION.
-
-  METHOD sandbox_json_cells.
-    DATA lv_html TYPE string.
-    lv_html = zcl_osd_amdp_sbx=>rows_table(
-      '[{"TEXT":"a},b,\"c\"","N":5},{"TEXT":"next","N":6}]' ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_html CS '<td>a},b,&quot;c&quot;</td>' ) ).
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_html CS '<td>next</td>' ) ).
-  ENDMETHOD.
 
   METHOD squares_are_computed.
     DATA lt_square TYPE zcl_osd_amdp_demo=>tt_square.

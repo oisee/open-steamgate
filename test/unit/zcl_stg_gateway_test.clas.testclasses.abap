@@ -909,6 +909,7 @@ CLASS ltcl_batch DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINA
     METHODS boundary_token_in_body FOR TESTING RAISING cx_static_check.
     METHODS body_octets FOR TESTING RAISING cx_static_check.
     METHODS binary_and_boundary_text FOR TESTING RAISING cx_static_check.
+    METHODS closing_boundary_at_end FOR TESTING RAISING cx_static_check.
     METHODS retrieve_parts FOR TESTING RAISING cx_static_check.
     METHODS changeset_ok FOR TESTING RAISING cx_static_check.
     METHODS changeset_fails_as_a_whole FOR TESTING RAISING cx_static_check.
@@ -946,7 +947,7 @@ CLASS ltcl_batch IMPLEMENTATION.
 
     lv_body = crlf( `--batch_1|Content-Type: application/http|Content-Transfer-Encoding: binary||GET TravelSet?$top=1 HTTP/1.1|Accept: application/json|||` &&
                     `--batch_1|Content-Type: multipart/mixed; boundary=changeset_2||--changeset_2|Content-Type: application/http|Content-Transfer-Encoding: binary||` &&
-                    `POST TravelSet HTTP/1.1|Content-Type: application/json|Content-Length: 20||{"TravelId":"T0300"}|--changeset_2--||--batch_1--|` ).
+                    `POST TravelSet HTTP/1.1|Content-Type: application/json|Content-Length: 20||{"TravelId":"T0300"}|--changeset_2--||--batch_1--` ).
 
     lt_parts = zcl_stg_batch=>parse( iv_body     = lv_body
                                      iv_boundary = 'batch_1' ).
@@ -990,12 +991,18 @@ CLASS ltcl_batch IMPLEMENTATION.
       `Content-Type: image/png` && cl_abap_char_utilities=>cr_lf &&
       cl_abap_char_utilities=>cr_lf ).
     lv_body_x = lv_body_x && lv_payload && cl_abap_codepage=>convert_to(
-      cl_abap_char_utilities=>cr_lf && `--b1--` && cl_abap_char_utilities=>cr_lf ).
+      cl_abap_char_utilities=>cr_lf && `--b1--` ).
     lt_parts = zcl_stg_batch=>parse( iv_body_x = lv_body_x iv_body = '' iv_boundary = 'b1' ).
     cl_abap_unit_assert=>assert_equals( act = lines( lt_parts ) exp = 1 ).
     READ TABLE lt_parts INDEX 1 INTO ls_part.
     READ TABLE ls_part-requests INDEX 1 INTO ls_request.
     cl_abap_unit_assert=>assert_equals( act = ls_request-body_x exp = lv_payload ).
+  ENDMETHOD.
+
+  METHOD closing_boundary_at_end.
+    DATA lt_parts TYPE zcl_stg_batch=>ty_parts.
+    lt_parts = zcl_stg_batch=>parse( iv_body = '--b--' iv_boundary = 'b' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_parts ) exp = 0 ).
   ENDMETHOD.
 
   METHOD boundary_token_in_body.
@@ -1004,7 +1011,7 @@ CLASS ltcl_batch IMPLEMENTATION.
     DATA ls_part TYPE zcl_stg_batch=>ty_part.
     DATA ls_request TYPE zcl_stg_batch=>ty_request.
     lv_body = crlf( `--b|Content-Type: application/http||POST TravelSet HTTP/1.1|Content-Type: application/json||` &&
-                    `{"Description":"before--b-after"}|--b--|` ).
+                    `{"Description":"before--b-after"}|--b--` ).
     lt_parts = zcl_stg_batch=>parse( iv_body = lv_body iv_boundary = 'b' ).
     cl_abap_unit_assert=>assert_equals( act = lines( lt_parts ) exp = 1 ).
     READ TABLE lt_parts INDEX 1 INTO ls_part.
@@ -1124,7 +1131,7 @@ CLASS ltcl_batch IMPLEMENTATION.
               `Content-Type: application/http` && cl_abap_char_utilities=>newline &&
               cl_abap_char_utilities=>newline && `GET TravelSet HTTP/1.1` &&
               cl_abap_char_utilities=>newline && cl_abap_char_utilities=>newline &&
-              cl_abap_char_utilities=>newline && `--b--` && cl_abap_char_utilities=>newline.
+              cl_abap_char_utilities=>newline && `--b--`.
     lt_parts = zcl_stg_batch=>parse( iv_body = lv_body iv_boundary = 'b' ).
     READ TABLE lt_parts INDEX 1 INTO ls_part.
     READ TABLE ls_part-requests INDEX 1 INTO ls_request.

@@ -209,8 +209,11 @@ CLASS zcl_stg_batch IMPLEMENTATION.
       WHILE lv_after < lv_len AND ( iv_body+lv_after(1) = '20' OR iv_body+lv_after(1) = '09' ).
         lv_after = lv_after + 1.
       ENDWHILE.
-      IF lv_after >= lv_len.
-        lv_valid = abap_false.
+      IF lv_after = lv_len.
+* A closing delimiter may end the body without a line break.
+        IF lv_closing = abap_false.
+          lv_valid = abap_false.
+        ENDIF.
       ELSEIF iv_body+lv_after(1) = '0A'.
         lv_after = lv_after + 1.
       ELSEIF lv_after + 1 < lv_len AND iv_body+lv_after(2) = '0D0A'.

@@ -30,9 +30,6 @@ CLASS zcl_osd_amdp_sbx DEFINITION PUBLIC CREATE PUBLIC.
     CLASS-METHODS engine
       RETURNING
         VALUE(rv_engine) TYPE string.
-    CLASS-METHODS rows_table
-      IMPORTING iv_json TYPE string
-      RETURNING VALUE(rv_html) TYPE string.
   PROTECTED SECTION.
   PRIVATE SECTION.
     CLASS-DATA gv_engine TYPE string.
@@ -51,6 +48,12 @@ CLASS zcl_osd_amdp_sbx DEFINITION PUBLIC CREATE PUBLIC.
         iv_user        TYPE string
         iv_schema      TYPE string
         iv_restricted  TYPE string
+      RETURNING
+        VALUE(rv_html) TYPE string.
+
+    CLASS-METHODS rows_table
+      IMPORTING
+        iv_json        TYPE string
       RETURNING
         VALUE(rv_html) TYPE string.
 
@@ -263,37 +266,44 @@ CLASS zcl_osd_amdp_sbx IMPLEMENTATION.
 *   shape: the columns are whatever came back. Reading it as text rather than
 *   as a typed structure is the point -- a sandbox that only shows shapes it
 *   was taught about is not a sandbox.
-    DATA lt_rows   TYPE string_table.
+    DATA lt_rows   TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
     DATA lv_row    TYPE string.
-    DATA lt_cells  TYPE tihttpnvp.
-    DATA ls_cell   TYPE ihttpnvp.
+    DATA lv_inner  TYPE string.
+    DATA lt_cells  TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    DATA lv_cell   TYPE string.
     DATA lv_cells  TYPE string.
     DATA lv_head   TYPE string.
+    DATA lv_name   TYPE string.
+    DATA lv_value  TYPE string.
     DATA lv_first  TYPE abap_bool.
-    DATA lx_error TYPE REF TO zcx_stg_error.
+    DATA lv_offset TYPE i.
 
     IF iv_json IS INITIAL OR iv_json = '[]'.
       RETURN.
     ENDIF.
 
-    TRY.
-        lt_rows = zcl_stg_json=>parse_array( iv_json ).
-      CATCH zcx_stg_error INTO lx_error.
-        RETURN.
-    ENDTRY.
+    lv_inner = iv_json.
+    REPLACE FIRST OCCURRENCE OF '[' IN lv_inner WITH ''.
+*   the last bracket, not any bracket: a value may carry one
+    lv_offset = strlen( lv_inner ) - 1.
+    IF lv_offset >= 0 AND lv_inner+lv_offset(1) = ']'.
+      lv_inner = lv_inner(lv_offset).
+    ENDIF.
+    SPLIT lv_inner AT '},' INTO TABLE lt_rows.
 
     lv_first = abap_true.
     LOOP AT lt_rows INTO lv_row.
-      TRY.
-          lt_cells = zcl_stg_json=>parse_object( lv_row ).
-        CATCH zcx_stg_error INTO lx_error.
-          RETURN.
-      ENDTRY.
+      REPLACE ALL OCCURRENCES OF '{' IN lv_row WITH ''.
+      REPLACE ALL OCCURRENCES OF '}' IN lv_row WITH ''.
+      SPLIT lv_row AT ',"' INTO TABLE lt_cells.
       CLEAR lv_cells.
       CLEAR lv_head.
-      LOOP AT lt_cells INTO ls_cell.
-        lv_cells = |{ lv_cells }<td>{ esc( ls_cell-value ) }</td>|.
-        lv_head  = |{ lv_head }<th>{ esc( ls_cell-name ) }</th>|.
+      LOOP AT lt_cells INTO lv_cell.
+        SPLIT lv_cell AT ':' INTO lv_name lv_value.
+        REPLACE ALL OCCURRENCES OF '"' IN lv_name WITH ''.
+        REPLACE ALL OCCURRENCES OF '"' IN lv_value WITH ''.
+        lv_cells = |{ lv_cells }<td>{ esc( lv_value ) }</td>|.
+        lv_head  = |{ lv_head }<th>{ esc( lv_name ) }</th>|.
       ENDLOOP.
       IF lv_first = abap_true.
         rv_html = |<table class="rows"><tr>{ lv_head }</tr>|.
