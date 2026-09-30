@@ -3060,6 +3060,9 @@ function refAttribute(base, attrNode, ctx, write = false) {
   if (base.type.k === "ref" && !base.type.intf && attrNode.concatTokens().includes("~")) return classRefIntfAttribute(base, upper(attrNode.concatTokens()), ctx, write);
   if (base.type.k !== "ref" || base.type.intf) throw new Unsupported(`-> on a ${base.type.k === "ref" ? "interface reference" : base.type.k}`);
   const name = upper(attrNode.concatTokens());
+  // a class the program does not compile is an empty struct in Go: its
+  // attribute is refused here, in this method, not left to fail the build
+  if (!ctx.program.wanted.has(base.type.name)) throw new Unsupported(`${base.type.name}->${name}: the class is not compiled in this program`);
   const a = [base.type.name, ...ancestors(ctx.reg, base.type.name)].map((c) => clasDef(ctx.reg, c)?.getAttributes().getInstance()
     .find((x) => upper(x.getName()) === name)).find(Boolean);
   if (a === undefined) throw new Unsupported(`${base.type.name}->${name}: not an instance attribute`);
@@ -3743,6 +3746,28 @@ function constructor(c, ctx, inferred) {
     const kids = c.body?.getChildren() ?? [];
     if (kids.length !== 1 || !isExpr(kids[0], Expressions.Source)) throw new Unsupported(`CORRESPONDING form: ${c.text}`);
     const from = source(kids[0], ctx);
+    // CORRESPONDING type( itab ) without BASE / MAPPING / EXCEPT: a new table,
+    // one row per source row, each row as the structure case below builds it
+    // (the report converter of open-abap-gui writes it for a select-option's
+    // ranges). The source is read once; a sorted or hashed target would need
+    // its key kept and is refused
+    if (from.type.k === "table" && to.k === "table") {
+      if (to.sorted || to.hashed) throw new Unsupported(`CORRESPONDING into a ${to.sorted ? "sorted" : "hashed"} table`);
+      if (from.type.row?.k !== "struct" || to.row?.k !== "struct") throw new Unsupported(`CORRESPONDING between tables of ${from.type.row?.k} and ${to.row?.k} rows`);
+      const src = structOf(ctx, from.type.row);
+      const dst = structOf(ctx, to.row);
+      if (!src || !dst) throw new Unsupported(`CORRESPONDING: a structure not in the program`);
+      const row = {e: "var", name: `CORR_${ctx.temps++}`, type: from.type.row};
+      ctx.locals.set(row.name, from.type.row);
+      const fields = [];
+      for (const f of dst.fields) {
+        const g = src.fields.find((x) => x.name === f.name);
+        if (!g) continue;
+        if (["struct", "table"].includes(f.type.k) || ["struct", "table"].includes(g.type.k)) throw new Unsupported(`CORRESPONDING with a deep component ${f.name}`);
+        fields.push({name: f.name, value: convert({e: "field", base: row, name: g.name, type: g.type}, f.type)});
+      }
+      return {e: "table_map", from, row, value: {e: "struct", fields, type: to.row}, type: to};
+    }
     if (from.type.k !== "struct" || to.k !== "struct") throw new Unsupported(`CORRESPONDING from a ${from.type.k} to a ${to.k}`);
     const plain = (x) => ["var", "attr", "static", "fs"].includes(x.e) || (x.e === "field" && plain(x.base));
     if (!plain(from)) throw new Unsupported(`CORRESPONDING of something other than a variable or its component: ${c.text}`);
@@ -6182,6 +6207,35 @@ function compareBytes(op, l, r, node) {
 
 /** character comparisons: c ignores trailing blanks, which the stored form already has */
 function compareValues(op, l, r, ctx) {
+  // two tables of one row type, = or <>: the same number of rows and each
+  // row equal to the one at its index, a row of a structure component by
+  // component by the rules below (the report converter of open-abap-gui
+  // compares a select-option's ranges this way). Other operators order
+  // tables by rules not measured here; deep rows are refused
+  if (l.type.k === "table" && r.type.k === "table") {
+    if (op !== "=" && op !== "<>") throw new Unsupported(`comparison of tables with ${op}`);
+    if (!sameType(l.type.row, r.type.row)) throw new Unsupported("comparison of tables of different row types");
+    const rowType = l.type.row;
+    const a = {e: "var", name: `TEQ_${ctx.temps++}`, type: rowType};
+    const b = {e: "var", name: `TEQ_${ctx.temps++}`, type: rowType};
+    ctx.locals.set(a.name, rowType);
+    ctx.locals.set(b.name, rowType);
+    let rowEq;
+    if (rowType.k === "struct") {
+      const st = structOf(ctx, rowType);
+      if (!st) throw new Unsupported("comparison of tables: a row structure not in the program");
+      for (const f of st.fields) {
+        if (["struct", "table", "ref", "data", "dref"].includes(f.type.k)) throw new Unsupported(`comparison of tables with a deep component ${f.name}`);
+        const one = compareValues("=", {e: "field", base: a, name: f.name, type: f.type}, {e: "field", base: b, name: f.name, type: f.type}, ctx);
+        rowEq = rowEq ? {c: "and", l: rowEq, r: one} : one;
+      }
+    } else if (!["struct", "table", "ref", "data", "dref"].includes(rowType.k)) {
+      rowEq = compareValues("=", a, b, ctx);
+    } else {
+      throw new Unsupported(`comparison of tables of ${rowType.k} rows`);
+    }
+    return {c: "tableeq", op, l, r, a, b, rowEq: rowEq ?? {c: "true"}};
+  }
   if (numeric(l.type) || numeric(r.type)) {
     const calc = l.type.k === "f" || r.type.k === "f" ? F : I;
     return {c: "cmp", op, l: convert(l, calc), r: convert(r, calc), type: calc};
