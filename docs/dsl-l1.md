@@ -134,11 +134,12 @@ registry in `tools/dsl-regions.mjs` (`RECIPES`) says how each recipe builds its 
   the paths (model, then `ZCL_OSD_TPL`, so `npm run transpile` first) and compares byte for byte:
   one line per region, `ok`, `DRIFT` with the first differing line, or `REFUSED` with the
   recipe's refusal. Exit 1 on any drift or refusal, 0 otherwise.
-- `write <path>...` rewrites the drifted regions in place, and only them; the rest of the file is
-  left byte for byte.
+- `write <path>...` rewrites the drifted regions in place, and only them; every byte outside them
+  is copied as read (bytes, not decoded text, so an invalid UTF-8 byte survives), and each line
+  keeps its own ending (mixed LF/CRLF files are read line by line).
 - `--trace` prints per region the file line of each generated line, its template line and the
   model path it read.
-- Unbalanced, nested or malformed markers, an unknown recipe, a missing `from=` or a `from=` the
+- A marker behind code on the same line, unbalanced, nested or malformed markers, an unknown recipe, a missing `from=` or a `from=` the
   class does not have are errors with file and line (exit 2).
 
 `test/dsl-regions.mjs` covers each of these; `test/lift-r1.mjs` reads its regions through the

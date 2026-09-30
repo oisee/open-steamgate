@@ -32,6 +32,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // A marker is any comment line starting `" osd:gen`; one that does not have
 // the full form is an error rather than a line nobody reads.
 const MARKER = /^" osd:gen\b/;
+const MARKER_TEXT = '" osd:gen';
 const MARKER_FORM = /^" osd:gen ([a-z0-9][a-z0-9-]*)((?: [a-z]+=\S+)*) (begin|end)$/;
 
 export class RegionError extends Error {
@@ -76,17 +77,42 @@ export const RECIPES = {
   },
 };
 
-// Every region of one source, in order. Unbalanced, nested and malformed
-// markers, an unknown recipe or a missing parameter are RegionErrors.
+// The lines of a file as bytes: each line's text (decoded for reading only),
+// its own separator ("\r\n", "\n" or "" at the end) and its byte offsets, so
+// a file with mixed line endings is read line by line and a rewrite touches
+// no byte outside what it replaces.
+function splitLines(bytes) {
+  const lines = [];
+  let start = 0;
+  while (start <= bytes.length) {
+    const nl = bytes.indexOf(0x0a, start);
+    const stop = nl < 0 ? bytes.length : nl;
+    const cr = stop > start && bytes[stop - 1] === 0x0d;
+    const textEnd = cr ? stop - 1 : stop;
+    lines.push({text: bytes.subarray(start, textEnd).toString("utf8"), sep: nl < 0 ? "" : cr ? "\r\n" : "\n",
+      start, end: nl < 0 ? bytes.length : nl + 1});
+    if (nl < 0) break;
+    start = nl + 1;
+  }
+  return lines;
+}
+
+// Every region of one source (a string or the file's bytes), in order.
+// Unbalanced, nested and malformed markers, a marker that does not stand on a
+// line of its own, an unknown recipe or a missing parameter are RegionErrors.
 export function parseRegions(source, file = "<source>") {
-  const eol = source.includes("\r\n") ? "\r\n" : "\n";
-  const lines = source.split(eol);
+  const bytes = Buffer.isBuffer(source) ? source : Buffer.from(source, "utf8");
+  const lines = splitLines(bytes);
   const regions = [];
-  let open;
-  lines.forEach((text, index) => {
+  let open, markers = 0;
+  lines.forEach(({text}, index) => {
     const line = index + 1;
     const trimmed = text.trim();
-    if (!MARKER.test(trimmed)) return;
+    if (!MARKER.test(trimmed)) {
+      if (text.includes(MARKER_TEXT)) throw new RegionError(file, line, `an osd:gen marker must stand on a line of its own: '${trimmed}'`);
+      return;
+    }
+    markers++;
     const form = MARKER_FORM.exec(trimmed);
     if (!form) throw new RegionError(file, line, `malformed marker: expected '" osd:gen <recipe> [key=value]... begin|end', found '${trimmed}'`);
     const [, recipe, rawParams, kind] = form;
@@ -101,17 +127,22 @@ export function parseRegions(source, file = "<source>") {
       for (const key of Object.keys(params)) {
         if (!entry.params.includes(key)) throw new RegionError(file, line, `recipe ${recipe} takes no ${key}=`);
       }
-      open = {recipe, params, begin: line, indent: /^ */.exec(text)[0]};
+      open = {recipe, params, begin: line, indent: /^ */.exec(text)[0], sep: lines[index].sep};
     } else {
       if (!open) throw new RegionError(file, line, `unbalanced marker: end of ${recipe} without a begin`);
       if (Object.keys(params).length) throw new RegionError(file, line, "an end marker takes no parameters");
       if (recipe !== open.recipe) throw new RegionError(file, line, `unbalanced marker: end of ${recipe} closes the ${open.recipe} region begun at line ${open.begin}`);
-      regions.push({...open, end: line, body: lines.slice(open.begin, index)});
+      const body = lines.slice(open.begin, index);
+      regions.push({...open, end: line, body: body.map((l) => l.text), bodyStart: lines[open.begin].start, bodyEnd: lines[index].start});
       open = undefined;
     }
   });
   if (open) throw new RegionError(file, open.begin, `unbalanced marker: ${open.recipe} begin has no end`);
-  return {regions, lines, eol};
+  // Every marker the text holds was read as one. A line split the parser got
+  // wrong would otherwise find no region and call the file clean.
+  const inText = bytes.toString("latin1").split(MARKER_TEXT).length - 1;
+  if (inText !== markers) throw new RegionError(file, 1, `${inText} osd:gen marker(s) in the text, ${markers} read as marker lines`);
+  return {regions, lines: lines.map((l) => l.text), bytes};
 }
 
 // The region's text with the begin marker's indentation taken off, as the
@@ -165,10 +196,11 @@ function abapFiles(paths) {
 export async function checkRegions(paths, {write = false, ddic = DEFAULT_DDIC.map((d) => resolve(ROOT, d))} = {}) {
   const results = [];
   for (const file of abapFiles(paths)) {
-    const source = readFileSync(file, "utf8");
+    const bytes = readFileSync(file);
+    const source = bytes.toString("utf8");
     let parsed;
     try {
-      parsed = parseRegions(source, file);
+      parsed = parseRegions(bytes, file);
     } catch (e) {
       if (!(e instanceof RegionError)) throw e;
       results.push({status: "ERROR", file, line: e.line, message: e.message});
@@ -200,13 +232,19 @@ export async function checkRegions(paths, {write = false, ddic = DEFAULT_DDIC.ma
       results.push(result);
     }
     if (write && replace.length) {
-      const lines = [...parsed.lines];
-      for (const r of [...replace].reverse()) {
+      // only the bytes of the drifted regions' bodies are replaced; every
+      // byte around them is copied as read, whatever its encoding
+      const parts = [];
+      let at = 0;
+      for (const r of replace) {
         const result = results.find((x) => x.file === file && x.line === r.begin);
-        lines.splice(r.begin, r.end - r.begin - 1, ...result.expected);
+        parts.push(parsed.bytes.subarray(at, r.bodyStart),
+          Buffer.from(result.expected.map((l) => l + r.sep).join(""), "utf8"));
+        at = r.bodyEnd;
         result.written = {from: r.body.length, to: result.expected.length};
       }
-      writeFileSync(file, lines.join(parsed.eol));
+      parts.push(parsed.bytes.subarray(at));
+      writeFileSync(file, Buffer.concat(parts));
     }
   }
   return results;

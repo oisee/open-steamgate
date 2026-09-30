@@ -76,6 +76,39 @@ describe("DSL generated regions", function () {
     expect(readFileSync(file, "utf8")).to.equal(source);
   });
 
+  it("mixed line endings: every region is still read, and write keeps each line's own ending", async () => {
+    // the first line break CRLF, the rest LF: a parser that picks one ending
+    // for the file finds no region at all and calls the file clean
+    const mixed = original.replace("\n", "\r\n");
+    copy(mixed);
+    const results = await checkRegions([dir]);
+    expect(results.map((r) => [r.status, r.params.from])).to.deep.equal([["ok", "before"], ["ok", "before_mixed"]]);
+    // and a CRLF region inside the LF file is repaired with CRLF
+    const crlfRegion = mixed.replace(/(from=before begin)\n([\s\S]*?)(    " osd:gen r1-lookup-enrich end)\n/,
+      (all, begin, body, end) => `${begin}\r\n${body.replace(/\n/g, "\r\n")}${end}\r\n`);
+    expect(crlfRegion).to.not.equal(mixed);
+    copy(crlfRegion.replace(COPY_LINE, "        <ls_row>-text = 'HAND EDIT'."));
+    const written = await checkRegions([dir], {write: true});
+    expect(written.map((r) => r.status)).to.deep.equal(["DRIFT", "ok"]);
+    expect(readFileSync(file, "utf8")).to.equal(crlfRegion);
+  });
+
+  it("write changes no byte outside the drifted region, not even one that is not UTF-8", async () => {
+    const [head, tail] = original.split("CLASS zcl_osd_lift_r1_demo IMPLEMENTATION.");
+    const bytes = Buffer.concat([Buffer.from(head), Buffer.from("* not UTF-8: "), Buffer.from([0xff, 0xc3]),
+      Buffer.from("\nCLASS zcl_osd_lift_r1_demo IMPLEMENTATION." + tail)]);
+    writeFileSync(file, Buffer.from(bytes.toString("latin1").replace(COPY_LINE, "        <ls_row>-text = 'HAND EDIT'."), "latin1"));
+    const written = await checkRegions([dir], {write: true});
+    expect(written.map((r) => r.status)).to.deep.equal(["DRIFT", "ok"]);
+    expect(readFileSync(file).equals(bytes)).to.equal(true);
+  });
+
+  it("a marker behind code on the same line is an error, not a line nobody reads", () => {
+    const source = original.replace(`    " osd:gen r1-lookup-enrich from=before_mixed begin`,
+      `    CLEAR sy-subrc. " osd:gen r1-lookup-enrich from=before_mixed begin`);
+    expect(() => parseRegions(source, file)).to.throw(`${file}:${BEGIN2}: an osd:gen marker must stand on a line of its own`);
+  });
+
   it("a BEFORE that R1 refuses is REFUSED with the recipe's reason", async () => {
     copy(original.replace("WHERE kind = <ls_row>-kind AND code = <ls_row>-code.",
       "WHERE kind = <ls_row>-kind AND text = <ls_row>-text."));
