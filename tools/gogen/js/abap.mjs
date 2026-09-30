@@ -320,6 +320,11 @@ export function Find(v, sub, off) {
 }
 export const CO = (a, b) => [...a].every((c) => b.includes(c));
 export const CS = (a, b) => b === "" || a.toUpperCase().includes(b.toUpperCase());
+export function CSWithPos(s, a, b) {
+  const pos = a.toUpperCase().indexOf(b.toUpperCase());
+  s.sy.fdpos = pos < 0 ? a.length : pos;
+  return pos >= 0;
+}
 // i into a string, as A4H moves it: 42 is "42 ", -5 is "5-"
 export const IToString = (v) => (v < 0 ? `${-v}-` : `${v} `);
 // NUMC moves, as go/abap/conv.go IToN / CToN (A4H, ZCL_GOGEN_T_NUMC): the

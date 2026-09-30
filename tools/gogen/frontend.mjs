@@ -3253,7 +3253,7 @@ function classRefIntfAttribute(base, name, ctx, write) {
 
 /* --------------------------------------------------------------- expressions */
 
-const SY = {"SY-INDEX": "Index", "SY-TABIX": "Tabix", "SY-SUBRC": "Subrc", "SY-DBCNT": "Dbcnt"};
+const SY = {"SY-INDEX": "Index", "SY-TABIX": "Tabix", "SY-SUBRC": "Subrc", "SY-DBCNT": "Dbcnt", "SY-FDPOS": "Fdpos"};
 const CONSTRUCTORS = new Set(["VALUE", "CONV", "NEW", "REF", "COND", "SWITCH", "EXACT", "CORRESPONDING", "REDUCE", "FILTER", "CAST", "BOOLC", "XSDBOOL"]);
 
 /**

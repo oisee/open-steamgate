@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 	"unsafe"
 )
@@ -814,6 +815,19 @@ func CO(a, b string) bool {
 
 // CS: a contains b, ignoring case; an empty b is always found.
 func CS(a, b string) bool { return b == "" || strings.Contains(strings.ToUpper(a), strings.ToUpper(b)) }
+
+// CSWithPos records the position as Node's CS comparison does. A miss stores
+// the length of the left operand, in UTF-16 code units.
+func CSWithPos(s *Session, a, b string) bool {
+	left, right := strings.ToUpper(a), strings.ToUpper(b)
+	pos := strings.Index(left, right)
+	if pos < 0 {
+		s.Sy.Fdpos = int32(len(utf16.Encode([]rune(left))))
+		return false
+	}
+	s.Sy.Fdpos = int32(len(utf16.Encode([]rune(left[:pos]))))
+	return true
+}
 
 // nFit is k places of digits: right-aligned, zeros in front, the last k
 // kept
