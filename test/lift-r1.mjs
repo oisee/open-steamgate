@@ -9,17 +9,10 @@ import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {DEFAULT_DDIC, find, modelR1, modelR1FromSource} from "../tools/lift.mjs";
+import {region} from "../tools/dsl-regions.mjs";
 
 const DEMO = "src/lift/zcl_osd_lift_r1_demo.clas.abap";
 const TEMPLATE = "recipes/r1-lookup-enrich/template.tpl";
-
-function region(source, recipe = "R1") {
-  const lines = source.split("\n");
-  const begin = lines.findIndex((l) => l.trim() === `" lift:${recipe} begin`);
-  const end = lines.findIndex((l) => l.trim() === `" lift:${recipe} end`);
-  const indent = /^ */.exec(lines[begin])[0].length;
-  return lines.slice(begin + 1, end).map((l) => l.slice(indent)).join("\n") + "\n";
-}
 
 describe("verified lift R1: lookup-enrich", function () {
   this.timeout(60000);
@@ -438,7 +431,7 @@ ENDCLASS.`);
 
   it("the generated region of AFTER is exactly what the template renders", async () => {
     const {text, trace} = await render(modelR1(DEMO, "before"));
-    expect(region(readFileSync(DEMO, "utf8"))).to.equal(text);
+    expect(region(readFileSync(DEMO, "utf8"), "before")).to.equal(text);
     // the line that copies the value traces to the template line of the
     // field loop and to the first value on it
     const copy = text.split("\n").findIndex((l) => l.includes("-text = <ls_lookup>-text")) + 1;
@@ -450,7 +443,7 @@ ENDCLASS.`);
 
   it("the generated R1b region is exactly what the template renders", async () => {
     const {text} = await render(modelR1(DEMO, "before_mixed"));
-    expect(region(readFileSync(DEMO, "utf8"), "R1b")).to.equal(text);
+    expect(region(readFileSync(DEMO, "utf8"), "before_mixed")).to.equal(text);
   });
 
   // AFTER is one SELECT in the ABAP. On a system the kernel sends FOR ALL

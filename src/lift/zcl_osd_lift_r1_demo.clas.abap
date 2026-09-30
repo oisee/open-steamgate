@@ -4,7 +4,8 @@ CLASS zcl_osd_lift_r1_demo DEFINITION PUBLIC FINAL CREATE PUBLIC.
 * BEFORE is the shape as it is found in code; AFTER is BEFORE with the loop
 * replaced by what recipes/r1-lookup-enrich/template.tpl renders from the
 * model tools/lift.mjs extracts out of BEFORE. The region between the
-* markers is generated, and test/lift-r1.mjs fails when it drifts.
+* osd:gen markers is generated; node tools/dsl-regions.mjs check src/lift
+* regenerates it from the method named in from= and fails when it drifts.
   PUBLIC SECTION.
     TYPES:
       BEGIN OF ty_row,
@@ -41,7 +42,7 @@ CLASS zcl_osd_lift_r1_demo IMPLEMENTATION.
 
   METHOD after.
     FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.
-    " lift:R1 begin
+    " osd:gen r1-lookup-enrich from=before begin
     DATA lt_lookup TYPE HASHED TABLE OF zosd_lift_txt WITH UNIQUE KEY kind code.
     FIELD-SYMBOLS <ls_lookup> LIKE LINE OF lt_lookup.
     IF ct_rows IS NOT INITIAL.
@@ -56,7 +57,7 @@ CLASS zcl_osd_lift_r1_demo IMPLEMENTATION.
         <ls_row>-text = <ls_lookup>-text.
       ENDIF.
     ENDLOOP.
-    " lift:R1 end
+    " osd:gen r1-lookup-enrich end
   ENDMETHOD.
 
   METHOD before_mixed.
@@ -71,7 +72,7 @@ CLASS zcl_osd_lift_r1_demo IMPLEMENTATION.
 
   METHOD after_mixed.
     FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.
-    " lift:R1b begin
+    " osd:gen r1-lookup-enrich from=before_mixed begin
     DATA lt_lookup TYPE HASHED TABLE OF zosd_lift_txt WITH UNIQUE KEY kind code.
     FIELD-SYMBOLS <ls_lookup> LIKE LINE OF lt_lookup.
     IF ct_rows IS NOT INITIAL.
@@ -88,7 +89,7 @@ CLASS zcl_osd_lift_r1_demo IMPLEMENTATION.
       ENDIF.
       MOVE sy-subrc TO <ls_row>-status.
     ENDLOOP.
-    " lift:R1b end
+    " osd:gen r1-lookup-enrich end
   ENDMETHOD.
 
 ENDCLASS.

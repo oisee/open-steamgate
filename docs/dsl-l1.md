@@ -114,6 +114,38 @@ class's `.clas.abap` and `.clas.trace.json` files. The command imports under its
 own temporary project name, removes those rows afterwards, prints the ABAP
 profile findings, and exits nonzero for an error finding.
 
+## Generated regions
+
+A generated region inside a hand-written ABAP file names its recipe and its source in its own
+markers, so one command can regenerate every region of a tree without a table kept elsewhere:
+
+```abap
+    " osd:gen r1-lookup-enrich from=before begin
+    ...rendered text, indented like the begin marker...
+    " osd:gen r1-lookup-enrich end
+```
+
+`<recipe>` is a folder under `recipes/` with a `template.tpl`; `from=` names the method of the
+same class (found through abaplint's structure) that the recipe's model is read from. The recipe
+registry in `tools/dsl-regions.mjs` (`RECIPES`) says how each recipe builds its model; today only
+`r1-lookup-enrich` (the `tools/lift.mjs` model of `from=`).
+
+- `node tools/dsl-regions.mjs check <path>...` regenerates every region in the `*.abap` files under
+  the paths (model, then `ZCL_OSD_TPL`, so `npm run transpile` first) and compares byte for byte:
+  one line per region, `ok`, `DRIFT` with the first differing line, or `REFUSED` with the
+  recipe's refusal. The canonical body ends every line like the begin marker line, so a line
+  with another ending is `DRIFT` ("line ending") and `check` and `write` agree byte for byte. Exit 1 on any drift or refusal, 0 otherwise.
+- `write <path>...` rewrites the drifted regions in place, and only them; every byte outside them
+  is copied as read (bytes, not decoded text, so an invalid UTF-8 byte survives), and each line
+  keeps its own ending (mixed LF/CRLF files are read line by line).
+- `--trace` prints per region the file line of each generated line, its template line and the
+  model path it read.
+- A marker behind code on the same line, unbalanced, nested or malformed markers, an unknown recipe, a missing `from=` or a `from=` the
+  class does not have are errors with file and line (exit 2).
+
+`test/dsl-regions.mjs` covers each of these; `test/lift-r1.mjs` reads its regions through the
+same parser (`region(source, from)`).
+
 ## Steps
 
 1. Model builder for one entity type out of the project tree (the rows `zcl_stg_segw_gen`
