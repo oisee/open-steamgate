@@ -8,6 +8,7 @@ import (
 
 type global struct{ _ byte }
 type local struct{ _ byte }
+type stray struct{ _ byte }
 
 func TestInternal(t *testing.T) {
 	abap.RegisterClass("ZCL_T_GLOBAL", (*global)(nil), func(*abap.Session) any { return &global{} })
@@ -21,8 +22,16 @@ func TestInternal(t *testing.T) {
 	if got != "CLAS-ZCL_T_POOL-LCL_T" {
 		t.Fatalf("local: %q", got)
 	}
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("a class nobody registered gave a name")
+			}
+		}()
+		Internal(&abap.Session{}, &stray{}, &got)
+	}()
 	defer func() {
-		if r, ok := recover().(abap.ArithmeticError); !ok || r.Class != "CX_SY_REF_IS_INITIAL" {
+		if r, ok := recover().(abap.ArithmeticError); !ok || r.Class != "OBJECTS_OBJREF_NOT_ASSIGNED" {
 			t.Fatalf("initial reference: %v", r)
 		}
 	}()
