@@ -76,7 +76,7 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
       ENDWHILE.
       lv_escaped = abap_false.
       lv_comment = abap_false.
-      IF iv_profile = 'abap' AND lv_len > 0 AND lv_line(1) = '*' AND lv_stack IS INITIAL.
+      IF iv_profile = 'abap' AND lv_len > 0 AND lv_line(1) = '*'.
         lv_comment = abap_true.
       ENDIF.
       lv_pos = 0.
