@@ -266,7 +266,14 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
       const {project} = await pushFile(DEFAULT_URL, xml);
       const made = await generateFiles(DEFAULT_URL, project);
       const expected = {...oracle.files, ...oracle.ext};
-      expect(Object.keys(made).sort(), name).to.deep.equal(Object.keys(expected).sort());
+      const traceName = Object.keys(made).find((file) => file.endsWith("_mpc.clas.trace.json"));
+      expect(traceName, `${name}: MPC trace sidecar`).to.be.a("string");
+      const sidecar = JSON.parse(made[traceName]);
+      const mpcName = traceName.replace(".clas.trace.json", ".clas.abap");
+      expect(sidecar.lines.length, `${name}: one trace per MPC line`).to.equal(made[mpcName].trimEnd().split("\n").length);
+      expect(sidecar.lines.every((line, index) => line.line === index + 1 && line.node), `${name}: named trace lines`).to.equal(true);
+      // The ABAP generator adds provenance; the JS twin still supplies the class oracle.
+      expect(Object.keys(made).filter((file) => file !== traceName).sort(), name).to.deep.equal(Object.keys(expected).sort());
       for (const [file, content] of Object.entries(expected)) {
         const a = content.split("\n");
         const b = made[file].split("\n");
@@ -297,6 +304,7 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
     await pushFunctionGroups(DEFAULT_URL, "src/demo");
     await pushFile(DEFAULT_URL, compiled.iwpr);
     const repo = await repoFiles(DEFAULT_URL, "ZSTG_DEMO");
+    expect(Object.keys(repo).some((name) => name.endsWith(".clas.trace.json"))).to.equal(false);
 
     expect(Object.keys(repo)).to.include(".abapgit.xml");
     expect(Object.keys(repo)).to.include("src/package.devc.xml");

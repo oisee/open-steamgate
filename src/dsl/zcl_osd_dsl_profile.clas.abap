@@ -36,26 +36,36 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
     DATA lv_escaped TYPE abap_bool.
     DATA lv_comment TYPE abap_bool.
     DATA lv_soft TYPE abap_bool.
-    DATA lv_node TYPE string.
     DATA lv_ascii_limit TYPE string.
+    DATA lv_lex TYPE abap_bool.
     IF iv_profile = 'text'.
       RETURN.
     ENDIF.
     lv_ascii_limit = cl_abap_codepage=>convert_from( source = '7F' ).
     CLEAR lv_stack.
+    " the lexer only decides whether a character outside 7-bit ASCII sits in
+    " a comment, a literal or code; without such a character there is nothing
+    " for it to decide, and generated code usually has none
+    FIND FIRST OCCURRENCE OF REGEX '[^\t -~]' IN TABLE is_result-lines.
+    lv_lex = boolc( sy-subrc = 0 ).
     LOOP AT is_result-lines INTO lv_line.
       lv_line_number = sy-tabix.
-      READ TABLE is_result-trace INTO ls_trace WITH KEY line = lv_line_number.
-      lv_node = zcl_osd_dsl_trace=>node_of( io_model = io_model iv_path = ls_trace-path ).
+      " the trace is written in line order: read it by index, fall back to a
+      " search only when it is not
+      CLEAR ls_trace.
+      READ TABLE is_result-trace INTO ls_trace INDEX lv_line_number.
+      IF sy-subrc <> 0 OR ls_trace-line <> lv_line_number.
+        READ TABLE is_result-trace INTO ls_trace WITH KEY line = lv_line_number.
+      ENDIF.
       CLEAR ls_finding.
       ls_finding-severity = 'E'.
       ls_finding-line = lv_line_number.
       ls_finding-template_line = ls_trace-template_line.
-      ls_finding-node = lv_node.
       lv_len = strlen( lv_line ).
       IF lv_len > 255.
         ls_finding-rule = 'line_length'.
         ls_finding-text = 'Line exceeds 255 characters'.
+        ls_finding-node = zcl_osd_dsl_trace=>node_of( io_model = io_model iv_path = ls_trace-path ).
         APPEND ls_finding TO rt_finding.
       ENDIF.
       IF lv_len > 0.
@@ -63,8 +73,12 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
         IF lv_char = space OR lv_char = cl_abap_char_utilities=>horizontal_tab.
           ls_finding-rule = 'trailing_blank'.
           ls_finding-text = 'Trailing blank'.
+          ls_finding-node = zcl_osd_dsl_trace=>node_of( io_model = io_model iv_path = ls_trace-path ).
           APPEND ls_finding TO rt_finding.
         ENDIF.
+      ENDIF.
+      IF lv_lex = abap_false.
+        CONTINUE.
       ENDIF.
       " a small lexer with a stack of contexts, top last: ' and ` quotes,
       " | string template text, { its expression (code); empty = code.
@@ -99,6 +113,7 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
               AND iv_strict = abap_false.
             ls_finding-severity = 'W'.
           ENDIF.
+          ls_finding-node = zcl_osd_dsl_trace=>node_of( io_model = io_model iv_path = ls_trace-path ).
           APPEND ls_finding TO rt_finding.
         ENDIF.
         IF lv_comment = abap_true.

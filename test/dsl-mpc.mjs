@@ -23,13 +23,14 @@ function sourceSpecs(dir = "src") {
   });
 }
 const builtNames = new Set(readdirSync("gen/stg"));
-const COMPILED = ["src", "gen/cds", "packs"].flatMap((root) => sourceSpecs(root))
+const ALL_COMPILED = ["src", "gen/cds", "packs"].flatMap((root) => sourceSpecs(root))
   .filter((path) => builtNames.has(path.split("/").pop().replace(/\.stg\.yaml$/, "")))
-  .map((path) => ({path, xml: compileFile(path).iwpr}))
-  .filter(({xml}) => {
-    const tree = parseIwpr(xml);
-    return tree.associations.length || tree.functionImports.length;
-  });
+  .map((path) => ({path, xml: compileFile(path).iwpr}));
+// ImportSet enforces SBO_ET.ABAP_STRUCT CHAR 32. Three generated CDS trees
+// carry a longer class=>type reference and cannot enter the SEGW tables.
+const OVERLONG = ALL_COMPILED.filter(({xml}) =>
+  parseIwpr(xml).entityTypes.some((type) => type.ABAP_STRUCT?.length > 32));
+const COMPILED = ALL_COMPILED.filter((item) => !OVERLONG.includes(item));
 
 describe("DSL L1: MPC methods from the model, byte for byte", function () {
   this.timeout(120000);
@@ -101,6 +102,14 @@ functions:
     return project;
   }
 
+  it("names the compiled projects excluded by the SEGW table width", () => {
+    expect(OVERLONG.map(({path}) => path).sort()).to.deep.equal([
+      "gen/cds/zc_osd_taxicube_cds.stg.yaml",
+      "gen/cds/zc_stg_flightcube_cds.stg.yaml",
+      "gen/cds/zc_stg_travelcube_cds.stg.yaml",
+    ]);
+  });
+
   // The ZUT_DSL ABAP Unit fixture alone reaches entity semantics, media,
   // and the association default-set line (no explicit association set).
   // The compiled complex project reaches both complex binding variants.
@@ -128,6 +137,8 @@ functions:
       const project = await importProject(path, path === "compiled demo" ? demoXml : path === "compiled complex" ? complexXml : COMPILED.find((item) => item.path === path)?.xml);
       const model = await abap.Classes.ZCL_STG_SEGW_GEN.build_model({iv_project: box(project)});
       const source = (await abap.Classes.ZCL_STG_SEGW_GEN.mpc_source({is_model: model})).get();
+      const legacy = (await abap.Classes.ZCL_STG_SEGW_GEN.mpc_source_legacy({is_model: model})).get();
+      expect(source, `${project} DSL versus legacy`).to.equal(legacy);
       const projectJson = await abap.Classes.ZCL_OSD_DSL_MPC.project_model({is_model: model});
       const whole = await abap.Classes.ZCL_OSD_DSL_MPC.render_class({is_model: model});
       const wholeText = (await abap.Classes.ZCL_OSD_TPL.to_string({is_result: whole})).get();
@@ -184,6 +195,49 @@ functions:
   // so a fixture that loses a case fails here rather than going quiet.
   it("the fixtures together exercise every optional line", () => {
     expect(Object.keys(seen).filter((what) => seen[what] === 0), "optional lines no fixture reaches").to.deep.equal([]);
+  });
+
+  it("refuses a rendered 256-character ABAP line with its position", async () => {
+    const project = await importProject("long rendered line", readFileSync(FIXTURES[2], "utf8"));
+    // generate renders through render_model (one model, built once)
+    const renderer = abap.Classes.ZCL_OSD_DSL_MPC.render_model;
+    abap.Classes.ZCL_OSD_DSL_MPC.render_model = async (...args) => {
+      const result = await renderer.call(abap.Classes.ZCL_OSD_DSL_MPC, ...args);
+      result.get().lines.array()[0].set("X".repeat(256));
+      return result;
+    };
+    try {
+      let error;
+      try {
+        await abap.Classes.ZCL_STG_SEGW_GEN.generate({iv_project: box(project)});
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error?.message?.get(), "GenerateSet must reject the profile error").to.match(
+        /line_length.*line 1, template line \d+, node [^:]+: Line exceeds 255 characters/);
+    } finally {
+      abap.Classes.ZCL_OSD_DSL_MPC.render_model = renderer;
+    }
+  });
+
+  it("returns non-ASCII comment warnings beside generated files", async () => {
+    const project = await importProject("warning line", readFileSync(FIXTURES[2], "utf8"));
+    // generate renders through render_model (one model, built once)
+    const renderer = abap.Classes.ZCL_OSD_DSL_MPC.render_model;
+    abap.Classes.ZCL_OSD_DSL_MPC.render_model = async (...args) => {
+      const result = await renderer.call(abap.Classes.ZCL_OSD_DSL_MPC, ...args);
+      result.get().lines.array()[0].set("*é");
+      return result;
+    };
+    try {
+      const files = (await abap.Classes.ZCL_STG_SEGW_GEN.generate({iv_project: box(project)})).array();
+      const warningsFile = files.find((file) => file.get().name.get().endsWith(".clas.warnings.json"));
+      expect(warningsFile, "warnings artifact").to.exist;
+      const warnings = JSON.parse(warningsFile.get().content.get()).warnings;
+      expect(warnings).to.deep.include({line: 1, template_line: 1, node: `project/${project}`, rule: "non_ascii", text: "Character outside 7-bit ASCII"});
+    } finally {
+      abap.Classes.ZCL_OSD_DSL_MPC.render_model = renderer;
+    }
   });
 
   it("writes the class and one trace entry per line", async () => {

@@ -275,6 +275,13 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
       IMPORTING
         is_model         TYPE ty_model
       RETURNING
+        VALUE(rv_source) TYPE string
+      RAISING cx_static_check.
+
+    CLASS-METHODS mpc_source_legacy
+      IMPORTING
+        is_model         TYPE ty_model
+      RETURNING
         VALUE(rv_source) TYPE string.
 
 * JavaScript's slice: out of range gives what is there, not an exception
@@ -904,6 +911,14 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
   METHOD generate.
     DATA ls_model TYPE ty_model.
     DATA ls_file  TYPE ty_file.
+    DATA ls_result TYPE zcl_osd_tpl=>ty_result.
+    DATA lo_json TYPE REF TO zif_ajson.
+    DATA lv_model_json TYPE string.
+    DATA lt_findings TYPE zcl_osd_dsl_profile=>tt_finding.
+    DATA ls_finding TYPE zcl_osd_dsl_profile=>ty_finding.
+    DATA lx_error TYPE REF TO cx_static_check.
+    DATA lv_warning_json TYPE string.
+    DATA lv_warning_first TYPE abap_bool.
 
     ls_model = build_model( iv_project ).
     IF ls_model-mpc IS INITIAL.
@@ -911,9 +926,49 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
         EXPORTING
           message = |{ iv_project }: no MPC class in the generated artifacts (SBD_GA)|.
     ENDIF.
-    ls_file-name    = file_name( iv_class = ls_model-mpc iv_ext = '.clas.abap' ).
-    ls_file-content = mpc_source( ls_model ).
+    TRY.
+        " one model, built once: rendered, checked and traced from the same tree
+        lv_model_json = zcl_osd_dsl_mpc=>project_model_json( ls_model ).
+        lo_json = zcl_ajson=>parse( lv_model_json ).
+        ls_result = zcl_osd_dsl_mpc=>render_model( lo_json ).
+        lt_findings = zcl_osd_dsl_profile=>check(
+          iv_profile = 'abap' iv_strict = abap_false
+          is_result = ls_result io_model = lo_json ).
+        ls_file-name = file_name( iv_class = ls_model-mpc iv_ext = '.clas.trace.json' ).
+        ls_file-content = zcl_osd_dsl_trace=>sidecar(
+          iv_generator = 'dsl-mpc' iv_template = 'mpc_class'
+          io_model = lo_json is_result = ls_result iv_model_json = lv_model_json ).
+      CATCH cx_static_check INTO lx_error.
+        RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+          EXPORTING message = |{ ls_model-mpc }: { lx_error->get_text( ) }|.
+    ENDTRY.
+    LOOP AT lt_findings INTO ls_finding WHERE severity = 'E'.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING message = |{ ls_model-mpc }: { ls_finding-rule } at line { ls_finding-line }, template line { ls_finding-template_line }, node { ls_finding-node }: { ls_finding-text }|.
+    ENDLOOP.
     APPEND ls_file TO rt_files.
+    ls_file-name = file_name( iv_class = ls_model-mpc iv_ext = '.clas.abap' ).
+    ls_file-content = zcl_osd_tpl=>to_string( ls_result ).
+    INSERT ls_file INTO rt_files INDEX 1.
+*   Warnings travel beside the class; ordinary projects gain only the trace.
+    lv_warning_json = `{"warnings":[`.
+    lv_warning_first = abap_true.
+    LOOP AT lt_findings INTO ls_finding WHERE severity = 'W'.
+      IF lv_warning_first = abap_false.
+        lv_warning_json = lv_warning_json && `,`.
+      ENDIF.
+      lv_warning_first = abap_false.
+      lv_warning_json = lv_warning_json && `{"line":` && |{ ls_finding-line }|
+        && `,"template_line":` && |{ ls_finding-template_line }|
+        && `,"node":"` && zcl_stg_json=>escape( ls_finding-node )
+        && `","rule":"` && zcl_stg_json=>escape( ls_finding-rule )
+        && `","text":"` && zcl_stg_json=>escape( ls_finding-text ) && `"}`.
+    ENDLOOP.
+    IF lv_warning_first = abap_false.
+      ls_file-name = file_name( iv_class = ls_model-mpc iv_ext = '.clas.warnings.json' ).
+      ls_file-content = lv_warning_json && `]}`.
+      APPEND ls_file TO rt_files.
+    ENDIF.
     ls_file-name    = file_name( iv_class = ls_model-mpc iv_ext = '.clas.xml' ).
     ls_file-content = zcl_stg_segw_gen_dpc=>mpc_xml( ls_model ).
     APPEND ls_file TO rt_files.
@@ -1621,6 +1676,10 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD mpc_source.
+    rv_source = zcl_osd_tpl=>to_string( zcl_osd_dsl_mpc=>render_class( is_model ) ).
+  ENDMETHOD.
+
+  METHOD mpc_source_legacy.
     DATA lv_cls       TYPE string.
     DATA lv_has_assoc TYPE abap_bool.
     DATA lv_has_act   TYPE abap_bool.
