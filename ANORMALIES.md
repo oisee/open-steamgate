@@ -2784,3 +2784,23 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: abaplint/transpiler, backlog, in the same branch `fae-blocks` as the blocking change
 - Regression-test location: upstream `test/database.ts` ("FOR ALL ENTRIES, UP TO counts the whole result, not each driving row": 3 rows; 6 without the fix)
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-fae-leftovers — four FOR ALL ENTRIES shapes the transpiled code gets wrong, older than the blocking change
+
+- Status: `open` (recorded; upstream: needs an issue, none sent)
+- Discovery date: `2026-09-30`
+- Affected versions: abaplint/transpiler main as of 2026-09-30 and the pin here (`oisee/transpiler` e97e82c7); all four behave the same before and after the blocking change of ANOMALY-2026-09-30-fae-one-select-per-row (a critic ran each on both builds)
+- Affected ABAP statement, runtime API or adapter: `SELECT ... FOR ALL ENTRIES IN itab WHERE ...` (`packages/transpiler/src/statements/select.ts`, the `SQLForAllEntries` branch)
+- Minimal ABAP reproducer: over a table of eight rows, with a non-empty driving table:
+  1. `APPENDING TABLE lt` into a table that already holds rows: the rows already there are gone (the branch clears the target before the first SELECT)
+  2. `ORDER BY id DESCENDING` with `UP TO 2 ROWS`: the rows come back in ascending order, because the duplicate removal sorts by every field after the last SELECT
+  3. a dynamic condition, `WHERE (lv_where)` naming a component of the driving table: the SQL names the driving table as a column ("no such column")
+  4. a condition with `IN` a range table of the driving row: no rows
+- Exact command used to run it: the critic's throwaway programs run through the transpiler's own test harness (`test/_utils.js` `runFiles`, SQLite); not committed
+- Expected SAP behaviour: not measured on a system. What SAP documents: APPENDING keeps the target's rows; with FOR ALL ENTRIES only ORDER BY PRIMARY KEY is allowed, so case 2 is a syntax question as much as a runtime one; a dynamic condition and IN are allowed
+- Actual open-abap behaviour: as listed above
+- Impact on open-steamgate: none found in the tree (no FOR ALL ENTRIES here uses these shapes); a real program that does would read wrong rows
+- Smallest safe workaround: avoid the four shapes; for APPENDING, select into a second table and append it
+- Upstream: abaplint/transpiler, needs an issue (one issue for the four, after a probe on A4H for cases 1, 3 and 4)
+- Regression-test location: none yet
+- Upstream version containing a fix: none yet
