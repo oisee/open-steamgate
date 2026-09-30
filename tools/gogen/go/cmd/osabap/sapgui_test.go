@@ -11,7 +11,7 @@ import (
 )
 
 func TestSAPGUIOptionIsSeparateFromReportArguments(t *testing.T) {
-	cli, err := reportargs.Parse([]string{"--name", "Alice", "-sapgui=127.0.0.1:3201", "--loud"}, hostFlags,
+	cli, err := reportargs.Parse([]string{"--name", "Alice", "-sapgui=127.0.0.1:3201", "--loud"}, reportargs.HostFlags,
 		reportargs.Report{Names: []string{"P_NAME", "P_LOUD"}, Checkboxes: map[string]bool{"P_LOUD": true}})
 	if err != nil {
 		t.Fatal(err)

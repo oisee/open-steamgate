@@ -114,8 +114,10 @@ is already built. Errors name the way out:
 
 For one release, the old double-dash spelling of a host flag (`--db`,
 `--allow-read`, ...) is still accepted, with a line on stderr, as long as the
-report has no option of that name. The reader is
-`tools/gogen/go/reportargs`, which `osd run` shares.
+report has no option of that name. The reader and the one list of host
+flags (`reportargs.HostFlags`) are in `tools/gogen/go/reportargs`; `osd run`
+passes its arguments to the report binary untouched, so nothing else parses
+them.
 
 ## Headless CLI
 

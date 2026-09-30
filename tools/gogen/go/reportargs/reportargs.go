@@ -34,6 +34,20 @@ type HostFlag struct {
 	Value ValueKind
 }
 
+// HostFlags is the one list of the host's flags: osabap reads it, and osd run
+// passes its arguments through to the report binary untouched, so there is
+// no second list to drift from this one.
+var HostFlags = []HostFlag{
+	{Name: "db", Value: Required},
+	{Name: "allow-read", Value: Required},
+	{Name: "allow-write", Value: Required},
+	{Name: "dataset-home", Value: Required},
+	{Name: "dataset-audit", Value: Required},
+	{Name: "params", Value: Required},
+	{Name: "sapgui", Value: Optional},
+	{Name: "sapgui-no-launch", Value: NoValue},
+}
+
 // Report is the selection screen as the command line sees it.
 type Report struct {
 	// Names are the selection names, P_ADD, S_TAG, ...

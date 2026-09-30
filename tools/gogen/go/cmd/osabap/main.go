@@ -98,22 +98,9 @@ func main() {
 	}
 }
 
-// hostFlags are the host's, one dash each (reportargs): two namespaces, so a
-// report option of the same name (--db for P_DB) never meets them
-var hostFlags = []reportargs.HostFlag{
-	{Name: "db", Value: reportargs.Required},
-	{Name: "allow-read", Value: reportargs.Required},
-	{Name: "allow-write", Value: reportargs.Required},
-	{Name: "dataset-home", Value: reportargs.Required},
-	{Name: "dataset-audit", Value: reportargs.Required},
-	{Name: "params", Value: reportargs.Required},
-	{Name: "sapgui", Value: reportargs.Optional},
-	{Name: "sapgui-no-launch", Value: reportargs.NoValue},
-}
-
 // commandLine reads the arguments once; -help prints the usage and ends here
 func commandLine(args []string) reportargs.Result {
-	cli, err := reportargs.Parse(args, hostFlags, reportargs.Report{Names: appSelectionNames, Checkboxes: appCheckboxes})
+	cli, err := reportargs.Parse(args, reportargs.HostFlags, reportargs.Report{Names: appSelectionNames, Checkboxes: appCheckboxes})
 	if err != nil {
 		panic(err)
 	}
