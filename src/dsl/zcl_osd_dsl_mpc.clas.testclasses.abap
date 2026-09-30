@@ -1,5 +1,6 @@
-* DANGEROUS: imported_project writes a project through ImportSet; setup and
-* teardown remove its rows, so the unit database is left as it was found.
+* DANGEROUS: imported_project writes the project ZUT_DSL through ImportSet.
+* The name is this test's own; setup and teardown delete its rows, and any
+* ZUT_DSL rows found before the test are lost.
 CLASS ltcl_dsl_mpc DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT FINAL.
   PRIVATE SECTION.
     METHODS setup.
@@ -9,6 +10,17 @@ CLASS ltcl_dsl_mpc DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT FI
     METHODS imported_project FOR TESTING RAISING cx_static_check.
     METHODS compare_project IMPORTING iv_project TYPE string RAISING cx_static_check.
     METHODS fixture RETURNING VALUE(rv_xml) TYPE string.
+    METHODS node
+      IMPORTING io_json TYPE REF TO zif_ajson
+                iv_path TYPE string
+      RETURNING VALUE(rv_node) TYPE string
+      RAISING cx_static_check.
+    METHODS node_of_line
+      IMPORTING is_result TYPE zcl_osd_tpl=>ty_result
+                io_json TYPE REF TO zif_ajson
+                iv_needle TYPE string
+      RETURNING VALUE(rv_node) TYPE string
+      RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_dsl_mpc IMPLEMENTATION.
@@ -47,7 +59,7 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
       && `</_-IWBEP_-I_SBO_ET>` && lv_nl
       && `<_-IWBEP_-I_SBO_CT><_-IWBEP_-I_SBO_CT><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>ct-1</NODE_UUID><NAME>Address</NAME></_-IWBEP_-I_SBO_CT></_-IWBEP_-I_SBO_CT>` && lv_nl
       && `<_-IWBEP_-I_SBO_PR>` && lv_nl
-      && `<_-IWBEP_-I_SBO_PR><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>pp-1</NODE_UUID><PARENT_UUID>et-1</PARENT_UUID><NAME>TravelId</NAME><IS_KEY>X</IS_KEY><EDM_CORE_TYPE>Edm.String</EDM_CORE_TYPE><PROP_PRECISION>2</PROP_PRECISION><MAX_LENGTH>20</MAX_LENGTH><AS_ETAG>X</AS_ETAG></_-IWBEP_-I_SBO_PR>` && lv_nl
+      && `<_-IWBEP_-I_SBO_PR><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>pp-1</NODE_UUID><PARENT_UUID>et-1</PARENT_UUID><NAME>TravelId</NAME><IS_KEY>X</IS_KEY><EDM_CORE_TYPE>Edm.String</EDM_CORE_TYPE><PROP_PRECISION>2</PROP_PRECISION><MAX_LENGTH>20</MAX_LENGTH><CREATABLE>X</CREATABLE><UPDATABLE>X</UPDATABLE><SORTABLE>X</SORTABLE><SEMANTICS>url</SEMANTICS><AS_ETAG>X</AS_ETAG></_-IWBEP_-I_SBO_PR>` && lv_nl
       && `<_-IWBEP_-I_SBO_PR><PROJECT>ZUT_DSL</PROJECT><NODE_UUID>pp-2</NODE_UUID><PARENT_UUID>et-1</PARENT_UUID><NAME>Address</NAME><COMPLEX_TYPE>ct-1</COMPLEX_TYPE></_-IWBEP_-I_SBO_PR>` && lv_nl
       && `</_-IWBEP_-I_SBO_PR>` && lv_nl
       && `<_-IWBEP_-I_SBO_PRT><_-IWBEP_-I_SBO_PRT><PROJECT>ZUT_DSL</PROJECT><SYLANGU>E</SYLANGU><NODE_UUID>pp-1</NODE_UUID><PROP_LABEL>Travel</PROP_LABEL></_-IWBEP_-I_SBO_PRT></_-IWBEP_-I_SBO_PRT>` && lv_nl
@@ -92,9 +104,6 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
     DATA lv_length TYPE i.
     DATA lv_count TYPE i.
     DATA lo_json TYPE REF TO zif_ajson.
-    DATA lv_path TYPE string.
-    DATA lv_node TYPE string.
-    DATA lv_pos TYPE i.
     ls_model = zcl_stg_segw_gen=>build_model( iv_project ).
     lv_source = zcl_stg_segw_gen=>mpc_source( ls_model ).
     IF iv_project = 'ZUT_DSL'.
@@ -106,6 +115,8 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
       cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `set_precison(` ) ).
       cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `set_maxlength(` ) ).
       cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `TravelAltSet` ) ).
+      cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `set_semantic( 'url' )` ) ).
+      cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `set_sortable( abap_true )` ) ).
     ENDIF.
     LOOP AT ls_model-entity_types INTO ls_type.
       lv_count = lv_count + 1.
@@ -121,29 +132,61 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
       cl_abap_unit_assert=>assert_equals( act = lines( ls_result-trace ) exp = lines( ls_result-lines ) ).
       lo_json = zcl_osd_dsl_mpc=>entity_model( is_type = ls_type iv_mpc = ls_model-mpc ).
       LOOP AT ls_result-trace INTO ls_trace.
-        lv_path = ls_trace-path.
-        CLEAR lv_node.
-        WHILE lv_node IS INITIAL.
-          IF lv_path = `/`.
-            lv_node = lo_json->get( `/@id` ).
-            EXIT.
-          ENDIF.
-          lv_node = lo_json->get( lv_path && `/@id` ).
-          IF lv_node IS INITIAL.
-            FIND REGEX `/[^/]+$` IN lv_path MATCH OFFSET lv_pos.
-            IF sy-subrc <> 0.
-              lv_path = `/`.
-            ELSE.
-              lv_path = substring( val = lv_path len = lv_pos ).
-              IF lv_path IS INITIAL.
-                lv_path = `/`.
-              ENDIF.
-            ENDIF.
-          ENDIF.
-        ENDWHILE.
-        cl_abap_unit_assert=>assert_true( xsdbool( lv_node CP `entity/*` ) ).
+        IF ls_trace-path <> `/`.
+          cl_abap_unit_assert=>assert_true( act = lo_json->exists( ls_trace-path ) msg = ls_trace-path ).
+        ENDIF.
+        cl_abap_unit_assert=>assert_true( xsdbool( node( io_json = lo_json iv_path = ls_trace-path ) CP `entity/*` ) ).
       ENDLOOP.
+      IF iv_project = 'ZUT_DSL' AND ls_type-name = 'Travel'.
+        cl_abap_unit_assert=>assert_equals(
+          exp = `entity/Travel/property/TravelId`
+          act = node_of_line( is_result = ls_result io_json = lo_json
+                              iv_needle = `create_property( iv_property_name = 'TravelId'` ) ).
+        cl_abap_unit_assert=>assert_equals(
+          exp = `entity/Travel/property/TravelId`
+          act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `set_semantic( 'url' )` ) ).
+        cl_abap_unit_assert=>assert_equals(
+          exp = `entity/Travel/set/TravelAltSet`
+          act = node_of_line( is_result = ls_result io_json = lo_json
+                              iv_needle = `create_entity_set( 'TravelAltSet' )` ) ).
+      ENDIF.
     ENDLOOP.
     cl_abap_unit_assert=>assert_true( xsdbool( lv_count > 0 ) ).
+  ENDMETHOD.
+  METHOD node.
+    " the nearest @id on the data path, climbing to the root
+    DATA lv_path TYPE string.
+    DATA lv_pos TYPE i.
+    lv_path = iv_path.
+    DO.
+      IF lv_path IS INITIAL OR lv_path = `/`.
+        rv_node = io_json->get( `/@id` ).
+        RETURN.
+      ENDIF.
+      rv_node = io_json->get( lv_path && `/@id` ).
+      IF rv_node IS NOT INITIAL.
+        RETURN.
+      ENDIF.
+      FIND REGEX `/[^/]+$` IN lv_path MATCH OFFSET lv_pos.
+      IF sy-subrc <> 0.
+        lv_path = `/`.
+      ELSE.
+        lv_path = substring( val = lv_path len = lv_pos ).
+      ENDIF.
+    ENDDO.
+  ENDMETHOD.
+
+  METHOD node_of_line.
+    DATA lv_line TYPE string.
+    DATA ls_trace TYPE zcl_osd_tpl=>ty_trace.
+    LOOP AT is_result-lines INTO lv_line.
+      IF lv_line CS iv_needle.
+        READ TABLE is_result-trace INTO ls_trace WITH KEY line = sy-tabix.
+        cl_abap_unit_assert=>assert_subrc( msg = iv_needle ).
+        rv_node = node( io_json = io_json iv_path = ls_trace-path ).
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+    cl_abap_unit_assert=>fail( msg = `no line with ` && iv_needle ).
   ENDMETHOD.
 ENDCLASS.
