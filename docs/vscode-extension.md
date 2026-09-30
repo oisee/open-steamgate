@@ -1033,7 +1033,7 @@ the browser again. Easy Access transactions (Run) keep their own
 | Expandable runnable TRAN | Transaction details | Run in Easy Access |
 | Non-runnable TRAN leaf | Transaction details and reason | No run |
 | Layers group, base layer, workspace layer | Layer explanation | No additional action |
-| Services root, kind group, pack group | Group explanation | No additional action |
+| Services root, kind group, layer group | Group explanation | No additional action |
 | Expandable APP, OData, ICF service row | Service details | Open service or app using `osd.openIn` |
 | APP, OData or ICF leaf with a URL (no children) | Open app or service using `osd.openIn` (a VS Code tab by default) | Reveal the same tab |
 | APC service row | Service details | No page to open |
@@ -1041,9 +1041,17 @@ the browser again. Easy Access transactions (Run) keep their own
 | OData entity set leaf | Open DPC method | Open again |
 | Empty/start-system placeholder | Why this group is empty | No additional action |
 
-Service rows are grouped by kind by default. Use the view title toggle to group
-them by pack; rows with no pack appear under **Unpacked**. The setting is
-`osd.services.groupBy`. A single click on an expandable APP, OData, ICF, or APC
+Service rows show their technical name first, with the description in grey and
+the path in the tooltip. Four view title buttons toggle name/description
+labels, cycle sorting by name/path/description, toggle grouping by kind/layer,
+and show or hide base services. They persist separately in the workspace's
+`workspaceState`. Defaults are name labels, name sorting, kind grouping, and
+base visible. Layer grouping shows **base**, each **workspace <folder>**, and
+each named pack; each layer then contains OData, Apps, ICF, and APC groups.
+The status inventory's Pack column identifies a service's layer; a workspace
+pack is shown by its source folder name. Two registrations of the same OData
+endpoint resolve to one row, with the later registration winning.
+A single click on an expandable APP, OData, ICF, or APC
 row updates one reused **Service details** webview. A service leaf with a URL
 opens that URL directly. The panel is disposed when closed and
 does not retain its hidden context. Its sections are specific to each row:
@@ -1100,7 +1108,7 @@ paths and the TSTCP parameter field used to identify parameter transactions.
 
 Pure view logic lives in `editors/vscode/lib.js` and is held without VS Code
 or a live server by `test/vscode-extension.mjs`: service normalization,
-kind/pack grouping, TRAN click classification and details, target-specific context actions, manifest data-source
+kind/layer grouping, sorting, deduplication, TRAN click classification and details, target-specific context actions, manifest data-source
 resolution, HTTP test matching, closure test union, dump filtering, method-line
 resolution, service-card links, and the details HTML renderer. It also checks the services and transaction routes
 against a real in-memory `ObjectStore`. `extension.js` owns the webview and
