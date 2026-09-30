@@ -33,6 +33,7 @@ import {uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tabl
 import {portabilityWarnings} from "./amdp-gen.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
+import {objectVersions, versionSource, versionsFeedDocument} from "./adt-versions.mjs";
 import {segwRegistrations} from "./segw-registry.mjs";
 import {generatorFoldersOf} from "./osd-packs.mjs";
 import {entitySetMapFor} from "./segw-entityset-map.mjs";
@@ -1802,6 +1803,50 @@ export function adtRouter(options = {}) {
         sendEntity(req, res, source);
       });
     });
+    // the versions of the source (tools/adt-versions.mjs): the feed, and one
+    // version's source. A class keeps them per include, at .../includes/
+    // <include>/versions, and so does an interface's main include, which is
+    // where vsp asks (resolveRevisionURL); everything else at .../source/main.
+    const versionsOf = (req, res, include) => answer(res, () => {
+      const part = store.read(type, req.params.name, include);
+      const base = `${BASE}/${adt}/${encodeURIComponent(String(req.params.name).toLowerCase())}` +
+        (include === undefined ? "/source/main/versions" : `/includes/${include}/versions`);
+      const feed = objectVersions(store.root, part.empty ? undefined : part.file, identity.userName);
+      if (feed.note !== "") res.set("X-OSD-History", `none: ${feed.note}`);
+      // exactly A4H's header: a string body would get "; charset=utf-8" added
+      res.set("Content-Type", "application/atom+xml;type=feed");
+      sendEntity(req, res, Buffer.from(versionsFeedDocument(part.name, type, base, feed)));
+    });
+    const versionContent = (req, res, include) => answer(res, () => {
+      const part = store.read(type, req.params.name, include);
+      let source;
+      try {
+        source = versionSource(store.root, part.empty ? undefined : part.file, req.params.version, part.source);
+      } catch (error) {
+        throw new NotFound(type, `${req.params.name} version ${req.params.version} (${error.message})`);
+      }
+      res.type("text/plain; charset=utf-8");
+      sendEntity(req, res, source);
+    });
+    router.get(`${BASE}/${adt}/:name/source/main/versions`, (req, res) => versionsOf(req, res));
+    router.get(`${BASE}/${adt}/:name/source/main/versions/:stamp/:version/content`, (req, res) => versionContent(req, res));
+    if (type === "DDLS") {
+      // a CDS source links its versions as a sibling of source/, not below it
+      router.get(`${BASE}/${adt}/:name/versions`, (req, res) => versionsOf(req, res));
+      router.get(`${BASE}/${adt}/:name/versions/:stamp/:version/content`, (req, res) => versionContent(req, res));
+    }
+    if (type === "CLAS" || type === "INTF") {
+      const includeOf = (req) => {
+        if (type === "INTF" && req.params.include !== "main") {
+          throw new NotFound(type, `${req.params.name} include ${req.params.include}`);
+        }
+        return req.params.include;
+      };
+      router.get(`${BASE}/${adt}/:name/includes/:include/versions`, (req, res) =>
+        answer(res, () => versionsOf(req, res, includeOf(req))));
+      router.get(`${BASE}/${adt}/:name/includes/:include/versions/:stamp/:version/content`, (req, res) =>
+        answer(res, () => versionContent(req, res, includeOf(req))));
+    }
     // the object structure: what a client reads before asking for one method
     // rather than the whole source. A plain full-source read never comes
     // through here, which is why wave 0 could do without it.

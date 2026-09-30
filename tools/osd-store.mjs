@@ -550,7 +550,8 @@ export class ObjectStore {
       throw new NotFound(type, name);
     }
     if (type === "CLAS" && include !== "main") {
-      const suffix = INCLUDES[include];
+      // own keys only: "constructor" or "toString" is no include
+      const suffix = Object.hasOwn(INCLUDES, include) ? INCLUDES[include] : undefined;
       if (suffix === undefined) {
         throw new NotFound(type, `${name} include ${include}`);
       }
@@ -593,7 +594,7 @@ export class ObjectStore {
     }
     let file = entry.file;
     if (type === "CLAS" && include !== "main") {
-      const suffix = INCLUDES[include];
+      const suffix = Object.hasOwn(INCLUDES, include) ? INCLUDES[include] : undefined;
       if (suffix === undefined) {
         throw new NotSupported(`class include ${include}`);
       }
@@ -1301,7 +1302,7 @@ export class ObjectStore {
       file = join(root.path, "osd", fileOf(name) + meta.ext);
     }
     if (type === "CLAS" && include !== "main") {
-      const suffix = INCLUDES[include];
+      const suffix = Object.hasOwn(INCLUDES, include) ? INCLUDES[include] : undefined;
       if (suffix === undefined) {
         throw new NotSupported(`class include ${include}`);
       }

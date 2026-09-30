@@ -414,14 +414,17 @@ export function classDocument(object, options = {}) {
   // These are the two the system points at the same href: the plain source and
   // its HTML rendering. Only text/plain is distinguished here — that URL
   // answers with the source whichever is asked for, and the client picks the
-  // text/plain one by type. The other two A4H links, versions and enhancement
-  // options, are deliberately not copied: nothing here serves them, and a link
-  // that 404s is the failure this round was spent removing.
+  // text/plain one by type. The versions link is served now
+  // (tools/adt-versions.mjs) and comes first, as in the recorded corpus;
+  // enhancement options are still not copied: nothing here serves them, and a
+  // link that 404s is the failure this round was spent removing.
   const include = (kind, sourceUri) =>
     `  <class:include class:includeType="${kind}" abapsource:sourceUri="${sourceUri}"` +
     ' adtcore:name="" adtcore:type="CLAS/I"' +
     ` adtcore:changedAt="${when}" adtcore:version="${object.version ?? "active"}"` +
     ` adtcore:createdAt="${when}" adtcore:changedBy="${xmlEscape(who)}" adtcore:createdBy="${xmlEscape(who)}">\n` +
+    `    <atom:link href="includes/${kind}/versions" rel="http://www.sap.com/adt/relations/versions"` +
+    ' xmlns:atom="http://www.w3.org/2005/Atom"/>\n' +
     `    <atom:link href="${sourceUri}" rel="http://www.sap.com/adt/relations/source" type="text/plain"` +
     ' xmlns:atom="http://www.w3.org/2005/Atom"/>\n' +
     `    <atom:link href="${sourceUri}" rel="http://www.sap.com/adt/relations/source" type="text/html"` +
