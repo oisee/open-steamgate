@@ -1813,8 +1813,9 @@ export function adtRouter(options = {}) {
         (include === undefined ? "/source/main/versions" : `/includes/${include}/versions`);
       const feed = objectVersions(store.root, part.file, identity.userName);
       if (feed.note !== "") res.set("X-OSD-History", `none: ${feed.note}`);
-      res.type("application/atom+xml;type=feed; charset=utf-8");
-      sendEntity(req, res, versionsFeedDocument(store.find(type, req.params.name).name, base, feed));
+      // exactly A4H's header: a string body would get "; charset=utf-8" added
+      res.set("Content-Type", "application/atom+xml;type=feed");
+      sendEntity(req, res, Buffer.from(versionsFeedDocument(store.find(type, req.params.name).name, type, base, feed)));
     });
     const versionContent = (req, res, include) => answer(res, () => {
       const part = store.read(type, req.params.name, include);

@@ -63,15 +63,21 @@ same git history over ADT (`tools/adt-versions.mjs`, routes in
   - An object git has no history for has `00000` only, the way a local object
     on a system does, and the response says why in `X-OSD-History`.
 - **Each version** reads back at `<feed>/<yyyymmddhhmmss>/<nnnnn>/content` as
-  `text/plain`: the URI shape A4H writes. The timestamp segment is informational;
-  the number selects the version. A number the feed does not list is 404, never
-  the active source.
-- **Not yet checked against a raw A4H capture.** The feed's XML is built from
-  what the clients read (abap-adt-api: `atom:content@src`, `atom:title`,
-  `atom:updated`, `atom:author/atom:name`; vsp: also `atom:id`) and the facts a
-  probe returned through vsp. The recorded corpus has the links but no feed and
-  no content exchange. No transport link is written, since the facade serves no
-  transport requests and a link that 404s is worse than none.
+  `text/plain`: the URI shape A4H writes. The segment selects nothing, the number
+  does; a number the feed does not list is 404, never the active source.
+- **Checked against a raw A4H capture** (foreman-dell, 2026-09-30): the response
+  header `application/atom+xml;type=feed`, and the root and the `00000` entry
+  byte for byte. That means one line with no whitespace, `adtcore` declared and
+  unused, the title `Version List of <NAME> (<TYPE>)` (`REPS` for a program,
+  `CLAS` for a class include), and the feed's own `atom:updated` and the `00000`
+  segment fixed at `1970-01-01T10:11:23Z` / `19700101101123`. The entry has
+  author, content, id, updated, in that order, with no title and no link, and
+  its `atom:updated` is the real date.
+- **Design, not oracle: the commit entries.** A4H has no transported version to
+  measure, so an entry for `00001`..`n` is the same shape plus the commit
+  subject as `atom:title` and the commit's own time in the segment. No transport
+  link is written, since the facade serves no transport requests and a link that
+  404s is worse than none.
 
 ## Next, on the same service
 

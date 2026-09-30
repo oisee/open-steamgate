@@ -3,16 +3,19 @@
 // .../includes/<include>/versions list 00000 (the working tree) and one
 // version per commit, oldest 00001, and each entry's content URI reads that
 // version back. What a client parses is abap-adt-api's reader contract
-// (atom:content@src, atom:title, atom:updated, atom:author/atom:name); the
-// feed XML itself is not yet checked against a raw A4H capture.
+// (atom:content@src, atom:title, atom:updated, atom:author/atom:name). The
+// root and the 00000 entry are checked byte for byte against a raw A4H
+// capture (foreman-dell, 2026-09-30); a commit's entry is design, since A4H
+// has no transported version to measure.
 import {expect} from "chai";
 import express from "express";
 import {execFileSync} from "node:child_process";
-import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
+import {identity} from "../tools/osd-identity.mjs";
 
 describe("tools/adt-facade: versions of an object out of git", function () {
   this.timeout(30000);
@@ -68,7 +71,8 @@ describe("tools/adt-facade: versions of an object out of git", function () {
     expect(feed.type).to.match(/^application\/atom\+xml/);
     const list = entries(feed.text);
     expect(list.map((e) => e.id)).to.deep.equal(["00000", "00002", "00001"]);
-    expect(list.map((e) => e.title)).to.deep.equal(["", "second", "first"]);
+    // 00000 carries no title at all on A4H; a commit carries its subject
+    expect(list.map((e) => e.title)).to.deep.equal([undefined, "second", "first"]);
     expect(list[1].author).to.equal("TESTAUTHOR");
     expect(list[1].src).to.match(/^\/sap\/bc\/adt\/programs\/programs\/zver\/source\/main\/versions\/\d{14}\/00002\/content$/);
     for (const e of list) expect(Number.isNaN(Date.parse(e.updated))).to.equal(false);
@@ -99,6 +103,23 @@ describe("tools/adt-facade: versions of an object out of git", function () {
     const list = entries(await response.text());
     expect(list.map((e) => e.id)).to.deep.equal(["00000"]);
     expect((await get(list[0].src)).text).to.equal("REPORT zloose.\n");
+  });
+
+  it("writes the feed root and the 00000 entry exactly as A4H does", async () => {
+    writeFileSync(join(root, "src", "zexact.prog.abap"), "REPORT zexact.\n");
+    const at = new Date("2012-10-22T16:13:47Z");
+    utimesSync(join(root, "src", "zexact.prog.abap"), at, at);
+    const response = await fetch(new URL("/sap/bc/adt/programs/programs/zexact/source/main/versions", base));
+    expect(response.headers.get("content-type")).to.equal("application/atom+xml;type=feed");
+    // A4H's body for RSPARAM, with the name, the user and the path swapped in
+    expect(await response.text()).to.equal('<?xml version="1.0" encoding="utf-8"?>' +
+      '<atom:feed xmlns:atom="http://www.w3.org/2005/Atom" xmlns:adtcore="http://www.sap.com/adt/core">' +
+      "<atom:title>Version List of ZEXACT (REPS)</atom:title><atom:updated>1970-01-01T10:11:23Z</atom:updated>" +
+      `<atom:entry><atom:author><atom:name>${identity().adt.userName}</atom:name></atom:author>` +
+      '<atom:content type="text/plain" src="/sap/bc/adt/programs/programs/zexact/source/main/versions/19700101101123/00000/content"/>' +
+      "<atom:id>00000</atom:id><atom:updated>2012-10-22T16:13:47Z</atom:updated></atom:entry></atom:feed>");
+    const klass = await get("/sap/bc/adt/oo/classes/zcl_ver/includes/main/versions");
+    expect(klass.text).to.include("<atom:title>Version List of ZCL_VER (CLAS)</atom:title>");
   });
 
   it("links the feed from the program and from every class include", async () => {

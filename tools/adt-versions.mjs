@@ -51,7 +51,7 @@ export function objectVersions(root, file, user) {
     author: modified || newest === undefined ? user : sapUserOf(newest.author),
     title: "",
   };
-  active.stamp = stampOf(active.date);
+  active.stamp = ACTIVE_STAMP;
   const versions = [active, ...commits.map((entry, index) => {
     const date = new Date(entry.authoredAt);
     return {
@@ -67,29 +67,39 @@ export function objectVersions(root, file, user) {
   return {versions, note: history.available === true ? "" : history.reason};
 }
 
+// what A4H writes for the active version: the segment and the feed's own
+// atom:updated are this constant, whatever the object (foreman-dell's raw
+// capture, 2026-09-30), while the entry's atom:updated is its real date
+const ACTIVE_STAMP = "19700101101123";
+const ACTIVE_UPDATED = "1970-01-01T10:11:23Z";
+
+// the type in the feed title: REPS for a program's source, CLAS for a class
+// include (measured); the rest are the object's own type (not measured)
+const TITLE_TYPE = {PROG: "REPS", INCL: "REPS", CLAS: "CLAS"};
+
 /**
- * The feed. `base` is the URI the feed answers at (…/source/main/versions);
- * each entry's content is <base>/<stamp>/<version>/content, the shape A4H
- * writes, which a client takes verbatim from atom:content@src.
+ * The feed. `base` is the absolute path the feed answers at
+ * (…/source/main/versions); each entry's content is
+ * <base>/<stamp>/<version>/content, which a client takes verbatim from
+ * atom:content@src. The root and the 00000 entry are A4H's byte for byte
+ * (one line, adtcore declared and unused, entry children author, content,
+ * id, updated, no title, no link). A4H has no transported version to
+ * measure, so a commit's entry is this design: the same shape plus its
+ * subject as atom:title, and its own date in the segment.
  */
-export function versionsFeedDocument(name, base, {versions}) {
-  const entries = versions.map((v) => `  <atom:entry>
-    <atom:author>
-      <atom:name>${escape(v.author)}</atom:name>
-    </atom:author>
-    <atom:content type="text/plain" src="${escape(`${base}/${v.stamp}/${v.version}/content`)}"/>
-    <atom:id>${v.version}</atom:id>
-    <atom:title>${escape(v.title)}</atom:title>
-    <atom:updated>${v.date.toISOString()}</atom:updated>
-  </atom:entry>`).join("\n");
-  const updated = versions[0]?.date ?? new Date(0);
-  return `<?xml version="1.0" encoding="utf-8"?>
-<atom:feed xmlns:atom="http://www.w3.org/2005/Atom" xmlns:adtcore="http://www.sap.com/adt/core">
-  <atom:title>Version List of ${escape(name)}</atom:title>
-  <atom:updated>${updated.toISOString()}</atom:updated>
-${entries}
-</atom:feed>
-`;
+export function versionsFeedDocument(name, type, base, {versions}) {
+  const entries = versions.map((v) => "<atom:entry>" +
+    `<atom:author><atom:name>${escape(v.author)}</atom:name></atom:author>` +
+    `<atom:content type="text/plain" src="${escape(`${base}/${v.stamp}/${v.version}/content`)}"/>` +
+    `<atom:id>${v.version}</atom:id>` +
+    (v.version === "00000" ? "" : `<atom:title>${escape(v.title)}</atom:title>`) +
+    `<atom:updated>${v.date.toISOString().replace(/\.\d{3}Z$/, "Z")}</atom:updated>` +
+    "</atom:entry>").join("");
+  return '<?xml version="1.0" encoding="utf-8"?>' +
+    '<atom:feed xmlns:atom="http://www.w3.org/2005/Atom" xmlns:adtcore="http://www.sap.com/adt/core">' +
+    `<atom:title>Version List of ${escape(name)} (${TITLE_TYPE[type] ?? escape(type)})</atom:title>` +
+    `<atom:updated>${ACTIVE_UPDATED}</atom:updated>` +
+    entries + "</atom:feed>";
 }
 
 /**
