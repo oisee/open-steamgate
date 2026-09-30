@@ -1,13 +1,18 @@
 # gogen: a Go backend for transpiled ABAP (spike)
 
-> **On main, in parts (2026-09-29).** This folder lands in three PRs:
-> **the core first** -- the generator,
-> the IR, the Go runtime (`go/abap`), the semantics harness and the
-> benchmark runner. The OSGo host (`osgo.mjs`, `osg-build.mjs`,
-> `gateway.mjs`, `go/cmd/osgo`, `go/apc`, parity) and osabap (the CLI/TUI
-> binary) follow, so the sections below that name them describe files that
-> are not here yet. CI: `.github/workflows/gogen.yml`. The root is
-> `OSG_HOME`, else `OSD_ROOT`, else the working directory (`home.mjs`).
+> **On main, in parts (2026-09-29/30).** This folder lands in three PRs:
+> the core (the generator, the IR, the Go runtime `go/abap`, the semantics
+> harness, the benchmark runner), then the OSGo host (`osgo.mjs`,
+> `osg-build.mjs`, `gateway.mjs`, `go/cmd/osgo`, `go/apc`, parity), then
+> osabap (the CLI/TUI binary), so the sections below that name osabap
+> describe files that are not here yet. CI: `.github/workflows/gogen.yml`
+> and the `osgo-host` job of `tests.yml`, which gates every change on one
+> gateway request through Go; `osgo-parity` in `gogen.yml` runs OSG's
+> suites against OSGo on a manual dispatch only. The OSGo tools need
+> the packs fetched (`node tools/osd-fetch.mjs`; `osg-build.mjs` refuses an
+> unfetched pack as `UNFETCHED`, as the Node build does) and a generation
+> (`npm run transpile`). The root is `OSG_HOME`, else `OSD_ROOT`, else the
+> working directory (`home.mjs`).
 
 A measurement, not a product. The question was whether a second backend for
 the abaplint transpiler, one that emits Go instead of JavaScript, is worth

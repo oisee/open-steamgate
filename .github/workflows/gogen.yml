@@ -13,6 +13,11 @@ name: gogen
 # the Node IR, so a change there runs this too: a pair main adds that the Go
 # runtime does not do yet goes into the strict known-gap list
 # (knowngaps_test.go, empty today), which turns red if one starts to pass.
+#
+# The OSGo host's gate is the osgo-host job of tests.yml: it depends on all
+# of src/ and the packs, so it runs on every change, from the build job's
+# tree. osgo-parity here runs OSG's own suites against Node and the binary
+# and is heavy, so it runs only when asked for (workflow_dispatch, parity).
 
 on:
   pull_request:
@@ -29,6 +34,11 @@ on:
       - 'src/demo_data/**'
       - '.github/workflows/gogen.yml'
   workflow_dispatch:
+    inputs:
+      parity:
+        description: Also run OSG's suites against OSGo (parity.mjs --fast; heavy)
+        type: boolean
+        default: false
 
 defaults:
   run:
@@ -71,3 +81,58 @@ jobs:
           go test ./abap/...
       - name: Semantics, Go and IR-as-JS against the measured answers
         run: node tools/gogen/semantics.mjs
+
+  osgo-parity:
+    if: github.event_name == 'workflow_dispatch' && inputs.parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: tools/gogen/go/go.sum
+      - name: Load the tracked source pins
+        run: node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+      # the transpiler this tree is pinned to, as tests.yml builds it (same
+      # cache key): the published one wrote wrong W3MI keys, and the Node
+      # reference must be measured on the transpiler OSG runs on
+      - name: Where the pinned transpiler lives
+        run: echo "TRANSPILER=$RUNNER_TEMP/transpiler" >> "$GITHUB_ENV"
+      - name: Restore the pinned transpiler build
+        id: transpiler_cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/transpiler
+          key: transpiler-v1-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('libs.lock.json') }}-${{ hashFiles('tools/osd-ci-transpiler-build.sh') }}
+      - name: Build the transpiler this tree is pinned to
+        if: steps.transpiler_cache.outputs.cache-hit != 'true'
+        run: bash tools/osd-ci-transpiler-build.sh build
+      - name: Verify and link the pinned transpiler
+        run: |
+          bash tools/osd-ci-transpiler-build.sh verify
+          node tools/osd-link.mjs transpiler packages/transpiler
+          node tools/osd-link.mjs transpiler-cli packages/cli
+          node tools/osd-link.mjs runtime packages/runtime
+          node tools/osd-transpiler.mjs
+      - name: The library folders and the packs
+        run: |
+          node tools/osd-libs.mjs
+          node tools/osd-libs.mjs --check
+          node tools/osd-fetch.mjs
+      - name: A generation of this tree
+        run: npm run transpile
+      - name: OSGo built
+        run: node tools/gogen/osgo.mjs
+      - name: OSG's suites against Node and OSGo
+        run: node tools/gogen/parity.mjs --fast --out "$RUNNER_TEMP/parity"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parity
+          path: ${{ runner.temp }}/parity

@@ -22,6 +22,11 @@
       "reason": "Константа рукопожатия WebSocket из RFC 6455. Опубликована в стандарте, одинакова у всех."
     },
     {
+      "file": "tools/gogen/o4dserve-js.mjs",
+      "value": "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
+      "reason": "Та же константа рукопожатия WebSocket из RFC 6455, в хосте O4D для Go-сравнения."
+    },
+    {
       "file": "tools/osd-tcp-forward.mjs",
       "value": "10.0.0.1",
       "reason": "Пример адреса в тексте справки по флагу. Ничьей сети не принадлежит."
