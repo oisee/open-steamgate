@@ -127,7 +127,8 @@ CLASS zcl_stg_json DEFINITION PUBLIC CREATE PUBLIC.
       IMPORTING
         iv_json TYPE string
       CHANGING
-        cv_off  TYPE i.
+        cv_off  TYPE i
+      RAISING zcx_stg_error.
 
     CLASS-METHODS skip_blanks
       IMPORTING
@@ -203,7 +204,13 @@ CLASS zcl_stg_json IMPLEMENTATION.
     DATA lv_len TYPE i.
 
     lv_len = strlen( iv_json ).
-    WHILE cv_off < lv_len AND iv_json+cv_off(1) IS INITIAL.
+    WHILE cv_off < lv_len.
+      IF iv_json+cv_off(1) <> space AND
+         iv_json+cv_off(1) <> cl_abap_char_utilities=>newline AND
+         iv_json+cv_off(1) <> cl_abap_char_utilities=>horizontal_tab AND
+         iv_json+cv_off(1) <> cl_abap_char_utilities=>cr_lf(1).
+        EXIT.
+      ENDIF.
       cv_off = cv_off + 1.
     ENDWHILE.
   ENDMETHOD.
@@ -213,6 +220,17 @@ CLASS zcl_stg_json IMPLEMENTATION.
     DATA lv_piece TYPE string.
     DATA lv_hex   TYPE string.
     DATA lv_x     TYPE x LENGTH 2.
+    DATA lv_low_x TYPE x LENGTH 2.
+    DATA lv_high TYPE i.
+    DATA lv_low TYPE i.
+    DATA lv_code TYPE i.
+    DATA lv_b1 TYPE x LENGTH 1.
+    DATA lv_b2 TYPE x LENGTH 1.
+    DATA lv_b3 TYPE x LENGTH 1.
+    DATA lv_b4 TYPE x LENGTH 1.
+    DATA lv_utf8 TYPE xstring.
+    DATA lv_bs TYPE xstring VALUE '08'.
+    DATA lv_ff TYPE xstring VALUE '0C'.
 
     lv_len = strlen( iv_json ).
 * cv_off is on the opening quote
@@ -224,6 +242,9 @@ CLASS zcl_stg_json IMPLEMENTATION.
         RETURN.
       ELSEIF lv_piece = '\'.
         cv_off = cv_off + 1.
+        IF cv_off >= lv_len.
+          EXIT.
+        ENDIF.
         lv_piece = iv_json+cv_off(1).
         CASE lv_piece.
           WHEN 'n'.
@@ -234,14 +255,54 @@ CLASS zcl_stg_json IMPLEMENTATION.
             lv_piece = cl_abap_char_utilities=>horizontal_tab.
           WHEN 'u'.
             cv_off = cv_off + 1.
+            IF cv_off + 4 > lv_len.
+              EXIT.
+            ENDIF.
             lv_hex = iv_json+cv_off(4).
+            IF lv_hex CN '0123456789abcdefABCDEF'.
+              EXIT.
+            ENDIF.
             lv_x = lv_hex.
-            lv_piece = cl_abap_conv_in_ce=>uccp( lv_x ).
+            lv_high = lv_x.
+            IF lv_high >= 55296 AND lv_high <= 56319.
+              cv_off = cv_off + 4.
+              IF cv_off + 6 > lv_len OR iv_json+cv_off(2) <> '\u'.
+                EXIT.
+              ENDIF.
+              cv_off = cv_off + 2.
+              lv_hex = iv_json+cv_off(4).
+              IF lv_hex CN '0123456789abcdefABCDEF'.
+                EXIT.
+              ENDIF.
+              lv_low_x = lv_hex.
+              lv_low = lv_low_x.
+              IF lv_low < 56320 OR lv_low > 57343.
+                EXIT.
+              ENDIF.
+              lv_code = 65536 + ( lv_high - 55296 ) * 1024 + lv_low - 56320.
+              lv_b1 = 240 + lv_code DIV 262144.
+              lv_b2 = 128 + ( lv_code DIV 4096 ) MOD 64.
+              lv_b3 = 128 + ( lv_code DIV 64 ) MOD 64.
+              lv_b4 = 128 + lv_code MOD 64.
+              CONCATENATE lv_b1 lv_b2 lv_b3 lv_b4 INTO lv_utf8 IN BYTE MODE.
+              lv_piece = cl_abap_codepage=>convert_from( lv_utf8 ).
+            ELSEIF lv_high >= 56320 AND lv_high <= 57343.
+              EXIT.
+            ELSE.
+              lv_piece = cl_abap_conv_in_ce=>uccp( lv_x ).
+            ENDIF.
             cv_off = cv_off + 3.
-          WHEN OTHERS.
-* \" \\ \/ and anything else: the character itself
+          WHEN '"' OR '\' OR '/'.
             lv_piece = iv_json+cv_off(1).
+          WHEN 'b'.
+            lv_piece = cl_abap_codepage=>convert_from( lv_bs ).
+          WHEN 'f'.
+            lv_piece = cl_abap_codepage=>convert_from( lv_ff ).
+          WHEN OTHERS.
+            EXIT.
         ENDCASE.
+      ELSEIF lv_piece < space.
+        EXIT.
       ENDIF.
       rv_value = rv_value && lv_piece.
       cv_off = cv_off + 1.
@@ -255,33 +316,77 @@ CLASS zcl_stg_json IMPLEMENTATION.
 
   METHOD skip_value.
     DATA lv_len   TYPE i.
-    DATA lv_depth TYPE i.
     DATA lv_char  TYPE string.
-    DATA lv_in    TYPE abap_bool.
+    DATA lv_stack TYPE string.
+    DATA lv_top TYPE c LENGTH 1.
+    DATA lv_off TYPE i.
+    DATA lv_start TYPE i.
+    DATA lv_token TYPE string.
+    DATA lv_dummy TYPE string.
 
     lv_len = strlen( iv_json ).
+    lv_start = cv_off.
+    IF cv_off >= lv_len.
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Missing JSON value'.
+    ENDIF.
+    IF iv_json+cv_off(1) = '"'.
+      lv_dummy = read_string( EXPORTING iv_json = iv_json CHANGING cv_off = cv_off ).
+      RETURN.
+    ENDIF.
     WHILE cv_off < lv_len.
       lv_char = iv_json+cv_off(1).
-      IF lv_in = abap_true.
-        IF lv_char = '\'.
-          cv_off = cv_off + 1.
-        ELSEIF lv_char = '"'.
-          lv_in = abap_false.
-        ENDIF.
-      ELSEIF lv_char = '"'.
-        lv_in = abap_true.
+      IF lv_char = '"'.
+        lv_dummy = read_string( EXPORTING iv_json = iv_json CHANGING cv_off = cv_off ).
+        CONTINUE.
       ELSEIF lv_char = '{' OR lv_char = '['.
-        lv_depth = lv_depth + 1.
+        lv_stack = lv_stack && lv_char.
       ELSEIF lv_char = '}' OR lv_char = ']'.
-        IF lv_depth = 0.
-          RETURN.
+        IF lv_stack IS INITIAL.
+          EXIT.
         ENDIF.
-        lv_depth = lv_depth - 1.
-      ELSEIF lv_char = ',' AND lv_depth = 0.
-        RETURN.
+        lv_off = strlen( lv_stack ) - 1.
+        lv_top = lv_stack+lv_off(1).
+        IF ( lv_char = '}' AND lv_top <> '{' ) OR
+           ( lv_char = ']' AND lv_top <> '[' ).
+          RAISE EXCEPTION TYPE zcx_stg_error
+            EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Mismatched JSON brackets'.
+        ENDIF.
+        lv_stack = lv_stack(lv_off).
+      ELSEIF lv_char = ',' AND lv_stack IS INITIAL.
+        EXIT.
       ENDIF.
       cv_off = cv_off + 1.
+      IF lv_stack IS INITIAL AND ( iv_json+lv_start(1) = '{' OR iv_json+lv_start(1) = '[' ).
+        EXIT.
+      ENDIF.
     ENDWHILE.
+    IF lv_stack IS NOT INITIAL.
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Unclosed JSON value'.
+    ENDIF.
+    IF iv_json+lv_start(1) = '{'.
+      lv_off = cv_off - lv_start.
+      lv_token = iv_json+lv_start(lv_off).
+      parse_object( lv_token ).
+    ELSEIF iv_json+lv_start(1) = '['.
+      lv_off = cv_off - lv_start.
+      lv_token = iv_json+lv_start(lv_off).
+      parse_array( lv_token ).
+    ENDIF.
+    IF iv_json+lv_start(1) <> '{' AND iv_json+lv_start(1) <> '['.
+      lv_off = cv_off - lv_start.
+      lv_token = iv_json+lv_start(lv_off).
+      SHIFT lv_token LEFT DELETING LEADING space.
+      SHIFT lv_token RIGHT DELETING TRAILING space.
+      IF lv_token <> 'true' AND lv_token <> 'false' AND lv_token <> 'null'.
+        FIND REGEX '^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$' IN lv_token.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zcx_stg_error
+            EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Invalid JSON value'.
+        ENDIF.
+      ENDIF.
+    ENDIF.
   ENDMETHOD.
 
   METHOD parse_array.
@@ -291,6 +396,8 @@ CLASS zcl_stg_json IMPLEMENTATION.
     DATA lv_start TYPE i.
     DATA lv_count TYPE i.
     DATA lv_elem  TYPE string.
+    DATA lv_closed TYPE abap_bool.
+    DATA lv_after_comma TYPE abap_bool.
 
     lv_len = strlen( iv_json ).
     skip_blanks( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
@@ -309,11 +416,27 @@ CLASS zcl_stg_json IMPLEMENTATION.
       ENDIF.
       lv_char = iv_json+lv_off(1).
       IF lv_char = ']'.
+        IF lv_after_comma = abap_true.
+          RAISE EXCEPTION TYPE zcx_stg_error
+            EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Trailing comma in JSON array'.
+        ENDIF.
+        lv_closed = abap_true.
+        lv_off = lv_off + 1.
         EXIT.
       ELSEIF lv_char = ','.
+        IF lv_after_comma = abap_true OR lines( rt_elements ) = 0.
+          RAISE EXCEPTION TYPE zcx_stg_error
+            EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Unexpected comma in JSON array'.
+        ENDIF.
+        lv_after_comma = abap_true.
         lv_off = lv_off + 1.
         CONTINUE.
       ENDIF.
+      IF lines( rt_elements ) > 0 AND lv_after_comma = abap_false.
+        RAISE EXCEPTION TYPE zcx_stg_error
+          EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Missing comma in JSON array'.
+      ENDIF.
+      lv_after_comma = abap_false.
       lv_start = lv_off.
 * skip_value counts the brackets itself and stops on the , or ] that ends
 * this element
@@ -327,9 +450,14 @@ CLASS zcl_stg_json IMPLEMENTATION.
       ENDIF.
       lv_count = lv_off - lv_start.
       lv_elem = iv_json+lv_start(lv_count).
-      CONDENSE lv_elem.
+      SHIFT lv_elem RIGHT DELETING TRAILING space.
       APPEND lv_elem TO rt_elements.
     ENDDO.
+    skip_blanks( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+    IF lv_closed = abap_false OR lv_off <> lv_len.
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Unclosed JSON array'.
+    ENDIF.
   ENDMETHOD.
 
   METHOD parse_object.
@@ -340,6 +468,10 @@ CLASS zcl_stg_json IMPLEMENTATION.
     DATA lv_start TYPE i.
     DATA lv_count TYPE i.
     DATA ls_pair  TYPE ihttpnvp.
+    DATA lv_wrapped TYPE abap_bool.
+    DATA lv_closed TYPE abap_bool.
+    DATA lv_need_comma TYPE abap_bool.
+    DATA lv_after_comma TYPE abap_bool.
 
     CLEAR et_nested.
     lv_len = strlen( iv_json ).
@@ -360,8 +492,28 @@ CLASS zcl_stg_json IMPLEMENTATION.
       ENDIF.
       lv_char = iv_json+lv_off(1).
       IF lv_char = '}'.
+        IF lv_after_comma = abap_true.
+          RAISE EXCEPTION TYPE zcx_stg_error
+            EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Trailing comma in JSON object'.
+        ENDIF.
+        lv_off = lv_off + 1.
+        IF lv_wrapped = abap_true.
+          skip_blanks( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+          IF lv_off >= lv_len OR iv_json+lv_off(1) <> '}'.
+            RAISE EXCEPTION TYPE zcx_stg_error
+              EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Unclosed JSON wrapper'.
+          ENDIF.
+          lv_off = lv_off + 1.
+        ENDIF.
+        lv_closed = abap_true.
         EXIT.
       ELSEIF lv_char = ','.
+        IF lv_need_comma = abap_false.
+          RAISE EXCEPTION TYPE zcx_stg_error
+            EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Unexpected comma in JSON object'.
+        ENDIF.
+        lv_need_comma = abap_false.
+        lv_after_comma = abap_true.
         lv_off = lv_off + 1.
         CONTINUE.
       ELSEIF lv_char <> '"'.
@@ -369,8 +521,14 @@ CLASS zcl_stg_json IMPLEMENTATION.
           EXPORTING
             status  = 400
             code    = 'STG/BAD_JSON'
-            message = |Unexpected { lv_char } at { lv_off } in request body|.
+          message = |Unexpected { lv_char } at { lv_off } in request body|.
       ENDIF.
+      IF lv_need_comma = abap_true.
+        RAISE EXCEPTION TYPE zcx_stg_error
+          EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Missing comma in JSON object'.
+      ENDIF.
+      lv_need_comma = abap_true.
+      lv_after_comma = abap_false.
 
       lv_name = read_string( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
       skip_blanks( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
@@ -387,6 +545,8 @@ CLASS zcl_stg_json IMPLEMENTATION.
 
       IF lv_name = 'd' AND lv_char = '{'.
 * v2 wrapper: descend
+        lv_wrapped = abap_true.
+        lv_need_comma = abap_false.
         lv_off = lv_off + 1.
         CONTINUE.
       ENDIF.
@@ -416,12 +576,17 @@ CLASS zcl_stg_json IMPLEMENTATION.
         skip_value( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
         lv_count = lv_off - lv_start.
         ls_pair-value = iv_json+lv_start(lv_count).
-        CONDENSE ls_pair-value.
+        SHIFT ls_pair-value RIGHT DELETING TRAILING space.
       ENDIF.
       IF lv_name <> '__metadata'.
         APPEND ls_pair TO rt_values.
       ENDIF.
     ENDDO.
+    skip_blanks( EXPORTING iv_json = iv_json CHANGING cv_off = lv_off ).
+    IF lv_closed = abap_false OR lv_off <> lv_len.
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING status = 400 code = 'STG/BAD_JSON' message = 'Unclosed JSON object'.
+    ENDIF.
   ENDMETHOD.
 
   METHOD epoch_ms.

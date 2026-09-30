@@ -45,6 +45,12 @@ CLASS zcl_stg_url DEFINITION PUBLIC CREATE PUBLIC.
         iv_value        TYPE string
       RETURNING
         VALUE(rv_value) TYPE string.
+  PRIVATE SECTION.
+    CLASS-METHODS segment
+      IMPORTING iv_path TYPE string
+      EXPORTING ev_name TYPE string ev_keys TYPE string
+      CHANGING cv_off TYPE i
+      RAISING zcx_stg_error.
 ENDCLASS.
 
 CLASS zcl_stg_url IMPLEMENTATION.
@@ -52,7 +58,7 @@ CLASS zcl_stg_url IMPLEMENTATION.
   METHOD parse.
     DATA lv_rest    TYPE string.
     DATA lv_segment TYPE string.
-    DATA lv_tail    TYPE string.
+    DATA lv_off     TYPE i.
 
     FIND REGEX '/sap/opu/odata/sap/([^/?]+)(.*)$' IN iv_path SUBMATCHES rs_request-service lv_rest.
     IF sy-subrc <> 0.
@@ -62,6 +68,7 @@ CLASS zcl_stg_url IMPLEMENTATION.
           code    = 'STG/NOT_ODATA'
           message = |Not an OData path: { iv_path }|.
     ENDIF.
+    rs_request-service = cl_http_utility=>unescape_url( rs_request-service ).
     rs_request-options = it_options.
 
     IF lv_rest = '' OR lv_rest = '/'.
@@ -69,35 +76,112 @@ CLASS zcl_stg_url IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    IF lv_rest CP '/$metadata*'.
+    IF lv_rest = '/$metadata' OR lv_rest = '/$metadata/'.
       rs_request-is_metadata = abap_true.
       RETURN.
     ENDIF.
 
-    IF lv_rest CP '/$batch*'.
+    IF lv_rest = '/$batch' OR lv_rest = '/$batch/'.
       rs_request-is_batch = abap_true.
       RETURN.
     ENDIF.
 
-* /<EntitySet>(<keys>)/<NavigationProperty>(<keys>)/$count, or the media
-* resource of an entity: /<EntitySet>(<keys>)/$value
-    FIND REGEX '^/([^/(]+)(?:\(([^)]*)\))?(?:/([^/($]+)(?:\(([^)]*)\))?)?(/\$count|/\$value)?/?$' IN lv_rest
-      SUBMATCHES lv_segment rs_request-key_string rs_request-nav_prop rs_request-nav_key_string lv_tail.
-    IF sy-subrc <> 0.
+    lv_off = 1.
+    segment( EXPORTING iv_path = lv_rest
+             IMPORTING ev_name = lv_segment ev_keys = rs_request-key_string
+             CHANGING cv_off = lv_off ).
+    IF lv_off < strlen( lv_rest ) AND lv_rest+lv_off(1) = '/'.
+      lv_off = lv_off + 1.
+      IF lv_off < strlen( lv_rest ).
+        IF lv_rest+lv_off = '$count' OR lv_rest+lv_off = '$count/'.
+          rs_request-is_count = abap_true.
+          lv_off = strlen( lv_rest ).
+        ELSEIF lv_rest+lv_off = '$value' OR lv_rest+lv_off = '$value/'.
+          rs_request-is_value = abap_true.
+          lv_off = strlen( lv_rest ).
+        ELSE.
+          segment( EXPORTING iv_path = lv_rest
+                   IMPORTING ev_name = rs_request-nav_prop ev_keys = rs_request-nav_key_string
+                   CHANGING cv_off = lv_off ).
+          IF lv_off < strlen( lv_rest ) AND lv_rest+lv_off(1) = '/'.
+            lv_off = lv_off + 1.
+            IF lv_rest+lv_off = '$count' OR lv_rest+lv_off = '$count/'.
+              rs_request-is_count = abap_true.
+              lv_off = strlen( lv_rest ).
+            ELSEIF lv_rest+lv_off = '$value' OR lv_rest+lv_off = '$value/'.
+              rs_request-is_value = abap_true.
+              lv_off = strlen( lv_rest ).
+            ENDIF.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+    IF lv_segment IS INITIAL OR lv_off <> strlen( lv_rest ).
       RAISE EXCEPTION TYPE zcx_stg_error
         EXPORTING
-          status  = 404
+          status  = 400
           code    = 'STG/BAD_RESOURCE_PATH'
           message = |Unsupported resource path: { lv_rest }|.
     ENDIF.
     rs_request-entity_set = cl_http_utility=>unescape_url( lv_segment ).
-    rs_request-key_string = cl_http_utility=>unescape_url( rs_request-key_string ).
     rs_request-nav_prop = cl_http_utility=>unescape_url( rs_request-nav_prop ).
-    rs_request-nav_key_string = cl_http_utility=>unescape_url( rs_request-nav_key_string ).
-    IF lv_tail = '/$count'.
-      rs_request-is_count = abap_true.
-    ELSEIF lv_tail = '/$value'.
-      rs_request-is_value = abap_true.
+  ENDMETHOD.
+
+  METHOD segment.
+    DATA lv_start TYPE i.
+    DATA lv_len TYPE i.
+    DATA lv_quote TYPE abap_bool.
+    DATA lv_char TYPE c LENGTH 1.
+    DATA lv_key_start TYPE i.
+    DATA lv_closed TYPE abap_bool.
+    DATA lv_next TYPE i.
+    DATA lv_slice_len TYPE i.
+    CLEAR: ev_name, ev_keys.
+    lv_len = strlen( iv_path ).
+    lv_start = cv_off.
+    WHILE cv_off < lv_len.
+      lv_char = iv_path+cv_off(1).
+      IF lv_char = '/' OR lv_char = '('.
+        EXIT.
+      ENDIF.
+      IF lv_char = ')'.
+        EXIT.
+      ENDIF.
+      cv_off = cv_off + 1.
+    ENDWHILE.
+    IF cv_off > lv_start.
+      lv_slice_len = cv_off - lv_start.
+      ev_name = iv_path+lv_start(lv_slice_len).
+    ENDIF.
+    IF cv_off < lv_len AND iv_path+cv_off(1) = '('.
+      cv_off = cv_off + 1.
+      lv_key_start = cv_off.
+      WHILE cv_off < lv_len.
+        lv_char = iv_path+cv_off(1).
+        IF lv_char = ''''.
+          lv_next = cv_off + 1.
+          IF lv_quote = abap_true AND lv_next < lv_len AND iv_path+lv_next(1) = ''''.
+            cv_off = cv_off + 2.
+            CONTINUE.
+          ENDIF.
+          IF lv_quote = abap_true.
+            lv_quote = abap_false.
+          ELSE.
+            lv_quote = abap_true.
+          ENDIF.
+        ELSEIF lv_char = ')' AND lv_quote = abap_false.
+          lv_closed = abap_true.
+          EXIT.
+        ENDIF.
+        cv_off = cv_off + 1.
+      ENDWHILE.
+      IF lv_closed = abap_true AND cv_off > lv_key_start.
+        lv_slice_len = cv_off - lv_key_start.
+        ev_keys = iv_path+lv_key_start(lv_slice_len).
+        cv_off = cv_off + 1.
+      ELSE.
+        CLEAR ev_name.
+      ENDIF.
     ENDIF.
   ENDMETHOD.
 
@@ -133,18 +217,74 @@ CLASS zcl_stg_url IMPLEMENTATION.
     DATA lv_part  TYPE string.
     DATA ls_key   TYPE /iwbep/s_mgw_name_value_pair.
     DATA lv_name  TYPE string.
+    DATA lv_off TYPE i.
+    DATA lv_start TYPE i.
+    DATA lv_len TYPE i.
+    DATA lv_quote TYPE abap_bool.
+    DATA lv_char TYPE c LENGTH 1.
+    DATA lv_next TYPE i.
+    DATA lv_equal TYPE i.
+    DATA lv_slice_len TYPE i.
+    DATA lv_piece TYPE string.
 
     IF iv_key_string IS INITIAL.
       RETURN.
     ENDIF.
 
-    SPLIT iv_key_string AT ',' INTO TABLE lt_parts.
+    lv_len = strlen( iv_key_string ).
+    WHILE lv_off < lv_len.
+      lv_char = iv_key_string+lv_off(1).
+      IF lv_char = ''''.
+        lv_next = lv_off + 1.
+        IF lv_quote = abap_true AND lv_next < lv_len AND iv_key_string+lv_next(1) = ''''.
+          lv_off = lv_off + 2.
+          CONTINUE.
+        ENDIF.
+        IF lv_quote = abap_true.
+          lv_quote = abap_false.
+        ELSE.
+          lv_quote = abap_true.
+        ENDIF.
+      ELSEIF lv_char = ',' AND lv_quote = abap_false.
+        lv_slice_len = lv_off - lv_start.
+        lv_piece = iv_key_string+lv_start(lv_slice_len).
+        APPEND lv_piece TO lt_parts.
+        lv_start = lv_off + 1.
+      ENDIF.
+      lv_off = lv_off + 1.
+    ENDWHILE.
+    IF lv_quote = abap_true OR lv_start = lv_len.
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING status = 400 code = 'STG/BAD_KEY' message = 'Malformed key predicate'.
+    ENDIF.
+    lv_slice_len = lv_len - lv_start.
+    lv_piece = iv_key_string+lv_start(lv_slice_len).
+    APPEND lv_piece TO lt_parts.
     LOOP AT lt_parts INTO lv_part.
-      CONDENSE lv_part.
-      IF lv_part CS '='.
-        SPLIT lv_part AT '=' INTO ls_key-name ls_key-value.
+      SHIFT lv_part LEFT DELETING LEADING space.
+      SHIFT lv_part RIGHT DELETING TRAILING space.
+      CLEAR: ls_key, lv_equal, lv_quote.
+      DO strlen( lv_part ) TIMES.
+        lv_off = sy-index - 1.
+        lv_char = lv_part+lv_off(1).
+        IF lv_char = ''''.
+          IF lv_quote = abap_true.
+            lv_quote = abap_false.
+          ELSE.
+            lv_quote = abap_true.
+          ENDIF.
+        ELSEIF lv_char = '=' AND lv_quote = abap_false.
+          lv_equal = lv_off + 1.
+          EXIT.
+        ENDIF.
+      ENDDO.
+      IF lv_equal > 0.
+        lv_slice_len = lv_equal - 1.
+        ls_key-name = lv_part(lv_slice_len).
+        ls_key-value = lv_part+lv_equal.
         CONDENSE ls_key-name.
-        CONDENSE ls_key-value.
+        SHIFT ls_key-value LEFT DELETING LEADING space.
+        SHIFT ls_key-value RIGHT DELETING TRAILING space.
       ELSEIF lines( it_key_names ) = 1.
         READ TABLE it_key_names INDEX 1 INTO lv_name.
         ls_key-name  = lv_name.
@@ -156,8 +296,30 @@ CLASS zcl_stg_url IMPLEMENTATION.
             code    = 'STG/BAD_KEY'
             message = |Key predicate must name every key property: { iv_key_string }|.
       ENDIF.
+      IF ls_key-name IS INITIAL OR ls_key-value IS INITIAL.
+        RAISE EXCEPTION TYPE zcx_stg_error
+          EXPORTING status = 400 code = 'STG/BAD_KEY' message = 'Malformed key predicate'.
+      ENDIF.
+      ls_key-name = cl_http_utility=>unescape_url( ls_key-name ).
+      ls_key-value = cl_http_utility=>unescape_url( ls_key-value ).
       ls_key-value = unquote( ls_key-value ).
+      READ TABLE rt_key_tab WITH KEY name = ls_key-name TRANSPORTING NO FIELDS.
+      IF sy-subrc = 0.
+        RAISE EXCEPTION TYPE zcx_stg_error
+          EXPORTING status = 400 code = 'STG/BAD_KEY' message = 'Duplicate key property'.
+      ENDIF.
       APPEND ls_key TO rt_key_tab.
+    ENDLOOP.
+    IF lines( rt_key_tab ) <> lines( it_key_names ).
+      RAISE EXCEPTION TYPE zcx_stg_error
+        EXPORTING status = 400 code = 'STG/BAD_KEY' message = 'Wrong number of key properties'.
+    ENDIF.
+    LOOP AT it_key_names INTO lv_name.
+      READ TABLE rt_key_tab WITH KEY name = lv_name TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        RAISE EXCEPTION TYPE zcx_stg_error
+          EXPORTING status = 400 code = 'STG/BAD_KEY' message = 'Unknown key property'.
+      ENDIF.
     ENDLOOP.
   ENDMETHOD.
 

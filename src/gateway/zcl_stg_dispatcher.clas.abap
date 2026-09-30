@@ -371,6 +371,7 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
             message = '$batch takes POST'.
       ENDIF.
       rs_response = zcl_stg_batch=>handle( iv_body         = iv_body
+                                            iv_body_x       = iv_body_x
                                            iv_content_type = iv_content_type
                                            iv_service_path = |/sap/opu/odata/sap/{ ls_service-name }|
                                            iv_host         = iv_host ).

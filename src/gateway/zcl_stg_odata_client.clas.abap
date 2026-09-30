@@ -101,12 +101,33 @@ CLASS zcl_stg_odata_client IMPLEMENTATION.
   METHOD call.
     DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
     DATA lv_text     TYPE string.
+    DATA lt_nested TYPE tihttpnvp.
+    DATA lt_values TYPE tihttpnvp.
+    DATA ls_pair TYPE ihttpnvp.
+    DATA lx_json TYPE REF TO zcx_stg_error.
 
     ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
                                                 iv_path    = |/sap/opu/odata/sap/{ mv_service }/{ iv_path }|
                                                 it_options = it_options ).
     IF ls_response-status <> 200.
-      FIND REGEX '"value":"([^"]*)"' IN ls_response-body SUBMATCHES lv_text.
+      TRY.
+          lt_values = zcl_stg_json=>parse_object(
+            EXPORTING iv_json = ls_response-body IMPORTING et_nested = lt_nested ).
+          READ TABLE lt_nested WITH KEY name = 'error' INTO ls_pair.
+          IF sy-subrc = 0.
+            lt_values = zcl_stg_json=>parse_object(
+              EXPORTING iv_json = ls_pair-value IMPORTING et_nested = lt_nested ).
+            READ TABLE lt_nested WITH KEY name = 'message' INTO ls_pair.
+            IF sy-subrc = 0.
+              lt_values = zcl_stg_json=>parse_object( ls_pair-value ).
+              READ TABLE lt_values WITH KEY name = 'value' INTO ls_pair.
+              IF sy-subrc = 0.
+                lv_text = ls_pair-value.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        CATCH zcx_stg_error INTO lx_json.
+      ENDTRY.
       IF lv_text IS INITIAL.
         lv_text = ls_response-body.
       ENDIF.
