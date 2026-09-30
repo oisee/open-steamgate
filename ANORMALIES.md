@@ -2593,3 +2593,50 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Regression-test location: none yet
 - Upstream version containing a fix: none yet
 
+### ANOMALY-2026-09-30-macro-argument-dollar — abaplint cannot parse a macro call whose argument contains "$`" or "$'"
+
+- Status: `open`
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/core` 2.120.55 and 2.120.60 (`abap/2_statements/expand_macros`)
+- Affected ABAP statement, runtime API or adapter: a call of a `DEFINE` macro with a literal argument containing `$` followed by a backtick or a quote, e.g. `` _set gv ` - $`. ``
+- Minimal ABAP reproducer: `DATA gv TYPE string. DEFINE _set. &1 = &2. END-OF-DEFINITION. _set gv ` - $`.` (also `' - $'` and `` `$` ``; `` `a$b` `` and `gv = ` - $`.` without the macro parse)
+- Exact command used to run it: a Registry over the snippet, `findIssues()` filtered to `parser_error` (a scratch script under `.local/`), on the pinned 2.120.55 and on a tarball of 2.120.60
+- Expected SAP behaviour: the macro expands and the statement is `gv = ` - $`.`; sbcgua/abap_mustache (MIT) has such calls in its tests (`zcl_mustache_test`, `zcl_mustache_parser` tests), and that code is maintained on SAP systems
+- Actual open-abap behaviour: `parser_error` "Statement does not exist in the configured ABAP version" on the macro call. `expandContents` substitutes arguments with `str.replace(reg, input)`, and a replacement string gives `` $` `` and `$'` their JavaScript meaning (the text before and after the match)
+- Impact on open-steamgate: none in OSG's code; a library that uses such macros does not build (found while evaluating abap_mustache as a template engine)
+- Smallest safe workaround: none in the tree; in an evaluation copy, avoid `$` next to a quote in macro arguments
+- Upstream: abaplint/abaplint#4342 (fork PR, 2026-09-30, after the critic gate): `str.replace(reg, () => input)` plus a test in `packages/core/test/abap/macros.ts`
+- Regression-test location: none yet; the upstream PR carries one in `packages/core/test/abap/macros.ts`
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-concatenate-lines-string-trim — `CONCATENATE LINES OF` drops trailing blanks of string rows in the transpiler runtime
+
+- Status: `open`
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/runtime` as pinned (`statements/concatenate`), and abaplint/transpiler `main` on 2026-09-30; the behaviour predates transpiler #1777, which kept it (`list.push(l.get().trimEnd())` before, `value.trimEnd()` after)
+- Affected ABAP statement, runtime API or adapter: `CONCATENATE LINES OF itab INTO str [SEPARATED BY sep]` without `RESPECTING BLANKS`, where `itab` has rows of type `string`
+- Minimal ABAP reproducer: `DATA lt TYPE string_table. DATA lv TYPE string. APPEND `a ` TO lt. APPEND `b` TO lt. CONCATENATE LINES OF lt INTO lv.` gives `ab` here
+- Exact command used to run it: sbcgua/abap_mustache as a scratch pack (`OSD_PACKS`) under `npm run unit`: `ZCL_MUSTACHE` `render_w_partials` got `Welcome toShopsky` for `Welcome to Shopsky`, because `zcl_mustache_utils=>join_strings` concatenates rendered string pieces with `CONCATENATE LINES OF`
+- Expected SAP behaviour: `a b`. The ABAP keyword documentation (7.50, CONCATENATE): "trailing blanks are usually ignored for data objects dobj1, dobj2 ... or rows in the internal table itab of fixed length"; string rows are not of fixed length. Not measured on A4H yet
+- Actual open-abap behaviour: the LINES branch calls `trimEnd()` on every row whatever its type; the non-LINES branch trims only `Character` operands, which is right
+- Impact on open-steamgate: none in `src/` or `packs/*/src` (no `CONCATENATE LINES OF` there, grep 2026-09-30); any library that joins rendered text this way loses blanks
+- Smallest safe workaround: join with a loop and `&&`, or add `RESPECTING BLANKS`
+- Upstream: parked, not pushed: branch `fix/concatenate-lines-string-blanks` in the transpiler clone (runtime change + two tests in `test/statements/concatenate.ts`, critic passed 2026-09-30; PR draft in `.local/upstream-drafts/`). Goes out after consulting dell/stoker, possibly batched (Alice, 2026-09-30)
+- Regression-test location: none yet
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-write-date-unformatted — `WRITE d TO c` leaves a date unformatted while `|{ d DATE = ENVIRONMENT }|` formats it, in the transpiler runtime
+
+- Status: `open`
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/runtime` / open-abap-core as pinned
+- Affected ABAP statement, runtime API or adapter: `WRITE <date> TO <c field> [LEFT-JUSTIFIED]` against a string template with `DATE = ENVIRONMENT`
+- Minimal ABAP reproducer: `DATA d TYPE d VALUE '20230528'. DATA c TYPE c LENGTH 20. WRITE d TO c LEFT-JUSTIFIED.` compared with `|{ d DATE = ENVIRONMENT }|`
+- Exact command used to run it: sbcgua/abap_mustache as a scratch pack under `npm run unit`: `ZCL_MUSTACHE_RENDER` `find_value_date_and_time` failed with "Expected '20230528', got '05/28/2023'"
+- Expected SAP behaviour: both follow the user's date format, so the upstream test passes on a system. Not measured on A4H
+- Actual open-abap behaviour: `WRITE ... TO` gives the internal `20230528`; the string template gives `05/28/2023`
+- Impact on open-steamgate: generated or rendered text must not depend on user formats; a generator should write dates in the internal format only
+- Smallest safe workaround: format dates explicitly, never through `ENVIRONMENT` or `WRITE TO`
+- Upstream: to be decided after an A4H probe (which of the two is off)
+- Regression-test location: none yet
+- Upstream version containing a fix: none yet
