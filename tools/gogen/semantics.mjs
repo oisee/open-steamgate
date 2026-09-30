@@ -18,6 +18,7 @@ const EXPECT = {
   // SHA-256 (Node's open-abap-core/AJSON result for this fixture).
   ZCL_GOGEN_T_AJSON: {Go: '{"a":"x","b":[7]}|44FFF909E380AA93C5444E84BC9F1D4C5FF61F2A4A18592CBE02DBF44D8B5423',
     JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
+  ZCL_GOGEN_T_WLIN: "0/2/0/1/0/0/4/0",
   ZCL_GOGEN_T_XATTR: "X",
   ZCL_GOGEN_T_SUBX: "X",
   ZCL_GOGEN_T_DELRANGE: "0/3/4 0/2 4/2",

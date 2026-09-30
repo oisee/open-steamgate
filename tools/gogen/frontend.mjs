@@ -2039,7 +2039,14 @@ function whereOf(cc, rowType, ctx, text) {
         where.push({fx, op: kids.length === 4 ? "notinitial" : "initial"});
         continue;
       }
-      throw new Unsupported(`WHERE table_line comparison: ${cc.concatTokens()}`);
+      const opT = upper(kids[1].concatTokens());
+      const op = OPS[opT] ?? opT;
+      if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE table_line operator ${op}`);
+      const v = source(kids[2], ctx, rowType);
+      const calc = numeric(rowType) || numeric(v.type) ? (rowType.k === "f" || v.type.k === "f" ? F : I) : S;
+      if (calc !== S && (charlike(rowType) || charlike(v.type))) throw new Unsupported("WHERE comparing characters with a number");
+      where.push({fx, op, value: convert(v, calc), calc});
+      continue;
     }
     let fx = null;
     if (path.length > 1 || initial) {
