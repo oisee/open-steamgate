@@ -1298,6 +1298,25 @@ something already shipped (then it is a must of the current release, like the ro
   blocker; also a possible silent bug on main).
 - must: the release draft built by CI, and its artefacts checked by content.
 - should: the honest speed measurement, Node vs Go on the whole intersection, one instrument.
+  **Measured 2026-09-30 (stoker)** at 464ff680 with the pinned transpiler e97e82c7, on the green intersection that
+  wave 3's compare named (35 classes, 289 methods, all SAME, re-verified at that SHA). Instrument: `unit-bench.mjs`
+  with `/usr/bin/time -f '%e %U %S %M'`, 3 samples, median, under `flock /tmp/osd-heavy.lock` with nothing else
+  running, on an i7-10700K (16 threads).
+
+  | | wall | cpu (user+sys) | peak memory |
+  |---|---|---|---|
+  | Node, the 35 classes | 16.32 s | 19.06 s | 830 MB |
+  | Go run, the 35 classes | 13.07 s | 13.14 s | 132 MB |
+  | Node, the 31 without TIMER/AMC/LUW/BATCH_RUNNER | 14.47 s | 18.41 s | 964 MB |
+  | Go run, the same 31 | 11.68 s | 12.71 s | 133 MB |
+  | Go cold build (empty GOCACHE) | 19.68 s | 93.3 s | 937 MB |
+  | Go warm build | 0.13 s | 0.34 s | 31 MB |
+
+  Go runs the intersection 1.25x faster on wall time, 1.45x on cpu, with 6.3x less peak memory. The suite is not
+  wait-bound: Go's cpu equals its wall, and dropping the classes that wait does not move the ratios. Profile before
+  quoting; the expected dominant cost is the per-class seed replay (each DB-opening class runs `OpenDB` over the
+  ~10.9 MB seed script), which U4 step 2 (image copy) targets. A cold build costs more than a whole Node run; a
+  warm rebuild is nearly free.
 - nice: accept ADR 0005 (lazy table providers) -- done 2026-09-30, narrowed after three reviews.
 
 **0.5**
@@ -1313,6 +1332,8 @@ something already shipped (then it is a must of the current release, like the ro
 - should: U4 step 1, process sharding of ABAP Unit on Go.
 - should: U4 step 2, Session-owned statics/DB/LUW, one goroutine per test class on a copy of the seed image; statics
   reset per test class as on A4H.
+- should: profile the Go unit binary (pprof) on the 35-class intersection, splitting seed replay / `OpenDB`,
+  emit-time init and the test bodies, before U4 step 2 is built, so its gain can be measured against a baseline.
 - should: lazy tables slice 1 (ADR 0005, accepted narrowed): the xref filled eager in its own step after the host
   listens, host readers await it; measure start and the cold first read; `lazy` only after those numbers.
 - nice: `SVRS_*` substitutes over #288's history (by key inside the FM); a `VRSD` table only once standard ABAP
