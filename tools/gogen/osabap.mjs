@@ -67,7 +67,7 @@ const program = compileProgram({
 writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
 
 // the report's own tables: their CREATE TABLEs, as the transpiler writes them
-// for the Node host, go into the binary for --db; a report without tables is
+// for the Node host, go into the binary for -db; a report without tables is
 // built without a database driver
 const tables = ddic.filter((file) => /\.tabl\.xml$/i.test(file)).map((file) => file.replace(/\.tabl\.xml$/i, "").toUpperCase());
 let schema = [];
@@ -106,4 +106,4 @@ execFileSync("go", ["build", ...(tables.length > 0 ? [] : ["-tags", "nodatabase"
   cwd: join(here, "go"), stdio: "inherit",
 });
 console.log(`osabap: ${name}, ${program.classes.length} classes, ${program.partial.length} statement stubs` +
-  `${tables.length ? `, tables ${tables.join(", ")} (--db)` : ""} -> ${bin}`);
+  `${tables.length ? `, tables ${tables.join(", ")} (-db)` : ""} -> ${bin}`);

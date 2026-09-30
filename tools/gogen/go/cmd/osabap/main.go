@@ -1,6 +1,6 @@
 // osabap runs one converted ABAP report as a native command. Arguments fill
 // the report selection screen; with no arguments, a terminal form presents
-// the same screen before the report lifecycle continues. --sapgui presents it
+// the same screen before the report lifecycle continues. -sapgui presents it
 // to a real SAP GUI over DIAG instead.
 package main
 
@@ -77,7 +77,7 @@ func main() {
 			abap.DialogStep(func() { result = hostRun(s, report, input, "", "") })
 		}
 	}()
-	// the --db file is whole only once it is closed: it is opened in WAL mode,
+	// the -db file is whole only once it is closed: it is opened in WAL mode,
 	// and until the last connection closes, the rows live in <file>-wal
 	closeDB()
 	if cancelled {
@@ -321,7 +321,7 @@ func jsonRanges(name string, raw any) []ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE 
 			r.low = fmt.Sprint(item)
 		}
 		if r.low == "" && r.option != "EQ" {
-			panic(fmt.Errorf("--params: %s range needs low", name))
+			panic(fmt.Errorf("-params: %s range needs low", name))
 		}
 		out = append(out, r)
 	}
@@ -421,7 +421,7 @@ func terminalInput(screen ZCL_GG_HOST__TY_RESULT) []ZIF_GG_SELECTION_SCREEN_TYPE
 // keeps its rows in, created with the report's tables when it is missing
 // (abap.OpenDBFile, which refuses a file another build laid out). A report
 // with no tables has no database and refuses the flag; one with tables and
-// no --db has no database either, and its first statement says so.
+// no -db has no database either, and its first statement says so.
 func dbOption(host []reportargs.Arg) {
 	path := ""
 	for _, flag := range host {
@@ -448,18 +448,18 @@ func dbOption(host []reportargs.Arg) {
 
 var dbOpen bool
 
-// closeDB checkpoints the --db file: the last connection closing folds the
+// closeDB checkpoints the -db file: the last connection closing folds the
 // WAL back into it, so the file alone holds every row
 func closeDB() {
 	if dbOpen {
 		dbOpen = false
 		if err := abap.DB().Close(); err != nil {
-			fmt.Fprintln(os.Stderr, "osabap: closing the --db file:", err)
+			fmt.Fprintln(os.Stderr, "osabap: closing the -db file:", err)
 		}
 	}
 }
 
-// withoutDB names the way out when a report with tables ran without --db:
+// withoutDB names the way out when a report with tables ran without -db:
 // the runtime only knows that no database was opened
 func withoutDB(r any) any {
 	if len(appTables) > 0 && strings.Contains(fmt.Sprint(r), "the host did not open a database") {

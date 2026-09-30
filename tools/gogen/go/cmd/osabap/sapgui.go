@@ -71,7 +71,7 @@ func serveSAPGUI(listen string, launch bool, selection ZCL_GG_HOST__TY_RESULT, e
 			clientHost = "127.0.0.1"
 		}
 		if err := startSAPGUI(clientHost, port, instance); err != nil {
-			return fmt.Errorf("launching SAP GUI: %w (use --sapgui-no-launch for a remote or manual client)", err)
+			return fmt.Errorf("launching SAP GUI: %w (use -sapgui-no-launch for a remote or manual client)", err)
 		}
 		fmt.Println("SAP GUI launched")
 	}

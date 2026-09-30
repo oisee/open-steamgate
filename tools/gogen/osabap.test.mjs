@@ -174,12 +174,12 @@ test("native DATASET copy obeys read, write and path grants", () => {
 });
 
 // A report with a table of its own (apps/notes: ZNOTES beside the report):
-// its rows live in the SQLite file --db names, created with the report's
-// tables when missing; without --db it refuses and names the flag; the file
+// its rows live in the SQLite file -db names, created with the report's
+// tables when missing; without -db it refuses and names the flag; the file
 // alone holds the rows once the command ends; a file laid out by another
 // build of the table is refused rather than used. The report is built from
 // a copy, so the tracked table is never edited.
-test("a report's own table lives in the --db file", () => {
+test("a report's own table lives in the -db file", () => {
   const dir = mkdtempSync(join(tmpdir(), "osabap-db-"));
   try {
     const app = join(dir, "notes");
@@ -227,7 +227,7 @@ test("a report's own table lives in the --db file", () => {
   }
 });
 
-test("a report without tables refuses --db", () => {
+test("a report without tables refuses -db", () => {
   execFileSync(process.execPath, [builder], {stdio: "inherit"});
   const result = run(["Alice", "-db", join(tmpdir(), "osabap-never.db")]);
   assert.equal(result.status, 1);
