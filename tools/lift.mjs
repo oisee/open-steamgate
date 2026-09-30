@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Verified lift, the finding half (docs/verified-lift.md, recipes/).
+// Verified lift, the finding half (recipes/; the research note is
+// docs/verified-lift.md on the research/verified-lift branch).
 //
 //   node tools/lift.mjs find <folder>...          database work inside loops, counted
 //   node tools/lift.mjs model <file.abap> <method> [--ddic <folder>]...
@@ -327,7 +328,8 @@ export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DD
   // agree, then each key is compared on its own. A key whose type does not
   // resolve stays open; one that resolves and differs refuses, whatever the
   // others do.
-  const open = ["no concurrent writes to the table during the loop", "reads confined to one client"];
+  const open = ["no concurrent writes to the table during the loop", "reads confined to one client",
+    "sy-subrc and sy-dbcnt after the loop not read"];
   const syntax = new abaplint.SyntaxLogic(registry, object).run();
   const scope = syntax.spaghetti.lookupPosition(body[0].getStart(), name);
   const componentsOf = (type) => type instanceof abaplint.BasicTypes.StructureType

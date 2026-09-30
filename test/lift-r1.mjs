@@ -184,7 +184,8 @@ ENDCLASS.`);
   it("the fixture itself is accepted, so the refusals above are about their one change", () => {
     const model = modelR1FromSource("zcl_fx.clas.abap", fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`), "m");
     // the key types were checked against the DDIC, so they are not open
-    expect(model.open).to.have.members(["no concurrent writes to the table during the loop", "reads confined to one client"]);
+    expect(model.open).to.have.members(["no concurrent writes to the table during the loop", "reads confined to one client",
+      "sy-subrc and sy-dbcnt after the loop not read"]);
   });
 
   it("R1 refuses a key component whose type differs from the column", () => {

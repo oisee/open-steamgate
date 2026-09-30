@@ -1,6 +1,6 @@
 * The differential test of R1: BEFORE and AFTER run on the same rows over the
 * same table contents and must leave the same rows. Each case is one of the
-* obligations the recipe declares (docs/verified-lift.md, 3.3): a hit, a miss
+* obligations the recipe declares (docs/verified-lift.md 3.3, research/verified-lift branch): a hit, a miss
 * that keeps what the row held, a key asked twice, no rows at all, a key that
 * differs in one component only. DANGEROUS: it writes ZOSD_LIFT_TXT, a table of
 * this recipe's own, but only the two kinds it uses, and puts back what it

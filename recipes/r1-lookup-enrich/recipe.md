@@ -1,6 +1,7 @@
 # R1 lookup-enrich: a SELECT SINGLE per loop row becomes one SELECT
 
-The shape, in the semantic-patch form of `docs/verified-lift.md` 4.4:
+The shape, in the semantic-patch form of `docs/verified-lift.md` 4.4 (on the research branch, at
+[`14172d39`](https://github.com/oisee/open-steamgate/blob/14172d39f94051be8bde09bb9c56dbea5e19bc6c/docs/verified-lift.md)):
 
 ```
 @@ itab T; field-symbol R; dbtab D; key-columns K1..Kn of D; columns C1..Cm of D @@

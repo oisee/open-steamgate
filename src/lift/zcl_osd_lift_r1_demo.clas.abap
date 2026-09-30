@@ -1,5 +1,5 @@
 CLASS zcl_osd_lift_r1_demo DEFINITION PUBLIC FINAL CREATE PUBLIC.
-* Recipe R1 of verified lift (docs/verified-lift.md): a SELECT SINGLE per row
+* Recipe R1 of verified lift (research/verified-lift branch): a SELECT SINGLE per row
 * of a loop becomes one SELECT for all rows and a read of a hashed table.
 * BEFORE is the shape as it is found in code; AFTER is BEFORE with the loop
 * replaced by what recipes/r1-lookup-enrich/template.tpl renders from the
