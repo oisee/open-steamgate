@@ -67,10 +67,11 @@ function ownCalls(loop) {
   const names = [];
   for (const statement of loop.findAllStatementNodes()) {
     const tokens = statement.getTokens().map((t) => t.getStr().toLowerCase());
-    const call = /^call method (me->)?([a-z_][\w]*)(?=[\s.(]|$)/.exec(tokens.join(" ").replace(/ -> /g, "->"));
-    if (call) {
-      names.push(call[2]);
-      continue;
+    if (tokens[0] === "call" && tokens[1] === "method") {
+      // the target, then the arguments below as for any statement
+      const self = tokens[2] === "me" && tokens[3] === "->";
+      const at = self ? 4 : 2;
+      if (/^[a-z_]\w*$/.test(tokens[at]) && !RECEIVER.has(tokens[at + 1])) names.push(tokens[at]);
     }
     for (const expression of statement.findAllExpressions(Expressions.MethodCall)) {
       const name = expression.findDirectExpression(Expressions.MethodName);

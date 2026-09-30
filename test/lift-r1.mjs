@@ -135,6 +135,7 @@ ENDCLASS.`;
   const receivers = [
     ["fetch( ).", 1], ["me->fetch( ).", 1], ["CALL METHOD fetch.", 1], ["CALL METHOD me->fetch.", 1],
     ["other->fetch( ).", 0], ["other->me->fetch( ).", 0], ["CALL METHOD other->fetch.", 0], ["zcl_fx=>fetch( ).", 0],
+    ["CALL METHOD m EXPORTING iv = fetch( ).", 1], ["CALL METHOD fetch=>m.", 0], ["CALL METHOD me->other->fetch.", 0],
   ];
   for (const [call, expected] of receivers) {
     it(`find counts \`${call}\` as ${expected ? "an own" : "another object's"} call`, () => {
@@ -142,8 +143,8 @@ ENDCLASS.`;
       try {
         writeFileSync(join(dir, "zcl_fx.clas.abap"), `CLASS zcl_fx DEFINITION PUBLIC FINAL.
   PUBLIC SECTION.
-    METHODS m.
-    METHODS fetch.
+    METHODS m IMPORTING iv TYPE i OPTIONAL.
+    METHODS fetch RETURNING VALUE(rv) TYPE i.
     DATA other TYPE REF TO zcl_fx.
 ENDCLASS.
 CLASS zcl_fx IMPLEMENTATION.
