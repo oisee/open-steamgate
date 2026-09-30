@@ -1212,8 +1212,14 @@ Today there is none. Each case has its own logic:
   - an explicit `invalidate`.
 - **Consumers:**
   1. `VRSD` for versions out of git (adt.md);
-  2. the status tables, moved from build time to on demand;
-  3. later, reference data fetched from an RFC destination on first use.
+  2. **the cross-reference, which already exists as a hand-wired eager provider**: `CROSS`, `WBCROSSGT`,
+     `WBCROSSGTX`, `D010INC`, parsed by `tools/osd-xref.mjs` (~3 s on the full tree, cached per generation) and
+     seeded by five callers through `tools/osd-xref-seed.mjs`. In the registry it starts as `eager` (same
+     behaviour, one wiring instead of five), then `lazy` to take the parse off host start, then `by_key` per
+     object so a warm edit re-derives only the rows of the edited object instead of the whole tree. vsp's
+     where-used and the Readers CodeLens read the same tables, unchanged;
+  3. the status tables, moved from build time to on demand;
+  4. later, reference data fetched from an RFC destination on first use.
 - **Open questions:**
   - A SELECT with a JOIN touching a lazy table: fill whole first.
   - Sorting and paging over a partial `by_key` fill: only keys asked are present, which is correct for a
