@@ -145,6 +145,30 @@ ENDCLASS.
 
   const literalsFile = "test/fixtures/dsl-literals/zcl_dsl_literals.clas.abap";
   const literalDDIC = "test/fixtures/dsl-literals";
+  const aliasFile = "test/fixtures/dsl-literals/zcl_dsl_aliases.clas.abap";
+  const aliasConstant = (name) => abapModel([aliasFile], {ddic: [literalDDIC]}).classes[0].attributes.find((a) => a.name === name);
+  it("uses the INT1 data element through a local TYPES alias", async () => {
+    const item = aliasConstant("c_small");
+    expect(item["value@type"]).to.deep.equal({built_in: "INT1"});
+    try {
+      await renderConstants(abapModel([aliasFile], {ddic: [literalDDIC]}), "zcl_dsl_aliases");
+      expect.fail("expected literal refusal");
+    } catch (error) {
+      expect(error.message).to.equal("main:1: literal value needs an integer in range");
+    }
+  });
+
+  it("keeps the data element's packed precision through a local TYPES alias", () => {
+    expect(aliasConstant("c_decimal")["value@type"]).to.deep.equal({built_in: "DEC", length: 14, decimals: 2});
+  });
+
+  it("follows a chain of two local TYPES aliases", () => {
+    expect(aliasConstant("c_chain")["value@type"]).to.deep.equal({built_in: "INT1"});
+  });
+
+  it("uses the built-in integer type when DDIC also defines I", () => {
+    expect(aliasConstant("c_builtin")["value@type"]).to.deep.equal({built_in: "INT4"});
+  });
   it("writes filter types beside literal values and parameter defaults", () => {
     const cls = abapModel([literalsFile], {ddic: [literalDDIC]}).classes[0];
     const actual = Object.fromEntries(cls.attributes.filter((a) => a["value@type"] !== undefined)

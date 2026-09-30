@@ -40,9 +40,9 @@ function syntaxType(registry, type, name) {
   return {resolved: false, abap_type: name ?? "unknown"};
 }
 
-function literalType(registry, type, name) {
+function literalType(registry, type, name, localTypes) {
   for (const provider of TYPE_PROVIDERS) {
-    const result = provider.literalType?.(registry, type, name);
+    const result = provider.literalType?.(registry, type, name, localTypes);
     if (result) return result;
   }
   return {resolved: false, reason: `${name ?? "type"} has no literal type provider`};
@@ -61,11 +61,11 @@ function literalText(expression) {
   return raw;
 }
 
-function valueFields(registry, type, expression, prefix, name) {
+function valueFields(registry, type, expression, prefix, name, localTypes) {
   if (!expression) return {};
   const value = literalText(expression);
   if (value === undefined) return {[`${prefix}_expr`]: expression.findFirstExpression(Expressions.SimpleFieldChain)?.concatTokens() ?? expression.concatTokens()};
-  const resolved = literalType(registry, type, name);
+  const resolved = literalType(registry, type, name, localTypes);
   return resolved.resolved === false
     ? {[prefix]: value, literal_type: resolved}
     : {[prefix]: value, [`${prefix}@type`]: resolved};
@@ -79,7 +79,7 @@ function declaration(registry, file, item, id, extra = {}, syntaxName) {
   return at(file, item, id, {...extra, "@type": syntaxType(registry, item.getType(), syntaxName)});
 }
 
-function methodNode(registry, file, name, method, statement) {
+function methodNode(registry, file, name, method, statement, localTypes) {
   const methodId = `${name}/method/${method.getName().toLowerCase()}`;
   const parsed = statement?.findAllExpressions(Expressions.MethodParam) ?? [];
   const params = method.getParameters().getAll().map((param) => {
@@ -88,7 +88,7 @@ function methodNode(registry, file, name, method, statement) {
     const defaultExpression = method.getParameters().getParameterDefault(param.getName());
     return declaration(registry, file, param, `${methodId}/param/${paramName}`, {
       name: paramName, kind: param.getMeta().find((meta) => ["importing", "exporting", "changing", "returning"].includes(meta)),
-      ...valueFields(registry, param.getType(), defaultExpression, "default", typeName(expression)),
+      ...valueFields(registry, param.getType(), defaultExpression, "default", typeName(expression), localTypes),
     }, typeName(expression));
   }).sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
   return at(file, method, methodId, {name: method.getName().toLowerCase(), visibility: abaplint.Visibility[method.getVisibility()].toLowerCase(),
@@ -103,6 +103,12 @@ function objectModel(registry, object, sourcePath) {
   if (!definition) throw new Error(`${sourcePath}: abaplint cannot resolve the declaration`);
   const file = object.getMainABAPFile();
   const statements = file.getStatements();
+  // Keep the source names of this object's simple TYPES aliases. abaplint's
+  // resolved IntegerType can lose the data element's INT1/INT2 width.
+  const localTypes = new Map(statements.filter((st) => st.get() instanceof Statements.Type).map((st) => [
+    nameOf(st.findFirstExpression(Expressions.NamespaceSimpleName))?.toUpperCase(),
+    typeName(st)?.toUpperCase(),
+  ]).filter(([name]) => name));
   const isClass = object.getType() === "CLAS";
   const name = object.getName().toLowerCase();
   const id = `${isClass ? "class" : "interface"}/${name}`;
@@ -110,7 +116,7 @@ function objectModel(registry, object, sourcePath) {
   const methodStatements = statements.filter((st) => st.get() instanceof Statements.MethodDef);
   const methods = [...definition.getMethodDefinitions().getAll()].map((method) => {
     const statement = methodStatements.find((st) => nameOf(st.findDirectExpression(Expressions.MethodName)) === method.getName().toLowerCase());
-    return methodNode(registry, sourcePath, id, method, statement);
+    return methodNode(registry, sourcePath, id, method, statement, localTypes);
   });
   const attributes = [...definition.getAttributes().getAll(), ...definition.getAttributes().getConstants()].map((attribute) => {
     const statement = statements.find((st) => st.get() instanceof Statements.Constant
@@ -120,7 +126,7 @@ function objectModel(registry, object, sourcePath) {
     return declaration(registry, sourcePath, attribute, `${id}/attribute/${attribute.getName().toLowerCase()}`,
       {name: attribute.getName().toLowerCase(), ...(isConstant ? {constant: true,
         declared_type: typeName(statement),
-        ...valueFields(registry, attribute.getType(), expression, "value", typeName(statement))} : {})}, undefined);
+        ...valueFields(registry, attribute.getType(), expression, "value", typeName(statement), localTypes)} : {})}, undefined);
   });
   const types = [...definition.getTypeDefinitions().getAll()].map((entry) => {
     const type = entry.type;
