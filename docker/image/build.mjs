@@ -29,8 +29,13 @@ for (const name of ["runtime", "transpiler", "extras", "cli"]) {
   run("npm", ["run", "compile"], resolve(`../transpiler/packages/${name}`));
 }
 chmodSync("../transpiler/packages/cli/abap_transpile", 0o755);
-for (const [name, folder] of [["runtime", "runtime"], ["transpiler", "transpiler"], ["transpiler-cli", "cli"]]) {
-  run("node", ["tools/osd-link.mjs", name, `packages/${folder}`]);
+for (const [name, path] of [
+  ["runtime", "packages/runtime"],
+  ["transpiler", "packages/transpiler"],
+  ["transpiler-cli", "packages/cli"],
+  ["core", "packages/transpiler/node_modules/@abaplint/core"],
+]) {
+  run("node", ["tools/osd-link.mjs", name, path]);
 }
 for (const source of sources.libraries) {
   const pin = libraries.get(source.folder);
