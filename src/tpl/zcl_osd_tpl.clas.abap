@@ -1284,6 +1284,12 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
              ( strlen( lv_digits ) = strlen( lv_limit ) AND lv_digits > lv_limit ).
             lv_error = `needs an integer in range`.
           ENDIF.
+          " the literal is written without leading zeroes: a numeric literal
+          " has at most 31 digits, and 00042 is 42
+          rv_text = lv_digits.
+          IF iv_text(1) = `-` AND lv_digits <> `0`.
+            rv_text = `-` && lv_digits.
+          ENDIF.
         ENDIF.
       WHEN `DEC` OR `CURR` OR `QUAN`.
         FIND REGEX '^-?[0-9]+(\.[0-9]+)?$' IN iv_text.
@@ -1302,8 +1308,12 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
             lv_integer = lv_digits.
             CLEAR lv_fraction.
           ENDIF.
+          WHILE strlen( lv_integer ) > 1 AND lv_integer(1) = `0`.
+            lv_integer = substring( val = lv_integer off = 1 ).
+          ENDWHILE.
+          " the type keeps room for its decimals: DEC 5,2 has three integer digits
           IF strlen( lv_fraction ) > lv_decimals OR
-             strlen( lv_integer ) + strlen( lv_fraction ) > lv_length.
+             strlen( lv_integer ) > lv_length - lv_decimals.
             lv_error = `exceeds precision`.
           ENDIF.
         ENDIF.

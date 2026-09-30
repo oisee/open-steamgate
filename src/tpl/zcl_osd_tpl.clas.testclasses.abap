@@ -66,6 +66,7 @@ CLASS ltcl_osd_tpl DEFINITION FOR TESTING
     METHODS literal_composition FOR TESTING RAISING cx_static_check.
     METHODS literal_not_scalar FOR TESTING.
     METHODS literal_one_source_literal FOR TESTING.
+    METHODS literal_normal_numbers FOR TESTING RAISING cx_static_check.
     METHODS utf8_passes_through FOR TESTING RAISING cx_static_check.
     METHODS utf8 IMPORTING iv_hex TYPE xstring RETURNING VALUE(rv) TYPE string.
 
@@ -873,6 +874,26 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       exp = `main:1: literal x cannot be one ABAP literal: longer than 255 characters`
       act = error_text( iv_template = `{{x | literal}}` iv_json = lv_json ) ).
+  ENDMETHOD.
+
+  METHOD literal_normal_numbers.
+    " leading zeroes are dropped: 32 zeroes are 0, not a 32-digit literal
+    cl_abap_unit_assert=>assert_equals(
+      exp = `0`
+      act = text( iv_template = `{{x | literal}}`
+                  iv_json = `{"x":"` && repeat( val = `0` occ = 32 ) && `","x@type":{"built_in":"INT4"}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `-42`
+      act = text( iv_template = `{{x | literal}}` iv_json = `{"x":"-0042","x@type":{"built_in":"INT2"}}` ) ).
+    " DEC 5,2 keeps two places for decimals: 123 fits, 1234 does not
+    cl_abap_unit_assert=>assert_equals(
+      exp = `'123.45'`
+      act = text( iv_template = `{{x | literal}}`
+                  iv_json = `{"x":"123.45","x@type":{"built_in":"DEC","length":5,"decimals":2}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x exceeds precision`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"1234","x@type":{"built_in":"DEC","length":5,"decimals":2}}` ) ).
   ENDMETHOD.
 
 ENDCLASS.
