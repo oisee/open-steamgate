@@ -128,8 +128,6 @@ func TestCmpDataOrder(t *testing.T) {
 	}
 	for name, pair := range map[string][2]Data{
 		"string no number with i": {gs("x"), gi(1)},
-		"d with i (not measured)": {gd("20260101"), gi(1)},
-		"x with p (not measured)": {gx("\x01", 1), gp("1")},
 		"struct with i":           {Data{P: &gcPair{}, T: gcPairT}, gi(1)},
 	} {
 		if gcCatch(func() { CmpData(pair[0], pair[1]) }) == nil {

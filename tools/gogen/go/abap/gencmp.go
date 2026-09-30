@@ -51,22 +51,22 @@ func DataEq(a, b Data) bool { return CmpData(a, b) == 0 }
 //     component (same number of components); object and data references:
 //     the same target or not (0 or 1, only = and <> mean anything);
 //   - numeric (i, int8, p, f) with numeric: f when either is an f (so an
-//     int8 beyond 2^53 is rounded to f first), else exact (p);
-//   - numeric with c, string or n: the character operand converted to the
-//     number (CX_SY_CONVERSION_NO_NUMBER when it is none), f when the
-//     numeric operand is an f, else p;
-//   - n with c or string: both as numbers (p);
-//   - n with n: as numbers;
+//     int8 or p beyond 2^53 is rounded to f first), else exact;
+//   - numeric with c, string, n, x, xstring, d or t: the other operand
+//     converted to the numeric operand's type, then compared in it
+//     (gencmpnum.go: i5 = s'4.9', d as days, t as seconds, x by its bytes;
+//     text that is no number is the uncatchable CONVT_NO_NUMBER);
+//   - n with c, string or n: as numbers;
 //   - x with x: the shorter padded with 00 on the right; xstring with
 //     xstring or x: the bytes, a prefix is smaller;
 //   - x or xstring with c or string: its hex digits in upper case, then
-//     characters; with i, int8 or n: its last four bytes as a signed i
-//     (typed code's measured rules, frontend compareBytes);
+//     characters; with n: its last four bytes as a signed i;
 //   - c, string, d, t with each other: the characters (a c without its
 //     trailing blanks, a d or t never set as its zeros).
 //
-// Pairs outside this (d or t with a number, x with p or f, a structure
-// with an elementary value, ...) dump NOT_COMPILED.
+// The rules with numbers and with n were measured on A4H on 2026-09-30
+// (ZCL_OSD_T_CMP). Pairs outside them (a structure with an elementary
+// value, ...) dump NOT_COMPILED.
 func CmpData(a, b Data) int {
 	if a.P == nil || b.P == nil {
 		panic(notAssigned("comparison"))
@@ -119,18 +119,19 @@ func CmpData(a, b Data) int {
 		return strings.Compare(XToHex(*a.P.(*string)), *b.P.(*string))
 	case isByte(kb) && (ka == 'C' || ka == 'g'):
 		return strings.Compare(*a.P.(*string), XToHex(*b.P.(*string)))
-	case isByte(ka) && (kb == 'I' || kb == '8' || kb == 'N'), isByte(kb) && (ka == 'I' || ka == '8' || ka == 'N'):
+	case isByte(ka) && kb == 'N', isByte(kb) && ka == 'N':
 		x, y := byteOrNum(a), byteOrNum(b)
 		return sign3(x < y, x > y)
-	case isNum(ka) || isNum(kb):
-		if !(isNum(ka) || isNumeric(ka)) || !(isNum(kb) || isNumeric(kb)) {
-			break
-		}
+	case isNum(ka) && isNum(kb):
 		if ka == 'F' || kb == 'F' {
 			x, y := dataF(a), dataF(b)
 			return sign3(x < y, x > y)
 		}
 		return CmpP(DataP(a), DataP(b))
+	case isNum(ka) && toNumber(kb):
+		return cmpAsNumber(a, b)
+	case isNum(kb) && toNumber(ka):
+		return -cmpAsNumber(b, a)
 	case ka == 'N' && (kb == 'N' || kb == 'C' || kb == 'g'), kb == 'N' && (ka == 'C' || ka == 'g'):
 		return CmpP(DataP(a), DataP(b))
 	case isText(ka) && isText(kb):
@@ -141,7 +142,6 @@ func CmpData(a, b Data) int {
 
 func isStruct(k byte) bool  { return k == 'u' || k == 'v' }
 func isNum(k byte) bool     { return k == 'I' || k == '8' || k == 'P' || k == 'F' }
-func isNumeric(k byte) bool { return k == 'C' || k == 'g' || k == 'N' } // converted to a number
 func isByte(k byte) bool    { return k == 'X' || k == 'y' }
 func isText(k byte) bool    { return k == 'C' || k == 'g' || k == 'D' || k == 'T' }
 
