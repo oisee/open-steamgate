@@ -38,7 +38,7 @@ CLASS lcl_req_entity IMPLEMENTATION.
 ENDCLASS.
 
 CLASS ltcl_phase0 DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
-* Phase 0 exit test (docs/prior-art.md §4): a transpiled, SEGW-shaped DPC runs
+* Phase 0 exit test (docs/prior-art.md section 4): a transpiled, SEGW-shaped DPC runs
 * its Open SQL against the local SQLite seeded from an abapGit TABU capture.
   PRIVATE SECTION.
     DATA mo_dpc TYPE REF TO /iwbep/if_mgw_appl_srv_runtime.

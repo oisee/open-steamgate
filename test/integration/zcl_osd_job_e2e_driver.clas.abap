@@ -16,7 +16,7 @@ CLASS zcl_osd_job_e2e_driver IMPLEMENTATION.
     APPEND VALUE #( sign = 'E' option = 'EQ' low = `a\b` ) TO rt_range.
     APPEND VALUE #( sign = 'I' option = 'NE' low = 'a&b' ) TO rt_range.
     APPEND VALUE #( sign = 'E' option = 'NE' low = '<tag>' ) TO rt_range.
-    APPEND VALUE #( sign = 'I' option = 'GT' low = 'café' ) TO rt_range.
+    APPEND VALUE #( sign = 'I' option = 'GT' low = |caf{ cl_abap_conv_in_ce=>uccp( '00E9' ) }| ) TO rt_range.
     APPEND VALUE #( sign = 'E' option = 'GT' low = `tail  ` ) TO rt_range.
     APPEND VALUE #( sign = 'I' option = 'GE' low = 'A' ) TO rt_range.
     APPEND VALUE #( sign = 'E' option = 'GE' low = 'B' ) TO rt_range.

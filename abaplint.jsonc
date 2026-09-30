@@ -111,6 +111,7 @@
     "errorNamespace": "."
   },
   "rules": {
+    "7bit_ascii": true,
     "parser_error": true,
     "check_syntax": true,
     "unknown_types": true,
