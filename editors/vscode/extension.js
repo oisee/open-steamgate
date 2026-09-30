@@ -3397,7 +3397,9 @@ function testExplorer(context, output, {
   function objectItemFor(entry) {
     const id = `${entry.object.type}:${entry.object.name}`;
     if (objects.has(id)) return undefined; // the same object found twice (two scans overlapping) -- keep the first
-    const item = controller.createTestItem(id, entry.object.name, entry.uri);
+    const mainFile = entry.object.type === "CLAS" ? fileOf(entry.dir, entry.object, "main") : undefined;
+    const uri = mainFile !== undefined && fs.existsSync(mainFile) ? vscode.Uri.file(mainFile) : entry.uri;
+    const item = controller.createTestItem(id, entry.object.name, uri);
     item.canResolveChildren = true;
     objects.set(id, {object: entry.object, dir: entry.dir});
     return item;
