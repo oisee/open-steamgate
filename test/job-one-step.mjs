@@ -1737,8 +1737,15 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       })), "invalid_opcode");
     }
     const selector = new abap.types.Structure({
-      jobname: new abap.types.Character(32).set(name), username: new abap.types.Character(12),
-      preliminary: new abap.types.Character(1), scheduled: new abap.types.Character(1),
+      jobname: new abap.types.Character(32).set(name),
+      jobcount: new abap.types.Character(8), jobgroup: new abap.types.Character(12),
+      username: new abap.types.Character(12),
+      from_date: new abap.types.Date(), from_time: new abap.types.Time(),
+      to_date: new abap.types.Date(), to_time: new abap.types.Time(),
+      no_date: new abap.types.Character(1), with_pred: new abap.types.Character(1),
+      eventid: new abap.types.Character(32), eventparm: new abap.types.Character(64),
+      abapname: new abap.types.Character(40),
+      prelim: new abap.types.Character(1), schedul: new abap.types.Character(1),
       ready: new abap.types.Character(1), running: new abap.types.Character(1),
       finished: new abap.types.Character(1).set("X"), aborted: new abap.types.Character(1),
     });

@@ -14,27 +14,92 @@ FUNCTION bp_job_select.
   DATA lv_user_match TYPE abap_bool.
   DATA lv_user_exclude TYPE abap_bool.
   DATA lv_row_match TYPE abap_bool.
+  DATA lv_wait_kind TYPE string.
+  DATA lv_wait_event_id TYPE string.
+  DATA lv_wait_event_param TYPE string.
+  DATA lv_step_count TYPE string.
+  DATA lv_step_program TYPE string.
+  DATA lv_step_index TYPE i.
+  DATA lv_step_index_text TYPE string.
+  DATA lv_message TYPE string.
   ret = 0.
   CLEAR: jobsel_param_out, local_client, nr_of_jobs_found.
   IF jobselect_dialog <> 'N'.
     RAISE invalid_dialog_type.
   ENDIF.
-  IF enddate IS NOT INITIAL OR endtime IS NOT INITIAL
-      OR adk_mode IS NOT INITIAL OR ( selection IS NOT INITIAL AND selection <> 'AL' )
-      OR ( only_this_subsystem IS NOT INITIAL AND only_this_subsystem <> 'Y' ).
+  IF enddate IS NOT INITIAL.
+    MESSAGE ID '00' TYPE 'E' NUMBER '398' WITH 'ENDDATE' INTO lv_message.
+    RAISE selection_canceled.
+  ENDIF.
+  IF endtime IS NOT INITIAL.
+    MESSAGE ID '00' TYPE 'E' NUMBER '398' WITH 'ENDTIME' INTO lv_message.
+    RAISE selection_canceled.
+  ENDIF.
+  IF adk_mode IS NOT INITIAL.
+    MESSAGE ID '00' TYPE 'E' NUMBER '398' WITH 'ADK_MODE' INTO lv_message.
+    RAISE selection_canceled.
+  ENDIF.
+  IF selection IS NOT INITIAL AND selection <> 'AL'.
+    MESSAGE ID '00' TYPE 'E' NUMBER '398' WITH 'SELECTION' INTO lv_message.
+    RAISE selection_canceled.
+  ENDIF.
+  IF only_this_subsystem IS NOT INITIAL AND only_this_subsystem <> 'Y'.
+    MESSAGE ID '00' TYPE 'E' NUMBER '398' WITH 'ONLY_THIS_SUBSYSTEM' INTO lv_message.
+    RAISE selection_canceled.
+  ENDIF.
+  IF jobsel_param_in-jobgroup IS NOT INITIAL.
+    MESSAGE ID '00' TYPE 'E' NUMBER '398' WITH 'JOBGROUP' INTO lv_message.
+    RAISE selection_canceled.
+  ENDIF.
+  IF jobsel_param_in-from_date IS NOT INITIAL.
+    MESSAGE ID '00' TYPE 'E' NUMBER '398' WITH 'FROM_DATE' INTO lv_message.
+    RAISE selection_canceled.
+  ENDIF.
+  IF jobsel_param_in-from_time IS NOT INITIAL.
+    MESSAGE ID '00' TYPE 'E' NUMBER '398' WITH 'FROM_TIME' INTO lv_message.
+    RAISE selection_canceled.
+  ENDIF.
+  IF jobsel_param_in-to_date IS NOT INITIAL.
+    MESSAGE ID '00' TYPE 'E' NUMBER '398' WITH 'TO_DATE' INTO lv_message.
+    RAISE selection_canceled.
+  ENDIF.
+  IF jobsel_param_in-to_time IS NOT INITIAL.
+    MESSAGE ID '00' TYPE 'E' NUMBER '398' WITH 'TO_TIME' INTO lv_message.
+    RAISE selection_canceled.
+  ENDIF.
+  IF jobsel_param_in-no_date IS NOT INITIAL.
+    MESSAGE ID '00' TYPE 'E' NUMBER '398' WITH 'NO_DATE' INTO lv_message.
+    RAISE selection_canceled.
+  ENDIF.
+  IF jobsel_param_in-with_pred IS NOT INITIAL.
+    MESSAGE ID '00' TYPE 'E' NUMBER '398' WITH 'WITH_PRED' INTO lv_message.
     RAISE selection_canceled.
   ENDIF.
   jobsel_param_out = jobsel_param_in.
   local_client = 'X'.
   SELECT * FROM zosd_job_identity INTO ls_identity
     WHERE mandt = sy-mandt AND owner = sy-uname.
-    IF jobsel_param_in-jobname IS NOT INITIAL
-        AND ls_identity-jobname <> jobsel_param_in-jobname.
+    IF jobsel_param_in-jobname IS NOT INITIAL.
+      IF jobsel_param_in-jobname CS '*'.
+        IF ls_identity-jobname NP jobsel_param_in-jobname.
+          CONTINUE.
+        ENDIF.
+      ELSEIF ls_identity-jobname <> jobsel_param_in-jobname.
+        CONTINUE.
+      ENDIF.
+    ENDIF.
+    IF jobsel_param_in-jobcount IS NOT INITIAL
+        AND ls_identity-jobcount <> jobsel_param_in-jobcount.
       CONTINUE.
     ENDIF.
-    IF jobsel_param_in-username IS NOT INITIAL
-        AND ls_identity-owner <> jobsel_param_in-username.
-      CONTINUE.
+    IF jobsel_param_in-username IS NOT INITIAL.
+      IF jobsel_param_in-username CS '*'.
+        IF ls_identity-owner NP jobsel_param_in-username.
+          CONTINUE.
+        ENDIF.
+      ELSEIF ls_identity-owner <> jobsel_param_in-username.
+        CONTINUE.
+      ENDIF.
     ENDIF.
     IF jobname_ext_sel IS SUPPLIED AND jobname_ext_sel IS NOT INITIAL.
       CLEAR: lv_name_include, lv_name_match, lv_name_exclude.
@@ -118,6 +183,51 @@ FUNCTION bp_job_select.
         CONTINUE.
       ENDIF.
     ENDIF.
+    IF jobsel_param_in-abapname IS NOT INITIAL.
+      CLEAR: lv_step_count, lv_step_program.
+      CALL FUNCTION 'ZOSD_JOB_READ'
+        EXPORTING iv_jobname = ls_identity-jobname iv_jobcount = ls_identity-jobcount
+        IMPORTING ev_step_count = lv_step_count
+        EXCEPTIONS OTHERS = 1.
+      IF sy-subrc <> 0 OR lv_step_count IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      lv_row_match = abap_false.
+      lv_step_index = 1.
+      WHILE lv_step_index <= lv_step_count.
+        lv_step_index_text = lv_step_index.
+        CALL FUNCTION 'ZOSD_JOB_READ'
+          EXPORTING iv_jobname = ls_identity-jobname iv_jobcount = ls_identity-jobcount
+                    iv_item = 'STEP' iv_index = lv_step_index_text
+          IMPORTING ev_step_program = lv_step_program
+          EXCEPTIONS OTHERS = 1.
+        IF sy-subrc = 0 AND lv_step_program = jobsel_param_in-abapname.
+          lv_row_match = abap_true.
+          EXIT.
+        ENDIF.
+        lv_step_index = lv_step_index + 1.
+      ENDWHILE.
+      IF lv_row_match = abap_false.
+        CONTINUE.
+      ENDIF.
+    ENDIF.
+    IF jobsel_param_in-eventid IS NOT INITIAL OR jobsel_param_in-eventparm IS NOT INITIAL.
+      CLEAR: lv_wait_kind, lv_wait_event_id, lv_wait_event_param.
+      CALL FUNCTION 'ZOSD_JOB_READ'
+        EXPORTING iv_jobname = ls_identity-jobname iv_jobcount = ls_identity-jobcount
+        IMPORTING ev_state = lv_state ev_wait_kind = lv_wait_kind
+                  ev_wait_event_id = lv_wait_event_id
+                  ev_wait_event_param = lv_wait_event_param
+        EXCEPTIONS OTHERS = 1.
+      IF sy-subrc <> 0 OR lv_state <> 'WAITING'
+          OR lv_wait_kind <> 'NAMED_EVENT'
+          OR ( jobsel_param_in-eventid IS NOT INITIAL
+            AND lv_wait_event_id <> jobsel_param_in-eventid )
+          OR ( jobsel_param_in-eventparm IS NOT INITIAL
+            AND lv_wait_event_param <> jobsel_param_in-eventparm ).
+        CONTINUE.
+      ENDIF.
+    ENDIF.
     CALL FUNCTION 'ZOSD_JOB_STATUS'
       EXPORTING iv_jobname = ls_identity-jobname iv_jobcount = ls_identity-jobcount
       IMPORTING ev_phase = lv_phase ev_state = lv_state
@@ -144,14 +254,14 @@ FUNCTION bp_job_select.
         lv_status = 'P'.
     ENDCASE.
     lv_selected = space.
-    IF jobsel_param_in-preliminary IS NOT INITIAL OR jobsel_param_in-scheduled IS NOT INITIAL
+    IF jobsel_param_in-prelim IS NOT INITIAL OR jobsel_param_in-schedul IS NOT INITIAL
         OR jobsel_param_in-ready IS NOT INITIAL OR jobsel_param_in-running IS NOT INITIAL
         OR jobsel_param_in-finished IS NOT INITIAL OR jobsel_param_in-aborted IS NOT INITIAL.
       CASE lv_status.
         WHEN 'P'.
-          lv_selected = jobsel_param_in-preliminary.
+          lv_selected = jobsel_param_in-prelim.
         WHEN 'S'.
-          lv_selected = jobsel_param_in-scheduled.
+          lv_selected = jobsel_param_in-schedul.
         WHEN 'Y'.
           lv_selected = jobsel_param_in-ready.
         WHEN 'R'.

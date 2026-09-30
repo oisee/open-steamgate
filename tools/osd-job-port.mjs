@@ -48,7 +48,7 @@ const readFill = (signature, fields) => fill(signature, {
   EV_LOG_COUNT: "", EV_HISTORICAL_GAP: "", EV_CREATED_ON: "", EV_CREATED_AT: "",
   EV_QUEUED_AT: "", EV_STARTED_AT: "", EV_ENDED_AT: "",
   EV_WAIT_KIND: "", EV_WAIT_JOBNAME: "", EV_WAIT_JOBCOUNT: "",
-  EV_WAIT_EVENT_ID: "", EV_STEP_NUMBER: "", EV_STEP_PROGRAM: "",
+  EV_WAIT_EVENT_ID: "", EV_WAIT_EVENT_PARAM: "", EV_STEP_NUMBER: "", EV_STEP_PROGRAM: "",
   EV_TAIL_EVENT_ID: "", EV_TAIL_EVENT_PARAM: "",
   EV_INPUT_JSON: "",
   EV_STEP_STATE: "", EV_STEP_STARTED_AT: "", EV_STEP_ENDED_AT: "",
@@ -159,7 +159,8 @@ export class JobDestination {
             const wait = snapshot.afterEvent ? {EV_WAIT_KIND: "AFTER_JOB",
               EV_WAIT_JOBNAME: snapshot.afterEvent.jobname,
               EV_WAIT_JOBCOUNT: snapshot.afterEvent.jobcount} : snapshot.namedEvent ?
-              {EV_WAIT_KIND: "NAMED_EVENT", EV_WAIT_EVENT_ID: snapshot.namedEvent.id} : {};
+              {EV_WAIT_KIND: "NAMED_EVENT", EV_WAIT_EVENT_ID: snapshot.namedEvent.id,
+                EV_WAIT_EVENT_PARAM: snapshot.namedEvent.param ?? ""} : {};
             const header = {...base, EV_LOG_COUNT: String(entries.length),
               EV_HISTORICAL_GAP: snapshot.technicalLog?.historicalGap ? "X" : "",
               EV_CREATED_ON: snapshot.createdOn ?? "", EV_CREATED_AT: snapshot.createdAt ?? "",

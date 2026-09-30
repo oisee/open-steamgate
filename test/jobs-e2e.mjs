@@ -50,6 +50,36 @@ describe("compiled ABAP jobs end to end", function () {
     status: new abap.types.Character(1), sdluname: new abap.types.Character(12),
   });
 
+  const selectorType = () => new abap.types.Structure({
+    jobname: new abap.types.Character(32), jobcount: new abap.types.Character(8),
+    jobgroup: new abap.types.Character(12), username: new abap.types.Character(12),
+    from_date: new abap.types.Date(), from_time: new abap.types.Time(),
+    to_date: new abap.types.Date(), to_time: new abap.types.Time(),
+    no_date: new abap.types.Character(1), with_pred: new abap.types.Character(1),
+    eventid: new abap.types.Character(32), eventparm: new abap.types.Character(64),
+    prelim: new abap.types.Character(1), schedul: new abap.types.Character(1),
+    ready: new abap.types.Character(1), running: new abap.types.Character(1),
+    finished: new abap.types.Character(1), aborted: new abap.types.Character(1),
+    abapname: new abap.types.Character(40),
+  });
+  const selectJobs = async (selector) => {
+    const jobs = table(headerType());
+    const count = new abap.types.Integer();
+    await dialogStep(() => abap.FunctionModules.BP_JOB_SELECT({
+      exporting: {jobselect_dialog: box("N"), jobsel_param_in: selector},
+      importing: {nr_of_jobs_found: count}, tables: {jobselect_joblist: jobs},
+    }));
+    return jobs.array().map((row) => ({name: row.get().jobname.get().trim(),
+      count: row.get().jobcount.get().trim(), status: row.get().status.get()}));
+  };
+  const expectSelectFailure = async (selector, code, field) => {
+    let failure;
+    try { await selectJobs(selector); } catch (error) { failure = error; }
+    expect(failure, `BP_JOB_SELECT should raise ${code}`).to.exist;
+    expect(String(failure.classic ?? failure.message).toLowerCase()).to.include(code);
+    if (field) expect(abap.builtin.sy.get().msgv1.get().trim()).to.equal(field);
+  };
+
   before(async () => {
     dir = mkdtempSync(join(tmpdir(), "osd-jobs-e2e-"));
     dbPath = join(dir, "business.sqlite");
@@ -175,8 +205,14 @@ describe("compiled ABAP jobs end to end", function () {
     expect(readyHeader.get().status.get()).to.equal("Y");
     const readySelector = new abap.types.Structure({
       jobname: new abap.types.Character(32).set(name),
-      username: new abap.types.Character(12), preliminary: new abap.types.Character(1),
-      scheduled: new abap.types.Character(1),
+      jobcount: new abap.types.Character(8), jobgroup: new abap.types.Character(12),
+      username: new abap.types.Character(12),
+      from_date: new abap.types.Date(), from_time: new abap.types.Time(),
+      to_date: new abap.types.Date(), to_time: new abap.types.Time(),
+      no_date: new abap.types.Character(1), with_pred: new abap.types.Character(1),
+      eventid: new abap.types.Character(32), eventparm: new abap.types.Character(64),
+      abapname: new abap.types.Character(40), prelim: new abap.types.Character(1),
+      schedul: new abap.types.Character(1),
       ready: new abap.types.Character(1).set("X"),
       running: new abap.types.Character(1), finished: new abap.types.Character(1),
       aborted: new abap.types.Character(1),
@@ -217,8 +253,15 @@ describe("compiled ABAP jobs end to end", function () {
     }));
     expect(steps.array().map((row) => row.get().progname.get().trim())).to.deep.equal(["ZGG_EX_012"]);
     const selector = new abap.types.Structure({
-      jobname: new abap.types.Character(32).set(name), username: new abap.types.Character(12),
-      preliminary: new abap.types.Character(1), scheduled: new abap.types.Character(1),
+      jobname: new abap.types.Character(32).set(name),
+      jobcount: new abap.types.Character(8), jobgroup: new abap.types.Character(12),
+      username: new abap.types.Character(12),
+      from_date: new abap.types.Date(), from_time: new abap.types.Time(),
+      to_date: new abap.types.Date(), to_time: new abap.types.Time(),
+      no_date: new abap.types.Character(1), with_pred: new abap.types.Character(1),
+      eventid: new abap.types.Character(32), eventparm: new abap.types.Character(64),
+      abapname: new abap.types.Character(40),
+      prelim: new abap.types.Character(1), schedul: new abap.types.Character(1),
       ready: new abap.types.Character(1), running: new abap.types.Character(1),
       finished: new abap.types.Character(1).set("X"), aborted: new abap.types.Character(1),
     });
@@ -238,6 +281,70 @@ describe("compiled ABAP jobs end to end", function () {
     }));
     expect(found.get()).to.equal(1);
     expect(jobs.array()[0].get().jobname.get().trim()).to.equal(name);
+  });
+
+  it("selects PRELIM and SCHEDUL, matches JOBCOUNT and known step/event fields", async () => {
+    const preliminary = "E2E_SELECT_PRELIM";
+    const waiting = "E2E_SELECT_EVENT";
+    const preliminaryCount = await dialogStep(() => open(preliminary));
+    const waitingCount = await dialogStep(async () => {
+      const count = await open(waiting);
+      await invoke("JOB_SUBMIT", {jobname: waiting, jobcount: count,
+        report: "ZGG_EX_012", authcknam: abap.builtin.sy.get().uname.get().trim()});
+      await invoke("JOB_CLOSE", {jobname: waiting, jobcount: count,
+        strtimmed: "", event_id: "E2E_SELECT_SIGNAL", event_param: "A"});
+      return count;
+    });
+    expect((await drainJobOutbox(store)).imported).to.equal(1);
+    const prelim = selectorType();
+    prelim.get().jobname.set(preliminary);
+    prelim.get().prelim.set("X");
+    expect(await selectJobs(prelim)).to.deep.equal([{name: preliminary,
+      count: preliminaryCount, status: "P"}]);
+    const patterned = selectorType();
+    patterned.get().jobname.set("E2E_SELECT_*");
+    expect(await selectJobs(patterned)).to.deep.equal([
+      {name: waiting, count: waitingCount, status: "S"},
+      {name: preliminary, count: preliminaryCount, status: "P"},
+    ]);
+    patterned.get().jobname.set("E2E_SELECT_+VENT*");
+    expect(await selectJobs(patterned)).to.deep.equal([
+      {name: waiting, count: waitingCount, status: "S"},
+    ]);
+    patterned.get().jobname.set("E2E_SELECT_MISSING*");
+    await expectSelectFailure(patterned, "no_jobs_found");
+    const schedul = selectorType();
+    schedul.get().jobname.set(waiting);
+    schedul.get().jobcount.set(waitingCount);
+    schedul.get().schedul.set("X");
+    expect(await selectJobs(schedul)).to.have.length(1);
+    const username = abap.builtin.sy.get().uname.get().trim();
+    schedul.get().username.set(`${username.slice(0, 1)}*`);
+    expect(await selectJobs(schedul)).to.have.length(1);
+    schedul.get().username.set("NO_SUCH_USER*");
+    await expectSelectFailure(schedul, "no_jobs_found");
+    schedul.get().username.set("");
+    schedul.get().abapname.set("ZGG_EX_012");
+    expect(await selectJobs(schedul)).to.have.length(1);
+    schedul.get().abapname.set("ZGG_EX_MISSING");
+    await expectSelectFailure(schedul, "no_jobs_found");
+    schedul.get().abapname.set("ZGG_EX_012");
+    schedul.get().eventid.set("E2E_SELECT_SIGNAL");
+    expect(await selectJobs(schedul)).to.have.length(1);
+    schedul.get().eventid.set("E2E_OTHER_SIGNAL");
+    await expectSelectFailure(schedul, "no_jobs_found");
+    schedul.get().eventid.set("E2E_SELECT_SIGNAL");
+    schedul.get().eventparm.set("A");
+    expect(await selectJobs(schedul)).to.deep.equal([{name: waiting,
+      count: waitingCount, status: "S"}]);
+    schedul.get().eventparm.set("B");
+    await expectSelectFailure(schedul, "no_jobs_found");
+    schedul.get().eventparm.set("A");
+    schedul.get().jobcount.set("99999999");
+    await expectSelectFailure(schedul, "no_jobs_found");
+    schedul.get().jobcount.set(waitingCount);
+    schedul.get().from_date.set("20260930");
+    await expectSelectFailure(schedul, "selection_canceled", "FROM_DATE");
   });
 
   it("records a failing report as ABORTED with a job log line", async () => {
