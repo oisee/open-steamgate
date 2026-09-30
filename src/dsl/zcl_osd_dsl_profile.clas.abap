@@ -42,6 +42,7 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
       RETURN.
     ENDIF.
     lv_ascii_limit = cl_abap_codepage=>convert_from( source = '7F' ).
+    CLEAR lv_stack.
     LOOP AT is_result-lines INTO lv_line.
       lv_line_number = sy-tabix.
       READ TABLE is_result-trace INTO ls_trace WITH KEY line = lv_line_number.
@@ -66,11 +67,16 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
         ENDIF.
       ENDIF.
       " a small lexer with a stack of contexts, top last: ' and ` quotes,
-      " | string template text, { its expression (code); empty = code
-      CLEAR lv_stack.
+      " | string template text, { its expression (code); empty = code.
+      " The stack lives across lines: an expression inside a template may go
+      " on on the next line. Quotes and template text cannot, so they end with
+      " their line.
+      WHILE lv_stack IS NOT INITIAL AND substring( val = lv_stack off = strlen( lv_stack ) - 1 len = 1 ) <> '{'.
+        lv_stack = substring( val = lv_stack len = strlen( lv_stack ) - 1 ).
+      ENDWHILE.
       lv_escaped = abap_false.
       lv_comment = abap_false.
-      IF iv_profile = 'abap' AND lv_len > 0 AND lv_line(1) = '*'.
+      IF iv_profile = 'abap' AND lv_len > 0 AND lv_line(1) = '*' AND lv_stack IS INITIAL.
         lv_comment = abap_true.
       ENDIF.
       lv_pos = 0.
@@ -123,7 +129,7 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
             lv_stack = lv_stack && '|'.
           ELSEIF lv_top = '{' AND lv_char = '}'.
             lv_stack = substring( val = lv_stack len = lv_depth - 1 ).
-          ELSEIF lv_top IS INITIAL AND iv_profile = 'abap' AND lv_char = '"'.
+          ELSEIF ( lv_top IS INITIAL OR lv_top = '{' ) AND iv_profile = 'abap' AND lv_char = '"'.
             lv_comment = abap_true.
           ELSEIF lv_top IS INITIAL AND iv_profile = 'sqlscript' AND lv_char = '-' AND lv_next = '-'.
             lv_comment = abap_true.

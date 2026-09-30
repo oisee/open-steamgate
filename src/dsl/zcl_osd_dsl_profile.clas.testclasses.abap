@@ -26,7 +26,10 @@ CLASS ltcl_profile IMPLEMENTATION.
     " a brace inside a quoted literal in an expression is not a brace; a
     " quote inside an expression is a literal again
     APPEND `lv = |{ '{' }` && lv_nonascii && `{ '` && lv_nonascii && `' }|.` TO ls_result-lines.
-    DO 8 TIMES.
+    " an expression going on on the next line, and a comment inside one
+    APPEND `lv = |{ x "` && lv_nonascii TO ls_result-lines.
+    APPEND `}` && lv_nonascii && `|.` TO ls_result-lines.
+    DO 10 TIMES.
       ls_trace-line = sy-index.
       ls_trace-template_line = sy-index + 10.
       ls_trace-path = '/'.
@@ -34,7 +37,7 @@ CLASS ltcl_profile IMPLEMENTATION.
     ENDDO.
     lt_findings = zcl_osd_dsl_profile=>check( iv_profile = 'abap' iv_strict = abap_false
                                                is_result = ls_result io_model = lo_model ).
-    cl_abap_unit_assert=>assert_equals( act = lines( lt_findings ) exp = 10 ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_findings ) exp = 12 ).
     READ TABLE lt_findings INDEX 1 INTO ls_finding.
     cl_abap_unit_assert=>assert_equals( act = ls_finding-rule exp = 'line_length' ).
     cl_abap_unit_assert=>assert_equals( act = ls_finding-line exp = 1 ).
@@ -73,6 +76,13 @@ CLASS ltcl_profile IMPLEMENTATION.
     READ TABLE lt_findings INDEX 10 INTO ls_finding.
     cl_abap_unit_assert=>assert_equals( act = ls_finding-severity exp = 'W' ).
     cl_abap_unit_assert=>assert_equals( act = ls_finding-line exp = 8 ).
+    " the comment inside the expression, then template text after the brace
+    READ TABLE lt_findings INDEX 11 INTO ls_finding.
+    cl_abap_unit_assert=>assert_equals( act = ls_finding-severity exp = 'W' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_finding-line exp = 9 ).
+    READ TABLE lt_findings INDEX 12 INTO ls_finding.
+    cl_abap_unit_assert=>assert_equals( act = ls_finding-severity exp = 'W' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_finding-line exp = 10 ).
     lt_findings = zcl_osd_dsl_profile=>check( iv_profile = 'abap' iv_strict = abap_true
                                                is_result = ls_result io_model = lo_model ).
     READ TABLE lt_findings INDEX 3 INTO ls_finding.
