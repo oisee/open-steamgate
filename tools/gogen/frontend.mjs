@@ -4122,6 +4122,14 @@ function sqlCompare(p, ctx, tb, acc) {
   if (!isExpr(kids[0], Expressions.SQLFieldName) || kids[0].concatTokens().includes("~")) throw new Unsupported(`WHERE compare: ${text}`);
   const col = upper(kids[0].concatTokens());
   const ct = tb.colType(col);
+  // The parser leaves LIKE as tokens rather than SQLCompareOperator. The
+  // SEGW cleanup tests use a quoted pattern; keep other forms refused.
+  const like = /^[\w/]+\s+(NOT\s+)?LIKE\s+'((?:''|[^'])*)'$/i.exec(text);
+  if (like) {
+    if (ct.k !== "c" && ct.k !== "string") throw new Unsupported(`WHERE LIKE on a ${ct.k} column: ${text}`);
+    return RIR.like(RIR.col(lowName(col), sqlIrType(ct)),
+      RIR.lit(like[2].replaceAll("''", "'"), RIR.T.str), undefined, !!like[1]);
+  }
   const inn = p.findDirectExpression(Expressions.SQLIn);
   if (inn) {
     if (kids.length !== 2 || kids[1] !== inn) throw new Unsupported(`WHERE IN form: ${text}`);
