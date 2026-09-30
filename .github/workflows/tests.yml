@@ -168,11 +168,14 @@ jobs:
       # Artifact belongs to this run, not to a generation-hash cache. Tar
       # preserves the live/output links and executable modes that Actions
       # artifacts would discard. The clone is relocated inside the checkout
-      # so npm ci in consumers supplies its package dependencies.
+      # so npm ci in consumers supplies its package dependencies. Core must
+      # travel with the clone: the fork may differ from npm's @abaplint/core.
       - name: Pack the built tree
         run: |
           mkdir -p .local/ci-artifact
           tar -C "$RUNNER_TEMP" --exclude='node_modules' -cf - transpiler | tar -C .local/ci-artifact -xf -
+          mkdir -p .local/ci-artifact/transpiler/packages/transpiler/node_modules/@abaplint
+          cp -a "$RUNNER_TEMP/transpiler/packages/transpiler/node_modules/@abaplint/core" .local/ci-artifact/transpiler/packages/transpiler/node_modules/@abaplint/core
           node tools/osd-ci-artifact.mjs pack "$RUNNER_TEMP/built-tree.tar"
       - uses: actions/upload-artifact@v4
         with:
