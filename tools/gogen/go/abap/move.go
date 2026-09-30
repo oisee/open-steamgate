@@ -55,6 +55,9 @@ func MoveData(dst, src Data) {
 	switch dk {
 	case 'u', 'v', 'h':
 		if dst.T == src.T && dst.T.Copy != nil {
+			if dk == 'h' {
+				BumpTable(dst.P)
+			}
 			dst.T.Copy(dst.P, src.P)
 			return
 		}
@@ -194,6 +197,9 @@ func ClearData(d Data) {
 		*d.P.(*Data) = Data{}
 	case 'u', 'v', 'h':
 		if d.T.Zero != nil {
+			if d.T.Kind == 'h' {
+				BumpTable(d.P)
+			}
 			d.T.Zero(d.P)
 			return
 		}

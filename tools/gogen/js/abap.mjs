@@ -953,7 +953,10 @@ export function MoveData(dst, src) {
   }
   switch (dk) {
     case "u": case "v": case "h":
-      if (dst.t === src.t) return Overwrite(dst.t, dst.get(), copy(v));
+      if (dst.t === src.t) {
+        if (dk === "h") bumpTable(dst.get());
+        return Overwrite(dst.t, dst.get(), copy(v));
+      }
       break;
     case "I":
       if (sk === "I") return dst.set(v);
@@ -1014,7 +1017,10 @@ export function ClearData(d) {
     case "P": return d.set(FmtP("", d.t.dec));
     case "X": return d.set("\u0000".repeat(d.t.len));
     case "l": return d.set(null);
-    case "u": case "v": case "h": return Overwrite(d.t, d.get(), d.t.zero());
+    case "u": case "v": case "h": {
+      if (d.t.kind === "h") bumpTable(d.get());
+      return Overwrite(d.t, d.get(), d.t.zero());
+    }
     default: throw new AbapError("NOT_COMPILED", `CLEAR: generic data of type kind ${d.t.kind}`);
   }
 }

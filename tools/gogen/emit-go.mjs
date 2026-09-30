@@ -1164,9 +1164,9 @@ function stmtLines(st, ctx, d) {
         for (let e = st.value; e.e === "concat"; e = e.l) parts.unshift(e.r);
         return parts.map((x) => `${t}${ctx.builders.get(st.target.name)}.WriteString(${expr(x, ctx)})`);
       }
-      return [`${t}${place(st.target, ctx)} = ${copied(expr(st.value, ctx), st.value.type, st.value)}`];
+      return [...(st.target.type.k === "table" ? [`${t}abap.BumpTable(&${place(st.target, ctx)})`] : []), `${t}${place(st.target, ctx)} = ${copied(expr(st.value, ctx), st.value.type, st.value)}`];
     case "clear":
-      return [`${t}${place(st.target, ctx)} = ${zero(st.target.type)}`];
+      return [...(st.target.type.k === "table" ? [`${t}abap.BumpTable(&${place(st.target, ctx)})`] : []), `${t}${place(st.target, ctx)} = ${zero(st.target.type)}`];
     case "append": {
       const tb = place(st.table, ctx);
       const unique = (st.table.type.secondary ?? []).filter((k) => k.unique);
@@ -1648,7 +1648,7 @@ ${t}	}`));
         // a row kept only the first time its columns are seen; an empty
         // driving table runs the statement without its WHERE
         const fr = `fae${st.fae.n}`;
-        return [`${t}${tgt} = nil`, `${t}{`,
+        return [`${t}abap.BumpTable(&${tgt}); ${tgt} = nil`, `${t}{`,
           `${t}\ttype faekey${n} struct {`, ...st.cols.map((c, i) => `${t}\t\tc${i} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`), `${t}\t}`,
           `${t}\tseen${n} := map[faekey${n}]bool{}`,
           `${t}\trow${n} := func(scan func(dest ...any) error) {`,
@@ -1666,7 +1666,7 @@ ${t}	}`));
           `${t}\tif len(seen${n}) > 0 {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 0, int32(len(seen${n}))`, `${t}\t} else {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}\t}`,
           `${t}}`];
       }
-      return [`${t}${tgt} = nil`,
+      return [`${t}abap.BumpTable(&${tgt}); ${tgt} = nil`,
         `${t}if n${n} := abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
         `${t}\tabap.Must(scan(${st.cols.map((_, i) => `&c${i}_${n}`).join(", ")}))`,

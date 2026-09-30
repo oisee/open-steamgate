@@ -38,6 +38,7 @@ const EXPECT = {
   ZCL_GOGEN_T_SCALARBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarbind.clas.abap:18", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
   ZCL_GOGEN_T_REBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_rebind.clas.abap:18", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
   ZCL_GOGEN_T_INITBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in reference to a deleted table row at zcl_gogen_t_initbind.clas.abap:14", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
+  ZCL_GOGEN_T_BINDMUT: "2/1/0/0/0",
   ZCL_GOGEN_T_GENERICBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in reference to a deleted table row at zcl_gogen_t_genericbind.clas.abap:15", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
   ZCL_GOGEN_T_SCALARREAD: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarread.clas.abap:17", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
   ZCL_GOGEN_T_SCALARLOOP: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarloop.clas.abap:19", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
@@ -407,7 +408,7 @@ const EXPECT = {
   ZCL_GOGEN_T_CALLSUBRC: {Go: "read:4 call:4", JS: "read:4 call:4"},
   // an OPTION in lower case: a dump CATCH cx_root does not take (A4H,
   // a4h-ranges.json), never "no restriction"
-  ZCL_GOGEN_T_SELDUMP: {Go: "ERROR SAPSQL_IN_ITAB_ILLEGAL_OPTION in range OPTION \"cp\": SAPSQL_IN_ITAB_ILLEGAL_OPTION, an uncatchable dump on A4H at zcl_gogen_t_seldump.clas.abap:23",
+  ZCL_GOGEN_T_SELDUMP: {Go: "ERROR SAPSQL_IN_ITAB_ILLEGAL_OPTION in range OPTION \"cp\": SAPSQL_IN_ITAB_ILLEGAL_OPTION, an uncatchable dump on A4H at zcl_gogen_t_seldump.clas.abap:24",
     JS: "ERROR NOT_COMPILED in SELECT ... FROM ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
   // d and t (A4H 2026-09-23, two probes joined into one class): c -> d keeps
   // 'ABC'; d - d counts days in calculation type i (( d / 7 ) * 7 rounds in

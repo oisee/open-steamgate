@@ -2844,6 +2844,7 @@ function statement(node, ctx) {
     return {s: "clear", target};
   }
   // FREE is CLEAR that also gives the memory back, which a GC does anyway
+  if (isStmt(node, Statements.Refresh)) return {s: "seq", body: node.findDirectExpressions(Expressions.Target).map((t) => lvalue(t, ctx)).map((target) => ({s: target.type.k === "data" ? "clear_data" : "clear", target}))};
   if (isStmt(node, Statements.Free)) return {s: "seq", body: node.findDirectExpressions(Expressions.Target).map((t) => lvalue(t, ctx)).map((target) => ({s: target.type.k === "data" ? "clear_data" : "clear", target}))};
   // WRITE goes to a list; in an APC or HTTP handler nobody ever displays it
   // WRITE is a no-op here, except the transpiler runtime's host code: open-abap-core

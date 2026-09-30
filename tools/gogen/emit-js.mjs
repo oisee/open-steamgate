@@ -402,12 +402,12 @@ function stmt(st, ctx, d) {
       }
       // a field symbol is the row itself: assigning to it writes into the row
       if (st.target.e === "fs") return [`${t}Object.assign(${ident(st.target.name)}, ${moved(st.value, ctx)});`];
-      return [`${t}${place(st.target, ctx)} = ${moved(st.value, ctx)};`];
+      return [...(st.target.type.k === "table" ? [`${t}abap.bumpTable(${place(st.target, ctx)});`] : []), `${t}${place(st.target, ctx)} = ${moved(st.value, ctx)};`];
     case "clear":
       // a field symbol is the row itself: clearing it clears the row
       if (st.target.e === "fs" && st.target.type.k === "struct") return [`${t}Object.assign(${ident(st.target.name)}, ${zero(st.target.type)});`];
-      if (st.target.e === "fs" && st.target.type.k === "table") return [`${t}${ident(st.target.name)}.length = 0;`];
-      return [`${t}${place(st.target, ctx)} = ${zero(st.target.type)};`];
+      if (st.target.e === "fs" && st.target.type.k === "table") return [`${t}abap.bumpTable(${ident(st.target.name)});`, `${t}${ident(st.target.name)}.length = 0;`];
+      return [...(st.target.type.k === "table" ? [`${t}abap.bumpTable(${place(st.target, ctx)});`] : []), `${t}${place(st.target, ctx)} = ${zero(st.target.type)};`];
     case "append": {
       const tb = place(st.table, ctx);
       const unique = (st.table.type.secondary ?? []).filter((k) => k.unique);
