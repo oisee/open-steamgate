@@ -11,7 +11,7 @@ import {existsSync, readFileSync, readdirSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import {join} from "node:path";
 
-/** Merge feature fragments in filename order, including named groups. The
+/** Merge feature fragments, then sort suite paths alphabetically. The
  * root argument lets tools that inspect another checkout read its manifest. */
 export function loadSuites(root = fileURLToPath(new URL("..", import.meta.url))) {
   const dir = join(root, "test", "suites.d");
@@ -36,7 +36,32 @@ export function loadSuites(root = fileURLToPath(new URL("..", import.meta.url)))
       }
     }
   }
+  files.sort();
+  for (const entries of Object.values(groups)) entries.sort();
   return {files, groups};
+}
+
+// Keep this routing table in step with test/suites.d/README.md. The longest
+// matching prefix wins; equal-length matches use the fragment filename.
+export const SUITE_FRAGMENTS = {
+  "adt.json": ["adt-", "http-codelens"],
+  "amdp-sqlscript.json": ["amdp-", "amdp.", "ir-", "sqlscript-", "hana-", "reserved-words"],
+  "apc-daemons.json": ["apc-", "amc.", "dialog-step", "pages-push", "osd-apc", "osd-icf-apc"],
+  "cds-sadl.json": ["cds-", "analytics", "ddic-"],
+  "gateway-odata.json": ["batch-inserts", "conformance", "database-", "db-migrate", "demo-data", "gateway-", "http-case", "mocha.", "reference-", "replay-", "rfc-", "sapevent", "se16", "seed-", "sql-", "sqlite-", "store-", "transaction", "write-boundary"],
+  "gogen-osgo.json": ["generation-", "osd-", "preview-", "stg-", "type-", "unit-run", "warm.", "xref-"],
+  "infra-misc.json": ["osd-dataset", "osd-suites"],
+  "jobs.json": ["batch-runs", "job-", "jobs-", "osd-job", "osd-queue", "telegram-"],
+  "segw.json": ["bsp-", "editor.", "flp-", "generated-", "osd-bsp", "pages-index", "segw-", "segw.", "webgui"],
+  "vscode.json": ["ci-vsix", "release-", "third-party-", "vsix-", "vscode-"],
+};
+
+export function suggestSuiteFragment(file, fragments = SUITE_FRAGMENTS) {
+  const name = file.replace(/^.*\//, "");
+  const matches = Object.entries(fragments).flatMap(([fragment, prefixes]) =>
+    prefixes.filter((prefix) => name.startsWith(prefix)).map((prefix) => ({fragment, prefix})));
+  matches.sort((a, b) => b.prefix.length - a.prefix.length || a.fragment.localeCompare(b.fragment));
+  return matches[0]?.fragment ?? "infra-misc.json";
 }
 
 /** A suite on disk that the list does not name.
@@ -154,13 +179,21 @@ if (files.length === 0) {
 const TESTS = fileURLToPath(new URL("../test", import.meta.url));
 const drift = listDrift(suitesOnDisk(TESTS).map((p) => `test/${p.slice(TESTS.length + 1)}`), [...files, ...Object.values(groups).flat()]);
 if (drift.unlisted.length > 0 || drift.absent.length > 0) {
-  for (const p of drift.unlisted) console.error(`osd-suites: ${p} has suites in it and test/suites.d does not name it`);
+  for (const p of drift.unlisted) console.error(`osd-suites: ${p} has suites in it and test/suites.d does not name it; suggested fragment: test/suites.d/${suggestSuiteFragment(p)}`);
   for (const p of drift.absent) console.error(`osd-suites: test/suites.d names ${p}, which is not there`);
   console.error("Add it, or delete it. A list of suites nobody checks is a list that quietly shrinks the run.");
   process.exit(2);
 }
 
 const argv = process.argv.slice(2);
+if (argv.includes("--check")) {
+  if (argv.length !== 1) {
+    console.error("osd-suites: --check takes no other options");
+    process.exit(2);
+  }
+  console.log(`osd-suites: ${files.length} ordinary suites and ${Object.values(groups).flat().length} grouped suites listed; no drift`);
+  process.exit(0);
+}
 const report = argv.includes("--report-skips");
 const takeOption = (name) => {
   const at = argv.indexOf(name);

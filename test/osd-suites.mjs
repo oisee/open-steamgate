@@ -3,7 +3,7 @@
 // does -- and a reporter checked only where everything is present reports on
 // the specimen made for it.
 import {expect} from "chai";
-import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards, loadSuites} from "../tools/osd-suites.mjs";
+import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards, loadSuites, suggestSuiteFragment} from "../tools/osd-suites.mjs";
 import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
 import {spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
@@ -40,19 +40,28 @@ describe("tools/osd-suites: a run says what it could not see", () => {
 // answering a narrower question than it was read as. That is the direction
 // drift always takes: the one that reads as progress.
 describe("the suite list against the tree", () => {
-  it("merges fragments by filename and refuses duplicate suites across files and groups", () => {
+  it("sorts merged suites alphabetically and refuses duplicates across files and groups", () => {
     const root = mkdtempSync(join(tmpdir(), "osd-suites-"));
     const dir = join(root, "test", "suites.d");
     try {
       mkdirSync(dir, {recursive: true});
-      writeFileSync(join(dir, "z.json"), JSON.stringify({files: ["test/z.mjs"], groups: {packaging: ["test/package.mjs"]}}));
-      writeFileSync(join(dir, "a.json"), JSON.stringify({files: ["test/a.mjs"]}));
-      expect(loadSuites(root)).to.deep.equal({files: ["test/a.mjs", "test/z.mjs"], groups: {packaging: ["test/package.mjs"]}});
-      writeFileSync(join(dir, "a.json"), JSON.stringify({files: ["test/package.mjs"]}));
-      expect(() => loadSuites(root)).to.throw("duplicate suite test/package.mjs");
+      writeFileSync(join(dir, "z.json"), JSON.stringify({files: ["test/a.mjs"], groups: {packaging: ["test/z-package.mjs", "test/a-package.mjs"]}}));
+      writeFileSync(join(dir, "a.json"), JSON.stringify({files: ["test/z.mjs"]}));
+      expect(loadSuites(root)).to.deep.equal({files: ["test/a.mjs", "test/z.mjs"], groups: {packaging: ["test/a-package.mjs", "test/z-package.mjs"]}});
+      writeFileSync(join(dir, "a.json"), JSON.stringify({files: ["test/a-package.mjs"]}));
+      expect(() => loadSuites(root)).to.throw("duplicate suite test/a-package.mjs");
     } finally {
       rmSync(root, {recursive: true, force: true});
     }
+  });
+
+  it("suggests the most specific feature fragment for new suite files", () => {
+    expect(suggestSuiteFragment("test/osd-job-next.mjs")).to.equal("jobs.json");
+    expect(suggestSuiteFragment("test/osd-apc-next.mjs")).to.equal("apc-daemons.json");
+    expect(suggestSuiteFragment("test/osd-dataset-next.mjs")).to.equal("infra-misc.json");
+    expect(suggestSuiteFragment("test/vscode-next.mjs")).to.equal("vscode.json");
+    expect(suggestSuiteFragment("test/unclassified-next.mjs")).to.equal("infra-misc.json");
+    expect(suggestSuiteFragment("test/tie-next.mjs", {"z.json": ["tie-"], "a.json": ["tie-"]})).to.equal("a.json");
   });
 
   it("names every file under test/ that has suites in it", () => {
