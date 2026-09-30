@@ -2,6 +2,21 @@
 
 **An ABAP application server you can clone.**
 
+## TL;DR — run it
+
+| way | do this | then open |
+| --- | --- | --- |
+| **Browser, now** | nothing to install | **[oisee.github.io/open-steamgate/main/app/flp.html](https://oisee.github.io/open-steamgate/main/app/flp.html)** |
+| **Docker** | `git clone https://github.com/oisee/open-steamgate && cd open-steamgate && docker compose -p osd11 -f docker/compose.sqlite.yml up -d` | `http://localhost:8011/app/flp.html` |
+| **Portainer** | Stacks → Add stack → Web editor, paste one YAML block from [`docs/spin.md`](docs/spin.md) (SQLite, DuckDB, PostgreSQL or HANA Express) | `http://<host>:8011/app/flp.html` |
+| **One binary (Bun)** | download `osd-linux-x64` / `osd-linux-arm64` / `osd-darwin-arm64` / `osd-windows-x64.exe` from [Releases](https://github.com/oisee/open-steamgate/releases), then `mv osd-linux-x64 osd && chmod +x osd && ./osd up` | `http://localhost:3030/` |
+| **VS Code** | install [open-steamgate: local ABAP server](https://marketplace.visualstudio.com/items?itemName=oisee.open-steamgate), or the `.vsix` from [Releases](https://github.com/oisee/open-steamgate/releases) via *Extensions: Install from VSIX…*; then run **osd: Start** | the OSD tree in VS Code |
+| **Node, from source** | `npm ci && npm run bootstrap && npm start` (Node 22.14+ or 24) | `http://localhost:3030/` |
+
+Each release also carries `sqlite.yml`, `duckdb.yml` and `postgres.yml`; start one with `docker compose -f sqlite.yml up -d`. `./osd doctor` checks a downloaded binary.
+
+## What it is
+
 open-steamgate (OSD) cross-compiles real ABAP — `_MPC_EXT` / `_DPC_EXT`
 Gateway classes, CDS views, AMDP methods, reports — and runs it against a local
 database. It serves OData to Fiori Elements, lets Eclipse edit it over ADT, and
@@ -22,14 +37,18 @@ thrown away.
 The name: `vsp` (vibing-steampunk) → `steamgate`. **Gate** is the SAP Gateway,
 the `/IWBEP/` framework whose runtime this project reimplements.
 
-## Try it
+## The ways to run it, in a sentence each
 
-| how | where |
-| --- | --- |
-| **In the browser**, nothing installed | **[oisee.github.io/open-steamgate/main/app/flp.html](https://oisee.github.io/open-steamgate/main/app/flp.html)**: the transpiled ABAP, the OData runtime and SQLite run in a service worker on your machine |
-| **Docker / Portainer** | `ghcr.io/oisee/open-steamgate`. The images are `showcase-draft` (with the demo packs) and `draft` (core only), multi-arch amd64 and arm64, and the arm64 image also runs on a Raspberry Pi 4. See [`docs/spin.md`](docs/spin.md) |
-| **VS Code** | [open-steamgate: local ABAP server](https://marketplace.visualstudio.com/items?itemName=oisee.open-steamgate) on the Marketplace: OSD tree, F8 data preview, ABAP Unit in the Test Explorer, debugging, `.http` CodeLens |
-| **From source** | see [Run it](#run-it) |
+- **Browser.** The transpiled ABAP, the OData runtime and SQLite run in a
+  service worker on your machine; no server answers anything.
+- **Docker.** `ghcr.io/oisee/open-steamgate`, tags `showcase-draft` (with the
+  demo packs) and `draft` (core), multi-arch amd64 and arm64. The arm64 image
+  also runs on a Raspberry Pi 4 ([`docs/spin.md`](docs/spin.md)).
+- **Binary.** One self-contained Bun executable per platform. It copies its
+  system into your user data directory on first start and layers your own
+  folders over it with `osd up --layer <folder>`.
+- **VS Code.** The OSD tree, F8 data preview, ABAP Unit in the Test Explorer,
+  debugging, and a `.http` CodeLens that finds the DPC method behind a request.
 
 The launchpad in the browser build:
 
@@ -77,7 +96,7 @@ runtime differs from SAP, written down before any workaround.
 | **Classic screens** | SAP Easy Access, SE16, ST05 and an editor, served by ABAP on the paths the originals use | [`docs/webgui.md`](docs/webgui.md) |
 | **Jobs and daemons** | `JOB_OPEN`/`SUBMIT`/`CLOSE` with standard signatures, `SUBMIT … VIA JOB … WITH … IN`, multi-step jobs, durable keys, tail events, a doctor. ABAP daemons: dialog-step queue, PCP, timers, AMC | [`docs/abap-daemons.md`](docs/abap-daemons.md) |
 | **Files** | `OPEN / READ / TRANSFER / DELETE DATASET` behind a sandbox: deny by default, allowed roots, no escape through `..`, symlinks or a swapped directory. A streaming **zip reader in ABAP** (own inflate, bounded memory, CRC-checked) runs the same on a system | [`docs/dataset.md`](docs/dataset.md), [`docs/zip-stream.md`](docs/zip-stream.md) |
-| **OSGo: ABAP → Go** | `gogen` compiles the system to Go: the whole OSD as one Go binary (841 classes, the demo answers), a report as a native command-line tool with its selection screen (`osabap`), ABAP Unit on Go compared method by method with Node, and sXML 27× faster than on Node | [`tools/gogen/README.md`](tools/gogen/README.md) |
+| **OSGo: ABAP → Go** | `gogen` compiles the system to Go: the whole OSD as one Go binary (841 classes at #251, the demo answers), a report as a native command-line tool with its selection screen (`osabap`), ABAP Unit on Go compared method by method with Node, and sXML about 27× faster than on Node on a 10 MiB benchmark (#275) | [`tools/gogen/README.md`](tools/gogen/README.md) |
 | **Databases** | sql.js, SQLite file (WAL), DuckDB, PostgreSQL and HANA behind one seam; FOR ALL ENTRIES sent in blocks, similar to the kernel | [`docs/db-backends.md`](docs/db-backends.md) |
 | **Instruments** | Comparing two systems (responses, SQL at the seam, a branch of a whole system), `.http` regression cases with a frozen clock, and a frame-by-frame oracle against a real system | [`docs/regression-http-cases.md`](docs/regression-http-cases.md), [`docs/frame-comparison.md`](docs/frame-comparison.md) |
 | **Packs and delivery** | A pack is a directory (`osd-pack.json`: ABAP, tables, rows, pages, tiles) layered over the tree. There is one Bun binary (`build/osd`), a relocatable release directory, Docker for amd64 and arm64, the browser preview on GitHub Pages, and a CI that gates every publication on the tag's tests | [`docs/using-osd.md`](docs/using-osd.md), [`docs/preview-deployments.md`](docs/preview-deployments.md) |
@@ -134,7 +153,8 @@ npm run binary && build/osd up             # the workbench as one Bun binary
 npm run vsix                 # the VS Code extension
 ```
 
-`npm run bootstrap` reads `libs.lock.json`: it clones the pinned libraries into
+HANA Express: running its image accepts SAP's developer licence, see
+[`docs/amdp-in-hana.md`](docs/amdp-in-hana.md). `npm run bootstrap` reads `libs.lock.json`: it clones the pinned libraries into
 `.local/lars/`, fetches the packs and runs the first transpile.
 
 ## Build on it
