@@ -69,6 +69,26 @@ test("comparison fails for each selected owner without a runnable method and for
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
+test("a different assertion in a known anomaly method remains DIFFERENT", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-anomaly-compare-"));
+  const key = {class: "ZCL_STG_GATEWAY_TEST", testclass: "LTCL_DISPATCH", method: "ENTITY_SET"};
+  const node = {...key, status: "SUCCESS", message: ""};
+  const reviewed = {...key, status: "FAILED", message: "Expected abap_true at zcl_stg_gateway_test.clas.testclasses.abap:383"};
+  const unrelated = {...reviewed, message: "Expected abap_true at zcl_stg_gateway_test.clas.testclasses.abap:380"};
+  try {
+    writeFileSync(join(dir, "node.json"), JSON.stringify([node]));
+    for (const [go, expected] of [[reviewed, "nodeAnomaly"], [unrelated, "different"]]) {
+      writeFileSync(join(dir, "go.json"), JSON.stringify({rows: [go]}));
+      const run = spawnSync("node", [join(here, "unit-compare.mjs"), "--node-json", join(dir, "node.json"),
+        "--go-json", join(dir, "go.json")], {encoding: "utf8", timeout: 10000});
+      assert.equal(run.error, undefined, run.stderr);
+      const methods = JSON.parse(run.stdout).methods;
+      assert.deepEqual(methods.nodeAnomaly.map((row) => row.key), expected === "nodeAnomaly" ? ["ZCL_STG_GATEWAY_TEST/LTCL_DISPATCH/ENTITY_SET"] : []);
+      assert.deepEqual(methods.different.map((row) => row.key), expected === "different" ? ["ZCL_STG_GATEWAY_TEST/LTCL_DISPATCH/ENTITY_SET"] : []);
+    }
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
 test("ABAP fixture runs pass, fail, exception, and teardown after failures", {timeout: 120000}, () => {
   const run = spawnSync("node", [join(here, "unit.mjs"), "--fixture", join(here, "testdata-unit")], {
     cwd: join(here, "..", ".."), encoding: "utf8", timeout: 110000, maxBuffer: 5e6,
