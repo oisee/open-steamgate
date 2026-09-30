@@ -9,28 +9,37 @@ ENDCLASS.
 
 CLASS {{class}} IMPLEMENTATION.
   METHOD check.
-    DATA {{for.itab}} TYPE STANDARD TABLE OF {{for.table}} WITH DEFAULT KEY.
-    DATA {{for.wa}} TYPE {{for.table}}.
-    DATA {{forbid.itab}} TYPE STANDARD TABLE OF {{forbid.table}} WITH DEFAULT KEY.
-    DATA {{forbid.wa}} TYPE {{forbid.table}}.
+    " one query: the tables joined, never a SELECT per row of the first
+    TYPES: BEGIN OF ty_join,
+{{#join.fields}}
+             {{name}} TYPE {{table}}-{{column}},
+{{/join.fields}}
+           END OF ty_join.
+    DATA {{join.itab}} TYPE STANDARD TABLE OF ty_join WITH DEFAULT KEY.
+    DATA {{join.wa}} TYPE ty_join.
     DATA lv_alert TYPE string.
-    SELECT * FROM {{for.table}} INTO TABLE {{for.itab}}
-{{#when.conditions}}
-      {{#@first}}WHERE{{/@first}}{{^@first}}  AND{{/@first}} {{column}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{ref}}{{/is_literal}}
-{{/when.conditions}}
-      ORDER BY PRIMARY KEY.
-    LOOP AT {{for.itab}} INTO {{for.wa}}.
-      SELECT * FROM {{forbid.table}} INTO TABLE {{forbid.itab}}
-{{#forbid.conditions}}
-        {{#@first}}WHERE{{/@first}}{{^@first}}  AND{{/@first}} {{column}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{ref}}{{/is_literal}}
-{{/forbid.conditions}}
-        ORDER BY PRIMARY KEY.
-      LOOP AT {{forbid.itab}} INTO {{forbid.wa}}.
+    SELECT
+{{#join.fields}}
+        {{source}} AS {{name}}
+{{/join.fields}}
+      FROM {{for.table}} AS {{for.alias}}
+        INNER JOIN {{forbid.table}} AS {{forbid.alias}}
+{{#join.on}}
+          {{#@first}}ON{{/@first}}{{^@first}} AND{{/@first}} {{lhs}} {{op}} {{sref}}
+{{/join.on}}
+      INTO CORRESPONDING FIELDS OF TABLE {{join.itab}}
+{{#join.where}}
+      {{#@first}}WHERE{{/@first}}{{^@first}}  AND{{/@first}} {{lhs}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{sref}}{{/is_literal}}
+{{/join.where}}
+      ORDER BY
+{{#join.order}}
+        {{source}}{{#@last}}.{{/@last}}
+{{/join.order}}
+    LOOP AT {{join.itab}} INTO {{join.wa}}.
 {{#alert.parts}}
-        {{#@first}}lv_alert = {{/@first}}{{^@first}}  && {{/@first}}{{#is_text}}{{value | literal}}{{/is_text}}{{^is_text}}{{ref}}{{/is_text}}{{#@last}}.{{/@last}}
+      {{#@first}}lv_alert = {{/@first}}{{^@first}}  && {{/@first}}{{#is_text}}{{value | literal}}{{/is_text}}{{^is_text}}{{jref}}{{/is_text}}{{#@last}}.{{/@last}}
 {{/alert.parts}}
-        APPEND lv_alert TO rt_alerts.
-      ENDLOOP.
+      APPEND lv_alert TO rt_alerts.
     ENDLOOP.
   ENDMETHOD.
 ENDCLASS.

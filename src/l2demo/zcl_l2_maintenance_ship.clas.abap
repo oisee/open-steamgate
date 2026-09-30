@@ -9,29 +9,39 @@ ENDCLASS.
 
 CLASS zcl_l2_maintenance_ship IMPLEMENTATION.
   METHOD check.
-    DATA lt_ship TYPE STANDARD TABLE OF zosd_l2_ship WITH DEFAULT KEY.
-    DATA ls_ship TYPE zosd_l2_ship.
-    DATA lt_voy TYPE STANDARD TABLE OF zosd_l2_voy WITH DEFAULT KEY.
-    DATA ls_voy TYPE zosd_l2_voy.
+    " one query: the tables joined, never a SELECT per row of the first
+    TYPES: BEGIN OF ty_join,
+             ship_ship_id TYPE zosd_l2_ship-ship_id,
+             voy_voyage_id TYPE zosd_l2_voy-voyage_id,
+             ship_name TYPE zosd_l2_ship-name,
+             voy_dep_date TYPE zosd_l2_voy-dep_date,
+           END OF ty_join.
+    DATA lt_join TYPE STANDARD TABLE OF ty_join WITH DEFAULT KEY.
+    DATA ls_join TYPE ty_join.
     DATA lv_alert TYPE string.
-    SELECT * FROM zosd_l2_ship INTO TABLE lt_ship
-      WHERE status = 'M'
-      ORDER BY PRIMARY KEY.
-    LOOP AT lt_ship INTO ls_ship.
-      SELECT * FROM zosd_l2_voy INTO TABLE lt_voy
-        WHERE ship_id = ls_ship-ship_id
-          AND dep_date > iv_date
-        ORDER BY PRIMARY KEY.
-      LOOP AT lt_voy INTO ls_voy.
-        lv_alert = ls_ship-ship_id
-          && ` `
-          && ls_ship-name
-          && `: in maintenance, voyage `
-          && ls_voy-voyage_id
-          && ` departs `
-          && ls_voy-dep_date.
-        APPEND lv_alert TO rt_alerts.
-      ENDLOOP.
+    SELECT
+        ship~ship_id AS ship_ship_id
+        voy~voyage_id AS voy_voyage_id
+        ship~name AS ship_name
+        voy~dep_date AS voy_dep_date
+      FROM zosd_l2_ship AS ship
+        INNER JOIN zosd_l2_voy AS voy
+          ON voy~ship_id = ship~ship_id
+      INTO CORRESPONDING FIELDS OF TABLE lt_join
+      WHERE ship~status = 'M'
+        AND voy~dep_date > iv_date
+      ORDER BY
+        ship~ship_id
+        voy~voyage_id.
+    LOOP AT lt_join INTO ls_join.
+      lv_alert = ls_join-ship_ship_id
+        && ` `
+        && ls_join-ship_name
+        && `: in maintenance, voyage `
+        && ls_join-voy_voyage_id
+        && ` departs `
+        && ls_join-voy_dep_date.
+      APPEND lv_alert TO rt_alerts.
     ENDLOOP.
   ENDMETHOD.
 ENDCLASS.

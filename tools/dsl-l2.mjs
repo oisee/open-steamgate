@@ -18,6 +18,9 @@ import {join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import yaml from "js-yaml";
 import {DEFAULT_DDIC, DDIC_PROVIDER, Refusal, registryFor} from "./dsl-ddic.mjs";
+import {INT_RANGE, INTEGERS, PACKED, allReferences, canonical, deriveCases, evaluate} from "./dsl-l2-eval.mjs";
+
+export {evaluate, stepValue} from "./dsl-l2-eval.mjs";
 
 export const CHECK_TEMPLATE = "recipes/l2-check/template.tpl";
 export const TEST_TEMPLATE = "recipes/l2-check-test/template.tpl";
@@ -264,8 +267,6 @@ function tableInfo(registry, name, fail) {
 }
 
 const CHAR_LIKE = new Set(["CHAR", "CLNT", "LANG", "CUKY", "UNIT", "ACCP", "SSTR", "STRG"]);
-const INTEGERS = new Set(["INT1", "INT2", "INT4", "INT8"]);
-const PACKED = new Set(["DEC", "CURR", "QUAN"]);
 export const DATE_TYPE = {built_in: "DATS", length: 8};
 
 const typeText = (type) => `${type.built_in}${type.length === undefined ? "" : ` ${type.length}`}${type.decimals === undefined ? "" : `,${type.decimals}`}`;
@@ -277,8 +278,6 @@ const typeText = (type) => `${type.built_in}${type.length === undefined ? "" : `
 // language's own: a character-like field takes a quoted literal.
 // test/dsl-l2.mjs runs boundary values through both and asserts they agree.
 const QUOTED_TYPES = new Set(["CHAR", "NUMC", "CLNT", "LANG", "CUKY", "UNIT", "ACCP", "DATS", "TIMS"]);
-const INT_RANGE = {INT1: [0n, 255n], INT2: [-32768n, 32767n], INT4: [-2147483648n, 2147483647n],
-  INT8: [-9223372036854775808n, 9223372036854775807n]};
 
 export function misfit(value, type, quoted = true) {
   const b = type.built_in;
@@ -345,17 +344,19 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     return value;
   };
   need(doc, "", "a mapping of the rule's keys", "map");
-  const known = new Set(["rule", "class", "title", "for", "when", "forbid", "alert", "examples"]);
+  const known = new Set(["rule", "class", "title", "for", "when", "forbid", "alert", "boundaries", "examples"]);
   for (const key of Object.keys(doc)) if (!known.has(key)) failAt(line(key))(`unknown key ${key}`);
 
   const name = need(doc.rule, "rule", "the rule's name");
   if (!/^[a-z][a-z0-9-]*$/.test(name)) failAt(line("rule"))(`rule name ${name} must be lower case letters, digits and "-"`);
   const id = `rule/${name}`;
+  if (doc.class !== undefined) need(doc.class, "class", "a class name (text)");
   const className = (doc.class ?? `zcl_l2_${name.replaceAll("-", "_")}`).toLowerCase();
   if (!/^[yz][a-z0-9_]*$/.test(className) || className.length > 30) {
     failAt(line(doc.class === undefined ? "rule" : "class"))(`class ${className} is not a customer class name of at most 30 characters${doc.class === undefined ? "; name one with class:" : ""}`);
   }
   const title = need(doc.title, "title", "a one-line title");
+  if (/[\r\n]/.test(title)) failAt(line("title"))("title must be one line");
 
   registry ??= registryFor(ddic, []);
   const tables = new Map();
@@ -375,6 +376,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
   for (const key of Object.keys(doc.forbid)) if (!["exists", "where"].includes(key)) failAt(line(`forbid/${key}`))(`unknown key forbid.${key}`);
   const inner = source("forbid/exists", doc.forbid.exists);
   if (inner.alias === outer.alias) failAt(line("forbid/exists"))(`alias ${inner.alias} is already the alias of ${outer.table}`);
+  if (inner.table === outer.table) failAt(line("forbid/exists"))(`for and exists are both ${outer.table}; slice 2 joins two different tables`);
   const aliases = new Map([[outer.alias, outer], [inner.alias, inner]]);
   const wa = (alias) => `ls_${alias}`;
 
@@ -409,26 +411,65 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
       if (isCurrent(right)) fail(`${cmp.left.text} ${cmp.op} ${cmp.right.text} compares two fields of ${current.alias}; not in slice 1`);
       const column = fieldOf(left, scope, fail).field;
       const type = column.literal;
+      // `lhs` and `sref` are the qualified columns of the one query (alias~column),
+      // `ref` the work-area component of the nested reference form; `cmp` is the
+      // comparison as data for the interpreter (tools/dsl-l2-eval.mjs)
       const node = {"@id": `${idBase}/${i + 1}`, rule_line: line(path), column: column.column, op,
-        "@type": type, text: `${cmp.left.text} ${cmp.op} ${cmp.right.text}`};
+        "@type": type, text: `${cmp.left.text} ${cmp.op} ${cmp.right.text}`, lhs: `${left.alias}~${column.column}`};
+      const cmpBase = {alias: left.alias, column: column.column, op, type};
       if (right.kind === "literal") {
         const why = misfit(right.value, type, right.quoted);
         if (why) fail(`${left.text} is ${typeText(type)}; ${why}`);
-        return {...node, is_literal: true, value: right.value, "value@type": type};
+        // a NUMC literal is the column's own text ('12' in NUMC 4 is '0012'): a system
+        // converts it, the database of this runtime would compare the digits as written
+        const value = type.built_in === "NUMC" ? canonical(type, right.value) : right.value;
+        return {...node, is_literal: true, value, "value@type": type,
+          cmp: {...cmpBase, rhs: {kind: "literal", value}}};
       }
       if (right.kind === "param") {
         if (type.built_in !== "DATS") fail(`${left.text} is ${typeText(type)}, $date is DATS`);
-        return {...node, is_literal: false, ref: "iv_date"};
+        return {...node, is_literal: false, ref: "iv_date", sref: "iv_date",
+          cmp: {...cmpBase, rhs: {kind: "param", name: right.name}}};
       }
       const other = fieldOf(right, scope, fail).field.literal;
-      if (other.built_in !== type.built_in) fail(`${left.text} is ${typeText(type)}, ${right.text} is ${typeText(other)}`);
-      return {...node, is_literal: false, ref: `${wa(right.alias)}-${right.field}`};
+      // the query compares the columns on the database, the nested form a host value
+      // converted to the column's type: only identical types mean the same thing
+      if (other.built_in !== type.built_in || other.length !== type.length || other.decimals !== type.decimals) {
+        fail(`${left.text} is ${typeText(type)}, ${right.text} is ${typeText(other)}; a field-to-field comparison needs the same type, length and decimals`);
+      }
+      return {...node, is_literal: false, ref: `${wa(right.alias)}-${right.field}`, sref: `${right.alias}~${right.field}`,
+        cmp: {...cmpBase, rhs: {kind: "field", alias: right.alias, column: right.field, type: other}}};
     });
   };
 
   const outerScope = new Map([[outer.alias, outer]]);
   const when = doc.when === undefined ? [] : conditions("when", doc.when, outer, outerScope, `${id}/when`);
   const forbid = conditions("forbid/where", doc.forbid.where, inner, aliases, `${id}/forbid/where`);
+
+  // the one query (slice 2): the `for` table INNER JOIN the `exists` table ON
+  // the equalities between their fields, the rest in WHERE, the columns the
+  // alert and the stable order need as aliased fields of one result line
+  const joinEquality = (c) => c.cmp.rhs.kind === "field" && c.cmp.op === "=";
+  if (!forbid.some(joinEquality)) {
+    failAt(line("forbid/where"))(`where needs an equality between a field of ${inner.alias} and a field of ${outer.alias} (the join condition of the one query)`);
+  }
+  const joinFields = new Map();
+  const joinField = (alias, column, ruleLine) => {
+    const key = `${alias}~${column}`;
+    if (!joinFields.has(key)) {
+      const name = `${alias}_${column}`;
+      if (name.length > 30) failAt(ruleLine)(`${name} is longer than 30 characters as a field of the joined result; shorten the alias`);
+      joinFields.set(key, {"@id": `${id}/join/field/${joinFields.size + 1}`, rule_line: ruleLine, name, source: key,
+        table: aliases.get(alias).table.toLowerCase(), column});
+    }
+    return joinFields.get(key).name;
+  };
+  const keysOf = (src, ruleLine) => src.info.keys.filter((k) => k !== src.info.client).map((k) => {
+    joinField(src.alias, k, ruleLine);
+    return {source: `${src.alias}~${k}`, rule_line: ruleLine};
+  });
+  const order = [...keysOf(outer, line("for")), ...keysOf(inner, line("forbid/exists"))]
+    .map((entry, n) => ({"@id": `${id}/join/order/${n + 1}`, ...entry}));
 
   // alert: text and holes
   const alertText = need(doc.alert, "alert", "text with {alias.field} holes");
@@ -443,19 +484,21 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     }
     const {field} = fieldOf({kind: "field", alias: part.alias, field: part.field, text: part.text}, aliases, alertFail);
     return {"@id": `${id}/alert/hole/${++holes}`, rule_line: line("alert"), is_text: false,
-      ref: `${wa(part.alias)}-${field.column}`, "@type": field.literal};
+      alias: part.alias, column: field.column,
+      ref: `${wa(part.alias)}-${field.column}`, jref: `ls_join-${joinField(part.alias, field.column, line("alert"))}`,
+      "@type": field.literal};
   });
   if (!parts.length) alertFail("alert is empty");
 
   // examples: rows of the rule's own tables, the date, the alerts expected
   // each table where it enters the rule: `for`, or `forbid.exists`
-  const ruleTables = [{...outer.info, rule_line: line("for")},
-    ...(inner.table === outer.table ? [] : [{...inner.info, rule_line: line("forbid/exists")}])];
+  const ruleTables = [{...outer.info, rule_line: line("for")}, {...inner.info, rule_line: line("forbid/exists")}];
   const testName = (table) => ({itab: `mt_${table.toLowerCase()}`, wa: `ls_${table.toLowerCase()}`});
-  const methods = new Set();
+  const methods = new Set(["check_reference"]);
   // a rule carries its proof: examples, each saying what it expects
   if (doc.examples === undefined) failAt(line("rule"))("a rule needs examples: none are given");
   if (Array.isArray(doc.examples) && !doc.examples.length) failAt(line("examples"))("a rule needs at least one example");
+  const raw = []; // the rows and date of each example as the interpreter reads them
   const examples = need(doc.examples, "examples", "a list of examples", "list").map((example, e) => {
     const base = `examples/${e}`;
     const fail = failAt(line(base));
@@ -464,6 +507,8 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     const label = need(example.name, `${base}/name`, "the example's name");
     const labelWhy = misfit(label, {built_in: "STRG"});
     if (labelWhy) failAt(line(`${base}/name`))(`example name: ${labelWhy}`);
+    const refWhy = misfit(`${label} (check against check_reference)`, {built_in: "STRG"});
+    if (refWhy) failAt(line(`${base}/name`))(`example name with the comparison message: ${refWhy}`);
     const method = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
     if (!/^[a-z]/.test(method) || method.length > 30) failAt(line(`${base}/name`))(`example name ${JSON.stringify(label)} gives method ${method}, which is not an ABAP name of at most 30 characters`);
     if (methods.has(method) || ["teardown", "assert_alerts"].includes(method)) failAt(line(`${base}/name`))(`example name ${JSON.stringify(label)} gives method ${method} a second time`);
@@ -502,7 +547,10 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     });
     if (example.expect === undefined) fail(`example ${JSON.stringify(label)} has no expect; write expect: [] when it expects no alert`);
     const expect = need(example.expect, `${base}/expect`, "a list of alert lines", "list");
+    raw.push(Object.fromEntries(Object.entries(rows).map(([t, list]) => [t.toLowerCase(),
+      list.map((row) => Object.fromEntries(Object.entries(row).map(([f, v]) => [f.toLowerCase(), v])))])));
     return {"@id": exampleId, rule_line: line(base), name: label, method, label, "label@type": {built_in: "STRG"},
+      ref_label: `${label} (check against check_reference)`, "ref_label@type": {built_in: "STRG"},
       date: {"@id": `${exampleId}/date`, rule_line: line(`${base}/date`), value: date, "value@type": DATE_TYPE,
         call: `${className}=>check`},
       tables: exampleTables,
@@ -514,18 +562,94 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
       })};
   });
 
-  return {
+  const ddicOf = (info) => ({client: info.client, keys: info.keys.filter((k) => k !== info.client),
+    fields: Object.fromEntries([...info.fields].map(([column, f]) => [column, f.literal]))});
+  const whenNodes = when;
+  const model = {
     "@id": id, rule_line: line("rule"), rule: name, title, source: where, class: className,
     for: {"@id": `${id}/for`, rule_line: line("for"), table: outer.table.toLowerCase(), alias: outer.alias,
       itab: `lt_${outer.alias}`, wa: wa(outer.alias)},
-    when: {"@id": `${id}/when`, rule_line: line(doc.when === undefined ? "for" : "when"), conditions: when},
-    forbid: {"@id": `${id}/forbid`, rule_line: line("forbid"), table: inner.table.toLowerCase(), alias: inner.alias,
+    when: {"@id": `${id}/when`, rule_line: line(doc.when === undefined ? "for" : "when"), conditions: whenNodes},
+    forbid: {"@id": `${id}/forbid`, rule_line: line("forbid"), exists_line: line("forbid/exists"), table: inner.table.toLowerCase(), alias: inner.alias,
       itab: `lt_${inner.alias}`, wa: wa(inner.alias), conditions: forbid},
+    join: {"@id": `${id}/join`, rule_line: line("forbid"), itab: "lt_join", wa: "ls_join",
+      fields: [...joinFields.values()], order,
+      on: forbid.filter(joinEquality), where: [...whenNodes, ...forbid.filter((c) => !joinEquality(c))]},
     alert: {"@id": `${id}/alert`, rule_line: line("alert"), parts},
     tables: ruleTables.map((info) => ({"@id": `${id}/table/${info.table.toLowerCase()}`, rule_line: info.rule_line,
       table: info.table.toLowerCase(), ...testName(info.table)})),
+    ddic: {[outer.table.toLowerCase()]: ddicOf(outer.info), [inner.table.toLowerCase()]: ddicOf(inner.info)},
     examples,
+    cases: [],
   };
+
+  // the hand-written examples against the interpreter: a wrong `expect` is
+  // found here, with its line, before any ABAP runs
+  examples.forEach((example, e) => {
+    const got = evaluate(model, raw[e], {date: example.date.value});
+    const want = example.expect.map((x) => x.value);
+    if (JSON.stringify([...got].sort()) !== JSON.stringify([...want].sort())) {
+      failAt(line(`examples/${e}/expect`))(`example ${JSON.stringify(example.name)} expects ${JSON.stringify(want)} but the rule gives ${JSON.stringify(got)}`);
+    }
+  });
+
+  // boundaries: derived cases, their expected alerts from the interpreter
+  if (doc.boundaries !== undefined) {
+    const selected = selection(doc.boundaries, model, failAt, line);
+    const first = examples[0];
+    const derived = deriveCases(model, selected, {date: first.date.value, example: raw[0], reserved: methods});
+    model.skipped = derived.skipped;
+    model.cases = derived.cases.map((c) => caseNode(model, c));
+  }
+  return model;
+}
+
+// `boundaries:` is `auto` or a list of condition references
+function selection(value, model, failAt, line) {
+  const all = allReferences(model);
+  if (value === "auto") return all;
+  if (!Array.isArray(value)) failAt(line("boundaries"))("boundaries is auto or a list of conditions such as when/1 or forbid/where/2");
+  return value.map((entry, i) => {
+    if (typeof entry !== "string" || !all.includes(entry)) {
+      failAt(line(`boundaries/${i}`))(`boundaries names ${JSON.stringify(entry)}, which is not a condition of the rule (${all.join(", ")})`);
+    }
+    return entry;
+  });
+}
+
+// A derived case as an L1 node of the same shape as an example, every node
+// tracing to the rule line of the condition it tests.
+function caseNode(model, c) {
+  const id = `${model["@id"]}/case/${c.method}`;
+  const ruleLine = c.line;
+  const STRG = {built_in: "STRG"};
+  const literal = (nodeId, value, type) => ({"@id": nodeId, rule_line: ruleLine, value, "value@type": type});
+  const tables = model.tables.map((t) => {
+    const list = c.rows[t.table] ?? [];
+    if (!list.length) return undefined;
+    const {client, fields} = model.ddic[t.table];
+    return {"@id": `${id}/table/${t.table}`, rule_line: ruleLine, table: t.table, itab: t.itab, wa: t.wa,
+      ...(client ? {client} : {}),
+      rows: list.map((row, r) => {
+        const rowId = `${id}/row/${t.table}/${r + 1}`;
+        return {"@id": rowId, rule_line: ruleLine,
+          fields: Object.entries(fields).filter(([column]) => column !== client).map(([column, type]) => {
+            const value = row[column];
+            const why = misfit(value, type);
+            if (why) throw new Error(`internal: derived value ${JSON.stringify(value)} for ${t.table}-${column}: ${why}`);
+            return {...literal(`${rowId}/field/${column}`, value, type), column};
+          })};
+      })};
+  }).filter(Boolean);
+  const label = c.label;
+  const refWhy = misfit(`${label} (check against check_reference)`, STRG);
+  if (refWhy) throw new Error(`derived case ${c.method}: ${refWhy}`);
+  return {"@id": id, rule_line: ruleLine, name: label, method: c.method, label, "label@type": STRG,
+    ref_label: `${label} (check against check_reference)`, "ref_label@type": STRG,
+    derived: {condition: c.condition, kind: c.kind},
+    date: {...literal(`${id}/date`, c.date, DATE_TYPE), call: `${model.class}=>check`},
+    tables,
+    expect: c.expect.map((value, x) => literal(`${id}/expect/${x + 1}`, value, STRG))};
 }
 
 // ---------------------------------------------------------------------------
@@ -564,7 +688,11 @@ function classXml(model) {
 }
 
 // The files of one rule, name -> content, and the profile findings.
-export async function renderRule(model) {
+export async function renderRule(compiled) {
+  // the test class runs the hand-written examples and then the derived cases
+  // through one template; the list is made here, so the trace and the model
+  // hash are those of what was rendered
+  const model = {...compiled, tests: [...compiled.examples, ...compiled.cases]};
   const {renderRecipe} = await import("./dsl-abap.mjs");
   const quiet = console.log;
   let check, test;
@@ -614,6 +742,22 @@ export async function checkRule(file, out, options = {}) {
   }
 }
 
+// What a reviewer reads: each derived case, its rows, and the alerts the
+// interpreter expects of it.
+export function describeCases(model) {
+  const out = [`${model.source}: ${model.examples.length} example(s), ${model.cases.length} derived case(s)`];
+  for (const c of model.cases) {
+    out.push("", `${c.method}  [${c.derived.condition}, rule line ${c.rule_line}]  ${c.label}`, `  date ${c.date.value}`);
+    for (const t of c.tables) {
+      for (const r of t.rows) out.push(`  ${t.table}: ${r.fields.map((f) => `${f.column}=${JSON.stringify(f.value)}`).join(" ")}`);
+    }
+    if (!c.tables.some((t) => t.table === model.forbid.table)) out.push(`  ${model.forbid.table}: (no rows)`);
+    out.push(c.expect.length ? `  expect: ${c.expect.map((e) => JSON.stringify(e.value)).join("\n          ")}` : "  expect: no alert");
+  }
+  for (const k of model.skipped ?? []) out.push("", `skipped ${k.condition}: ${k.reason}`);
+  return out.join("\n");
+}
+
 async function main(args) {
   const [command, file, ...rest] = args;
   const ddic = [];
@@ -623,11 +767,15 @@ async function main(args) {
     else if (rest[i] === "--ddic") ddic.push(rest[++i]);
     else throw new Error(`unknown argument ${rest[i]}`);
   }
-  if (!["build", "check"].includes(command) || !file || !out) {
-    console.error("Usage: node tools/dsl-l2.mjs <build|check> <rule.l2.yaml> --out <dir> [--ddic <folder>]...");
+  if (!["build", "check", "cases"].includes(command) || !file || (!out && command !== "cases")) {
+    console.error("Usage: node tools/dsl-l2.mjs <build|check> <rule.l2.yaml> --out <dir> [--ddic <folder>]...\n       node tools/dsl-l2.mjs cases <rule.l2.yaml> [--ddic <folder>]...");
     return 2;
   }
   const options = ddic.length ? {ddic} : {};
+  if (command === "cases") {
+    console.log(describeCases(compileRule(file, options)));
+    return 0;
+  }
   if (command === "check") {
     const drift = await checkRule(file, out, options);
     for (const line of drift) console.error(line);

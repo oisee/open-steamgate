@@ -1,4 +1,4 @@
-# DSL L2, slice 1: a domain rule on a synthetic airship fleet.
+# DSL L2, slices 1 and 2: a domain rule on a synthetic airship fleet.
 # `node tools/dsl-l2.mjs build src/l2demo/maintenance_ship.l2.yaml --out src/l2demo`
 # writes the check class, its test class and the trace (docs/dsl-l2.md).
 rule: maintenance-ship-no-future-voyage
@@ -10,6 +10,7 @@ forbid:
   exists: ZOSD_L2_VOY as voy
   where: voy.ship_id = ship.ship_id and voy.dep_date > $date
 alert: "{ship.ship_id} {ship.name}: in maintenance, voyage {voy.voyage_id} departs {voy.dep_date}"
+boundaries: auto
 examples:
   - name: flagged
     date: 20261001

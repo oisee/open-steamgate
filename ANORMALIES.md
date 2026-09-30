@@ -29,6 +29,38 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-09-30-numc-short-literal-not-padded -- a short NUMC literal in a WHERE is compared unpadded
+
+- Status: `open`
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/transpiler` and `@abaplint/database-sqlite` as pinned here
+- Affected ABAP statement, runtime API or adapter: `SELECT ... WHERE numc_field = '12'` on a column of type NUMC 4 (and the same literal in other comparisons against a NUMC column)
+- Minimal ABAP reproducer: found by the DSL L2 agreement test (`test/dsl-l2.mjs`, "field-to-field types and NUMC"): a rule compares a NUMC 4 field with the literal `'12'`; the generated `check` and `check_reference` both returned no rows while the row holds `0012`
+- Exact command used to run it: `npx mocha test/dsl-l2.mjs` with the NUMC literal padding in `tools/dsl-l2.mjs` removed
+- Expected SAP behaviour: the literal is converted to the column type before the comparison, so `'12'` becomes `'0012'` and the row matches (ABAP conversion rules for NUMC; **not measured on A4H** in this session)
+- Actual open-abap behaviour: the SQL compares the text `12` with `0012` and nothing matches
+- Impact on open-steamgate: hand-written SELECTs with short NUMC literals find nothing here; the L2 compiler pads NUMC literals to their DDIC length in the model, so generated code is not affected
+- Smallest safe workaround: write NUMC literals at their full length
+- Upstream issue: not filed
+- Regression-test location: `test/dsl-l2.mjs`, "field-to-field types and NUMC" (the ABAP agreement case)
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-09-30-concat-packed-drops-decimals -- `&&` with a packed operand prints 10.5 where a system prints 10.50
+
+- Status: `open`
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/runtime` as pinned here: `packages/runtime/src/operators/concat.ts` (the operand's `get()` is a JavaScript number, so the decimals are gone before the text is made)
+- Affected ABAP statement, runtime API or adapter: `lv_text = a && b.` (and string templates' `&&` chains) with an operand of type `p` with decimals
+- Minimal ABAP reproducer: found by the DSL L2 agreement test (`test/dsl-l2.mjs`, the synthetic rule over INT and DEC fields, first written with `{m.amt}` in the alert): a field of a table, `DEC 5,2`, holding `10.50`, read by `SELECT` into a structure component of the same type, then `lv_alert = ... && ls-amt.`
+- Exact command used to run it: `npx mocha test/dsl-l2.mjs`; by hand, `abap.operators.concat(new abap.types.Packed({length: 3, decimals: 2}).set("10.5"), new abap.types.String().set("x"))` answers `10.5x`, while `string.set(packed)` answers `10.50 `
+- Expected SAP behaviour: converting `p` to a string keeps the declared decimals, so the text is `10.50` (ABAP keyword documentation, conversion of `p`; **not measured on A4H** in this session)
+- Actual open-abap behaviour: `10.5`
+- Impact on open-steamgate: an L2 rule whose alert holes name a DEC/CURR/QUAN field would print differently here and on a system; the demo rule has no such hole, and the agreement test of the synthetic rule keeps DEC in its conditions and INT in its holes. The interpreter (`tools/dsl-l2-eval.mjs`, `render`) prints the ABAP-correct `10.50`, so a rule with such a hole fails its generated test here instead of passing quietly
+- Smallest safe workaround: none in the rule language; do not put a packed field in an alert
+- Upstream issue: not filed
+- Regression-test location: none yet
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-24-daemon-statics -- a daemon's class data is its own session's on a system, and the process's here
 
 - Status: `open` (by design; decision D4 in `docs/abap-daemons.md`)
