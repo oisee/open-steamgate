@@ -17,8 +17,8 @@ the Go host (`tools/gogen/go/abap/store_history.go`):
 
 - **The object's file comes from the object store.** It is the file of the winning layer.
 - **History follows renames** (`git log --follow`). A version from before a rename is read at the path it had then.
-- **A merge that changed the file is a version**, compared with its first parent (`--diff-merges=first-parent`), so the newest version is what HEAD holds even after a resolved conflict.
-- **A copy begins a history.** `--follow` also follows a copy into its source; a class made by copying another would inherit the other's commits, so the history stops at the commit that made the copy.
+- **A merge that changed the file is a version**, compared with its first parent (`--diff-merges=first-parent`), so the newest version is what HEAD holds even after a resolved conflict. The walk is `--first-parent`: a branch merged in shows as its merge, not as its commits again.
+- **A copy begins a history.** `--follow` also follows a copy into its source; a class made by copying another would inherit the other's commits, so the history stops at the commit that made the copy. The same cut applies when one commit moves a file and recreates the old name as a stub: git reports that as a copy, and the moved file's history begins there.
 - **`ZOSD_REVISION_S` fields:**
   - `REVISION` (the full SHA) and `SHORT` (12 characters);
   - `AUTHOR`: the commit author (after `.mailmap`) as a SAP-style user name (non-ASCII dropped, then upper case, `A-Z0-9_`, at most 12 characters), never an e-mail;

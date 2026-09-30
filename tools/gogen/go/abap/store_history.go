@@ -49,7 +49,8 @@ func storeSapUser(author string) string {
 }
 
 // storeHistory is gitObjectHistory of tools/osd-git-history.mjs: the commits
-// that changed file, newest first (a merge by its first-parent diff),
+// that changed file, newest first, along the first-parent line (a merge by
+// its first-parent diff),
 // followed across renames and cut at a copy. The reason is
 // set, and the list nil, when git has no history for it.
 func storeHistory(root, file string, limit int) ([]StoreRevision, string) {
@@ -63,7 +64,7 @@ func storeHistory(root, file string, limit int) ([]StoreRevision, string) {
 		return nil, file + " is not tracked by git"
 	}
 	out, err := storeGit(root, "--literal-pathspecs", "-c", "core.quotePath=false", "log", "--follow",
-		"--diff-merges=first-parent", "--name-status", "-n", strconv.Itoa(limit),
+		"--first-parent", "--diff-merges=first-parent", "--name-status", "-n", strconv.Itoa(limit),
 		"--format=%x1e%H%x00%aN%x00%aI%x00%s", "HEAD", "--", file)
 	if err != nil {
 		return nil, "git history is unavailable for this object store"
@@ -86,6 +87,10 @@ func storeHistory(root, file string, limit int) ([]StoreRevision, string) {
 			}
 		}
 		change := strings.Split(last, "\t")
+		// a D is --follow's old name leaving; there is no version to read there
+		if strings.HasPrefix(change[0], "D") {
+			continue
+		}
 		path := file
 		if len(change) > 1 {
 			path = change[len(change)-1]

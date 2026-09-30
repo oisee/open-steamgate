@@ -135,7 +135,8 @@ export function gitObjectRevision(root, file, revision) {
 
 /**
  * The versions of one object file, newest first: every commit that changed
- * it (a merge by its first-parent diff), followed across renames (`git log
+ * it along the first-parent line (a merge by its first-parent diff, the
+ * side branch's commits not listed again), followed across renames (`git log
  * --follow`) and cut at a copy, each with the path the file had in that commit. A file git does not track -- untracked, ignored,
  * a pack fetched without its .git, a tree that is no worktree -- has no
  * history, and says why: an empty list would read as "never changed".
@@ -156,13 +157,15 @@ export function gitObjectHistory(root, file, limit = 50) {
     return unavailable(`${file} is not tracked by git`);
   }
   const text = rawGit(root, ["--literal-pathspecs", "-c", "core.quotePath=false", "log", "--follow",
-    "--diff-merges=first-parent", "--name-status", "-n", String(limit),
+    "--first-parent", "--diff-merges=first-parent", "--name-status", "-n", String(limit),
     "--format=%x1e%H%x00%aN%x00%aI%x00%s", "HEAD", "--", file]);
   const entries = [];
   for (const record of text.split("\x1e").map((r) => r.trim()).filter(Boolean)) {
     const lines = record.split("\n");
     const [revision, author, authoredAt, subject] = lines[0].split("\x00");
     const change = (lines.slice(1).map((line) => line.trim()).filter(Boolean).pop() ?? "").split("\t");
+    // a D is --follow's old name leaving; there is no version to read there
+    if (change[0].startsWith("D")) continue;
     const path = change.length > 1 ? change[change.length - 1] : file;
     entries.push({revision, short: revision.slice(0, 12), author, authoredAt, subject, path});
     // --follow also follows a copy; what came before it is another object's

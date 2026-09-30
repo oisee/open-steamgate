@@ -107,6 +107,25 @@ func TestStoreHistoryMergesCopiesPaths(t *testing.T) {
 	if _, _, err := storeRevisionAt(root, "src/zé.prog.abap", revs[0].REVISION); err != nil {
 		t.Fatalf("a non-ASCII path reads back: %v", err)
 	}
+	// a rename on a side branch, merged --no-ff (a merge button): the merge
+	// is the version, the side commit is not listed again, each one reads
+	run("checkout", "-q", "-b", "side2")
+	run("mv", "src/za.prog.abap", "src/zb.prog.abap")
+	run("commit", "-q", "-m", "rename on side")
+	run("checkout", "-q", "main")
+	run("merge", "-q", "--no-ff", "-m", "merge rename", "side2")
+	revs, reason = storeHistory(root, "src/zb.prog.abap", 50)
+	if reason != "" || len(revs) == 0 || revs[0].SUBJECT != "merge rename" {
+		t.Fatalf("the merge is the version: %+v %q", revs, reason)
+	}
+	for _, r := range revs {
+		if r.SUBJECT == "rename on side" || r.SUBJECT == "side" {
+			t.Fatalf("a side commit listed beside its merge: %+v", revs)
+		}
+		if _, _, err := storeRevisionAt(root, "src/zb.prog.abap", r.REVISION); err != nil {
+			t.Fatalf("%s does not read: %v", r.SUBJECT, err)
+		}
+	}
 }
 
 // the bridge: HISTORY and REVISION through StoreCall on a store over a

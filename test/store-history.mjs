@@ -67,7 +67,7 @@ describe("object versions from git", function () {
     expect(sapUserOf("someone@example.com")).to.not.include("@");
   });
 
-  it("keeps a merge, cuts at a copy, reads a non-ASCII path", () => {
+  it("keeps a merge, cuts at a copy, reads a non-ASCII path and a merged rename", () => {
     const repo = mkdtempSync(join(tmpdir(), "osd-history-merge-"));
     const g = (...args) => execFileSync("git", args, {cwd: repo, stdio: ["ignore", "pipe", "pipe"]});
     try {
@@ -98,6 +98,18 @@ describe("object versions from git", function () {
       const copy = gitObjectHistory(repo, "src/zé.prog.abap").entries;
       expect(copy.map((e) => [e.subject, e.path])).to.deep.equal([["copy", "src/zé.prog.abap"]]);
       expect(gitObjectRevisionAt(repo, "src/zé.prog.abap", copy[0].revision).path).to.equal("src/zé.prog.abap");
+
+      // a rename on a side branch, merged --no-ff (a merge button): the merge
+      // is the version, the side commits are not listed again, each one reads
+      g("checkout", "-q", "-b", "side2");
+      g("mv", "src/za.prog.abap", "src/zb.prog.abap");
+      g("commit", "-q", "-m", "rename on side");
+      g("checkout", "-q", "main");
+      g("merge", "-q", "--no-ff", "-m", "merge rename", "side2");
+      const renamed = gitObjectHistory(repo, "src/zb.prog.abap").entries;
+      expect(renamed[0].subject).to.equal("merge rename");
+      expect(renamed.map((e) => e.subject)).to.not.include.members(["rename on side", "side"]);
+      for (const e of renamed) gitObjectRevisionAt(repo, "src/zb.prog.abap", e.revision);
     } finally {
       rmSync(repo, {recursive: true, force: true});
     }
