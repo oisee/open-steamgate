@@ -1829,6 +1829,9 @@ function expr(e, ctx) {
       return parts.length === 0 ? `""` : `(${parts.join(" + ")})`;
     }
     case "concat": return `(${expr(e.l, ctx)} + ${expr(e.r, ctx)})`;
+    // CORRESPONDING type( itab ): a new table, one mapped row per source row
+    case "table_map":
+      return `func() ${goType(e.type)} { out := ${goType(e.type)}{}; for _, ${place(e.row, ctx)} = range ${expr(e.from, ctx)} { out = append(out, ${expr(e.value, ctx)}) }; return out }()`;
     case "struct": {
       // VALUE #( ... ): a component it does not name is initial (critic finding 1)
       const rest = zeroFields(e.type, new Set(e.fields.map((f) => String(f.name).toUpperCase())));
@@ -2055,6 +2058,10 @@ function cond(c, ctx) {
     case "assigned": return c.fs.type.k === "data" ? `(${ident(c.fs.name)}.P != nil)` : `(${ident(c.fs.name)} != nil)`;
     case "data_bound": return `abap.DataBound(${expr(c.x, ctx)})`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;
+    case "true": return "true";
+    // two tables, = or <>: the row counts, then each row at its index
+    case "tableeq":
+      return `(${c.op === "=" ? "" : "!"}func() bool { l, r := ${expr(c.l, ctx)}, ${expr(c.r, ctx)}; if len(l) != len(r) { return false }; for i := range l { ${place(c.a, ctx)}, ${place(c.b, ctx)} = l[i], r[i]; if !(${cond(c.rowEq, ctx)}) { return false } }; return true }())`;
     case "or": return `(${cond(c.l, ctx)} || ${cond(c.r, ctx)})`;
     case "not": return `!(${cond(c.x, ctx)})`;
     default: throw new Error(`no Go for condition ${c.c}`);

@@ -177,6 +177,10 @@ const EXPECT = {
   // X0: measured on A4H (docs/dataset.md); the JS backend has no file system
   ZCL_GOGEN_T_DATASET: {Go: "t:61620A6364200A r:0/a/1 r:0/b/1 r:4//0 p:3 x:0/00FF0D/3 x:4/0A4100/2 x:4/000000/0 c:6100620020002000 m:8/No such file or directory e:open_mode d:0",
     JS: "ERROR NOT_COMPILED in DATASET: the JS backend has no file system (the Go host has the sandbox of go/abap/dataset.go)"},
+  // table CORRESPONDING and table = / <> (A4H 2026-09-30): c into string
+  // loses its blanks, i into n4 is zero-padded, a column the source lacks
+  // stays initial; tables compare row by row in order, c without blanks
+  ZCL_GOGEN_T_CORR: "[ab/0007/][abcdef/1234/] empty:0 copy:eq changed:ne shorter:ne reversed:ne blanks:eq wide:ne",
   ZCL_GOGEN_T_B64: {Go: "b1:/w== b2://4= b3:+/+/ b0:[]", JS: "ERROR NOT_COMPILED in abap.EncodeXBase64: a host function of the Go runtime"},
   // SHIFT s RIGHT DELETING TRAILING mask on a string: the length stays, the
   // masked tail goes and blanks come in on the left; a blank stops it

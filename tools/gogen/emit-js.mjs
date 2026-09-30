@@ -881,6 +881,9 @@ function expr(e, ctx) {
       return parts.length === 0 ? `""` : `(${parts.join(" + ")})`;
     }
     case "concat": return `(${expr(e.l, ctx)} + ${expr(e.r, ctx)})`;
+    // CORRESPONDING type( itab ): a new table, one mapped row per source row
+    case "table_map":
+      return `(() => { const out = []; for (const row of ${expr(e.from, ctx)}) { ${place(e.row, ctx)} = row; out.push(${expr(e.value, ctx)}); } return out; })()`;
     case "struct": {
       // every field, in the declared order: one object shape per structure
       const given = new Map(e.fields.map((f) => [f.name, f.value]));
@@ -1099,6 +1102,10 @@ function cond(c, ctx) {
       return `${expr(c.x, ctx)} === ${zero(c.x.type)}`;
     case "assigned": return `${ident(c.fs.name)} !== null`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;
+    case "true": return "true";
+    // two tables, = or <>: the row counts, then each row at its index
+    case "tableeq":
+      return `(${c.op === "=" ? "" : "!"}(() => { const l = ${expr(c.l, ctx)}, r = ${expr(c.r, ctx)}; if (l.length !== r.length) return false; for (let i = 0; i < l.length; i++) { ${place(c.a, ctx)} = l[i]; ${place(c.b, ctx)} = r[i]; if (!(${cond(c.rowEq, ctx)})) return false; } return true; })())`;
     case "or": return `(${cond(c.l, ctx)} || ${cond(c.r, ctx)})`;
     case "not": return `!(${cond(c.x, ctx)})`;
     default: throw new Error(`no JS for condition ${c.c}`);
