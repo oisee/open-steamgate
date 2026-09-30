@@ -258,6 +258,99 @@ const BUILTIN_TYPES = new Set(["B", "S", "I", "INT8", "P", "F", "C", "N", "D", "
   "DECFLOAT16", "DECFLOAT34", "UTCLONG"]);
 const HIT = "<ls_lookup>";
 
+const children = (node) => node?.getChildren() ?? [];
+const direct = (node, type) => children(node).filter((child) => child.get() instanceof type);
+const word = (node) => (node?.concatTokens?.() ?? node?.getStr?.())?.toLowerCase();
+
+function loopHead(statement) {
+  const source = statement.findDirectExpression(Expressions.LoopSource);
+  const target = statement.findDirectExpression(Expressions.LoopTarget);
+  const field = source?.findAllExpressions(Expressions.FieldChain) ?? [];
+  const symbol = target?.findAllExpressions(Expressions.FieldSymbol) ?? [];
+  const simpleSource = field.length === 1 && field[0].findAllExpressions(Expressions.SourceField).length === 1
+    && field[0].getTokens().length === 1 && source.getTokens().length === 1;
+  const simpleTarget = symbol.length === 1 && target.getTokens().length === 2
+    && word(target.getTokens()[0]) === "assigning";
+  const other = children(statement).filter((child) => child !== source && child !== target
+    && !["LOOP", "AT", "."].includes(child.concatTokens().toUpperCase()));
+  if (simpleSource && simpleTarget && other.length === 0) return {table: word(field[0]), row: word(symbol[0])};
+  const kind = other.some((child) => word(child) === "where") ? "shape/loop-where"
+    : target && word(target.getTokens()[0]) === "into" ? "shape/loop-into"
+      : simpleSource && simpleTarget ? "shape/loop-other" : "shape/loop-table";
+  throw new Refusal(kind, `the loop is not LOOP AT itab ASSIGNING <fs>: ${statement.concatTokens()}`);
+}
+
+function selectParts(statement, row) {
+  const select = statement.findDirectExpression(Expressions.Select);
+  const fields = select?.findDirectExpression(Expressions.SQLFieldList);
+  const from = select?.findDirectExpression(Expressions.SQLFrom);
+  const into = select?.findDirectExpression(Expressions.SQLIntoStructure)
+    ?? select?.findDirectExpression(Expressions.SQLIntoList);
+  const cond = select?.findDirectExpression(Expressions.SQLCond);
+  const shape = () => new Refusal("shape/select", `not SELECT SINGLE cols FROM dbtab INTO target WHERE ...: ${statement.concatTokens()}`);
+  if (!select || !fields || !from || !into || !cond || word(select.getTokens()[1]) !== "single") throw shape();
+  // These are the only clauses whose semantics the R1 template reproduces.
+  // abaplint supplies the clause expressions, but no single "plain SELECT"
+  // flag, so compare the direct children rather than re-reading SQL text.
+  const clauses = children(select).filter((child) => ![fields, from, into, cond].includes(child));
+  if (clauses.length !== 3 || clauses.map(word).join(" ") !== "select single where") throw shape();
+  const source = from.findAllExpressions(Expressions.SQLFromSource);
+  const tables = source[0]?.findAllExpressions(Expressions.DatabaseTable) ?? [];
+  if (source.length !== 1 || tables.length !== 1 || source[0].getTokens().length !== 1) throw shape();
+  const dbtab = word(tables[0]);
+  const columnNodes = fields.findAllExpressions(Expressions.SQLField);
+  if (!columnNodes.length || columnNodes.some((f) => direct(f, Expressions.SQLFieldName).length !== 1
+    || f.getTokens().length !== 1)) throw shape();
+  const columns = columnNodes.map((f) => word(direct(f, Expressions.SQLFieldName)[0]));
+  const targets = direct(into, Expressions.SQLTarget);
+  // INTO holds its targets and nothing else: CORRESPONDING FIELDS OF,
+  // INDICATORS and the like change what is written
+  const intoExtra = children(into).find((child) => !(child.get() instanceof Expressions.SQLTarget)
+    && !["into", "(", ")", ","].includes(word(child)));
+  if (intoExtra) throw new Refusal("shape/select", `INTO has more than its targets: ${into.concatTokens()}`);
+  if (columns.length !== targets.length) throw new Refusal("shape/select", "columns and targets differ in number");
+  const mapped = columns.map((column, i) => {
+    const target = targets[i].findDirectExpression(Expressions.Target);
+    const symbol = target?.findDirectExpression(Expressions.TargetFieldSymbol);
+    const component = target?.findDirectExpression(Expressions.ComponentName);
+    const tokens = children(target);
+    if (!symbol || !component || tokens.length !== 3 || word(symbol) !== row
+      || !(tokens[1].get() instanceof abaplint.Tokens.Dash)) {
+      throw new Refusal("shape/select", `target ${targets[i].concatTokens()} is not a component of ${row}`);
+    }
+    return {column, component: word(component)};
+  });
+  const comparisons = [];
+  function readCond(node) {
+    const parts = children(node);
+    for (const part of parts) {
+      if (part.get() instanceof Expressions.SQLCompare) comparisons.push(part);
+      else if (part.get() instanceof Expressions.SQLCond) readCond(part);
+      else if (part.get() instanceof abaplint.Tokens.Identifier && word(part) === "and") continue;
+      else if (["WParenLeftW", "WParenRightW", "ParenRightW"].includes(part.get().constructor.name)) continue;
+      else throw new Refusal("full key", `condition "${node.concatTokens()}" is not column = ${row}-component`);
+    }
+  }
+  readCond(cond);
+  const keys = comparisons.map((compare) => {
+    const parts = children(compare);
+    const [column, operator, rhs, dash, component] = parts;
+    const chain = rhs?.findAllExpressions(Expressions.FieldChain) ?? [];
+    const fs = chain[0]?.findAllExpressions(Expressions.FieldSymbol) ?? [];
+    if (parts.length !== 5 || !(column.get() instanceof Expressions.SQLFieldName)
+      || !(operator.get() instanceof Expressions.SQLCompareOperator) || !["=", "eq"].includes(word(operator))
+      || !(rhs.get() instanceof Expressions.SQLSource) || chain.length !== 1 || fs.length !== 1
+      || word(fs[0]) !== row || chain[0].getTokens().length !== 1
+      || rhs.getTokens().filter((t) => word(t) !== "@").length !== 1
+      || !(dash.get() instanceof abaplint.Tokens.Dash)
+      || !(component.get() instanceof Expressions.SQLFieldName)) {
+      throw new Refusal("full key", `condition "${compare.concatTokens()}" is not column = ${row}-component`);
+    }
+    return {column: word(column), component: word(component)};
+  });
+  return {dbtab, fields: mapped, keys};
+}
+
 export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DDIC) {
   const registry = registryFor(ddicFolders, [{name, source}]);
   const object = registry.getObjects().find((o) => o instanceof abaplint.ABAPObject && o.getABAPFiles().some((f) => f.getFilename() === name));
@@ -279,37 +372,13 @@ export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DD
     if (used.has(generated)) throw new Refusal("names", `${generated} is already used in ${name}; the rewrite would declare it again`);
   }
 
-  const head = loop.getFirstStatement().concatTokens().replace(/\s+/g, " ");
-  const at = /^LOOP AT (\w+) ASSIGNING (<\w+>)\.$/i.exec(head);
-  if (!at) {
-    const kind = / WHERE /i.test(head) ? "shape/loop-where" : / INTO /i.test(head) ? "shape/loop-into"
-      : /^LOOP AT \w+ ASSIGNING/i.test(head) ? "shape/loop-other" : "shape/loop-table";
-    throw new Refusal(kind, `the loop is not LOOP AT itab ASSIGNING <fs>: ${head}`);
-  }
-  const [, table, row] = at;
+  const {table, row} = loopHead(loop.getFirstStatement());
 
   const body = loop.findAllStatementNodes().slice(1, -1);
   if (body.length !== 1 || !(body[0].get() instanceof Statements.Select)) {
     throw new Refusal("shape/body", `the loop body is ${body.length} statements, not one SELECT`);
   }
-  const select = body[0].concatTokens().replace(/\s+/g, " ");
-  const parts = /^SELECT SINGLE ([\w ]+?) FROM (\w+) INTO (\([^)]*\)|\S+) WHERE (.+)\.$/i.exec(select);
-  if (!parts) throw new Refusal("shape/select", `not SELECT SINGLE cols FROM dbtab INTO target WHERE ...: ${select}`);
-  const [, columnList, dbtab, into, where] = parts;
-  const columns = columnList.trim().split(" ").map((c) => c.toLowerCase());
-  const targets = into.startsWith("(") ? into.slice(1, -1).split(",").map((t) => t.trim()) : [into];
-  if (columns.length !== targets.length) throw new Refusal("shape/select", "columns and targets differ in number");
-  const fields = columns.map((column, i) => {
-    const t = new RegExp(`^${row.replace(/[<>]/g, "\\$&")}-(\\w+)$`, "i").exec(targets[i]);
-    if (!t) throw new Refusal("shape/select", `target ${targets[i]} is not a component of ${row}`);
-    return {column, component: t[1].toLowerCase()};
-  });
-
-  const keys = where.split(/ AND /i).map((condition) => {
-    const c = new RegExp(`^(\\w+) = ${row.replace(/[<>]/g, "\\$&")}-(\\w+)$`, "i").exec(condition.trim());
-    if (!c) throw new Refusal("full key", `condition "${condition.trim()}" is not column = ${row}-component`);
-    return {column: c[1].toLowerCase(), component: c[2].toLowerCase()};
-  });
+  const {dbtab, fields, keys} = selectParts(body[0], row);
   let resolved;
   for (const provider of KEY_PROVIDERS) {
     resolved = provider(registry, dbtab);

@@ -308,6 +308,46 @@ ENDCLASS.`);
     expect(model.fields).to.deep.equal([{column: "kind", component: "kind"}, {column: "text", component: "text"}]);
   });
 
+  it("R1 reads a SELECT split by line breaks and an ABAP comment", () => {
+    const body = `      SELECT SINGLE text
+        FROM zosd_lift_txt
+        INTO <ls_row>-text
+        WHERE kind = <ls_row>-kind
+        " the second key follows on another line
+        AND code = <ls_row>-code.`;
+    expect(modelR1FromSource("zcl_fx.clas.abap", fixture(body), "m").source.keys)
+      .to.deep.equal([{column: "kind", component: "kind"}, {column: "code", component: "code"}]);
+  });
+
+  it("R1 reads an explicit host variable in INTO", () => {
+    const body = "      SELECT SINGLE text FROM zosd_lift_txt INTO @<ls_row>-text WHERE kind = <ls_row>-kind AND code = <ls_row>-code.";
+    const model = modelR1FromSource("zcl_fx.clas.abap", fixture(body), "m");
+    expect(model.fields).to.deep.equal([{column: "text", component: "text"}]);
+  });
+
+  it("R1 reads explicit host variables in WHERE", () => {
+    const body = "      SELECT SINGLE text FROM zosd_lift_txt INTO <ls_row>-text WHERE kind = @<ls_row>-kind AND code = @<ls_row>-code.";
+    const model = modelR1FromSource("zcl_fx.clas.abap", fixture(body), "m");
+    expect(model.source.keys.map((k) => k.component)).to.deep.equal(["kind", "code"]);
+  });
+
+  it("R1 reads grouped key equalities", () => {
+    const body = "      SELECT SINGLE text FROM zosd_lift_txt INTO <ls_row>-text WHERE ( kind = <ls_row>-kind ) AND ( code = <ls_row>-code ).";
+    expect(modelR1FromSource("zcl_fx.clas.abap", fixture(body), "m").source.keys)
+      .to.deep.equal([{column: "kind", component: "kind"}, {column: "code", component: "code"}]);
+  });
+
+  it("R1 reads EQ as key equality", () => {
+    const body = "      SELECT SINGLE text FROM zosd_lift_txt INTO <ls_row>-text WHERE kind EQ <ls_row>-kind AND code = <ls_row>-code.";
+    expect(modelR1FromSource("zcl_fx.clas.abap", fixture(body), "m").source.keys)
+      .to.deep.equal([{column: "kind", component: "kind"}, {column: "code", component: "code"}]);
+  });
+
+  it("R1 refuses an additional SELECT clause", () => {
+    const body = "      SELECT SINGLE text FROM zosd_lift_txt INTO <ls_row>-text WHERE kind = <ls_row>-kind AND code = <ls_row>-code ORDER BY PRIMARY KEY.";
+    expect(() => modelR1FromSource("zcl_fx.clas.abap", fixture(body), "m")).to.throw(/^shape: /);
+  });
+
   it("a field symbol the syntax cannot resolve leaves its agreement with the line open", () => {
     const source = fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`).replace("FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "FIELD-SYMBOLS <ls_row> TYPE zsomething_unknown.");
     expect(modelR1FromSource("zcl_fx.clas.abap", source, "m").open).to.include("<ls_row> typed like a line of ct_rows");
@@ -347,6 +387,17 @@ ENDCLASS.`);
       .replace("code TYPE c LENGTH 10", "code TYPE n LENGTH 10");
     expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(/^key types: ct_rows-code is Numeric\(10\), zosd_lift_txt-code is Character\(10\)/);
   });
+
+  for (const [what, into] of [
+    ["INTO CORRESPONDING FIELDS OF a component", "INTO CORRESPONDING FIELDS OF <ls_row>-text"],
+    ["INTO ... INDICATORS", "INTO <ls_row>-text INDICATORS NULL STRUCTURE nulls"],
+  ]) {
+    it(`R1 refuses ${what}`, () => {
+      const source = fixture(`      SELECT SINGLE text FROM zosd_lift_txt ${into} WHERE kind = <ls_row>-kind AND code = <ls_row>-code.`,
+        "    DATA nulls TYPE c LENGTH 1.\n");
+      expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(/^shape: /);
+    });
+  }
 
   it("the generated region of AFTER is exactly what the template renders", async () => {
     const {text, trace} = await render(modelR1(DEMO, "before"));
