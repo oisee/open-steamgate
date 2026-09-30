@@ -16,6 +16,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
   ZCL_GOGEN_T_UNCATCH: {Go: "ERROR NOT_COMPILED in find( ): OCC = 0 was not measured at zcl_gogen_t_uncatch.clas.abap:8", JS: "ERROR NOT_COMPILED in find( ) OCC = 0 was not measured"},
   ZCL_GOGEN_T_ROWREF: "append:9",
+  ZCL_GOGEN_T_ELEMREF: "append:9 read:8",
+  ZCL_GOGEN_T_ELEMREFSTALE: {Go: "ERROR GETWA_NOT_ASSIGNED in reference to a deleted table row at zcl_gogen_t_elemrefstale.clas.abap:19", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
   ZCL_GOGEN_T_ROWDEL: {Go: "ERROR GETWA_NOT_ASSIGNED in reference to a deleted table row at zcl_gogen_t_rowdel.clas.abap:20", JS: "ERROR GETWA_NOT_ASSIGNED in reference to a deleted table row"},
   // AJSON's local serializer, dynamic sorted key, row references and UTF-8
   // SHA-256 (Node's open-abap-core/AJSON result for this fixture).

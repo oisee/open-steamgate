@@ -1765,7 +1765,7 @@ ${t}	}`));
     case "read_key": {
       const tb = expr(st.table, ctx);
       const n = ctx.loop++;
-      const cond = st.keys.map((k) => (k.line ? `r${n} == ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} == ${expr(k.value, ctx)}`)).join(" && ");
+      const cond = st.keys.map((k) => (k.line ? `${rowValue(st.table.type, `r${n}`)} == ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} == ${expr(k.value, ctx)}`)).join(" && ");
       if (st.into?.conv) throw new Error("READ TABLE INTO a work area of another type");
       const bind = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, `i${n}`)}` : st.refInto ? `${place(st.into, ctx)} = ${rowRef(st.table.type, tb, `${tb}[i${n}]`)}` : st.into ? `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `r${n}`), st.into.type)}` : null;
       // ultra/events (fix round): a SORTED table, see read_key in frontend.mjs

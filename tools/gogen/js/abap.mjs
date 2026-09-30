@@ -844,6 +844,12 @@ export function bindRow(current, index) {
   }};
 }
 
+// An elementary REFERENCE INTO uses the same row slot and validity as
+// ASSIGNING. A plain cell would only change its private copy of the value.
+export function rowCell(current, index, t) {
+  return {...bindRow(current, index), t};
+}
+
 // a generic elementary value moved into a string
 export function DataString(d) {
   if (d === null) throw notAssigned("move");

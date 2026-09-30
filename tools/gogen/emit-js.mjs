@@ -355,6 +355,7 @@ function whereItem(w, row, ctx) {
 }
 const moved = (e, ctx) => (composite(e.type) && isPlace(e) ? `abap.copy(${expr(e, ctx)})` : expr(e, ctx));
 const boundRow = (table, tb, index) => table.row.k === "struct" ? `${tb}[${index}]` : `abap.bindRow(() => ${tb}, ${index})`;
+const rowRef = (table, tb, index) => table.row.k === "struct" ? `abap.cell(${tb}[${index}], ${desc(table.row)}, ${tb})` : `abap.rowCell(() => ${tb}, ${index}, ${desc(table.row)})`;
 
 /* sorted secondary keys (frontend secondaryKey, ultra/json): as emit-go keyLoop / readSecKey */
 function keyCmpJs(key, x, y) {
@@ -382,7 +383,7 @@ function readSecKey(st, ctx, t) {
   const tb = expr(st.table, ctx);
   const vals = `[${st.values.map((v) => expr(v, ctx)).join(", ")}]`;
   const cmp = st.key.comps.map((c, j) => `abap.cmpKey(r.${ident(c.name)}, v${n}[${j}])`).join(" || ") + " || 0";
-  const bind = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, `i${n}`)};` : st.refInto ? `${place(st.into, ctx)} = abap.cell(${tb}[i${n}], ${desc(st.table.type.row)}, ${tb});` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${tb}[i${n}])` : `${tb}[i${n}]`};` : "";
+  const bind = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, `i${n}`)};` : st.refInto ? `${place(st.into, ctx)} = ${rowRef(st.table.type, tb, `i${n}`)};` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${tb}[i${n}])` : `${tb}[i${n}]`};` : "";
   return [`${t}{`, `${t}  const v${n} = ${vals};`,
     `${t}  const [i${n}, pos${n}, sub${n}] = abap.keyRead(${tb}, (r) => ${cmp}, ${st.key.unique ? JSON.stringify(st.key.name) : `""`});`,
     `${t}  if (sub${n} === 0) { ${bind} }`, `${t}  s.sy.subrc = sub${n}; s.sy.tabix = pos${n};`, `${t}}`];
@@ -417,11 +418,11 @@ function stmt(st, ctx, d) {
         return [`${t}{`, `${t}  const v${n} = ${moved(st.value, ctx)};`,
           ...unique.map((k) => `${t}  abap.uniqueKeyCheck(${tb}, (r) => ${k.comps.map((c) => `r.${ident(c)} === v${n}.${ident(c)}`).join(" && ")}, ${JSON.stringify(k.name)});`),
           `${t}  ${tb}.push(v${n});`, `${t}}`, `${t}abap.bumpTable(${tb});`, `${t}s.sy.tabix = ${tb}.length;`, ...(st.fs ? [`${t}${ident(st.fs)} = ${boundRow(st.table.type, tb, `${tb}.length - 1`)};`] : []),
-          ...(st.refInto ? [`${t}${place(st.refInto, ctx)} = abap.cell(${tb}[${tb}.length - 1], ${desc(st.table.type.row)}, ${tb});`] : [])];
+          ...(st.refInto ? [`${t}${place(st.refInto, ctx)} = ${rowRef(st.table.type, tb, `${tb}.length - 1`)};`] : [])];
       }
       // ultra/events: APPEND ... ASSIGNING <fs> (a row of a structure only: see method)
       return [`${t}${tb}.push(${moved(st.value, ctx)});`, `${t}abap.bumpTable(${tb});`, `${t}s.sy.tabix = ${tb}.length;`, ...(st.fs ? [`${t}${ident(st.fs)} = ${boundRow(st.table.type, tb, `${tb}.length - 1`)};`] : []),
-        ...(st.refInto ? [`${t}${place(st.refInto, ctx)} = abap.cell(${tb}[${tb}.length - 1], ${desc(st.table.type.row)}, ${tb});`] : [])];
+        ...(st.refInto ? [`${t}${place(st.refInto, ctx)} = ${rowRef(st.table.type, tb, `${tb}.length - 1`)};`] : [])];
     }
     // ultra/events: CONCATENATE, FIND ALL ... MATCH COUNT (emit-go)
     case "concat": {
@@ -744,7 +745,7 @@ function stmt(st, ctx, d) {
       return [`${t}{`, `${t}  const v${n} = ${st.value.e === "lrow" && composite(st.value.type) ? `abap.copy(${expr(st.value, ctx)})` : moved(st.value, ctx)};`, `${t}  const cmp${n} = (r${n}) => { ${cmp} return 0; };`,
         `${t}  let pos${n} = ${tb}.length; s.sy.subrc = 0;`,
         `${t}  for (let i = 0; i < ${tb}.length; i++) { const c = cmp${n}(${tb}[i]); if (c === 0) { s.sy.subrc = 4; break; } if (c > 0) { pos${n} = i; break; } }`,
-        `${t}  if (s.sy.subrc === 0) { ${tb}.splice(pos${n}, 0, v${n}); abap.bumpTable(${tb});${st.refInto ? ` ${place(st.refInto, ctx)} = abap.cell(${tb}[pos${n}], ${desc(st.table.type.row)}, ${tb});` : ""} }`, `${t}}`];
+        `${t}  if (s.sy.subrc === 0) { ${tb}.splice(pos${n}, 0, v${n}); abap.bumpTable(${tb});${st.refInto ? ` ${place(st.refInto, ctx)} = ${rowRef(st.table.type, tb, `pos${n}`)};` : ""} }`, `${t}}`];
     }
     case "insert_lines_sorted": {
       const n = ctx.loop++;
@@ -770,7 +771,7 @@ function stmt(st, ctx, d) {
       const tb = expr(st.table, ctx);
       const n = ctx.loop++;
       const cond = st.keys.map((k) => (k.line ? `r${n} === ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} === ${expr(k.value, ctx)}`)).join(" && ");
-      const bind = st.fs ? `${ident(st.fs)} = r${n};` : st.refInto ? `${place(st.into, ctx)} = abap.cell(r${n}, ${desc(st.table.type.row)}, ${tb});` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(r${n})` : `r${n}`};` : "";
+      const bind = st.fs ? `${ident(st.fs)} = r${n};` : st.refInto ? `${place(st.into, ctx)} = ${rowRef(st.table.type, tb, `i${n}`)};` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(r${n})` : `r${n}`};` : "";
       // ultra/events (fix round): a SORTED table, as emit-go
       if (st.sorted) {
         const kv = (j) => `k${n}_${j}`;
