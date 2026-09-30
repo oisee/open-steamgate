@@ -14,6 +14,7 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  ZCL_GOGEN_T_BOUND: "X",
   // Arithmetic statements share the assignment calculation type: i division
   // rounds 21 / 2 to 11, while packed decimal retains its two places.
   ZCL_GOGEN_T_ARSTMT: "i:11 p:11.25",

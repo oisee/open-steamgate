@@ -1086,6 +1086,7 @@ function cond(c, ctx) {
     // two object references (ultra/json refeq; ultra/events: undefined and
     // null are both the initial reference)
     case "refeq": return `((${expr(c.l, ctx)} ?? null) ${c.op === "=" ? "===" : "!=="} (${expr(c.r, ctx)} ?? null))`;
+    case "data_bound": return `abap.DataBound(${expr(c.x, ctx)})`;
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;
       if (c.x.type.k === "dref") return `(${expr(c.x, ctx)} === null)`;

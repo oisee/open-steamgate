@@ -78,9 +78,12 @@ test("ABAP fixture runs pass, fail, exception, and teardown after failures", {ti
   const rows = summary.rows;
   assert.ok(summary.timingMs.frontendClosureRounds.length > 0);
   for (const phase of ["emit", "goBuild", "run"]) assert.ok(summary.timingMs[phase] >= 0, phase);
-  assert.deepEqual(rows.map((r) => r.method), ["PASS", "FAIL", "EXCEPTION", "AFTER_FAILURE", "FIRST", "SECOND", "FIRST", "SECOND"]);
-  assert.deepEqual(rows.map((r) => r.status), ["SUCCESS", "FAILED", "FAILED", "SUCCESS", "FAILED", "SKIPPED", "FAILED", "SUCCESS"]);
+  assert.deepEqual(rows.map((r) => r.method), ["PASS", "FAIL", "EXCEPTION", "AFTER_FAILURE", "FIRST", "SECOND", "THIRD", "FIRST", "SECOND", "FIRST", "SECOND"]);
+  assert.deepEqual(rows.map((r) => r.status), ["SUCCESS", "FAILED", "FAILED", "SUCCESS", "FAILED", "FAILED", "SKIPPED", "FAILED", "SKIPPED", "FAILED", "SUCCESS"]);
   assert.match(rows[1].message, /KERNEL_CX_ASSERT/);
   assert.match(rows[2].message, /CX_SY_ZERODIVIDE/);
-  assert.match(rows[5].message, /stopped after teardown failure/);
+  assert.match(rows[5].message, /KERNEL_CX_ASSERT/);
+  assert.match(rows[6].message, /stopped after teardown failure/);
+  assert.match(rows[8].message, /stopped after teardown failure/);
+  assert.match(rows[9].message, /KERNEL_CX_ASSERT/);
 });

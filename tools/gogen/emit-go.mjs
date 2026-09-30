@@ -1131,18 +1131,20 @@ function stmtLines(st, ctx, d) {
       if (st.call.e === "nop_call") return [];
       const c = st.call;
       const run = c.receiving ? `${place(c.receiving, ctx)} = ${expr(c, ctx)}` : expr(c, ctx);
+      const quit = c.owner === "CL_ABAP_UNIT_ASSERT" ? c.args.find((a) => a.name === "QUIT" && a.supplied) : null;
+      const marked = quit ? `abap.WithAssertQuit(${expr(quit.value, ctx)}, func() { ${run} })` : run;
       // ultra/events: a c field passed to a generic TYPE c keeps its length
       const fits = c.args.filter((a) => a.fitc).map((a) => `${t}${place(a.place, ctx)} = abap.CFit(${place(a.place, ctx)}, ${a.fitc})`);
       if (fits.length) {
-        if (!c.exceptions) return [`${t}${run}`, ...fits];
+        if (!c.exceptions) return [`${t}${marked}`, ...fits];
         const m = Object.entries(c.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
         return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(c.callee)}, map[string]int32{${m}}, ${c.exceptions.others})`,
-          `${t}\t${run}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`, ...fits];
+          `${t}\t${marked}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`, ...fits];
       }
-      if (!c.exceptions) return [`${t}${run}`];
+      if (!c.exceptions) return [`${t}${marked}`];
       const m = Object.entries(c.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
       return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(c.callee)}, map[string]int32{${m}}, ${c.exceptions.others})`,
-        `${t}\t${run}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
+        `${t}\t${marked}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
     }
     // ultra/events: SET HANDLER, one registration per handler (the names
     // Ev* are mixed case, so no ABAP name, all upper or all lower, meets them)

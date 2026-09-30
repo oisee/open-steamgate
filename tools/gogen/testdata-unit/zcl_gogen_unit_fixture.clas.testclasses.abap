@@ -11,6 +11,33 @@ CLASS ltcl_lifecycle DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS F
     METHODS after_failure FOR TESTING.
 ENDCLASS.
 
+CLASS ltcl_teardown_conditional DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    CLASS-DATA gv_count TYPE i.
+    METHODS teardown.
+    METHODS first FOR TESTING.
+    METHODS second FOR TESTING.
+    METHODS third FOR TESTING.
+ENDCLASS.
+CLASS ltcl_teardown_conditional IMPLEMENTATION.
+  METHOD first.
+    gv_count = 1.
+  ENDMETHOD.
+  METHOD second.
+    gv_count = 2.
+  ENDMETHOD.
+  METHOD third.
+    cl_abap_unit_assert=>fail( 'third must be skipped' ).
+  ENDMETHOD.
+  METHOD teardown.
+    IF gv_count = 1.
+      cl_abap_unit_assert=>fail( msg = 'continue first' quit = if_aunit_constants=>quit-no ).
+    ELSEIF gv_count = 2.
+      cl_abap_unit_assert=>fail( 'stop second' ).
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
+
 CLASS ltcl_lifecycle IMPLEMENTATION.
   METHOD class_setup.
     gv_state = 1.
