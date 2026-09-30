@@ -11,6 +11,7 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
   + "panic print println real recover bool byte error float32 float64 int int8 int16 int32 int64 rune string uint uint8 uint16 "
   + "uint32 uint64 uintptr true false nil iota me s math abap").split(" "));
 
+let exportedFields = false;
 export const ident = (name) => {
   // INTF~ATTR, an interface's attribute in the object, keeps the ~ apart
   // from the _ of an attribute of the class's own
@@ -18,8 +19,9 @@ export const ident = (name) => {
   const safe = GO_RESERVED.has(id) || /^\d/.test(id) ? `${id}_` : id;
   // ABAP fields cross generated Go package boundaries in a layered build.
   // A leading capital exports them; the rest of the spelling stays stable.
-  return safe[0].toUpperCase() + safe.slice(1);
+  return exportedFields ? safe[0].toUpperCase() + safe.slice(1) : safe;
 };
+const selfField = (name) => `${exportedFields ? "Self" : "self"}_${typeName(name)}`;
 const typeName = (s) => {
   const name = String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
   return name.startsWith("_") ? `N${name}` : name;
@@ -269,6 +271,7 @@ function cloneFuncs() {
 }
 
 export function emitGo(program, pkg = "main", layers = null) {
+  exportedFields = Boolean(layers);
   const classes = layers?.classes ?? (Array.isArray(program) ? program : program.classes);
   const structs = layers?.structs ?? (Array.isArray(program) ? new Map() : program.structs);
   CLONES = new Map();
@@ -315,7 +318,7 @@ export function emitGo(program, pkg = "main", layers = null) {
     // methods are promoted, and a redefinition shadows the method
     if (cls.super) out.push(`\t${typeName(cls.super)}`);
     // the most-derived object, for the calls a method makes on me
-    if (POLY.has(cls.name)) out.push(`\tSelf_${typeName(cls.name)} I_${typeName(cls.name)}`);
+    if (POLY.has(cls.name)) out.push(`\t${selfField(cls.name)} I_${typeName(cls.name)}`);
     // ultra/events: an object that raises instance events carries the
     // handlers registered FOR it (go/abap/events.go); once per chain, the
     // subclasses get it through the embedding
@@ -361,7 +364,7 @@ export function emitGo(program, pkg = "main", layers = null) {
       // an instance attribute without VALUE starts at its type's initial value (critic finding 1)
       ...chain.flatMap((c) => (c.attributes ?? []).filter((a) => !a.static && !a.unsupported && (a.value !== undefined || !isGoZero(zero(a.type))))
         .map((a) => `\to.${ident(a.name)} = ${a.value !== undefined ? constLiteral(a) : zero(a.type)}`)),
-      ...chain.filter((c) => POLY.has(c.name)).map((c) => `\to.Self_${typeName(c.name)} = o`),
+      ...chain.filter((c) => POLY.has(c.name)).map((c) => `\to.${selfField(c.name)} = o`),
       "\treturn o", "}", "");
     out.push(`func New_${typeName(cls.name)}(${["s *abap.Session", ...cp.map((p) => `${ident(p.name)} ${byRef(p) ? "*" : ""}${goType(p.type)}`)].join(", ")}) *${typeName(cls.name)} {`,
       ...(chainCctor(cls) ? [`\tEnsure_${typeName(cls.name)}(s)`] : []),
@@ -388,7 +391,11 @@ export function emitGo(program, pkg = "main", layers = null) {
   out.push(...descs);
   // a RESET line becomes a //line back to this file at the line after it
   for (let i = 0; i < out.length; i += 1) if (out[i] === RESET) out[i] = `//line zz_generated.go:${i + 2}`;
-  return out.join("\n") + "\n";
+  const generated = out.join("\n") + "\n";
+  // ident() is also used by the JS emitter in this process. A layered Go
+  // emission must not change its spelling for the next consumer.
+  exportedFields = false;
+  return generated;
 }
 
 /**
@@ -498,9 +505,9 @@ function nativeRtti(program) {
     ...set(sd, "d", "ABSOLUTE_NAME", "`\\TYPE=` + name"), ...set(sd, "d", "DDIC", `"X"`),
     "\tfor _, f := range fields {", "\t\te := Alloc_CL_ABAP_ELEMDESCR()",
     ...set(ed, "e", "KIND", `"E"`).map((l) => `\t${l}`), ...set(ed, "e", "TYPE_KIND", "f[1]").map((l) => `\t${l}`), ...set(ed, "e", "RELATIVE_NAME", "f[0]").map((l) => `\t${l}`),
-    `\t\tc := ${row}{}`, "\t\tc.Name = f[0]", "\t\tc.Type_ = e",
-    "\t\td.Mt_refs_comp = append(d.Mt_refs_comp, c)",
-    ...(has(sd, "MT_REFS") ? ["\t\td.Mt_refs = append(d.Mt_refs, c)"] : []), "\t}", "\treturn d", "}", "");
+    `\t\tc := ${row}{}`, `\t\tc.${ident("name")} = f[0]`, `\t\tc.${ident("type")} = e`,
+    `\t\td.${ident("mt_refs_comp")} = append(d.${ident("mt_refs_comp")}, c)`,
+    ...(has(sd, "MT_REFS") ? [`\t\td.${ident("mt_refs")} = append(d.${ident("mt_refs")}, c)`] : []), "\t}", "\treturn d", "}", "");
   return out;
 }
 
@@ -833,9 +840,9 @@ const tab = (n) => "\t".repeat(n);
 function self(ctx, methodName) {
   if (!POLY.has(ctx.cls.name)) return "me";
   // me as a value is the whole object, in a constructor too (New_ sets self first)
-  if (methodName === null) return `me.Self_${typeName(ctx.cls.name)}`;
+  if (methodName === null) return `me.${selfField(ctx.cls.name)}`;
   if (ctx.inCtor || ctx.cls.signatures?.get(methodName)?.private) return "me";
-  return `me.Self_${typeName(ctx.cls.name)}`;
+  return `me.${selfField(ctx.cls.name)}`;
 }
 
 /**

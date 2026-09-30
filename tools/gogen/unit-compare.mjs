@@ -33,7 +33,13 @@ const norm = (r) => ({class: String(r.class ?? r.class_name).toUpperCase(),
   testclass: String(r.testclass ?? r.testclass_name).toUpperCase(), method: String(r.method ?? r.method_name).toUpperCase(),
   status: String(r.status).toUpperCase(), message: String(r.message ?? "").trim()});
 const nodeRows = rawNode.map(norm);
-const goRows = result.rows.map(norm);
+// Older runner JSON labelled a reached tolerant stub FAILED. Never let an
+// oracle with the same error text turn that into a SAME result.
+const goRows = result.rows.map((r) => {
+  const row = norm(r);
+  if (row.message.includes("NOT_COMPILED in ")) row.status = "NOT_COMPILED";
+  return row;
+});
 const owners = new Set(classes.length ? classes : [...nodeRows, ...goRows].map((r) => r.class));
 const node = new Map(nodeRows.filter((r) => owners.has(r.class)).map((r) => [key(r), r]));
 const gorows = new Map(goRows.filter((r) => owners.has(r.class)).map((r) => [key(r), r]));

@@ -122,6 +122,8 @@ jobs:
         run: npm run transpile
       - name: Full Go ABAP Unit inventory
         run: node tools/gogen/unit.mjs --out "$RUNNER_TEMP/gogen-unit" > "$RUNNER_TEMP/gogen-unit.json"
+        env:
+          GOCACHE: ${{ runner.temp }}/gogen-unit-go-cache
       - uses: actions/upload-artifact@v4
         if: always()
         with:

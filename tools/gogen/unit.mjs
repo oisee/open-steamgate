@@ -2,7 +2,7 @@
 // Results are JSON rows: {class, testclass, method, status, message}.
 import {spawnSync} from "node:child_process";
 import {appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
-import {dirname, join} from "node:path";
+import {dirname, join, resolve} from "node:path";
 import {performance} from "node:perf_hooks";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
@@ -15,7 +15,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const values = (flag) => args.flatMap((x, i) => x === flag ? [args[i + 1]] : []);
 const selected = new Set(values("--class").map((x) => x.toUpperCase()));
-const out = values("--out")[0] ?? join(here, ".out", "unit");
+const out = resolve(values("--out")[0] ?? join(here, ".out", "unit"));
 const fixture = values("--fixture")[0];
 const config = JSON.parse(readFileSync(join(home, "abap_transpile.json"), "utf8"));
 const skipped = new Set((config.options?.skip ?? config.skip ?? []).map((s) =>
@@ -351,10 +351,11 @@ const emitStarted = performance.now();
 const goName = (x) => x.toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 const ready = rows.filter((x) => x.status === "READY");
 const groups = [...Map.groupBy(ready, (r) => `${r.class}:${r.testclass}`)].map(([key, methods]) => ({key, methods}));
-const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; \"fmt\"; \"os\"; \"osg/gogen/abap\")", "",
+const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; \"fmt\"; \"os\"; \"strings\"; \"osg/gogen/abap\")", "",
   "//go:embed zz_db.json", "var dbScript []byte", "",
   "type result struct { Class string `json:\"class\"`; Testclass string `json:\"testclass\"`; Method string `json:\"method\"`; Status string `json:\"status\"`; Message string `json:\"message\"` }",
   "func caught(f func()) (msg string) { defer func() { if x := recover(); x != nil { msg = fmt.Sprint(x) } }(); f(); return }",
+  "func isNotCompiled(msg string) bool { return strings.Contains(msg, \"NOT_COMPILED in \") }",
   "func main() { results := []result{}", "s := &abap.Session{}"];
 for (const {key, methods} of groups) {
   const [owner, local] = key.split(":");
@@ -362,21 +363,21 @@ for (const {key, methods} of groups) {
   const T = goName(key);
   const special = (name, receiver) => c.methods.some((m) => m.name === name)
     ? `${receiver}.${goName(name)}(s)` : "";
-  generated.push("{", "classError := \"\"");
+  generated.push("{", ...(c.methods.some((m) => m.name === "CLASS_TEARDOWN") ? ["groupStart := len(results)"] : []), "classError := \"\"");
   if (methods.some((m) => m.db)) generated.push("classError = caught(func(){ if err := abap.OpenDB(dbScript); err != nil { panic(err) } })");
   if (c.methods.some((m) => m.name === "CLASS_SETUP")) generated.push(`if classError == "" { classError = caught(func(){ ${T}_CLASS_SETUP(s) }) }`);
   for (const row of methods) {
     generated.push(`{ r := result{Class:${JSON.stringify(owner)}, Testclass:${JSON.stringify(local)}, Method:${JSON.stringify(row.method)}, Status:"SUCCESS"}`,
-      "if classError != \"\" { r.Status = \"FAILED\"; r.Message = \"class_setup: \" + classError } else {",
+      "if classError != \"\" { r.Status = \"FAILED\"; if isNotCompiled(classError) { r.Status = \"NOT_COMPILED\" }; r.Message = \"class_setup: \" + classError } else {",
       `test := New_${T}(s)`,
       `err := caught(func(){ ${special("SETUP", "test")} })`,
       "if err == \"\" { err = caught(func(){ test." + goName(row.method) + "(s) }) }",
       `tear := caught(func(){ ${special("TEARDOWN", "test")} })`,
       "if err == \"\" && tear != \"\" { err = \"teardown: \" + tear }",
-      "if err != \"\" { r.Status = \"FAILED\"; r.Message = err }", "}", "results = append(results, r)", "}");
+      "if err != \"\" { r.Status = \"FAILED\"; if isNotCompiled(err) { r.Status = \"NOT_COMPILED\" }; r.Message = err }", "}", "results = append(results, r)", "}");
   }
   if (c.methods.some((m) => m.name === "CLASS_TEARDOWN")) generated.push(
-    `if err := caught(func(){ ${T}_CLASS_TEARDOWN(s) }); err != "" && len(results) > 0 { results[len(results)-1].Status = "FAILED"; results[len(results)-1].Message += " class_teardown: " + err }`);
+    `if err := caught(func(){ ${T}_CLASS_TEARDOWN(s) }); err != "" { for i := groupStart; i < len(results); i++ { results[i].Status = "FAILED"; if isNotCompiled(err) { results[i].Status = "NOT_COMPILED" }; results[i].Message += " class_teardown: " + err } }`);
   generated.push("}");
 }
 generated.push("enc := json.NewEncoder(os.Stdout); if err := enc.Encode(results); err != nil { panic(err) }", "}");
@@ -394,6 +395,13 @@ if (ready.some((r) => r.db)) {
 } else writeFileSync(join(dir, "zz_db.json"), "[]");
 timingMs.emit = Math.round(performance.now() - emitStarted);
 const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.class)).size, rows, timingMs, layers: layerInfo};
+const updateCompiledCount = () => {
+  summary.compiled = owners.filter((owner) => {
+    const own = rows.filter((r) => r.class === owner);
+    return own.some((r) => r.status === "SUCCESS" || r.status === "FAILED")
+      && own.every((r) => r.status !== "NOT_COMPILED" && r.status !== "NEEDS_DB");
+  }).length;
+};
 writeFileSync(join(out, "plan.json"), JSON.stringify(summary, null, 2));
 if (!ready.length || args.includes("--build-only")) { console.log(JSON.stringify(summary)); process.exit(ready.length ? 0 : 2); }
 const bin = join(out, "unit");
@@ -428,7 +436,7 @@ let build;
 for (let attempt = 0; attempt < 100; attempt++) {
   const buildStarted = performance.now();
   build = spawnSync("go", ["build", ...(process.env.GOGEN_GO_BUILD_X ? ["-x"] : []), "-trimpath", "-o", bin, "./cmd/unit"], {
-    cwd: join(here, "go"), encoding: "utf8", env: {...process.env, GOCACHE: process.env.GOCACHE ?? "/tmp/gogen-unit-gocache"}, maxBuffer: 5e6,
+    cwd: join(here, "go"), encoding: "utf8", env: {...process.env, GOCACHE: process.env.GOCACHE ?? join(here, ".out", "go-cache")}, maxBuffer: 5e6,
   });
   if (process.env.GOGEN_GO_BUILD_X) appendFileSync(join(out, "go-build-x.log"), build.stderr ?? "");
   timingMs.goBuild += Math.round(performance.now() - buildStarted);
@@ -441,6 +449,7 @@ for (let attempt = 0; attempt < 100; attempt++) {
 if (build.status !== 0) {
   const message = (build.stderr || build.error?.message || "go build failed").trim().split("\n").slice(0, 12).join("\n");
   for (const r of ready) { r.status = "NOT_COMPILED"; r.message = message; }
+  updateCompiledCount();
   console.log(JSON.stringify({...summary, rows}));
   process.exit(2);
 }
@@ -449,9 +458,12 @@ const run = spawnSync(bin, [], {encoding: "utf8", timeout: 120000, maxBuffer: 20
 timingMs.run = Math.round(performance.now() - runStarted);
 if (run.status !== 0) {
   for (const r of ready) { r.status = "FAILED"; r.message = `runner: ${run.stderr || run.error?.message || run.signal || run.status}`; }
+  updateCompiledCount();
   console.log(JSON.stringify({...summary, rows})); process.exit(1);
 }
 const reconciled = reconcile(ready, JSON.parse(run.stdout));
 for (let i = 0; i < ready.length; i++) { ready[i].status = reconciled[i].status; ready[i].message = reconciled[i].message; }
+updateCompiledCount();
 console.log(JSON.stringify({...summary, rows}));
 if (ready.some((x) => x.status === "FAILED")) process.exit(1);
+if (ready.some((x) => x.status === "NOT_COMPILED")) process.exit(2);

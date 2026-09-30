@@ -33,6 +33,7 @@ test("comparison fails for each selected owner without a runnable method and for
       ["all skipped", [row("OWNER", "SKIPPED")]],
       ["absent rows", []],
       ["not compiled", [row("OWNER", "NOT_COMPILED", "compile error")]],
+      ["reached tolerant stub", [row("OWNER", "FAILED", "NOT_COMPILED in OWNER=>TEST: unsupported")]],
       ["needs db", [row("OWNER", "NEEDS_DB", "database unavailable")]],
     ]) {
       const result = compare([row("OWNER", "SUCCESS")], goRows, ["OWNER"]);
@@ -43,6 +44,11 @@ test("comparison fails for each selected owner without a runnable method and for
     const noSame = compare([row("OWNER", "SUCCESS")], [row("OWNER", "FAILED")], ["OWNER"]);
     assert.equal(noSame.status, 1);
     assert.equal(noSame.summary.methods.same.length, 0);
+    const stub = row("OWNER", "FAILED", "NOT_COMPILED in OWNER=>TEST: unsupported");
+    const matchingStub = compare([stub], [stub], ["OWNER"]);
+    assert.equal(matchingStub.status, 1);
+    assert.equal(matchingStub.summary.methods.same.length, 0);
+    assert.equal(matchingStub.summary.methods.nodeOnly.length, 1);
     const mixed = compare([row("GOOD", "SUCCESS"), row("EMPTY", "SUCCESS")], [row("GOOD", "SUCCESS")], ["GOOD", "EMPTY"]);
     assert.equal(mixed.status, 1);
     assert.deepEqual(mixed.summary.methods.same, ["GOOD/LTCL_TEST/TEST"]);
