@@ -93,6 +93,20 @@ describe("DSL generated regions", function () {
     expect(readFileSync(file, "utf8")).to.equal(crlfRegion);
   });
 
+  it("a region line whose ending differs from its begin marker's is DRIFT (line ending); write makes it canonical", async () => {
+    const lines = original.split("\n");
+    const at = lines.indexOf(COPY_LINE);
+    copy(original.replace(`${COPY_LINE}\n`, `${COPY_LINE}\r\n`));
+    const [first, second] = await checkRegions([dir]);
+    expect(first.status).to.equal("DRIFT");
+    expect(second.status).to.equal("ok");
+    expect(formatResult(first)).to.equal(`DRIFT   ${file}:${BEGIN1} r1-lookup-enrich from=before: line ending of line ${at + 1} is CRLF, the region's begin marker line ends in LF`);
+    const written = await checkRegions([dir], {write: true});
+    expect(written.map((r) => r.status)).to.deep.equal(["DRIFT", "ok"]);
+    expect(readFileSync(file).equals(Buffer.from(original))).to.equal(true);
+    expect((await checkRegions([dir])).map((r) => r.status)).to.deep.equal(["ok", "ok"]);
+  });
+
   it("write changes no byte outside the drifted region, not even one that is not UTF-8", async () => {
     const [head, tail] = original.split("CLASS zcl_osd_lift_r1_demo IMPLEMENTATION.");
     const bytes = Buffer.concat([Buffer.from(head), Buffer.from("* not UTF-8: "), Buffer.from([0xff, 0xc3]),

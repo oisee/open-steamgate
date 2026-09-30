@@ -133,7 +133,7 @@ export function parseRegions(source, file = "<source>") {
       if (Object.keys(params).length) throw new RegionError(file, line, "an end marker takes no parameters");
       if (recipe !== open.recipe) throw new RegionError(file, line, `unbalanced marker: end of ${recipe} closes the ${open.recipe} region begun at line ${open.begin}`);
       const body = lines.slice(open.begin, index);
-      regions.push({...open, end: line, body: body.map((l) => l.text), bodyStart: lines[open.begin].start, bodyEnd: lines[index].start});
+      regions.push({...open, end: line, body: body.map((l) => l.text), seps: body.map((l) => l.sep), bodyStart: lines[open.begin].start, bodyEnd: lines[index].start});
       open = undefined;
     }
   });
@@ -220,13 +220,17 @@ export async function checkRegions(paths, {write = false, ddic = DEFAULT_DDIC.ma
       }
       const {text, trace} = await render(model, recipe.template);
       const expected = text.replace(/\n$/, "").split("\n").map((l) => l === "" ? "" : r.indent + l);
-      const drift = expected.findIndex((l, i) => l !== r.body[i]);
+      // the canonical body is the rendered lines, each ended like the begin
+      // marker line: a line of the right text with another ending is drift
+      // too, so check and write agree byte for byte
+      const drift = expected.findIndex((l, i) => l !== r.body[i] || (i < r.body.length && r.seps[i] !== r.sep));
       const at = drift >= 0 ? drift : expected.length < r.body.length ? expected.length : -1;
       const result = {...base, status: at < 0 ? "ok" : "DRIFT", trace, template: recipe.template, expected};
       if (at >= 0) {
         result.driftLine = r.begin + 1 + at;
         result.wanted = expected[at];
         result.found = at < r.body.length ? r.body[at] : parsed.lines[r.end - 1];
+        if (result.wanted === result.found && at < r.body.length) result.ending = {found: r.seps[at], wanted: r.sep};
         replace.push(r);
       }
       results.push(result);
@@ -257,7 +261,10 @@ export function formatResult(result, {trace = false} = {}) {
   const out = [];
   if (result.status === "ok") out.push(`ok      ${where}${what}`);
   else if (result.status === "DRIFT") {
-    out.push(`DRIFT   ${where}${what}: line ${result.driftLine} is ${quote(result.found)}, the recipe renders ${quote(result.wanted)}`);
+    const ending = (sep) => sep === "\r\n" ? "CRLF" : "LF";
+    out.push(result.ending
+      ? `DRIFT   ${where}${what}: line ending of line ${result.driftLine} is ${ending(result.ending.found)}, the region's begin marker line ends in ${ending(result.ending.wanted)}`
+      : `DRIFT   ${where}${what}: line ${result.driftLine} is ${quote(result.found)}, the recipe renders ${quote(result.wanted)}`);
     if (result.written) out.push(`  written: ${result.written.from} lines replaced by ${result.written.to}`);
   } else if (result.status === "REFUSED") out.push(`REFUSED ${where}${what}: ${result.message}`);
   else out.push(`ERROR   ${result.message}`);
