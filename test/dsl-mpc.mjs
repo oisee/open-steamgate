@@ -1,10 +1,8 @@
-// DSL L1, first consumer (docs/dsl-l1.md): the DEFINE_<entity> method of an
-// _MPC class rendered from the L1 model through ZCL_OSD_TPL must equal, byte
-// for byte, what zcl_stg_segw_gen writes -- for every entity type of every
-// SEGW project the tree carries as a fixture. ABAP Unit cannot read these
-// files, so they are imported here through ImportSet, as the editor does.
+// Every _MPC method body rendered from L1 equals the SEGW generator's bytes.
+// The fixture trees are imported through ImportSet under this suite's names.
 import {expect} from "chai";
 import {readFileSync} from "node:fs";
+import {compile, compileFile} from "../tools/stg-compile.mjs";
 import {readSpec, tableName} from "../tools/segw-tables.mjs";
 
 const FIXTURES = [
@@ -13,18 +11,49 @@ const FIXTURES = [
   "test/fixtures/segw/zstg_mini.iwpr.xml",
   "src/zosd_test/segw/zosd_test.iwpr.xml",
 ];
+const METHODS = ["DEFINE", "DEFINE_COMPLEXTYPES", "DEFINE_ASSOCIATIONS", "DEFINE_ACTIONS", "GET_LAST_MODIFIED", "LOAD_TEXT_ELEMENTS"];
 
-describe("DSL L1: MPC entity methods from the model, byte for byte", function () {
+describe("DSL L1: MPC methods from the model, byte for byte", function () {
   this.timeout(120000);
   let abap;
+  let demoXml;
+  let complexXml;
   const box = (value) => new abap.types.String().set(value);
 
   before(async () => {
+    demoXml = compileFile("src/demo/zstg_demo.stg.yaml").iwpr;
+    complexXml = compile(`
+project: ZSTG_CT
+service: ZSTG_CT_SRV
+complexTypes:
+  Address:
+    properties:
+      Street: String(40)
+      City: String(40)
+  Money:
+    source: {struct: ZSTG_MONEY}
+    properties:
+      Amount: Decimal(15,2)
+      Currency: String(5)
+entities:
+  Customer:
+    keys: [CustomerId]
+    properties:
+      CustomerId: String(10)
+      Address: Address
+functions:
+  Quote:
+    method: GET
+    returns: {complexType: Money}
+    parameters:
+      CustomerId: String(10)
+`, {file: "zstg_ct.stg.yaml"}).iwpr;
     await import("./start.mjs");
     abap = globalThis.abap;
     await import("../output/zcl_osd_dsl_mpc.clas.mjs");
     await import("../output/zcl_stg_segw_gen.clas.mjs");
     await import("../output/zcl_osd_tpl.clas.mjs");
+    await import("../output/zcl_osd_dsl_trace.clas.mjs");
     await import("../output/zcl_stg_dispatcher.clas.mjs");
   });
 
@@ -40,9 +69,9 @@ describe("DSL L1: MPC entity methods from the model, byte for byte", function ()
     }
   });
 
-  async function importProject(path) {
+  async function importProject(path, suppliedXml) {
     const project = `${OWN}${++imported}`;
-    const xml = readFileSync(path, "utf8").replace(/<PROJECT>[^<]+<\/PROJECT>/g, `<PROJECT>${project}</PROJECT>`);
+    const xml = (suppliedXml ?? readFileSync(path, "utf8")).replace(/<PROJECT>[^<]+<\/PROJECT>/g, `<PROJECT>${project}</PROJECT>`);
     const response = await abap.Classes.ZCL_STG_DISPATCHER.dispatch({
       iv_method: box("POST"),
       iv_path: box("/sap/opu/odata/sap/ZSTG_SEGW_SRV/ImportSet"),
@@ -53,17 +82,55 @@ describe("DSL L1: MPC entity methods from the model, byte for byte", function ()
     return project;
   }
 
-  // No fixture file has a property with semantics, a complex property or a
-  // media entity (the files are shared with the SEGW generator tests and stay
-  // as they are); zcl_osd_dsl_mpc's ABAP Unit test imports a project with all
-  // three and compares those methods byte for byte too
-  const seen = {creatable: 0, updatable: 0, sortable: 0, key: 0, label: 0, sets: 0};
+  // The ZUT_DSL ABAP Unit fixture alone reaches entity semantics, media,
+  // and the association default-set line (no explicit association set).
+  // The compiled complex project reaches both complex binding variants.
+  const needles = {
+    creatable: "set_creatable( abap_true )", updatable: "set_updatable( abap_true )",
+    sortable: "set_sortable( abap_true )", key: "set_is_key( )",
+    label: "set_label_from_text_element(", sets: "create_entity_set(",
+    dispatcher: "define_associations( ).", complexDispatcher: "define_complextypes( ).",
+    complexType: "model->create_complex_type(", complexProperty: "lo_complex_type->create_property(",
+    complexDdic: "lo_complex_type->bind_structure( iv_structure_name   = 'ZSTG_MONEY'",
+    complexClass: "lo_complex_type->bind_structure( iv_structure_name = '",
+    association: "create_association(", constraint: "create_ref_constraint( )",
+    associationSet: "create_association_set(", navigation: "create_navigation_property(",
+    action: "create_action(", actionParameter: "create_input_parameter(",
+    actionFor: "set_action_for(", actionReturnEntity: "set_return_entity_type(",
+    actionReturnComplex: "set_return_complex_type(", actionHttp: "set_http_method(",
+    parameterLength: "lo_parameter->/iwbep/if_mgw_odata_property~set_maxlength(",
+    text: "ls_text_element-artifact_name", emptyText: "CLEAR ls_text_element.",
+    stamp: "lc_gen_date_time",
+  };
+  const seen = Object.fromEntries(Object.keys(needles).map((key) => [key, 0]));
 
-  for (const path of FIXTURES) {
-    it(`every entity type of ${path.split("/").pop()}`, async () => {
-      const project = await importProject(path);
+  for (const path of [...FIXTURES, "compiled demo", "compiled complex"]) {
+    it(`every method of ${path.split("/").pop()}`, async () => {
+      const project = await importProject(path, path === "compiled demo" ? demoXml : path === "compiled complex" ? complexXml : undefined);
       const model = await abap.Classes.ZCL_STG_SEGW_GEN.build_model({iv_project: box(project)});
       const source = (await abap.Classes.ZCL_STG_SEGW_GEN.mpc_source({is_model: model})).get();
+      const projectJson = await abap.Classes.ZCL_OSD_DSL_MPC.project_model({is_model: model});
+      for (const [what, needle] of Object.entries(needles)) if (source.includes(needle)) seen[what]++;
+      for (const method of METHODS) {
+        const start = source.indexOf(`  method ${method}.\n`);
+        if (start < 0) {
+          expect(["DEFINE_COMPLEXTYPES", "DEFINE_ASSOCIATIONS", "DEFINE_ACTIONS"]).to.include(method);
+          continue;
+        }
+        const end = source.indexOf("  endmethod.\n", start) + "  endmethod.\n".length;
+        const expected = source.slice(start, end);
+        const result = await abap.Classes.ZCL_OSD_DSL_MPC.render_method({is_model: model, iv_method: box(method)});
+        const actual = (await abap.Classes.ZCL_OSD_TPL.to_string({is_result: result})).get();
+        expect(actual, `${project} ${method}`).to.equal(expected);
+        const traces = result.get().trace.array();
+        expect(traces.length, `${project} ${method} trace count`).to.equal(result.get().lines.array().length);
+        for (const trace of traces) {
+          const path = trace.get().path.get();
+          if (path !== "/") expect((await projectJson.get().exists({iv_path: box(path)})).get(), `${method} ${path}`).to.equal("X");
+          const node = (await abap.Classes.ZCL_OSD_DSL_TRACE.node_of({io_model: projectJson, iv_path: box(path)})).get();
+          expect(node, `${method} ${path} node`).to.not.equal("");
+        }
+      }
       const types = model.get().entity_types.array();
       expect(types.length, `${project} has entity types`).to.be.greaterThan(0);
       for (const type of types) {
@@ -75,11 +142,8 @@ describe("DSL L1: MPC entity methods from the model, byte for byte", function ()
         const result = await abap.Classes.ZCL_OSD_DSL_MPC.render_entity({is_type: type, iv_mpc: model.get().mpc});
         const actual = (await abap.Classes.ZCL_OSD_TPL.to_string({is_result: result})).get();
         expect(actual, `${project} ${type.get().name.get()}`).to.equal(expected);
-        for (const [what, needle] of Object.entries({
-          creatable: "set_creatable( abap_true )", updatable: "set_updatable( abap_true )",
-          sortable: "set_sortable( abap_true )", key: "set_is_key( )", label: "set_label_from_text_element(",
-          sets: "create_entity_set(",
-        })) if (expected.includes(needle)) seen[what]++;
+        const unified = await abap.Classes.ZCL_OSD_DSL_MPC.render_method({is_model: model, iv_method: box(`DEFINE_${stem}`)});
+        expect((await abap.Classes.ZCL_OSD_TPL.to_string({is_result: unified})).get(), `${project} DEFINE_${stem}`).to.equal(expected);
       }
     });
   }

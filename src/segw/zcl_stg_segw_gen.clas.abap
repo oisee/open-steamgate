@@ -239,6 +239,10 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
       RETURNING
         VALUE(rv_text) TYPE string.
 
+    CLASS-METHODS action_type
+      IMPORTING is_function TYPE ty_function_import
+      RETURNING VALUE(rv_text) TYPE string.
+
     CLASS-METHODS banner
       RETURNING
         VALUE(rv_text) TYPE string.
@@ -372,12 +376,6 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
     CLASS-METHODS inline_type
       IMPORTING
         is_property    TYPE ty_property
-      RETURNING
-        VALUE(rv_text) TYPE string.
-
-    CLASS-METHODS action_type
-      IMPORTING
-        is_function    TYPE ty_function_import
       RETURNING
         VALUE(rv_text) TYPE string.
 
