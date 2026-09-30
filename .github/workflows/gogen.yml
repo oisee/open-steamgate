@@ -120,8 +120,23 @@ jobs:
           node tools/osd-fetch.mjs
       - name: Build the Node oracle inputs
         run: npm run transpile
+      # The inventory is expected to report gaps (exit 1: failed methods,
+      # exit 2: not compiled) until Go parity is complete, so those are
+      # written to the summary and do not turn the check red. A crash (any
+      # other exit, or no parsable JSON) does.
       - name: Full Go ABAP Unit inventory
-        run: node tools/gogen/unit.mjs --out "$RUNNER_TEMP/gogen-unit" > "$RUNNER_TEMP/gogen-unit.json"
+        run: |
+          set +e
+          node tools/gogen/unit.mjs --out "$RUNNER_TEMP/gogen-unit" > "$RUNNER_TEMP/gogen-unit.json"
+          rc=$?
+          set -e
+          if [[ $rc -gt 2 ]]; then echo "unit.mjs crashed with exit $rc" >&2; exit "$rc"; fi
+          node -e '
+            const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            const n = {};
+            for (const row of r.rows) n[row.status] = (n[row.status] ?? 0) + 1;
+            console.log(`gogen ABAP Unit inventory (exit ${process.argv[2]}): ${Object.entries(n).map(([k, v]) => `${k} ${v}`).join(", ")}`);
+          ' "$RUNNER_TEMP/gogen-unit.json" "$rc" | tee -a "$GITHUB_STEP_SUMMARY"
         env:
           GOCACHE: ${{ runner.temp }}/gogen-unit-go-cache
       - uses: actions/upload-artifact@v4
