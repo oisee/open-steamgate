@@ -2844,7 +2844,7 @@ function replaceStatement(node, ctx, text) {
   // REPLACE [FIRST OCCURRENCE OF | ALL OCCURRENCES OF] [REGEX] p IN
   // [SECTION [OFFSET o] [LENGTH l] OF] v WITH w [IGNORING CASE]; every rule
   // measured on A4H 2026-09-23, see abap.ReplaceStmt
-  if (/\b(PCRE|RESPECTING|IN\s+BYTE\s+MODE|REPLACEMENT|RESULTS|INTO)\b/i.test(text) || !/\bOF\b/i.test(text)) throw new Unsupported(`REPLACE form: ${text}`);
+  if (/\b(PCRE|RESPECTING|IN\s+BYTE\s+MODE|REPLACEMENT|RESULTS|INTO)\b/i.test(text)) throw new Unsupported(`REPLACE form: ${text}`);
   const kids = node.getChildren();
   const words = kids.map((k) => (k instanceof Nodes.TokenNode ? upper(k.concatTokens()) : ""));
   if (words.includes("SECTION") && !words.includes("OCCURRENCE") && !words.includes("OCCURRENCES")) throw new Unsupported(`REPLACE SECTION form: ${text}`);
@@ -3876,7 +3876,10 @@ function namedType(typeNode, ctx, inferred) {
   const t = upper(text);
   const builtin = {I, F, STRING: S, XSTRING: XS, INT8, D: C(8), T: C(6)}[t];
   if (builtin) return builtin;
-  const local = ctx.scope.findType?.(t) ?? clasDef(ctx.reg, ctx.className)?.getTypeDefinitions().getByName(t);
+  const pool = t.includes("_") ? ctx.reg.getObject("TYPE", t.split("_")[0]) : undefined;
+  const poolType = pool ? new abaplint.SyntaxLogic(ctx.reg, pool).run().spaghetti.getFirstChild()?.getFirstChild()?.findType(t) : undefined;
+  const local = ctx.scope.findType?.(t) ?? ctx.scope.findTypePoolType?.(t) ?? poolType
+    ?? clasDef(ctx.reg, ctx.className)?.getTypeDefinitions().getByName(t);
   if (local !== undefined) return typeOf(local.getType(), text, ctx.program);
   if (ctx.reg.getObject("CLAS", t) || ctx.reg.getObject("INTF", t)) return {k: "ref", name: t, intf: ctx.reg.getObject("INTF", t) !== undefined};
   const m = /^(\w+)=>(\w+)$/.exec(t);
@@ -4544,6 +4547,7 @@ function selectStatement(node, ctx, text) {
   if (sel && isDynamicSelect(sel)) return dynamicSelect(sel, ctx, text);
   if (sel && /^SELECT\s+SINGLE\b/i.test(text)) return selectSingle(sel, ctx, text);
   if (sel && /^SELECT\s+COUNT\s*\(\s*\*\s*\)\s+FROM\b/i.test(text)) return selectCount(sel, ctx, text);
+  if (sel && /^SELECT\s+SUM\s*\(/i.test(text) && !sel.findDirectExpression(Expressions.SQLGroupBy)) return selectSum(sel, ctx, text);
   if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|HAVING|JOIN|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
   // parity-wave1: SELECT ... FOR ALL ENTRIES IN itab WHERE ... itab-comp ...
   // (A4H ZCL_GOGEN_T_FAE): the statement once per driving row, the rows
@@ -4761,6 +4765,28 @@ function selectCount(sel, ctx, text) {
   rel = RIR.aggregate(rel, [], [{as: "n", expr: {...RIR.call("COUNT", [], RIR.T.int), star: true}}]);
   const lowered = lowerOrRefuse("SELECT COUNT", rel);
   return {s: "select_count", table: tb.name, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
+}
+
+/** Narrow scalar SUM of an i column, into an i field. */
+function selectSum(sel, ctx, text) {
+  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(text)) throw new Unsupported(`SELECT SUM form: ${text}`);
+  const fl = sel.findDirectExpression(Expressions.SQLFieldList);
+  const field = /^SUM\s*\(\s*([\w]+)\s*\)$/i.exec(fl?.concatTokens() ?? "")?.[1];
+  if (!field) throw new Unsupported(`SELECT SUM form: ${text}`);
+  const tb = selectTable(sel, ctx, text);
+  if (tb.colType(upper(field)).k !== "i") throw new Unsupported(`SELECT SUM of a non-i column: ${text}`);
+  const into = sel.findDirectExpression(Expressions.SQLIntoStructure);
+  const tnode = into?.findDirectExpression(Expressions.SQLTarget)?.findDirectExpression(Expressions.Target);
+  if (!tnode || into.findDirectExpressions(Expressions.SQLTarget).length !== 1) throw new Unsupported(`SELECT SUM INTO form: ${text}`);
+  const target = lvalue(tnode, ctx);
+  if (target.type.k !== "i") throw new Unsupported(`SELECT SUM INTO a ${target.type.k}: ${text}`);
+  const acc = {hosts: [], ranges: []};
+  const pred = wherePred(sel, ctx, tb, acc);
+  let rel = RIR.scan(lowName(tb.name));
+  if (pred !== null) rel = RIR.filter(rel, pred);
+  rel = RIR.aggregate(rel, [], [{as: "n", expr: RIR.call("SUM", [RIR.col(lowName(field), RIR.T.int)], RIR.T.int)}]);
+  const lowered = lowerOrRefuse("SELECT SUM", rel);
+  return {s: "select_sum", table: tb.name, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
 }
 
 /**

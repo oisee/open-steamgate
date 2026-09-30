@@ -22,9 +22,11 @@ const skipped = new Set((config.options?.skip ?? config.skip ?? []).map((s) =>
   `${s.object}/${s.class}/${s.method}`.toUpperCase()));
 const walk = (dir) => !existsSync(dir) ? [] : readdirSync(dir, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
   .flatMap((e) => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
-const sourceFolders = fixture ? [fixture] : [join(home, "test", "unit"), join(home, "src")];
+// Discover tests from the same input layers the compiler sees. Packs can
+// contribute test includes even when abap_transpile.json lists only src/test.
+const sourceFolders = fixture ? [fixture] : inputFoldersOf(home, config).map((f) => join(home, f));
 const sources = sourceFolders.flatMap(walk)
-  .filter((f) => f.endsWith(".clas.testclasses.abap"));
+  .filter((f) => f.endsWith(".clas.testclasses.abap") && !f.includes("/test/fixtures/"));
 const owners = [...new Set(sources.map((f) => f.split("/").at(-1).replace(/\.clas\.testclasses\.abap$/, "").toUpperCase()))]
   .filter((o) => selected.size === 0 || selected.has(o));
 if (selected.size && owners.length !== selected.size) throw new Error(`unknown test owner: ${[...selected].filter((x) => !owners.includes(x)).join(", ")}`);
@@ -360,7 +362,8 @@ const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; 
   "func caught(f func()) (msg string) { defer func() { if x := recover(); x != nil { msg = failureMessage(x) } }(); f(); return }",
   "func caughtTeardown(f func()) (msg string, assertion, quitNo bool) { defer func() { if x := recover(); x != nil { msg = failureMessage(x); if r, ok := abap.AsRaised(x); ok && r.Class == \"KERNEL_CX_ASSERT\" { assertion, quitNo = true, r.AssertionQuitNo } } }(); f(); return }",
   "func isNotCompiled(msg string) bool { return strings.Contains(msg, \"NOT_COMPILED in \") }",
-  "func main() { results := []result{}", "s := &abap.Session{}"];
+  `func main() { if err := abap.SetMediaDir(${JSON.stringify(join(out, "media"))}); err != nil { panic(err) }; results := []result{}`,
+  "s := &abap.Session{}"];
 for (const {key, methods} of groups) {
   const [owner, local] = key.split(":");
   const c = classes.get(key);
@@ -389,6 +392,9 @@ for (const {key, methods} of groups) {
 }
 generated.push("enc := json.NewEncoder(os.Stdout); if err := enc.Encode(results); err != nil { panic(err) }", "}");
 mkdirSync(out, {recursive: true});
+const {collectMedia, writeMedia, replaceWwwparams} = await import("./media.mjs");
+const media = collectMedia(folders.filter(existsSync));
+writeMedia(media, join(out, "media"));
 const dir = join(here, "go", "cmd", "unit");
 mkdirSync(dir, {recursive: true});
 writeGeneratedGo(dir);
@@ -398,7 +404,7 @@ if (ready.some((r) => r.db)) {
   const {seedStatements} = await import(`${home}/test/seed.mjs`);
   process.env.OSD_ROOT ??= home;
   const db = new DatabaseSetup(program.reg).run();
-  writeFileSync(join(dir, "zz_db.json"), JSON.stringify([...db.schemas.sqlite, ...db.insert, ...seedStatements()]));
+  writeFileSync(join(dir, "zz_db.json"), JSON.stringify(replaceWwwparams([...db.schemas.sqlite, ...db.insert, ...seedStatements()], media)));
 } else writeFileSync(join(dir, "zz_db.json"), "[]");
 timingMs.emit = Math.round(performance.now() - emitStarted);
 const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.class)).size, rows, timingMs, layers: layerInfo};

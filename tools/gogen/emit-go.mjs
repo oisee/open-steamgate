@@ -1686,6 +1686,12 @@ ${t}	}`));
         `${t}\t${place(st.target, ctx)} = abap.DBI(cnt${n})`, `${t}\ts.Sy.Dbcnt = abap.DBI(cnt${n})`,
         `${t}\tif cnt${n}.Int64 > 0 {`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t} else {`, `${t}\t\ts.Sy.Subrc = 4`, `${t}\t}`, `${t}}`];
     }
+    case "select_sum": {
+      const n = ctx.loop++;
+      return [`${t}{`, `${t}\tvar sum${n} abap.DBInt`,
+        `${t}\tabap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) { abap.Must(scan(&sum${n})) })`,
+        `${t}\t${place(st.target, ctx)} = abap.DBI(sum${n})`, `${t}\ts.Sy.Subrc = 0`, `${t}\ts.Sy.Dbcnt = 1`, `${t}}`];
+    }
     case "db_write_sql":
       return [`${t}abap.ExecWrite(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)})`];
     case "db_write": {

@@ -548,6 +548,8 @@ function stmt(st, ctx, d) {
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.fn}: a host function of the Go runtime`)});`];
     case "select_count":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`SELECT COUNT(*) FROM ${st.table}: the JS backend has no database (the Go host has SQLite)`)});`];
+    case "select_sum":
+      return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`SELECT SUM(...) FROM ${st.table}: the JS backend has no database (the Go host has SQLite)`)});`];
     case "dataset_open": case "dataset_close": case "dataset_delete": case "dataset_transfer":
     case "dataset_read": case "dataset_get_position": case "dataset_set_position":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", "DATASET: the JS backend has no file system (the Go host has the sandbox of go/abap/dataset.go)");`];
