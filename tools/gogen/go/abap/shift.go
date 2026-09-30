@@ -19,13 +19,3 @@ func ShiftRightTrailing(s, mask string) string {
 	}
 	return strings.Repeat(" ", len(r)-n) + string(r[:n])
 }
-
-// ShiftLeftLeading is SHIFT s LEFT DELETING LEADING mask on a string or a c
-// (the runtime's shift.js): leading characters that are in the mask are
-// removed. A c mask arrives padded to its length, so `space` is " ".
-func ShiftLeftLeading(s, mask string) string {
-	if mask == "" {
-		return s
-	}
-	return strings.TrimLeft(s, mask)
-}

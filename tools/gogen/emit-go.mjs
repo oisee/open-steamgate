@@ -392,7 +392,13 @@ export function emitGo(program, pkg = "main", layers = null) {
   out.push(...descs);
   // a RESET line becomes a //line back to this file at the line after it
   for (let i = 0; i < out.length; i += 1) if (out[i] === RESET) out[i] = `//line zz_generated.go:${i + 2}`;
-  const generated = out.join("\n") + "\n";
+  let generated = out.join("\n") + "\n";
+  // Runtime helpers are imported only by generated files that call them.
+  for (const name of ["datearith", "charsearch", "shiftleft"]) {
+    if (generated.includes(`${name}.`)) {
+      generated = generated.replace("\t\"osg/gogen/amc\"", `\t\"osg/gogen/amc\"\n\t\"osg/gogen/${name}\"`);
+    }
+  }
   // ident() is also used by the JS emitter in this process. A layered Go
   // emission must not change its spelling for the next consumer.
   exportedFields = false;
@@ -1528,7 +1534,7 @@ ${t}	}`));
     case "shift_left_leading": {
       const p = place(st.target, ctx);
       const mask = st.maskLen !== undefined ? `abap.PadC(${expr(st.mask, ctx)}, ${st.maskLen})` : expr(st.mask, ctx);
-      return [`${t}${p} = abap.ShiftLeftLeading(${p}, ${mask})`];
+      return [`${t}${p} = shiftleft.Leading(${p}, ${mask})`];
     }
     // CONCATENATE ... IN BYTE MODE into an xstring (ultra/packs): the bytes
     // joined, the operands read before the target is written
@@ -1865,7 +1871,7 @@ function expr(e, ctx) {
       if (e.op === "**") return `abap.PowF(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       return `(${expr(e.l, ctx)} ${e.op} ${expr(e.r, ctx)})`;
     case "conv": return conv(e, ctx);
-    case "date_add": return `abap.DateAdd(${expr(e.date, ctx)}, ${e.subtract ? "-" : ""}${expr(e.days, ctx)})`;
+    case "date_add": return `datearith.Add(${expr(e.date, ctx)}, ${e.subtract ? "-" : ""}${expr(e.days, ctx)})`;
     case "sorted_move": {
       const names = e.keys.map((k) => ident(k));
       const less = names.map((k) => `if x.${k} != y.${k} { return x.${k} < y.${k} }`).join("; ");
@@ -2049,7 +2055,7 @@ function cond(c, ctx) {
       return `func() bool { rows${n} := ${expr(c.range, ctx)}; hasI${n}, hit${n} := false, false; for _, r${n} := range rows${n} { match${n} := false; switch r${n}.Option { case "EQ": match${n} = ${expr(c.value, ctx)} == r${n}.Low; case "BT": match${n} = ${expr(c.value, ctx)} >= r${n}.Low && ${expr(c.value, ctx)} <= r${n}.High; default: panic(abap.NotCompiled("IN range", "selection option other than EQ or BT")) }; if r${n}.Sign == "I" { hasI${n} = true; if match${n} { hit${n} = true } } else if r${n}.Sign == "E" { if match${n} { return false } } else { panic(abap.NotCompiled("IN range", "selection sign other than I or E")) } }; return !hasI${n} || hit${n} }()`;
     }
     case "co": return `abap.CO(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
-    case "cs": return `abap.CSWithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
+    case "cs": return `charsearch.WithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp":

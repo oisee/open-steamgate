@@ -332,8 +332,9 @@ export function DateAdd(date, days) {
   return out;
 }
 export function CSWithPos(s, a, b) {
-  const pos = a.toUpperCase().indexOf(b.toUpperCase());
-  s.sy.fdpos = pos < 0 ? a.length : pos;
+  const upper = a.toUpperCase();
+  const pos = upper.indexOf(b.toUpperCase());
+  s.sy.fdpos = pos < 0 ? upper.length : pos;
   return pos >= 0;
 }
 // i into a string, as A4H moves it: 42 is "42 ", -5 is "5-"
