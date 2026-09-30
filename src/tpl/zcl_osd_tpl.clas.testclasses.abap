@@ -894,6 +894,11 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
       exp = `main:1: literal x exceeds precision`
       act = error_text( iv_template = `{{x | literal}}`
                         iv_json = `{"x":"1234","x@type":{"built_in":"DEC","length":5,"decimals":2}}` ) ).
+    " decimals may equal the length: DEC 2,2 holds 0.12
+    cl_abap_unit_assert=>assert_equals(
+      exp = `'0.12'`
+      act = text( iv_template = `{{x | literal}}`
+                  iv_json = `{"x":"0.12","x@type":{"built_in":"DEC","length":2,"decimals":2}}` ) ).
   ENDMETHOD.
 
 ENDCLASS.

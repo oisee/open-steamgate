@@ -1312,6 +1312,10 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
             lv_integer = substring( val = lv_integer off = 1 ).
           ENDWHILE.
           " the type keeps room for its decimals: DEC 5,2 has three integer digits
+          IF lv_integer = `0`.
+            " 0.12 has no integer digits: DEC 2,2 takes it
+            CLEAR lv_integer.
+          ENDIF.
           IF strlen( lv_fraction ) > lv_decimals OR
              strlen( lv_integer ) > lv_length - lv_decimals.
             lv_error = `exceeds precision`.
