@@ -1,7 +1,7 @@
 // The Open SQL forms the native build does not compile yet, pinned by name:
 // a form the Go generator learns moves from REFUSED to compiled, and this
-// list must shrink with it (foreman-dell's batch after U3 wave 3 aims at
-// 18/18). A form that stops compiling fails here as well.
+// list must shrink with it until all 18 compile. A form that stops compiling
+// fails here as well.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {compileCase, corpusCases} from "./osabap-sql-corpus.mjs";

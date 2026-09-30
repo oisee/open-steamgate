@@ -75,6 +75,9 @@ func main() {
 			abap.DialogStep(func() { result = hostRun(s, report, input, "", "") })
 		}
 	}()
+	// the --db file is whole only once it is closed: it is opened in WAL mode,
+	// and until the last connection closes, the rows live in <file>-wal
+	closeDB()
 	if cancelled {
 		return
 	}
@@ -468,10 +471,29 @@ func dbOption(args []string) []string {
 	if len(appTables) == 0 {
 		panic(fmt.Errorf("--db: %s has no tables of its own", appProgram))
 	}
-	if _, err := abap.OpenDBFile(path, appSchema); err != nil {
-		panic(err)
+	// the path goes into a file: URI, where these would be read as its syntax
+	// (a '?' would cut the name short and create another file)
+	if strings.ContainsAny(path, "?#%") {
+		panic(fmt.Errorf("--db %s: a file name with ?, # or %% is not accepted", path))
 	}
+	if _, err := abap.OpenDBFile(path, appSchema); err != nil {
+		panic(fmt.Errorf("--db %s: %w", path, err))
+	}
+	dbOpen = true
 	return rest
+}
+
+var dbOpen bool
+
+// closeDB checkpoints the --db file: the last connection closing folds the
+// WAL back into it, so the file alone holds every row
+func closeDB() {
+	if dbOpen {
+		dbOpen = false
+		if err := abap.DB().Close(); err != nil {
+			fmt.Fprintln(os.Stderr, "osabap: closing the --db file:", err)
+		}
+	}
 }
 
 // withoutDB names the way out when a report with tables ran without --db:
