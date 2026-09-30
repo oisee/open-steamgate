@@ -1274,6 +1274,11 @@ Alice, 2026-09-30: every item per release is marked.
 - **nice**: if time allows.
 - **generous**: only if we are being really generous.
 
+**The rule that makes this work:** a release is tagged when its **must** items are done, and nothing else blocks it.
+An unfinished should/nice/generous item moves to the next release with one line of reason; it never holds a tag.
+A new idea found during a release goes in as nice or generous for a later one, unless it is a correctness bug in
+something already shipped (then it is a must of the current release, like the row references in 0.4).
+
 **0.4** (the next tag, on Alice's yes)
 - must: U3 wave 3 merged. Go ABAP Unit parity with Node at 0 DIFFERENT, with the 12 reviewed nodeAnomaly rows.
 - must: stable row references in Go tables, and NOT_COMPILED and dumps uncatchable by ABAP CATCH (the last wave-3
