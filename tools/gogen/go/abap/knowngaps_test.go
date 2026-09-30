@@ -11,33 +11,9 @@ import (
 // yet (ANORMALIES, gogen-ir-pairs-behind-main). Strict in both directions: a
 // listed pair must still fail, and any other failure is an ordinary failure.
 // A pair that starts to pass fails the test until it is removed from here,
-// so the list cannot outlive the gap.
-var knownGaps = map[string]map[string]string{
-	"osql-where.json": {
-		"a decimal against a packed column":                "packed literals in WHERE (main #47, #55)",
-		"a packed literal rounds to the column's decimals": "packed literals in WHERE (main #47, #55)",
-		"a packed literal is bound as a decimal string":    "packed literals in WHERE (main #47, #55)",
-		"the largest packed value that fits":               "packed literals in WHERE (main #47, #55)",
-		"a RAW against its 2n upper-case hex digits":       "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-		"a RAW compared by its bytes":                      "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-		"a RAW compared with <>":                           "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-		"a RAW compared with >":                            "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-		"a RAW data error left of an unknown column: the first error from the left (not measured)": "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-		"a RAW literal in lower case is CX_SY_OPEN_SQL_DATA_ERROR":                                 "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-		"a RAW literal past F is CX_SY_OPEN_SQL_DATA_ERROR":                                        "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-		"a RAW literal that is empty is CX_SY_OPEN_SQL_DATA_ERROR":                                 "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-		"a RAW literal too long is CX_SY_OPEN_SQL_DATA_ERROR":                                      "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-		"a RAW literal too short is CX_SY_OPEN_SQL_DATA_ERROR":                                     "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-		"a RAW literal with a blank after it is CX_SY_OPEN_SQL_DATA_ERROR":                         "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-		"a RAW literal with a blank before it is CX_SY_OPEN_SQL_DATA_ERROR":                        "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-		"an unquoted number against a RAW is CX_SY_OPEN_SQL_DATA_ERROR":                            "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-		"an unquoted number of 2n digits against a RAW is CX_SY_OPEN_SQL_DATA_ERROR too":           "RAW columns in WHERE: data errors as outcomes, the PostgreSQL bytea parameter (main #66)",
-	},
-	"writes.json": {
-		"UPSERT ... SELECT: the keys the query brings updated, the others inserted":          "UPSERT ... SELECT (main #64)",
-		"UPSERT ... SELECT naming the key only: TXT kept on an update, initial on an insert": "UPSERT ... SELECT (main #64)",
-	},
-}
+// so the list cannot outlive the gap. Empty since the packed, RAW and
+// UPSERT ... SELECT ports; kept for the next time main's pairs run ahead.
+var knownGaps = map[string]map[string]string{}
 
 // gaps reports a pair's failure through errorf: a listed pair's failure is
 // recorded, anything else is t.Errorf. done checks the list is exact.

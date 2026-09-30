@@ -114,6 +114,9 @@ type IRWrite struct {
 	Set         []IRSet  `json:"set,omitempty"`
 	Pred        *IR      `json:"pred,omitempty"`
 	Key         []string `json:"key,omitempty"`
+	// an upsert's columns the statement does not name, with the value an
+	// inserted row gets (upsert / upsertFrom of ir-writes.mjs)
+	Fill []IRSet `json:"fill,omitempty"`
 }
 
 // Param is a bound value as lower() lists it.
@@ -147,17 +150,32 @@ var (
 	seamDouble  = regexp.MustCompile(`^F(\(|$)`)
 	seamPacked  = regexp.MustCompile(`^P\(\d+,\d+\)$`)
 	seamChar    = regexp.MustCompile(`^C\(\d+\)$`)
+	seamRaw     = regexp.MustCompile(`^X\((\d+)\)$`)
+	seamAnyP    = regexp.MustCompile(`^P(\(|$)`)
 )
 
 func (l *lowering) placeholder(n int, code string) string {
-	if l.dialect == "" || l.dialect == "duckdb" {
-		return "?"
-	}
 	code = strings.ToUpper(code)
 	integer := seamInteger.MatchString(code)
 	double := seamDouble.MatchString(code)
 	packed := seamPacked.MatchString(code)
 	switch l.dialect {
+	case "":
+		// SQLite: an integer parameter says what it is, as in the JS (which
+		// binds numbers as REAL); a packed one is bound as its decimal
+		// string, and NUMERIC is the nearest this engine has to a decimal
+		if integer || code == "INT8" {
+			return "CAST(? AS INTEGER)"
+		}
+		if seamAnyP.MatchString(code) {
+			return "CAST(? AS NUMERIC)"
+		}
+		return "?"
+	case "duckdb":
+		if packed {
+			return "CAST(? AS DECIMAL" + code[1:] + ")"
+		}
+		return "?"
 	case "hana":
 		switch {
 		case integer:
@@ -181,6 +199,11 @@ func (l *lowering) placeholder(n int, code string) string {
 			pg = "varchar" + code[1:]
 		case code == "STRING":
 			pg = "text"
+		case seamRaw.MatchString(code):
+			// a RAW(n) is its 2n upper-case hex digits, as the transpiler's
+			// schema stores it (NCHAR(2n)), bound as that text
+			k, _ := strconv.Atoi(seamRaw.FindStringSubmatch(code)[1])
+			pg = fmt.Sprintf("varchar(%d)", 2*k)
 		default:
 			c := code
 			if c == "" {
@@ -398,7 +421,34 @@ func (l *lowering) write(w *IRWrite) string {
 		if len(rest) > 0 {
 			action = "DO UPDATE SET " + strings.Join(rest, ", ")
 		}
-		return "INSERT INTO " + table + " " + cols(w.Columns) + " VALUES " + values(w.Rows) + " ON CONFLICT " + cols(w.Key) + " " + action
+		all := append([]string{}, w.Columns...)
+		fill := make([]*IR, len(w.Fill))
+		for i, f := range w.Fill {
+			all = append(all, f.Col)
+			fill[i] = f.Expr
+		}
+		if w.From != nil {
+			// the fill values are rendered before the query they follow in
+			// the text's order; SQLite reads `... FROM t ON CONFLICT` as a
+			// join constraint, so the source is a derived table with a
+			// WHERE of its own
+			var source string
+			if len(fill) == 0 {
+				source = "SELECT * FROM (" + l.sel(w.From) + ") WHERE true"
+			} else {
+				vs := ""
+				for _, f := range fill {
+					vs += ", " + l.expr(f)
+				}
+				source = `SELECT "q".*` + vs + " FROM (" + l.sel(w.From) + `) AS "q" WHERE true`
+			}
+			return "INSERT INTO " + table + " " + cols(all) + " " + source + " ON CONFLICT " + cols(w.Key) + " " + action
+		}
+		rows := make([][]*IR, len(w.Rows))
+		for i, row := range w.Rows {
+			rows[i] = append(append([]*IR{}, row...), fill...)
+		}
+		return "INSERT INTO " + table + " " + cols(all) + " VALUES " + values(rows) + " ON CONFLICT " + cols(w.Key) + " " + action
 	}
 	panic(Refused{fmt.Sprintf("no write %q", w.Write)})
 }

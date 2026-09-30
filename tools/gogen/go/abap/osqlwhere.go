@@ -23,6 +23,7 @@ import (
 //   OsqlWhereSyntax     CX_SY_DYNAMIC_OSQL_SYNTAX on A4H (catchable)
 //   OsqlWhereSemantics  CX_SY_DYNAMIC_OSQL_SEMANTICS on A4H (catchable)
 //   OsqlWhereDump       an uncatchable runtime error on A4H
+//   OsqlWhereData       CX_SY_OPEN_SQL_DATA_ERROR on A4H (catchable)
 //   OsqlWhereRefused    a form not measured, refused by a reason from
 //                       OsqlWhereReasons, never with a class A4H was not
 //                       seen to raise
@@ -59,6 +60,16 @@ func (OsqlWhereSemantics) Abap() string { return "CX_SY_DYNAMIC_OSQL_SEMANTICS" 
 type OsqlWhereDump struct{ Message string }
 
 func (e OsqlWhereDump) Error() string { return e.Message }
+
+// OsqlWhereData is CX_SY_OPEN_SQL_DATA_ERROR: a literal the column's type
+// cannot take -- a RAW compared with anything but exactly its 2n hex digits
+// in upper case (measured on A4H, 2026-09-24).
+type OsqlWhereData struct{ Message string }
+
+func (e OsqlWhereData) Error() string { return e.Message }
+
+// Abap is the class A4H raised.
+func (OsqlWhereData) Abap() string { return "CX_SY_OPEN_SQL_DATA_ERROR" }
 
 // the limits of MAX_DEPTH and MAX_TERMS: a port whose stack grows must
 // refuse where the JavaScript one runs out of it
@@ -357,7 +368,7 @@ func valueFor(tok osqlToken, c *OsqlColumn) *IR {
 			return Lit(raw, t)
 		}
 		if tok.kind == "text" || tok.kind == "number" {
-			panic(ArithmeticError{"CX_SY_OPEN_SQL_DATA_ERROR", fmt.Sprintf("%q is not a valid value for X(%d,0)", raw, t.Len)})
+			panic(OsqlWhereData{fmt.Sprintf("%q against the RAW(%d) column %s: only its %d hex digits in upper case", raw, t.Len, c.Name, 2*t.Len)})
 		}
 	}
 	if tok.kind == "number" && t.Abap != "C" {
@@ -657,7 +668,7 @@ func (p *osqlParser) primary() *IR {
 // OsqlWherePredicate is WHERE (text) as an IR predicate over the columns
 // given (by name, any case); nil, nil when the text is empty or blank
 // (every row). The error is an OsqlWhereSyntax, OsqlWhereSemantics,
-// OsqlWhereDump or OsqlWhereRefused.
+// OsqlWhereDump, OsqlWhereData or OsqlWhereRefused.
 func OsqlWherePredicate(text string, columns []OsqlColumn) (pred *IR, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -667,6 +678,8 @@ func OsqlWherePredicate(text string, columns []OsqlColumn) (pred *IR, err error)
 			case OsqlWhereSemantics:
 				err = x
 			case OsqlWhereDump:
+				err = x
+			case OsqlWhereData:
 				err = x
 			case OsqlWhereRefused:
 				err = x
@@ -705,6 +718,8 @@ func OsqlWhereOutcome(err error) map[string]string {
 		return map[string]string{"error": "OsqlWhereSemantics", "abap": x.Abap()}
 	case OsqlWhereDump:
 		return map[string]string{"error": "OsqlWhereDump"}
+	case OsqlWhereData:
+		return map[string]string{"error": "OsqlWhereData", "abap": x.Abap()}
 	case OsqlWhereRefused:
 		return map[string]string{"error": "Refused", "reason": x.Reason}
 	}
