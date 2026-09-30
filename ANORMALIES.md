@@ -2074,7 +2074,7 @@ The five `ANOMALY-2026-09-24-httpc-*` entries (`CL_HTTP_CLIENT`: body-latin1, fa
 - Actual open-abap behaviour: the generated code reads the key fields off the table itself (`lt.get().mandt`) and dies with `Error: table, no header line`
 - Impact on open-steamgate: any mass update dumps
 - Smallest safe workaround: `LOOP AT itab INTO wa. UPDATE dbtab FROM wa. ENDLOOP.` (sy-subrc / sy-dbcnt then need summing by hand)
-- Upstream: **needs an issue** in abaplint/transpiler
+- Upstream: [abaplint/transpiler#1937](https://github.com/abaplint/transpiler/pull/1937), sent 2026-09-30 from the branch `update-from-table` in abaplint/transpiler: the TABLE operand is passed as `table` and the runtime updates row by row (sy-subrc 4 when a row found nothing, sy-dbcnt the rows updated), with a test in `test/database.ts` that fails without it. Not pinned here: the workaround above stays until a release carries it
 - Regression-test location: `tools/gogen/semantics.mjs`, ZCL_GOGEN_T_DBW (comment)
 - Upstream version containing a fix: none yet
 
