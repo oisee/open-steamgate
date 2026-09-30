@@ -5687,7 +5687,11 @@ function call(chain, ctx, statement, hint) {
         if (p.optional) return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
         throw new Unsupported(`${name}: parameter ${p.name} not supplied`);
       }
-      return {name: p.name, supplied: true, dir: "importing", byValue: p.byValue, type: p.type, value: convert(source(s, ctx, p.type), p.type)};
+      const actual = source(s, ctx, p.type);
+      if (p.type.k === "table" && p.type.sorted && !actual.type.sorted) {
+        throw new Unsupported(`${name}: a STANDARD table is not type-compatible with SORTED parameter ${p.name} (A4H refusal)`);
+      }
+      return {name: p.name, supplied: true, dir: "importing", byValue: p.byValue, type: p.type, value: convert(actual, p.type)};
     }
     const t = targets.get(p.name);
     if (t === undefined) return {dir: p.dir, place: null, type: p.type};
