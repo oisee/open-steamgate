@@ -1232,7 +1232,8 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
         REPLACE ALL OCCURRENCES OF `'` IN rv_text WITH `''`.
         rv_text = `'` && rv_text && `'`.
       WHEN `STRG` OR `SSTR`.
-        IF lv_builtin = `SSTR` AND lv_length > 0 AND strlen( iv_text ) > lv_length.
+        IF lv_builtin = `SSTR` AND mi_data->exists( join( iv_path = lv_type_path iv_name = `length` ) ) = abap_true
+           AND strlen( iv_text ) > lv_length.
           lv_error = `exceeds length`.
         ENDIF.
         rv_text = iv_text.

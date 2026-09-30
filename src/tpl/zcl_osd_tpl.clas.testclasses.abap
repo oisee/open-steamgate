@@ -561,6 +561,11 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
       exp = `main:1: literal x needs 8 digits`
       act = error_text( iv_template = `{{x | literal}}`
                         iv_json = `{"x":"2026ABCD","x@type":{"built_in":"DATS","length":8}}` ) ).
+    " digits only, but seven of them: the count check alone must refuse it
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs 8 digits`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"2026093","x@type":{"built_in":"DATS","length":8}}` ) ).
   ENDMETHOD.
 
   METHOD literal_tims_digits.
@@ -568,6 +573,10 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
       exp = `main:1: literal x needs 6 digits`
       act = error_text( iv_template = `{{x | literal}}`
                         iv_json = `{"x":"12AB56","x@type":{"built_in":"TIMS","length":6}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs 6 digits`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"12345","x@type":{"built_in":"TIMS","length":6}}` ) ).
   ENDMETHOD.
 
   METHOD literal_sstr_length.
@@ -575,6 +584,11 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
       exp = `main:1: literal x exceeds length`
       act = error_text( iv_template = `{{x | literal}}`
                         iv_json = `{"x":"abcd","x@type":{"built_in":"SSTR","length":3}}` ) ).
+    " a length given as 0 is a length, not an absent one
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x exceeds length`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"a","x@type":{"built_in":"SSTR","length":0}}` ) ).
   ENDMETHOD.
 
   METHOD literal_integer_range.
@@ -594,6 +608,14 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
       exp = `main:1: literal x needs an integer in range`
       act = error_text( iv_template = `{{x | literal}}`
                         iv_json = `{"x":"-9223372036854775809","x@type":{"built_in":"INT8"}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs an integer in range`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"-1","x@type":{"built_in":"INT1"}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs an integer in range`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"9223372036854775808","x@type":{"built_in":"INT8"}}` ) ).
   ENDMETHOD.
 
   METHOD literal_decimal_number.
