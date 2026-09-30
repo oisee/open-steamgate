@@ -167,6 +167,31 @@ Each option accepts either `--option value` or `--option=value`. Paths outside
 the granted roots, including `..` escapes, are refused. These flags govern
 DATASET statements; frontend service file methods have their own host API.
 
+## Classes of a report, and --lib
+
+The classes and interfaces beside the report file (`zcl_x.clas.abap`, with its
+local includes) are compiled with it, the same way its dictionary is:
+`tools/gogen/apps/greet/` is the sample. Classes kept elsewhere come in with
+`--lib <folder>`, repeatable, for example the zip reader of this tree:
+
+```sh
+node tools/gogen/osabap.mjs my/zreport.prog.abap --lib src/zip
+```
+
+Every class and interface in a `--lib` folder is compiled into the command.
+
+The open-abap-core classes the program names come in by themselves: every
+name in the report, its classes and its `--lib` folders that is a class or an
+interface of open-abap-core is compiled, and so is every one those name in
+turn, local classes included, until nothing new turns up. A static call is
+not followed into the core the way a class of the program is, so without this
+a report reading XML needed `CL_SXML_STRING_READER`, the node classes its
+parser creates and `CL_ABAP_CODEPAGE` listed by hand. No list is kept.
+
+`OSABAP_CPUPROFILE=<file>` writes Go's CPU profile of the run
+(`go tool pprof -top <binary> <file>`); it is how an XML-to-XML converter report found
+its four hot spots, all in the runtime and none in the report.
+
 ## Open SQL and the -db file
 
 A report may bring tables of its own: the `.tabl.xml` files (and any

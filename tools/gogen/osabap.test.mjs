@@ -233,3 +233,26 @@ test("a report without tables refuses -db", () => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /-db: ZHELLO has no tables of its own/);
 });
+
+// A report's own classes beside it, and classes from a --lib folder, are
+// compiled with it (apps/greet: ZGREET calls ZCL_GREET_TEXT).
+test("the classes beside a report, or in a --lib folder, are part of it", () => {
+  execFileSync(process.execPath, [builder, join(here, "apps", "greet", "zgreet.prog.abap")], {stdio: "inherit"});
+  const beside = run(["--name", "Ann"]);
+  assert.equal(beside.status, 0, beside.stderr);
+  assert.equal(beside.stdout, "Hello, Ann!\n");
+
+  const dir = mkdtempSync(join(tmpdir(), "osabap-lib-"));
+  try {
+    mkdirSync(join(dir, "report"));
+    mkdirSync(join(dir, "lib"));
+    cpSync(join(here, "apps", "greet", "zgreet.prog.abap"), join(dir, "report", "zgreet.prog.abap"));
+    cpSync(join(here, "apps", "greet", "zcl_greet_text.clas.abap"), join(dir, "lib", "zcl_greet_text.clas.abap"));
+    execFileSync(process.execPath, [builder, join(dir, "report", "zgreet.prog.abap"), "--lib", join(dir, "lib")], {stdio: "inherit"});
+    const fromLib = run(["--name", "Bo"]);
+    assert.equal(fromLib.status, 0, fromLib.stderr);
+    assert.equal(fromLib.stdout, "Hello, Bo!\n");
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
