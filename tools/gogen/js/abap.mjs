@@ -320,6 +320,17 @@ export function Find(v, sub, off) {
 }
 export const CO = (a, b) => [...a].every((c) => b.includes(c));
 export const CS = (a, b) => b === "" || a.toUpperCase().includes(b.toUpperCase());
+export function DateAdd(date, days) {
+  if (!/^\d{8}$/.test(date) || date < "15821015" || !Number.isInteger(days)) throw notCompiled("date arithmetic: date or days outside the measured range");
+  const y = Number(date.slice(0, 4)), m = Number(date.slice(4, 6)), d = Number(date.slice(6));
+  const t = new Date(0);
+  t.setUTCFullYear(y, m - 1, d);
+  if (t.getUTCFullYear() !== y || t.getUTCMonth() !== m - 1 || t.getUTCDate() !== d) throw notCompiled("date arithmetic: an invalid date");
+  t.setUTCDate(t.getUTCDate() + days);
+  const out = `${String(t.getUTCFullYear()).padStart(4, "0")}${String(t.getUTCMonth() + 1).padStart(2, "0")}${String(t.getUTCDate()).padStart(2, "0")}`;
+  if (out < "15821015" || out > "99991231") throw notCompiled("date arithmetic: a result outside the measured range");
+  return out;
+}
 export function CSWithPos(s, a, b) {
   const pos = a.toUpperCase().indexOf(b.toUpperCase());
   s.sy.fdpos = pos < 0 ? a.length : pos;

@@ -1,9 +1,33 @@
 package abap
 
 import (
+	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
+
+// DateAdd is date arithmetic in the modern Gregorian range used by the
+// Gateway's OData DateTime conversion. Earlier calendar transitions are
+// refused until their date-add rule has been measured.
+func DateAdd(date string, days int32) string {
+	var y, m, d int
+	if len(date) != 8 || date < "15821015" || date > "99991231" {
+		panic(NotCompiled("date arithmetic", "a date outside the modern Gregorian range"))
+	}
+	if _, err := fmt.Sscanf(date, "%04d%02d%02d", &y, &m, &d); err != nil {
+		panic(NotCompiled("date arithmetic", "an invalid date"))
+	}
+	base := time.Date(y, time.Month(m), d, 0, 0, 0, 0, time.UTC)
+	if base.Year() != y || int(base.Month()) != m || base.Day() != d {
+		panic(NotCompiled("date arithmetic", "an invalid date"))
+	}
+	result := base.AddDate(0, 0, int(days))
+	if result.Year() < 1582 || result.Year() > 9999 || result.Format("20060102") < "15821015" {
+		panic(NotCompiled("date arithmetic", "a result outside the modern Gregorian range"))
+	}
+	return result.Format("20060102")
+}
 
 // DToI is a d moved into an i, or a d as an operand of arithmetic, measured
 // on A4H (2026-09-23): the days since 00010101, which is 0; the Julian

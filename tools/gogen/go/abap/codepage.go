@@ -3,6 +3,7 @@ package abap
 import (
 	"unicode/utf16"
 	"unicode/utf8"
+	"strings"
 )
 
 // EncodeText is cl_abap_conv_out_ce->convert: the characters of a string as
@@ -25,16 +26,16 @@ func EncodeText(encoding, text string) string {
 }
 
 // DecodeText is cl_abap_conv_in_ce->convert: bytes read as text. A byte
-// sequence that is not valid in the encoding raises
-// CX_SY_CONVERSION_CODEPAGE in open-abap unless IGNORE_CERR was set; that
-// class is not raised from the host, so both cases are refused rather than
-// answered with replacement characters.
+// sequence that is not valid UTF-8 raises CX_SY_CONVERSION_CODEPAGE unless
+// IGNORE_CERR was set; then TextDecoder substitutes replacement characters.
 func DecodeText(encoding string, ignoreErrors bool, data string) string {
-	_ = ignoreErrors // either way refused, see above
 	switch encoding {
 	case "utf8":
 		if !utf8.ValidString(data) {
-			panic(NotCompiled("CL_ABAP_CONV_IN_CE=>CONVERT", "bytes that are not UTF-8"))
+			if ignoreErrors {
+				return strings.ToValidUTF8(data, "\ufffd")
+			}
+			panic(ArithmeticError{Class: "CX_SY_CONVERSION_CODEPAGE", Op: "CL_ABAP_CONV_IN_CE=>CONVERT"})
 		}
 		return data
 	case "iso-8859-1":

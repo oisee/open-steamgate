@@ -204,6 +204,10 @@ for (const row of rows) if (row.status === "READY") {
   if ([row.method, "SETUP", "TEARDOWN", "CLASS_SETUP", "CLASS_TEARDOWN"].some((m) => needsDb(`${key}=>${m}`))) {
     row.db = true;
   }
+  // Interface dispatch and dynamically named calls hide SQL from the static
+  // walk. The Unit runner always has the seed database, as the Node runner
+  // does; open it for these paths too.
+  row.db = true;
 }
 
 // A package can import only packages below it. Promote a class when its

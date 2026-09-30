@@ -414,7 +414,9 @@ function stmt(st, ctx, d) {
     case "concat": {
       const sep = st.sep ? expr(st.sep, ctx) : `""`;
       const joined = st.table ? `${expr(st.table, ctx)}.map((ConcatRow) => ${expr(st.row, ctx)}).join(${sep})` : `[${st.parts.map((x) => expr(x, ctx)).join(", ")}].join(${sep})`;
-      return [`${t}{ const [v, rc] = abap.ConcatFit(${joined}, ${st.target.type.k === "c" ? st.target.type.len : -1}); ${place(st.target, ctx)} = v; s.sy.subrc = rc; }`];
+      const limit = st.target.type.k === "c" || st.target.type.k === "n" ? st.target.type.len : st.target.type.k === "d" ? 8 : -1;
+      const value = st.target.type.k === "n" ? `abap.CToN(v, ${limit})` : st.target.type.k === "d" ? "abap.S2D(v)" : "v";
+      return [`${t}{ const [v, rc] = abap.ConcatFit(${joined}, ${limit}); ${place(st.target, ctx)} = ${value}; s.sy.subrc = rc; }`];
     }
     case "find_all": {
       const icase = st.icase.e === "flag" ? String(st.icase.value) : `(${expr(st.icase, ctx)} === "X")`;
@@ -673,6 +675,12 @@ function stmt(st, ctx, d) {
       return [`${t}{`, `${t}const xH${n} = abap.pushHandler(s, ${guard});`, `${t}try {`, ...body, ...tail, `${t}} finally {`, `${t}  abap.popHandler(s, xH${n});`, `${t}}`, `${t}}`];
     }
     case "raise": return [`${t}throw abap.raise(${expr(st.value, ctx)}, ${JSON.stringify(st.cls ?? "")});`];
+    case "delete_adjacent": {
+      const tb = place(st.table, ctx);
+      const n = ctx.loop++;
+      const same = st.fields.map((f) => `rows${n}[i-1].${ident(f)} === rows${n}[i].${ident(f)}`).join(" && ");
+      return [`${t}{ const rows${n} = ${tb}.slice(); ${tb} = rows${n}.filter((_, i) => i === 0 || !(${same})); }`];
+    }
     case "sort": {
       // Array.prototype.sort is stable; a key may be the line itself, p
       // compares as a number (ultra/itab)
@@ -907,6 +915,13 @@ function expr(e, ctx) {
       if (e.op === "**") return `abap.PowF(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       return `(${expr(e.l, ctx)} ${e.op} ${expr(e.r, ctx)})`;
     case "conv": return conv(e, ctx);
+    case "date_add": return `abap.DateAdd(${expr(e.date, ctx)}, ${e.subtract ? "-" : ""}${expr(e.days, ctx)})`;
+    case "sorted_move": {
+      const names = e.keys.map((k) => ident(k));
+      const cmp = names.map((k) => `if (x.${k} !== y.${k}) return x.${k} < y.${k} ? -1 : 1;`).join(" ");
+      const same = names.map((k) => `v[i-1].${k} === v[i].${k}`).join(" && ");
+      return `(() => { const v = ${expr(e.x, ctx)}.slice().sort((x,y) => { ${cmp} return 0; }); ${e.unique ? `for (let i=1; i<v.length; i++) if (${same}) throw new abap.AbapError("NOT_COMPILED", "SORTED table move: a duplicate primary key");` : ""} return v; })()`;
+    }
     case "fn": return fn(e, ctx);
     case "lines": return `${expr(e.table, ctx)}.length`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
@@ -1082,6 +1097,10 @@ function fn(e, ctx) {
 
 function cond(c, ctx) {
   switch (c.c) {
+    case "in_range": {
+      const n = ctx.loop++;
+      return `(() => { const rows${n} = ${expr(c.range, ctx)}; let hasI${n} = false, hit${n} = false; for (const r${n} of rows${n}) { let match${n}; if (r${n}.Option === "EQ") match${n} = ${expr(c.value, ctx)} === r${n}.Low; else if (r${n}.Option === "BT") match${n} = ${expr(c.value, ctx)} >= r${n}.Low && ${expr(c.value, ctx)} <= r${n}.High; else throw new abap.AbapError("NOT_COMPILED", "IN range: selection option other than EQ or BT"); if (r${n}.Sign === "I") { hasI${n} = true; if (match${n}) hit${n} = true; } else if (r${n}.Sign === "E") { if (match${n}) return false; } else throw new abap.AbapError("NOT_COMPILED", "IN range: selection sign other than I or E"); } return !hasI${n} || hit${n}; })()`;
+    }
     case "co": return `abap.CO(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cs": return `abap.CSWithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;

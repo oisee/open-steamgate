@@ -433,7 +433,9 @@ const EXPECT = {
   // empty condition, no row. The rows are ordinary Open SQL, not measured;
   // '1 = 1' raising CX_SY_DYNAMIC_OSQL_SEMANTICS and an operator without
   // blanks CX_SY_DYNAMIC_OSQL_SYNTAX are A4H's (docs/osql-where.md, #47)
-  ZCL_GOGEN_T_DSEL: {Go: "static:0/2/CB byname:0/2/AC cds:0/2,B2,C3 empty:0/3 none:4/0/0 sum:0/2,C3,A1 one:semantics syntax:caught",
+  // Node accepts the literal-left tautology used by search help; A4H raises
+  // CX_SY_DYNAMIC_OSQL_SEMANTICS for it (recorded in the ABAP corpus).
+  ZCL_GOGEN_T_DSEL: {Go: "static:0/2/CB byname:0/2/AC cds:0/2,B2,C3 empty:0/3 none:4/0/0 sum:0/2,C3,A1 one:read syntax:caught",
     JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
   // a view hiding the client, read by name: refused at run time as the
   // static read is refused at build time
@@ -806,18 +808,9 @@ for (const [line, want] of Object.entries(REFUSED)) {
 for (const [line, msg] of got) {
   if (REFUSED[line] === undefined) { bad += 1; console.log(`FAIL refused :${line}: must compile, got ${msg}`); }
 }
-// ultra/events (fix round): what fills a SORTED table other than INSERT
-// INTO TABLE is refused, each at its line: a move from a STANDARD table, a
-// VALUE with rows, a move between SORTED tables of other keys, a STANDARD
-// actual for a SORTED IMPORTING parameter. VALUE #( ) and a move out of a
-// SORTED table into a STANDARD one compile. A4H: see the comment at the
-// top of testdata-refused/zcl_gogen_t_rf_sort.clas.abap
-const REFUSED_SORT = {
-  44: "a move into a SORTED table from a table of another kind or key",
-  46: "VALUE with rows for a SORTED table",
-  48: "a move into a SORTED table from a table of another kind or key",
-  54: "a move into a SORTED table from a table of another kind or key",
-};
+// Sorted-table moves, VALUE rows, and a standard-table actual now compile.
+// Keep the old refusal corpus as a compile check so these forms stay covered.
+const REFUSED_SORT = {};
 const rsort = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_sort"], tolerant: true});
 const rgot = new Map(rsort.partial.map((x) => [Number(/zcl_gogen_t_rf_sort\.clas\.abap:(\d+)\)/.exec(x)?.[1]), x.slice(x.indexOf("): ") + 3)]));
 for (const line of new Set([...Object.keys(REFUSED_SORT).map(Number), ...rgot.keys()])) {

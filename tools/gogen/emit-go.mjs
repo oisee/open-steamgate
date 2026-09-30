@@ -1074,6 +1074,7 @@ function dbColumn(c, v, ft) {
 // host value (a c right-trimmed, as the column binds it), a literal
 function sqlArgs(args, ctx) {
   return `[]any{${args.map((a) => (a.fit !== undefined ? `abap.DBCFit(${expr(a.host, ctx)}, ${a.fit})`
+    : a.xstring ? `abap.DBXString(${expr(a.host, ctx)})`
     : a.xhex !== undefined ? `abap.DBXHex(${expr(a.host, ctx)}, ${a.xhex})` : a.xexact !== undefined ? `abap.DBXSHex(${expr(a.host, ctx)}, ${a.xexact})`
     : a.host ? (a.host.type.k === "c" ? `abap.DBC(${expr(a.host, ctx)})` : expr(a.host, ctx))
     : a.mandt ? "abap.Mandt" : typeof a.value === "number" ? String(a.value) : JSON.stringify(String(a.value)))).join(", ")}}`;
@@ -1139,8 +1140,10 @@ function stmtLines(st, ctx, d) {
       const joined = st.table
         ? `func() string { var b []string; for _, ConcatRow := range ${expr(st.table, ctx)} { b = append(b, ${expr(st.row, ctx)}) }; return strings.Join(b, ${sep}) }()`
         : `strings.Join([]string{${st.parts.map((x) => expr(x, ctx)).join(", ")}}, ${sep})`;
-      return [`${t}{`, `${t}	v${n}, rc${n} := abap.ConcatFit(${joined}, ${st.target.type.k === "c" ? st.target.type.len : -1})`,
-        `${t}	${place(st.target, ctx)} = v${n}`, `${t}	s.Sy.Subrc = rc${n}`, `${t}}`];
+      const limit = st.target.type.k === "c" || st.target.type.k === "n" ? st.target.type.len : st.target.type.k === "d" ? 8 : -1;
+      const value = st.target.type.k === "n" ? `abap.CToN(v${n}, ${limit})` : st.target.type.k === "d" ? `abap.S2D(v${n})` : `v${n}`;
+      return [`${t}{`, `${t}	v${n}, rc${n} := abap.ConcatFit(${joined}, ${limit})`,
+        `${t}	${place(st.target, ctx)} = ${value}`, `${t}	s.Sy.Subrc = rc${n}`, `${t}}`];
     }
     // ultra/events: FIND ALL OCCURRENCES ... MATCH COUNT n
     case "find_all": {
@@ -1413,6 +1416,14 @@ function stmtLines(st, ctx, d) {
         ...body, `${t}\treturn 0`, `${t}}()`, `${t}_ = ctl${n}`];
       for (const code of [1, 2, 3]) if (frame.used.has(code)) out.push(`${t}if ctl${n} == ${code} {`, `${t}\t${leave(ctx, code)}`, `${t}}`);
       return out;
+    }
+    case "delete_adjacent": {
+      const tb = place(st.table, ctx);
+      const n = ctx.loop++;
+      const same = st.fields.map((f) => `p${n}.${ident(f)} == r${n}.${ident(f)}`).join(" && ");
+      return [`${t}if len(${tb}) > 1 {`, `${t}\tkeep${n} := ${tb}[:1]`, `${t}\tfor _, r${n} := range ${tb}[1:] {`,
+        `${t}\t\tp${n} := keep${n}[len(keep${n})-1]`, `${t}\t\tif !(${same}) { keep${n} = append(keep${n}, r${n}) }`,
+        `${t}\t}`, `${t}\t${tb} = keep${n}`, `${t}}`];
     }
     case "sort": {
       // SORT is not stable in ABAP; stable here, so equal keys keep their order
@@ -1854,6 +1865,13 @@ function expr(e, ctx) {
       if (e.op === "**") return `abap.PowF(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       return `(${expr(e.l, ctx)} ${e.op} ${expr(e.r, ctx)})`;
     case "conv": return conv(e, ctx);
+    case "date_add": return `abap.DateAdd(${expr(e.date, ctx)}, ${e.subtract ? "-" : ""}${expr(e.days, ctx)})`;
+    case "sorted_move": {
+      const names = e.keys.map((k) => ident(k));
+      const less = names.map((k) => `if x.${k} != y.${k} { return x.${k} < y.${k} }`).join("; ");
+      const same = names.map((k) => `v[i-1].${k} == v[i].${k}`).join(" && ");
+      return `func() ${goType(e.type)} { v := append(${goType(e.type)}(nil), ${expr(e.x, ctx)}...); sort.SliceStable(v, func(a,b int) bool { x,y := v[a],v[b]; ${less}; return false }); ${e.unique ? `for i:=1; i<len(v); i++ { if ${same} { panic(abap.NotCompiled("SORTED table move", "a duplicate primary key")) } };` : ""} return v }()`;
+    }
     case "fn": return fn(e, ctx);
     case "lines": return `int32(len(${expr(e.table, ctx)}))`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
@@ -2026,6 +2044,10 @@ function fn(e, ctx) {
 
 function cond(c, ctx) {
   switch (c.c) {
+    case "in_range": {
+      const n = ctx.loop++;
+      return `func() bool { rows${n} := ${expr(c.range, ctx)}; hasI${n}, hit${n} := false, false; for _, r${n} := range rows${n} { match${n} := false; switch r${n}.Option { case "EQ": match${n} = ${expr(c.value, ctx)} == r${n}.Low; case "BT": match${n} = ${expr(c.value, ctx)} >= r${n}.Low && ${expr(c.value, ctx)} <= r${n}.High; default: panic(abap.NotCompiled("IN range", "selection option other than EQ or BT")) }; if r${n}.Sign == "I" { hasI${n} = true; if match${n} { hit${n} = true } } else if r${n}.Sign == "E" { if match${n} { return false } } else { panic(abap.NotCompiled("IN range", "selection sign other than I or E")) } }; return !hasI${n} || hit${n} }()`;
+    }
     case "co": return `abap.CO(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cs": return `abap.CSWithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;
