@@ -2543,3 +2543,52 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: not upstream, this is our host
 - Regression-test location: `test/dataset.mjs` ("with no root, everything is refused")
 - Upstream version containing a fix: not applicable
+
+### ANOMALY-2026-09-30-amc-caller-identity — the Go host names the AMC caller when compiling, Node reads it off the stack
+
+- Status: `open` (by design; the two agree on every case measured)
+- Discovery date: `2026-09-30`
+- Affected versions: `tools/osd-amc.mjs` (Node) and `tools/gogen/go/amc` with `frontend.mjs` `AMC_CALLER` (Go)
+- Affected ABAP statement, runtime API or adapter: the SAMC authority check of `CL_AMC_CHANNEL_MANAGER`, `IF_AMC_MESSAGE_PRODUCER_*~SEND` and `IF_AMC_MESSAGE_CONSUMER~START_MESSAGE_DELIVERY`
+- Minimal ABAP reproducer: `test/unit/zcl_osd_amc_test.clas.testclasses.abap` `unauthorised_send`
+- Exact command used to run it: `node tools/gogen/unit-compare.mjs --class ZCL_OSD_AMC_TEST`
+- Expected SAP behaviour: the program in whose code the call stands is checked against the SAMC authorities (its class pool, `ZCL_X====...CP`)
+- Actual open-abap behaviour: Node takes the nearest `*.clas(.testclasses).mjs` frame on the JavaScript stack that is not the AMC classes; Go marks at compile time every method of a class whose source names the AMC API (a producer kept in an attribute counts) and enters that class's pool on the session while it runs, the innermost one being the caller. They differ only for a class whose source never names the API but calls it on an object it was handed (a helper that takes `REF TO object`): Go attributes that call to the class that entered last, Node to the helper
+- Impact on open-steamgate: none on the suite (8 of 8 the same); only the handed-object helper above could see a difference
+- Smallest safe workaround: authorise the class that names the API; typing the helper's parameter as the AMC interface makes Go attribute it to the helper too
+- Upstream: not upstream; host code
+- Regression-test location: `ZCL_OSD_AMC_TEST` on both hosts (`unit-compare.mjs`), `tools/gogen/go/amc` `TestAuthority`
+- Upstream version containing a fix: not applicable
+
+### ANOMALY-2026-09-30-amc-go-wait-holds-work-process — WAIT FOR MESSAGING CHANNELS keeps the Go work process
+
+- Status: `open`
+- Discovery date: `2026-09-30`
+- Affected versions: `tools/gogen/go/amc` `Wait` as emitted by `emit-go.mjs` `amc_wait`
+- Affected ABAP statement, runtime API or adapter: `WAIT FOR MESSAGING CHANNELS UNTIL ... UP TO ... SECONDS` in a step that holds `abap.WorkProcess` (an APC or ICF step of osgo)
+- Minimal ABAP reproducer: a handler that WAITs for a message another request sends
+- Exact command used to run it: not in a suite yet; the unit run holds no work process and is not affected
+- Expected SAP behaviour: WAIT rolls the session out, and other work runs meanwhile (docs/abap-daemons.md: "WAIT releases WorkProcess")
+- Actual open-abap behaviour: the waiting goroutine keeps the mutex, so a producer in another step runs only after the WAIT ends or times out
+- Impact on open-steamgate: the unit run and single-session use are exact; cross-request AMC on osgo is delayed by up to the WAIT's timeout
+- Smallest safe workaround: none needed for the suite; release the work process around the select in `amc.Wait` (a hook the generated code passes) when osgo serves AMC across requests. Related, same condition: nothing calls `amc.Broker.Forget` yet, so a long-running osgo keeps each session's inbox, id and the producer and consumer bindings
+- Upstream: not upstream; host code
+- Regression-test location: none yet
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-amc-go-delivery-luw — on Go an AMC receiver runs in the waiting session's LUW
+
+- Status: `open` (documented difference between the hosts)
+- Discovery date: `2026-09-30`
+- Affected versions: `tools/gogen/go/amc` Pump/Wait as emitted by `emit-go.mjs`, against `tools/osd-amc.mjs` `drainAmcSession`
+- Affected ABAP statement, runtime API or adapter: `IF_AMC_MESSAGE_RECEIVER_*~RECEIVE` called during `WAIT FOR MESSAGING CHANNELS`
+- Minimal ABAP reproducer: a receiver that writes a table row, and a waiting method that rolls back after the WAIT
+- Exact command used to run it: not in a suite; found by reading (the critic on #263)
+- Expected SAP behaviour: not measured on A4H for this case (P8 measured delivery at SEND and ROLLBACK not retracting a message)
+- Actual open-abap behaviour: Node runs each delivery in a dialog step of its own, which commits at its end, and so also commits what the waiter had pending; Go runs RECEIVE inside the waiter's LUW, so its writes stand or fall with the waiter's next COMMIT or ROLLBACK. On Go a subscription stopped inside RECEIVE loses the messages still queued for it; Node keeps delivering them
+- Impact on open-steamgate: the suite does not write in a receiver; a program that does and then rolls back keeps the receiver's rows on Node and loses them on Go
+- Smallest safe workaround: COMMIT WORK in the receiver when its writes must stand
+- Upstream: not upstream; host code
+- Regression-test location: none yet
+- Upstream version containing a fix: none yet
+

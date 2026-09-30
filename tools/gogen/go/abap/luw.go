@@ -209,6 +209,20 @@ func DialogStep(work func()) {
 	end(true)
 }
 
+// BeginUnitLUW opens the LUW a unit run works in, which is how the Node
+// unit run behaves: its SQLite client opens a transaction and only COMMIT
+// WORK or ROLLBACK WORK ends it (the next begins with the next write), with
+// nothing committed or rolled back between test methods. So a ROLLBACK
+// undoes back to the last COMMIT, as there. The unit runner calls it after
+// each OpenDB; a transaction left on the database OpenDB replaced is
+// rolled back first.
+func BeginUnitLUW() {
+	if tx != nil {
+		end(false)
+	}
+	begin()
+}
+
 // CommitWork is COMMIT WORK [AND WAIT]. Outside a dialog step it has
 // nothing to do: autocommit already made every write durable.
 func CommitWork(s *Session) {

@@ -794,6 +794,40 @@ its mechanism is the first thing step 5 has to demonstrate.
   client manager, AMC producer) compiles through gogen like any other ABAP,
   so the Go work is the host part only, and it comes after Node.
 
+#### AMC on Go, as built (2026-09-30)
+
+- **`tools/gogen/go/amc`**, a package of its own: it imports nothing
+  generated and nothing of `go/abap`. A session is an opaque key, a receiver
+  is what was subscribed, and delivery runs through a func the waiting
+  session hands over, in its own goroutine. One accessor, `amc.Current()`,
+  swapped with `amc.Use()`.
+- **SEND never blocks.** Each session has an inbox, a slice behind a mutex
+  with no bound (ABAP neither drops nor delays a SEND), and a notify channel
+  of capacity 1. `WAIT FOR MESSAGING CHANNELS UNTIL c UP TO n SECONDS`
+  drains it, runs the receivers, and `select`s on the signal and its
+  deadline: sy-subrc 0 or 8. Order holds per producer; a receiver may SEND
+  to its own session inside WAIT.
+- **The generated half.** gogen replaces the bodies open-abap-apc leaves to
+  a host (`CL_AMC_CHANNEL_MANAGER`'s statics, the producer's SENDs, the
+  consumer's START/STOP; `frontend.mjs` `AMC_HOST`), emits `AMCDefine` with
+  the program's SAMC channels read at build time and `AMCDeliver`, which calls
+  a receiver's `RECEIVE` by its method alone with a `ZCL_AMC_MESSAGE_CONTEXT`.
+- **Who is calling is compiled, not read off a stack.** Every method of a
+  class whose source names the AMC API enters its class pool on the session
+  while it runs (`amc.Current().Enter`); Node reads the nearest class off
+  the JavaScript stack (`callerProgram`). The SAMC decisions are the same:
+  `ZCL_OSD_AMC_TEST` runs its 8 methods on both hosts with the same result,
+  `UNAUTHORISED_SEND` included (ANORMALIES `amc-caller-identity`).
+- **A receiver runs in the waiter's LUW** on Go, where Node gives each
+  delivery a dialog step of its own; a receiver that must keep its writes
+  commits (ANORMALIES `amc-go-delivery-luw`). A receiver that raises leaves
+  the messages after it queued; one of another shape is a host error, never
+  a silent loss.
+- **Not yet:** WAIT does not release `WorkProcess` on Go. A producer in
+  another step waits until the WAIT ends or times out, where Node lets it run
+  (ANORMALIES `amc-go-wait-holds-work-process`). Communication type 1
+  (synchronous) is refused as on Node.
+
 ### The preview (service worker)
 
 Possible, and not faithful. A service worker is started on demand and
