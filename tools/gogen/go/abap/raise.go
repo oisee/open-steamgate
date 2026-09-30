@@ -32,7 +32,18 @@ func WithAssertQuit(quit int32, f func()) {
 	f()
 }
 
-func (r *Raised) Error() string { return "UNCAUGHT_EXCEPTION " + r.Class }
+func (r *Raised) Error() string {
+	if r.Class == "KERNEL_CX_ASSERT" {
+		v := reflect.ValueOf(r.Obj)
+		if v.IsValid() && v.Kind() == reflect.Pointer && !v.IsNil() {
+			msg := v.Elem().FieldByName("Msg")
+			if msg.IsValid() && msg.Kind() == reflect.String {
+				return msg.String()
+			}
+		}
+	}
+	return "UNCAUGHT_EXCEPTION " + r.Class
+}
 
 var supers = map[string]string{}
 
