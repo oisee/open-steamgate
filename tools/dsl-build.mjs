@@ -12,8 +12,10 @@
 import {existsSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {pathToFileURL} from "node:url";
+import {XMLValidator} from "fast-xml-parser";
 import {modelR1} from "./lift.mjs";
 import {abapModel, constantsModel, methodTableModel} from "./dsl-abap.mjs";
+import {buildDaemonModel, traceNodes} from "./dsl-daemons.mjs";
 
 // ---------------------------------------------------------------- scanner --
 
@@ -348,9 +350,13 @@ export const PROVIDERS = {
   "abap-constants": {
     samples: (recipeDir) => [["sample", constantsModel(abapModel([join(recipeDir, "sample")], {ddic: []}), "zcl_sample_constants")]],
   },
+  "json-file": {
+    samples: (recipeDir) => readdirSync(join(recipeDir, "sample")).filter((file) => file.endsWith(".json"))
+      .sort().map((file) => [file, buildDaemonModel(JSON.parse(readFileSync(join(recipeDir, "sample", file), "utf8")))]),
+  },
 };
 
-export const PROFILES = ["abap", "sqlscript", "text"];
+export const PROFILES = ["abap", "sqlscript", "text", "xml"];
 
 // ----------------------------------------------------------------- engine --
 
@@ -373,7 +379,7 @@ async function engine() {
 
 // Render through ZCL_OSD_TPL: {text, trace: [{line, template, template_line, path}], result, json}.
 // An engine refusal is an Error whose message is the engine's text.
-export async function renderWithEngine(template, data, partials = {}, name = "main") {
+export async function renderWithEngine(template, data, partials = {}, name = "main", escape = "none") {
   const abap = await engine();
   const box = (value) => new abap.types.String().set(value);
   const row = () => new abap.types.Structure({name: new abap.types.String(), template: new abap.types.String()});
@@ -387,7 +393,7 @@ export async function renderWithEngine(template, data, partials = {}, name = "ma
   const json = await abap.Classes.ZCL_AJSON.parse({iv_json: box(JSON.stringify(data))});
   let result;
   try {
-    result = await abap.Classes.ZCL_OSD_TPL.render({iv_template: box(template), ii_data: json, it_partials: table, iv_name: box(name)});
+    result = await abap.Classes.ZCL_OSD_TPL.render({iv_template: box(template), ii_data: json, it_partials: table, iv_name: box(name), iv_escape: box(escape)});
   } catch (error) {
     if (error.text?.get) throw new Error(error.text.get(), {cause: error});
     throw error;
@@ -400,7 +406,14 @@ export async function renderWithEngine(template, data, partials = {}, name = "ma
   return {text, trace, result, json};
 }
 
-async function profileFindings(profile, rendered) {
+async function profileFindings(profile, rendered, model) {
+  if (profile === "xml") {
+    const validity = XMLValidator.validate(rendered.text);
+    if (validity === true) return [];
+    const line = validity.err.line;
+    return [{severity: "E", line, template_line: rendered.trace[line - 1]?.template_line ?? 0,
+      rule: "xml", text: validity.err.msg, node: traceNodes(model, rendered.trace)[line - 1]?.node ?? ""}];
+  }
   const abap = await engine();
   const findings = await abap.Classes.ZCL_OSD_DSL_PROFILE.check({
     iv_profile: new abap.types.String().set(profile), iv_strict: new abap.types.Character(1).set(""),
@@ -551,7 +564,8 @@ export async function buildRecipe(name, {dir = "recipes", check = false, staticO
         for (const [label, model] of list) {
           let rendered;
           try {
-            rendered = await renderWithEngine(loaded.sources.get(loaded.manifest.template), model, partialSources, loaded.manifest.template);
+            rendered = await renderWithEngine(loaded.sources.get(loaded.manifest.template), model, partialSources, loaded.manifest.template,
+              loaded.manifest.profile === "xml" ? "html" : "none");
           } catch (error) {
             const match = /^(.+?):(\d+): (.*)$/s.exec(error.message);
             errors.push(match
@@ -559,7 +573,7 @@ export async function buildRecipe(name, {dir = "recipes", check = false, staticO
               : {recipe: name, file: loaded.manifest.template, line: 0, message: `${error.message} (sample ${label})`});
             continue;
           }
-          for (const finding of await profileFindings(loaded.manifest.profile, rendered)) {
+          for (const finding of await profileFindings(loaded.manifest.profile, rendered, model)) {
             const entry = {recipe: name, file: fileOf(rendered.trace[finding.line - 1]?.template ?? "main"),
               line: finding.template_line, message: `${finding.rule}: ${finding.text}, output line ${finding.line}, node ${finding.node || "-"} (sample ${label})`};
             (finding.severity === "E" ? errors : warnings).push(entry);

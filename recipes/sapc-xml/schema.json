@@ -1,0 +1,14 @@
+{
+ "object": {
+  "@id": "scalar",
+  "applicationId": "scalar",
+  "applicationVersion": "scalar",
+  "className": "scalar",
+  "description": "scalar",
+  "lang": "scalar",
+  "path": "scalar",
+  "stateful": "scalar",
+  "statefulXml": "scalar",
+  "version": "scalar"
+ }
+}
