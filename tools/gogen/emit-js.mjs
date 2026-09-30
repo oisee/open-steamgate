@@ -706,7 +706,7 @@ function stmt(st, ctx, d) {
       const tb = place(st.table, ctx);
       const n = ctx.loop++;
       const same = st.fields.map((f) => `rows${n}[i-1].${ident(f)} === rows${n}[i].${ident(f)}`).join(" && ");
-      return [`${t}{ const rows${n} = ${tb}.slice(); ${tb} = rows${n}.filter((_, i) => i === 0 || !(${same})); }`];
+      return [`${t}{ const rows${n} = ${tb}; const kept${n} = rows${n}.filter((_, i) => i === 0 || !(${same})); if (kept${n}.length !== rows${n}.length) { abap.bumpTable(rows${n}); ${tb} = kept${n}; } }`];
     }
     case "sort": {
       // Array.prototype.sort is stable; a key may be the line itself, p

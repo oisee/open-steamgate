@@ -1484,7 +1484,7 @@ function stmtLines(st, ctx, d) {
       const same = st.fields.map((f) => `p${n}.${ident(f)} == r${n}.${ident(f)}`).join(" && ");
       return [`${t}if len(${tb}) > 1 {`, `${t}\tkeep${n} := ${tb}[:1]`, `${t}\tfor _, r${n} := range ${tb}[1:] {`,
         `${t}\t\tp${n} := keep${n}[len(keep${n})-1]`, `${t}\t\tif !(${same}) { keep${n} = append(keep${n}, r${n}) }`,
-        `${t}\t}`, `${t}\t${tb} = keep${n}`, `${t}}`];
+        `${t}\t}`, `${t}\tif len(keep${n}) != len(${tb}) { abap.BumpTable(&${tb}) }`, `${t}\t${tb} = keep${n}`, `${t}}`];
     }
     case "sort": {
       // SORT is not stable in ABAP; stable here, so equal keys keep their order
