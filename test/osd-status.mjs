@@ -2,8 +2,11 @@ import {expect} from "chai";
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {childDatabaseFacts, databaseFacts, hostKind, packsInfo, platformFacts, portsOf, servicesOf, snapshot, socketsOn} from "../tools/osd-status.mjs";
+import {createRequire} from "node:module";
+import {childDatabaseFacts, databaseFacts, hostKind, packsInfo, platformFacts, portsOf, serviceTree, servicesOf, snapshot, socketsOn} from "../tools/osd-status.mjs";
 import {databaseDescriptor} from "../tools/osd-database-identity.mjs";
+import {registryClass, segwRegistrations} from "../tools/segw-registry.mjs";
+const {groupServices} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 
 // The snapshot the facade posts to ZCL_OSD_STATUS=>REFRESH. The contract is
 // the JSON below and the Fiori app is built against it, so these tests say
@@ -233,6 +236,55 @@ describe("tools/osd-status: the system as one JSON object", () => {
     expect(found).to.deep.include({path: "/sap/bc/zsrv", kind: "ICF", handler: "ZCL_SRV_HANDLER", text: "", pack: ""});
     expect(found).to.deep.include({path: "/sap/bc/zvibes", kind: "ICF", handler: "ZCL_VIBES", text: "", pack: "vibes"});
     expect(found).to.deep.include({path: "/sap/bc/apc/sap/zchan", kind: "APC", handler: "ZCL_CHAN", text: "", pack: ""});
+  });
+
+  it("keeps a base registration visible when its handler is overridden by a workspace pack", () => {
+    write("src/zcl_zdemo_dpc_ext.clas.abap", "CLASS zcl_zdemo_dpc_ext DEFINITION PUBLIC CREATE PUBLIC. ENDCLASS.");
+    write("packs/workspace/osd-pack.json", JSON.stringify({name: "workspace-pack"}));
+    write("packs/workspace/src/zcl_zdemo_dpc_ext.clas.abap", "CLASS zcl_zdemo_dpc_ext DEFINITION PUBLIC CREATE PUBLIC. ENDCLASS.");
+    const service = servicesOf(root, {}).find((row) => row.kind === "ODATA" && row.path.endsWith("/ZDEMO_SRV"));
+    expect(service.pack).to.equal("workspace-pack");
+    expect(groupServices([service], "layer", "name", true).flatMap((group) => group.groups.flatMap((kind) => kind.rows)))
+      .to.deep.equal([service]);
+  });
+
+  it("lists one OData endpoint when two registration files declare the same external service", () => {
+    write("gen/second.iwsv.xml",
+      "<abapGit><_-IWBEP_-I_MGW_SRG><MODEL_TECH_NAME>ZDEMO_MDL</MODEL_TECH_NAME><MODEL_VERSION>0001</MODEL_VERSION></_-IWBEP_-I_MGW_SRG>" +
+      "<_-IWBEP_-I_MGW_SRH><TECHNICAL_NAME>ZDEMO_SRV</TECHNICAL_NAME><VERSION>0001</VERSION>" +
+      "<EXTERNAL_NAME>ZDEMO_SRV</EXTERNAL_NAME><CLASS_NAME>ZCL_NEW_DPC_EXT</CLASS_NAME></_-IWBEP_-I_MGW_SRH></abapGit>");
+    const found = servicesOf(root, {}).filter((row) => row.kind === "ODATA" && row.path.endsWith("/ZDEMO_SRV"));
+    expect(found).to.have.length(1);
+    expect(found[0].handler).to.equal("ZCL_NEW_DPC_EXT");
+  });
+
+  it("chooses the later layer for an endpoint even when its technical name sorts first", () => {
+    const registration = (technical, handler) =>
+      `<abapGit><_-IWBEP_-I_MGW_SRG><MODEL_TECH_NAME>ZDEMO_MDL</MODEL_TECH_NAME><MODEL_VERSION>0001</MODEL_VERSION></_-IWBEP_-I_MGW_SRG>` +
+      `<_-IWBEP_-I_MGW_SRH><TECHNICAL_NAME>${technical}</TECHNICAL_NAME><VERSION>0001</VERSION>` +
+      `<EXTERNAL_NAME>ZSHARED_SRV</EXTERNAL_NAME><CLASS_NAME>${handler}</CLASS_NAME></_-IWBEP_-I_MGW_SRH></abapGit>`;
+    write("src/zzz_base.iwsv.xml", registration("ZZZ_BASE", "ZCL_BASE_DPC"));
+    write("gen/aaa_override.iwsv.xml", registration("AAA_OVERRIDE", "ZCL_OVERRIDE_DPC"));
+    const found = servicesOf(root, {}).filter((row) => row.kind === "ODATA" && row.path.endsWith("/ZSHARED_SRV"));
+    expect(found).to.have.length(1);
+    expect(found[0].handler).to.equal("ZCL_OVERRIDE_DPC");
+  });
+
+  it("keeps the registered src handler when a later endpoint has a missing model", () => {
+    const registration = (technical, model, handler) =>
+      `<abapGit><_-IWBEP_-I_MGW_SRG><MODEL_TECH_NAME>${model}</MODEL_TECH_NAME><MODEL_VERSION>0001</MODEL_VERSION></_-IWBEP_-I_MGW_SRG>` +
+      `<_-IWBEP_-I_MGW_SRH><TECHNICAL_NAME>${technical}</TECHNICAL_NAME><VERSION>0001</VERSION>` +
+      `<EXTERNAL_NAME>ZSHARED_SRV</EXTERNAL_NAME><CLASS_NAME>${handler}</CLASS_NAME></_-IWBEP_-I_MGW_SRH></abapGit>`;
+    write("src/good.iwsv.xml", registration("ZGOOD", "ZDEMO_MDL", "ZCL_GOOD_DPC"));
+    write("gen/bad.iwsv.xml", registration("ZBAD", "ZMISSING_MDL", "ZCL_BAD_DPC"));
+    const entries = segwRegistrations([join(root, "src"), join(root, "gen")]);
+    const registry = registryClass(entries);
+    expect(registry).to.contain("iv_service = 'ZSHARED_SRV'");
+    expect(registry).to.contain("iv_dpc     = 'ZCL_GOOD_DPC'");
+    expect(registry).not.to.contain("iv_dpc     = 'ZCL_BAD_DPC'");
+    const found = serviceTree(root, {}).filter((row) => row.kind === "ODATA" && row.name === "ZSHARED_SRV");
+    expect(found).to.have.length(1);
+    expect(found[0]).to.include({handler: "ZCL_GOOD_DPC", mpc: "ZCL_ZDEMO_MPC_EXT", source: "src/good.iwsv.xml"});
   });
 
   // The UI5 apps of the tree come out of their own manifests, so the menu

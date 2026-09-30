@@ -26,7 +26,7 @@ const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseChec
   dataPreviewAvailability, dataPreviewError,
   transpileLayers, classifyTestPath, PACKAGE_SPLIT_THRESHOLD, needsPackageSplit, packageDirsFrom, packageOf, hasTestMethods,
   demoFailureObjects, progTcodeOf, webguiTransactionUrl, webguiPanelHtml, runWebguiPanel, progRunLens,
-  SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel,
+  SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel, uniqueServices,
   serviceContextValue, serviceActionContext, normalizeTransactionRow, appManifestDetails, httpTestFiles, closureTestNames,
   transactionDetailsModel, classifyTransactionClick, transactionDetailsHtml,
   dumpsForService, implementationMethodLine, serviceCardModel, serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
@@ -161,11 +161,13 @@ function vscodeStub(settings = {}) {
 }
 
 function controllerContext() {
+  const saved = new Map();
   return {
     subscriptions: [],
     globalStorageUri: {fsPath: path.join(tmpdir(), "osd-controller-test")},
     extensionUri: {fsPath: path.join(tmpdir(), "osd-controller-test-no-bundle")},
     extension: {packageJSON: {version: "test"}},
+    workspaceState: {get: (key) => saved.get(key), update: async (key, value) => { saved.set(key, value); }},
   };
 }
 
@@ -2033,6 +2035,116 @@ describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace la
 // logic is pure; route coverage below uses an in-memory ObjectStore, while
 // the live round trip against a running osd is test/osd-child.mjs.
 describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)", function () {
+  it("persists each tree toggle in workspace state and restores it in a new provider", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {OsdTreeProvider} = loadExtension(api);
+    const context = controllerContext();
+    const controller = {context, launcher: {state: "running", layers: []}, onDidChange: () => {}};
+    const first = new OsdTreeProvider(controller);
+    try {
+      expect([first.labelBy, first.sortBy, first.groupBy, first.hideBase]).to.deep.equal(["name", "name", "kind", false]);
+      await first.setServiceOption("labelBy", "description");
+      await first.setServiceOption("sortBy", "path");
+      await first.setServiceOption("groupBy", "layer");
+      await first.setServiceOption("hideBase", true);
+      const restored = new OsdTreeProvider(controller);
+      try {
+        expect([restored.labelBy, restored.sortBy, restored.groupBy, restored.hideBase])
+          .to.deep.equal(["description", "path", "layer", true]);
+      } finally { restored.dispose(); }
+    } finally { first.dispose(); }
+  });
+
+  it("exposes all four tree toggles as icon commands in the view title", () => {
+    const manifest = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
+    for (const id of ["osd.toggleServiceLabel", "osd.cycleServiceSort", "osd.toggleServiceGrouping", "osd.toggleServiceBase"]) {
+      expect(manifest.contributes.commands.find((command) => command.command === id)?.icon).to.match(/^\$\(.+\)$/);
+      expect(manifest.contributes.menus["view/title"].some((entry) => entry.command === id && entry.when.includes("view == osdTree"))).to.equal(true);
+    }
+  });
+
+  it("renders layer groups with kind children and hides only base rows", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {OsdTreeProvider} = loadExtension(api);
+    const controller = {context: controllerContext(), launcher: {state: "running", layers: []}, onDidChange: () => {}};
+    const provider = new OsdTreeProvider(controller, async () => ({sources: {}, testClasses: []}));
+    try {
+      provider.rows = [
+        {kind: "ODATA", name: "BASE", path: "/base"},
+        {kind: "ODATA", name: "PACK", path: "/pack", pack: "fleet"},
+      ];
+      await provider.setServiceOption("groupBy", "layer");
+      expect(provider.serviceGroupItems().map((item) => item.label)).to.deep.equal(["base (1)", "fleet (1)"]);
+      const nested = provider.getChildren(provider.serviceGroupItems()[1]);
+      expect(nested.map((item) => item.label)).to.deep.equal(["OData (1)"]);
+      await provider.setServiceOption("hideBase", true);
+      expect(provider.serviceGroupItems().map((item) => item.label)).to.deep.equal(["fleet (1)"]);
+    } finally { provider.dispose(); }
+  });
+
+  it("labels a manifest-named workspace pack with its workspace folder", async () => {
+    const folder = mkdtempSync(path.join(tmpdir(), "osd-workspace-pack-"));
+    const manifest = path.join(folder, "osd-pack.json");
+    writeFileSync(manifest, JSON.stringify({name: "declared-pack"}));
+    const original = Osd.prototype.services;
+    Osd.prototype.services = async () => [{kind: "ODATA", name: "ZWORK_SRV", path: "/sap/opu/odata/sap/ZWORK_SRV", pack: "declared-pack"}];
+    const api = vscodeStub({home: ROOT});
+    const {OsdTreeProvider} = loadExtension(api);
+    const controller = {context: controllerContext(), launcher: {state: "running", layers: [{folder, manifest}]}, onDidChange: () => {}};
+    const provider = new OsdTreeProvider(controller);
+    try {
+      await provider.refreshServices();
+      expect(provider.rows[0].layer).to.equal(`workspace ${path.basename(folder)}`);
+      await provider.setServiceOption("groupBy", "layer");
+      expect(provider.serviceGroupItems()[0].label).to.equal(`workspace ${path.basename(folder)} (1)`);
+    } finally {
+      provider.dispose();
+      Osd.prototype.services = original;
+      rmSync(folder, {recursive: true, force: true});
+    }
+  });
+
+  it("removes duplicate registrations of one OData endpoint while keeping the winning row", () => {
+    const path = "/sap/opu/odata/sap/ZOSD_TEST_SRV";
+    expect(uniqueServices([
+      {kind: "ODATA", path, source: "src/old.iwsv.xml"},
+      {kind: "ODATA", path: `${path}/`, source: "packs/new.iwsv.xml"},
+      {kind: "ICF", path, source: "src/icf.xml"},
+    ])).to.deep.equal([
+      {kind: "ODATA", path: `${path}/`, source: "packs/new.iwsv.xml"},
+      {kind: "ICF", path, source: "src/icf.xml"},
+    ]);
+  });
+
+  it("shows technical names with descriptions secondary and supports description labels", () => {
+    const row = {kind: "ODATA", name: "ZOSD_TEST_SRV", text: "Demo items", path: "/sap/opu/odata/sap/ZOSD_TEST_SRV"};
+    expect(serviceLabel(row, "name")).to.deep.equal({label: "ZOSD_TEST_SRV", description: "Demo items"});
+    expect(serviceLabel(row, "description")).to.deep.equal({label: "Demo items", description: "ZOSD_TEST_SRV"});
+    expect(serviceLabel({kind: "ICF", handler: "ZCL_HANDLER", text: "Endpoint", path: "/sap/bc/example"}, "name").label).to.equal("ZCL_HANDLER");
+  });
+
+  it("sorts each kind by name, path, or description", () => {
+    const rows = [
+      {kind: "ODATA", name: "ZA", path: "/b", text: "Alpha"},
+      {kind: "ODATA", name: "ZB", path: "/a", text: "Beta"},
+    ];
+    expect(groupServices(rows, "kind", "name")[0].rows.map((r) => r.name)).to.deep.equal(["ZA", "ZB"]);
+    expect(groupServices(rows, "kind", "path")[0].rows.map((r) => r.name)).to.deep.equal(["ZB", "ZA"]);
+    expect(groupServices(rows, "kind", "description")[0].rows.map((r) => r.name)).to.deep.equal(["ZA", "ZB"]);
+  });
+
+  it("groups by layer, then kind, and hides base services when requested", () => {
+    const rows = [
+      {kind: "ODATA", name: "BASE", path: "/base"},
+      {kind: "APP", name: "WORK", path: "/work", layer: "workspace my-folder"},
+      {kind: "ODATA", name: "PACK", path: "/pack", pack: "fleet"},
+    ];
+    const groups = groupServices(rows, "layer", "name");
+    expect(groups.map((g) => g.label)).to.deep.equal(["base", "workspace my-folder", "fleet"]);
+    expect(groups[0].groups.map((g) => g.label)).to.deep.equal(["OData"]);
+    expect(groupServices(rows, "layer", "name", true).map((g) => g.label)).to.deep.equal(["workspace my-folder", "fleet"]);
+    expect(groupServices(rows, "kind", "name", true).flatMap((g) => g.rows).map((r) => r.name)).to.deep.equal(["PACK", "WORK"]);
+  });
   it("renders a full workspace pack in the Layers tree", () => {
     const folder = mkdtempSync(path.join(tmpdir(), "osd-tree-layer-"));
     const api = vscodeStub({home: ROOT});
@@ -2142,7 +2254,7 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
       for (const item of provider.getChildren()) await visit(item);
       // EntitySetItem is produced when the live entity-set map answers.
       await visit(new EntitySetItem("ZCL_TEST_DPC", {set: "TravelSet", kind: "GET_ENTITYSET"}, 12));
-      await provider.setServiceGrouping("pack");
+      await provider.setServiceOption("groupBy", "layer");
       for (const item of provider.serviceGroupItems()) {
         seen.add("osd-service-pack-group");
         await clickTreeNode(item, provider, output);
@@ -2531,13 +2643,13 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     expect(groups.every((g) => g.groupBy === "pack")).to.equal(true);
   });
 
-  it("labels a row by its own text first, then its name, then its path -- the path always in description", () => {
+  it("defaults to technical names and keeps descriptive text secondary", () => {
     expect(serviceLabel({text: "Travels", name: "ZSTG_DEMO_SRV", path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"}))
-      .to.deep.equal({label: "Travels", description: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"});
+      .to.deep.equal({label: "ZSTG_DEMO_SRV", description: "Travels"});
     expect(serviceLabel({text: "", name: "ZSTG_DEMO_SRV", path: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"}))
-      .to.deep.equal({label: "ZSTG_DEMO_SRV", description: "/sap/opu/odata/sap/ZSTG_DEMO_SRV"});
+      .to.deep.equal({label: "ZSTG_DEMO_SRV", description: ""});
     expect(serviceLabel({text: "", name: undefined, path: "/app/index.html"}))
-      .to.deep.equal({label: "/app/index.html", description: "/app/index.html"});
+      .to.deep.equal({label: "/app/index.html", description: ""});
   });
 
   it("gives each kind its own lower-cased contextValue, for view/item/context in package.json to match", () => {

@@ -32,7 +32,7 @@ import {DEFAULT_DATABASE} from "./sqlite-file-client.mjs";
 import {liveHash} from "./osd-build.mjs";
 import {instances} from "./osd-runtime.mjs";
 import {services as icfServices, channels as pushChannels} from "./osd-icf.mjs";
-import {segwRegistrations} from "./segw-registry.mjs";
+import {registeredServices, segwRegistrations} from "./segw-registry.mjs";
 import {generatorFoldersOf, folderOf, packsOf, webappsOf} from "./osd-packs.mjs";
 import {layers} from "./osd-inputs.mjs";
 import {identity} from "./osd-identity.mjs";
@@ -187,19 +187,20 @@ export function servicesOf(root, env = process.env) {
 export function serviceTree(root, env = process.env) {
   const out = [];
   const packs = packsOf(root, env);
+  const owners = layers(root, undefined, env).owner;
   const packOf = (file) => {
     const at = resolve(root, file);
-    return packs.find((p) => p.abap.some((f) => at.startsWith(resolve(f) + "/")))?.name ?? "";
+    return packs.find((p) => p.abap.some((f) => at === resolve(f) || at.startsWith(resolve(f) + "/")))?.name ?? "";
   };
   const rel = (file) => (file === undefined ? undefined : relative(root, resolve(root, file)));
   const folders = generatorFoldersOf(root, env).map((f) => join(root, f));
-  for (const one of segwRegistrations(folders)) {
+  for (const one of registeredServices(segwRegistrations(folders))) {
     out.push({
       path: `/sap/opu/odata/sap/${one.external}`,
       kind: "ODATA",
       handler: one.dpc ?? "",
       text: one.description ?? "",
-      pack: packOf(one.file),
+      pack: packOf(owners.get(`CLAS ${one.dpc.toUpperCase()}`) ?? ""),
       name: one.external,
       mpc: one.mpc ?? "",
       source: rel(one.file),

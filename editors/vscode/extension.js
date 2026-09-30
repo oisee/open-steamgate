@@ -29,7 +29,7 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLens
   unitRiskOf, unitDurationOf, runUnitQueue, unitPoolSize, riskWarning} = require("./lib.js");
 const {Launcher, ensureMaterializedHome, materializedHomeDir, selectOldHomes, listOldHomes, cleanupOldHomes,
   hasLiveServingLock,
-  detectWorkspaceLayers, layerContributions, databaseEnv, defaultDedicatedName, describeDatabase,
+  detectWorkspaceLayers, layerContributions, packNameOf, databaseEnv, defaultDedicatedName, describeDatabase,
   isOpenSteamgateCheckout: isOpenSteamgatePath, decideStartTarget, classify, PORT_RANGE, isFree,
   pickInspectorPort, SEED_ID_FILE} = require("./launcher.js");
 const {systemOverviewHtml} = require("./system-overview.js");
@@ -1085,7 +1085,11 @@ class OsdTreeProvider {
     this.capabilitiesByRow = new Map();
     this.transactions = [];
     this.transactionsLoaded = false;
-    this.groupBy = vscode.workspace.getConfiguration("osd").get("services.groupBy", "kind");
+    const saved = controller.context?.workspaceState;
+    this.labelBy = saved?.get("osd.services.labelBy") === "description" ? "description" : "name";
+    this.sortBy = ["name", "path", "description"].includes(saved?.get("osd.services.sortBy")) ? saved.get("osd.services.sortBy") : "name";
+    this.groupBy = saved?.get("osd.services.groupBy") === "layer" ? "layer" : "kind";
+    this.hideBase = saved?.get("osd.services.hideBase") === true;
     // T7 (docs/vscode-extension.md "Warm"): /osd/serving's own `warm` field,
     // shown on the state row the way the status bar shows it.
     this.warm = undefined;
@@ -1132,12 +1136,21 @@ class OsdTreeProvider {
       return;
     }
     try {
-      this.rows = await osd().services();
+      const workspacePacks = new Map();
+      for (const layer of this.controller.launcher?.layers ?? []) {
+        const label = `workspace ${path.basename(layer.folder)}`;
+        workspacePacks.set(packNameOf(layer.folder), label);
+        if (layer.manifest) {
+          const manifest = JSON.parse(fs.readFileSync(layer.manifest, "utf8"));
+          workspacePacks.set(String(manifest.name ?? path.basename(layer.folder)).toLowerCase(), label);
+        }
+      }
+      this.rows = (await osd().services()).map((row) => ({...row, layer: workspacePacks.get(row.pack) ?? row.pack ?? "base"}));
       for (const row of this.rows) {
         const saved = this.capabilitiesByRow.get(serviceRowKey(row));
         if (saved !== undefined) row.detailsCapabilities = saved;
       }
-      this.groups = groupServices(this.rows, this.groupBy);
+      this.regroupServices();
     } catch {
       this.rows = [];
       this.groups = [];
@@ -1159,11 +1172,16 @@ class OsdTreeProvider {
     this.transactionsLoaded = true;
   }
 
-  async setServiceGrouping(groupBy) {
-    this.groupBy = groupBy === "pack" ? "pack" : "kind";
-    const target = vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
-    await vscode.workspace.getConfiguration("osd").update("services.groupBy", this.groupBy, target);
-    this.groups = groupServices(this.rows, this.groupBy);
+  regroupServices() {
+    this.groups = groupServices(this.rows, this.groupBy, this.sortBy, this.hideBase);
+  }
+
+  async setServiceOption(option, value) {
+    const allowed = {labelBy: ["name", "description"], sortBy: ["name", "path", "description"], groupBy: ["kind", "layer"], hideBase: [true, false]};
+    if (!allowed[option]?.includes(value)) return;
+    this[option] = value;
+    await this.controller.context.workspaceState.update(`osd.services.${option}`, value);
+    this.regroupServices();
     this.emitter.fire();
   }
 
@@ -1188,7 +1206,7 @@ class OsdTreeProvider {
       return this.transactionItems();
     }
     if (element instanceof ServiceGroupItem) {
-      return this.serviceRowItems(element.group);
+      return element.group.groupBy === "layer" ? element.group.groups.map((group) => new ServiceGroupItem(group)) : this.serviceRowItems(element.group);
     }
     if (element instanceof ServiceRowItem) {
       return this.serviceClassItems(element.row);
@@ -1239,9 +1257,7 @@ class OsdTreeProvider {
 
     const system = new SystemGroupItem();
     const transactions = new TransactionGroupItem(this.transactions);
-    const grouping = vscode.workspace.getConfiguration("osd").get("services.groupBy", "kind");
-    this.groupBy = grouping === "pack" ? "pack" : "kind";
-    this.groups = groupServices(this.rows, this.groupBy);
+    this.regroupServices();
 
     system.command = treeClick(system);
     transactions.command = treeClick(transactions);
@@ -1296,7 +1312,7 @@ class OsdTreeProvider {
         this.capabilitiesByRow.set(key, capabilities);
       }
       row.detailsCapabilities = capabilities;
-      return new ServiceRowItem(row);
+      return new ServiceRowItem(row, this.labelBy);
     }));
   }
 
@@ -1424,10 +1440,10 @@ class TransactionItem extends vscode.TreeItem {
  *  refreshServices() above already asked once for the whole tree. */
 class ServiceGroupItem extends vscode.TreeItem {
   constructor(group) {
-    super(`${group.label} (${group.rows.length})`, vscode.TreeItemCollapsibleState.Collapsed);
+    super(`${group.label} (${group.rows?.length ?? group.groups.reduce((count, child) => count + child.rows.length, 0)})`, vscode.TreeItemCollapsibleState.Collapsed);
     this.group = group;
     this.contextValue = "osd-service-group";
-    this.iconPath = new vscode.ThemeIcon(group.groupBy === "pack" ? "package" : "folder");
+    this.iconPath = new vscode.ThemeIcon(group.groupBy === "layer" ? "layers" : "folder");
     this.command = treeClick(this);
   }
 }
@@ -1436,17 +1452,18 @@ class ServiceGroupItem extends vscode.TreeItem {
  *  control the context actions package.json contributes. A row expands when
  *  serviceClassItems() can produce a class or entity-set child. */
 class ServiceRowItem extends vscode.TreeItem {
-  constructor(row) {
-    const {label, description} = serviceLabel(row);
+  constructor(row, labelBy = "name") {
+    const {label, description} = serviceLabel(row, labelBy);
     const expandable = serviceClassNodes(row).length > 0;
     super(label, expandable ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
     this.row = row;
     this.description = description;
+    this.tooltip = `${label}\n${row.path}`;
     this.contextValue = serviceActionContext(row, row.detailsCapabilities);
     this.iconPath = new vscode.ThemeIcon(
       row.kind === "APP" ? "browser" : row.kind === "ODATA" ? "database" : row.kind === "APC" ? "broadcast" : "plug");
     if (!expandable && row.kind !== "APC" && row.path) {
-      this.tooltip = openTooltip("this page");
+      this.tooltip = `${row.path}\n${openTooltip("this page")}`;
     }
     this.command = treeClick(this);
   }
@@ -2400,8 +2417,15 @@ function activate(context) {
   context.subscriptions.push(vscode.window.registerTreeDataProvider("osdTree", treeProvider));
   context.subscriptions.push(vscode.commands.registerCommand("osd.refreshTree",
     () => treeProvider.refresh(true).then(() => treeProvider.emitter.fire(), () => treeProvider.emitter.fire())));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.groupServicesByKind", () => treeProvider.setServiceGrouping("kind")));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.groupServicesByPack", () => treeProvider.setServiceGrouping("pack")));
+  for (const [command, option, values] of [
+    ["osd.toggleServiceLabel", "labelBy", ["name", "description"]],
+    ["osd.cycleServiceSort", "sortBy", ["name", "path", "description"]],
+    ["osd.toggleServiceGrouping", "groupBy", ["kind", "layer"]],
+    ["osd.toggleServiceBase", "hideBase", [false, true]],
+  ]) {
+    context.subscriptions.push(vscode.commands.registerCommand(command, () =>
+      treeProvider.setServiceOption(option, values[(values.indexOf(treeProvider[option]) + 1) % values.length])));
+  }
 
   // Services tree (docs/vscode-extension.md, "Services tree"): a row's own
   // click shows the reusable details webview (on a leaf it opens the row).
