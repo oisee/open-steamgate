@@ -1,7 +1,7 @@
 REPORT znotes.
 
 * A report with a table of its own: osabap builds it as a native command
-* that keeps its rows in the SQLite file --db names.
+* that keeps its rows in the SQLite file -db names.
 
 PARAMETERS p_add TYPE string LOWER CASE.
 

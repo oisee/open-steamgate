@@ -125,6 +125,6 @@ with `abap.SetDatasetHost`.
 
 - osabap: the report converter of open-abap-gui does not pass the DATASET
   statements through yet, so a report that uses them is refused before
-  gogen sees it; `--allow-read` / `--allow-write` will set the two roots
+  gogen sees it; `-allow-read` / `-allow-write` will set the two roots
   (track O).
 - TRUNCATE DATASET, SORT, the additions refused above.
