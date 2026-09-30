@@ -338,11 +338,11 @@ ENDCLASS.
   });
 
   it("CAPABILITIES names what this host can do, so a screen draws only those buttons", async () => {
-    // Node holds the compiler and the build, so all five; OSGo answers
+    // Node holds the compiler and the build, so all of them; OSGo answers
     // without CHECK and ACTIVATE and the editor then offers neither
     const answer = await call(destination, {IV_COMMAND: "CAPABILITIES"});
     expect(answer.EV_ERROR).to.equal("");
-    expect(answer.EV_NOTE.split(" ")).to.deep.equal(["LIST", "READ", "WRITE", "CHECK", "ACTIVATE"]);
+    expect(answer.EV_NOTE.split(" ")).to.deep.equal(["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION"]);
   });
 
   it("an object nobody has is NAMED, not answered with an empty source", async () => {

@@ -412,3 +412,6 @@ The design stays a thin layer over the files: versions are not stored anywhere, 
   = git log, invalidated on a HEAD change.
 - Order: after track O. Measure the contract on A4H first (P-probe of the FMs' signatures and a VRSD row),
   per the clean-room rule.
+- **Done 2026-09-30 (stoker): the host history service.** `ZOSD_STORE` `HISTORY` / `REVISION` on Node and Go,
+  `ZCL_OSD_VERSIONS` as a thin reader ([`docs/object-versions.md`](../object-versions.md)). Next: the ADT versions feed,
+  then the `SVRS_*` substitutes on the provider registry.

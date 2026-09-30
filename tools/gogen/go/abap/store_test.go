@@ -36,7 +36,7 @@ func TestStoreCapabilities(t *testing.T) {
 	storeState.cfg = &StoreConfig{Roots: []StoreRoot{{Path: "src", Writable: true}}}
 	defer func() { storeState.cfg = nil }()
 	a := StoreCall(map[string]*string{"IV_COMMAND": &cmd})
-	if a.Scalars["EV_ERROR"] != "" || a.Scalars["EV_NOTE"] != "LIST READ WRITE" {
+	if a.Scalars["EV_ERROR"] != "" || a.Scalars["EV_NOTE"] != "LIST READ WRITE HISTORY REVISION" {
 		t.Fatalf("CAPABILITIES: note %q error %q", a.Scalars["EV_NOTE"], a.Scalars["EV_ERROR"])
 	}
 }
