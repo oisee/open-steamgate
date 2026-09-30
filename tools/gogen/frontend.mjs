@@ -20,7 +20,10 @@ import {readFileSync, readdirSync, existsSync} from "node:fs";
 import {join} from "node:path";
 
 const require = createRequire(import.meta.url);
-const abaplint = require("@abaplint/core");
+// The transpiler's database setup and rearranger use its own @abaplint/core.
+// Keep registry objects from that same copy so instanceof checks find tables.
+const transpilerRequire = createRequire(require.resolve("@abaplint/transpiler/package.json"));
+const abaplint = transpilerRequire("@abaplint/core");
 const {Rearranger} = require("@abaplint/transpiler/build/src/rearranger");
 const {Nodes, Statements, Structures, Expressions, BasicTypes} = abaplint;
 
@@ -2313,6 +2316,16 @@ function statement(node, ctx) {
     if (!cc) throw new Unsupported(`DELETE form: ${text}`);
     keyGuard(table.type, "DELETE");
     return {s: "delete_where", table, where: whereOf(cc, table.type.row, ctx, text)};
+  }
+  if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+TABLE\s+\S+\s+WITH\s+TABLE\s+KEY\s+/i.test(text)) {
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const key = /^DELETE\s+TABLE\s+\S+\s+WITH\s+TABLE\s+KEY\s+(\w+)\s*=\s*([\w-]+)\s*\.?$/i.exec(text);
+    const keyExpr = node.getChildren().find((x) => x.concatTokens().trim() === `${key?.[1]} = ${key?.[2]}`);
+    const value = keyExpr?.getChildren()[2];
+    if (!key || !value || table.type.k !== "table" || table.type.row.k !== "struct") throw new Unsupported(`DELETE form: ${text}`);
+    const field = fieldOf(ctx, table.type.row, key[1], text);
+    keyGuard(table.type, "DELETE TABLE");
+    return {s: "delete_key", table, key: field.name, value: convert(source(value, ctx, field.type), field.type)};
   }
   // ultra/itab: DELETE itab, the short form inside LOOP AT itab: the
   // current row goes and the loop goes on with the row after it (A4H

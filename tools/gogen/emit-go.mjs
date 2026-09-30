@@ -1653,6 +1653,14 @@ ${t}	}`));
         `${t}\t\t\tkept${n} = append(kept${n}, r${n})`, `${t}\t\t}`, `${t}\t}`,
         `${t}\ts.Sy.Subrc = 4`, `${t}\tif len(kept${n}) < len(${tb}) {`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}\t${tb} = kept${n}`, `${t}}`];
     }
+    case "delete_key": {
+      const n = ctx.loop++;
+      const tb = place(st.table, ctx);
+      return [`${t}{`, `${t}\tkey${n} := ${expr(st.value, ctx)}`, `${t}\ts.Sy.Subrc = 4`,
+        `${t}\tfor i${n}, r${n} := range ${tb} {`, `${t}\t\tif r${n}.${ident(st.key)} == key${n} {`,
+        `${t}\t\t\t${tb} = append(${tb}[:i${n}], ${tb}[i${n}+1:]...)`,
+        `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
+    }
     // ultra/itab: DELETE itab inside LOOP AT itab: the current row goes and
     // the loop index steps back, so the next pass reads the row after it
     case "delete_current": {

@@ -777,6 +777,13 @@ function stmt(st, ctx, d) {
       return [`${t}{`, `${t}  const kept${n} = ${tb}.filter((r${n}) => !(${keep}));`,
         `${t}  s.sy.subrc = kept${n}.length < ${tb}.length ? 0 : 4;`, `${t}  ${tb} = kept${n};`, `${t}}`];
     }
+    case "delete_key": {
+      const tb = place(st.table, ctx);
+      const n = ctx.loop++;
+      return [`${t}{`, `${t}  const key${n} = ${expr(st.value, ctx)};`, `${t}  s.sy.subrc = 4;`,
+        `${t}  const i${n} = ${tb}.findIndex((r${n}) => r${n}.${ident(st.key)} === key${n});`,
+        `${t}  if (i${n} >= 0) { ${tb}.splice(i${n}, 1); s.sy.subrc = 0; }`, `${t}}`];
+    }
     // ultra/itab: DELETE itab inside LOOP AT itab, as emit-go
     case "delete_current": {
       const tb = place(st.table, ctx);
