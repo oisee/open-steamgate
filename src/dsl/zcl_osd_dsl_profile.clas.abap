@@ -36,7 +36,6 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
     DATA lv_escaped TYPE abap_bool.
     DATA lv_comment TYPE abap_bool.
     DATA lv_soft TYPE abap_bool.
-    DATA lv_node TYPE string.
     DATA lv_ascii_limit TYPE string.
     IF iv_profile = 'text'.
       RETURN.
@@ -46,16 +45,15 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
     LOOP AT is_result-lines INTO lv_line.
       lv_line_number = sy-tabix.
       READ TABLE is_result-trace INTO ls_trace WITH KEY line = lv_line_number.
-      lv_node = zcl_osd_dsl_trace=>node_of( io_model = io_model iv_path = ls_trace-path ).
       CLEAR ls_finding.
       ls_finding-severity = 'E'.
       ls_finding-line = lv_line_number.
       ls_finding-template_line = ls_trace-template_line.
-      ls_finding-node = lv_node.
       lv_len = strlen( lv_line ).
       IF lv_len > 255.
         ls_finding-rule = 'line_length'.
         ls_finding-text = 'Line exceeds 255 characters'.
+        ls_finding-node = zcl_osd_dsl_trace=>node_of( io_model = io_model iv_path = ls_trace-path ).
         APPEND ls_finding TO rt_finding.
       ENDIF.
       IF lv_len > 0.
@@ -63,6 +61,7 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
         IF lv_char = space OR lv_char = cl_abap_char_utilities=>horizontal_tab.
           ls_finding-rule = 'trailing_blank'.
           ls_finding-text = 'Trailing blank'.
+          ls_finding-node = zcl_osd_dsl_trace=>node_of( io_model = io_model iv_path = ls_trace-path ).
           APPEND ls_finding TO rt_finding.
         ENDIF.
       ENDIF.
@@ -99,6 +98,7 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
               AND iv_strict = abap_false.
             ls_finding-severity = 'W'.
           ENDIF.
+          ls_finding-node = zcl_osd_dsl_trace=>node_of( io_model = io_model iv_path = ls_trace-path ).
           APPEND ls_finding TO rt_finding.
         ENDIF.
         IF lv_comment = abap_true.

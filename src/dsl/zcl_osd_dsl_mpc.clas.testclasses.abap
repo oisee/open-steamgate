@@ -121,6 +121,9 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
     DATA lv_method TYPE string.
     ls_model = zcl_stg_segw_gen=>build_model( iv_project ).
     lv_source = zcl_stg_segw_gen=>mpc_source( ls_model ).
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_source exp = zcl_stg_segw_gen=>mpc_source_legacy( ls_model )
+      msg = 'DSL source equals independent legacy generator' ).
     IF iv_project = 'ZUT_DSL'.
       ls_result = zcl_osd_dsl_mpc=>render_class( ls_model ).
       cl_abap_unit_assert=>assert_equals(
