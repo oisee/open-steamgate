@@ -40,6 +40,7 @@ CLASS zcl_osd_dsl_mpc DEFINITION PUBLIC FINAL CREATE PRIVATE.
     CLASS-METHODS method_template
       IMPORTING iv_method TYPE string RETURNING VALUE(rv_text) TYPE string.
     CLASS-METHODS class_template RETURNING VALUE(rv_text) TYPE string.
+    CLASS-METHODS type_template RETURNING VALUE(rv_text) TYPE string.
 ENDCLASS.
 
 CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
@@ -67,8 +68,6 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
       && `,"abap_struct":` && quoted( is_type-abap_struct )
       && `,"bind_ddic":` && quoted( is_type-abap_struct )
       && `,"media":` && quoted( flag_text( is_type-is_media ) )
-      && `,"banner":` && quoted( zcl_stg_segw_gen=>banner( ) )
-      && `,"stars":` && quoted( `***********************************************************************************************************************************` )
       && `,"properties":[`.
     lv_first = abap_true.
     LOOP AT is_type-properties INTO ls_prop.
@@ -127,7 +126,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
 
   METHOD entity_template.
     rv_text = rv_text && `  method DEFINE_{{define_stem}}.` && cl_abap_char_utilities=>newline.
-    rv_text = rv_text && `{{{banner}}}` && cl_abap_char_utilities=>newline.
+    rv_text = rv_text && zcl_stg_segw_gen=>banner( ) && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `  data:` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `        lo_annotation     type ref to /iwbep/if_mgw_odata_annotation,                "#EC NEEDED` && cl_abap_char_utilities=>newline.
@@ -136,18 +135,18 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
     rv_text = rv_text && `        lo_property       type ref to /iwbep/if_mgw_odata_property,                  "#EC NEEDED` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `        lo_entity_set     type ref to /iwbep/if_mgw_odata_entity_set.                "#EC NEEDED` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
-    rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+    rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `*   ENTITY - {{name}}` && cl_abap_char_utilities=>newline.
-    rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+    rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `lo_entity_type = model->create_entity_type( iv_entity_type_name = '{{name}}' iv_def_entity_set = abap_false ). "#EC NOTEXT` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `{{#media}}` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `lo_entity_type->set_is_media( 'X' ).  "#EC NOTEXT` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `{{/media}}` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
-    rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+    rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `*Properties` && cl_abap_char_utilities=>newline.
-    rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+    rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `{{#properties}}` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `{{#complex}}` && cl_abap_char_utilities=>newline.
@@ -201,9 +200,9 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
     rv_text = rv_text && `{{/bind_ddic}}` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
-    rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+    rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `*   ENTITY SETS` && cl_abap_char_utilities=>newline.
-    rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+    rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `{{#sets}}` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `lo_entity_set = lo_entity_type->create_entity_set( '{{name}}' ). "#EC NOTEXT` && cl_abap_char_utilities=>newline.
     rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
@@ -244,7 +243,10 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
     DATA lt_impl TYPE zcl_stg_segw_gen=>tt_file.
     DATA lv_block TYPE string.
     DATA lv_blocks TYPE string.
+    DATA lv_first_block TYPE string.
     DATA lv_count TYPE i.
+    DATA lv_component_first TYPE abap_bool.
+    DATA lv_kind TYPE string.
     DATA lv_pad TYPE string.
     DATA lv_stamp TYPE string.
     DATA lv_any TYPE abap_bool.
@@ -256,8 +258,6 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
       && `,"namespace":` && quoted( is_model-namespace )
       && `,"mpc":` && quoted( is_model-mpc )
       && `,"stamp":` && quoted( lv_stamp )
-      && `,"banner":` && quoted( zcl_stg_segw_gen=>banner( ) )
-      && `,"stars":` && quoted( `***********************************************************************************************************************************` )
       && `,"complex_types":[`.
     lv_first = abap_true.
     LOOP AT is_model-complex_types INTO ls_ct.
@@ -437,72 +437,111 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
     lv_json = lv_json && `],"has_texts":` && quoted( flag_text( xsdbool( lv_first = abap_false ) ) ).
     lv_blocks = ``.
     LOOP AT is_model-complex_types INTO ls_ct.
+      lv_kind = 'inline'.
       IF ls_ct-abap_struct IS NOT INITIAL.
-        lv_block = |  types:\n     { to_upper( ls_ct-name ) } type { ls_ct-abap_struct } .\n|.
-      ELSE.
-        lv_block = |  types:\n        begin of { to_upper( ls_ct-name ) },\n|.
-        LOOP AT ls_ct-properties INTO ls_prop.
-          lv_block = lv_block && |        { ls_prop-abap_field } type { zcl_stg_segw_gen=>inline_type( ls_prop ) },\n|.
-        ENDLOOP.
-        lv_block = lv_block && |    end of { to_upper( ls_ct-name ) } .\n|.
+        lv_kind = 'ddic'.
       ENDIF.
-      IF lv_count > 0.
-        lv_blocks = lv_blocks && `,`.
+      lv_block = `{"@id":` && quoted( `complex/` && ls_ct-name )
+        && `,"kind":` && quoted( lv_kind )
+        && `,"complex_ddic":` && quoted( flag_text( xsdbool( ls_ct-abap_struct IS NOT INITIAL ) ) )
+        && `,"complex_inline":` && quoted( flag_text( xsdbool( ls_ct-abap_struct IS INITIAL ) ) )
+        && `,"name":` && quoted( to_upper( ls_ct-name ) )
+        && `,"ddic":` && quoted( ls_ct-abap_struct ) && `,"components":[`.
+      lv_component_first = abap_true.
+      IF ls_ct-abap_struct IS INITIAL.
+        LOOP AT ls_ct-properties INTO ls_prop.
+          IF lv_component_first = abap_false.
+            lv_block = lv_block && `,`.
+          ENDIF.
+          lv_component_first = abap_false.
+          lv_block = lv_block && `{"@id":` && quoted( `complex/` && ls_ct-name && `/property/` && ls_prop-name )
+            && `,"name":` && quoted( ls_prop-abap_field )
+            && `,"abap_type":` && quoted( zcl_stg_segw_gen=>inline_type( ls_prop ) ) && `}`.
+        ENDLOOP.
+      ENDIF.
+      lv_block = lv_block && `]}`.
+      IF lv_count = 0.
+        lv_first_block = lv_block.
+      ELSE.
+        IF lv_blocks IS NOT INITIAL.
+          lv_blocks = lv_blocks && `,`.
+        ENDIF.
+        lv_blocks = lv_blocks && lv_block.
       ENDIF.
       lv_count = lv_count + 1.
-      lv_blocks = lv_blocks && `{"@id":` && quoted( `complex/` && ls_ct-name )
-        && `,"text":` && quoted( lv_block ) && `}`.
     ENDLOOP.
     LOOP AT is_model-function_imports INTO ls_fi.
       IF ls_fi-parameters IS INITIAL.
         CONTINUE.
       ENDIF.
-      lv_block = |  types:\n    begin of { zcl_stg_segw_gen=>action_type( ls_fi ) },\n|.
+      lv_block = `{"@id":` && quoted( `action/` && ls_fi-name )
+        && `,"kind":"inline","name":` && quoted( zcl_stg_segw_gen=>action_type( ls_fi ) )
+        && `,"is_action":"X"`
+        && `,"components":[`.
+      lv_component_first = abap_true.
       LOOP AT ls_fi-parameters INTO ls_fp.
-        lv_block = lv_block && |        { ls_fp-abap_field } type { zcl_stg_segw_gen=>action_parameter_type( ls_fp ) },\n|.
+        IF lv_component_first = abap_false.
+          lv_block = lv_block && `,`.
+        ENDIF.
+        lv_component_first = abap_false.
+        lv_block = lv_block && `{"@id":` && quoted( `action/` && ls_fi-name && `/parameter/` && ls_fp-name )
+          && `,"name":` && quoted( ls_fp-abap_field )
+          && `,"abap_type":` && quoted( zcl_stg_segw_gen=>action_parameter_type( ls_fp ) ) && `}`.
       ENDLOOP.
-      lv_block = lv_block && |    end of { zcl_stg_segw_gen=>action_type( ls_fi ) } .\n|.
-      IF lv_count > 0.
-        lv_blocks = lv_blocks && `,`.
+      lv_block = lv_block && `]}`.
+      IF lv_count = 0.
+        lv_first_block = lv_block.
+      ELSE.
+        IF lv_blocks IS NOT INITIAL.
+          lv_blocks = lv_blocks && `,`.
+        ENDIF.
+        lv_blocks = lv_blocks && lv_block.
       ENDIF.
       lv_count = lv_count + 1.
-      lv_blocks = lv_blocks && `{"@id":` && quoted( `action/` && ls_fi-name )
-        && `,"text":` && quoted( lv_block ) && `}`.
     ENDLOOP.
     LOOP AT is_model-entity_types INTO ls_type.
+      lv_kind = 'inline'.
       IF ls_type-abap_struct IS NOT INITIAL.
-        lv_block = |  types:\n     TS_{ ls_type-type_stem } type { ls_type-abap_struct } .\n  types:\nTT_{ ls_type-type_stem } type standard table of TS_{ ls_type-type_stem } .\n|.
-      ELSE.
-        lv_block = |  types:\n      begin of TS_{ ls_type-type_stem },\n|.
+        lv_kind = 'ddic'.
+      ENDIF.
+      lv_block = `{"@id":` && quoted( `entity/` && ls_type-name )
+        && `,"kind":` && quoted( lv_kind )
+        && `,"entity_ddic":` && quoted( flag_text( xsdbool( ls_type-abap_struct IS NOT INITIAL ) ) )
+        && `,"entity_inline":` && quoted( flag_text( xsdbool( ls_type-abap_struct IS INITIAL ) ) )
+        && `,"name":` && quoted( `TS_` && ls_type-type_stem )
+        && `,"table_name":` && quoted( `TT_` && ls_type-type_stem )
+        && `,"ddic":` && quoted( ls_type-abap_struct ) && `,"components":[`.
+      lv_component_first = abap_true.
+      IF ls_type-abap_struct IS INITIAL.
         LOOP AT ls_type-properties INTO ls_prop.
+          IF lv_component_first = abap_false.
+            lv_block = lv_block && `,`.
+          ENDIF.
+          lv_component_first = abap_false.
           IF ls_prop-complex_type IS NOT INITIAL.
-            lv_block = lv_block && |     { ls_prop-abap_field } type { to_upper( ls_prop-complex_type ) },\n|.
+            lv_block = lv_block && `{"@id":` && quoted( `entity/` && ls_type-name && `/property/` && ls_prop-name )
+              && `,"name":` && quoted( ls_prop-abap_field )
+              && `,"abap_type":` && quoted( to_upper( ls_prop-complex_type ) ) && `}`.
           ELSE.
-            lv_block = lv_block && |     { ls_prop-abap_field } type { zcl_stg_segw_gen=>inline_type( ls_prop ) },\n|.
+            lv_block = lv_block && `{"@id":` && quoted( `entity/` && ls_type-name && `/property/` && ls_prop-name )
+              && `,"name":` && quoted( ls_prop-abap_field )
+              && `,"abap_type":` && quoted( zcl_stg_segw_gen=>inline_type( ls_prop ) ) && `}`.
           ENDIF.
         ENDLOOP.
-        lv_block = lv_block && |  end of TS_{ ls_type-type_stem } .\n  types:\n    TT_{ ls_type-type_stem } type standard table of TS_{ ls_type-type_stem } .\n|.
       ENDIF.
-      IF lv_count > 0.
-        lv_blocks = lv_blocks && `,`.
+      lv_block = lv_block && `]}`.
+      IF lv_count = 0.
+        lv_first_block = lv_block.
+      ELSE.
+        IF lv_blocks IS NOT INITIAL.
+          lv_blocks = lv_blocks && `,`.
+        ENDIF.
+        lv_blocks = lv_blocks && lv_block.
       ENDIF.
       lv_count = lv_count + 1.
-      lv_blocks = lv_blocks && `{"@id":` && quoted( `entity/` && ls_type-name )
-        && `,"text":` && quoted( lv_block ) && `}`.
     ENDLOOP.
-    lv_json = lv_json && `,"other_types":[`.
-    IF lv_count > 0.
-      FIND FIRST OCCURRENCE OF `},{` IN lv_blocks MATCH OFFSET lv_count.
-      IF sy-subrc = 0.
-        lv_json = lv_json && substring( val = lv_blocks off = lv_count + 2 ) && `],`.
-        lv_blocks = substring( val = lv_blocks len = lv_count + 1 ).
-      ELSE.
-        lv_json = lv_json && `],`.
-      ENDIF.
-      lv_json = lv_json && `"first_type":[` && lv_blocks && `]`.
-    ELSE.
-      lv_json = lv_json && `],"first_type":[]`.
-    ENDIF.
+    lv_json = lv_json && `,"other_types":[` && lv_blocks
+      && `],"first_type":[` && lv_first_block && `]`.
     CLEAR lt_named.
     LOOP AT is_model-entity_types INTO ls_type.
       ls_named-name = ls_type-type_stem.
@@ -609,7 +648,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
     CASE iv_method.
       WHEN 'DEFINE'.
         rv_text = rv_text && `  method DEFINE.` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{{banner}}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && zcl_stg_segw_gen=>banner( ) && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `model->set_schema_namespace( '{{namespace}}' ).` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `{{#has_complex}}define_complextypes( ).` && cl_abap_char_utilities=>newline.
@@ -619,7 +658,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
         rv_text = rv_text && `{{/has_actions}}  endmethod.` && cl_abap_char_utilities=>newline.
       WHEN 'DEFINE_COMPLEXTYPES'.
         rv_text = rv_text && `  method DEFINE_COMPLEXTYPES.` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{{banner}}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && zcl_stg_segw_gen=>banner( ) && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && ` data:` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `       lo_annotation     type ref to /iwbep/if_mgw_odata_annotation,             "#EC NEEDED` && cl_abap_char_utilities=>newline.
@@ -627,15 +666,15 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
         rv_text = rv_text && `       lo_property       type ref to /iwbep/if_mgw_odata_property.                "#EC NEEDED` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `{{#complex_types}}` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `*   COMPLEX TYPE - {{name}}` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `lo_complex_type = model->create_complex_type( '{{name}}' ). "#EC NOTEXT` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `*Properties` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `{{#properties}}lo_property = lo_complex_type->create_property( iv_property_name  = '{{name}}' iv_abap_fieldname = '{{abap_field}}' ). "#EC NOTEXT` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `lo_property->set_type_edm_{{edm_setter}}( ).` && cl_abap_char_utilities=>newline.
@@ -653,7 +692,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
         rv_text = rv_text && `{{/bind_ddic}}{{/complex_types}}  endmethod.` && cl_abap_char_utilities=>newline.
       WHEN 'DEFINE_ASSOCIATIONS'.
         rv_text = rv_text && `  method DEFINE_ASSOCIATIONS.` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{{banner}}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && zcl_stg_segw_gen=>banner( ) && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
@@ -665,9 +704,9 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
         rv_text = rv_text && `lo_assoc_set      type ref to /iwbep/if_mgw_odata_assoc_set,                    "#EC NEEDED` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `lo_nav_property   type ref to /iwbep/if_mgw_odata_nav_prop.                     "#EC NEEDED` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `*   ASSOCIATIONS` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `{{#associations}} lo_association = model->create_association(` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `                            iv_association_name = '{{name}}' "#EC NOTEXT` && cl_abap_char_utilities=>newline.
@@ -687,9 +726,9 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `{{/associations}}` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `*   NAVIGATION PROPERTIES` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `{{#navigation_groups}}` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `* Navigation Properties for entity - {{name}}` && cl_abap_char_utilities=>newline.
@@ -700,7 +739,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
         rv_text = rv_text && `{{/navigation}}{{/navigation_groups}}  endmethod.` && cl_abap_char_utilities=>newline.
       WHEN 'DEFINE_ACTIONS'.
         rv_text = rv_text && `  method DEFINE_ACTIONS.` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{{banner}}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && zcl_stg_segw_gen=>banner( ) && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `data:` && cl_abap_char_utilities=>newline.
@@ -708,9 +747,9 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
         rv_text = rv_text && `lo_parameter      type ref to /iwbep/if_mgw_odata_parameter.              "#EC NEEDED` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `{{#actions}}` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `*   ACTION - {{name}}` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `lo_action = model->create_action( '{{name}}' ).  "#EC NOTEXT` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `{{#label}}lo_action->set_label_from_text_element( iv_text_element_symbol = '{{label}}' iv_text_element_container = gc_incl_name ).  "#EC NOTEXT` && cl_abap_char_utilities=>newline.
@@ -724,9 +763,9 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
         rv_text = rv_text && `lo_action->set_action_for( '{{action_for}}' ). "#EC NOTEXT` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `{{/action_for}}* Set return type multiplicity` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `lo_action->set_return_multiplicity( '{{return_card}}' ). "#EC NOTEXT` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{#has_parameters}}{{stars}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && `{{#has_parameters}}***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `* Parameters` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{stars}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && `***********************************************************************************************************************************` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `{{/has_parameters}}{{#parameters}}lo_parameter = lo_action->create_input_parameter( iv_parameter_name = '{{name}}'    iv_abap_fieldname = '{{abap_field}}' ). "#EC NOTEXT` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `{{#label}}lo_parameter->set_label_from_text_element( iv_text_element_symbol = '{{label}}' iv_text_element_container = gc_incl_name ). "#EC NOTEXT` && cl_abap_char_utilities=>newline.
@@ -736,7 +775,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
         rv_text = rv_text && `{{/has_parameters}}{{/actions}}  endmethod.` && cl_abap_char_utilities=>newline.
       WHEN 'GET_LAST_MODIFIED'.
         rv_text = rv_text && `  method GET_LAST_MODIFIED.` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{{banner}}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && zcl_stg_segw_gen=>banner( ) && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `  CONSTANTS: lc_gen_date_time TYPE timestamp VALUE '{{stamp}}'.                  "#EC NOTEXT` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `  rv_last_modified = super->get_last_modified( ).` && cl_abap_char_utilities=>newline.
@@ -746,7 +785,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
         rv_text = rv_text && `  endmethod.` && cl_abap_char_utilities=>newline.
       WHEN 'LOAD_TEXT_ELEMENTS'.
         rv_text = rv_text && `  method LOAD_TEXT_ELEMENTS.` && cl_abap_char_utilities=>newline.
-        rv_text = rv_text && `{{{banner}}}` && cl_abap_char_utilities=>newline.
+        rv_text = rv_text && zcl_stg_segw_gen=>banner( ) && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `DATA:` && cl_abap_char_utilities=>newline.
         rv_text = rv_text && `     ls_text_element TYPE ts_text_element.                                 "#EC NEEDED` && cl_abap_char_utilities=>newline.
@@ -785,6 +824,30 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
       iv_name = 'mpc_entity' ).
   ENDMETHOD.
 
+  METHOD type_template.
+    rv_text = `{{#complex_ddic}}  types:` && cl_abap_char_utilities=>newline
+      && `     {{name}} type {{ddic}} .` && cl_abap_char_utilities=>newline
+      && `{{/complex_ddic}}{{#complex_inline}}  types:` && cl_abap_char_utilities=>newline
+      && `        begin of {{name}},` && cl_abap_char_utilities=>newline
+      && `{{#components}}        {{name}} type {{abap_type}},` && cl_abap_char_utilities=>newline
+      && `{{/components}}    end of {{name}} .` && cl_abap_char_utilities=>newline
+      && `{{/complex_inline}}{{#is_action}}  types:` && cl_abap_char_utilities=>newline
+      && `    begin of {{name}},` && cl_abap_char_utilities=>newline
+      && `{{#components}}        {{name}} type {{abap_type}},` && cl_abap_char_utilities=>newline
+      && `{{/components}}    end of {{name}} .` && cl_abap_char_utilities=>newline
+      && `{{/is_action}}{{#entity_ddic}}  types:` && cl_abap_char_utilities=>newline
+      && `     {{name}} type {{ddic}} .` && cl_abap_char_utilities=>newline
+      && `  types:` && cl_abap_char_utilities=>newline
+      && `{{table_name}} type standard table of {{name}} .` && cl_abap_char_utilities=>newline
+      && `{{/entity_ddic}}{{#entity_inline}}  types:` && cl_abap_char_utilities=>newline
+      && `      begin of {{name}},` && cl_abap_char_utilities=>newline
+      && `{{#components}}     {{name}} type {{abap_type}},` && cl_abap_char_utilities=>newline
+      && `{{/components}}  end of {{name}} .` && cl_abap_char_utilities=>newline
+      && `  types:` && cl_abap_char_utilities=>newline
+      && `    {{table_name}} type standard table of {{name}} .` && cl_abap_char_utilities=>newline
+      && `{{/entity_inline}}`.
+  ENDMETHOD.
+
   METHOD class_template.
     rv_text = `class {{mpc}} definition` && cl_abap_char_utilities=>newline
       && `  public` && cl_abap_char_utilities=>newline
@@ -793,7 +856,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
       && cl_abap_char_utilities=>newline
       && `public section.` && cl_abap_char_utilities=>newline
       && cl_abap_char_utilities=>newline
-      && `{{#first_type}}{{{text}}}{{/first_type}}`
+      && `{{#first_type}}` && type_template( ) && `{{/first_type}}`
       && `  types:` && cl_abap_char_utilities=>newline
       && `   begin of ts_text_element,` && cl_abap_char_utilities=>newline
       && `      artifact_name  type c length 40,       " technical name` && cl_abap_char_utilities=>newline
@@ -804,7 +867,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
       && `   end of ts_text_element .` && cl_abap_char_utilities=>newline
       && `  types:` && cl_abap_char_utilities=>newline
       && `         tt_text_elements type standard table of ts_text_element with key text_symbol .` && cl_abap_char_utilities=>newline
-      && `{{#other_types}}{{{text}}}{{/other_types}}`
+      && `{{#other_types}}` && type_template( ) && `{{/other_types}}`
       && cl_abap_char_utilities=>newline
       && `{{#constants}}  constants GC_{{name}} type /IWBEP/IF_MGW_MED_ODATA_TYPES=>TY_E_MED_ENTITY_NAME value '{{value}}' ##NO_TEXT.` && cl_abap_char_utilities=>newline
       && `{{/constants}}` && cl_abap_char_utilities=>newline
