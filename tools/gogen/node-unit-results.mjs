@@ -17,6 +17,14 @@ const scratch = join(home, "output", "_unit_data.mjs");
 writeFileSync(scratch, exported);
 const {initializeABAP} = await import(pathToFileURL(join(home, "output", "init.mjs")));
 await initializeABAP();
+// The DATASET host every real host installs (test/setup.mjs): deny by
+// default unless OSD_DATASET_READ/WRITE name roots. Without it a raw runtime
+// answers "not supported" where a host answers sy-subrc 8, and the Node side
+// of the comparison is not the Node a user runs.
+{
+  const {installDataset} = await import(pathToFileURL(join(home, "tools", "osd-dataset.mjs")));
+  await installDataset(globalThis.abap);
+}
 const {getData} = await import(pathToFileURL(scratch));
 const rows = [];
 const messageOf = (e) => String(e?.msg?.get?.() ?? e?.message ?? e ?? "exception");
