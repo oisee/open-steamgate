@@ -2785,6 +2785,33 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Regression-test location: upstream `test/database.ts` ("FOR ALL ENTRIES, UP TO counts the whole result, not each driving row": 3 rows; 6 without the fix)
 - Upstream version containing a fix: none yet
 
+### ANOMALY-2026-09-30-unit-statics-across-test-classes — both ABAP Unit runners keep class statics from one test class to the next
+
+- Status: `open` (recorded; the fix is a runner change on both hosts, not started)
+- Discovery date: `2026-09-30`
+- Affected versions: the Node runner (the transpiler's generated unit runner in `output/index.mjs`, run by `npm run unit`, pin `oisee/transpiler` e97e82c7) and the Go runner (`tools/gogen/unit.mjs`) as of main 7b5921e5
+- Affected ABAP statement, runtime API or adapter: ABAP Unit test isolation, i.e. `CLASS-DATA` and the class constructor of a class under test across test classes
+- Minimal ABAP reproducer: `test/fixtures/unit-statics/` (`ZCL_OSD_STATICS_TEST`: a counter in CLASS-DATA and a class constructor that counts its runs; two test classes `LTC_A` and `LTC_B`, each with `M1_FIRST`, which expects the counter at 1 and one construction, and `M2_SECOND`, which expects the counter at 2)
+- Exact command used to run it:
+  - Go: `node tools/gogen/unit.mjs --fixture test/fixtures/unit-statics --class ZCL_OSD_STATICS_TEST`.
+  - Node: copy the two files into `test/unit/` and run `npm run unit`. The plain runner stops at the first failed assertion (`ANOMALY-2026-09-30-unit-exception-aborts-run`); `tools/gogen/node-unit-results.mjs` runs each method on its own and gives the whole row. The fixture is kept out of the suite so that `npm test` stays green until the runners are fixed.
+- Expected SAP behaviour: measured on A4H by foreman-dell, 2026-09-30, with a probe of the same shape (two local test classes, CLASS-DATA plus a class constructor holding a timestamp and a counter). Each test class runs in a fresh internal session: the class constructor runs again and the statics start over, while the methods of one test class share them. So both `M1_FIRST` see 1 and both `M2_SECOND` see 2.
+- Actual open-abap behaviour:
+
+  | | `LTC_A` m1 / m2 | `LTC_B` m1 / m2 |
+  |---|---|---|
+  | A4H | 1 / 2 | 1 / 2 |
+  | Node | 1 / 2 | **3** (`Expected '1', got '3'`, and the plain runner stops there) |
+  | Go | 1 / 2 | **3 / 4** |
+
+  The class constructor runs once per process and the statics carry on across test classes. On Go the fixture observes the single construction directly: a variant expecting 3/4 passes with one construction. On Node it follows from the constructor running at module import.
+- Impact on open-steamgate: a test class can pass or fail depending on which test class ran before it, and the same suite can disagree with a system. The Go/Node parity comparison does not show it, because both runners share the flaw. It is also the precondition for running test classes in parallel (U4), where each test class gets its own session anyway.
+- Smallest safe workaround: none in the runners. In tests, reset the statics a class under test keeps in `setup`/`class_setup`, or read them relative to their value at the start.
+- Also found: the Go generator refuses to read another class's public static attribute in an expression (`zcl_x=>gv_attr`) and reports it NOT_COMPILED. That is a gap in the generator, not a difference from SAP, so it lives in `docs/backlog/gogen-osgo.md`. The fixture reads the attribute through a method so the two findings stay apart.
+- Upstream: the Node runner is the transpiler's generated unit runner, so abaplint/transpiler needs an issue (per test class: re-initialise the statics and re-run the class constructor). The Go runner is ours (foreman-dell).
+- Regression-test location: `test/fixtures/unit-statics/`; it moves to `test/unit/` when both runners pass it
+- Upstream version containing a fix: none yet
+
 ### ANOMALY-2026-09-30-fae-leftovers — four FOR ALL ENTRIES shapes the transpiled code gets wrong, older than the blocking change
 
 - Status: `open` (recorded; upstream: needs an issue, none sent)
