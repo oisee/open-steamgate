@@ -16,17 +16,26 @@ The shape, in the semantic-patch form of `docs/verified-lift.md` 4.4:
 | obligation | why | closed by |
 |---|---|---|
 | the loop body is that one statement | anything else may depend on the order of reads | `tools/lift.mjs model` (shape) |
-| `K1..Kn` is the whole primary key of `D` without the client | then at most one row answers, so the hashed table can be unique and "which row" is not a question | `tools/lift.mjs model` against the table's DDIC |
-| each `R-ki` has the type of `Ki` | `FOR ALL ENTRIES` and `READ TABLE` compare after conversion; a different type is a different comparison | open: needs the type-aware model (L1) |
-| a miss leaves `R-ci` as it was | `SELECT SINGLE` that finds nothing does not touch its target | differential test `a_miss_keeps_the_old_value`; checked failing with a miss that clears |
-| no rows, no read | `FOR ALL ENTRIES` over an empty table reads the whole table | the `IS NOT INITIAL` guard; visible only in cost, so `test/lift-r1.mjs` counts rows fetched |
+| the generated names are free | `lt_lookup` / `<ls_lookup>` declared twice would not compile, or would alias the row | `tools/lift.mjs model` (names) |
+| `K1..Kn` is the whole primary key of `D` without the client | then at most one row answers, so the hashed table can be unique and "which row" is not a question | `tools/lift.mjs model` against the table's DDIC: transparent, no includes, the client left out only as the first key field of a client-dependent table |
+| each `R-ki` has the type of `Ki` | `FOR ALL ENTRIES` needs compatible operands ([SAP documentation](https://help.sap.com/doc/abapdocu_752_index_htm/7.52/en-US/abenwhere_logexp_itab.htm)) and `READ TABLE` compares after conversion | open (listed in the model's `open`): needs the type-aware model (L1) |
+| a miss leaves `R-ci` as it was | `SELECT SINGLE` that finds nothing does not touch its target | differential test `a_miss_keeps_the_old_value`, checked failing with a miss that clears; the same on A4H's kernel (2026-09-30) |
+| no rows, no read | `FOR ALL ENTRIES` over an empty table reads the whole table | the `IS NOT INITIAL` guard; visible only in cost, so `test/lift-r1.mjs` counts the database calls (0) |
 | a key asked twice | `FOR ALL ENTRIES` drops duplicates | differential test `the_same_key_twice` |
 
-**Equivalence declared:** the rows of `T` after the loop. Not declared: `sy-subrc`
-and `sy-dbcnt` after the loop, the order the database was read in.
+**Equivalence declared:** the rows of `T` after the loop, under two
+preconditions the recipe cannot check: nobody writes the table while the loop
+runs (BEFORE reads it `n` times and could see a commit in between; AFTER reads
+it once), and the reads are confined to one client (a system does that
+implicitly; this runtime does not, see `docs/luw-buffer.md` and ANORMALIES on
+MANDT, so a fixture keeps one client). Not declared: `sy-subrc` and `sy-dbcnt`
+after the loop -- a caller that reads them needs its own obligation. The model
+lists what it did not check under `open`.
 
-**Cost:** `n` round trips become at most one (plus one per 5-10 thousand keys
-on a system that splits `FOR ALL ENTRIES`).
+**Cost:** `n` round trips become a few blocks of `FOR ALL ENTRIES`. Measured on
+A4H (2026-09-30, 42 rows, 20 repetitions): 17.2 ms before, 1.6 ms after, with the
+same rows. Not measurable in OSG yet: the runtime sends `FOR ALL ENTRIES` one row
+at a time (`ANOMALY-2026-09-30-fae-one-select-per-row`).
 
 **Not handled here:** `INTO CORRESPONDING`, a WHERE with anything but key
 equalities, a loop over `INTO` a work area, a SELECT reached through a method
@@ -34,18 +43,20 @@ call (the finder counts those; R1 does not rewrite them).
 
 ## Where the shape occurs
 
-`node tools/lift.mjs find <folder>`, 2026-09-30. "Direct" is what abaplint's
-`db_operation_in_loop` reports: a database statement inside LOOP/DO/WHILE.
-"Via own method" is a loop that calls a method of the same object whose body
-does one, which the rule cannot see. Neither is yet a candidate for R1: that
-takes `model`, and its obligations.
+`node tools/lift.mjs find <folder>`, 2026-09-30, over the loops inside class
+implementations (a FORM or a function module is not counted yet). "With DB" is
+a loop with a database statement anywhere inside it, which is what abaplint's
+`db_operation_in_loop` reports. "Via own method" is a loop without one that calls a
+method of the same class (no receiver, or `me->`) whose body does one, which the
+rule cannot see. Neither is yet a candidate for R1: that takes `model`, and its
+obligations.
 
-| corpus | files | loops | direct | of them `SELECT SINGLE` | via own method |
+| corpus | files | loops | with DB | with `SELECT SINGLE` | via own method |
 |---|---|---|---|---|---|
 | [abapGit](https://github.com/abapGit/abapGit) `src/` at `3b6485b` | 743 | 1074 | 35 | 13 | 14 |
-| [spacelab-problem-management-backend-live](https://github.com/simplicity-goodness-truth/spacelab-problem-management-backend-live) | 133 | 137 | 26 | 2 | 6 |
-| [ABAPToTheFuture04](https://github.com/hardyp/ABAPToTheFuture04) | 116 | 89 | 2 | 2 | 2 |
-| SAP-delivered SEGW samples (local, not named) | 322 | 652 | 10 | 0 | 2 |
-| this tree, `src/` | 154 | 388 | 6 | 2 | 0 |
+| [spacelab-problem-management-backend-live](https://github.com/simplicity-goodness-truth/spacelab-problem-management-backend-live) | 136 | 115 | 15 | 2 | 6 |
+| [ABAPToTheFuture04](https://github.com/hardyp/ABAPToTheFuture04) | 123 | 88 | 2 | 1 | 2 |
+| SAP-delivered SEGW samples (local, not named) | 374 | 581 | 10 | 0 | 2 |
+| this tree, `src/` | 154 | 379 | 4 | 1 | 0 |
 
-In abapGit the indirect loops add 40% to what the rule reports.
+In abapGit the loops reached through an own method add 40% to what the rule reports.

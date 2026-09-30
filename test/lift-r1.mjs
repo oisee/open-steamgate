@@ -5,8 +5,10 @@
 // Equality of the rows is ABAP Unit's job (the class's own test class, which
 // runs on a system as well); what only the host can see is the cost.
 import {expect} from "chai";
-import {readFileSync} from "node:fs";
-import {modelR1} from "../tools/lift.mjs";
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+import {modelR1, modelR1FromSource} from "../tools/lift.mjs";
 
 const DEMO = "src/lift/zcl_osd_lift_r1_demo.clas.abap";
 const TEMPLATE = "recipes/r1-lookup-enrich/template.tpl";
@@ -51,8 +53,76 @@ describe("verified lift R1: lookup-enrich", function () {
     expect(model.fields).to.deep.equal([{column: "text", component: "text"}]);
   });
 
-  it("R1 refuses a loop that is not the shape, and says which obligation failed", () => {
-    expect(() => modelR1(DEMO, "after", ["src"])).to.throw(/^shape: /);
+  // One method per boundary of the shape; each must be refused by the named
+  // obligation. The table of the fixtures is the demo's (kind, code key).
+  const fixture = (body, declarations = "") => `CLASS zcl_fx DEFINITION PUBLIC FINAL.
+  PUBLIC SECTION.
+    TYPES: BEGIN OF ty_row, kind TYPE c LENGTH 4, code TYPE c LENGTH 10, text TYPE c LENGTH 40, END OF ty_row.
+    TYPES tt_rows TYPE STANDARD TABLE OF ty_row WITH DEFAULT KEY.
+    CLASS-METHODS m CHANGING ct_rows TYPE tt_rows.
+ENDCLASS.
+CLASS zcl_fx IMPLEMENTATION.
+  METHOD m.
+    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.
+${declarations}    LOOP AT ct_rows ASSIGNING <ls_row>.
+${body}
+    ENDLOOP.
+  ENDMETHOD.
+ENDCLASS.`;
+  const SELECT = "      SELECT SINGLE text FROM zosd_lift_txt INTO <ls_row>-text WHERE";
+  const refusals = [
+    ["a partial key", `${SELECT} kind = <ls_row>-kind.`, "", /^full key: WHERE names kind/],
+    ["an extra condition", `${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code AND text = <ls_row>-text.`, "", /^full key: /],
+    ["OR", `${SELECT} kind = <ls_row>-kind OR code = <ls_row>-code.`, "", /^full key: /],
+    ["a literal", `${SELECT} kind = 'STAT' AND code = <ls_row>-code.`, "", /^full key: /],
+    ["INTO CORRESPONDING", "      SELECT SINGLE text FROM zosd_lift_txt INTO CORRESPONDING FIELDS OF <ls_row> WHERE kind = <ls_row>-kind AND code = <ls_row>-code.", "", /^shape: /],
+    ["a second statement", `${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.\n      CLEAR <ls_row>-kind.`, "", /^shape: /],
+    ["a nested loop", `      LOOP AT ct_rows TRANSPORTING NO FIELDS WHERE kind = 'X'.\n      ENDLOOP.`, "", /^shape: /],
+    ["lt_lookup taken", `${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`, "    DATA lt_lookup TYPE i.\n", /^names: lt_lookup/],
+    ["<ls_lookup> taken", `${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`, "    FIELD-SYMBOLS <ls_lookup> TYPE any.\n", /^names: <ls_lookup>/],
+    ["the shape rewritten already", null, null, /^names: lt_lookup/],
+  ];
+  for (const [what, body, declarations, reason] of refusals) {
+    it(`R1 refuses ${what}, naming the obligation`, () => {
+      const run = body === null
+        ? () => modelR1(DEMO, "after", ["src"])
+        : () => modelR1FromSource("zcl_fx.clas.abap", fixture(body, declarations), "m", ["src"]);
+      expect(run).to.throw(reason);
+    });
+  }
+
+  // The key is read off the DDIC only where its layout is unambiguous.
+  const table = (clidep, fields) => `<abapGit><asx:abap><asx:values><DD02V><TABNAME>ZOSD_LIFT_TXT</TABNAME>
+<TABCLASS>TRANSP</TABCLASS>${clidep ? "<CLIDEP>X</CLIDEP>" : ""}</DD02V><DD03P_TABLE>${fields.map((f) => `<DD03P>${f}</DD03P>`).join("")}
+</DD03P_TABLE></asx:values></asx:abap></abapGit>`;
+  const layouts = [
+    ["a client-dependent table whose first key field is not the client", table(true, [
+      "<FIELDNAME>KIND</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>",
+      "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME>",
+      "<FIELDNAME>CODE</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>"]), /first key field is not the client/],
+    ["a client-independent table with a client-typed key field", table(false, [
+      "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME>",
+      "<FIELDNAME>KIND</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>",
+      "<FIELDNAME>CODE</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>"]), /client-typed key field mandt/],
+    ["a table with an include", table(true, [
+      "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME>",
+      "<FIELDNAME>.INCLUDE</FIELDNAME><KEYFLAG>X</KEYFLAG>"]), /has includes/],
+  ];
+  for (const [what, xml, reason] of layouts) {
+    it(`R1 refuses ${what}`, () => {
+      const dir = mkdtempSync(join(tmpdir(), "lift-ddic-"));
+      try {
+        writeFileSync(join(dir, "zosd_lift_txt.tabl.xml"), xml);
+        expect(() => modelR1(DEMO, "before", [dir])).to.throw(reason);
+      } finally {
+        rmSync(dir, {recursive: true, force: true});
+      }
+    });
+  }
+
+  it("the fixture itself is accepted, so the refusals above are about their one change", () => {
+    const model = modelR1FromSource("zcl_fx.clas.abap", fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`), "m", ["src"]);
+    expect(model.open).to.include("key types equal column types");
   });
 
   it("the generated region of AFTER is exactly what the template renders", async () => {

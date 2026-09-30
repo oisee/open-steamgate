@@ -40,8 +40,12 @@ function walk(dir, pattern) {
 }
 
 function parse(paths) {
+  return parseSources(paths.map((path) => ({name: basename(path), source: readFileSync(path, "utf8")})));
+}
+
+function parseSources(files) {
   const registry = new abaplint.Registry();
-  for (const path of paths) registry.addFile(new abaplint.MemoryFile(basename(path), readFileSync(path, "utf8")));
+  for (const file of files) registry.addFile(new abaplint.MemoryFile(file.name, file.source));
   registry.parse();
   return registry.getObjects().filter((o) => o instanceof abaplint.ABAPObject).flatMap((o) => o.getABAPFiles());
 }
@@ -54,45 +58,78 @@ const loopsOf = (structure) => [
 const methodName = (method) =>
   method.getFirstStatement().findDirectExpression(Expressions.MethodName)?.concatTokens().toLowerCase();
 
+// A call is to a method of the same class only when nothing stands before the
+// name, or `me->` does: `other->fetch( )` and `zcl_x=>fetch( )` are another
+// object's, whatever the name.
+function ownCalls(loop) {
+  const names = [];
+  for (const statement of loop.findAllStatementNodes()) {
+    const tokens = statement.getTokens().map((t) => t.getStr().toLowerCase());
+    for (const call of statement.findAllExpressions(Expressions.MethodCall)) {
+      const name = call.findDirectExpression(Expressions.MethodName);
+      if (!name) continue;
+      const at = statement.getTokens().indexOf(name.getFirstToken());
+      const before = tokens[at - 1];
+      if (before === "->" && tokens[at - 2] !== "me") continue;
+      if (before === "=>") continue;
+      names.push(name.concatTokens().toLowerCase());
+    }
+  }
+  return names;
+}
+
 export function find(folder) {
   const files = walk(folder, /\.abap$/);
-  const result = {folder, files: files.length, loops: 0, direct: 0, via_own_method: 0, select_single_direct: 0};
+  const result = {folder, files: files.length, loops: 0, loops_with_db: 0, loops_with_select_single: 0, loops_via_own_method: 0};
   for (const file of parse(files)) {
     const structure = file.getStructure();
     if (!structure) continue;
-    const dbMethods = new Set(structure.findAllStructures(Structures.Method)
-      .filter((m) => m.findAllStatementNodes().some(isDb)).map(methodName));
-    for (const loop of loopsOf(structure)) {
-      result.loops++;
-      const statements = loop.findAllStatementNodes();
-      if (statements.some(isDb)) {
-        result.direct++;
-        if (statements.some((s) => s.get() instanceof Statements.Select && /^SELECT SINGLE /i.test(s.concatTokens()))) {
-          result.select_single_direct++;
+    for (const implementation of structure.findAllStructures(Structures.ClassImplementation)) {
+      const dbMethods = new Set(implementation.findAllStructures(Structures.Method)
+        .filter((m) => m.findAllStatementNodes().some(isDb)).map(methodName));
+      for (const loop of loopsOf(implementation)) {
+        result.loops++;
+        const statements = loop.findAllStatementNodes();
+        if (statements.some(isDb)) {
+          result.loops_with_db++;
+          if (statements.some((s) => s.get() instanceof Statements.Select && /^SELECT SINGLE /i.test(s.concatTokens()))) {
+            result.loops_with_select_single++;
+          }
+          continue;
         }
-        continue;
+        if (ownCalls(loop).some((name) => dbMethods.has(name))) result.loops_via_own_method++;
       }
-      const called = loop.findAllExpressions(Expressions.MethodCall)
-        .map((e) => e.findDirectExpression(Expressions.MethodName)?.concatTokens().toLowerCase());
-      if (called.some((name) => dbMethods.has(name))) result.via_own_method++;
     }
   }
   return result;
 }
 
-// The primary key of a transparent table from its abapGit XML, client left out.
+// The primary key of a transparent table from its abapGit XML. The client
+// column is left out only where the table is client-dependent and the column
+// is its first key field of type CLNT; any other layout is refused, never
+// guessed, because dropping a real key field makes SELECT SINGLE ambiguous.
 export function primaryKey(table, ddicFolders) {
   const name = `${table.toLowerCase()}.tabl.xml`;
   for (const folder of ddicFolders) {
     const hit = walk(folder, /\.tabl\.xml$/).find((p) => basename(p) === name);
     if (!hit) continue;
     const xml = readFileSync(hit, "utf8");
+    if (!/<TABCLASS>TRANSP</.test(xml)) throw new Refusal("full key", `${table} is not a transparent table`);
     const fields = [...xml.matchAll(/<DD03P>([\s\S]*?)<\/DD03P>/g)].map((m) => ({
       name: /<FIELDNAME>([^<]+)</.exec(m[1])[1].toLowerCase(),
       key: /<KEYFLAG>X</.test(m[1]),
-      client: /<ROLLNAME>MANDT</.test(m[1]),
+      client: /<ROLLNAME>MANDT</.test(m[1]) || /<DATATYPE>CLNT</.test(m[1]),
+      include: /<FIELDNAME>\.INCLU/.test(m[1]),
     }));
-    return fields.filter((f) => f.key && !f.client).map((f) => f.name);
+    if (fields.some((f) => f.include)) throw new Refusal("full key", `${table} has includes; their key fields are not resolved`);
+    const keys = fields.filter((f) => f.key);
+    if (/<CLIDEP>X</.test(xml)) {
+      if (!keys[0]?.client) throw new Refusal("full key", `${table} is client-dependent but its first key field is not the client`);
+      keys.shift();
+    }
+    const stray = keys.find((f) => f.client);
+    if (stray) throw new Refusal("full key", `${table} has a second client-typed key field ${stray.name}`);
+    return keys.map((f) => f.name);
   }
   return undefined;
 }
@@ -106,12 +143,23 @@ class Refusal extends Error {
 
 // The R1 model of the one loop in `method`, or a Refusal naming the obligation.
 export function modelR1(path, method, ddicFolders) {
-  const [file] = parse([path]);
+  return modelR1FromSource(basename(path), readFileSync(path, "utf8"), method, ddicFolders);
+}
+
+const LOOKUP = "lt_lookup";
+const HIT = "<ls_lookup>";
+
+export function modelR1FromSource(name, source, method, ddicFolders) {
+  const [file] = parseSources([{name, source}]);
   const m = file.getStructure()?.findAllStructures(Structures.Method).find((s) => methodName(s) === method.toLowerCase());
   if (!m) throw new Refusal("shape", `no method ${method} in ${basename(path)}`);
   const loops = m.findAllStructures(Structures.Loop);
   if (loops.length !== 1) throw new Refusal("shape", `${loops.length} loops in ${method}, R1 takes one`);
   const loop = loops[0];
+  const used = new Set(m.findAllStatementNodes().flatMap((st) => st.getTokens().map((t) => t.getStr().toLowerCase())));
+  for (const generated of [LOOKUP, HIT]) {
+    if (used.has(generated)) throw new Refusal("names", `${generated} is already used in ${method}; the rewrite would declare it again`);
+  }
 
   const head = loop.getFirstStatement().concatTokens().replace(/\s+/g, " ");
   const at = /^LOOP AT (\w+) ASSIGNING (<\w+>)\.$/i.exec(head);
@@ -125,7 +173,7 @@ export function modelR1(path, method, ddicFolders) {
   const select = body[0].concatTokens().replace(/\s+/g, " ");
   const parts = /^SELECT SINGLE ([\w ]+?) FROM (\w+) INTO (\S+) WHERE (.+)\.$/i.exec(select);
   if (!parts) throw new Refusal("shape", `not SELECT SINGLE cols FROM dbtab INTO target WHERE ...: ${select}`);
-  const [, columnList, source, into, where] = parts;
+  const [, columnList, dbtab, into, where] = parts;
   const columns = columnList.trim().split(" ").map((c) => c.toLowerCase());
   const targets = into.startsWith("(") ? into.slice(1, -1).split(",").map((t) => t.trim()) : [into];
   if (columns.length !== targets.length) throw new Refusal("shape", "columns and targets differ in number");
@@ -140,21 +188,24 @@ export function modelR1(path, method, ddicFolders) {
     if (!c) throw new Refusal("full key", `condition "${condition.trim()}" is not column = ${row}-component`);
     return {column: c[1].toLowerCase(), component: c[2].toLowerCase()};
   });
-  const primary = primaryKey(source, ddicFolders);
-  if (!primary) throw new Refusal("full key", `no DDIC for ${source} in ${ddicFolders.join(", ")}`);
+  const primary = primaryKey(dbtab, ddicFolders);
+  if (!primary) throw new Refusal("full key", `no DDIC for ${dbtab} in ${ddicFolders.join(", ")}`);
   const asked = keys.map((k) => k.column);
   if (asked.length !== primary.length || primary.some((k) => !asked.includes(k))) {
-    throw new Refusal("full key", `WHERE names ${asked.join(", ")}; the primary key of ${source} is ${primary.join(", ")}`);
+    throw new Refusal("full key", `WHERE names ${asked.join(", ")}; the primary key of ${dbtab} is ${primary.join(", ")}`);
   }
   keys.sort((a, b) => primary.indexOf(a.column) - primary.indexOf(b.column));
 
   return {
     recipe: "R1",
     loop: {table: table.toLowerCase(), row: row.toLowerCase()},
-    source: {table: source.toLowerCase(), keys},
+    source: {table: dbtab.toLowerCase(), keys},
     fields,
-    lookup: "lt_lookup",
-    hit: "<ls_lookup>",
+    lookup: LOOKUP,
+    hit: HIT,
+    // checked here: shape, full key against the DDIC, names. Not checked: the
+    // obligations recipes/r1-lookup-enrich/recipe.md lists as open.
+    open: ["key types equal column types", "no concurrent writes to the table during the loop"],
   };
 }
 

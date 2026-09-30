@@ -2,9 +2,10 @@
 * same table contents and must leave the same rows. Each case is one of the
 * obligations the recipe declares (docs/verified-lift.md, 3.3): a hit, a miss
 * that keeps what the row held, a key asked twice, no rows at all, a key that
-* differs in one component only.
+* differs in one component only. DANGEROUS: setup empties ZOSD_LIFT_TXT, a
+* table of this recipe's own, and fills it; on a system nothing else reads it.
 CLASS ltcl_r1 DEFINITION FOR TESTING
-  RISK LEVEL HARMLESS DURATION SHORT FINAL.
+  RISK LEVEL DANGEROUS DURATION SHORT FINAL.
   PRIVATE SECTION.
     METHODS setup.
     METHODS hits_and_misses FOR TESTING.
