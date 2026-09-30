@@ -13,10 +13,10 @@ import {DEFAULT_DDIC, find, modelR1, modelR1FromSource} from "../tools/lift.mjs"
 const DEMO = "src/lift/zcl_osd_lift_r1_demo.clas.abap";
 const TEMPLATE = "recipes/r1-lookup-enrich/template.tpl";
 
-function region(source) {
+function region(source, recipe = "R1") {
   const lines = source.split("\n");
-  const begin = lines.findIndex((l) => l.trim() === '" lift:R1 begin');
-  const end = lines.findIndex((l) => l.trim() === '" lift:R1 end');
+  const begin = lines.findIndex((l) => l.trim() === `" lift:${recipe} begin`);
+  const end = lines.findIndex((l) => l.trim() === `" lift:${recipe} end`);
   const indent = /^ */.exec(lines[begin])[0].length;
   return lines.slice(begin + 1, end).map((l) => l.slice(indent)).join("\n") + "\n";
 }
@@ -76,7 +76,7 @@ ENDCLASS.`;
     ["OR", `${SELECT} kind = <ls_row>-kind OR code = <ls_row>-code.`, "", /^full key: /],
     ["a literal", `${SELECT} kind = 'STAT' AND code = <ls_row>-code.`, "", /^full key: /],
     ["INTO CORRESPONDING", "      SELECT SINGLE text FROM zosd_lift_txt INTO CORRESPONDING FIELDS OF <ls_row> WHERE kind = <ls_row>-kind AND code = <ls_row>-code.", "", /^shape: /],
-    ["a second statement", `${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.\n      CLEAR <ls_row>-kind.`, "", /^shape: /],
+    ["a second SELECT", `${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.\n      SELECT SINGLE text FROM zosd_lift_txt INTO <ls_row>-text WHERE kind = <ls_row>-kind AND code = <ls_row>-code.`, "", /^no other database statement in the loop: /],
     ["a nested loop", `      LOOP AT ct_rows TRANSPORTING NO FIELDS WHERE kind = 'X'.\n      ENDLOOP.`, "", /^shape: /],
     ["lt_lookup taken", `${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`, "    DATA lt_lookup TYPE i.\n", /^names: lt_lookup/],
     ["lt_lookup as a parameter", `${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`, "", /^names: lt_lookup/, "IMPORTING lt_lookup TYPE i OPTIONAL "],
@@ -90,6 +90,30 @@ ENDCLASS.`;
         ? () => modelR1(DEMO, "after")
         : () => modelR1FromSource("zcl_fx.clas.abap", fixture(body, declarations, parameters), method);
       expect(run).to.throw(reason);
+    });
+  }
+
+  it("R1b keeps the SELECT's body position", () => {
+    const model = modelR1(DEMO, "before_mixed");
+    expect(model.recipe).to.equal("R1b");
+    expect(model.position).to.equal(1);
+    expect(model.before.map((s) => s.text)).to.deep.equal(["ADD 1 TO <ls_row>-visits."]);
+    expect(model.after.map((s) => s.text)).to.deep.equal(["MOVE sy-subrc TO <ls_row>-status."]);
+    expect(model.open).to.include("prefetch may read keys the loop skips");
+  });
+
+  for (const [what, body, reason] of [
+    ["key written before", `      CLEAR <ls_row>-kind.\n${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`, /^key not written before the read:/],
+    ["key passed CHANGING", `      change_key( CHANGING cv_key = <ls_row>-kind ).\n${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`, /^key not written before the read:/],
+    ["key aliased through ASSIGN", `      ASSIGN <ls_row>-kind TO FIELD-SYMBOL(<alias>).\n${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`, /^key not written before the read:/],
+    ["loop table modified", `      MODIFY ct_rows FROM <ls_row> INDEX 1.\n${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`, /^key not written before the read:/],
+    ["sy-dbcnt read after", `${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.\n      MOVE sy-dbcnt TO <ls_row>-text.`, /^sy-dbcnt after the read:/],
+    ["another database statement", `      DELETE FROM zosd_lift_txt WHERE kind = 'NONE'.\n${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`, /^no other database statement in the loop:/],
+  ]) {
+    it(`R1b refuses ${what}`, () => {
+      const source = fixture(body).replace("CLASS zcl_fx IMPLEMENTATION.",
+        "CLASS zcl_fx IMPLEMENTATION.");
+      expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(reason);
     });
   }
 
@@ -399,6 +423,19 @@ ENDCLASS.`);
     });
   }
 
+  // merge critic on #290: the loop table written through a table expression,
+  // and system fields read before the lookup, were accepted
+  for (const [what, extra, reason] of [
+    ["the loop table written in the body", "      ct_rows[ 1 ]-kind = 'DIFF'.", /^key not written before the read: .*touches the loop table ct_rows/],
+    ["sy-dbcnt read before the lookup", "      <ls_row>-text = sy-dbcnt.", /^system fields before the read: /],
+    ["sy-subrc read before the lookup", "      IF sy-subrc = 0. ENDIF.", /^system fields before the read: /],
+  ]) {
+    it(`R1b refuses ${what}`, () => {
+      const source = fixture(`${extra}\n${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`);
+      expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(reason);
+    });
+  }
+
   it("the generated region of AFTER is exactly what the template renders", async () => {
     const {text, trace} = await render(modelR1(DEMO, "before"));
     expect(region(readFileSync(DEMO, "utf8"))).to.equal(text);
@@ -409,6 +446,11 @@ ENDCLASS.`);
     const entry = trace.find((t) => t.line === copy);
     expect(template[entry.template_line - 1]).to.equal("    {{loop.row}}-{{component}} = {{hit}}-{{column}}.");
     expect(entry.path).to.equal("/loop/row");
+  });
+
+  it("the generated R1b region is exactly what the template renders", async () => {
+    const {text} = await render(modelR1(DEMO, "before_mixed"));
+    expect(region(readFileSync(DEMO, "utf8"), "R1b")).to.equal(text);
   });
 
   // AFTER is one SELECT in the ABAP. On a system the kernel sends FOR ALL
@@ -424,7 +466,8 @@ ENDCLASS.`);
     }
     const rows = () => {
       const table = abap.types.TableFactory.construct(new abap.types.Structure({
-        kind: new abap.types.Character(4), code: new abap.types.Character(10), text: new abap.types.Character(40)}),
+        kind: new abap.types.Character(4), code: new abap.types.Character(10), text: new abap.types.Character(40),
+        visits: new abap.types.Integer(), status: new abap.types.Integer()}),
       {withHeader: false, keyType: "DEFAULT", primaryKey: {name: "primary_key", type: "STANDARD", isUnique: false, keyFields: []}, secondary: []});
       for (let i = 0; i < 50; i++) {
         const row = table.getRowType().clone();
@@ -454,9 +497,14 @@ ENDCLASS.`);
     };
     const before = await counted("before");
     const after = await counted("after");
+    const beforeMixed = await counted("before_mixed");
+    const afterMixed = await counted("after_mixed");
     expect(after.texts).to.deep.equal(before.texts);
     expect(before.calls).to.equal(50);
     expect(after.calls, "50 driving rows are one block (ANOMALY-2026-09-30-fae-one-select-per-row, fixed in the pin)").to.equal(1);
+    expect(afterMixed.texts).to.deep.equal(beforeMixed.texts);
+    expect(beforeMixed.calls).to.equal(50);
+    expect(afterMixed.calls).to.equal(1);
     const empty = abap.types.TableFactory.construct(rows().getRowType(), {withHeader: false, keyType: "DEFAULT", primaryKey: {name: "primary_key", type: "STANDARD", isUnique: false, keyFields: []}, secondary: []});
     const original = db.select.bind(db);
     let calls = 0;

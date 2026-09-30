@@ -16,7 +16,11 @@ The shape, in the semantic-patch form of `docs/verified-lift.md` 4.4 (on the res
 
 | obligation | why | closed by |
 |---|---|---|
-| the loop body is that one statement | anything else may depend on the order of reads | `tools/lift.mjs model` (shape) |
+| R1 has one body statement; R1b has one SELECT among other statements | the lookup must be unique and its position known | `tools/lift.mjs model` (shape) |
+| R1b places the read at the SELECT's statement index | statements before and after retain their order | `position`, `before`, and `after` from abaplint's statement tree; generated-region test |
+| a key component is not written before the SELECT | prefetch uses the original key | abaplint write positions; aliases, method calls carrying the row, and MODIFY of the loop table refuse conservatively |
+| no later read of `sy-dbcnt` | READ TABLE does not set it | abaplint read positions; `sy-subrc` remains set by READ TABLE |
+| no other database statement in the body | its order relative to the prefetch can matter | `tools/lift.mjs model` (database statement classes) |
 | the generated names are free | `lt_lookup` / `<ls_lookup>` declared twice would not compile, or would alias the row | `tools/lift.mjs model` (names) |
 | `K1..Kn` is the whole primary key of `D` without the client | then at most one row answers, so the hashed table can be unique and "which row" is not a question | `tools/lift.mjs model` against the DDIC as abaplint resolves it (key includes expanded, data element to domain for CLNT): transparent, the client left out only as the first field and key of a client-dependent table; every key include must be a table in the DDIC given, recursively, since abaplint drops an unresolved key include from the key without a word and skips a missing `CI_`/`SI_` one; a view or suffixed include is refused by name |
 | each `R-ki` has the type of `Ki` | `FOR ALL ENTRIES` needs compatible operands ([SAP documentation](https://help.sap.com/doc/abapdocu_752_index_htm/7.52/en-US/abenwhere_logexp_itab.htm)) and `READ TABLE` compares after conversion | `tools/lift.mjs model`: the loop table's line type from abaplint's syntax (a generic table or one with a header line refuses; the field symbol must be a structure typed like the line, and where that does not resolve it stays in `open`) against the column's from the DDIC, same kind, length and decimals, key by key; a key that does not resolve leaves it in `open` without hiding a mismatch in another, and so does an integer key unless the column is INT4 and the row's component a data element of type INT4, because abaplint gives INT1, INT2 and INT4 one type with no width |
@@ -32,11 +36,13 @@ implicitly; this runtime does not, see `docs/luw-buffer.md` and ANORMALIES on
 MANDT, so a fixture keeps one client). Not declared: `sy-subrc` and `sy-dbcnt`
 after the loop -- a caller that reads them needs its own obligation. The model
 lists what it did not check under `open`.
+R1b also lists `prefetch may read keys the loop skips` in `open`: control flow
+before the SELECT remains in place, but the prefetch can do extra work.
 
 **Cost:** `n` round trips become a few blocks of `FOR ALL ENTRIES`. Measured on
 A4H (2026-09-30, 42 rows, 20 repetitions): 17.2 ms before, 1.6 ms after, with the
-same rows. Not measurable in OSG yet: the runtime sends `FOR ALL ENTRIES` one row
-at a time (`ANOMALY-2026-09-30-fae-one-select-per-row`).
+same rows. In OSG since the transpiler pin of #280 (`FOR ALL ENTRIES` in blocks of
+50 driving rows): 50 SELECT SINGLE round trips become 1 (`test/lift-r1.mjs`).
 
 **Not handled here:** `INTO CORRESPONDING`, a WHERE with anything but key
 equalities, a loop over `INTO` a work area, a SELECT reached through a method
@@ -70,12 +76,14 @@ in a loop through `model` and counts the refusals by obligation and sub-kind
 
 | corpus | candidates | accepted | refused by |
 |---|---|---|---|
-| abapGit | 13 | 0 | `shape/body` 7, `shape/loop-where` 2, `shape/loop-into` 2, `shape/loop-table` 1, `shape/loops` 1 |
+| abapGit, before R1b | 13 | 0 | `shape/body` 7, `shape/loop-where` 2, `shape/loop-into` 2, `shape/loop-table` 1, `shape/loops` 1 |
+| abapGit, after R1b | 13 | 0 | `shape/select` 3, `no other database statement in the loop` 3, `shape/loop-where` 2, `shape/loop-into` 2, `shape/loop-table` 1, `shape/loops` 1, `full key` 1 |
 | spacelab | 2 | 0 | `shape/loop-other` 2 |
 | this tree, `src/` | 1 | 1 (the demo) | |
 
-No candidate got as far as the key: real loops do more than the one
-SELECT. The widening that pays first is `shape/body` -- other statements
-beside the SELECT, which needs a data-flow obligation (they do not read what
-the SELECT writes before it is written, and do not write what it reads) --
-then `LOOP ... INTO` and `LOOP ... WHERE`, which are mechanical.
+The `object_view` deserialize candidate now reaches the DDIC check, but its
+`DD03L` SELECT constrains `TABNAME` and `FIELDNAME` only. The DDIC is absent
+from the local corpus; published DD03L layouts show additional primary-key
+fields `AS4LOCAL`, `AS4VERS`, and `POSITION`, so supplying its DDIC would
+still refuse `full key`. See [DD03L layout](https://www.sapdatasheet.org/abap/tabl/dd03l.html).
+Accepting this example would require a separate recipe for nonunique lookups.
