@@ -6215,6 +6215,8 @@ function compareValues(op, l, r, ctx) {
   if (l.type.k === "table" && r.type.k === "table") {
     if (op !== "=" && op !== "<>") throw new Unsupported(`comparison of tables with ${op}`);
     if (!sameType(l.type.row, r.type.row)) throw new Unsupported("comparison of tables of different row types");
+    // a hashed table's order after DELETE and INSERT is not measured
+    if (l.type.hashed || r.type.hashed) throw new Unsupported("comparison of hashed tables");
     const rowType = l.type.row;
     const a = {e: "var", name: `TEQ_${ctx.temps++}`, type: rowType};
     const b = {e: "var", name: `TEQ_${ctx.temps++}`, type: rowType};
@@ -6237,7 +6239,7 @@ function compareValues(op, l, r, ctx) {
     return {c: "tableeq", op, l, r, a, b, rowEq: rowEq ?? {c: "true"}};
   }
   if (numeric(l.type) || numeric(r.type)) {
-    const calc = l.type.k === "f" || r.type.k === "f" ? F : I;
+    const calc = l.type.k === "f" || r.type.k === "f" ? F : l.type.k === "int8" || r.type.k === "int8" ? INT8 : I;
     return {c: "cmp", op, l: convert(l, calc), r: convert(r, calc), type: calc};
   }
   if (charlike(l.type) && charlike(r.type)) return {c: "cmp", op, l: convert(l, S), r: convert(r, S), type: S};

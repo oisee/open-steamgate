@@ -180,7 +180,7 @@ const EXPECT = {
   // table CORRESPONDING and table = / <> (A4H 2026-09-30): c into string
   // loses its blanks, i into n4 is zero-padded, a column the source lacks
   // stays initial; tables compare row by row in order, c without blanks
-  ZCL_GOGEN_T_CORR: "[ab/0007/][abcdef/1234/] empty:0 copy:eq changed:ne shorter:ne reversed:ne blanks:eq",
+  ZCL_GOGEN_T_CORR: "[ab/0007/][abcdef/1234/] empty:0 copy:eq changed:ne shorter:ne reversed:ne blanks:eq wide:ne",
   ZCL_GOGEN_T_B64: {Go: "b1:/w== b2://4= b3:+/+/ b0:[]", JS: "ERROR NOT_COMPILED in abap.EncodeXBase64: a host function of the Go runtime"},
   // SHIFT s RIGHT DELETING TRAILING mask on a string: the length stays, the
   // masked tail goes and blanks come in on the left; a blank stops it

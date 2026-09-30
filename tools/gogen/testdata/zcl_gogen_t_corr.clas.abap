@@ -13,6 +13,10 @@ CLASS zcl_gogen_t_corr DEFINITION PUBLIC FINAL CREATE PUBLIC.
     TYPES tt_a TYPE STANDARD TABLE OF ty_a WITH DEFAULT KEY.
     TYPES tt_b TYPE STANDARD TABLE OF ty_b WITH DEFAULT KEY.
     TYPES tt_c TYPE STANDARD TABLE OF char4 WITH DEFAULT KEY.
+    TYPES: BEGIN OF ty_w,
+             id TYPE int8,
+           END OF ty_w.
+    TYPES tt_w TYPE STANDARD TABLE OF ty_w WITH DEFAULT KEY.
     CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
 ENDCLASS.
 
@@ -28,6 +32,9 @@ CLASS zcl_gogen_t_corr IMPLEMENTATION.
     DATA ls_b TYPE ty_b.
     DATA lt_c1 TYPE tt_c.
     DATA lt_c2 TYPE tt_c.
+    DATA lt_w1 TYPE tt_w.
+    DATA lt_w2 TYPE tt_w.
+    DATA ls_w TYPE ty_w.
     ls_a-id = 7.
     ls_a-name = 'ab'.
     ls_a-extra = `x`.
@@ -78,6 +85,16 @@ CLASS zcl_gogen_t_corr IMPLEMENTATION.
       rv = rv && ` blanks:eq`.
     ELSE.
       rv = rv && ` blanks:ne`.
+    ENDIF.
+* int8 rows 2**32 and 0 differ; compared as i they would wrap to equal
+    ls_w-id = 4294967296.
+    APPEND ls_w TO lt_w1.
+    CLEAR ls_w.
+    APPEND ls_w TO lt_w2.
+    IF lt_w1 = lt_w2.
+      rv = rv && ` wide:eq`.
+    ELSE.
+      rv = rv && ` wide:ne`.
     ENDIF.
   ENDMETHOD.
 ENDCLASS.
