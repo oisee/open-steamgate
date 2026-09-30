@@ -235,6 +235,15 @@ describe("tools/osd-status: the system as one JSON object", () => {
     expect(found).to.deep.include({path: "/sap/bc/apc/sap/zchan", kind: "APC", handler: "ZCL_CHAN", text: "", pack: ""});
   });
 
+  it("lists one OData endpoint when two registration files declare the same external service", () => {
+    write("gen/second.iwsv.xml",
+      "<abapGit><_-IWBEP_-I_MGW_SRH><TECHNICAL_NAME>ZDEMO_SRV</TECHNICAL_NAME><VERSION>0001</VERSION>" +
+      "<EXTERNAL_NAME>ZDEMO_SRV</EXTERNAL_NAME><CLASS_NAME>ZCL_NEW_DPC_EXT</CLASS_NAME></_-IWBEP_-I_MGW_SRH></abapGit>");
+    const found = servicesOf(root, {}).filter((row) => row.kind === "ODATA" && row.path.endsWith("/ZDEMO_SRV"));
+    expect(found).to.have.length(1);
+    expect(found[0].handler).to.equal("ZCL_NEW_DPC_EXT");
+  });
+
   // The UI5 apps of the tree come out of their own manifests, so the menu
   // and the status app read one list: `sap.app.id` is the component that
   // answers, `title` is what it is called, and the path is the launchpad
