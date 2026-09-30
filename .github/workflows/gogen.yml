@@ -7,9 +7,9 @@ name: gogen
 # A job of its own, path-filtered, so a change to it never slows or reds the
 # main tests workflow, and a change elsewhere does not start a Go toolchain.
 #
-# `go test ./abap/...` and not `go build ./...`: cmd/bench compiles only
-# after tools/gogen/run.mjs has generated its `Call`, so a plain build of the
-# module fails by design. The pairs in test/fixtures/ir-pairs are shared with
+# `go test ./abap/...` and not `go build ./...`: cmd/bench, cmd/osgo and
+# cmd/osabap compile only after their runner has generated their half, so a
+# plain build of the module fails by design. The pairs in test/fixtures/ir-pairs are shared with
 # the Node IR, so a change there runs this too: a pair main adds that the Go
 # runtime does not do yet goes into the strict known-gap list
 # (knowngaps_test.go, empty today), which turns red if one starts to pass.
@@ -25,6 +25,7 @@ on:
       - 'tools/gogen/**'
       - 'test/fixtures/ir-pairs/**'
       - 'src/demo_data/**'
+      - 'libs.lock.json'
       - '.github/workflows/gogen.yml'
   push:
     branches: [main]
@@ -32,6 +33,7 @@ on:
       - 'tools/gogen/**'
       - 'test/fixtures/ir-pairs/**'
       - 'src/demo_data/**'
+      - 'libs.lock.json'
       - '.github/workflows/gogen.yml'
   workflow_dispatch:
     inputs:
@@ -77,10 +79,15 @@ jobs:
       - name: Go vet and tests
         working-directory: tools/gogen/go
         run: |
-          go vet ./abap/
-          go test ./abap/...
+          go vet ./abap/ ./termgui/
+          go test ./abap/... ./termgui/...
       - name: Semantics, Go and IR-as-JS against the measured answers
         run: node tools/gogen/semantics.mjs
+      # osabap: a report built into a native command (open-abap-gui's
+      # converter, from the pinned clone osd-libs made), run with flags,
+      # ranges, no arguments and the native frontend
+      - name: osabap, a report as a native command
+        run: node --test tools/gogen/osabap.test.mjs
 
   osgo-parity:
     if: github.event_name == 'workflow_dispatch' && inputs.parity

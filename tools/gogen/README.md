@@ -1,11 +1,11 @@
 # gogen: a Go backend for transpiled ABAP (spike)
 
-> **On main, in parts (2026-09-29/30).** This folder lands in three PRs:
+> **On main (2026-09-29/30), landed in three parts:**
 > the core (the generator, the IR, the Go runtime `go/abap`, the semantics
 > harness, the benchmark runner), then the OSGo host (`osgo.mjs`,
 > `osg-build.mjs`, `gateway.mjs`, `go/cmd/osgo`, `go/apc`, parity), then
-> osabap (the CLI/TUI binary), so the sections below that name osabap
-> describe files that are not here yet. CI: `.github/workflows/gogen.yml`
+> osabap (the CLI/TUI binary, `osabap.mjs`, `go/cmd/osabap`,
+> `go/termgui`, `apps/`, `docs/osabap-native.md`). CI: `.github/workflows/gogen.yml`
 > and the `osgo-host` job of `tests.yml`, which gates every change on one
 > gateway request through Go; `osgo-parity` in `gogen.yml` runs OSG's
 > suites against OSGo on a manual dispatch only. The OSGo tools need
