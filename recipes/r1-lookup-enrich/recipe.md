@@ -41,8 +41,8 @@ before the SELECT remains in place, but the prefetch can do extra work.
 
 **Cost:** `n` round trips become a few blocks of `FOR ALL ENTRIES`. Measured on
 A4H (2026-09-30, 42 rows, 20 repetitions): 17.2 ms before, 1.6 ms after, with the
-same rows. Not measurable in OSG yet: the runtime sends `FOR ALL ENTRIES` one row
-at a time (`ANOMALY-2026-09-30-fae-one-select-per-row`).
+same rows. In OSG since the transpiler pin of #280 (`FOR ALL ENTRIES` in blocks of
+50 driving rows): 50 SELECT SINGLE round trips become 1 (`test/lift-r1.mjs`).
 
 **Not handled here:** `INTO CORRESPONDING`, a WHERE with anything but key
 equalities, a loop over `INTO` a work area, a SELECT reached through a method
