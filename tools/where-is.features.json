@@ -1,0 +1,58 @@
+[
+  {
+    "name": "Build and serve the ABAP runtime",
+    "commands": ["transpile", "dev", "start", "unit"],
+    "main": ["tools/osd-build.mjs", "tools/osd-serve.mjs", "src/gateway", "src/http"],
+    "tests": ["test/osd-build.mjs", "test/mocha.mjs"],
+    "docs": ["docs/prior-art.md", "docs/warm-compile.md"]
+  },
+  {
+    "name": "SEGW and generated services",
+    "commands": ["segw", "segw:gen", "segw:tree"],
+    "main": ["tools/segw-registry.mjs", "tools/segw-gen.mjs", "tools/segw-tree.mjs", "src/segw", "src/sadl"],
+    "tests": ["test/segw.mjs", "test/segw-gen.mjs", "test/segw-tree.mjs"],
+    "docs": ["docs/segw-mapping.md", "docs/segw-tree.md", "docs/segw-editor.md"]
+  },
+  {
+    "name": "CDS, SQL and AMDP",
+    "commands": ["cds", "conformance:sqlscript"],
+    "main": ["tools/cds2ddic.mjs", "src/cds", "src/amdp", "tools/gogen/go/abap"],
+    "tests": ["test/amdp.mjs", "test/sqlscript-parser.mjs", "test/cds-check.mjs"],
+    "docs": ["docs/osql-where.md", "docs/sqlscript-surface.md", "docs/amdp-portable-runtime.md"]
+  },
+  {
+    "name": "Data, transactions and jobs",
+    "commands": ["osd:sql", "dbs"],
+    "main": ["tools/osd-data.mjs", "tools/osd-db.mjs", "src/luw", "src/jobs", "src/bal"],
+    "tests": ["test/dialog-step.mjs", "test/jobs-e2e.mjs", "test/bal-persist.mjs"],
+    "docs": ["docs/luw-buffer.md", "docs/job-identity.md", "docs/bal-store.md"]
+  },
+  {
+    "name": "VS Code and browser preview",
+    "commands": ["vsix", "web:vscode", "web:preview"],
+    "main": ["src/webgui", "src/status"],
+    "tests": ["test/vscode-extension.mjs", "test/preview-closure.mjs"],
+    "docs": ["docs/vscode-extension.md", "docs/vscode-web.md", "docs/preview-deployments.md"]
+  },
+  {
+    "name": "Packs and deployment",
+    "commands": ["packs:fetch", "segw:zip"],
+    "main": ["tools/osd-fetch.mjs", "tools/osd-abapgit-zip.mjs", "packs/*/osd-pack.json"],
+    "tests": ["test/osd-fetch.mjs", "test/osd-packs.mjs", "test/osd-abapgit-zip.mjs"],
+    "docs": ["docs/a4h-deploy.md", "docs/release.md"]
+  },
+  {
+    "name": "Go generator and runtime",
+    "commands": [],
+    "main": ["tools/gogen/go/abap", "tools/gogen/go/amc", "tools/gogen/go/apc"],
+    "tests": ["test/conformance.mjs"],
+    "docs": ["docs/conformance.md", "docs/osabap-native.md"]
+  },
+  {
+    "name": "Tests and publication checks",
+    "commands": ["integration", "leak", "naming"],
+    "main": ["tools/osd-suites.mjs", "tools/osd-leak-scan.mjs", "tools/osd-naming-scan.mjs"],
+    "tests": ["test/osd-suites.mjs", "test/leak-scan.mjs", "test/naming-scan.mjs"],
+    "docs": ["docs/ci-tests.md"]
+  }
+]

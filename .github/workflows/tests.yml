@@ -67,6 +67,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Check the feature map
+        run: |
+          npm run where
+          git diff --exit-code -- docs/where-is.md
       - name: Load the tracked source pins
         run: node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
 
