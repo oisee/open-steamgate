@@ -13,6 +13,8 @@ CLASS ltcl_reader IMPLEMENTATION.
       '<doc xmlns="urn:d"><row id="7">A&amp;B</row></doc>' ) ).
     node = reader->read_next_node( ).
     open ?= node.
+    cl_abap_unit_assert=>assert_equals( act = cl_abap_classdescr=>get_class_name( node )
+                                        exp = '\CLASS=CL_SXML_OPEN_ELEMENT' ).
     cl_abap_unit_assert=>assert_equals( act = open->qname-namespace
                                         exp = 'urn:d' ).
     reader->next_node( ).
@@ -23,7 +25,12 @@ CLASS ltcl_reader IMPLEMENTATION.
                                         exp = '7' ).
     node = reader->read_next_node( ).
     value ?= node.
+    cl_abap_unit_assert=>assert_equals( act = cl_abap_classdescr=>get_class_name( node )
+                                        exp = '\CLASS=CL_SXML_VALUE' ).
     cl_abap_unit_assert=>assert_equals( act = value->get_value( )
                                         exp = 'A&B' ).
+    node = reader->read_next_node( ).
+    cl_abap_unit_assert=>assert_equals( act = cl_abap_classdescr=>get_class_name( node )
+                                        exp = '\CLASS=CL_SXML_CLOSE_ELEMENT' ).
   ENDMETHOD.
 ENDCLASS.
