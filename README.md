@@ -131,7 +131,8 @@ yet: a report that selects gets an explicit error. The samples are in
 
 **The whole system in Go.** `node tools/gogen/osgo.mjs` builds `tools/gogen/.out/osgo`, the
 complete OSD (ICF, Gateway, the apps, SQLite) as one Go binary. The same ABAP
-Unit tests run on Node and on Go, method by method, and must agree.
+Unit tests run on Node and on Go and are compared method by method; closing
+the gap is the work before 0.4.
 
 ## Architecture
 
