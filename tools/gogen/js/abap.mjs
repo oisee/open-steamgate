@@ -710,6 +710,7 @@ export function handled(s, e) {
 export function classBased(e) {
   return e instanceof Raised || (e instanceof AbapError && e.cls.startsWith("CX_"));
 }
+export function catchable(e) { return classBased(e); }
 // get_text( ) of a value a CATCH INTO received that also takes runtime
 // exceptions: a raised object's own get_text, else the class and the operation
 export function excText(s, x) {

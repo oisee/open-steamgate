@@ -274,7 +274,7 @@ function catchCondJs(c) {
   const parts = [];
   if (c.covers.length) parts.push(`(xE instanceof abap.AbapError && ${JSON.stringify(c.covers)}.includes(xE.cls))`);
   if (c.own.length) parts.push(`(xE instanceof abap.Raised && (${c.own.map((x) => `abap.isA(xE.cls, ${JSON.stringify(x)})`).join(" || ")}))`);
-  return parts.length ? parts.join(" || ") : "false";
+  return parts.length ? `(abap.catchable(xE) && (${parts.join(" || ")}))` : "false";
 }
 
 function catchIntoJs(c, t) {

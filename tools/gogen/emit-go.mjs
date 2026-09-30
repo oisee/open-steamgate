@@ -1449,11 +1449,12 @@ function stmtLines(st, ctx, d) {
       // them in the session while its body runs
       const cleanup = st.cleanup ? [`${t}\t\t\t\tif abap.ClassBased(xR) && s.Handled(xR) {`, ...st.cleanup.flatMap((x) => stmt(x, ctx, d + 5)), `${t}\t\t\t\t}`] : [];
       ctx.tries.pop();
-      const guard = st.catches.length ? `${t}\t\t\t\txE, xOK := abap.AsError(xR)\n${t}\t\t\t\txRX, xROK := abap.AsRaised(xR)\n${t}\t\t\t\t_, _, _, _ = xE, xOK, xRX, xROK\n${t}\t\t\t\treturn ${st.catches.map(catchCond).join(" || ")}` : null;
+      const guard = st.catches.length ? `${t}\t\t\t\tif !abap.Catchable(xR) { return false }\n${t}\t\t\t\txE, xOK := abap.AsError(xR)\n${t}\t\t\t\txRX, xROK := abap.AsRaised(xR)\n${t}\t\t\t\t_, _, _, _ = xE, xOK, xRX, xROK\n${t}\t\t\t\treturn ${st.catches.map(catchCond).join(" || ")}` : null;
       const push = guard ? [`${t}\txH := len(s.Handlers)`, `${t}\ts.Handlers = append(s.Handlers, func(xR any) bool {`, guard, `${t}\t})`] : [];
       const pop = guard ? [`${t}\t\ts.Handlers = s.Handlers[:xH]`] : [];
       const out = [`${t}ctl${n} := func() (ctl int) {`, ...push, `${t}\tdefer func() {`, ...pop, `${t}\t\tif xR := recover(); xR != nil {`, `${t}\t\t\txE, xOK := abap.AsError(xR)`,
         `${t}\t\t\txRX, xROK := abap.AsRaised(xR)`, `${t}\t\t\t_, _, _, _ = xE, xOK, xRX, xROK`,
+        `${t}\t\t\tif !abap.Catchable(xR) { abap.Repanic(xR, debug.Stack()) }`,
         `${t}\t\t\tswitch {`, ...cases, `${t}\t\t\tdefault:`, ...cleanup, `${t}\t\t\t\tabap.Repanic(xR, debug.Stack())`, `${t}\t\t\t}`, `${t}\t\t}`, `${t}\t}()`,
         ...body, `${t}\treturn 0`, `${t}}()`, `${t}_ = ctl${n}`];
       for (const code of [1, 2, 3]) if (frame.used.has(code)) out.push(`${t}if ctl${n} == ${code} {`, `${t}\t${leave(ctx, code)}`, `${t}}`);
