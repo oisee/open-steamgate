@@ -71,6 +71,7 @@ export const composite = (t) => t?.k === "table" || t?.k === "struct";
 export const byRef = (p) => p.dir === "importing" && composite(p.type) && !p.byValue;
 const numeric = (t) => t.k === "i" || t.k === "f" || t.k === "int8";
 const charlike = (t) => t.k === "c" || t.k === "string";
+const cdsViewsByRegistry = new WeakMap();
 
 /* ------------------------------------------------------------------- program */
 
@@ -111,6 +112,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   if (!registry) {
     for (const folder of folders) walk(folder);
     reg.parse();
+    cdsViewsByRegistry.set(reg, cdsSqlViews(ddls));
   }
   REG = reg;
   const ours = (fn) => wanted.includes(objName(fn));
@@ -185,7 +187,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   }
   program.rtti = rttiTable(reg, program);
   program.exceptionSupers = exceptionSupers(reg, program);
-  program.cdsViews = cdsSqlViews(ddls);
+  program.cdsViews = cdsViewsByRegistry.get(reg) ?? {};
   program.tables = tableRegistry(reg, program);
   return program;
 }

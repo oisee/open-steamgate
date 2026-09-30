@@ -6,8 +6,20 @@ import {tmpdir} from "node:os";
 import {fileURLToPath} from "node:url";
 import {dirname, join} from "node:path";
 import {reconcile} from "./unit-results.mjs";
+import {compileProgram, columnRegistry} from "./frontend.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+test("a reused frontend registry keeps CDS to SQL view names", () => {
+  const args = {folders: [join(here, "testdata")], objects: []};
+  const first = compileProgram(args);
+  const reused = compileProgram({...args, registry: first.reg});
+  const expected = {ZGOGEN_T_DBWC: "ZGOGEN_T_DBWV"};
+  assert.deepEqual(first.cdsViews, expected);
+  assert.deepEqual(reused.cdsViews, expected);
+  assert.deepEqual(columnRegistry(reused).cdsViews, expected);
+  assert.equal(reused.tables.find((table) => table.name === "ZGOGEN_T_DBWC")?.sqlView, "ZGOGEN_T_DBWV");
+});
+
 test("a missing method fails the run", () => {
   const expected = [{class: "OWNER", testclass: "LOCAL", method: "ONE", status: "READY", message: ""},
     {class: "OWNER", testclass: "LOCAL", method: "TWO", status: "READY", message: ""}];
