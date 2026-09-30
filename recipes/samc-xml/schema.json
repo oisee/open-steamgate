@@ -2,6 +2,11 @@
  "object": {
   "@id": "scalar",
   "applicationId": "scalar",
+  "has_authorities": "scalar",
+  "has_channels": "scalar",
+  "has_description": "scalar",
+  "has_lang": "scalar",
+  "has_text": "scalar",
   "authorities": {
    "array": {
     "object": {
@@ -29,6 +34,7 @@
    }
   },
   "description": "scalar",
+  "kind": "scalar",
   "lang": "scalar",
   "version": "scalar"
  }

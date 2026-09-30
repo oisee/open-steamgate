@@ -565,7 +565,7 @@ export async function buildRecipe(name, {dir = "recipes", check = false, staticO
           let rendered;
           try {
             rendered = await renderWithEngine(loaded.sources.get(loaded.manifest.template), model, partialSources, loaded.manifest.template,
-              loaded.manifest.profile === "xml" ? "html" : "none");
+              loaded.manifest.profile === "xml" ? "xml" : "none");
           } catch (error) {
             const match = /^(.+?):(\d+): (.*)$/s.exec(error.message);
             errors.push(match

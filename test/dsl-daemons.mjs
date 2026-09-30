@@ -46,6 +46,102 @@ describe("DSL daemon channel files", function () {
     expect(output.authorities.map((authority) => authority.nr)).to.deep.equal(Array.from({length: ids.length}, (_, i) => i + 1));
   });
 
+  it("renders an authority whose PROGRAM_ID is absent in the input", async () => {
+    const model = JSON.parse(readFileSync(samc, "utf8"));
+    delete model.authorities[0].program_id;
+    const {text} = await renderDaemon(temp("computed.json", `${JSON.stringify(model)}\n`));
+    expect(text).to.equal(readFileSync(samcTarget, "utf8"));
+  });
+
+  it("omits an empty AUTHORITIES table from the SAMC shape", async () => {
+    const model = JSON.parse(readFileSync(samc, "utf8"));
+    model.authorities = [];
+    model.channels.pop();
+    const {text} = await renderDaemon(temp("noauth.json", `${JSON.stringify(model)}\n`));
+    const expected = readFileSync(samcTarget, "utf8")
+      .replace(/^     <AMC_CHANNEL>.*<CHANNEL_ID>\/ps<\/CHANNEL_ID>.*\n/m, "")
+      .replace(/    <AUTHORITIES>\n[\s\S]*?    <\/AUTHORITIES>\n/, "");
+    expect(text).to.equal(expected);
+  });
+
+  it("omits empty CHANNELS and TEXT, and an initial DESCRIPTION", async () => {
+    const model = JSON.parse(readFileSync(samc, "utf8"));
+    model.channels = [];
+    model.authorities = [];
+    model.description = "";
+    model.lang = "";
+    const {text} = await renderDaemon(temp("empty.json", `${JSON.stringify(model)}\n`));
+    const expected = readFileSync(samcTarget, "utf8")
+      .replace(/^    <TEXT>.*\n/m, "")
+      .replace(/    <CHANNELS>\n[\s\S]*?    <\/CHANNELS>\n/, "")
+      .replace(/    <AUTHORITIES>\n[\s\S]*?    <\/AUTHORITIES>\n/, "");
+    expect(text).to.equal(expected);
+    model.lang = "E";
+    const withLang = await renderDaemon(temp("empty-description.json", `${JSON.stringify(model)}\n`));
+    expect(withLang.text).to.include("<LANG>E</LANG></TEXT>");
+    expect(withLang.text).not.to.include("<DESCRIPTION>");
+  });
+
+  it("omits initial STATEFUL and escapes an apostrophe in SAPC", async () => {
+    const model = JSON.parse(readFileSync(sapc, "utf8"));
+    model.stateful = false;
+    model.description = "Alice's channel";
+    const {text} = await renderDaemon(temp("stateless.json", `${JSON.stringify(model)}\n`));
+    const expected = readFileSync(sapcTarget, "utf8")
+      .replace(/^     <STATEFUL>.*\n/m, "")
+      .replace("OSD demo push channel", "Alice&apos;s channel");
+    expect(text).to.equal(expected);
+  });
+
+  it("omits an empty SAPC TEXT block", async () => {
+    const model = JSON.parse(readFileSync(sapc, "utf8"));
+    model.lang = "";
+    model.description = "";
+    const {text} = await renderDaemon(temp("no-sapc-text.json", `${JSON.stringify(model)}\n`));
+    const expected = readFileSync(sapcTarget, "utf8")
+      .replace(/    <TEXT>\n[\s\S]*?    <\/TEXT>\n/, "");
+    expect(text).to.equal(expected);
+  });
+
+  it("uses iXML entities for all five XML specials in both recipes", async () => {
+    for (const [file, tag] of [[samc, "SAMC"], [sapc, "SAPC"]]) {
+      const model = JSON.parse(readFileSync(file, "utf8"));
+      model.description = `&<>"'`;
+      const {text} = await renderDaemon(temp(`${tag}.json`, `${JSON.stringify(model)}\n`));
+      expect(text).to.include("<DESCRIPTION>&amp;&lt;&gt;&quot;&apos;</DESCRIPTION>");
+    }
+  });
+
+  it("requires an explicit recipe kind and SAMC channels", async () => {
+    const model = JSON.parse(readFileSync(samc, "utf8"));
+    delete model.kind;
+    let error;
+    try { await renderDaemon(temp("no-kind.json", `${JSON.stringify(model)}\n`)); }
+    catch (caught) { error = caught; }
+    expect(error?.message).to.match(/kind/);
+    model.kind = "samc";
+    delete model.channels;
+    error = undefined;
+    try { await renderDaemon(temp("no-channels.json", `${JSON.stringify(model)}\n`)); }
+    catch (caught) { error = caught; }
+    expect(error?.message).to.match(/channels/);
+  });
+
+  it("rejects out-of-order authority numbers, row identity mismatches and namespaced classes", () => {
+    const model = JSON.parse(readFileSync(samc, "utf8"));
+    model.authorities[0].nr = 2;
+    expect(() => buildDaemonModel(model)).to.throw(/nr.*1/);
+    model.authorities[0].nr = 1;
+    model.channels[0].applicationId = "OTHER";
+    expect(() => buildDaemonModel(model)).to.throw(/applicationId/);
+    delete model.channels[0].applicationId;
+    model.authorities[0].version = "B";
+    expect(() => buildDaemonModel(model)).to.throw(/version/);
+    delete model.authorities[0].version;
+    model.authorities[0].program = "/NS/ZCL_DEMO";
+    expect(() => buildDaemonModel(model)).to.throw(/namespaced.*class/i);
+  });
+
   it("a changed channel field changes only the line traced to that channel", async () => {
     const original = await renderDaemon(samc);
     const model = JSON.parse(readFileSync(samc, "utf8"));

@@ -9,9 +9,9 @@ import {buildDaemonModel, traceNodes} from "./dsl-daemons.mjs";
 
 export async function renderDaemon(file) {
   const model = buildDaemonModel(JSON.parse(readFileSync(file, "utf8")));
-  const kind = model.channels ? "samc" : "sapc";
+  const kind = model.kind;
   const template = readFileSync(join("recipes", `${kind}-xml`, "template.tpl"), "utf8");
-  const rendered = await renderWithEngine(template, model, {}, "template.tpl", "html");
+  const rendered = await renderWithEngine(template, model, {}, "template.tpl", "xml");
   const valid = XMLValidator.validate(rendered.text);
   if (valid !== true) throw new Error(`XML line ${valid.err.line}: ${valid.err.msg}`);
   return {text: rendered.text, trace: traceNodes(model, rendered.trace), model};

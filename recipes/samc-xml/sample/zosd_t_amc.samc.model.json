@@ -1,5 +1,6 @@
 {
   "@id": "samc/ZOSD_T_AMC",
+  "kind": "samc",
   "applicationId": "ZOSD_T_AMC",
   "version": "A",
   "description": "OSD AMC probe (throwaway)",

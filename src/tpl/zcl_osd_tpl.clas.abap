@@ -26,6 +26,7 @@ CLASS zcl_osd_tpl DEFINITION PUBLIC FINAL CREATE PRIVATE.
       BEGIN OF c_escape,
         none TYPE string VALUE 'none',
         html TYPE string VALUE 'html',
+        xml TYPE string VALUE 'xml',
       END OF c_escape.
 
     CONSTANTS c_max_depth TYPE i VALUE 50.
@@ -1397,13 +1398,16 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
 
   METHOD escape.
     rv_text = iv_text.
-    IF mv_escape <> c_escape-html.
+    IF mv_escape <> c_escape-html AND mv_escape <> c_escape-xml.
       RETURN.
     ENDIF.
     REPLACE ALL OCCURRENCES OF `&` IN rv_text WITH `&amp;`.
     REPLACE ALL OCCURRENCES OF `<` IN rv_text WITH `&lt;`.
     REPLACE ALL OCCURRENCES OF `>` IN rv_text WITH `&gt;`.
     REPLACE ALL OCCURRENCES OF `"` IN rv_text WITH `&quot;`.
+    IF mv_escape = c_escape-xml.
+      REPLACE ALL OCCURRENCES OF `'` IN rv_text WITH `&apos;`.
+    ENDIF.
   ENDMETHOD.
 
 
