@@ -19,9 +19,13 @@ import (
 )
 
 func hostRun(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, batch, present string) ZCL_GG_HOST__TY_RESULT {
-	empty := []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE(nil)
+	values := make([]*ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, len(input))
+	for i := range input {
+		values[i] = &input[i]
+	}
+	empty := []*ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE(nil)
 	return ZCL_GG_HOST_RUN(s, report, nil, appProgram, "1000", "", 0, batch,
-		&input, &empty, &empty, "ONLI", "", "", "", "", 0, 1, "", "", "", 0,
+		&values, &empty, &empty, "ONLI", "", "", "", "", 0, 1, "", "", "", 0,
 		"", "", "", "", "", present, "", &ZIF_GG_HOST_HTML_V1__TY_NAVIGATION{}, &ZIF_GG_SESSION_TYPES_V1__TY_SUBMIT{})
 }
 

@@ -14,7 +14,38 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  ZCL_GOGEN_T_UNCATCH: {Go: "ERROR NOT_COMPILED in find( ): OCC = 0 was not measured at zcl_gogen_t_uncatch.clas.abap:8", JS: "ERROR NOT_COMPILED in find( ) OCC = 0 was not measured"},
+  ZCL_GOGEN_T_ROWREF: "append:9",
+  ZCL_GOGEN_T_ELEMREF: "append:9 read:8",
+  ZCL_GOGEN_T_ELEMREFSTALE: {Go: "ERROR GETWA_NOT_ASSIGNED in reference to a deleted table row at zcl_gogen_t_elemrefstale.clas.abap:19", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
+  ZCL_GOGEN_T_ROWDEL: {Go: "ERROR GETWA_NOT_ASSIGNED in reference to a deleted table row at zcl_gogen_t_rowdel.clas.abap:20", JS: "ERROR GETWA_NOT_ASSIGNED in reference to a deleted table row"},
+  // AJSON's local serializer, dynamic sorted key, row references and UTF-8
+  // SHA-256 (Node's open-abap-core/AJSON result for this fixture).
+  ZCL_GOGEN_T_AJSON: {Go: '{"a":"x","b":[7]}|44FFF909E380AA93C5444E84BC9F1D4C5FF61F2A4A18592CBE02DBF44D8B5423',
+    JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
+  ZCL_GOGEN_T_WLIN: "0/2/0/1/0/0/4/0",
+  ZCL_GOGEN_T_XATTR: "X",
+  ZCL_GOGEN_T_SUBX: "X",
+  ZCL_GOGEN_T_DELRANGE: "0/3/4 0/2 4/2",
+  ZCL_GOGEN_T_FMDEFAULT: "7/9",
   ZCL_GOGEN_T_RF_SORT_OK: "mv:ab vl:cd rk:dc empty:0 back:2",
+  ZCL_GOGEN_T_SORTREF: "m:9 a:2",
+  ZCL_GOGEN_T_COPYROWS: "1/2",
+  ZCL_GOGEN_T_COPYROUTES: "111119",
+  ZCL_GOGEN_T_COPYBASE: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYBASE=>RUN (zcl_gogen_t_copybase.clas.abap:18): VALUE for a table with BASE src at zcl_gogen_t_copybase.clas.abap:18", JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYBASE=>RUN (zcl_gogen_t_copybase.clas.abap:18): VALUE for a table with BASE src"},
+  ZCL_GOGEN_T_COPYINSERT: "1",
+  ZCL_GOGEN_T_COPYDATA: "1",
+  ZCL_GOGEN_T_COPYHASH: "1",
+  ZCL_GOGEN_T_COPYDREF: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYDREF=>RUN (zcl_gogen_t_copydref.clas.abap:19): target lr->* at zcl_gogen_t_copydref.clas.abap:19", JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYDREF=>RUN (zcl_gogen_t_copydref.clas.abap:19): target lr->*"},
+  ZCL_GOGEN_T_SCALARBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarbind.clas.abap:18", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
+  ZCL_GOGEN_T_REBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_rebind.clas.abap:18", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
+  ZCL_GOGEN_T_INITBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in reference to a deleted table row at zcl_gogen_t_initbind.clas.abap:14", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
+  ZCL_GOGEN_T_BINDMUT: "2/1/0/0/0",
+  ZCL_GOGEN_T_DELNOOPBIND: "7",
+  ZCL_GOGEN_T_GENERICBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in reference to a deleted table row at zcl_gogen_t_genericbind.clas.abap:15", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
+  ZCL_GOGEN_T_SCALARREAD: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarread.clas.abap:17", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
+  ZCL_GOGEN_T_SCALARLOOP: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarloop.clas.abap:19", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
+  ZCL_GOGEN_T_SECREF: "0/7",
   ZCL_GOGEN_T_BOUND: "X",
   // Arithmetic statements share the assignment calculation type: i division
   // rounds 21 / 2 to 11, while packed decimal retains its two places.
@@ -94,9 +125,7 @@ const EXPECT = {
   // emitters refuse it as an internal DELETE form; what this pins is that it
   // is not sent to the database (before the fix: "the relational IR has no
   // delete node")
-  ZCL_GOGEN_T_DELNAME: {
-    Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2. at zcl_gogen_t_delname.clas.abap:19",
-    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2."},
+  ZCL_GOGEN_T_DELNAME: "lines:1  subrc:0",
   ZCL_GOGEN_T_DYN: "upper:7 lower:err unknown:err",
   // CONCATENATE ... IN BYTE MODE into an xstring (A4H 2026-09-24, $ZOSG_TMP_0460;
   // ultra/packs, the SMW0 loaders of Zork and ZO4D): an x keeps its trailing
@@ -382,7 +411,7 @@ const EXPECT = {
   ZCL_GOGEN_T_CALLSUBRC: {Go: "read:4 call:4", JS: "read:4 call:4"},
   // an OPTION in lower case: a dump CATCH cx_root does not take (A4H,
   // a4h-ranges.json), never "no restriction"
-  ZCL_GOGEN_T_SELDUMP: {Go: "ERROR SAPSQL_IN_ITAB_ILLEGAL_OPTION in range OPTION \"cp\": SAPSQL_IN_ITAB_ILLEGAL_OPTION, an uncatchable dump on A4H at zcl_gogen_t_seldump.clas.abap:23",
+  ZCL_GOGEN_T_SELDUMP: {Go: "ERROR SAPSQL_IN_ITAB_ILLEGAL_OPTION in range OPTION \"cp\": SAPSQL_IN_ITAB_ILLEGAL_OPTION, an uncatchable dump on A4H at zcl_gogen_t_seldump.clas.abap:24",
     JS: "ERROR NOT_COMPILED in SELECT ... FROM ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
   // d and t (A4H 2026-09-23, two probes joined into one class): c -> d keeps
   // 'ABC'; d - d counts days in calculation type i (( d / 7 ) * 7 rounds in
@@ -621,9 +650,7 @@ const EXPECT = {
   // re-measured on A4H 2026-09-24, $ZOSG_TMP_0441), so the JS emitter
   // compiles WGUI1 and must give the same string
   ZCL_GOGEN_T_WGUI1: "le:XXXX ns:XX ref:XXXX so:0/2,0/2,0/2,4/2,0/2 B5 c2 m1 x3 rd:0/4 cc:[abcd e][ab cd][ab- cd][ab cd][abc]4[ab]0[ab cdx] cl:[p!/r!][ab][a  b  ][a b][]0 fa:3/0,1/0,0/4,2,2,2 esc:a&lt;b&gt;&quot;c&#39;&amp;d e",
-  // the JS emitter holds no field symbol of a string and refuses the method
-  ZCL_GOGEN_T_WGUI3: {Go: "ap:2 fs:[p!/r!]",
-    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_WGUI3=>RUN: field symbol <LV_S> of a string: the JS emitter holds only rows of structures"},
+  ZCL_GOGEN_T_WGUI3: "ap:2 fs:[p!/r!]",
   // READ TABLE WITH [TABLE] KEY on a SORTED table (A4H 2026-09-24,
   // $ZOSG_TMP_0441, fix round): a search by the key's leading components,
   // a miss is 4 and the row the key would go before, or 8 and lines + 1;
@@ -712,6 +739,7 @@ const EXPECT = {
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
 const core = `${home}/.local/lars/open-abap-core/src`;
+const ajson = `${home}/.local/lars/ajson/src/core`;
 // the demo-data classes in testdata/ are copies of src/demo_data: when the
 // checkout has them (OSG_HOME), a copy that drifted is a failure
 const demoCopies = readdirSync(join(here, "testdata")).filter((f) => /^zcl_osd_demo_\w+\.clas\.abap$/.test(f)).sort();
@@ -729,12 +757,13 @@ const groups = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".fu
 // out of open-abap-core as the gateway compiles them
 // and RTTI (ultra/json: describe_by_data, ZCL_GOGEN_T_RTTI)
 const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_ABAP_REGEX", "CL_HTTP_UTILITY",
+  "ZCL_AJSON", "ZIF_AJSON", "ZIF_AJSON_TYPES", "ZCX_AJSON_ERROR", "CL_ABAP_MESSAGE_DIGEST", "CX_ABAP_MESSAGE_DIGEST",
   "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR",
   // and open-abap-core's JSON reader (ZCL_GOGEN_T_JSONDES)
   "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE",
   // raw DEFLATE and zip (parity-wave2, ZCL_GOGEN_T_GZIP, ZCL_GOGEN_T_ZIP)
   "CL_ABAP_GZIP", "CL_ABAP_ZIP"];
-const program = compileProgram({folders: [join(here, "testdata"), core], objects: [...objects, ...groups, ...CORE]});
+const program = compileProgram({folders: [join(here, "testdata"), core, ajson], objects: [...objects, ...groups, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)
 objects.splice(0, objects.length, ...objects.filter((o) => program.classes.find((c) => c.name === o.toUpperCase())?.methods.some((m) => m.name === "RUN" && m.static)));

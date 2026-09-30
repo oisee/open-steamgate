@@ -164,7 +164,7 @@ func icf(s *abap.Session, rq icfRequest, base string) icfResponse {
 	if res.IF_HTTP_ENTITY__GET_CONTENT_TYPE(s) == "" {
 		res.IF_HTTP_ENTITY__SET_CONTENT_TYPE(s, "text/html")
 	}
-	var hs []IHTTPNVP
+	var hs []*IHTTPNVP
 	res.IF_HTTP_ENTITY__GET_HEADER_FIELDS(s, &hs)
 	for _, h := range hs {
 		out.Headers = append(out.Headers, [2]string{h.name, h.value})
@@ -253,7 +253,7 @@ func main() {
 	// what the ICF handler does before dispatch: ~path without the query,
 	// the query as form fields, decoded; the host as the outside sees it
 	path, query, _ := strings.Cut(os.Args[1], "?")
-	opts := []IHTTPNVP{}
+	opts := []*IHTTPNVP{}
 	for _, kv := range strings.Split(query, "&") {
 		if kv == "" {
 			continue
@@ -261,7 +261,7 @@ func main() {
 		k, v, _ := strings.Cut(kv, "=")
 		k, _ = url.QueryUnescape(k)
 		v, _ = url.QueryUnescape(v)
-		opts = append(opts, IHTTPNVP{name: k, value: v})
+		opts = append(opts, &IHTTPNVP{name: k, value: v})
 	}
 	// one dialog step: its database LUW is committed when it ends and rolled
 	// back when it dumps (abap.DialogStep, the kernel's rule)

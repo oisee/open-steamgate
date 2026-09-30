@@ -318,6 +318,19 @@ export function Find(v, sub, off) {
   const i = rest.indexOf(sub);
   return i < 0 ? -1 : off + [...rest.slice(0, i)].length;
 }
+export function FindOcc(v, sub, occ) {
+  if (sub === "") return Find(v, sub, 0);
+  if (occ === 0) throw new AbapError("NOT_COMPILED", "find( ) OCC = 0 was not measured");
+  const positions = [];
+  for (let at = 0; at <= v.length;) {
+    const i = v.indexOf(sub, at);
+    if (i < 0) break;
+    positions.push([...v.slice(0, i)].length);
+    at = i + sub.length;
+  }
+  return positions[occ > 0 ? occ - 1 : positions.length + occ] ?? -1;
+}
+export const Reverse = (v) => [...v].reverse().join("");
 export const CO = (a, b) => [...a].every((c) => b.includes(c));
 export const CS = (a, b) => b === "" || a.toUpperCase().includes(b.toUpperCase());
 export function DateAdd(date, days) {
@@ -697,6 +710,7 @@ export function handled(s, e) {
 export function classBased(e) {
   return e instanceof Raised || (e instanceof AbapError && e.cls.startsWith("CX_"));
 }
+export function catchable(e) { return classBased(e); }
 // get_text( ) of a value a CATCH INTO received that also takes runtime
 // exceptions: a raised object's own get_text, else the class and the operation
 export function excText(s, x) {
@@ -735,9 +749,10 @@ export const TP = (n, dec) => sizedType("P", n, dec);
 export const TN = (n) => sizedType("N", n);
 
 // a value that is no place of its own, seen as generic data: a slot of its own
-export function cell(v, t) {
+export function cell(v, t, table) {
   const c = {v};
-  return {get: () => c.v, set: (x) => { c.v = x; }, t};
+  const check = () => { if (table && !table.includes(v)) throw new AbapError("GETWA_NOT_ASSIGNED", "reference to a deleted table row"); };
+  return {get: () => { check(); return c.v; }, set: (x) => { check(); c.v = x; }, t};
 }
 
 const notAssigned = (op) => new AbapError("GETWA_NOT_ASSIGNED", op);
@@ -765,6 +780,7 @@ export function DeleteIndex(d, i) {
   const n = Lines(d);
   if (i < 1 || i > n) return false;
   d.get().splice(i - 1, 1);
+  bumpTable(d.get());
   return true;
 }
 
@@ -776,6 +792,7 @@ export function AppendData(t, v) {
   const rt = t.t.row;
   const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0), N: "0".repeat(rt.len ?? 0)})[rt.kind] ?? "";
   t.get().push(zero);
+  bumpTable(t.get());
   MoveData(Row(t, n), v);
   return n + 1;
 }
@@ -801,7 +818,36 @@ export function NewLine(t) {
 // row i (from 0) of a generic table, bound to the row itself
 export function Row(d, i) {
   const a = d.get();
-  return {get: () => a[i], set: (v) => { a[i] = v; }, t: d.t.row};
+  const version = tableVersion(a);
+  const value = a[i];
+  const check = () => {
+    if (d.get() !== a || tableVersion(a) !== version || i >= a.length || (value !== null && typeof value === "object" && a[i] !== value))
+      throw new AbapError("GETWA_NOT_ASSIGNED", "table row binding after structural mutation");
+  };
+  return {get: () => { check(); return a[i]; }, set: (v) => { check(); a[i] = v; }, t: d.t.row};
+}
+
+const tableVersions = new WeakMap();
+const tableVersion = (table) => tableVersions.get(table) ?? 0;
+export function bumpTable(table) { tableVersions.set(table, tableVersion(table) + 1); }
+export function bindRow(current, index) {
+  const table = current();
+  const version = tableVersion(table);
+  return {get: () => {
+    if (current() !== table || tableVersion(table) !== version || index >= table.length)
+      throw new AbapError("GETWA_NOT_ASSIGNED", "table row binding after structural mutation");
+    return table[index];
+  }, set: (v) => {
+    if (current() !== table || tableVersion(table) !== version || index >= table.length)
+      throw new AbapError("GETWA_NOT_ASSIGNED", "table row binding after structural mutation");
+    table[index] = v;
+  }};
+}
+
+// An elementary REFERENCE INTO uses the same row slot and validity as
+// ASSIGNING. A plain cell would only change its private copy of the value.
+export function rowCell(current, index, t) {
+  return {...bindRow(current, index), t};
 }
 
 // a generic elementary value moved into a string
@@ -913,7 +959,10 @@ export function MoveData(dst, src) {
   }
   switch (dk) {
     case "u": case "v": case "h":
-      if (dst.t === src.t) return Overwrite(dst.t, dst.get(), copy(v));
+      if (dst.t === src.t) {
+        if (dk === "h") bumpTable(dst.get());
+        return Overwrite(dst.t, dst.get(), copy(v));
+      }
       break;
     case "I":
       if (sk === "I") return dst.set(v);
@@ -974,7 +1023,10 @@ export function ClearData(d) {
     case "P": return d.set(FmtP("", d.t.dec));
     case "X": return d.set("\u0000".repeat(d.t.len));
     case "l": return d.set(null);
-    case "u": case "v": case "h": return Overwrite(d.t, d.get(), d.t.zero());
+    case "u": case "v": case "h": {
+      if (d.t.kind === "h") bumpTable(d.get());
+      return Overwrite(d.t, d.get(), d.t.zero());
+    }
     default: throw new AbapError("NOT_COMPILED", `CLEAR: generic data of type kind ${d.t.kind}`);
   }
 }
@@ -1482,6 +1534,7 @@ export function AppendInitialData(t) {
   const rt = t.t.row;
   const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0), N: "0".repeat(rt.len ?? 0)})[rt.kind] ?? "";
   t.get().push(zero);
+  bumpTable(t.get());
   return [Row(t, n), n + 1];
 }
 export function DescrLength(d) {

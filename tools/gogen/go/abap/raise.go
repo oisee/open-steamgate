@@ -118,6 +118,16 @@ func ClassBased(r any) bool {
 	return ok && len(e.Class) > 3 && e.Class[:3] == "CX_"
 }
 
+// Catchable reports whether an ABAP CATCH may handle a recovered value.
+// Refusals and dumps travel as panics too, but are not ABAP exceptions.
+func Catchable(r any) bool {
+	if _, ok := AsRaised(r); ok {
+		return true
+	}
+	e, ok := AsError(r)
+	return ok && len(e.Class) > 3 && e.Class[:3] == "CX_"
+}
+
 // Texter is an exception object whose get_text( ) is compiled.
 type Texter interface {
 	IF_MESSAGE__GET_TEXT(s *Session) string

@@ -6,6 +6,8 @@ package abap
 // structure or table component (whose MOVE-CORRESPONDING is recursive, or
 // EXPANDING NESTED TABLES) is refused rather than moved as a whole.
 func MoveCorrespondingData(dst, src Data) {
+	dst.Check()
+	src.Check()
 	if dst.P == nil {
 		panic(notAssigned("MOVE-CORRESPONDING into a field symbol"))
 	}

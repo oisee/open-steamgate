@@ -14,6 +14,8 @@ func notAssigned(op string) ArithmeticError {
 
 // MoveData is dst = src for a generic dst.
 func MoveData(dst, src Data) {
+	dst.Check()
+	src.Check()
 	if dst.P == nil {
 		panic(notAssigned("move into a field symbol"))
 	}
@@ -53,6 +55,9 @@ func MoveData(dst, src Data) {
 	switch dk {
 	case 'u', 'v', 'h':
 		if dst.T == src.T && dst.T.Copy != nil {
+			if dk == 'h' {
+				BumpTable(dst.P)
+			}
 			dst.T.Copy(dst.P, src.P)
 			return
 		}
@@ -166,6 +171,7 @@ func MoveData(dst, src Data) {
 
 // ClearData is CLEAR of a generic value: the slot it is bound to becomes initial.
 func ClearData(d Data) {
+	d.Check()
 	if d.P == nil {
 		panic(notAssigned("CLEAR of a field symbol"))
 	}
@@ -191,6 +197,9 @@ func ClearData(d Data) {
 		*d.P.(*Data) = Data{}
 	case 'u', 'v', 'h':
 		if d.T.Zero != nil {
+			if d.T.Kind == 'h' {
+				BumpTable(d.P)
+			}
 			d.T.Zero(d.P)
 			return
 		}

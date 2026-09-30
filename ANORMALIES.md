@@ -225,6 +225,7 @@ WRITE / lines( tab ).   " system: 1 -- runtime before #1892: 2
 - Regression-test location: none here (no timing test); the system side is the probe source above
 - Upstream version containing a fix: none yet
 
+
 ### ANOMALY-2026-09-24-httpc-status-code-field -- the response of open-abap-core's `CL_HTTP_CLIENT` has no `~status_code` header field; a system's has it and five more pseudo fields
 
 - Status: `fixed upstream: open-abap/open-abap-core#1269, merged 2026-09-25; verified 2026-09-30 by running the reproducer against open-abap-core main caad035`; before: open, **measured on an ABAP 7.5x system 2026-09-24** (the Go host does the same)
@@ -2831,3 +2832,14 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: abaplint/transpiler, needs an issue (one issue for the four, after a probe on A4H for cases 1, 3 and 4)
 - Regression-test location: none yet
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-go-row-binding-model — scalar row bindings use a table version token
+
+- Status: `open` (U4 table-header follow-up)
+- Discovery date: `2026-09-30`
+- Affected versions: this branch's Go and JavaScript row-binding runtimes
+- Affected ABAP statement, runtime API or adapter: `LOOP AT`, `READ TABLE`, and `APPEND ... ASSIGNING` on standard tables with scalar rows
+- Binding model: each Go scalar field symbol holds its own row pointer, table identity, index, and version captured at bind time. Each read or write validates that token; rebinding the same slice slot cannot renew an older symbol. JavaScript captures the array, index, and version in the binding. Structural changes invalidate retained bindings. Generic row bindings carry an equivalent validity check.
+- Known limits: scalar Go tables remain value slices. A structural change can conservatively reject a binding even when its row survived. `LOOP ... ASSIGNING` followed by `APPEND` in the body and a use of the field symbol after the loop has not been measured on SAP; the current version rule raises `GETWA_NOT_ASSIGNED` on that use. No SAP compatibility claim is made for that case.
+- Planned fix: U4's 0.5 table-header representation will put the version on the table itself and replace the present side-table model.
+- Regression-test location: `tools/gogen/testdata/zcl_gogen_t_rebind.clas.abap`, `zcl_gogen_t_initbind.clas.abap`, and `tools/gogen/go/abap/row_binding_bench_test.go`
