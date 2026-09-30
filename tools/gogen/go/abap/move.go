@@ -14,6 +14,8 @@ func notAssigned(op string) ArithmeticError {
 
 // MoveData is dst = src for a generic dst.
 func MoveData(dst, src Data) {
+	dst.Check()
+	src.Check()
 	if dst.P == nil {
 		panic(notAssigned("move into a field symbol"))
 	}
@@ -166,6 +168,7 @@ func MoveData(dst, src Data) {
 
 // ClearData is CLEAR of a generic value: the slot it is bound to becomes initial.
 func ClearData(d Data) {
+	d.Check()
 	if d.P == nil {
 		panic(notAssigned("CLEAR of a field symbol"))
 	}

@@ -68,8 +68,28 @@ type Comp struct {
 // Data is a generic value, a field symbol TYPE any, or a data reference. P
 // nil is an unassigned field symbol or an initial reference.
 type Data struct {
-	P any
-	T *Type
+	P     any
+	T     *Type
+	Valid func() bool // retained table-row reference; false after its row is deleted
+}
+
+// RowRef keeps the row's address, including when its table grows or shifts.
+// A deleted row becomes an explicit dump on dereference.
+func RowRef[T any](table *[]*T, row *T, typ *Type) Data {
+	return Data{P: row, T: typ, Valid: func() bool {
+		for _, current := range *table {
+			if current == row {
+				return true
+			}
+		}
+		return false
+	}}
+}
+
+func (d Data) Check() {
+	if d.Valid != nil && !d.Valid() {
+		panic(ArithmeticError{"GETWA_NOT_ASSIGNED", "reference to a deleted table row"})
+	}
 }
 
 var (
@@ -120,13 +140,14 @@ func itoa(n int) string {
 // Component is ASSIGN COMPONENT name OF STRUCTURE d: false (sy-subrc 4) when
 // d is not a structure or has no component of that name.
 func Component(d Data, name string) (Data, bool) {
+	d.Check()
 	if d.P == nil || d.T == nil || (d.T.Kind != 'u' && d.T.Kind != 'v') {
 		return Data{}, false
 	}
 	n := strings.ToUpper(strings.TrimRight(name, " "))
 	for _, c := range d.T.Comps {
 		if c.Name == n {
-			return Data{P: c.Get(d.P), T: c.T}, true
+			return Data{P: c.Get(d.P), T: c.T, Valid: d.Valid}, true
 		}
 	}
 	return Data{}, false
@@ -134,6 +155,7 @@ func Component(d Data, name string) (Data, bool) {
 
 // Lines is lines( ) of a generic table.
 func Lines(d Data) int {
+	d.Check()
 	if d.P == nil || d.T == nil || d.T.Kind != 'h' {
 		panic(NotCompiled("lines( )", "of a generic value that is not a table"))
 	}
@@ -175,6 +197,7 @@ func Row(d Data, i int) Data { return Data{P: d.T.At(d.P, i), T: d.T.Row} }
 
 // DataString is a generic elementary value moved into a string.
 func DataString(d Data) string {
+	d.Check()
 	switch d.T.Kind {
 	case 'g', 'C', 'D', 'T', 'N':
 		return *d.P.(*string)
@@ -188,6 +211,7 @@ func DataString(d Data) string {
 
 // DataI is a generic value moved into an i.
 func DataI(d Data) int32 {
+	d.Check()
 	switch d.T.Kind {
 	case 'I':
 		return *d.P.(*int32)
@@ -197,6 +221,7 @@ func DataI(d Data) int32 {
 
 // FmtData is a generic value in a string template.
 func FmtData(d Data) string {
+	d.Check()
 	switch d.T.Kind {
 	case 'I':
 		return FmtI(*d.P.(*int32))
@@ -217,6 +242,7 @@ func FmtData(d Data) string {
 // DataP is a generic elementary value as a packed value (exact, not yet
 // fitted to a field): the conversions of go/abap packed.go
 func DataP(d Data) string {
+	d.Check()
 	switch d.T.Kind {
 	case 'P':
 		return *d.P.(*string)
@@ -234,6 +260,7 @@ func DataP(d Data) string {
 
 // IsInitialData is IS INITIAL of a generic value.
 func IsInitialData(d Data) bool {
+	d.Check()
 	if d.P == nil {
 		return true
 	}
@@ -290,6 +317,7 @@ var TObj = &Type{Kind: 'r'}
 // The generic binding points at the reference slot, so its own P is non-nil
 // even when the reference held in that slot is initial.
 func DataBound(d Data) bool {
+	d.Check()
 	if d.P == nil || d.T == nil {
 		return false
 	}

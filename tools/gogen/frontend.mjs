@@ -1925,6 +1925,7 @@ function structure(node, ctx) {
       const nm = /<[\w]+>/.exec(lt.concatTokens())?.[0];
       if (nm === undefined || !ctx.fieldSymbols.has(upper(nm))) throw new Unsupported(`LOOP ASSIGNING ${lt.concatTokens()}`);
       fs = upper(nm);
+      if (table.type.row.k === "struct") table.type.stable = true;
     } else {
       // (ultra/events) LOOP ... TRANSPORTING NO FIELDS and the like have no target
       if (!lt?.findFirstExpression(Expressions.Target)) throw new Unsupported(`LOOP form: ${text}`);
@@ -2260,10 +2261,21 @@ function statement(node, ctx) {
     refuseSorted(table, "APPEND LINES OF into");
     return {s: "append_lines", table, src, from, to, value};
   }
-  // ultra/events: APPEND wa TO itab ASSIGNING <fs> (A4H ZCL_GOGEN_T_WGUI1: the
-  // field symbol points at the new row, sy-tabix is its index). In Go the
-  // field symbol is a pointer into the slice, which a later APPEND that
-  // grows the slice leaves behind: fine for the use right after the APPEND
+  // APPEND REFERENCE INTO binds the new row, including after later appends.
+  if (isStmt(node, Statements.Append) && /\bREFERENCE\s+INTO\b/i.test(text)) {
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const name = /\bREFERENCE\s+INTO\s+([\w-]+)/i.exec(text)?.[1];
+    if (table.type.k !== "table" || !name) throw new Unsupported(`APPEND REFERENCE INTO form: ${text}`);
+    refuseSorted(table, "APPEND to");
+    const refInto = variable(name, ctx);
+    if (refInto.type.k !== "dref") throw new Unsupported(`APPEND REFERENCE INTO a ${refInto.type.k}`);
+    const initial = /\bINITIAL\s+LINE\b/i.test(text);
+    const valueNode = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+    if (!initial && !valueNode) throw new Unsupported(`APPEND REFERENCE INTO form: ${text}`);
+    table.type.stable = true;
+    return {s: "append", table, value: initial ? {e: "zero", type: table.type.row} : convert(source(valueNode, ctx, table.type.row), table.type.row), refInto};
+  }
+  // APPEND ASSIGNING gives the field symbol the new row's address.
   if (isStmt(node, Statements.Append) && /\bASSIGNING\b/i.test(text) && !/\b(LINES OF|INITIAL LINE|REFERENCE|SORTED BY)\b/i.test(text)) {
     const fsName = upper(node.findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
     const fsType = ctx.fieldSymbols.get(fsName);
@@ -2271,6 +2283,7 @@ function statement(node, ctx) {
     if (table.type.k !== "table") throw new Unsupported(`APPEND ... ASSIGNING to a ${table.type.k}`);
     refuseSorted(table, "APPEND to");
     if (!fsType || fsType.k === "data" || !sameType(fsType, table.type.row) || (fsType.k === "struct" && fsType.go !== table.type.row.go)) throw new Unsupported(`APPEND ... ASSIGNING ${fsName}: ${text}`);
+    if (table.type.row.k === "struct") table.type.stable = true;
     const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
     return {s: "append", table, value: convert(source(value, ctx, table.type.row), table.type.row), fs: fsName};
   }
@@ -2321,6 +2334,7 @@ function statement(node, ctx) {
     if (table.type.k === "data" && table.type.table && fsType?.k === "data") return {s: "append_initial_data", table, fs: fsName};
     if (table.type.k !== "table" || !fsType || fsType.k === "data" || !sameType(fsType, table.type.row)) throw new Unsupported(`APPEND form: ${text}`);
     refuseSorted(table, "APPEND to");
+    table.type.stable = true;
     return {s: "append", table, value: {e: "zero", type: table.type.row}, fs: fsName};
   }
   if (isStmt(node, Statements.Append)) {
@@ -2372,6 +2386,7 @@ function statement(node, ctx) {
     if (rt && /\bASSIGNING\b/i.test(rt.concatTokens())) {
       fs = upper(/<[\w]+>/.exec(rt.concatTokens())?.[0] ?? "");
       if (!ctx.fieldSymbols.has(fs)) throw new Unsupported(`READ TABLE ASSIGNING ${fs}`);
+      if (table.type.row.k === "struct") table.type.stable = true;
     } else if (rt && /^TRANSPORTING\s+NO\s+FIELDS$/i.test(rt.concatTokens().trim())) {
       // only sy-subrc and sy-tabix
     } else if (rt) {
@@ -2381,6 +2396,7 @@ function statement(node, ctx) {
       refInto = /\bREFERENCE\s+INTO\b/i.test(rt.concatTokens());
       if (refInto) {
         if (into.type.k !== "dref") throw new Unsupported(`READ TABLE REFERENCE INTO a ${into.type.k}`);
+        table.type.stable = true;
       } else if (!sameType(into.type, table.type.row)) into = {...into, conv: true};
     }
     // WITH [TABLE] KEY k COMPONENTS c = v ...: a secondary key's order (secondaryKey)
@@ -2441,6 +2457,7 @@ function statement(node, ctx) {
       const fsName = upper(/ASSIGNING\s+(?:FIELD-SYMBOL\(\s*)?(<[\w]+>)/i.exec(text)?.[1] ?? "");
       if (!ctx.fieldSymbols.has(fsName)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}`);
       if (ctx.fieldSymbols.get(fsName).k !== "data" && !sameType(ctx.fieldSymbols.get(fsName), table.type.row)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}: typed unlike the rows`);
+      if (table.type.row.k === "struct") table.type.stable = true;
       return {s: "read_index", table, index, fs: fsName};
     }
     const into = lvalue(node.findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target), ctx);
@@ -2601,7 +2618,7 @@ function statement(node, ctx) {
     // NON-UNIQUE key goes is not measured): the row goes before the first
     // row with a greater key, not at all when one has the same key
     if (table.type.sorted) {
-      if (refInto) throw new Unsupported("INSERT INTO SORTED TABLE REFERENCE INTO: rows are stored in a Go slice; later inserts or deletes can move the row, so a retained reference is unsafe");
+      if (refInto) table.type.stable = true;
       if (!table.type.unique) throw new Unsupported(`INSERT INTO TABLE of a SORTED table with a NON-UNIQUE key`);
       const line = table.type.sorted.length === 1 && table.type.sorted[0] === "TABLE_LINE";
       const sortKeys = line ? [{line: true, type: table.type.row}] : table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));

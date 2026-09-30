@@ -14,18 +14,20 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  ZCL_GOGEN_T_UNCATCH: {Go: "ERROR NOT_COMPILED in find( ): OCC = 0 was not measured at zcl_gogen_t_uncatch.clas.abap:8", JS: "ERROR NOT_COMPILED in find( ) OCC = 0 was not measured"},
+  ZCL_GOGEN_T_ROWREF: "append:9",
+  ZCL_GOGEN_T_ROWDEL: {Go: "ERROR GETWA_NOT_ASSIGNED in reference to a deleted table row at zcl_gogen_t_rowdel.clas.abap:20", JS: "ERROR GETWA_NOT_ASSIGNED in reference to a deleted table row"},
   // AJSON's local serializer, dynamic sorted key, row references and UTF-8
   // SHA-256 (Node's open-abap-core/AJSON result for this fixture).
-  ZCL_GOGEN_T_AJSON: {Go: "ERROR NOT_COMPILED in ZCL_AJSON=>PROVE_PATH_EXISTS (zcl_ajson.clas.abap:294): INSERT INTO SORTED TABLE REFERENCE INTO: rows are stored in a Go slice; later inserts or deletes can move the row, so a retained reference is unsafe at zcl_ajson.clas.abap:294",
-    JS: "ERROR NOT_COMPILED in ZCL_AJSON=>PROVE_PATH_EXISTS (zcl_ajson.clas.abap:294): INSERT INTO SORTED TABLE REFERENCE INTO: rows are stored in a Go slice; later inserts or deletes can move the row, so a retained reference is unsafe"},
+  ZCL_GOGEN_T_AJSON: {Go: '{"a":"x","b":[7]}|44FFF909E380AA93C5444E84BC9F1D4C5FF61F2A4A18592CBE02DBF44D8B5423',
+    JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
   ZCL_GOGEN_T_WLIN: "0/2/0/1/0/0/4/0",
   ZCL_GOGEN_T_XATTR: "X",
   ZCL_GOGEN_T_SUBX: "X",
   ZCL_GOGEN_T_DELRANGE: "0/3/4 0/2 4/2",
   ZCL_GOGEN_T_FMDEFAULT: "7/9",
   ZCL_GOGEN_T_RF_SORT_OK: "mv:ab vl:cd rk:dc empty:0 back:2",
-  ZCL_GOGEN_T_SORTREF: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SORTREF=>RUN (zcl_gogen_t_sortref.clas.abap:18): INSERT INTO SORTED TABLE REFERENCE INTO: rows are stored in a Go slice; later inserts or deletes can move the row, so a retained reference is unsafe at zcl_gogen_t_sortref.clas.abap:18",
-    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_SORTREF=>RUN (zcl_gogen_t_sortref.clas.abap:18): INSERT INTO SORTED TABLE REFERENCE INTO: rows are stored in a Go slice; later inserts or deletes can move the row, so a retained reference is unsafe"},
+  ZCL_GOGEN_T_SORTREF: "m:9 a:2",
   ZCL_GOGEN_T_SECREF: "0/7",
   ZCL_GOGEN_T_BOUND: "X",
   // Arithmetic statements share the assignment calculation type: i division

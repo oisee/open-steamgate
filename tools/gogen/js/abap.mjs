@@ -749,9 +749,10 @@ export const TP = (n, dec) => sizedType("P", n, dec);
 export const TN = (n) => sizedType("N", n);
 
 // a value that is no place of its own, seen as generic data: a slot of its own
-export function cell(v, t) {
+export function cell(v, t, table) {
   const c = {v};
-  return {get: () => c.v, set: (x) => { c.v = x; }, t};
+  const check = () => { if (table && !table.includes(v)) throw new AbapError("GETWA_NOT_ASSIGNED", "reference to a deleted table row"); };
+  return {get: () => { check(); return c.v; }, set: (x) => { check(); c.v = x; }, t};
 }
 
 const notAssigned = (op) => new AbapError("GETWA_NOT_ASSIGNED", op);
