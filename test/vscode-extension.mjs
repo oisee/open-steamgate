@@ -170,6 +170,22 @@ function controllerContext() {
 }
 
 describe("editors/vscode: the extension's logic", function () {
+  it("uses paused debug state for ABAP run and stepping keys", () => {
+    const bindings = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8")).contributes.keybindings;
+    for (const [key, command] of [["f8", "osd.run"], ["f9", "osd.classrun"]]) {
+      const binding = bindings.find((row) => row.key === key && row.command === command);
+      expect(binding?.when).to.include("debugState != 'stopped'");
+      expect(binding.when).not.to.include("inDebugMode");
+    }
+    for (const [key, command] of [["f5", "workbench.action.debug.stepInto"],
+      ["f6", "workbench.action.debug.stepOver"], ["f7", "workbench.action.debug.stepOut"],
+      ["f8", "workbench.action.debug.continue"]]) {
+      const binding = bindings.find((row) => row.key === key && row.command === command);
+      expect(binding?.when).to.include("debugState == 'stopped'");
+      expect(binding.when).not.to.include("inDebugMode");
+    }
+  });
+
   it("builds the attach profile and keeps a supervised restart on one debugger session", () => {
     const config = debuggerConfiguration(9341);
     expect(config).to.include({name: "OSD: ABAP (9341)", type: "node", request: "attach", address: "127.0.0.1", port: 9341, restart: true, timeout: 30000});

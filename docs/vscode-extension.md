@@ -47,7 +47,7 @@ Classrun do not reach either type (Q7, below).
 | F8 | Run | `osd.run` -- dispatched by object type (`lib.js` `RUN_TABLE` / `runActionFor`, SE80's own dispatch, table below); a class with ABAP Unit tests runs them (Test Explorer's `testing.runCurrentFile`) | see the table below |
 | F9 | Run as ABAP Application (Console) | `osd.classrun` -- the current class against `oo/classrun` (Q6b, below), output in its own Output channel "osd console" | -- |
 | Ctrl+Shift+F10 | Run ABAP Unit | the built-in `testing.runCurrentFile` | -- |
-| F5 / F6 / F7 / F8, while a debug session is active | Step Into / Step Over / Return / Continue | the built-in `workbench.action.debug.step{Into,Over,Out}` / `.continue`, remapped only `when inDebugMode && resourceExtname == .abap`, so a non-ABAP debug session keeps VS Code's own F5 continue / F10 step over / F11 step into | -- |
+| F5 / F6 / F7 / F8, while execution is paused | Step Into / Step Over / Return / Continue | the built-in `workbench.action.debug.step{Into,Over,Out}` / `.continue`, remapped only `when debugState == 'stopped' && resourceExtname == .abap`, so an attached but running session leaves F8 and F9 available to run ABAP objects | -- |
 | Ctrl+Shift+B | Toggle breakpoint | the built-in `editor.debug.action.toggleBreakpoint` | -- |
 | F1 on a keyword | ABAP keyword documentation | -- | **left out**: ADT resolves a keyword to its help.sap.com page through its own shipped keyword-to-file index; a guessed URL (`abap` + the word + `.htm`) is wrong for enough keywords that a dead link is worse than no binding |
 

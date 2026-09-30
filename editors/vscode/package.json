@@ -349,15 +349,15 @@
     "keybindings": [
       {"key": "ctrl+f2", "command": "osd.check", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap"},
       {"key": "ctrl+f3", "command": "osd.activate", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap"},
-      {"key": "f8", "command": "osd.run", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && config.osd.keymap == abap && !inDebugMode"},
-      {"key": "f9", "command": "osd.classrun", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && !inDebugMode"},
+      {"key": "f8", "command": "osd.run", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && config.osd.keymap == abap && debugState != 'stopped'"},
+      {"key": "f9", "command": "osd.classrun", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && debugState != 'stopped'"},
       {"key": "ctrl+shift+f10", "command": "testing.runCurrentFile", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap"},
 
       {"key": "ctrl+shift+b", "command": "editor.debug.action.toggleBreakpoint", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap"},
-      {"key": "f5", "command": "workbench.action.debug.stepInto", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && inDebugMode"},
-      {"key": "f6", "command": "workbench.action.debug.stepOver", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && inDebugMode"},
-      {"key": "f7", "command": "workbench.action.debug.stepOut", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && inDebugMode"},
-      {"key": "f8", "command": "workbench.action.debug.continue", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && inDebugMode"}
+      {"key": "f5", "command": "workbench.action.debug.stepInto", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && debugState == 'stopped'"},
+      {"key": "f6", "command": "workbench.action.debug.stepOver", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && debugState == 'stopped'"},
+      {"key": "f7", "command": "workbench.action.debug.stepOut", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && debugState == 'stopped'"},
+      {"key": "f8", "command": "workbench.action.debug.continue", "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && debugState == 'stopped'"}
     ],
     "walkthroughs": [
       {
