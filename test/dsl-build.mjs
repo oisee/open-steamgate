@@ -100,6 +100,25 @@ describe("dsl build: recipes as build units", function () {
       expect(errors[0]).to.match(/^copy\/b\.tpl:1: partials call each other in a cycle: a -> b -> a/);
     });
 
+    it("a partial nobody calls is still linked: a missing partial in it is an error, the field checks use the model root", async () => {
+      const files = {...withPartials({lonely: "lonely.tpl"}, "{{#classes}}{{name}}{{/classes}}\n"), "lonely.tpl": "x\n{{> missing}}\n"};
+      expect(await errorsOf("abap-methods", files)).to.deep.equal([
+        "copy/lonely.tpl:2: partial missing is not declared in recipe.json (partial is never called, checked against the model root)"]);
+      const result = await build(copyOf("abap-methods", files));
+      expect(result.warnings.map(format)).to.deep.equal(["copy/recipe.json: partial lonely is not called"]);
+      expect(await errorsOf("abap-methods", {...files, "lonely.tpl": "{{nosuch}}\n"})).to.deep.equal([
+        "copy/lonely.tpl:1: {{nosuch}} is not a field of the model root (partial is never called, checked against the model root)"]);
+      expect(await errorsOf("abap-methods", {...files, "lonely.tpl": "{{#classes}}{{name}}{{/classes}}\n"})).to.deep.equal([]);
+    });
+
+    it("partials that call each other are an error though nothing calls them", async () => {
+      const errors = await errorsOf("abap-methods", {
+        ...withPartials({a: "a.tpl", b: "b.tpl"}, "text\n"), "a.tpl": "{{> b}}\n", "b.tpl": "\n{{> a}}\n",
+      });
+      expect(errors.length).to.be.greaterThan(0);
+      expect(errors.join("\n")).to.match(/copy\/b\.tpl:2: partials call each other in a cycle: a -> b -> a/);
+    });
+
     it("a partial is linked in the context of its caller, with its arguments", async () => {
       const ok = {...withPartials({p: "p.tpl"}, "{{#classes}}{{> p m=name}}{{/classes}}\n"), "p.tpl": "{{m}} {{name}}\n"};
       expect(await errorsOf("abap-methods", ok)).to.deep.equal([]);
@@ -135,6 +154,23 @@ describe("dsl build: recipes as build units", function () {
       const r1 = readFileSync("recipes/r1-lookup-enrich/template.tpl", "utf8");
       expect(await errorsOf("r1-lookup-enrich", {"template.tpl": r1.replace("{{source.table}}", "{{source.nope}}")}))
         .to.include("copy/template.tpl:1: {{source.nope}} is not a field of source");
+    });
+
+    it("a dotted name takes the nearest frame with its first part and does not retry outside", async () => {
+      // `a` is in the item and in the root; a.b is only in the root's a
+      const schema = {object: {a: {object: {b: "scalar"}}, list: {array: {object: {a: {object: {c: "scalar"}}}}}}};
+      const files = {"schema.json": schema};
+      expect(await errorsOf("r1-lookup-enrich", {...files, "template.tpl": "{{a.b}}{{#list}}{{a.c}}{{/list}}\n"})).to.deep.equal([]);
+      expect(await errorsOf("r1-lookup-enrich", {...files, "template.tpl": "{{#list}}\n{{a.b}}\n{{/list}}\n"}))
+        .to.deep.equal(["copy/template.tpl:2: {{a.b}} is not a field of list[].a"]);
+    });
+
+    it("a raw tag takes filters like a value tag", async () => {
+      expect(await errorsOf("abap-methods", {"template.tpl": "{{#classes}}{{& name | upper}}{{{name}}}\n{{/classes}}"})).to.deep.equal([]);
+      expect(await errorsOf("abap-methods", {"template.tpl": "{{#classes}}{{& name | shout}}\n{{/classes}}"}))
+        .to.deep.equal(['copy/template.tpl:1: unknown filter "shout"']);
+      expect(await errorsOf("abap-methods", {"template.tpl": "{{& nosuch | upper}}\n"}))
+        .to.deep.equal(["copy/template.tpl:1: {{nosuch}} is not a field of the model root"]);
     });
 
     it("loop metadata outside a loop", async () => {
@@ -268,7 +304,7 @@ describe("dsl build: recipes as build units", function () {
     });
 
     // and what the engine renders is not refused
-    const accepted = ["{{{x}}}", "{{& x}}", "{{! any words here }}", "{{x | pad 5 | upper}}", "{{x |}}",
+    const accepted = ["{{{x}}}", "{{& x}}", "{{! any words here }}", "{{x | pad 5 | upper}}", "{{& x | upper}}", "{{x |}}",
       "{{#a}}{{.}}{{/a}}", "{{#a}}{{b}}{{@index}}{{^@last}},{{/@last}}{{/a}}{{^z}}none{{/z}}", "  {{#a}}\n  {{b}}\n  {{/a}}",
       "{{> p m=x}}"];
     for (const template of accepted) {

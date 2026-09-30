@@ -182,7 +182,9 @@ run before the transpile. The tag scanner (about 80 lines) is therefore in JavaS
 and must be refused with the same line and text, what the engine renders must compile, and every
 recipe's template renders over its samples. One difference is deliberate: the engine checks a filter or
 a partial only where it renders one, the build checks every tag, and a partial that is not declared is an
-error here where the engine prints nothing.
+error here where the engine prints nothing. A declared partial that nothing calls is linked on its own
+(missing and cyclic references are errors; its names are checked against the model root, and the message
+says so) and reported as a warning.
 
 **Where it runs.** Not inside `npm run transpile`: the render step needs the transpiled
 `ZCL_OSD_TPL`, and the generators of that step run before it exists. It is `npm run dsl:build` and the

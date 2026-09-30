@@ -474,7 +474,7 @@ function link(loaded) {
   const {main, partials, schema, name} = loaded;
   const seen = new Set();
   const report = (unit, line, message, context) => {
-    const via = context.via ? ` (partial called at ${context.via})` : "";
+    const via = context.note ? ` (${context.note})` : context.via ? ` (partial called at ${context.via})` : "";
     const key = `${unit.file}:${line}:${message}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -491,8 +491,17 @@ function link(loaded) {
     if (partial?.tokens) walk(partial.tokens, [...stack, t.partial]);
   });
   walk(main.tokens, []);
-  for (const partialName of partials.keys()) {
-    if (!called.has(partialName)) loaded.warnings.push({recipe: name, file: "recipe.json", line: 0, message: `partial ${partialName} is not called`});
+  // A partial nobody calls is still a build unit: its references must resolve
+  // and must not cycle. It has no caller, so its names are checked against the
+  // model root (and the message says so); an argument alias it expects would
+  // be reported, which is the honest answer for a partial nothing feeds.
+  for (const [partialName, partial] of partials) {
+    if (called.has(partialName)) continue;
+    loaded.warnings.push({recipe: name, file: "recipe.json", line: 0, message: `partial ${partialName} is not called`});
+    if (partial.tokens && !partial.error) {
+      linkTokens(partial, partial.tokens, 0, partial.tokens.length, [{node: schema, label: ""}],
+        {chain: [partialName], note: "partial is never called, checked against the model root"}, report);
+    }
   }
 }
 
