@@ -42,6 +42,7 @@ CLASS ltcl_osd_tpl DEFINITION FOR TESTING
     METHODS nested_loop_metadata FOR TESTING RAISING cx_static_check.
     METHODS filters_checked_without_value FOR TESTING.
     METHODS utf8_passes_through FOR TESTING RAISING cx_static_check.
+    METHODS utf8 IMPORTING iv_hex TYPE xstring RETURNING VALUE(rv) TYPE string.
 
     METHODS data
       IMPORTING
@@ -568,11 +569,24 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
 
   METHOD utf8_passes_through.
     " Text is characters, not bytes: a comment, a value and a filter outside
-    " 7-bit ASCII come out unchanged, and pad counts characters.
+    " 7-bit ASCII come out unchanged, and pad counts characters. The source
+    " itself stays 7-bit ASCII, so the text is built from its UTF-8 bytes.
+    DATA lv_kaefer TYPE string.
+    DATA lv_zhuk   TYPE string.
+    DATA lv_upper  TYPE string.
+    DATA lv_lower  TYPE string.
+    lv_kaefer = `" K` && utf8( `C3A4` ) && `fer f` && utf8( `C3BC` ) && `r `.
+    lv_zhuk   = utf8( `D096D183D0BA` ).
+    lv_upper  = utf8( `D096D0A3D09A` ).
+    lv_lower  = utf8( `D0B6D183D0BA` ).
     cl_abap_unit_assert=>assert_equals(
-      exp = `" Käfer für Жук: ЖУК|жук  |`
-      act = text( iv_template = `" Käfer für {{name}}: {{name | upper}}|{{low | pad 5}}|`
-                  iv_json     = `{"name":"Жук","low":"жук"}` ) ).
+      exp = lv_kaefer && lv_zhuk && `: ` && lv_upper && `|` && lv_lower && `  |`
+      act = text( iv_template = lv_kaefer && `{{name}}: {{name | upper}}|{{low | pad 5}}|`
+                  iv_json     = `{"name":"` && lv_zhuk && `","low":"` && lv_lower && `"}` ) ).
+  ENDMETHOD.
+
+  METHOD utf8.
+    rv = cl_abap_codepage=>convert_from( source = iv_hex ).
   ENDMETHOD.
 
 
