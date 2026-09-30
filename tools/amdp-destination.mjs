@@ -44,12 +44,17 @@ function lostConnection(error) {
     /connection closed|socket hang up|connection reset|broken pipe/i.test(String(error?.message ?? ""));
 }
 
-function safeConnectionError(error, settings) {
-  let message = String(error?.message ?? error);
+function safeError(error, settings = {}) {
+  let message = String(error?.AMDP_REASON ?? error?.message ?? error);
+  // Driver errors may echo a URL, a DSN, or a connection string. Remove
+  // key=value fields first, then credentials wherever they occur elsewhere.
+  message = message.replace(/([\w.-]+\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s;&]+)/g, "$1[redacted]");
   for (const secret of [settings.password, settings.user].filter(Boolean)) {
-    message = message.split(String(secret)).join("[redacted]");
+    for (const spelling of [String(secret), encodeURIComponent(String(secret)), encodeURI(String(secret))]) {
+      if (spelling) message = message.replace(new RegExp(spelling.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "[redacted]");
+    }
   }
-  return `AMDP: HANA connection to ${settings.host}:${settings.port}, schema ${SCHEMA} failed: ${message.slice(0, 200)}`;
+  return `AMDP: HANA ${settings.host ?? "destination"}:${settings.port ?? ""}, schema ${SCHEMA} failed: ${message.slice(0, 200)}`;
 }
 
 export const amdpSessionSchema = (schema = SCHEMA) => [
@@ -207,11 +212,24 @@ export class AmdpDestination {
     // the source hash of what is deployed, so a body is created once and a
     // changed body is redeployed without anyone remembering to
     this.deployed = new Map();
+    this.deploying = new Map();
+    this.generation = 0;
+    this.connecting = undefined;
   }
 
   async #connect() {
     if (this.client !== undefined && this.client.readyState === "connected") return this.client;
+    if (this.connecting !== undefined) return this.connecting;
     if (this.client !== undefined) this.#forgetClient();
+    const generation = ++this.generation;
+    const pending = this.#openClient(generation);
+    this.connecting = pending;
+    try { return await pending; } finally {
+      if (this.connecting === pending) this.connecting = undefined;
+    }
+  }
+
+  async #openClient(generation) {
     // A host that was built without a HANA driver -- the browser preview,
     // where the bundle leaves hdb and tools/amdp-run.mjs out -- still has this
     // destination, because a developer needs "there is no HANA here" rather
@@ -237,14 +255,21 @@ export class AmdpDestination {
     this.settings = settings;
     try {
       const createClient = this.createClient ?? (await import("hdb")).default.createClient;
-      this.client = createClient(settings);
-      await new Promise((resolve, reject) => this.client.connect((e) => (e ? reject(e) : resolve())));
-      const [createSchema, setSchema] = amdpSessionSchema();
-      await this.#exec(createSchema).catch(() => undefined);
-      await this.#exec(setSchema);
+      const client = createClient(settings);
+      try {
+        await new Promise((resolve, reject) => client.connect((e) => (e ? reject(e) : resolve())));
+        const [createSchema, setSchema] = amdpSessionSchema();
+        await this.#exec(createSchema, client).catch(() => undefined);
+        await this.#exec(setSchema, client);
+        if (this.generation !== generation) throw new Error("session replaced while connecting");
+        this.client = client;
+      } catch (error) {
+        try { client.end(); } catch { /* already closed */ }
+        throw error;
+      }
     } catch (reason) {
-      this.#forgetClient();
-      await refuse(safeConnectionError(reason, settings));
+      if (this.generation === generation) this.#forgetClient();
+      await refuse(safeError(reason, settings));
     }
     // This is a separate HANA session from the system DatabaseClient. An
     // AMDP body names DDIC tables without a schema, just as it does on ABAP;
@@ -255,19 +280,22 @@ export class AmdpDestination {
     return this.client;
   }
 
-  #forgetClient() {
+  #forgetClient(expected = this.client) {
+    if (this.client !== expected) return;
     try { this.client?.end(); } catch { /* already closed */ }
     this.client = undefined;
+    this.generation++;
     // A server restart may have removed the procedures; rebuild them on the new session.
     this.deployed.clear();
+    this.deploying.clear();
   }
 
-  #exec(sql) {
+  #exec(sql, client = this.client) {
     return new Promise((resolve, reject) =>
-      this.client.exec(sql, (err, ...rest) => (err ? reject(err) : resolve(rest))));
+      client.exec(sql, (err, ...rest) => (err ? reject(err) : resolve(rest))));
   }
 
-  async #deploy(p, stack = new Set()) {
+  async #deploy(p, client, generation, stack = new Set()) {
     const identity = `${p.class}=>${p.method}`.toUpperCase();
     if (stack.has(identity)) throw new Error(`AMDP: cyclic native dependency at ${identity}`);
     const next = new Set(stack).add(identity);
@@ -278,13 +306,25 @@ export class AmdpDestination {
       const child = [...this.procedures.values()].find((one) =>
         `${one.class}=>${one.method}`.toUpperCase() === dependency);
       if (child === undefined) throw new Error(`AMDP: native dependency ${dependency} is absent from the manifest`);
-      await this.#deploy(child, next);
+      await this.#deploy(child, client, generation, next);
     }
+    if (generation !== this.generation || client !== this.client) throw new Error("AMDP: session replaced during deployment");
     if (this.deployed.get(p.module) === p.hash) return;
+    const active = this.deploying.get(p.module);
+    if (active?.generation === generation && active.hash === p.hash) return active.promise;
+    const promise = this.#deployOne(p, client, generation);
+    this.deploying.set(p.module, {generation, hash: p.hash, promise});
+    try { await promise; } finally {
+      if (this.deploying.get(p.module)?.promise === promise) this.deploying.delete(p.module);
+    }
+  }
+
+  async #deployOne(p, client, generation) {
     const name = `"${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"`;
-    await this.#exec(`CREATE SCHEMA "${SCHEMA}"`).catch(() => undefined);
-    await this.#exec(`DROP ${p.kind === "function" ? "FUNCTION" : "PROCEDURE"} ${name}`).catch(() => undefined);
-    await this.#exec(statement(p));
+    await this.#exec(`CREATE SCHEMA "${SCHEMA}"`, client).catch(() => undefined);
+    await this.#exec(`DROP ${p.kind === "function" ? "FUNCTION" : "PROCEDURE"} ${name}`, client).catch(() => undefined);
+    await this.#exec(statement(p), client);
+    if (generation !== this.generation || client !== this.client) throw new Error("AMDP: session replaced during deployment");
     this.deployed.set(p.module, p.hash);
     if (this.trace) console.log(`AMDP: deployed ${name}`);
   }
@@ -304,6 +344,9 @@ export class AmdpDestination {
     }
     this.client = undefined;
     this.sbx = undefined;
+    this.generation++;
+    this.deployed.clear();
+    this.deploying.clear();
   }
 
   /** The sandbox (backlog G.8): a body typed on a screen, run now.
@@ -319,9 +362,8 @@ export class AmdpDestination {
    *  cannot collide and a leftover object says who left it.
    *
    *  The interesting half is the failure: HANA answers a bad body with a
-   *  message that names the line and the column. That is the oracle we have
-   *  and no parser of ours would be, so it is passed through **verbatim** --
-   *  a sandbox that paraphrases the engine is worth nothing.
+   *  message that names the line and the column. Keep that position and text
+   *  while removing any credentials echoed by the driver.
    */
   /** The connection a typed body runs on, which is **not** the one the bridge
    *  deploys generated procedures with.
@@ -431,12 +473,10 @@ export class AmdpDestination {
       say("EV_ROWS", String(rows.length));
       say("EV_MS", String(Date.now() - started));
     } catch (e) {
-      // The engine's own words, twice. EV_ERROR carries the position moved
-      // back into the person's own line numbering, because a sandbox that
-      // points at line 2 of something the person cannot see is worse than
-      // one that says nothing. EV_RAW carries the message untouched, because
-      // the moment we start paraphrasing the oracle we stop having one.
-      const raw = String(e?.message ?? e);
+      // The engine's words, with credentials removed. EV_ERROR carries the position moved
+      // back into the person's own line numbering. EV_RAW retains the engine's
+      // original line numbers for diagnostics.
+      const raw = safeError(e, this.settings);
       say("EV_RAW", raw);
       say("EV_ERROR", raw.replace(/line (\d+)/g, (m, n) => `line ${Number(n) - SANDBOX_OFFSET}`));
     } finally {
@@ -446,6 +486,14 @@ export class AmdpDestination {
 
   /** the destination contract: (function module name, typed signature) */
   async call(name, signature) {
+    try {
+      return await this.#call(name, signature);
+    } catch (error) {
+      await refuse(safeError(error, this.settings), name);
+    }
+  }
+
+  async #call(name, signature) {
     if (String(name).trimEnd().toUpperCase() === "ZOSD_AMDP_SANDBOX") {
       return this.#sandbox(signature);
     }
@@ -471,34 +519,39 @@ export class AmdpDestination {
     // A socket can also die while still reporting "connected"; that case gets
     // the retry below after the first operation fails.
     const reconnecting = this.client !== undefined && this.client.readyState !== "connected";
+    let attemptClient;
     const invoke = async () => {
-      await this.#connect();
-      await this.#deploy(p);
+      const client = await this.#connect();
+      attemptClient = client;
+      const generation = this.generation;
+      await this.#deploy(p, client, generation);
       if (p.kind === "function") {
         // a table function is queried, not called
         const args = p.parameters.filter((x) => x.direction === "IN")
           .map((x) => `${x.name} => ${literal(inputs[x.name])}`).join(", ");
         const rows = await this.#exec(
-          `SELECT * FROM "${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"(${args})`);
+          `SELECT * FROM "${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"(${args})`, client);
         const returning = p.parameters.find((x) => x.direction === "RETURNING");
         return {[returning?.name ?? "rt"]: (rows.find(Array.isArray) ?? []).map((row) =>
           Object.fromEntries(Object.entries(row).map(([k, v]) =>
             [k.toLowerCase(), abapDateTime(Buffer.isBuffer(v) ? v.toString("utf8") : v)])))};
       }
       const method = {name: p.method, parameters: p.parameters.map((x) => ({...x, abapType: x.hanaType}))};
-      return call(this.client, `"${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"`, method, inputs, undefined);
+      return call(client, `"${SCHEMA}"."${p.class}=>${p.method.toUpperCase()}"`, method, inputs, undefined);
     };
     let result;
     try {
       result = await invoke();
     } catch (error) {
       if (!lostConnection(error)) throw error;
-      if (reconnecting) await refuse(safeConnectionError(error, this.settings));
-      this.#forgetClient();
+      // A failed dial was already shared by its waiters. Only an operation on
+      // an established client can spend this call's reconnect attempt.
+      if (attemptClient === undefined) throw error;
+      if (reconnecting) throw error;
+      this.#forgetClient(attemptClient);
       try {
         result = await invoke();
       } catch (retryError) {
-        if (lostConnection(retryError)) await refuse(safeConnectionError(retryError, this.settings));
         throw retryError;
       }
     }
