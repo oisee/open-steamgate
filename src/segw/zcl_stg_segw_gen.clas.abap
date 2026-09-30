@@ -227,6 +227,22 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
     TYPES tt_file TYPE STANDARD TABLE OF ty_file WITH DEFAULT KEY.
 
 * the model of a project, from the tables
+    CLASS-METHODS ab
+      IMPORTING
+        iv_bool        TYPE abap_bool
+      RETURNING
+        VALUE(rv_text) TYPE string.
+
+    CLASS-METHODS edm_setter
+      IMPORTING
+        iv_edm_type    TYPE string
+      RETURNING
+        VALUE(rv_text) TYPE string.
+
+    CLASS-METHODS banner
+      RETURNING
+        VALUE(rv_text) TYPE string.
+
     CLASS-METHODS build_model
       IMPORTING
         iv_project      TYPE string
@@ -353,18 +369,6 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
       CHANGING
         ct_properties TYPE tt_property.
 
-    CLASS-METHODS ab
-      IMPORTING
-        iv_bool        TYPE abap_bool
-      RETURNING
-        VALUE(rv_text) TYPE string.
-
-    CLASS-METHODS edm_setter
-      IMPORTING
-        iv_edm_type    TYPE string
-      RETURNING
-        VALUE(rv_text) TYPE string.
-
     CLASS-METHODS inline_type
       IMPORTING
         is_property    TYPE ty_property
@@ -388,10 +392,6 @@ CLASS zcl_stg_segw_gen DEFINITION PUBLIC CREATE PUBLIC.
         iv_digits        TYPE string
       RETURNING
         VALUE(rv_length) TYPE i.
-
-    CLASS-METHODS banner
-      RETURNING
-        VALUE(rv_text) TYPE string.
 
     CLASS-METHODS property_code
       IMPORTING
