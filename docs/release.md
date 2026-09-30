@@ -84,11 +84,9 @@ exclusion: the fork and upstream transpiler both declare MIT. Release builds
 now compile and link the `libs.lock.json` fork before bootstrap, for the VSIX,
 seeded binary, and Marketplace profile.
 
-The locked fork commit still lacks `only` and marks the whole registry dirty
-on a second run. The shared transpiler build applies
-`tools/osd-transpiler-only.patch` to that commit before compilation; the
-release jobs also link its `@abaplint/core` into the host so the registry and
-transpiler use the same class identities. The
+The locked fork commit contains upstream `only` (#1900) and registry reuse on
+a second run (#1921). The release jobs link its `@abaplint/core` into the host
+so the registry and transpiler use the same class identities. The
 archive check requires the compiled option and the runtime DATASET host, plus
 the lockfile ref stamped into the seed. The transpiler and runtime distributions
 are copied without their build-time `node_modules`, sources, and tests; their

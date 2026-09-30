@@ -7,7 +7,6 @@ case "${1:-}" in
   build)
     git clone --filter=blob:none "$OSD_TRANSPILER_REPO" "$clone"
     git -C "$clone" checkout "$OSD_TRANSPILER_REF"
-    git -C "$clone" apply "$(realpath tools/osd-transpiler-only.patch)"
     # The root supplies @types/node; ignore its recursive install script.
     npm --prefix "$clone" install --ignore-scripts --no-audit --no-fund
     for package in runtime transpiler extras cli; do
@@ -29,7 +28,7 @@ fi
 if ! grep -q 'this.options.only(obj)' "$clone/packages/transpiler/build/src/index.js" \
     || ! grep -q 'only?:' "$clone/packages/transpiler/build/src/types.d.ts" \
     || ! grep -q 'getConfig().get()' "$clone/packages/transpiler/build/src/validation.js"; then
-  echo "::error::Pinned transpiler build lacks the local only-option patch" >&2
+  echo "::error::Pinned transpiler build lacks only-option or registry-reuse support" >&2
   exit 1
 fi
 if [[ ! -d "$clone/node_modules" ]] || [[ ! -s "$clone/packages/transpiler/build/src/index.js" ]] || [[ ! -x "$clone/packages/cli/abap_transpile" ]]; then

@@ -104,7 +104,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/transpiler
-          key: transpiler-v1-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('libs.lock.json') }}-${{ hashFiles('tools/osd-ci-transpiler-build.sh', 'tools/osd-transpiler-only.patch') }}
+          key: transpiler-v1-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('libs.lock.json') }}-${{ hashFiles('tools/osd-ci-transpiler-build.sh') }}
       - name: Build the transpiler this tree is pinned to
         if: steps.transpiler_cache.outputs.cache-hit != 'true'
         run: bash tools/osd-ci-transpiler-build.sh build
