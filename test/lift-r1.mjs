@@ -388,6 +388,17 @@ ENDCLASS.`);
     expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(/^key types: ct_rows-code is Numeric\(10\), zosd_lift_txt-code is Character\(10\)/);
   });
 
+  for (const [what, into] of [
+    ["INTO CORRESPONDING FIELDS OF a component", "INTO CORRESPONDING FIELDS OF <ls_row>-text"],
+    ["INTO ... INDICATORS", "INTO <ls_row>-text INDICATORS NULL STRUCTURE nulls"],
+  ]) {
+    it(`R1 refuses ${what}`, () => {
+      const source = fixture(`      SELECT SINGLE text FROM zosd_lift_txt ${into} WHERE kind = <ls_row>-kind AND code = <ls_row>-code.`,
+        "    DATA nulls TYPE c LENGTH 1.\n");
+      expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(/^shape: /);
+    });
+  }
+
   it("the generated region of AFTER is exactly what the template renders", async () => {
     const {text, trace} = await render(modelR1(DEMO, "before"));
     expect(region(readFileSync(DEMO, "utf8"))).to.equal(text);

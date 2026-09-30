@@ -303,6 +303,11 @@ function selectParts(statement, row) {
     || f.getTokens().length !== 1)) throw shape();
   const columns = columnNodes.map((f) => word(direct(f, Expressions.SQLFieldName)[0]));
   const targets = direct(into, Expressions.SQLTarget);
+  // INTO holds its targets and nothing else: CORRESPONDING FIELDS OF,
+  // INDICATORS and the like change what is written
+  const intoExtra = children(into).find((child) => !(child.get() instanceof Expressions.SQLTarget)
+    && !["into", "(", ")", ","].includes(word(child)));
+  if (intoExtra) throw new Refusal("shape/select", `INTO has more than its targets: ${into.concatTokens()}`);
   if (columns.length !== targets.length) throw new Refusal("shape/select", "columns and targets differ in number");
   const mapped = columns.map((column, i) => {
     const target = targets[i].findDirectExpression(Expressions.Target);
