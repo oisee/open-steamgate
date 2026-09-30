@@ -118,7 +118,7 @@ function cloneName(t) {
   if (!CLONES.has(key)) CLONES.set(key, {name: `clone_${CLONES.size}`, type: t});
   return CLONES.get(key).name;
 }
-const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key", "refattr"]);
+const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key", "refattr", "dref_field"]);
 /** a value moved out of a place: a table (or a structure holding one) is copied */
 /** one condition of an internal table's WHERE over the row `row`
  * (ultra/itab: a nested component and IS [NOT] INITIAL read through fx) */
@@ -391,6 +391,12 @@ export function emitGo(program, pkg = "main", layers = null) {
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) out.push(...nativeMessageText(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_DATA"))) out.push(...nativeRttiData(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_JSON_PARSE"))) out.push(...nativeJsonParse());
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_AJSON_ENCODE"))) {
+    out.push("func Native_AJSON_ENCODE(s *abap.Session, input string) string { return abap.EncodeText(\"utf8\", input) }", "");
+  }
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_AJSON_DECODE"))) {
+    out.push("func Native_AJSON_DECODE(s *abap.Session, input string) string { return abap.DecodeText(\"utf8\", false, input) }", "");
+  }
   out.push(...nativeCodepage(classes));
   if (classes.some((c) => c.name === "CL_AMC_CHANNEL_MANAGER")) out.push(...amcGlue(program));
   out.push(...tableRegistry(layers?.tables ? {...program, tables: layers.tables} : program));
@@ -939,6 +945,7 @@ function place(p, ctx) {
     case "const": return p.go;
     case "sy": return `s.Sy.${p.field}`;
     case "field": return `${PLACES.has(p.base.e) || p.base.e === "const" ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
+    case "dref_field": return `abap.DerefAs[${goType(p.struct)}](${expr(p.base, ctx)}, ${JSON.stringify(`->${p.name}`)}).${ident(p.name)}`;
     case "fs": return p.type.k === "data" ? ident(p.name) : `(*${ident(p.name)})`;
     case "refattr": if (p.base.type.intf) return `(*${expr(p.base, ctx)}.${accessorName(p.name)}())`;
       return POLY.has(p.base.type.name) && !p.base.type.intf ? `${expr(p.base, ctx)}.As_${typeName(p.base.type.name)}().${ident(p.name)}` : `${expr(p.base, ctx)}.${ident(p.name)}`;
@@ -1834,7 +1841,7 @@ const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.Sqr
 
 function expr(e, ctx) {
   switch (e.e) {
-    case "var": case "attr": case "static": case "field": case "fs": case "row": case "row_key": case "refattr": return place(e, ctx);
+    case "var": case "attr": case "static": case "field": case "fs": case "row": case "row_key": case "refattr": case "dref_field": return place(e, ctx);
     case "zero": return zero(e.type) === "nil" ? `(${goType(e.type)})(nil)` : zero(e.type);
     case "case_fn": return `abap.${e.upper ? "ToUpper" : "ToLower"}(${expr(e.x, ctx)})`;
     case "table_lit": return `${goType(e.type)}{${e.rows.map((r) => copied(expr(r, ctx), r.type, r)).join(", ")}}`;
@@ -1893,6 +1900,8 @@ function expr(e, ctx) {
     case "exc_class": return `("\\\\CLASS=" + ${expr(e.x, ctx)}.Class)`;
     case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr(e.max, ctx)})`;
     case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
+    case "find_occ": return `charsearch.FindOcc(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${expr(e.occ, ctx)})`;
+    case "reverse": return `charsearch.Reverse(${expr(e.x, ctx)})`;
     case "xstrlen": return `int32(len(${expr(e.x, ctx)}))`;
     case "uccpi": return `abap.Uccpi(${expr(e.x, ctx)})`;
     case "substr": {
@@ -1988,6 +1997,12 @@ function conv(e, ctx) {
   const from = e.from.k;
   const to = e.to.k;
   switch (e.kind) {
+    case "char_to_struct": {
+      let off = 0;
+      const total = e.fields.reduce((n, f) => n + f.len, 0);
+      const fields = e.fields.map((f) => { const value = `${ident(f.name)}: abap.SubC(v, ${total}, ${off}, ${f.len})`; off += f.len; return value; });
+      return `func(v string) ${goType(e.to)} { return ${goType(e.to)}{${fields.join(", ")}} }(${x})`;
+    }
     case "struct_layout":
       return `func(v ${goType(e.from)}) ${goType(e.to)} { return ${goType(e.to)}{${e.pairs.map(([t, f]) => `${ident(t)}: v.${ident(f)}`).join(", ")}} }(${x})`;
     case "num":

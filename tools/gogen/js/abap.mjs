@@ -318,6 +318,19 @@ export function Find(v, sub, off) {
   const i = rest.indexOf(sub);
   return i < 0 ? -1 : off + [...rest.slice(0, i)].length;
 }
+export function FindOcc(v, sub, occ) {
+  if (sub === "") return Find(v, sub, 0);
+  if (occ === 0) throw new AbapError("NOT_COMPILED", "find( ) OCC = 0 was not measured");
+  const positions = [];
+  for (let at = 0; at <= v.length;) {
+    const i = v.indexOf(sub, at);
+    if (i < 0) break;
+    positions.push([...v.slice(0, i)].length);
+    at = i + sub.length;
+  }
+  return positions[occ > 0 ? occ - 1 : positions.length + occ] ?? -1;
+}
+export const Reverse = (v) => [...v].reverse().join("");
 export const CO = (a, b) => [...a].every((c) => b.includes(c));
 export const CS = (a, b) => b === "" || a.toUpperCase().includes(b.toUpperCase());
 export function DateAdd(date, days) {

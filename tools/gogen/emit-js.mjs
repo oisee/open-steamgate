@@ -325,6 +325,7 @@ function place(p, ctx) {
       return `${cls}.${ident(attr)}`;
     }
     case "field": return `${["var", "attr", "static", "field", "fs", "row", "refattr", "const"].includes(p.base.e) ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
+    case "dref_field": return `${expr(p.base, ctx)}.get().${ident(p.name)}`;
     case "fs": return ident(p.name);
     case "refattr": return `${expr(p.base, ctx)}.${ident(p.name)}`;
     case "row": {
@@ -869,7 +870,7 @@ const FN = {SIN: "Math.sin", COS: "Math.cos", TAN: "Math.tan", SQRT: "abap.SqrtF
 
 function expr(e, ctx) {
   switch (e.e) {
-    case "var": case "attr": case "static": case "field": case "fs": case "row": case "refattr": return place(e, ctx);
+    case "var": case "attr": case "static": case "field": case "fs": case "row": case "refattr": case "dref_field": return place(e, ctx);
     case "zero": return zero(e.type);
     case "case_fn": return `abap.${e.upper ? "ToUpper" : "ToLower"}(${expr(e.x, ctx)})`;
     case "table_lit": return `[${e.rows.map((r) => moved(r, ctx)).join(", ")}]`;
@@ -930,6 +931,8 @@ function expr(e, ctx) {
     case "exc_class": return `("\\\\CLASS=" + ${expr(e.x, ctx)}.cls)`;
     case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr(e.max, ctx)})`;
     case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
+    case "find_occ": return `abap.FindOcc(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${expr(e.occ, ctx)})`;
+    case "reverse": return `abap.Reverse(${expr(e.x, ctx)})`;
     case "xstrlen": return `${expr(e.x, ctx)}.length`;
     case "uccpi": return `abap.Uccpi(${expr(e.x, ctx)})`;
     case "substr": {
@@ -1027,6 +1030,12 @@ function conv(e, ctx) {
   const from = e.from.k;
   const to = e.to.k;
   switch (e.kind) {
+    case "char_to_struct": {
+      let off = 0;
+      const total = e.fields.reduce((n, f) => n + f.len, 0);
+      const fields = e.fields.map((f) => { const value = `${ident(f.name)}: abap.SubC(v, ${total}, ${off}, ${f.len})`; off += f.len; return value; });
+      return `((v) => ({${fields.join(", ")}}))(${x})`;
+    }
     case "struct_layout":
       return `((v) => ({${e.pairs.map(([t, f]) => `${ident(t)}: v.${ident(f)}`).join(", ")}}))(${x})`;
     case "num":

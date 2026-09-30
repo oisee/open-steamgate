@@ -170,10 +170,21 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   // named OWNER:LOCAL: wanted before any class compiles, so the owner's
   // CREATE OBJECT ... TYPE lcl_x finds its class
   program.locals = new Map();
+  program.localInterfaces = new Map();
   LOCAL_DEFS.clear();
   const localDefs = [];
   for (const obj of reg.getObjects()) {
     if (!(obj instanceof abaplint.Objects.Class) || !wanted.includes(obj.getName().toLowerCase()) || (!includeTests && !LOCAL_CLASSES.has(upper(obj.getName())))) continue;
+    if (LOCAL_CLASSES.has(upper(obj.getName()))) {
+      const top = new abaplint.SyntaxLogic(reg, obj).run().spaghetti.getTop();
+      for (const file of obj.getABAPFiles()) {
+        for (const match of file.getRaw().matchAll(/\bINTERFACE\s+(LIF_[A-Z0-9_]+)\s*\./gi)) {
+          const name = upper(match[1]);
+          const def = top.getChildren().find((s) => s.findInterfaceDefinition(name))?.findInterfaceDefinition(name);
+          if (def) program.localInterfaces.set(`${upper(obj.getName())}|${name}`, {def, source: file.getRaw()});
+        }
+      }
+    }
     for (const l of localClasses(reg, obj, includeTests === true || includeTests?.has?.(upper(obj.getName())))) {
       program.locals.set(`${upper(obj.getName())}|${l.local}`, l.name);
       program.wanted.add(l.name);
@@ -648,6 +659,11 @@ const NATIVE = new Map([
   // both are @KERNEL code on Node, and the JS emitter has neither
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "Native_DESCRIBE_BY_DATA"],
   ["CL_SXML_STRING_READER:LCL_JSON_PARSER=>PARSE", "Native_JSON_PARSE"],
+  // AJSON chooses a converter by a dynamic class/method name and falls back
+  // to the older converter on CX_SY_DYN_CALL_ILLEGAL_CLASS. Both paths are
+  // UTF-8 on Node; use the existing host text conversion for this pair.
+  ["ZCL_AJSON:LCL_UTILS=>STRING_TO_XSTRING_UTF8", "Native_AJSON_ENCODE"],
+  ["ZCL_AJSON:LCL_UTILS=>XSTRING_TO_STRING_UTF8", "Native_AJSON_DECODE"],
   ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~UNESCAPE_URL", "abap.UnescapeURL"],
   // the value text of CL_ABAP_UNIT_ASSERT's messages: Object.keys( ) of a
   // structure and an object's constructor name are @KERNEL lines in
@@ -1073,7 +1089,13 @@ function typeOf(t, where, program) {
   // generic value is a binding to a typed slot (abap.Data in Go)
   if (t instanceof BasicTypes.AnyType || t instanceof BasicTypes.DataType || t instanceof BasicTypes.SimpleType) return {k: "data"};
   if (t instanceof BasicTypes.TableType && (t.getRowType() instanceof BasicTypes.AnyType || t.getRowType() instanceof BasicTypes.DataType)) return {k: "data", table: true};
-  if (t instanceof BasicTypes.DataReference) return {k: "dref"};
+  if (t instanceof BasicTypes.DataReference) {
+    const inner = t.getType();
+    if (inner && !(inner instanceof BasicTypes.AnyType) && !(inner instanceof BasicTypes.DataType)) {
+      try { return {k: "dref", to: typeOf(inner, where, program)}; } catch (e) { if (!(e instanceof Unsupported)) throw e; }
+    }
+    return {k: "dref"};
+  }
   // REF TO object: the root of every class, any object fits
   if (t instanceof BasicTypes.GenericObjectReferenceType) return {k: "ref", name: "OBJECT", intf: true};
   // d and t: their characters, initial all zeros
@@ -3091,7 +3113,7 @@ function lvalue(target, ctx) {
     if (isExpr(kids[i], Expressions.TableExpression)) {
       place = rowOf(place, kids[i], ctx);
     } else if (isTok(kids[i], "->") && isExpr(kids[i + 1], Expressions.AttributeName)) {
-      place = refAttribute(place, kids[i + 1], ctx, true);
+      place = place.type.k === "dref" ? dataRefField(place, kids[i + 1], ctx) : refAttribute(place, kids[i + 1], ctx, true);
       i += 1;
     } else if (isTok(kids[i], "-") && isExpr(kids[i + 1], Expressions.ComponentName)) {
       const f = fieldOf(ctx, place.type, kids[i + 1].concatTokens(), target.concatTokens());
@@ -3123,6 +3145,13 @@ function refAttribute(base, attrNode, ctx, write = false) {
     throw new Unsupported(`${base.type.name}->${name}: not an instance attribute`);
   }
   return {e: "refattr", base, name, type: typeOf(a.getType(), `${base.type.name}->${name}`, ctx.program)};
+}
+
+function dataRefField(base, attrNode, ctx) {
+  const name = upper(attrNode.concatTokens());
+  if (base.type.to?.k !== "struct") throw new Unsupported(`-> on a dref without a structured target`);
+  const f = fieldOf(ctx, base.type.to, name, `${name} of data reference`);
+  return {e: "dref_field", base, name: f.name, type: f.type, struct: base.type.to};
 }
 
 /** tab[ n ] or tab[ component = value ... ]: the addressed row; a missing
@@ -3679,6 +3708,9 @@ function fieldChain(n, ctx) {
     } else if (isTok(kids[i], "->") && isExpr(kids[i + 1], Expressions.AttributeName) && place.type.k === "ref") {
       place = refAttribute(place, kids[i + 1], ctx);
       i += 1;
+    } else if (isTok(kids[i], "->") && isExpr(kids[i + 1], Expressions.AttributeName) && place.type.k === "dref") {
+      place = dataRefField(place, kids[i + 1], ctx);
+      i += 1;
     } else if (isTok(kids[i], "->") && upper(kids[i - 1].concatTokens()) === "ME") {
       place = {e: "attr", name: upper(kids[i + 1].concatTokens()), type: findAttribute(ctx, upper(kids[i + 1].concatTokens())).type};
       i += 1;
@@ -3727,16 +3759,39 @@ function substring(base, off, len, node) {
 
 const CHAR_UTILITIES = {NEWLINE: "\n", CR_LF: "\r\n", HORIZONTAL_TAB: "\t", FORM_FEED: "\f", VERTICAL_TAB: "\v"};
 
+// abaplint resolves a local interface's constant types but leaves VALUEs
+// that refer to a class constant undefined. Recover only declared VALUEs;
+// an unresolved expression remains a refusal in registerConst.
+function localInterfaceConstant(id, attr, local, reg) {
+  const resolve = (name, source) => {
+    const m = new RegExp(`\\b${name}\\s+TYPE\\s+[^\\n,.]+?\\s+VALUE\\s+([^,\\n.]+)`, "i").exec(source);
+    if (!m) return undefined;
+    const value = m[1].split('"')[0].trim();
+    const ref = /^([\w/]+)=>([\w]+)$/i.exec(value);
+    if (!ref) return value;
+    return reg.getObject("CLAS", upper(ref[1]))?.getDefinition()?.getAttributes().getConstants()
+      .find((c) => upper(c.getName()) === upper(ref[2]))?.getValue();
+  };
+  let value = id.getValue?.();
+  if (value && typeof value === "object") {
+    const begin = new RegExp(`\\bBEGIN\\s+OF\\s+${attr}\\s*,([\\s\\S]*?)\\bEND\\s+OF\\s+${attr}\\s*[,.]`, "i").exec(local.source)?.[1];
+    if (begin) value = Object.fromEntries(Object.keys(value).map((k) => [k, resolve(k, begin)]));
+  } else if (value === undefined) value = resolve(attr, local.source);
+  return {...id, getType: () => id.getType(), getValue: () => value};
+}
+
 /** zif_x=>c_y or zcl_x=>attr */
 function resolveStatic(owner, attr, ctx) {
   if (owner === "CL_ABAP_CHAR_UTILITIES" && CHAR_UTILITIES[attr] !== undefined) return {e: "chars", value: CHAR_UTILITIES[attr], type: C(1)};
   const intf = ctx.reg.getObject("INTF", owner)?.getDefinition();
   const clas = clasDef(ctx.reg, owner);
-  const def = intf ?? clas;
+  const local = ctx.program.localInterfaces.get(`${ctx.program.currentOwner}|${owner}`);
+  const def = intf ?? clas ?? local?.def;
   if (def === undefined) throw new Unsupported(`${owner}=>${attr}: ${owner} is not in the program`);
   const c = def.getAttributes().getConstants().find((x) => upper(x.getName()) === attr);
   if (c !== undefined) {
-    const go = registerConst(ctx.program, `${owner}~${attr}`, c, owner);
+    const go = registerConst(ctx.program, `${ctx.program.currentOwner ?? owner}:${owner}~${attr}`,
+      local ? localInterfaceConstant(c, attr, local, ctx.reg) : c, owner);
     if (go === undefined) throw new Unsupported(`constant ${owner}=>${attr} is outside the subset`);
     return {e: "const", go, type: ctx.program.consts.get(go).type};
   }
@@ -5572,12 +5627,20 @@ function call(chain, ctx, statement, hint) {
     if (["data", "i", "int8", "f", "struct", "table", "ref", "dref", "exc"].includes(x.type.k)) throw new Unsupported(`strlen( ) of a ${x.type.k}`);
     return {e: "strlen", x, type: I};
   }
+  if (receiver === null && owner === null && name === "REVERSE" && !ctx.signatures.has(name)) {
+    const x = source(direct, ctx);
+    if (!charlike(x.type)) throw new Unsupported(`reverse( ) of a ${x.type.k}`);
+    return {e: "reverse", x: convert(x, S), type: S};
+  }
   if (receiver === null && owner === null && name === "FIND" && !ctx.signatures.has(name)) {
     // find( val = s sub = x [off = n] ): measured on A4H, see abap.Find
     const arg = (p) => named?.findDirectExpressions(Expressions.ParameterS).find((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()) === p)?.findDirectExpression(Expressions.Source);
     const given = (named?.findDirectExpressions(Expressions.ParameterS) ?? []).map((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()));
-    if (!named || given.some((p) => !["VAL", "SUB", "OFF"].includes(p)) || !arg("VAL") || !arg("SUB")) throw new Unsupported(`find( ) form: ${chain.concatTokens()}`);
-    return {e: "find", val: convert(source(arg("VAL"), ctx), S), sub: convert(source(arg("SUB"), ctx), S), off: arg("OFF") ? convert(source(arg("OFF"), ctx, I), I) : null, type: I};
+    if (!named || given.some((p) => !["VAL", "SUB", "OFF", "OCC"].includes(p)) || !arg("VAL") || !arg("SUB") || (arg("OCC") && arg("OFF"))) throw new Unsupported(`find( ) form: ${chain.concatTokens()}`);
+    const val = convert(source(arg("VAL"), ctx), S);
+    const sub = convert(source(arg("SUB"), ctx), S);
+    if (arg("OCC")) return {e: "find_occ", val, sub, occ: convert(source(arg("OCC"), ctx, I), I), type: I};
+    return {e: "find", val, sub, off: arg("OFF") ? convert(source(arg("OFF"), ctx, I), I) : null, type: I};
   }
   if (receiver === null && name === "XSTRLEN" && !ctx.signatures.has(name)) {
     const x = source(direct, ctx);
@@ -6009,6 +6072,13 @@ export function convert(expr, to) {
   // x / xstring into characters: the hex digits, upper case, zeros kept; a c
   // target cuts them to its length (A4H 2026-09-23: x'0A0B' into c(3) is 0A0)
   if ((to.k === "string" || to.k === "c") && (from.k === "x" || from.k === "xstring")) return ok("x2s");
+  if (to.k === "struct" && charlike(from) && PROGRAM) {
+    const fields = PROGRAM.structs.get(to.go)?.fields;
+    if (fields?.length && fields.every((f) => f.type.k === "c" && Number.isInteger(f.type.len))) {
+      return {e: "conv", kind: "char_to_struct", from, to, x: expr, type: to,
+        fields: fields.map((f) => ({name: f.name, len: f.type.len}))};
+    }
+  }
   // characters into x / xstring (A4H 2026-09-24, ZCL_GOGEN_T_XCONV, and the
   // same rule for UPDATE SET raw = string, ZCL_GOGEN_T_RAWSTR): the longest
   // prefix of upper-case hex digits (a lower-case letter, a blank or a G ends
