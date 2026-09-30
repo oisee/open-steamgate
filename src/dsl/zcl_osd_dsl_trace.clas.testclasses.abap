@@ -29,6 +29,17 @@ CLASS ltcl_trace IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lo_sidecar->get( '/generator' ) exp = 'sample' ).
     cl_abap_unit_assert=>assert_equals( act = lo_sidecar->get( '/template' ) exp = 'sample.tpl' ).
     cl_abap_unit_assert=>assert_equals( act = strlen( lo_sidecar->get( '/model' ) ) exp = 71 ).
+    cl_abap_unit_assert=>assert_true( xsdbool( lo_sidecar->get( '/model' ) CP `sha256:*` ) ).
+    " the same model hashes the same, a changed model differently
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_ajson=>parse( zcl_osd_dsl_trace=>sidecar( iv_generator = 'sample' iv_template = 'sample.tpl'
+              io_model = zcl_ajson=>parse( lo_model->stringify( ) ) is_result = ls_result ) )->get( '/model' )
+      exp = lo_sidecar->get( '/model' ) ).
+    lo_model->set_string( iv_path = '/items/1/value' iv_val = 'y' ).
+    cl_abap_unit_assert=>assert_differs(
+      act = zcl_ajson=>parse( zcl_osd_dsl_trace=>sidecar( iv_generator = 'sample' iv_template = 'sample.tpl'
+              io_model = lo_model is_result = ls_result ) )->get( '/model' )
+      exp = lo_sidecar->get( '/model' ) ).
     cl_abap_unit_assert=>assert_equals( act = lo_sidecar->get_integer( '/lines/1/line' ) exp = 1 ).
     cl_abap_unit_assert=>assert_equals( act = lo_sidecar->get_integer( '/lines/1/template_line' ) exp = 1 ).
     cl_abap_unit_assert=>assert_equals( act = lo_sidecar->get( '/lines/1/path' ) exp = '/items/1/value' ).

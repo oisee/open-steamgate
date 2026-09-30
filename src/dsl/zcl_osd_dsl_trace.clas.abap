@@ -40,6 +40,8 @@ CLASS zcl_osd_dsl_trace IMPLEMENTATION.
     DATA ls_trace TYPE zcl_osd_tpl=>ty_trace.
     DATA lv_path TYPE string.
     DATA lv_index TYPE i.
+    " open-abap-core computes the digest with the host's crypto module; the
+    " browser preview maps it to crypto-browserify (webpack.config.cjs)
     cl_abap_message_digest=>calculate_hash_for_char(
       EXPORTING if_algorithm = 'SHA256' if_data = io_model->stringify( )
       IMPORTING ef_hashstring = lv_hash ).
