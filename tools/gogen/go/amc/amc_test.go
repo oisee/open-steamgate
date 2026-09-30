@@ -302,3 +302,31 @@ func TestDefineAgainKeepsSubscriptions(t *testing.T) {
 		t.Fatal("a Define after Subscribe orphaned the subscription")
 	}
 }
+
+// a receiver that raises (a CX in RECEIVE) leaves the rest of the batch
+// queued, ahead of what was published since (the critic on #263)
+func TestPanicKeepsTheRest(t *testing.T) {
+	b := testBroker()
+	a := &session{}
+	b.Subscribe("ZOSD_AMC_TEST", "/text", "", at(a, "001", "A"), "r")
+	from := at(&session{}, "001", "A")
+	for _, p := range []string{"one", "boom", "three"} {
+		b.Publish("ZOSD_AMC_TEST", "/text", "", from, false, Message{Type: "TEXT", Payload: p})
+	}
+	var seen []string
+	deliver := func(_ any, m Message) {
+		seen = append(seen, m.Payload.(string))
+		if m.Payload == "boom" {
+			panic("raised in RECEIVE")
+		}
+	}
+	func() {
+		defer func() { recover() }()
+		b.Pump(a, deliver)
+	}()
+	b.Publish("ZOSD_AMC_TEST", "/text", "", from, false, Message{Type: "TEXT", Payload: "four"})
+	b.Pump(a, deliver)
+	if fmt.Sprint(seen) != "[one boom three four]" {
+		t.Fatalf("%v", seen)
+	}
+}

@@ -26,6 +26,7 @@ package amc
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -210,15 +211,6 @@ func (s *Subscription) Stop() {
 	s.b.mu.Unlock()
 }
 
-// Check is what CREATE_MESSAGE_PRODUCER checks before a SEND: that the
-// channel exists and at.Program may send on it.
-func (b *Broker) Check(app, path, activity string, at Endpoint) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	_, err := b.channel(app, path, activity, at.Program)
-	return err
-}
-
 // Publish is SEND: the message is queued for every matching subscription at
 // once and the sender goes on; it never waits for a receiver.
 func (b *Broker) Publish(app, path, extension string, from Endpoint, suppressEcho bool, m Message) error {
@@ -341,7 +333,19 @@ func (b *Broker) Pump(session any, deliver Deliver) bool {
 	in := b.inboxOf(session)
 	b.mu.Unlock()
 	delivered := false
-	for _, d := range in.take() {
+	q := in.take()
+	// one at a time: a receiver that raises leaves the rest queued, ahead of
+	// anything published since, as Node keeps them pending
+	defer func() {
+		if len(q) > 0 {
+			in.mu.Lock()
+			in.queue = append(append([]delivery{}, q...), in.queue...)
+			in.mu.Unlock()
+		}
+	}()
+	for len(q) > 0 {
+		d := q[0]
+		q = q[1:]
 		if !d.sub.active.Load() {
 			continue
 		}
@@ -478,3 +482,6 @@ func (b *Broker) Caller(session any) string {
 
 // Seconds is UP TO n SECONDS as a duration.
 func Seconds(n float64) time.Duration { return time.Duration(n * float64(time.Second)) }
+
+// TypeOf names a value's Go type, for a delivery that cannot be made.
+func TypeOf(v any) string { return fmt.Sprintf("%T", v) }

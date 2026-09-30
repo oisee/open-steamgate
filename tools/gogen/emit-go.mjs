@@ -829,15 +829,20 @@ function amcGlue(program) {
     if (!m || !definable(program, m) || !CLASSES.has("ZCL_AMC_MESSAGE_CONTEXT")) continue;
     const msgType = goType(m.params.find((p) => p.name === "I_MESSAGE").type);
     cases.push(`\t\tcase ${JSON.stringify(type)}:`,
-      `\t\t\tif r, ok := receiver.(interface{ ${signature({}, {...m, name: `${intf}~RECEIVE`}, true)} }); ok {`,
-      `\t\t\t\tmsg, _ := m.Payload.(${msgType})`,
-      `\t\t\t\tr.${typeName(`${intf}~RECEIVE`)}(s, msg, New_ZCL_AMC_MESSAGE_CONTEXT(s, m.Client, m.Username))`,
-      `\t\t\t}`);
+      `\t\t\tr, ok := receiver.(interface{ ${signature({}, {...m, name: `${intf}~RECEIVE`}, true)} })`,
+      `\t\t\tmsg, okMsg := m.Payload.(${msgType})`,
+      // a receiver or a message of another shape is a host error, never a
+      // message that quietly does not arrive
+      `\t\t\tif !ok || !okMsg {`,
+      `\t\t\t\tpanic(abap.NotCompiled("AMC delivery", "a "+amc.TypeOf(receiver)+" cannot receive a ${type} message ("+amc.TypeOf(m.Payload)+")"))`,
+      `\t\t\t}`,
+      `\t\t\tr.${typeName(`${intf}~RECEIVE`)}(s, msg, New_ZCL_AMC_MESSAGE_CONTEXT(s, m.Client, m.Username))`);
   }
   return ["// AMCDefine gives the broker this program's SAMC channels (go/amc).", "func AMCDefine() {", "\tamc.Current().Define(",
     ...channels, "\t)", "}", "",
     "// AMCDeliver runs an AMC receiver in session s (go/amc).", "func AMCDeliver(s *abap.Session) amc.Deliver {",
-    "\treturn func(receiver any, m amc.Message) {", "\t\tswitch m.Type {", ...cases, "\t\t}", "\t}", "}", ""];
+    "\treturn func(receiver any, m amc.Message) {", "\t\tswitch m.Type {", ...cases,
+    "\t\tdefault:", "\t\t\tpanic(abap.NotCompiled(\"AMC delivery\", \"no receiver for a \"+m.Type+\" message in this program\"))", "\t\t}", "\t}", "}", ""];
 }
 
 function method(cls, m) {

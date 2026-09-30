@@ -796,8 +796,9 @@ function nativeArgs(specs, ctx) {
  * broker, as tools/osd-amc.mjs patches them on Node. A refusal comes back as
  * text and is raised as CX_AMC_ERROR with that reason, the way the Node host
  * raises it. Who is calling is decided when the program is compiled: every
- * method that names the AMC API enters its class pool on the session while
- * it runs (amcProgram below), where Node reads the class off the call stack.
+ * method of a class whose source names the AMC API enters its class pool on
+ * the session while it runs (amcProgram below), where Node reads the class
+ * off the call stack.
  */
 const AMC_HOST = new Map([
   ["CL_AMC_CHANNEL_MANAGER=>CREATE_MESSAGE_PRODUCER", {op: "create_producer", cls: "ZCL_AMC_PRODUCER",
@@ -811,7 +812,7 @@ const AMC_HOST = new Map([
   ["ZCL_AMC_CONSUMER=>IF_AMC_MESSAGE_CONSUMER~START_MESSAGE_DELIVERY", {op: "start", args: {RECEIVER: "I_RECEIVER"}}],
   ["ZCL_AMC_CONSUMER=>IF_AMC_MESSAGE_CONSUMER~STOP_MESSAGE_DELIVERY", {op: "stop", args: {RECEIVER: "I_RECEIVER"}}],
 ]);
-// a method that names one of these calls the AMC API
+// a class whose source names one of these calls the AMC API
 const AMC_CALLER = /\b(CL_AMC_CHANNEL_MANAGER|IF_AMC_MESSAGE_PRODUCER\w*|IF_AMC_MESSAGE_CONSUMER)\b/i;
 // the program the SAMC authorities name: a class's class pool
 const amcProgramOf = (cls) => upper(cls).padEnd(30, "=") + "CP";
@@ -1424,7 +1425,11 @@ function classIr(ctx0, obj) {
       compiled.unshift(...ctx.inits);
       const ir = {...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
         body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}};
-      if (AMC_CALLER.test(node.concatTokens())) ir.amcProgram = amcProgramOf(ctx.owner);
+      // by the class, not the method: a producer kept in an attribute and
+      // sent from a method that never names the type is this class's call
+      // too (the critic on #263). The AMC classes are not callers, as Node's
+      // callerProgram skips them
+      if (AMC_CALLER.test(file.getRaw()) && !/^(CL_AMC_|ZCL_AMC_)/.test(upper(ctx.owner))) ir.amcProgram = amcProgramOf(ctx.owner);
       if (name === "CONSTRUCTOR") cls.constructor = ir; else cls.methods.push(ir);
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;

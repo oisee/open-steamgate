@@ -812,12 +812,17 @@ its mechanism is the first thing step 5 has to demonstrate.
   consumer's START/STOP; `frontend.mjs` `AMC_HOST`), emits `AMCDefine` with
   the program's SAMC channels read at build time and `AMCDeliver`, which calls
   a receiver's `RECEIVE` by its method alone with a `ZCL_AMC_MESSAGE_CONTEXT`.
-- **Who is calling is compiled, not read off a stack.** A method that names
-  the AMC API enters its class pool on the session while it runs
-  (`amc.Current().Enter`); Node reads the nearest class off the JavaScript
-  stack (`callerProgram`). The SAMC decisions are the same:
+- **Who is calling is compiled, not read off a stack.** Every method of a
+  class whose source names the AMC API enters its class pool on the session
+  while it runs (`amc.Current().Enter`); Node reads the nearest class off
+  the JavaScript stack (`callerProgram`). The SAMC decisions are the same:
   `ZCL_OSD_AMC_TEST` runs its 8 methods on both hosts with the same result,
   `UNAUTHORISED_SEND` included (ANORMALIES `amc-caller-identity`).
+- **A receiver runs in the waiter's LUW** on Go, where Node gives each
+  delivery a dialog step of its own; a receiver that must keep its writes
+  commits (ANORMALIES `amc-go-delivery-luw`). A receiver that raises leaves
+  the messages after it queued; one of another shape is a host error, never
+  a silent loss.
 - **Not yet:** WAIT does not release `WorkProcess` on Go. A producer in
   another step waits until the WAIT ends or times out, where Node lets it run
   (ANORMALIES `amc-go-wait-holds-work-process`). Communication type 1
