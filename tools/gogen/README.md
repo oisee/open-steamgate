@@ -1528,3 +1528,67 @@ the design; the test assumes Node. Not a gap in OSGo; it is outside
 `compiler-deferred` because that class admits the CHECK test only. Node
 itself fails two e2e tests at both commits (the status object page's
 Services section, the Workbench's "Browse only"), which are not counted.
+
+## ABAP Unit, measured 2026-09-29
+
+`node tools/gogen/unit.mjs` discovers the repository's
+`test/unit/*.clas.testclasses.abap` and `src/**/*.clas.testclasses.abap`,
+compiles each owner with its call and type closure, and returns JSON rows
+`{class, testclass, method, status, message, alerts}`. It compiles test
+includes only for selected owners. A reachable stub is listed in `alerts`
+even when that branch was not executed. The runner uses the transpiler's
+class/method discovery, then calls `class_setup`, `setup`, the test method,
+`teardown`, and `class_teardown` in SAP's documented order. Each test
+method gets a fresh instance; teardown runs after a failed method, later
+methods still run, and class teardown runs at the end. The ordinary Node
+runner stops on the first exception (see ANORMALIES). The comparison oracle
+is `node-unit-results.mjs`, which instruments the Node metadata and follows
+the SAP lifecycle. A DB-using class gets a fresh in-memory
+SQLite database built from the transpiler's `DatabaseSetup` schema and
+generated rows plus `test/seed.mjs` rows. Explicitly skipped methods remain
+`SKIPPED`. An unbuilt owner cannot make another owner disappear: the full
+inventory builds them one by one.
+
+Run `npm run transpile` first for the Node oracle, then
+`node tools/gogen/unit-compare.mjs --class ZCL_OSD_FORM_TEST --class ZCL_OSD_TIMER_TEST`.
+The comparison uses the instrumented Node Unit results described above. Its
+structured `_unit_open.mjs` path uses a different test-object lifecycle, so
+it is not the oracle. The compare output separates same, different,
+Node-only, Go-only, and configured skips. `node --test tools/gogen/unit.test.mjs`
+checks pass, assertion failure, exception, hook order, and a dropped method.
+
+On this tree: **44 of 50 local test classes** built and ran at least one
+method, across 25 of 28 owners. Of 271 repository methods, 56 matched
+Node, 186 differed, 28 were Node-only because three owners did not build,
+and one was skipped on both. Go returned 56 successes and 186 failures;
+the 255 methods with static stub alerts are a separate risk count and are
+not counted as failures unless they executed a stub. The three classes
+green on both runtimes have 16 methods. Full method results and first
+reasons are in the local report.
+
+AMD Ryzen AI 7 PRO 350 w/ Radeon 860M, `nproc` 8, 2026-09-29. Each
+runtime was timed alone under `flock /tmp/osd-heavy.lock` with the same
+`/usr/bin/time -f '%e %M'` instrument; entries are medians of three runs.
+RSS is KiB. A cold Go build used a new `GOCACHE` each time. The exact
+intersection includes a seeded DB class.
+
+| Work | Node wall | Node peak RSS | Go wall | Go peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| Same 3 green classes, 16 methods, execution | 1.31 s | 475,540 | 0.23 s | 80,324 |
+| Go build, cold | — | — | 14.95 s | 746,544 |
+| Go build, warm | — | — | 0.16 s | 30,636 |
+| Full sets, separately: Node 278 methods; Go 242 runnable methods in 25 binaries | 10.80 s | 848,816 | 4.60 s | 335,520 |
+
+The full-set row has different populations and process layouts; it is not
+a speed ratio. The full Go inventory itself took 7:24.89 and peaked at
+1,768,808 KiB in one run (n=1), so the full runner is not in `gogen.yml` (the requested CI
+threshold is about five minutes). `unit-bench.mjs` and
+`unit-full-bench.mjs` reproduce the timing rows.
+
+Next gaps in order: generic `CL_ABAP_UNIT_ASSERT` comparisons (45 failed
+methods); Go emitter addresses of fields in temporary values and missing
+inherited `DEFINE` (28 methods in three unbuilt owners); AJSON parsing
+(13 failed methods); and the UUID kernel hook (four DB tests). Parallel
+classes were not timed: `go/abap/db.go` has one process-global DB, and
+generated class constructors and class data are process global without
+goroutine coordination.

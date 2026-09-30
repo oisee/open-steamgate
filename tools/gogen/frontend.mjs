@@ -78,7 +78,7 @@ const charlike = (t) => t.k === "c" || t.k === "string";
  */
 // skip(path): a file not to load, for a layered build where a later folder
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
-export function compileProgram({folders, objects, tolerant = false, skip = () => false}) {
+export function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   // only the syntax check and parser errors are read below (parser_error is a
@@ -129,8 +129,8 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   LOCAL_DEFS.clear();
   const localDefs = [];
   for (const obj of reg.getObjects()) {
-    if (!(obj instanceof abaplint.Objects.Class) || !wanted.includes(obj.getName().toLowerCase()) || !LOCAL_CLASSES.has(upper(obj.getName()))) continue;
-    for (const l of localClasses(reg, obj)) {
+    if (!(obj instanceof abaplint.Objects.Class) || !wanted.includes(obj.getName().toLowerCase()) || (!includeTests && !LOCAL_CLASSES.has(upper(obj.getName())))) continue;
+    for (const l of localClasses(reg, obj, includeTests === true || includeTests?.has?.(upper(obj.getName())))) {
       program.locals.set(`${upper(obj.getName())}|${l.local}`, l.name);
       program.wanted.add(l.name);
       LOCAL_DEFS.set(l.name, l.def);
@@ -415,21 +415,22 @@ function componentInterfaces(reg, intf, seen = new Set()) {
 // NATIVE below) carry the deserialize path ZCL_OSD_STATUS=>REFRESH takes
 // parity-wave2: CL_ABAP_ZIP (LCL_STREAM: the zip's bytes and its CRC-32),
 // the SEGW RepoSet zip
-const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM", "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CL_ABAP_ZIP"]);
+const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM", "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CL_ABAP_ZIP", "CL_ABAP_UNIT_ASSERT"]);
 // the definitions of the local classes compiled, by their compiled name
 const LOCAL_DEFS = new Map();
 // a class's definition: a global class of the registry, or a local class of
 // LOCAL_CLASSES by its compiled name (OWNER:LOCAL)
 const clasDef = (reg, name) => LOCAL_DEFS.get(name) ?? reg.getObject("CLAS", name)?.getDefinition();
 
-function localClasses(reg, obj) {
+function localClasses(reg, obj, includeTests = false) {
   const owner = upper(obj.getName());
   const top = new abaplint.SyntaxLogic(reg, obj).run().spaghetti.getTop();
   const out = [];
   for (const file of obj.getABAPFiles()) {
     if (file === obj.getMainABAPFile()) continue;
-    // the test include's classes are ABAP Unit, never part of the program
-    if (/\.testclasses\.abap$/i.test(file.getFilename())) continue;
+    const testInclude = /\.testclasses\.abap$/i.test(file.getFilename());
+    if (testInclude && !includeTests) continue;
+    if (!testInclude && !LOCAL_CLASSES.has(owner)) continue;
     for (const info of file.getInfo().listClassDefinitions()) {
       const local = upper(info.name);
       const def = findScope(top, "class_definition", local)?.findClassDefinition(local);
