@@ -426,3 +426,50 @@ jobs:
             full:success|fast:skipped) ;;
             *) echo "unexpected VSIX profile/job result: $VSIX_PROFILE:$PACKAGING_RESULT" >&2; exit 1 ;;
           esac
+
+  # One comment per PR with the jobs of this run, kept up to date: the same
+  # idea as oisee/minz's PR report and abaplint/transpiler's regression table.
+  # A green rollup and a job that never ran look alike in the checks list; a
+  # table that names every job, its result and its duration does not. The rows
+  # come from this run's own job list, so a new job appears without editing
+  # this step. Same-repository PRs only: a fork's token cannot write comments.
+  pr-report:
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [test]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Update one PR comment with this run's jobs
+        uses: actions/github-script@v7
+        env:
+          GATE_RESULT: ${{ needs.test.result }}
+        with:
+          script: |
+            const marker = '<!-- osd-pr-test-report -->';
+            const icon = (v) => v === 'success' ? '🟢 pass' : v === 'failure' ? '🔴 fail' : v === 'cancelled' ? '⚫ cancelled' : v === 'skipped' ? '⚪ skipped' : '⚪ ' + (v || 'not run');
+            const { owner, repo } = context.repo;
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt,
+              { owner, repo, run_id: context.runId, attempt_number: Number(process.env.GITHUB_RUN_ATTEMPT || 1) });
+            const took = (j) => (j.started_at && j.completed_at)
+              ? `${Math.round((new Date(j.completed_at) - new Date(j.started_at)) / 1000)} s` : '';
+            const rows = jobs.filter((j) => j.name !== 'pr-report')
+              .map((j) => `| ${j.name} | ${icon(j.conclusion)} | ${took(j)} |`);
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const body = [
+              marker,
+              `### PR tests: ${icon(process.env.GATE_RESULT)}`,
+              `Commit: \`${context.payload.pull_request.head.sha.slice(0, 8)}\` · [Full test log](${runUrl})`,
+              '',
+              '| Job | Result | Time |',
+              '| --- | --- | --- |',
+              ...rows,
+              '',
+              'The preview deployment, the gogen inventory and the leak scan are separate workflows and report as their own checks.',
+            ].join('\n');
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find((c) => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker));
+            if (existing) await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            else await github.rest.issues.createComment({ owner, repo, issue_number, body });
