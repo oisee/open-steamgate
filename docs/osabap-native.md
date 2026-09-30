@@ -129,10 +129,13 @@ environment variables set. Grant only the directories a report needs:
 osabap --allow-read ./input --allow-write ./output --input ./input/source.txt --output ./output/copy.txt
 ```
 
-`--allow-read DIR` and `--allow-write DIR` repeat to add roots. A write root
+`--allow-read DIR` and `--allow-write DIR` repeat to add roots, one directory
+per flag. A write root
 also permits reads. `--dataset-home DIR` resolves relative DATASET names from
 that directory; otherwise the first write root, then the first read root, is
-the base. `--dataset-audit FILE` appends JSON lines for OPEN and DELETE decisions.
+the base. `--dataset-audit FILE` appends JSON lines for OPEN and DELETE decisions
+only when FILE is inside a write root; an outside path creates no audit file.
+Relative audit names use the same base as relative DATASET names.
 Each option accepts either `--option value` or `--option=value`. Paths outside
 the granted roots, including `..` escapes, are refused. These flags govern
 DATASET statements; frontend service file methods have their own host API.

@@ -3,9 +3,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {execFileSync, spawnSync} from "node:child_process";
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {dirname, join} from "node:path";
+import {delimiter, dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -80,7 +80,7 @@ test("native DATASET copy obeys read, write and path grants", () => {
     mkdirSync(outputDir);
     const input = join(inputDir, "source.txt");
     const output = join(outputDir, "copy.txt");
-    const audit = join(dir, "audit.ndjson");
+    const audit = join(outputDir, "audit.ndjson");
     const content = "one\ntwo\n";
     writeFileSync(input, content);
     execFileSync(process.execPath, [builder, join(here, "apps", "dataset", "zdataset.prog.abap")], {stdio: "inherit"});
@@ -92,6 +92,27 @@ test("native DATASET copy obeys read, write and path grants", () => {
     assert.equal(readFileSync(output, "utf8"), content);
     assert.match(readFileSync(audit, "utf8"), /"allowed":true/);
     rmSync(output);
+
+    const escapedAudit = join(dir, "escaped-audit.ndjson");
+    const auditOutsideRoot = run(["--allow-read", inputDir, "--allow-write", outputDir,
+      "--dataset-audit", escapedAudit, "--input", input, "--output", output]);
+    assert.equal(auditOutsideRoot.status, 0, auditOutsideRoot.stderr);
+    assert.equal(existsSync(escapedAudit), false);
+    rmSync(output);
+
+    const linkedAudit = join(outputDir, "linked-audit.ndjson");
+    symlinkSync(escapedAudit, linkedAudit);
+    const auditViaLink = run(["--allow-read", inputDir, "--allow-write", outputDir,
+      "--dataset-audit", linkedAudit, "--input", input, "--output", output]);
+    assert.equal(auditViaLink.status, 0, auditViaLink.stderr);
+    assert.equal(existsSync(escapedAudit), false);
+    rmSync(output);
+
+    const joinedRoots = run(["--allow-read", `${outputDir}${delimiter}${inputDir}`, "--allow-write", outputDir,
+      "--input", input, "--output", output]);
+    assert.equal(joinedRoots.status, 1);
+    assert.match(joinedRoots.stderr, /one directory per flag/);
+    assert.equal(existsSync(output), false);
 
     const denied = spawnSync(binary, ["--input", input, "--output", output], {
       encoding: "utf8", env: {...process.env, OSD_DATASET_READ: inputDir, OSD_DATASET_WRITE: outputDir},

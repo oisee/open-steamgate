@@ -444,6 +444,7 @@ type Sandbox struct {
 	Read, Write []string
 	Home        string
 	Audit       func(entry map[string]any)
+	CreatePerm  os.FileMode
 	once        sync.Once
 	read, write []string
 }
@@ -463,15 +464,20 @@ func SandboxFromEnv() *Sandbox {
 	}
 	sb := &Sandbox{Read: roots(os.Getenv("OSD_DATASET_READ")), Write: roots(os.Getenv("OSD_DATASET_WRITE")), Home: os.Getenv("OSD_DATASET_HOME")}
 	if file := os.Getenv("OSD_DATASET_AUDIT"); file != "" {
+		// Audit output has the same write boundary as report output. Use a
+		// separate host so recording an audit entry does not audit itself.
+		auditHost := &Sandbox{Write: sb.Write, Home: sb.Home, CreatePerm: 0o600}
 		sb.Audit = func(entry map[string]any) {
 			line, err := json.Marshal(entry)
 			if err != nil {
 				return
 			}
 			line = append(line, '\n')
-			if f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
-				f.Write(line)
-				f.Close()
+			if f, _ := auditHost.Open(file, DatasetAppending); f != nil {
+				if n, err := f.Size(); err == nil {
+					_ = f.WriteAt(n, line)
+				}
+				_ = f.Close()
 			}
 		}
 	}
@@ -614,7 +620,11 @@ func (sb *Sandbox) Open(name string, mode DatasetMode) (DatasetHandle, string) {
 	default:
 		flags = os.O_RDWR
 	}
-	fh, err := os.OpenFile(real, flags|noFollow, 0o644)
+	perm := sb.CreatePerm
+	if perm == 0 {
+		perm = 0o644
+	}
+	fh, err := os.OpenFile(real, flags|noFollow, perm)
 	if err != nil {
 		sb.note(map[string]any{"op": "OPEN", "name": name, "mode": string(mode), "allowed": false, "why": err.Error()})
 		// the reason only: an OS message carries the resolved path

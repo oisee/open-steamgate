@@ -114,8 +114,14 @@ func datasetOptions(args []string) []string {
 			}
 			switch key {
 			case "--allow-read":
+				if strings.ContainsRune(value, filepath.ListSeparator) {
+					panic(fmt.Errorf("%s accepts one directory per flag", key))
+				}
 				read = append(read, value)
 			case "--allow-write":
+				if strings.ContainsRune(value, filepath.ListSeparator) {
+					panic(fmt.Errorf("%s accepts one directory per flag", key))
+				}
 				write = append(write, value)
 			case "--dataset-home":
 				home = value
@@ -128,10 +134,16 @@ func datasetOptions(args []string) []string {
 	}
 	// SandboxFromEnv owns audit creation and root normalization. These values
 	// replace inherited grants, so an unflagged command remains denied.
-	os.Setenv("OSD_DATASET_READ", strings.Join(read, string(filepath.ListSeparator)))
-	os.Setenv("OSD_DATASET_WRITE", strings.Join(write, string(filepath.ListSeparator)))
-	os.Setenv("OSD_DATASET_HOME", home)
-	os.Setenv("OSD_DATASET_AUDIT", audit)
+	for key, value := range map[string]string{
+		"OSD_DATASET_READ":  strings.Join(read, string(filepath.ListSeparator)),
+		"OSD_DATASET_WRITE": strings.Join(write, string(filepath.ListSeparator)),
+		"OSD_DATASET_HOME":  home,
+		"OSD_DATASET_AUDIT": audit,
+	} {
+		if err := os.Setenv(key, value); err != nil {
+			panic(err)
+		}
+	}
 	abap.SetDatasetHost(abap.SandboxFromEnv())
 	return rest
 }
@@ -349,7 +361,7 @@ func usage() {
 	fmt.Println("  --allow-read DIR  allow DATASET reads within DIR (repeatable)")
 	fmt.Println("  --allow-write DIR allow DATASET writes within DIR (repeatable; also readable)")
 	fmt.Println("  --dataset-home DIR base for relative DATASET names")
-	fmt.Println("  --dataset-audit FILE append OPEN/DELETE decisions as JSON lines")
+	fmt.Println("  --dataset-audit FILE append OPEN/DELETE decisions inside a write root")
 	for _, name := range appSelectionNames {
 		opt := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(name, "P_"), "_", "-"))
 		if appRanges[name] {
