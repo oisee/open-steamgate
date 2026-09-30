@@ -226,6 +226,21 @@ CLASS zcl_osd_tpl DEFINITION PUBLIC FINAL CREATE PRIVATE.
         iv_text        TYPE string
         it_filters     TYPE string_table
         iv_where       TYPE string
+        iv_name        TYPE string
+        iv_path        TYPE string
+        iv_check_only  TYPE abap_bool DEFAULT abap_false
+      RETURNING
+        VALUE(rv_text) TYPE string
+      RAISING
+        zcx_osd_tpl.
+
+    METHODS literal
+      IMPORTING
+        iv_text        TYPE string
+        iv_where       TYPE string
+        iv_name        TYPE string
+        iv_path        TYPE string
+        iv_check_only  TYPE abap_bool
       RETURNING
         VALUE(rv_text) TYPE string
       RAISING
@@ -661,6 +676,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
     DATA lv_index TYPE i.
     DATA ls_token TYPE ty_token.
     DATA ls_ref TYPE ty_ref.
+    DATA ls_type_ref TYPE ty_ref.
     DATA lv_name TYPE string.
     DATA lt_filters TYPE string_table.
     DATA lv_bar TYPE i.
@@ -715,15 +731,23 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
             lv_name = trim( substring( val = lv_name len = lv_bar ) ).
           ENDIF.
           " filters are checked whether or not the value exists
-          apply_filters( iv_text = `` it_filters = lt_filters iv_where = lv_where ).
           ls_ref = resolve( iv_name = lv_name it_frames = it_frames ).
+          IF ls_ref-found = abap_false.
+            ls_type_ref = resolve( iv_name = lv_name && `@type` it_frames = it_frames ).
+            IF ls_type_ref-found = abap_true.
+              ls_ref-path = substring( val = ls_type_ref-path len = strlen( ls_type_ref-path ) - 5 ).
+            ENDIF.
+          ENDIF.
+          apply_filters( iv_text = `` it_filters = lt_filters iv_where = lv_where
+                         iv_name = lv_name iv_path = ls_ref-path iv_check_only = abap_true ).
           IF ls_ref-found = abap_true.
             IF ls_ref-is_meta = abap_true.
               lv_text = ls_ref-text.
             ELSE.
               lv_text = value_text( ls_ref-path ).
             ENDIF.
-            lv_text = apply_filters( iv_text = lv_text it_filters = lt_filters iv_where = lv_where ).
+            lv_text = apply_filters( iv_text = lv_text it_filters = lt_filters iv_where = lv_where
+                                     iv_name = lv_name iv_path = ls_ref-path ).
             IF ls_token-kind = c_kind-var.
               lv_text = escape( lv_text ).
             ENDIF.
@@ -1141,12 +1165,184 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
           IF strlen( rv_text ) < lv_width.
             rv_text = rv_text && repeat( val = ` ` occ = lv_width - strlen( rv_text ) ).
           ENDIF.
+        WHEN `literal`.
+          IF lv_count <> 1.
+            RAISE EXCEPTION TYPE zcx_osd_tpl
+              EXPORTING text = |{ iv_where }: filter literal takes no argument|.
+          ENDIF.
+          rv_text = literal( iv_text = rv_text iv_where = iv_where iv_name = iv_name
+                             iv_path = iv_path iv_check_only = iv_check_only ).
         WHEN OTHERS.
           RAISE EXCEPTION TYPE zcx_osd_tpl
             EXPORTING
               text = |{ iv_where }: unknown filter "{ lv_name }"|.
       ENDCASE.
     ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD literal.
+    DATA lv_type_path TYPE string.
+    DATA lv_builtin TYPE string.
+    DATA lv_length TYPE i.
+    DATA lv_decimals TYPE i.
+    DATA lv_digits TYPE string.
+    DATA lv_limit TYPE string.
+    DATA lv_integer TYPE string.
+    DATA lv_fraction TYPE string.
+    DATA lv_error TYPE string.
+    DATA lv_pos TYPE i.
+    DATA lv_bytes TYPE i.
+
+    rv_text = iv_text.
+    lv_type_path = iv_path && `@type`.
+    IF iv_path IS INITIAL OR mi_data->exists( lv_type_path ) = abap_false
+       OR mi_data->get_node_type( lv_type_path ) <> zif_ajson_types=>node_type-object.
+      RAISE EXCEPTION TYPE zcx_osd_tpl
+        EXPORTING text = |{ iv_where }: literal needs { iv_name }@type|.
+    ENDIF.
+    lv_builtin = mi_data->get( join( iv_path = lv_type_path iv_name = `built_in` ) ).
+    CASE lv_builtin.
+      WHEN `CHAR` OR `NUMC` OR `CLNT` OR `LANG` OR `CUKY` OR `UNIT` OR `ACCP`
+        OR `DATS` OR `TIMS` OR `STRG` OR `SSTR` OR `INT1` OR `INT2` OR `INT4`
+        OR `INT8` OR `DEC` OR `CURR` OR `QUAN` OR `RAW`.
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE zcx_osd_tpl
+          EXPORTING text = |{ iv_where }: literal does not know { lv_builtin }|.
+    ENDCASE.
+    IF iv_check_only = abap_true.
+      RETURN.
+    ENDIF.
+    " an object, an array or null has no literal form; its text would be empty
+    CASE mi_data->get_node_type( iv_path ).
+      WHEN zif_ajson_types=>node_type-string OR zif_ajson_types=>node_type-number.
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE zcx_osd_tpl
+          EXPORTING text = |{ iv_where }: literal { iv_name } needs a text or a number|.
+    ENDCASE.
+
+    lv_length = mi_data->get( join( iv_path = lv_type_path iv_name = `length` ) ).
+    lv_decimals = mi_data->get( join( iv_path = lv_type_path iv_name = `decimals` ) ).
+    CASE lv_builtin.
+      WHEN `CHAR` OR `NUMC` OR `CLNT` OR `LANG` OR `CUKY` OR `UNIT` OR `ACCP`
+        OR `DATS` OR `TIMS`.
+        IF strlen( iv_text ) > lv_length.
+          lv_error = `exceeds length`.
+        ELSEIF lv_builtin = `NUMC` AND ( iv_text IS INITIAL OR iv_text CN `0123456789` ).
+          lv_error = `needs digits`.
+        ELSEIF lv_builtin = `DATS` AND ( strlen( iv_text ) <> 8 OR iv_text CN `0123456789` ).
+          lv_error = `needs 8 digits`.
+        ELSEIF lv_builtin = `TIMS` AND ( strlen( iv_text ) <> 6 OR iv_text CN `0123456789` ).
+          lv_error = `needs 6 digits`.
+        ENDIF.
+        rv_text = iv_text.
+        REPLACE ALL OCCURRENCES OF `'` IN rv_text WITH `''`.
+        rv_text = `'` && rv_text && `'`.
+      WHEN `STRG` OR `SSTR`.
+        IF lv_builtin = `SSTR` AND mi_data->exists( join( iv_path = lv_type_path iv_name = `length` ) ) = abap_true
+           AND strlen( iv_text ) > lv_length.
+          lv_error = `exceeds length`.
+        ENDIF.
+        rv_text = iv_text.
+        REPLACE ALL OCCURRENCES OF |`| IN rv_text WITH |``|.
+        rv_text = |`| && rv_text && |`|.
+      WHEN `INT1` OR `INT2` OR `INT4` OR `INT8`.
+        FIND REGEX '^-?[0-9]+$' IN iv_text.
+        IF sy-subrc <> 0.
+          lv_error = `needs an integer in range`.
+        ELSE.
+          lv_digits = iv_text.
+          IF lv_digits(1) = `-`.
+            lv_digits = substring( val = lv_digits off = 1 ).
+          ENDIF.
+          WHILE strlen( lv_digits ) > 1 AND lv_digits(1) = `0`.
+            lv_digits = substring( val = lv_digits off = 1 ).
+          ENDWHILE.
+          CASE lv_builtin.
+            WHEN `INT1`.
+              lv_limit = `255`.
+              IF iv_text(1) = `-` AND lv_digits <> `0`.
+                lv_error = `needs an integer in range`.
+              ENDIF.
+            WHEN `INT2`.
+              lv_limit = `32767`.
+              IF iv_text(1) = `-`.
+                lv_limit = `32768`.
+              ENDIF.
+            WHEN `INT4`.
+              lv_limit = `2147483647`.
+              IF iv_text(1) = `-`.
+                lv_limit = `2147483648`.
+              ENDIF.
+            WHEN `INT8`.
+              lv_limit = `9223372036854775807`.
+              IF iv_text(1) = `-`.
+                lv_limit = `9223372036854775808`.
+              ENDIF.
+          ENDCASE.
+          IF strlen( lv_digits ) > strlen( lv_limit ) OR
+             ( strlen( lv_digits ) = strlen( lv_limit ) AND lv_digits > lv_limit ).
+            lv_error = `needs an integer in range`.
+          ENDIF.
+          " the literal is written without leading zeroes: a numeric literal
+          " has at most 31 digits, and 00042 is 42
+          rv_text = lv_digits.
+          IF iv_text(1) = `-` AND lv_digits <> `0`.
+            rv_text = `-` && lv_digits.
+          ENDIF.
+        ENDIF.
+      WHEN `DEC` OR `CURR` OR `QUAN`.
+        FIND REGEX '^-?[0-9]+(\.[0-9]+)?$' IN iv_text.
+        IF sy-subrc <> 0.
+          lv_error = `needs a decimal number`.
+        ELSE.
+          lv_digits = iv_text.
+          IF lv_digits(1) = `-`.
+            lv_digits = substring( val = lv_digits off = 1 ).
+          ENDIF.
+          lv_pos = find( val = lv_digits sub = `.` ).
+          IF lv_pos >= 0.
+            lv_integer = substring( val = lv_digits len = lv_pos ).
+            lv_fraction = substring( val = lv_digits off = lv_pos + 1 ).
+          ELSE.
+            lv_integer = lv_digits.
+            CLEAR lv_fraction.
+          ENDIF.
+          WHILE strlen( lv_integer ) > 1 AND lv_integer(1) = `0`.
+            lv_integer = substring( val = lv_integer off = 1 ).
+          ENDWHILE.
+          " the type keeps room for its decimals: DEC 5,2 has three integer digits
+          IF lv_integer = `0`.
+            " 0.12 has no integer digits: DEC 2,2 takes it
+            CLEAR lv_integer.
+          ENDIF.
+          IF strlen( lv_fraction ) > lv_decimals OR
+             strlen( lv_integer ) > lv_length - lv_decimals.
+            lv_error = `exceeds precision`.
+          ENDIF.
+        ENDIF.
+        rv_text = `'` && iv_text && `'`.
+      WHEN `RAW`.
+        lv_bytes = strlen( iv_text ) DIV 2.
+        IF strlen( iv_text ) MOD 2 <> 0 OR lv_bytes > lv_length OR
+           iv_text CN `0123456789abcdefABCDEF`.
+          lv_error = `needs even hex within length`.
+        ENDIF.
+        rv_text = `'` && to_upper( iv_text ) && `'`.
+    ENDCASE.
+    " what the type allows must also be one ABAP literal: on one source line,
+    " and at most 255 characters between the delimiters once quotes are doubled
+    IF lv_error IS INITIAL AND rv_text(1) CA |'`|.
+      IF iv_text CA |{ cl_abap_char_utilities=>newline }{ cl_abap_char_utilities=>cr_lf(1) }|.
+        lv_error = `cannot be one ABAP literal: it has a line break`.
+      ELSEIF strlen( rv_text ) - 2 > 255.
+        lv_error = `cannot be one ABAP literal: longer than 255 characters`.
+      ENDIF.
+    ENDIF.
+    IF lv_error IS NOT INITIAL.
+      RAISE EXCEPTION TYPE zcx_osd_tpl
+        EXPORTING text = |{ iv_where }: literal { iv_name } { lv_error }|.
+    ENDIF.
   ENDMETHOD.
 
 

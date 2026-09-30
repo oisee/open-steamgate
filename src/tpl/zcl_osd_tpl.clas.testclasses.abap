@@ -41,6 +41,32 @@ CLASS ltcl_osd_tpl DEFINITION FOR TESTING
     METHODS shadowed_first_segment FOR TESTING RAISING cx_static_check.
     METHODS nested_loop_metadata FOR TESTING RAISING cx_static_check.
     METHODS filters_checked_without_value FOR TESTING.
+    METHODS literal_char FOR TESTING RAISING cx_static_check.
+    METHODS literal_string FOR TESTING RAISING cx_static_check.
+    METHODS literal_integer FOR TESTING RAISING cx_static_check.
+    METHODS literal_decimal FOR TESTING RAISING cx_static_check.
+    METHODS literal_raw FOR TESTING RAISING cx_static_check.
+    METHODS literal_missing_type FOR TESTING.
+    METHODS literal_missing_value FOR TESTING.
+    METHODS literal_absent_with_type FOR TESTING RAISING cx_static_check.
+    METHODS literal_unknown_type FOR TESTING.
+    METHODS literal_char_length FOR TESTING.
+    METHODS literal_numc_digits FOR TESTING.
+    METHODS literal_dats_digits FOR TESTING.
+    METHODS literal_tims_digits FOR TESTING.
+    METHODS literal_sstr_length FOR TESTING.
+    METHODS literal_integer_range FOR TESTING.
+    METHODS literal_decimal_number FOR TESTING.
+    METHODS literal_decimal_precision FOR TESTING.
+    METHODS literal_decimal_digits FOR TESTING.
+    METHODS literal_raw_hex FOR TESTING.
+    METHODS literal_raw_odd FOR TESTING.
+    METHODS literal_raw_length FOR TESTING.
+    METHODS literal_argument FOR TESTING.
+    METHODS literal_composition FOR TESTING RAISING cx_static_check.
+    METHODS literal_not_scalar FOR TESTING.
+    METHODS literal_one_source_literal FOR TESTING.
+    METHODS literal_normal_numbers FOR TESTING RAISING cx_static_check.
     METHODS utf8_passes_through FOR TESTING RAISING cx_static_check.
     METHODS utf8 IMPORTING iv_hex TYPE xstring RETURNING VALUE(rv) TYPE string.
 
@@ -449,6 +475,208 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
       act = error_text( iv_template = `{{name | shout}}` iv_json = `{"name":"ab"}` ) ).
   ENDMETHOD.
 
+  METHOD literal_char.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `'O''Brien'`
+      act = text( iv_template = `{{x | literal}}`
+                  iv_json = `{"x":"O'Brien","x@type":{"built_in":"CHAR","length":7}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `'0123'|'20260930'|'123456'`
+      act = text( iv_template = `{{n | literal}}|{{d | literal}}|{{t | literal}}`
+                  iv_json = `{"n":"0123","n@type":{"built_in":"NUMC","length":4},"d":"20260930","d@type":{"built_in":"DATS","length":8},"t":"123456","t@type":{"built_in":"TIMS","length":6}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_string.
+    cl_abap_unit_assert=>assert_equals(
+      exp = |`a``b`|
+      act = text( iv_template = `{{x | literal}}`
+                  iv_json = `{"x":"a` && |`| && `b","x@type":{"built_in":"SSTR","length":3}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = |`long`|
+      act = text( iv_template = `{{x | literal}}`
+                  iv_json = `{"x":"long","x@type":{"built_in":"STRG"}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_integer.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `255|-32768|-2147483648|9223372036854775807`
+      act = text( iv_template = `{{a | literal}}|{{b | literal}}|{{c | literal}}|{{d | literal}}`
+                  iv_json = `{"a":"255","a@type":{"built_in":"INT1"},"b":"-32768","b@type":{"built_in":"INT2"},"c":"-2147483648","c@type":{"built_in":"INT4"},"d":"9223372036854775807","d@type":{"built_in":"INT8"}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_decimal.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `'12.34'|'-3.5'|'0'`
+      act = text( iv_template = `{{a | literal}}|{{b | literal}}|{{c | literal}}`
+                  iv_json = `{"a":"12.34","a@type":{"built_in":"DEC","length":5,"decimals":2},"b":"-3.5","b@type":{"built_in":"CURR","length":4,"decimals":2},"c":"0","c@type":{"built_in":"QUAN","length":3,"decimals":0}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_raw.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `'0A1B'`
+      act = text( iv_template = `{{x | literal}}`
+                  iv_json = `{"x":"0a1b","x@type":{"built_in":"RAW","length":2}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_missing_type.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:3: literal needs x@type`
+      act = error_text( iv_template = `a` && nl( ) && `b` && nl( ) && `{{x | literal}}`
+                        iv_json = `{"x":"a"}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_missing_value.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal needs x@type`
+      act = error_text( iv_template = `{{x | literal}}` iv_json = `{}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_absent_with_type.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `[]`
+      act = text( iv_template = `[{{x | literal}}]`
+                  iv_json = `{"x@type":{"built_in":"CHAR","length":3}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_unknown_type.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal does not know FLTP`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":1,"x@type":{"built_in":"FLTP"}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_char_length.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x exceeds length`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"abcd","x@type":{"built_in":"CHAR","length":3}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_numc_digits.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs digits`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"12A","x@type":{"built_in":"NUMC","length":3}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_dats_digits.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs 8 digits`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"2026ABCD","x@type":{"built_in":"DATS","length":8}}` ) ).
+    " digits only, but seven of them: the count check alone must refuse it
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs 8 digits`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"2026093","x@type":{"built_in":"DATS","length":8}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_tims_digits.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs 6 digits`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"12AB56","x@type":{"built_in":"TIMS","length":6}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs 6 digits`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"12345","x@type":{"built_in":"TIMS","length":6}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_sstr_length.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x exceeds length`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"abcd","x@type":{"built_in":"SSTR","length":3}}` ) ).
+    " a length given as 0 is a length, not an absent one
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x exceeds length`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"a","x@type":{"built_in":"SSTR","length":0}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_integer_range.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs an integer in range`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"256","x@type":{"built_in":"INT1"}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs an integer in range`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"32768","x@type":{"built_in":"INT2"}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs an integer in range`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"2147483648","x@type":{"built_in":"INT4"}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs an integer in range`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"-9223372036854775809","x@type":{"built_in":"INT8"}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs an integer in range`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"-1","x@type":{"built_in":"INT1"}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs an integer in range`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"9223372036854775808","x@type":{"built_in":"INT8"}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_decimal_number.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs a decimal number`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"12x","x@type":{"built_in":"DEC","length":4,"decimals":2}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_decimal_precision.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x exceeds precision`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"12.345","x@type":{"built_in":"DEC","length":6,"decimals":2}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_decimal_digits.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x exceeds precision`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"123.45","x@type":{"built_in":"DEC","length":4,"decimals":2}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_raw_hex.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs even hex within length`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"0A1G","x@type":{"built_in":"RAW","length":2}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_raw_odd.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs even hex within length`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"0A1","x@type":{"built_in":"RAW","length":2}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_raw_length.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs even hex within length`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"0A1B","x@type":{"built_in":"RAW","length":1}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_argument.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: filter literal takes no argument`
+      act = error_text( iv_template = `{{x | literal 2}}`
+                        iv_json = `{"x":"a","x@type":{"built_in":"CHAR","length":1}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_composition.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `'AB'`
+      act = text( iv_template = `{{x | upper | literal}}`
+                  iv_json = `{"x":"ab","x@type":{"built_in":"CHAR","length":2}}` ) ).
+  ENDMETHOD.
+
   METHOD unclosed_section_is_error.
     cl_abap_unit_assert=>assert_equals(
       exp = `main:2: section a not closed`
@@ -607,6 +835,70 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       exp = `  X` && nl( ) && `END`
       act = text( iv_template = `  {{>p}}` && nl( ) && `END` iv_json = `{}` it_partials = lt_partials ) ).
+  ENDMETHOD.
+
+  METHOD literal_not_scalar.
+    " an object, an array and null are refused rather than printed as ''
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs a text or a number`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":{"a":1},"x@type":{"built_in":"CHAR","length":3}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs a text or a number`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":[1],"x@type":{"built_in":"CHAR","length":3}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x needs a text or a number`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":null,"x@type":{"built_in":"CHAR","length":3}}` ) ).
+  ENDMETHOD.
+
+  METHOD literal_one_source_literal.
+    DATA lv_json TYPE string.
+    " a line break cannot stand inside an ABAP literal
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x cannot be one ABAP literal: it has a line break`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"a\nb","x@type":{"built_in":"STRG"}}` ) ).
+    " 255 characters fit, 256 do not
+    lv_json = `{"x":"` && repeat( val = `a` occ = 255 ) && `","x@type":{"built_in":"STRG"}}`.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `|` && repeat( val = `a` occ = 255 ) && `|`
+      act = replace( val = text( iv_template = `{{x | literal}}` iv_json = lv_json ) sub = '`' with = `|` occ = 0 ) ).
+    lv_json = `{"x":"` && repeat( val = `a` occ = 256 ) && `","x@type":{"built_in":"STRG"}}`.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x cannot be one ABAP literal: longer than 255 characters`
+      act = error_text( iv_template = `{{x | literal}}` iv_json = lv_json ) ).
+    " doubling the quotes counts: 200 quote characters become 400
+    lv_json = `{"x":"` && repeat( val = `'` occ = 200 ) && `","x@type":{"built_in":"CHAR","length":200}}`.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x cannot be one ABAP literal: longer than 255 characters`
+      act = error_text( iv_template = `{{x | literal}}` iv_json = lv_json ) ).
+  ENDMETHOD.
+
+  METHOD literal_normal_numbers.
+    " leading zeroes are dropped: 32 zeroes are 0, not a 32-digit literal
+    cl_abap_unit_assert=>assert_equals(
+      exp = `0`
+      act = text( iv_template = `{{x | literal}}`
+                  iv_json = `{"x":"` && repeat( val = `0` occ = 32 ) && `","x@type":{"built_in":"INT4"}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `-42`
+      act = text( iv_template = `{{x | literal}}` iv_json = `{"x":"-0042","x@type":{"built_in":"INT2"}}` ) ).
+    " DEC 5,2 keeps two places for decimals: 123 fits, 1234 does not
+    cl_abap_unit_assert=>assert_equals(
+      exp = `'123.45'`
+      act = text( iv_template = `{{x | literal}}`
+                  iv_json = `{"x":"123.45","x@type":{"built_in":"DEC","length":5,"decimals":2}}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `main:1: literal x exceeds precision`
+      act = error_text( iv_template = `{{x | literal}}`
+                        iv_json = `{"x":"1234","x@type":{"built_in":"DEC","length":5,"decimals":2}}` ) ).
+    " decimals may equal the length: DEC 2,2 holds 0.12
+    cl_abap_unit_assert=>assert_equals(
+      exp = `'0.12'`
+      act = text( iv_template = `{{x | literal}}`
+                  iv_json = `{"x":"0.12","x@type":{"built_in":"DEC","length":2,"decimals":2}}` ) ).
   ENDMETHOD.
 
 ENDCLASS.

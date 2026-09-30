@@ -5,7 +5,7 @@
 `ZCL_OSD_TPL` (`src/tpl/`) renders a Mustache-style template over a JSON tree (`zif_ajson`) into
 lines of code, and gives every output line a **trace entry**: the template, the template line and the
 data path it came from. It is plain ABAP, so the same class runs in `npm test`, in OSGo and on a
-system through abapGit. Unit tests sit beside the class (`zcl_osd_tpl.clas.testclasses.abap`, 41
+system through abapGit. Unit tests sit beside the class (`zcl_osd_tpl.clas.testclasses.abap`, 67
 methods), as `src/regression/` does.
 
 ## Why
@@ -44,6 +44,19 @@ trace belongs inside the renderer, not around it.
 | `{{> p name=path ...}}` | partial with arguments: `name` resolves to `path` inside the partial and in the partials it calls; an inner argument of the same name wins |
 | `{{@index}}`, `{{#@first}}`, `{{^@last}}` | the nearest loop: 1-based index (like `sy-tabix`), first and last item |
 | `{{name \| lower}}`, `\| upper`, `\| pad 20` | filters, applied left to right; checked whether or not the value exists; `pad` takes one width from 1 to 255 |
+| `{{name \| literal}}` | ABAP literal using the model's sibling `name@type`; takes no argument and composes with other filters; a value that would need a line break or more than 255 characters between the delimiters (quotes doubled) is refused |
+
+`literal` uses the original value's `@type` object (`built_in`, `length`, `decimals`) even after
+earlier filters change its text. Missing metadata and unknown built-in types are errors with the
+template and line, for example `main:3: literal needs x@type`.
+
+| `built_in` | output | validation |
+|---|---|---|
+| CHAR, NUMC, CLNT, LANG, CUKY, UNIT, ACCP, DATS, TIMS | `'text'`, with `'` doubled | at most `length` characters; NUMC digits; DATS 8 digits; TIMS 6 digits |
+| STRG, SSTR | backtick-quoted text, with backticks doubled | SSTR at most `length` characters when given |
+| INT1, INT2, INT4, INT8 | unquoted integer | integer in range: INT1 0..255, INT2 -32768..32767, INT4 -2147483648..2147483647, INT8 -9223372036854775808..9223372036854775807 |
+| DEC, CURR, QUAN | `'12.34'` | numeric text with at most `decimals` fractional places and `length` digits |
+| RAW | `'0A1B'`, uppercase | even number of hex digits and at most `length` bytes |
 
 A section, inverted, close, comment or partial tag alone on its line takes the line with it, newline
 included (the Mustache "standalone" rule, judged on the source, so it holds for consecutive lines and
@@ -91,8 +104,6 @@ names the path of the line it ends; an empty value names nothing.
 - **The trace as a JSON sidecar** written beside generated objects.
 - **Mustache spec conformance** (github.com/mustache/spec, MIT; modules comments, interpolation,
   sections, inverted, partials) with the HTML escaper, deviations listed.
-- **Type-aware filters**: the generation DSL resolves DDIC and class types in its model; a filter can
-  then write, for example, an ABAP literal in the form the field's type needs.
 - The first user: a regenerated SEGW class compared byte for byte with `zcl_stg_segw_gen`'s output.
 
 ## Probes, erased at compile time
