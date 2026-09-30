@@ -200,10 +200,14 @@ export function constantsModel(model, className) {
     })}]};
 }
 
-async function renderRecipe(data, template) {
+// A model rendered through ZCL_OSD_TPL: the text, one trace entry per line
+// with the nearest @id on its data path, and, when a profile is named, what
+// ZCL_OSD_DSL_PROFILE finds on the result (with the trace in hand).
+export async function renderRecipe(data, template, {profile} = {}) {
   await import("../test/start.mjs");
   await import("../output/zcl_osd_tpl.clas.mjs");
   await import("../output/zcl_ajson.clas.mjs");
+  if (profile) await import("../output/zcl_osd_dsl_profile.clas.mjs");
   const abap = globalThis.abap;
   const box = (value) => new abap.types.String().set(value);
   const json = await abap.Classes.ZCL_AJSON.parse({iv_json: box(JSON.stringify(data))});
@@ -229,7 +233,11 @@ async function renderRecipe(data, template) {
     }
     return node;
   };
-  return {text, trace: trace.map((entry) => ({...entry, node: nodeAt(entry.path)}))};
+  const findings = profile ? (await abap.Classes.ZCL_OSD_DSL_PROFILE.check({
+    iv_profile: box(profile), iv_strict: new abap.types.Character(1).set(""), is_result: result, io_model: json,
+  })).array().map((finding) => Object.fromEntries(Object.entries(finding.get()).map(([key, value]) => [key, value.get()])))
+    : undefined;
+  return {text, trace: trace.map((entry) => ({...entry, node: nodeAt(entry.path)})), ...(findings ? {findings} : {})};
 }
 
 export async function renderMethodTable(model, className) {

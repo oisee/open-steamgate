@@ -1,0 +1,53 @@
+# DSL L2, slice 1: a domain rule on a synthetic airship fleet.
+# `node tools/dsl-l2.mjs build src/l2demo/maintenance_ship.l2.yaml --out src/l2demo`
+# writes the check class, its test class and the trace (docs/dsl-l2.md).
+rule: maintenance-ship-no-future-voyage
+class: zcl_l2_maintenance_ship
+title: A ship in maintenance has no voyage departing after the check date
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'M'
+forbid:
+  exists: ZOSD_L2_VOY as voy
+  where: voy.ship_id = ship.ship_id and voy.dep_date > $date
+alert: "{ship.ship_id} {ship.name}: in maintenance, voyage {voy.voyage_id} departs {voy.dep_date}"
+examples:
+  - name: flagged
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}]
+    expect:
+      - "S001 Albatross: in maintenance, voyage V00001 departs 20261005"
+  - name: past voyage is fine
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00002, ship_id: S001, dep_date: 20260920}]
+    expect: []
+  - name: departs on the check date
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00003, ship_id: S001, dep_date: 20261001}]
+    expect: []
+  - name: ship in service is fine
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S002, name: Cormorant, status: A}]
+      ZOSD_L2_VOY: [{voyage_id: V00004, ship_id: S002, dep_date: 20261005}]
+    expect: []
+  - name: one alert per voyage
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: M}
+        - {ship_id: S003, name: Petrel, status: M}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00005, ship_id: S001, dep_date: 20261010}
+        - {voyage_id: V00006, ship_id: S001, dep_date: 20261003}
+        - {voyage_id: V00007, ship_id: S003, dep_date: 20261002}
+        - {voyage_id: V00008, ship_id: S003, dep_date: 20250101}
+    expect:
+      - "S003 Petrel: in maintenance, voyage V00007 departs 20261002"
+      - "S001 Albatross: in maintenance, voyage V00006 departs 20261003"
+      - "S001 Albatross: in maintenance, voyage V00005 departs 20261010"

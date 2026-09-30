@@ -27,6 +27,7 @@
     "test/dsl-mpc.mjs",
     "test/dsl-abap.mjs",
     "test/dsl-regions.mjs",
-    "test/dsl-build.mjs"
+    "test/dsl-build.mjs",
+    "test/dsl-l2.mjs"
   ]
 }
