@@ -13,10 +13,11 @@
 //       demo service's $metadata, names its generation, and serves this
 //       checkout's source: the most recently changed ABAP file, read back
 //       over ADT, byte for byte. A stale seed fails there.
-//   release-verify.mjs pages <url> <commit> [--wait <seconds>]
+//   release-verify.mjs pages <url> <commit> [--wait <seconds>] [--local <build.json>]
 //       a published preview's build.json names this commit, and its sw.js
 //       carries the stamp build.json names (the CDN serves the new bundle,
-//       not an old one)
+//       not an old one); with --local, a bundle built later than this one
+//       (a newer push to the same directory) counts as superseded, not stale
 //
 // The VSIX is already checked by content in release.yml (the version inside
 // extension/package.json, scripts/release-version.mjs), and the Docker image
@@ -176,23 +177,32 @@ export async function checkServe(file, {timeoutSeconds = 600} = {}) {
   }
 }
 
-export async function checkPages(url, commit, {waitSeconds = 600} = {}) {
+export async function checkPages(url, commit, {waitSeconds = 600, local} = {}) {
+  // Pages builds the gh-pages branch one push at a time (4-7 min measured,
+  // 2026-09-30) and drops a push that arrives during a build; a later push
+  // of the same directory then carries a newer commit. That is this bundle
+  // superseded, not a stale one, and it is told apart by the build time the
+  // local build.json recorded.
+  const ours = local === undefined ? undefined : JSON.parse(readFileSync(local, "utf8"));
   const base = url.endsWith("/") ? url : `${url}/`;
   const deadline = Date.now() + waitSeconds * 1000;
   let last = "";
   while (true) {
     try {
       const build = await (await fetch(new URL("build.json", base), {cache: "no-store"})).json();
-      if (build.commit === commit) {
+      const fresh = build.commit === commit;
+      const superseded = !fresh && ours !== undefined && Date.parse(build.builtAt) > Date.parse(ours.builtAt);
+      if (fresh || superseded) {
         const worker = await (await fetch(new URL("sw.js", base), {cache: "no-store"})).text();
-        if (!worker.includes(build.stamp)) {
-          throw new Error(`sw.js does not carry the stamp ${build.stamp} that build.json names`);
-        }
-        return {url: base, commit, stamp: build.stamp, buildId: build.buildId};
+        // the two files are cached apart: a mismatch may be the CDN catching
+        // up, so it is retried until the deadline and only then an error
+        if (worker.includes(build.stamp)) return fresh ? {url: base, commit, stamp: build.stamp, buildId: build.buildId}
+          : {url: base, commit, superseded: build.commit, stamp: build.stamp, builtAt: build.builtAt};
+        last = `sw.js does not carry the stamp ${build.stamp} that build.json names`;
+      } else {
+        last = `build.json names ${build.commit}`;
       }
-      last = `build.json names ${build.commit}`;
     } catch (error) {
-      if (/does not carry the stamp/.test(error.message)) throw error;
       last = error.message;
     }
     if (Date.now() >= deadline) {
@@ -213,9 +223,12 @@ if (isMain) {
     let result;
     if (command === "binary" && args.length >= 2) result = checkBinary(args[0], args[1]);
     else if (command === "serve" && args.length >= 1) result = await checkServe(args[0], {timeoutSeconds: option("--timeout", 600)});
-    else if (command === "pages" && args.length >= 2) result = await checkPages(args[0], args[1], {waitSeconds: option("--wait", 600)});
+    else if (command === "pages" && args.length >= 2) {
+      const at = args.indexOf("--local");
+      result = await checkPages(args[0], args[1], {waitSeconds: option("--wait", 600), local: at < 0 ? undefined : args[at + 1]});
+    }
     else {
-      console.error("usage: release-verify.mjs binary <file> <target> | serve <file> [--timeout s] | pages <url> <commit> [--wait s]");
+      console.error("usage: release-verify.mjs binary <file> <target> | serve <file> [--timeout s] | pages <url> <commit> [--wait s] [--local build.json]");
       process.exit(2);
     }
     console.log(`release-verify ${command}: ok ${JSON.stringify(result)}`);

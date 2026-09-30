@@ -137,6 +137,9 @@ version inside `extension/package.json`, the Docker image by
 `docker/image/smoke.sh` before `docker.yml` publishes it, and each published
 preview by `release-verify.mjs pages` in `preview.yml`: its `build.json` must
 name the commit and its `sw.js` must carry the stamp `build.json` names.
+Pages builds `gh-pages` one push at a time (4-7 min measured 2026-09-30) and
+drops a push that lands during a build, so the check waits up to 20 minutes
+and counts a later bundle in the same directory as this one superseded.
 
 The measured seeded Linux x64 binary is 316.4 MB (decimal, 2026-09-30; it was 109.5 MB on 2026-09-16). All four requested Bun targets cross-compiled on Linux x64 with Bun 1.4.2
 in the local release check. No target failed to build. Only Linux x64 was

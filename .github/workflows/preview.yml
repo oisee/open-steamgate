@@ -165,9 +165,12 @@ jobs:
       # branch afterwards and a CDN stands in front of it. The published
       # build.json must name this commit and the sw.js it serves must carry
       # the stamp build.json names, or what people open is an older bundle.
+      # Pages builds one push at a time (4-7 min) and drops pushes that land
+      # during a build, so the wait is long and a later bundle in the same
+      # directory counts as this one superseded.
       - name: Check the published preview by its content
         if: ${{ success() }}
-        run: node scripts/release-verify.mjs pages "https://oisee.github.io/open-steamgate/$PREVIEW_DIRECTORY/" "$GITHUB_SHA" --wait 900
+        run: node scripts/release-verify.mjs pages "https://oisee.github.io/open-steamgate/$PREVIEW_DIRECTORY/" "$GITHUB_SHA" --wait 1200 --local build/preview/build.json
       - name: Preview comment on the pull request
         if: github.event_name == 'pull_request'
         env:
