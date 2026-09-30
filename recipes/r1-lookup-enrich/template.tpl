@@ -7,10 +7,14 @@ IF {{loop.table}} IS NOT INITIAL.
     WHERE {{#source.keys}}{{column}} = {{loop.table}}-{{component}}{{^@last}} AND {{/@last}}{{/source.keys}}.
 ENDIF.
 LOOP AT {{loop.table}} ASSIGNING {{loop.row}}.
+{{#before}}  {{text}}
+{{/before}}
   READ TABLE {{lookup}} ASSIGNING {{hit}} WITH TABLE KEY{{#source.keys}} {{column}} = {{loop.row}}-{{component}}{{/source.keys}}.
   IF sy-subrc = 0.
 {{#fields}}
     {{loop.row}}-{{component}} = {{hit}}-{{column}}.
 {{/fields}}
   ENDIF.
+{{#after}}  {{text}}
+{{/after}}
 ENDLOOP.

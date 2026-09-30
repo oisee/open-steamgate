@@ -34,6 +34,10 @@ CLASS ltcl_r1 DEFINITION FOR TESTING
         it_rows TYPE zcl_osd_lift_r1_demo=>tt_rows
       RETURNING
         VALUE(rt_rows) TYPE zcl_osd_lift_r1_demo=>tt_rows.
+    METHODS same_mixed
+      IMPORTING it_rows TYPE zcl_osd_lift_r1_demo=>tt_rows
+      RETURNING VALUE(rt_rows) TYPE zcl_osd_lift_r1_demo=>tt_rows.
+    METHODS mixed_cases FOR TESTING.
 ENDCLASS.
 
 CLASS ltcl_r1 IMPLEMENTATION.
@@ -86,6 +90,36 @@ CLASS ltcl_r1 IMPLEMENTATION.
     zcl_osd_lift_r1_demo=>before( CHANGING ct_rows = rt_rows ).
     zcl_osd_lift_r1_demo=>after( CHANGING ct_rows = lt_after ).
     cl_abap_unit_assert=>assert_equals( exp = rt_rows act = lt_after ).
+  ENDMETHOD.
+
+  METHOD same_mixed.
+    DATA lt_after TYPE zcl_osd_lift_r1_demo=>tt_rows.
+    rt_rows = it_rows.
+    lt_after = it_rows.
+    zcl_osd_lift_r1_demo=>before_mixed( CHANGING ct_rows = rt_rows ).
+    zcl_osd_lift_r1_demo=>after_mixed( CHANGING ct_rows = lt_after ).
+    cl_abap_unit_assert=>assert_equals( exp = rt_rows act = lt_after ).
+  ENDMETHOD.
+
+  METHOD mixed_cases.
+    DATA lt_rows TYPE zcl_osd_lift_r1_demo=>tt_rows.
+    DATA ls_row TYPE zcl_osd_lift_r1_demo=>ty_row.
+    APPEND row( iv_kind = 'STAT' iv_code = 'OPEN' ) TO lt_rows.
+    APPEND row( iv_kind = 'STAT' iv_code = 'GONE' iv_text = 'kept' ) TO lt_rows.
+    APPEND row( iv_kind = 'STAT' iv_code = 'OPEN' iv_text = 'stale' ) TO lt_rows.
+    lt_rows = same_mixed( lt_rows ).
+    READ TABLE lt_rows INTO ls_row INDEX 1.
+    cl_abap_unit_assert=>assert_equals( exp = 'Open' act = ls_row-text ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = ls_row-status ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = ls_row-visits ).
+    READ TABLE lt_rows INTO ls_row INDEX 2.
+    cl_abap_unit_assert=>assert_equals( exp = 'kept' act = ls_row-text ).
+    cl_abap_unit_assert=>assert_equals( exp = 4 act = ls_row-status ).
+    READ TABLE lt_rows INTO ls_row INDEX 3.
+    cl_abap_unit_assert=>assert_equals( exp = 'Open' act = ls_row-text ).
+    CLEAR lt_rows.
+    lt_rows = same_mixed( lt_rows ).
+    cl_abap_unit_assert=>assert_initial( lt_rows ).
   ENDMETHOD.
 
   METHOD hits_and_misses.

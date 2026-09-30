@@ -375,10 +375,13 @@ export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DD
   const {table, row} = loopHead(loop.getFirstStatement());
 
   const body = loop.findAllStatementNodes().slice(1, -1);
-  if (body.length !== 1 || !(body[0].get() instanceof Statements.Select)) {
-    throw new Refusal("shape/body", `the loop body is ${body.length} statements, not one SELECT`);
+  const selects = body.map((st, i) => st.get() instanceof Statements.Select ? i : -1).filter((i) => i >= 0);
+  if (selects.length !== 1 || body.some((st, i) => i !== selects[0] && isDb(st))) {
+    throw new Refusal(body.some((st, i) => i !== selects[0] && isDb(st)) ? "no other database statement in the loop" : "shape/body",
+      `the loop body needs exactly one SELECT SINGLE and no other database statement`);
   }
-  const {dbtab, fields, keys} = selectParts(body[0], row);
+  const position = selects[0];
+  const {dbtab, fields, keys} = selectParts(body[position], row);
   let resolved;
   for (const provider of KEY_PROVIDERS) {
     resolved = provider(registry, dbtab);
@@ -400,7 +403,39 @@ export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DD
   const open = ["no concurrent writes to the table during the loop", "reads confined to one client",
     "sy-subrc and sy-dbcnt after the loop not read"];
   const syntax = new abaplint.SyntaxLogic(registry, object).run();
-  const scope = syntax.spaghetti.lookupPosition(body[0].getStart(), name);
+  const scope = syntax.spaghetti.lookupPosition(body[position].getStart(), name);
+  if (body.length > 1) {
+    const writes = syntax.spaghetti.listWritePositions(name);
+    const reads = syntax.spaghetti.listReadPositions(name);
+    const inStatement = (ref, st) => !ref.getStart().isBefore(st.getStart()) && !ref.getStart().isAfter(st.getEnd());
+    const tokens = (st) => st.getTokens().map((t) => t.getStr().toLowerCase());
+    for (const st of body.slice(0, position)) {
+      const ts = tokens(st);
+      if ((st.get() instanceof Statements.Assign && ts.includes(row))
+        || (st.get() instanceof Statements.ModifyInternal && ts.includes(table))) {
+        throw new Refusal("key not written before the read", `${st.concatTokens()} may alias or modify the key`);
+      }
+      for (const ref of writes.filter((r) => inStatement(r, st) && r.getName().toLowerCase() === row)) {
+        const at = st.getTokens().indexOf(ref.getToken());
+        const component = ts[at + 1] === "-" ? ts[at + 2] : undefined;
+        if (!component || keys.some((k) => k.component === component)) {
+          throw new Refusal("key not written before the read", `${st.concatTokens()} writes ${row}${component ? `-${component}` : ""}`);
+        }
+      }
+      // Calls and indirect assignments are conservative when the syntax cannot
+      // establish which component of the row they change.
+      if (st.findAllExpressions(Expressions.MethodCall).length && ts.includes(row)) {
+        throw new Refusal("key not written before the read", `${st.concatTokens()} passes ${row} to a method`);
+      }
+    }
+    for (const st of body.slice(position + 1)) {
+      const ts = tokens(st);
+      if (reads.some((r) => inStatement(r, st) && r.getName().toLowerCase() === "sy")
+        && ts.some((t, i) => t === "sy" && ts[i + 1] === "-" && ts[i + 2] === "dbcnt")) {
+        throw new Refusal("sy-dbcnt after the read", `${st.concatTokens()} reads sy-dbcnt`);
+      }
+    }
+  }
   const componentsOf = (type) => type instanceof abaplint.BasicTypes.StructureType
     ? new Map(type.getComponents().map((c) => [c.name.toLowerCase(), c.type])) : undefined;
   const tableType = scope?.findVariable(table)?.getType();
@@ -484,8 +519,11 @@ export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DD
   }
   if (keysOpen) open.unshift("key types equal column types");
 
+  if (body.length > 1) open.push("prefetch may read keys the loop skips");
   return {
-    recipe: "R1",
+    recipe: body.length === 1 ? "R1" : "R1b",
+    ...(body.length === 1 ? {} : {position, before: body.slice(0, position).map((st) => ({text: st.concatTokens()})),
+      after: body.slice(position + 1).map((st) => ({text: st.concatTokens()}))}),
     loop: {table: table.toLowerCase(), row: row.toLowerCase()},
     source: {table: dbtab.toLowerCase(), keys},
     fields,
