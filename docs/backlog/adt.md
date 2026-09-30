@@ -384,5 +384,31 @@ open  SOAP: vsp's ADT is pure REST, no SOAP in it. The only SOAP it touches
       A local system would need it only if a non-ADT, RFC-speaking client
       had to attach. Question, not an item.
 open  Eclipse ADT against the façade: free if vsp accepts it, untested.
-open  revisions: reading them out of git instead of a system.
+open  revisions: reading them out of git instead of a system -- designed below,
+      "Versions of an object, read out of git (2026-09-30)".
 ```
+
+
+## Versions of an object, read out of git (2026-09-30)
+
+Alice, 2026-09-30: the version API inside ABAP should reach the host and land on the git layer.
+Today nothing does. There is no `SVRS_GET_VERSION_DIRECTORY*` or `SVRS_GET_REPS_FROM_OBJECT`, no `VRSD`,
+and the ADT facade has no versions feed. Eclipse's Revision History and vsp get nothing.
+The design stays a thin layer over the files: versions are not stored anywhere, git answers.
+
+- **Host history service.** Object name to its files, in layer order (the winning folder), then
+  `git log --follow` over them and `git show <commit>:<file>`. Version = commit. The active version is the
+  working tree; an unsaved edit is "inactive". Cached per HEAD.
+- **ABAP side.** Clean-room substitutes for `SVRS_GET_VERSION_DIRECTORY_46` / `SVRS_GET_REPS_FROM_OBJECT`
+  through a kernel hook, to SAP's contract. They return `VRSD`-shaped rows: version number, author, date/time,
+  and the short commit SHA in `KORRNUM`. Standard ABAP that compares versions then works over git.
+- **ADT facade.** `.../source/main/versions` (Atom, one entry per commit) and reading one version's source,
+  so Revision History and "Compare with..." work in Eclipse and vsp.
+- **VS Code** needs nothing: it already has git.
+- **Author.** The commit author, mapped to a SAP user name. No e-mail, per the repository's identity rule.
+- **Outside git** (a pack without `.git`, the browser preview): an honest "no history" answer, never an empty
+  list that reads as "never changed".
+- First consumer of the lazy table providers (gogen-osgo.md, "Lazy table providers"): `VRSD` by key, provider
+  = git log, invalidated on a HEAD change.
+- Order: after track O. Measure the contract on A4H first (P-probe of the FMs' signatures and a VRSD row),
+  per the clean-room rule.
