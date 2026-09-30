@@ -1298,7 +1298,7 @@ something already shipped (then it is a must of the current release, like the ro
   blocker; also a possible silent bug on main).
 - must: the release draft built by CI, and its artefacts checked by content.
 - should: the honest speed measurement, Node vs Go on the whole intersection, one instrument.
-- nice: accept ADR 0005 (lazy table providers). It is a decision, not code.
+- nice: accept ADR 0005 (lazy table providers) -- done 2026-09-30, narrowed after three reviews.
 
 **0.5**
 - must: O, program -> binary. F4 and dialogs in the TUI, Open SQL in the native build, `osd run ZREPORT` = F8.
@@ -1307,8 +1307,10 @@ something already shipped (then it is a must of the current release, like the ro
 - should: U4 step 1, process sharding of ABAP Unit on Go.
 - should: U4 step 2, Session-owned statics/DB/LUW, one goroutine per test class on a copy of the seed image; statics
   reset per test class as on A4H.
-- should: lazy tables slices 1-2 (ADR 0005): the xref into the registry as eager, then lazy.
-- nice: VRSD / `SVRS_*` over git on the registry (stoker; after ADR 0005 is accepted).
+- should: lazy tables slice 1 (ADR 0005, accepted narrowed): the xref filled eager in its own step after the host
+  listens, host readers await it; measure start and the cold first read; `lazy` only after those numbers.
+- nice: `SVRS_*` substitutes over #288's history (by key inside the FM); a `VRSD` table only once standard ABAP
+  that reads it enters the tree (ADR 0005, gated part).
 - nice: D, daemons DX: `osd samc --derive/--check` on DSL L1, CodeLens from the trace sidecar.
 - nice: Node ABAP Unit in worker_threads, one DB copy each.
 
