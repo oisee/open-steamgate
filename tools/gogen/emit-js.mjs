@@ -390,6 +390,12 @@ function stmt(st, ctx, d) {
   const t = tab(d);
   switch (st.s) {
     case "assign":
+      if (st.target.e === "substr_target") {
+        const base = place(st.target.base, ctx);
+        const off = st.target.off ? expr(st.target.off, ctx) : "0";
+        const len = expr(st.target.len, ctx);
+        return [`${t}${base} = ((b, o, n, v) => { abap.SubX(b, o, n); return b.slice(0, o) + abap.XFit(v, n) + b.slice(o + n); })(${base}, ${off}, ${len}, ${moved(st.value, ctx)});`];
+      }
       // a field symbol is the row itself: assigning to it writes into the row
       if (st.target.e === "fs") return [`${t}Object.assign(${ident(st.target.name)}, ${moved(st.value, ctx)});`];
       return [`${t}${place(st.target, ctx)} = ${moved(st.value, ctx)};`];
@@ -813,6 +819,14 @@ function stmt(st, ctx, d) {
       const tb = place(st.table, ctx);
       return [`${t}{`, `${t}  const ${n} = ${expr(st.index, ctx)};`,
         `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${tb}.splice(${n} - 1, 1); s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
+    }
+    case "delete_range": {
+      const n = ctx.loop++;
+      const tb = place(st.table, ctx);
+      return [`${t}{`, `${t}  const from${n} = ${expr(st.from, ctx)};`, `${t}  const to${n} = ${st.to ? expr(st.to, ctx) : `${tb}.length`};`,
+        `${t}  if (from${n} < 1 || to${n} < 1) throw new abap.AbapError("NOT_COMPILED", "DELETE range index below 1 was not measured");`,
+        `${t}  const end${n} = Math.min(to${n}, ${tb}.length);`,
+        `${t}  s.sy.subrc = 4;`, `${t}  if (from${n} <= end${n}) { ${tb}.splice(from${n} - 1, end${n} - from${n} + 1); s.sy.subrc = 0; }`, `${t}}`];
     }
     case "insert_index": {
       const n = `idx${ctx.loop++}`;

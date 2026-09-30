@@ -1588,8 +1588,10 @@ function attributeValue(id, type, where) {
   if (!quoted && !/^-?\d+(\.\d+)?$/.test(text)) throw new Unsupported(`${where}: VALUE ${text}`);
   let value = quoted ? text.slice(1, -1).replaceAll(text[0] === "'" ? "''" : "``", text[0]) : text;
   if (type.k === "c") value = value.slice(0, type.len).replace(/ +$/, "");
-  else if (!["i", "int8", "f", "string"].includes(type.k)) throw new Unsupported(`${where}: VALUE for type ${type.k}`);
-  if (type.k !== "c" && type.k !== "string" && !Number.isFinite(Number(value))) throw new Unsupported(`${where}: VALUE ${text}`);
+  else if (type.k === "x" || type.k === "xstring") {
+    if (!quoted || !/^(?:[0-9a-fA-F]{2})*$/.test(value)) throw new Unsupported(`${where}: VALUE ${text} for type ${type.k}`);
+  } else if (!["i", "int8", "f", "string"].includes(type.k)) throw new Unsupported(`${where}: VALUE for type ${type.k}`);
+  if (!["c", "string", "x", "xstring"].includes(type.k) && !Number.isFinite(Number(value))) throw new Unsupported(`${where}: VALUE ${text}`);
   return value;
 }
 
@@ -2499,6 +2501,15 @@ function statement(node, ctx) {
     keyGuard(table.type, "DELETE TABLE");
     return {s: "delete_key", table, key: field.name, value: convert(source(value, ctx, field.type), field.type)};
   }
+  if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+\S+\s+FROM\s+/i.test(text)) {
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table" || table.type.hashed || table.type.sorted) throw new Unsupported(`DELETE range of a ${table.type.k}`);
+    const indices = node.findDirectExpressions(Expressions.Source);
+    if (indices.length < 1 || indices.length > 2) throw new Unsupported(`DELETE range form: ${text}`);
+    keyGuard(table.type, "DELETE range");
+    return {s: "delete_range", table, from: convert(source(indices[0], ctx, I), I),
+      to: indices[1] ? convert(source(indices[1], ctx, I), I) : null};
+  }
   // ultra/itab: DELETE itab, the short form inside LOOP AT itab: the
   // current row goes and the loop goes on with the row after it (A4H
   // ZCL_GOGEN_T_NSCN); only in the innermost loop, over that same table
@@ -3141,6 +3152,12 @@ function lvalue(target, ctx) {
       const f = fieldOf(ctx, place.type, kids[i + 1].concatTokens(), target.concatTokens());
       place = {e: "field", base: place, name: f.name, type: f.type};
       i += 1;
+    } else if (isExpr(kids[i], Expressions.FieldOffset) || isExpr(kids[i], Expressions.FieldLength)) {
+      const off = isExpr(kids[i], Expressions.FieldOffset) ? offsetValue(kids[i], ctx) : null;
+      if (off !== null) i += 1;
+      const len = isExpr(kids[i], Expressions.FieldLength) ? offsetValue(kids[i], ctx) : null;
+      if (i < kids.length - 1 || !len || place.type.k !== "x") throw new Unsupported(`write target ${target.concatTokens()}`);
+      return {e: "substr_target", base: place, off, len, type: X(len.e === "int" ? len.value : place.type.len)};
     } else {
       throw new Unsupported(`target ${target.concatTokens()}`);
     }

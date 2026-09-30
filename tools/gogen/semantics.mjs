@@ -14,6 +14,9 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  ZCL_GOGEN_T_XATTR: "X",
+  ZCL_GOGEN_T_SUBX: "X",
+  ZCL_GOGEN_T_DELRANGE: "0/3/4 0/2 4/2",
   ZCL_GOGEN_T_FMDEFAULT: "7/9",
   ZCL_GOGEN_T_RF_SORT_OK: "mv:ab vl:cd rk:dc empty:0 back:2",
   ZCL_GOGEN_T_BOUND: "X",
@@ -95,9 +98,7 @@ const EXPECT = {
   // emitters refuse it as an internal DELETE form; what this pins is that it
   // is not sent to the database (before the fix: "the relational IR has no
   // delete node")
-  ZCL_GOGEN_T_DELNAME: {
-    Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2. at zcl_gogen_t_delname.clas.abap:19",
-    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_DELNAME=>RUN (zcl_gogen_t_delname.clas.abap:19): DELETE form: DELETE zgogen_t_dbw FROM 2."},
+  ZCL_GOGEN_T_DELNAME: "lines:1  subrc:0",
   ZCL_GOGEN_T_DYN: "upper:7 lower:err unknown:err",
   // CONCATENATE ... IN BYTE MODE into an xstring (A4H 2026-09-24, $ZOSG_TMP_0460;
   // ultra/packs, the SMW0 loaders of Zork and ZO4D): an x keeps its trailing

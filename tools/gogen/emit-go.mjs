@@ -1124,6 +1124,10 @@ function stmtLines(st, ctx, d) {
   const t = tab(d);
   switch (st.s) {
     case "assign":
+      if (st.target.e === "substr_target") {
+        HELPER_IMPORTS.add("subwrite");
+        return [`${t}${place(st.target.base, ctx)} = subwrite.X(${expr(st.target.base, ctx)}, ${st.target.off ? expr(st.target.off, ctx) : "0"}, ${expr(st.target.len, ctx)}, ${expr(st.value, ctx)})`];
+      }
       if (ctx.builders?.has(st.target.name) && isAppend(st, st.target.name)) {
         const parts = [];
         for (let e = st.value; e.e === "concat"; e = e.l) parts.unshift(e.r);
@@ -1805,6 +1809,15 @@ ${t}	}`));
       const tb = place(st.table, ctx);
       return [`${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
         `${t}\t${tb} = append(${tb}[:${n}-1], ${tb}[${n}:]...)`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+    }
+    case "delete_range": {
+      const n = ctx.loop++;
+      const tb = place(st.table, ctx);
+      return [`${t}{`, `${t}\tfrom${n} := ${expr(st.from, ctx)}`, `${t}\tto${n} := ${st.to ? expr(st.to, ctx) : `int32(len(${tb}))`}`,
+        `${t}\tif from${n} < 1 || to${n} < 1 { panic(abap.NotCompiled("DELETE range", "index below 1 was not measured")) }`,
+        `${t}\tif to${n} > int32(len(${tb})) { to${n} = int32(len(${tb})) }`,
+        `${t}\ts.Sy.Subrc = 4`, `${t}\tif from${n} <= to${n} {`,
+        `${t}\t\t${tb} = append(${tb}[:from${n}-1], ${tb}[to${n}:]...)`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}}`];
     }
     case "insert_index": {
       const n = `idx${ctx.loop++}`;
