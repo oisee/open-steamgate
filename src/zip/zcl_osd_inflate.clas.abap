@@ -23,11 +23,17 @@ CLASS zcl_osd_inflate DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_data       TYPE xstring
       RETURNING VALUE(rv_raw) TYPE xstring
       RAISING   zcx_osd_inflate.
-    "! The next piece of the compressed stream; returns the output it completes
+    "! The next piece of the compressed stream; returns the output it completes.
+    "! With IV_MAX_OUT > 0 it stops after about that many bytes (one step more
+    "! at most: a match is up to 258 bytes) and IS_PAUSED says output is still
+    "! waiting in the input already fed: FEED again, with an empty piece.
     METHODS feed
       IMPORTING iv_data       TYPE xstring
+                iv_max_out    TYPE i DEFAULT 0
       RETURNING VALUE(rv_raw) TYPE xstring
       RAISING   zcx_osd_inflate.
+    METHODS is_paused
+      RETURNING VALUE(rv_paused) TYPE abap_bool.
     "! Raises unless the final block has ended
     METHODS finish
       RAISING zcx_osd_inflate.
@@ -75,6 +81,8 @@ CLASS zcl_osd_inflate DEFINITION PUBLIC FINAL CREATE PUBLIC.
       mv_stored_left TYPE i,
       mv_hist        TYPE xstring,
       mv_unused      TYPE xstring,
+      mv_paused      TYPE abap_bool,
+      mv_room        TYPE i,
       ms_len         TYPE ty_huff,
       ms_dist        TYPE ty_huff.
 
@@ -253,8 +261,10 @@ CLASS zcl_osd_inflate IMPLEMENTATION.
     DATA lv_bitbuf TYPE i.
     DATA lv_bitcnt TYPE i.
     DATA lv_piece TYPE xstring.
+    DATA lv_emitted TYPE i.
     DATA lt_out TYPE STANDARD TABLE OF xstring WITH DEFAULT KEY.
 
+    mv_paused = abap_false.
     IF mv_state = c_done.
       CONCATENATE mv_unused iv_data INTO mv_unused IN BYTE MODE.
       RETURN.
@@ -271,6 +281,15 @@ CLASS zcl_osd_inflate IMPLEMENTATION.
     DO.
       IF mv_state = c_done.
         EXIT.
+      ENDIF.
+      " the output budget left; a stored step copies no more than that
+      mv_room = 0.
+      IF iv_max_out > 0.
+        mv_room = iv_max_out - lv_emitted - xstrlen( mv_hist ) + lv_from.
+        IF mv_room <= 0.
+          mv_paused = abap_true.
+          EXIT.
+        ENDIF.
       ENDIF.
       lv_pos = mv_pos.
       lv_bitbuf = mv_bitbuf.
@@ -302,6 +321,7 @@ CLASS zcl_osd_inflate IMPLEMENTATION.
           lv_len = lv_cut - lv_from.
           lv_piece = mv_hist+lv_from(lv_len).
           APPEND lv_piece TO lt_out.
+          lv_emitted = lv_emitted + lv_len.
           lv_from = lv_cut.
         ENDIF.
         mv_hist = mv_hist+lv_cut.
@@ -320,6 +340,10 @@ CLASS zcl_osd_inflate IMPLEMENTATION.
     IF mv_state <> c_done.
       fail( `the deflate stream ends before its final block` ).
     ENDIF.
+  ENDMETHOD.
+
+  METHOD is_paused.
+    rv_paused = mv_paused.
   ENDMETHOD.
 
   METHOD is_done.
@@ -443,6 +467,9 @@ CLASS zcl_osd_inflate IMPLEMENTATION.
     lv_take = mv_inlen - mv_pos.
     IF lv_take > mv_stored_left.
       lv_take = mv_stored_left.
+    ENDIF.
+    IF mv_room > 0 AND lv_take > mv_room.
+      lv_take = mv_room.
     ENDIF.
     IF lv_take = 0.
       RETURN.

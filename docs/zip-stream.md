@@ -14,14 +14,38 @@ system, on the Node runtime and on the Go build:
 
 ```abap
 CREATE OBJECT lo_source EXPORTING iv_file = `/data/in/export.zip`.
-CREATE OBJECT lo_zip EXPORTING io_source = lo_source.
-lo_zip->open( `export/big.xml` ).
-WHILE lo_zip->is_eof( ) = abap_false.
-  lv_piece = lo_zip->read( ).        " up to 64 KiB of compressed input a call
-  " ... hand lv_piece on
-ENDWHILE.
+TRY.
+    CREATE OBJECT lo_zip EXPORTING io_source = lo_source.
+    lo_zip->open( `export/big.xml` ).
+    WHILE lo_zip->is_eof( ) = abap_false.
+      lv_piece = lo_zip->read( ).       " see "Memory" below
+      " ... hand lv_piece on
+    ENDWHILE.
+  CLEANUP.
+    lo_source->close( ).
+ENDTRY.
 lo_source->close( ).
 ```
+
+## Memory
+
+Each `READ` is bounded by its two parameters: `IV_MAX` bytes of compressed
+input read from the source (default 64 KiB) and `IV_MAX_OUT` bytes of output
+returned (default 1 MiB; a deflate match may add up to 258 bytes more). When
+the output limit stops the decoder, the rest of what was read waits inside it
+and the next `READ` reads nothing new until it is used up. Besides that the
+decoder keeps its history (32 to 64 KiB, briefly one stored step more), and
+the reader keeps the central directory (read once, about 50 to 100 bytes an
+entry) and the last 64 KiB of the archive while it is opened.
+
+An entry that inflates to more than its directory size is stopped at the
+`READ` where that shows, not at its end: a zip bomb costs one output limit.
+After a failed check no entry is open and a further `READ` raises too.
+
+Several entries can be read at once: each `ZCL_OSD_ZIP_READER` holds its own
+position, decoder and checksum, and a source is read by position only, so
+several readers can share one `ZCL_OSD_ZIP_SOURCE_DATASET` (a dataset can be
+open only once per session) and be read in turn.
 
 ## Why our own decoder
 
@@ -52,15 +76,21 @@ the order they were added, and `LOAD` of bytes that are no zip at all returns
 One stream, 1 MiB of text: **Node 0.155 MiB/s** (6.4 s), **Go at least
 11 MiB/s** (1000 decodes of the 10892-byte test text in under a second,
 including start-up). The history is kept between 32 and 64 KiB inside the
-loop; before that it held the whole output of a piece and 1 MiB took 48 s on
+loop (briefly one stored step more); before that it held the whole output of a piece and 1 MiB took 48 s on
 Node. On Node the cost is now the transpiled ABAP per symbol, as for sXML
 (X1b); the binary path is Go.
 
 ## Not read
 
 ZIP64 (archives or entries of 2 GiB and more), encrypted entries, split
-archives, compression methods other than stored (0) and deflate (8). Names
-are decoded as UTF-8 whether or not the entry sets the UTF-8 flag.
+archives, archives with data in front of them (self-extracting ones: the
+first local header is not where the directory says), compression methods
+other than stored (0) and deflate (8). `CL_ABAP_ZIP` on the system has no
+ZIP64 either. Names are decoded as UTF-8 whether or not the entry sets the
+UTF-8 flag; a name that is not valid UTF-8 becomes empty. Of two entries
+with the same name, `OPEN` takes the first. The end-of-directory record is
+taken only where its comment ends the archive exactly, so a comment that
+contains its signature is not mistaken for it.
 
 ## Go build
 

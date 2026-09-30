@@ -44,10 +44,13 @@ CLASS zcl_osd_zip_reader DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS open
       IMPORTING iv_name TYPE string
       RAISING   zcx_osd_zip.
-    "! The next piece of the open entry, from up to IV_MAX compressed bytes;
-    "! may be empty before the end
+    "! The next piece of the open entry. Memory per call is bounded by both
+    "! limits: IV_MAX bytes of compressed input read, IV_MAX_OUT bytes of
+    "! output returned (about: a deflate match may add up to 258). A piece may
+    "! be empty before the end; loop until IS_EOF.
     METHODS read
       IMPORTING iv_max         TYPE i DEFAULT 65536
+                iv_max_out     TYPE i DEFAULT 1048576
       RETURNING VALUE(rv_data) TYPE xstring
       RAISING   zcx_osd_zip.
     METHODS is_eof
@@ -166,10 +169,12 @@ CLASS zcl_osd_zip_reader IMPLEMENTATION.
       lv_tail_len = 65557.
     ENDIF.
     lv_tail = mo_source->read( iv_pos = lv_size - lv_tail_len iv_len = lv_tail_len ).
+    " the record is taken only where its comment ends the archive exactly, so
+    " a comment that happens to contain the signature is not the record
     lv_at = xstrlen( lv_tail ) - 22.
     WHILE lv_at >= 0.
       lv_sig = lv_tail+lv_at(4).
-      IF lv_sig = lc_eocd.
+      IF lv_sig = lc_eocd AND lv_at + 22 + le( iv_data = lv_tail iv_off = lv_at + 20 iv_len = 2 ) = xstrlen( lv_tail ).
         lv_found = abap_true.
         EXIT.
       ENDIF.
@@ -197,7 +202,8 @@ CLASS zcl_osd_zip_reader IMPLEMENTATION.
     lv_bytes = lv_bytes+22(lv_len).
     mv_comment = text( lv_bytes ).
 
-    IF lv_cd_off + lv_cd_size > lv_size - xstrlen( lv_tail ) + lv_at.
+    " compared without adding the two, which could overflow
+    IF lv_cd_size > lv_size - xstrlen( lv_tail ) + lv_at OR lv_cd_off > lv_size - xstrlen( lv_tail ) + lv_at - lv_cd_size.
       fail( `the central directory lies outside the archive` ).
     ENDIF.
     lv_cd = mo_source->read( iv_pos = lv_cd_off iv_len = lv_cd_size ).
@@ -292,6 +298,7 @@ CLASS zcl_osd_zip_reader IMPLEMENTATION.
   METHOD read.
     DATA lv_take TYPE i.
     DATA lv_data TYPE xstring.
+    DATA lv_paused TYPE abap_bool.
     DATA lx_inflate TYPE REF TO zcx_osd_inflate.
 
     IF mv_open = abap_false.
@@ -300,37 +307,57 @@ CLASS zcl_osd_zip_reader IMPLEMENTATION.
     IF mv_eof = abap_true.
       RETURN.
     ENDIF.
-    lv_take = mv_left.
-    IF lv_take > iv_max.
-      lv_take = iv_max.
+    IF mo_inflate IS BOUND.
+      lv_paused = mo_inflate->is_paused( ).
     ENDIF.
-    IF lv_take > 0.
-      lv_data = mo_source->read( iv_pos = mv_pos iv_len = lv_take ).
-      IF xstrlen( lv_data ) < lv_take.
-        fail( |{ ms_entry-name } is cut short: the archive ends inside it| ).
+    " while output is still waiting in what was read, nothing more is read
+    IF lv_paused = abap_false.
+      lv_take = mv_left.
+      IF lv_take > iv_max.
+        lv_take = iv_max.
       ENDIF.
-      mv_pos = mv_pos + lv_take.
-      mv_left = mv_left - lv_take.
+      IF mo_inflate IS NOT BOUND AND iv_max_out > 0 AND lv_take > iv_max_out.
+        lv_take = iv_max_out.
+      ENDIF.
+      IF lv_take > 0.
+        lv_data = mo_source->read( iv_pos = mv_pos iv_len = lv_take ).
+        IF xstrlen( lv_data ) < lv_take.
+          mv_open = abap_false.
+          fail( |{ ms_entry-name } is cut short: the archive ends inside it| ).
+        ENDIF.
+        mv_pos = mv_pos + lv_take.
+        mv_left = mv_left - lv_take.
+      ENDIF.
     ENDIF.
     IF mo_inflate IS BOUND.
       TRY.
-          rv_data = mo_inflate->feed( lv_data ).
+          rv_data = mo_inflate->feed( iv_data = lv_data iv_max_out = iv_max_out ).
         CATCH zcx_osd_inflate INTO lx_inflate.
+          mv_open = abap_false.
           fail( |{ ms_entry-name }: { lx_inflate->reason }| ).
       ENDTRY.
+      lv_paused = mo_inflate->is_paused( ).
     ELSE.
       rv_data = lv_data.
     ENDIF.
     mo_crc->update( rv_data ).
     mv_produced = mv_produced + xstrlen( rv_data ).
-    IF mv_left = 0.
+    " more than the directory promised: a damaged entry or a bomb, stopped
+    " as soon as it shows and not at its end
+    IF mv_produced > ms_entry-size.
+      mv_open = abap_false.
+      fail( |{ ms_entry-name }: more than the { ms_entry-size } bytes the directory gives| ).
+    ENDIF.
+    IF mv_left = 0 AND lv_paused = abap_false.
       finish_entry( ).
     ENDIF.
   ENDMETHOD.
 
   METHOD finish_entry.
     DATA lx_inflate TYPE REF TO zcx_osd_inflate.
+    " a check that fails leaves no entry open, so a READ after it raises too
     mv_eof = abap_true.
+    mv_open = abap_false.
     IF mo_inflate IS BOUND.
       TRY.
           mo_inflate->finish( ).
@@ -344,6 +371,7 @@ CLASS zcl_osd_zip_reader IMPLEMENTATION.
     IF mo_crc->value( ) <> ms_entry-crc32.
       fail( |{ ms_entry-name }: CRC-32 does not match| ).
     ENDIF.
+    mv_open = abap_true.
   ENDMETHOD.
 
   METHOD is_eof.
