@@ -165,3 +165,55 @@ DDIC_PROVIDER.type = (registry, type, name) => {
 };
 
 export const TYPE_PROVIDERS = [DDIC_PROVIDER];
+
+const LITERAL_TYPES = new Set([
+  "CHAR", "NUMC", "CLNT", "LANG", "CUKY", "UNIT", "ACCP", "DATS", "TIMS",
+  "STRG", "SSTR", "INT1", "INT2", "INT4", "INT8", "DEC", "CURR", "QUAN", "RAW",
+]);
+const LENGTH_TYPES = new Set(["CHAR", "NUMC", "CLNT", "LANG", "CUKY", "UNIT", "ACCP", "DATS", "TIMS", "SSTR", "DEC", "CURR", "QUAN", "RAW"]);
+// Names accepted by abaplint's DDIC.lookupBuiltinType. These are ABAP
+// keywords even when the supplied DDIC happens to contain the same name.
+const ABAP_BUILTINS = new Set([
+  "C", "N", "I", "P", "X", "D", "T", "STRING", "XSTRING", "INT8", "F",
+  "DECFLOAT16", "DECFLOAT34", "XSEQUENCE", "CLIKE", "DECFLOAT", "ANY",
+  "SIMPLE", "%_C_POINTER", "TABLE", "DATA", "NUMERIC", "UTCLONG", "CSEQUENCE",
+]);
+
+// A filter type is deliberately separate from the display-oriented `type`.
+// DDIC names retain widths and semantics that abaplint's basic types erase.
+DDIC_PROVIDER.literalType = (registry, type, name, localTypes = new Map()) => {
+  if (!type || unresolvedDeep(type)) return {resolved: false, reason: `${name ?? "type"} does not resolve`};
+  let finalName = name?.toUpperCase();
+  const seen = new Set();
+  while (finalName && localTypes.has(finalName)) {
+    if (seen.has(finalName) || !localTypes.get(finalName)) {
+      return {resolved: false, reason: `${name} has no resolved TYPES reference`};
+    }
+    seen.add(finalName);
+    finalName = localTypes.get(finalName);
+  }
+  const builtinName = finalName && ABAP_BUILTINS.has(finalName);
+  const ddicName = builtinName ? undefined : finalName || type.getDDICName?.();
+  const element = ddicName && registry.getObject("DTEL", ddicName.toUpperCase());
+  if (!element && !builtinName && ["IntegerType", "Integer8Type", "PackedType"].includes(type.constructor.name)) {
+    return {resolved: false, reason: `${name ?? "type"} has no resolved integer or packed width`};
+  }
+  // abaplint exposes the DDIC datatype publicly, but not LENG/DECIMALS.
+  // Its parsed DDIC record retains both (including domain-backed elements).
+  element?.parse();
+  const domain = element?.getDomainName?.() && registry.getObject("DOMA", element.getDomainName().toUpperCase());
+  domain?.parse();
+  const ddic = element?.parsedXML?.leng ? element.parsedXML : domain?.parsedXML;
+  const builtIn = element ? element.getDataType(registry)?.toUpperCase() : ({...Object.fromEntries(BUILTIN), StringType: "STRG"})[type.constructor.name];
+  if (!builtIn || !LITERAL_TYPES.has(builtIn)) return {resolved: false, reason: `${builtIn ?? type.constructor.name} is not accepted by literal`};
+  const result = {built_in: builtIn};
+  // DDIC's packed length is digits. abaplint's PackedType length is bytes.
+  // Its maximum precision is twice the byte width minus one.
+  if (LENGTH_TYPES.has(builtIn)) {
+    const width = element ? Number(ddic?.leng ?? ddic?.length) : builtIn === "DATS" ? 8 : builtIn === "TIMS" ? 6 : type.getLength?.();
+    if (!Number.isFinite(width) || width <= 0) return {resolved: false, reason: `${builtIn} has no resolved length`};
+    result.length = ["DEC", "CURR", "QUAN"].includes(builtIn) && !element ? width * 2 - 1 : width;
+  }
+  if (["DEC", "CURR", "QUAN"].includes(builtIn)) result.decimals = element ? Number(ddic?.decimals ?? 0) : type.getDecimals?.() ?? 0;
+  return result;
+};

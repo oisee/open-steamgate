@@ -2,7 +2,7 @@ import {expect} from "chai";
 import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {abapModel, DDIC_PROVIDER as abapProvider, methodTableModel, renderMethodTable} from "../tools/dsl-abap.mjs";
+import {abapModel, DDIC_PROVIDER as abapProvider, methodTableModel, renderMethodTable, renderConstants} from "../tools/dsl-abap.mjs";
 import {DDIC_PROVIDER as modelProvider} from "../tools/dsl-ddic.mjs";
 import {DDIC_PROVIDER as liftProvider} from "../tools/lift.mjs";
 
@@ -38,6 +38,7 @@ describe("ABAP declaration L1", function () {
     expect(modelProvider).to.equal(liftProvider);
     expect(modelProvider).to.equal(abapProvider);
     expect(modelProvider.type).to.be.a("function");
+    expect(modelProvider.literalType).to.be.a("function");
   });
 
   it("reads class, declarations, parameter directions, types and source lines", () => {
@@ -140,5 +141,118 @@ ENDCLASS.
     expect(result.text).to.include("| render | importing iv_template: STRING");
     expect(result.text).to.include("| to_string | importing is_result:");
     expect(result.trace.every((entry) => entry.node?.startsWith("class/zcl_osd_tpl"))).to.equal(true);
+  });
+
+  const literalsFile = "test/fixtures/dsl-literals/zcl_dsl_literals.clas.abap";
+  const literalDDIC = "test/fixtures/dsl-literals";
+  const aliasFile = "test/fixtures/dsl-literals/zcl_dsl_aliases.clas.abap";
+  const aliasConstant = (name) => abapModel([aliasFile], {ddic: [literalDDIC]}).classes[0].attributes.find((a) => a.name === name);
+  it("uses the INT1 data element through a local TYPES alias", async () => {
+    const item = aliasConstant("c_small");
+    expect(item["value@type"]).to.deep.equal({built_in: "INT1"});
+    try {
+      await renderConstants(abapModel([aliasFile], {ddic: [literalDDIC]}), "zcl_dsl_aliases");
+      expect.fail("expected literal refusal");
+    } catch (error) {
+      expect(error.message).to.equal("main:1: literal value needs an integer in range");
+    }
+  });
+
+  it("keeps the data element's packed precision through a local TYPES alias", () => {
+    expect(aliasConstant("c_decimal")["value@type"]).to.deep.equal({built_in: "DEC", length: 14, decimals: 2});
+  });
+
+  it("follows a chain of two local TYPES aliases", () => {
+    expect(aliasConstant("c_chain")["value@type"]).to.deep.equal({built_in: "INT1"});
+  });
+
+  it("uses the built-in integer type when DDIC also defines I", () => {
+    expect(aliasConstant("c_builtin")["value@type"]).to.deep.equal({built_in: "INT4"});
+  });
+  it("writes filter types beside literal values and parameter defaults", () => {
+    const cls = abapModel([literalsFile], {ddic: [literalDDIC]}).classes[0];
+    const actual = Object.fromEntries(cls.attributes.filter((a) => a["value@type"] !== undefined)
+      .map((a) => [a.name, [a.value, a["value@type"]]]));
+    expect(actual).to.deep.equal({
+      c_char_de: ["Ab", {built_in: "CHAR", length: 4}],
+      c_char: ["xyz", {built_in: "CHAR", length: 3}],
+      c_numc: ["0042", {built_in: "NUMC", length: 4}],
+      c_int1: ["255", {built_in: "INT1"}],
+      c_int4: ["00042", {built_in: "INT4"}],
+      c_int8: ["9223372036854775807", {built_in: "INT8"}],
+      c_dec_de: ["1.50", {built_in: "DEC", length: 15, decimals: 2}],
+      c_dec14: ["1.25", {built_in: "DEC", length: 14, decimals: 2}],
+      c_dec: ["12.34", {built_in: "DEC", length: 15, decimals: 2}],
+      c_string: ["hello", {built_in: "STRG"}],
+      c_raw: ["0a1b", {built_in: "RAW", length: 2}],
+      c_date: ["20260930", {built_in: "DATS", length: 8}],
+      c_time: ["123456", {built_in: "TIMS", length: 6}],
+    });
+    expect(cls.attributes.find((a) => a.name === "c_ref")).to.include({value_expr: "c_int4"});
+    expect(cls.attributes.find((a) => a.name === "c_ref")).not.to.have.property("value@type");
+    expect(cls.attributes.find((a) => a.name === "c_xstring")).to.include({value: "00"});
+    expect(cls.attributes.find((a) => a.name === "c_xstring").literal_type).to.deep.equal({
+      resolved: false, reason: "XSTRING is not accepted by literal",
+    });
+    expect(cls.attributes.find((a) => a.name === "c_xstring")).not.to.have.property("value@type");
+    for (const [name, type] of [["c_float", "FLTP"], ["c_decfloat", "DECFLOAT16"]]) {
+      const item = cls.attributes.find((a) => a.name === name);
+      expect(item.literal_type).to.deep.equal({resolved: false, reason: `${type} is not accepted by literal`});
+      expect(item).not.to.have.property("value@type");
+    }
+    expect(cls.methods[0].parameters[0]).to.include({default: "A"});
+    expect(cls.methods[0].parameters[0]["default@type"]).to.deep.equal({built_in: "CHAR", length: 4});
+    expect(cls.attributes.find((a) => a.name === "c_dec")["@type"].length).to.equal(8);
+    const intf = abapModel(["test/fixtures/dsl-literals/zif_dsl_literals.intf.abap"], {ddic: []}).interfaces[0];
+    expect(intf.attributes[0]).to.include({constant: true, value: "interface"});
+    expect(intf.attributes[0]["value@type"]).to.deep.equal({built_in: "STRG"});
+  });
+
+  it("round trips every literal constant through the ABAP filter with a line trace", async () => {
+    const model = abapModel([literalsFile], {ddic: [literalDDIC]});
+    const result = await renderConstants(model, "zcl_dsl_literals");
+    expect(result.text).to.equal([
+      "CONSTANTS c_char_de TYPE zlit_char VALUE 'Ab'.",
+      "CONSTANTS c_char TYPE c LENGTH 3 VALUE 'xyz'.",
+      "CONSTANTS c_numc TYPE zlit_numc VALUE '0042'.",
+      "CONSTANTS c_int1 TYPE zlit_int1 VALUE 255.",
+      "CONSTANTS c_int4 TYPE i VALUE 42.",
+      "CONSTANTS c_int8 TYPE int8 VALUE 9223372036854775807.",
+      "CONSTANTS c_dec_de TYPE zlit_dec VALUE '1.50'.",
+      "CONSTANTS c_dec14 TYPE zlit_dec14 VALUE '1.25'.",
+      "CONSTANTS c_dec TYPE p LENGTH 8 DECIMALS 2 VALUE '12.34'.",
+      "CONSTANTS c_string TYPE string VALUE `hello`.",
+      "CONSTANTS c_raw TYPE x LENGTH 2 VALUE '0A1B'.",
+      "CONSTANTS c_date TYPE d VALUE '20260930'.",
+      "CONSTANTS c_time TYPE t VALUE '123456'.",
+      "",
+    ].join("\n"));
+    expect(result.trace).to.have.length(13);
+    for (const [index, entry] of result.trace.entries()) {
+      expect(entry.line).to.equal(index + 1);
+      expect(entry.node).to.equal(`class/zcl_dsl_literals/attribute/${model.classes[0].attributes[index].name}`);
+    }
+  });
+
+  it("refuses an INT1 value outside its range at the template line", async () => {
+    const model = abapModel(["test/fixtures/dsl-literals/zcl_dsl_refusal.clas.abap"], {ddic: [literalDDIC]});
+    expect(model.classes[0].attributes[0]["value@type"]).to.deep.equal({built_in: "INT1"});
+    try {
+      await renderConstants(model, "zcl_dsl_refusal");
+      expect.fail("expected literal refusal");
+    } catch (error) {
+      expect(error.message).to.equal("main:1: literal value needs an integer in range");
+    }
+  });
+
+  it("refuses a CHAR value beyond its declared length", async () => {
+    const model = abapModel(["test/fixtures/dsl-literals/zcl_dsl_char_refusal.clas.abap"], {ddic: []});
+    expect(model.classes[0].attributes[0]["value@type"]).to.deep.equal({built_in: "CHAR", length: 3});
+    try {
+      await renderConstants(model, "zcl_dsl_char_refusal");
+      expect.fail("expected literal refusal");
+    } catch (error) {
+      expect(error.message).to.equal("main:1: literal value exceeds length");
+    }
   });
 });
