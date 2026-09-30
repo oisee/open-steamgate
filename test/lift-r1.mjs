@@ -199,10 +199,10 @@ ENDCLASS.`);
 
   // Critic round r1d (10602587): each of these was accepted before.
   it("R1 refuses a key include the DDIC given does not hold, even a CI_ one abaplint skips", () => {
-    // abaplint refuses the first itself ("does not resolve"); the CI_ one it
+    // abaplint's parseType would refuse the first itself; the CI_ one it
     // skips, and only the check of the key includes here catches it
-    for (const [include, reason] of [["ZOSD_LIFT_MISSING", /^full key: zosd_lift_txt does not resolve/],
-      ["CI_LIFT_MISSING", /^full key: zosd_lift_txt has a key include CI_LIFT_MISSING that is not in the DDIC given/]]) {
+    for (const include of ["ZOSD_LIFT_MISSING", "CI_LIFT_MISSING"]) {
+      const reason = new RegExp(`^full key: zosd_lift_txt has a key include ${include} that is not in the DDIC given`);
       withDdic({
         "zosd_lift_txt.tabl.xml": table("ZOSD_LIFT_TXT", "TRANSP", true,
           [MANDT, char("KIND", 4, true), char("CODE", 10, true), `<FIELDNAME>.INCLUDE</FIELDNAME><KEYFLAG>X</KEYFLAG><PRECFIELD>${include}</PRECFIELD><COMPTYPE>S</COMPTYPE>`, char("TEXT", 40)]),
@@ -210,7 +210,9 @@ ENDCLASS.`);
     }
   });
 
-  it("R1 refuses a suffixed key include, which abaplint leaves out of the key", () => {
+  // diagnostic: abaplint keeps .INCLU-_X in the key as a literal name that
+  // never resolves, so this was refused before too, only for a vaguer reason
+  it("R1 refuses a suffixed key include and says why", () => {
     withDdic({
       "zosd_lift_key.tabl.xml": table("ZOSD_LIFT_KEY", "INTTAB", false, [char("CODE", 10)]),
       "zosd_lift_txt.tabl.xml": table("ZOSD_LIFT_TXT", "TRANSP", true,
@@ -232,16 +234,73 @@ ENDCLASS.`);
     expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(/^shape: ct_rows is typed generically/);
   });
 
-  it("R1 leaves INT1 and INT2 keys against TYPE i open: abaplint does not tell the widths apart", () => {
-    const int = (name, datatype, length) => `<FIELDNAME>${name}</FIELDNAME><KEYFLAG>X</KEYFLAG><INTTYPE>${datatype === "INT1" ? "b" : datatype === "INT2" ? "s" : "I"}</INTTYPE><INTLEN>00000${length}</INTLEN><DATATYPE>${datatype}</DATATYPE><LENG>000003</LENG>`;
-    const intFixture = fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`)
-      .replace("kind TYPE c LENGTH 4, code TYPE c LENGTH 10", "kind TYPE i, code TYPE i");
-    for (const [datatype, length, open] of [["INT1", 1, true], ["INT2", 2, true], ["INT4", 4, false]]) {
-      const model = withDdic({"zosd_lift_txt.tabl.xml": table("ZOSD_LIFT_TXT", "TRANSP", true, [MANDT, int("KIND", datatype, length), int("CODE", datatype, length), char("TEXT", 40)])},
-        (ddic) => modelR1FromSource("zcl_fx.clas.abap", intFixture, "m", ddic));
-      if (open) expect(model.open, datatype).to.include("key types equal column types");
-      else expect(model.open, datatype).to.not.include("key types equal column types");
-    }
+  // abaplint gives INT1, INT2 and INT4 one type with no width: only a data
+  // element on the row's side and INT4 on the column's close the obligation
+  const int = (name, datatype, length, key = true) => `<FIELDNAME>${name}</FIELDNAME>${key ? "<KEYFLAG>X</KEYFLAG>" : ""}<INTTYPE>${datatype === "INT1" ? "b" : datatype === "INT2" ? "s" : "I"}</INTTYPE><INTLEN>00000${length}</INTLEN><DATATYPE>${datatype}</DATATYPE><LENG>000003</LENG>`;
+  const intTable = (datatype, length) => ({"zosd_lift_txt.tabl.xml": table("ZOSD_LIFT_TXT", "TRANSP", true, [MANDT, int("KIND", datatype, length), int("CODE", datatype, length), char("TEXT", 40)])});
+  const intFixture = (declaration) => fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`)
+    .replace("kind TYPE c LENGTH 4, code TYPE c LENGTH 10", declaration);
+  const integerCases = [
+    ["INT1 column, TYPE i row", intTable("INT1", 1), intFixture("kind TYPE i, code TYPE i"), true],
+    ["INT2 column, TYPE i row", intTable("INT2", 2), intFixture("kind TYPE i, code TYPE i"), true],
+    ["INT4 column, TYPE i row (TYPE i proves nothing: it may be an INT1 field of a DDIC structure)", intTable("INT4", 4), intFixture("kind TYPE i, code TYPE i"), true],
+    ["INT4 column, data element INT1 row", intTable("INT4", 4), intFixture("kind TYPE int1, code TYPE int1"), true],
+    ["INT4 column, data element INT4 row", intTable("INT4", 4), intFixture("kind TYPE int4, code TYPE int4"), false],
+  ];
+  for (const [what, ddicFiles, source, open] of integerCases) {
+    it(`integer keys: ${what} ${open ? "stays open" : "closes"}`, () => {
+      const model = withDdic(ddicFiles, (ddic) => modelR1FromSource("zcl_fx.clas.abap", source, "m", ddic));
+      if (open) expect(model.open).to.include("key types equal column types");
+      else expect(model.open).to.not.include("key types equal column types");
+    });
+  }
+
+  it("integer keys: an INT1 field of a DDIC structure against an INT4 column stays open", () => {
+    const source = fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`)
+      .replace("TYPES tt_rows TYPE STANDARD TABLE OF ty_row", "TYPES tt_rows TYPE STANDARD TABLE OF zosd_lift_irow");
+    const model = withDdic({...intTable("INT4", 4),
+      "zosd_lift_irow.tabl.xml": table("ZOSD_LIFT_IROW", "INTTAB", false, [int("KIND", "INT1", 1, false), int("CODE", "INT1", 1, false), char("TEXT", 40)])},
+    (ddic) => modelR1FromSource("zcl_fx.clas.abap", source, "m", ddic));
+    expect(model.open).to.include("key types equal column types");
+  });
+
+  const symbolCases = [
+    ["a field symbol TYPE any", "FIELD-SYMBOLS <ls_row> TYPE any.", /^shape: <ls_row> is not typed as a structure/],
+    ["a field symbol whose same-named component has another type",
+      "TYPES: BEGIN OF ty_wide, kind TYPE c LENGTH 5, code TYPE c LENGTH 10, text TYPE c LENGTH 40, END OF ty_wide.\n    FIELD-SYMBOLS <ls_row> TYPE ty_wide.",
+      /^shape: <ls_row>-kind is Character\(5\), ct_rows-kind is Character\(4\)/],
+  ];
+  for (const [what, declaration, reason] of symbolCases) {
+    it(`R1 refuses ${what}`, () => {
+      const source = fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`).replace("FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", declaration);
+      expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(reason);
+    });
+  }
+
+  it("a field symbol the syntax cannot resolve leaves its agreement with the line open", () => {
+    const source = fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`).replace("FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "FIELD-SYMBOLS <ls_row> TYPE zsomething_unknown.");
+    expect(modelR1FromSource("zcl_fx.clas.abap", source, "m").open).to.include("<ls_row> typed like a line of ct_rows");
+  });
+
+  it("R1 refuses a loop table with a header line", () => {
+    const source = fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`)
+      .replace("FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "DATA lt_h TYPE STANDARD TABLE OF ty_row WITH HEADER LINE.\n    FIELD-SYMBOLS <ls_row> LIKE LINE OF lt_h.")
+      .replace("LOOP AT ct_rows ASSIGNING", "LOOP AT lt_h ASSIGNING");
+    expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(/^shape: lt_h has a header line/);
+  });
+
+  it("R1 refuses a key include that is a view, naming it as unsupported rather than missing", () => {
+    const view = `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_VIEW" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values><DD25V><VIEWNAME>ZOSD_LIFT_V</VIEWNAME><VIEWCLASS>D</VIEWCLASS></DD25V></asx:values>
+ </asx:abap>
+</abapGit>`;
+    withDdic({
+      "zosd_lift_v.view.xml": view,
+      "zosd_lift_txt.tabl.xml": table("ZOSD_LIFT_TXT", "TRANSP", true,
+        [MANDT, char("KIND", 4, true), char("CODE", 10, true), "<FIELDNAME>.INCLUDE</FIELDNAME><KEYFLAG>X</KEYFLAG><PRECFIELD>ZOSD_LIFT_V</PRECFIELD><COMPTYPE>S</COMPTYPE>", char("TEXT", 40)]),
+    }, (ddic) => expect(() => modelR1(DEMO, "before", ddic)).to.throw(/^full key: zosd_lift_txt has a key include ZOSD_LIFT_V that is a view/));
   });
 
   it("an unresolved key type does not hide a known mismatch in another key", () => {
@@ -249,6 +308,13 @@ ENDCLASS.`);
       .replace("kind TYPE c LENGTH 4", "kind TYPE n LENGTH 4")
       .replace("code TYPE c LENGTH 10", "code TYPE zsomething_unknown");
     expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(/^key types: ct_rows-kind is Numeric\(4\), zosd_lift_txt-kind is Character\(4\)/);
+  });
+
+  it("an unresolved first key does not stop the check of the next", () => {
+    const source = fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`)
+      .replace("kind TYPE c LENGTH 4", "kind TYPE zsomething_unknown")
+      .replace("code TYPE c LENGTH 10", "code TYPE n LENGTH 10");
+    expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(/^key types: ct_rows-code is Numeric\(10\), zosd_lift_txt-code is Character\(10\)/);
   });
 
   it("the generated region of AFTER is exactly what the template renders", async () => {
