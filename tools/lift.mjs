@@ -59,19 +59,29 @@ const methodName = (method) =>
   method.getFirstStatement().findDirectExpression(Expressions.MethodName)?.concatTokens().toLowerCase();
 
 // A call is to a method of the same class only when nothing stands before the
-// name, or `me->` does: `other->fetch( )` and `zcl_x=>fetch( )` are another
-// object's, whatever the name.
+// name, or `me->` does and nothing stands before `me`: `other->fetch( )`,
+// `zcl_x=>fetch( )` and `other->me->fetch( )` are another object's, whatever
+// the name. `CALL METHOD fetch` and `CALL METHOD me->fetch` count as well.
+const RECEIVER = new Set(["->", "=>", "-"]);
 function ownCalls(loop) {
   const names = [];
   for (const statement of loop.findAllStatementNodes()) {
     const tokens = statement.getTokens().map((t) => t.getStr().toLowerCase());
-    for (const call of statement.findAllExpressions(Expressions.MethodCall)) {
-      const name = call.findDirectExpression(Expressions.MethodName);
+    const call = /^call method (me->)?([a-z_][\w]*)(?=[\s.(]|$)/.exec(tokens.join(" ").replace(/ -> /g, "->"));
+    if (call) {
+      names.push(call[2]);
+      continue;
+    }
+    for (const expression of statement.findAllExpressions(Expressions.MethodCall)) {
+      const name = expression.findDirectExpression(Expressions.MethodName);
       if (!name) continue;
       const at = statement.getTokens().indexOf(name.getFirstToken());
       const before = tokens[at - 1];
-      if (before === "->" && tokens[at - 2] !== "me") continue;
-      if (before === "=>") continue;
+      if (before === "->") {
+        if (tokens[at - 2] !== "me" || RECEIVER.has(tokens[at - 3])) continue;
+      } else if (RECEIVER.has(before)) {
+        continue;
+      }
       names.push(name.concatTokens().toLowerCase());
     }
   }
@@ -118,13 +128,23 @@ export function primaryKey(table, ddicFolders) {
     const fields = [...xml.matchAll(/<DD03P>([\s\S]*?)<\/DD03P>/g)].map((m) => ({
       name: /<FIELDNAME>([^<]+)</.exec(m[1])[1].toLowerCase(),
       key: /<KEYFLAG>X</.test(m[1]),
-      client: /<ROLLNAME>MANDT</.test(m[1]) || /<DATATYPE>CLNT</.test(m[1]),
+      datatype: /<DATATYPE>(\w+)</.exec(m[1])?.[1],
+      mandt: /<ROLLNAME>MANDT</.test(m[1]),
       include: /<FIELDNAME>\.INCLU/.test(m[1]),
     }));
     if (fields.some((f) => f.include)) throw new Refusal("full key", `${table} has includes; their key fields are not resolved`);
+    // a client column is CLNT, or data element MANDT with no type of its own
+    for (const f of fields) {
+      if (f.mandt && f.datatype && f.datatype !== "CLNT") {
+        throw new Refusal("full key", `${table}-${f.name} has data element MANDT but type ${f.datatype}`);
+      }
+      f.client = f.datatype === "CLNT" || f.mandt;
+    }
     const keys = fields.filter((f) => f.key);
     if (/<CLIDEP>X</.test(xml)) {
-      if (!keys[0]?.client) throw new Refusal("full key", `${table} is client-dependent but its first key field is not the client`);
+      if (!fields[0]?.client || !fields[0].key) {
+        throw new Refusal("full key", `${table} is client-dependent but its first field is not the client key field`);
+      }
       keys.shift();
     }
     const stray = keys.find((f) => f.client);
@@ -152,13 +172,18 @@ const HIT = "<ls_lookup>";
 export function modelR1FromSource(name, source, method, ddicFolders) {
   const [file] = parseSources([{name, source}]);
   const m = file.getStructure()?.findAllStructures(Structures.Method).find((s) => methodName(s) === method.toLowerCase());
-  if (!m) throw new Refusal("shape", `no method ${method} in ${basename(path)}`);
+  if (!m) throw new Refusal("shape", `no method ${method} in ${name}`);
   const loops = m.findAllStructures(Structures.Loop);
   if (loops.length !== 1) throw new Refusal("shape", `${loops.length} loops in ${method}, R1 takes one`);
   const loop = loops[0];
-  const used = new Set(m.findAllStatementNodes().flatMap((st) => st.getTokens().map((t) => t.getStr().toLowerCase())));
+  // The method sees its own body and its signature; a parameter of that name
+  // counts as much as a local declaration.
+  const signature = file.getStructure().findAllStatements(Statements.MethodDef)
+    .filter((st) => st.findDirectExpression(Expressions.MethodName)?.concatTokens().toLowerCase() === method.toLowerCase());
+  const used = new Set([...m.findAllStatementNodes(), ...signature]
+    .flatMap((st) => st.getTokens().map((t) => t.getStr().toLowerCase())));
   for (const generated of [LOOKUP, HIT]) {
-    if (used.has(generated)) throw new Refusal("names", `${generated} is already used in ${method}; the rewrite would declare it again`);
+    if (used.has(generated)) throw new Refusal("names", `${generated} is already used in ${name}; the rewrite would declare it again`);
   }
 
   const head = loop.getFirstStatement().concatTokens().replace(/\s+/g, " ");
@@ -205,7 +230,8 @@ export function modelR1FromSource(name, source, method, ddicFolders) {
     hit: HIT,
     // checked here: shape, full key against the DDIC, names. Not checked: the
     // obligations recipes/r1-lookup-enrich/recipe.md lists as open.
-    open: ["key types equal column types", "no concurrent writes to the table during the loop"],
+    open: ["key types equal column types", "no concurrent writes to the table during the loop",
+      "reads confined to one client"],
   };
 }
 

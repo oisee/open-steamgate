@@ -2,12 +2,15 @@
 * same table contents and must leave the same rows. Each case is one of the
 * obligations the recipe declares (docs/verified-lift.md, 3.3): a hit, a miss
 * that keeps what the row held, a key asked twice, no rows at all, a key that
-* differs in one component only. DANGEROUS: setup empties ZOSD_LIFT_TXT, a
-* table of this recipe's own, and fills it; on a system nothing else reads it.
+* differs in one component only. DANGEROUS: it writes ZOSD_LIFT_TXT, a table of
+* this recipe's own, but only the two kinds it uses, and puts back what it
+* found there when it is done.
 CLASS ltcl_r1 DEFINITION FOR TESTING
   RISK LEVEL DANGEROUS DURATION SHORT FINAL.
   PRIVATE SECTION.
+    DATA mt_saved TYPE STANDARD TABLE OF zosd_lift_txt WITH DEFAULT KEY.
     METHODS setup.
+    METHODS teardown.
     METHODS hits_and_misses FOR TESTING.
     METHODS a_miss_keeps_the_old_value FOR TESTING.
     METHODS the_same_key_twice FOR TESTING.
@@ -38,7 +41,8 @@ CLASS ltcl_r1 IMPLEMENTATION.
   METHOD setup.
     DATA lt_db TYPE STANDARD TABLE OF zosd_lift_txt WITH DEFAULT KEY.
     DATA ls_db TYPE zosd_lift_txt.
-    DELETE FROM zosd_lift_txt.
+    SELECT * FROM zosd_lift_txt INTO TABLE mt_saved WHERE kind = 'STAT' OR kind = 'PRIO'.
+    DELETE FROM zosd_lift_txt WHERE kind = 'STAT' OR kind = 'PRIO'.
     ls_db-mandt = sy-mandt.
     ls_db-kind = 'STAT'.
     ls_db-code = 'OPEN'.
@@ -52,6 +56,13 @@ CLASS ltcl_r1 IMPLEMENTATION.
     ls_db-text = 'Open priority'.
     APPEND ls_db TO lt_db.
     INSERT zosd_lift_txt FROM TABLE lt_db.
+  ENDMETHOD.
+
+  METHOD teardown.
+    DELETE FROM zosd_lift_txt WHERE kind = 'STAT' OR kind = 'PRIO'.
+    IF mt_saved IS NOT INITIAL.
+      INSERT zosd_lift_txt FROM TABLE mt_saved.
+    ENDIF.
   ENDMETHOD.
 
   METHOD row.

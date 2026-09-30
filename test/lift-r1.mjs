@@ -8,7 +8,7 @@ import {expect} from "chai";
 import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {modelR1, modelR1FromSource} from "../tools/lift.mjs";
+import {find, modelR1, modelR1FromSource} from "../tools/lift.mjs";
 
 const DEMO = "src/lift/zcl_osd_lift_r1_demo.clas.abap";
 const TEMPLATE = "recipes/r1-lookup-enrich/template.tpl";
@@ -55,11 +55,11 @@ describe("verified lift R1: lookup-enrich", function () {
 
   // One method per boundary of the shape; each must be refused by the named
   // obligation. The table of the fixtures is the demo's (kind, code key).
-  const fixture = (body, declarations = "") => `CLASS zcl_fx DEFINITION PUBLIC FINAL.
+  const fixture = (body, declarations = "", parameters = "") => `CLASS zcl_fx DEFINITION PUBLIC FINAL.
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_row, kind TYPE c LENGTH 4, code TYPE c LENGTH 10, text TYPE c LENGTH 40, END OF ty_row.
     TYPES tt_rows TYPE STANDARD TABLE OF ty_row WITH DEFAULT KEY.
-    CLASS-METHODS m CHANGING ct_rows TYPE tt_rows.
+    CLASS-METHODS m ${parameters}CHANGING ct_rows TYPE tt_rows.
 ENDCLASS.
 CLASS zcl_fx IMPLEMENTATION.
   METHOD m.
@@ -79,14 +79,16 @@ ENDCLASS.`;
     ["a second statement", `${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.\n      CLEAR <ls_row>-kind.`, "", /^shape: /],
     ["a nested loop", `      LOOP AT ct_rows TRANSPORTING NO FIELDS WHERE kind = 'X'.\n      ENDLOOP.`, "", /^shape: /],
     ["lt_lookup taken", `${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`, "    DATA lt_lookup TYPE i.\n", /^names: lt_lookup/],
+    ["lt_lookup as a parameter", `${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`, "", /^names: lt_lookup/, "IMPORTING lt_lookup TYPE i OPTIONAL "],
     ["<ls_lookup> taken", `${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`, "    FIELD-SYMBOLS <ls_lookup> TYPE any.\n", /^names: <ls_lookup>/],
     ["the shape rewritten already", null, null, /^names: lt_lookup/],
+    ["a method that is not there", "", "", /^shape: no method absent/, "", "absent"],
   ];
-  for (const [what, body, declarations, reason] of refusals) {
+  for (const [what, body, declarations, reason, parameters, method = "m"] of refusals) {
     it(`R1 refuses ${what}, naming the obligation`, () => {
       const run = body === null
         ? () => modelR1(DEMO, "after", ["src"])
-        : () => modelR1FromSource("zcl_fx.clas.abap", fixture(body, declarations), "m", ["src"]);
+        : () => modelR1FromSource("zcl_fx.clas.abap", fixture(body, declarations, parameters), method, ["src"]);
       expect(run).to.throw(reason);
     });
   }
@@ -99,7 +101,7 @@ ENDCLASS.`;
     ["a client-dependent table whose first key field is not the client", table(true, [
       "<FIELDNAME>KIND</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>",
       "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME>",
-      "<FIELDNAME>CODE</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>"]), /first key field is not the client/],
+      "<FIELDNAME>CODE</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>"]), /first field is not the client key field/],
     ["a client-independent table with a client-typed key field", table(false, [
       "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME>",
       "<FIELDNAME>KIND</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>",
@@ -107,6 +109,15 @@ ENDCLASS.`;
     ["a table with an include", table(true, [
       "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME>",
       "<FIELDNAME>.INCLUDE</FIELDNAME><KEYFLAG>X</KEYFLAG>"]), /has includes/],
+    ["a non-key column before the client", table(true, [
+      "<FIELDNAME>NOTE</FIELDNAME><DATATYPE>CHAR</DATATYPE>",
+      "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME>",
+      "<FIELDNAME>KIND</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>",
+      "<FIELDNAME>CODE</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>"]), /first field is not the client/],
+    ["data element MANDT with a type that is not CLNT", table(true, [
+      "<FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME><DATATYPE>CHAR</DATATYPE>",
+      "<FIELDNAME>KIND</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>",
+      "<FIELDNAME>CODE</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE>"]), /MANDT but type CHAR/],
   ];
   for (const [what, xml, reason] of layouts) {
     it(`R1 refuses ${what}`, () => {
@@ -120,9 +131,43 @@ ENDCLASS.`;
     });
   }
 
+  // find: which calls are to the class's own database-reading method.
+  const receivers = [
+    ["fetch( ).", 1], ["me->fetch( ).", 1], ["CALL METHOD fetch.", 1], ["CALL METHOD me->fetch.", 1],
+    ["other->fetch( ).", 0], ["other->me->fetch( ).", 0], ["CALL METHOD other->fetch.", 0], ["zcl_fx=>fetch( ).", 0],
+  ];
+  for (const [call, expected] of receivers) {
+    it(`find counts \`${call}\` as ${expected ? "an own" : "another object's"} call`, () => {
+      const dir = mkdtempSync(join(tmpdir(), "lift-find-"));
+      try {
+        writeFileSync(join(dir, "zcl_fx.clas.abap"), `CLASS zcl_fx DEFINITION PUBLIC FINAL.
+  PUBLIC SECTION.
+    METHODS m.
+    METHODS fetch.
+    DATA other TYPE REF TO zcl_fx.
+ENDCLASS.
+CLASS zcl_fx IMPLEMENTATION.
+  METHOD fetch.
+    DATA lv_text TYPE c LENGTH 40.
+    SELECT SINGLE text FROM zosd_lift_txt INTO lv_text WHERE kind = 'A'.
+  ENDMETHOD.
+  METHOD m.
+    DO 2 TIMES.
+      ${call}
+    ENDDO.
+  ENDMETHOD.
+ENDCLASS.`);
+        expect(find(dir).loops_via_own_method).to.equal(expected);
+      } finally {
+        rmSync(dir, {recursive: true, force: true});
+      }
+    });
+  }
+
   it("the fixture itself is accepted, so the refusals above are about their one change", () => {
     const model = modelR1FromSource("zcl_fx.clas.abap", fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`), "m", ["src"]);
-    expect(model.open).to.include("key types equal column types");
+    expect(model.open).to.have.members(["key types equal column types",
+      "no concurrent writes to the table during the loop", "reads confined to one client"]);
   });
 
   it("the generated region of AFTER is exactly what the template renders", async () => {
