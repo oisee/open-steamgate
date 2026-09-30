@@ -140,13 +140,21 @@ export function sandboxDatasetHost({read = [], write = [], home, audit, beforeOp
     const c = fs.constants;
     let dir;
     try {
-      dir = await fs.open(root, c.O_RDONLY | c.O_DIRECTORY);
-    } catch {
-      return undefined;
+      dir = await fs.open(root, c.O_RDONLY | c.O_DIRECTORY | c.O_NOFOLLOW);
+    } catch (error) {
+      return {moved: error.code ?? String(error)};
     }
-    if ((await openedPath(dir)) === undefined) {
+    // the root itself swapped between the checks and here: the descriptor
+    // says where it landed, and a different directory is refused rather than
+    // walked (docs/dataset.md: a root's parent is still outside the promise)
+    const landed = await openedPath(dir);
+    if (landed === undefined) {
       await dir.close();
       return undefined;
+    }
+    if (landed !== root) {
+      await dir.close();
+      return {moved: "ELOOP"};
     }
     const parts = path.relative(root, real).split(path.sep);
     const base = parts.pop();
@@ -197,6 +205,11 @@ export function sandboxDatasetHost({read = [], write = [], home, audit, beforeOp
         await beforeOpen?.();
         const parent = await parentBeneath(where.real, writing ? roots.write : roots.read);
         if (parent?.moved !== undefined) {
+          // a directory removed meanwhile is missing, not an escape
+          if (parent.moved === "ENOENT") {
+            note({op: "OPEN", name, mode, allowed: false, why: "no such directory"});
+            return {message: "No such file or directory"};
+          }
           note({op: "OPEN", name, mode, allowed: false, why: "moved outside the dataset roots while opening"});
           return {message: `Permission denied: ${name} is outside the dataset roots`};
         }
@@ -224,6 +237,7 @@ export function sandboxDatasetHost({read = [], write = [], home, audit, beforeOp
           handle = undefined;
         }
       } catch (error) {
+        await handle?.close().catch(() => {});
         note({op: "OPEN", name, mode, allowed: false, why: error.code ?? String(error)});
         // the code only: an OS message carries the resolved path
         return {message: error.code === "ENOENT" ? "No such file or directory" : error.code === "ELOOP" ? `Permission denied: ${name} is a symbolic link` : (error.code ?? "error")};
@@ -263,7 +277,7 @@ export function sandboxDatasetHost({read = [], write = [], home, audit, beforeOp
         await beforeOpen?.();
         const parent = await parentBeneath(where.named, roots.write);
         if (parent?.moved !== undefined) {
-          note({op: "DELETE", name, allowed: false, why: "moved outside the dataset roots while deleting"});
+          note({op: "DELETE", name, allowed: false, why: parent.moved === "ENOENT" ? "no such directory" : "moved outside the dataset roots while deleting"});
           return false;
         }
         try {

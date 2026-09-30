@@ -57,14 +57,16 @@ FOR OUTPUT truncates only after the open. DELETE removes the entry the
 program named -- a link, not what it points at -- and a link that points out
 of the roots is not deleted at all.
 
-Where Node has no `/proc/self/fd` (macOS, Windows) the lexical and real-path
-checks stand alone and that race is open; on Windows root comparison is also
-case-sensitive although the file system is not, not verified there. Treat a
-Node host off Linux as checked, not sandboxed. The Go host holds the root
-directories open from the first use; Node opens the root again for each
-call, so a root whose own parent is writable by someone else is outside what
-either promises. The sandbox is a guard for programs; the race is closed
-because it cost little, not because a local attacker is the model.
+Where Node has no `/proc/self/fd` (macOS, Windows, a Linux without `/proc`
+mounted) the lexical and real-path checks stand alone and that race is open;
+on Windows root comparison is also case-sensitive although the file system
+is not, not verified there. Treat a Node host off Linux as checked, not
+sandboxed. The Go host holds the root directories open from the first use;
+Node opens the root again for each call, with `O_NOFOLLOW`, and refuses when
+the descriptor did not land on the root's real path, so a root renamed and
+replaced by a link meanwhile is refused too. The sandbox is a guard for
+programs; the race is closed because it cost little, not because a local
+attacker is the model.
 
 A refused or failed OPEN reports the reason without the resolved path; the
 audit log has the path.

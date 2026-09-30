@@ -5,7 +5,7 @@
 // escapes by .. and by symlink, a write to a read-only root, the audit log,
 // a binary round trip, text lines at the 64 KiB read boundary.
 import {expect} from "chai";
-import {mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync} from "node:fs";
+import {mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync, existsSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {ABAP} from "@abaplint/runtime";
@@ -155,6 +155,19 @@ describe("DATASET host (X0)", function () {
     reset();
     expect(await host.delete(join(sub, "old.txt"))).to.equal(false);
     expect(readFileSync(join(outside, "old.txt"), "utf8")).to.equal("keep\n");
+  });
+
+  it("a root replaced by a link after the checks takes no create outside (Linux)", async function () {
+    if (!existsSync("/proc/self/fd")) {
+      this.skip();
+    }
+    const host = sandboxDatasetHost({write: [writeRoot], beforeOpen: () => {
+      renameSync(writeRoot, `${writeRoot}.away`);
+      symlinkSync(outside, writeRoot);
+    }});
+    const opened = await host.open(join(writeRoot, "r.txt"), "OUTPUT");
+    expect(opened.message).to.match(/outside the dataset roots/);
+    expect(existsSync(join(outside, "r.txt"))).to.equal(false);
   });
 
   it("a name that is only a prefix of a root is not inside it", async () => {
