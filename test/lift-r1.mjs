@@ -224,7 +224,7 @@ ENDCLASS.`);
     const source = fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`)
       .replace("FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "FIELD-SYMBOLS <ls_row> TYPE ty_row.")
       .replace("TYPES tt_rows TYPE STANDARD TABLE OF ty_row", "TYPES: BEGIN OF ty_other, a TYPE c LENGTH 4, b TYPE c LENGTH 10, c TYPE c LENGTH 40, END OF ty_other.\n    TYPES tt_rows TYPE STANDARD TABLE OF ty_other");
-    expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(/^shape: ct_rows has no component kind/);
+    expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(/^shape: <ls_row> is not laid out like a line of ct_rows: kind, code, text against a, b, c/);
   });
 
   it("R1 refuses a generically typed loop table", () => {
@@ -276,6 +276,36 @@ ENDCLASS.`);
       expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(reason);
     });
   }
+
+  // critic r1f: LOOP ASSIGNING maps by position, the SELECT and FOR ALL
+  // ENTRIES read by name, so equal names in another order are another row
+  it("R1 refuses a field symbol with the line's components in another order", () => {
+    const source = fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`)
+      .replace("kind TYPE c LENGTH 4, code TYPE c LENGTH 10", "kind TYPE c LENGTH 10, code TYPE c LENGTH 10")
+      .replace("FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "TYPES: BEGIN OF ty_swapped, code TYPE c LENGTH 10, kind TYPE c LENGTH 10, text TYPE c LENGTH 40, END OF ty_swapped.\n    FIELD-SYMBOLS <ls_row> TYPE ty_swapped.");
+    expect(() => modelR1FromSource("zcl_fx.clas.abap", source, "m")).to.throw(/^shape: <ls_row> is not laid out like a line of ct_rows: code, kind, text against kind, code, text/);
+  });
+
+  it("integer keys: a data element named like a built-in type proves nothing", () => {
+    const dtelI = `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_DTEL" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values><DD04V><ROLLNAME>I</ROLLNAME><DDLANGUAGE>E</DDLANGUAGE><DATATYPE>INT4</DATATYPE><LENG>000010</LENG><REFKIND>D</REFKIND></DD04V></asx:values>
+ </asx:abap>
+</abapGit>`;
+    // an INT1 field of a DDIC structure answers "I" as its qualified name
+    const source = fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`)
+      .replace("TYPES tt_rows TYPE STANDARD TABLE OF ty_row", "TYPES tt_rows TYPE STANDARD TABLE OF zosd_lift_irow");
+    const model = withDdic({...intTable("INT4", 4), "i.dtel.xml": dtelI,
+      "zosd_lift_irow.tabl.xml": table("ZOSD_LIFT_IROW", "INTTAB", false, [int("KIND", "INT1", 1, false), int("CODE", "INT1", 1, false), char("TEXT", 40)])},
+    (ddic) => modelR1FromSource("zcl_fx.clas.abap", source, "m", ddic));
+    expect(model.open).to.include("key types equal column types");
+  });
+
+  it("R1 takes a parenthesised list of targets", () => {
+    const model = modelR1FromSource("zcl_fx.clas.abap", fixture("      SELECT SINGLE kind text FROM zosd_lift_txt INTO (<ls_row>-kind, <ls_row>-text) WHERE kind = <ls_row>-kind AND code = <ls_row>-code."), "m");
+    expect(model.fields).to.deep.equal([{column: "kind", component: "kind"}, {column: "text", component: "text"}]);
+  });
 
   it("a field symbol the syntax cannot resolve leaves its agreement with the line open", () => {
     const source = fixture(`${SELECT} kind = <ls_row>-kind AND code = <ls_row>-code.`).replace("FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "FIELD-SYMBOLS <ls_row> TYPE zsomething_unknown.");

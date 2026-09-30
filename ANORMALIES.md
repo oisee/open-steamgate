@@ -2768,3 +2768,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: abaplint/abaplint, needs an issue (Lars is busy: backlog)
 - Regression-test location: `test/lift-r1.mjs` (the test above; its CI_ case fails against the provider without the check)
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-fae-up-to-per-row — FOR ALL ENTRIES with UP TO n limits each driving row, not the result
+
+- Status: `open` (recorded; fix delegated to the transpiler pin owner; upstream: backlog)
+- Discovery date: `2026-09-30`
+- Affected versions: abaplint/transpiler as pinned here (`oisee/transpiler` at `ddb0a993`, `packages/transpiler/src/statements/select.ts`, the `SQLForAllEntries` branch)
+- Affected ABAP statement, runtime API or adapter: `SELECT ... UP TO n ROWS FOR ALL ENTRIES IN itab WHERE ...`
+- Minimal ABAP reproducer: `SELECT * FROM zosd_lift_txt INTO TABLE lt UP TO 3 ROWS FOR ALL ENTRIES IN it_keys WHERE kind = it_keys-kind.` with two driving rows (`STAT`, `OTH`) and four table rows for each
+- Exact command used to run it: a throwaway class with that statement in `src/lift/`, `npm run transpile`, then the method called from Node with `DatabaseClient.select` counted (not committed; the same measurement as the R1 cost test in `test/lift-r1.mjs`)
+- Expected SAP behaviour: the limit applies to the whole result. Measured on A4H on 2026-09-30 over a standard text table with two driving rows and `UP TO 3 ROWS`: 3 rows
+- Actual open-abap behaviour: 6 rows in 2 statements. The transpiled code puts `UP TO n ROWS` into the statement it runs once per driving row, so each row gets its own n; the duplicate removal after the loop does not cut the result back. Duplicate removal over the whole selected row and an empty driving table (whole WHERE ignored) match A4H
+- Impact on open-steamgate: a program that reads a sample with FOR ALL ENTRIES and UP TO gets up to n times the number of driving rows here; verified-lift evidence for such a shape would differ from the system
+- Smallest safe workaround: none in the tree; the one-statement FAE change (ANOMALY-2026-09-30-fae-one-select-per-row) removes it if the limit goes on the combined statement
+- Upstream: abaplint/transpiler, backlog, together with the one-statement change
+- Regression-test location: none yet; the test comes with the fix
+- Upstream version containing a fix: none yet

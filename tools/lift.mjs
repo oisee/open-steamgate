@@ -253,6 +253,8 @@ export function modelR1(path, method, ddicFolders = DEFAULT_DDIC) {
 }
 
 const LOOKUP = "lt_lookup";
+const BUILTIN_TYPES = new Set(["B", "S", "I", "INT8", "P", "F", "C", "N", "D", "T", "X", "STRING", "XSTRING",
+  "DECFLOAT16", "DECFLOAT34", "UTCLONG"]);
 const HIT = "<ls_lookup>";
 
 export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DDIC) {
@@ -290,7 +292,7 @@ export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DD
     throw new Refusal("shape/body", `the loop body is ${body.length} statements, not one SELECT`);
   }
   const select = body[0].concatTokens().replace(/\s+/g, " ");
-  const parts = /^SELECT SINGLE ([\w ]+?) FROM (\w+) INTO (\S+) WHERE (.+)\.$/i.exec(select);
+  const parts = /^SELECT SINGLE ([\w ]+?) FROM (\w+) INTO (\([^)]*\)|\S+) WHERE (.+)\.$/i.exec(select);
   if (!parts) throw new Refusal("shape/select", `not SELECT SINGLE cols FROM dbtab INTO target WHERE ...: ${select}`);
   const [, columnList, dbtab, into, where] = parts;
   const columns = columnList.trim().split(" ").map((c) => c.toLowerCase());
@@ -345,6 +347,25 @@ export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DD
   }
   const symbol = componentsOf(symbolType);
   let symbolOpen = !line || !symbol;
+  // the symbol is read by name in the SELECT and the table by name in FOR
+  // ALL ENTRIES, but LOOP ASSIGNING maps them by position: the two must be
+  // the same layout, component for component, not just agree on the names
+  // touched
+  if (line && symbol) {
+    const mine = [...symbol.entries()];
+    const theirs = [...line.entries()];
+    const at = theirs.findIndex(([n], i) => mine[i]?.[0] !== n);
+    if (mine.length !== theirs.length || at >= 0) {
+      throw new Refusal("shape/row", `${row} is not laid out like a line of ${table}: ${mine.map(([n]) => n).join(", ")} against ${theirs.map(([n]) => n).join(", ")}`);
+    }
+    for (const [n, t] of theirs) {
+      const own = symbol.get(n);
+      if (unresolved(own) || unresolved(t)) symbolOpen = true;
+      else if (!sameType(own, t)) {
+        throw new Refusal("shape/row", `${row}-${n} is ${describe(own)}, ${table}-${n} is ${describe(t)}; ${row} is not typed like its line`);
+      }
+    }
+  }
   const touched = [...new Set([...keys.map((k) => k.component), ...fields.map((f) => f.component)])];
   if (line) {
     for (const component of touched) {
@@ -381,8 +402,11 @@ export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DD
       // abaplint names a data element-typed component by the element, in
       // the qualified name rather than the DDIC name; it counts only if that
       // element is there
+      // a built-in integer answers its own name ("I") as qualified name,
+      // which a data element of that name must not be mistaken for
       const dtel = [component.getDDICName?.(), component.getQualifiedName?.()]
-        .map((n) => n && registry.getObject("DTEL", n.toUpperCase())).find(Boolean);
+        .filter((n) => n && !BUILTIN_TYPES.has(n.toUpperCase()))
+        .map((n) => registry.getObject("DTEL", n.toUpperCase())).find(Boolean);
       const theirs = dtel?.getDataType(registry)?.toUpperCase();
       if (column.ddic !== "INT4" || theirs !== "INT4") keysOpen = true;
     }
