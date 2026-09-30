@@ -209,6 +209,7 @@ func commandInput(args []string) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, boo
 		arg := args[i]
 		if arg == "--help" || arg == "-h" {
 			usage()
+			closeDB()
 			os.Exit(0)
 		}
 		if arg == "--params" {
