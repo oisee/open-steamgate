@@ -1,0 +1,54 @@
+# DSL L2, slice 3: require, the dual of forbid, on the synthetic airship fleet.
+# `node tools/dsl-l2.mjs build src/l2demo/ship_captain.l2.yaml --out src/l2demo`
+# writes the check class, its test class and the trace (docs/dsl-l2.md).
+rule: ship-in-service-has-a-captain
+class: zcl_l2_ship_captain
+title: A ship in service has a captain aboard on the check date
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'A'
+require:
+  exists: ZOSD_L2_CREW as crew
+  where: crew.ship_id = ship.ship_id and crew.role = 'C' and crew.since <= $date
+alert: "{ship.ship_id} {ship.name}: in service without a captain"
+boundaries: auto
+examples:
+  - name: captain aboard
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S002, name: Cormorant, status: A}]
+      ZOSD_L2_CREW: [{crew_id: C00010, ship_id: S002, role: C, since: 20260101}]
+    expect: []
+  - name: no crew at all
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S002, name: Cormorant, status: A}]
+    expect:
+      - "S002 Cormorant: in service without a captain"
+  - name: only an engineer
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S002, name: Cormorant, status: A}]
+      ZOSD_L2_CREW: [{crew_id: C00011, ship_id: S002, role: E, since: 20260101}]
+    expect:
+      - "S002 Cormorant: in service without a captain"
+  - name: the captain joins later
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S002, name: Cormorant, status: A}]
+      ZOSD_L2_CREW: [{crew_id: C00012, ship_id: S002, role: C, since: 20261002}]
+    expect:
+      - "S002 Cormorant: in service without a captain"
+  - name: a captain of another ship
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S002, name: Cormorant, status: A}
+        - {ship_id: S005, name: Tern, status: A}
+      ZOSD_L2_CREW: [{crew_id: C00013, ship_id: S005, role: C, since: 20261001}]
+    expect:
+      - "S002 Cormorant: in service without a captain"
+  - name: in maintenance needs none
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+    expect: []

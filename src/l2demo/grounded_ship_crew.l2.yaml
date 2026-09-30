@@ -1,0 +1,60 @@
+# DSL L2, slice 3: or and not, on the synthetic airship fleet.
+# `node tools/dsl-l2.mjs build src/l2demo/grounded_ship_crew.l2.yaml --out src/l2demo`
+# writes the check class, its test class and the trace (docs/dsl-l2.md).
+rule: grounded-ship-keeps-only-keepers
+class: zcl_l2_grounded_ship_crew
+title: A grounded ship has no crew aboard but its keepers and those joining later
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'M' or ship.status = 'D'
+forbid:
+  exists: ZOSD_L2_CREW as crew
+  where: crew.ship_id = ship.ship_id
+    and not (crew.role = 'K' or crew.since > $date)
+alert: "{ship.ship_id} {ship.name}: grounded, crew {crew.crew_id} ({crew.role}) aboard since {crew.since}"
+boundaries: auto
+examples:
+  - name: engineer aboard in maintenance
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_CREW: [{crew_id: C00001, ship_id: S001, role: E, since: 20260101}]
+    expect:
+      - "S001 Albatross: grounded, crew C00001 (E) aboard since 20260101"
+  - name: a keeper may stay
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_CREW: [{crew_id: C00002, ship_id: S001, role: K, since: 20260101}]
+    expect: []
+  - name: joining after the check date
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_CREW: [{crew_id: C00003, ship_id: S001, role: E, since: 20261002}]
+    expect: []
+  - name: joining on the check date
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S004, name: Skua, status: D}]
+      ZOSD_L2_CREW: [{crew_id: C00004, ship_id: S004, role: P, since: 20261001}]
+    expect:
+      - "S004 Skua: grounded, crew C00004 (P) aboard since 20261001"
+  - name: a ship in service is fine
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S002, name: Cormorant, status: A}]
+      ZOSD_L2_CREW: [{crew_id: C00005, ship_id: S002, role: E, since: 20260101}]
+    expect: []
+  - name: one alert per crew member
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: M}
+        - {ship_id: S004, name: Skua, status: D}
+      ZOSD_L2_CREW:
+        - {crew_id: C00006, ship_id: S004, role: C, since: 20250101}
+        - {crew_id: C00007, ship_id: S001, role: K, since: 20250101}
+        - {crew_id: C00008, ship_id: S001, role: E, since: 20250101}
+    expect:
+      - "S001 Albatross: grounded, crew C00008 (E) aboard since 20250101"
+      - "S004 Skua: grounded, crew C00006 (C) aboard since 20250101"

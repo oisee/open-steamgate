@@ -18,7 +18,7 @@ import {join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import yaml from "js-yaml";
 import {DEFAULT_DDIC, DDIC_PROVIDER, Refusal, registryFor} from "./dsl-ddic.mjs";
-import {INT_RANGE, INTEGERS, PACKED, allReferences, canonical, deriveCases, evaluate} from "./dsl-l2-eval.mjs";
+import {INT_RANGE, PACKED, allReferences, canonical, deriveCases, evaluate, kindOf} from "./dsl-l2-eval.mjs";
 
 export {evaluate, stepValue} from "./dsl-l2-eval.mjs";
 
@@ -94,6 +94,8 @@ function lineOf(index, path) {
 // expressions: a tokenizer and a recursive-descent parser
 
 const OPERATORS = ["<>", "<=", ">=", "=", "<", ">"];
+// the words of the condition language; none of them can be an alias
+export const KEYWORDS = new Set(["and", "or", "not", "as"]);
 
 export function tokenize(text, fail) {
   const tokens = [];
@@ -131,6 +133,9 @@ export function tokenize(text, fail) {
     } else if (c === ".") {
       i++;
       tokens.push({kind: "dot", value: ".", column: start + 1});
+    } else if (c === "(" || c === ")") {
+      i++;
+      tokens.push({kind: c === "(" ? "open" : "close", value: c, column: start + 1});
     } else {
       const op = OPERATORS.find((o) => text.startsWith(o, i));
       if (!op) fail(`unexpected character ${JSON.stringify(c)} at column ${start + 1}`);
@@ -173,23 +178,49 @@ class Parser {
     this.end();
     return {table: table.value.toUpperCase(), alias: alias.value.toLowerCase()};
   }
-  // conjunction := comparison ('and' comparison)*
-  conjunction() {
-    const list = [this.comparison()];
-    while (this.keyword("and")) {
-      this.next();
-      list.push(this.comparison());
-    }
+  // condition   := disjunction
+  // disjunction := conjunction ('or' conjunction)*
+  // conjunction := negation ('and' negation)*
+  // negation    := 'not' negation | '(' disjunction ')' | comparison
+  // A tree: {op: "or" | "and", items}, {op: "not", item}, {op: "cmp", left, op, right, at};
+  // an `and` inside an `and` (parentheses) is one `and`, the same for `or`.
+  condition() {
+    const tree = this.disjunction();
     this.end();
-    return list;
+    return tree;
+  }
+  disjunction() { return this.chain("or", () => this.conjunction()); }
+  conjunction() { return this.chain("and", () => this.negation()); }
+  chain(word, part) {
+    const items = [part()];
+    while (this.keyword(word)) {
+      this.next();
+      items.push(part());
+    }
+    return items.length === 1 ? items[0] : {op: word, items: items.flatMap((x) => x.op === word ? x.items : [x])};
+  }
+  negation() {
+    if (this.keyword("not")) {
+      this.next();
+      return {op: "not", item: this.negation()};
+    }
+    if (this.peek().kind === "open") {
+      const open = this.next();
+      const tree = this.disjunction();
+      if (this.peek().kind !== "close") this.fail(`expected ")" to close the "(" at column ${open.column}, found ${this.describe(this.peek())}`);
+      this.next();
+      return tree;
+    }
+    return {op: "cmp", ...this.comparison()};
   }
   // comparison := operand OP operand
   comparison() {
+    const at = this.peek().column;
     const left = this.operand();
     const op = this.next();
     if (op.kind !== "op") this.fail(`expected a comparison operator (${OPERATORS.join(" ")}), found ${this.describe(op)}`);
     const right = this.operand();
-    return {left, op: op.value, right};
+    return {left, cmp: op.value, right, at};
   }
   // operand := IDENT '.' IDENT | STRING | NUMBER | PARAM
   operand() {
@@ -198,7 +229,7 @@ class Parser {
     if (token.kind === "number") return {kind: "literal", quoted: false, value: token.value, text: token.value};
     if (token.kind === "param") return {kind: "param", name: token.value, text: `$${token.value}`};
     if (token.kind === "ident") {
-      if (token.value.toLowerCase() === "and") this.fail(`expected an operand, found "and" at column ${token.column}`);
+      if (KEYWORDS.has(token.value.toLowerCase())) this.fail(`expected an operand, found "${token.value}" at column ${token.column}`);
       this.expect("dot", `"." after ${token.value}`);
       const field = this.expect("ident", "a field name");
       return {kind: "field", alias: token.value.toLowerCase(), field: field.value.toLowerCase(),
@@ -212,8 +243,47 @@ export function parseSource(text, fail) {
   return new Parser(text, fail).source();
 }
 
-export function parseConditions(text, fail) {
-  return new Parser(text, fail).conjunction();
+export function parseCondition(text, fail) {
+  return new Parser(text, fail).condition();
+}
+
+// The rule line of each column of a condition written over several lines: a
+// plain scalar continued on more indented lines, or a block scalar (`|`, `>`).
+// `value` is what js-yaml read. When the lines joined the way YAML joins them
+// are not that value (quotes, escapes, blank lines, indentation kept by `|`),
+// every column takes the key's line.
+export function scalarLines(text, keyLine, value) {
+  const source = text.split(/\r?\n/);
+  const whole = () => keyLine;
+  const raw = source[keyLine - 1] ?? "";
+  let column = raw.length - raw.trimStart().length;
+  let rest = raw.slice(column);
+  while (rest === "-" || rest.startsWith("- ")) {
+    const after = rest.slice(1);
+    column += 1 + after.length - after.trimStart().length;
+    rest = after.trimStart();
+  }
+  const key = /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s"'#{[\]}:,][^:#]*?)\s*:(?:\s+|$)/.exec(rest);
+  if (!key || typeof value !== "string") return whole;
+  const first = rest.slice(key[0].length).replace(/\s+#.*$/, "").trimEnd();
+  const block = /^[|>]/.test(first);
+  if (!block && (first === "" || /^["']/.test(first))) return whole;
+  const segments = block ? [] : [{line: keyLine, text: first}];
+  for (let i = keyLine; i < source.length; i++) {
+    const text = source[i];
+    if (text.trim() === "") break;
+    if (text.length - text.trimStart().length <= column || (!block && text.trim().startsWith("#"))) break;
+    segments.push({line: i + 1, text: text.trim()});
+  }
+  const joined = segments.map((s) => s.text).join(first.startsWith("|") ? "\n" : " ");
+  if (!segments.length || joined !== value.replace(/\n+$/, "")) return whole;
+  const starts = [];
+  let offset = 1;
+  for (const s of segments) {
+    starts.push([offset, s.line]);
+    offset += s.text.length + 1;
+  }
+  return (at) => starts.filter(([o]) => o <= at).at(-1)?.[1] ?? keyLine;
 }
 
 // alert text: plain text with {alias.field} holes
@@ -321,9 +391,74 @@ export function misfit(value, type, quoted = true) {
 }
 
 // ---------------------------------------------------------------------------
+// conditions as lines of Open SQL
+
+// A condition tree with its comparisons in place of their indexes.
+const resolve = (tree, leaves) => tree.op === "cmp" ? {op: "cmp", leaf: leaves[tree.index]}
+  : tree.op === "not" ? {op: "not", item: resolve(tree.item, leaves)} : {op: tree.op, items: tree.items.map((x) => resolve(x, leaves))};
+
+// One line per comparison: `conn` (AND / OR) and `opens` ("( ", "NOT ( ")
+// before it, `closes` after it; `depth` is how many parentheses enclose the
+// connector. A group inside another group, and whatever follows a NOT, is
+// parenthesised, so the lines never lean on the precedence of Open SQL (which
+// is the rule language's: NOT, then AND, then OR). `exists` is require's
+// subquery.
+function layout(node, parent, depth) {
+  const line = (extra) => ({conn: "", opens: "", closes: "", depth, ...extra});
+  if (node.op === "cmp") return [line({leaf: node.leaf})];
+  if (node.op === "exists") {
+    const {clause} = node;
+    const body = layout(resolve(clause.tree, clause.conditions), 0, depth + 2);
+    body[0].lead = {indent: 2 + 2 * (depth + 1), word: "WHERE"};
+    body.at(-1).closes += " )";
+    return [line({text: `NOT EXISTS ( SELECT * FROM ${clause.table} AS ${clause.alias}`, clause}), ...body];
+  }
+  if (node.op === "not") {
+    const inner = layout(node.item, 0, depth + 1);
+    inner[0].opens = `NOT ( ${inner[0].opens}`;
+    inner.at(-1).closes += " )";
+    return inner;
+  }
+  const paren = parent > 0;
+  const d = paren ? depth + 1 : depth;
+  const lines = node.items.flatMap((item, i) => {
+    const sub = layout(item, 1, d);
+    if (i > 0) Object.assign(sub[0], {conn: node.op.toUpperCase(), depth: d});
+    return sub;
+  });
+  if (paren) {
+    lines[0].opens = `( ${lines[0].opens}`;
+    lines.at(-1).closes += " )";
+  }
+  return lines;
+}
+
+// The lines of a WHERE: `pre` is what comes before the comparison (after
+// `base`), `post` the parentheses closed after it. A comparison line is the
+// comparison's node, so it traces to its own rule line; a subquery's head is
+// its clause's.
+function whereLines(tree, base = "") {
+  if (!tree) return [];
+  return layout(tree, 0, 0).map((l, i) => {
+    const pre = i === 0 ? `${base}WHERE ${l.opens}`
+      : l.lead ? `${base}${" ".repeat(l.lead.indent)}${l.lead.word} ${l.opens}`
+        : `${base}${" ".repeat(2 + 2 * l.depth)}${l.conn.padStart(3)} ${l.opens}`;
+    if (l.leaf) return {...l.leaf, pre, post: l.closes, is_cmp: true};
+    return {"@id": l.clause["@id"], rule_line: l.clause.exists_line, pre, text: l.text, post: l.closes, is_cmp: false, is_literal: false};
+  });
+}
+
+// the conjunction of several trees, one `and` however they were written
+const conjoin = (trees) => {
+  const items = trees.filter(Boolean).flatMap((t) => t.op === "and" ? t.items : [t]);
+  return items.length === 0 ? undefined : items.length === 1 ? items[0] : {op: "and", items};
+};
+
+// ---------------------------------------------------------------------------
 // parse + check + compile: rule file -> L1 model
 
 const IDENT = /^[a-z][a-z0-9_]*$/;
+const MAX_CLAUSES = 3;
 
 export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
   const text = readFileSync(file, "utf8");
@@ -340,11 +475,11 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
   const need = (value, path, what, kind = "string") => {
     const ok = kind === "list" ? Array.isArray(value) : kind === "map"
       ? value && typeof value === "object" && !Array.isArray(value) : typeof value === "string" && value.trim() !== "";
-    if (!ok) failAt(line(path))(`${path} must be ${what}`);
+    if (!ok) failAt(line(path))(`${path.replaceAll("/", ".")} must be ${what}`);
     return value;
   };
   need(doc, "", "a mapping of the rule's keys", "map");
-  const known = new Set(["rule", "class", "title", "for", "when", "forbid", "alert", "boundaries", "examples"]);
+  const known = new Set(["rule", "class", "title", "for", "when", "forbid", "require", "alert", "boundaries", "examples"]);
   for (const key of Object.keys(doc)) if (!known.has(key)) failAt(line(key))(`unknown key ${key}`);
 
   const name = need(doc.rule, "rule", "the rule's name");
@@ -365,20 +500,48 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     return tables.get(tableName);
   };
 
-  // for / forbid.exists: a table with an alias
-  const source = (path, extra) => {
-    const parsed = parseSource(need(doc[path] ?? extra, path, "<TABLE> as <alias>"), failAt(line(path)));
+  // for / exists: a table with an alias
+  const source = (path, value) => {
+    const parsed = parseSource(need(value, path, "<TABLE> as <alias>"), failAt(line(path)));
     if (!IDENT.test(parsed.alias) || parsed.alias.length > 27) failAt(line(path))(`alias ${parsed.alias} is not a short ABAP name`);
+    if (KEYWORDS.has(parsed.alias)) failAt(line(path))(`alias ${parsed.alias} is a word of the condition language`);
     return {...parsed, info: tableOf(parsed.table, path)};
   };
-  const outer = source("for");
-  need(doc.forbid, "forbid", "a mapping with exists and where", "map");
-  for (const key of Object.keys(doc.forbid)) if (!["exists", "where"].includes(key)) failAt(line(`forbid/${key}`))(`unknown key forbid.${key}`);
-  const inner = source("forbid/exists", doc.forbid.exists);
-  if (inner.alias === outer.alias) failAt(line("forbid/exists"))(`alias ${inner.alias} is already the alias of ${outer.table}`);
-  if (inner.table === outer.table) failAt(line("forbid/exists"))(`for and exists are both ${outer.table}; slice 2 joins two different tables`);
-  const aliases = new Map([[outer.alias, outer], [inner.alias, inner]]);
+  const outer = source("for", doc.for);
   const wa = (alias) => `ls_${alias}`;
+
+  // forbid: one exists, or all: / any: of two or three; require: one exists
+  if (doc.forbid !== undefined && doc.require !== undefined) failAt(line("require"))("a rule has forbid or require, not both");
+  if (doc.forbid === undefined && doc.require === undefined) failAt(line("rule"))("a rule needs forbid: (no row may match) or require: (a row must match)");
+  const kind = doc.forbid !== undefined ? "forbid" : "require";
+  need(doc[kind], kind, "a mapping with exists and where", "map");
+  const listKey = ["all", "any"].find((k) => doc[kind][k] !== undefined);
+  let combine = "one", specs;
+  if (listKey) {
+    if (kind === "require") failAt(line(`require/${listKey}`))(`require takes one exists and where, not ${listKey}`);
+    for (const key of Object.keys(doc.forbid)) if (key !== listKey) failAt(line(`forbid/${key}`))(`forbid.${listKey} stands alone: ${key} belongs inside one of its clauses`);
+    const list = need(doc.forbid[listKey], `forbid/${listKey}`, "a list of clauses, each with exists and where", "list");
+    if (list.length < 2) failAt(line(`forbid/${listKey}`))(`forbid.${listKey} needs two or three clauses; write one clause as forbid.exists and forbid.where`);
+    if (list.length > MAX_CLAUSES) failAt(line(`forbid/${listKey}/${MAX_CLAUSES}`))(`forbid.${listKey} holds at most ${MAX_CLAUSES} clauses`);
+    combine = listKey;
+    specs = list.map((value, i) => ({path: `forbid/${listKey}/${i}`, id: `${id}/forbid/${listKey}/${i + 1}`, value}));
+  } else {
+    specs = [{path: kind, id: `${id}/${kind}`, value: doc[kind]}];
+  }
+  const aliases = new Map([[outer.alias, outer]]);
+  const sources = specs.map((spec) => {
+    need(spec.value, spec.path, "a mapping with exists and where", "map");
+    const allowed = combine === "any" ? ["exists", "where", "alert"] : ["exists", "where"];
+    for (const key of Object.keys(spec.value)) if (!allowed.includes(key)) failAt(line(`${spec.path}/${key}`))(`unknown key ${spec.path.replaceAll("/", ".")}.${key}`);
+    const epath = `${spec.path}/exists`;
+    const inner = source(epath, spec.value.exists);
+    if (aliases.has(inner.alias)) failAt(line(epath))(`alias ${inner.alias} is already the alias of ${aliases.get(inner.alias).table}`);
+    if (inner.table === outer.table) failAt(line(epath))(`for and exists are both ${outer.table}; a rule joins different tables`);
+    const twin = [...aliases.values()].find((s) => s.table === inner.table);
+    if (twin) failAt(line(epath))(`${inner.table} is read twice (as ${twin.alias} and ${inner.alias}); a rule joins different tables`);
+    aliases.set(inner.alias, inner);
+    return {spec, inner};
+  });
 
   const fieldOf = (operand, scope, fail) => {
     const src = scope.get(operand.alias);
@@ -393,106 +556,227 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     return {src, field};
   };
 
-  // conditions against the table being selected (`current`); `scope` is
-  // every alias the condition may name
+  // one comparison against the table being selected (`current`); `scope` is
+  // every alias it may name
   const MIRROR = {"=": "=", "<>": "<>", "<": ">", ">": "<", "<=": ">=", ">=": "<="};
-  const conditions = (path, text, current, scope, idBase) => {
-    const fail = failAt(line(path));
-    return parseConditions(need(text, path, "comparisons joined by and"), fail).map((cmp, i) => {
-      let {left, op, right} = cmp;
-      const isCurrent = (o) => o.kind === "field" && o.alias === current.alias;
-      for (const o of [left, right]) if (o.kind === "field") fieldOf(o, scope, fail);
-      for (const o of [left, right]) if (o.kind === "param" && o.name !== "date") fail(`unknown parameter $${o.name} (slice 1 has $date)`);
-      if (!isCurrent(left) && isCurrent(right)) {
-        [left, right] = [right, left];
-        op = MIRROR[op];
+  const comparison = (cmp, current, scope, nodeId, ruleLine) => {
+    const fail = failAt(ruleLine);
+    let {left, cmp: op, right} = cmp;
+    const written = `${cmp.left.text} ${cmp.cmp} ${cmp.right.text}`;
+    const isCurrent = (o) => o.kind === "field" && o.alias === current.alias;
+    for (const o of [left, right]) if (o.kind === "field") fieldOf(o, scope, fail);
+    for (const o of [left, right]) if (o.kind === "param" && o.name !== "date") fail(`unknown parameter $${o.name} (a rule has $date)`);
+    if (!isCurrent(left) && isCurrent(right)) {
+      [left, right] = [right, left];
+      op = MIRROR[op];
+    }
+    if (!isCurrent(left)) fail(`${written} must name a field of ${current.alias}`);
+    if (isCurrent(right)) fail(`${written} compares two fields of ${current.alias}; not in slice 1`);
+    const column = fieldOf(left, scope, fail).field;
+    const type = column.literal;
+    // `lhs` and `sref` are the qualified columns of the one query (alias~column),
+    // `ref` the work-area component of the nested reference form; `cmp` is the
+    // comparison as data for the interpreter (tools/dsl-l2-eval.mjs)
+    const node = {"@id": nodeId, rule_line: ruleLine, column: column.column, op,
+      "@type": type, text: written, lhs: `${left.alias}~${column.column}`};
+    const cmpBase = {alias: left.alias, column: column.column, op, type};
+    if (right.kind === "literal") {
+      const why = misfit(right.value, type, right.quoted);
+      if (why) fail(`${left.text} is ${typeText(type)}; ${why}`);
+      // a NUMC literal is the column's own text ('12' in NUMC 4 is '0012'): a system
+      // converts it, the database of this runtime would compare the digits as written
+      const value = type.built_in === "NUMC" ? canonical(type, right.value) : right.value;
+      return {...node, is_literal: true, value, "value@type": type,
+        cmp: {...cmpBase, rhs: {kind: "literal", value}}};
+    }
+    if (right.kind === "param") {
+      if (type.built_in !== "DATS") fail(`${left.text} is ${typeText(type)}, $date is DATS`);
+      return {...node, is_literal: false, ref: "iv_date", sref: "iv_date",
+        cmp: {...cmpBase, rhs: {kind: "param", name: right.name}}};
+    }
+    const other = fieldOf(right, scope, fail).field.literal;
+    // the query compares the columns on the database, the nested form a host value
+    // converted to the column's type: only identical types mean the same thing
+    if (other.built_in !== type.built_in || other.length !== type.length || other.decimals !== type.decimals) {
+      fail(`${left.text} is ${typeText(type)}, ${right.text} is ${typeText(other)}; a field-to-field comparison needs the same type, length and decimals`);
+    }
+    return {...node, is_literal: false, ref: `${wa(right.alias)}-${right.field}`, sref: `${right.alias}~${right.field}`,
+      cmp: {...cmpBase, rhs: {kind: "field", alias: right.alias, column: right.field, type: other}}};
+  };
+
+  // Two comparisons are the same when they are after the mirroring above:
+  // the field of the selected table on the left (so `a = b` and `b = a`,
+  // `a < b` and `b > a` meet), the other side by its value as the field
+  // holds it (CHAR without trailing blanks, 12.5 and 12.50 in a DEC alike).
+  const identity = ({cmp}) => {
+    const rhs = cmp.rhs;
+    const value = rhs.kind === "literal" ? (kindOf(cmp.type) === "char" ? rhs.value.replace(/ +$/, "") : canonical(cmp.type, rhs.value))
+      : rhs.kind === "param" ? `$${rhs.name}` : `${rhs.alias}.${rhs.column}`;
+    return `${cmp.alias}.${cmp.column} ${cmp.op} ${rhs.kind}:${value}`;
+  };
+  const refuseDuplicates = (tree, leaves) => {
+    if (tree.op === "cmp") return;
+    if (tree.op === "not") { refuseDuplicates(tree.item, leaves); return; }
+    const seen = new Map();
+    for (const item of tree.items) {
+      if (item.op !== "cmp") { refuseDuplicates(item, leaves); continue; }
+      const leaf = leaves[item.index];
+      const key = identity(leaf);
+      if (seen.has(key)) {
+        failAt(leaf.rule_line)(`${leaf.text} repeats ${seen.get(key).text} in the same ${tree.op === "and" ? "conjunction" : "disjunction"}`);
       }
-      if (!isCurrent(left)) fail(`${cmp.left.text} ${cmp.op} ${cmp.right.text} must name a field of ${current.alias}`);
-      if (isCurrent(right)) fail(`${cmp.left.text} ${cmp.op} ${cmp.right.text} compares two fields of ${current.alias}; not in slice 1`);
-      const column = fieldOf(left, scope, fail).field;
-      const type = column.literal;
-      // `lhs` and `sref` are the qualified columns of the one query (alias~column),
-      // `ref` the work-area component of the nested reference form; `cmp` is the
-      // comparison as data for the interpreter (tools/dsl-l2-eval.mjs)
-      const node = {"@id": `${idBase}/${i + 1}`, rule_line: line(path), column: column.column, op,
-        "@type": type, text: `${cmp.left.text} ${cmp.op} ${cmp.right.text}`, lhs: `${left.alias}~${column.column}`};
-      const cmpBase = {alias: left.alias, column: column.column, op, type};
-      if (right.kind === "literal") {
-        const why = misfit(right.value, type, right.quoted);
-        if (why) fail(`${left.text} is ${typeText(type)}; ${why}`);
-        // a NUMC literal is the column's own text ('12' in NUMC 4 is '0012'): a system
-        // converts it, the database of this runtime would compare the digits as written
-        const value = type.built_in === "NUMC" ? canonical(type, right.value) : right.value;
-        return {...node, is_literal: true, value, "value@type": type,
-          cmp: {...cmpBase, rhs: {kind: "literal", value}}};
+      seen.set(key, leaf);
+    }
+  };
+
+  // A condition: the tree over the comparisons (by index), and the list of
+  // comparisons in the order written; each comparison's rule line is the
+  // line it is written on.
+  const condition = (path, value, current, scope, idBase) => {
+    const keyLine = line(path);
+    const written = need(value, path, "a condition: comparisons joined by and, or, not and parentheses");
+    const lineAt = scalarLines(text, keyLine, written);
+    const parsed = parseCondition(written, failAt(keyLine));
+    const conditions = [];
+    const build = (node) => {
+      if (node.op === "cmp") {
+        conditions.push(comparison(node, current, scope, `${idBase}/${conditions.length + 1}`, lineAt(node.at)));
+        return {op: "cmp", index: conditions.length - 1};
       }
-      if (right.kind === "param") {
-        if (type.built_in !== "DATS") fail(`${left.text} is ${typeText(type)}, $date is DATS`);
-        return {...node, is_literal: false, ref: "iv_date", sref: "iv_date",
-          cmp: {...cmpBase, rhs: {kind: "param", name: right.name}}};
-      }
-      const other = fieldOf(right, scope, fail).field.literal;
-      // the query compares the columns on the database, the nested form a host value
-      // converted to the column's type: only identical types mean the same thing
-      if (other.built_in !== type.built_in || other.length !== type.length || other.decimals !== type.decimals) {
-        fail(`${left.text} is ${typeText(type)}, ${right.text} is ${typeText(other)}; a field-to-field comparison needs the same type, length and decimals`);
-      }
-      return {...node, is_literal: false, ref: `${wa(right.alias)}-${right.field}`, sref: `${right.alias}~${right.field}`,
-        cmp: {...cmpBase, rhs: {kind: "field", alias: right.alias, column: right.field, type: other}}};
-    });
+      if (node.op === "not") return {op: "not", item: build(node.item)};
+      return {op: node.op, items: node.items.map(build)};
+    };
+    const tree = build(parsed);
+    refuseDuplicates(tree, conditions);
+    return {tree, conditions};
   };
 
   const outerScope = new Map([[outer.alias, outer]]);
-  const when = doc.when === undefined ? [] : conditions("when", doc.when, outer, outerScope, `${id}/when`);
-  const forbid = conditions("forbid/where", doc.forbid.where, inner, aliases, `${id}/forbid/where`);
+  const when = doc.when === undefined ? {conditions: []} : condition("when", doc.when, outer, outerScope, `${id}/when`);
 
-  // the one query (slice 2): the `for` table INNER JOIN the `exists` table ON
-  // the equalities between their fields, the rest in WHERE, the columns the
-  // alert and the stable order need as aliased fields of one result line
+  // each clause: its where, the equalities at its top that join it to `for`
+  // (the ON of the query, the correlation of require's subquery), the rest
   const joinEquality = (c) => c.cmp.rhs.kind === "field" && c.cmp.op === "=";
-  if (!forbid.some(joinEquality)) {
-    failAt(line("forbid/where"))(`where needs an equality between a field of ${inner.alias} and a field of ${outer.alias} (the join condition of the one query)`);
-  }
-  const joinFields = new Map();
-  const joinField = (alias, column, ruleLine) => {
-    const key = `${alias}~${column}`;
-    if (!joinFields.has(key)) {
-      const name = `${alias}_${column}`;
-      if (name.length > 30) failAt(ruleLine)(`${name} is longer than 30 characters as a field of the joined result; shorten the alias`);
-      joinFields.set(key, {"@id": `${id}/join/field/${joinFields.size + 1}`, rule_line: ruleLine, name, source: key,
-        table: aliases.get(alias).table.toLowerCase(), column});
+  const clauses = sources.map(({spec, inner}) => {
+    const wpath = `${spec.path}/where`;
+    const scope = new Map([[outer.alias, outer], [inner.alias, inner]]);
+    const {tree, conditions} = condition(wpath, spec.value.where, inner, scope, `${spec.id}/where`);
+    const top = tree.op === "and" ? tree.items : [tree];
+    const isOn = (t) => t.op === "cmp" && joinEquality(conditions[t.index]);
+    if (!top.some(isOn)) {
+      const purpose = kind === "require" ? "the correlation of the subquery" : combine === "all" ? "every clause of all joins the for table in the one query" : "the join condition of the query";
+      failAt(line(wpath))(`where needs an equality between a field of ${inner.alias} and a field of ${outer.alias}, joined to the rest by and (${purpose})`);
     }
-    return joinFields.get(key).name;
-  };
-  const keysOf = (src, ruleLine) => src.info.keys.filter((k) => k !== src.info.client).map((k) => {
-    joinField(src.alias, k, ruleLine);
-    return {source: `${src.alias}~${k}`, rule_line: ruleLine};
+    return {"@id": spec.id, rule_line: line(spec.path), exists_line: line(`${spec.path}/exists`), path: spec.path,
+      table: inner.table.toLowerCase(), alias: inner.alias, itab: `lt_${inner.alias}`, wa: wa(inner.alias), loops: kind !== "require",
+      conditions, tree, on: top.filter(isOn).map((t) => conditions[t.index]), rest: conjoin(top.filter((t) => !isOn(t))),
+      info: inner.info, alertSpec: spec.value.alert};
   });
-  const order = [...keysOf(outer, line("for")), ...keysOf(inner, line("forbid/exists"))]
-    .map((entry, n) => ({"@id": `${id}/join/order/${n + 1}`, ...entry}));
 
-  // alert: text and holes
-  const alertText = need(doc.alert, "alert", "text with {alias.field} holes");
-  const alertFail = failAt(line("alert"));
-  let texts = 0, holes = 0;
-  const parts = parseAlert(alertText, alertFail).map((part) => {
-    if (part.kind === "text") {
-      const why = misfit(part.value, {built_in: "STRG"});
-      if (why) alertFail(`alert text: ${why}`);
-      return {"@id": `${id}/alert/text/${++texts}`, rule_line: line("alert"), is_text: true,
-        value: part.value, "value@type": {built_in: "STRG"}};
+  // alerts: text and holes
+  const alertOf = (path, value, scope, idBase, only) => {
+    const alertText = need(value, path, "text with {alias.field} holes");
+    const alertFail = failAt(line(path));
+    let texts = 0, holes = 0;
+    const parts = parseAlert(alertText, alertFail).map((part) => {
+      if (part.kind === "text") {
+        const why = misfit(part.value, {built_in: "STRG"});
+        if (why) alertFail(`alert text: ${why}`);
+        return {"@id": `${idBase}/alert/text/${++texts}`, rule_line: line(path), is_text: true,
+          value: part.value, "value@type": {built_in: "STRG"}};
+      }
+      if (only && part.alias !== outer.alias && aliases.has(part.alias)) alertFail(`${part.text}: ${only}`);
+      const {field} = fieldOf({kind: "field", alias: part.alias, field: part.field, text: part.text}, scope, alertFail);
+      return {"@id": `${idBase}/alert/hole/${++holes}`, rule_line: line(path), is_text: false,
+        alias: part.alias, column: field.column, ref: `${wa(part.alias)}-${field.column}`, "@type": field.literal};
+    });
+    if (!parts.length) alertFail("alert is empty");
+    return {"@id": `${idBase}/alert`, rule_line: line(path), parts};
+  };
+  let alert;
+  if (combine === "any") {
+    const shared = doc.alert === undefined ? undefined : alertOf("alert", doc.alert, aliases, id,
+      "a shared alert of any names only fields of the for table; give the clause its own alert:");
+    alert = shared;
+    for (const clause of clauses) {
+      if (clause.alertSpec !== undefined) {
+        clause.alert = alertOf(`${clause.path}/alert`, clause.alertSpec, new Map([[outer.alias, outer], [clause.alias, aliases.get(clause.alias)]]), clause["@id"]);
+      } else if (shared) {
+        clause.alert = shared;
+      } else {
+        failAt(clause.rule_line)("a clause of any needs its own alert: or the rule a shared alert:");
+      }
     }
-    const {field} = fieldOf({kind: "field", alias: part.alias, field: part.field, text: part.text}, aliases, alertFail);
-    return {"@id": `${id}/alert/hole/${++holes}`, rule_line: line("alert"), is_text: false,
-      alias: part.alias, column: field.column,
-      ref: `${wa(part.alias)}-${field.column}`, jref: `ls_join-${joinField(part.alias, field.column, line("alert"))}`,
-      "@type": field.literal};
+  } else {
+    alert = alertOf("alert", doc.alert, kind === "require" ? outerScope : aliases, id,
+      kind === "require" ? `require alerts when no row of the exists table is there, so its alert names only fields of ${outer.alias}` : undefined);
+  }
+
+  // The queries of `check`: one for forbid (the clauses joined) and for
+  // require (a NOT EXISTS subquery), one per clause for any (7.02 Open SQL
+  // has no UNION). The columns the alert and the order need are fields of
+  // one result line, `<alias>_<column>`.
+  const whenTree = when.tree && resolve(when.tree, when.conditions);
+  const groups = combine === "any" ? clauses.map((c) => [c]) : [clauses];
+  const queries = groups.map((group, g) => {
+    const multi = groups.length > 1;
+    const qid = multi ? `${id}/join/${g + 1}` : `${id}/join`;
+    const suffix = multi ? String(g + 1) : "";
+    const fields = new Map();
+    const field = (alias, column, ruleLine) => {
+      const key = `${alias}~${column}`;
+      if (!fields.has(key)) {
+        const fieldName = `${alias}_${column}`;
+        if (fieldName.length > 30) failAt(ruleLine)(`${fieldName} is longer than 30 characters as a field of the joined result; shorten the alias`);
+        fields.set(key, {"@id": `${qid}/field/${fields.size + 1}`, rule_line: ruleLine, name: fieldName, source: key,
+          table: aliases.get(alias).table.toLowerCase(), column});
+      }
+      return fields.get(key).name;
+    };
+    const keysOf = (alias, info, ruleLine) => info.keys.filter((k) => k !== info.client).map((k) => {
+      field(alias, k, ruleLine);
+      return {source: `${alias}~${k}`, rule_line: ruleLine};
+    });
+    const order = [...keysOf(outer.alias, outer.info, line("for")),
+      ...(kind === "require" ? [] : group.flatMap((c) => keysOf(c.alias, c.info, c.exists_line)))]
+      .map((entry, n) => ({"@id": `${qid}/order/${n + 1}`, ...entry}));
+    const qwa = `ls_join${suffix}`;
+    const parts = (combine === "any" ? group[0].alert : alert).parts.map((part) => part.is_text ? part
+      : {...part, jref: `${qwa}-${field(part.alias, part.column, part.rule_line)}`});
+    const condition = conjoin([whenTree, ...(kind === "require" ? [{op: "exists", clause: group[0]}]
+      : group.map((c) => c.rest && resolve(c.rest, c.conditions)))]);
+    return {"@id": qid, rule_line: line(kind), type: `ty_join${suffix}`, itab: `lt_join${suffix}`, wa: qwa,
+      fields: [...fields.values()],
+      from: {"@id": `${id}/for`, rule_line: line("for"), table: outer.table.toLowerCase(), alias: outer.alias},
+      joins: kind === "require" ? [] : group.map((c) => ({"@id": c["@id"], rule_line: c.rule_line, table: c.table, alias: c.alias, on: c.on})),
+      where: whereLines(condition), order, alert_parts: parts};
   });
-  if (!parts.length) alertFail("alert is empty");
+  const comment = kind === "require" ? "one query: the rows of the first with no match in a subquery, never a SELECT per row"
+    : combine === "any" ? "one query per clause: its table joined to the first, never a SELECT per row of the first"
+      : "one query: the tables joined, never a SELECT per row of the first";
+
+  // The reference: the rule as a person would write it, a SELECT on each
+  // exists table for every row of the one before (require: none found).
+  // One pass for forbid and require; one per clause for any, clause by clause,
+  // the order the queries answer in.
+  const forNode = {"@id": `${id}/for`, rule_line: line("for"), table: outer.table.toLowerCase(), alias: outer.alias,
+    itab: `lt_${outer.alias}`, wa: wa(outer.alias)};
+  const level = (node, tree, leaves, indent, isLoop) => ({"@id": node["@id"], rule_line: node.rule_line, indent,
+    table: node.table, itab: node.itab, wa: node.wa, is_loop: isLoop,
+    where: whereLines(tree && resolve(tree, leaves), `${indent}  `)});
+  const pass = (group, parts) => {
+    const levels = [level(forNode, when.tree, when.conditions, "    ", true),
+      ...group.map((c, k) => level(c, c.tree, c.conditions, " ".repeat(6 + 2 * k), kind !== "require"))];
+    const indent = " ".repeat(4 + 2 * levels.length);
+    return {"@id": group[0]["@id"], rule_line: group[0].rule_line, indent, levels,
+      alert_parts: parts.map((part, k) => ({...part, lead: `${indent}${k === 0 ? "lv_alert = " : "  && "}`, stop: k === parts.length - 1 ? "." : ""})),
+      closes: [...levels].reverse().map((l) => ({"@id": l["@id"], rule_line: l.rule_line, indent: l.indent, word: l.is_loop ? "ENDLOOP." : "ENDIF."}))};
+  };
+  const reference = combine === "any" ? clauses.map((c) => pass([c], c.alert.parts)) : [pass(clauses, alert.parts)];
 
   // examples: rows of the rule's own tables, the date, the alerts expected
-  // each table where it enters the rule: `for`, or `forbid.exists`
-  const ruleTables = [{...outer.info, rule_line: line("for")}, {...inner.info, rule_line: line("forbid/exists")}];
+  // each table where it enters the rule: `for`, or its clause's `exists`
+  const ruleTables = [{...outer.info, rule_line: line("for")}, ...clauses.map((c) => ({...c.info, rule_line: c.exists_line}))];
   const testName = (table) => ({itab: `mt_${table.toLowerCase()}`, wa: `ls_${table.toLowerCase()}`});
   const methods = new Set(["check_reference"]);
   // a rule carries its proof: examples, each saying what it expects
@@ -511,7 +795,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     if (refWhy) failAt(line(`${base}/name`))(`example name with the comparison message: ${refWhy}`);
     const method = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
     if (!/^[a-z]/.test(method) || method.length > 30) failAt(line(`${base}/name`))(`example name ${JSON.stringify(label)} gives method ${method}, which is not an ABAP name of at most 30 characters`);
-    if (methods.has(method) || ["teardown", "assert_alerts"].includes(method)) failAt(line(`${base}/name`))(`example name ${JSON.stringify(label)} gives method ${method} a second time`);
+    if (methods.has(method) || ["teardown", "assert_alerts", "assert_same_as_reference"].includes(method)) failAt(line(`${base}/name`))(`example name ${JSON.stringify(label)} gives method ${method} a second time`);
     methods.add(method);
     const exampleId = `${id}/example/${label}`;
     const date = need(example.date, `${base}/date`, "the check date (YYYYMMDD)");
@@ -564,21 +848,18 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
 
   const ddicOf = (info) => ({client: info.client, keys: info.keys.filter((k) => k !== info.client),
     fields: Object.fromEntries([...info.fields].map(([column, f]) => [column, f.literal]))});
-  const whenNodes = when;
   const model = {
-    "@id": id, rule_line: line("rule"), rule: name, title, source: where, class: className,
-    for: {"@id": `${id}/for`, rule_line: line("for"), table: outer.table.toLowerCase(), alias: outer.alias,
-      itab: `lt_${outer.alias}`, wa: wa(outer.alias)},
-    when: {"@id": `${id}/when`, rule_line: line(doc.when === undefined ? "for" : "when"), conditions: whenNodes},
-    forbid: {"@id": `${id}/forbid`, rule_line: line("forbid"), exists_line: line("forbid/exists"), table: inner.table.toLowerCase(), alias: inner.alias,
-      itab: `lt_${inner.alias}`, wa: wa(inner.alias), conditions: forbid},
-    join: {"@id": `${id}/join`, rule_line: line("forbid"), itab: "lt_join", wa: "ls_join",
-      fields: [...joinFields.values()], order,
-      on: forbid.filter(joinEquality), where: [...whenNodes, ...forbid.filter((c) => !joinEquality(c))]},
-    alert: {"@id": `${id}/alert`, rule_line: line("alert"), parts},
+    "@id": id, rule_line: line("rule"), rule: name, title, source: where, class: className, kind, combine, comment,
+    for: forNode,
+    when: {"@id": `${id}/when`, rule_line: line(doc.when === undefined ? "for" : "when"), conditions: when.conditions,
+      ...(when.tree ? {tree: when.tree} : {})},
+    clauses: clauses.map(({info, alertSpec, rest, ...clause}) => clause),
+    ...(alert ? {alert} : {}),
+    queries,
+    reference,
     tables: ruleTables.map((info) => ({"@id": `${id}/table/${info.table.toLowerCase()}`, rule_line: info.rule_line,
       table: info.table.toLowerCase(), ...testName(info.table)})),
-    ddic: {[outer.table.toLowerCase()]: ddicOf(outer.info), [inner.table.toLowerCase()]: ddicOf(inner.info)},
+    ddic: Object.fromEntries(ruleTables.map((info) => [info.table.toLowerCase(), ddicOf(info)])),
     examples,
     cases: [],
   };
@@ -646,7 +927,7 @@ function caseNode(model, c) {
   if (refWhy) throw new Error(`derived case ${c.method}: ${refWhy}`);
   return {"@id": id, rule_line: ruleLine, name: label, method: c.method, label, "label@type": STRG,
     ref_label: `${label} (check against check_reference)`, "ref_label@type": STRG,
-    derived: {condition: c.condition, kind: c.kind},
+    derived: {condition: c.condition, kind: c.kind, structural: c.structural},
     date: {...literal(`${id}/date`, c.date, DATE_TYPE), call: `${model.class}=>check`},
     tables,
     expect: c.expect.map((value, x) => literal(`${id}/expect/${x + 1}`, value, STRG))};
@@ -751,7 +1032,7 @@ export function describeCases(model) {
     for (const t of c.tables) {
       for (const r of t.rows) out.push(`  ${t.table}: ${r.fields.map((f) => `${f.column}=${JSON.stringify(f.value)}`).join(" ")}`);
     }
-    if (!c.tables.some((t) => t.table === model.forbid.table)) out.push(`  ${model.forbid.table}: (no rows)`);
+    for (const clause of model.clauses) if (!c.tables.some((t) => t.table === clause.table)) out.push(`  ${clause.table}: (no rows)`);
     out.push(c.expect.length ? `  expect: ${c.expect.map((e) => JSON.stringify(e.value)).join("\n          ")}` : "  expect: no alert");
   }
   for (const k of model.skipped ?? []) out.push("", `skipped ${k.condition}: ${k.reason}`);

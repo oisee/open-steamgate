@@ -35,29 +35,39 @@ CLASS ltcl_examples IMPLEMENTATION.
   METHOD check_reference.
     " the rule as a person would write it: a SELECT on the exists table for
     " every row of the first
-    DATA {{for.itab}} TYPE STANDARD TABLE OF {{for.table}} WITH DEFAULT KEY.
-    DATA {{for.wa}} TYPE {{for.table}}.
-    DATA {{forbid.itab}} TYPE STANDARD TABLE OF {{forbid.table}} WITH DEFAULT KEY.
-    DATA {{forbid.wa}} TYPE {{forbid.table}}.
+{{#for}}
+    DATA {{itab}} TYPE STANDARD TABLE OF {{table}} WITH DEFAULT KEY.
+    DATA {{wa}} TYPE {{table}}.
+{{/for}}
+{{#clauses}}
+    DATA {{itab}} TYPE STANDARD TABLE OF {{table}} WITH DEFAULT KEY.
+{{#loops}}
+    DATA {{wa}} TYPE {{table}}.
+{{/loops}}
+{{/clauses}}
     DATA lv_alert TYPE string.
-    SELECT * FROM {{for.table}} INTO TABLE {{for.itab}}
-{{#when.conditions}}
-      {{#@first}}WHERE{{/@first}}{{^@first}}  AND{{/@first}} {{column}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{ref}}{{/is_literal}}
-{{/when.conditions}}
-      ORDER BY PRIMARY KEY.
-    LOOP AT {{for.itab}} INTO {{for.wa}}.
-      SELECT * FROM {{forbid.table}} INTO TABLE {{forbid.itab}}
-{{#forbid.conditions}}
-        {{#@first}}WHERE{{/@first}}{{^@first}}  AND{{/@first}} {{column}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{ref}}{{/is_literal}}
-{{/forbid.conditions}}
-        ORDER BY PRIMARY KEY.
-      LOOP AT {{forbid.itab}} INTO {{forbid.wa}}.
-{{#alert.parts}}
-        {{#@first}}lv_alert = {{/@first}}{{^@first}}  && {{/@first}}{{#is_text}}{{value | literal}}{{/is_text}}{{^is_text}}{{ref}}{{/is_text}}{{#@last}}.{{/@last}}
-{{/alert.parts}}
-        APPEND lv_alert TO rt_alerts.
-      ENDLOOP.
-    ENDLOOP.
+{{#reference}}
+{{#levels}}
+{{indent}}SELECT * FROM {{table}} INTO TABLE {{itab}}
+{{#where}}
+{{pre}}{{#is_cmp}}{{column}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{ref}}{{/is_literal}}{{/is_cmp}}{{post}}
+{{/where}}
+{{indent}}  ORDER BY PRIMARY KEY.
+{{#is_loop}}
+{{indent}}LOOP AT {{itab}} INTO {{wa}}.
+{{/is_loop}}
+{{^is_loop}}
+{{indent}}IF {{itab}} IS INITIAL.
+{{/is_loop}}
+{{/levels}}
+{{#alert_parts}}
+{{lead}}{{#is_text}}{{value | literal}}{{/is_text}}{{^is_text}}{{ref}}{{/is_text}}{{stop}}
+{{/alert_parts}}
+{{indent}}APPEND lv_alert TO rt_alerts.
+{{#closes}}
+{{indent}}{{word}}
+{{/closes}}
+{{/reference}}
   ENDMETHOD.
 
   METHOD assert_alerts.
