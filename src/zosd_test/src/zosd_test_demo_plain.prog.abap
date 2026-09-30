@@ -4,7 +4,7 @@ REPORT zosd_test_demo_plain.
 * block, no subroutine. It exists so that a structure document over the
 * plainest program a system can hold has a subject **inside the system**.
 *
-* The façade test used to read `ZDEMO_EDITOR` for this, which lives under
+* The facade test used to read `ZDEMO_EDITOR` for this, which lives under
 * `test/fixtures/` -- a folder the build excludes and the object store
 * indexed, so the system contained an object the build had never seen, and
 * a check of it complained truthfully about the object and falsely about

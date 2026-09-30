@@ -4,7 +4,7 @@
 * It is a real APC handler: it inherits cl_apc_wsp_ext_stateful_base and
 * redefines the callbacks a system calls, so the same class would run in a
 * system's ICF unchanged. Stateful means the object outlives one message,
-* which is what the counter is here to demonstrate — a handler that answered
+* which is what the counter is here to demonstrate -- a handler that answered
 * identically every time would not tell us whether state survived.
 CLASS zcl_stg_apc_demo DEFINITION PUBLIC INHERITING FROM cl_apc_wsp_ext_stateful_base FINAL CREATE PUBLIC.
   PUBLIC SECTION.
