@@ -827,7 +827,7 @@ function stmt(st, ctx, d) {
       const n = ctx.loop++;
       const keep = st.where.map((w) => whereItem(w, `r${n}`, ctx)).join(" && ");
       return [`${t}{`, `${t}  const kept${n} = ${tb}.filter((r${n}) => !(${keep}));`,
-        `${t}  s.sy.subrc = kept${n}.length < ${tb}.length ? 0 : 4;`, `${t}  if (s.sy.subrc === 0) abap.bumpTable(${tb});`, `${t}  ${tb} = kept${n};`, `${t}}`];
+        `${t}  s.sy.subrc = kept${n}.length < ${tb}.length ? 0 : 4;`, `${t}  if (s.sy.subrc === 0) { abap.bumpTable(${tb}); ${tb} = kept${n}; }`, `${t}}`];
     }
     case "delete_key": {
       const tb = place(st.table, ctx);
