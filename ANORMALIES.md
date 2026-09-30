@@ -2736,3 +2736,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: backlog (Lars is busy this week); needs an issue or a PR in abaplint/transpiler after the critic and a heads-up to stoker
 - Regression-test location: none yet
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-fae-one-select-per-row — FOR ALL ENTRIES sends one SELECT per row of the driving table
+
+- Status: `open` (recorded; upstream: backlog)
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/transpiler` 2.13.93 and abaplint/transpiler main at dd83da9 (`packages/transpiler/src/statements/select.ts`, the `SQLForAllEntries` branch), as pinned in this tree (`oisee/transpiler` at `ddb0a993`)
+- Affected ABAP statement, runtime API or adapter: `SELECT ... FOR ALL ENTRIES IN itab WHERE ...`
+- Minimal ABAP reproducer: `zcl_osd_lift_r1_demo=>after` (`src/lift/`) over 50 rows
+- Exact command used to run it: `npx mocha test/lift-r1.mjs` (counts `DatabaseClient.select` calls)
+- Expected SAP behaviour: the database interface sends the driving table in blocks (profile parameters `rsdb/max_blocking_factor`, `rsdb/max_in_blocking_factor`), so 50 rows are a handful of statements at most; not measured on A4H yet
+- Actual open-abap behaviour: the transpiled code loops over the driving table and runs the statement once per row, appending, then sorts and deletes adjacent duplicates; 50 rows are 50 calls, as many as the SELECT SINGLE loop it replaces. The result rows are right (the differential test in `zcl_osd_lift_r1_demo.clas.testclasses.abap` passes)
+- Impact on open-steamgate: a set-based rewrite (verified lift recipe R1) shows no round-trip gain here, so cost evidence for R1 cannot come from this runtime; behaviour is unaffected. On DuckDB, PostgreSQL or HANA, where a call costs a round trip, FOR ALL ENTRIES is as slow as the loop
+- Smallest safe workaround: none needed for correctness; cost evidence for FOR ALL ENTRIES recipes waits for a blocking runtime or is measured on a system
+- Upstream: abaplint/transpiler, backlog (Lars is busy this week); a change would build one statement per block with the WHERE repeated under OR, keeping the empty-table branch
+- Regression-test location: `test/lift-r1.mjs` ("AFTER does too, on this runtime" pins 50 and fails when blocking arrives)
+- Upstream version containing a fix: none yet
