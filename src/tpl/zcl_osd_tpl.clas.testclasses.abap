@@ -18,7 +18,9 @@ CLASS ltcl_osd_tpl DEFINITION FOR TESTING
     METHODS partial_depth_boundary FOR TESTING RAISING cx_static_check.
     METHODS partial_arguments FOR TESTING RAISING cx_static_check.
     METHODS dotted_names FOR TESTING RAISING cx_static_check.
+    METHODS slash_in_a_name FOR TESTING RAISING cx_static_check.
     METHODS trace_whole_table FOR TESTING RAISING cx_static_check.
+    METHODS trace_static_block_lines FOR TESTING RAISING cx_static_check.
     METHODS trace_value_keeps_tag_line FOR TESTING RAISING cx_static_check.
     METHODS probes_erased_when_off FOR TESTING RAISING cx_static_check.
     METHODS deterministic FOR TESTING RAISING cx_static_check.
@@ -339,6 +341,20 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
                         it_partials = partial( iv_name = `decl` iv_template = `x` ) ) ).
   ENDMETHOD.
 
+  METHOD slash_in_a_name.
+* A name with a slash in it: the engine's path index would read "/a/b" as that
+* member, ajson reads it as b under a. The render answers what ajson answers.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `[]`
+      act = text( iv_template = `[{{a/b}}]`
+                  iv_json     = `{"a/b":"x"}` ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `[y]`
+      act = text( iv_template = `[{{a.b}}]`
+                  iv_json     = `{"a/b":"x","a":{"b":"y"}}` ) ).
+  ENDMETHOD.
+
+
   METHOD dotted_names.
     cl_abap_unit_assert=>assert_equals(
       exp = `zcl_a/zcl_b`
@@ -353,6 +369,22 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
       act = text( iv_template = `{{#inner}}{{label}}{{/inner}}`
                   iv_json     = `{"label":"outer","inner":{"label":"inner"}}` ) ).
   ENDMETHOD.
+
+  METHOD trace_static_block_lines.
+* One static token over several template lines: each output line names its
+* own template line, not the line the token starts on.
+    DATA ls_result TYPE zcl_osd_tpl=>ty_result.
+    DATA ls_trace TYPE zcl_osd_tpl=>ty_trace.
+    ls_result = zcl_osd_tpl=>render(
+      iv_template = `{{x}}` && nl( ) && `a` && nl( ) && `b` && nl( ) && `c`
+      ii_data     = data( `{"x":"1"}` )
+      iv_name     = `blk` ).
+    cl_abap_unit_assert=>assert_equals( exp = 4 act = lines( ls_result-trace ) ).
+    LOOP AT ls_result-trace INTO ls_trace.
+      cl_abap_unit_assert=>assert_equals( exp = sy-tabix act = ls_trace-template_line ).
+    ENDLOOP.
+  ENDMETHOD.
+
 
   METHOD trace_whole_table.
     DATA ls_result TYPE zcl_osd_tpl=>ty_result.

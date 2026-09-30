@@ -58,6 +58,7 @@ CLASS zcl_osd_tpl DEFINITION PUBLIC FINAL CREATE PRIVATE.
         close      TYPE i,
         indent     TYPE string,
         standalone TYPE abap_bool,
+        line       TYPE i,
       END OF ty_token,
       tt_tokens TYPE STANDARD TABLE OF ty_token WITH DEFAULT KEY,
       tt_offsets TYPE STANDARD TABLE OF i WITH DEFAULT KEY,
@@ -107,7 +108,19 @@ CLASS zcl_osd_tpl DEFINITION PUBLIC FINAL CREATE PRIVATE.
         partial  TYPE c LENGTH 1 VALUE '>',
       END OF c_kind.
 
+    TYPES:
+      BEGIN OF ty_node,
+        key   TYPE string,
+        type  TYPE zif_ajson_types=>ty_node_type,
+        value TYPE string,
+      END OF ty_node,
+      tt_nodes TYPE HASHED TABLE OF ty_node WITH UNIQUE KEY key.
+
     DATA mi_data TYPE REF TO zif_ajson.
+    " the data's nodes by full path, read once: a render asks for a path several
+    " times per tag, and ajson splits the path string on every ask
+    DATA mt_nodes TYPE tt_nodes.
+    DATA mv_indexed TYPE abap_bool.
     DATA mt_partials TYPE tt_partials.
     DATA mt_parsed TYPE tt_parsed.
     DATA mv_escape TYPE string.
@@ -173,9 +186,37 @@ CLASS zcl_osd_tpl DEFINITION PUBLIC FINAL CREATE PRIVATE.
       RAISING
         zcx_osd_tpl.
 
+    METHODS index_data.
+    METHODS node
+      IMPORTING
+        iv_path        TYPE string
+      RETURNING
+        VALUE(rs_node) TYPE ty_node.
+    METHODS node_type
+      IMPORTING
+        iv_path        TYPE string
+      RETURNING
+        VALUE(rv_type) TYPE zif_ajson_types=>ty_node_type.
+    METHODS node_value
+      IMPORTING
+        iv_path         TYPE string
+      RETURNING
+        VALUE(rv_value) TYPE string.
+    METHODS node_exists
+      IMPORTING
+        iv_path          TYPE string
+      RETURNING
+        VALUE(rv_exists) TYPE abap_bool.
+    METHODS node_boolean
+      IMPORTING
+        iv_path       TYPE string
+      RETURNING
+        VALUE(rv_yes) TYPE abap_bool.
+
     METHODS emit_static
       IMPORTING
         iv_tpl    TYPE i
+        iv_line   TYPE i
         iv_from   TYPE i
         iv_to     TYPE i
         iv_path   TYPE string
@@ -315,6 +356,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
 
     CREATE OBJECT lo_tpl.
     lo_tpl->mi_data = ii_data.
+    lo_tpl->index_data( ).
     lo_tpl->mt_partials = it_partials.
     lo_tpl->mv_escape = iv_escape.
 
@@ -362,6 +404,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
     DATA ls_parsed TYPE ty_parsed.
     DATA lv_pos TYPE i.
     DATA lv_nl TYPE i.
+    FIELD-SYMBOLS <ls_token> TYPE ty_token.
 
     ls_parsed-name = iv_name.
     ls_parsed-is_main = iv_main.
@@ -380,6 +423,10 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
     match_sections( EXPORTING iv_name        = iv_name
                               it_line_starts = ls_parsed-line_starts
                     CHANGING  ct_tokens      = ls_parsed-tokens ).
+    " the line of every token once here, not once per render
+    LOOP AT ls_parsed-tokens ASSIGNING <ls_token>.
+      <ls_token>-line = line_of( it_line_starts = ls_parsed-line_starts iv_offset = <ls_token>-start ).
+    ENDLOOP.
     APPEND ls_parsed TO mt_parsed.
     rv_index = lines( mt_parsed ).
   ENDMETHOD.
@@ -674,7 +721,6 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
 
   METHOD render_range.
     DATA lv_index TYPE i.
-    DATA ls_token TYPE ty_token.
     DATA ls_ref TYPE ty_ref.
     DATA ls_type_ref TYPE ty_ref.
     DATA lv_name TYPE string.
@@ -702,6 +748,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
     DATA lv_mark_lines TYPE i.
     DATA lv_mark_len TYPE i.
     FIELD-SYMBOLS <ls_tpl> TYPE ty_parsed.
+    FIELD-SYMBOLS <ls_token> TYPE ty_token.
 
     READ TABLE mt_parsed INDEX iv_tpl ASSIGNING <ls_tpl>.
     lv_template = <ls_tpl>-name.
@@ -709,20 +756,21 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
 
     lv_index = iv_from.
     WHILE lv_index <= iv_to.
-      READ TABLE <ls_tpl>-tokens INDEX lv_index INTO ls_token.
-      lv_line = line_of( it_line_starts = <ls_tpl>-line_starts iv_offset = ls_token-start ).
+      READ TABLE <ls_tpl>-tokens INDEX lv_index ASSIGNING <ls_token>.
+      lv_line = <ls_token>-line.
       lv_where = |{ lv_template }:{ lv_line }|.
 
-      CASE ls_token-kind.
+      CASE <ls_token>-kind.
         WHEN c_kind-static.
           emit_static( iv_tpl    = iv_tpl
-                       iv_from   = ls_token-start
-                       iv_to     = ls_token-end
+                       iv_line   = lv_line
+                       iv_from   = <ls_token>-start
+                       iv_to     = <ls_token>-end
                        iv_path   = lv_ctx_path
                        iv_indent = iv_indent ).
 
         WHEN c_kind-var OR c_kind-raw.
-          lv_name = ls_token-name.
+          lv_name = <ls_token>-name.
           CLEAR lt_filters.
           lv_bar = find( val = lv_name sub = `|` ).
           IF lv_bar >= 0.
@@ -748,7 +796,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
             ENDIF.
             lv_text = apply_filters( iv_text = lv_text it_filters = lt_filters iv_where = lv_where
                                      iv_name = lv_name iv_path = ls_ref-path ).
-            IF ls_token-kind = c_kind-var.
+            IF <ls_token>-kind = c_kind-var.
               lv_text = escape( lv_text ).
             ENDIF.
             emit_value( iv_text     = lv_text
@@ -758,16 +806,16 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
           ENDIF.
 
         WHEN c_kind-section.
-          ls_ref = resolve( iv_name = ls_token-name it_frames = it_frames ).
+          ls_ref = resolve( iv_name = <ls_token>-name it_frames = it_frames ).
           IF ls_ref-found = abap_true AND ls_ref-truthy = abap_true.
             IF ls_ref-is_meta = abap_false.
-              lv_type = mi_data->get_node_type( ls_ref-path ).
+              lv_type = node_type( ls_ref-path ).
             ELSE.
               CLEAR lv_type.
             ENDIF.
             IF lv_type = zif_ajson_types=>node_type-array.
               lv_count = 0.
-              WHILE mi_data->exists( join( iv_path = ls_ref-path iv_name = |{ lv_count + 1 }| ) ) = abap_true.
+              WHILE node_exists( join( iv_path = ls_ref-path iv_name = |{ lv_count + 1 }| ) ) = abap_true.
                 lv_count = lv_count + 1.
               ENDWHILE.
               DO lv_count TIMES.
@@ -780,7 +828,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
                 APPEND ls_frame TO lt_inner.
                 render_range( iv_tpl    = iv_tpl
                               iv_from   = lv_index + 1
-                              iv_to     = ls_token-close - 1
+                              iv_to     = <ls_token>-close - 1
                               it_frames = lt_inner
                               iv_indent = iv_indent ).
               ENDDO.
@@ -793,26 +841,26 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
               ENDIF.
               render_range( iv_tpl    = iv_tpl
                             iv_from   = lv_index + 1
-                            iv_to     = ls_token-close - 1
+                            iv_to     = <ls_token>-close - 1
                             it_frames = lt_inner
                             iv_indent = iv_indent ).
             ENDIF.
           ENDIF.
-          lv_index = ls_token-close.
+          lv_index = <ls_token>-close.
 
         WHEN c_kind-inverted.
-          ls_ref = resolve( iv_name = ls_token-name it_frames = it_frames ).
+          ls_ref = resolve( iv_name = <ls_token>-name it_frames = it_frames ).
           IF ls_ref-found = abap_false OR ls_ref-truthy = abap_false.
             render_range( iv_tpl    = iv_tpl
                           iv_from   = lv_index + 1
-                          iv_to     = ls_token-close - 1
+                          iv_to     = <ls_token>-close - 1
                           it_frames = it_frames
                           iv_indent = iv_indent ).
           ENDIF.
-          lv_index = ls_token-close.
+          lv_index = <ls_token>-close.
 
         WHEN c_kind-partial.
-          lt_words = split_words( ls_token-name ).
+          lt_words = split_words( <ls_token>-name ).
           READ TABLE lt_words INDEX 1 INTO lv_word.
           lv_partial = partial_index( lv_word ).
           IF lv_partial > 0.
@@ -847,12 +895,12 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
             ENDIF.
             READ TABLE mt_parsed INDEX lv_partial ASSIGNING <ls_tpl>.
             lv_partial_count = lines( <ls_tpl>-tokens ).
-            lv_indent = iv_indent && ls_token-indent.
+            lv_indent = iv_indent && <ls_token>-indent.
             " a standalone call starts a fresh source line: indent it
             lv_saved_indent = mv_pending_indent.
             lv_mark_lines = lines( mt_lines ).
             lv_mark_len = strlen( mv_current ).
-            IF ls_token-standalone = abap_true.
+            IF <ls_token>-standalone = abap_true.
               mv_pending_indent = lv_indent.
             ENDIF.
             mv_depth = mv_depth + 1.
@@ -866,7 +914,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
             " of its own: its indentation, not the partial's; after an inline call
             " it is still on the same source line: the indentation it had, if
             " nothing was written meanwhile, else none
-            IF ls_token-standalone = abap_true.
+            IF <ls_token>-standalone = abap_true.
               IF mv_current IS INITIAL.
                 mv_pending_indent = iv_indent.
               ENDIF.
@@ -899,8 +947,8 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
 
     READ TABLE mt_parsed INDEX iv_tpl ASSIGNING <ls_tpl>.
     lv_pos = iv_from.
+    lv_line = iv_line.
     WHILE lv_pos < iv_to.
-      lv_line = line_of( it_line_starts = <ls_tpl>-line_starts iv_offset = lv_pos ).
       lv_nl = find( val = <ls_tpl>-source sub = cl_abap_char_utilities=>newline off = lv_pos ).
       IF lv_nl < 0 OR lv_nl >= iv_to.
         lv_part = substring( val = <ls_tpl>-source off = lv_pos len = iv_to - lv_pos ).
@@ -914,6 +962,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
       end_line( iv_template = <ls_tpl>-name iv_line = lv_line iv_path = iv_path ).
       mv_pending_indent = iv_indent.
       lv_pos = lv_nl + 1.
+      lv_line = lv_line + 1.
     ENDWHILE.
   ENDMETHOD.
 
@@ -1054,7 +1103,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
       ENDIF.
       IF <ls_frame>-path IS NOT INITIAL.
         lv_candidate = join( iv_path = <ls_frame>-path iv_name = lv_first ).
-        IF mi_data->exists( lv_candidate ) = abap_true.
+        IF node_exists( lv_candidate ) = abap_true.
           EXIT.
         ENDIF.
       ENDIF.
@@ -1067,7 +1116,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
 
     LOOP AT lt_segments INTO lv_segment FROM 2.
       lv_candidate = join( iv_path = lv_candidate iv_name = lv_segment ).
-      IF mi_data->exists( lv_candidate ) = abap_false.
+      IF node_exists( lv_candidate ) = abap_false.
         RETURN.
       ENDIF.
     ENDLOOP.
@@ -1080,12 +1129,12 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
   METHOD value_text.
     DATA lv_type TYPE zif_ajson_types=>ty_node_type.
 
-    lv_type = mi_data->get_node_type( iv_path ).
+    lv_type = node_type( iv_path ).
     CASE lv_type.
       WHEN zif_ajson_types=>node_type-string OR zif_ajson_types=>node_type-number.
-        rv_text = mi_data->get( iv_path ).
+        rv_text = node_value( iv_path ).
       WHEN zif_ajson_types=>node_type-boolean.
-        IF mi_data->get_boolean( iv_path ) = abap_true.
+        IF node_boolean( iv_path ) = abap_true.
           rv_text = `true`.
         ELSE.
           rv_text = `false`.
@@ -1101,16 +1150,16 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
 * numbers (0 too) and objects are true.
     DATA lv_type TYPE zif_ajson_types=>ty_node_type.
 
-    lv_type = mi_data->get_node_type( iv_path ).
+    lv_type = node_type( iv_path ).
     CASE lv_type.
       WHEN zif_ajson_types=>node_type-null.
         rv_yes = abap_false.
       WHEN zif_ajson_types=>node_type-boolean.
-        rv_yes = mi_data->get_boolean( iv_path ).
+        rv_yes = node_boolean( iv_path ).
       WHEN zif_ajson_types=>node_type-array.
-        rv_yes = mi_data->exists( join( iv_path = iv_path iv_name = `1` ) ).
+        rv_yes = node_exists( join( iv_path = iv_path iv_name = `1` ) ).
       WHEN zif_ajson_types=>node_type-string.
-        IF mi_data->get( iv_path ) IS INITIAL.
+        IF node_value( iv_path ) IS INITIAL.
           rv_yes = abap_false.
         ELSE.
           rv_yes = abap_true.
@@ -1196,12 +1245,12 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
 
     rv_text = iv_text.
     lv_type_path = iv_path && `@type`.
-    IF iv_path IS INITIAL OR mi_data->exists( lv_type_path ) = abap_false
-       OR mi_data->get_node_type( lv_type_path ) <> zif_ajson_types=>node_type-object.
+    IF iv_path IS INITIAL OR node_exists( lv_type_path ) = abap_false
+       OR node_type( lv_type_path ) <> zif_ajson_types=>node_type-object.
       RAISE EXCEPTION TYPE zcx_osd_tpl
         EXPORTING text = |{ iv_where }: literal needs { iv_name }@type|.
     ENDIF.
-    lv_builtin = mi_data->get( join( iv_path = lv_type_path iv_name = `built_in` ) ).
+    lv_builtin = node_value( join( iv_path = lv_type_path iv_name = `built_in` ) ).
     CASE lv_builtin.
       WHEN `CHAR` OR `NUMC` OR `CLNT` OR `LANG` OR `CUKY` OR `UNIT` OR `ACCP`
         OR `DATS` OR `TIMS` OR `STRG` OR `SSTR` OR `INT1` OR `INT2` OR `INT4`
@@ -1214,15 +1263,15 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
       RETURN.
     ENDIF.
     " an object, an array or null has no literal form; its text would be empty
-    CASE mi_data->get_node_type( iv_path ).
+    CASE node_type( iv_path ).
       WHEN zif_ajson_types=>node_type-string OR zif_ajson_types=>node_type-number.
       WHEN OTHERS.
         RAISE EXCEPTION TYPE zcx_osd_tpl
           EXPORTING text = |{ iv_where }: literal { iv_name } needs a text or a number|.
     ENDCASE.
 
-    lv_length = mi_data->get( join( iv_path = lv_type_path iv_name = `length` ) ).
-    lv_decimals = mi_data->get( join( iv_path = lv_type_path iv_name = `decimals` ) ).
+    lv_length = node_value( join( iv_path = lv_type_path iv_name = `length` ) ).
+    lv_decimals = node_value( join( iv_path = lv_type_path iv_name = `decimals` ) ).
     CASE lv_builtin.
       WHEN `CHAR` OR `NUMC` OR `CLNT` OR `LANG` OR `CUKY` OR `UNIT` OR `ACCP`
         OR `DATS` OR `TIMS`.
@@ -1239,7 +1288,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
         REPLACE ALL OCCURRENCES OF `'` IN rv_text WITH `''`.
         rv_text = `'` && rv_text && `'`.
       WHEN `STRG` OR `SSTR`.
-        IF lv_builtin = `SSTR` AND mi_data->exists( join( iv_path = lv_type_path iv_name = `length` ) ) = abap_true
+        IF lv_builtin = `SSTR` AND node_exists( join( iv_path = lv_type_path iv_name = `length` ) ) = abap_true
            AND strlen( iv_text ) > lv_length.
           lv_error = `exceeds length`.
         ENDIF.
@@ -1389,6 +1438,117 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD index_data.
+* Every node under its full path, the way render names it ("/a/1/b", the root
+* "/"). A name with a slash (or a tab, ajson's escape for one) in it and the
+* index is not used: every ask goes to ajson, which reads such paths its own way.
+    DATA ls_node TYPE ty_node.
+    FIELD-SYMBOLS <ls_item> TYPE zif_ajson_types=>ty_node.
+
+    CLEAR mt_nodes.
+    mv_indexed = abap_false.
+    IF mi_data IS INITIAL.
+      RETURN.
+    ENDIF.
+    LOOP AT mi_data->mt_json_tree ASSIGNING <ls_item>.
+      IF <ls_item>-name CA `/` OR <ls_item>-name CA cl_abap_char_utilities=>horizontal_tab.
+        CLEAR mt_nodes.
+        RETURN.
+      ENDIF.
+      ls_node-key = <ls_item>-path && <ls_item>-name.
+      IF ls_node-key IS INITIAL.
+        ls_node-key = `/`.
+      ENDIF.
+      ls_node-type = <ls_item>-type.
+      ls_node-value = <ls_item>-value.
+      INSERT ls_node INTO TABLE mt_nodes.
+      IF sy-subrc <> 0.
+        CLEAR mt_nodes.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+    mv_indexed = abap_true.
+  ENDMETHOD.
+
+
+  METHOD node.
+* What ajson's get and get_node_type answer for the path; an unknown path is
+* an initial node.
+    DATA lv_key TYPE string.
+    DATA lv_len TYPE i.
+    FIELD-SYMBOLS <ls_node> TYPE ty_node.
+
+    IF mv_indexed = abap_false.
+      IF mi_data IS NOT INITIAL AND mi_data->exists( iv_path ) = abap_true.
+        rs_node-key = iv_path.
+        IF rs_node-key IS INITIAL.
+          rs_node-key = `/`.
+        ENDIF.
+        rs_node-type = mi_data->get_node_type( iv_path ).
+        rs_node-value = mi_data->get( iv_path ).
+      ENDIF.
+      RETURN.
+    ENDIF.
+    lv_key = iv_path.
+    lv_len = strlen( lv_key ).
+    IF lv_len = 0.
+      lv_key = `/`.
+    ELSE.
+      IF lv_key(1) <> `/`.
+        lv_key = `/` && lv_key.
+        lv_len = lv_len + 1.
+      ENDIF.
+      IF lv_len > 1 AND substring( val = lv_key off = lv_len - 1 len = 1 ) = `/`.
+        lv_key = substring( val = lv_key len = lv_len - 1 ).
+      ENDIF.
+    ENDIF.
+    READ TABLE mt_nodes WITH TABLE KEY key = lv_key ASSIGNING <ls_node>.
+    IF sy-subrc = 0.
+      rs_node = <ls_node>.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD node_type.
+    DATA ls_node TYPE ty_node.
+
+    ls_node = node( iv_path ).
+    rv_type = ls_node-type.
+  ENDMETHOD.
+
+
+  METHOD node_value.
+    DATA ls_node TYPE ty_node.
+
+    ls_node = node( iv_path ).
+    rv_value = ls_node-value.
+  ENDMETHOD.
+
+
+  METHOD node_exists.
+    DATA ls_node TYPE ty_node.
+
+    ls_node = node( iv_path ).
+    rv_exists = boolc( ls_node-key IS NOT INITIAL ).
+  ENDMETHOD.
+
+
+  METHOD node_boolean.
+* ajson's get_boolean: a boolean is its value, null is false, anything else
+* is true when it is not empty.
+    DATA ls_node TYPE ty_node.
+
+    ls_node = node( iv_path ).
+    IF ls_node-key IS INITIAL OR ls_node-type = zif_ajson_types=>node_type-null.
+      RETURN.
+    ELSEIF ls_node-type = zif_ajson_types=>node_type-boolean.
+      rv_yes = boolc( ls_node-value = `true` ).
+    ELSEIF ls_node-value IS NOT INITIAL.
+      rv_yes = abap_true.
+    ENDIF.
+  ENDMETHOD.
+
+
   METHOD join.
     IF iv_path = `/`.
       rv_path = `/` && iv_name.
@@ -1399,14 +1559,25 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
 
 
   METHOD line_of.
+* The last line that starts at or before the offset; the starts ascend, so
+* this halves instead of walking (a render asks once per token).
+    DATA lv_low TYPE i.
+    DATA lv_high TYPE i.
+    DATA lv_mid TYPE i.
     DATA lv_start TYPE i.
 
-    LOOP AT it_line_starts INTO lv_start.
+    lv_low = 1.
+    lv_high = lines( it_line_starts ).
+    WHILE lv_low <= lv_high.
+      lv_mid = ( lv_low + lv_high ) DIV 2.
+      READ TABLE it_line_starts INDEX lv_mid INTO lv_start.
       IF lv_start > iv_offset.
-        EXIT.
+        lv_high = lv_mid - 1.
+      ELSE.
+        rv_line = lv_mid.
+        lv_low = lv_mid + 1.
       ENDIF.
-      rv_line = sy-tabix.
-    ENDLOOP.
+    ENDWHILE.
   ENDMETHOD.
 
 
