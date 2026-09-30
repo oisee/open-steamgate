@@ -536,6 +536,8 @@ type StoreAnswer struct {
 	Objects []StoreRow
 	Issues  []StoreIssue
 	Types   []StoreTally
+	// HISTORY's versions (ET_REVISION, store_history.go)
+	Revisions []StoreRevision
 }
 
 func storeEmpty() StoreAnswer {
@@ -564,7 +566,7 @@ func storeNotFound(typ, name string) error { return storeRefusal(typ + " " + nam
 
 // StoreCapabilities is what CAPABILITIES names: the commands this host does,
 // as opposed to the ones it only refuses (CHECK, ACTIVATE: storeNoCompiler).
-var StoreCapabilities = []string{"LIST", "READ", "WRITE"}
+var StoreCapabilities = []string{"LIST", "READ", "WRITE", "HISTORY", "REVISION"}
 
 // StoreCall answers one call of ZOSD_STORE. in holds the importing values
 // that were passed (IV_*), present or absent the way the caller passed them.
@@ -586,7 +588,7 @@ func StoreCall(in map[string]*string) StoreAnswer {
 		return a
 	}
 	switch command {
-	case "LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS":
+	case "LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "HISTORY", "REVISION":
 	case "CAPABILITIES":
 		// what this host can do, for a screen that draws a button only for
 		// a command named here (ZCL_OSD_EDIT): no CHECK and no ACTIVATE,
@@ -623,6 +625,40 @@ func StoreCall(in map[string]*string) StoreAnswer {
 		err = storeWrite(ix, &a, typ, name, include, *src)
 		if err == nil {
 			a.Scalars["EV_MS"] = ms()
+		}
+	case "HISTORY", "REVISION":
+		// the versions of an object are its file's commits, stored nowhere
+		// (docs/backlog/adt.md); outside git "no history" and why, with no
+		// count, as tools/osd-store-destination.mjs answers
+		e := ix.find(typ, name)
+		if e == nil {
+			err = storeNotFound(typ, name)
+			break
+		}
+		if command == "HISTORY" {
+			limit, perr := strconv.Atoi(text("IV_LIMIT", ""))
+			if perr != nil || limit <= 0 {
+				limit = 50
+			}
+			a.Scalars["EV_FILE"] = e.File
+			revs, reason := storeHistory(storeState.root, e.File, limit)
+			if reason != "" {
+				a.Scalars["EV_NOTE"], a.Scalars["EV_COUNT"] = "no history: "+reason, ""
+				break
+			}
+			a.Revisions = revs
+			a.Scalars["EV_COUNT"] = strconv.Itoa(len(revs))
+		} else {
+			rev := text("IV_REVISION", "")
+			src, path, rerr := storeRevisionAt(storeState.root, e.File, rev)
+			if rerr != nil {
+				err = rerr
+				break
+			}
+			a.Scalars["EV_SOURCE"], a.Scalars["EV_FILE"] = src, path
+			if len(rev) >= 12 {
+				a.Scalars["EV_VERSION"] = strings.ToLower(rev[:12])
+			}
 		}
 	case "CHECK", "ACTIVATE", "TOKENS":
 		err = storeNoCompiler(ix, &a, command, typ, name)
@@ -830,7 +866,7 @@ func storeNoCompiler(ix *storeIndex, a *StoreAnswer, command, typ, name string) 
 // caller's values in, every exporting parameter and table it passed filled
 func ZOSD_STORE(s *Session, args map[string]Data) {
 	in := map[string]*string{}
-	for _, k := range []string{"IV_COMMAND", "IV_TYPE", "IV_NAME", "IV_INCLUDE", "IV_SOURCE", "IV_FILTER", "IV_LIMIT"} {
+	for _, k := range []string{"IV_COMMAND", "IV_TYPE", "IV_NAME", "IV_INCLUDE", "IV_SOURCE", "IV_FILTER", "IV_LIMIT", "IV_REVISION"} {
 		if d, ok := fmArg(args, k); ok {
 			v := DataString(d)
 			in[k] = &v
@@ -870,6 +906,15 @@ func ZOSD_STORE(s *Session, args map[string]Data) {
 			})
 		}
 	}
+	fillRows("ET_REVISION", len(a.Revisions), func(i int, set func(string, any)) {
+		r := a.Revisions[i]
+		set("REVISION", r.REVISION)
+		set("SHORT", r.SHORT)
+		set("AUTHOR", r.AUTHOR)
+		set("DATE", r.DATE)
+		set("TIME", r.TIME)
+		set("SUBJECT", r.SUBJECT)
+	})
 	fillRows("ET_OBJECT", len(a.Objects), func(i int, set func(string, any)) {
 		r := a.Objects[i]
 		set("TYPE", r.TYPE)

@@ -27,19 +27,20 @@
 import {given, givenText, fill} from "./osd-destination.mjs";
 import {snapshotOf, changedSince} from "./osd-generation-diff.mjs";
 import {objectOf} from "./osd-inputs.mjs";
+import {gitObjectHistory, gitObjectRevisionAt} from "./osd-git-history.mjs";
 import {basename, join} from "node:path";
 
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
 // command that needed a parse per display is gone (host-tools review S1/C2)
-const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES"];
+const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION"];
 
 /** What this host can do, as the screen asks it (CAPABILITIES, EV_NOTE):
  *  the editor draws a button only for a command named here. Node holds the
  *  compiler and the build, so it offers all five; a host that cannot check
  *  or activate (OSGo, a built binary) leaves them out and the screen shows
  *  no button that would only be refused (host-tools review 2026-09-25, D2). */
-export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE"];
+export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION"];
 
 export class StoreDestination {
   /**
@@ -110,6 +111,8 @@ export class StoreDestination {
         case "WRITE": return this.#write(type, name, include, source, started);
         case "CHECK": return this.#check(type, name, include, source, started);
         case "ACTIVATE": return await this.#activate(type, name, started);
+        case "HISTORY": return this.#history(type, name, signature);
+        case "REVISION": return this.#revision(type, name, givenText(signature, "IV_REVISION"));
       }
     } catch (error) {
       // the store's own refusals -- NotFound, ReadOnly, NotSupported -- are
@@ -176,6 +179,32 @@ export class StoreDestination {
       VERSION: state.version,
       CHANGED_AT: String(state.changedAt ?? ""),
     };
+  }
+
+  // **The versions of an object are its file's commits** (docs/backlog/adt.md,
+  // "Versions of an object, read out of git"): stored nowhere, git answers.
+  // The file is the one the object store resolved, the winning layer's. The
+  // author is a SAP-style user name, never an e-mail. Outside git the answer
+  // says "no history" and why, and EV_COUNT stays empty: a count of 0 would
+  // read as "never changed".
+  #history(type, name, signature) {
+    const entry = this.store.read(type, name);
+    const limit = Number(givenText(signature, "IV_LIMIT")) || 50;
+    const history = gitObjectHistory(this.store.root, entry.file, limit);
+    if (history.available !== true) {
+      return {EV_FILE: String(entry.file ?? ""), EV_NOTE: `no history: ${history.reason}`, EV_COUNT: ""};
+    }
+    return {
+      EV_FILE: String(entry.file ?? ""),
+      EV_COUNT: String(history.entries.length),
+      ET_REVISION: history.entries.map((e) => revisionRow(e)),
+    };
+  }
+
+  #revision(type, name, revision) {
+    const entry = this.store.read(type, name);
+    const found = gitObjectRevisionAt(this.store.root, entry.file, revision);
+    return {EV_SOURCE: found.source, EV_FILE: found.path, EV_VERSION: revision.toLowerCase().slice(0, 12)};
   }
 
   #read(type, name, include) {
@@ -341,4 +370,26 @@ const EMPTY = {
   ET_TYPE: [],
   // kept while ZOSD_STORE still declares it; nothing fills it since TOKENS left
   ET_TOKEN: [],
+  ET_REVISION: [],
 };
+
+/** A git author as a SAP user name: upper case, A-Z 0-9 _, at most 12 */
+export function sapUserOf(author) {
+  const user = String(author ?? "").toUpperCase().replace(/[^A-Z0-9_]/g, "").slice(0, 12);
+  return user === "" ? "UNKNOWN" : user;
+}
+
+function revisionRow(entry) {
+  const at = new Date(entry.authoredAt);
+  const valid = !Number.isNaN(at.getTime());
+  const iso = valid ? at.toISOString() : "";
+  return {
+    REVISION: entry.revision,
+    SHORT: entry.short,
+    AUTHOR: sapUserOf(entry.author),
+    // UTC, as a system's DATUM / ZEIT pair
+    DATE: valid ? iso.slice(0, 10).replace(/-/g, "") : "00000000",
+    TIME: valid ? iso.slice(11, 19).replace(/:/g, "") : "000000",
+    SUBJECT: String(entry.subject ?? "").slice(0, 80),
+  };
+}

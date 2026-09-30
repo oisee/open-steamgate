@@ -132,3 +132,60 @@ export function gitObjectRevision(root, file, revision) {
   // final newline: restoring a version must be byte-stable.
   return rawGit(root, ["show", "--no-textconv", `${wanted}:${file}`]);
 }
+
+/**
+ * The versions of one object file, newest first: every commit that changed
+ * it, followed across renames (`git log --follow`), each with the path the
+ * file had in that commit. A file git does not track -- untracked, ignored,
+ * a pack fetched without its .git, a tree that is no worktree -- has no
+ * history, and says why: an empty list would read as "never changed".
+ */
+export function gitObjectHistory(root, file, limit = 50) {
+  const unavailable = (reason) => ({available: false, reason, file});
+  try {
+    if (git(root, ["rev-parse", "--is-inside-work-tree"]).text !== "true") {
+      return unavailable("the object store is not inside a git worktree");
+    }
+    git(root, ["rev-parse", "HEAD"]);
+  } catch {
+    return unavailable("git history is unavailable for this object store");
+  }
+  try {
+    git(root, ["ls-files", "--error-unmatch", "--", file]);
+  } catch {
+    return unavailable(`${file} is not tracked by git`);
+  }
+  const text = rawGit(root, ["log", "--follow", "-n", String(limit),
+    "--format=%x1e%H%x00%an%x00%aI%x00%s", "--name-only", "HEAD", "--", file]);
+  const entries = text.split("\x1e").map((record) => record.trim()).filter(Boolean).map((record) => {
+    const lines = record.split("\n");
+    const [revision, author, authoredAt, subject] = lines[0].split("\x00");
+    const path = lines.slice(1).map((line) => line.trim()).filter(Boolean).pop() ?? file;
+    return {revision, short: revision.slice(0, 12), author, authoredAt, subject, path};
+  });
+  if (entries.length === 0) {
+    // added to the index and never committed: tracked, and still no version
+    return unavailable(`${file} has no commit yet`);
+  }
+  return {available: true, file, entries};
+}
+
+/**
+ * The source of one object file at one of its versions (a full commit SHA
+ * from gitObjectHistory), read at the path the file had in that commit, so
+ * a version from before a rename is still found. Byte-stable, final newline
+ * kept.
+ */
+export function gitObjectRevisionAt(root, file, revision) {
+  const wanted = String(revision ?? "").toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(wanted)) {
+    throw new Error("A git revision must be a full 40-character commit SHA.");
+  }
+  const history = gitObjectHistory(root, file, 100000);
+  if (history.available !== true) throw new Error(history.reason);
+  const entry = history.entries.find((e) => e.revision === wanted);
+  if (entry === undefined) {
+    throw new Error(`Revision ${wanted.slice(0, 12)} is not a version of ${file}.`);
+  }
+  return {source: rawGit(root, ["show", "--no-textconv", `${wanted}:${entry.path}`]), path: entry.path};
+}
