@@ -1,0 +1,177 @@
+{
+ "object": {
+  "classes": {
+   "array": {
+    "object": {
+     "@id": "scalar",
+     "attributes": {
+      "array": {
+       "object": {
+        "@id": "scalar",
+        "@type": {
+         "object": {
+          "abap_type": "scalar",
+          "built_in": "scalar",
+          "decimals": "scalar",
+          "length": "scalar",
+          "resolved": "scalar"
+         }
+        },
+        "constant": "scalar",
+        "declared_type": "scalar",
+        "file": "scalar",
+        "line": "scalar",
+        "literal_type": {
+         "object": {
+          "reason": "scalar",
+          "resolved": "scalar"
+         }
+        },
+        "name": "scalar",
+        "value": "scalar",
+        "value@type": {
+         "object": {
+          "built_in": "scalar",
+          "decimals": "scalar",
+          "length": "scalar"
+         }
+        },
+        "value_expr": "scalar"
+       }
+      }
+     },
+     "file": "scalar",
+     "interfaces": {
+      "array": {
+       "object": {
+        "@id": "scalar",
+        "file": "scalar",
+        "line": "scalar",
+        "name": "scalar"
+       }
+      }
+     },
+     "line": "scalar",
+     "methods": {
+      "array": {
+       "object": {
+        "@id": "scalar",
+        "file": "scalar",
+        "line": "scalar",
+        "name": "scalar",
+        "parameters": {
+         "array": {
+          "object": {
+           "@id": "scalar",
+           "@type": {
+            "object": {
+             "abap_type": "scalar",
+             "built_in": "scalar",
+             "length": "scalar",
+             "resolved": "scalar"
+            }
+           },
+           "default": "scalar",
+           "default@type": {
+            "object": {
+             "built_in": "scalar",
+             "length": "scalar"
+            }
+           },
+           "default_expr": "scalar",
+           "file": "scalar",
+           "kind": "scalar",
+           "line": "scalar",
+           "literal_type": {
+            "object": {
+             "reason": "scalar",
+             "resolved": "scalar"
+            }
+           },
+           "name": "scalar"
+          }
+         }
+        },
+        "static": "scalar",
+        "visibility": "scalar"
+       }
+      }
+     },
+     "name": "scalar",
+     "public_methods": {
+      "array": {
+       "object": {
+        "@id": "scalar",
+        "file": "scalar",
+        "line": "scalar",
+        "name": "scalar",
+        "parameters": {
+         "array": {
+          "object": {
+           "@id": "scalar",
+           "@type": {
+            "object": {
+             "abap_type": "scalar",
+             "built_in": "scalar",
+             "length": "scalar",
+             "resolved": "scalar"
+            }
+           },
+           "default": "scalar",
+           "default@type": {
+            "object": {
+             "built_in": "scalar",
+             "length": "scalar"
+            }
+           },
+           "default_expr": "scalar",
+           "file": "scalar",
+           "kind": "scalar",
+           "line": "scalar",
+           "literal_type": {
+            "object": {
+             "reason": "scalar",
+             "resolved": "scalar"
+            }
+           },
+           "name": "scalar"
+          }
+         }
+        },
+        "signature": "scalar",
+        "static": "scalar",
+        "visibility": "scalar"
+       }
+      }
+     },
+     "superclass": {
+      "object": {
+       "@id": "scalar",
+       "file": "scalar",
+       "line": "scalar",
+       "name": "scalar"
+      }
+     },
+     "types": {
+      "array": {
+       "object": {
+        "@id": "scalar",
+        "@type": {
+         "object": {
+          "abap_type": "scalar",
+          "built_in": "scalar",
+          "length": "scalar",
+          "resolved": "scalar"
+         }
+        },
+        "file": "scalar",
+        "line": "scalar",
+        "name": "scalar"
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}

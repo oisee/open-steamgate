@@ -1,0 +1,7 @@
+{
+  "template": "template.tpl",
+  "partials": {},
+  "model": "abap-constants",
+  "profile": "abap",
+  "schema": "schema.json"
+}

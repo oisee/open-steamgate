@@ -1,0 +1,52 @@
+{
+ "object": {
+  "after": {
+   "array": {
+    "object": {
+     "text": "scalar"
+    }
+   }
+  },
+  "before": {
+   "array": {
+    "object": {
+     "text": "scalar"
+    }
+   }
+  },
+  "fields": {
+   "array": {
+    "object": {
+     "column": "scalar",
+     "component": "scalar"
+    }
+   }
+  },
+  "hit": "scalar",
+  "lookup": "scalar",
+  "loop": {
+   "object": {
+    "row": "scalar",
+    "table": "scalar"
+   }
+  },
+  "open": {
+   "array": "scalar"
+  },
+  "position": "scalar",
+  "recipe": "scalar",
+  "source": {
+   "object": {
+    "keys": {
+     "array": {
+      "object": {
+       "column": "scalar",
+       "component": "scalar"
+      }
+     }
+    },
+    "table": "scalar"
+   }
+  }
+ }
+}
