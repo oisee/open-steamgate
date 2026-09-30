@@ -2,7 +2,7 @@
  "generator": "dsl-l2",
  "rule": "src/l2demo/maintenance_ship.l2.yaml",
  "template": "recipes/l2-check/template.tpl",
- "model": "sha256:d5041d71c291b0cbec2007d2d42966e1b59938f3629f9718bdb3a40f43d2cbfb",
+ "model": "sha256:f88609e30302867763f88ee3e0159830a5d307d060077f132bbec44ef6c84e42",
  "lines": [
   {
    "line": 1,
@@ -84,181 +84,251 @@
   {
    "line": 12,
    "template_line": 12,
-   "path": "/for/itab",
-   "node": "rule/maintenance-ship-no-future-voyage/for",
-   "rule_line": 7
-  },
-  {
-   "line": 13,
-   "template_line": 13,
-   "path": "/for/wa",
-   "node": "rule/maintenance-ship-no-future-voyage/for",
-   "rule_line": 7
-  },
-  {
-   "line": 14,
-   "template_line": 14,
-   "path": "/forbid/itab",
-   "node": "rule/maintenance-ship-no-future-voyage/forbid",
-   "rule_line": 9
-  },
-  {
-   "line": 15,
-   "template_line": 15,
-   "path": "/forbid/wa",
-   "node": "rule/maintenance-ship-no-future-voyage/forbid",
-   "rule_line": 9
-  },
-  {
-   "line": 16,
-   "template_line": 16,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 17,
-   "template_line": 17,
-   "path": "/for/table",
-   "node": "rule/maintenance-ship-no-future-voyage/for",
+   "line": 13,
+   "template_line": 13,
+   "path": "/",
+   "node": "rule/maintenance-ship-no-future-voyage",
+   "rule_line": 4
+  },
+  {
+   "line": 14,
+   "template_line": 15,
+   "path": "/join/fields/1/name",
+   "node": "rule/maintenance-ship-no-future-voyage/join/field/1",
    "rule_line": 7
   },
   {
+   "line": 15,
+   "template_line": 15,
+   "path": "/join/fields/2/name",
+   "node": "rule/maintenance-ship-no-future-voyage/join/field/2",
+   "rule_line": 10
+  },
+  {
+   "line": 16,
+   "template_line": 15,
+   "path": "/join/fields/3/name",
+   "node": "rule/maintenance-ship-no-future-voyage/join/field/3",
+   "rule_line": 12
+  },
+  {
+   "line": 17,
+   "template_line": 15,
+   "path": "/join/fields/4/name",
+   "node": "rule/maintenance-ship-no-future-voyage/join/field/4",
+   "rule_line": 12
+  },
+  {
    "line": 18,
-   "template_line": 19,
-   "path": "/when/conditions/1/column",
-   "node": "rule/maintenance-ship-no-future-voyage/when/1",
-   "rule_line": 8
+   "template_line": 17,
+   "path": "/",
+   "node": "rule/maintenance-ship-no-future-voyage",
+   "rule_line": 4
   },
   {
    "line": 19,
+   "template_line": 18,
+   "path": "/join/itab",
+   "node": "rule/maintenance-ship-no-future-voyage/join",
+   "rule_line": 9
+  },
+  {
+   "line": 20,
+   "template_line": 19,
+   "path": "/join/wa",
+   "node": "rule/maintenance-ship-no-future-voyage/join",
+   "rule_line": 9
+  },
+  {
+   "line": 21,
+   "template_line": 20,
+   "path": "/",
+   "node": "rule/maintenance-ship-no-future-voyage",
+   "rule_line": 4
+  },
+  {
+   "line": 22,
    "template_line": 21,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 20,
-   "template_line": 22,
-   "path": "/for/itab",
+   "line": 23,
+   "template_line": 23,
+   "path": "/join/fields/1/source",
+   "node": "rule/maintenance-ship-no-future-voyage/join/field/1",
+   "rule_line": 7
+  },
+  {
+   "line": 24,
+   "template_line": 23,
+   "path": "/join/fields/2/source",
+   "node": "rule/maintenance-ship-no-future-voyage/join/field/2",
+   "rule_line": 10
+  },
+  {
+   "line": 25,
+   "template_line": 23,
+   "path": "/join/fields/3/source",
+   "node": "rule/maintenance-ship-no-future-voyage/join/field/3",
+   "rule_line": 12
+  },
+  {
+   "line": 26,
+   "template_line": 23,
+   "path": "/join/fields/4/source",
+   "node": "rule/maintenance-ship-no-future-voyage/join/field/4",
+   "rule_line": 12
+  },
+  {
+   "line": 27,
+   "template_line": 25,
+   "path": "/for/table",
    "node": "rule/maintenance-ship-no-future-voyage/for",
    "rule_line": 7
   },
   {
-   "line": 21,
-   "template_line": 23,
+   "line": 28,
+   "template_line": 26,
    "path": "/forbid/table",
    "node": "rule/maintenance-ship-no-future-voyage/forbid",
    "rule_line": 9
   },
   {
-   "line": 22,
-   "template_line": 25,
-   "path": "/forbid/conditions/1/column",
+   "line": 29,
+   "template_line": 28,
+   "path": "/join/on/1/lhs",
    "node": "rule/maintenance-ship-no-future-voyage/forbid/where/1",
    "rule_line": 11
   },
   {
-   "line": 23,
-   "template_line": 25,
-   "path": "/forbid/conditions/2/column",
+   "line": 30,
+   "template_line": 30,
+   "path": "/join/itab",
+   "node": "rule/maintenance-ship-no-future-voyage/join",
+   "rule_line": 9
+  },
+  {
+   "line": 31,
+   "template_line": 32,
+   "path": "/join/where/1/lhs",
+   "node": "rule/maintenance-ship-no-future-voyage/when/1",
+   "rule_line": 8
+  },
+  {
+   "line": 32,
+   "template_line": 32,
+   "path": "/join/where/2/lhs",
    "node": "rule/maintenance-ship-no-future-voyage/forbid/where/2",
    "rule_line": 11
   },
   {
-   "line": 24,
-   "template_line": 27,
-   "path": "/",
-   "node": "rule/maintenance-ship-no-future-voyage",
-   "rule_line": 4
-  },
-  {
-   "line": 25,
-   "template_line": 28,
-   "path": "/forbid/itab",
-   "node": "rule/maintenance-ship-no-future-voyage/forbid",
-   "rule_line": 9
-  },
-  {
-   "line": 26,
-   "template_line": 30,
-   "path": "/alert/parts/1/ref",
-   "node": "rule/maintenance-ship-no-future-voyage/alert/hole/1",
-   "rule_line": 12
-  },
-  {
-   "line": 27,
-   "template_line": 30,
-   "path": "/alert/parts/2/value",
-   "node": "rule/maintenance-ship-no-future-voyage/alert/text/1",
-   "rule_line": 12
-  },
-  {
-   "line": 28,
-   "template_line": 30,
-   "path": "/alert/parts/3/ref",
-   "node": "rule/maintenance-ship-no-future-voyage/alert/hole/2",
-   "rule_line": 12
-  },
-  {
-   "line": 29,
-   "template_line": 30,
-   "path": "/alert/parts/4/value",
-   "node": "rule/maintenance-ship-no-future-voyage/alert/text/2",
-   "rule_line": 12
-  },
-  {
-   "line": 30,
-   "template_line": 30,
-   "path": "/alert/parts/5/ref",
-   "node": "rule/maintenance-ship-no-future-voyage/alert/hole/3",
-   "rule_line": 12
-  },
-  {
-   "line": 31,
-   "template_line": 30,
-   "path": "/alert/parts/6/value",
-   "node": "rule/maintenance-ship-no-future-voyage/alert/text/3",
-   "rule_line": 12
-  },
-  {
-   "line": 32,
-   "template_line": 30,
-   "path": "/alert/parts/7/ref",
-   "node": "rule/maintenance-ship-no-future-voyage/alert/hole/4",
-   "rule_line": 12
-  },
-  {
    "line": 33,
-   "template_line": 32,
-   "path": "/",
-   "node": "rule/maintenance-ship-no-future-voyage",
-   "rule_line": 4
-  },
-  {
-   "line": 34,
-   "template_line": 33,
-   "path": "/",
-   "node": "rule/maintenance-ship-no-future-voyage",
-   "rule_line": 4
-  },
-  {
-   "line": 35,
    "template_line": 34,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
+   "line": 34,
+   "template_line": 36,
+   "path": "/join/order/1/source",
+   "node": "rule/maintenance-ship-no-future-voyage/join/order/1",
+   "rule_line": 7
+  },
+  {
+   "line": 35,
+   "template_line": 36,
+   "path": "/join/order/2/source",
+   "node": "rule/maintenance-ship-no-future-voyage/join/order/2",
+   "rule_line": 10
+  },
+  {
    "line": 36,
-   "template_line": 35,
+   "template_line": 38,
+   "path": "/join/itab",
+   "node": "rule/maintenance-ship-no-future-voyage/join",
+   "rule_line": 9
+  },
+  {
+   "line": 37,
+   "template_line": 40,
+   "path": "/alert/parts/1/jref",
+   "node": "rule/maintenance-ship-no-future-voyage/alert/hole/1",
+   "rule_line": 12
+  },
+  {
+   "line": 38,
+   "template_line": 40,
+   "path": "/alert/parts/2/value",
+   "node": "rule/maintenance-ship-no-future-voyage/alert/text/1",
+   "rule_line": 12
+  },
+  {
+   "line": 39,
+   "template_line": 40,
+   "path": "/alert/parts/3/jref",
+   "node": "rule/maintenance-ship-no-future-voyage/alert/hole/2",
+   "rule_line": 12
+  },
+  {
+   "line": 40,
+   "template_line": 40,
+   "path": "/alert/parts/4/value",
+   "node": "rule/maintenance-ship-no-future-voyage/alert/text/2",
+   "rule_line": 12
+  },
+  {
+   "line": 41,
+   "template_line": 40,
+   "path": "/alert/parts/5/jref",
+   "node": "rule/maintenance-ship-no-future-voyage/alert/hole/3",
+   "rule_line": 12
+  },
+  {
+   "line": 42,
+   "template_line": 40,
+   "path": "/alert/parts/6/value",
+   "node": "rule/maintenance-ship-no-future-voyage/alert/text/3",
+   "rule_line": 12
+  },
+  {
+   "line": 43,
+   "template_line": 40,
+   "path": "/alert/parts/7/jref",
+   "node": "rule/maintenance-ship-no-future-voyage/alert/hole/4",
+   "rule_line": 12
+  },
+  {
+   "line": 44,
+   "template_line": 42,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 37,
-   "template_line": 36,
+   "line": 45,
+   "template_line": 43,
+   "path": "/",
+   "node": "rule/maintenance-ship-no-future-voyage",
+   "rule_line": 4
+  },
+  {
+   "line": 46,
+   "template_line": 44,
+   "path": "/",
+   "node": "rule/maintenance-ship-no-future-voyage",
+   "rule_line": 4
+  },
+  {
+   "line": 47,
+   "template_line": 45,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4

@@ -29,6 +29,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-09-30-concat-packed-drops-decimals -- `&&` with a packed operand prints 10.5 where a system prints 10.50
+
+- Status: `open`
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/runtime` as pinned here: `packages/runtime/src/operators/concat.ts` (the operand's `get()` is a JavaScript number, so the decimals are gone before the text is made)
+- Affected ABAP statement, runtime API or adapter: `lv_text = a && b.` (and string templates' `&&` chains) with an operand of type `p` with decimals
+- Minimal ABAP reproducer: found by the DSL L2 agreement test (`test/dsl-l2.mjs`, the synthetic rule over INT and DEC fields, first written with `{m.amt}` in the alert): a field of a table, `DEC 5,2`, holding `10.50`, read by `SELECT` into a structure component of the same type, then `lv_alert = ... && ls-amt.`
+- Exact command used to run it: `npx mocha test/dsl-l2.mjs`; by hand, `abap.operators.concat(new abap.types.Packed({length: 3, decimals: 2}).set("10.5"), new abap.types.String().set("x"))` answers `10.5x`, while `string.set(packed)` answers `10.50 `
+- Expected SAP behaviour: converting `p` to a string keeps the declared decimals, so the text is `10.50` (ABAP keyword documentation, conversion of `p`; **not measured on A4H** in this session)
+- Actual open-abap behaviour: `10.5`
+- Impact on open-steamgate: an L2 rule whose alert holes name a DEC/CURR/QUAN field would print differently here and on a system; the demo rule has no such hole, and the agreement test of the synthetic rule keeps DEC in its conditions and INT in its holes. The interpreter (`tools/dsl-l2-eval.mjs`, `render`) prints the ABAP-correct `10.50`, so a rule with such a hole fails its generated test here instead of passing quietly
+- Smallest safe workaround: none in the rule language; do not put a packed field in an alert
+- Upstream issue: not filed
+- Regression-test location: none yet
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-24-daemon-statics -- a daemon's class data is its own session's on a system, and the process's here
 
 - Status: `open` (by design; decision D4 in `docs/abap-daemons.md`)
