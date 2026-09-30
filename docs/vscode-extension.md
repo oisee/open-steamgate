@@ -1106,7 +1106,7 @@ resolution, service-card links, and the details HTML renderer. It also checks th
 against a real in-memory `ObjectStore`. `extension.js` owns the webview and
 tree commands.
 
-**Tests**: `test/vscode-launcher.mjs` (registered in `test/suites.json`) —
+**Tests**: `test/vscode-launcher.mjs` (registered in `test/suites.d/*.json`) —
 pure: `pickPort`/`isFree` over the 3531-3539 range and its exhaustion,
 `classify(logText)` against the builder's `UNFETCHED` refusal, a transpile
 failure, and Node's `EADDRINUSE` line,
@@ -1536,7 +1536,7 @@ archive after materializing it outside the checkout; the launchpad and
 service.
 
 **Proving it runs outside this checkout**: `test/vscode-vsix.mjs`
-(registered in `test/suites.json`, skipped via `this.skip()` when
+(registered in `test/suites.d/*.json`, skipped via `this.skip()` when
 `build/vsix` was never built, the same shape `test/osd-binary.mjs` already
 uses for the compiled binary) unzips the `.vsix` into
 `OSD_VSIX_SCRATCH` (or `~/.cache/osd-vsix-test` by default), runs

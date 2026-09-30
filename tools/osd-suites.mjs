@@ -1,8 +1,6 @@
-// Run the integration suites listed in test/suites.json.
+// Run the integration suites listed in test/suites.d/*.json.
 //
-// The list lives in a file with one entry per line rather than on one line of
-// package.json, because two people adding a suite conflicted on that line
-// twice in one hour and will again -- there are more suites coming.
+// Feature fragments keep independent suite additions out of the same file.
 //
 // It is a script rather than an inline `node -e` for a reason worth stating:
 // the exit code has to be the runner's. A one-liner that spawns mocha and
@@ -11,6 +9,35 @@
 import {spawnSync} from "node:child_process";
 import {existsSync, readFileSync, readdirSync} from "node:fs";
 import {fileURLToPath} from "node:url";
+import {join} from "node:path";
+
+/** Merge feature fragments in filename order, including named groups. The
+ * root argument lets tools that inspect another checkout read its manifest. */
+export function loadSuites(root = fileURLToPath(new URL("..", import.meta.url))) {
+  const dir = join(root, "test", "suites.d");
+  const fragments = readdirSync(dir).filter((name) => name.endsWith(".json")).sort();
+  if (fragments.length === 0) throw new Error(`${dir} has no suite fragments`);
+  const files = [];
+  const groups = {};
+  const seen = new Set();
+  for (const name of fragments) {
+    const fragment = JSON.parse(readFileSync(join(dir, name), "utf8"));
+    if (!Array.isArray(fragment.files) || (fragment.groups !== undefined && (fragment.groups === null || typeof fragment.groups !== "object" || Array.isArray(fragment.groups)))) {
+      throw new Error(`${name} needs a files array and optional groups object`);
+    }
+    for (const [group, entries] of [[null, fragment.files], ...Object.entries(fragment.groups ?? {})]) {
+      if (!Array.isArray(entries)) throw new Error(`${name}: ${group} must be an array`);
+      const target = group === null ? files : (groups[group] ??= []);
+      for (const file of entries) {
+        if (typeof file !== "string" || !file.startsWith("test/") || !file.endsWith(".mjs")) throw new Error(`${name}: invalid suite ${file}`);
+        if (seen.has(file)) throw new Error(`${name}: duplicate suite ${file}`);
+        seen.add(file);
+        target.push(file);
+      }
+    }
+  }
+  return {files, groups};
+}
 
 /** A suite on disk that the list does not name.
  *
@@ -111,11 +138,11 @@ const invoked = process.argv[1] !== undefined && process.argv[1].endsWith("osd-s
 if (invoked === false) {
   // imported for its reporter; the runner below is the command's job
 } else {
-const listed = JSON.parse(readFileSync(fileURLToPath(new URL("../test/suites.json", import.meta.url)), "utf8"));
+const listed = loadSuites();
 const files = listed.files ?? [];
 const groups = listed.groups ?? {};
 if (files.length === 0) {
-  console.error("test/suites.json lists no suites -- that is not a pass, it is an empty run");
+  console.error("test/suites.d lists no suites -- that is not a pass, it is an empty run");
   process.exit(2);
 }
 
@@ -127,8 +154,8 @@ if (files.length === 0) {
 const TESTS = fileURLToPath(new URL("../test", import.meta.url));
 const drift = listDrift(suitesOnDisk(TESTS).map((p) => `test/${p.slice(TESTS.length + 1)}`), [...files, ...Object.values(groups).flat()]);
 if (drift.unlisted.length > 0 || drift.absent.length > 0) {
-  for (const p of drift.unlisted) console.error(`osd-suites: ${p} has suites in it and test/suites.json does not name it`);
-  for (const p of drift.absent) console.error(`osd-suites: test/suites.json names ${p}, which is not there`);
+  for (const p of drift.unlisted) console.error(`osd-suites: ${p} has suites in it and test/suites.d does not name it`);
+  for (const p of drift.absent) console.error(`osd-suites: test/suites.d names ${p}, which is not there`);
   console.error("Add it, or delete it. A list of suites nobody checks is a list that quietly shrinks the run.");
   process.exit(2);
 }

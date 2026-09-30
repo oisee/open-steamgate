@@ -1,0 +1,27 @@
+{
+  "files": [
+    "test/anormalies-ids.mjs",
+    "test/abap-types.mjs",
+    "test/narrow-submit.mjs",
+    "test/dataset.mjs",
+    "test/taxi-import.mjs",
+    "test/bootstrap.mjs",
+    "test/e2e-instance.mjs",
+    "test/gui-reports.mjs",
+    "test/journal.mjs",
+    "test/leak-scan.mjs",
+    "test/lsd-a4h-011.mjs",
+    "test/naming-scan.mjs",
+    "test/unit-risk.mjs",
+    "test/protocol-diag.mjs",
+    "test/protocol-ni.mjs",
+    "test/protocol-rfc.mjs",
+    "test/protocol-sap-compress.mjs",
+    "test/shadowed-objects.mjs",
+    "test/undo-on-exit.mjs",
+    "test/zosd-test.mjs",
+    "test/osd-suites.mjs",
+    "test/ci-wait-tests.mjs",
+    "test/preflight.mjs"
+  ]
+}

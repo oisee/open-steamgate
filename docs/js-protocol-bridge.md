@@ -93,7 +93,7 @@ and must pass the repository leak scanner.
   socket read.
 - Protocol logs contain direction, layer and byte counts, never payload bodies
   by default.
-- All new suites are registered in `test/suites.json` when created.
+- All new suites are registered in `test/suites.d/*.json` when created.
 - amd64 and arm64 use identical JavaScript sources; no platform dispatch is
   allowed in the protocol semantics.
 

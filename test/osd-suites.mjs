@@ -3,9 +3,11 @@
 // does -- and a reporter checked only where everything is present reports on
 // the specimen made for it.
 import {expect} from "chai";
-import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards} from "../tools/osd-suites.mjs";
-import {readFileSync} from "node:fs";
+import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards, loadSuites} from "../tools/osd-suites.mjs";
+import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
 import {spawnSync} from "node:child_process";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 
 describe("tools/osd-suites: a run says what it could not see", () => {
   it("names every absent input and why it mattered", () => {
@@ -38,8 +40,23 @@ describe("tools/osd-suites: a run says what it could not see", () => {
 // answering a narrower question than it was read as. That is the direction
 // drift always takes: the one that reads as progress.
 describe("the suite list against the tree", () => {
+  it("merges fragments by filename and refuses duplicate suites across files and groups", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-suites-"));
+    const dir = join(root, "test", "suites.d");
+    try {
+      mkdirSync(dir, {recursive: true});
+      writeFileSync(join(dir, "z.json"), JSON.stringify({files: ["test/z.mjs"], groups: {packaging: ["test/package.mjs"]}}));
+      writeFileSync(join(dir, "a.json"), JSON.stringify({files: ["test/a.mjs"]}));
+      expect(loadSuites(root)).to.deep.equal({files: ["test/a.mjs", "test/z.mjs"], groups: {packaging: ["test/package.mjs"]}});
+      writeFileSync(join(dir, "a.json"), JSON.stringify({files: ["test/package.mjs"]}));
+      expect(() => loadSuites(root)).to.throw("duplicate suite test/package.mjs");
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
   it("names every file under test/ that has suites in it", () => {
-    const {files, groups} = JSON.parse(readFileSync("test/suites.json", "utf8"));
+    const {files, groups} = loadSuites();
     const listed = [...files, ...Object.values(groups).flat()];
     const drift = listDrift(suitesOnDisk("test"), listed);
     expect(drift.unlisted, `suites nobody runs: ${drift.unlisted.join(", ")}`).to.deep.equal([]);
@@ -48,7 +65,7 @@ describe("the suite list against the tree", () => {
 
   it("accepts the helper without a describe and lists packaging in its named group", () => {
     expect(hasSuites(readFileSync("test/helpers/vsix.mjs", "utf8"))).to.equal(false);
-    const {files, groups} = JSON.parse(readFileSync("test/suites.json", "utf8"));
+    const {files, groups} = loadSuites();
     expect(groups.packaging).to.deep.equal(["test/vscode-vsix-packaging.mjs"]);
     expect(files).not.to.include(groups.packaging[0]);
   });
@@ -81,7 +98,7 @@ describe("the suite list against the tree", () => {
 
 describe("suite sharding", () => {
   it("partitions the real list into four disjoint shards", () => {
-    const files = JSON.parse(readFileSync("test/suites.json", "utf8")).files;
+    const files = loadSuites().files;
     const seconds = JSON.parse(readFileSync("test/suite-timings.json", "utf8")).seconds;
     const all = assignShards(files, seconds, 4).flatMap((shard) => shard.files);
     expect(all.slice().sort()).to.deep.equal(files.slice().sort());

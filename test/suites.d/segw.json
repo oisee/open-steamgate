@@ -1,0 +1,16 @@
+{
+  "files": [
+    "test/bsp-app.mjs",
+    "test/editor.mjs",
+    "test/generated-metadata.mjs",
+    "test/osd-bsp.mjs",
+    "test/flp-pack-intents.mjs",
+    "test/pages-index.mjs",
+    "test/segw-corpus.mjs",
+    "test/segw-gen.mjs",
+    "test/segw-shlp.mjs",
+    "test/segw-tree.mjs",
+    "test/segw.mjs",
+    "test/webgui.mjs"
+  ]
+}
