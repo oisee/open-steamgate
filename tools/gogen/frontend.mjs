@@ -597,6 +597,8 @@ const NATIVE = new Map([
   // open-abap-core's INT (a seed given to CREATE is ignored there too)
   ["CL_ABAP_TSTMP=>SUBTRACT", {fn: "abap.TstmpSubtract", args: ["TSTMP1:p", "TSTMP2:p"]}],
   ["CL_ABAP_RANDOM=>INT", {fn: "abap.RandomInt31", args: []}],
+  // crypto.randomUUID() on Node (go/abap/uuid.go); CREATE_UUID_* are ABAP around it
+  ["CL_SYSTEM_UUID=>RANDOM", {fn: "abap.UUIDRandom", args: []}],
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "Native_DESCRIBE_BY_NAME"],
   // ultra/json: the descriptor of a value (emit-go nativeRttiData), and the
   // JSON.parse half of open-abap-core's JSON reader (go/abap/jsonparse.go);
@@ -604,6 +606,11 @@ const NATIVE = new Map([
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "Native_DESCRIBE_BY_DATA"],
   ["CL_SXML_STRING_READER:LCL_JSON_PARSER=>PARSE", "Native_JSON_PARSE"],
   ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~UNESCAPE_URL", "abap.UnescapeURL"],
+  // the value text of CL_ABAP_UNIT_ASSERT's messages: Object.keys( ) of a
+  // structure and an object's constructor name are @KERNEL lines in
+  // open-abap-core's LCL_DUMP (go/abap/unitdump.go)
+  ["CL_ABAP_UNIT_ASSERT:LCL_DUMP=>TO_STRING", "abap.UnitDumpToString"],
+  ["CL_ABAP_UNIT_ASSERT:LCL_DUMP=>DUMP_STRUCTURE", "abap.UnitDumpStructure"],
   // bytes as base64, RFC 4648 with padding (A4H 2026-09-24, ZCL_GOGEN_T_B64);
   // the LSD channel sends the show this way (ultra/packs). decode_x_base64
   // stays kernel code: what a system does with text that is not base64 is
@@ -1230,11 +1237,19 @@ function classIr(ctx0, obj) {
     }
     throw new Unsupported(`${className}: where REDEFINITION ${nm} comes from is not in the program`);
   };
+  // METHODS get_text REDEFINITION where get_text is a superclass's ALIASES
+  // for if_message~get_text: the method redefined is the interface method,
+  // and its implementation (METHOD get_text) is compiled under that name
+  const redefinedAlias = new Map();
   for (const m of def.getMethodDefinitions().getAll()) {
     if (!m.isRedefinition()) { addSig(m, "", m.isStatic()); continue; }
+    const nm = upper(m.getName());
+    const target = nm.includes("~") ? undefined : aliasTarget(reg, className, nm);
+    if (target?.includes("~")) redefinedAlias.set(nm, target);
     let o;
-    try { o = origin(m); } catch (e) { if (!(e instanceof Unsupported)) throw e; signatures.set(upper(m.getName()), {name: upper(m.getName()), unsupported: e.message}); continue; }
-    addSig(Object.assign(Object.create(Object.getPrototypeOf(o)), o, {getName: () => m.getName()}), "", m.isStatic());
+    const as = target?.includes("~") ? {getName: () => target} : m;
+    try { o = origin(as); } catch (e) { if (!(e instanceof Unsupported)) throw e; signatures.set(upper(as.getName()), {name: upper(as.getName()), unsupported: e.message}); continue; }
+    addSig(Object.assign(Object.create(Object.getPrototypeOf(o)), o, {getName: () => as.getName()}), "", m.isStatic());
   }
   const implemented = [...new Set(def.getImplementing().flatMap((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))]))];
   // an interface a superclass already implements (itself or through an
@@ -1274,7 +1289,8 @@ function classIr(ctx0, obj) {
     : tree.findAllStructures(Structures.ClassImplementation).filter((ci) => upper(ci.findFirstExpression(Expressions.ClassName).concatTokens()) === obj.local)
       .flatMap((ci) => ci.findAllStructures(Structures.Method));
   for (const node of methodNodes) {
-    const name = upper(node.findFirstExpression(Expressions.MethodName).concatTokens());
+    const written = upper(node.findFirstExpression(Expressions.MethodName).concatTokens());
+    const name = redefinedAlias.get(written) ?? written;
     const sig = signatures.get(name);
     const skip = (why) => {
       program.skipped.push(`${className}=>${name}: ${why}`);

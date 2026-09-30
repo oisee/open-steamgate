@@ -1911,6 +1911,13 @@ function cond(c, ctx) {
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp":
+      // a generic operand (frontend compareValues, unwrap_chars): the pair
+      // decides the comparison type, so both go to abap.CmpData as data
+      if (c.l.e === "unwrap_chars" || c.r.e === "unwrap_chars") {
+        const side = (x) => (x.e === "unwrap_chars" ? expr(x.x, ctx) : `abap.StrData(${expr(x, ctx)})`);
+        if (c.op === "=" || c.op === "<>") return `${c.op === "=" ? "" : "!"}abap.DataEq(${side(c.l)}, ${side(c.r)})`;
+        return `abap.CmpData(${side(c.l)}, ${side(c.r)}) ${c.op} 0`;
+      }
       if (c.type?.k === "p") return `abap.CmpP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} 0`;
       return `${expr(c.l, ctx)} ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} ${expr(c.r, ctx)}`;
     // abap.RefEq: two initial references of different static types are equal (ultra/json fix round)
