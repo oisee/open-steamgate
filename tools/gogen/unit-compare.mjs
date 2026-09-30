@@ -60,7 +60,10 @@ const node = new Map(nodeRows.filter((r) => owners.has(r.class)).map((r) => [key
 const gorows = new Map(goRows.filter((r) => owners.has(r.class)).map((r) => [key(r), r]));
 // Reviewed against the assertion in each ABAP Unit method and the mixed-client
 // seed. Keep exact messages so a new failure cannot inherit an exception.
+const searchHelpRefusal = 'CX_SY_DYNAMIC_OSQL_SEMANTICS in SELECT * FROM (mv_selmethod) INTO CORRESPONDING FIELDS OF TABLE <lt_rows> WHERE (lv_where) ORDER BY PRIMARY KEY.: a literal on the left of a condition ("1" at 0) is not a column';
 const knownNodeAnomalies = new Map([
+  ["ZCL_STG_GATEWAY_TEST/LTCL_DISPATCH/STATUS_VALUE_HELP", ["ANOMALY-2026-09-24-dynamic-where-pasted", "upstream search-help library emits 1 = 1 for an empty WHERE; A4H raises semantics", searchHelpRefusal]],
+  ["ZCL_STG_SHLP_TEST/LTCL_SHLP/ALL_STATUSES_SORTED", ["ANOMALY-2026-09-24-dynamic-where-pasted", "upstream search-help library emits 1 = 1 for an empty WHERE; A4H raises semantics", searchHelpRefusal]],
   ["ZCL_STG_GATEWAY_TEST/LTCL_DISPATCH/ENTITY_SET", ["ANOMALY-2026-09-11-no-implicit-mandt", "the assertion expects client 001 travel T0009 in the four-row entity set", "Expected abap_true"]],
   ["ZCL_STG_GATEWAY_TEST/LTCL_DISPATCH/PAGING_AND_INLINECOUNT", ["ANOMALY-2026-09-11-no-implicit-mandt", "the four-row ordering assertion includes T0009 and changes the page", "Expected abap_true"]],
   ["ZCL_STG_GATEWAY_TEST/LTCL_DISPATCH/COUNT", ["ANOMALY-2026-09-11-no-implicit-mandt", "Node counts four seeded travels; the logon client has three", "Expected '4', got '3'"]],
