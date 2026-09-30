@@ -414,8 +414,8 @@ func GetDatasetPosition(s *Session, name string, pos Data) {
 		}
 		*pos.P.(*int32) = int32(f.pos)
 	default:
-		v := int32(f.pos)
-		MoveData(pos, Data{P: &v, T: TI})
+		v := f.pos
+		MoveData(pos, Data{P: &v, T: TInt8})
 	}
 	s.Sy.Subrc = 0
 }

@@ -5638,6 +5638,14 @@ function datasetStatement(node, ctx, text) {
   // GET DATASET's name is a Target in the grammar, read here like a source
   const source = (n, to) => convert(isExpr(n, Expressions.Target) ? lvalue(n, ctx) : sourceOperand(n, ctx), to);
   const target = (n) => convert(lvalue(n, ctx), {k: "data"});
+  // a position or length from a number; a character operand would need a
+  // conversion the Go emitter has no rule for (c/n/string -> int8), and an
+  // Error there fails the whole program, so it is refused here, in one method
+  const number = (n, to, what) => {
+    const v = isExpr(n, Expressions.Target) ? lvalue(n, ctx) : sourceOperand(n, ctx);
+    if (!["i", "int8", "p", "f"].includes(v.type.k)) throw new Unsupported(`${what} of type ${v.type.k}`);
+    return convert(v, to);
+  };
   if (isStmt(node, Statements.OpenDataset)) {
     for (const w of ["CODE PAGE", "TYPE", "FILTER", "REPLACEMENT CHARACTER", "WITH BYTE-ORDER MARK", "SKIPPING BYTE-ORDER MARK",
       "WITH SMART LINEFEED", "WITH NATIVE LINEFEED", "WITH UNIX LINEFEED", "WITH WINDOWS LINEFEED", "IGNORING CONVERSION ERRORS",
@@ -5648,20 +5656,20 @@ function datasetStatement(node, ctx, text) {
     const message = after("MESSAGE");
     const position = after("AT POSITION");
     return {s: "dataset_open", name: source(operands[0].node, S), mode, binary: has("BINARY MODE"),
-      message: message ? target(message) : null, position: position ? source(position, INT8) : null};
+      message: message ? target(message) : null, position: position ? number(position, INT8, "OPEN DATASET ... AT POSITION") : null};
   }
   if (isStmt(node, Statements.CloseDataset)) return {s: "dataset_close", name: source(operands[0].node, S)};
   if (isStmt(node, Statements.DeleteDataset)) return {s: "dataset_delete", name: source(operands[0].node, S)};
   if (isStmt(node, Statements.Transfer)) {
     const length = after("LENGTH");
     return {s: "dataset_transfer", src: source(operands[0].node, {k: "data"}), name: source(after("TO"), S),
-      length: length ? source(length, I) : null, noEndOfLine: has("NO END OF LINE")};
+      length: length ? number(length, I, "TRANSFER ... LENGTH") : null, noEndOfLine: has("NO END OF LINE")};
   }
   if (isStmt(node, Statements.ReadDataset)) {
     const max = after("MAXIMUM LENGTH");
     const actual = after("ACTUAL LENGTH") ?? after("LENGTH", ["MAXIMUM", "ACTUAL"]);
     return {s: "dataset_read", name: source(operands[0].node, S), target: target(after("INTO")),
-      max: max ? source(max, I) : null, actual: actual ? target(actual) : null};
+      max: max ? number(max, I, "READ DATASET ... MAXIMUM LENGTH") : null, actual: actual ? target(actual) : null};
   }
   if (isStmt(node, Statements.GetDataset)) {
     if (after("ATTRIBUTES") !== undefined) throw new Unsupported("GET DATASET ... ATTRIBUTES");
@@ -5670,7 +5678,7 @@ function datasetStatement(node, ctx, text) {
     return {s: "dataset_get_position", name: source(operands[0].node, S), position: target(position)};
   }
   const position = after("POSITION");
-  return {s: "dataset_set_position", name: source(operands[0].node, S), position: position ? source(position, INT8) : null};
+  return {s: "dataset_set_position", name: source(operands[0].node, S), position: position ? number(position, INT8, "SET DATASET ... POSITION") : null};
 }
 
 export function convert(expr, to) {
