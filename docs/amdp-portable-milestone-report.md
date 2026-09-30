@@ -273,7 +273,7 @@ versioned search capability with two deliberately different profiles:
 
 This makes portable tests reproducible without claiming that all native
 linguistic engines have identical numbers. Full profile implementation is
-deferred in `docs/backlog.md` until the remaining general SQLScript milestones
+deferred in `docs/backlog/data-analytics.md` until the remaining general SQLScript milestones
 are complete.
 
 The tracked `search_cells` case no longer blocks that sequence. It now uses a

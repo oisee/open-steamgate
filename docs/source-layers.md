@@ -12,7 +12,7 @@ This page connects the current source-layer implementation to plans for archives
 | ABAP libraries | Configured in `abap_transpile.json`; ObjectStore loads them as library roots. | Read-only (`writable: false`). |
 | abapGit ZIP | Export exists; automatic ZIP import as a source layer does not. | Undecided. |
 
-The effective build order and collision rules are described in [Track E of the backlog](backlog.md#track-e--content-packs-and-layers-what-the-tree-is-made-of) and [Generations](generations.md). The write rules live in [`tools/osd-store.mjs`](../tools/osd-store.mjs) (`rootsOf`, `ObjectStore.write`), and VS Code discovery/projection in [`editors/vscode/launcher.js`](../editors/vscode/launcher.js) (`detectWorkspaceLayers`, `ensureWorkspacePacks`).
+The effective build order and collision rules are described in [Track E of the backlog](backlog/gogen-osgo.md#track-e--content-packs-and-layers-what-the-tree-is-made-of) and [Generations](generations.md). The write rules live in [`tools/osd-store.mjs`](../tools/osd-store.mjs) (`rootsOf`, `ObjectStore.write`), and VS Code discovery/projection in [`editors/vscode/launcher.js`](../editors/vscode/launcher.js) (`detectWorkspaceLayers`, `ensureWorkspacePacks`).
 
 ## ZIP layer proposal (not implemented)
 
@@ -28,6 +28,6 @@ The current `writable` flag distinguishes store roots that can receive writes; i
 - [Generations](generations.md) describes immutable built artifacts and content-derived build identities. Source ZIPs would be inputs to a generation, not generations themselves.
 - [Workbench object tools](workbench-object-tools.md#follow-up-remove-ambient-mutable-dependencies) plans content-addressed immutable library dependencies shared across worktrees.
 - [VS Code extension](vscode-extension.md) describes workspace packs and the writable copy of the VSIX seed.
-- [Backlog, binary layers 1.5](backlog.md) records ZIP-as-layer and the unresolved object-vs-file override rule.
+- [Backlog, binary layers 1.5](backlog/gogen-osgo.md) records ZIP-as-layer and the unresolved object-vs-file override rule.
 
 ADR 0001's per-process liveness counter and the later Generations document's content identity serve different purposes, but their wording about hashes differs. Clarify that relationship before making an archive hash visible as an ADT version identifier.

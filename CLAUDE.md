@@ -365,7 +365,7 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   (`zcl_stg_segw_fugr`). `npm run segw:cloud` is the informational abaplint pass
   with `syntax.version: Cloud`. `test/unit/zcl_stg_segw_test` is the CRUD
   round trip (`ltcl_crud`) and the served tree (`ltcl_tree`).
-- The RFC channel (`docs/rfc-channel.md`, backlog D.1): one ICF service,
+- The RFC channel (`docs/rfc-channel.md`, [backlog D.1](docs/backlog/diag-rfc.md)): one ICF service,
   `ZOSD_RFC` at `/sap/bc/osd/rfc/`, calls any remote-enabled function module
   of the tree over JSON. `GET /functions` is the catalogue, `GET
   /functions/<NAME>` the signature, `POST /call/<NAME>` the call
@@ -381,7 +381,7 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   a system failure is a broken call. No RFC wire, no SOAP envelope and no
   authentication yet; do not put it on a public address.
 - SAP Easy Access is served by ABAP at `/sap/bc/gui/sap/its/webgui/`
-  (`src/webgui/zcl_osd_webgui`, `docs/webgui.md`, backlog track G): the path
+  (`src/webgui/zcl_osd_webgui`, `docs/webgui.md`, [backlog track G](docs/backlog/webgui.md)): the path
   the real ITS webgui answers on, used on purpose. The tree is **read out of
   the five status tables** (`ZOSD_SVC`, `ZOSD_PACK`, `ZOSD_SYS`) rather than
   walked again, so there is one inventory and the menu cannot disagree with
@@ -431,7 +431,7 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   binary, where a module target makes both constructs legal, and where the
   `%23` defect turned out **not** to block packaging: `Bun.build({compile,
   plugins})` with a five-line `onResolve` builds a binary that runs.
-- **A pack is a directory, not a rebuild** (backlog E.2, `tools/osd-packs.mjs`):
+- **A pack is a directory, not a rebuild** ([backlog E.2](docs/backlog/gogen-osgo.md), `tools/osd-packs.mjs`):
   a folder with an `osd-pack.json` in it, holding ABAP (`src/`), seed rows
   (`data/`), table definitions (`src/ddic/`) and a page (`webapp/`). Packs are
   found in `packs/` and in whatever `OSD_PACKS` names, and layered after the
@@ -508,7 +508,7 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   test must exercise the real path rather than simulate it. Backlog 8.4.
 - **The `input_folder` list of `abap_transpile.json` is the layer order,
   and the later folder wins** — for the transpiler, the builder and the
-  object store alike (backlog E.1, 2026-09-16). Only listed folders are the
+  object store alike ([backlog E.1](docs/backlog/gogen-osgo.md), 2026-09-16). Only listed folders are the
   system: a folder under `local/` that is not listed is in nobody's tree,
   and an import appends its folder to the list. The builder hands the
   transpiler the winner of a name only (the rest go into the build's

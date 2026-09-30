@@ -9,7 +9,7 @@ it:
 - [`handover-2026-09-20.md`](handover-2026-09-20.md) — the **ICF registry
   track** in depth, from the other session: what is open in the order it
   unblocks, the write path, and what is recorded rather than fixed.
-- [`backlog.md`](backlog.md) — the whole board, and
+- [`backlog/README.md`](backlog/README.md) — the whole board, and
   [`icf-registry-plan.md`](icf-registry-plan.md) — that track's plan.
 
 **Everything below is measured, and says where. Where something is an

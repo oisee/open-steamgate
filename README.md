@@ -258,7 +258,7 @@ not exist.
 
 Measured in the tree as it is, at the 0.3 beta freeze (`cabed25`); rows not
 revisited since 2026-09-19 keep that date in their own column. The narrative is [`AGENDA.md`](AGENDA.md), the
-open list [`docs/backlog.md`](docs/backlog.md) (its track letters are in
+open list [`docs/backlog/README.md`](docs/backlog/README.md) (its track letters are in
 parentheses), the last two days [`docs/retro-2026-09-18.md`](docs/retro-2026-09-18.md)
 and [`docs/retro-2026-09-19.md`](docs/retro-2026-09-19.md).
 

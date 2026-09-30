@@ -244,7 +244,7 @@ await writeFile(workerPath, emitted.replaceAll(PLACEHOLDER, stamp), "utf8");
 // phrased as "both show the same generation" is unprovable by construction
 // and reads as drift to whoever tries it. The commit is shared, so the check
 // becomes "both show the same commit", which is true by construction rather
-// than by coincidence (the rule is in docs/backlog.md: i7 follows Pages).
+// than by coincidence (the rule is in docs/backlog/pages-preview.md: i7 follows Pages).
 let commit = process.env.GITHUB_SHA ?? "";
 if (commit === "") {
   try {

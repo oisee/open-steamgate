@@ -145,7 +145,7 @@ const COMPATIBILITY = {
   // So this does not make F8 work, and is not meant to. It converts a dialog
   // that ends the story into a real client knocking on a real port, which is
   // a thing that can be recorded and answered. That recording is the first
-  // step of the DIAG side quest (docs/backlog.md, track C); until C.4 stands
+  // step of the DIAG side quest (docs/backlog/diag-rfc.md, track C); until C.4 stands
   // up a listener, the honest reading of this entry is "we intend to".
   //
   // reentranceTickets is included because there is a resource behind it —
@@ -1186,7 +1186,7 @@ export function adtRouter(options = {}) {
       build: facadeBuildStamp(),
       generation: liveHash(store.root),
       // The commit, and it is the **only** number the two deployment targets
-      // can share (docs/backlog.md, "Deploying: the i7 follows Pages"). The
+      // can share (docs/backlog/pages-preview.md, "Deploying: the i7 follows Pages"). The
       // generation above is the transpiler's, the preview's `stamp` is
       // webpack's, and those two cannot agree even when built from one
       // source -- a check on them produces a false alarm, which is worse

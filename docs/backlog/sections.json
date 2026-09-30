@@ -1,0 +1,365 @@
+{
+  "source": "1628495742e8a54ad1a289119c06d11da1190d99",
+  "sections": [
+    {
+      "start": 1,
+      "end": 10,
+      "file": "overview.md",
+      "title": "Backlog"
+    },
+    {
+      "start": 11,
+      "end": 22,
+      "file": "ci-release.md",
+      "title": "Current execution plan \u2014 2026-09-22"
+    },
+    {
+      "start": 23,
+      "end": 32,
+      "file": "jobs.md",
+      "title": "Next application spike after background jobs"
+    },
+    {
+      "start": 33,
+      "end": 41,
+      "file": "gogen-osgo.md",
+      "title": "General ABAP transformation runtime"
+    },
+    {
+      "start": 42,
+      "end": 795,
+      "file": "overview.md",
+      "title": "Where it stands, and what is next \u2014 2026-09-19"
+    },
+    {
+      "start": 796,
+      "end": 849,
+      "file": "webgui.md",
+      "title": "Track WD -- Web Dynpro, with the handlers in the page"
+    },
+    {
+      "start": 850,
+      "end": 876,
+      "file": "pages-preview.md",
+      "title": "Deploying: the i7 follows Pages"
+    },
+    {
+      "start": 877,
+      "end": 1010,
+      "file": "overview.md",
+      "title": "Who drives what, settled 2026-09-19"
+    },
+    {
+      "start": 1011,
+      "end": 1067,
+      "file": "overview.md",
+      "title": "Status, 2026-09-19 \u2014 what closed, and what the day cost"
+    },
+    {
+      "start": 1068,
+      "end": 1105,
+      "file": "ci-release.md",
+      "title": "A pre-flight for the ABAP we generate (2026-09-19, next)"
+    },
+    {
+      "start": 1106,
+      "end": 1158,
+      "file": "segw.md",
+      "title": "The loop is closed: a SEGW project from one YAML is on a real system (2026-09-19)"
+    },
+    {
+      "start": 1159,
+      "end": 1192,
+      "file": "gogen-osgo.md",
+      "title": "The guard is a patch; a content-addressed name is the fix (2026-09-19)"
+    },
+    {
+      "start": 1193,
+      "end": 1245,
+      "file": "ci-release.md",
+      "title": "The container, 2026-09-19: five fixed, two open, and both open ones named"
+    },
+    {
+      "start": 1246,
+      "end": 1517,
+      "file": "overview.md",
+      "title": "The order of work, settled 2026-09-18"
+    },
+    {
+      "start": 1518,
+      "end": 1787,
+      "file": "adt.md",
+      "title": "Track A \u2014 ADT coverage surface"
+    },
+    {
+      "start": 1788,
+      "end": 2301,
+      "file": "gogen-osgo.md",
+      "title": "Track B \u2014 the runtime underneath"
+    },
+    {
+      "start": 2302,
+      "end": 2383,
+      "file": "diag-rfc.md",
+      "title": "Track C \u2014 the side quest: RFC in, DIAG out"
+    },
+    {
+      "start": 2384,
+      "end": 2470,
+      "file": "diag-rfc.md",
+      "title": "Track R \u2014 HTTP carried over RFC, and the ticket that gets us in"
+    },
+    {
+      "start": 2471,
+      "end": 2603,
+      "file": "diag-rfc.md",
+      "title": "Track D \u2014 the RFC gateway: expose every RFC-enabled function module"
+    },
+    {
+      "start": 2604,
+      "end": 3031,
+      "file": "gogen-osgo.md",
+      "title": "Track E \u2014 content packs and layers: what the tree is made of"
+    },
+    {
+      "start": 3032,
+      "end": 3203,
+      "file": "webgui.md",
+      "title": "Track G \u2014 the classic screens, and the GUI substitutes under them"
+    },
+    {
+      "start": 3204,
+      "end": 3294,
+      "file": "oracles.md",
+      "title": "Track O \u2014 the oracles: proving we answer the way a system answers"
+    },
+    {
+      "start": 3295,
+      "end": 3296,
+      "file": "overview.md",
+      "title": "The standing list"
+    },
+    {
+      "start": 3297,
+      "end": 3357,
+      "file": "decisions.md",
+      "title": "0. Decisions waiting on Alice"
+    },
+    {
+      "start": 3358,
+      "end": 3402,
+      "file": "decisions.md",
+      "title": "Answered 2026-09-19"
+    },
+    {
+      "start": 3403,
+      "end": 3447,
+      "file": "ci-release.md",
+      "title": "1. The Bun binary (gated on 0.1)"
+    },
+    {
+      "start": 3448,
+      "end": 3480,
+      "file": "ci-release.md",
+      "title": "1a. Shipping shapes that are not the binary"
+    },
+    {
+      "start": 3481,
+      "end": 3572,
+      "file": "adt.md",
+      "title": "2. The ADT fa\u00e7ade (gated on 0.2)"
+    },
+    {
+      "start": 3573,
+      "end": 3643,
+      "file": "gogen-osgo.md",
+      "title": "2a. OSD: the tiers, and who owns which layer"
+    },
+    {
+      "start": 3644,
+      "end": 3669,
+      "file": "adt.md",
+      "title": "2b. Questions parked next to the fa\u00e7ade"
+    },
+    {
+      "start": 3670,
+      "end": 3686,
+      "file": "data-analytics.md",
+      "title": "3. Analytics and CDS (no gate, S can start)"
+    },
+    {
+      "start": 3687,
+      "end": 3703,
+      "file": "segw.md",
+      "title": "4. The road to a system"
+    },
+    {
+      "start": 3704,
+      "end": 3716,
+      "file": "segw.md",
+      "title": "5. SEGW, the application (T's, with my editor on top)"
+    },
+    {
+      "start": 3717,
+      "end": 3726,
+      "file": "gateway.md",
+      "title": "6. Gateway leftovers (S)"
+    },
+    {
+      "start": 3727,
+      "end": 3735,
+      "file": "segw.md",
+      "title": "7. stg-compile leftovers (S), blocked on an oracle"
+    },
+    {
+      "start": 3736,
+      "end": 3903,
+      "file": "misc.md",
+      "title": "8. Housekeeping (S)"
+    },
+    {
+      "start": 3904,
+      "end": 4058,
+      "file": "upstream.md",
+      "title": "9. Upstream, outside this repository (T's, verbatim from them)"
+    },
+    {
+      "start": 4059,
+      "end": 4091,
+      "file": "upstream.md",
+      "title": "External dependencies, all of them in one place"
+    },
+    {
+      "start": 4092,
+      "end": 4115,
+      "file": "webgui.md",
+      "title": "Effects that render, and render wrong"
+    },
+    {
+      "start": 4116,
+      "end": 4165,
+      "file": "upstream.md",
+      "title": "Two for abaplint/abaplint, both reproduced here"
+    },
+    {
+      "start": 4166,
+      "end": 4206,
+      "file": "webgui.md",
+      "title": "W.1 second sieve \u2014 the SQL a system actually ran (2026-09-19)"
+    },
+    {
+      "start": 4207,
+      "end": 4233,
+      "file": "gogen-osgo.md",
+      "title": "W.1 branch plumbing, and what its first real run found (2026-09-19)"
+    },
+    {
+      "start": 4234,
+      "end": 4261,
+      "file": "gogen-osgo.md",
+      "title": "The finding: a generation name is not a function of the commit"
+    },
+    {
+      "start": 4262,
+      "end": 4299,
+      "file": "webgui.md",
+      "title": "G.10 wave 1 \u2014 the analysis, before the screen (2026-09-19)"
+    },
+    {
+      "start": 4300,
+      "end": 4374,
+      "file": "webgui.md",
+      "title": "G.10 wave 2 \u2014 the buffer, and where a trace may not live (2026-09-19)"
+    },
+    {
+      "start": 4375,
+      "end": 4412,
+      "file": "webgui.md",
+      "title": "G.10 wave 3 \u2014 the screen, at /sap/bc/osd/st05/ (2026-09-19)"
+    },
+    {
+      "start": 4413,
+      "end": 4456,
+      "file": "data-analytics.md",
+      "title": "The rest of the one-row inserts, and what the seed fix did not reach (2026-09-19)"
+    },
+    {
+      "start": 4457,
+      "end": 4482,
+      "file": "gogen-osgo.md",
+      "title": "What a planted branch does not isolate (2026-09-19)"
+    },
+    {
+      "start": 4483,
+      "end": 4508,
+      "file": "gogen-osgo.md",
+      "title": "`npm run branch -- state`: a count that cannot travel alone (2026-09-19)"
+    },
+    {
+      "start": 4509,
+      "end": 4559,
+      "file": "ci-release.md",
+      "title": "`npm run unit` can say it ran nothing (2026-09-19)"
+    },
+    {
+      "start": 4560,
+      "end": 4590,
+      "file": "ci-release.md",
+      "title": "Downloadable SQLite-only Bun releases and protocol consolidation (2026-09-21)"
+    },
+    {
+      "start": 4591,
+      "end": 4613,
+      "file": "data-analytics.md",
+      "title": "NYC taxi cross-database visual benchmark (2026-09-20)"
+    },
+    {
+      "start": 4614,
+      "end": 4625,
+      "file": "data-analytics.md",
+      "title": "ZVDB production continuation (deferred, 2026-09-21)"
+    },
+    {
+      "start": 4626,
+      "end": 4642,
+      "file": "data-analytics.md",
+      "title": "Portable and native fuzzy-text profiles (deferred, 2026-09-22)"
+    },
+    {
+      "start": 4643,
+      "end": 4656,
+      "file": "ci-release.md",
+      "title": "CI time and trigger budget (2026-09-21)"
+    },
+    {
+      "start": 4657,
+      "end": 4676,
+      "file": "vscode-ide.md",
+      "title": "Desktop VS Code OSD supervisor extension (2026-09-21)"
+    },
+    {
+      "start": 4677,
+      "end": 4694,
+      "file": "vscode-ide.md",
+      "title": "Browser workbench product entry and operator docs (2026-09-21)"
+    },
+    {
+      "start": 4695,
+      "end": 4721,
+      "file": "data-analytics.md",
+      "title": "Three vector engines on a HANA deployment, and the eAMDP session that goes stale (2026-09-30)"
+    },
+    {
+      "start": 4722,
+      "end": 4731,
+      "file": "pages-preview.md",
+      "title": "Pages preview: build on releases, not on every merge (2026-09-30)"
+    },
+    {
+      "start": 4732,
+      "end": 4751,
+      "file": "gogen-osgo.md",
+      "title": "gogen Go runtime: split `go/abap` into self-contained packages (2026-09-30)"
+    }
+  ]
+}

@@ -318,5 +318,5 @@ the bridge (one `TagTicket` check).
 ## See also
 
 - [`layers-we-own.md`](layers-we-own.md) — the DIAG reader/writer split across the family
-- [`backlog.md`](backlog.md) — track C, the side quest and its steps
+- [`backlog/diag-rfc.md`](backlog/diag-rfc.md) — track C, the side quest and its steps
 - [`adt-over-rfc.md`](adt-over-rfc.md) — the gateway door, which is built

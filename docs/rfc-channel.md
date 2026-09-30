@@ -245,7 +245,7 @@ the ABAP structure at runtime. Neither of the faces can.
 
 ## See also
 
-- [`docs/backlog.md`](backlog.md) track D — the rest of the track
+- [`docs/backlog/diag-rfc.md`](backlog/diag-rfc.md) track D — the rest of the track
 - [`docs/adt-over-rfc.md`](adt-over-rfc.md) — the RFC transport the bridge speaks
 - [`docs/segw-mapping.md`](segw-mapping.md) — how SEGW writes a typed call into a generated DPC
 - [`docs/rfc-destinations.example.json`](rfc-destinations.example.json) — calling *out*, which is the other direction

@@ -1,0 +1,64 @@
+# Backlog index
+
+Each entry links to its original text in a track file. The source order and line coverage are recorded in `sections.json`; run `bash scripts/check-backlog-split.sh` from the repository root to verify the split. Small link files preserve relative links inside the unchanged entries.
+
+- [Backlog](overview.md#backlog)
+- [Current execution plan — 2026-09-22](ci-release.md#current-execution-plan--2026-09-22) — 2026-09-22
+- [Next application spike after background jobs](jobs.md#next-application-spike-after-background-jobs)
+- [General ABAP transformation runtime](gogen-osgo.md#general-abap-transformation-runtime)
+- [Where it stands, and what is next — 2026-09-19](overview.md#where-it-stands-and-what-is-next--2026-09-19) — 2026-09-19
+- [Track WD -- Web Dynpro, with the handlers in the page](webgui.md#track-wd----web-dynpro-with-the-handlers-in-the-page)
+- [Deploying: the i7 follows Pages](pages-preview.md#deploying-the-i7-follows-pages)
+- [Who drives what, settled 2026-09-19](overview.md#who-drives-what-settled-2026-09-19) — 2026-09-19, settled
+- [Status, 2026-09-19 — what closed, and what the day cost](overview.md#status-2026-09-19--what-closed-and-what-the-day-cost) — 2026-09-19
+- [A pre-flight for the ABAP we generate (2026-09-19, next)](ci-release.md#a-pre-flight-for-the-abap-we-generate-2026-09-19-next) — 2026-09-19
+- [The loop is closed: a SEGW project from one YAML is on a real system (2026-09-19)](segw.md#the-loop-is-closed-a-segw-project-from-one-yaml-is-on-a-real-system-2026-09-19) — 2026-09-19
+- [The guard is a patch; a content-addressed name is the fix (2026-09-19)](gogen-osgo.md#the-guard-is-a-patch-a-content-addressed-name-is-the-fix-2026-09-19) — 2026-09-19
+- [The container, 2026-09-19: five fixed, two open, and both open ones named](ci-release.md#the-container-2026-09-19-five-fixed-two-open-and-both-open-ones-named) — 2026-09-19
+- [The order of work, settled 2026-09-18](overview.md#the-order-of-work-settled-2026-09-18) — 2026-09-18, settled
+- [Track A — ADT coverage surface](adt.md#track-a--adt-coverage-surface)
+- [Track B — the runtime underneath](gogen-osgo.md#track-b--the-runtime-underneath)
+- [Track C — the side quest: RFC in, DIAG out](diag-rfc.md#track-c--the-side-quest-rfc-in-diag-out)
+- [Track R — HTTP carried over RFC, and the ticket that gets us in](diag-rfc.md#track-r--http-carried-over-rfc-and-the-ticket-that-gets-us-in)
+- [Track D — the RFC gateway: expose every RFC-enabled function module](diag-rfc.md#track-d--the-rfc-gateway-expose-every-rfc-enabled-function-module)
+- [Track E — content packs and layers: what the tree is made of](gogen-osgo.md#track-e--content-packs-and-layers-what-the-tree-is-made-of)
+- [Track G — the classic screens, and the GUI substitutes under them](webgui.md#track-g--the-classic-screens-and-the-gui-substitutes-under-them)
+- [Track O — the oracles: proving we answer the way a system answers](oracles.md#track-o--the-oracles-proving-we-answer-the-way-a-system-answers)
+- [The standing list](overview.md#the-standing-list)
+- [0. Decisions waiting on Alice](decisions.md#0-decisions-waiting-on-alice)
+- [Answered 2026-09-19](decisions.md#answered-2026-09-19) — 2026-09-19
+- [1. The Bun binary (gated on 0.1)](ci-release.md#1-the-bun-binary-gated-on-01)
+- [1a. Shipping shapes that are not the binary](ci-release.md#1a-shipping-shapes-that-are-not-the-binary)
+- [2. The ADT façade (gated on 0.2)](adt.md#2-the-adt-façade-gated-on-02)
+- [2a. OSD: the tiers, and who owns which layer](gogen-osgo.md#2a-osd-the-tiers-and-who-owns-which-layer)
+- [2b. Questions parked next to the façade](adt.md#2b-questions-parked-next-to-the-façade)
+- [3. Analytics and CDS (no gate, S can start)](data-analytics.md#3-analytics-and-cds-no-gate-s-can-start)
+- [4. The road to a system](segw.md#4-the-road-to-a-system)
+- [5. SEGW, the application (T's, with my editor on top)](segw.md#5-segw-the-application-ts-with-my-editor-on-top)
+- [6. Gateway leftovers (S)](gateway.md#6-gateway-leftovers-s)
+- [7. stg-compile leftovers (S), blocked on an oracle](segw.md#7-stg-compile-leftovers-s-blocked-on-an-oracle) — blocked
+- [8. Housekeeping (S)](misc.md#8-housekeeping-s)
+- [9. Upstream, outside this repository (T's, verbatim from them)](upstream.md#9-upstream-outside-this-repository-ts-verbatim-from-them)
+- [External dependencies, all of them in one place](upstream.md#external-dependencies-all-of-them-in-one-place)
+- [Effects that render, and render wrong](webgui.md#effects-that-render-and-render-wrong)
+- [Two for abaplint/abaplint, both reproduced here](upstream.md#two-for-abaplintabaplint-both-reproduced-here)
+- [W.1 second sieve — the SQL a system actually ran (2026-09-19)](webgui.md#w1-second-sieve--the-sql-a-system-actually-ran-2026-09-19) — 2026-09-19
+- [W.1 branch plumbing, and what its first real run found (2026-09-19)](gogen-osgo.md#w1-branch-plumbing-and-what-its-first-real-run-found-2026-09-19) — 2026-09-19
+- [The finding: a generation name is not a function of the commit](gogen-osgo.md#the-finding-a-generation-name-is-not-a-function-of-the-commit)
+- [G.10 wave 1 — the analysis, before the screen (2026-09-19)](webgui.md#g10-wave-1--the-analysis-before-the-screen-2026-09-19) — 2026-09-19
+- [G.10 wave 2 — the buffer, and where a trace may not live (2026-09-19)](webgui.md#g10-wave-2--the-buffer-and-where-a-trace-may-not-live-2026-09-19) — 2026-09-19
+- [G.10 wave 3 — the screen, at /sap/bc/osd/st05/ (2026-09-19)](webgui.md#g10-wave-3--the-screen-at-sapbcosdst05-2026-09-19) — 2026-09-19
+- [The rest of the one-row inserts, and what the seed fix did not reach (2026-09-19)](data-analytics.md#the-rest-of-the-one-row-inserts-and-what-the-seed-fix-did-not-reach-2026-09-19) — 2026-09-19
+- [What a planted branch does not isolate (2026-09-19)](gogen-osgo.md#what-a-planted-branch-does-not-isolate-2026-09-19) — 2026-09-19
+- [npm run branch -- state: a count that cannot travel alone (2026-09-19)](gogen-osgo.md#npm-run-branch----state-a-count-that-cannot-travel-alone-2026-09-19) — 2026-09-19
+- [npm run unit can say it ran nothing (2026-09-19)](ci-release.md#npm-run-unit-can-say-it-ran-nothing-2026-09-19) — 2026-09-19
+- [Downloadable SQLite-only Bun releases and protocol consolidation (2026-09-21)](ci-release.md#downloadable-sqlite-only-bun-releases-and-protocol-consolidation-2026-09-21) — 2026-09-21
+- [NYC taxi cross-database visual benchmark (2026-09-20)](data-analytics.md#nyc-taxi-cross-database-visual-benchmark-2026-09-20) — 2026-09-20
+- [ZVDB production continuation (deferred, 2026-09-21)](data-analytics.md#zvdb-production-continuation-deferred-2026-09-21) — 2026-09-21, deferred
+- [Portable and native fuzzy-text profiles (deferred, 2026-09-22)](data-analytics.md#portable-and-native-fuzzy-text-profiles-deferred-2026-09-22) — 2026-09-22, deferred
+- [CI time and trigger budget (2026-09-21)](ci-release.md#ci-time-and-trigger-budget-2026-09-21) — 2026-09-21
+- [Desktop VS Code OSD supervisor extension (2026-09-21)](vscode-ide.md#desktop-vs-code-osd-supervisor-extension-2026-09-21) — 2026-09-21
+- [Browser workbench product entry and operator docs (2026-09-21)](vscode-ide.md#browser-workbench-product-entry-and-operator-docs-2026-09-21) — 2026-09-21
+- [Three vector engines on a HANA deployment, and the eAMDP session that goes stale (2026-09-30)](data-analytics.md#three-vector-engines-on-a-hana-deployment-and-the-eamdp-session-that-goes-stale-2026-09-30) — 2026-09-30
+- [Pages preview: build on releases, not on every merge (2026-09-30)](pages-preview.md#pages-preview-build-on-releases-not-on-every-merge-2026-09-30) — 2026-09-30
+- [gogen Go runtime: split go/abap into self-contained packages (2026-09-30)](gogen-osgo.md#gogen-go-runtime-split-goabap-into-self-contained-packages-2026-09-30) — 2026-09-30

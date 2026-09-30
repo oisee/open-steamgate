@@ -353,6 +353,6 @@ becomes one command.
 - [`db-backends.md`](db-backends.md) — the eleven-method seam
 - [`bun-spike.md`](bun-spike.md) — the binary, measured
 - [`adt-surface.md`](adt-surface.md), [`adt-over-rfc.md`](adt-over-rfc.md) — what B and D answer
-- [`backlog.md`](backlog.md) — tracks A–D and the standing list
+- [`backlog/README.md`](backlog/README.md) — tracks A–D and the standing list
 - [`layers-we-own.md`](layers-we-own.md) — what the Go siblings carry
 - [`adt-facade-shift-left.md`](adt-facade-shift-left.md) — B moved to Go: the analysis and the estimate

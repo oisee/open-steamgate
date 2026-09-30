@@ -502,7 +502,7 @@ and ordering agree exactly across supported backends. The second is
 `native-fuzzy`: backend scores may differ, while a published synthetic corpus
 enforces behavioural invariants, top-K recall, precision, false-positive
 bounds and deterministic OSG-owned tie breaking. Implementing those profiles
-is now explicitly deferred in `docs/backlog.md` until the remaining general
+is now explicitly deferred in `docs/backlog/data-analytics.md` until the remaining general
 corpus milestones are complete.
 
 To avoid making specialised fuzzy work a gate, the synthetic `search_cells`

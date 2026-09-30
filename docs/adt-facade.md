@@ -17,7 +17,7 @@ it answers today, how activation and persistence work, and how a new client
 should be tested against it. The second is the contract, endpoint by endpoint,
 for whoever writes such a client. The server's own measured coverage, test by
 test, is [adt-surface.md](adt-surface.md); what remains open is in
-[backlog.md](backlog.md).
+[backlog/adt.md](backlog/adt.md).
 
 ## Why this matters to abapGit
 
