@@ -613,3 +613,26 @@ describe("job step input bounds", function () {
     expect(() => jobInputJson(" ".repeat(JOB_INPUT_JSON_MAX + 1))).to.throw(/too large/);
   });
 });
+
+describe("the osd-batch-runs command line", function () {
+  this.timeout(120000);
+  // The worker is started as `node tools/osd-batch-runs.mjs worker`
+  // (docs/gui-reports.md), and the functions tested above were imported, never
+  // the command: a top-level `await main()` deadlocked on the cyclic import
+  // init -> setup -> osd-job-port -> osd-batch-runs and every drain/work/worker
+  // exited 13 while this suite stayed green.
+  it("drains and works on a durable file database as a process of its own", async () => {
+    const {spawnSync} = await import("node:child_process");
+    const dir = mkdtempSync(join(tmpdir(), "osd-batch-cli-"));
+    try {
+      const env = {...process.env, STG_DB: "file", STG_DB_PATH: join(dir, "b.sqlite"), OSD_OPERATIONS_DB: join(dir, "o.sqlite")};
+      for (const [cmd, key] of [["drain", "imported"], ["work", "kind"]]) {
+        const run = spawnSync(process.execPath, ["tools/osd-batch-runs.mjs", cmd], {cwd: root, env, encoding: "utf8", timeout: 110000});
+        expect(run.status, `${cmd}: ${run.stderr}`).to.equal(0);
+        expect(JSON.parse(run.stdout)).to.have.property(key);
+      }
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+});
