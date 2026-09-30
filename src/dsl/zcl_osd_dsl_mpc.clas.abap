@@ -15,6 +15,16 @@ CLASS zcl_osd_dsl_mpc DEFINITION PUBLIC FINAL CREATE PRIVATE.
       IMPORTING is_model TYPE zcl_stg_segw_gen=>ty_model
       RETURNING VALUE(ri_model) TYPE REF TO zif_ajson
       RAISING cx_static_check.
+    " the project model as the JSON text it is parsed from: a generator that
+    " hashes the model (the trace's model field) hashes this text instead of
+    " serialising the parsed tree again
+    CLASS-METHODS project_model_json
+      IMPORTING is_model TYPE zcl_stg_segw_gen=>ty_model
+      RETURNING VALUE(rv_json) TYPE string.
+    CLASS-METHODS render_model
+      IMPORTING io_model TYPE REF TO zif_ajson
+      RETURNING VALUE(rs_result) TYPE zcl_osd_tpl=>ty_result
+      RAISING cx_static_check.
     CLASS-METHODS render_method
       IMPORTING is_model TYPE zcl_stg_segw_gen=>ty_model
                 iv_method TYPE string
@@ -211,6 +221,10 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD project_model.
+    ri_model = zcl_ajson=>parse( project_model_json( is_model ) ).
+  ENDMETHOD.
+
+  METHOD project_model_json.
     DATA lv_json TYPE string.
     DATA lv_first TYPE abap_bool.
     DATA lv_inner TYPE abap_bool.
@@ -588,7 +602,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
       lv_json = lv_json && ls_impl-content.
     ENDLOOP.
     lv_json = lv_json && `]`.
-    ri_model = zcl_ajson=>parse( lv_json && `}` ).
+    rv_json = lv_json && `}`.
   ENDMETHOD.
 
   METHOD method_template.
@@ -833,12 +847,16 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD render_class.
+    rs_result = render_model( project_model( is_model ) ).
+  ENDMETHOD.
+
+  METHOD render_model.
     DATA lo_model TYPE REF TO zif_ajson.
     DATA lt_partials TYPE zcl_osd_tpl=>tt_partials.
     DATA ls_partial TYPE zcl_osd_tpl=>ty_partial.
     DATA lt_methods TYPE string_table.
     DATA lv_method TYPE string.
-    lo_model = project_model( is_model ).
+    lo_model = io_model.
     APPEND 'DEFINE' TO lt_methods.
     APPEND 'DEFINE_ACTIONS' TO lt_methods.
     APPEND 'DEFINE_ASSOCIATIONS' TO lt_methods.

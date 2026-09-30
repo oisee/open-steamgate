@@ -7,6 +7,7 @@ CLASS zcl_osd_dsl_trace DEFINITION PUBLIC FINAL CREATE PRIVATE.
       IMPORTING iv_generator TYPE string iv_template TYPE string
                 io_model TYPE REF TO zif_ajson
                 is_result TYPE zcl_osd_tpl=>ty_result
+                iv_model_json TYPE string OPTIONAL
       RETURNING VALUE(rv_json) TYPE string
       RAISING cx_abap_message_digest zcx_ajson_error.
 ENDCLASS.
@@ -45,10 +46,21 @@ CLASS zcl_osd_dsl_trace IMPLEMENTATION.
            END OF ty_cached_node.
     DATA lt_nodes TYPE HASHED TABLE OF ty_cached_node WITH UNIQUE KEY path.
     DATA ls_node TYPE ty_cached_node.
-    cl_abap_message_digest=>calculate_hash_for_char(
-      EXPORTING if_algorithm = 'SHA256' if_data = io_model->stringify( )
-      IMPORTING ef_hashstring = lv_hash ).
-    rv_json = `{"generator":"` && zcl_stg_json=>escape( iv_generator ) && `","lines":[`.
+    DATA lt_parts TYPE string_table.
+    " the model's own JSON text when the caller has it: serialising a large
+    " parsed tree again costs seconds
+    IF iv_model_json IS NOT INITIAL.
+      cl_abap_message_digest=>calculate_hash_for_char(
+        EXPORTING if_algorithm = 'SHA256' if_data = iv_model_json
+        IMPORTING ef_hashstring = lv_hash ).
+    ELSE.
+      cl_abap_message_digest=>calculate_hash_for_char(
+        EXPORTING if_algorithm = 'SHA256' if_data = io_model->stringify( )
+        IMPORTING ef_hashstring = lv_hash ).
+    ENDIF.
+    " built from parts and joined once: appending to one string ten thousand
+    " times copies it ten thousand times
+    APPEND `{"generator":"` && zcl_stg_json=>escape( iv_generator ) && `","lines":[` TO lt_parts.
     lv_first = abap_true.
     LOOP AT is_result-trace INTO ls_trace.
       READ TABLE lt_nodes INTO ls_node WITH TABLE KEY path = ls_trace-path.
@@ -59,15 +71,16 @@ CLASS zcl_osd_dsl_trace IMPLEMENTATION.
       ENDIF.
       lv_node = zcl_stg_json=>escape( ls_node-node ).
       IF lv_first = abap_false.
-        rv_json = rv_json && `,`.
+        APPEND `,` TO lt_parts.
       ENDIF.
       lv_first = abap_false.
-      rv_json = rv_json && `{"line":` && |{ ls_trace-line }|
+      APPEND `{"line":` && |{ ls_trace-line }|
         && `,"node":"` && lv_node
         && `","path":"` && zcl_stg_json=>escape( ls_trace-path )
-        && `","template_line":` && |{ ls_trace-template_line }| && `}`.
+        && `","template_line":` && |{ ls_trace-template_line }| && `}` TO lt_parts.
     ENDLOOP.
-    rv_json = rv_json && `],"model":"sha256:` && to_lower( lv_hash )
-      && `","template":"` && zcl_stg_json=>escape( iv_template ) && `"}`.
+    APPEND `],"model":"sha256:` && to_lower( lv_hash )
+      && `","template":"` && zcl_stg_json=>escape( iv_template ) && `"}` TO lt_parts.
+    rv_json = concat_lines_of( table = lt_parts ).
   ENDMETHOD.
 ENDCLASS.

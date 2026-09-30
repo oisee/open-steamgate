@@ -913,6 +913,7 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     DATA ls_file  TYPE ty_file.
     DATA ls_result TYPE zcl_osd_tpl=>ty_result.
     DATA lo_json TYPE REF TO zif_ajson.
+    DATA lv_model_json TYPE string.
     DATA lt_findings TYPE zcl_osd_dsl_profile=>tt_finding.
     DATA ls_finding TYPE zcl_osd_dsl_profile=>ty_finding.
     DATA lx_error TYPE REF TO cx_static_check.
@@ -926,15 +927,17 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
           message = |{ iv_project }: no MPC class in the generated artifacts (SBD_GA)|.
     ENDIF.
     TRY.
-        ls_result = zcl_osd_dsl_mpc=>render_class( ls_model ).
-        lo_json = zcl_osd_dsl_mpc=>project_model( ls_model ).
+        " one model, built once: rendered, checked and traced from the same tree
+        lv_model_json = zcl_osd_dsl_mpc=>project_model_json( ls_model ).
+        lo_json = zcl_ajson=>parse( lv_model_json ).
+        ls_result = zcl_osd_dsl_mpc=>render_model( lo_json ).
         lt_findings = zcl_osd_dsl_profile=>check(
           iv_profile = 'abap' iv_strict = abap_false
           is_result = ls_result io_model = lo_json ).
         ls_file-name = file_name( iv_class = ls_model-mpc iv_ext = '.clas.trace.json' ).
         ls_file-content = zcl_osd_dsl_trace=>sidecar(
           iv_generator = 'dsl-mpc' iv_template = 'mpc_class'
-          io_model = lo_json is_result = ls_result ).
+          io_model = lo_json is_result = ls_result iv_model_json = lv_model_json ).
       CATCH cx_static_check INTO lx_error.
         RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
           EXPORTING message = |{ ls_model-mpc }: { lx_error->get_text( ) }|.
