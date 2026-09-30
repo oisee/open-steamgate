@@ -13,18 +13,18 @@
 //       demo service's $metadata, names its generation, and serves this
 //       checkout's source: the most recently changed ABAP file, read back
 //       over ADT, byte for byte. A stale seed fails there.
-//   release-verify.mjs pages <url> <commit> [--wait <seconds>] [--local <build.json>]
-//       a published preview's build.json names this commit, and its sw.js
+//   release-verify.mjs pages <url> <commit> [--wait <seconds>]
+//       a deployed preview's build.json names this commit, and its sw.js
 //       carries the stamp build.json names (the CDN serves the new bundle,
-//       not an old one); with --local, a bundle built later than this one
-//       (a newer push to the same directory) counts as superseded, not stale
+//       not an old one); pages.yml runs it after each deploy
 //
 // The VSIX is already checked by content in release.yml (the version inside
 // extension/package.json, scripts/release-version.mjs), and the Docker image
 // by docker/image/smoke.sh before docker.yml publishes it.
 import {execFileSync, spawn} from "node:child_process";
 import {createHash} from "node:crypto";
-import {mkdtempSync, openSync, readSync, closeSync, readFileSync, rmSync, statSync, mkdirSync} from "node:fs";
+import {existsSync, mkdtempSync, openSync, readSync, closeSync, readFileSync, rmSync, statSync, mkdirSync} from "node:fs";
+import {report} from "../tools/osd-inputs.mjs";
 import {createServer} from "node:net";
 import {tmpdir} from "node:os";
 import {dirname, join, resolve} from "node:path";
@@ -101,17 +101,20 @@ const freePort = () => new Promise((done, fail) => {
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
-// the ABAP source this checkout changed last: the file a stale seed would
-// get wrong first
+// the ABAP source this checkout changed last that the system serves as it
+// is on disk: the file a stale seed would get wrong first. A file renamed or
+// deleted since, or hidden by a later layer (gen/, a pack), is not what the
+// binary serves under that name, so the walk goes on to the next.
 function newestAbap() {
-  const out = execFileSync("git", ["log", "-1", "--format=", "--name-only", "--diff-filter=AM", "--",
+  const hidden = new Set(report(undefined, {root}).clashes.flatMap((clash) => clash.hidden));
+  const out = execFileSync("git", ["log", "-n", "200", "--format=", "--name-only", "--diff-filter=AM", "--",
     "src/*.clas.abap", "src/**/*.clas.abap", "src/*.prog.abap", "src/**/*.prog.abap"],
-  {cwd: root, encoding: "utf8"}).trim().split("\n").filter(Boolean);
+  {cwd: root, encoding: "utf8"}).split("\n").filter(Boolean);
   for (const file of out) {
     const match = /([^/]+)\.(clas|prog)\.abap$/.exec(file);
-    if (match) return {file, name: match[1], kind: match[2]};
+    if (match && !hidden.has(file) && existsSync(join(root, file))) return {file, name: match[1], kind: match[2]};
   }
-  throw new Error("no ABAP class or program changed in this checkout's history");
+  throw new Error("no ABAP class or program in this checkout's recent history is served as it is on disk");
 }
 
 export async function checkServe(file, {timeoutSeconds = 600} = {}) {
@@ -177,27 +180,21 @@ export async function checkServe(file, {timeoutSeconds = 600} = {}) {
   }
 }
 
-export async function checkPages(url, commit, {waitSeconds = 600, local} = {}) {
-  // Pages builds the gh-pages branch one push at a time (4-7 min measured,
-  // 2026-09-30) and drops a push that arrives during a build; a later push
-  // of the same directory then carries a newer commit. That is this bundle
-  // superseded, not a stale one, and it is told apart by the build time the
-  // local build.json recorded.
-  const ours = local === undefined ? undefined : JSON.parse(readFileSync(local, "utf8"));
+export async function checkPages(url, commit, {waitSeconds = 600} = {}) {
   const base = url.endsWith("/") ? url : `${url}/`;
+  // the CDN keeps a file 10 min (max-age=600); a query of its own per try
+  // asks it for the origin's copy rather than its cached one
+  const fresh = (name) => fetch(new URL(`${name}?t=${Date.now()}`, base), {cache: "no-store"});
   const deadline = Date.now() + waitSeconds * 1000;
   let last = "";
   while (true) {
     try {
-      const build = await (await fetch(new URL("build.json", base), {cache: "no-store"})).json();
-      const fresh = build.commit === commit;
-      const superseded = !fresh && ours !== undefined && Date.parse(build.builtAt) > Date.parse(ours.builtAt);
-      if (fresh || superseded) {
-        const worker = await (await fetch(new URL("sw.js", base), {cache: "no-store"})).text();
+      const build = await (await fresh("build.json")).json();
+      if (build.commit === commit) {
+        const worker = await (await fresh("sw.js")).text();
         // the two files are cached apart: a mismatch may be the CDN catching
         // up, so it is retried until the deadline and only then an error
-        if (worker.includes(build.stamp)) return fresh ? {url: base, commit, stamp: build.stamp, buildId: build.buildId}
-          : {url: base, commit, superseded: build.commit, stamp: build.stamp, builtAt: build.builtAt};
+        if (worker.includes(build.stamp)) return {url: base, commit, stamp: build.stamp, buildId: build.buildId};
         last = `sw.js does not carry the stamp ${build.stamp} that build.json names`;
       } else {
         last = `build.json names ${build.commit}`;
@@ -223,12 +220,9 @@ if (isMain) {
     let result;
     if (command === "binary" && args.length >= 2) result = checkBinary(args[0], args[1]);
     else if (command === "serve" && args.length >= 1) result = await checkServe(args[0], {timeoutSeconds: option("--timeout", 600)});
-    else if (command === "pages" && args.length >= 2) {
-      const at = args.indexOf("--local");
-      result = await checkPages(args[0], args[1], {waitSeconds: option("--wait", 600), local: at < 0 ? undefined : args[at + 1]});
-    }
+    else if (command === "pages" && args.length >= 2) result = await checkPages(args[0], args[1], {waitSeconds: option("--wait", 600)});
     else {
-      console.error("usage: release-verify.mjs binary <file> <target> | serve <file> [--timeout s] | pages <url> <commit> [--wait s] [--local build.json]");
+      console.error("usage: release-verify.mjs binary <file> <target> | serve <file> [--timeout s] | pages <url> <commit> [--wait s]");
       process.exit(2);
     }
     console.log(`release-verify ${command}: ok ${JSON.stringify(result)}`);
