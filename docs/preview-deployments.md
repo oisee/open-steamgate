@@ -79,6 +79,31 @@ under `/open-steamgate/main/` as they do on port 3030.
   worker sends `x-forwarded-proto` / `x-forwarded-prefix`, `zcl_stg_http_handler`
   turns them into the origin the dispatcher prints.
 
+## How the site is deployed
+
+`preview.yml` writes each build into its own directory of the `gh-pages`
+branch (`main/`, `pr-<n>/`, through `scripts/pages-push.mjs`) and removes a
+pull request's directory when it closes. The site itself is deployed by
+`pages.yml` through the Pages Actions deploy, not by Pages' own build of the
+branch. It runs when a preview run completes. It takes `main/` and the
+previews of the pull requests still open, regenerates the index for exactly
+those, deploys them, and then checks each one by its content: the served
+`build.json` must name the commit it was built from, and `sw.js` must carry
+the stamp `build.json` names (`scripts/release-verify.mjs pages`).
+
+Why, measured on 2026-09-30:
+- `gh-pages` had grown to 4.7 GB in 7960 files, mostly previews of long-closed
+  pull requests. The site limit is 1 GB.
+- Pages' branch build took 4 to 7 minutes and errored every push that landed
+  during one.
+- As a result, the live main preview served an older commit while every
+  preview run was green.
+
+The branch was pruned the same day to `main/` plus the open previews
+(178 MB). Two repository settings make `pages.yml` the deploy: the
+`github-pages` environment allows the `main` branch (the workflow always runs
+in main's context), and Pages' source is "GitHub Actions".
+
 ## Locally
 
 ```sh

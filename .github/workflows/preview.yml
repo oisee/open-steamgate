@@ -2,7 +2,8 @@ name: preview deployment
 
 # Every pull request and every push to main gets a copy of open-steamgate that
 # runs entirely in the browser (build/preview/: the gateway in a service worker, the
-# Fiori demo app), published on GitHub Pages from the gh-pages branch:
+# Fiori demo app), written to the gh-pages branch and deployed from there by
+# pages.yml (main and the open pull requests only, checked by content):
 #   main         -> https://oisee.github.io/open-steamgate/main/
 #   PR <n>       -> https://oisee.github.io/open-steamgate/pr-<n>/
 # The pattern is larshp/hithub's preview-deploy workflow (MIT).

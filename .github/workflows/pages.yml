@@ -1,0 +1,97 @@
+name: pages
+
+# The site at https://oisee.github.io/open-steamgate/ is deployed from here,
+# through the Pages Actions deploy, not by Pages' own build of the gh-pages
+# branch. gh-pages stays where preview.yml keeps every preview (one directory
+# per build, written by scripts/pages-push.mjs); this workflow takes main and
+# the previews of the pull requests still open, and deploys only those.
+#
+# Why (measured 2026-09-30): gh-pages had grown to 4.7 GB in 7960 files,
+# mostly previews of long-closed pull requests. Pages' branch build took 4-7
+# minutes and errored every push that landed during one, so the live main
+# preview served cd0bfdc6 while the branch held 11536442 and every preview run
+# was green. The site limit is 1 GB; main plus the open previews is ~250 MB.
+#
+# A push made with GITHUB_TOKEN starts no workflow, so this runs when a
+# preview run completes (workflow_run, in main's context), and by hand. Two
+# repository settings go with it: the github-pages environment must allow
+# the main branch (its deployment branch policy), and Pages' source must be
+# "GitHub Actions" (build_type=workflow).
+
+on:
+  workflow_run:
+    workflows: ["preview deployment"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  pull-requests: read
+
+# the newest run deploys the newest gh-pages tip, so an older one waiting in
+# line has nothing left to add
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: What the site keeps
+        id: keep
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'dirs<<EOF'
+            echo main
+            gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 --json number --jq '.[].number' | sed 's/^/pr-/'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      # only the kept directories' blobs are fetched, not the whole 4.7 GB
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: site
+          filter: blob:none
+          sparse-checkout: ${{ steps.keep.outputs.dirs }}
+          sparse-checkout-cone-mode: true
+      - name: The index names only what is deployed
+        run: |
+          set -euo pipefail
+          rm -rf site/.git
+          touch site/.nojekyll
+          node --input-type=module -e '
+            import {writeFile} from "node:fs/promises";
+            import {renderPreviewIndex} from "./scripts/pages-index.mjs";
+            await writeFile("site/index.html", await renderPreviewIndex("site"));'
+          du -sh site
+          ls site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
+      # A deployment that reports success is checked by what it serves: each
+      # preview's build.json names the commit it was built from and its sw.js
+      # carries the stamp build.json names (scripts/release-verify.mjs).
+      - name: Check each deployed preview by its content
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          for build in site/*/build.json; do
+            directory="$(basename "$(dirname "$build")")"
+            commit="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).commit' "$build")"
+            node scripts/release-verify.mjs pages "${PAGE_URL%/}/$directory/" "$commit" --wait 300
+          done
