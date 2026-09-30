@@ -45,3 +45,48 @@ CLASS ltcl_lifecycle IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 ENDCLASS.
+
+CLASS ltcl_teardown_stop DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    CLASS-DATA gv_count TYPE i.
+    METHODS teardown.
+    METHODS first FOR TESTING.
+    METHODS second FOR TESTING.
+ENDCLASS.
+CLASS ltcl_teardown_stop IMPLEMENTATION.
+  METHOD first.
+    gv_count = gv_count + 1.
+  ENDMETHOD.
+  METHOD second.
+    gv_count = gv_count + 1.
+  ENDMETHOD.
+  METHOD teardown.
+    IF gv_count = 1.
+      cl_abap_unit_assert=>fail( 'teardown stop' ).
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
+
+CLASS ltcl_teardown_continue DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    CLASS-DATA gv_count TYPE i.
+    METHODS teardown.
+    METHODS first FOR TESTING.
+    METHODS second FOR TESTING.
+ENDCLASS.
+CLASS ltcl_teardown_continue IMPLEMENTATION.
+  METHOD first.
+    gv_count = gv_count + 1.
+  ENDMETHOD.
+  METHOD second.
+    IF gv_count <> 1.
+      cl_abap_unit_assert=>fail( 'second did not run' ).
+    ENDIF.
+    gv_count = gv_count + 1.
+  ENDMETHOD.
+  METHOD teardown.
+    IF gv_count = 1.
+      cl_abap_unit_assert=>fail( msg = 'teardown continue' quit = if_aunit_constants=>quit-no ).
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
