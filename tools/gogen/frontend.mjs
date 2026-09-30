@@ -45,7 +45,10 @@ const isStruct = (n, cls) => n instanceof Nodes.StructureNode && n.get() instanc
 const isTok = (n, s) => n instanceof Nodes.TokenNode && (s === undefined || upper(n.getFirstToken().getStr()) === s);
 const tokenStr = (n) => n.getFirstToken().getStr();
 const upper = (s) => String(s).toUpperCase();
-const goName = (s) => upper(s).replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
+const goName = (s) => {
+  const name = upper(s).replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
+  return name.startsWith("_") ? `N${name}` : name;
+};
 
 // ultra/events: a SORTED table keeps its rows in key order, which only
 // INSERT INTO TABLE knows how to do; every other statement that would place
@@ -68,6 +71,7 @@ export const composite = (t) => t?.k === "table" || t?.k === "struct";
 export const byRef = (p) => p.dir === "importing" && composite(p.type) && !p.byValue;
 const numeric = (t) => t.k === "i" || t.k === "f" || t.k === "int8";
 const charlike = (t) => t.k === "c" || t.k === "string";
+const cdsViewsByRegistry = new WeakMap();
 
 /* ------------------------------------------------------------------- program */
 
@@ -78,7 +82,7 @@ const charlike = (t) => t.k === "c" || t.k === "string";
  */
 // skip(path): a file not to load, for a layered build where a later folder
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
-export function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false}) {
+export function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   // only the syntax check and parser errors are read below (parser_error is a
@@ -88,7 +92,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   // a counter per program, so a second compileProgram in one process names
   // its FOR ALL ENTRIES rows as the first did (incremental rebuilds)
   FAE_N = 0;
-  const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
+  const reg = registry ?? new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
   // every file of the folders is loaded, so a class sees what it refers to;
   // only the objects named are compiled, and only their syntax errors count
   // a namespace is written # in a file name and / in the object's name
@@ -105,8 +109,11 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
       else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push(readFileSync(path, "utf8"));
     }
   };
-  for (const folder of folders) walk(folder);
-  reg.parse();
+  if (!registry) {
+    for (const folder of folders) walk(folder);
+    reg.parse();
+    cdsViewsByRegistry.set(reg, cdsSqlViews(ddls));
+  }
   REG = reg;
   const ours = (fn) => wanted.includes(objName(fn));
   const errors = reg.findIssues().filter((i) => (i.getKey() === "check_syntax" || i.getKey() === "parser_error") && ours(i.getFilename()));
@@ -180,7 +187,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   }
   program.rtti = rttiTable(reg, program);
   program.exceptionSupers = exceptionSupers(reg, program);
-  program.cdsViews = cdsSqlViews(ddls);
+  program.cdsViews = cdsViewsByRegistry.get(reg) ?? {};
   program.tables = tableRegistry(reg, program);
   return program;
 }

@@ -1586,9 +1586,53 @@ intersection includes a seeded DB class.
 
 The full-set row has different populations and process layouts; it is not
 a speed ratio. The full Go inventory itself took 7:24.89 and peaked at
-1,768,808 KiB in one run (n=1), so the full runner is not in `gogen.yml` (the requested CI
-threshold is about five minutes). `unit-bench.mjs` and
+1,768,808 KiB in one run (n=1), which kept the full runner out of `gogen.yml`
+at U1's five-minute CI threshold. `unit-bench.mjs` and
 `unit-full-bench.mjs` reproduce the timing rows.
+
+### Layered Unit build, 2026-09-30
+
+`unit.mjs` now parses the repository and libraries once, grows all 28
+owners' closures in that registry, and emits three Go packages:
+`generated/core` for libraries and shared types, `generated/app` for
+production classes, and `cmd/unit` for test include classes and the one
+runner. A class that refers to a higher layer is promoted to that layer;
+cross-layer class cycles are kept together and reported in `layers` in the
+JSON result. The Go compiler's method-level errors become typed stubs that
+raise `NOT_COMPILED` when called, then the same binary is retried. This lets
+other methods run. `--per-owner` remains available as an isolation fallback.
+The result JSON includes per-round frontend times, emission, Go build and
+execution times. `unit-layer-bench.mjs`, run under `flock
+/tmp/osd-heavy.lock`, measures cold and warm full inventories and warm
+rebuilds after a source edit in one app class or test include; it restores
+both files. The app case uses `go build -x` to check whether core compiled.
+
+The complete generated inventory gives the same comparison in the layered
+run and the per-owner fallback: 66 SAME, 204 DIFFERENT, 7 Node-only, 0
+Go-only, 1 skipped. U1's 56/186/28 baseline preceded this worktree's SEGW
+generated sources; the compared method populations differ. There were 172
+core classes, 233 app classes and 51 unit classes
+in the combined closure. Fourteen library classes were promoted to app
+because they use app-owned types; no cross-layer class cycle appeared.
+
+| Full inventory | Wall, seconds | Peak RSS, KiB | Frontend, ms | Rounds | Emit, ms | Go build, ms | Run, ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Per-owner fallback, one run | 244.91 | 910,192 | 148,692 | 82 | 2,829 | 76,121 | 5,770 |
+| Layered, cold cache, median of 3 | 37.55 | 988,480 | 7,886 | 3 | 1,090 | 22,143 | 5,245 |
+| Layered, warm full, median of 3 | 16.56 | 951,184 | 7,930 | 3 | 923 | 1,109 | 5,207 |
+| Layered, warm after app edit, median of 3 | 21.36 | 977,800 | 8,003 | 3 | 1,080 | 5,951 | 5,178 |
+| Layered, warm after test edit, median of 3 | 17.59 | 1,008,516 | 7,991 | 3 | 1,016 | 1,960 | 5,459 |
+
+Each cold run used a fresh `GOCACHE`; the warm cache was primed before its
+three measured runs. The edits added ABAP comment lines before one app class
+or one test include, changing generated Go line positions and restoring the
+original source after each run. In all three app-edit traces, `go build -x`
+compiled app and reused core. The per-owner fallback is a single run, not a
+median, and includes 28 Node processes and 28 Go builds; its phase totals
+exclude process startup and orchestration overhead.
+
+The warm full build and run are under five minutes, so `gogen.yml` has a
+non-blocking `unit-inventory` job that saves the JSON result.
 
 Next gaps in order: generic `CL_ABAP_UNIT_ASSERT` comparisons (45 failed
 methods); Go emitter addresses of fields in temporary values and missing

@@ -6,8 +6,20 @@ import {tmpdir} from "node:os";
 import {fileURLToPath} from "node:url";
 import {dirname, join} from "node:path";
 import {reconcile} from "./unit-results.mjs";
+import {compileProgram, columnRegistry} from "./frontend.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+test("a reused frontend registry keeps CDS to SQL view names", () => {
+  const args = {folders: [join(here, "testdata")], objects: []};
+  const first = compileProgram(args);
+  const reused = compileProgram({...args, registry: first.reg});
+  const expected = {ZGOGEN_T_DBWC: "ZGOGEN_T_DBWV"};
+  assert.deepEqual(first.cdsViews, expected);
+  assert.deepEqual(reused.cdsViews, expected);
+  assert.deepEqual(columnRegistry(reused).cdsViews, expected);
+  assert.equal(reused.tables.find((table) => table.name === "ZGOGEN_T_DBWC")?.sqlView, "ZGOGEN_T_DBWV");
+});
+
 test("a missing method fails the run", () => {
   const expected = [{class: "OWNER", testclass: "LOCAL", method: "ONE", status: "READY", message: ""},
     {class: "OWNER", testclass: "LOCAL", method: "TWO", status: "READY", message: ""}];
@@ -33,6 +45,7 @@ test("comparison fails for each selected owner without a runnable method and for
       ["all skipped", [row("OWNER", "SKIPPED")]],
       ["absent rows", []],
       ["not compiled", [row("OWNER", "NOT_COMPILED", "compile error")]],
+      ["reached tolerant stub", [row("OWNER", "FAILED", "NOT_COMPILED in OWNER=>TEST: unsupported")]],
       ["needs db", [row("OWNER", "NEEDS_DB", "database unavailable")]],
     ]) {
       const result = compare([row("OWNER", "SUCCESS")], goRows, ["OWNER"]);
@@ -43,6 +56,11 @@ test("comparison fails for each selected owner without a runnable method and for
     const noSame = compare([row("OWNER", "SUCCESS")], [row("OWNER", "FAILED")], ["OWNER"]);
     assert.equal(noSame.status, 1);
     assert.equal(noSame.summary.methods.same.length, 0);
+    const stub = row("OWNER", "FAILED", "NOT_COMPILED in OWNER=>TEST: unsupported");
+    const matchingStub = compare([stub], [stub], ["OWNER"]);
+    assert.equal(matchingStub.status, 1);
+    assert.equal(matchingStub.summary.methods.same.length, 0);
+    assert.equal(matchingStub.summary.methods.nodeOnly.length, 1);
     const mixed = compare([row("GOOD", "SUCCESS"), row("EMPTY", "SUCCESS")], [row("GOOD", "SUCCESS")], ["GOOD", "EMPTY"]);
     assert.equal(mixed.status, 1);
     assert.deepEqual(mixed.summary.methods.same, ["GOOD/LTCL_TEST/TEST"]);

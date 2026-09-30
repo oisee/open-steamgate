@@ -21,7 +21,10 @@ const ident = (name) => {
   return JS_RESERVED.has(id) ? `${id}_` : id;
 };
 
-const typeName = (s) => String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
+const typeName = (s) => {
+  const name = String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
+  return name.startsWith("_") ? `N${name}` : name;
+};
 
 /** a constant's or an attribute's VALUE as a JS literal */
 function literal(c) {

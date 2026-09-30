@@ -26,6 +26,10 @@ on:
       - 'test/fixtures/ir-pairs/**'
       - 'src/demo_data/**'
       - 'libs.lock.json'
+      - 'src/**'
+      - 'test/unit/**'
+      - 'packs/**'
+      - 'abap_transpile.json'
       - '.github/workflows/gogen.yml'
   push:
     branches: [main]
@@ -34,6 +38,10 @@ on:
       - 'test/fixtures/ir-pairs/**'
       - 'src/demo_data/**'
       - 'libs.lock.json'
+      - 'src/**'
+      - 'test/unit/**'
+      - 'packs/**'
+      - 'abap_transpile.json'
       - '.github/workflows/gogen.yml'
   workflow_dispatch:
     inputs:
@@ -88,6 +96,55 @@ jobs:
       # ranges, no arguments and the native frontend
       - name: osabap, a report as a native command
         run: node --test tools/gogen/osabap.test.mjs
+
+  unit-inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: tools/gogen/go/go.sum
+      - name: Load the tracked source pins
+        run: node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+      - name: Fetch source packs and libraries
+        run: |
+          node tools/osd-libs.mjs
+          node tools/osd-fetch.mjs
+      - name: Build the Node oracle inputs
+        run: npm run transpile
+      # The inventory is expected to report gaps (exit 1: failed methods,
+      # exit 2: not compiled) until Go parity is complete, so those are
+      # written to the summary and do not turn the check red. A crash (any
+      # other exit, or no parsable JSON) does.
+      - name: Full Go ABAP Unit inventory
+        run: |
+          set +e
+          node tools/gogen/unit.mjs --out "$RUNNER_TEMP/gogen-unit" > "$RUNNER_TEMP/gogen-unit.json"
+          rc=$?
+          set -e
+          if [[ $rc -gt 2 ]]; then echo "unit.mjs crashed with exit $rc" >&2; exit "$rc"; fi
+          node -e '
+            const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            const n = {};
+            for (const row of r.rows) n[row.status] = (n[row.status] ?? 0) + 1;
+            console.log(`gogen ABAP Unit inventory (exit ${process.argv[2]}): ${Object.entries(n).map(([k, v]) => `${k} ${v}`).join(", ")}`);
+          ' "$RUNNER_TEMP/gogen-unit.json" "$rc" | tee -a "$GITHUB_STEP_SUMMARY"
+        env:
+          GOCACHE: ${{ runner.temp }}/gogen-unit-go-cache
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gogen-unit-results
+          path: ${{ runner.temp }}/gogen-unit.json
+          if-no-files-found: ignore
 
   osgo-parity:
     if: github.event_name == 'workflow_dispatch' && inputs.parity
