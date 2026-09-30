@@ -140,6 +140,47 @@ Each option accepts either `--option value` or `--option=value`. Paths outside
 the granted roots, including `..` escapes, are refused. These flags govern
 DATASET statements; frontend service file methods have their own host API.
 
+## Open SQL and the --db file
+
+A report may bring tables of its own: the `.tabl.xml` files (and any
+`.dtel.xml`, `.doma.xml`, `.ttyp.xml`) beside the report file are compiled
+with it, and their CREATE TABLEs, as the transpiler writes them for the Node
+host, go into the binary. `tools/gogen/apps/notes/` is the sample:
+
+```sh
+node tools/gogen/osabap.mjs tools/gogen/apps/notes/znotes.prog.abap
+osabap --db notes.db --add "first note"      # 1 first note
+osabap --db notes.db --add "second note"     # the first run's row is still there
+osabap --add x                               # refused: run it with --db FILE
+```
+
+- `--db FILE` opens the SQLite file, creating it with the report's tables
+  when it is missing (`abap.OpenDBFile`, the one `osgo --db` uses). Each
+  dialog step is a database LUW: `COMMIT WORK` and `ROLLBACK WORK` behave as
+  on a system, and a dump rolls the step back.
+- A report with tables and no `--db` has no database. Its first statement
+  refuses and names the flag. There is never a silent in-memory database
+  whose rows vanish at exit.
+- A file laid out by another build of the tables (a column changed, a table
+  added) is refused, not used: the file carries a mark of the schema that
+  created it.
+- A report without tables is built without a database driver and refuses
+  `--db`.
+
+Which Open SQL forms compile is measured, not claimed:
+`node tools/gogen/osabap-sql-corpus.mjs` compiles each of the 18 forms in
+`tools/gogen/apps/sql-corpus/zsqlcorpus.abap` as a report of its own. On
+2026-09-30, 12 compile. The six that do not are pinned by
+`tools/gogen/osabap-sql-corpus.test.mjs`:
+- an aggregate without GROUP BY into a scalar (`MAX`);
+- `UP TO ... ORDER BY`;
+- `APPENDING TABLE`;
+- `INTO TABLE` of a SORTED table;
+- a `GROUP BY` SELECT loop;
+- an inline `@DATA( )` target.
+
+One such form makes the whole method NOT_COMPILED.
+
 ## Terminal UI
 
 With no arguments, a real terminal uses the tcell form in
@@ -264,7 +305,7 @@ text file through these ABAP APIs.
 The spike intentionally implements a small application runtime, not a whole
 SAP system:
 
-- no Open SQL/database in the `nodatabase` build;
+- Open SQL only on the report's own tables, through `--db` (12 of 18 corpus forms compile; see above);
 - no OData, HTTP, ICF or Fiori host;
 - one selection screen and one execution per process;
 - select-options in interactive frontends currently use comma-separated
