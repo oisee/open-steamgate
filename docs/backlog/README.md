@@ -62,3 +62,5 @@ Each entry links to its original text in a track file. The source order and line
 - [Three vector engines on a HANA deployment, and the eAMDP session that goes stale (2026-09-30)](data-analytics.md#three-vector-engines-on-a-hana-deployment-and-the-eamdp-session-that-goes-stale-2026-09-30) — 2026-09-30
 - [Pages preview: build on releases, not on every merge (2026-09-30)](pages-preview.md#pages-preview-build-on-releases-not-on-every-merge-2026-09-30) — 2026-09-30
 - [gogen Go runtime: split go/abap into self-contained packages (2026-09-30)](gogen-osgo.md#gogen-go-runtime-split-goabap-into-self-contained-packages-2026-09-30) — 2026-09-30
+- [Versions of an object, read out of git (2026-09-30)](adt.md#versions-of-an-object-read-out-of-git-2026-09-30) — 2026-09-30
+- [Lazy table providers: one registry, routed like ICF handlers (2026-09-30)](gogen-osgo.md#lazy-table-providers-one-registry-routed-like-icf-handlers-2026-09-30) — 2026-09-30

@@ -1181,3 +1181,46 @@ Tooling: `gopls` (not installed here yet: `go install golang.org/x/tools/gopls@l
 moving files between packages; `golangci-lint` and `goimports` are installed. GoLand's refactorings (Move across
 packages, Change Signature) are available through its built-in MCP server when an IDE session is running on a
 workstation -- optional, useful for large moves; never a CI dependency.
+
+
+## Lazy table providers: one registry, routed like ICF handlers (2026-09-30)
+
+Alice, 2026-09-30: a central way to fill tables lazily, whole or by key, on demand, with triggers.
+Today there is none. Each case has its own logic:
+- `data/*.tabu.json` seeds at start;
+- the status tables (`ZOSD_SVC`, `ZOSD_PACK`, `ZOSD_SYS`) are written by a generator at build time;
+- `hostRelation` gives AMDP a per-call relation;
+- Go's `RegisterTables` is dictionary only.
+
+- **Registry** (shaped like `src/icf/nodes.json`): table -> provider class implementing
+  `zif_osd_table_provider` (`fill_all`, `fill_by_key( ranges )`, `invalidate`).
+- **Policy per table:**
+  - `eager` at start;
+  - `lazy` whole on the first SELECT;
+  - `by_key` from the WHERE's `=`/`IN` on key fields, cached per key. Any other WHERE falls back to whole.
+- **Hook: the database seam** (`abap.context.databaseConnections["DEFAULT"]`, the one path ABAP reads data
+  through). Before a SELECT on a registered table it makes sure the requested part is filled; any other table
+  costs one map lookup. Node, Go and the preview get it from one place, which is the lesson of
+  `tools/osd-dialog-step.mjs`: a rule for every host lives in a module they all import.
+- **Fill runs as ABAP in its own dialog step** (work-process lock, commit on success, rollback on a dump),
+  so a failed fill leaves nothing half-written. A provider writes only its own table: no state shared between
+  processes (see the no-shared-table-state decision).
+- **Triggers for invalidation:**
+  - git HEAD change;
+  - a saved file (warm compile);
+  - a new generation;
+  - an explicit `invalidate`.
+- **Consumers:**
+  1. `VRSD` for versions out of git (adt.md);
+  2. **the cross-reference, which already exists as a hand-wired eager provider**: `CROSS`, `WBCROSSGT`,
+     `WBCROSSGTX`, `D010INC`, parsed by `tools/osd-xref.mjs` (~3 s on the full tree, cached per generation) and
+     seeded by five callers through `tools/osd-xref-seed.mjs`. In the registry it starts as `eager` (same
+     behaviour, one wiring instead of five), then `lazy` to take the parse off host start, then `by_key` per
+     object so a warm edit re-derives only the rows of the edited object instead of the whole tree. vsp's
+     where-used and the Readers CodeLens read the same tables, unchanged;
+  3. the status tables, moved from build time to on demand;
+  4. later, reference data fetched from an RFC destination on first use.
+- **Open questions:**
+  - A SELECT with a JOIN touching a lazy table: fill whole first.
+  - Sorting and paging over a partial `by_key` fill: only keys asked are present, which is correct for a
+    by-key read and wrong for a scan. A scan falls back to whole.
