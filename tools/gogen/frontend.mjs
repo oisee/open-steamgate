@@ -983,7 +983,7 @@ const nativeMeSig = (program, key, name) => {
 function typeOf(t, where, program) {
   // generic data: TYPE any / data / ANY TABLE, and data references. A
   // generic value is a binding to a typed slot (abap.Data in Go)
-  if (t instanceof BasicTypes.AnyType || t instanceof BasicTypes.DataType) return {k: "data"};
+  if (t instanceof BasicTypes.AnyType || t instanceof BasicTypes.DataType || t instanceof BasicTypes.SimpleType) return {k: "data"};
   if (t instanceof BasicTypes.TableType && (t.getRowType() instanceof BasicTypes.AnyType || t.getRowType() instanceof BasicTypes.DataType)) return {k: "data", table: true};
   if (t instanceof BasicTypes.DataReference) return {k: "dref"};
   // REF TO object: the root of every class, any object fits
@@ -5230,6 +5230,12 @@ function call(chain, ctx, statement, hint) {
     const body = nk.slice(3, -1).find((c) => !isTok(c)) ?? null;
     return constructor({kw: "NEW", typeNode: nk[1], body, text: chain.concatTokens()}, ctx, hint);
   }
+  if (isExpr(kids[0], Expressions.Cast)) {
+    if (kids.length !== 1) throw new Unsupported(`a call on a CAST result: ${chain.concatTokens()}`);
+    const ck = kids[0].getChildren();
+    const body = ck.slice(3, -1).find((c) => isExpr(c, Expressions.Source));
+    return constructor({kw: "CAST", typeNode: ck[1], body, text: chain.concatTokens()}, ctx, hint);
+  }
   let receiver = null;
   let owner = null;
   let sup = null;
@@ -5487,6 +5493,9 @@ function call(chain, ctx, statement, hint) {
 
 function defaultValue(p, ctx) {
   let t = p.default;
+  // A system field in a signature default is read when the call is made.
+  // ASSERT_SUBRC's ACT defaults to sy-subrc.
+  if (SY[upper(t)] !== undefined) return convert({e: "sy", field: SY[upper(t)], type: I}, p.type);
   // SPACE is a built-in value, not an attribute of the class which declares
   // the method. GUI_UPLOAD's optional CODEPAGE uses exactly this default.
   if (/^space$/i.test(t)) return convert({e: "chars", value: "", type: C(1)}, p.type);
@@ -5820,6 +5829,10 @@ function compare(node, ctx) {
     if (v.type.k === "dref") {
       const r = {c: "initial", x: v};
       return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? r : {c: "not", x: r};
+    }
+    if (v.type.k === "data") {
+      const r = {c: "data_bound", x: v};
+      return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? {c: "not", x: r} : r;
     }
     if (v.type.k !== "ref") throw new Unsupported(`IS BOUND of a ${v.type.k}`);
     const r = {c: "initial", x: v};

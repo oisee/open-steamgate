@@ -1,6 +1,7 @@
 package abap
 
 import (
+	"reflect"
 	"strings"
 	"sync"
 )
@@ -284,6 +285,24 @@ func Condense(s string, noGaps bool) string {
 
 // TObj is an object reference inside a structure seen generically.
 var TObj = &Type{Kind: 'r'}
+
+// DataBound is IS BOUND when a reference has crossed a TYPE any parameter.
+// The generic binding points at the reference slot, so its own P is non-nil
+// even when the reference held in that slot is initial.
+func DataBound(d Data) bool {
+	if d.P == nil || d.T == nil {
+		return false
+	}
+	switch d.T.Kind {
+	case 'l':
+		return d.P.(*Data).P != nil
+	case 'r':
+		v := reflect.ValueOf(d.P)
+		return v.Kind() == reflect.Pointer && !v.IsNil() && !v.Elem().IsNil()
+	default:
+		panic(NotCompiled("IS BOUND", "a generic value of type kind "+string(d.T.Kind)))
+	}
+}
 
 // TP is p of a length and number of decimals, Len = n*100 + dec. A p value
 // is carried as its decimal text with its decimals (packed.go).

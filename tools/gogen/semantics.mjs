@@ -17,6 +17,7 @@ const EXPECT = {
   // Arithmetic statements share the assignment calculation type: i division
   // rounds 21 / 2 to 11, while packed decimal retains its two places.
   ZCL_GOGEN_T_ARSTMT: "i:11 p:11.25",
+  ZCL_GOGEN_T_IDEF: "base/child",
   // parity-wave1, A4H 2026-09-24 ($ZOSG_TMP_0050, ABAP Unit probes of the
   // same classes). escape( format = e_json_string ): \\ and " escaped,
   // \b \t \n \f \r, the other control characters \u00XX in upper case,

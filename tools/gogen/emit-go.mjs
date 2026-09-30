@@ -867,8 +867,16 @@ function leave(ctx, code) {
 /** an IMPORTING argument: a composite by reference goes as a pointer, by VALUE as a clone */
 function importingArg(a, ctx) {
   if (a.byValue === undefined || !composite(a.type)) return expr(a.value, ctx);
-  if (!a.byValue) return PLACES.has(a.value.e) ? `&${place(a.value, ctx)}` : `abap.Ptr(${expr(a.value, ctx)})`;
+  if (!a.byValue) return addressable(a.value) ? `&${place(a.value, ctx)}` : `abap.Ptr(${expr(a.value, ctx)})`;
   return copied(expr(a.value, ctx), a.value.type, a.value);
+}
+
+// A component of a temporary structure is readable but Go cannot take its
+// address. Keep the temporary alive in a box for a by-reference argument.
+function addressable(x) {
+  if (!PLACES.has(x.e)) return false;
+  if (x.e === "field" || x.e === "row" || x.e === "row_key") return addressable(x.base);
+  return true;
 }
 
 function place(p, ctx) {
@@ -1794,7 +1802,7 @@ function expr(e, ctx) {
         : `case '${code}': return ${expr(b, ctx)}`));
       return `func() ${goType(e.type)} { switch ${sel} { ${arms.join("; ")} }; panic(abap.NotCompiled("arithmetic", ${JSON.stringify(`calculation type of ${e.text} with these operands: not measured`)})) }()`;
     }
-    case "wrap": return `abap.Data{P: ${PLACES.has(e.x.e) ? `&${place(e.x, ctx)}` : `abap.Ptr(${expr(e.x, ctx)})`}, T: ${desc(e.x.type)}}`;
+    case "wrap": return `abap.Data{P: ${addressable(e.x) ? `&${place(e.x, ctx)}` : `abap.Ptr(${expr(e.x, ctx)})`}, T: ${desc(e.x.type)}}`;
     case "unwrap": return unwrapTo(e.type, expr(e.x, ctx));
     case "unwrap_chars": return `abap.DataChars(${expr(e.x, ctx)})`;
     case "fae_row": return `fae${e.n}`;
@@ -1942,6 +1950,7 @@ function cond(c, ctx) {
       return `func() bool { for _, r${n} := range ${expr(c.table, ctx)} { if ${keys} { return true } }; return false }()`;
     }
     case "assigned": return c.fs.type.k === "data" ? `(${ident(c.fs.name)}.P != nil)` : `(${ident(c.fs.name)} != nil)`;
+    case "data_bound": return `abap.DataBound(${expr(c.x, ctx)})`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;
     case "or": return `(${cond(c.l, ctx)} || ${cond(c.r, ctx)})`;
     case "not": return `!(${cond(c.x, ctx)})`;
