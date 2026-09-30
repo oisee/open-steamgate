@@ -20,4 +20,12 @@ func TestDataBound(t *testing.T) {
 	if !DataBound(Data{P: &obj, T: TObj}) {
 		t.Fatal("assigned object reference is not bound")
 	}
+	var objSlot any = (*struct{})(nil)
+	if DataBound(Data{P: &objSlot, T: TObj}) {
+		t.Fatal("interface slot holding an initial object reference is bound")
+	}
+	objSlot = &struct{}{}
+	if !DataBound(Data{P: &objSlot, T: TObj}) {
+		t.Fatal("interface slot holding an assigned object reference is not bound")
+	}
 }

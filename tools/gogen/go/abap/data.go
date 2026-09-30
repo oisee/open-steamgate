@@ -298,7 +298,7 @@ func DataBound(d Data) bool {
 		return d.P.(*Data).P != nil
 	case 'r':
 		v := reflect.ValueOf(d.P)
-		return v.Kind() == reflect.Pointer && !v.IsNil() && !v.Elem().IsNil()
+		return v.Kind() == reflect.Pointer && !v.IsNil() && !refNil(v.Elem().Interface())
 	default:
 		panic(NotCompiled("IS BOUND", "a generic value of type kind "+string(d.T.Kind)))
 	}
