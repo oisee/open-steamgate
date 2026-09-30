@@ -361,11 +361,11 @@ ENDCLASS.`);
   });
 
   // AFTER is one SELECT in the ABAP. On a system the kernel sends FOR ALL
-  // ENTRIES in blocks; the open-abap runtime sends one SELECT per row of the
-  // driving table (ANOMALY-2026-09-30-fae-one-select-per-row), so here the
-  // round trips do not drop. This test pins that: when the runtime blocks,
-  // it fails, and the expectation becomes the real one.
-  it("BEFORE asks the database once per row; AFTER does too, on this runtime", async () => {
+  // ENTRIES in blocks, and the pinned transpiler does too: 50 driving rows
+  // to a statement, each row's condition under OR (it sent one SELECT per
+  // row before, ANOMALY-2026-09-30-fae-one-select-per-row, and this test
+  // pinned 50 then).
+  it("BEFORE asks the database once per row; AFTER asks once per block of driving rows", async () => {
     const db = abap.context.databaseConnections.DEFAULT;
     await db.execute("DELETE FROM zosd_lift_txt");
     for (let i = 0; i < 40; i++) {
@@ -405,7 +405,7 @@ ENDCLASS.`);
     const after = await counted("after");
     expect(after.texts).to.deep.equal(before.texts);
     expect(before.calls).to.equal(50);
-    expect(after.calls, "ANOMALY-2026-09-30-fae-one-select-per-row").to.equal(50);
+    expect(after.calls, "50 driving rows are one block (ANOMALY-2026-09-30-fae-one-select-per-row, fixed in the pin)").to.equal(1);
     const empty = abap.types.TableFactory.construct(rows().getRowType(), {withHeader: false, keyType: "DEFAULT", primaryKey: {name: "primary_key", type: "STANDARD", isUnique: false, keyFields: []}, secondary: []});
     const original = db.select.bind(db);
     let calls = 0;
