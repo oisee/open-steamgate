@@ -122,6 +122,34 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
     ls_model = zcl_stg_segw_gen=>build_model( iv_project ).
     lv_source = zcl_stg_segw_gen=>mpc_source( ls_model ).
     IF iv_project = 'ZUT_DSL'.
+      ls_result = zcl_osd_dsl_mpc=>render_class( ls_model ).
+      cl_abap_unit_assert=>assert_equals(
+        act = zcl_osd_tpl=>to_string( ls_result ) exp = lv_source msg = 'whole MPC class' ).
+      lo_json = zcl_osd_dsl_mpc=>project_model( ls_model ).
+      cl_abap_unit_assert=>assert_equals(
+        exp = `complex/Address/property/Street/type`
+        act = lo_json->get( '/complex_types/1/properties/1/@type/@id' ) ).
+      READ TABLE ls_model-entity_types INTO ls_type WITH KEY name = 'Travel'.
+      cl_abap_unit_assert=>assert_subrc( ).
+      CLEAR ls_type-entity_sets.
+      lo_json = zcl_osd_dsl_mpc=>entity_model( is_type = ls_type iv_mpc = ls_model-mpc ).
+      cl_abap_unit_assert=>assert_equals( exp = 'X' act = lo_json->get( '/has_texts' ) ).
+      lo_json = zcl_osd_dsl_mpc=>project_model( ls_model ).
+      cl_abap_unit_assert=>assert_equals(
+        exp = `complex/Address`
+        act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `begin of ADDRESS` ) ).
+      cl_abap_unit_assert=>assert_equals(
+        exp = `constant/ADDRESS`
+        act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `constants GC_ADDRESS` ) ).
+      cl_abap_unit_assert=>assert_equals(
+        exp = `declaration/DEFINE_COMPLEXTYPES`
+        act = node_of_line( is_result = ls_result io_json = lo_json iv_needle = `methods DEFINE_COMPLEXTYPES` ) ).
+      cl_abap_unit_assert=>assert_equals(
+        exp = `entity/Travel/property/TravelId`
+        act = node_of_line( is_result = ls_result io_json = lo_json
+                            iv_needle = `create_property( iv_property_name = 'TravelId'` ) ).
+    ENDIF.
+    IF iv_project = 'ZUT_DSL'.
       cl_abap_unit_assert=>assert_equals( act = lines( ls_model-entity_types ) exp = 3 ).
       cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `set_is_media( 'X' )` ) ).
       cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `create_complex_property(` ) ).

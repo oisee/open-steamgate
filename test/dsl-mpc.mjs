@@ -1,9 +1,13 @@
 // Every _MPC method body rendered from L1 equals the SEGW generator's bytes.
 // The fixture trees are imported through ImportSet under this suite's names.
 import {expect} from "chai";
-import {readFileSync} from "node:fs";
+import {readFileSync, readdirSync, mkdtempSync, rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+import {renderProject} from "../tools/dsl-mpc.mjs";
 import {compile, compileFile} from "../tools/stg-compile.mjs";
 import {readSpec, tableName} from "../tools/segw-tables.mjs";
+import {parseIwpr} from "../tools/segw-gen.mjs";
 
 const FIXTURES = [
   "test/fixtures/segw/zstg_label.iwpr.xml",
@@ -12,6 +16,20 @@ const FIXTURES = [
   "src/zosd_test/segw/zosd_test.iwpr.xml",
 ];
 const METHODS = ["DEFINE", "DEFINE_COMPLEXTYPES", "DEFINE_ASSOCIATIONS", "DEFINE_ACTIONS", "GET_LAST_MODIFIED", "LOAD_TEXT_ELEMENTS"];
+function sourceSpecs(dir = "src") {
+  return readdirSync(dir, {withFileTypes: true}).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    return entry.isDirectory() ? sourceSpecs(path) : entry.name.endsWith(".stg.yaml") ? [path] : [];
+  });
+}
+const builtNames = new Set(readdirSync("gen/stg"));
+const COMPILED = ["src", "gen/cds", "packs"].flatMap((root) => sourceSpecs(root))
+  .filter((path) => builtNames.has(path.split("/").pop().replace(/\.stg\.yaml$/, "")))
+  .map((path) => ({path, xml: compileFile(path).iwpr}))
+  .filter(({xml}) => {
+    const tree = parseIwpr(xml);
+    return tree.associations.length || tree.functionImports.length;
+  });
 
 describe("DSL L1: MPC methods from the model, byte for byte", function () {
   this.timeout(120000);
@@ -54,6 +72,7 @@ functions:
     await import("../output/zcl_stg_segw_gen.clas.mjs");
     await import("../output/zcl_osd_tpl.clas.mjs");
     await import("../output/zcl_osd_dsl_trace.clas.mjs");
+    await import("../output/zcl_osd_dsl_profile.clas.mjs");
     await import("../output/zcl_stg_dispatcher.clas.mjs");
   });
 
@@ -104,12 +123,25 @@ functions:
   };
   const seen = Object.fromEntries(Object.keys(needles).map((key) => [key, 0]));
 
-  for (const path of [...FIXTURES, "compiled demo", "compiled complex"]) {
+  for (const path of [...FIXTURES, "compiled demo", "compiled complex", ...COMPILED.map(({path}) => path)]) {
     it(`every method of ${path.split("/").pop()}`, async () => {
-      const project = await importProject(path, path === "compiled demo" ? demoXml : path === "compiled complex" ? complexXml : undefined);
+      const project = await importProject(path, path === "compiled demo" ? demoXml : path === "compiled complex" ? complexXml : COMPILED.find((item) => item.path === path)?.xml);
       const model = await abap.Classes.ZCL_STG_SEGW_GEN.build_model({iv_project: box(project)});
       const source = (await abap.Classes.ZCL_STG_SEGW_GEN.mpc_source({is_model: model})).get();
       const projectJson = await abap.Classes.ZCL_OSD_DSL_MPC.project_model({is_model: model});
+      const whole = await abap.Classes.ZCL_OSD_DSL_MPC.render_class({is_model: model});
+      const wholeText = (await abap.Classes.ZCL_OSD_TPL.to_string({is_result: whole})).get();
+      const mismatch = [...wholeText].findIndex((ch, i) => ch !== source[i]);
+      expect(wholeText, `${project} whole class at ${mismatch}: ${JSON.stringify(wholeText.slice(mismatch - 70, mismatch + 120))} vs ${JSON.stringify(source.slice(mismatch - 70, mismatch + 120))}`).to.equal(source);
+      const wholeTraces = whole.get().trace.array();
+      expect(wholeTraces.length, `${project} whole trace count`).to.equal(whole.get().lines.array().length);
+      for (const trace of wholeTraces) {
+        const path = trace.get().path.get();
+        const node = (await abap.Classes.ZCL_OSD_DSL_TRACE.node_of({io_model: projectJson, iv_path: box(path)})).get();
+        expect(node, `${project} whole trace ${path}`).to.not.equal("");
+      }
+      const findings = (await abap.Classes.ZCL_OSD_DSL_PROFILE.check({iv_profile: box("abap"), iv_strict: box(""), is_result: whole, io_model: projectJson})).array();
+      expect(findings.filter((f) => f.get().severity.get() === "E"), `${project} profile errors`).to.deep.equal([]);
       for (const [what, needle] of Object.entries(needles)) if (source.includes(needle)) seen[what]++;
       for (const method of METHODS) {
         const start = source.indexOf(`  method ${method}.\n`);
@@ -152,5 +184,22 @@ functions:
   // so a fixture that loses a case fails here rather than going quiet.
   it("the fixtures together exercise every optional line", () => {
     expect(Object.keys(seen).filter((what) => seen[what] === 0), "optional lines no fixture reaches").to.deep.equal([]);
+  });
+
+  it("writes the class and one trace entry per line", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "dsl-mpc-"));
+    try {
+      const {abapFile, traceFile, findings} = await renderProject(FIXTURES[0], folder);
+      const source = readFileSync(abapFile, "utf8");
+      const sidecar = JSON.parse(readFileSync(traceFile, "utf8"));
+      expect(sidecar.generator).to.equal("dsl-mpc");
+      expect(sidecar.template).to.equal("mpc_class");
+      expect(sidecar.model).to.match(/^sha256:[0-9a-f]{64}$/);
+      expect(sidecar.lines.length).to.equal(source.trimEnd().split("\n").length);
+      expect(sidecar.lines.every((line, index) => line.line === index + 1 && line.node)).to.equal(true);
+      expect(findings.filter((finding) => finding.severity === "E")).to.deep.equal([]);
+    } finally {
+      rmSync(folder, {recursive: true, force: true});
+    }
   });
 });

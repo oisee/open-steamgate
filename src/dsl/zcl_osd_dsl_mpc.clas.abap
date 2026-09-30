@@ -20,11 +20,16 @@ CLASS zcl_osd_dsl_mpc DEFINITION PUBLIC FINAL CREATE PRIVATE.
                 iv_method TYPE string
       RETURNING VALUE(rs_result) TYPE zcl_osd_tpl=>ty_result
       RAISING cx_static_check.
+    CLASS-METHODS render_class
+      IMPORTING is_model TYPE zcl_stg_segw_gen=>ty_model
+      RETURNING VALUE(rs_result) TYPE zcl_osd_tpl=>ty_result
+      RAISING cx_static_check.
   PRIVATE SECTION.
     CLASS-METHODS flag_text IMPORTING iv_flag TYPE abap_bool RETURNING VALUE(rv_text) TYPE string.
     CLASS-METHODS quoted IMPORTING iv_text TYPE string RETURNING VALUE(rv_text) TYPE string.
     CLASS-METHODS method_template
       IMPORTING iv_method TYPE string RETURNING VALUE(rv_text) TYPE string.
+    CLASS-METHODS class_template RETURNING VALUE(rv_text) TYPE string.
 ENDCLASS.
 
 CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
@@ -43,6 +48,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
     DATA ls_prop TYPE zcl_stg_segw_gen=>ty_property.
     DATA ls_set TYPE zcl_stg_segw_gen=>ty_entity_set.
     DATA lv_first TYPE abap_bool.
+    DATA lv_has_label TYPE abap_bool.
     lv_json = `{"@id":` && quoted( `entity/` && is_type-name )
       && `,"name":` && quoted( is_type-name )
       && `,"define_stem":` && quoted( is_type-define_stem )
@@ -56,6 +62,9 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
       && `,"properties":[`.
     lv_first = abap_true.
     LOOP AT is_type-properties INTO ls_prop.
+      IF ls_prop-text_element IS NOT INITIAL.
+        lv_has_label = abap_true.
+      ENDIF.
       IF lv_first = abap_false.
         lv_json = lv_json && `,`.
       ENDIF.
@@ -102,7 +111,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
         && `,"subscribable":` && quoted( zcl_stg_segw_gen=>ab( ls_set-subscribable ) )
         && `,"filter_required":` && quoted( zcl_stg_segw_gen=>ab( ls_set-filter_required ) ) && `}`.
     ENDLOOP.
-    lv_json = lv_json && `],"has_texts":` && quoted( flag_text( xsdbool( lv_first = abap_false ) ) ) && `}`.
+    lv_json = lv_json && `],"has_texts":` && quoted( flag_text( lv_has_label ) ) && `}`.
     ri_model = zcl_ajson=>parse( lv_json ).
   ENDMETHOD.
 
@@ -206,6 +215,7 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
     DATA lv_first TYPE abap_bool.
     DATA lv_inner TYPE abap_bool.
     DATA ls_type TYPE zcl_stg_segw_gen=>ty_entity_type.
+    DATA lo_entity TYPE REF TO zif_ajson.
     DATA ls_ct TYPE zcl_stg_segw_gen=>ty_complex_type.
     DATA ls_prop TYPE zcl_stg_segw_gen=>ty_property.
     DATA ls_aso TYPE zcl_stg_segw_gen=>ty_association.
@@ -214,6 +224,14 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
     DATA ls_nav TYPE zcl_stg_segw_gen=>ty_navigation.
     DATA ls_fi TYPE zcl_stg_segw_gen=>ty_function_import.
     DATA ls_fp TYPE zcl_stg_segw_gen=>ty_parameter.
+    DATA ls_named TYPE zcl_stg_segw_gen=>ty_file.
+    DATA lt_named TYPE zcl_stg_segw_gen=>tt_file.
+    DATA ls_impl TYPE zcl_stg_segw_gen=>ty_file.
+    DATA lt_impl TYPE zcl_stg_segw_gen=>tt_file.
+    DATA lv_block TYPE string.
+    DATA lv_blocks TYPE string.
+    DATA lv_count TYPE i.
+    DATA lv_pad TYPE string.
     DATA lv_stamp TYPE string.
     DATA lv_any TYPE abap_bool.
     lv_stamp = is_model-last_changed.
@@ -248,6 +266,11 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
         lv_json = lv_json && `{"@id":` && quoted( `complex/` && ls_ct-name && `/property/` && ls_prop-name )
           && `,"name":` && quoted( ls_prop-name )
           && `,"abap_field":` && quoted( ls_prop-abap_field )
+          && `,"@type":{"@id":` && quoted( `complex/` && ls_ct-name && `/property/` && ls_prop-name && `/type` )
+          && `,"built_in":` && quoted( ls_prop-type_kind )
+          && `,"length":` && quoted( ls_prop-length )
+          && `,"decimals":` && quoted( ls_prop-decimals )
+          && `,"data_element":` && quoted( ls_prop-type_name ) && `}`
           && `,"edm_setter":` && quoted( zcl_stg_segw_gen=>edm_setter( ls_prop-edm_type ) )
           && `,"precision":` && quoted( ls_prop-precision )
           && `,"max_length":` && quoted( ls_prop-max_length )
@@ -397,8 +420,175 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
           && `,"symbol":` && quoted( ls_prop-text_element ) && `}`.
       ENDLOOP.
     ENDLOOP.
-    lv_json = lv_json && `],"has_texts":` && quoted( flag_text( xsdbool( lv_first = abap_false ) ) ) && `}`.
-    ri_model = zcl_ajson=>parse( lv_json ).
+    lv_json = lv_json && `],"has_texts":` && quoted( flag_text( xsdbool( lv_first = abap_false ) ) ).
+    lv_blocks = ``.
+    LOOP AT is_model-complex_types INTO ls_ct.
+      IF ls_ct-abap_struct IS NOT INITIAL.
+        lv_block = |  types:\n     { to_upper( ls_ct-name ) } type { ls_ct-abap_struct } .\n|.
+      ELSE.
+        lv_block = |  types:\n        begin of { to_upper( ls_ct-name ) },\n|.
+        LOOP AT ls_ct-properties INTO ls_prop.
+          lv_block = lv_block && |        { ls_prop-abap_field } type { zcl_stg_segw_gen=>inline_type( ls_prop ) },\n|.
+        ENDLOOP.
+        lv_block = lv_block && |    end of { to_upper( ls_ct-name ) } .\n|.
+      ENDIF.
+      IF lv_count > 0.
+        lv_blocks = lv_blocks && `,`.
+      ENDIF.
+      lv_count = lv_count + 1.
+      lv_blocks = lv_blocks && `{"@id":` && quoted( `complex/` && ls_ct-name )
+        && `,"text":` && quoted( lv_block ) && `}`.
+    ENDLOOP.
+    LOOP AT is_model-function_imports INTO ls_fi.
+      IF ls_fi-parameters IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      lv_block = |  types:\n    begin of { zcl_stg_segw_gen=>action_type( ls_fi ) },\n|.
+      LOOP AT ls_fi-parameters INTO ls_fp.
+        lv_block = lv_block && |        { ls_fp-abap_field } type { zcl_stg_segw_gen=>action_parameter_type( ls_fp ) },\n|.
+      ENDLOOP.
+      lv_block = lv_block && |    end of { zcl_stg_segw_gen=>action_type( ls_fi ) } .\n|.
+      IF lv_count > 0.
+        lv_blocks = lv_blocks && `,`.
+      ENDIF.
+      lv_count = lv_count + 1.
+      lv_blocks = lv_blocks && `{"@id":` && quoted( `action/` && ls_fi-name )
+        && `,"text":` && quoted( lv_block ) && `}`.
+    ENDLOOP.
+    LOOP AT is_model-entity_types INTO ls_type.
+      IF ls_type-abap_struct IS NOT INITIAL.
+        lv_block = |  types:\n     TS_{ ls_type-type_stem } type { ls_type-abap_struct } .\n  types:\nTT_{ ls_type-type_stem } type standard table of TS_{ ls_type-type_stem } .\n|.
+      ELSE.
+        lv_block = |  types:\n      begin of TS_{ ls_type-type_stem },\n|.
+        LOOP AT ls_type-properties INTO ls_prop.
+          IF ls_prop-complex_type IS NOT INITIAL.
+            lv_block = lv_block && |     { ls_prop-abap_field } type { to_upper( ls_prop-complex_type ) },\n|.
+          ELSE.
+            lv_block = lv_block && |     { ls_prop-abap_field } type { zcl_stg_segw_gen=>inline_type( ls_prop ) },\n|.
+          ENDIF.
+        ENDLOOP.
+        lv_block = lv_block && |  end of TS_{ ls_type-type_stem } .\n  types:\n    TT_{ ls_type-type_stem } type standard table of TS_{ ls_type-type_stem } .\n|.
+      ENDIF.
+      IF lv_count > 0.
+        lv_blocks = lv_blocks && `,`.
+      ENDIF.
+      lv_count = lv_count + 1.
+      lv_blocks = lv_blocks && `{"@id":` && quoted( `entity/` && ls_type-name )
+        && `,"text":` && quoted( lv_block ) && `}`.
+    ENDLOOP.
+    lv_json = lv_json && `,"other_types":[`.
+    IF lv_count > 0.
+      FIND FIRST OCCURRENCE OF `},{` IN lv_blocks MATCH OFFSET lv_count.
+      IF sy-subrc = 0.
+        lv_json = lv_json && substring( val = lv_blocks off = lv_count + 2 ) && `],`.
+        lv_blocks = substring( val = lv_blocks len = lv_count + 1 ).
+      ELSE.
+        lv_json = lv_json && `],`.
+      ENDIF.
+      lv_json = lv_json && `"first_type":[` && lv_blocks && `]`.
+    ELSE.
+      lv_json = lv_json && `],"first_type":[]`.
+    ENDIF.
+    CLEAR lt_named.
+    LOOP AT is_model-entity_types INTO ls_type.
+      ls_named-name = ls_type-type_stem.
+      ls_named-content = ls_type-name.
+      APPEND ls_named TO lt_named.
+    ENDLOOP.
+    LOOP AT is_model-complex_types INTO ls_ct.
+      ls_named-name = to_upper( ls_ct-name ).
+      IF strlen( ls_named-name ) > 27.
+        ls_named-name = substring( val = ls_named-name len = 27 ).
+      ENDIF.
+      ls_named-content = ls_ct-name.
+      APPEND ls_named TO lt_named.
+    ENDLOOP.
+    SORT lt_named BY name.
+    lv_json = lv_json && `,"constants":[`.
+    lv_first = abap_true.
+    LOOP AT lt_named INTO ls_named.
+      IF lv_first = abap_false.
+        lv_json = lv_json && `,`.
+      ENDIF.
+      lv_first = abap_false.
+      lv_json = lv_json && `{"@id":` && quoted( `constant/` && ls_named-name )
+        && `,"name":` && quoted( ls_named-name )
+        && `,"value":` && quoted( ls_named-content ) && `}`.
+    ENDLOOP.
+    lv_json = lv_json && `],"declarations":[`.
+    CLEAR lt_named.
+    IF is_model-complex_types IS NOT INITIAL.
+      ls_named-name = 'DEFINE_COMPLEXTYPES'.
+      APPEND ls_named TO lt_named.
+    ENDIF.
+    LOOP AT is_model-entity_types INTO ls_type.
+      ls_named-name = `DEFINE_` && ls_type-define_stem.
+      APPEND ls_named TO lt_named.
+    ENDLOOP.
+    IF is_model-associations IS NOT INITIAL OR is_model-navigation IS NOT INITIAL.
+      ls_named-name = 'DEFINE_ASSOCIATIONS'.
+      APPEND ls_named TO lt_named.
+    ENDIF.
+    IF is_model-function_imports IS NOT INITIAL.
+      ls_named-name = 'DEFINE_ACTIONS'.
+      APPEND ls_named TO lt_named.
+    ENDIF.
+    lv_first = abap_true.
+    LOOP AT lt_named INTO ls_named.
+      IF lv_first = abap_false.
+        lv_json = lv_json && `,`.
+      ENDIF.
+      lv_first = abap_false.
+      lv_json = lv_json && `{"@id":` && quoted( `declaration/` && ls_named-name )
+        && `,"name":` && quoted( ls_named-name ) && `}`.
+    ENDLOOP.
+    lv_pad = is_model-mpc.
+    WHILE strlen( lv_pad ) < 30.
+      lv_pad = lv_pad && `=`.
+    ENDWHILE.
+    lv_json = lv_json && `],"text_include":` && quoted( lv_pad && `CP` ).
+    CLEAR lt_impl.
+    IF is_model-function_imports IS NOT INITIAL.
+      ls_impl-name = 'DEFINE_ACTIONS'.
+      ls_impl-content = `{"@id":"method/DEFINE_ACTIONS","is_actions":"X"}`.
+      APPEND ls_impl TO lt_impl.
+    ENDIF.
+    IF is_model-associations IS NOT INITIAL OR is_model-navigation IS NOT INITIAL.
+      ls_impl-name = 'DEFINE_ASSOCIATIONS'.
+      ls_impl-content = `{"@id":"method/DEFINE_ASSOCIATIONS","is_associations":"X"}`.
+      APPEND ls_impl TO lt_impl.
+    ENDIF.
+    IF is_model-complex_types IS NOT INITIAL.
+      ls_impl-name = 'DEFINE_COMPLEXTYPES'.
+      ls_impl-content = `{"@id":"method/DEFINE_COMPLEXTYPES","is_complex":"X"}`.
+      APPEND ls_impl TO lt_impl.
+    ENDIF.
+    LOOP AT is_model-entity_types INTO ls_type.
+      lo_entity = entity_model( is_type = ls_type iv_mpc = is_model-mpc ).
+      lv_block = lo_entity->stringify( ).
+      ls_impl-name = `DEFINE_` && ls_type-define_stem.
+      ls_impl-content = substring( val = lv_block len = strlen( lv_block ) - 1 )
+        && `,"is_entity":"X"}`.
+      APPEND ls_impl TO lt_impl.
+    ENDLOOP.
+    ls_impl-name = 'GET_LAST_MODIFIED'.
+    ls_impl-content = `{"@id":"method/GET_LAST_MODIFIED","is_last_modified":"X"}`.
+    APPEND ls_impl TO lt_impl.
+    ls_impl-name = 'LOAD_TEXT_ELEMENTS'.
+    ls_impl-content = `{"@id":"method/LOAD_TEXT_ELEMENTS","is_load_texts":"X"}`.
+    APPEND ls_impl TO lt_impl.
+    SORT lt_impl BY name.
+    lv_json = lv_json && `,"impls":[`.
+    lv_first = abap_true.
+    LOOP AT lt_impl INTO ls_impl.
+      IF lv_first = abap_false.
+        lv_json = lv_json && `,`.
+      ENDIF.
+      lv_first = abap_false.
+      lv_json = lv_json && ls_impl-content.
+    ENDLOOP.
+    lv_json = lv_json && `]`.
+    ri_model = zcl_ajson=>parse( lv_json && `}` ).
   ENDMETHOD.
 
   METHOD method_template.
@@ -579,5 +769,91 @@ CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
       iv_template = entity_template( )
       ii_data = entity_model( is_type = is_type iv_mpc = iv_mpc )
       iv_name = 'mpc_entity' ).
+  ENDMETHOD.
+
+  METHOD class_template.
+    rv_text = `class {{mpc}} definition` && cl_abap_char_utilities=>newline
+      && `  public` && cl_abap_char_utilities=>newline
+      && `  inheriting from /IWBEP/CL_MGW_PUSH_ABS_MODEL` && cl_abap_char_utilities=>newline
+      && `  create public .` && cl_abap_char_utilities=>newline
+      && cl_abap_char_utilities=>newline
+      && `public section.` && cl_abap_char_utilities=>newline
+      && cl_abap_char_utilities=>newline
+      && `{{#first_type}}{{{text}}}{{/first_type}}`
+      && `  types:` && cl_abap_char_utilities=>newline
+      && `   begin of ts_text_element,` && cl_abap_char_utilities=>newline
+      && `      artifact_name  type c length 40,       " technical name` && cl_abap_char_utilities=>newline
+      && `      artifact_type  type c length 4,` && cl_abap_char_utilities=>newline
+      && `      parent_artifact_name type c length 40, " technical name` && cl_abap_char_utilities=>newline
+      && `      parent_artifact_type type c length 4,` && cl_abap_char_utilities=>newline
+      && `      text_symbol    type textpoolky,` && cl_abap_char_utilities=>newline
+      && `   end of ts_text_element .` && cl_abap_char_utilities=>newline
+      && `  types:` && cl_abap_char_utilities=>newline
+      && `         tt_text_elements type standard table of ts_text_element with key text_symbol .` && cl_abap_char_utilities=>newline
+      && `{{#other_types}}{{{text}}}{{/other_types}}`
+      && cl_abap_char_utilities=>newline
+      && `{{#constants}}  constants GC_{{name}} type /IWBEP/IF_MGW_MED_ODATA_TYPES=>TY_E_MED_ENTITY_NAME value '{{value}}' ##NO_TEXT.` && cl_abap_char_utilities=>newline
+      && `{{/constants}}` && cl_abap_char_utilities=>newline
+      && cl_abap_char_utilities=>newline
+      && `  methods LOAD_TEXT_ELEMENTS` && cl_abap_char_utilities=>newline
+      && `  final` && cl_abap_char_utilities=>newline
+      && `    returning` && cl_abap_char_utilities=>newline
+      && `      value(RT_TEXT_ELEMENTS) type TT_TEXT_ELEMENTS` && cl_abap_char_utilities=>newline
+      && `    raising` && cl_abap_char_utilities=>newline
+      && `      /IWBEP/CX_MGW_MED_EXCEPTION .` && cl_abap_char_utilities=>newline
+      && cl_abap_char_utilities=>newline
+      && `  methods DEFINE` && cl_abap_char_utilities=>newline
+      && `    redefinition .` && cl_abap_char_utilities=>newline
+      && `  methods GET_LAST_MODIFIED` && cl_abap_char_utilities=>newline
+      && `    redefinition .` && cl_abap_char_utilities=>newline
+      && `protected section.` && cl_abap_char_utilities=>newline
+      && `private section.` && cl_abap_char_utilities=>newline
+      && cl_abap_char_utilities=>newline
+      && `{{#has_texts}}  constants GC_INCL_NAME type STRING value '{{text_include}}' ##NO_TEXT.` && cl_abap_char_utilities=>newline
+      && cl_abap_char_utilities=>newline
+      && `{{/has_texts}}{{#declarations}}  methods {{name}}` && cl_abap_char_utilities=>newline
+      && `    raising` && cl_abap_char_utilities=>newline
+      && `      /IWBEP/CX_MGW_MED_EXCEPTION .` && cl_abap_char_utilities=>newline
+      && `{{/declarations}}ENDCLASS.` && cl_abap_char_utilities=>newline
+      && cl_abap_char_utilities=>newline
+      && cl_abap_char_utilities=>newline
+      && cl_abap_char_utilities=>newline
+      && `CLASS {{mpc}} IMPLEMENTATION.` && cl_abap_char_utilities=>newline
+      && cl_abap_char_utilities=>newline
+      && cl_abap_char_utilities=>newline
+      && `{{> DEFINE}}`
+      && `{{#impls}}` && cl_abap_char_utilities=>newline && cl_abap_char_utilities=>newline
+      && `{{#is_actions}}{{> DEFINE_ACTIONS}}{{/is_actions}}`
+      && `{{#is_associations}}{{> DEFINE_ASSOCIATIONS}}{{/is_associations}}`
+      && `{{#is_complex}}{{> DEFINE_COMPLEXTYPES}}{{/is_complex}}`
+      && `{{#is_entity}}{{> entity}}{{/is_entity}}`
+      && `{{#is_last_modified}}{{> GET_LAST_MODIFIED}}{{/is_last_modified}}`
+      && `{{#is_load_texts}}{{> LOAD_TEXT_ELEMENTS}}{{/is_load_texts}}`
+      && `{{/impls}}ENDCLASS.` && cl_abap_char_utilities=>newline.
+  ENDMETHOD.
+
+  METHOD render_class.
+    DATA lo_model TYPE REF TO zif_ajson.
+    DATA lt_partials TYPE zcl_osd_tpl=>tt_partials.
+    DATA ls_partial TYPE zcl_osd_tpl=>ty_partial.
+    DATA lt_methods TYPE string_table.
+    DATA lv_method TYPE string.
+    lo_model = project_model( is_model ).
+    APPEND 'DEFINE' TO lt_methods.
+    APPEND 'DEFINE_ACTIONS' TO lt_methods.
+    APPEND 'DEFINE_ASSOCIATIONS' TO lt_methods.
+    APPEND 'DEFINE_COMPLEXTYPES' TO lt_methods.
+    APPEND 'GET_LAST_MODIFIED' TO lt_methods.
+    APPEND 'LOAD_TEXT_ELEMENTS' TO lt_methods.
+    LOOP AT lt_methods INTO lv_method.
+      ls_partial-name = lv_method.
+      ls_partial-template = method_template( lv_method ).
+      APPEND ls_partial TO lt_partials.
+    ENDLOOP.
+    ls_partial-name = 'entity'.
+    ls_partial-template = entity_template( ).
+    APPEND ls_partial TO lt_partials.
+    rs_result = zcl_osd_tpl=>render( iv_template = class_template( )
+      ii_data = lo_model it_partials = lt_partials iv_name = 'mpc_class' ).
   ENDMETHOD.
 ENDCLASS.

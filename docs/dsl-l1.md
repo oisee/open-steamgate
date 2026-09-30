@@ -1,6 +1,6 @@
 # DSL L1: the typed generation model
 
-Status: spec, 2026-09-30. Built on the template engine of `docs/abap-templates.md` (L0, PR #266).
+Status: MPC class rendering implemented through slice 5, 2026-09-30. Built on the template engine of `docs/abap-templates.md` (L0, PR #266).
 
 ## Where it sits
 
@@ -93,6 +93,21 @@ Acceptance:
 4. a mutation test: changing one model field changes exactly the lines whose trace names that node.
 
 Not in the first slice: the other MPC methods, DPC, the class frame, writing files.
+
+## Whole MPC class
+
+`zcl_osd_dsl_mpc=>render_class` renders the full `_MPC` class from the project
+model. The model fixes the type-block placement, constant and method-declaration
+order, optional sections, and alphabetical implementation order. The class
+template includes the method templates as partials, so the line trace reaches
+the section or property that produced each line. Complex properties carry a
+resolved `@type` with their own `@id`, as entity properties do.
+
+After `npm run transpile`, run
+`node tools/dsl-mpc.mjs render <project.iwpr.xml> --out <dir>` to write the
+class's `.clas.abap` and `.clas.trace.json` files. The command imports under its
+own temporary project name, removes those rows afterwards, prints the ABAP
+profile findings, and exits nonzero for an error finding.
 
 ## Steps
 
