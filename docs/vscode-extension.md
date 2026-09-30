@@ -1611,8 +1611,8 @@ own env when the setting resolves to on -- `"auto"` is on at or above
 os.totalmem())`, pure and unit-tested at both sides of the floor,
 `test/vscode-launcher.mjs`). This only asks the launched system to *try*:
 whether it actually primes is `tools/osd-store.mjs` `warmUp()`'s own
-business. Release VSIX builds use the locked fork with the local `only` and
-registry-reuse patch and one shared `@abaplint/core`; they can prime. A
+business. Release VSIX builds use the locked fork with upstream `only` and
+registry reuse and one shared `@abaplint/core`; they can prime. A
 checkout using the published npm transpiler stays cold and says why. That
 reason is shown as the server gave it, not reworded.
 

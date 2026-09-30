@@ -25,8 +25,9 @@ export async function verifyVsixTranspiler(file) {
     const actual = readFileSync(join(scratch, ".osd-transpiler-ref"), "utf8").trim();
     if (actual !== expected) throw new Error(`VSIX transpiler ref ${actual} differs from libs.lock.json ${expected}`);
     requireContent(scratch, "node_modules/@abaplint/transpiler/build/src/types.d.ts", /only\?:\s*\(obj:/);
-    requireContent(scratch, "node_modules/@abaplint/transpiler/build/src/index.js", /this\.options\.only\(obj\)/);
-    requireContent(scratch, "node_modules/@abaplint/transpiler/build/src/validation.js", /getConfig\(\)\.get\(\)/);
+    requireContent(scratch, "node_modules/@abaplint/transpiler/build/src/index.js", /this\.options\?\.only\?\.\(obj\) === false/);
+    requireContent(scratch, "node_modules/@abaplint/transpiler/build/src/validation.js", /reg\.getConfig\(\)\.get\(\)\) === JSON\.stringify\(conf\.get\(\)\)/);
+    requireContent(scratch, "node_modules/@abaplint/transpiler/build/src/validation.js", /obj\.setDirty\(\)/);
     requireContent(scratch, "node_modules/@abaplint/runtime/build/src/context.js", /dataset\s*=\s*undefined/);
     requireContent(scratch, "node_modules/@abaplint/runtime/build/src/statements/dataset.js", /this\.context\.dataset/);
     console.log(`VSIX transpiler: ${actual}; only option and DATASET host found in bundled code`);

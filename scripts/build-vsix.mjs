@@ -114,7 +114,7 @@ function pinnedTranspilerRef() {
       runtime !== join(clone, "packages", "runtime") ||
       core !== join(clone, "packages", "transpiler", "node_modules", "@abaplint", "core") ||
       execFileSync("git", ["-C", clone, "rev-parse", "HEAD"], {encoding: "utf8"}).trim() !== ref ||
-      !readFileSync(join(transpiler, "build", "src", "index.js"), "utf8").includes("this.options.only(obj)")) {
+      !readFileSync(join(transpiler, "build", "src", "index.js"), "utf8").includes("this.options?.only?.(obj) === false")) {
     throw new Error("build-vsix: transpiler and runtime must be linked to the built libs.lock.json fork; see tools/osd-ci-transpiler-build.sh");
   }
   return ref;
