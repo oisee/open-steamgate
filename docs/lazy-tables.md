@@ -1,5 +1,10 @@
 # Lazy table providers — design
 
+> **Scope, 2026-09-30:** ADR 0005 is accepted in narrowed form. What is accepted now: the registry concept
+> (internal), source identity, the cross-reference eager-in-its-own-step slice, measurement before lazy, keys as
+> name/value pairs with a DDIC `--check`, and the shared-DB rule. The implicit hook, the in-LUW fill protocol and
+> ABAP `ensure` below are **gated on the first ABAP reader of a registered table**; see the ADR, "Accepted scope".
+
 The decision and its reasons are in [ADR 0005](adr/0005-lazy-table-providers.md).
 This page is the shape of the code: the registry, the ABAP interface, the two
 hooks, the fill protocol, the first three providers and the tests that have to

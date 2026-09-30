@@ -1,6 +1,6 @@
 # ADR 0005 — Lazy table providers: derived tables filled on demand
 
-**Status:** Proposed
+**Status:** Accepted, narrowed (Alice, 2026-09-30, after reviews by astra, Fable and osg-research-c2). Release tier: 0.4 nice (the decision); first slice 0.5 should (`docs/backlog/gogen-osgo.md`, "Release plan with priorities")
 **Date:** 2026-09-30
 **Deciders:** Alice; open-steamgate (dell)
 **Context:** Alice asked for a central way to fill tables lazily, either whole or
@@ -43,7 +43,51 @@ Four facts of the code constrain the design:
    gets SQL text only, but `tables.go`'s registry (`RegisterTables`,
    `TableByName`) is generated from the DDIC and could carry a provider.
 
-## Decision
+## Accepted scope (2026-09-30)
+
+Three reviews (astra, Fable, osg-research-c2) all said ACCEPT WITH CHANGES, for one reason: **no ABAP under `src/`
+or `packs/` SELECTs a registered table today.** Every reader of `CROSS`, `WBCROSSGT*`, `D010INC` is host-side
+(`tools/osd-data.mjs`, `tools/adt-facade.mjs`, `osd-unit-risk.mjs` through `rows()`), and versions are already read
+from git at read time (#288, ADR 0001). So the decision is accepted and the mechanism is gated on a reader.
+
+**Accepted now**
+- **Derived tables are declared by group** (the tables one fill writes), with a policy (`eager` / `lazy` /
+  `by_key`) and a provider. The registry is **internal**: no public manifest format, no pack override semantics,
+  no ABAP interface yet. Those are one-way doors; they stay closed until a second consumer and the shared-DB model
+  are proven (astra).
+- **A fill is bound to an immutable source identity** (the generation for the cross-reference, a pinned commit
+  plus the layer mapping for git history) and publishes that identity with its rows. Freshness means "the rows
+  carry the identity the reader asks for"; a timer only decides when a read re-checks, it bounds nothing else
+  (astra).
+- **The first slice is the cross-reference only**, and outside any reader's LUW: an `eager` fill in a dialog step
+  of its own right after the host starts listening, and the closed list of host readers awaits that fill's promise
+  (Fable). This moves the ~3 s parse off the critical path of start without a fill under anybody else's lock.
+- **Measure before the policy changes**: host start and the cold first read of the cross-reference, with one
+  instrument, before `lazy` is switched on (osg-research-c2, astra).
+- **Keys are name/value pairs**, not a flattened string: CHAR loses trailing blanks and NUMC keeps leading zeros,
+  so a string built in ABAP and one built by the host would differ for the same key. A `--check` verifies every
+  registered table and key field against the DDIC (`tools/dsl-ddic.mjs`), in key order (osg-research-c2).
+- **One work process today, several in 0.6.** While there is one, fill state may live in the process. On a shared
+  DB (the OSGo dispatcher track) the group's source identity is a row beside its rows, rebuildable by dropping it,
+  a fill takes an ENQUEUE on the group, and rows plus identity publish atomically; an older publisher is rejected.
+  That row is cache metadata, not authoritative state, so it is not what ADR 0001 keeps out of tables (astra, Fable).
+- **Fill bookkeeping hangs off the step token**, never module scope, so the 0.5 Session refactor carries it (Fable).
+
+**Gated, not accepted yet: until the first ABAP SELECT of a registered table enters the tree**
+- The implicit read hook at the seam, fills in the reader's LUW, the pending/committed protocol, the `sy`
+  save/restore and re-entry guard, and the Go emitter's `Ensure`: decisions 3, 5, 6 and 8 below.
+- `ensure` in application ABAP (decision 4). By-key preparation happens inside our runtime implementations of
+  standard APIs (for example `SVRS_GET_VERSION_DIRECTORY_46`), and ordinary reads stay complete (astra). The rule
+  "an explicit ensure suppresses later implicit fills in the LUW" is dropped; a neighbouring reader could miss rows.
+  The sentence "the contract for such a reader is to ensure every key it reads, in the same LUW" stays as the
+  internal contract that verified lift R1 cites (osg-research-c2).
+- `VRSD` as a table: only when standard ABAP that reads `VRSD` enters the tree; until then #288 answers from git.
+- When the gate opens: match a table name only in table position (after `FROM` / `JOIN`), because `CROSS` is an SQL
+  keyword; map CDS SQL-view names and classic DDIC views to their base tables; in development, log every implicit
+  fill as a named event so no ABAP comes to rely on an implicit fill unnoticed (Fable, osg-research-c2).
+
+## Full design (the gated part follows the accepted scope above)
+
 
 1. **A registry of providers**, one entry per table, layered like the input
    folders so that a pack can add a provider. Each entry names:
@@ -142,9 +186,9 @@ Four facts of the code constrain the design:
 
 - Host start stops paying for tables nobody reads. The cross-reference parse
   is the largest such cost today.
-- Through the covered read paths, a derived table is stale for at most its
-  declared `maxStaleSeconds`, and only when a trigger was missed. Without a
-  missed trigger it is never stale.
+- Freshness is relative to a named source identity. A missed trigger delays
+  the re-check by at most `maxStaleSeconds`; it does not bound the fill's
+  duration or a transaction snapshot that is already open (astra).
 - The first SELECT of a lazy table pays for its fill inside the reader's step.
   For the cross-reference that is the cached copy (milliseconds) or the parse
   (~3 s cold). How slow a cold first read is gets measured, not guessed.
@@ -167,9 +211,9 @@ Four facts of the code constrain the design:
   measured time: `cacheKey` walks and hashes the tree, and HEAD spawns a
   process. That is the wrong cost for a read path; the epoch comparison is a
   number.
-- **A bookkeeping table for fill state.** It would be authoritative state that
-  nothing can rebuild, which is exactly what ADR 0001 and the 2026-09-24 rule
-  keep out of tables.
+- **A bookkeeping table as authoritative state.** Rejected. A source-identity
+  row beside the rows, rebuildable by dropping it, is cache metadata and is
+  accepted for the shared-DB case (see Accepted scope).
 - **A separate connection or step for the fill.** There is one work process,
   and the lock is not re-entrant. A second step would wait for the reader
   that is waiting for it.
