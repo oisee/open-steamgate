@@ -120,6 +120,19 @@ describe("DATASET host (X0)", function () {
     expect(await open("/mem/none.bin", "UPDATE")).to.equal(8);
   });
 
+  it("DELETE of a link removes the link, not the file it points at; OUTPUT still truncates", async () => {
+    writeFileSync(join(writeRoot, "target.txt"), "keep\n");
+    symlinkSync(join(writeRoot, "target.txt"), join(writeRoot, "link.txt"));
+    await run.statements.deleteDataset(str(join(writeRoot, "link.txt")));
+    expect(subrc()).to.equal(0);
+    expect(readFileSync(join(writeRoot, "target.txt"), "utf8")).to.equal("keep\n");
+    const name = str(join(writeRoot, "target.txt"));
+    await open(name.get(), "OUTPUT", false);
+    await run.statements.transfer(str("y"), name);
+    await run.statements.closeDataset(name);
+    expect(readFileSync(join(writeRoot, "target.txt"), "utf8")).to.equal("y\n");
+  });
+
   it("a name that is only a prefix of a root is not inside it", async () => {
     mkdirSync(readRoot + "2");
     writeFileSync(join(readRoot + "2", "b.txt"), "b\n");

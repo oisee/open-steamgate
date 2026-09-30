@@ -518,12 +518,12 @@ func within(candidate string, roots []string) bool {
 // elsewhere; the path with its symlinks followed is inside a root; a last
 // component that is a symlink pointing nowhere is refused, since opening it
 // for writing would create the file at its target.
-func (sb *Sandbox) place(name string, roots, given []string) (real, refused string, missing bool) {
+func (sb *Sandbox) place(name string, roots, given []string) (real, named, refused string, missing bool) {
 	if len(roots) == 0 {
-		return "", "no dataset root allows this (OSD_DATASET_READ / OSD_DATASET_WRITE)", false
+		return "", "", "no dataset root allows this (OSD_DATASET_READ / OSD_DATASET_WRITE)", false
 	}
 	if strings.ContainsRune(name, 0) {
-		return "", "a NUL in the name", false
+		return "", "", "a NUL in the name", false
 	}
 	read, write := sb.roots()
 	base := sb.Home
@@ -546,24 +546,32 @@ func (sb *Sandbox) place(name string, roots, given []string) (real, refused stri
 		}
 	}
 	if !within(wanted, lexical) && !within(wanted, roots) {
-		return "", name + " is outside the dataset roots", false
+		return "", "", name + " is outside the dataset roots", false
+	}
+	// the entry the name stands for without following its last component:
+	// what a DELETE removes (unlink never follows it)
+	if dir, err := filepath.EvalSymlinks(filepath.Dir(wanted)); err == nil {
+		named = filepath.Join(dir, filepath.Base(wanted))
 	}
 	if p, err := filepath.EvalSymlinks(wanted); err == nil {
 		real = p
 	} else {
 		if info, err := os.Lstat(wanted); err == nil && info.Mode()&os.ModeSymlink != 0 {
-			return "", name + " is a symbolic link that points nowhere", false
+			return "", "", name + " is a symbolic link that points nowhere", false
 		}
 		dir, err := filepath.EvalSymlinks(filepath.Dir(wanted))
 		if err != nil {
-			return "", "", true
+			return "", "", "", true
 		}
 		real = filepath.Join(dir, filepath.Base(wanted))
 	}
 	if !within(real, roots) {
-		return "", name + " is outside the dataset roots", false
+		return "", "", name + " is outside the dataset roots", false
 	}
-	return real, "", false
+	if named == "" {
+		named = real
+	}
+	return real, named, "", false
 }
 
 // Open opens name for mode inside the roots.
@@ -573,7 +581,7 @@ func (sb *Sandbox) Open(name string, mode DatasetMode) (DatasetHandle, string) {
 	if mode != DatasetInput {
 		roots, given = write, sb.Write
 	}
-	real, refused, missing := sb.place(name, roots, given)
+	real, _, refused, missing := sb.place(name, roots, given)
 	if refused != "" {
 		sb.note(map[string]any{"op": "OPEN", "name": name, "mode": string(mode), "allowed": false, "why": refused})
 		return nil, "Permission denied: " + refused
@@ -589,7 +597,8 @@ func (sb *Sandbox) Open(name string, mode DatasetMode) (DatasetHandle, string) {
 	case DatasetInput:
 		flags = os.O_RDONLY
 	case DatasetOutput:
-		flags = os.O_RDWR | os.O_CREATE | os.O_TRUNC
+		// truncated only after the descriptor is checked below
+		flags = os.O_RDWR | os.O_CREATE
 	case DatasetAppending:
 		flags = os.O_RDWR | os.O_CREATE
 	default:
@@ -616,6 +625,12 @@ func (sb *Sandbox) Open(name string, mode DatasetMode) (DatasetHandle, string) {
 		sb.note(map[string]any{"op": "OPEN", "name": name, "mode": string(mode), "allowed": false, "why": "moved outside the dataset roots while opening"})
 		return nil, "Permission denied: " + name + " is outside the dataset roots"
 	}
+	if mode == DatasetOutput {
+		if err := fh.Truncate(0); err != nil {
+			fh.Close()
+			return nil, "error"
+		}
+	}
 	sb.note(map[string]any{"op": "OPEN", "name": name, "mode": string(mode), "allowed": true, "path": real})
 	if info, err := fh.Stat(); err == nil && info.IsDir() {
 		// a directory opens on a system too and then reads nothing
@@ -628,16 +643,16 @@ func (sb *Sandbox) Open(name string, mode DatasetMode) (DatasetHandle, string) {
 // Delete removes name inside a write root.
 func (sb *Sandbox) Delete(name string) bool {
 	_, write := sb.roots()
-	real, refused, missing := sb.place(name, write, sb.Write)
+	_, named, refused, missing := sb.place(name, write, sb.Write)
 	if refused != "" || missing {
 		sb.note(map[string]any{"op": "DELETE", "name": name, "allowed": false})
 		return false
 	}
-	if err := os.Remove(real); err != nil {
+	if err := os.Remove(named); err != nil {
 		sb.note(map[string]any{"op": "DELETE", "name": name, "allowed": false, "why": err.Error()})
 		return false
 	}
-	sb.note(map[string]any{"op": "DELETE", "name": name, "allowed": true, "path": real})
+	sb.note(map[string]any{"op": "DELETE", "name": name, "allowed": true, "path": named})
 	return true
 }
 

@@ -245,3 +245,23 @@ func TestDatasetAudit(t *testing.T) {
 		t.Fatalf("audit %v", got)
 	}
 }
+
+func TestDatasetDeleteLinkAndTruncate(t *testing.T) {
+	f := newDatasetFixture(t)
+	target := filepath.Join(f.out, "target.txt")
+	os.WriteFile(target, []byte("keep\n"), 0o644)
+	os.Symlink(target, filepath.Join(f.out, "link.txt"))
+	DeleteDataset(f.s, filepath.Join(f.out, "link.txt"))
+	if f.s.Sy.Subrc != 0 {
+		t.Fatalf("delete rc %d", f.s.Sy.Subrc)
+	}
+	if got, _ := os.ReadFile(target); string(got) != "keep\n" {
+		t.Fatalf("the link's target changed: %q", got)
+	}
+	f.open(target, DatasetOutput, false)
+	Transfer(f.s, str("y"), target, -1, false)
+	CloseDataset(f.s, target)
+	if got, _ := os.ReadFile(target); string(got) != "y\n" {
+		t.Fatalf("OUTPUT did not truncate: %q", got)
+	}
+}

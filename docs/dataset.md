@@ -46,6 +46,16 @@ enough:
    programs, not a boundary against a local attacker who can write inside a
    root at the same time.
 
+FOR OUTPUT truncates only after that check, so a lost race cannot empty a
+file outside the roots (it can at most leave an empty new one there).
+DELETE removes the entry the program named -- a link, not what it points
+at -- and a link that points out of the roots is not deleted at all.
+
+On Windows neither `O_NOFOLLOW` nor a descriptor's path is available: the
+lexical and real-path checks stand alone, with no race protection, and root
+comparison is case-sensitive although the file system is not -- not
+verified there, so treat a Windows host as checked, not sandboxed.
+
 A refused or failed OPEN reports the reason without the resolved path; the
 audit log has the path.
 

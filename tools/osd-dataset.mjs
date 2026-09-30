@@ -95,6 +95,12 @@ export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
       return {refused: `${name} is outside the dataset roots`};
     }
     let real;
+    let named;
+    try {
+      named = path.join(await fs.realpath(path.dirname(wanted)), path.basename(wanted));
+    } catch {
+      // the parent is missing; resolved below
+    }
     try {
       real = await fs.realpath(wanted);
     } catch {
@@ -113,7 +119,7 @@ export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
         return {missing: true};
       }
     }
-    return within(real, roots) ? {real} : {refused: `${name} is outside the dataset roots`};
+    return within(real, roots) ? {real, named: named ?? real} : {refused: `${name} is outside the dataset roots`};
   };
 
   /** what the descriptor really opened, where the platform can say (Linux) */
@@ -144,7 +150,8 @@ export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
         // no O_APPEND for APPENDING: the runtime starts it at the end and
         // writes at its own position, which is the same on every platform
         // (pwrite ignores the offset under O_APPEND on Linux, not everywhere)
-        const flags = (mode === "INPUT" ? c.O_RDONLY : mode === "OUTPUT" ? c.O_RDWR | c.O_CREAT | c.O_TRUNC
+        // OUTPUT truncates only after the descriptor is checked below
+        const flags = (mode === "INPUT" ? c.O_RDONLY : mode === "OUTPUT" ? c.O_RDWR | c.O_CREAT
           : mode === "APPENDING" ? c.O_RDWR | c.O_CREAT : c.O_RDWR) | (c.O_NOFOLLOW ?? 0);
         handle = await fs.open(where.real, flags, 0o644);
         // a parent swapped for a symlink between the check and the open is
@@ -154,6 +161,9 @@ export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
           await handle.close();
           note({op: "OPEN", name, mode, allowed: false, why: "moved outside the dataset roots while opening"});
           return {message: `Permission denied: ${name} is outside the dataset roots`};
+        }
+        if (mode === "OUTPUT") {
+          await handle.truncate(0);
         }
         if ((await handle.stat()).isDirectory()) {
           // a directory opens on a system too (FOR INPUT IN BINARY MODE is 0
@@ -197,8 +207,10 @@ export function sandboxDatasetHost({read = [], write = [], home, audit} = {}) {
         return false;
       }
       try {
-        await fs.unlink(where.real);
-        note({op: "DELETE", name, allowed: true, path: where.real});
+        // unlink does not follow the last component: what the program named
+        // goes, a link and not the file it points at
+        await fs.unlink(where.named);
+        note({op: "DELETE", name, allowed: true, path: where.named});
         return true;
       } catch (error) {
         note({op: "DELETE", name, allowed: false, why: error.code ?? String(error)});
