@@ -31,6 +31,8 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
     DATA lv_char TYPE c LENGTH 1.
     DATA lv_next TYPE c LENGTH 1.
     DATA lv_quote TYPE c LENGTH 1.
+    DATA lv_brace TYPE i.
+    DATA lv_escaped TYPE abap_bool.
     DATA lv_comment TYPE abap_bool.
     DATA lv_soft TYPE abap_bool.
     DATA lv_node TYPE string.
@@ -63,6 +65,8 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
         ENDIF.
       ENDIF.
       CLEAR lv_quote.
+      CLEAR lv_brace.
+      lv_escaped = abap_false.
       lv_comment = abap_false.
       IF iv_profile = 'abap' AND lv_len > 0 AND lv_line(1) = '*'.
         lv_comment = abap_true.
@@ -78,17 +82,30 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
           ls_finding-rule = 'non_ascii'.
           ls_finding-text = 'Character outside 7-bit ASCII'.
           ls_finding-severity = 'E'.
-          IF ( lv_comment = abap_true OR lv_quote IS NOT INITIAL )
+          " inside a string template's { expression } it is code again
+          IF ( lv_comment = abap_true OR ( lv_quote IS NOT INITIAL AND lv_brace = 0 ) )
               AND iv_strict = abap_false.
             ls_finding-severity = 'W'.
           ENDIF.
           APPEND ls_finding TO rt_finding.
         ENDIF.
         IF lv_comment = abap_false.
-          IF lv_quote IS NOT INITIAL.
+          IF lv_escaped = abap_true.
+            " the character after a backslash in a string template is text;
+            " it was checked above like any other
+            lv_escaped = abap_false.
+          ELSEIF lv_quote = '|' AND lv_brace > 0.
+            IF lv_char = '{'.
+              lv_brace = lv_brace + 1.
+            ELSEIF lv_char = '}'.
+              lv_brace = lv_brace - 1.
+            ENDIF.
+          ELSEIF lv_quote IS NOT INITIAL.
             IF lv_quote = '|' AND lv_char = '\'.
               " a string template escapes with a backslash, not by doubling
-              lv_pos = lv_pos + 1.
+              lv_escaped = abap_true.
+            ELSEIF lv_quote = '|' AND lv_char = '{'.
+              lv_brace = 1.
             ELSEIF lv_quote = '|' AND lv_char = '|'.
               CLEAR lv_quote.
             ELSEIF lv_char = lv_quote.
@@ -101,8 +118,7 @@ CLASS zcl_osd_dsl_profile IMPLEMENTATION.
           ELSEIF lv_char = `'` OR lv_char = '`'.
             lv_quote = lv_char.
           ELSEIF iv_profile = 'abap' AND lv_char = '|'.
-            " a string template is a literal too; an embedded { expression } is
-            " counted as part of it
+            " a string template is a literal too, except its { expressions }
             lv_quote = lv_char.
           ELSEIF iv_profile = 'abap' AND lv_char = '"'.
             lv_comment = abap_true.
