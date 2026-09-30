@@ -2495,3 +2495,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Fix: the Go placeholders follow `tools/sqlscript-lower.mjs` again (SQLite binds a packed value as `CAST(? AS NUMERIC)` and an integer as `CAST(? AS INTEGER)` -- the latter covered by no pair, Go binds integers as int64 anyway --, DuckDB as `CAST(? AS DECIMAL(n,d))`, PostgreSQL a RAW(n) as `varchar(2n)`); a RAW literal that is not exactly its 2n upper-case hex digits is `OsqlWhereData` (CX_SY_OPEN_SQL_DATA_ERROR, catchable from a dynamic SELECT as before) rather than a panic; `UPSERT ... SELECT` and an upsert's `fill` columns render as `lower()` does for SQLite. `knownGaps` stays, empty, for the next time main's pairs run ahead
 - Regression-test location: `tools/gogen/go/abap/osqlwhere_test.go`, `writes_test.go`, `knowngaps_test.go`
 - Upstream version containing a fix: not applicable
+
+### ANOMALY-2026-09-30-unit-exception-aborts-run — the ordinary transpiler Unit runner stops after the first exception
+
+- Status: `open`
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/transpiler` 2.13.89 (`build/src/unit_test.js`, generated `output/index.mjs`)
+- Affected ABAP statement, runtime API or adapter: ABAP Unit lifecycle when a test method raises an uncaught exception or an assertion fails
+- Minimal ABAP reproducer: `tools/gogen/testdata-unit/zcl_gogen_unit_fixture.clas.testclasses.abap` has `FAIL`, `EXCEPTION`, and `AFTER_FAILURE` methods with a teardown hook
+- Exact command used to inspect it: `sed -n '210,245p' node_modules/@abaplint/transpiler/build/src/unit_test.js`; `node --test tools/gogen/unit.test.mjs` exercises the continuing lifecycle in the Go runner
+- Expected SAP behaviour: each method has a fresh instance; teardown runs after a failed method, later methods still run, and class teardown runs at the end ([SAP Help: ABAP Unit test execution](https://help.sap.com/docs/ABAP_PLATFORM_NEW/c238d694b825421f940829321ffa326a/baf1b5eb64254b8e8a4e5e79437cd441.html))
+- Actual open-abap behaviour: the generated ordinary Node runner has one outer `run().catch`; an exception in a method skips its teardown, later methods, and class teardown
+- Impact on open-steamgate: an ordinary Node Unit run reports only the first failure and misses later outcomes
+- Smallest safe workaround: `tools/gogen/node-unit-results.mjs` instruments the same Node metadata but catches per method and runs the remaining lifecycle; `tools/gogen/unit-compare.mjs` uses its per-method rows as the comparison oracle. The ordinary Node path is unchanged
+- Upstream: **needs an issue** in abaplint/transpiler (Unit runner exception handling)
+- Regression-test location: `tools/gogen/unit.test.mjs` lifecycle fixture
+- Upstream version containing a fix: none yet

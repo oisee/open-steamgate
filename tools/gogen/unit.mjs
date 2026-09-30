@@ -3,6 +3,7 @@
 import {spawnSync} from "node:child_process";
 import {existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
+import {performance} from "node:perf_hooks";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo, referencedClasses} from "./emit-go.mjs";
@@ -32,6 +33,7 @@ if (selected.size && owners.length !== selected.size) throw new Error(`unknown t
 // runtime has process-global class constructors.
 if (!selected.size && !fixture) {
   const rows = [];
+  const timingMs = {frontendClosureRounds: [], emit: 0, goBuild: 0, run: 0};
   for (const owner of owners) {
     const child = spawnSync("node", [join(here, "unit.mjs"), "--class", owner, "--out", join(out, owner.toLowerCase())], {
       cwd: home, encoding: "utf8", timeout: 180000, maxBuffer: 20e6, env: process.env,
@@ -40,7 +42,12 @@ if (!selected.size && !fixture) {
       rows.push({class: owner, status: "NOT_COMPILED", message: child.stderr || child.error?.message || `exit ${child.status}`});
       continue;
     }
-    try { rows.push(...JSON.parse(child.stdout).rows); }
+    try {
+      const result = JSON.parse(child.stdout);
+      rows.push(...result.rows);
+      timingMs.frontendClosureRounds.push(...(result.timingMs?.frontendClosureRounds ?? []));
+      for (const phase of ["emit", "goBuild", "run"]) timingMs[phase] += result.timingMs?.[phase] ?? 0;
+    }
     catch { rows.push({class: owner, status: "NOT_COMPILED", message: child.stderr || "invalid child result"}); }
   }
   const compiled = owners.filter((owner) => {
@@ -48,7 +55,7 @@ if (!selected.size && !fixture) {
     return own.some((r) => r.status === "SUCCESS" || r.status === "FAILED")
       && own.every((r) => r.status !== "NOT_COMPILED");
   });
-  console.log(JSON.stringify({classes: owners.length, compiled: compiled.length, rows}));
+  console.log(JSON.stringify({classes: owners.length, compiled: compiled.length, rows, timingMs}));
   process.exit(rows.some((r) => r.status === "FAILED") ? 1 : rows.some((r) => r.status === "NOT_COMPILED" || r.status === "NEEDS_DB") ? 2 : 0);
 }
 const libDirs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/framework", "open-abap-odata/src", "ajson/src/core"]
@@ -89,7 +96,9 @@ while (sourceQueue.length) {
   }
 }
 let program;
+const timingMs = {frontendClosureRounds: [], emit: 0, goBuild: 0, run: 0};
 for (let round = 0; round < 12; round++) {
+  const started = performance.now();
   program = compileProgram({folders, objects: [...wanted], tolerant: true, includeTests: new Set(owners), skip});
   const refs = new Set(referencedClasses(program));
   for (const name of wanted) {
@@ -101,6 +110,7 @@ for (let round = 0; round < 12; round++) {
     for (const m of c.methods) callsIn(m.body, refs);
   }
   const more = [...refs].filter((x) => available.has(x) && !wanted.has(x) && !x.includes(":"));
+  timingMs.frontendClosureRounds.push(Math.round(performance.now() - started));
   if (!more.length) break;
   for (const x of more) wanted.add(x);
   if (round === 11) throw new Error(`dependency closure did not settle: ${more.join(", ")}`);
@@ -190,6 +200,7 @@ for (const row of rows) if (row.status === "READY") {
   }
 }
 
+const emitStarted = performance.now();
 const goName = (x) => x.toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 const ready = rows.filter((x) => x.status === "READY");
 const groups = [...Map.groupBy(ready, (r) => `${r.class}:${r.testclass}`)].map(([key, methods]) => ({key, methods}));
@@ -234,20 +245,25 @@ if (ready.some((r) => r.db)) {
   const db = new DatabaseSetup(program.reg).run();
   writeFileSync(join(dir, "zz_db.json"), JSON.stringify([...db.schemas.sqlite, ...db.insert, ...seedStatements()]));
 } else writeFileSync(join(dir, "zz_db.json"), "[]");
-const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.class)).size, rows};
+timingMs.emit = Math.round(performance.now() - emitStarted);
+const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.class)).size, rows, timingMs};
 writeFileSync(join(out, "plan.json"), JSON.stringify(summary, null, 2));
 if (!ready.length || args.includes("--build-only")) { console.log(JSON.stringify(summary)); process.exit(ready.length ? 0 : 2); }
 const bin = join(out, "unit");
+const buildStarted = performance.now();
 const build = spawnSync("go", ["build", "-trimpath", "-o", bin, "./cmd/unit"], {
   cwd: join(here, "go"), encoding: "utf8", env: {...process.env, GOCACHE: process.env.GOCACHE ?? "/tmp/gogen-unit-gocache"}, maxBuffer: 5e6,
 });
+timingMs.goBuild = Math.round(performance.now() - buildStarted);
 if (build.status !== 0) {
   const message = (build.stderr || build.error?.message || "go build failed").trim().split("\n").slice(0, 12).join("\n");
   for (const r of ready) { r.status = "NOT_COMPILED"; r.message = message; }
   console.log(JSON.stringify({...summary, rows}));
   process.exit(2);
 }
+const runStarted = performance.now();
 const run = spawnSync(bin, [], {encoding: "utf8", timeout: 120000, maxBuffer: 20e6});
+timingMs.run = Math.round(performance.now() - runStarted);
 if (run.status !== 0) {
   for (const r of ready) { r.status = "FAILED"; r.message = `runner: ${run.stderr || run.error?.message || run.signal || run.status}`; }
   console.log(JSON.stringify({...summary, rows})); process.exit(1);

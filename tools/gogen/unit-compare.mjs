@@ -1,4 +1,4 @@
-// Compare per-method outcomes from the transpiler's ordinary Unit lifecycle
+// Compare per-method outcomes from the instrumented Node Unit lifecycle
 // with gogen's. Run `npm run transpile` first, or pass --node-json <file>.
 import {spawnSync} from "node:child_process";
 import {existsSync, readFileSync} from "node:fs";
@@ -28,13 +28,15 @@ else {
   if (!go.stdout) throw new Error(`Go Unit runner produced no results: ${go.stderr || go.error?.message}`);
   result = JSON.parse(go.stdout);
 }
-const owners = new Set(classes.length ? classes : result.rows.map((r) => r.class));
 const key = (r) => `${r.class}/${r.testclass}/${r.method}`;
 const norm = (r) => ({class: String(r.class ?? r.class_name).toUpperCase(),
   testclass: String(r.testclass ?? r.testclass_name).toUpperCase(), method: String(r.method ?? r.method_name).toUpperCase(),
   status: String(r.status).toUpperCase(), message: String(r.message ?? "").trim()});
-const node = new Map(rawNode.map(norm).filter((r) => owners.has(r.class)).map((r) => [key(r), r]));
-const gorows = new Map(result.rows.map(norm).filter((r) => owners.has(r.class)).map((r) => [key(r), r]));
+const nodeRows = rawNode.map(norm);
+const goRows = result.rows.map(norm);
+const owners = new Set(classes.length ? classes : [...nodeRows, ...goRows].map((r) => r.class));
+const node = new Map(nodeRows.filter((r) => owners.has(r.class)).map((r) => [key(r), r]));
+const gorows = new Map(goRows.filter((r) => owners.has(r.class)).map((r) => [key(r), r]));
 const methods = {same: [], different: [], nodeOnly: [], goOnly: [], skipped: []};
 for (const [k, n] of node) {
   const g = gorows.get(k);
@@ -48,7 +50,7 @@ for (const [k, g] of gorows) if (!node.has(k)) methods.goOnly.push({key: k, go: 
 const compiled = [];
 const notCompiled = [];
 for (const owner of owners) {
-  const rows = result.rows.filter((r) => r.class === owner);
+  const rows = goRows.filter((r) => r.class === owner);
   const first = rows.find((r) => r.status === "NOT_COMPILED" || r.status === "NEEDS_DB");
   if (first) notCompiled.push({class: owner, reason: `${first.status}: ${first.message}`});
   else if (rows.some((r) => r.status === "SUCCESS" || r.status === "FAILED")) compiled.push(owner);
@@ -57,4 +59,4 @@ for (const owner of owners) {
 }
 const summary = {classes: {compiled, notCompiled}, methods};
 console.log(JSON.stringify(summary, null, 2));
-if (methods.different.length || methods.goOnly.length || methods.nodeOnly.length) process.exitCode = 1;
+if (notCompiled.length || !methods.same.length || methods.different.length || methods.goOnly.length || methods.nodeOnly.length) process.exitCode = 1;

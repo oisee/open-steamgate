@@ -1538,8 +1538,12 @@ compiles each owner with its call and type closure, and returns JSON rows
 includes only for selected owners. A reachable stub is listed in `alerts`
 even when that branch was not executed. The runner uses the transpiler's
 class/method discovery, then calls `class_setup`, `setup`, the test method,
-`teardown`, and `class_teardown` in the ordinary Node Unit order. Each test
-method gets a fresh instance. A DB-using class gets a fresh in-memory
+`teardown`, and `class_teardown` in SAP's documented order. Each test
+method gets a fresh instance; teardown runs after a failed method, later
+methods still run, and class teardown runs at the end. The ordinary Node
+runner stops on the first exception (see ANORMALIES). The comparison oracle
+is `node-unit-results.mjs`, which instruments the Node metadata and follows
+the SAP lifecycle. A DB-using class gets a fresh in-memory
 SQLite database built from the transpiler's `DatabaseSetup` schema and
 generated rows plus `test/seed.mjs` rows. Explicitly skipped methods remain
 `SKIPPED`. An unbuilt owner cannot make another owner disappear: the full
@@ -1547,7 +1551,7 @@ inventory builds them one by one.
 
 Run `npm run transpile` first for the Node oracle, then
 `node tools/gogen/unit-compare.mjs --class ZCL_OSD_FORM_TEST --class ZCL_OSD_TIMER_TEST`.
-The comparison uses the ordinary Node Unit metadata and lifecycle. Its
+The comparison uses the instrumented Node Unit results described above. Its
 structured `_unit_open.mjs` path uses a different test-object lifecycle, so
 it is not the oracle. The compare output separates same, different,
 Node-only, Go-only, and configured skips. `node --test tools/gogen/unit.test.mjs`
@@ -1577,7 +1581,7 @@ intersection includes a seeded DB class.
 
 The full-set row has different populations and process layouts; it is not
 a speed ratio. The full Go inventory itself took 7:24.89 and peaked at
-1,768,808 KiB, so the full runner is not in `gogen.yml` (the requested CI
+1,768,808 KiB in one run (n=1), so the full runner is not in `gogen.yml` (the requested CI
 threshold is about five minutes). `unit-bench.mjs` and
 `unit-full-bench.mjs` reproduce the timing rows.
 
