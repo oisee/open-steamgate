@@ -905,6 +905,17 @@ func EncodeXBase64(s *Session, unencoded string) string {
 	return base64.StdEncoding.EncodeToString([]byte(unencoded))
 }
 
+// DecodeXBase64 is CL_HTTP_UTILITY=>DECODE_X_BASE64. An xstring is stored
+// as raw bytes in the Go runtime, so the decoded bytes can be returned as a
+// string without the hex conversion used by the Node transpiler runtime.
+func DecodeXBase64(s *Session, encoded string) string {
+	b, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		panic(HostError{"CL_HTTP_UTILITY=>DECODE_X_BASE64", err.Error()})
+	}
+	return string(b)
+}
+
 // CP is the pattern match, measured on A4H (2026-09-23): * is any run, + any
 // one character, # makes the next character literal and case-sensitive;
 // everything else compares ignoring case. A c pattern stored empty was all

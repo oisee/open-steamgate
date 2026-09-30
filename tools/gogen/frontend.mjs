@@ -612,10 +612,10 @@ const NATIVE = new Map([
   ["CL_ABAP_UNIT_ASSERT:LCL_DUMP=>TO_STRING", "abap.UnitDumpToString"],
   ["CL_ABAP_UNIT_ASSERT:LCL_DUMP=>DUMP_STRUCTURE", "abap.UnitDumpStructure"],
   // bytes as base64, RFC 4648 with padding (A4H 2026-09-24, ZCL_GOGEN_T_B64);
-  // the LSD channel sends the show this way (ultra/packs). decode_x_base64
-  // stays kernel code: what a system does with text that is not base64 is
-  // not measured
+  // the LSD channel sends the show this way (ultra/packs). Invalid base64
+  // behavior on a system has not been measured.
   ["CL_HTTP_UTILITY=>ENCODE_X_BASE64", "abap.EncodeXBase64"],
+  ["CL_HTTP_UTILITY=>DECODE_X_BASE64", "abap.DecodeXBase64"],
   ["ZCL_OAO_RFC_DESTINATION=>REGISTER_LOCAL", "abap.RegisterLocalDestination"],
   // get_text( ) of an exception without a T100 message or a text id: the
   // fallback text, which A4H gives too (2026-09-23); anything else dumps
