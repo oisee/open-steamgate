@@ -132,6 +132,8 @@ export async function checkServe(file, {timeoutSeconds = 600} = {}) {
   child.stderr.on("data", (d) => log.push(String(d)));
   let exited;
   child.on("exit", (code, signal) => { exited = {code, signal}; });
+  // a path that cannot start is an answer, not an unhandled event
+  child.on("error", (error) => { exited = {code: error.code ?? "error", signal: null}; log.push(String(error.message)); });
   const base = `http://127.0.0.1:${port}`;
   try {
     const deadline = Date.now() + timeoutSeconds * 1000;

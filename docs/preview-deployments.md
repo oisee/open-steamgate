@@ -100,8 +100,9 @@ Why, measured on 2026-09-30:
   preview run was green.
 
 The branch was pruned the same day to `main/` plus the open previews
-(178 MB). Pages' source setting must be "GitHub Actions" for `pages.yml` to
-be the deploy.
+(178 MB). Two repository settings make `pages.yml` the deploy: the
+`github-pages` environment allows the `main` branch (the workflow always runs
+in main's context), and Pages' source is "GitHub Actions".
 
 ## Locally
 

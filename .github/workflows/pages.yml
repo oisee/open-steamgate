@@ -13,8 +13,10 @@ name: pages
 # was green. The site limit is 1 GB; main plus the open previews is ~250 MB.
 #
 # A push made with GITHUB_TOKEN starts no workflow, so this runs when a
-# preview run completes (workflow_run, in main's context, which the
-# github-pages environment accepts), and by hand.
+# preview run completes (workflow_run, in main's context), and by hand. Two
+# repository settings go with it: the github-pages environment must allow
+# the main branch (its deployment branch policy), and Pages' source must be
+# "GitHub Actions" (build_type=workflow).
 
 on:
   workflow_run:
@@ -91,5 +93,5 @@ jobs:
           for build in site/*/build.json; do
             directory="$(basename "$(dirname "$build")")"
             commit="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).commit' "$build")"
-            node scripts/release-verify.mjs pages "${PAGE_URL%/}/$directory/" "$commit" --wait 600
+            node scripts/release-verify.mjs pages "${PAGE_URL%/}/$directory/" "$commit" --wait 300
           done
