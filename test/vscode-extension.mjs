@@ -1797,6 +1797,46 @@ describe("editors/vscode: the extension's logic", function () {
 });
 
 describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace layers / System)", function () {
+  it("indexes a class's tests by its main file while keeping child locations in testclasses", async () => {
+    const api = vscodeStub({home: ROOT, "tests.showSystem": false});
+    const include = path.join(ROOT, "src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
+    const main = path.join(ROOT, "src/webgui/zcl_osd_abap_tokens.clas.abap");
+    api.workspace.findFiles = async () => [api.Uri.file(include)];
+    api.workspace.getWorkspaceFolder = () => ({uri: api.Uri.file(ROOT)});
+    api.workspace.createFileSystemWatcher = () => ({onDidCreate() {}, onDidDelete() {}, onDidChange() {}, dispose() {}});
+    api.commands.registerCommand = () => ({dispose() {}});
+    api.TestRunProfileKind = {Run: 1, Debug: 2};
+    const collection = (parent) => {
+      const items = new Map();
+      return {get: (id) => items.get(id), get size() { return items.size; },
+        add(item) { item.parent = parent; items.set(item.id, item); },
+        replace(next) { items.clear(); next.forEach((item) => this.add(item)); },
+        [Symbol.iterator]: () => items[Symbol.iterator]()};
+    };
+    const controller = {items: collection(undefined),
+      createTestItem(id, label, uri) { const item = {id, label, uri}; item.children = collection(item); return item; },
+      createRunProfile() {}, dispose() {}};
+    api.tests = {createTestController: () => controller};
+    const {testExplorer} = loadExtension(api);
+    const originalDiscover = Osd.prototype.discover;
+    Osd.prototype.discover = async () => ({classes: [{name: "LTCL_SCAN", include: "testclasses", line: 1,
+      methods: [{name: "CHECK", line: 2}]}]});
+    let explorer;
+    try {
+      explorer = testExplorer(controllerContext(), {appendLine() {}});
+      await controller.resolveHandler();
+      const object = controller.items.get("group:project").children.get("CLAS:ZCL_OSD_ABAP_TOKENS");
+      expect(object.uri.fsPath).to.equal(main);
+      await controller.resolveHandler(object);
+      const testClass = object.children.get(`${object.id}/LTCL_SCAN`);
+      expect(testClass.uri.fsPath).to.equal(include);
+      expect(testClass.children.get(`${testClass.id}/CHECK`).uri.fsPath).to.equal(include);
+    } finally {
+      explorer?.dispose();
+      Osd.prototype.discover = originalDiscover;
+    }
+  });
+
   const transpileConfig = JSON.parse(readFileSync(path.join(ROOT, "abap_transpile.json"), "utf8"));
   const layers = transpileLayers(transpileConfig);
 
