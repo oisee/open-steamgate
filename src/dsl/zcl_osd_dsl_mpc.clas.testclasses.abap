@@ -8,13 +8,9 @@ CLASS ltcl_dsl_mpc DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT FI
     METHODS clean.
     METHODS seeded_project FOR TESTING RAISING cx_static_check.
     METHODS imported_project FOR TESTING RAISING cx_static_check.
+    METHODS mutation_trace FOR TESTING RAISING cx_static_check.
     METHODS compare_project IMPORTING iv_project TYPE string RAISING cx_static_check.
     METHODS fixture RETURNING VALUE(rv_xml) TYPE string.
-    METHODS node
-      IMPORTING io_json TYPE REF TO zif_ajson
-                iv_path TYPE string
-      RETURNING VALUE(rv_node) TYPE string
-      RAISING cx_static_check.
     METHODS node_of_line
       IMPORTING is_result TYPE zcl_osd_tpl=>ty_result
                 io_json TYPE REF TO zif_ajson
@@ -136,7 +132,8 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
         IF ls_trace-path <> `/`.
           cl_abap_unit_assert=>assert_true( act = lo_json->exists( ls_trace-path ) msg = ls_trace-path ).
         ENDIF.
-        cl_abap_unit_assert=>assert_true( xsdbool( node( io_json = lo_json iv_path = ls_trace-path ) CP `entity/*` ) ).
+        cl_abap_unit_assert=>assert_true( xsdbool( zcl_osd_dsl_trace=>node_of(
+          io_model = lo_json iv_path = ls_trace-path ) CP `entity/*` ) ).
       ENDLOOP.
       IF iv_project = 'ZUT_DSL' AND ls_type-name = 'Travel'.
         cl_abap_unit_assert=>assert_equals(
@@ -154,29 +151,6 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
     ENDLOOP.
     cl_abap_unit_assert=>assert_true( xsdbool( lv_count > 0 ) ).
   ENDMETHOD.
-  METHOD node.
-    " the nearest @id on the data path, climbing to the root
-    DATA lv_path TYPE string.
-    DATA lv_pos TYPE i.
-    lv_path = iv_path.
-    DO.
-      IF lv_path IS INITIAL OR lv_path = `/`.
-        rv_node = io_json->get( `/@id` ).
-        RETURN.
-      ENDIF.
-      rv_node = io_json->get( lv_path && `/@id` ).
-      IF rv_node IS NOT INITIAL.
-        RETURN.
-      ENDIF.
-      FIND REGEX `/[^/]+$` IN lv_path MATCH OFFSET lv_pos.
-      IF sy-subrc <> 0.
-        lv_path = `/`.
-      ELSE.
-        lv_path = substring( val = lv_path len = lv_pos ).
-      ENDIF.
-    ENDDO.
-  ENDMETHOD.
-
   METHOD node_of_line.
     DATA lv_line TYPE string.
     DATA ls_trace TYPE zcl_osd_tpl=>ty_trace.
@@ -184,10 +158,57 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
       IF lv_line CS iv_needle.
         READ TABLE is_result-trace INTO ls_trace WITH KEY line = sy-tabix.
         cl_abap_unit_assert=>assert_subrc( msg = iv_needle ).
-        rv_node = node( io_json = io_json iv_path = ls_trace-path ).
+        rv_node = zcl_osd_dsl_trace=>node_of( io_model = io_json iv_path = ls_trace-path ).
         RETURN.
       ENDIF.
     ENDLOOP.
     cl_abap_unit_assert=>fail( msg = `no line with ` && iv_needle ).
+  ENDMETHOD.
+
+  METHOD mutation_trace.
+    DATA ls_model TYPE zcl_stg_segw_gen=>ty_model.
+    DATA ls_type TYPE zcl_stg_segw_gen=>ty_entity_type.
+    DATA lo_json TYPE REF TO zif_ajson.
+    DATA ls_before TYPE zcl_osd_tpl=>ty_result.
+    DATA ls_after TYPE zcl_osd_tpl=>ty_result.
+    DATA ls_trace TYPE zcl_osd_tpl=>ty_trace.
+    DATA lv_before TYPE string.
+    DATA lv_after TYPE string.
+    DATA lv_changed TYPE i.
+    DATA lv_line TYPE i.
+    DATA lv_node TYPE string.
+    ls_model = zcl_stg_segw_gen=>build_model( 'ZSTG_MAPPED' ).
+    READ TABLE ls_model-entity_types INDEX 1 INTO ls_type.
+    cl_abap_unit_assert=>assert_subrc( ).
+    lo_json = zcl_osd_dsl_mpc=>entity_model( is_type = ls_type iv_mpc = ls_model-mpc ).
+    cl_abap_unit_assert=>assert_true( lo_json->exists( '/properties/1/@id' ) ).
+    ls_before = zcl_osd_tpl=>render( iv_template = zcl_osd_dsl_mpc=>entity_template( )
+                                      ii_data = lo_json iv_name = 'mpc_entity' ).
+    lv_node = lo_json->get( '/properties/1/@id' ).
+    lo_json->set_string( iv_path = '/properties/1/name' iv_val = 'ChangedName' ).
+    ls_after = zcl_osd_tpl=>render( iv_template = zcl_osd_dsl_mpc=>entity_template( )
+                                     ii_data = lo_json iv_name = 'mpc_entity' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( ls_after-lines ) exp = lines( ls_before-lines ) ).
+    " the mapping of lines to model paths does not move with a value change
+    cl_abap_unit_assert=>assert_equals( act = ls_after-trace exp = ls_before-trace ).
+    LOOP AT ls_before-lines INTO lv_before.
+      lv_line = sy-tabix.
+      READ TABLE ls_after-lines INDEX lv_line INTO lv_after.
+      IF lv_before <> lv_after.
+        lv_changed = lv_changed + 1.
+        " the line was the property's before the change, and still is
+        READ TABLE ls_before-trace INTO ls_trace WITH KEY line = lv_line.
+        cl_abap_unit_assert=>assert_subrc( ).
+        cl_abap_unit_assert=>assert_equals(
+          act = zcl_osd_dsl_trace=>node_of( io_model = lo_json iv_path = ls_trace-path )
+          exp = lv_node ).
+        READ TABLE ls_after-trace INTO ls_trace WITH KEY line = lv_line.
+        cl_abap_unit_assert=>assert_subrc( ).
+        cl_abap_unit_assert=>assert_equals(
+          act = zcl_osd_dsl_trace=>node_of( io_model = lo_json iv_path = ls_trace-path )
+          exp = lv_node ).
+      ENDIF.
+    ENDLOOP.
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_changed > 0 ) ).
   ENDMETHOD.
 ENDCLASS.
