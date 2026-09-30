@@ -14,6 +14,7 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  ZCL_GOGEN_T_RF_SORT_OK: "mv:ab vl:cd rk:dc empty:0 back:2",
   ZCL_GOGEN_T_BOUND: "X",
   // Arithmetic statements share the assignment calculation type: i division
   // rounds 21 / 2 to 11, while packed decimal retains its two places.
@@ -435,7 +436,7 @@ const EXPECT = {
   // blanks CX_SY_DYNAMIC_OSQL_SYNTAX are A4H's (docs/osql-where.md, #47)
   // Node accepts the literal-left tautology used by search help; A4H raises
   // CX_SY_DYNAMIC_OSQL_SEMANTICS for it (recorded in the ABAP corpus).
-  ZCL_GOGEN_T_DSEL: {Go: "static:0/2/CB byname:0/2/AC cds:0/2,B2,C3 empty:0/3 none:4/0/0 sum:0/2,C3,A1 one:read syntax:caught",
+  ZCL_GOGEN_T_DSEL: {Go: "static:0/2/CB byname:0/2/AC cds:0/2,B2,C3 empty:0/3 none:4/0/0 sum:0/2,C3,A1 one:semantics syntax:caught",
     JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
   // a view hiding the client, read by name: refused at run time as the
   // static read is refused at build time
@@ -810,7 +811,7 @@ for (const [line, msg] of got) {
 }
 // Sorted-table moves, VALUE rows, and a standard-table actual now compile.
 // Keep the old refusal corpus as a compile check so these forms stay covered.
-const REFUSED_SORT = {};
+const REFUSED_SORT = {54: "SHOW: a STANDARD table is not type-compatible with SORTED parameter IT (A4H refusal)"};
 const rsort = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_sort"], tolerant: true});
 const rgot = new Map(rsort.partial.map((x) => [Number(/zcl_gogen_t_rf_sort\.clas\.abap:(\d+)\)/.exec(x)?.[1]), x.slice(x.indexOf("): ") + 3)]));
 for (const line of new Set([...Object.keys(REFUSED_SORT).map(Number), ...rgot.keys()])) {

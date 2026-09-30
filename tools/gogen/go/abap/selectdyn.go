@@ -273,10 +273,7 @@ func SelectDyn(s *Session, q DynSelect, target Data) {
 
 	// WHERE: the parsed condition and the client
 	var pred *IR
-	// The Node search-help reader supplies this exact tautology for an empty
-	// selection. Keep the measured A4H parser verdict for other literal-left
-	// conditions; this one must select every row in the Node Unit path.
-	if q.HasWhere && strings.TrimSpace(q.Where) != "1 = 1" {
+	if q.HasWhere {
 		p, err := OsqlWherePredicate(q.Where, t.OsqlColumns())
 		if err != nil {
 			osqlWhereFailure(&q, err)
