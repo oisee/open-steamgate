@@ -5,7 +5,7 @@
 `ZCL_OSD_TPL` (`src/tpl/`) renders a Mustache-style template over a JSON tree (`zif_ajson`) into
 lines of code, and gives every output line a **trace entry**: the template, the template line and the
 data path it came from. It is plain ABAP, so the same class runs in `npm test`, in OSGo and on a
-system through abapGit. Unit tests sit beside the class (`zcl_osd_tpl.clas.testclasses.abap`, 40
+system through abapGit. Unit tests sit beside the class (`zcl_osd_tpl.clas.testclasses.abap`, 41
 methods), as `src/regression/` does.
 
 ## Why
@@ -60,6 +60,14 @@ Errors (`ZCX_OSD_TPL`) name the template and the line: `main:2: section a not cl
 - Truthiness is JSON's: `false`, `null`, `[]` and `""` are false, `0` is true.
 - Not supported: lambdas, inheritance, dynamic names, set-delimiter.
 
+### Characters
+
+The engine works on ABAP strings, which hold UTF-16 inside (as a JavaScript string does under the
+transpiler); UTF-8 exists only at the edges, in abapGit's files and in what a caller writes. So text
+in any script passes through unchanged (test `utf8_passes_through`), and every count -- `pad`, a
+line length -- is in ABAP characters: one for `ж` or `ä`, two for a character outside the Basic
+Multilingual Plane, which ABAP holds as a surrogate pair.
+
 ## The trace
 
 `ty_result-trace` has one entry per output line: `line`, `template` (a partial is its own template),
@@ -70,8 +78,14 @@ names the path of the line it ends; an empty value names nothing.
 
 ## Planned, not built
 
-- **Profiles** per target language: `abap` (7-bit ASCII, line length at most 255, no trailing
-  blanks, comment prefix `"`), `sqlscript` (`--`), `text`; a violation is an error with its trace entry.
+- **Profiles** per target language: `abap` (line length at most 255, no trailing blanks, comment
+  prefix `"`), `sqlscript` (`--`), `text`; a violation is an error with its trace entry.
+  **Character set (decided 2026-09-30):** text is Unicode from the start, not ASCII with UTF-8 added
+  later. A character outside 7-bit ASCII in a comment or a literal is a **warning** with its trace
+  entry; `strict` makes it an error (code bound for open-abap or abapGit, whose abaplint runs
+  `7bit_ascii`; SAP's guideline is the same:
+  [Character Set in Source Code](https://help.sap.com/doc/abapdocu_latest_index_htm/latest/en-US/abencharacter_set_guidl.html)).
+  An identifier outside ASCII is always an error, as in ABAP itself.
 - **Regions**: rendered blocks wrapped in marker comments, so a hand edit inside one is detectable.
   SAP's composer does the same for its slots (measured), which suggests the marker shape.
 - **The trace as a JSON sidecar** written beside generated objects.

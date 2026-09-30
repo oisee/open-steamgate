@@ -41,6 +41,7 @@ CLASS ltcl_osd_tpl DEFINITION FOR TESTING
     METHODS shadowed_first_segment FOR TESTING RAISING cx_static_check.
     METHODS nested_loop_metadata FOR TESTING RAISING cx_static_check.
     METHODS filters_checked_without_value FOR TESTING.
+    METHODS utf8_passes_through FOR TESTING RAISING cx_static_check.
 
     METHODS data
       IMPORTING
@@ -563,6 +564,15 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       exp = `main:1: filter pad needs one width from 1 to 255`
       act = error_text( iv_template = `{{v | pad 256}}` iv_json = `{"v":"a"}` ) ).
+  ENDMETHOD.
+
+  METHOD utf8_passes_through.
+    " Text is characters, not bytes: a comment, a value and a filter outside
+    " 7-bit ASCII come out unchanged, and pad counts characters.
+    cl_abap_unit_assert=>assert_equals(
+      exp = `" Käfer für Жук: ЖУК|жук  |`
+      act = text( iv_template = `" Käfer für {{name}}: {{name | upper}}|{{low | pad 5}}|`
+                  iv_json     = `{"name":"Жук","low":"жук"}` ) ).
   ENDMETHOD.
 
 
