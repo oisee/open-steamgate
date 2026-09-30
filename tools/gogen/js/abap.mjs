@@ -791,6 +791,7 @@ export function AppendData(t, v) {
   const rt = t.t.row;
   const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0), N: "0".repeat(rt.len ?? 0)})[rt.kind] ?? "";
   t.get().push(zero);
+  bumpTable(t.get());
   MoveData(Row(t, n), v);
   return n + 1;
 }
@@ -817,6 +818,23 @@ export function NewLine(t) {
 export function Row(d, i) {
   const a = d.get();
   return {get: () => a[i], set: (v) => { a[i] = v; }, t: d.t.row};
+}
+
+const tableVersions = new WeakMap();
+const tableVersion = (table) => tableVersions.get(table) ?? 0;
+export function bumpTable(table) { tableVersions.set(table, tableVersion(table) + 1); }
+export function bindRow(current, index) {
+  const table = current();
+  const version = tableVersion(table);
+  return {get: () => {
+    if (current() !== table || tableVersion(table) !== version || index >= table.length)
+      throw new AbapError("GETWA_NOT_ASSIGNED", "table row binding after structural mutation");
+    return table[index];
+  }, set: (v) => {
+    if (current() !== table || tableVersion(table) !== version || index >= table.length)
+      throw new AbapError("GETWA_NOT_ASSIGNED", "table row binding after structural mutation");
+    table[index] = v;
+  }};
 }
 
 // a generic elementary value moved into a string
@@ -1497,6 +1515,7 @@ export function AppendInitialData(t) {
   const rt = t.t.row;
   const zero = rt.zero ? rt.zero() : ({I: 0, F: 0, 8: 0n, D: "00000000", T: "000000", P: FmtP("", rt.dec ?? 0), X: "\u0000".repeat(rt.len ?? 0), N: "0".repeat(rt.len ?? 0)})[rt.kind] ?? "";
   t.get().push(zero);
+  bumpTable(t.get());
   return [Row(t, n), n + 1];
 }
 export function DescrLength(d) {

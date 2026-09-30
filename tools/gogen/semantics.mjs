@@ -32,6 +32,9 @@ const EXPECT = {
   ZCL_GOGEN_T_COPYROUTES: "111119",
   ZCL_GOGEN_T_COPYBASE: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYBASE=>RUN (zcl_gogen_t_copybase.clas.abap:18): VALUE for a table with BASE src at zcl_gogen_t_copybase.clas.abap:18", JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYBASE=>RUN (zcl_gogen_t_copybase.clas.abap:18): VALUE for a table with BASE src"},
   ZCL_GOGEN_T_COPYINSERT: "1",
+  ZCL_GOGEN_T_SCALARBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarbind.clas.abap:18", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
+  ZCL_GOGEN_T_SCALARREAD: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarread.clas.abap:17", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
+  ZCL_GOGEN_T_SCALARLOOP: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarloop.clas.abap:19", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
   ZCL_GOGEN_T_COPY: "copy a:2,1 b:3,50 struct a:1 b:60 alias it:3,99 after:3,99",
   ZCL_GOGEN_T_SECREF: "0/7",
   ZCL_GOGEN_T_BOUND: "X",
@@ -638,9 +641,7 @@ const EXPECT = {
   // re-measured on A4H 2026-09-24, $ZOSG_TMP_0441), so the JS emitter
   // compiles WGUI1 and must give the same string
   ZCL_GOGEN_T_WGUI1: "le:XXXX ns:XX ref:XXXX so:0/2,0/2,0/2,4/2,0/2 B5 c2 m1 x3 rd:0/4 cc:[abcd e][ab cd][ab- cd][ab cd][abc]4[ab]0[ab cdx] cl:[p!/r!][ab][a  b  ][a b][]0 fa:3/0,1/0,0/4,2,2,2 esc:a&lt;b&gt;&quot;c&#39;&amp;d e",
-  // the JS emitter holds no field symbol of a string and refuses the method
-  ZCL_GOGEN_T_WGUI3: {Go: "ap:2 fs:[p!/r!]",
-    JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_WGUI3=>RUN: field symbol <LV_S> of a string: the JS emitter holds only rows of structures"},
+  ZCL_GOGEN_T_WGUI3: "ap:2 fs:[p!/r!]",
   // READ TABLE WITH [TABLE] KEY on a SORTED table (A4H 2026-09-24,
   // $ZOSG_TMP_0441, fix round): a search by the key's leading components,
   // a miss is 4 and the row the key would go before, or 8 and lines + 1;

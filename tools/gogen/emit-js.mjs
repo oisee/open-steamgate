@@ -305,7 +305,7 @@ function method(cls, m) {
   const ctx = {cls, method: m, loop: 0, ret, inCtor: m.name === "CONSTRUCTOR"};
   // ultra/events: a field symbol of anything but a structure row or generic
   // data would need a box for the place it points at; refused here honestly
-  const odd = (m.fieldSymbols ?? []).find((f) => f.type.k !== "struct" && f.type.k !== "data");
+  const odd = (m.fieldSymbols ?? []).find((f) => f.type.k !== "struct" && f.type.k !== "data" && !["i", "int8", "string", "c", "n", "p", "d", "t", "x", "xstring", "f"].includes(f.type.k));
   if (odd) lines.push(`    throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${cls.name}=>${m.name}: field symbol ${odd.name} of a ${odd.type.k}: the JS emitter holds only rows of structures`)});`);
   else lines.push(...m.body.flatMap((st) => stmt(st, ctx, 2)));
   if (ret) lines.push(`    return ${ret};`);
@@ -327,7 +327,7 @@ function place(p, ctx) {
     }
     case "field": return `${["var", "attr", "static", "field", "fs", "row", "refattr", "const"].includes(p.base.e) ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "dref_field": return `${expr(p.base, ctx)}.get().${ident(p.name)}`;
-    case "fs": return ident(p.name);
+    case "fs": return p.type.k === "struct" || p.type.k === "data" ? ident(p.name) : `${ident(p.name)}.get()`;
     case "refattr": return `${expr(p.base, ctx)}.${ident(p.name)}`;
     case "row": {
       const b = place(p.base, ctx);
@@ -354,6 +354,7 @@ function whereItem(w, row, ctx) {
   }
 }
 const moved = (e, ctx) => (composite(e.type) && isPlace(e) ? `abap.copy(${expr(e, ctx)})` : expr(e, ctx));
+const boundRow = (table, tb, index) => table.row.k === "struct" ? `${tb}[${index}]` : `abap.bindRow(() => ${tb}, ${index})`;
 
 /* sorted secondary keys (frontend secondaryKey, ultra/json): as emit-go keyLoop / readSecKey */
 function keyCmpJs(key, x, y) {
@@ -364,7 +365,7 @@ function keyLoop(st, ctx, t, d) {
   const n = ctx.loop++;
   const tb = expr(st.table, ctx);
   const r = `${tb}[ord${n}[k${n}]]`;
-  const bind = st.fs ? `${ident(st.fs)} = ${r}` : `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${r})` : r}`;
+  const bind = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, `ord${n}[k${n}]`)}` : `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${r})` : r}`;
   return [
     `${t}{`, `${t}  const save${n} = s.sy.tabix;`, `${t}  s.sy.subrc = 4;`,
     `${t}  const ord${n} = abap.keyOrder(${tb}, (a, b) => ${keyCmpJs(st.key, "a", "b")}, ${st.key.unique ? JSON.stringify(st.key.name) : `""`});`,
@@ -381,7 +382,7 @@ function readSecKey(st, ctx, t) {
   const tb = expr(st.table, ctx);
   const vals = `[${st.values.map((v) => expr(v, ctx)).join(", ")}]`;
   const cmp = st.key.comps.map((c, j) => `abap.cmpKey(r.${ident(c.name)}, v${n}[${j}])`).join(" || ") + " || 0";
-  const bind = st.fs ? `${ident(st.fs)} = ${tb}[i${n}];` : st.refInto ? `${place(st.into, ctx)} = abap.cell(${tb}[i${n}], ${desc(st.table.type.row)}, ${tb});` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${tb}[i${n}])` : `${tb}[i${n}]`};` : "";
+  const bind = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, `i${n}`)};` : st.refInto ? `${place(st.into, ctx)} = abap.cell(${tb}[i${n}], ${desc(st.table.type.row)}, ${tb});` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${tb}[i${n}])` : `${tb}[i${n}]`};` : "";
   return [`${t}{`, `${t}  const v${n} = ${vals};`,
     `${t}  const [i${n}, pos${n}, sub${n}] = abap.keyRead(${tb}, (r) => ${cmp}, ${st.key.unique ? JSON.stringify(st.key.name) : `""`});`,
     `${t}  if (sub${n} === 0) { ${bind} }`, `${t}  s.sy.subrc = sub${n}; s.sy.tabix = pos${n};`, `${t}}`];
@@ -391,6 +392,8 @@ function stmt(st, ctx, d) {
   const t = tab(d);
   switch (st.s) {
     case "assign":
+      if (st.target.e === "fs" && st.target.type.k !== "struct" && st.target.type.k !== "data")
+        return [`${t}${ident(st.target.name)}.set(${moved(st.value, ctx)});`];
       if (st.target.e === "substr_target") {
         const base = place(st.target.base, ctx);
         const off = st.target.off ? expr(st.target.off, ctx) : "0";
@@ -413,11 +416,11 @@ function stmt(st, ctx, d) {
         const n = ctx.loop++;
         return [`${t}{`, `${t}  const v${n} = ${moved(st.value, ctx)};`,
           ...unique.map((k) => `${t}  abap.uniqueKeyCheck(${tb}, (r) => ${k.comps.map((c) => `r.${ident(c)} === v${n}.${ident(c)}`).join(" && ")}, ${JSON.stringify(k.name)});`),
-          `${t}  ${tb}.push(v${n});`, `${t}}`, `${t}s.sy.tabix = ${tb}.length;`, ...(st.fs ? [`${t}${ident(st.fs)} = ${tb}[${tb}.length - 1];`] : []),
+          `${t}  ${tb}.push(v${n});`, `${t}}`, `${t}abap.bumpTable(${tb});`, `${t}s.sy.tabix = ${tb}.length;`, ...(st.fs ? [`${t}${ident(st.fs)} = ${boundRow(st.table.type, tb, `${tb}.length - 1`)};`] : []),
           ...(st.refInto ? [`${t}${place(st.refInto, ctx)} = abap.cell(${tb}[${tb}.length - 1], ${desc(st.table.type.row)}, ${tb});`] : [])];
       }
       // ultra/events: APPEND ... ASSIGNING <fs> (a row of a structure only: see method)
-      return [`${t}${tb}.push(${moved(st.value, ctx)});`, `${t}s.sy.tabix = ${tb}.length;`, ...(st.fs ? [`${t}${ident(st.fs)} = ${tb}[${tb}.length - 1];`] : []),
+      return [`${t}${tb}.push(${moved(st.value, ctx)});`, `${t}abap.bumpTable(${tb});`, `${t}s.sy.tabix = ${tb}.length;`, ...(st.fs ? [`${t}${ident(st.fs)} = ${boundRow(st.table.type, tb, `${tb}.length - 1`)};`] : []),
         ...(st.refInto ? [`${t}${place(st.refInto, ctx)} = abap.cell(${tb}[${tb}.length - 1], ${desc(st.table.type.row)}, ${tb});`] : [])];
     }
     // ultra/events: CONCATENATE, FIND ALL ... MATCH COUNT (emit-go)
@@ -437,7 +440,7 @@ function stmt(st, ctx, d) {
       const tb = expr(st.table, ctx);
       if (st.fs) {
         return [`${t}{`, `${t}  const ${n} = ${expr(st.index, ctx)};`,
-          `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${ident(st.fs)} = ${tb}[${n} - 1]; s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
+          `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${ident(st.fs)} = ${boundRow(st.table.type, tb, `${n} - 1`)}; s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
       }
       const row = composite(st.into.type) ? `abap.copy(${tb}[${n} - 1])` : `${tb}[${n} - 1]`;
       return [
@@ -630,7 +633,7 @@ function stmt(st, ctx, d) {
       const tb = expr(st.table, ctx);
       const start = st.from ? `Math.max(${expr(st.from, ctx)} - 1, 0)` : "0";
       const limit = st.to ? ` && i${n} < ${expr(st.to, ctx)}` : "";
-      const bind = st.fs ? `${ident(st.fs)} = ${tb}[i${n}]`
+      const bind = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, `i${n}`)}`
         : `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${tb}[i${n}])` : `${tb}[i${n}]`}`;
       return [
         `${t}{`, `${t}  const save${n} = s.sy.tabix;`, `${t}  s.sy.subrc = 4;`,
@@ -824,26 +827,26 @@ function stmt(st, ctx, d) {
       const n = ctx.loop++;
       const keep = st.where.map((w) => whereItem(w, `r${n}`, ctx)).join(" && ");
       return [`${t}{`, `${t}  const kept${n} = ${tb}.filter((r${n}) => !(${keep}));`,
-        `${t}  s.sy.subrc = kept${n}.length < ${tb}.length ? 0 : 4;`, `${t}  ${tb} = kept${n};`, `${t}}`];
+        `${t}  s.sy.subrc = kept${n}.length < ${tb}.length ? 0 : 4;`, `${t}  if (s.sy.subrc === 0) abap.bumpTable(${tb});`, `${t}  ${tb} = kept${n};`, `${t}}`];
     }
     case "delete_key": {
       const tb = place(st.table, ctx);
       const n = ctx.loop++;
       return [`${t}{`, `${t}  const key${n} = ${expr(st.value, ctx)};`, `${t}  s.sy.subrc = 4;`,
         `${t}  const i${n} = ${tb}.findIndex((r${n}) => r${n}.${ident(st.key)} === key${n});`,
-        `${t}  if (i${n} >= 0) { ${tb}.splice(i${n}, 1); s.sy.subrc = 0; }`, `${t}}`];
+        `${t}  if (i${n} >= 0) { ${tb}.splice(i${n}, 1); abap.bumpTable(${tb}); s.sy.subrc = 0; }`, `${t}}`];
     }
     // ultra/itab: DELETE itab inside LOOP AT itab, as emit-go
     case "delete_current": {
       const tb = place(st.table, ctx);
       const i = st.token.idxVar;
-      return [`${t}${tb}.splice(${i}, 1); ${i}--; s.sy.subrc = 0;`];
+      return [`${t}${tb}.splice(${i}, 1); abap.bumpTable(${tb}); ${i}--; s.sy.subrc = 0;`];
     }
     case "delete_index": {
       const n = `idx${ctx.loop++}`;
       const tb = place(st.table, ctx);
       return [`${t}{`, `${t}  const ${n} = ${expr(st.index, ctx)};`,
-        `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${tb}.splice(${n} - 1, 1); s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
+        `${t}  if (${n} >= 1 && ${n} <= ${tb}.length) { ${tb}.splice(${n} - 1, 1); abap.bumpTable(${tb}); s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
     }
     case "delete_range": {
       const n = ctx.loop++;
@@ -851,13 +854,13 @@ function stmt(st, ctx, d) {
       return [`${t}{`, `${t}  const from${n} = ${expr(st.from, ctx)};`, `${t}  const to${n} = ${st.to ? expr(st.to, ctx) : `${tb}.length`};`,
         `${t}  if (from${n} < 1 || to${n} < 1) throw new abap.AbapError("NOT_COMPILED", "DELETE range index below 1 was not measured");`,
         `${t}  const end${n} = Math.min(to${n}, ${tb}.length);`,
-        `${t}  s.sy.subrc = 4;`, `${t}  if (from${n} <= end${n}) { ${tb}.splice(from${n} - 1, end${n} - from${n} + 1); s.sy.subrc = 0; }`, `${t}}`];
+        `${t}  s.sy.subrc = 4;`, `${t}  if (from${n} <= end${n}) { ${tb}.splice(from${n} - 1, end${n} - from${n} + 1); abap.bumpTable(${tb}); s.sy.subrc = 0; }`, `${t}}`];
     }
     case "insert_index": {
       const n = `idx${ctx.loop++}`;
       const tb = place(st.table, ctx);
       return [`${t}{`, `${t}  const ${n} = ${expr(st.index, ctx)};`,
-        `${t}  if (${n} >= 1 && ${n} <= ${tb}.length + 1) { ${tb}.splice(${n} - 1, 0, ${moved(st.value, ctx)}); s.sy.subrc = 0; s.sy.tabix = ${n}; }`,
+        `${t}  if (${n} >= 1 && ${n} <= ${tb}.length + 1) { ${tb}.splice(${n} - 1, 0, ${moved(st.value, ctx)}); abap.bumpTable(${tb}); s.sy.subrc = 0; s.sy.tabix = ${n}; }`,
         `${t}  else { s.sy.subrc = 4; }`, `${t}}`];
     }
     case "exit": return [`${t}break;`];

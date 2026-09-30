@@ -65,6 +65,7 @@ const rowValue = (table, item) => stable(table) ? `(*(${item}))` : item;
 const rowAddress = (table, item) => stable(table) ? item : `&${item}`;
 const rowStored = (table, value) => stable(table) ? `abap.Ptr(${value})` : value;
 const rowRef = (table, tb, item) => stable(table) ? `abap.RowRef(&${tb}, ${item}, ${desc(table.row)})` : `abap.Data{P: &${item}, T: ${desc(table.row)}}`;
+const boundRow = (table, tb, index) => !stable(table) && table.row.k !== "struct" ? `abap.BindRow(&${tb}, int(${index}))` : rowAddress(table, `${tb}[${index}]`);
 
 // a p field holds its decimals: initial is 0, 0.0, 0.00 ... (go/abap packed.go)
 const pZero = (t) => (t.calc || !t.dec ? "0" : `0.${"0".repeat(t.dec)}`);
@@ -976,7 +977,7 @@ function place(p, ctx) {
     case "sy": return `s.Sy.${p.field}`;
     case "field": return `${PLACES.has(p.base.e) || p.base.e === "const" ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "dref_field": return `abap.DerefAs[${goType(p.struct)}](${expr(p.base, ctx)}, ${JSON.stringify(`->${p.name}`)}).${ident(p.name)}`;
-    case "fs": return p.type.k === "data" ? ident(p.name) : `(*${ident(p.name)})`;
+    case "fs": return p.type.k === "data" ? ident(p.name) : p.type.k === "struct" ? `(*${ident(p.name)})` : `(*abap.CheckedRowPtr(${ident(p.name)}))`;
     case "refattr": if (p.base.type.intf) return `(*${expr(p.base, ctx)}.${accessorName(p.name)}())`;
       return POLY.has(p.base.type.name) && !p.base.type.intf ? `${expr(p.base, ctx)}.As_${typeName(p.base.type.name)}().${ident(p.name)}` : `${expr(p.base, ctx)}.${ident(p.name)}`;
     case "row": {
@@ -1056,7 +1057,7 @@ function keyLoop(st, ctx, t, d) {
   const n = ctx.loop++;
   const tb = expr(st.table, ctx);
   const i = `ord${n}[k${n}]`;
-  const bind = st.fs ? `${ident(st.fs)} = ${rowAddress(st.table.type, `${tb}[${i}]`)}` : `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[${i}]`), st.into.type)}`;
+  const bind = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, i)}` : `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[${i}]`), st.into.type)}`;
   const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => `${tb}[${i}].${ident(w.name)} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr(w.value, ctx)}`).join(" && ")}) { continue }` : null;
   return [
     `${t}{`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
@@ -1081,7 +1082,7 @@ function readSecKey(st, ctx, t) {
   const tb = expr(st.table, ctx);
   const vals = st.values.map((v, j) => `${t}\tv${n}_${j} := ${expr(v, ctx)}`);
   const cmp = st.key.comps.map((c, j) => `if c := abap.${c.num ? "CmpNum" : "CmpS"}(${tb}[i].${ident(c.name)}, v${n}_${j}); c != 0 {\n${t}\t\treturn c\n${t}\t}`);
-  const bind = st.fs ? `${ident(st.fs)} = ${rowAddress(st.table.type, `${tb}[i${n}]`)}` : st.refInto ? `${place(st.into, ctx)} = ${rowRef(st.table.type, tb, `${tb}[i${n}]`)}` : st.into ? `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[i${n}]`), st.into.type)}` : null;
+  const bind = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, `i${n}`)}` : st.refInto ? `${place(st.into, ctx)} = ${rowRef(st.table.type, tb, `${tb}[i${n}]`)}` : st.into ? `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[i${n}]`), st.into.type)}` : null;
   return [`${t}{`, ...vals,
     `${t}\ti${n}, pos${n}, sub${n} := abap.KeyRead(len(${tb}), func(i int) int {\n${t}\t${cmp.join(`\n${t}\t`)}\n${t}\treturn 0\n${t}\t}, ${st.key.unique ? JSON.stringify(st.key.name) : `""`})`,
     `${t}\tif sub${n} == 0 {`, ...(bind ? [`${t}\t\t${bind}`] : []), `${t}\t}`, `${t}\t_ = i${n}`,
@@ -1176,14 +1177,14 @@ function stmtLines(st, ctx, d) {
         const n = ctx.loop++;
         return [`${t}{`, `${t}	v${n} := ${copied(expr(st.value, ctx), st.value.type, st.value)}`,
           ...unique.map((k) => `${t}	abap.UniqueKeyCheck(len(${tb}), func(i int) bool { return ${k.comps.map((c) => `${tb}[i].${ident(c)} == v${n}.${ident(c)}`).join(" && ")} }, ${JSON.stringify(k.name)})`),
-          `${t}	${tb} = append(${tb}, ${rowStored(st.table.type, `v${n}`)})`, `${t}}`, `${t}s.Sy.Tabix = int32(len(${tb}))`,
+          `${t}	${tb} = append(${tb}, ${rowStored(st.table.type, `v${n}`)})`, `${t}}`, `${t}abap.BumpTable(&${tb})`, `${t}s.Sy.Tabix = int32(len(${tb}))`,
           // ultra/events: APPEND ... ASSIGNING <fs>
-          ...(st.fs ? [`${t}${ident(st.fs)} = ${rowAddress(st.table.type, `${tb}[len(${tb})-1]`)}`] : []),
+          ...(st.fs ? [`${t}${ident(st.fs)} = ${boundRow(st.table.type, tb, `len(${tb})-1`)}`] : []),
           ...(st.refInto ? [`${t}${place(st.refInto, ctx)} = ${rowRef(st.table.type, tb, `${tb}[len(${tb})-1]`)}`] : [])];
       }
-      return [`${t}${tb} = append(${tb}, ${rowStored(st.table.type, copied(expr(st.value, ctx), st.value.type, st.value))})`, `${t}s.Sy.Tabix = int32(len(${tb}))`,
+      return [`${t}${tb} = append(${tb}, ${rowStored(st.table.type, copied(expr(st.value, ctx), st.value.type, st.value))})`, `${t}abap.BumpTable(&${tb})`, `${t}s.Sy.Tabix = int32(len(${tb}))`,
         // ultra/events: APPEND ... ASSIGNING <fs>
-        ...(st.fs ? [`${t}${ident(st.fs)} = ${rowAddress(st.table.type, `${tb}[len(${tb})-1]`)}`] : []),
+        ...(st.fs ? [`${t}${ident(st.fs)} = ${boundRow(st.table.type, tb, `len(${tb})-1`)}`] : []),
         ...(st.refInto ? [`${t}${place(st.refInto, ctx)} = ${rowRef(st.table.type, tb, `${tb}[len(${tb})-1]`)}`] : [])];
     }
     // ultra/events: CONCATENATE [LINES OF] ... INTO t [SEPARATED BY s]
@@ -1209,7 +1210,7 @@ function stmtLines(st, ctx, d) {
       const tb = expr(st.table, ctx);
       if (st.fs) {
         return [`${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
-          `${t}\t${ident(st.fs)} = ${rowAddress(st.table.type, `${tb}[${n}-1]`)}`, `${t}\ts.Sy.Subrc = 0`, `${t}\ts.Sy.Tabix = ${n}`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+          `${t}\t${ident(st.fs)} = ${boundRow(st.table.type, tb, `${n}-1`)}`, `${t}\ts.Sy.Subrc = 0`, `${t}\ts.Sy.Tabix = ${n}`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
       }
       return [
         `${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
@@ -1417,7 +1418,7 @@ function stmtLines(st, ctx, d) {
       const tb = expr(st.table, ctx);
       const start = st.from ? `int(${expr(st.from, ctx)}) - 1` : "0";
       const limit = st.to ? ` && i${n} < int(${expr(st.to, ctx)})` : "";
-      const bind = st.fs ? `${ident(st.fs)} = ${rowAddress(st.table.type, `${tb}[i${n}]`)}` : `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[i${n}]`), st.into.type)}`;
+      const bind = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, `i${n}`)}` : `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[i${n}]`), st.into.type)}`;
       const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => whereItem(w, `${tb}[i${n}]`, ctx)).join(" && ")}) { continue }` : null;
       return [
         `${t}{`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
@@ -1766,7 +1767,7 @@ ${t}	}`));
       const n = ctx.loop++;
       const cond = st.keys.map((k) => (k.line ? `r${n} == ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} == ${expr(k.value, ctx)}`)).join(" && ");
       if (st.into?.conv) throw new Error("READ TABLE INTO a work area of another type");
-      const bind = st.fs ? `${ident(st.fs)} = ${rowAddress(st.table.type, `${tb}[i${n}]`)}` : st.refInto ? `${place(st.into, ctx)} = ${rowRef(st.table.type, tb, `${tb}[i${n}]`)}` : st.into ? `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `r${n}`), st.into.type)}` : null;
+      const bind = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, `i${n}`)}` : st.refInto ? `${place(st.into, ctx)} = ${rowRef(st.table.type, tb, `${tb}[i${n}]`)}` : st.into ? `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `r${n}`), st.into.type)}` : null;
       // ultra/events (fix round): a SORTED table, see read_key in frontend.mjs
       if (st.sorted) {
         const kv = (j) => `k${n}_${j}`;
@@ -1839,14 +1840,14 @@ ${t}	}`));
       const keep = st.where.map((w) => whereItem(w, `r${n}`, ctx)).join(" && ");
       return [`${t}{`, `${t}\tkept${n} := ${tb}[:0]`, `${t}\tfor _, r${n} := range ${tb} {`, `${t}\t\tif !(${keep}) {`,
         `${t}\t\t\tkept${n} = append(kept${n}, r${n})`, `${t}\t\t}`, `${t}\t}`,
-        `${t}\ts.Sy.Subrc = 4`, `${t}\tif len(kept${n}) < len(${tb}) {`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}\t${tb} = kept${n}`, `${t}}`];
+        `${t}\ts.Sy.Subrc = 4`, `${t}\tif len(kept${n}) < len(${tb}) {`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t\tabap.BumpTable(&${tb})`, `${t}\t}`, `${t}\t${tb} = kept${n}`, `${t}}`];
     }
     case "delete_key": {
       const n = ctx.loop++;
       const tb = place(st.table, ctx);
       return [`${t}{`, `${t}\tkey${n} := ${expr(st.value, ctx)}`, `${t}\ts.Sy.Subrc = 4`,
         `${t}\tfor i${n}, r${n} := range ${tb} {`, `${t}\t\tif r${n}.${ident(st.key)} == key${n} {`,
-        `${t}\t\t\t${tb} = append(${tb}[:i${n}], ${tb}[i${n}+1:]...)`,
+        `${t}\t\t\t${tb} = append(${tb}[:i${n}], ${tb}[i${n}+1:]...)`, `${t}\t\t\tabap.BumpTable(&${tb})`,
         `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
     }
     // ultra/itab: DELETE itab inside LOOP AT itab: the current row goes and
@@ -1854,13 +1855,13 @@ ${t}	}`));
     case "delete_current": {
       const tb = place(st.table, ctx);
       const i = st.token.idxVar;
-      return [`${t}${tb} = append(${tb}[:${i}], ${tb}[${i}+1:]...)`, `${t}${i}--`, `${t}s.Sy.Subrc = 0`];
+      return [`${t}${tb} = append(${tb}[:${i}], ${tb}[${i}+1:]...)`, `${t}abap.BumpTable(&${tb})`, `${t}${i}--`, `${t}s.Sy.Subrc = 0`];
     }
     case "delete_index": {
       const n = `idx${ctx.loop++}`;
       const tb = place(st.table, ctx);
       return [`${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
-        `${t}\t${tb} = append(${tb}[:${n}-1], ${tb}[${n}:]...)`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+        `${t}\t${tb} = append(${tb}[:${n}-1], ${tb}[${n}:]...)`, `${t}\tabap.BumpTable(&${tb})`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
     case "delete_range": {
       const n = ctx.loop++;
@@ -1869,13 +1870,13 @@ ${t}	}`));
         `${t}\tif from${n} < 1 || to${n} < 1 { panic(abap.NotCompiled("DELETE range", "index below 1 was not measured")) }`,
         `${t}\tif to${n} > int32(len(${tb})) { to${n} = int32(len(${tb})) }`,
         `${t}\ts.Sy.Subrc = 4`, `${t}\tif from${n} <= to${n} {`,
-        `${t}\t\t${tb} = append(${tb}[:from${n}-1], ${tb}[to${n}:]...)`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}}`];
+        `${t}\t\t${tb} = append(${tb}[:from${n}-1], ${tb}[to${n}:]...)`, `${t}\t\tabap.BumpTable(&${tb})`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}}`];
     }
     case "insert_index": {
       const n = `idx${ctx.loop++}`;
       const tb = place(st.table, ctx);
       return [`${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb})+1 {`,
-        `${t}\t${tb} = abap.InsertAt(${tb}, ${n}, ${rowStored(st.table.type, copied(expr(st.value, ctx), st.value.type, st.value))})`, `${t}\ts.Sy.Subrc = 0`, `${t}\ts.Sy.Tabix = ${n}`,
+        `${t}\t${tb} = abap.InsertAt(${tb}, ${n}, ${rowStored(st.table.type, copied(expr(st.value, ctx), st.value.type, st.value))})`, `${t}\tabap.BumpTable(&${tb})`, `${t}\ts.Sy.Subrc = 0`, `${t}\ts.Sy.Tabix = ${n}`,
         `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
     case "nop": return [];
