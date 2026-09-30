@@ -118,6 +118,25 @@ Supplying any report argument selects headless mode. Output lines go to stdout,
 messages go to stderr, an unsupported runtime operation exits with status 2,
 and a runtime failure exits with status 1.
 
+## DATASET file access
+
+`OPEN`, `READ`, `TRANSFER`, `CLOSE`, `DELETE`, `GET` and `SET DATASET` use the
+native dataset sandbox. With no access flags, every open is refused with
+`sy-subrc = 8` and a `MESSAGE` reason, even if the parent process has dataset
+environment variables set. Grant only the directories a report needs:
+
+```sh
+osabap --allow-read ./input --allow-write ./output --input ./input/source.txt --output ./output/copy.txt
+```
+
+`--allow-read DIR` and `--allow-write DIR` repeat to add roots. A write root
+also permits reads. `--dataset-home DIR` resolves relative DATASET names from
+that directory; otherwise the first write root, then the first read root, is
+the base. `--dataset-audit FILE` appends JSON lines for OPEN and DELETE decisions.
+Each option accepts either `--option value` or `--option=value`. Paths outside
+the granted roots, including `..` escapes, are refused. These flags govern
+DATASET statements; frontend service file methods have their own host API.
+
 ## Terminal UI
 
 With no arguments, a real terminal uses the tcell form in

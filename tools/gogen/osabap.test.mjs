@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {execFileSync, spawnSync} from "node:child_process";
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -45,6 +45,14 @@ test("unknown options fail instead of becoming report input", () => {
   assert.match(result.stderr, /unknown option --unknown/);
 });
 
+test("help describes dataset grants", () => {
+  const result = run(["--help"]);
+  assert.equal(result.status, 0, result.stderr);
+  for (const flag of ["--allow-read", "--allow-write", "--dataset-home", "--dataset-audit"]) {
+    assert.ok(result.stdout.includes(flag), flag);
+  }
+});
+
 test("native frontend reads environment and copies a text file", () => {
   const dir = mkdtempSync(join(tmpdir(), "osabap-frontend-"));
   try {
@@ -58,6 +66,50 @@ test("native frontend reads environment and copies a text file", () => {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, "Copied 2 lines 8 bytes\nEnv works\n");
     assert.equal(readFileSync(output, "utf8"), "one\ntwo\n");
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
+
+const datasetLowering = readFileSync(join(here, "frontend.mjs"), "utf8").includes("Statements.OpenDataset");
+test("native DATASET copy obeys read, write and path grants", {skip: datasetLowering ? false : "gogen DATASET lowering from PR #261 is not merged"}, () => {
+  const dir = mkdtempSync(join(tmpdir(), "osabap-dataset-"));
+  try {
+    const inputDir = join(dir, "in");
+    const outputDir = join(dir, "out");
+    mkdirSync(inputDir);
+    mkdirSync(outputDir);
+    const input = join(inputDir, "source.txt");
+    const output = join(outputDir, "copy.txt");
+    const audit = join(dir, "audit.ndjson");
+    const content = "one\nGrüße 世界\n\nlast\n";
+    writeFileSync(input, content);
+    execFileSync(process.execPath, [builder, join(here, "apps", "dataset", "zdataset.prog.abap")], {stdio: "inherit"});
+
+    const allowed = run(["--allow-read", inputDir, "--allow-write", outputDir, "--dataset-audit", audit, "--input", input, "--output", output]);
+    assert.equal(allowed.status, 0, allowed.stderr);
+    assert.equal(readFileSync(output, "utf8"), content);
+    assert.match(readFileSync(audit, "utf8"), /"allowed":true/);
+    rmSync(output);
+
+    const denied = spawnSync(binary, ["--input", input, "--output", output], {
+      encoding: "utf8", env: {...process.env, OSD_DATASET_READ: inputDir, OSD_DATASET_WRITE: outputDir},
+    });
+    assert.equal(denied.status, 0, denied.stderr);
+    assert.match(denied.stdout, /Refused/);
+    assert.equal(existsSync(output), false);
+
+    const readOnly = run(["--allow-read", inputDir, "--input", input, "--output", output]);
+    assert.equal(readOnly.status, 0, readOnly.stderr);
+    assert.match(readOnly.stdout, /Refused/);
+    assert.equal(existsSync(output), false);
+
+    const escaped = join(dir, "escape.txt");
+    const escape = run(["--allow-read", inputDir, "--allow-write", outputDir, "--dataset-home", outputDir,
+      "--input", input, "--output", "../escape.txt"]);
+    assert.equal(escape.status, 0, escape.stderr);
+    assert.match(escape.stdout, /Refused/);
+    assert.equal(existsSync(escaped), false);
   } finally {
     rmSync(dir, {recursive: true, force: true});
   }

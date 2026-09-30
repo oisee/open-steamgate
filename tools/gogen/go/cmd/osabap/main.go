@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"osg/gogen/abap"
@@ -37,6 +38,7 @@ func main() {
 		s := &abap.Session{}
 		report := newReport(s)
 		sapGUI, launchSAPGUI, listen, args := sapGUIOption(os.Args[1:])
+		args = datasetOptions(args)
 		input, headless := commandInput(args)
 		if sapGUI {
 			var screen ZCL_GG_HOST__TY_RESULT
@@ -88,6 +90,50 @@ func main() {
 		fmt.Fprintln(os.Stderr, "unsupported:", result.unsupported)
 		os.Exit(2)
 	}
+}
+
+// datasetOptions consumes host flags before selection-screen flags are parsed.
+// Install a fresh sandbox even when the parent process carries dataset env vars.
+func datasetOptions(args []string) []string {
+	var read, write []string
+	var home, audit string
+	var rest []string
+	for i := 0; i < len(args); i++ {
+		key, value, inline := strings.Cut(args[i], "=")
+		switch key {
+		case "--allow-read", "--allow-write", "--dataset-home", "--dataset-audit":
+			if !inline {
+				i++
+				if i >= len(args) {
+					panic(fmt.Errorf("%s needs a value", key))
+				}
+				value = args[i]
+			}
+			if value == "" {
+				panic(fmt.Errorf("%s needs a non-empty value", key))
+			}
+			switch key {
+			case "--allow-read":
+				read = append(read, value)
+			case "--allow-write":
+				write = append(write, value)
+			case "--dataset-home":
+				home = value
+			case "--dataset-audit":
+				audit = value
+			}
+		default:
+			rest = append(rest, args[i])
+		}
+	}
+	// SandboxFromEnv owns audit creation and root normalization. These values
+	// replace inherited grants, so an unflagged command remains denied.
+	os.Setenv("OSD_DATASET_READ", strings.Join(read, string(filepath.ListSeparator)))
+	os.Setenv("OSD_DATASET_WRITE", strings.Join(write, string(filepath.ListSeparator)))
+	os.Setenv("OSD_DATASET_HOME", home)
+	os.Setenv("OSD_DATASET_AUDIT", audit)
+	abap.SetDatasetHost(abap.SandboxFromEnv())
+	return rest
 }
 
 func graphicalInput(screen ZCL_GG_HOST__TY_RESULT) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, error) {
@@ -300,6 +346,10 @@ func usage() {
 	fmt.Println(" [options]")
 	fmt.Println("  --sapgui[=ADDR]   launch SAP GUI and serve it the selection screen (default 127.0.0.1:3232)")
 	fmt.Println("  --sapgui-no-launch serve SAP GUI without launching a local client")
+	fmt.Println("  --allow-read DIR  allow DATASET reads within DIR (repeatable)")
+	fmt.Println("  --allow-write DIR allow DATASET writes within DIR (repeatable; also readable)")
+	fmt.Println("  --dataset-home DIR base for relative DATASET names")
+	fmt.Println("  --dataset-audit FILE append OPEN/DELETE decisions as JSON lines")
 	for _, name := range appSelectionNames {
 		opt := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(name, "P_"), "_", "-"))
 		if appRanges[name] {
