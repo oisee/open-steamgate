@@ -2640,3 +2640,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: to be decided after an A4H probe (which of the two is off)
 - Regression-test location: none yet
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-find-section-length — `FIND ... IN SECTION OFFSET o LENGTH l OF dobj` searches `l` instead of `dobj` in the transpiler
+
+- Status: `open`
+- Discovery date: `2026-09-30`
+- Affected versions: the pinned transpiler of `main` at `ae0ad3e9` (`node tools/osd-transpiler.mjs` names it)
+- Affected ABAP statement, runtime API or adapter: `FIND sub IN SECTION OFFSET off LENGTH len OF dobj MATCH OFFSET moff`
+- Minimal ABAP reproducer: `FIND `{{` IN SECTION OFFSET lv_pos LENGTH lv_rest OF iv_template MATCH OFFSET lv_open.` (first version of `src/tpl/zcl_osd_tpl.clas.abap`)
+- Exact command used to run it: `npm run unit` in the worktree of `feat/abap-templates`; the generated module reads `abap.statements.find(lv_rest, {find: ..., sectionOffset: lv_pos, offset: lv_open, length: lv_rest})`
+- Expected SAP behaviour: the search runs in `dobj` from `off` for `len` characters, and `MATCH OFFSET` is relative to `dobj` (ABAP keyword documentation, FIND, `IN SECTION`). Not measured on A4H
+- Actual open-abap behaviour: the transpiler passes the `LENGTH` operand as the searched field and as the `length` (MATCH LENGTH) target; nothing is found in the text, and `lv_rest` would be overwritten on a match
+- Impact on open-steamgate: the template engine's tokenizer found no tags. The two other `IN SECTION` uses (`src/sadl/zcl_stg_sadl_def.clas.abap:101,105`) have no `LENGTH` and transpile correctly (`find(lv_xml, {..., sectionOffset: lv_off, offset: ...})`)
+- Smallest safe workaround: the `find( val = ... sub = ... off = ... )` builtin, as `zcl_osd_tpl` now does
+- Upstream: backlog, **needs an issue or a PR** in abaplint/transpiler (FIND statement transpiler, `SectionLength` vs `MatchLength`); goes out after the critic and a word to dell/stoker
+- Regression-test location: none yet
+- Upstream version containing a fix: none yet
