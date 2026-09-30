@@ -5,6 +5,8 @@ CLASS ltcl_url DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS count FOR TESTING RAISING cx_static_check.
     METHODS metadata_and_root FOR TESTING RAISING cx_static_check.
     METHODS keys_named FOR TESTING RAISING cx_static_check.
+    METHODS quoted_key FOR TESTING RAISING cx_static_check.
+    METHODS typed_keys_and_bad_quote FOR TESTING RAISING cx_static_check.
     METHODS not_odata FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
@@ -39,7 +41,7 @@ CLASS ltcl_url IMPLEMENTATION.
 
     ls_request = zcl_stg_url=>parse( '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(%27T0001%27)' ).
     cl_abap_unit_assert=>assert_equals( act = ls_request-key_string
-                                        exp = '''T0001''' ).
+                                        exp = '%27T0001%27' ).
 
     APPEND 'TravelId' TO lt_names.
     lt_keys = zcl_stg_url=>parse_keys( iv_key_string = ls_request-key_string
@@ -70,6 +72,57 @@ CLASS ltcl_url IMPLEMENTATION.
                                         exp = 'B' ).
     cl_abap_unit_assert=>assert_equals( act = ls_key-value
                                         exp = '2' ).
+  ENDMETHOD.
+
+  METHOD quoted_key.
+    DATA ls_request TYPE zcl_stg_url=>ty_request.
+    DATA lt_names TYPE string_table.
+    DATA lt_keys TYPE /iwbep/t_mgw_name_value_pair.
+    DATA ls_key LIKE LINE OF lt_keys.
+    ls_request = zcl_stg_url=>parse(
+      `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(Name='O''Brien, Ltd (West)',Id=5)/to_Bookings` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-nav_prop exp = 'to_Bookings' ).
+    APPEND 'Name' TO lt_names.
+    APPEND 'Id' TO lt_names.
+    lt_keys = zcl_stg_url=>parse_keys( iv_key_string = ls_request-key_string
+                                       it_key_names = lt_names ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_keys ) exp = 2 ).
+    READ TABLE lt_keys INDEX 1 INTO ls_key.
+    cl_abap_unit_assert=>assert_equals( act = ls_key-value exp = `O'Brien, Ltd (West)` ).
+    READ TABLE lt_keys INDEX 2 INTO ls_key.
+    cl_abap_unit_assert=>assert_equals( act = ls_key-value exp = '5' ).
+    ls_request = zcl_stg_url=>parse(
+      `/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(Name=%27O%27%27Brien%2C%20Ltd%20%28West%29%27)` ).
+    DELETE lt_names INDEX 2.
+    lt_keys = zcl_stg_url=>parse_keys( iv_key_string = ls_request-key_string
+                                       it_key_names = lt_names ).
+    READ TABLE lt_keys INDEX 1 INTO ls_key.
+    cl_abap_unit_assert=>assert_equals( act = ls_key-value exp = `O'Brien, Ltd (West)` ).
+  ENDMETHOD.
+
+  METHOD typed_keys_and_bad_quote.
+    DATA lt_names TYPE string_table.
+    DATA lt_keys TYPE /iwbep/t_mgw_name_value_pair.
+    DATA ls_key LIKE LINE OF lt_keys.
+    DATA lx_error TYPE REF TO zcx_stg_error.
+    APPEND 'A' TO lt_names.
+    APPEND 'B' TO lt_names.
+    APPEND 'C' TO lt_names.
+    lt_keys = zcl_stg_url=>parse_keys(
+      iv_key_string = `A=guid'abc',B=datetime'2024-01-02T03:04:05',C=X'FF00'`
+      it_key_names = lt_names ).
+    READ TABLE lt_keys INDEX 1 INTO ls_key.
+    cl_abap_unit_assert=>assert_equals( act = ls_key-value exp = `guid'abc'` ).
+    READ TABLE lt_keys INDEX 2 INTO ls_key.
+    cl_abap_unit_assert=>assert_equals( act = ls_key-value exp = `datetime'2024-01-02T03:04:05'` ).
+    READ TABLE lt_keys INDEX 3 INTO ls_key.
+    cl_abap_unit_assert=>assert_equals( act = ls_key-value exp = `X'FF00'` ).
+    TRY.
+        zcl_stg_url=>parse_keys( iv_key_string = `A='unclosed,B=5` it_key_names = lt_names ).
+        cl_abap_unit_assert=>fail( 'unclosed key quote must be rejected' ).
+      CATCH zcx_stg_error INTO lx_error.
+        cl_abap_unit_assert=>assert_equals( act = lx_error->status exp = 400 ).
+    ENDTRY.
   ENDMETHOD.
 
   METHOD count.
@@ -115,6 +168,8 @@ CLASS ltcl_json DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
   PRIVATE SECTION.
     METHODS values FOR TESTING RAISING cx_static_check.
     METHODS escape FOR TESTING RAISING cx_static_check.
+    METHODS surrogate FOR TESTING RAISING cx_static_check.
+    METHODS number_and_nested FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_json IMPLEMENTATION.
@@ -141,6 +196,42 @@ CLASS ltcl_json IMPLEMENTATION.
   METHOD escape.
     cl_abap_unit_assert=>assert_equals( act = zcl_stg_json=>escape( 'a"b\c' )
                                         exp = 'a\"b\\c' ).
+  ENDMETHOD.
+
+  METHOD surrogate.
+    DATA lt_values TYPE tihttpnvp.
+    DATA ls_value TYPE ihttpnvp.
+    DATA lv_expected TYPE string.
+    lt_values = zcl_stg_json=>parse_object( '{"Face":"\uD83D\uDE00"}' ).
+    READ TABLE lt_values WITH KEY name = 'Face' INTO ls_value.
+    lv_expected = cl_abap_codepage=>convert_from( 'F09F9880' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_value-value exp = lv_expected ).
+  ENDMETHOD.
+
+  METHOD number_and_nested.
+    DATA lt_values TYPE tihttpnvp.
+    DATA lt_nested TYPE tihttpnvp.
+    DATA ls_value TYPE ihttpnvp.
+    DATA lx_error TYPE REF TO zcx_stg_error.
+    lt_values = zcl_stg_json=>parse_object(
+      EXPORTING iv_json = '{"N":-12.5e+2,"Child":{"Text":"a},b"}}'
+      IMPORTING et_nested = lt_nested ).
+    READ TABLE lt_values WITH KEY name = 'N' INTO ls_value.
+    cl_abap_unit_assert=>assert_equals( act = ls_value-value exp = '-12.5e+2' ).
+    READ TABLE lt_nested WITH KEY name = 'Child' INTO ls_value.
+    cl_abap_unit_assert=>assert_equals( act = ls_value-value exp = '{"Text":"a},b"}' ).
+    TRY.
+        zcl_stg_json=>parse_object( '{"N":01}' ).
+        cl_abap_unit_assert=>fail( 'leading zero must be rejected' ).
+      CATCH zcx_stg_error INTO lx_error.
+        cl_abap_unit_assert=>assert_equals( act = lx_error->status exp = 400 ).
+    ENDTRY.
+    TRY.
+        zcl_stg_json=>parse_array( '[{"N":1}' ).
+        cl_abap_unit_assert=>fail( 'array must close' ).
+      CATCH zcx_stg_error INTO lx_error.
+        cl_abap_unit_assert=>assert_equals( act = lx_error->status exp = 400 ).
+    ENDTRY.
   ENDMETHOD.
 
 ENDCLASS.
@@ -787,6 +878,9 @@ CLASS ltcl_batch DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINA
   PRIVATE SECTION.
     METHODS setup.
     METHODS parse_retrieve_and_changeset FOR TESTING RAISING cx_static_check.
+    METHODS boundary_token_in_body FOR TESTING RAISING cx_static_check.
+    METHODS body_octets FOR TESTING RAISING cx_static_check.
+    METHODS binary_and_boundary_text FOR TESTING RAISING cx_static_check.
     METHODS retrieve_parts FOR TESTING RAISING cx_static_check.
     METHODS changeset_ok FOR TESTING RAISING cx_static_check.
     METHODS changeset_fails_as_a_whole FOR TESTING RAISING cx_static_check.
@@ -845,6 +939,61 @@ CLASS ltcl_batch IMPLEMENTATION.
                                         exp = 'POST' ).
     cl_abap_unit_assert=>assert_equals( act = ls_request-body
                                         exp = '{"TravelId":"T0300"}' ).
+  ENDMETHOD.
+
+  METHOD binary_and_boundary_text.
+    DATA lv_body_x TYPE xstring.
+    DATA lv_payload TYPE xstring.
+    DATA lt_parts TYPE zcl_stg_batch=>ty_parts.
+    DATA ls_part TYPE zcl_stg_batch=>ty_part.
+    DATA ls_request TYPE zcl_stg_batch=>ty_request.
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_stg_batch=>boundary_of( 'multipart/mixed; boundary="b;1"' ) exp = 'b;1' ).
+    lv_payload = cl_abap_codepage=>convert_to( `first--b1|middle` ).
+    lv_payload = lv_payload && '00FF0A0D' && cl_abap_codepage=>convert_to( `last` ).
+    lv_body_x = cl_abap_codepage=>convert_to(
+      `--b1` && cl_abap_char_utilities=>cr_lf &&
+      `Content-Type: application/http` && cl_abap_char_utilities=>cr_lf &&
+      cl_abap_char_utilities=>cr_lf &&
+      `PUT PhotoSet('P1')/$value HTTP/1.1` && cl_abap_char_utilities=>cr_lf &&
+      `Content-Type: image/png` && cl_abap_char_utilities=>cr_lf &&
+      cl_abap_char_utilities=>cr_lf ).
+    lv_body_x = lv_body_x && lv_payload && cl_abap_codepage=>convert_to(
+      cl_abap_char_utilities=>cr_lf && `--b1--` && cl_abap_char_utilities=>cr_lf ).
+    lt_parts = zcl_stg_batch=>parse( iv_body_x = lv_body_x iv_body = '' iv_boundary = 'b1' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_parts ) exp = 1 ).
+    READ TABLE lt_parts INDEX 1 INTO ls_part.
+    READ TABLE ls_part-requests INDEX 1 INTO ls_request.
+    cl_abap_unit_assert=>assert_equals( act = ls_request-body_x exp = lv_payload ).
+  ENDMETHOD.
+
+  METHOD boundary_token_in_body.
+    DATA lv_body TYPE string.
+    DATA lt_parts TYPE zcl_stg_batch=>ty_parts.
+    DATA ls_part TYPE zcl_stg_batch=>ty_part.
+    DATA ls_request TYPE zcl_stg_batch=>ty_request.
+    lv_body = crlf( `--b|Content-Type: application/http||POST TravelSet HTTP/1.1|Content-Type: application/json||` &&
+                    `{"Description":"before--b-after"}|--b--|` ).
+    lt_parts = zcl_stg_batch=>parse( iv_body = lv_body iv_boundary = 'b' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_parts ) exp = 1 ).
+    READ TABLE lt_parts INDEX 1 INTO ls_part.
+    READ TABLE ls_part-requests INDEX 1 INTO ls_request.
+    cl_abap_unit_assert=>assert_equals( act = ls_request-body exp = '{"Description":"before--b-after"}' ).
+  ENDMETHOD.
+
+  METHOD body_octets.
+    DATA lv_payload TYPE string.
+    DATA lv_body TYPE string.
+    DATA lt_parts TYPE zcl_stg_batch=>ty_parts.
+    DATA ls_part TYPE zcl_stg_batch=>ty_part.
+    DATA ls_request TYPE zcl_stg_batch=>ty_request.
+    lv_payload = `A  B` && cl_abap_char_utilities=>cr_lf && `C`.
+    lv_body = crlf( `--b|Content-Type: application/http||PUT PhotoSet('P1')/$value HTTP/1.1|` &&
+                    `Content-Type: text/plain||` ) && lv_payload && crlf( `|--b--|` ).
+    lt_parts = zcl_stg_batch=>parse( iv_body = lv_body iv_boundary = 'b' ).
+    READ TABLE lt_parts INDEX 1 INTO ls_part.
+    READ TABLE ls_part-requests INDEX 1 INTO ls_request.
+    cl_abap_unit_assert=>assert_equals( act = ls_request-body exp = lv_payload ).
   ENDMETHOD.
 
   METHOD retrieve_parts.
