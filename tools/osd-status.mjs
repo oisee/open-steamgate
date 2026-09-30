@@ -32,7 +32,7 @@ import {DEFAULT_DATABASE} from "./sqlite-file-client.mjs";
 import {liveHash} from "./osd-build.mjs";
 import {instances} from "./osd-runtime.mjs";
 import {services as icfServices, channels as pushChannels} from "./osd-icf.mjs";
-import {segwRegistrations} from "./segw-registry.mjs";
+import {registeredServices, segwRegistrations} from "./segw-registry.mjs";
 import {generatorFoldersOf, folderOf, packsOf, webappsOf} from "./osd-packs.mjs";
 import {layers} from "./osd-inputs.mjs";
 import {identity} from "./osd-identity.mjs";
@@ -194,13 +194,7 @@ export function serviceTree(root, env = process.env) {
   };
   const rel = (file) => (file === undefined ? undefined : relative(root, resolve(root, file)));
   const folders = generatorFoldersOf(root, env).map((f) => join(root, f));
-  // Different IWSV filenames can declare the same external endpoint across
-  // layers. segwRegistrations preserves layer order, so the later one wins.
-  const registrations = new Map();
-  for (const one of segwRegistrations(folders)) {
-    registrations.set(one.external.toLowerCase(), one);
-  }
-  for (const one of registrations.values()) {
+  for (const one of registeredServices(segwRegistrations(folders))) {
     out.push({
       path: `/sap/opu/odata/sap/${one.external}`,
       kind: "ODATA",
