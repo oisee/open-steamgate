@@ -90,6 +90,7 @@ jobs:
           node tools/osd-link.mjs transpiler packages/transpiler
           node tools/osd-link.mjs transpiler-cli packages/cli
           node tools/osd-link.mjs runtime packages/runtime
+          node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
           node tools/osd-transpiler.mjs
       # The library patches this tree holds until they land upstream. The
       # media path runs on SCMS_BINARY_TO_XSTRING, which open-abap-core does
