@@ -22,6 +22,7 @@
     "test/zosd-test.mjs",
     "test/osd-suites.mjs",
     "test/ci-wait-tests.mjs",
-    "test/preflight.mjs"
+    "test/preflight.mjs",
+    "test/lift-r1.mjs"
   ]
 }

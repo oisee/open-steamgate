@@ -2736,3 +2736,51 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: backlog (Lars is busy this week); needs an issue or a PR in abaplint/transpiler after the critic and a heads-up to stoker
 - Regression-test location: none yet
 - Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-fae-one-select-per-row — FOR ALL ENTRIES sends one SELECT per row of the driving table
+
+- Status: `open` (recorded; upstream: backlog)
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/transpiler` 2.13.93 and abaplint/transpiler main at dd83da9 (`packages/transpiler/src/statements/select.ts`, the `SQLForAllEntries` branch), as pinned in this tree (`oisee/transpiler` at `ddb0a993`)
+- Affected ABAP statement, runtime API or adapter: `SELECT ... FOR ALL ENTRIES IN itab WHERE ...`
+- Minimal ABAP reproducer: `zcl_osd_lift_r1_demo=>after` (`src/lift/`) over 50 rows
+- Exact command used to run it: `npx mocha test/lift-r1.mjs` (counts `DatabaseClient.select` calls)
+- Expected SAP behaviour: the database interface sends the driving table in blocks (profile parameters `rsdb/max_blocking_factor`, `rsdb/max_in_blocking_factor`), so 50 rows need not be 50 statements; how many were sent was not counted. Measured on A4H on 2026-09-30 with R1's two shapes over a standard client-independent text table with a three-field key, 42 driving rows, 20 repetitions: the same rows (a miss keeps the prefilled value, a duplicate key is filled), 17.2 ms for the SELECT SINGLE loop against 1.6 ms for FOR ALL ENTRIES. On the same system, UP TO 3 ROWS with two driving rows returned 3 rows (the limit applies to the whole result, not per driving row), the duplicate removal is over the whole selected row, and an empty driving table ignores the WHERE
+- Actual open-abap behaviour: the transpiled code loops over the driving table and runs the statement once per row, appending, then (for a standard target) sorts and deletes adjacent duplicates -- with a hashed target, as in R1, the test with a key asked twice passes; 50 rows are 50 calls, as many as the SELECT SINGLE loop it replaces. The result rows are right (the differential test in `zcl_osd_lift_r1_demo.clas.testclasses.abap` passes)
+- Impact on open-steamgate: a set-based rewrite (verified lift recipe R1) makes as many adapter calls as the loop it replaces (50 for 50 rows), so cost evidence for R1 cannot come from this runtime; behaviour is unaffected. Elapsed time on DuckDB, PostgreSQL or HANA is not measured; the number of calls is. How many blocks a system sends depends on its profile (`rsdb/max_blocking_factor`, `rsdb/max_in_blocking_factor`, database-specific)
+- Smallest safe workaround: none needed for correctness; cost evidence for FOR ALL ENTRIES recipes waits for a blocking runtime or is measured on a system
+- Upstream: abaplint/transpiler, backlog (Lars is busy this week); a change would build one statement per block with the WHERE repeated under OR, keeping the empty-table branch
+- Regression-test location: `test/lift-r1.mjs` ("AFTER does too, on this runtime" pins 50 and fails when blocking arrives)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-abaplint-key-include-dropped — abaplint reports a key without the key includes it cannot resolve
+
+- Status: `open` (worked around in `tools/lift.mjs`; upstream: needs an issue)
+- Discovery date: `2026-09-30`
+- Affected versions: `@abaplint/core` 2.120.55 (`build/src/objects/table.js`, `listKeys` and `parseType`)
+- Affected ABAP statement, runtime API or adapter: none at run time; the DDIC resolution a tool reads a table's primary key from (`Table.listKeys(reg)`, `Table.parseType(reg)`)
+- Minimal ABAP reproducer: a transparent table whose DD03P has key fields `KIND`, `CODE` and a key `.INCLUDE` of `CI_LIFT_MISSING`, which is not in the registry
+- Exact command used to run it: `npx mocha test/lift-r1.mjs` ("R1 refuses a key include the DDIC given does not hold, even a CI_ one abaplint skips")
+- Expected SAP behaviour: every field of a key include is a key field, a suffixed include (`.INCLU-<suffix>`) included; a table whose include cannot be activated is not active, so its key is not known
+- Actual open-abap behaviour: `listKeys` expands only a field named exactly `.INCLUDE`, and only when the include resolves to a structure; an unresolved `.INCLUDE` is left out without a message (a suffixed `.INCLU-xxx` key include is kept as a literal name, which then never resolves). `parseType` skips a missing `CI_`/`SI_` include and returns an unknown type for any other missing include, so only the `CI_`/`SI_` case reaches a caller as a complete-looking key that is a strict prefix of the real one
+- Impact on open-steamgate: verified lift R1 took the key from abaplint and certified a partial key as the full primary key, so the generated hashed lookup could lose rows (critic r1d on #271)
+- Smallest safe workaround: `tools/lift.mjs` walks the DD03P key fields itself, requires every key include to be a table in the DDIC given (recursively; a view or a suffixed include is refused by name) and refuses when the field list differs from `listKeys`
+- Upstream: abaplint/abaplint, needs an issue (Lars is busy: backlog)
+- Regression-test location: `test/lift-r1.mjs` (the test above; its CI_ case fails against the provider without the check)
+- Upstream version containing a fix: none yet
+
+### ANOMALY-2026-09-30-fae-up-to-per-row — FOR ALL ENTRIES with UP TO n limits each driving row, not the result
+
+- Status: `open` (recorded; fix delegated to the transpiler pin owner; upstream: backlog)
+- Discovery date: `2026-09-30`
+- Affected versions: abaplint/transpiler as pinned here (`oisee/transpiler` at `ddb0a993`, `packages/transpiler/src/statements/select.ts`, the `SQLForAllEntries` branch)
+- Affected ABAP statement, runtime API or adapter: `SELECT ... UP TO n ROWS FOR ALL ENTRIES IN itab WHERE ...`
+- Minimal ABAP reproducer: `SELECT * FROM zosd_lift_txt INTO TABLE lt UP TO 3 ROWS FOR ALL ENTRIES IN it_keys WHERE kind = it_keys-kind.` with two driving rows (`STAT`, `OTH`) and four table rows for each
+- Exact command used to run it: a throwaway class with that statement in `src/lift/`, `npm run transpile`, then the method called from Node with `DatabaseClient.select` counted (not committed; the same measurement as the R1 cost test in `test/lift-r1.mjs`)
+- Expected SAP behaviour: the limit applies to the whole result. Measured on A4H on 2026-09-30 over a standard text table with two driving rows and `UP TO 3 ROWS`: 3 rows
+- Actual open-abap behaviour: 6 rows in 2 statements. The transpiled code puts `UP TO n ROWS` into the statement it runs once per driving row, so each row gets its own n; the duplicate removal after the loop does not cut the result back. Duplicate removal over the whole selected row and an empty driving table (whole WHERE ignored) match A4H
+- Impact on open-steamgate: a program that reads a sample with FOR ALL ENTRIES and UP TO gets up to n times the number of driving rows here; verified-lift evidence for such a shape would differ from the system
+- Smallest safe workaround: none in the tree; the one-statement FAE change (ANOMALY-2026-09-30-fae-one-select-per-row) removes it if the limit goes on the combined statement
+- Upstream: abaplint/transpiler, backlog, together with the one-statement change
+- Regression-test location: none yet; the test comes with the fix
+- Upstream version containing a fix: none yet
