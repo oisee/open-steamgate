@@ -202,6 +202,17 @@ ENDCLASS.
     expect(store.list("CLAS").map((o) => o.name)).to.deep.equal(["ZCL_OSD_PROBE"]);
   });
 
+  it("an include name the table does not own is refused, never written into the main file", () => {
+    const written = store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    // "constructor" and "toString" are properties of every object: a plain
+    // lookup found Object there and wrote over the class (critic on #294)
+    for (const include of ["constructor", "toString"]) {
+      expect(() => store.write("CLAS", "ZCL_OSD_PROBE", "* not a class\n", include)).to.throw(/class include/);
+      expect(() => store.read("CLAS", "ZCL_OSD_PROBE", include)).to.throw();
+    }
+    expect(readFileSync(join(root, written.file), "utf8")).to.equal(CLASS);
+  });
+
   it("a new object may name a writable layer root", () => {
     mkdirSync(join(root, "scratch", "src"), {recursive: true});
     const layered = new ObjectStore({root, libs: [], roots: [
