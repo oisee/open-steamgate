@@ -1,7 +1,7 @@
 // ABAP Unit on gogen. Test includes are compiled only for selected owners.
 // Results are JSON rows: {class, testclass, method, status, message}.
 import {spawnSync} from "node:child_process";
-import {existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
+import {appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {performance} from "node:perf_hooks";
 import {fileURLToPath} from "node:url";
@@ -31,11 +31,11 @@ if (selected.size && owners.length !== selected.size) throw new Error(`unknown t
 // One bad generated method must not hide every other owner's verdict. Keep
 // this sequential: cmd/unit is the compiler's scratch package, and the Go
 // runtime has process-global class constructors.
-if (!selected.size && !fixture) {
+if (args.includes("--per-owner") && !selected.size && !fixture) {
   const rows = [];
   const timingMs = {frontendClosureRounds: [], emit: 0, goBuild: 0, run: 0};
   for (const owner of owners) {
-    const child = spawnSync("node", [join(here, "unit.mjs"), "--class", owner, "--out", join(out, owner.toLowerCase())], {
+    const child = spawnSync("node", [join(here, "unit.mjs"), "--class", owner, "--unlayered", "--out", join(out, owner.toLowerCase())], {
       cwd: home, encoding: "utf8", timeout: 180000, maxBuffer: 20e6, env: process.env,
     });
     if (!child.stdout) {
@@ -67,6 +67,8 @@ const available = new Set(folders.flatMap(walk).filter((f) => !skip(f) && /\.(cl
   .map((f) => f.split("/").at(-1).split(".")[0].replaceAll("#", "/").toUpperCase()));
 const sourceByName = new Map(folders.flatMap(walk).filter((f) => !skip(f) && /\.clas\.abap$/.test(f))
   .map((f) => [f.split("/").at(-1).split(".")[0].replaceAll("#", "/").toUpperCase(), f]));
+const objectByName = new Map(folders.flatMap(walk).filter((f) => !skip(f) && /\.(clas|intf)\.abap$/.test(f))
+  .map((f) => [f.split("/").at(-1).split(".")[0].replaceAll("#", "/").toUpperCase(), f]));
 
 function callsIn(node, out) {
   if (Array.isArray(node)) { for (const n of node) callsIn(n, out); return out; }
@@ -96,10 +98,12 @@ while (sourceQueue.length) {
   }
 }
 let program;
+let registry;
 const timingMs = {frontendClosureRounds: [], emit: 0, goBuild: 0, run: 0};
 for (let round = 0; round < 12; round++) {
   const started = performance.now();
-  program = compileProgram({folders, objects: [...wanted], tolerant: true, includeTests: new Set(owners), skip});
+  program = compileProgram({folders, objects: [...wanted], tolerant: true, includeTests: new Set(owners), skip, registry});
+  registry = program.reg;
   const refs = new Set(referencedClasses(program));
   for (const name of wanted) {
     const sup = program.reg.getObject("CLAS", name)?.getDefinition()?.getSuperClass();
@@ -200,6 +204,127 @@ for (const row of rows) if (row.status === "READY") {
   }
 }
 
+// A package can import only packages below it. Promote a class when its
+// static type or a direct call points upward; this also keeps class cycles
+// together. Test include classes live in unit, ordinary repository classes
+// in app, and the imported libraries in core.
+const layer = new Map(program.classes.map((c) => {
+  const owner = c.name.split(":")[0];
+  const file = sourceByName.get(owner);
+  return [c.name, c.name.includes(":") && owners.includes(owner) ? 2
+    : file && libDirs.some((dir) => file.startsWith(dir + "/")) ? 0 : 1];
+}));
+const initialLayer = new Map(layer);
+const interfaceLayer = new Map([...program.interfaceMethods.keys()].map((name) => {
+  const file = objectByName.get(name);
+  return [name, file && libDirs.some((dir) => file.startsWith(dir + "/")) ? 0 : 1];
+}));
+const structLayer = new Map([...program.structs.keys()].map((name) => [name, 0]));
+const typeLayer = (t) => !t ? 0 : t.k === "table" ? typeLayer(t.row)
+  : t.k === "struct" ? (structLayer.get(t.go) ?? 0)
+    : t.k === "ref" ? (t.intf ? interfaceLayer.get(t.name) : layer.get(t.name)) ?? 0 : 0;
+const classRefs = (c) => {
+  const refs = new Set(referencedClasses({...program, classes: [c], structs: new Map()}));
+  if (c.super) refs.add(c.super);
+  for (const m of c.methods) callsIn(m.body, refs);
+  for (const m of c.stubs ?? []) callsIn(m.body, refs);
+  return refs;
+};
+const edges = new Map(program.classes.map((c) => [c.name, [...classRefs(c)].filter((ref) => layer.has(ref))]));
+const index = new Map();
+const low = new Map();
+const stack = [];
+const onStack = new Set();
+const crossLayerCycles = [];
+function visitCycle(name) {
+  index.set(name, index.size);
+  low.set(name, index.get(name));
+  stack.push(name);
+  onStack.add(name);
+  for (const ref of edges.get(name) ?? []) {
+    if (!index.has(ref)) { visitCycle(ref); low.set(name, Math.min(low.get(name), low.get(ref))); }
+    else if (onStack.has(ref)) low.set(name, Math.min(low.get(name), index.get(ref)));
+  }
+  if (low.get(name) !== index.get(name)) return;
+  const component = [];
+  let member;
+  do { member = stack.pop(); onStack.delete(member); component.push(member); } while (member !== name);
+  if (component.length < 2 || new Set(component.map((n) => initialLayer.get(n))).size < 2) return;
+  component.sort();
+  crossLayerCycles.push(component);
+  for (const n of component) if (layer.get(n) < 2) layer.set(n, 1);
+}
+for (const name of layer.keys()) if (!index.has(name)) visitCycle(name);
+let promoted = true;
+while (promoted) {
+  promoted = false;
+  for (const [name, st] of program.structs) {
+    const next = Math.max(structLayer.get(name), ...st.fields.map((f) => typeLayer(f.type)));
+    if (next > structLayer.get(name)) { structLayer.set(name, next); promoted = true; }
+  }
+  for (const [name, sigs] of program.interfaceMethods) {
+    const next = Math.max(interfaceLayer.get(name), ...sigs.flatMap((m) => [typeLayer(m.returning?.type), ...m.params.map((p) => typeLayer(p.type))]));
+    if (next > interfaceLayer.get(name)) { interfaceLayer.set(name, next); promoted = true; }
+  }
+  for (const c of program.classes) {
+    let next = layer.get(c.name);
+    for (const ref of classRefs(c)) next = Math.max(next, layer.get(ref) ?? 0);
+    for (const intf of c.interfaces ?? []) next = Math.max(next, interfaceLayer.get(intf) ?? 0);
+    for (const a of c.attributes ?? []) next = Math.max(next, typeLayer(a.type));
+    for (const m of [...c.methods, ...(c.stubs ?? []), ...(c.constructor ? [c.constructor] : [])]) {
+      next = Math.max(next, typeLayer(m.returning?.type));
+      for (const p of m.params ?? []) next = Math.max(next, typeLayer(p.type));
+      for (const l of m.locals ?? []) next = Math.max(next, typeLayer(l.type));
+    }
+    if (next > layer.get(c.name)) { layer.set(c.name, next); promoted = true; }
+  }
+}
+const layerClasses = [0, 1, 2].map((i) => program.classes.filter((c) => layer.get(c.name) === i));
+const allClassNames = new Set(program.classes.map((c) => c.name));
+const layerInfo = {
+  classes: Object.fromEntries(["core", "app", "unit"].map((name, i) => [name, layerClasses[i].length])),
+  crossLayerCycles,
+  promoted: [...layer].filter(([name, value]) => value > initialLayer.get(name))
+    .map(([name, value]) => ({class: name, from: ["core", "app", "unit"][initialLayer.get(name)], to: ["core", "app", "unit"][value]})),
+};
+const eventsFor = (i) => new Map([...program.events].filter(([, ev]) =>
+  (layer.get(ev.decl) ?? interfaceLayer.get(ev.decl) ?? 0) === i));
+function writeGeneratedGo(dir) {
+  if (args.includes("--unlayered") || fixture) {
+    writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
+    return;
+  }
+  const coreDir = join(here, "go", "generated", "core");
+  const appDir = join(here, "go", "generated", "app");
+  mkdirSync(coreDir, {recursive: true});
+  mkdirSync(appDir, {recursive: true});
+  const coreNames = new Set(layerClasses[0].map((c) => c.name));
+  const appNames = new Set(layerClasses[1].map((c) => c.name));
+  const coreInterfaces = new Set([...interfaceLayer].filter(([, i]) => i === 0).map(([name]) => name));
+  const appInterfaces = new Set([...interfaceLayer].filter(([, i]) => i === 1).map(([name]) => name));
+  const structsAt = (i) => new Map([...program.structs].filter(([name]) => structLayer.get(name) === i));
+  const constsAt = (i) => new Map([...program.consts].filter(([name, c]) => {
+    const owner = [...layer.keys()].find((cls) => name.startsWith(cls.replace(/[^A-Z0-9_]/g, "_") + "__"));
+    return Math.max(owner ? layer.get(owner) : 0, typeLayer(c.type)) === i;
+  }));
+  writeFileSync(join(coreDir, "zz_generated.go"), emitGo(program, "core", {
+    classes: layerClasses[0], structs: structsAt(0), consts: constsAt(0),
+    interfaces: coreInterfaces, events: eventsFor(0), externalClasses: new Set([...allClassNames].filter((n) => !coreNames.has(n))),
+    marker: "GogenCoreLayer",
+  }));
+  writeFileSync(join(appDir, "zz_generated.go"), emitGo(program, "app", {
+    classes: layerClasses[1], structs: structsAt(1), consts: constsAt(1),
+    interfaces: appInterfaces, events: eventsFor(1), externalClasses: new Set([...allClassNames].filter((n) => !appNames.has(n))),
+    imports: ["osg/gogen/generated/core"], importMarkers: ["GogenCoreLayer"], marker: "GogenAppLayer",
+  }));
+  writeFileSync(join(dir, "zz_generated.go"), emitGo(program, "main", {
+    classes: layerClasses[2], structs: structsAt(2), consts: constsAt(2),
+    interfaces: new Set(), events: eventsFor(2), externalClasses: new Set([...allClassNames].filter((n) => layer.get(n) < 2)),
+    imports: ["osg/gogen/generated/core", "osg/gogen/generated/app"],
+    importMarkers: ["GogenCoreLayer", "GogenAppLayer"],
+  }));
+}
+
 const emitStarted = performance.now();
 const goName = (x) => x.toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 const ready = rows.filter((x) => x.status === "READY");
@@ -236,7 +361,7 @@ generated.push("enc := json.NewEncoder(os.Stdout); if err := enc.Encode(results)
 mkdirSync(out, {recursive: true});
 const dir = join(here, "go", "cmd", "unit");
 mkdirSync(dir, {recursive: true});
-writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
+writeGeneratedGo(dir);
 writeFileSync(join(dir, "zz_main.go"), generated.join("\n") + "\n");
 if (ready.some((r) => r.db)) {
   const {DatabaseSetup} = await import(`${home}/node_modules/@abaplint/transpiler/build/src/db/index.js`);
@@ -246,15 +371,50 @@ if (ready.some((r) => r.db)) {
   writeFileSync(join(dir, "zz_db.json"), JSON.stringify([...db.schemas.sqlite, ...db.insert, ...seedStatements()]));
 } else writeFileSync(join(dir, "zz_db.json"), "[]");
 timingMs.emit = Math.round(performance.now() - emitStarted);
-const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.class)).size, rows, timingMs};
+const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.class)).size, rows, timingMs, layers: layerInfo};
 writeFileSync(join(out, "plan.json"), JSON.stringify(summary, null, 2));
 if (!ready.length || args.includes("--build-only")) { console.log(JSON.stringify(summary)); process.exit(ready.length ? 0 : 2); }
 const bin = join(out, "unit");
-const buildStarted = performance.now();
-const build = spawnSync("go", ["build", "-trimpath", "-o", bin, "./cmd/unit"], {
-  cwd: join(here, "go"), encoding: "utf8", env: {...process.env, GOCACHE: process.env.GOCACHE ?? "/tmp/gogen-unit-gocache"}, maxBuffer: 5e6,
-});
-timingMs.goBuild = Math.round(performance.now() - buildStarted);
+// The Go compiler can reject a method that the IR frontend accepted. Find
+// its ABAP source position, retain its typed signature, and emit a method
+// that raises NOT_COMPILED when reached. The next build reports any further
+// errors, so unrelated owners can still share this one binary.
+function stubGoErrors(diagnostics) {
+  let changed = 0;
+  for (const line of diagnostics.split("\n")) {
+    const match = /^([^:\n]+\.abap):(\d+):\s*(.+)$/.exec(line);
+    if (!match) continue;
+    const [, file, rowText, reason] = match;
+    const row = Number(rowText);
+    const candidates = program.classes.flatMap((cls) =>
+      [...cls.methods, ...(cls.constructor ? [cls.constructor] : [])]
+        .filter((m) => m.pos?.file === file && m.pos.row <= row)
+        .map((m) => ({cls, method: m})));
+    candidates.sort((a, b) => b.method.pos.row - a.method.pos.row);
+    const target = candidates[0];
+    if (!target) continue;
+    const {cls, method} = target;
+    if (method.name === "CONSTRUCTOR") continue;
+    cls.methods.splice(cls.methods.indexOf(method), 1);
+    cls.stubs.push({...method, reason: `Go compiler: ${reason}`});
+    changed++;
+  }
+  return changed;
+}
+let build;
+for (let attempt = 0; attempt < 100; attempt++) {
+  const buildStarted = performance.now();
+  build = spawnSync("go", ["build", ...(process.env.GOGEN_GO_BUILD_X ? ["-x"] : []), "-trimpath", "-o", bin, "./cmd/unit"], {
+    cwd: join(here, "go"), encoding: "utf8", env: {...process.env, GOCACHE: process.env.GOCACHE ?? "/tmp/gogen-unit-gocache"}, maxBuffer: 5e6,
+  });
+  if (process.env.GOGEN_GO_BUILD_X) appendFileSync(join(out, "go-build-x.log"), build.stderr ?? "");
+  timingMs.goBuild += Math.round(performance.now() - buildStarted);
+  if (build.status === 0) break;
+  if (!stubGoErrors(build.stderr ?? "")) break;
+  const emitRetryStarted = performance.now();
+  writeGeneratedGo(dir);
+  timingMs.emit += Math.round(performance.now() - emitRetryStarted);
+}
 if (build.status !== 0) {
   const message = (build.stderr || build.error?.message || "go build failed").trim().split("\n").slice(0, 12).join("\n");
   for (const r of ready) { r.status = "NOT_COMPILED"; r.message = message; }
