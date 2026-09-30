@@ -117,6 +117,7 @@ CLASS ltcl_dsl_mpc IMPLEMENTATION.
       cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `TravelAltSet` ) ).
       cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `set_semantic( 'url' )` ) ).
       cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `set_sortable( abap_true )` ) ).
+      cl_abap_unit_assert=>assert_true( xsdbool( lv_source CS `set_as_etag( )` ) ).
     ENDIF.
     LOOP AT ls_model-entity_types INTO ls_type.
       lv_count = lv_count + 1.
