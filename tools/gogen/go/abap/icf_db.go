@@ -91,6 +91,8 @@ func OpenDBFile(path string, script []byte) (seeded bool, err error) {
 		d.Close()
 		return false, err
 	}
+	previous := db
 	db = d
+	if previous != nil { _ = previous.Close() }
 	return seeded, nil
 }
