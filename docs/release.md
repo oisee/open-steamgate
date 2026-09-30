@@ -124,7 +124,21 @@ binary from an open-steamgate checkout. `--seed` (or `OSD_BINARY_SEED=1`)
 requires the bootstrapped libraries and packs and embeds the seed. Run
 `osd doctor` to see which mode a binary contains.
 
-The measured seeded Linux x64 binary is 109.5 MB (decimal). All four requested Bun targets cross-compiled on Linux x64 with Bun 1.4.2
+**Every binary is checked by its content before it is uploaded**
+(`scripts/release-verify.mjs`, 2026-09-30): the header must name the target
+(ELF x86-64 / aarch64, Mach-O arm64, PE x64) and the `.sha256` must be the
+file's own digest. The Linux x64 binary, the one the runner can execute, is
+also run the way a user runs it: `./osd up` outside any checkout, with an empty
+data home. It must boot from its embedded seed, answer the demo service's
+`$metadata` with `TravelSet`, name its generation in `X-OSD-Generation`, and
+serve the ABAP file this commit changed last, read back over ADT, byte for
+byte. A seed built from other source fails there. The VSIX is checked by the
+version inside `extension/package.json`, the Docker image by
+`docker/image/smoke.sh` before `docker.yml` publishes it, and each published
+preview by `release-verify.mjs pages` in `preview.yml`: its `build.json` must
+name the commit and its `sw.js` must carry the stamp `build.json` names.
+
+The measured seeded Linux x64 binary is 316.4 MB (decimal, 2026-09-30; it was 109.5 MB on 2026-09-16). All four requested Bun targets cross-compiled on Linux x64 with Bun 1.4.2
 in the local release check. No target failed to build. Only Linux x64 was
 built on its native host; cross-compilation does not prove that Linux arm64,
 macOS arm64, or Windows x64 starts successfully. The binaries contain the

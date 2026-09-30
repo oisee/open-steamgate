@@ -223,6 +223,13 @@ jobs:
           mkdir -p build/release
           npm run binary -- --seed "build/release/$ASSET" "$TARGET"
           (cd build/release && sha256sum "$ASSET" > "$ASSET.sha256")
+          # by content, before anything is uploaded: the header names this
+          # target, and the one binary this runner can execute boots from its
+          # seed, answers the demo service and serves this commit's source
+          node scripts/release-verify.mjs binary "build/release/$ASSET" "$TARGET"
+          if [[ "$TARGET" == bun-linux-x64-baseline ]]; then
+            node scripts/release-verify.mjs serve "build/release/$ASSET"
+          fi
           release_is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)
           if [[ "$release_is_draft" != true && "$FULL_SCAN" != true ]]; then
             echo '::error::An existing published release requires OSD_LEAK_IDENTIFIERS and scanner exit 0 before uploading'

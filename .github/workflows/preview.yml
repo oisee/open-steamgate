@@ -161,6 +161,13 @@ jobs:
       - name: Refresh the index of all published previews
         if: ${{ success() }}
         run: node scripts/pages-push.mjs index
+      # A push to gh-pages that exits 0 is not a deployment: Pages builds the
+      # branch afterwards and a CDN stands in front of it. The published
+      # build.json must name this commit and the sw.js it serves must carry
+      # the stamp build.json names, or what people open is an older bundle.
+      - name: Check the published preview by its content
+        if: ${{ success() }}
+        run: node scripts/release-verify.mjs pages "https://oisee.github.io/open-steamgate/$PREVIEW_DIRECTORY/" "$GITHUB_SHA" --wait 900
       - name: Preview comment on the pull request
         if: github.event_name == 'pull_request'
         env:
