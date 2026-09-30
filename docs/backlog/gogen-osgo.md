@@ -1224,3 +1224,44 @@ Today there is none. Each case has its own logic:
   - A SELECT with a JOIN touching a lazy table: fill whole first.
   - Sorting and paging over a partial `by_key` fill: only keys asked are present, which is correct for a
     by-key read and wrong for a scan. A scan falls back to whole.
+
+## Parallel ABAP Unit and the next runtimes (2026-09-30, planned for 0.5 / 0.6)
+
+Alice, 2026-09-30. It follows U3 (Go ABAP Unit parity with Node, 0 DIFFERENT).
+
+**0.5 -- parallel ABAP Unit on Go (U4).**
+- Step 1: process sharding. The test binary runs N times, and each process takes its share of classes. Each process
+  has its own in-memory SQLite, so they share nothing.
+- Step 2: goroutines. The seed runs once into a template database, and each unit gets its own copy of that image
+  (serialize/deserialize, the backup API or `VACUUM INTO`; check the Go driver). The global `db`/`conn()` (`luw.go`,
+  `db.go`) and the class statics move into the Session.
+- The unit of isolation is the **test class**. Measured on A4H 2026-09-30 with two local test classes and a class
+  with CLASS-DATA plus a class constructor: each test class gets a fresh internal session (statics reset, class
+  constructor run again), and the test methods of one class share statics.
+- Our Node and Go runners probably keep statics across test classes: a parity gap with SAP. Check it, write an
+  ANORMALIES entry and fix both runners.
+- Verify with `go test -race`. Measure Node, Go serial, Go xN with one instrument.
+- The same step-2 refactor (Session instead of globals) is the first half of a multi-work-process OSGo server.
+
+**0.6 -- IR-JS parity as a third column.** `unit-compare` shows Node / Go / IR-JS. `emit-js.mjs` already runs the
+semantics harness, so DB-free tests (template engine, AJSON, parsers, compares) come first. DB tests need IR-JS on
+the same `DatabaseClient` seam, a separate and larger step. ADR 0004 still holds: IR-JS is an oracle, not a runtime.
+
+**0.6 -- the Go side of host relations: in-memory tables read in place.** `tools/ir-host-relation.mjs` (#56/#57) is
+the contract agreed with the Go runtime on 2026-09-24. An AMDP IN table or a FOR ALL ENTRIES itab reaches the plan as
+a relation for one call. JS is the reference and copies the rows once; the Go client was to answer with a **SQLite
+virtual table over the host's own memory**, and that part was never built (no vtab under `tools/gogen/go`).
+- The precondition is stable row storage in Go tables (U3 wave 3, 2026-09-30: references to rows survive inserts,
+  appends and deletes).
+- Gate: `tools/ir-host-relation-pairs.mjs`.
+- Scope: per call only, which is the decision already taken. There is no shared state between ABAP and a SQL engine
+  beyond one call.
+- The wider proposal, one DB IR for both runtimes (`docs/pamdp-ir-portability.md`, 2026-09-23), is still a
+  proposal awaiting Alice, and pAMDP is parked. The vtab does not depend on it.
+
+**0.6 -- OSGo as a server with several work processes.** A shared database (not copies), several connections
+(SQLite WAL / DuckDB / Postgres), one transaction per dialog step. Serialise only where SAP does (ENQUEUE, V2 update),
+replacing today's single FIFO work-process lock. Built on the 0.5 Session refactor.
+
+**Noted:** `zcl_stg_segw_gen=>mpc_source` through the DSL (#293) takes 3.6 s against 0.94 s before on the largest
+project in OSG, while the same engine on A4H is ~4x faster. That makes it a runtime performance case to profile.

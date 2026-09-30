@@ -64,3 +64,4 @@ Each entry links to its original text in a track file. The source order and line
 - [gogen Go runtime: split go/abap into self-contained packages (2026-09-30)](gogen-osgo.md#gogen-go-runtime-split-goabap-into-self-contained-packages-2026-09-30) — 2026-09-30
 - [Versions of an object, read out of git (2026-09-30)](adt.md#versions-of-an-object-read-out-of-git-2026-09-30) — 2026-09-30
 - [Lazy table providers: one registry, routed like ICF handlers (2026-09-30)](gogen-osgo.md#lazy-table-providers-one-registry-routed-like-icf-handlers-2026-09-30) — 2026-09-30
+- [Parallel ABAP Unit and the next runtimes (2026-09-30, planned for 0.5 / 0.6)](gogen-osgo.md#parallel-abap-unit-and-the-next-runtimes-2026-09-30-planned-for-05--06) — 2026-09-30
