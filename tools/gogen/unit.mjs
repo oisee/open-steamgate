@@ -94,7 +94,7 @@ while (sourceQueue.length) {
   if (!file) continue;
   const testFile = owners.includes(name) ? sources.find((f) => f.split("/").at(-1).startsWith(name.toLowerCase() + ".")) : undefined;
   const contents = readFileSync(file, "utf8") + (testFile ? "\n" + readFileSync(testFile, "utf8") : "");
-  for (const ref of contents.matchAll(/\b(?:ZCL|ZCX|CL|CX)_[A-Z0-9_]+\b/gi)) {
+  for (const ref of contents.matchAll(/(?<![A-Z0-9_/])(?:\/[A-Z0-9_]+\/)?(?:ZCL|ZCX|CL|CX)_[A-Z0-9_]+\b/gi)) {
     const target = ref[0].toUpperCase();
     if (available.has(target) && !wanted.has(target)) { wanted.add(target); sourceQueue.push(target); }
   }
@@ -106,7 +106,7 @@ for (let round = 0; round < 12; round++) {
   const started = performance.now();
   program = compileProgram({folders, objects: [...wanted], tolerant: true, includeTests: new Set(owners), skip, registry});
   registry = program.reg;
-  const refs = new Set(referencedClasses(program));
+  const refs = new Set([...referencedClasses(program), ...program.missing]);
   for (const name of wanted) {
     const sup = program.reg.getObject("CLAS", name)?.getDefinition()?.getSuperClass();
     if (sup) refs.add(sup.toUpperCase());

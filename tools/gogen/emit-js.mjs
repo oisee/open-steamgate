@@ -452,7 +452,13 @@ function stmt(st, ctx, d) {
       return [`${t}abap.MoveCorrespondingData(${expr(st.to, ctx)}, ${expr(st.from, ctx)});`];
     case "shift_right_trailing": {
       const p = place(st.target, ctx);
-      return [`${t}${p} = abap.ShiftRightTrailing(${p}, ${expr(st.mask, ctx)});`];
+      const mask = st.maskLen !== undefined ? `abap.PadC(${expr(st.mask, ctx)}, ${st.maskLen})` : expr(st.mask, ctx);
+      return [`${t}${p} = abap.ShiftRightTrailing(${p}, ${mask});`];
+    }
+    case "shift_left_leading": {
+      const p = place(st.target, ctx);
+      const mask = st.maskLen !== undefined ? `abap.PadC(${expr(st.mask, ctx)}, ${st.maskLen})` : expr(st.mask, ctx);
+      return [`${t}${p} = abap.ShiftLeftLeading(${p}, ${mask});`];
     }
     // CONCATENATE ... IN BYTE MODE (ultra/packs; see emit-go.mjs)
     case "shift_left_circ_bytes": {

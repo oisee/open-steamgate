@@ -1036,6 +1036,14 @@ export function ShiftRightTrailing(s, mask) {
   return " ".repeat(r.length - n) + r.slice(0, n).join("");
 }
 
+// SHIFT s LEFT DELETING LEADING mask on a string or a c (see go/abap/shift.go)
+export function ShiftLeftLeading(s, mask) {
+  const r = [...s];
+  let i = 0;
+  while (i < r.length && mask.includes(r[i])) i += 1;
+  return r.slice(i).join("");
+}
+
 // sy-mandt: the transpiler runtime's logon client (see go/abap/select.go, ANORMALIES)
 export const Mandt = "123";
 

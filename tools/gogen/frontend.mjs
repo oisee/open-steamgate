@@ -29,6 +29,12 @@ const {Rearranger} = require("@abaplint/transpiler/build/src/rearranger");
 const {Nodes, Statements, Structures, Expressions, BasicTypes} = abaplint;
 
 export class Unsupported extends Error {}
+// A class outside the program is named, so a closure can add it and retry
+// instead of refusing the caller for good.
+function notInProgram(ctx, cls, message) {
+  ctx.program.missing.add(cls);
+  return new Unsupported(message);
+}
 
 export const I = {k: "i"};
 export const F = {k: "f"};
@@ -148,7 +154,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   for (const e of errors) broken.add(objName(e.getFilename()));
   if (broken.size > 0) wanted.splice(0, wanted.length, ...wanted.filter((w) => !broken.has(w)));
 
-  const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], wanted: new Set(wanted.map(upper)),
+  const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], missing: new Set(), wanted: new Set(wanted.map(upper)),
     interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
   program.supplied = suppliedParams(reg, program.wanted);
   PROGRAM = program;
@@ -2040,12 +2046,23 @@ function statement(node, ctx) {
       if (target.type.k !== "x") throw new Unsupported(`SHIFT LEFT CIRCULAR IN BYTE MODE of a ${target.type.k}`);
       return {s: "shift_left_circ_bytes", target};
     }
+    // SHIFT s LEFT DELETING LEADING mask on a string or a c: the leading
+    // characters that are in the mask go (the runtime's shift.js); a c mask
+    // keeps its trailing blanks, so `space` deletes blanks. A c target is
+    // stored without trailing blanks, so nothing is padded here.
+    if (/^SHIFT\s+\S+\s+LEFT\s+DELETING\s+LEADING\s/i.test(text)) {
+      const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      if (target.type.k !== "string" && target.type.k !== "c") throw new Unsupported(`SHIFT LEFT DELETING LEADING of a ${target.type.k}`);
+      const mask = source(node.findDirectExpression(Expressions.Source), ctx);
+      if (mask.type.k !== "c" && mask.type.k !== "string") throw new Unsupported(`SHIFT ... DELETING LEADING a ${mask.type.k}`);
+      return {s: "shift_left_leading", target, mask: convert(mask, S), maskLen: mask.type.k === "c" ? mask.type.len ?? 1 : undefined};
+    }
     if (!/^SHIFT\s+\S+\s+RIGHT\s+DELETING\s+TRAILING\s/i.test(text)) throw new Unsupported(`statement Shift: ${text}`);
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (target.type.k !== "string") throw new Unsupported(`SHIFT RIGHT DELETING TRAILING of a ${target.type.k}`);
     const mask = source(node.findDirectExpression(Expressions.Source), ctx);
     if (mask.type.k !== "c" && mask.type.k !== "string") throw new Unsupported(`SHIFT ... DELETING TRAILING a ${mask.type.k}`);
-    return {s: "shift_right_trailing", target, mask: convert(mask, S)};
+    return {s: "shift_right_trailing", target, mask: convert(mask, S), maskLen: mask.type.k === "c" ? mask.type.len ?? 1 : undefined};
   }
   // CONCATENATE a b ... INTO t IN BYTE MODE, t an xstring and every operand
   // an x or an xstring (ultra/packs: the SMW0 loaders of Zork and ZO4D glue
@@ -3062,7 +3079,7 @@ function refAttribute(base, attrNode, ctx, write = false) {
   const name = upper(attrNode.concatTokens());
   // a class the program does not compile is an empty struct in Go: its
   // attribute is refused here, in this method, not left to fail the build
-  if (!ctx.program.wanted.has(base.type.name)) throw new Unsupported(`${base.type.name}->${name}: the class is not compiled in this program`);
+  if (!ctx.program.wanted.has(base.type.name)) throw notInProgram(ctx, base.type.name, `${base.type.name}->${name}: the class is not compiled in this program`);
   const a = [base.type.name, ...ancestors(ctx.reg, base.type.name)].map((c) => clasDef(ctx.reg, c)?.getAttributes().getInstance()
     .find((x) => upper(x.getName()) === name)).find(Boolean);
   if (a === undefined) throw new Unsupported(`${base.type.name}->${name}: not an instance attribute`);
@@ -3811,7 +3828,7 @@ function constructor(c, ctx, inferred) {
   if (c.kw === "NEW") {
     const to = namedType(c.typeNode, ctx, inferred);
     if (to.k !== "ref") throw new Unsupported(`NEW of a ${to.k}: ${c.text}`);
-    if (!ctx.program.wanted.has(to.name)) throw new Unsupported(`NEW ${to.name}: the class is not compiled in this program`);
+    if (!ctx.program.wanted.has(to.name)) throw notInProgram(ctx, to.name, `NEW ${to.name}: the class is not compiled in this program`);
     const sig = constructorSignature(ctx, to.name);
     const given = new Map();
     const body = c.body;
@@ -4937,7 +4954,7 @@ function createObject(node, ctx) {
   const written = clsNode ? upper(clsNode.concatTokens()) : target.type.name;
   // a local class of this class's owner (LOCAL_CLASSES), by its compiled name
   const cls = ctx.program.locals?.get(`${ctx.owner ?? ctx.className}|${written}`) ?? written;
-  if (!ctx.program.wanted.has(cls)) throw new Unsupported(`CREATE OBJECT ${cls}: the class is not compiled in this program`);
+  if (!ctx.program.wanted.has(cls)) throw notInProgram(ctx, cls, `CREATE OBJECT ${cls}: the class is not compiled in this program`);
   const sig = constructorSignature(ctx, cls);
   const given = new Map();
   for (const p of params?.findAllExpressions(Expressions.ParameterS) ?? []) {
@@ -4970,7 +4987,7 @@ function raiseException(node, ctx, text) {
   const clsNode = node.findDirectExpression(Expressions.ClassName);
   if (clsNode) {
     const cls = upper(clsNode.concatTokens());
-    if (!ctx.program.wanted.has(cls)) throw new Unsupported(`RAISE EXCEPTION TYPE ${cls}: the class is not compiled in this program`);
+    if (!ctx.program.wanted.has(cls)) throw notInProgram(ctx, cls, `RAISE EXCEPTION TYPE ${cls}: the class is not compiled in this program`);
     const params = node.findDirectExpression(Expressions.ParameterListS);
     const given = new Map();
     for (const p of params?.findAllExpressions(Expressions.ParameterS) ?? []) {
@@ -5087,7 +5104,7 @@ function setHandler(node, ctx, text) {
     if (mname.includes("~")) throw new Unsupported(`SET HANDLER of an interface method: ${ms.concatTokens()}`);
     const at = declaringClass(ctx.reg, owner, mname, "method");
     if (!at) throw new Unsupported(`SET HANDLER: ${owner} has no method ${mname}`);
-    if (!ctx.program.wanted.has(at)) throw new Unsupported(`SET HANDLER: ${at} is not compiled in this program`);
+    if (!ctx.program.wanted.has(at)) throw notInProgram(ctx, at, `SET HANDLER: ${at} is not compiled in this program`);
     const mdef = declaredMethod(ctx.reg, at, mname);
     if (!mdef?.isEventHandler?.()) throw new Unsupported(`SET HANDLER: ${at}=>${mname} is not an event handler`);
     const ev = eventInfo(ctx, upper(mdef.getEventClass()), mdef.getEventName());
@@ -5116,7 +5133,7 @@ function setHandler(node, ctx, text) {
     const of = upper(mdef.getEventClass());
     let filter = null;
     if (forAll && of !== ev.decl && !ctx.reg.getObject("INTF", of)) {
-      if (!ctx.program.wanted.has(of)) throw new Unsupported(`SET HANDLER ... FOR ALL INSTANCES: ${of} is not compiled in this program`);
+      if (!ctx.program.wanted.has(of)) throw notInProgram(ctx, of, `SET HANDLER ... FOR ALL INSTANCES: ${of} is not compiled in this program`);
       filter = of;
     }
     handlers.push({call, obj, me: !obj && !sig.static, key: sig.static ? `${at}=>${mname}` : mname, event: ev.key, filter});
@@ -5382,7 +5399,7 @@ function call(chain, ctx, statement, hint) {
   if (kids.length === 3 && upper(kids[0].concatTokens()) === "SUPER" && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall)) {
     // SUPER->m( ): the superclass's implementation, not a virtual call
     sup = ancestors(ctx.reg, ctx.className)[0];
-    if (!sup || !ctx.program.wanted.has(sup)) throw new Unsupported(`SUPER-> in ${ctx.className}: the superclass is not compiled in this program`);
+    if (!sup || !ctx.program.wanted.has(sup)) throw notInProgram(ctx, sup, `SUPER-> in ${ctx.className}: the superclass is not compiled in this program`);
     mc = kids[2];
   } else if (kids.length === 1 && isExpr(kids[0], Expressions.MethodCall)) {
     mc = kids[0];
@@ -5398,7 +5415,7 @@ function call(chain, ctx, statement, hint) {
   } else if (kids.length === 3 && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall) && !isExpr(kids[0], Expressions.MethodCall)) {
     receiver = isExpr(kids[0], Expressions.FieldChain) || isExpr(kids[0], Expressions.SourceField) ? fieldChain(kids[0], ctx) : null;
     if (receiver === null || receiver.type.k !== "ref") throw new Unsupported(`call through ${kids[0].concatTokens()}`);
-    if (!receiver.type.intf && !ctx.program.wanted.has(receiver.type.name)) throw new Unsupported(`call on a ${receiver.type.name}, which is not compiled in this program`);
+    if (!receiver.type.intf && !ctx.program.wanted.has(receiver.type.name)) throw notInProgram(ctx, receiver.type.name, `call on a ${receiver.type.name}, which is not compiled in this program`);
     owner = receiver.type.name;
     mc = kids[2];
   } else if ((kids.length > 3 || isExpr(kids[0], Expressions.MethodCall)) && isTok(kids[kids.length - 2], "->") && isExpr(kids[kids.length - 1], Expressions.MethodCall)) {
@@ -5409,7 +5426,7 @@ function call(chain, ctx, statement, hint) {
       findFirstExpression: (t) => head.map((k) => (isTok(k) ? undefined : isExpr(k, t) ? k : k.findFirstExpression(t))).find(Boolean)};
     receiver = call(prefix, ctx, false);
     if (receiver.type.k !== "ref") throw new Unsupported(`call through a ${receiver.type.k}: ${chain.concatTokens()}`);
-    if (!receiver.type.intf && !ctx.program.wanted.has(receiver.type.name)) throw new Unsupported(`call on a ${receiver.type.name}, which is not compiled in this program`);
+    if (!receiver.type.intf && !ctx.program.wanted.has(receiver.type.name)) throw notInProgram(ctx, receiver.type.name, `call on a ${receiver.type.name}, which is not compiled in this program`);
     owner = receiver.type.name;
     mc = kids[kids.length - 1];
   } else {
@@ -5547,7 +5564,7 @@ function call(chain, ctx, statement, hint) {
   if (sig.unsupported) throw new Unsupported(`${owner ? owner + "=>" : ""}${name} was skipped: ${sig.unsupported}`);
   if (!statement && sig.returning === null) throw new Unsupported(`${name} has no RETURNING, cannot be an operand`);
   if (owner !== null && receiver === null && !sig.static) throw new Unsupported(`${owner}=>${name}: an instance method called statically`);
-  if (owner !== null && receiver === null && !ctx.program.wanted.has(owner)) throw new Unsupported(`${owner}=>${name}: ${owner} is not compiled in this program`);
+  if (owner !== null && receiver === null && !ctx.program.wanted.has(owner)) throw notInProgram(ctx, owner, `${owner}=>${name}: ${owner} is not compiled in this program`);
   const importing = sig.params.filter((p) => p.dir === "importing");
   const given = new Map();
   const targets = new Map();
