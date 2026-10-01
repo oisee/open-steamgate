@@ -65,10 +65,19 @@ reports it, and it is never deleted.
 own change stamps. A change made in the *same second* as the stamp it
 replaces is not seen. Any later edit of a class include moves that
 include's `UDAT`+`UTIME` past the recorded maximum and is seen. The
-package is created by the run and exists only for its duration, so such
-an edit would have to come from someone writing into it in that second. A
-content hash of every include (and of the DDIC rows) would close this. It
-is not done here.
+package is created by the run, and without `--keep` it exists only for the
+run. Such an edit would have to come from someone writing into it in that
+second.
+
+A second limit: the stamps read *active* rows only (REPOSRC `r3state = 'A'`,
+DDIC `as4local = 'A'`). An edit saved but not activated while `--keep`
+leaves the package in place does not move the stamp, and a later
+`--cleanup` deletes the object together with that inactive version. Only
+the run's own objects in its own temporary `$` package are affected, and
+only on an explicit `--cleanup`.
+
+A content hash of every include and of the DDIC rows, with inactive rows
+counted as a change, would close both limits. It is not done here.
 
 A refused import writes no receipt, and neither does an import whose stamps
 could not be read. In both cases the cleanup deletes no object.
