@@ -60,6 +60,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream issue: none yet, needs an issue or a fork fix (open-abap-core; for the lead, after the A4H recording confirms the derived parts)
 - Regression-test location: `test/unit/zcl_osd_sxml_contract_test.clas.testclasses.abap` (`reference_concat`)
 - Upstream version containing a fix: `unknown`
+### ANOMALY-2026-10-01-find-byte-mode -- FIND ... IN BYTE MODE searches the hex text, and SECTION ... LENGTH loses its target
+
+- Status: `open`
+- Discovery date: `2026-10-01`
+- Affected versions: the pinned transpiler and runtime (`libs.lock.json`, `oisee/transpiler e34d6a1`)
+- Affected ABAP statement, runtime API or adapter: `FIND x IN [SECTION OFFSET o [LENGTH l] OF] xstr IN BYTE MODE MATCH OFFSET m`
+- Minimal ABAP reproducer: `FIND iv_byte IN SECTION OFFSET lv_rel LENGTH lv_len OF mv_buf IN BYTE MODE MATCH OFFSET lv_found.` transpiles to `abap.statements.find(lv_len, {..., length: lv_len})`: the LENGTH operand becomes the searched object and the MATCH LENGTH target, and the call fails with `blah.substr is not a function`. Without LENGTH: the runtime runs a regular expression over the hex text of the xstring, so needle `3C` matches the bytes `C3 A3 C3` at a half-byte offset and MATCH OFFSET is that offset / 2, rounded; it also collects every match even though FIND asks for the first.
+- Exact command used to run it: found by `ZCL_OSD_SXML_STREAM_READER` under `test/unit/zcl_osd_sxml_contract_test` (`ltcl_readers->streaming`); the half-byte match is read off `@abaplint/runtime` `statements/find.js`
+- Expected SAP behaviour: LENGTH bounds the section; byte mode matches whole bytes only; the first match ends the search
+- Actual open-abap behaviour: as above
+- Impact on open-steamgate: a byte-mode FIND can report a needle that is not there, and every FIND costs the whole rest of the section
+- Smallest safe workaround: the streaming sXML reader never uses LENGTH, searches small slices that double, and checks every reported match against the bytes before trusting it (`find_slice`)
+- Upstream issue: none yet, needs an issue (abaplint/transpiler)
+- Regression-test location: `test/unit/zcl_osd_sxml_contract_test.clas.testclasses.abap` (`ltcl_readers->streaming`, through the reader's checked search)
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-10-01-submit-via-job-char-operands -- SUBMIT VIA JOB refused a job name and count in SAP's own CHAR types
 
 - Status: `fixed` (in this repository's lowering; no upstream involved)
