@@ -1884,7 +1884,22 @@ describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace la
       createRunProfile() {}, dispose() {}};
     api.tests = {createTestController: () => tree};
     api.TestRunProfileKind = {Run: 1, Debug: 2};
-    api.workspace.findFiles = async (pattern) => pattern instanceof api.RelativePattern ? [api.Uri.file(source)] : [];
+    let scans = 0;
+    let activeScans = 0;
+    let maxActiveScans = 0;
+    let releaseScan;
+    let holdScan = false;
+    api.workspace.findFiles = async (pattern) => {
+      if (!(pattern instanceof api.RelativePattern)) {
+        scans++;
+        activeScans++;
+        maxActiveScans = Math.max(maxActiveScans, activeScans);
+        if (holdScan) await new Promise((resolve) => { releaseScan = resolve; });
+        activeScans--;
+        return [];
+      }
+      return [api.Uri.file(source)];
+    };
     api.workspace.getWorkspaceFolder = () => undefined;
     api.workspace.createFileSystemWatcher = () => ({onDidCreate() {}, onDidDelete() {}, onDidChange() {}, dispose() {}});
     api.workspace.onDidSaveTextDocument = () => ({dispose() {}});
@@ -1907,6 +1922,7 @@ describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace la
       let lensRefreshes = 0;
       const subscription = lensProvider.onDidChangeCodeLenses(() => lensRefreshes++);
       await tree.resolveHandler();
+      expect(scans).to.equal(1);
       expect(tree.items.get("group:workspace")).to.equal(undefined);
       expect(await titles()).to.deep.equal(["read by 0 · tests 0 · services 0"]);
 
@@ -1915,22 +1931,42 @@ describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace la
       systemController.launcher.layers = [{folder, srcDir: path.join(folder, "src")}];
       systemController.launcher.state = "starting";
       state.fire();
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      expect(scans, "building and starting do not scan").to.equal(1);
       systemController.launcher.state = "running";
       state.fire();
       await new Promise((resolve) => setTimeout(resolve, 350));
+      expect(scans, "Start scans once after running").to.equal(2);
       expect(tree.items.get("group:workspace").children.get(`group:workspace:${path.basename(folder)}`)
         .children.get("CLAS:ZCL_LAYER_TEST")).to.not.equal(undefined);
       expect(await titles()).to.deep.equal(["read by 0 · tests 1 · services 0"]);
       expect(lensRefreshes).to.be.greaterThan(0);
+      state.fire();
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      expect(scans, "unchanged running state does not scan").to.equal(2);
 
       systemController.launcher.layers = [];
       state.fire();
       await new Promise((resolve) => setTimeout(resolve, 350));
+      expect(scans, "a layer change scans once").to.equal(3);
       expect(tree.items.get("group:workspace")).to.equal(undefined);
+
+      holdScan = true;
+      const first = tree.resolveHandler();
+      expect(scans).to.equal(4);
+      const second = tree.resolveHandler();
+      const third = tree.resolveHandler();
+      expect(scans, "overlapping requests wait for the first scan").to.equal(4);
+      holdScan = false;
+      releaseScan();
+      await Promise.all([first, second, third]);
+      expect(scans, "overlapping requests coalesce into one follow-up scan").to.equal(5);
+      expect(maxActiveScans).to.equal(1);
       subscription.dispose();
     } finally {
       lens?.dispose();
       explorer?.dispose();
+      expect(state.listeners.size, "disposing removes state listeners").to.equal(0);
       Osd.prototype.readers = oldReaders;
       rmSync(folder, {recursive: true, force: true});
     }

@@ -3565,7 +3565,7 @@ function testExplorer(context, output, {
   // RISK LEVEL of a class that declares HARMLESS and reaches a write
   const classSchedules = new Map();
   const riskDiagnostics = vscode.languages?.createDiagnosticCollection?.("osd ABAP Unit risk");
-  const buildTree = async () => {
+  const scanTree = async () => {
     // a rebuilt tree starts with no verdicts: an object is described again
     // when it is expanded or run, and a deleted file keeps no warning
     classSchedules.clear();
@@ -3637,6 +3637,22 @@ function testExplorer(context, output, {
     }
   };
 
+  // A file scan yields to VS Code. Keep the old scan and any newer request
+  // in order, so the last request always publishes the latest layer list.
+  let building;
+  let dirty = false;
+  const buildTree = () => {
+    dirty = true;
+    if (building !== undefined) return building;
+    building = (async () => {
+      do {
+        dirty = false;
+        await scanTree();
+      } while (dirty);
+    })().finally(() => { building = undefined; });
+    return building;
+  };
+
   const discover = async (item) => {
     const {object, dir} = objects.get(item.id);
     item.busy = true;
@@ -3700,7 +3716,20 @@ function testExplorer(context, output, {
     clearTimeout(rebuildTimer);
     rebuildTimer = setTimeout(() => { buildTree().catch((e) => output.appendLine(String(e.message ?? e))); }, 300);
   };
-  const onState = systemController?.onDidChange(() => scheduleRebuild());
+  const layerKey = () => JSON.stringify((systemController?.launcher?.layers ?? []).map(({folder, srcDir}) => [folder, srcDir]));
+  let lastLayerKey = layerKey();
+  let lastState = systemController?.launcher?.state;
+  const onState = systemController?.onDidChange(() => {
+    const state = systemController?.launcher?.state;
+    const key = layerKey();
+    const layersChanged = key !== lastLayerKey;
+    lastLayerKey = key;
+    const reachedRunning = state === "running" && lastState !== "running";
+    lastState = state;
+    // Layer discovery during Start happens in "building". The running
+    // notification covers it, after the server can answer the test lenses.
+    if (reachedRunning || (layersChanged && state === "running")) scheduleRebuild();
+  });
   const watcher = vscode.workspace.createFileSystemWatcher(TEST_FILE_GLOB);
   watcher.onDidCreate(() => scheduleRebuild());
   watcher.onDidDelete(() => scheduleRebuild());
