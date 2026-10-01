@@ -135,7 +135,10 @@ export function mentionedNames(sql, prefix = "") {
   }
   const names = new Set();
   for (const tok of tokens) {
-    if (tok.t !== "id" && tok.t !== "word") {
+    // a string literal counts too: SQLite reads `FROM 'tab'` and `FROM \`tab\``
+    // as a table (critic round 6); a literal that merely equals an allow-listed
+    // table name costs one extra, allowed read
+    if (tok.t !== "id" && tok.t !== "word" && tok.t !== "str") {
       continue;
     }
     let name = tok.v.toUpperCase();

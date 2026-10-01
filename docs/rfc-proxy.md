@@ -102,7 +102,14 @@ over-approximation on purpose: an exact reading of `FROM`/`JOIN` missed a read
 table in one more SQL form per review round (a comma after a `JOIN`, a derived
 table in a comma list), and a missed table is a wrong answer, while a name
 that is mentioned but not read (a column or alias sharing a table's name)
-only costs an extra hydration of a table one is allowed to read. The exact
+only costs an extra hydration of a table one is allowed to read. String
+literals count as mentions too, since SQLite reads ``FROM `tab` `` and
+`FROM 'tab'` as tables. The *first statement that mentions* a table is what
+decides it: an alias or column that shares an allow-listed table's name
+hydrates that table there, so a later local write meets the fetched rows
+rather than an empty table (write-first applies to writes before any
+mention). In replay without a capture such a mention fails the statement
+with the capture path, never with an empty table. The exact
 reading (`FROM`, `JOIN`, comma lists, `WHERE` subqueries, `UNION`; a `FROM`
 inside `TRIM`/`EXTRACT`/`SUBSTRING` is not a table) is still done for the
 journal: a statement it cannot classify (`WITH`, anything in parentheses right

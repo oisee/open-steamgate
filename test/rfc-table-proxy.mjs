@@ -385,15 +385,14 @@ describe("tools/rfc-table-proxy: a table without rows is filled from the system 
     expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(2);
   });
 
-  it("a statement that cannot be classified hydrates nothing and is journaled as unclassified", async () => {
+  it("a statement that cannot be classified is journaled as unclassified; a name it does not mention is not hydrated", async () => {
     const {factory, log} = fakeOpenRfc(system);
     await install({mode: "live", allow: "ZTPROXY_A", clientFactory: factory, connection: CONNECTION});
     const wrapped = abap.context.databaseConnections["DEFAULT"];
-    await fails(() => wrapped.select({select: "SELECT * FROM 'ztproxy_a'"}));
     await fails(() => wrapped.select({select: "SELECT * FROM ztproxy_a_fn(1)"}));
     expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(0);
-    expect(tableJournal().map((e) => e.state)).to.deep.equal(["unclassified", "unclassified"]);
-    expect(tableJournal()[0].reason).to.contain("FROM");
+    expect(tableJournal().map((e) => e.state)).to.deep.equal(["unclassified"]);
+    expect(tableJournal()[0].reason).to.contain("table function");
   });
 
   it("a statement it cannot classify still hydrates every allow-listed table it mentions", async () => {
@@ -402,6 +401,15 @@ describe("tools/rfc-table-proxy: a table without rows is filled from the system 
     await abap.context.databaseConnections["DEFAULT"].select({select: "SELECT * FROM \"ztproxy_a\" WHERE 1 IN (SELECT 1 FROM generate_series(1, 2))"}).catch(() => {});
     expect(log.filter((l) => l.fm === "RFC_READ_TABLE").map((l) => String(l.input.QUERY_TABLE).trim())).to.deep.equal(["ZTPROXY_A"]);
     expect(tableJournal().map((e) => e.state)).to.include("unclassified");
+  });
+
+  it("a table named in backticks or single quotes, which SQLite reads as a table, is hydrated (critic round 6)", async () => {
+    const {factory, log} = fakeOpenRfc(system);
+    await install({mode: "live", allow: "ZTPROXY_*", clientFactory: factory, connection: CONNECTION});
+    const wrapped = abap.context.databaseConnections["DEFAULT"];
+    await wrapped.select({select: "SELECT * FROM `ztproxy_a`"}).catch(() => {});
+    await wrapped.select({select: "SELECT * FROM 'ztproxy_b'"}).catch(() => {});
+    expect(log.filter((l) => l.fm === "RFC_READ_TABLE").map((l) => String(l.input.QUERY_TABLE).trim()).sort()).to.deep.equal(["ZTPROXY_A", "ZTPROXY_B"]);
   });
 
   it("a comma after a JOIN does not hide the third table (critic round 5): every mentioned allow-listed table is hydrated", async () => {
