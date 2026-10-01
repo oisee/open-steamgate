@@ -140,23 +140,41 @@ test("overlapping unit runs isolate generated Go and shard files, even with one 
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
+test("overlapping runs merge distinct class timings in one output directory", {timeout: 120000}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-timings-"));
+  try {
+    const [a, b] = await Promise.all([
+      unitRun([...staticsArgs, "--out", dir]),
+      unitRun([join(here, "unit.mjs"), "--fixture", join(here, "testdata-unit"), "--jobs", "2", "--out", dir]),
+    ]);
+    assert.equal(a.status, 0, a.stderr || a.stdout);
+    assert.equal(b.status, 1, b.stderr || b.stdout);
+    const timings = JSON.parse(readFileSync(join(dir, "class-timings.json"), "utf8"));
+    assert.ok(Object.keys(timings).some((key) => key.includes("ZCL_OSD_STATICS_TEST")), JSON.stringify(timings));
+    assert.ok(Object.keys(timings).some((key) => key.includes("ZCL_GOGEN_UNIT_FIXTURE")), JSON.stringify(timings));
+    assert.equal(existsSync(join(dir, "class-timings.json.lock")), false);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
 test("a missing or corrupt seed image and a killed shard fail every assigned method", {timeout: 120000}, async () => {
   const dir = mkdtempSync(join(tmpdir(), "gogen-unit-faults-"));
   const wrapper = join(dir, "runner.mjs");
   writeFileSync(wrapper, `#!/usr/bin/env node
-import {spawnSync} from "node:child_process";
+import {spawn, spawnSync} from "node:child_process";
 import {rmSync, writeFileSync} from "node:fs";
 const args = process.argv.slice(2);
 const image = args[args.indexOf("--seed-image") + 1];
 if (args.includes("--classes-file")) {
   if (process.env.GOGEN_UNIT_TEST_FAULT === "limit") {
     process.stderr.write("earlier stderr\\n");
-    process.stdout.write("x".repeat(21e6));
-    setInterval(() => {}, 1000);
+    spawn(process.execPath, ["-e", "process.stdout.write('x'.repeat(21e6)); setTimeout(() => require('node:fs').writeFileSync(process.env.GOGEN_UNIT_TEST_MARKER, 'survived'), 500)"],
+      {stdio: ["ignore", "inherit", "inherit"], env: process.env});
+    process.exit(0);
   }
 }
-if (args.includes("--classes-file") && process.env.GOGEN_UNIT_TEST_FAULT === "limit") {
-  await new Promise(() => {});
+if (process.env.GOGEN_UNIT_TEST_FAULT === "signal" && args.includes("--seed-image-out")) {
+  process.stderr.write("earlier stderr\\n");
+  process.kill(process.pid, "SIGTERM");
 }
 const run = spawnSync(process.env.GOGEN_UNIT_BINARY, args, {stdio: "inherit"});
 if (args.includes("--seed-image-out") && run.status === 0) {
@@ -168,17 +186,45 @@ process.exit(run.status ?? 1);
 `);
   chmodSync(wrapper, 0o755);
   try {
-    for (const fault of ["missing", "corrupt", "limit"]) {
+    for (const fault of ["missing", "corrupt", "limit", "signal"]) {
+      const marker = join(dir, "survived");
       const run = await unitRun([...staticsArgs, "--out", join(dir, fault)],
-        {GOGEN_UNIT_RUNNER: wrapper, GOGEN_UNIT_TEST_FAULT: fault});
+        {GOGEN_UNIT_RUNNER: wrapper, GOGEN_UNIT_TEST_FAULT: fault, GOGEN_UNIT_TEST_MARKER: marker});
       assert.equal(run.status, 1, run.stderr || run.stdout);
       assert.deepEqual(run.result.rows.map((row) => row.status), ["FAILED", "FAILED", "FAILED", "FAILED"]);
       const messages = run.result.rows.map((row) => row.message);
       if (fault === "limit") {
         assert.ok(messages.every((msg) => /stdout limit exceeded/.test(msg)), messages.join("\n"));
         assert.ok(messages.every((msg) => !/earlier stderr/.test(msg)));
+        await new Promise((resolveWait) => setTimeout(resolveWait, 700));
+        assert.equal(existsSync(marker), false, "the runner's descendant survived the output limit");
+      } else if (fault === "signal") {
+        assert.ok(messages.every((msg) => /seed image: terminated by SIGTERM/.test(msg)), messages.join("\n"));
+        assert.ok(messages.every((msg) => !/earlier stderr/.test(msg)));
       } else assert.ok(messages.every((msg) => /seed image:/.test(msg)));
       assert.equal(existsSync(join(dirname(run.result.buildDir), "shards")), false);
+    }
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("runner errors and signals take precedence over earlier stderr", {timeout: 120000}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-run-errors-"));
+  const wrapper = join(dir, "runner.mjs");
+  writeFileSync(wrapper, `#!/usr/bin/env node
+process.stderr.write("earlier stderr\\n");
+process.kill(process.pid, "SIGTERM");
+`);
+  chmodSync(wrapper, 0o755);
+  try {
+    for (const [label, jobs, runner, expected] of [
+      ["single-signal", "1", wrapper, "runner: terminated by SIGTERM"],
+      ["seed-error", "2", join(dir, "absent"), "seed image: spawnSync"],
+      ["single-error", "1", join(dir, "absent"), "runner: spawnSync"],
+    ]) {
+      const run = await unitRun([...staticsArgs.slice(0, -2), "--jobs", jobs, "--out", join(dir, label)], {GOGEN_UNIT_RUNNER: runner});
+      assert.equal(run.status, 1, run.stderr || run.stdout);
+      assert.ok(run.result.rows.every((row) => row.message.includes(expected)), JSON.stringify(run.result.rows));
+      assert.ok(run.result.rows.every((row) => !row.message.includes("earlier stderr")));
     }
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });

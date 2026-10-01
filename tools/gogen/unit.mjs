@@ -500,9 +500,21 @@ const runDetail = {seedImageMs: 0, shards: [], mergeMs: 0};
 const timingFile = join(out, "class-timings.json");
 const oldTimings = existsSync(timingFile) ? JSON.parse(readFileSync(timingFile, "utf8")) : {};
 const saveTimings = (latest) => {
-  const temp = join(runDir, "class-timings.json");
-  writeFileSync(temp, JSON.stringify({...oldTimings, ...latest}, null, 2));
-  renameSync(temp, timingFile);
+  const lock = `${timingFile}.lock`;
+  const deadline = Date.now() + 30000;
+  while (true) {
+    try { mkdirSync(lock); break; }
+    catch (error) {
+      if (error.code !== "EEXIST" || Date.now() >= deadline) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
+  try {
+    const current = existsSync(timingFile) ? JSON.parse(readFileSync(timingFile, "utf8")) : {};
+    const temp = join(runDir, "class-timings.json");
+    writeFileSync(temp, JSON.stringify({...current, ...latest}, null, 2));
+    renameSync(temp, timingFile);
+  } finally { rmSync(lock, {recursive: true}); }
 };
 const shards = Array.from({length: Math.min(jobs, groups.length)}, () => ({keys: [], weight: 0}));
 const orderedGroups = [...groups].sort((a, b) => a.key.localeCompare(b.key));
@@ -521,10 +533,18 @@ for (const [index, group] of orderedGroups.entries()) {
   shard.weight += weightOf(group.key);
 }
 const runner = process.env.GOGEN_UNIT_RUNNER ?? bin;
+const runFailure = (run) => run.error?.message || (run.signal ? `terminated by ${run.signal}` : "") || run.stderr || `exit ${run.status}`;
 const runProcess = (argv, env, cwd) => new Promise((resolveRun) => {
-  const child = spawn(runner, argv, {encoding: "utf8", env: {...env, GOGEN_UNIT_BINARY: bin}, cwd});
+  const child = spawn(runner, argv, {encoding: "utf8", env: {...env, GOGEN_UNIT_BINARY: bin}, cwd, detached: true});
   let stdout = "", stderr = "", error, killReason;
-  const kill = (reason) => { killReason ??= reason; child.kill("SIGKILL"); };
+  const kill = (reason) => {
+    if (killReason) return;
+    killReason = reason;
+    if (child.pid) {
+      try { process.kill(-child.pid, "SIGKILL"); }
+      catch (e) { if (e.code !== "ESRCH") throw e; }
+    }
+  };
   const timer = setTimeout(() => kill("timeout after 120000 ms"), 120000);
   child.stdout.on("data", (chunk) => { stdout += chunk; if (stdout.length > 20e6) kill("stdout limit exceeded (20 MB)"); });
   child.stderr.on("data", (chunk) => { stderr += chunk; if (stderr.length > 20e6) kill("stderr limit exceeded (20 MB)"); });
@@ -549,7 +569,7 @@ if (shards.length <= 1) {
     encoding: "utf8", timeout: 120000, maxBuffer: 20e6, cwd: singleDir, env,
   });
   if (run.status !== 0) {
-    for (const r of ready) { r.status = "FAILED"; r.message = `runner: ${run.stderr || run.error?.message || run.signal || run.status}`; }
+    for (const r of ready) { r.status = "FAILED"; r.message = `runner: ${runFailure(run)}`; }
     updateCompiledCount();
     rmSync(singleDir, {recursive: true, force: true});
     console.log(JSON.stringify({...summary, rows})); process.exit(1);
@@ -571,7 +591,7 @@ if (shards.length <= 1) {
   });
   runDetail.seedImageMs = Math.round(performance.now() - seedStarted);
   const seedHeader = existsSync(seedFile) ? readFileSync(seedFile).subarray(0, 16).toString("utf8") : "";
-  const seedError = seed.status !== 0 ? seed.stderr || seed.error?.message || seed.signal || seed.status
+  const seedError = seed.status !== 0 ? runFailure(seed)
     : !existsSync(seedFile) ? "seed image missing"
       : ready.some((r) => r.db) ? (seedHeader !== "SQLite format 3\0" ? "invalid SQLite seed image" : "")
         : seedHeader ? "unexpected seed image for a database-free run" : "";
@@ -598,7 +618,7 @@ if (shards.length <= 1) {
       "--timings-out", durationsFile, "--phases-out", phasesFile], env, shardDir);
     const phase = {index, startMs: Math.round(started - runStarted), endMs: Math.round(performance.now() - runStarted), classes: shard.keys.length};
     runDetail.shards.push(phase);
-    if (run.killReason || run.status !== 0) return {keys: shard.keys, error: run.killReason || run.error?.message || run.stderr || run.signal || `exit ${run.status}`};
+    if (run.killReason || run.status !== 0) return {keys: shard.keys, error: run.killReason || runFailure(run)};
     try {
       const durations = JSON.parse(readFileSync(durationsFile, "utf8"));
       phase.classMs = Object.values(durations).reduce((a, b) => a + b, 0);
