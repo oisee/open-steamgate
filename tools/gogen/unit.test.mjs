@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
-import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {fileURLToPath} from "node:url";
 import {dirname, join} from "node:path";
@@ -90,7 +90,9 @@ test("a different assertion in a known anomaly method remains DIFFERENT", () => 
 });
 
 test("ABAP Unit class statics and constructor restart for each Go test class", {timeout: 120000}, () => {
-  const run = spawnSync("node", [join(here, "unit.mjs"), "--fixture", "test/fixtures/unit-statics", "--class", "ZCL_OSD_STATICS_TEST"], {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-shards-"));
+  const argv = [join(here, "unit.mjs"), "--fixture", "test/fixtures/unit-statics", "--class", "ZCL_OSD_STATICS_TEST", "--out", dir];
+  const run = spawnSync("node", [...argv, "--jobs", "1"], {
     cwd: join(here, "..", ".."), encoding: "utf8", timeout: 110000, maxBuffer: 5e6,
   });
   assert.equal(run.status, 0, run.stderr || run.error?.message || run.stdout);
@@ -99,6 +101,14 @@ test("ABAP Unit class statics and constructor restart for each Go test class", {
     ["LTC_A", "M1_FIRST", "SUCCESS"], ["LTC_A", "M2_SECOND", "SUCCESS"],
     ["LTC_B", "M1_FIRST", "SUCCESS"], ["LTC_B", "M2_SECOND", "SUCCESS"],
   ]);
+  const sharded = spawnSync("node", [...argv, "--jobs", "2"], {
+    cwd: join(here, "..", ".."), encoding: "utf8", timeout: 110000, maxBuffer: 5e6,
+  });
+  assert.equal(sharded.status, 0, sharded.stderr || sharded.error?.message || sharded.stdout);
+  assert.deepEqual(JSON.parse(sharded.stdout).rows, rows);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, "shard-0", "classes.json"), "utf8")).length, 1);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, "shard-1", "classes.json"), "utf8")).length, 1);
+  rmSync(dir, {recursive: true, force: true});
 });
 
 test("unit statics parity labels only reviewed Node assertions as nodeAnomaly", () => {

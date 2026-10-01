@@ -1336,6 +1336,29 @@ something already shipped (then it is a must of the current release, like the ro
 
   Full Node/Go compare counts before and after stayed at 384 SAME, 6 DIFFERENT, 13 nodeAnomaly, 161 Node-only,
   0 Go-only and 1 SKIPPED. A Go test also checks that a class's inserted row is absent from the next class image.
+
+  **U4 step 1b, process shards (2026-10-01):** With all pinned source packs fetched, the same 51-owner inventory
+  was built once per invocation and run with `--jobs 1,2,4,8,16`. Each configuration had three runs under
+  `flock /tmp/osd-heavy.lock`, timed with
+  `/usr/bin/time -f '%e %U %S %M'` (wall seconds, user seconds, system seconds, peak KiB), as in `unit-bench.mjs`.
+  The table reports medians. Runner wall is `timingMs.run` from the same reports; total wall includes frontend and
+  Go build. Every one of the 15 reports had the same 565 class/method/status/message rows as `--jobs 1`.
+
+  | Jobs | total wall | total CPU | peak RSS | runner wall |
+  |---:|---:|---:|---:|---:|
+  | 1 | 22.08 s | 27.34 s | 1,009,448 KiB | 8.31 s |
+  | 2 | 19.56 s | 29.35 s | 1,018,404 KiB | 5.04 s |
+  | 4 | 18.70 s | 28.45 s | 988,504 KiB | 5.02 s |
+  | 8 | 19.99 s | 31.68 s | 986,880 KiB | 5.69 s |
+  | 16 | 19.53 s | 31.63 s | 988,736 KiB | 5.08 s |
+
+  Four processes gave the lowest median total wall on this eight-core allocation. Two and four had almost identical
+  runner times; eight and sixteen spent more CPU without a further gain. Each shard gets its own temp and DATASET
+  directory, including its audit file; the media tree and SQLite seed image are read-only inputs written once before
+  processes start. No ABAP Unit class in this inventory binds an HTTP
+  or APC listening port: the Go network listeners found are in Go tests, not the generated Unit binary. The only
+  shard-owned files under the build directory are its class list, timings, temp files, and DATASET files; the parent
+  writes the one timing report. A failed shard assigns its process error to every method it owned.
 - nice: accept ADR 0005 (lazy table providers) -- done 2026-09-30, narrowed after three reviews.
 
 **0.5**

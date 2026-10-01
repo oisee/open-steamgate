@@ -132,7 +132,7 @@ jobs:
       - name: Full Go ABAP Unit inventory
         run: |
           set +e
-          node tools/gogen/unit.mjs --out "$RUNNER_TEMP/gogen-unit" > "$RUNNER_TEMP/gogen-unit.json"
+          node tools/gogen/unit.mjs --jobs "$(node -p 'Math.min(require("os").availableParallelism(), 16)')" --out "$RUNNER_TEMP/gogen-unit" > "$RUNNER_TEMP/gogen-unit.json"
           rc=$?
           set -e
           if [[ $rc -gt 2 ]]; then echo "unit.mjs crashed with exit $rc" >&2; exit "$rc"; fi
