@@ -59,19 +59,22 @@ describe("the corpus oracle: the sweep's selection", () => {
   const run = (n) => schemaName(newRunId(1e12 + n, () => n % 36));
   const OLD = run(1), NEW = run(2), EDGE = run(3), UNMARKED = run(4), NOAGE = run(5);
   const catalogue = [
-    {SCHEMA_NAME: OLD, AGE_SECONDS: 10 * h, MARKED: 1},
-    {SCHEMA_NAME: NEW, AGE_SECONDS: 1 * h, MARKED: 1},
-    {SCHEMA_NAME: EDGE, AGE_SECONDS: 6 * h, MARKED: 1},
-    {SCHEMA_NAME: UNMARKED, AGE_SECONDS: 100 * h, MARKED: 0},
-    {SCHEMA_NAME: NOAGE, AGE_SECONDS: null, MARKED: 1},
+    {SCHEMA_NAME: OLD, AGE_SECONDS: 10 * h, MARKED: 1, LIVE: 0},
+    {SCHEMA_NAME: NEW, AGE_SECONDS: 1 * h, MARKED: 1, LIVE: 0},
+    {SCHEMA_NAME: EDGE, AGE_SECONDS: 6 * h, MARKED: 1, LIVE: 0},
+    {SCHEMA_NAME: UNMARKED, AGE_SECONDS: 100 * h, MARKED: 0, LIVE: 0},
+    {SCHEMA_NAME: NOAGE, AGE_SECONDS: null, MARKED: 1, LIVE: 0},
+    // a run older than any limit whose connection is still open, and one whose liveness was not read
+    {SCHEMA_NAME: run(6), AGE_SECONDS: 1000 * h, MARKED: 1, LIVE: 1},
+    {SCHEMA_NAME: run(7), AGE_SECONDS: 1000 * h, MARKED: 1},
     // lookalikes of the family that newRunId cannot make, marked or not
-    {SCHEMA_NAME: "OSD_CORPUS_BACKUP", AGE_SECONDS: 100 * h, MARKED: 1},
-    {SCHEMA_NAME: "OSD_CORPUS_X_Y", AGE_SECONDS: 100 * h, MARKED: 1},
-    {SCHEMA_NAME: `${OLD}_COPY`, AGE_SECONDS: 100 * h, MARKED: 1},
-    {SCHEMA_NAME: OLD.toLowerCase(), AGE_SECONDS: 100 * h, MARKED: 1},
-    {SCHEMA_NAME: "OSD_CORPUS", AGE_SECONDS: 100 * h, MARKED: 1},
-    {SCHEMA_NAME: "OSD_CORPUSX", AGE_SECONDS: 100 * h, MARKED: 1},
-    {SCHEMA_NAME: "SYS", AGE_SECONDS: 1000 * h, MARKED: 0},
+    {SCHEMA_NAME: "OSD_CORPUS_BACKUP", AGE_SECONDS: 100 * h, MARKED: 1, LIVE: 0},
+    {SCHEMA_NAME: "OSD_CORPUS_X_Y", AGE_SECONDS: 100 * h, MARKED: 1, LIVE: 0},
+    {SCHEMA_NAME: `${OLD}_COPY`, AGE_SECONDS: 100 * h, MARKED: 1, LIVE: 0},
+    {SCHEMA_NAME: OLD.toLowerCase(), AGE_SECONDS: 100 * h, MARKED: 1, LIVE: 0},
+    {SCHEMA_NAME: "OSD_CORPUS", AGE_SECONDS: 100 * h, MARKED: 1, LIVE: 0},
+    {SCHEMA_NAME: "OSD_CORPUSX", AGE_SECONDS: 100 * h, MARKED: 1, LIVE: 0},
+    {SCHEMA_NAME: "SYS", AGE_SECONDS: 1000 * h, MARKED: 0, LIVE: 0},
   ];
 
   it("takes only a marked run schema older than the limit, by HANA's own age", () => {
@@ -81,6 +84,10 @@ describe("the corpus oracle: the sweep's selection", () => {
   it("follows --older-than", () => {
     expect(sweepSelection(catalogue, 0.5)).to.have.members([OLD, NEW, EDGE]);
     expect(sweepSelection(catalogue, 24)).to.deep.equal([]);
+  });
+
+  it("never takes a run still connected, or one whose liveness is unknown, however old", () => {
+    for (const hours of [0, 6, 100]) expect(sweepSelection(catalogue, hours)).to.not.include.members([run(6), run(7)]);
   });
 
   it("never takes a lookalike, an unmarked schema or one without an age, whatever the limit", () => {

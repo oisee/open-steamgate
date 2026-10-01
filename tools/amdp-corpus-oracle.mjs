@@ -118,13 +118,17 @@ export function refuseSchema(theirs) {
  * than `olderThanHours` ago. The age is HANA's own (AGE_SECONDS, from
  * SECONDS_BETWEEN(CREATE_TIME, CURRENT_TIMESTAMP), both in the database's
  * clock), so the Node process's time zone plays no part.
- * rows: [{SCHEMA_NAME, AGE_SECONDS, MARKED}]
+ * A schema whose run is still connected (LIVE > 0: the marker's
+ * CONNECTION_ID is an open connection in M_CONNECTIONS) is never taken,
+ * however old: a long run is not an abandoned one.
+ * rows: [{SCHEMA_NAME, AGE_SECONDS, MARKED, LIVE}]
  */
 export function sweepSelection(rows, olderThanHours = 6) {
   return rows.filter((row) => {
     const name = String(row.SCHEMA_NAME);
     if (!name.startsWith(`${SCHEMA_PREFIX}_`) || !RUN_ID_SHAPE.test(name.slice(SCHEMA_PREFIX.length + 1))) return false;
     if (Number(row.MARKED) !== 1) return false;
+    if (row.LIVE === null || row.LIVE === undefined || Number(row.LIVE) !== 0) return false;
     const age = Number(row.AGE_SECONDS);
     return row.AGE_SECONDS !== null && row.AGE_SECONDS !== undefined && Number.isFinite(age) && age > olderThanHours * 3600;
   }).map((row) => String(row.SCHEMA_NAME));
@@ -140,6 +144,13 @@ export async function sweep({olderThanHours = 6, yes = false, log = console.log}
     const rows = await exec("SELECT S.SCHEMA_NAME, SECONDS_BETWEEN(S.CREATE_TIME, CURRENT_TIMESTAMP) AS AGE_SECONDS,"
       + ` (SELECT COUNT(*) FROM SYS.TABLES T WHERE T.SCHEMA_NAME = S.SCHEMA_NAME AND T.TABLE_NAME = '${RUN_MARKER}') AS MARKED`
       + " FROM SYS.SCHEMAS S WHERE S.SCHEMA_NAME LIKE 'OSD\\_CORPUS\\_%' ESCAPE '\\'");
+    // a run's marker names its connection; a schema whose connection is open belongs to a run still going
+    for (const row of rows) {
+      if (Number(row.MARKED) !== 1) continue;
+      const live = await exec(`SELECT COUNT(*) AS N FROM ${quote(row.SCHEMA_NAME)}.${quote(RUN_MARKER)} R`
+        + " JOIN SYS.M_CONNECTIONS C ON C.CONNECTION_ID = R.CONNECTION_ID AND C.CONNECTION_STATUS <> ''");
+      row.LIVE = live[0]?.N;
+    }
     const names = sweepSelection(rows, olderThanHours);
     for (const name of names) {
       if (yes) { await exec(`DROP SCHEMA ${quote(name)} CASCADE`); log(`amdp-corpus-oracle: dropped ${name}`); }
@@ -743,7 +754,8 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
   try {
   await exec(`CREATE SCHEMA ${quote(SCHEMA)}`);
   own.created();
-  await exec(`CREATE COLUMN TABLE ${quote(SCHEMA)}.${quote(RUN_MARKER)} ("RUN_ID" NVARCHAR(32))`);
+  await exec(`CREATE COLUMN TABLE ${quote(SCHEMA)}.${quote(RUN_MARKER)} ("RUN_ID" NVARCHAR(32), "CONNECTION_ID" INTEGER)`);
+  await exec(`INSERT INTO ${quote(SCHEMA)}.${quote(RUN_MARKER)} VALUES ('${SCHEMA.slice(SCHEMA_PREFIX.length + 1)}', CURRENT_CONNECTION)`);
   await exec(`SET SCHEMA ${quote(SCHEMA)}`);
   console.log(`amdp-corpus-oracle: schema ${SCHEMA}`);
 
