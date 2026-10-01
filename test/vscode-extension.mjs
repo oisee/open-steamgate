@@ -12,7 +12,7 @@ import {fileURLToPath} from "node:url";
 import {createRequire} from "node:module";
 import {checkReportDocument, activationSuccessDocument, activationFailureDocument, uriOf as facadeUriOf} from "../tools/adt-documents.mjs";
 import {entitySetMapFor} from "../tools/segw-entityset-map.mjs";
-import {adtRouter, tableDataDocument} from "../tools/adt-facade.mjs";
+import {adtRouter, tableDataDocument, countServiceRegistrations} from "../tools/adt-facade.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 
 const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseCheckReport, parseActivationResult, runActionFor, osdRunCommandLine,
@@ -3184,6 +3184,56 @@ describe("editors/vscode: service card source navigation", () => {
     const html = serviceDetailsHtml({row: {kind: "ODATA"}, card});
     expect(html).to.contain("GET_EXPANDED_ENTITY generic (all sets)");
   });
+
+  it("resolves every operation kind and a function import through the shared EXT/base resolver", () => {
+    const operations = ["GET_ENTITYSET", "GET_ENTITY", "CREATE_ENTITY", "UPDATE_ENTITY", "DELETE_ENTITY",
+      "GET_EXPANDED_ENTITY", "GET_EXPANDED_ENTITYSET", "CREATE_DEEP_ENTITY", "GET_STREAM", "UPDATE_STREAM"];
+    const interfaceOperations = new Set(operations.slice(5));
+    const methods = operations.map((operation) => interfaceOperations.has(operation)
+      ? `/iwbep/if_mgw_appl_srv_runtime~${operation.toLowerCase()}` : `travelset_${operation.toLowerCase()}`);
+    const ext = methods.flatMap((name) => [`METHOD ${name}.`, " IF iv_entity_set_name = 'TravelSet'. ENDIF.", "ENDMETHOD."]);
+    ext.push("METHOD /iwbep/if_mgw_appl_srv_runtime~execute_action.", " IF iv_action_name = 'CancelTravel'. ENDIF.", "ENDMETHOD.");
+    const files = [
+      {path: "src/zcl_all_dpc_ext.clas.abap", source: ext.join("\n")},
+      {path: "src/zcl_all_mpc.clas.abap", source: "METHOD define.\nENDMETHOD."},
+      {path: "src/all.stg.yaml", source: "service: ALL_SRV\n  Travel:\n    set: TravelSet\n    media: true\n  CancelTravel:\n    method: POST\n"},
+    ];
+    const card = serviceCardModel({name: "ALL_SRV", handler: "ZCL_ALL_DPC_EXT"}, [{set: "TravelSet"}], files);
+    const set = card.entitySets.find((one) => one.set === "TravelSet");
+    expect(set.operations.map((one) => one.name)).to.deep.equal(operations);
+    for (const [index, operation] of operations.entries()) {
+      expect(set.operations[index].link, operation).to.include({path: files[0].path, line: index * 3 + 1});
+    }
+    expect(card.functionImports.find((one) => one.name === "CancelTravel").link).to.include({path: files[0].path, line: 31});
+  });
+
+  it("builds a 1,000-set card within the source-index budget", () => {
+    const sets = Array.from({length: 1000}, (_, i) => ({set: `Set${i}`, kind: "GET_ENTITYSET", method: `SET${i}_GET_ENTITYSET`}));
+    const source = sets.map((set) => `METHOD ${set.method}.\nENDMETHOD.`).join("\n");
+    const files = [{path: "src/zcl_large_dpc_ext.clas.abap", source}];
+    const started = performance.now();
+    const card = serviceCardModel({handler: "ZCL_LARGE_DPC_EXT"}, sets, files);
+    expect(card.entitySets).to.have.lengthOf(1000);
+    expect(card.entitySets[999].operations[0].link).to.include({line: 1999});
+    expect(performance.now() - started).to.be.lessThan(200);
+  });
+
+  it("reads the launcher's workspace layers, including custom projected pack sources", () => {
+    const {serviceCardFiles} = loadExtension(vscodeStub({home: ROOT}));
+    const folder = mkdtempSync(path.join(tmpdir(), "osd-card-layer-"));
+    try {
+      const custom = path.join(folder, "abap");
+      mkdirSync(custom);
+      writeFileSync(path.join(folder, "osd-pack.json"), JSON.stringify({name: "fleet", abap: "abap"}));
+      writeFileSync(path.join(custom, "zcl_layer_dpc_ext.clas.abap"), "METHOD travelset_get_entityset.\nENDMETHOD.");
+      const files = serviceCardFiles(ROOT, [{folder, srcDir: custom, manifest: path.join(folder, "osd-pack.json")}]);
+      const row = {handler: "ZCL_LAYER_DPC_EXT", pack: "fleet"};
+      const card = serviceCardModel(row, [{set: "TravelSet"}], files);
+      expect(card.entitySets[0].operations[0].link).to.include({path: path.join(custom, "zcl_layer_dpc_ext.clas.abap"), line: 1});
+    } finally {
+      rmSync(folder, {recursive: true, force: true});
+    }
+  });
 });
 
 describe("tools/adt-facade: service detail inventories", function () {
@@ -3221,6 +3271,20 @@ describe("tools/adt-facade: service detail inventories", function () {
     expect(answer.counts.services).to.equal(1);
     expect(readersLensTitle(answer.counts)).to.contain("services 1");
     expect(answer.readers.some((reader) => reader.name === "ZCL_ZSTG_DEMO_DPC_EXT")).to.equal(false);
+  });
+
+  it("counts each endpoint once for DPC, MPC, handler, and where-used readers", () => {
+    const rows = [
+      {kind: "ODATA", path: "/sap/opu/odata/sap/DEMO", handler: "ZCL_DPC", mpc: "ZCL_MPC"},
+      {kind: "ODATA", path: "/sap/opu/odata/sap/DEMO", handler: "ZCL_DPC", mpc: "ZCL_MPC"},
+      {kind: "ICF", path: "/sap/bc/demo", handler: "ZCL_HANDLER"},
+      {kind: "ICF", path: "/sap/bc/demo", handler: "ZCL_HANDLER"},
+    ];
+    const readers = [{services: ["DEMO", "DEMO"]}, {services: ["DEMO"]}];
+    expect(countServiceRegistrations(readers, rows, "ZCL_DPC")).to.equal(1);
+    expect(countServiceRegistrations([], rows, "ZCL_MPC")).to.equal(1);
+    expect(countServiceRegistrations([], rows, "ZCL_HANDLER")).to.equal(1);
+    expect(countServiceRegistrations(readers, rows, "ZCL_OTHER")).to.equal(1);
   });
 
   it("returns source-relative transaction registry rows including hand-declared transactions", async () => {

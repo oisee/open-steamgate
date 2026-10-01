@@ -1704,21 +1704,37 @@ function testSourcesForService(root, row) {
   return httpTestFiles(collected, row.path, row.name);
 }
 
-function serviceCardFiles(root) {
+function serviceCardFiles(root, layers = []) {
   const files = [];
-  const visit = (dir) => {
+  const seen = new Set();
+  const visit = (dir, pack) => {
     let entries;
     try { entries = fs.readdirSync(dir, {withFileTypes: true}); } catch { return; }
     for (const entry of entries) {
       if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "build") continue;
       const absolute = path.join(dir, entry.name);
-      if (entry.isDirectory()) visit(absolute);
+      if (entry.isDirectory()) visit(absolute, pack);
       else if (/\.(?:clas\.abap|stg\.yaml|iwpr\.xml|shlp\.xml|ddls\.asddls)$/i.test(entry.name)) {
-        try { files.push({path: path.relative(root, absolute).replaceAll(path.sep, "/"), source: fs.readFileSync(absolute, "utf8")}); } catch {}
+        if (seen.has(absolute)) continue;
+        seen.add(absolute);
+        try { files.push({path: pack ? absolute : path.relative(root, absolute).replaceAll(path.sep, "/"),
+          source: fs.readFileSync(absolute, "utf8"), pack}); } catch {}
       }
     }
   };
   for (const folder of ["src", "gen", "packs"]) visit(path.join(root, folder));
+  for (const layer of layers) {
+    let manifest;
+    try { if (layer.manifest) manifest = JSON.parse(fs.readFileSync(layer.manifest, "utf8")); } catch {}
+    const pack = String(manifest?.name ?? packNameOf(layer.folder)).toLowerCase();
+    const folders = manifest ? [manifest.abap ?? (fs.existsSync(path.join(layer.folder, "src")) ? "src" : ".")].flat()
+      : [layer.srcDir ?? path.join(layer.folder, "src")];
+    for (const folder of folders) {
+      if (folder === false) continue;
+      const absolute = path.resolve(layer.folder, folder);
+      if (absolute === layer.folder || absolute.startsWith(layer.folder + path.sep)) visit(absolute, pack);
+    }
+  }
   return files;
 }
 
@@ -1782,7 +1798,7 @@ async function serviceDetailsData(item, provider) {
       details.entitySets = [];
       details.entitySetsError = String(e.message ?? e);
     }
-    details.card = serviceCardModel(row, details.entitySets, serviceCardFiles(root));
+    details.card = serviceCardModel(row, details.entitySets, serviceCardFiles(root, activeController?.launcher?.layers ?? []));
     const [serving, dumps] = await Promise.allSettled([osd().serving(), osd().dumps()]);
     details.serving = serving.status === "fulfilled" ? serving.value : undefined;
     details.dumps = dumpsForService(dumps.status === "fulfilled" ? dumps.value : [], row);
@@ -1862,7 +1878,7 @@ function ensureDetailsPanel(output) {
   serviceDetailsPanel.webview.onDidReceiveMessage(async (message) => {
     if (message?.command === "openCardPath") {
       const target = serviceCardTargets.get(`${message.path}:${message.line}`);
-      const absolute = target && sourcePath(serviceSourceRoot(), target.path);
+      const absolute = target && sourcePath(serviceSourceRoot(), target.path, path.isAbsolute(target.path));
       if (!absolute) return;
       const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(absolute)));
       const at = new vscode.Position(Math.max(0, target.line - 1), 0);
@@ -4034,4 +4050,4 @@ module.exports = {activate, deactivate, runReportInTerminal, SystemController, d
   httpLensProvider, openEntitySetMethod, statusBar,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,
-  wirePageTabs, openDetailsMetadata};
+  wirePageTabs, openDetailsMetadata, serviceCardFiles};
