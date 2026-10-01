@@ -102,7 +102,7 @@ scratchpad and not in the PR threads. The PR bodies and commit messages record t
 | Lift R2 (#326) | luna, xhigh | 1 h 53 min with lock waits, 918k tokens | Claude 7/10, 3 P2 | 3 | MERGE 8/10 |
 | L1 s13 report selection model (#327) | sol | 12 min (+13 fix) | Claude 7/10, 3 P2 | 2 | MERGE 8/10 |
 | L1 s13 follow-ups (#329) | Sonnet | 2.4 min | codex MERGE 9/10 | 1 | MERGE 9/10 |
-| Lift R2 follow-ups (#330) | Opus | 20 min (+6, +3 fix) | codex 7/10, 1 P2 | 3 | MERGE 8/10 |
+| Lift R2 follow-ups (#330) | Opus | 20 min, two fix rounds | codex 7/10, 1 P2 | 3 | MERGE 8/10 |
 
 What this phase added to the list above:
 
@@ -123,7 +123,7 @@ What this phase added to the list above:
     a hand-prepared deserialisation input, not abapGit's output. The spec had said otherwise. The fix was a
     capture from A4H and a new slice (#325), not a worker fix round.
 13. **luna at xhigh, measured once.** On R2 its round-1 score was in the range of the others (7/10 with three
-    P2s, against 6 to 8/10) and it fixed its own findings well in two rounds. It is the slowest and the most expensive worker measured
+    P2s, against 6 to 9/10) and it fixed its own findings well in two rounds. It is the slowest and the most expensive worker measured
     here: almost two hours and 918k tokens, against 2.4 to 44 minutes for the other slices of this phase.
 14. **Small follow-ups belong to Sonnet.** Its two follow-up slices took 2.4 and 2.8 minutes and needed one
     round and two rounds.
