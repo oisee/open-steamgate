@@ -84,8 +84,12 @@ test("native frontend reads environment and copies a text file", () => {
     const output = join(dir, "output.txt");
     writeFileSync(input, "one\ntwo\n");
     execFileSync(process.execPath, [builder, join(here, "apps", "io", "zio.prog.abap")], {stdio: "inherit"});
-    const result = spawnSync(binary, ["--input", input, "--output", output], {
-      encoding: "utf8", env: {...process.env, OSABAP_TEST_ENV: "works"},
+    const env = {...process.env, OSABAP_TEST_ENV: "works"};
+    // GUI_UPLOAD / GUI_DOWNLOAD go through the DATASET sandbox: no grant, no file
+    const refused = spawnSync(binary, ["--input", input, "--output", output], {encoding: "utf8", env});
+    assert.notEqual(refused.status, 0, "an ungranted upload must be refused");
+    const result = spawnSync(binary, ["-allow-read", dir, "-allow-write", dir, "--input", input, "--output", output], {
+      encoding: "utf8", env,
     });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, "Copied 2 lines 8 bytes\nEnv works\n");
