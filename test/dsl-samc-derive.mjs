@@ -82,6 +82,17 @@ describe("DSL SAMC derive", function () {
       .to.deep.equal([["/global", "S", 9]]);
   });
 
+  it("returns to report constants after a local class (critic c7)", () => {
+    const model = deriveSamc(["test/fixtures/samc-derive-repro/c7"], "APP", {channels: {"/y": {scope: "C"}}});
+    expect(model.authorities.map((row) => [row.channelId, row.activity, row.program_id]))
+      .to.deep.equal([["/y", "S", "ZT_AMC7"]]);
+    const source = readFileSync("test/fixtures/samc-derive-repro/c7/zt_amc7.prog.abap", "utf8");
+    const {dir} = fixture(source.replace("i_channel_id = co_ch", "i_channel_id = iv_ch"), "zt_amc7.prog.abap");
+    const viaSite = deriveSamc([dir], "APP", {channels: {"/y": {scope: "C"}},
+      callSites: {"zt_amc7.": {channelIds: ["/y"]}}});
+    expect(viaSite.authorities[0]).to.include({channelId: "/y", program_id: "ZT_AMC7"});
+  });
+
   it("uses a callSites type for a generic producer (critic c2)", () => {
     const {dir, file} = fixture(cls("  DATA lo_generic TYPE REF TO if_amc_message_producer.\n  lo_generic = cl_amc_channel_manager=>create_message_producer( i_application_id = 'TEST_APP' i_channel_id = '/literal' )."));
     const model = deriveSamc([dir], "TEST_APP", {channels: {"/literal": {scope: "C"}},
@@ -106,6 +117,17 @@ describe("DSL SAMC derive", function () {
       callSites: {[key]: {messageType: "TEXT", deliveryProgram: "ZCL_T_AMC", authority: "R"}}});
     expect(model.authorities.map((row) => [row.channelId, row.activity, row.program]))
       .to.deep.equal([["/a", "R", "ZCL_T_AMC"]]);
+  });
+
+  it("uses the delivery program's overlay kind for its authority", () => {
+    const dir = "test/fixtures/samc-derive-repro/c4";
+    const key = "zcl_t_amc.clas.abap:10";
+    for (const [kind, program, programId] of [["report", "ZT_DELIVERY", "ZT_DELIVERY"],
+      ["function_group", "ZT_DELIVERY", "SAPLZT_DELIVERY"]]) {
+      const model = deriveSamc([dir], "APP", {channels: {"/a": {scope: "C"}},
+        callSites: {[key]: {messageType: "TEXT", deliveryProgram: program, kind, authority: "R"}}});
+      expect(model.authorities[0]).to.include({kind, program, program_id: programId});
+    }
   });
 
   it("refuses conflicting producer and receiver message types on one channel", () => {

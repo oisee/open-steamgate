@@ -183,7 +183,7 @@ export function deriveSamc(paths, applicationId, decl = {}, numberingFile, allow
       if (!consumer || consumer.delivered) return;
       if (consumer.site?.authority === "R" && consumer.site.deliveryProgram && consumer.messageType) {
         for (const channelId of consumer.channelIds) facts.push({channelId, activity: "R", messageType: consumer.messageType,
-          kind: item.kind, program: consumer.site.deliveryProgram, source: consumer.source});
+          kind: consumer.site.kind ?? "class", program: consumer.site.deliveryProgram, source: consumer.source});
         return;
       }
       throw new Error(`${consumer.source.file}:${consumer.source.line}: consumer delivery cannot be resolved; add callSites {messageType, deliveryProgram, authority: "R"}`);
@@ -198,12 +198,15 @@ export function deriveSamc(paths, applicationId, decl = {}, numberingFile, allow
       const statementTokens = words(st).map((part) => part.toLowerCase());
       if (statementTokens[0] === "class" && (statementTokens.includes("definition") || statementTokens.includes("implementation"))) {
         ownerClass = statementTokens[1];
+        method = "";
       }
       if (st.get() instanceof Statements.MethodImplementation) {
         flushConsumers();
         method = lower(st.findDirectExpression(Expressions.MethodName)) ?? "";
         vars = new Map(globalVars);
       }
+      if (statementTokens[0] === "endmethod") method = "";
+      if (statementTokens[0] === "endclass") { ownerClass = item.program.toLowerCase(); method = ""; }
       for (const [name, type] of declaredTypes([st])) vars.set(name, type);
       for (const call of st.findAllExpressions(Expressions.MethodCall)) {
         const name = lower(call.findDirectExpression(Expressions.MethodName));
