@@ -1,0 +1,31 @@
+name: size budget
+
+# Monoliths may shrink, never grow: tools/osd-size-budget.mjs against
+# tools/osd-size-budget.json. A file or package over its budget, a new file
+# in go/abap, a package without a README or importing go/abap, or a budget
+# raised against the base branch without a reason fails it. The same check
+# runs at pre-push (.githooks/pre-push).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: false
+      - name: The base branch's budget
+        run: git fetch --no-tags --depth=1 origin "${GITHUB_BASE_REF:-main}"
+      - name: Size budget
+        run: node tools/osd-size-budget.mjs --base FETCH_HEAD
