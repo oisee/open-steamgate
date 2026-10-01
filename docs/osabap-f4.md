@@ -1,8 +1,11 @@
 # Terminal F4 and file dialogs
 
 `osd run` / `osabap` carries `AT SELECTION-SCREEN ON VALUE-REQUEST FOR
-<parameter>` into the generated report class. In the terminal selection
-screen, F4 calls that ABAP event for the focused field. A report whose values
+<parameter>` and `FOR <select-option>-LOW` / `-HIGH` into the generated report
+class. In the terminal selection screen, F4 calls the event for the focused
+field. A select-option's main row edits comma-separated LOW values; when it
+has a HIGH value request, a second row edits the first range's HIGH value.
+A report whose values
 are all supplied as options runs without a selection screen or value request.
 `ON HELP-REQUEST` (F1) is rejected at build time. SAP GUI wrapper mode does
 not implement F4; frontend dialog calls there report that they are available
@@ -11,7 +14,8 @@ only in the terminal selection screen.
 The terminal browser uses DATASET's sandbox. Open and directory dialogs list
 only `-allow-read` roots (write roots are readable); save lists only
 `-allow-write` roots. A path or symlink outside a root is refused. F4 reports
-the missing grant in the form footer. Arrows move, Enter descends or chooses a
+the missing grant in the form footer. Arrows move, PageUp/PageDown scroll by a
+screen, Home/End jump to the first/last entry, Enter descends or chooses a
 file, Backspace goes up within the root, `/` filters, Space chooses the current
 directory (or marks files with `MULTISELECTION = 'X'`), `n` enters an open or save name,
 and Esc cancels. Enter returns marked files. Each chosen path is validated

@@ -477,3 +477,10 @@ test("F4 report builds and terminal keyboard drives open, directory, save", () =
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /input\s+folder\s+output/);
 });
+
+test("select-option LOW and HIGH F4 handlers build and run in the terminal", () => {
+  execFileSync(process.execPath, [builder, join(here, "apps", "pickrange", "zpickrange.prog.abap")], {stdio: "inherit"});
+  execFileSync("go", ["test", "-tags", "nodatabase,osabap_pickrange", "./cmd/osabap"], {
+    cwd: join(here, "go"), stdio: "inherit",
+  });
+});

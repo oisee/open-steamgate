@@ -176,6 +176,7 @@ func (b Browser) confirmSave(screen tcell.Screen, path string) bool {
 			return true
 		}
 		if key.Rune() == 'n' || key.Rune() == 'N' || key.Key() == tcell.KeyEscape {
+			// TODO: distinguish Escape (cancel dialog) from N (stay in dialog).
 			return false
 		}
 	}
@@ -206,7 +207,7 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 		return "", err
 	}
 	filter, name := "", b.DefaultName
-	selected, editing, editingFilter := 0, false, false
+	selected, scroll, editing, editingFilter := 0, 0, false, false
 	atRoots := false
 	marked := map[string]entry{}
 	for {
@@ -227,11 +228,13 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 		if selected >= len(entries) {
 			selected = max(0, len(entries)-1)
 		}
+		_, height := screen.Size()
+		scroll = visibleStart(selected, scroll, len(entries), height)
 		caption := dir
 		if atRoots {
 			caption = "Granted roots"
 		}
-		b.draw(screen, caption, entries, selected, filter, name, editing, editingFilter)
+		b.draw(screen, caption, entries, selected, scroll, filter, name, editing, editingFilter)
 		ev, ok := screen.PollEvent().(*tcell.EventKey)
 		if !ok {
 			continue
@@ -279,6 +282,14 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 			selected = max(0, selected-1)
 		case tcell.KeyDown:
 			selected = min(max(0, len(entries)-1), selected+1)
+		case tcell.KeyPgUp:
+			selected = max(0, selected-max(1, height-4))
+		case tcell.KeyPgDn:
+			selected = min(max(0, len(entries)-1), selected+max(1, height-4))
+		case tcell.KeyHome:
+			selected = 0
+		case tcell.KeyEnd:
+			selected = max(0, len(entries)-1)
 		case tcell.KeyBackspace, tcell.KeyBackspace2:
 			if !atRoots {
 				parent := filepath.Dir(dir)
@@ -392,7 +403,21 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 	}
 }
 
-func (b Browser) draw(screen tcell.Screen, dir string, entries []entry, selected int, filter, name string, editing, editingFilter bool) {
+// Rows 0 and 1 are the title and directory, row 2 is a spacer, and the
+// final row is the footer. Keep the selection inside the remaining viewport.
+func visibleStart(selected, scroll, count, height int) int {
+	page := max(1, height-4)
+	scroll = min(max(0, scroll), max(0, count-page))
+	if selected < scroll {
+		return selected
+	}
+	if selected >= scroll+page {
+		return selected - page + 1
+	}
+	return scroll
+}
+
+func (b Browser) draw(screen tcell.Screen, dir string, entries []entry, selected, scroll int, filter, name string, editing, editingFilter bool) {
 	w, h := screen.Size()
 	screen.Clear()
 	put := func(y int, s string, style tcell.Style) {
@@ -412,7 +437,8 @@ func (b Browser) draw(screen tcell.Screen, dir string, entries []entry, selected
 	}
 	put(0, title, tcell.StyleDefault.Reverse(true))
 	put(1, dir, tcell.StyleDefault)
-	for i, e := range entries {
+	for i := scroll; i < len(entries) && i < scroll+max(0, h-4); i++ {
+		e := entries[i]
 		marker := "  "
 		if e.dir {
 			marker = "/ "
@@ -421,9 +447,9 @@ func (b Browser) draw(screen tcell.Screen, dir string, entries []entry, selected
 		if i == selected {
 			style = style.Reverse(true)
 		}
-		put(i+3, marker+e.name, style)
+		put(i-scroll+3, marker+e.name, style)
 	}
-	footer := "↑/↓ select  Enter open  Backspace up  / filter  Esc cancel"
+	footer := "↑/↓ select  PgUp/PgDn Home/End  Enter open  Backspace up  / filter  Esc cancel"
 	if b.Mode == Directory {
 		footer += "  Space choose folder"
 	}

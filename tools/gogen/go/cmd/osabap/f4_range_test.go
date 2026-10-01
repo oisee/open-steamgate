@@ -1,0 +1,51 @@
+//go:build osabap_pickrange
+
+package main
+
+import (
+	"testing"
+
+	"github.com/gdamore/tcell/v2"
+	"osg/gogen/abap"
+	"osg/gogen/termgui"
+)
+
+func TestSelectOptionComponentF4(t *testing.T) {
+	s := &abap.Session{}
+	report := newReport(s)
+	var initial ZCL_GG_HOST__TY_RESULT
+	abap.DialogStep(func() { initial = hostRun(s, report, nil, "", "X") })
+	form := graphicalForm(s, report, initial)
+	if !appF4["S_FILE-LOW"] || !appF4["S_FILE-HIGH"] || len(form.Fields) != 2 {
+		t.Fatalf("component F4 fields: %#v, %#v", appF4, form.Fields)
+	}
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	low, err := form.OnF4(screen, "S_FILE", form.Fields)
+	if err != nil || low != "low.txt" {
+		t.Fatalf("LOW: %q, %v", low, err)
+	}
+	form.Fields[0].Value = low
+	high, err := form.OnF4(screen, "S_FILE-HIGH", form.Fields)
+	if err != nil || high != "high.txt" {
+		t.Fatalf("HIGH: %q, %v", high, err)
+	}
+	form.Fields[1].Value = high
+	values := selectionValuesFromFields(form.Fields, initial)
+	if len(values) != 1 || len(values[0].ranges) != 1 || values[0].ranges[0].low != low ||
+		values[0].ranges[0].high != high || values[0].ranges[0].option != "BT" {
+		t.Fatalf("range after F4: %#v", values)
+	}
+	// The actual terminal form selects the two handlers by focused row.
+	screen.PostEvent(tcell.NewEventKey(tcell.KeyF4, 0, tcell.ModNone))
+	screen.PostEvent(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
+	screen.PostEvent(tcell.NewEventKey(tcell.KeyF4, 0, tcell.ModNone))
+	screen.PostEvent(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	fields, err := termgui.RunOnScreen(screen, graphicalForm(s, report, initial))
+	if err != nil || fields[0].Value != low || fields[1].Value != high {
+		t.Fatalf("terminal component F4: %#v, %v", fields, err)
+	}
+}

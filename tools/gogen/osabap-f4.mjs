@@ -4,6 +4,7 @@
 export function prepareF4(source, parsed) {
   const statements = parsed.units[0].statements;
   const fields = [];
+  const events = [];
   const dialogCalls = [];
   const edits = [];
   let active;
@@ -13,8 +14,15 @@ export function prepareF4(source, parsed) {
       if (/^AT SELECTION-SCREEN ON HELP-REQUEST\b/i.test(words)) {
         throw new Error("ON HELP-REQUEST (F1) is not supported by osabap");
       }
-      active = /^AT SELECTION-SCREEN ON VALUE-REQUEST FOR ([A-Z][A-Z0-9_]*)\s*\.$/i.exec(words)?.[1]?.toUpperCase();
-      if (active) fields.push(active);
+      const request = /^AT SELECTION-SCREEN ON VALUE-REQUEST FOR ([A-Z][A-Z0-9_]*(?:-(?:LOW|HIGH))?)\s*\.$/i.exec(words);
+      if (/^AT SELECTION-SCREEN ON VALUE-REQUEST\b/i.test(words) && !request) {
+        throw new Error(`unsupported ON VALUE-REQUEST target: ${words}`);
+      }
+      active = request?.[1]?.toUpperCase();
+      if (active) {
+        fields.push(active);
+        events.push(active);
+      }
       continue;
     }
     if (["StartOfSelection", "EndOfSelection", "Initialization", "TopOfPage", "AtLineSelection", "AtUserCommand"].includes(st.kind)) active = undefined;
@@ -34,5 +42,5 @@ export function prepareF4(source, parsed) {
   }
   let convertedSource = source;
   for (const edit of edits.reverse()) convertedSource = convertedSource.slice(0, edit.start) + edit.text + convertedSource.slice(edit.end);
-  return {fields: [...new Set(fields)], dialogCalls, convertedSource};
+  return {fields: [...new Set(fields)], events, dialogCalls, convertedSource};
 }

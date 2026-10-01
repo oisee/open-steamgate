@@ -20,6 +20,14 @@ test("real HELP-REQUEST is refused", () => {
   assert.throws(() => prepareF4(source, parseSource(source, "zpick.prog.abap")), /HELP-REQUEST/);
 });
 
+test("select-option LOW and HIGH value requests keep their component names", () => {
+  const source = `REPORT zpickrange.\nDATA gv_file TYPE string.\nSELECT-OPTIONS s_file FOR gv_file.\nAT SELECTION-SCREEN ON VALUE-REQUEST FOR s_file-low.\n  s_file-low = 'a.txt'.\nAT SELECTION-SCREEN ON VALUE-REQUEST FOR s_file-high.\n  s_file-high = 'z.txt'.\nSTART-OF-SELECTION.\n`;
+  const result = prepareF4(source, parseSource(source, "zpickrange.prog.abap"));
+  assert.deepEqual(result.fields, ["S_FILE-LOW", "S_FILE-HIGH"]);
+  assert.deepEqual(result.events, result.fields);
+  assert.match(result.convertedSource, /s_file-low = 'a.txt'/);
+});
+
 test("F4 preserves an entire block after assignments with punctuation in literals", () => {
   const source = `REPORT zpick.\nPARAMETERS p TYPE string.\nDATA note TYPE string.\nAT SELECTION-SCREEN ON VALUE-REQUEST FOR p.\n  note = 'before'.\n  p = 'a.txt'.\n  note = 'after: one'.\n  p = 'say ''hello'': a.txt'.\n  CALL METHOD cl_gui_frontend_services=>file_open_dialog.\n  note = 'after call'.\nSTART-OF-SELECTION.\n  p = 'unchanged'.\n`;
   const result = prepareF4(source, parseSource(source, "zpick.prog.abap"));

@@ -2,6 +2,7 @@ package filepick
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,49 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"osg/gogen/abap"
 )
+
+func TestLongDirectoryViewportAndNavigation(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 40; i++ {
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("item%02d.txt", i)), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b := Browser{Sandbox: &abap.Sandbox{Read: []string{root}}, Mode: Open}
+	entries, err := b.entries(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := simulated(t)
+	s.SetSize(80, 10) // six visible entry rows
+	for _, selected := range []int{0, 5, 6, 29, 39, 12, 0} {
+		start := visibleStart(selected, 0, len(entries), 10)
+		if selected < start || selected >= start+6 {
+			t.Fatalf("selected row %d outside viewport starting at %d", selected, start)
+		}
+		b.draw(s, root, entries, selected, start, "", "", false, false)
+		_, _, style, _ := s.GetContent(0, selected-start+3)
+		_, _, reverse := style.Decompose()
+		if reverse&tcell.AttrReverse == 0 {
+			t.Fatalf("selected row %d is not highlighted", selected)
+		}
+	}
+	for _, keys := range [][]*tcell.EventKey{
+		{press(tcell.KeyEnd), press(tcell.KeyEnter)},
+		{press(tcell.KeyPgDn), press(tcell.KeyPgDn), press(tcell.KeyPgUp), press(tcell.KeyHome), press(tcell.KeyEnter)},
+	} {
+		want := "item39.txt"
+		if len(keys) > 2 {
+			want = "item00.txt"
+		}
+		pick := simulated(t, keys...)
+		pick.SetSize(80, 10)
+		got, err := b.Run(pick)
+		if err != nil || got != filepath.Join(root, want) {
+			t.Fatalf("navigation picked %q, %v; want %s", got, err, want)
+		}
+	}
+}
 
 func simulated(t *testing.T, keys ...*tcell.EventKey) tcell.SimulationScreen {
 	t.Helper()

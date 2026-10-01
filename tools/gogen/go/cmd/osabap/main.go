@@ -216,14 +216,27 @@ func graphicalForm(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST_
 			field.Kind = termgui.Text
 		}
 		form.Fields = append(form.Fields, field)
+		if e.kind == "SELECT_OPTION" && appF4[name+"-HIGH"] {
+			high := ""
+			if len(input.ranges) > 0 {
+				high = strings.TrimSpace(input.ranges[0].high)
+			}
+			form.Fields = append(form.Fields, termgui.Field{Name: name + "-HIGH", Label: strings.TrimSpace(e.text) + " high", Value: high, Width: int(e.visible_length)})
+		}
 	}
 	form.OnF4 = func(terminal tcell.Screen, name string, fields []termgui.Field) (string, error) {
-		if !appF4[name] {
+		target := name
+		if appRanges[name] {
+			target += "-LOW"
+		}
+		if !appF4[target] {
 			return "", fmt.Errorf("no ON VALUE-REQUEST for %s", name)
 		}
-		values := map[string]selectionInput{}
+		original := ""
 		for _, f := range fields {
-			values[f.Name] = selectionInput{value: f.Value}
+			if f.Name == name {
+				original = f.Value
+			}
 		}
 		var pickErr error
 		abap.FrontendPick = func(options abap.FrontendPickOptions) (string, error) {
@@ -239,16 +252,20 @@ func graphicalForm(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST_
 		}
 		defer func() { abap.FrontendPick = nil }()
 		var result ZCL_GG_HOST__TY_RESULT
-		abap.DialogStep(func() { result = hostRunRequest(s, report, selectionValues(values), "", "X", name) })
+		abap.DialogStep(func() { result = hostRunRequest(s, report, selectionValuesFromFields(fields, screen), "", "X", target) })
 		if pickErr != nil {
 			return "", pickErr
 		}
+		base := strings.SplitN(target, "-", 2)[0]
 		for _, v := range result.values {
-			if strings.TrimSpace(v.name) == name && len(v.ranges) > 0 {
+			if strings.TrimSpace(v.name) == base && len(v.ranges) > 0 {
+				if strings.HasSuffix(target, "-HIGH") {
+					return strings.TrimSpace(v.ranges[0].high), nil
+				}
 				return strings.TrimSpace(v.ranges[0].low), nil
 			}
 		}
-		return values[name].value, nil
+		return original, nil
 	}
 	return form
 }
@@ -281,6 +298,21 @@ func selectionValuesFromFields(fields []termgui.Field, screen ZCL_GG_HOST__TY_RE
 				}
 			}
 			current[field.Name] = input
+		} else if strings.HasSuffix(field.Name, "-HIGH") && appRanges[strings.TrimSuffix(field.Name, "-HIGH")] {
+			base := strings.TrimSuffix(field.Name, "-HIGH")
+			input := current[base]
+			if len(input.ranges) == 0 && field.Value != "" {
+				input.ranges = append(input.ranges, ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE{sign: "I", option: "BT"})
+			}
+			if len(input.ranges) > 0 {
+				input.ranges[0].high = field.Value
+				if field.Value != "" {
+					input.ranges[0].option = "BT"
+				} else {
+					input.ranges[0].option = "EQ"
+				}
+			}
+			current[base] = input
 		} else {
 			current[field.Name] = selectionInput{value: field.Value}
 		}
