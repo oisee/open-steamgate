@@ -1,0 +1,6 @@
+{
+  "name": "Z_PROXY_PROBE_FM",
+  "destination": "SYNTHETIC",
+  "params": {"IV_KEY": "A1"},
+  "result": {"EV_TEXT": "hello"}
+}

@@ -325,6 +325,20 @@ export async function setup(abap, schemas, insert) {
   // it 'NONE' and '' run here and any other name replays STG_RFC_CAPTURE
   const {installRfcDestinations} = await import("../tools/rfc-replay.mjs");
   await installRfcDestinations(abap, {trace: process.env.STG_RFC_TRACE === "1"});
+  if (process.env.STG_RFC_PROXY) {
+    // opt-in: a CALL FUNCTION without DESTINATION whose module is not
+    // transpiled goes to this destination when STG_RFC_PROXY_ALLOW names it
+    // (docs/rfc-proxy.md). STG_RFC_PROXY_MODE: live | record | replay.
+    const {installFunctionProxy} = await import("../tools/rfc-proxy.mjs");
+    await installFunctionProxy(abap, {
+      destination: process.env.STG_RFC_PROXY,
+      allow: process.env.STG_RFC_PROXY_ALLOW ?? "",
+      mode: process.env.STG_RFC_PROXY_MODE,
+      folder: process.env.STG_RFC_CAPTURE,
+      noLive: process.env.STG_RFC_NO_LIVE === "1" || process.env.CI === "true",
+      trace: process.env.STG_RFC_TRACE === "1",
+    });
+  }
   // This branch is Node-only; keep node:sqlite out of the preview bundle.
   const {JobDestination} = await import(/* webpackIgnore: true */ "../tools/osd-job-port.mjs");
   const jobs = new JobDestination(process.cwd(), process.env);

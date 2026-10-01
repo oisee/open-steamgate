@@ -12,6 +12,7 @@
     "test/reference-generation.mjs",
     "test/replay-compare.mjs",
     "test/rfc-live.mjs",
+    "test/rfc-proxy.mjs",
     "test/rfc-replay.mjs",
     "test/sapevent.mjs",
     "test/se16.mjs",

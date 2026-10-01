@@ -326,11 +326,29 @@ export function resetSequences() {
 
 // ---------------------------------------------------------------- clients
 
+/** where installFunctionProxy (tools/rfc-proxy.mjs) keeps the table it wrapped */
+export const ORIGINAL_FUNCTION_MODULES = Symbol.for("osd.rfc.originalFunctionModules");
+
+/**
+ * The function modules that are really transpiled into this process. When a
+ * proxy answers for the absent ones, abap.FunctionModules is that proxy and
+ * "is it there?" is always yes, so every question about local-ness goes
+ * through here and sees the table the proxy wrapped.
+ */
+export function localFunctionModules(abap = globalThis.abap) {
+  return abap[ORIGINAL_FUNCTION_MODULES] ?? abap.FunctionModules;
+}
+
+/** is this function module transpiled here (never true for a proxied name) */
+export function isLocal(name, abap = globalThis.abap) {
+  return localFunctionModules(abap)[name.trimEnd().toUpperCase()] !== undefined;
+}
+
 /** the function modules of this process, what DESTINATION 'NONE' means */
 export function localClient() {
   return {
     call: async (name, signature) => {
-      const fm = globalThis.abap.FunctionModules[name.trimEnd().toUpperCase()];
+      const fm = localFunctionModules()[name.trimEnd().toUpperCase()];
       if (fm === undefined) {
         throw await new globalThis.abap.Classes["CX_SY_DYN_CALL_ILLEGAL_FUNC"]().constructor_();
       }
@@ -373,6 +391,11 @@ export class RfcReplayClient {
     }
     const sy = globalThis.abap.builtin.sy.get();
     if (capture.exception !== undefined) {
+      if (typeof signature.raise === "function") {
+        // a call without DESTINATION (tools/rfc-proxy.mjs) has no EXCEPTIONS
+        // map to look the name up in: its caller catches a classic error
+        signature.raise(capture.exception);
+      }
       const exceptions = upperKeys(signature.exceptions);
       const code = exceptions[capture.exception] ?? exceptions["OTHERS"];
       if (code === undefined) {
