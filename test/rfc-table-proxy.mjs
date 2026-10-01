@@ -396,30 +396,38 @@ describe("tools/rfc-table-proxy: a table without rows is filled from the system 
     expect(tableJournal()[0].reason).to.contain("FROM");
   });
 
-  it("a statement with an unsupported construct hydrates none of its tables, also the ones before it", async () => {
+  it("a statement it cannot classify still hydrates every allow-listed table it mentions", async () => {
     const {factory, log} = fakeOpenRfc(system);
     await install({mode: "live", allow: "ZTPROXY_*", clientFactory: factory, connection: CONNECTION});
-    await fails(() => abap.context.databaseConnections["DEFAULT"].select({select: "SELECT * FROM \"ztproxy_a\" WHERE 1 IN (SELECT 1 FROM generate_series(1, 2))"}));
-    expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(0);
+    await abap.context.databaseConnections["DEFAULT"].select({select: "SELECT * FROM \"ztproxy_a\" WHERE 1 IN (SELECT 1 FROM generate_series(1, 2))"}).catch(() => {});
+    expect(log.filter((l) => l.fm === "RFC_READ_TABLE").map((l) => String(l.input.QUERY_TABLE).trim())).to.deep.equal(["ZTPROXY_A"]);
+    expect(tableJournal().map((e) => e.state)).to.include("unclassified");
   });
 
-  it("a statement with a WITH clause makes no RFC call and is journaled as unclassified", async () => {
+  it("a comma after a JOIN does not hide the third table (critic round 5): every mentioned allow-listed table is hydrated", async () => {
+    const {factory, log} = fakeOpenRfc(system);
+    await install({mode: "live", allow: "ZTPROXY_*", clientFactory: factory, connection: CONNECTION});
+    await abap.context.databaseConnections["DEFAULT"].select({select: "SELECT * FROM \"ztproxy_a\" JOIN \"ztproxy_b\" ON 1 = 1, \"ztproxy_c\""}).catch(() => {});
+    expect(log.filter((l) => l.fm === "RFC_READ_TABLE").map((l) => String(l.input.QUERY_TABLE).trim()).sort()).to.deep.equal(["ZTPROXY_A", "ZTPROXY_B", "ZTPROXY_C"]);
+  });
+
+  it("a statement with a WITH clause is journaled as unclassified and hydrates every allow-listed name it mentions", async () => {
     const {factory, log} = fakeOpenRfc(system);
     await install({mode: "live", allow: "ZTPROXY_*", clientFactory: factory, connection: CONNECTION});
     const wrapped = abap.context.databaseConnections["DEFAULT"];
     await wrapped.select({select: "WITH ztproxy_a AS (SELECT id FROM \"ztproxy_b\") SELECT * FROM ztproxy_a"});
     await wrapped.select({select: "WITH unused AS (SELECT * FROM \"ztproxy_a\") SELECT 1"});
-    expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(0);
-    expect(tableJournal().map((e) => e.state)).to.deep.equal(["unclassified", "unclassified"]);
+    expect(log.filter((l) => l.fm === "RFC_READ_TABLE").map((l) => String(l.input.QUERY_TABLE).trim()).sort()).to.deep.equal(["ZTPROXY_A", "ZTPROXY_B"]);
+    expect(tableJournal().filter((e) => e.state === "unclassified")).to.have.length(2);
     expect(tableJournal()[0].reason).to.equal("WITH (common table expression) is not produced by Open SQL; not classified");
   });
 
-  it("a parenthesized join group makes no RFC call and is journaled as unclassified", async () => {
+  it("a parenthesized join group is journaled as unclassified and hydrates both tables it mentions", async () => {
     const {factory, log} = fakeOpenRfc(system);
     await install({mode: "live", allow: "ZTPROXY_*", clientFactory: factory, connection: CONNECTION});
     await abap.context.databaseConnections["DEFAULT"].select({select: "SELECT * FROM (\"ztproxy_a\" JOIN \"ztproxy_b\" ON 1 = 1)"}).catch(() => {});
-    expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(0);
-    expect(tableJournal().map((e) => `${e.state}:${e.reason}`)).to.deep.equal(["unclassified:parenthesized join group; not classified"]);
+    expect(log.filter((l) => l.fm === "RFC_READ_TABLE").map((l) => String(l.input.QUERY_TABLE).trim()).sort()).to.deep.equal(["ZTPROXY_A", "ZTPROXY_B"]);
+    expect(tableJournal().filter((e) => e.state === "unclassified").map((e) => e.reason)).to.deep.equal(["parenthesized join group; not classified"]);
   });
 
   it("writes never reach the system, and the wrapped connection otherwise behaves as before", async () => {

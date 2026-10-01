@@ -118,6 +118,36 @@ function tokenize(sql) {
 }
 
 /**
+ * Every name the statement mentions as an identifier, outside string
+ * literals and comments: the over-approximation hydration is decided on.
+ * Classifying FROM/JOIN exactly kept missing a read table in one more SQL
+ * form per review round (a comma after a JOIN, a derived table in a comma
+ * list); a name that is mentioned but not read only costs an extra, allowed
+ * hydration, while a name that is read but missed is a wrong answer. Only
+ * allow-listed names are ever hydrated, so a column or alias that happens
+ * to share a table's name is the whole cost. Undefined when a literal or
+ * comment is not closed (such a statement does not run).
+ */
+export function mentionedNames(sql, prefix = "") {
+  const tokens = tokenize(String(sql));
+  if (tokens === undefined) {
+    return undefined;
+  }
+  const names = new Set();
+  for (const tok of tokens) {
+    if (tok.t !== "id" && tok.t !== "word") {
+      continue;
+    }
+    let name = tok.v.toUpperCase();
+    if (prefix !== "" && name.startsWith(prefix.toUpperCase())) {
+      name = name.slice(prefix.length);
+    }
+    names.add(name);
+  }
+  return [...names];
+}
+
+/**
  * The tables a statement reads: every FROM and JOIN, at any depth, with a
  * comma list after a FROM. `{tables: [NAME...], unclassified: reason|undefined}`.
  * A FROM or JOIN followed by anything but an identifier or `(` is not guessed
@@ -456,7 +486,11 @@ export async function installTableProxy(abap, options = {}) {
   };
 
   const ensure = async (sql) => {
-    const {tables, unclassified} = readTables(sql, prefix());
+    // readTables names what the statement reads where it can tell, and is
+    // kept for the journal; hydration covers every allow-listed name the
+    // statement mentions, so no read table is missed (mentionedNames)
+    const {tables: read, unclassified} = readTables(sql, prefix());
+    const tables = new Set([...read, ...(mentionedNames(sql, prefix()) ?? [])]);
     if (unclassified !== undefined && !unclassifiedSeen.has(sql)) {
       unclassifiedSeen.add(sql);
       journal.push({table: undefined, destination, state: "unclassified", source: undefined, rows: 0, truncated: false,

@@ -95,16 +95,20 @@ table that looks hydrated.
 
 The proxy wraps the connection in `abap.context.databaseConnections.DEFAULT`
 (the eleven-method `DatabaseClient` of `docs/db-backends.md`; the runtime is
-not forked). A `select` or `openCursor` is read as SQL text: every `FROM` and
-`JOIN` at any depth, quoted names (`"tab"`, `"schema"."tab"`), a comma list,
-subqueries in `WHERE`, `UNION`. A `FROM` inside `TRIM`/`EXTRACT`/`SUBSTRING` is not a
-table. A statement with a `WITH` clause (anywhere, outside literals) is not
-classified at all, nor is anything in parentheses right after `FROM` or `JOIN`
-(a derived table `FROM (SELECT ...)` or a join group `FROM (a JOIN b ...)`):
-7.02 Open SQL produces none of them, and following them through comma lists
-and joins is where read tables were missed. A statement this cannot classify (a string where a table should be, a
-table function, `FROM @x`, an unterminated literal) hydrates **nothing** (not even the tables read before the construct) and is
-journaled as `unclassified` with the reason. For each allow-listed table the
+not forked). A `select` or `openCursor` is read as SQL text, and **every
+allow-listed table the statement mentions** as an identifier (outside string
+literals and comments) is hydrated before it runs. This is an
+over-approximation on purpose: an exact reading of `FROM`/`JOIN` missed a read
+table in one more SQL form per review round (a comma after a `JOIN`, a derived
+table in a comma list), and a missed table is a wrong answer, while a name
+that is mentioned but not read (a column or alias sharing a table's name)
+only costs an extra hydration of a table one is allowed to read. The exact
+reading (`FROM`, `JOIN`, comma lists, `WHERE` subqueries, `UNION`; a `FROM`
+inside `TRIM`/`EXTRACT`/`SUBSTRING` is not a table) is still done for the
+journal: a statement it cannot classify (`WITH`, anything in parentheses right
+after `FROM`/`JOIN`, a table function, `FROM @x`, a string where a table
+should be) is journaled as `unclassified` with the reason, and its mentioned
+allow-listed tables are hydrated all the same. For each allow-listed table the
 statement reads and that has not been decided in this process:
 
 1. it was written locally first and the write is **committed**: **not
