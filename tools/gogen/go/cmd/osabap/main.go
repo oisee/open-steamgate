@@ -228,13 +228,23 @@ func graphicalForm(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST_
 		var pickErr error
 		abap.FrontendPick = func(kind, initial, defaultName, title string) (string, error) {
 			mode := filepick.Open
-			switch kind {
+			parts := strings.Split(kind, "|")
+			switch parts[0] {
 			case "save":
 				mode = filepick.Save
 			case "directory":
 				mode = filepick.Directory
 			}
-			browser := filepick.Browser{Sandbox: abap.SandboxFromEnv(), Mode: mode, Initial: initial, DefaultName: defaultName, Title: title}
+			browser := filepick.Browser{Sandbox: abap.SandboxFromEnv(), Mode: mode, Initial: initial, DefaultName: defaultName, Title: title, Multi: parts[0] == "open-multiple"}
+			if len(parts) > 1 {
+				browser.Patterns = filepick.SAPPatterns(parts[1])
+			}
+			if len(parts) > 2 {
+				browser.Extension = parts[2]
+			}
+			if len(parts) > 3 {
+				browser.ConfirmOverwrite = strings.EqualFold(parts[3], "X")
+			}
 			path, err := browser.Run(terminal)
 			if err != nil && !errors.Is(err, filepick.ErrCancel) {
 				pickErr = err

@@ -9,6 +9,7 @@ import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
 import {checkLibPins} from "./lib-pins.mjs";
+import {prepareF4} from "./osabap-f4.mjs";
 
 const here = import.meta.dirname;
 // node tools/gogen/osabap.mjs [report.prog.abap] [--lib <folder>]...
@@ -37,6 +38,7 @@ mkdirSync(dir, {recursive: true});
 
 const gui = join(home, ".local", "lars", "open-abap-gui");
 const {convertProgram} = await import(join(gui, "converter", "src", "api.mjs"));
+const {parseSource} = await import(join(gui, "converter", "src", "parser.mjs"));
 const source = readFileSync(report, "utf8");
 // the selection texts of the report (TPOOL, ID S) from the abapGit <report>.prog.xml
 // beside it: the labels of the terminal form and of -help; the text symbols
@@ -58,15 +60,7 @@ for (const [, item] of tpool.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
 // The converter's simple-assignment F4 shortcut discards all statements
 // preceding `field = value`. Spell that assignment as MOVE in this input so
 // the complete event block passes through native lowering.
-const f4Fields = [...source.matchAll(/AT\s+SELECTION-SCREEN\s+ON\s+VALUE-REQUEST\s+FOR\s+(\w+)\s*\./gi)].map((m) => m[1].toUpperCase());
-if (/AT\s+SELECTION-SCREEN\s+ON\s+HELP-REQUEST\b/i.test(source)) {
-  throw new Error(`${report}: ON HELP-REQUEST (F1) is not supported by osabap`);
-}
-let convertedSource = source;
-for (const field of f4Fields) {
-  const re = new RegExp(`(^\\s*)(${field})\\s*=\\s*([^\\n.]+)\\.`, "gim");
-  convertedSource = convertedSource.replace(re, (_, indent, target, value) => `${indent}MOVE ${value} TO ${target}.`);
-}
+const {fields: f4Fields, convertedSource} = prepareF4(source, parseSource(source, basename(report)));
 const converted = await convertProgram({source: convertedSource, filename: basename(report), mode: "strict", nativePassthrough: true, className, transactionCode: name, ...(Object.keys(textPool).length > 0 ? {textPool} : {})});
 if (converted.supported !== true || converted.classSource === undefined) {
   throw new Error(`${report}: converter refused the report: ${JSON.stringify(converted.diagnostics)}`);

@@ -96,10 +96,82 @@ func TestFilterSaveAndMissingGrants(t *testing.T) {
 	if _, err := save.Sandbox.BrowseSaveName(root); err == nil {
 		t.Fatal("directory accepted as a save filename")
 	}
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	os.WriteFile(outside, nil, 0600)
+	link := filepath.Join(root, "link.txt")
+	os.Symlink(outside, link)
+	if _, err := save.Sandbox.BrowseSaveName(link); err == nil {
+		t.Fatal("symlink save target accepted")
+	}
 	for _, mode := range []Mode{Open, Save, Directory} {
 		_, err := (Browser{Sandbox: &abap.Sandbox{}, Mode: mode}).Run(simulated(t))
 		if err == nil || !strings.Contains(err.Error(), "-allow-") {
 			t.Fatalf("mode %v: %v", mode, err)
 		}
+	}
+}
+
+func TestSwapAfterListingIsRefused(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "root")
+	os.Mkdir(root, 0700)
+	outside := filepath.Join(base, "outside")
+	os.WriteFile(outside, []byte("secret"), 0600)
+	for _, mode := range []Mode{Open, Save, Directory} {
+		name := "target"
+		path := filepath.Join(root, name)
+		if mode == Directory {
+			os.Mkdir(path, 0700)
+		} else {
+			os.WriteFile(path, nil, 0600)
+		}
+		b := Browser{Sandbox: &abap.Sandbox{Read: []string{root}, Write: []string{root}}, Mode: mode}
+		swapped := false
+		b.afterList = func() {
+			if swapped {
+				return
+			}
+			swapped = true
+			os.Remove(path)
+			if err := os.Symlink(outside, path); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, err := b.Run(simulated(t, press(tcell.KeyEnter), press(tcell.KeyEscape)))
+		if !errors.Is(err, ErrCancel) {
+			t.Fatalf("mode %v selected swapped link: %v", mode, err)
+		}
+		os.Remove(path)
+	}
+}
+
+func TestSAPFilterExtensionAndMulti(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt", "c.bin"} {
+		os.WriteFile(filepath.Join(root, name), nil, 0600)
+	}
+	patterns := SAPPatterns("Text (*.txt)|*.txt|Binary (*.bin)|*.bin")
+	if len(patterns) != 2 {
+		t.Fatalf("patterns: %v", patterns)
+	}
+	b := Browser{Sandbox: &abap.Sandbox{Read: []string{root}}, Mode: Open, Patterns: SAPPatterns("Text (*.txt)|*.txt"), Multi: true}
+	path, err := b.Run(simulated(t, letter(' '), press(tcell.KeyDown), letter(' '), press(tcell.KeyEnter)))
+	if err != nil || path != filepath.Join(root, "a.txt")+"\x00"+filepath.Join(root, "b.txt") {
+		t.Fatalf("multi: %q %v", path, err)
+	}
+	open := Browser{Sandbox: &abap.Sandbox{Read: []string{root}}, Mode: Open, DefaultName: "a", Extension: "txt"}
+	path, err = open.Run(simulated(t, letter('n'), press(tcell.KeyEnter)))
+	if err != nil || path != filepath.Join(root, "a.txt") {
+		t.Fatalf("open extension: %q %v", path, err)
+	}
+	save := Browser{Sandbox: &abap.Sandbox{Write: []string{root}}, Mode: Save, Extension: "txt", DefaultName: "new"}
+	path, err = save.Run(simulated(t, letter('n'), press(tcell.KeyEnter)))
+	if err != nil || path != filepath.Join(root, "new.txt") {
+		t.Fatalf("extension: %q %v", path, err)
+	}
+	save.DefaultName, save.ConfirmOverwrite = "a.txt", true
+	path, err = save.Run(simulated(t, letter('n'), press(tcell.KeyEnter), letter('n'), press(tcell.KeyEscape)))
+	if !errors.Is(err, ErrCancel) || path != "" {
+		t.Fatalf("overwrite declined: %q %v", path, err)
 	}
 }

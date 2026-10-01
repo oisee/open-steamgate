@@ -19,26 +19,38 @@ func frontendPick(kind, initial, name, title string) (string, bool) {
 	return path, err == nil && path != ""
 }
 
-func FrontendFileOpenDialog(_ *Session, title, name, initial string, table any, rc, action *int32) {
+func FrontendFileOpenDialog(_ *Session, title, name, filter, extension, initial, multi string, table any, rc, action *int32) {
 	*rc, *action = 0, 9
 	rows := reflect.ValueOf(table).Elem()
 	rows.Set(reflect.MakeSlice(rows.Type(), 0, 1))
-	path, ok := frontendPick("open", initial, name, title)
+	kind := "open"
+	if strings.EqualFold(strings.TrimSpace(multi), "X") {
+		kind = "open-multiple"
+	}
+	if filter != "" || extension != "" {
+		kind += "|" + filter + "|" + extension
+	}
+	path, ok := frontendPick(kind, initial, name, title)
 	if !ok {
 		return
 	}
-	row := reflect.New(rows.Type().Elem()).Elem()
-	field := row.FieldByName("filename")
-	// The generated FILE_TABLE field follows ABAP's lowercase naming. The
-	// typed generated package cannot be imported here, so set this one field.
-	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().SetString(path)
-	rows.Set(reflect.Append(rows, row))
-	*rc, *action = 1, 0
+	for _, selected := range strings.Split(path, "\x00") {
+		row := reflect.New(rows.Type().Elem()).Elem()
+		field := row.FieldByName("filename")
+		// The generated FILE_TABLE field follows ABAP's lowercase naming.
+		reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().SetString(selected)
+		rows.Set(reflect.Append(rows, row))
+	}
+	*rc, *action = int32(rows.Len()), 0
 }
 
-func FrontendFileSaveDialog(_ *Session, title, name, initial string, filename, dir, fullpath *string, action *int32) {
+func FrontendFileSaveDialog(_ *Session, title, name, filter, extension, initial, prompt string, filename, dir, fullpath *string, action *int32) {
 	*action = 9
-	path, ok := frontendPick("save", initial, name, title)
+	kind := "save"
+	if filter != "" || extension != "" || prompt != "" {
+		kind += "|" + filter + "|" + extension + "|" + prompt
+	}
+	path, ok := frontendPick(kind, initial, name, title)
 	if !ok {
 		return
 	}

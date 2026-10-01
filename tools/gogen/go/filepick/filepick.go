@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
@@ -23,16 +25,40 @@ const (
 )
 
 type Browser struct {
-	Sandbox     *abap.Sandbox
-	Mode        Mode
-	Initial     string
-	DefaultName string
-	Title       string
+	Sandbox          *abap.Sandbox
+	Mode             Mode
+	Initial          string
+	DefaultName      string
+	Title            string
+	Patterns         []string
+	Extension        string
+	ConfirmOverwrite bool
+	Multi            bool
+	afterList        func()
 }
 
 type entry struct {
 	name string
 	dir  bool
+}
+
+// SAPPatterns reads alternating description and wildcard fields. Several
+// patterns in one field are separated by semicolons.
+func SAPPatterns(filter string) []string {
+	parts := strings.Split(filter, "|")
+	patterns := []string{}
+	for i := 1; i < len(parts); i += 2 {
+		for _, pattern := range strings.Split(parts[i], ";") {
+			pattern = strings.TrimSpace(pattern)
+			if pattern == "*.*" || pattern == "*" {
+				return nil
+			}
+			if pattern != "" {
+				patterns = append(patterns, pattern)
+			}
+		}
+	}
+	return patterns
 }
 
 func (b Browser) roots() []string { return b.Sandbox.BrowseRoots(b.Mode == Save) }
@@ -49,6 +75,18 @@ func (b Browser) entries(dir, filter string) ([]entry, error) {
 	}
 	out := []entry{}
 	for _, info := range infos {
+		if !info.IsDir() && len(b.Patterns) > 0 {
+			matched := false
+			for _, pattern := range b.Patterns {
+				if ok, _ := filepath.Match(strings.ToLower(pattern), strings.ToLower(info.Name())); ok {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
 		if filter != "" && !strings.Contains(strings.ToLower(info.Name()), strings.ToLower(filter)) {
 			continue
 		}
@@ -67,7 +105,77 @@ func (b Browser) entries(dir, filter string) ([]entry, error) {
 		}
 		out = append(out, entry{info.Name(), stat.IsDir()})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
 	return out, nil
+}
+
+// selected reopens the entry through os.Root after the user has chosen it.
+// Listing alone cannot authorize a path because the directory may change.
+func (b Browser) selected(dir string, item entry) (string, bool) {
+	path := filepath.Join(dir, item.name)
+	checked, file, err := b.Sandbox.BrowsePath(path, b.Mode == Save)
+	if err != nil {
+		return "", false
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info.IsDir() != item.dir {
+		return "", false
+	}
+	return checked, true
+}
+
+func (b Browser) saveName(dir, name string) (string, bool) {
+	if name == "" || name != filepath.Base(name) {
+		return "", false
+	}
+	if b.Extension != "" && filepath.Ext(name) == "" {
+		name += "." + strings.TrimPrefix(b.Extension, ".")
+	}
+	path, err := b.Sandbox.BrowseSaveName(filepath.Join(dir, name))
+	return path, err == nil
+}
+
+func (b Browser) openName(dir, name string) (string, bool) {
+	if name == "" || name != filepath.Base(name) {
+		return "", false
+	}
+	if b.Extension != "" && filepath.Ext(name) == "" {
+		name += "." + strings.TrimPrefix(b.Extension, ".")
+	}
+	path, file, err := b.Sandbox.BrowsePath(filepath.Join(dir, name), false)
+	if err != nil {
+		return "", false
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	return path, err == nil && !info.IsDir()
+}
+
+func (b Browser) confirmSave(screen tcell.Screen, path string) bool {
+	if !b.ConfirmOverwrite {
+		return true
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return true
+	}
+	_, h := screen.Size()
+	for x, r := range []rune("Overwrite existing file? y/n") {
+		screen.SetContent(x, h-1, r, nil, tcell.StyleDefault.Reverse(true))
+	}
+	screen.Show()
+	for {
+		key, ok := screen.PollEvent().(*tcell.EventKey)
+		if !ok {
+			continue
+		}
+		if key.Rune() == 'y' || key.Rune() == 'Y' {
+			return true
+		}
+		if key.Rune() == 'n' || key.Rune() == 'N' || key.Key() == tcell.KeyEscape {
+			return false
+		}
+	}
 }
 
 func (b Browser) initial() (string, error) {
@@ -96,10 +204,14 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 	}
 	filter, name := "", b.DefaultName
 	selected, editing, editingFilter := 0, false, false
+	marked := map[string]entry{}
 	for {
 		entries, err := b.entries(dir, filter)
 		if err != nil {
 			return "", err
+		}
+		if b.afterList != nil {
+			b.afterList()
 		}
 		if selected >= len(entries) {
 			selected = max(0, len(entries)-1)
@@ -122,10 +234,17 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 					name = string([]rune(name)[:len([]rune(name))-1])
 				}
 			case tcell.KeyEnter:
-				if !editingFilter && b.Mode == Save && name != "" && name == filepath.Base(name) {
-					path, err := b.Sandbox.BrowseSaveName(filepath.Join(dir, name))
-					if err == nil {
-						return path, nil
+				if !editingFilter {
+					if b.Mode == Open {
+						if path, ok := b.openName(dir, name); ok {
+							return path, nil
+						}
+					} else if b.Mode == Save {
+						if path, ok := b.saveName(dir, name); ok && b.confirmSave(screen, path) {
+							if checked, valid := b.saveName(dir, name); valid {
+								return checked, nil
+							}
+						}
 					}
 				}
 				editing = false
@@ -153,19 +272,47 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 				selected = 0
 			}
 		case tcell.KeyEnter:
+			if b.Multi && len(marked) > 0 {
+				paths := []string{}
+				for _, item := range entries {
+					if _, ok := marked[item.name]; !ok {
+						continue
+					}
+					if path, valid := b.selected(dir, item); valid && !item.dir {
+						paths = append(paths, path)
+					}
+				}
+				if len(paths) > 0 {
+					return strings.Join(paths, "\x00"), nil
+				}
+				marked = map[string]entry{}
+				continue
+			}
 			if len(entries) > 0 {
 				item := entries[selected]
-				path := filepath.Join(dir, item.name)
+				path, valid := b.selected(dir, item)
+				if !valid {
+					continue
+				}
 				if item.dir {
 					dir = path
+					marked = map[string]entry{}
 					selected = 0
 					filter = ""
 				} else if b.Mode != Directory {
-					return path, nil
+					if b.Mode != Save {
+						return path, nil
+					} else if b.confirmSave(screen, path) {
+						if checked, valid := b.saveName(dir, item.name); valid {
+							return checked, nil
+						}
+					}
 				}
 			} else if b.Mode == Save && name != "" {
-				if path, err := b.Sandbox.BrowseSaveName(filepath.Join(dir, name)); err == nil {
-					return path, nil
+				if path, ok := b.saveName(dir, name); ok && b.confirmSave(screen, path) {
+					if checked, valid := b.saveName(dir, name); valid {
+						return checked, nil
+					}
 				}
 			}
 		case tcell.KeyRune:
@@ -175,14 +322,30 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 				editing = true
 				editingFilter = true
 			case 'n':
-				if b.Mode == Save {
+				if b.Mode == Save || b.Mode == Open {
 					editing = true
 					editingFilter = false
 					name = b.DefaultName
 				}
 			case ' ':
 				if b.Mode == Directory {
-					return dir, nil
+					checked, file, err := b.Sandbox.BrowsePath(dir, false)
+					if err != nil {
+						continue
+					}
+					info, err := file.Stat()
+					file.Close()
+					if err != nil || !info.IsDir() {
+						continue
+					}
+					return checked, nil
+				} else if b.Multi && len(entries) > 0 && !entries[selected].dir {
+					item := entries[selected]
+					if _, ok := marked[item.name]; ok {
+						delete(marked, item.name)
+					} else {
+						marked[item.name] = item
+					}
 				}
 			default:
 				if filter != "" {
@@ -228,7 +391,7 @@ func (b Browser) draw(screen tcell.Screen, dir string, entries []entry, selected
 	if b.Mode == Directory {
 		footer += "  Space choose folder"
 	}
-	if b.Mode == Save {
+	if b.Mode == Save || b.Mode == Open {
 		footer += "  n name"
 		if name != "" {
 			footer += fmt.Sprintf(" [%s]", name)

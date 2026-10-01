@@ -581,6 +581,15 @@ func (sb *Sandbox) BrowseSaveName(name string) (string, error) {
 	if missing {
 		return "", os.ErrNotExist
 	}
+	// An existing symlink can be swapped into the target after a directory
+	// listing. Do not return it as a save name, even when its parent is safe.
+	root, rel, ok := sb.beneath(real, write)
+	if !ok {
+		return "", os.ErrPermission
+	}
+	if info, err := root.Lstat(rel); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return "", os.ErrPermission
+	}
 	if _, existing, err := sb.BrowsePath(real, true); err == nil {
 		defer existing.Close()
 		if info, err := existing.Stat(); err == nil && info.IsDir() {

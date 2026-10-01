@@ -13,7 +13,9 @@ only `-allow-read` roots (write roots are readable); save lists only
 `-allow-write` roots. A path or symlink outside a root is refused. F4 reports
 the missing grant in the form footer. Arrows move, Enter descends or chooses a
 file, Backspace goes up within the root, `/` filters, Space chooses the current
-directory, `n` enters a save name, and Esc cancels.
+directory (or marks files with `MULTISELECTION = 'X'`), `n` enters an open or save name,
+and Esc cancels. Enter returns marked files. Each chosen path is validated
+again after the listing.
 
 ## ABAP contract
 
@@ -22,7 +24,7 @@ A4H**. The class methods use `ACTION_OK = 0` and `ACTION_CANCEL = 9`:
 
 | API | Output on selection | Output on cancel |
 | --- | --- | --- |
-| `CL_GUI_FRONTEND_SERVICES=>FILE_OPEN_DIALOG` | `FILE_TABLE` has one `FILENAME` row, `RC = 1`, `USER_ACTION = 0` | empty table, `RC = 0`, `USER_ACTION = 9` |
+| `CL_GUI_FRONTEND_SERVICES=>FILE_OPEN_DIALOG` | `FILE_TABLE` has one `FILENAME` row, or several with `MULTISELECTION = 'X'`; `RC` is the row count, `USER_ACTION = 0` | empty table, `RC = 0`, `USER_ACTION = 9` |
 | `=>FILE_SAVE_DIALOG` | `FILENAME` is the basename, `PATH` the directory, `FULLPATH` the complete name, `USER_ACTION = 0` | `USER_ACTION = 9`; caller's path fields remain unchanged |
 | `=>DIRECTORY_BROWSE` | `SELECTED_FOLDER` is the chosen directory | `SELECTED_FOLDER` remains unchanged |
 | `F4_FILENAME` | `FILE_NAME` (IMPORTING to caller) receives the selected name | caller's value remains unchanged |
@@ -40,3 +42,13 @@ these inputs but uses the sandbox's directory listing; it does not apply
 choice, not an A4H measurement.
 
 SAP describes the [open dialog and its `FILE_TABLE`, `RC`, and `USER_ACTION` parameters](https://help.sap.com/docs/r/5a005e044eef436f8b27bbd3f73a3cfc/7.40.17/en-US/dd66b1a76d7044ff8fd46c04fdaec220.html), the [save dialog and action codes](https://help.sap.com/saphelp_em92/helpdata/en/d0/0754b08a6947c19ce3f43add7696cb/content.htm), and [`DIRECTORY_BROWSE`'s `SELECTED_FOLDER`](https://help.sap.com/docs/SAP_NETWEAVER_AS_ABAP_752/5a005e044eef436f8b27bbd3f73a3cfc/eb82368f3d144c15ba6cc73f64ebf861.html). SAP's examples show [`F4_FILENAME`'s `FILE_NAME` IMPORTING parameter](https://help.sap.com/docs/SUPPORT_CONTENT/abap/3353525680.html) and [`KD_GET_FILENAME_ON_F4`'s `FILE_NAME` CHANGING parameter](https://help.sap.com/docs/SUPPORT_CONTENT/abap/3353523952.html). The single-selection behavior and cancellation preservation above are this terminal implementation's choices.
+
+`FILE_FILTER` accepts alternating descriptions and wildcard fields, such as
+`Text (*.txt)|*.txt|All (*.*)|*.*`, with semicolon separated patterns. The
+terminal browser shows the union of the patterns. `DEFAULT_EXTENSION` is
+appended to an entered name without an extension. `INITIAL_DIRECTORY` sets the
+starting folder when it is inside a granted root; `WINDOW_TITLE` heads the
+browser. `DEFAULT_FILE_NAME` supplies the save name, and
+`PROMPT_ON_OVERWRITE = 'X'` asks yes or no before returning an existing file.
+These input behaviors follow SAP's published parameter contract and remain
+**unverified on A4H**.
