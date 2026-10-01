@@ -18,8 +18,15 @@ CLASS {{class}} IMPLEMENTATION.
            END OF {{type}}.
     DATA {{itab}} TYPE STANDARD TABLE OF {{type}} WITH DEFAULT KEY.
     DATA {{wa}} TYPE {{type}}.
+{{#limit}}
+    DATA ls_prev TYPE {{type}}.
+{{/limit}}
 {{/queries}}
     DATA lv_alert TYPE string.
+{{#threshold}}
+    DATA lv_count TYPE i.
+    DATA lv_count_text TYPE c LENGTH 12.
+{{/threshold}}
 {{#queries}}
     SELECT
 {{#fields}}
@@ -43,11 +50,37 @@ CLASS {{class}} IMPLEMENTATION.
         {{source}}{{#@last}}.{{/@last}}
 {{/order}}
     LOOP AT {{itab}} INTO {{wa}}.
+{{#limit}}
+      IF lv_count > 0 AND ( {{key_change}} ).
+        IF lv_count {{op}} {{value}}.
+          lv_count_text = lv_count.
+          CONDENSE lv_count_text NO-GAPS.
+{{/limit}}
+{{#alert_parts}}
+{{#limit}}    {{/limit}}      {{#@first}}lv_alert = {{/@first}}{{^@first}}  && {{/@first}}{{#is_text}}{{value | literal}}{{/is_text}}{{^is_text}}{{jref}}{{/is_text}}{{#@last}}.{{/@last}}
+{{/alert_parts}}
+{{#limit}}
+          APPEND lv_alert TO rt_alerts.
+        ENDIF.
+        CLEAR lv_count.
+      ENDIF.
+      ADD 1 TO lv_count.
+      ls_prev = {{wa}}.
+{{/limit}}
+{{^limit}}
+      APPEND lv_alert TO rt_alerts.
+{{/limit}}
+    ENDLOOP.
+{{#limit}}
+    IF lv_count {{op}} {{value}}.
+      lv_count_text = lv_count.
+      CONDENSE lv_count_text NO-GAPS.
 {{#alert_parts}}
       {{#@first}}lv_alert = {{/@first}}{{^@first}}  && {{/@first}}{{#is_text}}{{value | literal}}{{/is_text}}{{^is_text}}{{jref}}{{/is_text}}{{#@last}}.{{/@last}}
 {{/alert_parts}}
       APPEND lv_alert TO rt_alerts.
-    ENDLOOP.
+    ENDIF.
+{{/limit}}
 {{/queries}}
   ENDMETHOD.
 ENDCLASS.

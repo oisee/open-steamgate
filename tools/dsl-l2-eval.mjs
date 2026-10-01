@@ -278,6 +278,7 @@ export function evaluate(model, rows, params = {}, override = {}) {
   };
   const alertOf = (parts, context) => parts.map((part) => {
     if (part.is_text) return part.value;
+    if (part.is_count) return String(context.$count);
     const at = context[part.alias];
     return render(fieldsOf(at.table)[part.column], valueOf(at.table, at.row, part.column));
   }).join("");
@@ -288,7 +289,15 @@ export function evaluate(model, rows, params = {}, override = {}) {
       if (whenHolds(context)) visit(context);
     }
   };
-  if (model.kind === "require") {
+  if (model.kind === "limit") {
+    const clause = model.clauses[0];
+    each((context) => {
+      const count = matching(clause, 0, context).length;
+      if (test(model.threshold.op, Math.sign(count - model.threshold.value))) {
+        alerts.push(alertOf(model.alert.parts, {...context, $count: count}));
+      }
+    });
+  } else if (model.kind === "require") {
     const clause = model.clauses[0];
     each((context) => {
       if (!matching(clause, 0, context).length) alerts.push(alertOf(model.alert.parts, context));
@@ -572,6 +581,41 @@ export function structureDiscriminates(model, rows, params) {
     JSON.stringify(evaluate(model, rows, params, {[c]: value})) !== expected));
 }
 
+// Add matching rows by varying a counted-table key. The interpreter checks
+// the resulting count, so a constrained key or a short key cannot fake a case.
+function countTo(model, rows, wanted, params) {
+  const clause = model.clauses[0];
+  const table = clause.table;
+  if (wanted === 0) { rows[table] = []; return true; }
+  if (wanted > 64) return false;
+  const count = () => Number(evaluate({...model, threshold: {op: ">", value: 0}, alert: {parts: [{is_count: true}]}}, rows, params)[0] ?? 0);
+  if (count() !== 1) return false;
+  const base = {...rows[table][0]};
+  for (let i = 1; i < wanted; i++) {
+    let added = false;
+    for (const key of model.ddic[table].keys) {
+      const type = model.ddic[table].fields[key];
+      for (let seed = i + 100; seed < i + 300; seed++) {
+        const value = defaultValue(type, seed);
+        const row = {...base, [key]: value};
+        rows[table].push(row);
+        if (keysDistinct(model, rows) && count() === i + 1) { added = true; break; }
+        rows[table].pop();
+      }
+      if (added) break;
+    }
+    if (!added) return false;
+  }
+  return true;
+}
+
+export function thresholdDiscriminates(model, rows, params) {
+  const expected = JSON.stringify(evaluate(model, rows, params));
+  const {op, value} = model.threshold;
+  return [{op: op === ">" ? ">=" : ">", value}, {op, value: value - 1}, {op, value: value + 1}]
+    .some((threshold) => JSON.stringify(evaluate({...model, threshold}, rows, params)) !== expected);
+}
+
 // Every case for the selected conditions, in rule order, then the structural
 // cases of the clauses: {method, label, kind, condition, line (the rule line
 // of the condition or clause), date, rows, expect, structural}. `example` is
@@ -620,6 +664,10 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       continue;
     }
     if (owner.when) resolveClauses(model, params, start, undefined, true);
+    if (model.kind === "limit" && !countTo(model, start, model.threshold.value + (model.threshold.op === ">" ? 1 : 0), params)) {
+      skipped.push({condition: cond.text, reason: "cannot make the threshold count with distinct matching keys"});
+      continue;
+    }
     const setField = (value) => {
       const rows = clone(start);
       rows[table][owner.slot][cmp.column] = value;
@@ -647,6 +695,27 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       }
       add(reference, cond.rule_line, suffix, methods, cond.text, rows);
     }
+  }
+
+  if (model.kind === "limit") {
+    const n = model.threshold.value;
+    const counts = model.threshold.op === ">" ? [n, n + 1] : [n - 1, n];
+    const suffixes = model.threshold.op === ">" ? ["not_over", "over"] : ["below", "at"];
+    const methods = name("limit threshold", ["count"], suffixes, model.threshold.rule_line);
+    for (let i = 0; i < counts.length; i++) {
+      const rows = clone(base.rows);
+      if (!countTo(model, rows, counts[i], params)) {
+        skipped.push({condition: `limit/${model.threshold.key}`, reason: `cannot make ${counts[i]} matching rows with distinct keys`});
+        continue;
+      }
+      if (!thresholdDiscriminates(model, rows, params)) {
+        skipped.push({condition: `limit/${model.threshold.key}`, reason: `${counts[i]} rows do not discriminate the threshold`});
+        continue;
+      }
+      add(`limit/${model.threshold.key}`, model.threshold.rule_line, suffixes[i], methods,
+        `${counts[i]} matching rows`, rows, true);
+    }
+    return {cases, skipped};
   }
 
   // the structural cases of the clauses, each guarded like the others

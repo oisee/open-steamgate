@@ -365,9 +365,46 @@ a built tree (`npm run transpile`): the templates render in the ABAP runtime. `-
 (`abap_transpile.json`, `abaplint.jsonc`): abaplint would read a trace as a file of the class and
 a rule file as an object of an unknown type.
 
+## Slice 4: count with a threshold
+
+`limit:` counts related rows for each `for` row that passes `when`. It takes
+`count: TABLE as alias`, a slice-3 `where:` with a top-level equality to the
+`for` table, and exactly one threshold: `more_than: n` or `at_least: m`.
+Thresholds are non-negative INT4 integers; `at_least: 0` is refused because it
+holds for every `for` row. `more_than: 0` and `at_least: 1` mean existence,
+with one alert per `for` row. `limit` cannot be combined with `forbid` or
+`require`. The alert names fields of the `for` row and may use `{count}`;
+the counted table has no single row to name. The interpreter prints the count
+with JavaScript's integer decimal conversion. Both generated ABAP methods copy
+the integer into a length-12 character field and `CONDENSE ... NO-GAPS`, so
+the alert has no padding or leading zeros.
+
+The intended aggregate JOIN lowering was probed first in
+`docs/probes/dsl-l2/`. `GROUP BY` and aliased `COUNT( * )` reached generated
+SQL, but the transpiler omitted `HAVING`, and the probe's aggregate JOIN left
+an alias tilde in its ON expression. See
+`ANOMALIES.md#anomaly-2026-10-01-select-having-dropped`. The chosen lowering
+uses one 7.02 Open SQL INNER JOIN ordered by the `for` key. A loop counts
+adjacent matching rows and emits one alert after a group exceeds the threshold.
+The reference independently selects the `for` rows, then selects matching
+count-table rows per row and uses `DESCRIBE TABLE ... LINES`. Each test runs
+both methods and compares their ordered alerts, then compares to the
+interpreter. Derived cases put the count at `n` and `n + 1` for `more_than`,
+or `m - 1` and `m` for `at_least`, and each case must change under a mutant of
+its threshold. Per-comparison cases include enough other matching rows for
+their own comparison to decide the threshold.
+Case generation is bounded to 64 counted rows so a valid INT4 threshold cannot
+allocate billions of test rows; larger boundaries are reported as skipped in
+`cases` and need hand-written examples.
+
+The demo is `src/l2demo/ship_voyage_limit.l2.yaml`: zero, two, three and five
+future voyages, a ship excluded by `when`, and a cross-ship case that exposes a
+missing ON equality.
+
 ## Not yet
 
-Parameters other than `$date`, aggregates, a condition on the outer table inside `where` beyond
+Parameters other than `$date`, `fewer_than` / `exactly` and other zero-count comparisons (which need an outer join or NOT EXISTS),
+`sum` / `min` / `max`, grouping by fields of the counted table, `limit` under `all` / `any`, a condition on the outer table inside `where` beyond
 the join (a comparison of an `exists` field with an outer field is allowed; one of only outer
 fields is not), a `for` and an `exists` on the same table, a join without an equality, an
 equality under `or` as a join, a clause of `all` or `any` naming another clause, `require` with
