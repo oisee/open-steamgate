@@ -497,9 +497,16 @@ CLASS ltcl_readers DEFINITION FOR TESTING DURATION MEDIUM RISK LEVEL HARMLESS FI
     METHODS assert_contract
       IMPORTING ii_factory TYPE REF TO zif_osd_sxml_factory.
     METHODS harness_fails_a_bad_reader FOR TESTING RAISING cx_static_check.
+    METHODS streaming FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_readers IMPLEMENTATION.
+
+  METHOD streaming.
+    DATA li_factory TYPE REF TO zif_osd_sxml_factory.
+    CREATE OBJECT li_factory TYPE zcl_osd_sxml_factory_stream.
+    assert_contract( li_factory ).
+  ENDMETHOD.
 
   METHOD assert_contract.
     DATA lo_contract TYPE REF TO zcl_osd_sxml_contract.
