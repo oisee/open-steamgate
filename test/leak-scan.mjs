@@ -96,6 +96,7 @@ describe("leak scanner", () => {
       ["a name that is not a string", {k: [42]}],
       ["a name too short to scan", {k: ["ab"]}],
       ["a category without names", {k: []}],
+      ["no categories at all", {}],
     ]) {
       it(`refuses a list with ${label}, without printing it`, () => {
         const broken = mkdtempSync(join(tmpdir(), "osd-leak-shape-"));

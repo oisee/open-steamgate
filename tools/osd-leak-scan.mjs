@@ -193,6 +193,7 @@ function identifiers(root) {
     process.exit(1);
   };
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) bad("top level", "not an object of categories");
+  if (Object.keys(raw).length === 0) bad("top level", "no categories, so nothing would be checked");
   const list = [];
   Object.entries(raw).forEach(([kind, values], i) => {
     if (/[\r\n]/.test(kind)) bad(`category #${i + 1}`, "a line break in its name");
