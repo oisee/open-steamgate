@@ -2497,9 +2497,7 @@ function activate(context) {
   // Q2b "Runner" (docs/vscode-extension.md): a lens over each
   // `<set>_get_entityset` / `<set>_get_entity` method of a SEGW _DPC_EXT
   // class, and the command it (and F8, above) both call.
-  context.subscriptions.push(vscode.commands.registerCommand("osd.callEntitySet", (args) => callEntitySet(args, output)));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.callEntitySetWithDebugger", (args) =>
-    args === undefined ? run(output, classrunOutput, true) : callEntitySet({...args, withDebugger: true}, output)));
+  registerEntitySetCommands(context, output, classrunOutput, controller);
   context.subscriptions.push(entitySetLensProvider(output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.httpLensInfo", () => {}));
   // gui-reports spike: "Open in VS Code" for a converted report, the same
@@ -2900,10 +2898,10 @@ async function activateCurrent(diagnostics, output) {
 // below), reach a real action; everything else answers the text of the
 // server work its turn would add.
 
-async function requireDebugSystem(output, action) {
-  const attached = await activeController?.attachSystemDebugger({onDemand: true});
+async function requireDebugSystem(output, action, controller = activeController) {
+  const attached = await controller?.attachSystemDebugger({onDemand: true});
   if (attached === true) return true;
-  const reason = activeController?.debuggerError ?? "the system is not running; start it with osd: Start";
+  const reason = controller?.debuggerError ?? "the system is not running; start it with osd: Start";
   const message = `${action} with debugger: ${reason}`;
   output.appendLine(`osd debugger: ${message}`);
   vscode.window.showWarningMessage(`osd: ${message}`);
@@ -3412,10 +3410,23 @@ function progLensProvider() {
  *  to (lib.js `keyOf`, off `__metadata.uri` -- this client does not
  *  otherwise know the entity type's key properties), then calls the one
  *  entity. Cancelling the prompt leaves nothing called. */
-async function callEntitySet({service, set, kind, file, withDebugger = false}, output) {
-  if (withDebugger && !(await requireDebugSystem(output, "Call EntitySet"))) return;
+function registerEntitySetCommands(context, output, classrunOutput, controller) {
+  context.subscriptions.push(vscode.commands.registerCommand("osd.callEntitySet", (args) => callEntitySet(args, output, controller)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.callEntitySetWithDebugger", (args) =>
+    args === undefined ? run(output, classrunOutput, true) : callEntitySet({...args, withDebugger: true}, output, controller)));
+}
+
+async function callEntitySet({service, set, kind, file, withDebugger = false}, output, controller = activeController) {
+  const source = file ?? vscode.window.activeTextEditor?.document?.fileName;
+  if (withDebugger && !abapBreakpoints().some((bp) => source && path.resolve(bp.location.uri.fsPath) === path.resolve(source))) {
+    const choice = await vscode.window.showWarningMessage(
+      `osd: no enabled breakpoint in ${source ?? "the DPC file"}; ${set} will run without stopping`,
+      "Continue without stopping", "Cancel");
+    if (choice !== "Continue without stopping") return;
+  }
+  if (withDebugger && !(await requireDebugSystem(output, "Call EntitySet", controller))) return;
   if (withDebugger) {
-    if (!(await activeController.waitForDebuggerReady(file ?? vscode.window.activeTextEditor?.document?.fileName,
+    if (!(await controller.waitForDebuggerReady(source,
       15000, {reportMissingBreakpoint: true, output}))) {
       vscode.window.showWarningMessage(`osd: debugger or breakpoints for ${set} did not become ready within 15 s`);
       return;
@@ -4187,7 +4198,7 @@ async function deactivate() {
   await activeController?.stop();
 }
 
-module.exports = {activate, deactivate, runReportInTerminal, SystemController, classrunObject, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
+module.exports = {activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
   httpLensProvider, openEntitySetMethod, statusBar,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,

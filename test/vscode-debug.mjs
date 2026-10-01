@@ -455,6 +455,64 @@ describe("VS Code debugger transport: serving DPC after earlier activity", funct
 });
 
 describe("VS Code controller: Attach and call across a generation switch", function () {
+  it("asks before a debugger call with no enabled DPC breakpoint, and honours both choices", async () => {
+    const commands = new Map();
+    const warnings = [];
+    const requests = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      requests.push(url);
+      return {status: 200, text: async () => JSON.stringify({d: {results: []}})};
+    };
+    class SourceBreakpoint {
+      constructor(file, enabled) { this.enabled = enabled; this.location = {uri: {scheme: "file", fsPath: file}}; }
+    }
+    const api = {
+      SourceBreakpoint,
+      TreeItem: class {},
+      EventEmitter: class { event = () => ({dispose() {}}); fire() {} },
+      debug: {breakpoints: [new SourceBreakpoint("/w/zcl_demo_dpc_ext.clas.abap", false)]},
+      ViewColumn: {Beside: 2},
+      commands: {registerCommand(name, handler) { commands.set(name, handler); return {dispose() {}}; }},
+      workspace: {getConfiguration: () => ({get: (_key, fallback) => fallback})},
+      window: {showWarningMessage: async (message, ...choices) => {
+        warnings.push({message, choices});
+        return warnings.length === 1 ? "Cancel" : "Continue without stopping";
+      }, createWebviewPanel: () => ({webview: {html: ""}})},
+    };
+    const require = createRequire(import.meta.url);
+    const Module = require("node:module");
+    const extensionPath = require.resolve("../editors/vscode/extension.js");
+    delete require.cache[extensionPath];
+    const originalLoad = Module._load;
+    Module._load = function (request, parent, isMain) {
+      if (request === "vscode") return api;
+      return originalLoad.call(this, request, parent, isMain);
+    };
+    let registerEntitySetCommands;
+    try { ({registerEntitySetCommands} = require(extensionPath)); }
+    finally { Module._load = originalLoad; }
+    const calls = [];
+    const controller = {attachSystemDebugger: async () => { calls.push("attach"); return true; },
+      waitForDebuggerReady: async () => { calls.push("ready"); return true; }};
+    try {
+      registerEntitySetCommands({subscriptions: []}, {appendLine() {}}, undefined, controller);
+      const command = commands.get("osd.callEntitySetWithDebugger");
+      const args = {service: "ZDEMO_SRV", set: "TravelSet", kind: "get_entityset", file: "/w/zcl_demo_dpc_ext.clas.abap"};
+      await command(args);
+      expect(requests).to.deep.equal([]);
+      expect(calls).to.deep.equal([]);
+      await command(args);
+      expect(warnings).to.have.length(2);
+      expect(warnings[0].message).to.include("no enabled breakpoint");
+      expect(warnings[0].choices).to.deep.equal(["Continue without stopping", "Cancel"]);
+      expect(calls).to.deep.equal(["attach", "ready"]);
+      expect(requests).to.have.length(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("waits for the replacement session's verified DPC breakpoint despite late old termination", async () => {
     const home = mkdtempSync(join(tmpdir(), "osd-attach-generation-"));
     const first = join(home, "build", "by-input", "first", "output");
@@ -464,6 +522,12 @@ describe("VS Code controller: Attach and call across a generation switch", funct
     symlinkSync(first, join(home, "output"), "dir");
     const listeners = {start: [], end: []};
     const events = [];
+    const commands = new Map();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      events.push(`request ${url}`);
+      return {status: 200, text: async () => JSON.stringify({d: {results: []}})};
+    };
     const file = join(home, "src", "zcl_demo_dpc_ext.clas.abap");
     class SourceBreakpoint {
       constructor() { this.enabled = true; this.location = {uri: {scheme: "file", fsPath: file}}; }
@@ -472,8 +536,13 @@ describe("VS Code controller: Attach and call across a generation switch", funct
       SourceBreakpoint,
       EventEmitter: class { event = () => ({dispose() {}}); fire() {} },
       TreeItem: class {},
-      workspace: {onDidChangeWorkspaceFolders: () => ({dispose() {}})},
-      window: {setStatusBarMessage: () => ({dispose() {}})},
+      ViewColumn: {Beside: 2},
+      commands: {registerCommand(name, handler) { commands.set(name, handler); return {dispose() {}}; }},
+      workspace: {onDidChangeWorkspaceFolders: () => ({dispose() {}}),
+        getConfiguration: () => ({get: (_key, fallback) => fallback})},
+      window: {setStatusBarMessage: () => ({dispose() {}}),
+        showErrorMessage: (message) => { throw new Error(message); },
+        createWebviewPanel: () => ({webview: {html: ""}})},
       debug: {
         breakpoints: [new SourceBreakpoint()],
         onDidStartDebugSession(fn) { listeners.start.push(fn); return {dispose() {}}; },
@@ -498,7 +567,8 @@ describe("VS Code controller: Attach and call across a generation switch", funct
       return originalLoad.call(this, request, parent, isMain);
     };
     let SystemController;
-    try { ({SystemController} = require(extensionPath)); }
+    let registerEntitySetCommands;
+    try { ({SystemController, registerEntitySetCommands} = require(extensionPath)); }
     finally { Module._load = originalLoad; }
     try {
       const output = [];
@@ -507,27 +577,36 @@ describe("VS Code controller: Attach and call across a generation switch", funct
         osdHome: home, storageDir: home, layers: []};
       controller.debuggerState = {systemPort: 9401};
       controller.debuggerOutputPattern = `${first}/**/*.mjs`;
+      registerEntitySetCommands({subscriptions: []}, {appendLine: (line) => output.push(line)}, undefined, controller);
       const old = {id: "old", name: "OSD: ABAP (9401)",
         getDebugProtocolBreakpoint: async () => ({verified: true})};
       listeners.start.forEach((fn) => fn(old));
       rmSync(join(home, "output"));
       symlinkSync(second, join(home, "output"), "dir");
-      expect(await controller.attachSystemDebugger({onDemand: true})).to.equal(true);
+      const command = commands.get("osd.callEntitySetWithDebugger");
+      expect(command).to.be.a("function");
+      let finished = false;
+      const calling = command({service: "ZDEMO_SRV", set: "TravelSet", kind: "get_entityset", file})
+        .then(() => { finished = true; });
+      await new Promise((resolve) => setTimeout(resolve, 30));
       expect(events).to.deep.equal([`stop old`, `start ${second}/**/*.mjs`]);
       // The old DAP marker was verified, but the serving generation changed.
-      let ready = false;
-      const waiting = controller.waitForDebuggerReady(file, 500).then((value) => { ready = value; return value; });
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      expect(ready).to.equal(false);
+      expect(finished).to.equal(false);
       const replacement = {id: "new", name: old.name,
-        getDebugProtocolBreakpoint: async () => ({verified: true})};
+        getDebugProtocolBreakpoint: async () => ({verified: false})};
       listeners.start.forEach((fn) => fn(replacement));
       listeners.end.forEach((fn) => fn(old));
-      expect(await waiting).to.equal(true);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(events.some((event) => event.startsWith("request ")), "unverified replacement must not receive the call").to.equal(false);
+      replacement.getDebugProtocolBreakpoint = async () => ({verified: true});
+      await calling;
+      expect(events.at(-1)).to.equal("request http://localhost:3030/sap/opu/odata/sap/ZDEMO_SRV/TravelSet?$top=20&$format=json");
+      expect(finished).to.equal(true);
       expect(controller.activeSystemSessionId).to.equal("new");
       expect(controller.debuggerState.systemPort).to.equal(9401);
       expect(output).to.deep.equal([]);
     } finally {
+      globalThis.fetch = originalFetch;
       rmSync(home, {recursive: true, force: true});
     }
   });
