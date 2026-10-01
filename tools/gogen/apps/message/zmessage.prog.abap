@@ -2,7 +2,7 @@ REPORT zmessage.
 PARAMETERS p_mode(1) DEFAULT 'E'.
 
 START-OF-SELECTION.
-  WRITE / 'before'.
+  WRITE: / |mode { p_mode }, then|, 'before'.
   PERFORM fail.
   WRITE / 'after'.
 

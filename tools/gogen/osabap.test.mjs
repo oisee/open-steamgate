@@ -384,7 +384,8 @@ test("an E, A, W or X message ends the run with status 1, I, S and DISPLAY LIKE 
     const result = run(["--mode", mode]);
     assert.equal(result.status, status, `${mode}: ${result.stderr}`);
     assert.equal(result.stderr, text + "\n", mode);
-    assert.equal(result.stdout, stdout, mode);
+    // the chained WRITE keeps the comma inside its template as one operand
+    assert.equal(result.stdout, `mode ${mode}, then ` + stdout, mode);
   }
 });
 
