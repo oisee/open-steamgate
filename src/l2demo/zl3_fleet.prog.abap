@@ -6,13 +6,17 @@ REPORT zl3_fleet.
 PARAMETERS p_rule TYPE c LENGTH 60 LOWER CASE.
 PARAMETERS p_date TYPE d.
 PARAMETERS p_run TYPE c LENGTH 32.
+PARAMETERS p_bind TYPE c LENGTH 255 LOWER CASE.
 
 START-OF-SELECTION.
   DATA ls_rule TYPE zcl_l3_fleet=>ty_rule.
+  DATA lv_bind TYPE string.
+  lv_bind = p_bind.
   ls_rule = zcl_l3_fleet=>run_rule(
     iv_rule = p_rule
     iv_date = p_date
-    iv_run = p_run ).
+    iv_run = p_run
+    iv_bind = lv_bind ).
   WRITE: / ls_rule-rule, ls_rule-status, ls_rule-alerts.
   IF ls_rule-status <> 'DONE'.
     MESSAGE 'The rule did not run to the end; see the list' TYPE 'E'.

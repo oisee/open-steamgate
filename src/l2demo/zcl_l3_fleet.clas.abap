@@ -36,14 +36,18 @@ CLASS zcl_l3_fleet DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_rule_6 TYPE zosd_l3_alert-rule_name VALUE 'ship-cargo-limit'.
     CONSTANTS c_hash_6 TYPE zosd_l3_alert-model_hash VALUE 'sha256:6dc361bcc17b388fe102c33fead3d7dd38d6b4993437e78ec508424e0e0f50a5'.
     " not run: ship-max-cargo (src/l2demo/ship_max_cargo.l2.yaml), enabled: false in the set
+    " iv_bind: the variant of each port for this run, "port=variant,port=variant";
+    " a port it does not name keeps the manifest's binding
     CLASS-METHODS run
       IMPORTING iv_date TYPE d
                 iv_mode TYPE c DEFAULT 'S'
+                iv_bind TYPE string OPTIONAL
       RETURNING VALUE(rs_result) TYPE ty_result.
     CLASS-METHODS run_rule
       IMPORTING iv_rule TYPE csequence
                 iv_date TYPE d
                 iv_run TYPE csequence
+                iv_bind TYPE string OPTIONAL
       RETURNING VALUE(rs_rule) TYPE ty_rule.
     CLASS-METHODS collect
       IMPORTING is_result TYPE ty_result
@@ -58,10 +62,12 @@ CLASS zcl_l3_fleet DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_file TYPE csequence
                 iv_line TYPE i
                 it_alerts TYPE string_table
+                iv_bind TYPE string OPTIONAL
       CHANGING cs_rule TYPE ty_rule.
     CLASS-METHODS submit
       IMPORTING iv_date TYPE d
                 iv_run TYPE csequence
+                iv_bind TYPE string OPTIONAL
       CHANGING cs_rule TYPE ty_rule.
 ENDCLASS.
 
@@ -72,6 +78,16 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
     DATA lt_rules TYPE tt_rule.
     DATA ls_rule TYPE ty_rule.
     DATA lv_stamp TYPE timestampl.
+    DATA lv_parallel TYPE abap_bool.
+    DATA li_src_1 TYPE REF TO zif_l3_fleet_ships.
+    DATA lv_swap_1 TYPE abap_bool.
+    DATA lt_keep_1 TYPE zif_l3_fleet_ships=>tt_rows.
+    DATA lt_scope_1 TYPE zif_l3_fleet_ships=>tt_rows.
+    FIELD-SYMBOLS <ls_row_1> TYPE zosd_l2_ship.
+    IF iv_mode = c_parallel.
+      lv_parallel = abap_true.
+    ENDIF.
+    zcl_l3_fleet_ports=>check( iv_bind = iv_bind iv_parallel = lv_parallel ).
     rs_result-set_name = c_set.
     rs_result-mode = iv_mode.
     rs_result-check_date = iv_date.
@@ -82,19 +98,39 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
         rs_result-run_id = lv_stamp.
     ENDTRY.
     lt_rules = rules( ).
+    " a source that is not live replaces the rows of zosd_l2_ship for this run:
+    " the table's own rows are kept, the source's rows stand in their place,
+    " and the rules read them as they read the table; the rows come back below
+    li_src_1 = zcl_l3_fleet_ports=>get_ships( zcl_l3_fleet_ports=>variant( iv_port = 'ships' iv_bind = iv_bind ) ).
+    IF li_src_1->live( ) = abap_false.
+      lv_swap_1 = abap_true.
+      SELECT * FROM zosd_l2_ship INTO TABLE lt_keep_1.
+      lt_scope_1 = li_src_1->read( ).
+      LOOP AT lt_scope_1 ASSIGNING <ls_row_1>.
+        <ls_row_1>-mandt = sy-mandt.
+      ENDLOOP.
+      DELETE FROM zosd_l2_ship.
+      INSERT zosd_l2_ship FROM TABLE lt_scope_1.
+    ENDIF.
     LOOP AT lt_rules INTO ls_rule.
       IF iv_mode = c_parallel.
         submit( EXPORTING iv_date = rs_result-check_date
                           iv_run = rs_result-run_id
+                          iv_bind = iv_bind
                 CHANGING cs_rule = ls_rule ).
       ELSE.
         ls_rule = run_rule( iv_rule = ls_rule-rule
                             iv_date = rs_result-check_date
-                            iv_run = rs_result-run_id ).
+                            iv_run = rs_result-run_id
+                            iv_bind = iv_bind ).
         rs_result-alerts = rs_result-alerts + ls_rule-alerts.
       ENDIF.
       APPEND ls_rule TO rs_result-rules.
     ENDLOOP.
+    IF lv_swap_1 = abap_true.
+      DELETE FROM zosd_l2_ship.
+      INSERT zosd_l2_ship FROM TABLE lt_keep_1.
+    ENDIF.
   ENDMETHOD.
 
   METHOD rules.
@@ -139,6 +175,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
                          iv_file = 'src/l2demo/maintenance_ship.l2.yaml'
                          iv_line = 12
                          it_alerts = lt_alerts
+                         iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_2.
         rs_rule-model_hash = c_hash_2.
@@ -150,6 +187,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
                          iv_file = 'src/l2demo/grounded_ship_crew.l2.yaml'
                          iv_line = 13
                          it_alerts = lt_alerts
+                         iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_3.
         rs_rule-model_hash = c_hash_3.
@@ -161,6 +199,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
                          iv_file = 'src/l2demo/ship_captain.l2.yaml'
                          iv_line = 12
                          it_alerts = lt_alerts
+                         iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_4.
         rs_rule-model_hash = c_hash_4.
@@ -172,6 +211,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
                          iv_file = 'src/l2demo/ship_voyage_limit.l2.yaml'
                          iv_line = 10
                          it_alerts = lt_alerts
+                         iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_5.
         rs_rule-model_hash = c_hash_5.
@@ -183,6 +223,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
                          iv_file = 'src/l2demo/ship_min_crew.l2.yaml'
                          iv_line = 10
                          it_alerts = lt_alerts
+                         iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_6.
         rs_rule-model_hash = c_hash_6.
@@ -194,6 +235,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
                          iv_file = 'src/l2demo/ship_cargo_limit.l2.yaml'
                          iv_line = 9
                          it_alerts = lt_alerts
+                         iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN OTHERS.
         rs_rule-status = 'UNKNOWN'.
@@ -201,12 +243,15 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD write.
-    " idempotent per (set, rule, model hash, check date): MODIFY on the key,
-    " and the rows past the last alert of this run go, so a rerun or a
-    " retried job leaves exactly this run's alerts under this rule version;
-    " the rows of other versions and dates stay
+    " the rows of one rule version and date go through the alert sink the run
+    " is bound to (alerts); the log variant is idempotent per (set,
+    " rule, model hash, check date), see its class
     DATA ls_row TYPE zosd_l3_alert.
+    DATA lt_rows TYPE zif_l3_fleet_alerts=>tt_rows.
+    DATA ls_group TYPE zif_l3_fleet_alerts=>ty_group.
+    DATA li_sink TYPE REF TO zif_l3_fleet_alerts.
     DATA lv_alert TYPE string.
+    DATA lv_count TYPE i.
     ls_row-set_name = c_set.
     ls_row-rule_name = cs_rule-rule.
     ls_row-model_hash = cs_rule-model_hash.
@@ -219,18 +264,17 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
     LOOP AT it_alerts INTO lv_alert.
       ls_row-alert_seq = sy-tabix.
       ls_row-alert_text = lv_alert.
-      MODIFY zosd_l3_alert FROM ls_row.
-      IF sy-subrc <> 0.
-        cs_rule-failed = cs_rule-failed + 1.
-      ENDIF.
+      APPEND ls_row TO lt_rows.
     ENDLOOP.
-    cs_rule-alerts = lines( it_alerts ).
-    DELETE FROM zosd_l3_alert
-      WHERE set_name = c_set
-        AND rule_name = cs_rule-rule
-        AND model_hash = cs_rule-model_hash
-        AND check_date = iv_date
-        AND alert_seq > cs_rule-alerts.
+    ls_group-set_name = c_set.
+    ls_group-rule_name = cs_rule-rule.
+    ls_group-model_hash = cs_rule-model_hash.
+    ls_group-check_date = iv_date.
+    li_sink = zcl_l3_fleet_ports=>get_alerts( zcl_l3_fleet_ports=>variant( iv_port = 'alerts' iv_bind = iv_bind ) ).
+    lv_count = li_sink->put( it_rows = lt_rows
+                             is_group = ls_group ).
+    cs_rule-alerts = lines( lt_rows ).
+    cs_rule-failed = cs_rule-alerts - lv_count.
     IF cs_rule-failed = 0.
       cs_rule-status = 'DONE'.
     ELSE.
@@ -261,6 +305,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
       WITH p_rule = cs_rule-rule
       WITH p_date = iv_date
       WITH p_run = iv_run
+      WITH p_bind = iv_bind
       VIA JOB lv_jobname NUMBER lv_jobcount
       AND RETURN.
     CALL FUNCTION 'JOB_CLOSE'

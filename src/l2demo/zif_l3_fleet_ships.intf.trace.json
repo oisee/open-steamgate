@@ -1,0 +1,134 @@
+{
+ "generator": "dsl-l3",
+ "set": "src/l2demo/fleet.l3.yaml",
+ "template": "recipes/l3-ports/iface-source.tpl",
+ "model": "sha256:3c93868f0487de5f1fb019a89fbf2f062bb14c9bf8e3d037299609fa94f2c308",
+ "lines": [
+  {
+   "line": 1,
+   "template_line": 1,
+   "path": "/source",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 2,
+   "template_line": 2,
+   "path": "/port",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 3,
+   "template_line": 3,
+   "path": "/iface",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 4,
+   "template_line": 4,
+   "path": "/table",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 5,
+   "template_line": 5,
+   "path": "/table",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 6,
+   "template_line": 6,
+   "path": "/",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 7,
+   "template_line": 7,
+   "path": "/",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 8,
+   "template_line": 8,
+   "path": "/",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 9,
+   "template_line": 9,
+   "path": "/",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 10,
+   "template_line": 10,
+   "path": "/",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 11,
+   "template_line": 11,
+   "path": "/",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 12,
+   "template_line": 12,
+   "path": "/",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 13,
+   "template_line": 13,
+   "path": "/",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 14,
+   "template_line": 14,
+   "path": "/",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 15,
+   "template_line": 15,
+   "path": "/",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 16,
+   "template_line": 16,
+   "path": "/",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 17,
+   "template_line": 17,
+   "path": "/",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  },
+  {
+   "line": 18,
+   "template_line": 18,
+   "path": "/",
+   "node": "set/fleet/port/ships",
+   "set_line": 22
+  }
+ ]
+}

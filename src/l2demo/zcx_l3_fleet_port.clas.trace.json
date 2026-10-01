@@ -1,7 +1,7 @@
 {
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet.l3.yaml",
- "template": "recipes/l3-job/template.tpl",
+ "template": "recipes/l3-ports/exception.tpl",
  "model": "sha256:ae7cf63022f723b619f2468a18a871af7f90d2733ddc19318dcf0c295b5cf56d",
  "rules": {
   "maintenance-ship-no-future-voyage": {
@@ -39,28 +39,28 @@
   {
    "line": 1,
    "template_line": 1,
-   "path": "/report",
+   "path": "/source",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 2,
    "template_line": 2,
-   "path": "/source",
+   "path": "/set",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 3,
    "template_line": 3,
-   "path": "/set",
+   "path": "/exception",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 4,
    "template_line": 4,
-   "path": "/class",
+   "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
@@ -116,7 +116,7 @@
   {
    "line": 12,
    "template_line": 12,
-   "path": "/class",
+   "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
@@ -137,7 +137,7 @@
   {
    "line": 15,
    "template_line": 15,
-   "path": "/class",
+   "path": "/exception",
    "node": "set/fleet",
    "set_line": 6
   },
@@ -193,6 +193,27 @@
   {
    "line": 23,
    "template_line": 23,
+   "path": "/",
+   "node": "set/fleet",
+   "set_line": 6
+  },
+  {
+   "line": 24,
+   "template_line": 24,
+   "path": "/",
+   "node": "set/fleet",
+   "set_line": 6
+  },
+  {
+   "line": 25,
+   "template_line": 25,
+   "path": "/",
+   "node": "set/fleet",
+   "set_line": 6
+  },
+  {
+   "line": 26,
+   "template_line": 26,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6

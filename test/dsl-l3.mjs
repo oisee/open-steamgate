@@ -27,6 +27,8 @@ const RUNNER = "zcl_l3_fleet";
 const REPORT = "zl3_fleet";
 const SET_TEXT = readFileSync(SET, "utf8");
 const DATE = "20261001";
+// every file the set generates beside the rules: the runner, the report, the ports
+const GENERATED = /^(zcl_l3_fleet|zl3_fleet|zif_l3_fleet_|zcx_l3_fleet_port)[a-z_]*\.(clas|prog|intf)\.(abap|xml|trace\.json)$/;
 const setLine = (re) => SET_TEXT.split("\n").findIndex((l) => re.test(l)) + 1;
 
 // Rows that make six of the set's rules alert on DATE: a ship in maintenance
@@ -60,13 +62,15 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
     it("and the check notices one changed byte", async () => {
       const copy = join(scratch, "drift");
       mkdirSync(copy);
-      for (const f of [`${RUNNER}.clas.abap`, `${RUNNER}.clas.xml`, `${RUNNER}.clas.trace.json`,
-        `${REPORT}.prog.abap`, `${REPORT}.prog.xml`, `${REPORT}.prog.trace.json`]) {
-        writeFileSync(join(copy, f), readFileSync(join(OUT, f)));
-      }
+      for (const f of readdirSync(OUT).filter((n) => GENERATED.test(n))) writeFileSync(join(copy, f), readFileSync(join(OUT, f)));
       const file = join(copy, `${RUNNER}.clas.abap`);
-      writeFileSync(file, readFileSync(file, "utf8").replace("MODIFY zosd_l3_alert", "INSERT zosd_l3_alert"));
+      writeFileSync(file, readFileSync(file, "utf8").replace("DELETE FROM zosd_l2_ship.", "DELETE FROM zosd_l2_crew."));
       expect(await checkSet(SET, copy)).to.deep.equal([`${RUNNER}.clas.abap: differs from a fresh build`]);
+      // and in a port's variant, which the runner no longer holds
+      const log = join(copy, "zcl_l3_fleet_alerts_log.clas.abap");
+      writeFileSync(file, readFileSync(join(OUT, `${RUNNER}.clas.abap`)));
+      writeFileSync(log, readFileSync(log, "utf8").replace("MODIFY zosd_l3_alert", "INSERT zosd_l3_alert"));
+      expect(await checkSet(SET, copy)).to.deep.equal(["zcl_l3_fleet_alerts_log.clas.abap: differs from a fresh build"]);
     });
 
     it("the compiler knows no domain words", () => {
@@ -157,6 +161,91 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
     });
   });
 
+  describe("ports in the manifest", () => {
+    // a copy of the manifest in its own folder, its rule paths made relative to it, one text replaced
+    let n = 0;
+    const portManifest = (from, to, files = {}) => {
+      expect(SET_TEXT, `the set has ${JSON.stringify(from)}`).to.include(from);
+      const dir = join(scratch, `ports-${n++}`);
+      mkdirSync(dir);
+      for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+      const rel = (f) => relative(dir, join(process.cwd(), OUT, f)).split(sep).join("/");
+      const file = join(dir, "fleet.l3.yaml");
+      writeFileSync(file, SET_TEXT.replace(/rule: ([a-z_]+\.l2\.yaml)/g, (m, f) => `rule: ${rel(f)}`).replace(from, to));
+      return {file, dir, text: readFileSync(file, "utf8")};
+    };
+    const where = (file) => relative(process.cwd(), file).split(sep).join("/");
+    const lineIn = (text, re) => text.split("\n").findIndex((l) => re.test(l)) + 1;
+    const HAND = "      table: generated\n      capture: generated\n";
+    const withHand = HAND + "      hand: zcl_hand_ships\n";
+    const handClass = (methods = ["read", "live", "volatile"], interfaces = "    INTERFACES zif_l3_fleet_ships.\n") => `CLASS zcl_hand_ships DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+${interfaces}ENDCLASS.
+
+CLASS zcl_hand_ships IMPLEMENTATION.
+${methods.map((m) => `  METHOD zif_l3_fleet_ships~${m}.\n  ENDMETHOD.\n`).join("\n")}ENDCLASS.
+`;
+    const refusedAt = (m, re, line, fileOf = m.file) => {
+      let error;
+      try { compileSet(m.file); } catch (e) { error = e; }
+      expect(error, "an error").to.be.instanceOf(SetError);
+      expect(error.message.startsWith(`${where(fileOf)}:${line}: `), error.message).to.equal(true);
+      expect(error.message.slice(`${where(fileOf)}:${line}: `.length)).to.match(re);
+    };
+
+    it("a hand-written variant is a class that implements the port's interface; the factory creates it", async () => {
+      const m = portManifest(HAND, withHand, {"zcl_hand_ships.clas.abap": handClass()});
+      const model = compileSet(m.file);
+      expect(model.ports[0].variants.map((v) => [v.name, v.generated])).to.deep.equal([["table", true], ["capture", true], ["hand", false]]);
+      const {files} = await buildSet(m.file, join(m.dir, "out"));
+      expect(files["zcl_l3_fleet_ports.clas.abap"]).to.include("CREATE OBJECT ri_port TYPE zcl_hand_ships.");
+      expect(Object.keys(files).filter((f) => f.includes("hand")), "no class is generated for it").to.deep.equal([]);
+    });
+
+    it("a class that lacks a method of the port's signature is refused at its INTERFACES line, in its own file", () => {
+      const m = portManifest(HAND, withHand, {"zcl_hand_ships.clas.abap": handClass(["read", "volatile"])});
+      const classFile = join(m.dir, "zcl_hand_ships.clas.abap");
+      refusedAt(m, /^class zcl_hand_ships does not implement zif_l3_fleet_ships~live; the port's signature is read, live, volatile/,
+        lineIn(readFileSync(classFile, "utf8"), /INTERFACES/), classFile);
+    });
+
+    it("a class built for another interface is refused at its CLASS line", () => {
+      const m = portManifest(HAND, withHand, {"zcl_hand_ships.clas.abap": handClass(["read", "live", "volatile"], "    INTERFACES zif_l3_fleet_alerts.\n")});
+      const classFile = join(m.dir, "zcl_hand_ships.clas.abap");
+      refusedAt(m, /^class zcl_hand_ships does not implement zif_l3_fleet_ships/, 1, classFile);
+    });
+
+    it("a class that is not there is refused at the variant's manifest line", () => {
+      const m = portManifest(HAND, withHand);
+      refusedAt(m, /^class zcl_hand_ships of variant hand is not found/, lineIn(m.text, /hand: zcl_hand_ships/));
+    });
+
+    it("a generated variant a kind does not have, and a binding to a variant that is not there, are refused at their lines", () => {
+      let m = portManifest("    variants:\n      table: generated", "    variants:\n      log: generated\n      table: generated");
+      refusedAt(m, /^a generated variant of a source is one of table, dummy, capture; log needs a class of its own/, lineIn(m.text, /log: generated/));
+      m = portManifest("  ships: table\n", "  ships: nowhere\n");
+      refusedAt(m, /^binding ships: "nowhere" is not a variant of the port \(table, capture\)/, lineIn(m.text, /ships: nowhere/));
+      m = portManifest("  alerts: log\n", "  alerts: log\n  audit: log\n");
+      refusedAt(m, /^binding audit names no port of the set/, lineIn(m.text, /audit: log/));
+      m = portManifest("  ships: table\n", "");
+      refusedAt(m, /^port ships has no binding/, lineIn(m.text, /^bindings:/));
+    });
+
+    it("a sink that is not the alert log, a second sink, and a field the table lacks are refused", () => {
+      let m = portManifest("    key: ship_id", "    key: no_such");
+      refusedAt(m, /^ZOSD_L2_SHIP has no field NO_SUCH/, lineIn(m.text, /key: no_such/));
+      m = portManifest("    group: [set_name, rule_name, model_hash, check_date]", "    group: [set_name, rule_name]");
+      refusedAt(m, /^group of sink alerts is set_name, rule_name, model_hash, check_date/, lineIn(m.text, /group:/));
+      m = portManifest("bindings:\n", "  more:\n    kind: sink\n    table: ZOSD_L3_ALERT\n    group: [set_name, rule_name, model_hash, check_date]\n    seq: alert_seq\n    variants:\n      dummy: generated\nbindings:\n  more: dummy\n");
+      refusedAt(m, /^a set has exactly one sink/, lineIn(m.text, /^ports:/));
+    });
+
+    it("a generated name over 30 characters is refused, naming the name", () => {
+      const m = portManifest("  ships:\n    kind: source", "  shipsandmore:\n    kind: source");
+      refusedAt(m, /^the generated name zcl_l3_fleet_shipsandmore_table has 31 characters, a class or interface name has at most 30/, lineIn(m.text, /table: generated/));
+    });
+  });
+
   describe("the trace", () => {
     const trace = JSON.parse(readFileSync(join(OUT, `${RUNNER}.clas.trace.json`), "utf8"));
     const source = readFileSync(join(OUT, `${RUNNER}.clas.abap`), "utf8").split("\n");
@@ -181,6 +270,69 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
       expect(header.set_line).to.equal(setLine(/^set:/));
       const date = trace.lines.find((e) => /rs_result-check_date = iv_date\./.test(source[e.line - 1]));
       expect(date.set_line).to.equal(setLine(/^date:/));
+    });
+
+    it("every line of the ports' interfaces, variants, factory and exception traces to a manifest line", () => {
+      const files = readdirSync(OUT).filter((f) => /^(zif_l3_fleet_|zcx_l3_fleet_port|zcl_l3_fleet_(ports|ships|alerts))[a-z_]*\.(clas|intf)\.abap$/.test(f));
+      expect(files.sort()).to.deep.equal(["zcl_l3_fleet_alerts_capture.clas.abap", "zcl_l3_fleet_alerts_dummy.clas.abap", "zcl_l3_fleet_alerts_log.clas.abap",
+        "zcl_l3_fleet_ports.clas.abap", "zcl_l3_fleet_ships_capture.clas.abap", "zcl_l3_fleet_ships_table.clas.abap",
+        "zcx_l3_fleet_port.clas.abap", "zif_l3_fleet_alerts.intf.abap", "zif_l3_fleet_ships.intf.abap"]);
+      const yamlLines = SET_TEXT.split("\n");
+      const portsAt = setLine(/^ports:/);
+      for (const f of files) {
+        const text = readFileSync(join(OUT, f), "utf8").split("\n");
+        const t = JSON.parse(readFileSync(join(OUT, f.replace(/\.abap$/, ".trace.json")), "utf8"));
+        expect(t.lines.map((l) => l.line), f).to.deep.equal(text.slice(0, -1).map((_, i) => i + 1));
+        for (const entry of t.lines) {
+          expect(entry.set_line, `${f}:${entry.line}`).to.be.within(/^zcx_|_ports\./.test(f) ? setLine(/^set:/) : portsAt, yamlLines.length);
+          expect(entry.node, `${f}:${entry.line}`).to.match(/^set\/fleet(\/|$)/);
+        }
+      }
+    });
+
+    it("a port's lines trace to the port's line, a variant's to the variant's, the default binding to its binding line", () => {
+      const lineOf = (file, re) => {
+        const text = readFileSync(join(OUT, file), "utf8").split("\n");
+        const t = JSON.parse(readFileSync(join(OUT, file.replace(/\.abap$/, ".trace.json")), "utf8"));
+        const i = text.findIndex((l) => re.test(l));
+        expect(i, `${file} has ${re}`).to.be.at.least(0);
+        return t.lines[i].set_line;
+      };
+      const ships = setLine(/^  ships:/), alerts = setLine(/^  alerts:/);
+      expect(lineOf("zif_l3_fleet_ships.intf.abap", /^INTERFACE/)).to.equal(ships);
+      expect(lineOf("zif_l3_fleet_ships.intf.abap", /METHODS read/)).to.equal(ships);
+      expect(lineOf("zif_l3_fleet_alerts.intf.abap", /METHODS put/)).to.equal(alerts);
+      // the variant's line within its port: the first such line after the port's own
+      const variant = (port, name) => {
+        const from = setLine(new RegExp(`^  ${port}:`));
+        return from + SET_TEXT.split("\n").slice(from).findIndex((l) => new RegExp(`^      ${name}: generated`).test(l)) + 1;
+      };
+      expect(lineOf("zcl_l3_fleet_ships_table.clas.abap", /SELECT \* FROM/)).to.equal(variant("ships", "table"));
+      expect(lineOf("zcl_l3_fleet_ships_capture.clas.abap", /gv_reads = gv_reads \+ 1/)).to.equal(variant("ships", "capture"));
+      expect(lineOf("zcl_l3_fleet_alerts_log.clas.abap", /MODIFY zosd_l3_alert/)).to.equal(variant("alerts", "log"));
+      expect(lineOf("zcl_l3_fleet_alerts_dummy.clas.abap", /rv_count = lines/)).to.equal(variant("alerts", "dummy"));
+      expect(lineOf("zcl_l3_fleet_alerts_capture.clas.abap", /APPEND LINES OF/)).to.equal(variant("alerts", "capture"));
+      expect(lineOf("zcl_l3_fleet_ports.clas.abap", /rv_variant = 'table'/)).to.equal(setLine(/^  ships: table/));
+      expect(lineOf("zcl_l3_fleet_ports.clas.abap", /rv_variant = 'log'/)).to.equal(setLine(/^  alerts: log/));
+      expect(lineOf("zcl_l3_fleet_ports.clas.abap", /METHOD get_alerts/)).to.equal(alerts);
+      // each WHEN of a factory method is its variant's line
+      const factory = readFileSync(join(OUT, "zcl_l3_fleet_ports.clas.abap"), "utf8").split("\n");
+      const factoryTrace = JSON.parse(readFileSync(join(OUT, "zcl_l3_fleet_ports.clas.trace.json"), "utf8"));
+      const at = factory.findIndex((l) => /METHOD get_alerts/.test(l));
+      for (const name of ["log", "dummy", "capture"]) {
+        const i = factory.findIndex((l, k) => k > at && l.includes(`WHEN '${name}'.`));
+        expect(factoryTrace.lines[i].set_line, name).to.equal(variant("alerts", name));
+        expect(factoryTrace.lines[i + 1].set_line, name).to.equal(variant("alerts", name));
+      }
+    });
+
+    it("the runner's lines about a port trace to that port: the swap to the source, the write to the sink", () => {
+      const src = readFileSync(join(OUT, `${RUNNER}.clas.abap`), "utf8").split("\n");
+      const t = JSON.parse(readFileSync(join(OUT, `${RUNNER}.clas.trace.json`), "utf8"));
+      const ships = setLine(/^  ships:/), alerts = setLine(/^  alerts:/);
+      const of = (re) => src.map((l, i) => [l, t.lines[i]]).filter(([l]) => re.test(l)).map(([, e]) => e.set_line);
+      expect(of(/li_src_1|lt_keep_1|lt_scope_1|lv_swap_1/)).to.satisfy((ls) => ls.length >= 10 && ls.every((l) => l === ships));
+      expect(of(/li_sink|ls_group/)).to.satisfy((ls) => ls.length >= 8 && ls.every((l) => l === alerts));
     });
 
     it("the job report has its own trace, and names each rule's version", () => {
@@ -224,8 +376,9 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
       }
       return rows.sort(byKey);
     };
-    const runSet = (className, mode = "S") => dialogStep(() => abap.Classes[className.toUpperCase()].run({
-      iv_date: date(), iv_mode: new abap.types.Character(1).set(mode)})).then(plain);
+    const runSet = (className, mode = "S", bind) => dialogStep(() => abap.Classes[className.toUpperCase()].run({
+      iv_date: date(), iv_mode: new abap.types.Character(1).set(mode),
+      ...(bind === undefined ? {} : {iv_bind: new abap.types.String().set(bind)})})).then(plain);
     const clearLog = () => exec(["DELETE FROM zosd_l3_alert"]);
 
     before(async () => {
@@ -419,6 +572,8 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
       const deps = ["src/dsl/zosd_l3_alert.tabl.xml", "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
         "gen/gui/zcl_osd_batch_report.clas.abap",
         ...readdirSync(OUT).filter((f) => /^zosd_l2_.*\.(tabl|dtel)\.xml$/.test(f)).map((f) => join(OUT, f)),
+        // the ports the runner binds: their interfaces, variants, factory and exception
+        ...readdirSync(OUT).filter((f) => /^(zif_l3_fleet_|zcx_l3_fleet_port|zcl_l3_fleet_(ports|ships|alerts))[a-z_]*\.(clas|intf)\.(abap|xml)$/.test(f)).map((f) => join(OUT, f)),
         ...model.rules.flatMap((r) => [`${OUT}/${r.check_class}.clas.abap`, `${OUT}/${r.check_class}.clas.xml`]),
         // a mutant of the ABAP Unit proof calls the committed runner
         ...(name === RUNNER ? [] : [`${OUT}/${RUNNER}.clas.abap`, `${OUT}/${RUNNER}.clas.xml`]),
@@ -442,9 +597,26 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
       for (const f of Object.keys(files).filter((f) => f.endsWith(".clas.abap"))) {
         await import(pathToFileURL(join(out, f.replace(/\.abap$/, ".mjs"))).href);
       }
+      // the runner reaches the ports by name, and a class is registered when its module is imported
+      for (const f of readdirSync("output").filter((n) => /^(zcl_l3_fleet_(ports|ships|alerts)\w*|zcx_l3_fleet_port)\.clas\.mjs$/.test(n))) {
+        if (!Object.keys(files).includes(f.replace(/\.mjs$/, ".abap"))) await import(pathToFileURL(join(process.cwd(), "output", f)).href);
+      }
       expect(abap.Classes[name.toUpperCase()], `${name} loaded`).to.exist;
     }
-    const renamed = (name, text = readFileSync(join(OUT, `${RUNNER}.clas.abap`), "utf8")) => text.replaceAll(RUNNER, name);
+    const renamed = (name, text = readFileSync(join(OUT, `${RUNNER}.clas.abap`), "utf8")) => text.replace(new RegExp(`\\b${RUNNER}\\b`, "g"), name);
+    // a copy of a generated class of the ports under another name, one edit made, loaded beside
+    // the built system; the runner reaches the class by its name, so swapping the registry's
+    // entry for the length of `work` is what binds the copy
+    const portClass = (file) => readFileSync(join(OUT, file), "utf8");
+    const loadPortClass = async (real, name, edit) => {
+      const text = portClass(`${real}.clas.abap`).replaceAll(real, name);
+      await loadRunner(name, edit(text));
+    };
+    const withClass = async (real, name, work) => {
+      const was = abap.Classes[real.toUpperCase()];
+      abap.Classes[real.toUpperCase()] = abap.Classes[name.toUpperCase()];
+      try { return await work(); } finally { abap.Classes[real.toUpperCase()] = was; }
+    };
     const mutate = (text, from, to) => {
       expect(text, `the runner holds ${JSON.stringify(from)}`).to.include(from);
       return text.replace(from, to);
@@ -457,8 +629,9 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
       });
 
       it("INSERT instead of MODIFY: the rerun cannot rewrite its rows", async () => {
-        await loadRunner("zcl_l3_fleet_m1", mutate(renamed("zcl_l3_fleet_m1"), "      MODIFY zosd_l3_alert FROM ls_row.", "      INSERT zosd_l3_alert FROM ls_row."));
-        const {problems} = await logProblems("zcl_l3_fleet_m1");
+        await loadPortClass("zcl_l3_fleet_alerts_log", "zcl_l3_fleet_alerts_log_m1",
+          (text) => mutate(text, "      MODIFY zosd_l3_alert FROM ls_row.", "      INSERT zosd_l3_alert FROM ls_row."));
+        const {problems} = await withClass("zcl_l3_fleet_alerts_log", "zcl_l3_fleet_alerts_log_m1", () => logProblems(RUNNER));
         expect(problems.join("\n")).to.match(/status WRITE-FAILED after the rerun/);
         expect(problems.join("\n")).to.match(/still name the first run/);
       });
@@ -598,9 +771,10 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
         });
 
         it("INSERT instead of MODIFY: the first run passes, the rerun cannot rewrite its rows", async () => {
-          await loadRunner("zcl_l3_fleet_pm2", mutate(renamed("zcl_l3_fleet_pm2"), "      MODIFY zosd_l3_alert FROM ls_row.", "      INSERT zosd_l3_alert FROM ls_row."));
+          await loadPortClass("zcl_l3_fleet_alerts_log", "zcl_l3_fleet_alerts_log_pm2",
+            (text) => mutate(text, "      MODIFY zosd_l3_alert FROM ls_row.", "      INSERT zosd_l3_alert FROM ls_row."));
           const local = await proofClass();
-          const failures = await withRunner("zcl_l3_fleet_pm2", async () => ({
+          const failures = await withClass("zcl_l3_fleet_alerts_log", "zcl_l3_fleet_alerts_log_pm2", async () => ({
             mode_s: await runMethod(local, "mode_s"), rerun: await runMethod(local, "rerun")}));
           expect(failures.mode_s).to.equal(undefined);
           expect(failures.rerun).to.match(/^the rerun: every rule DONE expected, got L3_FLEET_01 .* WRITE-FAILED ;/);
@@ -622,6 +796,208 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
           expect(ours().seed).to.equal(0);
           await exec([`DELETE FROM zosd_l3_alert WHERE check_date = '${CHECK_DATE}'`]);
         });
+      });
+    });
+
+    // ---- ports and adapters (docs/dsl-l3.md) ----------------------------------------------
+    describe("ports and adapters: bindings are data, a variant is chosen per run", () => {
+      const PORTS = "zcl_l3_fleet_ports";
+      const portsText = readFileSync(join(OUT, `${PORTS}.clas.abap`), "utf8");
+      const CAPTURE = "ZCL_L3_FLEET_ALERTS_CAPTURE";
+      const SHIPS = "ZCL_L3_FLEET_SHIPS_CAPTURE";
+      const nameOf = (r) => ({set: r.set_name, rule: r.rule_name, hash: r.model_hash, date: r.check_date,
+        seq: Number(r.alert_seq), text: r.alert_text, file: r.rule_file, line: Number(r.rule_line), class: r.rule_class});
+      const trimmed = (rows) => rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, typeof v === "string" ? v.trim() : v])));
+      const captured = async () => (await abap.Classes[CAPTURE].rows()).array().map((r) => nameOf(Object.fromEntries(
+        Object.entries(r.get()).map(([k, v]) => [k, v.get()])))).sort(byKey);
+      const shipRows = (rows) => {
+        const table = new abap.types.Table(new abap.types.Structure({mandt: new abap.types.Character(3), ship_id: new abap.types.Character(4),
+          name: new abap.types.Character(30), status: new abap.types.Character(1)}));
+        for (const [id, name, status] of rows) {
+          const row = new abap.types.Structure({mandt: new abap.types.Character(3), ship_id: new abap.types.Character(4),
+            name: new abap.types.Character(30), status: new abap.types.Character(1)});
+          row.get().ship_id.set(id); row.get().name.set(name); row.get().status.set(status);
+          table.append(row);
+        }
+        return table;
+      };
+      const ships = () => read("SELECT ship_id, name, status FROM zosd_l2_ship ORDER BY ship_id");
+      const refusal = async (work) => {
+        try { await work(); } catch (e) { return e; }
+        return undefined;
+      };
+      // what a run bound to `bind` leaves in the log, and what the result reports
+      const bound = async (bind, mode = "S") => { await clearLog(); return {result: await runSet(RUNNER, mode, bind), log: log()}; };
+
+      it("explicit default bindings are the default run: the same log, the same counts", async () => {
+        const plain0 = await bound();
+        const named = await bound("ships=table,alerts=log");
+        expect(content(named.log)).to.deep.equal(content(plain0.log));
+        expect(named.result.alerts).to.equal(7);
+        expect(named.result.rules.map((r) => r.status)).to.deep.equal(Array(6).fill("DONE"));
+      });
+
+      it("alerts=dummy: the same counts, no log rows", async () => {
+        const {result, log: rows} = await bound("alerts=dummy");
+        expect(result.alerts).to.equal(7);
+        expect(result.rules.map((r) => r.status)).to.deep.equal(Array(6).fill("DONE"));
+        expect(result.rules.map((r) => r.alerts).reduce((a, b) => a + b)).to.equal(7);
+        expect(rows).to.deep.equal([]);
+      });
+
+      it("alerts=capture: the captured rows equal what the log variant writes, and the log stays empty", async () => {
+        const want = await bound();
+        await abap.Classes[CAPTURE].reset();
+        const {result, log: rows} = await bound("alerts=capture");
+        expect(rows).to.deep.equal([]);
+        expect(result.alerts).to.equal(7);
+        const got = await captured();
+        expect(got).to.have.length(7);
+        // the rows are the log's rows but for the run and its time, which belong to the run
+        expect(trimmed(got)).to.deep.equal(trimmed(content(want.log).map(({set, rule, hash, date, seq, text, file, line, class: c}) =>
+          ({set, rule, hash, date, seq: Number(seq), text, file, line, class: c})).sort(byKey)));
+      });
+
+      // what a replay must do, and what a refusal must do, as lists of what is wrong
+      async function replayProblems(runner = RUNNER) {
+        const problems = [];
+        const before = ships();
+        await clearLog();
+        await abap.Classes[SHIPS].reset();
+        await abap.Classes[SHIPS].set_rows({it_rows: shipRows([["S002", "Bluebird", "A"], ["S777", "Ghost", "A"]])});
+        await runSet(runner, "S", "ships=capture");
+        const texts = log().map((r) => r.text);
+        if (!texts.includes("S777 Ghost: in service without a captain")) problems.push(`the rows given are not seen: ${JSON.stringify(texts)}`);
+        const others = texts.filter((t) => /^S00[134]/.test(t));
+        if (others.length) problems.push(`rows of the table are seen though the source gave none of them: ${JSON.stringify(others)}`);
+        if (JSON.stringify(ships()) !== JSON.stringify(before)) problems.push(`the ships table is not back: ${JSON.stringify(ships())}`);
+        return {problems, texts};
+      }
+      async function refusalProblems() {
+        const problems = [];
+        await clearLog();
+        const before = ships();
+        const error = await refusal(() => runSet(RUNNER, "S", "alerts=nope"));
+        if (error?.constructor?.name?.toUpperCase() !== "ZCX_L3_FLEET_PORT") problems.push(`no typed refusal for an unknown variant: ${String(error?.message ?? error)}`);
+        else if (error.port.get() !== "alerts" || error.variant.get() !== "nope" || !/no such variant/.test(error.reason.get())) problems.push("the refusal does not name the port and the variant");
+        if (log().length) problems.push("a refused run wrote the log");
+        if (JSON.stringify(ships()) !== JSON.stringify(before)) problems.push("a refused run touched the ships table");
+        return problems;
+      }
+
+      it("ships=capture with rows given: the rules see exactly those rows, no table read, and the table comes back", async () => {
+        const full = await expected();
+        const {problems, texts} = await replayProblems();
+        expect(problems).to.deep.equal([]);
+        // S002 as the table has it, and S777, which no table holds
+        expect(texts.filter((t) => t.startsWith("S002")).sort()).to.deep.equal(full.filter((r) => r.text.startsWith("S002")).map((r) => r.text).sort());
+        expect(Number((await abap.Classes[SHIPS].reads()).get())).to.equal(1);
+        // and the run after it, bound as before, sees the table again
+        expect(content((await bound()).log)).to.deep.equal(full.map(({set, rule, hash, date, seq, text, file, line, class: c}) => ({set, rule, hash, date, seq, text, file, line, class: c})));
+      });
+
+      it("a variant the port does not have is a typed refusal, before anything is read or written", async () => {
+        expect(await refusalProblems()).to.deep.equal([]);
+        const port = await refusal(() => runSet(RUNNER, "S", "audit=log"));
+        expect(port?.reason?.get()).to.match(/no such port/);
+      });
+
+      it("a run in jobs refuses a variant that cannot cross sessions", async () => {
+        for (const bind of ["alerts=capture", "alerts=dummy", "ships=capture"]) {
+          const error = await refusal(() => runSet(RUNNER, "P", bind));
+          expect(error?.constructor?.name?.toUpperCase(), bind).to.equal("ZCX_L3_FLEET_PORT");
+        }
+      });
+
+      it("the binding travels to the job: the report has p_bind, and submit passes it", () => {
+        expect(readFileSync(join(OUT, `${REPORT}.prog.abap`), "utf8")).to.include("PARAMETERS p_bind TYPE c LENGTH 255 LOWER CASE.");
+        expect(readFileSync(join(OUT, `${RUNNER}.clas.abap`), "utf8")).to.include("      WITH p_bind = iv_bind");
+      });
+
+      describe("mutants of the ports", () => {
+        // what a binding must do, as a list of what is wrong; empty for the generated classes
+        async function bindingProblems() {
+          const problems = [];
+          await clearLog();
+          await runSet(RUNNER, "S", "alerts=dummy");
+          if (log().length) problems.push(`alerts=dummy wrote ${log().length} log row(s)`);
+          await runSet(RUNNER);
+          const want = trimmed(content(log()).map(({set, rule, hash, date, seq, text, file, line, class: c}) => ({set, rule, hash, date, seq, text, file, line, class: c})));
+          await clearLog();
+          await abap.Classes[CAPTURE].reset();
+          await runSet(RUNNER, "S", "alerts=capture");
+          if (log().length) problems.push(`alerts=capture wrote ${log().length} log row(s)`);
+          const got = trimmed(await captured());
+          if (JSON.stringify(got) !== JSON.stringify(want)) problems.push(`alerts=capture holds ${got.length} row(s), the log variant writes ${want.length}`);
+          return problems;
+        }
+
+        it("control: the generated classes under their own names pass the binding check", async () => {
+          expect(await bindingProblems()).to.deep.equal([]);
+        });
+
+        it("a factory that ignores the binding (always the default) is caught", async () => {
+          await loadPortClass(PORTS, `${PORTS}_m1`, (text) => mutate(text, "        rv_variant = lv_value.", "        rv_variant = rv_variant."));
+          const problems = await withClass(PORTS, `${PORTS}_m1`, bindingProblems);
+          expect(problems.join("\n")).to.match(/alerts=dummy wrote 7 log row\(s\)/);
+          expect(problems.join("\n")).to.match(/alerts=capture wrote 7 log row\(s\)/);
+        });
+
+        it("a dummy sink that writes is caught", async () => {
+          await loadPortClass("zcl_l3_fleet_alerts_dummy", "zcl_l3_fleet_alerts_dummy_m1",
+            (text) => mutate(text, "    rv_count = lines( it_rows ).", "    MODIFY zosd_l3_alert FROM TABLE it_rows.\n    rv_count = lines( it_rows )."));
+          const problems = await withClass("zcl_l3_fleet_alerts_dummy", "zcl_l3_fleet_alerts_dummy_m1", bindingProblems);
+          expect(problems.join("\n")).to.match(/alerts=dummy wrote 7 log row\(s\)/);
+        });
+
+        it("a runner that never swaps the source in is caught: the rows given are not seen", async () => {
+          const name = "zcl_l3_fleet_ns";
+          await loadRunner(name, mutate(renamed(name), "    IF li_src_1->live( ) = abap_false.\n      lv_swap_1 = abap_true.", "    IF abap_false = abap_true.\n      lv_swap_1 = abap_true."));
+          const {problems} = await replayProblems(name);
+          expect(problems.join("\n")).to.match(/the rows given are not seen/);
+          expect((await replayProblems()).problems, "control: the generated runner passes").to.deep.equal([]);
+        });
+
+        it("a factory that falls back to the default for an unknown variant is caught", async () => {
+          await loadPortClass(PORTS, `${PORTS}_m2`, (text) => {
+            const at = text.indexOf("METHOD get_alerts.");
+            const edited = text.slice(at).replace("      WHEN OTHERS.\n        RAISE EXCEPTION TYPE zcx_l3_fleet_port\n          EXPORTING iv_port = 'alerts' iv_variant = iv_variant\n                    iv_reason = 'no such variant for the port'.",
+              "      WHEN OTHERS.\n        CREATE OBJECT ri_port TYPE zcl_l3_fleet_alerts_log.");
+            expect(edited, "the mutation applied").to.not.equal(text.slice(at));
+            return text.slice(0, at) + edited;
+          });
+          await withClass(PORTS, `${PORTS}_m2`, async () => {
+            expect((await refusalProblems()).join("\n")).to.match(/no typed refusal for an unknown variant/);
+          });
+        });
+
+        it("a capture sink that drops a row is caught", async () => {
+          await loadPortClass("zcl_l3_fleet_alerts_capture", "zcl_l3_fleet_alerts_capture_m1",
+            (text) => mutate(text, "    APPEND LINES OF it_rows TO gt_rows.", "    APPEND LINES OF it_rows FROM 2 TO gt_rows."));
+          await withClass("zcl_l3_fleet_alerts_capture", "zcl_l3_fleet_alerts_capture_m1", async () => {
+            expect((await bindingProblems()).join("\n")).to.match(/alerts=capture holds \d+ row\(s\), the log variant writes 7/);
+          });
+        });
+      });
+    });
+
+    describe("a replay source that swaps the table: a mutant that never restores it is caught", () => {
+      it("the check 'the table is back' fails for a runner that skips the restore", async () => {
+        const name = "zcl_l3_fleet_pr";
+        const text = renamed(name);
+        await loadRunner(name, mutate(text, "      DELETE FROM zosd_l2_ship.\n      INSERT zosd_l2_ship FROM TABLE lt_keep_1.\n", ""));
+        const before = read("SELECT ship_id FROM zosd_l2_ship ORDER BY ship_id");
+        await abap.Classes.ZCL_L3_FLEET_SHIPS_CAPTURE.reset();
+        const rows = new abap.types.Table(new abap.types.Structure({mandt: new abap.types.Character(3), ship_id: new abap.types.Character(4),
+          name: new abap.types.Character(30), status: new abap.types.Character(1)}));
+        await abap.Classes.ZCL_L3_FLEET_SHIPS_CAPTURE.set_rows({it_rows: rows});
+        try {
+          await runSet(name, "S", "ships=capture,alerts=dummy");
+          expect(read("SELECT ship_id FROM zosd_l2_ship ORDER BY ship_id"), "the mutant leaves the table as the source had it").to.deep.equal([]);
+        } finally {
+          await exec([...FLEET.zosd_l2_ship.map((row) => `INSERT INTO zosd_l2_ship (mandt, ship_id, name, status) VALUES ('123', '${row.join("', '")}')`)]);
+        }
+        expect(before.length).to.equal(4);
       });
     });
 

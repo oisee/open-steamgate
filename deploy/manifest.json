@@ -4,7 +4,7 @@
   "customerNamespaces": [],
   "units": {
     "l3demo": {
-      "description": "The DSL L3 fleet set and its ABAP Unit proof (docs/dsl-l3.md, Proof): the four L2 tables and their data element, the six enabled rule classes, the runner, its job report, the alert log and the proof class. Staged into one flat folder from src/l2demo, src/dsl and src/l3proof.",
+      "description": "The DSL L3 fleet set and its ABAP Unit proof (docs/dsl-l3.md, Proof): the four L2 tables and their data element, the six enabled rule classes, the runner with its ports (two interfaces, five generated variants, the factory and its exception), its job report, the alert log and the proof class. Staged into one flat folder from src/l2demo, src/dsl and src/l3proof.",
       "sources": ["src/l3proof"],
       "objects": [
         "TABL ZOSD_L2_SHIP",
@@ -19,6 +19,15 @@
         "CLAS ZCL_L2_SHIP_VOYAGE_LIMIT",
         "CLAS ZCL_L2_SHIP_MIN_CREW",
         "CLAS ZCL_L2_SHIP_CARGO_LIMIT",
+        "INTF ZIF_L3_FLEET_SHIPS",
+        "INTF ZIF_L3_FLEET_ALERTS",
+        "CLAS ZCX_L3_FLEET_PORT",
+        "CLAS ZCL_L3_FLEET_SHIPS_TABLE",
+        "CLAS ZCL_L3_FLEET_SHIPS_CAPTURE",
+        "CLAS ZCL_L3_FLEET_ALERTS_LOG",
+        "CLAS ZCL_L3_FLEET_ALERTS_DUMMY",
+        "CLAS ZCL_L3_FLEET_ALERTS_CAPTURE",
+        "CLAS ZCL_L3_FLEET_PORTS",
         "CLAS ZCL_L3_FLEET",
         "PROG ZL3_FLEET",
         "CLAS ZCL_L3_FLEET_PROOF"
