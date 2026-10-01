@@ -147,7 +147,7 @@ describe("DSL generated regions", function () {
     ["a region inside a region", (s) => s.replace(`    " osd:gen r1-lookup-enrich end\n  ENDMETHOD.\n\n  METHOD before_mixed.`, "  ENDMETHOD.\n\n  METHOD before_mixed."), BEGIN2 - 1,
       `nested region: begin inside the r1-lookup-enrich region begun at line ${BEGIN1}`],
     ["an unknown recipe", (s) => s.replace("osd:gen r1-lookup-enrich from=before_mixed begin", "osd:gen r9-nothing from=before_mixed begin"), BEGIN2,
-      "unknown recipe r9-nothing (known: r1-lookup-enrich, r2-select-table-per-row)"],
+      "unknown recipe r9-nothing (known: r1-lookup-enrich, r2-select-table-per-row, r3-filter-into-where)"],
     ["a marker in the wrong form", (s) => s.replace("osd:gen r1-lookup-enrich from=before begin", "osd:gen r1-lookup-enrich from=before start"), BEGIN1,
       `malformed marker: expected '" osd:gen <recipe> [key=value]... begin|end', found '" osd:gen r1-lookup-enrich from=before start'`],
     ["a begin without from=", (s) => s.replace("osd:gen r1-lookup-enrich from=before begin", "osd:gen r1-lookup-enrich begin"), BEGIN1,

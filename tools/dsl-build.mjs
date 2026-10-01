@@ -13,7 +13,7 @@ import {existsSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {pathToFileURL} from "node:url";
 import {XMLValidator} from "fast-xml-parser";
-import {modelR1, modelR2} from "./lift.mjs";
+import {modelR1, modelR2, modelR3} from "./lift.mjs";
 import {abapModel, constantsModel, methodTableModel} from "./dsl-abap.mjs";
 import {buildDaemonModel, traceNodes} from "./dsl-daemons.mjs";
 import {reportModel} from "./dsl-report-model.mjs";
@@ -341,6 +341,7 @@ function linkPartial(unit, token, frames, context, report) {
 
 const R1_DEMO = "src/lift/zcl_osd_lift_r1_demo.clas.abap";
 const R2_DEMO = "src/lift/zcl_osd_lift_r2_demo.clas.abap";
+const R3_SAMPLE = "recipes/r3-filter-into-where/sample/zcl_osd_lift_r3_probe.clas.abap";
 
 export const PROVIDERS = {
   "lift-r1": {
@@ -348,6 +349,9 @@ export const PROVIDERS = {
   },
   "lift-r2": {
     samples: () => [["before", modelR2(R2_DEMO, "before")]],
+  },
+  "lift-r3": {
+    samples: () => [["before", modelR3(R3_SAMPLE, "before")]],
   },
   "abap-methods": {
     samples: (recipeDir) => [["sample", methodTableModel(abapModel([join(recipeDir, "sample")], {ddic: []}), "zcl_sample_methods")]],

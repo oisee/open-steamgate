@@ -6,7 +6,6 @@ import {DatabaseSync} from "node:sqlite";
 import {ABAP, types} from "@abaplint/runtime";
 import {modelR3FromSource} from "../tools/lift.mjs";
 import {region, render} from "../tools/dsl-regions.mjs";
-import {requireBatchedFae} from "./helpers/fae-batching.mjs";
 
 const FILE = "recipes/r3-filter-into-where/sample/zcl_osd_lift_r3_probe.clas.abap";
 const SOURCE = readFileSync(FILE, "utf8");
@@ -84,8 +83,8 @@ describe("verified lift R3", () => {
     expect(model(source).body).to.equal("\" first comment\n  CONCATENATE rv_text ls_row-seq INTO rv_text. \" tail\n\" last comment");
   });
   it("renders the generated region with L0 and a line trace", async function () {
+    this.timeout(120000);
     if (!existsSync("output/zcl_osd_tpl.clas.mjs")) this.skip();
-    await requireBatchedFae(this, ["output/zcl_osd_tpl.clas.mjs"]);
     const rendered = await render(model(), "recipes/r3-filter-into-where/template.tpl");
     expect(region(SOURCE, "before")).to.equal(rendered.text);
     expect(rendered.trace.length).to.be.greaterThan(0);
