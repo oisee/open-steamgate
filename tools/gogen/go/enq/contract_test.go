@@ -34,11 +34,11 @@ type contract struct {
 		ID    string `json:"id"`
 		Title string `json:"title"`
 		Steps []struct {
-			Owner         string            `json:"owner"`
-			Call          string            `json:"call"`
-			Params        map[string]string `json:"params"`
-			Expect        map[string]any    `json:"expect"`
-			Informational bool              `json:"informational"`
+			Owner         string         `json:"owner"`
+			Call          string         `json:"call"`
+			Params        map[string]any `json:"params"`
+			Expect        map[string]any `json:"expect"`
+			Informational bool           `json:"informational"`
 			Async         *struct {
 				DelayMs int `json:"delayMs"`
 			} `json:"async"`
@@ -68,6 +68,8 @@ type harness struct {
 	renewed map[string]bool
 	// when the last timed END_SESSION ran (grantedWithinMsOfRelease)
 	released time.Duration
+	// how long the update module of the open LUW runs (params.durationMs)
+	duration map[string]int
 }
 
 func (h *harness) session(name string) int64 {
@@ -89,8 +91,11 @@ func (h *harness) advance(d time.Duration) {
 	}
 }
 
-func (h *harness) request(p map[string]string) Request {
+func (h *harness) request(call string, p map[string]string) Request {
 	r := Request{Client: client, Table: h.c.LockObject.Table, Object: h.c.LockObject.Name, Mode: p["MODE_ZOSD_PRB"]}
+	if at := strings.Index(call, "_"); at >= 0 {
+		r.Object = call[at+1:] // ENQUEUE_EZOSD_PRB2: the second lock object on the table
+	}
 	if r.Mode == "" {
 		r.Mode = "E"
 	}
@@ -114,6 +119,18 @@ func number(v any) int {
 	return int(f)
 }
 
+// renewal checks expect.newUpdateOwner of a COMMIT or ROLLBACK step
+func (h *harness) renewal(expect map[string]any, before string, sid int64) string {
+	want, ok := expect["newUpdateOwner"]
+	if !ok {
+		return ""
+	}
+	if got := h.srv.UpdateOwner(sid) != before; got != want.(bool) {
+		return fmt.Sprintf("newUpdateOwner %v", got)
+	}
+	return ""
+}
+
 func (h *harness) flush() {
 	for _, f := range h.pending {
 		f()
@@ -130,7 +147,7 @@ func (h *harness) step(owner, call string, p map[string]string, expect map[strin
 			p = map[string]string{"K1": "NEWOWNER"}
 		}
 		start := h.now
-		r := h.request(p)
+		r := h.request(call, p)
 		res := h.srv.enqueueWith(sid, r, p["_WAIT"] == "X", h.advance)
 		// the GUSRVB the row just taken carries, against the one before the
 		// last COMMIT or ROLLBACK: new after a ROLLBACK or a COMMIT that ran
@@ -171,29 +188,50 @@ func (h *harness) step(owner, call string, p map[string]string, expect map[strin
 	case strings.HasPrefix(call, "DEQUEUE_ALL"):
 		h.srv.DequeueAll(sid)
 	case strings.HasPrefix(call, "DEQUEUE_"):
-		h.srv.Dequeue(sid, h.request(p))
+		h.srv.Dequeue(sid, h.request(call, p))
 	case call == "ENQUEUE_READ":
-		if _, ok := expect["eventuallyWithinMs"]; ok {
+		if v, ok := expect["eventuallyWithinMs"]; ok {
 			// a release that is asynchronous on a system has happened by the
-			// deadline: the queued update task and session teardowns run
+			// deadline: the queued teardowns run, and the clock goes to it
 			h.flush()
+			h.advance(time.Duration(number(v)) * time.Millisecond)
 		}
 		return h.read(p, expect)
 	case strings.HasPrefix(call, "CALL FUNCTION") && strings.Contains(call, "IN UPDATE TASK"):
 		h.updated[owner] = true
+		h.duration[owner] = 0
+		if v, ok := p["durationMs"]; ok {
+			var ms int
+			fmt.Sscan(v, &ms)
+			h.duration[owner] = ms
+		}
 	case call == "COMMIT WORK" || call == "COMMIT WORK AND WAIT":
 		h.ended[owner], h.renewed[owner] = h.srv.UpdateOwner(sid), h.updated[owner]
+		before := h.srv.UpdateOwner(sid)
 		ended := h.srv.Commit(sid, h.updated[owner])
+		took := time.Duration(h.duration[owner]) * time.Millisecond
 		h.updated[owner] = false
-		if call == "COMMIT WORK AND WAIT" {
+		switch {
+		case call == "COMMIT WORK AND WAIT":
+			h.advance(took)
 			h.srv.UpdateDone(sid, ended)
-		} else {
+		case took > 0:
+			// an update that runs for durationMs: its locks go when it ends
+			h.timed = append(h.timed, event{at: h.now + took, do: func() { h.srv.UpdateDone(sid, ended) }})
+		default:
 			h.pending = append(h.pending, func() { h.srv.UpdateDone(sid, ended) })
+		}
+		if msg := h.renewal(expect, before, sid); msg != "" {
+			return msg
 		}
 	case call == "ROLLBACK WORK":
 		h.ended[owner], h.renewed[owner] = h.srv.UpdateOwner(sid), true
 		h.updated[owner] = false
+		before := h.srv.UpdateOwner(sid)
 		h.srv.Rollback(sid)
+		if msg := h.renewal(expect, before, sid); msg != "" {
+			return msg
+		}
 	case strings.HasPrefix(call, "WAIT UP TO"):
 		var n int
 		fmt.Sscanf(strings.TrimPrefix(call, "WAIT UP TO "), "%d", &n)
@@ -270,7 +308,20 @@ func (h *harness) matches(r Row, m map[string]any) bool {
 		}
 		return id != "" && h.owners[who.(string)] == r.Session
 	}
-	return owned(r.Dialog, m["GUSR"]) && owned(r.Update, m["GUSRVB"])
+	// GUSRVB "S" is S's current update owner, "S^" the one S handed to its
+	// update task at a COMMIT
+	update := func(who any) bool {
+		if who == nil {
+			return r.Update == ""
+		}
+		name := who.(string)
+		sid := h.owners[strings.TrimSuffix(name, "^")]
+		if r.Update == "" || sid != r.Session {
+			return false
+		}
+		return (r.Update == h.srv.UpdateOwner(sid)) != strings.HasSuffix(name, "^")
+	}
+	return owned(r.Dialog, m["GUSR"]) && update(m["GUSRVB"])
 }
 
 func show(rows []Row) string {
@@ -297,7 +348,7 @@ func TestContract(t *testing.T) {
 		t.Run(tc.ID, func(t *testing.T) {
 			srv := New("osdhost_OSD_00")
 			defer srv.Close()
-			h := &harness{t: t, srv: srv, c: &c, owners: map[string]int64{}, updated: map[string]bool{}, ended: map[string]string{}, renewed: map[string]bool{}}
+			h := &harness{t: t, srv: srv, c: &c, owners: map[string]int64{}, updated: map[string]bool{}, ended: map[string]string{}, renewed: map[string]bool{}, duration: map[string]int{}}
 			for i, st := range tc.Steps {
 				delay := -1
 				if st.Async != nil {
@@ -307,7 +358,11 @@ func TestContract(t *testing.T) {
 				if st.Informational {
 					expect = nil // what the sandbox showed in a race, not a gate
 				}
-				if msg := h.step(st.Owner, st.Call, st.Params, expect, delay); msg != "" {
+				params := map[string]string{}
+				for k, v := range st.Params {
+					params[k] = fmt.Sprint(v)
+				}
+				if msg := h.step(st.Owner, st.Call, params, expect, delay); msg != "" {
 					t.Fatalf("%s: step %d %s %s %v: %s", tc.Title, i+1, st.Owner, st.Call, st.Params, msg)
 				}
 			}
