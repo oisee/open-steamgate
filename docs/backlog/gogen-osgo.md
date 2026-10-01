@@ -1327,7 +1327,7 @@ something already shipped (then it is a must of the current release, like the ro
   **Done 2026-09-30 (stoker): both keep them.** In the second test class the counter reads 3 where A4H reads 1,
   on Node and on Go alike. See `ANOMALY-2026-09-30-unit-statics-across-test-classes`, with the fixture in
   `test/fixtures/unit-statics/`. The Go half of the fix is U4 step 2 below; the Node half needs a transpiler issue.
-- **status 2026-10-01 (dell):** Open SQL in the native build 18/18 is merged (#349).
+- **status 2026-10-01 (dell):** The SQL corpus of the native build is 18/18, merged (#349).
   Class statics are reset per test class on Go, merged (#365); the Node half stays an upstream issue.
   F4 and the file/folder dialogs in the TUI: branch feat/osabap-f4-file-dialogs.
 - should (moved from must, 2026-10-01, decided with codex-astra): **the table-header row model.** The version moves from
