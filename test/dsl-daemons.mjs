@@ -10,7 +10,7 @@ import {buildDaemonModel, programId} from "../tools/dsl-daemons.mjs";
 
 const samc = "recipes/samc-xml/sample/zosd_t_amc.samc.model.json";
 const sapc = "recipes/sapc-xml/sample/zstg_apc_demo.sapc.model.json";
-const samcTarget = "docs/probes/abap-daemons/zosd_t_amc.samc.xml";
+const samcTarget = "docs/probes/abap-daemons/zosd_t_amc.serialized.samc.xml";
 const sapcTarget = "src/apc/zstg_apc_demo.sapc.xml";
 
 describe("DSL daemon channel files", function () {
@@ -25,31 +25,39 @@ describe("DSL daemon channel files", function () {
   };
   after(() => scratch.forEach((dir) => rmSync(dir, {recursive: true, force: true})));
 
-  it("matches the SAMC deserialize input accepted on A4H and the real-shaped SAPC target byte for byte", async () => {
+  it("matches abapGit's own SAMC serialisation captured on A4H (BOM included) and the real-shaped SAPC target byte for byte", async () => {
     for (const [model, target] of [[samc, samcTarget], [sapc, sapcTarget]]) {
       const {text, trace} = await renderDaemon(model);
       expect(text).to.equal(readFileSync(target, "utf8"));
       expect(text).to.match(/<\/abapGit>\n$/);
+      expect(text.startsWith("\ufeff<?xml")).to.equal(true);
       expect(trace).to.have.length(text.trimEnd().split("\n").length);
       expect(trace.every((entry) => entry.node)).to.equal(true);
       expect(XMLValidator.validate(text)).to.equal(true);
     }
   });
 
-  it("computes each PROGRAM_ID from its class and matches the probe", () => {
+  it("computes each PROGRAM_ID from its class or report and matches the capture", () => {
     const model = JSON.parse(readFileSync(samc, "utf8"));
     const output = buildDaemonModel(model);
     const target = readFileSync(samcTarget, "utf8");
     const ids = [...target.matchAll(/<PROGRAM_ID>([^<]+)<\/PROGRAM_ID>/g)].map((match) => match[1]);
-    expect(ids).to.deep.equal(output.authorities.map((authority) => programId(authority.program)));
+    expect(ids).to.deep.equal(output.authorities.map((authority) => programId(authority.program, authority.kind)));
     expect(output.authorities.map((authority) => authority.program_id)).to.deep.equal(ids);
     expect(output.authorities.map((authority) => authority.nr)).to.deep.equal(Array.from({length: ids.length}, (_, i) => i + 1));
   });
 
   it("renders an authority whose PROGRAM_ID is absent in the input", async () => {
     const model = JSON.parse(readFileSync(samc, "utf8"));
+    expect(model.authorities[0].program_id).to.equal(undefined);
+    const expected = "ZCL_OSD_T_DMN=================CP";
+    model.authorities[0].program_id = expected;
+    const explicit = await renderDaemon(temp("explicit.json", `${JSON.stringify(model)}\n`));
+    expect(explicit.text).to.include(`<PROGRAM_ID>${expected}</PROGRAM_ID>`);
     delete model.authorities[0].program_id;
+    expect(buildDaemonModel(model).authorities[0].program_id).to.equal(expected);
     const {text} = await renderDaemon(temp("computed.json", `${JSON.stringify(model)}\n`));
+    expect(text).to.equal(explicit.text);
     expect(text).to.equal(readFileSync(samcTarget, "utf8"));
   });
 
@@ -84,13 +92,37 @@ describe("DSL daemon channel files", function () {
     expect(() => buildDaemonModel(model)).to.throw(/messageType|MESSAGE_TYPE_ID/i);
   });
 
+  it("renders channels sorted by CHANNEL_ID whatever the input order, authorities keep NR order", async () => {
+    const model = JSON.parse(readFileSync(samc, "utf8"));
+    model.channels.reverse();
+    const {text} = await renderDaemon(temp("reversed.json", `${JSON.stringify(model)}\n`));
+    expect(text).to.equal(readFileSync(samcTarget, "utf8"));
+    expect([...text.matchAll(/<AMC_CHANNEL>[\s\S]*?<CHANNEL_ID>([^<]+)</g)].map((match) => match[1])).to.deep.equal(["/pc", "/ps", "/pu"]);
+    expect([...text.matchAll(/<NR>(\d+)</g)].map((match) => match[1])).to.deep.equal(["1", "2", "3", "4", "5"]);
+    expect(buildDaemonModel(model).channels.map((channel) => channel["@id"]).join()).to.equal("samc/ZOSD_T_AMC/ch/pc,samc/ZOSD_T_AMC/ch/ps,samc/ZOSD_T_AMC/ch/pu");
+  });
+
+  it("emits the UTF-8 BOM exactly once, in the file bytes, and a BOM-less target is drift at line 1", () => {
+    const out = temp("bom.xml", "");
+    const run = spawnSync("node", ["tools/dsl-samc.mjs", "render", samc, "--out", out], {encoding: "utf8"});
+    expect(run.status, run.stderr).to.equal(0);
+    const bytes = readFileSync(out);
+    expect([...bytes.subarray(0, 3)]).to.deep.equal([0xef, 0xbb, 0xbf]);
+    expect(bytes.indexOf(Buffer.from([0xef, 0xbb, 0xbf]), 3)).to.equal(-1);
+    expect(bytes.equals(readFileSync(samcTarget))).to.equal(true);
+    const bare = temp("bare.xml", readFileSync(samcTarget, "utf8").replace(/^\ufeff/, ""));
+    const check = spawnSync("node", ["tools/dsl-samc.mjs", "check", samc, bare], {encoding: "utf8"});
+    expect(check.status).to.equal(1);
+    expect(check.stderr).to.include(`${bare}: drift at line 1`);
+  });
+
   it("omits an empty AUTHORITIES table from the SAMC shape", async () => {
     const model = JSON.parse(readFileSync(samc, "utf8"));
     model.authorities = [];
     model.channels.pop();
     const {text} = await renderDaemon(temp("noauth.json", `${JSON.stringify(model)}\n`));
     const expected = readFileSync(samcTarget, "utf8")
-      .replace(/^     <AMC_CHANNEL>.*<CHANNEL_ID>\/ps<\/CHANNEL_ID>.*\n/m, "")
+      .replace(/     <AMC_CHANNEL>\n(?:      .*\n){2}      <CHANNEL_ID>\/ps<\/CHANNEL_ID>\n(?:      .*\n){2}     <\/AMC_CHANNEL>\n/, "")
       .replace(/    <AUTHORITIES>\n[\s\S]*?    <\/AUTHORITIES>\n/, "");
     expect(text).to.equal(expected);
   });
@@ -103,13 +135,13 @@ describe("DSL daemon channel files", function () {
     model.lang = "";
     const {text} = await renderDaemon(temp("empty.json", `${JSON.stringify(model)}\n`));
     const expected = readFileSync(samcTarget, "utf8")
-      .replace(/^    <TEXT>.*\n/m, "")
+      .replace(/    <TEXT>\n[\s\S]*?    <\/TEXT>\n/, "")
       .replace(/    <CHANNELS>\n[\s\S]*?    <\/CHANNELS>\n/, "")
       .replace(/    <AUTHORITIES>\n[\s\S]*?    <\/AUTHORITIES>\n/, "");
     expect(text).to.equal(expected);
     model.lang = "E";
     const withLang = await renderDaemon(temp("empty-description.json", `${JSON.stringify(model)}\n`));
-    expect(withLang.text).to.include("<LANG>E</LANG></TEXT>");
+    expect(withLang.text).to.include("<LANG>E</LANG>\n    </TEXT>");
     expect(withLang.text).not.to.include("<DESCRIPTION>");
   });
 
@@ -197,7 +229,7 @@ describe("DSL daemon channel files", function () {
     const target = temp("target.xml", readFileSync(samcTarget, "utf8").replace("<SCOPE>C</SCOPE>", "<SCOPE>X</SCOPE>"));
     const run = spawnSync("node", ["tools/dsl-samc.mjs", "check", samc, target], {encoding: "utf8"});
     expect(run.status).to.equal(1);
-    expect(run.stderr).to.include(`${target}: drift at line 9`);
+    expect(run.stderr).to.include(`${target}: drift at line 21`);
     expect(firstDifference("a\n", "a")).to.equal(2);
   });
 
