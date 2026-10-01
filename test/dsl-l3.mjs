@@ -255,6 +255,17 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
         `INSERT INTO ${table} (mandt, ${COLUMNS[table].join(", ")}) VALUES ('123', ${row.map((v) => `'${v}'`).join(", ")})`));
       await exec([...Object.keys(FLEET).map((t) => `DELETE FROM ${t}`), ...inserts]);
     });
+    // loadRunner imports a separately transpiled module, which re-registers
+    // classes it pulls in (CX_ROOT among them) as second copies; a suite after
+    // this one in the same process then fails every cast against the first
+    // copy (cx_sy_move_cast_error in test/gui-reports.mjs). Put the registry back.
+    let classesBefore;
+    before(() => { classesBefore = {...globalThis.abap.Classes}; });
+    after(() => {
+      const classes = globalThis.abap.Classes;
+      for (const key of Object.keys(classes)) if (!(key in classesBefore)) delete classes[key];
+      Object.assign(classes, classesBefore);
+    });
     after(async () => {
       if (client) await exec([...Object.keys(FLEET).map((t) => `DELETE FROM ${t}`), "DELETE FROM zosd_l3_alert"]).catch(() => {});
       store?.close();
