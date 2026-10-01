@@ -6,19 +6,6 @@ import (
 	"testing"
 )
 
-func stringTable(value *[]string) Data {
-	t := &Type{Kind: 'h', Row: TString}
-	t.Lines = func(p any) int { return len(*p.(*[]string)) }
-	t.At = func(p any, i int) any { return &(*p.(*[]string))[i] }
-	t.Append = func(p any) any {
-		table := p.(*[]string)
-		*table = append(*table, "")
-		return &(*table)[len(*table)-1]
-	}
-	t.Zero = func(p any) { *p.(*[]string) = nil }
-	return Data{P: value, T: t}
-}
-
 func TestFrontendTextUploadDownload(t *testing.T) {
 	dir := t.TempDir()
 	sb := &Sandbox{Read: []string{dir}, Write: []string{dir}}

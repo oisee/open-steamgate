@@ -1,4 +1,4 @@
-package abap
+package inflate
 
 import (
 	"bytes"
@@ -30,8 +30,8 @@ func TestInflateHostMatchesFlate(t *testing.T) {
 		data := append(comp.Bytes(), tail...)
 		for _, piece := range []int{1, 7, 4096, len(data)} {
 			for _, budget := range []int32{0, 1, 1000, 65536} {
-				s := &Session{}
-				h := InflateHostOpen(s)
+				reg := &Registry{}
+				h := reg.Open()
 				var out []byte
 				var state int32
 				var raw, unused, reason string
@@ -45,7 +45,7 @@ func TestInflateHostMatchesFlate(t *testing.T) {
 						chunk = string(data[at:end])
 						at = end
 					}
-					InflateHostFeed(s, h, chunk, budget, &raw, &state, &unused, &reason)
+					raw, state, unused, reason = reg.Feed(h, chunk, budget)
 					if reason != "" {
 						t.Fatalf("level %d piece %d budget %d: %s", level, piece, budget, reason)
 					}
@@ -69,12 +69,13 @@ func TestInflateHostMatchesFlate(t *testing.T) {
 }
 
 func TestInflateHostCorrupt(t *testing.T) {
-	s := &Session{}
-	h := InflateHostOpen(s)
-	var raw, unused, reason string
-	var state int32
+	reg := &Registry{}
+	h := reg.Open()
 	// a final block of type 3
-	InflateHostFeed(s, h, "\x07", 0, &raw, &state, &unused, &reason)
+	raw, state, unused, reason := reg.Feed(h, "\x07", 0)
+	if raw != "" || state != 0 || unused != "" {
+		t.Fatalf("corrupt feed returned data: %q %d %q", raw, state, unused)
+	}
 	if reason != "invalid block type 3" {
 		t.Fatalf("reason %q", reason)
 	}

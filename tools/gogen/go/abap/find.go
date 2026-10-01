@@ -63,14 +63,14 @@ func compileABAP(p string, icase bool) *regexp.Regexp {
 	}
 	syntax := outsideClasses(p)
 	if strings.Contains(syntax, "*?") || strings.Contains(syntax, "+?") || strings.Contains(syntax, "??") {
-		panic(ArithmeticError{"CX_SY_INVALID_REGEX", p})
+		panic(ArithmeticError{Class: "CX_SY_INVALID_REGEX", Op: p})
 	}
 	if strings.Contains(strings.ReplaceAll(syntax, "(?:", ""), "(?") {
 		panic(NotCompiled("FIND REGEX", "a (?...) group other than (?:...) is not in Go's regexp: "+p))
 	}
 	re, err := regexp.Compile(key)
 	if err != nil {
-		panic(ArithmeticError{"CX_SY_INVALID_REGEX", p})
+		panic(ArithmeticError{Class: "CX_SY_INVALID_REGEX", Op: p})
 	}
 	re.Longest()
 	regexCache.Store(key, re)
@@ -320,8 +320,8 @@ func plainResults(s, p string, all bool) [][]int32 {
 // pcreRefused are the PCRE constructs Go's RE2 does not have: refused by
 // name rather than read as something else
 var pcreRefused = []struct {
-	re   *regexp.Regexp
-	what string
+	re	*regexp.Regexp
+	what	string
 }{
 	{regexp.MustCompile(`\(\?=`), "a lookahead (?=...)"},
 	{regexp.MustCompile(`\(\?!`), "a negative lookahead (?!...)"},

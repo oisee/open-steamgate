@@ -28,7 +28,7 @@ func UnitDumpToString(s *Session, v Data) string {
 	case 'r':
 		obj := refTarget(v)
 		if refNil(obj) {
-			panic(ArithmeticError{"OBJECTS_OBJREF_NOT_ASSIGNED", "LCL_DUMP=>TO_STRING"})
+			panic(ArithmeticError{Class: "OBJECTS_OBJREF_NOT_ASSIGNED", Op: "LCL_DUMP=>TO_STRING"})
 		}
 		return "[object, " + jsClassName(obj) + "]"
 	case 'D', 'T':

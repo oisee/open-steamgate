@@ -61,7 +61,7 @@ func TestLUW(t *testing.T) {
 		}()
 		DialogStep(func() {
 			put("C")
-			panic(ArithmeticError{"CX_SY_ZERODIVIDE", "/"})
+			panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "/"})
 		})
 	}()
 	if tx != nil || rows() != 2 {
@@ -138,7 +138,7 @@ func TestLUWDumpSurvivesRollbackError(t *testing.T) {
 		defer func() { got = recover() }()
 		DialogStep(func() {
 			tx.Rollback() // the step's own rollback will now fail
-			panic(ArithmeticError{"CX_SY_ZERODIVIDE", "/"})
+			panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "/"})
 		})
 	}()
 	if e, ok := got.(ArithmeticError); !ok || e.Class != "CX_SY_ZERODIVIDE" {
@@ -186,7 +186,7 @@ func TestLUWStatementCache(t *testing.T) {
 			if count() != 3 {
 				t.Fatal("the cached insert is not in the step")
 			}
-			panic(ArithmeticError{"CX_SY_ZERODIVIDE", "/"})
+			panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "/"})
 		})
 	}()
 	s := &Session{}

@@ -90,7 +90,7 @@ func ClassOf(obj any) string {
 // possible", which CATCH cx_root does not take (2026-09-23).
 func Raise(obj any, class string) *Raised {
 	if obj == nil || (reflect.ValueOf(obj).Kind() == reflect.Pointer && reflect.ValueOf(obj).IsNil()) {
-		panic(ArithmeticError{"OBJECTS_OBJREF_NOT_ASSIGNED", "RAISE EXCEPTION of an initial reference"})
+		panic(ArithmeticError{Class: "OBJECTS_OBJREF_NOT_ASSIGNED", Op: "RAISE EXCEPTION of an initial reference"})
 	}
 	if class == "" {
 		class = ClassOf(obj)

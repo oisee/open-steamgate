@@ -54,7 +54,7 @@ func charNumber(v string) (p string) {
 	defer func() {
 		if r := recover(); r != nil {
 			if e, ok := r.(ArithmeticError); ok && e.Class == "CX_SY_CONVERSION_NO_NUMBER" {
-				panic(ArithmeticError{CompareNoNumber, strconv.Quote(v) + " cannot be interpreted as a number (comparison)"})
+				panic(ArithmeticError{Class: CompareNoNumber, Op: strconv.Quote(v) + " cannot be interpreted as a number (comparison)"})
 			}
 			panic(r)
 		}

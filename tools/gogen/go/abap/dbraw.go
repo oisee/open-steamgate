@@ -13,19 +13,6 @@ func DBXStr(v DBString) string {
 	return string(b)
 }
 
-// DerefAs is ASSIGN ref->* TO <fs> for a field symbol typed with a
-// structure: the value the reference points at, when it has that type.
-// A reference to anything else is refused (NOT_COMPILED): a system checks
-// compatibility by the ABAP type, which the Go host does not reproduce.
-func DerefAs[T any](d Data, text string) *T {
-	d.Check()
-	p, ok := d.P.(*T)
-	if !ok {
-		panic(NotCompiled(text, "the reference points at a value of another type"))
-	}
-	return p
-}
-
 // RAW(n) columns (ultra/zvdb, A4H 2026-09-24, $ZOSG_TMP_0300: probes
 // ZCL_GOGEN_T_RAWRD, _RAWSEL, _RAWDYN over a table MANDT/ID/R RAW(4)).
 //
@@ -57,7 +44,7 @@ func DBXHex(v string, n int) string { return XToHex(XFit(v, n)) }
 // not a valid value for X(4,0)" when not caught).
 func DBXSHex(v string, n int) string {
 	if len(v) != n {
-		panic(ArithmeticError{"CX_SY_OPEN_SQL_DATA_ERROR", "'" + XToHex(v) + "' is not a valid value for X(" + itoa(n) + ",0)"})
+		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DATA_ERROR", Op: "'" + XToHex(v) + "' is not a valid value for X(" + itoa(n) + ",0)"})
 	}
 	return XToHex(v)
 }
@@ -68,7 +55,7 @@ func DBXString(v string) string { return XToHex(v) }
 
 // rawHexLit is a literal compared with a RAW(n) column: exactly 2n
 // upper-case hex digits, else CX_SY_OPEN_SQL_DATA_ERROR (A4H, dynamic WHERE:
-// '12', '1200000000', lower case, 'XYZ', '', a number, a leading or
+// '12', '1200000000', lower case, 'XYZ', ”, a number, a leading or
 // trailing blank all raise)
 func rawHexLit(v string, n int) bool {
 	if len(v) != 2*n {

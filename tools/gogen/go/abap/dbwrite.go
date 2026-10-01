@@ -159,11 +159,11 @@ func exec(st *IRWrite) (n int64, dup bool) {
 		if duplicateKey(err) {
 			return 0, true
 		}
-		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
+		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: err.Error()})
 	}
 	n, err = res.RowsAffected()
 	if err != nil {
-		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
+		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: err.Error()})
 	}
 	return n, false
 }
@@ -225,14 +225,14 @@ func InsertRows(s *Session, w WriteSpec, rows [][]any, onDuplicate string) {
 		}
 		n, dup := exec(st)
 		if dup {
-			panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", "INSERT " + w.Table + ": a duplicate key although duplicates are skipped"})
+			panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: "INSERT " + w.Table + ": a duplicate key although duplicates are skipped"})
 		}
 		written += n
 	}
 	if written < int64(len(rows)) {
 		if onDuplicate == "raise" {
 			// every other row is written, sy is left as it was (A4H)
-			panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", fmt.Sprintf("INSERT %s FROM TABLE: %d of %d rows have a key that exists", w.Table, int64(len(rows))-written, len(rows))})
+			panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: fmt.Sprintf("INSERT %s FROM TABLE: %d of %d rows have a key that exists", w.Table, int64(len(rows))-written, len(rows))})
 		}
 		s.Sy.Subrc = 4
 	} else {
@@ -302,11 +302,11 @@ func ExecWrite(s *Session, text string, args []any, preds []HostPred) {
 	text, bound := SpliceRanges(text, args, preds)
 	res, err := conn().Exec(text, bound...)
 	if err != nil {
-		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
+		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: err.Error()})
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
+		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: err.Error()})
 	}
 	s.Sy.Subrc = 0
 	if n == 0 {

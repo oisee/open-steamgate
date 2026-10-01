@@ -23,7 +23,7 @@ func Select(s *Session, text string, args []any, preds []HostPred, row func(scan
 	text, bound := SpliceRanges(text, args, preds)
 	rows, err := conn().Query(text, bound...)
 	if err != nil {
-		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
+		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: err.Error()})
 	}
 	defer rows.Close()
 	n := 0
@@ -32,7 +32,7 @@ func Select(s *Session, text string, args []any, preds []HostPred, row func(scan
 		n++
 	}
 	if err := rows.Err(); err != nil {
-		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
+		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: err.Error()})
 	}
 	return n
 }
@@ -50,6 +50,6 @@ func DBI(v DBInt) int32 { return int32(v.Int64) }
 // Must turns a scan error into a database dump.
 func Must(err error) {
 	if err != nil {
-		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
+		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: err.Error()})
 	}
 }

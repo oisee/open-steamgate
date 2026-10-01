@@ -55,13 +55,13 @@ func plainConn() querier {
 const stmtCacheMax = 4096
 
 var (
-	stmtCache   = map[string]*sql.Stmt{}
-	stmtSeen    = map[string]int{}
-	stmtPending []string
-	txStmts     = map[string]*sql.Stmt{}
+	stmtCache	= map[string]*sql.Stmt{}
+	stmtSeen	= map[string]int{}
+	stmtPending	[]string
+	txStmts		= map[string]*sql.Stmt{}
 	// the database the cache belongs to: another one (OpenDB again) starts
 	// it empty
-	stmtDB *sql.DB
+	stmtDB	*sql.DB
 )
 
 func stmtCacheFor(d *sql.DB) {
@@ -163,7 +163,7 @@ func begin() {
 	}
 	t, err := db.Begin()
 	if err != nil {
-		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
+		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: err.Error()})
 	}
 	tx = t
 }
@@ -182,7 +182,7 @@ func end(commit bool) {
 	}
 	prepareSeen()
 	if err != nil {
-		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
+		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: err.Error()})
 	}
 }
 
@@ -202,7 +202,7 @@ func DialogStep(work func()) {
 			defer func() { recover() }()
 			end(false)
 		}()
-		if dump != nil { // nil: runtime.Goexit, which goes on by itself
+		if dump != nil {	// nil: runtime.Goexit, which goes on by itself
 			panic(dump)
 		}
 	}()

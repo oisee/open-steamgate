@@ -12,6 +12,8 @@ package abap
 import (
 	"fmt"
 	"math"
+	"osg/gogen/abaperr"
+	"osg/gogen/inflate"
 	"strings"
 )
 
@@ -39,20 +41,13 @@ type Session struct {
 	// headers and the answer of a SEND), by the object (httpc.go)
 	httpc map[any]*httpcClient
 	// inflate: the decoders of ZCL_OSD_INFLATE=>HOST_* by handle (inflate.go)
-	inflate    map[int32]*inflater
-	inflateSeq int32
+	inflate *inflate.Registry
 }
 
-// ArithmeticError is a class-based ABAP exception, raised as a Go panic and
-// recovered at the boundary of the call that started the step.
-type ArithmeticError struct {
-	Class string // CX_SY_ARITHMETIC_OVERFLOW, CX_SY_ZERODIVIDE, CX_SY_CONVERSION_OVERFLOW
-	Op    string
-}
+// ArithmeticError retains the identity of errors from pure packages.
+type ArithmeticError = abaperr.ArithmeticError
 
-func (e ArithmeticError) Error() string { return e.Class + " in " + e.Op }
-
-func overflow(op string) { panic(ArithmeticError{"CX_SY_ARITHMETIC_OVERFLOW", op}) }
+func overflow(op string) { panic(ArithmeticError{Class: "CX_SY_ARITHMETIC_OVERFLOW", Op: op}) }
 
 func check(v int64, op string) int32 {
 	if v > math.MaxInt32 || v < math.MinInt32 {
@@ -74,7 +69,7 @@ func DivI(a, b int32) int32 {
 		if a == 0 {
 			return 0
 		}
-		panic(ArithmeticError{"CX_SY_ZERODIVIDE", "/"})
+		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "/"})
 	}
 	n, d := int64(a), int64(b)
 	q := n / d
@@ -96,7 +91,7 @@ func DivIntI(a, b int32) int32 {
 		if a == 0 {
 			return 0
 		}
-		panic(ArithmeticError{"CX_SY_ZERODIVIDE", "DIV"})
+		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "DIV"})
 	}
 	n, d := int64(a), int64(b)
 	r := n % d
@@ -111,7 +106,7 @@ func ModI(a, b int32) int32 {
 		if a == 0 {
 			return 0
 		}
-		panic(ArithmeticError{"CX_SY_ZERODIVIDE", "MOD"})
+		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "MOD"})
 	}
 	n, d := int64(a), int64(b)
 	r := n % d
@@ -128,7 +123,7 @@ func DivF(a, b float64) float64 {
 		if a == 0 {
 			return 0
 		}
-		panic(ArithmeticError{"CX_SY_ZERODIVIDE", "/"})
+		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "/"})
 	}
 	return a / b
 }
@@ -139,7 +134,7 @@ func DivIntF(a, b float64) float64 {
 		if a == 0 {
 			return 0
 		}
-		panic(ArithmeticError{"CX_SY_ZERODIVIDE", "DIV"})
+		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "DIV"})
 	}
 	r := math.Mod(a, b)
 	if r < 0 {
@@ -153,7 +148,7 @@ func ModF(a, b float64) float64 {
 		if a == 0 {
 			return 0
 		}
-		panic(ArithmeticError{"CX_SY_ZERODIVIDE", "MOD"})
+		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "MOD"})
 	}
 	r := math.Mod(a, b)
 	if r < 0 {
@@ -167,7 +162,7 @@ func ModF(a, b float64) float64 {
 func F2I(f float64) int32 {
 	r := math.Round(f) // math.Round is half away from zero
 	if math.IsNaN(r) || r > math.MaxInt32 || r < math.MinInt32 {
-		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "f->i"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_OVERFLOW", Op: "f->i"})
 	}
 	return int32(r)
 }

@@ -39,8 +39,6 @@ func (f *datasetFixture) open(name string, mode DatasetMode, binary bool) (int32
 	return f.s.Sy.Subrc, msg
 }
 
-func str(v string) Data { return Data{P: &v, T: TString} }
-
 func TestDatasetDenyByDefault(t *testing.T) {
 	f := newDatasetFixture(t)
 	SetDatasetHost(&Sandbox{})
