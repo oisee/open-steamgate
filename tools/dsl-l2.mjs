@@ -823,14 +823,15 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     const condition = conjoin([whenTree, ...(kind === "require" ? [{op: "exists", clause: group[0]}]
       : group.map((c) => c.rest && resolve(c.rest, c.conditions)))]);
     const group_keys = order.map((o) => ({...o, name: `${outer.alias}_${o.source.split("~")[1]}`}));
-    // Slice 5, fewer_than / exactly: a for row with no counted row counts 0,
-    // and the INNER JOIN does not return it. Two queries: the for rows that
-    // meet `when`, and the joined rows counted per for key (READ, then MODIFY
-    // or INSERT: this runtime's COLLECT does not sum, ANORMALIES
-    // collect-does-not-sum); the for rows are read in key order and a key
-    // the counts lack counts 0. One
-    // query with a LEFT OUTER JOIN would need the rest of `where` in its ON,
-    // which ABAP 7.02 refuses (docs/dsl-l2.md, "Slice 5").
+    // 7.02 permits only a conjunction of equalities in an outer join's ON.
+    // The counted table's client key is a presence marker: Open SQL's implicit
+    // current-client handling makes a real joined row noninitial on SAP.
+    const clause = group[0];
+    const topWhere = clause.tree.op === "and" ? clause.tree.items : [clause.tree];
+    const oneOuter = kind === "limit" && threshold.zero && clause.info.client &&
+      topWhere.every((node) => node.op === "cmp" && clause.conditions[node.index].op === "=" &&
+        clause.conditions[node.index].cmp.rhs.kind !== "param");
+    const marker = oneOuter ? field(clause.alias, clause.info.client, clause.exists_line) : undefined;
     const zero = kind === "limit" && threshold.zero ? {"@id": `${qid}/zero`, rule_line: threshold.rule_line,
       op: threshold.op, value: threshold.value,
       keys: group_keys.map((k) => ({"@id": k["@id"], rule_line: k.rule_line, name: k.name,
@@ -839,6 +840,8 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
       read_key: group_keys.map((k) => `${k.name} = ls_for-${k.name}`).join(" "),
       join_key: group_keys.map((k) => `${k.name} = ${qwa}-${k.name}`).join(" "),
       // the read of the for rows traces to the for line, its WHERE to `when`
+      ...(oneOuter ? {one_outer: true, marker,
+        key_change: group_keys.map((k) => `${qwa}-${k.name} <> ls_prev-${k.name}`).join(" OR ")} : {}),
       for_query: {"@id": `${qid}/for`, rule_line: line("for"),
         from: {"@id": `${id}/for`, rule_line: line("for"), table: outer.table.toLowerCase(), alias: outer.alias},
         where: whereLines(whenTree)}} : undefined;
@@ -847,12 +850,15 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
       ...(zero ? {zero, join_fields: [...fields.values()].filter((f) => group_keys.some((k) => k.source === f.source))} : {}),
       from: {"@id": `${id}/for`, rule_line: line("for"), table: outer.table.toLowerCase(), alias: outer.alias},
       joins: kind === "require" ? [] : group.map((c) => ({"@id": kind === "limit" ? `${c["@id"]}/count` : c["@id"],
-        rule_line: kind === "limit" ? c.exists_line : c.rule_line, table: c.table, alias: c.alias, on: c.on})),
-      where: whereLines(condition), order, alert_parts: parts,
+        rule_line: kind === "limit" ? c.exists_line : c.rule_line, table: c.table, alias: c.alias,
+        on: oneOuter ? topWhere.map((node) => c.conditions[node.index]) : c.on,
+        ...(oneOuter ? {one_outer: true} : {})})),
+      where: whereLines(oneOuter ? whenTree : condition), order, alert_parts: parts,
       ...(kind === "limit" && !zero ? {limit: threshold, group_keys,
         key_change: group_keys.map((k) => `${qwa}-${k.name} <> ls_prev-${k.name}`).join(" OR ")} : {})};
   });
-  const comment = kind === "limit" && threshold.zero ? "two queries: the for rows, and the join rows counted per for key (a key not counted counts 0)"
+  const comment = kind === "limit" && threshold.zero && queries[0].zero.one_outer ? "one query: legal equality-only LEFT OUTER JOIN; missing counted side counts 0"
+    : kind === "limit" && threshold.zero ? "two queries: the for rows, and the join rows counted per for key (a key not counted counts 0)"
     : kind === "limit" ? "one query: join rows counted per for key in the loop (HAVING probe fails here)"
     : kind === "require" ? "one query: the rows of the first with no match in a subquery, never a SELECT per row"
     : combine === "any" ? "one query per clause: its table joined to the first, never a SELECT per row of the first"

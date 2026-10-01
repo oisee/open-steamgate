@@ -452,15 +452,28 @@ measured, on 2026-10-01, transpiled with the fleet tables and run here:
 Neither the probe nor the rule was run on A4H: ABAP Unit runs there
 currently return no test classes at all.
 
-So shape (a), one query with a LEFT OUTER JOIN, is correct here, and legal
-on a 7.02 system only while every condition of `where` beyond the join is an
-equality (with a literal; it goes into `ON`). A non-equality such as the
-demo's `crew.since <= $date` cannot go into `ON` and cannot stand in `WHERE`,
-and neither can `or` or `not`. Shape (b) is used for every `fewer_than` and
-`exactly`, whatever the `where`: **two queries**, both 7.02 Open SQL. **This
-is a simplification**: a rule whose extra conditions are all equalities with
-literals could be one LEFT OUTER JOIN, and is not; one lowering for every
-zero-count rule is the trade, a second database call the price.
+The compiler chooses one LEFT OUTER JOIN for `fewer_than` and `exactly` when
+the counted clause's entire `where` is a conjunction of equalities to outer
+fields or literals. Every `where` equality goes in `ON`; `when` alone goes in
+`WHERE`. The query orders by the `for` key. The loop counts a row only when
+the counted table's `MANDT` key is not initial. On a 7.02 system Open SQL's
+implicit current-client handling guarantees a real joined row has a
+noninitial client marker. This matters:
+the runtime probe accepted a real crew row with an initial `CREW_ID`, so that
+key field cannot distinguish it from a missing side. The generated query
+collects each `for` key once and clears its count before reading
+the counted rows. The `ship_min_captains` demo exercises this form, including
+the real row with an initial crew ID. This runtime does not implement implicit
+client filtering: a direct database probe accepted a row with both `MANDT`
+and `CREW_ID` initial, an all-initial DDIC key. Such manually inserted rows
+are outside this one-query guarantee. The compiler does not emit an explicit
+client equality in `ON`, which
+7.02 Open SQL allows only with `CLIENT SPECIFIED` (the same SAP Help page
+linked above).
+
+A non-equality such as `crew.since <= $date`, a parameter equality, or an
+`or` / `not` in `where` keeps the two-query form below. The compiler makes
+this choice from the condition tree, not from generated SQL.
 
 1. The `for` rows that meet `when`, the key and the fields the alert names,
    `ORDER BY` the `for` key, into `lt_for`. It traces to the `for:` line, its
@@ -470,13 +483,13 @@ zero-count rule is the trade, a second database call the price.
    TABLE KEY`, then `ADD 1` and `MODIFY TABLE`, or `INSERT ... INTO TABLE`
    for a new key; no `COLLECT`, see above).
 
-Then `LOOP AT lt_for`: `CLEAR lv_count`, `READ TABLE lt_count` by the key, the
+For the two-query form, `LOOP AT lt_for`: `CLEAR lv_count`, `READ TABLE lt_count` by the key, the
 count taken when found, and 0 when not; the threshold decides the alert. The
 alerts come in the `for` key order. `more_than` and `at_least` keep the
 one-query lowering of slice 4; their ABAP did not change. `check_reference`
 stays the nested form (`DESCRIBE TABLE ... LINES` counts 0 by itself).
-`test/dsl-l2.mjs` counts the database calls: two per `check`, whatever the
-number of `for` rows.
+`test/dsl-l2.mjs` counts database calls: one for the equality-only form and
+two for the other form, whatever the number of `for` rows.
 
 ### Derived cases
 
@@ -534,9 +547,17 @@ and fails `none_and_two` and `b_count_above` with `=` made `>=`, and
 `b_count_next_zero` with `CLEAR lv_count` dropped; `exactly: 0`
 and `exactly: 3` run green with their own cases.
 
+`src/l2demo/ship_min_captains.l2.yaml` is the one-query example:
+`crew.ship_id = ship.ship_id and crew.role = 'C'`. Its committed generated
+class contains one `SELECT`. The examples and every derived case compare
+`check` with `check_reference`, including an inserted crew row whose
+`CREW_ID` is initial. The one-query call count stays one across five ships.
+Three generated-code mutants go red: counting a missing-side row as one,
+moving the role equality from `ON` to `WHERE`, and dropping `CLEAR lv_count`.
+
 ## Not yet
 
-Parameters other than `$date`, a one-query zero count (a LEFT OUTER JOIN where `where` beyond the join is only equalities with literals),
+Parameters other than `$date`,
 `sum` / `min` / `max`, grouping by fields of the counted table, `limit` under `all` / `any`, a condition on the outer table inside `where` beyond
 the join (a comparison of an `exists` field with an outer field is allowed; one of only outer
 fields is not), a `for` and an `exists` on the same table, a join without an equality, an

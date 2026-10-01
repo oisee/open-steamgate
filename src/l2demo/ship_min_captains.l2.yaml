@@ -1,0 +1,29 @@
+rule: ship-min-captains
+class: zcl_l2_ship_min_captains
+title: An active ship needs two captains
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'A'
+limit:
+  count: ZOSD_L2_CREW as crew
+  where: crew.ship_id = ship.ship_id and crew.role = 'C'
+  fewer_than: 2
+alert: "{ship.ship_id} {ship.name}: {count} captains"
+boundaries: auto
+examples:
+  - name: zero and two
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S002, name: Tern, status: A}
+        - {ship_id: S001, name: Gull, status: A}
+      ZOSD_L2_CREW:
+        - {crew_id: C00002, ship_id: S001, role: C, since: 20260101}
+        - {crew_id: C00001, ship_id: S001, role: C, since: 20260101}
+        - {crew_id: C00003, ship_id: S002, role: K, since: 20260101}
+    expect: ["S002 Tern: 0 captains"]
+  - name: initial crew id
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S003, name: Heron, status: A}]
+      ZOSD_L2_CREW: [{crew_id: '', ship_id: S003, role: C, since: 20260101}]
+    expect: ["S003 Heron: 1 captains"]
