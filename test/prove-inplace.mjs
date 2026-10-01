@@ -4,15 +4,18 @@
 // the abapGit repository row, and it answers the snippets the way the
 // snippets ask abapGit: hash = SHA-256 of each serialised file, a deploy that
 // guards on the expected hashes and writes the zip's files over the objects
-// it was told it may overwrite. The fake does not execute ABAP, so snippet
-// properties are also checked on their text.
+// it was told it may overwrite. It answers the way vsp v2.58.0-54 does:
+// execute_abap as JSON whose result_text is the snippet's RETURN_VALUE( lt_out )
+// table, and, for the fresh mode's sequence below, git_import_zip,
+// git_delete_objects and `read DEVC` with inventory. The fake does not execute
+// ABAP, so snippet properties are also checked on their text.
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {inflateRawSync} from "node:zlib";
-import {MARK_CLOSE, MARK_OPEN, buildZip, main} from "../tools/osd-prove-on-system.mjs";
+import {buildZip, main} from "../tools/osd-prove-on-system.mjs";
 import {
   chunkAbap, dropRepoAbap, deployAbap, hashAbap, listAbap, canonicalXml, objectHash, readState, snapshotDir, writeState,
 } from "../tools/osd-prove-inplace.mjs";
@@ -25,9 +28,11 @@ const DEMO = "CLAS ZCL_OSD_PROVE_DEMO";
 const PLAIN = "CLAS ZCL_OSD_PROVE_PLAIN";
 const OTHER = "CLAS ZCL_OSD_UNTOUCHED";
 
-const alert = (msg) => `Program: ZTEMP_EXEC_1\nSuccess: false\nMessage: The code did not finish: Critical Assertion Error: '${msg}'\n`
-  + `  Title: Critical Assertion Error: '${msg}'\n`;
-const framed = (body) => alert(`${MARK_OPEN}${body}${MARK_CLOSE}`);
+/** vsp's execute_abap answer for a snippet that returned `rows` ([k, v]) */
+const answer = (rows) => JSON.stringify({success: true, programName: "ZTEMP_EXEC_12345678", output: ["..."], executionTime: 0.1,
+  message: "Executed successfully, 1 output(s) returned", cleanedUp: true,
+  result_text: JSON.stringify([...rows.map(([k, v]) => ({K: k, V: String(v)})), {K: "end", V: "OSDPROVE"}])});
+const json = (o, isError = false) => `${isError ? "ERROR: " : ""}${JSON.stringify(o)}`;
 const sha = (s) => createHash("sha256").update(Buffer.from(s, "utf8")).digest("hex").toUpperCase();
 
 function unzip(buf) {
@@ -90,16 +95,10 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
     sys,
     put,
     async call(action, target, params) {
-      const kindOf = (code) => (code.includes("zcl_abapgit_objects=>delete") ? "cleanup"
-        : code.includes("nostamp=") ? "receipt"
-          : code.includes("existing={ lv_n }") ? "preflight"
-            : code.includes("zcl_abapgit_zip=>load") ? (code.includes("lt_exp") ? "deploy" : "import")
-              : code.includes("lv_chunk") ? "chunk"
-          : code.includes("repo_deleted") ? "drop"
-            : code.includes("children={ lv_kids }") ? "list"
-              : code.includes("seoclassdf") ? "check"
-                : code.includes("files={ lv_n }") ? "hash" : "?");
-      const kind = action === "analyze" ? kindOf(params.code) : action;
+      const kindOf = (code) => /^" osdprove:(\w+)$/m.exec(code)?.[1] ?? "?";
+      const kind = action === "analyze" ? kindOf(params.code)
+        : action === "system" ? {git_import_zip: "import", git_delete_objects: "delete"}[params.type] ?? params.type
+          : action === "read" ? "inventory" : action;
       sys.seen[kind] = (sys.seen[kind] ?? 0) + 1;
       sys.calls.push({kind, params});
       for (const h of hooks) {
@@ -114,24 +113,18 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
       if (action === "test") {
         const name = target.replace(/^CLAS /, "");
         const c = info(name);
-        if (c === undefined || c.methods.length === 0) return JSON.stringify({classes: null});
-        return JSON.stringify({classes: [{name: "LTCL_DOUBLE", parentName: name, testMethods: c.methods.map((m) => ({name: m}))}]});
+        const classes = c === undefined || c.methods.length === 0 ? [] : [{name: "LTCL_DOUBLE", parentName: name, testMethods: c.methods.map((m) => ({name: m}))}];
+        const methods = classes.reduce((n, x) => n + x.testMethods.length, 0);
+        return JSON.stringify({ok: methods > 0, counts: {classes: classes.length, methods, passed: methods, failed: 0, classFailures: 0, warnings: 0, notRun: 0}, classes});
       }
-      assert.equal(action, "analyze", `unexpected call ${action}`);
-      const code = params.code;
-      assert.match(code, /cl_abap_unit_assert=>fail\( msg = /, "every snippet reports through fail( )");
-      assert.ok(/^[\x00-\x7f]*$/.test(code), "snippet is ASCII");
-      const items = itemsOf(code);
-      const pkg = /'(\$[A-Z0-9_]+)'/.exec(code)?.[1];
-      // ---- the fresh mode's snippets (the sequence test): preflight, import, receipt, cleanup
-      if (kind === "preflight") {
-        return framed(`tdevc=${sys.packages.has(pkg) ? 1 : 0}; repo=none; existing=0;`);
-      }
+      // ---- the fresh mode's vsp operations (the sequence test): import, delete, inventory
       if (kind === "import") {
-        const b64 = [...code.matchAll(/APPEND `([A-Za-z0-9+/=]*)` TO lt_b64\./g)].map((m) => m[1]).join("");
-        const zip = unzip(Buffer.from(b64, "base64"));
-        let repo = sys.repos.find((r) => r.pkg === pkg);
-        if (!repo) { repo = {key: "000000000042", name: OWN, pkg}; sys.repos.push(repo); }
+        const pkg = params.package;
+        const zip = unzip(Buffer.from(params.zip_base64, "base64"));
+        assert.equal(params.overwrite, false);
+        if (sys.repos.some((r) => r.pkg === pkg)) return json({status: "refused", package: pkg, log: [{type: "E", text: "a repository exists"}]}, true);
+        const repo = {key: "000000000042", name: params.repo_name, pkg};
+        sys.repos.push(repo);
         const fresh = new Map();
         for (const [f, text] of zip) {
           const m = /^src\/([a-z0-9_]+)\.([a-z]+)\.(.+)$/.exec(f);
@@ -141,81 +134,131 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
           fresh.get(item).push([f.slice(4), text]);
         }
         for (const [item, files] of fresh) { put(item, files, pkg); restamp(item); }
-        return framed(`files=${zip.size}; repo=${repo.key}; status=S; logs=0; tadir=${sys.objects.size};`);
+        return json({status: "imported", job: "ZVSP_GIT_IMPORT", jobCount: "12345678", package: pkg, repoKey: repo.key, repoName: repo.name,
+          repoCreated: true, log: [], tadir: [...fresh.keys()].map((i) => ({pgmid: "R3TR", object: i.slice(0, 4), objName: i.slice(5), devclass: pkg, created: true}))});
+      }
+      if (kind === "delete") {
+        const pkg = params.package;
+        const res = {package: pkg, objects: [], repoDeleted: false, packageDeleted: false};
+        for (const it of params.objects) {
+          const [type, name] = it.split(" ");
+          const o = sys.objects.get(it);
+          if (type === "DEVC" || o?.devclass !== pkg) res.objects.push({type, name, status: "skipped"});
+          else { sys.objects.delete(it); res.objects.push({type, name, status: "deleted"}); }
+        }
+        const empty = ![...sys.objects.values()].some((o) => o.devclass === pkg);
+        let repo = sys.repos.find((r) => r.pkg === pkg);
+        if (repo && params.delete_repo && empty) {
+          sys.repos = sys.repos.filter((r) => r !== repo);
+          res.repoDeleted = true;
+          res.repo = {key: repo.key, name: repo.name, offline: true};
+          repo = undefined;
+        }
+        if (empty && !repo) { sys.packages.delete(pkg); res.packageDeleted = true; }
+        return json(res);
+      }
+      if (kind === "inventory") {
+        const pkg = target.slice(5);
+        return json({package: pkg, objects: [...sys.objects].filter(([, o]) => o.devclass === pkg).map(([i]) => ({type: i.slice(0, 4), name: i.slice(5)})),
+          subpackages: [], abapgit_repos: sys.repos.filter((r) => r.pkg === pkg).map((r) => ({key: r.key, package: pkg, offline: true}))});
+      }
+      assert.equal(action, "analyze", `unexpected call ${action}`);
+      const code = params.code;
+      assert.match(code.trimEnd().split("\n").at(-1), /^RETURN_VALUE\( lt_out \)\.$/, "every snippet hands back its rows with RETURN_VALUE( )");
+      assert.ok(/^[\x00-\x7f]*$/.test(code), "snippet is ASCII");
+      const items = itemsOf(code);
+      const pkg = /'(\$[A-Z0-9_]+)'/.exec(code)?.[1];
+      const out = [];
+      // ---- the fresh mode's snippets (the sequence test): preflight, receipt, decision, residue
+      if (kind === "preflight") {
+        out.push(["tdevc", sys.packages.has(pkg) ? 1 : 0], ["repo", "none"], ["existing", 0]);
+        return answer(out);
       }
       if (kind === "receipt") {
-        let out = "";
         for (const item of items) {
-          out += ` stamp=${colon(item)}@${sys.stamps.get(item)};`;
-          for (const f of hashes(item)) out += ` h_file=${colon(item)}|${f.n}|${f.h}|${f.size};`;
-          out += ` h_obj=${colon(item)} files=${sys.objects.get(item).files.size};`;
+          out.push(["stamp", `${colon(item)}@${sys.stamps.get(item)}`]);
+          for (const f of hashes(item)) out.push(["h_file", `${colon(item)}|${f.n}|${f.h}|${f.size}`]);
+          out.push(["h_obj", `${colon(item)}|${sys.objects.get(item).files.size}`]);
         }
-        return framed(`${out} items=${items.length};`);
+        out.push(["items", items.length]);
+        return answer(out);
       }
-      if (kind === "cleanup") {
+      if (kind === "decide") {
         const stamps = [...code.matchAll(/APPEND `([A-Z]{4}:[0-9/]+)` TO lt_stamps\./g)].map((m) => m[1]);
         const exp = [...code.matchAll(/APPEND `([A-Z0-9]{4} [A-Z0-9_/]+)@([^=`]+)=([0-9A-F]{64})` TO lt_exp\./g)];
-        let out = "";
-        const handed = [];
-        items.forEach((item, i) => {
-          if (sys.stamps.get(item) === stamps[i]) { handed.push(item); return; }
-          const want = exp.filter((m) => m[1] === item).map((m) => `${m[2]}=${m[3]}`).sort();
-          if (want.length > 0 && JSON.stringify(want) === JSON.stringify(guardLines(item).sort())) {
-            out += ` rehashed=${colon(item)}@${sys.stamps.get(item)};`;
-            handed.push(item);
-          } else {
-            out += ` changed=${colon(item)}@${sys.stamps.get(item)};`;
-            if (want.length > 0) out += ` hashdiff=${colon(item)};`;
-          }
-        });
-        for (const item of handed) sys.objects.delete(item);
         const repo = sys.repos.find((r) => r.pkg === pkg);
-        if (repo) { sys.repos = sys.repos.filter((r) => r !== repo); out += ` repo_deleted=${repo.key};`; }
+        out.push(...(repo ? [["repo", repo.key], ["repo_name", repo.name]] : [["repo", "none"]]));
+        let n = 0;
+        items.forEach((item, i) => {
+          let same = sys.stamps.get(item) === stamps[i];
+          if (!same) {
+            const want = exp.filter((m) => m[1] === item).map((m) => `${m[2]}=${m[3]}`).sort();
+            same = want.length > 0 && JSON.stringify(want) === JSON.stringify(guardLines(item).sort());
+            if (same) out.push(["rehashed", `${colon(item)}@${sys.stamps.get(item)}`]);
+            else {
+              out.push(["changed", `${colon(item)}@${sys.stamps.get(item)}`]);
+              if (want.length > 0) out.push(["hashdiff", colon(item)]);
+            }
+          }
+          if (same) { n += 1; out.push(["delete", colon(item)]); }
+        });
+        out.push(["go", "X"], ["to_delete", n], ["items", items.length]);
+        return answer(out);
+      }
+      if (kind === "residue") {
+        const key = /lv_key = '([0-9]+)'\./.exec(code)?.[1];
         const left = items.filter((i) => sys.objects.has(i));
-        const rest = [...sys.objects].filter(([, o]) => o.devclass === pkg).map(([i]) => i);
-        if (rest.length === 0) sys.packages.delete(pkg);
-        return framed(`${out} to_delete=${handed.length}; repo_left=0;${left.map((i) => ` item_left=${colon(i)};`).join("")} items_left=${left.length}; `
-          + `others=${rest.length};${rest.map((i) => ` other=${colon(i)};`).join("")} children=0; tdevc_left=${sys.packages.has(pkg) ? 1 : 0};`);
+        const rest = [...sys.objects].filter(([, o]) => o.devclass === pkg).map(([i]) => i).filter((i) => !items.includes(i));
+        const repo = sys.repos.find((r) => r.pkg === pkg);
+        out.push(["repo_left", key && sys.repos.some((r) => r.key === key) ? 1 : 0], ...(repo ? [["repo", repo.key], ["repo_name", repo.name]] : [["repo", "none"]]),
+          ...left.map((i) => ["item_left", colon(i)]), ["items_left", left.length],
+          ["others", rest.length + left.length], ...[...left, ...rest].map((i) => ["other", colon(i)]), ["children", 0], ["tdevc_left", sys.packages.has(pkg) ? 1 : 0]);
+        return answer(out);
       }
       if (kind === "list") {
         const repo = sys.repos.find((r) => r.pkg === pkg);
         const mine = [...sys.objects].filter(([, o]) => o.devclass === pkg).map(([i]) => i).sort();
-        return framed(`tdevc=${sys.packages.has(pkg) ? 1 : 0}; ${repo ? `repo=${repo.key}; repo_name=${repo.name};` : "repo=none;"} items=${mine.length};`
-          + mine.map((i) => ` item=${colon(i)};`).join("") + " children=0;");
+        out.push(["tdevc", sys.packages.has(pkg) ? 1 : 0], ...(repo ? [["repo", repo.key], ["repo_name", repo.name]] : [["repo", "none"]]),
+          ["items", mine.length], ...mine.map((i) => ["item", colon(i)]), ["children", 0]);
+        return answer(out);
       }
       if (kind === "hash" || kind === "chunk") {
-        let out = "";
+        let found = "";
         for (const item of items) {
           const o = sys.objects.get(item);
-          if (!o) out += ` absent=${colon(item)};`;
-          else if (o.devclass !== pkg) out += ` elsewhere=${colon(item)}@${o.devclass};`;
+          if (!o) out.push(["absent", colon(item)]);
+          else if (o.devclass !== pkg) out.push(["elsewhere", `${colon(item)}@${o.devclass}`]);
           else if (kind === "hash") {
-            for (const f of hashes(item)) out += ` file=${colon(item)}|${f.n}|${f.h}|${f.size};`;
-            out += ` obj=${colon(item)} files=${o.files.size};`;
+            for (const f of hashes(item)) out.push(["file", `${colon(item)}|${f.n}|${f.h}|${f.size}`]);
+            out.push(["obj", `${colon(item)}|${o.files.size}`]);
           } else {
             const [, name, off, len] = /ls_file-filename = '([^']+)'[\s\S]*ls_file-data\+(\d+)\((\d+)\)/.exec(code);
             const text = o.files.get(name);
             if (text !== undefined) {
+              found = "X";
               const b = Buffer.from(text, "utf8");
-              out += ` fhash=${sha(text)}; chunk=${b.subarray(Number(off), Number(off) + Number(len)).toString("hex").toUpperCase()};`;
+              out.push(["fhash", sha(text)], ["chunk", b.subarray(Number(off), Number(off) + Number(len)).toString("hex").toUpperCase()]);
             }
-            out += ` found=${text === undefined ? "" : "X"};`;
           }
         }
-        return framed(out);
+        if (kind === "chunk") out.push(["found", found]);
+        return answer(out);
       }
       if (kind === "check") {
         const names = [...code.matchAll(/APPEND `([A-Z0-9_]+)` TO lt_cls\./g)].map((m) => m[1]);
-        return framed(names.map((n) => { const c = info(n); return c === undefined ? ` ${n} found=4 wut= ccau=0;`
-          : ` ${n} found=0 wut=${c.wut ? "X" : ""} ccau=${c.methods.length ? 10 + c.methods.length * 3 : 0};`; }).join(""));
+        for (const n of names) {
+          const c = info(n);
+          out.push(["cls", c === undefined ? `${n}|4||0` : `${n}|0|${c.wut ? "X" : ""}|${c.methods.length ? 10 + c.methods.length * 3 : 0}`]);
+        }
+        return answer(out);
       }
       if (kind === "drop") {
         const key = /get_key\( \) <> '(\d+)'/.exec(code)[1];
         const repo = sys.repos.find((r) => r.pkg === pkg);
-        let out = "";
-        if (repo && (repo.key !== key || repo.name !== OWN)) out += ` ERR refused: repository ${repo.key} named ${repo.name} is not the one this run used;`;
-        else if (repo) { sys.repos = sys.repos.filter((r) => r !== repo); out += ` repo_deleted=${key};`; }
-        return framed(`${out} repo_left=${sys.repos.some((r) => r.key === key) ? 1 : 0};`);
+        if (repo && (repo.key !== key || repo.name !== OWN)) out.push(["err", `refused: repository ${repo.key} named ${repo.name} is not the one this run used`]);
+        else if (repo) { sys.repos = sys.repos.filter((r) => r !== repo); out.push(["repo_deleted", key]); }
+        out.push(["repo_left", sys.repos.some((r) => r.key === key) ? 1 : 0]);
+        return answer(out);
       }
       assert.equal(kind, "deploy");
       sys.imports += 1;
@@ -223,19 +266,22 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
       const zip = unzip(Buffer.from(b64, "base64"));
       sys.deployedZips.push(zip);
       const exp = [...code.matchAll(/APPEND `([A-Z0-9]{4} [A-Z0-9_/]+)@([^=`]+)=([0-9A-F]{64})` TO lt_exp\./g)];
-      let out = `files=${zip.size};`;
+      out.push(["files", zip.size]);
       let repo = sys.repos.find((r) => r.pkg === pkg);
-      if (repo && repo.name !== OWN) return framed(`${out} ERR the package has repository ${repo.key} named ${repo.name}, not this tool's; logs=0; tadir=0;`);
+      if (repo && repo.name !== OWN) {
+        return answer([...out, ["err", `the package has repository ${repo.key} named ${repo.name}, not this tool's`], ["logs", 0], ["tadir", 0]]);
+      }
       let foreign = false;
       for (const item of items) {
-        if (!sys.objects.has(item)) { out += ` absent=${colon(item)};`; foreign = true; continue; }
+        if (!sys.objects.has(item)) { out.push(["absent", colon(item)]); foreign = true; continue; }
         const want = exp.filter((m) => m[1] === item).map((m) => `${m[2]}=${m[3]}`).sort();
-        if (JSON.stringify(want) !== JSON.stringify(guardLines(item).sort())) { out += ` changed=${colon(item)};`; foreign = true; }
+        if (JSON.stringify(want) !== JSON.stringify(guardLines(item).sort())) { out.push(["changed", colon(item)]); foreign = true; }
       }
-      if (foreign) return framed(`${out} import refused; logs=0; tadir=${sys.objects.size};`);
+      if (foreign) return answer([...out, ["refused", "X"], ["logs", 0], ["tadir", sys.objects.size]]);
       let created = false;
       if (!repo) { repo = {key: "000000000042", name: OWN, pkg}; sys.repos.push(repo); created = true; }
-      out += ` repo=${repo.key};${created ? ` repo_new=${repo.key};` : ""}`;
+      if (created) out.push(["repo_new", repo.key]);
+      out.push(["repo", repo.key]);
       const byObject = new Map();
       for (const [f, text] of zip) {
         const m = /^src\/([a-z0-9_]+)\.([a-z]+)\.(.+)$/.exec(f);
@@ -245,7 +291,7 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
         byObject.get(item).push([f.slice(4), text]);
       }
       for (const item of byObject.keys()) {
-        if (!items.includes(item)) return framed(`${out} ERR would overwrite ${colon(item).replace(":", " ")} (action 3); import refused; logs=0; tadir=0;`);
+        if (!items.includes(item)) return answer([...out, ["err", `would overwrite ${item} (action 3)`], ["refused", "X"], ["logs", 0], ["tadir", 0]]);
       }
       for (const [item, files] of byObject) {
         const o = sys.objects.get(item);
@@ -253,14 +299,14 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
         for (const [n, t] of files) o.files.set(n, stored(n, t, sys));
         if (restoreCorrupts && sys.imports > 1) o.files.set(`${item.slice(5).toLowerCase()}.clas.abap`, "CLASS broken.\n");
       }
-      out += " status=S;";
+      out.push(["status", "S"]);
       inStep?.(sys);
       // the deploy snippet's own post-deploy read, same dialog step
       for (const item of items) {
-        for (const f of hashes(item)) out += ` dep_file=${colon(item)}|${f.n}|${f.h}|${f.size};`;
-        out += ` dep_obj=${colon(item)} files=${sys.objects.get(item).files.size};`;
+        for (const f of hashes(item)) out.push(["dep_file", `${colon(item)}|${f.n}|${f.h}|${f.size}`]);
+        out.push(["dep_obj", `${colon(item)}|${sys.objects.get(item).files.size}`]);
       }
-      return framed(`${out} logs=0; tadir=${sys.objects.size};`);
+      return answer([...out, ["logs", 0], ["tadir", sys.objects.size]]);
     },
   };
 }
@@ -269,7 +315,9 @@ const lines = [];
 async function run(args, mcp, runs = mkdtempSync(join(tmpdir(), "osd-prove-inplace-"))) {
   lines.length = 0;
   const code = await main(args, {mcp, out: (l) => lines.push(String(l)), receiptDir: runs});
-  return {code, text: lines.join("\n"), runs};
+  const text = lines.join("\n");
+  assert.doesNotMatch(text, /disagree/, text);
+  return {code, text, runs};
 }
 const inPlace = (extra = []) => [join(FIXTURE, "src"), "--in-place", "--package", PKG, "--unit", "prove-demo", "--manifest", MANIFEST, ...extra];
 const snapHashes = (mcp) => Object.fromEntries([...mcp.sys.objects].map(([i, o]) => [i, objectHash([...o.files].map(([n, t]) => ({name: n, sha256: sha(t).toLowerCase()})))]));
@@ -597,24 +645,24 @@ describe("osd-prove-on-system --in-place", () => {
     assert.equal(mcp.sys.imports, 0);
   });
 
-  it("snippets: ASCII, end with the fail( ) report, values validated, the deploy guards and approves only its items", () => {
+  it("snippets: ASCII, end with their RETURN_VALUE( ), values validated, the deploy guards and approves only its items", () => {
     const zip = Buffer.from("PK");
     const exp = [{item: DEMO, files: [{name: "zcl_osd_prove_demo.clas.abap", sha256: "a".repeat(64)}]}];
     for (const code of [listAbap(PKG), hashAbap(PKG, [DEMO]), chunkAbap(PKG, DEMO, "zcl_osd_prove_demo.clas.abap", 0, 100),
       deployAbap(zip, PKG, exp), dropRepoAbap(PKG, "000000000042")]) {
       assert.ok(/^[\x00-\x7f]*$/.test(code));
-      assert.match(code.trimEnd().split("\n").at(-1), /^cl_abap_unit_assert=>fail\( msg = \|OSDPROVE<<\{ lv_out \}>>OSDPROVE\| \)\.$/);
+      assert.match(code.trimEnd().split("\n").at(-1), /^RETURN_VALUE\( lt_out \)\.$/);
     }
     const d = deployAbap(zip, PKG, exp);
     assert.match(d, /IF lt_a <> lt_b\.[\s\S]*lv_foreign = abap_true\./);
     // the post-deploy hashes are read in the deploy's own step, right after
     // the deserialise, with the hash snippet's serialisation and digest
     const des = d.indexOf("li_repo->deserialize(");
-    const dep = d.indexOf("dep_file=");
+    const dep = d.indexOf("k = 'dep_file'");
     assert.ok(des > 0 && dep > des, "the post-deploy read follows the deserialise in the same snippet");
-    const hashLine = hashAbap(PKG, [DEMO]).split("\n").find((l) => l.includes(" file="));
-    assert.ok(d.split("\n").some((l) => l.trim() === hashLine.trim().replace(" file=", " dep_file=")), "the same report line as the hash snippet");
-    assert.match(d, /repo_new=\{ li_repo->get_key\( \) \}/);
+    const hashLine = hashAbap(PKG, [DEMO]).split("\n").find((l) => l.includes("k = 'file'"));
+    assert.ok(d.split("\n").some((l) => l.trim() === hashLine.trim().replace("k = 'file'", "k = 'dep_file'")), "the same result row as the hash snippet");
+    assert.match(d, /k = 'repo_new' v = \|\{ li_repo->get_key\( \) \}\|/);
     assert.ok(d.indexOf("lt_a <> lt_b") < d.indexOf("li_repo->deserialize("), "the guard runs before the deserialise");
     assert.match(d, /zif_abapgit_objects=>c_deserialize_action-update\s+OR <ls_o>-action = zif_abapgit_objects=>c_deserialize_action-overwrite/);
     assert.match(d, /<ls_w>-decision = zif_abapgit_definitions=>c_no\./);
@@ -622,7 +670,7 @@ describe("osd-prove-on-system --in-place", () => {
     // package's own DEVC, measured on A4H): declined, never a refusal and
     // never approved
     assert.match(d, /ELSEIF <ls_o>-action = zif_abapgit_objects=>c_deserialize_action-delete\.[\s\S]{0,400}?<ls_o>-decision = zif_abapgit_definitions=>c_no\./);
-    assert.match(d, /keep=\{ <ls_o>-obj_type \}/);
+    assert.match(d, /k = 'keep' v = \|\{ <ls_o>-obj_type \}/);
     assert.match(d, /LOOP AT ls_checks-data_loss/);
     assert.doesNotMatch(d, /purge|zcl_abapgit_objects=>delete/);
     assert.throws(() => hashAbap(PKG, ["CLAS ZCL_X` TO lt_items. DELETE"]), /cannot be put into an ABAP literal/);

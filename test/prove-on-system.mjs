@@ -1,11 +1,16 @@
 // tools/osd-prove-on-system.mjs against a fake system. Nothing here talks
-// to SAP: the MCP transport is a model of what vsp answered on A4H
-// (2026-10-01), driven by the zip the tool really builds. The model reads
-// the zip -- the class XML, the test include -- so the WITH_UNIT_TESTS case
-// is the system's behaviour following from the file, not a canned answer.
-// The cleanup model does what the snippet asks of abapGit and nothing more:
-// it deletes the TADIR rows it is handed, the repository row, and the
-// package only when nothing is in it -- so a test can see what survives.
+// to SAP: the MCP transport is a model of what vsp v2.58.0-54 answers --
+// execute_abap as JSON with result_text (the snippet's RETURN_VALUE( lt_out ),
+// a table serialised as [{"K","V"}]), ABAP Unit as {ok, counts, classes},
+// git_import_zip / git_import_status, git_delete_objects and `read DEVC`
+// with inventory, in the shapes vsp's own source gives them. It is driven
+// by the zip the tool really builds: the model reads the zip -- the class
+// XML, the test include -- so the WITH_UNIT_TESTS case is the system's
+// behaviour following from the file, not a canned answer.
+// git_delete_objects does what vsp does and nothing more: it deletes the
+// TADIR items of the package it is handed, the offline repository only on
+// delete_repo and only from an emptied package, and the package only when
+// nothing and no repository is left -- so a test can see what survives.
 // No child process is spawned: the tool writes its zip in process and the
 // fake reads it in process (a sandbox may refuse to spawn `zip`/`unzip`).
 import assert from "node:assert/strict";
@@ -14,10 +19,12 @@ import {cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} fr
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {inflateRawSync} from "node:zlib";
+import * as abaplint from "@abaplint/core";
 import {
-  MARK_CLOSE, MARK_OPEN, STAMPED_KINDS, buildZip, checkPackage, cleanupAbap, classCheckAbap, countTestMethods, importAbap,
-  main, osgRunner, preflightAbap, prove, receiptAbap, verdict,
+  STAMPED_KINDS, buildZip, checkPackage, classCheckAbap, countTestMethods, decideAbap, main, osgRunner, preflightAbap,
+  prove, receiptAbap, residueAbap, rowsOf, verdict,
 } from "../tools/osd-prove-on-system.mjs";
+import {chunkAbap, deployAbap, dropRepoAbap, hashAbap, listAbap} from "../tools/osd-prove-inplace.mjs";
 
 const FIXTURE = resolve("test/fixtures/prove-on-system");
 const MANIFEST = join(FIXTURE, "manifest.json");
@@ -25,12 +32,14 @@ const PKG = "$ZOSG_TMP_TEST";
 const OWN = `OSDPROVE ${PKG}`;
 const ZIP_OBJECTS = ["CLAS ZCL_OSD_PROVE_DEMO", "CLAS ZCL_OSD_PROVE_PLAIN"];
 
-/** what vsp prints for an execute_abap whose last line is fail( msg ) */
-const alert = (msg) => `Program: ZTEMP_EXEC_1\nSuccess: false\nCleaned Up: true\n`
-  + `Message: The code did not finish: Critical Assertion Error: '${msg}'\n\n`
-  + `Raw Alerts (for debugging):\n  Kind: failedAssertion, Severity: critical\n`
-  + `  Title: Critical Assertion Error: '${msg}'\n`;
-const framed = (body) => alert(`${MARK_OPEN}${body}${MARK_CLOSE}`);
+/** what vsp answers for an execute_abap whose snippet returned `rows`
+ *  ([k, v] pairs) with RETURN_VALUE( lt_out ): result_text is the table as
+ *  JSON, its last row the end row the snippet appends */
+export const answer = (rows, {end = true, edit = (t) => t} = {}) => JSON.stringify({
+  success: true, programName: "ZTEMP_EXEC_12345678", output: ["..."], executionTime: 0.12,
+  message: "Executed successfully, 1 output(s) returned", cleanedUp: true,
+  result_text: edit(JSON.stringify([...rows.map(([k, v]) => ({K: k, V: String(v)})), ...(end ? [{K: "end", V: "OSDPROVE"}] : [])])),
+}, undefined, 2);
 
 /** a zip's files, read the way cl_abap_zip would: local headers, deflate */
 function unzip(buf) {
@@ -53,6 +62,7 @@ function unzip(buf) {
 const sha = (text) => createHash("sha256").update(Buffer.from(text, "utf8")).digest("hex").toUpperCase();
 const itemsOf = (code) => [...code.matchAll(/APPEND `([A-Z0-9]{4} [A-Z0-9_/]+)` TO lt_items\./g)].map((m) => m[1]);
 const colon = (item) => item.replace(" ", ":");
+const kindOf = (code) => /^" osdprove:(\w+)$/m.exec(code)?.[1];
 
 /** A sandbox system as far as this tool can see it: packages (name ->
  *  parent), TADIR rows ({item, devclass}), abapGit repositories ({key, name,
@@ -60,9 +70,10 @@ const colon = (item) => item.replace(" ", ":");
  *  about. */
 function fakeSystem({
   importErrors = [], importWarnings = [], status, failing = new Set(),
-  before = {}, intruder, childPackage, undeletable = new Set(), editImport = (m) => m,
+  before = {}, intruder, childPackage, undeletable = new Set(), editImport = (a) => a,
   dropCheck = new Set(), checkOverride = {}, unitText = {}, afterImport = () => {}, touchAfterReceipt = new Set(),
-  afterReceipt = () => {}, beforeCheck = () => {}, withHashes = true, hashFail = new Set(),
+  afterReceipt = () => {}, beforeCheck = () => {}, withHashes = true, hashFail = new Set(), execAnswer = {},
+  failedImport = false, refuseImport, pendingPolls = 0, inventoryEdit = (i) => i, deleteEdit = (r) => r,
 } = {}) {
   const sys = {
     packages: new Map(Object.entries(before.packages ?? {})),
@@ -73,6 +84,7 @@ function fakeSystem({
     stamps: new Map(),
     // the files abapGit would serialise each object to: item -> Map(name -> text)
     files: new Map(),
+    importAnswer: undefined, polls: 0,
   };
   const fileHashes = (item) => [...(sys.files.get(item) ?? [])].sort(([a], [b]) => (a < b ? -1 : 1))
     .map(([n, t]) => ({n, h: sha(t), size: Buffer.byteLength(t)}));
@@ -82,6 +94,187 @@ function fakeSystem({
   };
   const repoOf = (pkg) => sys.repos.find((r) => r.pkg === pkg);
   const row = (item) => sys.tadir.find((t) => t.item === item);
+  const json = (o, isError = false) => `${isError ? "ERROR: " : ""}${JSON.stringify(o, undefined, 2)}`;
+  const hashRows = (out, item, prefix) => {
+    for (const f of fileHashes(item)) out.push([`${prefix}file`, `${colon(item)}|${f.n}|${f.h}|${f.size}`]);
+    out.push([`${prefix}obj`, `${colon(item)}|${sys.files.get(item)?.size ?? 0}`]);
+  };
+  const exec = (kind, code, pkg) => {
+    const out = [];
+    if (kind === "chunk") {
+      const [, name, off, len] = /ls_file-filename = '([^']+)'[\s\S]*ls_file-data\+(\d+)\((\d+)\)/.exec(code);
+      let found = "";
+      for (const item of itemsOf(code)) {
+        const text = sys.files.get(item)?.get(name);
+        if (text !== undefined) {
+          found = "X";
+          out.push(["fhash", sha(text)], ["chunk", Buffer.from(text, "utf8").subarray(Number(off), Number(off) + Number(len)).toString("hex").toUpperCase()]);
+        }
+      }
+      out.push(["found", found]);
+      return out;
+    }
+    if (kind === "hash") {
+      for (const item of itemsOf(code)) hashRows(out, item, "");
+      return out;
+    }
+    if (kind === "preflight") {
+      const repo = repoOf(pkg);
+      const exists = itemsOf(code).map(row).filter(Boolean);
+      out.push(["tdevc", sys.packages.has(pkg) ? 1 : 0]);
+      if (repo) out.push(["repo", repo.key], ["repo_name", repo.name]);
+      else out.push(["repo", "none"]);
+      for (const t of exists) out.push(["exists", `${colon(t.item)}@${t.devclass}`]);
+      out.push(["existing", exists.length]);
+      return out;
+    }
+    if (kind === "receipt") {
+      assert.match(code, /zcl_abapgit_oo_factory=>get_by_type\( lv_type \)->get_includes\( lv_name \)/);
+      const items = itemsOf(code);
+      for (const item of items) {
+        const t = row(item);
+        if (!t) out.push(["absent", colon(item)]);
+        else if (t.devclass !== pkg) out.push(["elsewhere", `${colon(item)}@${t.devclass}`]);
+        else if (!sys.stamps.has(item)) out.push(["nostamp", colon(item)]);
+        else {
+          out.push(["stamp", `${colon(item)}@${sys.stamps.get(item)}`]);
+          // abapGit serialised it in the same step: h_file / h_obj
+          if (hashFail.has(item)) out.push(["h_fail", `${colon(item)}|serialisation failed`]);
+          else if (withHashes) hashRows(out, item, "h_");
+        }
+      }
+      // somebody edits an object after the receipt was taken
+      for (const item of touchAfterReceipt) sys.stamps.set(item, `${item.slice(0, 4)}:20261001130000/9`);
+      afterReceipt(sys);
+      out.push(["items", items.length]);
+      return out;
+    }
+    if (kind === "check") {
+      beforeCheck(sys); // an edit after the receipt step is done, chunk reads included
+      const names = [...code.matchAll(/APPEND `([A-Z0-9_]+)` TO lt_cls\./g)].map((m) => m[1]);
+      for (const n of names.filter((x) => !dropCheck.has(x))) {
+        if (checkOverride[n]) { out.push(["cls", `${n}|${checkOverride[n]}`]); continue; }
+        const c = sys.classes.get(n);
+        out.push(["cls", c === undefined ? `${n}|4||0` : `${n}|0|${c.wut ? "X" : ""}|${c.methods.length ? 10 + c.methods.length * 3 : 0}`]);
+      }
+      return out;
+    }
+    if (kind === "decide") {
+      assert.doesNotMatch(code, /->purge\(|zcl_abapgit_objects=>delete|->delete\(/, "the decision deletes nothing");
+      const want = /get_key\( \) <> '([0-9]*)'/.exec(code)?.[1];
+      const ownName = /get_name\( \) <> '([^']+)'/.exec(code)[1];
+      const items = itemsOf(code);
+      const wants = [...code.matchAll(/APPEND `([A-Z]{4}:[0-9/]+)` TO lt_stamps\./g)].map((m) => m[1]);
+      assert.equal(wants.length, items.length, "a stamp per item");
+      const expLines = [...code.matchAll(/APPEND `([A-Z0-9]{4} [A-Z0-9_/]+)@([^=`]+)=([0-9A-F]{64})` TO lt_exp\./g)];
+      const repo = repoOf(pkg);
+      if (repo) out.push(["repo", repo.key], ["repo_name", repo.name]);
+      else out.push(["repo", "none"]);
+      const go = !(repo && ((want !== undefined && repo.key !== want) || repo.name !== ownName));
+      if (!go) out.push(["err", `refused: repository ${repo.key} named ${repo.name} is not the one this run imported into`]);
+      let n = 0;
+      if (go) {
+        items.forEach((item, i) => {
+          const t = row(item);
+          if (!t) out.push(["absent", colon(item)]);
+          else if (t.devclass !== pkg) out.push(["elsewhere", `${colon(item)}@${t.devclass}`]);
+          else {
+            let same = true;
+            if (sys.stamps.get(item) !== wants[i]) {
+              // the snippet: a moved stamp is still ours when the files hash as the receipt says
+              const exp = expLines.filter((m) => m[1] === item).map((m) => `${m[2]}=${m[3]}`).sort();
+              const cur = fileHashes(item).map((f) => `${f.n}=${f.h}`).sort();
+              same = exp.length > 0 && JSON.stringify(exp) === JSON.stringify(cur);
+              if (same) out.push(["rehashed", `${colon(item)}@${sys.stamps.get(item) ?? ""}`]);
+              else {
+                out.push(["changed", `${colon(item)}@${sys.stamps.get(item) ?? ""}`]);
+                if (exp.length > 0) out.push(["hashdiff", colon(item)]);
+              }
+            }
+            if (same) { n += 1; out.push(["delete", colon(item)]); }
+          }
+        });
+      }
+      out.push(["go", go ? "X" : ""], ["to_delete", n], ["items", items.length]);
+      return out;
+    }
+    if (kind === "residue") {
+      const key = /lv_key = '([0-9]+)'\./.exec(code)?.[1];
+      out.push(["repo_left", key && sys.repos.some((r) => r.key === key) ? 1 : 0]);
+      const repo = repoOf(pkg);
+      if (repo) out.push(["repo", repo.key], ["repo_name", repo.name]);
+      else out.push(["repo", "none"]);
+      const items = itemsOf(code);
+      const left = items.filter((i) => row(i)?.devclass === pkg);
+      for (const i of left) out.push(["item_left", colon(i)]);
+      for (const i of items) if (!row(i) && sys.stamps.has(i)) out.push(["stamp_left", `${colon(i)}@${sys.stamps.get(i)}`]);
+      out.push(["items_left", left.length]);
+      const rest = sys.tadir.filter((t) => t.devclass === pkg && t.item !== `DEVC ${pkg}`);
+      out.push(["others", rest.length], ...rest.map((t) => ["other", colon(t.item)]));
+      const children = [...sys.packages].filter(([, parent]) => parent === pkg).map(([c]) => c);
+      out.push(["children", children.length], ...children.map((c) => ["child", c]));
+      out.push(["tdevc_left", sys.packages.has(pkg) ? 1 : 0]);
+      return out;
+    }
+    throw new Error(`unexpected snippet ${kind}`);
+  };
+  /** git_import_zip as vsp answers it once its job is done */
+  const importZip = (params) => {
+    const pkg = params.package;
+    const files = unzip(Buffer.from(params.zip_base64, "base64"));
+    const base = {job: "ZVSP_GIT_IMPORT", jobCount: "12345678", system: "XYZ", client: "001", package: pkg, transport: "",
+      packages: [pkg], jobStatus: "F", repoName: params.repo_name, repoCreated: false, packageCreated: false, infoCount: 3,
+      code: "", message: "", log: [], tadir: [], decisions: []};
+    let repo = repoOf(pkg);
+    if (repo || refuseImport) {
+      // vsp's job: an existing repository without overwrite, or a conflict, refuses; nothing is written
+      return {...base, status: "refused", message: refuseImport ?? `package ${pkg} has repository ${repo.key} named ${repo.name}`,
+        log: [{type: "E", text: refuseImport ?? "refused"}], repoName: ""};
+    }
+    repo = {key: "000000000042", name: params.repo_name, pkg};
+    sys.repos.push(repo);
+    const tadir = [];
+    const written = [];
+    for (const [f, text] of files) {
+      const o = /^src\/([a-z0-9_]+)\.([a-z]+)\.(.+)$/.exec(f);
+      if (o === null || o[2] === "devc") continue;
+      const item = `${o[2].toUpperCase()} ${o[1].toUpperCase()}`;
+      if (!sys.files.has(item)) sys.files.set(item, new Map());
+      sys.files.get(item).set(f.slice(4), text);
+      if (o[2] === "ddls" && o[3] === "xml" && !row(item)) {
+        sys.tadir.push({item, devclass: pkg});
+        sys.stamps.set(item, stampOf(item));
+        written.push(item);
+      }
+    }
+    for (const [f, text] of files) {
+      const m = /^src\/(zcl_[a-z0-9_]+)\.clas\.xml$/.exec(f);
+      if (m === null) continue;
+      const name = m[1].toUpperCase();
+      const tests = files.get(`src/${m[1]}.clas.testclasses.abap`) ?? "";
+      const wut = /<WITH_UNIT_TESTS>X</.test(text);
+      // what A4H did (#354): without WITH_UNIT_TESTS no CCAU include is created
+      const methods = wut ? [...tests.matchAll(/METHODS (\w+) FOR TESTING/g)].map((x) => x[1].toUpperCase()) : [];
+      sys.classes.set(name, {wut, methods});
+      if (!row(`CLAS ${name}`)) {
+        sys.tadir.push({item: `CLAS ${name}`, devclass: pkg});
+        sys.stamps.set(`CLAS ${name}`, stampOf(`CLAS ${name}`));
+        written.push(`CLAS ${name}`);
+      }
+      if (failedImport) break; // deserialize stopped partway
+    }
+    for (const item of written) tadir.push({pgmid: "R3TR", object: item.slice(0, 4), objName: item.slice(5), devclass: pkg, created: true});
+    // what the job reports is what it did; a change after it (afterImport) is somebody else's
+    const reported = {repoKey: repo.key, repoName: repo.name};
+    if (intruder) sys.tadir.push({item: intruder, devclass: pkg});
+    if (childPackage) sys.packages.set(childPackage, pkg);
+    afterImport(sys);
+    const log = [...importErrors.map((t) => ({type: "E", text: t, objType: "TABL", objName: "ZOSD_BROKEN"})),
+      ...importWarnings.map((t) => ({type: "W", text: t, objType: "CLAS", objName: "ZCL_OSD_PROVE_DEMO"}))];
+    const st = status ?? (failedImport ? "failed" : importErrors.length ? "imported_with_errors" : "imported");
+    return {...base, status: st, ...reported, repoCreated: true, log, tadir,
+      message: failedImport ? "deserialize stopped partway: CX_SY_ITAB_LINE_NOT_FOUND" : ""};
+  };
   return {
     sys,
     async call(action, target, params) {
@@ -94,218 +287,122 @@ function fakeSystem({
       }
       if (action === "analyze" && params.type === "execute_abap") {
         const code = params.code;
-        assert.match(code, /cl_abap_unit_assert=>fail\( msg = /, "every snippet reports through fail( )");
+        assert.match(code.trimEnd().split("\n").at(-1), /^RETURN_VALUE\( lt_out \)\.$/, "every snippet ends in its one RETURN_VALUE( )");
+        assert.equal(code.match(/RETURN_VALUE\(/g).length, 1, "and calls it once");
+        assert.doesNotMatch(code, /cl_abap_unit_assert=>fail/, "no result through an alert title");
         assert.ok(/^[\x00-\x7f]*$/.test(code), "snippet is ASCII");
+        const kind = kindOf(code);
+        sys.calls.at(-1).kind = kind;
         const pkg = /iv_package = '([^']+)'/.exec(code)?.[1] ?? /lv_where <> '([^']+)'/.exec(code)?.[1]
-          ?? /lv_dev <> '([^']+)'/.exec(code)?.[1];
-        if (code.includes("lv_chunk") && !code.includes("nostamp=")) {
-          sys.calls.at(-1).kind = "chunk";
-          const [, name, off, len] = /ls_file-filename = '([^']+)'[\s\S]*ls_file-data\+(\d+)\((\d+)\)/.exec(code);
-          let out = "";
-          for (const item of itemsOf(code)) {
-            const text = sys.files.get(item)?.get(name);
-            if (text !== undefined) {
-              out += ` fhash=${sha(text)}; chunk=${Buffer.from(text, "utf8").subarray(Number(off), Number(off) + Number(len)).toString("hex").toUpperCase()};`;
-            }
-            out += ` found=${text === undefined ? "" : "X"};`;
+          ?? /lv_dev <> '([^']+)'/.exec(code)?.[1] ?? /devclass = '([^']+)'/.exec(code)?.[1];
+        const rows = exec(kind, code, pkg);
+        return execAnswer[kind] !== undefined ? execAnswer[kind](rows) : answer(rows);
+      }
+      if (action === "system" && params.type === "git_import_zip") {
+        sys.calls.at(-1).kind = "import";
+        assert.equal(params.overwrite, false, "the import never overwrites");
+        assert.equal(params.repo_name, `OSDPROVE ${params.package}`);
+        const a = editImport(importZip(params));
+        sys.importAnswer = a;
+        if (pendingPolls > 0) return json({job: a.job, jobCount: a.jobCount, status: "pending", package: a.package, note: "still running"});
+        return json(a, ["refused", "failed", "unknown"].includes(a.status));
+      }
+      if (action === "system" && params.type === "git_import_status") {
+        sys.calls.at(-1).kind = "status";
+        assert.equal(params.job, "12345678");
+        sys.polls += 1;
+        if (sys.polls < pendingPolls) return json({job: "ZVSP_GIT_IMPORT", jobCount: "12345678", status: "pending"});
+        const a = sys.importAnswer;
+        return json(a, ["refused", "failed", "unknown"].includes(a.status));
+      }
+      if (action === "system" && params.type === "git_delete_objects") {
+        sys.calls.at(-1).kind = "delete";
+        const pkg = params.package;
+        const res = {package: pkg, objects: [], repoDeleted: false, packageDeleted: false};
+        let failed;
+        for (const it of params.objects) {
+          const [type, name] = it.split(" ");
+          const o = {type, name};
+          if (type === "DEVC") Object.assign(o, {status: "skipped", reason: "a package is not deleted as an item"});
+          else if (row(it)?.devclass !== pkg) Object.assign(o, {status: "skipped", reason: `not in package ${pkg} (TADIR)`});
+          else if (undeletable.has(it)) { Object.assign(o, {status: "failed", reason: "Deletion of object failed"}); failed = o; }
+          else {
+            sys.tadir = sys.tadir.filter((t) => t.item !== it);
+            sys.files.delete(it);
+            sys.stamps.delete(it);
+            sys.deleted.push(it);
+            o.status = "deleted";
           }
-          return framed(out);
+          res.objects.push(o);
         }
-        if (code.includes("obj={ lv_type }:{ lv_name } files={ lv_n }") && !code.includes("nostamp=") && !code.includes("zcl_abapgit_objects=>delete")) {
-          sys.calls.at(-1).kind = "hash";
-          let out = "";
-          for (const item of itemsOf(code)) {
-            for (const f of fileHashes(item)) out += ` file=${colon(item)}|${f.n}|${f.h}|${f.size};`;
-            out += ` obj=${colon(item)} files=${sys.files.get(item)?.size ?? 0};`;
-          }
-          return framed(out);
+        if (failed) {
+          res.repoNote = "kept: not every object could be deleted";
+          res.packageNote = "kept: not every object could be deleted";
+          return json({error: `${failed.type} ${failed.name} could not be deleted: ${failed.reason}`, result: deleteEdit(res)}, true);
         }
-        if (code.includes("existing={ lv_n }")) {
-          sys.calls.at(-1).kind = "preflight";
-          const repo = repoOf(pkg);
-          const exists = itemsOf(code).map(row).filter(Boolean);
-          return framed(`tdevc=${sys.packages.has(pkg) ? 1 : 0}; `
-            + `${repo ? `repo=${repo.key}; repo_name=${repo.name};` : "repo=none;"}`
-            + exists.map((t) => ` exists=${colon(t.item)}@${t.devclass};`).join("") + ` existing=${exists.length};`);
+        const rest = sys.tadir.filter((t) => t.devclass === pkg && t.item !== `DEVC ${pkg}`);
+        const children = [...sys.packages].filter(([, parent]) => parent === pkg);
+        const empty = rest.length === 0 && children.length === 0;
+        let repo = repoOf(pkg);
+        if (repo) res.repo = {key: repo.key, name: repo.name, offline: true, state: "offline"};
+        if (repo && params.delete_repo && empty) {
+          sys.repos = sys.repos.filter((r) => r !== repo);
+          res.repoDeleted = true;
+          repo = undefined;
         }
-        if (code.includes("zcl_abapgit_zip=>load")) {
-          sys.calls.at(-1).kind = "import";
-          const b64 = [...code.matchAll(/APPEND `([A-Za-z0-9+/=]*)` TO lt_b64\./g)].map((m) => m[1]).join("");
-          const files = unzip(Buffer.from(b64, "base64"));
-          const own = /iv_name = '([^']+)'/.exec(code)[1];
-          let repo = repoOf(pkg);
-          if (repo && repo.name !== own) {
-            // the snippet's own guard: never deserialise into somebody else's repository
-            return framed(`files=${files.size}; ERR the package has repository ${repo.key} named ${repo.name}, not this tool's; logs=0; tadir=0;`);
-          }
-          if (!repo) {
-            repo = {key: "000000000042", name: own, pkg};
-            sys.repos.push(repo);
-          }
-          const importedKey = repo.key;
-          for (const [f, text] of files) {
-            const o = /^src\/([a-z0-9_]+)\.([a-z]+)\.(.+)$/.exec(f);
-            if (o === null || o[2] === "devc") continue;
-            const item = `${o[2].toUpperCase()} ${o[1].toUpperCase()}`;
-            if (!sys.files.has(item)) sys.files.set(item, new Map());
-            sys.files.get(item).set(f.slice(4), text);
-            if (o[2] === "ddls" && o[3] === "xml" && !row(item)) {
-              sys.tadir.push({item, devclass: pkg});
-              sys.stamps.set(item, stampOf(item));
-            }
-          }
-          for (const [f, text] of files) {
-            const m = /^src\/(zcl_[a-z0-9_]+)\.clas\.xml$/.exec(f);
-            if (m === null) continue;
-            const name = m[1].toUpperCase();
-            const tests = files.get(`src/${m[1]}.clas.testclasses.abap`) ?? "";
-            const wut = /<WITH_UNIT_TESTS>X</.test(text);
-            // what A4H did (#354): without WITH_UNIT_TESTS no CCAU include is created
-            const methods = wut ? [...tests.matchAll(/METHODS (\w+) FOR TESTING/g)].map((x) => x[1].toUpperCase()) : [];
-            sys.classes.set(name, {wut, methods});
-            if (!row(`CLAS ${name}`)) {
-              sys.tadir.push({item: `CLAS ${name}`, devclass: pkg});
-              sys.stamps.set(`CLAS ${name}`, stampOf(`CLAS ${name}`));
-            }
-          }
-          if (intruder) sys.tadir.push({item: intruder, devclass: pkg});
-          if (childPackage) sys.packages.set(childPackage, pkg);
-          afterImport(sys);
-          const logs = [...importErrors.map((e) => ` [E] ${e};`), ...importWarnings.map((e) => ` [W] ${e};`)].join("");
-          const st = status ?? (importErrors.length ? "E" : importWarnings.length ? "W" : "S");
-          const inPkg = sys.tadir.filter((t) => t.devclass === pkg).length;
-          return alert(editImport(`${MARK_OPEN}files=${files.size}; repo=${importedKey}; status=${st};${logs} `
-            + `logs=${importErrors.length + importWarnings.length}; tadir=${inPkg};${MARK_CLOSE}`));
+        if (empty && !repo && sys.packages.has(pkg)) {
+          sys.packages.delete(pkg);
+          sys.tadir = sys.tadir.filter((t) => t.item !== `DEVC ${pkg}`);
+          res.packageDeleted = true;
         }
-        if (code.includes("nostamp=")) {
-          sys.calls.at(-1).kind = "receipt";
-          assert.match(code, /zcl_abapgit_oo_factory=>get_by_type\( lv_type \)->get_includes\( lv_name \)/);
-          const items = itemsOf(code);
-          let out = "";
-          for (const item of items) {
-            const t = row(item);
-            if (!t) out += ` absent=${colon(item)};`;
-            else if (t.devclass !== pkg) out += ` elsewhere=${colon(item)}@${t.devclass};`;
-            else if (!sys.stamps.has(item)) out += ` nostamp=${colon(item)};`;
-            else {
-              out += ` stamp=${colon(item)}@${sys.stamps.get(item)};`;
-              // abapGit serialised it in the same step: h_file / h_obj
-              if (hashFail.has(item)) out += ` h_fail=${colon(item)}|serialisation failed;`;
-              else if (withHashes) {
-                for (const f of fileHashes(item)) out += ` h_file=${colon(item)}|${f.n}|${f.h}|${f.size};`;
-                out += ` h_obj=${colon(item)} files=${sys.files.get(item)?.size ?? 0};`;
-              }
-            }
-          }
-          // somebody edits an object after the receipt was taken
-          for (const item of touchAfterReceipt) sys.stamps.set(item, `${item.slice(0, 4)}:20261001130000/9`);
-          afterReceipt(sys);
-          return framed(`${out} items=${items.length};`);
-        }
-        if (code.includes("seoclassdf")) {
-          sys.calls.at(-1).kind = "check";
-          beforeCheck(sys); // an edit after the receipt step is done, chunk reads included
-          const names = [...code.matchAll(/APPEND `([A-Z0-9_]+)` TO lt_cls\./g)].map((m) => m[1]);
-          const parts = names.filter((n) => !dropCheck.has(n)).map((n) => {
-            if (checkOverride[n]) return ` ${n} ${checkOverride[n]};`;
-            const c = sys.classes.get(n);
-            return c === undefined ? ` ${n} found=4 wut= ccau=0;`
-              : ` ${n} found=0 wut=${c.wut ? "X" : ""} ccau=${c.methods.length ? 10 + c.methods.length * 3 : 0};`;
-          });
-          return framed(parts.join(""));
-        }
-        if (code.includes("zcl_abapgit_objects=>delete")) {
-          sys.calls.at(-1).kind = "cleanup";
-          assert.doesNotMatch(code, /->purge\(/, "no purge");
-          const want = /get_key\( \) <> '([0-9]*)'/.exec(code)?.[1];
-          const ownName = /get_name\( \) <> '([^']+)'/.exec(code)[1];
-          const items = itemsOf(code);
-          const wants = [...code.matchAll(/APPEND `([A-Z]{4}:[0-9/]+)` TO lt_stamps\./g)].map((m) => m[1]);
-          assert.equal(wants.length, items.length, "a stamp per item");
-          const expLines = [...code.matchAll(/APPEND `([A-Z0-9]{4} [A-Z0-9_/]+)@([^=`]+)=([0-9A-F]{64})` TO lt_exp\./g)];
-          assert.doesNotMatch(code, /[^\x00-\x7f]/);
-          let out = "";
-          const repo = repoOf(pkg);
-          const go = !(repo && ((want !== undefined && repo.key !== want) || repo.name !== ownName));
-          if (!go) out += ` ERR refused: repository ${repo.key} named ${repo.name} is not the one this run imported into;`;
-          let key;
-          if (go) {
-            const handed = [];
-            items.forEach((item, i) => {
-              const t = row(item);
-              if (!t) out += ` absent=${colon(item)};`;
-              else if (t.devclass !== pkg) out += ` elsewhere=${colon(item)}@${t.devclass};`;
-              else if (sys.stamps.get(item) !== wants[i]) {
-                // the snippet: a moved stamp is still ours when the files hash as the receipt says
-                const exp = expLines.filter((m) => m[1] === item).map((m) => `${m[2]}=${m[3]}`).sort();
-                const cur = fileHashes(item).map((f) => `${f.n}=${f.h}`).sort();
-                if (exp.length > 0 && JSON.stringify(exp) === JSON.stringify(cur)) {
-                  out += ` rehashed=${colon(item)}@${sys.stamps.get(item) ?? ""};`;
-                  handed.push(item);
-                } else {
-                  out += ` changed=${colon(item)}@${sys.stamps.get(item) ?? ""};`;
-                  if (exp.length > 0) out += ` hashdiff=${colon(item)};`;
-                }
-              } else handed.push(item);
-            });
-            out += ` to_delete=${handed.length};`;
-            for (const item of handed) {
-              if (undeletable.has(item)) {
-                out += ` [E] ${item}: Deletion of object failed;`;
-                continue;
-              }
-              sys.tadir = sys.tadir.filter((t) => t.item !== item);
-              sys.files.delete(item);
-              sys.deleted.push(item);
-            }
-            if (repo) {
-              key = repo.key;
-              sys.repos = sys.repos.filter((r) => r !== repo);
-              out += ` repo_deleted=${key};`;
-            }
-          }
-          out += ` repo_left=${key && sys.repos.some((r) => r.key === key) ? 1 : 0};`;
-          const left = items.filter((i) => row(i)?.devclass === pkg);
-          out += left.map((i) => ` item_left=${colon(i)};`).join("") + ` items_left=${left.length};`;
-          const rest = sys.tadir.filter((t) => t.devclass === pkg && t.item !== `DEVC ${pkg}`);
-          out += ` others=${rest.length};` + rest.map((t) => ` other=${colon(t.item)};`).join("");
-          const children = [...sys.packages].filter(([, parent]) => parent === pkg).map(([n]) => n);
-          out += ` children=${children.length};` + children.map((c) => ` child=${c};`).join("");
-          if (go && rest.length === 0 && children.length === 0) {
-            sys.packages.delete(pkg);
-            sys.tadir = sys.tadir.filter((t) => t.item !== `DEVC ${pkg}`);
-          }
-          out += ` tdevc_left=${sys.packages.has(pkg) ? 1 : 0};`;
-          return framed(out);
-        }
-        throw new Error("unexpected snippet");
+        return json(deleteEdit(res));
+      }
+      if (action === "read" && String(target).startsWith("DEVC ") && params?.inventory === true) {
+        sys.calls.at(-1).kind = "inventory";
+        const pkg = target.slice(5);
+        return json(inventoryEdit({package: pkg, source: "TADIR, TDEVC (data preview)",
+          objects: sys.tadir.filter((t) => t.devclass === pkg).map((t) => ({type: t.item.slice(0, 4), name: t.item.slice(5)})),
+          subpackages: [...sys.packages].filter(([, parent]) => parent === pkg).map(([n]) => ({name: n})),
+          abapgit_repos: sys.repos.filter((r) => r.pkg === pkg).map((r) => ({key: r.key, package: pkg, offline: true}))}));
       }
       if (action === "test") {
         const name = target.replace(/^CLAS /, "");
         assert.equal(params.object_url, `/sap/bc/adt/oo/classes/${name.toLowerCase()}`);
         if (unitText[name] !== undefined) return unitText[name];
         const c = sys.classes.get(name);
-        if (c === undefined || c.methods.length === 0) return JSON.stringify({classes: null}, undefined, 2);
-        return JSON.stringify({classes: [{name: "LTCL_DOUBLE", parentName: name, testMethods: c.methods.map((m) => ({
+        return unitReport(c === undefined || c.methods.length === 0 ? [] : [{name: "LTCL_DOUBLE", parentName: name, testMethods: c.methods.map((m) => ({
           name: m,
           ...(failing.has(m) ? {alerts: [{kind: "failedAssertion", severity: "critical",
             title: `Critical Assertion Error: 'Expected 4, got 5'`}]} : {}),
-        }))}]}, undefined, 2);
+        }))}]);
       }
       throw new Error(`unexpected call ${action} ${target}`);
     },
   };
 }
 
-async function run(args, mcp, receiptDir = mkdtempSync(join(tmpdir(), "osd-prove-runs-"))) {
+/** vsp's ABAP Unit answer (full form): ok and counts over the classes */
+function unitReport(classes, extra = {}) {
+  const methods = classes.reduce((n, c) => n + (c.testMethods?.length ?? 0), 0);
+  const failed = classes.reduce((n, c) => n + (c.testMethods ?? []).filter((m) => (m.alerts ?? []).length > 0).length, 0);
+  const ok = methods > 0 && failed === 0;
+  return JSON.stringify({ok, counts: {classes: classes.length, methods, passed: methods - failed, failed, classFailures: 0, warnings: 0, notRun: 0},
+    ...(ok ? {} : methods === 0 ? {note: "ABAP Unit reported no test class for this object, so nothing ran"} : {}), classes, ...extra}, undefined, 2);
+}
+
+async function run(args, mcp, receiptDir = mkdtempSync(join(tmpdir(), "osd-prove-runs-")), {disagree = false} = {}) {
   const lines = [];
   const code = await main(args, {mcp, out: (l) => lines.push(String(l)), receiptDir});
-  return {code, text: lines.join("\n"), receiptDir};
+  const text = lines.join("\n");
+  // the two residue reads agree in every case but the one that makes them differ
+  if (!disagree) assert.doesNotMatch(text, /disagree/, text);
+  return {code, text, receiptDir};
 }
 const receiptIn = (dir) => join(dir, `${PKG}.json`);
 
 const base = (folder = join(FIXTURE, "src")) => [folder, "--unit", "prove-demo", "--manifest", MANIFEST, "--package", PKG];
 const kinds = (mcp) => mcp.sys.calls.map((c) => c.kind ?? c.action);
+const deleteCalls = (mcp) => mcp.sys.calls.filter((c) => c.kind === "delete").map((c) => c.params);
 const clean = (mcp) => {
   assert.equal(mcp.sys.packages.size, 0);
   assert.deepEqual(mcp.sys.tadir, []);
@@ -327,25 +424,32 @@ describe("osd-prove-on-system", () => {
   });
 
   describe("happy path and the failures it must not hide", () => {
-    it("happy path: preflight, create, import, run, compare, clean up, exit 0", async () => {
+    it("happy path: preflight, create, git_import_zip, run, compare, decide, git_delete_objects, residue, exit 0", async () => {
       const mcp = fakeSystem();
       const {code, text} = await run(base(), mcp);
       assert.equal(code, 0, text);
       assert.match(text, /ZCL_OSD_PROVE_DEMO\s+\| 2\s+\| 2\s+\| 0/);
       assert.match(text, /ZCL_OSD_PROVE_PLAIN\s+\| 0\s+\| 0\s+\| 0/);
       // one chunk read per XML file: the receipt keeps its canonical digest
-      assert.deepEqual(kinds(mcp), ["preflight", "create", "import", "receipt", "chunk", "chunk", "check", "test", "cleanup"]);
+      assert.deepEqual(kinds(mcp), ["preflight", "create", "import", "receipt", "chunk", "chunk", "check", "test",
+        "decide", "delete", "residue", "inventory"]);
+      const imp = mcp.sys.calls.find((c) => c.kind === "import").params;
+      assert.equal(imp.package, PKG);
+      assert.equal(imp.overwrite, false);
+      assert.deepEqual(unzip(Buffer.from(imp.zip_base64, "base64")), unzip(buildZip(join(FIXTURE, "src"), {unit: "prove-demo", manifest: MANIFEST}).bytes));
+      assert.deepEqual(deleteCalls(mcp), [{type: "git_delete_objects", package: PKG, objects: ZIP_OBJECTS, delete_repo: true}]);
       assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS);
       clean(mcp);
     });
 
-    it("a deserialize error fails the run and shows its message, and still cleans up", async () => {
-      const mcp = fakeSystem({importErrors: ["TABL ZOSD_BROKEN: XML parser error, unexpected end of document"]});
+    it("a deserialize error (imported_with_errors) fails the run with its log, and the receipt still cleans up", async () => {
+      const mcp = fakeSystem({importErrors: ["XML parser error, unexpected end of document"]});
       const {code, text} = await run(base(), mcp);
       assert.equal(code, 1, text);
+      assert.match(text, /FAIL import imported_with_errors/);
       assert.match(text, /FAIL import log \[E\] TABL ZOSD_BROKEN: XML parser error, unexpected end of document/);
       assert.ok(!kinds(mcp).includes("test"), "no unit run over a broken import");
-      assert.equal(kinds(mcp).at(-1), "cleanup");
+      assert.equal(kinds(mcp).at(-1), "inventory");
       clean(mcp);
     });
 
@@ -374,13 +478,14 @@ describe("osd-prove-on-system", () => {
       assert.match(text, /FAIL ZCL_OSD_PROVE_DEMO: fails on the system: LTCL_DOUBLE->TWO_IS_FOUR: .*Expected 4, got 5/);
     });
 
-    it("an object abapGit could not delete fails the run: it is named and the package is kept", async () => {
+    it("an object vsp could not delete fails the run: it is named, and the repository and the package are kept", async () => {
       const mcp = fakeSystem({undeletable: new Set(["CLAS ZCL_OSD_PROVE_PLAIN"])});
       const {code, text} = await run(base(), mcp);
       assert.equal(code, 1, text);
-      assert.match(text, /FAIL cleanup log \[E\] CLAS ZCL_OSD_PROVE_PLAIN: Deletion of object failed/);
+      assert.match(text, /FAIL cleanup: git_delete_objects: CLAS ZCL_OSD_PROVE_PLAIN could not be deleted: Deletion of object failed/);
+      assert.match(text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN failed: Deletion of object failed/);
       assert.match(text, /FAIL cleanup incomplete: 1 object\(s\) of the zip left/);
-      assert.match(text, /FAIL cleanup: package \$ZOSG_TMP_TEST kept[\s\S]*CLAS ZCL_OSD_PROVE_PLAIN/);
+      assert.match(text, /FAIL cleanup incomplete: 1 repository left/);
       assert.ok(mcp.sys.packages.has(PKG));
       assert.match(text, /^NOT proved/m);
     });
@@ -389,12 +494,13 @@ describe("osd-prove-on-system", () => {
       const mcp = fakeSystem();
       const {code, text, receiptDir} = await run([...base(), "--keep"], mcp);
       assert.equal(code, 0, text);
-      assert.ok(!kinds(mcp).includes("cleanup"));
+      assert.ok(!kinds(mcp).includes("decide") && !kinds(mcp).includes("delete"));
       assert.match(text, /node tools\/osd-prove-on-system\.mjs --cleanup --package '\$ZOSG_TMP_TEST'/);
       const receipt = JSON.parse(readFileSync(receiptIn(receiptDir), "utf8"));
       assert.equal(receipt.package, PKG);
       assert.equal(receipt.repoKey, "000000000042");
       assert.equal(receipt.repoName, OWN);
+      assert.equal(receipt.repoCreated, true);
       assert.deepEqual(receipt.objects, ZIP_OBJECTS);
       assert.deepEqual(receipt.stamped.map((e) => e.item).sort(), ZIP_OBJECTS);
       assert.ok(receipt.stamped.every((e) => e.devclass === PKG && /^CLAS:\d{14}\/\d+$/.test(e.stamp)));
@@ -440,11 +546,6 @@ describe("osd-prove-on-system", () => {
       }
     });
 
-    it("the import never moves an object from another package (warning_package decisions are no)", () => {
-      const code = importAbap(Buffer.from("PK"), PKG);
-      assert.match(code, /LOOP AT ls_checks-warning_package ASSIGNING FIELD-SYMBOL\(<ls_w>\)\.\n\s+<ls_w>-decision = zif_abapgit_definitions=>c_no\./);
-    });
-
     it("an object of the zip that exists already, in any package, is refused", async () => {
       const mcp = fakeSystem({before: {packages: {ZOTHER: ""}, tadir: [{item: "CLAS ZCL_OSD_PROVE_DEMO", devclass: "ZOTHER"}]}});
       const {code, text} = await run(base(), mcp);
@@ -460,32 +561,45 @@ describe("osd-prove-on-system", () => {
       assert.match(text, /FAIL cleanup: package \$ZOSG_TMP_TEST kept, it holds what this run did not bring\n\s+1 object\(s\):\n\s+PROG ZARRIVED_MEANWHILE\n\s+1 subpackage\(s\):\n\s+\$ZOSG_TMP_TEST_SUB/);
       assert.ok(mcp.sys.packages.has(PKG) && mcp.sys.packages.has("$ZOSG_TMP_TEST_SUB"));
       assert.deepEqual(mcp.sys.tadir.map((t) => t.item).sort(), [`DEVC ${PKG}`, "PROG ZARRIVED_MEANWHILE"]);
+      assert.deepEqual(deleteCalls(mcp)[0].objects, ZIP_OBJECTS, "only the receipt's objects were handed to vsp");
+      assert.equal(mcp.sys.repos.length, 1, "vsp keeps the repository of a package that is not empty");
     });
 
-    it("an import refused for a zip-named object that appeared after the preflight deletes no object (critic round 6)", async () => {
-      // the object is there (the fake wrote it into the package); the import
-      // reports it would overwrite it and refuses, so it is not ours to delete
-      const mcp = fakeSystem({editImport: (m) => m.replace(/status=S;/, "ERR would overwrite CLAS ZCL_OSD_PROVE_DEMO (action 3); import refused;")});
-      const {code, text} = await run(base(), mcp);
-      assert.notEqual(code, 0);
-      assert.match(text, /would overwrite CLAS ZCL_OSD_PROVE_DEMO/);
-      assert.deepEqual(mcp.sys.deleted, []);
-      assert.ok(mcp.sys.tadir.some((r) => r.item === "CLAS ZCL_OSD_PROVE_DEMO"), "the foreign object stays");
-    });
-
-    it("a refused import writes no receipt, and --cleanup then refuses and deletes nothing", async () => {
-      const mcp = fakeSystem({editImport: (m) => m.replace(/status=S;/, "ERR would overwrite CLAS ZCL_OSD_PROVE_DEMO (action 3); import refused;")});
-      const {text, receiptDir} = await run(base(), mcp);
+    it("a refused import (a zip-named object that appeared after the preflight) deletes no object and writes no receipt", async () => {
+      // the object is there (somebody wrote it into the package); vsp refuses
+      // the import, so the object is not ours to delete
+      const mcp = fakeSystem({refuseImport: "CLAS ZCL_OSD_PROVE_DEMO exists: would overwrite (action update)"});
+      // the preflight does not see it: it appears right before the import
+      const call = mcp.call.bind(mcp);
+      let seen = false;
+      mcp.call = async (action, target, params) => {
+        if (action === "system" && !seen) { seen = true; mcp.sys.tadir.push({item: "CLAS ZCL_OSD_PROVE_DEMO", devclass: PKG}); }
+        return call(action, target, params);
+      };
+      const {code, text, receiptDir} = await run(base(), mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL import refused: CLAS ZCL_OSD_PROVE_DEMO exists: would overwrite/);
+      assert.match(text, /FAIL import log \[E\]/);
       assert.ok(!kinds(mcp).includes("receipt"));
-      assert.ok(!existsSync(receiptIn(receiptDir)), text);
+      assert.ok(!existsSync(receiptIn(receiptDir)));
       assert.deepEqual(mcp.sys.deleted, []);
+      assert.deepEqual(deleteCalls(mcp)[0].objects, [`DEVC ${PKG}`], "no object, only the package entry, which vsp never deletes as an item");
+      assert.ok(mcp.sys.tadir.some((r) => r.item === "CLAS ZCL_OSD_PROVE_DEMO"), "the foreign object stays");
+      assert.ok(mcp.sys.packages.has(PKG), "and so does the package that holds it");
       const calls = mcp.sys.calls.length;
       const again = await run(["--cleanup", "--package", PKG], mcp, receiptDir);
       assert.equal(again.code, 2, again.text);
       assert.match(again.text, /refused: no receipt for \$ZOSG_TMP_TEST.*nothing is deleted. Inspect it by hand/);
       assert.equal(mcp.sys.calls.length, calls, "no call to the system");
+    });
+
+    it("a refused import into an empty package: vsp deletes the empty package it created, and only that", async () => {
+      const mcp = fakeSystem({refuseImport: "an unmet requirement"});
+      const {code, text} = await run(base(), mcp);
+      assert.equal(code, 1, text);
       assert.deepEqual(mcp.sys.deleted, []);
-      assert.ok(mcp.sys.tadir.some((r) => r.item === "CLAS ZCL_OSD_PROVE_DEMO"));
+      assert.deepEqual(deleteCalls(mcp), [{type: "git_delete_objects", package: PKG, objects: [`DEVC ${PKG}`], delete_repo: false}]);
+      clean(mcp);
     });
 
     it("--cleanup without a receipt refuses before any connection to a system is made", async () => {
@@ -524,21 +638,43 @@ describe("osd-prove-on-system", () => {
       assert.match(again.text, /CLAS ZCL_OSD_PROVE_PLAIN changed since the import/);
       assert.deepEqual(mcp.sys.deleted, ["CLAS ZCL_OSD_PROVE_DEMO"]);
       assert.ok(mcp.sys.tadir.some((r) => r.item === "CLAS ZCL_OSD_PROVE_PLAIN"));
+      assert.equal(mcp.sys.repos.length, 1, "the repository row stays with the object that stays");
     });
 
-    it("the cleanup deletes only the zip's items, even when the package holds more", async () => {
+    it("git_delete_objects is handed exactly the decided objects: a changed one is never in the list", async () => {
+      // the mutant this pins: handing vsp the whole receipt instead of the
+      // decision's delete= list would delete the edited class
+      const mcp = fakeSystem({touchAfterReceipt: new Set(["CLAS ZCL_OSD_PROVE_PLAIN"]),
+        afterReceipt: (sys) => sys.files.get("CLAS ZCL_OSD_PROVE_PLAIN").set("zcl_osd_prove_plain.clas.abap", "edited by somebody\n")});
+      await run(base(), mcp);
+      const calls = deleteCalls(mcp);
+      assert.equal(calls.length, 1);
+      assert.deepEqual(calls[0].objects, ["CLAS ZCL_OSD_PROVE_DEMO"]);
+      assert.equal(calls[0].delete_repo, true);
+      assert.ok(mcp.sys.tadir.some((t) => t.item === "CLAS ZCL_OSD_PROVE_PLAIN"), "the edited class survives");
+    });
+
+    it("an outcome for an object this run did not ask about is a problem", async () => {
+      const mcp = fakeSystem({deleteEdit: (r) => ({...r, objects: [...r.objects, {type: "PROG", name: "ZOTHER", status: "deleted"}]})});
+      const {code, text} = await run(base(), mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL cleanup: git_delete_objects reported PROG ZOTHER, which this run did not ask it to delete/);
+    });
+
+    it("the cleanup hands vsp only the zip's items, even when the package holds more", async () => {
       const mcp = fakeSystem({intruder: "TABL ZSOMEBODY_ELSES"});
       await run(base(), mcp);
       assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS);
-      const code = mcp.sys.calls.find((c) => c.kind === "cleanup").params.code;
+      const code = mcp.sys.calls.find((c) => c.kind === "decide").params.code;
       assert.deepEqual(code.match(/APPEND `[^`]+` TO lt_items\./g).map((l) => l.slice(8, -14)), ZIP_OBJECTS);
       assert.doesNotMatch(code, /ZSOMEBODY_ELSES/);
       assert.match(code, /SELECT SINGLE \* FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name/);
       assert.match(code, /ELSEIF ls_db-devclass <> '\$ZOSG_TMP_TEST'\./);
-      assert.match(code, /zcl_abapgit_objects=>delete\( it_tadir = lt_tadir ii_log = li_log \)/);
-      assert.match(code, /zcl_abapgit_repo_srv=>get_instance\( \)->delete\( li_repo \)/);
-      assert.match(code, /SELECT devclass FROM tdevc WHERE parentcl = '\$ZOSG_TMP_TEST'/);
-      assert.match(code, /IF lv_go = abap_true AND lt_rest IS INITIAL AND lt_children IS INITIAL\./);
+      assert.doesNotMatch(code, /zcl_abapgit_objects=>delete|->delete\(|purge/, "the decision deletes nothing itself");
+      const res = mcp.sys.calls.find((c) => c.kind === "residue").params.code;
+      assert.match(res, /SELECT devclass FROM tdevc WHERE parentcl = '\$ZOSG_TMP_TEST'/);
+      assert.match(res, /stamp_left/);
+      assert.deepEqual(deleteCalls(mcp)[0].objects, ZIP_OBJECTS);
     });
 
     it("a zip item found in another package is not touched and is reported", async () => {
@@ -552,7 +688,7 @@ describe("osd-prove-on-system", () => {
       assert.ok(mcp.sys.tadir.some((t) => t.item === "CLAS ZCL_OSD_PROVE_PLAIN" && t.devclass === "ZOTHER"));
     });
 
-    it("a foreign repository that appears after the preflight is not imported into, and nothing is deleted", async () => {
+    it("a foreign repository that appears after the preflight: vsp refuses the import, and nothing is deleted", async () => {
       const mcp = fakeSystem();
       const call = mcp.call.bind(mcp);
       mcp.call = async (action, target, params) => {
@@ -562,12 +698,11 @@ describe("osd-prove-on-system", () => {
       };
       const {code, text} = await run(base(), mcp);
       assert.equal(code, 1, text);
-      assert.match(text, /FAIL import failed: the package has repository 000000000007 named TEAM_X_PROJECT, not this tool's/);
+      assert.match(text, /FAIL import refused: package \$ZOSG_TMP_TEST has repository 000000000007 named TEAM_X_PROJECT/);
       assert.match(text, /FAIL cleanup: refused: repository 000000000007 named TEAM_X_PROJECT/);
+      assert.ok(!kinds(mcp).includes("delete"), "a refused decision sends no delete");
       assert.deepEqual(mcp.sys.deleted, []);
       assert.equal(mcp.sys.repos.length, 1);
-      assert.match(importAbap(Buffer.from("PK"), PKG),
-        /IF li_repo IS BOUND AND li_repo->get_name\( \) <> 'OSDPROVE \$ZOSG_TMP_TEST'\.[\s\S]*iv_name = 'OSDPROVE \$ZOSG_TMP_TEST'/);
     });
 
     it("a repository key that changed between import and cleanup refuses the cleanup", async () => {
@@ -576,6 +711,7 @@ describe("osd-prove-on-system", () => {
       assert.equal(code, 1, text);
       assert.match(text, /FAIL cleanup: refused: repository 000000000099 named OSDPROVE \$ZOSG_TMP_TEST is not the one this run imported into/);
       assert.deepEqual(mcp.sys.deleted, []);
+      assert.ok(!kinds(mcp).includes("delete"));
     });
 
     it("a renamed repository refuses the cleanup", async () => {
@@ -586,60 +722,197 @@ describe("osd-prove-on-system", () => {
       assert.deepEqual(mcp.sys.deleted, []);
     });
 
-    it("an import report without a repository key: the cleanup refuses any repository", async () => {
-      const mcp = fakeSystem({editImport: (m) => m.replace(/ repo=\d+;/, "")});
+    it("an import answer without a repository key: the cleanup refuses any repository", async () => {
+      const mcp = fakeSystem({editImport: (a) => ({...a, repoKey: undefined})});
       const {code, text} = await run(base(), mcp);
       assert.equal(code, 1, text);
-      assert.match(text, /FAIL import: the report carries no repository key/);
+      assert.match(text, /FAIL import: the answer carries no repository key/);
       assert.match(text, /FAIL cleanup: refused: repository 000000000042/);
       assert.deepEqual(mcp.sys.deleted, []);
     });
 
-    it("the cleanup snippet names the key and the tool's repository, and takes nothing but a key", () => {
+    it("the repository row goes only when this run's import created it: repoCreated false keeps it (delete_repo false)", async () => {
+      const mcp = fakeSystem({editImport: (a) => ({...a, repoCreated: false})});
+      const {code, text, receiptDir} = await run(base(), mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /import: repository 000000000042 was not created by this import/);
+      assert.deepEqual(deleteCalls(mcp), [{type: "git_delete_objects", package: PKG, objects: ZIP_OBJECTS, delete_repo: false}]);
+      assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS, "the objects of the receipt still go");
+      assert.deepEqual(mcp.sys.repos.map((r) => r.key), ["000000000042"], "the row is left registered");
+      assert.match(text, /FAIL cleanup incomplete: 1 repository left/);
+      assert.equal(JSON.parse(readFileSync(receiptIn(receiptDir), "utf8")).repoCreated, false);
+    });
+
+    it("a receipt that does not record repoCreated (an older version) never deletes the row", async () => {
+      const mcp = fakeSystem();
+      const {receiptDir} = await run([...base(), "--keep"], mcp);
+      const file = receiptIn(receiptDir);
+      const receipt = JSON.parse(readFileSync(file, "utf8"));
+      delete receipt.repoCreated;
+      writeFileSync(file, JSON.stringify(receipt));
+      const again = await run(["--cleanup", "--package", PKG], mcp, receiptDir);
+      assert.equal(again.code, 1, again.text);
+      assert.match(again.text, /does not record whether its run created repository 000000000042/);
+      assert.equal(deleteCalls(mcp)[0].delete_repo, false);
+      assert.equal(mcp.sys.repos.length, 1);
+    });
+
+    it("vsp unregistering another repository than this run's is reported", async () => {
+      const mcp = fakeSystem({deleteEdit: (r) => (r.repoDeleted ? {...r, repo: {key: "000000000007", name: "X", offline: true}} : r)});
+      const {code, text} = await run(base(), mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL cleanup: git_delete_objects unregistered repository 000000000007, not this run's 000000000042/);
+    });
+
+    it("the decision snippet names the key and the tool's repository, and takes nothing but a key", () => {
       const entries = ZIP_OBJECTS.map((item) => ({item, stamp: "CLAS:20261001120000/9"}));
-      const code = cleanupAbap(PKG, entries, "000000000042");
+      const code = decideAbap(PKG, entries, "000000000042");
       assert.match(code, /get_key\( \) <> '000000000042' OR li_repo->get_name\( \) <> 'OSDPROVE \$ZOSG_TMP_TEST'/);
-      assert.doesNotMatch(code, /purge/);
-      assert.throws(() => cleanupAbap(PKG, entries, "42' OR 1 = '1"), /not a repository key/);
-      assert.throws(() => cleanupAbap(PKG, [{item: "CLAS ZCL_X` TO lt_items. DELETE FROM tadir.", stamp: "CLAS:20261001120000/9"}]),
+      assert.doesNotMatch(code, /purge|zcl_abapgit_objects=>delete|->delete\(/);
+      assert.throws(() => decideAbap(PKG, entries, "42' OR 1 = '1"), /not a repository key/);
+      assert.throws(() => decideAbap(PKG, [{item: "CLAS ZCL_X` TO lt_items. DELETE FROM tadir.", stamp: "CLAS:20261001120000/9"}]),
         /cannot be put into an ABAP literal/);
-      assert.throws(() => cleanupAbap(PKG, [{item: "CLAS ZCL_X", stamp: "x` TO lt_stamps."}]), /not a stamp/);
+      assert.throws(() => decideAbap(PKG, [{item: "CLAS ZCL_X", stamp: "x` TO lt_stamps."}]), /not a stamp/);
+      assert.throws(() => residueAbap(PKG, ZIP_OBJECTS, "1' OR '1"), /not a repository key/);
       assert.match(code, /IF lv_stamp IS INITIAL OR lv_stamp <> lv_want\./);
+    });
+
+    it("the residue read and vsp's inventory must agree; an inventory that could not check repositories fails", async () => {
+      const a = await run(base(), fakeSystem({inventoryEdit: (i) => ({...i, objects: [{type: "PROG", name: "ZGHOST"}]})}), undefined, {disagree: true});
+      assert.equal(a.code, 1, a.text);
+      assert.match(a.text, /FAIL residue: vsp's inventory and the residue read disagree about \$ZOSG_TMP_TEST: inventory \[PROG ZGHOST\], residue \[\]/);
+      const b = await run(base(), fakeSystem({inventoryEdit: (i) => ({...i, abapgit_repos: null, skipped: ["abapGit repositories: free SQL is blocked"]})}));
+      assert.equal(b.code, 1, b.text);
+      assert.match(b.text, /FAIL residue: inventory: the abapGit repositories were not checked \(abapGit repositories: free SQL is blocked\)/);
+      const c = await run(base(), fakeSystem({inventoryEdit: (i) => ({...i, objects_truncated: true})}));
+      assert.equal(c.code, 1, c.text);
+      assert.match(c.text, /FAIL residue: inventory: the answer is truncated/);
+    });
+
+    it("a deleted object whose source or dictionary rows survived is residue", async () => {
+      const mcp = fakeSystem();
+      const call = mcp.call.bind(mcp);
+      mcp.call = async (action, target, params) => {
+        const r = await call(action, target, params);
+        // vsp removed the TADIR row, the REPOSRC rows stayed
+        if (params?.type === "git_delete_objects") mcp.sys.stamps.set("CLAS ZCL_OSD_PROVE_DEMO", "CLAS:20261001120000/9");
+        return r;
+      };
+      const {code, text} = await run(base(), mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL cleanup incomplete: CLAS ZCL_OSD_PROVE_DEMO has no TADIR row but its source or dictionary rows are still there/);
     });
   });
 
   describe("P2: missing or unreadable evidence is never green", () => {
-    it("an import report without a status fails", async () => {
-      const {code, text} = await run(base(), fakeSystem({editImport: (m) => m.replace(/ status=S;/, "")}));
+    it("an import answer without a status fails", async () => {
+      const {code, text} = await run(base(), fakeSystem({editImport: (a) => ({...a, status: undefined})}));
       assert.equal(code, 1, text);
-      assert.match(text, /FAIL import: the report carries no abapGit status/);
+      assert.match(text, /FAIL import: status missing/);
     });
 
-    it("status W passes when its W messages are carried back and shown", async () => {
-      const {code, text} = await run(base(), fakeSystem({importWarnings: ["CLAS ZCL_OSD_PROVE_DEMO: object already exists"]}));
+    it("W lines in the log of an import pass and are shown", async () => {
+      const {code, text} = await run(base(), fakeSystem({importWarnings: ["object already exists"]}));
       assert.equal(code, 0, text);
-      assert.match(text, /status=W; \[W\] CLAS ZCL_OSD_PROVE_DEMO: object already exists;/);
+      assert.match(text, /import: status imported; .*\[W\] CLAS ZCL_OSD_PROVE_DEMO: object already exists/);
     });
 
-    it("status W with no W message carried back fails", async () => {
-      const {code, text} = await run(base(), fakeSystem({status: "W"}));
+    it("an E line in the log fails even under status imported", async () => {
+      const {code, text} = await run(base(), fakeSystem({editImport: (a) => ({...a, log: [{type: "E", text: "boom"}]})}));
       assert.equal(code, 1, text);
-      assert.match(text, /FAIL import status W with no W message carried back/);
+      assert.match(text, /FAIL import log \[E\] boom/);
     });
 
-    it("status E with no message carried back still fails, and so does an unknown status", async () => {
-      const e = await run(base(), fakeSystem({status: "E"}));
-      assert.equal(e.code, 1, e.text);
-      assert.match(e.text, /FAIL import status E/);
-      const q = await run(base(), fakeSystem({status: "Q"}));
-      assert.equal(q.code, 1, q.text);
-      assert.match(q.text, /FAIL import status Q/);
+    it("refused, failed and imported_with_errors each fail the run with the log; an unknown status too", async () => {
+      for (const [status, extra] of [["refused", "refused"], ["failed", "failed: deserialize"], ["imported_with_errors", "imported_with_errors"], ["Q", "status Q"]]) {
+        const {code, text} = await run(base(), fakeSystem({editImport: (a) => ({...a, status, message: "deserialize", log: [{type: "E", text: `the ${status} log`}]})}));
+        assert.equal(code, 1, `${status}: ${text}`);
+        assert.match(text, new RegExp(`FAIL import:? ${extra}`), status);
+        assert.match(text, new RegExp(`the ${status} log`), status);
+      }
     });
 
-    it("a missing end marker fails (the report may be cut)", async () => {
-      const {code, text} = await run(base(), fakeSystem({editImport: (m) => m.replace(MARK_CLOSE, "")}));
+    it("a refused import gets no receipt even when its answer names a repository: nothing is deleted", async () => {
+      // vsp removes the repository a refused import created; its key may still be in the answer
+      const mcp = fakeSystem({editImport: (a) => ({...a, status: "refused", message: "a conflict", log: [{type: "E", text: "conflict"}]})});
+      const {code, text, receiptDir} = await run(base(), mcp);
       assert.equal(code, 1, text);
-      assert.match(text, /FAIL import: the report has no end marker/);
+      assert.ok(!kinds(mcp).includes("receipt"), "no receipt step");
+      assert.ok(!existsSync(receiptIn(receiptDir)));
+      assert.deepEqual(mcp.sys.deleted, []);
+      assert.deepEqual(deleteCalls(mcp)[0].objects, [`DEVC ${PKG}`]);
+    });
+
+    it("a failed import (stopped partway) gets a receipt, so what it did write is cleaned up", async () => {
+      const mcp = fakeSystem({failedImport: true});
+      const {code, text} = await run(base(), mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL import failed: deserialize stopped partway/);
+      assert.match(text, /FAIL receipt: CLAS ZCL_OSD_PROVE_PLAIN is not on the system after the import/);
+      assert.deepEqual(mcp.sys.deleted, ["CLAS ZCL_OSD_PROVE_DEMO"]);
+      clean(mcp);
+    });
+
+    it("an import job still running is asked about through git_import_status; one that never ends deletes nothing", async () => {
+      const real = buildZip(join(FIXTURE, "src"), {unit: "prove-demo", manifest: MANIFEST});
+      const osg = {mode: "count", methods: async () => ({methods: 2, names: ["LTCL_DOUBLE->TWO_IS_FOUR", "LTCL_DOUBLE->ZERO_IS_ZERO"], failing: []})};
+      const done = fakeSystem({pendingPolls: 2});
+      const r1 = await prove({folder: "x", unit: "u", pkg: PKG, receiptFile: receiptIn(mkdtempSync(join(tmpdir(), "osd-prove-runs-"))), mcp: done,
+        osg, zipper: () => ({...real, classes: ["ZCL_OSD_PROVE_DEMO"]}), importPoll: {tries: 5, delayMs: 0}});
+      assert.equal(r1.ok, true, r1.problems.join("\n"));
+      assert.equal(kinds(done).filter((k) => k === "status").length, 2);
+      clean(done);
+      const never = fakeSystem({pendingPolls: 99});
+      const r2 = await prove({folder: "x", unit: "u", pkg: PKG, receiptFile: receiptIn(mkdtempSync(join(tmpdir(), "osd-prove-runs-"))), mcp: never,
+        osg, zipper: () => real, importPoll: {tries: 3, delayMs: 0}});
+      assert.equal(r2.ok, false);
+      assert.match(r2.problems.join("\n"), /import: status pending/);
+      assert.match(r2.problems.join("\n"), /cleanup skipped: the import job may still be running/);
+      assert.ok(!kinds(never).includes("decide") && !kinds(never).includes("delete"), "nothing is decided or deleted");
+    });
+
+    it("an import call that breaks (no answer) is treated as a job that may be running: nothing is deleted", async () => {
+      const mcp = fakeSystem();
+      const call = mcp.call.bind(mcp);
+      mcp.call = async (action, target, params) => {
+        if (params?.type === "git_import_zip") throw new Error("MCP tools/call timed out after 900000 ms");
+        return call(action, target, params);
+      };
+      const {code, text} = await run(base(), mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL cleanup skipped/);
+      assert.ok(!kinds(mcp).includes("delete"));
+    });
+
+    it("a snippet result that is not JSON, cut, or without its end row fails closed", async () => {
+      const cut = await run(base(), fakeSystem({execAnswer: {receipt: (rows) => answer(rows, {edit: (t) => t.slice(0, Math.floor(t.length / 2))})}}));
+      assert.equal(cut.code, 1, cut.text);
+      assert.match(cut.text, /FAIL receipt not written, so no object will be deleted: receipt: result_text is not JSON, so it may be cut/);
+      const noEnd = await run(base(), fakeSystem({execAnswer: {receipt: (rows) => answer(rows, {end: false})}}));
+      assert.equal(noEnd.code, 1, noEnd.text);
+      assert.match(noEnd.text, /receipt: the result has no end row, so it may be cut/);
+      const old = await run(base(), fakeSystem({execAnswer: {preflight: () => "Program: ZTEMP_EXEC_1\nSuccess: false\nMessage: Critical Assertion Error: 'x'"}}));
+      assert.equal(old.code, 2, old.text);
+      assert.match(old.text, /refused: preflight: the answer is not JSON \(vsp v2\.58\.0-54/);
+      const died = await run(base(), fakeSystem({execAnswer: {check: () => JSON.stringify({success: false, programName: "Z", output: [], cleanedUp: true,
+        message: "The code did not finish", failure: {kind: "exception", severity: "critical", title: "Exception Error <CX_SY_OPEN_SQL_DB>", line: 12}})}}));
+      assert.equal(died.code, 1, died.text);
+      assert.match(died.text, /FAIL class check: the snippet did not finish: Exception Error <CX_SY_OPEN_SQL_DB> \(line 12 of the snippet\)/);
+      const two = await run(base(), fakeSystem({execAnswer: {check: () => JSON.stringify({success: true, output: ["a", "b"], result_text: ["a", "b"]})}}));
+      assert.match(two.text, /FAIL class check: more than one value came back/);
+    });
+
+    it("rowsOf: the end row must be the last and the only one, every row a {K, V} of strings", () => {
+      const ok = rowsOf(answer([["a", "1"]]), "t");
+      assert.deepEqual(ok, [{k: "a", v: "1"}]);
+      const wrap = (arr) => JSON.stringify({success: true, result_text: JSON.stringify(arr)});
+      assert.throws(() => rowsOf(wrap([{K: "end", V: "OSDPROVE"}, {K: "a", V: "1"}]), "t"), /no end row/);
+      assert.throws(() => rowsOf(wrap([{K: "a", V: 1}, {K: "end", V: "OSDPROVE"}]), "t"), /not \{K, V\}/);
+      assert.throws(() => rowsOf(wrap({K: "end", V: "OSDPROVE"}), "t"), /not the snippet's table/);
+      assert.throws(() => rowsOf("ERROR: execute_abap is blocked", "t"), /vsp refused the call/);
+      assert.throws(() => rowsOf(JSON.stringify({success: true}), "t"), /no value came back/);
+      // lower-case keys (another JSON writer) are read the same
+      assert.deepEqual(rowsOf(wrap([{k: "a", v: "1"}, {k: "end", v: "OSDPROVE"}]), "t"), [{k: "a", v: "1"}]);
     });
 
     it("a class without a class-check entry fails", async () => {
@@ -650,16 +923,52 @@ describe("osd-prove-on-system", () => {
 
     it("unparseable unit JSON fails, also for a class counted at 0 on OSG", async () => {
       const {code, text} = await run(base(), fakeSystem({
-        checkOverride: {ZCL_OSD_PROVE_PLAIN: "found=0 wut=X ccau=5"},
+        checkOverride: {ZCL_OSD_PROVE_PLAIN: "0|X|5"},
         unitText: {ZCL_OSD_PROVE_PLAIN: "Error: context canceled"},
       }));
       assert.equal(code, 1, text);
       assert.match(text, /FAIL ZCL_OSD_PROVE_PLAIN: unit result is not JSON: Error: context canceled/);
     });
 
+    it("a unit answer in the old shape (no ok, no counts) fails: it is not the report the comparison reads", async () => {
+      const {code, text} = await run(base(), fakeSystem({
+        unitText: {ZCL_OSD_PROVE_DEMO: JSON.stringify({classes: [{name: "LTCL_DOUBLE", parentName: "ZCL_OSD_PROVE_DEMO", testMethods: [{name: "TWO_IS_FOUR"}, {name: "ZERO_IS_ZERO"}]}]})},
+      }));
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL ZCL_OSD_PROVE_DEMO: the unit result is not vsp's ABAP Unit report \(ok, counts/);
+    });
+
+    it("counts that do not match the methods listed fail; so does a failures-only answer", async () => {
+      const listed = [{name: "LTCL_DOUBLE", parentName: "ZCL_OSD_PROVE_DEMO", testMethods: [{name: "TWO_IS_FOUR"}, {name: "ZERO_IS_ZERO"}]}];
+      const a = await run(base(), fakeSystem({unitText: {ZCL_OSD_PROVE_DEMO: JSON.stringify({ok: true, counts: {methods: 3}, classes: listed})}}));
+      assert.equal(a.code, 1, a.text);
+      assert.match(a.text, /the unit result counts 3 test method\(s\) and lists 2/);
+      const b = await run(base(), fakeSystem({unitText: {ZCL_OSD_PROVE_DEMO: JSON.stringify({ok: true, counts: {methods: 2}, onlyFailures: true, classes: []})}}));
+      assert.equal(b.code, 1, b.text);
+      assert.match(b.text, /lists failures only/);
+    });
+
+    it("a run vsp calls not ok, with no failure behind it, fails", async () => {
+      const {code, text} = await run(base(), fakeSystem({
+        unitText: {ZCL_OSD_PROVE_DEMO: unitReport([{name: "LTCL_DOUBLE", parentName: "ZCL_OSD_PROVE_DEMO", testMethods: [{name: "TWO_IS_FOUR"}, {name: "ZERO_IS_ZERO"}]},
+          {name: "LTCL_SLOW", parentName: "ZCL_OSD_PROVE_DEMO", testMethods: [], alerts: []}], {ok: false, notRunClasses: ["LTCL_SLOW"]})},
+      }));
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL ZCL_OSD_PROVE_DEMO: fails on the system: LTCL_SLOW \(class\): not run/);
+    });
+
+    it("ok false with every listed method passing and nothing named is still a failure", async () => {
+      const {code, text} = await run(base(), fakeSystem({
+        unitText: {ZCL_OSD_PROVE_DEMO: unitReport([{name: "LTCL_DOUBLE", parentName: "ZCL_OSD_PROVE_DEMO", testMethods: [{name: "TWO_IS_FOUR"}, {name: "ZERO_IS_ZERO"}]}],
+          {ok: false, note: "a class was refused for its risk level"})},
+      }));
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL ZCL_OSD_PROVE_DEMO: fails on the system: ZCL_OSD_PROVE_DEMO \(run\): vsp reports the run not ok: a class was refused for its risk level/);
+    });
+
     it("unit JSON that does not name the class fails", async () => {
       const {code, text} = await run(base(), fakeSystem({
-        unitText: {ZCL_OSD_PROVE_DEMO: JSON.stringify({classes: [{name: "LTCL_X", parentName: "ZCL_OTHER", testMethods: [{name: "A"}, {name: "B"}]}]})},
+        unitText: {ZCL_OSD_PROVE_DEMO: unitReport([{name: "LTCL_X", parentName: "ZCL_OTHER", testMethods: [{name: "A"}, {name: "B"}]}])},
       }));
       assert.equal(code, 1, text);
       assert.match(text, /FAIL ZCL_OSD_PROVE_DEMO: the unit result names no test class of ZCL_OSD_PROVE_DEMO/);
@@ -667,7 +976,7 @@ describe("osd-prove-on-system", () => {
 
     it("nameless method entries do not count: two empty objects for the expected class fail", async () => {
       const {code, text} = await run(base(), fakeSystem({
-        unitText: {ZCL_OSD_PROVE_DEMO: JSON.stringify({classes: [{name: "LTCL_DOUBLE", parentName: "ZCL_OSD_PROVE_DEMO", testMethods: [{}, {}]}]})},
+        unitText: {ZCL_OSD_PROVE_DEMO: unitReport([{name: "LTCL_DOUBLE", parentName: "ZCL_OSD_PROVE_DEMO", testMethods: [{}, {}]}])},
       }));
       assert.equal(code, 1, text);
       assert.match(text, /FAIL ZCL_OSD_PROVE_DEMO: test methods differ: 2 test method\(s\) on OSG, 0 on the system; on OSG, not on the system: LTCL_DOUBLE->TWO_IS_FOUR, LTCL_DOUBLE->ZERO_IS_ZERO/);
@@ -676,8 +985,8 @@ describe("osd-prove-on-system", () => {
 
     it("the same count with different names fails, naming the missing and the extra", async () => {
       const {code, text} = await run(base(), fakeSystem({
-        unitText: {ZCL_OSD_PROVE_DEMO: JSON.stringify({classes: [{name: "LTCL_DOUBLE", parentName: "ZCL_OSD_PROVE_DEMO",
-          testMethods: [{name: "two_is_four"}, {name: "SOMETHING_ELSE"}]}]})},
+        unitText: {ZCL_OSD_PROVE_DEMO: unitReport([{name: "LTCL_DOUBLE", parentName: "ZCL_OSD_PROVE_DEMO",
+          testMethods: [{name: "two_is_four"}, {name: "SOMETHING_ELSE"}]}])},
       }));
       assert.equal(code, 1, text);
       assert.match(text, /test methods differ: 2 test method\(s\) on OSG, 2 on the system; on OSG, not on the system: LTCL_DOUBLE->ZERO_IS_ZERO; on the system, not on OSG: LTCL_DOUBLE->SOMETHING_ELSE/);
@@ -713,8 +1022,8 @@ describe("osd-prove-on-system", () => {
 
     it("a nameless test method entry that carries an alert fails the run", async () => {
       const {code, text} = await run(base(), fakeSystem({
-        unitText: {ZCL_OSD_PROVE_DEMO: JSON.stringify({classes: [{name: "LTCL_DOUBLE", parentName: "ZCL_OSD_PROVE_DEMO",
-          testMethods: [{name: "TWO_IS_FOUR"}, {name: "ZERO_IS_ZERO"}, {alerts: [{title: "Critical Assertion Error: 'boom'"}]}]}]})},
+        unitText: {ZCL_OSD_PROVE_DEMO: unitReport([{name: "LTCL_DOUBLE", parentName: "ZCL_OSD_PROVE_DEMO",
+          testMethods: [{name: "TWO_IS_FOUR"}, {name: "ZERO_IS_ZERO"}, {alerts: [{title: "Critical Assertion Error: 'boom'"}]}]}])},
       }));
       assert.equal(code, 1, text);
       assert.match(text, /FAIL ZCL_OSD_PROVE_DEMO: fails on the system: LTCL_DOUBLE-><unnamed>: an unnamed test method failed: .*boom/);
@@ -750,21 +1059,42 @@ describe("osd-prove-on-system", () => {
     assert.match((await osgRunner(fakeUnit(notOk)).methods("ZCL_X")).failing[0], /reported not ok/);
   });
 
-  it("the import never approves an overwrite: a zip-named object that appeared since the preflight stops it", () => {
-    const code = importAbap("UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==", PKG);
-    // only an "add" (a new object) is approved; any other action refuses the import
-    assert.match(code, /IF <ls_o>-action = zif_abapgit_objects=>c_deserialize_action-add OR \( <ls_o>-obj_type = 'DEVC' AND <ls_o>-obj_name = '\$ZOSG_TMP_TEST' \)\.\s+<ls_o>-decision = zif_abapgit_definitions=>c_yes\./);
-    assert.match(code, /ERR would overwrite/);
-    const guard = code.indexOf("IF lv_foreign = abap_true.");
-    assert.ok(guard > 0 && code.indexOf("li_repo->deserialize(") > code.indexOf("ELSE.", guard));
+  const allSnippets = () => {
+    const e = [{item: "CLAS ZCL_A", stamp: "CLAS:20261001120000/9", files: [{name: "zcl_a.clas.abap", sha256: "a".repeat(64)}]}];
+    return {
+      preflight: preflightAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"]), receipt: receiptAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"]),
+      decide: decideAbap("$ZOSG_TMP_X", e, "000000000042"), residue: residueAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"], "000000000042"),
+      residueNoKey: residueAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"]), check: classCheckAbap(["ZCL_A"]), list: listAbap("$ZOSG_TMP_X"),
+      hash: hashAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"]), chunk: chunkAbap("$ZOSG_TMP_X", "CLAS ZCL_A", "zcl_a.clas.abap", 0, 10),
+      deploy: deployAbap(Buffer.from("PK"), "$ZOSG_TMP_X", [{item: "CLAS ZCL_A", files: e[0].files}]), drop: dropRepoAbap("$ZOSG_TMP_X", "000000000042"),
+    };
+  };
+
+  it("snippets are ASCII, named, and each ends with its one RETURN_VALUE( lt_out ) after the end row", () => {
+    for (const [name, code] of Object.entries(allSnippets())) {
+      assert.ok(/^[\x00-\x7f]*$/.test(code), name);
+      assert.match(code, /^" osdprove:\w+\n/, name);
+      const tail = code.trimEnd().split("\n").slice(-2);
+      assert.deepEqual(tail, ["APPEND VALUE #( k = 'end' v = 'OSDPROVE' ) TO lt_out.", "RETURN_VALUE( lt_out )."], name);
+      assert.equal(code.match(/RETURN_VALUE\(/g).length, 1, name);
+      assert.doesNotMatch(code, /cl_abap_unit_assert|lv_out/, name);
+    }
   });
 
-  it("snippets are ASCII and each ends with the fail( msg ) report", () => {
-    for (const code of [importAbap(Buffer.from("PK"), "$ZOSG_TMP_X"), classCheckAbap(["ZCL_A"]),
-      cleanupAbap("$ZOSG_TMP_X", [{item: "CLAS ZCL_A", stamp: "CLAS:20261001120000/9"}], "000000000042"),
-      preflightAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"]), receiptAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"])]) {
-      assert.ok(/^[\x00-\x7f]*$/.test(code));
-      assert.match(code.trimEnd().split("\n").at(-1), /^cl_abap_unit_assert=>fail\( msg = \|OSDPROVE<<\{ lv_out \}>>OSDPROVE\| \)\.$/);
+  it("every snippet parses as ABAP inside vsp's execute_abap wrapper (abaplint, v757)", () => {
+    // the wrapper's shape (vsp pkg/adt/workflows_execute.go): the snippet is the
+    // body of a test method, RETURN_VALUE( ) a method of the same class
+    const wrap = (code) => ["REPORT ztemp_exec_1.", "CLASS ltc_executor DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.",
+      "  PUBLIC SECTION.", "    METHODS execute_payload FOR TESTING.", "  PRIVATE SECTION.", "    METHODS return_value IMPORTING value TYPE any.",
+      "ENDCLASS.", "CLASS ltc_executor IMPLEMENTATION.", "  METHOD execute_payload.", "    DATA lv_result TYPE string.", code,
+      "  ENDMETHOD.", "  METHOD return_value.", "  ENDMETHOD.", "ENDCLASS.", ""].join("\n");
+    for (const [name, code] of Object.entries(allSnippets())) {
+      const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify({global: {files: "/**/*.*"},
+        syntax: {version: "v757", errorNamespace: "."}, rules: {parser_error: true}})));
+      reg.addFile(new abaplint.MemoryFile("ztemp_exec_1.prog.abap", wrap(code)));
+      reg.parse();
+      const issues = reg.findIssues().filter((i) => i.getKey() === "parser_error");
+      assert.deepEqual(issues.map((i) => `${i.getStart().getRow()}: ${i.getMessage()}`), [], name);
     }
   });
 
@@ -793,7 +1123,7 @@ describe("osd-prove-on-system", () => {
       const code = mcp.sys.calls.find((c) => c.kind === "receipt").params.code;
       assert.match(code, /zcl_abapgit_objects=>serialize\(/);
       assert.match(code, /cl_abap_message_digest=>calculate_hash_for_raw\(/);
-      assert.match(code, /h_file=/);
+      assert.match(code, /k = 'h_file'/);
     });
 
     it("stamp moved, content equal to the receipt's hash: the object is deleted as ours (re-activation)", async () => {
@@ -840,7 +1170,7 @@ describe("osd-prove-on-system", () => {
       assert.match(again.text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import \(stamp now "CLAS:20261001130000\/9"\); kept/);
       assert.doesNotMatch(again.text, /foreign edit/, "no hash was compared");
       assert.deepEqual(mcp.sys.deleted, ["CLAS ZCL_OSD_PROVE_DEMO"]);
-      const code = mcp.sys.calls.filter((c) => c.kind === "cleanup").at(-1).params.code;
+      const code = mcp.sys.calls.filter((c) => c.kind === "decide").at(-1).params.code;
       assert.doesNotMatch(code, /TO lt_exp\./, "the snippet carries no hash of an old receipt");
     });
 
@@ -856,19 +1186,19 @@ describe("osd-prove-on-system", () => {
       assert.match(again.text, /1 receipt entr\(ies\) carry no content hashes/);
     });
 
-    it("the cleanup snippet: the hash is compared only where the stamp moved, with the in-place serialisation, and a file that is not there is a difference", async () => {
+    it("the decision snippet: the hash is compared only where the stamp moved, with the in-place serialisation, and a file that is not there is a difference", async () => {
       const {receiptDir} = await keptRun();
       const receipt = JSON.parse(readFileSync(receiptIn(receiptDir), "utf8"));
-      const code = cleanupAbap(PKG, receipt.stamped.map((e) => ({item: e.item, stamp: e.stamp, files: e.files})), "000000000042");
+      const code = decideAbap(PKG, receipt.stamped.map((e) => ({item: e.item, stamp: e.stamp, files: e.files})), "000000000042");
       assert.match(code, /IF lv_stamp IS INITIAL OR lv_stamp <> lv_want\.[\s\S]*zcl_abapgit_objects=>serialize\([\s\S]*IF lt_a = lt_b\.\s+lv_same = abap_true\./);
-      assert.match(code, /rehashed=/);
+      assert.match(code, /k = 'rehashed'/);
       // what the hash check decides: only an equal set of files keeps the object ours, and a stamp that did not move needs no hash
       assert.match(code, /lv_same = abap_true\.\n\s+IF lv_stamp IS INITIAL OR lv_stamp <> lv_want\.\n\s+" the stamp moved/);
       assert.match(code, /lv_same = abap_false\./);
-      assert.match(code, /IF lv_same = abap_true\.\n\s+CLEAR ls_tadir\.\n\s+MOVE-CORRESPONDING ls_db TO ls_tadir\.\n\s+APPEND ls_tadir TO lt_tadir\./);
+      assert.match(code, /IF lv_same = abap_true\.\n\s+lv_del = lv_del \+ 1\.\n\s+APPEND VALUE #\( k = 'delete' v = \|\{ lv_type \}:\{ lv_name \}\| \) TO lt_out\./);
       assert.match(code, /IF lt_a IS NOT INITIAL\./);
       assert.match(code, /APPEND `CLAS ZCL_OSD_PROVE_PLAIN@zcl_osd_prove_plain\.clas\.abap=[0-9A-F]{64}` TO lt_exp\./);
-      assert.throws(() => cleanupAbap(PKG, [{item: PLAIN_ITEM, stamp: "CLAS:20261001120000/9", files: [{name: "x y", sha256: "00"}]}]), /not a file entry/);
+      assert.throws(() => decideAbap(PKG, [{item: PLAIN_ITEM, stamp: "CLAS:20261001120000/9", files: [{name: "x y", sha256: "00"}]}]), /not a file entry/);
       assert.ok(STAMPED_KINDS.includes("DDLS"));
       assert.ok(!STAMPED_KINDS.includes("DCLS"), "no stamp table for DCLS is known");
     });
@@ -877,7 +1207,7 @@ describe("osd-prove-on-system", () => {
       const crlf = (sys) => sys.files.get(PLAIN_ITEM).set(PLAIN_XML, sys.files.get(PLAIN_ITEM).get(PLAIN_XML).replace(/\n/g, "\r\n"));
       const moved = new Set([PLAIN_ITEM]);
 
-      it("only XML bytes differ and the canonical tree equals the receipt's: deleted, through a second cleanup call that re-checks the hashes in its step", async () => {
+      it("only XML bytes differ and the canonical tree equals the receipt's: deleted, through a second decision that re-checks the hashes in its step", async () => {
         let rewritten;
         const mcp = fakeSystem({touchAfterReceipt: moved, beforeCheck: (sys) => {
           crlf(sys);
@@ -886,12 +1216,12 @@ describe("osd-prove-on-system", () => {
         const {code, text} = await run(base(), mcp);
         assert.equal(code, 0, text);
         assert.match(text, /CLAS ZCL_OSD_PROVE_PLAIN: zcl_osd_prove_plain\.clas\.xml differs in bytes from the receipt's but is the same XML element tree; accepted as unchanged/);
-        assert.deepEqual(kinds(mcp).filter((k) => k === "cleanup" || k === "hash"), ["cleanup", "hash", "cleanup"]);
+        assert.deepEqual(kinds(mcp).filter((k) => k === "decide" || k === "hash" || k === "delete"), ["decide", "hash", "decide", "delete"]);
         assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS);
         // the second call expects the CURRENT bytes (the snippet checks them in its own step)
-        const second = mcp.sys.calls.filter((c) => c.kind === "cleanup")[1].params.code;
+        const second = mcp.sys.calls.filter((c) => c.kind === "decide")[1].params.code;
         assert.ok(second.includes(`zcl_osd_prove_plain.clas.xml=${rewritten}`), "the accepted hash is the current one");
-        assert.ok(!mcp.sys.calls.filter((c) => c.kind === "cleanup")[0].params.code.includes(rewritten));
+        assert.ok(!mcp.sys.calls.filter((c) => c.kind === "decide")[0].params.code.includes(rewritten));
         clean(mcp);
       });
 
@@ -901,7 +1231,7 @@ describe("osd-prove-on-system", () => {
         const {code, text} = await run(base(), mcp);
         assert.equal(code, 1, text);
         assert.match(text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import .* a foreign edit; kept/);
-        assert.equal(kinds(mcp).filter((k) => k === "cleanup").length, 1);
+        assert.equal(kinds(mcp).filter((k) => k === "decide").length, 1);
         assert.ok(mcp.sys.tadir.some((t) => t.item === PLAIN_ITEM));
       });
 
@@ -912,7 +1242,7 @@ describe("osd-prove-on-system", () => {
         const {code, text} = await run(base(), mcp);
         assert.equal(code, 1, text);
         assert.match(text, /a foreign edit; kept/);
-        assert.equal(kinds(mcp).filter((k) => k === "cleanup").length, 1);
+        assert.equal(kinds(mcp).filter((k) => k === "decide").length, 1);
         assert.ok(mcp.sys.tadir.some((t) => t.item === PLAIN_ITEM));
       });
 
@@ -932,7 +1262,7 @@ describe("osd-prove-on-system", () => {
         const {code, text} = await run(base(), mcp);
         assert.equal(code, 1, text);
         assert.match(text, /a foreign edit; kept/);
-        assert.equal(kinds(mcp).filter((k) => k === "cleanup").length, 1);
+        assert.equal(kinds(mcp).filter((k) => k === "decide").length, 1);
         assert.ok(mcp.sys.tadir.some((t) => t.item === PLAIN_ITEM));
       });
 

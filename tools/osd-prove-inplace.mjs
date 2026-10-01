@@ -49,8 +49,8 @@ import {tmpdir} from "node:os";
 import {dirname, join} from "node:path";
 import {abapgitXml, zipInProcess} from "./osd-abapgit-zip.mjs";
 import {
-  B64_LINE, CLASS_NAME, MAX_LIST, MAX_LOG, OBJECT_ITEM, REPO_KEY, buildZip, checkItems, checkPackage, exec, field,
-  judgeImport, listed, ownRepoName, pairs, parseImport, proveClasses, receiptPath, report,
+  B64_LINE, CLASS_NAME, MAX_LIST, MAX_LOG, OBJECT_ITEM, OUT_DECLS, REPO_KEY, all, buildZip, checkItems, checkPackage, exec,
+  head, judgeImport, listed, num, one, ownRepoName, pairs, parseImport, proveClasses, put, receiptPath, report,
 } from "./osd-prove-on-system.mjs";
 
 // ------------------------------------------------------------------- hashes
@@ -72,11 +72,13 @@ const CHUNK_BYTES = 8000;
 const BATCH = 12;
 
 // ------------------------------------------------------------------ snippets
-// ASCII only, every one ends with the fail( msg ) report, every value is
-// validated before it is interpolated.
+// ASCII only, every one hands its rows back with RETURN_VALUE( ) (report()),
+// every value is validated before it is interpolated.
 
-const SERIALIZE_DECLS = [
-  "DATA lv_out TYPE string.",
+// a function, not a constant: the two modules import each other, and
+// OUT_DECLS is not there yet while this one is first evaluated
+const serializeDecls = () => [
+  ...OUT_DECLS,
   "DATA lt_items TYPE string_table.",
   "DATA lv_item TYPE string.",
   "DATA lv_type TYPE tadir-object.",
@@ -101,10 +103,10 @@ export function serializeBlock(pkg, {onFile = [], onOk = [], onFail = [], onMiss
     "SELECT SINGLE devclass FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
     "  INTO @lv_dev.",
     "IF sy-subrc <> 0.",
-    `  lv_out = |{ lv_out } ${prefix}absent={ lv_type }:{ lv_name };|.`,
+    `  ${put(`${prefix}absent`, "{ lv_type }:{ lv_name }")}`,
     ...onMissing.map((l) => `  ${l}`),
     `ELSEIF lv_dev <> '${pkg}'.`,
-    `  lv_out = |{ lv_out } ${prefix}elsewhere={ lv_type }:{ lv_name }@{ lv_dev };|.`,
+    `  ${put(`${prefix}elsewhere`, "{ lv_type }:{ lv_name }@{ lv_dev }")}`,
     ...onMissing.map((l) => `  ${l}`),
     "ELSE.",
     "  CLEAR: ls_item, ls_ser, lv_n.",
@@ -127,7 +129,7 @@ export function serializeBlock(pkg, {onFile = [], onOk = [], onFail = [], onMiss
     "      ENDLOOP.",
     ...onOk.map((l) => `      ${l}`),
     "    CATCH cx_root INTO lx_s.",
-    `      lv_out = |{ lv_out } ${prefix}fail={ lv_type }:{ lv_name }\\|{ lx_s->get_text( ) };|.`,
+    `      ${put(`${prefix}fail`, "{ lv_type }:{ lv_name }\\|{ lx_s->get_text( ) }")}`,
     ...onFail.map((l) => `      ${l}`),
     "  ENDTRY.",
     "ENDIF.",
@@ -139,34 +141,36 @@ const itemLines = (items) => items.map((i) => `APPEND \`${i}\` TO lt_items.`);
 /** What the package holds and who versions it. Nothing is changed. */
 export function listAbap(pkg) {
   return [
-    "DATA lv_out TYPE string.",
+    head("list"),
+    ...OUT_DECLS,
     "DATA li_repo TYPE REF TO zif_abapgit_repo.",
     "DATA lv_n TYPE i.",
     `SELECT COUNT(*) FROM tdevc WHERE devclass = '${pkg}' INTO @DATA(lv_devc).`,
-    "lv_out = |tdevc={ lv_devc };|.",
+    put("tdevc", "{ lv_devc }"),
     "TRY.",
     "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
     `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
     "    IF li_repo IS BOUND.",
-    "      lv_out = |{ lv_out } repo={ li_repo->get_key( ) }; repo_name={ li_repo->get_name( ) };|.",
+    `      ${put("repo", "{ li_repo->get_key( ) }")}`,
+    `      ${put("repo_name", "{ li_repo->get_name( ) }")}`,
     "    ELSE.",
-    "      lv_out = |{ lv_out } repo=none;|.",
+    `      ${put("repo", "none")}`,
     "    ENDIF.",
     "  CATCH cx_root INTO DATA(lx).",
-    "    lv_out = |{ lv_out } ERR { lx->get_text( ) };|.",
+    `    ${put("err", "{ lx->get_text( ) }")}`,
     "ENDTRY.",
     `SELECT object, obj_name FROM tadir WHERE pgmid = 'R3TR' AND devclass = '${pkg}' AND object <> 'DEVC'`,
     "  INTO TABLE @DATA(lt_t).",
-    "lv_out = |{ lv_out } items={ lines( lt_t ) };|.",
+    put("items", "{ lines( lt_t ) }"),
     "LOOP AT lt_t INTO DATA(ls_t).",
     "  lv_n = lv_n + 1.",
     `  IF lv_n <= ${MAX_LIST}.`,
-    "    lv_out = |{ lv_out } item={ ls_t-object }:{ ls_t-obj_name };|.",
+    `    ${put("item", "{ ls_t-object }:{ ls_t-obj_name }")}`,
     "  ENDIF.",
     "ENDLOOP.",
     `SELECT COUNT(*) FROM tdevc WHERE parentcl = '${pkg}' INTO @DATA(lv_kids).`,
-    "lv_out = |{ lv_out } children={ lv_kids };|.",
-    report("lv_out"),
+    put("children", "{ lv_kids }"),
+    report(),
   ].join("\n") + "\n";
 }
 
@@ -177,11 +181,11 @@ export function listAbap(pkg) {
  *  same serialisation and the same digest. */
 export const hashItemBlock = (pkg, prefix = "") => serializeBlock(pkg, {
   prefix,
-  onFile: [`lv_out = |{ lv_out } ${prefix}file={ lv_type }:{ lv_name }\\|{ ls_file-filename }\\|{ lv_hx }\\|{ xstrlen( ls_file-data ) };|.`],
-  onOk: [`lv_out = |{ lv_out } ${prefix}obj={ lv_type }:{ lv_name } files={ lv_n };|.`],
+  onFile: [put(`${prefix}file`, "{ lv_type }:{ lv_name }\\|{ ls_file-filename }\\|{ lv_hx }\\|{ xstrlen( ls_file-data ) }")],
+  onOk: [put(`${prefix}obj`, "{ lv_type }:{ lv_name }\\|{ lv_n }")],
 });
 
-/** The declarations hashItemBlock needs beyond lv_out, lv_item, lv_type,
+/** The declarations hashItemBlock needs beyond lt_out, lv_item, lv_type,
  *  lv_name (a snippet that already has those adds these). */
 export const HASH_DECLS = [
   "DATA lv_dev TYPE tadir-devclass.",
@@ -206,10 +210,11 @@ export const DEPLOYED = "dep_";
 export function hashAbap(pkg, items) {
   checkItems(items);
   return [
-    ...SERIALIZE_DECLS,
+    head("hash"),
+    ...serializeDecls(),
     ...itemLines(items),
     ...hashLoop(pkg),
-    report("lv_out"),
+    report(),
   ].join("\n") + "\n";
 }
 
@@ -223,7 +228,8 @@ export function chunkAbap(pkg, item, filename, offset, length) {
     throw new Error(`not a chunk: ${offset}+${length}`);
   }
   return [
-    ...SERIALIZE_DECLS,
+    head("chunk"),
+    ...serializeDecls(),
     "DATA lv_chunk TYPE xstring.",
     "DATA lv_found TYPE abap_bool.",
     ...itemLines([item]),
@@ -233,13 +239,14 @@ export function chunkAbap(pkg, item, filename, offset, length) {
         `IF ls_file-filename = '${filename}'.`,
         "  lv_found = abap_true.",
         `  lv_chunk = ls_file-data+${offset}(${length}).`,
-        "  lv_out = |{ lv_out } fhash={ lv_hx }; chunk={ lv_chunk };|.",
+        `  ${put("fhash", "{ lv_hx }")}`,
+        `  ${put("chunk", "{ lv_chunk }")}`,
         "ENDIF.",
       ],
     }).map((l) => `  ${l}`),
     "ENDLOOP.",
-    "lv_out = |{ lv_out } found={ lv_found };|.",
-    report("lv_out"),
+    put("found", "{ lv_found }"),
+    report(),
   ].join("\n") + "\n";
 }
 
@@ -265,7 +272,8 @@ export function deployAbap(zipBytes, pkg, expected) {
   const zipLines = [];
   for (let i = 0; i < b64.length; i += B64_LINE) zipLines.push(`APPEND \`${b64.slice(i, i + B64_LINE)}\` TO lt_b64.`);
   return [
-    ...SERIALIZE_DECLS,
+    head("deploy"),
+    ...serializeDecls(),
     "DATA lt_b64 TYPE string_table.",
     "DATA lt_exp TYPE string_table.",
     "DATA lt_got TYPE string_table.",
@@ -287,11 +295,11 @@ export function deployAbap(zipBytes, pkg, expected) {
     "DATA li_repo TYPE REF TO zif_abapgit_repo.",
     "TRY.",
     "    DATA(lt_files) = zcl_abapgit_zip=>load( lv_zip ).",
-    "    lv_out = |files={ lines( lt_files ) };|.",
+    `    ${put("files", "{ lines( lt_files ) }")}`,
     "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
     `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
     `    IF li_repo IS BOUND AND li_repo->get_name( ) <> '${ownRepoName(pkg)}'.`,
-    "      lv_out = |{ lv_out } ERR the package has repository { li_repo->get_key( ) } named { li_repo->get_name( ) }, not this tool's;|.",
+    `      ${put("err", "the package has repository { li_repo->get_key( ) } named { li_repo->get_name( ) }, not this tool's")}`,
     "    ELSE.",
     "      \" the guard: every item that may be overwritten is serialised again",
     "      \" right now, inside the call that deserialises, and must equal what",
@@ -322,20 +330,20 @@ export function deployAbap(zipBytes, pkg, expected) {
     "        SORT lt_b.",
     "        IF lt_a <> lt_b.",
     "          SPLIT lv_item AT space INTO lv_type lv_name.",
-    "          lv_out = |{ lv_out } changed={ lv_type }:{ lv_name };|.",
+    `          ${put("changed", "{ lv_type }:{ lv_name }")}`,
     "          lv_foreign = abap_true.",
     "        ENDIF.",
     "      ENDLOOP.",
     "      IF lv_foreign = abap_true.",
-    "        lv_out = |{ lv_out } import refused;|.",
+    `        ${put("refused", "X")}`,
     "      ELSE.",
     "        IF li_repo IS NOT BOUND.",
     "          li_repo = zcl_abapgit_repo_srv=>get_instance( )->new_offline(",
     `            iv_name = '${ownRepoName(pkg)}' iv_package = '${pkg}' ).`,
     "          \" this call created the row: only such a row is the run's to delete",
-    "          lv_out = |{ lv_out } repo_new={ li_repo->get_key( ) };|.",
+    `          ${put("repo_new", "{ li_repo->get_key( ) }")}`,
     "        ENDIF.",
-    "        lv_out = |{ lv_out } repo={ li_repo->get_key( ) };|.",
+    `        ${put("repo", "{ li_repo->get_key( ) }")}`,
     "        li_repo->set_files_remote( lt_files ).",
     "        DATA(ls_checks) = li_repo->deserialize_checks( ).",
     "        LOOP AT ls_checks-overwrite ASSIGNING FIELD-SYMBOL(<ls_o>).",
@@ -349,18 +357,18 @@ export function deployAbap(zipBytes, pkg, expected) {
     "            \" AFTER zip does not carry (the package's own DEVC, measured on A4H,",
     "            \" and any object outside the AFTER set); decline it, keep the object",
     "            <ls_o>-decision = zif_abapgit_definitions=>c_no.",
-    "            lv_out = |{ lv_out } keep={ <ls_o>-obj_type }:{ <ls_o>-obj_name };|.",
+    `            ${put("keep", "{ <ls_o>-obj_type }:{ <ls_o>-obj_name }")}`,
     "          ELSE.",
     "            lv_foreign = abap_true.",
-    "            lv_out = |{ lv_out } ERR would overwrite { <ls_o>-obj_type } { <ls_o>-obj_name } (action { <ls_o>-action });|.",
+    `            ${put("err", "would overwrite { <ls_o>-obj_type } { <ls_o>-obj_name } (action { <ls_o>-action })")}`,
     "          ENDIF.",
     "        ENDLOOP.",
     "        LOOP AT ls_checks-data_loss ASSIGNING FIELD-SYMBOL(<ls_d>).",
     "          lv_foreign = abap_true.",
-    "          lv_out = |{ lv_out } ERR would lose data in { <ls_d>-obj_type } { <ls_d>-obj_name };|.",
+    `          ${put("err", "would lose data in { <ls_d>-obj_type } { <ls_d>-obj_name }")}`,
     "        ENDLOOP.",
     "        IF lv_foreign = abap_true.",
-    "          lv_out = |{ lv_out } import refused;|.",
+    `          ${put("refused", "X")}`,
     "        ELSE.",
     "          LOOP AT ls_checks-warning_package ASSIGNING FIELD-SYMBOL(<ls_w>).",
     "            <ls_w>-decision = zif_abapgit_definitions=>c_no.",
@@ -368,7 +376,7 @@ export function deployAbap(zipBytes, pkg, expected) {
     "          ls_checks-requirements-decision = zif_abapgit_definitions=>c_yes.",
     "          ls_checks-dependencies-decision = zif_abapgit_definitions=>c_yes.",
     "          li_repo->deserialize( is_checks = ls_checks ii_log = li_log ).",
-    "          lv_out = |{ lv_out } status={ li_log->get_status( ) };|.",
+    `          ${put("status", "{ li_log->get_status( ) }")}`,
     "          \" what the import left, read in this same dialog step with the",
     "          \" serialisation and digest of the hash snippet: the run records",
     "          \" this as its deployed version, not a later read another session",
@@ -378,18 +386,18 @@ export function deployAbap(zipBytes, pkg, expected) {
     "      ENDIF.",
     "    ENDIF.",
     "  CATCH cx_root INTO DATA(lx).",
-    "    lv_out = |{ lv_out } ERR { cl_abap_classdescr=>get_class_name( lx ) }: { lx->get_text( ) };|.",
+    `    ${put("err", "{ cl_abap_classdescr=>get_class_name( lx ) }: { lx->get_text( ) }")}`,
     "ENDTRY.",
     "LOOP AT li_log->get_messages( ) INTO DATA(ls_m) WHERE type = 'E' OR type = 'W' OR type = 'A'.",
     "  lv_logs = lv_logs + 1.",
     `  IF lv_logs <= ${MAX_LOG}.`,
-    "    lv_out = |{ lv_out } [{ ls_m-type }] { ls_m-obj_type } { ls_m-obj_name }: { ls_m-text };|.",
+    `    ${put("log", "{ ls_m-type }\\|{ ls_m-obj_type } { ls_m-obj_name }: { ls_m-text }")}`,
     "  ENDIF.",
     "ENDLOOP.",
-    "lv_out = |{ lv_out } logs={ lv_logs };|.",
+    put("logs", "{ lv_logs }"),
     `SELECT object, obj_name FROM tadir WHERE devclass = '${pkg}' INTO TABLE @DATA(lt_tadir).`,
-    "lv_out = |{ lv_out } tadir={ lines( lt_tadir ) };|.",
-    report("lv_out"),
+    put("tadir", "{ lines( lt_tadir ) }"),
+    report(),
   ].join("\n") + "\n";
 }
 
@@ -398,76 +406,86 @@ export function deployAbap(zipBytes, pkg, expected) {
 export function dropRepoAbap(pkg, key) {
   if (!REPO_KEY.test(key ?? "")) throw new Error(`not a repository key: ${key}`);
   return [
-    "DATA lv_out TYPE string.",
+    head("drop"),
+    ...OUT_DECLS,
     "DATA li_repo TYPE REF TO zif_abapgit_repo.",
     "DATA lv_repos TYPE i.",
     "TRY.",
     "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
     `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
     "  CATCH cx_root INTO DATA(lx).",
-    "    lv_out = |ERR repository lookup: { lx->get_text( ) };|.",
+    `    ${put("err", "repository lookup: { lx->get_text( ) }")}`,
     "ENDTRY.",
     "IF li_repo IS BOUND.",
     `  IF li_repo->get_key( ) <> '${key}' OR li_repo->get_name( ) <> '${ownRepoName(pkg)}'.`,
-    "    lv_out = |{ lv_out } ERR refused: repository { li_repo->get_key( ) } named { li_repo->get_name( ) } is not the one this run used;|.",
+    `    ${put("err", "refused: repository { li_repo->get_key( ) } named { li_repo->get_name( ) } is not the one this run used")}`,
     "  ELSE.",
     "    TRY.",
     "        zcl_abapgit_repo_srv=>get_instance( )->delete( li_repo ).",
     "        COMMIT WORK.",
-    "        lv_out = |{ lv_out } repo_deleted={ li_repo->get_key( ) };|.",
+    `        ${put("repo_deleted", "{ li_repo->get_key( ) }")}`,
     "      CATCH cx_root INTO DATA(lx2).",
-    "        lv_out = |{ lv_out } ERR repo delete: { lx2->get_text( ) };|.",
+    `        ${put("err", "repo delete: { lx2->get_text( ) }")}`,
     "    ENDTRY.",
     "  ENDIF.",
     "ENDIF.",
     "DATA(lv_tab) = zcl_abapgit_persistence_db=>c_tabname.",
     `SELECT COUNT(*) FROM (lv_tab) WHERE type = @zcl_abapgit_persistence_db=>c_type_repo AND value = '${key}' INTO @lv_repos.`,
-    "lv_out = |{ lv_out } repo_left={ lv_repos };|.",
-    report("lv_out"),
+    put("repo_left", "{ lv_repos }"),
+    report(),
   ].join("\n") + "\n";
 }
 
 // ------------------------------------------------------------------- parsing
 
-export function parseList(msg) {
+export function parseList(rows) {
   return {
-    err: /ERR ([^;]*);/.exec(msg)?.[1],
-    tdevc: Number(field(msg, "tdevc") ?? NaN),
-    repo: field(msg, "repo"),
-    repoName: /repo_name=([^;]*);/.exec(msg)?.[1]?.trim(),
-    items: Number(field(msg, "items") ?? NaN),
-    item: pairs(msg, "item").map((p) => p.item),
-    children: Number(field(msg, "children") ?? NaN),
+    err: one(rows, "err"),
+    tdevc: num(rows, "tdevc"),
+    repo: one(rows, "repo"),
+    repoName: one(rows, "repo_name")?.trim(),
+    items: num(rows, "items"),
+    item: pairs(rows, "item").map((p) => p.item),
+    children: num(rows, "children"),
   };
 }
 
-/** item -> {files: [{name, sha256, size}]}, plus what was not readable. */
-export function parseHashes(msg, prefix = "") {
+const FAIL_ROW = /^([A-Z0-9]{4}):([^|]*)\|(.*)$/s;
+
+/** item -> {files: [{name, sha256, size}]}, plus what was not readable. A
+ *  file row that is not `TYPE:NAME|file|HEX64|size` is not counted, so the
+ *  object's `obj` row (its file count) no longer matches: incomplete. */
+export function parseHashes(rows, prefix = "") {
   const files = new Map();
-  for (const m of msg.matchAll(new RegExp(` ${prefix}file=([A-Z0-9]{4}):([^|;]*)\\|([^|;]*)\\|([0-9A-F]{64})\\|(\\d+);`, "g"))) {
+  for (const v of all(rows, `${prefix}file`)) {
+    const m = /^([A-Z0-9]{4}):([^|]*)\|([^|]*)\|([0-9A-F]{64})\|(\d+)$/.exec(v);
+    if (m === null) continue;
     const item = `${m[1]} ${m[2].trim()}`;
     if (!files.has(item)) files.set(item, []);
     files.get(item).push({name: m[3], sha256: m[4].toLowerCase(), size: Number(m[5])});
   }
   const objs = new Map();
-  for (const m of msg.matchAll(new RegExp(` ${prefix}obj=([A-Z0-9]{4}):([^;@]*?) files=(\\d+);`, "g"))) objs.set(`${m[1]} ${m[2].trim()}`, Number(m[3]));
+  for (const v of all(rows, `${prefix}obj`)) {
+    const m = /^([A-Z0-9]{4}):([^|]*)\|(\d+)$/.exec(v);
+    if (m !== null) objs.set(`${m[1]} ${m[2].trim()}`, Number(m[3]));
+  }
   return {
     files, objs,
-    absent: pairs(msg, `${prefix}absent`).map((p) => p.item),
-    elsewhere: pairs(msg, `${prefix}elsewhere`),
-    fail: [...msg.matchAll(new RegExp(` ${prefix}fail=([A-Z0-9]{4}):([^|;]*)\\|([^;]*);`, "g"))].map((m) => ({item: `${m[1]} ${m[2].trim()}`, text: m[3].trim()})),
+    absent: pairs(rows, `${prefix}absent`).map((p) => p.item),
+    elsewhere: pairs(rows, `${prefix}elsewhere`),
+    fail: all(rows, `${prefix}fail`).map((v) => FAIL_ROW.exec(v)).filter(Boolean).map((m) => ({item: `${m[1]} ${m[2].trim()}`, text: m[3].trim()})),
   };
 }
 
-export function parseDeploy(msg) {
+export function parseDeploy(rows) {
   return {
-    changed: pairs(msg, "changed").map((p) => p.item),
-    absent: pairs(msg, "absent").map((p) => p.item),
-    elsewhere: pairs(msg, "elsewhere"),
-    fail: [...msg.matchAll(/ fail=([A-Z0-9]{4}):([^|;]*)\|([^;]*);/g)].map((m) => `${m[1]} ${m[2].trim()}: ${m[3].trim()}`),
-    refused: /import refused;/.test(msg),
-    repoNew: field(msg, "repo_new"),
-    wouldOverwrite: [...msg.matchAll(/ERR (would [^;]*);/g)].map((m) => m[1]),
+    changed: pairs(rows, "changed").map((p) => p.item),
+    absent: pairs(rows, "absent").map((p) => p.item),
+    elsewhere: pairs(rows, "elsewhere"),
+    fail: all(rows, "fail").map((v) => FAIL_ROW.exec(v)).filter(Boolean).map((m) => `${m[1]} ${m[2].trim()}: ${m[3].trim()}`),
+    refused: one(rows, "refused") === "X",
+    repoNew: one(rows, "repo_new"),
+    wouldOverwrite: all(rows, "err").filter((v) => v.startsWith("would ")),
   };
 }
 
@@ -521,7 +539,7 @@ export async function readHashes(mcp, pkg, items, log = () => {}) {
     const batch = items.slice(i, i + BATCH);
     const r = await exec(mcp, hashAbap(pkg, batch), "hash");
     log(`hash: ${batch.length} object(s)`);
-    collectHashes(parseHashes(r.message), batch, out);
+    collectHashes(parseHashes(r.rows), batch, out);
   }
   return out;
 }
@@ -555,10 +573,13 @@ export async function fetchFile(mcp, pkg, item, file) {
   for (let off = 0; off < file.size; off += CHUNK_BYTES) {
     const len = Math.min(CHUNK_BYTES, file.size - off);
     const r = await exec(mcp, chunkAbap(pkg, item, file.name, off, len), "chunk");
-    const hex = /chunk=([0-9A-F]*);/.exec(r.message)?.[1];
-    const fhash = /fhash=([0-9A-F]{64});/.exec(r.message)?.[1];
-    if (field(r.message, "found") !== "X" || hex === undefined || fhash?.toLowerCase() !== file.sha256 || hex.length !== len * 2) {
-      throw new Error(`${item} ${file.name}: the chunk at ${off} is not the version that was hashed (${r.message.trim().slice(0, 200)})`);
+    const hexes = all(r.rows, "chunk");
+    const fhashes = all(r.rows, "fhash");
+    const hex = hexes[0];
+    const fhash = fhashes[0];
+    if (one(r.rows, "found") !== "X" || hexes.length !== 1 || fhashes.length !== 1 || !/^[0-9A-F]*$/.test(hex)
+      || !/^[0-9A-F]{64}$/.test(fhash) || fhash.toLowerCase() !== file.sha256 || hex.length !== len * 2) {
+      throw new Error(`${item} ${file.name}: the chunk at ${off} is not the version that was hashed (${r.message.slice(0, 200)})`);
     }
     parts.push(Buffer.from(hex, "hex"));
   }
@@ -570,10 +591,10 @@ export async function fetchFile(mcp, pkg, item, file) {
 /** Step 1. Returns {state} or {refusals}. Nothing on the system is changed. */
 export async function takeSnapshot(mcp, pkg, dir, log = () => {}) {
   const r = await exec(mcp, listAbap(pkg), "snapshot list");
-  const l = parseList(r.message);
+  const l = parseList(r.rows);
   if (l.err !== undefined) return {refusals: [`refused: snapshot: ${l.err}`]};
   if (Number.isNaN(l.tdevc) || Number.isNaN(l.items) || l.repo === undefined || Number.isNaN(l.children)) {
-    return {refusals: [`refused: snapshot: the report is incomplete: ${r.message.trim()}`]};
+    return {refusals: [`refused: snapshot: the result is incomplete: ${r.message}`]};
   }
   if (l.tdevc === 0) return {refusals: [`refused: package ${pkg} does not exist. --in-place works inside an existing package; the fresh mode creates one.`]};
   if (l.repo !== "none" && l.repoName !== ownRepoName(pkg)) {
@@ -648,9 +669,9 @@ export async function rollbackToSnapshot(mcp, pkg, dir, state, {log = () => {}} 
     try {
       const zip = snapshotZip(dir, state, candidates.map((c) => c.item));
       const r = await exec(mcp, deployAbap(zip, pkg, candidates), "restore");
-      log(`restore: ${r.message.trim()}`);
-      const d = parseDeploy(r.message);
-      const imp = parseImport(r.message);
+      log(`restore: ${r.message}`);
+      const d = parseDeploy(r.rows);
+      const imp = parseImport(r.rows);
       if (imp.repo !== undefined && REPO_KEY.test(imp.repo)) state.repoKey = imp.repo;
       if (d.repoNew !== undefined && REPO_KEY.test(d.repoNew)) state.createdRepo = d.repoNew;
       for (const i of d.changed) problems.push(`rollback: ${i} changed while the restore was starting; refused`);
@@ -680,7 +701,7 @@ export async function rollbackToSnapshot(mcp, pkg, dir, state, {log = () => {}} 
       + (gone.length ? `; snapshot files missing: ${gone.join(", ")}` : ""));
   }
   try {
-    const l = parseList((await exec(mcp, listAbap(pkg), "verification list")).message);
+    const l = parseList((await exec(mcp, listAbap(pkg), "verification list")).rows);
     const fresh = l.item.filter((i) => !snap.has(i));
     if (fresh.length > 0) notes.push(`appeared in ${pkg} since the snapshot, not ours and not touched:\n${listed(fresh)}`);
     if (l.items > l.item.length) notes.push(`the package now holds ${l.items} objects and only ${l.item.length} are listed`);
@@ -702,9 +723,9 @@ export async function rollbackToSnapshot(mcp, pkg, dir, state, {log = () => {}} 
     if (REPO_KEY.test(key ?? "")) {
       try {
         const r = await exec(mcp, dropRepoAbap(pkg, key), "repository");
-        log(`repository: ${r.message.trim()}`);
-        for (const e of [...r.message.matchAll(/ERR ([^;]*);/g)]) problems.push(`repository: ${e[1]}`);
-        if (field(r.message, "repo_left") !== "0") problems.push("repository: the tool's repository row is still there");
+        log(`repository: ${r.message}`);
+        for (const e of all(r.rows, "err")) problems.push(`repository: ${e}`);
+        if (num(r.rows, "repo_left") !== 0) problems.push("repository: the tool's repository row is still there");
       } catch (e) {
         problems.push(`repository: ${e.message}`);
       }
@@ -814,8 +835,8 @@ export function snapshotFilesOf(dir, state, item) {
  *  A file the zip carries and the system does not show is a failed deploy of
  *  that file; one the system shows and the zip lacks passes only by (c).
  *  Anything else refuses the object: not recorded, the run fails. */
-export async function adoptDeployed({mcp, pkg, items, message, zipFiles, snapshot = [], problems, log = () => {}}) {
-  const dep = collectHashes(parseHashes(message, DEPLOYED), items);
+export async function adoptDeployed({mcp, pkg, items, rows, zipFiles, snapshot = [], problems, log = () => {}}) {
+  const dep = collectHashes(parseHashes(rows, DEPLOYED), items);
   for (const b of problemsOf(dep)) problems.push(`deployed version: ${b}`);
   const flagged = new Set([...dep.absent, ...dep.elsewhere.map((e) => e.item), ...dep.fail.map((f) => f.item), ...dep.incomplete]);
   const deployed = {};
@@ -952,14 +973,14 @@ export async function proveInPlace({folder, unit, manifest, pkg, keep = false, m
   const expected = built.objects.map((item) => ({item, files: state.objects.find((o) => o.item === item).files}));
 
   let ran = false;
-  let deployMsg;
+  let deployRows;
   try {
     try {
       const r = await exec(mcp, deployAbap(built.bytes, pkg, expected), "deploy");
-      deployMsg = r.message;
-      log(`deploy: ${r.message.trim()}`);
-      const d = parseDeploy(r.message);
-      const imp = parseImport(r.message);
+      deployRows = r.rows;
+      log(`deploy: ${r.message}`);
+      const d = parseDeploy(r.rows);
+      const imp = parseImport(r.rows);
       ran = imp.status !== undefined && !d.refused;
       if (imp.repo !== undefined && REPO_KEY.test(imp.repo)) state.repoKey = imp.repo;
       if (d.repoNew !== undefined && REPO_KEY.test(d.repoNew)) state.createdRepo = d.repoNew;
@@ -983,7 +1004,7 @@ export async function proveInPlace({folder, unit, manifest, pkg, keep = false, m
     // made in between -- and each object is checked against the AFTER zip
     try {
       if (!ran) throw Object.assign(new Error("the import reported no status, so the deployed hashes are unknown and the rollback will not touch an object that differs"), {skip: true});
-      state.deployed = await adoptDeployed({mcp, pkg, items: [...built.objects], message: deployMsg, zipFiles: built.files,
+      state.deployed = await adoptDeployed({mcp, pkg, items: [...built.objects], rows: deployRows, zipFiles: built.files,
         snapshot: state.objects, problems, log});
     } catch (e) {
       if (!e.skip) problems.push(`deployed version could not be hashed, so nothing can be rolled back safely: ${e.message}`);
