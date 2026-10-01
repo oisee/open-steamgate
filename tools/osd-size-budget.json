@@ -50,6 +50,10 @@
       "lines": 74,
       "reason": "baseline 2026-10-01"
     },
+    "go:cmd/metrics": {
+      "lines": 140,
+      "reason": "recorded by --update"
+    },
     "go:cmd/o4dserve": {
       "lines": 83,
       "reason": "baseline 2026-10-01"

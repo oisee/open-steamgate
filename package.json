@@ -121,6 +121,7 @@
     "@abaplint/transpiler-cli": "^2.13.89",
     "@duckdb/node-api": "^1.5.5-r.4",
     "@playwright/test": "^1.62.1",
+    "acorn": "^8.18.0",
     "assert": "^2.1.0",
     "browserify-zlib": "^0.2.0",
     "buffer": "^6.0.3",
