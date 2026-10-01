@@ -122,6 +122,7 @@ Still open:
 | HAR (Playwright `recordHar`, DevTools) | the observed sequence | filter, redact, rebuild CSRF and cookies as steps, parse multipart |
 | SE37 test directory, report variants (B18, via ADT) | saved inputs | the A4H probes first; not an OData recorder |
 | [fiori_automator](https://github.com/oisee/fiori_automator) sessions | clicks as intent, plus the requests | a draft to review, not a faithful capture (below) |
+| SAP Gateway Client (`/IWFND/GW_CLIENT`) saved test cases (B18, 0.5 nice) | requests developers already keep: method, URI, headers, body | an A4H probe first: where and in what format the cases are stored, and whether an expected response is stored at all; then a converter to `###` blocks with `# @osd.id` plus a draft golden; writes, CSRF and `$batch` stay behind steps 5 and 6. First client: osg-demo's fleet suite (chapter 15) |
 
 ### fiori_automator
 
