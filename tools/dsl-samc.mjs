@@ -6,9 +6,14 @@ import {pathToFileURL} from "node:url";
 import {XMLValidator} from "fast-xml-parser";
 import {renderWithEngine} from "./dsl-build.mjs";
 import {buildDaemonModel, traceNodes} from "./dsl-daemons.mjs";
+import {deriveSamc} from "./dsl-samc-derive.mjs";
 
 export async function renderDaemon(file) {
-  const model = buildDaemonModel(JSON.parse(readFileSync(file, "utf8")));
+  return renderDaemonModel(JSON.parse(readFileSync(file, "utf8")));
+}
+
+export async function renderDaemonModel(input) {
+  const model = buildDaemonModel(input);
   const kind = model.kind;
   const template = readFileSync(join("recipes", `${kind}-xml`, "template.tpl"), "utf8");
   const rendered = await renderWithEngine(template, model, {}, "template.tpl", "xml");
@@ -26,7 +31,45 @@ export function firstDifference(actual, expected) {
   return 0;
 }
 
+export async function checkDerived(paths, applicationId, decl, target) {
+  const rendered = await renderDaemonModel(deriveSamc(paths, applicationId, decl));
+  const line = firstDifference(rendered.text, readFileSync(target, "utf8"));
+  if (!line) return {line: 0};
+  const node = rendered.trace[line - 1]?.node;
+  const row = [...rendered.model.channels, ...rendered.model.authorities].find((entry) => entry["@id"] === node);
+  return {line, node, source: row?.source ?? []};
+}
+
 async function main(args) {
+  if (["derive", "check"].includes(args[0]) && args.slice(1).includes("--app")) {
+    const [command, ...rest] = args;
+    const paths = [];
+    const options = {};
+    for (let i = 0; i < rest.length; i++) {
+      if (["--app", "--decl", "--out", "--against"].includes(rest[i])) options[rest[i++].slice(2)] = rest[i];
+      else paths.push(rest[i]);
+    }
+    if (!paths.length || !options.app) throw new Error("derive/check needs ABAP folders and --app");
+    const decl = options.decl ? JSON.parse(readFileSync(options.decl, "utf8")) : {};
+    if (command === "derive") {
+      const model = deriveSamc(paths, options.app, decl);
+      const value = `${JSON.stringify(model, null, 2)}\n`;
+      if (options.out) writeFileSync(options.out, value);
+      else process.stdout.write(value);
+      return 0;
+    }
+    if (!options.against) throw new Error("check needs --against <file.samc.xml>");
+    const log = console.log;
+    let result;
+    try { console.log = (...items) => console.error(...items); result = await checkDerived(paths, options.app, decl, options.against); }
+    finally { console.log = log; }
+    if (result.line) {
+      console.error(`${options.against}: drift at line ${result.line}, node ${result.node ?? "unknown"}${result.source.length ? `, source ${result.source.map((p) => `${p.file}:${p.line}`).join(", ")}` : ""}`);
+      return 1;
+    }
+    console.log(`ok ${options.against}`);
+    return 0;
+  }
   const [command, file, ...rest] = args;
   if (!file || !["render", "check"].includes(command)) throw new Error("usage: dsl-samc.mjs render <model.json> [--out <file>] | check <model.json> <target.xml> (SAMC target: abapGit's own serialisation captured on A4H, BOM included)");
   const log = console.log;
