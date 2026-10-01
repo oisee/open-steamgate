@@ -6,7 +6,10 @@ const approved = new Map([
   // own MIT code, oisee/open-abap-gui#1); LICENSE and package.json unchanged.
   // 9b3b985 = f1fbd36 + the converter's chained-WRITE comma fix
   // (open-abap/open-abap-gui#182); LICENSE and package.json unchanged.
-  ["oisee/open-abap-gui", "9b3b985976e87e0cbe19eb23affa7356cca32353"],
+  // f17b4b4 = 9b3b985 + the host's selection-screen errors (selection_error,
+  // a confirmed warning, required fields first); LICENSE and package.json
+  // unchanged.
+  ["oisee/open-abap-gui", "f17b4b4c84b30898784b1f2b59dab24fbd86f1f3"],
 ]);
 
 export function approvedLicenseAssumption(source) {
