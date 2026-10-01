@@ -67,7 +67,7 @@ export function objectHash(files) {
 }
 
 /** A file name that can sit in an ABAP literal and in a zip entry. */
-const FILE_NAME = /^[A-Za-z0-9_.#%$+-]{1,120}$/;
+export const FILE_NAME = /^[A-Za-z0-9_.#%$+-]{1,120}$/;
 const CHUNK_BYTES = 8000;
 const BATCH = 12;
 
@@ -95,7 +95,7 @@ const SERIALIZE_DECLS = [
  *  file, `onOk` after the last, `onFail` when abapGit or the digest raised.
  *  The same ABAP serves the hash report, the chunk reader and the deploy
  *  guard, so all three see the same bytes. */
-function serializeBlock(pkg, {onFile = [], onOk = [], onFail = [], onMissing = [], prefix = ""}) {
+export function serializeBlock(pkg, {onFile = [], onOk = [], onFail = [], onMissing = [], prefix = ""}) {
   return [
     "SPLIT lv_item AT space INTO lv_type lv_name.",
     "SELECT SINGLE devclass FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
@@ -170,17 +170,31 @@ export function listAbap(pkg) {
   ].join("\n") + "\n";
 }
 
-/** The hash report of every item of lt_items, as `[prefix]file=` and
- *  `[prefix]obj=` entries: one text for the hash snippet and for the
- *  post-deploy read inside the deploy snippet, so both report the same
- *  serialisation and the same digest. */
+/** The hash report of ONE item (lv_item), as `[prefix]file=` and
+ *  `[prefix]obj=` entries. One text for the hash snippet, for the post-deploy
+ *  read inside the deploy snippet and for the fresh mode's receipt (which
+ *  reads it in the same dialog step as the stamp), so all three report the
+ *  same serialisation and the same digest. */
+export const hashItemBlock = (pkg, prefix = "") => serializeBlock(pkg, {
+  prefix,
+  onFile: [`lv_out = |{ lv_out } ${prefix}file={ lv_type }:{ lv_name }\\|{ ls_file-filename }\\|{ lv_hx }\\|{ xstrlen( ls_file-data ) };|.`],
+  onOk: [`lv_out = |{ lv_out } ${prefix}obj={ lv_type }:{ lv_name } files={ lv_n };|.`],
+});
+
+/** The declarations hashItemBlock needs beyond lv_out, lv_item, lv_type,
+ *  lv_name (a snippet that already has those adds these). */
+export const HASH_DECLS = [
+  "DATA lv_dev TYPE tadir-devclass.",
+  "DATA ls_item TYPE zif_abapgit_definitions=>ty_item.",
+  "DATA ls_ser TYPE zif_abapgit_objects=>ty_serialization.",
+  "DATA ls_file TYPE zif_abapgit_git_definitions=>ty_file.",
+  "DATA lv_hx TYPE xstring.",
+  "DATA lx_s TYPE REF TO cx_root.",
+];
+
 const hashLoop = (pkg, prefix = "") => [
   "LOOP AT lt_items INTO lv_item.",
-  ...serializeBlock(pkg, {
-    prefix,
-    onFile: [`lv_out = |{ lv_out } ${prefix}file={ lv_type }:{ lv_name }\\|{ ls_file-filename }\\|{ lv_hx }\\|{ xstrlen( ls_file-data ) };|.`],
-    onOk: [`lv_out = |{ lv_out } ${prefix}obj={ lv_type }:{ lv_name } files={ lv_n };|.`],
-  }).map((l) => `  ${l}`),
+  ...hashItemBlock(pkg, prefix).map((l) => `  ${l}`),
   "ENDLOOP.",
 ];
 
@@ -513,7 +527,7 @@ export async function readHashes(mcp, pkg, items, log = () => {}) {
 }
 
 /** A parsed hash report of `items` into `out` (readHashes' shape). */
-function collectHashes(p, items, out = {byItem: new Map(), absent: [], elsewhere: [], fail: [], incomplete: []}) {
+export function collectHashes(p, items, out = {byItem: new Map(), absent: [], elsewhere: [], fail: [], incomplete: []}) {
   out.absent.push(...p.absent);
   out.elsewhere.push(...p.elsewhere);
   out.fail.push(...p.fail);
@@ -536,7 +550,7 @@ const problemsOf = (h) => [
   ...h.incomplete.map((i) => `the hash report for ${i} is incomplete`),
 ];
 
-async function fetchFile(mcp, pkg, item, file) {
+export async function fetchFile(mcp, pkg, item, file) {
   const parts = [];
   for (let off = 0; off < file.size; off += CHUNK_BYTES) {
     const len = Math.min(CHUNK_BYTES, file.size - off);

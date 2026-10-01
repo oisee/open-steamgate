@@ -9,12 +9,13 @@
 // No child process is spawned: the tool writes its zip in process and the
 // fake reads it in process (a sandbox may refuse to spawn `zip`/`unzip`).
 import assert from "node:assert/strict";
+import {createHash} from "node:crypto";
 import {cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {inflateRawSync} from "node:zlib";
 import {
-  MARK_CLOSE, MARK_OPEN, buildZip, checkPackage, cleanupAbap, classCheckAbap, countTestMethods, importAbap,
+  MARK_CLOSE, MARK_OPEN, STAMPED_KINDS, buildZip, checkPackage, cleanupAbap, classCheckAbap, countTestMethods, importAbap,
   main, osgRunner, preflightAbap, prove, receiptAbap, verdict,
 } from "../tools/osd-prove-on-system.mjs";
 
@@ -49,6 +50,7 @@ function unzip(buf) {
   return files;
 }
 
+const sha = (text) => createHash("sha256").update(Buffer.from(text, "utf8")).digest("hex").toUpperCase();
 const itemsOf = (code) => [...code.matchAll(/APPEND `([A-Z0-9]{4} [A-Z0-9_/]+)` TO lt_items\./g)].map((m) => m[1]);
 const colon = (item) => item.replace(" ", ":");
 
@@ -60,6 +62,7 @@ function fakeSystem({
   importErrors = [], importWarnings = [], status, failing = new Set(),
   before = {}, intruder, childPackage, undeletable = new Set(), editImport = (m) => m,
   dropCheck = new Set(), checkOverride = {}, unitText = {}, afterImport = () => {}, touchAfterReceipt = new Set(),
+  afterReceipt = () => {}, beforeCheck = () => {}, withHashes = true, hashFail = new Set(),
 } = {}) {
   const sys = {
     packages: new Map(Object.entries(before.packages ?? {})),
@@ -68,7 +71,11 @@ function fakeSystem({
     classes: new Map(), calls: [], deleted: [],
     // the version stamp each object carries on the system; an edit changes it
     stamps: new Map(),
+    // the files abapGit would serialise each object to: item -> Map(name -> text)
+    files: new Map(),
   };
+  const fileHashes = (item) => [...(sys.files.get(item) ?? [])].sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([n, t]) => ({n, h: sha(t), size: Buffer.byteLength(t)}));
   const stampOf = (item) => {
     const type = item.slice(0, 4);
     return `${type}:20261001120000${type === "CLAS" || type === "INTF" ? "/9" : ""}`;
@@ -89,7 +96,30 @@ function fakeSystem({
         const code = params.code;
         assert.match(code, /cl_abap_unit_assert=>fail\( msg = /, "every snippet reports through fail( )");
         assert.ok(/^[\x00-\x7f]*$/.test(code), "snippet is ASCII");
-        const pkg = /iv_package = '([^']+)'/.exec(code)?.[1] ?? /lv_where <> '([^']+)'/.exec(code)?.[1];
+        const pkg = /iv_package = '([^']+)'/.exec(code)?.[1] ?? /lv_where <> '([^']+)'/.exec(code)?.[1]
+          ?? /lv_dev <> '([^']+)'/.exec(code)?.[1];
+        if (code.includes("lv_chunk") && !code.includes("nostamp=")) {
+          sys.calls.at(-1).kind = "chunk";
+          const [, name, off, len] = /ls_file-filename = '([^']+)'[\s\S]*ls_file-data\+(\d+)\((\d+)\)/.exec(code);
+          let out = "";
+          for (const item of itemsOf(code)) {
+            const text = sys.files.get(item)?.get(name);
+            if (text !== undefined) {
+              out += ` fhash=${sha(text)}; chunk=${Buffer.from(text, "utf8").subarray(Number(off), Number(off) + Number(len)).toString("hex").toUpperCase()};`;
+            }
+            out += ` found=${text === undefined ? "" : "X"};`;
+          }
+          return framed(out);
+        }
+        if (code.includes("obj={ lv_type }:{ lv_name } files={ lv_n }") && !code.includes("nostamp=") && !code.includes("zcl_abapgit_objects=>delete")) {
+          sys.calls.at(-1).kind = "hash";
+          let out = "";
+          for (const item of itemsOf(code)) {
+            for (const f of fileHashes(item)) out += ` file=${colon(item)}|${f.n}|${f.h}|${f.size};`;
+            out += ` obj=${colon(item)} files=${sys.files.get(item)?.size ?? 0};`;
+          }
+          return framed(out);
+        }
         if (code.includes("existing={ lv_n }")) {
           sys.calls.at(-1).kind = "preflight";
           const repo = repoOf(pkg);
@@ -113,6 +143,17 @@ function fakeSystem({
             sys.repos.push(repo);
           }
           const importedKey = repo.key;
+          for (const [f, text] of files) {
+            const o = /^src\/([a-z0-9_]+)\.([a-z]+)\.(.+)$/.exec(f);
+            if (o === null || o[2] === "devc") continue;
+            const item = `${o[2].toUpperCase()} ${o[1].toUpperCase()}`;
+            if (!sys.files.has(item)) sys.files.set(item, new Map());
+            sys.files.get(item).set(f.slice(4), text);
+            if (o[2] === "ddls" && o[3] === "xml" && !row(item)) {
+              sys.tadir.push({item, devclass: pkg});
+              sys.stamps.set(item, stampOf(item));
+            }
+          }
           for (const [f, text] of files) {
             const m = /^src\/(zcl_[a-z0-9_]+)\.clas\.xml$/.exec(f);
             if (m === null) continue;
@@ -146,14 +187,24 @@ function fakeSystem({
             if (!t) out += ` absent=${colon(item)};`;
             else if (t.devclass !== pkg) out += ` elsewhere=${colon(item)}@${t.devclass};`;
             else if (!sys.stamps.has(item)) out += ` nostamp=${colon(item)};`;
-            else out += ` stamp=${colon(item)}@${sys.stamps.get(item)};`;
+            else {
+              out += ` stamp=${colon(item)}@${sys.stamps.get(item)};`;
+              // abapGit serialised it in the same step: h_file / h_obj
+              if (hashFail.has(item)) out += ` h_fail=${colon(item)}|serialisation failed;`;
+              else if (withHashes) {
+                for (const f of fileHashes(item)) out += ` h_file=${colon(item)}|${f.n}|${f.h}|${f.size};`;
+                out += ` h_obj=${colon(item)} files=${sys.files.get(item)?.size ?? 0};`;
+              }
+            }
           }
           // somebody edits an object after the receipt was taken
           for (const item of touchAfterReceipt) sys.stamps.set(item, `${item.slice(0, 4)}:20261001130000/9`);
+          afterReceipt(sys);
           return framed(`${out} items=${items.length};`);
         }
         if (code.includes("seoclassdf")) {
           sys.calls.at(-1).kind = "check";
+          beforeCheck(sys); // an edit after the receipt step is done, chunk reads included
           const names = [...code.matchAll(/APPEND `([A-Z0-9_]+)` TO lt_cls\./g)].map((m) => m[1]);
           const parts = names.filter((n) => !dropCheck.has(n)).map((n) => {
             if (checkOverride[n]) return ` ${n} ${checkOverride[n]};`;
@@ -171,6 +222,8 @@ function fakeSystem({
           const items = itemsOf(code);
           const wants = [...code.matchAll(/APPEND `([A-Z]{4}:[0-9/]+)` TO lt_stamps\./g)].map((m) => m[1]);
           assert.equal(wants.length, items.length, "a stamp per item");
+          const expLines = [...code.matchAll(/APPEND `([A-Z0-9]{4} [A-Z0-9_/]+)@([^=`]+)=([0-9A-F]{64})` TO lt_exp\./g)];
+          assert.doesNotMatch(code, /[^\x00-\x7f]/);
           let out = "";
           const repo = repoOf(pkg);
           const go = !(repo && ((want !== undefined && repo.key !== want) || repo.name !== ownName));
@@ -182,8 +235,18 @@ function fakeSystem({
               const t = row(item);
               if (!t) out += ` absent=${colon(item)};`;
               else if (t.devclass !== pkg) out += ` elsewhere=${colon(item)}@${t.devclass};`;
-              else if (sys.stamps.get(item) !== wants[i]) out += ` changed=${colon(item)}@${sys.stamps.get(item) ?? ""};`;
-              else handed.push(item);
+              else if (sys.stamps.get(item) !== wants[i]) {
+                // the snippet: a moved stamp is still ours when the files hash as the receipt says
+                const exp = expLines.filter((m) => m[1] === item).map((m) => `${m[2]}=${m[3]}`).sort();
+                const cur = fileHashes(item).map((f) => `${f.n}=${f.h}`).sort();
+                if (exp.length > 0 && JSON.stringify(exp) === JSON.stringify(cur)) {
+                  out += ` rehashed=${colon(item)}@${sys.stamps.get(item) ?? ""};`;
+                  handed.push(item);
+                } else {
+                  out += ` changed=${colon(item)}@${sys.stamps.get(item) ?? ""};`;
+                  if (exp.length > 0) out += ` hashdiff=${colon(item)};`;
+                }
+              } else handed.push(item);
             });
             out += ` to_delete=${handed.length};`;
             for (const item of handed) {
@@ -192,6 +255,7 @@ function fakeSystem({
                 continue;
               }
               sys.tadir = sys.tadir.filter((t) => t.item !== item);
+              sys.files.delete(item);
               sys.deleted.push(item);
             }
             if (repo) {
@@ -269,7 +333,8 @@ describe("osd-prove-on-system", () => {
       assert.equal(code, 0, text);
       assert.match(text, /ZCL_OSD_PROVE_DEMO\s+\| 2\s+\| 2\s+\| 0/);
       assert.match(text, /ZCL_OSD_PROVE_PLAIN\s+\| 0\s+\| 0\s+\| 0/);
-      assert.deepEqual(kinds(mcp), ["preflight", "create", "import", "receipt", "check", "test", "cleanup"]);
+      // one chunk read per XML file: the receipt keeps its canonical digest
+      assert.deepEqual(kinds(mcp), ["preflight", "create", "import", "receipt", "chunk", "chunk", "check", "test", "cleanup"]);
       assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS);
       clean(mcp);
     });
@@ -447,10 +512,11 @@ describe("osd-prove-on-system", () => {
     });
 
     it("an object changed after the import survives the automatic cleanup and a later --cleanup", async () => {
-      const mcp = fakeSystem({touchAfterReceipt: new Set(["CLAS ZCL_OSD_PROVE_PLAIN"])});
+      const mcp = fakeSystem({touchAfterReceipt: new Set(["CLAS ZCL_OSD_PROVE_PLAIN"]),
+        afterReceipt: (sys) => sys.files.get("CLAS ZCL_OSD_PROVE_PLAIN").set("zcl_osd_prove_plain.clas.abap", "edited by somebody\n")});
       const {code, text, receiptDir} = await run(base(), mcp);
       assert.equal(code, 1, text);
-      assert.match(text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import \(stamp now "CLAS:20261001130000\/9"\); kept/);
+      assert.match(text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import \(stamp now "CLAS:20261001130000\/9"\) and its content differs from the receipt's hash: a foreign edit; kept/);
       assert.deepEqual(mcp.sys.deleted, ["CLAS ZCL_OSD_PROVE_DEMO"]);
       assert.ok(existsSync(receiptIn(receiptDir)), "an incomplete cleanup keeps the receipt");
       const again = await run(["--cleanup", "--package", PKG], mcp, receiptDir);
@@ -700,5 +766,244 @@ describe("osd-prove-on-system", () => {
       assert.ok(/^[\x00-\x7f]*$/.test(code));
       assert.match(code.trimEnd().split("\n").at(-1), /^cl_abap_unit_assert=>fail\( msg = \|OSDPROVE<<\{ lv_out \}>>OSDPROVE\| \)\.$/);
     }
+  });
+
+  describe("the receipt's content hashes: a moved stamp is not an edit", () => {
+    const PLAIN_ITEM = "CLAS ZCL_OSD_PROVE_PLAIN";
+    const PLAIN_ABAP = "zcl_osd_prove_plain.clas.abap";
+    const PLAIN_XML = "zcl_osd_prove_plain.clas.xml";
+    const keptRun = async (opts) => {
+      const mcp = fakeSystem(opts);
+      const r = await run([...base(), "--keep"], mcp);
+      assert.equal(r.code, 0, r.text);
+      return {mcp, ...r};
+    };
+
+    it("the receipt records each object's content hash, per file, and a canonical digest for XML", async () => {
+      const {mcp, receiptDir} = await keptRun();
+      const receipt = JSON.parse(readFileSync(receiptIn(receiptDir), "utf8"));
+      for (const e of receipt.stamped) {
+        const files = mcp.sys.files.get(e.item);
+        assert.deepEqual(e.files.map((f) => f.name).sort(), [...files.keys()].sort());
+        for (const f of e.files) assert.equal(f.sha256.toUpperCase(), sha(files.get(f.name)));
+        assert.match(e.hash, /^[0-9a-f]{64}$/);
+        for (const f of e.files) assert.equal(f.cx !== undefined, f.name.endsWith(".xml"), f.name);
+      }
+      // taken in the step that reads the stamp, by the in-place mode's serialisation
+      const code = mcp.sys.calls.find((c) => c.kind === "receipt").params.code;
+      assert.match(code, /zcl_abapgit_objects=>serialize\(/);
+      assert.match(code, /cl_abap_message_digest=>calculate_hash_for_raw\(/);
+      assert.match(code, /h_file=/);
+    });
+
+    it("stamp moved, content equal to the receipt's hash: the object is deleted as ours (re-activation)", async () => {
+      const mcp = fakeSystem({touchAfterReceipt: new Set([PLAIN_ITEM, "CLAS ZCL_OSD_PROVE_DEMO"])});
+      const {code, text, receiptDir} = await run(base(), mcp);
+      assert.equal(code, 0, text);
+      assert.match(text, /CLAS ZCL_OSD_PROVE_PLAIN: stamp moved to "CLAS:20261001130000\/9" but the content equals the receipt's hash/);
+      assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS);
+      assert.ok(!existsSync(receiptIn(receiptDir)));
+      clean(mcp);
+    });
+
+    it("stamp moved, content differs from the hash: kept, the run fails, the receipt stays, and a later --cleanup keeps it too", async () => {
+      const mcp = fakeSystem({touchAfterReceipt: new Set([PLAIN_ITEM]),
+        afterReceipt: (sys) => sys.files.get(PLAIN_ITEM).set(PLAIN_ABAP, "CLASS zcl_osd_prove_plain DEFINITION PUBLIC.\nENDCLASS. \" edited\n")});
+      const {code, text, receiptDir} = await run(base(), mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import .* and its content differs from the receipt's hash: a foreign edit; kept/);
+      assert.deepEqual(mcp.sys.deleted, ["CLAS ZCL_OSD_PROVE_DEMO"]);
+      assert.ok(existsSync(receiptIn(receiptDir)));
+      const again = await run(["--cleanup", "--package", PKG], mcp, receiptDir);
+      assert.equal(again.code, 1, again.text);
+      assert.deepEqual(mcp.sys.deleted, ["CLAS ZCL_OSD_PROVE_DEMO"]);
+      assert.ok(mcp.sys.tadir.some((r) => r.item === PLAIN_ITEM));
+    });
+
+    it("a stamp that did not move deletes the object as before, whatever its hash says", async () => {
+      // the stamp limit (same second) stays what it was: the hash only adds a reason to delete
+      const mcp = fakeSystem({afterReceipt: (sys) => sys.files.get(PLAIN_ITEM).set(PLAIN_ABAP, "edited in the same second\n")});
+      const {code, text} = await run(base(), mcp);
+      assert.equal(code, 0, text);
+      assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS);
+    });
+
+    it("an old receipt (no hashes) behaves as before and says so: a moved stamp is kept even when the content is unchanged", async () => {
+      const {mcp, receiptDir} = await keptRun({touchAfterReceipt: new Set([PLAIN_ITEM])});
+      const file = receiptIn(receiptDir);
+      const receipt = JSON.parse(readFileSync(file, "utf8"));
+      for (const e of receipt.stamped) { delete e.files; delete e.hash; }
+      writeFileSync(file, JSON.stringify(receipt));
+      const again = await run(["--cleanup", "--package", PKG], mcp, receiptDir);
+      assert.equal(again.code, 1, again.text);
+      assert.match(again.text, /cleanup: the receipt carries no content hashes .*decided by the version stamp alone, as before/);
+      assert.match(again.text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import \(stamp now "CLAS:20261001130000\/9"\); kept/);
+      assert.doesNotMatch(again.text, /foreign edit/, "no hash was compared");
+      assert.deepEqual(mcp.sys.deleted, ["CLAS ZCL_OSD_PROVE_DEMO"]);
+      const code = mcp.sys.calls.filter((c) => c.kind === "cleanup").at(-1).params.code;
+      assert.doesNotMatch(code, /TO lt_exp\./, "the snippet carries no hash of an old receipt");
+    });
+
+    it("an object abapGit could not hash is decided by its stamp alone; the others keep their hashes", async () => {
+      const {mcp, receiptDir, text} = await keptRun({hashFail: new Set([PLAIN_ITEM])});
+      assert.match(text, /receipt: no content hash for CLAS ZCL_OSD_PROVE_PLAIN \(serialisation failed\)/);
+      const receipt = JSON.parse(readFileSync(receiptIn(receiptDir), "utf8"));
+      const byItem = new Map(receipt.stamped.map((e) => [e.item, e]));
+      assert.ok(byItem.get("CLAS ZCL_OSD_PROVE_DEMO").files.length > 0);
+      assert.equal(byItem.get(PLAIN_ITEM).files, undefined);
+      const again = await run(["--cleanup", "--package", PKG], mcp, receiptDir);
+      assert.equal(again.code, 0, again.text);
+      assert.match(again.text, /1 receipt entr\(ies\) carry no content hashes/);
+    });
+
+    it("the cleanup snippet: the hash is compared only where the stamp moved, with the in-place serialisation, and a file that is not there is a difference", async () => {
+      const {receiptDir} = await keptRun();
+      const receipt = JSON.parse(readFileSync(receiptIn(receiptDir), "utf8"));
+      const code = cleanupAbap(PKG, receipt.stamped.map((e) => ({item: e.item, stamp: e.stamp, files: e.files})), "000000000042");
+      assert.match(code, /IF lv_stamp IS INITIAL OR lv_stamp <> lv_want\.[\s\S]*zcl_abapgit_objects=>serialize\([\s\S]*IF lt_a = lt_b\.\s+lv_same = abap_true\./);
+      assert.match(code, /rehashed=/);
+      // what the hash check decides: only an equal set of files keeps the object ours, and a stamp that did not move needs no hash
+      assert.match(code, /lv_same = abap_true\.\n\s+IF lv_stamp IS INITIAL OR lv_stamp <> lv_want\.\n\s+" the stamp moved/);
+      assert.match(code, /lv_same = abap_false\./);
+      assert.match(code, /IF lv_same = abap_true\.\n\s+CLEAR ls_tadir\.\n\s+MOVE-CORRESPONDING ls_db TO ls_tadir\.\n\s+APPEND ls_tadir TO lt_tadir\./);
+      assert.match(code, /IF lt_a IS NOT INITIAL\./);
+      assert.match(code, /APPEND `CLAS ZCL_OSD_PROVE_PLAIN@zcl_osd_prove_plain\.clas\.abap=[0-9A-F]{64}` TO lt_exp\./);
+      assert.throws(() => cleanupAbap(PKG, [{item: PLAIN_ITEM, stamp: "CLAS:20261001120000/9", files: [{name: "x y", sha256: "00"}]}]), /not a file entry/);
+      assert.ok(STAMPED_KINDS.includes("DDLS"));
+      assert.ok(!STAMPED_KINDS.includes("DCLS"), "no stamp table for DCLS is known");
+    });
+
+    describe("XML that abapGit rewrote is not an edit, if it is the same element tree", () => {
+      const crlf = (sys) => sys.files.get(PLAIN_ITEM).set(PLAIN_XML, sys.files.get(PLAIN_ITEM).get(PLAIN_XML).replace(/\n/g, "\r\n"));
+      const moved = new Set([PLAIN_ITEM]);
+
+      it("only XML bytes differ and the canonical tree equals the receipt's: deleted, through a second cleanup call that re-checks the hashes in its step", async () => {
+        let rewritten;
+        const mcp = fakeSystem({touchAfterReceipt: moved, beforeCheck: (sys) => {
+          crlf(sys);
+          rewritten = sha(sys.files.get(PLAIN_ITEM).get(PLAIN_XML));
+        }});
+        const {code, text} = await run(base(), mcp);
+        assert.equal(code, 0, text);
+        assert.match(text, /CLAS ZCL_OSD_PROVE_PLAIN: zcl_osd_prove_plain\.clas\.xml differs in bytes from the receipt's but is the same XML element tree; accepted as unchanged/);
+        assert.deepEqual(kinds(mcp).filter((k) => k === "cleanup" || k === "hash"), ["cleanup", "hash", "cleanup"]);
+        assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS);
+        // the second call expects the CURRENT bytes (the snippet checks them in its own step)
+        const second = mcp.sys.calls.filter((c) => c.kind === "cleanup")[1].params.code;
+        assert.ok(second.includes(`zcl_osd_prove_plain.clas.xml=${rewritten}`), "the accepted hash is the current one");
+        assert.ok(!mcp.sys.calls.filter((c) => c.kind === "cleanup")[0].params.code.includes(rewritten));
+        clean(mcp);
+      });
+
+      it("the XML's text changed (same shape, other value): kept, no second call", async () => {
+        const mcp = fakeSystem({touchAfterReceipt: moved, beforeCheck: (sys) => sys.files.get(PLAIN_ITEM).set(PLAIN_XML,
+          sys.files.get(PLAIN_ITEM).get(PLAIN_XML).replace("prove-on-system fixture", "somebody's description"))});
+        const {code, text} = await run(base(), mcp);
+        assert.equal(code, 1, text);
+        assert.match(text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import .* a foreign edit; kept/);
+        assert.equal(kinds(mcp).filter((k) => k === "cleanup").length, 1);
+        assert.ok(mcp.sys.tadir.some((t) => t.item === PLAIN_ITEM));
+      });
+
+      it("an XML file that is no longer one well-formed tree is kept", async () => {
+        const mcp = fakeSystem({touchAfterReceipt: moved, beforeCheck: (sys) => sys.files.get(PLAIN_ITEM).set(PLAIN_XML,
+          sys.files.get(PLAIN_ITEM).get(PLAIN_XML).replace("</abapGit>", ""))});
+        const {code, text} = await run(base(), mcp);
+        assert.equal(code, 1, text);
+        assert.ok(mcp.sys.tadir.some((t) => t.item === PLAIN_ITEM));
+      });
+
+      it("a source file that differs is never accepted by the XML rule, even beside an XML that only moved", async () => {
+        const mcp = fakeSystem({touchAfterReceipt: moved, beforeCheck: (sys) => {
+          crlf(sys);
+          sys.files.get(PLAIN_ITEM).set(PLAIN_ABAP, sys.files.get(PLAIN_ITEM).get(PLAIN_ABAP) + "\n");
+        }});
+        const {code, text} = await run(base(), mcp);
+        assert.equal(code, 1, text);
+        assert.match(text, /a foreign edit; kept/);
+        assert.equal(kinds(mcp).filter((k) => k === "cleanup").length, 1);
+        assert.ok(mcp.sys.tadir.some((t) => t.item === PLAIN_ITEM));
+      });
+
+      it("a receipt whose XML has no canonical digest decides by bytes only", async () => {
+        const {mcp, receiptDir} = await keptRun({touchAfterReceipt: moved, beforeCheck: crlf});
+        const file = receiptIn(receiptDir);
+        const receipt = JSON.parse(readFileSync(file, "utf8"));
+        for (const e of receipt.stamped) for (const f of e.files) delete f.cx;
+        writeFileSync(file, JSON.stringify(receipt));
+        const again = await run(["--cleanup", "--package", PKG], mcp, receiptDir);
+        assert.equal(again.code, 1, again.text);
+        assert.match(again.text, /a foreign edit; kept/);
+        assert.ok(mcp.sys.tadir.some((t) => t.item === PLAIN_ITEM));
+      });
+    });
+
+    describe("DDLS (CDS views)", () => {
+      const DDLS = "DDLS ZOSD_PROVE_CDS";
+      const withDdls = async (fn) => {
+        const dir = mkdtempSync(join(tmpdir(), "osd-prove-ddls-"));
+        try {
+          const src = join(dir, "src");
+          cpSync(join(FIXTURE, "src"), src, {recursive: true});
+          writeFileSync(join(src, "zosd_prove_cds.ddls.asddls"),
+            "@AbapCatalog.sqlViewName: 'ZVOSDPROVECDS'\n@EndUserText.label: 'prove fixture'\ndefine view ZOSD_PROVE_CDS\n  as select from tadir\n{\n  key obj_name as ObjName\n}\n");
+          writeFileSync(join(src, "zosd_prove_cds.ddls.xml"), `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_DDLS" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <DDLS>
+    <DDLNAME>ZOSD_PROVE_CDS</DDLNAME>
+    <DDLANGUAGE>E</DDLANGUAGE>
+    <DDTEXT>prove fixture</DDTEXT>
+   </DDLS>
+  </asx:values>
+ </asx:abap>
+</abapGit>
+`);
+          const manifest = JSON.parse(readFileSync(MANIFEST, "utf8"));
+          manifest.units["prove-demo"].objects.push(DDLS);
+          const mfile = join(dir, "manifest.json");
+          writeFileSync(mfile, JSON.stringify(manifest));
+          return await fn([src, "--unit", "prove-demo", "--manifest", mfile, "--package", PKG]);
+        } finally {
+          rmSync(dir, {recursive: true, force: true});
+        }
+      };
+
+      it("the zip carries abapGit's file names for it, and the receipt snippet reads its stamp from DDDDLSRC", async () => {
+        await withDdls(async (args) => {
+          const z = buildZip(args[0], {unit: "prove-demo", manifest: args[4]});
+          assert.ok(z.objects.includes(DDLS));
+          const files = unzip(z.bytes);
+          assert.ok(files.has("src/zosd_prove_cds.ddls.asddls") && files.has("src/zosd_prove_cds.ddls.xml"));
+          const code = receiptAbap(PKG, [DDLS]);
+          assert.match(code, /WHEN 'DDLS'\.\s+SELECT SINGLE as4date, as4time FROM ddddlsrc WHERE ddlname = @lv_name AND as4local = 'A' INTO/);
+        });
+      });
+
+      it("a CDS view in the zip is stamped, hashed and deleted like the others, and its stamp moving alone does not keep it", async () => {
+        await withDdls(async (args) => {
+          const mcp = fakeSystem({touchAfterReceipt: new Set([DDLS])});
+          const {code, text, receiptDir} = await run(args, mcp);
+          assert.equal(code, 0, text);
+          assert.match(text, /receipt: 3 object\(s\) stamped/);
+          assert.match(text, /DDLS ZOSD_PROVE_CDS: stamp moved .* the content equals the receipt's hash/);
+          assert.deepEqual(mcp.sys.deleted.sort(), [...ZIP_OBJECTS, DDLS]);
+          assert.ok(!existsSync(receiptIn(receiptDir)));
+          clean(mcp);
+        });
+      });
+
+      it("an edit of the CDS source (the .asddls file) is a foreign edit: kept", async () => {
+        await withDdls(async (args) => {
+          const mcp = fakeSystem({touchAfterReceipt: new Set([DDLS]),
+            afterReceipt: (sys) => sys.files.get(DDLS).set("zosd_prove_cds.ddls.asddls", "define view ZOSD_PROVE_CDS as select from t000 { key mandt }\n")});
+          const {code, text} = await run(args, mcp);
+          assert.equal(code, 1, text);
+          assert.match(text, /FAIL cleanup: DDLS ZOSD_PROVE_CDS changed since the import .* a foreign edit; kept/);
+          assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS);
+        });
+      });
+    });
   });
 });
