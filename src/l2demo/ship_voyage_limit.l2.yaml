@@ -1,0 +1,97 @@
+rule: ship-too-many-future-voyages
+class: zcl_l2_ship_voyage_limit
+title: A ship has at most two voyages departing after the check date
+for: ZOSD_L2_SHIP as ship
+when: ship.status <> 'D'
+limit:
+  count: ZOSD_L2_VOY as voy
+  where: voy.ship_id = ship.ship_id and voy.dep_date > $date
+  more_than: 2
+alert: "{ship.ship_id} {ship.name}: {count} future voyages"
+boundaries: auto
+examples:
+  - name: zero future voyages
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: A}]
+    expect: []
+  - name: exactly two future voyages
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S002, name: Cormorant, status: A}]
+      ZOSD_L2_VOY:
+        - {voyage_id: V00001, ship_id: S002, dep_date: 20261002}
+        - {voyage_id: V00002, ship_id: S002, dep_date: 20261003}
+    expect: []
+  - name: three future voyages
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S003, name: Tern, status: A}]
+      ZOSD_L2_VOY:
+        - {voyage_id: V00003, ship_id: S003, dep_date: 20261002}
+        - {voyage_id: V00004, ship_id: S003, dep_date: 20261003}
+        - {voyage_id: V00005, ship_id: S003, dep_date: 20261004}
+    expect: ["S003 Tern: 3 future voyages"]
+  - name: five future voyages
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S004, name: Gull, status: A}]
+      ZOSD_L2_VOY:
+        - {voyage_id: V00006, ship_id: S004, dep_date: 20261002}
+        - {voyage_id: V00007, ship_id: S004, dep_date: 20261003}
+        - {voyage_id: V00008, ship_id: S004, dep_date: 20261004}
+        - {voyage_id: V00009, ship_id: S004, dep_date: 20261005}
+        - {voyage_id: V00010, ship_id: S004, dep_date: 20261006}
+    expect: ["S004 Gull: 5 future voyages"]
+  - name: filtered ship
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S005, name: Heron, status: D}]
+      ZOSD_L2_VOY:
+        - {voyage_id: V00011, ship_id: S005, dep_date: 20261002}
+        - {voyage_id: V00012, ship_id: S005, dep_date: 20261003}
+        - {voyage_id: V00013, ship_id: S005, dep_date: 20261004}
+    expect: []
+  - name: other ships voyages
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S006, name: Egret, status: A}
+        - {ship_id: S007, name: Ibis, status: A}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00014, ship_id: S007, dep_date: 20261002}
+        - {voyage_id: V00015, ship_id: S007, dep_date: 20261003}
+        - {voyage_id: V00016, ship_id: S007, dep_date: 20261004}
+    expect: ["S007 Ibis: 3 future voyages"]
+  - name: groups last over
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S012, name: Skua, status: A}
+        - {ship_id: S010, name: Auk, status: A}
+        - {ship_id: S011, name: Rail, status: A}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00024, ship_id: S012, dep_date: 20261002}
+        - {voyage_id: V00020, ship_id: S010, dep_date: 20261002}
+        - {voyage_id: V00027, ship_id: S012, dep_date: 20261005}
+        - {voyage_id: V00023, ship_id: S011, dep_date: 20261002}
+        - {voyage_id: V00021, ship_id: S010, dep_date: 20261003}
+        - {voyage_id: V00025, ship_id: S012, dep_date: 20261003}
+        - {voyage_id: V00022, ship_id: S010, dep_date: 20261004}
+        - {voyage_id: V00026, ship_id: S012, dep_date: 20261004}
+    expect: ["S010 Auk: 3 future voyages", "S012 Skua: 4 future voyages"]
+  - name: groups last under
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S022, name: Lark, status: A}
+        - {ship_id: S020, name: Wren, status: A}
+        - {ship_id: S021, name: Teal, status: A}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00032, ship_id: S021, dep_date: 20261002}
+        - {voyage_id: V00030, ship_id: S020, dep_date: 20261002}
+        - {voyage_id: V00034, ship_id: S022, dep_date: 20261003}
+        - {voyage_id: V00031, ship_id: S020, dep_date: 20261003}
+        - {voyage_id: V00033, ship_id: S022, dep_date: 20261002}
+        - {voyage_id: V00035, ship_id: S020, dep_date: 20261004}
+    expect: ["S020 Wren: 3 future voyages"]

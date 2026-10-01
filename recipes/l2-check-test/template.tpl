@@ -46,6 +46,33 @@ CLASS ltcl_examples IMPLEMENTATION.
 {{/loops}}
 {{/clauses}}
     DATA lv_alert TYPE string.
+{{#threshold}}
+    DATA lv_count TYPE i.
+    DATA lv_count_text TYPE c LENGTH 12.
+{{/threshold}}
+{{#limit_reference}}
+    SELECT * FROM {{outer.table}} INTO TABLE {{outer.itab}}
+{{#outer.where}}
+{{pre}}{{#is_cmp}}{{column}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{ref}}{{/is_literal}}{{/is_cmp}}{{post}}
+{{/outer.where}}
+      ORDER BY PRIMARY KEY.
+    LOOP AT {{outer.itab}} INTO {{outer.wa}}.
+      SELECT * FROM {{inner.table}} INTO TABLE {{inner.itab}}
+{{#inner.where}}
+{{pre}}{{#is_cmp}}{{column}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{ref}}{{/is_literal}}{{/is_cmp}}{{post}}
+{{/inner.where}}
+        ORDER BY PRIMARY KEY.
+      DESCRIBE TABLE {{inner.itab}} LINES lv_count.
+      IF lv_count {{threshold.op}} {{threshold.value}}.
+        lv_count_text = lv_count.
+        CONDENSE lv_count_text NO-GAPS.
+{{#alert_parts}}
+{{lead}}{{#is_text}}{{value | literal}}{{/is_text}}{{^is_text}}{{ref}}{{/is_text}}{{stop}}
+{{/alert_parts}}
+        APPEND lv_alert TO rt_alerts.
+      ENDIF.
+    ENDLOOP.
+{{/limit_reference}}
 {{#reference}}
 {{#levels}}
 {{indent}}SELECT * FROM {{table}} INTO TABLE {{itab}}

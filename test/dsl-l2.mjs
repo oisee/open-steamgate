@@ -12,8 +12,8 @@ import {tmpdir} from "node:os";
 import {basename, join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DEFAULT_DDIC, registryFor} from "../tools/dsl-ddic.mjs";
-import {buildRule, checkRule, compileRule, describeCases, evaluate, misfit, parseCondition, RuleError, stepValue} from "../tools/dsl-l2.mjs";
-import {bump, caseDiscriminates, compareValues, conditionOf, structureDiscriminates} from "../tools/dsl-l2-eval.mjs";
+import {buildRule, capWarning, checkRule, compileRule, describeCases, evaluate, misfit, parseCondition, RuleError, stepValue} from "../tools/dsl-l2.mjs";
+import {bump, caseDiscriminates, compareValues, conditionOf, structureDiscriminates, thresholdDiscriminates} from "../tools/dsl-l2-eval.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
@@ -27,7 +27,8 @@ const DERIVED = ["B_STATUS_EQ", "B_STATUS_NE", "B_STATUS_BLANK", "B_SHIP_ID_MATC
 const ruleLine = (re) => RULE_TEXT.split("\n").findIndex((l) => re.test(l)) + 1;
 const OR_NOT = "src/l2demo/grounded_ship_crew.l2.yaml";
 const REQUIRE = "src/l2demo/ship_captain.l2.yaml";
-const DEMO_RULES = [RULE, OR_NOT, REQUIRE];
+const LIMIT = "src/l2demo/ship_voyage_limit.l2.yaml";
+const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT];
 
 describe("DSL L2: a rule, its generated check, its examples and its derived cases", function () {
   this.timeout(180000);
@@ -485,6 +486,153 @@ examples:
     }
   }
   const failed = (results) => Object.entries(results).filter(([, r]) => r === "failed").map(([m]) => m).sort();
+
+  describe("slice 4: count thresholds", () => {
+    before(async () => { await import("./start.mjs"); });
+    const text = readFileSync(LIMIT, "utf8");
+    const copy = (tag, source) => {
+      const className = `zcl_l2_count_${tag}`;
+      const file = join(scratch, `${tag}.l2.yaml`);
+      writeFileSync(file, source.replace(/^class: .*$/m, `class: ${className}`));
+      return {file, className};
+    };
+    const rows = (c) => Object.fromEntries(c.tables.map((t) => [t.table,
+      t.rows.map((r) => Object.fromEntries(r.fields.map((f) => [f.column, f.value])))]));
+
+    it("the committed rule runs its examples and all eleven derived cases, including two groups", async () => {
+      const {model, results, messages} = await runRule(LIMIT, "zcl_l2_ship_voyage_limit");
+      expect(Object.keys(results)).to.have.length(19);
+      expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+      const groups = model.cases.find((c) => c.method === "b_count_groups");
+      expect(groups).to.exist;
+      expect(rows(groups).zosd_l2_ship).to.have.length(2);
+      expect(rows(groups).zosd_l2_ship.map((ship) =>
+        rows(groups).zosd_l2_voy.filter((voy) => voy.ship_id === ship.ship_id).length)).to.deep.equal([3, 2]);
+      expect(groups.expect).to.have.length(1);
+      for (const c of model.cases) {
+        const discriminates = c.method === "b_count_groups" ? true : c.derived.condition.startsWith("limit/")
+          ? thresholdDiscriminates(model, rows(c), {date: c.date.value})
+          : caseDiscriminates(model, conditionOf(model, c.derived.condition), rows(c), {date: c.date.value});
+        expect(discriminates, c.method).to.equal(true);
+      }
+    });
+
+    it("the count source and threshold lines trace to their own rule lines", () => {
+      for (const suffix of ["clas", "clas.testclasses"]) {
+        const base = join(OUT, `zcl_l2_ship_voyage_limit.${suffix}`);
+        const source = readFileSync(`${base}.abap`, "utf8").split("\n");
+        const trace = JSON.parse(readFileSync(`${base}.trace.json`, "utf8"));
+        const at = (pattern) => trace.lines.find((e) => pattern.test(source[e.line - 1]));
+        expect(at(/SELECT \* FROM zosd_l2_voy|INNER JOIN zosd_l2_voy/).rule_line).to.equal(text.split("\n").findIndex((l) => /^  count:/.test(l)) + 1);
+        expect(at(/IF lv_count > 2\./).rule_line).to.equal(text.split("\n").findIndex((l) => /^  more_than:/.test(l)) + 1);
+      }
+    });
+
+    it("the threshold operator mutant fails at exactly two", async () => {
+      const {file, className} = copy("op", text);
+      const {results} = await runRule(file, className, {transform: {"clas.abap": (s) => s.replaceAll("IF lv_count > 2.", "IF lv_count >= 2.")}});
+      expect(failed(results)).to.include("exactly_two_future_voyages");
+      expect(failed(results)).to.include("b_count_not_over");
+    });
+
+    it("the threshold literal mutant fails at three", async () => {
+      const {file, className} = copy("lit", text);
+      const {results} = await runRule(file, className, {transform: {"clas.abap": (s) => s.replaceAll("IF lv_count > 2.", "IF lv_count > 3.")}});
+      expect(failed(results)).to.include("three_future_voyages");
+    });
+
+    it("dropping the group count reset fails on the last nonviolating ship", async () => {
+      const {file, className} = copy("noclear", text);
+      const {results} = await runRule(file, className, {mutate: {"clas.abap": [["        CLEAR lv_count.", "        " ]]}});
+      expect(failed(results)).to.include("groups_last_under");
+      expect(failed(results)).to.include("b_count_groups");
+    });
+
+    it("never splitting groups loses the first group's alert", async () => {
+      const {file, className} = copy("nosplit", text);
+      const {results} = await runRule(file, className, {mutate: {"clas.abap": [["IF lv_count > 0 AND (", "IF lv_count < 0 AND ("]]}});
+      expect(failed(results)).to.include("groups_last_over");
+      expect(failed(results)).to.include("b_count_groups");
+    });
+
+    it("dropping the ON equality is caught by check_reference", async () => {
+      const {file, className} = copy("join", text);
+      const {results, messages} = await runRule(file, className, {mutate: {"clas.abap": [["ON voy~ship_id = ship~ship_id", "ON voy~ship_id = voy~ship_id"]]}});
+      expect(failed(results).length).to.be.greaterThan(0);
+      expect(failed(results)).to.include("other_ships_voyages");
+      expect(failed(results)).to.include("b_ship_id_nomatch");
+      expect(Object.values(messages).some((m) => m.includes("#assert_same_as_reference"))).to.equal(true);
+    });
+
+    it("at_least: 3 has below and at boundary cases, both run in ABAP", async () => {
+      const {file, className} = copy("at", text.replace("more_than: 2", "at_least: 3"));
+      const {model, results, messages} = await runRule(file, className);
+      expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+      expect(model.cases.map((c) => c.method)).to.include.members(["b_count_below", "b_count_at"]);
+      expect(model.cases.find((c) => c.method === "b_count_below").expect).to.deep.equal([]);
+      expect(model.cases.find((c) => c.method === "b_count_at").expect).to.have.length(1);
+    });
+
+    it("zero and one thresholds accept existence and emit once per for row", async () => {
+      const base = `rule: count-exists
+class: zcl_l2_count_exists
+title: Count existence
+for: ZOSD_L2_SHIP as ship
+limit:
+  count: ZOSD_L2_VOY as voy
+  where: voy.ship_id = ship.ship_id
+  more_than: 0
+alert: "{ship.ship_id}: {count}"
+boundaries: auto
+examples:
+  - name: no voyage
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: A, status: A}]
+    expect: []
+  - name: two voyages one alert
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: A, status: A}]
+      ZOSD_L2_VOY:
+        - {voyage_id: V00001, ship_id: S001, dep_date: 20261002}
+        - {voyage_id: V00002, ship_id: S001, dep_date: 20261003}
+    expect: ["S001: 2"]
+`;
+      for (const [tag, rule] of [["zero", base], ["one", base.replace("more_than: 0", "at_least: 1")]]) {
+        const {file, className} = copy(tag, rule);
+        const {model, results, messages} = await runRule(file, className);
+        expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+        expect(model.cases.map((c) => c.method)).to.include("b_count_groups");
+      }
+    });
+
+    it("refuses zero-count forms and counted-row alert holes at their own lines", () => {
+      for (const [from, to, reason] of [
+        ["more_than: 2", "at_least: 0", "holds for every for row"],
+        ["more_than: 2", "exactly: 2", "zero-count groups"],
+        ["more_than: 2", "more_than: 2147483648", "INT4"],
+        ["{count} future", "{voy.voyage_id} future", "limit counts rows"],
+      ]) {
+        const {file} = copy(`bad${reason.length}`, text.replace(from, to));
+        const altered = readFileSync(file, "utf8");
+        const target = altered.split("\n").findIndex((l) => l.includes(to)) + 1;
+        expect(() => compileRule(file, {registry})).to.throw(RuleError, reason)
+          .with.property("line", target);
+      }
+      const {file} = copy("mixed", text.replace("limit:\n", "forbid:\n  exists: ZOSD_L2_VOY as other\n  where: other.ship_id = ship.ship_id\nlimit:\n"));
+      expect(() => compileRule(file, {registry})).to.throw(RuleError, "exactly one");
+    });
+
+    it("names the 64-row cap and warns with the threshold line", () => {
+      const capText = `${text.slice(0, text.indexOf("examples:"))}examples:\n  - name: no voyages\n    date: 20261001\n    rows:\n      ZOSD_L2_SHIP: [{ship_id: S001, name: A, status: A}]\n    expect: []\n`;
+      const {file} = copy("cap64", capText.replace("more_than: 2", "more_than: 64"));
+      const model = compileRule(file, {registry});
+      expect(model.skipped.map((item) => item.reason).join("\n")).to.include("64-row");
+      const line = readFileSync(file, "utf8").split("\n").findIndex((entry) => entry.includes("more_than: 64")) + 1;
+      expect(capWarning(model, file)).to.include(`${file}:${line}: warning: the 64-row cap`);
+    });
+  });
 
 
   // The mutants change the rule in the ABAP -- the query and the reference

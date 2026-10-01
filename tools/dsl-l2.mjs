@@ -298,9 +298,13 @@ export function parseAlert(text, fail) {
     if (open > i) parts.push({kind: "text", value: text.slice(i, open)});
     const end = text.indexOf("}", open);
     if (end < 0) fail(`"{" at column ${open + 1} is not closed`);
-    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(text.slice(open + 1, end));
-    if (!m) fail(`a hole is {alias.field}, found {${text.slice(open + 1, end)}} at column ${open + 1}`);
-    parts.push({kind: "hole", alias: m[1].toLowerCase(), field: m[2].toLowerCase(), text: text.slice(open, end + 1)});
+    const hole = text.slice(open + 1, end).trim();
+    if (hole.toLowerCase() === "count") parts.push({kind: "count", text: text.slice(open, end + 1)});
+    else {
+      const m = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(hole);
+      if (!m) fail(`a hole is {alias.field} or {count}, found {${text.slice(open + 1, end)}} at column ${open + 1}`);
+      parts.push({kind: "hole", alias: m[1].toLowerCase(), field: m[2].toLowerCase(), text: text.slice(open, end + 1)});
+    }
     i = end + 1;
   }
   return parts;
@@ -510,7 +514,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     return value;
   };
   need(doc, "", "a mapping of the rule's keys", "map");
-  const known = new Set(["rule", "class", "title", "for", "when", "forbid", "require", "alert", "boundaries", "examples"]);
+  const known = new Set(["rule", "class", "title", "for", "when", "forbid", "require", "limit", "alert", "boundaries", "examples"]);
   for (const key of Object.keys(doc)) if (!known.has(key)) failAt(line(key))(`unknown key ${key}`);
 
   const name = need(doc.rule, "rule", "the rule's name");
@@ -542,10 +546,28 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
   const wa = (alias) => `ls_${alias}`;
 
   // forbid: one exists, or all: / any: of two or three; require: one exists
-  if (doc.forbid !== undefined && doc.require !== undefined) failAt(line("require"))("a rule has forbid or require, not both");
-  if (doc.forbid === undefined && doc.require === undefined) failAt(line("rule"))("a rule needs forbid: (no row may match) or require: (a row must match)");
-  const kind = doc.forbid !== undefined ? "forbid" : "require";
-  need(doc[kind], kind, "a mapping with exists and where", "map");
+  const present = ["forbid", "require", "limit"].filter((k) => doc[k] !== undefined);
+  if (doc.forbid !== undefined && doc.require !== undefined && doc.limit === undefined) {
+    failAt(line("require"))("a rule has forbid or require, not both");
+  }
+  if (present.length === 0) failAt(line("rule"))("a rule needs forbid: (no row may match) or require: (a row must match) or limit: (a count must exceed a threshold)");
+  if (present.length !== 1) failAt(line(present[1] ?? "rule"))("a rule needs exactly one of forbid:, require:, or limit:");
+  const kind = present[0];
+  need(doc[kind], kind, kind === "limit" ? "a mapping with count, where and a threshold" : "a mapping with exists and where", "map");
+  let threshold;
+  if (kind === "limit") {
+    const spec = doc.limit;
+    for (const key of Object.keys(spec)) if (!["count", "where", "more_than", "at_least"].includes(key)) {
+      const why = ["fewer_than", "exactly"].includes(key) ? `${key} needs zero-count groups, which require an outer join or NOT EXISTS; not in this slice` : `unknown key limit.${key}`;
+      failAt(line(`limit/${key}`))(why);
+    }
+    const keys = ["more_than", "at_least"].filter((k) => spec[k] !== undefined);
+    if (keys.length !== 1) failAt(line(keys[1] ? `limit/${keys[1]}` : "limit"))("limit needs exactly one of more_than or at_least");
+    const key = keys[0], value = spec[key];
+    if (!/^(0|[1-9][0-9]*)$/.test(value ?? "") || BigInt(value ?? -1) > 2147483647n) failAt(line(`limit/${key}`))(`${key} must be a non-negative INT4 integer`);
+    if (key === "at_least" && value === "0") failAt(line(`limit/${key}`))("at_least: 0 holds for every for row; zero counts need a different lowering");
+    threshold = {"@id": `${id}/limit/${key}`, rule_line: line(`limit/${key}`), op: key === "more_than" ? ">" : ">=", value: Number(value), key};
+  }
   const listKey = ["all", "any"].find((k) => doc[kind][k] !== undefined);
   let combine = "one", specs;
   if (listKey) {
@@ -562,10 +584,10 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
   const aliases = new Map([[outer.alias, outer]]);
   const sources = specs.map((spec) => {
     need(spec.value, spec.path, "a mapping with exists and where", "map");
-    const allowed = combine === "any" ? ["exists", "where", "alert"] : ["exists", "where"];
+    const allowed = kind === "limit" ? ["count", "where", "more_than", "at_least"] : combine === "any" ? ["exists", "where", "alert"] : ["exists", "where"];
     for (const key of Object.keys(spec.value)) if (!allowed.includes(key)) failAt(line(`${spec.path}/${key}`))(`unknown key ${spec.path.replaceAll("/", ".")}.${key}`);
-    const epath = `${spec.path}/exists`;
-    const inner = source(epath, spec.value.exists);
+    const epath = `${spec.path}/${kind === "limit" ? "count" : "exists"}`;
+    const inner = source(epath, spec.value[kind === "limit" ? "count" : "exists"]);
     if (aliases.has(inner.alias)) failAt(line(epath))(`alias ${inner.alias} is already the alias of ${aliases.get(inner.alias).table}`);
     if (inner.table === outer.table) failAt(line(epath))(`for and exists are both ${outer.table}; a rule joins different tables`);
     const twin = [...aliases.values()].find((s) => s.table === inner.table);
@@ -712,7 +734,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
       const purpose = kind === "require" ? "the correlation of the subquery" : combine === "all" ? "every clause of all joins the for table in the one query" : "the join condition of the query";
       failAt(line(wpath))(`where needs an equality between a field of ${inner.alias} and a field of ${outer.alias}, joined to the rest by and (${purpose})`);
     }
-    return {"@id": spec.id, rule_line: line(spec.path), exists_line: line(`${spec.path}/exists`), path: spec.path,
+    return {"@id": spec.id, rule_line: line(spec.path), exists_line: line(`${spec.path}/${kind === "limit" ? "count" : "exists"}`), path: spec.path,
       table: inner.table.toLowerCase(), alias: inner.alias, itab: `lt_${inner.alias}`, wa: wa(inner.alias), loops: kind !== "require",
       slot: sources.slice(0, sources.findIndex((x) => x.spec === spec)).filter((x) => x.inner.table === inner.table).length,
       conditions, tree, on: top.filter(isOn).map((t) => conditions[t.index]), rest: conjoin(top.filter((t) => !isOn(t))),
@@ -725,6 +747,10 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     const alertFail = failAt(line(path));
     let texts = 0, holes = 0;
     const parts = parseAlert(alertText, alertFail).flatMap((part) => {
+      if (part.kind === "count") {
+        if (kind !== "limit") alertFail("{count} is available only for limit rules");
+        return {"@id": `${idBase}/alert/count`, rule_line: line(path), is_text: false, is_count: true, ref: "lv_count_text"};
+      }
       if (part.kind === "text") {
         const why = misfit(part.value, {built_in: "STRG"});
         if (why) alertFail(`alert text: ${why}`);
@@ -756,7 +782,8 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     }
   } else {
     alert = alertOf("alert", doc.alert, kind === "require" ? outerScope : aliases, id,
-      kind === "require" ? `require alerts when no row of the exists table is there, so its alert names only fields of ${outer.alias}` : undefined);
+      kind === "require" ? `require alerts when no row of the exists table is there, so its alert names only fields of ${outer.alias}`
+        : kind === "limit" ? `limit counts rows of the count table, so its alert names only fields of ${outer.alias}` : undefined);
   }
 
   // The queries of `check`: one for forbid (the clauses joined) and for
@@ -785,20 +812,25 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
       return {source: `${alias}~${k}`, rule_line: ruleLine};
     });
     const order = [...keysOf(outer.alias, outer.info, line("for")),
-      ...(kind === "require" ? [] : group.flatMap((c) => keysOf(c.alias, c.info, c.exists_line)))]
+      ...(["require", "limit"].includes(kind) ? [] : group.flatMap((c) => keysOf(c.alias, c.info, c.exists_line)))]
       .map((entry, n) => ({"@id": `${qid}/order/${n + 1}`, ...entry}));
     const qwa = `ls_join${suffix}`;
-    const parts = (combine === "any" ? group[0].alert : alert).parts.map((part) => part.is_text ? part
-      : {...part, jref: `${qwa}-${field(part.alias, part.column, part.rule_line)}`});
+    const parts = (combine === "any" ? group[0].alert : alert).parts.map((part) => part.is_text || part.is_count ? {...part, ...(part.is_count ? {jref: "lv_count_text"} : {})}
+      : {...part, jref: `${kind === "limit" ? "ls_prev" : qwa}-${field(part.alias, part.column, part.rule_line)}`});
     const condition = conjoin([whenTree, ...(kind === "require" ? [{op: "exists", clause: group[0]}]
       : group.map((c) => c.rest && resolve(c.rest, c.conditions)))]);
+    const group_keys = order.map((o) => ({...o, name: `${outer.alias}_${o.source.split("~")[1]}`}));
     return {"@id": qid, rule_line: line(kind), type: `ty_join${suffix}`, itab: `lt_join${suffix}`, wa: qwa,
       fields: [...fields.values()],
       from: {"@id": `${id}/for`, rule_line: line("for"), table: outer.table.toLowerCase(), alias: outer.alias},
-      joins: kind === "require" ? [] : group.map((c) => ({"@id": c["@id"], rule_line: c.rule_line, table: c.table, alias: c.alias, on: c.on})),
-      where: whereLines(condition), order, alert_parts: parts};
+      joins: kind === "require" ? [] : group.map((c) => ({"@id": kind === "limit" ? `${c["@id"]}/count` : c["@id"],
+        rule_line: kind === "limit" ? c.exists_line : c.rule_line, table: c.table, alias: c.alias, on: c.on})),
+      where: whereLines(condition), order, alert_parts: parts,
+      ...(kind === "limit" ? {limit: threshold, group_keys,
+        key_change: group_keys.map((k) => `${qwa}-${k.name} <> ls_prev-${k.name}`).join(" OR ")} : {})};
   });
-  const comment = kind === "require" ? "one query: the rows of the first with no match in a subquery, never a SELECT per row"
+  const comment = kind === "limit" ? "one query: join rows counted per for key in the loop (HAVING probe fails here)"
+    : kind === "require" ? "one query: the rows of the first with no match in a subquery, never a SELECT per row"
     : combine === "any" ? "one query per clause: its table joined to the first, never a SELECT per row of the first"
       : "one query: the tables joined, never a SELECT per row of the first";
 
@@ -819,7 +851,14 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
       alert_parts: parts.map((part, k) => ({...part, lead: `${indent}${k === 0 ? "lv_alert = " : "  && "}`, stop: k === parts.length - 1 ? "." : ""})),
       closes: [...levels].reverse().map((l) => ({"@id": l["@id"], rule_line: l.rule_line, indent: l.indent, word: l.is_loop ? "ENDLOOP." : "ENDIF."}))};
   };
-  const reference = combine === "any" ? clauses.map((c) => pass([c], c.alert.parts)) : [pass(clauses, alert.parts)];
+  const reference = combine === "any" ? clauses.map((c) => pass([c], c.alert.parts)) : kind === "limit" ? [] : [pass(clauses, alert.parts)];
+  const limit_reference = kind === "limit" ? {
+    "@id": `${id}/limit/reference`, rule_line: line("limit"), threshold,
+    outer: level(forNode, when.tree, when.conditions, "    ", true),
+    inner: level({...clauses[0], "@id": `${clauses[0]["@id"]}/count`, rule_line: clauses[0].exists_line},
+      clauses[0].tree, clauses[0].conditions, "      ", false),
+    alert_parts: alert.parts.map((part, k, parts) => ({...part, lead: `        ${k === 0 ? "lv_alert = " : "  && "}`, stop: k === parts.length - 1 ? "." : ""})),
+  } : undefined;
 
   // examples: rows of the rule's own tables, the date, the alerts expected
   // each table where it enters the rule: `for`, or its clause's `exists`
@@ -904,7 +943,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     clauses: clauses.map(({info, alertSpec, rest, ...clause}) => clause),
     ...(alert ? {alert} : {}),
     queries,
-    reference,
+    reference, ...(limit_reference ? {limit_reference, threshold} : {}),
     tables: ruleTables.map((info) => ({"@id": `${id}/table/${info.table.toLowerCase()}`, rule_line: info.rule_line,
       table: info.table.toLowerCase(), ...testName(info.table)})),
     ddic: Object.fromEntries(ruleTables.map((info) => [info.table.toLowerCase(), ddicOf(info)])),
@@ -1105,6 +1144,12 @@ export function describeCases(model) {
   return out.join("\n");
 }
 
+export function capWarning(model, file = model.source) {
+  return model.kind === "limit" && model.threshold.value >= 64
+    ? `${file}:${model.threshold.rule_line}: warning: the 64-row cap leaves count boundaries without derived coverage; examples must cover them`
+    : undefined;
+}
+
 async function main(args) {
   const [command, file, ...rest] = args;
   const ddic = [];
@@ -1119,18 +1164,21 @@ async function main(args) {
     return 2;
   }
   const options = ddic.length ? {ddic} : {};
+  const warnCap = (model) => { const warning = capWarning(model, file); if (warning) console.warn(warning); };
   if (command === "cases") {
     console.log(describeCases(compileRule(file, options)));
     return 0;
   }
   if (command === "check") {
+    warnCap(compileRule(file, options));
     const drift = await checkRule(file, out, options);
     for (const line of drift) console.error(line);
     console.log(drift.length ? `${file}: ${drift.length} file(s) drifted; rebuild with: node tools/dsl-l2.mjs build ${file} --out ${out}`
       : `${file}: generated files match`);
     return drift.length ? 1 : 0;
   }
-  const {files, findings} = await buildRule(file, out, options);
+  const {model, files, findings} = await buildRule(file, out, options);
+  warnCap(model);
   for (const name of Object.keys(files)) console.log(`wrote ${join(out, name)}`);
   console.log(`abap profile: ${findings.length} finding(s)`);
   for (const f of findings) console.log(`${f.severity} ${f.file}:${f.line} ${f.rule}: ${f.text} (${f.node})`);
@@ -1143,4 +1191,3 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(1);
   });
 }
-

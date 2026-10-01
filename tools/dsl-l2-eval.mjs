@@ -278,6 +278,7 @@ export function evaluate(model, rows, params = {}, override = {}) {
   };
   const alertOf = (parts, context) => parts.map((part) => {
     if (part.is_text) return part.value;
+    if (part.is_count) return String(context.$count);
     const at = context[part.alias];
     return render(fieldsOf(at.table)[part.column], valueOf(at.table, at.row, part.column));
   }).join("");
@@ -288,7 +289,15 @@ export function evaluate(model, rows, params = {}, override = {}) {
       if (whenHolds(context)) visit(context);
     }
   };
-  if (model.kind === "require") {
+  if (model.kind === "limit") {
+    const clause = model.clauses[0];
+    each((context) => {
+      const count = matching(clause, 0, context).length;
+      if (test(model.threshold.op, Math.sign(count - model.threshold.value))) {
+        alerts.push(alertOf(model.alert.parts, {...context, $count: count}));
+      }
+    });
+  } else if (model.kind === "require") {
     const clause = model.clauses[0];
     each((context) => {
       if (!matching(clause, 0, context).length) alerts.push(alertOf(model.alert.parts, context));
@@ -572,6 +581,43 @@ export function structureDiscriminates(model, rows, params) {
     JSON.stringify(evaluate(model, rows, params, {[c]: value})) !== expected));
 }
 
+// Add matching rows by varying a counted-table key. The interpreter checks
+// the resulting count, so a constrained key or a short key cannot fake a case.
+export const COUNT_ROW_CAP = 64;
+
+function countTo(model, rows, wanted, params) {
+  const clause = model.clauses[0];
+  const table = clause.table;
+  if (wanted === 0) { rows[table] = []; return true; }
+  if (wanted > COUNT_ROW_CAP) return false;
+  const count = () => Number(evaluate({...model, threshold: {op: ">", value: 0}, alert: {parts: [{is_count: true}]}}, rows, params)[0] ?? 0);
+  if (count() !== 1) return false;
+  const base = {...rows[table][0]};
+  for (let i = 1; i < wanted; i++) {
+    let added = false;
+    for (const key of model.ddic[table].keys) {
+      const type = model.ddic[table].fields[key];
+      for (let seed = i + 100; seed < i + 300; seed++) {
+        const value = defaultValue(type, seed);
+        const row = {...base, [key]: value};
+        rows[table].push(row);
+        if (keysDistinct(model, rows) && count() === i + 1) { added = true; break; }
+        rows[table].pop();
+      }
+      if (added) break;
+    }
+    if (!added) return false;
+  }
+  return true;
+}
+
+export function thresholdDiscriminates(model, rows, params) {
+  const expected = JSON.stringify(evaluate(model, rows, params));
+  const {op, value} = model.threshold;
+  return [{op: op === ">" ? ">=" : ">", value}, {op, value: value - 1}, {op, value: value + 1}]
+    .some((threshold) => JSON.stringify(evaluate({...model, threshold}, rows, params)) !== expected);
+}
+
 // Every case for the selected conditions, in rule order, then the structural
 // cases of the clauses: {method, label, kind, condition, line (the rule line
 // of the condition or clause), date, rows, expect, structural}. `example` is
@@ -620,6 +666,11 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       continue;
     }
     if (owner.when) resolveClauses(model, params, start, undefined, true);
+    if (model.kind === "limit" && !countTo(model, start, model.threshold.value + (model.threshold.op === ">" ? 1 : 0), params)) {
+      skipped.push({condition: cond.text, reason: model.threshold.value + (model.threshold.op === ">" ? 1 : 0) > COUNT_ROW_CAP
+        ? `count exceeds the ${COUNT_ROW_CAP}-row derived-case cap` : "cannot make the threshold count with distinct matching keys"});
+      continue;
+    }
     const setField = (value) => {
       const rows = clone(start);
       rows[table][owner.slot][cmp.column] = value;
@@ -647,6 +698,82 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       }
       add(reference, cond.rule_line, suffix, methods, cond.text, rows);
     }
+  }
+
+  if (model.kind === "limit") {
+    const n = model.threshold.value;
+    const counts = model.threshold.op === ">" ? [n, n + 1] : [n - 1, n];
+    const suffixes = model.threshold.op === ">" ? ["not_over", "over"] : ["below", "at"];
+    const methods = name("limit threshold", ["count"], suffixes, model.threshold.rule_line);
+    for (let i = 0; i < counts.length; i++) {
+      const rows = clone(base.rows);
+      if (!countTo(model, rows, counts[i], params)) {
+        skipped.push({condition: `limit/${model.threshold.key}`, reason: counts[i] > COUNT_ROW_CAP
+          ? `${counts[i]} matching rows exceed the ${COUNT_ROW_CAP}-row derived-case cap`
+          : `cannot make ${counts[i]} matching rows with distinct keys`});
+        continue;
+      }
+      if (!thresholdDiscriminates(model, rows, params)) {
+        skipped.push({condition: `limit/${model.threshold.key}`, reason: `${counts[i]} rows do not discriminate the threshold`});
+        continue;
+      }
+      add(`limit/${model.threshold.key}`, model.threshold.rule_line, suffixes[i], methods,
+        `${counts[i]} matching rows`, rows, true);
+    }
+    // Exercise the transition between two joined for rows. The first group
+    // exceeds the threshold and the second sits on it, so both clearing the
+    // count and detecting the new key matter.
+    const over = n + (model.threshold.op === ">" ? 1 : 0);
+    const at = Math.max(1, n + (model.threshold.op === ">" ? 0 : -1));
+    if (over + at > COUNT_ROW_CAP) {
+      skipped.push({condition: `limit/${model.threshold.key}`, reason: `two groups need ${over + at} counted rows, exceeding the ${COUNT_ROW_CAP}-row derived-case cap`});
+    } else {
+      const first = clone(base.rows), second = clone(base.rows);
+      let joined = false;
+      if (countTo(model, first, over, params)) {
+        const outer = second[model.for.table][0];
+        for (const key of model.ddic[model.for.table].keys) {
+          const type = model.ddic[model.for.table].fields[key];
+          const original = outer[key];
+          for (let seed = 2; seed < 300 && !joined; seed++) {
+            const candidate = defaultValue(type, seed);
+            if (compareValues(type, original, type, candidate) === 0) continue;
+            outer[key] = candidate;
+            for (const on of model.clauses[0].on) {
+              if (on.cmp.rhs.kind === "field" && on.cmp.rhs.column === key && on.cmp.op === "=") {
+                second[model.clauses[0].table][0][on.cmp.column] = candidate;
+              }
+            }
+            if (countTo(model, second, at, params)) {
+              const counted = model.clauses[0].table;
+              const freeKey = model.ddic[counted].keys.find((column) =>
+                !model.clauses[0].on.some((on) => on.cmp.column === column));
+              if (freeKey) {
+                const type = model.ddic[counted].fields[freeKey];
+                second[counted].forEach((row, i) => { row[freeKey] = defaultValue(type, 500 + i); });
+              }
+              const rows = clone(first);
+              rows[model.for.table].push(outer);
+              rows[counted].push(...second[counted]);
+              if (keysDistinct(model, rows) && evaluate(model, rows, params).length ===
+                evaluate(model, first, params).length + evaluate(model, second, params).length) {
+                const multi = name("limit groups", ["count"], ["groups"], model.threshold.rule_line);
+                add(`limit/${model.threshold.key}`, model.threshold.rule_line, "groups", multi,
+                  `${over} and ${at} matching rows in two groups`, rows, true);
+                joined = true;
+              }
+            }
+            if (!joined) {
+              second[model.for.table][0][key] = original;
+              second[model.clauses[0].table] = base.rows[model.clauses[0].table].map((row) => ({...row}));
+            }
+          }
+          if (joined) break;
+        }
+      }
+      if (!joined) skipped.push({condition: `limit/${model.threshold.key}`, reason: "cannot make two distinct for groups with matching counted rows"});
+    }
+    return {cases, skipped};
   }
 
   // the structural cases of the clauses, each guarded like the others
