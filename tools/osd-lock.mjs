@@ -90,6 +90,10 @@ export function libraryPath(root, folder, env = process.env) {
     }
   } catch { /* absent or not a standalone checkout */ }
   if (actual !== pin.ref) throw new Error(`${folder} is at ${actual}, libs.lock.json says ${pin.ref}; run node tools/osd-libs.mjs --sync`);
+  let dirty;
+  try { dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {cwd: path, encoding: "utf8", stdio: "pipe"}).length > 0; }
+  catch (error) { throw new Error(`${folder} at ${path}: cannot check working tree (${error.message})`); }
+  if (dirty) throw new Error(`${folder} at ${path} has modified or untracked files; use OSD_LIB_${folder.toUpperCase().replace(/[^A-Z0-9]/g, "_")} for development`);
   return path;
 }
 

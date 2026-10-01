@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Materialise locked library commits and keep .local/lars as the public path.
 import {execFileSync} from "node:child_process";
-import {closeSync, lstatSync, mkdirSync, mkdtempSync, openSync, readlinkSync, renameSync, rmSync, symlinkSync} from "node:fs";
-import {dirname, join, relative, resolve} from "node:path";
+import {closeSync, lstatSync, mkdirSync, mkdtempSync, openSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync} from "node:fs";
+import {dirname, join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {librariesFromLock, libraryPath} from "./osd-lock.mjs";
 
@@ -12,9 +12,13 @@ const head = (path) => { try { return git(path, "rev-parse", "HEAD"); } catch { 
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 export function libraries(root = ".") {
+  const lars = resolve(root, ".local", "lars");
+  let shared = lars;
+  try { shared = realpathSync(lars); } catch { /* fresh checkout */ }
+  const store = dirname(shared);
   return librariesFromLock(root).libraries.map((lib) => ({
-    ...lib, at: lib.path, pin: join(root, ".local", "pins", `${lib.name}@${lib.ref}`),
-    dev: join(root, ".local", "dev", lib.name),
+    ...lib, at: join(shared, lib.name), pin: join(store, "pins", `${lib.name}@${lib.ref}`),
+    dev: join(store, "dev", lib.name), shared: shared !== lars,
   }));
 }
 
@@ -72,16 +76,17 @@ function pointAtPin(lib) {
   if (fd === undefined) throw new Error(`${lib.name}: timed out waiting for ${lock}`);
   try {
     if (exists(lib.at) && !lstatSync(lib.at).isSymbolicLink()) {
+      if (lib.shared) throw new Error(`${lib.name}: ${lib.at} is shared by worktrees; move it aside manually before syncing`);
       if (exists(lib.dev)) throw new Error(`${lib.name}: cannot move ${lib.at} to ${lib.dev}: destination exists; move it aside manually`);
       mkdirSync(dirname(lib.dev), {recursive: true});
       renameSync(lib.at, lib.dev);
     }
-    const target = relative(dirname(lib.at), lib.pin);
+    const target = resolve(lib.pin);
     if (exists(lib.at)) {
       if (resolve(dirname(lib.at), readlinkSync(lib.at)) === resolve(lib.pin)) return;
       rmSync(lib.at); // only our symlink, never a directory
     }
-    try { symlinkSync(process.platform === "win32" ? resolve(lib.pin) : target, lib.at, process.platform === "win32" ? "junction" : "dir"); }
+    try { symlinkSync(target, lib.at, process.platform === "win32" ? "junction" : "dir"); }
     catch (error) {
       throw new Error(`${lib.name}: could not create ${lib.at} link (${error.message}); on Windows enable Developer Mode or run in an elevated terminal`);
     }

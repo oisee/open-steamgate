@@ -1,10 +1,11 @@
 import {strict as assert} from "node:assert";
 import {execFileSync, spawn} from "node:child_process";
-import {mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, lstatSync, realpathSync, readFileSync} from "node:fs";
+import {mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, lstatSync, realpathSync, readFileSync, readlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join, dirname} from "node:path";
 import {materialise} from "../tools/osd-libs.mjs";
 import {libraryPath} from "../tools/osd-lock.mjs";
+import {generate as generateGui} from "../tools/osd-gui-convert.mjs";
 
 const git = (dir, ...args) => execFileSync("git", args, {cwd: dir, encoding: "utf8"}).trim();
 function fixture() {
@@ -69,6 +70,70 @@ describe("locked library paths", () => {
       assert.deepEqual(results.map((r) => r.status), [0, 0], JSON.stringify(results));
       assert.equal(git(join(f.home, ".local/lars/example"), "rev-parse", "HEAD"), f.ref);
     } finally { rmSync(f.root, {recursive: true, force: true}); }
+  });
+
+  it("anchors pins beside a shared lars directory and uses absolute links", () => {
+    const f = fixture();
+    try {
+      const shared = join(f.root, "shared", ".local");
+      mkdirSync(join(shared, "lars"), {recursive: true});
+      mkdirSync(join(f.home, ".local"), {recursive: true});
+      symlinkSync(join(shared, "lars"), join(f.home, ".local/lars"), "dir");
+      run(f.home, f.bare);
+      const at = join(shared, "lars/example");
+      const pin = join(shared, `pins/example@${f.ref}`);
+      assert.equal(realpathSync(at), realpathSync(pin));
+      assert.equal(readlinkSync(at), pin);
+    } finally { rmSync(f.root, {recursive: true, force: true}); }
+  });
+
+  it("does not move a clone used through a shared lars directory", () => {
+    const f = fixture();
+    try {
+      const shared = join(f.root, "shared", ".local");
+      mkdirSync(join(shared, "lars"), {recursive: true});
+      mkdirSync(join(f.home, ".local"), {recursive: true});
+      symlinkSync(join(shared, "lars"), join(f.home, ".local/lars"), "dir");
+      const at = join(shared, "lars/example");
+      git(f.home, "clone", "-q", f.bare, at);
+      assert.throws(() => run(f.home, f.bare), /shared by worktrees/);
+      assert.equal(git(at, "rev-parse", "HEAD"), git(f.source, "rev-parse", "HEAD"));
+    } finally { rmSync(f.root, {recursive: true, force: true}); }
+  });
+
+  it("refuses modified and untracked files at the pinned commit", () => {
+    const f = fixture();
+    try {
+      run(f.home, f.bare);
+      const pin = join(f.home, `.local/pins/example@${f.ref}`);
+      writeFileSync(join(pin, "file.txt"), "edited");
+      assert.throws(() => libraryPath(f.home, "example"), /modified or untracked/);
+      writeFileSync(join(pin, "file.txt"), "one");
+      writeFileSync(join(pin, "new.txt"), "new");
+      assert.throws(() => libraryPath(f.home, "example"), /modified or untracked/);
+    } finally { rmSync(f.root, {recursive: true, force: true}); }
+  });
+
+  it("loads the GUI converter from the explicit override", async () => {
+    const f = fixture();
+    const old = process.env.OSD_LIB_OPEN_ABAP_GUI;
+    try {
+      const converter = join(f.root, "gui", "converter", "src", "api.mjs");
+      mkdirSync(dirname(converter), {recursive: true});
+      writeFileSync(converter, "export function convertProgram() { throw new Error('override used'); }\n");
+      const lock = JSON.parse(readFileSync(join(f.home, "libs.lock.json"), "utf8"));
+      lock.libraries.push({folder: "open-abap-gui", repo: "test/gui", ref: f.ref});
+      writeFileSync(join(f.home, "libs.lock.json"), JSON.stringify(lock));
+      process.env.OSD_LIB_OPEN_ABAP_GUI = join(f.root, "gui");
+      const reports = join(f.root, "reports");
+      mkdirSync(reports);
+      writeFileSync(join(reports, "sample.prog.abap"), "REPORT z_sample.\n");
+      await assert.rejects(generateGui([reports], join(f.root, "generated"), {root: f.home}), /override used/);
+    } finally {
+      if (old === undefined) delete process.env.OSD_LIB_OPEN_ABAP_GUI;
+      else process.env.OSD_LIB_OPEN_ABAP_GUI = old;
+      rmSync(f.root, {recursive: true, force: true});
+    }
   });
 
   it("refuses to overwrite an existing development clone", () => {
