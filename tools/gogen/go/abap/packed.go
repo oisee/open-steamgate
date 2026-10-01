@@ -185,7 +185,7 @@ func DivP(a, b string) string {
 		if x.v.Sign() == 0 {
 			return "0"
 		}
-		panic(ArithmeticError{"CX_SY_ZERODIVIDE", "/"})
+		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "/"})
 	}
 	if x.v.Sign() == 0 {
 		return "0"
@@ -224,7 +224,7 @@ func pDivMod(a, b, op string) (pdec, pdec) {
 		if x.v.Sign() == 0 {
 			return pZero, pZero
 		}
-		panic(ArithmeticError{"CX_SY_ZERODIVIDE", op})
+		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: op})
 	}
 	ay := new(big.Int).Abs(y.v)
 	r := new(big.Int).Mod(x.v, ay) // Euclidean: 0 <= r < |y|
@@ -262,7 +262,7 @@ func PFit(a string, n, dec int, arith bool) string {
 		if arith {
 			overflow("=")
 		}
-		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "p"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_OVERFLOW", Op: "p"})
 	}
 	return pFixed(d, dec)
 }
@@ -288,7 +288,7 @@ func CToP(v string) string {
 	}
 	ip, fp, _ := strings.Cut(t, ".")
 	if ip+fp == "" || strings.Trim(ip, "0123456789") != "" || strings.Trim(fp, "0123456789") != "" {
-		panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->p"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_NO_NUMBER", Op: "c->p"})
 	}
 	x := pParse(ip + "." + fp)
 	if neg {
@@ -303,7 +303,7 @@ func CToP(v string) string {
 // and 1.0049999999999999 round to).
 func FToP(f float64) string {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
-		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "f->p"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_OVERFLOW", Op: "f->p"})
 	}
 	return pText(pParseExp(strconv.FormatFloat(f, 'e', 16, 64)))
 }
@@ -334,7 +334,7 @@ func PToI(a string, arith bool) int32 {
 		if arith {
 			overflow("=")
 		}
-		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "p->i"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_OVERFLOW", Op: "p->i"})
 	}
 	return int32(v.Int64())
 }
@@ -345,7 +345,7 @@ func PToI8(a string, arith bool) int64 {
 		if arith {
 			overflow("=")
 		}
-		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "p->int8"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_OVERFLOW", Op: "p->int8"})
 	}
 	return v.Int64()
 }

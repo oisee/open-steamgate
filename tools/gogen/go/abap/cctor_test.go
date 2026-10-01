@@ -16,7 +16,7 @@ func TestCctorGuard(t *testing.T) {
 		defer CctorGuard("ZCL_X", &done)
 		panic(p)
 	}
-	r := ensure(ArithmeticError{"CX_SY_ZERODIVIDE", "/"})
+	r := ensure(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "/"})
 	w, ok := r.(*Rethrown)
 	if !ok {
 		t.Fatalf("want a *Rethrown CctorDump, got %T %v", r, r)

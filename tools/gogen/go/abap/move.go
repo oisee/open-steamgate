@@ -9,7 +9,7 @@ import "strings"
 // rather than guess.
 
 func notAssigned(op string) ArithmeticError {
-	return ArithmeticError{"GETWA_NOT_ASSIGNED", op}
+	return ArithmeticError{Class: "GETWA_NOT_ASSIGNED", Op: op}
 }
 
 // MoveData is dst = src for a generic dst.

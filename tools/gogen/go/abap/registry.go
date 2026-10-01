@@ -26,10 +26,10 @@ func RegisterClass(name string, zero any, make func(*Session) any) {
 func CreateAs[T any](s *Session, name string) T {
 	c, ok := classes[strings.TrimRight(name, " ")]
 	if !ok {
-		panic(ArithmeticError{"CX_SY_CREATE_OBJECT_ERROR", "CREATE OBJECT TYPE (" + name + ")"})
+		panic(ArithmeticError{Class: "CX_SY_CREATE_OBJECT_ERROR", Op: "CREATE OBJECT TYPE (" + name + ")"})
 	}
 	if _, fits := c.zero.(T); !fits {
-		panic(ArithmeticError{"CX_SY_MOVE_CAST_ERROR", "CREATE OBJECT TYPE (" + name + ")"})
+		panic(ArithmeticError{Class: "CX_SY_MOVE_CAST_ERROR", Op: "CREATE OBJECT TYPE (" + name + ")"})
 	}
 	return c.make(s).(T)
 }
@@ -54,7 +54,7 @@ func Cast[T any](v any) T {
 	}
 	t, ok := v.(T)
 	if !ok {
-		panic(ArithmeticError{"CX_SY_MOVE_CAST_ERROR", "?="})
+		panic(ArithmeticError{Class: "CX_SY_MOVE_CAST_ERROR", Op: "?="})
 	}
 	return t
 }
@@ -129,15 +129,15 @@ func CallStatic(s *Session, class, method string, args map[string]Data) {
 		if registryClasses[c] {
 			panic(NotCompiled("CALL METHOD ("+c+")=>"+method, "the class exists but is not compiled in this program"))
 		}
-		panic(ArithmeticError{"CX_SY_DYN_CALL_ILLEGAL_CLASS", "CALL METHOD (" + c + ")=>" + method})
+		panic(ArithmeticError{Class: "CX_SY_DYN_CALL_ILLEGAL_CLASS", Op: "CALL METHOD (" + c + ")=>" + method})
 	}
 	e, ok := statics[c+"=>"+method]
 	if !ok {
-		panic(ArithmeticError{"CX_SY_DYN_CALL_ILLEGAL_METHOD", "CALL METHOD (" + c + ")=>" + method})
+		panic(ArithmeticError{Class: "CX_SY_DYN_CALL_ILLEGAL_METHOD", Op: "CALL METHOD (" + c + ")=>" + method})
 	}
 	for n := range args {
 		if !e.params[n] {
-			panic(ArithmeticError{"CX_SY_DYN_CALL_PARAM_NOT_FOUND", c + "=>" + method + " " + n})
+			panic(ArithmeticError{Class: "CX_SY_DYN_CALL_PARAM_NOT_FOUND", Op: c + "=>" + method + " " + n})
 		}
 	}
 	e.call(s, args)

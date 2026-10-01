@@ -99,7 +99,7 @@ func ParseF(v string) float64 {
 	}
 	switch t {
 	case "nan", "inf", "Infinity":
-		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "c->f"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_OVERFLOW", Op: "c->f"})
 	}
 	for _, w := range []string{"nan", "inf", "infinity"} {
 		if strings.Contains(strings.ToLower(t), w) {
@@ -108,7 +108,7 @@ func ParseF(v string) float64 {
 	}
 	neg, body, ok := numSign(t)
 	if !ok {
-		panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->f"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_NO_NUMBER", Op: "c->f"})
 	}
 	mant, exp := body, ""
 	if i := strings.IndexAny(body, "Ee"); i >= 0 {
@@ -117,18 +117,18 @@ func ParseF(v string) float64 {
 			exp = exp[1:]
 		}
 		if exp == "" || !allDigits(exp) {
-			panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->f"})
+			panic(ArithmeticError{Class: "CX_SY_CONVERSION_NO_NUMBER", Op: "c->f"})
 		}
 	}
 	if !decimalDigits(mant) {
-		panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->f"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_NO_NUMBER", Op: "c->f"})
 	}
 	f, err := strconv.ParseFloat(body, 64)
 	if err != nil && !errors.Is(err, strconv.ErrRange) {
-		panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->f"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_NO_NUMBER", Op: "c->f"})
 	}
 	if math.IsInf(f, 0) {
-		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "c->f"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_OVERFLOW", Op: "c->f"})
 	}
 	if neg {
 		f = -f
@@ -188,7 +188,7 @@ func ParseI(v string) int32 {
 	neg, body, ok := numSign(t)
 	body = strings.Trim(body, " ")
 	if !ok || !decimalDigits(body) {
-		panic(ArithmeticError{"CX_SY_CONVERSION_NO_NUMBER", "c->i"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_NO_NUMBER", Op: "c->i"})
 	}
 	whole, frac := body, ""
 	if i := strings.IndexByte(body, '.'); i >= 0 {
@@ -196,7 +196,7 @@ func ParseI(v string) int32 {
 	}
 	whole = strings.TrimLeft(whole, "0")
 	if len(whole) > 10 {
-		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "c->i"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_OVERFLOW", Op: "c->i"})
 	}
 	var n int64
 	for i := 0; i < len(whole); i++ {
@@ -209,7 +209,7 @@ func ParseI(v string) int32 {
 		n = -n
 	}
 	if n > math.MaxInt32 || n < math.MinInt32 {
-		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "c->i"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_OVERFLOW", Op: "c->i"})
 	}
 	return int32(n)
 }
@@ -220,7 +220,7 @@ func I8ToI(v int64) int32 { return check(v, "int8->i") }
 func F2I8(f float64) int64 {
 	r := math.Round(f)
 	if math.IsNaN(r) || r >= 9.223372036854775807e18 || r < -9.223372036854775808e18 {
-		panic(ArithmeticError{"CX_SY_CONVERSION_OVERFLOW", "f->int8"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_OVERFLOW", Op: "f->int8"})
 	}
 	return int64(r)
 }
@@ -255,7 +255,7 @@ func DivI8(a, b int64) int64 {
 		if a == 0 {
 			return 0
 		}
-		panic(ArithmeticError{"CX_SY_ZERODIVIDE", "/"})
+		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "/"})
 	}
 	q := a / b
 	r := a % b
@@ -273,7 +273,7 @@ func DivIntI8(a, b int64) int64 {
 		if a == 0 {
 			return 0
 		}
-		panic(ArithmeticError{"CX_SY_ZERODIVIDE", "DIV"})
+		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "DIV"})
 	}
 	r := a % b
 	q := a / b
@@ -291,7 +291,7 @@ func ModI8(a, b int64) int64 {
 		if a == 0 {
 			return 0
 		}
-		panic(ArithmeticError{"CX_SY_ZERODIVIDE", "MOD"})
+		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "MOD"})
 	}
 	r := a % b
 	if r < 0 {
@@ -309,13 +309,13 @@ func absI64(v int64) int64 {
 // Built-in numeric functions with ABAP's domain checks.
 func SqrtF(v float64) float64 {
 	if v < 0 {
-		panic(ArithmeticError{"CX_SY_ARG_OUT_OF_DOMAIN", "sqrt"})
+		panic(ArithmeticError{Class: "CX_SY_ARG_OUT_OF_DOMAIN", Op: "sqrt"})
 	}
 	return math.Sqrt(v)
 }
 func LogF(v float64) float64 {
 	if v <= 0 {
-		panic(ArithmeticError{"CX_SY_ARG_OUT_OF_DOMAIN", "log"})
+		panic(ArithmeticError{Class: "CX_SY_ARG_OUT_OF_DOMAIN", Op: "log"})
 	}
 	return math.Log(v)
 }
@@ -425,7 +425,7 @@ func FmtF(v float64) string {
 // expression raises for a missing row.
 func Idx(n int, i int32) int {
 	if i < 1 || int(i) > n {
-		panic(ArithmeticError{"CX_SY_ITAB_LINE_NOT_FOUND", "table expression"})
+		panic(ArithmeticError{Class: "CX_SY_ITAB_LINE_NOT_FOUND", Op: "table expression"})
 	}
 	return int(i) - 1
 }
@@ -438,7 +438,7 @@ func RowByKey[T any](table *[]T, match func(T) bool) *T {
 			return &(*table)[i]
 		}
 	}
-	panic(ArithmeticError{"CX_SY_ITAB_LINE_NOT_FOUND", "table expression"})
+	panic(ArithmeticError{Class: "CX_SY_ITAB_LINE_NOT_FOUND", Op: "table expression"})
 }
 
 // InsertAt is INSERT ... INDEX i for a checked 1-based index.
@@ -453,10 +453,10 @@ func InsertAt[T any](s []T, i int32, v T) []T {
 // PowF is ** with calculation type f.
 func PowF(a, b float64) float64 {
 	if a < 0 && b != math.Trunc(b) {
-		panic(ArithmeticError{"CX_SY_ARG_OUT_OF_DOMAIN", "**"})
+		panic(ArithmeticError{Class: "CX_SY_ARG_OUT_OF_DOMAIN", Op: "**"})
 	}
 	if a == 0 && b < 0 {
-		panic(ArithmeticError{"CX_SY_ZERODIVIDE", "**"})
+		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "**"})
 	}
 	return math.Pow(a, b)
 }
@@ -679,7 +679,7 @@ func (m *strMemo) byteAt(v string, k int) int {
 	return b
 }
 
-func rangeError() { panic(ArithmeticError{"CX_SY_RANGE_OUT_OF_BOUNDS", "offset/length"}) }
+func rangeError() { panic(ArithmeticError{Class: "CX_SY_RANGE_OUT_OF_BOUNDS", Op: "offset/length"}) }
 
 // SubS is v+off(len) of a string, counted in characters; len -1 is the
 // rest. Out of range raises, as ABAP does.
@@ -799,7 +799,7 @@ func Uccpi(v int32) string { return strings.TrimRight(string(rune(v)), " ") }
 // beyond it raises; an empty sub raises CX_SY_STRG_PAR_VAL; case counts.
 func Find(v, sub string, off int32) int32 {
 	if sub == "" {
-		panic(ArithmeticError{"CX_SY_STRG_PAR_VAL", "find"})
+		panic(ArithmeticError{Class: "CX_SY_STRG_PAR_VAL", Op: "find"})
 	}
 	if isASCII(v) {
 		if off < 0 || off > int32(len(v)) {
@@ -924,7 +924,7 @@ func UnescapeURL(s *Session, escaped string, options int32) string {
 	out, err := url.PathUnescape(escaped)
 	if err != nil {
 		// not an ABAP exception class: the transpiler runtime dumps with a URIError
-		panic(ArithmeticError{"URI_MALFORMED", "unescape_url: " + err.Error()})
+		panic(ArithmeticError{Class: "URI_MALFORMED", Op: "unescape_url: " + err.Error()})
 	}
 	return out
 }

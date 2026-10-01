@@ -377,9 +377,9 @@ type HostPred struct {
 func rangeFailure(err error) {
 	switch x := err.(type) {
 	case RangesDump:
-		panic(ArithmeticError{x.Abap, x.Message})
+		panic(ArithmeticError{Class: x.Abap, Op: x.Message})
 	case RangesDataError:
-		panic(ArithmeticError{x.Abap, x.Message})
+		panic(ArithmeticError{Class: x.Abap, Op: x.Message})
 	case RangesRefused:
 		panic(NotCompiled("IN range", x.Message))
 	case Refused:

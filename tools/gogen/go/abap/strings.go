@@ -250,7 +250,7 @@ func ReplaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen 
 		ms = rxAll(sec, p, icase, !all)
 	} else {
 		if p == "" && all {
-			panic(ArithmeticError{"CX_SY_REPLACE_INFINITE_LOOP", "REPLACE ALL OCCURRENCES OF ''"})
+			panic(ArithmeticError{Class: "CX_SY_REPLACE_INFINITE_LOOP", Op: "REPLACE ALL OCCURRENCES OF ''"})
 		}
 		ms = plainAll(sec, p, icase, !all)
 	}
@@ -289,7 +289,7 @@ func ReplaceFn(v, p, with string, regex bool, occ int32) string {
 		if regex {
 			panic(NotCompiled("replace( )", "an empty regex is not measured"))
 		}
-		panic(ArithmeticError{"CX_SY_STRG_PAR_VAL", "replace"})
+		panic(ArithmeticError{Class: "CX_SY_STRG_PAR_VAL", Op: "replace"})
 	}
 	var ms [][]int
 	if regex {
@@ -316,7 +316,7 @@ func ReplaceFn(v, p, with string, regex bool, occ int32) string {
 // Repeat is repeat( val occ ): a negative occ raises CX_SY_STRG_PAR_VAL.
 func Repeat(v string, occ int32) string {
 	if occ < 0 {
-		panic(ArithmeticError{"CX_SY_STRG_PAR_VAL", "repeat"})
+		panic(ArithmeticError{Class: "CX_SY_STRG_PAR_VAL", Op: "repeat"})
 	}
 	return strings.Repeat(v, int(occ))
 }

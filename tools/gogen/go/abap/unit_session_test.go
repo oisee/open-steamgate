@@ -119,3 +119,24 @@ func TestEndTestClassForgetsAMCAndClosesDatasets(t *testing.T) {
 		t.Fatal("second class left its DATASET handle open")
 	}
 }
+
+func TestEndTestClassDropsInflateHandles(t *testing.T) {
+	session.BeginTestClass()
+	s := &Session{}
+	h := InflateHostOpen(s)
+	var raw, unused, reason string
+	var state int32
+	InflateHostFeed(s, h, "\x00", 0, &raw, &state, &unused, &reason)
+	if s.inflate == nil {
+		t.Fatal("inflater did not retain a pending stream")
+	}
+	registry := s.inflate
+	EndTestClass(s)
+	if s.inflate != nil {
+		t.Fatal("session retained inflate registry")
+	}
+	_, _, _, reason = registry.Feed(h, "", 0)
+	if reason != "inflate handle is gone" {
+		t.Fatalf("handle survived EndTestClass: %q", reason)
+	}
+}

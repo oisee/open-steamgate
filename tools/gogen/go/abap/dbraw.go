@@ -44,7 +44,7 @@ func DBXHex(v string, n int) string { return XToHex(XFit(v, n)) }
 // not a valid value for X(4,0)" when not caught).
 func DBXSHex(v string, n int) string {
 	if len(v) != n {
-		panic(ArithmeticError{"CX_SY_OPEN_SQL_DATA_ERROR", "'" + XToHex(v) + "' is not a valid value for X(" + itoa(n) + ",0)"})
+		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DATA_ERROR", Op: "'" + XToHex(v) + "' is not a valid value for X(" + itoa(n) + ",0)"})
 	}
 	return XToHex(v)
 }

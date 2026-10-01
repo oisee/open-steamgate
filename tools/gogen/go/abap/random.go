@@ -8,7 +8,7 @@ import "math/rand/v2"
 // harness may call SeedRandom: then both draw from the same xorshift32.
 func RandomInt(min, max int32) int32 {
 	if max < min {
-		panic(ArithmeticError{"CX_ABAP_RANDOM", "min > max"})
+		panic(ArithmeticError{Class: "CX_ABAP_RANDOM", Op: "min > max"})
 	}
 	if seeded {
 		state ^= state << 13
@@ -23,4 +23,4 @@ var seeded bool
 var state uint32
 
 // SeedRandom makes RandomInt a fixed sequence (harnesses only).
-func SeedRandom(seed uint32) { seeded, state = true, seed }
+func SeedRandom(seed uint32)	{ seeded, state = true, seed }

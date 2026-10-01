@@ -127,7 +127,7 @@ func Activation(v string) bool {
 }
 
 func notBound(what string) {
-	panic(ArithmeticError{"OBJECTS_OBJREF_NOT_ASSIGNED", what})
+	panic(ArithmeticError{Class: "OBJECTS_OBJREF_NOT_ASSIGNED", Op: what})
 }
 
 // SetHandler is one handler of a SET HANDLER statement. forObj is the FOR

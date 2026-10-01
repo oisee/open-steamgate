@@ -12,6 +12,10 @@ func EndTestClass(s *Session) {
 		client.drop()
 	}
 	s.httpc = nil
+	if s.inflate != nil {
+		s.inflate.DropAll()
+		s.inflate = nil
+	}
 	CloseSessionDatasets(s)
 	amc.Current().Forget(s)
 	session.EndTestClass()

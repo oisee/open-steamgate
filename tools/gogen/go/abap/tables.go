@@ -228,7 +228,7 @@ func CreateDataByName(name string, table bool) Data {
 	if ddicKnown(name) {
 		panic(NotCompiled("CREATE DATA TYPE ("+strings.TrimSpace(name)+")", "a type of the dictionary that is not a table or view"))
 	}
-	panic(ArithmeticError{"CX_SY_CREATE_DATA_ERROR", "CREATE DATA TYPE (" + strings.TrimSpace(name) + ")"})
+	panic(ArithmeticError{Class: "CX_SY_CREATE_DATA_ERROR", Op: "CREATE DATA TYPE (" + strings.TrimSpace(name) + ")"})
 }
 
 // ddicNames are the other names the program's dictionary has (data

@@ -103,14 +103,14 @@ func (t *Table) OsqlColumns() []OsqlColumn {
 func osqlWhereFailure(q *DynSelect, err error) {
 	switch x := err.(type) {
 	case OsqlWhereSyntax:
-		panic(ArithmeticError{x.Abap(), q.Stmt + ": " + x.Message})
+		panic(ArithmeticError{Class: x.Abap(), Op: q.Stmt + ": " + x.Message})
 	case OsqlWhereSemantics:
-		panic(ArithmeticError{x.Abap(), q.Stmt + ": " + x.Message})
+		panic(ArithmeticError{Class: x.Abap(), Op: q.Stmt + ": " + x.Message})
 	case OsqlWhereData:
-		panic(ArithmeticError{x.Abap(), q.Stmt + ": " + x.Message})
+		panic(ArithmeticError{Class: x.Abap(), Op: q.Stmt + ": " + x.Message})
 	case OsqlWhereDump:
 		// uncatchable on A4H; its runtime error's name was not read there
-		panic(ArithmeticError{"DYNAMIC_OSQL_RUNTIME_ERROR", q.Stmt + ": " + x.Message})
+		panic(ArithmeticError{Class: "DYNAMIC_OSQL_RUNTIME_ERROR", Op: q.Stmt + ": " + x.Message})
 	case OsqlWhereRefused:
 		q.refuse("the condition " + strconv.Quote(q.Where) + " is not carried (" + x.Reason + "): " + x.Message)
 	case Refused:
@@ -338,7 +338,7 @@ func SelectDyn(s *Session, q DynSelect, target Data) {
 
 	rows, err := conn().Query(text, values(params)...)
 	if err != nil {
-		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
+		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: err.Error()})
 	}
 	defer rows.Close()
 	ClearData(target)
@@ -366,7 +366,7 @@ func SelectDyn(s *Session, q DynSelect, target Data) {
 		n++
 	}
 	if err := rows.Err(); err != nil {
-		panic(ArithmeticError{"CX_SY_OPEN_SQL_DB", err.Error()})
+		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: err.Error()})
 	}
 	if n > 0 {
 		s.Sy.Subrc, s.Sy.Dbcnt = 0, int32(n)

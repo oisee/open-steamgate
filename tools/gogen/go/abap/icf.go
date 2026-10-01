@@ -97,7 +97,7 @@ func ICFResponseAppend(s *Session, res Data, name, value string) {
 	if strings.EqualFold(name, "content-type") {
 		for _, f := range x.RespHeaders {
 			if strings.EqualFold(f[0], "content-type") {
-				panic(HostError{"CL_EXPRESS_ICF_SHIM=>RESPONSE", "a second Content-Type (express: Content-Type cannot be set to an Array)"})
+				panic(HostError{Where: "CL_EXPRESS_ICF_SHIM=>RESPONSE", Text: "a second Content-Type (express: Content-Type cannot be set to an Array)"})
 			}
 		}
 	}
@@ -109,7 +109,7 @@ func ICFResponseAppend(s *Session, res Data, name, value string) {
 func ICFResponseSend(s *Session, res Data, code int32, body string) {
 	x := icfExchange(res, "CL_EXPRESS_ICF_SHIM=>RESPONSE")
 	if x.Sent {
-		panic(HostError{"CL_EXPRESS_ICF_SHIM=>RESPONSE", "the response was sent twice (express: headers already sent)"})
+		panic(HostError{Where: "CL_EXPRESS_ICF_SHIM=>RESPONSE", Text: "the response was sent twice (express: headers already sent)"})
 	}
 	x.Status = code
 	x.RespBody = []byte(body)
@@ -122,7 +122,7 @@ func ICFResponseSend(s *Session, res Data, code int32, body string) {
 // the text and bytes that are not UTF-8 raise CX_SY_CONVERSION_CODEPAGE.
 func ICFGetCData(s *Session, data string) string {
 	if !utf8.ValidString(data) {
-		panic(ArithmeticError{"CX_SY_CONVERSION_CODEPAGE", "get_cdata: the body is not UTF-8"})
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_CODEPAGE", Op: "get_cdata: the body is not UTF-8"})
 	}
 	return data
 }
