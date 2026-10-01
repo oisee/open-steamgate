@@ -136,9 +136,12 @@ default).
 ## Which copy
 
 A breakpoint binds only in the file a loaded source map names. The
-transpiler writes each `sources` entry relative to the generation's own
-`build/by-input/<hash>/output`, so it always resolves inside the tree that
-built it -- the system's osdHome. Measured 2026-09-27 on this tree:
+transpiler writes ordinary `sources` entries relative to the generation's own
+`build/by-input/<hash>/output`, so they resolve inside the tree that
+built it -- the system's osdHome. A workspace pack projected through
+`globalStorage/packs/ws-*` is different: its map names the symlink's real
+workspace `.abap` path directly, matching the file open in the editor.
+Measured 2026-09-27 on this tree:
 `output/zcl_stg_url.clas.mjs.map` names
 `../../../../src/gateway/zcl_stg_url.clas.abap`, which resolves to
 `<osdHome>/src/gateway/zcl_stg_url.clas.abap` and nowhere else.

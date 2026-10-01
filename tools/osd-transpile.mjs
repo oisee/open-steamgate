@@ -17,7 +17,7 @@
 // @abaplint/core, because the transpiler checks its input with instanceof.
 // So core is resolved from where the transpiler package is, not from here.
 import {execFileSync} from "node:child_process";
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
@@ -108,6 +108,7 @@ const regexps = (list) => (list ?? []).map((p) => new RegExp(p, "i"));
 export async function readAll(files, relativeTo, transform = (source) => source) {
   return files.map((filename) => ({
     filename: basename(filename),
+    sourcePath: filename,
     relative: relative(relativeTo, dirname(filename)),
     contents: transform(readFileSync(filename, isBinaryFilename(filename) ? "latin1" : "utf8"), basename(filename)),
   }));
@@ -201,7 +202,12 @@ export function outputFiles(output, config, outputFolder, files) {
           continue;
         }
         const rel = f.relative.split(sep).join("/");
-        sourcePaths[f.filename] = rel === "" ? f.filename : `${rel}/${f.filename}`;
+        // Workspace packs are projected through a symlink in globalStorage.
+        // Name the file the editor opened, not that projection: js-debug
+        // otherwise sees two different source identities for one ABAP file.
+        const canonical = f.sourcePath && realpathSync(f.sourcePath);
+        sourcePaths[f.filename] = canonical && canonical !== f.sourcePath
+          ? canonical.split(sep).join("/") : rel === "" ? f.filename : `${rel}/${f.filename}`;
       }
       out.push({path: join(outputFolder, name), contents: o.chunk.getMap(o.filename, {generatedLineOffset, sourcePaths})});
     }

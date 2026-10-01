@@ -141,6 +141,44 @@ function breakpointFor(sourcePath, sourceLine, sourceColumn) {
 describe("VS Code debugger transport: detached ABAP Unit child", function () {
   this.timeout(180000);
 
+  it("maps a projected DPC_EXT generation to its workspace source for OData attach", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-dpc-map-"));
+    try {
+      const home = join(dir, "home");
+      const storage = join(dir, "storage");
+      const workspace = join(dir, "workspace");
+      const workspaceSource = join(workspace, "src");
+      const packSource = join(storage, "packs", packNameOf(workspace), "src");
+      const generation = join(home, "build", "by-input", "abc123", "output");
+      mkdirSync(workspaceSource, {recursive: true});
+      mkdirSync(dirname(packSource), {recursive: true});
+      symlinkSync(workspaceSource, packSource, "dir");
+      const source = join(workspaceSource, "zcl_ship_dpc_ext.clas.abap");
+      writeFileSync(source, `CLASS zcl_ship_dpc_ext DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS shipset_get_entityset.
+ENDCLASS.
+CLASS zcl_ship_dpc_ext IMPLEMENTATION.
+  METHOD shipset_get_entityset.
+    DATA lv_count TYPE i.
+    lv_count = 1.
+  ENDMETHOD.
+ENDCLASS.`);
+      await transpile({root: home, config: {input_folder: relative(home, packSource),
+        output_folder: relative(home, generation), input_filter: [".*\\.abap$"], exclude_filter: [],
+        libs: [], options: {}, write_source_map: true, write_unit_tests: false}, modules: modulesOf(ROOT)});
+      const map = JSON.parse(readFileSync(join(generation, "zcl_ship_dpc_ext.clas.mjs.map"), "utf8"));
+      expect(map.sources).to.include(source);
+      const attach = debuggerConfiguration(9341, {root: home, storageDir: storage,
+        layers: [{folder: workspace, srcDir: workspaceSource}]});
+      expect(attach.outFiles).to.include(`${home}/build/**/*.mjs`);
+      expect(attach.resolveSourceMapLocations).to.include(`${home}/build/**`);
+      expect(attach.sourceMapPathOverrides[`file://${packSource}/*`]).to.equal(`${workspaceSource}/*`);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
   it("binds a workspace ABAP Unit breakpoint at a multiline call's executable start", async () => {
     const source = `CLASS ltcl_probe DEFINITION FINAL FOR TESTING.
   PRIVATE SECTION.
@@ -181,7 +219,7 @@ ENDCLASS.`;
       await transpile({root: home, config, modules: modulesOf(ROOT)});
       const module = join(home, config.output_folder, "zcl_probe.clas.testclasses.mjs");
       const map = JSON.parse(readFileSync(module + ".map", "utf8"));
-      expect(realpathSync(resolve(dirname(module), map.sources[0]))).to.equal(testFile);
+      expect(resolve(dirname(module), map.sources[0]), "the map names the file open in the editor").to.equal(testFile);
       const position = generatedPosition(map.mappings, 0, 10, 4);
       expect(position, "ABAP call line has a source-map position").to.not.equal(undefined);
       const generated = readFileSync(module, "utf8").split("\n")[position.line - 1];
@@ -189,7 +227,7 @@ ENDCLASS.`;
       const port = await pickInspectorPort();
       const attach = debuggerConfiguration(port, {target: "unit", root: home, storageDir: storage,
         layers: [{folder: workspace, srcDir: workspaceSource, manifest: join(workspace, "osd-pack.json")}]});
-      expect(attach.sourceMapPathOverrides[`${dirname(map.sources[0])}/*`]).to.equal(`${workspaceSource}/*`);
+      expect(attach.sourceMapPathOverrides[`file://${packSource}/*`]).to.equal(`${workspaceSource}/*`);
       expect(attach.outFiles).to.include(`${home}/build/**/*.mjs`);
 
       const runner = join(dir, "runner.mjs");
