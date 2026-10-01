@@ -156,6 +156,34 @@ TYPES:
 and it belongs in `_MPC_EXT` because SEGW regenerates `_MPC` from the tree
 and wipes whatever was added to it.
 
+### A comment between the parts of a class implementation is not stored
+
+A system answers HTTP 400 "The class contains unknown comments which can't be
+stored" (T100 `OO_SOURCE_BASED` 012) and does **not** save the class when a
+comment line (`*` in column 1, or `"` after optional blanks) stands
+
+- between two methods of the implementation,
+- between `CLASS ... IMPLEMENTATION.` and the first `METHOD`,
+- after the last `ENDMETHOD.` and before the implementation's `ENDCLASS.`,
+- between the definition's `ENDCLASS.` and `CLASS ... IMPLEMENTATION.`.
+
+Measured on A4H on 2026-10-01 with an ADT save of a global class main
+include. Accepted and stored verbatim: comments anywhere in the DEFINITION
+part, a header comment before `CLASS ... DEFINITION`, a trailing comment
+after the final `ENDCLASS.`, comments inside `METHOD ... ENDMETHOD.`, and
+blank lines anywhere. abapGit deploys through the same storage, so such a
+class builds and runs here and fails the last mile. A section banner such as
+`* ---- the model` between two methods is the usual way to write one; it
+belongs inside the method that follows.
+
+`node tools/osd-oo-comments.mjs` checks the main include of every class under
+`src/` and the packs (CI: `leak-scan.yml`), and `--fix` moves each block into
+the following method, or into the preceding one when none follows. Not
+measured, so not checked: the local includes (`.clas.locals_imp/def`,
+`.testclasses`, `.macros`) and a comment that trails a statement on its own
+line (`ENDMETHOD. " done`). `test/oo-comments.mjs` holds every case above and
+runs the generators' output through the same check.
+
 ### A date is a date, and the tree says so
 
 OData V2 has one temporal type, so a model that names only Edm types cannot
