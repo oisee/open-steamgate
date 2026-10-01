@@ -356,9 +356,22 @@ func hasPrefixFold(p, prefix string) bool {
 }
 
 func main() {
-	port := flag.Int("port", 3095, "port to listen on")
+	defaultPort := 3095
+	for _, name := range []string{"OSD_PORT", "STG_PORT"} {
+		if value := os.Getenv(name); value != "" {
+			parsed, err := strconv.Atoi(value)
+			if err != nil || parsed < 1 || parsed > 65535 {
+				log.Fatalf("%s: invalid port %q", name, value)
+			}
+			defaultPort = parsed
+			break
+		}
+	}
+	port := flag.Int("port", defaultPort, "port to listen on (OSD_PORT or STG_PORT)")
 	addr := flag.String("addr", "127.0.0.1", "address to listen on")
 	dbFile := flag.String("db", "", "an SQLite file (WAL) instead of the in-memory database; seeded once, when it has no tables, and refused when another build seeded it")
+	homeDir := flag.String("home", "", "data directory; defaults -db to <home>/osgo.sqlite and makes a fresh directory a full database reset")
+	version := flag.Bool("version", false, "print release tag and commit")
 	root := flag.String("root", osgRoot, "the checkout whose webapp/ is served")
 	media := flag.String("media", "", "the SMW0 media directory (w3mi.json and the data files); default media/ beside the binary when it is there")
 	// HTTPS beside HTTP, the way a system answers on 443nn next to 80nn: the
@@ -368,6 +381,18 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "the certificate (PEM) for -tls-port")
 	tlsKey := flag.String("tls-key", "", "its private key (PEM)")
 	flag.Parse()
+	if *version {
+		fmt.Printf("osgo %s (%s)\n", releaseTag, releaseCommit)
+		return
+	}
+	if *homeDir != "" {
+		if err := os.MkdirAll(*homeDir, 0700); err != nil {
+			log.Fatalf("home: %v", err)
+		}
+		if *dbFile == "" {
+			*dbFile = filepath.Join(*homeDir, "osgo.sqlite")
+		}
+	}
 	started := time.Now()
 	// OSGO_PPROF=127.0.0.1:<port>: Go's profiler on a listener of its own,
 	// never on the service's port (go tool pprof http://<addr>/debug/pprof/profile)
@@ -472,6 +497,10 @@ func main() {
 	routes = append(routes, route{"/appconfig/fioriSandboxConfig.json", true, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Write([]byte("{}\n"))
+	}})
+	routes = append(routes, route{"/health", true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		fmt.Fprintf(w, "{\"status\":\"ready\",\"version\":%q,\"commit\":%q}\n", releaseTag, releaseCommit)
 	}})
 	// the tiles the packs declare (test/start.mjs pack-tiles), read when this binary was built
 	routes = append(routes, route{"/app/packs.json", true, func(w http.ResponseWriter, r *http.Request) {

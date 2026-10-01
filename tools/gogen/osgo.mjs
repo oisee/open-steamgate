@@ -145,9 +145,9 @@ func newAPCHost(s *abap.Session, handler string, r *http.Request) apc.Host {
 \t// in the order the URL has them, decoded as URLSearchParams decodes them
 \t// for the Node host (apc.FormFields; url.ParseQuery would drop a pair with
 \t// a bad escape or a ';')
-\tfields := []IHTTPNVP{}
+\tfields := []*IHTTPNVP{}
 \tfor _, f := range apc.FormFields(r.URL.RawQuery) {
-\t\tfields = append(fields, IHTTPNVP{name: f[0], value: f[1]})
+\t\tfields = append(fields, &IHTTPNVP{name: f[0], value: f[1]})
 \t}
 \treturn apcHost{New_ZCL_APC_HOST(s, handler, &fields)}
 }

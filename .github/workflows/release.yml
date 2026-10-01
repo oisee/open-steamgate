@@ -103,6 +103,7 @@ jobs:
           node scripts/release-readme.mjs \
             "open-steamgate-$version.vsix" \
             osd-linux-x64 osd-linux-arm64 osd-darwin-arm64 osd-windows-x64.exe \
+            osgo-linux-x64 osgo-linux-arm64 osgo-darwin-arm64 osgo-windows-x64.exe \
             sqlite.yml duckdb.yml postgres.yml hana.yml > build/vsix/README.md
           node scripts/release-readme.mjs --diz "$version" > build/vsix/FILE_ID.DIZ
           { cat build/vsix/README.md; printf '\nChanges: see CHANGELOG.md\n'; } > build/vsix/release-body.md
@@ -307,6 +308,101 @@ jobs:
             gh release upload "$RELEASE_TAG" --clobber "docker/compose/$db.yml"
           done
 
+  osgo:
+    needs: [vsix, tagged_tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {goos: linux, goarch: amd64, asset: osgo-linux-x64}
+          - {goos: linux, goarch: arm64, asset: osgo-linux-arm64}
+          - {goos: darwin, goarch: arm64, asset: osgo-darwin-arm64}
+          - {goos: windows, goarch: amd64, asset: osgo-windows-x64.exe}
+    permissions:
+      actions: read
+      contents: write
+    env:
+      RELEASE_TAG: ${{ needs.vsix.outputs.tag }}
+      FULL_SCAN: ${{ needs.vsix.outputs.full_scan }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: tools/gogen/go/go.sum
+      - run: npm ci
+      - name: Load the tracked source pins
+        run: node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+      - name: Build and link the pinned transpiler
+        run: |
+          export TRANSPILER="$RUNNER_TEMP/transpiler"
+          echo "TRANSPILER=$RUNNER_TEMP/transpiler" >> "$GITHUB_ENV"
+          bash tools/osd-ci-transpiler-build.sh build
+          node tools/osd-link.mjs transpiler packages/transpiler
+          node tools/osd-link.mjs transpiler-cli packages/cli
+          node tools/osd-link.mjs runtime packages/runtime
+          node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
+          node tools/osd-transpiler.mjs
+      - name: Fetch libraries and generate OSGo
+        run: |
+          node tools/osd-libs.mjs
+          node tools/osd-libs.mjs --check
+          node tools/osd-fetch.mjs
+          npm run transpile
+          (cd tools/gogen/go && go mod download)
+          node tools/gogen/osgo.mjs
+      - name: Cross-build, verify and attach OSGo
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          ASSET: ${{ matrix.asset }}
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          node scripts/release-version.mjs "$RELEASE_TAG" --allow-untagged
+          git fetch --tags --force
+          node scripts/release-version.mjs --check-target "$RELEASE_TAG"
+          mkdir -p build/release
+          commit="$(git rev-parse HEAD)"
+          (cd tools/gogen/go && go build -trimpath -ldflags="-s -w -X main.releaseTag=$RELEASE_TAG -X main.releaseCommit=$commit" -o "../../../build/release/$ASSET" ./cmd/osgo)
+          (cd build/release && sha256sum "$ASSET" > "$ASSET.sha256")
+          file "build/release/$ASSET"
+          node scripts/release-verify.mjs binary "build/release/$ASSET" "go-$GOOS-$GOARCH"
+          if [[ "$GOOS" == linux ]]; then
+            if readelf -l "build/release/$ASSET" | grep -q INTERP; then
+              echo '::error::OSGo has an ELF dynamic interpreter'
+              exit 1
+            fi
+          fi
+          if [[ "$ASSET" == osgo-linux-x64 ]]; then
+            if ldd "build/release/$ASSET" > "$RUNNER_TEMP/osgo-ldd.txt" 2>&1; then
+              echo '::error::OSGo is dynamically linked'
+              exit 1
+            fi
+            grep -Eq 'not a dynamic executable|statically linked' "$RUNNER_TEMP/osgo-ldd.txt"
+            node scripts/release-verify-osgo.mjs "build/release/$ASSET" "$RELEASE_TAG" "$commit"
+          fi
+          release_is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)
+          if [[ "$release_is_draft" != true && "$FULL_SCAN" != true ]]; then
+            echo '::error::An existing published release requires OSD_LEAK_IDENTIFIERS and scanner exit 0 before uploading'
+            exit 1
+          fi
+          if [[ "$release_is_draft" != true ]]; then
+            tag_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+            node tools/osd-ci-wait-tests.mjs "$RELEASE_TAG" "$tag_sha"
+          fi
+          gh release upload "$RELEASE_TAG" --clobber "build/release/$ASSET" "build/release/$ASSET.sha256"
+
   tagged_tests:
     needs: vsix
     runs-on: ubuntu-latest
@@ -334,7 +430,7 @@ jobs:
           node tools/osd-ci-wait-tests.mjs "$RELEASE_TAG" "$tag_sha"
 
   publish:
-    needs: [vsix, binary, compose, tagged_tests]
+    needs: [vsix, binary, osgo, compose, tagged_tests]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -364,6 +460,13 @@ jobs:
           fi
           git fetch --tags --force
           node scripts/release-version.mjs --check-target "$RELEASE_TAG"
+          gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' > "$RUNNER_TEMP/release-assets.txt"
+          for asset in \
+            osd-linux-x64 osd-linux-arm64 osd-darwin-arm64 osd-windows-x64.exe \
+            osgo-linux-x64 osgo-linux-arm64 osgo-darwin-arm64 osgo-windows-x64.exe; do
+            grep -Fxq "$asset" "$RUNNER_TEMP/release-assets.txt"
+            grep -Fxq "$asset.sha256" "$RUNNER_TEMP/release-assets.txt"
+          done
           if [[ "$GITHUB_EVENT_NAME" == push || "$DRAFT" == false ]]; then
             gh release edit "$RELEASE_TAG" --draft=false --prerelease
           fi
