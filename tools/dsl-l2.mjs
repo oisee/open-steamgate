@@ -555,18 +555,21 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
   const kind = present[0];
   need(doc[kind], kind, kind === "limit" ? "a mapping with count, where and a threshold" : "a mapping with exists and where", "map");
   let threshold;
+  // more_than / at_least count from above (slice 4); fewer_than / exactly
+  // need the for rows with no related row at all, counted 0 (slice 5)
+  const THRESHOLDS = ["more_than", "at_least", "fewer_than", "exactly"];
   if (kind === "limit") {
     const spec = doc.limit;
-    for (const key of Object.keys(spec)) if (!["count", "where", "more_than", "at_least"].includes(key)) {
-      const why = ["fewer_than", "exactly"].includes(key) ? `${key} needs zero-count groups, which require an outer join or NOT EXISTS; not in this slice` : `unknown key limit.${key}`;
-      failAt(line(`limit/${key}`))(why);
-    }
-    const keys = ["more_than", "at_least"].filter((k) => spec[k] !== undefined);
-    if (keys.length !== 1) failAt(line(keys[1] ? `limit/${keys[1]}` : "limit"))("limit needs exactly one of more_than or at_least");
+    for (const key of Object.keys(spec)) if (!["count", "where", ...THRESHOLDS].includes(key)) failAt(line(`limit/${key}`))(`unknown key limit.${key}`);
+    const keys = THRESHOLDS.filter((k) => spec[k] !== undefined);
+    if (keys.length !== 1) failAt(line(keys[1] ? `limit/${keys[1]}` : "limit"))("limit needs exactly one of more_than, at_least, fewer_than or exactly");
     const key = keys[0], value = spec[key];
     if (!/^(0|[1-9][0-9]*)$/.test(value ?? "") || BigInt(value ?? -1) > 2147483647n) failAt(line(`limit/${key}`))(`${key} must be a non-negative INT4 integer`);
-    if (key === "at_least" && value === "0") failAt(line(`limit/${key}`))("at_least: 0 holds for every for row; zero counts need a different lowering");
-    threshold = {"@id": `${id}/limit/${key}`, rule_line: line(`limit/${key}`), op: key === "more_than" ? ">" : ">=", value: Number(value), key};
+    if (key === "at_least" && value === "0") failAt(line(`limit/${key}`))("at_least: 0 holds for every for row; it is no rule");
+    if (key === "fewer_than" && value === "0") failAt(line(`limit/${key}`))("fewer_than: 0 never holds: a count is never below 0");
+    const op = {more_than: ">", at_least: ">=", fewer_than: "<", exactly: "="}[key];
+    threshold = {"@id": `${id}/limit/${key}`, rule_line: line(`limit/${key}`), op, value: Number(value), key,
+      ...(key === "fewer_than" || key === "exactly" ? {zero: true} : {})};
   }
   const listKey = ["all", "any"].find((k) => doc[kind][k] !== undefined);
   let combine = "one", specs;
@@ -584,7 +587,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
   const aliases = new Map([[outer.alias, outer]]);
   const sources = specs.map((spec) => {
     need(spec.value, spec.path, "a mapping with exists and where", "map");
-    const allowed = kind === "limit" ? ["count", "where", "more_than", "at_least"] : combine === "any" ? ["exists", "where", "alert"] : ["exists", "where"];
+    const allowed = kind === "limit" ? ["count", "where", ...THRESHOLDS] : combine === "any" ? ["exists", "where", "alert"] : ["exists", "where"];
     for (const key of Object.keys(spec.value)) if (!allowed.includes(key)) failAt(line(`${spec.path}/${key}`))(`unknown key ${spec.path.replaceAll("/", ".")}.${key}`);
     const epath = `${spec.path}/${kind === "limit" ? "count" : "exists"}`;
     const inner = source(epath, spec.value[kind === "limit" ? "count" : "exists"]);
@@ -816,20 +819,41 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
       .map((entry, n) => ({"@id": `${qid}/order/${n + 1}`, ...entry}));
     const qwa = `ls_join${suffix}`;
     const parts = (combine === "any" ? group[0].alert : alert).parts.map((part) => part.is_text || part.is_count ? {...part, ...(part.is_count ? {jref: "lv_count_text"} : {})}
-      : {...part, jref: `${kind === "limit" ? "ls_prev" : qwa}-${field(part.alias, part.column, part.rule_line)}`});
+      : {...part, jref: `${kind === "limit" ? (threshold.zero ? "ls_for" : "ls_prev") : qwa}-${field(part.alias, part.column, part.rule_line)}`});
     const condition = conjoin([whenTree, ...(kind === "require" ? [{op: "exists", clause: group[0]}]
       : group.map((c) => c.rest && resolve(c.rest, c.conditions)))]);
     const group_keys = order.map((o) => ({...o, name: `${outer.alias}_${o.source.split("~")[1]}`}));
+    // Slice 5, fewer_than / exactly: a for row with no counted row counts 0,
+    // and the INNER JOIN does not return it. Two queries: the for rows that
+    // meet `when`, and the joined rows counted per for key (READ, then MODIFY
+    // or INSERT: this runtime's COLLECT does not sum, ANORMALIES
+    // collect-does-not-sum); the for rows are read in key order and a key
+    // the counts lack counts 0. One
+    // query with a LEFT OUTER JOIN would need the rest of `where` in its ON,
+    // which ABAP 7.02 refuses (docs/dsl-l2.md, "Slice 5").
+    const zero = kind === "limit" && threshold.zero ? {"@id": `${qid}/zero`, rule_line: threshold.rule_line,
+      op: threshold.op, value: threshold.value,
+      keys: group_keys.map((k) => ({"@id": k["@id"], rule_line: k.rule_line, name: k.name,
+        table: outer.table.toLowerCase(), column: k.source.split("~")[1]})),
+      key_list: group_keys.map((k) => k.name).join(" "),
+      read_key: group_keys.map((k) => `${k.name} = ls_for-${k.name}`).join(" "),
+      join_key: group_keys.map((k) => `${k.name} = ${qwa}-${k.name}`).join(" "),
+      // the read of the for rows traces to the for line, its WHERE to `when`
+      for_query: {"@id": `${qid}/for`, rule_line: line("for"),
+        from: {"@id": `${id}/for`, rule_line: line("for"), table: outer.table.toLowerCase(), alias: outer.alias},
+        where: whereLines(whenTree)}} : undefined;
     return {"@id": qid, rule_line: line(kind), type: `ty_join${suffix}`, itab: `lt_join${suffix}`, wa: qwa,
       fields: [...fields.values()],
+      ...(zero ? {zero, join_fields: [...fields.values()].filter((f) => group_keys.some((k) => k.source === f.source))} : {}),
       from: {"@id": `${id}/for`, rule_line: line("for"), table: outer.table.toLowerCase(), alias: outer.alias},
       joins: kind === "require" ? [] : group.map((c) => ({"@id": kind === "limit" ? `${c["@id"]}/count` : c["@id"],
         rule_line: kind === "limit" ? c.exists_line : c.rule_line, table: c.table, alias: c.alias, on: c.on})),
       where: whereLines(condition), order, alert_parts: parts,
-      ...(kind === "limit" ? {limit: threshold, group_keys,
+      ...(kind === "limit" && !zero ? {limit: threshold, group_keys,
         key_change: group_keys.map((k) => `${qwa}-${k.name} <> ls_prev-${k.name}`).join(" OR ")} : {})};
   });
-  const comment = kind === "limit" ? "one query: join rows counted per for key in the loop (HAVING probe fails here)"
+  const comment = kind === "limit" && threshold.zero ? "two queries: the for rows, and the join rows counted per for key (a key not counted counts 0)"
+    : kind === "limit" ? "one query: join rows counted per for key in the loop (HAVING probe fails here)"
     : kind === "require" ? "one query: the rows of the first with no match in a subquery, never a SELECT per row"
     : combine === "any" ? "one query per clause: its table joined to the first, never a SELECT per row of the first"
       : "one query: the tables joined, never a SELECT per row of the first";

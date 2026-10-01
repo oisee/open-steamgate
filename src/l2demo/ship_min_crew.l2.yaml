@@ -1,0 +1,80 @@
+rule: ship-min-crew
+class: zcl_l2_ship_min_crew
+title: An active ship has at least two crew members aboard on the check date
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'A'
+limit:
+  count: ZOSD_L2_CREW as crew
+  where: crew.ship_id = ship.ship_id and crew.since <= $date
+  fewer_than: 2
+alert: "{ship.ship_id} {ship.name}: {count} crew aboard"
+boundaries: auto
+examples:
+  - name: one crew member
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S002, name: Cormorant, status: A}]
+      ZOSD_L2_CREW: [{crew_id: C00001, ship_id: S002, role: C, since: 20260101}]
+    expect: ["S002 Cormorant: 1 crew aboard"]
+  - name: no crew
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: A}]
+    expect: ["S001 Albatross: 0 crew aboard"]
+  - name: two crew members
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S003, name: Tern, status: A}]
+      ZOSD_L2_CREW:
+        - {crew_id: C00002, ship_id: S003, role: C, since: 20260101}
+        - {crew_id: C00003, ship_id: S003, role: K, since: 20261001}
+    expect: []
+  - name: three crew members
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S004, name: Gull, status: A}]
+      ZOSD_L2_CREW:
+        - {crew_id: C00004, ship_id: S004, role: C, since: 20260101}
+        - {crew_id: C00005, ship_id: S004, role: K, since: 20260201}
+        - {crew_id: C00006, ship_id: S004, role: P, since: 20260301}
+    expect: []
+  - name: one not yet aboard
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S005, name: Heron, status: A}]
+      ZOSD_L2_CREW:
+        - {crew_id: C00007, ship_id: S005, role: C, since: 20260101}
+        - {crew_id: C00008, ship_id: S005, role: K, since: 20261002}
+    expect: ["S005 Heron: 1 crew aboard"]
+  - name: filtered ship
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S006, name: Egret, status: M}]
+    expect: []
+  - name: other ships crew
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S008, name: Ibis, status: A}
+        - {ship_id: S007, name: Crane, status: A}
+      ZOSD_L2_CREW:
+        - {crew_id: C00010, ship_id: S008, role: K, since: 20260101}
+        - {crew_id: C00009, ship_id: S008, role: C, since: 20260101}
+    expect: ["S007 Crane: 0 crew aboard"]
+  - name: fleet out of key order
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S024, name: Rook, status: D}
+        - {ship_id: S022, name: Lark, status: A}
+        - {ship_id: S020, name: Wren, status: A}
+        - {ship_id: S023, name: Kite, status: A}
+        - {ship_id: S021, name: Teal, status: A}
+      ZOSD_L2_CREW:
+        - {crew_id: C00025, ship_id: S023, role: K, since: 20260501}
+        - {crew_id: C00020, ship_id: S020, role: C, since: 20260101}
+        - {crew_id: C00023, ship_id: S022, role: C, since: 20260101}
+        - {crew_id: C00022, ship_id: S020, role: P, since: 20260301}
+        - {crew_id: C00024, ship_id: S023, role: C, since: 20260101}
+        - {crew_id: C00021, ship_id: S020, role: K, since: 20260201}
+    expect: ["S021 Teal: 0 crew aboard", "S022 Lark: 1 crew aboard"]

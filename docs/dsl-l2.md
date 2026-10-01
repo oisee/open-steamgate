@@ -1,6 +1,6 @@
 # DSL L2: a domain rule compiled to L1
 
-Status: slices 1, 2 and 3, 2026-09-30. Built on L1 (`docs/dsl-l1.md`) and the template engine
+Status: slices 1 to 5, 2026-10-01. Built on L1 (`docs/dsl-l1.md`) and the template engine
 (`docs/abap-templates.md`).
 
 ## What L2 is
@@ -412,9 +412,131 @@ future voyages, a ship excluded by `when`, a cross-ship case that exposes a
 missing ON equality, and groups inserted out of key order with the last group
 both above and below the threshold.
 
+## Slice 5: count from below (`fewer_than`, `exactly`, zero counts)
+
+`limit:` takes exactly one of `more_than: n`, `at_least: n`, `fewer_than: n`
+or `exactly: n`. `fewer_than: 0` is refused (a count is never below 0);
+`exactly: 0` is allowed. The other slice-4 rules stand, and `{count}` prints
+`0` for a `for` row with no related row. `fewer_than` and `exactly` need that
+row: it can break the rule ("an active ship has at least two crew members",
+`fewer_than: 2`) and the INNER JOIN of slice 4 never returns it.
+
+### The probe, and the shape chosen
+
+`docs/probes/dsl-l2/zcl_l2_outer_probe.clas.abap` (and its test include)
+measured, on 2026-10-01, transpiled with the fleet tables and run here:
+
+- a LEFT OUTER JOIN with the join equality in `ON` returns the `for` row with
+  no match once, its outer columns **initial** (`''`, `00000000`): what a
+  system does with a null;
+- `ON` with an equality against a literal (`crew~role = 'C'`), `ON` with
+  `crew~since > iv_date`, and a right-table column in `WHERE` all pass
+  abaplint's syntax check for `v702` and `open-abap` and answer by standard
+  SQL. The first is legal Open SQL: SAP's own example of an outer join has
+  `p~cityfrom = 'FRANKFURT'` in its `ON` (SAP Help, "Specifying Two or More
+  Database Tables as an Outer Join",
+  https://help.sap.com/saphelp_autoid2007/helpdata/en/fc/eb39c4358411d1829f0000e829fbfe/content.htm?no_cache=true).
+  The other two are not: an outer join's `ON` takes `=` comparisons only,
+  joined by AND, and no column of the right table may stand in `WHERE` (the
+  later releases lift this in strict mode only, which needs `@` and `INTO`
+  last). Recorded as `ANOMALY-2026-10-01-outer-join-702-restrictions-unchecked`;
+  not measured on a 7.02 system;
+- `COLLECT` does not sum in this runtime: it looks for a line equal as a
+  whole and inserts the work area when there is none. A standard table then
+  gains a second row for a key with another count, a sorted table with a
+  unique key refuses the duplicate and keeps its first row
+  (`ANOMALY-2026-10-01-collect-does-not-sum`, the same on transpiler `main`).
+  The first lowering counted with it; `check_reference` failed every case
+  with a count of two or more.
+
+Neither the probe nor the rule was run on A4H: ABAP Unit runs there
+currently return no test classes at all.
+
+So shape (a), one query with a LEFT OUTER JOIN, is correct here, and legal
+on a 7.02 system only while every condition of `where` beyond the join is an
+equality (with a literal; it goes into `ON`). A non-equality such as the
+demo's `crew.since <= $date` cannot go into `ON` and cannot stand in `WHERE`,
+and neither can `or` or `not`. Shape (b) is used for every `fewer_than` and
+`exactly`, whatever the `where`: **two queries**, both 7.02 Open SQL. **This
+is a simplification**: a rule whose extra conditions are all equalities with
+literals could be one LEFT OUTER JOIN, and is not; one lowering for every
+zero-count rule is the trade, a second database call the price.
+
+1. The `for` rows that meet `when`, the key and the fields the alert names,
+   `ORDER BY` the `for` key, into `lt_for`. It traces to the `for:` line, its
+   `WHERE` to `when:`.
+2. The slice-4 INNER JOIN, selecting only the `for` key, into `lt_join`. A
+   loop counts it per key into a sorted table `lt_count` (`READ TABLE ... WITH
+   TABLE KEY`, then `ADD 1` and `MODIFY TABLE`, or `INSERT ... INTO TABLE`
+   for a new key; no `COLLECT`, see above).
+
+Then `LOOP AT lt_for`: `CLEAR lv_count`, `READ TABLE lt_count` by the key, the
+count taken when found, and 0 when not; the threshold decides the alert. The
+alerts come in the `for` key order. `more_than` and `at_least` keep the
+one-query lowering of slice 4; their ABAP did not change. `check_reference`
+stays the nested form (`DESCRIBE TABLE ... LINES` counts 0 by itself).
+`test/dsl-l2.mjs` counts the database calls: two per `check`, whatever the
+number of `for` rows.
+
+### Derived cases
+
+The interpreter evaluates `<` and `=` as it does `>` and `>=`; a `for` row
+with no counted row counts 0. The threshold cases:
+
+| threshold | cases (counted rows) |
+|---|---|
+| `more_than: n` | `not_over` n, `over` n + 1 (slice 4) |
+| `at_least: m` | `below` m - 1, `at` m (slice 4) |
+| `fewer_than: m` | `below` m - 1, `at` m, and `zero` (0) unless m - 1 is 0; `next_zero` |
+| `exactly: n` | `below` n - 1 (not for n = 0), `at` n, `above` n + 1, and `zero` unless one of them is 0; `next_zero` |
+
+`next_zero` puts a `for` key with counted rows directly before, in key order,
+a key with none. The first key's count is the one that would change the
+second key's answer were it carried over (`fewer_than: m`: m; `exactly: n`:
+n, or 1 for `exactly: 0`), and the case must change its alerts under the
+mutant that keeps the previous row's count (the interpreter's `stale`
+mutant). It tests the count reset per `for` row, which no other derived case
+does: the zero cases have one `for` row, and the two-group case guarantees
+neither a key without counted rows nor the order of its keys.
+
+A case with 0 counted rows has a `for` row and no row of the counted table at
+all. A threshold case must discriminate: some mutant changes its alerts,
+another operator (`<` for `<=`; `=` for `>=`, `<=`, `<>`), the value one
+either way, or, for `fewer_than` and `exactly`, the `for` rows read through
+the INNER JOIN only. The case of a comparison is built at a pivot count: for
+a `when` comparison the count at which the rule alerts nearest the threshold
+(`fewer_than: m`: m - 1, `exactly: n`: n), for a `where` comparison the count
+at which one row less changes the answer (m; n, or 1 for `exactly: 0`). So
+`fewer_than: 1` tests its `when` on a ship with no counted row. The two-group
+case stays: the first group alerts (m - 1 rows, or n), the second does not
+(m rows, or n + 1), and the groups must read differently in the alert. The
+64-row cap and its warning apply as in slice 4 (`fewer_than: 33` loses the
+two-group case, `exactly: 64` its `above` case and the two groups).
+
+### Demo and mutations
+
+`src/l2demo/ship_min_crew.l2.yaml`: an active ship has at least two crew
+members aboard on the check date (`fewer_than: 2`, `where` with
+`crew.since <= $date`). Its examples have ships with 0, 1, 2 and 3 crew, one
+whose second member joins after the check date, a ship filtered out by `when`,
+a ship without crew next to one with two, and five ships and six crew members
+inserted out of key order; 13 derived cases. `test/dsl-l2.mjs` mutates the
+generated ABAP: `<` made `<=` fails `two_crew_members` and `b_count_at`;
+`CLEAR lv_count` dropped (a ship without crew keeps the count of the ship
+before it) fails `fleet_out_of_key_order` and `b_count_next_zero`, and on a
+copy of the rule whose only example has one crew member it fails
+`b_count_next_zero` alone, so the derived cases catch it without a
+hand-written fleet; `CHECK sy-subrc = 0` after the read
+of the counts (only the keys the join returned alert, the merge of the
+missing rows gone) fails `no_crew`, `other_ships_crew`, the fleet and
+`b_count_zero`. A synthetic `exactly: 1` rule over the crew roles runs green
+and fails `none_and_two` and `b_count_above` with `=` made `>=`, and
+`b_count_next_zero` with `CLEAR lv_count` dropped; `exactly: 0`
+and `exactly: 3` run green with their own cases.
+
 ## Not yet
 
-Parameters other than `$date`, `fewer_than` / `exactly` and other zero-count comparisons (which need an outer join or NOT EXISTS),
+Parameters other than `$date`, a one-query zero count (a LEFT OUTER JOIN where `where` beyond the join is only equalities with literals),
 `sum` / `min` / `max`, grouping by fields of the counted table, `limit` under `all` / `any`, a condition on the outer table inside `where` beyond
 the join (a comparison of an `exists` field with an outer field is allowed; one of only outer
 fields is not), a `for` and an `exists` on the same table, a join without an equality, an
