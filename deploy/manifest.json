@@ -3,11 +3,6 @@
   "about": "What may leave this repository for a real system, by object. tools/osd-abapgit-zip.mjs refuses any object that is not listed in the unit it builds, and any object with an SAP-owned name even when it is listed, unless the entry says why it is intended. See docs/a4h-deploy.md, section 'What may leave for a system'.",
   "customerNamespaces": [],
   "units": {
-    "lift-r3-stage1": {
-      "description": "First stage of the disposable R3 NULL probe, before OPT exists.",
-      "sources": ["recipes/r3-filter-into-where/a4h-probe-stage1"],
-      "objects": ["TABL ZOSD_LIFT_R3", "CLAS ZCL_OSD_LIFT_R3_PROBE"]
-    },
     "lift-r3-probe": {
       "description": "Disposable R3 ABAP/Open SQL comparison probe; the unit owns its synthetic table and class.",
       "sources": ["recipes/r3-filter-into-where/a4h-probe"],

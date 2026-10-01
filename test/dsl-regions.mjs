@@ -2,7 +2,7 @@
 // tree is regenerated from its recipe's model and template and compared.
 import {expect} from "chai";
 import {spawnSync} from "node:child_process";
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {checkRegions, formatResult, parseRegions, regionText} from "../tools/dsl-regions.mjs";
@@ -173,5 +173,12 @@ describe("DSL generated regions", function () {
     const lines = original.split("\n");
     const copied = lines.indexOf(COPY_LINE) + 1;
     expect(run.stdout).to.include(`  ${copied} <- recipes/r1-lookup-enrich/template.tpl:15 /loop/row`);
+  });
+  it("checks and traces the R3 sample", function () {
+    if (!existsSync("output/zcl_osd_tpl.clas.mjs")) this.skip();
+    const run = cli("check", "recipes/r3-filter-into-where/sample", "--trace");
+    expect(run.status, run.stdout + run.stderr).to.equal(0);
+    expect(run.stdout).to.include("r3-filter-into-where from=before");
+    expect(run.stdout).to.match(/<- recipes\/r3-filter-into-where\/template\.tpl:\d+ \/(?:select|body)/);
   });
 });

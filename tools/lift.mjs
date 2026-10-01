@@ -1013,10 +1013,16 @@ export function modelR3FromSource(name, source, method, ddicFolders = DEFAULT_DD
   const m = file?.getStructure()?.findAllStructures(Structures.Method).find((s) => methodName(s) === method.toLowerCase());
   if (!m) throw new Refusal("shape", `no parsed method ${method} in ${name}`);
   const loops = m.findAllStructures(Structures.Select);
-  if (loops.length !== 1 || m.findAllStructures(Structures.Loop).length) {
+  if (loops.length !== 1) {
     throw new Refusal("shape", "R3 needs exactly one SELECT/ENDSELECT loop; INTO TABLE/LOOP needs proof that the table has no other use");
   }
   const loop = loops[0];
+  if ([Structures.Do, Structures.While, Structures.Loop, Structures.Select]
+    .some((kind) => m.findAllStructures(kind).some((outer) => outer !== loop
+      && outer.getFirstToken().getStart().isBefore(loop.getFirstToken().getStart())
+      && outer.getLastToken().getStart().isAfter(loop.getLastToken().getStart())))) {
+    throw new Refusal("enclosing loop", "R3 refuses a SELECT inside an enclosing DO, WHILE, LOOP or SELECT");
+  }
   const selectStatement = loop.getFirstStatement();
   const select = selectStatement.findDirectExpression(Expressions.Select);
   const from = select?.findDirectExpression(Expressions.SQLFrom);
@@ -1024,6 +1030,7 @@ export function modelR3FromSource(name, source, method, ddicFolders = DEFAULT_DD
   const cond = select?.findDirectExpression(Expressions.SQLCond);
   const fields = select?.findDirectExpression(Expressions.SQLFieldList);
   const order = select?.findDirectExpression(Expressions.SQLOrderBy);
+  if (/\bWHERE\s*\(/i.test(selectStatement.concatTokens())) throw new Refusal("dynamic WHERE", "R3 requires a static WHERE condition");
   if (!select || !from || !into || !fields || !cond) throw new Refusal("shape", "SELECT needs a static FROM, INTO work area, and WHERE");
   if (select.findDirectExpression(Expressions.SQLUpTo)) throw new Refusal("UP TO n ROWS", "filtering after a row limit differs from filtering before it");
   const table = from.findAllExpressions(Expressions.DatabaseTable);
@@ -1038,7 +1045,8 @@ export function modelR3FromSource(name, source, method, ddicFolders = DEFAULT_DD
     && new RegExp(`^DATA\\s+${row}\\s+TYPE\\s+${dbtab}\\s*\\.$`, "i").test(st.concatTokens()))) {
     throw new Refusal("row type", `${row} must be declared TYPE ${dbtab} in this method`);
   }
-  const clauses = children(select).filter((n) => ![from, into, cond, fields, order].includes(n)).map(word);
+  const clauses = children(select).filter((n) => ![from, into, cond, fields, order,
+    select.findDirectExpression(Expressions.SQLUpTo)].includes(n)).map(word);
   if (clauses.join(" ") !== "select where") throw new Refusal("shape", "SELECT has an unsupported clause");
   if (/\bOR\b/i.test(cond.concatTokens())) throw new Refusal("WHERE grouping", "an OR condition needs explicit grouping before appending AND");
   const body = loop.findAllStatementNodes().slice(1, -1);
@@ -1055,6 +1063,7 @@ export function modelR3FromSource(name, source, method, ddicFolders = DEFAULT_DD
   const [, checkedRow, columnRaw, rawOp, value] = filter;
   const op = ifContinue ? ({"=": "<>", "<>": "=", "<": ">=", ">": "<=", "<=": ">", ">=": "<"})[rawOp] : rawOp;
   const column = columnRaw.toLowerCase();
+  if (["<", ">", "<=", ">="].includes(rawOp)) throw new Refusal("CHAR order", "CHAR ordering is not proven equivalent across ABAP and SQL");
   if (checkedRow.toLowerCase() !== row) throw new Refusal("reads only the row", `CHECK reads ${checkedRow}, not ${row}`);
   const ddic = registry.getObject("TABL", dbtab.toUpperCase());
   const field = ddic?.getFields()?.find((f) => f.FIELDNAME?.toLowerCase() === column);
@@ -1082,10 +1091,16 @@ export function modelR3FromSource(name, source, method, ddicFolders = DEFAULT_DD
     if (!(variableType instanceof abaplint.BasicTypes.CharacterType) || variableType.getLength() !== width) {
       throw new Refusal("type pair", `${value} is not proven CHAR(${width})`);
     }
-    const bodyText = loop.concatTokens().toLowerCase();
-    if (new RegExp(`\\b(?:move\\s+[^.]+\\s+to|clear|free|add\\s+[^.]+\\s+to)\\s+${value.toLowerCase()}\\b`).test(bodyText)
-      || body.slice(ifContinue ? 3 : 1).some((st) => st.getTokens().some((t) => word(t) === value.toLowerCase())
-        && (methodCall(st) || /\b(?:=|to|into|changing)\b/i.test(st.concatTokens())))) {
+    const statements = loop.findAllStatementNodes().slice(1, -1).filter((st) => st !== check);
+    // SyntaxLogic omits some mutating statements (notably OVERLAY). Only
+    // accept a mention when its statement is demonstrably read-only.
+    const writes = syntax.spaghetti.listWritePositions(name);
+    const inStatement = (ref, st) => !ref.getStart().isBefore(st.getStart()) && !ref.getStart().isAfter(st.getEnd());
+    const readOnly = [Statements.If, Statements.ElseIf, Statements.Check, Statements.Case,
+      Statements.When, Statements.Find, Statements.Data];
+    if (statements.some((st) => st.getTokens().some((t) => word(t) === value.toLowerCase())
+      && (writes.some((ref) => ref.getName().toLowerCase() === value.toLowerCase() && inStatement(ref, st))
+        || methodCall(st) || !readOnly.some((kind) => st.get() instanceof kind)))) {
       throw new Refusal("loop invariant", `${value} may be written in the loop`);
     }
     // Escaped host variables were introduced after 7.02; the unescaped
@@ -1109,13 +1124,18 @@ export function modelR3FromSource(name, source, method, ddicFolders = DEFAULT_DD
   const orderText = order?.concatTokens();
   const predicate = `${column} ${op} ${host}`;
   const newSelect = orderText
-    ? oldSelect.replace(orderText, `AND ${predicate} ${orderText}`)
-    : oldSelect.replace(/\.$/, ` AND ${predicate}.`);
-  const bodyText = remaining.map((st) => st.concatTokens()).join("\n");
+    ? oldSelect.replace(orderText, () => `AND ${predicate} ${orderText}`)
+    : oldSelect.replace(/\.$/, () => ` AND ${predicate}.`);
+  const end = loop.getLastToken().getStart();
+  const start = body[ifContinue ? 2 : 0].getEnd();
+  const lines = source.split("\n");
+  const bodyText = lines.slice(start.getRow(), end.getRow() - 1)
+    .map((line) => line.replace(/^ {0,6}/, "")).join("\n").trimEnd();
   return {recipe: "R3", source: {table: dbtab, row, column, op, value}, select: newSelect,
     body: bodyText, open: ["ABAP and Open SQL CHAR case/collation agreement on A4H",
       ...(value.startsWith("'") ? [] : [`${value} is not changed through an alias or call during the loop`]),
-      "no concurrent change to selected rows", "same client and database snapshot"]};
+      "no concurrent change to selected rows", "same client and database snapshot",
+      "caller reads sy-subrc after the method returns"]};
 }
 
 // Every method of every class in `folder` whose loop holds an R1 or R2 lookup,

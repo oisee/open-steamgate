@@ -1,10 +1,12 @@
 import {expect} from "chai";
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {basename, join} from "node:path";
 import {DatabaseSync} from "node:sqlite";
 import {ABAP, types} from "@abaplint/runtime";
 import {modelR3FromSource} from "../tools/lift.mjs";
+import {region, render} from "../tools/dsl-regions.mjs";
+import {requireBatchedFae} from "./helpers/fae-batching.mjs";
 
 const FILE = "recipes/r3-filter-into-where/sample/zcl_osd_lift_r3_probe.clas.abap";
 const SOURCE = readFileSync(FILE, "utf8");
@@ -31,9 +33,47 @@ describe("verified lift R3", () => {
     expect(() => model(source.replace("CONCATENATE rv_text ls_row-seq INTO rv_text.", "CLEAR lv_active.\n      CONCATENATE rv_text ls_row-seq INTO rv_text.")))
       .to.throw(/loop invariant/);
   });
+  const hostSource = () => SOURCE.replace("DATA ls_row TYPE zosd_lift_r2.", "DATA ls_row TYPE zosd_lift_r2.\n    DATA lv_active TYPE c LENGTH 1.")
+    .replace("CHECK ls_row-active = 'X'.", "CHECK ls_row-active = lv_active.");
+  for (const [name, statement] of [
+    ["assignment", "lv_active = 'Y'."], ["CONDENSE", "CONDENSE lv_active."],
+    ["SHIFT", "SHIFT lv_active."], ["REPLACE", "REPLACE 'X' IN lv_active WITH 'Y'."],
+    ["CHANGING call", "zcl_osd_lift_r3_probe=>change( CHANGING value = lv_active )."],
+  ]) {
+    it(`refuses host ${name} after CHECK`, () => {
+      const source = hostSource().replace("CONCATENATE rv_text", `${statement}\n      CONCATENATE rv_text`);
+      expect(() => model(source)).to.throw(/loop invariant/);
+    });
+  }
+  it("refuses an enclosing DO with a preceding sy-subrc read", () => {
+    const source = SOURCE.replace("    SELECT * FROM", "    DO 2 TIMES.\n      rv_text = sy-subrc.\n    SELECT * FROM")
+      .replace("    ENDSELECT.\n  ENDMETHOD.", "    ENDSELECT.\n    ENDDO.\n  ENDMETHOD.");
+    expect(() => model(source)).to.throw(/enclosing loop/);
+  });
+  it("lists a caller's later sy-subrc read as open", () => {
+    expect(model().open).to.include("caller reads sy-subrc after the method returns");
+  });
+  it("keeps dollar signs in a literal predicate", () => {
+    expect(model(SOURCE.replace("CHECK ls_row-active = 'X'.", () => "CHECK ls_row-active = '$'.")).select)
+      .to.include("active = '$' ORDER BY");
+  });
+  it("preserves comments and body indentation", () => {
+    const source = SOURCE.replace("      CONCATENATE rv_text ls_row-seq INTO rv_text.",
+      "      \" first comment\n        CONCATENATE rv_text ls_row-seq INTO rv_text. \" tail\n      \" last comment");
+    expect(model(source).body).to.equal("\" first comment\n  CONCATENATE rv_text ls_row-seq INTO rv_text. \" tail\n\" last comment");
+  });
+  it("renders the generated region with L0 and a line trace", async function () {
+    if (!existsSync("output/zcl_osd_tpl.clas.mjs")) this.skip();
+    await requireBatchedFae(this, ["output/zcl_osd_tpl.clas.mjs"]);
+    const rendered = await render(model(), "recipes/r3-filter-into-where/template.tpl");
+    expect(region(SOURCE, "before")).to.equal(rendered.text);
+    expect(rendered.trace.length).to.be.greaterThan(0);
+  });
 
   const refusals = [
-    ["limit", (s) => s.replace("INTO ls_row WHERE", "INTO ls_row UP TO 2 ROWS WHERE"), /UP TO n ROWS/],
+    ["limit", (s) => s.replace("FROM zosd_lift_r2 INTO", "FROM zosd_lift_r2 UP TO 2 ROWS INTO"), /UP TO n ROWS/],
+    ["dynamic WHERE", (s) => s.replace("WHERE kind = 'STAT'", "WHERE (lv_w)"), /dynamic WHERE/],
+    ["CHAR order", (s) => s.replace("CHECK ls_row-active = 'X'", "CHECK ls_row-active < 'X'"), /CHAR order/],
     ["effect before CHECK", (s) => s.replace("      CHECK ls_row-active", "      CLEAR rv_text.\n      CHECK ls_row-active"), /no side effect before the filter/],
     ["foreign row", (s) => s.replace("CHECK ls_row-active", "CHECK ls_other-active"), /reads only the row/],
     ["unknown column", (s) => s.replace("CHECK ls_row-active", "CHECK ls_row-missing"), /reads only the row/],
@@ -76,7 +116,7 @@ describe("verified lift R3", () => {
     db.close();
   });
 
-  it("kills the UP TO mutant: filter after limit loses a passing row", () => {
+  it("SQLite demonstrates that filter after limit loses a passing row", () => {
     const db = new DatabaseSync(":memory:");
     db.exec("CREATE TABLE rows (seq INTEGER, active TEXT)");
     db.exec("INSERT INTO rows VALUES (1, ''), (2, 'X')");
@@ -87,7 +127,7 @@ describe("verified lift R3", () => {
     db.close();
   });
 
-  it("kills NULL, NUMC and CHAR-length mutants with seeded database values", () => {
+  it("SQLite demonstrates NULL, NUMC and CHAR-length differences with seeded values", () => {
     const db = new DatabaseSync(":memory:");
     db.exec("CREATE TABLE rows (c TEXT, n TEXT, nullable TEXT)");
     db.exec("INSERT INTO rows VALUES ('A   ', '0012', NULL)");
