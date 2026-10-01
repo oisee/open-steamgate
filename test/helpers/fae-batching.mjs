@@ -18,7 +18,7 @@
 // its behaviour. It costs one tiny transpile, about a second.
 import {readFileSync} from "node:fs";
 import {createRequire} from "node:module";
-import {join} from "node:path";
+import {dirname, join} from "node:path";
 import {modulesOf} from "../../tools/osd-transpile.mjs";
 
 const ROWS = 120;
@@ -53,7 +53,13 @@ export async function faeStatements(root = process.cwd()) {
   const out = await new Transpiler({ignoreSourceMap: true}).run(reg);
   const code = out.objects.find((o) => o.filename === "zfae_probe.prog.mjs").chunk.getCode();
 
-  const runtime = createRequire(join(root, "package.json"))("@abaplint/runtime");
+  const need = createRequire(join(root, "package.json"));
+  const runtime = need("@abaplint/runtime");
+  // `new ABAP()` and the probe write to the runtime's module-level sy
+  // (subrc, tabix, index, datum, uzeit); a suite that froze the clock or set
+  // sy-mandt would find it changed. Keep every field and put it back.
+  const sy = syOf(root).get();
+  const saved = Object.entries(sy).map(([name, field]) => [field, field.get()]);
   const abap = new runtime.ABAP();
   let calls = 0;
   abap.statements.select = async () => { calls++; };
@@ -65,6 +71,7 @@ export async function faeStatements(root = process.cwd()) {
     const run = Object.getPrototypeOf(async function () {}).constructor;
     await new run("abap", code)(abap);
   } finally {
+    for (const [field, value] of saved) field.set(value);
     if (had) Object.defineProperty(globalThis, "abap", had);
     else delete globalThis.abap;
   }
@@ -95,4 +102,11 @@ export async function requireBatchedFae(context, files = [], probe = batchesFae)
   if (outputBatched(files) !== true) {
     throw new Error(STALE);
   }
+}
+
+// the runtime's module-level sy, reached before an ABAP is constructed
+// (the instance only exposes it afterwards)
+export function syOf(root = process.cwd()) {
+  const need = createRequire(join(root, "package.json"));
+  return need(join(dirname(need.resolve("@abaplint/runtime/package.json")), "build", "src", "builtin")).sy;
 }

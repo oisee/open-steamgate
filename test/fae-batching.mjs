@@ -2,7 +2,7 @@ import {expect} from "chai";
 import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {RELINK, STALE, batchesFae, faeStatements, requireBatchedFae} from "./helpers/fae-batching.mjs";
+import {RELINK, STALE, batchesFae, faeStatements, syOf, requireBatchedFae} from "./helpers/fae-batching.mjs";
 
 // test/helpers/fae-batching.mjs: the guard that turns "expected 4 to equal 1"
 // on a tree with the published packages into the instruction to relink.
@@ -38,6 +38,19 @@ describe("FAE batching guard", function () {
       await requireBatchedFae(undefined, [blocked], async () => true);
     } finally {
       rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
+  it("leaves sy as it found it (a frozen clock, a client, a counter)", async () => {
+    const sy = syOf().get();
+    const want = {mandt: "456", datum: "20260101", uzeit: "123456", subrc: 4, index: 7, tabix: 9};
+    const was = Object.fromEntries(Object.keys(want).map((k) => [k, sy[k].get()]));
+    for (const [k, v] of Object.entries(want)) sy[k].set(v);
+    try {
+      await faeStatements();
+      for (const [k, v] of Object.entries(want)) expect(String(sy[k].get()), k).to.equal(String(v));
+    } finally {
+      for (const [k, v] of Object.entries(was)) sy[k].set(v);
     }
   });
 
