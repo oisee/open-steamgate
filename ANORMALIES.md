@@ -29,6 +29,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-01-submit-via-job-char-operands -- SUBMIT VIA JOB refused a job name and count in SAP's own CHAR types
+
+- Status: `fixed` (in this repository's lowering; no upstream involved)
+- Discovery date: `2026-10-01`
+- Affected versions: `tools/osd-narrow-submit.mjs` before this date
+- Affected ABAP statement, runtime API or adapter: `SUBMIT <prog> ... VIA JOB lv_jobname NUMBER lv_jobcount AND RETURN` with `lv_jobname TYPE tbtcjob-jobname` (CHAR 32) and `lv_jobcount TYPE tbtcjob-jobcount` (CHAR 8), the types `JOB_OPEN` hands back
+- Minimal ABAP reproducer: `test/narrow-submit.mjs`, "takes a job name and count in SAP's own CHAR types"; found by the DSL L3 runner (`src/l2demo/zcl_l3_fleet.clas.abap`, method `submit`)
+- Exact command used to run it: `npm run transpile` with the runner in the tree: `osd-build: FAILED: check_syntax, Method parameter type not compatible, IV_JOBNAME`
+- Expected SAP behaviour: SUBMIT VIA JOB takes the name and count as character-like data objects; the job FMs' own types are the documented choice
+- Actual open-abap behaviour: the lowering passed the operands as they were to `ZCL_OSD_BATCH_REPORT=>SUBMIT_VIA_JOB`, whose parameters are STRING, so a CHAR operand was a type error at the syntax check; only STRING variables (as in `test/integration/zcl_osd_job_e2e_driver`) went through
+- Impact on open-steamgate: a program written for a system, with SAP's types, did not build here
+- Smallest safe workaround: none needed; the lowering now wraps both operands in `CONV string( )`, as it already did for selection values
+- Upstream issue: none; the lowering is this repository's
+- Regression-test location: `test/narrow-submit.mjs` (fails without the conversion: `Method parameter type not compatible, IV_JOBNAME`); `test/dsl-l3.mjs` mode P
+- Upstream version containing a fix: not applicable
+
 ### ANOMALY-2026-10-01-int8-string-sign -- INT8 to STRING puts a negative sign first here, not last as SAP does
 
 - Status: `workaround`

@@ -33,6 +33,7 @@
     "test/dsl-report.mjs",
     "test/dsl-daemons.mjs",
     "test/dsl-samc-derive.mjs",
-    "test/dsl-l2.mjs"
+    "test/dsl-l2.mjs",
+    "test/dsl-l3.mjs"
   ]
 }
