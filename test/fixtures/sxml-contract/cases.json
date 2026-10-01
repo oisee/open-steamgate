@@ -904,6 +904,93 @@
         "CLOSE \"a\"",
         "FINAL"
       ]
+    },
+    {
+      "name": "utf16le_bom_text",
+      "input": [
+        {
+          "hex": "FFFE3C0061003E00E9003C002F0061003E00"
+        }
+      ],
+      "note": "UTF-16LE with a BOM, e acute in text",
+      "group": "transcoded",
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"\\u00E9\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "utf16le_bom_mismatched_close",
+      "input": [
+        {
+          "hex": "FFFE3C0061003E003C002F0062003E00"
+        }
+      ],
+      "note": "UTF-16LE with a BOM: the error offset counts input bytes, BOM excluded (stoker measured 6)",
+      "group": "transcoded",
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "ERROR CX_SXML_PARSE_ERROR 6"
+      ],
+      "fork": "MISS"
+    },
+    {
+      "name": "utf16be_bom_mismatched_close",
+      "input": [
+        {
+          "hex": "FEFF003C0061003E003C002F0062003E"
+        }
+      ],
+      "note": "UTF-16BE with a BOM: the same offset rule",
+      "group": "transcoded",
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "ERROR CX_SXML_PARSE_ERROR 6"
+      ],
+      "fork": "MISS"
+    },
+    {
+      "name": "latin1_declared_text",
+      "input": [
+        "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><a>",
+        {
+          "hex": "E9"
+        },
+        "</a>"
+      ],
+      "note": "a declared ISO-8859-1 document, E9 in text",
+      "group": "transcoded",
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"\\u00E9\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "latin1_declared_mismatched_close",
+      "input": [
+        "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><a>",
+        {
+          "hex": "E9"
+        },
+        "</b>"
+      ],
+      "note": "a declared ISO-8859-1 document: the error offset counts input bytes (stoker measured 48; UTF-8 would be 49)",
+      "group": "transcoded",
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"\\u00E9\"",
+        "ERROR CX_SXML_PARSE_ERROR 48"
+      ],
+      "fork": "MISS"
     }
   ]
 }
