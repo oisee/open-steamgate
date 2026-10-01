@@ -453,3 +453,82 @@ describe("VS Code debugger transport: serving DPC after earlier activity", funct
     }
   });
 });
+
+describe("VS Code controller: Attach and call across a generation switch", function () {
+  it("waits for the replacement session's verified DPC breakpoint despite late old termination", async () => {
+    const home = mkdtempSync(join(tmpdir(), "osd-attach-generation-"));
+    const first = join(home, "build", "by-input", "first", "output");
+    const second = join(home, "build", "by-input", "second", "output");
+    mkdirSync(first, {recursive: true});
+    mkdirSync(second, {recursive: true});
+    symlinkSync(first, join(home, "output"), "dir");
+    const listeners = {start: [], end: []};
+    const events = [];
+    const file = join(home, "src", "zcl_demo_dpc_ext.clas.abap");
+    class SourceBreakpoint {
+      constructor() { this.enabled = true; this.location = {uri: {scheme: "file", fsPath: file}}; }
+    }
+    const api = {
+      SourceBreakpoint,
+      EventEmitter: class { event = () => ({dispose() {}}); fire() {} },
+      TreeItem: class {},
+      workspace: {onDidChangeWorkspaceFolders: () => ({dispose() {}})},
+      window: {setStatusBarMessage: () => ({dispose() {}})},
+      debug: {
+        breakpoints: [new SourceBreakpoint()],
+        onDidStartDebugSession(fn) { listeners.start.push(fn); return {dispose() {}}; },
+        onDidTerminateDebugSession(fn) { listeners.end.push(fn); return {dispose() {}}; },
+        async stopDebugging(session) {
+          events.push(`stop ${session.id}`);
+          // VS Code may deliver termination after the new session starts.
+        },
+        async startDebugging(_folder, config) {
+          events.push(`start ${config.outFiles[0]}`);
+          return true;
+        },
+      },
+    };
+    const require = createRequire(import.meta.url);
+    const Module = require("node:module");
+    const extensionPath = require.resolve("../editors/vscode/extension.js");
+    delete require.cache[extensionPath];
+    const originalLoad = Module._load;
+    Module._load = function (request, parent, isMain) {
+      if (request === "vscode") return api;
+      return originalLoad.call(this, request, parent, isMain);
+    };
+    let SystemController;
+    try { ({SystemController} = require(extensionPath)); }
+    finally { Module._load = originalLoad; }
+    try {
+      const output = [];
+      const controller = new SystemController({subscriptions: []}, {appendLine: (line) => output.push(line)});
+      controller.launcher = {state: "running", inspectPort: 9401, inspectorOpen: true, debug: false,
+        osdHome: home, storageDir: home, layers: []};
+      controller.debuggerState = {systemPort: 9401};
+      controller.debuggerOutputPattern = `${first}/**/*.mjs`;
+      const old = {id: "old", name: "OSD: ABAP (9401)",
+        getDebugProtocolBreakpoint: async () => ({verified: true})};
+      listeners.start.forEach((fn) => fn(old));
+      rmSync(join(home, "output"));
+      symlinkSync(second, join(home, "output"), "dir");
+      expect(await controller.attachSystemDebugger({onDemand: true})).to.equal(true);
+      expect(events).to.deep.equal([`stop old`, `start ${second}/**/*.mjs`]);
+      // The old DAP marker was verified, but the serving generation changed.
+      let ready = false;
+      const waiting = controller.waitForDebuggerReady(file, 500).then((value) => { ready = value; return value; });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(ready).to.equal(false);
+      const replacement = {id: "new", name: old.name,
+        getDebugProtocolBreakpoint: async () => ({verified: true})};
+      listeners.start.forEach((fn) => fn(replacement));
+      listeners.end.forEach((fn) => fn(old));
+      expect(await waiting).to.equal(true);
+      expect(controller.activeSystemSessionId).to.equal("new");
+      expect(controller.debuggerState.systemPort).to.equal(9401);
+      expect(output).to.deep.equal([]);
+    } finally {
+      rmSync(home, {recursive: true, force: true});
+    }
+  });
+});

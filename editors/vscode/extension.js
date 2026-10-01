@@ -673,6 +673,7 @@ class SystemController {
       if (await vscode.debug.startDebugging(undefined, config) === true) {
         this.debuggerState = {systemPort: port};
         this.debuggerOutputPattern = config.outFiles[0];
+        return true;
       } else {
         this.output.appendLine(`osd debugger: could not reattach to generation ${config.outFiles[0]}`);
       }
@@ -704,8 +705,8 @@ class SystemController {
    *  applying source maps. A request sent then can pass a loaded DPC before
    *  its breakpoint binds. Ask VS Code for this session's DAP breakpoint,
    *  which is the same verified state shown by the filled editor glyph. */
-  async waitForDebuggerReady(file, timeoutMs = 15000) {
-    const wait = (token) => this.#waitForDebuggerReady(file, timeoutMs, token);
+  async waitForDebuggerReady(file, timeoutMs = 15000, {reportMissingBreakpoint = false, output = this.output} = {}) {
+    const wait = (token) => this.#waitForDebuggerReady(file, timeoutMs, token, reportMissingBreakpoint, output);
     if (typeof vscode.window.withProgress === "function") {
       return vscode.window.withProgress({location: vscode.ProgressLocation.Notification,
         title: "osd: waiting for debugger breakpoints", cancellable: true}, (_, token) => wait(token));
@@ -713,7 +714,7 @@ class SystemController {
     return wait();
   }
 
-  async #waitForDebuggerReady(file, timeoutMs, token) {
+  async #waitForDebuggerReady(file, timeoutMs, token, reportMissingBreakpoint, output) {
     const port = this.launcher?.inspectPort;
     const name = `OSD: ABAP (${port})`;
     const target = file && path.resolve(file);
@@ -728,7 +729,11 @@ class SystemController {
       while (!cancelled && Date.now() < deadline) {
         const session = this.runningDebugSessions().find((one) => one.name === name);
         if (session !== undefined && typeof session.getDebugProtocolBreakpoint === "function") {
-          if (breakpoints.length === 0) return true;
+          if (breakpoints.length === 0) {
+            if (reportMissingBreakpoint && target !== undefined)
+              output.appendLine(`osd debugger: no enabled breakpoint in ${target}; calling without a verified breakpoint`);
+            return true;
+          }
           const check = Promise.all(breakpoints.map(async (bp) => {
             try { return await session.getDebugProtocolBreakpoint(bp); } catch { return undefined; }
           }));
@@ -774,6 +779,9 @@ class SystemController {
       this.output.appendLine(`--- osd debugger: inspector opened on 127.0.0.1:${launcher.inspectPort} ---`);
     }
     await this.debuggerTransition;
+    // Attach and call must inspect the serving link now, while this attach
+    // owns the inspector queue; the status bar's periodic refresh can be late.
+    if (await this.#refreshDebuggerGeneration() === true) return true;
     return this.applyDebuggerEvent({type: "system-started", enabled: true, port: launcher.inspectPort});
   }
 
@@ -3407,7 +3415,8 @@ function progLensProvider() {
 async function callEntitySet({service, set, kind, file, withDebugger = false}, output) {
   if (withDebugger && !(await requireDebugSystem(output, "Call EntitySet"))) return;
   if (withDebugger) {
-    if (!(await activeController.waitForDebuggerReady(file ?? vscode.window.activeTextEditor?.document?.fileName))) {
+    if (!(await activeController.waitForDebuggerReady(file ?? vscode.window.activeTextEditor?.document?.fileName,
+      15000, {reportMissingBreakpoint: true, output}))) {
       vscode.window.showWarningMessage(`osd: debugger or breakpoints for ${set} did not become ready within 15 s`);
       return;
     }

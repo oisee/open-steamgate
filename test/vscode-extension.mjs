@@ -919,6 +919,26 @@ describe("editors/vscode: the extension's logic", function () {
     expect(await waiting).to.equal(false);
   });
 
+  it("reports an absent enabled DPC breakpoint, but verifies one when present", async () => {
+    const api = debugApi();
+    const file = "/w/src/zcl_demo_dpc_ext.clas.abap";
+    const output = [];
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {appendLine: (line) => output.push(line)});
+    controller.launcher = fakeLauncher({inspectPort: 9401});
+    let verified = false;
+    controller.debugSessions.add({id: "dpc", name: "OSD: ABAP (9401)",
+      getDebugProtocolBreakpoint: async () => ({verified})});
+    api.debug.breakpoints = [new api.SourceBreakpoint(file, false)];
+    expect(await controller.waitForDebuggerReady(file, 100, {reportMissingBreakpoint: true})).to.equal(true);
+    expect(output).to.deep.equal([`osd debugger: no enabled breakpoint in ${file}; calling without a verified breakpoint`]);
+    api.debug.breakpoints = [new api.SourceBreakpoint(file)];
+    expect(await controller.waitForDebuggerReady(file, 80, {reportMissingBreakpoint: true})).to.equal(false);
+    verified = true;
+    expect(await controller.waitForDebuggerReady(file, 100, {reportMissingBreakpoint: true})).to.equal(true);
+    expect(output).to.have.length(1);
+  });
+
   it("serializes a generation refresh with a following attach and ignores the old termination", async () => {
     const api = debugApi();
     const listeners = {start: [], end: []};
