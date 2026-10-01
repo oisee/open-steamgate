@@ -2,28 +2,49 @@
 // generators, seed inputs, configuration and the Go runtime copied to a run.
 // The conservative whole-folder key also covers newly added closure members.
 import {createHash} from "node:crypto";
-import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync} from "node:fs";
-import {join, relative} from "node:path";
+import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync} from "node:fs";
+import {createRequire} from "node:module";
+import {dirname, join, relative} from "node:path";
+import {dataDirsOf, ddicDirsOf} from "../osd-packs.mjs";
 
-const version = 1;
+const version = 2;
 const walk = (dir) => !existsSync(dir) ? [] : readdirSync(dir, {withFileTypes: true})
   .sort((a, b) => a.name.localeCompare(b.name))
   .flatMap((entry) => entry.isDirectory() ? ([".out", ".git", "node_modules"].includes(entry.name) ? [] : walk(join(dir, entry.name))) : entry.isFile() ? [join(dir, entry.name)] : []);
 
-export function frontendInputs({home, folders, owners, fixture, unlayered}) {
-  const seedRoot = process.env.OSD_ROOT ?? home;
+function packageIdentity(name, from) {
+  const path = from.resolve(`${name}/package.json`);
+  return {dir: realpathSync(dirname(path)), version: JSON.parse(readFileSync(path, "utf8")).version};
+}
+
+function toolchainIdentity(from) {
+  const transpilerPath = from.resolve("@abaplint/transpiler/package.json");
+  return {
+    transpiler: packageIdentity("@abaplint/transpiler", from),
+    core: packageIdentity("@abaplint/core", createRequire(transpilerPath)),
+  };
+}
+
+export function frontendInputs({home, folders, owners, fixture, unlayered, env = process.env,
+  toolchainRequire = createRequire(import.meta.url)}) {
+  const seedRoot = env.OSD_ROOT ?? home;
+  const dataDirs = dataDirsOf(seedRoot, env);
+  const ddicDirs = ddicDirsOf(seedRoot, env);
   const selected = new Set([
     join(home, "abap_transpile.json"), join(home, "package-lock.json"), join(home, "libs.lock.json"),
     ...walk(join(home, "tools", "gogen")).filter((file) => file.endsWith(".mjs") || file.endsWith(".go") || file.endsWith("go.mod") || file.endsWith("go.sum")),
     ...walk(join(home, "tools")).filter((file) => file.endsWith(".mjs")),
     ...walk(join(home, "test")).filter((file) => file.endsWith("seed.mjs")),
-    ...walk(join(seedRoot, "data")),
+    ...dataDirs.flatMap(walk),
+    ...ddicDirs.flatMap(walk),
     ...walk(join(seedRoot, "packs")),
     ...folders.flatMap(walk),
   ]);
   const files = [...selected].filter(existsSync).sort();
   const hash = createHash("sha256");
-  hash.update(JSON.stringify({version, home, seedRoot, folders, owners, fixture, unlayered, node: process.version}));
+  hash.update(JSON.stringify({version, home, seedRoot, folders, owners, fixture, unlayered,
+    dataDirs, ddicDirs, noLine: Boolean(env.GOGEN_NOLINE), toolchain: toolchainIdentity(toolchainRequire),
+    node: process.version}));
   for (const file of files) {
     hash.update(relative(home, file)); hash.update("\0");
     hash.update(readFileSync(file)); hash.update("\0");

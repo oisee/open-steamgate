@@ -1,6 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {createRequire} from "node:module";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {frontendInputs, readFrontendCache, writeFrontendCache} from "./frontend-cache.mjs";
@@ -29,6 +30,77 @@ test("every input category changes the frontend key", () => {
     assert.notEqual(key(), baseline, "new registry object");
     assert.notEqual(frontendInputs({...options, owners: ["OTHER"]}).key, key(), "selection");
     assert.notEqual(frontendInputs({...options, folders: [fixture, join(home, "other")]}).key, key(), "layer order");
+  } finally { rmSync(home, {recursive: true, force: true}); }
+});
+
+test("external pack seed and DDIC edits invalidate the frontend snapshot", () => {
+  const home = mkdtempSync(join(tmpdir(), "gogen-cache-pack-"));
+  const external = mkdtempSync(join(tmpdir(), "gogen-external-pack-"));
+  try {
+    const data = join(external, "data", "rows.tabu.json");
+    const ddic = join(external, "src", "ddic", "zrows.tabl.xml");
+    mkdirSync(join(external, "data"));
+    mkdirSync(join(external, "src", "ddic"), {recursive: true});
+    writeFileSync(join(external, "osd-pack.json"), JSON.stringify({name: "external"}));
+    writeFileSync(data, "first row");
+    writeFileSync(ddic, "first definition");
+    const options = {home, folders: [], owners: [], fixture: false, unlayered: false,
+      env: {OSD_PACKS: external}};
+    const initial = frontendInputs(options);
+    assert.ok(initial.files.includes(data));
+    assert.ok(initial.files.includes(ddic));
+    const cacheRoot = join(home, "cache");
+    const go = join(home, "go");
+    mkdirSync(join(go, "cmd", "unit"), {recursive: true});
+    writeFileSync(join(go, "cmd", "unit", "zz_generated.go"), "package main\n");
+    writeFrontendCache(cacheRoot, initial.key, go, {rows: [], layers: {}});
+    writeFileSync(data, "changed row");
+    const changedSeedKey = frontendInputs(options).key;
+    assert.notEqual(changedSeedKey, initial.key, "seed row");
+    assert.equal(readFrontendCache(cacheRoot, changedSeedKey, join(home, "copy")), null, "changed row misses snapshot");
+    writeFileSync(data, "first row");
+    writeFileSync(ddic, "changed definition");
+    assert.notEqual(frontendInputs(options).key, initial.key, "DDIC definition");
+  } finally {
+    rmSync(home, {recursive: true, force: true});
+    rmSync(external, {recursive: true, force: true});
+  }
+});
+
+test("effective emission flag changes the frontend key", () => {
+  const home = mkdtempSync(join(tmpdir(), "gogen-cache-env-"));
+  try {
+    const options = {home, folders: [], owners: [], fixture: false, unlayered: false};
+    const key = (GOGEN_NOLINE) => frontendInputs({...options, env: {GOGEN_NOLINE}}).key;
+    assert.equal(key(undefined), key(""), "both enable line emission");
+    assert.notEqual(key(undefined), key("1"), "suppressed line emission");
+    assert.equal(key("1"), key("yes"), "both suppress line emission");
+  } finally { rmSync(home, {recursive: true, force: true}); }
+});
+
+test("resolved abaplint package overrides change the frontend key", () => {
+  const home = mkdtempSync(join(tmpdir(), "gogen-cache-toolchain-"));
+  try {
+    const options = {home, folders: [], owners: [], fixture: false, unlayered: false, env: {}};
+    const fakeRequire = (variant) => {
+      const project = join(home, variant);
+      const transpiler = join(project, "node_modules", "@abaplint", "transpiler");
+      const core = join(transpiler, "node_modules", "@abaplint", "core");
+      mkdirSync(core, {recursive: true});
+      writeFileSync(join(transpiler, "package.json"), JSON.stringify({version: "1.0.0"}));
+      writeFileSync(join(core, "package.json"), JSON.stringify({version: "1.0.0"}));
+      return createRequire(join(project, "frontend.mjs"));
+    };
+    const firstRequire = fakeRequire("first");
+    const first = frontendInputs({...options, toolchainRequire: firstRequire}).key;
+    const override = frontendInputs({...options, toolchainRequire: fakeRequire("override")}).key;
+    assert.notEqual(override, first, "same versions from different resolved directories");
+    const transpiler = join(home, "first", "node_modules", "@abaplint", "transpiler");
+    writeFileSync(join(transpiler, "package.json"), JSON.stringify({version: "2.0.0"}));
+    assert.notEqual(frontendInputs({...options, toolchainRequire: firstRequire}).key, first, "transpiler version");
+    writeFileSync(join(transpiler, "package.json"), JSON.stringify({version: "1.0.0"}));
+    writeFileSync(join(transpiler, "node_modules", "@abaplint", "core", "package.json"), JSON.stringify({version: "2.0.0"}));
+    assert.notEqual(frontendInputs({...options, toolchainRequire: firstRequire}).key, first, "core version");
   } finally { rmSync(home, {recursive: true, force: true}); }
 });
 
