@@ -159,8 +159,14 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
     return undefined;
   }
   if (ledger.run_id !== id) fail("import ledger points to a different run");
-  const run = db.prepare("SELECT * FROM batch_runs WHERE id = ?").get(id);
+  let run = db.prepare("SELECT * FROM batch_runs WHERE id = ?").get(id);
   if (!run) fail("import ledger has no operations run");
+  // RELEASING: the scheduler decided to start a due time job and has not
+  // queued it yet. It reads as WAITING (S) until it is released.
+  if (run.state === "RELEASING") {
+    if (run.sdl_at === null || run.sdl_at === undefined) fail("releasing run has no start time");
+    run = {...run, state: "WAITING"};
+  }
   if (value(run, "source_db") !== sourceDb || value(run, "source_client") !== caller.client ||
       value(run, "source_sysid") !== caller.sid || value(run, "source_owner") !== value(identity, "owner") ||
       value(run, "job_name").toUpperCase() !== value(identity, "jobname") ||

@@ -488,4 +488,44 @@ describe("periodic and time-scheduled background jobs", function () {
     expect([w.instances("STALE"), w.waiting("STALE")]).to.deep.equal([[60, 180], [300]]);
     w.scheduler.stop();
   });
+  it("ends the chain when BP_JOB_DELETE commits between the due read and the successor", async () => {
+    const w = world("2026-10-02T00:10:01Z", {execute: done});
+    const closed = await close(w, "DELRACE", {start: 60, period: {mins: 2}});
+    await w.scheduler.tick();
+    w.clock.set(w.clock.now() + 60 * 1000);
+    w.scheduler.afterDueRead = async (run) => {
+      expect(await deleteJob(run.job_name, run.job_count)).to.equal(0);
+    };
+    await w.scheduler.tick();
+    w.scheduler.afterDueRead = undefined;
+    expect(w.runs("DELRACE").map((run) => run.state)).to.deep.equal(["DELETED"]);
+    expect(await status(w.name("DELRACE"), closed.count).catch((error) => String(error.classic))).to.match(/job_notex/i);
+    await w.clock.advance(900 * 1000);
+    expect([w.instances("DELRACE"), w.waiting("DELRACE"), w.runs("DELRACE").length]).to.deep.equal([[], [], 1]);
+    w.scheduler.stop();
+  });
+
+  it("recovers a crash while the instance is RELEASING to one successor and one release", async () => {
+    const w = world("2026-10-02T00:20:01Z", {execute: done});
+    const closed = await close(w, "RELCRASH", {start: 60, period: {mins: 2}});
+    await w.scheduler.tick();
+    w.scheduler.stop();
+    w.clock.set(w.clock.now() + 60 * 1000);
+    // the host dies after the decision, before the successor is made
+    w.scheduler.ensureSuccessor = async () => { throw new Error("host stopped"); };
+    try { await w.scheduler.releaseDue(); throw new Error("release did not fail"); }
+    catch (error) { expect(error.message).to.equal("host stopped"); }
+    expect(w.runs("RELCRASH").map((run) => run.state)).to.deep.equal(["RELEASING"]);
+    // it reads as S, and a delete is refused like a running job's
+    expect(await status(w.name("RELCRASH"), closed.count)).to.equal("S");
+    expect(await deleteJob(w.name("RELCRASH"), closed.count)).to.equal("JOB_IS_ALREADY_RUNNING");
+    await w.hostStart();
+    await w.hostStart();
+    expect([w.instances("RELCRASH"), w.waiting("RELCRASH")]).to.deep.equal([[60], [180]]);
+    const started = w.store.db.prepare(`SELECT COUNT(*) AS n FROM batch_job_log l JOIN batch_runs r ON r.id = l.run_id
+      WHERE r.job_name = ? AND l.event_code = 'STEP_STARTED'`).get(w.name("RELCRASH")).n;
+    expect(started).to.equal(1);
+    expect(identities(successorIntentId(w.runs("RELCRASH")[0].id))).to.have.length(1);
+    w.scheduler.stop();
+  });
 });

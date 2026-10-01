@@ -167,6 +167,7 @@ export class JobScheduler {
     this.stopped = false;
     this.running = undefined;
     this.beforeReserve = undefined; // test seam, see reserveSuccessorCount
+    this.afterDueRead = undefined; // test seam, see releaseDue
   }
 
   /** host start: every overdue released job starts once, then the timer
@@ -204,13 +205,17 @@ export class JobScheduler {
     return outcomes;
   }
 
-  /** release every timed job whose start time has come; a periodic one gets
-   *  its successor first, so a crash between the two leaves a job that is
-   *  still due and a successor that is found again, never a second one */
+  /** release every timed job whose start time has come. The decision is the
+   *  store's WAITING -> RELEASING transition; only then is a periodic job's
+   *  successor made, and then the job is queued. A crash after the decision
+   *  leaves it RELEASING: the next pass finishes it (successor found again
+   *  through its unique intent, never a second one) and never re-decides. */
   async releaseDue() {
     const stamp = msStamp(this.clock.now());
     const released = [];
     for (const run of this.store.dueTimed(stamp, workerSource())) {
+      await this.afterDueRead?.(run); // test seam: a BP_JOB_DELETE may commit here
+      if (!this.store.beginRelease(run.id, stamp)) continue; // deleted (or taken) meanwhile: no successor
       if (periodMinutes(periodOf(run)) > 0) await this.ensureSuccessor(run);
       const result = this.store.releaseTimed(run.id, stamp, new Date(this.clock.now()).toISOString());
       if (result.kind !== "unchanged") released.push({id: run.id, kind: result.kind});

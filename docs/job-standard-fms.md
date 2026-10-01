@@ -115,8 +115,16 @@ does not, because its successor exists already.
 regression cases replaces) and arms a real timer; tests pass `manualClock()`
 and `installAbapClock()`, so `JOB_CLOSE`, the report and the scheduler read
 one time. A pass imports the committed outbox, releases every timed job whose
-time has come (WAITING to QUEUED, once, under `BEGIN IMMEDIATE`), makes a
-periodic job's successor just before it releases it, and runs what is queued.
+time has come, and runs what is queued. The release decision is one
+conditional update in the operations store, WAITING to RELEASING: a job that
+`BP_JOB_DELETE` took first loses it and gets no successor, so a delete that
+commits while the scheduler is already looking still ends the chain. Only a
+job that won it gets its periodic successor, and then it goes RELEASING to
+QUEUED. RELEASING reads as `S` (bridge state `WAITING`) until it is queued;
+`BP_JOB_DELETE` refuses it with `JOB_IS_ALREADY_RUNNING`, as it refuses a
+queued or running job. A crash after the decision leaves the job RELEASING,
+and the next pass finishes it: the successor is found again, the job is
+queued once, and the decision is never taken twice.
 Every run is an entry into ABAP through `tools/osd-dialog-step.mjs`
 (`runConvertedBatch`): it takes the work process, commits when it ends and
 rolls back when it dumps. The successor is made when the instance is
@@ -157,7 +165,8 @@ instance is not started; it ends `A` with result status `EXPIRED`, and its
 periodic successor is still made, with its latest start moved by the period.
 
 **BP_JOB_DELETE** deletes a job of the caller that waits (`S`) or has ended
-(`F`, `A`). A queued or running job raises `JOB_IS_ALREADY_RUNNING`, an
+(`F`, `A`). A queued or running job, or one the scheduler is releasing,
+raises `JOB_IS_ALREADY_RUNNING`, an
 unknown one `JOB_DOES_NOT_EXIST`, another user's `NO_DELETE_AUTHORITY`, and a
 job still in the caller's LUW or in the outbox (not yet imported) or a
 nonempty `FORCEDMODE` raises `CANT_DELETE_JOB`. Like `BP_EVENT_RAISE` the

@@ -465,13 +465,14 @@ export class BatchRuns {
       AND (source_instance IS NULL OR source_instance = ?)`;
   static #sourceParams = (source) => [source.db, source.client, source.sysid, source.owner, source.instance ?? null];
 
-  /** released time jobs of `source` whose start time has come, oldest first */
+  /** released time jobs of `source` whose start time has come, oldest
+   *  first, and any whose release a crash interrupted (RELEASING) */
   dueTimed(nowStamp, source) {
     if (!source) return [];
     return this.readSnapshot(() => this.db.prepare(`SELECT id, job_name, job_count, source_db,
       source_client, source_sysid, source_owner, program, generation, sdl_at, last_at,
       prd_mins, prd_hours, prd_days, prd_weeks, tail_event_id, tail_event_param, source_instance
-      FROM batch_runs WHERE state = 'WAITING' AND sdl_at IS NOT NULL AND sdl_at <= ?
+      FROM batch_runs WHERE state IN ('WAITING', 'RELEASING') AND sdl_at IS NOT NULL AND sdl_at <= ?
       ${BatchRuns.#sourceScope} ORDER BY sdl_at, rowid`).all(nowStamp, ...BatchRuns.#sourceParams(source)));
   }
 
@@ -479,7 +480,7 @@ export class BatchRuns {
   nextTimed(source) {
     if (!source) return undefined;
     return this.readSnapshot(() => this.db.prepare(`SELECT MIN(sdl_at) AS at FROM batch_runs
-      WHERE state = 'WAITING' AND sdl_at IS NOT NULL ${BatchRuns.#sourceScope}`)
+      WHERE state IN ('WAITING', 'RELEASING') AND sdl_at IS NOT NULL ${BatchRuns.#sourceScope}`)
       .get(...BatchRuns.#sourceParams(source))?.at ?? undefined);
   }
 
@@ -499,11 +500,32 @@ export class BatchRuns {
    *  asks and however often. A job past its latest start time is not
    *  started; it ends aborted (an assumption: the sandbox measured only the
    *  refusal at JOB_CLOSE, not a latest start reached while waiting). */
+  /** The decision to start a due time job, taken once: WAITING ->
+   *  RELEASING in one conditional update. Only a job that wins it gets a
+   *  successor; a job BP_JOB_DELETE took first does not, so deleting the
+   *  waiting instance ends the chain (sandbox, 2026-10-01). A job already
+   *  RELEASING (a crash after the decision) answers true again: recovery
+   *  finishes the decision and never takes it twice. */
+  beginRelease(id, nowStamp) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const run = this.db.prepare("SELECT state, sdl_at FROM batch_runs WHERE id = ?").get(id);
+      let decided = run?.state === "RELEASING";
+      if (run?.state === "WAITING" && run.sdl_at && run.sdl_at <= nowStamp) {
+        decided = this.db.prepare(`UPDATE batch_runs SET state = 'RELEASING'
+          WHERE id = ? AND state = 'WAITING'`).run(id).changes === 1;
+      }
+      this.db.exec("COMMIT");
+      return decided;
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  /** RELEASING -> QUEUED, or FAILED when the latest start has passed */
   releaseTimed(id, nowStamp, at = new Date().toISOString()) {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const run = this.db.prepare(`SELECT state, sdl_at, last_at, step_count FROM batch_runs WHERE id = ?`).get(id);
-      if (!run || run.state !== "WAITING" || !run.sdl_at || run.sdl_at > nowStamp) {
+      if (!run || run.state !== "RELEASING" || !run.sdl_at || run.sdl_at > nowStamp) {
         this.db.exec("COMMIT");
         return {kind: "unchanged"};
       }
@@ -514,7 +536,7 @@ export class BatchRuns {
           detail = CASE WHEN step_no = 1 THEN ? ELSE NULL END WHERE run_id = ? AND state = 'PENDING'`)
           .run(at, detail, id);
         this.db.prepare(`UPDATE batch_runs SET state = 'FAILED', ended_at = ?, result_status = 'EXPIRED',
-          detail = ? WHERE id = ? AND state = 'WAITING'`).run(at, detail, id);
+          detail = ? WHERE id = ? AND state = 'RELEASING'`).run(at, detail, id);
         this.#appendJobLog(id, 1, "STEP_FAILED", at);
         this.#appendJobLog(id, null, "JOB_FAILED", at);
         this.db.exec("COMMIT");
@@ -523,7 +545,7 @@ export class BatchRuns {
       const ready = this.db.prepare(`UPDATE batch_run_steps SET state = 'READY'
         WHERE run_id = ? AND step_no = 1 AND state = 'PENDING'`).run(id).changes;
       if (run.step_count < 1 || ready !== 1) throw new Error(`timed job ${id} has no first pending step`);
-      this.db.prepare("UPDATE batch_runs SET state = 'QUEUED', queued_at = ? WHERE id = ? AND state = 'WAITING'")
+      this.db.prepare("UPDATE batch_runs SET state = 'QUEUED', queued_at = ? WHERE id = ? AND state = 'RELEASING'")
         .run(at, id);
       this.db.exec("COMMIT");
       return {kind: "released"};
@@ -539,7 +561,7 @@ export class BatchRuns {
       const run = this.db.prepare("SELECT state FROM batch_runs WHERE id = ?").get(id);
       let kind;
       if (!run || run.state === "DELETED") kind = "missing";
-      else if (run.state === "QUEUED" || run.state === "RUNNING") kind = "running";
+      else if (run.state === "QUEUED" || run.state === "RUNNING" || run.state === "RELEASING") kind = "running";
       else {
         this.db.prepare("UPDATE batch_runs SET state = 'DELETED' WHERE id = ?").run(id);
         kind = "deleted";
