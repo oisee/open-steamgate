@@ -128,6 +128,10 @@ export function readTables(sql, prefix = "") {
   if (tokens === undefined) {
     return {tables: [], unclassified: "an unterminated literal, quoted name or comment"};
   }
+  const ctes = cteDefinitions(tokens);
+  if (typeof ctes === "string") {
+    return {tables: [], unclassified: ctes};
+  }
   const tables = new Set();
   const parens = [];
   const refName = (token) => {
@@ -163,7 +167,7 @@ export function readTables(sql, prefix = "") {
       }
       if (next === undefined || (next.t !== "id" && next.t !== "word")
           || (next.t === "word" && NOT_A_TABLE.has(next.v.toUpperCase()))) {
-        return {tables: [...tables], unclassified: `${tok.v.toUpperCase()} is followed by ${next === undefined ? "nothing" : `'${next.v}'`}`};
+        return {tables: [], unclassified: `${tok.v.toUpperCase()} is followed by ${next === undefined ? "nothing" : `'${next.v}'`}`};
       }
       // schema . table
       let name = next;
@@ -173,9 +177,19 @@ export function readTables(sql, prefix = "") {
         j += 2;
       }
       if (tokens[j]?.t === "p" && tokens[j].v === "(" && name.t === "word") {
-        return {tables: [...tables], unclassified: `${name.v} is called as a table function`};
+        return {tables: [], unclassified: `${name.v} is called as a table function`};
       }
-      tables.add(refName(name));
+      const ref = refName(name);
+      const shadow = ctes.find((c) => c.name === ref);
+      if (shadow !== undefined) {
+        // a CTE is not a table; its own body naming it is a real table
+        // under the same name, which is not told apart here
+        if (i > shadow.from && i < shadow.to) {
+          return {tables: [], unclassified: `the body of the CTE ${ref} reads a name equal to the CTE`};
+        }
+      } else {
+        tables.add(ref);
+      }
       // alias
       if (tokens[j]?.t === "word" && tokens[j].v.toUpperCase() === "AS") {
         j += 2;
@@ -190,6 +204,59 @@ export function readTables(sql, prefix = "") {
     }
   }
   return {tables: [...tables], unclassified: undefined};
+}
+
+/**
+ * The names `WITH [RECURSIVE] n [(cols)] AS ( ... ) [, m AS ( ... )]` defines,
+ * anywhere in the statement (nested ones too), with the token range of each
+ * body; a string when a WITH cannot be read.
+ */
+function cteDefinitions(tokens) {
+  const isP = (t, v) => t?.t === "p" && t.v === v;
+  const close = (open) => {
+    let depth = 0;
+    for (let k = open; k < tokens.length; k += 1) {
+      if (isP(tokens[k], "(")) depth += 1;
+      if (isP(tokens[k], ")")) {
+        depth -= 1;
+        if (depth === 0) return k;
+      }
+    }
+    return -1;
+  };
+  const out = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (tokens[i].t !== "word" || tokens[i].v.toUpperCase() !== "WITH") continue;
+    let j = i + 1;
+    if (tokens[j]?.t === "word" && tokens[j].v.toUpperCase() === "RECURSIVE") j += 1;
+    let first = true;
+    for (;;) {
+      const name = tokens[j];
+      if (name === undefined || (name.t !== "word" && name.t !== "id")) {
+        if (first) break; // WITH of something else (a hint, WITH TIES, ...)
+        return "a WITH list that cannot be read";
+      }
+      let k = j + 1;
+      if (isP(tokens[k], "(")) {
+        k = close(k) + 1; // column list
+        if (k === 0) return "an unbalanced WITH column list";
+      }
+      if (!(tokens[k]?.t === "word" && tokens[k].v.toUpperCase() === "AS" && isP(tokens[k + 1], "("))) {
+        if (first) break;
+        return "a WITH list that cannot be read";
+      }
+      const end = close(k + 1);
+      if (end < 0) return "an unbalanced WITH body";
+      out.push({name: name.v.toUpperCase(), from: k + 1, to: end});
+      first = false;
+      if (isP(tokens[end + 1], ",")) {
+        j = end + 2;
+        continue;
+      }
+      break;
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- fetching
@@ -252,11 +319,28 @@ export function parseRows(table, wanted, fields, data, delimiter) {
   });
 }
 
+/**
+ * The client column a table's rows carry, or undefined for a client-independent
+ * table: its first key field, when that is typed MANDT (the data element) or,
+ * where the transpiled DDIC keeps no type name (a CLNT datatype shows as a
+ * plain CHAR 3), is called MANDT. A MANDT that is not the first key field is
+ * data, and keeps the system's value.
+ */
+export function clientColumnOf(abap, table, columns) {
+  const first = String(abap.DDIC?.[table]?.keyFields?.[0] ?? "").toUpperCase();
+  const column = columns.find((c) => c.name === first);
+  if (column === undefined || column.field.constructor.name !== "Character" || lengthOf(column.field) !== 3) {
+    return undefined;
+  }
+  const typed = typeof column.field.getDDICName === "function" ? column.field.getDDICName() : undefined;
+  return String(typed ?? "").toUpperCase() === "MANDT" || first === "MANDT" ? first : undefined;
+}
+
 /** a text from the system as the SQL value the runtime's own INSERT would write for this column */
-function sqlValue(abap, column, text, local) {
+function sqlValue(abap, column, text, local, clientColumn) {
   const kind = column.field.constructor.name;
   let value = text;
-  if (column.name === "MANDT") {
+  if (column.name === clientColumn) {
     value = local.mandt;
   } else if (NUMERIC.has(kind)) {
     value = text.trim();
@@ -334,7 +418,9 @@ export async function installTableProxy(abap, options = {}) {
   const prefix = () => abap.dbo?.tablePrefix ?? "";
   const journal = abap[JOURNAL] = [];
   const decided = new Map(); // table -> "hydrated" | "skipped" | Promise
-  const written = new Set();
+  const written = new Set(); // committed local writes
+  const writtenPending = new Set(); // in the open LUW
+  const skippedOnPending = new Set(); // read-and-skipped because of a pending write
   const pending = new Set(); // hydrated inside the open LUW
   const unclassifiedSeen = new Set();
 
@@ -385,7 +471,10 @@ export async function installTableProxy(abap, options = {}) {
 
   const hydrate = async (table) => {
     const base = {table, destination};
-    if (written.has(table)) {
+    if (written.has(table) || writtenPending.has(table)) {
+      if (!written.has(table)) {
+        skippedOnPending.add(table);
+      }
       journal.push({...base, state: "skipped-written", source: undefined, rows: 0, truncated: false});
       return "skipped";
     }
@@ -399,12 +488,13 @@ export async function installTableProxy(abap, options = {}) {
     const {fields, data} = await fetchRows(table, columns);
     const rows = parseRows(table, columns.map((c) => c.name), fields, data.slice(0, maxRows), delimiter);
     const local = {mandt: abap.builtin.sy.get().mandt.get()};
+    const clientColumn = clientColumnOf(abap, table, columns);
     try {
       for (const row of rows) {
         const {subrc} = await original.insert({
           table: quoted,
           columns: columns.map((c) => c.name.toLowerCase()),
-          values: columns.map((c) => sqlValue(abap, c, row[c.name], local)),
+          values: columns.map((c) => sqlValue(abap, c, row[c.name], local, clientColumn)),
         });
         if (subrc !== 0) {
           throw new Error(`table proxy: a row of ${table} could not be inserted (duplicate key?)`);
@@ -445,7 +535,7 @@ export async function installTableProxy(abap, options = {}) {
     if (prefix() !== "" && name.startsWith(prefix().toUpperCase())) {
       name = name.slice(prefix().length);
     }
-    written.add(name);
+    writtenPending.add(name);
   };
 
   const wrapped = new Proxy(original, {
@@ -464,14 +554,22 @@ export async function installTableProxy(abap, options = {}) {
         case "insert":
         case "update":
         case "delete":
-          return (opts, ...rest) => {
-            noted(opts?.table ?? "");
-            return value.call(target, opts, ...rest);
+          // marked once the client says the write happened; made local for
+          // good only when it is committed
+          return async (opts, ...rest) => {
+            const result = await value.call(target, opts, ...rest);
+            if (result?.subrc === undefined || result.subrc === 0) {
+              noted(opts?.table ?? "");
+            }
+            return result;
           };
         case "commit":
           return async (...rest) => {
             const result = await value.apply(target, rest);
             pending.clear();
+            for (const table of writtenPending) written.add(table);
+            writtenPending.clear();
+            skippedOnPending.clear();
             return result;
           };
         case "rollback":
@@ -482,6 +580,10 @@ export async function installTableProxy(abap, options = {}) {
               journal.push({table, destination, state: "rolled-back", source: undefined, rows: 0, truncated: false});
             }
             pending.clear();
+            // an uncommitted write did not happen, nor does what it decided
+            writtenPending.clear();
+            for (const table of skippedOnPending) decided.delete(table);
+            skippedOnPending.clear();
             return result;
           };
         default:

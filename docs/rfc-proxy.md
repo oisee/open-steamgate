@@ -98,12 +98,19 @@ The proxy wraps the connection in `abap.context.databaseConnections.DEFAULT`
 not forked). A `select` or `openCursor` is read as SQL text: every `FROM` and
 `JOIN` at any depth, quoted names (`"tab"`, `"schema"."tab"`), a comma list,
 subqueries, `UNION`. A `FROM` inside `TRIM`/`EXTRACT`/`SUBSTRING` is not a
-table. A statement this cannot classify (a string where a table should be, a
-table function, `FROM @x`, an unterminated literal) hydrates nothing and is
+table. A name defined by `WITH` (several, nested, or one that shadows a real
+table) is a CTE and not a table; a CTE whose body reads its own name is not
+guessed at. A statement this cannot classify (a string where a table should be, a
+table function, `FROM @x`, an unterminated literal) hydrates **nothing** (not even the tables read before the construct) and is
 journaled as `unclassified` with the reason. For each allow-listed table the
 statement reads and that has not been decided in this process:
 
-1. it was written locally first: **not hydrated**, journal `skipped-written`;
+1. it was written locally first and the write is **committed**: **not
+   hydrated**, journal `skipped-written`. The mark follows the LUW: a write
+   marks the table pending, a `commit` makes it local for good, a `rollback`
+   drops the pending mark and any skip decided because of it, so the first
+   read after the rollback can still hydrate. A write that failed (the client
+   threw, or answered `subrc` other than 0) marks nothing;
 2. it already has rows (seeded, restored from `STG_DB_PATH`): **not
    hydrated**, journal `skipped-local-rows`;
 3. otherwise `RFC_READ_TABLE` with `QUERY_TABLE`, `DELIMITER` (`|`),
@@ -116,15 +123,19 @@ both. The table has to be in the local DDIC (`abap.DDIC`); an allow-listed
 table that is not is an error, not a guess.
 
 **Writes stay local.** `insert`, `update` and `delete` never go to the system.
-Any of them on an allow-listed table before its first read makes it local for
-good (an `execute(sql)` is not looked at: seed before installing). The hydrated
+A successful, committed one on an allow-listed table before its first read
+makes it local for good (an `execute(sql)` is not looked at: seed before installing). The hydrated
 rows are part of the **open LUW**: a `commit` keeps them; a `rollback` takes
 them back, unmarks the table (journal `rolled-back`) and the next read fetches
 again. If a row cannot be inserted (a duplicate key in the capture) the table
 is emptied again and the read fails.
 
 **MANDT.** The system's rows come with the system's client. The column MANDT
-is rewritten to the local client, `sy-mandt`, which is 123 here (ANORMALIES
+is rewritten to the local client, `sy-mandt`, which is 123 here, **only for a
+client-dependent table**: one whose first key field is the client (typed with
+the data element MANDT or, because the transpiled DDIC keeps no CLNT, a CHAR 3
+called MANDT). A MANDT that is not the first key field, or any column of a
+client-independent table, keeps the system's value (ANORMALIES
 "no implicit MANDT": nothing filters by client, so a row left in another
 client would be read anyway, and a DPC branching on `sy-mandt` would see
 123). Any other client column is not touched.

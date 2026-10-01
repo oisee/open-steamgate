@@ -180,16 +180,98 @@ describe("tools/rfc-table-proxy: a table without rows is filled from the system 
     expect(tableJournal()[0]).to.include({table: "ZTPROXY_A", state: "skipped-written"});
   });
 
-  it("an update or a delete of the table, even one that changes nothing, also makes it local", async () => {
+  it("an update or a delete that is committed makes the table local for good", async () => {
     const {factory, log} = fakeOpenRfc(system);
     await install({mode: "live", allow: "ZTPROXY_*", clientFactory: factory, connection: CONNECTION});
     const wrapped = abap.context.databaseConnections["DEFAULT"];
-    await wrapped.update({table: "\"ztproxy_a\"", where: "id = 'Z'", set: ["txt = 'x'"]});
-    await wrapped.delete({table: "\"ztproxy_b\"", where: "id = 'Z'"});
+    const put = (table, id) => wrapped.insert({table: `"${table}"`, columns: ["mandt", "id"], values: ["'123'", `'${id}'`]});
+    await put("ztproxy_a", "U1");
+    await put("ztproxy_b", "D1");
+    await wrapped.commit();
+    await wrapped.update({table: "\"ztproxy_a\"", where: "id = 'U1'", set: ["mandt = '123'"]});
+    await wrapped.delete({table: "\"ztproxy_b\"", where: "id = 'D1'"});
+    await wrapped.commit();
     await probe.read_a();
     await probe.read_join();
     expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(0);
+    // written, not merely "has rows": the state is the first thing asked
     expect(tableJournal().map((e) => `${e.table}:${e.state}`).sort()).to.deep.equal(["ZTPROXY_A:skipped-written", "ZTPROXY_B:skipped-written"]);
+  });
+
+  it("a write that is rolled back does not make the table local: the first read after it hydrates", async () => {
+    const {factory, log} = fakeOpenRfc(system);
+    await install({mode: "live", allow: "ZTPROXY_A", clientFactory: factory, connection: CONNECTION});
+    const wrapped = abap.context.databaseConnections["DEFAULT"];
+    await probe.write_a({iv_id: new abap.types.Character(4).set("L1")});
+    await wrapped.rollback();
+    expect((await probe.read_a()).get()).to.equal("123/A1/one/12.50;123/B2/a|b|c/-3.00;");
+    expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(1);
+  });
+
+  it("a read inside the LUW of an uncommitted write skips, and a rollback lifts that decision", async () => {
+    const {factory, log} = fakeOpenRfc(system);
+    await install({mode: "live", allow: "ZTPROXY_A", clientFactory: factory, connection: CONNECTION});
+    const wrapped = abap.context.databaseConnections["DEFAULT"];
+    await probe.write_a({iv_id: new abap.types.Character(4).set("L1")});
+    await db.delete({table: "\"ztproxy_a\"", where: ""});
+    expect((await probe.read_a()).get()).to.equal("");
+    expect(tableJournal()[0].state).to.equal("skipped-written");
+    await wrapped.rollback();
+    expect((await probe.read_a()).get()).to.contain("A1");
+    expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(1);
+  });
+
+  it("a write that is committed makes the table local", async () => {
+    const {factory, log} = fakeOpenRfc(system);
+    await install({mode: "live", allow: "ZTPROXY_A", clientFactory: factory, connection: CONNECTION});
+    const wrapped = abap.context.databaseConnections["DEFAULT"];
+    await probe.write_a({iv_id: new abap.types.Character(4).set("L1")});
+    await wrapped.commit();
+    await db.delete({table: "\"ztproxy_a\"", where: ""});
+    await wrapped.commit();
+    await wrapped.rollback();
+    expect((await probe.read_a()).get()).to.equal("");
+    expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(0);
+    expect(tableJournal()[0].state).to.equal("skipped-written");
+  });
+
+  it("a failed write (the client reports it) does not mark the table", async () => {
+    const {factory, log} = fakeOpenRfc(system);
+    await install({mode: "live", allow: "ZTPROXY_B", clientFactory: factory, connection: CONNECTION});
+    const wrapped = abap.context.databaseConnections["DEFAULT"];
+    const failed = await wrapped.insert({table: "\"ztproxy_b\"", columns: ["nonexistent"], values: ["'x'"]});
+    expect(failed.subrc).to.not.equal(0);
+    await wrapped.commit();
+    await probe.read_join();
+    expect(log.filter((l) => l.fm === "RFC_READ_TABLE").map((l) => l.input.QUERY_TABLE.trim())).to.deep.equal(["ZTPROXY_B"]);
+    expect(tableJournal()[0].state).to.equal("hydrated");
+  });
+
+  it("a failed write (the client throws) does not mark the table", async () => {
+    const {factory, log} = fakeOpenRfc(system);
+    const real = db.insert;
+    db.insert = async () => { throw new Error("boom"); };
+    try {
+      await install({mode: "live", allow: "ZTPROXY_B", clientFactory: factory, connection: CONNECTION});
+      const wrapped = abap.context.databaseConnections["DEFAULT"];
+      const thrown = await fails(() => wrapped.insert({table: "\"ztproxy_b\"", columns: ["id"], values: ["'x'"]}));
+      expect(thrown?.message).to.equal("boom");
+      await wrapped.commit();
+      db.insert = real;
+      await probe.read_join();
+      expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(1);
+    } finally {
+      db.insert = real;
+    }
+  });
+
+  it("MANDT is rewritten only for a client-dependent table: the first key field is MANDT", async () => {
+    await install({allow: "ZTPROXY_I"});
+    await abap.context.databaseConnections["DEFAULT"].select({select: "SELECT * FROM \"ztproxy_i\""});
+    expect(tableJournal()[0]).to.include({table: "ZTPROXY_I", state: "hydrated"});
+    // a MANDT that is a plain column of a client-independent table is data
+    expect((await db.select({select: "SELECT id, mandt FROM \"ztproxy_i\""})).rows[0]).to.deep.include({mandt: "001"});
+    expect((await rows("ztproxy_i"))[0].id.trimEnd()).to.equal("I1");
   });
 
   it("rows the local table refuses (a duplicate key) fail the read and leave the table empty and undecided", async () => {
@@ -314,6 +396,20 @@ describe("tools/rfc-table-proxy: a table without rows is filled from the system 
     expect(tableJournal()[0].reason).to.contain("FROM");
   });
 
+  it("a statement with an unsupported construct hydrates none of its tables, also the ones before it", async () => {
+    const {factory, log} = fakeOpenRfc(system);
+    await install({mode: "live", allow: "ZTPROXY_*", clientFactory: factory, connection: CONNECTION});
+    await fails(() => abap.context.databaseConnections["DEFAULT"].select({select: "SELECT * FROM \"ztproxy_a\" WHERE 1 IN (SELECT 1 FROM generate_series(1, 2))"}));
+    expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(0);
+  });
+
+  it("a CTE named like an allow-listed table is not hydrated, the real table under it is", async () => {
+    const {factory, log} = fakeOpenRfc(system);
+    await install({mode: "live", allow: "ZTPROXY_*", clientFactory: factory, connection: CONNECTION});
+    await abap.context.databaseConnections["DEFAULT"].select({select: "WITH ztproxy_a AS (SELECT id FROM \"ztproxy_b\") SELECT * FROM ztproxy_a"});
+    expect(log.filter((l) => l.fm === "RFC_READ_TABLE").map((l) => l.input.QUERY_TABLE.trim())).to.deep.equal(["ZTPROXY_B"]);
+  });
+
   it("writes never reach the system, and the wrapped connection otherwise behaves as before", async () => {
     const {factory, log} = fakeOpenRfc(system);
     await install({mode: "live", allow: "ZTPROXY_C", clientFactory: factory, connection: CONNECTION});
@@ -363,6 +459,11 @@ describe("tools/rfc-table-proxy: which tables a statement reads", () => {
     ["SELECT TRIM(LEADING '0' FROM id) FROM \"t1\"", ["T1"]],
     ["SELECT EXTRACT(YEAR FROM d) FROM \"t1\"", ["T1"]],
     ["SELECT * FROM \"t1\" -- from t9\n", ["T1"]],
+    ["WITH ZTPROXY_A AS (SELECT id FROM ZTPROXY_B) SELECT * FROM ZTPROXY_A", ["ZTPROXY_B"]],
+    ["WITH a AS (SELECT * FROM t1), b AS (SELECT * FROM a JOIN t2 ON 1 = 1) SELECT * FROM b", ["T1", "T2"]],
+    ["WITH RECURSIVE a (x) AS (SELECT 1) SELECT * FROM a JOIN t9 ON 1 = 1", ["T9"]],
+    ["SELECT * FROM t1 WHERE k IN (WITH c AS (SELECT k FROM t2) SELECT k FROM c)", ["T1", "T2"]],
+    ["WITH a AS (SELECT * FROM t1) SELECT * FROM (WITH b AS (SELECT * FROM a) SELECT * FROM b) x JOIN t3 ON 1 = 1", ["T1", "T3"]],
     ["SELECT 1", []],
     ["select * from \"T1\" where a = 'it''s from t2'", ["T1"]],
   ];
@@ -376,6 +477,19 @@ describe("tools/rfc-table-proxy: which tables a statement reads", () => {
 
   it("strips the table prefix of abap.dbo", () => {
     expect(readTables("SELECT * FROM \"pfx_ztab\"", "pfx_").tables).to.deep.equal(["ZTAB"]);
+  });
+
+  it("an unclassified statement names no table at all, not even the ones read before the construct", () => {
+    const r = readTables("SELECT * FROM t1 JOIN t2 ON 1 = 1 WHERE x IN (SELECT y FROM generate_series(1, 3))");
+    expect(r.unclassified).to.be.a("string");
+    expect(r.tables).to.deep.equal([]);
+    expect(readTables("SELECT * FROM t1 WHERE x IN (SELECT 1 FROM 'bad')").tables).to.deep.equal([]);
+  });
+
+  it("a CTE whose body reads a name equal to its own is not guessed at", () => {
+    const r = readTables("WITH t1 AS (SELECT * FROM t1) SELECT * FROM t1");
+    expect(r.unclassified).to.contain("t1".toUpperCase());
+    expect(r.tables).to.deep.equal([]);
   });
 
   for (const sql of [
