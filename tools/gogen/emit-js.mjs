@@ -432,6 +432,8 @@ function stmt(st, ctx, d) {
       const value = st.target.type.k === "n" ? `abap.CToN(v, ${limit})` : st.target.type.k === "d" ? "abap.S2D(v)" : "v";
       return [`${t}{ const [v, rc] = abap.ConcatFit(${joined}, ${limit}); ${place(st.target, ctx)} = ${value}; s.sy.subrc = rc; }`];
     }
+    case "find_bytes":
+      return [`${t}{ const fb = abap.FindBytes(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.secOff ? expr(st.secOff, ctx) : "0"}); if (fb >= 0) { ${st.off ? `${place(st.off, ctx)} = fb; ` : ""}s.sy.subrc = 0; } else { s.sy.subrc = 4; } }`];
     case "find_all": {
       const icase = st.icase.e === "flag" ? String(st.icase.value) : `(${expr(st.icase, ctx)} === "X")`;
       return [`${t}${place(st.count, ctx)} = abap.FindAllCount(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${icase}); s.sy.subrc = ${place(st.count, ctx)} > 0 ? 0 : 4;`];

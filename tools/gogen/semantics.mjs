@@ -145,6 +145,10 @@ const EXPECT = {
   // (ANORMALIES byte-to-i-move)
   ZCL_GOGEN_T_XMOVI: "a:11 b:-1 c:255 d:258 e:0 f:-2147483648 g:-2 h:255 x5:2 xs5:2",
   ZCL_GOGEN_T_BYTECAT: "cat:FFAB00CD00/5/0 zeros:0000AB00CD00/6 empty:0/0",
+  // FIND ... IN [SECTION OFFSET o OF] xs IN BYTE MODE [MATCH OFFSET m]
+  // (A4H 2026-10-01, execute_abap): byte offsets, a miss leaves m alone with
+  // sy-subrc 4, a section offset at the end is a miss and not an error
+  ZCL_GOGEN_T_FINDBYTE: "a:0/1 b:0/4 c:0/2 d:4/7 e:4/7 f:4",
   // CONCATENATE LINES OF ... IN BYTE MODE and x = x + y grown in place
   // (abap.AppendBytes; the zip reader's read_all and the inflater).
   // Derived, not measured on A4H: the rows joined; an empty table gives an
