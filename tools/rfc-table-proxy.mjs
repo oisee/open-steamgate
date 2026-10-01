@@ -128,9 +128,10 @@ export function readTables(sql, prefix = "") {
   if (tokens === undefined) {
     return {tables: [], unclassified: "an unterminated literal, quoted name or comment"};
   }
-  const ctes = cteDefinitions(tokens);
-  if (typeof ctes === "string") {
-    return {tables: [], unclassified: ctes};
+  // Open SQL of 7.02 has no WITH, so the SQL this sees never has one; one
+  // that does is not read, and CTE scoping is not chased
+  if (tokens.some((t) => t.t === "word" && t.v.toUpperCase() === "WITH")) {
+    return {tables: [], unclassified: "WITH (common table expression) is not produced by Open SQL; not classified"};
   }
   const tables = new Set();
   const parens = [];
@@ -179,17 +180,7 @@ export function readTables(sql, prefix = "") {
       if (tokens[j]?.t === "p" && tokens[j].v === "(" && name.t === "word") {
         return {tables: [], unclassified: `${name.v} is called as a table function`};
       }
-      const ref = refName(name);
-      const shadow = ctes.find((c) => c.name === ref);
-      if (shadow !== undefined) {
-        // a CTE is not a table; its own body naming it is a real table
-        // under the same name, which is not told apart here
-        if (i > shadow.from && i < shadow.to) {
-          return {tables: [], unclassified: `the body of the CTE ${ref} reads a name equal to the CTE`};
-        }
-      } else {
-        tables.add(ref);
-      }
+      tables.add(refName(name));
       // alias
       if (tokens[j]?.t === "word" && tokens[j].v.toUpperCase() === "AS") {
         j += 2;
@@ -204,59 +195,6 @@ export function readTables(sql, prefix = "") {
     }
   }
   return {tables: [...tables], unclassified: undefined};
-}
-
-/**
- * The names `WITH [RECURSIVE] n [(cols)] AS ( ... ) [, m AS ( ... )]` defines,
- * anywhere in the statement (nested ones too), with the token range of each
- * body; a string when a WITH cannot be read.
- */
-function cteDefinitions(tokens) {
-  const isP = (t, v) => t?.t === "p" && t.v === v;
-  const close = (open) => {
-    let depth = 0;
-    for (let k = open; k < tokens.length; k += 1) {
-      if (isP(tokens[k], "(")) depth += 1;
-      if (isP(tokens[k], ")")) {
-        depth -= 1;
-        if (depth === 0) return k;
-      }
-    }
-    return -1;
-  };
-  const out = [];
-  for (let i = 0; i < tokens.length; i += 1) {
-    if (tokens[i].t !== "word" || tokens[i].v.toUpperCase() !== "WITH") continue;
-    let j = i + 1;
-    if (tokens[j]?.t === "word" && tokens[j].v.toUpperCase() === "RECURSIVE") j += 1;
-    let first = true;
-    for (;;) {
-      const name = tokens[j];
-      if (name === undefined || (name.t !== "word" && name.t !== "id")) {
-        if (first) break; // WITH of something else (a hint, WITH TIES, ...)
-        return "a WITH list that cannot be read";
-      }
-      let k = j + 1;
-      if (isP(tokens[k], "(")) {
-        k = close(k) + 1; // column list
-        if (k === 0) return "an unbalanced WITH column list";
-      }
-      if (!(tokens[k]?.t === "word" && tokens[k].v.toUpperCase() === "AS" && isP(tokens[k + 1], "("))) {
-        if (first) break;
-        return "a WITH list that cannot be read";
-      }
-      const end = close(k + 1);
-      if (end < 0) return "an unbalanced WITH body";
-      out.push({name: name.v.toUpperCase(), from: k + 1, to: end});
-      first = false;
-      if (isP(tokens[end + 1], ",")) {
-        j = end + 2;
-        continue;
-      }
-      break;
-    }
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------- fetching

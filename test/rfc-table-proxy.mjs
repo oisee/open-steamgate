@@ -403,11 +403,15 @@ describe("tools/rfc-table-proxy: a table without rows is filled from the system 
     expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(0);
   });
 
-  it("a CTE named like an allow-listed table is not hydrated, the real table under it is", async () => {
+  it("a statement with a WITH clause makes no RFC call and is journaled as unclassified", async () => {
     const {factory, log} = fakeOpenRfc(system);
     await install({mode: "live", allow: "ZTPROXY_*", clientFactory: factory, connection: CONNECTION});
-    await abap.context.databaseConnections["DEFAULT"].select({select: "WITH ztproxy_a AS (SELECT id FROM \"ztproxy_b\") SELECT * FROM ztproxy_a"});
-    expect(log.filter((l) => l.fm === "RFC_READ_TABLE").map((l) => l.input.QUERY_TABLE.trim())).to.deep.equal(["ZTPROXY_B"]);
+    const wrapped = abap.context.databaseConnections["DEFAULT"];
+    await wrapped.select({select: "WITH ztproxy_a AS (SELECT id FROM \"ztproxy_b\") SELECT * FROM ztproxy_a"});
+    await wrapped.select({select: "WITH unused AS (SELECT * FROM \"ztproxy_a\") SELECT 1"});
+    expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(0);
+    expect(tableJournal().map((e) => e.state)).to.deep.equal(["unclassified", "unclassified"]);
+    expect(tableJournal()[0].reason).to.equal("WITH (common table expression) is not produced by Open SQL; not classified");
   });
 
   it("writes never reach the system, and the wrapped connection otherwise behaves as before", async () => {
@@ -459,11 +463,6 @@ describe("tools/rfc-table-proxy: which tables a statement reads", () => {
     ["SELECT TRIM(LEADING '0' FROM id) FROM \"t1\"", ["T1"]],
     ["SELECT EXTRACT(YEAR FROM d) FROM \"t1\"", ["T1"]],
     ["SELECT * FROM \"t1\" -- from t9\n", ["T1"]],
-    ["WITH ZTPROXY_A AS (SELECT id FROM ZTPROXY_B) SELECT * FROM ZTPROXY_A", ["ZTPROXY_B"]],
-    ["WITH a AS (SELECT * FROM t1), b AS (SELECT * FROM a JOIN t2 ON 1 = 1) SELECT * FROM b", ["T1", "T2"]],
-    ["WITH RECURSIVE a (x) AS (SELECT 1) SELECT * FROM a JOIN t9 ON 1 = 1", ["T9"]],
-    ["SELECT * FROM t1 WHERE k IN (WITH c AS (SELECT k FROM t2) SELECT k FROM c)", ["T1", "T2"]],
-    ["WITH a AS (SELECT * FROM t1) SELECT * FROM (WITH b AS (SELECT * FROM a) SELECT * FROM b) x JOIN t3 ON 1 = 1", ["T1", "T3"]],
     ["SELECT 1", []],
     ["select * from \"T1\" where a = 'it''s from t2'", ["T1"]],
   ];
@@ -486,10 +485,24 @@ describe("tools/rfc-table-proxy: which tables a statement reads", () => {
     expect(readTables("SELECT * FROM t1 WHERE x IN (SELECT 1 FROM 'bad')").tables).to.deep.equal([]);
   });
 
-  it("a CTE whose body reads a name equal to its own is not guessed at", () => {
-    const r = readTables("WITH t1 AS (SELECT * FROM t1) SELECT * FROM t1");
-    expect(r.unclassified).to.contain("t1".toUpperCase());
-    expect(r.tables).to.deep.equal([]);
+  for (const sql of [
+    "WITH ZTPROXY_A AS (SELECT id FROM ZTPROXY_B) SELECT * FROM ZTPROXY_A",
+    "WITH a AS (SELECT * FROM t1), b AS (SELECT * FROM a JOIN t2 ON 1 = 1) SELECT * FROM b",
+    "WITH RECURSIVE a (x) AS (SELECT 1) SELECT * FROM a JOIN t9 ON 1 = 1",
+    "SELECT * FROM t1 WHERE k IN (WITH c AS (SELECT k FROM t2) SELECT k FROM c)",
+    "WITH t1 AS (SELECT * FROM t1) SELECT * FROM t1",
+    "SELECT * FROM ztproxy_a WHERE 1 IN (WITH ztproxy_a AS (SELECT 1) SELECT * FROM ztproxy_a)",
+    "WITH unused AS (SELECT * FROM ztproxy_a) SELECT 1",
+    "with lower as (select 1) select * from t1",
+  ]) {
+    it(`a WITH clause is unclassified and names no table: ${sql}`, () => {
+      expect(readTables(sql)).to.deep.equal({tables: [], unclassified: "WITH (common table expression) is not produced by Open SQL; not classified"});
+    });
+  }
+
+  it("WITH inside a string literal or a quoted name is not a WITH clause", () => {
+    expect(readTables("SELECT * FROM t1 WHERE a = 'x WITH y'").tables).to.deep.equal(["T1"]);
+    expect(readTables("SELECT * FROM \"with\"").tables).to.deep.equal(["WITH"]);
   });
 
   for (const sql of [
