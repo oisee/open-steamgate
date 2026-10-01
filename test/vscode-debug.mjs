@@ -12,7 +12,7 @@ import {createRequire} from "node:module";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const {pickInspectorPort, packNameOf} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
-const {debuggerConfiguration} = createRequire(import.meta.url)("../editors/vscode/lib.js");
+const {debuggerConfiguration, runningAbapSources, breakpointWarning} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 function decodeVlq(text) {
@@ -185,6 +185,11 @@ ENDCLASS.`;
       expect(attach.resolveSourceMapLocations).to.include(`${home}/build/**`);
       expect(attach.sourceMapPathOverrides[`${dirname(mapped)}/*`]).to.equal(`${workspaceSource}/*`);
       expect(attach.sourceMapPathOverrides[`file://${packSource}/*`]).to.equal(`${workspaceSource}/*`);
+      symlinkSync(generation, join(home, "output"), "dir");
+      const running = runningAbapSources(home, {storageDir: storage,
+        layers: [{folder: workspace, srcDir: workspaceSource}]});
+      expect(breakpointWarning(source, running), "the compiled DPC file is the editor's breakpoint source")
+        .to.equal(undefined);
       // The same bytes under a retargeted projection may reuse the same
       // generation: its map names the stable projection, while the attach
       // config points to the workspace now open in the editor.
