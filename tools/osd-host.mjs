@@ -14,7 +14,7 @@
 // the entry, registered here, and tools/osd-transpile.mjs asks before it
 // resolves them from a node_modules that is not there.
 import {basename, delimiter, isAbsolute, join, resolve} from "node:path";
-import {existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {homedir} from "node:os";
 
 // Bun uses /$bunfs/ on Unix and a virtual B:/~BUN/root path on Windows.
@@ -83,6 +83,22 @@ export function layerList(args, env = process.env, cwd = process.cwd()) {
     if (!existsSync(folder) || !statSync(folder).isDirectory()) throw new Error(`layer is not a directory: ${folder}`);
   }
   return {folders, rest};
+}
+
+// The system homes a seeded binary has materialized under a data directory:
+// each osd-home-<seed id> whose marker names the same id, the way
+// ensureBinaryHome accepts one. `osd doctor` prints them, so "where did my
+// edits go" has an answer without reading this file.
+export function homesIn(dataDir) {
+  if (!existsSync(dataDir)) return [];
+  return readdirSync(dataDir).sort()
+    .map((name) => ({name, id: /^osd-home-([0-9a-f]{64})$/.exec(name)?.[1]}))
+    .filter(({id}) => id !== undefined)
+    .map(({name, id}) => join(dataDir, name))
+    .filter((home) => {
+      const marker = join(home, ".osd-materialized");
+      return existsSync(marker) && readFileSync(marker, "utf8").trim() === home.slice(-64);
+    });
 }
 
 export function isCheckout(dir) {
