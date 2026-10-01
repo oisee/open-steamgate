@@ -24,39 +24,47 @@
 // zip may exist anywhere. Right after an import that was not refused, the
 // run reads a version stamp for every object the import wrote into the
 // package and writes a receipt, `.local/prove-runs/<package>.json`. The
-// cleanup -- the run's own, or `--cleanup` later -- deletes an object only
-// if it is in the receipt and its stamp is unchanged -- or its stamp moved
-// and its content hash (SHA-256 of abapGit's serialisation, read in the
-// same step as the stamp) is still the receipt's, since a re-activation
-// moves stamps and leaves content -- through abapGit's object layer; then the repository row (only the tool's own,
-// `OSDPROVE <package>`, with the receipt's key) and the package only when
-// nothing else and no subpackage is in it. No receipt, no delete: the zip's
-// object list alone never authorises one.
+// cleanup -- the run's own, or `--cleanup` later -- deletes, in one snippet
+// of ours and one dialog step, the objects that are still the receipt's: in
+// the package, and the stamp unchanged -- or the stamp moved and the content
+// hash (SHA-256 of abapGit's serialisation, read in the same step as the
+// stamp) is still the receipt's, since a re-activation moves stamps and
+// leaves content; then the repository row only when this run's import
+// created it (`OSDPROVE <package>`, the receipt's key, checked in that same
+// step), then the package if nothing is left. No receipt, no delete: the
+// zip's object list alone never authorises one. vsp's git_delete_objects is
+// not used: it has no conditional delete (no expected version per object, no
+// expected repository key), so an object replaced between a decision and
+// its call would be deleted.
 //
-// The steps, each a small MCP call, because a long call can be cut by
-// "context canceled":
+// What vsp does (v2.58.0-54 or later, `MIN_VSP`) and what stays ours:
+//   - the import is vsp's `git_import_zip` (abapGit on the system, as a
+//     background job; overwrite false, so nothing that exists is touched);
+//   - the deletion stays ours (cleanupAbap), decided and done in one step;
+//   - the residue is read twice: vsp's `read DEVC <pkg> {inventory}` and our
+//     own TADIR / repository / REPOSRC-and-DD count, and the two must agree;
+//   - every snippet we still run (preflight, receipt stamps and hashes,
+//     chunk reads, the cleanup, the residue count, the class check)
+//     hands its result back with RETURN_VALUE( ) as a table of rows, which
+//     vsp answers as JSON; no result is read out of an alert title any more.
+//
+// The steps, each a small MCP call:
 //   1. zip the folder (tools/osd-abapgit-zip.mjs, fail closed on the unit);
 //   2. preflight: refuse (exit 2) when the package exists or an object of
 //      the zip exists already;
 //   3. create the local package (`create DEVC`);
-//   4. import with abapGit (`analyze execute_abap`) into the tool's own
-//      offline repository, recording its key; then stamp what it wrote and
-//      write the receipt;
+//   4. `git_import_zip` into the tool's own offline repository, recording
+//      its key and whether this import created it; then stamp what it
+//      wrote and write the receipt;
 //   5. read SEOCLASSDF-WITH_UNIT_TESTS and the CCAU line count per class;
 //   6. ABAP Unit per class (`test CLAS`), compared by method identity
 //      (test class -> method), not by count;
 //   7. cleanup as above; anything left fails the run (exit 1) and is listed.
 //
 // Missing evidence is never a pass: no status, no class-check entry, a unit
-// result that is not JSON or does not name the class, an unnamed test
-// method with an alert, a report without its end marker, a zip without
-// classes, or no test method run on the system all fail the run.
-//
-// `execute_abap` prints nothing a caller can read: the program's result
-// comes back as the title of a failed assertion. So every snippet ends with
-// `cl_abap_unit_assert=>fail( msg = ... )`, and the message is framed by
-// MARK_OPEN / MARK_CLOSE so it is found in vsp's text whatever surrounds it
-// ("no output captured" is normal and means nothing).
+// result that is not vsp's JSON or does not name the class, an unnamed test
+// method with an alert, a snippet result that is not JSON or has no end row,
+// a zip without classes, or no test method run on the system all fail the run.
 import {spawn} from "node:child_process";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -70,12 +78,21 @@ import {
   rollbackFromState, serializeBlock, sha256, snapshotDir,
 } from "./osd-prove-inplace.mjs";
 
-export const MARK_OPEN = "OSDPROVE<<";
-export const MARK_CLOSE = ">>OSDPROVE";
+/** The vsp this tool needs: execute_abap answering JSON with result_text and
+ *  RETURN_VALUE( ), ABAP Unit with ok and counts, git_import_zip /
+ *  git_import_status, and `read DEVC` with inventory. */
+export const MIN_VSP = "vsp v2.58.0-54 (vibing-steampunk main at 0a83078, #301)";
 export const DEFAULT_PACKAGE = "$ZOSG_TMP_PROVE";
 export const B64_LINE = 200;
-// abapGit log messages carried back in one alert title; the rest are counted
+// abapGit log messages the in-place deploy snippet carries back; the rest are counted
 export const MAX_LOG = 20;
+/** Seconds vsp may spend on one long call (`params.timeout`). */
+export const CALL_TIMEOUT = 300;
+/** How long git_import_zip waits for its job before it answers. */
+export const IMPORT_WAIT_SECONDS = 300;
+/** If the job is still running after that: how often, and how far apart,
+ *  git_import_status is asked before the run gives up (fail closed). */
+export const IMPORT_POLL = {tries: 20, delayMs: 15000};
 
 // ------------------------------------------------------------------ refusals
 
@@ -98,10 +115,34 @@ export function checkPackage(name) {
 
 export const CLASS_NAME = /^[A-Z0-9_/]{1,30}$/;
 
-// ----------------------------------------------------------------- templates
-// ASCII only, and every one ends with the fail( msg ) report.
+// ------------------------------------------------- the snippets' result rows
+//
+// Every snippet collects its result in lt_out, a table of {k, v} strings, and
+// hands it back with one RETURN_VALUE( lt_out ) as its last statement. vsp
+// answers execute_abap as JSON and serialises the table into result_text
+// (`[{"K":..,"V":..}, ...]`). The last row is END_ROW: a result without it,
+// or a result_text that is not JSON, may have been cut, and fails the run.
 
-export const report = (expr) => `cl_abap_unit_assert=>fail( msg = |${MARK_OPEN}{ ${expr} }${MARK_CLOSE}| ).`;
+export const END_ROW = {k: "end", v: "OSDPROVE"};
+
+/** The declarations every snippet needs for its result. */
+export const OUT_DECLS = [
+  "TYPES: BEGIN OF ty_osd_kv,",
+  "         k TYPE string,",
+  "         v TYPE string,",
+  "       END OF ty_osd_kv.",
+  "DATA lt_out TYPE STANDARD TABLE OF ty_osd_kv WITH EMPTY KEY.",
+];
+
+/** One result row: `k` is a literal name, `v` the inside of a string template. */
+export const put = (k, v) => `APPEND VALUE #( k = '${k}' v = |${v}| ) TO lt_out.`;
+
+/** The last lines of every snippet: the end row, and the one RETURN_VALUE( ). */
+export const report = () => `APPEND VALUE #( k = '${END_ROW.k}' v = '${END_ROW.v}' ) TO lt_out.\nRETURN_VALUE( lt_out ).`;
+
+/** The first line of every snippet names it (a comment, for a reader of the
+ *  temporary program and for the tests' fake system). */
+export const head = (kind) => `" osdprove:${kind}`;
 
 /** The offline repository this tool creates is named so it can tell it
  *  from anybody else's: a repository in the package under any other name
@@ -112,83 +153,106 @@ export function ownRepoName(pkg) {
 
 export const REPO_KEY = /^[0-9]{1,12}$/;
 
-/** Step 3: base64 zip -> abapGit offline repo in `pkg` -> deserialize. */
-export function importAbap(zipBytes, pkg) {
-  const b64 = Buffer.from(zipBytes).toString("base64");
-  const lines = [];
-  for (let i = 0; i < b64.length; i += B64_LINE) lines.push(`APPEND \`${b64.slice(i, i + B64_LINE)}\` TO lt_b64.`);
-  return [
-    "DATA lt_b64 TYPE string_table.",
-    "DATA lv_out TYPE string.",
-    "DATA lv_logs TYPE i.",
-    ...lines,
-    "DATA(lv_b64) = concat_lines_of( table = lt_b64 ).",
-    "DATA(lv_zip) = cl_http_utility=>decode_x_base64( lv_b64 ).",
-    "DATA(li_log) = CAST zif_abapgit_log( NEW zcl_abapgit_log( ) ).",
-    "TRY.",
-    "    DATA(lt_files) = zcl_abapgit_zip=>load( lv_zip ).",
-    "    lv_out = |files={ lines( lt_files ) };|.",
-    "    DATA li_repo TYPE REF TO zif_abapgit_repo.",
-    "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
-    `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
-    `    IF li_repo IS BOUND AND li_repo->get_name( ) <> '${ownRepoName(pkg)}'.`,
-    "      lv_out = |{ lv_out } ERR the package has repository { li_repo->get_key( ) } named { li_repo->get_name( ) }, not this tool's;|.",
-    "    ELSE.",
-    "      IF li_repo IS NOT BOUND.",
-    "        li_repo = zcl_abapgit_repo_srv=>get_instance( )->new_offline(",
-    `          iv_name = '${ownRepoName(pkg)}' iv_package = '${pkg}' ).`,
-    "      ENDIF.",
-    "      lv_out = |{ lv_out } repo={ li_repo->get_key( ) };|.",
-    "      li_repo->set_files_remote( lt_files ).",
-    "      DATA(ls_checks) = li_repo->deserialize_checks( ).",
-    "      \" abapGit lists new objects here too (action add, measured on A4H);",
-    "      \" the package is new and the preflight found none of the zip's",
-    "      \" objects, so any other action is an object that appeared since,",
-    "      \" not ours: refuse rather than overwrite it",
-    "      DATA lv_foreign TYPE abap_bool.",
-    "      LOOP AT ls_checks-overwrite ASSIGNING FIELD-SYMBOL(<ls_o>).",
-    "        \" the package itself was created by this run; its package.devc.xml",
-    "        \" updates it (action update, measured on A4H)",
-    `        IF <ls_o>-action = zif_abapgit_objects=>c_deserialize_action-add OR ( <ls_o>-obj_type = 'DEVC' AND <ls_o>-obj_name = '${pkg}' ).`,
-    "          <ls_o>-decision = zif_abapgit_definitions=>c_yes.",
-    "        ELSE.",
-    "          lv_foreign = abap_true.",
-    "          lv_out = |{ lv_out } ERR would overwrite { <ls_o>-obj_type } { <ls_o>-obj_name } (action { <ls_o>-action });|.",
-    "        ENDIF.",
-    "      ENDLOOP.",
-    "      IF lv_foreign = abap_true.",
-    "        lv_out = |{ lv_out } import refused;|.",
-    "      ELSE.",
-    "        LOOP AT ls_checks-warning_package ASSIGNING FIELD-SYMBOL(<ls_w>).",
-    "          <ls_w>-decision = zif_abapgit_definitions=>c_no.",
-    "        ENDLOOP.",
-    "        ls_checks-requirements-decision = zif_abapgit_definitions=>c_yes.",
-    "        ls_checks-dependencies-decision = zif_abapgit_definitions=>c_yes.",
-    "        li_repo->deserialize( is_checks = ls_checks ii_log = li_log ).",
-    "        lv_out = |{ lv_out } status={ li_log->get_status( ) };|.",
-    "      ENDIF.",
-    "    ENDIF.",
-    "  CATCH cx_root INTO DATA(lx).",
-    "    lv_out = |{ lv_out } ERR { cl_abap_classdescr=>get_class_name( lx ) }: { lx->get_text( ) };|.",
-    "ENDTRY.",
-    "LOOP AT li_log->get_messages( ) INTO DATA(ls_m) WHERE type = 'E' OR type = 'W' OR type = 'A'.",
-    "  lv_logs = lv_logs + 1.",
-    `  IF lv_logs <= ${MAX_LOG}.`,
-    "    lv_out = |{ lv_out } [{ ls_m-type }] { ls_m-obj_type } { ls_m-obj_name }: { ls_m-text };|.",
-    "  ENDIF.",
-    "ENDLOOP.",
-    "lv_out = |{ lv_out } logs={ lv_logs };|.",
-    `SELECT object, obj_name FROM tadir WHERE devclass = '${pkg}' INTO TABLE @DATA(lt_tadir).`,
-    "lv_out = |{ lv_out } tadir={ lines( lt_tadir ) };|.",
-    report("lv_out"),
-  ].join("\n") + "\n";
+// ------------------------------------------------------------ reading rows
+
+export const all = (rows, k) => rows.filter((r) => r.k === k).map((r) => r.v);
+export const one = (rows, k) => rows.find((r) => r.k === k)?.v;
+export const num = (rows, k) => {
+  const v = one(rows, k)?.trim();
+  return v !== undefined && /^-?[0-9]+$/.test(v) ? Number(v) : NaN;
+};
+const ITEM_REF = /^([A-Z0-9]{4}):([^@]*)(?:@(.*))?$/s;
+/** Rows `k` whose value is `TYPE:NAME` or `TYPE:NAME@where`. A row that is
+ *  neither is not guessed at: it throws, and the caller fails. */
+export const pairs = (rows, k) => all(rows, k).map((v) => {
+  const m = ITEM_REF.exec(v);
+  if (m === null) throw new Error(`the result row ${k}=${v.slice(0, 120)} is not TYPE:NAME`);
+  return {item: `${m[1]} ${m[2].trim()}`, where: m[3]?.trim()};
+});
+/** The rows as one line, for the log. */
+export const show = (rows) => rows.map((r) => `${r.k}=${r.v.length > 160 ? `${r.v.slice(0, 160)}...` : r.v}`).join("; ");
+
+/** The rows of an execute_abap answer, or a throw that says why there are
+ *  none: an answer that is not JSON (an older vsp, or a cut one), a snippet
+ *  that did not finish (vsp's `failure`, with the snippet's line), no value
+ *  or more than one, a result_text that is not JSON (cut), a row that is not
+ *  {K, V}, or no END_ROW at the end. Never a partial result. */
+export function rowsOf(text, step) {
+  const s = String(text);
+  const fail = (why, code) => { throw Object.assign(new Error(`${step}: ${why}`), {code}); };
+  if (s.startsWith("ERROR:")) fail(`vsp refused the call: ${s.slice(0, 600)}`, "VSP_ERROR");
+  let ans;
+  try {
+    ans = JSON.parse(s);
+  } catch {
+    fail(`the answer is not JSON (${MIN_VSP} or later answers execute_abap as JSON; a cut answer is not JSON either): ${s.slice(0, 300)}`, "NOT_JSON");
+  }
+  if (ans === null || typeof ans !== "object" || Array.isArray(ans)) fail(`the answer is not an execute_abap result: ${s.slice(0, 300)}`, "NOT_JSON");
+  if (ans.failure !== undefined || ans.success !== true) {
+    const f = ans.failure ?? {};
+    fail(`the snippet did not finish: ${f.title ?? ans.message ?? "no reason given"}`
+      + (f.line ? ` (line ${f.line} of the snippet)` : "")
+      + (Array.isArray(f.details) && f.details.length ? `; ${f.details.slice(0, 5).join("; ")}` : ""), "FAILED");
+  }
+  const rt = ans.result_text;
+  if (rt === undefined || rt === null) fail("no value came back (the snippet did not reach its RETURN_VALUE( ))", "NO_REPORT");
+  if (typeof rt !== "string") fail("more than one value came back; every snippet returns exactly one", "NO_REPORT");
+  let arr;
+  try {
+    arr = JSON.parse(rt);
+  } catch {
+    fail(`result_text is not JSON, so it may be cut: ${rt.slice(0, 300)}`, "TRUNCATED");
+  }
+  if (!Array.isArray(arr)) fail(`result_text is not the snippet's table of rows: ${rt.slice(0, 300)}`, "TRUNCATED");
+  const rows = [];
+  for (const o of arr) {
+    const k = o?.K ?? o?.k;
+    const v = o?.V ?? o?.v;
+    if (typeof k !== "string" || typeof v !== "string") fail(`result_text holds a row that is not {K, V}: ${JSON.stringify(o)?.slice(0, 200)}`, "TRUNCATED");
+    rows.push({k: k.trim(), v});
+  }
+  const last = rows.at(-1);
+  if (last === undefined || last.k !== END_ROW.k || last.v !== END_ROW.v || rows.filter((r) => r.k === END_ROW.k).length !== 1) {
+    fail(`the result has no end row, so it may be cut: ${show(rows).slice(0, 300)}`, "TRUNCATED");
+  }
+  return rows.slice(0, -1);
 }
 
-/** Step 4: SEOCLASSDF-WITH_UNIT_TESTS and the CCAU line count per class. */
+/** A JSON answer of another vsp operation (git_*, read DEVC, test). vsp
+ *  marks an error result, which this transport passes as `ERROR: <text>`;
+ *  its text is often JSON too (a refused import, a failed delete). */
+export function jsonAnswer(text, step) {
+  const s = String(text);
+  const isError = s.startsWith("ERROR:");
+  const body = isError ? s.slice(6).trim() : s.trim();
+  let json;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    throw Object.assign(new Error(`${step}: ${isError ? "vsp refused the call" : "the answer is not JSON"}: ${s.slice(0, 600)}`),
+      {code: isError ? "VSP_ERROR" : "NOT_JSON"});
+  }
+  if (json === null || typeof json !== "object") throw Object.assign(new Error(`${step}: the answer is not a JSON object: ${s.slice(0, 300)}`), {code: "NOT_JSON"});
+  return {json, isError};
+}
+
+/** One snippet, run: its rows and a printable line. */
+export async function exec(mcp, code, step) {
+  const text = await mcp.call("analyze", undefined, {type: "execute_abap", code, timeout: CALL_TIMEOUT});
+  const rows = rowsOf(text, step);
+  return {rows, message: show(rows)};
+}
+
+// ----------------------------------------------------------------- snippets
+// ASCII only, every value validated before it is interpolated.
+
+/** Step 5: SEOCLASSDF-WITH_UNIT_TESTS and the CCAU line count per class. */
 export function classCheckAbap(classes) {
+  for (const c of classes) if (!CLASS_NAME.test(c)) throw new Error(`class name ${c} cannot be put into an ABAP literal`);
   return [
+    head("check"),
+    ...OUT_DECLS,
     "DATA lt_cls TYPE string_table.",
-    "DATA lv_out TYPE string.",
     "DATA lv_wut TYPE c LENGTH 1.",
     "DATA lv_found TYPE i.",
     "DATA lt_src TYPE string_table.",
@@ -201,14 +265,14 @@ export function classCheckAbap(classes) {
     "  lv_found = sy-subrc.",
     "  lv_inc = cl_oo_classname_service=>get_ccau_name( CONV seoclsname( lv_cls ) ).",
     "  READ REPORT lv_inc INTO lt_src.",
-    "  lv_out = |{ lv_out } { lv_cls } found={ lv_found } wut={ lv_wut } ccau={ lines( lt_src ) };|.",
+    `  ${put("cls", "{ lv_cls }\\|{ lv_found }\\|{ lv_wut }\\|{ lines( lt_src ) }")}`,
     "ENDLOOP.",
-    report("lv_out"),
+    report(),
   ].join("\n") + "\n";
 }
 
-// how many rows one alert title lists; a list that is longer is counted
-// and not shown, and a check that needs the list fails rather than guess
+// how many rows one list carries; a list that is longer is counted and not
+// shown, and a check that needs the list fails rather than guess
 export const MAX_LIST = 200;
 
 export const OBJECT_ITEM = /^[A-Z0-9]{4} [A-Z0-9_/]{1,40}$/;
@@ -222,8 +286,9 @@ export function checkItems(items) {
 // A run receipt says which objects this run's import wrote into the package
 // and what each looked like right after: its TADIR identity and a version
 // stamp read on the system. Only an object in the receipt with the same
-// stamp is ever deleted, by the run's own cleanup or by `--cleanup` later.
-// The zip's object list alone never authorises a delete.
+// stamp (or a moved stamp and the same content hash) is ever deleted, by the
+// run's own cleanup or by `--cleanup` later. The zip's object list alone
+// never authorises a delete.
 
 /** The kinds of object a stamp can be read for, and from where:
  *  CLAS/INTF the newest REPOSRC UDAT+UTIME over abapGit's own include list
@@ -248,7 +313,8 @@ const STAMP_DECLARATIONS = [
   "DATA lt_incs TYPE zif_abapgit_oo_object_fnc=>ty_includes_tt.",
 ];
 
-/** ABAP that sets lv_stamp for lv_type / lv_name (empty: no stamp). */
+/** ABAP that sets lv_stamp for lv_type / lv_name (empty: no stamp). The
+ *  residue check uses it too: a deleted object must have none left. */
 const STAMP_BLOCK = [
   "CLEAR: lv_stamp, lv_max, lv_cnt, lt_incs, lv_d, lv_t.",
   "CASE lv_type.",
@@ -288,15 +354,16 @@ const STAMP_BLOCK = [
   "ENDIF.",
 ];
 
-/** The prefix of the content-hash entries in the receipt snippet's report. */
+/** The prefix of the content-hash rows in the receipt snippet's result. */
 export const RECEIPT_HASH = "h_";
 
 /** After the import: each object of the zip whose TADIR row is in the
- *  package, with its stamp. Nothing is changed. */
+ *  package, with its stamp and content hash. Nothing is changed. */
 export function receiptAbap(pkg, items) {
   checkItems(items);
   return [
-    "DATA lv_out TYPE string.",
+    head("receipt"),
+    ...OUT_DECLS,
     "DATA lt_items TYPE string_table.",
     "DATA lv_type TYPE tadir-object.",
     "DATA lv_name TYPE tadir-obj_name.",
@@ -309,23 +376,23 @@ export function receiptAbap(pkg, items) {
     "  SELECT SINGLE devclass FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
     "    INTO @DATA(lv_where).",
     "  IF sy-subrc <> 0.",
-    "    lv_out = |{ lv_out } absent={ lv_type }:{ lv_name };|.",
+    `    ${put("absent", "{ lv_type }:{ lv_name }")}`,
     `  ELSEIF lv_where <> '${pkg}'.`,
-    "    lv_out = |{ lv_out } elsewhere={ lv_type }:{ lv_name }@{ lv_where };|.",
+    `    ${put("elsewhere", "{ lv_type }:{ lv_name }@{ lv_where }")}`,
     "  ELSE.",
     ...STAMP_BLOCK.map((l) => `    ${l}`),
     "    IF lv_stamp IS INITIAL.",
-    "      lv_out = |{ lv_out } nostamp={ lv_type }:{ lv_name };|.",
+    `      ${put("nostamp", "{ lv_type }:{ lv_name }")}`,
     "    ELSE.",
-    "      lv_out = |{ lv_out } stamp={ lv_type }:{ lv_name }@{ lv_stamp };|.",
+    `      ${put("stamp", "{ lv_type }:{ lv_name }@{ lv_stamp }")}`,
     "      \" the content hash in the same dialog step as the stamp, with the",
     "      \" in-place mode's own serialisation and digest (hashItemBlock)",
     ...hashItemBlock(pkg, RECEIPT_HASH).map((l) => `      ${l}`),
     "    ENDIF.",
     "  ENDIF.",
     "ENDLOOP.",
-    "lv_out = |{ lv_out } items={ lines( lt_items ) };|.",
-    report("lv_out"),
+    put("items", "{ lines( lt_items ) }"),
+    report(),
   ].join("\n") + "\n";
 }
 
@@ -335,7 +402,8 @@ export function receiptAbap(pkg, items) {
 export function preflightAbap(pkg, items) {
   checkItems(items);
   return [
-    "DATA lv_out TYPE string.",
+    head("preflight"),
+    ...OUT_DECLS,
     "DATA lt_items TYPE string_table.",
     "DATA lv_type TYPE tadir-object.",
     "DATA lv_name TYPE tadir-obj_name.",
@@ -343,17 +411,18 @@ export function preflightAbap(pkg, items) {
     "DATA li_repo TYPE REF TO zif_abapgit_repo.",
     ...items.map((i) => `APPEND \`${i}\` TO lt_items.`),
     `SELECT COUNT(*) FROM tdevc WHERE devclass = '${pkg}' INTO @DATA(lv_devc).`,
-    "lv_out = |tdevc={ lv_devc };|.",
+    put("tdevc", "{ lv_devc }"),
     "TRY.",
     "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
     `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
     "    IF li_repo IS BOUND.",
-    "      lv_out = |{ lv_out } repo={ li_repo->get_key( ) }; repo_name={ li_repo->get_name( ) };|.",
+    `      ${put("repo", "{ li_repo->get_key( ) }")}`,
+    `      ${put("repo_name", "{ li_repo->get_name( ) }")}`,
     "    ELSE.",
-    "      lv_out = |{ lv_out } repo=none;|.",
+    `      ${put("repo", "none")}`,
     "    ENDIF.",
     "  CATCH cx_root INTO DATA(lx).",
-    "    lv_out = |{ lv_out } ERR { lx->get_text( ) };|.",
+    `    ${put("err", "{ lx->get_text( ) }")}`,
     "ENDTRY.",
     "LOOP AT lt_items INTO DATA(lv_item).",
     "  SPLIT lv_item AT space INTO lv_type lv_name.",
@@ -362,16 +431,16 @@ export function preflightAbap(pkg, items) {
     "  IF sy-subrc = 0.",
     "    lv_n = lv_n + 1.",
     `    IF lv_n <= ${MAX_LIST}.`,
-    "      lv_out = |{ lv_out } exists={ lv_type }:{ lv_name }@{ lv_where };|.",
+    `      ${put("exists", "{ lv_type }:{ lv_name }@{ lv_where }")}`,
     "    ENDIF.",
     "  ENDIF.",
     "ENDLOOP.",
-    "lv_out = |{ lv_out } existing={ lv_n };|.",
-    report("lv_out"),
+    put("existing", "{ lv_n }"),
+    report(),
   ].join("\n") + "\n";
 }
 
-/** The cleanup's content check of lv_item: abapGit serialises it now with
+/** The decision's content check of lv_item: abapGit serialises it now with
  *  the in-place mode's serializeBlock (same serialisation, same digest),
  *  every file becomes `ITEM@name=HEX` in lt_b, and the object is the
  *  receipt's when lt_b equals lt_a (the receipt's lines for the item). A
@@ -383,24 +452,28 @@ const hashCompare = (pkg) => serializeBlock(pkg, {
   onOk: ["SORT lt_a.", "SORT lt_b.", "IF lt_a = lt_b.", "  lv_same = abap_true.", "ENDIF."],
 });
 
-/** Step 7, the cleanup, in one snippet so nothing changes between the
- *  check and the delete:
+/** Step 7a, the cleanup, in ONE snippet so nothing changes between the
+ *  check and the delete (vsp's git_delete_objects cannot be used here: it
+ *  takes no expected version per object and no expected repository key,
+ *  so an object replaced between a decision and its call would be deleted):
  *   a. the package's repository, if any, must be the tool's own by name and,
  *      when `expectedKey` is given, the one this run imported into -- else
- *      nothing at all is deleted;
- *   b. each object of the zip whose TADIR row is in this package goes into
- *      one list for zcl_abapgit_objects=>delete (abapGit's object layer,
- *      which deletes them one by one in dependency order and commits each);
- *      an object of the zip in another package, or one that is not there,
- *      is reported and not touched; nothing outside the zip's list is ever
- *      handed to it;
- *   c. the repository row is deleted with zcl_abapgit_repo_srv->delete,
- *      which removes the persisted repository and no object;
+ *      `go` is not set and nothing at all is deleted;
+ *   b. each receipt entry whose TADIR row is in this package and whose stamp
+ *      is unchanged -- or moved, with the receipt's content hashes -- goes
+ *      into one list for zcl_abapgit_objects=>delete (abapGit's object
+ *      layer, dependency order, a commit per object), in the same step; an
+ *      entry in another package, or one that is not there, is reported and
+ *      not touched; a changed one is kept; nothing outside the receipt is
+ *      ever handed to it;
+ *   c. the repository row is deleted (zcl_abapgit_repo_srv->delete, which
+ *      removes the persisted repository and no object) only when `dropRepo`:
+ *      this run's import created it, and (a) just checked it is that row;
  *   d. the package is deleted (abapGit's DEVC object, which deletes only an
- *      empty package) only if TADIR holds nothing else under it and TDEVC
- *      has no subpackage of it; otherwise it is kept and what is there is
- *      listed. Subpackages are never deleted. */
-export function cleanupAbap(pkg, entries, expectedKey) {
+ *      empty package) only if no repository is left registered for it,
+ *      TADIR holds nothing else under it and TDEVC has no subpackage of it.
+ *      Subpackages are never deleted. */
+export function cleanupAbap(pkg, entries, expectedKey, dropRepo = false) {
   const items = entries.map((e) => e.item);
   checkItems(items);
   for (const e of entries) if (!STAMP.test(e.stamp ?? "")) throw new Error(`not a stamp: ${e.stamp} (${e.item})`);
@@ -416,17 +489,22 @@ export function cleanupAbap(pkg, entries, expectedKey) {
   if (expectedKey !== undefined && expectedKey !== "" && !REPO_KEY.test(expectedKey)) throw new Error(`not a repository key: ${expectedKey}`);
   const keyCheck = expectedKey === undefined ? "" : `li_repo->get_key( ) <> '${expectedKey}' OR `;
   return [
-    "DATA lv_out TYPE string.",
+    head("cleanup"),
+    ...OUT_DECLS,
     "DATA lv_go TYPE abap_bool VALUE abap_true.",
+    `DATA lv_drop TYPE abap_bool VALUE ${dropRepo === true ? "abap_true" : "abap_false"}.`,
+    "DATA lv_gone TYPE abap_bool.",
+    "DATA lv_logs TYPE i.",
+    "DATA lt_tadir TYPE zif_abapgit_definitions=>ty_tadir_tt.",
+    "DATA ls_tadir TYPE zif_abapgit_definitions=>ty_tadir.",
+    "DATA lv_key TYPE string.",
+    "DATA(li_log) = CAST zif_abapgit_log( NEW zcl_abapgit_log( ) ).",
     "DATA lt_items TYPE string_table.",
     "DATA lv_type TYPE tadir-object.",
     "DATA lv_name TYPE tadir-obj_name.",
-    "DATA lt_tadir TYPE zif_abapgit_definitions=>ty_tadir_tt.",
-    "DATA ls_tadir TYPE zif_abapgit_definitions=>ty_tadir.",
-    "DATA lv_key TYPE zif_abapgit_persistence=>ty_value.",
     "DATA lv_n TYPE i.",
+    "DATA lv_del TYPE i.",
     "DATA li_repo TYPE REF TO zif_abapgit_repo.",
-    "DATA(li_log) = CAST zif_abapgit_log( NEW zcl_abapgit_log( ) ).",
     "DATA lt_stamps TYPE string_table.",
     "DATA lv_want TYPE string.",
     "DATA lv_same TYPE abap_bool.",
@@ -446,11 +524,17 @@ export function cleanupAbap(pkg, entries, expectedKey) {
     "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
     `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
     "  CATCH cx_root INTO DATA(lx).",
-    "    lv_out = |ERR repository lookup: { lx->get_text( ) };|.",
+    `    ${put("err", "repository lookup: { lx->get_text( ) }")}`,
     "    lv_go = abap_false.",
     "ENDTRY.",
+    "IF li_repo IS BOUND.",
+    `  ${put("repo", "{ li_repo->get_key( ) }")}`,
+    `  ${put("repo_name", "{ li_repo->get_name( ) }")}`,
+    "ELSE.",
+    `  ${put("repo", "none")}`,
+    "ENDIF.",
     `IF li_repo IS BOUND AND ( ${keyCheck}li_repo->get_name( ) <> '${ownRepoName(pkg)}' ).`,
-    "  lv_out = |{ lv_out } ERR refused: repository { li_repo->get_key( ) } named { li_repo->get_name( ) } is not the one this run imported into;|.",
+    `  ${put("err", "refused: repository { li_repo->get_key( ) } named { li_repo->get_name( ) } is not the one this run imported into")}`,
     "  lv_go = abap_false.",
     "ENDIF.",
     "IF lv_go = abap_true.",
@@ -461,9 +545,9 @@ export function cleanupAbap(pkg, entries, expectedKey) {
     "    SELECT SINGLE * FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
     "      INTO @DATA(ls_db).",
     "    IF sy-subrc <> 0.",
-    "      lv_out = |{ lv_out } absent={ lv_type }:{ lv_name };|.",
+    `      ${put("absent", "{ lv_type }:{ lv_name }")}`,
     `    ELSEIF ls_db-devclass <> '${pkg}'.`,
-    "      lv_out = |{ lv_out } elsewhere={ lv_type }:{ lv_name }@{ ls_db-devclass };|.",
+    `      ${put("elsewhere", "{ lv_type }:{ lv_name }@{ ls_db-devclass }")}`,
     "    ELSE.",
     ...STAMP_BLOCK.map((l) => `      ${l}`),
     "      lv_same = abap_true.",
@@ -484,80 +568,59 @@ export function cleanupAbap(pkg, entries, expectedKey) {
     ...hashCompare(pkg).map((l) => `          ${l}`),
     "        ENDIF.",
     "        IF lv_same = abap_true.",
-    "          lv_out = |{ lv_out } rehashed={ lv_type }:{ lv_name }@{ lv_stamp };|.",
+    `          ${put("rehashed", "{ lv_type }:{ lv_name }@{ lv_stamp }")}`,
     "        ELSE.",
-    "          lv_out = |{ lv_out } changed={ lv_type }:{ lv_name }@{ lv_stamp };|.",
+    `          ${put("changed", "{ lv_type }:{ lv_name }@{ lv_stamp }")}`,
     "          IF lt_a IS NOT INITIAL.",
-    "            lv_out = |{ lv_out } hashdiff={ lv_type }:{ lv_name };|.",
+    `            ${put("hashdiff", "{ lv_type }:{ lv_name }")}`,
     "          ENDIF.",
     "        ENDIF.",
     "      ENDIF.",
     "      IF lv_same = abap_true.",
+    "        lv_del = lv_del + 1.",
+    `        ${put("delete", "{ lv_type }:{ lv_name }")}`,
     "        CLEAR ls_tadir.",
     "        MOVE-CORRESPONDING ls_db TO ls_tadir.",
     "        APPEND ls_tadir TO lt_tadir.",
     "      ENDIF.",
     "    ENDIF.",
     "  ENDLOOP.",
-    "  lv_out = |{ lv_out } to_delete={ lines( lt_tadir ) };|.",
-    "  TRY.",
-    "      zcl_abapgit_objects=>delete( it_tadir = lt_tadir ii_log = li_log ).",
-    "    CATCH cx_root INTO DATA(lx2).",
-    "      lv_out = |{ lv_out } ERR delete: { lx2->get_text( ) };|.",
-    "  ENDTRY.",
-    "  lv_n = 0.",
-    "  LOOP AT li_log->get_messages( ) INTO DATA(ls_m) WHERE type = 'E' OR type = 'A'.",
-    "    lv_n = lv_n + 1.",
-    `    IF lv_n <= ${MAX_LOG}.`,
-    "      lv_out = |{ lv_out } [{ ls_m-type }] { ls_m-obj_type } { ls_m-obj_name }: { ls_m-text };|.",
-    "    ENDIF.",
-    "  ENDLOOP.",
-    "  IF li_repo IS BOUND.",
-    "    lv_key = li_repo->get_key( ).",
+    "  \" the delete, in the step that checked: exactly what was decided above",
+    "  IF lt_tadir IS NOT INITIAL.",
     "    TRY.",
-    "        zcl_abapgit_repo_srv=>get_instance( )->delete( li_repo ).",
-    "        COMMIT WORK.",
-    "        lv_out = |{ lv_out } repo_deleted={ lv_key };|.",
-    "      CATCH cx_root INTO DATA(lx3).",
-    "        lv_out = |{ lv_out } ERR repo delete: { lx3->get_text( ) };|.",
+    "        zcl_abapgit_objects=>delete( it_tadir = lt_tadir ii_log = li_log ).",
+    "      CATCH cx_root INTO DATA(lx2).",
+    `        ${put("err", "delete: { lx2->get_text( ) }")}`,
     "    ENDTRY.",
     "  ENDIF.",
-    "ENDIF.",
-    // what is left, read from the database whatever happened above
-    "DATA lv_repos TYPE i.",
-    "IF lv_key IS NOT INITIAL.",
-    "  DATA(lv_tab) = zcl_abapgit_persistence_db=>c_tabname.",
-    "  SELECT COUNT(*) FROM (lv_tab) WHERE type = @zcl_abapgit_persistence_db=>c_type_repo",
-    "    AND value = @lv_key INTO @lv_repos.",
-    "ENDIF.",
-    "lv_out = |{ lv_out } repo_left={ lv_repos };|.",
-    "DATA lv_items_left TYPE i.",
-    "LOOP AT lt_items INTO lv_item.",
-    "  SPLIT lv_item AT space INTO lv_type lv_name.",
-    "  SELECT SINGLE devclass FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
-    `    AND devclass = '${pkg}' INTO @DATA(lv_dummy).`,
-    "  IF sy-subrc = 0.",
-    "    lv_items_left = lv_items_left + 1.",
-    "    lv_out = |{ lv_out } item_left={ lv_type }:{ lv_name };|.",
+    "  LOOP AT li_log->get_messages( ) INTO DATA(ls_m) WHERE type = 'E' OR type = 'A'.",
+    "    lv_logs = lv_logs + 1.",
+    `    IF lv_logs <= ${MAX_LOG}.`,
+    `      ${put("log", "{ ls_m-type }\\|{ ls_m-obj_type } { ls_m-obj_name }: { ls_m-text }")}`,
+    "    ENDIF.",
+    "  ENDLOOP.",
+    `  ${put("logs", "{ lv_logs }")}`,
+    "  IF li_repo IS BOUND.",
+    "    lv_key = li_repo->get_key( ).",
+    "    IF lv_drop = abap_true.",
+    "      TRY.",
+    "          zcl_abapgit_repo_srv=>get_instance( )->delete( li_repo ).",
+    "          COMMIT WORK.",
+    "          lv_gone = abap_true.",
+    `          ${put("repo_deleted", "{ lv_key }")}`,
+    "        CATCH cx_root INTO DATA(lx3).",
+    `          ${put("err", "repo delete: { lx3->get_text( ) }")}`,
+    "      ENDTRY.",
+    "    ELSE.",
+    `      ${put("repo_kept", "{ lv_key }")}`,
+    "    ENDIF.",
     "  ENDIF.",
-    "ENDLOOP.",
-    "lv_out = |{ lv_out } items_left={ lv_items_left };|.",
+    "ENDIF.",
     `SELECT object, obj_name FROM tadir WHERE devclass = '${pkg}'`,
     `  AND NOT ( object = 'DEVC' AND obj_name = '${pkg}' ) INTO TABLE @DATA(lt_rest).`,
-    "lv_out = |{ lv_out } others={ lines( lt_rest ) };|.",
-    "lv_n = 0.",
-    "LOOP AT lt_rest INTO DATA(ls_r).",
-    "  lv_n = lv_n + 1.",
-    `  IF lv_n <= ${MAX_LIST}.`,
-    "    lv_out = |{ lv_out } other={ ls_r-object }:{ ls_r-obj_name };|.",
-    "  ENDIF.",
-    "ENDLOOP.",
     `SELECT devclass FROM tdevc WHERE parentcl = '${pkg}' INTO TABLE @DATA(lt_children).`,
-    "lv_out = |{ lv_out } children={ lines( lt_children ) };|.",
-    "LOOP AT lt_children INTO DATA(ls_child).",
-    "  lv_out = |{ lv_out } child={ ls_child-devclass };|.",
-    "ENDLOOP.",
-    "IF lv_go = abap_true AND lt_rest IS INITIAL AND lt_children IS INITIAL.",
+    "IF lv_go = abap_true AND ( li_repo IS NOT BOUND OR lv_gone = abap_true )",
+    "    AND lt_rest IS INITIAL AND lt_children IS INITIAL.",
     "  CLEAR: ls_tadir, lt_tadir.",
     `  SELECT SINGLE * FROM tadir WHERE pgmid = 'R3TR' AND object = 'DEVC' AND obj_name = '${pkg}' INTO @DATA(ls_devc).`,
     "  IF sy-subrc = 0.",
@@ -572,110 +635,195 @@ export function cleanupAbap(pkg, entries, expectedKey) {
     "  TRY.",
     "      zcl_abapgit_objects=>delete( it_tadir = lt_tadir ).",
     "      COMMIT WORK.",
+    `      ${put("package_deleted", "X")}`,
     "    CATCH cx_root INTO DATA(lx4).",
-    "      lv_out = |{ lv_out } ERR package delete: { lx4->get_text( ) };|.",
+    `      ${put("err", "package delete: { lx4->get_text( ) }")}`,
     "  ENDTRY.",
     "ENDIF.",
+    put("go", "{ lv_go }"),
+    put("to_delete", "{ lv_del }"),
+    put("items", "{ lines( lt_items ) }"),
+    report(),
+  ].join("\n") + "\n";
+}
+
+/** Step 7b, what is left, read from the database after the cleanup:
+ *  the repository rows with this run's key, the receipt's objects still in
+ *  the package's TADIR, the REPOSRC / DD rows of a receipt object that has
+ *  no TADIR row any more (`stamp_left`: STAMP_BLOCK finds a stamp, so its
+ *  source or dictionary rows survived), anything else in the package, its
+ *  subpackages, and the package itself. Reads only. */
+export function residueAbap(pkg, items, key) {
+  checkItems(items);
+  if (key !== undefined && key !== "" && !REPO_KEY.test(key)) throw new Error(`not a repository key: ${key}`);
+  return [
+    head("residue"),
+    ...OUT_DECLS,
+    "DATA lt_items TYPE string_table.",
+    "DATA lv_type TYPE tadir-object.",
+    "DATA lv_name TYPE tadir-obj_name.",
+    "DATA lv_n TYPE i.",
+    "DATA lv_repos TYPE i.",
+    "DATA lv_items_left TYPE i.",
+    "DATA lv_key TYPE zif_abapgit_persistence=>ty_value.",
+    "DATA li_repo TYPE REF TO zif_abapgit_repo.",
+    ...STAMP_DECLARATIONS,
+    ...items.map((i) => `APPEND \`${i}\` TO lt_items.`),
+    ...(key ? [`lv_key = '${key}'.`,
+      "DATA(lv_tab) = zcl_abapgit_persistence_db=>c_tabname.",
+      "SELECT COUNT(*) FROM (lv_tab) WHERE type = @zcl_abapgit_persistence_db=>c_type_repo",
+      "  AND value = @lv_key INTO @lv_repos."] : []),
+    put("repo_left", "{ lv_repos }"),
+    "TRY.",
+    "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
+    `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
+    "    IF li_repo IS BOUND.",
+    `      ${put("repo", "{ li_repo->get_key( ) }")}`,
+    `      ${put("repo_name", "{ li_repo->get_name( ) }")}`,
+    "    ELSE.",
+    `      ${put("repo", "none")}`,
+    "    ENDIF.",
+    "  CATCH cx_root INTO DATA(lx).",
+    `    ${put("err", "repository lookup: { lx->get_text( ) }")}`,
+    "ENDTRY.",
+    "LOOP AT lt_items INTO DATA(lv_item).",
+    "  SPLIT lv_item AT space INTO lv_type lv_name.",
+    "  SELECT SINGLE devclass FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
+    "    INTO @DATA(lv_where).",
+    "  IF sy-subrc = 0.",
+    `    IF lv_where = '${pkg}'.`,
+    "      lv_items_left = lv_items_left + 1.",
+    `      ${put("item_left", "{ lv_type }:{ lv_name }")}`,
+    "    ENDIF.",
+    "  ELSE.",
+    ...STAMP_BLOCK.map((l) => `    ${l}`),
+    "    IF lv_stamp IS NOT INITIAL.",
+    `      ${put("stamp_left", "{ lv_type }:{ lv_name }@{ lv_stamp }")}`,
+    "    ENDIF.",
+    "  ENDIF.",
+    "ENDLOOP.",
+    put("items_left", "{ lv_items_left }"),
+    `SELECT object, obj_name FROM tadir WHERE devclass = '${pkg}'`,
+    `  AND NOT ( object = 'DEVC' AND obj_name = '${pkg}' ) INTO TABLE @DATA(lt_rest).`,
+    put("others", "{ lines( lt_rest ) }"),
+    "LOOP AT lt_rest INTO DATA(ls_r).",
+    "  lv_n = lv_n + 1.",
+    `  IF lv_n <= ${MAX_LIST}.`,
+    `    ${put("other", "{ ls_r-object }:{ ls_r-obj_name }")}`,
+    "  ENDIF.",
+    "ENDLOOP.",
+    `SELECT devclass FROM tdevc WHERE parentcl = '${pkg}' INTO TABLE @DATA(lt_children).`,
+    put("children", "{ lines( lt_children ) }"),
+    "LOOP AT lt_children INTO DATA(ls_child).",
+    `  ${put("child", "{ ls_child-devclass }")}`,
+    "ENDLOOP.",
     `SELECT COUNT(*) FROM tdevc WHERE devclass = '${pkg}' INTO @DATA(lv_devc).`,
-    "lv_out = |{ lv_out } tdevc_left={ lv_devc };|.",
-    report("lv_out"),
+    put("tdevc_left", "{ lv_devc }"),
+    report(),
   ].join("\n") + "\n";
 }
 
 // ------------------------------------------------------------------- parsing
 
-/** The framed message of a snippet's fail( ), or undefined when vsp's text
- *  carries none (the program did not reach its last line). A message whose
- *  end marker is missing is returned as truncated, and a caller fails it. */
-export function reportOf(text) {
-  const s = String(text);
-  const i = s.indexOf(MARK_OPEN);
-  if (i < 0) return undefined;
-  const j = s.indexOf(MARK_CLOSE, i);
-  if (j < 0) return {message: s.slice(i + MARK_OPEN.length).split("\n")[0], truncated: true};
-  return {message: s.slice(i + MARK_OPEN.length, j), truncated: false};
-}
-
-export const field = (msg, name) => new RegExp(`(?:^|\\s|;)${name}=([^;\\s]*)`).exec(msg)?.[1];
-
-export function parseImport(msg) {
-  const logs = [...msg.matchAll(/\[([EWA])\] ([^;]*);/g)].map((m) => ({type: m[1], text: m[2].trim()}));
-  const err = /ERR ([^;]*);/.exec(msg)?.[1];
+/** The in-place deploy snippet's import report (status, repository, log). */
+export function parseImport(rows) {
   return {
-    files: Number(field(msg, "files") ?? NaN),
-    repo: field(msg, "repo"),
-    status: field(msg, "status"),
-    err,
-    logs,
-    logCount: Number(field(msg, "logs") ?? NaN),
-    tadir: Number(field(msg, "tadir") ?? NaN),
+    files: num(rows, "files"),
+    repo: one(rows, "repo"),
+    status: one(rows, "status"),
+    err: one(rows, "err"),
+    logs: all(rows, "log").map((v) => {
+      const i = v.indexOf("|");
+      return {type: v.slice(0, i), text: v.slice(i + 1).trim()};
+    }),
+    logCount: num(rows, "logs"),
+    tadir: num(rows, "tadir"),
   };
 }
 
-export const pairs = (msg, name) => [...msg.matchAll(new RegExp(`(?:^|\\s|;)${name}=([A-Z0-9]+):([^;@]*)(?:@([^;]*))?;`, "g"))]
-  .map((m) => ({item: `${m[1]} ${m[2].trim()}`, where: m[3]?.trim()}));
-
-export function parsePreflight(msg) {
+export function parsePreflight(rows) {
   return {
-    err: /ERR ([^;]*);/.exec(msg)?.[1],
-    tdevc: Number(field(msg, "tdevc") ?? NaN),
-    repo: field(msg, "repo"),
-    repoName: /repo_name=([^;]*);/.exec(msg)?.[1]?.trim(),
-    existing: Number(field(msg, "existing") ?? NaN),
-    exists: pairs(msg, "exists"),
+    err: one(rows, "err"),
+    tdevc: num(rows, "tdevc"),
+    repo: one(rows, "repo"),
+    repoName: one(rows, "repo_name")?.trim(),
+    existing: num(rows, "existing"),
+    exists: pairs(rows, "exists"),
   };
 }
 
-export function parseClassCheck(msg) {
+export function parseClassCheck(rows) {
   const out = new Map();
-  for (const m of msg.matchAll(/([A-Z0-9_/]+) found=(\d+) wut=(\S*) ccau=(\d+);/g)) {
-    out.set(m[1], {found: m[2] === "0", wut: m[3] === "X", ccau: Number(m[4])});
+  for (const v of all(rows, "cls")) {
+    const m = /^([A-Z0-9_/]+)\|(\d+)\|(\S*)\|(\d+)$/.exec(v.trim());
+    if (m !== null) out.set(m[1], {found: m[2] === "0", wut: m[3] === "X", ccau: Number(m[4])});
   }
   return out;
 }
 
-export function parseReceipt(msg) {
+export function parseReceipt(rows) {
   return {
-    // one entry per object: a report that reaches us more than once (vsp
-    // repeats the alert text) must not hand abapGit the same object twice
-    stamped: [...new Map(pairs(msg, "stamp").map((p) => [p.item, {item: p.item, stamp: p.where}])).values()],
-    nostamp: pairs(msg, "nostamp").map((p) => p.item),
-    absent: pairs(msg, "absent").map((p) => p.item),
-    elsewhere: pairs(msg, "elsewhere"),
-    items: Number(field(msg, "items") ?? NaN),
+    // one entry per object: abapGit must never be handed the same object twice
+    stamped: [...new Map(pairs(rows, "stamp").map((p) => [p.item, {item: p.item, stamp: p.where}])).values()],
+    nostamp: pairs(rows, "nostamp").map((p) => p.item),
+    absent: pairs(rows, "absent").map((p) => p.item),
+    elsewhere: pairs(rows, "elsewhere"),
+    items: num(rows, "items"),
   };
 }
 
-export function parseCleanup(msg) {
+export function parseCleanup(rows) {
   return {
-    err: [...msg.matchAll(/ERR ([^;]*);/g)].map((m) => m[1]),
-    logs: [...msg.matchAll(/\[([EA])\] ([^;]*);/g)].map((m) => `[${m[1]}] ${m[2].trim()}`),
-    toDelete: Number(field(msg, "to_delete") ?? NaN),
-    absent: pairs(msg, "absent").map((p) => p.item),
-    changed: pairs(msg, "changed"),
+    err: all(rows, "err"),
+    logs: all(rows, "log").map((v) => { const i = v.indexOf("|"); return `[${v.slice(0, i)}] ${v.slice(i + 1).trim()}`; }),
+    repoDeleted: one(rows, "repo_deleted"),
+    repoKept: one(rows, "repo_kept"),
+    packageDeleted: one(rows, "package_deleted") === "X",
+    repo: one(rows, "repo"),
+    repoName: one(rows, "repo_name")?.trim(),
+    go: one(rows, "go") === "X",
+    goSeen: one(rows, "go") !== undefined,
+    toDelete: num(rows, "to_delete"),
+    items: num(rows, "items"),
+    delete: pairs(rows, "delete").map((p) => p.item),
+    absent: pairs(rows, "absent").map((p) => p.item),
+    changed: pairs(rows, "changed"),
     // the stamp moved and the content is the receipt's: deleted as ours
-    rehashed: pairs(msg, "rehashed"),
+    rehashed: pairs(rows, "rehashed"),
     // the stamp moved, the receipt had hashes and the content differs
-    hashdiff: pairs(msg, "hashdiff").map((p) => p.item),
+    hashdiff: pairs(rows, "hashdiff").map((p) => p.item),
     // abapGit could not serialise the object to compare it
-    hashFail: parseHashes(msg, "h_").fail,
-    elsewhere: pairs(msg, "elsewhere"),
-    repoLeft: Number(field(msg, "repo_left") ?? NaN),
-    itemsLeft: Number(field(msg, "items_left") ?? NaN),
-    itemLeft: pairs(msg, "item_left").map((p) => p.item),
-    others: Number(field(msg, "others") ?? NaN),
-    other: pairs(msg, "other").map((p) => p.item),
-    children: Number(field(msg, "children") ?? NaN),
-    child: [...msg.matchAll(/child=([^;]*);/g)].map((m) => m[1].trim()),
-    tdevcLeft: Number(field(msg, "tdevc_left") ?? NaN),
+    hashFail: parseHashes(rows, "h_").fail,
+    elsewhere: pairs(rows, "elsewhere"),
   };
 }
 
-/** ADT's unit result as vsp returns it: classes[].testMethods[], a failure
- *  carries alerts[] with a title. `error` is set when the text is not JSON
- *  or the class is not in it: no evidence, which is never a pass. */
+export function parseResidue(rows) {
+  return {
+    err: all(rows, "err"),
+    repoLeft: num(rows, "repo_left"),
+    repo: one(rows, "repo"),
+    repoName: one(rows, "repo_name")?.trim(),
+    itemsLeft: num(rows, "items_left"),
+    itemLeft: pairs(rows, "item_left").map((p) => p.item),
+    stampLeft: pairs(rows, "stamp_left"),
+    others: num(rows, "others"),
+    other: pairs(rows, "other").map((p) => p.item),
+    children: num(rows, "children"),
+    child: all(rows, "child").map((c) => c.trim()),
+    tdevcLeft: num(rows, "tdevc_left"),
+  };
+}
+
+/** vsp's ABAP Unit report (ok, counts, classes[].testMethods[]; a failure
+ *  carries alerts[] with a title). `error` is set when the text is not that
+ *  JSON, when its counts do not match the methods it lists, or when the
+ *  class is not in it: no evidence, which is never a pass. A run vsp calls
+ *  not ok with no failure behind it (no method ran, a class not run) is a
+ *  failure too. */
 export function parseUnit(text, className) {
   const s = String(text);
+  if (s.startsWith("ERROR:")) return {methods: 0, failing: [], error: `the unit run was refused: ${s.slice(0, 300)}`};
   const i = s.indexOf("{");
   let json;
   try {
@@ -684,10 +832,19 @@ export function parseUnit(text, className) {
   } catch {
     return {methods: 0, failing: [], error: `unit result is not JSON: ${s.slice(0, 200)}`};
   }
-  const classes = (Array.isArray(json.classes) ? json.classes : [])
-    .filter((c) => String(c.parentName ?? "").toUpperCase() === className);
+  if (typeof json?.ok !== "boolean" || typeof json?.counts?.methods !== "number") {
+    return {methods: 0, failing: [], error: `the unit result is not vsp's ABAP Unit report (ok, counts; ${MIN_VSP}): ${s.slice(0, 200)}`};
+  }
+  if (json.onlyFailures === true) return {methods: 0, failing: [], error: "the unit result lists failures only; the method comparison needs every method"};
+  const listedAll = Array.isArray(json.classes) ? json.classes : [];
+  const listed = listedAll.reduce((n, c) => n + (Array.isArray(c?.testMethods) ? c.testMethods.length : 0), 0);
+  if (listed !== json.counts.methods) {
+    return {methods: 0, failing: [], error: `the unit result counts ${json.counts.methods} test method(s) and lists ${listed}`};
+  }
+  const classes = listedAll.filter((c) => String(c?.parentName ?? "").toUpperCase() === className);
   if (classes.length === 0) {
-    return {methods: 0, failing: [], error: `the unit result names no test class of ${className}`};
+    return {methods: 0, failing: [], error: `the unit result names no test class of ${className}`
+      + (json.ok === false && json.note ? ` (${json.note})` : "")};
   }
   const failing = [];
   const names = [];
@@ -710,6 +867,10 @@ export function parseUnit(text, className) {
         failing.push({method: `${c.name}->${m.name}`, title: m.alerts.map((a) => a.title).join(" | ")});
       }
     }
+  }
+  for (const n of json.notRunClasses ?? []) failing.push({method: `${n} (class)`, title: "not run"});
+  if (json.ok === false && failing.length === 0) {
+    failing.push({method: `${className} (run)`, title: `vsp reports the run not ok${json.note ? `: ${json.note}` : ""}`});
   }
   return {methods: names.length, names, nameless, failing};
 }
@@ -823,22 +984,6 @@ export function buildZip(folder, {unit: unitName, manifest, withPackageXml = tru
 
 // --------------------------------------------------------------------- run
 
-export async function exec(mcp, code, step) {
-  const text = await mcp.call("analyze", undefined, {type: "execute_abap", code});
-  const r = reportOf(text);
-  if (r === undefined) {
-    throw Object.assign(new Error(`${step}: the system sent no report (the snippet did not reach its fail( )): `
-      + String(text).slice(0, 600)), {code: "NO_REPORT"});
-  }
-  if (r.truncated) {
-    throw Object.assign(new Error(`${step}: the report has no end marker, so it may be cut: ${r.message.slice(0, 300)}`),
-      {code: "TRUNCATED"});
-  }
-  return r;
-}
-
-/** What the package holds, read and checked for completeness. Throws when
- *  the answer cannot be relied on. */
 export const listed = (list) => list.map((o) => `    ${o}`).join("\n");
 
 /** Step 2: refusals before anything is written. The package must not
@@ -846,11 +991,11 @@ export const listed = (list) => list.map((o) => `    ${o}`).join("\n");
  *  yet, in any package: an import would take it over. */
 export async function preflight(mcp, pkg, items) {
   const r = await exec(mcp, preflightAbap(pkg, items), "preflight");
-  const p = parsePreflight(r.message);
+  const p = parsePreflight(r.rows);
   const refusals = [];
   if (p.err !== undefined) refusals.push(`refused: preflight: ${p.err}`);
   if (Number.isNaN(p.tdevc) || p.repo === undefined || Number.isNaN(p.existing)) {
-    return [`refused: preflight: the report is incomplete: ${r.message.trim()}`];
+    return [`refused: preflight: the result is incomplete: ${r.message}`];
   }
   if (p.tdevc > 0 || p.repo !== "none") {
     refusals.push(`refused: package ${pkg} exists`
@@ -883,23 +1028,23 @@ export function readReceipt(file) {
   return JSON.parse(readFileSync(file, "utf8"));
 }
 
-/** The receipt's entries with their content hashes, from the same report
+/** The receipt's entries with their content hashes, from the same result
  *  as the stamps (the receipt snippet serialised each object in the step
  *  that read its stamp). An XML file also gets `cx`, the SHA-256 of its
  *  canonical element tree, read back by chunks that must carry the reported
  *  hash (so it is that version): the cleanup uses it to tell abapGit
  *  re-writing an XML file from somebody editing it. An object abapGit could
- *  not hash, or whose report is incomplete, keeps no hash and is decided by
+ *  not hash, or whose result is incomplete, keeps no hash and is decided by
  *  its stamp alone, as before; a file that cannot be read back keeps no
  *  `cx` and is compared by bytes only. Neither fails the run: the hashes
  *  only ever add a reason to delete. */
-export async function withHashes(mcp, pkg, entries, message, log = () => {}) {
-  const h = collectHashes(parseHashes(message, RECEIPT_HASH), entries.map((e) => e.item));
+export async function withHashes(mcp, pkg, entries, rows, log = () => {}) {
+  const h = collectHashes(parseHashes(rows, RECEIPT_HASH), entries.map((e) => e.item));
   const out = [];
   for (const e of entries) {
     const got = h.byItem.get(e.item);
     if (got === undefined) {
-      log(`receipt: no content hash for ${e.item} (${h.fail.find((f) => f.item === e.item)?.text ?? "the report is incomplete"}); it is decided by its stamp alone`);
+      log(`receipt: no content hash for ${e.item} (${h.fail.find((f) => f.item === e.item)?.text ?? "the result is incomplete"}); it is decided by its stamp alone`);
       out.push(e);
       continue;
     }
@@ -926,7 +1071,7 @@ export async function withHashes(mcp, pkg, entries, message, log = () => {}) {
  *  files abapGit serialises now are hashed; when every file that differs is
  *  XML and its canonical element tree equals the one the receipt recorded
  *  (`cx`), and the set of files is the same, the object's expected hashes
- *  become the current ones, and the cleanup snippet re-checks them in its own
+ *  become the current ones, and the decision snippet re-checks them in its own
  *  step. Anything else (a source file differs, a file came or went, no `cx`,
  *  a file that is not one well-formed tree, a read that fails) leaves the
  *  entry as it was: kept, a foreign edit. */
@@ -959,26 +1104,58 @@ export async function acceptCanonicalXml(mcp, pkg, entries, names, log = () => {
   return {entries: next, accepted};
 }
 
-/** Step 7: delete the receipt's objects that are unchanged, the repository
- *  row, and the package if nothing else is in it (cleanupAbap says how).
- *  `entries` are the receipt's stamped objects; with none, no object is
- *  deleted. Returns the problems; anything left is one. */
-export async function cleanup(mcp, pkg, entries, {expectedKey, log = () => {}} = {}) {
+/** vsp's `read DEVC <pkg> {inventory}`: the package's TADIR objects (its own
+ *  entry left out), subpackages and abapGit repositories, or a throw when
+ *  the answer is not that (or says it is incomplete). */
+export async function inventory(mcp, pkg) {
+  const {json, isError} = jsonAnswer(await mcp.call("read", `DEVC ${pkg}`, {inventory: true}), "inventory");
+  if (isError) throw new Error(`inventory: vsp answered an error: ${JSON.stringify(json).slice(0, 300)}`);
+  // both lists must be there; null is how vsp (Go) writes an empty one
+  const list = (k) => Object.hasOwn(json, k) && (json[k] === null || Array.isArray(json[k]));
+  if (!list("objects") || !list("subpackages")) throw new Error(`inventory: the answer has no objects or subpackages list: ${JSON.stringify(json).slice(0, 200)}`);
+  if (json.objects_truncated || json.subpackages_truncated) throw new Error("inventory: the answer is truncated");
+  if (!Array.isArray(json.abapgit_repos)) {
+    throw new Error(`inventory: the abapGit repositories were not checked${json.skipped?.length ? ` (${json.skipped.join("; ")})` : ""}`);
+  }
+  return {
+    objects: (json.objects ?? []).map((o) => `${String(o.type).trim()} ${String(o.name).trim()}`).filter((o) => o !== `DEVC ${pkg}`).sort(),
+    subpackages: (json.subpackages ?? []).map((s) => String(s.name).trim()).sort(),
+    repos: json.abapgit_repos.map((r) => String(r.key).trim()),
+  };
+}
+
+/** Step 7: the cleanup snippet decides and deletes in one dialog step
+ *  (cleanupAbap: stamps, content hashes and the repository key checked where
+ *  the delete happens) -- the repository row only when `createdKey` names
+ *  this run's own -- then the residue is read twice (our count and vsp's
+ *  inventory). `entries` are the receipt's stamped objects; with none, no
+ *  object is deleted. Returns the problems; anything left is one. */
+export async function cleanup(mcp, pkg, entries, {expectedKey, createdKey, log = () => {}} = {}) {
   // without the key of this run's import the repository cannot be told from
   // one that appeared since; the snippet then refuses any repository at all
   if (expectedKey === undefined) expectedKey = "";
+  const dropRepo = createdKey !== undefined && REPO_KEY.test(createdKey) && createdKey === expectedKey;
   const unhashed = entries.filter((e) => !(e.files?.length > 0));
   if (unhashed.length > 0) {
     log(`cleanup: ${unhashed.length === entries.length ? "the receipt carries" : `${unhashed.length} receipt entr(ies) carry`} no content hashes `
       + "(written by an older version, or an object that could not be hashed): decided by the version stamp alone, as before");
   }
-  let r;
+  const problems = [];
   let c;
   const accepted = [];
+  // errors and abapGit log lines of every call count, not only the last's
+  const seen = [];
+  const check = (x, r) => {
+    if (!x.goSeen || x.items !== entries.length || x.toDelete !== x.delete.length) throw new Error(`cleanup: the result is incomplete: ${r.message}`);
+    seen.push(...x.err.map((e) => `cleanup: ${e}`), ...x.logs.map((l) => `cleanup log ${l}`));
+    if (x.repoDeleted) log(`cleanup: repository ${x.repoDeleted} (${ownRepoName(pkg)}) deleted`);
+    if (x.repoKept) log(`cleanup: repository ${x.repoKept} is not one this run's import created${createdKey === undefined ? " (the receipt does not say it did)" : ""}; it is left registered, and the package with it`);
+  };
   try {
-    r = await exec(mcp, cleanupAbap(pkg, entries, expectedKey), "cleanup");
-    c = parseCleanup(r.message);
-    log(`cleanup: ${r.message.trim()}`);
+    let r = await exec(mcp, cleanupAbap(pkg, entries, expectedKey, dropRepo), "cleanup");
+    c = parseCleanup(r.rows);
+    log(`cleanup: ${r.message}`);
+    check(c, r);
     // an XML file abapGit rewrote (same tree, other bytes) is not an edit:
     // when the only difference of a moved object is such a file, say so to
     // the snippet through the object's current hashes and run it again; the
@@ -990,18 +1167,17 @@ export async function cleanup(mcp, pkg, entries, {expectedKey, log = () => {}} =
           log(`cleanup: ${a.item}: ${a.files.join(", ")} differs in bytes from the receipt's but is the same XML element tree; accepted as unchanged`);
         }
         accepted.push(...acc.accepted);
-        r = await exec(mcp, cleanupAbap(pkg, acc.entries, expectedKey), "cleanup");
-        c = parseCleanup(r.message);
-        log(`cleanup (second call): ${r.message.trim()}`);
+        r = await exec(mcp, cleanupAbap(pkg, acc.entries, expectedKey, dropRepo), "cleanup");
+        c = parseCleanup(r.rows);
+        log(`cleanup (second call): ${r.message}`);
+        check(c, r);
       }
     }
   } catch (e) {
-    return {ok: false, problems: [`cleanup: ${e.message}`]};
+    return {ok: false, problems: [...seen, `cleanup: ${e.message}`]};
   }
-  const problems = [];
   for (const f of c.hashFail) problems.push(`cleanup: ${f.item} could not be serialised to compare its content (${f.text}); kept`);
-  for (const e of c.err) problems.push(`cleanup: ${e}`);
-  for (const l of c.logs) problems.push(`cleanup log ${l}`);
+  problems.push(...new Set(seen));
   for (const e of c.elsewhere) problems.push(`cleanup: ${e.item} is in package ${e.where}, not ${pkg}; not touched`);
   for (const e of c.changed) {
     problems.push(`cleanup: ${e.item} changed since the import (stamp now "${e.where ?? ""}")`
@@ -1011,39 +1187,127 @@ export async function cleanup(mcp, pkg, entries, {expectedKey, log = () => {}} =
   for (const e of c.rehashed) {
     log(`cleanup: ${e.item}: stamp moved to "${e.where ?? ""}" but the content equals the receipt's hash (re-activated, not edited); deleted as ours`);
   }
-  for (const [name, n] of [["repository", c.repoLeft], ["object(s) of the zip", c.itemsLeft]]) {
+  if (entries.length === 0) log("cleanup: no receipt entries, so no object was deleted");
+  if (!c.go) log("cleanup: refused, so nothing was deleted");
+  // what is left, read twice: our count, and vsp's inventory; they must agree
+  let left;
+  try {
+    const r = await exec(mcp, residueAbap(pkg, entries.map((e) => e.item), expectedKey || undefined), "residue");
+    left = parseResidue(r.rows);
+    log(`residue: ${r.message}`);
+  } catch (e) {
+    problems.push(`residue: ${e.message}`);
+    return {ok: false, problems, parsed: c, accepted};
+  }
+  for (const e of left.err) problems.push(`residue: ${e}`);
+  for (const [name, n] of [["repository", left.repoLeft], ["object(s) of the zip", left.itemsLeft]]) {
     if (!(n === 0)) problems.push(`cleanup incomplete: ${Number.isNaN(n) ? "unknown number of" : n} ${name} left`);
   }
-  if (c.itemLeft.length) problems.push(`cleanup: left in ${pkg}:\n${listed(c.itemLeft)}`);
-  if (entries.length === 0) log("cleanup: no receipt entries, so no object was deleted");
-  if (!(c.others === 0) || !(c.children === 0)) {
+  if (left.itemLeft.length) problems.push(`cleanup: left in ${pkg}:\n${listed(left.itemLeft)}`);
+  for (const s of left.stampLeft) problems.push(`cleanup incomplete: ${s.item} has no TADIR row but its source or dictionary rows are still there (${s.where})`);
+  if (!(left.others === 0) || !(left.children === 0)) {
     problems.push(`cleanup: package ${pkg} kept, it holds what this run did not bring`
-      + (c.others > 0 ? `\n  ${c.others} object(s):\n${listed(c.other)}` : "")
-      + (c.children > 0 ? `\n  ${c.children} subpackage(s):\n${listed(c.child)}` : "")
-      + (Number.isNaN(c.others) || Number.isNaN(c.children) ? "\n  (the report does not say what)" : ""));
-  } else if (!(c.tdevcLeft === 0)) {
-    problems.push(`cleanup incomplete: package ${pkg} ${Number.isNaN(c.tdevcLeft) ? "may be" : "is"} still there`);
+      + (left.others > 0 ? `\n  ${left.others} object(s):\n${listed(left.other)}` : "")
+      + (left.children > 0 ? `\n  ${left.children} subpackage(s):\n${listed(left.child)}` : "")
+      + (Number.isNaN(left.others) || Number.isNaN(left.children) ? "\n  (the result does not say what)" : ""));
+  } else if (!(left.tdevcLeft === 0)) {
+    problems.push(`cleanup incomplete: package ${pkg} ${Number.isNaN(left.tdevcLeft) ? "may be" : "is"} still there`
+      + (left.repo !== undefined && left.repo !== "none" ? ` (repository ${left.repo} named "${left.repoName}" is registered for it)` : ""));
   }
-  return {ok: problems.length === 0, problems, parsed: c, accepted};
+  try {
+    const inv = await inventory(mcp, pkg);
+    // `other` is every TADIR row of the package but its own, the receipt's
+    // objects that are left included
+    const ours = [...left.other].sort();
+    if (left.others <= left.other.length && JSON.stringify(inv.objects) !== JSON.stringify(ours)) {
+      problems.push(`residue: vsp's inventory and the residue read disagree about ${pkg}: inventory [${inv.objects.join(", ")}], residue [${ours.join(", ")}]`);
+    }
+    if (JSON.stringify(inv.subpackages) !== JSON.stringify([...left.child].sort())) {
+      problems.push(`residue: vsp's inventory and the residue read disagree about the subpackages of ${pkg}: inventory [${inv.subpackages.join(", ")}], residue [${left.child.join(", ")}]`);
+    }
+    if (expectedKey && inv.repos.includes(expectedKey) !== (left.repoLeft > 0)) {
+      problems.push(`residue: vsp's inventory and the residue read disagree about repository ${expectedKey}`);
+    }
+  } catch (e) {
+    problems.push(`residue: ${e.message}`);
+  }
+  return {ok: problems.length === 0, problems, parsed: c, residue: left, accepted};
 }
 
-/** The import's evidence, checked: a parsed status of S, or W with its W
- *  messages carried back and shown (W passes then: abapGit's W is a
- *  warning about an object that was still deserialised); E, A, no status,
- *  an unknown status, an exception, or messages not carried back fail. */
+/** git_import_zip's answer, waited for: a job that is still pending after
+ *  git_import_zip's own wait is asked about through git_import_status, a
+ *  bounded number of times. Returns the last answer. */
+export async function importZip(mcp, pkg, bytes, {poll = IMPORT_POLL, log = () => {}} = {}) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let {json} = jsonAnswer(await mcp.call("system", undefined, {type: "git_import_zip", zip_base64: Buffer.from(bytes).toString("base64"),
+    package: pkg, repo_name: ownRepoName(pkg), overwrite: false, wait_seconds: IMPORT_WAIT_SECONDS}), "import");
+  for (let i = 0; i < poll.tries && (json.status === "pending" || json.status === "unknown") && /^[0-9]{8}$/.test(String(json.jobCount ?? "")); i += 1) {
+    log(`import: job ${json.job ?? ""} ${json.jobCount} is ${json.status}; asking again`);
+    await sleep(poll.delayMs);
+    try {
+      ({json} = jsonAnswer(await mcp.call("system", undefined, {type: "git_import_status", job: json.jobCount}), "import status"));
+    } catch (e) {
+      // the job was started: whatever went wrong asking about it, it may be running
+      throw Object.assign(e, {code: "STATUS_UNKNOWN"});
+    }
+  }
+  return json;
+}
+
+const logLine = (l) => `[${l?.type ?? "?"}] ${[l?.objType, l?.objName].filter(Boolean).join(" ")}${l?.objType || l?.objName ? ": " : ""}${l?.text ?? ""}`;
+
+/** git_import_zip's evidence, checked. `imported` passes, with its W
+ *  messages shown (abapGit's W is a warning about an object it still
+ *  deserialised); an E or A message in its log fails it all the same.
+ *  `imported_with_errors`, `refused` and `failed` fail the run with the
+ *  whole log; so does any other status (a job still running, unknown). A
+ *  TADIR row the import wrote into another package fails it too. */
+export function judgeGitImport(ans, pkg) {
+  const problems = [];
+  const logs = Array.isArray(ans.log) ? ans.log : undefined;
+  const status = ans.status;
+  if (status === "imported") {
+    for (const l of logs ?? []) if (l?.type !== "W") problems.push(`import log ${logLine(l)}`);
+  } else if (status === "imported_with_errors" || status === "refused" || status === "failed") {
+    problems.push(`import ${status}${ans.message ? `: ${ans.message}` : ""}${ans.note ? ` (${ans.note})` : ""}`);
+    for (const l of logs ?? []) problems.push(`import log ${logLine(l)}`);
+  } else {
+    problems.push(`import: status ${status ?? "missing"}${ans.note ? ` (${ans.note})` : ""}`
+      + (ans.jobCount ? `; ask vsp with git_import_status job=${ans.jobCount}` : ""));
+  }
+  if (typeof ans.error === "string") problems.push(`import: ${ans.error}`);
+  if (status !== undefined && logs === undefined && ["imported", "imported_with_errors", "refused", "failed"].includes(status)) {
+    problems.push("import: the answer carries no log");
+  }
+  if (["imported", "imported_with_errors", "failed"].includes(status)) {
+    if (!Array.isArray(ans.tadir)) problems.push("import: the answer carries no TADIR rows");
+    else {
+      for (const t of ans.tadir) {
+        if (String(t?.devclass ?? "").trim() !== pkg) problems.push(`import wrote ${t?.object} ${t?.objName} into package ${t?.devclass}, not ${pkg}`);
+      }
+    }
+  }
+  if (ans.package !== undefined && String(ans.package).trim() !== pkg) problems.push(`import: the answer is about package ${ans.package}, not ${pkg}`);
+  return problems;
+}
+
+/** The in-place deploy's import evidence (our own snippet's rows): a parsed
+ *  status of S, or W with its W messages carried back and shown; E, A, no
+ *  status, an unknown status, an exception, or messages not carried back
+ *  fail. */
 export function judgeImport(imp) {
   const problems = [];
   if (imp.err !== undefined) problems.push(`import failed: ${imp.err}`);
-  if (imp.status === undefined) problems.push("import: the report carries no abapGit status");
+  if (imp.status === undefined) problems.push("import: the result carries no abapGit status");
   else if (imp.status === "W") {
     if (!imp.logs.some((l) => l.type === "W")) problems.push("import status W with no W message carried back");
   } else if (imp.status !== "S") problems.push(`import status ${imp.status}`);
   for (const l of imp.logs) if (l.type !== "W") problems.push(`import log [${l.type}] ${l.text}`);
-  if (Number.isNaN(imp.logCount)) problems.push("import: the report carries no log count");
+  if (Number.isNaN(imp.logCount)) problems.push("import: the result carries no log count");
   else if (imp.logCount > imp.logs.length) {
     problems.push(`import log: ${imp.logCount - imp.logs.length} more message(s) not carried back`);
   }
-  if (Number.isNaN(imp.tadir)) problems.push("import: the report carries no TADIR count");
+  if (Number.isNaN(imp.tadir)) problems.push("import: the result carries no TADIR count");
   return problems;
 }
 
@@ -1055,8 +1319,8 @@ export async function proveClasses({mcp, classes, osg, problems, rows, log = () 
   if (problems.length === 0) {
     try {
       const r = await exec(mcp, classCheckAbap(classes), "class check");
-      check = parseClassCheck(r.message);
-      log(`classes: ${r.message.trim()}`);
+      check = parseClassCheck(r.rows);
+      log(`classes: ${r.message}`);
       for (const cls of classes) {
         if (!check.has(cls)) problems.push(`class check: no entry for ${cls}`);
       }
@@ -1087,14 +1351,14 @@ export async function proveClasses({mcp, classes, osg, problems, rows, log = () 
         row.notes.push("no CCAU include on the system (WITH_UNIT_TESTS missing from the class XML?)");
       }
       const text = await mcp.call("test", `CLAS ${cls}`,
-        {object_url: `/sap/bc/adt/oo/classes/${encodeURIComponent(cls.toLowerCase())}`, include_dangerous: true});
+        {object_url: `/sap/bc/adt/oo/classes/${encodeURIComponent(cls.toLowerCase())}`, include_dangerous: true, timeout: CALL_TIMEOUT});
       const there = parseUnit(text, cls);
       row.system = there.methods;
       row.failing = there.failing;
       if (there.error !== undefined) problems.push(`${cls}: ${there.error}`);
       if (there.nameless > 0) row.notes.push(`${there.nameless} test method entr(ies) without a name, not counted`);
       // the same tests, by name: a count can match with different methods behind it
-      const diff = methodDiff(here.names, there.names);
+      const diff = methodDiff(here.names, there.names ?? []);
       if (diff.missing.length > 0 || diff.extra.length > 0) {
         problems.push(`${cls}: test methods differ: ${here.methods} test method(s) on OSG, ${there.methods} on the system`
           + (diff.missing.length ? `; on OSG, not on the system: ${diff.missing.join(", ")}` : "")
@@ -1109,10 +1373,10 @@ export async function proveClasses({mcp, classes, osg, problems, rows, log = () 
   }
 }
 
-/** Steps 1-6. `mcp` is {call(action, target, params) -> text}; `osg` is a
+/** Steps 1-7. `mcp` is {call(action, target, params) -> text}; `osg` is a
  *  provider ({mode, methods(cls)}); `zipper` builds the zip. */
 export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep = false, mcp, osg,
-  receiptFile = receiptPath(pkg),
+  receiptFile = receiptPath(pkg), importPoll = IMPORT_POLL,
   zipper = buildZip, log = () => {}}) {
   pkg = checkPackage(pkg);
   const problems = [];
@@ -1152,35 +1416,54 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
 
   // the repository key the import reports; the cleanup takes that repository and no other
   let importedKey;
+  // the key of a repository this run's import created: only that row is the run's to delete
+  let createdKey;
   // the objects this run may delete: those in its receipt, none until the
-  // import has written them. An import refused because a zip-named object
-  // appeared in the package after the preflight wrote nothing of ours and
-  // gets no receipt, so the cleanup then deletes no object at all (critic
-  // round 6), only our repository row and, if it is empty, the package
+  // import has written them. A refused import wrote nothing of ours and gets
+  // no receipt, so the cleanup then deletes no object at all, only the
+  // package if it is empty and no repository is registered for it (vsp
+  // removes the repository a refused import created)
   let receipt;
+  // an import job that has not finished may still be writing into the
+  // package: then nothing at all is deleted, not even an empty package. Open
+  // until vsp says the import is over, or that it refused the call before
+  // any job (an error answer that is not JSON); a call that timed out or
+  // broke may have started one
+  let open = true;
   try {
-    let refused = true;
+    let wrote = false;
     try {
-      const r = await exec(mcp, importAbap(built.bytes, pkg), "import");
-      log(`import: ${r.message.trim()}`);
-      refused = /import refused;/.test(r.message);
-      const imp = parseImport(r.message);
-      if (imp.repo !== undefined && REPO_KEY.test(imp.repo)) importedKey = imp.repo;
-      else problems.push("import: the report carries no repository key");
-      problems.push(...judgeImport(imp));
+      const ans = await importZip(mcp, pkg, built.bytes, {poll: importPoll, log});
+      open = !["imported", "imported_with_errors", "refused", "failed"].includes(ans.status);
+      log(`import: status ${ans.status}; repository ${ans.repoKey ?? "none"} "${ans.repoName ?? ""}"${ans.repoCreated ? " (created)" : ""}; `
+        + `${Array.isArray(ans.tadir) ? ans.tadir.length : "no"} TADIR row(s); `
+        + `${Array.isArray(ans.log) ? ans.log.length : "no"} log line(s)${Array.isArray(ans.log) && ans.log.length ? `: ${ans.log.map(logLine).join("; ")}` : ""}`);
+      // objects may be on the system: imported (with or without errors), or stopped partway
+      wrote = ["imported", "imported_with_errors", "failed"].includes(ans.status);
+      const key = String(ans.repoKey ?? "").trim();
+      if (REPO_KEY.test(key)) {
+        importedKey = key;
+        if (ans.repoCreated === true) createdKey = key;
+        else log(`import: repository ${key} was not created by this import; the cleanup will leave it registered`);
+        if (String(ans.repoName ?? "").trim() !== ownRepoName(pkg)) {
+          problems.push(`import: the repository is named "${ans.repoName ?? ""}", not "${ownRepoName(pkg)}"`);
+        }
+      } else if (wrote) problems.push("import: the answer carries no repository key");
+      problems.push(...judgeGitImport(ans, pkg));
     } catch (e) {
+      if (e.code === "VSP_ERROR") open = false;
       problems.push(e.message);
     }
 
     // the receipt: what the import wrote, as it was right after
-    if (!refused && importedKey !== undefined) {
+    if (wrote && importedKey !== undefined) {
       try {
         const r = await exec(mcp, receiptAbap(pkg, built.objects), "receipt");
-        const got = parseReceipt(r.message);
-        if (got.items !== built.objects.length) throw new Error(`receipt: the report is incomplete: ${r.message.trim()}`);
-        const stamped = await withHashes(mcp, pkg, got.stamped.map((e) => ({...e, devclass: pkg})), r.message, log);
-        receipt = {package: pkg, repoKey: importedKey, repoName: ownRepoName(pkg), objects: built.objects,
-          stamped, written: new Date().toISOString()};
+        const got = parseReceipt(r.rows);
+        if (got.items !== built.objects.length) throw new Error(`receipt: the result is incomplete: ${r.message}`);
+        const stamped = await withHashes(mcp, pkg, got.stamped.map((e) => ({...e, devclass: pkg})), r.rows, log);
+        receipt = {package: pkg, repoKey: importedKey, repoName: ownRepoName(pkg), repoCreated: createdKey !== undefined,
+          objects: built.objects, stamped, written: new Date().toISOString()};
         writeReceipt(receiptFile, receipt);
         log(`receipt: ${receipt.stamped.length} object(s) stamped, ${receiptFile}`);
         for (const i of got.nostamp) problems.push(`receipt: no stamp for ${i}; it will not be deleted`);
@@ -1194,12 +1477,15 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
 
     if (problems.length === 0) await proveClasses({mcp, classes, osg, problems, rows, log});
   } finally {
-    if (keep) {
+    if (open) {
+      problems.push(`cleanup skipped: the import job may still be running in ${pkg}, so nothing is deleted. `
+        + "Ask vsp with git_import_status, and remove the package by hand (SE80 / ADT, abapGit's repository list) once the job is over");
+    } else if (keep) {
       log(`--keep: package ${pkg} and its objects are left on the system. Remove them with\n`
         + `  node tools/osd-prove-on-system.mjs --cleanup --package '${pkg}'\n`
         + `(it deletes only what the receipt ${receiptFile} lists, unchanged)`);
     } else {
-      const c = await cleanup(mcp, pkg, receipt?.stamped ?? [], {expectedKey: importedKey, log});
+      const c = await cleanup(mcp, pkg, receipt?.stamped ?? [], {expectedKey: importedKey, createdKey, log});
       problems.push(...c.problems);
       if (c.ok && receipt !== undefined) rmSync(receiptFile, {force: true});
     }
@@ -1229,7 +1515,7 @@ export function table(rows) {
 
 /** The real transport: vsp over stdio, as the MCP configuration names it. */
 export function mcpStdio({config = process.env.OSD_MCP_CONFIG ?? join(process.cwd(), ".mcp.json"),
-  server = process.env.OSD_MCP_SERVER, timeoutMs = 600000} = {}) {
+  server = process.env.OSD_MCP_SERVER, timeoutMs = 900000} = {}) {
   if (!existsSync(config)) throw new Error(`no MCP configuration at ${config} (set OSD_MCP_CONFIG)`);
   const servers = JSON.parse(readFileSync(config, "utf8")).mcpServers ?? {};
   const names = Object.keys(servers);
@@ -1278,7 +1564,7 @@ export function mcpStdio({config = process.env.OSD_MCP_CONFIG ?? join(process.cw
       const args = {action, params};
       if (target !== undefined) args.target = target;
       const r = await rpc("tools/call", {name: "SAP", arguments: args});
-      // the whole text: a truncated response is the failure mode measured on A4H
+      // the whole text: a cut answer must be seen as cut, not repaired
       const text = (r.result?.content ?? []).map((c) => c.text ?? "").join("\n") || JSON.stringify(r.error ?? r);
       return r.result?.isError || r.error ? `ERROR: ${text}` : text;
     },
@@ -1301,7 +1587,12 @@ export async function cleanupFromReceipt(mcp, pkg, file, out) {
     out(`refused: the receipt at ${file} is not a receipt for ${pkg}`);
     return 2;
   }
-  const c = await cleanup(mcp, pkg, receipt.stamped, {expectedKey: receipt.repoKey, log: out});
+  if (receipt.repoCreated === undefined) {
+    out(`note: the receipt does not record whether its run created repository ${receipt.repoKey} (written by an older version), `
+      + "so the row is left registered and the package with it; remove them by hand in abapGit if they are this tool's");
+  }
+  const c = await cleanup(mcp, pkg, receipt.stamped, {expectedKey: receipt.repoKey,
+    createdKey: receipt.repoCreated === true ? receipt.repoKey : undefined, log: out});
   for (const p of c.problems) out(`FAIL ${p}`);
   if (c.ok) rmSync(file, {force: true});
   out(c.ok ? `cleanup of ${pkg}: complete` : `cleanup of ${pkg}: INCOMPLETE`);
@@ -1339,7 +1630,8 @@ export async function main(argv, {mcp: givenMcp, out = console.log, receiptDir} 
       + "[--osg count|run] [--server <mcp server>]\n"
       + "       osd-prove-on-system.mjs --cleanup --package $ZOSG_TMP_X   (needs the run's receipt)\n"
       + "       osd-prove-on-system.mjs --in-place --package $ZEXISTING <folder> --unit <unit> [--keep]\n"
-      + "       osd-prove-on-system.mjs --rollback --package $ZEXISTING   (needs the snapshot of an --in-place --keep run)");
+      + "       osd-prove-on-system.mjs --rollback --package $ZEXISTING   (needs the snapshot of an --in-place --keep run)\n"
+      + `       needs ${MIN_VSP}`);
     return 2;
   }
   const file = receiptPath(pkg, receiptDir);

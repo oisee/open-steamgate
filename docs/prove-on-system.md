@@ -19,6 +19,74 @@ names (default: `.mcp.json` at the repository root, which is gitignored).
 Use `--server`/`OSD_MCP_SERVER` when that file configures more than one
 server. No host, user or client name is written in the tool.
 
+## What goes through vsp, and what stays ours
+
+**Minimum vsp: v2.58.0-54** (vibing-steampunk `main` at `0a83078`, #301).
+An older vsp answers `execute_abap` as text, and the tool then refuses at
+the preflight ("the answer is not JSON"). The import and the deletion also
+need ZADT_VSP with its git service and abapGit on the system (`vsp install
+zadt-vsp`) and the `$` package inside vsp's `--allowed-packages`.
+
+| Step | Through | Why |
+|---|---|---|
+| import (fresh mode) | vsp `git_import_zip` (`overwrite: false`), and `git_import_status` while its job runs | abapGit on the system as a background job; nothing that exists is overwritten, an object of another package refuses |
+| deletion of the run's objects, its repository row, its package | **our cleanup snippet**, one dialog step | vsp has no conditional delete; see "Why the deletion stays ours" |
+| residue | vsp `read DEVC <package> {inventory}` **and** our own count, which must agree | two independent reads of the same state |
+| ABAP Unit | vsp `test` (its JSON: `ok`, `counts`, `classes`) | the method comparison reads the classes; a run vsp calls not ok fails |
+| preflight, receipt stamps and content hashes, chunk reads, the cleanup, the residue count, the class check | our snippets through `execute_abap` | they are the tool's rules, not abapGit's import |
+| `--in-place` deploy and restore, its repository row | our own deploy snippet and `dropRepoAbap` | see below |
+
+Every snippet that still runs hands its result back with **one
+`RETURN_VALUE( lt_out )`** as its last statement: `lt_out` is a table of
+`{k, v}` strings, and vsp serialises it into `result_text` as JSON
+(`[{"K":..,"V":..}, ...]`). The last row is `end=OSDPROVE`. The tool reads
+nothing out of an alert title any more, and fails closed on:
+
+- an answer that is not JSON (an older vsp, or a cut answer);
+- a snippet that did not finish (vsp's `failure`, with the line of the
+  snippet where it stopped);
+- no value, or more than one;
+- a `result_text` that is not JSON (cut), a row that is not `{K, V}` of
+  strings, or no end row at the end.
+
+**Why `--in-place` keeps its own deploy.** It must decline the deletes abapGit
+plans (the AFTER zip carries no `package.devc.xml`, so abapGit plans to
+delete the package's own entry, measured on A4H). vsp's `git_import_zip`
+updates an existing object only with `overwrite: true`, and `overwrite`
+also requires deletes to be allowed, so the two cannot be had together.
+The deploy snippet stays, and only its reporting moved to `RETURN_VALUE`.
+
+**Why the deletion stays ours.** vsp has `git_delete_objects`, and the tool
+does not use it. It deletes the TADIR items it is given, as they are when it
+gets to them: it takes no expected version (stamp or content hash) per
+object, and `delete_repo` takes no expected repository key. Deciding in one
+call and deleting through it in the next would open a window in which an
+object replaced by somebody else is deleted as if it were the run's -- and
+seeing that afterwards does not bring it back (a test pins this: a version
+put in place after the cleanup's first call must survive, and the split
+design fails it). So the cleanup is one snippet of ours, as before: the
+stamps, the content hashes and the repository key are checked in the dialog
+step that hands the objects to `zcl_abapgit_objects=>delete`, drops the
+repository row and deletes the empty package. What vsp would need for the
+tool to use it: a `git_delete_objects` that takes, per object, an expected
+stamp or content hash and refuses (in the step that deletes) when it no
+longer matches, and an expected `repoKey` for `delete_repo`.
+
+**What changed for the guarantees.**
+
+- The repository row is deleted only when this run's import created it
+  (`repoCreated`), checked by key and name in the cleanup's own step. A
+  row that is not the run's stays, and so does the package it is registered
+  for (the package is deleted only with no repository left registered).
+- An import job that did not finish (still pending after the polls, an
+  unknown status, a call that broke) skips the cleanup entirely: the job may
+  still be writing into the package. The run fails and says to ask
+  `git_import_status` and to remove the package by hand.
+- The residue check is stronger: besides the TADIR counts, a receipt object
+  whose TADIR row is gone must have no REPOSRC / DD rows left (its stamp must
+  read empty), and vsp's inventory must list the same objects, subpackages
+  and repository as our count.
+
 ## It deletes only what it brought, unchanged
 
 The run creates its own package and so owns it:
@@ -30,8 +98,10 @@ The run creates its own package and so owns it:
   its content is still the one the receipt hashed (a re-activation is not
   an edit).
 - It deletes only its own repository row: the one named `OSDPROVE <package>`
-  whose key is the key its own import reported. This needs no receipt, and
-  it also happens after a refused import, since the row is the run's own.
+  whose key is the key its own import reported **and** that this import
+  created (`repoCreated` in vsp's answer, `repoCreated` in the receipt). A
+  receipt written before that field existed never deletes the row; the
+  cleanup says so. A refused import's row is removed by vsp itself.
 - It deletes the package (created by this run) only when nothing else is in it.
 
 There is no abapGit `purge` and there is no `--reuse`. The zip's object
@@ -46,7 +116,7 @@ Right after an import that was not refused, the run writes
 another folder). It holds:
 
 - the package;
-- the repository key and name;
+- the repository key and name, and whether this run's import created it;
 - the zip's object list;
 - for each object that the import wrote into the package, its TADIR
   identity, a version stamp read on the system right after the import, and
@@ -124,8 +194,8 @@ accepted only if **every differing file is XML, the set of file names is the
 same, each such file has a `cx`, and its canonical tree now equals it**. Then the
 tool runs the cleanup snippet a second time with that object's *current*
 file hashes as the expected ones, so the snippet checks again, in its own step,
-that the object is still exactly what was read; the second call replaces the
-first. Why this is sound: a canonical tree keeps every element name, attribute
+that the object is still exactly what was read, and deletes it in that step;
+the second call's result replaces the first's. Why this is sound: a canonical tree keeps every element name, attribute
 and non-blank text, so an edit of a value or a structure changes it; what it
 ignores (indentation, attribute order, line endings, declaration, comments)
 carries no content abapGit would deserialise. Why it is limited to XML: a
@@ -162,8 +232,8 @@ A complete cleanup removes the receipt. An incomplete one keeps it, so that
 
 ## The steps
 
-Every step is a separate, small MCP call, because vsp can cut a long call
-with "context canceled".
+Every step is a separate, small MCP call, because a long call can be cut.
+The long ones carry vsp's `timeout` (300 s).
 
 1. **Zip.** The tool lays the folder out the same way as
    `tools/osd-abapgit-zip.mjs`: only objects that the deploy unit lists,
@@ -184,36 +254,37 @@ with "context canceled".
      import would take it over. The refusal names each object and its
      package.
 3. **Package.** The tool runs `create DEVC $X`.
-4. **Import.** An `execute_abap` snippet decodes the zip. The zip is
-   embedded as base64 in lines of 200 characters. The snippet then:
-   1. calls `zcl_abapgit_zip=>load( )`;
-   2. creates the offline repository `OSDPROVE <package>` with
-      `new_offline( )`;
-   3. runs `set_files_remote( )`, `deserialize_checks( )` and
-      `deserialize( )`. Only new objects (action add) and the
-      run's own package entry are approved; any other overwrite refuses
-      the import (see the measured section below). The warning_package
-      decisions are **no**: abapGit then leaves out any object that would
-      move in from another package.
+4. **Import.** vsp's `git_import_zip` with the zip as `zip_base64`, the
+   package, `repo_name` = `OSDPROVE <package>`, `overwrite: false` and
+   `wait_seconds: 300`. abapGit on the system imports it as background job
+   `ZVSP_GIT_IMPORT`: an offline repository, `set_files_remote`,
+   `deserialize_checks`, `deserialize`, with vsp's policy (an existing
+   object is never updated without `overwrite`, an object of another
+   package, a package move, data loss or unmet requirements refuse). If the
+   job is still running when the call returns, the tool asks
+   `git_import_status` up to 20 times, 15 s apart. The answer is judged:
+   - `imported` passes; W lines of its log are shown, an E or A line fails;
+   - `imported_with_errors`, `refused` and `failed` fail the run, with the
+     whole log;
+   - any other status (still pending, unknown, missing) fails it, and the
+     cleanup is skipped (the job may still be writing);
+   - a TADIR row the import wrote into another package fails it;
+   - the repository key must be there (else the cleanup refuses any
+     repository) and the repository must be named `OSDPROVE <package>`.
 
-   If a repository under any other name is found at this point, the
-   snippet does not import into it. The report carries the repository key,
-   and a report without a key fails. It also carries the status, the
-   abapGit log messages of types E/W/A, and the TADIR count.
-   - Status S passes.
-   - Status W passes only when its W messages came back and are shown,
-     because abapGit's W is a warning about an object it still
-     deserialised. W with no message fails.
-   - E, A, no status, an unknown status, any E or A message, and messages
-     that were not carried back all fail.
+   Objects can be on the system after `imported`, `imported_with_errors`
+   and `failed`, so those get a receipt; `refused` wrote nothing and gets
+   none.
 5. **Classes.** For each class, the tool reads
    `SEOCLASSDF-WITH_UNIT_TESTS` and the line count of the CCAU include
    (`cl_oo_classname_service=>get_ccau_name`, `READ REPORT`). Every class
    of the zip must have an entry.
 6. **ABAP Unit.** For each class, the tool runs `test CLAS X` with
    `include_dangerous`.
-   - **The result must be readable.** It must be JSON and must name a test
-     class of that class. Anything else fails.
+   - **The result must be vsp's report.** It must be JSON with `ok` and
+     `counts`, list every method (not `only_failures`), its
+     `counts.methods` must equal the methods it lists, and it must name a
+     test class of that class. Anything else fails.
    - **Methods are compared by identity, not by count.** The set of
      `TESTCLASS->METHOD` names the system ran (case-insensitive) must equal
      the set of `FOR TESTING` methods in the source. With `--osg run`, it
@@ -222,6 +293,8 @@ with "context canceled".
    - **Unnamed method entries.** An entry without a name does not count.
      If such an entry carries an alert, it fails the run as "an unnamed
      test method failed".
+   - **Not ok.** A class vsp lists as not run fails; a run vsp calls not ok
+     with no failure behind it fails with vsp's note.
    - **A class with no tests on either side is not called.** That means no
      tests on OSG and, by step 5, none on the system (WITH_UNIT_TESTS not
      set, empty CCAU). Its row says so.
@@ -231,49 +304,50 @@ with "context canceled".
      test method inherited from an abstract local test class to the class
      that declares it, while ADT names the subclass. Such a class shows as
      a difference, not as a pass.
-7. **Cleanup.** This is one snippet, so nothing changes between the checks
-   and the deletes. It works in this order:
-   1. **Repository check.** If the package has a repository, it must be the
-      tool's own by name and the one this run imported into, by the key
-      from step 4. Otherwise nothing at all is deleted. If the import
-      reported no key, any repository refuses the cleanup.
-   2. **The receipt's objects.** For each object in the receipt, the
-      snippet reads its TADIR row. It keeps the object only if `DEVCLASS` is
-      this package **and** the stamp it reads now equals the receipt's
-      stamp, **or** its stamp moved and the files abapGit serialises now are
-      the receipt's hashed files (see the content hash above).
-      - A changed object is kept and reported, and the run fails (exit 1).
-      - An object that is missing or in another package is reported and
-        not touched.
-      - It hands exactly the objects it kept to `zcl_abapgit_objects=>delete`,
-        abapGit's object layer, which deletes them one by one in dependency
-        order and commits each.
-      - Nothing outside the receipt is ever handed to it. With no receipt,
-        no object is deleted.
-   3. **The repository row.** It is deleted with
-      `zcl_abapgit_repo_srv->delete`. In abapGit's source, that method
-      removes the persisted repository and checksums and drops the
-      favourite flag; it deletes no object. (`purge` is the method that
-      deletes objects, and the tool does not call it.)
-   4. **The package.** It is deleted through abapGit's DEVC object, which
-      deletes only an empty package, and only if TADIR holds nothing else
-      under it and TDEVC has no subpackage with `PARENTCL` = the package.
-      Otherwise the package is kept, what is there is listed, and the run
-      fails (exit 1). Subpackages are never deleted.
+7. **Cleanup.** Two reads after one snippet that changes things:
+   1. **The cleanup snippet**, one dialog step, so nothing changes between
+      the checks and the deletes:
+      1. **Repository check.** If the package has a repository, it must be
+         the tool's own by name and the one this run imported into, by the
+         key from step 4. Otherwise nothing at all is deleted. If the import
+         reported no key, any repository refuses the cleanup.
+      2. **The receipt's objects.** For each object in the receipt, the
+         snippet reads its TADIR row. It keeps the object for deletion only
+         if `DEVCLASS` is this package **and** the stamp it reads now equals
+         the receipt's stamp, **or** its stamp moved and the files abapGit
+         serialises now are the receipt's hashed files (see the content
+         hash above). A changed object is kept and reported, and the run
+         fails (exit 1); one that is missing or in another package is
+         reported and not touched. It hands exactly the objects it kept to
+         `zcl_abapgit_objects=>delete`, abapGit's object layer, which deletes
+         them one by one in dependency order and commits each. Nothing
+         outside the receipt is ever handed to it; with no receipt, no
+         object is deleted.
+      3. **The repository row**, only when this run's import created it
+         (`repoCreated`, carried into the snippet as `lv_drop`):
+         `zcl_abapgit_repo_srv->delete`, which removes the persisted
+         repository and no object. Otherwise it stays (`repo_kept=`).
+      4. **The package**, through abapGit's DEVC object, which deletes only
+         an empty package, and only if no repository is left registered for
+         it, TADIR holds nothing else under it and TDEVC has no subpackage
+         with `PARENTCL` = the package. Subpackages are never deleted.
+   2. **The residue**, read twice. Our snippet counts the repository rows
+      with the run's key, the receipt's objects still in the package, the
+      REPOSRC / DD rows of a receipt object whose TADIR row is gone (its
+      stamp must read empty), everything else in the package, its
+      subpackages and the package itself. vsp's inventory (`read DEVC
+      <package>` with `inventory`) must list the same objects, subpackages
+      and repository; an inventory that is truncated, has no `objects` or
+      no `subpackages` field (`null` is vsp's empty list) or could not check
+      the repositories fails. Anything left is a problem: a foreign object
+      or a subpackage keeps the package, and they are listed.
 
    `--keep` skips this step and prints the `--cleanup` command. That
    command needs the receipt. Without one it refuses (exit 2) before it
    connects to anything, and it says how to inspect the package by hand.
    With a receipt, it does the same work with the receipt's objects,
-   stamps and repository key, and it removes the receipt when the cleanup
-   is complete.
-
-`execute_abap` returns no output that the caller can read. Each snippet
-therefore ends with `cl_abap_unit_assert=>fail( msg = ... )`, and the result
-arrives as the alert title. The message is framed by `OSDPROVE<<` and
-`>>OSDPROVE`, so the tool can find it in vsp's text. A message without its
-end marker may have been cut, so it fails the run. vsp's "no output
-captured" message is normal. All snippets are ASCII.
+   stamps, repository key and `repoCreated`, and it removes the receipt
+   when the cleanup is complete.
 
 The result is a table:
 
@@ -283,7 +357,7 @@ class              | methods on OSG | methods on system | failing on system
 
 The tool exits with 1 if any of these happens:
 
-- an import error;
+- an import error, or an import that did not finish;
 - missing or unreadable evidence;
 - a difference in test methods;
 - a failing method;
@@ -329,98 +403,103 @@ two defects that no run here could find:
 ## Tests
 
 `test/prove-on-system.mjs` runs the tool against a fake transport that
-models what vsp returned on A4H.
+models what vsp v2.58.0-54 answers, in the shapes its source gives them:
+`execute_abap` as JSON whose `result_text` is the snippet's
+`RETURN_VALUE( lt_out )` table, ABAP Unit as `{ok, counts, classes}`,
+`git_import_zip` / `git_import_status` and `read DEVC` with `inventory`.
 
-- **The fake reads the real zip.** It reads the zip that the tool builds
-  from `test/fixtures/prove-on-system/`, so the WITH_UNIT_TESTS case comes
-  from the class XML and is not a canned answer.
+- **The fake reads the real zip.** It reads the zip that the tool hands to
+  `git_import_zip`, so the WITH_UNIT_TESTS case comes from the class XML and
+  is not a canned answer.
 - **The fake models the system state.** It keeps packages with their
-  parents, TADIR rows, and abapGit repositories. Its cleanup does what the
-  snippet asks of abapGit and nothing more, so a test can see what
-  survives.
+  parents, TADIR rows, version stamps, serialised files and abapGit
+  repositories. Its cleanup does what the snippet asks of abapGit and
+  nothing more, in the one call, so a test can see what survives. It also
+  still models vsp's `git_delete_objects` and a decision-only snippet, so
+  the split design can be run against the tests (it fails the one-step
+  test).
 - **Some properties are checked as text.** The fake does not execute ABAP.
-  So the snippet's own properties (the `DEVCLASS` check, the subpackage
-  query, the empty-package condition, `warning_package` = no, no `purge`,
-  the stamp comparison)
-  are checked on the snippet's text.
+  So the snippets' own properties (the `DEVCLASS` check, the subpackage
+  query, the stamp comparison, the delete list filled only where the check
+  held and handed to abapGit in the same snippet, no `purge`, one
+  `RETURN_VALUE( )` after the end row, ASCII) are checked on the snippet's
+  text, and every snippet is parsed by abaplint inside the shape of vsp's
+  execute wrapper.
 
 The tests cover:
 
-- **Basic runs:**
-  - the happy path;
-  - a deserialize error and its message;
-  - a class without CCAU;
-  - a failing test method;
-  - an object abapGit could not delete;
-  - `--keep` followed by `--cleanup`, which cleans completely by the
-    receipt and removes it;
-  - the refusal of a package that does not start with `$`.
-- **Preflight refusals:**
-  - an existing package (empty, with a foreign object, with a repository);
-  - a zip object that already exists in another package.
-- **Cleanup scope:**
-  - a foreign object and a subpackage that survive the cleanup and are
-    reported;
-  - a cleanup that deletes only the zip's items when the package holds
-    more;
-  - a zip item found in another package.
+- **Basic runs:** the happy path (the exact call sequence, the zip vsp
+  receives, the cleanup's objects and its repository flag);
+  `imported_with_errors` and its log; a class without CCAU; a failing test
+  method; an object abapGit could not delete; `--keep` followed by
+  `--cleanup`; the refusal of a package that does not start with `$`.
+- **Preflight refusals:** an existing package (empty, with a foreign object,
+  with a repository); a zip object that already exists in another package.
+- **The one step:** an object replaced right before the cleanup call is not
+  deleted; a version put in place after the cleanup's first call survives
+  (the split decide-then-`git_delete_objects` design, run against this
+  test, deletes it and fails).
+- **Cleanup scope:** a foreign object and a subpackage that survive and are
+  reported; only the receipt's objects in the snippet; a zip item found in
+  another package; a deleted object whose REPOSRC / DD rows survived; vsp's
+  inventory disagreeing with our count, truncated, unable to check the
+  repositories, or without its `objects` / `subpackages` field (and `null`
+  lists accepted as empty).
+- **Repository ownership:** a foreign repository that appears after the
+  preflight (vsp refuses the import, the cleanup refuses, nothing is
+  deleted); a key that changed; a renamed repository; an answer without a
+  key; `repoCreated: false` keeps the row and the package; a receipt
+  without `repoCreated` never deletes the row.
+- **The import's evidence:** no status; W lines shown and passing; an E
+  line under `imported`; `refused`, `failed`, `imported_with_errors` and an
+  unknown status, each with its log; a refused import gets no receipt even
+  when its answer names a repository; a failed import's partial objects are
+  cleaned by the receipt; a pending job is polled through
+  `git_import_status`, and one that never ends, or a call that broke,
+  deletes nothing.
+- **The snippets' results:** a `result_text` cut in half, one without its
+  end row, an answer in the old text shape, a snippet that died (with its
+  line), two values instead of one, rows that are not `{K, V}`.
+- **The unit result:** not JSON; the old shape without `ok`/`counts`;
+  counts that do not match the listed methods; a failures-only answer; a
+  class not run; `ok: false` with nothing named; the class not named;
+  nameless entries, with and without an alert; the same count with
+  different names; `--osg run` against the methods OSG ran; no class in the
+  zip; no test method run.
 - **The receipt's content hashes** (`describe("the receipt's content hashes")`):
-  - the receipt carries each object's per-file hash and a canonical digest for
-    XML, taken in the receipt snippet's own step with the in-place
-    serialisation;
-  - stamp moved and hash equal: deleted;
-  - stamp moved and hash differs: kept, the receipt stays, and a later
-    `--cleanup` keeps it too;
-  - stamp unchanged and hash differs: deleted as before;
-  - an old receipt (no hashes), or an object that could not be hashed:
-    as before, and the log says so;
-  - XML that abapGit rewrote (same tree, other bytes): deleted through the
-    second cleanup call, which carries the current hashes; a changed XML
-    value, a malformed XML, a source file that differs beside an XML that only
-    moved, a receipt without `cx`: kept;
-  - DDLS: its file names and stamp snippet, a view that is stamped, hashed and
-    deleted, a changed `.asddls` kept (fixture built in a temp folder);
-  - in `test/prove-inplace.mjs` the whole sequence: a fresh `--keep` run, an
-    in-place run on its package (the fake re-activates every object a deploy
-    writes), then `--cleanup`: deleted by hash; the same with the hashes
-    stripped from the receipt: refused as measured; one object edited after:
-    kept, the other deleted.
-  The fake does not execute ABAP: what the cleanup snippet *decides* (compare
-  the sets, delete only on equal) is modelled in the fake and pinned on the
-  snippet's text; the real behaviour is for A4H to measure.
-- **The receipt:**
-  - a refused import writes no receipt, and `--cleanup` then refuses and
-    deletes nothing;
-  - `--cleanup` without a receipt refuses before any connection is made,
-    even with a zip list at hand;
-  - an object changed after the import (its stamp differs) survives both
-    the automatic cleanup and a later `--cleanup`;
-  - a complete automatic cleanup removes the receipt.
-- **Repository ownership:**
-  - a foreign repository that appears after the preflight;
-  - a repository key that changed;
-  - a renamed repository;
-  - an import report without a key.
-- **Missing evidence:**
-  - no status;
-  - W with and without its messages;
-  - E without a message;
-  - an unknown status;
-  - no end marker;
-  - no class-check entry;
-  - unit output that is not JSON or does not name the class;
-  - nameless entries, with and without an alert;
-  - the same count with different names;
-  - `--osg run` against the methods OSG ran;
-  - no class in the zip;
-  - no test method run.
+  the receipt carries each object's per-file hash and a canonical digest for
+  XML; stamp moved and hash equal: deleted; stamp moved and hash differs:
+  kept, also by a later `--cleanup`; stamp unchanged and hash differs:
+  deleted as before; an old receipt, or an object that could not be hashed:
+  as before, and the log says so; XML that abapGit rewrote: deleted through
+  the second cleanup call, which carries the current hashes; a changed XML
+  value, a malformed XML, a source file that differs beside an XML that only
+  moved, a receipt without `cx`: kept; DDLS: stamped, hashed and deleted, a
+  changed `.asddls` kept. In `test/prove-inplace.mjs` the whole sequence: a
+  fresh `--keep` run, an in-place run on its package (the fake re-activates
+  every object a deploy writes), then `--cleanup`: deleted by hash; the same
+  with the hashes stripped: refused as measured; one object edited after:
+  kept, the other deleted.
 - **The wording of the verdict** in both modes.
 
-No child process is spawned: the fake reads the in-process zip in process,
-and the suite passes with `child_process` disabled. Each case was checked to
-fail when the code it covers is removed.
+No child process is spawned: the fake reads the in-process zip in process.
+Each rule was checked to fail when the code it covers is removed or bent:
+the split design (decide, then `git_delete_objects`), the repository row
+dropped though not created, a delete list filled outside the check, the
+package deleted with a foreign repository registered, an inventory without
+its lists, no end-row check, a cut `result_text` tolerated,
+`imported_with_errors` passing, a receipt after a refused import, the
+inventory not compared, a not-ok unit run ignored, a cleanup while the job
+may run, `repoCreated` ignored, residual REPOSRC / DD rows ignored: each
+makes at least one test fail.
 
 ## Measured on the sandbox: what abapGit's overwrite list holds
+
+(This was measured with the tool's own import snippet, which vsp's
+`git_import_zip` has replaced in the fresh mode; vsp's job applies the same
+rule -- an existing object is never updated without `overwrite` -- and
+leaves an existing package's own entry as it is. The `--in-place` deploy
+snippet still decides on this list itself.)
 
 `deserialize_checks( )` lists every object it would write in `overwrite`, new ones included, each with an
 `action` (`zif_abapgit_objects=>c_deserialize_action`: add 1, update 2, overwrite 3, delete 4, delete_add 5,
@@ -453,9 +532,13 @@ The perimeter is a **snapshot**, not the package (`tools/osd-prove-inplace.mjs`)
    hash, else refused and nothing is deployed. The deploy snippet serialises
    the objects once more inside the call that deserialises, so nothing slips in
    between.
-3. **Deploy.** Through the tool's own offline repository. An overwrite is
-   approved only for an item of the AFTER list with action update or overwrite;
-   any other entry, any data loss, any other repository refuses the import.
+3. **Deploy.** Through the tool's own offline repository and its own deploy
+   snippet, not vsp's `git_import_zip` (see "What goes through vsp" above: an
+   update there needs `overwrite`, which needs deletes allowed, and this mode
+   must decline the deletes abapGit plans). An overwrite is approved only for
+   an item of the AFTER list with action update or overwrite; any other entry,
+   any data loss, any other repository refuses the import. Like every snippet,
+   it reports through `RETURN_VALUE( lt_out )`.
 4. **Tests.** The same comparison as the fresh mode (`proveClasses`).
 5. **Rollback, always.** The deployed version's hashes are recorded only if
    abapGit reported a status, and they are not read by a later call: the
@@ -514,8 +597,9 @@ run fail closed (never adopted) -- how abapGit's serialiser rewrites the XML
 of a deserialised object is not yet measured on A4H.
 That `serialize` in the same step sees what `deserialize` just activated is
 read off the abapGit source, not yet measured on A4H; the post-deploy report
-also lengthens the deploy's answer by one entry per file, and a cut answer
-fails the run (no end marker) rather than adopting anything. The abapGit calls the snippets assume
+also lengthens the deploy's answer by one row per file, and a cut answer
+fails the run (no end row, or a `result_text` that is not JSON) rather than
+adopting anything. The abapGit calls the snippets assume
 (`zcl_abapgit_objects=>serialize( is_item io_i18n_params )`,
 `zcl_abapgit_i18n_params=>new`, `cl_abap_message_digest=>calculate_hash_for_raw`)
 are measured only against the abapGit source, not yet on a system.
