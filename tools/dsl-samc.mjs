@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Render or compare a whole SAMC/SAPC abapGit file from its L1 JSON model.
+// Render or compare SAMC/SAPC XML from an L1 JSON model. SAMC matches the A4H deserialize input.
 import {readFileSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {pathToFileURL} from "node:url";
@@ -28,7 +28,7 @@ export function firstDifference(actual, expected) {
 
 async function main(args) {
   const [command, file, ...rest] = args;
-  if (!file || !["render", "check"].includes(command)) throw new Error("usage: dsl-samc.mjs render <model.json> [--out <file>] | check <model.json> <target.xml>");
+  if (!file || !["render", "check"].includes(command)) throw new Error("usage: dsl-samc.mjs render <model.json> [--out <file>] | check <model.json> <target.xml> (SAMC target: A4H-accepted abapGit deserialize input; abapGit's pretty-printed serialisation is a follow-up)");
   const log = console.log;
   let rendered;
   try {

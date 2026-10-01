@@ -14,6 +14,7 @@
      "activity": "scalar",
      "applicationId": "scalar",
      "channelId": "scalar",
+     "kind": "scalar",
      "nr": "scalar",
      "program": "scalar",
      "program_id": "scalar",

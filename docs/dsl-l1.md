@@ -193,12 +193,15 @@ integration suite, so a recipe that stops building fails the tag's tests.
 
 ## Daemon channel files (D via L1)
 
-Stage 1 renders whole abapGit SAMC and SAPC XML files from hand-written JSON L1 models in
+Stage 1 renders whole SAMC and SAPC XML files from hand-written JSON L1 models in
 `recipes/samc-xml/sample/` and `recipes/sapc-xml/sample/`. `node tools/dsl-samc.mjs render
 <model.json> --out <file>` writes XML and a line trace sidecar; `check <model.json> <target.xml>`
 reports the first differing line. `dsl-build --check` compiles, links, renders and validates the
-recipes. Authority numbers are explicit in the model; the model builder validates or computes
-`program_id` and derives SAPC's XML state flag. The engine escapes XML text.
+recipes. The SAMC sample is byte-identical with the deserialize input abapGit accepted on A4H;
+abapGit's own pretty-printed serialisation is a follow-up. The SAPC target is real-shaped.
+Authority numbers are explicit in the model; the model builder validates or computes `program_id`
+from each authority's `kind` (`class` by default, `report`, or `function_group`) and derives SAPC's
+XML state flag. The engine escapes XML text.
 
 Stage 2 will derive the model from ABAP plus a declared `<app>.samc.decl.json` overlay beside
 the code. The template will continue to render only decisions already recorded in the model.

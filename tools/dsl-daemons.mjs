@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 // L1 model facts for abapGit daemon channel files.
-export function programId(program) {
-  if (program?.startsWith("/")) throw new Error(`namespaced class ${program} cannot use the unnamespaced PROGRAM_ID rule`);
-  if (!/^[A-Z][A-Z0-9_]{0,29}$/.test(program)) throw new Error(`invalid class name ${program}`);
+export function programId(program, kind = "class") {
+  if (!["class", "report", "function_group"].includes(kind)) throw new Error(`invalid authority kind ${kind}`);
+  if (program?.startsWith("/")) throw new Error(`namespaced ${kind} ${program} cannot use the unnamespaced PROGRAM_ID rule`);
+  const maxLength = kind === "function_group" ? 26 : 30;
+  if (typeof program !== "string" || !new RegExp(`^[A-Z][A-Z0-9_]{0,${maxLength - 1}}$`).test(program)) {
+    throw new Error(`invalid ${kind} name ${program}`);
+  }
+  if (kind === "report") return program;
+  if (kind === "function_group") return `SAPL${program}`;
   return `${program.padEnd(30, "=")}CP`;
 }
 
@@ -11,6 +17,10 @@ export function buildDaemonModel(model) {
   if (!["samc", "sapc"].includes(result.kind)) throw new Error(`kind must be samc or sapc`);
   if (result.kind === "samc" && !Array.isArray(result.channels)) throw new Error(`samc channels must be an array`);
   if (result.kind === "samc" && !Array.isArray(result.authorities)) throw new Error(`samc authorities must be an array`);
+  for (const channel of result.channels ?? []) {
+    if (typeof channel.scope !== "string" || !channel.scope.trim()) throw new Error(`scope (SCOPE) is required on ${channel["@id"]}`);
+    if (typeof channel.messageType !== "string" || !channel.messageType.trim()) throw new Error(`messageType (MESSAGE_TYPE_ID) is required on ${channel["@id"]}`);
+  }
   for (const row of [...(result.channels ?? []), ...(result.authorities ?? [])]) {
     for (const key of ["applicationId", "version"]) {
       if (row[key] !== undefined && row[key] !== result[key]) {
@@ -23,9 +33,10 @@ export function buildDaemonModel(model) {
   if (result.authorities) {
     for (const [index, authority] of result.authorities.entries()) {
       if (authority.nr !== index + 1) throw new Error(`authority nr must be ${index + 1} on ${authority["@id"]}`);
-      const computed = programId(authority.program);
+      authority.kind ??= "class";
+      const computed = programId(authority.program, authority.kind);
       if (authority.program_id !== undefined && authority.program_id !== computed) {
-        throw new Error(`program_id differs from ${authority.program} on ${authority["@id"]}`);
+        throw new Error(`program_id ${authority.program_id} differs from computed ${authority.kind} PROGRAM_ID ${computed} for ${authority.program} on ${authority["@id"]}`);
       }
       authority.program_id = computed;
     }

@@ -25,7 +25,7 @@ describe("DSL daemon channel files", function () {
   };
   after(() => scratch.forEach((dir) => rmSync(dir, {recursive: true, force: true})));
 
-  it("renders SAMC and SAPC byte for byte, with one final newline", async () => {
+  it("matches the SAMC deserialize input accepted on A4H and the real-shaped SAPC target byte for byte", async () => {
     for (const [model, target] of [[samc, samcTarget], [sapc, sapcTarget]]) {
       const {text, trace} = await renderDaemon(model);
       expect(text).to.equal(readFileSync(target, "utf8"));
@@ -51,6 +51,37 @@ describe("DSL daemon channel files", function () {
     delete model.authorities[0].program_id;
     const {text} = await renderDaemon(temp("computed.json", `${JSON.stringify(model)}\n`));
     expect(text).to.equal(readFileSync(samcTarget, "utf8"));
+  });
+
+  it("renders report and function group PROGRAM_IDs in bare forms", async () => {
+    const model = JSON.parse(readFileSync(samc, "utf8"));
+    model.authorities = [
+      {"@id": "report", nr: 1, channelId: "/pc", kind: "report", program: "ZOSD_T_DSUB", activity: "R"},
+      {"@id": "group", nr: 2, channelId: "/pc", kind: "function_group", program: "ZIRC", program_id: "SAPLZIRC", activity: "S"},
+    ];
+    const {text} = await renderDaemon(temp("program-kinds.json", `${JSON.stringify(model)}\n`));
+    expect([...text.matchAll(/<PROGRAM_ID>([^<]+)<\/PROGRAM_ID>/g)].map((match) => match[1]))
+      .to.deep.equal(["ZOSD_T_DSUB", "SAPLZIRC"]);
+    expect(buildDaemonModel(model).authorities.map((authority) => authority.kind))
+      .to.deep.equal(["report", "function_group"]);
+  });
+
+  it("defaults a missing authority kind to class and rejects a wrong explicit PROGRAM_ID", () => {
+    const model = JSON.parse(readFileSync(samc, "utf8"));
+    delete model.authorities[0].program_id;
+    expect(buildDaemonModel(model).authorities[0].program_id).to.equal("ZCL_OSD_T_DMN=================CP");
+    model.authorities[0].kind = "report";
+    model.authorities[0].program_id = "ZCL_OSD_T_DMN=================CP";
+    expect(() => buildDaemonModel(model)).to.throw(/program_id.*report.*ZCL_OSD_T_DMN.*ZCL_OSD_T_DMN/);
+  });
+
+  it("requires nonempty SCOPE and MESSAGE_TYPE_ID", () => {
+    const model = JSON.parse(readFileSync(samc, "utf8"));
+    model.channels[0].scope = "";
+    expect(() => buildDaemonModel(model)).to.throw(/scope/i);
+    model.channels[0].scope = "C";
+    model.channels[0].messageType = "";
+    expect(() => buildDaemonModel(model)).to.throw(/messageType|MESSAGE_TYPE_ID/i);
   });
 
   it("omits an empty AUTHORITIES table from the SAMC shape", async () => {
