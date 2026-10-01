@@ -3,7 +3,7 @@ REPORT zl3_fleet.
 * Set fleet: one rule of the set as one background job step,
 * submitted by zcl_l3_fleet=>run( iv_mode = 'P' ).
 
-PARAMETERS p_rule TYPE c LENGTH 60.
+PARAMETERS p_rule TYPE c LENGTH 60 LOWER CASE.
 PARAMETERS p_date TYPE d.
 PARAMETERS p_run TYPE c LENGTH 32.
 
