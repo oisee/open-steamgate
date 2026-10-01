@@ -572,6 +572,81 @@ function methodCall(statement) {
     || (tokens[0] === "call" && tokens[1] === "method");
 }
 
+// Statements besides method calls that run code this method does not show: a
+// subroutine, a function module, a constructor (NEW, CREATE OBJECT, an
+// exception's), an event handler, a BAdI, the ON COMMIT / ON ROLLBACK
+// subroutines of COMMIT and ROLLBACK WORK, the callbacks a WAIT lets run.
+// Each can change an attribute or the actual behind a by-reference parameter.
+function otherCall(statement) {
+  const tokens = statement.getTokens().map((token) => token.getStr().toLowerCase());
+  return [Statements.Perform, Statements.CallFunction, Statements.CreateObject, Statements.RaiseEvent,
+    Statements.CallBadi, Statements.Commit, Statements.Rollback, Statements.Wait].some((kind) => statement.get() instanceof kind)
+    || (statement.get() instanceof Statements.Raise && tokens.includes("exception"))
+    || statement.findAllExpressions(Expressions.NewObject).length > 0;
+}
+
+// A data object the method does not own: an attribute, a by-reference
+// parameter, a built-in. Each may be T itself, or alias T or one of its rows,
+// when T is an attribute or a by-reference parameter.
+function nonlocal(variable) {
+  if (variable?.constructor?.name !== "TypedIdentifier") return true;
+  const meta = variable.getMeta?.() ?? [];
+  return ["importing", "exporting", "changing"].some((direction) => meta.includes(direction))
+    && !meta.includes("pass_by_value");
+}
+
+// Which field symbols may point into T or the loop row. A field symbol is
+// re-pointed only by ASSIGN, by ASSIGNING or by FOR; every field symbol named
+// in such a statement anywhere in the method counts as assigned there, from
+// whatever else the statement names (an over-approximation that refuses more,
+// never less). The assignment is unsafe when the statement names T or <R>, a
+// dereference or an object or class component, a dynamic ASSIGN, another
+// unsafe field symbol, or -- when T is not a local -- a data object that is
+// not one either. A field symbol written in the body with no such statement
+// in the method has an undetermined source and is unsafe too.
+function unsafeFieldSymbols({method, scopeAt, table, row, tableNonlocal}) {
+  const unsafe = new Map([[row, "it is the loop row"]]);
+  const assignments = [];
+  for (const st of method.findAllStatementNodes()) {
+    const tokens = st.getTokens().map((token) => token.getStr().toLowerCase());
+    if (!(st.get() instanceof Statements.Assign) && !tokens.includes("assigning") && !tokens.includes("for")) continue;
+    const symbols = [...new Set(tokens.filter((token) => token.startsWith("<") && token.endsWith(">")))];
+    if (!symbols.length) continue;
+    let reason;
+    if (tokens.includes(table) || tokens.includes(row)) reason = `${st.concatTokens()} names ${tokens.includes(table) ? table : row}`;
+    else if (tokens.includes("->") || tokens.includes("=>")) reason = `${st.concatTokens()} assigns through a dereference or a component of an object or class`;
+    else if (dynamicAssign(tokens) || (st.get() instanceof Statements.Assign
+      && tokens.some((token, i) => token === "(" && tokens[i - 1] !== "symbol"))) {
+      // an ASSIGN with a parenthesis other than FIELD-SYMBOL( ) is dynamic in
+      // some part (name, offset, length) or calls something; refused alike
+      reason = `${st.concatTokens()} is a dynamic ASSIGN`;
+    } else if (tableNonlocal) {
+      const scope = scopeAt(st);
+      const outside = tokens.find((token) => !token.startsWith("<") && nonlocal(scope?.findVariable(token)) && scope?.findVariable(token));
+      if (outside) reason = `${st.concatTokens()} names ${outside}, which is not a local of the method and may alias nonlocal ${table}`;
+    }
+    for (const symbol of symbols) {
+      if (reason && !unsafe.has(symbol)) unsafe.set(symbol, reason);
+    }
+    assignments.push({st, symbols});
+  }
+  // a field symbol assigned in a statement that names an unsafe one is unsafe
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const {st, symbols} of assignments) {
+      const source = symbols.find((symbol) => unsafe.has(symbol));
+      if (!source) continue;
+      for (const symbol of symbols.filter((candidate) => !unsafe.has(candidate))) {
+        unsafe.set(symbol, `${st.concatTokens()} names ${source}, which may point into ${table}`);
+        changed = true;
+      }
+    }
+  }
+  const assigned = new Set(assignments.flatMap(({symbols}) => symbols));
+  return (symbol) => unsafe.get(symbol)
+    ?? (assigned.has(symbol) ? undefined : `no ASSIGN, ASSIGNING or FOR in the method shows where ${symbol} points`);
+}
+
 function dynamicAssign(tokens) {
   return tokens[0] === "assign" && tokens[1] === "(";
 }
@@ -693,17 +768,40 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
       throw new Refusal("loop table alias", `${st.concatTokens()} may retain a row alias of ${table} before the loop`);
     }
   }
+  // A by-reference IMPORTING, EXPORTING or CHANGING parameter names the
+  // caller's data object, which a called method may reach as well; VALUE( )
+  // and RETURNING are copies. The signature is read twice: as tokens and as
+  // abaplint's parameter metadata, and either one makes T nonlocal.
   const formalByReferenceTable = signature.some((st) => {
     const tokens = st.getTokens().map((token) => token.getStr().toLowerCase());
     const at = tokens.indexOf(table);
     if (at < 0 || tokens[at - 2] === "value" || tokens[at - 1] === "value") return false;
     const direction = tokens.slice(0, at).reverse().find((token) => ["importing", "changing", "exporting", "returning"].includes(token));
-    return direction === "importing" || direction === "changing";
+    return direction === "importing" || direction === "changing" || direction === "exporting";
   });
-  if ((tableVariable?.constructor?.name !== "TypedIdentifier" || formalByReferenceTable) && bodyStatements.some(methodCall)) {
+  const tableNonlocal = nonlocal(tableVariable) || formalByReferenceTable;
+  if (tableNonlocal && bodyStatements.some(methodCall)) {
     const call = bodyStatements.find(methodCall);
     throw new Refusal("loop table method call", `${call.concatTokens()} may change nonlocal loop table ${table}`);
   }
+  if (tableNonlocal && bodyStatements.some(otherCall)) {
+    const call = bodyStatements.find(otherCall);
+    throw new Refusal("loop table call", `${call.concatTokens()} runs code that may change nonlocal loop table ${table}`);
+  }
+  // A local T is reached by a subroutine or function module only through its
+  // parameter list: T itself anywhere, or the row before the SELECT (a FORM's
+  // USING is by reference too). Passing the row after the SELECT can only
+  // change a row the prefetch no longer needs.
+  for (const [index, item] of items.entries()) {
+    for (const st of item.findAllStatementNodes().filter((candidate) => candidate !== selectStatement && otherCall(candidate))) {
+      const tokens = st.getTokens().map((token) => token.getStr().toLowerCase());
+      if (tokens.includes(table) || (index < position && tokens.includes(row))) {
+        throw new Refusal("loop table call", `${st.concatTokens()} passes ${tokens.includes(table) ? table : row} to code this method does not show`);
+      }
+    }
+  }
+  const unsafeSymbol = unsafeFieldSymbols({method: m, table, row, tableNonlocal,
+    scopeAt: (st) => syntax.spaghetti.lookupPosition(st.getStart(), name)});
   for (const st of bodyStatements) {
     const tokens = st.getTokens().map((token) => token.getStr().toLowerCase());
     if (dynamicAssign(tokens)) {
@@ -717,7 +815,8 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
     }
     for (const ref of bodyWritePositions.filter((candidate) => inStatement(candidate, st)
       && candidate.getName().startsWith("<") && candidate.getName().toLowerCase() !== row)) {
-      throw new Refusal("field-symbol write", `${st.concatTokens()} writes through field symbol ${ref.getName()}`);
+      const why = unsafeSymbol(ref.getName().toLowerCase());
+      if (why) throw new Refusal("field-symbol write", `${st.concatTokens()} writes through field symbol ${ref.getName()}, which may point into ${table} or ${row}: ${why}`);
     }
   }
   const loopType = tableType(scope, table, "shape/loop-table");
@@ -774,7 +873,16 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
   const writes = syntax.spaghetti.listWritePositions(name).filter((ref) => ref.getName().toLowerCase() === resultTable);
   const insideLoop = (ref) => !ref.getStart().isBefore(loop.getFirstToken().getStart())
     && !ref.getStart().isAfter(loop.getLastToken().getStart());
-  if (writes.some((ref) => insideLoop(ref) && !inStatement(ref, selectStatement))) {
+  // LOOP AT and READ TABLE with ASSIGNING count as writes of the table they
+  // read, since the field symbol may write its rows. Such writes are the same
+  // on both sides: BEFORE's SELECT and AFTER's rebuild both replace the whole
+  // table at the SELECT's position, and every other statement runs unchanged
+  // on equal contents. The field symbol itself is checked by the body guard.
+  const loopStatements = loop.findAllStatementNodes();
+  const viaAssigning = (ref) => loopStatements.some((st) => inStatement(ref, st)
+    && (st.get() instanceof Statements.Loop || st.get() instanceof Statements.ReadTable)
+    && st.getTokens().some((token) => token.getStr().toLowerCase() === "assigning"));
+  if (writes.some((ref) => insideLoop(ref) && !inStatement(ref, selectStatement) && !viaAssigning(ref))) {
     throw new Refusal("result written only by SELECT", `${resultTable} is written by a loop statement besides the SELECT`);
   }
   const afterStatements = items.slice(position + 1).flatMap((item) => item.findAllStatementNodes());
@@ -802,11 +910,18 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
           throw new Refusal("key not written before the read", `${st.concatTokens()} writes ${row}${component ? `-${component}` : ""}`);
         }
       }
-      if (st.findAllExpressions(Expressions.MethodCall).length && tokens.includes(row)) {
-        throw new Refusal("key not written before the read", `${st.concatTokens()} passes ${row} to a method`);
+      if ((methodCall(st) || otherCall(st)) && tokens.includes(row)) {
+        throw new Refusal("key not written before the read", `${st.concatTokens()} passes ${row} to a call`);
       }
     }
   }
+
+  // abaplint stops reading a method at its first error, and the read and
+  // write positions the guards above rely on stop with it: a guard that found
+  // nothing to refuse may not have looked. Checked last, so a refusal a guard
+  // could name still names its own obligation.
+  const issue = syntax.issues.find((candidate) => candidate.getFilename() === name);
+  if (issue) throw new Refusal("shape/syntax", `${name} has a syntax error, so its reads and writes are incomplete: ${issue.getMessage()}`);
 
   const before = position === 0 ? [] : [{text: sourceTextRange(source, items[0].getFirstToken().getStart(),
     selectStatement.getFirstToken().getStart(), items[0].getFirstToken().getStart().getCol() - 1)}];
@@ -826,7 +941,9 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
     names: {all: ALL_ROWS, all_row: ALL_ROW, work: R2_WORK, saved_subrc: SAVED_SUBRC, saved_dbcnt: SAVED_DBCNT, saved_tabix: SAVED_TABIX},
     order: "ORDER BY PRIMARY KEY",
     open: ["no concurrent writes to the database table during the loop",
-      "reads confined to one client", "prefetch may read keys whose loop iteration skips the SELECT"],
+      "reads confined to one client", "prefetch may read keys whose loop iteration skips the SELECT",
+      ...(tableNonlocal ? [`no data reference into ${table} set outside this method`,
+        `no other by-reference parameter or attribute aliases ${table} or one of its rows`] : [])],
   };
 }
 

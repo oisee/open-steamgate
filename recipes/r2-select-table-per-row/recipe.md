@@ -25,7 +25,7 @@ statements; a body statement that belongs to a chain is refused.
 | `lt_x` is a resolved table, written only by this SELECT in the loop, read after it during the iteration, and not read after the loop | the rebuilt target must have the same shape and lifetime as the original target | abaplint `SyntaxLogic` read/write positions and the loop structure; `shape/result-*` or `result *` |
 | `lt_x` is a standard table with one resolved component per selected column, each with the selected column's type | appending must preserve the SELECT's row order and the original positional projection | abaplint `SyntaxLogic` table and line types; `shape/result-table` or `shape/result-types` |
 | The SELECT's `sy-subrc` and `sy-dbcnt` values reach the same original statements, and the reconstruction does not leak its `sy-tabix` | the bulk SELECT and local reconstruction loop set system fields differently | the generated template saves/restores fields around the preload, sets `sy-subrc` to 0/4 and `sy-dbcnt` to `lines( lt_x )`, and restores `sy-tabix` at the SELECT position |
-| Before the loop, any statement naming `T` together with `ASSIGNING`, `REFERENCE INTO`, `REF #`, `GET REFERENCE`, or `ASSIGN` is refused, regardless of statement kind; any dynamic `ASSIGN (` is refused. In the body, `GET REFERENCE OF` and `REF #` involving `T` or `<R>`, dynamic `ASSIGN (`, writes through a field symbol other than `<R>`, and writes through a dereference are refused. `T` is also refused in any body statement outside the SELECT, and no correlation field may be written through `<R>` before the SELECT. Method calls are refused when `T` is a class or instance attribute or a by-reference `IMPORTING` / `CHANGING` parameter. | the prefetch reads the driver rows before the loop and cannot follow row aliases, indirect writes, or prove what a method mutates | `modelR2FromSource` token and write-position guards; `loop table alias`, `loop row reference`, `dynamic ASSIGN`, `field-symbol write`, `dereference write`, `loop table method call`, `key not written before the read`, or `shape/loops` |
+| Before the loop, any statement naming `T` together with `ASSIGNING`, `REFERENCE INTO`, `REF #`, `GET REFERENCE`, or `ASSIGN` is refused, regardless of statement kind; any dynamic `ASSIGN (` is refused. In the body, `GET REFERENCE OF` and `REF #` involving `T` or `<R>`, dynamic `ASSIGN (`, and writes through a dereference are refused. A write through a field symbol other than `<R>` is refused when that field symbol may point into `T` or `<R>`: every `ASSIGN`, `ASSIGNING` or `FOR` statement of the method that names it counts as an assignment, and it is unsafe when such a statement names `T` or `<R>` (so `ASSIGN COMPONENT ... OF STRUCTURE <R>` too), a dereference `->` or a component `=>`, a dynamic `ASSIGN`, another unsafe field symbol, or, when `T` is not a local, any attribute or by-reference parameter; a field symbol with no such statement has no known source and is unsafe as well. So `LOOP AT lt_x ASSIGNING <h>` over the result table, the same over another local table, and `ASSIGN ls_local TO <x>` are accepted. `LOOP AT` / `READ TABLE ... ASSIGNING` over `lt_x` is not a write of `lt_x` for the next obligation, since BEFORE's SELECT and AFTER's rebuild both replace the whole table at the SELECT. `T` is also refused in any body statement outside the SELECT, and no correlation field may be written through `<R>` before the SELECT, nor `<R>` passed to any call there. When `T` is a class or instance attribute or a by-reference `IMPORTING`, `EXPORTING` or `CHANGING` parameter (read from the signature and from abaplint's parameter metadata, so `!ct_rows` counts), a method call in the body is refused, and so are `PERFORM`, `CALL FUNCTION`, `NEW` / `CREATE OBJECT`, `RAISE EXCEPTION`, `RAISE EVENT`, `CALL BADI`, `COMMIT WORK`, `ROLLBACK WORK` and `WAIT`; `VALUE( )` parameters are locals. When `T` is a local, `PERFORM` and `CALL FUNCTION` are refused only when their parameter list names `T`, or `<R>` before the SELECT. A file with a syntax error is refused last, since abaplint's read and write positions are then incomplete. | the prefetch reads the driver rows before the loop and cannot follow row aliases, indirect writes, or prove what a call mutates | `modelR2FromSource` token and write-position guards; `loop table alias`, `loop row reference`, `dynamic ASSIGN`, `field-symbol write`, `dereference write`, `loop table method call`, `loop table call`, `key not written before the read`, `shape/syntax`, or `shape/loops` |
 | `T` is not empty before `FOR ALL ENTRIES` | an empty FAE driver reads the whole source table | the generated `IF T IS NOT INITIAL` guard; the host test counts zero calls for empty `T` |
 | Generated names are unused | declarations must not shadow the method's locals or parameters | `requireNamesFree` in `tools/lift.mjs`; `names` |
 
@@ -46,12 +46,25 @@ this order claim; see [`ANORMALIES.md`](../../ANORMALIES.md).
 The model leaves these environmental assumptions open: the source table is
 not concurrently changed while the loop runs; reads are confined to one
 client; and a prior body statement may skip a later row's SELECT even though
-the bulk prefetch can already have fetched its key. The template does not
+the bulk prefetch can already have fetched its key. When `T` is an attribute
+or a by-reference parameter, two more are open, because neither can be seen
+from inside the method: no data reference into `T` was set outside it (by
+another method, into an attribute `T`), and no other by-reference parameter
+or attribute aliases `T` or one of its rows (a caller may pass the same table
+twice). The body guards refuse every write through such a reference that they
+can see: a dereference write (`MODIFY gr->*`, `gr->kind = ...`, a `LOOP` or
+`ASSIGN` over `gr->*`), a field symbol assigned from one, and every call that
+could write through one. What stays open is a write the method makes directly
+to another parameter or attribute that happens to be `T`'s alias, which is not
+a dereference, and is the second assumption. The template does not
 claim to preserve database side effects between iterations.
 
 `test/lift-r2.mjs` checks model refusals, template rendering (including the
 rendered sort columns), comment retention, `sy-tabix` restoration, and
-database-call counts. The demo's ABAP Unit test compares BEFORE and AFTER for multiple hits
+database-call counts. Its differential builds an accepted variant of BEFORE
+into a class of its own with AFTER rendered from the model, transpiles it in
+the test and compares the rows, system fields and reads of both methods; the
+accepted field-symbol forms and a local `T` go through it. The demo's ABAP Unit test compares BEFORE and AFTER for multiple hits
 in primary-key order, a miss, a repeated key, an empty driver, and rows both
 matching and failing the extra `active = 'X'` condition. It also compares the
 emulated system fields. On this runtime a nonempty driver is one FAE database
