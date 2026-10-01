@@ -46,7 +46,7 @@ export async function reportModel(input) {
     .filter((element) => element.name);
   const elements = selections.map((item) => {
     const name = item.name.toUpperCase();
-    const checkbox = /\bCHECKBOX\b/i.test(item.additions ?? "");
+    const checkbox = item.kind === "parameter" && /\bAS\s+CHECKBOX\b/i.test(item.additions ?? "");
     const group = /\bRADIOBUTTON\s+GROUP\s+(\w+)/i.exec(item.additions ?? "")?.[1]?.toUpperCase();
     const kind = group ? "radiobutton" : checkbox ? "checkbox" : item.kind;
     const referred = /\bFOR\s+(\w+)/i.exec(item.additions ?? "")?.[1]?.toUpperCase();
