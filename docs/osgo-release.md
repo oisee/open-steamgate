@@ -36,7 +36,8 @@ kill "$pid"
 `-home` puts the SQLite database at `<home>/osgo.sqlite`; a fresh directory
 is a full data reset. `-db <path>` chooses a database file explicitly and
 overrides `-home` and `STG_DB_PATH`. `-home` overrides `STG_DB_PATH`. With no
-path setting the database is in memory and reseeded at each start. `-port`
+path setting the database is reseeded at each start. The startup log says
+`database: in memory (use -home or -db to keep data)`. `-port`
 overrides `OSD_PORT`, which overrides `STG_PORT`; the default is 3095. The listener binds to `127.0.0.1` unless
 `-addr` specifies another address. Keep the listener private: OSGo does not
 provide authentication.

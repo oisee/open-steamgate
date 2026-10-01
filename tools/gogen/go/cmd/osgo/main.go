@@ -355,9 +355,9 @@ func hasPrefixFold(p, prefix string) bool {
 	return len(p) >= len(prefix) && strings.EqualFold(p[:len(prefix)], prefix)
 }
 
-func selectedPort(flagValue string, getenv func(string) string) (int, string, error) {
+func selectedPort(flagValue string, explicit bool, getenv func(string) string) (int, string, error) {
 	value, source := flagValue, "-port"
-	if value == "" {
+	if !explicit {
 		for _, name := range []string{"OSD_PORT", "STG_PORT"} {
 			if value = getenv(name); value != "" {
 				source = name
@@ -365,7 +365,7 @@ func selectedPort(flagValue string, getenv func(string) string) (int, string, er
 			}
 		}
 	}
-	if value == "" {
+	if value == "" && !explicit {
 		return 3095, "default", nil
 	}
 	port, err := strconv.Atoi(value)
@@ -419,18 +419,21 @@ func main() {
 		fmt.Printf("osgo %s (%s)\n", releaseTag, releaseCommit)
 		return
 	}
-	portValue, _, err := selectedPort(*portFlag, os.Getenv)
+	portExplicit, dbExplicit := false, false
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "port":
+			portExplicit = true
+		case "db":
+			dbExplicit = true
+		}
+	})
+	portValue, _, err := selectedPort(*portFlag, portExplicit, os.Getenv)
 	if err != nil {
 		log.Fatal(err)
 	}
 	port := &portValue
 	abap.SysID = selectedSID(os.LookupEnv)
-	dbExplicit := false
-	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "db" {
-			dbExplicit = true
-		}
-	})
 	*dbFile = selectedDB(*dbFile, *homeDir, dbExplicit, os.Getenv)
 	if *homeDir != "" {
 		if err := os.MkdirAll(*homeDir, 0700); err != nil {
@@ -476,7 +479,7 @@ func main() {
 		if err := abap.OpenDB(dbScript); err != nil {
 			log.Fatalf("database: %v", err)
 		}
-		log.Printf("database: in memory, seeded")
+		log.Printf("database: in memory (use -home or -db to keep data)")
 		abap.HostFacts = append(abap.HostFacts, "database\tSQLite (modernc.org/sqlite, pure Go), in memory, seeded at start")
 	} else {
 		seeded, err := abap.OpenDBFile(*dbFile, dbScript)
