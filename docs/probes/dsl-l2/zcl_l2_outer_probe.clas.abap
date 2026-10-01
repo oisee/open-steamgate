@@ -12,13 +12,14 @@ CLASS zcl_l2_outer_probe DEFINITION PUBLIC FINAL CREATE PUBLIC.
     TYPES ty_rows TYPE STANDARD TABLE OF ty_row WITH DEFAULT KEY.
     " 1: ON holds the join equality only (legal in 7.02)
     CLASS-METHODS outer_eq RETURNING VALUE(rt_lines) TYPE string_table.
-    " 2: ON also holds a comparison with a literal (7.02: only = between columns)
+    " 2: ON also holds an equality with a literal (legal: SAP docs show one)
     CLASS-METHODS outer_on_literal RETURNING VALUE(rt_lines) TYPE string_table.
     " 3: ON also holds a > against a host variable (7.02: refused)
     CLASS-METHODS outer_on_greater IMPORTING iv_date TYPE d RETURNING VALUE(rt_lines) TYPE string_table.
     " 4: a field of the right table in WHERE (7.02: refused)
     CLASS-METHODS outer_where_right RETURNING VALUE(rt_lines) TYPE string_table.
-    " 5: two queries (for rows, inner join counted by COLLECT), merged in ABAP
+    " 5: two queries (for rows, inner join counted by COLLECT), merged in ABAP;
+    "    COLLECT does not sum here (see 6), so it is right only at one row per key
     CLASS-METHODS two_queries IMPORTING iv_date TYPE d RETURNING VALUE(rt_lines) TYPE string_table.
     " 6: COLLECT into a sorted table and into a standard table, two rows of one key
     CLASS-METHODS collect_sorted RETURNING VALUE(rt_lines) TYPE string_table.

@@ -2,7 +2,7 @@
  "generator": "dsl-l2",
  "rule": "src/l2demo/ship_min_crew.l2.yaml",
  "template": "recipes/l2-check/template.tpl",
- "model": "sha256:ab09b0b98f0470f4d70dd2fb9448fc9c9ced4905e448f2a9a368efa6ecac585b",
+ "model": "sha256:7b263670f95f02a5f10e5e83ca5ca4b944c7a68da605f9d722b9185103484cbf",
  "lines": [
   {
    "line": 1,

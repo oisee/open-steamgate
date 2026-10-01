@@ -291,11 +291,16 @@ export function evaluate(model, rows, params = {}, override = {}) {
   };
   if (model.kind === "limit") {
     const clause = model.clauses[0];
+    let last = 0;
     each((context) => {
-      const count = matching(clause, 0, context).length;
+      let count = matching(clause, 0, context).length;
       // `inner`: the mutant that reads the for rows through the INNER JOIN
       // only, so a for row with no counted row is never seen
       if (count === 0 && model.threshold.inner) return;
+      // `stale`: the mutant whose count is not reset per for row, so a row
+      // with no counted row keeps the count of the row before it
+      if (count === 0 && model.threshold.stale) count = last;
+      last = count;
       if (test(model.threshold.op, Math.sign(count - model.threshold.value))) {
         alerts.push(alertOf(model.alert.parts, {...context, $count: count}));
       }
@@ -618,6 +623,37 @@ function countTo(model, rows, wanted, params) {
 // or excluded, and for an equality its one-sided forms
 const THRESHOLD_MUTANTS = {">": [">="], ">=": [">"], "<": ["<="], "=": [">=", "<=", "<>"]};
 
+// Rows with the base for row counted `carried` times and a second for row,
+// later in key order, with no counted row; undefined when no such rows make
+// the stale-count mutant change the alerts.
+function nextZero(model, baseRows, carried, params) {
+  const forTable = model.for.table, {keys, fields} = model.ddic[forTable];
+  const first = clone(baseRows);
+  if (!countTo(model, first, carried, params)) return undefined;
+  const original = first[forTable][0];
+  const others = Object.keys(fields).filter((column) => !keys.includes(column) && column !== model.ddic[forTable].client);
+  const counts = {...model, threshold: {op: ">=", value: 0}, alert: {parts: [{is_count: true}]}};
+  for (const key of keys) {
+    const candidates = [bump(original[key], 1), stepValue(fields[key], original[key], 1),
+      ...Array.from({length: 298}, (_, i) => defaultValue(fields[key], i + 2))];
+    for (const candidate of candidates) {
+      if (candidate === undefined || compareValues(fields[key], candidate, fields[key], original[key]) <= 0) continue;
+      // the other fields as they were, or each made different (so the alert
+      // names something of its own); either may keep the when true
+      for (const variant of [false, true]) {
+        const second = {...original, [key]: candidate};
+        if (variant) for (const column of others) second[column] = different(fields[column], original[column]) ?? second[column];
+        const rows = clone(first);
+        rows[forTable].push(second);
+        if (!keysDistinct(model, rows)) continue;
+        if (JSON.stringify(evaluate(counts, rows, params)) !== JSON.stringify([String(carried), "0"])) continue;
+        if (staleDiscriminates(model, rows, params)) return rows;
+      }
+    }
+  }
+  return undefined;
+}
+
 // A threshold case discriminates when a mutant of the threshold changes its
 // alerts: another operator, the value one either way, and for a zero-count
 // threshold the for rows read through the INNER JOIN only.
@@ -627,6 +663,13 @@ export function thresholdDiscriminates(model, rows, params) {
   return [...THRESHOLD_MUTANTS[op].map((other) => ({op: other, value})), {op, value: value - 1}, {op, value: value + 1}]
     .some((threshold) => JSON.stringify(evaluate({...model, threshold}, rows, params)) !== expected)
     || (model.threshold.zero === true && JSON.stringify(evaluate({...model, threshold: {...model.threshold, inner: true}}, rows, params)) !== expected);
+}
+
+// A zero-count case discriminates the count reset when the mutant that
+// keeps the previous for row's count changes its alerts.
+export function staleDiscriminates(model, rows, params) {
+  return JSON.stringify(evaluate(model, rows, params))
+    !== JSON.stringify(evaluate({...model, threshold: {...model.threshold, stale: true}}, rows, params));
 }
 
 // The counts a limit's cases are built on. `fires` is the count at which the
@@ -760,6 +803,24 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       }
       add(`limit/${model.threshold.key}`, model.threshold.rule_line, suffixes[i], methods,
         `${counts[i]} matching rows`, rows, true);
+    }
+    // fewer_than / exactly: a for key with counted rows directly before, in
+    // key order, a key with none, the first count chosen so that it would
+    // change the second row's answer were it carried over (the count reset
+    // per for row is what this case tests; the guard is the stale mutant).
+    if (model.threshold.zero) {
+      const carried = model.threshold.op === "<" ? n : Math.max(n, 1);
+      const methods = name("limit count reset", ["count"], ["next_zero"], model.threshold.rule_line);
+      const made = carried > COUNT_ROW_CAP ? undefined : nextZero(model, base.rows, carried, params);
+      if (carried > COUNT_ROW_CAP) {
+        skipped.push({condition: `limit/${model.threshold.key}`, reason: `${carried} matching rows exceed the ${COUNT_ROW_CAP}-row derived-case cap`,
+          cap: true, case: "next_zero"});
+      } else if (!made) {
+        skipped.push({condition: `limit/${model.threshold.key}`, reason: "cannot make a counted for key followed by one with no counted row whose alerts tell them apart"});
+      } else {
+        add(`limit/${model.threshold.key}`, model.threshold.rule_line, "next_zero", methods,
+          `${carried} matching rows, then a key with none`, made, true);
+      }
     }
     // Exercise the transition between two for rows. The first group alerts
     // (more_than: over the threshold) and the second sits next to it without

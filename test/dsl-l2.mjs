@@ -13,7 +13,7 @@ import {basename, join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DEFAULT_DDIC, registryFor} from "../tools/dsl-ddic.mjs";
 import {buildRule, capWarning, checkRule, compileRule, describeCases, evaluate, misfit, parseCondition, RuleError, stepValue} from "../tools/dsl-l2.mjs";
-import {bump, caseDiscriminates, compareValues, conditionOf, structureDiscriminates, thresholdDiscriminates} from "../tools/dsl-l2-eval.mjs";
+import {bump, caseDiscriminates, compareValues, conditionOf, staleDiscriminates, structureDiscriminates, thresholdDiscriminates} from "../tools/dsl-l2-eval.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
@@ -729,6 +729,7 @@ ${trivial}`,
     const rows = (c) => Object.fromEntries(c.tables.map((t) => [t.table,
       t.rows.map((r) => Object.fromEntries(r.fields.map((f) => [f.column, f.value])))]));
     const discriminating = (model) => model.cases.filter((c) => !(c.method === "b_count_groups" ? true
+      : c.method === "b_count_next_zero" ? staleDiscriminates(model, rows(c), {date: c.date.value})
       : c.derived.condition.startsWith("limit/") ? thresholdDiscriminates(model, rows(c), {date: c.date.value})
         : caseDiscriminates(model, conditionOf(model, c.derived.condition), rows(c), {date: c.date.value}))).map((c) => c.method);
     // exactly: one rule over the same fleet, its examples written for it
@@ -763,11 +764,17 @@ examples:
     expect: []
 `;
 
-    it("the committed rule runs its examples and its twelve derived cases, a for row with no crew among them", async () => {
+    it("the committed rule runs its examples and its thirteen derived cases, a for row with no crew among them", async () => {
       const {model, results, messages} = await runRule(MIN_CREW, "zcl_l2_ship_min_crew");
-      expect(Object.keys(results)).to.have.length(8 + 12);
+      expect(Object.keys(results)).to.have.length(8 + 13);
       expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
-      expect(model.cases.map((c) => c.method)).to.include.members(["b_count_below", "b_count_at", "b_count_zero", "b_count_groups"]);
+      expect(model.cases.map((c) => c.method)).to.include.members(["b_count_below", "b_count_at", "b_count_zero", "b_count_next_zero", "b_count_groups"]);
+      // a counted key directly before, in key order, a key with no counted row
+      const next = model.cases.find((c) => c.method === "b_count_next_zero");
+      const ships = rows(next).zosd_l2_ship.map((r) => r.ship_id);
+      expect(ships).to.have.length(2);
+      expect(ships[0] < ships[1]).to.equal(true);
+      expect(rows(next).zosd_l2_crew.every((r) => r.ship_id === ships[0])).to.equal(true);
       const zero = model.cases.find((c) => c.method === "b_count_zero");
       expect(rows(zero).zosd_l2_crew, "no crew row at all").to.equal(undefined);
       expect(zero.expect.map((e) => e.value)).to.deep.equal(["S002 Cormorant: 0 crew aboard"]);
@@ -831,7 +838,19 @@ examples:
     it("dropping the zero count (CLEAR lv_count) lets a crewless ship take the previous ship's count and vanish", async () => {
       const {file, className} = copy("noclear", text);
       const {results} = await runRule(file, className, {mutate: {"clas.abap": [["      CLEAR lv_count.\n", ""]]}});
-      expect(failed(results)).to.include("fleet_out_of_key_order");
+      expect(failed(results)).to.include.members(["fleet_out_of_key_order", "b_count_next_zero"]);
+    });
+
+    it("dropping CLEAR lv_count goes red through the derived cases alone (a rule whose only example has one crew member)", async () => {
+      const head = text.slice(0, text.indexOf("examples:"));
+      const only = `${head}examples:\n  - name: one crew member\n    date: 20261001\n    rows:\n      ZOSD_L2_SHIP: [{ship_id: S002, name: Cormorant, status: A}]\n`
+        + "      ZOSD_L2_CREW: [{crew_id: C00001, ship_id: S002, role: C, since: 20260101}]\n    expect: [\"S002 Cormorant: 1 crew aboard\"]\n";
+      const clean = copy("onlyone", only);
+      const ok = await runRule(clean.file, clean.className);
+      expect(failed(ok.results), JSON.stringify(ok.messages)).to.deep.equal([]);
+      const {file, className} = copy("onlyone_noclear", only);
+      const {results} = await runRule(file, className, {mutate: {"clas.abap": [["      CLEAR lv_count.\n", ""]]}});
+      expect(failed(results)).to.deep.equal(["b_count_next_zero"]);
     });
 
     const READ_FOR = "      READ TABLE lt_count INTO ls_count WITH TABLE KEY ship_ship_id = ls_for-ship_ship_id.\n";
@@ -845,7 +864,7 @@ examples:
       const {file, className} = copy("exactly", EXACTLY);
       const model = compileRule(file, {registry});
       const methods = model.cases.map((c) => c.method);
-      expect(methods).to.include.members(["b_count_below", "b_count_at", "b_count_above", "b_count_groups"]);
+      expect(methods).to.include.members(["b_count_below", "b_count_at", "b_count_above", "b_count_next_zero", "b_count_groups"]);
       expect(methods).to.not.include("b_count_zero");
       expect(rows(model.cases.find((c) => c.method === "b_count_below")).zosd_l2_crew).to.equal(undefined);
       expect(discriminating(model)).to.deep.equal([]);
@@ -855,6 +874,9 @@ examples:
       const mutant = copy("exactly_ge", EXACTLY);
       const {results} = await runRule(mutant.file, mutant.className, {transform: {"clas.abap": (s) => s.replaceAll("IF lv_count = 1.", "IF lv_count >= 1.")}});
       expect(failed(results)).to.include.members(["none_and_two", "b_count_above"]);
+      const stale = copy("exactly_stale", EXACTLY);
+      const dropped = await runRule(stale.file, stale.className, {mutate: {"clas.abap": [["      CLEAR lv_count.\n", ""]]}});
+      expect(failed(dropped.results)).to.include("b_count_next_zero");
     });
 
     it("exactly: 0 has no below case; exactly: 3 adds a zero case; both run green", async () => {
@@ -862,8 +884,8 @@ examples:
         .replace('expect: ["S001 Albatross: 1 captains"]', "expect: []")
         .replace("        - {crew_id: C00004, ship_id: S002, role: K, since: 20260101}\n    expect: []", "        - {crew_id: C00004, ship_id: S002, role: K, since: 20260101}\n    expect: [\"S002 Gull: 0 captains\"]");
       const threeRule = EXACTLY.replace("exactly: 1", "exactly: 3").replace('expect: ["S001 Albatross: 1 captains"]', "expect: []");
-      for (const [tag, rule, want, without] of [["ex0", zeroRule, ["b_count_at", "b_count_above"], ["b_count_below", "b_count_zero"]],
-        ["ex3", threeRule, ["b_count_below", "b_count_at", "b_count_above", "b_count_zero"], []]]) {
+      for (const [tag, rule, want, without] of [["ex0", zeroRule, ["b_count_at", "b_count_above", "b_count_next_zero"], ["b_count_below", "b_count_zero"]],
+        ["ex3", threeRule, ["b_count_below", "b_count_at", "b_count_above", "b_count_zero", "b_count_next_zero"], []]]) {
         const {file, className} = copy(tag, rule);
         const {model, results, messages} = await runRule(file, className);
         expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
@@ -903,7 +925,8 @@ examples:
       const trivial = "examples:\n  - name: none\n    date: 20261001\n    rows:\n      ZOSD_L2_SHIP: [{ship_id: S001, name: A, status: D}]\n    expect: []\n";
       const head = text.slice(0, text.indexOf("examples:"));
       for (const [threshold, named] of [["fewer_than: 32", []], ["fewer_than: 33", ["limit/fewer_than (groups)"]],
-        ["exactly: 64", ["limit/exactly (above)", "limit/exactly (groups)"]]]) {
+        ["exactly: 64", ["limit/exactly (above)", "limit/exactly (groups)"]],
+        ["fewer_than: 65", ["limit/fewer_than (at)", "limit/fewer_than (next_zero)", "limit/fewer_than (groups)"]]]) {
         const {file} = copy(`cap_${threshold.replace(/\W+/g, "_")}`, head.replace("fewer_than: 2", threshold) + trivial);
         const model = compileRule(file, {registry});
         const warning = capWarning(model, file);

@@ -36,6 +36,7 @@ CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT F
     METHODS b_count_below FOR TESTING.
     METHODS b_count_at FOR TESTING.
     METHODS b_count_zero FOR TESTING.
+    METHODS b_count_next_zero FOR TESTING.
     METHODS b_count_groups FOR TESTING.
 ENDCLASS.
 
@@ -734,6 +735,47 @@ CLASS ltcl_examples IMPLEMENTATION.
     lt_ref = check_reference( iv_date = '20261001' ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `0 matching rows: zero (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `0 matching rows: zero` ).
+  ENDMETHOD.
+
+  METHOD b_count_next_zero.
+    DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
+    DATA ls_zosd_l2_crew TYPE zosd_l2_crew.
+    DATA lt_act TYPE string_table.
+    DATA lt_ref TYPE string_table.
+    DATA lt_exp TYPE string_table.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S002'.
+    ls_zosd_l2_ship-name = 'Cormorant'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S003'.
+    ls_zosd_l2_ship-name = 'Cormorant'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_crew.
+    ls_zosd_l2_crew-mandt = sy-mandt.
+    ls_zosd_l2_crew-crew_id = 'C00001'.
+    ls_zosd_l2_crew-ship_id = 'S002'.
+    ls_zosd_l2_crew-role = 'C'.
+    ls_zosd_l2_crew-since = '20260101'.
+    APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
+    CLEAR ls_zosd_l2_crew.
+    ls_zosd_l2_crew-mandt = sy-mandt.
+    ls_zosd_l2_crew-crew_id = 'A00101'.
+    ls_zosd_l2_crew-ship_id = 'S002'.
+    ls_zosd_l2_crew-role = 'C'.
+    ls_zosd_l2_crew-since = '20260101'.
+    APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
+    INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
+    APPEND `S003 Cormorant: 0 crew aboard` TO lt_exp.
+    lt_act = zcl_l2_ship_min_crew=>check( iv_date = '20261001' ).
+    lt_ref = check_reference( iv_date = '20261001' ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `2 matching rows, then a key with none: next_zero (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `2 matching rows, then a key with none: next_zero` ).
   ENDMETHOD.
 
   METHOD b_count_groups.
