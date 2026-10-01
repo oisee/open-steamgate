@@ -508,9 +508,10 @@ function catchCond(c) {
   return parts.length ? parts.join(" || ") : "false";
 }
 
-function catchInto(c, t) {
+function catchInto(c, t, ctx) {
   if (!c.into) return [];
-  const v = ident(c.into);
+  // a local, or an attribute of the class (a report's global data)
+  const v = c.intoPlace ? place(c.intoPlace, ctx) : ident(c.into);
   if (c.intoKind === "ref") return [`${t}\t\t\t\t${v} = abap.Cast[${goType(c.intoType)}](xRX.Obj)`];
   if (!c.own.length) return [`${t}\t\t\t\t${v} = &abap.Exception{Class: xE.Class, Op: xE.Op}`];
   return [`${t}\t\t\t\tif xROK {`, `${t}\t\t\t\t\t${v} = &abap.Exception{Class: xRX.Class, Obj: xRX.Obj}`, `${t}\t\t\t\t} else {`,
@@ -1468,7 +1469,7 @@ function stmtLines(st, ctx, d) {
       const body = st.body.flatMap((x) => stmt(x, ctx, d + 1));
       frame.mode = "catch";
       const cases = st.catches.map((c) => [`${t}\t\t\tcase ${catchCond(c)}:`,
-        ...catchInto(c, t),
+        ...catchInto(c, t, ctx),
         ...c.body.flatMap((x) => stmt(x, ctx, d + 4))]).flat();
       // a CLEANUP runs only when a TRY further out takes the exception (A4H:
       // the handler is looked for before unwinding; none, and the dump is at

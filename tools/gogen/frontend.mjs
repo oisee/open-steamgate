@@ -1317,6 +1317,32 @@ function classIr(ctx0, obj) {
   const attributes = [];
   const ownAttrs = new Set(def.getAttributes().getAll().map((a) => upper(a.getName())));
   const classVars = {...(defScope?.getData().vars ?? {}), ...(implScope?.getData().vars ?? {})};
+  // a private attribute a CATCH of runtime exceptions in this class takes INTO
+  // holds an exception value, not an object (see tryStatement). Private: a
+  // subclass sees the attribute as the REF it is declared. A CATCH in a local
+  // or test class, and one INTO a local or parameter of the same name, do not
+  // count
+  const privateAttrs = new Set(def.getAttributes().getAll()
+    .filter((a) => a.getVisibility?.() === abaplint.Visibility.Private).map((a) => upper(a.getName())));
+  const inThisClass = (scope) => {
+    for (let x = scope; x; x = x.getParent()) {
+      const id = x.getIdentifier();
+      if (id.stype === "class_implementation") return upper(id.sname) === upper(scopeName);
+    }
+    return false;
+  };
+  const excInto = new Set();
+  for (const file of obj.getABAPFiles?.() ?? []) {
+    for (const st of file.getStatements()) {
+      if (!(st.get() instanceof Statements.Catch) || !/\bINTO\b/i.test(st.concatTokens())) continue;
+      const target = st.findDirectExpression(Expressions.Target);
+      const nm = upper((target?.findFirstExpression(Expressions.TargetField) ?? target)?.concatTokens() ?? "");
+      const names = st.findDirectExpressions(Expressions.ClassName).map((x) => upper(x.concatTokens()));
+      if (!privateAttrs.has(nm) || !RUNTIME_CX.some((cx) => names.some((x) => isSubclass(reg, cx, x)))) continue;
+      const scope = spaghetti.lookupPosition(st.getFirstToken().getStart(), file.getFilename());
+      if (inThisClass(scope) && scope.getData().vars[nm] === undefined) excInto.add(nm);
+    }
+  }
   for (const [name, id] of Object.entries(classVars)) {
     if (name === "ME" || name === "SUPER") continue;
     const meta = id.getMeta();
@@ -1326,6 +1352,11 @@ function classIr(ctx0, obj) {
     }
     // an inherited attribute lives in the superclass's part of the object
     if (!ownAttrs.has(name)) continue;
+    if (excInto.has(name)) {
+      (program.excAttrs ??= new Set()).add(`${className}|${name}`);
+      attributes.push({name, type: EXC, static: meta.includes("static")});
+      continue;
+    }
     try {
       const type = typeOf(id.getType(), `${className} ${name}`, program);
       attributes.push({name, type, static: meta.includes("static"), value: attributeValue(id, type, `${className} ${name}`)});
@@ -1790,7 +1821,20 @@ function tryBlock(node, ctx) {
     if (/\bINTO\b/i.test(st.concatTokens())) {
       const target = st.findDirectExpression(Expressions.Target);
       const nm = upper((target.findFirstExpression(Expressions.TargetField) ?? target).concatTokens());
-      if (!ctx.locals.has(nm)) throw new Unsupported(`CATCH ... INTO ${nm}: not a local`);
+      if (ctx.sig.params.some((x) => x.name === nm) || ctx.sig.returning?.name === nm) throw new Unsupported(`CATCH ... INTO ${nm}: a parameter`);
+      if (!ctx.locals.has(nm)) {
+        // an attribute of the class: a report's global data, which the
+        // converter makes attributes of the report class. One that takes
+        // runtime exceptions is an exception value in the whole class
+        // (classIr marks it), as a local is in its method
+        const attr = /^[A-Z_][A-Z0-9_]*$/.test(nm) ? findAttribute(ctx, nm) : undefined;
+        if (attr?.e !== "attr" && attr?.e !== "static") throw new Unsupported(`CATCH ... INTO ${nm}: not a local or an attribute`);
+        // only a private attribute of this class is made an exception value (classIr)
+        if (covers.length > 0 && attr.type.k !== "exc") throw new Unsupported(`CATCH ... INTO ${nm}: runtime exceptions INTO an attribute that is not private to ${ctx.className}`);
+        if (covers.length === 0 && attr.type.k !== "ref") throw new Unsupported(`CATCH ... INTO ${nm}: an attribute of type ${attr.type.k}`);
+        if (attr.type.k === "ref" && !attr.type.intf && attr.type.name !== "OBJECT" && !ctx.program.wanted.has(attr.type.name)) throw new Unsupported(`CATCH ... INTO ${nm}: REF TO ${attr.type.name}, which is not compiled`);
+        return {classes: names, into: nm, intoPlace: attr, intoKind: covers.length > 0 ? "exc" : "ref", intoType: attr.type, covers, own, body: bodyOf(c, ctx)};
+      }
       const declared = ctx.locals.get(nm);
       if (covers.length > 0) {
         ctx.locals.set(nm, EXC);
@@ -3206,7 +3250,7 @@ function findAttribute(ctx, n) {
     if (go === undefined) throw new Unsupported(`constant ${n} is outside the subset`);
     return {e: "const", go, type: ctx.program.consts.get(go).type};
   }
-  const type = typeOf(id.getType(), `${ctx.className} ${n}`, ctx.program);
+  const type = ctx.program.excAttrs?.has(`${ctx.className}|${n}`) ? EXC : typeOf(id.getType(), `${ctx.className} ${n}`, ctx.program);
   if (id.getMeta().includes("static")) return {e: "static", go: goName(`${declaringClass(ctx.reg, ctx.className, n, "attr") ?? ctx.className}=>${n}`), type};
   return {e: "attr", name: n, type};
 }
@@ -5716,14 +5760,24 @@ function callMethodChain(node) {
   return chain;
 }
 
+/** x when it holds an exception value: a local caught INTO, or an attribute
+ * (a report's global) a CATCH of runtime exceptions takes INTO */
+function excHolder(v, ctx) {
+  const n = upper(v);
+  if (ctx.locals?.get(n)?.k === "exc") return {e: "var", name: n, type: EXC};
+  if (ctx.locals?.has(n) || ctx.sig?.params.some((x) => x.name === n) || ctx.sig?.returning?.name === n) return undefined;
+  if (!/^[A-Z_][A-Z0-9_]*$/.test(n) || !ctx.program.excAttrs?.has(`${ctx.className}|${n}`)) return undefined;
+  return findAttribute(ctx, n);
+}
+
 function call(chain, ctx, statement, hint) {
   const kids = chain.getChildren();
   // x->get_text( ) of an exception caught INTO x
   if (kids.length === 3 && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall)) {
-    const v = kids[0].concatTokens();
-    if (ctx.locals?.get(upper(v))?.k === "exc") {
+    const x = excHolder(kids[0].concatTokens(), ctx);
+    if (x) {
       if (upper(kids[2].findDirectExpression(Expressions.MethodName).concatTokens()) !== "GET_TEXT") throw new Unsupported(`exception method ${kids[2].concatTokens()}`);
-      return {e: "exc_text", x: {e: "var", name: upper(v), type: EXC}, type: S};
+      return {e: "exc_text", x, type: S};
     }
   }
   // cl_abap_classdescr=>get_class_name( x ) of an exception caught INTO x
@@ -5732,7 +5786,8 @@ function call(chain, ctx, statement, hint) {
   // and for a raised object alike
   if (/^cl_abap_(class|type)descr=>get_class_name\(\s*\w+\s*\)$/i.test(chain.concatTokens())) {
     const v = /\(\s*(\w+)\s*\)$/.exec(chain.concatTokens())[1];
-    if (ctx.locals?.get(upper(v))?.k === "exc") return {e: "exc_class", x: {e: "var", name: upper(v), type: EXC}, type: S};
+    const x = excHolder(v, ctx);
+    if (x) return {e: "exc_class", x, type: S};
   }
   // cl_abap_random_int=>create( [seed] min max )->get_next( ): a system seeds
   // an unseeded generator at random, so a number, not a sequence, is the
