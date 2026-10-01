@@ -248,7 +248,7 @@ const STAMP_BLOCK = [
   "        CLEAR lt_incs.",
   "    ENDTRY.",
   "    LOOP AT lt_incs INTO DATA(lv_inc).",
-  "      SELECT SINGLE udat, utime FROM reposrc WHERE progname = @lv_inc AND r3state = 'A' INTO (@lv_d, @lv_t).",
+  "      SELECT SINGLE udat, utime FROM reposrc WHERE progname = @lv_inc-programm AND r3state = 'A' INTO (@lv_d, @lv_t).",
   "      IF sy-subrc = 0.",
   "        lv_cnt = lv_cnt + 1.",
   "        IF |{ lv_d }{ lv_t }| > lv_max.",
@@ -560,7 +560,9 @@ export function parseClassCheck(msg) {
 
 export function parseReceipt(msg) {
   return {
-    stamped: pairs(msg, "stamp").map((p) => ({item: p.item, stamp: p.where})),
+    // one entry per object: a report that reaches us more than once (vsp
+    // repeats the alert text) must not hand abapGit the same object twice
+    stamped: [...new Map(pairs(msg, "stamp").map((p) => [p.item, {item: p.item, stamp: p.where}])).values()],
     nostamp: pairs(msg, "nostamp").map((p) => p.item),
     absent: pairs(msg, "absent").map((p) => p.item),
     elsewhere: pairs(msg, "elsewhere"),
