@@ -87,6 +87,12 @@ export function registerWaitPump(callback) {
 // Host services with pending ABAP definitions may keep data only for the
 // current execution. The browser has no AsyncLocalStorage: fail closed there
 // rather than treating every request as one caller.
+/** the step that holds the work process now: in the browser, where there is
+ *  no AsyncLocalStorage, the only way to tell which step is running */
+export function holderToken() {
+  return holder;
+}
+
 export function currentStepToken() {
   const token = steps?.getStore();
   return token !== undefined && token.dialog === true && token.done !== true && token === holder ? token : undefined;
@@ -96,6 +102,17 @@ export function currentStepToken() {
 // Its expiry is a new event, including when the old step is still running.
 export function outsideStepContext(work) {
   return steps === undefined ? work() : steps.exit(work);
+}
+
+// Every step's start and end, for the host services that keep state per
+// session (tools/osd-enq-host.mjs): onStart(token) when it has the work
+// process, onEnd(token, {dumped}) when it gives it back for good. The token
+// identifies the step in the browser too, where there is no
+// AsyncLocalStorage.
+const stepHooks = new Set();
+export function onEveryStep(hooks) {
+  stepHooks.add(hooks);
+  return () => stepHooks.delete(hooks);
 }
 
 export function onStepLuwEnd(callback) {
@@ -163,10 +180,14 @@ export async function exclusive(work, what, {dialog = false} = {}) {
   const token = {what, dialog};
   await acquire(token);
   try {
+    for (const hooks of stepHooks) hooks.onStart?.(token);
     return steps === undefined ? await work() : await steps.run(token, work);
   } finally {
     endLuw(token);
     token.done = true;
+    for (const hooks of stepHooks) {
+      try { hooks.onEnd?.(token, {dumped: token.dumped === true}); } catch { /* a hook must not hold the work process */ }
+    }
     release();
   }
 }
@@ -191,6 +212,8 @@ export async function dialogStep(work, what) {
       endLuw();
       return result;
     } catch (e) {
+      const token = currentStepToken() ?? holder;
+      if (token !== undefined) token.dumped = true;
       await connection().rollback?.();
       endLuw();
       throw e;

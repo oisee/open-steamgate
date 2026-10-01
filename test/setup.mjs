@@ -292,6 +292,27 @@ async function setupDatabase(abap, schemas, insert) {
     const {installAmc} = await import("../tools/osd-amc.mjs");
     installAmc(abap);
   }
+  // the lock server (tools/osd-enq-host.mjs): ENQUEUE_<obj> / DEQUEUE_<obj>,
+  // DEQUEUE_ALL, ENQUEUE_READ, COMMIT/ROLLBACK WORK and the end of a step;
+  // the update-task modules (UPDATE_TASK in a *.fugr.xml) on Node, where the
+  // tree is on disk -- in the browser none, so a COMMIT there hands no lock
+  // to an update
+  {
+    const {installEnq} = await import("../tools/osd-enq-host.mjs");
+    let updateModules = [];
+    if (preview === undefined && globalThis.process?.versions?.node !== undefined) {
+      try {
+        const {functionModules} = await import(/* webpackIgnore: true */ "../tools/osd-fm-registry.mjs");
+        const {generatorFoldersOf} = await import(/* webpackIgnore: true */ "../tools/osd-packs.mjs");
+        const root = process.cwd();
+        updateModules = functionModules(generatorFoldersOf(root).map((f) => `${root}/${f}`))
+          .filter((fm) => fm.updateTask).map((fm) => fm.name);
+      } catch {
+        updateModules = [];
+      }
+    }
+    installEnq(abap, {updateModules});
+  }
   if (preview !== undefined) {
     preview.schemas = schemas;
     // **The rows as they were given, not as they were batched.** The
