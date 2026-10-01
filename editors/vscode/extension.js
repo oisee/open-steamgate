@@ -492,17 +492,24 @@ class SystemController {
     this.debuggerStarts = new Map();
     this.debuggerTransition = Promise.resolve();
     this.debuggerOutputPattern = undefined;
+    this.activeSystemSessionId = undefined;
     // The stable VS Code API has no list of running debug sessions (only
     // start/terminate events), so the controller keeps its own.
     this.debugSessions = new Set();
-    this.retiredDebugSessions = new WeakSet();
+    this.retiredDebugSessionIds = new Set();
     if (typeof vscode.debug.onDidStartDebugSession === "function") {
-      context.subscriptions.push(vscode.debug.onDidStartDebugSession((session) => { this.debugSessions.add(session); }));
+      context.subscriptions.push(vscode.debug.onDidStartDebugSession((session) => {
+        this.debugSessions.add(session);
+        if (session.name === `OSD: ABAP (${this.launcher?.inspectPort})`)
+          this.activeSystemSessionId = session.id;
+      }));
     }
     context.subscriptions.push(vscode.debug.onDidTerminateDebugSession((session) => {
       this.debugSessions.delete(session);
-      if (this.retiredDebugSessions.delete(session)) return;
-      if (session.name === `OSD: ABAP (${this.debuggerState.systemPort})`) {
+      if (this.retiredDebugSessionIds.delete(session.id)) return;
+      if (this.activeSystemSessionId !== undefined && session.id === this.activeSystemSessionId &&
+          session.name === `OSD: ABAP (${this.debuggerState.systemPort})`) {
+        this.activeSystemSessionId = undefined;
         this.debuggerState = debugAttachPlan(this.debuggerState,
           {type: "system-session-ended", port: this.debuggerState.systemPort}).state;
         // the debug session ended: an inspector opened on demand closes
@@ -572,7 +579,7 @@ class SystemController {
    *  otherwise the sessions this controller saw start and not yet end. */
   runningDebugSessions() {
     const sessions = Array.isArray(vscode.debug.sessions) ? vscode.debug.sessions : [...this.debugSessions];
-    return sessions.filter((session) => !this.retiredDebugSessions.has(session));
+    return sessions.filter((session) => !this.retiredDebugSessionIds.has(session.id));
   }
 
   async applyDebuggerEvent(event) {
@@ -595,8 +602,9 @@ class SystemController {
         if (session !== undefined) {
           // VS Code can deliver terminate after a new process has reused the
           // port. Retire this exact session before requesting its stop.
-          this.retiredDebugSessions.add(session);
+          this.retiredDebugSessionIds.add(session.id);
           this.debugSessions.delete(session);
+          if (session.id === this.activeSystemSessionId) this.activeSystemSessionId = undefined;
           await vscode.debug.stopDebugging(session);
         }
         this.debuggerStarts.delete(name);
@@ -637,7 +645,11 @@ class SystemController {
   /** A debug session keeps its outFiles after a warm swap or a supervised
    *  restart. Reattach it once the serving output link names another build. */
   async refreshDebuggerGeneration() {
-    if (this.refreshingDebugger || this.launcher?.state !== "running") return;
+    return this.#inspectorStep(() => this.#refreshDebuggerGeneration());
+  }
+
+  async #refreshDebuggerGeneration() {
+    if (this.launcher?.state !== "running") return;
     const port = this.debuggerState.systemPort;
     if (port === undefined) return;
     const session = this.runningDebugSessions().find((one) => one.name === `OSD: ABAP (${port})`);
@@ -649,13 +661,13 @@ class SystemController {
       return;
     }
     if (this.debuggerOutputPattern === config.outFiles[0]) return;
-    this.refreshingDebugger = true;
     try {
       // Clear the old session before stopping it so its termination event
       // cannot close an inspector opened on demand for the replacement.
       this.debuggerState = {systemPort: undefined};
-      this.retiredDebugSessions.add(session);
+      this.retiredDebugSessionIds.add(session.id);
       this.debugSessions.delete(session);
+      if (session.id === this.activeSystemSessionId) this.activeSystemSessionId = undefined;
       await vscode.debug.stopDebugging(session);
       this.debuggerOutputPattern = undefined;
       if (await vscode.debug.startDebugging(undefined, config) === true) {
@@ -666,8 +678,6 @@ class SystemController {
       }
     } catch (error) {
       this.output.appendLine(`osd debugger: ${String(error?.message ?? error)}`);
-    } finally {
-      this.refreshingDebugger = false;
     }
   }
 
@@ -695,6 +705,15 @@ class SystemController {
    *  its breakpoint binds. Ask VS Code for this session's DAP breakpoint,
    *  which is the same verified state shown by the filled editor glyph. */
   async waitForDebuggerReady(file, timeoutMs = 15000) {
+    const wait = (token) => this.#waitForDebuggerReady(file, timeoutMs, token);
+    if (typeof vscode.window.withProgress === "function") {
+      return vscode.window.withProgress({location: vscode.ProgressLocation.Notification,
+        title: "osd: waiting for debugger breakpoints", cancellable: true}, (_, token) => wait(token));
+    }
+    return wait();
+  }
+
+  async #waitForDebuggerReady(file, timeoutMs, token) {
     const port = this.launcher?.inspectPort;
     const name = `OSD: ABAP (${port})`;
     const target = file && path.resolve(file);
@@ -703,20 +722,35 @@ class SystemController {
       target !== undefined && path.resolve(bp.location.uri.fsPath) === target);
     const status = vscode.window.setStatusBarMessage?.("osd: waiting for the debugger…");
     const deadline = Date.now() + timeoutMs;
+    let cancelled = token?.isCancellationRequested === true;
+    const subscription = token?.onCancellationRequested?.(() => { cancelled = true; });
     try {
-      while (Date.now() < deadline) {
+      while (!cancelled && Date.now() < deadline) {
         const session = this.runningDebugSessions().find((one) => one.name === name);
         if (session !== undefined && typeof session.getDebugProtocolBreakpoint === "function") {
           if (breakpoints.length === 0) return true;
-          const states = await Promise.all(breakpoints.map(async (bp) => {
+          const check = Promise.all(breakpoints.map(async (bp) => {
             try { return await session.getDebugProtocolBreakpoint(bp); } catch { return undefined; }
           }));
-          if (states.every((bp) => bp?.verified === true)) return true;
+          // A DAP request can remain pending after the session disappears.
+          // Race each check against the remaining deadline and cancellation.
+          let timer;
+          const states = await Promise.race([check, new Promise((resolve) => {
+            timer = setTimeout(() => resolve(undefined), Math.min(50, Math.max(0, deadline - Date.now())));
+          })]);
+          clearTimeout(timer);
+          if (cancelled || Date.now() >= deadline) return false;
+          if (states?.every((bp) => bp?.verified === true) &&
+              this.runningDebugSessions().some((one) => one.id === session.id)) return true;
+          if (states !== undefined)
+            await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(0, deadline - Date.now()))));
+          continue;
         }
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(0, deadline - Date.now()))));
       }
       return false;
     } finally {
+      subscription?.dispose();
       status?.dispose();
     }
   }
@@ -758,7 +792,7 @@ class SystemController {
     if (launcher === undefined || launcher.debug === true || launcher.inspectorOpen !== true) return false;
     if (abapBreakpoints().length > 0) return false;
     const name = `OSD: ABAP (${launcher.inspectPort})`;
-    if (!sessionEnded && this.runningDebugSessions().some((session) => session.name === name)) return false;
+    if (this.runningDebugSessions().some((session) => session.name === name)) return false;
     await this.debuggerTransition;
     await this.applyDebuggerEvent({type: "system-detach"});
     const closed = await launcher.closeInspector();
@@ -2926,7 +2960,7 @@ async function run(output, classrunOutput, forceDebugger = false) {
     return;
   }
   if (action.kind === "classrun") {
-    await classrunObject(object.name, classrunOutput, forceDebugger);
+    await classrunObject(object.name, classrunOutput, forceDebugger, editor.document.fileName);
     return;
   }
   if (action.kind === "webgui") {
@@ -3029,7 +3063,7 @@ async function classrunCurrent(classrunOutput, withDebugger = false) {
     vscode.window.showInformationMessage(`osd: ${object.name} is not a class`);
     return;
   }
-  await classrunObject(object.name, classrunOutput, withDebugger);
+  await classrunObject(object.name, classrunOutput, withDebugger, current.editor.document.fileName);
 }
 
 // ---- the taxi demo's sample data (ZOSD_TAXI_SRV, src/demo_data/): nothing
@@ -3076,12 +3110,17 @@ async function resetTaxiData() {
   }
 }
 
-async function classrunObject(name, classrunOutput, withDebugger = false) {
-  if (withDebugger && !(await requireDebugSystem(classrunOutput, "Classrun"))) return;
+async function classrunObject(name, classrunOutput, withDebugger = false, file,
+  {attach = requireDebugSystem, controller = activeController, client = osd} = {}) {
+  if (withDebugger && !(await attach(classrunOutput, "Classrun"))) return;
+  if (withDebugger && !(await controller.waitForDebuggerReady(file))) {
+    vscode.window.showWarningMessage(`osd: debugger or breakpoints for ${name} did not become ready within 15 s`);
+    return;
+  }
   classrunOutput.show(true);
   classrunOutput.appendLine(`--- classrun ${name} ---`);
   try {
-    const {text, ms, generation} = await osd().classrun(name);
+    const {text, ms, generation} = await client().classrun(name);
     classrunOutput.appendLine(text);
     classrunOutput.appendLine(`(${ms} ms${generation ? `, ${generation}` : ""})`);
   } catch (e) {
@@ -3369,7 +3408,8 @@ async function callEntitySet({service, set, kind, file, withDebugger = false}, o
   if (withDebugger && !(await requireDebugSystem(output, "Call EntitySet"))) return;
   if (withDebugger) {
     if (!(await activeController.waitForDebuggerReady(file ?? vscode.window.activeTextEditor?.document?.fileName))) {
-      vscode.window.showWarningMessage(`osd: debugger or breakpoints for ${set} did not become ready within 15 s; calling anyway`);
+      vscode.window.showWarningMessage(`osd: debugger or breakpoints for ${set} did not become ready within 15 s`);
+      return;
     }
   }
   try {
@@ -4138,7 +4178,7 @@ async function deactivate() {
   await activeController?.stop();
 }
 
-module.exports = {activate, deactivate, runReportInTerminal, SystemController, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
+module.exports = {activate, deactivate, runReportInTerminal, SystemController, classrunObject, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
   httpLensProvider, openEntitySetMethod, statusBar,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,

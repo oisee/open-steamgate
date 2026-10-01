@@ -884,12 +884,100 @@ describe("editors/vscode: the extension's logic", function () {
     // VS Code reports the old session's termination after the new one starts.
     listeners.end.forEach((fn) => fn(replacement));
     expect(controller.debuggerState.systemPort).to.equal(9401);
+    expect(controller.activeSystemSessionId).to.equal("third");
     await restarted;
     expect(statuses).to.include("osd: waiting for the debugger…");
     expect(statuses.filter((s) => s === "disposed")).to.have.length(3);
     verified = false;
     expect(await controller.waitForDebuggerReady(file, 80), "unverified breakpoints time out").to.equal(false);
     expect(statuses.at(-1)).to.equal("disposed");
+  });
+
+  it("bounds a pending DAP breakpoint request and cancels its progress wait", async () => {
+    const api = debugApi();
+    const file = "/w/src/zcl_wait.clas.abap";
+    api.debug.breakpoints = [new api.SourceBreakpoint(file)];
+    const listeners = [];
+    api.debug.onDidStartDebugSession = (fn) => { listeners.push(fn); return {dispose() {}}; };
+    let cancel;
+    api.ProgressLocation = {Notification: 15};
+    api.window.withProgress = (options, task) => {
+      expect(options).to.include({location: 15, cancellable: true});
+      return task({}, {onCancellationRequested(fn) { cancel = fn; return {dispose() {}}; }});
+    };
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {appendLine() {}});
+    controller.launcher = fakeLauncher({inspectPort: 9401});
+    listeners.forEach((fn) => fn({id: "pending", name: "OSD: ABAP (9401)",
+      getDebugProtocolBreakpoint: () => new Promise(() => {})}));
+    const started = Date.now();
+    expect(await controller.waitForDebuggerReady(file, 80)).to.equal(false);
+    expect(Date.now() - started).to.be.lessThan(500);
+    const waiting = controller.waitForDebuggerReady(file, 1000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    cancel();
+    expect(await waiting).to.equal(false);
+  });
+
+  it("serializes a generation refresh with a following attach and ignores the old termination", async () => {
+    const api = debugApi();
+    const listeners = {start: [], end: []};
+    api.debug.onDidStartDebugSession = (fn) => { listeners.start.push(fn); return {dispose() {}}; };
+    api.debug.onDidTerminateDebugSession = (fn) => { listeners.end.push(fn); return {dispose() {}}; };
+    const home = mkdtempSync(path.join(tmpdir(), "osd-debug-refresh-"));
+    try {
+      const first = path.join(home, "build", "by-input", "first", "output");
+      const second = path.join(home, "build", "by-input", "second", "output");
+      mkdirSync(first, {recursive: true});
+      mkdirSync(second, {recursive: true});
+      symlinkSync(first, path.join(home, "output"), "dir");
+      const SystemController = loadSystemController(api);
+      const controller = new SystemController(controllerContext(), {appendLine() {}});
+      controller.launcher = fakeLauncher({osdHome: home, inspectPort: 9401, inspectorOpen: true});
+      controller.debuggerState = {systemPort: 9401};
+      controller.debuggerOutputPattern = `${first}/**/*.mjs`;
+      const old = {id: "old", name: "OSD: ABAP (9401)"};
+      listeners.start.forEach((fn) => fn(old));
+      rmSync(path.join(home, "output"));
+      symlinkSync(second, path.join(home, "output"), "dir");
+      let finishStop;
+      api.debug.stopDebugging = async () => new Promise((resolve) => { finishStop = resolve; });
+      api.debug.startDebugging = async (_folder, config) => {
+        api.debug.started.push(config);
+        listeners.start.forEach((fn) => fn({id: "new", name: config.name}));
+        return true;
+      };
+      const refresh = controller.refreshDebuggerGeneration();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const attach = controller.attachSystemDebugger({onDemand: true});
+      expect(api.debug.started).to.have.length(0);
+      finishStop();
+      await Promise.all([refresh, attach]);
+      listeners.end.forEach((fn) => fn({...old}));
+      expect(api.debug.started).to.have.length(1);
+      expect(controller.activeSystemSessionId).to.equal("new");
+      expect(controller.debuggerState.systemPort).to.equal(9401);
+    } finally {
+      rmSync(home, {recursive: true, force: true});
+    }
+  });
+
+  it("classrun with debugger waits for its class breakpoint before sending the run", async () => {
+    const api = debugApi();
+    api.window.showWarningMessage = () => {};
+    const {classrunObject} = loadExtension(api);
+    const lines = [];
+    const output = {show() {}, appendLine(line) { lines.push(line); }};
+    const calls = [];
+    const options = {attach: async () => true,
+      controller: {waitForDebuggerReady: async (file) => { calls.push(file); return false; }},
+      client: () => ({classrun: async () => { calls.push("run"); return {text: "ok", ms: 1}; }})};
+    await classrunObject("ZCL_X", output, true, "/w/src/zcl_x.clas.abap", options);
+    expect(calls).to.deep.equal(["/w/src/zcl_x.clas.abap"]);
+    options.controller.waitForDebuggerReady = async (file) => { calls.push(file); return true; };
+    await classrunObject("ZCL_X", output, true, "/w/src/zcl_x.clas.abap", options);
+    expect(calls).to.deep.equal(["/w/src/zcl_x.clas.abap", "/w/src/zcl_x.clas.abap", "run"]);
+    expect(lines).to.include("ok");
   });
 
   it("the debugger on demand says why it cannot attach: not running, or the door refused", async () => {
@@ -923,8 +1011,9 @@ describe("editors/vscode: the extension's logic", function () {
       new api.SourceBreakpoint("/w/tools/x.mjs")];
     // the last one gone while the session is attached (a paused request, a
     // Run with debugger): it stays until the session ends
-    const session = {name: "OSD: ABAP (9401)"};
+    const session = {id: "release-test", name: "OSD: ABAP (9401)"};
     controller.debugSessions.add(session);
+    controller.activeSystemSessionId = session.id;
     expect(await controller.releaseDebugger(), "the session is still in use").to.equal(false);
     expect(controller.launcher.calls).to.deep.equal(["open"]);
     // the session's own end is what releases it (the terminate handler)
