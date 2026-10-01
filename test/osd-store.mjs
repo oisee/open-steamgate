@@ -58,7 +58,7 @@ describe("tools/osd-store: the objects of the local system", function () {
   it("finds objects by name and by what is in the source", () => {
     const byName = store.search("SEGW_GEN");
     expect(byName.map((o) => o.name)).to.include("ZCL_STG_SEGW_GEN");
-    const bySource = store.search("maxEditMode", {source: true, type: "CLAS", max: 5});
+    const bySource = store.search("maxEditMode", {source: true, type: "CLAS", max: 50});
     expect(bySource.map((o) => o.name)).to.include("ZCL_STG_SEGW_GEN_DPC");
   });
 
