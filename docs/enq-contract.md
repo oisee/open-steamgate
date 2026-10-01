@@ -8,7 +8,7 @@ function modules of our own called the generated lock modules and
 SAP's lock modules and no SAP client library was read. Every probe object
 was deleted afterwards.
 
-The fixtures are `test/fixtures/enq/contract.json`: 67 cases, each a
+The fixtures are `test/fixtures/enq/contract.json`: 77 cases, each a
 sequence of steps with the owner of each call and `expect` = what the system
 answered. The Go and Node lock servers of E1 are gated on them
 (`docs/backlog/gogen-osgo.md`, "The lock server (ENQ)").
@@ -171,6 +171,31 @@ Releases at the end of a session are asynchronous. Straight after
 one second later they were gone. The gate is gone within 2 s after a closed
 connection and within 5 s after the end of a job.
 
+### Between COMMIT WORK and the update task
+
+A V1 update module that took 6 s held the update back, so the window between
+`COMMIT WORK` and the update task could be observed (cases
+`update-window-*`). In that window, the `_SCOPE 2` locks of the committed
+LUW belong to the update task. They keep the `GUSRVB` the session had before
+the commit, written `O1^` in the fixtures, and to everyone, **the committing
+session included**, that is another owner:
+
+- The same session's new E on the same key gets `FOREIGN_LOCK` with MC
+  **601**, not 602, and so does another session's request. A new key is
+  granted under the session's new `GUSRVB`, so the update owner is renewed at
+  `COMMIT WORK`, before the update has run.
+- `DEQUEUE_ALL`, a DEQUEUE of that key, `ROLLBACK WORK` and the end of the
+  committing session (`RFC_CONNECTION_CLOSE`) all leave the lock alone. It
+  goes when the update task has run, about 6 s after the commit here, and the
+  key can then be locked again.
+
+COMMIT and ROLLBACK steps carry `expect.newUpdateOwner` where the renewal
+was measured:
+
+- `true` after a COMMIT that queued an update.
+- `true` after a ROLLBACK.
+- `false` after a COMMIT with nothing to update.
+
 ## 5. `_WAIT`
 
 `_WAIT = 'X'` retries before it gives up. Against a lock that stayed held,
@@ -186,6 +211,25 @@ themselves were not measured.
 `DEQUEUE_ALL` releases every lock of the caller in every scope, the dialog
 halves and the update halves. It leaves other owners' locks: O1's call kept
 O2's and O3's locks, and O2's call then removed only O2's lock.
+
+## 6b. Two lock objects on one table
+
+A second lock object `EZOSD_PRB2` was put over the same table with the same
+arguments (cases `two-objects-*`). The lock is keyed by table, argument,
+mode and owner. Which lock object took it does not matter:
+
+- E through one object and E through the other by the same owner make **one
+  row with count 2**. A DEQUEUE through either object counts it down, and a
+  lock taken through one object is released by a DEQUEUE through the other.
+- Another owner is refused through either object, and X then X through the
+  two objects gives 602 as it does for one object.
+- S through one object and E through the other are two rows. Each DEQUEUE
+  matches by mode, whatever the object.
+- `GOBJ` is display only. All rows of one owner on one argument showed the
+  object of the **first** lock taken on that argument, even a row whose mode
+  was only ever requested through the other object. On a refusal,
+  `sy-msgv2` named the holder's object. Both are observations and are not
+  gated.
 
 ## 7. `ENQUEUE_READ`
 

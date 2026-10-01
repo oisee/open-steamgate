@@ -48,7 +48,17 @@
   "expect.elapsedMs": "a tolerant bound {min,max} on the step's duration in ms",
   "expect.grantedWithinMsOfRelease": "a _WAIT request is granted no later than this many ms after the conflicting lock went",
   "async": "{delayMs, relativeTo}: the step fires delayMs after the next step starts, without waiting for it",
-  "END_SESSION": "the owner's session ends (RFC connection closed, task or job ended); its locks of every scope go, asynchronously"
+  "END_SESSION": "the owner's session ends (RFC connection closed, task or job ended); its locks of every scope go, asynchronously -- except locks already handed to an update task by COMMIT WORK, which stay until the update has run",
+  "expect.newUpdateOwner": "on a COMMIT WORK or ROLLBACK WORK step: true = the session's next _SCOPE 2 lock carries a different GUSRVB than its locks before the step; false = the same one. Absent = not measured",
+  "GUSRVB <S>^": "the update owner that session S handed to its update task at its last COMMIT WORK; the update task holds those locks, and to every session including S they are another owner's (601)",
+  "CALL FUNCTION <update module> IN UPDATE TASK": "params.durationMs: how long the V1 update module takes; the steps between its COMMIT WORK and the next eventually-read run inside that window"
+ },
+ "secondLockObject": {
+  "name": "EZOSD_PRB2",
+  "table": "ZOSD_PRB",
+  "mode": "MODE_ZOSD_PRB",
+  "args": "the same as lockObject",
+  "usedIn": "group 7-two-lock-objects"
  },
  "owners": {
   "O1": "the calling session: a stateful RFC connection; its locks outlive each call on that connection",
@@ -3623,7 +3633,8 @@
      "call": "COMMIT WORK AND WAIT",
      "params": {},
      "expect": {
-      "subrc": 0
+      "subrc": 0,
+      "newUpdateOwner": false
      }
     },
     {
@@ -3905,7 +3916,11 @@
     {
      "owner": "O1",
      "call": "ROLLBACK WORK",
-     "params": {}
+     "params": {},
+     "expect": {
+      "subrc": 0,
+      "newUpdateOwner": true
+     }
     },
     {
      "owner": "O1",
@@ -3999,8 +4014,10 @@
      "call": "COMMIT WORK",
      "params": {},
      "expect": {
-      "subrc": 0
-     }
+      "subrc": 0,
+      "newUpdateOwner": true
+     },
+     "note": "newUpdateOwner measured by the session's next _SCOPE 2 lock, taken in the following call"
     },
     {
      "owner": "O1",
@@ -4205,14 +4222,6 @@
         "GUSRVB": null
        }
       ]
-     }
-    },
-    {
-     "owner": "O1",
-     "call": "ENQUEUE_EZOSD_PRB",
-     "note": "the next LUW's _SCOPE 2 lock carries a new GUSRVB",
-     "expect": {
-      "newUpdateOwner": true
      }
     }
    ]
@@ -5482,6 +5491,1165 @@
         "GUSR": null,
         "GUSRVB": "O1"
        }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "update-window-new-lock-same-key",
+   "group": "4b-update-window",
+   "title": "Between COMMIT WORK and the update task, the handed-over lock is another owner's: the same session's new E on it gets 601",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "CW",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}CW        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "CALL FUNCTION <update module> IN UPDATE TASK",
+     "params": {
+      "durationMs": 6000
+     },
+     "note": "a V1 update module that takes durationMs to run (on the sandbox a 6 s busy loop before its database write), so the window between COMMIT WORK and the update is observable"
+    },
+    {
+     "owner": "O1",
+     "call": "COMMIT WORK",
+     "params": {},
+     "expect": {
+      "subrc": 0,
+      "newUpdateOwner": true
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}CW        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1^"
+       }
+      ]
+     },
+     "note": "GUSRVB is still the id the session had before COMMIT; it now belongs to the update task"
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "CW",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "CW",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "CX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}CW        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1^"
+       },
+       {
+        "GARG": "{MANDT}CX        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "CX carries the session's new GUSRVB"
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}CX        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ],
+      "eventuallyWithinMs": 10000
+     },
+     "note": "CW goes when the update task has run (about 6 s after COMMIT on the sandbox)"
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "CW",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "update-window-dequeue-all",
+   "group": "4b-update-window",
+   "title": "DEQUEUE_ALL between COMMIT WORK and the update task leaves the handed-over lock to the update",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "DA",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "CALL FUNCTION <update module> IN UPDATE TASK",
+     "params": {
+      "durationMs": 6000
+     },
+     "note": "a V1 update module that takes durationMs to run (on the sandbox a 6 s busy loop before its database write), so the window between COMMIT WORK and the update is observable"
+    },
+    {
+     "owner": "O1",
+     "call": "COMMIT WORK",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_ALL",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}DA        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1^"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "DA",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": [],
+      "eventuallyWithinMs": 10000
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "DA",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "update-window-dequeue-and-rollback",
+   "group": "4b-update-window",
+   "title": "DEQUEUE of the key and ROLLBACK WORK between COMMIT WORK and the update task leave the handed-over lock to the update",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "DD",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "CALL FUNCTION <update module> IN UPDATE TASK",
+     "params": {
+      "durationMs": 6000
+     },
+     "note": "a V1 update module that takes durationMs to run (on the sandbox a 6 s busy loop before its database write), so the window between COMMIT WORK and the update is observable"
+    },
+    {
+     "owner": "O1",
+     "call": "COMMIT WORK",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "DD",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}DD        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1^"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ROLLBACK WORK",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}DD        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1^"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": [],
+      "eventuallyWithinMs": 10000
+     }
+    }
+   ]
+  },
+  {
+   "id": "update-window-session-end",
+   "group": "4b-update-window",
+   "title": "The end of the committing session between COMMIT WORK and the update task leaves the handed-over lock to the update",
+   "steps": [
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "CL",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "CALL FUNCTION <update module> IN UPDATE TASK",
+     "params": {
+      "durationMs": 6000
+     },
+     "note": "a V1 update module that takes durationMs to run (on the sandbox a 6 s busy loop before its database write), so the window between COMMIT WORK and the update is observable"
+    },
+    {
+     "owner": "O2",
+     "call": "COMMIT WORK",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "END_SESSION",
+     "params": {},
+     "note": "RFC_CONNECTION_CLOSE on the sandbox"
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}CL        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2^"
+       }
+      ]
+     },
+     "note": "also still there 2 s after the close on the sandbox"
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "CL",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": [],
+      "eventuallyWithinMs": 10000
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "CL",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "two-objects-same-mode-cumulate",
+   "group": "7-two-lock-objects",
+   "title": "The same argument and mode through two lock objects on one table: one row, count 2; a DEQUEUE through either object counts down",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB2",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}B1        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 2,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "observed": {
+      "GOBJ": [
+       "EZOSD_PRB"
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB2",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB2",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}B1        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB2",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": []
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "two-objects-dequeue-other",
+   "group": "7-two-lock-objects",
+   "title": "A lock taken through one lock object is released by a DEQUEUE through the other",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B2",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB2",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B2",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "two-objects-X",
+   "group": "7-two-lock-objects",
+   "title": "X through one object, X through the other by the same owner: 602, as for one object",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "B3",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB2",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "B3",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "602",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}B3        K",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "two-objects-modes",
+   "group": "7-two-lock-objects",
+   "title": "S through one object and E through the other: two rows; each DEQUEUE matches by mode, whatever the object",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "B4",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB2",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B4",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}B4        K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}B4        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "observed": {
+      "GOBJ": [
+       "EZOSD_PRB",
+       "EZOSD_PRB"
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B4",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}B4        K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB2",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "B4",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "two-objects-gobj-display",
+   "group": "7-two-lock-objects",
+   "title": "GOBJ is display only: the rows of one owner on one argument showed the object of the first lock taken on it",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB2",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B5",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "B5",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}B5        K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}B5        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "observed": {
+      "GOBJ": [
+       "EZOSD_PRB2",
+       "EZOSD_PRB2"
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_ALL",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "B6",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB2",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B6",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B6",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}B6        K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}B6        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 2,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "observed": {
+      "GOBJ": [
+       "EZOSD_PRB",
+       "EZOSD_PRB"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "two-objects-refusal",
+   "group": "7-two-lock-objects",
+   "title": "Another owner is refused through either object; sy-msgv2 named the holder's object",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB2",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B7",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B7",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     },
+     "observed": {
+      "sy-msgv2": "EZOSD_PRB2"
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB2",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B7",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     },
+     "observed": {
+      "sy-msgv2": "EZOSD_PRB2"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B7",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}B7        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 2,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "observed": {
+      "GOBJ": [
+       "EZOSD_PRB2"
       ]
      }
     }
