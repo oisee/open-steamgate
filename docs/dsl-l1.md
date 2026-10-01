@@ -253,16 +253,16 @@ their global class, as SAP's `PROGRAM_ID` does. The capture shows that abapGit
 preserves configured `NR` order rather than sorting it.
 
 The probe fixture at `test/fixtures/samc-derive/` copies the daemon class and
-the driver's p8b AMC test include. The daemon producer is reached with `/pc`
+the driver's p8a and p8b AMC test includes. The daemon producer is reached with `/pc`
 by p8b and p8a; its consumer is reached with `/pc` by p8b and `/pc`, `/pu`,
 `/ps` by p8a. The p8a source also directly sends on all three channels.
-These are positive probes. The copied p8b include directly sends and receives
+These are positive probes. The p8b include directly sends and receives
 on `/pc`; its consumer catches errors but then waits for delivery and tests
 echo, so `authority: none` would be false. The report `ZOSD_T_DSUB` has no AMC
 call. No inspected include creates a `/pu` consumer in `ZCL_OSD_T_DDRV`, and
 no inspected caller sends `/ps` through the daemon. Those three captured
 grants remain `extraAuthorities`, without code provenance. The derivation has
-nine authorities and reports drift against the five-row capture. The Stage 1
+eleven authorities and reports drift against the five-row capture. The Stage 1
 hand-written model reproduces that capture byte for byte; deriving it from
 these sources would omit real calls.
 
