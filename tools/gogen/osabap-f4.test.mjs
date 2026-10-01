@@ -18,3 +18,13 @@ test("real HELP-REQUEST is refused", () => {
   const source = "REPORT zpick.\nAT SELECTION-SCREEN ON HELP-REQUEST FOR p.\n";
   assert.throws(() => prepareF4(source, parseSource(source, "zpick.prog.abap")), /HELP-REQUEST/);
 });
+
+test("F4 preserves an entire block after assignments with punctuation in literals", () => {
+  const source = `REPORT zpick.\nPARAMETERS p TYPE string.\nDATA note TYPE string.\nAT SELECTION-SCREEN ON VALUE-REQUEST FOR p.\n  note = 'before'.\n  p = 'a.txt'.\n  note = 'after: one'.\n  p = 'say ''hello'': a.txt'.\n  CALL METHOD cl_gui_frontend_services=>file_open_dialog.\n  note = 'after call'.\nSTART-OF-SELECTION.\n  p = 'unchanged'.\n`;
+  const result = prepareF4(source, parseSource(source, "zpick.prog.abap"));
+  assert.equal(result.dialogCalls.length, 1);
+  assert.match(result.convertedSource, /MOVE 'a\.txt' TO p\./);
+  assert.match(result.convertedSource, /MOVE 'say ''hello'': a\.txt' TO p\./);
+  assert.match(result.convertedSource, /note = 'before'\.[\s\S]*note = 'after: one'\.[\s\S]*CALL METHOD[\s\S]*note = 'after call'\./);
+  assert.match(result.convertedSource, /START-OF-SELECTION\.\n  p = 'unchanged'\./);
+});

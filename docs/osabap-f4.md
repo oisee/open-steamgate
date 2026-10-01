@@ -30,6 +30,14 @@ A4H**. The class methods use `ACTION_OK = 0` and `ACTION_CANCEL = 9`:
 | `F4_FILENAME` | `FILE_NAME` (IMPORTING to caller) receives the selected name | caller's value remains unchanged |
 | `KD_GET_FILENAME_ON_F4` | `FILE_NAME` (CHANGING) receives the selected name | caller's value remains unchanged |
 
+If the open dialog cannot run because it has no grant, a path is refused, or an
+I/O operation fails, it returns an empty `FILE_TABLE` and `RC = -1`. Cancellation
+returns `RC = 0` with `ACTION_CANCEL`. The terminal form also shows the failure
+reason in its footer. Save and directory browse have no documented `RC` output:
+on either cancellation or failure, save reports `ACTION_CANCEL` and keeps the
+caller's path fields; directory browse keeps `SELECTED_FOLDER`. The terminal
+form reports failures for these dialogs in its footer too.
+
 For `F4_FILENAME`, the documented call supplies `PROGRAM_NAME`,
 `DYNPRO_NUMBER`, and `FIELD_NAME` as EXPORTING inputs and receives
 `FILE_NAME` under IMPORTING. For `KD_GET_FILENAME_ON_F4`, the documented

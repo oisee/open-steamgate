@@ -24,7 +24,9 @@ export function prepareF4(source, parsed) {
     }
     if (st.kind !== "Move") continue;
     const original = source.slice(st.span.startOffset, st.span.endOffset);
-    const match = new RegExp(`^(${active})\\s*=\\s*([^\\n.]+)\\.$`, "i").exec(original.trim());
+    // The parser has already found the statement's final period. Internal
+    // periods in a quoted value are data, not another statement boundary.
+    const match = new RegExp(`^(${active})\\s*=\\s*([\\s\\S]+)\\.$`, "i").exec(original.trim());
     if (match) edits.push({start: st.span.startOffset, end: st.span.endOffset, text: `MOVE ${match[2]} TO ${match[1]}.`});
   }
   let convertedSource = source;

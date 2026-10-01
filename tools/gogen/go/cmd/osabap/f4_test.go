@@ -3,16 +3,31 @@
 package main
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
 	"osg/gogen/abap"
+	"osg/gogen/filepick"
 	"osg/gogen/termgui"
 )
+
+func TestDialogFilterReachesBrowser(t *testing.T) {
+	options := abap.FrontendPickOptions{Kind: "save", Filter: "Text (*.txt)|*.txt|All (*.*)|*.*", Extension: "txt", Prompt: "X"}
+	browser := browserForDialog(options)
+	if browser.Mode != filepick.Save || !browser.ConfirmOverwrite || browser.Extension != "txt" || len(browser.Patterns) != 0 {
+		t.Fatalf("save dialog options: %+v", browser)
+	}
+	options.Kind = "open-multiple"
+	options.Filter = "Text (*.txt)|*.txt|Images (*.png)|*.png"
+	browser = browserForDialog(options)
+	if !browser.Multi || !reflect.DeepEqual(browser.Patterns, []string{"*.txt", "*.png"}) {
+		t.Fatalf("open dialog options: %+v", browser)
+	}
+}
 
 func TestF4SelectionScreenDialogs(t *testing.T) {
 	read := t.TempDir()
@@ -97,9 +112,9 @@ func TestF4SelectionScreenDialogs(t *testing.T) {
 func TestF4FilenameFunctionModules(t *testing.T) {
 	s := &abap.Session{}
 	report := newReport(s)
-	abap.FrontendPick = func(kind, initial, name, title string) (string, error) {
-		if kind != "open" {
-			t.Fatalf("kind %q", kind)
+	abap.FrontendPick = func(options abap.FrontendPickOptions) (string, error) {
+		if options.Kind != "open" {
+			t.Fatalf("kind %q", options.Kind)
 		}
 		return "/chosen/file.txt", nil
 	}
@@ -127,9 +142,9 @@ func TestF4FilenameFunctionModules(t *testing.T) {
 func TestF4ReadsEditedOtherField(t *testing.T) {
 	s := &abap.Session{}
 	report := newReport(s)
-	abap.FrontendPick = func(kind, initial, name, title string) (string, error) {
-		if initial != "/edited/directory" {
-			t.Fatalf("initial directory = %q", initial)
+	abap.FrontendPick = func(options abap.FrontendPickOptions) (string, error) {
+		if options.Initial != "/edited/directory" {
+			t.Fatalf("initial directory = %q", options.Initial)
 		}
 		return "/chosen/file.txt", nil
 	}
@@ -144,11 +159,11 @@ func TestF4ReadsEditedOtherField(t *testing.T) {
 func TestCancelledSavePreservesField(t *testing.T) {
 	s := &abap.Session{}
 	report := newReport(s)
-	abap.FrontendPick = func(kind, initial, name, title string) (string, error) {
-		if kind != "save" {
-			t.Fatalf("kind %q", kind)
+	abap.FrontendPick = func(options abap.FrontendPickOptions) (string, error) {
+		if options.Kind != "save" {
+			t.Fatalf("kind %q", options.Kind)
 		}
-		return "", errors.New("cancelled")
+		return "", abap.ErrFrontendPickCancel
 	}
 	defer func() { abap.FrontendPick = nil }()
 	var result ZCL_GG_HOST__TY_RESULT

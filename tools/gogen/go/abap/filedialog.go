@@ -1,22 +1,29 @@
 package abap
 
 import (
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"unsafe"
 )
 
+type FrontendPickOptions struct {
+	Kind, Initial, Name, Title string
+	Filter, Extension, Prompt  string
+}
+
+var ErrFrontendPickCancel = errors.New("file dialog cancelled")
+
 // FrontendPick is installed only while a terminal selection form is active.
 // Outside that form (including batch and SAP GUI) dialogs refuse explicitly.
-var FrontendPick func(kind, initial, name, title string) (string, error)
+var FrontendPick func(FrontendPickOptions) (string, error)
 
-func frontendPick(kind, initial, name, title string) (string, bool) {
+func frontendPick(options FrontendPickOptions) (string, error) {
 	if FrontendPick == nil {
 		panic(NotCompiled("F4 file dialog", "available only in the terminal selection screen; SAP GUI F4 is not supported"))
 	}
-	path, err := FrontendPick(kind, initial, name, title)
-	return path, err == nil && path != ""
+	return FrontendPick(options)
 }
 
 func FrontendFileOpenDialog(_ *Session, title, name, filter, extension, initial, multi string, table any, rc, action *int32) {
@@ -27,11 +34,14 @@ func FrontendFileOpenDialog(_ *Session, title, name, filter, extension, initial,
 	if strings.EqualFold(strings.TrimSpace(multi), "X") {
 		kind = "open-multiple"
 	}
-	if filter != "" || extension != "" {
-		kind += "|" + filter + "|" + extension
+	path, err := frontendPick(FrontendPickOptions{Kind: kind, Initial: initial, Name: name, Title: title, Filter: filter, Extension: extension})
+	if err != nil {
+		if !errors.Is(err, ErrFrontendPickCancel) {
+			*rc = -1
+		}
+		return
 	}
-	path, ok := frontendPick(kind, initial, name, title)
-	if !ok {
+	if path == "" {
 		return
 	}
 	for _, selected := range strings.Split(path, "\x00") {
@@ -46,27 +56,23 @@ func FrontendFileOpenDialog(_ *Session, title, name, filter, extension, initial,
 
 func FrontendFileSaveDialog(_ *Session, title, name, filter, extension, initial, prompt string, filename, dir, fullpath *string, action *int32) {
 	*action = 9
-	kind := "save"
-	if filter != "" || extension != "" || prompt != "" {
-		kind += "|" + filter + "|" + extension + "|" + prompt
-	}
-	path, ok := frontendPick(kind, initial, name, title)
-	if !ok {
+	path, err := frontendPick(FrontendPickOptions{Kind: "save", Initial: initial, Name: name, Title: title, Filter: filter, Extension: extension, Prompt: prompt})
+	if err != nil || path == "" {
 		return
 	}
 	*filename, *dir, *fullpath, *action = filepath.Base(path), filepath.Dir(path), path, 0
 }
 
 func FrontendDirectoryBrowse(_ *Session, title, initial string, selected *string) {
-	path, ok := frontendPick("directory", initial, "", title)
-	if ok {
+	path, err := frontendPick(FrontendPickOptions{Kind: "directory", Initial: initial, Title: title})
+	if err == nil && path != "" {
 		*selected = path
 	}
 }
 
 func F4_FILENAME(_ *Session, args map[string]Data) {
-	path, ok := frontendPick("open", "", "", "")
-	if !ok {
+	path, err := frontendPick(FrontendPickOptions{Kind: "open"})
+	if err != nil || path == "" {
 		return
 	}
 	if target, exists := args["FILE_NAME"]; exists {
@@ -79,8 +85,8 @@ func KD_GET_FILENAME_ON_F4(_ *Session, args map[string]Data) {
 	if !exists {
 		return
 	}
-	path, ok := frontendPick("open", "", strings.TrimSpace(DataString(target)), "")
-	if ok {
+	path, err := frontendPick(FrontendPickOptions{Kind: "open", Name: strings.TrimSpace(DataString(target))})
+	if err == nil && path != "" {
 		MoveData(target, Data{P: &path, T: TString})
 	}
 }

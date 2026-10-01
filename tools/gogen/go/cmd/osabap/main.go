@@ -226,27 +226,13 @@ func graphicalForm(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST_
 			values[f.Name] = selectionInput{value: f.Value}
 		}
 		var pickErr error
-		abap.FrontendPick = func(kind, initial, defaultName, title string) (string, error) {
-			mode := filepick.Open
-			parts := strings.Split(kind, "|")
-			switch parts[0] {
-			case "save":
-				mode = filepick.Save
-			case "directory":
-				mode = filepick.Directory
-			}
-			browser := filepick.Browser{Sandbox: abap.SandboxFromEnv(), Mode: mode, Initial: initial, DefaultName: defaultName, Title: title, Multi: parts[0] == "open-multiple"}
-			if len(parts) > 1 {
-				browser.Patterns = filepick.SAPPatterns(parts[1])
-			}
-			if len(parts) > 2 {
-				browser.Extension = parts[2]
-			}
-			if len(parts) > 3 {
-				browser.ConfirmOverwrite = strings.EqualFold(parts[3], "X")
-			}
+		abap.FrontendPick = func(options abap.FrontendPickOptions) (string, error) {
+			browser := browserForDialog(options)
 			path, err := browser.Run(terminal)
-			if err != nil && !errors.Is(err, filepick.ErrCancel) {
+			if errors.Is(err, filepick.ErrCancel) {
+				return "", abap.ErrFrontendPickCancel
+			}
+			if err != nil {
 				pickErr = err
 			}
 			return path, err
@@ -265,6 +251,17 @@ func graphicalForm(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST_
 		return values[name].value, nil
 	}
 	return form
+}
+
+func browserForDialog(options abap.FrontendPickOptions) filepick.Browser {
+	mode := filepick.Open
+	switch options.Kind {
+	case "save":
+		mode = filepick.Save
+	case "directory":
+		mode = filepick.Directory
+	}
+	return filepick.Browser{Sandbox: abap.SandboxFromEnv(), Mode: mode, Initial: options.Initial, DefaultName: options.Name, Title: options.Title, Multi: options.Kind == "open-multiple", Patterns: filepick.SAPPatterns(options.Filter), Extension: options.Extension, ConfirmOverwrite: strings.EqualFold(options.Prompt, "X")}
 }
 
 func selectionValuesFromFields(fields []termgui.Field, screen ZCL_GG_HOST__TY_RESULT) []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE {
