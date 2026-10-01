@@ -1175,10 +1175,22 @@ export function provenance(model, path) {
   return {node: node["@id"], rule_line: node.rule_line};
 }
 
+// The model the templates render: the compiled rule with the hand-written
+// examples and then the derived cases as one list of tests.
+export function renderModel(compiled) {
+  return {...compiled, tests: [...compiled.examples, ...compiled.cases]};
+}
+
+// The model hash both sidecars carry, "sha256:<hex>" of the rendered model;
+// an L3 set writes it into its runner so an alert names the rule version.
+export function modelHash(model) {
+  return `sha256:${createHash("sha256").update(JSON.stringify(model)).digest("hex")}`;
+}
+
 function sidecar(model, template, rendered) {
   return JSON.stringify({
     generator: "dsl-l2", rule: model.source, template,
-    model: `sha256:${createHash("sha256").update(JSON.stringify(model)).digest("hex")}`,
+    model: modelHash(model),
     lines: rendered.trace.map((entry) => ({line: entry.line, template_line: entry.template_line, path: entry.path,
       ...provenance(model, entry.path)})),
   }, null, 1) + "\n";
@@ -1202,7 +1214,7 @@ export async function renderRule(compiled) {
   // the test class runs the hand-written examples and then the derived cases
   // through one template; the list is made here, so the trace and the model
   // hash are those of what was rendered
-  const model = {...compiled, tests: [...compiled.examples, ...compiled.cases]};
+  const model = renderModel(compiled);
   const {renderRecipe} = await import("./dsl-abap.mjs");
   const quiet = console.log;
   let check, test;

@@ -83,7 +83,11 @@ function replacement(statement, filename) {
     ? `( name = '${name}' ranges = zcl_osd_submit_ranges=>of( ${value} ) )`
     : `( name = '${name}' value = CONV string( ${value} ) )`);
   const input = rows.length === 0 ? "" : ` it_input = VALUE #( ${rows.join(" ")} )`;
-  return job ? `zcl_osd_batch_report=>submit_via_job( iv_program = '${program}' iv_jobname = ${job.name} iv_jobcount = ${job.count} iv_authcknam = sy-uname${input} ).` :
+  // SAP's SUBMIT takes the job name and count in its own types (TBTCJOB-
+  // JOBNAME, CHAR 32; TBTCJOB-JOBCOUNT, CHAR 8); the registry's parameters
+  // are STRING, so each is converted rather than passed by reference
+  // (ANORMALIES 2026-10-01-submit-via-job-char-operands)
+  return job ? `zcl_osd_batch_report=>submit_via_job( iv_program = '${program}' iv_jobname = CONV string( ${job.name} ) iv_jobcount = CONV string( ${job.count} ) iv_authcknam = sy-uname${input} ).` :
     `zcl_osd_batch_report=>submit( iv_program = '${program}'${input} iv_batch = sy-batch ).`;
 }
 

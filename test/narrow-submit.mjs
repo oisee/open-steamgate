@@ -42,10 +42,35 @@ describe("static narrow SUBMIT lowering", () => {
   it("lowers static VIA JOB with bounded scalar selections", () => {
     const before = source("SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_count WITH p_date = lv_date AND RETURN.");
     const after = lowerNarrowSubmit(before, file, core);
-    expect(after).to.contain("submit_via_job( iv_program = 'ZGG_EX_012' iv_jobname = lv_job iv_jobcount = lv_count");
+    expect(after).to.contain("submit_via_job( iv_program = 'ZGG_EX_012' iv_jobname = CONV string( lv_job ) iv_jobcount = CONV string( lv_count )");
     expect(after).to.contain("( name = 'P_DATE' value = CONV string( lv_date ) )");
     expect(after).to.contain("iv_authcknam = sy-uname");
     expect(after.split("\n").length).to.equal(before.split("\n").length);
+  });
+
+  it("takes a job name and count in SAP's own CHAR types (TBTCJOB-JOBNAME, -JOBCOUNT)", () => {
+    // the registry's parameters are STRING: an operand passed as it is would
+    // be a CHAR 32 for a STRING by reference, which the syntax check refuses
+    const stub = `CLASS zcl_osd_batch_report DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    TYPES: BEGIN OF ty_value, name TYPE string, value TYPE string, END OF ty_value.
+    TYPES ty_values TYPE STANDARD TABLE OF ty_value WITH DEFAULT KEY.
+    CLASS-METHODS submit_via_job
+      IMPORTING iv_program TYPE string iv_jobname TYPE string
+                iv_jobcount TYPE string iv_authcknam TYPE syuname
+                it_input TYPE ty_values OPTIONAL.
+ENDCLASS.
+CLASS zcl_osd_batch_report IMPLEMENTATION.
+  METHOD submit_via_job.
+  ENDMETHOD.
+ENDCLASS.`;
+    const before = source("DATA lv_job TYPE c LENGTH 32.\n    DATA lv_count TYPE c LENGTH 8.\n    SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_count WITH p_date = '20251231' AND RETURN.");
+    const after = lowerNarrowSubmit(before, file, core);
+    const config = core.Config.getDefault();
+    const registry = new core.Registry(config).addFile(new core.MemoryFile(file, after))
+      .addFile(new core.MemoryFile("zcl_osd_batch_report.clas.abap", stub)).parse();
+    const syntax = registry.findIssues().filter((issue) => issue.getKey() === "check_syntax").map((issue) => issue.getMessage());
+    expect(syntax).to.deep.equal([]);
   });
 
   it("does not rewrite comments or string literals", () => {
@@ -77,7 +102,7 @@ describe("static narrow SUBMIT lowering", () => {
   it("accepts VIA JOB anywhere among the additions, before AND RETURN", () => {
     const before = source("SUBMIT zgg_ex_012 WITH p_date = lv_date VIA JOB lv_job NUMBER lv_count WITH p_count = 2 AND RETURN.");
     const after = lowerNarrowSubmit(before, file, core);
-    expect(after).to.contain("submit_via_job( iv_program = 'ZGG_EX_012' iv_jobname = lv_job iv_jobcount = lv_count");
+    expect(after).to.contain("submit_via_job( iv_program = 'ZGG_EX_012' iv_jobname = CONV string( lv_job ) iv_jobcount = CONV string( lv_count )");
     expect(after).to.contain("( name = 'P_DATE' value = CONV string( lv_date ) )");
     expect(after).to.contain("( name = 'P_COUNT' value = CONV string( 2 ) )");
     expect(unknownStatements(after)).to.deep.equal([]);
@@ -86,7 +111,7 @@ describe("static narrow SUBMIT lowering", () => {
   it("takes component, instance and static access as one operand", () => {
     const before = source("SUBMIT zgg_ex_012\n      WITH p_date = ls_job-date\n      VIA JOB me->mv_job NUMBER zcl_counter=>gv_count\n      WITH p_count = lo_step->count AND RETURN.");
     const after = lowerNarrowSubmit(before, file, core);
-    expect(after).to.contain("iv_jobname = me->mv_job iv_jobcount = zcl_counter=>gv_count");
+    expect(after).to.contain("iv_jobname = CONV string( me->mv_job ) iv_jobcount = CONV string( zcl_counter=>gv_count )");
     expect(after).to.contain("CONV string( ls_job-date )");
     expect(after).to.contain("CONV string( lo_step->count )");
     expect(after.split("\n").length).to.equal(before.split("\n").length);

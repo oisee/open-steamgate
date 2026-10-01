@@ -1,0 +1,16 @@
+# DSL L3, slice 1: the fleet's rules run as one set, every alert logged in
+# ZOSD_L3_ALERT under its rule's model hash (docs/dsl-l3.md).
+# `node tools/dsl-l3.mjs build src/l2demo/fleet.l3.yaml --out src/l2demo`
+# writes the runner ZCL_L3_FLEET, the job report ZL3_FLEET and their traces.
+set: fleet
+title: Every fleet rule, checked for one date
+date: $date
+rules:
+  - rule: maintenance_ship.l2.yaml
+  - rule: grounded_ship_crew.l2.yaml
+  - rule: ship_captain.l2.yaml
+  - rule: ship_voyage_limit.l2.yaml
+  - rule: ship_min_crew.l2.yaml
+  - rule: ship_cargo_limit.l2.yaml
+  - rule: ship_max_cargo.l2.yaml
+    enabled: false
