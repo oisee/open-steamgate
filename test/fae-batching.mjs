@@ -54,6 +54,30 @@ describe("FAE batching guard", function () {
     }
   });
 
+  it("restores sy and the global even when borrowing the global throws", async () => {
+    const sy = syOf().get();
+    const was = {index: sy.index.get(), subrc: sy.subrc.get(), datum: sy.datum.get()};
+    sy.index.set(7); sy.subrc.set(4); sy.datum.set("20260101");
+    const had = Object.getOwnPropertyDescriptor(globalThis, "abap");
+    Object.defineProperty(globalThis, "abap", {value: had?.value, writable: false, configurable: true, enumerable: true});
+    let error;
+    try {
+      await faeStatements();
+    } catch (e) {
+      error = e;
+    } finally {
+      if (had) Object.defineProperty(globalThis, "abap", had); else delete globalThis.abap;
+    }
+    try {
+      expect(error, "assigning a read-only global must fail the probe").to.be.instanceOf(Error);
+      expect(String(sy.index.get())).to.equal("7");
+      expect(String(sy.subrc.get())).to.equal("4");
+      expect(String(sy.datum.get())).to.equal("20260101");
+    } finally {
+      sy.index.set(was.index); sy.subrc.set(was.subrc); sy.datum.set(was.datum);
+    }
+  });
+
   it("raises the mocha timeout of the hook that asks, the probe transpiles", async () => {
     let asked;
     const context = {timeout: (ms) => { if (ms === undefined) return 2000; asked = ms; return context; }};

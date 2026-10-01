@@ -60,14 +60,15 @@ export async function faeStatements(root = process.cwd()) {
   // sy-mandt would find it changed. Keep every field and put it back.
   const sy = syOf(root).get();
   const saved = Object.entries(sy).map(([name, field]) => [field, field.get()]);
-  const abap = new runtime.ABAP();
   let calls = 0;
-  abap.statements.select = async () => { calls++; };
   // the runtime reaches for a global `abap`; borrow it and give it back, the
-  // suite that asked may have its own
+  // suite that asked may have its own. The constructor and the assignment are
+  // inside the try: either may throw after having written to sy.
   const had = Object.getOwnPropertyDescriptor(globalThis, "abap");
-  globalThis.abap = abap;
   try {
+    const abap = new runtime.ABAP();
+    abap.statements.select = async () => { calls++; };
+    globalThis.abap = abap;
     const run = Object.getPrototypeOf(async function () {}).constructor;
     await new run("abap", code)(abap);
   } finally {
