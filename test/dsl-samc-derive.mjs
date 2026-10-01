@@ -111,9 +111,11 @@ ENDFUNCTION.
       && row.source.some((source) => source.file.endsWith(".clas.p8a.testclasses.abap")))).to.equal(true);
     const rendered = await renderDaemonModel(model);
     expect(firstDifference(rendered.text, readFileSync(capture, "utf8"))).to.be.greaterThan(0);
-    expect(model.authorities).to.have.length(11);
+    expect(model.authorities).to.have.length(12);
+    expect(model.authorities.some((row) => row.program === "ZCL_OSD_T_DMN" && row.channelId === "/pu" && row.activity === "S"
+      && row.source.some((source) => source.line === 300))).to.equal(true);
     expect(model.authorities.filter((row) => row.source.length === 0).map((row) => `${row.program}:${row.channelId}:${row.activity}`))
-      .to.deep.equal(["ZOSD_T_DSUB:/pc:S", "ZCL_OSD_T_DMN:/ps:S", "ZCL_OSD_T_DDRV:/pu:R"]);
+      .to.deep.equal(["ZOSD_T_DSUB:/pc:S", "ZCL_OSD_T_DDRV:/pu:R"]);
   });
 
   it("check reports the drifting XML node and ABAP source", async () => {
