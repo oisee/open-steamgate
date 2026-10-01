@@ -31,7 +31,9 @@ ${beforeEnd}ENDCLASS.
 
 const rows = (text) => findings(text, "zcl_t.clas.abap");
 
-describe("a comment where a system refuses to store one (OO_SOURCE_BASED 012)", () => {
+describe("a comment where a system refuses to store one (OO_SOURCE_BASED 012)", function () {
+  // the CLI and tree cases spawn node and parse every class: seconds on a runner
+  this.timeout(120000);
   describe("refused, as measured", () => {
     it("between two methods of the implementation", () => {
       const text = CLASS("", IMPL("", "", "  \" between\n"));
