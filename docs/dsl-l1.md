@@ -213,8 +213,53 @@ Authority numbers are explicit in the model; the model builder validates or comp
 from each authority's `kind` (`class` by default, `report`, or `function_group`) and derives SAPC's
 XML state flag. The engine escapes XML text.
 
-Stage 2 will derive the model from ABAP plus a declared `<app>.samc.decl.json` overlay beside
-the code. The template will continue to render only decisions already recorded in the model.
+### Derive (stage 2)
+
+`node tools/dsl-samc.mjs derive <folder…> --app ZOSD_T_AMC --decl
+<app>.samc.decl.json --out model.json` walks abapGit class, report and function-group
+ABAP files with abaplint's syntax tree. `check <folder…> --app X --decl … --against
+<file.samc.xml>` derives the same model, renders the SAMC recipe and reports the
+first differing XML line, model node and ABAP source. Without `--out`, derive
+prints JSON. File and source order do not affect the model. The renderer still
+has no inference logic.
+
+The overlay contains `description`, `lang`, optional `version` (default `A`),
+`channels: {"/channel": {"scope": "C"}}`, `extraAuthorities` rows with
+`channelId`, `program`, `kind` and `activity`, and `callSites`. A call site is
+keyed by `basename:line`, full `file:line`, or `PROGRAM.method`, and gives
+`channelIds` (an array) when the channel is dynamic. It may also give
+`applicationIds` or `messageType` when those cannot be proven. A stated value
+that contradicts a statically resolved value refuses the derivation. Scope,
+description and language are declarations; channel IDs, activity and message
+type come from code wherever possible. Every derived channel and authority
+carries its call-site `source` list. XML trace lines point to these nodes.
+
+A producer's declared interface or cast gives `TEXT`, `BINARY` or `PCP`, the
+exact `MESSAGE_TYPE_ID` spellings in the captured XML (`PCP` there). A
+consumer's `start_message_delivery` gives `R`, and the receiver interface gives
+the message type when resolvable. Producer creation gives `S`. SAP documents
+`S` as Send, `R` as Receive, and `C` as Receive via APC WebSocket in
+[Defining an ABAP Messaging Channel Application](https://help.sap.com/docs/SAP_NETWEAVER_AS_ABAP_752/c238d694b825421f940829321ffa326a/5212f332ffec430bbacfc62789692f4f.html).
+The captured file contains only `S` and `R`; `C` therefore requires an
+`extraAuthorities` declaration. Local test class calls count and belong to
+their global class, as SAP's `PROGRAM_ID` does. Authority `NR` is assigned
+deterministically from channel ID, `PROGRAM_ID`, then activity; the capture
+shows that abapGit preserves the configured `NR` order rather than sorting it.
+
+The probe fixture at `test/fixtures/samc-derive/` copies the daemon class and
+the driver's AMC test include. Its overlay must declare the three channel
+scopes and the dynamic channel sets at daemon lines 300 and 550 and driver
+include line 28. The captured authority table grants only five of the ten
+derived rows (eight from calls and two declared extra authorities). In
+particular, it omits the driver's `/pc` test send and receive, the daemon's
+`/ps` receive and `/pu` send and receive. The capture also grants
+`ZOSD_T_DSUB` send on `/pc` even though that report has no AMC call, and
+`ZCL_OSD_T_DDRV` receive on `/pu` without a corresponding direct call in the
+fixture; these two rows are `extraAuthorities`. The derivation deliberately
+reports drift against this capture. Byte identity would require omitting real
+call-site facts or adding an authority selection rule beyond this overlay's
+agreed scope. Stage 1's hand-written model remains the byte-identical capture
+fixture.
 
 ## Steps
 
