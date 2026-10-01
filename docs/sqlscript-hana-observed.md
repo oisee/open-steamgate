@@ -686,7 +686,7 @@ function is ours and was not read off a system:
   inside a SQLScript string is kept, which the stand assumes.
 
 `tools/amdp-corpus-oracle.mjs` creates every corpus body on the local HANA
-Express in that form (one schema, dropped and recreated per run), with an
+Express in that form (a schema of its own per run, `OSD_CORPUS_<runid>`, dropped at the end of that run only; `--sweep` removes what a crashed run left), with an
 empty table of the system's shape for each table it reads, and sorts every
 refusal into whose fault it is. First full run: HANA accepts 204 of the 364
 working bodies; every body the portable compiler accepts, HANA accepts too;

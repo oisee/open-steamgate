@@ -11,6 +11,7 @@
     "test/ir-ranges-a4h.mjs",
     "test/ir-osql-where.mjs",
     "test/amdp-corpus-oracle.mjs",
+    "test/amdp-corpus-oracle-schema.mjs",
     "test/amdp-pack.mjs",
     "test/reserved-words.mjs",
     "test/hana-dialect.mjs",
