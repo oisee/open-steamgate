@@ -1480,13 +1480,14 @@ function classIr(ctx0, obj) {
     try {
       const scope = spaghetti.lookupPosition(node.getFirstToken().getStart(), file.getFilename());
       const ctx = {program, reg, className, scopeName, owner: obj.owner ?? className, method: name, sig, signatures, scope, file, spaghetti, locals: new Map(), temps: 0};
+      const body = node.findDirectStructure(Structures.Body);
       const known = new Set([...sig.params.map((p) => p.name), sig.returning?.name].filter(Boolean));
       ctx.fieldSymbols = new Map();
       for (const [vname, id] of Object.entries(scope.getData().vars)) {
         if (known.has(vname) || vname === "ME" || vname === "SUPER") continue;
         // abaplint leaves SELECT ... INTO TABLE @DATA(x) without a row type.
         // The SELECT field list supplies it when the statement is lowered.
-        if (new RegExp(`\\bINTO\\s+TABLE\\s+@DATA\\s*\\(\\s*${vname}\\s*\\)`, "i").test(file.getRaw())) continue;
+        if (body && new RegExp(`\\bINTO\\s+TABLE\\s+@DATA\\s*\\(\\s*${vname}\\s*\\)`, "i").test(body.concatTokens())) continue;
         const t = typeOf(id.getType(), `${className}=>${name} ${vname}`, program);
         // a field symbol points into a row: only rows of structures, whose
         // reference both backends can hold (a pointer, an object)
@@ -1500,7 +1501,6 @@ function classIr(ctx0, obj) {
           ctx.locals.set(vname, t);
         }
       }
-      const body = node.findDirectStructure(Structures.Body);
       ctx.inits = [];
       const compiled = body === undefined ? [] : block(body, ctx);
       compiled.unshift(...ctx.inits);

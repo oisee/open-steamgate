@@ -7,7 +7,6 @@ import {copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import {basename, dirname, join, resolve} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
-import {convertNativeReport} from "./convert-report.mjs";
 import {home} from "./home.mjs";
 import {checkLibPins} from "./lib-pins.mjs";
 
@@ -37,8 +36,9 @@ mkdirSync(generated, {recursive: true});
 mkdirSync(dir, {recursive: true});
 
 const gui = join(home, ".local", "lars", "open-abap-gui");
+const {convertProgram} = await import(join(gui, "converter", "src", "api.mjs"));
 const source = readFileSync(report, "utf8");
-const converted = await convertNativeReport({source, filename: basename(report), mode: "strict", className, transactionCode: name}, gui);
+const converted = await convertProgram({source, filename: basename(report), mode: "strict", nativePassthrough: true, className, transactionCode: name});
 if (converted.supported !== true || converted.classSource === undefined) {
   throw new Error(`${report}: converter refused the report: ${JSON.stringify(converted.diagnostics)}`);
 }

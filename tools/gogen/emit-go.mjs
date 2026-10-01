@@ -1527,7 +1527,7 @@ ${t}	}`));
       const cmp = st.keys.map((k) => `if a, b := ${get(`r${n}`, k)}, ${get(`v${n}`, k)}; a != b { if a > b { c${n} = 1 } else { c${n} = -1 }; goto done${n} }`);
       return [`${t}{`, `${t}	v${n} := ${st.value.e === "lrow" && needsCopy(st.value.type) ? `${cloneName(st.value.type)}(${rowValue(st.table.type, expr(st.value, ctx))})` : copied(st.value.e === "lrow" ? rowValue(st.table.type, expr(st.value, ctx)) : expr(st.value, ctx), st.value.type, st.value)}`, `${t}	pos${n} := len(${tb})`, `${t}	s.Sy.Subrc = 0`,
         `${t}	for i${n}, r${n} := range ${tb} {`, `${t}		c${n} := 0`, ...cmp.map((x) => `${t}		${x}`), `${t}	done${n}:`,
-        `${t}		if c${n} == 0 {`, `${t}			s.Sy.Subrc = 4`, `${t}			break`, `${t}		}`,
+        ...(st.unique === false ? [] : [`${t}		if c${n} == 0 {`, `${t}			s.Sy.Subrc = 4`, `${t}			break`, `${t}		}`]),
         `${t}		if c${n} > 0 {`, `${t}			pos${n} = i${n}`, `${t}			break`, `${t}		}`, `${t}	}`,
         `${t}	if s.Sy.Subrc == 0 {`, `${t}		${tb} = append(${tb}, ${rowStored(st.table.type, `v${n}`)})`, `${t}		copy(${tb}[pos${n}+1:], ${tb}[pos${n}:])`, `${t}		${tb}[pos${n}] = ${rowStored(st.table.type, `v${n}`)}`, `${t}		abap.BumpTable(&${tb})`,
         ...(st.refInto ? [`${t}		${place(st.refInto, ctx)} = ${rowRef(st.table.type, tb, `${tb}[pos${n}]`)}`] : []), `${t}	}`, `${t}}`];
@@ -1651,6 +1651,22 @@ ${t}	}`));
       const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
       const moves = st.assign.map((a, i) => (a === null ? null
         : `${a.line ? "r" : `r.${ident(a.field)}`} = ${dbColumn(st.cols[i], `c${i}_${n}`, a.type)}`)).filter(Boolean);
+      const keyedRow = () => {
+        const ty = st.target.type;
+        const saved = ctx.lrow;
+        ctx.lrow = "r";
+        const value = {e: "lrow", type: ty.row};
+        const lines = ty.sorted
+          ? stmt({s: "insert_sorted", table: st.target, value,
+            keys: ty.sorted.map((name) => ({name})), unique: ty.unique}, ctx, d + 1)
+          : ty.hashed ? stmt({s: "insert_table", table: st.target, value,
+            unique: true, keys: ty.hashed}, ctx, d + 1)
+          : [`${t}\t${tgt} = append(${tgt}, ${rowStored(ty, "r")})`];
+        ctx.lrow = saved;
+        return [...lines, ...((ty.sorted && ty.unique) || ty.hashed
+          ? [`${t}\tif s.Sy.Subrc == 4 { panic(abap.ArithmeticError{Class: "ITAB_DUPLICATE_KEY", Op: "SELECT INTO TABLE"}) }`]
+          : [])];
+      };
       if (st.fae) {
         // FOR ALL ENTRIES (frontend selectStatement): once per driving row,
         // a row kept only the first time its columns are seen; an empty
@@ -1664,7 +1680,7 @@ ${t}	}`));
           `${t}\t\tabap.Must(scan(${st.cols.map((_, i) => `&k.c${i}`).join(", ")}))`,
           `${t}\t\tif seen${n}[k] {`, `${t}\t\t\treturn`, `${t}\t\t}`, `${t}\t\tseen${n}[k] = true`,
           ...st.cols.map((_, i) => `${t}\t\tc${i}_${n} := k.c${i}\n${t}\t\t_ = c${i}_${n}`),
-          `${t}\t\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t\t${m}`), `${t}\t\t${tgt} = append(${tgt}, ${rowStored(st.target.type, "r")})`, `${t}\t}`,
+          `${t}\t\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t\t${m}`), ...keyedRow(), `${t}\t}`,
           `${t}\tif drv${n} := ${expr(st.fae.table, ctx)}; len(drv${n}) == 0 {`,
           `${t}\t\tabap.Select(s, ${JSON.stringify(st.fae.sql)}, ${sqlArgs(st.fae.args, ctx)}, ${hostPreds(st.fae.preds, ctx)}, row${n})`,
           `${t}\t} else {`,
@@ -1674,19 +1690,12 @@ ${t}	}`));
           `${t}\tif len(seen${n}) > 0 {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 0, int32(len(seen${n}))`, `${t}\t} else {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}\t}`,
           `${t}}`];
       }
-      const sorted = st.target.type.sorted;
-      const hashed = st.target.type.hashed;
-      const duplicate = `panic(abap.ArithmeticError{Class: "ITAB_DUPLICATE_KEY", Op: "SELECT INTO TABLE"})`;
-      const finish = sorted ? [
-        `${t}sort.SliceStable(${tgt}, func(a, b int) bool { x, y := ${tgt}[a], ${tgt}[b]; ${sorted.map((k) => `if x.${ident(k)} != y.${ident(k)} { return x.${ident(k)} < y.${ident(k)} }`).join("; ")}; return false })`,
-        ...(st.target.type.unique ? [`${t}for i := 1; i < len(${tgt}); i++ { if ${sorted.map((k) => `${tgt}[i-1].${ident(k)} == ${tgt}[i].${ident(k)}`).join(" && ")} { ${duplicate} } }`] : []),
-      ] : hashed ? [`${t}for i := 1; i < len(${tgt}); i++ { for j := 0; j < i; j++ { if ${hashed.map((k) => `${tgt}[j].${ident(k)} == ${tgt}[i].${ident(k)}`).join(" && ")} { ${duplicate} } } }`] : [];
       return [`${t}abap.BumpTable(&${tgt})`, ...(st.appending ? [] : [`${t}${tgt} = nil`]),
         `${t}if n${n} := abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
         `${t}\tabap.Must(scan(${st.cols.map((_, i) => `&c${i}_${n}`).join(", ")}))`,
-        `${t}\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t${m}`), `${t}\t${tgt} = append(${tgt}, ${rowStored(st.target.type, "r")})`,
-        `${t}}); n${n} > 0 {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 0, int32(n${n})`, `${t}} else {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}}`, ...finish];
+        `${t}\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t${m}`), ...keyedRow(),
+        `${t}}); n${n} > 0 {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 0, int32(n${n})`, `${t}} else {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}}`];
     }
     case "select_aggregate": {
       const n = ctx.loop++;

@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
-import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {copyFileSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {dirname, join, basename} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -112,6 +112,42 @@ ENDCLASS.
     writeFileSync(join(goDir, "zz_generated_test.go"), `package main\nimport ("testing"; "osg/gogen/abap")\nfunc TestRead(t *testing.T) { if got := ZCL_GOGEN_STATIC_READER_RUN(&abap.Session{}); got != 9 { t.Fatalf("got %d", got) } }\n`);
     const run = spawnSync("go", ["test", `./cmd/${basename(goDir)}`], {cwd: join(here, "go"), encoding: "utf8", timeout: 120000});
     assert.equal(run.status, 0, run.stderr || run.stdout);
+  } finally {
+    rmSync(sourceDir, {recursive: true, force: true});
+    rmSync(goDir, {recursive: true, force: true});
+  }
+});
+
+test("an inline SELECT table name in one method does not hide a local of another method", () => {
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-inline-source-"));
+  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-inline-test-"));
+  try {
+    copyFileSync(join(here, "apps", "notes", "znotes.tabl.xml"), join(sourceDir, "znotes.tabl.xml"));
+    writeFileSync(join(sourceDir, "zcl_gogen_inline_scope.clas.abap"), `
+CLASS zcl_gogen_inline_scope DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS rows RETURNING VALUE(rv) TYPE i.
+    CLASS-METHODS number RETURNING VALUE(rv) TYPE i.
+ENDCLASS.
+CLASS zcl_gogen_inline_scope IMPLEMENTATION.
+  METHOD rows.
+    SELECT id FROM znotes INTO TABLE @DATA(lt).
+    rv = lines( lt ).
+  ENDMETHOD.
+  METHOD number.
+    DATA(lt) = 3.
+    rv = lt.
+  ENDMETHOD.
+ENDCLASS.
+`);
+    const program = compileProgram({folders: [sourceDir], objects: ["ZCL_GOGEN_INLINE_SCOPE"]});
+    const generated = emitGo(program);
+    assert.doesNotMatch(generated, /NOT_COMPILED in ZCL_GOGEN_INLINE_SCOPE/);
+    writeFileSync(join(goDir, "zz_generated.go"), generated);
+    const build = spawnSync("go", ["test", `./cmd/${basename(goDir)}`], {
+      cwd: join(here, "go"), encoding: "utf8", timeout: 120000,
+    });
+    assert.equal(build.status, 0, build.stderr || build.stdout);
   } finally {
     rmSync(sourceDir, {recursive: true, force: true});
     rmSync(goDir, {recursive: true, force: true});

@@ -260,13 +260,17 @@ ENDCLASS.
 PARAMETERS p_id TYPE i.
 DATA gt_notes TYPE STANDARD TABLE OF znotes WITH DEFAULT KEY.
 DATA gt_sorted TYPE SORTED TABLE OF znotes WITH UNIQUE KEY id.
+DATA gt_sorted_multi TYPE SORTED TABLE OF znotes WITH NON-UNIQUE KEY text.
 DATA gt_hash TYPE HASHED TABLE OF znotes WITH UNIQUE KEY id.
 DATA gt_sorted_text TYPE SORTED TABLE OF znotes WITH UNIQUE KEY text.
+DATA gt_hash_text TYPE HASHED TABLE OF znotes WITH UNIQUE KEY text.
 DATA gs_note TYPE znotes.
 DATA gv_max TYPE i.
 DATA gv_rc TYPE i.
 DATA gv_limit TYPE i.
 DATA gv_group TYPE string.
+DATA gv_name TYPE string.
+DATA gv_n TYPE i.
 START-OF-SELECTION.
   SELECT MAX( id ) FROM znotes INTO gv_max.
   gv_rc = sy-subrc.
@@ -280,14 +284,28 @@ START-OF-SELECTION.
   SELECT * FROM znotes INTO TABLE gt_sorted.
   READ TABLE gt_sorted INTO gs_note INDEX 1.
   WRITE: / 'SORTED', lines( gt_sorted ), gs_note-id.
+  SELECT * FROM znotes INTO TABLE gt_sorted_multi.
+  READ TABLE gt_sorted_multi INTO gs_note INDEX 1.
+  WRITE: / 'SORTED-MULTI', lines( gt_sorted_multi ), gs_note-text.
   SELECT * FROM znotes INTO TABLE gt_hash.
   WRITE: / 'HASHED', lines( gt_hash ).
   SELECT id, text FROM znotes WHERE id >= @p_id INTO TABLE @DATA(lt_new).
   WRITE: / 'INLINE', lines( lt_new ), sy-dbcnt.
   gv_group = zcl_sql_corpus_groups=>run( ).
   WRITE: / 'GROUP', gv_group.
+  CLEAR gv_group.
+  SELECT text COUNT(*) FROM znotes INTO (gv_name, gv_n) GROUP BY text.
+    gv_group = gv_group && gv_name && ':' && gv_n && ':' && 'p_id' && ';'.
+  ENDSELECT.
+  WRITE: / 'NATIVE', gv_group.
   IF p_id = 0.
     SELECT * FROM znotes INTO TABLE gt_sorted_text.
+  ELSEIF p_id = 1.
+    SELECT * FROM znotes APPENDING TABLE gt_sorted_text.
+  ELSEIF p_id = 2.
+    SELECT * FROM znotes INTO TABLE gt_hash_text.
+  ELSEIF p_id = 3.
+    SELECT * FROM znotes APPENDING TABLE gt_hash_text.
   ENDIF.
 `);
     execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
@@ -297,15 +315,19 @@ START-OF-SELECTION.
     assert.match(result.stdout, /TOP\s+10\s+12/);
     assert.match(result.stdout, /APPEND\s+12\s+2/);
     assert.match(result.stdout, /SORTED\s+12\s+1/);
+    assert.match(result.stdout, /SORTED-MULTI\s+12\s+alpha/);
     assert.match(result.stdout, /HASHED\s+12/);
     assert.match(result.stdout, /INLINE\s+3\s+3/);
     assert.match(result.stdout, /GROUP\s+alpha:5;beta:4;gamma:3;\/3/);
+    assert.match(result.stdout, /NATIVE\s+alpha:5:p_id;beta:4:p_id;gamma:3:p_id;/);
     const empty = run(["-db", join(dir, "empty.db"), "--p-id", "10"]);
     assert.equal(empty.status, 0, empty.stderr);
     assert.match(empty.stdout, /MAX\s+0\s+0\s+1/);
-    const duplicate = run(["-db", db, "--p-id", "0"]);
-    assert.equal(duplicate.status, 1);
-    assert.match(duplicate.stderr, /ITAB_DUPLICATE_KEY/);
+    for (const target of [0, 1, 2, 3]) {
+      const duplicate = run(["-db", db, "--p-id", String(target)]);
+      assert.equal(duplicate.status, 1, `target ${target}: ${duplicate.stderr}`);
+      assert.match(duplicate.stderr, /ITAB_DUPLICATE_KEY/);
+    }
   } finally {
     rmSync(dir, {recursive: true, force: true});
   }
