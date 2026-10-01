@@ -27,7 +27,9 @@
 //                            connection, a job, a stateless request that is
 //                            its own session); the handle goes with it
 //   enqueue / dequeue /      from the generated ENQUEUE_<obj> / DEQUEUE_<obj>,
-//   dequeueAll / read        DEQUEUE_ALL and ENQUEUE_READ
+//   dequeueAll / read        DEQUEUE_ALL and ENQUEUE_READ; enqueue with
+//                            _WAIT takes {sleep}: the host's sleep that gives
+//                            up the work process (there is no default)
 //   commit(sid, updated)     at COMMIT WORK, updated = an update module was
 //                            registered in this LUW; keep what it returns
 //   updateDone(sid, ended)   when that update has run (COMMIT WORK AND WAIT:
@@ -164,7 +166,17 @@ export class LockServer {
   /** ENQUEUE: with wait a refusal is retried once a second for five seconds
    * (measured: a lock that stays held fails after about 4.7 s, one released
    * after about 1 s is granted after about 1.0 s) */
-  async enqueue(sid, r, {wait = false, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))} = {}) {
+  async enqueue(sid, r, {wait = false, sleep} = {}) {
+    // there is no default sleep: a host has one work process, and a sleep
+    // that keeps it lets the holder's DEQUEUE, queued behind, never run (the
+    // waiter fails while the lock was ready to go). The host passes the sleep
+    // that gives the work process up meanwhile, as its WAIT UP TO does
+    // (tools/osd-dialog-step.mjs: commit, release, take it back). On a
+    // system the waiting work process stays busy and others serve; here the
+    // yield costs the implicit commit WAIT costs.
+    if (wait && typeof sleep !== "function") {
+      throw new Error("osd-enq: ENQUEUE with _WAIT needs the host's sleep that gives up the work process");
+    }
     for (let attempt = 0; ; attempt++) {
       const res = this.tryEnqueue(sid, r);
       if (res.subrc !== 1 || !wait || attempt >= WAIT_TRIES) return res;
@@ -267,11 +279,12 @@ export class LockServer {
 
   /** the session's current update owner (GUSRVB of its next _SCOPE 2 lock) */
   updateOwner(sid) {
-    return this.sessions.get(sid)?.update ?? "";
+    return this.live(sid)?.update ?? "";
   }
 
   /** ENQUEUE_READ: an empty filter field matches every row */
   read({client = "", table = "", user = ""} = {}) {
+    if (this.closed) return [];
     return this.rows
       .filter((w) => (!client || w.client === client) && (!table || w.table === table) && (!user || w.user === user))
       .map((w) => ({...w, taken: new Date(w.taken)}));

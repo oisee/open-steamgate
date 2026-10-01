@@ -280,6 +280,35 @@ describe("the lock server's own rules beyond the fixtures", function () {
     srv.close();
     expect((await srv.enqueue(a, lockOn("A", "E", 2))).subrc).to.equal(2);
     expect(srv.commit(a, true)).to.equal("");
+    expect(srv.read()).to.deep.equal([]);
+    expect(srv.updateOwner(a)).to.equal("");
+  });
+
+  it("refuses _WAIT without the host's yielding sleep", async () => {
+    const srv = new LockServer("i");
+    const a = srv.open("U");
+    let error;
+    try { await srv.enqueue(a, lockOn("A", "E", 2), {wait: true}); } catch (e) { error = e; }
+    expect(String(error)).to.match(/needs the host's sleep/);
+  });
+
+  it("grants a _WAIT whose holder's DEQUEUE is queued behind it on the one work process", async () => {
+    // a toy work process, first come first served, as osd-dialog-step's: a
+    // step holds it; the waiter's sleep gives it up and takes it back
+    const queue = [];
+    let held = false;
+    const acquire = () => new Promise((resolve) => { if (!held) { held = true; resolve(); } else queue.push(resolve); });
+    const release = () => { const next = queue.shift(); if (next) next(); else held = false; };
+    const step = async (work) => { await acquire(); try { return await work(); } finally { release(); } };
+    const yieldingSleep = async (ms) => { release(); await new Promise((r) => setTimeout(r, ms / 100)); await acquire(); };
+    const srv = new LockServer("i");
+    const holder = srv.open("H");
+    const waiter = srv.open("W");
+    await step(() => srv.enqueue(holder, lockOn("A", "E", 2)));
+    const waiting = step(() => srv.enqueue(waiter, lockOn("A", "E", 2), {wait: true, sleep: yieldingSleep}));
+    const freed = step(async () => srv.dequeue(holder, lockOn("A", "E", 2)));
+    const [res] = await Promise.all([waiting, freed]);
+    expect(res.subrc).to.equal(0);
   });
 
   it("lets one of many concurrent sessions have an E lock", async () => {
