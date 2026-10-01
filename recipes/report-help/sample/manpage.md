@@ -21,10 +21,10 @@ zreportdemo - ABAP report
 : DATS, default sy-datum TO sy-datum
 
 --in, --p-in
-: CHAR(1), radio DIR, default 'X'
+: CHAR(1), radio DIR, takes a value: --in=<value>, default 'X'
 
 --out, --p-out
-: CHAR(1), radio DIR
+: CHAR(1), radio DIR, takes a value: --out=<value>
 
 --date, --p-date
 : DATS, default sy-datum
@@ -34,6 +34,12 @@ zreportdemo - ABAP report
 
 --plain, --p-plain
 : CHAR(1)
+
+--dot, --p-dot
+: CHAR(2)
+
+--len, --p-len
+: CHAR(10)
 
 DIR
 : Radio group: --in, --out

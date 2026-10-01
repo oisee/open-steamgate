@@ -4,6 +4,7 @@ import {basename, dirname, join, resolve} from "node:path";
 import {createRequire} from "node:module";
 import {home} from "./gogen/home.mjs";
 import {DDIC_PROVIDER, registryFor} from "./dsl-ddic.mjs";
+import {stripLiterals} from "./abap-additions.mjs";
 
 const require = createRequire(import.meta.url);
 const {DDIC} = require("@abaplint/core/build/src/ddic.js");
@@ -52,10 +53,13 @@ export async function reportModel(input) {
     const referred = /\bFOR\s+(\w+)/i.exec(item.additions ?? "")?.[1]?.toUpperCase();
     const reference = selections.find((candidate) => candidate.name.toUpperCase() === referred);
     const dataType = reference?.dataType ?? item.dataType;
-    const implicitChar = item.kind === "parameter" && !/\b(?:TYPE|LIKE|AS)\b/i.test(item.additions ?? "");
+    const implicitChar = item.kind === "parameter" && !/\b(?:TYPE|LIKE|AS)\b/i.test(stripLiterals(item.additions));
+    // Obsolete length syntax: PARAMETERS p(10). reaches the IR as typ STRING
+    // with additions starting "(10)"; it is a C of that length.
+    const implicitLength = implicitChar ? Number(/^\s*\((\d+)\)/.exec(item.additions ?? "")?.[1] ?? 1) : 1;
     const typeName = checkbox || group || implicitChar ? "C" : dataType?.rollname ?? dataType?.typ;
     if (!typeName) throw new Error(`${report}: ${name} has no type`);
-    const type = ddic.lookupBuiltinType(typeName, checkbox || group || implicitChar ? 1 : dataType?.length, dataType?.decimals)
+    const type = ddic.lookupBuiltinType(typeName, implicitChar ? implicitLength : checkbox || group ? 1 : dataType?.length, dataType?.decimals)
       ?? ddic.lookup(typeName).type;
     const display = DDIC_PROVIDER.type(ddic.reg, type, typeName);
     // The converter keeps additions in IR but its default field currently
@@ -70,8 +74,8 @@ export async function reportModel(input) {
     const typeLabel = display.length === undefined ? baseLabel : `${baseLabel}(${display.length}${display.decimals ? `,${display.decimals}` : ""})`;
     const facts = [typeLabel,
       ...(checkbox ? ["flag"] : []), ...(/\bOBLIGATORY\b/i.test(item.additions ?? "") ? ["obligatory"] : []),
-      ...(group ? [`radio ${group}`] : [])].join(", ");
-    const selectionText = /^D\s*\.$/i.test(item.text?.trim() ?? "") ? "" : item.text && item.text !== item.name ? item.text : "";
+      ...(group ? [`radio ${group}, takes a value: ${cli[0]}=<value>`] : [])].join(", ");
+    const selectionText = /^(?:D\s+)?\.$/.test(item.text?.trim() ?? "") ? "" : item.text && item.text !== item.name ? item.text : "";
     return {"@id": `report/${program}/sel/${name}`, name, kind, source_kind: item.kind, cli, cli_label: cli.join(", "),
       "@type": display, ...defaultFields(raw, "default", ddic, type, typeName),
       ...defaultFields(upper, "default_to", ddic, type, typeName),
@@ -82,6 +86,16 @@ export async function reportModel(input) {
       text: selectionText,
       type_label: typeLabel, facts, positional: item.kind === "parameter" && !checkbox, checkbox};
   });
+  const claimed = new Map();
+  for (const element of elements) {
+    for (const cli of element.cli) {
+      const other = claimed.get(cli);
+      if (other && other !== element.name) {
+        throw new Error(`${report}: ${other} and ${element.name} both claim ${cli}`);
+      }
+      claimed.set(cli, element.name);
+    }
+  }
   const selectionNames = names(elements);
   const positionals = elements.filter((element) => element.positional).map((element) => element.name);
   const checkboxes = elements.filter((element) => element.checkbox).map((element) => element.name);
@@ -91,7 +105,7 @@ export async function reportModel(input) {
       members: elements.filter((element) => element.radio_group === name).map((element) => element.cli[0]).join(", ")}));
   return {"@id": `report/${program}`, name: program.toLowerCase(), elements, groups,
     selection_names: selectionNames, positionals, checkboxes, ranges,
-    go_selection_names: goList(selectionNames), go_positionals: goList(positionals),
+    positional_line: positionals.join(", "), go_selection_names: goList(selectionNames), go_positionals: goList(positionals),
     go_checkboxes: goMap(checkboxes), go_ranges: goMap(ranges),
     go_selection_decl: `var appSelectionNames = []string{${goList(selectionNames)}}`,
     go_positionals_decl: `var appPositionals = []string{${goList(positionals)}}`,

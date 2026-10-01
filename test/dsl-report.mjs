@@ -4,6 +4,7 @@ import {tmpdir} from "node:os";
 import {basename, join} from "node:path";
 import {home} from "../tools/gogen/home.mjs";
 import {reportModel, renderReport} from "../tools/dsl-report.mjs";
+import {stripLiterals} from "../tools/abap-additions.mjs";
 
 const sample = "recipes/report-help/sample";
 const generatorSource = readFileSync("tools/gogen/osabap.mjs", "utf8");
@@ -61,8 +62,8 @@ describe("report selection L1", function () {
     const manpage = await renderReport("manpage", sample);
     expect(manpage.text).to.equal(readFileSync(join(sample, "manpage.md"), "utf8"));
     const lines = rendered.text.trimEnd().split("\n");
-    for (let index = 2; index < 2 + rendered.model.elements.length; index++) {
-      expect(rendered.trace[index].node, lines[index]).to.equal(rendered.model.elements[index - 2]["@id"]);
+    for (let index = 3; index < 3 + rendered.model.elements.length; index++) {
+      expect(rendered.trace[index].node, lines[index]).to.equal(rendered.model.elements[index - 3]["@id"]);
     }
     const members = rendered.model.elements.filter((item) => item.radio_group === "DIR").map((item) => item["@id"]);
     expect(rendered.trace.find((entry) => entry.node === rendered.model.groups[0]["@id"]).nodes).to.deep.equal(members);
@@ -102,6 +103,12 @@ describe("report selection L1", function () {
     expect(plain.type_label).to.equal("CHAR(1)");
     expect(plain["@type"]).to.include({built_in: "CHAR", length: 1});
     expect(plain.text).to.equal("");
+    // a bare "." TPOOL entry is the same marker as "D       ."
+    expect(byName("P_DOT").text).to.equal("");
+    expect(byName("P_DOT")).not.to.have.property("selection_text");
+    // obsolete length syntax: PARAMETERS p(10).
+    expect(byName("P_LEN").type_label).to.equal("CHAR(10)");
+    expect(byName("P_LEN")["@type"]).to.include({built_in: "CHAR", length: 10});
     expect(name.selection_text).to.equal("Your name");
     expect([inButton.radio_group, outButton.radio_group]).to.deep.equal(["DIR", "DIR"]);
     expect(model.groups[0].members).to.equal("--in, --out");
@@ -110,8 +117,38 @@ describe("report selection L1", function () {
       const file = join(dir, "zdecimal.prog.abap");
       writeFileSync(file, "REPORT zdecimal.\nPARAMETERS p_amount TYPE p LENGTH 8 DECIMALS 2.\nSTART-OF-SELECTION.\n WRITE p_amount.\n");
       expect((await reportModel(file)).elements[0].type_label).to.equal("DEC(8,2)");
+      // a literal that spells a keyword does not hide the implicit C
+      const quoted = join(dir, "zquoted.prog.abap");
+      writeFileSync(quoted, "REPORT zquoted.\nPARAMETERS p_q(4) DEFAULT 'LIKE'.\nPARAMETERS p_t(4) DEFAULT `TYPE`.\nSTART-OF-SELECTION.\n WRITE p_q.\n");
+      expect((await reportModel(quoted)).elements.map((item) => item.type_label)).to.deep.equal(["CHAR(4)", "CHAR(4)"]);
     } finally {
       rmSync(dir, {recursive: true, force: true});
     }
+  });
+
+  it("prints the positional order and refuses two elements with one CLI name", async () => {
+    const help = (await renderReport("help", sample)).text.split("\n");
+    expect(help[1]).to.equal("Positionals, in order: P_NAME, P_IN, P_OUT, P_DATE, P_CONST, P_PLAIN, P_DOT, P_LEN");
+    expect(help.filter((line) => line.includes("=<value>")).map((line) => line.trim().split(" ")[0]))
+      .to.deep.equal(["--in,", "--out,"]);
+    const dir = mkdtempSync(join(tmpdir(), "report-clash-"));
+    try {
+      const file = join(dir, "zclash.prog.abap");
+      writeFileSync(file, "REPORT zclash.\nDATA gv TYPE i.\nPARAMETERS p_s_tag TYPE c LENGTH 2.\nSELECT-OPTIONS s_tag FOR gv.\nSTART-OF-SELECTION.\n WRITE gv.\n");
+      let message = "";
+      try { await reportModel(file); } catch (error) { message = error.message; }
+      expect(message).to.match(/P_S_TAG/).and.match(/S_TAG/).and.match(/--s-tag/);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
+  it("stripLiterals blanks quoted and backticked literals, keeping length", () => {
+    expect(stripLiterals("DEFAULT 'LIKE' OBLIGATORY")).to.equal("DEFAULT        OBLIGATORY");
+    expect(stripLiterals("DEFAULT `TYPE`")).to.equal("DEFAULT       ");
+    expect(stripLiterals("DEFAULT 'it''s TYPE' LIKE x")).to.equal(`DEFAULT ${" ".repeat(12)} LIKE x`);
+    expect(stripLiterals("DEFAULT `a``AS``b` AS CHECKBOX")).to.equal(`DEFAULT ${" ".repeat(10)} AS CHECKBOX`);
+    expect(stripLiterals("")).to.equal("");
+    expect(stripLiterals(undefined)).to.equal("");
   });
 });
