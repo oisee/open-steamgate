@@ -83,9 +83,26 @@ CLASS zcl_osd_inflate DEFINITION PUBLIC FINAL CREATE PUBLIC.
       mv_unused      TYPE xstring,
       mv_paused      TYPE abap_bool,
       mv_room        TYPE i,
+      mv_opened      TYPE abap_bool,
+      mv_host        TYPE i,
       ms_len         TYPE ty_huff,
       ms_dist        TYPE ty_huff.
 
+    "! The decoder of a host that has one of its own (the Go runtime of
+    "! osabap, go/abap/inflate.go): a handle, or 0 when there is none, as
+    "! here and on a system, and FEED decodes in ABAP
+    CLASS-METHODS host_open
+      RETURNING VALUE(rv_handle) TYPE i.
+    "! FEED on the host's decoder. EV_STATE: 1 paused, 2 done (EV_UNUSED
+    "! holds the bytes after the end); EV_REASON a corrupt stream
+    CLASS-METHODS host_feed
+      IMPORTING iv_handle  TYPE i
+                iv_data    TYPE xstring
+                iv_max_out TYPE i
+      EXPORTING ev_raw     TYPE xstring
+                ev_state   TYPE i
+                ev_unused  TYPE xstring
+                ev_reason  TYPE string.
     CLASS-METHODS ints
       IMPORTING iv_list        TYPE string
       RETURNING VALUE(rt_ints) TYPE ty_ints.
@@ -252,6 +269,14 @@ CLASS zcl_osd_inflate IMPLEMENTATION.
     lo_inflate->finish( ).
   ENDMETHOD.
 
+  METHOD host_open.
+    rv_handle = 0.
+  ENDMETHOD.
+
+  METHOD host_feed.
+    CLEAR: ev_raw, ev_state, ev_unused, ev_reason.
+  ENDMETHOD.
+
   METHOD feed.
     DATA lv_from TYPE i.
     DATA lv_len TYPE i.
@@ -263,10 +288,34 @@ CLASS zcl_osd_inflate IMPLEMENTATION.
     DATA lv_piece TYPE xstring.
     DATA lv_emitted TYPE i.
     DATA lt_out TYPE STANDARD TABLE OF xstring WITH DEFAULT KEY.
+    DATA lv_state TYPE i.
+    DATA lv_reason TYPE string.
 
     mv_paused = abap_false.
     IF mv_state = c_done.
       CONCATENATE mv_unused iv_data INTO mv_unused IN BYTE MODE.
+      RETURN.
+    ENDIF.
+
+    IF mv_opened = abap_false.
+      mv_opened = abap_true.
+      mv_host = host_open( ).
+    ENDIF.
+    IF mv_host <> 0.
+      host_feed( EXPORTING iv_handle  = mv_host
+                           iv_data    = iv_data
+                           iv_max_out = iv_max_out
+                 IMPORTING ev_raw     = rv_raw
+                           ev_state   = lv_state
+                           ev_unused  = mv_unused
+                           ev_reason  = lv_reason ).
+      IF lv_reason IS NOT INITIAL.
+        fail( lv_reason ).
+      ENDIF.
+      mv_paused = boolc( lv_state = 1 ).
+      IF lv_state = 2.
+        mv_state = c_done.
+      ENDIF.
       RETURN.
     ENDIF.
 

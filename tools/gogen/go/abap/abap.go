@@ -38,6 +38,9 @@ type Session struct {
 	// httpc: what Node keeps on each CL_HTTP_CLIENT object (its socket, the
 	// headers and the answer of a SEND), by the object (httpc.go)
 	httpc map[any]*httpcClient
+	// inflate: the decoders of ZCL_OSD_INFLATE=>HOST_* by handle (inflate.go)
+	inflate    map[int32]*inflater
+	inflateSeq int32
 }
 
 // ArithmeticError is a class-based ABAP exception, raised as a Go panic and

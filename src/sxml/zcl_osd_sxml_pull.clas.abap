@@ -111,6 +111,26 @@ CLASS zcl_osd_sxml_pull DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS code_unit
       IMPORTING iv_code      TYPE i
       RETURNING VALUE(rv_char) TYPE string.
+    "! IV_PART as text when it is UTF-8 the code page conversion takes back
+    "! unchanged (EV_OK = 1), else EV_OK = 0: the first half of PIECE,
+    "! which a native build may answer from the host
+    CLASS-METHODS utf8_text
+      IMPORTING iv_part TYPE xstring
+      EXPORTING ev_text TYPE string
+                ev_ok   TYPE i.
+    "! the offset in IV_BUF, from IV_FROM, of the first byte that ends a name
+    "! (white space, / > = ?), or the length of IV_BUF: the loop of TAKE_NAME,
+    "! which a native build may answer from the host
+    CLASS-METHODS name_end
+      IMPORTING iv_buf        TYPE xstring
+                iv_from       TYPE i
+      RETURNING VALUE(rv_end) TYPE i.
+    "! the offset in IV_BUF, from IV_FROM, of the first byte that is not white
+    "! space (blank, tab, LF, CR), or the length of IV_BUF
+    CLASS-METHODS space_end
+      IMPORTING iv_buf        TYPE xstring
+                iv_from       TYPE i
+      RETURNING VALUE(rv_end) TYPE i.
     "! one code point, as one character or a surrogate pair
     CLASS-METHODS code_point
       IMPORTING iv_code      TYPE i
@@ -263,9 +283,6 @@ CLASS zcl_osd_sxml_pull DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_at     TYPE i
       RAISING   cx_sxml_parse_error.
     METHODS whitespace.
-    METHODS is_space
-      IMPORTING iv_byte       TYPE ty_byte
-      RETURNING VALUE(rv_yes) TYPE abap_bool.
     METHODS take_name
       RETURNING VALUE(rv_name) TYPE string
       RAISING   cx_sxml_parse_error.
@@ -555,29 +572,36 @@ CLASS zcl_osd_sxml_pull IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD utf8_text.
+    DATA lv_back TYPE xstring.
+    CLEAR: ev_text, ev_ok.
+    TRY.
+        ev_text = cl_abap_codepage=>convert_from( iv_part ).
+        lv_back = cl_abap_codepage=>convert_to( ev_text ).
+        IF lv_back = iv_part.
+          ev_ok = 1.
+        ENDIF.
+      CATCH cx_root.
+        ev_ok = 0.
+    ENDTRY.
+  ENDMETHOD.
+
   METHOD piece.
 * the bytes [IV_BEGIN, IV_BEGIN + IV_LENGTH) as text. Valid UTF-8 goes
 * through the code page conversion, checked by converting back (a host
 * that replaces instead of raising fails the round trip); anything else
 * is decoded by REPLACED with the rules measured on a system
     DATA lv_part TYPE xstring.
-    DATA lv_back TYPE xstring.
-    DATA lv_ok TYPE abap_bool.
+    DATA lv_ok TYPE i.
     IF iv_length <= 0.
       RETURN.
     ENDIF.
     lv_part = bytes( iv_begin  = iv_begin
                      iv_length = iv_length ).
-    TRY.
-        rv_text = cl_abap_codepage=>convert_from( lv_part ).
-        lv_back = cl_abap_codepage=>convert_to( rv_text ).
-        IF lv_back = lv_part.
-          lv_ok = abap_true.
-        ENDIF.
-      CATCH cx_root.
-        lv_ok = abap_false.
-    ENDTRY.
-    IF lv_ok = abap_false.
+    utf8_text( EXPORTING iv_part = lv_part
+               IMPORTING ev_text = rv_text
+                         ev_ok   = lv_ok ).
+    IF lv_ok = 0.
       rv_text = replaced( iv_part  = lv_part
                           iv_begin = iv_begin ).
     ENDIF.
@@ -916,33 +940,58 @@ CLASS zcl_osd_sxml_pull IMPLEMENTATION.
     mv_eof = abap_false.
   ENDMETHOD.
 
-  METHOD is_space.
-    IF iv_byte = c_space OR iv_byte = c_tab OR iv_byte = c_lf OR iv_byte = c_cr.
-      rv_yes = abap_true.
-    ENDIF.
-  ENDMETHOD.
 
   METHOD whitespace.
+    DATA lv_end TYPE i.
     WHILE has( mv_pos ) = abap_true.
-      IF is_space( byte_at( mv_pos ) ) = abap_false.
+      lv_end = space_end( iv_buf  = mv_buf
+                          iv_from = mv_pos - mv_base ).
+      mv_pos = mv_base + lv_end.
+      IF lv_end < xstrlen( mv_buf ).
         EXIT.
       ENDIF.
-      mv_pos = mv_pos + 1.
+    ENDWHILE.
+  ENDMETHOD.
+
+  METHOD name_end.
+    DATA lv_byte TYPE ty_byte.
+    rv_end = iv_from.
+    WHILE rv_end < xstrlen( iv_buf ).
+      lv_byte = iv_buf+rv_end(1).
+      IF lv_byte = c_space OR lv_byte = c_slash OR lv_byte = c_gt OR lv_byte = c_eq
+          OR lv_byte = c_quest OR lv_byte = c_lf OR lv_byte = c_tab OR lv_byte = c_cr.
+        RETURN.
+      ENDIF.
+      rv_end = rv_end + 1.
+    ENDWHILE.
+  ENDMETHOD.
+
+  METHOD space_end.
+    DATA lv_byte TYPE ty_byte.
+    rv_end = iv_from.
+    WHILE rv_end < xstrlen( iv_buf ).
+      lv_byte = iv_buf+rv_end(1).
+      IF lv_byte <> c_space AND lv_byte <> c_tab AND lv_byte <> c_lf AND lv_byte <> c_cr.
+        RETURN.
+      ENDIF.
+      rv_end = rv_end + 1.
     ENDWHILE.
   ENDMETHOD.
 
   METHOD take_name.
+* the name runs to the first delimiter; a name cut by the end of the window
+* goes on in the next chunk
     DATA lv_begin TYPE i.
-    DATA lv_byte TYPE ty_byte.
+    DATA lv_end TYPE i.
     DATA lv_c TYPE c LENGTH 1.
     lv_begin = mv_pos.
     WHILE has( mv_pos ) = abap_true.
-      lv_byte = byte_at( mv_pos ).
-      IF lv_byte = c_space OR lv_byte = c_slash OR lv_byte = c_gt OR lv_byte = c_eq
-          OR lv_byte = c_quest OR lv_byte = c_lf OR lv_byte = c_tab OR lv_byte = c_cr.
+      lv_end = name_end( iv_buf  = mv_buf
+                         iv_from = mv_pos - mv_base ).
+      mv_pos = mv_base + lv_end.
+      IF lv_end < xstrlen( mv_buf ).
         EXIT.
       ENDIF.
-      mv_pos = mv_pos + 1.
     ENDWHILE.
     IF lv_begin = mv_pos.
       fail( iv_reason = 'document not wellformed'
