@@ -261,7 +261,9 @@ func browserForDialog(options abap.FrontendPickOptions) filepick.Browser {
 	case "directory":
 		mode = filepick.Directory
 	}
-	return filepick.Browser{Sandbox: abap.SandboxFromEnv(), Mode: mode, Initial: options.Initial, DefaultName: options.Name, Title: options.Title, Multi: options.Kind == "open-multiple", Patterns: filepick.SAPPatterns(options.Filter), Extension: options.Extension, ConfirmOverwrite: strings.EqualFold(options.Prompt, "X")}
+	// The generated call passes "" when PROMPT_ON_OVERWRITE is omitted;
+	// SAP's documented default is X. An explicit space disables the prompt.
+	return filepick.Browser{Sandbox: abap.SandboxFromEnv(), Mode: mode, Initial: options.Initial, DefaultName: options.Name, Title: options.Title, Multi: options.Kind == "open-multiple", Patterns: filepick.SAPPatterns(options.Filter), Extension: options.Extension, ConfirmOverwrite: options.Kind == "save" && (options.Prompt == "" || strings.EqualFold(strings.TrimSpace(options.Prompt), "X"))}
 }
 
 func selectionValuesFromFields(fields []termgui.Field, screen ZCL_GG_HOST__TY_RESULT) []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE {

@@ -1,6 +1,6 @@
 // Work only on statements accepted by abaplint. Source spans keep comments and
 // string literals byte-for-byte intact when the converter's F4 shortcut needs
-// an assignment spelled as MOVE.
+// assignments spelled as MOVE.
 export function prepareF4(source, parsed) {
   const statements = parsed.units[0].statements;
   const fields = [];
@@ -26,7 +26,10 @@ export function prepareF4(source, parsed) {
     const original = source.slice(st.span.startOffset, st.span.endOffset);
     // The parser has already found the statement's final period. Internal
     // periods in a quoted value are data, not another statement boundary.
-    const match = new RegExp(`^(${active})\\s*=\\s*([\\s\\S]+)\\.$`, "i").exec(original.trim());
+    // The converter searches for the first simple assignment anywhere in the
+    // event and replaces the whole body with its value. Rewriting just the F4
+    // field still loses the body if a helper assignment comes first (or later).
+    const match = /^([A-Z][A-Z0-9_]*)\s*=\s*([\s\S]+)\.$/i.exec(original.trim());
     if (match) edits.push({start: st.span.startOffset, end: st.span.endOffset, text: `MOVE ${match[2]} TO ${match[1]}.`});
   }
   let convertedSource = source;

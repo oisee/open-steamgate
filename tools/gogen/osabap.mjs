@@ -57,9 +57,9 @@ for (const [, item] of tpool.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
   if (field("ID") === "S" && entry !== ".") textPool[field("KEY").toUpperCase()] = entry;
   if (field("ID") === "I") textPool[`TEXT-${field("KEY").toUpperCase()}`] = entry;
 }
-// The converter's simple-assignment F4 shortcut discards all statements
-// preceding `field = value`. Spell that assignment as MOVE in this input so
-// the complete event block passes through native lowering.
+// The converter's simple-assignment F4 shortcut replaces the event body at
+// the first assignment, regardless of target. Spell every simple assignment
+// as MOVE so the complete event block passes through native lowering.
 const {fields: f4Fields, convertedSource} = prepareF4(source, parseSource(source, basename(report)));
 const converted = await convertProgram({source: convertedSource, filename: basename(report), mode: "strict", nativePassthrough: true, className, transactionCode: name, ...(Object.keys(textPool).length > 0 ? {textPool} : {})});
 if (converted.supported !== true || converted.classSource === undefined) {

@@ -57,6 +57,7 @@ terminal browser shows the union of the patterns. `DEFAULT_EXTENSION` is
 appended to an entered name without an extension. `INITIAL_DIRECTORY` sets the
 starting folder when it is inside a granted root; `WINDOW_TITLE` heads the
 browser. `DEFAULT_FILE_NAME` supplies the save name, and
-`PROMPT_ON_OVERWRITE = 'X'` asks yes or no before returning an existing file.
+`PROMPT_ON_OVERWRITE` defaults to `'X'` and asks yes or no before returning an
+existing file; passing a space disables the prompt.
 These input behaviors follow SAP's published parameter contract and remain
 **unverified on A4H**.

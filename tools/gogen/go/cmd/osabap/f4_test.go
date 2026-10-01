@@ -29,6 +29,50 @@ func TestDialogFilterReachesBrowser(t *testing.T) {
 	}
 }
 
+func TestSaveOverwritePromptDefaultAndSpace(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "existing.txt")
+	if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OSD_DATASET_WRITE", root)
+	t.Setenv("OSD_DATASET_READ", "")
+	t.Setenv("OSD_DATASET_HOME", "")
+	screen := func(keys ...*tcell.EventKey) tcell.SimulationScreen {
+		t.Helper()
+		s := tcell.NewSimulationScreen("UTF-8")
+		if err := s.Init(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(s.Fini)
+		s.SetSize(100, 20)
+		for _, key := range keys {
+			s.PostEvent(key)
+		}
+		return s
+	}
+	key := func(k tcell.Key) *tcell.EventKey { return tcell.NewEventKey(k, 0, tcell.ModNone) }
+	runeKey := func(r rune) *tcell.EventKey { return tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone) }
+	options := abap.FrontendPickOptions{Kind: "save", Name: "existing.txt"}
+	browser := browserForDialog(options)
+	if !browser.ConfirmOverwrite {
+		t.Fatal("omitted prompt did not default to enabled")
+	}
+	got, err := browser.Run(screen(runeKey('n'), key(tcell.KeyEnter), runeKey('n'), key(tcell.KeyEscape)))
+	if err != filepick.ErrCancel || got != "" {
+		t.Fatalf("declined overwrite: %q, %v", got, err)
+	}
+	options.Prompt = " "
+	browser = browserForDialog(options)
+	if browser.ConfirmOverwrite {
+		t.Fatal("explicit space still prompts")
+	}
+	got, err = browser.Run(screen(runeKey('n'), key(tcell.KeyEnter)))
+	if err != nil || got != path {
+		t.Fatalf("save without prompt: %q, %v", got, err)
+	}
+}
+
 func TestF4SelectionScreenDialogs(t *testing.T) {
 	read := t.TempDir()
 	write := t.TempDir()
