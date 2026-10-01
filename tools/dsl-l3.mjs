@@ -401,8 +401,11 @@ async function main(args) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main(process.argv.slice(2)).then((code) => process.exit(code), (error) => {
+  // exit only once stdout and stderr have drained: a piped stdout is
+  // asynchronous, and process.exit() right after console.log loses the output
+  const flushThenExit = (code) => process.stdout.write("", () => process.stderr.write("", () => process.exit(code)));
+  main(process.argv.slice(2)).then(flushThenExit, (error) => {
     console.error(error.message);
-    process.exit(1);
+    flushThenExit(1);
   });
 }
