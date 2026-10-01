@@ -1440,8 +1440,14 @@ describe("tools/adt-facade: create and delete over the wire", () => {
         {headers: stateless})).text();
       expect(found, `${when}: quick search`).to.contain('adtcore:name="$ZOSD_TEST_VSPCI"');
     };
-    await visible("right after the create");
-    // what the disk watcher does after the create's own write
+    // the real disk watcher: the create's own write makes it drop the index
+    // (store.index undefined), and the next request rebuilds it
+    for (let i = 0; i < 100 && store.index !== undefined; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(store.index, "the watcher fired on the create's write").to.equal(undefined);
+    await visible("after the watcher fired");
+    // and a rebuild forced by hand
     store.build();
     await visible("after a rebuild");
 
