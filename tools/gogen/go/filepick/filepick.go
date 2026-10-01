@@ -151,16 +151,16 @@ func (b Browser) openName(dir, name string) (string, bool) {
 	return path, err == nil && !info.IsDir()
 }
 
-func (b Browser) confirmSave(screen tcell.Screen, path string) bool {
+func (b Browser) confirmSave(screen tcell.Screen, path string) (bool, error) {
 	if !b.ConfirmOverwrite {
-		return true
+		return true, nil
 	}
 	exists, err := b.Sandbox.BrowseSaveExists(path)
 	if err != nil {
-		return false
+		return false, nil
 	}
 	if !exists {
-		return true
+		return true, nil
 	}
 	_, h := screen.Size()
 	for x, r := range []rune("Overwrite existing file? y/n") {
@@ -173,11 +173,13 @@ func (b Browser) confirmSave(screen tcell.Screen, path string) bool {
 			continue
 		}
 		if key.Rune() == 'y' || key.Rune() == 'Y' {
-			return true
+			return true, nil
 		}
-		if key.Rune() == 'n' || key.Rune() == 'N' || key.Key() == tcell.KeyEscape {
-			// TODO: distinguish Escape (cancel dialog) from N (stay in dialog).
-			return false
+		if key.Key() == tcell.KeyEscape {
+			return false, ErrCancel
+		}
+		if key.Rune() == 'n' || key.Rune() == 'N' {
+			return false, nil
 		}
 	}
 }
@@ -258,9 +260,15 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 							return path, nil
 						}
 					} else if b.Mode == Save {
-						if path, ok := b.saveName(dir, name); ok && b.confirmSave(screen, path) {
-							if checked, valid := b.saveName(dir, name); valid {
-								return checked, nil
+						if path, ok := b.saveName(dir, name); ok {
+							confirmed, err := b.confirmSave(screen, path)
+							if err != nil {
+								return "", err
+							}
+							if confirmed {
+								if checked, valid := b.saveName(dir, name); valid {
+									return checked, nil
+								}
 							}
 						}
 					}
@@ -346,16 +354,28 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 				} else if b.Mode != Directory {
 					if b.Mode != Save {
 						return path, nil
-					} else if b.confirmSave(screen, path) {
-						if checked, valid := b.saveName(dir, item.name); valid {
-							return checked, nil
+					} else {
+						confirmed, err := b.confirmSave(screen, path)
+						if err != nil {
+							return "", err
+						}
+						if confirmed {
+							if checked, valid := b.saveName(dir, item.name); valid {
+								return checked, nil
+							}
 						}
 					}
 				}
 			} else if b.Mode == Save && name != "" {
-				if path, ok := b.saveName(dir, name); ok && b.confirmSave(screen, path) {
-					if checked, valid := b.saveName(dir, name); valid {
-						return checked, nil
+				if path, ok := b.saveName(dir, name); ok {
+					confirmed, err := b.confirmSave(screen, path)
+					if err != nil {
+						return "", err
+					}
+					if confirmed {
+						if checked, valid := b.saveName(dir, name); valid {
+							return checked, nil
+						}
 					}
 				}
 			}

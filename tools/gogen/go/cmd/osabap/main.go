@@ -262,6 +262,13 @@ func graphicalForm(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST_
 				if strings.HasSuffix(target, "-HIGH") {
 					return strings.TrimSpace(v.ranges[0].high), nil
 				}
+				if appRanges[base] {
+					lows := make([]string, 0, len(v.ranges))
+					for _, r := range v.ranges {
+						lows = append(lows, strings.TrimSpace(r.low))
+					}
+					return strings.Join(lows, ","), nil
+				}
 				return strings.TrimSpace(v.ranges[0].low), nil
 			}
 		}

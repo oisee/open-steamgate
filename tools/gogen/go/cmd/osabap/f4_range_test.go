@@ -49,3 +49,26 @@ func TestSelectOptionComponentF4(t *testing.T) {
 		t.Fatalf("terminal component F4: %#v, %v", fields, err)
 	}
 }
+
+func TestSelectOptionLowF4KeepsOtherRanges(t *testing.T) {
+	s := &abap.Session{}
+	report := newReport(s)
+	var initial ZCL_GG_HOST__TY_RESULT
+	abap.DialogStep(func() { initial = hostRun(s, report, nil, "", "X") })
+	form := graphicalForm(s, report, initial)
+	form.Fields[0].Value = "a,b"
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	got, err := form.OnF4(screen, "S_FILE", form.Fields)
+	if err != nil || got != "low.txt,b" {
+		t.Fatalf("LOW ranges after F4: %q, %v", got, err)
+	}
+	form.Fields[0].Value = got
+	values := selectionValuesFromFields(form.Fields, initial)
+	if len(values) != 1 || len(values[0].ranges) != 2 || values[0].ranges[0].low != "low.txt" || values[0].ranges[1].low != "b" {
+		t.Fatalf("submitted ranges: %#v", values)
+	}
+}

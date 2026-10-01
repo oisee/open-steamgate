@@ -450,12 +450,12 @@ func SetDatasetPosition(s *Session, name string, pos int64, endOfFile bool) {
 // resolves a relative name (default the first write root, else the first
 // read root). Audit, when set, gets every OPEN and DELETE.
 type Sandbox struct {
-	Read, Write []string
-	Home        string
-	Audit       func(entry map[string]any)
-	CreatePerm  os.FileMode
-	once        sync.Once
-	read, write []string
+	Read, Write             []string
+	Home                    string
+	Audit                   func(entry map[string]any)
+	CreatePerm              os.FileMode
+	once                    sync.Once
+	read, write, browseRead []string
 	// one os.Root per real root: every open and unlink goes through the
 	// root that holds the path, so the kernel resolves it beneath that
 	// directory in the same call that creates or opens the file. A parent
@@ -514,6 +514,11 @@ func (sb *Sandbox) roots() ([]string, []string) {
 			}
 			return p
 		}
+		for _, r := range sb.Read {
+			if p := real(r); p != "" {
+				sb.browseRead = append(sb.browseRead, p)
+			}
+		}
 		for _, r := range append(append([]string{}, sb.Read...), sb.Write...) {
 			if p := real(r); p != "" {
 				sb.read = append(sb.read, p)
@@ -537,22 +542,23 @@ func (sb *Sandbox) roots() ([]string, []string) {
 	return sb.read, sb.write
 }
 
-// BrowseRoots returns the normalized roots available to a file dialog.
-// A write root is readable by an open dialog, as it is by DATASET.
+// BrowseRoots returns the normalized roots granted to a file dialog.
+// DATASET itself can read write roots, but open/directory dialogs require
+// explicit read grants.
 func (sb *Sandbox) BrowseRoots(save bool) []string {
-	read, write := sb.roots()
+	_, write := sb.roots()
 	if save {
 		return append([]string(nil), write...)
 	}
-	return append([]string(nil), read...)
+	return append([]string(nil), sb.browseRead...)
 }
 
 // BrowsePath checks a candidate with DATASET's lexical and real-path rules.
 // Directories are opened through the same os.Root handle used by DATASET, so
 // a symlink swapped between checking and listing cannot escape the root.
 func (sb *Sandbox) BrowsePath(name string, save bool) (string, *os.File, error) {
-	read, write := sb.roots()
-	roots, given := read, append(append([]string{}, sb.Read...), sb.Write...)
+	_, write := sb.roots()
+	roots, given := sb.browseRead, sb.Read
 	if save {
 		roots, given = write, sb.Write
 	}

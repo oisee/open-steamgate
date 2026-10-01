@@ -155,6 +155,34 @@ func TestFilterSaveAndMissingGrants(t *testing.T) {
 	}
 }
 
+func TestOpenAndDirectoryRequireReadGrant(t *testing.T) {
+	private := t.TempDir()
+	name := filepath.Join(private, "private.txt")
+	if err := os.WriteFile(name, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	sb := &abap.Sandbox{Write: []string{private}}
+	for _, mode := range []Mode{Open, Directory} {
+		b := Browser{Sandbox: sb, Mode: mode, Initial: private}
+		if _, err := b.initial(); err == nil || !strings.Contains(err.Error(), "-allow-read") {
+			t.Fatalf("mode %v accepted write-only root: %v", mode, err)
+		}
+		if _, err := b.entries(private, ""); err == nil {
+			t.Fatalf("mode %v listed write-only root", mode)
+		}
+		if _, ok := b.selected(private, entry{name: "private.txt"}); ok {
+			t.Fatalf("mode %v returned write-only file", mode)
+		}
+	}
+	if _, f, err := sb.BrowsePath(name, false); err == nil {
+		f.Close()
+		t.Fatal("write-only file opened by picker")
+	}
+	if roots := sb.BrowseRoots(true); len(roots) != 1 || roots[0] != private {
+		t.Fatalf("save roots: %v", roots)
+	}
+}
+
 func TestSwapAfterListingIsRefused(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "root")
@@ -218,6 +246,14 @@ func TestSAPFilterExtensionAndMulti(t *testing.T) {
 	if !errors.Is(err, ErrCancel) || path != "" {
 		t.Fatalf("overwrite declined: %q %v", path, err)
 	}
+	path, err = save.Run(simulated(t, letter('n'), press(tcell.KeyEnter), press(tcell.KeyEscape)))
+	if !errors.Is(err, ErrCancel) || path != "" {
+		t.Fatalf("overwrite Esc did not cancel: %q %v", path, err)
+	}
+	path, err = save.Run(simulated(t, letter('n'), press(tcell.KeyEnter), letter('n'), letter('n'), press(tcell.KeyEnter), letter('y')))
+	if err != nil || path != filepath.Join(root, "a.txt") {
+		t.Fatalf("overwrite N did not stay in dialog: %q %v", path, err)
+	}
 }
 
 func TestOverwriteCheckRejectsSwappedSymlink(t *testing.T) {
@@ -235,7 +271,7 @@ func TestOverwriteCheckRejectsSwappedSymlink(t *testing.T) {
 		}
 		// No key is posted: a prompt would hang. Neither target's existence
 		// may change the response to a swapped link.
-		if b.confirmSave(simulated(t), path) {
+		if confirmed, err := b.confirmSave(simulated(t), path); confirmed || err != nil {
 			t.Fatal("swapped symlink accepted")
 		}
 		os.Remove(path)
