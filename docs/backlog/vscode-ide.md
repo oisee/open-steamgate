@@ -50,3 +50,25 @@ warm or cold and why, and record the generation id each time. Acceptance: (2) an
 numbers land in `docs/warm-compile.md` next to the save-to-system figures. If (2) rebuilds, find which input changes
 the hash between two Starts (a timestamp, a temp path, readdir order, the storage dir) and fix that, the same way
 `gen/` ordering was fixed for the binary.
+
+### "Take it to a system": closure of an object into a deploy unit (2026-10-01)
+
+Alice's request via osg-demo. **CLI first (0.5 nice), wizard second (0.6 should).** From one object (or several),
+compute what it needs and write it as a unit of `deploy/manifest.json`, the source of truth `segw:zip`,
+`tools/osd-deploy-manifest.mjs` and osg-demo's smoke check 10 already read; the zip stays `segw:zip --unit`.
+
+- Closure from what the system already knows: the cross-reference seeded at boot (CROSS / WBCROSSGT / D010INC),
+  abaplint references, DDIC chains (TABL → DTEL → DOMA, SHLP), SEGW (IWPR/IWSV/IWMO → MPC/DPC/_EXT), CDS,
+  BSP/WAPA + SICF, PROG includes, FUGR.
+- Boundaries chosen by the user: stop at a package or list of packages; never pull bundled-system or lib objects
+  (listed as "expected on the target"); never SAP standard (listed as a prerequisite).
+- Refused up front, with the reason: engine-only objects (ZIF_OSD_* implementers and their users, the job doctor,
+  converted ZGUI_ transactions), and DSL sidecars, which `not_in_system` already names.
+- Output groups: Needed / Optional (test classes, seed rows as a separate data unit) / Refused (reason) / Expected on
+  target. `--dry-run` diffs against an existing unit; `--used-by` answers the reverse question.
+- CLI: `osd closure <object>... --stop-package <p>... --unit <name> [--write|--dry-run]` (name to settle), one
+  module the extension calls, not a second implementation.
+- Wizard: "osd: Take it to a system…" on an editor or tree selection, a checkbox tree over the CLI's groups, then
+  "Write zip" or "Save as deploy unit".
+- Acceptance: osg-demo's ZCL_ZOSD_FLEET_DPC_EXT plus its app gives exactly their current manifest unit (smoke check 10
+  compares the two), and the zip imports on A4H with the existing last-mile checks (docs/a4h-deploy.md).
