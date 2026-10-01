@@ -19,7 +19,7 @@
       "input": [
         "{}"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>empty_object (MIT)",
       "expected": [
         "OPEN \"object\" \"\"",
@@ -35,7 +35,7 @@
       "input": [
         "[]"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>empty_array (MIT)",
       "expected": [
         "OPEN \"array\" \"\"",
@@ -51,7 +51,7 @@
       "input": [
         "2"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>simple_integer (MIT)",
       "expected": [
         "OPEN \"num\" \"\"",
@@ -68,7 +68,7 @@
       "input": [
         "true"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>simple_true (MIT)",
       "expected": [
         "OPEN \"bool\" \"\"",
@@ -85,7 +85,7 @@
       "input": [
         "null"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>simple_null (MIT)",
       "expected": [
         "OPEN \"null\" \"\"",
@@ -101,7 +101,7 @@
       "input": [
         "[2]"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>integer_array (MIT)",
       "expected": [
         "OPEN \"array\" \"\"",
@@ -120,7 +120,7 @@
       "input": [
         "{\"key1\": \"value1\"}"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>key_value (MIT)",
       "expected": [
         "OPEN \"object\" \"\"",
@@ -140,7 +140,7 @@
       "input": [
         "{\"key1\": []}"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>key_empty (MIT)",
       "expected": [
         "OPEN \"object\" \"\"",
@@ -159,7 +159,7 @@
       "input": [
         "{\"\": 1}"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>empty_key_has_name_attribute (MIT)",
       "expected": [
         "OPEN \"object\" \"\"",
@@ -179,7 +179,7 @@
       "input": [
         "{\"key1\": \"value1\", \"key2\": \"value2\"}"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>two_keys (MIT)",
       "expected": [
         "OPEN \"object\" \"\"",
@@ -203,7 +203,7 @@
       "input": [
         "[1, 2]"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>two_array (MIT)",
       "expected": [
         "OPEN \"array\" \"\"",
@@ -225,7 +225,7 @@
       "input": [
         "[{\"key\": \"value\"}]"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>array_with_object (MIT)",
       "expected": [
         "OPEN \"array\" \"\"",
@@ -247,7 +247,7 @@
       "input": [
         "{\"key\": {\"sub\": \"value\"}}"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>object_with_object (MIT)",
       "expected": [
         "OPEN \"object\" \"\"",
@@ -270,7 +270,7 @@
       "input": [
         "moo, hello world"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>bad_json_next_node (MIT)",
       "expected": [
         "ERROR CX_SXML_PARSE_ERROR 0"
@@ -282,11 +282,17 @@
       "input": [
         "{\n\"ok\": \"abc\",\n\"error\"\n}"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>bad_json_xml_offset (MIT)",
       "expected": [
+        "OPEN \"object\" \"\"",
+        "OPEN \"str\" \"\"",
+        "ATTR \"name\" \"\" \"ok\"",
+        "VALUE \"abc\"",
+        "CLOSE \"str\"",
         "ERROR CX_SXML_PARSE_ERROR 23"
-      ]
+      ],
+      "fork": "MISS"
     },
     {
       "name": "json_non_ascii",
@@ -294,7 +300,7 @@
       "input": [
         "{\"\u00e9\u20ac\ud83d\ude00\": \"\u00e9\u20ac\ud83d\ude00\"}"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"object\" \"\"",
         "OPEN \"str\" \"\"",
@@ -313,7 +319,7 @@
       "input": [
         "<a>t</a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
         "VALUE \"t\"",
@@ -327,7 +333,7 @@
       "input": [
         "<\u00e9 \u00e9x=\"v\">t</\u00e9>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "note": "e acute in an element name and an attribute name",
       "expected": [
         "OPEN \"\\u00E9\" \"\"",
@@ -343,7 +349,7 @@
       "input": [
         "<a\u20ac>t</a\u20ac>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "note": "U+20AC is a name character in XML 1.0 fifth edition, not in the fourth",
       "expected": [
         "OPEN \"a\\u20AC\" \"\"",
@@ -358,7 +364,7 @@
       "input": [
         "<a\ud83d\ude00/>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "note": "U+1F600 in a name: fifth edition only",
       "expected": [
         "OPEN \"a\\uD83D\\uDE00\" \"\"",
@@ -372,7 +378,7 @@
       "input": [
         "<a x=\"\u00e9\u20ac\ud83d\ude00\">\u00e9\u20ac\ud83d\ude00</a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
         "ATTR \"x\" \"\" \"\\u00E9\\u20AC\\uD83D\\uDE00\"",
@@ -387,7 +393,7 @@
       "input": [
         "<a><![CDATA[\u00e9\u20ac\ud83d\ude00]]></a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
         "VALUE \"\\u00E9\\u20AC\\uD83D\\uDE00\"",
@@ -401,7 +407,7 @@
       "input": [
         "<a><!--\u00e9\u20ac\ud83d\ude00-->t</a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
         "VALUE \"t\"",
@@ -415,7 +421,7 @@
       "input": [
         "<a x=\"&amp;&#x20AC;&#128512;\">&amp;&#x20AC;&#128512;&lt;&gt;&quot;&apos;</a>"
       ],
-      "status": "provisional-spec",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
         "ATTR \"x\" \"\" \"&\\u20AC\\uD83D\\uDE00\"",
@@ -432,7 +438,7 @@
       "input": [
         "<a><![CDATA[x]]y]]]></a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "note": "CDATA holding ]] and ending in ]]]>: the value is x]]y]",
       "expected": [
         "OPEN \"a\" \"\"",
@@ -447,15 +453,15 @@
       "input": [
         "<a>1<!-- a-b - c- -->2</a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "note": "single dashes next to each other and next to the end, never two in a row",
       "expected": [
         "OPEN \"a\" \"\"",
-        "VALUE \"1\"",
-        "VALUE \"2\"",
+        "VALUE \"12\"",
         "CLOSE \"a\"",
         "FINAL"
-      ]
+      ],
+      "fork": "MISS"
     },
     {
       "name": "xml_pi",
@@ -463,7 +469,7 @@
       "input": [
         "<?xml version=\"1.0\"?><?pi data?><a><?inner x?>t</a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
         "VALUE \"t\"",
@@ -480,7 +486,7 @@
         },
         "<a>t</a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
         "VALUE \"t\"",
@@ -494,7 +500,7 @@
       "input": [
         "<r xmlns=\"urn:d\" xmlns:p=\"urn:p\"><p:c p:x=\"1\" y=\"2\">t</p:c><d/></r>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"r\" \"urn:d\"",
         "OPEN \"c\" \"urn:p\"",
@@ -514,7 +520,7 @@
       "input": [
         "<a><b/><c></c></a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
         "OPEN \"b\" \"\"",
@@ -531,7 +537,7 @@
       "input": [
         "<a> </a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
         "VALUE \" \"",
@@ -545,7 +551,7 @@
       "input": [
         "<a>\n  <b>x</b>\n</a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
         "OPEN \"b\" \"\"",
@@ -561,7 +567,7 @@
       "input": [
         "<a>abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 </a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "note": "one text node of 560 bytes, longer than any chunk of a two-chunk split's shorter half",
       "expected": [
         "OPEN \"a\" \"\"",
@@ -643,7 +649,7 @@
       "input": [
         "<a><b>t</b>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
         "OPEN \"b\" \"\"",
@@ -658,11 +664,12 @@
       "input": [
         "<a></b>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
-        "ERROR CX_SXML_PARSE_ERROR 7"
-      ]
+        "ERROR CX_SXML_PARSE_ERROR 3"
+      ],
+      "fork": "MISS"
     },
     {
       "name": "xml_mismatched_close_non_ascii",
@@ -698,7 +705,7 @@
       "input": [
         "<a>x]]>y</a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "note": "]]> may not occur in text",
       "expected": [
         "OPEN \"a\" \"\"",
@@ -713,11 +720,12 @@
       "input": [
         "<a>&foo;</a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
-        "ERROR CX_SXML_PARSE_ERROR 8"
-      ]
+        "ERROR CX_SXML_PARSE_ERROR 3"
+      ],
+      "fork": "MISS"
     },
     {
       "name": "xml_bad_charref",
@@ -725,11 +733,12 @@
       "input": [
         "<a>&#xD800;</a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
-        "ERROR CX_SXML_PARSE_ERROR 11"
-      ]
+        "ERROR CX_SXML_PARSE_ERROR 3"
+      ],
+      "fork": "MISS"
     },
     {
       "name": "xml_comment_double_dash",
@@ -737,17 +746,18 @@
       "input": [
         "<a><!--x--y--></a>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "OPEN \"a\" \"\"",
-        "ERROR CX_SXML_PARSE_ERROR 8"
-      ]
+        "ERROR CX_SXML_PARSE_ERROR 7"
+      ],
+      "fork": "MISS"
     },
     {
       "name": "xml_empty_document",
       "group": "xml-invalid",
       "input": [],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "expected": [
         "ERROR CX_SXML_PARSE_ERROR 0"
       ]
@@ -877,11 +887,15 @@
           "hex": "E282"
         }
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "note": "an incomplete sequence after the root element, at the end of the input",
       "expected": [
-        "ERROR CX_SY_CONVERSION_CODEPAGE -"
-      ]
+        "OPEN \"a\" \"\"",
+        "VALUE \"a\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ],
+      "fork": "MISS"
     },
     {
       "name": "utf8_in_attribute",
@@ -893,11 +907,15 @@
         },
         "\"/>"
       ],
-      "status": "provisional-fork",
+      "status": "measured-a4h-2026-10-01",
       "note": "a lone continuation byte inside an attribute value",
       "expected": [
-        "ERROR CX_SY_CONVERSION_CODEPAGE -"
-      ]
+        "OPEN \"a\" \"\"",
+        "ATTR \"x\" \"\" \"\\uFFFD\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ],
+      "fork": "MISS"
     }
   ]
 }

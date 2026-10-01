@@ -24,7 +24,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_empty_object`.
     ls-group = `json-ported`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `7B7D`.
     ls-input = lv_hex.
@@ -39,7 +39,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_empty_array`.
     ls-group = `json-ported`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `5B5D`.
     ls-input = lv_hex.
@@ -54,7 +54,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_simple_integer`.
     ls-group = `json-ported`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `32`.
     ls-input = lv_hex.
@@ -71,7 +71,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_simple_true`.
     ls-group = `json-ported`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `74727565`.
     ls-input = lv_hex.
@@ -88,7 +88,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_simple_null`.
     ls-group = `json-ported`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `6E756C6C`.
     ls-input = lv_hex.
@@ -103,7 +103,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_integer_array`.
     ls-group = `json-ported`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `5B325D`.
     ls-input = lv_hex.
@@ -124,7 +124,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_key_value`.
     ls-group = `json-ported`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `7B226B657931223A202276616C756531227D`.
     ls-input = lv_hex.
@@ -147,7 +147,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_key_empty`.
     ls-group = `json-ported`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `7B226B657931223A205B5D7D`.
     ls-input = lv_hex.
@@ -168,7 +168,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_empty_key`.
     ls-group = `json-ported`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `7B22223A20317D`.
     ls-input = lv_hex.
@@ -191,7 +191,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_two_keys`.
     ls-group = `json-ported`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `7B226B657931223A202276616C756531222C20226B657932223A202276616C756532227D`.
     ls-input = lv_hex.
@@ -222,7 +222,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_two_array`.
     ls-group = `json-ported`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `5B312C20325D`.
     ls-input = lv_hex.
@@ -249,7 +249,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_array_with_object`.
     ls-group = `json-ported`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `5B7B226B6579223A202276616C7565227D5D`.
     ls-input = lv_hex.
@@ -276,7 +276,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_object_with_object`.
     ls-group = `json-ported`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `7B226B6579223A207B22737562223A202276616C7565227D7D`.
     ls-input = lv_hex.
@@ -305,7 +305,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_bad`.
     ls-group = `json-ported`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `6D6F6F2C2068656C6C6F20776F726C64`.
     ls-input = lv_hex.
     lv_line = `ERROR CX_SXML_PARSE_ERROR 0`.
@@ -315,9 +315,20 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_bad_offset`.
     ls-group = `json-ported`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
+    ls-fork = `MISS`.
     lv_hex = `7B0A226F6B223A2022616263222C0A226572726F72220A7D`.
     ls-input = lv_hex.
+    lv_line = `OPEN "object" ""`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `OPEN "str" ""`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `ATTR "name" "" "ok"`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `VALUE "abc"`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `CLOSE "str"`.
+    APPEND lv_line TO ls-expected.
     lv_line = `ERROR CX_SXML_PARSE_ERROR 23`.
     APPEND lv_line TO ls-expected.
     APPEND ls TO rt.
@@ -325,7 +336,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `json_non_ascii`.
     ls-group = `json`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `7B22C3A9E282ACF09F9880223A2022C3A9E282ACF09F9880227D`.
     ls-input = lv_hex.
@@ -348,7 +359,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_simple`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C613E743C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -364,7 +375,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_name_e_acute`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3CC3A920C3A9783D2276223E743C2FC3A93E`.
     ls-input = lv_hex.
     lv_line = `OPEN "\u00E9" ""`.
@@ -382,7 +393,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_name_euro`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C61E282AC3E743C2F61E282AC3E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a\u20AC" ""`.
@@ -398,7 +409,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_name_astral`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C61F09F98802F3E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a\uD83D\uDE00" ""`.
@@ -412,7 +423,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_non_ascii_values`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C6120783D22C3A9E282ACF09F9880223EC3A9E282ACF09F98803C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -430,7 +441,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_non_ascii_cdata`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C613E3C215B43444154415BC3A9E282ACF09F98805D5D3E3C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -446,7 +457,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_non_ascii_comment`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C613E3C212D2DC3A9E282ACF09F98802D2D3E743C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -462,7 +473,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_entities`.
     ls-group = `xml`.
-    ls-status = `provisional-spec`.
+    ls-status = `measured-a4h-2026-10-01`.
     ls-fork = `MISS`.
     lv_hex = `3C6120783D2226616D703B262378323041433B26233132383531323B223E26616D703B262378323041433B26233132383531323B266C743B2667743B2671756F743B2661706F733B3C2F613E`.
     ls-input = lv_hex.
@@ -481,7 +492,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_cdata_brackets`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C613E3C215B43444154415B785D5D795D5D5D3E3C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -497,14 +508,13 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_comment_dashes`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
+    ls-fork = `MISS`.
     lv_hex = `3C613E313C212D2D20612D62202D20632D202D2D3E323C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
     APPEND lv_line TO ls-expected.
-    lv_line = `VALUE "1"`.
-    APPEND lv_line TO ls-expected.
-    lv_line = `VALUE "2"`.
+    lv_line = `VALUE "12"`.
     APPEND lv_line TO ls-expected.
     lv_line = `CLOSE "a"`.
     APPEND lv_line TO ls-expected.
@@ -515,7 +525,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_pi`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C3F786D6C2076657273696F6E3D22312E30223F3E3C3F706920646174613F3E3C613E3C3F696E6E657220783F3E743C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -531,7 +541,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_bom`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `EFBBBF3C613E743C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -547,7 +557,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_namespaces`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C7220786D6C6E733D2275726E3A642220786D6C6E733A703D2275726E3A70223E3C703A6320703A783D22312220793D2232223E743C2F703A633E3C642F3E3C2F723E`.
     ls-input = lv_hex.
     lv_line = `OPEN "r" "urn:d"`.
@@ -575,7 +585,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_empty_elements`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C613E3C622F3E3C633E3C2F633E3C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -597,7 +607,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_whitespace_only`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C613E203C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -613,7 +623,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_whitespace_between`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C613E0A20203C623E783C2F623E0A3C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -633,7 +643,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_long_text`.
     ls-group = `xml`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C613E61626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F9880`.
     lv_hex = lv_hex && `2061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061`.
     lv_hex = lv_hex && `626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F98802061626320C3A9E282ACF09F988020616263`.
@@ -726,7 +736,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_unclosed`.
     ls-group = `xml-invalid`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C613E3C623E743C2F623E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -744,12 +754,13 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_mismatched_close`.
     ls-group = `xml-invalid`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
+    ls-fork = `MISS`.
     lv_hex = `3C613E3C2F623E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
     APPEND lv_line TO ls-expected.
-    lv_line = `ERROR CX_SXML_PARSE_ERROR 7`.
+    lv_line = `ERROR CX_SXML_PARSE_ERROR 3`.
     APPEND lv_line TO ls-expected.
     APPEND ls TO rt.
 
@@ -782,7 +793,7 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_cdata_end_in_text`.
     ls-group = `xml-invalid`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = `3C613E785D5D3E793C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -798,43 +809,46 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `xml_bad_entity`.
     ls-group = `xml-invalid`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
+    ls-fork = `MISS`.
     lv_hex = `3C613E26666F6F3B3C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
     APPEND lv_line TO ls-expected.
-    lv_line = `ERROR CX_SXML_PARSE_ERROR 8`.
+    lv_line = `ERROR CX_SXML_PARSE_ERROR 3`.
     APPEND lv_line TO ls-expected.
     APPEND ls TO rt.
 
     CLEAR ls.
     ls-name = `xml_bad_charref`.
     ls-group = `xml-invalid`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
+    ls-fork = `MISS`.
     lv_hex = `3C613E262378443830303B3C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
     APPEND lv_line TO ls-expected.
-    lv_line = `ERROR CX_SXML_PARSE_ERROR 11`.
+    lv_line = `ERROR CX_SXML_PARSE_ERROR 3`.
     APPEND lv_line TO ls-expected.
     APPEND ls TO rt.
 
     CLEAR ls.
     ls-name = `xml_comment_double_dash`.
     ls-group = `xml-invalid`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
+    ls-fork = `MISS`.
     lv_hex = `3C613E3C212D2D782D2D792D2D3E3C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
     APPEND lv_line TO ls-expected.
-    lv_line = `ERROR CX_SXML_PARSE_ERROR 8`.
+    lv_line = `ERROR CX_SXML_PARSE_ERROR 7`.
     APPEND lv_line TO ls-expected.
     APPEND ls TO rt.
 
     CLEAR ls.
     ls-name = `xml_empty_document`.
     ls-group = `xml-invalid`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
     lv_hex = ``.
     ls-input = lv_hex.
     lv_line = `ERROR CX_SXML_PARSE_ERROR 0`.
@@ -938,20 +952,34 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     CLEAR ls.
     ls-name = `utf8_truncated_at_eof`.
     ls-group = `utf8`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
+    ls-fork = `MISS`.
     lv_hex = `3C613E613C2F613EE282`.
     ls-input = lv_hex.
-    lv_line = `ERROR CX_SY_CONVERSION_CODEPAGE -`.
+    lv_line = `OPEN "a" ""`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `VALUE "a"`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `CLOSE "a"`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `FINAL`.
     APPEND lv_line TO ls-expected.
     APPEND ls TO rt.
 
     CLEAR ls.
     ls-name = `utf8_in_attribute`.
     ls-group = `utf8`.
-    ls-status = `provisional-fork`.
+    ls-status = `measured-a4h-2026-10-01`.
+    ls-fork = `MISS`.
     lv_hex = `3C6120783D2280222F3E`.
     ls-input = lv_hex.
-    lv_line = `ERROR CX_SY_CONVERSION_CODEPAGE -`.
+    lv_line = `OPEN "a" ""`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `ATTR "x" "" "\uFFFD"`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `CLOSE "a"`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `FINAL`.
     APPEND lv_line TO ls-expected.
     APPEND ls TO rt.
   ENDMETHOD.
