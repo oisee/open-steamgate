@@ -189,7 +189,7 @@ export async function currentOrigins(client) {
  *  host's business; that it is said is not optional, which is why an empty
  *  array is a different thing from a caller who did not ask. */
 export async function applyTo(client, objects, options = {}) {
-  const now = new Date().toISOString();
+  const now = options.now ?? new Date().toISOString();
   const actions = plan(objects, await currentRows(client), await currentOrigins(client));
   const write = (sql) => client.execute(sql);
 
@@ -321,7 +321,7 @@ export async function applyAtStartup(client, options = {}) {
     await client.beginTransaction?.();
     let result;
     try {
-      result = await applyTo(client, objects);
+      result = await applyTo(client, objects, options);
       await client.commit?.();
     } catch (e) {
       await client.rollback?.();

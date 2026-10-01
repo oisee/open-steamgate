@@ -57,6 +57,13 @@ describe("scripts/release-verify: an artefact by its content", () => {
     expect(checkBinary(write("osd-windows-x64.exe", pe(0x8664)), "bun-windows-x64-baseline").sha256).to.have.length(64);
   });
 
+  it("checks Go release formats by the bytes they contain", () => {
+    expect(checkBinary(write("osgo-linux-x64", elf(0x3e)), "go-linux-amd64").bytes).to.equal(64);
+    expect(checkBinary(write("osgo-linux-arm64", elf(0xb7)), "go-linux-arm64").target).to.equal("go-linux-arm64");
+    expect(checkBinary(write("osgo-darwin-arm64", macho(0x0100000c)), "go-darwin-arm64").sha256).to.have.length(64);
+    expect(checkBinary(write("osgo-windows-x64.exe", pe(0x8664)), "go-windows-amd64").bytes).to.equal(256);
+  });
+
   it("refuses a binary for another target, a script, and a sidecar that is not its digest", () => {
     expect(() => checkBinary(write("a", elf(0x3e)), "bun-linux-arm64")).to.throw(/not the elf machine 0xb7/);
     expect(() => checkBinary(write("b", Buffer.from("#!/bin/sh\n")), "bun-linux-x64-baseline")).to.throw(/is unknown/);

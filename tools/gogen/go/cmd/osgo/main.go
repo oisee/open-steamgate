@@ -355,10 +355,57 @@ func hasPrefixFold(p, prefix string) bool {
 	return len(p) >= len(prefix) && strings.EqualFold(p[:len(prefix)], prefix)
 }
 
+func selectedPort(flagValue string, explicit bool, getenv func(string) string) (int, string, error) {
+	value, source := flagValue, "-port"
+	if !explicit {
+		for _, name := range []string{"OSD_PORT", "STG_PORT"} {
+			if value = getenv(name); value != "" {
+				source = name
+				break
+			}
+		}
+	}
+	if value == "" && !explicit {
+		return 3095, "default", nil
+	}
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		return 0, source, fmt.Errorf("%s: invalid port %q", source, value)
+	}
+	return port, source, nil
+}
+
+func selectedSID(lookup func(string) (string, bool)) string {
+	sid, present := lookup("OSD_SID")
+	if !present {
+		sid, _ = lookup("STG_ADT_SID")
+	}
+	sid = strings.ToUpper(strings.TrimSpace(sid))
+	if sid == "" {
+		return "OSG"
+	}
+	if len(sid) > 3 {
+		sid = sid[:3]
+	}
+	return sid
+}
+
+func selectedDB(db, home string, explicit bool, getenv func(string) string) string {
+	if explicit {
+		return db
+	}
+	if home != "" {
+		return filepath.Join(home, "osgo.sqlite")
+	}
+	return getenv("STG_DB_PATH")
+}
+
 func main() {
-	port := flag.Int("port", 3095, "port to listen on")
+	portFlag := flag.String("port", "", "port to listen on (OSD_PORT or STG_PORT)")
 	addr := flag.String("addr", "127.0.0.1", "address to listen on")
 	dbFile := flag.String("db", "", "an SQLite file (WAL) instead of the in-memory database; seeded once, when it has no tables, and refused when another build seeded it")
+	homeDir := flag.String("home", "", "data directory; defaults -db to <home>/osgo.sqlite and makes a fresh directory a full database reset")
+	version := flag.Bool("version", false, "print release tag and commit")
 	root := flag.String("root", osgRoot, "the checkout whose webapp/ is served")
 	media := flag.String("media", "", "the SMW0 media directory (w3mi.json and the data files); default media/ beside the binary when it is there")
 	// HTTPS beside HTTP, the way a system answers on 443nn next to 80nn: the
@@ -368,6 +415,31 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "the certificate (PEM) for -tls-port")
 	tlsKey := flag.String("tls-key", "", "its private key (PEM)")
 	flag.Parse()
+	if *version {
+		fmt.Printf("osgo %s (%s)\n", releaseTag, releaseCommit)
+		return
+	}
+	portExplicit, dbExplicit := false, false
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "port":
+			portExplicit = true
+		case "db":
+			dbExplicit = true
+		}
+	})
+	portValue, _, err := selectedPort(*portFlag, portExplicit, os.Getenv)
+	if err != nil {
+		log.Fatal(err)
+	}
+	port := &portValue
+	abap.SysID = selectedSID(os.LookupEnv)
+	*dbFile = selectedDB(*dbFile, *homeDir, dbExplicit, os.Getenv)
+	if *homeDir != "" {
+		if err := os.MkdirAll(*homeDir, 0700); err != nil {
+			log.Fatalf("home: %v", err)
+		}
+	}
 	started := time.Now()
 	// OSGO_PPROF=127.0.0.1:<port>: Go's profiler on a listener of its own,
 	// never on the service's port (go tool pprof http://<addr>/debug/pprof/profile)
@@ -407,7 +479,7 @@ func main() {
 		if err := abap.OpenDB(dbScript); err != nil {
 			log.Fatalf("database: %v", err)
 		}
-		log.Printf("database: in memory, seeded")
+		log.Printf("database: in memory (use -home or -db to keep data)")
 		abap.HostFacts = append(abap.HostFacts, "database\tSQLite (modernc.org/sqlite, pure Go), in memory, seeded at start")
 	} else {
 		seeded, err := abap.OpenDBFile(*dbFile, dbScript)
@@ -473,6 +545,10 @@ func main() {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Write([]byte("{}\n"))
 	}})
+	routes = append(routes, route{"/health", true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		fmt.Fprintf(w, "{\"status\":\"ready\",\"version\":%q,\"commit\":%q}\n", releaseTag, releaseCommit)
+	}})
 	// the tiles the packs declare (test/start.mjs pack-tiles), read when this binary was built
 	routes = append(routes, route{"/app/packs.json", true, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -480,11 +556,8 @@ func main() {
 	}})
 	// each pack's own webapp/ under its name, then the tree's
 	for p, dir := range packWebapps {
-		// a pack folder of the build's checkout is looked for under -root,
-		// so a copied tree (root/webapp, root/packs/<name>/webapp) serves it
-		if rel, err := filepath.Rel(osgRoot, dir); err == nil && !strings.HasPrefix(rel, "..") {
-			dir = filepath.Join(*root, rel)
-		}
+		// Generated pack directories are relative to the tree chosen by -root.
+		dir = filepath.Join(*root, dir)
 		routes = append(routes, route{p, false, serveStatic(p, dir, notFound)})
 	}
 	routes = append(routes, route{"/app", false, serveStatic("/app", webapp, notFound)})

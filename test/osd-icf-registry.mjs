@@ -47,6 +47,13 @@ describe("the ICF registry, applied to a database", function () {
     expect(said).to.deep.equal([]);
   });
 
+  it("uses a supplied timestamp for a reproducible seed", async () => {
+    const now = "2026-09-29T12:00:00.000Z";
+    await applyTo(client(), objects(), {now});
+    const rows = await client().select({select: 'SELECT DISTINCT "changed_at" FROM "zosd_icf_origin"'});
+    expect(rows.rows.map((row) => row.CHANGED_AT ?? row.changed_at)).to.deep.equal([now]);
+  });
+
   it("applying again changes nothing, which is what makes writable mean anything", async () => {
     await applyTo(client(), objects());
     const {actions} = await applyTo(client(), objects());

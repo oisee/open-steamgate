@@ -45,4 +45,14 @@ describe("release README and FILE_ID.DIZ", () => {
     for (const byte of bytes) assert.ok((byte >= 0x20 && byte <= 0x7e) || byte === 0x0d || byte === 0x0a);
     assert.throws(() => renderDiz("not-a-version"), /numeric release version/);
   });
+
+  it("describes each OSGo asset and its health route", () => {
+    const text = renderReadme(["osgo-linux-x64", "osgo-windows-x64.exe"]);
+    assert.match(text, /osgo-linux-x64/);
+    assert.match(text, /osgo-windows-x64\.exe/);
+    assert.match(text, /\/health/);
+    assert.match(text, /-home/);
+    assert.match(text, /does not serve ADT yet/);
+    assert.match(text, /sha256sum -c/);
+  });
 });

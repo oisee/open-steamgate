@@ -5,20 +5,21 @@ import {resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
 const binaries = new Set(["osd-linux-x64", "osd-linux-arm64", "osd-darwin-arm64", "osd-windows-x64.exe"]);
+const goBinaries = new Set(["osgo-linux-x64", "osgo-linux-arm64", "osgo-darwin-arm64", "osgo-windows-x64.exe"]);
 const compose = new Set(["sqlite.yml", "duckdb.yml", "postgres.yml", "hana.yml"]);
 
 export function renderReadme(assets) {
   const names = [...new Set(assets)];
   if (names.length === 0) throw new Error("pass at least one release asset");
   for (const name of names) {
-    if (!/^open-steamgate-\d+\.\d+\.\d+\.vsix$/.test(name) && !binaries.has(name) && !compose.has(name)) {
+    if (!/^open-steamgate-\d+\.\d+\.\d+\.vsix$/.test(name) && !binaries.has(name) && !goBinaries.has(name) && !compose.has(name)) {
       throw new Error(`unknown release asset: ${name}`);
     }
   }
   const lines = [
     "# Start here",
     "",
-    "Pick the VSIX for VS Code, a self-contained Bun binary, or a Compose file for Docker. SQLite is the default Compose database.",
+    "Pick the VSIX for VS Code, a self-contained Bun binary, a static OSGo binary, or a Compose file for Docker. SQLite is the default Compose database.",
     "",
   ];
   for (const name of names) {
@@ -30,6 +31,9 @@ export function renderReadme(assets) {
         "The bundled working copy lives at `<globalStorageUri>/osd-home-<seedId>/`; the database lives under `<globalStorageUri>/osd-instance/<home-hash>/db/osd.sqlite`. VS Code owns the actual global storage path. After an update, run **osd: Remove old working copies** to review and remove stale bundled copies.",
         "",
       );
+    } else if (goBinaries.has(name)) {
+      const executable = name.endsWith(".exe") ? ".\\osgo.exe" : "./osgo";
+      lines.push(`OSGo is a single static Go executable with SQLite built in. Download and verify this file, rename it to \`${name.endsWith(".exe") ? "osgo.exe" : "osgo"}\`, then run \`${executable} -home <data-directory> -port 3095\`. Check \`http://127.0.0.1:3095/health\` for readiness. A new home directory starts a newly seeded database; \`-db <file>\` overrides its database path. Run \`${executable} -version\` for the tag and commit. OSGo does not serve ADT yet. See docs/osgo-release.md for CI usage.`, "");
     } else if (binaries.has(name)) {
       if (name.endsWith(".exe")) {
         lines.push(
@@ -64,12 +68,12 @@ export function renderReadme(assets) {
       lines.push("The file uses `ghcr.io/oisee/open-steamgate:draft` by default; set `OSD_TAG` to a tested Docker image tag to pin it.", "");
     }
   }
-  const checksummed = names.filter((name) => name.endsWith(".vsix") || binaries.has(name));
+  const checksummed = names.filter((name) => name.endsWith(".vsix") || binaries.has(name) || goBinaries.has(name));
   if (checksummed.length) {
     lines.push(
       "## Check downloads",
       "",
-      "Each VSIX and Bun executable has a matching `<asset>.sha256` file. Download the file and its checksum into one directory. On Linux run `sha256sum -c <asset>.sha256`; on macOS run `shasum -a 256 -c <asset>.sha256`. On Windows run `Get-FileHash .\\<asset> -Algorithm SHA256` in PowerShell and compare its Hash with the first value in `<asset>.sha256` (`Get-Content .\\<asset>.sha256`).",
+      "Each VSIX and executable has a matching `<asset>.sha256` file. Download the file and its checksum into one directory. On Linux run `sha256sum -c <asset>.sha256`; on macOS run `shasum -a 256 -c <asset>.sha256`. On Windows run `Get-FileHash .\\<asset> -Algorithm SHA256` in PowerShell and compare its Hash with the first value in `<asset>.sha256` (`Get-Content .\\<asset>.sha256`).",
       "",
     );
   }
