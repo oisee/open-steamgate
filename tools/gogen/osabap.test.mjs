@@ -301,6 +301,8 @@ test("osd run builds a report once, keeps it and passes its arguments through", 
     cpSync(join(here, "apps", "notes"), app, {recursive: true});
     const report = join(app, "znotes.prog.abap");
     const file = join(dir, "notes.db");
+    // a folder of the user's own in the cache directory is not osd's to prune
+    mkdirSync(join(dir, "cache", "mine"), {recursive: true});
     const first = osdRun([report, "-db", file, "--add", "hello"]);
     assert.equal(first.status, 0, first.stderr);
     assert.match(first.stderr, /osd run: building znotes\.prog\.abap/);
@@ -327,6 +329,7 @@ test("osd run builds a report once, keeps it and passes its arguments through", 
     const missing = osdRun([join(dir, "nope.prog.abap")]);
     assert.equal(missing.status, 2);
     assert.match(missing.stderr, /no such report/);
+    assert.equal(existsSync(join(dir, "cache", "mine")), true);
   } finally {
     rmSync(dir, {recursive: true, force: true});
   }

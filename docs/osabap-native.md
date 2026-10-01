@@ -201,7 +201,7 @@ this into a terminal of its own, after asking for the arguments. Nothing
 after the report is osd's: `--layer` there is the report's to refuse, and
 one bare `--` right after the report is dropped, so `osd run x -- -help`
 shows the report's help. The command is kept under `.local/osd-run/<hash>`
-(or `$OSD_RUN_CACHE`; the newest 16 stay), the hash taken over the report
+(or `$OSD_RUN_CACHE`; the 16 last used stay, and nothing there not named like a hash is touched), the hash taken over the report
 and the objects beside it, every `--lib` folder and the compiler: the files
 git lists under `tools/gogen` (its runtime ABAP included) and `tools/*.mjs`,
 open-abap-core and open-abap-gui by size and time, the `@abaplint/core` and

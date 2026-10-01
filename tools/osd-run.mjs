@@ -10,7 +10,7 @@
 // Every argument after the report goes to the command untouched; one bare
 // `--` right after the report is osd's and is dropped, so that `osd run x
 // -- -help` reaches the report rather than osd. A build is kept under
-// .local/osd-run/<hash> (or $OSD_RUN_CACHE), the newest 16 kept, the hash
+// .local/osd-run/<hash> (or $OSD_RUN_CACHE), the 16 last used kept, the hash
 // taken over what the build reads: the report and the objects beside it,
 // every --lib folder, and the compiler itself (tools/gogen with its runtime
 // ABAP, the tools/*.mjs its front end imports, open-abap-core and
@@ -18,7 +18,7 @@
 // The same source runs the kept command without a build.
 import {createHash} from "node:crypto";
 import {spawnSync} from "node:child_process";
-import {closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeSync} from "node:fs";
+import {closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeSync} from "node:fs";
 import {basename, dirname, join, resolve} from "node:path";
 import {compiled, toolCommand} from "./osd-host.mjs";
 
@@ -164,20 +164,34 @@ function withLock(file, fn, log) {
 const cacheDir = () => process.env.OSD_RUN_CACHE ? resolve(process.env.OSD_RUN_CACHE) : join(root, ".local", "osd-run");
 const KEEP = 16;
 
-// the kept builds beyond the newest KEEP go
+// The kept builds beyond the KEEP last used go: only folders named like a
+// hash, whatever else $OSD_RUN_CACHE holds stays, and a build another
+// terminal is running (Windows will not remove it) is left for next time
 function prune(dir) {
-  const entries = readdirSync(dir, {withFileTypes: true}).filter((e) => e.isDirectory())
+  const entries = readdirSync(dir, {withFileTypes: true}).filter((e) => e.isDirectory() && /^[0-9a-f]{32}$/.test(e.name))
     .map((e) => ({path: join(dir, e.name), at: statSync(join(dir, e.name)).mtimeMs}))
     .sort((a, b) => b.at - a.at);
-  for (const old of entries.slice(KEEP)) rmSync(old.path, {recursive: true, force: true});
+  for (const old of entries.slice(KEEP)) {
+    try {
+      rmSync(old.path, {recursive: true, force: true});
+    } catch {
+      // in use
+    }
+  }
 }
 
 export function binaryFor({report, libs}, {log = (line) => console.error(line)} = {}) {
   // the command runs here, so it is built for here whatever GOOS says
   const exe = process.platform === "win32" ? "osabap.exe" : "osabap";
   const dir = cacheDir();
-  const kept = join(dir, buildHash({report, libs}), basename(report).replace(/\.prog\.abap$/i, ""), exe);
-  if (existsSync(kept)) return kept;
+  const hashed = join(dir, buildHash({report, libs}));
+  const kept = join(hashed, basename(report).replace(/\.prog\.abap$/i, ""), exe);
+  if (existsSync(kept)) {
+    // used now: pruning keeps the builds last used, not the last built
+    const now = new Date();
+    utimesSync(hashed, now, now);
+    return kept;
+  }
   return withLock(join(dir, ".lock"), () => {
     if (existsSync(kept)) return kept;
     log(`osd run: building ${basename(report)}`);
