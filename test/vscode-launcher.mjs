@@ -12,7 +12,7 @@ import {createServer} from "node:net";
 import {spawn} from "node:child_process";
 import {mkdtempSync, mkdirSync, readdirSync, readlinkSync, rmSync, writeFileSync, existsSync, lstatSync, symlinkSync, readFileSync, statSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {delimiter, join} from "node:path";
+import {delimiter, join, relative, sep} from "node:path";
 import {once} from "node:events";
 import {brotliCompressSync} from "node:zlib";
 import {ObjectStore} from "../tools/osd-store.mjs";
@@ -24,7 +24,7 @@ const {
   PORT_RANGE, isFree, pickPort, classify,
   pickInspectorPort, debugSystemEnv,
   looksLikeAbapGitFolder, isOpenSteamgateCheckout, decideStartTarget,
-  detectWorkspaceLayers, packNameOf, ensureWorkspacePacks,
+  detectWorkspaceLayers, packNameOf, coveredLayers, ensureWorkspacePacks,
   waitForServing, servingOnce, terminate, Launcher,
   linkOrCopyTree, materializedHomeDir, ensureMaterializedHome, selectOldHomes, listOldHomes, keptHomeNotice, MATERIALIZED_MARKER,
   cleanupOldHomes, hasLiveServingLock, setServingChildPid, SERVING_LOCK_PREFIX,
@@ -316,6 +316,47 @@ describe("editors/vscode/launcher.js: ensureWorkspacePacks (tools/osd-packs.mjs'
   afterEach(() => {
     rmSync(storageDir, {recursive: true, force: true});
     rmSync(wsDir, {recursive: true, force: true});
+  });
+
+  it("does not project a workspace pack the system already finds (osg-demo's BAD_PACK)", async () => {
+    writeFileSync(join(wsDir, "osd-pack.json"), JSON.stringify({name: "osg-demo"}));
+    const home = mkdtempSync(join(tmpdir(), "osd-launcher-home-"));
+    const box = mkdtempSync(join(tmpdir(), "osd-launcher-box-"));
+    try {
+      const {detectWorkspaceLayers: detect} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
+      const {packsOf} = await import("../tools/osd-packs.mjs");
+      const layers = detect([wsDir]);
+      const start = (env) => {
+        const covered = coveredLayers(packsOf, home, env, layers);
+        const packsDir = ensureWorkspacePacks(storageDir, layers.filter((layer) => !covered.has(layer)));
+        const names = packsOf(home, {OSD_PACKS: [env.OSD_PACKS, packsDir].filter(Boolean).join(delimiter)}).map((p) => p.name);
+        return {covered: [...covered], demo: names.filter((name) => name === "osg-demo").length};
+      };
+      // the defect: the original folder and its projection both carry "osg-demo"
+      const projected = ensureWorkspacePacks(storageDir, layers);
+      expect(() => packsOf(home, {OSD_PACKS: [wsDir, projected].join(delimiter)})).to.throw(/osg-demo/);
+      // inherited directly, with a trailing separator, and relative to osdHome
+      expect(start({OSD_PACKS: `${wsDir}${sep}`})).to.deep.equal({covered: layers, demo: 1});
+      expect(start({OSD_PACKS: relative(home, wsDir)})).to.deep.equal({covered: layers, demo: 1});
+      // inherited through a container that holds it as a symlink
+      symlinkSync(wsDir, join(box, "linked"), "dir");
+      expect(start({OSD_PACKS: box})).to.deep.equal({covered: layers, demo: 1});
+      // osdHome's own packs/, with no OSD_PACKS at all
+      mkdirSync(join(home, "packs"));
+      symlinkSync(wsDir, join(home, "packs", "osg-demo"), "dir");
+      expect(start({})).to.deep.equal({covered: layers, demo: 1});
+      // not found anywhere: projected as before
+      rmSync(join(home, "packs"), {recursive: true, force: true});
+      expect(start({})).to.deep.equal({covered: [], demo: 1});
+      // a home that refuses (two different packs of one name) covers nothing; the build reports it
+      const twin = join(box, "twin");
+      mkdirSync(join(twin, "src"), {recursive: true});
+      writeFileSync(join(twin, "osd-pack.json"), JSON.stringify({name: "osg-demo"}));
+      expect(coveredLayers(packsOf, home, {OSD_PACKS: box}, layers).size).to.equal(0);
+    } finally {
+      rmSync(home, {recursive: true, force: true});
+      rmSync(box, {recursive: true, force: true});
+    }
   });
 
   it("keeps the permanent notebook scratch pack even with no workspace layers", async () => {

@@ -26,6 +26,7 @@ const fs = require("node:fs");
 const {createBrotliDecompress} = require("node:zlib");
 const os = require("node:os");
 const path = require("node:path");
+const {pathToFileURL} = require("node:url");
 
 // Ports 3531-3539 only (the budget this spike was given); nothing here ever
 // asks for a port outside it, and a caller that wants a different range
@@ -332,6 +333,29 @@ function packNameOf(folder) {
   const base = path.basename(folder).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "ws";
   const hash = createHash("sha1").update(folder).digest("hex").slice(0, 10);
   return `ws-${base}-${hash}`;
+}
+
+/** The workspace layers the system already finds as packs of its own.
+ *  Start projects each workspace layer into a pack under storage; when
+ *  osdHome's packs/ or the inherited OSD_PACKS (directly, or as a container,
+ *  or through a symlink) already bring the same folder, a projection would
+ *  bring its pack name a second time from another directory, and
+ *  tools/osd-packs.mjs refuses that (BAD_PACK). Rather than repeat its rules
+ *  here, ask it: `packsOf` (the home's own copy, passed in) lists what it
+ *  finds, and a layer whose folder is one of those is not projected. When
+ *  the question cannot be asked (an old home, a pack it refuses), nothing is
+ *  covered and the build says what is wrong, as before. */
+function coveredLayers(packsOf, home, env, layers) {
+  const fold = (dir) => (process.platform === "win32" ? dir.toLowerCase() : dir);
+  const real = (dir) => { try { return fold(fs.realpathSync(dir)); } catch { return fold(path.resolve(dir)); } };
+  let found;
+  try {
+    found = packsOf(home, {...env, OSD_WEB_PACKS: undefined});
+  } catch {
+    return new Set();
+  }
+  const dirs = new Set(found.map((pack) => real(pack.dir)));
+  return new Set(layers.filter((layer) => layer.manifest && dirs.has(real(layer.folder))));
 }
 
 function countFiles(dir, accept, seen = new Set()) {
@@ -1178,7 +1202,17 @@ class Launcher extends EventEmitter {
     this.startedAt = Date.now();
     this.#setState("building");
     this.layers = detectWorkspaceLayers(this.workspaceFolders);
-    const packsDir = ensureWorkspacePacks(this.storageDir, this.layers);
+    let covered = new Set();
+    try {
+      const {packsOf} = await import(pathToFileURL(path.join(this.osdHome, "tools", "osd-packs.mjs")).href);
+      covered = coveredLayers(packsOf, this.osdHome, process.env, this.layers);
+    } catch {
+      // a home without tools/osd-packs.mjs: project every layer, as before
+    }
+    for (const layer of covered) {
+      this.#log(`workspace layer ${layer.folder} is already a pack of this system (packs/ or OSD_PACKS): it is not projected again\n`);
+    }
+    const packsDir = ensureWorkspacePacks(this.storageDir, this.layers.filter((layer) => !covered.has(layer)));
     for (const layer of this.layers) {
       this.#log(`workspace layer: ${layer.folder} (${path.relative(layer.folder, layer.srcDir) === "" ? "." : "src"})\n`);
     }
@@ -1657,6 +1691,7 @@ module.exports = {
   decideStartTarget,
   detectWorkspaceLayers,
   packNameOf,
+  coveredLayers,
   ensureWorkspacePacks,
   layerContributions,
   waitForServing,
