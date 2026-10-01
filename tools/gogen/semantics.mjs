@@ -150,6 +150,13 @@ const EXPECT = {
   // sy-subrc 4, a section offset at the end is a miss and not an error, an
   // empty pattern is found where the search starts, an offset past the end
   // is CX_SY_RANGE_OUT_OF_BOUNDS
+  // CATCH ... INTO an attribute (a report's global): a runtime exception read
+  // in another method, a raised object with its attribute, a static attribute,
+  // a CATCH of both kinds INTO one attribute, a local and a parameter of the
+  // attribute's name. Derived, not measured on A4H: what a local gives
+  // (\\CLASS= of the caught class, as ZCL_GOGEN_T_RAWRD measured for a local;
+  // a raised object's text as ZCL_GOGEN_T_RAISE)
+  ZCL_GOGEN_T_CATCHATTR: "rt:\\CLASS=CX_SY_ZERODIVIDE obj:X/3 static:\\CLASS=CX_SY_ARITHMETIC_OVERFLOW mixed:\\CLASS=CX_SY_ZERODIVIDE,\\CLASS=ZCX_GOGEN_T_RSUB shadow:5 param:[An exception was raised.]",
   ZCL_GOGEN_T_FINDBYTE: "a:0/1 b:0/4 c:0/2 d:4/7 e:4/7 f:4 g:0/0 h:0/3 i:range",
   // CONCATENATE LINES OF ... IN BYTE MODE and x = x + y grown in place
   // (abap.AppendBytes; the zip reader's read_all and the inflater).

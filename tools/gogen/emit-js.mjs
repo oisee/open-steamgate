@@ -277,10 +277,11 @@ function catchCondJs(c) {
   return parts.length ? `(abap.catchable(xE) && (${parts.join(" || ")}))` : "false";
 }
 
-function catchIntoJs(c, t) {
+function catchIntoJs(c, t, ctx) {
   if (!c.into) return "";
-  // a ref INTO takes the object; an exception value is the error itself
-  return `${t}    ${ident(c.into)} = ${c.intoKind === "ref" ? "xE.obj" : "xE"};\n`;
+  // a ref INTO takes the object; an exception value is the error itself; the
+  // target is a local, or an attribute of the class (a report's global data)
+  return `${t}    ${c.intoPlace ? place(c.intoPlace, ctx) : ident(c.into)} = ${c.intoKind === "ref" ? "xE.obj" : "xE"};\n`;
 }
 
 // ultra/events: see chainCctor in emit-go.mjs
@@ -694,7 +695,7 @@ function stmt(st, ctx, d) {
     }
     case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
     case "try": {
-      const arms = st.catches.map((c, i) => `${i ? " else " : ""}if (${catchCondJs(c)}) {\n${catchIntoJs(c, t)}${c.body.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  }`);
+      const arms = st.catches.map((c, i) => `${i ? " else " : ""}if (${catchCondJs(c)}) {\n${catchIntoJs(c, t, ctx)}${c.body.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  }`);
       // a CLEANUP runs only when a TRY further out takes the exception: see
       // emit-go; the CATCHes of this TRY are registered while its body runs
       const cleanup = st.cleanup ? `if (abap.classBased(xE) && abap.handled(s, xE)) {\n${st.cleanup.flatMap((x) => stmt(x, ctx, d + 2)).join("\n")}\n${t}  } ` : "";
