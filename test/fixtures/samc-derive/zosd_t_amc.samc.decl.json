@@ -9,7 +9,8 @@
   "callSites": {
     "zcl_osd_t_dmn.clas.abap:300": {"channelIds": ["/pc"]},
     "zcl_osd_t_dmn.clas.abap:550": {"channelIds": ["/pc", "/ps", "/pu"]},
-    "zcl_osd_t_ddrv.clas.testclasses.abap:28": {"channelIds": ["/pc"]}
+    "zcl_osd_t_ddrv.clas.p8a.testclasses.abap:28": {"channelIds": ["/pc", "/ps", "/pu"]},
+    "zcl_osd_t_ddrv.clas.p8b.testclasses.abap:28": {"channelIds": ["/pc"]}
   },
   "extraAuthorities": [
     {"channelId": "/pc", "kind": "report", "program": "ZOSD_T_DSUB", "activity": "S"},

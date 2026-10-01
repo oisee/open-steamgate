@@ -106,10 +106,12 @@ ENDFUNCTION.
     const model = deriveSamc([probe], "ZOSD_T_AMC", decl);
     const driver = model.authorities.filter((row) => row.program === "ZCL_OSD_T_DDRV");
     expect(driver.some((row) => row.activity === "S" && row.channelId === "/pc"
-      && row.source.some((source) => source.file.endsWith(".clas.testclasses.abap")))).to.equal(true);
+      && row.source.some((source) => source.file.endsWith(".clas.p8b.testclasses.abap")))).to.equal(true);
+    expect(driver.some((row) => row.activity === "S" && row.channelId === "/pu"
+      && row.source.some((source) => source.file.endsWith(".clas.p8a.testclasses.abap")))).to.equal(true);
     const rendered = await renderDaemonModel(model);
     expect(firstDifference(rendered.text, readFileSync(capture, "utf8"))).to.be.greaterThan(0);
-    expect(model.authorities).to.have.length(9);
+    expect(model.authorities).to.have.length(11);
     expect(model.authorities.filter((row) => row.source.length === 0).map((row) => `${row.program}:${row.channelId}:${row.activity}`))
       .to.deep.equal(["ZOSD_T_DSUB:/pc:S", "ZCL_OSD_T_DMN:/ps:S", "ZCL_OSD_T_DDRV:/pu:R"]);
   });
