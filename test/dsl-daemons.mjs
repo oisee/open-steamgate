@@ -49,8 +49,15 @@ describe("DSL daemon channel files", function () {
 
   it("renders an authority whose PROGRAM_ID is absent in the input", async () => {
     const model = JSON.parse(readFileSync(samc, "utf8"));
+    expect(model.authorities[0].program_id).to.equal(undefined);
+    const expected = "ZCL_OSD_T_DMN=================CP";
+    model.authorities[0].program_id = expected;
+    const explicit = await renderDaemon(temp("explicit.json", `${JSON.stringify(model)}\n`));
+    expect(explicit.text).to.include(`<PROGRAM_ID>${expected}</PROGRAM_ID>`);
     delete model.authorities[0].program_id;
+    expect(buildDaemonModel(model).authorities[0].program_id).to.equal(expected);
     const {text} = await renderDaemon(temp("computed.json", `${JSON.stringify(model)}\n`));
+    expect(text).to.equal(explicit.text);
     expect(text).to.equal(readFileSync(samcTarget, "utf8"));
   });
 
