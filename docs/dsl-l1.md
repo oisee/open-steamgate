@@ -220,8 +220,12 @@ XML state flag. The engine escapes XML text.
 ABAP files with abaplint's syntax tree. `check <folder…> --app X --decl … --against
 <file.samc.xml>` derives the same model, renders the SAMC recipe and reports the
 first differing XML line, model node and ABAP source. Without `--out`, derive
-prints JSON. File and source order do not affect the model. The renderer still
-has no inference logic.
+prints JSON. `derive --against <file.samc.xml>` or `derive --numbering <file.samc.xml>`
+keeps existing authority NRs and appends new rows after the highest old NR.
+`check --against` uses the compared file for the same purpose. A removed
+authority is reported as drift with its old NR. Numbering is history, kept
+from the file; without one, ordering is deterministic. File and source order
+do not affect the model. The renderer has no inference logic.
 
 The overlay contains `description`, `lang`, optional `version` (default `A`),
 `channels: {"/channel": {"scope": "C"}}`, `extraAuthorities` rows with
@@ -233,6 +237,9 @@ that contradicts a statically resolved value refuses the derivation. Scope,
 description and language are declarations; channel IDs, activity and message
 type come from code wherever possible. Every derived channel and authority
 carries its call-site `source` list. XML trace lines point to these nodes.
+`authority: "none"` excludes an actual call site only with a nonempty `reason`;
+an unmatched site is refused. It describes a documented failed call, not a
+positive test call.
 
 A producer's declared interface or cast gives `TEXT`, `BINARY` or `PCP`, the
 exact `MESSAGE_TYPE_ID` spellings in the captured XML (`PCP` there). A
@@ -242,24 +249,22 @@ the message type when resolvable. Producer creation gives `S`. SAP documents
 [Defining an ABAP Messaging Channel Application](https://help.sap.com/docs/SAP_NETWEAVER_AS_ABAP_752/c238d694b825421f940829321ffa326a/5212f332ffec430bbacfc62789692f4f.html).
 The captured file contains only `S` and `R`; `C` therefore requires an
 `extraAuthorities` declaration. Local test class calls count and belong to
-their global class, as SAP's `PROGRAM_ID` does. Authority `NR` is assigned
-deterministically from channel ID, `PROGRAM_ID`, then activity; the capture
-shows that abapGit preserves the configured `NR` order rather than sorting it.
+their global class, as SAP's `PROGRAM_ID` does. The capture shows that abapGit
+preserves configured `NR` order rather than sorting it.
 
 The probe fixture at `test/fixtures/samc-derive/` copies the daemon class and
-the driver's AMC test include. Its overlay must declare the three channel
-scopes and the dynamic channel sets at daemon lines 300 and 550 and driver
-include line 28. The captured authority table grants only five of the ten
-derived rows (eight from calls and two declared extra authorities). In
-particular, it omits the driver's `/pc` test send and receive, the daemon's
-`/ps` receive and `/pu` send and receive. The capture also grants
-`ZOSD_T_DSUB` send on `/pc` even though that report has no AMC call, and
-`ZCL_OSD_T_DDRV` receive on `/pu` without a corresponding direct call in the
-fixture; these two rows are `extraAuthorities`. The derivation deliberately
-reports drift against this capture. Byte identity would require omitting real
-call-site facts or adding an authority selection rule beyond this overlay's
-agreed scope. Stage 1's hand-written model remains the byte-identical capture
-fixture.
+the driver's p8b AMC test include. The daemon producer is reached with `/pc`
+by p8b and p8a; its consumer is reached with `/pc` by p8b and `/pc`, `/pu`,
+`/ps` by p8a. The p8a source also directly sends on all three channels.
+These are positive probes. The copied p8b include directly sends and receives
+on `/pc`; its consumer catches errors but then waits for delivery and tests
+echo, so `authority: none` would be false. The report `ZOSD_T_DSUB` has no AMC
+call. No inspected include creates a `/pu` consumer in `ZCL_OSD_T_DDRV`, and
+no inspected caller sends `/ps` through the daemon. Those three captured
+grants remain `extraAuthorities`, without code provenance. The derivation has
+nine authorities and reports drift against the five-row capture. The Stage 1
+hand-written model reproduces that capture byte for byte; deriving it from
+these sources would omit real calls.
 
 ## Steps
 

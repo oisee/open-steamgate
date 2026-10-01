@@ -4,6 +4,7 @@ import {basename, join} from "node:path";
 import {readFileSync, readdirSync, statSync} from "node:fs";
 import {registryFor} from "./dsl-ddic.mjs";
 import {buildDaemonModel, programId} from "./dsl-daemons.mjs";
+import {XMLParser} from "fast-xml-parser";
 
 const {Expressions, Statements} = createRequire(import.meta.url)("@abaplint/core");
 const types = new Map([["if_amc_message_producer_text", "TEXT"], ["if_amc_message_producer_binary", "BINARY"],
@@ -117,7 +118,25 @@ function sourceFile(file) {
     source: readFileSync(file, "utf8")};
 }
 
-export function deriveSamc(paths, applicationId, decl = {}) {
+function historicalAuthorities(file, applicationId) {
+  const xml = new XMLParser({parseTagValue: false}).parse(readFileSync(file, "utf8"));
+  const samc = xml?.abapGit?.["asx:abap"]?.["asx:values"]?.SAMC;
+  if (!samc || samc.HEADER?.APPLICATION_ID !== applicationId) throw new Error(`${file}: SAMC application ID differs from ${applicationId}`);
+  const entries = samc.AUTHORITIES?.AMC_CHNL_AUTH ?? [];
+  const rows = Array.isArray(entries) ? entries : [entries];
+  const seen = new Set(), keys = new Set();
+  return rows.map((row) => {
+    const nr = Number(row.NR);
+    if (!Number.isSafeInteger(nr) || nr < 1 || seen.has(nr)) throw new Error(`${file}: invalid or duplicate authority NR ${row.NR}`);
+    const key = `${row.CHANNEL_ID}|${row.PROGRAM_ID}|${row.ACTIVITY}`;
+    if (row.APPLICATION_ID !== applicationId || keys.has(key)) throw new Error(`${file}: invalid or duplicate historical authority ${key}`);
+    seen.add(nr);
+    keys.add(key);
+    return {nr, key};
+  });
+}
+
+export function deriveSamc(paths, applicationId, decl = {}, numberingFile) {
   if (!applicationId) throw new Error("--app is required");
   const inputs = filesIn(paths).map(sourceFile);
   const names = new Set();
@@ -170,6 +189,11 @@ export function deriveSamc(paths, applicationId, decl = {}) {
         const where = `${item.file}:${st.getStart().getRow()}`;
         const site = callSite(decl, item.file, st.getStart().getRow(), `${item.program}.${method}`);
         if (site) usedSites.add(site);
+        if (site?.authority === "none") {
+          if (typeof site.reason !== "string" || !site.reason.trim()) throw new Error(`${where}: authority none requires a reason`);
+          if (name !== "start_message_delivery") continue;
+          throw new Error(`${where}: authority none belongs on the consumer creation call`);
+        }
         if (name === "start_message_delivery") {
           const consumer = consumers.get(owner);
           if (!consumer) continue;
@@ -245,7 +269,20 @@ export function deriveSamc(paths, applicationId, decl = {}) {
   }
   const authRows = [...authorities.values()].sort((a, b) => a.channelId.localeCompare(b.channelId)
     || programId(a.program, a.kind).localeCompare(programId(b.program, b.kind)) || a.activity.localeCompare(b.activity));
-  authRows.forEach((row, index) => { row.nr = index + 1; row["@id"] = `samc/${applicationId}/auth/${row.nr}`; row.source.sort(order); });
+  if (numberingFile) {
+    const history = historicalAuthorities(numberingFile, applicationId);
+    const current = new Map(authRows.map((row) => [`${row.channelId}|${programId(row.program, row.kind)}|${row.activity}`, row]));
+    for (const old of history) {
+      const row = current.get(old.key);
+      if (!row) throw new Error(`${numberingFile}: authority drift: NR ${old.nr} ${old.key} is no longer derived`);
+      row.nr = old.nr;
+      current.delete(old.key);
+    }
+    let next = Math.max(0, ...history.map((row) => row.nr));
+    for (const row of current.values()) row.nr = ++next;
+    authRows.sort((a, b) => a.nr - b.nr);
+  } else authRows.forEach((row, index) => { row.nr = index + 1; });
+  authRows.forEach((row) => { row["@id"] = `samc/${applicationId}/auth/${row.nr}`; row.source.sort(order); });
   return buildDaemonModel({"@id": `samc/${applicationId}`, kind: "samc", applicationId, version: decl.version ?? "A",
     description: decl.description ?? "", lang: decl.lang ?? "", channels: [...channels.values()], authorities: authRows});
 }
