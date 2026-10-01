@@ -14,7 +14,12 @@ const here = import.meta.dirname;
 // --lib adds a folder of ABAP classes and interfaces the report may use; the
 // classes, interfaces and dictionary beside the report are always part of it.
 const cli = process.argv.slice(2);
-const libs = cli.flatMap((arg, i) => arg === "--lib" ? [resolve(cli[i + 1] ?? "")] : []);
+const libs = cli.flatMap((arg, i) => {
+  if (arg !== "--lib") return [];
+  // a --lib without its folder would be the working directory, node_modules and all
+  if (!cli[i + 1] || cli[i + 1].startsWith("-")) throw new Error("osabap: --lib needs a folder");
+  return [resolve(cli[i + 1])];
+});
 const positional = cli.filter((arg, i) => arg !== "--lib" && cli[i - 1] !== "--lib");
 const report = resolve(positional[0] ?? join(here, "apps", "hello", "zhello.prog.abap"));
 const name = basename(report).replace(/\.prog\.abap$/i, "").toUpperCase();
@@ -59,7 +64,8 @@ const walk = (folder) => {
     const path = join(folder, entry.name);
     if (entry.isDirectory()) walk(path);
     else if (/\.(clas|intf)\.(abap|locals_imp\.abap|locals_def\.abap)$/i.test(entry.name)) {
-      const name = entry.name.split(".")[0].toLowerCase();
+      // abapGit writes /UI2/CL_JSON as #ui2#cl_json; the source names it with slashes
+      const name = entry.name.split(".")[0].toLowerCase().replaceAll("#", "/");
       coreFiles.set(name, [...(coreFiles.get(name) ?? []), path]);
     }
   }
