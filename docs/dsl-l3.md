@@ -155,7 +155,7 @@ carried is an error.
 
 ## Proof
 
-`test/dsl-l3.mjs` (registered in `test/suites.d/infra-misc.json`, 60 tests, the ports' among them, see "Ports and adapters"):
+`test/dsl-l3.mjs` (registered in `test/suites.d/infra-misc.json`, 68 tests, the ports' among them, see "Ports and adapters"):
 
 - the committed runner and report are a fresh build, and `check` notices a changed byte; the
   compiler names no domain word; each refusal above at its line;
@@ -298,10 +298,16 @@ bindings:                        # the default variant of each port
 ```
 
 A variant is `generated` (a source: `table`, `dummy`, `capture`; a sink: `log`, `dummy`, `capture`)
-or the name of a **hand-written class** (`remote: zcl_my_ships_remote`). The compiler finds the
-class beside the set or under `src/` and refuses it, at the class file's line, when it does not say
-`INTERFACES zif_l3_<set>_<port>` or lacks one of the port's methods (a source: `read`, `live`,
-`volatile`; a sink: `put`, `volatile`). A generated name over 30 characters, a binding to a variant
+or a **hand-written class** (`remote: {class: zcl_my_ships_remote, replay_safe: true}`). The
+compiler finds the class beside the set or under `src/` and reads it with abaplint: the named
+class itself must declare `INTERFACES zif_l3_<set>_<port>` and implement each of the port's
+methods in its own IMPLEMENTATION (a source: `read`, `live`, `volatile`; a sink: `put`,
+`volatile`); a helper class in the same file counts for nothing. It is refused at the class's
+own file and line otherwise. In a set whose source can replay (any source variant other than
+`table`), every hand-written variant must say `replay_safe: true`, and the claim is checked:
+the class holds no COMMIT, ROLLBACK, MODIFY, INSERT, UPDATE, DELETE or MERGE statement, no
+`CALL FUNCTION ... IN UPDATE TASK` or `IN BACKGROUND`, no commit or rollback function module and
+no native SQL (it cannot see what a helper the class calls does). A generated name over 30 characters, a binding to a variant
 the port does not have, a port without a binding, a second sink and a field the table lacks are
 each refused at their manifest line. The runner knows exactly one sink (the alert log), so the
 set has exactly one.
@@ -345,11 +351,23 @@ behave as before under the default binding (the whole earlier proof is unchanged
 
 ### The replay seam
 
+**Never in production: it swaps table content in the caller's LUW.** It is a test and dev seam.
+A run that binds a source that is not live is refused with the typed exception, naming the
+source, before anything is read, written or swapped, unless the caller passes
+`iv_allow_replay = abap_true` to `run( )`. Only tests pass it.
+
 The L2 check classes read their tables themselves, in one joined `SELECT`, and a rule's rows cannot
 be handed to it. So a source that is not `live` works by **replacing the table's content for the
 run**: the runner reads the table into a backup, asks the source for its rows (`read( )`), deletes
 the table and inserts those rows (the client field set to the logon client), runs the rules, and
-puts the backup back, all in the run's own LUW. The rules then see exactly the rows the source
+puts the backup back, all in the run's own LUW. The restore also happens when an exception
+leaves the run: the swap is in a `TRY` whose `CATCH cx_root` restores and raises again (the
+transpiler drops `CLEANUP`, `ANORMALIES.md`). What cannot be restored is a unit of work that was
+ended inside the swap, so nothing in the window may end one, and that is checked rather than
+promised: every generated check class is asserted read-only by the compiler (no COMMIT, ROLLBACK,
+MODIFY, INSERT, UPDATE, DELETE, MERGE, update task or native SQL), the generated runner and every
+generated variant are asserted to hold no COMMIT or ROLLBACK (the log variant writes, and ends
+nothing), and a hand-written variant must be `replay_safe` and is checked the same way. The rules then see exactly the rows the source
 gave, including ones the table does not hold (`test/dsl-l3.mjs` replays two ships, one of them
 absent from the table, and finds that ship's alerts and none for the table's other ships), and the
 table is as it was afterwards. It is for one session at a time: a run in jobs refuses it (and
@@ -365,7 +383,9 @@ its time) and the log stays empty; `ships=capture` with given rows replays them 
 comes back; an unknown variant or port is the typed refusal before anything is read or written; a
 run in jobs refuses `capture` and `dummy`; the compile-time refusals above, each at its line; the
 trace of every generated line to a manifest line. Mutants, each transpiled alone and swapped in
-by name, with a control copy that passes: a factory that ignores the binding (always the
+by name, with a control copy that passes (the replay's own mutants: a runner that does not restore
+on an exception, caught by a rule that raises mid-replay and a step that looks at the table before
+it ends; a factory that ignores the opt-in): a factory that ignores the binding (always the
 default) is caught by `alerts=dummy` writing seven rows; a dummy sink that writes is caught the
 same way; a capture sink that drops a row is caught by the comparison with the log; a runner that
 never swaps the source in is caught by the rows given not being seen; a runner that skips the

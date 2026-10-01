@@ -31,11 +31,14 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
     " not run: {{name}} ({{file}}), enabled: false in the set
 {{/disabled}}
     " iv_bind: the variant of each port for this run, "port=variant,port=variant";
-    " a port it does not name keeps the manifest's binding
+    " a port it does not name keeps the manifest's binding. A source that is not
+    " live replaces table content in the caller's LUW: a test and dev seam, never
+    " production, and refused unless iv_allow_replay says so.
     CLASS-METHODS run
       IMPORTING iv_date TYPE d
                 iv_mode TYPE c DEFAULT 'S'
                 iv_bind TYPE string OPTIONAL
+                iv_allow_replay TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rs_result) TYPE ty_result.
     CLASS-METHODS run_rule
       IMPORTING iv_rule TYPE csequence
@@ -58,6 +61,11 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 it_alerts TYPE string_table
                 iv_bind TYPE string OPTIONAL
       CHANGING cs_rule TYPE ty_rule.
+{{#sources}}
+    " puts the rows of {{table}} back after a replay: the rows kept before it
+    CLASS-METHODS restore_{{index}}
+      IMPORTING it_keep TYPE {{iface}}=>tt_rows.
+{{/sources}}
     CLASS-METHODS submit
       IMPORTING iv_date TYPE d
                 iv_run TYPE csequence
@@ -73,6 +81,7 @@ CLASS {{class}} IMPLEMENTATION.
     DATA ls_rule TYPE ty_rule.
     DATA lv_stamp TYPE timestampl.
     DATA lv_parallel TYPE abap_bool.
+    DATA lx_error TYPE REF TO cx_root.
 {{#sources}}
     DATA li_src_{{index}} TYPE REF TO {{iface}}.
     DATA lv_swap_{{index}} TYPE abap_bool.
@@ -83,7 +92,9 @@ CLASS {{class}} IMPLEMENTATION.
     IF iv_mode = c_parallel.
       lv_parallel = abap_true.
     ENDIF.
-    {{ports_class}}=>check( iv_bind = iv_bind iv_parallel = lv_parallel ).
+    {{ports_class}}=>check( iv_bind = iv_bind
+                          iv_parallel = lv_parallel
+                          iv_allow_replay = iv_allow_replay ).
     rs_result-set_name = c_set.
     rs_result-mode = iv_mode.
 {{#date}}
@@ -101,47 +112,65 @@ CLASS {{class}} IMPLEMENTATION.
         rs_result-run_id = lv_stamp.
     ENDTRY.
     lt_rules = rules( ).
+    " a source that is not live replaces table content for this run, and the
+    " table is put back whatever happens: after the loop, or when an exception
+    " leaves this method (CATCH and RAISE, which does what CLEANUP would; the
+    " transpiler drops CLEANUP, ANORMALIES.md). Nothing in here commits.
+    TRY.
 {{#sources}}
-    " a source that is not live replaces the rows of {{table}} for this run:
-    " the table's own rows are kept, the source's rows stand in their place,
-    " and the rules read them as they read the table; the rows come back below
-    li_src_{{index}} = {{ports_class}}=>get_{{name}}( {{ports_class}}=>variant( iv_port = {{name | literal}} iv_bind = iv_bind ) ).
-    IF li_src_{{index}}->live( ) = abap_false.
-      lv_swap_{{index}} = abap_true.
-      SELECT * FROM {{table}} INTO TABLE lt_keep_{{index}}.
-      lt_scope_{{index}} = li_src_{{index}}->read( ).
+        " {{table}}: the table's own rows are kept, the source's rows stand
+        " in their place, and the rules read them as they read the table
+        li_src_{{index}} = {{ports_class}}=>get_{{name}}( {{ports_class}}=>variant( iv_port = {{name | literal}} iv_bind = iv_bind ) ).
+        IF li_src_{{index}}->live( ) = abap_false.
+          SELECT * FROM {{table}} INTO TABLE lt_keep_{{index}}.
+          lt_scope_{{index}} = li_src_{{index}}->read( ).
 {{#has_client}}
-      LOOP AT lt_scope_{{index}} ASSIGNING <ls_row_{{index}}>.
-        <ls_row_{{index}}>-{{client}} = sy-mandt.
-      ENDLOOP.
+          LOOP AT lt_scope_{{index}} ASSIGNING <ls_row_{{index}}>.
+            <ls_row_{{index}}>-{{client}} = sy-mandt.
+          ENDLOOP.
 {{/has_client}}
-      DELETE FROM {{table}}.
-      INSERT {{table}} FROM TABLE lt_scope_{{index}}.
-    ENDIF.
+          lv_swap_{{index}} = abap_true.
+          DELETE FROM {{table}}.
+          INSERT {{table}} FROM TABLE lt_scope_{{index}}.
+        ENDIF.
 {{/sources}}
-    LOOP AT lt_rules INTO ls_rule.
-      IF iv_mode = c_parallel.
-        submit( EXPORTING iv_date = rs_result-check_date
-                          iv_run = rs_result-run_id
-                          iv_bind = iv_bind
-                CHANGING cs_rule = ls_rule ).
-      ELSE.
-        ls_rule = run_rule( iv_rule = ls_rule-rule
-                            iv_date = rs_result-check_date
-                            iv_run = rs_result-run_id
-                            iv_bind = iv_bind ).
-        rs_result-alerts = rs_result-alerts + ls_rule-alerts.
-      ENDIF.
-      APPEND ls_rule TO rs_result-rules.
-    ENDLOOP.
+        LOOP AT lt_rules INTO ls_rule.
+          IF iv_mode = c_parallel.
+            submit( EXPORTING iv_date = rs_result-check_date
+                              iv_run = rs_result-run_id
+                              iv_bind = iv_bind
+                    CHANGING cs_rule = ls_rule ).
+          ELSE.
+            ls_rule = run_rule( iv_rule = ls_rule-rule
+                                iv_date = rs_result-check_date
+                                iv_run = rs_result-run_id
+                                iv_bind = iv_bind ).
+            rs_result-alerts = rs_result-alerts + ls_rule-alerts.
+          ENDIF.
+          APPEND ls_rule TO rs_result-rules.
+        ENDLOOP.
+      CATCH cx_root INTO lx_error.
+{{#sources}}
+        IF lv_swap_{{index}} = abap_true.
+          restore_{{index}}( lt_keep_{{index}} ).
+        ENDIF.
+{{/sources}}
+        RAISE EXCEPTION lx_error.
+    ENDTRY.
 {{#sources}}
     IF lv_swap_{{index}} = abap_true.
-      DELETE FROM {{table}}.
-      INSERT {{table}} FROM TABLE lt_keep_{{index}}.
+      restore_{{index}}( lt_keep_{{index}} ).
     ENDIF.
 {{/sources}}
   ENDMETHOD.
 
+{{#sources}}
+  METHOD restore_{{index}}.
+    DELETE FROM {{table}}.
+    INSERT {{table}} FROM TABLE it_keep.
+  ENDMETHOD.
+
+{{/sources}}
   METHOD rules.
     DATA ls_rule TYPE ty_rule.
 {{#rules}}

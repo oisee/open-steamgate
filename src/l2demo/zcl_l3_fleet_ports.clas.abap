@@ -9,10 +9,13 @@ CLASS zcl_l3_fleet_ports DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_bind TYPE string OPTIONAL
       RETURNING VALUE(rv_variant) TYPE string.
     " refuses a binding naming a port or a variant the set does not have, and,
-    " for a run in jobs, a variant that cannot cross sessions
+    " for a run in jobs, a variant that cannot cross sessions; a source that is
+    " not live is a replay (it swaps table content in the caller LUW), a test and
+    " dev seam, never production, refused unless iv_allow_replay is set
     CLASS-METHODS check
       IMPORTING iv_bind TYPE string OPTIONAL
-                iv_parallel TYPE abap_bool DEFAULT abap_false.
+                iv_parallel TYPE abap_bool DEFAULT abap_false
+                iv_allow_replay TYPE abap_bool DEFAULT abap_false.
     CLASS-METHODS get_ships
       IMPORTING iv_variant TYPE csequence
       RETURNING VALUE(ri_port) TYPE REF TO zif_l3_fleet_ships.
@@ -54,6 +57,7 @@ CLASS zcl_l3_fleet_ports IMPLEMENTATION.
     DATA lv_value TYPE string.
     DATA lv_known TYPE abap_bool.
     DATA lv_variant TYPE string.
+    DATA lv_replay TYPE string.
     DATA li_ships TYPE REF TO zif_l3_fleet_ships.
     DATA li_alerts TYPE REF TO zif_l3_fleet_alerts.
     SPLIT iv_bind AT ',' INTO TABLE lt_parts.
@@ -88,12 +92,20 @@ CLASS zcl_l3_fleet_ports IMPLEMENTATION.
         EXPORTING iv_port = 'ships' iv_variant = lv_variant
                   iv_reason = 'the variant replaces the table content, a run in jobs cannot'.
     ENDIF.
+    IF li_ships->live( ) = abap_false AND lv_replay IS INITIAL.
+      lv_replay = 'ships'.
+    ENDIF.
     lv_variant = variant( iv_port = 'alerts' iv_bind = iv_bind ).
     li_alerts = get_alerts( lv_variant ).
     IF iv_parallel = abap_true AND li_alerts->volatile( ) = abap_true.
       RAISE EXCEPTION TYPE zcx_l3_fleet_port
         EXPORTING iv_port = 'alerts' iv_variant = lv_variant
                   iv_reason = 'the variant keeps its rows in this session, a job cannot use it'.
+    ENDIF.
+    IF lv_replay IS NOT INITIAL AND iv_allow_replay = abap_false.
+      RAISE EXCEPTION TYPE zcx_l3_fleet_port
+        EXPORTING iv_port = lv_replay iv_variant = variant( iv_port = lv_replay iv_bind = iv_bind )
+                  iv_reason = 'a replay swaps table content in the caller LUW; for a test or a dev run only, never production: pass iv_allow_replay'.
     ENDIF.
   ENDMETHOD.
 

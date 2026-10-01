@@ -13,9 +13,11 @@ import {spawnSync} from "node:child_process";
 import {createHash} from "node:crypto";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {dirname, join, relative, resolve as resolvePath, sep} from "node:path";
+import {basename, dirname, join, relative, resolve as resolvePath, sep} from "node:path";
+import {createRequire} from "node:module";
 import {pathToFileURL} from "node:url";
 import yaml from "js-yaml";
+const abaplint = createRequire(import.meta.url)("@abaplint/core");
 import {compileRule, lineIndex, modelHash, renderModel, rulePath, RuleError} from "./dsl-l2.mjs";
 import {DEFAULT_DDIC, registryFor} from "./dsl-ddic.mjs";
 
@@ -43,7 +45,74 @@ export const WIDTH = {set: 16, rule: 60, hash: 71, file: 128, jobname: 32};
 // class ZCL_OSD_GUITX_L3_<SET> has 30 characters at most) and the job names
 // L3_<SET>_<nn> are made of it
 export const SET_NAME = /^[a-z][a-z0-9_]{0,12}$/;
+// ---------------------------------------------------------------------------
+// static checks on ABAP source, read with abaplint (statements, not text)
+
+// Statements that end or write a unit of work. A check class and a variant
+// declared replay_safe hold none of the first two lists; the generated runner
+// and the generated variants may write (the log does) but never end the unit.
+const ENDS_UNIT = new Map([[abaplint.Statements.Commit, "COMMIT"], [abaplint.Statements.Rollback, "ROLLBACK"]]);
+const WRITES = new Map([[abaplint.Statements.ModifyDatabase, "MODIFY"], [abaplint.Statements.InsertDatabase, "INSERT"],
+  [abaplint.Statements.UpdateDatabase, "UPDATE"], [abaplint.Statements.DeleteDatabase, "DELETE"], [abaplint.Statements.MergeDatabase, "MERGE"]]);
+const COMMITTING_FM = /^'(DB_COMMIT|DB_ROLLBACK|BAPI_TRANSACTION_COMMIT|BAPI_TRANSACTION_ROLLBACK)'$/i;
+
+// [{line, what}] for each statement of the source that ends the unit of work, writes (when
+// writes is false), registers an update task or runs native SQL
+export function unitFindings(text, name, {writes = false} = {}) {
+  const registry = new abaplint.Registry();
+  registry.addFile(new abaplint.MemoryFile(name, text));
+  registry.parse();
+  const found = [];
+  for (const object of registry.getObjects()) {
+    for (const file of object.getABAPFiles()) {
+      for (const statement of file.getStatements()) {
+        const type = statement.get().constructor;
+        const line = statement.getStart().getRow();
+        const source = statement.concatTokens().replace(/\s+/g, " ");
+        if (ENDS_UNIT.has(type)) found.push({line, what: `${ENDS_UNIT.get(type)} statement`});
+        else if (!writes && WRITES.has(type)) found.push({line, what: `${WRITES.get(type)} database statement`});
+        else if (type === abaplint.Statements.CallFunction && (/\bIN UPDATE TASK\b|\bIN BACKGROUND\b/i.test(source) || COMMITTING_FM.test((source.split(" ")[2] ?? "").replace(/\.$/, "")))) found.push({line, what: "CALL FUNCTION that registers an update or ends the unit"});
+        else if (type === abaplint.Statements.SetUpdateTask) found.push({line, what: "SET UPDATE TASK statement"});
+        else if (type === abaplint.Statements.CallDatabase) found.push({line, what: "native SQL"});
+      }
+    }
+  }
+  return found;
+}
+
+// What the named class of a source declares: its DEFINITION line, the interfaces it names and the
+// methods its own IMPLEMENTATION holds (a second class in the file counts for nothing).
+export function classShape(text, name, className) {
+  const registry = new abaplint.Registry();
+  registry.addFile(new abaplint.MemoryFile(name, text));
+  registry.parse();
+  const same = (a) => a?.toLowerCase() === className.toLowerCase();
+  const S = abaplint.Statements, E = abaplint.Expressions;
+  const shape = {line: undefined, interfaces: [], methods: []};
+  let inDefinition = false, inImplementation = false;
+  for (const file of registry.getObjects().flatMap((o) => o.getABAPFiles())) {
+    for (const statement of file.getStatements()) {
+      const type = statement.get();
+      if (type instanceof S.ClassDefinition) {
+        inDefinition = same(statement.findFirstExpression(E.ClassName)?.concatTokens());
+        if (inDefinition) shape.line = statement.getStart().getRow();
+      } else if (type instanceof S.ClassImplementation) {
+        inImplementation = same(statement.findFirstExpression(E.ClassName)?.concatTokens());
+      } else if (type instanceof S.EndClass) {
+        inDefinition = false;
+        inImplementation = false;
+      } else if (inDefinition && type instanceof S.InterfaceDef) {
+        shape.interfaces.push(statement.findFirstExpression(E.InterfaceName).concatTokens().toLowerCase());
+      } else if (inImplementation && type instanceof S.MethodImplementation) {
+        shape.methods.push(statement.findFirstExpression(E.MethodName).concatTokens().toLowerCase());
+      }
+    }
+  }
+  return shape.line === undefined ? undefined : shape;
+}
+
 const KEYS = ["set", "title", "class", "report", "date", "rules", "ports", "bindings"];
+const VARIANT_KEYS = ["class", "replay_safe"];
 const PORT_KEYS = ["kind", "table", "key", "group", "seq", "variants"];
 const PORT_NAME = /^[a-z][a-z0-9_]{0,11}$/;
 const RULE_KEYS = ["rule", "enabled"];
@@ -151,6 +220,12 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     try { committed = JSON.parse(readFileSync(sidecar, "utf8")).model; } catch { committed = undefined; }
     if (committed === undefined) fail(at, `rule ${entry.rule} has no generated class beside it (${path(sidecar)}); build it with node tools/dsl-l2.mjs build ${path(ruleFile)} --out ${path(dirname(ruleFile))}`);
     if (committed !== hash) fail(at, `the generated class of ${entry.rule} is stale (its trace names ${committed}, the rule compiles to ${hash}); rebuild it with node tools/dsl-l2.mjs build ${path(ruleFile)} --out ${path(dirname(ruleFile))}`);
+    // a check class is read-only by construction: a replay runs it with the table swapped
+    const classFile = join(dirname(ruleFile), `${compiled.class}.clas.abap`);
+    if (existsSync(classFile)) {
+      const [first] = unitFindings(readFileSync(classFile, "utf8"), basename(classFile));
+      if (first) fail(at, `the generated class of ${entry.rule} (${path(classFile)}:${first.line}) holds a ${first.what}; a check class only reads (a replay swaps table content under it)`);
+    }
     const recorded = compiled.source;
     if (recorded.length > WIDTH.file) fail(at, `rule path ${recorded} is longer than ${WIDTH.file} characters, the width of ZOSD_L3_ALERT-RULE_FILE`);
     return {at, enabled: enabled === "true", compiled, hash, recorded};
@@ -180,20 +255,27 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   const implicit = doc.ports === undefined;
   const bindingDocs = doc.bindings === undefined ? (implicit ? {alerts: "log"} : {}) : asMap(doc.bindings, "bindings", "a mapping of port name to the variant it is bound to");
   if (!Object.keys(portDocs).length) fail(line("ports"), "ports names at least one port");
-  // a hand-written variant: the class exists and implements the port's interface,
-  // each of its methods; refused at the class's own line otherwise
-  const checkClass = ({className, iface, kind, at, vname}) => {
+  // a hand-written variant: the named class itself declares the port's interface and implements
+  // each of its methods (read with abaplint, so a second class in the file counts for nothing),
+  // and, when it says replay_safe, holds no statement that ends or writes a unit of work;
+  // refused at the class's own file and line otherwise
+  const checkClass = ({className, iface, kind, at, vname, replaySafe}) => {
     const found = findClassFile(className, classSearch);
     if (!found) fail(at, `class ${className} of variant ${vname} is not found (${className}.clas.abap beside the set or under src)`);
-    const lines = readFileSync(found, "utf8").split(/\r?\n/);
-    const find = (re) => lines.findIndex((l) => re.test(l)) + 1;
-    const defLine = find(new RegExp(`^\\s*CLASS\\s+${className}\\s+DEFINITION`, "i")) || 1;
-    const intfLine = find(new RegExp(`^\\s*INTERFACES\\s+(?:[A-Za-z0-9_]+\\s*,\\s*)*${iface}\\b`, "i"));
-    if (!intfLine) throw new SetError(path(found), defLine, `class ${className} does not implement ${iface}, the interface of the ${kind} port (INTERFACES ${iface}.)`);
+    const text = readFileSync(found, "utf8");
+    const shape = classShape(text, basename(found), className);
+    if (!shape) throw new SetError(path(found), 1, `${basename(found)} does not define class ${className}`);
+    if (!shape.interfaces.includes(iface)) {
+      throw new SetError(path(found), shape.line, `class ${className} does not implement ${iface}, the interface of the ${kind} port (INTERFACES ${iface}.)`);
+    }
     for (const method of PORT_METHODS[kind]) {
-      if (!find(new RegExp(`^\\s*METHOD\\s+${iface}~${method}\\s*\\.`, "i"))) {
-        throw new SetError(path(found), intfLine, `class ${className} does not implement ${iface}~${method}; the port's signature is ${PORT_METHODS[kind].join(", ")} (see the generated ${iface})`);
+      if (!shape.methods.includes(`${iface}~${method}`)) {
+        throw new SetError(path(found), shape.line, `class ${className} does not implement ${iface}~${method} in its own implementation; the port's signature is ${PORT_METHODS[kind].join(", ")} (see the generated ${iface})`);
       }
+    }
+    if (replaySafe) {
+      const [first] = unitFindings(text, basename(found));
+      if (first) throw new SetError(path(found), first.line, `class ${className} is declared replay_safe in the manifest (line ${at}) and holds a ${first.what}; a replay swaps table content in the caller LUW and nothing in it may write or end the unit`);
     }
   };
   const ifaceOf = (port) => `zif_l3_${set}_${port}`;
@@ -234,11 +316,20 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     if (!Object.keys(variantDocs).length) fail(line(`${key}/variants`), `port ${name} needs at least one variant`);
     tooLong(ifaceOf(name), key);
     const iface = ifaceOf(name);
-    const variants = Object.entries(variantDocs).map(([vname, value]) => {
+    const variants = Object.entries(variantDocs).map(([vname, value0]) => {
+      let value = value0;
       const vkey = `${key}/variants/${vname}`;
       const vat = implicit ? at : line(vkey);
       if (!PORT_NAME.test(vname)) fail(vat, `variant ${JSON.stringify(vname)} is a lower-case name of 1 to 12 letters, digits and _ starting with a letter`);
-      if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9_]*$/.test(value)) fail(vat, `variant ${vname} is generated or the name of a class`);
+      let replaySafe = false;
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        for (const k of Object.keys(value)) if (!VARIANT_KEYS.includes(k)) fail(line(`${vkey}/${k}`), `unknown key ${k} in a variant (${VARIANT_KEYS.join(", ")})`);
+        const flag = value.replay_safe ?? "false";
+        if (flag !== "true" && flag !== "false") fail(line(`${vkey}/replay_safe`), `replay_safe is true or false, not ${JSON.stringify(flag)}`);
+        replaySafe = flag === "true";
+        value = value.class;
+      }
+      if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9_]*$/.test(value)) fail(vat, `variant ${vname} is generated or the name of a class (a class: <name> with an optional replay_safe: true)`);
       let className, generated = value === "generated";
       if (generated) {
         if (!GENERATED[kind].includes(vname)) fail(vat, `a generated variant of a ${kind} is one of ${GENERATED[kind].join(", ")}; ${vname} needs a class of its own (${vname}: <class>)`);
@@ -246,14 +337,14 @@ export function compileSet(file, {ddic, registry, out} = {}) {
         tooLong(className, vkey);
       } else {
         className = value.toLowerCase();
-        checkClass({className, iface, kind, at: vat, vname});
+        checkClass({className, iface, kind, at: vat, vname, replaySafe});
       }
       return {
         "@id": `${id}/port/${name}/variant/${vname}`, set_line: vat,
         name: vname, "name@type": CHAR(30), class: className, generated,
         is_table: generated && vname === "table", is_log: generated && vname === "log",
         is_dummy: generated && vname === "dummy", is_capture: generated && vname === "capture",
-        volatile: generated && (vname === "dummy" || vname === "capture"),
+        volatile: generated && (vname === "dummy" || vname === "capture"), replay_safe: replaySafe,
       };
     });
     const bound = bindingDocs[name];
@@ -271,6 +362,13 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     };
   });
   for (const name of Object.keys(bindingDocs)) if (!ports.some((p) => p.name === name)) fail(line(`bindings/${name}`), `binding ${name} names no port of the set`);
+  // a set whose source can replay (a variant that is not the live table) may run any hand-written
+  // variant inside the swap, so each must say, and have checked, that it writes and ends nothing
+  if (ports.some((p) => p.is_source && p.variants.some((v) => !v.is_table))) {
+    for (const p of ports) for (const v of p.variants) {
+      if (!v.generated && !v.replay_safe) fail(v.set_line, `variant ${v.name} of port ${p.name} is a hand-written class in a set whose source can replay; declare it ${v.name}: {class: ${v.class}, replay_safe: true} once it holds no write and no COMMIT or ROLLBACK (checked), or take the replay variants out`);
+    }
+  }
   const sinks = ports.filter((p) => p.is_sink);
   if (sinks.length !== 1) fail(line("ports"), `a set has exactly one sink, the alert sink the runner writes through; this one has ${sinks.length}`);
   const SET = set.toUpperCase();
@@ -376,6 +474,11 @@ export async function renderSet(model) {
   const known = linesById(model);
   const nodeLine = (nodeId) => known.get(nodeId) ?? model.set_line;
   const extra = await renderPorts(model);
+  // nothing the runner or a generated variant holds may end the unit of work while a table is swapped
+  for (const [name, text] of [[`${model.class}.clas.abap`, runner.text], ...extra.results.map(([n, r]) => [n, r.text])]) {
+    const [first] = unitFindings(text, name, {writes: true});
+    if (first) throw new SetError(model.where ?? model.source, model.set_line, `the generated ${name} line ${first.line} holds a ${first.what}; nothing generated may end the unit of work`);
+  }
   const results = [[`${model.class}.clas.abap`, runner], [`${model.report}.prog.abap`, job], ...extra.results];
   for (const [name, result] of results) {
     const error = result.findings.find((f) => f.severity === "E");

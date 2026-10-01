@@ -37,11 +37,14 @@ CLASS zcl_l3_fleet DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_hash_6 TYPE zosd_l3_alert-model_hash VALUE 'sha256:6dc361bcc17b388fe102c33fead3d7dd38d6b4993437e78ec508424e0e0f50a5'.
     " not run: ship-max-cargo (src/l2demo/ship_max_cargo.l2.yaml), enabled: false in the set
     " iv_bind: the variant of each port for this run, "port=variant,port=variant";
-    " a port it does not name keeps the manifest's binding
+    " a port it does not name keeps the manifest's binding. A source that is not
+    " live replaces table content in the caller's LUW: a test and dev seam, never
+    " production, and refused unless iv_allow_replay says so.
     CLASS-METHODS run
       IMPORTING iv_date TYPE d
                 iv_mode TYPE c DEFAULT 'S'
                 iv_bind TYPE string OPTIONAL
+                iv_allow_replay TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rs_result) TYPE ty_result.
     CLASS-METHODS run_rule
       IMPORTING iv_rule TYPE csequence
@@ -64,6 +67,9 @@ CLASS zcl_l3_fleet DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 it_alerts TYPE string_table
                 iv_bind TYPE string OPTIONAL
       CHANGING cs_rule TYPE ty_rule.
+    " puts the rows of zosd_l2_ship back after a replay: the rows kept before it
+    CLASS-METHODS restore_1
+      IMPORTING it_keep TYPE zif_l3_fleet_ships=>tt_rows.
     CLASS-METHODS submit
       IMPORTING iv_date TYPE d
                 iv_run TYPE csequence
@@ -79,6 +85,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
     DATA ls_rule TYPE ty_rule.
     DATA lv_stamp TYPE timestampl.
     DATA lv_parallel TYPE abap_bool.
+    DATA lx_error TYPE REF TO cx_root.
     DATA li_src_1 TYPE REF TO zif_l3_fleet_ships.
     DATA lv_swap_1 TYPE abap_bool.
     DATA lt_keep_1 TYPE zif_l3_fleet_ships=>tt_rows.
@@ -87,7 +94,9 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
     IF iv_mode = c_parallel.
       lv_parallel = abap_true.
     ENDIF.
-    zcl_l3_fleet_ports=>check( iv_bind = iv_bind iv_parallel = lv_parallel ).
+    zcl_l3_fleet_ports=>check( iv_bind = iv_bind
+                          iv_parallel = lv_parallel
+                          iv_allow_replay = iv_allow_replay ).
     rs_result-set_name = c_set.
     rs_result-mode = iv_mode.
     rs_result-check_date = iv_date.
@@ -98,39 +107,53 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
         rs_result-run_id = lv_stamp.
     ENDTRY.
     lt_rules = rules( ).
-    " a source that is not live replaces the rows of zosd_l2_ship for this run:
-    " the table's own rows are kept, the source's rows stand in their place,
-    " and the rules read them as they read the table; the rows come back below
-    li_src_1 = zcl_l3_fleet_ports=>get_ships( zcl_l3_fleet_ports=>variant( iv_port = 'ships' iv_bind = iv_bind ) ).
-    IF li_src_1->live( ) = abap_false.
-      lv_swap_1 = abap_true.
-      SELECT * FROM zosd_l2_ship INTO TABLE lt_keep_1.
-      lt_scope_1 = li_src_1->read( ).
-      LOOP AT lt_scope_1 ASSIGNING <ls_row_1>.
-        <ls_row_1>-mandt = sy-mandt.
-      ENDLOOP.
-      DELETE FROM zosd_l2_ship.
-      INSERT zosd_l2_ship FROM TABLE lt_scope_1.
-    ENDIF.
-    LOOP AT lt_rules INTO ls_rule.
-      IF iv_mode = c_parallel.
-        submit( EXPORTING iv_date = rs_result-check_date
-                          iv_run = rs_result-run_id
-                          iv_bind = iv_bind
-                CHANGING cs_rule = ls_rule ).
-      ELSE.
-        ls_rule = run_rule( iv_rule = ls_rule-rule
-                            iv_date = rs_result-check_date
-                            iv_run = rs_result-run_id
-                            iv_bind = iv_bind ).
-        rs_result-alerts = rs_result-alerts + ls_rule-alerts.
-      ENDIF.
-      APPEND ls_rule TO rs_result-rules.
-    ENDLOOP.
+    " a source that is not live replaces table content for this run, and the
+    " table is put back whatever happens: after the loop, or when an exception
+    " leaves this method (CATCH and RAISE, which does what CLEANUP would; the
+    " transpiler drops CLEANUP, ANORMALIES.md). Nothing in here commits.
+    TRY.
+        " zosd_l2_ship: the table's own rows are kept, the source's rows stand
+        " in their place, and the rules read them as they read the table
+        li_src_1 = zcl_l3_fleet_ports=>get_ships( zcl_l3_fleet_ports=>variant( iv_port = 'ships' iv_bind = iv_bind ) ).
+        IF li_src_1->live( ) = abap_false.
+          SELECT * FROM zosd_l2_ship INTO TABLE lt_keep_1.
+          lt_scope_1 = li_src_1->read( ).
+          LOOP AT lt_scope_1 ASSIGNING <ls_row_1>.
+            <ls_row_1>-mandt = sy-mandt.
+          ENDLOOP.
+          lv_swap_1 = abap_true.
+          DELETE FROM zosd_l2_ship.
+          INSERT zosd_l2_ship FROM TABLE lt_scope_1.
+        ENDIF.
+        LOOP AT lt_rules INTO ls_rule.
+          IF iv_mode = c_parallel.
+            submit( EXPORTING iv_date = rs_result-check_date
+                              iv_run = rs_result-run_id
+                              iv_bind = iv_bind
+                    CHANGING cs_rule = ls_rule ).
+          ELSE.
+            ls_rule = run_rule( iv_rule = ls_rule-rule
+                                iv_date = rs_result-check_date
+                                iv_run = rs_result-run_id
+                                iv_bind = iv_bind ).
+            rs_result-alerts = rs_result-alerts + ls_rule-alerts.
+          ENDIF.
+          APPEND ls_rule TO rs_result-rules.
+        ENDLOOP.
+      CATCH cx_root INTO lx_error.
+        IF lv_swap_1 = abap_true.
+          restore_1( lt_keep_1 ).
+        ENDIF.
+        RAISE EXCEPTION lx_error.
+    ENDTRY.
     IF lv_swap_1 = abap_true.
-      DELETE FROM zosd_l2_ship.
-      INSERT zosd_l2_ship FROM TABLE lt_keep_1.
+      restore_1( lt_keep_1 ).
     ENDIF.
+  ENDMETHOD.
+
+  METHOD restore_1.
+    DELETE FROM zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE it_keep.
   ENDMETHOD.
 
   METHOD rules.

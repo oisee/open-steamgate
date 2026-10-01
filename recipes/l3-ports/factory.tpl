@@ -9,10 +9,13 @@ CLASS {{ports_class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_bind TYPE string OPTIONAL
       RETURNING VALUE(rv_variant) TYPE string.
     " refuses a binding naming a port or a variant the set does not have, and,
-    " for a run in jobs, a variant that cannot cross sessions
+    " for a run in jobs, a variant that cannot cross sessions; a source that is
+    " not live is a replay (it swaps table content in the caller LUW), a test and
+    " dev seam, never production, refused unless iv_allow_replay is set
     CLASS-METHODS check
       IMPORTING iv_bind TYPE string OPTIONAL
-                iv_parallel TYPE abap_bool DEFAULT abap_false.
+                iv_parallel TYPE abap_bool DEFAULT abap_false
+                iv_allow_replay TYPE abap_bool DEFAULT abap_false.
 {{#ports}}
     CLASS-METHODS get_{{name}}
       IMPORTING iv_variant TYPE csequence
@@ -55,6 +58,7 @@ CLASS {{ports_class}} IMPLEMENTATION.
     DATA lv_value TYPE string.
     DATA lv_known TYPE abap_bool.
     DATA lv_variant TYPE string.
+    DATA lv_replay TYPE string.
 {{#ports}}
     DATA li_{{name}} TYPE REF TO {{iface}}.
 {{/ports}}
@@ -91,8 +95,16 @@ CLASS {{ports_class}} IMPLEMENTATION.
         EXPORTING iv_port = {{name | literal}} iv_variant = lv_variant
                   iv_reason = 'the variant replaces the table content, a run in jobs cannot'.
     ENDIF.
+    IF li_{{name}}->live( ) = abap_false AND lv_replay IS INITIAL.
+      lv_replay = {{name | literal}}.
+    ENDIF.
 {{/is_source}}
 {{/ports}}
+    IF lv_replay IS NOT INITIAL AND iv_allow_replay = abap_false.
+      RAISE EXCEPTION TYPE {{exception}}
+        EXPORTING iv_port = lv_replay iv_variant = variant( iv_port = lv_replay iv_bind = iv_bind )
+                  iv_reason = 'a replay swaps table content in the caller LUW; for a test or a dev run only, never production: pass iv_allow_replay'.
+    ENDIF.
   ENDMETHOD.
 {{#ports}}
 
