@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {createHash} from "node:crypto";
 // Look for live identifiers in what is about to become public.
 //
 // The rule in CLAUDE.md is old and it has been walked past twice. Once a wire
@@ -152,7 +153,14 @@ function identifierList(root) {
 function allowed(root) {
   const path = join(root, ".leak-allow.json");
   if (!existsSync(path)) return () => false;
-  const raw = JSON.parse(readFileSync(path, "utf8"));
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    // Node's parse error quotes the input; report the file only.
+    console.error(`osd-leak-scan: ${path} is not valid JSON (${error.name}); its content is not printed`);
+    process.exit(1);
+  }
   const keys = new Set();
   for (const entry of raw.allow ?? []) {
     if (!entry.reason) {
@@ -166,13 +174,38 @@ function allowed(root) {
 function identifiers(root) {
   const path = identifierList(root);
   if (!path) return null;
-  const raw = JSON.parse(readFileSync(path, "utf8"));
-  const list = [];
-  for (const [kind, values] of Object.entries(raw)) {
-    for (const v of values) {
-      if (typeof v === "string" && v.length >= 3) list.push({ kind, value: v });
-    }
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    // Node's parse error quotes the input, and in CI that input is the secret
+    // list and the log is public: say where, never what.
+    console.error(`osd-leak-scan: ${path} is not valid JSON (${error.name}); its content is not printed`);
+    process.exit(1);
   }
+  // The list is checked whole before anything uses it: a name the scan would
+  // silently skip (too short, not a string, a string where an array belongs)
+  // is coverage lost without a word, and a line break inside a name or a
+  // category would split the one-line ::add-mask:: command and leave the rest
+  // of it in a public log. Errors name the position, never the content.
+  const bad = (where, why) => {
+    console.error(`osd-leak-scan: ${path}: ${where}: ${why}; its content is not printed`);
+    process.exit(1);
+  };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) bad("top level", "not an object of categories");
+  if (Object.keys(raw).length === 0) bad("top level", "no categories, so nothing would be checked");
+  const list = [];
+  Object.entries(raw).forEach(([kind, values], i) => {
+    if (/[\r\n]/.test(kind)) bad(`category #${i + 1}`, "a line break in its name");
+    if (!Array.isArray(values)) bad(`category #${i + 1}`, "not an array of names");
+    if (values.length === 0) bad(`category #${i + 1}`, "no names");
+    values.forEach((v, j) => {
+      if (typeof v !== "string") bad(`category #${i + 1}, name #${j + 1}`, "not a string");
+      if (/[\r\n]/.test(v)) bad(`category #${i + 1}, name #${j + 1}`, "a line break in it");
+      if (v.trim().length < 3) bad(`category #${i + 1}, name #${j + 1}`, "shorter than 3 characters, which the scan cannot match without noise");
+      list.push({ kind, value: v });
+    });
+  });
   return list;
 }
 
@@ -340,6 +373,33 @@ const pathsAt = args.indexOf("--paths");
 const pathArgs = pathsAt >= 0 ? args.slice(pathsAt + 1).filter((a) => !a.startsWith("--")) : null;
 
 const names = identifiers(root);
+// In CI the list comes from an Actions secret and the log is public, so a hit
+// must not print the very name it caught, nor the category it is filed under
+// (a category name can say more than the name). --redact prints the file, the
+// kind of view, a category number and a short hash of the value; the same scan
+// on a machine with the list says what it is. --print-masks emits one
+// ::add-mask:: line per name and category, so the runner masks them anywhere
+// in the log as a second guard.
+const redact = args.includes("--redact") || process.env.OSD_LEAK_REDACT === "1";
+if (args.includes("--print-masks")) {
+  const seenMask = new Set();
+  for (const { kind, value } of names ?? []) {
+    for (const s of [kind, value]) {
+      if (seenMask.has(s)) continue;
+      seenMask.add(s);
+      console.log(`::add-mask::${s}`);
+    }
+  }
+  process.exit(names ? 0 : 2);
+}
+const kinds = [...new Set((names ?? []).map((n) => n.kind))];
+const shown = (h) => {
+  if (!redact) return `${h.what} (${h.how}): ${h.text}`;
+  const n = kinds.indexOf(h.what);
+  const label = n >= 0 ? `имя из списка, категория #${n + 1}` : h.what;
+  const digest = createHash("sha256").update(h.text.toLowerCase()).digest("hex").slice(0, 8);
+  return `${label} (${h.how}): sha256:${digest}`;
+};
 const files = pathArgs
   ? namedFiles(root, pathArgs)
   : rangeArgs ? blobsInRange(root, rangeArgs) : all ? trackedFiles(root) : stagedFiles(root);
@@ -376,7 +436,7 @@ if (hits.length) {
   console.error("");
   for (const [file, list] of byFile) {
     console.error(`  ${file}`);
-    for (const h of list) console.error(`      ${h.what} (${h.how}): ${h.text}`);
+    for (const h of list) console.error(`      ${shown(h)}`);
   }
   console.error("");
   console.error("Это публичный репозиторий. Вычисти или положи под .local/.");
