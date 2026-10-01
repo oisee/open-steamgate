@@ -1,6 +1,6 @@
 # DSL L2: a domain rule compiled to L1
 
-Status: slices 1 and 2, 2026-09-30. Built on L1 (`docs/dsl-l1.md`) and the template engine
+Status: slices 1, 2 and 3, 2026-09-30. Built on L1 (`docs/dsl-l1.md`) and the template engine
 (`docs/abap-templates.md`).
 
 ## What L2 is
@@ -198,6 +198,147 @@ prints the reviewer's view: for each case its method, condition, rows and the al
 The demo rule derives ten cases (`status`: eq, ne, blank; the join: match, nomatch; `dep_date`:
 lt, eq, gt; the `exists`: zero, two).
 
+## Slice 3: or, not, several exists, require
+
+### The language
+
+```yaml
+when: ship.status = 'M' or ship.status = 'D'
+forbid:
+  exists: ZOSD_L2_CREW as crew
+  where: crew.ship_id = ship.ship_id
+    and not (crew.role = 'K' or crew.since > $date)
+```
+
+```
+condition   := disjunction
+disjunction := conjunction ('or' conjunction)*
+conjunction := negation ('and' negation)*
+negation    := 'not' negation | '(' disjunction ')' | comparison
+```
+
+`not` binds tighter than `and`, `and` tighter than `or`; parentheses group. The model keeps the
+tree (`when.tree`, `clauses[n].tree`: `{op: and | or, items}`, `{op: not, item}`,
+`{op: cmp, index}`), and the comparisons stay a list in the order written, each with its own
+`@id` (`when/2`, `forbid/where/3`) and **its own rule line**: a condition written over several
+lines (a plain scalar continued on more indented lines, or `|` / `>`) gives each comparison the
+line it stands on. When the lines, joined the way YAML joins them, are not the value js-yaml read
+(quotes, escapes, blank lines, indentation kept by `|`), every comparison takes the key's line.
+An alias may not be `and`, `or`, `not` or `as`.
+
+**Several exists.** `forbid:` holds one clause (`exists` + `where`, as before), or a list of two
+or three under `all:` or `any:`:
+
+```yaml
+forbid:
+  all:                                   # every clause matches: one alert per combination
+    - exists: ZOSD_L2_VOY as voy
+      where: voy.ship_id = ship.ship_id and voy.dep_date > $date
+    - exists: ZOSD_L2_CREW as crew
+      where: crew.ship_id = ship.ship_id and (crew.role = 'C' or crew.role = 'P')
+alert: "{ship.ship_id}: voyage {voy.voyage_id}, crew {crew.crew_id}"
+```
+
+Under `all` the alert may name every alias. Under `any` each matching row of each clause is one
+alert: a clause may carry its own `alert:` (holes from `for` and its own alias), and the rule's
+`alert:` is shared by the clauses that do not, and may name only `for` fields. A clause's `where`
+sees `for` and its own alias, not another clause's. Under `any` two clauses may read the same
+table under different aliases (each is its own query; in the derived cases each clause gets a row
+of its own in that table, and a case whose rows would share a key is skipped). Under `all` and
+`forbid` every table is read once: a clause's `zero` case empties its table, which would empty
+the other clause too.
+
+**`require:`** is the dual of `forbid:`: one `exists` + `where`, and the alert fires for a `for`
+row that meets `when` when **no** row matches. Its alert names only `for` fields (there is no row
+of the other table to name).
+
+**Duplicates** in one conjunction (or disjunction) are an error at the second one's line. Two
+comparisons are the same after the mirroring every comparison gets anyway (the selected table's
+field on the left: `a = b` and `b = a`, `a < b` and `b > a` meet), the other side compared as the
+field holds it (CHAR without trailing blanks, `12.5` and `12.50` in a DEC alike). The same
+comparison in two different groups (`(a and b) or (a and c)`) is fine. A `not` and a group are
+compared as units, the items of a group in any order: `not a and not a` is refused, and so is
+`(a or b) and (b or a)`; `a and not a` is not a duplicate.
+
+### The lowering
+
+- Every `where` needs, among its top-level conjuncts (joined by `and`, not under `or` or `not`),
+  an equality with a `for` field: it becomes the clause's `ON` (for `require`, the correlation of
+  the subquery). A clause without one is refused with the reason; for `all` the reason says that
+  every clause joins the `for` table in the one query.
+- `when` and the rest of each `where` are one `and` in `WHERE`, one comparison per line.
+  A group inside a group is parenthesised, and so is everything after a `NOT`, so the lines never
+  lean on Open SQL's precedence (which is the rule language's). A line holds one comparison and
+  its parentheses.
+- **No line over 255 characters.** An alert text (up to 255 characters as a literal) is cut into
+  pieces of at most 100, each its own `&&` line; an expected alert of a test method that does not
+  fit one literal is built in `lv_exp` the same way (`APPEND` takes no expression in 7.02). What
+  the `abap` profile still refuses (a long example name in the assert call's line, a long CHAR
+  literal after its column) is a `RuleError` at the rule line of the node the line traces to,
+  raised by `renderRule` before any file is written, so `build`, `check` and the API refuse it
+  alike. Before, the profile's error only made the `build` command exit 1, after writing the
+  files, and `check` and `buildRule` did not look at it.
+- `forbid` with one clause or `all:` is **one** `SELECT`: `for INNER JOIN` each clause in turn,
+  ordered by the `for` key and each clause's key. `any:` is **one query per clause** (7.02 Open SQL
+  has no `UNION`), each into its own table (`lt_join1`, `lt_join2`), and the alerts come clause
+  by clause, each clause in key order. `check` makes as many database calls as the rule has
+  clauses, whatever the number of rows; `test/dsl-l2.mjs` counts them.
+- `require` is **one** `SELECT` on the `for` table with a correlated subquery:
+  `WHERE <when> AND NOT EXISTS ( SELECT * FROM <table> AS <alias> WHERE <where> )`, the outer
+  field written `for_alias~field`. **Chosen after measuring** (2026-09-30): the transpiler takes
+  the 7.02 form, passes the subquery through to SQL with its correlation, and SQLite answers it;
+  a probe over five ships and five voyages gave the expected rows for `OR`, `NOT ( ... )` and
+  `NOT EXISTS` against the nested form. So the FOR ALL ENTRIES fallback the spec named was not
+  needed, and no anomaly was found. (The SQLite client of the runtime turns every `~` of the
+  statement into `.`, which is how `ship~ship_id` inside the subquery reaches the database.)
+- `check_reference` stays the direct nested form for every construct: a `SELECT` per row of the
+  table before it, `LOOP` for `forbid`, `IF lt_x IS INITIAL` for `require`, one pass per clause for
+  `any` (clause by clause, the order `check` answers in).
+
+### The interpreter and the derived cases
+
+`evaluate` walks the trees. Two-valued logic is enough: a field is never NULL here (every row is
+written by an ABAP `INSERT`, which fills every column, and every join is an inner join), so
+`not` is plain negation.
+
+A case must make its comparison decide. The compiler walks from the tree's root to the
+comparison: under an `and` the other items must hold, under an `or` they must not, a `not`
+passes the decision through; every other tree of the rule holds. Rows are solved for that (a
+tree's ways to come out true or false are enumerated, at most 64 per tree), starting from the
+first example's first rows, and then the comparison's field takes its boundary values as in
+slice 2. Under a `not` the mutants are the same and the expected result flips (the interpreter
+computes it). Under `require` a comparison of `when` is tested with no exists row, since with one
+the rule stays silent whatever `when` says.
+
+The discriminate guard stays mandatory. Its mutants of a comparison are: always true (dropped
+from an `and`), always false (dropped from an `or`), every other operator, and the literal or
+parameter one step either way. The structural cases have a guard of their own: some clause
+replaced by one that always matches, or by one that never does, must change the alerts.
+
+| rule | structural cases |
+|---|---|
+| `forbid`, one clause | `b_exists_zero`, `b_exists_two` (as in slice 2) |
+| `all` | per clause `b_<alias>_zero` (that clause unmatched: no alert), `b_<alias>_two` |
+| `any` | per clause `b_<alias>_only` (only that clause matches), `b_<alias>_two`; `b_exists_zero` |
+| `require` | `b_exists_zero` (no exists row: the alert), `b_exists_one` (one matching row: none) |
+
+`<alias>` falls back to `exists<n>` when a name would pass 30 characters.
+
+### Demo
+
+Beside the slice 1-2 rule, on the same fleet with a crew table (`ZOSD_L2_CREW`):
+`src/l2demo/grounded_ship_crew.l2.yaml` (`or` and `not`, its `where` over two lines; 6 examples,
+16 derived cases) and `src/l2demo/ship_captain.l2.yaml` (`require`; 6 examples, 13 derived
+cases). The slice 1-2 demo's ABAP did not change; its traces did, where a line that named no
+value (`TYPES: BEGIN OF`, `ORDER BY`, the reference's `SELECT` lines) traced to the rule's root
+and now traces to its query or its level.
+
+`test/dsl-l2.mjs` also builds a synthetic `all` rule and a synthetic `any` rule over the three
+fleet tables and runs them, and mutates the generated ABAP once per construct: `OR` made `AND`,
+a `NOT` dropped, `NOT EXISTS` made `EXISTS` (the reference's `IS INITIAL` made `IS NOT
+INITIAL`), and one clause of `all` taken out of the query and the reference alike; each turns
+its cases red.
+
 ## Commands
 
 ```
@@ -226,10 +367,11 @@ a rule file as an object of an unknown type.
 
 ## Not yet
 
-More than one `exists`, `or`, `not`, parameters other than `$date`, aggregates, a condition on
-the outer table inside `where` beyond the join (a comparison of an `exists` field with an outer
-field is allowed; one of only outer fields is not), a `for` and an `exists` on the same table, a
-join without an equality, a message class for the alert, derived cases for `or`/`not`, and
-running a rule on A4H. The interpreter's agreement with a system is measured here only, on this
-runtime (NUMC comparisons against a literal, for one, are the interpreter's reading of the DDIC
-and are not exercised by an ABAP test).
+Parameters other than `$date`, aggregates, a condition on the outer table inside `where` beyond
+the join (a comparison of an `exists` field with an outer field is allowed; one of only outer
+fields is not), a `for` and an `exists` on the same table, a join without an equality, an
+equality under `or` as a join, a clause of `all` or `any` naming another clause, `require` with
+more than one clause, more than three clauses, a message class for the alert, and running a rule
+on A4H. The interpreter's agreement with a system is measured here only, on this runtime (NUMC
+comparisons against a literal, for one, are the interpreter's reading of the DDIC and are not
+exercised by an ABAP test).

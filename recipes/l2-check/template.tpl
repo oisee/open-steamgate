@@ -9,37 +9,45 @@ ENDCLASS.
 
 CLASS {{class}} IMPLEMENTATION.
   METHOD check.
-    " one query: the tables joined, never a SELECT per row of the first
-    TYPES: BEGIN OF ty_join,
-{{#join.fields}}
+    " {{comment}}
+{{#queries}}
+    TYPES: BEGIN OF {{type}},
+{{#fields}}
              {{name}} TYPE {{table}}-{{column}},
-{{/join.fields}}
-           END OF ty_join.
-    DATA {{join.itab}} TYPE STANDARD TABLE OF ty_join WITH DEFAULT KEY.
-    DATA {{join.wa}} TYPE ty_join.
+{{/fields}}
+           END OF {{type}}.
+    DATA {{itab}} TYPE STANDARD TABLE OF {{type}} WITH DEFAULT KEY.
+    DATA {{wa}} TYPE {{type}}.
+{{/queries}}
     DATA lv_alert TYPE string.
+{{#queries}}
     SELECT
-{{#join.fields}}
+{{#fields}}
         {{source}} AS {{name}}
-{{/join.fields}}
-      FROM {{for.table}} AS {{for.alias}}
-        INNER JOIN {{forbid.table}} AS {{forbid.alias}}
-{{#join.on}}
+{{/fields}}
+{{#from}}
+      FROM {{table}} AS {{alias}}
+{{/from}}
+{{#joins}}
+        INNER JOIN {{table}} AS {{alias}}
+{{#on}}
           {{#@first}}ON{{/@first}}{{^@first}} AND{{/@first}} {{lhs}} {{op}} {{sref}}
-{{/join.on}}
-      INTO CORRESPONDING FIELDS OF TABLE {{join.itab}}
-{{#join.where}}
-      {{#@first}}WHERE{{/@first}}{{^@first}}  AND{{/@first}} {{lhs}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{sref}}{{/is_literal}}
-{{/join.where}}
+{{/on}}
+{{/joins}}
+      INTO CORRESPONDING FIELDS OF TABLE {{itab}}
+{{#where}}
+      {{pre}}{{#is_cmp}}{{lhs}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{sref}}{{/is_literal}}{{/is_cmp}}{{^is_cmp}}{{text}}{{/is_cmp}}{{post}}
+{{/where}}
       ORDER BY
-{{#join.order}}
+{{#order}}
         {{source}}{{#@last}}.{{/@last}}
-{{/join.order}}
-    LOOP AT {{join.itab}} INTO {{join.wa}}.
-{{#alert.parts}}
+{{/order}}
+    LOOP AT {{itab}} INTO {{wa}}.
+{{#alert_parts}}
       {{#@first}}lv_alert = {{/@first}}{{^@first}}  && {{/@first}}{{#is_text}}{{value | literal}}{{/is_text}}{{^is_text}}{{jref}}{{/is_text}}{{#@last}}.{{/@last}}
-{{/alert.parts}}
+{{/alert_parts}}
       APPEND lv_alert TO rt_alerts.
     ENDLOOP.
+{{/queries}}
   ENDMETHOD.
 ENDCLASS.

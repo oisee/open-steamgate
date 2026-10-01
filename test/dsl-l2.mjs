@@ -12,8 +12,8 @@ import {tmpdir} from "node:os";
 import {basename, join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DEFAULT_DDIC, registryFor} from "../tools/dsl-ddic.mjs";
-import {buildRule, checkRule, compileRule, describeCases, evaluate, misfit, RuleError, stepValue} from "../tools/dsl-l2.mjs";
-import {bump, caseDiscriminates, compareValues, conditionOf} from "../tools/dsl-l2-eval.mjs";
+import {buildRule, checkRule, compileRule, describeCases, evaluate, misfit, parseCondition, RuleError, stepValue} from "../tools/dsl-l2.mjs";
+import {bump, caseDiscriminates, compareValues, conditionOf, structureDiscriminates} from "../tools/dsl-l2-eval.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
@@ -25,6 +25,9 @@ const RULE_TEXT = readFileSync(RULE, "utf8");
 const DERIVED = ["B_STATUS_EQ", "B_STATUS_NE", "B_STATUS_BLANK", "B_SHIP_ID_MATCH", "B_SHIP_ID_NOMATCH",
   "B_DEP_DATE_LT", "B_DEP_DATE_EQ", "B_DEP_DATE_GT", "B_EXISTS_ZERO", "B_EXISTS_TWO"];
 const ruleLine = (re) => RULE_TEXT.split("\n").findIndex((l) => re.test(l)) + 1;
+const OR_NOT = "src/l2demo/grounded_ship_crew.l2.yaml";
+const REQUIRE = "src/l2demo/ship_captain.l2.yaml";
+const DEMO_RULES = [RULE, OR_NOT, REQUIRE];
 
 describe("DSL L2: a rule, its generated check, its examples and its derived cases", function () {
   this.timeout(180000);
@@ -44,11 +47,13 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
   };
 
   describe("generation", () => {
-    it("the committed files are a fresh build (the check command exits 0)", () => {
-      const run = spawnSync(process.execPath, ["tools/dsl-l2.mjs", "check", RULE, "--out", OUT], {encoding: "utf8"});
-      expect(run.status, run.stdout + run.stderr).to.equal(0);
-      expect(run.stdout).to.contain("generated files match");
-    });
+    for (const rule of DEMO_RULES) {
+      it(`the committed files of ${basename(rule)} are a fresh build (the check command exits 0)`, () => {
+        const run = spawnSync(process.execPath, ["tools/dsl-l2.mjs", "check", rule, "--out", OUT], {encoding: "utf8"});
+        expect(run.status, run.stdout + run.stderr).to.equal(0);
+        expect(run.stdout).to.contain("generated files match");
+      });
+    }
 
     it("and the check notices one changed byte", async () => {
       const copy = join(scratch, "drift");
@@ -324,7 +329,7 @@ examples:
     it("the fixture rule compiles, with the DDIC types on its literals", () => {
       const model = compileRule(numRule("num-ok", "", ""), {registry: numRegistry});
       expect(model.when.conditions[0]["value@type"]).to.deep.equal({built_in: "INT1"});
-      expect(model.forbid.conditions[1]["value@type"]).to.deep.equal({built_in: "DEC", length: 5, decimals: 2});
+      expect(model.clauses[0].conditions[1]["value@type"]).to.deep.equal({built_in: "DEC", length: 5, decimals: 2});
     });
 
     const cases = [
@@ -407,11 +412,19 @@ examples:
   // fails the test), transpiled alone and run in this process: which methods
   // fail, and with what message, says what the tests prove. `fixture` names
   // tables that are not in the system: their DDIC files and CREATE TABLE.
-  async function runRule(file, className, {ruleRegistry = registry, tables = ["zosd_l2_ship.tabl.xml", "zosd_l2_voy.tabl.xml"],
-    tableDir = OUT, fixture = false, mutate = {}} = {}) {
+  const FLEET = ["zosd_l2_ship.tabl.xml", "zosd_l2_voy.tabl.xml", "zosd_l2_crew.tabl.xml"];
+  async function loadRule(file, className, {ruleRegistry = registry, tables = FLEET,
+    tableDir = OUT, mutate = {}, transform = {}} = {}) {
     const out = join(scratch, basename(file, ".l2.yaml"));
     const {model} = await buildRule(file, out, {registry: ruleRegistry});
     expect(model.class).to.equal(className);
+    for (const [suffix, change] of Object.entries(transform)) {
+      const target = join(out, `${className}.${suffix}`);
+      const before = readFileSync(target, "utf8");
+      const after = change(before);
+      expect(after, `${suffix} changed by the transform`).to.not.equal(before);
+      writeFileSync(target, after);
+    }
     for (const [suffix, edits] of Object.entries(mutate)) {
       const target = join(out, `${className}.${suffix}`);
       let text = readFileSync(target, "utf8");
@@ -439,6 +452,10 @@ examples:
       const code = o.chunk.getCode().replace(/import\("\.\/([^"]+)"\)/g, (m, name) => own.has(name) ? m : `import("${outputDir}${name}")`);
       writeFileSync(join(out, o.filename), code);
     }
+    return {model, out, output};
+  }
+  async function runRule(file, className, {fixture = false, ...options} = {}) {
+    const {model, out, output} = await loadRule(file, className, options);
     const db = globalThis.abap.context.databaseConnections.DEFAULT;
     const created = [];
     if (fixture) {
@@ -895,6 +912,635 @@ examples:
       const red = failed(results);
       expect(red).to.include("b_n_lvl_eq");
       expect(red).to.include("fires");
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // slice 3: or, not, several exists, require, no duplicate conditions
+
+  const OR_NOT_TEXT = readFileSync(OR_NOT, "utf8");
+  const REQUIRE_TEXT = readFileSync(REQUIRE, "utf8");
+  const lineIn = (text, re) => text.split("\n").findIndex((l) => re.test(l)) + 1;
+  const writeRule = (name, text) => {
+    const f = join(scratch, `${name}.l2.yaml`);
+    writeFileSync(f, text);
+    return f;
+  };
+  const refusedAt = (file, message, at) => {
+    const text = readFileSync(file, "utf8");
+    const where = relative(process.cwd(), file).split(sep).join("/");
+    const line = typeof at === "number" ? at : lineIn(text, at);
+    expect(line, `a line matching ${at}`).to.be.greaterThan(0);
+    let error;
+    try {
+      compileRule(file, {registry});
+    } catch (e) {
+      error = e;
+    }
+    expect(error, "an error").to.be.instanceOf(RuleError);
+    expect(error.message.startsWith(`${where}:${line}: `), error.message).to.equal(true);
+    expect(error.message.slice(`${where}:${line}: `.length)).to.match(message);
+  };
+  const rowsOfCase = (t) => Object.fromEntries(t.tables.map((x) => [x.table,
+    x.rows.map((r) => Object.fromEntries(r.fields.map((f) => [f.column, f.value])))]));
+
+  // two synthetic rules over the three fleet tables: all and any
+  const ALL_RULE = `rule: all-fixture
+class: zcl_l2_all_fixture
+title: a ship in maintenance with a voyage ahead and a captain or pilot aboard
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'M'
+forbid:
+  all:
+    - exists: ZOSD_L2_VOY as voy
+      where: voy.ship_id = ship.ship_id and voy.dep_date > $date
+    - exists: ZOSD_L2_CREW as crew
+      where: crew.ship_id = ship.ship_id and (crew.role = 'C' or crew.role = 'P')
+alert: "{ship.ship_id}: voyage {voy.voyage_id}, crew {crew.crew_id}"
+boundaries: auto
+examples:
+  - name: fires
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}]
+      ZOSD_L2_CREW: [{crew_id: C00001, ship_id: S001, role: C, since: 20260101}]
+    expect: ["S001: voyage V00001, crew C00001"]
+  - name: a pair per combination
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY:
+        - {voyage_id: V00001, ship_id: S001, dep_date: 20261005}
+        - {voyage_id: V00002, ship_id: S001, dep_date: 20261006}
+      ZOSD_L2_CREW:
+        - {crew_id: C00001, ship_id: S001, role: C, since: 20260101}
+        - {crew_id: C00002, ship_id: S001, role: P, since: 20260101}
+    expect: ["S001: voyage V00001, crew C00001", "S001: voyage V00001, crew C00002",
+      "S001: voyage V00002, crew C00001", "S001: voyage V00002, crew C00002"]
+  - name: no crew no alert
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}]
+    expect: []
+`;
+  const ANY_RULE = `rule: any-fixture
+class: zcl_l2_any_fixture
+title: a ship in maintenance with a voyage ahead or a captain or pilot aboard
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'M'
+forbid:
+  any:
+    - exists: ZOSD_L2_VOY as voy
+      where: voy.ship_id = ship.ship_id and voy.dep_date > $date
+      alert: "{ship.ship_id}: voyage {voy.voyage_id} ahead"
+    - exists: ZOSD_L2_CREW as crew
+      where: crew.ship_id = ship.ship_id and (crew.role = 'C' or crew.role = 'P')
+alert: "{ship.ship_id} {ship.name}: crew aboard"
+boundaries: auto
+examples:
+  - name: fires twice
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}]
+      ZOSD_L2_CREW: [{crew_id: C00001, ship_id: S001, role: C, since: 20260101}]
+    expect: ["S001: voyage V00001 ahead", "S001 Albatross: crew aboard"]
+  - name: only the crew
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_CREW: [{crew_id: C00001, ship_id: S001, role: P, since: 20260101}]
+    expect: ["S001 Albatross: crew aboard"]
+`;
+
+  describe("slice 3: the condition language", () => {
+    const tree = (text) => {
+      const strip = (n) => n.op === "cmp" ? `${n.left.text}${n.cmp}${n.right.text}` : n.op === "not" ? {not: strip(n.item)} : {[n.op]: n.items.map(strip)};
+      return strip(parseCondition(text, (m) => { throw new Error(m); }));
+    };
+
+    it("not binds tighter than and, and than or", () => {
+      expect(tree("a.x = 1 or a.y = 2 and not a.z = 3")).to.deep.equal({or: ["a.x=1", {and: ["a.y=2", {not: "a.z=3"}]}]});
+      expect(tree("not a.x = 1 and a.y = 2")).to.deep.equal({and: [{not: "a.x=1"}, "a.y=2"]});
+    });
+    it("parentheses group, and an and inside an and is one and", () => {
+      expect(tree("(a.x = 1 or a.y = 2) and a.z = 3")).to.deep.equal({and: [{or: ["a.x=1", "a.y=2"]}, "a.z=3"]});
+      expect(tree("(a.x = 1 and a.y = 2) and a.z = 3")).to.deep.equal({and: ["a.x=1", "a.y=2", "a.z=3"]});
+      expect(tree("not (a.x = 1 or not (a.y = 2))")).to.deep.equal({not: {or: ["a.x=1", {not: "a.y=2"}]}});
+    });
+    it("a missing parenthesis, a stray one and a keyword as an operand are errors with their column", () => {
+      const error = (text) => { try { parseCondition(text, (m) => { throw new Error(m); }); } catch (e) { return e.message; } return "no error"; };
+      expect(error("(a.x = 1 or a.y = 2")).to.match(/^expected "\)" to close the "\(" at column 1, found the end/);
+      expect(error("a.x = 1)")).to.match(/^unexpected "\)" at column 8/);
+      expect(error("a.x = 1 and or a.y = 2")).to.match(/^expected an operand, found "or" at column 13/);
+    });
+    it("an alias that is a word of the language is refused at its line", () => {
+      refusedAt(variant("alias-or", "for: ZOSD_L2_SHIP as ship", "for: ZOSD_L2_SHIP as or"), /^alias or is a word of the condition language/, /^for:/);
+    });
+
+    it("each comparison takes the line it is written on, in a condition over several lines", () => {
+      const model = compileRule(OR_NOT, {registry});
+      const [on, role, since] = model.clauses[0].conditions;
+      expect(on.rule_line).to.equal(lineIn(OR_NOT_TEXT, /^\s+where: crew\.ship_id = ship\.ship_id$/));
+      expect(role.rule_line).to.equal(lineIn(OR_NOT_TEXT, /^\s+and not \(crew\.role/));
+      expect(since.rule_line).to.equal(role.rule_line);
+      expect(role.rule_line).to.equal(on.rule_line + 1);
+    });
+
+    describe("two identical conditions in one conjunction are refused at the second", () => {
+      it("written the same way", () => refusedAt(variant("dup-same", "when: ship.status = 'M'", "when: ship.status = 'M' and ship.status = 'M'"),
+        /^ship\.status = 'M' repeats ship\.status = 'M' in the same conjunction/, /^when:/));
+      it("with the operands the other way round", () => refusedAt(variant("dup-mirror", "when: ship.status = 'M'", "when: ship.status = 'M' and 'M' = ship.status"),
+        /^'M' = ship\.status repeats ship\.status = 'M' in the same conjunction/, /^when:/));
+      it("a join equality written both ways, the second on its own line", () => {
+        const file = variant("dup-join", "  where: voy.ship_id = ship.ship_id and voy.dep_date > $date",
+          "  where: voy.ship_id = ship.ship_id and voy.dep_date > $date\n    and ship.ship_id = voy.ship_id");
+        refusedAt(file, /^ship\.ship_id = voy\.ship_id repeats voy\.ship_id = ship\.ship_id in the same conjunction/, /^\s+and ship\.ship_id = voy\.ship_id$/);
+      });
+      it("a < b and b > a", () => refusedAt(variant("dup-order", "voy.dep_date > $date", "voy.dep_date > $date and $date < voy.dep_date"),
+        /^\$date < voy\.dep_date repeats voy\.dep_date > \$date/, /^\s+where:/));
+      it("inside a group under or, too", () => refusedAt(variant("dup-group", "when: ship.status = 'M'", "when: ship.status = 'A' or (ship.status = 'M' and ship.status = 'M')"),
+        /^ship\.status = 'M' repeats ship\.status = 'M' in the same conjunction/, /^when:/));
+      it("but the same comparison in two different conjunctions is fine", () => {
+        const file = variant("dup-ok", "when: ship.status = 'M'", "when: (ship.status = 'M' and ship.name = 'Albatross') or (ship.status = 'M' and ship.name = 'Petrel')");
+        expect(() => compileRule(file, {registry})).to.not.throw();
+      });
+    });
+
+    describe("forbid, require, all and any are checked with their lines", () => {
+      it("forbid and require together", () => refusedAt(writeRule("both", RULE_TEXT.replace("alert:", "require:\n  exists: ZOSD_L2_CREW as crew\n  where: crew.ship_id = ship.ship_id\nalert:")),
+        /^a rule has forbid or require, not both/, /^require:/));
+      it("require's alert names only the for table", () => refusedAt(writeRule("req-hole", REQUIRE_TEXT.replace("in service without a captain\"", "no captain {crew.crew_id}\"")),
+        /^\{crew\.crew_id\}: require alerts when no row of the exists table is there, so its alert names only fields of ship/, /^alert:/));
+      it("require takes one exists", () => refusedAt(writeRule("req-any", REQUIRE_TEXT.replace("require:\n  exists: ZOSD_L2_CREW as crew\n  where:", "require:\n  any:\n    - exists: ZOSD_L2_CREW as crew\n      where:")),
+        /^require takes one exists and where, not any/, /^\s+any:/));
+      it("all with one clause", () => refusedAt(writeRule("all-one", ALL_RULE.replace(/    - exists: ZOSD_L2_CREW as crew\n.*\n/, "")),
+        /^forbid\.all needs two or three clauses/, /^\s+all:/));
+      it("all with four clauses", () => {
+        const four = ALL_RULE.replace("alert:", "    - exists: ZOSD_L2_SHIP as s2\n      where: s2.ship_id = ship.ship_id\n    - exists: ZOSD_L2_NOPE as n\n      where: n.x = ship.ship_id\nalert:");
+        refusedAt(writeRule("all-four", four), /^forbid\.all holds at most 3 clauses/, /^\s+- exists: ZOSD_L2_NOPE/);
+      });
+      it("a clause of all without an equality to for is refused with the reason", () => refusedAt(
+        writeRule("all-nojoin", ALL_RULE.replace("where: crew.ship_id = ship.ship_id and (crew.role = 'C' or crew.role = 'P')", "where: crew.role = 'C' or crew.role = 'P'")),
+        /^where needs an equality between a field of crew and a field of ship, joined to the rest by and \(every clause of all joins the for table in the one query\)/,
+        /^\s+where: crew\.role = 'C' or/));
+      it("an equality under or does not join", () => refusedAt(
+        variant("or-join", "where: voy.ship_id = ship.ship_id and voy.dep_date > $date", "where: voy.ship_id = ship.ship_id or voy.dep_date > $date"),
+        /^where needs an equality between a field of voy and a field of ship, joined to the rest by and/, /^\s+where:/));
+      it("a clause of all may not name another clause's alias", () => refusedAt(
+        writeRule("all-scope", ALL_RULE.replace("(crew.role = 'C' or crew.role = 'P')", "(crew.role = 'C' or voy.voyage_id = 'V00001')")),
+        /^alias voy is not in scope here \(in scope: ship, crew\)/, /^\s+where: crew\.ship_id/));
+      it("the same table in two clauses", () => refusedAt(writeRule("all-twin", ALL_RULE.replace("ZOSD_L2_CREW as crew", "ZOSD_L2_VOY as crew")),
+        /^ZOSD_L2_VOY is read twice \(as voy and crew\); under all each clause reads its own table \(its zero case empties that table\); any allows a table twice/, /^\s+- exists: ZOSD_L2_VOY as crew/));
+      it("a shared alert of any names only fields of for", () => refusedAt(writeRule("any-shared", ANY_RULE.replace("crew aboard\"", "crew {crew.crew_id} aboard\"")),
+        /^\{crew\.crew_id\}: a shared alert of any names only fields of the for table/, /^alert:/));
+      it("a clause of any without an alert and no shared one", () => refusedAt(writeRule("any-noalert", ANY_RULE.replace(/^alert: .*\n/m, "")),
+        /^a clause of any needs its own alert: or the rule a shared alert:/, /^\s+- exists: ZOSD_L2_CREW/));
+    });
+  });
+
+  describe("slice 3: the lowering", () => {
+    const methodOf = (file, name) => {
+      const text = readFileSync(file, "utf8");
+      return text.slice(text.indexOf(`  METHOD ${name}.`), text.indexOf("ENDMETHOD.", text.indexOf(`  METHOD ${name}.`)));
+    };
+    const built = {};
+    before(async () => {
+      for (const [name, text] of [["all", ALL_RULE], ["any", ANY_RULE]]) {
+        const out = join(scratch, `shape-${name}`);
+        await buildRule(writeRule(`shape-${name}`, text), out, {registry});
+        built[name] = (suffix) => join(out, `zcl_l2_${name}_fixture.${suffix}`);
+      }
+    });
+
+    it("or and not: the WHERE keeps the groups in parentheses, one comparison per line", () => {
+      const check = methodOf(join(OUT, "zcl_l2_grounded_ship_crew.clas.abap"), "check");
+      expect(check).to.contain(["      WHERE ( ship~status = 'M'",
+        "           OR ship~status = 'D' )",
+        "        AND NOT ( crew~role = 'K'",
+        "           OR crew~since > iv_date )",
+        "      ORDER BY"].join("\n"));
+      expect(check).to.contain("          ON crew~ship_id = ship~ship_id\n");
+      const reference = methodOf(join(OUT, "zcl_l2_grounded_ship_crew.clas.testclasses.abap"), "check_reference");
+      expect(reference).to.contain("      WHERE status = 'M'\n         OR status = 'D'\n");
+      expect(reference).to.contain("        WHERE ship_id = ls_ship-ship_id\n          AND NOT ( role = 'K'\n             OR since > iv_date )\n");
+    });
+
+    it("require: one query with a correlated NOT EXISTS; the reference is IF ... IS INITIAL", () => {
+      const check = methodOf(join(OUT, "zcl_l2_ship_captain.clas.abap"), "check");
+      expect(check).to.contain(["      FROM zosd_l2_ship AS ship",
+        "      INTO CORRESPONDING FIELDS OF TABLE lt_join",
+        "      WHERE ship~status = 'A'",
+        "        AND NOT EXISTS ( SELECT * FROM zosd_l2_crew AS crew",
+        "          WHERE crew~ship_id = ship~ship_id",
+        "            AND crew~role = 'C'",
+        "            AND crew~since <= iv_date )",
+        "      ORDER BY",
+        "        ship~ship_id."].join("\n"));
+      expect(check.match(/^\s+SELECT$/gm)).to.have.length(1);
+      expect(check.match(/SELECT \*/g)).to.have.length(1);
+      expect(check).to.not.contain("INNER JOIN");
+      const reference = methodOf(join(OUT, "zcl_l2_ship_captain.clas.testclasses.abap"), "check_reference");
+      expect(reference).to.contain("      IF lt_crew IS INITIAL.\n");
+      expect(reference).to.not.contain("DATA ls_crew");
+    });
+
+    it("all: one query, every clause an INNER JOIN with its ON, ordered by every key", () => {
+      const check = methodOf(built.all("clas.abap"), "check");
+      expect(check.match(/^\s+SELECT$/gm)).to.have.length(1);
+      expect(check).to.contain(["      FROM zosd_l2_ship AS ship",
+        "        INNER JOIN zosd_l2_voy AS voy",
+        "          ON voy~ship_id = ship~ship_id",
+        "        INNER JOIN zosd_l2_crew AS crew",
+        "          ON crew~ship_id = ship~ship_id",
+        "      INTO CORRESPONDING FIELDS OF TABLE lt_join",
+        "      WHERE ship~status = 'M'",
+        "        AND voy~dep_date > iv_date",
+        "        AND ( crew~role = 'C'",
+        "           OR crew~role = 'P' )",
+        "      ORDER BY",
+        "        ship~ship_id",
+        "        voy~voyage_id",
+        "        crew~crew_id."].join("\n"));
+    });
+
+    it("any: one query per clause, each into its own table, clause by clause", () => {
+      const check = methodOf(built.any("clas.abap"), "check");
+      expect(check.match(/^\s+SELECT$/gm)).to.have.length(2);
+      expect(check.indexOf("INTO CORRESPONDING FIELDS OF TABLE lt_join1")).to.be.lessThan(check.indexOf("INTO CORRESPONDING FIELDS OF TABLE lt_join2"));
+      expect(check).to.contain("        INNER JOIN zosd_l2_voy AS voy\n          ON voy~ship_id = ship~ship_id\n      INTO CORRESPONDING FIELDS OF TABLE lt_join1");
+      expect(check).to.contain("        INNER JOIN zosd_l2_crew AS crew\n          ON crew~ship_id = ship~ship_id\n      INTO CORRESPONDING FIELDS OF TABLE lt_join2");
+      expect(check).to.contain("lv_alert = ls_join1-ship_ship_id\n        && `: voyage `\n        && ls_join1-voy_voyage_id");
+      expect(check).to.contain("lv_alert = ls_join2-ship_ship_id\n        && ` `\n        && ls_join2-ship_name");
+    });
+
+    it("the traces of the new constructs reach their own rule lines", () => {
+      const at = (file, re) => {
+        const abap = readFileSync(file, "utf8").split("\n");
+        const trace = JSON.parse(readFileSync(file.replace(/\.abap$/, ".trace.json"), "utf8"));
+        const n = abap.findIndex((l) => re.test(l)) + 1;
+        expect(n, `a line matching ${re}`).to.be.greaterThan(0);
+        return trace.lines.find((e) => e.line === n);
+      };
+      const g = join(OUT, "zcl_l2_grounded_ship_crew.clas.abap"), c = join(OUT, "zcl_l2_ship_captain.clas.abap");
+      expect(at(g, /OR ship~status = 'D' \)$/)).to.include({node: "rule/grounded-ship-keeps-only-keepers/when/2", rule_line: lineIn(OR_NOT_TEXT, /^when:/)});
+      expect(at(g, /OR crew~since > iv_date \)$/)).to.include({node: "rule/grounded-ship-keeps-only-keepers/forbid/where/3", rule_line: lineIn(OR_NOT_TEXT, /^\s+and not/)});
+      expect(at(g, /ON crew~ship_id = ship~ship_id$/)).to.include({rule_line: lineIn(OR_NOT_TEXT, /^\s+where:/)});
+      expect(at(c, /AND NOT EXISTS \( SELECT \* FROM zosd_l2_crew AS crew$/)).to.include({node: "rule/ship-in-service-has-a-captain/require", rule_line: lineIn(REQUIRE_TEXT, /^\s+exists:/)});
+      expect(at(c, /AND crew~since <= iv_date \)$/)).to.include({node: "rule/ship-in-service-has-a-captain/require/where/3", rule_line: lineIn(REQUIRE_TEXT, /^\s+where:/)});
+      expect(at(join(OUT, "zcl_l2_ship_captain.clas.testclasses.abap"), /IF lt_crew IS INITIAL\.$/)).to.include({node: "rule/ship-in-service-has-a-captain/require"});
+    });
+  });
+
+  describe("slice 3: derived cases under or, not, all, any and require", () => {
+    const byMethod = (model) => Object.fromEntries(model.cases.map((c) => [c.method, c]));
+    const alerts = (c) => c.expect.map((e) => e.value);
+
+    it("the interpreter agrees with every example and derived case of every rule", () => {
+      const models = [compileRule(OR_NOT, {registry}), compileRule(REQUIRE, {registry}),
+        compileRule(writeRule("agree-all", ALL_RULE), {registry}), compileRule(writeRule("agree-any", ANY_RULE), {registry})];
+      expect(models.map((m) => m.cases.length)).to.deep.equal([16, 13, 20, 21]);
+      for (const model of models) {
+        for (const t of [...model.examples, ...model.cases]) {
+          expect(evaluate(model, rowsOfCase(t), {date: t.date.value}).sort(), `${model.rule} ${t.method}`).to.deep.equal(alerts(t).sort());
+        }
+      }
+    });
+
+    it("under or the other disjunct is held false, so the target decides", () => {
+      const cases = byMethod(compileRule(OR_NOT, {registry}));
+      // status = 'M' is tested with a status that is not 'D', and the other way round
+      expect(["b_status_eq", "b_status_ne", "b_status_blank"].map((m) => rowsOfCase(cases[m]).zosd_l2_ship[0].status)).to.deep.equal(["M", "N", ""]);
+      expect(["b_ship_status_eq", "b_ship_status_ne", "b_ship_status_blank"].map((m) => rowsOfCase(cases[m]).zosd_l2_ship[0].status)).to.deep.equal(["D", "E", ""]);
+      expect(alerts(cases.b_status_eq)).to.have.length(1);
+      expect(alerts(cases.b_status_ne)).to.deep.equal([]);
+      // inside not ( role = 'K' or since > $date ): the other disjunct is false (since <= date)
+      for (const m of ["b_role_eq", "b_role_ne", "b_role_blank"]) expect(rowsOfCase(cases[m]).zosd_l2_crew[0].since <= "20261001", m).to.equal(true);
+      for (const m of ["b_since_lt", "b_since_eq", "b_since_gt"]) expect(rowsOfCase(cases[m]).zosd_l2_crew[0].role, m).to.not.equal("K");
+    });
+
+    it("under not the expected result flips: role = 'K' true gives no alert, false gives one", () => {
+      const cases = byMethod(compileRule(OR_NOT, {registry}));
+      expect(alerts(cases.b_role_eq)).to.deep.equal([]);
+      expect(alerts(cases.b_role_ne)).to.have.length(1);
+      expect(alerts(cases.b_since_gt)).to.deep.equal([]);
+      expect(alerts(cases.b_since_eq)).to.have.length(1);
+    });
+
+    it("every case of the or/not, require, all and any rules discriminates", () => {
+      for (const model of [compileRule(OR_NOT, {registry}), compileRule(REQUIRE, {registry}),
+        compileRule(writeRule("disc-all", ALL_RULE), {registry}), compileRule(writeRule("disc-any", ANY_RULE), {registry})]) {
+        for (const c of model.cases) {
+          const params = {date: c.date.value};
+          const ok = c.derived.structural ? structureDiscriminates(model, rowsOfCase(c), params)
+            : caseDiscriminates(model, conditionOf(model, c.derived.condition), rowsOfCase(c), params);
+          expect(ok, `${model.rule} ${c.method}`).to.equal(true);
+        }
+      }
+    });
+
+    it("the guard bites under or: a row where the other disjunct holds does not isolate the target", () => {
+      const model = compileRule(OR_NOT, {registry});
+      const cond = conditionOf(model, "when/1");
+      const params = {date: "20261001"};
+      const crew = [{crew_id: "C00001", ship_id: "S001", role: "E", since: "20260101"}];
+      expect(caseDiscriminates(model, cond, {zosd_l2_ship: [{ship_id: "S001", name: "A", status: "M"}], zosd_l2_crew: crew}, params)).to.equal(true);
+      expect(caseDiscriminates(model, cond, {zosd_l2_ship: [{ship_id: "S001", name: "A", status: "D"}], zosd_l2_crew: crew}, params), "status D decides the or whatever status = 'M' says").to.equal(false);
+      // and under not: a row where the other disjunct inside the not holds
+      const role = conditionOf(model, "forbid/where/2");
+      expect(caseDiscriminates(model, role, {zosd_l2_ship: [{ship_id: "S001", name: "A", status: "M"}], zosd_l2_crew: [{...crew[0], since: "20261231"}]}, params),
+        "since > date makes the not false whatever role says").to.equal(false);
+    });
+
+    it("the structural guard bites too: a row set no clause decides is not emitted", () => {
+      const model = compileRule(writeRule("guard-all", ALL_RULE), {registry});
+      const params = {date: "20261001"};
+      expect(structureDiscriminates(model, {zosd_l2_ship: [{ship_id: "S001", name: "A", status: "A"}], zosd_l2_voy: [], zosd_l2_crew: []}, params),
+        "a ship in service: no clause changes anything").to.equal(false);
+    });
+
+    it("all: a case per clause with that clause unmatched gives no alert", () => {
+      const cases = byMethod(compileRule(writeRule("struct-all", ALL_RULE), {registry}));
+      expect(rowsOfCase(cases.b_crew_zero).zosd_l2_crew ?? []).to.deep.equal([]);
+      expect(rowsOfCase(cases.b_crew_zero).zosd_l2_voy).to.have.length(1);
+      expect(alerts(cases.b_crew_zero)).to.deep.equal([]);
+      expect(alerts(cases.b_voy_zero)).to.deep.equal([]);
+      expect(alerts(cases.b_crew_two)).to.have.length(2);
+    });
+
+    it("any: a case where only the second clause matches, and one where none does", () => {
+      const cases = byMethod(compileRule(writeRule("struct-any", ANY_RULE), {registry}));
+      expect(rowsOfCase(cases.b_crew_only).zosd_l2_voy ?? []).to.deep.equal([]);
+      expect(alerts(cases.b_crew_only)).to.deep.equal(["S001 Albatross: crew aboard"]);
+      expect(alerts(cases.b_voy_only)).to.deep.equal(["S001: voyage V00001 ahead"]);
+      expect(alerts(cases.b_exists_zero)).to.deep.equal([]);
+      expect(alerts(cases.b_crew_two)).to.have.length(3);
+    });
+
+    it("require: zero exists rows alert, one matching row does not; a when is tested with no exists row", () => {
+      const cases = byMethod(compileRule(REQUIRE, {registry}));
+      expect(alerts(cases.b_exists_zero)).to.deep.equal(["S002 Cormorant: in service without a captain"]);
+      expect(alerts(cases.b_exists_one)).to.deep.equal([]);
+      expect(rowsOfCase(cases.b_exists_one).zosd_l2_crew).to.have.length(1);
+      expect(rowsOfCase(cases.b_status_eq).zosd_l2_crew ?? []).to.deep.equal([]);
+      expect(alerts(cases.b_status_eq)).to.have.length(1);
+      expect(alerts(cases.b_status_ne)).to.deep.equal([]);
+    });
+  });
+
+  describe("slice 3: the ABAP proves it, and a mutant per construct is caught", () => {
+    before(async () => {
+      await import("./start.mjs");
+    });
+    const copy = (name, text, className) => writeRule(name, text.replace(/^class: .*$/m, `class: ${className}`));
+
+    it("ABAP Unit of the two new demo classes runs green in this runtime", async () => {
+      for (const [className, count] of [["ZCL_L2_GROUNDED_SHIP_CREW", 22], ["ZCL_L2_SHIP_CAPTAIN", 19]]) {
+        const result = await new UnitRun(new ObjectStore()).runDetached("CLAS", className);
+        expect(result.counts, JSON.stringify(result.testClasses)).to.include({methods: count, passed: count, failed: 0});
+      }
+    });
+
+    for (const [what, text, className, cases] of [
+      ["or and not", () => OR_NOT_TEXT, "zcl_l2_s3_ornot", 22],
+      ["require", () => REQUIRE_TEXT, "zcl_l2_s3_require", 19],
+      ["all", () => ALL_RULE, "zcl_l2_s3_all", 23],
+      ["any", () => ANY_RULE, "zcl_l2_s3_any", 23],
+    ]) {
+      it(`${what}: every example and derived case passes, check against check_reference included`, async () => {
+        const {results, messages} = await runRule(copy(`abap-${className}`, text(), className), className);
+        expect(Object.keys(results)).to.have.length(cases);
+        expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+      });
+    }
+
+    it("or changed to and: the cases of the or fail", async () => {
+      const {results} = await runRule(copy("mut-or", OR_NOT_TEXT, "zcl_l2_s3_mut_or"), "zcl_l2_s3_mut_or", {mutate: {
+        "clas.abap": [["OR ship~status = 'D' )", "AND ship~status = 'D' )"]],
+        "clas.testclasses.abap": [["OR status = 'D'", "AND status = 'D'"]]}});
+      const red = failed(results);
+      for (const m of ["b_status_eq", "b_ship_status_eq"]) expect(red, `${m} in ${red}`).to.include(m);
+    });
+
+    it("not dropped: the cases under the not fail", async () => {
+      const {results} = await runRule(copy("mut-not", OR_NOT_TEXT, "zcl_l2_s3_mut_not"), "zcl_l2_s3_mut_not", {mutate: {
+        "clas.abap": [["AND NOT ( crew~role = 'K'", "AND ( crew~role = 'K'"]],
+        "clas.testclasses.abap": [["AND NOT ( role = 'K'", "AND ( role = 'K'"]]}});
+      const red = failed(results);
+      for (const m of ["b_role_eq", "b_role_ne", "b_since_eq", "b_since_gt", "engineer_aboard_in_maintenance"]) expect(red, `${m} in ${red}`).to.include(m);
+    });
+
+    it("require changed to forbid: the structural cases and the examples fail", async () => {
+      const {results} = await runRule(copy("mut-req", REQUIRE_TEXT, "zcl_l2_s3_mut_req"), "zcl_l2_s3_mut_req", {mutate: {
+        "clas.abap": [["AND NOT EXISTS (", "AND EXISTS ("]],
+        "clas.testclasses.abap": [["IF lt_crew IS INITIAL.", "IF lt_crew IS NOT INITIAL."]]}});
+      const red = failed(results);
+      for (const m of ["b_exists_zero", "b_exists_one", "captain_aboard", "no_crew_at_all"]) expect(red, `${m} in ${red}`).to.include(m);
+    });
+
+    it("one clause of all dropped: the zero case of that clause fails, and not only against the reference", async () => {
+      // the crew clause taken out of the query and out of the nested reference
+      const dropQuery = (text) => text
+        .replace("        crew~crew_id AS crew_crew_id\n", "")
+        .replace("        INNER JOIN zosd_l2_crew AS crew\n          ON crew~ship_id = ship~ship_id\n", "")
+        .replace("        AND ( crew~role = 'C'\n           OR crew~role = 'P' )\n", "")
+        .replace("        voy~voyage_id\n        crew~crew_id.", "        voy~voyage_id.")
+        .replace(/ls_join-crew_crew_id/, "`C00001`");
+      const dropLevel = (text) => text.replace(/\n {8}SELECT \* FROM zosd_l2_crew[\s\S]*?LOOP AT lt_crew INTO ls_crew\./, "")
+        .replace(/(APPEND lv_alert TO rt_alerts\.\n) {8}ENDLOOP\.\n/, "$1")
+        .replace(/ls_crew-crew_id/, "`C00001`");
+      const file = copy("mut-all", ALL_RULE, "zcl_l2_s3_mut_all");
+      const {results, messages} = await runRule(file, "zcl_l2_s3_mut_all", {mutate: {}, transform: {"clas.abap": dropQuery, "clas.testclasses.abap": dropLevel}});
+      const red = failed(results);
+      expect(red).to.include("b_crew_zero");
+      expect(messages.b_crew_zero).to.not.include("assert_same_as_reference");
+      expect(red).to.include("no_crew_no_alert");
+    });
+  });
+
+  describe("slice 3: one query where one query is possible", () => {
+    const db = () => globalThis.abap.context.databaseConnections.DEFAULT;
+    const insert = async (table, columns, values) => {
+      const mandt = globalThis.abap.builtin.sy.get().mandt.get();
+      await db().execute(`INSERT INTO ${table} (mandt, ${columns.join(", ")}) VALUES ('${mandt}', ${values.map((v) => `'${v}'`).join(", ")})`);
+    };
+    const counted = async (run) => {
+      const original = db().select.bind(db());
+      let calls = 0;
+      db().select = async (options) => { calls++; return original(options); };
+      try {
+        return {alerts: (await run()).array().map((a) => a.get()), calls};
+      } finally {
+        db().select = original;
+      }
+    };
+    before(async () => {
+      await import("./start.mjs");
+    });
+
+    for (const [what, text, className, status, expected] of [
+      ["require", () => REQUIRE_TEXT, "zcl_l2_s3_calls_req", "A", {calls: 1, alerts: 6}],
+      ["all", () => ALL_RULE, "zcl_l2_s3_calls_all", "M", {calls: 1, alerts: 6}],
+      ["any (two clauses)", () => ANY_RULE, "zcl_l2_s3_calls_any", "M", {calls: 2, alerts: 12}],
+      ["or and not", () => OR_NOT_TEXT, "zcl_l2_s3_calls_ornot", "M", {calls: 1, alerts: 6}],
+    ]) {
+      it(`${what}: check makes ${expected.calls} database call(s) for six for rows, the reference more`, async () => {
+        const {out} = await loadRule(writeRule(`calls-${className}`, text().replace(/^class: .*$/m, `class: ${className}`)), className);
+        const module = await import(pathToFileURL(join(out, `${className}.clas.testclasses.mjs`)).href);
+        await import(pathToFileURL(join(out, `${className}.clas.mjs`)).href);
+        const n = 6;
+        try {
+          for (let i = 1; i <= n; i++) {
+            await insert("zosd_l2_ship", ["ship_id", "name", "status"], [`Q${i}`, `Ship ${i}`, status]);
+            await insert("zosd_l2_voy", ["voyage_id", "ship_id", "dep_date"], [`QV${i}`, `Q${i}`, "20261005"]);
+            await insert("zosd_l2_crew", ["crew_id", "ship_id", "role", "since"], [`QC${i}`, `Q${i}`, "P", "20260101"]);
+          }
+          const date = new globalThis.abap.types.Date().set("20261001");
+          const joined = await counted(() => globalThis.abap.Classes[className.toUpperCase()].check({iv_date: date}));
+          const test = await new module.ltcl_examples().constructor_();
+          const nested = await counted(() => test.FRIENDS_ACCESS_INSTANCE.check_reference({iv_date: date}));
+          expect(joined.calls, "calls of check").to.equal(expected.calls);
+          expect(joined.alerts).to.have.length(expected.alerts);
+          expect(nested.calls, "the reference makes a call per for row").to.be.greaterThan(n);
+          expect(nested.alerts).to.deep.equal(joined.alerts);
+        } finally {
+          for (const t of ["zosd_l2_crew", "zosd_l2_voy", "zosd_l2_ship"]) await db().execute(`DELETE FROM ${t}`);
+        }
+      });
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // slice 3, after the critic: duplicates as units, a table twice under any,
+  // no generated line over 255 characters
+
+  const ANY_TWICE = `rule: any-twice
+class: zcl_l2_any_twice
+title: a ship in maintenance with a voyage ahead, or one long ago
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'M'
+forbid:
+  any:
+    - exists: ZOSD_L2_VOY as v1
+      where: v1.ship_id = ship.ship_id and v1.dep_date > $date
+      alert: "{ship.ship_id}: voyage {v1.voyage_id} ahead"
+    - exists: ZOSD_L2_VOY as v2
+      where: v2.ship_id = ship.ship_id and v2.dep_date < '20200101'
+      alert: "{ship.ship_id}: voyage {v2.voyage_id} long ago"
+boundaries: auto
+examples:
+  - name: both
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY:
+        - {voyage_id: V00001, ship_id: S001, dep_date: 20261005}
+        - {voyage_id: V00002, ship_id: S001, dep_date: 20190101}
+    expect: ["S001: voyage V00001 ahead", "S001: voyage V00002 long ago"]
+  - name: one voyage in both
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00003, ship_id: S001, dep_date: 20190101}]
+    expect: ["S001: voyage V00003 long ago"]
+`;
+  const LONG_TEXT = "x".repeat(255);
+  const LONG_ALERT = `rule: long-alert
+class: zcl_l2_long_alert
+title: an alert text as long as a literal may be
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'M'
+forbid:
+  exists: ZOSD_L2_VOY as voy
+  where: voy.ship_id = ship.ship_id and voy.dep_date > $date
+alert: "{ship.ship_id}${LONG_TEXT}"
+boundaries: auto
+examples:
+  - name: fires
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}]
+    expect: ["S001${LONG_TEXT}"]
+`;
+
+  describe("slice 3 critic: duplicates under not and in groups are refused as units", () => {
+    it("not a and not a", () => refusedAt(variant("dup-not", "when: ship.status = 'M'", "when: not ship.status = 'A' and not ship.status = 'A'"),
+      /^not ship\.status = 'A' repeats not ship\.status = 'A' in the same conjunction/, /^when:/));
+    it("two groups with the same items in another order", () => refusedAt(
+      variant("dup-groups", "when: ship.status = 'M'", "when: (ship.status = 'M' or ship.name = 'X') and (ship.name = 'X' or 'M' = ship.status)"),
+      /^ship\.name = 'X' or 'M' = ship\.status repeats ship\.status = 'M' or ship\.name = 'X' in the same conjunction/, /^when:/));
+    it("not (a or b) twice in a disjunction", () => refusedAt(
+      variant("dup-notgroup", "when: ship.status = 'M'", "when: ship.status = 'M' or not (ship.name = 'X' or ship.name = 'Y') or not (ship.name = 'Y' or ship.name = 'X')"),
+      /^not \(ship\.name = 'Y' or ship\.name = 'X'\) repeats not \(ship\.name = 'X' or ship\.name = 'Y'\) in the same disjunction/, /^when:/));
+    it("but a and not a are different", () => {
+      const file = variant("dup-notok", "when: ship.status = 'M'", "when: ship.status = 'M' and not ship.status = 'A'");
+      expect(() => compileRule(file, {registry})).to.not.throw();
+    });
+  });
+
+  describe("slice 3 critic: two clauses of any may read one table", () => {
+    before(async () => {
+      await import("./start.mjs");
+    });
+    it("compiles: one query per clause, each with its own alias, and a row of its own in the derived cases", () => {
+      const model = compileRule(writeRule("any-twice", ANY_TWICE), {registry});
+      expect(model.clauses.map((c) => [c.alias, c.table, c.slot])).to.deep.equal([["v1", "zosd_l2_voy", 0], ["v2", "zosd_l2_voy", 1]]);
+      expect(model.tables.map((t) => t.table)).to.deep.equal(["zosd_l2_ship", "zosd_l2_voy"]);
+      const eq = model.cases.find((c) => c.method === "b_v2_dep_date_eq");
+      expect(rowsOfCase(eq).zosd_l2_voy.map((r) => r.dep_date)).to.deep.equal(["20261005", "20200101"]);
+      expect(eq.expect.map((e) => e.value)).to.deep.equal(["S001: voyage V00001 ahead"]);
+      const only = model.cases.find((c) => c.method === "b_v2_only");
+      expect(rowsOfCase(only).zosd_l2_voy.map((r) => r.voyage_id)).to.deep.equal(["V00002"]);
+      for (const c of model.cases) {
+        const keys = (rowsOfCase(c).zosd_l2_voy ?? []).map((r) => r.voyage_id);
+        expect(new Set(keys).size, `${c.method} keys`).to.equal(keys.length);
+      }
+    });
+    it("and the ABAP agrees on every example and case", async () => {
+      const {results, messages} = await runRule(writeRule("any-twice-abap", ANY_TWICE), "zcl_l2_any_twice");
+      expect(Object.keys(results).length).to.be.greaterThan(15);
+      expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+    });
+  });
+
+  describe("slice 3 critic: no generated line is longer than 255 characters", () => {
+    before(async () => {
+      await import("./start.mjs");
+    });
+    it("a maximal accepted alert text renders in pieces, every line of both classes at most 255", async () => {
+      const out = join(scratch, "long-alert");
+      const {files, findings} = await buildRule(writeRule("long-alert", LONG_ALERT), out, {registry});
+      expect(findings.filter((f) => f.severity === "E")).to.deep.equal([]);
+      for (const [name, text] of Object.entries(files).filter(([n]) => n.endsWith(".abap"))) {
+        const long = text.split("\n").filter((l) => l.length > 255);
+        expect(long, name).to.deep.equal([]);
+      }
+      expect(files["zcl_l2_long_alert.clas.testclasses.abap"]).to.contain("APPEND lv_exp TO lt_exp.");
+    });
+    it("and its ABAP builds the same alert as the interpreter", async () => {
+      const {results, messages} = await runRule(writeRule("long-alert-abap", LONG_ALERT.replace("zcl_l2_long_alert", "zcl_l2_long_alert2")), "zcl_l2_long_alert2");
+      expect(Object.keys(results).length).to.be.greaterThan(5);
+      expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+    });
+    it("a line the profile still refuses is a RuleError at its rule line, before any file is written", async () => {
+      // an example name that fits the literal check but not the assert call's line
+      const name = `nb${"!".repeat(170)}`;
+      const file = writeRule("long-name", LONG_ALERT.replace("  - name: fires", `  - name: ${name}`));
+      const out = join(scratch, "long-name-out");
+      let error;
+      try {
+        await buildRule(file, out, {registry});
+      } catch (e) {
+        error = e;
+      }
+      expect(error).to.be.instanceOf(RuleError);
+      const where = relative(process.cwd(), file).split(sep).join("/");
+      expect(error.message.startsWith(`${where}:${lineIn(readFileSync(file, "utf8"), /^\s+- name: n/)}: the generated zcl_l2_long_alert.clas.testclasses.abap line `), error.message).to.equal(true);
+      expect(error.message).to.contain("Line exceeds 255 characters");
+      expect(() => readdirSync(out)).to.throw();
     });
   });
 });
