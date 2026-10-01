@@ -747,10 +747,17 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
 
   // the repository key the import reports; the cleanup takes that repository and no other
   let importedKey;
+  // the zip's objects this run may delete: none until the import has written
+  // them. An import refused because a zip-named object appeared in the
+  // package after the preflight wrote nothing of ours, so the cleanup then
+  // deletes no object at all (critic round 6), only our repository row and,
+  // if it is empty, the package
+  let ours = [];
   try {
     try {
       const r = await exec(mcp, importAbap(built.bytes, pkg), "import");
       log(`import: ${r.message.trim()}`);
+      if (!/import refused;/.test(r.message)) ours = built.objects;
       const imp = parseImport(r.message);
       if (imp.repo !== undefined && REPO_KEY.test(imp.repo)) importedKey = imp.repo;
       else problems.push("import: the report carries no repository key");
@@ -821,7 +828,7 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
         + `  node tools/osd-prove-on-system.mjs ${folder} --unit ${unit}${manifest ? ` --manifest ${manifest}` : ""} `
         + `--cleanup --package '${pkg}'`);
     } else {
-      const c = await cleanup(mcp, pkg, built.objects, {expectedKey: importedKey, log});
+      const c = await cleanup(mcp, pkg, ours, {expectedKey: importedKey, log});
       problems.push(...c.problems);
     }
   }

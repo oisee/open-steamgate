@@ -352,6 +352,17 @@ describe("osd-prove-on-system", () => {
       assert.deepEqual(mcp.sys.tadir.map((t) => t.item).sort(), [`DEVC ${PKG}`, "PROG ZARRIVED_MEANWHILE"]);
     });
 
+    it("an import refused for a zip-named object that appeared after the preflight deletes no object (critic round 6)", async () => {
+      // the object is there (the fake wrote it into the package); the import
+      // reports it would overwrite it and refuses, so it is not ours to delete
+      const mcp = fakeSystem({editImport: (m) => m.replace(/status=S;/, "ERR would overwrite CLAS ZCL_OSD_PROVE_DEMO (action 3); import refused;")});
+      const {code, text} = await run(base(), mcp);
+      assert.notEqual(code, 0);
+      assert.match(text, /would overwrite CLAS ZCL_OSD_PROVE_DEMO/);
+      assert.deepEqual(mcp.sys.deleted, []);
+      assert.ok(mcp.sys.tadir.some((r) => r.item === "CLAS ZCL_OSD_PROVE_DEMO"), "the foreign object stays");
+    });
+
     it("the cleanup deletes only the zip's items, even when the package holds more", async () => {
       const mcp = fakeSystem({intruder: "TABL ZSOMEBODY_ELSES"});
       await run(base(), mcp);
