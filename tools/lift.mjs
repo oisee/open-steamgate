@@ -806,9 +806,22 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
     return direction === "importing" || direction === "changing" || direction === "exporting";
   });
   const tableNonlocal = nonlocal(tableVariable) || formalByReferenceTable;
-  if (tableNonlocal && bodyStatements.some(methodCall)) {
+  // A local T escapes when a statement up to the end of the loop hands T to
+  // code the method does not show (a method call, or any statement outside
+  // LOCAL_KINDS: CALL FUNCTION, PERFORM, NEW, RAISE EXCEPTION ...): that code
+  // may keep a reference to T, and a later call that names neither T nor <R>
+  // can then change a row's key before its SELECT. An escaped T is treated
+  // like a nonlocal one. A local statement naming T (`lt_copy = T`, a MOVE
+  // into an attribute) copies the table by value and lets nothing escape;
+  // GET REFERENCE and REF # of T are refused on their own.
+  const escape = tableNonlocal ? undefined : m.findAllStatementNodes().find((st) => st !== selectStatement
+    && !st.getStart().isAfter(loop.getLastToken().getStart()) && (methodCall(st) || otherCall(st))
+    && st.getTokens().some((token) => token.getStr().toLowerCase() === table));
+  const tableReachable = tableNonlocal || Boolean(escape);
+  const reachableWhy = tableNonlocal ? `nonlocal loop table ${table}` : `loop table ${table}, which escapes in ${escape?.concatTokens()}`;
+  if (tableReachable && bodyStatements.some(methodCall)) {
     const call = bodyStatements.find(methodCall);
-    throw new Refusal("loop table method call", `${call.concatTokens()} may change nonlocal loop table ${table}`);
+    throw new Refusal("loop table method call", `${call.concatTokens()} may change ${reachableWhy}`);
   }
   const unsafeSymbol = unsafeFieldSymbols({method: m, table, row, tableNonlocal,
     scopeAt: (st) => syntax.spaghetti.lookupPosition(st.getStart(), name)});
@@ -906,10 +919,6 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
   // Calls into code the method does not show, by the LOCAL_KINDS allow-list.
   // Checked after the alias and result guards, so a statement one of them can
   // name keeps its obligation.
-  if (tableNonlocal && bodyStatements.some(otherCall)) {
-    const call = bodyStatements.find(otherCall);
-    throw new Refusal("loop table call", `${call.concatTokens()} runs code that may change nonlocal loop table ${table}`);
-  }
   // A local T is reached by a subroutine or function module only through its
   // parameter list: T itself anywhere, or the row before the SELECT (a FORM's
   // USING is by reference too). Passing the row after the SELECT can only
@@ -921,6 +930,10 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
         throw new Refusal("loop table call", `${st.concatTokens()} passes ${tokens.includes(table) ? table : row} to code this method does not show`);
       }
     }
+  }
+  if (tableReachable && bodyStatements.some(otherCall)) {
+    const call = bodyStatements.find(otherCall);
+    throw new Refusal("loop table call", `${call.concatTokens()} runs code that may change ${reachableWhy}`);
   }
   for (const [index, item] of items.entries()) {
     if (index === position) continue;

@@ -485,6 +485,35 @@ describe("verified lift R2: SELECT table per row", function () {
     }
   });
 
+  describe("a local loop table that escapes before the loop", () => {
+    // the critic's reproducer: stash( ) keeps a reference to the local T,
+    // bump( ) names neither T nor <R> and changes row 2's key through it
+    const helpers = (source) => attribute(source, "    CLASS-METHODS stash CHANGING rows TYPE tt_rows.\n    CLASS-METHODS bump.\n    CLASS-DATA gr_rows TYPE REF TO tt_rows.\n    CLASS-DATA gt_copy TYPE tt_rows.\n")
+      .replace("CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.\n", "CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.\n  METHOD stash.\n    GET REFERENCE OF rows INTO gr_rows.\n  ENDMETHOD.\n\n"
+        + "  METHOD bump.\n    FIELD-SYMBOLS <x> TYPE ty_row.\n    IF gr_rows IS BOUND.\n      READ TABLE gr_rows->* ASSIGNING <x> INDEX 2.\n      IF sy-subrc = 0.\n        <x>-code = 'OPEN'.\n      ENDIF.\n    ENDIF.\n  ENDMETHOD.\n\n");
+    const preLoop = (source, lines) => source.replace("    LOOP AT lt_rows ASSIGNING <ls_row>.", `${lines}    LOOP AT lt_rows ASSIGNING <ls_row>.`);
+
+    const escapes = [
+      ["a method call", "    stash( CHANGING rows = lt_rows ).\n"],
+      ["CALL FUNCTION", "    CALL FUNCTION 'Z_LIFT_STASH' TABLES ct_rows = lt_rows.\n"],
+    ];
+    for (const [what, line] of escapes) {
+      it(`refuses an unseen call in the body once T escaped through ${what} before the loop`, () => {
+        const caught = refuse(beforeSelect(preLoop(helpers(localTable(ORIGINAL)), line), "      bump( ).\n"));
+        expect(caught, what).to.be.instanceOf(Refusal);
+        expect(caught.obligation).to.equal("loop table method call");
+        expect(caught.message).to.match(/lt_rows, which escapes in/);
+      });
+    }
+
+    it("accepts the same call when only value copies of T leave the method, by the differential", async () => {
+      const source = beforeSelect(preLoop(declare(helpers(localTable(ORIGINAL)), "    DATA lt_copy TYPE tt_rows."),
+        "    lt_copy = lt_rows.\n    gt_copy = lt_rows.\n    stash( CHANGING rows = lt_copy ).\n"), "      bump( ).\n");
+      const {before} = await differential(source);
+      expect(before.rows.map((row) => row.code.trimEnd())).to.deep.equal(["OPEN", "GONE", "DONE", "OPEN"]);
+    });
+  });
+
   describe("aliases set outside the method", () => {
     it("lists the outside data reference as open when T is nonlocal", () => {
       expect(model().open).to.include.members(["no data reference into ct_rows set outside this method",
