@@ -4,6 +4,9 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     CLASS-METHODS check
       IMPORTING iv_date TYPE d
+{{#params}}
+                {{ref}} TYPE {{type_name}}{{#default}} DEFAULT {{default | literal}}{{/default}}
+{{/params}}
       RETURNING VALUE(rt_alerts) TYPE string_table.
 ENDCLASS.
 
@@ -51,6 +54,9 @@ CLASS {{class}} IMPLEMENTATION.
 {{/zero}}
 {{/queries}}
     DATA lv_alert TYPE string.
+{{#windows}}
+    DATA {{name}} TYPE d.
+{{/windows}}
 {{#threshold}}
 {{#is_count}}
     DATA lv_count TYPE i.
@@ -71,6 +77,9 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_aggregate_seen TYPE c LENGTH 1.
 {{/is_count}}
 {{/aggregate}}
+{{#windows}}
+    {{name}} = iv_date {{sign}} {{offset_ref}}.
+{{/windows}}
 {{#queries}}
 {{#zero}}
 {{^one_outer}}

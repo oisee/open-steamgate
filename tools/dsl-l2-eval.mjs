@@ -120,7 +120,7 @@ function civilFromDays(z) {
 
 // one day on a DATS text, or undefined for a text that is no calendar date
 // and for a step out of 0001-01-01 .. 9999-12-31
-function stepDate(text, dir) {
+export function shiftDate(text, dir) {
   if (!/^[0-9]{8}$/.test(text)) return undefined;
   const y = Number(text.slice(0, 4)), m = Number(text.slice(4, 6)), d = Number(text.slice(6, 8));
   if (y < 1 || m < 1 || m > 12 || d < 1) return undefined;
@@ -130,6 +130,20 @@ function stepDate(text, dir) {
   const [ny, nm, nd] = civilFromDays(days + dir);
   if (ny < 1 || ny > 9999) return undefined;
   return `${String(ny).padStart(4, "0")}${String(nm).padStart(2, "0")}${String(nd).padStart(2, "0")}`;
+}
+const stepDate = shiftDate;
+
+function rhsValue(rhs, params) {
+  if (rhs.kind === "literal") return rhs.value;
+  if (rhs.kind === "param") return params[rhs.name];
+  if (rhs.kind === "window") {
+    const offset = rhs.offset.kind === "literal" ? rhs.offset.value : params[rhs.offset.name];
+    if (offset === undefined) throw new Error(`no value for date window offset $${rhs.offset.name}`);
+    const days = Number(offset);
+    if (!Number.isSafeInteger(days) || days < 0) throw new Error(`date window offset must be a non-negative safe integer: ${offset}`);
+    return shiftDate(params.date, (rhs.sign === "-" ? -1 : 1) * days);
+  }
+  return undefined;
 }
 
 function stepTime(text, dir) {
@@ -245,6 +259,7 @@ function holdsTree(tree, leaves, holds) {
 // always matches (a row of initial values) or never does: the structural
 // mutants of the discriminate guard.
 export function evaluate(model, rows, params = {}, override = {}) {
+  params = {...Object.fromEntries((model.params ?? []).filter((p) => p.default !== undefined).map((p) => [p.name, p.default])), ...params};
   const tables = lower(rows);
   const schema = model.ddic;
   const fieldsOf = (table) => schema[table].fields;
@@ -260,10 +275,9 @@ export function evaluate(model, rows, params = {}, override = {}) {
     const left = context[cmp.alias];
     const a = valueOf(left.table, left.row, cmp.column);
     let b, typeB = cmp.type;
-    if (cmp.rhs.kind === "literal") b = cmp.rhs.value;
-    else if (cmp.rhs.kind === "param") {
-      b = params[cmp.rhs.name];
-      if (b === undefined) throw new Error(`no value for parameter $${cmp.rhs.name}`);
+    if (cmp.rhs.kind !== "field") {
+      b = rhsValue(cmp.rhs, params);
+      if (b === undefined) throw new Error(`no value for parameter or date window ${JSON.stringify(cmp.rhs)}`);
     } else {
       const right = context[cmp.rhs.alias];
       b = valueOf(right.table, right.row, cmp.rhs.column);
@@ -451,8 +465,8 @@ function solveRow(model, params, rows, alias, table, cmps, keep = false, slot = 
   }
   for (const [column, list] of byColumn) {
     const type = model.ddic[table].fields[column];
-    const target = (cmp) => cmp.rhs.kind === "literal" ? cmp.rhs.value : cmp.rhs.kind === "param" ? params[cmp.rhs.name]
-      : rows[model.for.table][0][cmp.rhs.column] ?? initialValue(cmp.rhs.type);
+    const target = (cmp) => cmp.rhs.kind === "field" ? rows[model.for.table][0][cmp.rhs.column] ?? initialValue(cmp.rhs.type)
+      : rhsValue(cmp.rhs, params);
     const candidates = [];
     for (const cmp of list) {
       const v = target(cmp);
@@ -596,13 +610,31 @@ function mutantsOf(cond, params) {
   const out = [{...cond, constant: true}, {...cond, constant: false},
     ...OPERATORS.filter((op) => op !== cmp.op).map((op) => ({...cond, cmp: {...cmp, op}}))];
   if (cmp.rhs.kind !== "field") {
-    const value = cmp.rhs.kind === "literal" ? cmp.rhs.value : params[cmp.rhs.name];
+    const value = rhsValue(cmp.rhs, params);
     for (const dir of [-1, 1]) {
       const shifted = isOrdered(cmp.type) ? stepValue(cmp.type, value, dir) : bump(value, dir);
       if (shifted !== undefined) out.push({...cond, cmp: {...cmp, rhs: {kind: "literal", value: shifted}}});
     }
   }
+  if (cmp.rhs.kind === "window") {
+    for (const dir of [-1, 1]) {
+      const offset = cmp.rhs.offset.kind === "literal" ? cmp.rhs.offset.value : params[cmp.rhs.offset.name];
+      const next = BigInt(offset) + BigInt(dir);
+      if (next >= 0n && next <= 2147483647n) out.push({...cond, cmp: {...cmp,
+        rhs: {...cmp.rhs, offset: {kind: "literal", value: String(next)}}}});
+    }
+  }
   return out;
+}
+
+export function windowOffsetDiscriminates(model, cond, rows, params, dir) {
+  const rhs = cond.cmp.rhs;
+  if (rhs.kind !== "window") return false;
+  const offset = rhs.offset.kind === "literal" ? rhs.offset.value : params[rhs.offset.name];
+  const next = BigInt(offset) + BigInt(dir);
+  if (next < 0n || next > 2147483647n) return false;
+  const mutated = {...cond, cmp: {...cond.cmp, rhs: {...rhs, offset: {kind: "literal", value: String(next)}}}};
+  return JSON.stringify(evaluate(model, rows, params)) !== JSON.stringify(evaluate(withCondition(model, cond, mutated), rows, params));
 }
 
 // A case discriminates when some mutant of the condition it targets gives
@@ -897,8 +929,7 @@ function aggregateGroups(model, baseRows, params) {
 // cases of the clauses: {method, label, kind, condition, line (the rule line
 // of the condition or clause), date, rows, expect, structural}. `example` is
 // the raw rows of the first hand-written example, `date` its check date.
-export function deriveCases(model, references, {date, example, reserved = new Set()}) {
-  const params = {date};
+export function deriveCases(model, references, {date, params = {date}, paramArgs = [], example, reserved = new Set()}) {
   const base = baseRows(model, params, example);
   if (base.why) return {cases: [], skipped: [{condition: "(all)", reason: base.why}]};
   const cases = [], skipped = [];
@@ -918,7 +949,7 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       skipped.push({condition: `${label} (${suffix})`, reason: "its rows would share a key"});
       return;
     }
-    cases.push({method: methods[suffix], label: `${label}: ${suffix}`, kind: suffix, condition, line, date, rows,
+    cases.push({method: methods[suffix], label: `${label}: ${suffix}`, kind: suffix, condition, line, date, rows, paramArgs,
       expect: evaluate(model, rows, params), structural});
   };
   let index = 0;
@@ -976,8 +1007,8 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       if (pivot === 0) rows[model.clauses[0].table] = [];
       return rows;
     };
-    const reference_value = canonical(type, cmp.rhs.kind === "literal" ? cmp.rhs.value : cmp.rhs.kind === "param" ? params[cmp.rhs.name]
-      : start[model.for.table][0][cmp.rhs.column]);
+    const reference_value = canonical(type, cmp.rhs.kind === "field" ? start[model.for.table][0][cmp.rhs.column]
+      : rhsValue(cmp.rhs, params));
     let variants;
     if (isJoin) variants = [["match", reference_value], ["nomatch", different(type, reference_value)]];
     else if (isOrdered(type)) variants = [["lt", stepValue(type, reference_value, -1)], ["eq", reference_value], ["gt", stepValue(type, reference_value, 1)]];

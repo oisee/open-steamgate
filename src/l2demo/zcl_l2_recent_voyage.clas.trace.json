@@ -1,0 +1,284 @@
+{
+ "generator": "dsl-l2",
+ "rule": "src/l2demo/recent_voyage.l2.yaml",
+ "template": "recipes/l2-check/template.tpl",
+ "model": "sha256:c3299de3df574ade7e542770fe2ba81c793bc116b348707cf29db9819be9a806",
+ "lines": [
+  {
+   "line": 1,
+   "template_line": 1,
+   "path": "/source",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 2,
+   "template_line": 2,
+   "path": "/rule",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 3,
+   "template_line": 3,
+   "path": "/class",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 4,
+   "template_line": 4,
+   "path": "/",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 5,
+   "template_line": 5,
+   "path": "/",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 6,
+   "template_line": 6,
+   "path": "/",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 7,
+   "template_line": 8,
+   "path": "/params/1/ref",
+   "node": "rule/active-ship-recent-voyage/param/max_days",
+   "rule_line": 5
+  },
+  {
+   "line": 8,
+   "template_line": 10,
+   "path": "/",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 9,
+   "template_line": 11,
+   "path": "/",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 10,
+   "template_line": 12,
+   "path": "/",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 11,
+   "template_line": 13,
+   "path": "/class",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 12,
+   "template_line": 14,
+   "path": "/",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 13,
+   "template_line": 15,
+   "path": "/comment",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 14,
+   "template_line": 17,
+   "path": "/queries/1/type",
+   "node": "rule/active-ship-recent-voyage/join",
+   "rule_line": 8
+  },
+  {
+   "line": 15,
+   "template_line": 19,
+   "path": "/queries/1/fields/1/name",
+   "node": "rule/active-ship-recent-voyage/join/field/1",
+   "rule_line": 6
+  },
+  {
+   "line": 16,
+   "template_line": 21,
+   "path": "/queries/1/type",
+   "node": "rule/active-ship-recent-voyage/join",
+   "rule_line": 8
+  },
+  {
+   "line": 17,
+   "template_line": 22,
+   "path": "/queries/1/itab",
+   "node": "rule/active-ship-recent-voyage/join",
+   "rule_line": 8
+  },
+  {
+   "line": 18,
+   "template_line": 23,
+   "path": "/queries/1/wa",
+   "node": "rule/active-ship-recent-voyage/join",
+   "rule_line": 8
+  },
+  {
+   "line": 19,
+   "template_line": 56,
+   "path": "/",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 20,
+   "template_line": 58,
+   "path": "/windows/1/name",
+   "node": "rule/active-ship-recent-voyage/window/1",
+   "rule_line": 10,
+   "param_rule_line": 5
+  },
+  {
+   "line": 21,
+   "template_line": 81,
+   "path": "/windows/1/name",
+   "node": "rule/active-ship-recent-voyage/window/1",
+   "rule_line": 10,
+   "param_rule_line": 5
+  },
+  {
+   "line": 22,
+   "template_line": 105,
+   "path": "/queries/1",
+   "node": "rule/active-ship-recent-voyage/join",
+   "rule_line": 8
+  },
+  {
+   "line": 23,
+   "template_line": 120,
+   "path": "/queries/1/fields/1/source",
+   "node": "rule/active-ship-recent-voyage/join/field/1",
+   "rule_line": 6
+  },
+  {
+   "line": 24,
+   "template_line": 124,
+   "path": "/queries/1/from/table",
+   "node": "rule/active-ship-recent-voyage/for",
+   "rule_line": 6
+  },
+  {
+   "line": 25,
+   "template_line": 132,
+   "path": "/queries/1/itab",
+   "node": "rule/active-ship-recent-voyage/join",
+   "rule_line": 8
+  },
+  {
+   "line": 26,
+   "template_line": 134,
+   "path": "/queries/1/where/1/pre",
+   "node": "rule/active-ship-recent-voyage/when/1",
+   "rule_line": 7
+  },
+  {
+   "line": 27,
+   "template_line": 134,
+   "path": "/queries/1/where/2/pre",
+   "node": "rule/active-ship-recent-voyage/require",
+   "rule_line": 9
+  },
+  {
+   "line": 28,
+   "template_line": 134,
+   "path": "/queries/1/where/3/pre",
+   "node": "rule/active-ship-recent-voyage/require/where/1",
+   "rule_line": 10
+  },
+  {
+   "line": 29,
+   "template_line": 134,
+   "path": "/queries/1/where/4/pre",
+   "node": "rule/active-ship-recent-voyage/require/where/2",
+   "rule_line": 10,
+   "param_rule_line": 5
+  },
+  {
+   "line": 30,
+   "template_line": 134,
+   "path": "/queries/1/where/5/pre",
+   "node": "rule/active-ship-recent-voyage/require/where/3",
+   "rule_line": 10
+  },
+  {
+   "line": 31,
+   "template_line": 136,
+   "path": "/queries/1",
+   "node": "rule/active-ship-recent-voyage/join",
+   "rule_line": 8
+  },
+  {
+   "line": 32,
+   "template_line": 138,
+   "path": "/queries/1/order/1/source",
+   "node": "rule/active-ship-recent-voyage/join/order/1",
+   "rule_line": 6
+  },
+  {
+   "line": 33,
+   "template_line": 249,
+   "path": "/queries/1/itab",
+   "node": "rule/active-ship-recent-voyage/join",
+   "rule_line": 8
+  },
+  {
+   "line": 34,
+   "template_line": 293,
+   "path": "/queries/1/alert_parts/1/jref",
+   "node": "rule/active-ship-recent-voyage/alert/hole/1",
+   "rule_line": 11
+  },
+  {
+   "line": 35,
+   "template_line": 293,
+   "path": "/queries/1/alert_parts/2/value",
+   "node": "rule/active-ship-recent-voyage/alert/text/1",
+   "rule_line": 11
+  },
+  {
+   "line": 36,
+   "template_line": 330,
+   "path": "/queries/1",
+   "node": "rule/active-ship-recent-voyage/join",
+   "rule_line": 8
+  },
+  {
+   "line": 37,
+   "template_line": 332,
+   "path": "/queries/1",
+   "node": "rule/active-ship-recent-voyage/join",
+   "rule_line": 8
+  },
+  {
+   "line": 38,
+   "template_line": 384,
+   "path": "/",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  },
+  {
+   "line": 39,
+   "template_line": 385,
+   "path": "/",
+   "node": "rule/active-ship-recent-voyage",
+   "rule_line": 1
+  }
+ ]
+}

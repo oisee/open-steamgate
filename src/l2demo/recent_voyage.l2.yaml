@@ -1,0 +1,33 @@
+rule: active-ship-recent-voyage
+class: zcl_l2_recent_voyage
+title: An active ship needs a voyage within the preceding number of days
+params:
+  max_days: {type: ZOSD_L2_DAYS, default: 30}
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'A'
+require:
+  exists: ZOSD_L2_VOY as voy
+  where: voy.ship_id = ship.ship_id and voy.dep_date >= $date - $max_days and voy.dep_date <= $date
+alert: "{ship.ship_id}: no recent voyage"
+boundaries: auto
+examples:
+  - name: leap day at lower bound
+    date: 20240301
+    params: {max_days: 1}
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: A}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20240229}]
+    expect: []
+  - name: day before leap bound
+    date: 20240301
+    params: {max_days: 1}
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: A}]
+      ZOSD_L2_VOY: [{voyage_id: V00002, ship_id: S001, dep_date: 20240228}]
+    expect: ["S001: no recent voyage"]
+  - name: default window
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S002, name: Petrel, status: A}]
+      ZOSD_L2_VOY: [{voyage_id: V00003, ship_id: S002, dep_date: 20260915}]
+    expect: []

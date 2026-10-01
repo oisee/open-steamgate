@@ -13,6 +13,9 @@ CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT F
     METHODS teardown.
     METHODS check_reference
       IMPORTING iv_date TYPE d
+{{#params}}
+                {{ref}} TYPE {{type_name}}{{#default}} DEFAULT {{default | literal}}{{/default}}
+{{/params}}
       RETURNING VALUE(rt_alerts) TYPE string_table.
     METHODS assert_alerts
       IMPORTING it_act TYPE string_table it_exp TYPE string_table iv_example TYPE string.
@@ -60,6 +63,9 @@ CLASS ltcl_examples IMPLEMENTATION.
 {{/limit_reference}}
 {{/clauses}}
     DATA lv_alert TYPE string.
+{{#windows}}
+    DATA {{name}} TYPE d.
+{{/windows}}
 {{#threshold}}
 {{#is_count}}
     DATA lv_count TYPE i.
@@ -78,6 +84,9 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lv_aggregate_seen TYPE c LENGTH 1.
 {{/is_count}}
 {{/threshold}}
+{{#windows}}
+    {{name}} = iv_date {{sign}} {{offset_ref}}.
+{{/windows}}
 {{#limit_reference}}
     SELECT * FROM {{outer.table}} INTO TABLE {{outer.itab}}
 {{#outer.where}}
@@ -237,8 +246,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND lv_exp TO lt_exp.
 {{/single}}
 {{/expect}}
-    lt_act = {{date.call}}( iv_date = {{date.value | literal}} ).
-    lt_ref = check_reference( iv_date = {{date.value | literal}} ).
+    lt_act = {{date.call}}( iv_date = {{date.value | literal}}{{#param_args}} {{ref}} = {{value | literal}}{{/param_args}} ).
+    lt_ref = check_reference( iv_date = {{date.value | literal}}{{#param_args}} {{ref}} = {{value | literal}}{{/param_args}} ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = {{ref_label | literal}} ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = {{label | literal}} ).
   ENDMETHOD.
