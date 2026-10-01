@@ -2314,6 +2314,10 @@ function activate(context) {
   // should not have to be found again in the general channel's scrollback.
   const classrunOutput = vscode.window.createOutputChannel("osd console");
   context.subscriptions.push(classrunOutput);
+  const systemOutput = vscode.window.createOutputChannel("osd system");
+  context.subscriptions.push(systemOutput);
+  const controller = new SystemController(context, systemOutput);
+  activeController = controller;
   context.subscriptions.push(statusBar(context));
   breakpointToggleStatusBar(context);
   breakpointGuard(context);
@@ -2378,17 +2382,8 @@ function activate(context) {
   context.subscriptions.push(sqlNotebookController(output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.newSqlNotebook", newSqlNotebook));
 
-  // B0 "Pocket SAP" spike (docs/vscode-extension.md, "B0 spike"): the
-  // extension starts and stops the system itself. Its own Output channel,
-  // separate from "osd" above -- a build's and a server's own log is a
-  // different thing from what a check or an activation reports.
-  const systemOutput = vscode.window.createOutputChannel("osd system");
-  context.subscriptions.push(systemOutput);
-  const controller = new SystemController(context, systemOutput);
-  activeController = controller;
-  // Registered after the controller exists, so the lens refreshes when it
-  // starts, stops or rebuilds; a default argument read before this line
-  // would have been undefined.
+  // The controller is available to the Test Explorer and lenses from their
+  // registration onward, including before the first Start.
   context.subscriptions.push(httpLensProvider(output, controller));
   context.subscriptions.push(vscode.commands.registerCommand("osd.gettingStarted", () => {
     const {publisher, name} = context.extension.packageJSON;
@@ -3361,7 +3356,7 @@ function entitySetHtml(title, call, rows) {
 // `vscode.CodeLens`. A click opens a quick pick of the readers (Test /
 // Service tagged) and opens the file of the one chosen.
 
-function readersLensProvider(output) {
+function readersLensProvider(output, controller = activeController) {
   const emitter = new vscode.EventEmitter();
   const provider = {
     onDidChangeCodeLenses: emitter.event,
@@ -3390,7 +3385,8 @@ function readersLensProvider(output) {
   // a save can add, rename or remove a reference this class's readers count
   // depends on, in this file or in whichever other file did the referencing
   const onSave = vscode.workspace.onDidSaveTextDocument(() => emitter.fire());
-  return {dispose: () => { registration.dispose(); onSave.dispose(); }};
+  const onState = controller?.onDidChange(() => emitter.fire());
+  return {dispose: () => { registration.dispose(); onSave.dispose(); onState?.dispose(); }};
 }
 
 async function showReaders(found, output) {
@@ -3430,6 +3426,7 @@ async function showReaders(found, output) {
 function testExplorer(context, output, {
   attachUnitDebugger = (event) => activeController?.applyDebuggerEvent(event),
   pickUnitInspectorPort = pickInspectorPort,
+  systemController = activeController,
 } = {}) {
   const controller = vscode.tests.createTestController("osd-abap-unit", "ABAP Unit (osd)");
   const objects = new Map(); // object item id -> {object, dir} -- unchanged meaning, any tree depth
@@ -3568,14 +3565,14 @@ function testExplorer(context, output, {
   // RISK LEVEL of a class that declares HARMLESS and reaches a write
   const classSchedules = new Map();
   const riskDiagnostics = vscode.languages?.createDiagnosticCollection?.("osd ABAP Unit risk");
-  const buildTree = async () => {
+  const scanTree = async () => {
     // a rebuilt tree starts with no verdicts: an object is described again
     // when it is expanded or run, and a deleted file keeps no warning
     classSchedules.clear();
     riskDiagnostics?.clear();
-    const root = activeController?.launcher?.osdHome ?? osdHomeOf();
+    const root = systemController?.launcher?.osdHome ?? osdHomeOf();
     const layers = transpileLayers(readTranspileConfig(root));
-    const workspaceLayers = activeController?.launcher?.layers ?? [];
+    const workspaceLayers = systemController?.launcher?.layers ?? [];
     const showSystem = vscode.workspace.getConfiguration("osd").get("tests.showSystem", true);
 
     controller.items.replace([]);
@@ -3638,6 +3635,22 @@ function testExplorer(context, output, {
       const containerNode = bucket.subgroup === undefined ? topNode : ensureGroupNode(bucketKey, bucket.subgroup, topNode);
       placeEntries(containerNode, bucket.entries);
     }
+  };
+
+  // A file scan yields to VS Code. Keep the old scan and any newer request
+  // in order, so the last request always publishes the latest layer list.
+  let building;
+  let dirty = false;
+  const buildTree = () => {
+    dirty = true;
+    if (building !== undefined) return building;
+    building = (async () => {
+      do {
+        dirty = false;
+        await scanTree();
+      } while (dirty);
+    })().finally(() => { building = undefined; });
+    return building;
   };
 
   const discover = async (item) => {
@@ -3703,6 +3716,20 @@ function testExplorer(context, output, {
     clearTimeout(rebuildTimer);
     rebuildTimer = setTimeout(() => { buildTree().catch((e) => output.appendLine(String(e.message ?? e))); }, 300);
   };
+  const layerKey = () => JSON.stringify((systemController?.launcher?.layers ?? []).map(({folder, srcDir}) => [folder, srcDir]));
+  let lastLayerKey = layerKey();
+  let lastState = systemController?.launcher?.state;
+  const onState = systemController?.onDidChange(() => {
+    const state = systemController?.launcher?.state;
+    const key = layerKey();
+    const layersChanged = key !== lastLayerKey;
+    lastLayerKey = key;
+    const reachedRunning = state === "running" && lastState !== "running";
+    lastState = state;
+    // Layer discovery during Start happens in "building". The running
+    // notification covers it, after the server can answer the test lenses.
+    if (reachedRunning || (layersChanged && state === "running")) scheduleRebuild();
+  });
   const watcher = vscode.workspace.createFileSystemWatcher(TEST_FILE_GLOB);
   watcher.onDidCreate(() => scheduleRebuild());
   watcher.onDidDelete(() => scheduleRebuild());
@@ -3880,7 +3907,7 @@ function testExplorer(context, output, {
   controller.refreshHandler = async () => {
     await buildTree();
   };
-  return {dispose: () => { clearTimeout(rebuildTimer); watcher.dispose(); debugCurrentTests.dispose(); riskDiagnostics?.dispose(); controller.dispose(); }};
+  return {dispose: () => { clearTimeout(rebuildTimer); onState?.dispose(); watcher.dispose(); debugCurrentTests.dispose(); riskDiagnostics?.dispose(); controller.dispose(); }};
 }
 
 function* gather(collection) {
@@ -4003,7 +4030,7 @@ async function deactivate() {
   await activeController?.stop();
 }
 
-module.exports = {activate, deactivate, runReportInTerminal, SystemController, debugOnDemand, testExplorer, OsdTreeProvider, TransactionItem, EntitySetItem,
+module.exports = {activate, deactivate, runReportInTerminal, SystemController, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
   httpLensProvider, openEntitySetMethod, statusBar,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,

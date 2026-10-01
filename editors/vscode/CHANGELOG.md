@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Register `.abap` as ABAP with breakpoint support, so VS Code accepts breakpoint toggles in a fresh profile.
+- Refresh the Test Explorer and test-count lenses after Start and workspace layer changes.
 - The Test Explorer runs ABAP Unit by `RISK LEVEL`: HARMLESS objects in parallel (longest `DURATION` first), the rest one at a time after them; an undeclared level counts as DANGEROUS. A HARMLESS class that reaches a database write is warned about on its `RISK LEVEL` line and runs alone, and one that writes anyway fails with "RISK LEVEL HARMLESS but wrote to <table>". Cancel now stops the test run in flight.
 - Debugging switches itself on; `osd.debug` is gone. A breakpoint in an `.abap` file or **Run with debugger** opens the running system's inspector (127.0.0.1 only) and attaches, with no restart; once no `.abap` breakpoint is left and the debug session has ended, it is closed again. `OSD_INSPECT=1` opens it at start, and an existing `"osd.debug": true` is still read for one release.
 - The OSD tree opens its pages inside VS Code by default (the Fiori Launchpad, apps, services, `$metadata`, the `/osd/*` endpoints): one tab per page, reused on a second click. The launchpad, endpoint and service nodes have an inline link-external action, and every page node an "... in External Browser" context item, for the system browser. `osd.openIn: browser` restores the old default. The System overview's launchpad button and the details panel's `$metadata` link follow the same rule; page tabs close on Stop and reload after a rebuild.

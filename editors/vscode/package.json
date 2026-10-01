@@ -38,6 +38,8 @@
     "onView:osdTree"
   ],
   "contributes": {
+    "languages": [{"id": "abap", "aliases": ["ABAP"], "extensions": [".abap"]}],
+    "breakpoints": [{"language": "abap"}],
     "configuration": {
       "title": "osd",
       "properties": {

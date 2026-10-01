@@ -1685,7 +1685,10 @@ verbatim when it did not.
 ## Debugging ABAP
 
 Debugging switches itself on; `osd.debug` is gone from the settings. A
-breakpoint set in an `.abap` file while the system runs, **osd: Run with
+fresh profile recognizes `.abap` as ABAP and accepts VS Code breakpoints
+without changing user settings. The extension uses VS Code's built-in Node
+debugger for its attach sessions. A breakpoint set in an `.abap` file while
+the system runs, **osd: Run with
 debugger**, or the debugger variants of the entity-set CodeLens and of
 classrun open the running serving child's inspector on a free
 127.0.0.1 port (`/osd/inspector`, `tools/osd-inspector.mjs`) and start a
