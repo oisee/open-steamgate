@@ -1,8 +1,9 @@
-// Does the tree under test batch FOR ALL ENTRIES?
+// Does the tree under test batch FOR ALL ENTRIES? (toolchain and build)
 //
 // ANOMALY-2026-09-30-fae-one-select-per-row: the published transpiler writes
 // one SELECT per row of the driving table, and the pinned fork
-// (libs.lock.json, linked by tools/osd-link.mjs) writes one per block of 50.
+// (libs.lock.json, linked by tools/osd-link.mjs; the batching is in the
+// transpiler's generated code, the runtime only executes it) writes one per block of 50.
 // A few tests count database calls ("50 driving rows are 1 call") and they
 // can only pass on the fork. An `npm install` in a worktree quietly puts the
 // published packages back, and the tests then fail with "expected 4 to equal
@@ -15,13 +16,19 @@
 // says "linked", which is true of any local build, fork or not; the probe
 // says what the build does, so a link to some other checkout is judged by
 // its behaviour. It costs one tiny transpile, about a second.
+import {readFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {join} from "node:path";
 import {modulesOf} from "../../tools/osd-transpile.mjs";
 
 const ROWS = 120;
 
-export const RELINK = "relink the pinned runtime (published @abaplint/runtime runs FOR ALL ENTRIES per row): TRANSPILER=<fork> node tools/osd-link.mjs runtime packages/runtime";
+// the documented relinks are package.json's transpiler:local and runtime:local
+export const RELINK = "relink the pinned transpiler (the published @abaplint/transpiler emits FOR ALL ENTRIES as one SELECT per row): TRANSPILER=<fork> npm run transpiler:local && TRANSPILER=<fork> npm run runtime:local; then rebuild (npm run transpile)";
+export const STALE = "output/ was built by a transpiler without batched FAE: rebuild with npm run transpile";
+
+// the block loop the fork's select.ts writes: `.slice(i, i + 50)`
+const BLOCK = /\.slice\(\w+, \w+ \+ 50\)/;
 
 const TABLE = `<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_TABL" serializer_version="v1.0.0"><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DD02V><TABNAME>ZFAE_PROBE</TABNAME><DDLANGUAGE>E</DDLANGUAGE><TABCLASS>TRANSP</TABCLASS><CONTFLAG>A</CONTFLAG></DD02V><DD03P_TABLE><DD03P><FIELDNAME>K</FIELDNAME><KEYFLAG>X</KEYFLAG><INTTYPE>C</INTTYPE><INTLEN>000008</INTLEN><DATATYPE>CHAR</DATATYPE><LENG>000004</LENG><MASK>  CHAR</MASK></DD03P></DD03P_TABLE></asx:values></asx:abap></abapGit>`;
@@ -70,12 +77,22 @@ export async function batchesFae(root = process.env.OSD_FAE_ROOT ?? process.cwd(
   return (await faeStatements(root)) < ROWS;
 }
 
+// The built output the suite runs: a tree rebuilt by the published transpiler
+// and then relinked to the fork passes the probe and still counts per row.
+export function outputBatched(files) {
+  return files.every((f) => BLOCK.test(readFileSync(f, "utf8")));
+}
+
 // For mocha: `before(async function () { await requireBatchedFae(this); })`.
 // It fails, it does not skip: a skip is green, and a CI that has the
 // published packages must not be green on a test it never ran.
-export async function requireBatchedFae(context, probe = batchesFae) {
+//   files: the built modules the suite executes (output/...mjs)
+export async function requireBatchedFae(context, files = [], probe = batchesFae) {
   if (context?.timeout) context.timeout(Math.max(context.timeout(), 60000));
   if (await probe() !== true) {
     throw new Error(RELINK);
+  }
+  if (outputBatched(files) !== true) {
+    throw new Error(STALE);
   }
 }

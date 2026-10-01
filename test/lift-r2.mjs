@@ -10,7 +10,7 @@ import {DEFAULT_DDIC, find, modelR2, modelR2FromSource, survey} from "../tools/l
 import {Refusal} from "../tools/dsl-ddic.mjs";
 import {region, render} from "../tools/dsl-regions.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
-import {requireBatchedFae} from "./helpers/fae-runtime.mjs";
+import {requireBatchedFae} from "./helpers/fae-batching.mjs";
 
 const DEMO = "src/lift/zcl_osd_lift_r2_demo.clas.abap";
 const TEMPLATE = "recipes/r2-select-table-per-row/template.tpl";
@@ -23,7 +23,7 @@ describe("verified lift R2: SELECT table per row", function () {
 
   let scratch;
   before(async function () {
-    await requireBatchedFae(this);
+    await requireBatchedFae(this, ["output/zcl_osd_lift_r2_demo.clas.mjs"]);
     await import("./start.mjs");
     abap = globalThis.abap;
     await import("../output/zcl_osd_tpl.clas.mjs");

@@ -10,7 +10,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {DEFAULT_DDIC, find, modelR1, modelR1FromSource} from "../tools/lift.mjs";
 import {region} from "../tools/dsl-regions.mjs";
-import {requireBatchedFae} from "./helpers/fae-runtime.mjs";
+import {requireBatchedFae} from "./helpers/fae-batching.mjs";
 
 const DEMO = "src/lift/zcl_osd_lift_r1_demo.clas.abap";
 const TEMPLATE = "recipes/r1-lookup-enrich/template.tpl";
@@ -21,7 +21,7 @@ describe("verified lift R1: lookup-enrich", function () {
   const box = (value) => new abap.types.String().set(value);
 
   before(async function () {
-    await requireBatchedFae(this);
+    await requireBatchedFae(this, ["output/zcl_osd_lift_r1_demo.clas.mjs"]);
     await import("./start.mjs");
     abap = globalThis.abap;
     await import("../output/zcl_osd_tpl.clas.mjs");
