@@ -26,6 +26,7 @@ const fs = require("node:fs");
 const {createBrotliDecompress} = require("node:zlib");
 const os = require("node:os");
 const path = require("node:path");
+const {pathToFileURL} = require("node:url");
 
 // Ports 3531-3539 only (the budget this spike was given); nothing here ever
 // asks for a port outside it, and a caller that wants a different range
@@ -334,38 +335,27 @@ function packNameOf(folder) {
   return `ws-${base}-${hash}`;
 }
 
-/** How the inherited OSD_PACKS meets the workspace layers. Start projects
- *  each workspace layer into its own pack under storage; tools/osd-packs.mjs
- *  refuses a pack name found in two directories (BAD_PACK), so a layer the
- *  inherited value already reaches must not arrive twice. An entry is read
- *  the way packsOf() reads it: relative to osdHome, a pack itself when it
- *  holds osd-pack.json, otherwise a container of packs.
- *  - an entry that is a layer's own folder is dropped (`dropped`): the
- *    workspace projection wins;
- *  - a container that holds a layer with a manifest stays (it may hold other
- *    packs), and that layer is not projected (`covered`): the container
- *    already brings it, under its own name. */
-function inheritedPacks(value, layers, home = process.cwd()) {
+/** The workspace layers the system already finds as packs of its own.
+ *  Start projects each workspace layer into a pack under storage; when
+ *  osdHome's packs/ or the inherited OSD_PACKS (directly, or as a container,
+ *  or through a symlink) already bring the same folder, a projection would
+ *  bring its pack name a second time from another directory, and
+ *  tools/osd-packs.mjs refuses that (BAD_PACK). Rather than repeat its rules
+ *  here, ask it: `packsOf` (the home's own copy, passed in) lists what it
+ *  finds, and a layer whose folder is one of those is not projected. When
+ *  the question cannot be asked (an old home, a pack it refuses), nothing is
+ *  covered and the build says what is wrong, as before. */
+function coveredLayers(packsOf, home, env, layers) {
   const fold = (dir) => (process.platform === "win32" ? dir.toLowerCase() : dir);
   const real = (dir) => { try { return fold(fs.realpathSync(dir)); } catch { return fold(path.resolve(dir)); } };
-  const layerOf = new Map(layers.map((layer) => [real(layer.folder), layer]));
-  const kept = [];
-  const dropped = [];
-  const covered = new Set();
-  for (const entry of (value ?? "").split(path.delimiter).map((s) => s.trim()).filter((s) => s !== "")) {
-    const dir = path.isAbsolute(entry) ? entry : path.join(home, entry);
-    const at = real(dir);
-    if (layerOf.has(at)) {
-      dropped.push(entry);
-      continue;
-    }
-    kept.push(entry);
-    if (fs.existsSync(path.join(dir, "osd-pack.json"))) continue;
-    for (const [folder, layer] of layerOf) {
-      if (layer.manifest && path.dirname(folder) === at) covered.add(layer);
-    }
+  let found;
+  try {
+    found = packsOf(home, {...env, OSD_WEB_PACKS: undefined});
+  } catch {
+    return new Set();
   }
-  return {kept, dropped, covered};
+  const dirs = new Set(found.map((pack) => real(pack.dir)));
+  return new Set(layers.filter((layer) => layer.manifest && dirs.has(real(layer.folder))));
 }
 
 function countFiles(dir, accept, seen = new Set()) {
@@ -1212,14 +1202,17 @@ class Launcher extends EventEmitter {
     this.startedAt = Date.now();
     this.#setState("building");
     this.layers = detectWorkspaceLayers(this.workspaceFolders);
-    const inherited = inheritedPacks(process.env.OSD_PACKS, this.layers, this.osdHome);
-    for (const entry of inherited.dropped) {
-      this.#log(`OSD_PACKS entry ${entry} is also a workspace folder: the workspace layer is used, the entry is left out\n`);
+    let covered = new Set();
+    try {
+      const {packsOf} = await import(pathToFileURL(path.join(this.osdHome, "tools", "osd-packs.mjs")).href);
+      covered = coveredLayers(packsOf, this.osdHome, process.env, this.layers);
+    } catch {
+      // a home without tools/osd-packs.mjs: project every layer, as before
     }
-    for (const layer of inherited.covered) {
-      this.#log(`workspace layer ${layer.folder} is already a pack of an OSD_PACKS container: it is not projected again\n`);
+    for (const layer of covered) {
+      this.#log(`workspace layer ${layer.folder} is already a pack of this system (packs/ or OSD_PACKS): it is not projected again\n`);
     }
-    const packsDir = ensureWorkspacePacks(this.storageDir, this.layers.filter((layer) => !inherited.covered.has(layer)));
+    const packsDir = ensureWorkspacePacks(this.storageDir, this.layers.filter((layer) => !covered.has(layer)));
     for (const layer of this.layers) {
       this.#log(`workspace layer: ${layer.folder} (${path.relative(layer.folder, layer.srcDir) === "" ? "." : "src"})\n`);
     }
@@ -1291,7 +1284,8 @@ class Launcher extends EventEmitter {
       STG_SERVE: "child",
       ...warmEnvironment(this.warmMode),
     }, this.debug, this.inspectPort);
-    env.OSD_PACKS = [...inherited.kept, packsDir].join(path.delimiter);
+    env.OSD_PACKS = [process.env.OSD_PACKS, packsDir]
+      .filter((value) => value !== undefined && value !== "").join(path.delimiter);
     this.env = env;
     this.databaseLabel = describeDatabase(this.database);
     try {
@@ -1697,7 +1691,7 @@ module.exports = {
   decideStartTarget,
   detectWorkspaceLayers,
   packNameOf,
-  inheritedPacks,
+  coveredLayers,
   ensureWorkspacePacks,
   layerContributions,
   waitForServing,
