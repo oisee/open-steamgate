@@ -157,8 +157,7 @@ function allowed(root) {
   try {
     raw = JSON.parse(readFileSync(path, "utf8"));
   } catch (error) {
-    // Node's parse error quotes the input, and in CI that input is the secret
-    // list and the log is public: say where, never what.
+    // Node's parse error quotes the input; report the file only.
     console.error(`osd-leak-scan: ${path} is not valid JSON (${error.name}); its content is not printed`);
     process.exit(1);
   }
@@ -175,7 +174,15 @@ function allowed(root) {
 function identifiers(root) {
   const path = identifierList(root);
   if (!path) return null;
-  const raw = JSON.parse(readFileSync(path, "utf8"));
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    // Node's parse error quotes the input, and in CI that input is the secret
+    // list and the log is public: say where, never what.
+    console.error(`osd-leak-scan: ${path} is not valid JSON (${error.name}); its content is not printed`);
+    process.exit(1);
+  }
   const list = [];
   for (const [kind, values] of Object.entries(raw)) {
     for (const v of values) {
