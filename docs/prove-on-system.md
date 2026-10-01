@@ -246,3 +246,13 @@ The tests cover:
 No child process is spawned: the fake reads the in-process zip in process,
 and the suite passes with `child_process` disabled. Each case was checked to
 fail when the code it covers is removed.
+
+## Measured on the sandbox: what abapGit's overwrite list holds
+
+`deserialize_checks( )` lists every object it would write in `overwrite`, new ones included, each with an
+`action` (`zif_abapgit_objects=>c_deserialize_action`: add 1, update 2, overwrite 3, delete 4, delete_add 5,
+packmove 6). Because the run creates its package and the preflight finds none of the zip's objects, the import
+approves only `add`, plus the package's own `DEVC` entry, which `package.devc.xml` updates (action 2). Any other entry is an object
+that appeared after the preflight, so the import is refused and nothing is overwritten. Measured 2026-10-01:
+a guard that refused every entry stopped a clean import on the first new class, and one that approved only `add`
+stopped it on the run's own package. Both were caught by real runs and are the reason for this rule.

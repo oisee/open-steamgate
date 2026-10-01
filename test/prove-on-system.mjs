@@ -572,6 +572,15 @@ describe("osd-prove-on-system", () => {
     assert.match((await osgRunner(fakeUnit(notOk)).methods("ZCL_X")).failing[0], /reported not ok/);
   });
 
+  it("the import never approves an overwrite: a zip-named object that appeared since the preflight stops it", () => {
+    const code = importAbap("UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==", PKG);
+    // only an "add" (a new object) is approved; any other action refuses the import
+    assert.match(code, /IF <ls_o>-action = zif_abapgit_objects=>c_deserialize_action-add OR \( <ls_o>-obj_type = 'DEVC' AND <ls_o>-obj_name = '\$ZOSG_TMP_TEST' \)\.\s+<ls_o>-decision = zif_abapgit_definitions=>c_yes\./);
+    assert.match(code, /ERR would overwrite/);
+    const guard = code.indexOf("IF lv_foreign = abap_true.");
+    assert.ok(guard > 0 && code.indexOf("li_repo->deserialize(") > code.indexOf("ELSE.", guard));
+  });
+
   it("snippets are ASCII and each ends with the fail( msg ) report", () => {
     for (const code of [importAbap(Buffer.from("PK"), "$ZOSG_TMP_X"), classCheckAbap(["ZCL_A"]),
       cleanupAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"], "000000000042"), preflightAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"])]) {
