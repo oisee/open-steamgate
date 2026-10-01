@@ -1,6 +1,6 @@
 # DSL L1: the typed generation model
 
-Status: MPC class rendering implemented through slice 5, recipes as build units (`dsl build`) in slice 11, 2026-09-30. Built on the template engine of `docs/abap-templates.md` (L0, PR #266).
+Status: MPC and DPC class rendering implemented, with recipes as build units (`dsl build`) from slice 11, 2026-10-01. Built on the template engine of `docs/abap-templates.md` (L0, PR #266).
 
 ## Where it sits
 
@@ -114,6 +114,39 @@ After `npm run transpile`, run
 class's `.clas.abap` and `.clas.trace.json` files. The command imports under its
 own temporary project name, removes those rows afterwards, prints the ABAP
 profile findings, and exits nonzero for an error finding.
+
+## Second consumer: whole DPC class
+
+`zcl_osd_dsl_dpc=>render_class` builds the generated `_DPC` class from the
+same project tree as `zcl_stg_segw_gen_dpc=>dpc_source`. Its JSON model has
+stable project, operation, entity-set and property nodes. It decides which
+runtime methods exist, the Q/R/U/C/D redefinition order, sorted declarations
+and implementations, SADL edit modes, forward data-source order and reverse
+result-structure order. `ZCL_OSD_TPL` renders `src/dsl/dpc-templates/*.tpl`
+as partials. `node tools/dsl-dpc-embed.mjs` embeds those reviewed templates in
+`zcl_osd_dsl_dpc_templates` so the same ABAP class runs without a filesystem;
+`--check` detects drift. Template comments document the copied SEGW formatting
+quirks, including GET_ENTITY's banner and the literal tab in dispatch calls.
+
+The byte bridge in `test/dsl-dpc.mjs` compares every IWPR fixture and every
+compiled STG project admitted by the MPC bridge. For each rendered class it
+checks one trace node per line and the `abap` profile. Four independent model
+mutations (project stamp, operation method, SADL set binding and property
+field) must change only lines traced to their node. The test also exercises
+the command's source and sidecar output.
+
+After `npm run transpile`, run
+`node tools/dsl-dpc.mjs render <project.iwpr.xml> --out <dir>` to write the
+`_DPC` `.clas.abap` and `.clas.trace.json` files. It imports under a temporary
+project name, deletes its rows afterwards, reports profile findings and exits
+nonzero for an error.
+
+RFC and search-help operation bodies produced by `zcl_stg_segw_gen_rfc` are
+opaque pre-rendered text fields under the operation's trace node for this
+slice; its search-help interface method is also opaque. Replacing that mapping
+generator is the next slice. The string DPC generator remains the oracle and
+is not replaced here. XML, the EXT pair and direct writes to project folders
+remain outside this consumer.
 
 ## Generated regions
 
