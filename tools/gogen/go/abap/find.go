@@ -121,14 +121,6 @@ func checkLines(p, s, where string) {
 	}
 }
 
-// FindSection is FIND p IN SECTION [OFFSET off] [LENGTH n] OF s for a
-// substring (not a regex), measured on A4H 2026-09-24 (ZCL_GOGEN_T_FINDSEC):
-// the match offset counts from the start of s; an offset below 0 or past the
-// end, a length below -1, or a section past the end raise
-// CX_SY_RANGE_OUT_OF_BOUNDS; a length of -1 is the rest of s, as if none
-// were given (measured: -1 finds, -3 raises); an offset at the end is an
-// empty section, where only an empty pattern is found (at the offset,
-// length 0). A match must lie inside the section.
 // FindBytes is FIND p IN [SECTION OFFSET off OF] s IN BYTE MODE over xstrings:
 // the byte offset of p in s from off on, false when it is not there. An
 // offset past the end is CX_SY_RANGE_OUT_OF_BOUNDS, as for a section of a
@@ -144,6 +136,14 @@ func FindBytes(s, p string, off int32) (int32, bool) {
 	return off + int32(i), true
 }
 
+// FindSection is FIND p IN SECTION [OFFSET off] [LENGTH n] OF s for a
+// substring (not a regex), measured on A4H 2026-09-24 (ZCL_GOGEN_T_FINDSEC):
+// the match offset counts from the start of s; an offset below 0 or past the
+// end, a length below -1, or a section past the end raise
+// CX_SY_RANGE_OUT_OF_BOUNDS; a length of -1 is the rest of s, as if none
+// were given (measured: -1 finds, -3 raises); an offset at the end is an
+// empty section, where only an empty pattern is found (at the offset,
+// length 0). A match must lie inside the section.
 func FindSection(s, p string, icase bool, off, n int32, nsub int) (bool, int32, int32, []string) {
 	// the section by byte index, walked to once: no []rune of the whole
 	// text per call (a loop of FIND ... SECTION OFFSET over a long text was

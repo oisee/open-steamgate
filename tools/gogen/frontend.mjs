@@ -2786,7 +2786,8 @@ function statement(node, ctx) {
     // [MATCH OFFSET m]: a byte sequence in an xstring (the sXML reader crosses
     // a UTF-8 document with it); offsets in bytes, sy-subrc 4 and m left
     // alone when it is not there
-    if (/^FIND (FIRST OCCURRENCE OF )?IN (SECTION OFFSET OF )?IN BYTE MODE( MATCH OFFSET)?$/.test(tw)) {
+    if (/^FIND (FIRST OCCURRENCE OF )?IN (SECTION OFFSET OF )?IN BYTE MODE( MATCH OFFSET)?$/.test(tw)
+      && !/\b(REGEX|PCRE)\b/i.test(node.findDirectExpression(Expressions.FindType)?.concatTokens() ?? "")) {
       const srcs = node.findDirectExpressions(Expressions.Source);
       const section = words.includes("SECTION");
       if (srcs.length !== (section ? 3 : 2)) throw new Unsupported(`FIND form: ${text}`);

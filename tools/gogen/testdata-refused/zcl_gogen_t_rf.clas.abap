@@ -16,5 +16,9 @@ CLASS zcl_gogen_t_rf IMPLEMENTATION.
     lo_i->value = 3.
     lo_i->mv_x = 4.
     rv = lo_i->mv_ro.
+    DATA lv_xs TYPE xstring.
+    DATA lv_p TYPE x LENGTH 1.
+    DATA lv_o TYPE i.
+    FIND REGEX lv_p IN lv_xs IN BYTE MODE MATCH OFFSET lv_o.
   ENDMETHOD.
 ENDCLASS.
