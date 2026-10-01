@@ -828,6 +828,70 @@ describe("editors/vscode: the extension's logic", function () {
     expect(controller.launcher.calls).to.deep.equal(["open"]);
   });
 
+  it("waits for the current system session and a verified DPC breakpoint after prior activity and restart", async () => {
+    const api = debugApi();
+    const statuses = [];
+    api.window.setStatusBarMessage = (message) => {
+      statuses.push(message);
+      return {dispose: () => statuses.push("disposed")};
+    };
+    const listeners = {start: [], end: []};
+    api.debug.onDidStartDebugSession = (fn) => { listeners.start.push(fn); return {dispose() {}}; };
+    api.debug.onDidTerminateDebugSession = (fn) => { listeners.end.push(fn); return {dispose() {}}; };
+    const file = "/w/src/zcl_demo_dpc_ext.clas.abap";
+    const bp = new api.SourceBreakpoint(file);
+    api.debug.breakpoints = [bp];
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {appendLine() {}});
+    controller.launcher = fakeLauncher();
+    // A plain request loads the DPC before the debugger starts.
+    const calls = ["plain request"];
+    await controller.attachSystemDebugger({onDemand: true});
+    let ready = false;
+    const first = controller.waitForDebuggerReady(file, 300).then(() => { ready = true; calls.push("debug request"); });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(ready).to.equal(false);
+    let verified = false;
+    const session = {name: "OSD: ABAP (9401)", id: "first",
+      getDebugProtocolBreakpoint: async () => verified ? {verified: true} : {verified: false}};
+    listeners.start.forEach((fn) => fn(session));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(ready).to.equal(false);
+    verified = true;
+    await first;
+    expect(calls).to.deep.equal(["plain request", "debug request"]);
+    // Shift+F5 ends that session. The next call must wait for a new one.
+    listeners.end.forEach((fn) => fn(session));
+    const second = controller.attachSystemDebugger({onDemand: true});
+    await second;
+    let secondReady = false;
+    const next = controller.waitForDebuggerReady(file, 300).then(() => { secondReady = true; });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(secondReady).to.equal(false);
+    const replacement = {...session, id: "second", getDebugProtocolBreakpoint: async () => ({verified: true})};
+    listeners.start.forEach((fn) => fn(replacement));
+    await next;
+    // A Stop/Start on the same port must not reuse the old session.
+    controller.launcher.state = "stopped";
+    await controller.applyDebuggerEvent({type: "system-stopped"});
+    controller.launcher.state = "running";
+    await controller.attachSystemDebugger({onDemand: true});
+    let restartedReady = false;
+    const restarted = controller.waitForDebuggerReady(file, 300).then(() => { restartedReady = true; });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(restartedReady).to.equal(false);
+    listeners.start.forEach((fn) => fn({...session, id: "third"}));
+    // VS Code reports the old session's termination after the new one starts.
+    listeners.end.forEach((fn) => fn(replacement));
+    expect(controller.debuggerState.systemPort).to.equal(9401);
+    await restarted;
+    expect(statuses).to.include("osd: waiting for the debugger…");
+    expect(statuses.filter((s) => s === "disposed")).to.have.length(3);
+    verified = false;
+    expect(await controller.waitForDebuggerReady(file, 80), "unverified breakpoints time out").to.equal(false);
+    expect(statuses.at(-1)).to.equal("disposed");
+  });
+
   it("the debugger on demand says why it cannot attach: not running, or the door refused", async () => {
     const api = debugApi();
     const SystemController = loadSystemController(api);

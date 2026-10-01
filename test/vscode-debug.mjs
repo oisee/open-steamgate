@@ -12,6 +12,7 @@ import {createRequire} from "node:module";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const {pickInspectorPort, packNameOf} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
+const {Launcher} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 const {debuggerConfiguration, runningAbapSources, breakpointWarning} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -123,11 +124,12 @@ async function inspectorTarget(port) {
 function breakpointFor(sourcePath, sourceLine, sourceColumn) {
   const output = join(ROOT, "output");
   for (const name of readdirSync(output).filter((entry) => entry.endsWith(".mjs.map"))) {
-    const mapFile = join(output, name);
+    const mapFile = realpathSync(join(output, name));
     const data = JSON.parse(readFileSync(mapFile, "utf8"));
     const source = data.sources.find((entry) => {
       const absolute = resolve(dirname(mapFile), entry);
-      return absolute === sourcePath || entry.replaceAll("\\", "/").endsWith("/src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
+      return absolute === sourcePath || (sourcePath.endsWith("/src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap") &&
+        entry.replaceAll("\\", "/").endsWith("/src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap"));
     });
     if (source === undefined) continue;
     const position = generatedPosition(data.mappings, data.sources.indexOf(source), sourceLine, sourceColumn);
@@ -393,6 +395,61 @@ ENDCLASS.`;
     } finally {
       cancellation.abort();
       await resultPromise.catch(() => {});
+    }
+  });
+});
+
+describe("VS Code debugger transport: serving DPC after earlier activity", function () {
+  this.timeout(180000);
+
+  it("pauses on a DPC line after a plain call, a detached session, and Stop/Start", async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-dpc-debug-"));
+    const launcher = new Launcher({osdHome: ROOT, storageDir, workspaceFolders: [], warm: "off"});
+    const sourcePath = join(ROOT, "src/demo/zcl_zstg_demo_dpc_ext.clas.abap");
+    const lines = readFileSync(sourcePath, "utf8").split(/\r?\n/);
+    const sourceLine = lines.findIndex((line) => line.includes("lt_status = ranges_for(")) + 1;
+    expect(sourceLine).to.be.greaterThan(0);
+    let client;
+    try {
+      for (let run = 0; run < 2; run++) {
+        const {port} = await launcher.start();
+        const breakpoint = breakpointFor(sourcePath, sourceLine, lines[sourceLine - 1].search(/\S/));
+        const url = `http://127.0.0.1:${port}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$format=json`;
+        // This request loads and executes the DPC before any debugger exists.
+        expect((await fetch(url)).status).to.equal(200);
+        const inspectPort = await launcher.openInspector();
+        for (let session = 0; session < 2; session++) {
+          const target = await inspectorTarget(inspectPort);
+          const socket = new WebSocket(target.webSocketDebuggerUrl);
+          await new Promise((resolve, reject) => {
+            socket.addEventListener("open", resolve, {once: true});
+            socket.addEventListener("error", reject, {once: true});
+          });
+          client = new InspectorClient(socket);
+          await client.send("Debugger.enable");
+          const scripts = client.events.filter((event) => event.method === "Debugger.scriptParsed" &&
+            event.params.url.includes("zcl_zstg_demo_dpc_ext"));
+          expect(scripts.map((event) => event.params.url), `expected ${breakpoint.url}`).to.include(breakpoint.url);
+          const set = await client.send("Debugger.setBreakpointByUrl", {
+            url: breakpoint.url, lineNumber: breakpoint.lineNumber, columnNumber: breakpoint.columnNumber,
+          });
+          if (set.locations.length === 0) {
+            await client.waitFor("Debugger.breakpointResolved", (event) => event.breakpointId === set.breakpointId);
+          }
+          const response = fetch(url);
+          const paused = await client.waitFor("Debugger.paused");
+          expect(paused.hitBreakpoints).to.include(set.breakpointId);
+          await client.send("Debugger.resume");
+          expect((await response).status).to.equal(200);
+          client.socket.close();
+          client = undefined;
+        }
+        await launcher.stop();
+      }
+    } finally {
+      client?.socket.close();
+      await launcher.stop();
+      rmSync(storageDir, {recursive: true, force: true});
     }
   });
 });

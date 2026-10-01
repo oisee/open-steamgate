@@ -495,11 +495,13 @@ class SystemController {
     // The stable VS Code API has no list of running debug sessions (only
     // start/terminate events), so the controller keeps its own.
     this.debugSessions = new Set();
+    this.retiredDebugSessions = new WeakSet();
     if (typeof vscode.debug.onDidStartDebugSession === "function") {
       context.subscriptions.push(vscode.debug.onDidStartDebugSession((session) => { this.debugSessions.add(session); }));
     }
     context.subscriptions.push(vscode.debug.onDidTerminateDebugSession((session) => {
       this.debugSessions.delete(session);
+      if (this.retiredDebugSessions.delete(session)) return;
       if (session.name === `OSD: ABAP (${this.debuggerState.systemPort})`) {
         this.debuggerState = debugAttachPlan(this.debuggerState,
           {type: "system-session-ended", port: this.debuggerState.systemPort}).state;
@@ -569,7 +571,8 @@ class SystemController {
   /** Running debug sessions: VS Code's own list where a runtime has one,
    *  otherwise the sessions this controller saw start and not yet end. */
   runningDebugSessions() {
-    return Array.isArray(vscode.debug.sessions) ? vscode.debug.sessions : [...this.debugSessions];
+    const sessions = Array.isArray(vscode.debug.sessions) ? vscode.debug.sessions : [...this.debugSessions];
+    return sessions.filter((session) => !this.retiredDebugSessions.has(session));
   }
 
   async applyDebuggerEvent(event) {
@@ -589,7 +592,13 @@ class SystemController {
       const name = config.name;
       if (action.type === "stop") {
         const session = this.runningDebugSessions().find((candidate) => candidate.name === name);
-        if (session !== undefined) await vscode.debug.stopDebugging(session);
+        if (session !== undefined) {
+          // VS Code can deliver terminate after a new process has reused the
+          // port. Retire this exact session before requesting its stop.
+          this.retiredDebugSessions.add(session);
+          this.debugSessions.delete(session);
+          await vscode.debug.stopDebugging(session);
+        }
         this.debuggerStarts.delete(name);
         this.debuggerOutputPattern = undefined;
         continue;
@@ -645,6 +654,8 @@ class SystemController {
       // Clear the old session before stopping it so its termination event
       // cannot close an inspector opened on demand for the replacement.
       this.debuggerState = {systemPort: undefined};
+      this.retiredDebugSessions.add(session);
+      this.debugSessions.delete(session);
       await vscode.debug.stopDebugging(session);
       this.debuggerOutputPattern = undefined;
       if (await vscode.debug.startDebugging(undefined, config) === true) {
@@ -677,6 +688,37 @@ class SystemController {
 
   async attachSystemDebugger(options = {}) {
     return this.#inspectorStep(() => this.#attachSystemDebugger(options));
+  }
+
+  /** startDebugging resolves before js-debug has finished attaching and
+   *  applying source maps. A request sent then can pass a loaded DPC before
+   *  its breakpoint binds. Ask VS Code for this session's DAP breakpoint,
+   *  which is the same verified state shown by the filled editor glyph. */
+  async waitForDebuggerReady(file, timeoutMs = 15000) {
+    const port = this.launcher?.inspectPort;
+    const name = `OSD: ABAP (${port})`;
+    const target = file && path.resolve(file);
+    const breakpoints = (vscode.debug.breakpoints ?? []).filter((bp) =>
+      bp instanceof vscode.SourceBreakpoint && bp.enabled && bp.location.uri.scheme === "file" &&
+      target !== undefined && path.resolve(bp.location.uri.fsPath) === target);
+    const status = vscode.window.setStatusBarMessage?.("osd: waiting for the debugger…");
+    const deadline = Date.now() + timeoutMs;
+    try {
+      while (Date.now() < deadline) {
+        const session = this.runningDebugSessions().find((one) => one.name === name);
+        if (session !== undefined && typeof session.getDebugProtocolBreakpoint === "function") {
+          if (breakpoints.length === 0) return true;
+          const states = await Promise.all(breakpoints.map(async (bp) => {
+            try { return await session.getDebugProtocolBreakpoint(bp); } catch { return undefined; }
+          }));
+          if (states.every((bp) => bp?.verified === true)) return true;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return false;
+    } finally {
+      status?.dispose();
+    }
   }
 
   async #attachSystemDebugger({onDemand = false} = {}) {
@@ -2879,7 +2921,8 @@ async function run(output, classrunOutput, forceDebugger = false) {
     return;
   }
   if (action.kind === "call-entityset") {
-    await callEntitySet({service: action.service, set: action.set, kind: action.entityKind, withDebugger: forceDebugger}, output);
+    await callEntitySet({service: action.service, set: action.set, kind: action.entityKind,
+      file: editor.document.fileName, withDebugger: forceDebugger}, output);
     return;
   }
   if (action.kind === "classrun") {
@@ -3267,7 +3310,7 @@ function entitySetLensProvider(output) {
       }
       return entitySetLenses(document.getText(), map).flatMap((lens) => {
         const range = new vscode.Range(lens.line - 1, 0, lens.line - 1, 0);
-        const args = {service: lens.service, set: lens.set, kind: lens.kind};
+        const args = {service: lens.service, set: lens.set, kind: lens.kind, file: document.fileName};
         return [new vscode.CodeLens(range, {
           title: lens.title,
           command: "osd.callEntitySet",
@@ -3322,8 +3365,13 @@ function progLensProvider() {
  *  to (lib.js `keyOf`, off `__metadata.uri` -- this client does not
  *  otherwise know the entity type's key properties), then calls the one
  *  entity. Cancelling the prompt leaves nothing called. */
-async function callEntitySet({service, set, kind, withDebugger = false}, output) {
+async function callEntitySet({service, set, kind, file, withDebugger = false}, output) {
   if (withDebugger && !(await requireDebugSystem(output, "Call EntitySet"))) return;
+  if (withDebugger) {
+    if (!(await activeController.waitForDebuggerReady(file ?? vscode.window.activeTextEditor?.document?.fileName))) {
+      vscode.window.showWarningMessage(`osd: debugger or breakpoints for ${set} did not become ready within 15 s; calling anyway`);
+    }
+  }
   try {
     if (kind === "get_entity") {
       const probe = await osd().odata(service, `${set}?$top=1&$format=json`);
