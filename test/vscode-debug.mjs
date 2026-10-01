@@ -431,6 +431,8 @@ describe("VS Code debugger configuration: which generations' maps js-debug may r
       expect(sourceMapAllowed(config, real(join(live, "zcl_zosd_fleet_dpc_ext.clas.mjs.map")))).to.equal(true);
       expect(sourceMapAllowed(config, real(join(hot, "zcl_zosd_fleet_dpc_ext.clas.mjs.map")))).to.equal(true);
       expect(sourceMapAllowed(config, join(home, "node_modules", "@abaplint", "runtime", "build", "x.js.map"))).to.equal(false);
+      // inside the allowed build/ tree, so only the node_modules exclusion can refuse it
+      expect(sourceMapAllowed(config, join(realpathSync(live), "node_modules", "x", "y.js.map"))).to.equal(false);
       // Without a root the profile stays portable and still covers the build.
       expect(debuggerConfiguration(9229).resolveSourceMapLocations)
         .to.deep.equal(["${workspaceFolder}/build/**", "!**/node_modules/**"]);

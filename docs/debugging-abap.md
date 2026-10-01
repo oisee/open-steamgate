@@ -286,6 +286,11 @@ inspected after the fact.
 }
 ```
 
+If `build/` is a symbolic link to a directory outside the workspace, Node reports
+the real path of each module, so add that real path too (for example
+`"/data/osd-build/**"`) to `resolveSourceMapLocations`. The extension's own
+"Attach and call" configuration does this by itself.
+
 The attach config is the manual alternative: start the server by hand
 (`OSD_INSPECT=9229 npm start`, or `npm run osd:serve` with the same env)
 and attach to port 9229. The launch config runs `npm start` from VS Code
