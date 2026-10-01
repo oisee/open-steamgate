@@ -403,12 +403,12 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/osd-prove-inplace.mjs": {
-      "lines": 1036,
-      "reason": "baseline 2026-10-01"
+      "lines": 1057,
+      "reason": "baseline 2026-10-01 re-taken after #409 (merged before #407, same night): JSON reporting of the in-place snippets"
     },
     "tools/osd-prove-on-system.mjs": {
-      "lines": 1382,
-      "reason": "baseline 2026-10-01"
+      "lines": 1674,
+      "reason": "baseline 2026-10-01 re-taken after #409 (merged before #407, same night): vsp-native import/unit/inventory plus the one-step cleanup kept on purpose; carve-out of the ABAP snippets is a follow-up"
     },
     "tools/osd-store.mjs": {
       "lines": 1661,
