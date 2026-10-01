@@ -153,7 +153,15 @@ function identifierList(root) {
 function allowed(root) {
   const path = join(root, ".leak-allow.json");
   if (!existsSync(path)) return () => false;
-  const raw = JSON.parse(readFileSync(path, "utf8"));
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    // Node's parse error quotes the input, and in CI that input is the secret
+    // list and the log is public: say where, never what.
+    console.error(`osd-leak-scan: ${path} is not valid JSON (${error.name}); its content is not printed`);
+    process.exit(1);
+  }
   const keys = new Set();
   for (const entry of raw.allow ?? []) {
     if (!entry.reason) {

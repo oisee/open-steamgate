@@ -76,6 +76,19 @@ describe("leak scanner", () => {
       assert.match(result.stderr, /категория #1 \(текст\): sha256:[0-9a-f]{8}/);
     });
 
+    it("does not quote a malformed list", () => {
+      const broken = mkdtempSync(join(tmpdir(), "osd-leak-broken-"));
+      try {
+        mkdirSync(join(broken, ".local"), {recursive: true});
+        writeFileSync(join(broken, ".local", "leak-identifiers.json"), `{"k": [${name}]}`);
+        const result = spawnSync(process.execPath, ["tools/osd-leak-scan.mjs", broken, "--print-masks"], {encoding: "utf8"});
+        assert.equal(result.status, 1);
+        assert.doesNotMatch(result.stdout + result.stderr, new RegExp(name));
+      } finally {
+        rmSync(broken, {recursive: true, force: true});
+      }
+    });
+
     it("emits a mask for every name and category", () => {
       const result = run("--print-masks");
       assert.equal(result.status, 0);
