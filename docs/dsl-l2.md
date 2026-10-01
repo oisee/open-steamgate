@@ -1,6 +1,6 @@
 # DSL L2: a domain rule compiled to L1
 
-Status: slices 1 to 5, 2026-10-01. Built on L1 (`docs/dsl-l1.md`) and the template engine
+Status: slices 1 to 6, 2026-10-01. Built on L1 (`docs/dsl-l1.md`) and the template engine
 (`docs/abap-templates.md`).
 
 ## What L2 is
@@ -587,10 +587,13 @@ field type, including the number of DEC decimals. Thus `1000.001` does not fit
 
 SUM accumulates in `p LENGTH 16 DECIMALS d` for packed fields and `INT8` for
 integer fields. MIN and MAX use the field's own type. This widens
-`INT1`/`INT2`/`INT4`; an `INT8` sum uses the full `INT8` range, and a packed
-sum uses a 16-byte accumulator with the field's decimals. The rule does not
-establish a maximum number of matching rows, so it does not claim a sum cannot
-exceed its accumulator's range.
+`INT1`/`INT2`/`INT4`; an `INT8` sum is limited by the full `INT8` result range,
+and a packed sum uses a 16-byte accumulator with the field's decimals. The
+rule does not establish a maximum number of matching rows, so an actual sum
+can still overflow its accumulator. To keep the generated boundary test from
+overflowing first, it skips an adjacent INT8 sum boundary outside the INT8
+range (for example, `above` at INT8 maximum) and records the reason in
+`model.skipped`.
 
 An empty SUM is 0. An empty MIN or MAX is undefined: with either operation,
 `fewer_than` and `exactly` are refused at the threshold line. For
@@ -608,19 +611,27 @@ with the expected grouped values. `HAVING` is still dropped, so the generated
 rule uses the loop for its threshold. The probe also recorded that packed
 `10.50` assigned directly to STRING becomes `10.50 `, but assigning through a
 fixed CHAR first loses the decimals; packed `-10.50` becomes `10.50-`. The
-Integer aggregate alerts convert through INT8 before STRING to preserve their
-full width and leading sign. The packed formatter copies the magnitude to
-packed, converts it to STRING, condenses it, then prefixes a negative sign.
-The interpreter emits the same field-literal text, including DEC scale.
+packed formatter copies the magnitude to packed, converts it to STRING,
+condenses it, then prefixes a negative sign. For integer aggregate alerts,
+direct INT8-to-STRING conversion puts the sign first here and last on SAP
+(ANORMALIES `int8-string-sign`); it is not measured on A4H because the ABAP
+Unit runner there is down. The generated formatter converts the magnitude to
+INT8, converts it to STRING, condenses it, then prefixes `-`; INT8 minimum
+uses its known decimal magnitude because that positive value cannot fit in
+INT8. The interpreter emits the same field-literal text, including DEC scale.
 
 Derived SUM boundaries are `t - 1` smallest field step, `t` and `t + 1`
 smallest field step (one for integer fields, `10^-d` for packed); MIN and MAX
 include a group whose extreme equals the threshold. Applicable zero, next-zero
 and two-group cases follow slice 5. `src/l2demo/ship_cargo_limit.l2.yaml`
 demonstrates fractional weights below, at and above a DEC threshold; the
-max-cargo demo and a test-only negative minimum exercise MAX, MIN and alert
-formatting. The tests mutate `>`, SUM-to-count, MAX-to-MIN, the accumulator
-reset and the accumulator's decimals; each mutation is caught.
+max-cargo demo and test-only all-negative groups exercise MIN and MAX, including
+the initial-value guard and alert formatting. The integer formatter has a
+generated-code shape assertion: removing its magnitude conversion and explicit
+sign prefix is rejected even though this runtime's direct INT8 conversion
+would print a leading sign. The tests mutate `>`, SUM-to-count, MAX-to-MIN,
+MAX's first-row guard, the accumulator reset and the accumulator's decimals;
+each mutation is caught.
 
 ## Not yet
 

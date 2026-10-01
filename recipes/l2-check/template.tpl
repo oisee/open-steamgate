@@ -52,19 +52,21 @@ CLASS {{class}} IMPLEMENTATION.
 {{/queries}}
     DATA lv_alert TYPE string.
 {{#threshold}}
+{{#is_count}}
     DATA lv_count TYPE i.
     DATA lv_count_text TYPE c LENGTH 12.
+{{/is_count}}
 {{/threshold}}
 {{#aggregate}}
 {{^is_count}}
     DATA lv_aggregate TYPE {{accumulator_type}}.
     DATA lv_aggregate_text TYPE string.
+    DATA lv_aggregate_signed TYPE string.
 {{#is_integer}}
     DATA lv_aggregate_integer TYPE int8.
 {{/is_integer}}
 {{^is_integer}}
     DATA lv_aggregate_abs TYPE p LENGTH 16 DECIMALS {{decimals}}.
-    DATA lv_aggregate_signed TYPE string.
 {{/is_integer}}
     DATA lv_aggregate_seen TYPE c LENGTH 1.
 {{/is_count}}
@@ -188,9 +190,20 @@ CLASS {{class}} IMPLEMENTATION.
       ENDIF.
       IF lv_aggregate {{op}} {{value | literal}}.
 {{#is_integer}}
-        lv_aggregate_integer = lv_aggregate.
-        lv_aggregate_text = lv_aggregate_integer.
-        CONDENSE lv_aggregate_text NO-GAPS.
+        IF lv_aggregate = -9223372036854775807 - 1.
+          lv_aggregate_text = '9223372036854775808'.
+        ELSE.
+          lv_aggregate_integer = lv_aggregate.
+          IF lv_aggregate < 0.
+            lv_aggregate_integer = 0 - lv_aggregate.
+          ENDIF.
+          lv_aggregate_text = lv_aggregate_integer.
+          CONDENSE lv_aggregate_text NO-GAPS.
+        ENDIF.
+        IF lv_aggregate < 0.
+          CONCATENATE `-` lv_aggregate_text INTO lv_aggregate_signed.
+          lv_aggregate_text = lv_aggregate_signed.
+        ENDIF.
 {{/is_integer}}
 {{^is_integer}}
         lv_aggregate_abs = lv_aggregate.
@@ -237,9 +250,20 @@ CLASS {{class}} IMPLEMENTATION.
       IF lv_aggregate_seen = 'X' AND ( {{key_change}} ).
         IF lv_aggregate {{op}} {{value | literal}}.
 {{#is_integer}}
-          lv_aggregate_integer = lv_aggregate.
-          lv_aggregate_text = lv_aggregate_integer.
-          CONDENSE lv_aggregate_text NO-GAPS.
+          IF lv_aggregate = -9223372036854775807 - 1.
+            lv_aggregate_text = '9223372036854775808'.
+          ELSE.
+            lv_aggregate_integer = lv_aggregate.
+            IF lv_aggregate < 0.
+              lv_aggregate_integer = 0 - lv_aggregate.
+            ENDIF.
+            lv_aggregate_text = lv_aggregate_integer.
+            CONDENSE lv_aggregate_text NO-GAPS.
+          ENDIF.
+          IF lv_aggregate < 0.
+            CONCATENATE `-` lv_aggregate_text INTO lv_aggregate_signed.
+            lv_aggregate_text = lv_aggregate_signed.
+          ENDIF.
 {{/is_integer}}
 {{^is_integer}}
           lv_aggregate_abs = lv_aggregate.
@@ -307,9 +331,20 @@ CLASS {{class}} IMPLEMENTATION.
 {{^is_count}}
     IF lv_aggregate_seen = 'X' AND lv_aggregate {{op}} {{value | literal}}.
 {{#is_integer}}
-      lv_aggregate_integer = lv_aggregate.
-      lv_aggregate_text = lv_aggregate_integer.
-      CONDENSE lv_aggregate_text NO-GAPS.
+      IF lv_aggregate = -9223372036854775807 - 1.
+        lv_aggregate_text = '9223372036854775808'.
+      ELSE.
+        lv_aggregate_integer = lv_aggregate.
+        IF lv_aggregate < 0.
+          lv_aggregate_integer = 0 - lv_aggregate.
+        ENDIF.
+        lv_aggregate_text = lv_aggregate_integer.
+        CONDENSE lv_aggregate_text NO-GAPS.
+      ENDIF.
+      IF lv_aggregate < 0.
+        CONCATENATE `-` lv_aggregate_text INTO lv_aggregate_signed.
+        lv_aggregate_text = lv_aggregate_signed.
+      ENDIF.
 {{/is_integer}}
 {{^is_integer}}
       lv_aggregate_abs = lv_aggregate.

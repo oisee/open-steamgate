@@ -1145,6 +1145,18 @@ examples:
       expect(failed(min.results), JSON.stringify(min.messages)).to.deep.equal([]);
       expect(min.model.cases.map((c) => c.method)).to.include("b_min_at");
       expect(min.model.examples[0].expect.map((e) => e.value)).to.deep.equal(["S030: minimum -2.50 kg"]);
+
+      const negativeMaxText = MIN_RULE.replace("  min:", "  max:")
+        .replace("alert: \"{ship.ship_id}: minimum {min} kg\"", "alert: \"{ship.ship_id}: maximum {max} kg\"")
+        .replace("S030: minimum -2.50 kg", "S030: maximum -1.25 kg");
+      const negativeMaxCopy = copy("negative_max", negativeMaxText);
+      const negativeMax = await runRule(negativeMaxCopy.file, negativeMaxCopy.className);
+      expect(failed(negativeMax.results), JSON.stringify(negativeMax.messages)).to.deep.equal([]);
+      expect(negativeMax.model.cases.map((c) => c.method)).to.include("b_max_at");
+      for (const testCase of negativeMax.model.cases) {
+        const weights = caseRows(testCase).zosd_l2_cargo?.map((row) => row.weight) ?? [];
+        expect(weights.every((weight) => weight.startsWith("-")), testCase.method).to.equal(true);
+      }
     });
 
     it("uses the zero-sum query shape for fewer_than and derives zero, next_zero and two groups", async () => {
@@ -1162,7 +1174,7 @@ examples:
       expect(caseRows(next).zosd_l2_cargo.every((r) => r.ship_id === ships[0])).to.equal(true);
     });
 
-    it("> to >=, sum to count, max to min, reset removal and integer accumulation all go red", async () => {
+    it("> to >=, sum to count, max to min, max's missing initial guard, reset removal and integer accumulation all go red", async () => {
       const ge = copy("ge", cargoText);
       const geResult = await runRule(ge.file, ge.className, {transform: {"clas.abap": (s) =>
         s.replaceAll("lv_aggregate > '1000.00'", "lv_aggregate >= '1000.00'")}});
@@ -1179,6 +1191,14 @@ examples:
         "ls_join-cargo_weight > lv_aggregate", "ls_join-cargo_weight < lv_aggregate",
       ]]}});
       expect(failed(extremeResult.results)).to.include("maximum_over");
+
+      const negativeMax = copy("negative_max_no_seen", MIN_RULE.replace("  min:", "  max:")
+        .replace("alert: \"{ship.ship_id}: minimum {min} kg\"", "alert: \"{ship.ship_id}: maximum {max} kg\"")
+        .replace("S030: minimum -2.50 kg", "S030: maximum -1.25 kg"));
+      const noMaxSeen = await runRule(negativeMax.file, negativeMax.className, {mutate: {"clas.abap": [[
+        "lv_aggregate_seen IS INITIAL OR ls_join-cargo_weight > lv_aggregate", "ls_join-cargo_weight > lv_aggregate",
+      ]]}});
+      expect(failed(noMaxSeen.results)).to.include("negative_minimum");
 
       const fewer = copy("reset_mutant", ZERO_SUM);
       const resetResult = await runRule(fewer.file, fewer.className, {mutate: {"clas.abap": [[
@@ -1220,6 +1240,7 @@ limit:
   where: amount.ship_id = ship.ship_id
   more_than: ${threshold}
 alert: "{sum}"
+boundaries: auto
 examples:
   - name: one
     date: 20261001
@@ -1280,6 +1301,7 @@ limit:
   where: amount.ship_id = ship.ship_id
   more_than: 12345678901234566
 alert: "{sum}"
+boundaries: auto
 examples:
   - name: seventeen digit total
     date: 20261001
@@ -1295,6 +1317,16 @@ examples:
       const int8Abap = readFileSync(join(int8Out, "zcl_l2_aggregate_int8_alert.clas.abap"), "utf8");
       expect(int8Abap).to.include("DATA lv_aggregate TYPE int8.");
       expect(int8Abap).to.include("DATA lv_aggregate_integer TYPE int8.");
+      expect(int8Abap).to.not.match(/DATA lv_count(?:_text)? TYPE/);
+
+      const int8BoundaryRule = join(scratch, "aggregate_int8_boundary.l2.yaml");
+      writeFileSync(int8BoundaryRule, readFileSync(int8Rule, "utf8")
+        .replace("more_than: 12345678901234566", "more_than: 9223372036854775807")
+        .replace('expect: ["12345678901234567"]', "expect: []"));
+      const int8Boundary = compileRule(int8BoundaryRule, {registry: aggRegistry});
+      expect(int8Boundary.cases.map((c) => c.method)).to.not.include("b_sum_above");
+      expect(int8Boundary.skipped.some((entry) =>
+        entry.case === "above" && entry.reason.includes("outside the INT8 sum range"))).to.equal(true);
 
       const int4Rule = join(scratch, "aggregate_int4_alert.l2.yaml");
       writeFileSync(int4Rule, `rule: aggregate-int4-alert
@@ -1319,6 +1351,22 @@ examples:
         tableDir: runtimeDdic, fixture: ["zosd_l2_aggint"]});
       expect(int4.model.aggregate.accumulator_type).to.equal("int8");
       expect(failed(int4.results), JSON.stringify(int4.messages)).to.deep.equal([]);
+
+      const int4Out = join(scratch, "aggregate_int4_alert");
+      await buildRule(int4Rule, int4Out, {registry: aggRegistry});
+      const int4Abap = readFileSync(join(int4Out, "zcl_l2_aggregate_int4_alert.clas.abap"), "utf8");
+      const int4TestAbap = readFileSync(join(int4Out, "zcl_l2_aggregate_int4_alert.clas.testclasses.abap"), "utf8");
+      const integerFormatter = /IF lv_aggregate = -9223372036854775807 - 1\.\s+lv_aggregate_text = '9223372036854775808'\.\s+ELSE\.\s+lv_aggregate_integer = lv_aggregate\.\s+IF lv_aggregate < 0\.\s+lv_aggregate_integer = 0 - lv_aggregate\.\s+ENDIF\.\s+lv_aggregate_text = lv_aggregate_integer\.\s+CONDENSE lv_aggregate_text NO-GAPS\.\s+ENDIF\.\s+IF lv_aggregate < 0\.\s+CONCATENATE `-` lv_aggregate_text INTO lv_aggregate_signed\.\s+lv_aggregate_text = lv_aggregate_signed\.\s+ENDIF\./g;
+      const hasIntegerSignFormatter = (source) => {
+        const conversions = (source.match(/lv_aggregate_text = lv_aggregate_integer\./g) ?? []).length;
+        const explicit = [...source.matchAll(integerFormatter)].length;
+        return conversions > 0 && explicit === conversions;
+      };
+      expect(hasIntegerSignFormatter(int4Abap), "generated check formats the INT8 magnitude before the sign").to.equal(true);
+      expect(hasIntegerSignFormatter(int4TestAbap), "generated reference test formats the INT8 magnitude before the sign").to.equal(true);
+      const sapSignMutant = int4Abap.replace(/\s+IF lv_aggregate < 0\.\s+lv_aggregate_integer = 0 - lv_aggregate\.\s+ENDIF\./g, "")
+        .replace(/\s+IF lv_aggregate < 0\.\s+CONCATENATE `-` lv_aggregate_text INTO lv_aggregate_signed\.\s+lv_aggregate_text = lv_aggregate_signed\.\s+ENDIF\./g, "");
+      expect(hasIntegerSignFormatter(sapSignMutant), "the SAP trailing-sign mutant is rejected by the code-shape oracle").to.equal(false);
     });
 
     it("refuses fewer_than and exactly for min and max because their empty result is undefined", () => {

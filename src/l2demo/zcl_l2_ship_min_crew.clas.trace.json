@@ -223,357 +223,357 @@
   },
   {
    "line": 32,
-   "template_line": 55,
-   "path": "/threshold",
+   "template_line": 56,
+   "path": "/threshold/is_count",
    "node": "rule/ship-min-crew/limit/fewer_than",
    "rule_line": 9
   },
   {
    "line": 33,
-   "template_line": 56,
-   "path": "/threshold",
+   "template_line": 57,
+   "path": "/threshold/is_count",
    "node": "rule/ship-min-crew/limit/fewer_than",
    "rule_line": 9
   },
   {
    "line": 34,
-   "template_line": 76,
+   "template_line": 78,
    "path": "/queries/1/zero/for_query",
    "node": "rule/ship-min-crew/join/for",
    "rule_line": 4
   },
   {
    "line": 35,
-   "template_line": 78,
+   "template_line": 80,
    "path": "/queries/1/zero/for_fields/1/source",
    "node": "rule/ship-min-crew/join/field/1",
    "rule_line": 4
   },
   {
    "line": 36,
-   "template_line": 78,
+   "template_line": 80,
    "path": "/queries/1/zero/for_fields/2/source",
    "node": "rule/ship-min-crew/join/field/2",
    "rule_line": 10
   },
   {
    "line": 37,
-   "template_line": 81,
+   "template_line": 83,
    "path": "/queries/1/zero/for_query/from/table",
    "node": "rule/ship-min-crew/for",
    "rule_line": 4
   },
   {
    "line": 38,
-   "template_line": 83,
+   "template_line": 85,
    "path": "/queries/1/zero/for_query",
    "node": "rule/ship-min-crew/join/for",
    "rule_line": 4
   },
   {
    "line": 39,
-   "template_line": 85,
+   "template_line": 87,
    "path": "/queries/1/zero/for_query/where/1/pre",
    "node": "rule/ship-min-crew/when/1",
    "rule_line": 5
   },
   {
    "line": 40,
-   "template_line": 87,
+   "template_line": 89,
    "path": "/queries/1/zero/for_query",
    "node": "rule/ship-min-crew/join/for",
    "rule_line": 4
   },
   {
    "line": 41,
-   "template_line": 89,
+   "template_line": 91,
    "path": "/queries/1/order/1/source",
    "node": "rule/ship-min-crew/join/order/1",
    "rule_line": 4
   },
   {
    "line": 42,
-   "template_line": 94,
+   "template_line": 96,
    "path": "/queries/1",
    "node": "rule/ship-min-crew/join",
    "rule_line": 6
   },
   {
    "line": 43,
-   "template_line": 103,
+   "template_line": 105,
    "path": "/queries/1/join_fields/1/source",
    "node": "rule/ship-min-crew/join/field/1",
    "rule_line": 4
   },
   {
    "line": 44,
-   "template_line": 113,
+   "template_line": 115,
    "path": "/queries/1/from/table",
    "node": "rule/ship-min-crew/for",
    "rule_line": 4
   },
   {
    "line": 45,
-   "template_line": 116,
+   "template_line": 118,
    "path": "/queries/1/joins/1/table",
    "node": "rule/ship-min-crew/limit/count",
    "rule_line": 7
   },
   {
    "line": 46,
-   "template_line": 118,
+   "template_line": 120,
    "path": "/queries/1/joins/1/on/1/lhs",
    "node": "rule/ship-min-crew/limit/where/1",
    "rule_line": 8
   },
   {
    "line": 47,
-   "template_line": 121,
+   "template_line": 123,
    "path": "/queries/1/itab",
    "node": "rule/ship-min-crew/join",
    "rule_line": 6
   },
   {
    "line": 48,
-   "template_line": 123,
+   "template_line": 125,
    "path": "/queries/1/where/1/pre",
    "node": "rule/ship-min-crew/when/1",
    "rule_line": 5
   },
   {
    "line": 49,
-   "template_line": 123,
+   "template_line": 125,
    "path": "/queries/1/where/2/pre",
    "node": "rule/ship-min-crew/limit/where/2",
    "rule_line": 8
   },
   {
    "line": 50,
-   "template_line": 125,
+   "template_line": 127,
    "path": "/queries/1",
    "node": "rule/ship-min-crew/join",
    "rule_line": 6
   },
   {
    "line": 51,
-   "template_line": 127,
+   "template_line": 129,
    "path": "/queries/1/order/1/source",
    "node": "rule/ship-min-crew/join/order/1",
    "rule_line": 4
   },
   {
    "line": 52,
-   "template_line": 133,
+   "template_line": 135,
    "path": "/queries/1/itab",
    "node": "rule/ship-min-crew/join",
    "rule_line": 6
   },
   {
    "line": 53,
-   "template_line": 145,
+   "template_line": 147,
    "path": "/queries/1/zero/join_key",
    "node": "rule/ship-min-crew/join/zero",
    "rule_line": 9
   },
   {
    "line": 54,
-   "template_line": 146,
+   "template_line": 148,
    "path": "/queries/1/zero",
    "node": "rule/ship-min-crew/join/zero",
    "rule_line": 9
   },
   {
    "line": 55,
-   "template_line": 149,
+   "template_line": 151,
    "path": "/queries/1/zero/aggregate/is_count",
    "node": "rule/ship-min-crew/limit/count",
    "rule_line": 7
   },
   {
    "line": 56,
-   "template_line": 157,
+   "template_line": 159,
    "path": "/queries/1/zero",
    "node": "rule/ship-min-crew/join/zero",
    "rule_line": 9
   },
   {
    "line": 57,
-   "template_line": 158,
+   "template_line": 160,
    "path": "/queries/1/zero",
    "node": "rule/ship-min-crew/join/zero",
    "rule_line": 9
   },
   {
    "line": 58,
-   "template_line": 159,
+   "template_line": 161,
    "path": "/queries/1/wa",
    "node": "rule/ship-min-crew/join",
    "rule_line": 6
   },
   {
    "line": 59,
-   "template_line": 162,
+   "template_line": 164,
    "path": "/queries/1/zero/aggregate/is_count",
    "node": "rule/ship-min-crew/limit/count",
    "rule_line": 7
   },
   {
    "line": 60,
-   "template_line": 168,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 9
-  },
-  {
-   "line": 61,
-   "template_line": 169,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 9
-  },
-  {
-   "line": 62,
    "template_line": 170,
    "path": "/queries/1/zero",
    "node": "rule/ship-min-crew/join/zero",
    "rule_line": 9
   },
   {
-   "line": 63,
+   "line": 61,
    "template_line": 171,
    "path": "/queries/1/zero",
    "node": "rule/ship-min-crew/join/zero",
    "rule_line": 9
   },
   {
-   "line": 64,
-   "template_line": 174,
-   "path": "/queries/1/zero/aggregate/is_count",
-   "node": "rule/ship-min-crew/limit/count",
-   "rule_line": 7
-  },
-  {
-   "line": 65,
-   "template_line": 175,
-   "path": "/queries/1/zero/read_key",
+   "line": 62,
+   "template_line": 172,
+   "path": "/queries/1/zero",
    "node": "rule/ship-min-crew/join/zero",
    "rule_line": 9
   },
   {
-   "line": 66,
+   "line": 63,
+   "template_line": 173,
+   "path": "/queries/1/zero",
+   "node": "rule/ship-min-crew/join/zero",
+   "rule_line": 9
+  },
+  {
+   "line": 64,
    "template_line": 176,
    "path": "/queries/1/zero/aggregate/is_count",
    "node": "rule/ship-min-crew/limit/count",
    "rule_line": 7
   },
   {
-   "line": 67,
+   "line": 65,
    "template_line": 177,
-   "path": "/queries/1/zero/aggregate/is_count",
-   "node": "rule/ship-min-crew/limit/count",
-   "rule_line": 7
+   "path": "/queries/1/zero/read_key",
+   "node": "rule/ship-min-crew/join/zero",
+   "rule_line": 9
   },
   {
-   "line": 68,
+   "line": 66,
    "template_line": 178,
    "path": "/queries/1/zero/aggregate/is_count",
    "node": "rule/ship-min-crew/limit/count",
    "rule_line": 7
   },
   {
-   "line": 69,
+   "line": 67,
    "template_line": 179,
-   "path": "/queries/1/zero/op",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 9
+   "path": "/queries/1/zero/aggregate/is_count",
+   "node": "rule/ship-min-crew/limit/count",
+   "rule_line": 7
   },
   {
-   "line": 70,
+   "line": 68,
    "template_line": 180,
    "path": "/queries/1/zero/aggregate/is_count",
    "node": "rule/ship-min-crew/limit/count",
    "rule_line": 7
   },
   {
-   "line": 71,
+   "line": 69,
    "template_line": 181,
+   "path": "/queries/1/zero/op",
+   "node": "rule/ship-min-crew/join/zero",
+   "rule_line": 9
+  },
+  {
+   "line": 70,
+   "template_line": 182,
+   "path": "/queries/1/zero/aggregate/is_count",
+   "node": "rule/ship-min-crew/limit/count",
+   "rule_line": 7
+  },
+  {
+   "line": 71,
+   "template_line": 183,
    "path": "/queries/1/zero/aggregate/is_count",
    "node": "rule/ship-min-crew/limit/count",
    "rule_line": 7
   },
   {
    "line": 72,
-   "template_line": 210,
+   "template_line": 223,
    "path": "/queries/1/alert_parts/1/jref",
    "node": "rule/ship-min-crew/alert/hole/1",
    "rule_line": 10
   },
   {
    "line": 73,
-   "template_line": 210,
+   "template_line": 223,
    "path": "/queries/1/alert_parts/2/value",
    "node": "rule/ship-min-crew/alert/text/1",
    "rule_line": 10
   },
   {
    "line": 74,
-   "template_line": 210,
+   "template_line": 223,
    "path": "/queries/1/alert_parts/3/jref",
    "node": "rule/ship-min-crew/alert/hole/2",
    "rule_line": 10
   },
   {
    "line": 75,
-   "template_line": 210,
+   "template_line": 223,
    "path": "/queries/1/alert_parts/4/value",
    "node": "rule/ship-min-crew/alert/text/2",
    "rule_line": 10
   },
   {
    "line": 76,
-   "template_line": 210,
+   "template_line": 223,
    "path": "/queries/1/alert_parts/5/jref",
    "node": "rule/ship-min-crew/alert/count",
    "rule_line": 10
   },
   {
    "line": 77,
-   "template_line": 210,
+   "template_line": 223,
    "path": "/queries/1/alert_parts/6/value",
    "node": "rule/ship-min-crew/alert/text/3",
    "rule_line": 10
   },
   {
    "line": 78,
-   "template_line": 212,
+   "template_line": 225,
    "path": "/queries/1/zero",
    "node": "rule/ship-min-crew/join/zero",
    "rule_line": 9
   },
   {
    "line": 79,
-   "template_line": 215,
+   "template_line": 228,
    "path": "/queries/1/zero/aggregate/is_count",
    "node": "rule/ship-min-crew/limit/count",
    "rule_line": 7
   },
   {
    "line": 80,
-   "template_line": 221,
+   "template_line": 234,
    "path": "/queries/1/zero",
    "node": "rule/ship-min-crew/join/zero",
    "rule_line": 9
   },
   {
    "line": 81,
-   "template_line": 340,
+   "template_line": 375,
    "path": "/",
    "node": "rule/ship-min-crew",
    "rule_line": 1
   },
   {
    "line": 82,
-   "template_line": 341,
+   "template_line": 376,
    "path": "/",
    "node": "rule/ship-min-crew",
    "rule_line": 1

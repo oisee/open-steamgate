@@ -48,8 +48,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lv_alert TYPE string.
     DATA lv_aggregate TYPE p LENGTH 16 DECIMALS 2.
     DATA lv_aggregate_text TYPE string.
-    DATA lv_aggregate_abs TYPE p LENGTH 16 DECIMALS 2.
     DATA lv_aggregate_signed TYPE string.
+    DATA lv_aggregate_abs TYPE p LENGTH 16 DECIMALS 2.
     DATA lv_aggregate_seen TYPE c LENGTH 1.
     SELECT * FROM zosd_l2_ship INTO TABLE lt_ship
       ORDER BY PRIMARY KEY.

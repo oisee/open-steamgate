@@ -18,12 +18,10 @@ CLASS zcl_l2_ship_max_cargo IMPLEMENTATION.
     DATA ls_join TYPE ty_join.
     DATA ls_prev TYPE ty_join.
     DATA lv_alert TYPE string.
-    DATA lv_count TYPE i.
-    DATA lv_count_text TYPE c LENGTH 12.
     DATA lv_aggregate TYPE zosd_l2_cargo-weight.
     DATA lv_aggregate_text TYPE string.
-    DATA lv_aggregate_abs TYPE p LENGTH 16 DECIMALS 2.
     DATA lv_aggregate_signed TYPE string.
+    DATA lv_aggregate_abs TYPE p LENGTH 16 DECIMALS 2.
     DATA lv_aggregate_seen TYPE c LENGTH 1.
     SELECT
         ship~ship_id AS ship_ship_id

@@ -29,6 +29,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-01-int8-string-sign -- INT8 to STRING puts a negative sign first here, not last as SAP does
+
+- Status: `workaround`
+- Discovery date: `2026-10-01`
+- Affected versions: `@abaplint/runtime 2.13.93` (the version pinned here)
+- Affected ABAP statement, runtime API or adapter: assigning an `INT8` value to a `STRING`; runtime API equivalent `String.set(Integer8(-3n))`
+- Minimal ABAP reproducer: `DATA lv_value TYPE int8 VALUE -3. DATA lv_text TYPE string. lv_text = lv_value.`
+- Exact command used to run it: `node --input-type=module -e 'import * as abap from "@abaplint/runtime"; console.log(new abap.types.String().set(new abap.types.Integer8().set(-3n)).get())'`
+- Expected SAP behaviour: `lv_text` is `3-`, with the negative sign last (not measured on A4H: its ABAP Unit runner is down)
+- Actual open-abap behaviour: the INT8 runtime object converts to `-3`, with a leading sign and no trailing blank; the `Integer` runtime object instead converts to `3-`
+- Impact on open-steamgate: an integer aggregate alert formatted by a direct INT8-to-STRING assignment agrees with the interpreter only because of this runtime difference and would print incorrectly on a system
+- Smallest safe workaround: take the absolute value into INT8, convert that magnitude to STRING and CONDENSE it, then prefix `-` when the aggregate is negative; special-case INT8 minimum because its magnitude is not representable as INT8
+- Upstream issue: [abaplint/transpiler#1939](https://github.com/abaplint/transpiler/issues/1939)
+- Regression-test location: `test/dsl-l2.mjs`, generated-code shape assertion for both the check and reference test templates (runtime sign placement is not a valid oracle)
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-09-30-numc-short-literal-not-padded -- a short NUMC literal in a WHERE is compared unpadded
 
 - Status: `open`
@@ -63,8 +79,9 @@ Format adapted from `larshp/hithub` (MIT).
 - Smallest safe workaround: aggregate alerts convert the absolute packed
   accumulator directly to STRING, condense it, then prefix `-` for a negative
   value. This keeps DEC decimals and a leading sign without concatenating a
-  packed operand or converting through fixed CHAR. Integer aggregates pass
-  through INT8 before conversion to STRING, preserving the sign and full range.
+  packed operand or converting through fixed CHAR. Integer aggregates use the
+  magnitude-to-STRING formatter in ANOMALY-2026-10-01-int8-string-sign; direct
+  INT8-to-STRING sign placement is a runtime divergence, not a feature.
 - Upstream issue: not filed
 - Regression-test location: `docs/probes/dsl-l2/zcl_l2_aggregate_probe.clas.testclasses.abap` distinguishes ABAP assignment from the direct API; `test/dsl-l2.mjs` covers aggregate alert text, including a negative DEC minimum
 - Upstream version containing a fix: `unknown`

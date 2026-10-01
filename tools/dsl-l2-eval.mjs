@@ -669,13 +669,21 @@ function splitTotal(type, total) {
 }
 
 function stepAggregate(type, text, dir) {
-  if (kindOf(type) === "int") return String(BigInt(text) + BigInt(dir));
+  if (kindOf(type) === "int") {
+    const next = BigInt(text) + BigInt(dir);
+    if (type.built_in === "INT8") {
+      const [low, high] = INT_RANGE.INT8;
+      if (next < low || next > high) return undefined;
+    }
+    return String(next);
+  }
   return formatDecimal(scaled(text, type.decimals ?? 0) + BigInt(dir), type.decimals ?? 0);
 }
 
 // Make one counted group whose exact sum is `total`. Values are split across
 // two source rows only when a sum boundary is one step past the field range.
 function sumTo(model, baseRows, total, params) {
+  if (total === undefined) return undefined;
   const clause = model.clauses[0], table = clause.table;
   const type = model.aggregate.type, column = model.aggregate.column;
   const values = splitTotal(type, total);
@@ -996,6 +1004,10 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       const suffixes = ["below", "at", "above"];
       const methods = name("sum threshold", [operation, "limit"], suffixes, model.threshold.rule_line);
       for (let i = 0; i < targets.length; i++) {
+        if (targets[i] === undefined) {
+          skipped.push({condition: `limit/${model.threshold.key}`, reason: `the ${suffixes[i]} boundary is outside the INT8 sum range`, case: suffixes[i]});
+          continue;
+        }
         const rows = sumTo(model, base.rows, targets[i], params);
         if (!rows) {
           skipped.push({condition: `limit/${model.threshold.key}`, reason: `cannot make the matching rows sum to ${targets[i]}`, case: suffixes[i]});
