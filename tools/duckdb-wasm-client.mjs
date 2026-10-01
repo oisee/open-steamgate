@@ -4,6 +4,7 @@
 import {createDuckDB, BROWSER_RUNTIME, VoidLogger} from "@duckdb/duckdb-wasm/blocking";
 import {bindValue} from "./abap-types.mjs";
 import {trimLiterals} from "./sql-literals.mjs";
+import {osqlSemanticsError} from "./osql-error.mjs";
 
 function plain(value) {
   if (typeof value === "bigint") return Number(value);
@@ -139,9 +140,7 @@ export class DuckDBWasmClient {
     try {
       return rowsOf(this.connection.query(sql));
     } catch (error) {
-      const cx = globalThis.abap?.Classes?.CX_SY_DYNAMIC_OSQL_SEMANTICS;
-      if (cx !== undefined) throw await new cx().constructor_({sqlmsg: error.message || ""});
-      throw error;
+      throw await osqlSemanticsError(error);
     }
   }
 
