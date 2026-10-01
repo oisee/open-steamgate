@@ -2903,3 +2903,35 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Impact: a DSL count check lowered with HAVING would alert below its threshold. The L2 compiler instead reads matching JOIN rows with one query and counts them in a 7.02 ABAP loop.
 - Upstream: needs an issue: HAVING unsupported in abaplint/transpiler.
 - Regression: generated L2 count demo and its reference comparison in `test/dsl-l2.mjs`.
+
+### ANOMALY-2026-10-01-collect-does-not-sum — COLLECT inserts or skips a line, never sums its numeric fields
+
+- Status: `workaround`
+- Discovery date: `2026-10-01`
+- Affected versions: `@abaplint/runtime` 2.13.93, as pinned in this tree; `packages/runtime/src/statements/collect.ts` on transpiler `main` reads the same on 2026-10-01
+- Affected ABAP statement, runtime API or adapter: `COLLECT wa INTO itab` (standard and sorted tables alike)
+- Minimal ABAP reproducer: `docs/probes/dsl-l2/zcl_l2_outer_probe.clas.abap`, methods `collect_sorted` and `collect_standard`, and their test include: a line `P001` with `cnt = 1` collected twice
+- Exact command used to run it: with the probe copied into `src/l2demo/`, `flock /tmp/osd-heavy.lock npm run transpile` then `flock /tmp/osd-heavy.lock node tools/osd-unit-run.mjs` runs its test class; on 2026-10-01 it was transpiled alone with the three fleet tables, the way `loadRule` in `test/dsl-l2.mjs` transpiles a rule, and its methods called
+- Expected SAP behaviour: COLLECT looks for a line with the same key (the non-numeric components for a standard table with default key, the table key otherwise) and adds the numeric components into it; the probe expects `P001:2` (ABAP keyword documentation, `COLLECT`; not measured on A4H in this session)
+- Actual open-abap behaviour: the runtime compares the **whole** line with each existing line and inserts the work area when none is equal; when one is, it does nothing. The probe answers `P001:1`; a count built with COLLECT stays at 1 for every key
+- Impact on open-steamgate: the first lowering of the slice-5 zero-count check counted the joined rows with COLLECT and alerted on every ship with two or more crew; `check_reference` caught it in every derived case with a count above 1
+- Smallest safe workaround: the L2 template counts with `READ TABLE ... WITH TABLE KEY`, then `ADD 1` and `MODIFY TABLE`, or `INSERT ... INTO TABLE` for a new key; no COLLECT in generated code
+- Upstream: needs an issue: COLLECT does not sum in abaplint/transpiler's runtime
+- Regression-test location: `test/dsl-l2.mjs`, "slice 5", every derived case with a count of two or more (`b_count_at`, `b_count_groups`) compared with `check_reference`
+- Upstream version containing a fix: unknown
+
+### ANOMALY-2026-10-01-outer-join-702-restrictions-unchecked — abaplint accepts in v702 the LEFT OUTER JOIN forms 7.02 refuses
+
+- Status: `open`
+- Discovery date: `2026-10-01`
+- Affected versions: `@abaplint/core` as pinned here (syntax versions `v702` and `open-abap`); `@abaplint/transpiler` 2.13.93 and `@abaplint/database-sqlite`
+- Affected ABAP statement, runtime API or adapter: `SELECT ... FROM a LEFT OUTER JOIN b ON <cond>` with, in `ON`, a comparison against a literal or a host variable or an operator other than `=`, and `SELECT ... LEFT OUTER JOIN b ... WHERE b~col ...`
+- Minimal ABAP reproducer: `docs/probes/dsl-l2/zcl_l2_outer_probe.clas.abap`, methods `outer_on_literal`, `outer_on_greater` and `outer_where_right`
+- Exact command used to run it: an abaplint registry over the probe with `parser_error` and `check_syntax` for versions `v702` and `open-abap` reports nothing; transpiled and run, the three answer what standard SQL answers (a row per for row, the outer side initial where nothing matched; the WHERE on the right table drops those rows)
+- Expected SAP behaviour: before release 7.40 SP08 the ON condition of a LEFT OUTER JOIN holds only `=` comparisons joined by AND, each naming a column of the right table, and no column of the right table may appear in WHERE (ABAP keyword documentation for 7.0x, `SELECT - FROM ... JOIN`); the later releases lift this only in strict mode, which needs the `@` host variables and the `INTO` clause last. **Not measured on a 7.02 system** (there is none here; A4H is a later release)
+- Actual open-abap behaviour: all three forms pass the syntax check and run, with standard SQL semantics; the outer side of a missing match comes back as the initial value (`''`, `00000000`), which is what a system does with a null
+- Impact on open-steamgate: a generator that emitted such a join would be green here and a syntax error on a 7.02 system. The DSL L2 zero-count check (`fewer_than`, `exactly`) does not use a LEFT OUTER JOIN for that reason; it reads the `for` rows and the joined rows in two queries and merges them in ABAP
+- Smallest safe workaround: none needed: no generator here emits an outer join with more than column equalities
+- Upstream: needs an issue: abaplint's v702 syntax check does not apply the LEFT OUTER JOIN restrictions
+- Regression-test location: none; the probe documents the measurement
+- Upstream version containing a fix: unknown

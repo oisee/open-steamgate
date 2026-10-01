@@ -293,6 +293,9 @@ export function evaluate(model, rows, params = {}, override = {}) {
     const clause = model.clauses[0];
     each((context) => {
       const count = matching(clause, 0, context).length;
+      // `inner`: the mutant that reads the for rows through the INNER JOIN
+      // only, so a for row with no counted row is never seen
+      if (count === 0 && model.threshold.inner) return;
       if (test(model.threshold.op, Math.sign(count - model.threshold.value))) {
         alerts.push(alertOf(model.alert.parts, {...context, $count: count}));
       }
@@ -611,11 +614,34 @@ function countTo(model, rows, wanted, params) {
   return true;
 }
 
+// the operators a threshold's operator is mistaken for: the bound included
+// or excluded, and for an equality its one-sided forms
+const THRESHOLD_MUTANTS = {">": [">="], ">=": [">"], "<": ["<="], "=": [">=", "<=", "<>"]};
+
+// A threshold case discriminates when a mutant of the threshold changes its
+// alerts: another operator, the value one either way, and for a zero-count
+// threshold the for rows read through the INNER JOIN only.
 export function thresholdDiscriminates(model, rows, params) {
   const expected = JSON.stringify(evaluate(model, rows, params));
   const {op, value} = model.threshold;
-  return [{op: op === ">" ? ">=" : ">", value}, {op, value: value - 1}, {op, value: value + 1}]
-    .some((threshold) => JSON.stringify(evaluate({...model, threshold}, rows, params)) !== expected);
+  return [...THRESHOLD_MUTANTS[op].map((other) => ({op: other, value})), {op, value: value - 1}, {op, value: value + 1}]
+    .some((threshold) => JSON.stringify(evaluate({...model, threshold}, rows, params)) !== expected)
+    || (model.threshold.zero === true && JSON.stringify(evaluate({...model, threshold: {...model.threshold, inner: true}}, rows, params)) !== expected);
+}
+
+// The counts a limit's cases are built on. `fires` is the count at which the
+// rule alerts nearest its threshold (a `when` comparison decides there);
+// `flips` the count at which one counted row less changes the answer (a
+// `where` comparison decides there, its row being one of them).
+export function pivotCounts(threshold) {
+  const n = threshold.value;
+  switch (threshold.op) {
+    case ">": return {fires: n + 1, flips: n + 1};
+    case ">=": return {fires: n, flips: n};
+    case "<": return {fires: n - 1, flips: n};
+    case "=": return {fires: n, flips: Math.max(n, 1)};
+    default: throw new Error(`threshold operator ${threshold.op}`);
+  }
 }
 
 // Every case for the selected conditions, in rule order, then the structural
@@ -666,10 +692,14 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       continue;
     }
     if (owner.when) resolveClauses(model, params, start, undefined, true);
-    if (model.kind === "limit" && !countTo(model, start, model.threshold.value + (model.threshold.op === ">" ? 1 : 0), params)) {
-      skipped.push({condition: cond.text, reason: model.threshold.value + (model.threshold.op === ">" ? 1 : 0) > COUNT_ROW_CAP
+    // a limit's comparison decides at its pivot count; a `when` whose pivot is
+    // 0 is tested on a for row with no counted row at all (emptied below,
+    // after the field is set)
+    const pivot = model.kind === "limit" ? pivotCounts(model.threshold)[owner.when ? "fires" : "flips"] : undefined;
+    if (pivot !== undefined && pivot > 0 && !countTo(model, start, pivot, params)) {
+      skipped.push({condition: cond.text, reason: pivot > COUNT_ROW_CAP
         ? `count exceeds the ${COUNT_ROW_CAP}-row derived-case cap` : "cannot make the threshold count with distinct matching keys",
-        cap: model.threshold.value + (model.threshold.op === ">" ? 1 : 0) > COUNT_ROW_CAP, case: "all variants"});
+        cap: pivot > COUNT_ROW_CAP, case: "all variants"});
       continue;
     }
     const setField = (value) => {
@@ -679,6 +709,7 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       // a changed value may break the other conditions on another row
       // (m.cnt < n.lvl): keep the tested value and adjust the other rows
       resolveClauses(model, params, rows, owner.when ? undefined : owner.clause, true);
+      if (pivot === 0) rows[model.clauses[0].table] = [];
       return rows;
     };
     const reference_value = canonical(type, cmp.rhs.kind === "literal" ? cmp.rhs.value : cmp.rhs.kind === "param" ? params[cmp.rhs.name]
@@ -703,8 +734,16 @@ export function deriveCases(model, references, {date, example, reserved = new Se
 
   if (model.kind === "limit") {
     const n = model.threshold.value;
-    const counts = model.threshold.op === ">" ? [n, n + 1] : [n - 1, n];
-    const suffixes = model.threshold.op === ">" ? ["not_over", "over"] : ["below", "at"];
+    // the counts on either side of the threshold, and for exactly both sides;
+    // a zero-count comparison always has a case with no counted row at all
+    const bounds = {
+      ">": [["not_over", n], ["over", n + 1]],
+      ">=": [["below", n - 1], ["at", n]],
+      "<": [["below", n - 1], ["at", n]],
+      "=": [...(n > 0 ? [["below", n - 1]] : []), ["at", n], ["above", n + 1]],
+    }[model.threshold.op];
+    if (model.threshold.zero && !bounds.some(([, count]) => count === 0)) bounds.push(["zero", 0]);
+    const suffixes = bounds.map(([suffix]) => suffix), counts = bounds.map(([, count]) => count);
     const methods = name("limit threshold", ["count"], suffixes, model.threshold.rule_line);
     for (let i = 0; i < counts.length; i++) {
       const rows = clone(base.rows);
@@ -722,11 +761,12 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       add(`limit/${model.threshold.key}`, model.threshold.rule_line, suffixes[i], methods,
         `${counts[i]} matching rows`, rows, true);
     }
-    // Exercise the transition between two joined for rows. The first group
-    // exceeds the threshold and the second sits on it, so both clearing the
-    // count and detecting the new key matter.
-    const over = n + (model.threshold.op === ">" ? 1 : 0);
-    const at = Math.max(1, n + (model.threshold.op === ">" ? 0 : -1));
+    // Exercise the transition between two for rows. The first group alerts
+    // (more_than: over the threshold) and the second sits next to it without
+    // alerting, so both clearing the count and detecting the new key matter.
+    // For fewer_than and exactly the first group may have no counted row.
+    const over = pivotCounts(model.threshold).fires;
+    const at = {">": Math.max(1, n), ">=": Math.max(1, n - 1), "<": n, "=": n + 1}[model.threshold.op];
     if (over + at > COUNT_ROW_CAP) {
       skipped.push({condition: `limit/${model.threshold.key}`, reason: `two groups need ${over + at} counted rows, exceeding the ${COUNT_ROW_CAP}-row derived-case cap`,
         cap: true, case: "groups"});

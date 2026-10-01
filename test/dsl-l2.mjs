@@ -28,7 +28,8 @@ const ruleLine = (re) => RULE_TEXT.split("\n").findIndex((l) => re.test(l)) + 1;
 const OR_NOT = "src/l2demo/grounded_ship_crew.l2.yaml";
 const REQUIRE = "src/l2demo/ship_captain.l2.yaml";
 const LIMIT = "src/l2demo/ship_voyage_limit.l2.yaml";
-const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT];
+const MIN_CREW = "src/l2demo/ship_min_crew.l2.yaml";
+const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT, MIN_CREW];
 
 describe("DSL L2: a rule, its generated check, its examples and its derived cases", function () {
   this.timeout(180000);
@@ -610,7 +611,7 @@ examples:
     it("refuses zero-count forms and counted-row alert holes at their own lines", () => {
       for (const [from, to, reason] of [
         ["more_than: 2", "at_least: 0", "holds for every for row"],
-        ["more_than: 2", "exactly: 2", "zero-count groups"],
+        ["more_than: 2", "fewer_than: 0", "never holds"],
         ["more_than: 2", "more_than: 2147483648", "INT4"],
         ["{count} future", "{voy.voyage_id} future", "limit counts rows"],
       ]) {
@@ -715,6 +716,202 @@ ${trivial}`,
     });
   });
 
+
+  describe("slice 5: count from below (fewer_than, exactly, zero counts)", () => {
+    before(async () => { await import("./start.mjs"); });
+    const text = readFileSync(MIN_CREW, "utf8");
+    const copy = (tag, source) => {
+      const className = `zcl_l2_below_${tag}`;
+      const file = join(scratch, `below_${tag}.l2.yaml`);
+      writeFileSync(file, source.replace(/^class: .*$/m, `class: ${className}`));
+      return {file, className};
+    };
+    const rows = (c) => Object.fromEntries(c.tables.map((t) => [t.table,
+      t.rows.map((r) => Object.fromEntries(r.fields.map((f) => [f.column, f.value])))]));
+    const discriminating = (model) => model.cases.filter((c) => !(c.method === "b_count_groups" ? true
+      : c.derived.condition.startsWith("limit/") ? thresholdDiscriminates(model, rows(c), {date: c.date.value})
+        : caseDiscriminates(model, conditionOf(model, c.derived.condition), rows(c), {date: c.date.value}))).map((c) => c.method);
+    // exactly: one rule over the same fleet, its examples written for it
+    const EXACTLY = `rule: ship-one-captain
+class: x
+title: An active ship has exactly one crew member in role C
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'A'
+limit:
+  count: ZOSD_L2_CREW as crew
+  where: crew.ship_id = ship.ship_id and crew.role = 'C'
+  exactly: 1
+alert: "{ship.ship_id} {ship.name}: {count} captains"
+boundaries: auto
+examples:
+  - name: one captain
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: A}]
+      ZOSD_L2_CREW: [{crew_id: C00001, ship_id: S001, role: C, since: 20260101}]
+    expect: ["S001 Albatross: 1 captains"]
+  - name: none and two
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S003, name: Tern, status: A}
+        - {ship_id: S002, name: Gull, status: A}
+      ZOSD_L2_CREW:
+        - {crew_id: C00003, ship_id: S003, role: C, since: 20260101}
+        - {crew_id: C00002, ship_id: S003, role: C, since: 20260101}
+        - {crew_id: C00004, ship_id: S002, role: K, since: 20260101}
+    expect: []
+`;
+
+    it("the committed rule runs its examples and its twelve derived cases, a for row with no crew among them", async () => {
+      const {model, results, messages} = await runRule(MIN_CREW, "zcl_l2_ship_min_crew");
+      expect(Object.keys(results)).to.have.length(8 + 12);
+      expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+      expect(model.cases.map((c) => c.method)).to.include.members(["b_count_below", "b_count_at", "b_count_zero", "b_count_groups"]);
+      const zero = model.cases.find((c) => c.method === "b_count_zero");
+      expect(rows(zero).zosd_l2_crew, "no crew row at all").to.equal(undefined);
+      expect(zero.expect.map((e) => e.value)).to.deep.equal(["S002 Cormorant: 0 crew aboard"]);
+      expect(discriminating(model)).to.deep.equal([]);
+    });
+
+    it("check makes two database calls whatever the number of for rows: the for rows and the counted join", async () => {
+      const {out, model} = await loadRule(...Object.values(copy("calls", text)));
+      const abap = globalThis.abap;
+      const db = abap.context.databaseConnections.DEFAULT;
+      const mandt = abap.builtin.sy.get().mandt.get();
+      const n = 5;
+      try {
+        for (let i = 1; i <= n; i++) {
+          await db.execute(`INSERT INTO zosd_l2_ship (mandt, ship_id, name, status) VALUES ('${mandt}', 'Q00${i}', 'Ship ${i}', 'A')`);
+          if (i % 2) await db.execute(`INSERT INTO zosd_l2_crew (mandt, crew_id, ship_id, role, since) VALUES ('${mandt}', 'Q0000${i}', 'Q00${i}', 'C', '20260101')`);
+        }
+        const module = await import(pathToFileURL(join(out, `${model.class}.clas.mjs`)).href);
+        const original = db.select.bind(db);
+        let calls = 0;
+        db.select = async (options) => { calls++; return original(options); };
+        let alerts;
+        try {
+          alerts = (await module[model.class].check({iv_date: new abap.types.Date().set("20261001")})).array().map((a) => a.get())
+            .filter((a) => a.startsWith("Q"));
+        } finally {
+          db.select = original;
+        }
+        expect(calls, "two SELECTs").to.equal(2);
+        expect(alerts).to.deep.equal(["Q001 Ship 1: 1 crew aboard", "Q002 Ship 2: 0 crew aboard", "Q003 Ship 3: 1 crew aboard",
+          "Q004 Ship 4: 0 crew aboard", "Q005 Ship 5: 1 crew aboard"]);
+      } finally {
+        await db.execute("DELETE FROM zosd_l2_crew WHERE crew_id LIKE 'Q%'");
+        await db.execute("DELETE FROM zosd_l2_ship WHERE ship_id LIKE 'Q%'");
+      }
+    });
+
+    it("the count source and threshold lines trace to their own rule lines", () => {
+      for (const suffix of ["clas", "clas.testclasses"]) {
+        const base = join(OUT, `zcl_l2_ship_min_crew.${suffix}`);
+        const source = readFileSync(`${base}.abap`, "utf8").split("\n");
+        const trace = JSON.parse(readFileSync(`${base}.trace.json`, "utf8"));
+        const at = (pattern) => trace.lines.find((e) => pattern.test(source[e.line - 1]));
+        expect(at(/SELECT \* FROM zosd_l2_crew|INNER JOIN zosd_l2_crew/).rule_line).to.equal(text.split("\n").findIndex((l) => /^  count:/.test(l)) + 1);
+        expect(at(/IF lv_count < 2\./).rule_line).to.equal(text.split("\n").findIndex((l) => /^  fewer_than:/.test(l)) + 1);
+      }
+      // the read of the for rows traces to the for line, its WHERE to the when line
+      const source = readFileSync(join(OUT, "zcl_l2_ship_min_crew.clas.abap"), "utf8").split("\n");
+      const trace = JSON.parse(readFileSync(join(OUT, "zcl_l2_ship_min_crew.clas.trace.json"), "utf8"));
+      const into = trace.lines.find((e) => /INTO CORRESPONDING FIELDS OF TABLE lt_for/.test(source[e.line - 1]));
+      expect(into.rule_line).to.equal(text.split("\n").findIndex((l) => /^for:/.test(l)) + 1);
+      expect(trace.lines.find((e) => e.line === into.line + 1).rule_line).to.equal(text.split("\n").findIndex((l) => /^when:/.test(l)) + 1);
+    });
+
+    it("< changed to <= fails at two crew members, in the example and in the derived case", async () => {
+      const {file, className} = copy("op", text);
+      const {results} = await runRule(file, className, {transform: {"clas.abap": (s) => s.replaceAll("IF lv_count < 2.", "IF lv_count <= 2.")}});
+      expect(failed(results)).to.include.members(["two_crew_members", "b_count_at"]);
+    });
+
+    it("dropping the zero count (CLEAR lv_count) lets a crewless ship take the previous ship's count and vanish", async () => {
+      const {file, className} = copy("noclear", text);
+      const {results} = await runRule(file, className, {mutate: {"clas.abap": [["      CLEAR lv_count.\n", ""]]}});
+      expect(failed(results)).to.include("fleet_out_of_key_order");
+    });
+
+    const READ_FOR = "      READ TABLE lt_count INTO ls_count WITH TABLE KEY ship_ship_id = ls_for-ship_ship_id.\n";
+    it("dropping the merge of the for rows the counts lack (only counted keys alert) loses every zero count", async () => {
+      const {file, className} = copy("nomerge", text);
+      const {results} = await runRule(file, className, {mutate: {"clas.abap": [[READ_FOR, `${READ_FOR}      CHECK sy-subrc = 0.\n`]]}});
+      expect(failed(results)).to.include.members(["no_crew", "other_ships_crew", "fleet_out_of_key_order", "b_count_zero"]);
+    });
+
+    it("exactly: 1 derives below (no crew at all), at and above; = changed to >= fails above", async () => {
+      const {file, className} = copy("exactly", EXACTLY);
+      const model = compileRule(file, {registry});
+      const methods = model.cases.map((c) => c.method);
+      expect(methods).to.include.members(["b_count_below", "b_count_at", "b_count_above", "b_count_groups"]);
+      expect(methods).to.not.include("b_count_zero");
+      expect(rows(model.cases.find((c) => c.method === "b_count_below")).zosd_l2_crew).to.equal(undefined);
+      expect(discriminating(model)).to.deep.equal([]);
+      const clean = await runRule(file, className);
+      expect(failed(clean.results), JSON.stringify(clean.messages)).to.deep.equal([]);
+      // a class of its own: the module of the first run stays in the import cache
+      const mutant = copy("exactly_ge", EXACTLY);
+      const {results} = await runRule(mutant.file, mutant.className, {transform: {"clas.abap": (s) => s.replaceAll("IF lv_count = 1.", "IF lv_count >= 1.")}});
+      expect(failed(results)).to.include.members(["none_and_two", "b_count_above"]);
+    });
+
+    it("exactly: 0 has no below case; exactly: 3 adds a zero case; both run green", async () => {
+      const zeroRule = EXACTLY.replace("exactly: 1", "exactly: 0")
+        .replace('expect: ["S001 Albatross: 1 captains"]', "expect: []")
+        .replace("        - {crew_id: C00004, ship_id: S002, role: K, since: 20260101}\n    expect: []", "        - {crew_id: C00004, ship_id: S002, role: K, since: 20260101}\n    expect: [\"S002 Gull: 0 captains\"]");
+      const threeRule = EXACTLY.replace("exactly: 1", "exactly: 3").replace('expect: ["S001 Albatross: 1 captains"]', "expect: []");
+      for (const [tag, rule, want, without] of [["ex0", zeroRule, ["b_count_at", "b_count_above"], ["b_count_below", "b_count_zero"]],
+        ["ex3", threeRule, ["b_count_below", "b_count_at", "b_count_above", "b_count_zero"], []]]) {
+        const {file, className} = copy(tag, rule);
+        const {model, results, messages} = await runRule(file, className);
+        expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+        const methods = model.cases.map((c) => c.method);
+        expect(methods, tag).to.include.members(want);
+        for (const m of without) expect(methods, tag).to.not.include(m);
+        expect(discriminating(model), tag).to.deep.equal([]);
+      }
+    });
+
+    it("fewer_than: 1 tests its when on a ship with no crew row, and its below case is the zero case", () => {
+      const {file} = copy("ft1", text.replace("fewer_than: 2", "fewer_than: 1")
+        .replace('expect: ["S002 Cormorant: 1 crew aboard"]', "expect: []")
+        .replace('expect: ["S005 Heron: 1 crew aboard"]', "expect: []")
+        .replace('expect: ["S021 Teal: 0 crew aboard", "S022 Lark: 1 crew aboard"]', 'expect: ["S021 Teal: 0 crew aboard"]'));
+      const model = compileRule(file, {registry});
+      const below = model.cases.find((c) => c.method === "b_count_below");
+      expect(rows(below).zosd_l2_crew).to.equal(undefined);
+      expect(model.cases.map((c) => c.method)).to.not.include("b_count_zero");
+      const status = model.cases.find((c) => c.method === "b_status_eq");
+      expect(rows(status).zosd_l2_crew, "the when is tested with no crew row").to.equal(undefined);
+      expect(status.expect).to.have.length(1);
+      expect(discriminating(model)).to.deep.equal([]);
+    });
+
+    it("refuses fewer_than: 0, a negative exactly and two thresholds at their own lines", () => {
+      for (const [to, reason] of [["fewer_than: 0", "never holds"], ["exactly: -1", "non-negative INT4"],
+        ["fewer_than: 2\n  exactly: 2", "exactly one of more_than, at_least, fewer_than or exactly"]]) {
+        const {file} = copy(`bad_${reason.length}`, text.replace("fewer_than: 2", to));
+        const altered = readFileSync(file, "utf8");
+        const target = altered.split("\n").findIndex((l) => l.includes(to.split("\n").pop())) + 1;
+        expect(() => compileRule(file, {registry}), to).to.throw(RuleError, reason).with.property("line", target);
+      }
+    });
+
+    it("warns when the 64-row cap skips a case of fewer_than or exactly", () => {
+      const trivial = "examples:\n  - name: none\n    date: 20261001\n    rows:\n      ZOSD_L2_SHIP: [{ship_id: S001, name: A, status: D}]\n    expect: []\n";
+      const head = text.slice(0, text.indexOf("examples:"));
+      for (const [threshold, named] of [["fewer_than: 32", []], ["fewer_than: 33", ["limit/fewer_than (groups)"]],
+        ["exactly: 64", ["limit/exactly (above)", "limit/exactly (groups)"]]]) {
+        const {file} = copy(`cap_${threshold.replace(/\W+/g, "_")}`, head.replace("fewer_than: 2", threshold) + trivial);
+        const model = compileRule(file, {registry});
+        const warning = capWarning(model, file);
+        if (!named.length) { expect(warning, threshold).to.equal(undefined); continue; }
+        for (const name of named) expect(warning, threshold).to.include(name);
+      }
+    });
+  });
 
   // The mutants change the rule in the ABAP -- the query and the reference
   // alike -- and leave the expectations as the unmutated rule derived them:

@@ -21,6 +21,18 @@ CLASS {{class}} IMPLEMENTATION.
 {{#limit}}
     DATA ls_prev TYPE {{type}}.
 {{/limit}}
+{{#zero}}
+    TYPES: BEGIN OF ty_count,
+{{#keys}}
+             {{name}} TYPE {{table}}-{{column}},
+{{/keys}}
+             cnt TYPE i,
+           END OF ty_count.
+    DATA lt_for TYPE STANDARD TABLE OF {{type}} WITH DEFAULT KEY.
+    DATA ls_for TYPE {{type}}.
+    DATA lt_count TYPE SORTED TABLE OF ty_count WITH UNIQUE KEY {{key_list}}.
+    DATA ls_count TYPE ty_count.
+{{/zero}}
 {{/queries}}
     DATA lv_alert TYPE string.
 {{#threshold}}
@@ -28,10 +40,36 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_count_text TYPE c LENGTH 12.
 {{/threshold}}
 {{#queries}}
+{{#zero}}
+{{#for_query}}
     SELECT
 {{#fields}}
         {{source}} AS {{name}}
 {{/fields}}
+{{#from}}
+      FROM {{table}} AS {{alias}}
+{{/from}}
+      INTO CORRESPONDING FIELDS OF TABLE lt_for
+{{#where}}
+      {{pre}}{{#is_cmp}}{{lhs}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{sref}}{{/is_literal}}{{/is_cmp}}{{^is_cmp}}{{text}}{{/is_cmp}}{{post}}
+{{/where}}
+      ORDER BY
+{{#order}}
+        {{source}}{{#@last}}.{{/@last}}
+{{/order}}
+{{/for_query}}
+{{/zero}}
+    SELECT
+{{#zero}}
+{{#join_fields}}
+        {{source}} AS {{name}}
+{{/join_fields}}
+{{/zero}}
+{{^zero}}
+{{#fields}}
+        {{source}} AS {{name}}
+{{/fields}}
+{{/zero}}
 {{#from}}
       FROM {{table}} AS {{alias}}
 {{/from}}
@@ -49,6 +87,35 @@ CLASS {{class}} IMPLEMENTATION.
 {{#order}}
         {{source}}{{#@last}}.{{/@last}}
 {{/order}}
+{{#zero}}
+    LOOP AT {{itab}} INTO {{wa}}.
+      READ TABLE lt_count INTO ls_count WITH TABLE KEY {{join_key}}.
+      IF sy-subrc = 0.
+        ADD 1 TO ls_count-cnt.
+        MODIFY TABLE lt_count FROM ls_count.
+      ELSE.
+        MOVE-CORRESPONDING {{wa}} TO ls_count.
+        ls_count-cnt = 1.
+        INSERT ls_count INTO TABLE lt_count.
+      ENDIF.
+    ENDLOOP.
+    LOOP AT lt_for INTO ls_for.
+      CLEAR lv_count.
+      READ TABLE lt_count INTO ls_count WITH TABLE KEY {{read_key}}.
+      IF sy-subrc = 0.
+        lv_count = ls_count-cnt.
+      ENDIF.
+      IF lv_count {{op}} {{value}}.
+        lv_count_text = lv_count.
+        CONDENSE lv_count_text NO-GAPS.
+{{#alert_parts}}
+        {{#@first}}lv_alert = {{/@first}}{{^@first}}  && {{/@first}}{{#is_text}}{{value | literal}}{{/is_text}}{{^is_text}}{{jref}}{{/is_text}}{{#@last}}.{{/@last}}
+{{/alert_parts}}
+        APPEND lv_alert TO rt_alerts.
+      ENDIF.
+    ENDLOOP.
+{{/zero}}
+{{^zero}}
     LOOP AT {{itab}} INTO {{wa}}.
 {{#limit}}
       IF lv_count > 0 AND ( {{key_change}} ).
@@ -81,6 +148,7 @@ CLASS {{class}} IMPLEMENTATION.
       APPEND lv_alert TO rt_alerts.
     ENDIF.
 {{/limit}}
+{{/zero}}
 {{/queries}}
   ENDMETHOD.
 ENDCLASS.
