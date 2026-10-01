@@ -29,7 +29,8 @@ const OR_NOT = "src/l2demo/grounded_ship_crew.l2.yaml";
 const REQUIRE = "src/l2demo/ship_captain.l2.yaml";
 const LIMIT = "src/l2demo/ship_voyage_limit.l2.yaml";
 const MIN_CREW = "src/l2demo/ship_min_crew.l2.yaml";
-const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT, MIN_CREW];
+const MIN_CAPTAINS = "src/l2demo/ship_min_captains.l2.yaml";
+const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT, MIN_CREW, MIN_CAPTAINS];
 
 describe("DSL L2: a rule, its generated check, its examples and its derived cases", function () {
   this.timeout(180000);
@@ -732,6 +733,72 @@ ${trivial}`,
       : c.method === "b_count_next_zero" ? staleDiscriminates(model, rows(c), {date: c.date.value})
       : c.derived.condition.startsWith("limit/") ? thresholdDiscriminates(model, rows(c), {date: c.date.value})
         : caseDiscriminates(model, conditionOf(model, c.derived.condition), rows(c), {date: c.date.value}))).map((c) => c.method);
+
+    it("uses one LEFT OUTER JOIN for equalities, including a real row with an initial crew id", async () => {
+      const {model, results, messages} = await runRule(MIN_CAPTAINS, "zcl_l2_ship_min_captains");
+      expect(model.queries[0].zero.one_outer).to.equal(true);
+      expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+      expect(model.cases.map((c) => c.method)).to.include.members(["b_count_next_zero", "b_count_groups"]);
+      expect(discriminating(model)).to.deep.equal([]);
+      const source = readFileSync(join(OUT, "zcl_l2_ship_min_captains.clas.abap"), "utf8");
+      expect(source.match(/\bSELECT\b/g)).to.have.length(1);
+      expect(source).to.include("LEFT OUTER JOIN zosd_l2_crew");
+      expect(source).to.include("AND crew~role = 'C'");
+    });
+
+    it("keeps two queries when the condition tree has a comparison, or, or not", () => {
+      const base = readFileSync(MIN_CAPTAINS, "utf8");
+      for (const [tag, where] of [["date", "crew.ship_id = ship.ship_id and crew.since <= $date"],
+        ["or", "crew.ship_id = ship.ship_id and (crew.role = 'C' or crew.role = 'K')"],
+        ["not", "crew.ship_id = ship.ship_id and not crew.role = 'K'"]]) {
+        const trivial = "examples:\n  - name: inactive\n    date: 20261001\n    rows:\n      ZOSD_L2_SHIP: [{ship_id: S001, name: Gull, status: M}]\n    expect: []\n";
+        const source = base.slice(0, base.indexOf("examples:")).replace("crew.ship_id = ship.ship_id and crew.role = 'C'", where) + trivial;
+        const {file} = copy(`fb_${tag}`, source);
+        expect(compileRule(file, {registry}).queries[0].zero.one_outer, tag).to.equal(undefined);
+      }
+    });
+
+    it("makes one database call for multiple for rows", async () => {
+      const copyRule = copy("outer_calls", readFileSync(MIN_CAPTAINS, "utf8"));
+      const {out, model} = await loadRule(copyRule.file, copyRule.className);
+      const module = await import(pathToFileURL(join(out, `${model.class}.clas.mjs`)).href);
+      const abap = globalThis.abap;
+      const db = abap.context.databaseConnections.DEFAULT;
+      const mandt = abap.builtin.sy.get().mandt.get();
+      for (let i = 1; i <= 5; i++) {
+        await db.execute(`INSERT INTO zosd_l2_ship (mandt, ship_id, name, status) VALUES ('${mandt}', 'Q00${i}', 'Ship ${i}', 'A')`);
+        if (i % 2) await db.execute(`INSERT INTO zosd_l2_crew (mandt, crew_id, ship_id, role, since) VALUES ('${mandt}', 'Q0000${i}', 'Q00${i}', 'C', '20260101')`);
+      }
+      const original = db.select.bind(db);
+      let calls = 0;
+      db.select = async (options) => { calls++; return original(options); };
+      let alerts;
+      try { alerts = (await module[model.class].check({iv_date: new abap.types.Date().set("20261001")})).array().map((a) => a.get()).filter((a) => a.startsWith("Q")); }
+      finally {
+        db.select = original;
+        await db.execute("DELETE FROM zosd_l2_crew WHERE crew_id LIKE 'Q%'");
+        await db.execute("DELETE FROM zosd_l2_ship WHERE ship_id LIKE 'Q%'");
+      }
+      expect(calls).to.equal(1);
+      expect(alerts).to.deep.equal(["Q001 Ship 1: 1 captains", "Q002 Ship 2: 0 captains", "Q003 Ship 3: 1 captains",
+        "Q004 Ship 4: 0 captains", "Q005 Ship 5: 1 captains"]);
+    });
+
+    for (const [tag, from, to, evidence] of [
+      ["missing", "      IF ls_join-crew_mandt IS INITIAL.\n        CONTINUE.\n      ENDIF.\n", "", "zero_and_two"],
+      ["where", "AND crew~role = 'C'", "AND crew~role = crew~role", "zero_and_two"],
+      ["clear", "      CLEAR lv_count.\n", "", "b_count_next_zero"],
+    ]) {
+      it(`${tag} mutant goes red against check_reference`, async () => {
+        const {file, className} = copy(`outer_${tag}`, readFileSync(MIN_CAPTAINS, "utf8"));
+        const transform = tag === "where" ? {"clas.abap": (s) => {
+          const changed = s.replace("           AND crew~role = 'C'\n", "").replace("      WHERE ship~status = 'A'", "      WHERE ship~status = 'A' AND crew~role = 'C'");
+          return changed;
+        }} : {"clas.abap": (s) => s.replace(from, to)};
+        const {results} = await runRule(file, className, {transform});
+        expect(failed(results)).to.include(evidence);
+      });
+    }
     // exactly: one rule over the same fleet, its examples written for it
     const EXACTLY = `rule: ship-one-captain
 class: x

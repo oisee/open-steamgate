@@ -153,224 +153,224 @@
   },
   {
    "line": 22,
-   "template_line": 37,
+   "template_line": 41,
    "path": "/",
    "node": "rule/grounded-ship-keeps-only-keepers",
    "rule_line": 4
   },
   {
    "line": 23,
-   "template_line": 62,
+   "template_line": 68,
    "path": "/queries/1",
    "node": "rule/grounded-ship-keeps-only-keepers/join",
    "rule_line": 9
   },
   {
    "line": 24,
-   "template_line": 70,
+   "template_line": 83,
    "path": "/queries/1/fields/1/source",
    "node": "rule/grounded-ship-keeps-only-keepers/join/field/1",
    "rule_line": 7
   },
   {
    "line": 25,
-   "template_line": 70,
+   "template_line": 83,
    "path": "/queries/1/fields/2/source",
    "node": "rule/grounded-ship-keeps-only-keepers/join/field/2",
    "rule_line": 10
   },
   {
    "line": 26,
-   "template_line": 70,
+   "template_line": 83,
    "path": "/queries/1/fields/3/source",
    "node": "rule/grounded-ship-keeps-only-keepers/join/field/3",
    "rule_line": 13
   },
   {
    "line": 27,
-   "template_line": 70,
+   "template_line": 83,
    "path": "/queries/1/fields/4/source",
    "node": "rule/grounded-ship-keeps-only-keepers/join/field/4",
    "rule_line": 13
   },
   {
    "line": 28,
-   "template_line": 70,
+   "template_line": 83,
    "path": "/queries/1/fields/5/source",
    "node": "rule/grounded-ship-keeps-only-keepers/join/field/5",
    "rule_line": 13
   },
   {
    "line": 29,
-   "template_line": 74,
+   "template_line": 87,
    "path": "/queries/1/from/table",
    "node": "rule/grounded-ship-keeps-only-keepers/for",
    "rule_line": 7
   },
   {
    "line": 30,
-   "template_line": 77,
+   "template_line": 90,
    "path": "/queries/1/joins/1/table",
    "node": "rule/grounded-ship-keeps-only-keepers/forbid",
    "rule_line": 9
   },
   {
    "line": 31,
-   "template_line": 79,
+   "template_line": 92,
    "path": "/queries/1/joins/1/on/1/lhs",
    "node": "rule/grounded-ship-keeps-only-keepers/forbid/where/1",
    "rule_line": 11
   },
   {
    "line": 32,
-   "template_line": 82,
+   "template_line": 95,
    "path": "/queries/1/itab",
    "node": "rule/grounded-ship-keeps-only-keepers/join",
    "rule_line": 9
   },
   {
    "line": 33,
-   "template_line": 84,
+   "template_line": 97,
    "path": "/queries/1/where/1/pre",
    "node": "rule/grounded-ship-keeps-only-keepers/when/1",
    "rule_line": 8
   },
   {
    "line": 34,
-   "template_line": 84,
+   "template_line": 97,
    "path": "/queries/1/where/2/pre",
    "node": "rule/grounded-ship-keeps-only-keepers/when/2",
    "rule_line": 8
   },
   {
    "line": 35,
-   "template_line": 84,
+   "template_line": 97,
    "path": "/queries/1/where/3/pre",
    "node": "rule/grounded-ship-keeps-only-keepers/forbid/where/2",
    "rule_line": 12
   },
   {
    "line": 36,
-   "template_line": 84,
+   "template_line": 97,
    "path": "/queries/1/where/4/pre",
    "node": "rule/grounded-ship-keeps-only-keepers/forbid/where/3",
    "rule_line": 12
   },
   {
    "line": 37,
-   "template_line": 86,
+   "template_line": 99,
    "path": "/queries/1",
    "node": "rule/grounded-ship-keeps-only-keepers/join",
    "rule_line": 9
   },
   {
    "line": 38,
-   "template_line": 88,
+   "template_line": 101,
    "path": "/queries/1/order/1/source",
    "node": "rule/grounded-ship-keeps-only-keepers/join/order/1",
    "rule_line": 7
   },
   {
    "line": 39,
-   "template_line": 88,
+   "template_line": 101,
    "path": "/queries/1/order/2/source",
    "node": "rule/grounded-ship-keeps-only-keepers/join/order/2",
    "rule_line": 10
   },
   {
    "line": 40,
-   "template_line": 119,
+   "template_line": 142,
    "path": "/queries/1/itab",
    "node": "rule/grounded-ship-keeps-only-keepers/join",
    "rule_line": 9
   },
   {
    "line": 41,
-   "template_line": 127,
+   "template_line": 150,
    "path": "/queries/1/alert_parts/1/jref",
    "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/1",
    "rule_line": 13
   },
   {
    "line": 42,
-   "template_line": 127,
+   "template_line": 150,
    "path": "/queries/1/alert_parts/2/value",
    "node": "rule/grounded-ship-keeps-only-keepers/alert/text/1",
    "rule_line": 13
   },
   {
    "line": 43,
-   "template_line": 127,
+   "template_line": 150,
    "path": "/queries/1/alert_parts/3/jref",
    "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/2",
    "rule_line": 13
   },
   {
    "line": 44,
-   "template_line": 127,
+   "template_line": 150,
    "path": "/queries/1/alert_parts/4/value",
    "node": "rule/grounded-ship-keeps-only-keepers/alert/text/2",
    "rule_line": 13
   },
   {
    "line": 45,
-   "template_line": 127,
+   "template_line": 150,
    "path": "/queries/1/alert_parts/5/jref",
    "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/3",
    "rule_line": 13
   },
   {
    "line": 46,
-   "template_line": 127,
+   "template_line": 150,
    "path": "/queries/1/alert_parts/6/value",
    "node": "rule/grounded-ship-keeps-only-keepers/alert/text/3",
    "rule_line": 13
   },
   {
    "line": 47,
-   "template_line": 127,
+   "template_line": 150,
    "path": "/queries/1/alert_parts/7/jref",
    "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/4",
    "rule_line": 13
   },
   {
    "line": 48,
-   "template_line": 127,
+   "template_line": 150,
    "path": "/queries/1/alert_parts/8/value",
    "node": "rule/grounded-ship-keeps-only-keepers/alert/text/4",
    "rule_line": 13
   },
   {
    "line": 49,
-   "template_line": 127,
+   "template_line": 150,
    "path": "/queries/1/alert_parts/9/jref",
    "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/5",
    "rule_line": 13
   },
   {
    "line": 50,
-   "template_line": 138,
+   "template_line": 161,
    "path": "/queries/1",
    "node": "rule/grounded-ship-keeps-only-keepers/join",
    "rule_line": 9
   },
   {
    "line": 51,
-   "template_line": 140,
+   "template_line": 163,
    "path": "/queries/1",
    "node": "rule/grounded-ship-keeps-only-keepers/join",
    "rule_line": 9
   },
   {
    "line": 52,
-   "template_line": 153,
+   "template_line": 176,
    "path": "/",
    "node": "rule/grounded-ship-keeps-only-keepers",
    "rule_line": 4
   },
   {
    "line": 53,
-   "template_line": 154,
+   "template_line": 177,
    "path": "/",
    "node": "rule/grounded-ship-keeps-only-keepers",
    "rule_line": 4

@@ -32,6 +32,10 @@ CLASS {{class}} IMPLEMENTATION.
     DATA ls_for TYPE {{type}}.
     DATA lt_count TYPE SORTED TABLE OF ty_count WITH UNIQUE KEY {{key_list}}.
     DATA ls_count TYPE ty_count.
+{{#one_outer}}
+    DATA lv_seen TYPE c LENGTH 1.
+    DATA ls_prev TYPE {{type}}.
+{{/one_outer}}
 {{/zero}}
 {{/queries}}
     DATA lv_alert TYPE string.
@@ -41,6 +45,7 @@ CLASS {{class}} IMPLEMENTATION.
 {{/threshold}}
 {{#queries}}
 {{#zero}}
+{{^one_outer}}
 {{#for_query}}
     SELECT
 {{#fields}}
@@ -58,12 +63,20 @@ CLASS {{class}} IMPLEMENTATION.
         {{source}}{{#@last}}.{{/@last}}
 {{/order}}
 {{/for_query}}
+{{/one_outer}}
 {{/zero}}
     SELECT
 {{#zero}}
+{{#one_outer}}
+{{#fields}}
+        {{source}} AS {{name}}
+{{/fields}}
+{{/one_outer}}
+{{^one_outer}}
 {{#join_fields}}
         {{source}} AS {{name}}
 {{/join_fields}}
+{{/one_outer}}
 {{/zero}}
 {{^zero}}
 {{#fields}}
@@ -74,9 +87,9 @@ CLASS {{class}} IMPLEMENTATION.
       FROM {{table}} AS {{alias}}
 {{/from}}
 {{#joins}}
-        INNER JOIN {{table}} AS {{alias}}
+        {{#one_outer}}LEFT OUTER{{/one_outer}}{{^one_outer}}INNER{{/one_outer}} JOIN {{table}} AS {{alias}}
 {{#on}}
-          {{#@first}}ON{{/@first}}{{^@first}} AND{{/@first}} {{lhs}} {{op}} {{sref}}
+          {{#@first}}ON{{/@first}}{{^@first}} AND{{/@first}} {{lhs}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{sref}}{{/is_literal}}
 {{/on}}
 {{/joins}}
       INTO CORRESPONDING FIELDS OF TABLE {{itab}}
@@ -89,6 +102,16 @@ CLASS {{class}} IMPLEMENTATION.
 {{/order}}
 {{#zero}}
     LOOP AT {{itab}} INTO {{wa}}.
+{{#one_outer}}
+      IF lv_seen IS INITIAL OR {{key_change}}.
+        APPEND {{wa}} TO lt_for.
+      ENDIF.
+      lv_seen = 'X'.
+      ls_prev = {{wa}}.
+      IF {{wa}}-{{marker}} IS INITIAL.
+        CONTINUE.
+      ENDIF.
+{{/one_outer}}
       READ TABLE lt_count INTO ls_count WITH TABLE KEY {{join_key}}.
       IF sy-subrc = 0.
         ADD 1 TO ls_count-cnt.
