@@ -13,7 +13,7 @@ This implementation is deliberately narrow. It accepts one static `SELECT * FROM
 | Reads only the row and a loop-invariant value | Requires one DDIC column of the selected table and either a literal or a same-width CHAR variable; refuses a variable that may be written in the body. Other row shapes refuse. |
 | No side effect before the filter | Requires `CHECK` or the exact `IF/CONTINUE/ENDIF` as the first action. |
 | `UP TO n ROWS` | Refuses: the limit applies before the original filter. |
-| `sy-dbcnt`, `sy-subrc` | Refuses later reads of `sy-dbcnt` and reads of `sy-subrc` in or after the loop. The old `sy-subrc` after a loop with fetched rows but no passing row is not yet measured on A4H. |
+| `sy-dbcnt`, `sy-subrc` | Refuses later reads of `sy-dbcnt` and reads of `sy-subrc` in or after the loop. Measured on A4H: when rows are fetched and none passes the filter, the old loop leaves `sy-subrc = 0` and the rewritten SELECT leaves `4`, so the refusal is necessary, not merely cautious. |
 | ABAP versus SQL comparison | Accepts only CHAR equality/inequality/order comparisons with a literal of precisely the DDIC width or a same-width CHAR variable. Case and collation agreement remains open. NUMC, packed and other type pairs refuse. |
 | NULL | Requires the DD03P `NOTNULL` flag or a key field. A DB NULL fetched into ABAP becomes initial; `CHECK f = space` can then pass where SQL `f = space` cannot. |
 | Operators | Maps `=`, `<>`, `<`, `>`, `<=`, `>=` and the complement of each for IF/CONTINUE. `BETWEEN`, `IN` ranges, `CP`, `CS`, `NP`, `NS` refuse. |
@@ -51,3 +51,17 @@ The A4H probe has two folders and deployment units. First run `node tools/osd-pr
 ## Not proven
 
 No ABAP runtime differential, A4H comparison, public-corpus survey, explicit field-list mapping, table-form liveness proof, `sy-subrc` equivalence, case/collation equivalence, packed/NUMC conversion equivalence, or performance improvement is proven. The sample has a generated region and the rendering/line-trace integration is registered, but its regeneration could not run without the compiled L0 classes in this worktree.
+
+
+## Measured on A4H (2026-10-01)
+
+The lead ran the probe through `tools/osd-prove-on-system.mjs` as a fresh run (unit `lift-r3-probe`). All eight test methods ran on the system.
+- **Type pairs.** For the CHAR literal shorter and longer than the column, the NUMC column against a literal and against a number, case, and the packed number, the count of rows the old CHECK lets through equals the count the rewritten WHERE selects.
+- **`sy-subrc` after the loop.** It differs: 0 before, 4 after (see the obligation table).
+- **NULL.** Not measured. In stage 2, adding the nullable `OPT` column to the stage-1 table was reported by abapGit's table comparator as possible data loss, and the in-place mode refuses a deploy with data loss, by design. `null_initial` therefore ran with no `R3N` row and proves nothing. R3 refuses nullable columns regardless.
+- **What the system caught that this runtime did not.** Two defects in the probe itself: `LABEL` is a reserved DDIC field name (activation refused), and a class XML without `WITH_UNIT_TESTS` gets no test include.
+
+Survey with `--recipe r3`, measured by the lead:
+- abapGit `src`: 5 candidates, 0 accepted (shape 4, `UP TO n ROWS` 1).
+- Public corpus: [ABAPToTheFuture04](https://github.com/hardyp/ABAPToTheFuture04) 2 (shape 1, UP TO 1); [building_gateway_services](https://github.com/grahamrobbo/building_gateway_services) 3 (shape 3); [spacelab-problem-management-backend-live](https://github.com/simplicity-goodness-truth/spacelab-problem-management-backend-live) 15 (UP TO 7, shape 8); the other repositories 0.
+- In total, 25 candidates and 0 accepted. Nine of them, more than a third, are refused because the loop has `UP TO n ROWS`, exactly where the naive fix changes which rows are read.

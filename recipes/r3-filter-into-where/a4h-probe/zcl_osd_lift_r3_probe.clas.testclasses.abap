@@ -143,6 +143,10 @@ CLASS ltcl_r3 IMPLEMENTATION.
       CONTINUE.
     ENDSELECT.
     new_subrc = sy-subrc.
-    cl_abap_unit_assert=>assert_equals( exp = old_subrc act = new_subrc ).
+    " measured on A4H 2026-10-01: rows fetched, none passes the CHECK ->
+    " the old loop leaves 0, the rewritten SELECT matches nothing -> 4.
+    " This is why R3 refuses a read of sy-subrc after the loop.
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = old_subrc ).
+    cl_abap_unit_assert=>assert_equals( exp = 4 act = new_subrc ).
   ENDMETHOD.
 ENDCLASS.
