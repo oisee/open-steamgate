@@ -8,17 +8,29 @@ function modules of our own called the generated lock modules and
 SAP's lock modules and no SAP client library was read. Every probe object
 was deleted afterwards.
 
-The fixtures are `test/fixtures/enq/contract.json`: 61 cases, each a
+The fixtures are `test/fixtures/enq/contract.json`: 67 cases, each a
 sequence of steps with the owner of each call and `expect` = what the system
 answered. The Go and Node lock servers of E1 are gated on them
 (`docs/backlog/gogen-osgo.md`, "The lock server (ENQ)").
+
+**Isolation.** Every case starts with fresh sessions for the owners it names
+and an empty lock table, so `NUMBER` and the rows of each `ENQUEUE_READ`
+depend only on that case's own steps. On the sandbox each case had its own
+key values and ended with `DEQUEUE_ALL` of every owner.
+
+**What is a gate.** `expect` is the gate. `observed` and steps marked
+`informational` record what the sandbox showed where the result depends on
+a race or a clock. They are not gates. Asynchronous releases are gated as
+`eventuallyWithinMs` (poll until the rows match or the deadline passes), and
+durations get tolerant `{min, max}` bounds. The `schema` block of the file
+lists every field.
 
 ## The probe
 
 - Table `ZOSD_PRB` (`MANDT`, `K1 CHAR10`, `K2 CHAR10`, all key) and lock
   object `EZOSD_PRB` over it, primary table only, in `$ZOSG_TMP`. vsp cannot
-  create a lock object over ADT, so it was written with `DDIF_ENQU_PUT` +
-  `DDIF_ENQU_ACTIVATE` from a module of ours. The generated
+  create a lock object over ADT, so a module of ours created it through the
+  dictionary API. The generated
   `ENQUEUE_EZOSD_PRB` takes `MODE_ZOSD_PRB`, `MANDT`, `K1`, `K2`, `X_K1`,
   `X_K2`, `_SCOPE`, `_WAIT`, `_COLLECT` and raises `FOREIGN_LOCK` /
   `SYSTEM_FAILURE`.
@@ -40,7 +52,12 @@ Comparing them across sessions settled which mechanism gives a new owner:
 | `SUBMIT ... AND RETURN` inside an RFC session | unmeasured: the program took no lock (`sy-subrc` 4), and one that writes a list broke the RFC connection |
 
 The fixtures call them O1 (the calling session), O2 (`DESTINATION 'NONE'`),
-O3 (`STARTING NEW TASK`) and OJ (the job). All ran as one user, so
+O3 (`STARTING NEW TASK`) and OJ (the job). In the fixtures, O3 is a session
+that stays open until an `END_SESSION` step for it. On the sandbox it was a
+task whose module enqueued and then waited (`WAIT UP TO 2` or `3 SECONDS`)
+before returning. O1 waited 1 s after starting it, so its lock was in place
+before O1's next step, and every read that shows that lock fell inside the
+wait. All ran as one user, so
 `sy-msgv1` is the same name for every holder; the fixtures write it as
 `<USER>`.
 
@@ -95,6 +112,19 @@ owner. O behaves like S toward other owners.
 - A DEQUEUE with another mode, another scope or a key that is not held does
   nothing and answers 0. DEQUEUE has no exceptions.
 
+### When a request collides with both
+
+A request can collide with the caller's own lock and with another owner's
+lock at the same time. For example, O1 holds X on `(A1, A)`, O2 holds E on
+`(A1, B)`, and O1 asks for a generic E on `(A1, initial)`. The answer is
+decided by **whichever conflicting lock was acquired first**. If O1's own X
+came first, the answer is 602. If O2's E came first, it is 601. The same
+holds for an X request against own E plus foreign S. Swapping the K2 values
+so that the order of the arguments disagrees with the order of acquisition
+does not change the result, so it is acquisition order and not the order of
+the arguments (cases `precedence-*`). In both cases `sy-msgv2` was the lock
+object name. That was observed but is not gated.
+
 ## 3. Argument masks
 
 - An initial key field without `X_<field> = 'X'` is **generic**: it matches
@@ -121,7 +151,7 @@ Each case enqueued one lock with `_SCOPE` 1, one with 2 and one with 3:
 | Event | Scope 1 | Scope 2 | Scope 3 |
 |---|---|---|---|
 | `COMMIT WORK` with **nothing in the update task** (also `AND WAIT`, also in a background job) | kept | **kept** | kept |
-| `COMMIT WORK` after a V1 `CALL FUNCTION ... IN UPDATE TASK` | kept | released once the update task has run (still there right after the statement, gone within 2 s) | the update half goes, the dialog half stays |
+| `COMMIT WORK` after a V1 `CALL FUNCTION ... IN UPDATE TASK` | kept | released once the update task has run (gate: gone within 2 s; observed still there right after the statement) | the update half goes, the dialog half stays |
 | `COMMIT WORK AND WAIT` with a V1 update | kept | released when it returns | the dialog half stays |
 | `ROLLBACK WORK` | kept | released | the dialog half stays |
 | End of the session (`RFC_CONNECTION_CLOSE`, the end of a job, the end of an aRFC task) | released | released | released |
@@ -137,15 +167,17 @@ Two of these results were surprises and are the ones most worth gating:
    0.4 ADT defect in another form.
 
 Releases at the end of a session are asynchronous. Straight after
-`RFC_CONNECTION_CLOSE` the rows were still there, and one second later they
-were gone.
+`RFC_CONNECTION_CLOSE` the rows were still there (observed, not gated), and
+one second later they were gone. The gate is gone within 2 s after a closed
+connection and within 5 s after the end of a job.
 
 ## 5. `_WAIT`
 
 `_WAIT = 'X'` retries before it gives up. Against a lock that stayed held,
-`FOREIGN_LOCK` came after about 4.7 s (the same call without `_WAIT` takes
-0 ms). Against a lock whose holder ended about one second later, the request
-was granted after about 1.0 s. That is consistent with a retry about once a
+`FOREIGN_LOCK` came after about 4.7 s (gate: 3 to 7 s). The same call
+without `_WAIT` took 0 ms (gate: under 0.5 s). Against a lock whose holder
+ended about one second later, the request was granted after about 1.0 s
+(gate: granted within 2 s of the release). That is consistent with a retry about once a
 second for about five seconds, but the retry count and the interval
 themselves were not measured.
 
@@ -156,6 +188,10 @@ halves and the update halves. It leaves other owners' locks: O1's call kept
 O2's and O3's locks, and O2's call then removed only O2's lock.
 
 ## 7. `ENQUEUE_READ`
+
+The types below, the owner-id format and the blank fields are observations
+outside the gate. The cases gate only `GARG`, `GMODE`, `GUSE`, `GUSEVB`,
+`NUMBER`, and which session's id `GUSR` and `GUSRVB` hold.
 
 Parameters `GCLIENT`, `GNAME`, `GARG`, `GUNAME` (`space` = all users),
 `LOCAL`, `FAST`, `GARGNOWC`. It exports `NUMBER` and `SUBRC` and has the

@@ -38,11 +38,23 @@
    "SYSTEM_FAILURE"
   ]
  },
+ "isolation": "Every case starts with fresh sessions for each owner it names and an empty lock table for ZOSD_PRB; nothing carries over from an earlier case. On the sandbox each case used its own key values and ended with DEQUEUE_ALL of every owner (and the end of the O2 session), so NUMBER and the rows of each read depend only on the case's own steps.",
+ "schema": {
+  "steps": "run in order; a step completes before the next starts unless it has async",
+  "expect": "the gate: what the system answered",
+  "observed": "informational: what the sandbox showed, not a gate (elapsed times, reads whose result depends on a race)",
+  "informational": "true on a step that is not a gate at all; its result is in observed",
+  "expect.eventuallyWithinMs": "on a read: the rows must be reached within this many ms of the previous step's completion (poll); release here is asynchronous",
+  "expect.elapsedMs": "a tolerant bound {min,max} on the step's duration in ms",
+  "expect.grantedWithinMsOfRelease": "a _WAIT request is granted no later than this many ms after the conflicting lock went",
+  "async": "{delayMs, relativeTo}: the step fires delayMs after the next step starts, without waiting for it",
+  "END_SESSION": "the owner's session ends (RFC connection closed, task or job ended); its locks of every scope go, asynchronously"
+ },
  "owners": {
   "O1": "the calling session: a stateful RFC connection; its locks outlive each call on that connection",
   "O2": "a second session: synchronous CALL FUNCTION ... DESTINATION 'NONE' from O1; stateful until RFC_CONNECTION_CLOSE",
-  "O3": "a third session: CALL FUNCTION ... STARTING NEW TASK ... DESTINATION 'NONE'; lives until the called module returns",
-  "OJ": "a background job: SUBMIT ... VIA JOB + JOB_CLOSE strtimmed",
+  "O3": "a third session that stays open until an END_SESSION step for it (or the end of the case). On the sandbox it was CALL FUNCTION ... STARTING NEW TASK ... DESTINATION 'NONE' of a module that enqueued and then waited (WAIT UP TO n SECONDS, 3 s in dequeue-all-not-others, 2 s in wait-released) before returning; its session ended when the module returned. Its ENQUEUE had completed before O1's next step (O1 waited 1 s after starting the task), and every read that shows its lock fell inside the wait.",
+  "OJ": "a background job: SUBMIT ... VIA JOB + JOB_CLOSE strtimmed; its session ends when its program ends (END_SESSION)",
   "model": "a session has two owner ids. GUSR (dialog owner) holds _SCOPE 1 and lives as long as the session; GUSRVB (update owner) holds _SCOPE 2 and is replaced after a ROLLBACK WORK and after a COMMIT WORK that ran an update. _SCOPE 3 is one row carrying both. In expect, GUSR/GUSRVB name the session whose owner id it is; null = blank."
  },
  "notation": {
@@ -52,9 +64,11 @@
   "<USER>": "the user name of the holder (sy-msgv1); all sessions ran as one user",
   "K2": "an ENQUEUE step without K2 in the case text uses K2='K'; an empty K2 is the initial value",
   "rows": "ENQUEUE_READ (GNAME = 'ZOSD_PRB', GUNAME = space); row order is not part of the contract",
-  "MC 601 / 602": "601 = held by another owner, 602 = refused against the caller's own lock; both raise FOREIGN_LOCK with sy-msgv1 = the user"
+  "MC 601 / 602": "601 = held by another owner, 602 = refused against the caller's own lock; both raise FOREIGN_LOCK with sy-msgv1 = the user. When a request collides with both, the conflicting lock acquired first decides (group 2b). Observed, not gated: sy-msgv2 = the lock object name on a refusal"
  },
  "enqueueRead": {
+  "gate": false,
+  "note": "observations, outside the gate: the parameter and field types as the interface declared them, the owner-id format and the values seen. Cases gate only GARG, GMODE, GUSE, GUSEVB, NUMBER and which session's id GUSR / GUSRVB is.",
   "params": {
    "GCLIENT": "CHAR 3",
    "GNAME": "CHAR 30",
@@ -3996,7 +4010,8 @@
       "GNAME": "ZOSD_PRB",
       "GUNAME": ""
      },
-     "expect": {
+     "informational": true,
+     "observed": {
       "NUMBER": 3,
       "rows": [
        {
@@ -4025,12 +4040,7 @@
        }
       ]
      },
-     "note": "read immediately after COMMIT WORK: still all three"
-    },
-    {
-     "owner": "O1",
-     "call": "WAIT UP TO 2 SECONDS",
-     "params": {}
+     "note": "observed on the sandbox right after COMMIT WORK: still all three; a fast update may already have run, so this is not a gate"
     },
     {
      "owner": "O1",
@@ -4059,9 +4069,10 @@
         "GUSR": "O1",
         "GUSRVB": null
        }
-      ]
+      ],
+      "eventuallyWithinMs": 2000
      },
-     "note": "the update task has run and written its row"
+     "note": "gone by the read 2 s later on the sandbox, once the update task had run and written its row"
     },
     {
      "owner": "O2",
@@ -4301,7 +4312,8 @@
       "GNAME": "ZOSD_PRB",
       "GUNAME": ""
      },
-     "expect": {
+     "informational": true,
+     "observed": {
       "NUMBER": 3,
       "rows": [
        {
@@ -4330,12 +4342,7 @@
        }
       ]
      },
-     "note": "immediately after the close: still there"
-    },
-    {
-     "owner": "O1",
-     "call": "WAIT UP TO 1 SECONDS",
-     "params": {}
+     "note": "observed on the sandbox immediately after the close: still there; not a gate"
     },
     {
      "owner": "O1",
@@ -4347,8 +4354,10 @@
      },
      "expect": {
       "NUMBER": 0,
-      "rows": []
-     }
+      "rows": [],
+      "eventuallyWithinMs": 2000
+     },
+     "note": "gone by the read 1 s later on the sandbox"
     }
    ]
   },
@@ -4701,8 +4710,9 @@
     },
     {
      "owner": "OJ",
-     "call": "job ends",
-     "params": {}
+     "call": "END_SESSION",
+     "params": {},
+     "note": "the job's program ends"
     },
     {
      "owner": "O1",
@@ -4714,9 +4724,10 @@
      },
      "expect": {
       "NUMBER": 0,
-      "rows": []
+      "rows": [],
+      "eventuallyWithinMs": 5000
      },
-     "note": "read about 5 s after the job's last statement"
+     "note": "on the sandbox the first read after the job ended, about 5 s later, was empty"
     }
    ]
   },
@@ -4753,9 +4764,12 @@
       "sy-msgno": "601",
       "sy-msgv1": "<USER>",
       "elapsedMs": {
-       "measured": 4709,
-       "approx": 5000
+       "min": 3000,
+       "max": 7000
       }
+     },
+     "observed": {
+      "elapsedMs": 4709
      }
     },
     {
@@ -4773,8 +4787,11 @@
       "sy-msgno": "601",
       "sy-msgv1": "<USER>",
       "elapsedMs": {
-       "measured": 0
+       "max": 500
       }
+     },
+     "observed": {
+      "elapsedMs": 0
      }
     }
    ]
@@ -4798,13 +4815,13 @@
     },
     {
      "owner": "O3",
-     "call": "holds 2 s, then its task ends",
-     "params": {}
-    },
-    {
-     "owner": "O1",
-     "call": "WAIT UP TO 1 SECONDS",
-     "params": {}
+     "call": "END_SESSION",
+     "params": {},
+     "async": {
+      "delayMs": 1000,
+      "relativeTo": "start of the next step"
+     },
+     "note": "O3 ends while O1's _WAIT request is retrying; on the sandbox O3 was a task that enqueued, waited 2 s and returned, and O1 started its request 1 s after starting the task"
     },
     {
      "owner": "O1",
@@ -4817,10 +4834,10 @@
      },
      "expect": {
       "subrc": 0,
-      "elapsedMs": {
-       "measured": 1014,
-       "approx": 1000
-      }
+      "grantedWithinMsOfRelease": 2000
+     },
+     "observed": {
+      "elapsedMs": 1014
      }
     }
    ]
@@ -4935,11 +4952,6 @@
     },
     {
      "owner": "O1",
-     "call": "WAIT UP TO 1 SECONDS",
-     "params": {}
-    },
-    {
-     "owner": "O1",
      "call": "DEQUEUE_ALL",
      "params": {},
      "expect": {
@@ -5002,6 +5014,473 @@
         "GUSEVB": 1,
         "GUSR": null,
         "GUSRVB": "O3"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O3",
+     "call": "END_SESSION",
+     "params": {}
+    }
+   ]
+  },
+  {
+   "id": "precedence-own-first-a1",
+   "group": "2b-precedence",
+   "title": "Own X taken before another owner's E; O1's generic E collides with both: the earlier lock decides (602)",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "A1",
+      "K2": "A"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "A1",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "A1",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "602",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}A1        A",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}A1        B",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "precedence-foreign-first-a2",
+   "group": "2b-precedence",
+   "title": "Another owner's E taken before own X; O1's generic E collides with both: the earlier lock decides (601)",
+   "steps": [
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "A2",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "A2",
+      "K2": "A"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "A2",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}A2        B",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2"
+       },
+       {
+        "GARG": "{MANDT}A2        A",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "precedence-own-first-a3",
+   "group": "2b-precedence",
+   "title": "Own E taken before another owner's S; O1's generic X collides with both: 602",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "A3",
+      "K2": "A"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "A3",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "A3",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "602",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}A3        A",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}A3        B",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "precedence-foreign-first-a4",
+   "group": "2b-precedence",
+   "title": "Another owner's S taken before own S; O1's generic X collides with both: 601",
+   "steps": [
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "A4",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "A4",
+      "K2": "A"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "A4",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}A4        B",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2"
+       },
+       {
+        "GARG": "{MANDT}A4        A",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "precedence-not-garg-order-b1",
+   "group": "2b-precedence",
+   "title": "Own X on (B1,Z) before another owner's E on (B1,A): 602, so the order is acquisition, not GARG",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "B1",
+      "K2": "Z"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B1",
+      "K2": "A"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B1",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "602",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}B1        Z",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}B1        A",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "precedence-not-garg-order-b2",
+   "group": "2b-precedence",
+   "title": "Another owner's E on (B2,Z) before own X on (B2,A): 601",
+   "steps": [
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B2",
+      "K2": "Z"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "B2",
+      "K2": "A"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "B2",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}B2        Z",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2"
+       },
+       {
+        "GARG": "{MANDT}B2        A",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
        }
       ]
      }
