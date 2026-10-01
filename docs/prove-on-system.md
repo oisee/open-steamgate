@@ -1,97 +1,140 @@
 # Prove on a system: the same ABAP Unit on OSG and on a sandbox
 
-`tools/osd-prove-on-system.mjs` takes a folder of abapGit-named objects,
-puts it on a sandbox system through abapGit, runs each class's ABAP Unit
-there, compares the counts with OSG, and removes everything again.
+`tools/osd-prove-on-system.mjs` takes a folder of abapGit-named objects and
+puts it on a sandbox system through abapGit. It runs each class's ABAP Unit
+there, compares the test methods with OSG, and then deletes exactly what it
+brought.
 
 ```
 node tools/osd-prove-on-system.mjs <folder> --unit <deploy unit> [--manifest m.json]
-     [--package $ZOSG_TMP_X] [--keep] [--reuse] [--osg count|run] [--server <mcp server>]
+     [--package $ZOSG_TMP_X] [--keep] [--osg count|run] [--server <mcp server>]
 node tools/osd-prove-on-system.mjs <folder> --unit <deploy unit> --cleanup --package $ZOSG_TMP_X
 ```
 
 **Use it on a sandbox only, and never on a productive or customer system.**
-The tool imports, runs and purges. It accepts only a local package (a name
+The tool imports, runs and deletes. It accepts only a local package (a name
 that starts with `$`) and refuses any other name before it sends anything.
 It reaches the system through the vsp MCP server that `OSD_MCP_CONFIG`
 names (default: `.mcp.json` at the repository root, which is gitignored).
 Use `--server`/`OSD_MCP_SERVER` when that file configures more than one
 server. No host, user or client name is written in the tool.
 
+## It deletes only what it brought
+
+The run creates its own package and so owns it:
+
+- The package must not exist when the run starts.
+- No object of the zip may exist yet, in any package.
+- The run deletes only the zip's own objects, and only those it finds in
+  that package.
+- It deletes only its own repository row.
+- It deletes the package only when nothing else is in it.
+
+There is no abapGit `purge` and there is no `--reuse`.
+
 ## The steps
 
 Every step is a separate, small MCP call, because vsp can cut a long call
 with "context canceled".
 
-1. **Zip.** Lay the folder out the same way as `tools/osd-abapgit-zip.mjs`:
-   only objects that the deploy unit lists, and the build fails closed on
-   anything else. The zip is written in process (`zipInProcess` in
-   `tools/osd-abapgit-zip.mjs`: deflate, sorted paths, fixed timestamp), not
-   by the `zip` binary, so the tool spawns no child. A unit that puts no
-   class in the zip fails here: there is nothing to prove.
-2. **Preflight.** Before anything is written, the tool reads what the
-   package holds: the abapGit repository registered for it (key and name),
-   its TDEVC row and its TADIR objects. The tool's own offline repository
-   is always named `OSDPROVE <package>`; a repository under any other name
-   is somebody else's and refuses the run (exit 2), with or without
-   `--reuse`. Step 7 purges the package, so without `--reuse` the package
-   must not exist yet: a registered repository, an existing package or any
-   object in it refuses the run, and the refusal names the objects.
-   `--reuse` admits a package with no repository or the tool's own, whose
-   objects are within the zip's objects, which is what an earlier run of
-   the same zip leaves; any other object is refused and listed.
-3. **Package.** Run `create DEVC $X`, unless `--reuse` found it.
+1. **Zip.** The tool lays the folder out the same way as
+   `tools/osd-abapgit-zip.mjs`: only objects that the deploy unit lists,
+   and the build fails closed on anything else.
+   - The zip is written in process (`zipInProcess` in
+     `tools/osd-abapgit-zip.mjs`: deflate, sorted paths, fixed timestamp),
+     not by the `zip` binary, so the tool spawns no child.
+   - A unit that puts no class in the zip fails here, because there is
+     nothing to prove.
+2. **Preflight.** This step reads only and changes nothing. The run is
+   refused (exit 2) in two cases:
+   - **The package exists.** The run is refused whether the package is
+     empty or not, and whether or not a repository is registered for it.
+     The message says how to inspect it (SE80 or ADT, abapGit's
+     repository list) and to remove it by hand or pick another
+     `--package`.
+   - **An object of the zip already exists in TADIR, in any package.** An
+     import would take it over. The refusal names each object and its
+     package.
+3. **Package.** The tool runs `create DEVC $X`.
 4. **Import.** An `execute_abap` snippet decodes the zip. The zip is
-   embedded as base64 in lines of 200 characters. The snippet calls
-   `zcl_abapgit_zip=>load( )`, then reuses the package's repository or
-   creates `new_offline( )` named `OSDPROVE <package>`; a repository with
-   any other name found at this point (one that appeared after the
-   preflight) is not imported into. The report carries the repository key,
-   and a report without one fails. It then runs `set_files_remote( )` and
-   `deserialize_checks( )`, with every decision set to yes, and then
-   `deserialize( )`. The tool reports the status, the abapGit log messages
-   of types E/W/A, and the TADIR count. Status S passes. Status W passes
-   only when its W messages came back and are shown, because abapGit's W
-   is a warning about an object it still deserialised; W with no message
-   fails. E, A, no status, an unknown status, any E or A message, or
-   messages not carried back all fail.
+   embedded as base64 in lines of 200 characters. The snippet then:
+   1. calls `zcl_abapgit_zip=>load( )`;
+   2. creates the offline repository `OSDPROVE <package>` with
+      `new_offline( )`;
+   3. runs `set_files_remote( )`, `deserialize_checks( )` and
+      `deserialize( )`. The overwrite decisions are yes. The
+      warning_package decisions are **no**: abapGit then leaves out any
+      object that would move in from another package.
+
+   If a repository under any other name is found at this point, the
+   snippet does not import into it. The report carries the repository key,
+   and a report without a key fails. It also carries the status, the
+   abapGit log messages of types E/W/A, and the TADIR count.
+   - Status S passes.
+   - Status W passes only when its W messages came back and are shown,
+     because abapGit's W is a warning about an object it still
+     deserialised. W with no message fails.
+   - E, A, no status, an unknown status, any E or A message, and messages
+     that were not carried back all fail.
 5. **Classes.** For each class, the tool reads
    `SEOCLASSDF-WITH_UNIT_TESTS` and the line count of the CCAU include
-   (`cl_oo_classname_service=>get_ccau_name`, `READ REPORT`).
-   Every class of the zip must have an entry.
-6. **ABAP Unit.** For each class, the tool runs
-   `test CLAS X` with `include_dangerous`. The JSON result has
-   `classes[].testMethods[]`, and a failing method has `alerts[]` with a
-   title. The result must be JSON and must name a test class of that
-   class; anything else fails. The methods are compared by identity, not by
-   count: the set of `TESTCLASS->METHOD` names the system ran
-   (case-insensitive) must equal the set of `FOR TESTING` methods in the
-   source, or with `--osg run` the set OSG ran, and the run names what is
-   missing on either side. A method entry without a name does not count.
-   (A test method inherited from an abstract local test class is
-   attributed by the source parse to the class that declares it, where ADT
-   names the subclass; such a class shows as a difference, not a pass.) The one exception is a class that has no
-   tests on OSG and, by step 5, none on the system (WITH_UNIT_TESTS not
-   set, empty CCAU): it is not called and is marked so. If no test method
-   ran on the system at all, the run fails: there is nothing to prove.
-7. **Cleanup.** The tool reads the package again and purges only when the
-   repository is the tool's own by name and is the one this run imported
-   into by key, and every object in the package is one of the zip's
-   objects; otherwise it refuses the purge (exit 1) and says why. The purge
-   snippet checks the key and the name again on the system before it
-   purges. A stand-alone `--cleanup` has no import, so there the name is
-   the evidence of ownership. It then runs abapGit `purge( )` with `delete_checks( )`. If
-   the repository row is still there, the tool deletes it and runs
-   `COMMIT WORK`. It then checks that no repository row, no TADIR object
-   and no TDEVC package is left. Anything left fails the run. `--keep`
-   skips this step and prints the `--cleanup` command that does it later.
+   (`cl_oo_classname_service=>get_ccau_name`, `READ REPORT`). Every class
+   of the zip must have an entry.
+6. **ABAP Unit.** For each class, the tool runs `test CLAS X` with
+   `include_dangerous`.
+   - **The result must be readable.** It must be JSON and must name a test
+     class of that class. Anything else fails.
+   - **Methods are compared by identity, not by count.** The set of
+     `TESTCLASS->METHOD` names the system ran (case-insensitive) must equal
+     the set of `FOR TESTING` methods in the source. With `--osg run`, it
+     must equal the set that OSG ran. The run names what is missing on
+     either side.
+   - **Unnamed method entries.** An entry without a name does not count.
+     If such an entry carries an alert, it fails the run as "an unnamed
+     test method failed".
+   - **A class with no tests on either side is not called.** That means no
+     tests on OSG and, by step 5, none on the system (WITH_UNIT_TESTS not
+     set, empty CCAU). Its row says so.
+   - **Something must run.** If no test method ran on the system at all,
+     the run fails because there is nothing to prove.
+   - **Known limit: inherited test methods.** The source parse credits a
+     test method inherited from an abstract local test class to the class
+     that declares it, while ADT names the subclass. Such a class shows as
+     a difference, not as a pass.
+7. **Cleanup.** This is one snippet, so nothing changes between the checks
+   and the deletes. It works in this order:
+   1. **Repository check.** If the package has a repository, it must be the
+      tool's own by name and the one this run imported into, by the key
+      from step 4. Otherwise nothing at all is deleted. If the import
+      reported no key, any repository refuses the cleanup.
+   2. **The zip's objects.** For each object in the zip's list, the
+      snippet reads its TADIR row and keeps it only if `DEVCLASS` is this
+      package. It hands exactly those rows to `zcl_abapgit_objects=>delete`,
+      abapGit's object layer, which deletes them one by one in dependency
+      order and commits each. An object of the zip that is missing or in
+      another package is reported and not touched. Nothing outside the
+      zip's list is ever handed to it.
+   3. **The repository row.** It is deleted with
+      `zcl_abapgit_repo_srv->delete`. In abapGit's source, that method
+      removes the persisted repository and checksums and drops the
+      favourite flag; it deletes no object. (`purge` is the method that
+      deletes objects, and the tool does not call it.)
+   4. **The package.** It is deleted through abapGit's DEVC object, which
+      deletes only an empty package, and only if TADIR holds nothing else
+      under it and TDEVC has no subpackage with `PARENTCL` = the package.
+      Otherwise the package is kept, what is there is listed, and the run
+      fails (exit 1). Subpackages are never deleted.
+
+   `--keep` skips this step and prints the `--cleanup` command. That
+   command does the same work with the zip's object list. It has no
+   import, so there the repository's name is the evidence of ownership.
 
 `execute_abap` returns no output that the caller can read. Each snippet
 therefore ends with `cl_abap_unit_assert=>fail( msg = ... )`, and the result
 arrives as the alert title. The message is framed by `OSDPROVE<<` and
 `>>OSDPROVE`, so the tool can find it in vsp's text. A message without its
-end marker may be cut and fails the run. vsp's "no output captured"
-message is normal. All snippets are ASCII.
+end marker may have been cut, so it fails the run. vsp's "no output
+captured" message is normal. All snippets are ASCII.
 
 The result is a table:
 
@@ -99,10 +142,16 @@ The result is a table:
 class              | methods on OSG | methods on system | failing on system
 ```
 
-The tool exits with 1 in any of these cases: an import error, missing or
-unreadable evidence, a count mismatch, a failing method, a refused purge,
-or an incomplete cleanup. It exits with 2 on a refusal before anything was
-written.
+The tool exits with 1 if any of these happens:
+
+- an import error;
+- missing or unreadable evidence;
+- a difference in test methods;
+- a failing method;
+- a refused cleanup;
+- anything left after the cleanup.
+
+It exits with 2 on a refusal before anything was written.
 
 The last line says what was established and no more:
 
@@ -114,12 +163,12 @@ The last line says what was established and no more:
 
 ## The OSG side
 
-By default (`--osg count`), the tool counts the `FOR TESTING` methods of each
-class from abaplint's parse of the folder (helper methods are not counted).
-It does not run them. With `--osg run`, it runs the class through
+By default (`--osg count`), the tool collects the `FOR TESTING` methods of
+each class from abaplint's parse of the folder (helper methods are not
+included). It does not run them. With `--osg run`, it runs the class through
 `tools/osd-unit.mjs` on this runtime. That needs the folder in the build
-(`abap_transpile.json`), and any method that fails on OSG also fails the run.
-The output states which of the two modes was used.
+(`abap_transpile.json`), and any method that fails on OSG also fails the
+run. The output states which of the two modes was used.
 
 ## What a system catches that OSG does not
 
@@ -134,39 +183,66 @@ two defects that no run here could find:
   system creates no CCAU include for it: 0 lines. ADT then runs no test
   class, and the run reports nothing at all, not a failure. OSG runs the
   tests from `.clas.testclasses.abap` no matter what the flag says. The
-  count comparison catches this case (for example, 2 methods on OSG and 0 on
-  the system), and step 4 gives the reason: WITH_UNIT_TESTS is not set and
-  there is no CCAU include.
+  method comparison catches this case (for example, 2 methods on OSG and 0
+  on the system), and step 5 gives the reason: WITH_UNIT_TESTS is not set
+  and there is no CCAU include.
 
 ## Tests
 
-`test/prove-on-system.mjs` runs the tool against a fake transport that models
-what vsp returned on A4H. The fake reads the zip that the tool really builds
-(from `test/fixtures/prove-on-system/`), so the WITH_UNIT_TESTS case comes
-from the class XML and is not a canned answer. The tests cover:
+`test/prove-on-system.mjs` runs the tool against a fake transport that
+models what vsp returned on A4H.
 
-- the happy path;
-- a deserialize error and its message;
-- a class without CCAU;
-- a failing test method;
-- an incomplete cleanup;
-- `--keep`;
-- the refusal of a package that does not start with `$`;
-- a package that already holds objects, has a repository or exists;
-- `--reuse` with exactly the zip's objects, and with different ones;
-- an object that arrived during the run, which refuses the purge;
-- somebody else's repository, with and without `--reuse`, before the
-  import and appearing after the preflight; a repository key that changed
-  between import and purge; a renamed repository; an import report without
-  a key;
-- method identities: nameless entries, the same count with different
-  names, and `--osg run` against the methods OSG ran;
-- each piece of missing evidence: no status, W with and without its
-  messages, E without a message, an unknown status, no end marker, no
-  class-check entry, unit output that is not JSON or does not name the
-  class, no class in the zip, no test method run;
-- the wording of the verdict in both modes.
+- **The fake reads the real zip.** It reads the zip that the tool builds
+  from `test/fixtures/prove-on-system/`, so the WITH_UNIT_TESTS case comes
+  from the class XML and is not a canned answer.
+- **The fake models the system state.** It keeps packages with their
+  parents, TADIR rows, and abapGit repositories. Its cleanup does what the
+  snippet asks of abapGit and nothing more, so a test can see what
+  survives.
+- **Some properties are checked as text.** The fake does not execute ABAP.
+  So the snippet's own properties (the `DEVCLASS` check, the subpackage
+  query, the empty-package condition, `warning_package` = no, no `purge`)
+  are checked on the snippet's text.
 
-No child process is spawned: the fake reads the in-process zip in
-process, and the suite passes with `child_process` disabled. Each case was
-checked to fail when the code it covers is removed.
+The tests cover:
+
+- **Basic runs:**
+  - the happy path;
+  - a deserialize error and its message;
+  - a class without CCAU;
+  - a failing test method;
+  - an object abapGit could not delete;
+  - `--keep` followed by `--cleanup`;
+  - the refusal of a package that does not start with `$`.
+- **Preflight refusals:**
+  - an existing package (empty, with a foreign object, with a repository);
+  - a zip object that already exists in another package.
+- **Cleanup scope:**
+  - a foreign object and a subpackage that survive the cleanup and are
+    reported;
+  - a cleanup that deletes only the zip's items when the package holds
+    more;
+  - a zip item found in another package.
+- **Repository ownership:**
+  - a foreign repository that appears after the preflight;
+  - a repository key that changed;
+  - a renamed repository;
+  - an import report without a key.
+- **Missing evidence:**
+  - no status;
+  - W with and without its messages;
+  - E without a message;
+  - an unknown status;
+  - no end marker;
+  - no class-check entry;
+  - unit output that is not JSON or does not name the class;
+  - nameless entries, with and without an alert;
+  - the same count with different names;
+  - `--osg run` against the methods OSG ran;
+  - no class in the zip;
+  - no test method run.
+- **The wording of the verdict** in both modes.
+
+No child process is spawned: the fake reads the in-process zip in process,
+and the suite passes with `child_process` disabled. Each case was checked to
+fail when the code it covers is removed.

@@ -1,7 +1,7 @@
 // The same ABAP Unit on OSG and on a sandbox system, in one command.
 //
 //   node tools/osd-prove-on-system.mjs <folder> --unit <unit> [--manifest m.json]
-//        [--package $ZOSG_TMP_X] [--keep] [--reuse] [--osg count|run] [--server <name>]
+//        [--package $ZOSG_TMP_X] [--keep] [--osg count|run] [--server <name>]
 //   node tools/osd-prove-on-system.mjs <folder> --unit <unit> --cleanup --package $ZOSG_TMP_X
 //
 // Why (Alice, 2026-10-01): "proven by runs on systems, OSG included". The
@@ -14,34 +14,36 @@
 // sandbox can repeat it. docs/prove-on-system.md has the steps.
 //
 // **Sandboxes only.** A local `$` package is the only target it accepts; it
-// imports, runs and purges, and a productive or customer system is never
+// imports, runs and deletes, and a productive or customer system is never
 // the place for that. The system is whatever the MCP configuration names
 // (`OSD_MCP_CONFIG`, default `.mcp.json`, gitignored): no host, user or
 // client is written here.
 //
+// **It deletes only what it brought.** The package must not exist when the
+// run starts -- the run creates it and so owns it -- and no object of the
+// zip may exist anywhere. The cleanup does not purge: it hands exactly the
+// zip's objects found in that package to abapGit's object layer, deletes
+// the repository row (only the tool's own, `OSDPROVE <package>`, with the
+// key this run imported into), and deletes the package only when nothing
+// else and no subpackage is in it.
+//
 // The steps, each a small MCP call, because a long call can be cut by
 // "context canceled":
 //   1. zip the folder (tools/osd-abapgit-zip.mjs, fail closed on the unit);
-//   1a. read what the package holds -- repository (key and name), TDEVC,
-//      TADIR -- and refuse a package that is not new, since step 6 purges
-//      it; a repository not named `OSDPROVE <package>` (this tool's own)
-//      refuses always; `--reuse` admits the tool's own repository and
-//      objects within the zip's (an earlier run's leftovers);
-//   2. create the local package (`create DEVC`) unless --reuse found it;
-//   3. import it with abapGit (`analyze execute_abap`) into the tool's own
+//   2. preflight: refuse (exit 2) when the package exists or an object of
+//      the zip exists already;
+//   3. create the local package (`create DEVC`);
+//   4. import with abapGit (`analyze execute_abap`) into the tool's own
 //      offline repository, recording its key;
-//   4. read SEOCLASSDF-WITH_UNIT_TESTS and the CCAU line count per class;
-//   5. ABAP Unit per class (`test CLAS`), compared by method identity
+//   5. read SEOCLASSDF-WITH_UNIT_TESTS and the CCAU line count per class;
+//   6. ABAP Unit per class (`test CLAS`), compared by method identity
 //      (test class -> method), not by count;
-//   6. read the package again and purge only the tool's own repository with
-//      the key this run imported into, and only if every object in it is
-//      one of the zip's; delete the repo if it is still registered; verify that
-//      no package, no TADIR row and no repo is left.
+//   7. cleanup as above; anything left fails the run (exit 1) and is listed.
 //
 // Missing evidence is never a pass: no status, no class-check entry, a unit
-// result that is not JSON or does not name the class, a report without its
-// end marker, a zip without classes, or no test method run on the system
-// all fail the run.
+// result that is not JSON or does not name the class, an unnamed test
+// method with an alert, a report without its end marker, a zip without
+// classes, or no test method run on the system all fail the run.
 //
 // `execute_abap` prints nothing a caller can read: the program's result
 // comes back as the title of a failed assertion. So every snippet ends with
@@ -70,7 +72,7 @@ const MAX_LOG = 20;
 export function checkPackage(name) {
   const pkg = String(name ?? "").toUpperCase();
   if (!pkg.startsWith("$")) {
-    const e = new Error(`refused: package "${name}" is not local. This tool imports, runs and purges, `
+    const e = new Error(`refused: package "${name}" is not local. This tool imports, runs and deletes, `
       + "so it only takes a $ package, on a sandbox; never a transportable package, never a productive or customer system.");
     e.code = "REFUSED";
     throw e;
@@ -92,7 +94,7 @@ const report = (expr) => `cl_abap_unit_assert=>fail( msg = |${MARK_OPEN}{ ${expr
 
 /** The offline repository this tool creates is named so it can tell it
  *  from anybody else's: a repository in the package under any other name
- *  is not ours to deserialise into or to purge. */
+ *  is not ours to deserialise into or to delete. */
 export function ownRepoName(pkg) {
   return `OSDPROVE ${pkg}`;
 }
@@ -132,7 +134,7 @@ export function importAbap(zipBytes, pkg) {
     "        <ls_o>-decision = zif_abapgit_definitions=>c_yes.",
     "      ENDLOOP.",
     "      LOOP AT ls_checks-warning_package ASSIGNING FIELD-SYMBOL(<ls_w>).",
-    "        <ls_w>-decision = zif_abapgit_definitions=>c_yes.",
+    "        <ls_w>-decision = zif_abapgit_definitions=>c_no.",
     "      ENDLOOP.",
     "      ls_checks-requirements-decision = zif_abapgit_definitions=>c_yes.",
     "      ls_checks-dependencies-decision = zif_abapgit_definitions=>c_yes.",
@@ -178,92 +180,196 @@ export function classCheckAbap(classes) {
   ].join("\n") + "\n";
 }
 
-/** Step 7: purge -- only the repository with this run's key and the tool's
- *  own name -- drop it if still registered, verify nothing is left. */
-export function cleanupAbap(pkg, expectedKey = "") {
-  if (expectedKey !== "" && !REPO_KEY.test(expectedKey)) throw new Error(`not a repository key: ${expectedKey}`);
-  return [
-    "DATA lv_out TYPE string.",
-    "DATA lv_key TYPE zif_abapgit_persistence=>ty_value.",
-    "DATA li_repo TYPE REF TO zif_abapgit_repo.",
-    "TRY.",
-    "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
-    `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
-    `    IF li_repo IS BOUND AND ( li_repo->get_key( ) <> '${expectedKey}' OR li_repo->get_name( ) <> '${ownRepoName(pkg)}' ).`,
-    "      lv_out = |ERR purge refused: repository { li_repo->get_key( ) } named { li_repo->get_name( ) } is not the one this run imported into;|.",
-    "    ELSEIF li_repo IS BOUND.",
-    "      lv_key = li_repo->get_key( ).",
-    "      DATA(ls_checks) = li_repo->delete_checks( ).",
-    "      DATA(li_log) = zcl_abapgit_repo_srv=>get_instance( )->purge( ii_repo = li_repo is_checks = ls_checks ).",
-    "      lv_out = |purged status={ li_log->get_status( ) };|.",
-    "    ELSE.",
-    "      lv_out = |no repo;|.",
-    "    ENDIF.",
-    "  CATCH cx_root INTO DATA(lx).",
-    "    lv_out = |{ lv_out } ERR { lx->get_text( ) };|.",
-    "ENDTRY.",
-    "DATA(lv_tab) = zcl_abapgit_persistence_db=>c_tabname.",
-    "DATA lv_repos TYPE i.",
-    "IF lv_key IS NOT INITIAL.",
-    "  SELECT COUNT(*) FROM (lv_tab) WHERE type = @zcl_abapgit_persistence_db=>c_type_repo",
-    "    AND value = @lv_key INTO @lv_repos.",
-    "  IF lv_repos > 0.",
-    "    TRY.",
-    "        zcl_abapgit_repo_srv=>get_instance( )->delete( li_repo ).",
-    "        COMMIT WORK.",
-    "        lv_out = |{ lv_out } repo_deleted={ lv_key };|.",
-    "      CATCH cx_root INTO DATA(lx2).",
-    "        lv_out = |{ lv_out } ERR delete: { lx2->get_text( ) };|.",
-    "    ENDTRY.",
-    "    SELECT COUNT(*) FROM (lv_tab) WHERE type = @zcl_abapgit_persistence_db=>c_type_repo",
-    "      AND value = @lv_key INTO @lv_repos.",
-    "  ENDIF.",
-    "ENDIF.",
-    "lv_out = |{ lv_out } repo_left={ lv_repos };|.",
-    `SELECT object, obj_name FROM tadir WHERE devclass = '${pkg}' INTO TABLE @DATA(lt_tadir).`,
-    "lv_out = |{ lv_out } tadir_left={ lines( lt_tadir ) };|.",
-    "LOOP AT lt_tadir INTO DATA(ls_t).",
-    "  lv_out = |{ lv_out } { ls_t-object } { ls_t-obj_name };|.",
-    "ENDLOOP.",
-    `SELECT COUNT(*) FROM tdevc WHERE devclass = '${pkg}' INTO @DATA(lv_devc).`,
-    "lv_out = |{ lv_out } tdevc_left={ lv_devc };|.",
-    report("lv_out"),
-  ].join("\n") + "\n";
+// how many rows one alert title lists; a list that is longer is counted
+// and not shown, and a check that needs the list fails rather than guess
+const MAX_LIST = 200;
+
+const OBJECT_ITEM = /^[A-Z0-9]{4} [A-Z0-9_/]{1,40}$/;
+
+function checkItems(items) {
+  for (const i of items) if (!OBJECT_ITEM.test(i)) throw new Error(`object "${i}" cannot be put into an ABAP literal`);
 }
 
-// how many TADIR rows one alert title carries; more than this cannot be
-// checked, and an inventory that cannot be checked refuses
-const MAX_INVENTORY = 200;
-
-/** Before the import and before the purge: what the package holds now --
- *  the repository registered for it, whether the package exists, and its
- *  TADIR objects. Nothing is changed. */
-export function inventoryAbap(pkg) {
+/** Step 2, the preflight: nothing is changed. Does the package exist, has
+ *  it a repository, and does any object of the zip exist already (in any
+ *  package)? */
+export function preflightAbap(pkg, items) {
+  checkItems(items);
   return [
     "DATA lv_out TYPE string.",
+    "DATA lt_items TYPE string_table.",
+    "DATA lv_type TYPE tadir-object.",
+    "DATA lv_name TYPE tadir-obj_name.",
     "DATA lv_n TYPE i.",
     "DATA li_repo TYPE REF TO zif_abapgit_repo.",
+    ...items.map((i) => `APPEND \`${i}\` TO lt_items.`),
+    `SELECT COUNT(*) FROM tdevc WHERE devclass = '${pkg}' INTO @DATA(lv_devc).`,
+    "lv_out = |tdevc={ lv_devc };|.",
     "TRY.",
     "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
     `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
     "    IF li_repo IS BOUND.",
-    "      lv_out = |repo={ li_repo->get_key( ) }; repo_name={ li_repo->get_name( ) };|.",
+    "      lv_out = |{ lv_out } repo={ li_repo->get_key( ) }; repo_name={ li_repo->get_name( ) };|.",
     "    ELSE.",
-    "      lv_out = |repo=none;|.",
+    "      lv_out = |{ lv_out } repo=none;|.",
     "    ENDIF.",
     "  CATCH cx_root INTO DATA(lx).",
-    "    lv_out = |ERR { lx->get_text( ) };|.",
+    "    lv_out = |{ lv_out } ERR { lx->get_text( ) };|.",
     "ENDTRY.",
-    `SELECT COUNT(*) FROM tdevc WHERE devclass = '${pkg}' INTO @DATA(lv_devc).`,
-    "lv_out = |{ lv_out } tdevc={ lv_devc };|.",
-    `SELECT object, obj_name FROM tadir WHERE devclass = '${pkg}' INTO TABLE @DATA(lt_tadir).`,
-    "lv_out = |{ lv_out } tadir={ lines( lt_tadir ) };|.",
-    "LOOP AT lt_tadir INTO DATA(ls_t).",
-    "  lv_n = lv_n + 1.",
-    `  IF lv_n <= ${MAX_INVENTORY}.`,
-    "    lv_out = |{ lv_out } obj={ ls_t-object }:{ ls_t-obj_name };|.",
+    "LOOP AT lt_items INTO DATA(lv_item).",
+    "  SPLIT lv_item AT space INTO lv_type lv_name.",
+    "  SELECT SINGLE devclass FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
+    "    INTO @DATA(lv_where).",
+    "  IF sy-subrc = 0.",
+    "    lv_n = lv_n + 1.",
+    `    IF lv_n <= ${MAX_LIST}.`,
+    "      lv_out = |{ lv_out } exists={ lv_type }:{ lv_name }@{ lv_where };|.",
+    "    ENDIF.",
     "  ENDIF.",
     "ENDLOOP.",
+    "lv_out = |{ lv_out } existing={ lv_n };|.",
+    report("lv_out"),
+  ].join("\n") + "\n";
+}
+
+/** Step 7, the cleanup, in one snippet so nothing changes between the
+ *  check and the delete:
+ *   a. the package's repository, if any, must be the tool's own by name and,
+ *      when `expectedKey` is given, the one this run imported into -- else
+ *      nothing at all is deleted;
+ *   b. each object of the zip whose TADIR row is in this package goes into
+ *      one list for zcl_abapgit_objects=>delete (abapGit's object layer,
+ *      which deletes them one by one in dependency order and commits each);
+ *      an object of the zip in another package, or one that is not there,
+ *      is reported and not touched; nothing outside the zip's list is ever
+ *      handed to it;
+ *   c. the repository row is deleted with zcl_abapgit_repo_srv->delete,
+ *      which removes the persisted repository and no object;
+ *   d. the package is deleted (abapGit's DEVC object, which deletes only an
+ *      empty package) only if TADIR holds nothing else under it and TDEVC
+ *      has no subpackage of it; otherwise it is kept and what is there is
+ *      listed. Subpackages are never deleted. */
+export function cleanupAbap(pkg, items, expectedKey) {
+  checkItems(items);
+  if (expectedKey !== undefined && expectedKey !== "" && !REPO_KEY.test(expectedKey)) throw new Error(`not a repository key: ${expectedKey}`);
+  const keyCheck = expectedKey === undefined ? "" : `li_repo->get_key( ) <> '${expectedKey}' OR `;
+  return [
+    "DATA lv_out TYPE string.",
+    "DATA lv_go TYPE abap_bool VALUE abap_true.",
+    "DATA lt_items TYPE string_table.",
+    "DATA lv_type TYPE tadir-object.",
+    "DATA lv_name TYPE tadir-obj_name.",
+    "DATA lt_tadir TYPE zif_abapgit_definitions=>ty_tadir_tt.",
+    "DATA ls_tadir TYPE zif_abapgit_definitions=>ty_tadir.",
+    "DATA lv_key TYPE zif_abapgit_persistence=>ty_value.",
+    "DATA lv_n TYPE i.",
+    "DATA li_repo TYPE REF TO zif_abapgit_repo.",
+    "DATA(li_log) = CAST zif_abapgit_log( NEW zcl_abapgit_log( ) ).",
+    ...items.map((i) => `APPEND \`${i}\` TO lt_items.`),
+    "TRY.",
+    "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
+    `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
+    "  CATCH cx_root INTO DATA(lx).",
+    "    lv_out = |ERR repository lookup: { lx->get_text( ) };|.",
+    "    lv_go = abap_false.",
+    "ENDTRY.",
+    `IF li_repo IS BOUND AND ( ${keyCheck}li_repo->get_name( ) <> '${ownRepoName(pkg)}' ).`,
+    "  lv_out = |{ lv_out } ERR refused: repository { li_repo->get_key( ) } named { li_repo->get_name( ) } is not the one this run imported into;|.",
+    "  lv_go = abap_false.",
+    "ENDIF.",
+    "IF lv_go = abap_true.",
+    "  LOOP AT lt_items INTO DATA(lv_item).",
+    "    SPLIT lv_item AT space INTO lv_type lv_name.",
+    "    SELECT SINGLE * FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
+    "      INTO @DATA(ls_db).",
+    "    IF sy-subrc <> 0.",
+    "      lv_out = |{ lv_out } absent={ lv_type }:{ lv_name };|.",
+    `    ELSEIF ls_db-devclass <> '${pkg}'.`,
+    "      lv_out = |{ lv_out } elsewhere={ lv_type }:{ lv_name }@{ ls_db-devclass };|.",
+    "    ELSE.",
+    "      CLEAR ls_tadir.",
+    "      MOVE-CORRESPONDING ls_db TO ls_tadir.",
+    "      APPEND ls_tadir TO lt_tadir.",
+    "    ENDIF.",
+    "  ENDLOOP.",
+    "  lv_out = |{ lv_out } to_delete={ lines( lt_tadir ) };|.",
+    "  TRY.",
+    "      zcl_abapgit_objects=>delete( it_tadir = lt_tadir ii_log = li_log ).",
+    "    CATCH cx_root INTO DATA(lx2).",
+    "      lv_out = |{ lv_out } ERR delete: { lx2->get_text( ) };|.",
+    "  ENDTRY.",
+    "  LOOP AT li_log->get_messages( ) INTO DATA(ls_m) WHERE type = 'E' OR type = 'A'.",
+    "    lv_n = lv_n + 1.",
+    `    IF lv_n <= ${MAX_LOG}.`,
+    "      lv_out = |{ lv_out } [{ ls_m-type }] { ls_m-obj_type } { ls_m-obj_name }: { ls_m-text };|.",
+    "    ENDIF.",
+    "  ENDLOOP.",
+    "  IF li_repo IS BOUND.",
+    "    lv_key = li_repo->get_key( ).",
+    "    TRY.",
+    "        zcl_abapgit_repo_srv=>get_instance( )->delete( li_repo ).",
+    "        COMMIT WORK.",
+    "        lv_out = |{ lv_out } repo_deleted={ lv_key };|.",
+    "      CATCH cx_root INTO DATA(lx3).",
+    "        lv_out = |{ lv_out } ERR repo delete: { lx3->get_text( ) };|.",
+    "    ENDTRY.",
+    "  ENDIF.",
+    "ENDIF.",
+    // what is left, read from the database whatever happened above
+    "DATA lv_repos TYPE i.",
+    "IF lv_key IS NOT INITIAL.",
+    "  DATA(lv_tab) = zcl_abapgit_persistence_db=>c_tabname.",
+    "  SELECT COUNT(*) FROM (lv_tab) WHERE type = @zcl_abapgit_persistence_db=>c_type_repo",
+    "    AND value = @lv_key INTO @lv_repos.",
+    "ENDIF.",
+    "lv_out = |{ lv_out } repo_left={ lv_repos };|.",
+    "DATA lv_items_left TYPE i.",
+    "LOOP AT lt_items INTO lv_item.",
+    "  SPLIT lv_item AT space INTO lv_type lv_name.",
+    "  SELECT SINGLE devclass FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
+    `    AND devclass = '${pkg}' INTO @DATA(lv_dummy).`,
+    "  IF sy-subrc = 0.",
+    "    lv_items_left = lv_items_left + 1.",
+    "    lv_out = |{ lv_out } item_left={ lv_type }:{ lv_name };|.",
+    "  ENDIF.",
+    "ENDLOOP.",
+    "lv_out = |{ lv_out } items_left={ lv_items_left };|.",
+    `SELECT object, obj_name FROM tadir WHERE devclass = '${pkg}'`,
+    `  AND NOT ( object = 'DEVC' AND obj_name = '${pkg}' ) INTO TABLE @DATA(lt_rest).`,
+    "lv_out = |{ lv_out } others={ lines( lt_rest ) };|.",
+    "lv_n = 0.",
+    "LOOP AT lt_rest INTO DATA(ls_r).",
+    "  lv_n = lv_n + 1.",
+    `  IF lv_n <= ${MAX_LIST}.`,
+    "    lv_out = |{ lv_out } other={ ls_r-object }:{ ls_r-obj_name };|.",
+    "  ENDIF.",
+    "ENDLOOP.",
+    `SELECT devclass FROM tdevc WHERE parentcl = '${pkg}' INTO TABLE @DATA(lt_children).`,
+    "lv_out = |{ lv_out } children={ lines( lt_children ) };|.",
+    "LOOP AT lt_children INTO DATA(lv_child).",
+    "  lv_out = |{ lv_out } child={ lv_child };|.",
+    "ENDLOOP.",
+    "IF lv_go = abap_true AND lt_rest IS INITIAL AND lt_children IS INITIAL.",
+    "  CLEAR: ls_tadir, lt_tadir.",
+    `  SELECT SINGLE * FROM tadir WHERE pgmid = 'R3TR' AND object = 'DEVC' AND obj_name = '${pkg}' INTO @DATA(ls_devc).`,
+    "  IF sy-subrc = 0.",
+    "    MOVE-CORRESPONDING ls_devc TO ls_tadir.",
+    "  ELSE.",
+    "    ls_tadir-pgmid = 'R3TR'.",
+    "    ls_tadir-object = 'DEVC'.",
+    `    ls_tadir-obj_name = '${pkg}'.`,
+    `    ls_tadir-devclass = '${pkg}'.`,
+    "  ENDIF.",
+    "  APPEND ls_tadir TO lt_tadir.",
+    "  TRY.",
+    "      zcl_abapgit_objects=>delete( it_tadir = lt_tadir ).",
+    "      COMMIT WORK.",
+    "    CATCH cx_root INTO DATA(lx4).",
+    "      lv_out = |{ lv_out } ERR package delete: { lx4->get_text( ) };|.",
+    "  ENDTRY.",
+    "ENDIF.",
+    `SELECT COUNT(*) FROM tdevc WHERE devclass = '${pkg}' INTO @DATA(lv_devc).`,
+    "lv_out = |{ lv_out } tdevc_left={ lv_devc };|.",
     report("lv_out"),
   ].join("\n") + "\n";
 }
@@ -298,15 +404,17 @@ export function parseImport(msg) {
   };
 }
 
-export function parseInventory(msg) {
-  const objects = [...msg.matchAll(/obj=([A-Z0-9]+):([^;]*);/g)].map((m) => `${m[1]} ${m[2].trim()}`);
+const pairs = (msg, name) => [...msg.matchAll(new RegExp(`(?:^|\\s|;)${name}=([A-Z0-9]+):([^;@]*)(?:@([^;]*))?;`, "g"))]
+  .map((m) => ({item: `${m[1]} ${m[2].trim()}`, where: m[3]?.trim()}));
+
+export function parsePreflight(msg) {
   return {
     err: /ERR ([^;]*);/.exec(msg)?.[1],
+    tdevc: Number(field(msg, "tdevc") ?? NaN),
     repo: field(msg, "repo"),
     repoName: /repo_name=([^;]*);/.exec(msg)?.[1]?.trim(),
-    tdevc: Number(field(msg, "tdevc") ?? NaN),
-    tadir: Number(field(msg, "tadir") ?? NaN),
-    objects,
+    existing: Number(field(msg, "existing") ?? NaN),
+    exists: pairs(msg, "exists"),
   };
 }
 
@@ -320,10 +428,18 @@ export function parseClassCheck(msg) {
 
 export function parseCleanup(msg) {
   return {
-    status: field(msg, "status"),
     err: [...msg.matchAll(/ERR ([^;]*);/g)].map((m) => m[1]),
+    logs: [...msg.matchAll(/\[([EA])\] ([^;]*);/g)].map((m) => `[${m[1]}] ${m[2].trim()}`),
+    toDelete: Number(field(msg, "to_delete") ?? NaN),
+    absent: pairs(msg, "absent").map((p) => p.item),
+    elsewhere: pairs(msg, "elsewhere"),
     repoLeft: Number(field(msg, "repo_left") ?? NaN),
-    tadirLeft: Number(field(msg, "tadir_left") ?? NaN),
+    itemsLeft: Number(field(msg, "items_left") ?? NaN),
+    itemLeft: pairs(msg, "item_left").map((p) => p.item),
+    others: Number(field(msg, "others") ?? NaN),
+    other: pairs(msg, "other").map((p) => p.item),
+    children: Number(field(msg, "children") ?? NaN),
+    child: [...msg.matchAll(/child=([^;]*);/g)].map((m) => m[1].trim()),
     tdevcLeft: Number(field(msg, "tdevc_left") ?? NaN),
   };
 }
@@ -352,9 +468,14 @@ export function parseUnit(text, className) {
   for (const c of classes) {
     for (const a of c.alerts ?? []) failing.push({method: `${c.name} (class)`, title: a.title});
     for (const m of c.testMethods ?? []) {
-      // a method without a name is not evidence of a test that ran
+      // a method without a name is not evidence of a test that ran -- but
+      // one that carries an alert is evidence of a test that failed
       if (typeof m?.name !== "string" || m.name.trim() === "" || typeof c.name !== "string" || c.name.trim() === "") {
         nameless += 1;
+        if ((m?.alerts ?? []).length > 0) {
+          failing.push({method: `${c.name ?? "?"}-><unnamed>`,
+            title: `an unnamed test method failed: ${m.alerts.map((a) => a?.title).join(" | ")}`});
+        }
         continue;
       }
       names.push(methodId(c.name, m.name));
@@ -480,100 +601,66 @@ async function exec(mcp, code, step) {
 
 /** What the package holds, read and checked for completeness. Throws when
  *  the answer cannot be relied on. */
-async function inventory(mcp, pkg, step) {
-  const r = await exec(mcp, inventoryAbap(pkg), step);
-  const inv = parseInventory(r.message);
-  if (inv.err !== undefined) throw new Error(`${step}: ${inv.err}`);
-  if (inv.repo === undefined || Number.isNaN(inv.tdevc) || Number.isNaN(inv.tadir)) {
-    throw new Error(`${step}: the inventory is incomplete: ${r.message.trim()}`);
-  }
-  if (inv.repo !== "none" && (!REPO_KEY.test(inv.repo) || inv.repoName === undefined)) {
-    throw new Error(`${step}: repository ${inv.repo} without a readable key and name: ${r.message.trim()}`);
-  }
-  if (inv.objects.length !== inv.tadir) {
-    throw new Error(`${step}: ${inv.tadir} TADIR object(s), ${inv.objects.length} listed; what is not listed cannot be checked`);
-  }
-  // the package's own DEVC row is not one of the zip's objects and is ours to remove with it
-  inv.foreign = inv.objects.filter((o) => o !== `DEVC ${pkg}`);
-  return inv;
-}
-
 const listed = (list) => list.map((o) => `    ${o}`).join("\n");
 
-/** May the import go into this package? A repository under any name but
- *  the tool's own refuses, with or without --reuse. Without --reuse only a
- *  package that does not exist yet; with it, one whose objects are within
- *  the zip's (the leftovers of an earlier run of the same zip), with no
- *  repository or the tool's own. Returns the refusals, empty when admitted. */
-export function admitPackage(inv, zipObjects, reuse, pkg) {
-  if (inv.repo !== "none" && inv.repoName !== ownRepoName(pkg)) {
-    return [`refused: ${pkg} has abapGit repository ${inv.repo} named "${inv.repoName}", not this tool's `
-      + `("${ownRepoName(pkg)}"). Somebody else's repository is never imported into or purged.`];
+/** Step 2: refusals before anything is written. The package must not
+ *  exist: the run creates it and so owns it. No object of the zip may exist
+ *  yet, in any package: an import would take it over. */
+export async function preflight(mcp, pkg, items) {
+  const r = await exec(mcp, preflightAbap(pkg, items), "preflight");
+  const p = parsePreflight(r.message);
+  const refusals = [];
+  if (p.err !== undefined) refusals.push(`refused: preflight: ${p.err}`);
+  if (Number.isNaN(p.tdevc) || p.repo === undefined || Number.isNaN(p.existing)) {
+    return [`refused: preflight: the report is incomplete: ${r.message.trim()}`];
   }
-  if (!reuse) {
-    const why = [];
-    if (inv.repo !== "none") why.push(`abapGit repository ${inv.repo} is registered for it`);
-    if (inv.foreign.length > 0) why.push(`it holds ${inv.foreign.length} object(s):\n${listed(inv.foreign)}`);
-    else if (inv.tdevc > 0) why.push("the package already exists (a purge would delete it)");
-    return why.length === 0 ? [] : [`refused: ${pkg} is not new: ${why.join("; ")}. `
-      + "The cleanup purges the package, so it must not hold anything this run did not bring. "
-      + "If this is what an earlier run of the same zip left, pass --reuse."];
+  if (p.tdevc > 0 || p.repo !== "none") {
+    refusals.push(`refused: package ${pkg} exists`
+      + (p.repo !== "none" ? ` (abapGit repository ${p.repo} named "${p.repoName}" is registered for it)` : "")
+      + ". This tool only works in a package it creates, so it owns everything it deletes. "
+      + `Inspect it (SE80 / ADT package ${pkg}, abapGit's repository list) and remove it by hand, `
+      + "or pass another --package.");
   }
-  const zip = new Set(zipObjects);
-  const extra = inv.foreign.filter((o) => !zip.has(o));
-  if (extra.length === 0) return [];
-  return [`refused: --reuse takes a package whose objects are within the zip's, and ${pkg} holds `
-    + `${extra.length} that are not:\n  not in the zip:\n${listed(extra)}`];
+  if (p.existing > 0) {
+    refusals.push(`refused: ${p.existing} object(s) of the zip exist already; an import would take them over:\n`
+      + listed(p.exists.map((e) => `${e.item} in ${e.where}`))
+      + (p.existing > p.exists.length ? `\n    ... and ${p.existing - p.exists.length} more` : ""));
+  }
+  return refusals;
 }
 
-/** Step 7: inventory first. The purge goes ahead only when the package's
- *  repository is the tool's own by name AND the one this run imported into
- *  by key (`expectedKey`; `adoptOwnKey` is the stand-alone --cleanup, where
- *  there was no import and the name is the evidence), and every object in
- *  the package is one of the zip's. Then verify nothing is left. */
-export async function cleanup(mcp, pkg, zipObjects, {expectedKey, adoptOwnKey = false, log = () => {}} = {}) {
-  let inv;
-  try {
-    inv = await inventory(mcp, pkg, "cleanup inventory");
-  } catch (e) {
-    return {ok: false, problems: [`purge refused: ${e.message}`]};
+/** Step 7: delete the zip's objects in the package, the repository row, and
+ *  the package if nothing else is in it (cleanupAbap says how). Returns the
+ *  problems; anything left is one. */
+export async function cleanup(mcp, pkg, items, {expectedKey, standalone = false, log = () => {}} = {}) {
+  if (!standalone && expectedKey === undefined) {
+    // without the key of this run's import the repository cannot be told from
+    // one that appeared since; the snippet then refuses any repository at all
+    expectedKey = "";
   }
-  let key = "";
-  if (inv.repo !== "none") {
-    if (inv.repoName !== ownRepoName(pkg)) {
-      return {ok: false, problems: [`purge refused: ${pkg} has abapGit repository ${inv.repo} named "${inv.repoName}", `
-        + `not this tool's ("${ownRepoName(pkg)}")`]};
-    }
-    const want = adoptOwnKey ? inv.repo : expectedKey;
-    if (want === undefined) {
-      return {ok: false, problems: [`purge refused: repository ${inv.repo} is in ${pkg}, and this run recorded no `
-        + "repository key from its import, so it cannot show the repository is the one it imported into"]};
-    }
-    if (inv.repo !== want) {
-      return {ok: false, problems: [`purge refused: the repository in ${pkg} is ${inv.repo}, `
-        + `this run imported into ${want}`]};
-    }
-    key = inv.repo;
-  }
-  const zip = new Set(zipObjects);
-  const extra = inv.foreign.filter((o) => !zip.has(o));
-  if (extra.length > 0) {
-    return {ok: false, problems: [`purge refused: ${pkg} holds ${extra.length} object(s) that are not the zip's, `
-      + `and a purge would delete them:\n${listed(extra)}`]};
-  }
-  const problems = [];
   let r;
   try {
-    r = await exec(mcp, cleanupAbap(pkg, key), "cleanup");
+    r = await exec(mcp, cleanupAbap(pkg, items, standalone ? undefined : expectedKey), "cleanup");
   } catch (e) {
     return {ok: false, problems: [`cleanup: ${e.message}`]};
   }
   const c = parseCleanup(r.message);
   log(`cleanup: ${r.message.trim()}`);
-  for (const e of c.err) problems.push(`cleanup error: ${e}`);
-  if (c.status !== undefined && c.status !== "S" && c.status !== "W") problems.push(`cleanup: purge status ${c.status}`);
-  for (const [name, n] of [["repo", c.repoLeft], ["TADIR object", c.tadirLeft], ["package", c.tdevcLeft]]) {
-    if (!(n === 0)) problems.push(`cleanup incomplete: ${Number.isNaN(n) ? "unknown number of" : n} ${name}(s) left`);
+  const problems = [];
+  for (const e of c.err) problems.push(`cleanup: ${e}`);
+  for (const l of c.logs) problems.push(`cleanup log ${l}`);
+  for (const e of c.elsewhere) problems.push(`cleanup: ${e.item} is in package ${e.where}, not ${pkg}; not touched`);
+  for (const [name, n] of [["repository", c.repoLeft], ["object(s) of the zip", c.itemsLeft]]) {
+    if (!(n === 0)) problems.push(`cleanup incomplete: ${Number.isNaN(n) ? "unknown number of" : n} ${name} left`);
+  }
+  if (c.itemLeft.length) problems.push(`cleanup: left in ${pkg}:\n${listed(c.itemLeft)}`);
+  if (!(c.others === 0) || !(c.children === 0)) {
+    problems.push(`cleanup: package ${pkg} kept, it holds what this run did not bring`
+      + (c.others > 0 ? `\n  ${c.others} object(s):\n${listed(c.other)}` : "")
+      + (c.children > 0 ? `\n  ${c.children} subpackage(s):\n${listed(c.child)}` : "")
+      + (Number.isNaN(c.others) || Number.isNaN(c.children) ? "\n  (the report does not say what)" : ""));
+  } else if (!(c.tdevcLeft === 0)) {
+    problems.push(`cleanup incomplete: package ${pkg} ${Number.isNaN(c.tdevcLeft) ? "may be" : "is"} still there`);
   }
   return {ok: problems.length === 0, problems, parsed: c};
 }
@@ -600,7 +687,7 @@ export function judgeImport(imp) {
 
 /** Steps 1-6. `mcp` is {call(action, target, params) -> text}; `osg` is a
  *  provider ({mode, methods(cls)}); `zipper` builds the zip. */
-export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep = false, reuse = false, mcp, osg,
+export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep = false, mcp, osg,
   zipper = buildZip, log = () => {}}) {
   pkg = checkPackage(pkg);
   const problems = [];
@@ -619,32 +706,26 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
   }
   log(`zip: ${built.bytes.length} bytes, unit "${built.unit}", ${built.objects.length} object(s), ${classes.length} class(es)`);
 
-  // read before anything is written: the cleanup purges the package
-  let inv;
+  // read before anything is written: the run must create the package itself
+  let refusals;
   try {
-    inv = await inventory(mcp, pkg, "preflight");
+    refusals = await preflight(mcp, pkg, built.objects);
   } catch (e) {
-    problems.push(`refused: ${e.message}`);
-    return done({refused: true});
+    refusals = [`refused: ${e.message}`];
   }
-  const refusals = admitPackage(inv, built.objects, reuse, pkg);
   if (refusals.length > 0) {
     problems.push(...refusals);
     return done({refused: true});
   }
 
-  if (inv.tdevc === 0) {
-    const devc = await mcp.call("create", `DEVC ${pkg}`, {name: pkg, description: "open-steamgate prove-on-system (temporary)"});
-    if (/^ERROR/i.test(devc)) {
-      problems.push(`package ${pkg} not created: ${devc.slice(0, 300)}`);
-      return done();
-    }
-    log(`package ${pkg}: created`);
-  } else {
-    log(`package ${pkg}: exists, reused (--reuse)`);
+  const devc = await mcp.call("create", `DEVC ${pkg}`, {name: pkg, description: "open-steamgate prove-on-system (temporary)"});
+  if (/^ERROR/i.test(devc)) {
+    problems.push(`package ${pkg} not created: ${devc.slice(0, 300)}`);
+    return done();
   }
+  log(`package ${pkg}: created`);
 
-  // the repository key the import reports; the purge takes that repository and no other
+  // the repository key the import reports; the cleanup takes that repository and no other
   let importedKey;
   try {
     try {
@@ -819,23 +900,23 @@ export async function main(argv, {mcp: givenMcp, out = console.log} = {}) {
   }
   if (folder === undefined) {
     out("usage: osd-prove-on-system.mjs <folder> --unit <unit> [--manifest m.json] [--package $ZOSG_TMP_X] [--keep] "
-      + "[--reuse] [--osg count|run] [--server <mcp server>]\n"
+      + "[--osg count|run] [--server <mcp server>]\n"
       + "       osd-prove-on-system.mjs <folder> --unit <unit> [--manifest m.json] --cleanup --package $ZOSG_TMP_X");
     return 2;
   }
   const mcp = givenMcp ?? mcpStdio({server: flag("server")});
   try {
     if (argv.includes("--cleanup")) {
-      // the zip's object list is what may be purged, so the folder is needed here too
+      // the zip's object list is what may be deleted, so the folder is needed here too
       const built = buildZip(folder, {unit: flag("unit"), manifest: flag("manifest")});
-      const c = await cleanup(mcp, pkg, built.objects, {adoptOwnKey: true, log: out});
+      const c = await cleanup(mcp, pkg, built.objects, {standalone: true, log: out});
       for (const p of c.problems) out(`FAIL ${p}`);
       out(c.ok ? `cleanup of ${pkg}: complete` : `cleanup of ${pkg}: INCOMPLETE`);
       return c.ok ? 0 : 1;
     }
     const osg = flag("osg") === "run" ? osgRunner() : osgCounter(folder);
     const r = await prove({folder, unit: flag("unit"), manifest: flag("manifest"), pkg, keep: argv.includes("--keep"),
-      reuse: argv.includes("--reuse"), mcp, osg, log: out});
+      mcp, osg, log: out});
     out("");
     if (r.rows.length > 0) out(table(r.rows));
     for (const row of r.rows) for (const n of row.notes) out(`  ${row.cls}: ${n}`);
