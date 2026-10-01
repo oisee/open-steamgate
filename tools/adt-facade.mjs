@@ -2154,7 +2154,7 @@ export function adtRouter(options = {}) {
           // NoModification for perfectly writable local objects, so a client
           // that trusted that field would find nothing writable at all.
           res.status(200).type(asXmlTypeFor(req, "com.sap.adt.lock.Result2"))
-            .send(lockResultDocument("", {modifiable: false}));
+            .send(lockResultDocument(""));
           return;
         }
         // one holder per object across sessions; the same session locking
