@@ -19,7 +19,7 @@ func testBroker() *Broker {
 		return out
 	}
 	text := auth("/text", "S", "R")
-	text = append(text, Authority{Path: "/text", Program: ProgramOf("ZCL_OSD_AMC_SOCKET"), Activity: "R"})
+	text = append(text, Authority{Path: "/text", Program: ProgramOf("ZCL_OSD_AMC_SOCKET"), Activity: "C"})
 	return New(
 		Channel{App: "ZOSD_AMC_TEST", Path: "/text", Type: "TEXT", Scope: "C", Auth: text},
 		Channel{App: "ZOSD_AMC_TEST", Path: "/denied", Type: "TEXT", Scope: "C", Auth: text},

@@ -210,13 +210,24 @@ export function deriveSamc(paths, applicationId, decl = {}, numberingFile, allow
       for (const [name, type] of declaredTypes([st])) vars.set(name, type);
       for (const call of st.findAllExpressions(Expressions.MethodCall)) {
         const name = lower(call.findDirectExpression(Expressions.MethodName));
-        if (!["create_message_producer", "create_message_consumer", "start_message_delivery"].includes(name)) continue;
+        if (!["create_message_producer", "create_message_consumer", "start_message_delivery", "bind_amc_message_consumer"].includes(name)) continue;
         const tokens = words(st).map((token) => token.toLowerCase());
         const methodIndex = tokens.indexOf(name);
         const owner = tokens[methodIndex - 2];
         const where = `${item.file}:${st.getStart().getRow()}`;
         const site = callSite(decl, item.file, st.getStart().getRow(), `${ownerClass}.${method}`);
         if (site) usedSites.add(site);
+        if (name === "bind_amc_message_consumer") {
+          // SAP: activity C = receive via APC WebSocket. The binding is the grant, so the program is this object.
+          if (site?.authority === "none") throw new Error(`${where}: authority none does not apply to an APC bind`);
+          const params = parameters(call);
+          const apps = idsFor(resolved(params.get("i_application_id"), ownerClass, method, constants), site, "applicationIds", where);
+          if (!apps.includes(applicationId)) continue;
+          const channelIds = idsFor(resolved(params.get("i_channel_id"), ownerClass, method, constants), site, "channelIds", where);
+          for (const channelId of channelIds) facts.push({channelId, activity: "C", messageType: site?.messageType, kind: item.kind,
+            program: item.program, source: place(item.file, st)});
+          continue;
+        }
         if (site?.authority === "none") {
           if (typeof site.reason !== "string" || !site.reason.trim()) throw new Error(`${where}: authority none requires a reason`);
           const app = resolved(parameters(call).get("i_application_id"), ownerClass, method, constants);
@@ -305,6 +316,7 @@ export function deriveSamc(paths, applicationId, decl = {}, numberingFile, allow
   }
   for (const row of channels.values()) {
     if (!row.scope) throw new Error(`${row.channelId}: scope is required in overlay`);
+    if (!row.messageType) throw new Error(`${row.source[0]?.file}:${row.source[0]?.line}: ${row.channelId} message type cannot be resolved; add callSites messageType`);
     row.source.sort(order);
   }
   const authRows = [...authorities.values()].sort((a, b) => a.channelId.localeCompare(b.channelId)

@@ -252,8 +252,11 @@ consumer's `start_message_delivery` gives `R`, and the receiver interface gives
 the message type when resolvable. Producer creation gives `S`. SAP documents
 `S` as Send, `R` as Receive, and `C` as Receive via APC WebSocket in
 [Defining an ABAP Messaging Channel Application](https://help.sap.com/docs/SAP_NETWEAVER_AS_ABAP_752/c238d694b825421f940829321ffa326a/5212f332ffec430bbacfc62789692f4f.html).
-The captured file contains only `S` and `R`; `C` therefore requires an
-`extraAuthorities` declaration. Local test class calls count and belong to
+The captured file contains only `S` and `R`. Activity `C` is SAP's "receive via
+APC WebSocket": a `bind_amc_message_consumer` call (application and channel ids
+resolved like a producer's, program from the enclosing object, message type from
+the channel's other uses or the call site's overlay) derives it from code, and
+an unresolvable id is refused with file:line unless `callSites` names the call. Local test class calls count and belong to
 their global class, as SAP's `PROGRAM_ID` does. The capture shows that abapGit
 preserves configured `NR` order rather than sorting it.
 

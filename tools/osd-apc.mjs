@@ -252,7 +252,7 @@ export async function serveChannel(options) {
         let last = Promise.resolve();
         subscriptions.push(broker.subscribe({
           app: binding.application_id.get(), path: binding.channel_id.get(),
-          extension: binding.extension_id.get(),
+          extension: binding.extension_id.get(), activity: "C",
           program: channel.handler.toUpperCase().padEnd(30, "=") + "CP",
           session: timers.session,
           client: abap.builtin.sy.get().mandt.get(), username: abap.builtin.sy.get().uname.get(),

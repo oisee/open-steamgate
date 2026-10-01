@@ -53,10 +53,19 @@ describe("AMC in one Node process", function () {
         expect(() => broker.channel(app, "/pc", "S", "ZOSD_T_DSUB")).not.to.throw();
       } else {
         expect(channels[0].authorities[2]).to.deep.equal({
-          path: "/text", program: "ZCL_OSD_AMC_SOCKET============CP", activity: "R",
+          path: "/text", program: "ZCL_OSD_AMC_SOCKET============CP", activity: "C",
         });
       }
     }
+  });
+
+  it("authorises an APC bind by C and an AMC consumer by R", () => {
+    const channels = parseSamc(readFileSync("src/amc/zstg_amc_test.samc.xml", "utf8"), "zstg_amc_test.samc.xml");
+    const broker = new AmcBroker(channels);
+    const socket = "ZCL_OSD_AMC_SOCKET============CP";
+    const sub = (activity) => () => broker.subscribe({app: "ZOSD_AMC_TEST", path: "/text", program: socket, receive: () => {}, activity});
+    expect(sub("C")).not.to.throw();
+    expect(sub("R")).to.throw(/receive is not authorised/);
   });
 
   it("delivers client and user scopes only to matching subscriptions, system to all", () => {

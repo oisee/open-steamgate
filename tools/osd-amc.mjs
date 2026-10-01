@@ -64,8 +64,9 @@ export class AmcBroker {
     return row;
   }
 
-  subscribe({app, path, program, session, receive, extension = "", client, username}) {
-    const channel = this.channel(app, path, "R", program);
+  // activity R = AMC consumer; C = an APC WebSocket bound with bind_amc_message_consumer.
+  subscribe({app, path, program, session, receive, extension = "", client, username, activity = "R"}) {
+    const channel = this.channel(app, path, activity, program);
     const subscription = {channel, session, receive, extension, client, username, pending: [], active: true};
     this.subscribers.add(subscription);
     return {
