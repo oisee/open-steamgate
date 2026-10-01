@@ -161,11 +161,15 @@ What is known, and from where:
 - DEC/CURR/QUAN values come back as text with a trailing sign, DATS as
   `YYYYMMDD`, TIMS as `HHMMSS`: from SAP documentation, and what the parser
   assumes; no formatting guarantee beyond that is taken for granted.
-- Whether the OFFSET column of FIELDS counts the delimiters of DATA is **not
-  measured**; the parser assumes it does (the fake system of the tests and the
-  captures of `test/fixtures/rfc/RFC_READ_TABLE/` are laid out that way) and
-  stops if that is not so. To be checked on the sandbox; the `delimiter`
-  option is the way out.
+- The OFFSET column of FIELDS **counts the delimiters of DATA**: measured on
+  the A4H sandbox (2026-10-01) by calling `RFC_READ_TABLE` on `T000` with
+  `DELIMITER = '|'` and fields MANDT, MTEXT, ORT01: FIELDS came back as
+  offsets 0 / 4 / 30 with lengths 3 / 25 / 25, and each DATA row had the
+  delimiter at position 3 and 29 (`000|<25 chars>|<city>`); without a
+  delimiter the row is the fields back to back. The parser's layout check
+  (a delimiter before every field after the first) matches that, and the
+  fake system and the captures of `test/fixtures/rfc/RFC_READ_TABLE/` are laid
+  out the same way. The trailing blanks of the last field are not sent.
 - `RFC_READ_TABLE` reads the logon client of a client-dependent table and is
   not remote-enabled everywhere; authority checks (S_TABU_DIS) run as the RFC
   user. Not proxied here, as in P1.
