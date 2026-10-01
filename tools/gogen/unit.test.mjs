@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {spawnSync} from "node:child_process";
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {spawn, spawnSync} from "node:child_process";
+import {chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {fileURLToPath} from "node:url";
 import {dirname, join} from "node:path";
@@ -9,6 +9,15 @@ import {reconcile} from "./unit-results.mjs";
 import {compileProgram, columnRegistry} from "./frontend.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+const root = join(here, "..", "..");
+const staticsArgs = [join(here, "unit.mjs"), "--fixture", "test/fixtures/unit-statics", "--class", "ZCL_OSD_STATICS_TEST", "--jobs", "2"];
+const unitRun = (argv, env = {}) => new Promise((resolveRun) => {
+  const child = spawn("node", argv, {cwd: root, env: {...process.env, ...env}});
+  let stdout = "", stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  child.on("close", (status) => resolveRun({status, stdout, stderr, result: stdout ? JSON.parse(stdout) : null}));
+});
 test("a reused frontend registry keeps CDS to SQL view names", () => {
   const args = {folders: [join(here, "testdata")], objects: []};
   const first = compileProgram(args);
@@ -106,9 +115,72 @@ test("ABAP Unit class statics and constructor restart for each Go test class", {
   });
   assert.equal(sharded.status, 0, sharded.stderr || sharded.error?.message || sharded.stdout);
   assert.deepEqual(JSON.parse(sharded.stdout).rows, rows);
-  assert.deepEqual(JSON.parse(readFileSync(join(dir, "shard-0", "classes.json"), "utf8")).length, 1);
-  assert.deepEqual(JSON.parse(readFileSync(join(dir, "shard-1", "classes.json"), "utf8")).length, 1);
+  const buildDir = JSON.parse(sharded.stdout).buildDir;
+  assert.ok(existsSync(join(buildDir, "generated", "core", "zz_generated.go")));
+  assert.equal(existsSync(join(dirname(buildDir), "shards")), false);
   rmSync(dir, {recursive: true, force: true});
+});
+
+test("overlapping unit runs isolate generated Go and shard files, even with one output directory", {timeout: 120000}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-overlap-"));
+  try {
+    for (const shared of [false, true]) {
+      const outA = join(dir, shared ? "shared" : "a");
+      const outB = join(dir, shared ? "shared" : "b");
+      const [a, b] = await Promise.all([unitRun([...staticsArgs, "--out", outA]), unitRun([...staticsArgs, "--out", outB])]);
+      for (const run of [a, b]) {
+        assert.equal(run.status, 0, run.stderr || run.stdout);
+        assert.deepEqual(run.result.rows.map((row) => row.status), ["SUCCESS", "SUCCESS", "SUCCESS", "SUCCESS"]);
+        assert.equal(existsSync(join(dirname(run.result.buildDir), "shards")), false);
+      }
+      assert.notEqual(a.result.buildDir, b.result.buildDir);
+      assert.ok(existsSync(join(a.result.buildDir, "cmd", "unit", "zz_generated.go")));
+      assert.ok(existsSync(join(b.result.buildDir, "cmd", "unit", "zz_generated.go")));
+    }
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("a missing or corrupt seed image and a killed shard fail every assigned method", {timeout: 120000}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-faults-"));
+  const wrapper = join(dir, "runner.mjs");
+  writeFileSync(wrapper, `#!/usr/bin/env node
+import {spawnSync} from "node:child_process";
+import {rmSync, writeFileSync} from "node:fs";
+const args = process.argv.slice(2);
+const image = args[args.indexOf("--seed-image") + 1];
+if (args.includes("--classes-file")) {
+  if (process.env.GOGEN_UNIT_TEST_FAULT === "limit") {
+    process.stderr.write("earlier stderr\\n");
+    process.stdout.write("x".repeat(21e6));
+    setInterval(() => {}, 1000);
+  }
+}
+if (args.includes("--classes-file") && process.env.GOGEN_UNIT_TEST_FAULT === "limit") {
+  await new Promise(() => {});
+}
+const run = spawnSync(process.env.GOGEN_UNIT_BINARY, args, {stdio: "inherit"});
+if (args.includes("--seed-image-out") && run.status === 0) {
+  const target = args[args.indexOf("--seed-image-out") + 1];
+  if (process.env.GOGEN_UNIT_TEST_FAULT === "missing") rmSync(target);
+  if (process.env.GOGEN_UNIT_TEST_FAULT === "corrupt") writeFileSync(target, "not a SQLite database");
+}
+process.exit(run.status ?? 1);
+`);
+  chmodSync(wrapper, 0o755);
+  try {
+    for (const fault of ["missing", "corrupt", "limit"]) {
+      const run = await unitRun([...staticsArgs, "--out", join(dir, fault)],
+        {GOGEN_UNIT_RUNNER: wrapper, GOGEN_UNIT_TEST_FAULT: fault});
+      assert.equal(run.status, 1, run.stderr || run.stdout);
+      assert.deepEqual(run.result.rows.map((row) => row.status), ["FAILED", "FAILED", "FAILED", "FAILED"]);
+      const messages = run.result.rows.map((row) => row.message);
+      if (fault === "limit") {
+        assert.ok(messages.every((msg) => /stdout limit exceeded/.test(msg)), messages.join("\n"));
+        assert.ok(messages.every((msg) => !/earlier stderr/.test(msg)));
+      } else assert.ok(messages.every((msg) => /seed image:/.test(msg)));
+      assert.equal(existsSync(join(dirname(run.result.buildDir), "shards")), false);
+    }
+  } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
 test("unit statics parity labels only reviewed Node assertions as nodeAnomaly", () => {

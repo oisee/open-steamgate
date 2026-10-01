@@ -1,7 +1,7 @@
 // ABAP Unit on gogen. Test includes are compiled only for selected owners.
 // Results are JSON rows: {class, testclass, method, status, message}.
 import {spawn, spawnSync} from "node:child_process";
-import {appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
+import {appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync} from "node:fs";
 import {availableParallelism} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {performance} from "node:perf_hooks";
@@ -65,6 +65,9 @@ if (args.includes("--per-owner") && !selected.size && !fixture) {
   console.log(JSON.stringify({classes: owners.length, compiled: compiled.length, rows, timingMs}));
   process.exit(rows.some((r) => r.status === "FAILED") ? 1 : rows.some((r) => r.status === "NOT_COMPILED" || r.status === "NEEDS_DB") ? 2 : 0);
 }
+mkdirSync(out, {recursive: true});
+const runDir = mkdtempSync(join(out, "run-"));
+const goDir = join(runDir, "go");
 const libDirs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/framework", "open-abap-odata/src", "ajson/src/core"]
   .map((x) => join(home, ".local", "lars", x)).filter(existsSync);
 const folders = [...(fixture ? sourceFolders : inputFoldersOf(home, config).map((f) => join(home, f))), ...libDirs].filter(existsSync);
@@ -322,8 +325,8 @@ function writeGeneratedGo(dir) {
     writeFileSync(join(dir, "zz_generated.go"), emitGo(program, "main", null, true));
     return;
   }
-  const coreDir = join(here, "go", "generated", "core");
-  const appDir = join(here, "go", "generated", "app");
+  const coreDir = join(goDir, "generated", "core");
+  const appDir = join(goDir, "generated", "app");
   mkdirSync(coreDir, {recursive: true});
   mkdirSync(appDir, {recursive: true});
   const coreNames = new Set(layerClasses[0].map((c) => c.name));
@@ -368,7 +371,7 @@ const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; 
   "func caught(f func()) (msg string) { defer func() { if x := recover(); x != nil { msg = failureMessage(x) } }(); f(); return }",
   "func caughtTeardown(f func()) (msg string, assertion, quitNo bool) { defer func() { if x := recover(); x != nil { msg = failureMessage(x); if r, ok := abap.AsRaised(x); ok && r.Class == \"KERNEL_CX_ASSERT\" { assertion, quitNo = true, r.AssertionQuitNo } } }(); f(); return }",
   "func isNotCompiled(msg string) bool { return strings.Contains(msg, \"NOT_COMPILED in \") }",
-  `func main() { if err := abap.SetMediaDir(${JSON.stringify(join(out, "media"))}); err != nil { panic(err) }; results := []result{}`,
+  `func main() { if err := abap.SetMediaDir(${JSON.stringify(join(runDir, "media"))}); err != nil { panic(err) }; results := []result{}`,
   "classesFile := flag.String(\"classes-file\", \"\", \"JSON list of test classes to run\")",
   "imageFile := flag.String(\"seed-image\", \"\", \"seeded SQLite image\")",
   "imageOut := flag.String(\"seed-image-out\", \"\", \"write seeded SQLite image and exit\")",
@@ -411,11 +414,14 @@ for (const {key, methods} of groups) {
   generated.push("abap.EndTestClass(s)", `durations[${JSON.stringify(key)}] = float64(time.Since(classStarted).Microseconds()) / 1000`, "}");
 }
 generated.push("if *timingsOut != \"\" { data, err := json.Marshal(durations); if err != nil { panic(err) }; if err := os.WriteFile(*timingsOut, data, 0600); err != nil { panic(err) } }", "enc := json.NewEncoder(os.Stdout); if err := enc.Encode(results); err != nil { panic(err) }", "}");
-mkdirSync(out, {recursive: true});
+// Go resolves imports inside its module tree. Copy the small module into this
+// invocation's tree so another unit run cannot replace generated packages
+// between emission and compilation.
+cpSync(join(here, "go"), goDir, {recursive: true});
 const {collectMedia, writeMedia, replaceWwwparams} = await import("./media.mjs");
 const media = collectMedia(folders.filter(existsSync));
-writeMedia(media, join(out, "media"));
-const dir = join(here, "go", "cmd", "unit");
+writeMedia(media, join(runDir, "media"));
+const dir = join(goDir, "cmd", "unit");
 mkdirSync(dir, {recursive: true});
 writeGeneratedGo(dir);
 writeFileSync(join(dir, "zz_main.go"), generated.join("\n") + "\n");
@@ -427,7 +433,7 @@ if (ready.some((r) => r.db)) {
   writeFileSync(join(dir, "zz_db.json"), JSON.stringify(replaceWwwparams([...db.schemas.sqlite, ...db.insert, ...seedStatements()], media)));
 } else writeFileSync(join(dir, "zz_db.json"), "[]");
 timingMs.emit = Math.round(performance.now() - emitStarted);
-const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.class)).size, rows, timingMs, layers: layerInfo};
+const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.class)).size, rows, timingMs, layers: layerInfo, buildDir: goDir};
 const updateCompiledCount = () => {
   summary.compiled = owners.filter((owner) => {
     const own = rows.filter((r) => r.class === owner);
@@ -435,10 +441,10 @@ const updateCompiledCount = () => {
       && own.every((r) => r.status !== "NOT_COMPILED" && r.status !== "NEEDS_DB");
   }).length;
 };
-writeFileSync(join(out, "plan.json"), JSON.stringify(summary, null, 2));
+writeFileSync(join(runDir, "plan.json"), JSON.stringify(summary, null, 2));
 if (!ready.length || args.includes("--build-only")) { console.log(JSON.stringify(summary)); process.exit(ready.length ? 0 : 2); }
-const bin = join(out, "unit");
-if (process.env.GOGEN_GO_BUILD_X) writeFileSync(join(out, "go-build-x.log"), "");
+const bin = join(runDir, "unit");
+if (process.env.GOGEN_GO_BUILD_X) writeFileSync(join(runDir, "go-build-x.log"), "");
 // The Go compiler can reject a method that the IR frontend accepted. Find
 // its ABAP source position, retain its typed signature, and emit a method
 // that raises NOT_COMPILED when reached. The next build reports any further
@@ -469,9 +475,9 @@ let build;
 for (let attempt = 0; attempt < 100; attempt++) {
   const buildStarted = performance.now();
   build = spawnSync("go", ["build", ...(process.env.GOGEN_GO_BUILD_X ? ["-x"] : []), "-trimpath", "-o", bin, "./cmd/unit"], {
-    cwd: join(here, "go"), encoding: "utf8", env: {...process.env, GOCACHE: process.env.GOCACHE ?? join(here, ".out", "go-cache")}, maxBuffer: 5e6,
+    cwd: goDir, encoding: "utf8", env: {...process.env, GOCACHE: process.env.GOCACHE ?? join(here, ".out", "go-cache")}, maxBuffer: 5e6,
   });
-  if (process.env.GOGEN_GO_BUILD_X) appendFileSync(join(out, "go-build-x.log"), build.stderr ?? "");
+  if (process.env.GOGEN_GO_BUILD_X) appendFileSync(join(runDir, "go-build-x.log"), build.stderr ?? "");
   timingMs.goBuild += Math.round(performance.now() - buildStarted);
   if (build.status === 0) break;
   if (!stubGoErrors(build.stderr ?? "")) break;
@@ -493,53 +499,91 @@ const runDetail = {seedImageMs: 0, shards: [], mergeMs: 0};
 // callers. Shards share only immutable generated code, media and seed bytes.
 const timingFile = join(out, "class-timings.json");
 const oldTimings = existsSync(timingFile) ? JSON.parse(readFileSync(timingFile, "utf8")) : {};
+const saveTimings = (latest) => {
+  const temp = join(runDir, "class-timings.json");
+  writeFileSync(temp, JSON.stringify({...oldTimings, ...latest}, null, 2));
+  renameSync(temp, timingFile);
+};
 const shards = Array.from({length: Math.min(jobs, groups.length)}, () => ({keys: [], weight: 0}));
 const orderedGroups = [...groups].sort((a, b) => a.key.localeCompare(b.key));
-if (Object.keys(oldTimings).length) orderedGroups.sort((a, b) =>
-  (oldTimings[b.key] ?? 0) - (oldTimings[a.key] ?? 0) || a.key.localeCompare(b.key));
+const knownWeights = Object.values(oldTimings).filter((n) => typeof n === "number" && Number.isFinite(n) && n > 0).sort((a, b) => a - b);
+const middle = Math.floor(knownWeights.length / 2);
+const fallbackWeight = knownWeights.length ? (knownWeights[middle] + knownWeights[(knownWeights.length - 1) >> 1]) / 2 : 1;
+const weightOf = (key) => typeof oldTimings[key] === "number" && Number.isFinite(oldTimings[key]) && oldTimings[key] > 0
+  ? oldTimings[key] : fallbackWeight;
+if (knownWeights.length) orderedGroups.sort((a, b) =>
+  weightOf(b.key) - weightOf(a.key) || a.key.localeCompare(b.key));
 for (const [index, group] of orderedGroups.entries()) {
-  const shard = Object.keys(oldTimings).length
+  const shard = knownWeights.length
     ? shards.reduce((best, next) => next.weight < best.weight ? next : best)
     : shards[index % shards.length];
   shard.keys.push(group.key);
-  shard.weight += oldTimings[group.key] ?? 1;
+  shard.weight += weightOf(group.key);
 }
-const runProcess = (argv, env) => new Promise((resolveRun) => {
-  const child = spawn(bin, argv, {encoding: "utf8", env});
-  let stdout = "", stderr = "", error;
-  const timer = setTimeout(() => child.kill("SIGKILL"), 120000);
-  child.stdout.on("data", (chunk) => { stdout += chunk; if (stdout.length > 20e6) child.kill("SIGKILL"); });
-  child.stderr.on("data", (chunk) => { stderr += chunk; if (stderr.length > 20e6) child.kill("SIGKILL"); });
+const runner = process.env.GOGEN_UNIT_RUNNER ?? bin;
+const runProcess = (argv, env, cwd) => new Promise((resolveRun) => {
+  const child = spawn(runner, argv, {encoding: "utf8", env: {...env, GOGEN_UNIT_BINARY: bin}, cwd});
+  let stdout = "", stderr = "", error, killReason;
+  const kill = (reason) => { killReason ??= reason; child.kill("SIGKILL"); };
+  const timer = setTimeout(() => kill("timeout after 120000 ms"), 120000);
+  child.stdout.on("data", (chunk) => { stdout += chunk; if (stdout.length > 20e6) kill("stdout limit exceeded (20 MB)"); });
+  child.stderr.on("data", (chunk) => { stderr += chunk; if (stderr.length > 20e6) kill("stderr limit exceeded (20 MB)"); });
   child.on("error", (e) => { error = e; });
-  child.on("close", (status, signal) => { clearTimeout(timer); resolveRun({status, signal, stdout, stderr, error}); });
+  child.on("close", (status, signal) => { clearTimeout(timer); resolveRun({status, signal, stdout, stderr, error, killReason}); });
 });
 let actual = [];
 let durations = {};
 if (shards.length <= 1) {
   const started = performance.now();
-  const phasesFile = join(out, "phases.json");
-  const run = spawnSync(bin, ["--timings-out", timingFile, "--phases-out", phasesFile], {encoding: "utf8", timeout: 120000, maxBuffer: 20e6});
+  const phasesFile = join(runDir, "phases.json");
+  const singleDir = join(runDir, "single");
+  mkdirSync(singleDir);
+  const tempDir = join(singleDir, "tmp");
+  const datasetDir = join(singleDir, "dataset");
+  mkdirSync(tempDir); mkdirSync(datasetDir);
+  const env = {...process.env, GOGEN_UNIT_BINARY: bin, TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir,
+    OSD_DATASET_READ: datasetDir, OSD_DATASET_WRITE: datasetDir, OSD_DATASET_HOME: datasetDir,
+    OSD_DATASET_AUDIT: join(datasetDir, "audit.ndjson")};
+  const runTimingsFile = join(runDir, "timings.json");
+  const run = spawnSync(runner, ["--timings-out", runTimingsFile, "--phases-out", phasesFile], {
+    encoding: "utf8", timeout: 120000, maxBuffer: 20e6, cwd: singleDir, env,
+  });
   if (run.status !== 0) {
     for (const r of ready) { r.status = "FAILED"; r.message = `runner: ${run.stderr || run.error?.message || run.signal || run.status}`; }
     updateCompiledCount();
+    rmSync(singleDir, {recursive: true, force: true});
     console.log(JSON.stringify({...summary, rows})); process.exit(1);
   }
   actual = JSON.parse(run.stdout);
+  const latestTimings = JSON.parse(readFileSync(runTimingsFile, "utf8"));
+  saveTimings(latestTimings);
   runDetail.shards.push({index: 0, startMs: Math.round(started - runStarted), endMs: Math.round(performance.now() - runStarted),
     classes: groups.length, startupSeedMs: JSON.parse(readFileSync(phasesFile, "utf8")).startupSeedMs,
-    classMs: Object.values(JSON.parse(readFileSync(timingFile, "utf8"))).reduce((a, b) => a + b, 0)});
+    classMs: Object.values(latestTimings).reduce((a, b) => a + b, 0)});
+  rmSync(singleDir, {recursive: true, force: true});
 } else {
   const seedStarted = performance.now();
-  const seed = spawnSync(bin, ["--seed-image-out", join(out, "seed.sqlite")], {encoding: "utf8", timeout: 120000, maxBuffer: 20e6});
+  const scratchDir = join(runDir, "shards");
+  mkdirSync(scratchDir);
+  const seedFile = join(scratchDir, "seed.sqlite");
+  const seed = spawnSync(runner, ["--seed-image-out", seedFile], {
+    encoding: "utf8", timeout: 120000, maxBuffer: 20e6, cwd: scratchDir, env: {...process.env, GOGEN_UNIT_BINARY: bin},
+  });
   runDetail.seedImageMs = Math.round(performance.now() - seedStarted);
-  if (seed.status !== 0) {
-    for (const r of ready) { r.status = "FAILED"; r.message = `seed image: ${seed.stderr || seed.error?.message || seed.signal || seed.status}`; }
+  const seedHeader = existsSync(seedFile) ? readFileSync(seedFile).subarray(0, 16).toString("utf8") : "";
+  const seedError = seed.status !== 0 ? seed.stderr || seed.error?.message || seed.signal || seed.status
+    : !existsSync(seedFile) ? "seed image missing"
+      : ready.some((r) => r.db) ? (seedHeader !== "SQLite format 3\0" ? "invalid SQLite seed image" : "")
+        : seedHeader ? "unexpected seed image for a database-free run" : "";
+  if (seedError) {
+    for (const r of ready) { r.status = "FAILED"; r.message = `seed image: ${seedError}`; }
     updateCompiledCount();
+    rmSync(scratchDir, {recursive: true, force: true});
     console.log(JSON.stringify({...summary, rows})); process.exit(1);
   }
   const results = await Promise.all(shards.map(async (shard, index) => {
     const started = performance.now();
-    const shardDir = join(out, `shard-${index}`);
+    const shardDir = join(scratchDir, `shard-${index}`);
     const tempDir = join(shardDir, "tmp");
     const datasetDir = join(shardDir, "dataset");
     mkdirSync(tempDir, {recursive: true}); mkdirSync(datasetDir, {recursive: true});
@@ -550,11 +594,11 @@ if (shards.length <= 1) {
     const env = {...process.env, TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir,
       OSD_DATASET_READ: datasetDir, OSD_DATASET_WRITE: datasetDir, OSD_DATASET_HOME: datasetDir,
       OSD_DATASET_AUDIT: join(datasetDir, "audit.ndjson")};
-    const run = await runProcess(["--classes-file", classesFile, "--seed-image", join(out, "seed.sqlite"),
-      "--timings-out", durationsFile, "--phases-out", phasesFile], env);
+    const run = await runProcess(["--classes-file", classesFile, "--seed-image", seedFile,
+      "--timings-out", durationsFile, "--phases-out", phasesFile], env, shardDir);
     const phase = {index, startMs: Math.round(started - runStarted), endMs: Math.round(performance.now() - runStarted), classes: shard.keys.length};
     runDetail.shards.push(phase);
-    if (run.status !== 0) return {keys: shard.keys, error: run.stderr || run.error?.message || run.signal || `exit ${run.status}`};
+    if (run.killReason || run.status !== 0) return {keys: shard.keys, error: run.killReason || run.error?.message || run.stderr || run.signal || `exit ${run.status}`};
     try {
       const durations = JSON.parse(readFileSync(durationsFile, "utf8"));
       phase.classMs = Object.values(durations).reduce((a, b) => a + b, 0);
@@ -569,8 +613,9 @@ if (shards.length <= 1) {
         actual.push(...group.methods.map((r) => ({...r, status: "FAILED", message: `runner: ${result.error}`})));
     } else { actual.push(...result.rows); Object.assign(durations, result.durations); }
   }
-  writeFileSync(timingFile, JSON.stringify({...oldTimings, ...durations}, null, 2));
+  saveTimings(durations);
   runDetail.mergeMs = Math.round(performance.now() - mergeStarted);
+  rmSync(scratchDir, {recursive: true, force: true});
 }
 timingMs.run = Math.round(performance.now() - runStarted);
 timingMs.runDetail = runDetail;

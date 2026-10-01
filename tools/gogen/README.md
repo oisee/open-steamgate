@@ -1554,10 +1554,13 @@ generated rows plus `test/seed.mjs` rows. Explicitly skipped methods remain
 `SKIPPED`. An unbuilt owner cannot make another owner disappear; `--per-owner`
 builds each owner separately for diagnosis. The normal runner accepts `--jobs N`
 (`--jobs 1` keeps the single-process path; the default is the available CPU
-count, capped at 16). It builds one binary, writes one seeded SQLite image,
-then runs test classes in separate processes with private temporary and
-DATASET directories. `--out` holds `class-timings.json`, which balances the
-next run; without timings, classes are assigned in name order round robin.
+count, capped at 16). Each invocation builds in a unique `--out/run-*` Go
+tree and writes one seeded SQLite image, then runs test classes in separate
+working directories with private temporary and DATASET directories. Shard
+scratch and the seed image are removed after the run. `--out` holds
+`class-timings.json`, which balances the next run; without timings, classes
+are assigned in name order round robin. The report's `buildDir` points to
+the run's Go tree for follow-on builds.
 The JSON report keeps the single-process row order and schema. A crashed
 shard marks its assigned methods failed with the process reason.
 
