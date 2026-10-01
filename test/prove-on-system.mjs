@@ -905,6 +905,17 @@ describe("osd-prove-on-system", () => {
         assert.ok(mcp.sys.tadir.some((t) => t.item === PLAIN_ITEM));
       });
 
+      it("an XML leaf that was empty and now holds only whitespace is a foreign edit: kept, no second call", async () => {
+        const mcp = fakeSystem({touchAfterReceipt: moved,
+          afterImport: (sys) => { const f = sys.files.get(PLAIN_ITEM); f.set(PLAIN_XML, f.get(PLAIN_XML).replace("<UNICODE>X</UNICODE>", "<UNICODE/>")); },
+          beforeCheck: (sys) => { const f = sys.files.get(PLAIN_ITEM); f.set(PLAIN_XML, f.get(PLAIN_XML).replace("<UNICODE/>", "<UNICODE> </UNICODE>")); }});
+        const {code, text} = await run(base(), mcp);
+        assert.equal(code, 1, text);
+        assert.match(text, /a foreign edit; kept/);
+        assert.equal(kinds(mcp).filter((k) => k === "cleanup").length, 1);
+        assert.ok(mcp.sys.tadir.some((t) => t.item === PLAIN_ITEM));
+      });
+
       it("an XML file that is no longer one well-formed tree is kept", async () => {
         const mcp = fakeSystem({touchAfterReceipt: moved, beforeCheck: (sys) => sys.files.get(PLAIN_ITEM).set(PLAIN_XML,
           sys.files.get(PLAIN_ITEM).get(PLAIN_XML).replace("</abapGit>", ""))});

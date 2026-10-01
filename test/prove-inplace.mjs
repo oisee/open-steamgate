@@ -409,6 +409,21 @@ describe("osd-prove-on-system --in-place", () => {
     assert.deepEqual(snapHashes(mcp), before);
   });
 
+  it("(b) an XML leaf that is empty in the zip and whitespace on the system is NOT equal: refused, not adopted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-prove-after-"));
+    try {
+      cpSync(join(FIXTURE, "src"), dir, {recursive: true});
+      const f = join(dir, DEMO_XML);
+      writeFileSync(f, readFileSync(f, "utf8").replace("<UNICODE>X</UNICODE>", "<UNICODE/>"));
+      const mcp = fakeSystem({stored: (n, t, sys) => (sys.imports === 1 && n === DEMO_XML ? t.replace("<UNICODE/>", "<UNICODE> </UNICODE>") : t)});
+      const {code, text} = await run([dir, "--in-place", "--package", PKG, "--unit", "prove-demo", "--manifest", MANIFEST], mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL deployed version: CLAS ZCL_OSD_PROVE_DEMO is not what this run deployed \(zcl_osd_prove_demo\.clas\.xml is neither the AFTER zip's/);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
   it("(c) an XML file the deploy left as it was in the snapshot is adopted (nothing of ours in it)", async () => {
     const mcp = fakeSystem({stored: (n, t, sys) => (sys.imports === 1 && n.endsWith(".xml") ? sysFile(sys, n) : t)});
     const before = snapHashes(mcp);
@@ -448,6 +463,17 @@ describe("osd-prove-on-system --in-place", () => {
     assert.equal(code, 1, text);
     assert.match(text, /CLAS ZCL_OSD_PROVE_PLAIN is not what this run deployed \(zcl_osd_prove_plain\.clas\.locals_imp\.abap is shown by the system, is not in the AFTER zip and is not the snapshot's\)/);
     assert.equal(mcp.sys.objects.get(PLAIN).files.get(PLAIN_LOCALS), "* added by somebody\n");
+  });
+
+  it("canonical XML: whitespace-only text is dropped only between element children; a leaf keeps it; xml:space=preserve keeps all", () => {
+    assert.notEqual(canonicalXml("<a><b> </b></a>"), canonicalXml("<a><b/></a>"));
+    assert.notEqual(canonicalXml("<a><b> </b></a>"), canonicalXml("<a><b></b></a>"));
+    assert.notEqual(canonicalXml("<a><b>\n</b></a>"), canonicalXml("<a><b> </b></a>"));
+    assert.equal(canonicalXml("<a><b></b></a>"), canonicalXml("<a><b/></a>"));
+    assert.equal(canonicalXml("<a>\n  <b>x</b>\n  <c/>\n</a>"), canonicalXml("<a><b>x</b><c/></a>"));
+    assert.notEqual(canonicalXml("<a xml:space=\"preserve\">\n  <b>x</b>\n</a>"), canonicalXml("<a xml:space=\"preserve\"><b>x</b></a>"));
+    assert.notEqual(canonicalXml("<a xml:space=\"preserve\"><b>\n <c/> </b></a>"), canonicalXml("<a xml:space=\"preserve\"><b><c/></b></a>"), "inherited by the subtree");
+    assert.equal(canonicalXml("<a xml:space=\"preserve\"><b xml:space=\"default\">\n <c/> </b></a>"), canonicalXml("<a xml:space=\"preserve\"><b xml:space=\"default\"><c/></b></a>"));
   });
 
   it("canonical XML: attribute order, whitespace-only text, empty-element form, CDATA and entities do not count; content does", () => {

@@ -734,25 +734,34 @@ const unescapeXml = (t) => t.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|ap
 
 /** An XML document as a canonical string: elements with their attributes
  *  sorted by name and values unescaped, text unescaped (CDATA as text,
- *  adjacent text joined), whitespace-only text dropped; the declaration,
- *  comments and processing instructions do not count. Undefined when the
- *  text is not one well-formed element tree (unbalanced tags, a second
- *  root, text outside the root, a DOCTYPE): such a file is not decided. */
+ *  adjacent text joined); the declaration, comments and processing
+ *  instructions do not count. Whitespace-only text is dropped ONLY between
+ *  the element children of an element that has some (indentation); the text
+ *  of a leaf element is kept exactly, so `<a> </a>` differs from `<a/>` and
+ *  `<a></a>` equals `<a/>` (empty is empty); inside `xml:space="preserve"`
+ *  nothing is dropped. Undefined when the text is not one well-formed
+ *  element tree (unbalanced tags, a second root, text outside the root, a
+ *  DOCTYPE): such a file is not decided. */
 export function canonicalXml(buf) {
   const src = Buffer.from(buf).toString("utf8").replace(/^\uFEFF/, "");
   const tag = /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[([\s\S]*?)\]\]>|<!|<\/\s*([^\s>]+)\s*>|<([^\s/>!?]+)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>|</g;
-  const out = [];
   const stack = [];
-  let roots = 0;
+  let root;
   let text = "";
   let at = 0;
   const flush = () => {
-    if (text.trim() !== "") {
-      if (stack.length === 0) return false;
-      out.push(`T${JSON.stringify(text)}`);
+    if (text !== "") {
+      if (stack.length === 0) {
+        if (text.trim() !== "") return false;
+      } else stack.at(-1).kids.push(text);
     }
     text = "";
     return true;
+  };
+  const render = (n) => {
+    const hasEl = n.kids.some((k) => typeof k !== "string");
+    const kids = n.kids.filter((k) => typeof k !== "string" || n.preserve || !hasEl || k.trim() !== "");
+    return `(${n.name}${JSON.stringify(n.attrs)}${kids.map((k) => (typeof k === "string" ? `T${JSON.stringify(k)}` : render(k))).join("")})`;
   };
   for (const m of src.matchAll(tag)) {
     text += unescapeXml(src.slice(at, m.index));
@@ -762,21 +771,26 @@ export function canonicalXml(buf) {
     if (m[0] === "<!" || m[0] === "<") return undefined;
     if (!flush()) return undefined;
     if (m[2] !== undefined) {
-      if (stack.pop() !== m[2]) return undefined;
-      out.push(")");
+      const n = stack.pop();
+      if (n?.name !== m[2]) return undefined;
+      if (stack.length === 0) root = n;
+      else stack.at(-1).kids.push(n);
       continue;
     }
-    if (stack.length === 0 && (roots += 1) > 1) return undefined;
+    if (stack.length === 0 && root !== undefined) return undefined;
     const attrs = [...m[4].matchAll(/([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)]
-      .map((a) => [a[1], unescapeXml(a[2] ?? a[3])]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+      .map((a) => [a[1], unescapeXml(a[2] ?? a[3])]).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0));
     if (new Set(attrs.map(([n]) => n)).size !== attrs.length) return undefined;
-    out.push(`(${m[3]}${JSON.stringify(attrs)}`);
-    if (m[5] === "/") out.push(")");
-    else stack.push(m[3]);
+    const sp = attrs.find(([n]) => n === "xml:space")?.[1];
+    const n = {name: m[3], attrs, kids: [], preserve: sp === "preserve" || (sp !== "default" && stack.at(-1)?.preserve === true)};
+    if (m[5] === "/") {
+      if (stack.length === 0) root = n;
+      else stack.at(-1).kids.push(n);
+    } else stack.push(n);
   }
   text += unescapeXml(src.slice(at));
-  if (!flush() || stack.length > 0 || roots !== 1) return undefined;
-  return out.join("");
+  if (!flush() || stack.length > 0 || root === undefined) return undefined;
+  return render(root);
 }
 
 /** Where a snapshot's copy of an object lies, for a restore by hand. */

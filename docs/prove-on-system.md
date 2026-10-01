@@ -115,8 +115,10 @@ differs, the cleanup does not treat that as an edit by default and does not
 ignore it either. At receipt time each XML file is also read back by chunks (the
 chunk carries the file's hash, so it is that version) and the SHA-256 of its
 **canonical element tree** (`canonicalXml`, the in-place mode's: attributes
-sorted, whitespace-only text dropped, entities and CDATA read, declaration and
-comments ignored; a file that is not one well-formed tree has none) is stored as
+sorted, whitespace-only text dropped only between the element children of an
+element that has some (indentation), the text of a leaf kept exactly so `<a> </a>`
+differs from `<a/>`, `xml:space="preserve"` keeping everything in its subtree,
+entities and CDATA read, declaration and comments ignored; a file that is not one well-formed tree has none) is stored as
 `cx`. At cleanup, an object whose stamp moved and whose hash differs is
 accepted only if **every differing file is XML, the set of file names is the
 same, each such file has a `cx`, and its canonical tree now equals it**. Then the
