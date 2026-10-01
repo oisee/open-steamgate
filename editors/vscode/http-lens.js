@@ -1,7 +1,7 @@
 "use strict";
 
 // A deliberately small .http reader. The full case parser lives elsewhere.
-const {implementationMethodLine} = require("./lib.js");
+const {resolveImplementationMethod} = require("./lib.js");
 
 function requestBlocks(source) {
   const lines = String(source ?? "").split(/\r\n|\r|\n/);
@@ -54,14 +54,9 @@ function resolveRequest(request, rows, map, sources) {
   const kind = match[2] === undefined ? "get_entityset" : "get_entity";
   const set = map.sets?.find((one) => one.kind === kind && one.set.toUpperCase() === match[1].toUpperCase());
   if (!set) return unresolved(`unknown entity set or ${kind.toUpperCase()} method`, line);
-  const ext = String(row.handler).toUpperCase();
-  const base = ext.replace(/_EXT$/, "");
-  for (const owner of [...new Set([ext, base])]) {
-    const file = sources?.[owner];
-    const at = file && implementationMethodLine(file.source, set.method);
-    if (at && file.path) return {line, title: `${service} › ${set.set} › ${kind.toUpperCase()} → ${owner.toLowerCase()}:${at} (static) · last: not run`,
-      owner, set, path: file.path, methodLine: at};
-  }
+  const found = resolveImplementationMethod(row.handler, set.method, sources);
+  if (found) return {line, title: `${service} › ${set.set} › ${kind.toUpperCase()} → ${found.owner.toLowerCase()}:${found.line} (static) · last: not run`,
+    owner: found.owner, set, path: found.path, methodLine: found.line};
   return unresolved("owning method source unavailable", line);
 }
 

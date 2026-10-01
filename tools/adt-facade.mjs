@@ -34,7 +34,7 @@ import {portabilityWarnings} from "./amdp-gen.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
 import {objectVersions, versionSource, versionsFeedDocument} from "./adt-versions.mjs";
-import {segwRegistrations} from "./segw-registry.mjs";
+import {segwRegistrations, registeredServices} from "./segw-registry.mjs";
 import {generatorFoldersOf} from "./osd-packs.mjs";
 import {entitySetMapFor} from "./segw-entityset-map.mjs";
 import {testClassesIn} from "./osd-unit-run.mjs";
@@ -42,6 +42,17 @@ import {serviceTree} from "./osd-status.mjs";
 import {transactions} from "./osd-tran-registry.mjs";
 
 export const BASE = "/sap/bc/adt";
+
+export function countServiceRegistrations(readers, rows, className) {
+  const ids = new Set(readers.flatMap((reader) => reader.services).map((service) =>
+    `/sap/opu/odata/sap/${service}`.toUpperCase()));
+  for (const row of rows) {
+    if ([row.handler, row.mpc].some((candidate) => String(candidate ?? "").toUpperCase() === className)) {
+      ids.add(String(row.path).toUpperCase());
+    }
+  }
+  return ids.size;
+}
 
 const xmlEscape = (s) => String(s)
   .replaceAll("&", "&amp;")
@@ -1482,13 +1493,15 @@ export function adtRouter(options = {}) {
   // (`data.query`, tools/osd-data.mjs) -- this is a where-used view over the
   // same seeded tables, not a second index.
   //
-  // A reader is a class if it carries its own ABAP Unit tests
+  // A reader is a test if it carries its own ABAP Unit tests
   // (tools/osd-unit-run.mjs testClassesIn, the build's own list of
   // `*.clas.testclasses.abap` objects) or a service if it is registered as a
   // service's own `_DPC_EXT` (tools/segw-registry.mjs segwRegistrations,
   // read fresh off the tree the way the entitysets route above does) --
   // both are classifications of the reader, not of the class being read, so
-  // a reader can be neither, either or both.
+  // a reader can be neither, either or both. The services count also includes
+  // registrations directly handled by the class being read (DPC, MPC or
+  // another service handler); those are not where-used readers.
   router.get(`${BASE}/core/http/xref/readers`, async (req, res) => {
     const type = String(req.query.type ?? "").toUpperCase();
     const name = String(req.query.name ?? "").toUpperCase();
@@ -1520,8 +1533,8 @@ export function adtRouter(options = {}) {
         includes = result.rows.map((r) => String(r.include).toUpperCase());
       }
       const typeOf = new Map(store.list().map((o) => [o.name, o.type]));
-    const folders = generatorFoldersOf(store.root).map((f) => join(store.root, f));
-      const registrations = segwRegistrations(folders);
+      const folders = generatorFoldersOf(store.root).map((f) => join(store.root, f));
+      const registrations = registeredServices(segwRegistrations(folders));
       const testClasses = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
       const readers = [...new Set(includes)]
         .filter((include) => include !== name)
@@ -1531,8 +1544,9 @@ export function adtRouter(options = {}) {
           name: include,
           include,
           isTest: testClasses.has(include),
-          services: registrations.filter((r) => r.dpc === include).map((r) => r.service),
+          services: registrations.filter((r) => r.dpc === include).map((r) => r.external),
         }));
+      const serviceCount = countServiceRegistrations(readers, type === "CLAS" ? serviceTree(store.root) : [], name);
       res.type("application/json; charset=utf-8").send(JSON.stringify({
         name,
         source,
@@ -1540,7 +1554,7 @@ export function adtRouter(options = {}) {
         counts: {
           readers: readers.length,
           tests: readers.filter((r) => r.isTest).length,
-          services: readers.filter((r) => r.services.length > 0).length,
+          services: serviceCount,
         },
       }));
     } catch (e) {

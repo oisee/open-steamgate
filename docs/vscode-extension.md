@@ -345,7 +345,9 @@ is marked a test when it carries its own ABAP Unit tests
 (`tools/osd-unit-run.mjs` `testClassesIn`) and a service when it is
 registered as a service's own `_DPC_EXT` (`tools/segw-registry.mjs`
 `segwRegistrations`, read fresh off the tree the way the entitysets route
-does); a reader can be neither, either, or both.
+does); a reader can be neither, either, or both. The `services` count also
+includes services registered directly to the class being viewed as DPC, MPC,
+or handler. The class itself remains absent from the where-used reader list.
 
 Clicking the lens shows a quick pick of the readers (Test / Service tagged in
 the description) and opens the file of the one chosen, by the glob its own
