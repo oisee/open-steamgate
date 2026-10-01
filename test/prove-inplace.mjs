@@ -347,6 +347,11 @@ describe("osd-prove-on-system --in-place", () => {
     assert.ok(d.indexOf("lt_a <> lt_b") < d.indexOf("li_repo->deserialize("), "the guard runs before the deserialise");
     assert.match(d, /zif_abapgit_objects=>c_deserialize_action-update\s+OR <ls_o>-action = zif_abapgit_objects=>c_deserialize_action-overwrite/);
     assert.match(d, /<ls_w>-decision = zif_abapgit_definitions=>c_no\./);
+    // abapGit plans a delete for what the AFTER zip does not carry (the
+    // package's own DEVC, measured on A4H): declined, never a refusal and
+    // never approved
+    assert.match(d, /ELSEIF <ls_o>-action = zif_abapgit_objects=>c_deserialize_action-delete\.[\s\S]{0,400}?<ls_o>-decision = zif_abapgit_definitions=>c_no\./);
+    assert.match(d, /keep=\{ <ls_o>-obj_type \}/);
     assert.match(d, /LOOP AT ls_checks-data_loss/);
     assert.doesNotMatch(d, /purge|zcl_abapgit_objects=>delete/);
     assert.throws(() => hashAbap(PKG, ["CLAS ZCL_X` TO lt_items. DELETE"]), /cannot be put into an ABAP literal/);

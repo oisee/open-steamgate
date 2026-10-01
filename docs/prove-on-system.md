@@ -375,3 +375,11 @@ touch any object that differs. The abapGit calls the snippets assume
 `zcl_abapgit_i18n_params=>new`, `cl_abap_message_digest=>calculate_hash_for_raw`)
 are measured only against the abapGit source, not yet on a system.
 Tests: `test/prove-inplace.mjs` (fake system; each rule checked failing without it).
+
+### Measured on A4H for `--in-place` (2026-10-01)
+
+- `cl_abap_message_digest` SHA-256 over abapGit's serialized files works on the sandbox; snapshot and verification hashed 13 objects.
+- An AFTER zip without `package.devc.xml` makes abapGit plan a **delete** (action 4) of the package's own DEVC entry. In place nothing is deleted: a delete action is declined (decision no) and reported as `keep=`, never approved.
+- A deploy re-activates DDIC objects even when their content is unchanged, so after an in-place run on a package that a fresh run installed with `--keep`, that fresh run's receipt stamps are stale and its `--cleanup` refuses those objects as changed. The content hashes of the in-place snapshot are unaffected (13/13 equal after rollback).
+- End to end: snapshot of 13 objects, one class changed in AFTER, 127 system tests passed, rollback re-imported that class, 13/13 hashes equal to the snapshot.
+
