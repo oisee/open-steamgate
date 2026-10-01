@@ -29,11 +29,12 @@ func selectionAgain(result ZCL_GG_HOST__TY_RESULT, input []ZIF_GG_SELECTION_SCRE
 		ready: strings.TrimSpace(e.ready), warned: input}, true
 }
 
-// confirms is the host's iv_confirm_warnings for the next run: "X" when a
-// warning was shown and the values are the ones it was given.
+// confirms is the host's iv_confirmed_warning for the next run: the text of
+// the warning shown, when the values are the ones it was given. Only that
+// warning lets its event go on; a later one is sent like the first.
 func (r selectionRetry) confirms(input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE) string {
 	if r.kind == "W" && reflect.DeepEqual(r.warned, input) {
-		return "X"
+		return r.text
 	}
 	return ""
 }

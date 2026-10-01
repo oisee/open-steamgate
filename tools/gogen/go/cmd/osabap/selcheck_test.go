@@ -79,8 +79,21 @@ func TestSelectionWarningIsConfirmedByEnter(t *testing.T) {
 }
 
 func TestSelectionObligatoryKeepsEveryFieldReady(t *testing.T) {
-	_, retry, again := selcheckRun(t, map[string]selectionInput{"P_B": {value: "x"}}, selectionRetry{})
+	// P_B is wrong too, but the empty OBLIGATORY P_A is checked first
+	_, retry, again := selcheckRun(t, map[string]selectionInput{"P_B": {value: "BAD"}}, selectionRetry{})
 	if !again || retry.kind != "E" || retry.field != "P_A" || retry.ready != "" {
 		t.Fatalf("retry %+v again %v", retry, again)
+	}
+}
+
+func TestSelectionSecondWarningIsSentAfterTheFirst(t *testing.T) {
+	values := map[string]selectionInput{"P_A": {value: "WARN2"}, "P_B": {value: "x"}}
+	_, retry, again := selcheckRun(t, values, selectionRetry{})
+	if !again || retry.text != "Are you sure" {
+		t.Fatalf("first: %+v", retry)
+	}
+	_, retry, again = selcheckRun(t, values, retry)
+	if !again || retry.kind != "W" || retry.text != "Really sure" {
+		t.Fatalf("second: %+v again %v", retry, again)
 	}
 }

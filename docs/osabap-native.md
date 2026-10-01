@@ -292,16 +292,20 @@ run:
   input, the others are dimmed: the ABAP documentation of
   [`AT SELECTION-SCREEN ON`](https://help.sap.com/doc/abapdocu_latest_index_htm/latest/en-US/abapat_selection-screen_events.htm)
   says the same for SAP GUI;
-- after a warning, Enter with the values unchanged confirms it and the event
-  goes on to `START-OF-SELECTION`; changed values run the checks again.
+- after a warning, Enter with the values unchanged confirms that warning and
+  the event goes on (a later warning is sent like the first); changed values
+  run the checks again;
+- an empty `OBLIGATORY` field is checked before the events, as on a system,
+  and a message of `AT SELECTION-SCREEN OUTPUT` keeps nothing back.
 
 `START-OF-SELECTION` runs only once the checks pass. Escape still cancels.
 Headless runs are unchanged: the message goes to stderr and the status is 1.
 The host reports this as `selection_error` of `ZCL_GG_HOST=>RUN` and takes the
-confirmation as `iv_confirm_warnings`; `tools/gogen/apps/selcheck` is the
+confirmation as `iv_confirmed_warning`; `tools/gogen/apps/selcheck` is the
 sample, `cmd/osabap/selcheck_test.go` the test. An error in
-`AT SELECTION-SCREEN ON BLOCK` leaves every field ready (the block's fields
-are not told apart yet).
+`AT SELECTION-SCREEN ON BLOCK`, `ON RADIOBUTTON GROUP` or `ON END OF` leaves
+every field ready, where SAP GUI readies the block's or the group's fields
+(not told apart yet).
 
 When stdin is not a terminal, OSABAP uses a deterministic line form instead.
 That keeps the no-argument path testable through pipes.

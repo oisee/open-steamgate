@@ -12,8 +12,11 @@ AT SELECTION-SCREEN ON p_b.
   ENDIF.
 
 AT SELECTION-SCREEN.
-  IF p_a = 'WARN'.
+  IF p_a = 'WARN' OR p_a = 'WARN2'.
     MESSAGE 'Are you sure' TYPE 'W'.
+  ENDIF.
+  IF p_a = 'WARN2'.
+    MESSAGE 'Really sure' TYPE 'W'.
   ENDIF.
 
 START-OF-SELECTION.
