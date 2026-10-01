@@ -41,7 +41,23 @@ test("a clone on its pin passes; off the pin or dirty it is named, and strict re
 
     lock(core.head, gui.head);
     writeFileSync(join(core.dir, "a.txt"), "2");
-    assert.deepEqual(libDrift(home), [`open-abap-core has uncommitted changes over its pin ${core.head.slice(0, 8)}`]);
+    assert.deepEqual(libDrift(home), [`open-abap-core has changes over its pin ${core.head.slice(0, 8)} (edited or untracked files)`]);
+    git(core.dir, "checkout", "-q", "--", "a.txt");
+    // a new class file osabap would compile counts as a change too
+    writeFileSync(join(core.dir, "zcl_new.clas.abap"), "");
+    assert.equal(libDrift(home).length, 1);
+    rmSync(join(core.dir, "zcl_new.clas.abap"));
+
+    // a plain folder inside a git repository is not answered by that repository
+    git(home, "init", "-q");
+    rmSync(gui.dir, {recursive: true, force: true});
+    mkdirSync(gui.dir, {recursive: true});
+    assert.deepEqual(libDrift(home), [`open-abap-gui is not a git clone of its own; libs.lock.json pins ${gui.head.slice(0, 8)}`]);
+
+    // strict: an unreadable lock is an error, not a pass
+    writeFileSync(join(home, "libs.lock.json"), "{");
+    assert.deepEqual(libDrift(home), []);
+    assert.throws(() => libDrift(home, undefined, {strict: true}));
   } finally {
     rmSync(home, {recursive: true, force: true});
   }
