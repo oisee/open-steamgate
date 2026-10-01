@@ -14,6 +14,10 @@ CLASS ltcl_batch_report DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL H
     METHODS static_submit_range_bt_and_e FOR TESTING.
     METHODS job_submit_checks_registry FOR TESTING.
     METHODS context_is_per_run FOR TESTING.
+    METHODS submit_selection_defaults FOR TESTING.
+    METHODS submit_with_conversion FOR TESTING.
+    METHODS submit_with_rows FOR TESTING.
+    METHODS submit_preserves_subrc FOR TESTING.
 ENDCLASS.
 
 CLASS ltcl_batch_report IMPLEMENTATION.
@@ -196,5 +200,83 @@ CLASS ltcl_batch_report IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
     FIND 'DEFAULT' IN ls_dialog-lines[ 1 ].
     cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+  ENDMETHOD.
+
+  METHOD submit_selection_defaults.
+    DATA(ls_result) = zcl_osd_batch_report=>run( iv_program = 'ZOSD_SUB_SEM' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'COMPLETED' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( ls_result-lines ) exp = 11 ).
+    FIND 'CHAR MIX' IN ls_result-lines[ 2 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'LOWER AbCdE' IN ls_result-lines[ 3 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'NUM 4' IN ls_result-lines[ 4 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND sy-datum IN ls_result-lines[ 5 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'RADIO X' IN ls_result-lines[ 6 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'RADIO2' IN ls_result-lines[ 7 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'X' IN ls_result-lines[ 7 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'HEADER A' IN ls_result-lines[ 8 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'TEXT E NB A z' IN ls_result-lines[ 9 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'LCASE I EQ lower' IN ls_result-lines[ 10 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'STR MIXED' IN ls_result-lines[ 11 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+  ENDMETHOD.
+
+  METHOD submit_with_conversion.
+    DATA lt_input TYPE zif_gg_selection_screen_types=>ty_values.
+    INSERT VALUE #( name = 'P_CHAR' value = 'abcde' ) INTO TABLE lt_input.
+    INSERT VALUE #( name = 'P_NUM' value = '12' ) INTO TABLE lt_input.
+    INSERT VALUE #( name = 'P_LOWER' value = 'aBcDeF' ) INTO TABLE lt_input.
+    DATA(ls_result) = zcl_osd_batch_report=>run( iv_program = 'ZOSD_SUB_SEM' it_input = lt_input ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'COMPLETED' ).
+    FIND 'CHAR ABC' IN ls_result-lines[ 2 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'NUM 12' IN ls_result-lines[ 4 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'LOWER aBcDe' IN ls_result-lines[ 3 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    CLEAR lt_input.
+    INSERT VALUE #( name = 'P_CHAR' value = '' ) INTO TABLE lt_input.
+    ls_result = zcl_osd_batch_report=>run( iv_program = 'ZOSD_SUB_SEM' it_input = lt_input ).
+    FIND 'MIX' IN ls_result-lines[ 2 ].
+    cl_abap_unit_assert=>assert_differs( act = sy-subrc exp = 0 ).
+  ENDMETHOD.
+
+  METHOD submit_with_rows.
+    DATA lt_input TYPE zif_gg_selection_screen_types=>ty_values.
+    DATA lt_rows TYPE zcl_osd_submit_semantics=>ty_input_rows.
+    APPEND VALUE #( name = 'S_TEXT' value = 'q1' ) TO lt_rows.
+    APPEND VALUE #( name = 'S_TEXT' value = 'q2' ) TO lt_rows.
+    APPEND VALUE #( name = 'S_TEXT' ranges = VALUE #( ( sign = 'I' option = 'NE' low = 'q3' ) ) ) TO lt_rows.
+    lt_input = zcl_osd_submit_semantics=>combine( lt_rows ).
+    DATA(ls_result) = zcl_osd_batch_report=>run( iv_program = 'ZOSD_SUB_SEM' it_input = lt_input ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'COMPLETED' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( ls_result-lines ) exp = 13 ).
+    FIND 'HEADER Q1' IN ls_result-lines[ 8 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'TEXT I EQ Q1' IN ls_result-lines[ 9 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'TEXT I EQ q2' IN ls_result-lines[ 10 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'TEXT I NE q3' IN ls_result-lines[ 11 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+  ENDMETHOD.
+
+  METHOD submit_preserves_subrc.
+    DATA lt_input TYPE zif_gg_selection_screen_types=>ty_values.
+    READ TABLE lt_input INDEX 1 TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 4 ).
+    SUBMIT zosd_sub_sem AND RETURN.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 4 ).
+    SUBMIT zosd_sub_sem WITH p_char = 'abcde' AND RETURN.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 4 ).
   ENDMETHOD.
 ENDCLASS.

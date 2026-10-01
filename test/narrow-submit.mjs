@@ -38,6 +38,13 @@ describe("static narrow SUBMIT lowering", () => {
     expect(after).to.contain("( name = 'P_COUNT' value = CONV string( 2 ) )");
     expect(after.split("\n").length).to.equal(before.split("\n").length);
   });
+  it("keeps repeated select-option clauses in source order for the called report", () => {
+    const after = lowerNarrowSubmit(source("SUBMIT zosd_sub_sem WITH s_text = 'q1' WITH s_text = 'q2' WITH s_text IN lt_ranges AND RETURN."), file, core);
+    expect(after).to.contain("zcl_osd_submit_semantics=>combine( VALUE #(");
+    expect(after.match(/name = 'S_TEXT'/g)).to.have.length(3);
+    expect(after.indexOf("'q1'")).to.be.lessThan(after.indexOf("'q2'"));
+    expect(after.indexOf("'q2'")).to.be.lessThan(after.indexOf("of( lt_ranges )"));
+  });
 
   it("lowers static VIA JOB with bounded scalar selections", () => {
     const before = source("SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_count WITH p_date = lv_date AND RETURN.");
@@ -95,7 +102,7 @@ ENDCLASS.`;
   it("keeps a comment on the first line of the statement", () => {
     const before = source("SUBMIT zgg_ex_012 \" first\n      WITH p_date = lv_date AND RETURN.");
     const after = lowerNarrowSubmit(before, file, core);
-    expect(after).to.match(/submit\( iv_program = 'ZGG_EX_012'.*\). " first/);
+    expect(after).to.match(/submit\( iv_program = 'ZGG_EX_012'.*\). sy-subrc = lv_osd_submit_subrc_\d+_\d+\. " first/);
     expect(unknownStatements(after)).to.deep.equal([]);
   });
 
@@ -163,7 +170,6 @@ ENDCLASS.`;
     "SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_a VIA JOB lv_job NUMBER lv_b AND RETURN.",
     "SUBMIT /OSDNS/ZREPORT_WITH_A_NAME_LONGER_THAN_FORTY AND RETURN.",
     "SUBMIT zgg_ex_012 WITH p_date = lv_date AND RETURN WITH p_count = 2.",
-    "SUBMIT zgg_ex_012 WITH p_date = lv_date WITH p_date = lv_other AND RETURN.",
   ]) {
     it(`refuses ${form}`, () => {
       expect(() => lowerNarrowSubmit(source(form), file, core)).to.throw("supported SUBMIT form");

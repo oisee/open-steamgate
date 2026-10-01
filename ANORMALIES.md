@@ -3034,3 +3034,15 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: none yet; abaplint could warn about a `.testclasses.abap` file whose class XML lacks the flag. Not filed
 - Regression-test location: `test/xml-wellformed.mjs`
 - Upstream version containing a fix: n/a
+
+### ANOMALY-2026-10-01-submit-with-selection — called report selection values diverge from A4H
+
+- Status: `workaround`
+- Discovery date: `2026-10-01`
+- Affected adapter: generated one-shot report registry and the open-abap-gui selection host used by `SUBMIT ... WITH`
+- Expected A4H behaviour (stoker background job, throwaways deleted): a PARAMETER without DEFAULT starts initial; DEFAULT, including a field such as `sy-datum`, is used; character defaults are truncated to the declared length and upper-cased unless LOWER CASE, including string parameters; a radio group selects its first button unless another declares DEFAULT 'X'; SELECT-OPTIONS DEFAULT produces one `I EQ` row, or `I BT` with DEFAULT ... TO ..., respecting OPTION and SIGN, in both table and header line. Any WITH for a select-option replaces default rows; repeated WITH clauses append in order. `WITH p = ''` clears a parameter default, numeric text converts to the parameter type, and a parameter without LOWER CASE is upper-cased. Only the first row of a select-option without LOWER CASE is upper-cased, regardless of option or source (scalar or IN table); later rows preserve case. A4H did not measure whether HIGH of that first row is converted, so this adapter will uppercase LOW only until measured. `SUBMIT ... AND RETURN` leaves the caller's `sy-subrc` untouched. An invalid numeric WITH value terminates with uncaught `CONVT_NO_NUMBER`.
+- Actual before fix: the generated registry rejects repeated input names, while the selection host's defaults and input conversion do not consistently apply the A4H rules above. The registry calls the host with raw string values and ranges, so the called declaration is not used to normalize input before report execution.
+- Impact: reports can observe missing or extra default rows, incorrect case and type conversion, or rejection of valid repeated WITH clauses.
+- Smallest safe workaround: `zcl_osd_submit_semantics` converts defaults and supplied input using the called report's declarations, and the one-shot registry merges repeated select-option rows before the selection host runs. The transpiler's `ty_values` is a sorted table with unique names, so the lowering combines repeated clauses before passing them to the registry.
+- Upstream: not raised; the compatibility layer is local to this report host.
+- Regression-test location: `test/unit/zcl_osd_batch_runner_test.clas.testclasses.abap`, `test/submit-semantics.mjs`, and `test/narrow-submit.mjs`.

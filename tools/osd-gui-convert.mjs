@@ -53,7 +53,9 @@ export function batchRegistrySource(reports) {
     .map((entry) => `      WHEN ${abapLiteral(entry.programName)}. rv_supported = abap_true.`).join("\n");
   const cases = known.map((entry) => `      WHEN ${abapLiteral(entry.programName)}.
 ${entry.wired === true ? `        lo_report = NEW ${entry.className.toLowerCase()}( ).
-${[...new Set(entry.selectionNames ?? [])].map((name) => `        INSERT ${abapLiteral(name)} INTO TABLE lt_allowed.`).join("\n")}` : `        rs_result-status = 'UNSUPPORTED'.
+${[...new Set(entry.selectionNames ?? [])].map((name) => `        INSERT ${abapLiteral(name)} INTO TABLE lt_allowed.`).join("\n")}
+${(entry.selectionElements ?? []).filter((element) => element.kind === "select-option").map((element) => `        INSERT ${abapLiteral(element.name)} INTO TABLE lt_select_options.`).join("\n")}
+${(entry.selectionElements ?? []).filter((element) => /LOWER\s+CASE/i.test(element.additions ?? "")).map((element) => `        INSERT ${abapLiteral(element.name)} INTO TABLE lt_lower_case.`).join("\n")}` : `        rs_result-status = 'UNSUPPORTED'.
         rs_result-detail = ${abapLiteral(entry.skipped ?? "conversion unsupported")}.
         RETURN.`}`).join("\n");
   return `CLASS zcl_osd_batch_report DEFINITION PUBLIC FINAL CREATE PUBLIC.
@@ -102,7 +104,11 @@ ${supported}
     DATA lv_program TYPE string.
     DATA lv_name TYPE string.
     DATA lt_allowed TYPE SORTED TABLE OF string WITH UNIQUE KEY table_line.
+    DATA lt_select_options TYPE SORTED TABLE OF string WITH UNIQUE KEY table_line.
+    DATA lt_lower_case TYPE SORTED TABLE OF string WITH UNIQUE KEY table_line.
     DATA lt_input TYPE zif_gg_selection_screen_types=>ty_values.
+    DATA lo_screen TYPE REF TO zcl_gg_host_screen.
+    DATA lt_elements TYPE zcl_gg_host_screen=>ty_elements.
     DATA lo_report TYPE REF TO zif_gg_report_v1.
     DATA ls_host TYPE zcl_gg_host=>ty_result.
     lv_program = iv_program.
@@ -114,6 +120,9 @@ ${cases}
         rs_result-detail = |Report { iv_program } is not in the converted report registry|.
         RETURN.
     ENDCASE.
+    lo_screen = NEW zcl_gg_host_screen( ).
+    lo_report->build_screen( lo_screen ).
+    lt_elements = lo_screen->get_elements( ).
     LOOP AT it_input INTO DATA(ls_input).
       lv_name = ls_input-name.
       TRANSLATE lv_name TO UPPER CASE.
@@ -123,11 +132,50 @@ ${cases}
         RETURN.
       ENDIF.
       ls_input-name = lv_name.
-      INSERT ls_input INTO TABLE lt_input.
+      IF line_exists( lt_select_options[ table_line = lv_name ] ).
+        IF ls_input-ranges IS INITIAL.
+          APPEND VALUE #( sign = 'I' option = 'EQ' low = ls_input-value ) TO ls_input-ranges.
+        ENDIF.
+        IF line_exists( lt_input[ name = lv_name ] ).
+          APPEND LINES OF ls_input-ranges TO lt_input[ name = lv_name ]-ranges.
+        ELSE.
+          INSERT ls_input INTO TABLE lt_input.
+        ENDIF.
+      ELSE.
+        IF ls_input-ranges IS NOT INITIAL.
+          READ TABLE ls_input-ranges INTO DATA(ls_last_range) INDEX lines( ls_input-ranges ).
+          ls_input-value = ls_last_range-low.
+          CLEAR ls_input-ranges.
+        ENDIF.
+        IF line_exists( lt_input[ name = lv_name ] ).
+          lt_input[ name = lv_name ] = ls_input.
+        ELSE.
+          INSERT ls_input INTO TABLE lt_input.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+    LOOP AT lt_input ASSIGNING FIELD-SYMBOL(<ls_value>).
+      READ TABLE lt_elements INTO DATA(ls_element) WITH KEY name = <ls_value>-name.
       IF sy-subrc <> 0.
-        rs_result-status = 'INVALID_INPUT'.
-        rs_result-detail = |Selection field { lv_name } was supplied more than once|.
-        RETURN.
+        CONTINUE.
+      ENDIF.
+      IF line_exists( lt_select_options[ table_line = <ls_value>-name ] ).
+        LOOP AT <ls_value>-ranges ASSIGNING FIELD-SYMBOL(<ls_range>).
+          <ls_range>-low = zcl_osd_submit_semantics=>value(
+            iv_value = <ls_range>-low is_type = ls_element-data_type
+            iv_lower_case = COND #( WHEN sy-tabix = 1
+              AND NOT line_exists( lt_lower_case[ table_line = <ls_value>-name ] )
+              THEN abap_false ELSE abap_true ) ).
+          IF <ls_range>-high IS NOT INITIAL.
+            <ls_range>-high = zcl_osd_submit_semantics=>value(
+              iv_value = <ls_range>-high is_type = ls_element-data_type
+              iv_lower_case = abap_true ).
+          ENDIF.
+        ENDLOOP.
+      ELSE.
+        <ls_value>-value = zcl_osd_submit_semantics=>value(
+          iv_value = <ls_value>-value is_type = ls_element-data_type
+          iv_lower_case = xsdbool( line_exists( lt_lower_case[ table_line = <ls_value>-name ] ) ) ).
       ENDIF.
     ENDLOOP.
     ls_host = zcl_gg_host=>run(
@@ -139,6 +187,8 @@ ${cases}
   ENDMETHOD.
 
   METHOD submit.
+    DATA lv_subrc TYPE sysubrc.
+    lv_subrc = sy-subrc.
     DATA(ls_result) = run(
       iv_program = iv_program
       it_input = it_input
@@ -147,9 +197,12 @@ ${cases}
       RAISE EXCEPTION NEW zcx_osd_submit(
         iv_detail = |SUBMIT { iv_program }: { ls_result-status } { ls_result-detail }| ).
     ENDIF.
+    sy-subrc = lv_subrc.
   ENDMETHOD.
 
   METHOD submit_via_job.
+    DATA lv_subrc TYPE sysubrc.
+    lv_subrc = sy-subrc.
     DATA lv_error TYPE string.
     DATA lv_input TYPE string.
     IF iv_authcknam <> sy-uname.
@@ -167,6 +220,7 @@ ${cases}
     IF lv_error IS NOT INITIAL.
       RAISE EXCEPTION NEW zcx_osd_submit( iv_detail = |SUBMIT { iv_program }: { lv_error }| ).
     ENDIF.
+    sy-subrc = lv_subrc.
   ENDMETHOD.
 
   METHOD result_of.
@@ -237,6 +291,47 @@ export function namesOf(programName) {
     wrapperClassName: `ZCL_OSD_GUITX_${base}`,
     tcode: `ZGUI_${base}`,
   };
+}
+
+// The converter emits the declarations, while this host supplies SAP's
+// selection-screen conversion at the boundary where they enter the builder.
+export function selectionSemanticsSource(source, elements) {
+  const radios = new Map();
+  for (const element of elements) {
+    if (element.kind !== "parameter") continue;
+    const group = /RADIOBUTTON\s+GROUP\s+(\w+)/i.exec(element.additions ?? "")?.[1]?.toUpperCase();
+    if (!group) continue;
+    if (!radios.has(group)) radios.set(group, []);
+    radios.get(group).push(element);
+  }
+  return source.split("\n").map((line) => {
+    const name = /io_builder->add_(?:parameter|select_option|radiobutton)\( VALUE #\( name = '([^']+)'/.exec(line)?.[1];
+    const element = elements.find((item) => item.name === name);
+    if (!element) return line;
+    if (line.includes("io_builder->add_parameter(")) {
+      return line.replace("add_parameter( VALUE #(", "add_parameter( zcl_osd_submit_semantics=>parameter( VALUE #(")
+        .replace(/\) \)\.$/, ") ) ).");
+    }
+    if (line.includes("io_builder->add_select_option(")) {
+      const option = /\bOPTION\s+(EQ|NE|GT|GE|LT|LE|BT|NB|CP|NP)\b/i.exec(element.additions ?? "")?.[1]?.toUpperCase();
+      const sign = /\bSIGN\s+([IE])\b/i.exec(element.additions ?? "")?.[1]?.toUpperCase();
+      if (option) line = line.replace(/(default = VALUE #\( sign = '[IE]' option = ')[A-Z]+(')/, `$1${option}$2`);
+      if (sign) line = line.replace(/(default = VALUE #\( sign = ')[IE](')/, `$1${sign}$2`);
+      if (/LOWER\s+CASE/i.test(element.additions ?? "")) line = line.replace(/\) \)\.$/, " lower_case = abap_true ) ).");
+      return line.replace("add_select_option( VALUE #(", "add_select_option( zcl_osd_submit_semantics=>select_option( VALUE #(")
+        .replace(/\) \)\.$/, ") ) ).");
+    }
+    const group = /RADIOBUTTON\s+GROUP\s+(\w+)/i.exec(element.additions ?? "")?.[1]?.toUpperCase();
+    const members = radios.get(group) ?? [];
+    const explicit = /DEFAULT\s+(?:'X'|X|ABAP_TRUE)(?=\s|$)/i;
+    if (explicit.test(element.additions ?? "") && !line.includes(" default = abap_true")) {
+      return line.replace(/\) \)\.$/, " default = abap_true ) ).");
+    }
+    if (members[0] === element && !members.some((item) => explicit.test(item.additions ?? ""))) {
+      return line.replace(/\) \)\.$/, " default = abap_true ) ).");
+    }
+    return line;
+  }).join("\n");
 }
 
 /** an ABAP backtick string literal, not a JSON one -- ABAP's `"` starts an
@@ -559,12 +654,15 @@ export async function generate(folders, out = DEFAULT_OUT, options = {}) {
       usedMode = "partial/skeleton";
     }
     mkdirSync(out, {recursive: true});
-    const selectionNames = (result.reportIR?.selections ?? [])
+    const selectionElements = (result.reportIR?.selections ?? [])
       .flatMap((screen) => screen.elements ?? [])
+      .filter((element) => ["parameter", "select-option"].includes(element.kind));
+    const selectionNames = selectionElements
       .map((element) => element.name).filter(Boolean);
-    const entry = {file, programName, ...names, mode: usedMode, supported: result.supported, diagnostics: result.diagnostics.length, selectionNames};
+    const entry = {file, programName, ...names, mode: usedMode, supported: result.supported, diagnostics: result.diagnostics.length, selectionNames, selectionElements};
     if (result.classSource !== undefined) {
-      writeFileSync(join(out, `${names.className.toLowerCase()}.clas.abap`), result.classSource);
+      writeFileSync(join(out, `${names.className.toLowerCase()}.clas.abap`),
+        selectionSemanticsSource(result.classSource, selectionElements));
       for (const helper of result.helperSources ?? []) {
         writeFileSync(join(out, `${helper.className.toLowerCase()}.clas.abap`), helper.source);
       }

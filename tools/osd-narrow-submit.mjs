@@ -72,7 +72,6 @@ function replacement(statement, filename) {
       const operator = upper(at + 2);
       const value = words[at + 3];
       if (!SELECTION.test(name ?? "") || !["=", "EQ", "IN"].includes(operator) || !OPERAND.test(value ?? "")) unsupported();
-      if (values.some((row) => row.name === name.toUpperCase())) unsupported(`${name.toUpperCase()} given twice`);
       values.push({name: name.toUpperCase(), value, range: operator === "IN"});
       at += 4;
     } else {
@@ -82,13 +81,15 @@ function replacement(statement, filename) {
   const rows = values.map(({name, value, range}) => range
     ? `( name = '${name}' ranges = zcl_osd_submit_ranges=>of( ${value} ) )`
     : `( name = '${name}' value = CONV string( ${value} ) )`);
-  const input = rows.length === 0 ? "" : ` it_input = VALUE #( ${rows.join(" ")} )`;
+  const input = rows.length === 0 ? "" : ` it_input = zcl_osd_submit_semantics=>combine( VALUE #( ${rows.join(" ")} ) )`;
+  const saved = `lv_osd_submit_subrc_${line}_${statement.getStart().getCol()}`;
   // SAP's SUBMIT takes the job name and count in its own types (TBTCJOB-
   // JOBNAME, CHAR 32; TBTCJOB-JOBCOUNT, CHAR 8); the registry's parameters
   // are STRING, so each is converted rather than passed by reference
   // (ANORMALIES 2026-10-01-submit-via-job-char-operands)
-  return job ? `zcl_osd_batch_report=>submit_via_job( iv_program = '${program}' iv_jobname = CONV string( ${job.name} ) iv_jobcount = CONV string( ${job.count} ) iv_authcknam = sy-uname${input} ).` :
+  const call = job ? `zcl_osd_batch_report=>submit_via_job( iv_program = '${program}' iv_jobname = CONV string( ${job.name} ) iv_jobcount = CONV string( ${job.count} ) iv_authcknam = sy-uname${input} ).` :
     `zcl_osd_batch_report=>submit( iv_program = '${program}'${input} iv_batch = sy-batch ).`;
+  return `DATA(${saved}) = sy-subrc. ${call} sy-subrc = ${saved}.`;
 }
 
 // The lowered call takes the statement's first line. A comment the developer
