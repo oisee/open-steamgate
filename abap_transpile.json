@@ -124,6 +124,7 @@
     "\\.cjs$",
     "\\.sapc\\.xml$",
     "\\.samc\\.xml$",
+    "\\.samc\\.model\\.json$",
     "\\.ddls\\.",
     "\\.stg\\.yaml$",
     "\\.l2\\.yaml$",

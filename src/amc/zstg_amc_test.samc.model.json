@@ -1,0 +1,23 @@
+{
+  "@id": "samc/ZOSD_AMC_TEST",
+  "kind": "samc",
+  "applicationId": "ZOSD_AMC_TEST",
+  "version": "A",
+  "description": "OSD AMC tests",
+  "lang": "E",
+  "channels": [
+    {"@id": "samc/ZOSD_AMC_TEST/ch/text", "channelId": "/text", "scope": "C", "messageType": "TEXT"},
+    {"@id": "samc/ZOSD_AMC_TEST/ch/denied", "channelId": "/denied", "scope": "C", "messageType": "TEXT"},
+    {"@id": "samc/ZOSD_AMC_TEST/ch/binary", "channelId": "/binary", "scope": "C", "messageType": "BINARY"},
+    {"@id": "samc/ZOSD_AMC_TEST/ch/pcp", "channelId": "/pcp", "scope": "C", "messageType": "PCP"}
+  ],
+  "authorities": [
+    {"@id": "samc/ZOSD_AMC_TEST/auth/1", "nr": 1, "channelId": "/text", "kind": "class", "program": "ZCL_OSD_AMC_TEST", "activity": "S"},
+    {"@id": "samc/ZOSD_AMC_TEST/auth/2", "nr": 2, "channelId": "/text", "kind": "class", "program": "ZCL_OSD_AMC_TEST", "activity": "R"},
+    {"@id": "samc/ZOSD_AMC_TEST/auth/3", "nr": 3, "channelId": "/text", "kind": "class", "program": "ZCL_OSD_AMC_SOCKET", "activity": "R"},
+    {"@id": "samc/ZOSD_AMC_TEST/auth/4", "nr": 4, "channelId": "/binary", "kind": "class", "program": "ZCL_OSD_AMC_TEST", "activity": "S"},
+    {"@id": "samc/ZOSD_AMC_TEST/auth/5", "nr": 5, "channelId": "/binary", "kind": "class", "program": "ZCL_OSD_AMC_TEST", "activity": "R"},
+    {"@id": "samc/ZOSD_AMC_TEST/auth/6", "nr": 6, "channelId": "/pcp", "kind": "class", "program": "ZCL_OSD_AMC_TEST", "activity": "S"},
+    {"@id": "samc/ZOSD_AMC_TEST/auth/7", "nr": 7, "channelId": "/pcp", "kind": "class", "program": "ZCL_OSD_AMC_TEST", "activity": "R"}
+  ]
+}
