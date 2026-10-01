@@ -43,7 +43,7 @@ describe("static narrow SUBMIT lowering", () => {
     expect(after).to.contain("zcl_osd_submit_semantics=>combine( VALUE #(");
     expect(after.match(/name = 'S_TEXT'/g)).to.have.length(3);
     expect(after.indexOf("'q1'")).to.be.lessThan(after.indexOf("'q2'"));
-    expect(after.indexOf("'q2'")).to.be.lessThan(after.indexOf("of( lt_ranges )"));
+    expect(after.indexOf("'q2'")).to.be.lessThan(after.indexOf("for_submit( lt_ranges )"));
   });
 
   it("lowers static VIA JOB with bounded scalar selections", () => {
@@ -145,7 +145,7 @@ ENDCLASS.`;
   it("passes WITH sel IN range as selection ranges on a synchronous SUBMIT", () => {
     const before = source("SUBMIT zgg_ex_012 WITH s_date IN lt_range WITH p_count EQ 2 AND RETURN.");
     const after = lowerNarrowSubmit(before, file, core);
-    expect(after).to.contain("( name = 'S_DATE' ranges = zcl_osd_submit_ranges=>of( lt_range ) )");
+    expect(after).to.contain("( name = 'S_DATE' ranges = zcl_osd_submit_ranges=>for_submit( lt_range ) )");
     expect(after).to.contain("( name = 'P_COUNT' value = CONV string( 2 ) )");
     expect(after).to.contain("iv_batch = sy-batch");
     expect(unknownStatements(after)).to.deep.equal([]);
@@ -155,7 +155,7 @@ ENDCLASS.`;
     const form = source("SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_number WITH s_date IN lt_range AND RETURN.");
     const after = lowerNarrowSubmit(form, file, core);
     expect(after).to.contain("submit_via_job( iv_program = 'ZGG_EX_012'");
-    expect(after).to.contain("( name = 'S_DATE' ranges = zcl_osd_submit_ranges=>of( lt_range ) )");
+    expect(after).to.contain("( name = 'S_DATE' ranges = zcl_osd_submit_ranges=>for_submit( lt_range ) )");
     expect(unknownStatements(after)).to.deep.equal([]);
   });
 

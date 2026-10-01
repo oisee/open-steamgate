@@ -22,7 +22,11 @@ START-OF-SELECTION.
   WRITE: / 'DATE', p_date.
   WRITE: / 'RADIO', r_one, r_two.
   WRITE: / 'RADIO2', r_three, r_four.
-  WRITE: / 'HEADER', s_text-low.
+  IF lines( s_text[] ) = 0.
+    WRITE: / 'HEADER'.
+  ELSE.
+    WRITE: / 'HEADER', s_text-low.
+  ENDIF.
   LOOP AT s_text.
     WRITE: / 'TEXT', s_text-sign, s_text-option, s_text-low, s_text-high.
   ENDLOOP.

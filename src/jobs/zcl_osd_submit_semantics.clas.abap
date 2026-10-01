@@ -38,18 +38,27 @@ CLASS zcl_osd_submit_semantics IMPLEMENTATION.
   ENDMETHOD.
   METHOD value.
     rv_value = iv_value.
-    CASE is_type-typ.
-      WHEN 'I'.
-        rv_value = CONV string( CONV i( iv_value ) ).
-      WHEN 'N'.
-        IF is_type-length > 0.
-          rv_value = |{ CONV i( iv_value ) WIDTH = is_type-length ALIGN = RIGHT PAD = '0' }|.
+    TRY.
+        CASE is_type-typ.
+          WHEN 'I'.
+            rv_value = CONV string( CONV i( iv_value ) ).
+          WHEN 'N'.
+            IF is_type-length > 0.
+              rv_value = |{ CONV i( iv_value ) WIDTH = is_type-length ALIGN = RIGHT PAD = '0' }|.
+            ENDIF.
+          WHEN 'C'.
+            IF is_type-length > 0 AND strlen( rv_value ) > is_type-length.
+              rv_value = rv_value(is_type-length).
+            ENDIF.
+        ENDCASE.
+      CATCH cx_sy_conversion_no_number.
+* A supplied numeric screen value dumps instead of raising a catchable
+* exception. The integer/character comparison raises CONVT_NO_NUMBER as a
+* plain runtime error, which an ABAP CATCH cx_root cannot intercept.
+        IF 0 = 'abc'.
+          rv_value = iv_value.
         ENDIF.
-      WHEN 'C'.
-        IF is_type-length > 0 AND strlen( rv_value ) > is_type-length.
-          rv_value = rv_value(is_type-length).
-        ENDIF.
-    ENDCASE.
+    ENDTRY.
     IF iv_lower_case = abap_false AND ( is_type-typ = 'C' OR is_type-typ = 'STRING' ).
       TRANSLATE rv_value TO UPPER CASE.
     ENDIF.

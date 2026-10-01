@@ -79,7 +79,7 @@ function replacement(statement, filename) {
     }
   }
   const rows = values.map(({name, value, range}) => range
-    ? `( name = '${name}' ranges = zcl_osd_submit_ranges=>of( ${value} ) )`
+    ? `( name = '${name}' ranges = zcl_osd_submit_ranges=>for_submit( ${value} ) )`
     : `( name = '${name}' value = CONV string( ${value} ) )`);
   const input = rows.length === 0 ? "" : ` it_input = zcl_osd_submit_semantics=>combine( VALUE #( ${rows.join(" ")} ) )`;
   const saved = `lv_osd_submit_subrc_${line}_${statement.getStart().getCol()}`;

@@ -1,4 +1,5 @@
 import {expect} from "chai";
+import {dialogStep, workProcess} from "../tools/osd-dialog-step.mjs";
 
 describe("called report SUBMIT selections", function () {
   this.timeout(30000);
@@ -74,6 +75,28 @@ describe("called report SUBMIT selections", function () {
     ]);
   });
 
+  it("keeps an empty IN range distinct from scalar WITH = '' through combine and registry", async () => {
+    await abap.Classes.ZCL_OSD_BATCH_RUNNER_TEST.empty_range_with();
+    await abap.Classes.ZCL_OSD_BATCH_RUNNER_TEST.scalar_empty_with();
+    const types = abap.Classes.ZIF_GG_SELECTION_SCREEN_TYPES;
+    const empty = types.ty_ranges.clone();
+    const marked = await abap.Classes.ZCL_OSD_SUBMIT_RANGES.for_submit({it_range: empty});
+    expect(marked.array()).to.have.length(1);
+    const rows = abap.Classes.ZCL_OSD_SUBMIT_SEMANTICS.ty_input_rows.clone();
+    const inRow = types.ty_value.clone();
+    inRow.get().name.set("S_TEXT");
+    inRow.get().ranges.set(marked);
+    rows.append(inRow);
+    const input = await abap.Classes.ZCL_OSD_SUBMIT_SEMANTICS.combine({it_rows: rows});
+    expect(input.array()[0].get().ranges.array()).to.have.length(1);
+    const noRows = await run(input);
+    expect(noRows).to.include("HEADER");
+    expect(noRows.filter((line) => line.startsWith("TEXT "))).to.deep.equal([]);
+
+    const scalar = await run(values([{name: "S_TEXT", value: ""}]));
+    expect(scalar.filter((line) => line.startsWith("TEXT "))).to.deep.equal(["TEXT I EQ"]);
+  });
+
   it("converts both bounds of only the first range row unless LOWER CASE is declared", async () => {
     const lines = await run(values([{name: "S_TEXT", ranges: [
       {sign: "I", option: "BT", low: "a", high: "c"},
@@ -89,15 +112,37 @@ describe("called report SUBMIT selections", function () {
     expect(lower).to.include("LCASE I BT a c");
   });
 
-  it("leaves caller sy-subrc intact and lets a numeric conversion error escape", async () => {
+  it("leaves caller sy-subrc intact and ends the step on an uncatchable numeric dump", async () => {
     abap.builtin.sy.get().subrc.set(4);
     await abap.Classes.ZCL_OSD_BATCH_REPORT.submit({iv_program: box("ZOSD_SUB_SEM")});
     expect(abap.builtin.sy.get().subrc.get()).to.equal(4);
+    for (const bad of ["abc", "1abc"]) {
+      let failure;
+      try { await run(values([{name: "P_NUM", value: bad}])); }
+      catch (error) { failure = error; }
+      expect(failure, bad).to.be.instanceOf(Error);
+      expect(failure.message, bad).to.include("CONVT_NO_NUMBER");
+    }
+    const client = abap.context.databaseConnections.DEFAULT;
+    const commit = client.commit;
+    const rollback = client.rollback;
+    let commits = 0;
+    let rollbacks = 0;
+    client.commit = async function (...args) { commits++; return commit.apply(this, args); };
+    client.rollback = async function (...args) { rollbacks++; return rollback.apply(this, args); };
     try {
-      await run(values([{name: "P_NUM", value: "abc"}]));
-      throw new Error("invalid numeric WITH value was accepted");
-    } catch (error) {
-      expect(error.constructor.name).to.equal("cx_sy_conversion_no_number");
+      let failure;
+      try {
+        await dialogStep(() => abap.Classes.ZCL_OSD_BATCH_RUNNER_TEST.invalid_with());
+      } catch (error) { failure = error; }
+      expect(failure).to.be.instanceOf(Error);
+      expect(failure.message).to.include("CONVT_NO_NUMBER");
+      expect(commits).to.equal(0);
+      expect(rollbacks).to.equal(1);
+      expect(workProcess()).to.include({held: false});
+    } finally {
+      client.commit = commit;
+      client.rollback = rollback;
     }
   });
 });

@@ -160,6 +160,8 @@ ${cases}
         CONTINUE.
       ENDIF.
       IF line_exists( lt_select_options[ table_line = <ls_value>-name ] ).
+        DELETE <ls_value>-ranges WHERE sign = '#' AND option = '  '
+          AND low = '' AND high = ''.
         LOOP AT <ls_value>-ranges ASSIGNING FIELD-SYMBOL(<ls_range>).
           DATA(lv_lower_case) = xsdbool( sy-tabix <> 1
             OR line_exists( lt_lower_case[ table_line = <ls_value>-name ] ) ).
