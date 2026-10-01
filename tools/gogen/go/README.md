@@ -2,7 +2,11 @@
 
 `abap/` implements ABAP values, tables, Open SQL, database operations, and HTTP-facing runtime support; its [README](abap/README.md) maps the files. The generator pipeline and measured scope are in [gogen's README](../README.md).
 
+`abaperr/` defines the host and arithmetic errors shared with pure packages.
+
 `amc/` and `apc/` implement messaging and push-channel support used by the Go host. `termgui/` contains terminal UI code for OSABAP; see [native ABAP reports](../../../docs/osabap-native.md).
+
+`nodehdr/` implements Node-compatible duplicate-header joining for ICF and HTTP clients.
 
 `cmd/` contains command entry points, including `osgo/`, `osabap/`, and benchmark or probe commands. `go.mod` defines the module; [conformance](../../../docs/conformance.md) describes the HTTP checks used across hosts.
 

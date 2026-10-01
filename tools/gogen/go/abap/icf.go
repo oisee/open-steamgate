@@ -6,6 +6,8 @@ import (
 	"compress/zlib"
 	"io"
 	"net/http"
+	"osg/gogen/abaperr"
+	"osg/gogen/nodehdr"
 	"regexp"
 	"sort"
 	"strconv"
@@ -83,16 +85,8 @@ func ICFRequestPath(s *Session, req Data, out *string) {
 	*out = icfExchange(req, "CL_EXPRESS_ICF_SHIM=>REQUEST").Path
 }
 
-// HostError is the host refusing what the ABAP asked of it: a contract of
-// the host (express's, here) that the call broke. It is not a compiler gap
-// (NotCompiled) and not an ABAP exception, so no CATCH takes it; the dialog
-// step ends in it as a dump.
-type HostError struct {
-	Where string
-	Text  string
-}
-
-func (e HostError) Error() string { return e.Where + ": " + e.Text }
+// HostError retains the identity of errors from pure packages.
+type HostError = abaperr.HostError
 
 // ICFResponseAppend is res.append(name, value): a header line more, however
 // many of that name there are already -- except Content-Type, where express's
@@ -139,12 +133,6 @@ func ICFSetCData(s *Session, buffer *string, data string) {
 	*buffer = data
 }
 
-// Node keeps the first of these when a request repeats them, joins cookie
-// with "; " and every other name with ", " (http.IncomingMessage).
-var nodeFirstWins = map[string]bool{"age": true, "authorization": true, "content-length": true, "content-type": true, "etag": true,
-	"expires": true, "from": true, "host": true, "if-modified-since": true, "if-unmodified-since": true, "last-modified": true,
-	"location": true, "max-forwards": true, "proxy-authorization": true, "referer": true, "retry-after": true, "server": true, "user-agent": true}
-
 // ICFBodyLimit is express.raw's limit in the Node hosts (16mb).
 const ICFBodyLimit = 16 << 20
 
@@ -173,14 +161,10 @@ func NewICFExchange(r *http.Request, class string) (*ICFExchange, error) {
 	add := func(name, value string) {
 		name = strings.ToLower(name)
 		prev, seen := joined[name]
-		switch {
-		case !seen:
+		if !seen {
 			joined[name] = value
-		case nodeFirstWins[name]:
-		case name == "cookie":
-			joined[name] = prev + "; " + value
-		default:
-			joined[name] = prev + ", " + value
+		} else {
+			joined[name] = nodehdr.Merge(name, prev, value)
 		}
 	}
 	if r.Host != "" {

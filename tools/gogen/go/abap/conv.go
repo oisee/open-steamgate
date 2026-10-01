@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"net/url"
+	"osg/gogen/abaperr"
 	"strconv"
 	"strings"
 	"sync"
@@ -524,9 +525,7 @@ func FmtFDec(v float64, n int) string {
 
 // NotCompiled is what a method that did not compile raises when called: the
 // class exists and its other methods run, this one names why it cannot.
-func NotCompiled(method, reason string) ArithmeticError {
-	return ArithmeticError{"NOT_COMPILED", method + ": " + reason}
-}
+func NotCompiled(method, reason string) ArithmeticError { return abaperr.NotCompiled(method, reason) }
 
 // Contains is the unique-key check of a HASHED table keyed on the whole line.
 func Contains[T comparable](s []T, v T) bool {

@@ -3,13 +3,13 @@ package abap
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"io"
 	"net"
 	"net/http/httputil"
+	"osg/gogen/nodehdr"
 	"regexp"
 	"sort"
 	"strconv"
@@ -457,11 +457,8 @@ func addNodeHeader(o *jsObject, name, value string) {
 		o.set(name, "") // an array there, always: the ABAP's loop skips it
 	case !seen:
 		o.set(name, value)
-	case nodeFirstWins[name]:
-	case name == "cookie":
-		o.set(name, prev+"; "+value)
 	default:
-		o.set(name, prev+", "+value)
+		o.set(name, nodehdr.Merge(name, prev, value))
 	}
 }
 
@@ -615,29 +612,4 @@ func HTTPCResponseStatus(s *Session, me any, out *int32) {
 // HTTPCResponseBody is mv_data.set(response.body as hex): the bytes.
 func HTTPCResponseBody(s *Session, me any, out *string) {
 	*out = string(httpcResp(s, me).body)
-}
-
-// GunzipWithHeader is cl_abap_gzip=>decompress_binary_with_header, which
-// open-abap-core writes as zlib.gunzipSync: every gzip member in turn;
-// anything that is not gzip, a truncated stream or bytes after the last
-// member are a zlib error there, not the method's CX_SY_COMPRESSION_ERROR,
-// so a dump here.
-func GunzipWithHeader(s *Session, in string, out *string) {
-	z, err := gzip.NewReader(strings.NewReader(in))
-	if err != nil {
-		panic(HostError{"CL_ABAP_GZIP=>DECOMPRESS_BINARY_WITH_HEADER", "zlib: " + err.Error()})
-	}
-	b, err := io.ReadAll(z)
-	if err != nil {
-		panic(HostError{"CL_ABAP_GZIP=>DECOMPRESS_BINARY_WITH_HEADER", "zlib: " + err.Error()})
-	}
-	*out = string(b)
-}
-
-// EncodeBase64 is cl_http_utility=>encode_base64: Buffer.from(text), its
-// UTF-8 bytes, as base64 (open-abap-core's kernel lines; authenticate's
-// Basic header). A system converts the text in its own code page first;
-// not measured on A4H.
-func EncodeBase64(s *Session, unencoded string) string {
-	return EncodeXBase64(s, unencoded)
 }

@@ -95,11 +95,6 @@ func W3MIBytes(objid string) ([]byte, bool) {
 	return b, true
 }
 
-func fmArg(args map[string]Data, name string) (Data, bool) {
-	d, ok := args[name]
-	return d, ok && d.P != nil
-}
-
 // WWWDATA_IMPORT: KEY (a WWWDATATAB) in, the content as rows of MIME out.
 func WWWDATA_IMPORT(s *Session, args map[string]Data) {
 	key, ok := fmArg(args, "KEY")

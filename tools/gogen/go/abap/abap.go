@@ -12,6 +12,7 @@ package abap
 import (
 	"fmt"
 	"math"
+	"osg/gogen/abaperr"
 	"strings"
 )
 
@@ -43,14 +44,8 @@ type Session struct {
 	inflateSeq int32
 }
 
-// ArithmeticError is a class-based ABAP exception, raised as a Go panic and
-// recovered at the boundary of the call that started the step.
-type ArithmeticError struct {
-	Class string // CX_SY_ARITHMETIC_OVERFLOW, CX_SY_ZERODIVIDE, CX_SY_CONVERSION_OVERFLOW
-	Op    string
-}
-
-func (e ArithmeticError) Error() string { return e.Class + " in " + e.Op }
+// ArithmeticError retains the identity of errors from pure packages.
+type ArithmeticError = abaperr.ArithmeticError
 
 func overflow(op string) { panic(ArithmeticError{"CX_SY_ARITHMETIC_OVERFLOW", op}) }
 

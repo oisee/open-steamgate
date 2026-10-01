@@ -1,18 +1,9 @@
 package abap
 
 import (
-	"encoding/hex"
 	"strings"
 	"testing"
 )
-
-func unhex(t *testing.T, h string) string {
-	b, err := hex.DecodeString(h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(b)
-}
 
 // Node's zlib.deflateRawSync / inflateRawSync (finishFlush Z_SYNC_FLUSH)
 // on the same bytes, recorded 2026-09-24
