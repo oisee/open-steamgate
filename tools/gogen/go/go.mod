@@ -1,6 +1,6 @@
 module osg/gogen
 
-go 1.26
+go 1.26.0
 
 // open-diag-go develops beside these sibling modules and deliberately keeps
 // v0.0.0 placeholders in its own go.mod. Pin those placeholders for consumers.
@@ -13,7 +13,7 @@ require (
 	github.com/gdamore/tcell/v2 v2.13.10
 	github.com/oisee/open-diag-go v0.0.0-20260928212308-62029ee085bc
 	golang.org/x/term v0.37.0
-	modernc.org/sqlite v1.57.0
+	modernc.org/sqlite v1.60.1
 )
 
 require (
@@ -27,9 +27,9 @@ require (
 	github.com/oisee/vibing-steampunk v0.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
-	modernc.org/libc v1.74.4 // indirect
+	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.11.0 // indirect
+	modernc.org/memory v1.12.1 // indirect
 )
