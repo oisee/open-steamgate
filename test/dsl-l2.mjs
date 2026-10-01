@@ -624,6 +624,87 @@ examples:
       expect(() => compileRule(file, {registry})).to.throw(RuleError, "exactly one");
     });
 
+    // Rules whose alert names no count and no key of the for table: the alert
+    // lines of the two groups can only differ in a non-key field the alert
+    // names, so the derived two-group case alone must catch a never-split
+    // mutant (the examples are one trivial row each).
+    const trivial = "examples:\n  - name: none\n    date: 20261001\n    rows:\n      ZOSD_L2_SHIP: [{ship_id: S001, name: A, status: A}]\n    expect: []\n";
+    const FIXTURES = {
+      grpnd: `rule: grp
+class: x
+title: grouping
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'A' or not ship.name = 'X'
+limit:
+  count: ZOSD_L2_VOY as voy
+  where: voy.ship_id = ship.ship_id and (voy.dep_date > $date or not voy.voyage_id <> 'V99999')
+  more_than: 2
+alert: "{ship.name} too many"
+boundaries: auto
+${trivial}`,
+      demoe: `rule: ship-too-many-future-voyages
+class: x
+title: A ship has at most two voyages departing after the check date
+for: ZOSD_L2_SHIP as ship
+when: ship.status <> 'D'
+limit:
+  count: ZOSD_L2_VOY as voy
+  where: voy.ship_id = ship.ship_id and voy.dep_date > $date
+  more_than: 2
+alert: "{ship.name} over"
+boundaries: auto
+${trivial}`,
+    };
+    for (const [tag, source] of Object.entries(FIXTURES)) {
+      it(`${tag}: the second group differs in the alert's fields, so the derived case alone catches never-split`, async () => {
+        const {file, className} = copy(`split_${tag}`, source);
+        const {model, results} = await runRule(file, className, {mutate: {"clas.abap": [["IF lv_count > 0 AND (", "IF lv_count < 0 AND ("]]}});
+        const groups = model.cases.find((c) => c.method === "b_count_groups");
+        expect(groups, JSON.stringify(model.skipped)).to.not.equal(undefined);
+        const names = rows(groups).zosd_l2_ship.map((r) => r.name);
+        expect(names, "one name per group").to.have.length(2);
+        expect(names[0]).to.not.equal(names[1]);
+        expect(failed(results)).to.deep.equal(["b_count_groups"]);
+      });
+    }
+
+    it("skips the two-group case with a reason when the alert cannot tell the groups apart", () => {
+      const {file} = copy("split_none", FIXTURES.demoe.replace('"{ship.name} over"', '"over"'));
+      const model = compileRule(file, {registry});
+      expect(model.cases.map((c) => c.method)).to.not.include("b_count_groups");
+      expect(model.skipped.map((k) => k.reason).join("\n")).to.include("alerts differ");
+    });
+
+    it("warns for every threshold that loses a derived case to the cap, naming it, and for no other", () => {
+      const probe = (tag, threshold) => {
+        const {file} = copy(tag, FIXTURES.demoe.replace("more_than: 2", threshold));
+        return {file, model: compileRule(file, {registry})};
+      };
+      for (const [threshold, named] of [
+        ["more_than: 31", []],
+        ["at_least: 32", []],
+        ["more_than: 32", ["limit/more_than (groups)"]],
+        ["at_least: 33", ["limit/at_least (groups)"]],
+        ["more_than: 63", ["limit/more_than (groups)"]],
+        ["at_least: 64", ["limit/at_least (groups)"]],
+        ["more_than: 64", ["limit/more_than (over)", "limit/more_than (groups)"]],
+        ["at_least: 65", ["limit/at_least (at)", "limit/at_least (groups)"]],
+      ]) {
+        const {file, model} = probe(`cap_${threshold.replace(/\W+/g, "_")}`, threshold);
+        const warning = capWarning(model, file);
+        if (!named.length) { expect(warning, threshold).to.equal(undefined); continue; }
+        const line = readFileSync(file, "utf8").split("\n").findIndex((l) => l.includes(threshold)) + 1;
+        expect(warning, threshold).to.include(`${file}:${line}: warning: the 64-row cap`);
+        for (const name of named) expect(warning, threshold).to.include(name);
+        const listed = warning.split(" skips derived cases: ")[1].split("; ")[0].split(", ");
+        if (/: 6[4-5]$/.test(threshold) && !threshold.startsWith("at_least: 64")) expect(listed.filter((n) => n.startsWith("limit/")), threshold).to.deep.equal(named);
+        else expect(listed, threshold).to.deep.equal(named);
+      }
+      // at_least: 64 derives both of its boundaries and loses only the groups
+      const {model} = probe("cap_a64", "at_least: 64");
+      expect(model.cases.map((c) => c.method)).to.include.members(["b_count_below", "b_count_at"]);
+    });
+
     it("names the 64-row cap and warns with the threshold line", () => {
       const capText = `${text.slice(0, text.indexOf("examples:"))}examples:\n  - name: no voyages\n    date: 20261001\n    rows:\n      ZOSD_L2_SHIP: [{ship_id: S001, name: A, status: A}]\n    expect: []\n`;
       const {file} = copy("cap64", capText.replace("more_than: 2", "more_than: 64"));

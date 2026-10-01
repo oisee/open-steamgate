@@ -864,7 +864,7 @@ CLASS ltcl_examples IMPLEMENTATION.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'A002'.
-    ls_zosd_l2_ship-name = 'A00000000000000000000000000002'.
+    ls_zosd_l2_ship-name = 'A00000000000000000000000000003'.
     ls_zosd_l2_ship-status = 'E'.
     APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
     INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.

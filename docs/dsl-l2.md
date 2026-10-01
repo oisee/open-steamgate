@@ -395,10 +395,17 @@ its threshold. Per-comparison cases include enough other matching rows for
 their own comparison to decide the threshold.
 Case generation is bounded to 64 counted rows so a valid INT4 threshold cannot
 allocate billions of test rows. Cases needing more rows are reported as skipped
-with the cap named. At a threshold of 64 or more, some count boundaries lack
-derived coverage (`more_than: 64` cannot derive its violating boundary);
-`build` and `check` warn with the rule line, and hand-written examples must
-cover the missing boundaries.
+with the cap named. `build` and `check` warn at the threshold's rule line
+whenever a derived case is skipped for the cap, naming the cases: the two-group
+case needs `over + at` counted rows, so it is lost from `more_than: 32` and
+`at_least: 33`, a boundary case from `more_than: 64` and `at_least: 65`. A
+threshold whose cases all fit (`more_than: 31`, `at_least: 32`) draws no
+warning, and `at_least: 64` warns about the two-group case only, both of its
+boundaries (63 and 64) being derived. Hand-written
+examples must cover the skipped cases. The second group's `for` row takes
+different values in every non-key field the alert names, so the alert lines
+tell the groups apart; where no such values exist the case is skipped with
+that reason.
 
 The demo is `src/l2demo/ship_voyage_limit.l2.yaml`: zero, two, three and five
 future voyages, a ship excluded by `when`, a cross-ship case that exposes a
