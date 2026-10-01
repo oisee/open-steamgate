@@ -13,6 +13,7 @@
     "test/lsd-a4h-011.mjs",
     "test/naming-scan.mjs",
     "test/oo-comments.mjs",
+    "test/ddic-reserved.mjs",
     "test/unit-risk.mjs",
     "test/protocol-diag.mjs",
     "test/protocol-ni.mjs",

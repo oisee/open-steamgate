@@ -71,7 +71,19 @@ with `MESSAGE ... TYPE 'E'` when the rule did not end `DONE`, which aborts its j
 
 | key | field |
 |---|---|
-| MANDT, SET_NAME, RULE, MODEL_HASH, CHECK_DATE, ALERT_SEQ | ALERT_TEXT (STRG), RUN_ID, RUN_TS, RULE_CLASS, RULE_FILE, RULE_LINE |
+| MANDT, SET_NAME (CHAR 16), MODEL_HASH (CHAR 71), CHECK_DATE, ALERT_SEQ | RULE_NAME (CHAR 60), ALERT_TEXT (STRG), RUN_ID, RUN_TS, RULE_CLASS, RULE_FILE, RULE_LINE |
+
+The rule is not part of the key: its model hash already names it. The hash is a SHA-256 of the
+compiled rule, which holds the rule's name, and a set refuses two rules of one name, so one hash
+is one rule of one set. Leaving it out keeps the key at 102 characters (3 + 16 + 71 + 8 + the
+four bytes of INT4), under the 120 past which a system warns "Key length > 120 (restricted
+functions)"; with the rule in the key (and a 30-character set name) it was 176, and A4H said so.
+The set name is 16 wide because a set name has at most 13 characters.
+
+The column is `RULE_NAME`, not `RULE`: `RULE` is a reserved word in a system's dictionary, and
+A4H refused to activate the table with it ("RULE is a reserved word (choose another field
+name)", 2026-10-01). `tools/osd-ddic-reserved.mjs` now refuses such a field name before it
+leaves the tree.
 
 `ALERT_SEQ` is the position of the alert in the rule's `check` answer, which is ordered (L2's
 `ORDER BY` plus `SORT`). `RULE_FILE` and `RULE_LINE` are the rule file and its `alert:` line.
@@ -235,7 +247,11 @@ folder that the unit does not list refuses the zip. Keep `--osg` at its default,
 run` runs the class through `UnitRun` in the tool's own process, where `mode_p` has neither step,
 file nor worker and fails.
 
-TODO(lead): run the line above on A4H; when it passes, record the run here and drop "running on
+The first run (2026-10-01) stopped at the import: A4H refused to activate `ZOSD_L3_ALERT`, whose
+rule column was then named `RULE`, a reserved word, and warned that its key was longer than 120.
+Both are fixed above (the alert log section); nothing else had run.
+
+TODO(lead): run the line above on A4H again; when it passes, record the run here and drop "running on
 A4H" from "Not yet".
 
 ## Not yet

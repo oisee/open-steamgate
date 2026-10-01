@@ -10,7 +10,7 @@
 CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDIUM.
   PRIVATE SECTION.
     TYPES: BEGIN OF ty_row,
-             rule TYPE zosd_l3_alert-rule,
+             rule_name TYPE zosd_l3_alert-rule_name,
              model_hash TYPE zosd_l3_alert-model_hash,
              alert_seq TYPE i,
              alert_text TYPE string,
@@ -44,7 +44,7 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     METHODS expected
       RETURNING VALUE(rt_rows) TYPE tt_row.
     METHODS add_expected
-      IMPORTING iv_rule TYPE zosd_l3_alert-rule
+      IMPORTING iv_rule TYPE zosd_l3_alert-rule_name
                 iv_hash TYPE zosd_l3_alert-model_hash
                 it_alerts TYPE string_table
       CHANGING ct_rows TYPE tt_row.
@@ -109,15 +109,15 @@ CLASS ltcl_proof IMPLEMENTATION.
     DATA lt_log TYPE tt_row.
     DATA ls_row TYPE ty_row.
     DATA ls_result TYPE zcl_l3_fleet=>ty_result.
-    DATA lt_rules TYPE STANDARD TABLE OF zosd_l3_alert-rule WITH DEFAULT KEY.
+    DATA lt_rules TYPE STANDARD TABLE OF zosd_l3_alert-rule_name WITH DEFAULT KEY.
     DATA lv_ours TYPE i.
     DATA lv_lines TYPE i.
     lt_exp = expected( ).
     LOOP AT lt_exp INTO ls_row WHERE alert_text CP 'L30*'.
       lv_ours = lv_ours + 1.
-      READ TABLE lt_rules TRANSPORTING NO FIELDS WITH KEY table_line = ls_row-rule.
+      READ TABLE lt_rules TRANSPORTING NO FIELDS WITH KEY table_line = ls_row-rule_name.
       IF sy-subrc <> 0.
-        APPEND ls_row-rule TO lt_rules.
+        APPEND ls_row-rule_name TO lt_rules.
       ENDIF.
     ENDLOOP.
     cl_abap_unit_assert=>assert_equals( act = lv_ours exp = 7
@@ -310,14 +310,14 @@ CLASS ltcl_proof IMPLEMENTATION.
     lt_alerts = zcl_l2_ship_cargo_limit=>check( zcl_l3_fleet_proof=>c_check_date ).
     add_expected( EXPORTING iv_rule = zcl_l3_fleet=>c_rule_6 iv_hash = zcl_l3_fleet=>c_hash_6
                             it_alerts = lt_alerts CHANGING ct_rows = rt_rows ).
-    SORT rt_rows BY rule model_hash alert_seq.
+    SORT rt_rows BY rule_name model_hash alert_seq.
   ENDMETHOD.
 
   METHOD add_expected.
     DATA ls_row TYPE ty_row.
     DATA lv_alert TYPE string.
     LOOP AT it_alerts INTO lv_alert.
-      ls_row-rule = iv_rule.
+      ls_row-rule_name = iv_rule.
       ls_row-model_hash = iv_hash.
       ls_row-alert_seq = sy-tabix.
       ls_row-alert_text = lv_alert.
@@ -328,18 +328,18 @@ CLASS ltcl_proof IMPLEMENTATION.
   METHOD logged.
     " the log of the proof's check date: one run's rows, or all of them
     IF iv_run IS INITIAL.
-      SELECT rule model_hash alert_seq alert_text FROM zosd_l3_alert
+      SELECT rule_name model_hash alert_seq alert_text FROM zosd_l3_alert
         INTO CORRESPONDING FIELDS OF TABLE rt_rows
         WHERE set_name = zcl_l3_fleet=>c_set
           AND check_date = zcl_l3_fleet_proof=>c_check_date.
     ELSE.
-      SELECT rule model_hash alert_seq alert_text FROM zosd_l3_alert
+      SELECT rule_name model_hash alert_seq alert_text FROM zosd_l3_alert
         INTO CORRESPONDING FIELDS OF TABLE rt_rows
         WHERE set_name = zcl_l3_fleet=>c_set
           AND check_date = zcl_l3_fleet_proof=>c_check_date
           AND run_id = iv_run.
     ENDIF.
-    SORT rt_rows BY rule model_hash alert_seq.
+    SORT rt_rows BY rule_name model_hash alert_seq.
   ENDMETHOD.
 
   METHOD foreign.

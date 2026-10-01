@@ -29,6 +29,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-01-rule-reserved-word -- a table field named RULE builds and runs here and does not activate on a system
+
+- Status: `workaround`
+- Discovery date: `2026-10-01`
+- Affected versions: every version; abaplint and the transpiler check no field name against a system's reserved words
+- Affected ABAP statement, runtime API or adapter: a transparent table (`*.tabl.xml`) with a field `RULE`; the same family as `zone-reserved-word`
+- Minimal ABAP reproducer: `src/dsl/zosd_l3_alert.tabl.xml` before this date (field `RULE`, key `MANDT, SET_NAME, RULE, MODEL_HASH, CHECK_DATE, ALERT_SEQ`)
+- Exact command used to run it: the lead's `node tools/osd-prove-on-system.mjs ... --unit l3demo` on A4H, 2026-10-01
+- Expected SAP behaviour: activation refused, "RULE is a reserved word (choose another field name)"; and a warning "Table ZOSD_L3_ALERT: Key length > 120 (restricted functions)"
+- Actual open-abap behaviour: the table is created and the L3 runner and its tests pass
+- Impact on open-steamgate: L3 could not reach a system
+- Smallest safe workaround: the column is `RULE_NAME` and not part of the key (the model hash names the rule); `SET_NAME` is CHAR 16; the key is 102. `tools/osd-ddic-reserved.mjs` (CI: leak-scan.yml) refuses a field named by a public reserved-word list, so the next one is found here
+- Upstream issue: none; a system's dictionary rule, not a transpiler defect
+- Regression-test location: `test/ddic-reserved.mjs`; `test/dsl-l3.mjs`
+- Upstream version containing a fix: not applicable
+
 ### ANOMALY-2026-10-01-assert-equals-table-length-msg -- assert_equals on two tables of different length reports its own text, not MSG
 
 - Status: `open`

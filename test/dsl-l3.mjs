@@ -200,8 +200,8 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
       try { return db.prepare(sql).all(...args); } finally { db.close(); }
     };
     const exec = (statements) => dialogStep(async () => { for (const s of statements) await client.execute(s); });
-    const log = () => read("SELECT * FROM zosd_l3_alert ORDER BY set_name, rule, model_hash, check_date, alert_seq")
-      .map((r) => ({set: r.set_name.trim(), rule: r.rule.trim(), hash: r.model_hash.trim(), date: r.check_date,
+    const log = () => read("SELECT * FROM zosd_l3_alert ORDER BY set_name, rule_name, model_hash, check_date, alert_seq")
+      .map((r) => ({set: r.set_name.trim(), rule: r.rule_name.trim(), hash: r.model_hash.trim(), date: r.check_date,
         seq: Number(r.alert_seq), text: String(r.alert_text), run: r.run_id.trim(), ts: Number(r.run_ts),
         file: r.rule_file.trim(), line: Number(r.rule_line), class: r.rule_class.trim()})).sort(byKey);
     const content = (rows) => rows.map(({run, ts, ...rest}) => rest);
