@@ -19,7 +19,12 @@ CLASS ltcl_zip DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS output_limit FOR TESTING RAISING cx_static_check.
     METHODS bomb_stops_early FOR TESTING RAISING cx_static_check.
     METHODS signature_in_comment FOR TESTING RAISING cx_static_check.
+    METHODS source_chunks FOR TESTING RAISING cx_static_check.
+    METHODS source_max_total FOR TESTING RAISING cx_static_check.
+    METHODS source_max_ratio FOR TESTING RAISING cx_static_check.
+    METHODS source_honest_bomb FOR TESTING RAISING cx_static_check.
     METHODS bomb RETURNING VALUE(rv_data) TYPE xstring.
+    METHODS honest_bomb RETURNING VALUE(rv_data) TYPE xstring.
     METHODS comment_zip RETURNING VALUE(rv_data) TYPE xstring.
     METHODS reader
       IMPORTING iv_data          TYPE xstring
@@ -283,6 +288,98 @@ CLASS ltcl_zip IMPLEMENTATION.
       '74504B0102140314000000000000603E5D00000000000000000000000004000000000000000000000080019C0400006469722F504B0102140314000000000000603E5D738C052900010000000100000500000000000000000000008001BE040000622E62'
       '696E504B0102140314000008080000603E5DED496E3409000000070000000600000000000000000000008001E1050000C3BC2E747874504B05060000000004000400CC0000000E060000050068656C6C6F'
       INTO lv_hex.
+    rv_data = lv_hex.
+  ENDMETHOD.
+
+  METHOD source_chunks.
+    " an entry as a byte source: pieces of at most the chunk (and one deflate
+    " match), the whole entry in order, then empty and empty again
+    DATA lo_source TYPE REF TO zif_osd_byte_source.
+    DATA lv_piece TYPE xstring.
+    DATA lv_all TYPE xstring.
+    CREATE OBJECT lo_source TYPE zcl_osd_byte_source_zip
+      EXPORTING io_zip = reader( zip( ) ) iv_name = `a.txt` iv_chunk = 100.
+    DO.
+      lv_piece = lo_source->next( ).
+      IF lv_piece IS INITIAL.
+        EXIT.
+      ENDIF.
+      cl_abap_unit_assert=>assert_true( boolc( xstrlen( lv_piece ) <= 100 + 257 ) ).
+      CONCATENATE lv_all lv_piece INTO lv_all IN BYTE MODE.
+    ENDDO.
+    cl_abap_unit_assert=>assert_equals( act = lv_all exp = text( ) ).
+    cl_abap_unit_assert=>assert_initial( lo_source->next( ) ).
+    cl_abap_unit_assert=>assert_initial( lo_source->next( ) ).
+  ENDMETHOD.
+
+  METHOD source_max_total.
+    " a bomb whose directory is honest about its 1 MiB passes the reader's
+    " own check; the total limit stops it, and the bytes handed out before
+    " stay under that limit
+    DATA lo_source TYPE REF TO zcl_osd_byte_source_zip.
+    DATA lx_error TYPE REF TO zcx_osd_byte_source.
+    CREATE OBJECT lo_source
+      EXPORTING io_zip = reader( honest_bomb( ) ) iv_name = `z.bin` iv_chunk = 4096 iv_max_total = 100000.
+    TRY.
+        DO.
+          IF lo_source->zif_osd_byte_source~next( ) IS INITIAL.
+            EXIT.
+          ENDIF.
+        ENDDO.
+        cl_abap_unit_assert=>fail( 'the total limit must stop the entry' ).
+      CATCH zcx_osd_byte_source INTO lx_error.
+        cl_abap_unit_assert=>assert_equals( act = lx_error->reason
+                                            exp = `z.bin: more than 100000 bytes` ).
+    ENDTRY.
+    cl_abap_unit_assert=>assert_true( boolc( lo_source->get_produced( ) <= 100000 ) ).
+    cl_abap_unit_assert=>assert_initial( lo_source->zif_osd_byte_source~next( ) ).
+  ENDMETHOD.
+
+  METHOD source_max_ratio.
+    " about 1000 bytes out per compressed byte; a limit of 100 stops it
+    DATA lo_source TYPE REF TO zcl_osd_byte_source_zip.
+    DATA lx_error TYPE REF TO zcx_osd_byte_source.
+    CREATE OBJECT lo_source
+      EXPORTING io_zip = reader( honest_bomb( ) ) iv_name = `z.bin` iv_chunk = 4096 iv_max_ratio = 100.
+    TRY.
+        DO.
+          IF lo_source->zif_osd_byte_source~next( ) IS INITIAL.
+            EXIT.
+          ENDIF.
+        ENDDO.
+        cl_abap_unit_assert=>fail( 'the ratio limit must stop the entry' ).
+      CATCH zcx_osd_byte_source INTO lx_error.
+        cl_abap_unit_assert=>assert_equals( act = lx_error->reason
+                                            exp = `z.bin: inflates to more than 100 times its 1033 compressed bytes` ).
+    ENDTRY.
+    cl_abap_unit_assert=>assert_true( boolc( lo_source->get_produced( ) <= 103300 ) ).
+  ENDMETHOD.
+
+  METHOD source_honest_bomb.
+    " without limits the honest bomb reads to its end, a chunk at a time
+    DATA lo_source TYPE REF TO zcl_osd_byte_source_zip.
+    DATA lv_piece TYPE xstring.
+    DATA lv_max TYPE i.
+    CREATE OBJECT lo_source
+      EXPORTING io_zip = reader( honest_bomb( ) ) iv_name = `z.bin` iv_chunk = 4096.
+    DO.
+      lv_piece = lo_source->zif_osd_byte_source~next( ).
+      IF lv_piece IS INITIAL.
+        EXIT.
+      ENDIF.
+      IF xstrlen( lv_piece ) > lv_max.
+        lv_max = xstrlen( lv_piece ).
+      ENDIF.
+    ENDDO.
+    cl_abap_unit_assert=>assert_equals( act = lo_source->get_produced( ) exp = 1048576 ).
+    cl_abap_unit_assert=>assert_true( boolc( lv_max <= 4096 + 257 ) ).
+  ENDMETHOD.
+
+  METHOD honest_bomb.
+    " BOMB with its directory and local header saying the true 1 MiB
+    DATA lv_hex TYPE string.
+    lv_hex = bomb( ).
+    REPLACE ALL OCCURRENCES OF '090400000A000000' IN lv_hex WITH '0904000000001000'.
     rv_data = lv_hex.
   ENDMETHOD.
 
