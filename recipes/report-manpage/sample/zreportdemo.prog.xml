@@ -2,6 +2,7 @@
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_PROG" serializer_version="v1.0.0">
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>
   <PROGDIR><NAME>ZREPORTDEMO</NAME></PROGDIR>
-  <TPOOL><item><ID>S</ID><KEY>P_NAME</KEY><ENTRY>Your name</ENTRY><LENGTH>9</LENGTH></item></TPOOL>
+  <TPOOL><item><ID>S</ID><KEY>P_NAME</KEY><ENTRY>Your name</ENTRY><LENGTH>9</LENGTH></item>
+  <item><ID>S</ID><KEY>P_PLAIN</KEY><ENTRY>D       .</ENTRY><LENGTH>9</LENGTH></item></TPOOL>
  </asx:values></asx:abap>
 </abapGit>

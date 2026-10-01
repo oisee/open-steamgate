@@ -27,6 +27,31 @@
        "length": "scalar"
       }
      },
+     "default_literal": "scalar",
+     "default_literal@type": {
+      "object": {
+       "built_in": "scalar",
+       "length": "scalar"
+      }
+     },
+     "default_option": "scalar",
+     "default_raw": "scalar",
+     "default_sign": "scalar",
+     "default_to": "scalar",
+     "default_to@type": {
+      "object": {
+       "built_in": "scalar",
+       "length": "scalar"
+      }
+     },
+     "default_to_literal": "scalar",
+     "default_to_literal@type": {
+      "object": {
+       "built_in": "scalar",
+       "length": "scalar"
+      }
+     },
+     "default_to_raw": "scalar",
      "facts": "scalar",
      "kind": "scalar",
      "name": "scalar",
@@ -34,6 +59,7 @@
      "positional": "scalar",
      "radio_group": "scalar",
      "selection_text": "scalar",
+     "source_kind": "scalar",
      "text": "scalar",
      "type_label": "scalar"
     }

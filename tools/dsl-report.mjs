@@ -18,7 +18,7 @@ export async function renderReport(kind, report, {out} = {}) {
   const trace = traceNodes(model, rendered.trace).map((entry) => {
     if (kind === "args") {
       const sources = [model.elements, model.elements.filter((item) => item.positional),
-        model.elements.filter((item) => item.checkbox), model.elements.filter((item) => item.kind === "select-option")];
+        model.elements.filter((item) => item.checkbox), model.elements.filter((item) => item.source_kind === "select-option")];
       return {...entry, nodes: sources[entry.line - 1].map((item) => item["@id"])};
     }
     if (entry.node.startsWith(`report/${model.name.toUpperCase()}/radio/`)) {
