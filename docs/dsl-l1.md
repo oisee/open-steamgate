@@ -213,8 +213,70 @@ Authority numbers are explicit in the model; the model builder validates or comp
 from each authority's `kind` (`class` by default, `report`, or `function_group`) and derives SAPC's
 XML state flag. The engine escapes XML text.
 
-Stage 2 will derive the model from ABAP plus a declared `<app>.samc.decl.json` overlay beside
-the code. The template will continue to render only decisions already recorded in the model.
+### Derive (stage 2)
+
+`node tools/dsl-samc.mjs derive <folder…> --app ZOSD_T_AMC --decl
+<app>.samc.decl.json --out model.json` walks abapGit class, report and function-group
+ABAP files with abaplint's syntax tree. `check <folder…> --app X --decl … --against
+<file.samc.xml>` derives the same model, renders the SAMC recipe and reports the
+first differing XML line, model node and ABAP source. Without `--out`, derive
+prints JSON. `derive --against <file.samc.xml>` or `derive --numbering <file.samc.xml>`
+keeps existing authority NRs and appends new rows after the highest old NR.
+`check --against` uses the compared file for the same purpose. A removed
+authority is reported as drift with its old NR. Numbering is history, kept
+from the file; without one, ordering is deterministic. File and source order
+do not affect the model. The renderer has no inference logic.
+
+The overlay contains `description`, `lang`, optional `version` (default `A`),
+`channels: {"/channel": {"scope": "C"}}`, `extraAuthorities` rows with
+`channelId`, `program`, `kind`, `activity` and a required `reason`, and `callSites`. A call site is
+keyed by `basename:line`, full `file:line`, or `CLASS.method`, and gives
+`channelIds` (an array) when the channel is dynamic. It may also give
+`applicationIds` or `messageType` when those cannot be proven. A stated value
+that contradicts a statically resolved value refuses the derivation. Scope,
+description and language are declarations; channel IDs, activity and message
+type come from code wherever possible. Every derived channel and authority
+carries its call-site `source` list. XML trace lines point to these nodes.
+`authority: "none"` excludes an actual call site only with a nonempty `reason`
+and a matching application ID;
+an unmatched site is refused. It describes a documented failed call, not a
+positive test call.
+If consumer delivery cannot be connected to its creation, the creation site
+must state `messageType`, `deliveryProgram` and `authority: "R"`; otherwise
+derivation refuses the channel. `check` reports a target grant with neither
+a call nor a reasoned overlay entry as `grant without use` at its authority node.
+
+A producer's declared interface or cast gives `TEXT`, `BINARY` or `PCP`, the
+exact `MESSAGE_TYPE_ID` spellings in the captured XML (`PCP` there). A
+consumer's `start_message_delivery` gives `R`, and the receiver interface gives
+the message type when resolvable. Producer creation gives `S`. SAP documents
+`S` as Send, `R` as Receive, and `C` as Receive via APC WebSocket in
+[Defining an ABAP Messaging Channel Application](https://help.sap.com/docs/SAP_NETWEAVER_AS_ABAP_752/c238d694b825421f940829321ffa326a/5212f332ffec430bbacfc62789692f4f.html).
+The captured file contains only `S` and `R`; `C` therefore requires an
+`extraAuthorities` declaration. Local test class calls count and belong to
+their global class, as SAP's `PROGRAM_ID` does. The capture shows that abapGit
+preserves configured `NR` order rather than sorting it.
+
+The probe fixture at `test/fixtures/samc-derive/` copies the daemon class and
+renames the driver's p8a and p8b AMC test includes for the fixture. The tests send `/pc` to the
+daemon producer, but `on_message` forwards the unvalidated PCP `ch` field to
+`amc_send`; callers can also supply `/ps` or `/pu`. The daemon consumer is
+reached with `/pc` by p8b and `/pc`, `/pu`, `/ps` by p8a. The p8a source also
+directly sends on all three channels. The daemon producer's three-channel set
+is declared in the overlay because its channel comes from PCP input; static
+derivation cannot prove those values.
+These are positive probes. The p8b include directly sends and receives
+on `/pc`; its consumer catches errors but then waits for delivery and tests
+echo, so `authority: none` would be false. The report `ZOSD_T_DSUB` has no AMC
+call. No inspected include creates a `/pu` consumer in `ZCL_OSD_T_DDRV`.
+Those two captured grants remain `extraAuthorities`, each with a reason and
+without code provenance.
+The second proof uses `src/amc/zstg_amc_test.samc.decl.json` with the AMC
+test class and test include. Its derived XML matches
+`src/amc/zstg_amc_test.samc.xml` byte for byte.
+The derivation has twelve authorities and reports drift against the five-row capture. The Stage 1
+hand-written model reproduces that capture byte for byte; deriving it from
+these sources would omit real calls.
 
 ## Steps
 

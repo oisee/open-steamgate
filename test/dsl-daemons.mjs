@@ -193,7 +193,7 @@ describe("DSL daemon channel files", function () {
   it("rejects out-of-order authority numbers, row identity mismatches and namespaced classes", () => {
     const model = JSON.parse(readFileSync(samc, "utf8"));
     model.authorities[0].nr = 2;
-    expect(() => buildDaemonModel(model)).to.throw(/nr.*1/);
+    expect(() => buildDaemonModel(model)).to.throw(/nr.*unique ascending/);
     model.authorities[0].nr = 1;
     model.channels[0].applicationId = "OTHER";
     expect(() => buildDaemonModel(model)).to.throw(/applicationId/);

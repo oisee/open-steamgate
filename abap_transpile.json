@@ -125,6 +125,7 @@
     "\\.sapc\\.xml$",
     "\\.samc\\.xml$",
     "\\.samc\\.model\\.json$",
+    "\\.samc\\.decl\\.json$",
     "\\.ddls\\.",
     "\\.stg\\.yaml$",
     "\\.l2\\.yaml$",
