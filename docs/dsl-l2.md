@@ -1,6 +1,6 @@
 # DSL L2: a domain rule compiled to L1
 
-Status: slices 1 to 5, 2026-10-01. Built on L1 (`docs/dsl-l1.md`) and the template engine
+Status: slices 1 to 6, 2026-10-01. Built on L1 (`docs/dsl-l1.md`) and the template engine
 (`docs/abap-templates.md`).
 
 ## What L2 is
@@ -564,10 +564,79 @@ class contains one `SELECT`. The examples and every derived case compare
 Three generated-code mutants go red: counting a missing-side row as one,
 moving the role equality from `ON` to `WHERE`, and dropping `CLEAR lv_count`.
 
+## Slice 6: sum, min and max of a numeric field
+
+`limit` can name one numeric field of its counted table with `sum`, `min` or
+`max`, followed by `where` and one of the same four thresholds as `count`:
+
+```yaml
+limit:
+  sum: ZOSD_L2_CARGO.weight as cargo
+  where: cargo.ship_id = ship.ship_id
+  more_than: 1000.00
+alert: "{ship.ship_id}: {sum} kg booked"
+```
+
+The field must resolve in DDIC as `INT1`, `INT2`, `INT4`, `INT8`, `DEC`,
+`CURR` or `QUAN`. `FLTP` is refused because its rounding and equality cannot
+be proved here. Other fields, including `CHAR`, `NUMC` and `DATS`, are refused
+at the aggregate field's rule line with their DDIC type in the reason. The
+threshold goes through the existing `literal` / `misfit` checks against the
+field type, including the number of DEC decimals. Thus `1000.001` does not fit
+`DEC 9,2`.
+
+SUM accumulates in `p LENGTH 16 DECIMALS d` for packed fields and `INT8` for
+integer fields. MIN and MAX use the field's own type. This widens
+`INT1`/`INT2`/`INT4`; an `INT8` sum is limited by the full `INT8` result range,
+and a packed sum uses a 16-byte accumulator with the field's decimals. The
+rule does not establish a maximum number of matching rows, so an actual sum
+can still overflow its accumulator. To keep the generated boundary test from
+overflowing first, it skips an adjacent INT8 sum boundary outside the INT8
+range (for example, `above` at INT8 maximum) and records the reason in
+`model.skipped`.
+
+An empty SUM is 0. An empty MIN or MAX is undefined: with either operation,
+`fewer_than` and `exactly` are refused at the threshold line. For
+`more_than` and `at_least`, a `for` row with no matching counted row produces
+no MIN/MAX alert. SUM thresholds whose answer may depend on the empty value
+use the two-query lowering or the equality-only LEFT OUTER JOIN from slice 5.
+For all aggregates, the main query is an ordered JOIN, then an explicit SORT,
+then an ABAP loop. It accumulates one result per `for` key; it does not use
+`HAVING`, which this runtime drops. `check_reference` remains a nested SELECT
+per `for` row and loops over the selected values.
+
+The native-aggregate probe at `docs/probes/dsl-l2/` showed that this
+transpiler does execute `SELECT SUM( weight )`, `MAX( weight )` and `GROUP BY`
+with the expected grouped values. `HAVING` is still dropped, so the generated
+rule uses the loop for its threshold. The probe also recorded that packed
+`10.50` assigned directly to STRING becomes `10.50 `, but assigning through a
+fixed CHAR first loses the decimals; packed `-10.50` becomes `10.50-`. The
+packed formatter copies the magnitude to packed, converts it to STRING,
+condenses it, then prefixes a negative sign. For integer aggregate alerts,
+direct INT8-to-STRING conversion puts the sign first here and last on SAP
+(ANORMALIES `int8-string-sign`, measured on A4H: INT8 and I -3 to STRING
+both give `3-`). The generated formatter converts the magnitude to
+INT8, converts it to STRING, condenses it, then prefixes `-`; INT8 minimum
+uses its known decimal magnitude because that positive value cannot fit in
+INT8. The interpreter emits the same field-literal text, including DEC scale.
+
+Derived SUM boundaries are `t - 1` smallest field step, `t` and `t + 1`
+smallest field step (one for integer fields, `10^-d` for packed); MIN and MAX
+include a group whose extreme equals the threshold. Applicable zero, next-zero
+and two-group cases follow slice 5. `src/l2demo/ship_cargo_limit.l2.yaml`
+demonstrates fractional weights below, at and above a DEC threshold; the
+max-cargo demo and test-only all-negative groups exercise MIN and MAX, including
+the initial-value guard and alert formatting. The integer formatter has a
+generated-code shape assertion: removing its magnitude conversion and explicit
+sign prefix is rejected even though this runtime's direct INT8 conversion
+would print a leading sign. The tests mutate `>`, SUM-to-count, MAX-to-MIN,
+MAX's first-row guard, the accumulator reset and the accumulator's decimals;
+each mutation is caught.
+
 ## Not yet
 
-Parameters other than `$date`,
-`sum` / `min` / `max`, grouping by fields of the counted table, `limit` under `all` / `any`, a condition on the outer table inside `where` beyond
+Parameters other than `$date`, grouping by fields of the counted table,
+`limit` under `all` / `any`, a condition on the outer table inside `where` beyond
 the join (a comparison of an `exists` field with an outer field is allowed; one of only outer
 fields is not), a `for` and an `exists` on the same table, a join without an equality, an
 equality under `or` as a join, a clause of `all` or `any` naming another clause, `require` with

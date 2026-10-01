@@ -30,7 +30,9 @@ const REQUIRE = "src/l2demo/ship_captain.l2.yaml";
 const LIMIT = "src/l2demo/ship_voyage_limit.l2.yaml";
 const MIN_CREW = "src/l2demo/ship_min_crew.l2.yaml";
 const MIN_CAPTAINS = "src/l2demo/ship_min_captains.l2.yaml";
-const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT, MIN_CREW, MIN_CAPTAINS];
+const CARGO_LIMIT = "src/l2demo/ship_cargo_limit.l2.yaml";
+const MAX_CARGO = "src/l2demo/ship_max_cargo.l2.yaml";
+const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT, MIN_CREW, MIN_CAPTAINS, CARGO_LIMIT, MAX_CARGO];
 
 describe("DSL L2: a rule, its generated check, its examples and its derived cases", function () {
   this.timeout(180000);
@@ -415,7 +417,8 @@ examples:
   // fails the test), transpiled alone and run in this process: which methods
   // fail, and with what message, says what the tests prove. `fixture` names
   // tables that are not in the system: their DDIC files and CREATE TABLE.
-  const FLEET = ["zosd_l2_ship.tabl.xml", "zosd_l2_voy.tabl.xml", "zosd_l2_crew.tabl.xml"];
+  const FLEET = ["zosd_l2_ship.tabl.xml", "zosd_l2_voy.tabl.xml", "zosd_l2_crew.tabl.xml",
+    "zosd_l2_cargo.tabl.xml", "zosd_l2_weight.dtel.xml"];
   async function loadRule(file, className, {ruleRegistry = registry, tables = FLEET,
     tableDir = OUT, mutate = {}, transform = {}} = {}) {
     const out = join(scratch, basename(file, ".l2.yaml"));
@@ -464,6 +467,7 @@ examples:
     if (fixture) {
       for (const statement of output.databaseSetup.schemas.sqlite) {
         const name = /CREATE TABLE\s+'?(\w+)/i.exec(statement)?.[1];
+        if (Array.isArray(fixture) && !fixture.includes(name?.toLowerCase())) continue;
         if (name) { await db.execute(statement); created.push(name); }
       }
     }
@@ -1038,6 +1042,340 @@ examples:
         const warning = capWarning(model, file);
         if (!named.length) { expect(warning, threshold).to.equal(undefined); continue; }
         for (const name of named) expect(warning, threshold).to.include(name);
+      }
+    });
+  });
+
+  describe("slice 6: numeric field aggregates", () => {
+    before(async () => { await import("./start.mjs"); });
+    const cargoText = readFileSync(CARGO_LIMIT, "utf8");
+    const copy = (tag, source) => {
+      const className = `zcl_l2_ag_${tag}`;
+      const file = join(scratch, `cargo_${tag}.l2.yaml`);
+      writeFileSync(file, source.replace(/^class: .*$/m, `class: ${className}`));
+      return {file, className};
+    };
+    const caseRows = (c) => Object.fromEntries(c.tables.map((t) => [t.table,
+      t.rows.map((r) => Object.fromEntries(r.fields.map((f) => [f.column, f.value])))]));
+
+    const ZERO_SUM = `rule: ship-cargo-empty-sum
+class: zcl_l2_cargo_empty_sum
+title: Empty cargo weighs zero
+for: ZOSD_L2_SHIP as ship
+limit:
+  sum: ZOSD_L2_CARGO.weight as cargo
+  where: cargo.ship_id = ship.ship_id
+  fewer_than: 1000.00
+alert: "{ship.ship_id}: {sum} kg booked"
+boundaries: auto
+examples:
+  - name: above threshold
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S040, name: Tern, status: A}]
+      ZOSD_L2_CARGO:
+        - {cargo_id: C00040, ship_id: S040, weight: 600.01}
+        - {cargo_id: C00041, ship_id: S040, weight: 400.00}
+    expect: []
+  - name: empty group
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S041, name: Gull, status: A}]
+    expect: ["S041: 0.00 kg booked"]
+  - name: nonempty then empty
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S042, name: Heron, status: A}
+        - {ship_id: S043, name: Wren, status: A}
+      ZOSD_L2_CARGO: [{cargo_id: C00042, ship_id: S042, weight: 1000.01}]
+    expect: ["S043: 0.00 kg booked"]
+`;
+
+    const MIN_RULE = `rule: ship-min-cargo
+class: zcl_l2_cargo_minimum
+title: The minimum cargo weight is reported
+for: ZOSD_L2_SHIP as ship
+limit:
+  min: ZOSD_L2_CARGO.weight as cargo
+  where: cargo.ship_id = ship.ship_id
+  at_least: -2.50
+alert: "{ship.ship_id}: minimum {min} kg"
+boundaries: auto
+examples:
+  - name: negative minimum
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S030, name: Tern, status: A}]
+      ZOSD_L2_CARGO:
+        - {cargo_id: C00030, ship_id: S030, weight: -2.50}
+        - {cargo_id: C00031, ship_id: S030, weight: -1.25}
+    expect: ["S030: minimum -2.50 kg"]
+  - name: empty minimum is undefined
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S031, name: Gull, status: A}]
+    expect: []
+`;
+
+    it("runs fractional sum examples and derives DEC boundaries and separate groups", async () => {
+      const {model, results, messages} = await runRule(CARGO_LIMIT, "zcl_l2_ship_cargo_limit");
+      expect(Object.keys(results)).to.have.length(model.examples.length + model.cases.length);
+      expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+      expect(model.cases.map((c) => c.method)).to.include.members([
+        "b_ship_id_match", "b_ship_id_nomatch", "b_sum_below", "b_sum_at", "b_sum_above", "b_sum_groups",
+      ]);
+      const values = Object.fromEntries(model.cases.filter((c) => ["below", "at", "above"].includes(c.derived.kind))
+        .map((c) => [c.derived.kind, caseRows(c).zosd_l2_cargo[0].weight]));
+      expect(values).to.deep.equal({below: "999.99", at: "1000.00", above: "1000.01"});
+      const reference = readFileSync(join(OUT, "zcl_l2_ship_cargo_limit.clas.testclasses.abap"), "utf8");
+      expect(reference).to.contain("SELECT weight FROM zosd_l2_cargo INTO TABLE lt_aggregate_values");
+      expect(reference).to.contain("LOOP AT lt_aggregate_values INTO lv_aggregate_value.");
+      expect(model.examples.map((e) => e.expect.map((x) => x.value))).to.deep.equal([
+        ["S003: 1000.01 kg booked"], [], [], ["S011: 1000.01 kg booked"],
+      ]);
+    });
+
+    it("runs max and min, including negative DEC alert text and an exact extreme", async () => {
+      const max = await runRule(MAX_CARGO, "zcl_l2_ship_max_cargo");
+      expect(failed(max.results), JSON.stringify(max.messages)).to.deep.equal([]);
+      expect(max.model.cases.map((c) => c.method)).to.include("b_max_at");
+      const minCopy = copy("minimum", MIN_RULE);
+      const min = await runRule(minCopy.file, minCopy.className);
+      expect(failed(min.results), JSON.stringify(min.messages)).to.deep.equal([]);
+      expect(min.model.cases.map((c) => c.method)).to.include("b_min_at");
+      expect(min.model.examples[0].expect.map((e) => e.value)).to.deep.equal(["S030: minimum -2.50 kg"]);
+
+      const negativeMaxText = MIN_RULE.replace("  min:", "  max:")
+        .replace("alert: \"{ship.ship_id}: minimum {min} kg\"", "alert: \"{ship.ship_id}: maximum {max} kg\"")
+        .replace("S030: minimum -2.50 kg", "S030: maximum -1.25 kg");
+      const negativeMaxCopy = copy("negative_max", negativeMaxText);
+      const negativeMax = await runRule(negativeMaxCopy.file, negativeMaxCopy.className);
+      expect(failed(negativeMax.results), JSON.stringify(negativeMax.messages)).to.deep.equal([]);
+      expect(negativeMax.model.cases.map((c) => c.method)).to.include("b_max_at");
+      for (const testCase of negativeMax.model.cases) {
+        const weights = caseRows(testCase).zosd_l2_cargo?.map((row) => row.weight) ?? [];
+        expect(weights.every((weight) => weight.startsWith("-")), testCase.method).to.equal(true);
+      }
+    });
+
+    it("uses the zero-sum query shape for fewer_than and derives zero, next_zero and two groups", async () => {
+      const fewer = copy("empty_sum", ZERO_SUM);
+      const {model, results, messages} = await runRule(fewer.file, fewer.className);
+      expect(model.queries[0].zero).to.include({one_outer: true});
+      expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+      expect(model.cases.map((c) => c.method)).to.include.members(["b_sum_zero", "b_sum_next_zero", "b_sum_groups"]);
+      const zero = model.cases.find((c) => c.method === "b_sum_zero");
+      expect(caseRows(zero).zosd_l2_cargo).to.equal(undefined);
+      expect(zero.expect.map((e) => e.value)).to.deep.equal(["S040: 0.00 kg booked"]);
+      const next = model.cases.find((c) => c.method === "b_sum_next_zero");
+      const ships = caseRows(next).zosd_l2_ship.map((r) => r.ship_id);
+      expect(ships[0] < ships[1]).to.equal(true);
+      expect(caseRows(next).zosd_l2_cargo.every((r) => r.ship_id === ships[0])).to.equal(true);
+    });
+
+    it("> to >=, sum to count, max to min, max's missing initial guard, reset removal and integer accumulation all go red", async () => {
+      const ge = copy("ge", cargoText);
+      const geResult = await runRule(ge.file, ge.className, {transform: {"clas.abap": (s) =>
+        s.replaceAll("lv_aggregate > '1000.00'", "lv_aggregate >= '1000.00'")}});
+      expect(failed(geResult.results)).to.include("b_sum_at");
+
+      const count = copy("count_mutant", cargoText);
+      const countResult = await runRule(count.file, count.className, {mutate: {"clas.abap": [[
+        "ADD ls_join-cargo_weight TO lv_aggregate.", "ADD 1 TO lv_aggregate.",
+      ]]}});
+      expect(failed(countResult.results)).to.include("fractional_over");
+
+      const min = copy("max_as_min", readFileSync(MAX_CARGO, "utf8"));
+      const extremeResult = await runRule(min.file, min.className, {mutate: {"clas.abap": [[
+        "ls_join-cargo_weight > lv_aggregate", "ls_join-cargo_weight < lv_aggregate",
+      ]]}});
+      expect(failed(extremeResult.results)).to.include("maximum_over");
+
+      const negativeMax = copy("negative_max_no_seen", MIN_RULE.replace("  min:", "  max:")
+        .replace("alert: \"{ship.ship_id}: minimum {min} kg\"", "alert: \"{ship.ship_id}: maximum {max} kg\"")
+        .replace("S030: minimum -2.50 kg", "S030: maximum -1.25 kg"));
+      const noMaxSeen = await runRule(negativeMax.file, negativeMax.className, {mutate: {"clas.abap": [[
+        "lv_aggregate_seen IS INITIAL OR ls_join-cargo_weight > lv_aggregate", "ls_join-cargo_weight > lv_aggregate",
+      ]]}});
+      expect(failed(noMaxSeen.results)).to.include("negative_minimum");
+
+      const fewer = copy("reset_mutant", ZERO_SUM);
+      const resetResult = await runRule(fewer.file, fewer.className, {mutate: {"clas.abap": [[
+        "      CLEAR lv_aggregate.\n      READ TABLE lt_count", "      READ TABLE lt_count",
+      ]]}});
+      expect(failed(resetResult.results)).to.include("b_sum_next_zero");
+
+      const integer = copy("integer_accumulator", cargoText);
+      const integerResult = await runRule(integer.file, integer.className, {mutate: {"clas.abap": [[
+        "DATA lv_aggregate TYPE p LENGTH 16 DECIMALS 2.", "DATA lv_aggregate TYPE i.",
+      ]]}});
+      expect(failed(integerResult.results)).to.include("fractional_over");
+    });
+
+    it("reports unsupported DDIC fields, keeps INT8 sums wide, and refuses a DEC threshold's excess precision", async () => {
+      const ddic = join(scratch, "aggregate-ddic");
+      mkdirSync(ddic, {recursive: true});
+      const numericFields = ["I1", "I2", "I4", "I8", "DEC"];
+      const numericTypes = [["I1", "INT1", 3], ["I2", "INT2", 5], ["I4", "INT4", 10], ["I8", "INT8", 19], ["DEC", "DEC", 9]];
+      for (const [name, type, length] of numericTypes) {
+        writeFileSync(join(ddic, `zosd_l2_a_${name.toLowerCase()}.dtel.xml`), dtel(`ZOSD_L2_A_${name}`, type, length, type === "DEC" ? 2 : 0));
+      }
+      const badTypes = [["CHAR_VALUE", "CHAR", 4], ["NUMC_VALUE", "NUMC", 4], ["DATE_VALUE", "DATS", 8],
+        ["TIME_VALUE", "TIMS", 6]];
+      const fields = [typed("SHIP_ID", "CHAR", 4), ...numericFields.map((name) => elem(name, `ZOSD_L2_A_${name}`)),
+        ...badTypes.map(([name, type, length]) => typed(name, type, length))];
+      writeFileSync(join(ddic, "zosd_l2_aggnum.tabl.xml"), tableXml("ZOSD_L2_AGGNUM", [key("ID"), ...fields]));
+      writeFileSync(join(ddic, "zosd_l2_aggfloat.tabl.xml"), tableXml("ZOSD_L2_AGGFLOAT", [key("ID"),
+        typed("SHIP_ID", "CHAR", 4), typed("FLOAT_VALUE", "FLTP", 8)]));
+      writeFileSync(join(ddic, "zosd_l2_aggint.tabl.xml"), tableXml("ZOSD_L2_AGGINT", [key("ID"),
+        typed("SHIP_ID", "CHAR", 4), elem("INT_VALUE", "ZOSD_L2_A_I4")]));
+      const aggRegistry = registryFor([...DEFAULT_DDIC, ddic], []);
+      const ruleFor = (tag, source, threshold = "5") => `rule: aggregate-type-${tag.toLowerCase().replaceAll("_", "-")}
+class: zcl_l2_aggregate_type
+title: aggregate type check
+for: ZOSD_L2_SHIP as ship
+limit:
+  sum: ZOSD_L2_AGGNUM.${source.toLowerCase()} as amount
+  where: amount.ship_id = ship.ship_id
+  more_than: ${threshold}
+alert: "{sum}"
+boundaries: auto
+examples:
+  - name: one
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S050, name: Tern, status: A}]
+      ZOSD_L2_AGGNUM: [{id: A001, ship_id: S050, i1: 1, i2: 1, i4: 1, i8: 1, dec: 1.25,
+        char_value: A, numc_value: 1, date_value: 20260101, float_value: 1.5, time_value: 120000}]
+    expect: []
+`;
+      const compileSource = (tag, source, threshold = "5") => {
+        const file = join(scratch, `aggregate_type_${tag.toLowerCase()}.l2.yaml`);
+        writeFileSync(file, ruleFor(tag, source, threshold).replace("float_value: 1.5, ", ""));
+        return {file};
+      };
+      for (const [field, expected] of [["I1", "int8"], ["I2", "int8"], ["I4", "int8"],
+        ["I8", "int8"], ["DEC", "p LENGTH 16 DECIMALS 2"]]) {
+        const item = compileSource(field, field);
+        const model = compileRule(item.file, {registry: aggRegistry});
+        expect(model.aggregate.accumulator_type, field).to.equal(expected);
+      }
+      for (const [field, datatype] of badTypes) {
+        const item = compileSource(field, field);
+        const source = readFileSync(item.file, "utf8");
+        const line = source.split("\n").findIndex((entry) => entry.includes(`sum: ZOSD_L2_AGGNUM.${field.toLowerCase()}`)) + 1;
+        let error;
+        try { compileRule(item.file, {registry: aggRegistry}); } catch (caught) { error = caught; }
+        expect(error, field).to.be.instanceOf(RuleError);
+        expect(error.message, field).to.include(`:${line}: `);
+        const message = (() => { try { compileRule(item.file, {registry: aggRegistry}); } catch (error) { return error.message; } })();
+        expect(message, field).to.include(`is ${datatype}`);
+      }
+      const floatFile = join(scratch, "aggregate_type_float.l2.yaml");
+      const floatText = ruleFor("FLOAT_VALUE", "FLOAT_VALUE").replace("ZOSD_L2_AGGNUM.float_value", "ZOSD_L2_AGGFLOAT.float_value")
+        .replace("ZOSD_L2_AGGNUM: [{id: A001, ship_id: S050, i1: 1, i2: 1, i4: 1, i8: 1, dec: 1.25,\n        char_value: A, numc_value: 1, date_value: 20260101, float_value: 1.5, time_value: 120000}]", "ZOSD_L2_AGGNUM: []");
+      writeFileSync(floatFile, floatText);
+      const floatLine = floatText.split("\n").findIndex((entry) => entry.includes("sum: ZOSD_L2_AGGFLOAT.float_value")) + 1;
+      expect(() => compileRule(floatFile, {registry: aggRegistry}))
+        .to.throw(RuleError, new RegExp(`:${floatLine}: .*FLTP; floating point equality and rounding cannot be proved`));
+      const file = join(scratch, "aggregate_threshold_precision.l2.yaml");
+      writeFileSync(file, cargoText.replace("more_than: 1000.00", "more_than: 1000.001"));
+      const text = readFileSync(file, "utf8");
+      const line = text.split("\n").findIndex((entry) => entry.includes("more_than: 1000.001")) + 1;
+      expect(() => compileRule(file, {registry})).to.throw(RuleError, new RegExp(`:${line}: .*exceeds the precision of DEC 9,2`));
+
+      const runtimeDdic = join(scratch, "aggregate-runtime-ddic");
+      mkdirSync(runtimeDdic, {recursive: true});
+      for (const name of FLEET) copyFileSync(join(OUT, name), join(runtimeDdic, name));
+      for (const name of ["zosd_l2_aggint.tabl.xml", "zosd_l2_a_i4.dtel.xml"]) {
+        copyFileSync(join(ddic, name), join(runtimeDdic, name));
+      }
+      const int8Rule = join(scratch, "aggregate_int8_alert.l2.yaml");
+      writeFileSync(int8Rule, `rule: aggregate-int8-alert
+class: zcl_l2_aggregate_int8_alert
+title: A wide integer sum keeps every digit
+for: ZOSD_L2_SHIP as ship
+limit:
+  sum: ZOSD_L2_AGGNUM.i8 as amount
+  where: amount.ship_id = ship.ship_id
+  more_than: 12345678901234566
+alert: "{sum}"
+boundaries: auto
+examples:
+  - name: seventeen digit total
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S050, name: Tern, status: A}]
+      ZOSD_L2_AGGNUM: [{id: A050, ship_id: S050, i8: 12345678901234567}]
+    expect: ["12345678901234567"]
+`);
+      const int8Out = join(scratch, "aggregate_int8_alert");
+      const int8 = await buildRule(int8Rule, int8Out, {registry: aggRegistry});
+      expect(int8.model.aggregate.accumulator_type).to.equal("int8");
+      expect(int8.model.examples[0].expect.map((entry) => entry.value)).to.deep.equal(["12345678901234567"]);
+      const int8Abap = readFileSync(join(int8Out, "zcl_l2_aggregate_int8_alert.clas.abap"), "utf8");
+      expect(int8Abap).to.include("DATA lv_aggregate TYPE int8.");
+      expect(int8Abap).to.include("DATA lv_aggregate_integer TYPE int8.");
+      expect(int8Abap).to.not.match(/DATA lv_count(?:_text)? TYPE/);
+
+      const int8BoundaryRule = join(scratch, "aggregate_int8_boundary.l2.yaml");
+      writeFileSync(int8BoundaryRule, readFileSync(int8Rule, "utf8")
+        .replace("more_than: 12345678901234566", "more_than: 9223372036854775807")
+        .replace('expect: ["12345678901234567"]', "expect: []"));
+      const int8Boundary = compileRule(int8BoundaryRule, {registry: aggRegistry});
+      expect(int8Boundary.cases.map((c) => c.method)).to.not.include("b_sum_above");
+      expect(int8Boundary.skipped.some((entry) =>
+        entry.case === "above" && entry.reason.includes("outside the INT8 sum range"))).to.equal(true);
+
+      const int4Rule = join(scratch, "aggregate_int4_alert.l2.yaml");
+      writeFileSync(int4Rule, `rule: aggregate-int4-alert
+class: zcl_l2_aggregate_int4_alert
+title: Integer alert keeps its leading sign
+for: ZOSD_L2_SHIP as ship
+limit:
+  sum: ZOSD_L2_AGGINT.int_value as amount
+  where: amount.ship_id = ship.ship_id
+  more_than: -4
+alert: "{sum}"
+examples:
+  - name: negative integer total
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S050, name: Tern, status: A}]
+      ZOSD_L2_AGGINT: [{id: A050, ship_id: S050, int_value: -3}]
+    expect: ["-3"]
+`);
+      const int4 = await runRule(int4Rule, "zcl_l2_aggregate_int4_alert", {ruleRegistry: aggRegistry,
+        tables: [...FLEET, "zosd_l2_aggint.tabl.xml", "zosd_l2_a_i4.dtel.xml"],
+        tableDir: runtimeDdic, fixture: ["zosd_l2_aggint"]});
+      expect(int4.model.aggregate.accumulator_type).to.equal("int8");
+      expect(failed(int4.results), JSON.stringify(int4.messages)).to.deep.equal([]);
+
+      const int4Out = join(scratch, "aggregate_int4_alert");
+      await buildRule(int4Rule, int4Out, {registry: aggRegistry});
+      const int4Abap = readFileSync(join(int4Out, "zcl_l2_aggregate_int4_alert.clas.abap"), "utf8");
+      const int4TestAbap = readFileSync(join(int4Out, "zcl_l2_aggregate_int4_alert.clas.testclasses.abap"), "utf8");
+      const integerFormatter = /IF lv_aggregate = -9223372036854775807 - 1\.\s+lv_aggregate_text = '9223372036854775808'\.\s+ELSE\.\s+lv_aggregate_integer = lv_aggregate\.\s+IF lv_aggregate < 0\.\s+lv_aggregate_integer = 0 - lv_aggregate\.\s+ENDIF\.\s+lv_aggregate_text = lv_aggregate_integer\.\s+CONDENSE lv_aggregate_text NO-GAPS\.\s+ENDIF\.\s+IF lv_aggregate < 0\.\s+CONCATENATE `-` lv_aggregate_text INTO lv_aggregate_signed\.\s+lv_aggregate_text = lv_aggregate_signed\.\s+ENDIF\./g;
+      const hasIntegerSignFormatter = (source) => {
+        const conversions = (source.match(/lv_aggregate_text = lv_aggregate_integer\./g) ?? []).length;
+        const explicit = [...source.matchAll(integerFormatter)].length;
+        return conversions > 0 && explicit === conversions;
+      };
+      expect(hasIntegerSignFormatter(int4Abap), "generated check formats the INT8 magnitude before the sign").to.equal(true);
+      expect(hasIntegerSignFormatter(int4TestAbap), "generated reference test formats the INT8 magnitude before the sign").to.equal(true);
+      const sapSignMutant = int4Abap.replace(/\s+IF lv_aggregate < 0\.\s+lv_aggregate_integer = 0 - lv_aggregate\.\s+ENDIF\./g, "")
+        .replace(/\s+IF lv_aggregate < 0\.\s+CONCATENATE `-` lv_aggregate_text INTO lv_aggregate_signed\.\s+lv_aggregate_text = lv_aggregate_signed\.\s+ENDIF\./g, "");
+      expect(hasIntegerSignFormatter(sapSignMutant), "the SAP trailing-sign mutant is rejected by the code-shape oracle").to.equal(false);
+    });
+
+    it("refuses fewer_than and exactly for min and max because their empty result is undefined", () => {
+      for (const operation of ["min", "max"]) for (const threshold of ["fewer_than: 2.00", "exactly: 2.00"]) {
+        const source = `rule: empty-extreme\nclass: zcl_l2_empty_extreme\ntitle: t\nfor: ZOSD_L2_SHIP as ship\nlimit:\n  ${operation}: ZOSD_L2_CARGO.weight as cargo\n  where: cargo.ship_id = ship.ship_id\n  ${threshold}\nalert: \"{${operation}}\"\nexamples:\n  - name: empty\n    date: 20261001\n    rows:\n      ZOSD_L2_SHIP: [{ship_id: S060, name: Tern, status: A}]\n    expect: []\n`;
+        const file = join(scratch, `empty_${operation}_${threshold.split(":")[0]}.l2.yaml`);
+        writeFileSync(file, source);
+        const line = source.split("\n").findIndex((entry) => entry.includes(threshold)) + 1;
+        expect(() => compileRule(file, {registry})).to.throw(RuleError, new RegExp(`:${line}: ${operation} is undefined for an empty group`));
       }
     });
   });

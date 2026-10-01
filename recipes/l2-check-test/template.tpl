@@ -40,15 +40,43 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA {{wa}} TYPE {{table}}.
 {{/for}}
 {{#clauses}}
+{{#limit_reference}}
+{{#threshold.is_count}}
     DATA {{itab}} TYPE STANDARD TABLE OF {{table}} WITH DEFAULT KEY.
 {{#loops}}
     DATA {{wa}} TYPE {{table}}.
 {{/loops}}
+{{/threshold.is_count}}
+{{^threshold.is_count}}
+    DATA {{limit_reference.inner.value_itab}} TYPE STANDARD TABLE OF {{limit_reference.inner.table}}-{{limit_reference.inner.select_column}} WITH DEFAULT KEY.
+    DATA {{limit_reference.inner.value_wa}} TYPE {{limit_reference.inner.table}}-{{limit_reference.inner.select_column}}.
+{{/threshold.is_count}}
+{{/limit_reference}}
+{{^limit_reference}}
+    DATA {{itab}} TYPE STANDARD TABLE OF {{table}} WITH DEFAULT KEY.
+{{#loops}}
+    DATA {{wa}} TYPE {{table}}.
+{{/loops}}
+{{/limit_reference}}
 {{/clauses}}
     DATA lv_alert TYPE string.
 {{#threshold}}
+{{#is_count}}
     DATA lv_count TYPE i.
     DATA lv_count_text TYPE c LENGTH 12.
+{{/is_count}}
+{{^is_count}}
+    DATA lv_aggregate TYPE {{aggregate.accumulator_type}}.
+    DATA lv_aggregate_text TYPE string.
+    DATA lv_aggregate_signed TYPE string.
+{{#aggregate.is_integer}}
+    DATA lv_aggregate_integer TYPE int8.
+{{/aggregate.is_integer}}
+{{^aggregate.is_integer}}
+    DATA lv_aggregate_abs TYPE p LENGTH 16 DECIMALS {{aggregate.decimals}}.
+{{/aggregate.is_integer}}
+    DATA lv_aggregate_seen TYPE c LENGTH 1.
+{{/is_count}}
 {{/threshold}}
 {{#limit_reference}}
     SELECT * FROM {{outer.table}} INTO TABLE {{outer.itab}}
@@ -57,15 +85,76 @@ CLASS ltcl_examples IMPLEMENTATION.
 {{/outer.where}}
       ORDER BY PRIMARY KEY.
     LOOP AT {{outer.itab}} INTO {{outer.wa}}.
+{{#threshold.is_count}}
       SELECT * FROM {{inner.table}} INTO TABLE {{inner.itab}}
+{{/threshold.is_count}}
+{{^threshold.is_count}}
+      SELECT {{inner.select_column}} FROM {{inner.table}} INTO TABLE {{inner.value_itab}}
+{{/threshold.is_count}}
 {{#inner.where}}
 {{pre}}{{#is_cmp}}{{column}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{ref}}{{/is_literal}}{{/is_cmp}}{{post}}
 {{/inner.where}}
         ORDER BY PRIMARY KEY.
+{{#threshold.is_count}}
       DESCRIBE TABLE {{inner.itab}} LINES lv_count.
-      IF lv_count {{threshold.op}} {{threshold.value}}.
+      IF lv_count {{threshold.op}} {{threshold.value | literal}}.
         lv_count_text = lv_count.
         CONDENSE lv_count_text NO-GAPS.
+{{/threshold.is_count}}
+{{^threshold.is_count}}
+      CLEAR lv_aggregate.
+      CLEAR lv_aggregate_seen.
+      LOOP AT {{inner.value_itab}} INTO {{inner.value_wa}}.
+{{#threshold.aggregate.is_sum}}
+        ADD {{inner.value_wa}} TO lv_aggregate.
+{{/threshold.aggregate.is_sum}}
+{{#threshold.aggregate.is_min}}
+        IF lv_aggregate_seen IS INITIAL OR {{inner.value_wa}} < lv_aggregate.
+          lv_aggregate = {{inner.value_wa}}.
+        ENDIF.
+{{/threshold.aggregate.is_min}}
+{{#threshold.aggregate.is_max}}
+        IF lv_aggregate_seen IS INITIAL OR {{inner.value_wa}} > lv_aggregate.
+          lv_aggregate = {{inner.value_wa}}.
+        ENDIF.
+{{/threshold.aggregate.is_max}}
+        lv_aggregate_seen = 'X'.
+      ENDLOOP.
+{{#threshold.aggregate.is_sum}}
+      IF lv_aggregate {{threshold.op}} {{threshold.value | literal}}.
+{{/threshold.aggregate.is_sum}}
+{{^threshold.aggregate.is_sum}}
+      IF lv_aggregate_seen = 'X' AND lv_aggregate {{threshold.op}} {{threshold.value | literal}}.
+{{/threshold.aggregate.is_sum}}
+{{#threshold.aggregate.is_integer}}
+        IF lv_aggregate = -9223372036854775807 - 1.
+          lv_aggregate_text = '9223372036854775808'.
+        ELSE.
+          lv_aggregate_integer = lv_aggregate.
+          IF lv_aggregate < 0.
+            lv_aggregate_integer = 0 - lv_aggregate.
+          ENDIF.
+          lv_aggregate_text = lv_aggregate_integer.
+          CONDENSE lv_aggregate_text NO-GAPS.
+        ENDIF.
+        IF lv_aggregate < 0.
+          CONCATENATE `-` lv_aggregate_text INTO lv_aggregate_signed.
+          lv_aggregate_text = lv_aggregate_signed.
+        ENDIF.
+{{/threshold.aggregate.is_integer}}
+{{^threshold.aggregate.is_integer}}
+        lv_aggregate_abs = lv_aggregate.
+        IF lv_aggregate < 0.
+          lv_aggregate_abs = 0 - lv_aggregate.
+        ENDIF.
+        lv_aggregate_text = lv_aggregate_abs.
+        CONDENSE lv_aggregate_text NO-GAPS.
+        IF lv_aggregate < 0.
+          CONCATENATE `-` lv_aggregate_text INTO lv_aggregate_signed.
+          lv_aggregate_text = lv_aggregate_signed.
+        ENDIF.
+{{/threshold.aggregate.is_integer}}
+{{/threshold.is_count}}
 {{#alert_parts}}
 {{lead}}{{#is_text}}{{value | literal}}{{/is_text}}{{^is_text}}{{ref}}{{/is_text}}{{stop}}
 {{/alert_parts}}

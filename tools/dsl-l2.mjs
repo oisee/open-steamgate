@@ -19,7 +19,7 @@ import {dirname, join, relative, resolve as resolvePath, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import yaml from "js-yaml";
 import {DEFAULT_DDIC, DDIC_PROVIDER, Refusal, registryFor, unresolvedDeep} from "./dsl-ddic.mjs";
-import {INT_RANGE, PACKED, allReferences, canonical, deriveCases, evaluate, kindOf} from "./dsl-l2-eval.mjs";
+import {INT_RANGE, PACKED, allReferences, canonical, compareValues, deriveCases, evaluate, kindOf} from "./dsl-l2-eval.mjs";
 
 export {evaluate, stepValue} from "./dsl-l2-eval.mjs";
 
@@ -300,7 +300,9 @@ export function parseAlert(text, fail) {
     const end = text.indexOf("}", open);
     if (end < 0) fail(`"{" at column ${open + 1} is not closed`);
     const hole = text.slice(open + 1, end).trim();
-    if (hole.toLowerCase() === "count") parts.push({kind: "count", text: text.slice(open, end + 1)});
+    if (["count", "sum", "min", "max"].includes(hole.toLowerCase())) {
+      parts.push({kind: hole.toLowerCase(), text: text.slice(open, end + 1)});
+    }
     else {
       const m = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(hole);
       if (!m) fail(`a hole is {alias.field} or {count}, found {${text.slice(open + 1, end)}} at column ${open + 1}`);
@@ -570,26 +572,25 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   if (doc.forbid !== undefined && doc.require !== undefined && doc.limit === undefined) {
     failAt(line("require"))("a rule has forbid or require, not both");
   }
-  if (present.length === 0) failAt(line("rule"))("a rule needs forbid: (no row may match) or require: (a row must match) or limit: (a count must exceed a threshold)");
+  if (present.length === 0) failAt(line("rule"))("a rule needs forbid: (no row may match) or require: (a row must match) or limit: (an aggregate must meet a threshold)");
   if (present.length !== 1) failAt(line(present[1] ?? "rule"))("a rule needs exactly one of forbid:, require:, or limit:");
   const kind = present[0];
-  need(doc[kind], kind, kind === "limit" ? "a mapping with count, where and a threshold" : "a mapping with exists and where", "map");
-  let threshold;
-  // more_than / at_least count from above (slice 4); fewer_than / exactly
-  // need the for rows with no related row at all, counted 0 (slice 5)
+  need(doc[kind], kind, kind === "limit" ? "a mapping with count, sum, min or max, where and a threshold" : "a mapping with exists and where", "map");
+  let threshold, aggregate;
+  // `count` is the original row-count aggregate. `sum`, `min` and `max`
+  // name one numeric DDIC field of the counted table.
+  const AGGREGATES = ["count", "sum", "min", "max"];
   const THRESHOLDS = ["more_than", "at_least", "fewer_than", "exactly"];
+  let aggregateKey, thresholdSpec;
   if (kind === "limit") {
     const spec = doc.limit;
-    for (const key of Object.keys(spec)) if (!["count", "where", ...THRESHOLDS].includes(key)) failAt(line(`limit/${key}`))(`unknown key limit.${key}`);
+    for (const key of Object.keys(spec)) if (![...AGGREGATES, "where", ...THRESHOLDS].includes(key)) failAt(line(`limit/${key}`))(`unknown key limit.${key}`);
+    const aggregateKeys = AGGREGATES.filter((k) => spec[k] !== undefined);
+    if (aggregateKeys.length !== 1) failAt(line(aggregateKeys[1] ? `limit/${aggregateKeys[1]}` : "limit"))("limit needs exactly one of count, sum, min or max");
+    aggregateKey = aggregateKeys[0];
     const keys = THRESHOLDS.filter((k) => spec[k] !== undefined);
     if (keys.length !== 1) failAt(line(keys[1] ? `limit/${keys[1]}` : "limit"))("limit needs exactly one of more_than, at_least, fewer_than or exactly");
-    const key = keys[0], value = spec[key];
-    if (!/^(0|[1-9][0-9]*)$/.test(value ?? "") || BigInt(value ?? -1) > 2147483647n) failAt(line(`limit/${key}`))(`${key} must be a non-negative INT4 integer`);
-    if (key === "at_least" && value === "0") failAt(line(`limit/${key}`))("at_least: 0 holds for every for row; it is no rule");
-    if (key === "fewer_than" && value === "0") failAt(line(`limit/${key}`))("fewer_than: 0 never holds: a count is never below 0");
-    const op = {more_than: ">", at_least: ">=", fewer_than: "<", exactly: "="}[key];
-    threshold = {"@id": `${id}/limit/${key}`, rule_line: line(`limit/${key}`), op, value: Number(value), key,
-      ...(key === "fewer_than" || key === "exactly" ? {zero: true} : {})};
+    thresholdSpec = {key: keys[0], value: spec[keys[0]], rule_line: line(`limit/${keys[0]}`)};
   }
   const listKey = ["all", "any"].find((k) => doc[kind][k] !== undefined);
   let combine = "one", specs;
@@ -607,10 +608,34 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   const aliases = new Map([[outer.alias, outer]]);
   const sources = specs.map((spec) => {
     need(spec.value, spec.path, "a mapping with exists and where", "map");
-    const allowed = kind === "limit" ? ["count", "where", ...THRESHOLDS] : combine === "any" ? ["exists", "where", "alert"] : ["exists", "where"];
+    const allowed = kind === "limit" ? [...AGGREGATES, "where", ...THRESHOLDS] : combine === "any" ? ["exists", "where", "alert"] : ["exists", "where"];
     for (const key of Object.keys(spec.value)) if (!allowed.includes(key)) failAt(line(`${spec.path}/${key}`))(`unknown key ${spec.path.replaceAll("/", ".")}.${key}`);
-    const epath = `${spec.path}/${kind === "limit" ? "count" : "exists"}`;
-    const inner = source(epath, spec.value[kind === "limit" ? "count" : "exists"]);
+    const epath = `${spec.path}/${kind === "limit" ? aggregateKey : "exists"}`;
+    let inner, aggregateSpec;
+    if (kind === "limit" && aggregateKey !== "count") {
+      const parsed = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$/i.exec(spec.value[aggregateKey] ?? "");
+      if (!parsed) failAt(line(epath))(`${aggregateKey}: write TABLE.FIELD as alias`);
+      inner = source(epath, `${parsed[1]} as ${parsed[3]}`);
+      const column = parsed[2].toLowerCase();
+      const field = inner.info.fields.get(column);
+      if (!field) failAt(line(epath))(`${inner.table} has no field ${parsed[2].toUpperCase()}`);
+      if (field.column === inner.info.client) failAt(line(epath))(`${aggregateKey} cannot use the client field; the runtime sets it`);
+      if (/^FLTP\b/.test(field.literal.reason ?? "")) failAt(line(epath))(`${aggregateKey} field ${inner.table}-${column.toUpperCase()} is FLTP; floating point equality and rounding cannot be proved here`);
+      if (field.literal.resolved === false) failAt(line(epath))(`${aggregateKey} field ${inner.table}-${column.toUpperCase()} has no resolved DDIC type: ${field.literal.reason}`);
+      const numeric = new Set([...Object.keys(INT_RANGE), ...PACKED]);
+      if (!numeric.has(field.literal.built_in)) failAt(line(epath))(`${aggregateKey} field ${inner.table}-${column.toUpperCase()} is ${typeText(field.literal)}; use INT1/2/4/8 or DEC/packed numeric fields`);
+      const decimals = PACKED.has(field.literal.built_in) ? field.literal.decimals ?? 0 : 0;
+      const accumulatorType = aggregateKey === "sum"
+        ? PACKED.has(field.literal.built_in) ? `p LENGTH 16 DECIMALS ${decimals}` : "int8"
+        : `${inner.table.toLowerCase()}-${column}`;
+      aggregateSpec = {"@id": `${id}/limit/${aggregateKey}`, operation: aggregateKey, column, type: field.literal, rule_line: line(epath),
+        accumulator_type: accumulatorType, decimals, is_count: false, is_sum: aggregateKey === "sum",
+        is_min: aggregateKey === "min", is_max: aggregateKey === "max", is_integer: !PACKED.has(field.literal.built_in)};
+    } else {
+      inner = source(epath, spec.value[kind === "limit" ? "count" : "exists"]);
+      if (kind === "limit") aggregateSpec = {"@id": `${id}/limit/count`, operation: "count", is_count: true, column: undefined,
+        accumulator_type: "i", rule_line: line(epath)};
+    }
     if (aliases.has(inner.alias)) failAt(line(epath))(`alias ${inner.alias} is already the alias of ${aliases.get(inner.alias).table}`);
     if (inner.table === outer.table) failAt(line(epath))(`for and exists are both ${outer.table}; a rule joins different tables`);
     const twin = [...aliases.values()].find((s) => s.table === inner.table);
@@ -623,7 +648,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
         ? "under all each clause reads its own table (its zero case empties that table); any allows a table twice" : "a rule joins different tables"}`);
     }
     aliases.set(inner.alias, inner);
-    return {spec, inner};
+    return {spec, inner, aggregateSpec};
   });
 
   const fieldOf = (operand, scope, fail) => {
@@ -747,7 +772,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   // each clause: its where, the equalities at its top that join it to `for`
   // (the ON of the query, the correlation of require's subquery), the rest
   const joinEquality = (c) => c.cmp.rhs.kind === "field" && c.cmp.op === "=";
-  const clauses = sources.map(({spec, inner}) => {
+  const clauses = sources.map(({spec, inner, aggregateSpec}) => {
     const wpath = `${spec.path}/where`;
     const scope = new Map([[outer.alias, outer], [inner.alias, inner]]);
     const {tree, conditions} = condition(wpath, spec.value.where, inner, scope, `${spec.id}/where`);
@@ -757,12 +782,40 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
       const purpose = kind === "require" ? "the correlation of the subquery" : combine === "all" ? "every clause of all joins the for table in the one query" : "the join condition of the query";
       failAt(line(wpath))(`where needs an equality between a field of ${inner.alias} and a field of ${outer.alias}, joined to the rest by and (${purpose})`);
     }
-    return {"@id": spec.id, rule_line: line(spec.path), exists_line: line(`${spec.path}/${kind === "limit" ? "count" : "exists"}`), path: spec.path,
+    return {"@id": spec.id, rule_line: line(spec.path), exists_line: line(`${spec.path}/${kind === "limit" ? aggregateKey : "exists"}`), path: spec.path,
       table: inner.table.toLowerCase(), alias: inner.alias, itab: `lt_${inner.alias}`, wa: wa(inner.alias), loops: kind !== "require",
       slot: sources.slice(0, sources.findIndex((x) => x.spec === spec)).filter((x) => x.inner.table === inner.table).length,
       conditions, tree, on: top.filter(isOn).map((t) => conditions[t.index]), rest: conjoin(top.filter((t) => !isOn(t))),
-      info: inner.info, alertSpec: spec.value.alert};
+      info: inner.info, alertSpec: spec.value.alert, ...(aggregateSpec ? {aggregate: aggregateSpec} : {})};
   });
+
+  if (kind === "limit") {
+    aggregate = clauses[0].aggregate;
+    const {key, value, rule_line: ruleLine} = thresholdSpec;
+    const op = {more_than: ">", at_least: ">=", fewer_than: "<", exactly: "="}[key];
+    if (aggregate.is_count) {
+      if (!/^(0|[1-9][0-9]*)$/.test(value ?? "") || BigInt(value ?? -1) > 2147483647n) failAt(ruleLine)(`${key} must be a non-negative INT4 integer`);
+      if (key === "at_least" && value === "0") failAt(ruleLine)("at_least: 0 holds for every for row; it is no rule");
+      if (key === "fewer_than" && value === "0") failAt(ruleLine)("fewer_than: 0 never holds: a count is never below 0");
+      threshold = {"@id": `${id}/limit/${key}`, rule_line: ruleLine, op, value: Number(value), key, "value@type": {built_in: "INT4"}, is_count: true,
+        ...(key === "fewer_than" || key === "exactly" ? {zero: true} : {})};
+    } else {
+      const type = aggregate.type;
+      const why = misfit(value ?? "", type, false);
+      if (why) failAt(ruleLine)(`${key} threshold is ${typeText(type)}; ${why}`);
+      if ((aggregate.is_min || aggregate.is_max) && (key === "fewer_than" || key === "exactly")) {
+        failAt(ruleLine)(`${aggregate.operation} is undefined for an empty group, so ${key} cannot compare it; use more_than or at_least`);
+      }
+      const normalized = canonical(type, value);
+      const cmp = compareValues(type, "0", type, normalized);
+      const zeroCompare = op === ">" ? cmp > 0 : op === ">=" ? cmp >= 0 : op === "<" ? cmp < 0
+        : op === "<=" ? cmp <= 0 : op === "=" ? cmp === 0 : cmp !== 0;
+      const needsEmpty = aggregate.is_sum && (key === "fewer_than" || key === "exactly" || zeroCompare);
+      threshold = {"@id": `${id}/limit/${key}`, rule_line: ruleLine, op, value, canonical_value: normalized,
+        "value@type": type, numeric_type: type, key, is_count: false, ...(needsEmpty ? {zero: true} : {})};
+    }
+    threshold.aggregate = aggregate;
+  }
 
   // alerts: text and holes
   const alertOf = (path, value, scope, idBase, only) => {
@@ -770,9 +823,14 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     const alertFail = failAt(line(path));
     let texts = 0, holes = 0;
     const parts = parseAlert(alertText, alertFail).flatMap((part) => {
-      if (part.kind === "count") {
-        if (kind !== "limit") alertFail("{count} is available only for limit rules");
-        return {"@id": `${idBase}/alert/count`, rule_line: line(path), is_text: false, is_count: true, ref: "lv_count_text"};
+      if (["count", "sum", "min", "max"].includes(part.kind)) {
+        if (kind !== "limit") alertFail(`{${part.kind}} is available only for limit rules`);
+        if (part.kind === "count" && !aggregate.is_count) alertFail(`{count} is available only when limit counts rows; use {${aggregate.operation}}`);
+        if (part.kind !== "count" && (aggregate.is_count || part.kind !== aggregate.operation)) {
+          alertFail(`{${part.kind}} does not match this limit's ${aggregate.operation}; use {${aggregate.operation}}`);
+        }
+        return {"@id": `${idBase}/alert/${part.kind}`, rule_line: line(path), is_text: false,
+          ...(part.kind === "count" ? {is_count: true, ref: "lv_count_text"} : {is_aggregate: true, ref: "lv_aggregate_text"})};
       }
       if (part.kind === "text") {
         const why = misfit(part.value, {built_in: "STRG"});
@@ -806,7 +864,9 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   } else {
     alert = alertOf("alert", doc.alert, kind === "require" ? outerScope : aliases, id,
       kind === "require" ? `require alerts when no row of the exists table is there, so its alert names only fields of ${outer.alias}`
-        : kind === "limit" ? `limit counts rows of the count table, so its alert names only fields of ${outer.alias}` : undefined);
+        : kind === "limit" ? aggregate.is_count
+          ? `limit counts rows, so its alert names only fields of ${outer.alias}`
+          : `limit ${aggregate.operation} has one result per for row, so its alert names only fields of ${outer.alias}` : undefined);
   }
 
   // The queries of `check`: one for forbid (the clauses joined) and for
@@ -838,7 +898,8 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
       ...(["require", "limit"].includes(kind) ? [] : group.flatMap((c) => keysOf(c.alias, c.info, c.exists_line)))]
       .map((entry, n) => ({"@id": `${qid}/order/${n + 1}`, ...entry}));
     const qwa = `ls_join${suffix}`;
-    const parts = (combine === "any" ? group[0].alert : alert).parts.map((part) => part.is_text || part.is_count ? {...part, ...(part.is_count ? {jref: "lv_count_text"} : {})}
+    const parts = (combine === "any" ? group[0].alert : alert).parts.map((part) => part.is_text || part.is_count || part.is_aggregate ? {...part,
+      ...(part.is_count ? {jref: "lv_count_text"} : part.is_aggregate ? {jref: "lv_aggregate_text"} : {})}
       : {...part, jref: `${kind === "limit" ? (threshold.zero ? "ls_for" : "ls_prev") : qwa}-${field(part.alias, part.column, part.rule_line)}`});
     const condition = conjoin([whenTree, ...(kind === "require" ? [{op: "exists", clause: group[0]}]
       : group.map((c) => c.rest && resolve(c.rest, c.conditions)))]);
@@ -847,13 +908,18 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     // The counted table's client key is a presence marker: Open SQL's implicit
     // current-client handling makes a real joined row noninitial on SAP.
     const clause = group[0];
+    if (kind === "limit" && !aggregate.is_count) {
+      aggregate.result_field = field(clause.alias, aggregate.column, aggregate.rule_line);
+      aggregate.source = `${clause.alias}~${aggregate.column}`;
+      aggregate.table = clause.table;
+    }
     const topWhere = clause.tree.op === "and" ? clause.tree.items : [clause.tree];
     const oneOuter = kind === "limit" && threshold.zero && clause.info.client &&
       topWhere.every((node) => node.op === "cmp" && clause.conditions[node.index].op === "=" &&
         clause.conditions[node.index].cmp.rhs.kind !== "param");
     const marker = oneOuter ? field(clause.alias, clause.info.client, clause.exists_line) : undefined;
     const zero = kind === "limit" && threshold.zero ? {"@id": `${qid}/zero`, rule_line: threshold.rule_line,
-      op: threshold.op, value: threshold.value,
+      op: threshold.op, value: threshold.value, "value@type": threshold["value@type"], aggregate,
       keys: group_keys.map((k) => ({"@id": k["@id"], rule_line: k.rule_line, name: k.name,
         table: outer.table.toLowerCase(), column: k.source.split("~")[1]})),
       for_fields: [...fields.values()].filter((f) => f.source.startsWith(`${outer.alias}~`)),
@@ -867,21 +933,31 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
         from: {"@id": `${id}/for`, rule_line: line("for"), table: outer.table.toLowerCase(), alias: outer.alias},
         where: whereLines(whenTree)}} : undefined;
     return {"@id": qid, rule_line: line(kind), type: `ty_join${suffix}`, itab: `lt_join${suffix}`, wa: qwa,
-      fields: [...fields.values()],
-      ...(zero ? {zero, join_fields: [...fields.values()].filter((f) => group_keys.some((k) => k.source === f.source))} : {}),
+      fields: [...fields.values()], ...(kind === "limit" ? {aggregate} : {}),
+      ...(zero ? {zero, join_fields: [...fields.values()].filter((f) => group_keys.some((k) => k.source === f.source)
+        || (!aggregate.is_count && f.source === aggregate.source))} : {}),
       from: {"@id": `${id}/for`, rule_line: line("for"), table: outer.table.toLowerCase(), alias: outer.alias},
-      joins: kind === "require" ? [] : group.map((c) => ({"@id": kind === "limit" ? `${c["@id"]}/count` : c["@id"],
+      joins: kind === "require" ? [] : group.map((c) => ({"@id": kind === "limit" ? `${c["@id"]}/${aggregate.operation}` : c["@id"],
         rule_line: kind === "limit" ? c.exists_line : c.rule_line, table: c.table, alias: c.alias,
         on: oneOuter ? topWhere.map((node) => c.conditions[node.index]) : c.on,
         ...(oneOuter ? {one_outer: true} : {})})),
       where: whereLines(oneOuter ? whenTree : condition), order, alert_parts: parts,
       ...(oneOuter || (kind === "limit" && !zero) ? {sort_by: group_keys.map((k) => k.name).join(" ")} : {}),
-      ...(kind === "limit" && !zero ? {limit: threshold, group_keys,
+      ...(kind === "limit" && !zero ? {limit: {...threshold, aggregate}, group_keys,
         key_change: group_keys.map((k) => `${qwa}-${k.name} <> ls_prev-${k.name}`).join(" OR ")} : {})};
   });
-  const comment = kind === "limit" && threshold.zero && queries[0].zero.one_outer ? "one query: legal equality-only LEFT OUTER JOIN; missing counted side counts 0"
-    : kind === "limit" && threshold.zero ? "two queries: the for rows, and the join rows counted per for key (a key not counted counts 0)"
-    : kind === "limit" ? "one query: join rows counted per for key in the loop (HAVING probe fails here)"
+  const emptyResult = kind === "limit"
+    ? aggregate.is_count ? "a key without counted rows has count 0" : "an empty sum is 0"
+    : "";
+  const comment = kind === "limit" && threshold.zero && queries[0].zero.one_outer
+    ? aggregate.is_count ? "one query: legal equality-only LEFT OUTER JOIN; missing counted side counts 0"
+      : "one query: legal equality-only LEFT OUTER JOIN; an empty sum is 0"
+    : kind === "limit" && threshold.zero
+      ? aggregate.is_count ? "two queries: the for rows, and the join rows counted per for key (a key not counted counts 0)"
+        : `two queries: the for rows, and the join rows aggregated per for key (${emptyResult})`
+    : kind === "limit"
+      ? aggregate.is_count ? "one query: join rows counted per for key in the loop (HAVING probe fails here)"
+        : "one query: ordered JOIN rows aggregated per for key in the loop (HAVING probe fails here)"
     : kind === "require" ? "one query: the rows of the first with no match in a subquery, never a SELECT per row"
     : combine === "any" ? "one query per clause: its table joined to the first, never a SELECT per row of the first"
       : "one query: the tables joined, never a SELECT per row of the first";
@@ -905,10 +981,11 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   };
   const reference = combine === "any" ? clauses.map((c) => pass([c], c.alert.parts)) : kind === "limit" ? [] : [pass(clauses, alert.parts)];
   const limit_reference = kind === "limit" ? {
-    "@id": `${id}/limit/reference`, rule_line: line("limit"), threshold,
+    "@id": `${id}/limit/reference`, rule_line: line("limit"), threshold, aggregate,
     outer: level(forNode, when.tree, when.conditions, "    ", true),
-    inner: level({...clauses[0], "@id": `${clauses[0]["@id"]}/count`, rule_line: clauses[0].exists_line},
+    inner: {...level({...clauses[0], "@id": `${clauses[0]["@id"]}/${aggregate.operation}`, rule_line: clauses[0].exists_line},
       clauses[0].tree, clauses[0].conditions, "      ", false),
+    ...(!aggregate.is_count ? {select_column: aggregate.column, value_itab: "lt_aggregate_values", value_wa: "lv_aggregate_value"} : {})},
     alert_parts: alert.parts.map((part, k, parts) => ({...part, lead: `        ${k === 0 ? "lv_alert = " : "  && "}`, stop: k === parts.length - 1 ? "." : ""})),
   } : undefined;
 
@@ -997,7 +1074,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     clauses: clauses.map(({info, alertSpec, rest, ...clause}) => clause),
     ...(alert ? {alert} : {}),
     queries,
-    reference, ...(limit_reference ? {limit_reference, threshold} : {}),
+    reference, ...(limit_reference ? {limit_reference, threshold, aggregate} : {}),
     tables: ruleTables.map((info) => ({"@id": `${id}/table/${info.table.toLowerCase()}`, rule_line: info.rule_line,
       table: info.table.toLowerCase(), ...testName(info.table)})),
     ddic: Object.fromEntries(ruleTables.map((info) => [info.table.toLowerCase(), ddicOf(info)])),
