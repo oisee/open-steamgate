@@ -23,6 +23,7 @@
     "test/osd-suites.mjs",
     "test/ci-wait-tests.mjs",
     "test/preflight.mjs",
+    "test/fae-batching.mjs",
     "test/lift-r1.mjs",
     "test/lift-r2.mjs",
     "test/dsl-mpc.mjs",
