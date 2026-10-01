@@ -813,7 +813,7 @@ export function adtRouter(options = {}) {
   // client watches; the timeout is advertised and never enforced here,
   // because there is nothing to expire.
   router.get(`${BASE}/core/http/sessions`, (req, res) => {
-    const id = sessionIdentifier(req, identity);
+    const id = sessionIdentifier(req);
     res.type("application/vnd.sap.adt.core.http.session.v3+xml; charset=utf-8").send(
       '<?xml version="1.0" encoding="utf-8"?>' +
       '<http:session xmlns:http="http://www.sap.com/adt/http" xmlns:atom="http://www.w3.org/2005/Atom">' +
@@ -1627,7 +1627,7 @@ export function adtRouter(options = {}) {
   // session the poll named, when it names the caller's own, and the logoff
   // resource for whichever session the cookies carry.
   router.delete(`${BASE}/core/http/sessions/:id`, (req, res) => {
-    if (String(req.params.id).toUpperCase() === sessionIdentifier(req, identity)) {
+    if (String(req.params.id).toUpperCase() === sessionIdentifier(req)) {
       sessions.end(req.adt.session.id);
     }
     res.status(200).end();
@@ -3052,16 +3052,16 @@ function refuse(res, status, type, message, options) {
 
 // sessionIdentifier names the security session in the sessions document.
 //
-// Derived from the cookie the logon set, so that it is stable for as long as
-// the client's session is and changes when that does — the client treats it
-// as an identity and polls it. A client that arrives without one gets a
-// stable placeholder rather than a fresh value per request, which would look
-// like a session ending on every poll.
-function sessionIdentifier(req, identity) {
-  const cookie = req.headers.cookie ?? "";
-  const named = new RegExp(`SAP_SESSIONID_${identity.systemID}_${identity.client}=([^;]+)`).exec(cookie);
-  const seed = named === null ? `${identity.systemID}${identity.client}${identity.userName}` : named[1];
-  return createHash("sha256").update(seed).digest("hex").slice(0, 32).toUpperCase();
+// Stable for as long as the client's session is and changed when that is,
+// because the client treats it as an identity and polls it.
+//
+// Derived from the session the middleware chose for this request
+// (req.adt.session), never from one cookie read on its own: a request can
+// carry a context cookie for one session and a session cookie for another,
+// and the middleware picks the context one. An id built from the session
+// cookie then advertised a URL whose DELETE ended the other session.
+function sessionIdentifier(req) {
+  return createHash("sha256").update(req.adt.session.id).digest("hex").slice(0, 32).toUpperCase();
 }
 
 // asXmlTypeFor echoes back the vnd.sap.as+xml dataname a client asked for.

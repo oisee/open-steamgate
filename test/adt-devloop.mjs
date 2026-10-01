@@ -1320,6 +1320,28 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${id}`}});
     });
 
+    it("the security session advertised and deleted is the one the middleware chose", async () => {
+      const holder = await otherSession("OTHERDEV");
+      const bystander = await otherSession("THIRDDEV");
+      expect((await lockIt(holder.other)).status).to.equal(200);
+      // the context cookie names the holder, the session cookie the bystander:
+      // the middleware picks the holder, and so must the advertised URL
+      const mixed = {cookie: `sap-contextid=${holder.id}; SAP_SESSIONID_OSD_001=${bystander.id}`};
+      const poll = await holder.other("/core/http/sessions", {headers: mixed});
+      const url = /href="([^"]*\/core\/http\/sessions\/[0-9A-F]+)"/.exec(await poll.text())?.[1];
+      expect(url).to.be.a("string");
+      const own = await holder.other("/core/http/sessions", {headers: {cookie: `sap-contextid=${holder.id}`}});
+      expect(await own.text(), "the holder's own poll names the same URL").to.contain(url);
+      const ended = await fetch(`http://localhost:${port}${url}`, {method: "DELETE",
+        headers: {...mixed, "x-csrf-token": poll.headers.get("x-csrf-token")}});
+      expect(ended.status).to.equal(200);
+      // the holder's session ended, so its lock went with it
+      const mine = await lockIt();
+      expect(mine.status, "the holder's session is the one that ended").to.equal(200);
+      await unlockIt(mine.handle);
+      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${bystander.id}`}});
+    });
+
     it("a logoff carrying two cookies for two sessions ends only the one the context cookie names", async () => {
       const holder = await otherSession("OTHERDEV");
       const bystander = await otherSession("THIRDDEV");
