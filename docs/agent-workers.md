@@ -145,7 +145,7 @@ table above grows.
 | merge critic of a codex worker | a Claude Opus read-only subagent, asked for concrete counterexample rules or inputs | the owner reads the verdict against the diff | on L2 s2 it found 7 P2s where codex found 4 on the same diff, each with a reproducer. 1 slice, both candidates |
 | merge critic of a Claude worker | codex `gpt-6-sol`, medium, read-only | the owner | found a real P2 in every Claude candidate (4 of 4), and missed two on L2 s2 that the Claude critic found. Consider adding a Claude critic for high-stakes slices |
 | tie-breaker, when a critic keeps raising P3s as P2 | the other family's critic, one round | the owner decides | good-enough bar; stops a nagging critic without dropping a real finding |
-| leak and resemblance review (public vs private material) | a separate session from the author's, any family | the owner | ADR 0006: the author's own review does not count |
+| leak and resemblance review (public vs private material) | a separate session from the author's, any family | the owner | the author's own review does not count |
 | synthesis across many results (a report, a plan) | Fable | the owner | team rule: Fable only for synthesis |
 
 Never: Haiku as a worker or a critic (team floor is Sonnet); a critic from the worker's own family as the only
