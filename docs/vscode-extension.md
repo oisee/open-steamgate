@@ -1287,7 +1287,7 @@ file with `code --install-extension <vsix> --force`. The build refuses to
 package while a selected pack is unfetched, so a successful install command
 has a complete bundled seed.
 
-The tracked `editors/vscode/package.json` keeps the release baseline (`0.4.0`, the 0.4 line since 2026-09-30; the last 0.3 release was `vscode-v0.3.1370`)
+The tracked `editors/vscode/package.json` keeps the release baseline (`0.5.0`, the 0.5 line since 2026-10-01; the last 0.4 release was `vscode-v0.4.1444`)
 and supplies the major and minor for packaged builds. At packaging time, the
 build changes only the staged copy's patch to `git rev-list --count HEAD`;
 the tracked patch remains intact. Bump the major or minor by hand for a new
