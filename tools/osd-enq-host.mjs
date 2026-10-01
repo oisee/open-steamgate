@@ -134,6 +134,11 @@ function raiseClassic(abap, name, msgno = "", holder = "") {
 /** installs the lock server into the ABAP runtime; updateModules: the names
  * of the update-task function modules of the tree */
 export function installEnq(abap, {updateModules = []} = {}) {
+  // a host or a test that sets up a database without the ABAP runtime's
+  // registries (no Classes, FunctionModules or statements) has no ABAP to
+  // lock for
+  if (typeof abap?.Classes !== "object" || abap.Classes === null || typeof abap.FunctionModules !== "object" || abap.FunctionModules === null
+      || typeof abap.statements?.commit !== "function") return;
   if (abap.__osdEnq === true) return;
   abap.__osdEnq = true;
 
