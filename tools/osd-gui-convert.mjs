@@ -161,15 +161,15 @@ ${cases}
       ENDIF.
       IF line_exists( lt_select_options[ table_line = <ls_value>-name ] ).
         LOOP AT <ls_value>-ranges ASSIGNING FIELD-SYMBOL(<ls_range>).
+          DATA(lv_lower_case) = xsdbool( sy-tabix <> 1
+            OR line_exists( lt_lower_case[ table_line = <ls_value>-name ] ) ).
           <ls_range>-low = zcl_osd_submit_semantics=>value(
             iv_value = <ls_range>-low is_type = ls_element-data_type
-            iv_lower_case = COND #( WHEN sy-tabix = 1
-              AND NOT line_exists( lt_lower_case[ table_line = <ls_value>-name ] )
-              THEN abap_false ELSE abap_true ) ).
+            iv_lower_case = lv_lower_case ).
           IF <ls_range>-high IS NOT INITIAL.
             <ls_range>-high = zcl_osd_submit_semantics=>value(
               iv_value = <ls_range>-high is_type = ls_element-data_type
-              iv_lower_case = abap_true ).
+              iv_lower_case = lv_lower_case ).
           ENDIF.
         ENDLOOP.
       ELSE.

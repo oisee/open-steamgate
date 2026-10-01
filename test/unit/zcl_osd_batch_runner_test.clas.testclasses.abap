@@ -222,7 +222,7 @@ CLASS ltcl_batch_report IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
     FIND 'HEADER A' IN ls_result-lines[ 8 ].
     cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
-    FIND 'TEXT E NB A z' IN ls_result-lines[ 9 ].
+    FIND 'TEXT E NB A Z' IN ls_result-lines[ 9 ].
     cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
     FIND 'LCASE I EQ lower' IN ls_result-lines[ 10 ].
     cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
@@ -267,6 +267,26 @@ CLASS ltcl_batch_report IMPLEMENTATION.
     FIND 'TEXT I EQ q2' IN ls_result-lines[ 10 ].
     cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
     FIND 'TEXT I NE q3' IN ls_result-lines[ 11 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+
+    CLEAR lt_input.
+    INSERT VALUE #( name = 'S_TEXT' ranges = VALUE #(
+      ( sign = 'I' option = 'BT' low = 'a' high = 'c' )
+      ( sign = 'I' option = 'BT' low = 'd' high = 'f' ) ) ) INTO TABLE lt_input.
+    ls_result = zcl_osd_batch_report=>run( iv_program = 'ZOSD_SUB_SEM' it_input = lt_input ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'COMPLETED' ).
+    FIND 'HEADER A' IN ls_result-lines[ 8 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'TEXT I BT A C' IN ls_result-lines[ 9 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    FIND 'TEXT I BT d f' IN ls_result-lines[ 10 ].
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+
+    CLEAR lt_input.
+    INSERT VALUE #( name = 'S_LOWER' ranges = VALUE #(
+      ( sign = 'I' option = 'BT' low = 'a' high = 'c' ) ) ) INTO TABLE lt_input.
+    ls_result = zcl_osd_batch_report=>run( iv_program = 'ZOSD_SUB_SEM' it_input = lt_input ).
+    FIND 'LCASE I BT a c' IN ls_result-lines[ 10 ].
     cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
   ENDMETHOD.
 

@@ -27,6 +27,6 @@ START-OF-SELECTION.
     WRITE: / 'TEXT', s_text-sign, s_text-option, s_text-low, s_text-high.
   ENDLOOP.
   LOOP AT s_lower.
-    WRITE: / 'LCASE', s_lower-sign, s_lower-option, s_lower-low.
+    WRITE: / 'LCASE', s_lower-sign, s_lower-option, s_lower-low, s_lower-high.
   ENDLOOP.
   WRITE: / 'STR', p_str.

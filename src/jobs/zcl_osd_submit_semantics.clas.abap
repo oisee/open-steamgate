@@ -76,7 +76,7 @@ CLASS zcl_osd_submit_semantics IMPLEMENTATION.
         rs_option-default-high = value(
           iv_value = is_option-default-high
           is_type = is_option-data_type
-          iv_lower_case = abap_true ).
+          iv_lower_case = is_option-lower_case ).
       ENDIF.
     ENDIF.
   ENDMETHOD.

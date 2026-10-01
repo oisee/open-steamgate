@@ -37,7 +37,7 @@ describe("called report SUBMIT selections", function () {
   it("uses declared parameter, radio, and select-option defaults", async () => {
     const lines = await run();
     expect(lines).to.include.members(["EMPTY", "CHAR MIX", "LOWER AbCdE", "NUM 4",
-      "RADIO X", "RADIO2  X", "HEADER A", "TEXT E NB A z", "LCASE I EQ lower", "STR MIXED"]);
+      "RADIO X", "RADIO2  X", "HEADER A", "TEXT E NB A Z", "LCASE I EQ lower", "STR MIXED"]);
     expect(lines.find((line) => line.startsWith("DATE "))).to.match(/^DATE \d{8}$/);
   });
 
@@ -72,6 +72,21 @@ describe("called report SUBMIT selections", function () {
     expect(fromRange.filter((line) => line.startsWith("TEXT "))).to.deep.equal([
       "TEXT I CP Z*", "TEXT I EQ m2",
     ]);
+  });
+
+  it("converts both bounds of only the first range row unless LOWER CASE is declared", async () => {
+    const lines = await run(values([{name: "S_TEXT", ranges: [
+      {sign: "I", option: "BT", low: "a", high: "c"},
+      {sign: "I", option: "BT", low: "d", high: "f"},
+    ]}]));
+    expect(lines).to.include("HEADER A");
+    expect(lines.filter((line) => line.startsWith("TEXT "))).to.deep.equal([
+      "TEXT I BT A C", "TEXT I BT d f",
+    ]);
+    const lower = await run(values([{name: "S_LOWER", ranges: [
+      {sign: "I", option: "BT", low: "a", high: "c"},
+    ]}]));
+    expect(lower).to.include("LCASE I BT a c");
   });
 
   it("leaves caller sy-subrc intact and lets a numeric conversion error escape", async () => {
