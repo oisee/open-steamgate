@@ -1,7 +1,7 @@
 // ABAP Unit on gogen. Test includes are compiled only for selected owners.
 // Results are JSON rows: {class, testclass, method, status, message}.
 import {spawn, spawnSync} from "node:child_process";
-import {appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync} from "node:fs";
+import {appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, unlinkSync, writeFileSync} from "node:fs";
 import {availableParallelism} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {performance} from "node:perf_hooks";
@@ -501,20 +501,45 @@ const timingFile = join(out, "class-timings.json");
 const oldTimings = existsSync(timingFile) ? JSON.parse(readFileSync(timingFile, "utf8")) : {};
 const saveTimings = (latest) => {
   const lock = `${timingFile}.lock`;
-  const deadline = Date.now() + 30000;
+  const configuredTimeout = Number(process.env.GOGEN_UNIT_TIMING_LOCK_TIMEOUT_MS ?? 30000);
+  const deadline = Date.now() + (Number.isFinite(configuredTimeout) && configuredTimeout >= 0 ? configuredTimeout : 30000);
   while (true) {
     try { mkdirSync(lock); break; }
     catch (error) {
-      if (error.code !== "EEXIST" || Date.now() >= deadline) throw error;
+      if (error.code !== "EEXIST") throw error;
+      // A killed writer leaves the directory behind. Only its recorded owner
+      // can be reclaimed; an empty directory may belong to a new writer.
+      let pid;
+      try { pid = readFileSync(join(lock, "pid"), "utf8").trim(); }
+      catch (readError) { if (readError.code !== "ENOENT") throw readError; }
+      if (pid && /^[1-9]\d*$/.test(pid) && Number.isSafeInteger(Number(pid))) {
+        let dead = false;
+        try { process.kill(Number(pid), 0); }
+        catch (probeError) {
+          if (probeError.code === "ESRCH") dead = true;
+          else if (probeError.code !== "EPERM") throw probeError;
+        }
+        if (dead) {
+          try { unlinkSync(join(lock, "pid")); rmdirSync(lock); }
+          catch (removeError) { if (removeError.code !== "ENOENT") throw removeError; }
+          continue;
+        }
+      }
+      if (Date.now() >= deadline) throw new Error(`timing lock timed out: ${lock}`);
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
   }
   try {
+    writeFileSync(join(lock, "pid"), `${process.pid}\n`);
     const current = existsSync(timingFile) ? JSON.parse(readFileSync(timingFile, "utf8")) : {};
     const temp = join(runDir, "class-timings.json");
     writeFileSync(temp, JSON.stringify({...current, ...latest}, null, 2));
     renameSync(temp, timingFile);
   } finally { rmSync(lock, {recursive: true}); }
+};
+const saveTimingsOrWarn = (latest) => {
+  try { saveTimings(latest); }
+  catch (error) { console.error(`warning: class timings were not saved: ${error.message}`); }
 };
 const shards = Array.from({length: Math.min(jobs, groups.length)}, () => ({keys: [], weight: 0}));
 const orderedGroups = [...groups].sort((a, b) => a.key.localeCompare(b.key));
@@ -576,7 +601,7 @@ if (shards.length <= 1) {
   }
   actual = JSON.parse(run.stdout);
   const latestTimings = JSON.parse(readFileSync(runTimingsFile, "utf8"));
-  saveTimings(latestTimings);
+  saveTimingsOrWarn(latestTimings);
   runDetail.shards.push({index: 0, startMs: Math.round(started - runStarted), endMs: Math.round(performance.now() - runStarted),
     classes: groups.length, startupSeedMs: JSON.parse(readFileSync(phasesFile, "utf8")).startupSeedMs,
     classMs: Object.values(latestTimings).reduce((a, b) => a + b, 0)});
@@ -633,7 +658,7 @@ if (shards.length <= 1) {
         actual.push(...group.methods.map((r) => ({...r, status: "FAILED", message: `runner: ${result.error}`})));
     } else { actual.push(...result.rows); Object.assign(durations, result.durations); }
   }
-  saveTimings(durations);
+  saveTimingsOrWarn(durations);
   runDetail.mergeMs = Math.round(performance.now() - mergeStarted);
   rmSync(scratchDir, {recursive: true, force: true});
 }

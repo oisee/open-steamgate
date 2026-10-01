@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {spawn, spawnSync} from "node:child_process";
-import {chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {fileURLToPath} from "node:url";
 import {dirname, join} from "node:path";
@@ -153,6 +153,34 @@ test("overlapping runs merge distinct class timings in one output directory", {t
     assert.ok(Object.keys(timings).some((key) => key.includes("ZCL_OSD_STATICS_TEST")), JSON.stringify(timings));
     assert.ok(Object.keys(timings).some((key) => key.includes("ZCL_GOGEN_UNIT_FIXTURE")), JSON.stringify(timings));
     assert.equal(existsSync(join(dir, "class-timings.json.lock")), false);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("a stale timing lock with a dead owner is recovered", {timeout: 120000}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-stale-lock-"));
+  const lock = join(dir, "class-timings.json.lock");
+  mkdirSync(lock);
+  writeFileSync(join(lock, "pid"), "999999999\n");
+  try {
+    const run = await unitRun([...staticsArgs, "--out", dir]);
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+    assert.deepEqual(run.result.rows.map((row) => row.status), ["SUCCESS", "SUCCESS", "SUCCESS", "SUCCESS"]);
+    assert.ok(Object.keys(JSON.parse(readFileSync(join(dir, "class-timings.json"), "utf8"))).length > 0);
+    assert.equal(existsSync(lock), false);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("a live timing lock times out without hiding the JSON report", {timeout: 120000}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-live-lock-"));
+  const lock = join(dir, "class-timings.json.lock");
+  mkdirSync(lock);
+  writeFileSync(join(lock, "pid"), `${process.pid}\n`);
+  try {
+    const run = await unitRun([...staticsArgs, "--out", dir], {GOGEN_UNIT_TIMING_LOCK_TIMEOUT_MS: "50"});
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+    assert.deepEqual(run.result.rows.map((row) => row.status), ["SUCCESS", "SUCCESS", "SUCCESS", "SUCCESS"]);
+    assert.match(run.stderr, /warning: class timings were not saved: timing lock timed out/);
+    assert.equal(existsSync(join(dir, "class-timings.json")), false);
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
