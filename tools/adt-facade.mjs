@@ -24,7 +24,7 @@ import {readFileSync, appendFileSync} from "node:fs";
 import {dirname, join, relative} from "node:path";
 import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
-import {Sessions, parseCookies, CONTEXT_COOKIE, SESSION_COOKIE} from "./adt-session.mjs";
+import {Sessions, parseCookies, sessionIdOf} from "./adt-session.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
@@ -1633,11 +1633,12 @@ export function adtRouter(options = {}) {
     res.status(200).end();
   });
   router.get("/sap/public/bc/icf/logoff", (req, res) => {
-    const cookies = parseCookies(req.headers.cookie);
-    for (const id of new Set([cookies[CONTEXT_COOKIE], cookies[SESSION_COOKIE]])) {
-      if (id) {
-        sessions.end(id);
-      }
+    // exactly the one session the cookies name, by the middleware's own
+    // precedence: two cookies naming two sessions end only the one the
+    // client is using, never the other
+    const id = sessionIdOf(parseCookies(req.headers.cookie));
+    if (id) {
+      sessions.end(id);
     }
     res.status(200).type("text/plain").send("logged off");
   });
@@ -2124,7 +2125,16 @@ export function adtRouter(options = {}) {
     });
     router.delete(`${BASE}/${adt}/:name`, (req, res) => {
       answer(res, () => {
-        store.delete(type, decodeURIComponent(req.params.name));
+        const name = decodeURIComponent(req.params.name);
+        // an object another session holds is not this one's to delete
+        const holder = req.adt.sessions.holderOf(type, store.find(type, name)?.name ?? name);
+        if (holder !== undefined && holder.session !== req.adt.session) {
+          res.status(403).type("application/xml").send(lockedByOtherDocument(holder.session.user, String(name).toUpperCase()));
+          return;
+        }
+        const gone = store.delete(type, name);
+        // and a lock on an object that is gone holds nothing
+        req.adt.sessions.release(gone.type, gone.name);
         res.status(200).end();
       });
     });
@@ -2201,6 +2211,20 @@ export function adtRouter(options = {}) {
       }
       return true;
     };
+    // the handle of mayWrite, asked again just before a write: still this
+    // session's, still the object's holder
+    const stillHeld = (req, res) => {
+      const {session, sessions} = req.adt;
+      const handle = String(req.query.lockHandle ?? "");
+      const lock = session.locks.get(handle);
+      const holder = lock === undefined ? undefined : sessions.holderOf(lock.type, lock.name);
+      if (lock === undefined || holder?.session !== session || holder.handle !== handle) {
+        res.status(409).type("application/xml").send(exceptionDocument("ExceptionResourceNotLocked",
+          `lock handle ${handle} was released before the source arrived`));
+        return false;
+      }
+      return true;
+    };
     // WRITE. The file only: the transpile belongs to activation, where the
     // verdict is what the client waits for and the modules follow after.
     const writeSource = (req, res) => {
@@ -2227,6 +2251,13 @@ export function adtRouter(options = {}) {
               "ExceptionResourceIsModified",
               "source changed since it was opened; reload before saving",
             ));
+            return;
+          }
+          // The body arrives after the lock was checked, and the lock can go
+          // while it does (an UNLOCK, a logoff, an expiry, another session
+          // taking the object after that). Checked again right beside the
+          // write, which is the moment the handle has to be good for.
+          if (stillHeld(req, res) === false) {
             return;
           }
           store.write(type, req.params.name, body.toString("utf8"), include);
@@ -2267,6 +2298,9 @@ export function adtRouter(options = {}) {
           const current = store.read(type, req.params.name, include);
           if (current.empty !== true) {
             throw new Conflict(type, `${current.name} include ${include}`);
+          }
+          if (stillHeld(req, res) === false) {
+            return;
           }
           store.write(type, req.params.name, "", include);
           res.status(201)

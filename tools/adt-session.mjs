@@ -44,6 +44,15 @@ export function parseCookies(header) {
   return out;
 }
 
+// Which session a request's cookies name. Two cookies can name one, and
+// the context cookie wins when present because it is the one that carries
+// statefulness; the session cookie answers for everyone else (see the
+// middleware below for why). Undefined for none, "" for an empty context
+// cookie, which is a client asking for a fresh context.
+export function sessionIdOf(cookies) {
+  return cookies[CONTEXT_COOKIE] || cookies[SESSION_COOKIE];
+}
+
 export class Session {
   constructor(user) {
     this.id = randomBytes(12).toString("hex");
@@ -141,6 +150,14 @@ export class Sessions {
     }
   }
 
+  // The object is gone (deleted): whoever held it holds nothing now.
+  release(type, name) {
+    const owner = this.owners.get(Sessions.#key(type, name));
+    if (owner !== undefined) {
+      this.unlock(owner.session, owner.handle);
+    }
+  }
+
   // An explicit end (logoff) or an expiry: the session goes, and every lock
   // it held goes with it. This and UNLOCK are the only ways a lock is lost.
   end(id) {
@@ -212,7 +229,7 @@ export class Sessions {
       // carries statefulness, and the session cookie answers for everyone
       // else. That is also how the real thing behaves: A4H binds its token to
       // the session it issued at logon.
-      const asked = cookies[CONTEXT_COOKIE] || cookies[SESSION_COOKIE];
+      const asked = sessionIdOf(cookies);
 
       // an empty cookie is a heal attempt: the client believes the
       // context is gone and wants a new one rather than an error
