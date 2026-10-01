@@ -110,18 +110,18 @@ describe("DSL SAMC derive", function () {
   it("refuses an unresolved consumer until the overlay explicitly grants R (critic c4)", () => {
     const dir = "test/fixtures/samc-derive-repro/c4";
     const channels = {"/a": {scope: "C"}};
-    const key = "zcl_t_amc.clas.abap:10";
+    const key = "zcl_t_amc4.clas.abap:10";
     expect(() => deriveSamc([dir], "APP", {channels, callSites: {[key]: {messageType: "TEXT"}}}))
-      .to.throw(/zcl_t_amc.clas.abap:10: consumer delivery cannot be resolved.*deliveryProgram.*authority: "R"/);
+      .to.throw(/zcl_t_amc4.clas.abap:10: consumer delivery cannot be resolved.*deliveryProgram.*authority: "R"/);
     const model = deriveSamc([dir], "APP", {channels,
-      callSites: {[key]: {messageType: "TEXT", deliveryProgram: "ZCL_T_AMC", authority: "R"}}});
+      callSites: {[key]: {messageType: "TEXT", deliveryProgram: "ZCL_T_AMC4", authority: "R"}}});
     expect(model.authorities.map((row) => [row.channelId, row.activity, row.program]))
-      .to.deep.equal([["/a", "R", "ZCL_T_AMC"]]);
+      .to.deep.equal([["/a", "R", "ZCL_T_AMC4"]]);
   });
 
   it("uses the delivery program's overlay kind for its authority", () => {
     const dir = "test/fixtures/samc-derive-repro/c4";
-    const key = "zcl_t_amc.clas.abap:10";
+    const key = "zcl_t_amc4.clas.abap:10";
     for (const [kind, program, programId] of [["report", "ZT_DELIVERY", "ZT_DELIVERY"],
       ["function_group", "ZT_DELIVERY", "SAPLZT_DELIVERY"]]) {
       const model = deriveSamc([dir], "APP", {channels: {"/a": {scope: "C"}},
