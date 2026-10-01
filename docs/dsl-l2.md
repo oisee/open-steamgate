@@ -1,6 +1,6 @@
 # DSL L2: a domain rule compiled to L1
 
-Status: slices 1 to 6, 2026-10-01. Built on L1 (`docs/dsl-l1.md`) and the template engine
+Status: slices 1 to 7, 2026-10-01. Built on L1 (`docs/dsl-l1.md`) and the template engine
 (`docs/abap-templates.md`).
 
 ## What L2 is
@@ -49,7 +49,8 @@ Grammar (the expressions are parsed by a small recursive-descent parser over tok
 source      := TABLE 'as' ALIAS
 conjunction := comparison ('and' comparison)*
 comparison  := operand ('=' | '<>' | '<' | '>' | '<=' | '>=') operand
-operand     := ALIAS '.' FIELD | 'literal' | NUMBER | '$date'
+operand     := ALIAS '.' FIELD | 'literal' | NUMBER | '$date' | '$name' | date-window
+date-window := '$date' ('-' | '+') (NONNEGATIVE_INTEGER | '$int_name')
 alert       := text with {ALIAS.FIELD} holes
 ```
 
@@ -633,14 +634,52 @@ would print a leading sign. The tests mutate `>`, SUM-to-count, MAX-to-MIN,
 MAX's first-row guard, the accumulator reset and the accumulator's decimals;
 each mutation is caught.
 
+## Slice 7: typed parameters and date windows
+
+`params:` declares names for `$name` operands. Each name has a DDIC element or
+provider-resolved built-in `type`, and may have a `default`. For example,
+`max_days: {type: ZOSD_L2_DAYS, default: 30}` declares `$max_days`. A default
+makes the ABAP IMPORTING parameter optional; without it, every example must
+supply a value. An example's `params:` mapping overrides defaults. The test
+class passes those values to both `check` and `check_reference`, and the
+interpreter receives the effective values. A declared parameter must be used.
+Unknown names, `date` as a declared name, unresolved and FLTP types, and
+defaults or example values that fail the `literal` filter are refused at
+their source lines. A direct comparison needs the same DDIC built-in type,
+length and decimals as its selected field.
+
+`$date - N` and `$date + N` compare with DATS fields. `N` is a non-negative
+INT4 literal or a declared INT1/2/4 parameter whose supplied values are
+non-negative INT4 day counts. The compiler assigns each distinct bound once
+to `DATA lv_window_<n> TYPE d` before any SELECT; Open SQL compares the
+field with that local. The reference method does the same. The interpreter
+uses Gregorian day arithmetic, including month ends and 29 February. Its
+derived cases use the bound, the preceding day and the following day when
+they isolate the condition. The discriminator also checks offset mutants
+`N - 1` and `N + 1`; the demo's lower-bound `lt` and `eq` cases kill them.
+Window use lines in the trace carry both `rule_line` (the comparison's line)
+and `param_rule_line` (the declaration's `params:` line). A window against a
+non-DATS field, a negative literal offset, and a non-integer offset parameter
+are refused at the comparison line.
+
+`src/l2demo/recent_voyage.l2.yaml` uses the fleet's ship and voyage tables:
+an active ship needs a voyage in the last `$max_days` days, default 30. Its
+first example sets one day and checks the 2024-02-29 lower bound from a
+2024-03-01 check date. The derived cases check the adjacent days. The rule
+stays out of `fleet.l3.yaml` because the L3 runner passes only the date to
+each rule and cannot supply `$max_days` or other rule parameters.
+
 ## Not yet
 
-Parameters other than `$date`, grouping by fields of the counted table,
+Grouping by fields of the counted table,
 `limit` under `all` / `any`, a condition on the outer table inside `where` beyond
 the join (a comparison of an `exists` field with an outer field is allowed; one of only outer
 fields is not), a `for` and an `exists` on the same table, a join without an equality, an
 equality under `or` as a join, a clause of `all` or `any` naming another clause, `require` with
 more than one clause, more than three clauses, a message class for the alert, and running a rule
-on A4H. The interpreter's agreement with a system is measured here only, on this runtime (NUMC
+on A4H. Date windows use a proleptic Gregorian calendar in the interpreter;
+their behavior across the 1582 calendar switch still needs measurement on a
+system. There is no runtime guard for very large day offsets. The interpreter's
+agreement with a system is measured here only, on this runtime (NUMC
 comparisons against a literal, for one, are the interpreter's reading of the DDIC and are not
 exercised by an ABAP test).

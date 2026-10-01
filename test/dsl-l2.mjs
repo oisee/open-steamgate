@@ -13,7 +13,7 @@ import {basename, dirname, join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DEFAULT_DDIC, registryFor} from "../tools/dsl-ddic.mjs";
 import {buildRule, capWarning, checkRule, compileRule, describeCases, evaluate, misfit, parseCondition, RuleError, rulePath, stepValue} from "../tools/dsl-l2.mjs";
-import {bump, caseDiscriminates, compareValues, conditionOf, defaultValue, staleDiscriminates, structureDiscriminates, thresholdDiscriminates} from "../tools/dsl-l2-eval.mjs";
+import {bump, caseDiscriminates, compareValues, conditionOf, defaultValue, shiftDate, staleDiscriminates, structureDiscriminates, thresholdDiscriminates, windowOffsetDiscriminates} from "../tools/dsl-l2-eval.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
@@ -32,7 +32,8 @@ const MIN_CREW = "src/l2demo/ship_min_crew.l2.yaml";
 const MIN_CAPTAINS = "src/l2demo/ship_min_captains.l2.yaml";
 const CARGO_LIMIT = "src/l2demo/ship_cargo_limit.l2.yaml";
 const MAX_CARGO = "src/l2demo/ship_max_cargo.l2.yaml";
-const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT, MIN_CREW, MIN_CAPTAINS, CARGO_LIMIT, MAX_CARGO];
+const RECENT = "src/l2demo/recent_voyage.l2.yaml";
+const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT, MIN_CREW, MIN_CAPTAINS, CARGO_LIMIT, MAX_CARGO, RECENT];
 
 describe("DSL L2: a rule, its generated check, its examples and its derived cases", function () {
   this.timeout(180000);
@@ -59,6 +60,24 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
         expect(run.stdout).to.contain("generated files match");
       });
     }
+
+    it("old and parameterized rules trace every output line to the current templates", () => {
+      for (const name of ["zcl_l2_ship_captain", "zcl_l2_recent_voyage"]) {
+        for (const kind of ["clas", "clas.testclasses"]) {
+          const prefix = join(OUT, `${name}.${kind}`);
+          const sidecar = JSON.parse(readFileSync(`${prefix}.trace.json`, "utf8"));
+          const template = readFileSync(sidecar.template, "utf8").split("\n");
+          const output = readFileSync(`${prefix}.abap`, "utf8").split("\n");
+          for (const entry of sidecar.lines) {
+            const source = template[entry.template_line - 1];
+            const rendered = output[entry.line - 1];
+            expect(source, `${name}.${kind} output line ${entry.line} names template line ${entry.template_line}`).to.be.a("string");
+            expect(rendered, `${name}.${kind} output line ${entry.line} exists`).to.be.a("string");
+            if (!source.includes("{{")) expect(rendered, `${name}.${kind} output line ${entry.line} from template line ${entry.template_line}`).to.equal(source);
+          }
+        }
+      }
+    });
 
     it("and the check notices one changed byte", async () => {
       const copy = join(scratch, "drift");
@@ -418,7 +437,7 @@ examples:
   // fail, and with what message, says what the tests prove. `fixture` names
   // tables that are not in the system: their DDIC files and CREATE TABLE.
   const FLEET = ["zosd_l2_ship.tabl.xml", "zosd_l2_voy.tabl.xml", "zosd_l2_crew.tabl.xml",
-    "zosd_l2_cargo.tabl.xml", "zosd_l2_weight.dtel.xml"];
+    "zosd_l2_cargo.tabl.xml", "zosd_l2_weight.dtel.xml", "zosd_l2_days.dtel.xml"];
   async function loadRule(file, className, {ruleRegistry = registry, tables = FLEET,
     tableDir = OUT, mutate = {}, transform = {}} = {}) {
     const out = join(scratch, basename(file, ".l2.yaml"));
@@ -2555,6 +2574,131 @@ examples:
       } finally {
         rmSync(loose, {recursive: true, force: true});
       }
+    });
+  });
+
+  describe("slice 7: typed parameters and date windows", () => {
+    const source = readFileSync(RECENT, "utf8");
+    const write = (tag, text) => {
+      const file = join(scratch, `s7-${tag}.l2.yaml`);
+      writeFileSync(file, text.replace(/^class: .*$/m, `class: zcl_l2_s7_${tag.replaceAll("-", "_")}`));
+      return file;
+    };
+    const refuse = (tag, text, linePattern, reason) => {
+      const file = write(tag, text);
+      const at = readFileSync(file, "utf8").split("\n").findIndex((line) => linePattern.test(line)) + 1;
+      let error;
+      try { compileRule(file, {registry}); } catch (caught) { error = caught; }
+      expect(error).to.be.instanceOf(RuleError);
+      expect(error.line).to.equal(at);
+      expect(error.message).to.match(reason);
+    };
+    const rows = (c) => Object.fromEntries(c.tables.map((t) => [t.table,
+      t.rows.map((r) => Object.fromEntries(r.fields.map((f) => [f.column, f.value])))]));
+
+    it("lowers a leap-day bound once and traces both the use and declaration", () => {
+      const model = compileRule(RECENT, {registry});
+      expect(model.cases.filter((c) => c.derived.condition === "require/where/2").map((c) => c.method))
+        .to.deep.equal(["b_dep_date_lt", "b_dep_date_eq", "b_dep_date_gt"]);
+      expect(shiftDate("20240301", -1)).to.equal("20240229");
+      const abap = readFileSync(join(OUT, "zcl_l2_recent_voyage.clas.abap"), "utf8").split("\n");
+      expect(abap.filter((line) => /lv_window_1 = iv_date - iv_max_days\./.test(line))).to.have.length(1);
+      expect(abap).to.include("            AND voy~dep_date >= lv_window_1");
+      const trace = JSON.parse(readFileSync(join(OUT, "zcl_l2_recent_voyage.clas.trace.json"), "utf8"));
+      const usage = trace.lines.find((entry) => /voy~dep_date >= lv_window_1/.test(abap[entry.line - 1]));
+      const paramLine = source.split("\n").findIndex((line) => /max_days:/.test(line)) + 1;
+      const whereLine = source.split("\n").findIndex((line) => /where:/.test(line)) + 1;
+      expect(usage).to.include({rule_line: whereLine, param_rule_line: paramLine});
+    });
+
+    it("every window boundary discriminates, with offset plus and minus one killed", () => {
+      const model = compileRule(RECENT, {registry});
+      const cond = model.clauses[0].conditions[1];
+      const cases = model.cases.filter((c) => c.derived.condition === "require/where/2");
+      const params = {date: "20240301", max_days: "1"};
+      for (const c of cases) expect(caseDiscriminates(model, cond, rows(c), params), c.method).to.equal(true);
+      expect(windowOffsetDiscriminates(model, cond, rows(cases[0]), params, 1)).to.equal(true);
+      expect(windowOffsetDiscriminates(model, cond, rows(cases[1]), params, -1)).to.equal(true);
+    });
+
+    it("runs the committed examples and all derived cases against check_reference", async () => {
+      await import("./start.mjs");
+      const result = await new UnitRun(new ObjectStore()).runDetached("CLAS", "ZCL_L2_RECENT_VOYAGE");
+      const model = compileRule(RECENT, {registry});
+      expect(result.counts).to.include({methods: model.examples.length + model.cases.length,
+        passed: model.examples.length + model.cases.length, failed: 0});
+    });
+
+    it("an offset changed in generated ABAP is killed by a derived boundary", async () => {
+      await import("./start.mjs");
+      const file = write("offset_mutant", source);
+      const result = await runRule(file, "zcl_l2_s7_offset_mutant", {mutate: {
+        "clas.abap": [["lv_window_1 = iv_date - iv_max_days.", "lv_window_1 = iv_date - iv_max_days - 1."]],
+        "clas.testclasses.abap": [["lv_window_1 = iv_date - iv_max_days.", "lv_window_1 = iv_date - iv_max_days - 1."]]}});
+      expect(failed(result.results)).to.include("b_dep_date_lt");
+    });
+
+    it("accepts a direct typed operand and a plus window across leap day", async () => {
+      await import("./start.mjs");
+      const text = `rule: forward-window
+class: zcl_l2_s7_forward
+title: a voyage in a forward window
+params:
+  cutoff: {type: D, default: 20240227}
+  days: {type: ZOSD_L2_DAYS, default: 1}
+for: ZOSD_L2_SHIP as ship
+forbid:
+  exists: ZOSD_L2_VOY as voy
+  where: voy.ship_id = ship.ship_id and voy.dep_date >= $cutoff and voy.dep_date <= $date + $days
+alert: "{ship.ship_id}: {voy.voyage_id}"
+boundaries: auto
+examples:
+  - name: leap day
+    date: 20240228
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, status: A}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20240229}]
+    expect: ["S001: V00001"]
+  - name: overridden cutoff
+    date: 20240228
+    params: {cutoff: 20240301, days: 1}
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, status: A}]
+      ZOSD_L2_VOY: [{voyage_id: V00002, ship_id: S001, dep_date: 20240229}]
+    expect: []
+`;
+      const file = write("forward", text);
+      const model = compileRule(file, {registry});
+      expect(model.clauses[0].conditions[1].sref).to.equal("iv_cutoff");
+      expect(model.windows[0]).to.include({sign: "+", offset_ref: "iv_days"});
+      const condition = model.clauses[0].conditions[2];
+      const boundaries = model.cases.filter((c) => c.derived.condition === "forbid/where/3");
+      expect(boundaries.map((c) => c.derived.kind)).to.deep.equal(["lt", "eq", "gt"]);
+      for (const c of boundaries) expect(caseDiscriminates(model, condition, rows(c), {date: "20240228", cutoff: "20240227", days: "1"}), c.method).to.equal(true);
+      expect(windowOffsetDiscriminates(model, condition, rows(boundaries[1]), {date: "20240228", cutoff: "20240227", days: "1"}, -1)).to.equal(true);
+      expect(windowOffsetDiscriminates(model, condition, rows(boundaries[2]), {date: "20240228", cutoff: "20240227", days: "1"}, 1)).to.equal(true);
+      const result = await runRule(file, "zcl_l2_s7_forward");
+      expect(failed(result.results), JSON.stringify(result.messages)).to.deep.equal([]);
+    });
+
+    it("refuses unknown, unused, clashing, unresolved, misfit and floating parameters at their lines", () => {
+      refuse("unknown", source.replace("$max_days", "$missing"), /where:/, /unknown parameter \$missing/);
+      refuse("unused", source.replace("and voy.dep_date >= $date - $max_days", ""), /max_days:/, /declared but unused/);
+      refuse("date", source.replace("max_days:", "date:"), /date: \{type:/, /clashes with/);
+      refuse("unresolved", source.replace("ZOSD_L2_DAYS", "ZOSD_L2_NO_SUCH_TYPE"), /max_days:/, /cannot resolve/);
+      refuse("default", source.replace("default: 30", "default: nope"), /max_days:/, /not an integer/);
+      refuse("float", source.replace("ZOSD_L2_DAYS", "F"), /max_days:/, /FLTP/);
+    });
+
+    it("refuses invalid window operands at the comparison line", () => {
+      refuse("negative", source.replace("$date - $max_days", "$date - -1"), /where:/, /non-negative INT4/);
+      refuse("nondats", source.replace("voy.dep_date >= $date - $max_days", "voy.voyage_id >= $date - $max_days"), /where:/, /needs a DATS field/);
+      refuse("nonint", source.replace("type: ZOSD_L2_DAYS, default: 30", "type: D, default: 20240301"), /where:/, /needs an INT parameter/);
+      refuse("int8", source.replace("type: ZOSD_L2_DAYS, default: 30", "type: INT8, default: 30"), /where:/, /INT8 is unavailable in ABAP 7\.02/);
+      refuse("tight-minus", source.replace("$date - $max_days", "$date-30"), /where:/, /write `\$date - 30`/);
+      refuse("negative-example", source.replace("max_days: 1", "max_days: -1"), /params: \{max_days: -1\}/, /non-negative INT4/);
+      refuse("negative-default", source.replace("default: 30", "default: -1"), /max_days:/, /non-negative INT4/);
+      refuse("missing-required", source.replace(", default: 30", ""), /- name: default window/, /needs \$max_days/);
     });
   });
 });

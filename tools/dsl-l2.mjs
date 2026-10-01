@@ -17,9 +17,12 @@ import {mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSyn
 import {tmpdir} from "node:os";
 import {dirname, join, relative, resolve as resolvePath, sep} from "node:path";
 import {pathToFileURL} from "node:url";
+import {createRequire} from "node:module";
 import yaml from "js-yaml";
 import {DEFAULT_DDIC, DDIC_PROVIDER, Refusal, registryFor, unresolvedDeep} from "./dsl-ddic.mjs";
-import {INT_RANGE, PACKED, allReferences, canonical, compareValues, deriveCases, evaluate, kindOf} from "./dsl-l2-eval.mjs";
+import {INT_RANGE, PACKED, allReferences, canonical, compareValues, deriveCases, evaluate, kindOf, shiftDate} from "./dsl-l2-eval.mjs";
+
+const {DDIC} = createRequire(import.meta.url)("@abaplint/core/build/src/ddic.js");
 
 export {evaluate, stepValue} from "./dsl-l2-eval.mjs";
 
@@ -131,6 +134,9 @@ export function tokenize(text, fail) {
       const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(text.slice(i));
       i += m[0].length;
       tokens.push({kind: "ident", value: m[0], column: start + 1});
+    } else if (c === "+" || c === "-") {
+      i++;
+      tokens.push({kind: "arith", value: c, column: start + 1});
     } else if (c === ".") {
       i++;
       tokens.push({kind: "dot", value: ".", column: start + 1});
@@ -228,7 +234,20 @@ class Parser {
     const token = this.next();
     if (token.kind === "string") return {kind: "literal", quoted: true, value: token.value, text: `'${token.value}'`};
     if (token.kind === "number") return {kind: "literal", quoted: false, value: token.value, text: token.value};
-    if (token.kind === "param") return {kind: "param", name: token.value, text: `$${token.value}`};
+    if (token.kind === "param") {
+      if (token.value === "date" && this.peek().kind === "number" && this.peek().value.startsWith("-") &&
+          this.peek().column === token.column + token.value.length + 1) {
+        this.fail(`write \`$date - ${this.peek().value.slice(1)}\` for a date window`);
+      }
+      if (token.value === "date" && this.peek().kind === "arith") {
+        const sign = this.next().value;
+        const offset = this.next();
+        if (offset.kind !== "number" && offset.kind !== "param") this.fail(`a date window needs a non-negative integer or declared INT parameter, found ${this.describe(offset)}`);
+        return {kind: "window", sign, offset: offset.kind === "number" ? {kind: "literal", value: offset.value} : {kind: "param", name: offset.value},
+          text: `$date ${sign} ${offset.kind === "number" ? offset.value : `$${offset.value}`}`};
+      }
+      return {kind: "param", name: token.value, text: `$${token.value}`};
+    }
     if (token.kind === "ident") {
       if (KEYWORDS.has(token.value.toLowerCase())) this.fail(`expected an operand, found "${token.value}" at column ${token.column}`);
       this.expect("dot", `"." after ${token.value}`);
@@ -536,7 +555,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     return value;
   };
   need(doc, "", "a mapping of the rule's keys", "map");
-  const known = new Set(["rule", "class", "title", "for", "when", "forbid", "require", "limit", "alert", "boundaries", "examples"]);
+  const known = new Set(["rule", "class", "title", "params", "for", "when", "forbid", "require", "limit", "alert", "boundaries", "examples"]);
   for (const key of Object.keys(doc)) if (!known.has(key)) failAt(line(key))(`unknown key ${key}`);
 
   const name = need(doc.rule, "rule", "the rule's name");
@@ -551,6 +570,32 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   if (/[\r\n]/.test(title)) failAt(line("title"))("title must be one line");
 
   registry ??= registryFor(ddic, []);
+  const parameterTypes = new DDIC(registry);
+  const params = new Map();
+  if (doc.params !== undefined) {
+    need(doc.params, "params", "a mapping of parameter names to types", "map");
+    for (const [rawName, spec] of Object.entries(doc.params)) {
+      const path = `params/${rawName}`;
+      const name = rawName.toLowerCase();
+      if (!/^[a-z][a-z0-9_]*$/.test(rawName) || rawName !== name || name.length > 27) failAt(line(path))(`parameter ${rawName} must be a lower-case ABAP name of at most 27 characters`);
+      if (name === "date") failAt(line(path))("parameter date clashes with the built-in $date");
+      need(spec, path, "a mapping with type and optional default", "map");
+      for (const key of Object.keys(spec)) if (!["type", "default"].includes(key)) failAt(line(`${path}/${key}`))(`unknown key params.${rawName}.${key}`);
+      const typeName = need(spec.type, `${path}/type`, "a DDIC element or built-in type").toUpperCase();
+      const resolved = parameterTypes.lookupBuiltinType(typeName) ?? parameterTypes.lookup(typeName)?.type;
+      const type = DDIC_PROVIDER.literalType(registry, resolved, typeName);
+      if (type.resolved === false) failAt(line(`${path}/type`))(`parameter $${name} type ${typeName} cannot resolve: ${type.reason}`);
+      if (spec.default !== undefined) {
+        const value = need(spec.default, `${path}/default`, "a scalar default");
+        const why = misfit(value, type);
+        if (why) failAt(line(`${path}/default`))(`default for $${name} is ${typeText(type)}; ${why}`);
+      }
+      params.set(name, {"@id": `${id}/param/${name}`, rule_line: line(path), name, type_name: typeName.toLowerCase(), type,
+        ref: `iv_${name}`, ...(spec.default !== undefined ? {default: spec.default, "default@type": type} : {})});
+    }
+  }
+  const usedParams = new Set();
+  const windows = new Map();
   const tables = new Map();
   const tableOf = (tableName, path) => {
     if (!tables.has(tableName)) tables.set(tableName, tableInfo(registry, tableName, failAt(line(path))));
@@ -673,13 +718,20 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     const written = `${cmp.left.text} ${cmp.cmp} ${cmp.right.text}`;
     const isCurrent = (o) => o.kind === "field" && o.alias === current.alias;
     for (const o of [left, right]) if (o.kind === "field") fieldOf(o, scope, fail);
-    for (const o of [left, right]) if (o.kind === "param" && o.name !== "date") fail(`unknown parameter $${o.name} (a rule has $date)`);
+    for (const o of [left, right]) {
+      const names = o.kind === "param" ? [o.name] : o.kind === "window" && o.offset.kind === "param" ? [o.offset.name] : [];
+      for (const name of names) {
+        if (name !== "date" && !params.has(name)) fail(`unknown parameter $${name} (declare it under params:)`);
+        if (name !== "date") usedParams.add(name);
+      }
+    }
     if (!isCurrent(left) && isCurrent(right)) {
       [left, right] = [right, left];
       op = MIRROR[op];
     }
     if (!isCurrent(left)) fail(`${written} must name a field of ${current.alias}`);
     if (isCurrent(right)) fail(`${written} compares two fields of ${current.alias}; not in slice 1`);
+    if (right.kind === "window" && right.offset.kind === "param" && right.offset.name === "date") fail("a date window offset needs a declared INT parameter, not $date");
     const column = fieldOf(left, scope, fail).field;
     const type = column.literal;
     // `lhs` and `sref` are the qualified columns of the one query (alias~column),
@@ -698,9 +750,38 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
         cmp: {...cmpBase, rhs: {kind: "literal", value}}};
     }
     if (right.kind === "param") {
-      if (type.built_in !== "DATS") fail(`${left.text} is ${typeText(type)}, $date is DATS`);
-      return {...node, is_literal: false, ref: "iv_date", sref: "iv_date",
+      const parameter = params.get(right.name);
+      if (right.name === "date" ? type.built_in !== "DATS"
+        : type.built_in !== parameter.type.built_in || type.length !== parameter.type.length || type.decimals !== parameter.type.decimals) {
+        fail(`${left.text} is ${typeText(type)}, $${right.name} is ${right.name === "date" ? "DATS" : typeText(parameter.type)}`);
+      }
+      const ref = right.name === "date" ? "iv_date" : parameter.ref;
+      return {...node, is_literal: false, ref, sref: ref,
+        ...(parameter ? {param_line: parameter.rule_line} : {}),
         cmp: {...cmpBase, rhs: {kind: "param", name: right.name}}};
+    }
+    if (right.kind === "window") {
+      if (type.built_in !== "DATS") fail(`${left.text} is ${typeText(type)}; a date window needs a DATS field`);
+      const offset = right.offset;
+      if (offset.kind === "literal") {
+        if (!/^(0|[1-9][0-9]*)$/.test(offset.value) || BigInt(offset.value) > 2147483647n) fail(`date window ${right.text} needs a non-negative INT4 day count`);
+      } else {
+        const offsetType = params.get(offset.name).type;
+        if (!INT_RANGE[offsetType.built_in]) fail(`date window ${right.text} needs an INT parameter; $${offset.name} is ${typeText(offsetType)}`);
+        if (offsetType.built_in === "INT8") fail(`date window ${right.text} cannot use $${offset.name}: INT8 is unavailable in ABAP 7.02`);
+      }
+      const key = right.text;
+      if (!windows.has(key)) {
+        const number = windows.size + 1;
+        windows.set(key, {"@id": `${id}/window/${number}`, rule_line: ruleLine, name: `lv_window_${number}`,
+          sign: right.sign, offset_ref: offset.kind === "literal" ? offset.value : params.get(offset.name).ref,
+          ...(offset.kind === "param" ? {offset_param: offset.name} : {}),
+          ...(offset.kind === "param" ? {param_line: params.get(offset.name).rule_line} : {})});
+      }
+      const window = windows.get(key);
+      return {...node, is_literal: false, ref: window.name, sref: window.name,
+        ...(window.param_line ? {param_line: window.param_line} : {}),
+        cmp: {...cmpBase, rhs: {kind: "window", sign: right.sign, offset}}};
     }
     const other = fieldOf(right, scope, fail).field.literal;
     // the query compares the columns on the database, the nested form a host value
@@ -719,7 +800,8 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   const identity = ({cmp}) => {
     const rhs = cmp.rhs;
     const value = rhs.kind === "literal" ? (kindOf(cmp.type) === "char" ? rhs.value.replace(/ +$/, "") : canonical(cmp.type, rhs.value))
-      : rhs.kind === "param" ? `$${rhs.name}` : `${rhs.alias}.${rhs.column}`;
+      : rhs.kind === "param" ? `$${rhs.name}` : rhs.kind === "window" ? `$date${rhs.sign}${rhs.offset.kind === "param" ? `$${rhs.offset.name}` : rhs.offset.value}`
+        : `${rhs.alias}.${rhs.column}`;
     return `${cmp.alias}.${cmp.column} ${cmp.op} ${rhs.kind}:${value}`;
   };
   // A `not` or a group is compared as a unit: its key is built from the keys
@@ -788,6 +870,16 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
       conditions, tree, on: top.filter(isOn).map((t) => conditions[t.index]), rest: conjoin(top.filter((t) => !isOn(t))),
       info: inner.info, alertSpec: spec.value.alert, ...(aggregateSpec ? {aggregate: aggregateSpec} : {})};
   });
+  for (const parameter of params.values()) if (!usedParams.has(parameter.name)) {
+    failAt(parameter.rule_line)(`parameter $${parameter.name} is declared but unused`);
+  }
+  const windowParams = new Set([...windows.values()].map((window) => window.offset_param).filter(Boolean));
+  for (const name of windowParams) {
+    const parameter = params.get(name);
+    if (parameter.default !== undefined && (BigInt(parameter.default) < 0n || BigInt(parameter.default) > 2147483647n)) {
+      failAt(line(`params/${name}/default`))(`date window offset $${name} must be a non-negative INT4 day count`);
+    }
+  }
 
   if (kind === "limit") {
     aggregate = clauses[0].aggregate;
@@ -998,11 +1090,12 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   if (doc.examples === undefined) failAt(line("rule"))("a rule needs examples: none are given");
   if (Array.isArray(doc.examples) && !doc.examples.length) failAt(line("examples"))("a rule needs at least one example");
   const raw = []; // the rows and date of each example as the interpreter reads them
+  const exampleParams = [];
   const examples = need(doc.examples, "examples", "a list of examples", "list").map((example, e) => {
     const base = `examples/${e}`;
     const fail = failAt(line(base));
     need(example, base, "a mapping with name, date, rows and expect", "map");
-    for (const key of Object.keys(example)) if (!["name", "date", "rows", "expect"].includes(key)) failAt(line(`${base}/${key}`))(`unknown key ${key} in an example`);
+    for (const key of Object.keys(example)) if (!["name", "date", "params", "rows", "expect"].includes(key)) failAt(line(`${base}/${key}`))(`unknown key ${key} in an example`);
     const label = need(example.name, `${base}/name`, "the example's name");
     const labelWhy = misfit(label, {built_in: "STRG"});
     if (labelWhy) failAt(line(`${base}/name`))(`example name: ${labelWhy}`);
@@ -1016,6 +1109,31 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     const date = need(example.date, `${base}/date`, "the check date (YYYYMMDD)");
     const dateWhy = misfit(date, DATE_TYPE);
     if (dateWhy) failAt(line(`${base}/date`))(dateWhy);
+    if (windows.size && !shiftDate(date, 0)) failAt(line(`${base}/date`))(`date ${date} is not a calendar date for a date window`);
+    const givenParams = example.params === undefined ? {} : need(example.params, `${base}/params`, "a mapping of parameter values", "map");
+    for (const key of Object.keys(givenParams)) if (!params.has(key)) failAt(line(`${base}/params/${key}`))(`unknown example parameter $${key}`);
+    const effectiveParams = {date};
+    const paramArgs = [];
+    for (const parameter of params.values()) {
+      const value = givenParams[parameter.name] ?? parameter.default;
+      if (value === undefined) failAt(line(`${base}/params`))(`example ${JSON.stringify(label)} needs $${parameter.name} (no default)`);
+      if (typeof value !== "string") failAt(line(`${base}/params/${parameter.name}`))(`$${parameter.name} must be a scalar`);
+      const why = misfit(value, parameter.type);
+      if (why) failAt(line(`${base}/params/${parameter.name}`))(`$${parameter.name} is ${typeText(parameter.type)}; ${why}`);
+      if (windowParams.has(parameter.name) && (BigInt(value) < 0n || BigInt(value) > 2147483647n)) {
+        failAt(line(`${base}/params/${parameter.name}`))(`date window offset $${parameter.name} must be a non-negative INT4 day count`);
+      }
+      effectiveParams[parameter.name] = value;
+      if (Object.hasOwn(givenParams, parameter.name)) paramArgs.push({"@id": `${exampleId}/param/${parameter.name}`,
+        rule_line: line(`${base}/params/${parameter.name}`), ref: parameter.ref, value, "value@type": parameter.type});
+    }
+    for (const window of windows.values()) {
+      const offset = window.offset_param ? effectiveParams[window.offset_param] : window.offset_ref;
+      if (!shiftDate(date, (window.sign === "-" ? -1 : 1) * Number(offset))) {
+        failAt(line(window.offset_param && Object.hasOwn(givenParams, window.offset_param)
+          ? `${base}/params/${window.offset_param}` : `${base}/date`))(`date window ${window.name} leaves the DATS range`);
+      }
+    }
     const rows = example.rows === undefined ? {} : need(example.rows, `${base}/rows`, "a mapping of table to rows", "map");
     const exampleTables = Object.keys(rows).map((tableName) => {
       const tpath = `${base}/rows/${tableName}`;
@@ -1048,10 +1166,12 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     const expect = need(example.expect, `${base}/expect`, "a list of alert lines", "list");
     raw.push(Object.fromEntries(Object.entries(rows).map(([t, list]) => [t.toLowerCase(),
       list.map((row) => Object.fromEntries(Object.entries(row).map(([f, v]) => [f.toLowerCase(), v])))])));
+    exampleParams.push(effectiveParams);
     return {"@id": exampleId, rule_line: line(base), name: label, method, label, "label@type": {built_in: "STRG"},
       ref_label: `${label} (check against check_reference)`, "ref_label@type": {built_in: "STRG"},
       date: {"@id": `${exampleId}/date`, rule_line: line(`${base}/date`), value: date, "value@type": DATE_TYPE,
         call: `${className}=>check`},
+      ...(params.size ? {param_args: paramArgs, has_params: true} : {}),
       tables: exampleTables,
       expect: expect.map((value, x) => {
         if (typeof value !== "string") failAt(line(`${base}/expect/${x}`))("an expected alert is one line of text");
@@ -1068,6 +1188,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     fields: Object.fromEntries([...info.fields].filter(([, f]) => f.literal.resolved !== false).map(([column, f]) => [column, f.literal]))});
   const model = {
     "@id": id, rule_line: line("rule"), rule: name, title, source: recorded, class: className, kind, combine, comment,
+    ...(params.size ? {params: [...params.values()]} : {}), ...(windows.size ? {windows: [...windows.values()]} : {}),
     for: forNode,
     when: {"@id": `${id}/when`, rule_line: line(doc.when === undefined ? "for" : "when"), conditions: when.conditions,
       ...(when.tree ? {tree: when.tree} : {})},
@@ -1085,7 +1206,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   // the hand-written examples against the interpreter: a wrong `expect` is
   // found here, with its line, before any ABAP runs
   examples.forEach((example, e) => {
-    const got = evaluate(model, raw[e], {date: example.date.value});
+    const got = evaluate(model, raw[e], exampleParams[e]);
     const want = example.expect.map((x) => x.value);
     if (JSON.stringify([...got].sort()) !== JSON.stringify([...want].sort())) {
       failAt(line(`examples/${e}/expect`))(`example ${JSON.stringify(example.name)} expects ${JSON.stringify(want)} but the rule gives ${JSON.stringify(got)}`);
@@ -1104,7 +1225,8 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
       }
     }
     const first = examples[0];
-    const derived = deriveCases(model, selected, {date: first.date.value, example: raw[0], reserved: methods});
+    const derived = deriveCases(model, selected, {date: first.date.value, params: exampleParams[0],
+      paramArgs: first.param_args ?? [], example: raw[0], reserved: methods});
     model.skipped = derived.skipped;
     model.cases = derived.cases.map((c) => caseNode(model, c));
   }
@@ -1158,6 +1280,7 @@ function caseNode(model, c) {
     ref_label: `${label} (check against check_reference)`, "ref_label@type": STRG,
     derived: {condition: c.condition, kind: c.kind, structural: c.structural},
     date: {...literal(`${id}/date`, c.date, DATE_TYPE), call: `${model.class}=>check`},
+    ...(model.params ? {param_args: c.paramArgs ?? [], has_params: true} : {}),
     tables,
     expect, long_expect: expect.some((x) => !x.single)};
 }
@@ -1172,7 +1295,8 @@ export function provenance(model, path) {
     current = Array.isArray(current) ? current[Number(part) - 1] : current?.[part];
     if (current?.["@id"]) node = current;
   }
-  return {node: node["@id"], rule_line: node.rule_line};
+  return {node: node["@id"], rule_line: node.rule_line,
+    ...(node.param_line ? {param_rule_line: node.param_line} : {})};
 }
 
 // The model the templates render: the compiled rule with the hand-written
