@@ -238,6 +238,26 @@ export function installStoreDestination(abap, options = {}) {
 // schema from the DDIC in src/ + libs, seed rows from data/*.tabu.json.
 // STG_DB=duckdb swaps SQLite for DuckDB (tools/duckdb-client.mjs).
 export async function setup(abap, schemas, insert) {
+  await setupDatabase(abap, schemas, insert);
+  // opt-in, Node only (the preview never installs it): a table of the allow
+  // list that has no rows here is filled from this destination on its first
+  // read (docs/rfc-proxy.md, "P2: tables"). After the database, whichever
+  // branch of setupDatabase built it, because it wraps that connection.
+  if (globalThis.__stgPreview === undefined && globalThis.process?.env?.STG_TABLE_PROXY) {
+    const {installTableProxy} = await import("../tools/rfc-table-proxy.mjs");
+    await installTableProxy(abap, {
+      destination: process.env.STG_TABLE_PROXY,
+      allow: process.env.STG_TABLE_PROXY_ALLOW ?? "",
+      mode: process.env.STG_TABLE_PROXY_MODE ?? process.env.STG_RFC_PROXY_MODE,
+      folder: process.env.STG_RFC_CAPTURE,
+      maxRows: process.env.STG_TABLE_PROXY_MAX_ROWS,
+      noLive: process.env.STG_RFC_NO_LIVE === "1" || process.env.CI === "true",
+      trace: process.env.STG_RFC_TRACE === "1",
+    });
+  }
+}
+
+async function setupDatabase(abap, schemas, insert) {
   let db;
   // The transpiler hands over the object directory and the sources one row
   // per statement -- 1542 INSERTs into TADIR and 907 into REPOSRC, measured
