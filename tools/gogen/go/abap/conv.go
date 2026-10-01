@@ -664,7 +664,7 @@ func (m *strMemo) byteAt(v string, k int) int {
 		return len(v)
 	}
 	b, from := m.idx[k/64], k/64*64
-	if len(v) < 1<<32 {
+	if uint64(len(v)) < 1<<32 {
 		c := m.cursor.Load()
 		if ck, cb := int(c>>32), int(c&0xffffffff); ck <= k && ck > from {
 			b, from = cb, ck
@@ -674,7 +674,7 @@ func (m *strMemo) byteAt(v string, k int) int {
 		_, w := utf8.DecodeRuneInString(v[b:])
 		b += w
 	}
-	if len(v) < 1<<32 {
+	if uint64(len(v)) < 1<<32 {
 		m.cursor.Store(uint64(k)<<32 | uint64(b))
 	}
 	return b
