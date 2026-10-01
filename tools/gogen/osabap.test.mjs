@@ -347,6 +347,9 @@ test("the classes beside a report, or in a --lib folder, are part of it", () => 
   const beside = run(["--name", "Ann"]);
   assert.equal(beside.status, 0, beside.stderr);
   assert.equal(beside.stdout, "Hello, Ann!\n");
+  // the selection text from zgreet.prog.xml (TPOOL, ID S) labels the field
+  assert.match(run(["-help"]).stdout, /--name\s+Who to greet \(P_NAME, value\)/);
+  assert.match(run([], "Bo\n").stdout, /Who to greet/);
 
   const dir = mkdtempSync(join(tmpdir(), "osabap-lib-"));
   try {

@@ -360,12 +360,17 @@ func usage() {
 	fmt.Println("report options (the selection screen; also by full name, --p-name / --s-name):")
 	for _, name := range appSelectionNames {
 		opt := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(name, "P_"), "_", "-"))
+		kind := "value"
 		if appRanges[name] {
-			fmt.Printf("  --%-16s %s range (repeatable)\n", opt, name)
+			kind = "range (repeatable)"
 		} else if appCheckboxes[name] {
-			fmt.Printf("  --%-16s %s checkbox\n", opt, name)
+			kind = "checkbox"
+		}
+		if label := appLabels[name]; label != "" {
+			// the selection text of the report, as the selection screen shows it
+			fmt.Printf("  --%-16s %s (%s, %s)\n", opt, label, name, kind)
 		} else {
-			fmt.Printf("  --%-16s %s value\n", opt, name)
+			fmt.Printf("  --%-16s %s %s\n", opt, name, kind)
 		}
 	}
 	fmt.Println("  --                 everything after is positional")
