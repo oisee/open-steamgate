@@ -366,7 +366,7 @@ const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; 
   "s := &abap.Session{}"];
 if (groups.some(({methods}) => methods.some((m) => m.db))) generated.push(
   "if err := abap.OpenDB(dbScript); err != nil { panic(err) }",
-  "dbImage, err := abap.DBImage(); if err != nil { panic(err) }");
+  "dbImage, err := abap.DBImage(); if err != nil { panic(err) }; abap.CloseUnitDB(); abap.SetUnitDBImage(dbImage)");
 for (const {key, methods} of groups) {
   const [owner, local] = key.split(":");
   const c = classes.get(key);

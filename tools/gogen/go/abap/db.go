@@ -16,6 +16,11 @@ import (
 // In-memory SQLite is one database per connection, so the pool keeps one.
 // The Unit runner replaces this connection for every DB-using test class.
 var db *sql.DB
+var unitDBImage []byte
+
+// SetUnitDBImage lets a Unit class open its seed copy on first SQL use.
+// Some ABAP calls reach SQL through dynamic dispatch, beyond static detection.
+func SetUnitDBImage(image []byte) { unitDBImage = image }
 
 // OpenDB creates the in-memory database and runs the script, a JSON array of
 // SQL statements.
@@ -114,7 +119,29 @@ func OpenDBImage(image []byte) (err error) {
 // DB is the process's database; a SELECT before OpenDB is a host error.
 func DB() *sql.DB {
 	if db == nil {
+		if unitDBImage != nil {
+			if err := OpenDBImage(unitDBImage); err != nil {
+				panic(err)
+			}
+			BeginUnitLUW()
+			return db
+		}
 		panic(NotCompiled("database", "the host did not open a database"))
 	}
 	return db
+}
+
+// CloseUnitDB releases the current test class's database and its LUW.
+// The seed image is kept by the runner, independently of this connection.
+func CloseUnitDB() {
+	if db == nil {
+		return
+	}
+	if tx != nil {
+		end(false)
+	}
+	stmtCacheFor(nil)
+	d := db
+	db = nil
+	_ = d.Close()
 }
