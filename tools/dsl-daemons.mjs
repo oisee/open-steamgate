@@ -33,8 +33,10 @@ export function buildDaemonModel(model) {
     row.version = result.version;
   }
   if (result.authorities) {
-    for (const [index, authority] of result.authorities.entries()) {
-      if (authority.nr !== index + 1) throw new Error(`authority nr must be ${index + 1} on ${authority["@id"]}`);
+    let previousNr = 0;
+    for (const authority of result.authorities) {
+      if (!Number.isSafeInteger(authority.nr) || authority.nr <= previousNr) throw new Error(`authority nr must be a unique ascending positive integer on ${authority["@id"]}`);
+      previousNr = authority.nr;
       authority.kind ??= "class";
       const computed = programId(authority.program, authority.kind);
       if (authority.program_id !== undefined && authority.program_id !== computed) {

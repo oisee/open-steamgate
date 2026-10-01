@@ -31,8 +31,8 @@ export function firstDifference(actual, expected) {
   return 0;
 }
 
-export async function checkDerived(paths, applicationId, decl, target) {
-  const rendered = await renderDaemonModel(deriveSamc(paths, applicationId, decl));
+export async function checkDerived(paths, applicationId, decl, target, numberingFile = target) {
+  const rendered = await renderDaemonModel(deriveSamc(paths, applicationId, decl, numberingFile));
   const line = firstDifference(rendered.text, readFileSync(target, "utf8"));
   if (!line) return {line: 0};
   const node = rendered.trace[line - 1]?.node;
@@ -46,13 +46,13 @@ async function main(args) {
     const paths = [];
     const options = {};
     for (let i = 0; i < rest.length; i++) {
-      if (["--app", "--decl", "--out", "--against"].includes(rest[i])) options[rest[i++].slice(2)] = rest[i];
+      if (["--app", "--decl", "--out", "--against", "--numbering"].includes(rest[i])) options[rest[i++].slice(2)] = rest[i];
       else paths.push(rest[i]);
     }
     if (!paths.length || !options.app) throw new Error("derive/check needs ABAP folders and --app");
     const decl = options.decl ? JSON.parse(readFileSync(options.decl, "utf8")) : {};
     if (command === "derive") {
-      const model = deriveSamc(paths, options.app, decl);
+      const model = deriveSamc(paths, options.app, decl, options.numbering ?? options.against);
       const value = `${JSON.stringify(model, null, 2)}\n`;
       if (options.out) writeFileSync(options.out, value);
       else process.stdout.write(value);
@@ -61,7 +61,7 @@ async function main(args) {
     if (!options.against) throw new Error("check needs --against <file.samc.xml>");
     const log = console.log;
     let result;
-    try { console.log = (...items) => console.error(...items); result = await checkDerived(paths, options.app, decl, options.against); }
+    try { console.log = (...items) => console.error(...items); result = await checkDerived(paths, options.app, decl, options.against, options.numbering ?? options.against); }
     finally { console.log = log; }
     if (result.line) {
       console.error(`${options.against}: drift at line ${result.line}, node ${result.node ?? "unknown"}${result.source.length ? `, source ${result.source.map((p) => `${p.file}:${p.line}`).join(", ")}` : ""}`);

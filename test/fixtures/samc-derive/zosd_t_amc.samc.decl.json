@@ -7,12 +7,13 @@
     "/pu": {"scope": "U"}
   },
   "callSites": {
-    "zcl_osd_t_dmn.clas.abap:300": {"channelIds": ["/pc", "/ps", "/pu"]},
+    "zcl_osd_t_dmn.clas.abap:300": {"channelIds": ["/pc"]},
     "zcl_osd_t_dmn.clas.abap:550": {"channelIds": ["/pc", "/ps", "/pu"]},
     "zcl_osd_t_ddrv.clas.testclasses.abap:28": {"channelIds": ["/pc"]}
   },
   "extraAuthorities": [
     {"channelId": "/pc", "kind": "report", "program": "ZOSD_T_DSUB", "activity": "S"},
-    {"channelId": "/pu", "kind": "class", "program": "ZCL_OSD_T_DDRV", "activity": "R"}
+    {"channelId": "/pu", "kind": "class", "program": "ZCL_OSD_T_DDRV", "activity": "R"},
+    {"channelId": "/ps", "kind": "class", "program": "ZCL_OSD_T_DMN", "activity": "S"}
   ]
 }

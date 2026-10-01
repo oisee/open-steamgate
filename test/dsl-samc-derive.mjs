@@ -102,16 +102,16 @@ ENDFUNCTION.
     expect(model.authorities[0]).to.include({kind: "function_group", program: "ZT_AMC", program_id: "SAPLZT_AMC"});
   });
 
-  it("includes local test class calls under their global class and exposes capture authority drift", async () => {
+  it("keeps positive test calls and exposes capture authority drift", async () => {
     const model = deriveSamc([probe], "ZOSD_T_AMC", decl);
     const driver = model.authorities.filter((row) => row.program === "ZCL_OSD_T_DDRV");
     expect(driver.some((row) => row.activity === "S" && row.channelId === "/pc"
       && row.source.some((source) => source.file.endsWith(".clas.testclasses.abap")))).to.equal(true);
     const rendered = await renderDaemonModel(model);
     expect(firstDifference(rendered.text, readFileSync(capture, "utf8"))).to.be.greaterThan(0);
-    expect(model.authorities).to.have.length(10);
+    expect(model.authorities).to.have.length(9);
     expect(model.authorities.filter((row) => row.source.length === 0).map((row) => `${row.program}:${row.channelId}:${row.activity}`))
-      .to.deep.equal(["ZOSD_T_DSUB:/pc:S", "ZCL_OSD_T_DDRV:/pu:R"]);
+      .to.deep.equal(["ZOSD_T_DSUB:/pc:S", "ZCL_OSD_T_DMN:/ps:S", "ZCL_OSD_T_DDRV:/pu:R"]);
   });
 
   it("check reports the drifting XML node and ABAP source", async () => {
@@ -119,5 +119,34 @@ ENDFUNCTION.
     expect(result.line).to.be.greaterThan(0);
     expect(result.node).to.match(/^samc\/ZOSD_T_AMC\/auth\/\d+$/);
     expect(result.source[0].file).to.include("test/fixtures/samc-derive/");
+  });
+
+  it("requires a reason and a real call site for authority none", () => {
+    const {dir, file} = fixture(cls("  lo_p ?= cl_amc_channel_manager=>create_message_producer( i_application_id = 'TEST_APP' i_channel_id = '/literal' )."));
+    const key = `${file}:11`;
+    expect(() => deriveSamc([dir], "TEST_APP", {...baseDecl, callSites: {[key]: {authority: "none"}}}))
+      .to.throw(/authority none requires a reason/);
+    expect(() => deriveSamc([dir], "TEST_APP", {...baseDecl, callSites: {[`${file}:12`]: {authority: "none", reason: "negative probe"}}}))
+      .to.throw(/does not match an AMC call/);
+    const model = deriveSamc([dir], "TEST_APP", {channels: {}, callSites: {[key]: {authority: "none", reason: "expects cx_amc_error"}}});
+    expect(model.authorities).to.have.length(0);
+  });
+
+  it("keeps historical NRs, appends new authorities, and reports removed ones", async () => {
+    const a = fixture(cls(`  lo_p ?= cl_amc_channel_manager=>create_message_producer( i_application_id = 'TEST_APP' i_channel_id = '/literal' ).
+  lo_p ?= cl_amc_channel_manager=>create_message_producer( i_application_id = 'TEST_APP' i_channel_id = '/constant' ).`));
+    const initial = deriveSamc([a.file], "TEST_APP", baseDecl);
+    const rendered = await renderDaemonModel(initial);
+    const historical = fixture(rendered.text.replace("<NR>1</NR>", "<NR>X</NR>").replace("<NR>2</NR>", "<NR>1</NR>").replace("<NR>X</NR>", "<NR>2</NR>"), "history.samc.xml");
+    const reordered = deriveSamc([a.file], "TEST_APP", baseDecl, historical.file);
+    expect(reordered.authorities.map((row) => [row.channelId, row.nr])).to.deep.equal([["/literal", 1], ["/constant", 2]]);
+    const b = fixture("REPORT zt_amc.\nDATA lo_p TYPE REF TO if_amc_message_producer_text.\nlo_p ?= cl_amc_channel_manager=>create_message_producer( i_application_id = 'TEST_APP' i_channel_id = '/new' ).\n", "zt_amc.prog.abap");
+    const expanded = deriveSamc([a.file, b.file], "TEST_APP", {...baseDecl, channels: {...baseDecl.channels, "/new": {scope: "C"}}}, historical.file);
+    expect(expanded.authorities.map((row) => [row.channelId, row.nr])).to.deep.equal([["/literal", 1], ["/constant", 2], ["/new", 3]]);
+    const gapped = fixture(readFileSync(historical.file, "utf8").replace("<NR>2</NR>", "<NR>4</NR>"), "gapped.samc.xml");
+    const withGap = deriveSamc([a.file, b.file], "TEST_APP", {...baseDecl, channels: {...baseDecl.channels, "/new": {scope: "C"}}}, gapped.file);
+    expect(withGap.authorities.map((row) => row.nr)).to.deep.equal([1, 4, 5]);
+    expect(() => deriveSamc([b.file], "TEST_APP", {channels: {"/new": {scope: "C"}}}, historical.file))
+      .to.throw(/authority drift: NR/);
   });
 });
