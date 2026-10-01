@@ -12,7 +12,7 @@ import {createServer} from "node:net";
 import {spawn} from "node:child_process";
 import {mkdtempSync, mkdirSync, readdirSync, readlinkSync, rmSync, writeFileSync, existsSync, lstatSync, symlinkSync, readFileSync, statSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {delimiter, join, sep} from "node:path";
+import {basename, delimiter, dirname, join, sep} from "node:path";
 import {once} from "node:events";
 import {brotliCompressSync} from "node:zlib";
 import {ObjectStore} from "../tools/osd-store.mjs";
@@ -329,10 +329,30 @@ describe("editors/vscode/launcher.js: ensureWorkspacePacks (tools/osd-packs.mjs'
       // the defect: both the original folder and its projection carry "osg-demo"
       expect(() => packsOf(storageDir, {OSD_PACKS: [wsDir, packsDir].join(delimiter)})).to.throw(/osg-demo/);
       const inherited = inheritedPacks([other, `${wsDir}${sep}`].join(delimiter), layers);
-      expect(inherited).to.deep.equal({kept: [other], dropped: [`${wsDir}${sep}`]});
+      expect(inherited.kept).to.deep.equal([other]);
+      expect(inherited.dropped).to.deep.equal([`${wsDir}${sep}`]);
       const names = packsOf(storageDir, {OSD_PACKS: [...inherited.kept, packsDir].join(delimiter)}).map((p) => p.name);
       expect(names.filter((name) => name === "osg-demo")).to.have.lengthOf(1);
-      expect(inheritedPacks(undefined, layers)).to.deep.equal({kept: [], dropped: []});
+      expect(inheritedPacks(undefined, layers)).to.deep.equal({kept: [], dropped: [], covered: new Set()});
+      // relative entries are read from osdHome, as packsOf() reads them
+      const home = dirname(wsDir);
+      expect(inheritedPacks(basename(wsDir), layers, home).dropped).to.deep.equal([basename(wsDir)]);
+      // a container holding the workspace pack stays, and the layer is not projected again
+      const box = mkdtempSync(join(tmpdir(), "osd-launcher-box-"));
+      try {
+        const inner = join(box, "osg-demo");
+        mkdirSync(join(inner, "src"), {recursive: true});
+        writeFileSync(join(inner, "osd-pack.json"), JSON.stringify({name: "osg-demo"}));
+        const boxed = detect([inner]);
+        const container = inheritedPacks(box, boxed, other);
+        expect(container.kept).to.deep.equal([box]);
+        expect([...container.covered]).to.deep.equal(boxed);
+        const projected = ensureWorkspacePacks(storageDir, boxed.filter((layer) => !container.covered.has(layer)));
+        const both = packsOf(storageDir, {OSD_PACKS: [...container.kept, projected].join(delimiter)}).map((p) => p.name);
+        expect(both.filter((name) => name === "osg-demo")).to.have.lengthOf(1);
+      } finally {
+        rmSync(box, {recursive: true, force: true});
+      }
     } finally {
       rmSync(other, {recursive: true, force: true});
     }

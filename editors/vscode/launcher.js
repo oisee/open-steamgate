@@ -334,21 +334,38 @@ function packNameOf(folder) {
   return `ws-${base}-${hash}`;
 }
 
-/** The inherited OSD_PACKS entries that do not name a workspace layer's own
- *  folder. Start projects every workspace layer into its own pack under
- *  storage; an inherited entry naming the same folder would add the same
- *  pack name a second time from another directory, which tools/osd-packs.mjs
- *  refuses (BAD_PACK). The workspace projection wins; `dropped` says which
- *  entries were left out so Start can say so. */
-function inheritedPacks(value, layers) {
-  const real = (dir) => { try { return fs.realpathSync(dir); } catch { return path.resolve(dir); } };
-  const own = new Set(layers.map((layer) => real(layer.folder)));
+/** How the inherited OSD_PACKS meets the workspace layers. Start projects
+ *  each workspace layer into its own pack under storage; tools/osd-packs.mjs
+ *  refuses a pack name found in two directories (BAD_PACK), so a layer the
+ *  inherited value already reaches must not arrive twice. An entry is read
+ *  the way packsOf() reads it: relative to osdHome, a pack itself when it
+ *  holds osd-pack.json, otherwise a container of packs.
+ *  - an entry that is a layer's own folder is dropped (`dropped`): the
+ *    workspace projection wins;
+ *  - a container that holds a layer with a manifest stays (it may hold other
+ *    packs), and that layer is not projected (`covered`): the container
+ *    already brings it, under its own name. */
+function inheritedPacks(value, layers, home = process.cwd()) {
+  const fold = (dir) => (process.platform === "win32" ? dir.toLowerCase() : dir);
+  const real = (dir) => { try { return fold(fs.realpathSync(dir)); } catch { return fold(path.resolve(dir)); } };
+  const layerOf = new Map(layers.map((layer) => [real(layer.folder), layer]));
   const kept = [];
   const dropped = [];
+  const covered = new Set();
   for (const entry of (value ?? "").split(path.delimiter).map((s) => s.trim()).filter((s) => s !== "")) {
-    (own.has(real(entry)) ? dropped : kept).push(entry);
+    const dir = path.isAbsolute(entry) ? entry : path.join(home, entry);
+    const at = real(dir);
+    if (layerOf.has(at)) {
+      dropped.push(entry);
+      continue;
+    }
+    kept.push(entry);
+    if (fs.existsSync(path.join(dir, "osd-pack.json"))) continue;
+    for (const [folder, layer] of layerOf) {
+      if (layer.manifest && path.dirname(folder) === at) covered.add(layer);
+    }
   }
-  return {kept, dropped};
+  return {kept, dropped, covered};
 }
 
 function countFiles(dir, accept, seen = new Set()) {
@@ -1195,7 +1212,14 @@ class Launcher extends EventEmitter {
     this.startedAt = Date.now();
     this.#setState("building");
     this.layers = detectWorkspaceLayers(this.workspaceFolders);
-    const packsDir = ensureWorkspacePacks(this.storageDir, this.layers);
+    const inherited = inheritedPacks(process.env.OSD_PACKS, this.layers, this.osdHome);
+    for (const entry of inherited.dropped) {
+      this.#log(`OSD_PACKS entry ${entry} is also a workspace folder: the workspace layer is used, the entry is left out\n`);
+    }
+    for (const layer of inherited.covered) {
+      this.#log(`workspace layer ${layer.folder} is already a pack of an OSD_PACKS container: it is not projected again\n`);
+    }
+    const packsDir = ensureWorkspacePacks(this.storageDir, this.layers.filter((layer) => !inherited.covered.has(layer)));
     for (const layer of this.layers) {
       this.#log(`workspace layer: ${layer.folder} (${path.relative(layer.folder, layer.srcDir) === "" ? "." : "src"})\n`);
     }
@@ -1267,10 +1291,6 @@ class Launcher extends EventEmitter {
       STG_SERVE: "child",
       ...warmEnvironment(this.warmMode),
     }, this.debug, this.inspectPort);
-    const inherited = inheritedPacks(process.env.OSD_PACKS, this.layers);
-    for (const entry of inherited.dropped) {
-      this.#log(`OSD_PACKS entry ${entry} is also a workspace folder: the workspace layer is used, the entry is left out\n`);
-    }
     env.OSD_PACKS = [...inherited.kept, packsDir].join(path.delimiter);
     this.env = env;
     this.databaseLabel = describeDatabase(this.database);
