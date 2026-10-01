@@ -7,11 +7,8 @@
 //
 //   node tools/amdp-extract.mjs <class.clas.abap> [--json] [--procedure]
 //
-// The body is taken **by source position**, between the end of the
-// MethodImplementation statement and the start of its ENDMETHOD, because
-// abaplint parses an AMDP body as a run of NativeSQL statements whose
-// concatenated tokens do not reproduce the source. The signature comes from
-// the class definition, which abaplint does parse properly.
+// The body comes from abaplint NativeSQL statements. Their token spans
+// preserve the original SQLScript whitespace and comments.
 import {readFileSync} from "node:fs";
 import * as abaplint from "@abaplint/core";
 import {runsAs} from "./osd-main.mjs";
@@ -89,70 +86,6 @@ export function parameterType(abapType, types) {
     return scalar === undefined ? undefined : `TABLE(value ${scalar})`;
   }
   return undefined;
-}
-
-/** `!VALUE(x)` into `VALUE(x)`, for abaplint only.
- *
- *  abaplint 2.120.55 parses `!x` and it parses `VALUE(x)`, and it does not
- *  parse the two together -- the statement comes back `Unknown` and **that
- *  method** is missing from the class definition
- *  (ANOMALY-2026-09-19-bang-value). It is rare by file count and total where
- *  it occurs: 6 of 3052 classes read off a system have it, and there it is
- *  generated for every parameter of every method, so abaplint reads 2 of 15
- *  methods in one of them. A body whose signature went missing then looks as
- *  though it read an undeclared table variable.
- *
- *  The `!` is the **identifier escape** -- it stops the name being read as a
- *  keyword -- and carries no meaning for the interface, so removing it
- *  before parsing changes nothing about what is read. (Not `PREFERRED
- *  PARAMETER`, which is a different addition; abaplint's own rule for this
- *  is `no_exclamation_escape`.) This
- *  is deliberately a normalisation of one token for one parser and not a
- *  parameter parser of our own: re-deriving what abaplint does is the
- *  failure mode this project is built to avoid, and it would go stale
- *  silently the moment upstream fixes this. */
-export function withoutBangValue(source) {
-  // **Outside string literals and comments only.** The first version was a
-  // bare replace, and its own test caught it rewriting `'!VALUE('` inside a
-  // literal -- which would change a body rather than its declaration. It is
-  // the same lesson the HANA shape query paid for two hours earlier: a
-  // substitution over source text scans, or it edits things it never meant
-  // to. `!VALUE(` in a string is far-fetched; so was a `?` in one.
-  const text = String(source);
-  let out = "";
-  let i = 0;
-  while (i < text.length) {
-    const c = text[i];
-    if (c === "'" || c === "`") {
-      let j = i + 1;
-      while (j < text.length) {
-        if (text[j] === c) {
-          if (text[j + 1] === c) j += 2;
-          else { j += 1; break; }
-        } else j += 1;
-      }
-      out += text.slice(i, j);
-      i = j;
-      continue;
-    }
-    if (c === "\"" && (out === "" || out.endsWith("\n"))) {
-      // a full-line ABAP comment starts with `"` only at the start of a line
-      // here; `*` in column one is handled by the same rule
-      const end = text.indexOf("\n", i);
-      const j = end === -1 ? text.length : end;
-      out += text.slice(i, j);
-      i = j;
-      continue;
-    }
-    const match = /^!\s*(?=VALUE\s*\()/i.exec(text.slice(i, i + 12));
-    if (match !== null) {
-      i += match[0].length;
-      continue;
-    }
-    out += c;
-    i += 1;
-  }
-  return out;
 }
 
 /** the type text of a parameter: `TYPE x`, `TYPE REF TO x`, `TYPE STANDARD TABLE OF x`,
@@ -271,7 +204,7 @@ export function definitionsByText(source) {
 
 export function extract(source, filename = "x.clas.abap", extraTypeSources = []) {
   const reg = new abaplint.Registry()
-    .addFile(new abaplint.MemoryFile(filename, withoutBangValue(source))).parse();
+    .addFile(new abaplint.MemoryFile(filename, source)).parse();
   const obj = reg.getFirstObject();
   if (obj === undefined) throw new Error("nothing parsed out of " + filename);
   const file = obj.getABAPFiles()[0];
@@ -359,25 +292,17 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
     if (m !== null) tableFunctions.set(m[1].toUpperCase(), m[2].toUpperCase());
   }
 
-  // The database methods are cut out of the TEXT, not out of abaplint's
-  // statements: from `METHOD m BY DATABASE ...` to the first line that is
-  // `ENDMETHOD.`. abaplint lexes a SQLScript body as ABAP, and a body can
-  // put its lexer into a state where the rest of the method is one token a
-  // line -- `endmethod.` among them -- so two methods came out as one and
-  // the second was lost (a corpus class whose SQLScript comment ends in
-  // `] ) }`; HANA then refused the merged body "near <the next method>").
-  // Searched in copies with the ABAP comments blanked, offset for offset:
-  // a `*` line inside a USING list is not a table, a header in a comment is
-  // none. `"` is blanked only where the header is looked for -- in a
-  // SQLScript body it opens a quoted name, not a comment. The body is cut
-  // from the source itself, and ends at the LAST `ENDMETHOD` (pragmas
-  // allowed) before the next METHOD or ENDCLASS: an `ENDMETHOD.` in a
-  // comment of the body comes earlier, and `x = 1; ENDMETHOD.` or
-  // `ENDMETHOD ##NEEDED.` still end it. No ENDMETHOD before that boundary:
-  // the method is left out rather than merged with the next.
+  // Match database method headers in text, then take each body from the
+  // NativeSQL statements abaplint parsed within it. The source span of those
+  // tokens preserves SQLScript whitespace and comments. The text boundary
+  // also handles #4329, where a lexer error can swallow the next method.
   const out = [];
   const starless = source.split("\n").map((line) => (line.startsWith("*") ? " ".repeat(line.length) : line)).join("\n");
   const blanked = starless.split("\n").map((line) => line.replace(/"[^\n]*$/, (c) => " ".repeat(c.length))).join("\n");
+  const lineOffsets = [0];
+  for (let i = 0; i < source.length; i += 1) if (source[i] === "\n") lineOffsets.push(i + 1);
+  const offset = (position) => lineOffsets[position.row - 1] + position.col - 1;
+  const native = file.getStatements().filter((statement) => statement.get().constructor.name === "NativeSQL");
   const headerAt = /^[ \t]*METHOD\s+([\w\/~]+)\s+BY\s+DATABASE\s+(PROCEDURE|FUNCTION)\b[^.]*\./gim;
   for (const header of blanked.matchAll(headerAt)) {
     const text = header[0];
@@ -387,7 +312,22 @@ export function extract(source, filename = "x.clas.abap", extraTypeSources = [])
     const region = boundary === null ? rest : rest.slice(0, boundary.index);
     const ends = [...region.matchAll(/\bENDMETHOD(?:\s+##\w+)*\s*\./gi)];
     if (ends.length === 0) continue;
-    const body = source.slice(bodyStart, bodyStart + ends.at(-1).index).trim();
+    const bodyEnd = bodyStart + ends.at(-1).index;
+    const statements = native.filter((statement) => {
+      const start = offset(statement.getFirstToken().getStart());
+      return start >= bodyStart && start < bodyEnd;
+    });
+    // #4329 can make the preceding NativeSQL swallow this entire method.
+    // Retain a narrow fallback until that separate parser defect is fixed.
+    const nativeEnd = statements.length === 0 ? bodyEnd : offset(statements.at(-1).getLastToken().getEnd());
+    // An unrelated lexer defect (#4329) can swallow ENDMETHOD and the next
+    // method into one NativeSQL token. Keep the text boundary for that case.
+    // The lexer can also omit a trailing SQL comment from its final token.
+    const tail = source.slice(nativeEnd, bodyEnd);
+    const lastLine = source.slice(source.lastIndexOf("\n", nativeEnd - 1) + 1, nativeEnd);
+    const end = nativeEnd > bodyEnd || /^\s*(?:--[^\n]*)?\s*$/.test(tail) || lastLine.includes("--")
+      ? bodyEnd : nativeEnd;
+    const body = source.slice(statements.length === 0 ? bodyStart : offset(statements[0].getFirstToken().getStart()), end).trim();
     const name = header[1];
     const tableFunction = tableFunctions.get(name.toUpperCase());
     out.push({

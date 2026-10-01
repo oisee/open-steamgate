@@ -1368,7 +1368,7 @@ twice out loud before reading the code that answers it.
 
 ### ANOMALY-2026-09-19-bang-value — abaplint does not parse a method declared `!VALUE(x)`, and the method is lost
 
-- Status: `fixed upstream: abaplint/abaplint#4311, merged 2026-09-20, first released in @abaplint/core 2.120.57; this tree still pins an older core`
+- Status: `fixed in this tree with @abaplint/core 2.120.59`
 - Discovery date: `2026-09-19`
 - Affected versions: `@abaplint/core` 2.120.55
 - Affected ABAP statement, runtime API or adapter: `METHODS` / `CLASS-METHODS` with a parameter written `!VALUE(name)`
@@ -1383,10 +1383,20 @@ twice out loud before reading the code that answers it.
 - Expected SAP behaviour: **not claimed, and not needed.** The `!` is the **identifier escape** — it stops the name being read as a keyword — and it carries no meaning for the interface. (It is not `PREFERRED PARAMETER`, which is a separate `METHODS` addition; abaplint's own rule for the escape is `no_exclamation_escape`. The first version of this entry got that name wrong, and a critic caught it before it went to the people who wrote that rule.) What makes this an anomaly does not need a system: abaplint parses `!iv_x` and parses `VALUE(iv_x)`, and does not parse the two **together**. `!REFERENCE(x)` fails the same way
 - Actual open-abap behaviour: the `METHODS` / `CLASS-METHODS` statement comes back as `Unknown`, so **that method** is missing from `getClassDefinition().methods`. Other methods of the class are unaffected — the first version of this entry said "the whole class", which is an artefact of a reproducer with one method in it. Nor is it silent: `findIssues()` reports a `parser_error`, but it points at the `CLASS` token rather than at the parameter, and a caller using `getClassDefinition()` sees only a missing method
 - Impact on open-steamgate: rare by file count and total where it occurs — 6 of 3052 classes read off a system contain the form at all, and in those it is generated for every parameter of every method, so abaplint parses 2 of 15 methods in one class and 1 of 9 in another. (Who generates it is **not** measured: the first version of this entry said SE24, which nobody asked. abaplint#2529 floats the same guess and it is still a guess.) A body then looks as though it read an **undeclared table variable** — the refusal names `:it_ddls`, declared three lines above it in the ABAP. Measured: 171 of 364 corpus bodies had a signature carrying parameters; with the workaround, **188**
-- Smallest safe workaround: `withoutBangValue()` in `tools/amdp-extract.mjs` — `!VALUE(` becomes `VALUE(` for the parser and for nothing else. Deliberately a normalisation of one token for one parser rather than a parameter parser of our own: re-deriving what abaplint does is the failure mode this project is built to avoid, and it would go stale in silence the day upstream fixes this
+- Resolution: root `@abaplint/core` and the bundled `@abaplint/cli` are pinned to 2.120.59, matching the fork transpiler. `withoutBangValue()` and its canary were removed; the parameter test remains.
 - Upstream issue: https://github.com/abaplint/abaplint/issues/4308, opened 2026-09-19; **PR https://github.com/abaplint/abaplint/pull/4311** the same day, after Lars answered "PRs welcome". Three expressions matched the keyword as a literal and all three are fixed: `MethodParam`, `MethodDefReturning` and `PassByValue`. The second was found by a test — `RETURNING !VALUE(rv_x)` still failed after the first was fixed — which is why the test cases were written before the second site was looked for. That repository takes no branch from us and its regression workflow skips forks, so an issue is the whole of what we can offer there, and the issue offers a PR if the maintainer names the shape he wants. Related upstream: abaplint#2529, the same escape in front of a builtin function, open since 2022
-- Regression-test location: `test/amdp.mjs`, "a parameter written `!VALUE(x)` is still a parameter" — **and, separately, "the abaplint gap the !VALUE workaround exists for"**, which asserts the upstream defect itself so that the workaround has an expiry. A workaround with no expiry is how a tree collects code nobody dares remove: the reason lives in a commit message, the commit message is read once, and later the normalisation looks load-bearing. When abaplint learns the form, that test fails and says to delete the workaround rather than to adjust the expectation
-- Upstream version containing a fix: **merged 2026-09-20 (abaplint#4311, by larshp), not yet released.** Merged is not shipped: the workaround stays until a published `@abaplint/abaplint` carries it, and the expiry test -- "the abaplint gap the !VALUE workaround exists for" -- is what will say so, by going red on the release rather than on the merge. Checking the merge instead of the release is the same mistake as reading a build command's exit code for a built artefact
+- Regression-test location: `test/amdp.mjs`, "a parameter written `!VALUE(x)` is still a parameter"
+- Upstream version containing a fix: `@abaplint/core 2.120.57` (this tree uses 2.120.59)
+
+
+### ANOMALY-2026-09-19-native-sql-colon — abaplint dropped colons inside NativeSQL (#4307)
+
+- Status: `fixed in this tree with @abaplint/core 2.120.59`
+- Affected versions: `@abaplint/core 2.120.55`
+- Reproducer: `SELECT :a AS x, :b AS y FROM dummy;` inside an AMDP method was split into two NativeSQL statements and their tokens lost the colons.
+- Resolution: `tools/amdp-extract.mjs` takes the body from NativeSQL statement spans with core 2.120.59. The position-based #4307 canary was removed. A separate text fallback remains for the unrelated #4329 parser defect, which can swallow the next method.
+- Regression-test location: `test/amdp.mjs`, AMDP body extraction and colon assertions.
+- Upstream version containing a fix: `@abaplint/core 2.120.59` (verified by the former canary).
 
 
 ### NOTE-2026-09-19-shared-library-clone — a library clone shared by symlink has no private checkout
