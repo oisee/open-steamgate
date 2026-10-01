@@ -218,6 +218,40 @@ ENDFUNCTION.
     expect(checked.grantWithoutUse).to.deep.equal([{nr: 2, key: `/literal|ZT_EXTRA|S`, node: "samc/TEST_APP/auth/2"}]);
   });
 
+  const bindClass = (args) => `CLASS zcl_t_sock DEFINITION PUBLIC FINAL CREATE PUBLIC.
+ PUBLIC SECTION.
+  METHODS start.
+ENDCLASS.
+CLASS zcl_t_sock IMPLEMENTATION.
+ METHOD start.
+  DATA lo_b TYPE REF TO if_apc_wsp_binding_manager.
+  lo_b->bind_amc_message_consumer( ${args} ).
+ ENDMETHOD.
+ENDCLASS.
+`;
+
+  it("derives C for an APC bind, typed from the channel's other uses", () => {
+    const prod = fixture(cls("  lo_p ?= cl_amc_channel_manager=>create_message_producer( i_application_id = 'TEST_APP' i_channel_id = '/literal' )."));
+    const bind = fixture(bindClass("i_application_id = 'TEST_APP' i_channel_id = '/literal'"), "zcl_t_sock.clas.abap");
+    const model = deriveSamc([prod.dir, bind.dir], "TEST_APP", {channels: {"/literal": {scope: "C"}}});
+    expect(model.authorities.map((row) => [row.program, row.activity])).to.deep.equal([["ZCL_T_AMC", "S"], ["ZCL_T_SOCK", "C"]]);
+    expect(model.channels[0].messageType).to.equal("TEXT");
+    expect(model.channels[0].source.map((p) => p.file)).to.include(bind.file);
+    const other = fixture(bindClass("i_application_id = 'OTHER' i_channel_id = '/zzz'"), "zcl_t_sock.clas.abap");
+    expect(deriveSamc([prod.dir, other.dir], "TEST_APP", {channels: {"/literal": {scope: "C"}}}).authorities).to.have.length(1);
+  });
+
+  it("refuses an APC bind with an unresolvable channel unless callSites names it", () => {
+    const bind = fixture(bindClass("i_application_id = 'TEST_APP' i_channel_id = iv_ch"), "zcl_t_sock.clas.abap");
+    const decl2 = {channels: {"/x": {scope: "C"}}};
+    expect(() => deriveSamc([bind.dir], "TEST_APP", decl2)).to.throw(`${bind.file}:8: channelIds cannot be resolved`);
+    const model = deriveSamc([bind.dir], "TEST_APP", {...decl2,
+      callSites: {[`${bind.file}:8`]: {channelIds: ["/x"], messageType: "TEXT"}}});
+    expect(model.authorities.map((row) => row.activity)).to.deep.equal(["C"]);
+    expect(() => deriveSamc([bind.dir], "TEST_APP", {...decl2,
+      callSites: {[`${bind.file}:8`]: {channelIds: ["/x"]}}})).to.throw(/message type cannot be resolved/);
+  });
+
   it("derives dell's ZSTG_AMC_TEST XML byte for byte", async () => {
     const overlay = JSON.parse(readFileSync("src/amc/zstg_amc_test.samc.decl.json", "utf8"));
     const paths = ["test/unit/zcl_osd_amc_test.clas.abap", "test/unit/zcl_osd_amc_test.clas.testclasses.abap",
@@ -230,7 +264,7 @@ ENDFUNCTION.
     expect(drift.line).to.be.greaterThan(0);
     expect(drift.node).to.equal("samc/ZOSD_AMC_TEST/ch/text");
     const unreasoned = structuredClone(overlay);
-    delete unreasoned.extraAuthorities[0].reason;
+    unreasoned.extraAuthorities = [{channelId: "/text", kind: "class", program: "ZT_X", activity: "S"}];
     expect(() => deriveSamc(paths, "ZOSD_AMC_TEST", unreasoned)).to.throw(/reason is required/);
   });
 

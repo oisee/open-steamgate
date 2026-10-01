@@ -13,8 +13,5 @@
     "zcl_osd_amc_test.clas.testclasses.abap:102": {"messageType": "BINARY"},
     "zcl_osd_amc_test.clas.testclasses.abap:118": {"messageType": "PCP"},
     "zcl_osd_amc_test.clas.testclasses.abap:143": {"authority": "none", "messageType": "TEXT", "reason": "synchronous communication is refused before authority use"}
-  },
-  "extraAuthorities": [
-    {"channelId": "/text", "kind": "class", "program": "ZCL_OSD_AMC_SOCKET", "activity": "R", "reason": "APC bind_amc_message_consumer grants R; static AMC call scan does not cover the binding API"}
-  ]
+  }
 }
