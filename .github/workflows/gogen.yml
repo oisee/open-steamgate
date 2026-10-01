@@ -196,6 +196,7 @@ jobs:
           node tools/osd-link.mjs transpiler packages/transpiler
           node tools/osd-link.mjs transpiler-cli packages/cli
           node tools/osd-link.mjs runtime packages/runtime
+          node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
           node tools/osd-transpiler.mjs
       - name: The library folders and the packs
         run: |

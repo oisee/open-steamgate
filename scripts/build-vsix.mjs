@@ -93,6 +93,7 @@ import {fileURLToPath} from "node:url";
 import {describeVsixPreflight, vsixPreflightMissing} from "../tools/osd-lock.mjs";
 import {requireSupportedNode} from "../tools/osd-node-version.mjs";
 import {packAt} from "../tools/osd-packs.mjs";
+import {readLock} from "../tools/osd-lock.mjs";
 import {writeThirdPartyNotices} from "./third-party-notices.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -101,6 +102,23 @@ const BUILD_DIR = join(ROOT, "build", "vsix");
 let minimatch;
 const require = createRequire(import.meta.url);
 const {writeSeedId, writeTar} = require("../editors/vscode/launcher.js");
+
+function pinnedTranspilerRef() {
+  const ref = readLock(ROOT).transpiler.ref;
+  const base = join(ROOT, "node_modules", "@abaplint");
+  const transpiler = realpathSync(join(base, "transpiler"));
+  const runtime = realpathSync(join(base, "runtime"));
+  const core = realpathSync(join(base, "core"));
+  const clone = resolve(transpiler, "..", "..");
+  if (transpiler !== join(clone, "packages", "transpiler") ||
+      runtime !== join(clone, "packages", "runtime") ||
+      core !== join(clone, "packages", "transpiler", "node_modules", "@abaplint", "core") ||
+      execFileSync("git", ["-C", clone, "rev-parse", "HEAD"], {encoding: "utf8"}).trim() !== ref ||
+      !readFileSync(join(transpiler, "build", "src", "index.js"), "utf8").includes("this.options?.only?.(obj) === false")) {
+    throw new Error("build-vsix: transpiler and runtime must be linked to the built libs.lock.json fork; see tools/osd-ci-transpiler-build.sh");
+  }
+  return ref;
+}
 
 /** Only named in-tree packs can enter the seed. An empty override selects no
  * packs; an unknown name is a typo, not a silently smaller package. */
@@ -365,7 +383,20 @@ export function copySeedTree(seedRoot, selectedPacks) {
 
   const modules = runtimeModuleClosure();
   for (const name of modules) {
-    copyReal(join(ROOT, "node_modules", name), join(seedRoot, "node_modules", name));
+    const source = join(ROOT, "node_modules", name);
+    const dest = join(seedRoot, "node_modules", name);
+    if (name === "@abaplint/transpiler" || name === "@abaplint/runtime") {
+      // A linked fork package has its build-time node_modules, TypeScript
+      // sources, and tests beside the compiled distribution. Runtime deps
+      // are already supplied by the lockfile closure at the seed root.
+      mkdirSync(dest, {recursive: true});
+      for (const file of ["package.json", "LICENSE", "README.md"]) {
+        if (existsSync(join(source, file))) copyReal(join(source, file), join(dest, file));
+      }
+      copyReal(join(source, "build"), join(dest, "build"));
+    } else {
+      copyReal(source, dest);
+    }
   }
   log(`node_modules: ${modules.length} packages traced from package-lock.json`);
 
@@ -499,6 +530,7 @@ function prebuildGeneration(seedRoot, env) {
  *  VSIX's alone. */
 export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = false} = {}) {
   requireSupportedNode(process.versions.node, "system seed: ");
+  const transpilerRef = pinnedTranspilerRef();
   const preflight = describeVsixPreflight(vsixPreflightMissing(ROOT));
   if (preflight !== undefined) throw new Error(preflight);
   ({minimatch} = await import("minimatch"));
@@ -510,6 +542,7 @@ export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = f
   if (missing.length > 0) throw new Error(describeUnfetched(missing));
   rmSync(seedRoot, {recursive: true, force: true});
   const modules = copySeedTree(seedRoot, selectedPacks);
+  writeFileSync(join(seedRoot, ".osd-transpiler-ref"), `${transpilerRef}\n`);
   materializeSeedLinks(seedRoot);
   excludeStagedPackSources(seedRoot, selectedPacks);
   const generation = prebuild ? prebuildGeneration(seedRoot, env) : undefined;

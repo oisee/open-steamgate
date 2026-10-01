@@ -25,6 +25,13 @@ if [[ ! -d "$clone/.git" ]] || [[ "$(git -C "$clone" rev-parse HEAD)" != "$OSD_T
   echo "::error::Pinned transpiler checkout is missing or at the wrong commit: $clone" >&2
   exit 1
 fi
+if ! grep -Fq 'this.options?.only?.(obj) === false' "$clone/packages/transpiler/build/src/index.js" \
+    || ! grep -q 'only?:' "$clone/packages/transpiler/build/src/types.d.ts" \
+    || ! grep -Fq 'reg.getConfig().get()) === JSON.stringify(conf.get())' "$clone/packages/transpiler/build/src/validation.js" \
+    || ! grep -Fq 'obj.setDirty()' "$clone/packages/transpiler/build/src/validation.js"; then
+  echo "::error::Pinned transpiler build lacks only-option or registry-reuse support" >&2
+  exit 1
+fi
 if [[ ! -d "$clone/node_modules" ]] || [[ ! -s "$clone/packages/transpiler/build/src/index.js" ]] || [[ ! -x "$clone/packages/cli/abap_transpile" ]]; then
   echo "::error::Pinned transpiler cache has missing dependencies, compiled entry point, or CLI executable" >&2
   exit 1

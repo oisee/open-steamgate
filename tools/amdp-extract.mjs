@@ -7,11 +7,8 @@
 //
 //   node tools/amdp-extract.mjs <class.clas.abap> [--json] [--procedure]
 //
-// The body is taken **by source position**, between the end of the
-// MethodImplementation statement and the start of its ENDMETHOD, because
-// abaplint parses an AMDP body as a run of NativeSQL statements whose
-// concatenated tokens do not reproduce the source. The signature comes from
-// the class definition, which abaplint does parse properly.
+// The body is cut by source position. abaplint #4307 is fixed in 2.120.59,
+// but NativeSQL token spans lost body tails on the measured corpus.
 import {readFileSync} from "node:fs";
 import * as abaplint from "@abaplint/core";
 import {runsAs} from "./osd-main.mjs";
@@ -89,70 +86,6 @@ export function parameterType(abapType, types) {
     return scalar === undefined ? undefined : `TABLE(value ${scalar})`;
   }
   return undefined;
-}
-
-/** `!VALUE(x)` into `VALUE(x)`, for abaplint only.
- *
- *  abaplint 2.120.55 parses `!x` and it parses `VALUE(x)`, and it does not
- *  parse the two together -- the statement comes back `Unknown` and **that
- *  method** is missing from the class definition
- *  (ANOMALY-2026-09-19-bang-value). It is rare by file count and total where
- *  it occurs: 6 of 3052 classes read off a system have it, and there it is
- *  generated for every parameter of every method, so abaplint reads 2 of 15
- *  methods in one of them. A body whose signature went missing then looks as
- *  though it read an undeclared table variable.
- *
- *  The `!` is the **identifier escape** -- it stops the name being read as a
- *  keyword -- and carries no meaning for the interface, so removing it
- *  before parsing changes nothing about what is read. (Not `PREFERRED
- *  PARAMETER`, which is a different addition; abaplint's own rule for this
- *  is `no_exclamation_escape`.) This
- *  is deliberately a normalisation of one token for one parser and not a
- *  parameter parser of our own: re-deriving what abaplint does is the
- *  failure mode this project is built to avoid, and it would go stale
- *  silently the moment upstream fixes this. */
-export function withoutBangValue(source) {
-  // **Outside string literals and comments only.** The first version was a
-  // bare replace, and its own test caught it rewriting `'!VALUE('` inside a
-  // literal -- which would change a body rather than its declaration. It is
-  // the same lesson the HANA shape query paid for two hours earlier: a
-  // substitution over source text scans, or it edits things it never meant
-  // to. `!VALUE(` in a string is far-fetched; so was a `?` in one.
-  const text = String(source);
-  let out = "";
-  let i = 0;
-  while (i < text.length) {
-    const c = text[i];
-    if (c === "'" || c === "`") {
-      let j = i + 1;
-      while (j < text.length) {
-        if (text[j] === c) {
-          if (text[j + 1] === c) j += 2;
-          else { j += 1; break; }
-        } else j += 1;
-      }
-      out += text.slice(i, j);
-      i = j;
-      continue;
-    }
-    if (c === "\"" && (out === "" || out.endsWith("\n"))) {
-      // a full-line ABAP comment starts with `"` only at the start of a line
-      // here; `*` in column one is handled by the same rule
-      const end = text.indexOf("\n", i);
-      const j = end === -1 ? text.length : end;
-      out += text.slice(i, j);
-      i = j;
-      continue;
-    }
-    const match = /^!\s*(?=VALUE\s*\()/i.exec(text.slice(i, i + 12));
-    if (match !== null) {
-      i += match[0].length;
-      continue;
-    }
-    out += c;
-    i += 1;
-  }
-  return out;
 }
 
 /** the type text of a parameter: `TYPE x`, `TYPE REF TO x`, `TYPE STANDARD TABLE OF x`,
@@ -271,7 +204,7 @@ export function definitionsByText(source) {
 
 export function extract(source, filename = "x.clas.abap", extraTypeSources = []) {
   const reg = new abaplint.Registry()
-    .addFile(new abaplint.MemoryFile(filename, withoutBangValue(source))).parse();
+    .addFile(new abaplint.MemoryFile(filename, source)).parse();
   const obj = reg.getFirstObject();
   if (obj === undefined) throw new Error("nothing parsed out of " + filename);
   const file = obj.getABAPFiles()[0];

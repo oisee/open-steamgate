@@ -230,10 +230,7 @@ describe("AMDP: cutting a body out of a class", () => {
     expect(r.methods).to.have.length(1);
     const m = r.methods[0];
     expect([m.name, m.forDb, m.language, m.readOnly]).to.deep.equal(["calculate_squares", "HDB", "SQLSCRIPT", true]);
-    // the body is SQLScript and nothing but: no METHOD, no ENDMETHOD, no
-    // ABAP around it. It is taken by source position, because abaplint
-    // parses an AMDP body as a run of NativeSQL statements whose
-    // concatenated tokens do not reproduce the source.
+    // The body is SQLScript and nothing but: no METHOD or ENDMETHOD.
     expect(m.body).to.match(/^DECLARE lv_i INTEGER;/);
     expect(m.body).to.contain("WHILE lv_i <= :iv_count DO");
     expect(m.body.toUpperCase()).to.not.contain("ENDMETHOD");
@@ -416,7 +413,7 @@ describe("AMDP: cutting a body out of a class", () => {
 
 });
 
-describe("the database methods are cut out of the text, not out of abaplint's statements", () => {
+describe("AMDP body extraction handles lexer boundary defects", () => {
   // abaplint 2.120.59 lexes a SQLScript body as ABAP: one `}` in it -- in a
   // SQLScript comment, too -- and ENDMETHOD is no longer a statement, so the
   // next method was swallowed into this one and lost
@@ -511,70 +508,7 @@ ENDCLASS.`;
     }
   });
 
-  it("and the marker is removed for the parser only, nowhere else", async () => {
-    const {withoutBangValue} = await import("../tools/amdp-extract.mjs");
-    // `!name` on its own parses and is left alone; only the combination goes
-    expect(withoutBangValue("IMPORTING !iv_x TYPE i")).to.equal("IMPORTING !iv_x TYPE i");
-    expect(withoutBangValue("IMPORTING !VALUE(iv_x)")).to.equal("IMPORTING VALUE(iv_x)");
-    // and never inside a string literal: rewriting there would change a
-    // body rather than a declaration. The first version of this function did
-    // exactly that, and this assertion is the one that caught it
-    expect(withoutBangValue("SELECT '!VALUE(' FROM t")).to.equal("SELECT '!VALUE(' FROM t");
-    expect(withoutBangValue("a = '!VALUE(x)'; METHODS m IMPORTING !VALUE(iv) TYPE i."))
-      .to.equal("a = '!VALUE(x)'; METHODS m IMPORTING VALUE(iv) TYPE i.");
-  });
-});
 
-// **The test that has to go red the day the workaround stops being needed.**
-//
-// `withoutBangValue` exists only because abaplint cannot parse `!VALUE(x)`.
-// A workaround with no expiry is how a tree collects code nobody dares
-// remove: the reason lives in a commit message, the commit message is read
-// once, and five years later the normalisation looks load-bearing. So the
-// upstream defect itself is asserted. When abaplint learns the form, this
-// fails, and what it says to do is delete the workaround and this test with
-// it.
-describe("the abaplint gap the !VALUE workaround exists for", () => {
-  it("is still there — and when this fails, remove withoutBangValue, not this test's expectation", async () => {
-    const abaplint = await import("@abaplint/core");
-    const source = `CLASS c DEFINITION PUBLIC.
-  PUBLIC SECTION.
-    CLASS-METHODS m1 IMPORTING !VALUE(iv_x) TYPE i.
-ENDCLASS.
-CLASS c IMPLEMENTATION.
-ENDCLASS.`;
-    const registry = new abaplint.Registry()
-      .addFile(new abaplint.MemoryFile("c.clas.abap", source)).parse();
-    const object = registry.getFirstObject();
-    const kinds = object.getABAPFiles()[0].getStatements().map((s) => s.get().constructor.name);
-    // A sentinel has to do two things or it goes stale unnoticed
-    // (fable-osd): assert the **specific** way it breaks, and say in its own
-    // message what to do when it goes red. It will go red in months, when
-    // the context is gone.
-    const todo = "abaplint now parses !VALUE(x). Do this, in order: delete withoutBangValue and its " +
-      "call in tools/amdp-extract.mjs; delete this describe block; mark " +
-      "ANOMALY-2026-09-19-bang-value fixed with the version; re-run " +
-      "`node tools/sqlscript/coverage.mjs` and check the count did not fall.";
-    expect(kinds, todo).to.contain("Unknown");
-    // the specific breakage, not "something failed": not one method
-    // mis-read, the whole class silently parameterless. Without this, an
-    // unrelated change to how abaplint reports a refusal would leave the
-    // test green while it checked nothing.
-    expect(object.getClassDefinition?.()?.methods ?? [], todo).to.have.length(0);
-  });
-
-  it("while the two halves apart are parsed, which is what makes it a gap and not a policy", async () => {
-    const abaplint = await import("@abaplint/core");
-    for (const decl of ["CLASS-METHODS m1 IMPORTING !iv_x TYPE i.",
-                        "CLASS-METHODS m1 IMPORTING VALUE(iv_x) TYPE i."]) {
-      const source = `CLASS c DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    ${decl}\nENDCLASS.\nCLASS c IMPLEMENTATION.\nENDCLASS.`;
-      const registry = new abaplint.Registry()
-        .addFile(new abaplint.MemoryFile("c.clas.abap", source)).parse();
-      const kinds = registry.getFirstObject().getABAPFiles()[0].getStatements()
-        .map((s) => s.get().constructor.name);
-      expect(kinds, decl).to.not.contain("Unknown");
-    }
-  });
 });
 
 // **An ABAP program cannot defend itself against a runtime throw.**
@@ -694,46 +628,5 @@ describe("the AMDP destination fails where the calling ABAP can catch it", () =>
     } finally {
       globalThis.abap = before;
     }
-  });
-});
-
-// The other abaplint gap this tree works around, and the older of the two:
-// `tools/amdp-extract.mjs` takes an AMDP body **by source position**, between
-// the end of the method statement and the start of its ENDMETHOD, rather than
-// from the NativeSQL statements abaplint produces. The reason is asserted here
-// for the same reason the !VALUE one is: a workaround with no expiry becomes
-// load-bearing by forgetting.
-//
-// abaplint/abaplint#4307, opened 2026-09-19, with a fix offered the same day.
-describe("the abaplint gap the position-based AMDP extraction exists for", () => {
-  it("is still there — and when this fails, take the body from the statements, do not adjust this", async () => {
-    const abaplint = await import("@abaplint/core");
-    const source = `CLASS zcl_amdp_probe DEFINITION PUBLIC FINAL CREATE PUBLIC.
-  PUBLIC SECTION.
-    INTERFACES if_amdp_marker_hdb.
-    CLASS-METHODS squares.
-ENDCLASS.
-
-CLASS zcl_amdp_probe IMPLEMENTATION.
-  METHOD squares BY DATABASE PROCEDURE FOR HDB
-                 LANGUAGE SQLSCRIPT
-                 OPTIONS READ-ONLY.
-    SELECT :a AS x, :b AS y FROM dummy;
-  ENDMETHOD.
-ENDCLASS.`;
-    const registry = new abaplint.Registry()
-      .addFile(new abaplint.MemoryFile("zcl_amdp_probe.clas.abap", source)).parse();
-    const native = registry.getFirstObject().getABAPFiles()[0].getStatements()
-      .filter((s) => s.get().constructor.name === "NativeSQL")
-      .map((s) => s.concatTokens());
-    const todo = "abaplint now keeps a colon inside native SQL (#4307). Do this, in order: take the " +
-      "body from the NativeSQL statements in tools/amdp-extract.mjs instead of by source position; " +
-      "delete this describe block; mark the anomaly fixed with the version; re-run " +
-      "`node tools/sqlscript/coverage.mjs` and check the count did not fall.";
-    // the SPECIFIC breakage, twice over, so that an unrelated change to how
-    // abaplint reports statements cannot leave this green while it checks
-    // nothing: the body is cut in two, and the colons are gone from it
-    expect(native, todo).to.have.length(2);
-    expect(native.join(" "), todo).to.not.contain(":a");
   });
 });

@@ -1611,9 +1611,10 @@ own env when the setting resolves to on -- `"auto"` is on at or above
 os.totalmem())`, pure and unit-tested at both sides of the floor,
 `test/vscode-launcher.mjs`). This only asks the launched system to *try*:
 whether it actually primes is `tools/osd-store.mjs` `warmUp()`'s own
-business, and on the pinned transpiler (no
-`abaplint/transpiler#1899`/`#1900`/`#1921`) it stays cold and says why --
-that reason is shown as the server gave it, not reworded.
+business. Release VSIX builds use the locked fork with upstream `only` and
+registry reuse and one shared `@abaplint/core`; they can prime. A
+checkout using the published npm transpiler stays cold and says why. That
+reason is shown as the server gave it, not reworded.
 
 **Where it shows.** `/osd/serving`'s own `warm` field (`{state: off |
 priming | primed | cold, reason, generation, unverified, swaps, copies,
@@ -1678,9 +1679,8 @@ does.
 build text") and `test/vscode-launcher.mjs` ("shouldWarm"); the live half
 in `test/vscode-warm.mjs`, against a real `node test/run.mjs` with
 `OSD_WARM=1`, an on-disk comment edit and `Osd#activate()` -- asserts a
-warm swap when the registry primed, and that the cold reason is surfaced,
-verbatim, when it did not (this checkout's pinned transpiler: `the
-transpiler has no \`only\` option (abaplint/transpiler#1900)`).
+warm swap when the registry primed, and that the cold reason is surfaced
+verbatim when it did not.
 
 ## Debugging ABAP
 
