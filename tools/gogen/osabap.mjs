@@ -8,6 +8,7 @@ import {basename, dirname, join, resolve} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
+import {checkLibPins} from "./lib-pins.mjs";
 
 const here = import.meta.dirname;
 // node tools/gogen/osabap.mjs [report.prog.abap] [--lib <folder>]...
@@ -29,6 +30,7 @@ const dir = join(here, "go", "cmd", "osabap");
 const targetGOOS = process.env.GOOS || (process.platform === "win32" ? "windows" : "");
 const bin = join(here, ".out", targetGOOS === "windows" ? "osabap.exe" : "osabap");
 
+checkLibPins(home);
 rmSync(generated, {recursive: true, force: true});
 mkdirSync(generated, {recursive: true});
 mkdirSync(dir, {recursive: true});
