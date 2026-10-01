@@ -342,6 +342,11 @@ const EXPECT = {
   // and every reference reads ($ZOSG_TMP_0121, 2026-09-23). Go gave the
   // subclass a second field until then: get:0 ... get:7
   ZCL_GOGEN_T_IADUP: "get:5 a:6 c:6 s:6 b:7 get:5",
+  // not an A4H value but a compile fixture: the row of a RANGE OF in an
+  // interface method's signature, built by a caller and taken by another
+  // class that implements it (Go named the row after each, and the class no
+  // longer implemented the interface; osg-research's DSL L3 ports, #401)
+  ZCL_GOGEN_T_RNG: "all:3 b:1",
   // class-based exceptions (A4H, the exception classes local to the probe,
   // the same code otherwise): a CATCH by hierarchy with the attributes read
   // INTO, the first CATCH that fits, CLEANUP inner then outer then the
