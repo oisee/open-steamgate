@@ -360,6 +360,7 @@ export function emitGo(program, pkg = "main", layers = null) {
     // registry need each object to be itself
     if (out.at(-1) === `type ${typeName(cls.name)} struct {`) out.push("\t_ byte");
     out.push("}", "");
+    if (cls.name === "KERNEL_CX_ASSERT") out.push(`func (me *KERNEL_CX_ASSERT) AssertionMessage() string { return me.${ident("MSG")} }`, "");
     if (POLY.has(cls.name)) out.push(...classInterface(program, cls));
     out.push(...attrAccessors(cls, inst));
     for (const a of (cls.attributes ?? []).filter((x) => x.static && !x.unsupported)) {
@@ -1526,7 +1527,7 @@ ${t}	}`));
       const cmp = st.keys.map((k) => `if a, b := ${get(`r${n}`, k)}, ${get(`v${n}`, k)}; a != b { if a > b { c${n} = 1 } else { c${n} = -1 }; goto done${n} }`);
       return [`${t}{`, `${t}	v${n} := ${st.value.e === "lrow" && needsCopy(st.value.type) ? `${cloneName(st.value.type)}(${rowValue(st.table.type, expr(st.value, ctx))})` : copied(st.value.e === "lrow" ? rowValue(st.table.type, expr(st.value, ctx)) : expr(st.value, ctx), st.value.type, st.value)}`, `${t}	pos${n} := len(${tb})`, `${t}	s.Sy.Subrc = 0`,
         `${t}	for i${n}, r${n} := range ${tb} {`, `${t}		c${n} := 0`, ...cmp.map((x) => `${t}		${x}`), `${t}	done${n}:`,
-        `${t}		if c${n} == 0 {`, `${t}			s.Sy.Subrc = 4`, `${t}			break`, `${t}		}`,
+        ...(st.unique === false ? [] : [`${t}		if c${n} == 0 {`, `${t}			s.Sy.Subrc = 4`, `${t}			break`, `${t}		}`]),
         `${t}		if c${n} > 0 {`, `${t}			pos${n} = i${n}`, `${t}			break`, `${t}		}`, `${t}	}`,
         `${t}	if s.Sy.Subrc == 0 {`, `${t}		${tb} = append(${tb}, ${rowStored(st.table.type, `v${n}`)})`, `${t}		copy(${tb}[pos${n}+1:], ${tb}[pos${n}:])`, `${t}		${tb}[pos${n}] = ${rowStored(st.table.type, `v${n}`)}`, `${t}		abap.BumpTable(&${tb})`,
         ...(st.refInto ? [`${t}		${place(st.refInto, ctx)} = ${rowRef(st.table.type, tb, `${tb}[pos${n}]`)}`] : []), `${t}	}`, `${t}}`];
@@ -1645,11 +1646,27 @@ ${t}	}`));
       // INTO TABLE replaces the table; each row is scanned column by column
       // and moved into the target's fields (by name with CORRESPONDING)
       const n = ctx.loop++;
-      const tgt = place(st.target, ctx);
+      const tgt = st.target === null ? null : place(st.target, ctx);
       const rowGo = goType(st.target.type.row);
       const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
       const moves = st.assign.map((a, i) => (a === null ? null
         : `${a.line ? "r" : `r.${ident(a.field)}`} = ${dbColumn(st.cols[i], `c${i}_${n}`, a.type)}`)).filter(Boolean);
+      const keyedRow = () => {
+        const ty = st.target.type;
+        const saved = ctx.lrow;
+        ctx.lrow = "r";
+        const value = {e: "lrow", type: ty.row};
+        const lines = ty.sorted
+          ? stmt({s: "insert_sorted", table: st.target, value,
+            keys: ty.sorted.map((name) => ({name})), unique: ty.unique}, ctx, d + 1)
+          : ty.hashed ? stmt({s: "insert_table", table: st.target, value,
+            unique: true, keys: ty.hashed}, ctx, d + 1)
+          : [`${t}\t${tgt} = append(${tgt}, ${rowStored(ty, "r")})`];
+        ctx.lrow = saved;
+        return [...lines, ...((ty.sorted && ty.unique) || ty.hashed
+          ? [`${t}\tif s.Sy.Subrc == 4 { panic(abap.ArithmeticError{Class: "ITAB_DUPLICATE_KEY", Op: "SELECT INTO TABLE"}) }`]
+          : [])];
+      };
       if (st.fae) {
         // FOR ALL ENTRIES (frontend selectStatement): once per driving row,
         // a row kept only the first time its columns are seen; an empty
@@ -1663,7 +1680,7 @@ ${t}	}`));
           `${t}\t\tabap.Must(scan(${st.cols.map((_, i) => `&k.c${i}`).join(", ")}))`,
           `${t}\t\tif seen${n}[k] {`, `${t}\t\t\treturn`, `${t}\t\t}`, `${t}\t\tseen${n}[k] = true`,
           ...st.cols.map((_, i) => `${t}\t\tc${i}_${n} := k.c${i}\n${t}\t\t_ = c${i}_${n}`),
-          `${t}\t\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t\t${m}`), `${t}\t\t${tgt} = append(${tgt}, ${rowStored(st.target.type, "r")})`, `${t}\t}`,
+          `${t}\t\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t\t${m}`), ...keyedRow(), `${t}\t}`,
           `${t}\tif drv${n} := ${expr(st.fae.table, ctx)}; len(drv${n}) == 0 {`,
           `${t}\t\tabap.Select(s, ${JSON.stringify(st.fae.sql)}, ${sqlArgs(st.fae.args, ctx)}, ${hostPreds(st.fae.preds, ctx)}, row${n})`,
           `${t}\t} else {`,
@@ -1673,12 +1690,21 @@ ${t}	}`));
           `${t}\tif len(seen${n}) > 0 {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 0, int32(len(seen${n}))`, `${t}\t} else {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}\t}`,
           `${t}}`];
       }
-      return [`${t}abap.BumpTable(&${tgt}); ${tgt} = nil`,
+      return [`${t}abap.BumpTable(&${tgt})`, ...(st.appending ? [] : [`${t}${tgt} = nil`]),
         `${t}if n${n} := abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
         `${t}\tvar ${vars.join("\n" + t + "\tvar ")}`,
         `${t}\tabap.Must(scan(${st.cols.map((_, i) => `&c${i}_${n}`).join(", ")}))`,
-        `${t}\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t${m}`), `${t}\t${tgt} = append(${tgt}, ${rowStored(st.target.type, "r")})`,
+        `${t}\tvar r ${rowGo}`, ...moves.map((m) => `${t}\t${m}`), ...keyedRow(),
         `${t}}); n${n} > 0 {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 0, int32(n${n})`, `${t}} else {`, `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}}`];
+    }
+    case "select_aggregate": {
+      const n = ctx.loop++;
+      const col = st.cols[0];
+      const v = `agg${n}`;
+      return [`${t}{`, `${t}\tvar ${v} ${col.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`,
+        `${t}\tabap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) { abap.Must(scan(&${v})) })`,
+        `${t}\t${place(st.target, ctx)} = ${dbColumn(col, v, st.assign[0].type)}`,
+        `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 0, 1`, `${t}}`];
     }
     case "unassign":
       return [`${t}${ident(st.fs.name)} = ${st.fs.type.k === "data" ? "abap.Data{}" : "nil"}`];
@@ -1714,10 +1740,10 @@ ${t}	}`));
       // the rows so far; after the loop, EXIT included, 0 and the rows read,
       // or 4 and 0 when there was no row and the work area is untouched
       const n = ctx.loop++;
-      const tgt = place(st.target, ctx);
+      const tgt = st.target === null ? null : place(st.target, ctx);
       const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
       const val = (i) => dbColumn(st.cols[i], `q${n}.c${i}`, st.assign[i]?.type ?? st.cols[i].type);
-      const moves = st.assign.map((a, i) => (a === null ? null : `${a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(val(i), a.type)}`)).filter(Boolean);
+      const moves = st.assign.map((a, i) => (a === null ? null : `${a.place ? place(a.place, ctx) : a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(val(i), a.type)}`)).filter(Boolean);
       return [`${t}{`,
         `${t}\ttype selrow${n} struct {`, ...st.cols.map((c, i) => `${t}\t\tc${i} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`), `${t}\t}`,
         `${t}\tvar rows${n} []selrow${n}`,
@@ -1922,7 +1948,12 @@ const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.Sqr
 
 function expr(e, ctx) {
   switch (e.e) {
-    case "var": case "attr": case "static": case "field": case "fs": case "row": case "row_key": case "refattr": case "dref_field": return place(e, ctx);
+    case "static": {
+      const cls = e.owner && CLASSES.get(e.owner);
+      if (cls && chainCctor(cls)) return `func() ${goType(e.type)} { Ensure_${typeName(e.owner)}(s); return ${place(e, ctx)} }()`;
+      return place(e, ctx);
+    }
+    case "var": case "attr": case "field": case "fs": case "row": case "row_key": case "refattr": case "dref_field": return place(e, ctx);
     case "zero": return zero(e.type) === "nil" ? `(${goType(e.type)})(nil)` : zero(e.type);
     case "case_fn": return `abap.${e.upper ? "ToUpper" : "ToLower"}(${expr(e.x, ctx)})`;
     case "table_lit": return `${goType(e.type)}{${e.rows.map((r) => rowStored(e.type, copied(expr(r, ctx), r.type, r))).join(", ")}}`;

@@ -175,6 +175,15 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
         const group = fmGroups.get(upper(match[1]));
         if (group && !wanted.includes(group)) wanted.push(group);
       }
+      // A PUBLIC CLASS-DATA read is a dependency too: its class constructor
+      // and storage must be emitted even when no method of that class is called.
+      for (const match of file.getRaw().matchAll(/\b([a-z_][\w]*)=>([a-z_]\w*)/gi)) {
+        const owner = match[1].toLowerCase();
+        const attr = upper(match[2]);
+        const def = reg.getObject("CLAS", owner)?.getDefinition();
+        if (def?.getAttributes().getStatic().some((a) => upper(a.getName()) === attr && a.getVisibility?.() === abaplint.Visibility.Public)
+            && !wanted.includes(owner)) wanted.push(owner);
+      }
     }
   }
 
@@ -1471,10 +1480,14 @@ function classIr(ctx0, obj) {
     try {
       const scope = spaghetti.lookupPosition(node.getFirstToken().getStart(), file.getFilename());
       const ctx = {program, reg, className, scopeName, owner: obj.owner ?? className, method: name, sig, signatures, scope, file, spaghetti, locals: new Map(), temps: 0};
+      const body = node.findDirectStructure(Structures.Body);
       const known = new Set([...sig.params.map((p) => p.name), sig.returning?.name].filter(Boolean));
       ctx.fieldSymbols = new Map();
       for (const [vname, id] of Object.entries(scope.getData().vars)) {
         if (known.has(vname) || vname === "ME" || vname === "SUPER") continue;
+        // abaplint leaves SELECT ... INTO TABLE @DATA(x) without a row type.
+        // The SELECT field list supplies it when the statement is lowered.
+        if (body && new RegExp(`\\bINTO\\s+TABLE\\s+@DATA\\s*\\(\\s*${vname}\\s*\\)`, "i").test(body.concatTokens())) continue;
         const t = typeOf(id.getType(), `${className}=>${name} ${vname}`, program);
         // a field symbol points into a row: only rows of structures, whose
         // reference both backends can hold (a pointer, an object)
@@ -1488,7 +1501,6 @@ function classIr(ctx0, obj) {
           ctx.locals.set(vname, t);
         }
       }
-      const body = node.findDirectStructure(Structures.Body);
       ctx.inits = [];
       const compiled = body === undefined ? [] : block(body, ctx);
       compiled.unshift(...ctx.inits);
@@ -3945,10 +3957,11 @@ function resolveStatic(owner, attr, ctx) {
   const alias = (def.getAliases?.() ?? []).find((x) => upper(x.getName()) === attr);
   const comp = alias === undefined ? [] : upper(alias.getComponent()).split("~");
   if (comp.length === 2 && comp[0] !== owner) return resolveStatic(comp[0], comp[1], ctx);
-  // ultra/events: a static attribute of ANOTHER class is refused here. On a
-  // system reading one is a use of that class and runs its class
-  // constructor first; whoever adds that read must also emit the class's
-  // Ensure_<class> (emit-go) / $ensure (emit-js) before it
+  const a = clas?.getAttributes().getStatic().find((x) => upper(x.getName()) === attr);
+  if (a && a.getVisibility?.() === abaplint.Visibility.Public) {
+    return {e: "static", go: goName(`${owner}=>${attr}`), owner,
+      type: typeOf(a.getType(), `${owner}=>${attr}`, ctx.program)};
+  }
   throw new Unsupported(`${owner}=>${attr}`);
 }
 
@@ -4507,9 +4520,9 @@ function selectColumns(sel, tb, text) {
  */
 function groupedColumns(sel, tb, text) {
   const gb = sel.findDirectExpression(Expressions.SQLGroupBy);
-  if (!gb) throw new Unsupported(`SELECT with an aggregate and no GROUP BY: ${text}`);
+  if (!gb && !/^SELECT\s+(?:MAX|MIN|SUM|COUNT)\s*\(/i.test(text)) throw new Unsupported(`SELECT with an aggregate and no GROUP BY: ${text}`);
   // the first column is an SQLField, the ones after it bare SQLFieldNames
-  const gcols = gb.getChildren().filter((c) => !isTok(c, "GROUP") && !isTok(c, "BY") && !isTok(c, ","));
+  const gcols = gb?.getChildren().filter((c) => !isTok(c, "GROUP") && !isTok(c, "BY") && !isTok(c, ",")) ?? [];
   const groupBy = gcols.map((f) => {
     const n = isExpr(f, Expressions.SQLFieldName) ? f : f.findDirectExpression(Expressions.SQLFieldName);
     if (!n || (!isExpr(f, Expressions.SQLFieldName) && f.getChildren().length !== 1)) throw new Unsupported(`GROUP BY ${f.concatTokens()}`);
@@ -4517,7 +4530,7 @@ function groupedColumns(sel, tb, text) {
     tb.colType(name);
     return name;
   });
-  if (groupBy.length === 0) throw new Unsupported(`GROUP BY form: ${text}`);
+  if (gb && groupBy.length === 0) throw new Unsupported(`GROUP BY form: ${text}`);
   const fl = sel.findDirectExpression(Expressions.SQLFieldList);
   const cols = [];
   for (const f of fl?.findDirectExpressions(Expressions.SQLField) ?? []) {
@@ -4597,17 +4610,21 @@ function selectLoop(node, ctx) {
   const st = node.findDirectStatement(Statements.SelectLoop);
   const text = st?.concatTokens() ?? "";
   const sel = st?.findDirectExpression(Expressions.Select);
-  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|FOR\s+UPDATE)\b/i.test(text)) throw new Unsupported(`SELECT loop form: ${text}`);
+  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|FOR\s+UPDATE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT loop form: ${text}`);
   if (sel.findDirectExpression(Expressions.SQLIntoTable)) throw new Unsupported(`SELECT loop INTO TABLE: ${text}`);
   const tb = selectTable(sel, ctx, text);
-  const cols = selectColumns(sel, tb, text);
+  const grouped = !!sel.findDirectExpression(Expressions.SQLGroupBy);
+  const cols = grouped ? groupedColumns(sel, tb, text) : selectColumns(sel, tb, text);
   const {assign, target} = intoWorkArea(sel, ctx, text, cols, "SELECT loop");
-  if (target === null) throw new Unsupported(`SELECT loop INTO a list: not measured: ${text}`);
   const acc = {hosts: [], ranges: []};
   const pred = wherePred(sel, ctx, tb, acc);
   const order = orderByOf(sel, tb);
   let rel = RIR.scan(lowName(tb.name));
   if (pred !== null) rel = RIR.filter(rel, pred);
+  if (grouped) {
+    rel = RIR.aggregate(rel, cols.groupBy.map(lowName), cols.filter((c) => c.agg).map((c) => ({as: lowName(c.name), expr: c.agg.star
+      ? {...RIR.call("COUNT", [], RIR.T.int), star: true} : RIR.call(c.agg.fn, [RIR.col(lowName(c.agg.col), sqlIrType(c.type))], sqlIrType(c.type))})));
+  }
   rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
   if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc})));
   const lowered = lowerOrRefuse("SELECT", rel);
@@ -4625,6 +4642,26 @@ function selectLoop(node, ctx) {
   return {s: "select_loop", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc), body};
 }
 
+// Clause checks must inspect the parsed SELECT, not its source text: a WHERE
+// string can contain any of these keywords without adding a SQL clause.
+function selectShape(sel) {
+  return sel.getChildren().map((child) => {
+    if (isTok(child)) return tokenStr(child);
+    if (isExpr(child, Expressions.SQLIntoTable)) return isTok(child.getFirstChild(), "APPENDING") ? "APPENDING TABLE" : "INTO TABLE";
+    if (isExpr(child, Expressions.SQLFrom)) return /\bJOIN\b/i.test(child.concatTokens()) ? "JOIN" : "FROM";
+    if (isExpr(child, Expressions.SQLSetOp)) return "UNION";
+    if (isExpr(child, Expressions.SQLOptions)) return child.concatTokens();
+    const clauses = [
+      [Expressions.SQLUpTo, "UP TO"], [Expressions.SQLGroupBy, "GROUP BY"],
+      [Expressions.SQLOrderBy, "ORDER BY"], [Expressions.SQLForAllEntries, "FOR ALL"],
+      [Expressions.SQLHaving, "HAVING"], [Expressions.SQLPackageSize, "PACKAGE"],
+      [Expressions.SQLBypassingBuffer, "BYPASSING"], [Expressions.SQLClient, "CLIENT"],
+      [Expressions.DatabaseConnection, "CONNECTION"], [Expressions.SQLOffset, "OFFSET"],
+    ];
+    return clauses.find(([kind]) => isExpr(child, kind))?.[1] ?? "";
+  }).join(" ");
+}
+
 /**
  * SELECT fields FROM table INTO [CORRESPONDING FIELDS OF] TABLE itab
  * [WHERE ...] [ORDER BY f ...]: the form the gateway's DPCs use. sy-subrc 0
@@ -4636,7 +4673,7 @@ function selectStatement(node, ctx, text) {
   if (sel && /^SELECT\s+SINGLE\b/i.test(text)) return selectSingle(sel, ctx, text);
   if (sel && /^SELECT\s+COUNT\s*\(\s*\*\s*\)\s+FROM\b/i.test(text)) return selectCount(sel, ctx, text);
   if (sel && /^SELECT\s+SUM\s*\(/i.test(text) && !sel.findDirectExpression(Expressions.SQLGroupBy)) return selectSum(sel, ctx, text);
-  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|HAVING|JOIN|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
+  if (!sel || /\b(SINGLE|DISTINCT|HAVING|JOIN|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT form: ${text}`);
   // parity-wave1: SELECT ... FOR ALL ENTRIES IN itab WHERE ... itab-comp ...
   // (A4H ZCL_GOGEN_T_FAE): the statement once per driving row, the rows
   // made unique over the columns selected (sy-dbcnt counts them), and an
@@ -4655,11 +4692,27 @@ function selectStatement(node, ctx, text) {
     fae = {name: upper(drvSrc.concatTokens().replace(/^@/, "")), row: drv.type.row, n: FAE_N, table: drv};
   }
   const tb = selectTable(sel, ctx, text);
+  const scalarAggregate = /^SELECT\s+(MAX|MIN|SUM)\s*\(\s*(\w+)\s*\)/i.exec(text);
+  if (scalarAggregate && !sel.findDirectExpression(Expressions.SQLGroupBy)) {
+    const fn = upper(scalarAggregate[1]);
+    const field = upper(scalarAggregate[2]);
+    const col = {name: `${fn}_${field}`, type: tb.colType(field), agg: {fn, col: field}};
+    return selectAggregateScalar(sel, ctx, text, tb, col);
+  }
   // ultra/itab: aggregates and GROUP BY (groupedColumns below)
   const grouped = sel.findDirectExpression(Expressions.SQLGroupBy) !== undefined && sel.findDirectExpression(Expressions.SQLGroupBy) !== null;
   const cols = grouped || sel.findFirstExpression(Expressions.SQLAggregation) ? groupedColumns(sel, tb, text) : selectColumns(sel, tb, text);
   const into = sel.findDirectExpression(Expressions.SQLIntoTable);
+  if (!into && cols.length === 1 && cols[0].agg && !grouped) return selectAggregateScalar(sel, ctx, text, tb, cols[0]);
   if (!into) throw new Unsupported(`SELECT INTO form (only INTO [CORRESPONDING FIELDS OF] TABLE): ${text}`);
+  const inline = /@DATA\s*\(\s*(\w+)\s*\)/i.exec(into.concatTokens());
+  if (inline) {
+    const name = upper(inline[1]);
+    const go = goName(`${ctx.className}=>${ctx.method}~${name}`);
+    const row = {k: "struct", go};
+    ctx.program.structs.set(go, {...row, fields: cols.map((c) => ({name: c.name, type: c.type}))});
+    ctx.locals.set(name, {k: "table", row});
+  }
   const corresponding = /\bCORRESPONDING\s+FIELDS\b/i.test(into.concatTokens());
   // ultra/itab (critic fix): an aggregate without AS has no name of its
   // own (COUNT_STAR / MAX_ID are ours), so INTO CORRESPONDING FIELDS would
@@ -4711,9 +4764,27 @@ function selectStatement(node, ctx, text) {
     rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
   }
   if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc})));
+  const up = sel.findDirectExpression(Expressions.SQLUpTo);
+  if (up) {
+    const src = up.findDirectExpression(Expressions.SQLSource);
+    if (!src) throw new Unsupported(`UP TO form: ${text}`);
+    const count = sqlHost(src, [], ctx, text);
+    if (count.type.k !== "i") throw new Unsupported(`UP TO a ${count.type.k} value: ${text}`);
+    if (count.e === "int") rel = RIR.limit(rel, count.value);
+    else {
+      acc.hosts.push(count);
+      rel = RIR.limit(rel, RIR.param(`@@host:${acc.hosts.length - 1}@@`, RIR.T.int));
+    }
+  }
   const lowered = lowerOrRefuse("SELECT", rel);
-  refuseSorted(target, "SELECT INTO TABLE");
+  const appending = isTok(into.getFirstChild(), "APPENDING");
   if (fae) {
+    // The empty-driver query below is the bare column list, and the driver
+    // path replaces the target: a FOR ALL ENTRIES that also appends, limits
+    // or orders would lose rows or return too many, so it is refused.
+    if (appending || up || order.length > 0) {
+      throw new Unsupported(`FOR ALL ENTRIES with ${appending ? "APPENDING" : up ? "UP TO" : "ORDER BY"}: ${text}`);
+    }
     // the same columns without the WHERE, for an empty driving table
     const accAll = {hosts: [], ranges: []};
     let relAll = RIR.scan(lowName(tb.name));
@@ -4723,7 +4794,19 @@ function selectStatement(node, ctx, text) {
     return {s: "select_table", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc),
       fae: {n: fae.n, table: fae.table, sql: all.sql, ...loweredArgs(all, accAll)}};
   }
-  return {s: "select_table", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
+  return {s: "select_table", table: tb.name, cols, assign, target, appending, sql: lowered.sql, ...loweredArgs(lowered, acc)};
+}
+function selectAggregateScalar(sel, ctx, text, tb, col) {
+  const {assign, target} = intoWorkArea(sel, ctx, text, [col], "SELECT aggregate");
+  const acc = {hosts: [], ranges: []};
+  let rel = RIR.scan(lowName(tb.name));
+  const pred = wherePred(sel, ctx, tb, acc);
+  if (pred !== null) rel = RIR.filter(rel, pred);
+  const agg = col.agg.star ? {...RIR.call("COUNT", [], RIR.T.int), star: true}
+    : RIR.call(col.agg.fn, [RIR.col(lowName(col.agg.col), sqlIrType(col.type))], sqlIrType(col.type));
+  rel = RIR.aggregate(rel, [], [{as: lowName(col.name), expr: agg}]);
+  const lowered = lowerOrRefuse("SELECT", rel);
+  return {s: "select_aggregate", table: tb.name, cols: [col], assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc)};
 }
 let FAE_N = 0;
 
@@ -4761,7 +4844,7 @@ function dynamicTokens(dyn, ctx, what, text) {
  */
 function dynamicSelect(sel, ctx, text) {
   if (/^SELECT\s+SINGLE\b/i.test(text)) throw new Unsupported(`dynamic SELECT SINGLE: ${text}`);
-  if (/\b(UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|CONNECTION|OFFSET)\b/i.test(text)) throw new Unsupported(`dynamic SELECT form: ${text}`);
+  if (/\b(UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|CONNECTION|OFFSET)\b/i.test(selectShape(sel))) throw new Unsupported(`dynamic SELECT form: ${text}`);
   const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
   if (from.length !== 1) throw new Unsupported(`dynamic SELECT FROM form: ${text}`);
   let table;
@@ -4837,7 +4920,7 @@ function dynamicSelect(sel, ctx, text) {
  * the count (A4H, ANORMALIES select-count-dbcnt), sy-subrc 4 when it is 0.
  */
 function selectCount(sel, ctx, text) {
-  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(text)) throw new Unsupported(`SELECT COUNT form: ${text}`);
+  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT COUNT form: ${text}`);
   const fl = sel.findDirectExpression(Expressions.SQLFieldList);
   if (!/^COUNT\s*\(\s*\*\s*\)$/i.test(fl?.concatTokens() ?? "")) throw new Unsupported(`SELECT COUNT form: ${text}`);
   const tb = selectTable(sel, ctx, text);
@@ -4857,7 +4940,7 @@ function selectCount(sel, ctx, text) {
 
 /** Narrow scalar SUM of an i column, into an i field. */
 function selectSum(sel, ctx, text) {
-  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(text)) throw new Unsupported(`SELECT SUM form: ${text}`);
+  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT SUM form: ${text}`);
   const fl = sel.findDirectExpression(Expressions.SQLFieldList);
   const field = /^SUM\s*\(\s*([\w]+)\s*\)$/i.exec(fl?.concatTokens() ?? "")?.[1];
   if (!field) throw new Unsupported(`SELECT SUM form: ${text}`);
@@ -5076,7 +5159,7 @@ function intoWorkArea(sel, ctx, text, cols, verb) {
  * bound; MANDT is the logon client, as for a table.
  */
 function selectSingle(sel, ctx, text) {
-  if (/\b(UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|FOR\s+UPDATE)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
+  if (/\b(UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|FOR\s+UPDATE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT form: ${text}`);
   const tb = selectTable(sel, ctx, text);
   const cols = selectColumns(sel, tb, text);
   const {assign, target} = intoWorkArea(sel, ctx, text, cols, "SELECT SINGLE");

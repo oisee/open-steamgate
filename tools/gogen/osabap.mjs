@@ -38,7 +38,7 @@ mkdirSync(dir, {recursive: true});
 const gui = join(home, ".local", "lars", "open-abap-gui");
 const {convertProgram} = await import(join(gui, "converter", "src", "api.mjs"));
 const source = readFileSync(report, "utf8");
-const converted = await convertProgram({source, filename: basename(report), mode: "strict", className, transactionCode: name});
+const converted = await convertProgram({source, filename: basename(report), mode: "strict", nativePassthrough: true, className, transactionCode: name});
 if (converted.supported !== true || converted.classSource === undefined) {
   throw new Error(`${report}: converter refused the report: ${JSON.stringify(converted.diagnostics)}`);
 }

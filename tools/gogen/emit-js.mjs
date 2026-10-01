@@ -548,6 +548,7 @@ function stmt(st, ctx, d) {
     // the JS side has no database: a SELECT is refused, not guessed
     case "select_dyn":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`dynamic SELECT: the JS backend has no database (the Go host has SQLite)`)});`];
+    case "select_aggregate":
     case "select_table":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`SELECT ... FROM ${st.table}: the JS backend has no database (the Go host has SQLite)`)});`];
     case "select_single":
@@ -916,7 +917,8 @@ const FN = {SIN: "Math.sin", COS: "Math.cos", TAN: "Math.tan", SQRT: "abap.SqrtF
 
 function expr(e, ctx) {
   switch (e.e) {
-    case "var": case "attr": case "static": case "field": case "fs": case "row": case "refattr": case "dref_field": return place(e, ctx);
+    case "static": return e.owner ? `(${typeName(e.owner)}.$ensure?.(s), ${place(e, ctx)})` : place(e, ctx);
+    case "var": case "attr": case "field": case "fs": case "row": case "refattr": case "dref_field": return place(e, ctx);
     case "zero": return zero(e.type);
     case "case_fn": return `abap.${e.upper ? "ToUpper" : "ToLower"}(${expr(e.x, ctx)})`;
     case "table_lit": return `[${e.rows.map((r) => moved(r, ctx)).join(", ")}]`;
