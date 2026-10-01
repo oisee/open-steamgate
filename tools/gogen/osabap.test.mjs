@@ -466,3 +466,14 @@ test("osd run builds a report once, keeps it and passes its arguments through", 
     rmSync(dir, {recursive: true, force: true});
   }
 });
+
+test("F4 report builds and terminal keyboard drives open, directory, save", () => {
+  execFileSync(process.execPath, [builder, join(here, "apps", "pickfile", "zpickfile.prog.abap")], {stdio: "inherit"});
+  execFileSync("go", ["test", "-tags", "nodatabase,osabap_pickfile", "./cmd/osabap"], {
+    cwd: join(here, "go"), stdio: "inherit",
+  });
+  // With all values supplied, even a report containing F4 handlers stays headless.
+  const result = run(["--in", "input", "--dir", "folder", "--out", "output", "--fm1", "one", "--fm2", "two"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /input\s+folder\s+output/);
+});

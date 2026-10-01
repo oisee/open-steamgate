@@ -755,6 +755,9 @@ const NATIVE = new Map([
   ["CL_GUI_FRONTEND_SERVICES=>FILE_GET_SIZE", {fn: "abap.FrontendFileSize", args: ["FILE_NAME:string", "&FILE_SIZE:i"]}],
   ["CL_GUI_FRONTEND_SERVICES=>GUI_UPLOAD", {fn: "abap.FrontendUpload", args: ["FILENAME:string", "FILETYPE:c", "&FILELENGTH:i", "&HEADER:xstring", "&DATA_TAB:data"]}],
   ["CL_GUI_FRONTEND_SERVICES=>GUI_DOWNLOAD", {fn: "abap.FrontendDownload", args: ["FILENAME:string", "FILETYPE:string", "BIN_FILESIZE:i", "WRITE_LF:c", "APPEND:c", "DATA_TAB:data"]}],
+  ["CL_GUI_FRONTEND_SERVICES=>FILE_OPEN_DIALOG", {fn: "abap.FrontendFileOpenDialog", args: ["WINDOW_TITLE:string", "DEFAULT_FILENAME:string", "INITIAL_DIRECTORY:string", "&FILE_TABLE:table", "&RC:i", "&USER_ACTION:i"]}],
+  ["CL_GUI_FRONTEND_SERVICES=>FILE_SAVE_DIALOG", {fn: "abap.FrontendFileSaveDialog", args: ["WINDOW_TITLE:string", "DEFAULT_FILE_NAME:string", "INITIAL_DIRECTORY:string", "&FILENAME:string", "&PATH:string", "&FULLPATH:string", "&USER_ACTION:i"]}],
+  ["CL_GUI_FRONTEND_SERVICES=>DIRECTORY_BROWSE", {fn: "abap.FrontendDirectoryBrowse", args: ["WINDOW_TITLE:string", "INITIAL_FOLDER:string", "&SELECTED_FOLDER:string"]}],
   ["ZCL_OSABAP_RUNTIME=>GETENV", {fn: "abap.FrontendGetenv", args: ["NAME:string"]}],
 ]);
 
@@ -922,6 +925,8 @@ function amcMethod(spec, ctx) {
  * their rules measured on A4H 2026-09-23 (ZCL_GOGEN_T_W3MI in semantics.mjs).
  */
 const NATIVE_FM = new Map([
+  ["F4_FILENAME", {fn: "abap.F4_FILENAME", params: {PROGRAM_NAME: "exporting", DYNPRO_NUMBER: "exporting", FIELD_NAME: "exporting", FILE_NAME: "importing"}}],
+  ["KD_GET_FILENAME_ON_F4", {fn: "abap.KD_GET_FILENAME_ON_F4", params: {PROGRAM_NAME: "exporting", DYNPRO_NUMBER: "exporting", FIELD_NAME: "exporting", MASK: "exporting", STATIC: "exporting", FILE_NAME: "changing"}}],
   ["WWWDATA_IMPORT", {fn: "abap.WWWDATA_IMPORT", params: {KEY: "exporting", MIME: "tables"}}],
   ["SCMS_BINARY_TO_XSTRING", {fn: "abap.SCMS_BINARY_TO_XSTRING",
     params: {INPUT_LENGTH: "exporting", FIRST_LINE: "exporting", LAST_LINE: "exporting", BUFFER: "importing", BINARY_TAB: "tables"}}],
@@ -992,7 +997,7 @@ function callFunction(node, ctx, text) {
         }
       } else if (isExpr(k, Expressions.ParameterListT)) {
         const kw = upper(kids[i - 1]?.concatTokens() ?? "");
-        const dir = kw === "IMPORTING" ? "importing" : kw === "TABLES" ? "tables" : null;
+        const dir = kw === "IMPORTING" ? "importing" : kw === "TABLES" ? "tables" : kw === "CHANGING" ? "changing" : null;
         if (dir === null) throw new Unsupported(`CALL FUNCTION '${name}': ${kw} parameters`);
         for (const p of k.findDirectExpressions(Expressions.ParameterT)) {
           const pname = upper(p.findDirectExpression(Expressions.ParameterName).concatTokens());

@@ -31,6 +31,12 @@ func TestSAPGUIOptionIsSeparateFromReportArguments(t *testing.T) {
 	}
 }
 
+func TestSAPGUIF4IsRefused(t *testing.T) {
+	if !sapGUIF4([]diag.Item{{Type: diag.ItemAPPL, ID: 0x0c, SID: 0x04, Value: []byte("=F4")}}) {
+		t.Fatal("F4 command was not recognized")
+	}
+}
+
 func TestSAPGUINoLaunch(t *testing.T) {
 	enabled, launch, listen := sapGUIOption([]reportargs.Arg{{Name: "sapgui-no-launch"}})
 	if !enabled || launch || listen != defaultSAPGUIListen {

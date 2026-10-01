@@ -14,19 +14,25 @@ import (
 	"runtime/pprof"
 	"strings"
 
+	"github.com/gdamore/tcell/v2"
 	"osg/gogen/abap"
+	"osg/gogen/filepick"
 	"osg/gogen/reportargs"
 	"osg/gogen/termgui"
 )
 
 func hostRun(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, batch, present string) ZCL_GG_HOST__TY_RESULT {
+	return hostRunRequest(s, report, input, batch, present, "")
+}
+
+func hostRunRequest(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, batch, present, valueRequest string) ZCL_GG_HOST__TY_RESULT {
 	values := make([]*ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, len(input))
 	for i := range input {
 		values[i] = &input[i]
 	}
 	empty := []*ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE(nil)
 	return ZCL_GG_HOST_RUN(s, report, nil, appProgram, "1000", "", 0, batch,
-		&values, &empty, &empty, "ONLI", "", "", "", "", 0, 1, "", "", "", 0,
+		&values, &empty, &empty, "ONLI", "", valueRequest, "", "", 0, 1, "", "", "", 0,
 		"", "", "", "", "", present, "", &ZIF_GG_HOST_HTML_V1__TY_NAVIGATION{}, &ZIF_GG_SESSION_TYPES_V1__TY_SUBMIT{})
 }
 
@@ -77,7 +83,7 @@ func main() {
 			abap.DialogStep(func() { screen = hostRun(s, report, nil, "", "X") })
 			if termgui.Available() {
 				var err error
-				input, err = graphicalInput(screen)
+				input, err = graphicalInput(s, report, screen)
 				if errors.Is(err, termgui.ErrCancelled) {
 					cancelled = true
 					return
@@ -175,7 +181,15 @@ func datasetOptions(host []reportargs.Arg) {
 	abap.SetDatasetHost(abap.SandboxFromEnv())
 }
 
-func graphicalInput(screen ZCL_GG_HOST__TY_RESULT) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, error) {
+func graphicalInput(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST__TY_RESULT) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, error) {
+	fields, err := termgui.Run(graphicalForm(s, report, screen))
+	if err != nil {
+		return nil, err
+	}
+	return selectionValuesFromFields(fields, screen), nil
+}
+
+func graphicalForm(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST__TY_RESULT) termgui.Form {
 	current := map[string]selectionInput{}
 	for _, v := range screen.values {
 		current[strings.TrimSpace(v.name)] = selectionInput{value: strings.TrimSpace(v.value), ranges: v.ranges}
@@ -203,9 +217,50 @@ func graphicalInput(screen ZCL_GG_HOST__TY_RESULT) ([]ZIF_GG_SELECTION_SCREEN_TY
 		}
 		form.Fields = append(form.Fields, field)
 	}
-	fields, err := termgui.Run(form)
-	if err != nil {
-		return nil, err
+	form.OnF4 = func(terminal tcell.Screen, name string, fields []termgui.Field) (string, error) {
+		if !appF4[name] {
+			return "", fmt.Errorf("no ON VALUE-REQUEST for %s", name)
+		}
+		values := map[string]selectionInput{}
+		for _, f := range fields {
+			values[f.Name] = selectionInput{value: f.Value}
+		}
+		var pickErr error
+		abap.FrontendPick = func(kind, initial, defaultName, title string) (string, error) {
+			mode := filepick.Open
+			switch kind {
+			case "save":
+				mode = filepick.Save
+			case "directory":
+				mode = filepick.Directory
+			}
+			browser := filepick.Browser{Sandbox: abap.SandboxFromEnv(), Mode: mode, Initial: initial, DefaultName: defaultName, Title: title}
+			path, err := browser.Run(terminal)
+			if err != nil && !errors.Is(err, filepick.ErrCancel) {
+				pickErr = err
+			}
+			return path, err
+		}
+		defer func() { abap.FrontendPick = nil }()
+		var result ZCL_GG_HOST__TY_RESULT
+		abap.DialogStep(func() { result = hostRunRequest(s, report, selectionValues(values), "", "X", name) })
+		if pickErr != nil {
+			return "", pickErr
+		}
+		for _, v := range result.values {
+			if strings.TrimSpace(v.name) == name && len(v.ranges) > 0 {
+				return strings.TrimSpace(v.ranges[0].low), nil
+			}
+		}
+		return values[name].value, nil
+	}
+	return form
+}
+
+func selectionValuesFromFields(fields []termgui.Field, screen ZCL_GG_HOST__TY_RESULT) []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE {
+	current := map[string]selectionInput{}
+	for _, v := range screen.values {
+		current[strings.TrimSpace(v.name)] = selectionInput{value: strings.TrimSpace(v.value), ranges: v.ranges}
 	}
 	for _, field := range fields {
 		if field.Kind == termgui.Ranges {
@@ -221,7 +276,7 @@ func graphicalInput(screen ZCL_GG_HOST__TY_RESULT) ([]ZIF_GG_SELECTION_SCREEN_TY
 			current[field.Name] = selectionInput{value: field.Value}
 		}
 	}
-	return selectionValues(current), nil
+	return selectionValues(current)
 }
 
 func commandInput(cli reportargs.Result) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, bool) {

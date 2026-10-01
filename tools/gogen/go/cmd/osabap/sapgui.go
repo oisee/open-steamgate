@@ -132,6 +132,9 @@ func runSAPGUISession(conn net.Conn, selection ZCL_GG_HOST__TY_RESULT, execute f
 		if sapGUIExit(items) || resultShown {
 			return endSAPGUISession(conn)
 		}
+		if sapGUIF4(items) {
+			return fmt.Errorf("SAP GUI F4 is not supported; use the terminal selection screen")
+		}
 		values := sapGUISelectionValues(items, fields)
 		result := execute(values)
 		resultShown = true
@@ -150,7 +153,7 @@ func sapGUISelectionScreen(result ZCL_GG_HOST__TY_RESULT) (*frame.Screen, []sapG
 	}
 	screen := frame.New(27, 120).
 		Text(0, 2, appProgram+" - selection screen").
-		Text(24, 2, "F8 or Execute runs the report; Back closes the program")
+		Text(24, 2, "F8 or Execute runs the report; Back closes the program; F4 unavailable here")
 	fields := []sapGUIField{}
 	row := 2
 	for _, element := range result.elements {
@@ -295,6 +298,18 @@ func sapGUIExit(items []diag.Item) bool {
 		}
 		code := strings.ToLower(strings.TrimSpace(string(item.Value)))
 		return code == "/i" || code == "/n" || code == "/nend" || code == "/nex" || code == "/bend" || code == "back" || code == "=back" || code == "exit"
+	}
+	return false
+}
+
+func sapGUIF4(items []diag.Item) bool {
+	for _, item := range items {
+		if item.Type == diag.ItemAPPL && item.ID == 0x0c && item.SID == 0x04 {
+			code := strings.ToUpper(strings.TrimSpace(string(item.Value)))
+			if code == "F4" || code == "=F4" {
+				return true
+			}
+		}
 	}
 	return false
 }

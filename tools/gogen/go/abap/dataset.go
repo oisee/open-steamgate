@@ -537,6 +537,65 @@ func (sb *Sandbox) roots() ([]string, []string) {
 	return sb.read, sb.write
 }
 
+// BrowseRoots returns the normalized roots available to a file dialog.
+// A write root is readable by an open dialog, as it is by DATASET.
+func (sb *Sandbox) BrowseRoots(save bool) []string {
+	read, write := sb.roots()
+	if save {
+		return append([]string(nil), write...)
+	}
+	return append([]string(nil), read...)
+}
+
+// BrowsePath checks a candidate with DATASET's lexical and real-path rules.
+// Directories are opened through the same os.Root handle used by DATASET, so
+// a symlink swapped between checking and listing cannot escape the root.
+func (sb *Sandbox) BrowsePath(name string, save bool) (string, *os.File, error) {
+	read, write := sb.roots()
+	roots, given := read, append(append([]string{}, sb.Read...), sb.Write...)
+	if save {
+		roots, given = write, sb.Write
+	}
+	real, _, refused, missing := sb.place(name, roots, given)
+	if refused != "" {
+		return "", nil, errors.New(refused)
+	}
+	if missing {
+		return "", nil, os.ErrNotExist
+	}
+	root, rel, ok := sb.beneath(real, roots)
+	if !ok {
+		return "", nil, os.ErrPermission
+	}
+	f, err := root.Open(rel)
+	return real, f, err
+}
+
+// BrowseSaveName validates a future file without creating or truncating it.
+func (sb *Sandbox) BrowseSaveName(name string) (string, error) {
+	_, write := sb.roots()
+	real, _, refused, missing := sb.place(name, write, sb.Write)
+	if refused != "" {
+		return "", errors.New(refused)
+	}
+	if missing {
+		return "", os.ErrNotExist
+	}
+	if _, existing, err := sb.BrowsePath(real, true); err == nil {
+		defer existing.Close()
+		if info, err := existing.Stat(); err == nil && info.IsDir() {
+			return "", errors.New("cannot save to a directory")
+		}
+	}
+	// Recheck the parent with the root handle before returning the name.
+	_, f, err := sb.BrowsePath(filepath.Dir(real), true)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	return real, nil
+}
+
 func (sb *Sandbox) note(entry map[string]any) {
 	if sb.Audit != nil {
 		entry["at"] = time.Now().UTC().Format(time.RFC3339Nano)

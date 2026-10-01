@@ -55,11 +55,38 @@ for (const [, item] of tpool.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
   if (field("ID") === "S" && entry !== ".") textPool[field("KEY").toUpperCase()] = entry;
   if (field("ID") === "I") textPool[`TEXT-${field("KEY").toUpperCase()}`] = entry;
 }
-const converted = await convertProgram({source, filename: basename(report), mode: "strict", nativePassthrough: true, className, transactionCode: name, ...(Object.keys(textPool).length > 0 ? {textPool} : {})});
+// The converter's simple-assignment F4 shortcut discards all statements
+// preceding `field = value`. Spell that assignment as MOVE in this input so
+// the complete event block passes through native lowering.
+const f4Fields = [...source.matchAll(/AT\s+SELECTION-SCREEN\s+ON\s+VALUE-REQUEST\s+FOR\s+(\w+)\s*\./gi)].map((m) => m[1].toUpperCase());
+if (/AT\s+SELECTION-SCREEN\s+ON\s+HELP-REQUEST\b/i.test(source)) {
+  throw new Error(`${report}: ON HELP-REQUEST (F1) is not supported by osabap`);
+}
+let convertedSource = source;
+for (const field of f4Fields) {
+  const re = new RegExp(`(^\\s*)(${field})\\s*=\\s*([^\\n.]+)\\.`, "gim");
+  convertedSource = convertedSource.replace(re, (_, indent, target, value) => `${indent}MOVE ${value} TO ${target}.`);
+}
+const converted = await convertProgram({source: convertedSource, filename: basename(report), mode: "strict", nativePassthrough: true, className, transactionCode: name, ...(Object.keys(textPool).length > 0 ? {textPool} : {})});
 if (converted.supported !== true || converted.classSource === undefined) {
   throw new Error(`${report}: converter refused the report: ${JSON.stringify(converted.diagnostics)}`);
 }
-writeFileSync(join(generated, `${className.toLowerCase()}.clas.abap`), converted.classSource);
+let classSource = converted.classSource;
+if (f4Fields.length) {
+  const state = converted.reportIR?.statePlan?.selectionState ?? {};
+  const marker = "  METHOD zif_gg_report_v1~at_selection_screen_value_req.";
+  const start = classSource.indexOf(marker);
+  const end = classSource.indexOf("  ENDMETHOD.", start);
+  if (start < 0 || end < 0) throw new Error(`${report}: converter omitted ON VALUE-REQUEST method`);
+  const prefix = f4Fields.map((field) => {
+    const member = state[field]?.member;
+    if (!member || state[field].ranges) throw new Error(`${report}: F4 requires a scalar selection field: ${field}`);
+    return `    IF iv_name = '${field}' AND line_exists( it_values[ name = '${field}' ] ).\n      ${member} = it_values[ name = '${field}' ]-value.\n    ENDIF.`;
+  }).join("\n");
+  const suffix = f4Fields.map((field) => `    IF iv_name = '${field}'.\n      rt_values = VALUE #( ( sign = zif_gg_selection_screen_types=>sign_include option = zif_gg_selection_screen_types=>option_eq low = ${state[field].member} ) ).\n    ENDIF.`).join("\n");
+  classSource = classSource.slice(0, start + marker.length) + "\n" + prefix + classSource.slice(start + marker.length, end) + suffix + "\n" + classSource.slice(end);
+}
+writeFileSync(join(generated, `${className.toLowerCase()}.clas.abap`), classSource);
 // the report's own dictionary: tables, data elements, domains and table
 // types beside the report file are part of it, the way a report on a system
 // brings its tables along in its package
@@ -181,6 +208,7 @@ var appPositionals = []string{${positionals.map(JSON.stringify).join(", ")}}
 var appCheckboxes = map[string]bool{${checkboxes.map((name) => `${JSON.stringify(name)}: true`).join(", ")}}
 var appRanges = map[string]bool{${ranges.map((name) => `${JSON.stringify(name)}: true`).join(", ")}}
 var appLabels = map[string]string{${Object.entries(textPool).filter(([key]) => selectionNames.includes(key)).map(([key, text]) => `${JSON.stringify(key)}: ${JSON.stringify(text)}`).join(", ")}}
+var appF4 = map[string]bool{${f4Fields.map((name) => `${JSON.stringify(name)}: true`).join(", ")}}
 
 func newReport(s *abap.Session) *${className} { return New_${className}(s) }
 `);
