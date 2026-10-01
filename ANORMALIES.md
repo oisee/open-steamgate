@@ -29,6 +29,37 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-01-assert-differs-never-fails -- open-abap-core's cl_abap_unit_assert=>assert_differs passes on equal values
+
+- Status: `workaround`
+- Discovery date: `2026-10-01`
+- Affected versions: `oisee/open-abap-core 909179a`; at `8b397be` (#372, open-abap-core#1279) the invalid-UTF-8, byte-offset and lower-case-encoding fixtures pass, and the marks in `cases.json` say which still miss. Still open at `8b397be`: a declaration with one byte cut out of it (`xml_decl_lowercase_utf8` under the drop-a-boundary-byte mutant) ends the run with `CONVT_NO_NUMBER` instead of a parse error, so that mutant leaves the fixture out and upstream `open-abap/open-abap-core` main at `9959c70`
+- Affected ABAP statement, runtime API or adapter: `cl_abap_unit_assert=>assert_differs( act = x exp = x )`
+- Minimal ABAP reproducer: `cl_abap_unit_assert=>assert_differs( act = 1 exp = 1 ).` in any test method: the method passes
+- Exact command used to run it: found by the sXML contract's mutant test (`test/unit/zcl_osd_sxml_contract_test`, `mutant_decode_per_chunk`): a loop of `assert_differs( act = split exp = whole )` passed over two rows whose split was `whole`
+- Expected SAP behaviour: the assertion fails when ACT equals EXP
+- Actual open-abap behaviour: the method calls `assert_equals`, raises `kernel_cx_assert` when it did not fail, and its own `CATCH kernel_cx_assert. RETURN.` catches that raise as well, so it never fails
+- Impact on open-steamgate: every `assert_differs` in the tree is a check that cannot fail here (eight files used it on 2026-10-01); a green run says nothing about them
+- Smallest safe workaround: `IF act = exp. cl_abap_unit_assert=>fail( ... ). ENDIF.`, as the sXML contract test does
+- Upstream issue: none yet, needs an issue (open-abap-core; for the lead)
+- Regression-test location: none in this tree yet; the sXML contract test avoids the method
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-10-01-sxml-reader-vs-a4h -- CL_SXML_STRING_READER of the pinned fork against A4H
+
+- Status: `open`
+- Discovery date: `2026-10-01`
+- Affected versions: `oisee/open-abap-core 909179a` (pinned in `libs.lock.json`)
+- Affected ABAP statement, runtime API or adapter: `cl_sxml_string_reader=>create( )`, `if_sxml_reader->next_node( )` / `next_attribute( )`, `cx_sxml_parse_error-xml_offset`
+- Minimal ABAP reproducer: the fixtures with `fork: MISS` or `DUMPS` in `test/fixtures/sxml-contract/cases.json`, run by `test/unit/zcl_osd_sxml_contract_test` (`reference_concat`); on A4H by `test/fixtures/sxml-contract/recorder.abap`
+- Exact command used to run it: `npm run unit` (the reference test asserts the fork misses exactly the fixtures marked MISS); `node tools/osd-sxml-contract.mjs provisional` re-derives the marks
+- Expected SAP behaviour (measured on A4H 2026-10-01 by the lead and stoker, except where marked as derived from XML 1.0 / JSON-XML): `xml_offset` is a byte offset (`<a>`+e acute+euro+`</b>`: 8, the start of the wrong close tag; `<a x="`+two e acute+`<"/>`: 6, the start of the value); text and CDATA next to each other are ONE value; invalid UTF-8 in text is replaced, not raised (80: one FFFD; C0 AF: one FFFD; E2 82 before a letter: two FFFD; E2 82 or F0 9F 98 directly before `<`: a parse error at the `<`; ED A0 80: a lone D800 passed through); a byte FF inside a comment is ignored; `encoding="utf-8"` in lower case is accepted; derived: `&#128512;` is the pair D83D DE00; a JSON document read with `next_node` ends in `co_nt_final` and a member's key is its attribute `name`
+- Actual open-abap behaviour: offsets count characters and point after the close tag (9 and 8 for the two cases); text and CDATA are two values; any invalid UTF-8 anywhere raises `CX_SY_CONVERSION_CODEPAGE` in `create( )`; lower-case `utf-8` ends the run with the runtime error CONVT_NO_NUMBER in `cl_abap_conv_in_ce=>create`, which no CATCH sees; `&#128512;` becomes F600 (`uccpi` keeps 16 bits); JSON through `next_node` never reports `co_nt_final` (the last close element repeats) and `next_attribute` gives no `name` attribute
+- Impact on open-steamgate: an sXML consumer here sees other values, offsets and errors than on a system; the streaming readers (stoker) are written against the A4H behaviour, so the fork's reader is not their oracle
+- Smallest safe workaround: none; the contract records the A4H behaviour and marks the fork's misses
+- Upstream issue: none yet, needs an issue or a fork fix (open-abap-core; for the lead, after the A4H recording confirms the derived parts)
+- Regression-test location: `test/unit/zcl_osd_sxml_contract_test.clas.testclasses.abap` (`reference_concat`)
+- Upstream version containing a fix: `unknown`
 ### ANOMALY-2026-10-01-submit-via-job-char-operands -- SUBMIT VIA JOB refused a job name and count in SAP's own CHAR types
 
 - Status: `fixed` (in this repository's lowering; no upstream involved)

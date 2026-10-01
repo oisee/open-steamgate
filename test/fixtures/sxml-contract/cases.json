@@ -1,0 +1,909 @@
+{
+  "//": [
+    "Fixtures of the sXML reader contract (ZCL_OSD_SXML_CONTRACT). This file is the source;",
+    "node tools/osd-sxml-contract.mjs writes src/sxml/zcl_osd_sxml_fixtures.clas.abap, the A4H recorder and its",
+    "in-repo twin from it. input: strings are UTF-8 encoded, {hex} parts are raw bytes.",
+    "status provisional-fork: expected generated from the pinned oisee/open-abap-core (libs.lock.json) through",
+    "ZCL_OSD_SXML_FACTORY_CONCAT by 'osd-sxml-contract.mjs provisional'; NOT an oracle.",
+    "status provisional-spec: written by hand from the XML 1.0 / JSON-XML rules where the fork is visibly wrong ('spec' says why).",
+    "status measured-a4h-<date>: measured on A4H with the real CL_SXML_STRING_READER; 'measured' says which",
+    "part was measured, the rest of the lines are derived.",
+    "Every provisional expectation is replaced by the A4H recording (osd-sxml-contract.mjs import).",
+    "fork: what the pinned fork does (set by 'provisional'): absent = passes, MISS = another sequence, DUMPS = a",
+    "runtime error no CATCH sees. Where the fork and A4H differ, that is an ANORMALIES entry, not an edit of the expectation."
+  ],
+  "fixtures": [
+    {
+      "name": "json_empty_object",
+      "group": "json-ported",
+      "input": [
+        "{}"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>empty_object (MIT)",
+      "expected": [
+        "OPEN \"object\" \"\"",
+        "CLOSE \"object\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "json_empty_array",
+      "group": "json-ported",
+      "input": [
+        "[]"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>empty_array (MIT)",
+      "expected": [
+        "OPEN \"array\" \"\"",
+        "CLOSE \"array\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "json_simple_integer",
+      "group": "json-ported",
+      "input": [
+        "2"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>simple_integer (MIT)",
+      "expected": [
+        "OPEN \"num\" \"\"",
+        "VALUE \"2\"",
+        "CLOSE \"num\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "json_simple_true",
+      "group": "json-ported",
+      "input": [
+        "true"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>simple_true (MIT)",
+      "expected": [
+        "OPEN \"bool\" \"\"",
+        "VALUE \"true\"",
+        "CLOSE \"bool\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "json_simple_null",
+      "group": "json-ported",
+      "input": [
+        "null"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>simple_null (MIT)",
+      "expected": [
+        "OPEN \"null\" \"\"",
+        "CLOSE \"null\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "json_integer_array",
+      "group": "json-ported",
+      "input": [
+        "[2]"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>integer_array (MIT)",
+      "expected": [
+        "OPEN \"array\" \"\"",
+        "OPEN \"num\" \"\"",
+        "VALUE \"2\"",
+        "CLOSE \"num\"",
+        "CLOSE \"array\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "json_key_value",
+      "group": "json-ported",
+      "input": [
+        "{\"key1\": \"value1\"}"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>key_value (MIT)",
+      "expected": [
+        "OPEN \"object\" \"\"",
+        "OPEN \"str\" \"\"",
+        "ATTR \"name\" \"\" \"key1\"",
+        "VALUE \"value1\"",
+        "CLOSE \"str\"",
+        "CLOSE \"object\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "json_key_empty",
+      "group": "json-ported",
+      "input": [
+        "{\"key1\": []}"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>key_empty (MIT)",
+      "expected": [
+        "OPEN \"object\" \"\"",
+        "OPEN \"array\" \"\"",
+        "ATTR \"name\" \"\" \"key1\"",
+        "CLOSE \"array\"",
+        "CLOSE \"object\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "json_empty_key",
+      "group": "json-ported",
+      "input": [
+        "{\"\": 1}"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>empty_key_has_name_attribute (MIT)",
+      "expected": [
+        "OPEN \"object\" \"\"",
+        "OPEN \"num\" \"\"",
+        "ATTR \"name\" \"\" \"\"",
+        "VALUE \"1\"",
+        "CLOSE \"num\"",
+        "CLOSE \"object\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "json_two_keys",
+      "group": "json-ported",
+      "input": [
+        "{\"key1\": \"value1\", \"key2\": \"value2\"}"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>two_keys (MIT)",
+      "expected": [
+        "OPEN \"object\" \"\"",
+        "OPEN \"str\" \"\"",
+        "ATTR \"name\" \"\" \"key1\"",
+        "VALUE \"value1\"",
+        "CLOSE \"str\"",
+        "OPEN \"str\" \"\"",
+        "ATTR \"name\" \"\" \"key2\"",
+        "VALUE \"value2\"",
+        "CLOSE \"str\"",
+        "CLOSE \"object\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "json_two_array",
+      "group": "json-ported",
+      "input": [
+        "[1, 2]"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>two_array (MIT)",
+      "expected": [
+        "OPEN \"array\" \"\"",
+        "OPEN \"num\" \"\"",
+        "VALUE \"1\"",
+        "CLOSE \"num\"",
+        "OPEN \"num\" \"\"",
+        "VALUE \"2\"",
+        "CLOSE \"num\"",
+        "CLOSE \"array\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "json_array_with_object",
+      "group": "json-ported",
+      "input": [
+        "[{\"key\": \"value\"}]"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>array_with_object (MIT)",
+      "expected": [
+        "OPEN \"array\" \"\"",
+        "OPEN \"object\" \"\"",
+        "OPEN \"str\" \"\"",
+        "ATTR \"name\" \"\" \"key\"",
+        "VALUE \"value\"",
+        "CLOSE \"str\"",
+        "CLOSE \"object\"",
+        "CLOSE \"array\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "json_object_with_object",
+      "group": "json-ported",
+      "input": [
+        "{\"key\": {\"sub\": \"value\"}}"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>object_with_object (MIT)",
+      "expected": [
+        "OPEN \"object\" \"\"",
+        "OPEN \"object\" \"\"",
+        "ATTR \"name\" \"\" \"key\"",
+        "OPEN \"str\" \"\"",
+        "ATTR \"name\" \"\" \"sub\"",
+        "VALUE \"value\"",
+        "CLOSE \"str\"",
+        "CLOSE \"object\"",
+        "CLOSE \"object\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "json_bad",
+      "group": "json-ported",
+      "input": [
+        "moo, hello world"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>bad_json_next_node (MIT)",
+      "expected": [
+        "ERROR CX_SXML_PARSE_ERROR 0"
+      ]
+    },
+    {
+      "name": "json_bad_offset",
+      "group": "json-ported",
+      "input": [
+        "{\n\"ok\": \"abc\",\n\"error\"\n}"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "source": "open-abap-core src/sxml/cl_sxml_string_reader.clas.testclasses.abap, ltcl_json=>bad_json_xml_offset (MIT)",
+      "expected": [
+        "OPEN \"object\" \"\"",
+        "OPEN \"str\" \"\"",
+        "ATTR \"name\" \"\" \"ok\"",
+        "VALUE \"abc\"",
+        "CLOSE \"str\"",
+        "ERROR CX_SXML_PARSE_ERROR 23"
+      ],
+      "fork": "MISS"
+    },
+    {
+      "name": "json_non_ascii",
+      "group": "json",
+      "input": [
+        "{\"\u00e9\u20ac\ud83d\ude00\": \"\u00e9\u20ac\ud83d\ude00\"}"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"object\" \"\"",
+        "OPEN \"str\" \"\"",
+        "ATTR \"name\" \"\" \"\\u00E9\\u20AC\\uD83D\\uDE00\"",
+        "VALUE \"\\u00E9\\u20AC\\uD83D\\uDE00\"",
+        "CLOSE \"str\"",
+        "CLOSE \"object\"",
+        "FINAL"
+      ],
+      "spec": "JSON-XML: a member is an element whose attribute name holds the key; the document ends in FINAL. open-abap-core's own test asserts the same elements, values and key (through the object API)",
+      "fork": "MISS"
+    },
+    {
+      "name": "xml_simple",
+      "group": "xml",
+      "input": [
+        "<a>t</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"t\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_name_e_acute",
+      "group": "xml",
+      "input": [
+        "<\u00e9 \u00e9x=\"v\">t</\u00e9>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "note": "e acute in an element name and an attribute name",
+      "expected": [
+        "OPEN \"\\u00E9\" \"\"",
+        "ATTR \"\\u00E9x\" \"\" \"v\"",
+        "VALUE \"t\"",
+        "CLOSE \"\\u00E9\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_name_euro",
+      "group": "xml",
+      "input": [
+        "<a\u20ac>t</a\u20ac>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "note": "U+20AC is a name character in XML 1.0 fifth edition, not in the fourth",
+      "expected": [
+        "OPEN \"a\\u20AC\" \"\"",
+        "VALUE \"t\"",
+        "CLOSE \"a\\u20AC\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_name_astral",
+      "group": "xml",
+      "input": [
+        "<a\ud83d\ude00/>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "note": "U+1F600 in a name: fifth edition only",
+      "expected": [
+        "OPEN \"a\\uD83D\\uDE00\" \"\"",
+        "CLOSE \"a\\uD83D\\uDE00\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_non_ascii_values",
+      "group": "xml",
+      "input": [
+        "<a x=\"\u00e9\u20ac\ud83d\ude00\">\u00e9\u20ac\ud83d\ude00</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "ATTR \"x\" \"\" \"\\u00E9\\u20AC\\uD83D\\uDE00\"",
+        "VALUE \"\\u00E9\\u20AC\\uD83D\\uDE00\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_non_ascii_cdata",
+      "group": "xml",
+      "input": [
+        "<a><![CDATA[\u00e9\u20ac\ud83d\ude00]]></a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"\\u00E9\\u20AC\\uD83D\\uDE00\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_non_ascii_comment",
+      "group": "xml",
+      "input": [
+        "<a><!--\u00e9\u20ac\ud83d\ude00-->t</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"t\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_entities",
+      "group": "xml",
+      "input": [
+        "<a x=\"&amp;&#x20AC;&#128512;\">&amp;&#x20AC;&#128512;&lt;&gt;&quot;&apos;</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "ATTR \"x\" \"\" \"&\\u20AC\\uD83D\\uDE00\"",
+        "VALUE \"&\\u20AC\\uD83D\\uDE00<>\\u0022'\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ],
+      "spec": "XML 1.0: &#128512; is U+1F600, the pair D83D DE00; the fork truncates it to F600",
+      "fork": "MISS"
+    },
+    {
+      "name": "xml_cdata_brackets",
+      "group": "xml",
+      "input": [
+        "<a><![CDATA[x]]y]]]></a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "note": "CDATA holding ]] and ending in ]]]>: the value is x]]y]",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"x]]y]\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_comment_dashes",
+      "group": "xml",
+      "input": [
+        "<a>1<!-- a-b - c- -->2</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "note": "single dashes next to each other and next to the end, never two in a row",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"12\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ],
+      "fork": "MISS"
+    },
+    {
+      "name": "xml_pi",
+      "group": "xml",
+      "input": [
+        "<?xml version=\"1.0\"?><?pi data?><a><?inner x?>t</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"t\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_bom",
+      "group": "xml",
+      "input": [
+        {
+          "hex": "EFBBBF"
+        },
+        "<a>t</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"t\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_namespaces",
+      "group": "xml",
+      "input": [
+        "<r xmlns=\"urn:d\" xmlns:p=\"urn:p\"><p:c p:x=\"1\" y=\"2\">t</p:c><d/></r>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"r\" \"urn:d\"",
+        "OPEN \"c\" \"urn:p\"",
+        "ATTR \"x\" \"urn:p\" \"1\"",
+        "ATTR \"y\" \"\" \"2\"",
+        "VALUE \"t\"",
+        "CLOSE \"c\"",
+        "OPEN \"d\" \"urn:d\"",
+        "CLOSE \"d\"",
+        "CLOSE \"r\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_empty_elements",
+      "group": "xml",
+      "input": [
+        "<a><b/><c></c></a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "OPEN \"b\" \"\"",
+        "CLOSE \"b\"",
+        "OPEN \"c\" \"\"",
+        "CLOSE \"c\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_whitespace_only",
+      "group": "xml",
+      "input": [
+        "<a> </a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \" \"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_whitespace_between",
+      "group": "xml",
+      "input": [
+        "<a>\n  <b>x</b>\n</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "OPEN \"b\" \"\"",
+        "VALUE \"x\"",
+        "CLOSE \"b\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_long_text",
+      "group": "xml",
+      "input": [
+        "<a>abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 abc \u00e9\u20ac\ud83d\ude00 </a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "note": "one text node of 560 bytes, longer than any chunk of a two-chunk split's shorter half",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 abc \\u00E9\\u20AC\\uD83D\\uDE00 \"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_decl_lowercase_utf8",
+      "group": "xml",
+      "input": [
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?><a>\u00e9</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"\\u00E9\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ],
+      "measured": "a lower-case encoding=\"utf-8\" is accepted"
+    },
+    {
+      "name": "xml_astral_text",
+      "group": "xml",
+      "input": [
+        "<a>\ud83d\ude00</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"\\uD83D\\uDE00\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ],
+      "measured": "F0 9F 98 80 is the surrogate pair D83D DE00"
+    },
+    {
+      "name": "xml_text_cdata_merged",
+      "group": "xml",
+      "input": [
+        "<a\u00e9 x=\"\u00e9\u20ac\">\u00e9\u20ac<![CDATA[\u00e9]]]]></a\u00e9>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\\u00E9\" \"\"",
+        "ATTR \"x\" \"\" \"\\u00E9\\u20AC\"",
+        "VALUE \"\\u00E9\\u20AC\\u00E9]]\"",
+        "CLOSE \"a\\u00E9\"",
+        "FINAL"
+      ],
+      "measured": "OPEN, one VALUE for text and CDATA together, CLOSE; the ATTR line and FINAL are derived",
+      "fork": "MISS"
+    },
+    {
+      "name": "xml_ff_in_comment",
+      "group": "xml",
+      "input": [
+        "<a><!--",
+        {
+          "hex": "FF"
+        },
+        "--></a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ],
+      "measured": "the byte FF inside a comment is ignored; the event lines are derived"
+    },
+    {
+      "name": "xml_unclosed",
+      "group": "xml-invalid",
+      "input": [
+        "<a><b>t</b>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "OPEN \"b\" \"\"",
+        "VALUE \"t\"",
+        "CLOSE \"b\"",
+        "ERROR CX_SXML_PARSE_ERROR 11"
+      ]
+    },
+    {
+      "name": "xml_mismatched_close",
+      "group": "xml-invalid",
+      "input": [
+        "<a></b>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "ERROR CX_SXML_PARSE_ERROR 3"
+      ]
+    },
+    {
+      "name": "xml_mismatched_close_non_ascii",
+      "group": "xml-invalid",
+      "input": [
+        "<a>\u00e9\u20ac</b>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"\\u00E9\\u20AC\"",
+        "ERROR CX_SXML_PARSE_ERROR 8"
+      ],
+      "measured": "the error is at byte 8, the start of the wrong close tag: a byte offset, not a character offset"
+    },
+    {
+      "name": "xml_lt_in_attribute",
+      "group": "xml-invalid",
+      "input": [
+        "<a x=\"\u00e9\u00e9<\"/>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "ERROR CX_SXML_PARSE_ERROR 6"
+      ],
+      "measured": "the error is at byte 6, the start of the attribute value"
+    },
+    {
+      "name": "xml_cdata_end_in_text",
+      "group": "xml-invalid",
+      "input": [
+        "<a>x]]>y</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "note": "]]> may not occur in text",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"x]]>y\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "xml_bad_entity",
+      "group": "xml-invalid",
+      "input": [
+        "<a>&foo;</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "ERROR CX_SXML_PARSE_ERROR 3"
+      ],
+      "fork": "MISS"
+    },
+    {
+      "name": "xml_bad_charref",
+      "group": "xml-invalid",
+      "input": [
+        "<a>&#xD800;</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "ERROR CX_SXML_PARSE_ERROR 3"
+      ],
+      "fork": "MISS"
+    },
+    {
+      "name": "xml_comment_double_dash",
+      "group": "xml-invalid",
+      "input": [
+        "<a><!--x--y--></a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "ERROR CX_SXML_PARSE_ERROR 7"
+      ],
+      "fork": "MISS"
+    },
+    {
+      "name": "xml_empty_document",
+      "group": "xml-invalid",
+      "input": [],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "ERROR CX_SXML_PARSE_ERROR 0"
+      ]
+    },
+    {
+      "name": "utf8_lone_continuation",
+      "group": "utf8",
+      "input": [
+        "<a>",
+        {
+          "hex": "80"
+        },
+        "a</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"\\uFFFDa\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ],
+      "measured": "VALUE FFFD a"
+    },
+    {
+      "name": "utf8_overlong",
+      "group": "utf8",
+      "input": [
+        "<a>",
+        {
+          "hex": "C0AF"
+        },
+        "a</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"\\uFFFDa\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ],
+      "measured": "VALUE: ONE FFFD for the two bytes, then a"
+    },
+    {
+      "name": "utf8_truncated_3",
+      "group": "utf8",
+      "input": [
+        "<a>",
+        {
+          "hex": "E282"
+        },
+        "a</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"\\uFFFD\\uFFFDa\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ],
+      "measured": "VALUE: TWO FFFD, one per byte, then a"
+    },
+    {
+      "name": "utf8_truncated_3_before_lt",
+      "group": "utf8",
+      "input": [
+        "<a>",
+        {
+          "hex": "E282"
+        },
+        "</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "ERROR CX_SXML_PARSE_ERROR 5"
+      ],
+      "measured": "parse error at byte 5, the <; the OPEN line is derived"
+    },
+    {
+      "name": "utf8_truncated_4_before_lt",
+      "group": "utf8",
+      "input": [
+        "<a>",
+        {
+          "hex": "F09F98"
+        },
+        "</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "ERROR CX_SXML_PARSE_ERROR 6"
+      ],
+      "measured": "parse error at byte 6, the <; the OPEN line is derived"
+    },
+    {
+      "name": "utf8_encoded_surrogate",
+      "group": "utf8",
+      "input": [
+        "<a>",
+        {
+          "hex": "EDA080"
+        },
+        "</a>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"\\uD800\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ],
+      "measured": "ED A0 80 passes as a raw lone D800, unreplaced (a later convert_to of it dumps with CONVT_CODEPAGE)",
+      "fork": "MISS"
+    },
+    {
+      "name": "utf8_truncated_at_eof",
+      "group": "utf8",
+      "input": [
+        "<a>a</a>",
+        {
+          "hex": "E282"
+        }
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "note": "an incomplete sequence after the root element, at the end of the input",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"a\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    },
+    {
+      "name": "utf8_in_attribute",
+      "group": "utf8",
+      "input": [
+        "<a x=\"",
+        {
+          "hex": "80"
+        },
+        "\"/>"
+      ],
+      "status": "measured-a4h-2026-10-01",
+      "note": "a lone continuation byte inside an attribute value",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "ATTR \"x\" \"\" \"\\uFFFD\"",
+        "CLOSE \"a\"",
+        "FINAL"
+      ]
+    }
+  ]
+}
