@@ -431,9 +431,8 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
   ENDMETHOD.
 
 
-* ------------------------------------------------------------- the model
-
   METHOD rows.
+* ------------------------------------------------------------- the model
     DATA lo_source  TYPE REF TO zif_stg_cds_source.
     DATA lv_class   TYPE string.
     DATA lt_orderby TYPE string_table.
@@ -1019,9 +1018,8 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
     rv_name = to_lower( replace( val = iv_class sub = '/' with = '#' occ = 0 ) ) && iv_ext.
   ENDMETHOD.
 
-* --------------------------------------------------------- MPC source
-
   METHOD set_operations.
+* --------------------------------------------------------- MPC source
     DATA ls_se     TYPE ty_row.
     DATA ls_op_row TYPE ty_row.
     DATA ls_mh     TYPE ty_row.

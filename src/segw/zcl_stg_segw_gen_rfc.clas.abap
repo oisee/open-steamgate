@@ -233,9 +233,8 @@ ENDCLASS.
 
 CLASS zcl_stg_segw_gen_rfc IMPLEMENTATION.
 
-* ------------------------------------------------------------ the mapping
-
   METHOD kind_by_name.
+* ------------------------------------------------------------ the mapping
 * what a parameter is when the signature does not say: SAP naming
 * (IV_/IS_/IT_ or I_ importing, E.. exporting, C.. changing, else tables)
     DATA lv_c1 TYPE string.
@@ -492,9 +491,8 @@ CLASS zcl_stg_segw_gen_rfc IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
-* --------------------------------------------------------- text blocks
-
   METHOD call_blocks.
+* --------------------------------------------------------- text blocks
     DATA ls_param   TYPE ty_param.
     DATA lv_kind    TYPE string.
     DATA lv_keyword TYPE string.
@@ -848,9 +846,8 @@ CLASS zcl_stg_segw_gen_rfc IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
-* ------------------------------------------------------------ RFC method
-
   METHOD rfc_method.
+* ------------------------------------------------------------ RFC method
     DATA lt_params  TYPE tt_param.
     DATA ls_param   TYPE ty_param.
     DATA lv_intf    TYPE string.
@@ -1263,9 +1260,8 @@ CLASS zcl_stg_segw_gen_rfc IMPLEMENTATION.
     rv_text = rv_text && lv_body && |  endmethod.\n|.
   ENDMETHOD.
 
-* ---------------------------------------------------------- search help
-
   METHOD shlp_implementation.
+* ---------------------------------------------------------- search help
     rv_text = |  method /IWBEP/IF_SB_GENDPC_SHLP_DATA~GET_SEARCH_HELP_VALUES.\n|
       && |* Call to Search Help run time mechanism to get values\n|
       && |  DATA lo_sh_data TYPE REF TO /iwbep/if_sb_shlp_data.\n|

@@ -1106,9 +1106,8 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
     rv_source = rv_source && |ENDCLASS.\n|.
   ENDMETHOD.
 
-* ------------------------------------------------------------------ XML
-
   METHOD clas_xml.
+* ------------------------------------------------------------------ XML
     DATA ls_component TYPE ty_named.
     DATA lv_sub       TYPE string.
     DATA lv_bom       TYPE string.

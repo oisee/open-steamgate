@@ -56,3 +56,11 @@ jobs:
       # names the position it failed in.
       - name: the naming rule
         run: node tools/osd-naming-scan.mjs
+      # What a system refuses to store (OO_SOURCE_BASED 012): a comment line
+      # between the parts of a class implementation. It builds and runs here
+      # and fails the last mile, so it is checked where the naming rule is.
+      # The only dependency is the parser, pinned as package.json pins it.
+      - name: comments outside methods in class implementations
+        run: |
+          npm install --no-save --no-package-lock --ignore-scripts @abaplint/core@2.120.59
+          node tools/osd-oo-comments.mjs

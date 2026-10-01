@@ -187,9 +187,8 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-* ---------------- entity set facet
-
   METHOD /iwbep/if_mgw_req_entityset~get_entity_set_name.
+* ---------------- entity set facet
     rv_entity_set = mv_entity_set.
   ENDMETHOD.
 
@@ -291,9 +290,8 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
     rv_osql_where_clause = /iwbep/if_mgw_req_entityset~get_osql_where_clause( ).
   ENDMETHOD.
 
-* ---------------- filter facet
-
   METHOD /iwbep/if_mgw_req_filter~get_filter_select_options.
+* ---------------- filter facet
     rt_filter_select_options = mt_filter.
   ENDMETHOD.
 
@@ -334,9 +332,8 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
-* ---------------- single entity facets
-
   METHOD /iwbep/if_mgw_req_entity~get_entity_set_name.
+* ---------------- single entity facets
     rv_entity_set = mv_entity_set.
   ENDMETHOD.
 
