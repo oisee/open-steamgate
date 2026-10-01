@@ -90,7 +90,9 @@ After L2 s2 the parallel runs stopped (below).
 ## The rotation phase (2026-09-30 night to 2026-10-01)
 
 One worker per task from here on, rotated, with the critic always from the other family. "Rounds" counts critic
-rounds up to MERGE. The wall times are the worker's own; lock waits are included where noted.
+rounds up to MERGE. The wall times are the worker's own; lock waits are included where noted. Times, token
+counts and scores come from the owning session's run log and the critics' reports, which are kept in its
+scratchpad and not in the PR threads. The PR bodies and commit messages record the findings and the fixes.
 
 | slice | worker | wall | round 1 | rounds | final |
 |---|---|---|---|---|---|
@@ -109,13 +111,13 @@ What this phase added to the list above:
    the rounds; do not read a quick pass on a small slice as a verdict on the worker.
 10. **A guard written as a deny-list failed every time it was attacked.** R2's alias guard listed the forms
     it refused, and round 2 found four it did not list. The call guard listed statement kinds, and
-    `CALL DIALOG` (which abaplint cannot even parse) and `OVERLAY` (whose write abaplint does not report) went
+    `CALL DIALOG ... IMPORTING ... TO` (a form abaplint cannot parse) and `OVERLAY` (whose write abaplint does not report) went
     past it. A local table that escaped through a call before the loop went past the rule "a call reaches T only
     if it names T". Each was fixed by turning the check around: an allow-list of what is known to be safe, a
     refusal for everything else, and a refusal for any file the parser could not read. For a lift, an
     over-strict guard loses a rewrite; a lenient one changes the program's result.
 11. **The strongest finding is a run, not a reading.** On #330 the codex critic built both methods,
-    BEFORE and AFTER, and showed that they returned different rows (`MATCH`, `dbCount 1` against nothing).
+    BEFORE and AFTER, and showed that BEFORE found a row where AFTER found none.
     A reproducer that runs ends the argument about severity. Ask for one whenever the harness allows.
 12. **A critic can find a wrong premise in the owner's spec.** On #322 round 2 found that the SAMC target was
     a hand-prepared deserialisation input, not abapGit's output. The spec had said otherwise. The fix was a
