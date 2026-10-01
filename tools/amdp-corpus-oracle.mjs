@@ -726,7 +726,7 @@ function parseStop(body, why) {
   return `${shape(words[0] ?? "")} ${shape(next)}`.trim();
 }
 
-export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000, out, scratch, catalog, extraDdic}) {
+export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000, out, scratch, catalog, extraDdic, parity = false}) {
   // the corpus's sources are unzipped under .local, not a world-readable /tmp
   scratch ??= join(out, "scratch");
   if (catalog !== undefined && existsSync(catalog)) CATALOG = readCatalog(readFileSync(catalog, "utf8"));
@@ -751,6 +751,11 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
   const onSignal = (signal) => { own.drop().finally(() => process.exit(signal === "SIGINT" ? 130 : 143)); };
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
+  // read after the finally below, by the report: declared outside the try
+  const tables = new Map();       // name -> "created" | reason
+  const created = [];             // routine keys, in the order HANA took them
+  const result = new Map();       // body key -> {status, class?, message?}
+  const parityResults = {};
   try {
   await exec(`CREATE SCHEMA ${quote(SCHEMA)}`);
   own.created();
@@ -759,9 +764,6 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
   await exec(`SET SCHEMA ${quote(SCHEMA)}`);
   console.log(`amdp-corpus-oracle: schema ${SCHEMA}`);
 
-  const tables = new Map();       // name -> "created" | reason
-  const created = [];             // routine keys, in the order HANA took them
-  const result = new Map();       // body key -> {status, class?, message?}
   const ensureTable = async (name) => {
     const key = upper(name);
     if (tables.has(key)) return tables.get(key) === "created";
@@ -837,6 +839,20 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
     if (progress === 0) break;
     pending = next;
   }
+  if (parity) {
+    const {parityBody} = await import("./amdp-value-parity.mjs");
+    let compared = 0;
+    for (const body of bodies) {
+      if (result.get(body.key)?.status !== "created" || ours(body, r) !== "OK") {
+        parityResults[body.key] = {status: "skipped", reason: result.get(body.key)?.status !== "created" ? "HXE did not create the body" : "portable compiler refused the body"};
+        continue;
+      }
+      try { parityResults[body.key] = await parityBody(body, {...r, oracleTables: tables, hanaParameterType, schema: SCHEMA}, client); }
+      catch (error) { parityResults[body.key] = {status: "skipped", reason: `parity harness: ${String(error.message).slice(0, 300)}`}; }
+      compared += 1;
+      if (compared % 10 === 0) console.log(`amdp-corpus-oracle: value parity attempted on ${compared} created, compiled bodies`);
+    }
+  }
   } finally {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
@@ -876,8 +892,14 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
     tablesCreated: [...tables.values()].filter((v) => v === "created").length,
     tablesMissing: [...tables.values()].filter((v) => v !== "created").length,
   };
+  if (parity) summary.parity = Object.fromEntries(["equal", "differs", "hana-error", "portable-error", "skipped"].map((status) =>
+    [status, Object.values(parityResults).filter((one) => one.status === status).length]));
   mkdirSync(out, {recursive: true});
   writeFileSync(join(out, "report.json"), JSON.stringify({summary, gaps, creationOrder: created, tables: Object.fromEntries(tables), rows}, undefined, 2));
+  if (parity) {
+    const date = new Date().toISOString().slice(0, 10);
+    writeFileSync(join(out, `parity-${date}.json`), JSON.stringify({date, summary: summary.parity, results: parityResults}, undefined, 2));
+  }
   return {summary, gaps};
 }
 
@@ -898,6 +920,7 @@ if (runsAs("amdp-corpus-oracle.mjs")) {
     out: opt("--out", ".local/amdp-oracle"),
     catalog: opt("--catalog", ".local/amdp-oracle/a4h-catalog.txt"),
     extraDdic: opt("--extra-ddic", ".local/amdp-oracle/a4h-ddic-extra.txt"),
+    parity: args.includes("--parity"),
   });
   console.log(JSON.stringify(summary, undefined, 2));
   console.log("grammar gaps (HANA accepts, we stop there), by the word we stopped at:");

@@ -12,6 +12,7 @@
     "test/ir-osql-where.mjs",
     "test/amdp-corpus-oracle.mjs",
     "test/amdp-corpus-oracle-schema.mjs",
+    "test/amdp-value-parity.mjs",
     "test/amdp-pack.mjs",
     "test/reserved-words.mjs",
     "test/hana-dialect.mjs",
