@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: 22
       # The identifier list is gitignored, so it reaches the runner only as the
-      # LEAK_IDENTIFIERS Actions secret. The log of a public repository is
+      # OSD_LEAK_IDENTIFIERS Actions secret (the one release.yml reads). The log of a public repository is
       # public, so every name and category is registered with ::add-mask::
       # before anything runs, and the scan prints a category number and a
       # hash instead of the value (--redact). Without the secret (a pull
@@ -34,10 +34,10 @@ jobs:
       # the secret into an environment whose deployment policy allows main only.
       - name: install the identifier list
         env:
-          LEAK_IDENTIFIERS: ${{ secrets.LEAK_IDENTIFIERS }}
+          LEAK_IDENTIFIERS: ${{ secrets.OSD_LEAK_IDENTIFIERS }}
         run: |
           if [ -z "$LEAK_IDENTIFIERS" ]; then
-            echo "::warning::LEAK_IDENTIFIERS is not available to this run: names are NOT checked, only the structural rules"
+            echo "::warning::OSD_LEAK_IDENTIFIERS is not available to this run: names are NOT checked, only the structural rules"
             exit 0
           fi
           umask 077

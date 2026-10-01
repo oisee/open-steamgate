@@ -110,11 +110,15 @@ jobs:
           test -s build/vsix/README.md
           test -s build/vsix/FILE_ID.DIZ
           if [[ -n "$LEAK_IDENTIFIERS_JSON" ]]; then
+            umask 077
             mkdir -p .local
             printf '%s' "$LEAK_IDENTIFIERS_JSON" > .local/leak-identifiers.json
+            # the log is public: mask every name and category before any scan
+            # output, and let the scan print hashes instead of values
+            node tools/osd-leak-scan.mjs --print-masks
           fi
           status=0
-          node tools/osd-leak-scan.mjs --paths build/vsix/CHANGELOG.md build/vsix/README.md build/vsix/FILE_ID.DIZ || status=$?
+          node tools/osd-leak-scan.mjs --redact --paths build/vsix/CHANGELOG.md build/vsix/README.md build/vsix/FILE_ID.DIZ || status=$?
           printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
           full_scan=false
           if [[ "$status" -eq 0 && -n "$LEAK_IDENTIFIERS_JSON" ]]; then
