@@ -198,7 +198,9 @@ describe("editors/vscode: the extension's logic", function () {
   it("builds the attach profile and keeps a supervised restart on one debugger session", () => {
     const config = debuggerConfiguration(9341);
     expect(config).to.include({name: "OSD: ABAP (9341)", type: "node", request: "attach", address: "127.0.0.1", port: 9341, restart: true, timeout: 30000});
-    expect(config.resolveSourceMapLocations).to.deep.equal(["${workspaceFolder}/build/live/output/**", "!**/node_modules/**"]);
+    // Maps are read from the whole build: the serving process can run a
+    // generation other than the live one (docs/debugging-abap.md).
+    expect(config.resolveSourceMapLocations).to.deep.equal(["${workspaceFolder}/build/**", "!**/node_modules/**"]);
     expect(config.outFiles).to.deep.equal(["${workspaceFolder}/build/live/output/**/*.mjs"]);
     expect(config.pauseForSourceMap).to.equal(true);
     expect(debuggerConfiguration(9342, {target: "unit", restart: false}))
@@ -224,7 +226,8 @@ describe("editors/vscode: the extension's logic", function () {
       symlinkSync(second, path.join(home, "output"), "dir");
       const swapped = debuggerConfiguration(9341, {root: home});
       expect(swapped.outFiles).to.deep.equal([`${second}/**/*.mjs`]);
-      expect(swapped.resolveSourceMapLocations).to.deep.equal([`${second}/**`, "!**/node_modules/**"]);
+      expect(swapped.resolveSourceMapLocations).to.deep.equal(
+        [...new Set([`${build}/**`, `${realpathSync(build)}/**`]), "!**/node_modules/**"]);
     } finally {
       rmSync(home, {recursive: true, force: true});
     }

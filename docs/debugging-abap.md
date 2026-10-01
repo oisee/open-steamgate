@@ -250,7 +250,7 @@ inspected after the fact.
       "port": 9229,
       "restart": true,
       "resolveSourceMapLocations": [
-        "${workspaceFolder}/build/live/output/**",
+        "${workspaceFolder}/build/**",
         "!**/node_modules/**"
       ],
       "skipFiles": [
@@ -272,7 +272,7 @@ inspected after the fact.
       "autoAttachChildProcesses": true,
       "console": "integratedTerminal",
       "resolveSourceMapLocations": [
-        "${workspaceFolder}/build/live/output/**",
+        "${workspaceFolder}/build/**",
         "!**/node_modules/**"
       ],
       "skipFiles": [
@@ -296,7 +296,15 @@ starts itself.
 The extension resolves `output/` to the current `build/by-input/<generation>/output`
 when it attaches, so `outFiles` predicts one generation. It refreshes the
 debug session when the serving generation changes. The manual profile uses
-`build/live/output` as a movable alias. js-debug documents `outFiles` as the
+`build/live/output` as a movable alias. `resolveSourceMapLocations` is the
+whole `build/` on purpose, in both: the serving process can run code from a
+generation other than the live one (a build that went live before the
+recycle; a warm swap, whose changed modules load from `build/hot/` and whose
+others stay in the generation the process booted from), Node reports every
+module by its real path, and js-debug does not read the map of a script
+outside these globs. A breakpoint there shows as bound and never stops: that
+was the 0.5.1467 regression, where the globs named the live generation only.
+js-debug documents `outFiles` as the
 generated JavaScript search globs, `resolveSourceMapLocations` as the places
 whose maps it may use, and `pauseForSourceMap` as waiting for an incoming
 script's map before continuing ([js-debug options](https://github.com/microsoft/vscode-js-debug/blob/main/OPTIONS.md)).

@@ -1,8 +1,8 @@
 import {expect} from "chai";
-import {mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {spawn} from "node:child_process";
 import {tmpdir} from "node:os";
-import {dirname, join, relative, resolve} from "node:path";
+import {basename, dirname, join, matchesGlob, relative, resolve} from "node:path";
 import {pathToFileURL, fileURLToPath} from "node:url";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
@@ -13,7 +13,7 @@ import {createRequire} from "node:module";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const {pickInspectorPort, packNameOf} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 const {Launcher} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
-const {debuggerConfiguration, runningAbapSources, breakpointWarning} = createRequire(import.meta.url)("../editors/vscode/lib.js");
+const {debuggerConfiguration, runningAbapSources, breakpointWarning, Osd} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 function decodeVlq(text) {
@@ -185,7 +185,8 @@ ENDCLASS.`;
       const attach = debuggerConfiguration(9341, {root: home, storageDir: storage,
         layers: [{folder: workspace, srcDir: workspaceSource}]});
       expect(attach.outFiles).to.deep.equal([`${generation}/**/*.mjs`]);
-      expect(attach.resolveSourceMapLocations).to.deep.equal([`${generation}/**`, "!**/node_modules/**"]);
+      expect(attach.resolveSourceMapLocations).to.deep.equal(
+        [...new Set([`${join(home, "build")}/**`, `${realpathSync(join(home, "build"))}/**`]), "!**/node_modules/**"]);
       expect(attach.pauseForSourceMap).to.equal(true);
       expect(attach.sourceMapPathOverrides[`${dirname(mapped)}/*`]).to.equal(`${workspaceSource}/*`);
       expect(attach.sourceMapPathOverrides[`file://${packSource}/*`]).to.equal(`${workspaceSource}/*`);
@@ -395,6 +396,126 @@ ENDCLASS.`;
     } finally {
       cancellation.abort();
       await resultPromise.catch(() => {});
+    }
+  });
+});
+
+// js-debug reads a script's source map only when the map's own location
+// matches resolveSourceMapLocations (positive globs, `!` excludes, dot files
+// included). The same rule, so a test can ask it without js-debug.
+function sourceMapAllowed(config, mapFile) {
+  const file = mapFile.replaceAll("\\", "/");
+  const patterns = config.resolveSourceMapLocations;
+  return patterns.some((p) => !p.startsWith("!") && matchesGlob(file, p)) &&
+    !patterns.some((p) => p.startsWith("!") && matchesGlob(file, p.slice(1)));
+}
+
+describe("VS Code debugger configuration: which generations' maps js-debug may read", function () {
+  it("predicts the live generation but resolves maps of every generation and of a warm swap", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-debug-generations-"));
+    try {
+      const home = join(dir, "home");
+      const booted = join(home, "build", "by-input", "booted", "output");
+      const live = join(home, "build", "by-input", "live", "output");
+      const hot = join(home, "build", "hot", "live");
+      for (const folder of [booted, live, hot]) mkdirSync(folder, {recursive: true});
+      symlinkSync(join(home, "build", "by-input", "live"), join(home, "build", "live"), "dir");
+      symlinkSync(join("build", "live", "output"), join(home, "output"), "dir");
+      const config = debuggerConfiguration(9229, {root: home});
+      const real = (file) => join(realpathSync(dirname(file)), basename(file));
+      expect(config.outFiles).to.deep.equal([`${realpathSync(live).replaceAll("\\", "/")}/**/*.mjs`]);
+      // The serving process booted from another generation than the one that
+      // is live now (a build ahead of the recycle, or a warm swap that only
+      // replaced the changed modules): its maps must still be read.
+      expect(sourceMapAllowed(config, real(join(booted, "zcl_osd_fleet_report.clas.mjs.map")))).to.equal(true);
+      expect(sourceMapAllowed(config, real(join(live, "zcl_zosd_fleet_dpc_ext.clas.mjs.map")))).to.equal(true);
+      expect(sourceMapAllowed(config, real(join(hot, "zcl_zosd_fleet_dpc_ext.clas.mjs.map")))).to.equal(true);
+      expect(sourceMapAllowed(config, join(home, "node_modules", "@abaplint", "runtime", "build", "x.js.map"))).to.equal(false);
+      // Without a root the profile stays portable and still covers the build.
+      expect(debuggerConfiguration(9229).resolveSourceMapLocations)
+        .to.deep.equal(["${workspaceFolder}/build/**", "!**/node_modules/**"]);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
+  it("resolves maps through a build folder that is itself a link", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-debug-build-link-"));
+    try {
+      const home = join(dir, "home");
+      const store = join(dir, "store");
+      mkdirSync(join(store, "by-input", "a", "output"), {recursive: true});
+      mkdirSync(home);
+      symlinkSync(store, join(home, "build"), "dir");
+      symlinkSync(join(store, "by-input", "a"), join(store, "live"), "dir");
+      const config = debuggerConfiguration(9229, {root: home});
+      expect(sourceMapAllowed(config, join(realpathSync(store), "by-input", "a", "output", "x.clas.mjs.map"))).to.equal(true);
+      expect(sourceMapAllowed(config, join(home, "build", "by-input", "a", "output", "x.clas.mjs.map"))).to.equal(true);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+});
+
+describe("VS Code debugger transport: a generation goes live ahead of the serving process", function () {
+  this.timeout(240000);
+
+  // osg-demo on 0.5.1467: "Run as ABAP Application with debugger" and
+  // "Attach debugger and call" showed a bound breakpoint and never stopped.
+  // The serving process ran modules from the generation it booted from while
+  // build/live already named another, and the attach configuration allowed
+  // source maps from the live generation only. Read the real script URLs off
+  // the running process's inspector and check them against the configuration
+  // the extension builds at that moment.
+  it("keeps the classrun class and the DPC the process loaded inside resolveSourceMapLocations", async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-debug-ahead-"));
+    const launcher = new Launcher({osdHome: ROOT, storageDir, workspaceFolders: [], warm: "off"});
+    const liveLink = join(ROOT, "build", "live");
+    const other = join(ROOT, "build", "by-input", `osd-test-ahead-${process.pid}`);
+    let liveTarget;
+    let client;
+    try {
+      const {port} = await launcher.start();
+      const osdClient = new Osd(`http://127.0.0.1:${port}`);
+      // The class run and the OData call load both modules before any debugger.
+      expect((await osdClient.classrun("ZCL_OSD_CLASSRUN_DEMO")).text).to.be.a("string");
+      expect((await fetch(`http://127.0.0.1:${port}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$format=json`)).status).to.equal(200);
+      const inspectPort = await launcher.openInspector();
+      const target = await inspectorTarget(inspectPort);
+      const socket = new WebSocket(target.webSocketDebuggerUrl);
+      await new Promise((resolve, reject) => {
+        socket.addEventListener("open", resolve, {once: true});
+        socket.addEventListener("error", reject, {once: true});
+      });
+      client = new InspectorClient(socket);
+      await client.send("Debugger.enable");
+      const loaded = (name) => client.events.find((event) => event.method === "Debugger.scriptParsed" &&
+        event.params.url.endsWith(`/${name}.clas.mjs`))?.params;
+      const scripts = ["zcl_osd_classrun_demo", "zcl_zstg_demo_dpc_ext"].map(loaded);
+      expect(scripts.every(Boolean), "both modules are loaded in the serving process").to.equal(true);
+      // Another generation goes live; the serving process is not recycled.
+      liveTarget = readlinkSync(liveLink);
+      mkdirSync(join(other, "output"), {recursive: true});
+      rmSync(liveLink);
+      symlinkSync(other, liveLink, "dir");
+      const config = debuggerConfiguration(inspectPort, {root: ROOT, storageDir, layers: launcher.layers});
+      expect(config.outFiles[0]).to.include(`osd-test-ahead-${process.pid}`);
+      for (const script of scripts) {
+        const moduleFile = fileURLToPath(script.url);
+        expect(moduleFile.includes(`osd-test-ahead-${process.pid}`)).to.equal(false);
+        const mapFile = script.sourceMapURL.startsWith("file:")
+          ? fileURLToPath(script.sourceMapURL) : resolve(dirname(moduleFile), script.sourceMapURL);
+        expect(sourceMapAllowed(config, mapFile), `${mapFile} against ${config.resolveSourceMapLocations}`).to.equal(true);
+      }
+    } finally {
+      client?.socket.close();
+      if (liveTarget !== undefined) {
+        rmSync(liveLink, {force: true});
+        symlinkSync(liveTarget, liveLink, "dir");
+      }
+      rmSync(other, {recursive: true, force: true});
+      await launcher.stop();
+      rmSync(storageDir, {recursive: true, force: true});
     }
   });
 });

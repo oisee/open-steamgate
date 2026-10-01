@@ -142,9 +142,23 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
   const normalizedRoot = typeof root === "string" && root !== "" ? root.replaceAll("\\", "/").replace(/\/+$/, "") : undefined;
   const buildRoot = normalizedRoot === undefined ? "${workspaceFolder}/build" : `${normalizedRoot}/build`;
   // Node loads modules through output/, but resolves that link to the immutable
-  // by-input generation. Predict only those scripts, never cached generations.
+  // by-input generation. outFiles predicts only the generation that is live
+  // now, never the cached ones. Source maps, though, are allowed from the
+  // whole build tree: the serving process can run code from a generation
+  // other than the live one -- a build that went live before the recycle, a
+  // warm swap (changed modules under build/hot/, the rest still in the
+  // generation the process booted from) -- and js-debug never reads the map
+  // of a script outside resolveSourceMapLocations, so a breakpoint there
+  // looks bound and never stops (0.5.1467, osg-demo).
   let outputRoot = `${buildRoot}/live/output`;
+  // Node reports scripts by real path; build/ itself may be a link.
+  let realBuildRoot = buildRoot;
   if (root !== undefined) {
+    try {
+      realBuildRoot = fs.realpathSync(path.join(root, "build")).replaceAll("\\", "/");
+    } catch {
+      // No build yet: the literal path is the only one there is.
+    }
     try {
       outputRoot = fs.realpathSync(path.join(root, "build", "live", "output")).replaceAll("\\", "/");
     } catch {
@@ -173,7 +187,7 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
     restart,
     ...(target === "unit" ? {continueOnAttach: true} : {}),
     timeout: 30000,
-    resolveSourceMapLocations: [`${outputRoot}/**`, "!**/node_modules/**"],
+    resolveSourceMapLocations: [...new Set([`${buildRoot}/**`, `${realBuildRoot}/**`])].concat("!**/node_modules/**"),
     skipFiles: ["<node_internals>/**", `${modulesRoot}/@abaplint/runtime/**`],
     outFiles: [`${outputRoot}/**/*.mjs`],
     pauseForSourceMap: true,

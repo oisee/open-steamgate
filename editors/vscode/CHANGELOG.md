@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fix (0.5.1467 regression): **Run as ABAP Application with debugger** and **Attach debugger and call** stop again at a bound breakpoint when the serving process runs a generation other than the live one (a build ahead of the recycle, a warm swap). The debugger reads source maps from the whole `build/` again; it still predicts breakpoints in the live generation only.
 - Show DPC_EXT entity-set redefinitions and their source lines on service Details, using the same owner lookup as the HTTP lens; count services registered directly to a class in its readers lens.
 - Register `.abap` as ABAP with breakpoint support, so VS Code accepts breakpoint toggles in a fresh profile.
 - Refresh the Test Explorer and test-count lenses after Start and workspace layer changes.
