@@ -1482,13 +1482,15 @@ export function adtRouter(options = {}) {
   // (`data.query`, tools/osd-data.mjs) -- this is a where-used view over the
   // same seeded tables, not a second index.
   //
-  // A reader is a class if it carries its own ABAP Unit tests
+  // A reader is a test if it carries its own ABAP Unit tests
   // (tools/osd-unit-run.mjs testClassesIn, the build's own list of
   // `*.clas.testclasses.abap` objects) or a service if it is registered as a
   // service's own `_DPC_EXT` (tools/segw-registry.mjs segwRegistrations,
   // read fresh off the tree the way the entitysets route above does) --
   // both are classifications of the reader, not of the class being read, so
-  // a reader can be neither, either or both.
+  // a reader can be neither, either or both. The services count also includes
+  // registrations directly handled by the class being read (DPC, MPC or
+  // another service handler); those are not where-used readers.
   router.get(`${BASE}/core/http/xref/readers`, async (req, res) => {
     const type = String(req.query.type ?? "").toUpperCase();
     const name = String(req.query.name ?? "").toUpperCase();
@@ -1520,7 +1522,7 @@ export function adtRouter(options = {}) {
         includes = result.rows.map((r) => String(r.include).toUpperCase());
       }
       const typeOf = new Map(store.list().map((o) => [o.name, o.type]));
-    const folders = generatorFoldersOf(store.root).map((f) => join(store.root, f));
+      const folders = generatorFoldersOf(store.root).map((f) => join(store.root, f));
       const registrations = segwRegistrations(folders);
       const testClasses = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
       const readers = [...new Set(includes)]
@@ -1533,6 +1535,12 @@ export function adtRouter(options = {}) {
           isTest: testClasses.has(include),
           services: registrations.filter((r) => r.dpc === include).map((r) => r.service),
         }));
+      const services = new Set(readers.flatMap((reader) => reader.services));
+      if (type === "CLAS") for (const row of serviceTree(store.root)) {
+        if ([row.handler, row.mpc].some((candidate) => String(candidate ?? "").toUpperCase() === name)) {
+          services.add(row.name ?? row.path);
+        }
+      }
       res.type("application/json; charset=utf-8").send(JSON.stringify({
         name,
         source,
@@ -1540,7 +1548,7 @@ export function adtRouter(options = {}) {
         counts: {
           readers: readers.length,
           tests: readers.filter((r) => r.isTest).length,
-          services: readers.filter((r) => r.services.length > 0).length,
+          services: services.size,
         },
       }));
     } catch (e) {

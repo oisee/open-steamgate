@@ -3103,6 +3103,38 @@ describe("editors/vscode: service card source navigation", () => {
     expect(html).to.contain('data-line="392"').and.to.contain("inherited (generic)").and.to.contain("Function imports");
   });
 
+  it("shows DPC_EXT redefinitions at their source lines and keeps other set operations inherited", () => {
+    const files = [
+      {path: "src/fleet/zcl_fleet_dpc_ext.clas.abap", source: [
+        "CLASS zcl_fleet_dpc_ext IMPLEMENTATION.",
+        "  METHOD shipset_get_entityset.", "  ENDMETHOD.",
+        "  METHOD shipset_get_entity.", "  ENDMETHOD.",
+        "  METHOD voyageset_get_entityset.", "  ENDMETHOD.", "ENDCLASS.",
+      ].join("\n")},
+      {path: "src/fleet/zcl_fleet_dpc.clas.abap", source: [
+        "CLASS zcl_fleet_dpc IMPLEMENTATION.",
+        "  METHOD shipset_create_entity.", "  ENDMETHOD.", "ENDCLASS.",
+      ].join("\n")},
+    ];
+    const sets = [
+      {set: "ShipSet", kind: "get_entityset", method: "SHIPSET_GET_ENTITYSET"},
+      {set: "ShipSet", kind: "get_entity", method: "SHIPSET_GET_ENTITY"},
+      {set: "VoyageSet", kind: "get_entityset", method: "VOYAGESET_GET_ENTITYSET"},
+    ];
+    const row = {kind: "ODATA", name: "FLEET_SRV", handler: "ZCL_FLEET_DPC_EXT"};
+    const card = serviceCardModel(row, sets, files);
+    const operation = (set, name) => card.entitySets.find((item) => item.set === set).operations.find((item) => item.name === name);
+    expect(operation("ShipSet", "GET_ENTITYSET").link).to.include({path: files[0].path, line: 2});
+    expect(operation("ShipSet", "GET_ENTITY").link).to.include({path: files[0].path, line: 4});
+    expect(operation("VoyageSet", "GET_ENTITYSET").link).to.include({path: files[0].path, line: 6});
+    expect(operation("ShipSet", "CREATE_ENTITY")).to.include({inherited: true, link: undefined});
+    expect(operation("ShipSet", "UPDATE_ENTITY")).to.include({inherited: true, link: undefined});
+    const html = serviceDetailsHtml({row, card});
+    expect(html).to.contain("GET_ENTITYSET redefined (src/fleet/zcl_fleet_dpc_ext.clas.abap:2)");
+    expect(html).to.contain('data-line="2"');
+    expect(html).to.contain("CREATE_ENTITY <span class=\"muted\">inherited (generic)</span>");
+  });
+
   it("maps a SADL set to its CDS definition and generated source class", () => {
     const files = [source("src/demo_sadl/zcl_zstg_sadl_mpc.clas.abap"), source("src/demo_sadl/zcl_zstg_sadl_mpc_ext.clas.abap"),
       source("src/demo_sadl/zcl_zstg_sadl_dpc_ext.clas.abap"), source("src/cds/zc_stg_travel.ddls.asddls"),
@@ -3161,7 +3193,7 @@ describe("tools/adt-facade: service detail inventories", function () {
   before(async function () {
     const app = express();
     const store = new ObjectStore({root: ROOT, libs: []});
-    app.use(adtRouter({store, data: {}, watch: false}).router);
+    app.use(adtRouter({store, data: {query: async () => ({rows: []})}, watch: false}).router);
     server = app.listen(0, "127.0.0.1");
     await new Promise((resolve) => server.once("listening", resolve));
     base = `http://127.0.0.1:${server.address().port}/sap/bc/adt/core/http`;
@@ -3180,6 +3212,15 @@ describe("tools/adt-facade: service detail inventories", function () {
     expect(demo.mpcSource).to.match(/\.clas\.abap$/);
     expect(demo.helpers).to.be.an("array");
     expect(services.find((row) => row.kind === "APP").handlerSource).to.equal(undefined);
+  });
+
+  it("counts a service registered directly to its DPC_EXT in the readers lens", async () => {
+    const response = await fetch(`${base}/xref/readers?type=CLAS&name=ZCL_ZSTG_DEMO_DPC_EXT`);
+    expect(response.status).to.equal(200);
+    const answer = await response.json();
+    expect(answer.counts.services).to.equal(1);
+    expect(readersLensTitle(answer.counts)).to.contain("services 1");
+    expect(answer.readers.some((reader) => reader.name === "ZCL_ZSTG_DEMO_DPC_EXT")).to.equal(false);
   });
 
   it("returns source-relative transaction registry rows including hand-declared transactions", async () => {

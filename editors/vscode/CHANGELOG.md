@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Show DPC_EXT entity-set redefinitions and their source lines on service Details, using the same owner lookup as the HTTP lens; count services registered directly to a class in its readers lens.
 - Register `.abap` as ABAP with breakpoint support, so VS Code accepts breakpoint toggles in a fresh profile.
 - Refresh the Test Explorer and test-count lenses after Start and workspace layer changes.
 - The Test Explorer runs ABAP Unit by `RISK LEVEL`: HARMLESS objects in parallel (longest `DURATION` first), the rest one at a time after them; an undeclared level counts as DANGEROUS. A HARMLESS class that reaches a database write is warned about on its `RISK LEVEL` line and runs alone, and one that writes anyway fails with "RISK LEVEL HARMLESS but wrote to <table>". Cancel now stops the test run in flight.

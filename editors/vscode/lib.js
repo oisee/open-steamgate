@@ -2370,6 +2370,18 @@ function implementationMethodLine(source, name) {
   return undefined;
 }
 
+/** The implementation selected by an EXT class, then its generated base. */
+function resolveImplementationMethod(className, methodName, sources) {
+  const ext = String(className ?? "").toUpperCase();
+  const base = ext.replace(/_EXT$/, "");
+  for (const owner of [...new Set([ext, base])]) {
+    const file = sources?.[owner];
+    const line = file && implementationMethodLine(file.source, methodName);
+    if (line && file.path) return {owner, path: file.path, line};
+  }
+  return undefined;
+}
+
 function implementationMethodBody(source, name) {
   const lines = String(source ?? "").split(/\r\n|\r|\n/);
   const start = implementationMethodLine(source, name);
@@ -2402,6 +2414,9 @@ function serviceCardModel(row, sets = [], files = []) {
     return line && link(file, label, line);
   };
   const dpc = cls(row.handler, row.handlerSource);
+  const dpcBase = cls(String(row.handler ?? "").replace(/_EXT$/i, ""), dpc?.path);
+  const dpcSources = {[String(row.handler ?? "").toUpperCase()]: dpc};
+  if (dpcBase && dpcBase !== dpc) dpcSources[String(row.handler).replace(/_EXT$/i, "").toUpperCase()] = dpcBase;
   const mpc = cls(mpcName, row.mpcSource ?? dpc?.path);
   const mpcBase = cls(String(mpcName ?? "").replace(/_EXT$/i, ""), mpc?.path ?? dpc?.path);
   const model = [method(mpcBase, "DEFINE", "MPC DEFINE"),
@@ -2454,9 +2469,15 @@ function serviceCardModel(row, sets = [], files = []) {
     const operations = SET_OPERATIONS.map((operation) => {
       const candidate = INTERFACE_OPERATIONS.has(operation)
         ? `/iwbep/if_mgw_appl_srv_runtime~${operation.toLowerCase()}` : `${prefix}_${operation.toLowerCase()}`;
+      const mapped = sets.find((set) => set.kind?.toUpperCase() === operation &&
+        String(set.set).toLowerCase() === prefix);
+      const resolved = INTERFACE_OPERATIONS.has(operation) ? undefined :
+        resolveImplementationMethod(row.handler, mapped?.method ?? candidate, dpcSources);
       const found = INTERFACE_OPERATIONS.has(operation) ?
         (interfaceTargets.get(operation)?.named.has(prefix) ? interfaceTargets.get(operation).target : undefined) :
-        method(dpc, candidate, operation);
+        resolved?.owner === String(row.handler).toUpperCase()
+          ? {label: `${operation} redefined (${resolved.path}:${resolved.line})`, path: resolved.path, line: resolved.line}
+          : undefined;
       return {name: operation, link: found, inherited: !found};
     }).filter((operation) => !generic.some((target) => target.label.startsWith(`${operation.name} `)) &&
       (!["GET_STREAM", "UPDATE_STREAM"].includes(operation.name) ||
@@ -2569,6 +2590,6 @@ module.exports = {osdRunCommandLine, unitRiskOf, unitDurationOf, unitSchedule, r
   SERVICE_GROUP_ORDER, serviceGroupLabel, normalizeServiceSetRow, normalizeServiceRow, groupServices, serviceLabel, uniqueServices,
   serviceContextValue, serviceActionContext, normalizeTransactionRow, transactionDetailsModel, classifyTransactionClick,
   transactionDetailsHtml, appManifestDetails, httpTestFiles, closureTestNames, dumpsForService,
-  implementationMethodLine, serviceCardModel, serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
+  implementationMethodLine, resolveImplementationMethod, serviceCardModel, serviceDetailsHtml, serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
   PRESETS, presetSettings, isOpenSteamgateCheckout, osdHomeChoice, osdStateContext,
   SYSTEM_STATUS_SETS, odataV2Results, systemOverviewModel, taxiDefaultYear, taxiResetPrompt};
