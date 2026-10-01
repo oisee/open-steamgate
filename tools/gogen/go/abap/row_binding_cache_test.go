@@ -25,6 +25,7 @@ func TestBumpTableCacheHit(t *testing.T) {
 func TestBumpTableNegativeThenCreate(t *testing.T) {
 	rows := []int{1}
 	ptr := (*byte)(reflect.ValueOf(&rows).UnsafePointer())
+	versionBloomAdd(ptr) // exercise the negative cache despite the pre-check
 	BumpTable(&rows)
 	if cell, ok := cachedVersion(ptr); !ok || cell != nil {
 		t.Fatal("missing cell was not cached")
@@ -43,12 +44,37 @@ func TestBumpTableNegativeThenCreate(t *testing.T) {
 func TestBumpTableNegativeDuringCreation(t *testing.T) {
 	rows := []int{1}
 	ptr := (*byte)(reflect.ValueOf(&rows).UnsafePointer())
+	versionBloomAdd(ptr)
 	BumpTable(&rows)
 	versionGeneration.Add(1) // model a creator between invalidation and publication
 	defer versionGeneration.Add(1)
 	if _, ok := cachedVersion(ptr); ok {
 		t.Fatal("negative entry was valid while a cell was being published")
 	}
+}
+
+func TestBumpTableFreshAddress(t *testing.T) {
+	for i := 0; i < 1024; i++ {
+		rows := []int{i}
+		ptr := (*byte)(reflect.ValueOf(&rows).UnsafePointer())
+		if versionBloomSeen(ptr) {
+			continue
+		}
+		slot := versionSlot(ptr)
+		before := slot.Load()
+		BumpTable(&rows)
+		if slot.Load() != before {
+			t.Fatal("fresh address populated the version cache")
+		}
+		binding := BindRow(&rows, 0)
+		if !versionBloomSeen(ptr) {
+			t.Fatal("cell creation did not publish the address")
+		}
+		BumpTable(&rows)
+		assertUnassigned(t, binding)
+		return
+	}
+	t.Fatal("could not allocate an address absent from the Bloom filter")
 }
 
 func TestBumpTableCacheAfterGC(t *testing.T) {

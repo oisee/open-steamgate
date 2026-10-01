@@ -21,10 +21,35 @@ type versionCacheEntry struct {
 }
 
 const versionCacheSize = 256
+const versionBloomBits = 1 << 16
 
 var versionCache [versionCacheSize]atomic.Pointer[versionCacheEntry]
+
+// Bits are never cleared: address reuse can only cause a false positive, which
+// takes the weak-pointer-validated cache/slow path.
+var versionBloom [versionBloomBits / 64]atomic.Uint64
 var versionGeneration atomic.Uint64
 var versionCreateMu sync.Mutex
+
+func versionBloomHashes(ptr *byte) (uint64, uint64) {
+	addr := uint64(uintptr(unsafe.Pointer(ptr))) >> 3
+	h1 := addr ^ addr>>17 ^ addr>>31
+	h2 := addr * 0x9e3779b97f4a7c15
+	h2 ^= h2 >> 32
+	return h1 & (versionBloomBits - 1), h2 & (versionBloomBits - 1)
+}
+
+func versionBloomSeen(ptr *byte) bool {
+	h1, h2 := versionBloomHashes(ptr)
+	return versionBloom[h1>>6].Load()&(uint64(1)<<(h1&63)) != 0 &&
+		versionBloom[h2>>6].Load()&(uint64(1)<<(h2&63)) != 0
+}
+
+func versionBloomAdd(ptr *byte) {
+	h1, h2 := versionBloomHashes(ptr)
+	versionBloom[h1>>6].Or(uint64(1) << (h1 & 63))
+	versionBloom[h2>>6].Or(uint64(1) << (h2 & 63))
+}
 
 func versionSlot(ptr *byte) *atomic.Pointer[versionCacheEntry] {
 	key := uintptr(unsafe.Pointer(ptr))
@@ -74,6 +99,8 @@ func versionCell(table any) *atomic.Uint64 {
 		return cell
 	}
 	// Odd generations reject negative hits while the cell is being published.
+	// Publish both Bloom bits first, so a later BumpTable cannot miss this cell.
+	versionBloomAdd(ptr)
 	versionGeneration.Add(1)
 	cell := new(atomic.Uint64)
 	tableVersions.Store(key, cell)
@@ -89,6 +116,10 @@ func tableVersion(table any) uint64 { return versionCell(table).Load() }
 
 func BumpTable(table any) {
 	ptr := (*byte)(reflect.ValueOf(table).UnsafePointer())
+	if !versionBloomSeen(ptr) {
+		runtime.KeepAlive(table)
+		return
+	}
 	if cell, ok := cachedVersion(ptr); ok {
 		if cell != nil {
 			cell.Add(1)

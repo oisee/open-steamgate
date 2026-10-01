@@ -44,3 +44,12 @@ func BenchmarkBumpTableNoBinding(b *testing.B) {
 	}
 	runtime.KeepAlive(&rows)
 }
+
+func BenchmarkBumpTableFreshTables(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var rows []int
+		rows = append(rows, i)
+		BumpTable(&rows)
+	}
+}
