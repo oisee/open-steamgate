@@ -49,6 +49,24 @@ describe("the size budget", function () {
     expect(check(now, {"go:abap": 110}, {base: base()})).to.deep.equal([]);
   });
 
+  it("wants a reason for a big new budget the base did not have (a renamed package that grew)", () => {
+    const now = base();
+    now.budgets["go:cmd/osgo2"] = {lines: 1879, reason: "recorded by --update"};
+    expect(check(now, {"go:cmd/osgo2": 1879}, {base: base()}).join("\n")).to.match(/a new budget of 1879 lines without a reason/);
+    now.budgets["go:cmd/osgo2"].reason = "cmd/osgo renamed and given the gateway's routes (#999)";
+    expect(check(now, {"go:cmd/osgo2": 1879}, {base: base()})).to.deep.equal([]);
+  });
+
+  it("lets the exemption lists and the limits only shrink against the base", () => {
+    const now = base();
+    now.readmeMissing = ["enq"];
+    now.importsAbap = {enq: "why not"};
+    now.fileLimits = {go: 900, mjs: 1000};
+    now.watched = [];
+    const errors = check(now, {}, {base: base()}).join("\n");
+    expect(errors).to.match(/readmeMissing: enq added/).and.match(/importsAbap: enq added/).and.match(/fileLimits.go raised/);
+  });
+
   it("refuses a dependency on go/abap unless the package is exempt", () => {
     const deps = new Map([["enq", true]]);
     expect(check(base(), {"go:enq": 10}, {deps}).join("\n")).to.match(/enq: depends on osg\/gogen\/abap/);

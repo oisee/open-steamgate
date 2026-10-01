@@ -18,7 +18,7 @@
 //   - every package under tools/gogen/go has a budget (--update records a new
 //     one), a README.md of at least three lines, and does not depend on
 //     osg/gogen/abap -- unless it is on the exemption lists, which only shrink.
-// It runs at pre-push (.githooks/pre-push) and in CI (gogen.yml).
+// It runs at pre-push (.githooks/pre-push) and in CI (size-budget.yml).
 import {execFileSync} from "node:child_process";
 import {existsSync, readFileSync, readdirSync, statSync, writeFileSync} from "node:fs";
 import {dirname, join, relative} from "node:path";
@@ -27,6 +27,7 @@ import {fileURLToPath} from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BUDGET = join(ROOT, "tools", "osd-size-budget.json");
 const GO = join(ROOT, "tools", "gogen", "go");
+const UPDATE_REASON = "recorded by --update";
 const HINT = "carve it into a package of its own (docs/backlog/gogen-osgo.md, \"modules\"), or raise the budget in tools/osd-size-budget.json with a reason";
 
 const lines = (file) => {
@@ -52,9 +53,11 @@ function goPackages() {
   return out;
 }
 
-/** a package's own code: no tests, no generated zz_ files */
+/** a package's own code: no tests, and no zz_ files where they are
+ * generated (cmd/*, which the gogen tools write and git ignores); a zz_ file
+ * anywhere else is written by hand and counts */
 const ownGoFiles = (dir) => readdirSync(dir).sort()
-  .filter((n) => n.endsWith(".go") && !n.endsWith("_test.go") && !n.startsWith("zz_"))
+  .filter((n) => n.endsWith(".go") && !n.endsWith("_test.go") && !(n.startsWith("zz_") && rel(dir).startsWith("tools/gogen/go/cmd/")))
   .map((n) => join(dir, n));
 
 const pkgName = (dir) => rel(dir).replace(/^tools\/gogen\/go\//, "");
@@ -69,18 +72,26 @@ function mjsFiles(dir = join(ROOT, "tools"), out = []) {
   return out;
 }
 
-/** package -> does it depend on osg/gogen/abap; undefined without Go */
+/** package -> does it depend on osg/gogen/abap; undefined without a Go
+ * toolchain, and an Error when there is one and the listing failed (a check
+ * that did not run must not read as one that passed). -e lists a package
+ * whose files are incomplete -- cmd/osgo embeds a generated, ignored file */
 export function abapDependents() {
   try {
-    const listing = execFileSync("go", ["list", "-f", "{{.ImportPath}} {{join .Deps \" \"}}", "./..."], {cwd: GO, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"]});
+    execFileSync("go", ["version"], {cwd: GO, stdio: "ignore"});
+  } catch {
+    return undefined;
+  }
+  try {
+    const listing = execFileSync("go", ["list", "-e", "-f", "{{.ImportPath}} {{join .Deps \" \"}}", "./..."], {cwd: GO, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]});
     const out = new Map();
     for (const line of listing.trim().split("\n")) {
       const [path, ...deps] = line.split(" ");
       out.set(path.replace(/^osg\/gogen\//, ""), deps.includes("osg/gogen/abap"));
     }
     return out;
-  } catch {
-    return undefined;
+  } catch (e) {
+    return new Error(`go list failed: ${String(e.stderr ?? e.message).trim().split("\n")[0]}`);
   }
 }
 
@@ -128,7 +139,7 @@ export function check(budget, sizes, {deps, base} = {}) {
     if (short && !(budget.readmeMissing ?? []).includes(name)) {
       errors.push(`tools/gogen/go/${name}: no README.md of at least three lines (what it is, its API, its invariants)`);
     }
-    if (deps?.get(name) && !(name in (budget.importsAbap ?? {}))) {
+    if (deps instanceof Map && deps.get(name) && !(name in (budget.importsAbap ?? {}))) {
       errors.push(`tools/gogen/go/${name}: depends on osg/gogen/abap -- a package takes a narrow interface; only go/abap imports packages`);
     }
   }
@@ -138,6 +149,23 @@ export function check(budget, sizes, {deps, base} = {}) {
       if (was && entry.lines > was.lines && (!entry.reason || entry.reason === was.reason)) {
         errors.push(`${key}: budget raised ${was.lines} -> ${entry.lines} without a new reason`);
       }
+      // a budget the base did not have: a renamed package that grew, or a big
+      // new one, needs a reason a reviewer reads, not the one --update writes
+      if (!was && entry.lines > limitGo && (!entry.reason || entry.reason === UPDATE_REASON)) {
+        errors.push(`${key}: a new budget of ${entry.lines} lines without a reason`);
+      }
+    }
+    for (const name of budget.readmeMissing ?? []) {
+      if (!(base.readmeMissing ?? []).includes(name)) errors.push(`readmeMissing: ${name} added -- the exemption list only shrinks; write the README`);
+    }
+    for (const name of Object.keys(budget.importsAbap ?? {})) {
+      if (!(name in (base.importsAbap ?? {}))) errors.push(`importsAbap: ${name} added -- the exemption list only shrinks; take a narrow interface`);
+    }
+    for (const kind of ["go", "mjs"]) {
+      if ((budget.fileLimits?.[kind] ?? 0) > (base.fileLimits?.[kind] ?? Infinity)) errors.push(`fileLimits.${kind} raised -- the limits only go down`);
+    }
+    for (const f of base.watched ?? []) {
+      if (!(budget.watched ?? []).includes(f) && existsSync(join(ROOT, f))) errors.push(`watched: ${f} removed while it exists`);
     }
   }
   return errors;
@@ -152,14 +180,14 @@ export function update(budget, sizes, {deps} = {}) {
   // a new package is recorded; a new go/abap file or an oversize file is not
   // (those need a budget written by hand, with a reason)
   for (const [key, n] of Object.entries(sizes)) {
-    if (key.startsWith("go:") && !b[key]) b[key] = {lines: n, reason: "recorded by --update"};
-    if ((budget.watched ?? []).includes(key) && !b[key]) b[key] = {lines: n, reason: "recorded by --update"};
+    if (key.startsWith("go:") && !b[key]) b[key] = {lines: n, reason: UPDATE_REASON};
+    if ((budget.watched ?? []).includes(key) && !b[key]) b[key] = {lines: n, reason: UPDATE_REASON};
   }
   budget.readmeMissing = (budget.readmeMissing ?? []).filter((name) => {
     const readme = join(GO, name, "README.md");
     return sizes[`go:${name}`] !== undefined && (!existsSync(readme) || lines(readme) < 3);
   });
-  if (deps) {
+  if (deps instanceof Map) {
     budget.importsAbap = Object.fromEntries(Object.entries(budget.importsAbap ?? {}).filter(([name]) => deps.get(name)));
   }
   budget.budgets = Object.fromEntries(Object.entries(b).sort(([a], [c]) => a.localeCompare(c)));
@@ -185,7 +213,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       }
     }
     const errors = check(budget, sizes, {deps, base});
-    if (deps === undefined) console.error("osd-size-budget: no Go toolchain -- the dependency direction was not checked");
+    if (deps instanceof Error) errors.push(`the dependency direction could not be checked: ${deps.message}`);
+    if (deps === undefined) {
+      if (process.env.CI) errors.push("no Go toolchain in CI -- the dependency direction was not checked");
+      else console.error("osd-size-budget: no Go toolchain -- the dependency direction was not checked");
+    }
     if (errors.length > 0) {
       console.error(`osd-size-budget: ${errors.length} breach(es):`);
       for (const e of errors) console.error(`  ${e}`);

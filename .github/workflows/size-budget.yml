@@ -24,8 +24,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
-          cache: false
-      - name: The base branch's budget
-        run: git fetch --no-tags --depth=1 origin "${GITHUB_BASE_REF:-main}"
+          cache-dependency-path: tools/gogen/go/go.sum
+      # the base: the target branch of a pull request, the commit before a
+      # push to main (a push compared with main itself would check nothing)
+      - name: The base's budget
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$GITHUB_BASE_REF" ]; then git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+          else git fetch --no-tags --depth=1 origin "$BEFORE"; fi
       - name: Size budget
         run: node tools/osd-size-budget.mjs --base FETCH_HEAD
