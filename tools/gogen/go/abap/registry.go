@@ -146,7 +146,8 @@ func CallStatic(s *Session, class, method string, args map[string]Data) {
 // Local RFC destinations: CALL FUNCTION ... DESTINATION to one of these runs
 // the module in this process ('NONE' on a Gateway). The transpiler runtime
 // keeps them in abap.context.RFCDestinations; CALL FUNCTION is not compiled
-// yet, so nothing reads this table so far.
+// yet, so nothing reads this table so far. TODO(U4 step 2): move this
+// process-wide store into Session when destination lookup is implemented.
 var localDestinations sync.Map
 
 func RegisterLocalDestination(s *Session, name string) {

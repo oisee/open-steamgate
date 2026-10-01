@@ -1333,6 +1333,7 @@ something already shipped (then it is a must of the current release, like the ro
 - should: U4 step 1, process sharding of ABAP Unit on Go.
 - should: U4 step 2, Session-owned statics/DB/LUW, one goroutine per test class on a copy of the seed image; statics
   reset per test class as on A4H.
+  Move class statics into the session before parallel classes; see session.Reset.
 - should: profile the Go unit binary (pprof) on the 35-class intersection, splitting seed replay / `OpenDB`,
   emit-time init and the test bodies, before U4 step 2 is built, so its gain can be measured against a baseline.
 - should: lazy tables slice 1 (ADR 0005, accepted narrowed): the xref filled eager in its own step after the host
