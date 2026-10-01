@@ -74,8 +74,20 @@ ENDCLASS.`;
     const before = source("DATA lv_job TYPE c LENGTH 32.\n    DATA lv_count TYPE c LENGTH 8.\n    SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_count WITH p_date = '20251231' AND RETURN.");
     const after = lowerNarrowSubmit(before, file, core);
     const config = core.Config.getDefault();
+    // the lowered call wraps WITH rows in zcl_osd_submit_semantics=>combine( )
+    const semantics = `CLASS zcl_osd_submit_semantics DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS combine IMPORTING it_input TYPE zcl_osd_batch_report=>ty_values
+      RETURNING VALUE(rt_input) TYPE zcl_osd_batch_report=>ty_values.
+ENDCLASS.
+CLASS zcl_osd_submit_semantics IMPLEMENTATION.
+  METHOD combine.
+    rt_input = it_input.
+  ENDMETHOD.
+ENDCLASS.`;
     const registry = new core.Registry(config).addFile(new core.MemoryFile(file, after))
-      .addFile(new core.MemoryFile("zcl_osd_batch_report.clas.abap", stub)).parse();
+      .addFile(new core.MemoryFile("zcl_osd_batch_report.clas.abap", stub))
+      .addFile(new core.MemoryFile("zcl_osd_submit_semantics.clas.abap", semantics)).parse();
     const syntax = registry.findIssues().filter((issue) => issue.getKey() === "check_syntax").map((issue) => issue.getMessage());
     expect(syntax).to.deep.equal([]);
   });
