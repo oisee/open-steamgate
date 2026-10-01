@@ -217,10 +217,7 @@ func statusApps(root string) []statusService {
 	}
 	sort.Strings(packs)
 	for _, p := range packs {
-		dir := packWebapps[p]
-		if rel, err := filepath.Rel(osgRoot, dir); err == nil && !strings.HasPrefix(rel, "..") {
-			dir = filepath.Join(root, rel)
-		}
+		dir := filepath.Join(root, packWebapps[p])
 		name := strings.TrimPrefix(p, "/app/")
 		folders = append(folders, folder{name, dir, name})
 	}

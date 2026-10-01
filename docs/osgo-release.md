@@ -20,17 +20,24 @@ chmod +x "$asset"
 mkdir -p "$RUNNER_TEMP/osgo-home"
 ./"$asset" -home "$RUNNER_TEMP/osgo-home" -port 3095 &
 pid=$!
-# Poll until GET http://127.0.0.1:3095/health returns status=ready.
-curl --fail http://127.0.0.1:3095/health
+ready=0
+for attempt in $(seq 1 60); do
+  if curl --fail --silent http://127.0.0.1:3095/health | grep -q '"status":"ready"'; then
+    ready=1
+    break
+  fi
+  sleep 0.5
+done
+if [ "$ready" -ne 1 ]; then echo 'OSGo did not become ready' >&2; exit 1; fi
 curl --fail 'http://127.0.0.1:3095/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$top=1&$format=json'
 kill "$pid"
 ```
 
 `-home` puts the SQLite database at `<home>/osgo.sqlite`; a fresh directory
 is a full data reset. `-db <path>` chooses a database file explicitly and
-overrides the home default. Without either flag the database is in memory
-and is reseeded at each start. `-port` overrides `OSD_PORT`, which overrides
-`STG_PORT`; the default is 3095. The listener binds to `127.0.0.1` unless
+overrides `-home` and `STG_DB_PATH`. `-home` overrides `STG_DB_PATH`. With no
+path setting the database is in memory and reseeded at each start. `-port`
+overrides `OSD_PORT`, which overrides `STG_PORT`; the default is 3095. The listener binds to `127.0.0.1` unless
 `-addr` specifies another address. Keep the listener private: OSGo does not
 provide authentication.
 

@@ -355,19 +355,53 @@ func hasPrefixFold(p, prefix string) bool {
 	return len(p) >= len(prefix) && strings.EqualFold(p[:len(prefix)], prefix)
 }
 
-func main() {
-	defaultPort := 3095
-	for _, name := range []string{"OSD_PORT", "STG_PORT"} {
-		if value := os.Getenv(name); value != "" {
-			parsed, err := strconv.Atoi(value)
-			if err != nil || parsed < 1 || parsed > 65535 {
-				log.Fatalf("%s: invalid port %q", name, value)
+func selectedPort(flagValue string, getenv func(string) string) (int, string, error) {
+	value, source := flagValue, "-port"
+	if value == "" {
+		for _, name := range []string{"OSD_PORT", "STG_PORT"} {
+			if value = getenv(name); value != "" {
+				source = name
+				break
 			}
-			defaultPort = parsed
-			break
 		}
 	}
-	port := flag.Int("port", defaultPort, "port to listen on (OSD_PORT or STG_PORT)")
+	if value == "" {
+		return 3095, "default", nil
+	}
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		return 0, source, fmt.Errorf("%s: invalid port %q", source, value)
+	}
+	return port, source, nil
+}
+
+func selectedSID(lookup func(string) (string, bool)) string {
+	sid, present := lookup("OSD_SID")
+	if !present {
+		sid, _ = lookup("STG_ADT_SID")
+	}
+	sid = strings.ToUpper(strings.TrimSpace(sid))
+	if sid == "" {
+		return "OSG"
+	}
+	if len(sid) > 3 {
+		sid = sid[:3]
+	}
+	return sid
+}
+
+func selectedDB(db, home string, explicit bool, getenv func(string) string) string {
+	if explicit {
+		return db
+	}
+	if home != "" {
+		return filepath.Join(home, "osgo.sqlite")
+	}
+	return getenv("STG_DB_PATH")
+}
+
+func main() {
+	portFlag := flag.String("port", "", "port to listen on (OSD_PORT or STG_PORT)")
 	addr := flag.String("addr", "127.0.0.1", "address to listen on")
 	dbFile := flag.String("db", "", "an SQLite file (WAL) instead of the in-memory database; seeded once, when it has no tables, and refused when another build seeded it")
 	homeDir := flag.String("home", "", "data directory; defaults -db to <home>/osgo.sqlite and makes a fresh directory a full database reset")
@@ -385,12 +419,22 @@ func main() {
 		fmt.Printf("osgo %s (%s)\n", releaseTag, releaseCommit)
 		return
 	}
+	portValue, _, err := selectedPort(*portFlag, os.Getenv)
+	if err != nil {
+		log.Fatal(err)
+	}
+	port := &portValue
+	abap.SysID = selectedSID(os.LookupEnv)
+	dbExplicit := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "db" {
+			dbExplicit = true
+		}
+	})
+	*dbFile = selectedDB(*dbFile, *homeDir, dbExplicit, os.Getenv)
 	if *homeDir != "" {
 		if err := os.MkdirAll(*homeDir, 0700); err != nil {
 			log.Fatalf("home: %v", err)
-		}
-		if *dbFile == "" {
-			*dbFile = filepath.Join(*homeDir, "osgo.sqlite")
 		}
 	}
 	started := time.Now()
@@ -509,11 +553,8 @@ func main() {
 	}})
 	// each pack's own webapp/ under its name, then the tree's
 	for p, dir := range packWebapps {
-		// a pack folder of the build's checkout is looked for under -root,
-		// so a copied tree (root/webapp, root/packs/<name>/webapp) serves it
-		if rel, err := filepath.Rel(osgRoot, dir); err == nil && !strings.HasPrefix(rel, "..") {
-			dir = filepath.Join(*root, rel)
-		}
+		// Generated pack directories are relative to the tree chosen by -root.
+		dir = filepath.Join(*root, dir)
 		routes = append(routes, route{p, false, serveStatic(p, dir, notFound)})
 	}
 	routes = append(routes, route{"/app", false, serveStatic("/app", webapp, notFound)})

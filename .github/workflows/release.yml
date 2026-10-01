@@ -355,6 +355,7 @@ jobs:
           node tools/osd-transpiler.mjs
       - name: Fetch libraries and generate OSGo
         run: |
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
           node tools/osd-libs.mjs
           node tools/osd-libs.mjs --check
           node tools/osd-fetch.mjs
@@ -375,6 +376,12 @@ jobs:
           mkdir -p build/release
           commit="$(git rev-parse HEAD)"
           (cd tools/gogen/go && go build -trimpath -ldflags="-s -w -X main.releaseTag=$RELEASE_TAG -X main.releaseCommit=$commit" -o "../../../build/release/$ASSET" ./cmd/osgo)
+          for private_path in "$GITHUB_WORKSPACE" "$HOME"; do
+            if [[ -n "$private_path" ]] && LC_ALL=C grep -aFq "$private_path" "build/release/$ASSET"; then
+              echo "::error::OSGo binary contains a runner path"
+              exit 1
+            fi
+          done
           (cd build/release && sha256sum "$ASSET" > "$ASSET.sha256")
           file "build/release/$ASSET"
           node scripts/release-verify.mjs binary "build/release/$ASSET" "go-$GOOS-$GOARCH"
