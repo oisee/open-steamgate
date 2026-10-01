@@ -72,3 +72,22 @@ compute what it needs and write it as a unit of `deploy/manifest.json`, the sour
   "Write zip" or "Save as deploy unit".
 - Acceptance: osg-demo's ZCL_ZOSD_FLEET_DPC_EXT plus its app gives exactly their current manifest unit (smoke check 10
   compares the two), and the zip imports on A4H with the existing last-mile checks (docs/a4h-deploy.md).
+
+### The generation DSL in the editor: trace navigation, diagnostics, schemas, `.tpl` highlighting (2026-10-01)
+
+**0.6 nice (Alice). Not started until the DSL syntax settles.** Each L2 slice still adds constructs, so schemas and a
+grammar written now would go stale with every PR. Today the extension has no language, grammar or schema for any of
+the DSL files. L2/L3 rule YAML and `*.stg.yaml` get plain YAML colouring and `recipe.json` gets plain JSON colouring;
+the 13 `.tpl` templates have none. The steps below are in order of value, and each is its own slice:
+
+1. **Trace navigation.** Hover a line of a generated region to see the template line and the model path that produced
+   it, from the trace sidecar, and click through to the template. The sidecar format is the most stable part of the
+   DSL, so this one may start before the rest.
+2. **Diagnostics.** Run `dsl build --check` and the L2 compiler on save and put their `file:line` errors into
+   Problems. Parse the tools' existing output; do not write a second checker.
+3. **Schemas.** JSON Schema for the L2/L3 rule YAML, `*.stg.yaml` and `recipe.json`, contributed through
+   `yamlValidation` (needs the Red Hat YAML extension) and `jsonValidation`. Derive the schemas from the compilers'
+   own accepted shapes, and test that every file in the tree validates and that each refusal fixture fails.
+4. **`.tpl` highlighting.** A TextMate injection grammar for the Mustache-subset tags over ABAP. Cosmetic, so last.
+
+Start condition: two consecutive L2/L3 slices that add no syntax, or an explicit freeze of the DSL grammar.
