@@ -7,13 +7,13 @@
 // reaches the rule line.
 import {expect} from "chai";
 import {spawnSync} from "node:child_process";
-import {copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {basename, join, relative, sep} from "node:path";
+import {basename, dirname, join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DEFAULT_DDIC, registryFor} from "../tools/dsl-ddic.mjs";
-import {buildRule, capWarning, checkRule, compileRule, describeCases, evaluate, misfit, parseCondition, RuleError, stepValue} from "../tools/dsl-l2.mjs";
-import {bump, caseDiscriminates, compareValues, conditionOf, staleDiscriminates, structureDiscriminates, thresholdDiscriminates} from "../tools/dsl-l2-eval.mjs";
+import {buildRule, capWarning, checkRule, compileRule, describeCases, evaluate, misfit, parseCondition, RuleError, rulePath, stepValue} from "../tools/dsl-l2.mjs";
+import {bump, caseDiscriminates, compareValues, conditionOf, defaultValue, staleDiscriminates, structureDiscriminates, thresholdDiscriminates} from "../tools/dsl-l2-eval.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
@@ -2096,6 +2096,127 @@ examples:
       expect(error.message.startsWith(`${where}:${lineIn(readFileSync(file, "utf8"), /^\s+- name: n/)}: the generated zcl_l2_long_alert.clas.testclasses.abap line `), error.message).to.equal(true);
       expect(error.message).to.contain("Line exceeds 255 characters");
       expect(() => readdirSync(out)).to.throw();
+    });
+  });
+
+  // A rule that lives in a pack (osg-demo, 2026-10-01): its tables declare
+  // fields by DATATYPE with no data element, and it is built from another
+  // checkout than the one it lives in.
+  describe("a rule in a pack: built-in typed fields and a stable rule path", () => {
+    const PACK = "test/fixtures/dsl-l2-pack";
+    const PACK_RULE = join(PACK, "pack_ints.l2.yaml");
+    const PACK_TABLES = ["zosd_l2_pkship.tabl.xml", "zosd_l2_pkvoy.tabl.xml"];
+    let packRegistry;
+    before(async () => {
+      await import("./start.mjs");
+      packRegistry = registryFor([PACK, ".local/lars/open-abap-core/src"], []);
+    });
+
+    it("INT1, INT2, INT4, INT8 and DEC typed by DATATYPE get their DDIC type and width", () => {
+      const model = compileRule(PACK_RULE, {registry: packRegistry});
+      const {fields} = model.ddic.zosd_l2_pkship;
+      expect([fields.lvl1, fields.lvl2, fields.steam_pct, fields.odo, fields.rate]).to.deep.equal([
+        {built_in: "INT1"}, {built_in: "INT2"}, {built_in: "INT4"}, {built_in: "INT8"}, {built_in: "DEC", length: 7, decimals: 2}]);
+      expect(model.cases.length).to.be.greaterThan(5);
+      // a filler value fits a narrow packed field whatever the seed
+      for (const type of [{built_in: "DEC", length: 3, decimals: 2}, {built_in: "DEC", length: 2, decimals: 0}]) {
+        for (const seed of [1, 9, 10, 99, 100, 500, 799]) expect(misfit(defaultValue(type, seed), type), `${JSON.stringify(type)} seed ${seed}`).to.equal(undefined);
+      }
+      // every derived row fills them with a value of their own type
+      for (const c of model.cases) {
+        for (const t of c.tables.filter((x) => x.table === "zosd_l2_pkship")) {
+          for (const r of t.rows) {
+            expect(r.fields.map((f) => f.column)).to.include.members(["lvl1", "lvl2", "steam_pct", "odo", "rate"]);
+            for (const f of r.fields) expect(misfit(f.value, f["value@type"]), `${c.method} ${f.column}=${f.value}`).to.equal(undefined);
+          }
+        }
+      }
+    });
+
+    it("and the generated tests of boundaries: auto run green in ABAP", async () => {
+      // the transpiler's CREATE TABLE has no column type for INT8
+      // (ANOMALY-2026-10-01-transpiler-int8-column), so the run is over the
+      // fixture without its INT8 field; the compile above covers INT8
+      const ddic = join(scratch, "pack-run");
+      mkdirSync(ddic, {recursive: true});
+      const ship = readFileSync(join(PACK, PACK_TABLES[0]), "utf8");
+      const noInt8 = ship.replace(/\s*<DD03P>\s*<FIELDNAME>ODO<\/FIELDNAME>[\s\S]*?<\/DD03P>/, "");
+      expect(noInt8).to.not.equal(ship);
+      writeFileSync(join(ddic, PACK_TABLES[0]), noInt8);
+      copyFileSync(join(PACK, PACK_TABLES[1]), join(ddic, PACK_TABLES[1]));
+      const reg = registryFor([ddic, ".local/lars/open-abap-core/src"], []);
+      const {model, results, messages} = await runRule(PACK_RULE, "zcl_l2_pack_ints",
+        {ruleRegistry: reg, tables: PACK_TABLES, tableDir: ddic, fixture: true});
+      expect(Object.keys(model.ddic.zosd_l2_pkship.fields)).to.include.members(["lvl1", "lvl2", "steam_pct", "rate"]);
+      expect(Object.keys(results)).to.have.length(model.examples.length + model.cases.length);
+      expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+    });
+
+    it("a field the rule never names whose data element is missing is refused at boundaries, naming it", () => {
+      const ddic = join(scratch, "pack-nodtel");
+      mkdirSync(ddic, {recursive: true});
+      const ship = readFileSync(join(PACK, PACK_TABLES[0]), "utf8");
+      const lost = ship.replace(/<FIELDNAME>ODO<\/FIELDNAME>[\s\S]*?<\/DD03P>/,
+        "<FIELDNAME>ODO</FIELDNAME>\n     <ROLLNAME>ZOSD_L2_NODTEL</ROLLNAME>\n     <ADMINFIELD>0</ADMINFIELD>\n     <COMPTYPE>E</COMPTYPE>\n    </DD03P>");
+      expect(lost).to.not.equal(ship);
+      writeFileSync(join(ddic, PACK_TABLES[0]), lost);
+      copyFileSync(join(PACK, PACK_TABLES[1]), join(ddic, PACK_TABLES[1]));
+      const reg = registryFor([ddic, ".local/lars/open-abap-core/src"], []);
+      const file = join(scratch, "pack_nodtel.l2.yaml");
+      writeFileSync(file, readFileSync(PACK_RULE, "utf8"));
+      const where = relative(process.cwd(), file).split(sep).join("/");
+      const at = lineIn(readFileSync(file, "utf8"), /^boundaries:/);
+      expect(() => compileRule(file, {registry: reg})).to.throw(RuleError,
+        `${where}:${at}: ZOSD_L2_PKSHIP-ODO: data element ZOSD_L2_NODTEL is not in the DDIC given; add a --ddic folder that has it`);
+      // without boundaries nothing fills it, and the rule builds
+      writeFileSync(file, readFileSync(PACK_RULE, "utf8").replace(/^boundaries: auto\n/m, ""));
+      expect(compileRule(file, {registry: reg}).cases).to.deep.equal([]);
+    });
+
+    it("the rule path is recorded the same from another working directory", function () {
+      // another checkout: every entry of this one but .git, linked, so that
+      // the path relative to the working directory is ../../<this checkout>/...
+      const here = process.cwd();
+      const alt = join(scratch, "alt-checkout");
+      mkdirSync(alt, {recursive: true});
+      for (const entry of readdirSync(here)) if (entry !== ".git") symlinkSync(join(here, entry), join(alt, entry));
+      const build = (cwd, out) => {
+        const run = spawnSync(process.execPath, [join(here, "tools/dsl-l2.mjs"), "build", join(here, RULE), "--out", out,
+          "--ddic", join(here, "src"), "--ddic", join(here, ".local/lars/open-abap-core/src")], {cwd, encoding: "utf8"});
+        expect(run.status, run.stdout + run.stderr).to.equal(0);
+        return Object.fromEntries(readdirSync(out).sort().map((f) => [f, readFileSync(join(out, f), "utf8")]));
+      };
+      const a = build(here, join(scratch, "path-a"));
+      const b = build(alt, join(scratch, "path-b"));
+      expect(Object.keys(a)).to.have.length(5);
+      expect(b).to.deep.equal(a);
+      expect(a[`${CLASS}.clas.abap`].split("\n")[0]).to.equal(`* Generated by tools/dsl-l2.mjs from ${RULE}; do not edit.`);
+      expect(JSON.parse(a[`${CLASS}.clas.trace.json`]).rule).to.equal(RULE);
+    });
+
+    it("a rule in another git repository records its path in that repository; outside one, relative to --out", () => {
+      const repo = mkdtempSync(join(tmpdir(), "dsl-l2-repo-"));
+      try {
+        const init = spawnSync("git", ["init", "-q", repo], {encoding: "utf8"});
+        expect(init.status, init.stderr).to.equal(0);
+        mkdirSync(join(repo, "src", "l2"), {recursive: true});
+        const file = join(repo, "src", "l2", "pack_ints.l2.yaml");
+        copyFileSync(PACK_RULE, file);
+        expect(rulePath(file, join(scratch, "elsewhere"))).to.equal("src/l2/pack_ints.l2.yaml");
+        expect(compileRule(file, {registry: packRegistry}).source).to.equal("src/l2/pack_ints.l2.yaml");
+      } finally {
+        rmSync(repo, {recursive: true, force: true});
+      }
+      const loose = mkdtempSync(join(tmpdir(), "dsl-l2-loose-"));
+      try {
+        const file = join(loose, "rules", "pack_ints.l2.yaml");
+        mkdirSync(dirname(file));
+        copyFileSync(PACK_RULE, file);
+        const inGit = spawnSync("git", ["rev-parse", "--show-toplevel"], {cwd: loose}).status === 0;
+        if (!inGit) expect(rulePath(file, join(loose, "out"))).to.equal("../rules/pack_ints.l2.yaml");
+      } finally {
+        rmSync(loose, {recursive: true, force: true});
+      }
     });
   });
 });

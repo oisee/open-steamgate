@@ -2945,3 +2945,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: needs an issue: abaplint's v702 syntax check does not apply the LEFT OUTER JOIN restrictions
 - Regression-test location: none; the probe documents the measurement
 - Upstream version containing a fix: unknown
+
+### ANOMALY-2026-10-01-transpiler-int8-column — the transpiler's database setup has no column type for INT8
+
+- Status: `open`
+- Discovery date: `2026-10-01`
+- Affected versions: `@abaplint/transpiler` 2.13.93 (the schema generators for SQLite, PostgreSQL and Snowflake)
+- Affected ABAP statement, runtime API or adapter: the `CREATE TABLE` the transpiler writes for a transparent table (`output.databaseSetup.schemas`) when a field is DDIC type INT8 (abaplint `Integer8Type`), whether declared by DATATYPE or by a data element
+- Minimal ABAP reproducer: `test/fixtures/dsl-l2-pack/zosd_l2_pkship.tabl.xml` (field `ODO`, DATATYPE INT8, LENG 19) in a transpiler registry
+- Exact command used to run it: `test/dsl-l2.mjs`'s `runRule` over that table with `fixture: true`; the transpile throws `database_setup: ZOSD_L2_PKSHIP-ODO, todo toType handle: Integer8Type`. `toType` in `src/db/schema_generation/sqlite_database_schema.ts` (and the pg and snowflake ones) handles `IntegerType` and has no branch for `Integer8Type`
+- Expected SAP behaviour: a transparent table may have an INT8 field; the database column is an 8-byte integer
+- Actual open-abap behaviour: the whole transpile fails on the table, so no table with an INT8 field can be created or read here
+- Impact on open-steamgate: a table with an INT8 field cannot be part of the tree. The DSL L2 compiler types such a field (INT8 by DATATYPE resolves since this date) and fills it in derived rows, but its generated tests cannot be run over that table here
+- Smallest safe workaround: none in the runtime. `test/dsl-l2.mjs` runs the generated tests of the pack fixture over a copy of the table without its INT8 field and checks INT8 at compile time only
+- Upstream: needs an issue: abaplint/transpiler database setup lacks a column type for Integer8Type (SQLite `INTEGER`, PostgreSQL `BIGINT`)
+- Regression-test location: `test/dsl-l2.mjs`, "a rule in a pack: built-in typed fields and a stable rule path"
+- Upstream version containing a fix: unknown
