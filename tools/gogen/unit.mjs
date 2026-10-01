@@ -364,6 +364,9 @@ const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; 
   "func isNotCompiled(msg string) bool { return strings.Contains(msg, \"NOT_COMPILED in \") }",
   `func main() { if err := abap.SetMediaDir(${JSON.stringify(join(out, "media"))}); err != nil { panic(err) }; results := []result{}`,
   "s := &abap.Session{}"];
+if (groups.some(({methods}) => methods.some((m) => m.db))) generated.push(
+  "if err := abap.OpenDB(dbScript); err != nil { panic(err) }",
+  "dbImage, err := abap.DBImage(); if err != nil { panic(err) }");
 for (const {key, methods} of groups) {
   const [owner, local] = key.split(":");
   const c = classes.get(key);
@@ -375,7 +378,7 @@ for (const {key, methods} of groups) {
   generated.push("{", "session.BeginTestClass()", "s = &abap.Session{}", ...(c.methods.some((m) => m.name === "CLASS_TEARDOWN") ? ["groupStart := len(results)"] : []), "classError := \"\"", "stopClass := false");
   // one LUW chain as the Node unit run has (abap.BeginUnitLUW): COMMIT and
   // ROLLBACK WORK end it, nothing between the methods does
-  if (methods.some((m) => m.db)) generated.push("classError = caught(func(){ if err := abap.OpenDB(dbScript); err != nil { panic(err) }; abap.BeginUnitLUW() })");
+  if (methods.some((m) => m.db)) generated.push("classError = caught(func(){ if err := abap.OpenDBImage(dbImage); err != nil { panic(err) }; abap.BeginUnitLUW() })");
   if (c.methods.some((m) => m.name === "CLASS_SETUP")) generated.push(`if classError == "" { classError = caught(func(){ ${T}_CLASS_SETUP(s) }) }`);
   for (const row of methods) {
     generated.push(`{ r := result{Class:${JSON.stringify(owner)}, Testclass:${JSON.stringify(local)}, Method:${JSON.stringify(row.method)}, Status:"SUCCESS"}`,

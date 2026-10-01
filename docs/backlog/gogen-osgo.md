@@ -1317,6 +1317,25 @@ something already shipped (then it is a must of the current release, like the ro
   quoting; the expected dominant cost is the per-class seed replay (each DB-opening class runs `OpenDB` over the
   ~10.9 MB seed script), which U4 step 2 (image copy) targets. A cold build costs more than a whole Node run; a
   warm rebuild is nearly free.
+
+  **Seed image profile and measurement (2026-10-01):** A CPU profile of the Go Unit inventory before the image
+  change sampled 16.90 s. `abap.OpenDB` accounted for 10.62 s cumulative (62.8%). The top flat costs were
+  `linux.Syscall6` 2.16 s, `libc.Xmemcpy` 1.41 s, SQLite bind 1.29 s, SQLite allocation 0.76 s, and JSON validation
+  0.57 s. `OpenDB`'s repeated statement execution and JSON decoding were therefore the main cost. The image is seeded
+  once, serialized with modernc SQLite, and deserialized onto a private connection for each DB-using test class.
+
+  The old 35-class list was not retained with the baseline, and the current inventory has changed. For a matched
+  before/after comparison, both binaries used the **same current 51-owner inventory** and the same generated seed;
+  each had three runs under `flock /tmp/osd-heavy.lock`, with `/usr/bin/time -f '%e %U %S %M'`. These numbers must
+  not be compared directly with the 35-class table above.
+
+  | Current 51-owner Go inventory | median wall | median cpu (user+sys) | median peak memory |
+  |---|---:|---:|---:|
+  | Seed replay per DB class | 17.07 s | 17.41 s | 141,460 KiB |
+  | Seed image copy per DB class | 8.65 s | 8.29 s | 127,852 KiB |
+
+  Full Node/Go compare counts before and after stayed at 384 SAME, 6 DIFFERENT, 13 nodeAnomaly, 161 Node-only,
+  0 Go-only and 1 SKIPPED. A Go test also checks that a class's inserted row is absent from the next class image.
 - nice: accept ADR 0005 (lazy table providers) -- done 2026-09-30, narrowed after three reviews.
 
 **0.5**
