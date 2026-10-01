@@ -63,3 +63,35 @@ examples:
         - {voyage_id: V00015, ship_id: S007, dep_date: 20261003}
         - {voyage_id: V00016, ship_id: S007, dep_date: 20261004}
     expect: ["S007 Ibis: 3 future voyages"]
+  - name: groups last over
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S012, name: Skua, status: A}
+        - {ship_id: S010, name: Auk, status: A}
+        - {ship_id: S011, name: Rail, status: A}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00024, ship_id: S012, dep_date: 20261002}
+        - {voyage_id: V00020, ship_id: S010, dep_date: 20261002}
+        - {voyage_id: V00027, ship_id: S012, dep_date: 20261005}
+        - {voyage_id: V00023, ship_id: S011, dep_date: 20261002}
+        - {voyage_id: V00021, ship_id: S010, dep_date: 20261003}
+        - {voyage_id: V00025, ship_id: S012, dep_date: 20261003}
+        - {voyage_id: V00022, ship_id: S010, dep_date: 20261004}
+        - {voyage_id: V00026, ship_id: S012, dep_date: 20261004}
+    expect: ["S010 Auk: 3 future voyages", "S012 Skua: 4 future voyages"]
+  - name: groups last under
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S022, name: Lark, status: A}
+        - {ship_id: S020, name: Wren, status: A}
+        - {ship_id: S021, name: Teal, status: A}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00032, ship_id: S021, dep_date: 20261002}
+        - {voyage_id: V00030, ship_id: S020, dep_date: 20261002}
+        - {voyage_id: V00034, ship_id: S022, dep_date: 20261003}
+        - {voyage_id: V00031, ship_id: S020, dep_date: 20261003}
+        - {voyage_id: V00033, ship_id: S022, dep_date: 20261002}
+        - {voyage_id: V00035, ship_id: S020, dep_date: 20261004}
+    expect: ["S020 Wren: 3 future voyages"]

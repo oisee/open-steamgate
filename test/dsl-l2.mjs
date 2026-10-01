@@ -12,7 +12,7 @@ import {tmpdir} from "node:os";
 import {basename, join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DEFAULT_DDIC, registryFor} from "../tools/dsl-ddic.mjs";
-import {buildRule, checkRule, compileRule, describeCases, evaluate, misfit, parseCondition, RuleError, stepValue} from "../tools/dsl-l2.mjs";
+import {buildRule, capWarning, checkRule, compileRule, describeCases, evaluate, misfit, parseCondition, RuleError, stepValue} from "../tools/dsl-l2.mjs";
 import {bump, caseDiscriminates, compareValues, conditionOf, structureDiscriminates, thresholdDiscriminates} from "../tools/dsl-l2-eval.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
@@ -499,12 +499,18 @@ examples:
     const rows = (c) => Object.fromEntries(c.tables.map((t) => [t.table,
       t.rows.map((r) => Object.fromEntries(r.fields.map((f) => [f.column, f.value])))]));
 
-    it("the committed rule runs its examples and all ten discriminating derived cases", async () => {
+    it("the committed rule runs its examples and all eleven derived cases, including two groups", async () => {
       const {model, results, messages} = await runRule(LIMIT, "zcl_l2_ship_voyage_limit");
-      expect(Object.keys(results)).to.have.length(16);
+      expect(Object.keys(results)).to.have.length(19);
       expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+      const groups = model.cases.find((c) => c.method === "b_count_groups");
+      expect(groups).to.exist;
+      expect(rows(groups).zosd_l2_ship).to.have.length(2);
+      expect(rows(groups).zosd_l2_ship.map((ship) =>
+        rows(groups).zosd_l2_voy.filter((voy) => voy.ship_id === ship.ship_id).length)).to.deep.equal([3, 2]);
+      expect(groups.expect).to.have.length(1);
       for (const c of model.cases) {
-        const discriminates = c.derived.condition.startsWith("limit/")
+        const discriminates = c.method === "b_count_groups" ? true : c.derived.condition.startsWith("limit/")
           ? thresholdDiscriminates(model, rows(c), {date: c.date.value})
           : caseDiscriminates(model, conditionOf(model, c.derived.condition), rows(c), {date: c.date.value});
         expect(discriminates, c.method).to.equal(true);
@@ -535,11 +541,26 @@ examples:
       expect(failed(results)).to.include("three_future_voyages");
     });
 
+    it("dropping the group count reset fails on the last nonviolating ship", async () => {
+      const {file, className} = copy("noclear", text);
+      const {results} = await runRule(file, className, {mutate: {"clas.abap": [["        CLEAR lv_count.", "        " ]]}});
+      expect(failed(results)).to.include("groups_last_under");
+      expect(failed(results)).to.include("b_count_groups");
+    });
+
+    it("never splitting groups loses the first group's alert", async () => {
+      const {file, className} = copy("nosplit", text);
+      const {results} = await runRule(file, className, {mutate: {"clas.abap": [["IF lv_count > 0 AND (", "IF lv_count < 0 AND ("]]}});
+      expect(failed(results)).to.include("groups_last_over");
+      expect(failed(results)).to.include("b_count_groups");
+    });
+
     it("dropping the ON equality is caught by check_reference", async () => {
       const {file, className} = copy("join", text);
       const {results, messages} = await runRule(file, className, {mutate: {"clas.abap": [["ON voy~ship_id = ship~ship_id", "ON voy~ship_id = voy~ship_id"]]}});
       expect(failed(results).length).to.be.greaterThan(0);
       expect(failed(results)).to.include("other_ships_voyages");
+      expect(failed(results)).to.include("b_ship_id_nomatch");
       expect(Object.values(messages).some((m) => m.includes("#assert_same_as_reference"))).to.equal(true);
     });
 
@@ -580,8 +601,9 @@ examples:
 `;
       for (const [tag, rule] of [["zero", base], ["one", base.replace("more_than: 0", "at_least: 1")]]) {
         const {file, className} = copy(tag, rule);
-        const {results, messages} = await runRule(file, className);
+        const {model, results, messages} = await runRule(file, className);
         expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+        expect(model.cases.map((c) => c.method)).to.include("b_count_groups");
       }
     });
 
@@ -600,6 +622,15 @@ examples:
       }
       const {file} = copy("mixed", text.replace("limit:\n", "forbid:\n  exists: ZOSD_L2_VOY as other\n  where: other.ship_id = ship.ship_id\nlimit:\n"));
       expect(() => compileRule(file, {registry})).to.throw(RuleError, "exactly one");
+    });
+
+    it("names the 64-row cap and warns with the threshold line", () => {
+      const capText = `${text.slice(0, text.indexOf("examples:"))}examples:\n  - name: no voyages\n    date: 20261001\n    rows:\n      ZOSD_L2_SHIP: [{ship_id: S001, name: A, status: A}]\n    expect: []\n`;
+      const {file} = copy("cap64", capText.replace("more_than: 2", "more_than: 64"));
+      const model = compileRule(file, {registry});
+      expect(model.skipped.map((item) => item.reason).join("\n")).to.include("64-row");
+      const line = readFileSync(file, "utf8").split("\n").findIndex((entry) => entry.includes("more_than: 64")) + 1;
+      expect(capWarning(model, file)).to.include(`${file}:${line}: warning: the 64-row cap`);
     });
   });
 

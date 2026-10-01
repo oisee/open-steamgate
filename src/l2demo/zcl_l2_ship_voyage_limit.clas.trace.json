@@ -2,7 +2,7 @@
  "generator": "dsl-l2",
  "rule": "src/l2demo/ship_voyage_limit.l2.yaml",
  "template": "recipes/l2-check/template.tpl",
- "model": "sha256:1f1e98d41a72173435f4ad5ef1f7cdf1dfa107b075ceefbb6c6dea01cfa76552",
+ "model": "sha256:0260c1be7aedeab98ff1ee1811d9eb0618eda4ca8497aa4161cb99938c6a2d6f",
  "lines": [
   {
    "line": 1,

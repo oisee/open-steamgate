@@ -381,25 +381,29 @@ the alert has no padding or leading zeros.
 
 The intended aggregate JOIN lowering was probed first in
 `docs/probes/dsl-l2/`. `GROUP BY` and aliased `COUNT( * )` reached generated
-SQL, but the transpiler omitted `HAVING`, and the probe's aggregate JOIN left
-an alias tilde in its ON expression. See
-`ANOMALIES.md#anomaly-2026-10-01-select-having-dropped`. The chosen lowering
+SQL, but transpiler 2.13.93 has no `HAVING` support and omitted it. See
+`ANORMALIES.md#anomaly-2026-10-01-select-having-dropped`. The chosen lowering
 uses one 7.02 Open SQL INNER JOIN ordered by the `for` key. A loop counts
 adjacent matching rows and emits one alert after a group exceeds the threshold.
 The reference independently selects the `for` rows, then selects matching
 count-table rows per row and uses `DESCRIBE TABLE ... LINES`. Each test runs
 both methods and compares their ordered alerts, then compares to the
 interpreter. Derived cases put the count at `n` and `n + 1` for `more_than`,
-or `m - 1` and `m` for `at_least`, and each case must change under a mutant of
+or `m - 1` and `m` for `at_least`. A two-group case checks the transition
+between distinct `for` rows. Each threshold boundary case must change under a mutant of
 its threshold. Per-comparison cases include enough other matching rows for
 their own comparison to decide the threshold.
 Case generation is bounded to 64 counted rows so a valid INT4 threshold cannot
-allocate billions of test rows; larger boundaries are reported as skipped in
-`cases` and need hand-written examples.
+allocate billions of test rows. Cases needing more rows are reported as skipped
+with the cap named. At a threshold of 64 or more, some count boundaries lack
+derived coverage (`more_than: 64` cannot derive its violating boundary);
+`build` and `check` warn with the rule line, and hand-written examples must
+cover the missing boundaries.
 
 The demo is `src/l2demo/ship_voyage_limit.l2.yaml`: zero, two, three and five
-future voyages, a ship excluded by `when`, and a cross-ship case that exposes a
-missing ON equality.
+future voyages, a ship excluded by `when`, a cross-ship case that exposes a
+missing ON equality, and groups inserted out of key order with the last group
+both above and below the threshold.
 
 ## Not yet
 

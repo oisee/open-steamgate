@@ -23,6 +23,8 @@ CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT F
     METHODS five_future_voyages FOR TESTING.
     METHODS filtered_ship FOR TESTING.
     METHODS other_ships_voyages FOR TESTING.
+    METHODS groups_last_over FOR TESTING.
+    METHODS groups_last_under FOR TESTING.
     METHODS b_status_eq FOR TESTING.
     METHODS b_status_ne FOR TESTING.
     METHODS b_status_blank FOR TESTING.
@@ -33,6 +35,7 @@ CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT F
     METHODS b_dep_date_gt FOR TESTING.
     METHODS b_count_not_over FOR TESTING.
     METHODS b_count_over FOR TESTING.
+    METHODS b_count_groups FOR TESTING.
 ENDCLASS.
 
 CLASS ltcl_examples IMPLEMENTATION.
@@ -314,6 +317,157 @@ CLASS ltcl_examples IMPLEMENTATION.
     lt_ref = check_reference( iv_date = '20261001' ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `other ships voyages (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `other ships voyages` ).
+  ENDMETHOD.
+
+  METHOD groups_last_over.
+    DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
+    DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
+    DATA lt_act TYPE string_table.
+    DATA lt_ref TYPE string_table.
+    DATA lt_exp TYPE string_table.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S012'.
+    ls_zosd_l2_ship-name = 'Skua'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S010'.
+    ls_zosd_l2_ship-name = 'Auk'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S011'.
+    ls_zosd_l2_ship-name = 'Rail'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00024'.
+    ls_zosd_l2_voy-ship_id = 'S012'.
+    ls_zosd_l2_voy-dep_date = '20261002'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00020'.
+    ls_zosd_l2_voy-ship_id = 'S010'.
+    ls_zosd_l2_voy-dep_date = '20261002'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00027'.
+    ls_zosd_l2_voy-ship_id = 'S012'.
+    ls_zosd_l2_voy-dep_date = '20261005'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00023'.
+    ls_zosd_l2_voy-ship_id = 'S011'.
+    ls_zosd_l2_voy-dep_date = '20261002'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00021'.
+    ls_zosd_l2_voy-ship_id = 'S010'.
+    ls_zosd_l2_voy-dep_date = '20261003'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00025'.
+    ls_zosd_l2_voy-ship_id = 'S012'.
+    ls_zosd_l2_voy-dep_date = '20261003'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00022'.
+    ls_zosd_l2_voy-ship_id = 'S010'.
+    ls_zosd_l2_voy-dep_date = '20261004'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00026'.
+    ls_zosd_l2_voy-ship_id = 'S012'.
+    ls_zosd_l2_voy-dep_date = '20261004'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
+    APPEND `S010 Auk: 3 future voyages` TO lt_exp.
+    APPEND `S012 Skua: 4 future voyages` TO lt_exp.
+    lt_act = zcl_l2_ship_voyage_limit=>check( iv_date = '20261001' ).
+    lt_ref = check_reference( iv_date = '20261001' ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `groups last over (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `groups last over` ).
+  ENDMETHOD.
+
+  METHOD groups_last_under.
+    DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
+    DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
+    DATA lt_act TYPE string_table.
+    DATA lt_ref TYPE string_table.
+    DATA lt_exp TYPE string_table.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S022'.
+    ls_zosd_l2_ship-name = 'Lark'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S020'.
+    ls_zosd_l2_ship-name = 'Wren'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S021'.
+    ls_zosd_l2_ship-name = 'Teal'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00032'.
+    ls_zosd_l2_voy-ship_id = 'S021'.
+    ls_zosd_l2_voy-dep_date = '20261002'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00030'.
+    ls_zosd_l2_voy-ship_id = 'S020'.
+    ls_zosd_l2_voy-dep_date = '20261002'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00034'.
+    ls_zosd_l2_voy-ship_id = 'S022'.
+    ls_zosd_l2_voy-dep_date = '20261003'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00031'.
+    ls_zosd_l2_voy-ship_id = 'S020'.
+    ls_zosd_l2_voy-dep_date = '20261003'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00033'.
+    ls_zosd_l2_voy-ship_id = 'S022'.
+    ls_zosd_l2_voy-dep_date = '20261002'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00035'.
+    ls_zosd_l2_voy-ship_id = 'S020'.
+    ls_zosd_l2_voy-dep_date = '20261004'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
+    APPEND `S020 Wren: 3 future voyages` TO lt_exp.
+    lt_act = zcl_l2_ship_voyage_limit=>check( iv_date = '20261001' ).
+    lt_ref = check_reference( iv_date = '20261001' ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `groups last under (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `groups last under` ).
   ENDMETHOD.
 
   METHOD b_status_eq.
@@ -693,5 +847,62 @@ CLASS ltcl_examples IMPLEMENTATION.
     lt_ref = check_reference( iv_date = '20261001' ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `3 matching rows: over (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `3 matching rows: over` ).
+  ENDMETHOD.
+
+  METHOD b_count_groups.
+    DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
+    DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
+    DATA lt_act TYPE string_table.
+    DATA lt_ref TYPE string_table.
+    DATA lt_exp TYPE string_table.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'A001'.
+    ls_zosd_l2_ship-name = 'A00000000000000000000000000002'.
+    ls_zosd_l2_ship-status = 'E'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'A002'.
+    ls_zosd_l2_ship-name = 'A00000000000000000000000000002'.
+    ls_zosd_l2_ship-status = 'E'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'A00001'.
+    ls_zosd_l2_voy-ship_id = 'A001'.
+    ls_zosd_l2_voy-dep_date = '20261002'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'A00101'.
+    ls_zosd_l2_voy-ship_id = 'A001'.
+    ls_zosd_l2_voy-dep_date = '20261002'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'A00102'.
+    ls_zosd_l2_voy-ship_id = 'A001'.
+    ls_zosd_l2_voy-dep_date = '20261002'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'A00500'.
+    ls_zosd_l2_voy-ship_id = 'A002'.
+    ls_zosd_l2_voy-dep_date = '20261002'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'A00501'.
+    ls_zosd_l2_voy-ship_id = 'A002'.
+    ls_zosd_l2_voy-dep_date = '20261002'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
+    APPEND `A001 A00000000000000000000000000002: 3 future voyages` TO lt_exp.
+    lt_act = zcl_l2_ship_voyage_limit=>check( iv_date = '20261001' ).
+    lt_ref = check_reference( iv_date = '20261001' ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `3 and 2 matching rows in two groups: groups (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `3 and 2 matching rows in two groups: groups` ).
   ENDMETHOD.
 ENDCLASS.

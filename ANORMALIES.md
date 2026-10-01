@@ -2892,14 +2892,14 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Regression-test location: `test/lift-r2.mjs` asserts the rendered sort line and its column order
 - Upstream version containing a fix: none; the order difference is recorded, not fixed
 
-### ANOMALY-2026-10-01-select-having-dropped — transpiler omits HAVING from an aggregate JOIN
+### ANOMALY-2026-10-01-select-having-dropped — transpiler omits HAVING from SELECT
 
 - Status: `workaround`
 - Discovery date: `2026-10-01`
-- Affected statement: ABAP 7.02 `SELECT ... COUNT( * ) AS cnt ... INNER JOIN ... GROUP BY ... HAVING COUNT( * ) > 2 INTO CORRESPONDING FIELDS OF TABLE`.
+- Affected statement: any ABAP `SELECT` with `HAVING`; the measured reproducer uses ABAP 7.02 `SELECT ... COUNT( * ) AS cnt ... INNER JOIN ... GROUP BY ... HAVING COUNT( * ) > 2 INTO CORRESPONDING FIELDS OF TABLE`.
 - Minimal reproducer: `docs/probes/dsl-l2/zcl_l2_count_probe.clas.abap` and its test include.
 - Exact command: with the probe temporarily in `src/l2demo/`, `flock /tmp/osd-heavy.lock npm run transpile` then `flock /tmp/osd-heavy.lock node tools/osd-unit-run.mjs`.
-- Expected: one row (`P001:3`); actual: two rows. The transpiled `output/zcl_l2_count_probe.clas.mjs` SELECT contains `GROUP BY` and `COUNT( * ) AS cnt`, but no `HAVING`; its ON also retains `a~ship_id` rather than converting it to a SQL-qualified column. Thus the probe did not establish correct aggregate JOIN semantics.
+- Expected: one row (`P001:3`); actual: two rows. The transpiled `output/zcl_l2_count_probe.clas.mjs` SELECT contains `GROUP BY` and `COUNT( * ) AS cnt`, but no `HAVING`. Inspection of `node_modules/@abaplint/transpiler/build` in 2.13.93 (`grep -ri having`) finds no HAVING support, so this applies to any SELECT using HAVING.
 - Impact: a DSL count check lowered with HAVING would alert below its threshold. The L2 compiler instead reads matching JOIN rows with one query and counts them in a 7.02 ABAP loop.
-- Upstream: needs an issue in abaplint/transpiler.
+- Upstream: needs an issue: HAVING unsupported in abaplint/transpiler.
 - Regression: generated L2 count demo and its reference comparison in `test/dsl-l2.mjs`.

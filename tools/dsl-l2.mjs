@@ -1144,6 +1144,12 @@ export function describeCases(model) {
   return out.join("\n");
 }
 
+export function capWarning(model, file = model.source) {
+  return model.kind === "limit" && model.threshold.value >= 64
+    ? `${file}:${model.threshold.rule_line}: warning: the 64-row cap leaves count boundaries without derived coverage; examples must cover them`
+    : undefined;
+}
+
 async function main(args) {
   const [command, file, ...rest] = args;
   const ddic = [];
@@ -1158,18 +1164,21 @@ async function main(args) {
     return 2;
   }
   const options = ddic.length ? {ddic} : {};
+  const warnCap = (model) => { const warning = capWarning(model, file); if (warning) console.warn(warning); };
   if (command === "cases") {
     console.log(describeCases(compileRule(file, options)));
     return 0;
   }
   if (command === "check") {
+    warnCap(compileRule(file, options));
     const drift = await checkRule(file, out, options);
     for (const line of drift) console.error(line);
     console.log(drift.length ? `${file}: ${drift.length} file(s) drifted; rebuild with: node tools/dsl-l2.mjs build ${file} --out ${out}`
       : `${file}: generated files match`);
     return drift.length ? 1 : 0;
   }
-  const {files, findings} = await buildRule(file, out, options);
+  const {model, files, findings} = await buildRule(file, out, options);
+  warnCap(model);
   for (const name of Object.keys(files)) console.log(`wrote ${join(out, name)}`);
   console.log(`abap profile: ${findings.length} finding(s)`);
   for (const f of findings) console.log(`${f.severity} ${f.file}:${f.line} ${f.rule}: ${f.text} (${f.node})`);
