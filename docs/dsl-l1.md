@@ -232,3 +232,27 @@ Each step: a critic on the diff, fixes with tests that fail without them, then t
   built only in ABAP?
 - Where a sidecar lives for an object deployed through abapGit: beside the source in the repo, or
   only in the generator's output.
+
+## Report selection screen (osabap)
+
+`node tools/dsl-report.mjs model|help|manpage|args <report.prog.abap or folder> [--out <file>]`
+builds an L1 selection model from the same strict open-abap-gui converter IR that
+`tools/gogen/osabap.mjs` reads. A folder must contain one `.prog.abap` file. The
+converter also loads a neighboring `.prog.xml` text pool, so TPOOL `S` labels
+appear in help and manpage output. Each selection has a stable
+`report/<NAME>/sel/<FIELD>` ID, CLI spellings, DDIC type, typed default where
+present, obligation, radio group, and positional/checkbox classification.
+Derived CLI and Go facts are computed in the model builder.
+Per `reportargs`, a `P_NAME` parameter accepts `--name` and `--p-name`;
+an `S_TAG` select-option accepts `--s-tag` only. Checkboxes accept the same
+parameter spellings but consume no value.
+
+The `report-help`, `report-manpage`, and `report-args-go` recipes render that
+model. `help` lists report options and points to host `-help` for host flags;
+`manpage` is Markdown; `args` is the four Go declarations embedded by osabap.
+`--out` writes the rendering and `<file>.trace.json`; each option line in the
+help trace names its selection node. `node tools/dsl-build.mjs --check` checks
+all three recipe schemas and renders their fixture. The Go parity test executes
+osabap's existing selection expressions and Go interpolation from its source
+read-only, then compares the resulting block for every example report. osabap
+itself remains unchanged for its owner to wire the new renderer.

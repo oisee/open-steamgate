@@ -16,6 +16,7 @@ import {XMLValidator} from "fast-xml-parser";
 import {modelR1} from "./lift.mjs";
 import {abapModel, constantsModel, methodTableModel} from "./dsl-abap.mjs";
 import {buildDaemonModel, traceNodes} from "./dsl-daemons.mjs";
+import {reportModel} from "./dsl-report-model.mjs";
 
 // ---------------------------------------------------------------- scanner --
 
@@ -353,6 +354,9 @@ export const PROVIDERS = {
   "json-file": {
     samples: (recipeDir) => readdirSync(join(recipeDir, "sample")).filter((file) => file.endsWith(".json"))
       .sort().map((file) => [file, buildDaemonModel(JSON.parse(readFileSync(join(recipeDir, "sample", file), "utf8")))]),
+  },
+  "report-selection": {
+    samples: async (recipeDir) => [["sample", await reportModel(join(recipeDir, "sample"))]],
   },
 };
 
