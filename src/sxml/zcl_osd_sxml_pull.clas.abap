@@ -353,7 +353,6 @@ CLASS zcl_osd_sxml_pull IMPLEMENTATION.
     rv_text = cl_abap_codepage=>convert_from( lv_utf8 ).
   ENDMETHOD.
 
-* ---------------------------------------------------------------- window
 
   METHOD fill.
     DATA lv_chunk TYPE xstring.
@@ -516,7 +515,6 @@ CLASS zcl_osd_sxml_pull IMPLEMENTATION.
     rv_bytes = mv_buf+lv_rel(iv_length).
   ENDMETHOD.
 
-* -------------------------------------------------------------- decoding
 
   METHOD piece.
 * the bytes [IV_BEGIN, IV_BEGIN + IV_LENGTH) as text. Valid UTF-8 goes
@@ -730,7 +728,6 @@ CLASS zcl_osd_sxml_pull IMPLEMENTATION.
     ENDCASE.
   ENDMETHOD.
 
-* ------------------------------------------------------------ XML parser
 
   METHOD fail.
     DATA lx_error TYPE REF TO cx_sxml_parse_error.
@@ -1302,7 +1299,6 @@ CLASS zcl_osd_sxml_pull IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-* ----------------------------------------------------------- JSON parser
 
   METHOD json_next.
 * JSON as JSON-XML: object, array, str, num, bool, null; a member's key is
@@ -1577,7 +1573,6 @@ CLASS zcl_osd_sxml_pull IMPLEMENTATION.
     ENDDO.
   ENDMETHOD.
 
-* ---------------------------------------------------------------- API
 
   METHOD set_keep_whitespace.
     mv_keep_whitespace = iv_keep.
