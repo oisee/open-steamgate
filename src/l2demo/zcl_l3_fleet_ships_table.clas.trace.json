@@ -1,0 +1,92 @@
+{
+ "generator": "dsl-l3",
+ "set": "src/l2demo/fleet.l3.yaml",
+ "template": "recipes/l3-ports/source-table.tpl",
+ "model": "sha256:849516331162669211f07d1fad30e2b4a1473e720248b0b226ba4f217dfbe822",
+ "lines": [
+  {
+   "line": 1,
+   "template_line": 1,
+   "path": "/source",
+   "node": "set/fleet/port/ships/variant/table",
+   "set_line": 27
+  },
+  {
+   "line": 2,
+   "template_line": 2,
+   "path": "/port",
+   "node": "set/fleet/port/ships/variant/table",
+   "set_line": 27
+  },
+  {
+   "line": 3,
+   "template_line": 3,
+   "path": "/class",
+   "node": "set/fleet/port/ships/variant/table",
+   "set_line": 27
+  },
+  {
+   "line": 4,
+   "template_line": 4,
+   "path": "/",
+   "node": "set/fleet/port/ships/variant/table",
+   "set_line": 27
+  },
+  {
+   "line": 5,
+   "template_line": 5,
+   "path": "/iface",
+   "node": "set/fleet/port/ships/variant/table",
+   "set_line": 27
+  },
+  {
+   "line": 6,
+   "template_line": 6,
+   "path": "/",
+   "node": "set/fleet/port/ships/variant/table",
+   "set_line": 27
+  },
+  {
+   "line": 7,
+   "template_line": 7,
+   "path": "/",
+   "node": "set/fleet/port/ships/variant/table",
+   "set_line": 27
+  },
+  {
+   "line": 8,
+   "template_line": 8,
+   "path": "/class",
+   "node": "set/fleet/port/ships/variant/table",
+   "set_line": 27
+  },
+  {
+   "line": 9,
+   "template_line": 9,
+   "path": "/iface",
+   "node": "set/fleet/port/ships/variant/table",
+   "set_line": 27
+  },
+  {
+   "line": 10,
+   "template_line": 10,
+   "path": "/table",
+   "node": "set/fleet/port/ships/variant/table",
+   "set_line": 27
+  },
+  {
+   "line": 11,
+   "template_line": 11,
+   "path": "/",
+   "node": "set/fleet/port/ships/variant/table",
+   "set_line": 27
+  },
+  {
+   "line": 12,
+   "template_line": 12,
+   "path": "/",
+   "node": "set/fleet/port/ships/variant/table",
+   "set_line": 27
+  }
+ ]
+}

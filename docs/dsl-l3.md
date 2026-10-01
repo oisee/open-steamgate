@@ -155,7 +155,7 @@ carried is an error.
 
 ## Proof
 
-`test/dsl-l3.mjs` (registered in `test/suites.d/infra-misc.json`, 36 tests):
+`test/dsl-l3.mjs` (registered in `test/suites.d/infra-misc.json`, 72 tests, the ports' among them, see "Ports and adapters"):
 
 - the committed runner and report are a fresh build, and `check` notices a changed byte; the
   compiler names no domain word; each refusal above at its line;
@@ -227,7 +227,7 @@ rows under the run id it deleted; delete `ZOSD_L3_ALERT` rows of check date `209
 
 **On A4H.** The deploy unit `l3demo` (`deploy/manifest.json`) lists exactly what the proof needs:
 the four L2 tables and `ZOSD_L2_WEIGHT`, the six enabled rule classes (with their own generated
-tests, which the run will report too), `ZCL_L3_FLEET`, `ZL3_FLEET`, `ZOSD_L3_ALERT` and the proof.
+tests, which the run will report too), `ZCL_L3_FLEET` with its ports (below), `ZL3_FLEET`, `ZOSD_L3_ALERT` and the proof.
 The objects live in three folders and the tool takes one flat folder, so stage them first:
 
 ```
@@ -237,7 +237,9 @@ rm -rf .local/stage/l3demo && mkdir -p .local/stage/l3demo && cp \
   src/l2demo/zcl_l2_maintenance_ship.clas.* src/l2demo/zcl_l2_grounded_ship_crew.clas.* \
   src/l2demo/zcl_l2_ship_captain.clas.* src/l2demo/zcl_l2_ship_voyage_limit.clas.* \
   src/l2demo/zcl_l2_ship_min_crew.clas.* src/l2demo/zcl_l2_ship_cargo_limit.clas.* \
-  src/l2demo/zcl_l3_fleet.clas.* src/l2demo/zl3_fleet.prog.* src/l3proof/zcl_l3_fleet_proof.clas.* \
+  src/l2demo/zcl_l3_fleet.clas.* src/l2demo/zcl_l3_fleet_ports.clas.* src/l2demo/zcl_l3_fleet_ships_*.clas.* \
+  src/l2demo/zcl_l3_fleet_alerts_*.clas.* src/l2demo/zif_l3_fleet_*.intf.* src/l2demo/zcx_l3_fleet_port.clas.* \
+  src/l2demo/zl3_fleet.prog.* src/l3proof/zcl_l3_fleet_proof.clas.* \
   .local/stage/l3demo/
 node tools/osd-prove-on-system.mjs .local/stage/l3demo --unit l3demo --manifest deploy/manifest.json
 ```
@@ -256,6 +258,164 @@ The second run (2026-10-01, after the rename) passed end to end on A4H:
 - 109 ABAP Unit methods, all green: the six rule classes' own tests and the three proof methods, mode S, rerun and mode P;
 - **mode P ran on the system's own job scheduler**: six background jobs, `L3_FLEET_01` to `L3_FLEET_06`, all with status F (finished), within about a second. The log equals mode S's. This is the first check of this runtime's job emulation against a real scheduler;
 - cleanup by receipt removed every object and the package. The jobs stay in SM37's history, as a system keeps them.
+
+## Ports and adapters
+
+A **port** is a typed interface the runner talks to instead of a table: a `source` it reads rows
+from, a `sink` it writes rows through. Each port has **variants**, classes that implement the
+interface, and a **binding** says which variant a run uses. Real code of this shape writes each
+port as an interface with several hand-written implementations (local, remote, dummy) and picks one
+with a hard-coded `CREATE OBJECT`; the dummy and zero-footprint variants are copies. Here the
+interface, the dummy and capture variants and the factory are generated, through the same engine
+and with the same trace as the runner, and the choice is data.
+
+### The YAML
+
+In the set file (one file, so every port, variant and binding has its own line for the trace;
+a set without `ports:` gets the implicit `alerts` sink with the `log` variant and behaves as before):
+
+```yaml
+ports:
+  ships:
+    kind: source
+    table: ZOSD_L2_SHIP          # the row type: a DDIC table, checked against the DDIC given
+    key: ship_id                 # the field a key range is over
+    variants:
+      table: generated           # reads the table the rules read
+      capture: generated         # replays the rows it was given
+  alerts:
+    kind: sink
+    table: ZOSD_L3_ALERT         # the alert log: the one table the runner knows how to fill
+    group: [set_name, rule_name, model_hash, check_date]   # the key of one rule version and date
+    seq: alert_seq
+    variants:
+      log: generated             # today's MODIFY plus tail DELETE
+      dummy: generated           # takes the rows, counts them, writes nothing
+      capture: generated         # keeps the rows in memory for a test
+bindings:                        # the default variant of each port
+  ships: table
+  alerts: log
+```
+
+A variant is `generated` (a source: `table`, `dummy`, `capture`; a sink: `log`, `dummy`, `capture`)
+or the name of a **hand-written class** (`remote: zcl_my_ships_remote`). The compiler finds the
+class beside the set or under `src/` and reads it with abaplint: the named class itself must
+declare `INTERFACES zif_l3_<set>_<port>` and implement the port's method in its own
+IMPLEMENTATION (a source: `read`; a sink: `put`); a helper class in the same file counts for
+nothing. It is refused at the class's own file and line otherwise. A generated name over 30
+characters, a binding to a variant the port does not have, a port without a binding, a second sink
+and a field the table lacks are each refused at their manifest line. The runner knows exactly one
+sink (the alert log), so the set has exactly one.
+
+**A hand-written class is never bound in a replay, and nothing scans it to decide so.** An earlier
+draft let a class declare `replay_safe` and checked it for COMMIT and friends. That cannot be
+made sound: `WAIT UP TO` commits, a helper the class calls can commit, and a static scan of one
+file sees neither. So the rule is structural: a run whose source binding is a replay may bind only
+generated variants on every port, and the factory refuses any hand-written variant in that run
+before anything is created, read or swapped.
+
+### What is generated
+
+Per port `ZIF_L3_<SET>_<PORT>`:
+
+- a source: `TYPES tt_rows` (the table's rows) and `tt_range` (a range over the key),
+  `read( it_range ) RETURNING rt_rows`;
+- a sink: `tt_rows`, `ty_group` (the group's key fields) and `put( it_rows, is_group ) RETURNING
+  rv_count` (how many rows it took).
+
+Per generated variant `ZCL_L3_<SET>_<PORT>_<VARIANT>`: `table` selects the key range; `log` is
+exactly the old `write` (`MODIFY` per row, then `DELETE` of the group's rows past the last one),
+moved out of the runner; `dummy` counts; `capture` appends to a class attribute, with static
+`rows( )` and `reset( )` (a source's `dummy` and `capture` have `set_rows( )` and `reset( )`, the
+capture also `reads( )`). Also `ZCL_L3_<SET>_PORTS`, the factory, and `ZCX_L3_<SET>_PORT`, its
+exception (`CX_NO_CHECK`, with `port`, `variant` and `reason`, so a caller that never names
+bindings needs no `RAISING`).
+
+The factory has `get_<port>( iv_variant )`, which returns the implementation and refuses an unknown
+name with the exception (no silent default); `variant( iv_port, iv_bind )`, which is the manifest's
+binding unless the run's binding names the port; `swaps( iv_port, iv_bind )`; and `check( iv_bind,
+iv_parallel, iv_allow_replay )`. **`check` is pure data and creates nothing.** The generator knows
+each variant's kind and, for a generated one, whether it is volatile (keeps rows in this session:
+`dummy`, `capture`) and whether it replays (a source variant other than `table`); the factory
+holds that as plain comparisons on the variant name, and a hand-written class counts as live and
+not volatile and is never asked. `check` first resolves and validates every port's binding by
+name (unknown port, unknown variant), and only then refuses, in this order: a volatile variant
+in mode P, a replay in mode P, a hand-written variant in a replay, and a replay without the
+opt-in. No adapter has been created when any of them is raised. `swaps` is the same data: the
+runner swaps a table only when the source is bound to a generated replaying variant. Each file has a `.trace.json`: a line of a port's interface traces to the port's
+manifest line, a line of a variant class to the variant's line, the default `rv_variant = '...'`
+to the binding's line, and the runner's lines about a port (the swap, the write) to the port's line.
+
+### Bindings are data
+
+`run( iv_date, iv_mode, iv_bind )` and `run_rule( ..., iv_bind )` take the binding as a string,
+`'ships=capture,alerts=dummy'`; a port it does not name keeps the manifest's binding. The report
+has a parameter `P_BIND` and `submit` passes the string on, so a run in jobs carries it too. The
+same generated runner therefore runs against the log, in a test against a capture, or with a
+hand-written remote variant, with no rebuild. The runner reaches the alert sink through the
+factory (`write` builds the rows of one rule version and date and calls `put`), so the log
+variant is the only code that touches `ZOSD_L3_ALERT` on a write; mode S and P and the log
+behave as before under the default binding (the whole earlier proof is unchanged).
+
+### The replay seam
+
+**Never in production: it swaps table content in the caller's LUW.** It is a test and dev seam.
+A run that binds a source that is not live is refused with the typed exception, naming the
+source, before anything is read, written or swapped, unless the caller passes
+`iv_allow_replay = abap_true` to `run( )`. Only tests pass it.
+
+The L2 check classes read their tables themselves, in one joined `SELECT`, and a rule's rows cannot
+be handed to it. So a source bound to a generated variant other than `table` works by **replacing the table's content for the
+run**: the runner reads the table into a backup, asks the source for its rows (`read( )`), deletes
+the table and inserts those rows (the client field set to the logon client), runs the rules, and
+puts the backup back, all in the run's own LUW. The restore also happens when an exception
+leaves the run: the swap is in a `TRY` whose `CATCH cx_root` restores and raises again (the
+transpiler drops `CLEANUP`, `ANORMALIES.md`). What cannot be restored is a unit of work that was
+ended or split inside the swap, so nothing in the window may, and that is checked rather than
+promised: every generated check class is asserted by the compiler (with abaplint, on statements)
+to hold no COMMIT, ROLLBACK, WAIT, SUBMIT, CALL TRANSACTION, RECEIVE RESULTS, MODIFY, INSERT,
+UPDATE, DELETE, MERGE, update task, native SQL, or CALL FUNCTION with `IN UPDATE TASK`, `IN
+BACKGROUND`, `DESTINATION`, `STARTING NEW TASK` or a commit/rollback module; the generated runner
+and every generated variant are asserted to hold none of the unit-ending or splitting ones (the
+log variant writes; the runner's one SUBMIT is in the mode P path, which a replay refuses).
+Hand-written classes are not scanned, they are not bound (see above). The rules then see exactly the rows the source
+gave, including ones the table does not hold (`test/dsl-l3.mjs` replays two ships, one of them
+absent from the table, and finds that ship's alerts and none for the table's other ships), and the
+table is as it was afterwards. It is for one session at a time: a run in jobs refuses it (and
+refuses every volatile variant: a job of another session would not see in-memory rows). It
+swaps only the source port's table; the other tables the rules read stay real, and a source bound
+to `table` or to a hand-written class swaps nothing and reads nothing.
+
+### Proof
+
+In `test/dsl-l3.mjs`: explicit default bindings give the default log; `alerts=dummy` reports the
+same counts and writes no row; `alerts=capture` holds the log variant's rows (but for the run and
+its time) and the log stays empty; `ships=capture` with given rows replays them and the table
+comes back; an unknown variant or port is the typed refusal before anything is read or written; a
+run in jobs refuses `capture` and `dummy`; the compile-time refusals above, each at its line; the
+trace of every generated line to a manifest line. Mutants, each transpiled alone and swapped in
+by name, with a control copy that passes (the replay's own mutants: a runner that does not restore
+on an exception, caught by a rule that raises mid-replay and a step that looks at the table before
+it ends; a factory that ignores the opt-in): a factory that ignores the binding (always the
+default) is caught by `alerts=dummy` writing seven rows; a dummy sink that writes is caught the
+same way; a capture sink that drops a row is caught by the comparison with the log; a runner that
+never swaps the source in is caught by the rows given not being seen; a runner that skips the
+restore is caught by the table not being back; a factory that falls back to the default for an
+unknown variant is caught by the missing refusal. The ABAP Unit proof (`src/l3proof`) is
+unchanged.
+
+### Not here yet
+
+The pipeline around the ports (a pile planner that splits a key range over several workers, an
+order between stages, an audit sink and a provenance row), a schedule, and remote adapters (a
+variant that calls another system is a hand-written class today). A replay that does not touch the
+table needs the L2 check classes to take their rows from a port, a change in L2; a sink other than
+the alert log is not done either.
+
+The third run (2026-10-01, with ports and adapters, commit 65bd6731) passed the same way:
+- 24 objects imported and activated on A4H: the two port interfaces, five generated variants, the factory and its exception, plus the regenerated runner;
+- 109 tests green, the proof's mode P included, again on real background jobs;
+- cleanup by receipt left nothing.
 
 ## Not yet
 

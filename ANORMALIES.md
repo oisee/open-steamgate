@@ -3143,3 +3143,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Smallest safe workaround: `zcl_osd_submit_semantics` converts defaults and supplied input using the called report's declarations, and the one-shot registry merges repeated select-option rows before the selection host runs. The transpiler's `ty_values` is a sorted table with unique names, so the lowering combines repeated clauses before passing them to the registry.
 - Upstream: not raised; the compatibility layer is local to this report host.
 - Regression-test location: `test/unit/zcl_osd_batch_runner_test.clas.testclasses.abap`, `test/submit-semantics.mjs`, and `test/narrow-submit.mjs`.
+
+### ANOMALY-2026-10-01-cleanup-ignored — the transpiler drops the CLEANUP block of a TRY
+
+- Status: `workaround`
+- Discovery date: `2026-10-01`
+- Affected versions: `@abaplint/transpiler e34d6a1` (the generated JS carries the comment `Transpiler todo: CLEANUP ignored`)
+- Affected ABAP statement, runtime API or adapter: `TRY. ... CLEANUP. ... ENDTRY.`
+- Minimal ABAP reproducer: the L3 runner's replay in `recipes/l3-set/template.tpl` before the workaround; `test/dsl-l3.mjs`, "a rule that raises in the middle of a replay"
+- Exact command used to run it: `npx mocha test/dsl-l3.mjs -g "raises in the middle"`
+- Expected SAP behaviour: the CLEANUP block runs when an exception leaves the TRY uncaught, then the exception goes on
+- Actual open-abap behaviour: the block is dropped, nothing runs
+- Impact on open-steamgate: a replay's table restore would be skipped by an exception that escapes
+- Smallest safe workaround: `CATCH cx_root INTO lx. restore. RAISE EXCEPTION lx.` in the generated runner (same effect for class-based exceptions; a runtime error that is not a class exception is not caught on a system either way)
+- Upstream issue: none yet
+- Regression-test location: `test/dsl-l3.mjs`, "a rule that raises in the middle of a replay" and its no-restore mutant
+- Upstream version containing a fix: `unknown`

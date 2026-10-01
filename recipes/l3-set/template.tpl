@@ -30,14 +30,21 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
 {{#disabled}}
     " not run: {{name}} ({{file}}), enabled: false in the set
 {{/disabled}}
+    " iv_bind: the variant of each port for this run, "port=variant,port=variant";
+    " a port it does not name keeps the manifest's binding. A source that is not
+    " live replaces table content in the caller's LUW: a test and dev seam, never
+    " production, and refused unless iv_allow_replay says so.
     CLASS-METHODS run
       IMPORTING iv_date TYPE d
                 iv_mode TYPE c DEFAULT 'S'
+                iv_bind TYPE string OPTIONAL
+                iv_allow_replay TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rs_result) TYPE ty_result.
     CLASS-METHODS run_rule
       IMPORTING iv_rule TYPE csequence
                 iv_date TYPE d
                 iv_run TYPE csequence
+                iv_bind TYPE string OPTIONAL
       RETURNING VALUE(rs_rule) TYPE ty_rule.
     CLASS-METHODS collect
       IMPORTING is_result TYPE ty_result
@@ -52,10 +59,17 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_file TYPE csequence
                 iv_line TYPE i
                 it_alerts TYPE string_table
+                iv_bind TYPE string OPTIONAL
       CHANGING cs_rule TYPE ty_rule.
+{{#sources}}
+    " puts the rows of {{table}} back after a replay: the rows kept before it
+    CLASS-METHODS restore_{{index}}
+      IMPORTING it_keep TYPE {{iface}}=>tt_rows.
+{{/sources}}
     CLASS-METHODS submit
       IMPORTING iv_date TYPE d
                 iv_run TYPE csequence
+                iv_bind TYPE string OPTIONAL
       CHANGING cs_rule TYPE ty_rule.
 ENDCLASS.
 
@@ -66,6 +80,21 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lt_rules TYPE tt_rule.
     DATA ls_rule TYPE ty_rule.
     DATA lv_stamp TYPE timestampl.
+    DATA lv_parallel TYPE abap_bool.
+    DATA lx_error TYPE REF TO cx_root.
+{{#sources}}
+    DATA li_src_{{index}} TYPE REF TO {{iface}}.
+    DATA lv_swap_{{index}} TYPE abap_bool.
+    DATA lt_keep_{{index}} TYPE {{iface}}=>tt_rows.
+    DATA lt_scope_{{index}} TYPE {{iface}}=>tt_rows.
+    FIELD-SYMBOLS <ls_row_{{index}}> TYPE {{table}}.
+{{/sources}}
+    IF iv_mode = c_parallel.
+      lv_parallel = abap_true.
+    ENDIF.
+    {{ports_class}}=>check( iv_bind = iv_bind
+                          iv_parallel = lv_parallel
+                          iv_allow_replay = iv_allow_replay ).
     rs_result-set_name = c_set.
     rs_result-mode = iv_mode.
 {{#date}}
@@ -83,21 +112,65 @@ CLASS {{class}} IMPLEMENTATION.
         rs_result-run_id = lv_stamp.
     ENDTRY.
     lt_rules = rules( ).
-    LOOP AT lt_rules INTO ls_rule.
-      IF iv_mode = c_parallel.
-        submit( EXPORTING iv_date = rs_result-check_date
-                          iv_run = rs_result-run_id
-                CHANGING cs_rule = ls_rule ).
-      ELSE.
-        ls_rule = run_rule( iv_rule = ls_rule-rule
-                            iv_date = rs_result-check_date
-                            iv_run = rs_result-run_id ).
-        rs_result-alerts = rs_result-alerts + ls_rule-alerts.
-      ENDIF.
-      APPEND ls_rule TO rs_result-rules.
-    ENDLOOP.
+    " a source that is not live replaces table content for this run, and the
+    " table is put back whatever happens: after the loop, or when an exception
+    " leaves this method (CATCH and RAISE, which does what CLEANUP would; the
+    " transpiler drops CLEANUP, ANORMALIES.md). Nothing in here commits.
+    TRY.
+{{#sources}}
+        " {{table}}: the table's own rows are kept, the source's rows stand
+        " in their place, and the rules read them as they read the table
+        IF {{ports_class}}=>swaps( iv_port = {{name | literal}} iv_bind = iv_bind ) = abap_true.
+          li_src_{{index}} = {{ports_class}}=>get_{{name}}( {{ports_class}}=>variant( iv_port = {{name | literal}} iv_bind = iv_bind ) ).
+          SELECT * FROM {{table}} INTO TABLE lt_keep_{{index}}.
+          lt_scope_{{index}} = li_src_{{index}}->read( ).
+{{#has_client}}
+          LOOP AT lt_scope_{{index}} ASSIGNING <ls_row_{{index}}>.
+            <ls_row_{{index}}>-{{client}} = sy-mandt.
+          ENDLOOP.
+{{/has_client}}
+          lv_swap_{{index}} = abap_true.
+          DELETE FROM {{table}}.
+          INSERT {{table}} FROM TABLE lt_scope_{{index}}.
+        ENDIF.
+{{/sources}}
+        LOOP AT lt_rules INTO ls_rule.
+          IF iv_mode = c_parallel.
+            submit( EXPORTING iv_date = rs_result-check_date
+                              iv_run = rs_result-run_id
+                              iv_bind = iv_bind
+                    CHANGING cs_rule = ls_rule ).
+          ELSE.
+            ls_rule = run_rule( iv_rule = ls_rule-rule
+                                iv_date = rs_result-check_date
+                                iv_run = rs_result-run_id
+                                iv_bind = iv_bind ).
+            rs_result-alerts = rs_result-alerts + ls_rule-alerts.
+          ENDIF.
+          APPEND ls_rule TO rs_result-rules.
+        ENDLOOP.
+      CATCH cx_root INTO lx_error.
+{{#sources}}
+        IF lv_swap_{{index}} = abap_true.
+          restore_{{index}}( lt_keep_{{index}} ).
+        ENDIF.
+{{/sources}}
+        RAISE EXCEPTION lx_error.
+    ENDTRY.
+{{#sources}}
+    IF lv_swap_{{index}} = abap_true.
+      restore_{{index}}( lt_keep_{{index}} ).
+    ENDIF.
+{{/sources}}
   ENDMETHOD.
 
+{{#sources}}
+  METHOD restore_{{index}}.
+    DELETE FROM {{table}}.
+    INSERT {{table}} FROM TABLE it_keep.
+  ENDMETHOD.
+
+{{/sources}}
   METHOD rules.
     DATA ls_rule TYPE ty_rule.
 {{#rules}}
@@ -123,6 +196,7 @@ CLASS {{class}} IMPLEMENTATION.
                          iv_file = {{file | literal}}
                          iv_line = {{alert_line | literal}}
                          it_alerts = lt_alerts
+                         iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
 {{/rules}}
       WHEN OTHERS.
@@ -131,12 +205,16 @@ CLASS {{class}} IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD write.
-    " idempotent per (set, rule, model hash, check date): MODIFY on the key,
-    " and the rows past the last alert of this run go, so a rerun or a
-    " retried job leaves exactly this run's alerts under this rule version;
-    " the rows of other versions and dates stay
-    DATA ls_row TYPE zosd_l3_alert.
+    " the rows of one rule version and date go through the alert sink the run
+    " is bound to ({{sink.name}}); the log variant is idempotent per (set,
+    " rule, model hash, check date), see its class
+{{#sink}}
+    DATA ls_row TYPE {{table}}.
+    DATA lt_rows TYPE {{iface}}=>tt_rows.
+    DATA ls_group TYPE {{iface}}=>ty_group.
+    DATA li_sink TYPE REF TO {{iface}}.
     DATA lv_alert TYPE string.
+    DATA lv_count TYPE i.
     ls_row-set_name = c_set.
     ls_row-rule_name = cs_rule-rule.
     ls_row-model_hash = cs_rule-model_hash.
@@ -149,18 +227,18 @@ CLASS {{class}} IMPLEMENTATION.
     LOOP AT it_alerts INTO lv_alert.
       ls_row-alert_seq = sy-tabix.
       ls_row-alert_text = lv_alert.
-      MODIFY zosd_l3_alert FROM ls_row.
-      IF sy-subrc <> 0.
-        cs_rule-failed = cs_rule-failed + 1.
-      ENDIF.
+      APPEND ls_row TO lt_rows.
     ENDLOOP.
-    cs_rule-alerts = lines( it_alerts ).
-    DELETE FROM zosd_l3_alert
-      WHERE set_name = c_set
-        AND rule_name = cs_rule-rule
-        AND model_hash = cs_rule-model_hash
-        AND check_date = iv_date
-        AND alert_seq > cs_rule-alerts.
+    ls_group-set_name = c_set.
+    ls_group-rule_name = cs_rule-rule.
+    ls_group-model_hash = cs_rule-model_hash.
+    ls_group-check_date = iv_date.
+    li_sink = {{ports_class}}=>get_{{name}}( {{ports_class}}=>variant( iv_port = {{name | literal}} iv_bind = iv_bind ) ).
+    lv_count = li_sink->put( it_rows = lt_rows
+                             is_group = ls_group ).
+    cs_rule-alerts = lines( lt_rows ).
+    cs_rule-failed = cs_rule-alerts - lv_count.
+{{/sink}}
     IF cs_rule-failed = 0.
       cs_rule-status = 'DONE'.
     ELSE.
@@ -191,6 +269,7 @@ CLASS {{class}} IMPLEMENTATION.
       WITH p_rule = cs_rule-rule
       WITH p_date = iv_date
       WITH p_run = iv_run
+      WITH p_bind = iv_bind
       VIA JOB lv_jobname NUMBER lv_jobcount
       AND RETURN.
     CALL FUNCTION 'JOB_CLOSE'
