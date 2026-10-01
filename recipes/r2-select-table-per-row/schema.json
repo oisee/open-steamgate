@@ -1,0 +1,95 @@
+{
+ "object": {
+  "after": {
+   "array": {
+    "object": {
+     "text": "scalar"
+    }
+   }
+  },
+  "before": {
+   "array": {
+    "object": {
+     "text": "scalar"
+    }
+   }
+  },
+  "loop": {
+   "object": {
+    "row": "scalar",
+    "table": "scalar"
+   }
+  },
+  "names": {
+   "object": {
+    "all": "scalar",
+    "all_row": "scalar",
+    "saved_dbcnt": "scalar",
+    "saved_subrc": "scalar",
+    "saved_tabix": "scalar",
+    "work": "scalar"
+   }
+  },
+  "open": {
+   "array": "scalar"
+  },
+  "order": "scalar",
+  "position": "scalar",
+  "recipe": "scalar",
+  "result": {
+   "object": {
+    "assignments": {
+     "array": {
+      "object": {
+       "column": "scalar",
+       "component": "scalar"
+      }
+     }
+    },
+    "table": "scalar"
+   }
+  },
+  "source": {
+   "object": {
+    "conditions": {
+     "array": {
+      "object": {
+       "column": "scalar",
+       "text": "scalar"
+      }
+     }
+    },
+    "fields": {
+     "array": {
+      "object": {
+       "column": "scalar"
+      }
+     }
+    },
+    "keys": {
+     "array": {
+      "object": {
+       "column": "scalar",
+       "component": "scalar"
+      }
+     }
+    },
+    "primary": {
+     "array": {
+      "object": {
+       "column": "scalar"
+      }
+     }
+    },
+    "sort": {
+     "array": {
+      "object": {
+       "column": "scalar"
+      }
+     }
+    },
+    "table": "scalar"
+   }
+  }
+ }
+}

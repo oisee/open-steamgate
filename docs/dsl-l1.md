@@ -128,8 +128,10 @@ markers, so one command can regenerate every region of a tree without a table ke
 
 `<recipe>` is a folder under `recipes/` with a `template.tpl`; `from=` names the method of the
 same class (found through abaplint's structure) that the recipe's model is read from. The recipe
-registry in `tools/dsl-regions.mjs` (`RECIPES`) says how each recipe builds its model; today only
-`r1-lookup-enrich` (the `tools/lift.mjs` model of `from=`).
+registry in `tools/dsl-regions.mjs` (`RECIPES`) says how each recipe builds its model; today it includes
+`r1-lookup-enrich` (the `tools/lift.mjs` model of `from=`) and
+`r2-select-table-per-row` (one ordered `SELECT INTO TABLE` per row becomes a
+guarded `FOR ALL ENTRIES` fetch with a sorted result and reconstructed target).
 
 - `node tools/dsl-regions.mjs check <path>...` regenerates every region in the `*.abap` files under
   the paths (model, then `ZCL_OSD_TPL`, so `npm run transpile` first) and compares byte for byte:
@@ -144,8 +146,8 @@ registry in `tools/dsl-regions.mjs` (`RECIPES`) says how each recipe builds its 
 - A marker behind code on the same line, unbalanced, nested or malformed markers, an unknown recipe, a missing `from=` or a `from=` the
   class does not have are errors with file and line (exit 2).
 
-`test/dsl-regions.mjs` covers each of these; `test/lift-r1.mjs` reads its regions through the
-same parser (`region(source, from)`).
+`test/dsl-regions.mjs` covers each of these; `test/lift-r1.mjs` and
+`test/lift-r2.mjs` read their regions through the same parser (`region(source, from)`).
 
 ## Recipes as build units
 
@@ -158,9 +160,9 @@ and `<recipe>/<file>:<line>` in it.
  "profile": "text", "schema": "schema.json"}
 ```
 
-`model` names the provider, a small registry in `tools/dsl-build.mjs` (`lift-r1`, `abap-methods`,
-`abap-constants`, `json-file`) that maps it to the function building the model and to its sample input(s): the R1
-demo class for `lift-r1`, a `sample/` folder beside the two ABAP recipes, and JSON samples beside the daemon recipes. `profile` is `abap`, `sqlscript`, `text` or `xml`. `schema` is the model's shape: `"scalar"`, `{"object": {field: shape}}`, `{"array": shape}`.
+`model` names the provider, a small registry in `tools/dsl-build.mjs` (`lift-r1`, `lift-r2`,
+`abap-methods`, `abap-constants`, `json-file`) that maps it to the function building the model and to its sample
+input(s): the R1/R2 demo classes for the lift recipes, a `sample/` folder beside the two ABAP recipes, and JSON samples beside the daemon recipes. `profile` is `abap`, `sqlscript`, `text` or `xml`. `schema` is the model's shape: `"scalar"`, `{"object": {field: shape}}`, `{"array": shape}`.
 
 | step | what it does |
 |---|---|
