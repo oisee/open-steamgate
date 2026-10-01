@@ -982,7 +982,7 @@
         },
         "</b>"
       ],
-      "note": "a declared ISO-8859-1 document: the error offset counts input bytes (stoker measured 48; UTF-8 would be 49)",
+      "note": "a declared ISO-8859-1 document: the error offset counts the UTF-8 the system converts it to (48; input bytes would be 47, the declaration is 43 bytes); UTF-16 by contrast counts its own bytes",
       "group": "transcoded",
       "status": "measured-a4h-2026-10-01",
       "expected": [

@@ -61,20 +61,20 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: `test/unit/zcl_osd_sxml_contract_test.clas.testclasses.abap` (`reference_concat`)
 - Upstream version containing a fix: `unknown`
 
-### ANOMALY-2026-10-01-sxml-stream-transcoded-offsets -- the streaming sXML parser counts error offsets in its UTF-8 stream, not in a UTF-16 or Latin-1 input
+### ANOMALY-2026-10-01-sxml-stream-transcoded-offsets -- the streaming sXML parser counted a UTF-16 input's error offsets in its UTF-8 stream, not in the input's own bytes
 
-- Status: `open`
+- Status: `fixed`
 - Discovery date: `2026-10-01`
 - Affected versions: `ZCL_OSD_SXML_PULL` as first written
 - Affected ABAP statement, runtime API or adapter: `cx_sxml_parse_error-xml_offset` of `ZCL_OSD_SXML_PULL` / `ZCL_OSD_SXML_STREAM_READER` for input with a UTF-16 BOM or a declared ISO-8859-1 / US-ASCII
-- Minimal ABAP reproducer: `FFFE` then `<a></b>` in UTF-16LE through `ZCL_OSD_SXML_STREAM_READER=>CREATE( )`: the error offset is 3, the start of `</b>` in the UTF-8 the input was transcoded to
+- Minimal ABAP reproducer: `FFFE` then `<a></b>` in UTF-16LE through `ZCL_OSD_SXML_STREAM_READER=>CREATE( )`: the error offset was 3 before the fix (the start of `</b>` in the UTF-8 the input was transcoded to) and is 6 now, as on the system
 - Exact command used to run it: `npm run unit`, `test/unit/zcl_osd_sxml_stream_test` (`ltcl_pull->utf16_offset`)
-- Expected SAP behaviour: measured on A4H (2026-10-01, `CL_SXML_STRING_READER`): the offset counts the bytes of the input as given, the BOM not counted -- `FFFE` or `FEFF` then `<a></b>` in UTF-16 is 6; a declared ISO-8859-1 `<a>` `E9` `</b>` after a 44-byte declaration is 48 (the UTF-8 count would be 49)
-- Actual open-abap behaviour: the offset counts the bytes of the transcoded UTF-8 stream from its start (the BOM not counted); a US-ASCII byte above 7F is read as U+FFFD, not refused
+- Expected SAP behaviour: measured on A4H (2026-10-01, `CL_SXML_STRING_READER`): UTF-16 is counted in the input's own bytes, the BOM not counted -- `FFFE` or `FEFF` then `<a></b>` is 6, `<a>` `E9E9` `</b>` is 10 (UTF-8 would be 3 and 7); any other code page is counted in the UTF-8 the system converts it to -- a declared ISO-8859-1 `<a>` `E9` `</b>` after a 43-byte declaration is 48, with `E9E9` 50 (input bytes would be 47 and 48)
+- Actual open-abap behaviour: was: every transcoded input counted in its UTF-8, wrong for UTF-16 only. Now: `ZCL_OSD_SXML_PULL` maps a UTF-16 input's offset back to its bytes (2 per character, a surrogate pair 4); ISO-8859-1 / US-ASCII keep the UTF-8 count, as the system does. A US-ASCII byte above 7F is read as U+FFFD, not refused
 - Impact on open-steamgate: an error position in a non-UTF-8 document points at the wrong byte; values and events are unaffected
 - Smallest safe workaround: none needed for UTF-8 input; for the others, measure the system's offsets with a contract fixture before relying on them
 - Upstream issue: none; the parser is this repository's
-- Regression-test location: `test/unit/zcl_osd_sxml_stream_test.clas.testclasses.abap` (`ltcl_pull->utf16_offset` pins the current count; no A4H fixture yet)
+- Regression-test location: the A4H-recorded transcoded fixtures of the sXML contract (UTF-16LE/BE mismatched close at 6, declared ISO-8859-1 at 48), run against the streaming reader in `ltcl_readers->streaming`; `ltcl_pull->utf16_offset` in `test/unit/zcl_osd_sxml_stream_test.clas.testclasses.abap`
 - Upstream version containing a fix: not applicable
 
 ### ANOMALY-2026-10-01-find-byte-mode -- FIND ... IN BYTE MODE searches the hex text, and SECTION ... LENGTH loses its target
