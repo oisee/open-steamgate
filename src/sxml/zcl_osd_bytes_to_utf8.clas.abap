@@ -1,4 +1,5 @@
-"! A byte source in UTF-16 (LE or BE) or ISO-8859-1 handed out as UTF-8,
+"! A byte source in UTF-16 (LE or BE), ISO-8859-1 or US-ASCII handed out as
+"! UTF-8 (a US-ASCII byte above 7F becomes U+FFFD),
 "! chunk by chunk: a code unit or a surrogate pair cut by a chunk boundary
 "! waits for the next chunk. IV_HEAD is read before the source. A lone
 "! surrogate is passed through in its three-byte form, an odd byte at the
@@ -43,8 +44,10 @@ CLASS zcl_osd_bytes_to_utf8 IMPLEMENTATION.
         rv_kind = 'LE'.
       WHEN 'UTF-16BE' OR 'UTF-16'.
         rv_kind = 'BE'.
-      WHEN 'ISO-8859-1' OR 'ISO_8859-1' OR 'LATIN1' OR 'LATIN-1' OR 'US-ASCII' OR 'ASCII'.
+      WHEN 'ISO-8859-1' OR 'ISO_8859-1' OR 'LATIN1' OR 'LATIN-1'.
         rv_kind = 'L1'.
+      WHEN 'US-ASCII' OR 'ASCII'.
+        rv_kind = 'AS'.
     ENDCASE.
   ENDMETHOD.
 
@@ -114,7 +117,7 @@ CLASS zcl_osd_bytes_to_utf8 IMPLEMENTATION.
     DATA lv_code TYPE i.
     DATA lv_low TYPE i.
     WHILE xstrlen( rv ) = 0.
-      IF mv_eof = abap_false AND ( xstrlen( mv_pending ) < 4 OR mv_kind = 'L1' ).
+      IF mv_eof = abap_false AND ( xstrlen( mv_pending ) < 4 OR mv_kind = 'L1' OR mv_kind = 'AS' ).
         lv_chunk = mo_source->next( ).
         IF xstrlen( lv_chunk ) = 0.
           mv_eof = abap_true.
@@ -127,10 +130,14 @@ CLASS zcl_osd_bytes_to_utf8 IMPLEMENTATION.
         RETURN.
       ENDIF.
       lv_pos = 0.
-      IF mv_kind = 'L1'.
+      IF mv_kind = 'L1' OR mv_kind = 'AS'.
         WHILE lv_pos < lv_len.
           lv_byte = mv_pending+lv_pos(1).
           lv_code = lv_byte.
+          IF mv_kind = 'AS' AND lv_code > 127.
+* not ASCII: a replacement character, as for a byte that is not UTF-8
+            lv_code = 65533.
+          ENDIF.
           utf8( EXPORTING iv_code = lv_code
                 CHANGING  cv_out  = rv ).
           lv_pos = lv_pos + 1.
