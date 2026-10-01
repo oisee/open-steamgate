@@ -363,6 +363,28 @@ test("the classes beside a report, or in a --lib folder, are part of it", () => 
   }
 });
 
+// MESSAGE TYPE 'E', 'A', 'W' or 'X' in a FORM raises ZCX_GG_CONTROL_FLOW, an
+// open-abap-gui host class whose superclass CX_NO_CHECK only the host classes
+// name; it ends the run with the text on stderr and exit status 1, as a
+// background job with one is cancelled (apps/message)
+test("an E, A, W or X message ends the run with status 1, I, S and DISPLAY LIKE 'E' do not", () => {
+  execFileSync(process.execPath, [builder, join(here, "apps", "message", "zmessage.prog.abap")], {stdio: "inherit"});
+  for (const [mode, text, status, stdout] of [
+    ["E", "bad input", 1, "before\n"],
+    ["A", "abort", 1, "before\n"],
+    ["W", "warning", 1, "before\n"],
+    ["X", "dump", 1, "before\n"],
+    ["I", "info", 0, "before\nafter\n"],
+    ["S", "status", 0, "before\nafter\n"],
+    ["D", "looks bad", 0, "before\nafter\n"],
+  ]) {
+    const result = run(["--mode", mode]);
+    assert.equal(result.status, status, `${mode}: ${result.stderr}`);
+    assert.equal(result.stderr, text + "\n", mode);
+    assert.equal(result.stdout, stdout, mode);
+  }
+});
+
 test("MEMORY ID checkbox is a memory id, not a checkbox", () => {
   const dir = mkdtempSync(join(tmpdir(), "osabap-memid-"));
   try {

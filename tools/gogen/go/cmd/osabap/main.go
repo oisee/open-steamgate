@@ -111,6 +111,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, "unsupported:", result.unsupported)
 		os.Exit(2)
 	}
+	// a MESSAGE of any type but I and S ended the run (the host raises for
+	// E, A, W and X alike): on a system a background job with one is
+	// cancelled, so a script sees a failure (S DISPLAY LIKE 'E' does not count)
+	for _, m := range result.messages {
+		if m.type_ != "I" && m.type_ != "S" {
+			os.Exit(1)
+		}
+	}
 }
 
 // commandLine reads the arguments once; -help prints the usage and ends here

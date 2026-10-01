@@ -77,9 +77,21 @@ const namesIn = (text) => new Set(text.toLowerCase().match(/[a-z_/][a-z0-9_/]*/g
 const ownSources = [source, ...[dirname(report), ...libs].flatMap((folder) => readdirSync(folder)
   .filter((f) => /\.(clas|intf)\.(abap|locals_imp\.abap|locals_def\.abap)$/i.test(f))
   .map((f) => readFileSync(join(folder, f), "utf8")))];
+const hostObjects = [join(gui, "framework"), join(gui, "framework", "host")]
+  .flatMap((folder) => readdirSync(folder)
+    .filter((file) => /^(?:zcl_gg_host|zcx_gg_).*\.clas\.abap$/i.test(file) && !/\.testclasses\./i.test(file))
+    .map((file) => file.replace(/\.clas\.abap$/i, "")));
+// the host classes of open-abap-gui are compiled too, and a class needs its
+// superclass: ZCX_GG_CONTROL_FLOW, which MESSAGE TYPE 'E' raises, is a
+// CX_NO_CHECK, and without it every E or A message ended in NOT_COMPILED
+const hostSources = [join(gui, "framework"), join(gui, "framework", "host")]
+  .flatMap((folder) => readdirSync(folder)
+    .filter((file) => hostObjects.includes(file.replace(/\.clas\.abap$/i, "")))
+    .map((file) => readFileSync(join(folder, file), "utf8")));
+const superclasses = (text) => [...text.matchAll(/\bINHERITING\s+FROM\s+([\w\/]+)/gi)].map((m) => m[1].toLowerCase());
 const coreObjects = [];
 const seen = new Set(ownObjects);
-let pending = [...namesIn(ownSources.join("\n"))];
+let pending = [...namesIn(ownSources.join("\n")), ...hostSources.flatMap(superclasses)];
 while (pending.length > 0) {
   const next = [];
   for (const name of pending) {
@@ -112,10 +124,6 @@ const rttiObjects = readdirSync(join(core, "rtti"))
   .filter((file) => /^cl_abap_.*\.clas\.abap$/i.test(file))
   .map((file) => file.replace(/\.clas\.abap$/i, ""));
 const appRuntime = join(here, "apps", "runtime");
-const hostObjects = [join(gui, "framework"), join(gui, "framework", "host")]
-  .flatMap((folder) => readdirSync(folder)
-    .filter((file) => /^(?:zcl_gg_host|zcx_gg_).*\.clas\.abap$/i.test(file) && !/\.testclasses\./i.test(file))
-    .map((file) => file.replace(/\.clas\.abap$/i, "")));
 const program = compileProgram({
   folders: [generated, ...libs, appRuntime, join(gui, "framework"), join(gui, "src"), core],
   objects: [className.toLowerCase(), ...ownObjects, ...coreObjects, ...hostObjects, ...rttiObjects, "zcl_gg_workbench_utility",
