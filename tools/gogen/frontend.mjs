@@ -3420,7 +3420,13 @@ function ownInterfaceAttributes(program, intf) {
     const entry = {name, intf, readOnly: readOnly(st)};
     if (st?.findFirstExpression(Expressions.Value)) entry.unsupported = `${name}: VALUE on an interface DATA does not activate on A4H`;
     else {
-      try { entry.type = typeOf(a.getType(), name, program); } catch (e) { if (!(e instanceof Unsupported)) throw e; entry.unsupported = e.message; }
+      // an anonymous structure (DATA BEGIN OF qname ...) is the interface's
+      // type, named after the interface: typed while a class that implements
+      // it is compiled, it was named after that class, and the interface's
+      // accessor in another package then named a type it cannot see
+      const owner = program.currentClass;
+      program.currentClass = goName(intf);
+      try { entry.type = typeOf(a.getType(), name, program); } catch (e) { if (!(e instanceof Unsupported)) throw e; entry.unsupported = e.message; } finally { program.currentClass = owner; }
     }
     out.push(entry);
   }
