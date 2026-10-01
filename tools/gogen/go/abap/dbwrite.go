@@ -178,10 +178,19 @@ func duplicateKey(err error) bool {
 	return false
 }
 
-// the rows of one INSERT statement: SQLite takes 32766 parameters, so a big
-// table goes in parts, the counts summed (ON CONFLICT DO NOTHING is per row,
-// so parts answer what one statement would)
-const insertChunk = 500
+// the rows of one INSERT statement: a big table goes in parts, the counts
+// summed (ON CONFLICT DO NOTHING is per row, so parts answer what one
+// statement would). A part is sized by its parameters, not its rows:
+// modernc.org/sqlite binds each parameter by scanning the arguments for its
+// ordinal, so one statement costs the square of its parameters (500 rows of
+// 15 columns: 28 million comparisons). insertParams keeps that small while a
+// statement still carries many rows; parts of the same size share one cached
+// prepared statement.
+var insertParams = 256
+
+func insertChunk(columns int) int {
+	return max(1, insertParams/max(1, columns))
+}
 
 // InsertRows is INSERT dbtab FROM wa (onDuplicate "error", one row),
 // FROM TABLE ("raise") and FROM TABLE ... ACCEPTING DUPLICATE KEYS ("ignore").
@@ -203,8 +212,9 @@ func InsertRows(s *Session, w WriteSpec, rows [][]any, onDuplicate string) {
 		return
 	}
 	var written int64
-	for at := 0; at < len(rows); at += insertChunk {
-		part := rows[at:min(at+insertChunk, len(rows))]
+	chunk := insertChunk(len(w.Cols))
+	for at := 0; at < len(rows); at += chunk {
+		part := rows[at:min(at+chunk, len(rows))]
 		bound := make([][]*IR, len(part))
 		for i, r := range part {
 			bound[i] = w.row(r)
