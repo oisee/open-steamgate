@@ -161,21 +161,22 @@ functions:
     const sidecar = JSON.parse((await abap.Classes.ZCL_OSD_DSL_TRACE.sidecar({
       iv_generator: box("dsl-dpc"), iv_template: box("dpc_class"), io_model: baseModel, is_result: base,
     })).get());
+    // exact counts measured 2026-10-01 (5/1/1/1): a mutation that starts touching more or fewer lines fails
     const changes = [
-      {node: json["@id"], edit: (data) => { data.generated_on = "02.10.2026"; }},
-      {node: json.declarations[0]["@id"], edit: (data) => { data.declarations[0].method += "_ALT"; }},
-      {node: json.sadl_sources[0]["@id"], edit: (data) => { data.sadl_sources[0].binding += "_ALT"; }},
-      {node: json.sadl_structures[0].properties[0]["@id"],
+      {count: 5, node: json["@id"], edit: (data) => { data.generated_on = "02.10.2026"; }},
+      {count: 1, node: json.declarations[0]["@id"], edit: (data) => { data.declarations[0].method += "_ALT"; }},
+      {count: 1, node: json.sadl_sources[0]["@id"], edit: (data) => { data.sadl_sources[0].binding += "_ALT"; }},
+      {count: 1, node: json.sadl_structures[0].properties[0]["@id"],
         edit: (data) => { data.sadl_structures[0].properties[0].abap_field += "_ALT"; }},
     ];
-    for (const {node, edit} of changes) {
+    for (const {count, node, edit} of changes) {
       const changed = structuredClone(json);
       edit(changed);
       const result = await abap.Classes.ZCL_OSD_DSL_DPC.render_model({io_model: await parse(changed)});
       const lines = result.get().lines.array().map((line) => line.get());
       expect(lines.length, `${node} line count`).to.equal(baseLines.length);
       const indices = lines.flatMap((line, i) => line !== baseLines[i] ? [i] : []);
-      expect(indices.length, `${node} changed lines`).to.be.greaterThan(0);
+      expect(indices.length, `${node} changed lines`).to.equal(count);
       expect(indices.every((i) => sidecar.lines[i].node === node), `${node} changed only own lines`).to.equal(true);
       expect(sidecar.lines.filter((line) => line.node === node).length, `${node} has traced lines`).to.be.greaterThan(0);
     }
