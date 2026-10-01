@@ -25,7 +25,7 @@ func hostRun(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_
 	return hostRunRequest(s, report, input, batch, present, "", "")
 }
 
-func hostRunRequest(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, batch, present, valueRequest, confirmedWarning string) ZCL_GG_HOST__TY_RESULT {
+func hostRunRequest(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, batch, present, valueRequest, confirmedWarnings string) ZCL_GG_HOST__TY_RESULT {
 	values := make([]*ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, len(input))
 	for i := range input {
 		values[i] = &input[i]
@@ -33,7 +33,7 @@ func hostRunRequest(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SEL
 	empty := []*ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE(nil)
 	return ZCL_GG_HOST_RUN(s, report, nil, appProgram, "1000", "", 0, batch,
 		&values, &empty, &empty, "ONLI", "", valueRequest, "", "", 0, 1, "", "", "", 0,
-		"", "", "", "", "", present, "", confirmedWarning, &ZIF_GG_HOST_HTML_V1__TY_NAVIGATION{}, &ZIF_GG_SESSION_TYPES_V1__TY_SUBMIT{})
+		"", "", "", "", "", present, "", confirmedWarnings, &ZIF_GG_HOST_HTML_V1__TY_NAVIGATION{}, &ZIF_GG_SESSION_TYPES_V1__TY_SUBMIT{})
 }
 
 var stopProfile = func() {}
@@ -101,12 +101,13 @@ func main() {
 				if err != nil {
 					panic(err)
 				}
-				confirm := retry.confirms(input)
-				abap.DialogStep(func() { result = hostRunRequest(s, report, input, "", "", "", confirm) })
+				confirmed := retry.confirms(input)
+				abap.DialogStep(func() { result = hostRunRequest(s, report, input, "", "", "", strings.Join(confirmed, "\n")) })
 				next, again := selectionAgain(result, input)
 				if !again {
 					break
 				}
+				next.confirmed = confirmed
 				screen, retry = result, next
 			}
 		}

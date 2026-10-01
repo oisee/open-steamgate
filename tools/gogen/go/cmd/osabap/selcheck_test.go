@@ -18,9 +18,10 @@ func selcheckRun(t *testing.T, values map[string]selectionInput, retry selection
 	report := newReport(s)
 	input := selectionValues(values)
 	var result ZCL_GG_HOST__TY_RESULT
-	confirm := retry.confirms(input)
-	abap.DialogStep(func() { result = hostRunRequest(s, report, input, "", "", "", confirm) })
+	confirmed := retry.confirms(input)
+	abap.DialogStep(func() { result = hostRunRequest(s, report, input, "", "", "", strings.Join(confirmed, "\n")) })
 	next, again := selectionAgain(result, input)
+	next.confirmed = confirmed
 	return result, next, again
 }
 
@@ -95,5 +96,11 @@ func TestSelectionSecondWarningIsSentAfterTheFirst(t *testing.T) {
 	_, retry, again = selcheckRun(t, values, retry)
 	if !again || retry.kind != "W" || retry.text != "Really sure" {
 		t.Fatalf("second: %+v again %v", retry, again)
+	}
+	// the third Enter confirms both and the report runs; the two warnings
+	// do not take turns
+	result, _, again := selcheckRun(t, values, retry)
+	if again || !strings.Contains(lines(result), "ran") {
+		t.Fatalf("third: again %v lines %q", again, lines(result))
 	}
 }

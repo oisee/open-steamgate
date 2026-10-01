@@ -16,6 +16,9 @@ import (
 type selectionRetry struct {
 	kind, text, field, ready string
 	warned                   []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE
+	// confirmed: the warnings already confirmed with these values; a run
+	// starts the events over, so each is passed again
+	confirmed []string
 }
 
 // selectionAgain says whether the result is a selection screen to send again.
@@ -29,14 +32,14 @@ func selectionAgain(result ZCL_GG_HOST__TY_RESULT, input []ZIF_GG_SELECTION_SCRE
 		ready: strings.TrimSpace(e.ready), warned: input}, true
 }
 
-// confirms is the host's iv_confirmed_warning for the next run: the text of
-// the warning shown, when the values are the ones it was given. Only that
-// warning lets its event go on; a later one is sent like the first.
-func (r selectionRetry) confirms(input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE) string {
+// confirms is the host's iv_confirmed_warnings for the next run: when the
+// values are the ones the warning was given, the warnings confirmed so far
+// and this one. A warning not confirmed yet is sent like the first.
+func (r selectionRetry) confirms(input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE) []string {
 	if r.kind == "W" && reflect.DeepEqual(r.warned, input) {
-		return r.text
+		return append(append([]string(nil), r.confirmed...), r.text)
 	}
-	return ""
+	return nil
 }
 
 func (r selectionRetry) apply(form termgui.Form) termgui.Form {

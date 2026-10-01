@@ -301,7 +301,7 @@ run:
 `START-OF-SELECTION` runs only once the checks pass. Escape still cancels.
 Headless runs are unchanged: the message goes to stderr and the status is 1.
 The host reports this as `selection_error` of `ZCL_GG_HOST=>RUN` and takes the
-confirmation as `iv_confirmed_warning`; `tools/gogen/apps/selcheck` is the
+confirmation as `iv_confirmed_warnings`; `tools/gogen/apps/selcheck` is the
 sample, `cmd/osabap/selcheck_test.go` the test. An error in
 `AT SELECTION-SCREEN ON BLOCK`, `ON RADIOBUTTON GROUP` or `ON END OF` leaves
 every field ready, where SAP GUI readies the block's or the group's fields
