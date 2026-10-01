@@ -3,6 +3,27 @@
   "about": "What may leave this repository for a real system, by object. tools/osd-abapgit-zip.mjs refuses any object that is not listed in the unit it builds, and any object with an SAP-owned name even when it is listed, unless the entry says why it is intended. See docs/a4h-deploy.md, section 'What may leave for a system'.",
   "customerNamespaces": [],
   "units": {
+    "l3demo": {
+      "description": "The DSL L3 fleet set and its ABAP Unit proof (docs/dsl-l3.md, Proof): the four L2 tables and their data element, the six enabled rule classes, the runner, its job report, the alert log and the proof class. Staged into one flat folder from src/l2demo, src/dsl and src/l3proof.",
+      "sources": ["src/l3proof"],
+      "objects": [
+        "TABL ZOSD_L2_SHIP",
+        "TABL ZOSD_L2_VOY",
+        "TABL ZOSD_L2_CREW",
+        "TABL ZOSD_L2_CARGO",
+        "DTEL ZOSD_L2_WEIGHT",
+        "TABL ZOSD_L3_ALERT",
+        "CLAS ZCL_L2_MAINTENANCE_SHIP",
+        "CLAS ZCL_L2_GROUNDED_SHIP_CREW",
+        "CLAS ZCL_L2_SHIP_CAPTAIN",
+        "CLAS ZCL_L2_SHIP_VOYAGE_LIMIT",
+        "CLAS ZCL_L2_SHIP_MIN_CREW",
+        "CLAS ZCL_L2_SHIP_CARGO_LIMIT",
+        "CLAS ZCL_L3_FLEET",
+        "PROG ZL3_FLEET",
+        "CLAS ZCL_L3_FLEET_PROOF"
+      ]
+    },
     "lift-r3-probe": {
       "description": "Disposable R3 ABAP/Open SQL comparison probe; the unit owns its synthetic table and class.",
       "sources": ["recipes/r3-filter-into-where/a4h-probe"],

@@ -29,6 +29,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-01-assert-equals-table-length-msg -- assert_equals on two tables of different length reports its own text, not MSG
+
+- Status: `open`
+- Discovery date: `2026-10-01`
+- Affected versions: `oisee/open-abap-core 909179a` (`src/unit/cl_abap_unit_assert.clas.abap`, the table branch of `assert_equals`)
+- Affected ABAP statement, runtime API or adapter: `cl_abap_unit_assert=>assert_equals( act = lt_a exp = lt_b msg = '...' )` with `lines( lt_a ) <> lines( lt_b )`
+- Minimal ABAP reproducer: the L3 proof's `rerun` method (`src/l3proof/zcl_l3_fleet_proof.clas.testclasses.abap`) against a runner that drops a rule
+- Exact command used to run it: `npx mocha test/dsl-l3.mjs`, "a runner that drops a rule"
+- Expected SAP behaviour: the failure carries the caller's MSG (ABAP Unit shows it as the alert's description), with the difference as detail; not measured on A4H
+- Actual open-abap behaviour: the alert text is `Expected table to contain <n> rows, got <m>` and MSG is dropped; equal-length tables that differ do carry MSG
+- Impact on open-steamgate: a failing table comparison says how it differs but not which check failed; the test still fails
+- Smallest safe workaround: none needed; `test/dsl-l3.mjs` accepts either text for that mutant
+- Upstream issue: none yet (open-abap-core; for the lead)
+- Regression-test location: `test/dsl-l3.mjs`, "a runner that drops a rule"
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-10-01-assert-differs-never-fails -- open-abap-core's cl_abap_unit_assert=>assert_differs passes on equal values
 
 - Status: `workaround`

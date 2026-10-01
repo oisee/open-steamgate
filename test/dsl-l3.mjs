@@ -420,6 +420,8 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
         "gen/gui/zcl_osd_batch_report.clas.abap",
         ...readdirSync(OUT).filter((f) => /^zosd_l2_.*\.(tabl|dtel)\.xml$/.test(f)).map((f) => join(OUT, f)),
         ...model.rules.flatMap((r) => [`${OUT}/${r.check_class}.clas.abap`, `${OUT}/${r.check_class}.clas.xml`]),
+        // a mutant of the ABAP Unit proof calls the committed runner
+        ...(name === RUNNER ? [] : [`${OUT}/${RUNNER}.clas.abap`, `${OUT}/${RUNNER}.clas.xml`]),
         ...["ddic/ttyp/string_table.ttyp.xml", "ddic/structures/symsg.tabl.xml"].map((p) => join(CORE, p)),
         // CL_SYSTEM_UUID and the exception classes it raises, with their roots
         ...["uuid", "exceptions", ".", "ddic/dtel", "ddic/doma"].flatMap((folder) => readdirSync(join(CORE, folder))
@@ -475,6 +477,151 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
         await loadRunner("zcl_l3_fleet_m3", mutate(text, `VALUE '${right}'.`, `VALUE 'sha256:${"0".repeat(64)}'.`));
         const {problems} = await logProblems("zcl_l3_fleet_m3");
         expect(problems.join("\n")).to.match(new RegExp(`maintenance-ship-no-future-voyage 1: model hash sha256:0{64} is not the rule's ${right}`));
+      });
+    });
+
+    // The ABAP Unit proof (src/l3proof, docs/dsl-l3.md "Proof") is the same
+    // source the lead runs on a system. `npm run unit` runs mode_s and rerun
+    // and skips mode_p by configuration (abap_transpile.json), because there
+    // no ABAP Unit method runs in a dialog step, the database is in memory and
+    // nothing executes a released job. Here the class gets what a system gives
+    // it: each method (setup, the method, teardown) is one dialog step on a
+    // file database, and beside it runs the loop `osd-batch-runs worker` runs,
+    // drain the outbox and work the queue. That loop takes the work process
+    // like any step, so a job runs only while the proof's WAIT has given it up,
+    // which is when a background work process gets the CPU on a system.
+    describe("the ABAP Unit proof ZCL_L3_FLEET_PROOF, each method a dialog step, a job worker beside it", () => {
+      const PROOF = "zcl_l3_fleet_proof";
+      const PROOF_DIR = "src/l3proof";
+      const CHECK_DATE = "20991001";
+      let worker;
+      const startWorker = () => {
+        const state = {stop: false, errors: [], ran: 0};
+        state.done = (async () => {
+          while (!state.stop) {
+            try {
+              await drainJobOutbox(store);
+              const outcome = await workQueuedBatch(root, store);
+              if (["completed", "failed", "step"].includes(outcome.kind)) state.ran++;
+              else await new Promise((r) => setTimeout(r, 50));
+            } catch (e) {
+              state.errors.push(String(e?.message ?? e));
+              state.stop = true;
+            }
+          }
+        })();
+        return state;
+      };
+      // no job of the set queued or running, so nothing writes after this
+      const settled = async () => {
+        for (let i = 0; i < 400; i++) {
+          const open = read("SELECT COUNT(*) AS n FROM zosd_job_outbox")[0].n
+            + store.list().filter((r) => r.jobName.startsWith("L3_FLEET_") && !["COMPLETED", "FAILED", "INTERRUPTED"].includes(r.state)).length;
+          if (open === 0) return;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        throw new Error("the worker did not settle");
+      };
+      const failureOf = (e) => {
+        const text = (x) => (x?.get ? String(x.get()) : x === undefined ? undefined : String(x));
+        return text(e?.msg) ?? text(e?.message) ?? String(e);
+      };
+      // one ABAP Unit method as ABAP Unit runs it: a fresh instance, setup,
+      // the method, teardown; here inside one dialog step
+      const runMethod = (local, method) => dialogStep(async () => {
+        const test = await (new local()).constructor_();
+        const own = test.FRIENDS_ACCESS_INSTANCE;
+        await own.setup();
+        try { await own[method](); } finally { await own.teardown(); }
+      }).then(() => undefined, failureOf);
+      const proofClass = async (module = pathToFileURL(join(root, "output", `${PROOF}.clas.testclasses.mjs`)).href) => (await import(module)).ltcl_proof;
+      const ours = () => ({
+        log: read("SELECT COUNT(*) AS n FROM zosd_l3_alert WHERE check_date = ?", CHECK_DATE)[0].n,
+        seed: read("SELECT COUNT(*) AS n FROM zosd_l2_ship WHERE ship_id LIKE 'L30%'")[0].n,
+      });
+      // a runner mutant answers every call the proof (and a job) makes to ZCL_L3_FLEET
+      const withRunner = async (name, work) => {
+        const real = abap.Classes.ZCL_L3_FLEET;
+        abap.Classes.ZCL_L3_FLEET = abap.Classes[name.toUpperCase()];
+        try { return await work(); } finally { abap.Classes.ZCL_L3_FLEET = real; }
+      };
+
+      before(() => { worker = startWorker(); });
+      after(async () => {
+        worker.stop = true;
+        await worker.done;
+        await exec([`DELETE FROM zosd_l3_alert WHERE check_date = '${CHECK_DATE}'`]);
+      });
+      afterEach(() => expect(worker.errors, "the worker").to.deep.equal([]));
+
+      it("passes on this runtime, mode_p included: six jobs run while it waits, and it leaves nothing behind", async () => {
+        const local = await proofClass();
+        const before = new Set(store.list().map((r) => r.id));
+        const failures = {};
+        for (const method of ["mode_s", "rerun", "mode_p"]) failures[method] = await runMethod(local, method);
+        expect(failures).to.deep.equal({mode_s: undefined, rerun: undefined, mode_p: undefined});
+        const runs = store.list().filter((r) => !before.has(r.id));
+        expect(runs.map((r) => r.jobName).sort(), "six jobs ran").to.deep.equal(model.rules.map((_, i) => `L3_FLEET_0${i + 1}`));
+        expect(runs.map((r) => r.state)).to.deep.equal(Array(6).fill("COMPLETED"));
+        expect(ours(), "teardown deleted the seed and the runs' rows").to.deep.equal({log: 0, seed: 0});
+      });
+
+      it("npm run unit runs mode_s and rerun and skips mode_p by configuration, said in the run", () => {
+        const index = readFileSync(join(root, "output", "index.mjs"), "utf8");
+        const entry = index.split("ret.push(").find((e) => e.includes(`"${PROOF.toUpperCase()}"`));
+        expect(entry).to.include('{"name":"mode_s","skip":false},{"name":"rerun","skip":false},{"name":"mode_p","skip":true}');
+        expect(entry).to.include('riskLevel: "DANGEROUS"');
+      });
+
+      it("the class is what a system needs: unit tests flagged, 7-bit ASCII, lines under 255", () => {
+        expect(readFileSync(join(PROOF_DIR, `${PROOF}.clas.xml`), "utf8")).to.include("<WITH_UNIT_TESTS>X</WITH_UNIT_TESTS>");
+        for (const f of readdirSync(PROOF_DIR)) {
+          const text = readFileSync(join(PROOF_DIR, f), "utf8");
+          expect(/^[\x09\x0a\x0d\x20-\x7e]*$/.test(text), `${f} is 7-bit ASCII`).to.equal(true);
+          expect(Math.max(...text.split("\n").map((l) => l.length)), f).to.be.below(255);
+        }
+      });
+
+      describe("mutants it catches", () => {
+        it("a runner that drops a rule: mode S runs five, and the log misses the rule's alerts", async () => {
+          const lines = "    ls_rule-rule = c_rule_6.\n    ls_rule-model_hash = c_hash_6.\n    ls_rule-jobname = 'L3_FLEET_06'.\n    APPEND ls_rule TO rt_rules.\n";
+          await loadRunner("zcl_l3_fleet_pm1", mutate(renamed("zcl_l3_fleet_pm1"), lines, ""));
+          const local = await proofClass();
+          const failures = await withRunner("zcl_l3_fleet_pm1", async () => ({
+            mode_s: await runMethod(local, "mode_s"), rerun: await runMethod(local, "rerun")}));
+          expect(failures.mode_s).to.equal("mode S runs the six enabled rules");
+          // open-abap-core's assert_equals answers a table of another length
+          // with its own text and not with msg; a system shows msg
+          expect(failures.rerun).to.be.oneOf(["after the rerun the log is still the union of the checks",
+            "Expected table to contain 12 rows, got 10"]);
+          expect(ours()).to.deep.equal({log: 0, seed: 0});
+        });
+
+        it("INSERT instead of MODIFY: the first run passes, the rerun cannot rewrite its rows", async () => {
+          await loadRunner("zcl_l3_fleet_pm2", mutate(renamed("zcl_l3_fleet_pm2"), "      MODIFY zosd_l3_alert FROM ls_row.", "      INSERT zosd_l3_alert FROM ls_row."));
+          const local = await proofClass();
+          const failures = await withRunner("zcl_l3_fleet_pm2", async () => ({
+            mode_s: await runMethod(local, "mode_s"), rerun: await runMethod(local, "rerun")}));
+          expect(failures.mode_s).to.equal(undefined);
+          expect(failures.rerun).to.match(/^the rerun: every rule DONE expected, got L3_FLEET_01 .* WRITE-FAILED ;/);
+          expect(ours()).to.deep.equal({log: 0, seed: 0});
+        });
+
+        it("mode P that does not wait: collect reads the jobs before they ran, and the proof names their states", async () => {
+          const name = `${PROOF}_pm3`;
+          const tests = readFileSync(join(PROOF_DIR, `${PROOF}.clas.testclasses.abap`), "utf8").replaceAll(PROOF, name);
+          await loadRunner(name, readFileSync(join(PROOF_DIR, `${PROOF}.clas.abap`), "utf8").replaceAll(PROOF, name), {
+            extra: {[`${name}.clas.testclasses.abap`]: mutate(tests, "      WAIT UP TO 1 SECONDS.\n", "")}});
+          const local = await proofClass(pathToFileURL(join(scratch, name, `${name}.clas.testclasses.mjs`)).href);
+          const failure = await runMethod(local, "mode_p");
+          expect(failure).to.match(/^the jobs did not end within 180 seconds: L3_FLEET_01 \d{8} maintenance-ship-no-future-voyage READY ;/);
+          expect(failure.match(/ READY ;/g)).to.have.length(6);
+          // the jobs were released all the same: they run once the step is
+          // over, after the teardown, and write under the run it deleted
+          await settled();
+          expect(ours().seed).to.equal(0);
+          await exec([`DELETE FROM zosd_l3_alert WHERE check_date = '${CHECK_DATE}'`]);
+        });
       });
     });
 

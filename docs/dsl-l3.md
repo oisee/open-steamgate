@@ -143,7 +143,7 @@ carried is an error.
 
 ## Proof
 
-`test/dsl-l3.mjs` (registered in `test/suites.d/infra-misc.json`, 30 tests):
+`test/dsl-l3.mjs` (registered in `test/suites.d/infra-misc.json`, 36 tests):
 
 - the committed runner and report are a fresh build, and `check` notices a changed byte; the
   compiler names no domain word; each refusal above at its line;
@@ -161,6 +161,82 @@ carried is an error.
 - mutants of the generated runner, each transpiled alone under another class name, with a control
   copy that passes the same check: `INSERT` for `MODIFY`, one rule dropped from `rules( )`, and a
   wrong model hash constant. Each makes the log check report a problem.
+
+### The ABAP Unit proof, for this runtime and a system
+
+`ZCL_L3_FLEET_PROOF` (`src/l3proof/`, its own folder and package so the deploy unit can name it
+without the rest of `src/l2demo`) carries a local test class `ltcl_proof`, `RISK LEVEL DANGEROUS`
+(it commits) and `DURATION MEDIUM`. Not `LONG`: vsp runs ABAP Unit with short and medium tests
+only unless `include_long` is passed, and `tools/osd-prove-on-system.mjs` passes
+`include_dangerous` alone, so a long class would not run on the system at all. The source is the
+same on both sides; nothing in it asks which system it is on.
+
+- `setup` inserts the mocha proof's fleet again under keys that start with `L30` (no generated L2
+  test uses them) and commits; every run uses the check date `20991001`
+  (`ZCL_L3_FLEET_PROOF=>C_CHECK_DATE`), which no other log group uses, so a run's `MODIFY` and
+  tail `DELETE` touch only the proof's rows. `teardown` deletes the seed and every alert row of
+  the runs the method made, by run id, and commits. Job logs and SM37 history stay.
+- `mode_s`: the six rules' own `check` answers (the classes called directly) hold seven alerts
+  about the seeded keys, from six rules; `run( 'S' )` reports six rules `DONE` and as many alerts,
+  and the log of that run equals the union of the answers.
+- `rerun`: a second run is a run of its own, every rule `DONE`, the log identical and still the
+  union, and no row of the date naming another run.
+- `mode_p`: `run( 'P' )` reports six rules `SUBMITTED`; the caller commits; a bounded loop calls
+  `collect( )`, then `WAIT UP TO 1 SECONDS`, until every job is `FINISHED` or `ABORTED`, and gives
+  up after 180 s with each rule's job name, count and status in the failure. Then every rule is
+  `FINISHED`, each counts the alerts mode S counted, and the log of the parallel run equals mode S's.
+
+**Where its jobs run.** On a system the background work processes run the jobs while the test
+session sits in `WAIT`. On this runtime three things stand in the way inside the ABAP Unit loop
+(`output/index.mjs`, and `UnitRun` in `tools/osd-unit.mjs`): `JOB_OPEN` goes through the `JOBS`
+destination, which needs a dialog step (`tools/osd-job-port.mjs`: "JOB_* requires a dialog step"),
+and no test method runs in one; that destination also needs `STG_DB=file`, and `npm run unit`
+runs in memory; and nothing executes a released job in that process, since the outbox drain and the
+queue are worked by `osd-batch-runs worker` or by a test (`drainJobOutbox`, `workQueuedBatch`).
+Making the unit loop give every method a step, a file and a worker would change every test's
+LUW and is not small, so it is not done. Instead:
+
+- `npm run unit` runs `mode_s` and `rerun` and skips `mode_p` by configuration
+  (`options.skip` in `abap_transpile.json`, printed as "skipped due to configuration");
+- `test/dsl-l3.mjs` runs the whole class, `mode_p` included, on its file database: each method
+  (setup, method, teardown) as one dialog step, with the worker's own loop (drain the outbox, work
+  the queue) running beside it in the process. That loop takes the work process like any step, so a
+  job runs only while the proof's `WAIT` has given it up. The suite checks that the six jobs ran,
+  that the proof passed and that it left no seed and no log rows behind.
+
+The same suite runs three mutants through the proof: a runner that drops a rule (`mode_s` fails,
+six rules expected; `rerun` fails, the log is not the union), `INSERT` for `MODIFY` (`mode_s`
+passes, `rerun` fails with the rules `WRITE-FAILED`), and a proof whose wait loop has no `WAIT`
+(collect reads the jobs before they ran; it fails naming six jobs `READY`, and the released jobs
+then run after the teardown, which is the case the next paragraph warns about).
+
+If `mode_p` gives up on a system, the jobs it released may still run after `teardown` and write
+rows under the run id it deleted; delete `ZOSD_L3_ALERT` rows of check date `20991001` by hand.
+
+**On A4H.** The deploy unit `l3demo` (`deploy/manifest.json`) lists exactly what the proof needs:
+the four L2 tables and `ZOSD_L2_WEIGHT`, the six enabled rule classes (with their own generated
+tests, which the run will report too), `ZCL_L3_FLEET`, `ZL3_FLEET`, `ZOSD_L3_ALERT` and the proof.
+The objects live in three folders and the tool takes one flat folder, so stage them first:
+
+```
+rm -rf .local/stage/l3demo && mkdir -p .local/stage/l3demo && cp \
+  src/l2demo/zosd_l2_ship.tabl.xml src/l2demo/zosd_l2_voy.tabl.xml src/l2demo/zosd_l2_crew.tabl.xml \
+  src/l2demo/zosd_l2_cargo.tabl.xml src/l2demo/zosd_l2_weight.dtel.xml src/dsl/zosd_l3_alert.tabl.xml \
+  src/l2demo/zcl_l2_maintenance_ship.clas.* src/l2demo/zcl_l2_grounded_ship_crew.clas.* \
+  src/l2demo/zcl_l2_ship_captain.clas.* src/l2demo/zcl_l2_ship_voyage_limit.clas.* \
+  src/l2demo/zcl_l2_ship_min_crew.clas.* src/l2demo/zcl_l2_ship_cargo_limit.clas.* \
+  src/l2demo/zcl_l3_fleet.clas.* src/l2demo/zl3_fleet.prog.* src/l3proof/zcl_l3_fleet_proof.clas.* \
+  .local/stage/l3demo/
+node tools/osd-prove-on-system.mjs .local/stage/l3demo --unit l3demo --manifest deploy/manifest.json
+```
+
+The trace sidecars are copied and left out of the zip like every sidecar; anything else in the
+folder that the unit does not list refuses the zip. Keep `--osg` at its default, `count`: `--osg
+run` runs the class through `UnitRun` in the tool's own process, where `mode_p` has neither step,
+file nor worker and fails.
+
+TODO(lead): run the line above on A4H; when it passes, record the run here and drop "running on
+A4H" from "Not yet".
 
 ## Not yet
 
