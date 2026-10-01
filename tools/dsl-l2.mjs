@@ -836,6 +836,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
       op: threshold.op, value: threshold.value,
       keys: group_keys.map((k) => ({"@id": k["@id"], rule_line: k.rule_line, name: k.name,
         table: outer.table.toLowerCase(), column: k.source.split("~")[1]})),
+      for_fields: [...fields.values()].filter((f) => f.source.startsWith(`${outer.alias}~`)),
       key_list: group_keys.map((k) => k.name).join(" "),
       read_key: group_keys.map((k) => `${k.name} = ls_for-${k.name}`).join(" "),
       join_key: group_keys.map((k) => `${k.name} = ${qwa}-${k.name}`).join(" "),
@@ -854,6 +855,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
         on: oneOuter ? topWhere.map((node) => c.conditions[node.index]) : c.on,
         ...(oneOuter ? {one_outer: true} : {})})),
       where: whereLines(oneOuter ? whenTree : condition), order, alert_parts: parts,
+      ...(oneOuter || (kind === "limit" && !zero) ? {sort_by: group_keys.map((k) => k.name).join(" ")} : {}),
       ...(kind === "limit" && !zero ? {limit: threshold, group_keys,
         key_change: group_keys.map((k) => `${qwa}-${k.name} <> ls_prev-${k.name}`).join(" OR ")} : {})};
   });

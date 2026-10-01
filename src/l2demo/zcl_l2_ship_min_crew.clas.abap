@@ -20,8 +20,12 @@ CLASS zcl_l2_ship_min_crew IMPLEMENTATION.
              ship_ship_id TYPE zosd_l2_ship-ship_id,
              cnt TYPE i,
            END OF ty_count.
-    DATA lt_for TYPE STANDARD TABLE OF ty_join WITH DEFAULT KEY.
-    DATA ls_for TYPE ty_join.
+    TYPES: BEGIN OF ty_for,
+             ship_ship_id TYPE zosd_l2_ship-ship_id,
+             ship_name TYPE zosd_l2_ship-name,
+           END OF ty_for.
+    DATA lt_for TYPE STANDARD TABLE OF ty_for WITH DEFAULT KEY.
+    DATA ls_for TYPE ty_for.
     DATA lt_count TYPE SORTED TABLE OF ty_count WITH UNIQUE KEY ship_ship_id.
     DATA ls_count TYPE ty_count.
     DATA lv_alert TYPE string.

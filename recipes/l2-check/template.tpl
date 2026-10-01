@@ -28,8 +28,13 @@ CLASS {{class}} IMPLEMENTATION.
 {{/keys}}
              cnt TYPE i,
            END OF ty_count.
-    DATA lt_for TYPE STANDARD TABLE OF {{type}} WITH DEFAULT KEY.
-    DATA ls_for TYPE {{type}}.
+    TYPES: BEGIN OF ty_for,
+{{#for_fields}}
+             {{name}} TYPE {{table}}-{{column}},
+{{/for_fields}}
+           END OF ty_for.
+    DATA lt_for TYPE STANDARD TABLE OF ty_for WITH DEFAULT KEY.
+    DATA ls_for TYPE ty_for.
     DATA lt_count TYPE SORTED TABLE OF ty_count WITH UNIQUE KEY {{key_list}}.
     DATA ls_count TYPE ty_count.
 {{#one_outer}}
@@ -48,9 +53,9 @@ CLASS {{class}} IMPLEMENTATION.
 {{^one_outer}}
 {{#for_query}}
     SELECT
-{{#fields}}
+{{#for_fields}}
         {{source}} AS {{name}}
-{{/fields}}
+{{/for_fields}}
 {{#from}}
       FROM {{table}} AS {{alias}}
 {{/from}}
@@ -101,10 +106,14 @@ CLASS {{class}} IMPLEMENTATION.
         {{source}}{{#@last}}.{{/@last}}
 {{/order}}
 {{#zero}}
+{{#one_outer}}
+    SORT {{itab}} BY {{sort_by}}.
+{{/one_outer}}
     LOOP AT {{itab}} INTO {{wa}}.
 {{#one_outer}}
       IF lv_seen IS INITIAL OR {{key_change}}.
-        APPEND {{wa}} TO lt_for.
+        MOVE-CORRESPONDING {{wa}} TO ls_for.
+        APPEND ls_for TO lt_for.
       ENDIF.
       lv_seen = 'X'.
       ls_prev = {{wa}}.
@@ -139,6 +148,9 @@ CLASS {{class}} IMPLEMENTATION.
     ENDLOOP.
 {{/zero}}
 {{^zero}}
+{{#limit}}
+    SORT {{itab}} BY {{sort_by}}.
+{{/limit}}
     LOOP AT {{itab}} INTO {{wa}}.
 {{#limit}}
       IF lv_count > 0 AND ( {{key_change}} ).
