@@ -256,3 +256,25 @@ test("the classes beside a report, or in a --lib folder, are part of it", () => 
     rmSync(dir, {recursive: true, force: true});
   }
 });
+
+test("MEMORY ID checkbox is a memory id, not a checkbox", () => {
+  const dir = mkdtempSync(join(tmpdir(), "osabap-memid-"));
+  try {
+    writeFileSync(join(dir, "zmemid.prog.abap"), [
+      "REPORT zmemid.",
+      "PARAMETERS p_mem TYPE c LENGTH 10 MEMORY ID checkbox LOWER CASE.",
+      "PARAMETERS p_cb AS CHECKBOX.",
+      "START-OF-SELECTION.",
+      "  WRITE: / p_mem, p_cb.",
+      ""].join("\n"));
+    execFileSync(process.execPath, [builder, join(dir, "zmemid.prog.abap")], {stdio: "inherit"});
+    const out = run(["--mem", "hello", "--cb"]);
+    assert.equal(out.status, 0, out.stderr);
+    assert.match(out.stdout, /^hello\s+X\n$/);
+    const positional = run(["hi"]);
+    assert.equal(positional.status, 0, positional.stderr);
+    assert.match(positional.stdout, /^hi\b/);
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
