@@ -180,12 +180,12 @@ func duplicateKey(err error) bool {
 
 // the rows of one INSERT statement: a big table goes in parts, the counts
 // summed (ON CONFLICT DO NOTHING is per row, so parts answer what one
-// statement would). A part is sized by its parameters, not its rows:
-// modernc.org/sqlite binds each parameter by scanning the arguments for its
-// ordinal, so one statement costs the square of its parameters (500 rows of
-// 15 columns: 28 million comparisons). insertParams keeps that small while a
-// statement still carries many rows; parts of the same size share one cached
-// prepared statement.
+// statement would). A part is sized by its parameters, not its rows, which
+// keeps it under SQLite's parameter limit at any width. It was also what
+// kept modernc.org/sqlite's bind linear: before v1.60.1 it scanned the
+// arguments for every parameter (modernc-org/sqlite#8), and 500 rows of 15
+// columns cost 28 million comparisons. Parts of the same size share one
+// cached prepared statement.
 const insertParams = 256
 
 func insertChunk(columns int) int {
