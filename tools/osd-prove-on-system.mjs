@@ -1,8 +1,8 @@
 // The same ABAP Unit on OSG and on a sandbox system, in one command.
 //
 //   node tools/osd-prove-on-system.mjs <folder> --unit <unit> [--manifest m.json]
-//        [--package $ZOSG_TMP_X] [--keep] [--osg count|run] [--server <name>]
-//   node tools/osd-prove-on-system.mjs --cleanup --package $ZOSG_TMP_X
+//        [--package $ZOSG_TMP_X] [--keep] [--reuse] [--osg count|run] [--server <name>]
+//   node tools/osd-prove-on-system.mjs <folder> --unit <unit> --cleanup --package $ZOSG_TMP_X
 //
 // Why (Alice, 2026-10-01): "proven by runs on systems, OSG included". The
 // first such proof was walked by hand on A4H for the L2 rules -- a zip of
@@ -22,13 +22,21 @@
 // The steps, each a small MCP call, because a long call can be cut by
 // "context canceled":
 //   1. zip the folder (tools/osd-abapgit-zip.mjs, fail closed on the unit);
-//   2. create the local package (`create DEVC`, an existing one is reused);
-//   3. import it with abapGit (`analyze execute_abap`), reusing the repo
-//      the package already has;
+//   1a. read what the package holds -- repository, TDEVC, TADIR -- and refuse
+//      a package that is not new, since step 6 purges it; `--reuse` admits
+//      one whose objects are exactly the zip's (an earlier run's leftovers);
+//   2. create the local package (`create DEVC`) unless --reuse found it;
+//   3. import it with abapGit (`analyze execute_abap`);
 //   4. read SEOCLASSDF-WITH_UNIT_TESTS and the CCAU line count per class;
 //   5. ABAP Unit per class (`test CLAS`);
-//   6. purge, delete the repo if it is still registered, and verify that no
-//      package, no TADIR row and no repo is left.
+//   6. read the package again and purge only if every object in it is one
+//      of the zip's; delete the repo if it is still registered; verify that
+//      no package, no TADIR row and no repo is left.
+//
+// Missing evidence is never a pass: no status, no class-check entry, a unit
+// result that is not JSON or does not name the class, a report without its
+// end marker, a zip without classes, or no test method run on the system
+// all fail the run.
 //
 // `execute_abap` prints nothing a caller can read: the program's result
 // comes back as the title of a failed assertion. So every snippet ends with
@@ -41,7 +49,7 @@ import {tmpdir} from "node:os";
 import {basename, join, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {runsAs} from "./osd-main.mjs";
-import {layout, zip} from "./osd-abapgit-zip.mjs";
+import {layout, zipInProcess} from "./osd-abapgit-zip.mjs";
 import {loadManifest, unitFor} from "./osd-deploy-manifest.mjs";
 
 export const MARK_OPEN = "OSDPROVE<<";
@@ -205,10 +213,48 @@ export function cleanupAbap(pkg) {
   ].join("\n") + "\n";
 }
 
+// how many TADIR rows one alert title carries; more than this cannot be
+// checked, and an inventory that cannot be checked refuses
+const MAX_INVENTORY = 200;
+
+/** Before the import and before the purge: what the package holds now --
+ *  the repository registered for it, whether the package exists, and its
+ *  TADIR objects. Nothing is changed. */
+export function inventoryAbap(pkg) {
+  return [
+    "DATA lv_out TYPE string.",
+    "DATA lv_n TYPE i.",
+    "DATA li_repo TYPE REF TO zif_abapgit_repo.",
+    "TRY.",
+    "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
+    `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
+    "    IF li_repo IS BOUND.",
+    "      lv_out = |repo={ li_repo->get_key( ) };|.",
+    "    ELSE.",
+    "      lv_out = |repo=none;|.",
+    "    ENDIF.",
+    "  CATCH cx_root INTO DATA(lx).",
+    "    lv_out = |ERR { lx->get_text( ) };|.",
+    "ENDTRY.",
+    `SELECT COUNT(*) FROM tdevc WHERE devclass = '${pkg}' INTO @DATA(lv_devc).`,
+    "lv_out = |{ lv_out } tdevc={ lv_devc };|.",
+    `SELECT object, obj_name FROM tadir WHERE devclass = '${pkg}' INTO TABLE @DATA(lt_tadir).`,
+    "lv_out = |{ lv_out } tadir={ lines( lt_tadir ) };|.",
+    "LOOP AT lt_tadir INTO DATA(ls_t).",
+    "  lv_n = lv_n + 1.",
+    `  IF lv_n <= ${MAX_INVENTORY}.`,
+    "    lv_out = |{ lv_out } obj={ ls_t-object }:{ ls_t-obj_name };|.",
+    "  ENDIF.",
+    "ENDLOOP.",
+    report("lv_out"),
+  ].join("\n") + "\n";
+}
+
 // ------------------------------------------------------------------- parsing
 
 /** The framed message of a snippet's fail( ), or undefined when vsp's text
- *  carries none (the program did not reach its last line). */
+ *  carries none (the program did not reach its last line). A message whose
+ *  end marker is missing is returned as truncated, and a caller fails it. */
 export function reportOf(text) {
   const s = String(text);
   const i = s.indexOf(MARK_OPEN);
@@ -229,8 +275,19 @@ export function parseImport(msg) {
     status: field(msg, "status"),
     err,
     logs,
-    logCount: Number(field(msg, "logs") ?? logs.length),
+    logCount: Number(field(msg, "logs") ?? NaN),
     tadir: Number(field(msg, "tadir") ?? NaN),
+  };
+}
+
+export function parseInventory(msg) {
+  const objects = [...msg.matchAll(/obj=([A-Z0-9]+):([^;]*);/g)].map((m) => `${m[1]} ${m[2].trim()}`);
+  return {
+    err: /ERR ([^;]*);/.exec(msg)?.[1],
+    repo: field(msg, "repo"),
+    tdevc: Number(field(msg, "tdevc") ?? NaN),
+    tadir: Number(field(msg, "tadir") ?? NaN),
+    objects,
   };
 }
 
@@ -253,18 +310,23 @@ export function parseCleanup(msg) {
 }
 
 /** ADT's unit result as vsp returns it: classes[].testMethods[], a failure
- *  carries alerts[] with a title. No classes is a run of nothing. */
+ *  carries alerts[] with a title. `error` is set when the text is not JSON
+ *  or the class is not in it: no evidence, which is never a pass. */
 export function parseUnit(text, className) {
   const s = String(text);
   const i = s.indexOf("{");
   let json;
   try {
-    json = i < 0 ? {} : JSON.parse(s.slice(i));
+    if (i < 0) throw new Error("no JSON");
+    json = JSON.parse(s.slice(i));
   } catch {
-    return {methods: 0, failing: [], unreadable: s.slice(0, 300)};
+    return {methods: 0, failing: [], error: `unit result is not JSON: ${s.slice(0, 200)}`};
   }
-  const classes = (json.classes ?? []).filter((c) => c.parentName === undefined
-    || String(c.parentName).toUpperCase() === className);
+  const classes = (Array.isArray(json.classes) ? json.classes : [])
+    .filter((c) => String(c.parentName ?? "").toUpperCase() === className);
+  if (classes.length === 0) {
+    return {methods: 0, failing: [], error: `the unit result names no test class of ${className}`};
+  }
   const failing = [];
   let methods = 0;
   for (const c of classes) {
@@ -278,7 +340,6 @@ export function parseUnit(text, className) {
   }
   return {methods, failing};
 }
-
 // ---------------------------------------------------------------- OSG side
 
 /** Every class of the folder with its FOR TESTING methods, from abaplint's
@@ -333,18 +394,24 @@ export function osgRunner() {
 
 // --------------------------------------------------------------------- zip
 
-/** Step 1, as tools/osd-abapgit-zip.mjs does it for a folder: only what the
- *  unit lists, fail closed. Returns the bytes and the classes. */
+/** abapGit file name -> "TYPE NAME" (`#ns#x.clas.xml` -> "CLAS /NS/X"). */
+const objectKey = (type, name) => `${type} ${String(name).toUpperCase().replace(/#/g, "/")}`;
+
+/** Step 1, as tools/osd-abapgit-zip.mjs lays a folder out: only what the
+ *  unit lists, fail closed. The zip itself is written in this process
+ *  (`zipInProcess`), not by the `zip` binary, so no child is spawned.
+ *  Returns the bytes, the objects ("TYPE NAME") and the classes. */
 export function buildZip(folder, {unit: unitName, manifest} = {}) {
   const unit = unitFor(loadManifest(manifest), folder, unitName);
   const work = mkdtempSync(join(tmpdir(), "osd-prove-"));
   try {
     const staging = join(work, "repo");
-    const out = join(work, "repo.zip");
     const laid = layout(folder, staging, `open-steamgate prove: ${basename(resolve(folder))}`, undefined, unit);
-    zip(staging, out);
-    return {bytes: readFileSync(out), classes: [...(laid.objects.get("CLAS") ?? [])].map((c) => c.toUpperCase()).sort(),
-      unit: unit.name};
+    const objects = [];
+    for (const [type, names] of laid.objects) for (const n of names) objects.push(objectKey(type, n));
+    objects.sort();
+    const classes = objects.filter((o) => o.startsWith("CLAS ")).map((o) => o.slice(5));
+    return {bytes: zipInProcess(staging), objects, classes, unit: unit.name};
   } finally {
     rmSync(work, {recursive: true, force: true});
   }
@@ -359,11 +426,71 @@ async function exec(mcp, code, step) {
     throw Object.assign(new Error(`${step}: the system sent no report (the snippet did not reach its fail( )): `
       + String(text).slice(0, 600)), {code: "NO_REPORT"});
   }
+  if (r.truncated) {
+    throw Object.assign(new Error(`${step}: the report has no end marker, so it may be cut: ${r.message.slice(0, 300)}`),
+      {code: "TRUNCATED"});
+  }
   return r;
 }
 
-/** Steps 6: returns {ok, problems, parsed}. */
-export async function cleanup(mcp, pkg, log = () => {}) {
+/** What the package holds, read and checked for completeness. Throws when
+ *  the answer cannot be relied on. */
+async function inventory(mcp, pkg, step) {
+  const r = await exec(mcp, inventoryAbap(pkg), step);
+  const inv = parseInventory(r.message);
+  if (inv.err !== undefined) throw new Error(`${step}: ${inv.err}`);
+  if (inv.repo === undefined || Number.isNaN(inv.tdevc) || Number.isNaN(inv.tadir)) {
+    throw new Error(`${step}: the inventory is incomplete: ${r.message.trim()}`);
+  }
+  if (inv.objects.length !== inv.tadir) {
+    throw new Error(`${step}: ${inv.tadir} TADIR object(s), ${inv.objects.length} listed; what is not listed cannot be checked`);
+  }
+  // the package's own DEVC row is not one of the zip's objects and is ours to remove with it
+  inv.foreign = inv.objects.filter((o) => o !== `DEVC ${pkg}`);
+  return inv;
+}
+
+/** May the import go into this package? Without --reuse only a package
+ *  that does not exist yet; with it, one whose objects are none or exactly
+ *  the zip's (the leftovers of an earlier run of the same zip). Returns the
+ *  refusals, empty when admitted. */
+export function admitPackage(inv, zipObjects, reuse, pkg) {
+  const lines = (list) => list.map((o) => `    ${o}`).join("\n");
+  if (!reuse) {
+    const why = [];
+    if (inv.repo !== "none") why.push(`abapGit repository ${inv.repo} is registered for it`);
+    if (inv.foreign.length > 0) why.push(`it holds ${inv.foreign.length} object(s):\n${lines(inv.foreign)}`);
+    else if (inv.tdevc > 0) why.push("the package already exists (a purge would delete it)");
+    return why.length === 0 ? [] : [`refused: ${pkg} is not new: ${why.join("; ")}. `
+      + "The cleanup purges the package, so it must not hold anything this run did not bring. "
+      + "If this is what an earlier run of the same zip left, pass --reuse."];
+  }
+  if (inv.foreign.length === 0) return [];
+  const zip = new Set(zipObjects);
+  const have = new Set(inv.foreign);
+  const extra = inv.foreign.filter((o) => !zip.has(o));
+  const missing = zipObjects.filter((o) => !have.has(o));
+  if (extra.length === 0 && missing.length === 0) return [];
+  return [`refused: --reuse takes a package whose objects are exactly the zip's, and ${pkg} differs:`
+    + (extra.length ? `\n  not in the zip:\n${lines(extra)}` : "")
+    + (missing.length ? `\n  in the zip, not in the package:\n${lines(missing)}` : "")];
+}
+
+/** Step 6: inventory first; purge only when every object in the package is
+ *  one of the zip's; then verify nothing is left. */
+export async function cleanup(mcp, pkg, zipObjects, log = () => {}) {
+  let inv;
+  try {
+    inv = await inventory(mcp, pkg, "cleanup inventory");
+  } catch (e) {
+    return {ok: false, problems: [`purge refused: ${e.message}`]};
+  }
+  const zip = new Set(zipObjects);
+  const extra = inv.foreign.filter((o) => !zip.has(o));
+  if (extra.length > 0) {
+    return {ok: false, problems: [`purge refused: ${pkg} holds ${extra.length} object(s) that are not the zip's, `
+      + `and a purge would delete them:\n${extra.map((o) => `    ${o}`).join("\n")}`]};
+  }
   const problems = [];
   let r;
   try {
@@ -381,52 +508,90 @@ export async function cleanup(mcp, pkg, log = () => {}) {
   return {ok: problems.length === 0, problems, parsed: c};
 }
 
+/** The import's evidence, checked: a parsed status of S, or W with its W
+ *  messages carried back and shown (W passes then: abapGit's W is a
+ *  warning about an object that was still deserialised); E, A, no status,
+ *  an unknown status, an exception, or messages not carried back fail. */
+export function judgeImport(imp) {
+  const problems = [];
+  if (imp.err !== undefined) problems.push(`import failed: ${imp.err}`);
+  if (imp.status === undefined) problems.push("import: the report carries no abapGit status");
+  else if (imp.status === "W") {
+    if (!imp.logs.some((l) => l.type === "W")) problems.push("import status W with no W message carried back");
+  } else if (imp.status !== "S") problems.push(`import status ${imp.status}`);
+  for (const l of imp.logs) if (l.type !== "W") problems.push(`import log [${l.type}] ${l.text}`);
+  if (Number.isNaN(imp.logCount)) problems.push("import: the report carries no log count");
+  else if (imp.logCount > imp.logs.length) {
+    problems.push(`import log: ${imp.logCount - imp.logs.length} more message(s) not carried back`);
+  }
+  if (Number.isNaN(imp.tadir)) problems.push("import: the report carries no TADIR count");
+  return problems;
+}
+
 /** Steps 1-6. `mcp` is {call(action, target, params) -> text}; `osg` is a
  *  provider ({mode, methods(cls)}); `zipper` builds the zip. */
-export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep = false, mcp, osg, zipper = buildZip,
-  log = () => {}}) {
+export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep = false, reuse = false, mcp, osg,
+  zipper = buildZip, log = () => {}}) {
   pkg = checkPackage(pkg);
   const problems = [];
   const rows = [];
+  const done = (extra = {}) => ({ok: problems.length === 0, problems, rows, pkg, osgMode: osg.mode,
+    systemMethods: rows.reduce((n, r) => n + r.system, 0), osgMethods: rows.reduce((n, r) => n + r.osg, 0), ...extra});
 
   const built = zipper(folder, {unit, manifest});
   const classes = built.classes;
+  if (classes.length === 0) {
+    problems.push(`nothing to prove: unit "${built.unit}" puts no class in the zip`);
+    return done();
+  }
   for (const c of classes) {
     if (!CLASS_NAME.test(c)) throw new Error(`class name ${c} cannot be put into an ABAP literal`);
   }
-  log(`zip: ${built.bytes.length} bytes, unit "${built.unit}", ${classes.length} class(es)`);
+  log(`zip: ${built.bytes.length} bytes, unit "${built.unit}", ${built.objects.length} object(s), ${classes.length} class(es)`);
 
-  const devc = await mcp.call("create", `DEVC ${pkg}`, {name: pkg, description: "open-steamgate prove-on-system (temporary)"});
-  if (/^ERROR/i.test(devc) && !/exist/i.test(devc)) {
-    problems.push(`package ${pkg} not created: ${devc.slice(0, 300)}`);
-    return {ok: false, problems, rows, classes, pkg, osgMode: osg.mode};
+  // read before anything is written: the cleanup purges the package
+  let inv;
+  try {
+    inv = await inventory(mcp, pkg, "preflight");
+  } catch (e) {
+    problems.push(`refused: ${e.message}`);
+    return done({refused: true});
   }
-  log(`package ${pkg}: ${/exist/i.test(devc) ? "exists, reused" : "created"}`);
+  const refusals = admitPackage(inv, built.objects, reuse, pkg);
+  if (refusals.length > 0) {
+    problems.push(...refusals);
+    return done({refused: true});
+  }
 
-  let imported;
+  if (inv.tdevc === 0) {
+    const devc = await mcp.call("create", `DEVC ${pkg}`, {name: pkg, description: "open-steamgate prove-on-system (temporary)"});
+    if (/^ERROR/i.test(devc)) {
+      problems.push(`package ${pkg} not created: ${devc.slice(0, 300)}`);
+      return done();
+    }
+    log(`package ${pkg}: created`);
+  } else {
+    log(`package ${pkg}: exists, reused (--reuse)`);
+  }
+
   try {
     try {
       const r = await exec(mcp, importAbap(built.bytes, pkg), "import");
-      imported = parseImport(r.message);
-      log(`import: ${r.message.trim()}${r.truncated ? " (truncated)" : ""}`);
-      if (imported.err !== undefined) problems.push(`import failed: ${imported.err}`);
-      if (imported.status === "E" || imported.status === "A") problems.push(`import status ${imported.status}`);
-      for (const l of imported.logs) {
-        if (l.type !== "W") problems.push(`import log [${l.type}] ${l.text}`);
-      }
-      if (imported.logCount > imported.logs.length) {
-        problems.push(`import log: ${imported.logCount - imported.logs.length} more message(s) not carried back`);
-      }
+      log(`import: ${r.message.trim()}`);
+      problems.push(...judgeImport(parseImport(r.message)));
     } catch (e) {
       problems.push(e.message);
     }
 
     let check = new Map();
-    if (classes.length > 0 && problems.length === 0) {
+    if (problems.length === 0) {
       try {
         const r = await exec(mcp, classCheckAbap(classes), "class check");
         check = parseClassCheck(r.message);
         log(`classes: ${r.message.trim()}`);
+        for (const cls of classes) {
+          if (!check.has(cls)) problems.push(`class check: no entry for ${cls}`);
+        }
       } catch (e) {
         problems.push(e.message);
       }
@@ -435,38 +600,59 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
     if (problems.length === 0) {
       for (const cls of classes) {
         const here = await osg.methods(cls);
+        const info = check.get(cls);
+        const row = {cls, osg: here.methods, system: 0, failing: [], notes: []};
+        rows.push(row);
+        for (const f of here.failing) problems.push(`${cls}: fails on OSG: ${f}`);
+        if (!info.found) {
+          row.notes.push("not active on the system");
+          problems.push(`${cls}: not active on the system`);
+          continue;
+        }
+        if (here.methods === 0 && !info.wut && info.ccau === 0) {
+          // no tests here and, by SEOCLASSDF and the CCAU include, none there
+          row.notes.push("no tests on either side; ABAP Unit not called");
+          continue;
+        }
+        if (here.methods > 0 && !info.wut) row.notes.push("WITH_UNIT_TESTS is not set on the system");
+        if (here.methods > 0 && info.ccau === 0) {
+          row.notes.push("no CCAU include on the system (WITH_UNIT_TESTS missing from the class XML?)");
+        }
         const text = await mcp.call("test", `CLAS ${cls}`,
           {object_url: `/sap/bc/adt/oo/classes/${encodeURIComponent(cls.toLowerCase())}`, include_dangerous: true});
         const there = parseUnit(text, cls);
-        const info = check.get(cls);
-        const row = {cls, osg: here.methods, system: there.methods, failing: there.failing, notes: []};
-        if (info !== undefined && !info.found) row.notes.push("not active on the system");
-        if (here.methods > 0 && info !== undefined && info.found && !info.wut) {
-          row.notes.push("WITH_UNIT_TESTS is not set on the system");
-        }
-        if (here.methods > 0 && info !== undefined && info.found && info.ccau === 0) {
-          row.notes.push("no CCAU include on the system (WITH_UNIT_TESTS missing from the class XML?)");
-        }
-        if (there.unreadable !== undefined) row.notes.push(`unit result not readable: ${there.unreadable}`);
-        rows.push(row);
-        for (const f of here.failing) problems.push(`${cls}: fails on OSG: ${f}`);
+        row.system = there.methods;
+        row.failing = there.failing;
+        if (there.error !== undefined) problems.push(`${cls}: ${there.error}`);
         if (here.methods !== there.methods) {
           problems.push(`${cls}: ${here.methods} test method(s) on OSG, ${there.methods} on the system`
             + (row.notes.length ? ` (${row.notes.join("; ")})` : ""));
         }
         for (const f of there.failing) problems.push(`${cls}: fails on the system: ${f.method}: ${f.title}`);
       }
+      if (rows.reduce((n, r) => n + r.system, 0) === 0) {
+        problems.push("nothing to prove: no test method ran on the system");
+      }
     }
   } finally {
     if (keep) {
       log(`--keep: package ${pkg} and its objects are left on the system. Remove them with\n`
-        + `  node tools/osd-prove-on-system.mjs --cleanup --package '${pkg}'`);
+        + `  node tools/osd-prove-on-system.mjs ${folder} --unit ${unit}${manifest ? ` --manifest ${manifest}` : ""} `
+        + `--cleanup --package '${pkg}'`);
     } else {
-      const c = await cleanup(mcp, pkg, log);
+      const c = await cleanup(mcp, pkg, built.objects, log);
       problems.push(...c.problems);
     }
   }
-  return {ok: problems.length === 0, problems, rows, classes, pkg, osgMode: osg.mode};
+  return done();
+}
+
+/** The last line says what was established, and no more: only a run on
+ *  both sides may say the same tests pass on both. */
+export function verdict(r) {
+  if (!r.ok) return `NOT proved: ${r.problems.length} problem(s)`;
+  if (r.osgMode === "run") return `proved: the same ${r.systemMethods} tests pass on OSG and on the system`;
+  return `system: ${r.systemMethods} tests pass; OSG: ${r.osgMethods} test methods counted from source, not run`;
 }
 
 export function table(rows) {
@@ -551,31 +737,33 @@ export async function main(argv, {mcp: givenMcp, out = console.log} = {}) {
     out(e.message);
     return 2;
   }
-  const cleanupOnly = argv.includes("--cleanup");
-  if (!cleanupOnly && folder === undefined) {
+  if (folder === undefined) {
     out("usage: osd-prove-on-system.mjs <folder> --unit <unit> [--manifest m.json] [--package $ZOSG_TMP_X] [--keep] "
-      + "[--osg count|run] [--server <mcp server>]\n       osd-prove-on-system.mjs --cleanup --package $ZOSG_TMP_X");
+      + "[--reuse] [--osg count|run] [--server <mcp server>]\n"
+      + "       osd-prove-on-system.mjs <folder> --unit <unit> [--manifest m.json] --cleanup --package $ZOSG_TMP_X");
     return 2;
   }
   const mcp = givenMcp ?? mcpStdio({server: flag("server")});
   try {
-    if (cleanupOnly) {
-      const c = await cleanup(mcp, pkg, out);
+    if (argv.includes("--cleanup")) {
+      // the zip's object list is what may be purged, so the folder is needed here too
+      const built = buildZip(folder, {unit: flag("unit"), manifest: flag("manifest")});
+      const c = await cleanup(mcp, pkg, built.objects, out);
       for (const p of c.problems) out(`FAIL ${p}`);
       out(c.ok ? `cleanup of ${pkg}: complete` : `cleanup of ${pkg}: INCOMPLETE`);
       return c.ok ? 0 : 1;
     }
     const osg = flag("osg") === "run" ? osgRunner() : osgCounter(folder);
     const r = await prove({folder, unit: flag("unit"), manifest: flag("manifest"), pkg, keep: argv.includes("--keep"),
-      mcp, osg, log: out});
+      reuse: argv.includes("--reuse"), mcp, osg, log: out});
     out("");
-    out(table(r.rows));
+    if (r.rows.length > 0) out(table(r.rows));
     for (const row of r.rows) for (const n of row.notes) out(`  ${row.cls}: ${n}`);
     out(`\nOSG side: ${r.osgMode === "run" ? "ABAP Unit run on this runtime (tools/osd-unit.mjs)"
       : "FOR TESTING methods counted from the source (abaplint parse); not run"}`);
     for (const p of r.problems) out(`FAIL ${p}`);
-    out(r.ok ? "proved: the same tests pass on OSG and on the system" : `NOT proved: ${r.problems.length} problem(s)`);
-    return r.ok ? 0 : 1;
+    out(verdict(r));
+    return r.ok ? 0 : r.refused ? 2 : 1;
   } catch (e) {
     out(`${e.code ?? "ERROR"}: ${e.message}`);
     return e.code === "REFUSED" ? 2 : 1;
