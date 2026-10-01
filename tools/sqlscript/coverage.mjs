@@ -500,6 +500,7 @@ if (basename(process.argv[1] ?? "") === "coverage.mjs") {
   if (catalogueFailures.using.length > 0) console.log(`USING tables in the export refused whole (an include did not resolve): ${catalogueFailures.using.length}\n  ${catalogueFailures.using.slice(0, 8).join("\n  ")}`);
   if (catalogueFailures.parameters.length > 0) console.log(`table parameters not typed: ${catalogueFailures.parameters.length}\n  ${catalogueFailures.parameters.slice(0, 8).join("\n  ")}`);
   for (const [which, r] of Object.entries(corporaReport)) {
+    if (!Array.isArray(r?.byLanguage)) continue; // report metadata is not a corpus
     console.log(`\n${which}: ${r.bodies} SQLScript bodies` +
       ` (of ${r.counted} BY DATABASE bodies: ${r.byLanguage.map(([l, n]) => `${l} ${n}`).join(", ")})`);
     console.log(`  parsed   ${r.parsed}`);
