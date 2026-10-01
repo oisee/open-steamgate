@@ -58,18 +58,19 @@
 import {spawn} from "node:child_process";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {basename, join, resolve} from "node:path";
+import {basename, dirname, join, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {runsAs} from "./osd-main.mjs";
 import {layout, zipInProcess} from "./osd-abapgit-zip.mjs";
 import {loadManifest, unitFor} from "./osd-deploy-manifest.mjs";
+import {proveInPlace, rollbackFromState, snapshotDir} from "./osd-prove-inplace.mjs";
 
 export const MARK_OPEN = "OSDPROVE<<";
 export const MARK_CLOSE = ">>OSDPROVE";
 export const DEFAULT_PACKAGE = "$ZOSG_TMP_PROVE";
-const B64_LINE = 200;
+export const B64_LINE = 200;
 // abapGit log messages carried back in one alert title; the rest are counted
-const MAX_LOG = 20;
+export const MAX_LOG = 20;
 
 // ------------------------------------------------------------------ refusals
 
@@ -90,12 +91,12 @@ export function checkPackage(name) {
   return pkg;
 }
 
-const CLASS_NAME = /^[A-Z0-9_/]{1,30}$/;
+export const CLASS_NAME = /^[A-Z0-9_/]{1,30}$/;
 
 // ----------------------------------------------------------------- templates
 // ASCII only, and every one ends with the fail( msg ) report.
 
-const report = (expr) => `cl_abap_unit_assert=>fail( msg = |${MARK_OPEN}{ ${expr} }${MARK_CLOSE}| ).`;
+export const report = (expr) => `cl_abap_unit_assert=>fail( msg = |${MARK_OPEN}{ ${expr} }${MARK_CLOSE}| ).`;
 
 /** The offline repository this tool creates is named so it can tell it
  *  from anybody else's: a repository in the package under any other name
@@ -104,7 +105,7 @@ export function ownRepoName(pkg) {
   return `OSDPROVE ${pkg}`;
 }
 
-const REPO_KEY = /^[0-9]{1,12}$/;
+export const REPO_KEY = /^[0-9]{1,12}$/;
 
 /** Step 3: base64 zip -> abapGit offline repo in `pkg` -> deserialize. */
 export function importAbap(zipBytes, pkg) {
@@ -203,11 +204,11 @@ export function classCheckAbap(classes) {
 
 // how many rows one alert title lists; a list that is longer is counted
 // and not shown, and a check that needs the list fails rather than guess
-const MAX_LIST = 200;
+export const MAX_LIST = 200;
 
-const OBJECT_ITEM = /^[A-Z0-9]{4} [A-Z0-9_/]{1,40}$/;
+export const OBJECT_ITEM = /^[A-Z0-9]{4} [A-Z0-9_/]{1,40}$/;
 
-function checkItems(items) {
+export function checkItems(items) {
   for (const i of items) if (!OBJECT_ITEM.test(i)) throw new Error(`object "${i}" cannot be put into an ABAP literal`);
 }
 
@@ -520,7 +521,7 @@ export function reportOf(text) {
   return {message: s.slice(i + MARK_OPEN.length, j), truncated: false};
 }
 
-const field = (msg, name) => new RegExp(`(?:^|\\s|;)${name}=([^;\\s]*)`).exec(msg)?.[1];
+export const field = (msg, name) => new RegExp(`(?:^|\\s|;)${name}=([^;\\s]*)`).exec(msg)?.[1];
 
 export function parseImport(msg) {
   const logs = [...msg.matchAll(/\[([EWA])\] ([^;]*);/g)].map((m) => ({type: m[1], text: m[2].trim()}));
@@ -536,7 +537,7 @@ export function parseImport(msg) {
   };
 }
 
-const pairs = (msg, name) => [...msg.matchAll(new RegExp(`(?:^|\\s|;)${name}=([A-Z0-9]+):([^;@]*)(?:@([^;]*))?;`, "g"))]
+export const pairs = (msg, name) => [...msg.matchAll(new RegExp(`(?:^|\\s|;)${name}=([A-Z0-9]+):([^;@]*)(?:@([^;]*))?;`, "g"))]
   .map((m) => ({item: `${m[1]} ${m[2].trim()}`, where: m[3]?.trim()}));
 
 export function parsePreflight(msg) {
@@ -716,17 +717,24 @@ const objectKey = (type, name) => `${type} ${String(name).toUpperCase().replace(
  *  unit lists, fail closed. The zip itself is written in this process
  *  (`zipInProcess`), not by the `zip` binary, so no child is spawned.
  *  Returns the bytes, the objects ("TYPE NAME") and the classes. */
-export function buildZip(folder, {unit: unitName, manifest} = {}) {
+export function buildZip(folder, {unit: unitName, manifest, withPackageXml = true} = {}) {
   const unit = unitFor(loadManifest(manifest), folder, unitName);
   const work = mkdtempSync(join(tmpdir(), "osd-prove-"));
   try {
     const staging = join(work, "repo");
     const laid = layout(folder, staging, `open-steamgate prove: ${basename(resolve(folder))}`, undefined, unit);
+    // --in-place: the package exists and is not ours to rewrite, so the
+    // zip must not carry a package.devc.xml that would update its attributes
+    if (!withPackageXml) rmSync(join(staging, "src", "package.devc.xml"), {force: true});
     const objects = [];
     for (const [type, names] of laid.objects) for (const n of names) objects.push(objectKey(type, n));
     objects.sort();
     const classes = objects.filter((o) => o.startsWith("CLAS ")).map((o) => o.slice(5));
-    return {bytes: zipInProcess(staging), objects, classes, unit: unit.name};
+    // the zip's object files by name, for the in-place mode's check that
+    // what a deploy left is what the zip carried
+    const files = new Map(readdirSync(join(staging, "src"), {withFileTypes: true}).filter((e) => e.isFile())
+      .map((e) => e.name).sort().map((n) => [n, readFileSync(join(staging, "src", n))]));
+    return {bytes: zipInProcess(staging), objects, classes, unit: unit.name, files};
   } finally {
     rmSync(work, {recursive: true, force: true});
   }
@@ -734,7 +742,7 @@ export function buildZip(folder, {unit: unitName, manifest} = {}) {
 
 // --------------------------------------------------------------------- run
 
-async function exec(mcp, code, step) {
+export async function exec(mcp, code, step) {
   const text = await mcp.call("analyze", undefined, {type: "execute_abap", code});
   const r = reportOf(text);
   if (r === undefined) {
@@ -750,7 +758,7 @@ async function exec(mcp, code, step) {
 
 /** What the package holds, read and checked for completeness. Throws when
  *  the answer cannot be relied on. */
-const listed = (list) => list.map((o) => `    ${o}`).join("\n");
+export const listed = (list) => list.map((o) => `    ${o}`).join("\n");
 
 /** Step 2: refusals before anything is written. The package must not
  *  exist: the run creates it and so owns it. No object of the zip may exist
@@ -853,6 +861,68 @@ export function judgeImport(imp) {
   return problems;
 }
 
+/** Steps 5-6, shared with the in-place mode: the class check, then ABAP
+ *  Unit per class, compared with OSG by method identity. Pushes into
+ *  `problems` and `rows`; touches nothing on the system. */
+export async function proveClasses({mcp, classes, osg, problems, rows, log = () => {}}) {
+  let check = new Map();
+  if (problems.length === 0) {
+    try {
+      const r = await exec(mcp, classCheckAbap(classes), "class check");
+      check = parseClassCheck(r.message);
+      log(`classes: ${r.message.trim()}`);
+      for (const cls of classes) {
+        if (!check.has(cls)) problems.push(`class check: no entry for ${cls}`);
+      }
+    } catch (e) {
+      problems.push(e.message);
+    }
+  }
+
+  if (problems.length === 0) {
+    for (const cls of classes) {
+      const here = await osg.methods(cls);
+      const info = check.get(cls);
+      const row = {cls, osg: here.methods, system: 0, failing: [], notes: []};
+      rows.push(row);
+      for (const f of here.failing) problems.push(`${cls}: fails on OSG: ${f}`);
+      if (!info.found) {
+        row.notes.push("not active on the system");
+        problems.push(`${cls}: not active on the system`);
+        continue;
+      }
+      if (here.methods === 0 && !info.wut && info.ccau === 0) {
+        // no tests here and, by SEOCLASSDF and the CCAU include, none there
+        row.notes.push("no tests on either side; ABAP Unit not called");
+        continue;
+      }
+      if (here.methods > 0 && !info.wut) row.notes.push("WITH_UNIT_TESTS is not set on the system");
+      if (here.methods > 0 && info.ccau === 0) {
+        row.notes.push("no CCAU include on the system (WITH_UNIT_TESTS missing from the class XML?)");
+      }
+      const text = await mcp.call("test", `CLAS ${cls}`,
+        {object_url: `/sap/bc/adt/oo/classes/${encodeURIComponent(cls.toLowerCase())}`, include_dangerous: true});
+      const there = parseUnit(text, cls);
+      row.system = there.methods;
+      row.failing = there.failing;
+      if (there.error !== undefined) problems.push(`${cls}: ${there.error}`);
+      if (there.nameless > 0) row.notes.push(`${there.nameless} test method entr(ies) without a name, not counted`);
+      // the same tests, by name: a count can match with different methods behind it
+      const diff = methodDiff(here.names, there.names);
+      if (diff.missing.length > 0 || diff.extra.length > 0) {
+        problems.push(`${cls}: test methods differ: ${here.methods} test method(s) on OSG, ${there.methods} on the system`
+          + (diff.missing.length ? `; on OSG, not on the system: ${diff.missing.join(", ")}` : "")
+          + (diff.extra.length ? `; on the system, not on OSG: ${diff.extra.join(", ")}` : "")
+          + (row.notes.length ? ` (${row.notes.join("; ")})` : ""));
+      }
+      for (const f of there.failing) problems.push(`${cls}: fails on the system: ${f.method}: ${f.title}`);
+    }
+    if (rows.reduce((n, r) => n + r.system, 0) === 0) {
+      problems.push("nothing to prove: no test method ran on the system");
+    }
+  }
+}
+
 /** Steps 1-6. `mcp` is {call(action, target, params) -> text}; `osg` is a
  *  provider ({mode, methods(cls)}); `zipper` builds the zip. */
 export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep = false, mcp, osg,
@@ -935,62 +1005,7 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
       }
     }
 
-    let check = new Map();
-    if (problems.length === 0) {
-      try {
-        const r = await exec(mcp, classCheckAbap(classes), "class check");
-        check = parseClassCheck(r.message);
-        log(`classes: ${r.message.trim()}`);
-        for (const cls of classes) {
-          if (!check.has(cls)) problems.push(`class check: no entry for ${cls}`);
-        }
-      } catch (e) {
-        problems.push(e.message);
-      }
-    }
-
-    if (problems.length === 0) {
-      for (const cls of classes) {
-        const here = await osg.methods(cls);
-        const info = check.get(cls);
-        const row = {cls, osg: here.methods, system: 0, failing: [], notes: []};
-        rows.push(row);
-        for (const f of here.failing) problems.push(`${cls}: fails on OSG: ${f}`);
-        if (!info.found) {
-          row.notes.push("not active on the system");
-          problems.push(`${cls}: not active on the system`);
-          continue;
-        }
-        if (here.methods === 0 && !info.wut && info.ccau === 0) {
-          // no tests here and, by SEOCLASSDF and the CCAU include, none there
-          row.notes.push("no tests on either side; ABAP Unit not called");
-          continue;
-        }
-        if (here.methods > 0 && !info.wut) row.notes.push("WITH_UNIT_TESTS is not set on the system");
-        if (here.methods > 0 && info.ccau === 0) {
-          row.notes.push("no CCAU include on the system (WITH_UNIT_TESTS missing from the class XML?)");
-        }
-        const text = await mcp.call("test", `CLAS ${cls}`,
-          {object_url: `/sap/bc/adt/oo/classes/${encodeURIComponent(cls.toLowerCase())}`, include_dangerous: true});
-        const there = parseUnit(text, cls);
-        row.system = there.methods;
-        row.failing = there.failing;
-        if (there.error !== undefined) problems.push(`${cls}: ${there.error}`);
-        if (there.nameless > 0) row.notes.push(`${there.nameless} test method entr(ies) without a name, not counted`);
-        // the same tests, by name: a count can match with different methods behind it
-        const diff = methodDiff(here.names, there.names);
-        if (diff.missing.length > 0 || diff.extra.length > 0) {
-          problems.push(`${cls}: test methods differ: ${here.methods} test method(s) on OSG, ${there.methods} on the system`
-            + (diff.missing.length ? `; on OSG, not on the system: ${diff.missing.join(", ")}` : "")
-            + (diff.extra.length ? `; on the system, not on OSG: ${diff.extra.join(", ")}` : "")
-            + (row.notes.length ? ` (${row.notes.join("; ")})` : ""));
-        }
-        for (const f of there.failing) problems.push(`${cls}: fails on the system: ${f.method}: ${f.title}`);
-      }
-      if (rows.reduce((n, r) => n + r.system, 0) === 0) {
-        problems.push("nothing to prove: no test method ran on the system");
-      }
-    }
+    if (problems.length === 0) await proveClasses({mcp, classes, osg, problems, rows, log});
   } finally {
     if (keep) {
       log(`--keep: package ${pkg} and its objects are left on the system. Remove them with\n`
@@ -1009,8 +1024,10 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
  *  both sides may say the same tests pass on both. */
 export function verdict(r) {
   if (!r.ok) return `NOT proved: ${r.problems.length} problem(s)`;
-  if (r.osgMode === "run") return `proved: the same ${r.systemMethods} tests pass on OSG and on the system`;
-  return `system: ${r.systemMethods} tests pass; OSG: ${r.osgMethods} test methods counted from source, not run`;
+  // --in-place: success also means the package was put back and shown equal to its snapshot
+  const back = r.inPlace ? (r.kept ? "; AFTER left deployed (--keep)" : r.restored ? `; package restored: ${r.restored}` : "") : "";
+  if (r.osgMode === "run") return `proved: the same ${r.systemMethods} tests pass on OSG and on the system${back}`;
+  return `system: ${r.systemMethods} tests pass; OSG: ${r.osgMethods} test methods counted from source, not run${back}`;
 }
 
 export function table(rows) {
@@ -1104,6 +1121,8 @@ export async function cleanupFromReceipt(mcp, pkg, file, out) {
   return c.ok ? 0 : 1;
 }
 
+const readFileOrNone = (dir) => (existsSync(join(dir, "snapshot.json")) ? dir : undefined);
+
 export async function main(argv, {mcp: givenMcp, out = console.log, receiptDir} = {}) {
   const flag = (n) => { const i = argv.indexOf(`--${n}`); return i < 0 ? undefined : argv[i + 1]; };
   const valued = new Set(["--unit", "--manifest", "--package", "--osg", "--server"]);
@@ -1116,10 +1135,24 @@ export async function main(argv, {mcp: givenMcp, out = console.log, receiptDir} 
     return 2;
   }
   const cleanupOnly = argv.includes("--cleanup");
-  if (folder === undefined && !cleanupOnly) {
+  const inPlace = argv.includes("--in-place");
+  const rollbackOnly = argv.includes("--rollback");
+  if (inPlace || rollbackOnly) {
+    if (flag("package") === undefined) {
+      out("refused: --in-place and --rollback work in an existing package: name it with --package");
+      return 2;
+    }
+    if ([inPlace, rollbackOnly, cleanupOnly].filter(Boolean).length > 1) {
+      out("refused: --in-place, --rollback and --cleanup are separate modes");
+      return 2;
+    }
+  }
+  if (folder === undefined && !cleanupOnly && !rollbackOnly) {
     out("usage: osd-prove-on-system.mjs <folder> --unit <unit> [--manifest m.json] [--package $ZOSG_TMP_X] [--keep] "
       + "[--osg count|run] [--server <mcp server>]\n"
-      + "       osd-prove-on-system.mjs --cleanup --package $ZOSG_TMP_X   (needs the run's receipt)");
+      + "       osd-prove-on-system.mjs --cleanup --package $ZOSG_TMP_X   (needs the run's receipt)\n"
+      + "       osd-prove-on-system.mjs --in-place --package $ZEXISTING <folder> --unit <unit> [--keep]\n"
+      + "       osd-prove-on-system.mjs --rollback --package $ZEXISTING   (needs the snapshot of an --in-place --keep run)");
     return 2;
   }
   const file = receiptPath(pkg, receiptDir);
@@ -1127,12 +1160,20 @@ export async function main(argv, {mcp: givenMcp, out = console.log, receiptDir} 
     // refused before any connection is made
     return cleanupFromReceipt(undefined, pkg, file, out);
   }
+  if (rollbackOnly && readFileOrNone(snapshotDir(pkg, receiptDir ?? dirname(file))) === undefined) {
+    // refused before any connection is made
+    return rollbackFromState(undefined, pkg, snapshotDir(pkg, receiptDir ?? dirname(file)), out);
+  }
   const mcp = givenMcp ?? mcpStdio({server: flag("server")});
   try {
+    if (rollbackOnly) return await rollbackFromState(mcp, pkg, snapshotDir(pkg, receiptDir ?? dirname(file)), out);
     if (cleanupOnly) return await cleanupFromReceipt(mcp, pkg, file, out);
     const osg = flag("osg") === "run" ? osgRunner() : osgCounter(folder);
-    const r = await prove({folder, unit: flag("unit"), manifest: flag("manifest"), pkg, keep: argv.includes("--keep"),
-      mcp, osg, log: out, receiptFile: file});
+    const r = inPlace
+      ? await proveInPlace({folder, unit: flag("unit"), manifest: flag("manifest"), pkg, keep: argv.includes("--keep"),
+        mcp, osg, log: out, runsDir: receiptDir ?? dirname(file)})
+      : await prove({folder, unit: flag("unit"), manifest: flag("manifest"), pkg, keep: argv.includes("--keep"),
+        mcp, osg, log: out, receiptFile: file});
     out("");
     if (r.rows.length > 0) out(table(r.rows));
     for (const row of r.rows) for (const n of row.notes) out(`  ${row.cls}: ${n}`);
