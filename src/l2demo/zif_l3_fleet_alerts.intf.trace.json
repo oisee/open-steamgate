@@ -122,27 +122,6 @@
    "path": "/",
    "node": "set/fleet/port/alerts",
    "set_line": 29
-  },
-  {
-   "line": 18,
-   "template_line": 17,
-   "path": "/",
-   "node": "set/fleet/port/alerts",
-   "set_line": 29
-  },
-  {
-   "line": 19,
-   "template_line": 18,
-   "path": "/",
-   "node": "set/fleet/port/alerts",
-   "set_line": 29
-  },
-  {
-   "line": 20,
-   "template_line": 19,
-   "path": "/",
-   "node": "set/fleet/port/alerts",
-   "set_line": 29
   }
  ]
 }

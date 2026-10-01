@@ -22,8 +22,4 @@ CLASS {{class}} IMPLEMENTATION.
     APPEND LINES OF it_rows TO gt_rows.
     rv_count = lines( it_rows ).
   ENDMETHOD.
-
-  METHOD {{iface}}~volatile.
-    rv_volatile = abap_true.
-  ENDMETHOD.
 ENDCLASS.

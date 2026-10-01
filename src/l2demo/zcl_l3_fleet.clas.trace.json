@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet.l3.yaml",
  "template": "recipes/l3-set/template.tpl",
- "model": "sha256:42b23112b760012e1d634a6f296b361c1390db849ea188756729feb6a7dc791c",
+ "model": "sha256:ff822dedf5c794f864e79dd454c2d15a62d2555e36463ab06315afa85d845ca2",
  "rules": {
   "maintenance-ship-no-future-voyage": {
    "file": "src/l2demo/maintenance_ship.l2.yaml",
@@ -851,7 +851,7 @@
   {
    "line": 117,
    "template_line": 123,
-   "path": "/sources/1/index",
+   "path": "/sources/1/ports_class",
    "node": "set/fleet/port/ships",
    "set_line": 22
   },

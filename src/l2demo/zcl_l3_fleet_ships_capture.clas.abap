@@ -33,12 +33,4 @@ CLASS zcl_l3_fleet_ships_capture IMPLEMENTATION.
       APPEND ls_row TO rt_rows.
     ENDLOOP.
   ENDMETHOD.
-
-  METHOD zif_l3_fleet_ships~live.
-    rv_live = abap_false.
-  ENDMETHOD.
-
-  METHOD zif_l3_fleet_ships~volatile.
-    rv_volatile = abap_true.
-  ENDMETHOD.
 ENDCLASS.

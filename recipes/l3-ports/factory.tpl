@@ -8,14 +8,21 @@ CLASS {{ports_class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_port TYPE csequence
                 iv_bind TYPE string OPTIONAL
       RETURNING VALUE(rv_variant) TYPE string.
-    " refuses a binding naming a port or a variant the set does not have, and,
-    " for a run in jobs, a variant that cannot cross sessions; a source that is
-    " not live is a replay (it swaps table content in the caller LUW), a test and
-    " dev seam, never production, refused unless iv_allow_replay is set
+    " refuses a binding naming a port or a variant the set does not have, a variant that
+    " cannot cross sessions in a run in jobs, a hand-written variant in a replay, and a
+    " replay without iv_allow_replay. A replay is a source bound to a generated variant that
+    " is not the live table: it swaps table content in the caller LUW, a test and dev seam,
+    " never production. This is decided from the manifest's data, below, before any adapter is
+    " created: a hand-written class counts as live and not volatile and is never asked.
     CLASS-METHODS check
       IMPORTING iv_bind TYPE string OPTIONAL
                 iv_parallel TYPE abap_bool DEFAULT abap_false
                 iv_allow_replay TYPE abap_bool DEFAULT abap_false.
+    " true when the source port is bound to a generated variant that is not the live table
+    CLASS-METHODS swaps
+      IMPORTING iv_port TYPE csequence
+                iv_bind TYPE string OPTIONAL
+      RETURNING VALUE(rv_swaps) TYPE abap_bool.
 {{#ports}}
     CLASS-METHODS get_{{name}}
       IMPORTING iv_variant TYPE csequence
@@ -51,6 +58,24 @@ CLASS {{ports_class}} IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+  METHOD swaps.
+    DATA lv_variant TYPE string.
+    lv_variant = variant( iv_port = iv_port iv_bind = iv_bind ).
+{{#ports}}
+{{#is_source}}
+    IF iv_port = {{name | literal}}.
+{{#variants}}
+{{#nonlive}}
+      IF lv_variant = {{name | literal}}.
+        rv_swaps = abap_true.
+      ENDIF.
+{{/nonlive}}
+{{/variants}}
+    ENDIF.
+{{/is_source}}
+{{/ports}}
+  ENDMETHOD.
+
   METHOD check.
     DATA lt_parts TYPE string_table.
     DATA lv_part TYPE string.
@@ -58,10 +83,9 @@ CLASS {{ports_class}} IMPLEMENTATION.
     DATA lv_value TYPE string.
     DATA lv_known TYPE abap_bool.
     DATA lv_variant TYPE string.
-    DATA lv_replay TYPE string.
-{{#ports}}
-    DATA li_{{name}} TYPE REF TO {{iface}}.
-{{/ports}}
+    DATA lv_volatile_port TYPE string.
+    DATA lv_replay_port TYPE string.
+    DATA lv_hand_port TYPE string.
     SPLIT iv_bind AT ',' INTO TABLE lt_parts.
     LOOP AT lt_parts INTO lv_part.
       CLEAR: lv_name, lv_value.
@@ -83,26 +107,45 @@ CLASS {{ports_class}} IMPLEMENTATION.
     ENDLOOP.
 {{#ports}}
     lv_variant = variant( iv_port = {{name | literal}} iv_bind = iv_bind ).
-    li_{{name}} = get_{{name}}( lv_variant ).
-    IF iv_parallel = abap_true AND li_{{name}}->volatile( ) = abap_true.
+    lv_known = abap_false.
+{{#variants}}
+    IF lv_variant = {{name | literal}}.
+      lv_known = abap_true.
+{{#volatile}}
+      lv_volatile_port = {{port | literal}}.
+{{/volatile}}
+{{#nonlive}}
+      lv_replay_port = {{port | literal}}.
+{{/nonlive}}
+{{#hand}}
+      lv_hand_port = {{port | literal}}.
+{{/hand}}
+    ENDIF.
+{{/variants}}
+    IF lv_known = abap_false.
       RAISE EXCEPTION TYPE {{exception}}
         EXPORTING iv_port = {{name | literal}} iv_variant = lv_variant
+                  iv_reason = 'no such variant for the port'.
+    ENDIF.
+{{/ports}}
+    IF iv_parallel = abap_true AND lv_volatile_port IS NOT INITIAL.
+      RAISE EXCEPTION TYPE {{exception}}
+        EXPORTING iv_port = lv_volatile_port
                   iv_reason = 'the variant keeps its rows in this session, a job cannot use it'.
     ENDIF.
-{{#is_source}}
-    IF iv_parallel = abap_true AND li_{{name}}->live( ) = abap_false.
+    IF iv_parallel = abap_true AND lv_replay_port IS NOT INITIAL.
       RAISE EXCEPTION TYPE {{exception}}
-        EXPORTING iv_port = {{name | literal}} iv_variant = lv_variant
+        EXPORTING iv_port = lv_replay_port
                   iv_reason = 'the variant replaces the table content, a run in jobs cannot'.
     ENDIF.
-    IF li_{{name}}->live( ) = abap_false AND lv_replay IS INITIAL.
-      lv_replay = {{name | literal}}.
-    ENDIF.
-{{/is_source}}
-{{/ports}}
-    IF lv_replay IS NOT INITIAL AND iv_allow_replay = abap_false.
+    IF lv_replay_port IS NOT INITIAL AND lv_hand_port IS NOT INITIAL.
       RAISE EXCEPTION TYPE {{exception}}
-        EXPORTING iv_port = lv_replay iv_variant = variant( iv_port = lv_replay iv_bind = iv_bind )
+        EXPORTING iv_port = lv_hand_port
+                  iv_reason = 'a replay binds generated variants only: a hand-written class can commit, and no scan sees what it calls'.
+    ENDIF.
+    IF lv_replay_port IS NOT INITIAL AND iv_allow_replay = abap_false.
+      RAISE EXCEPTION TYPE {{exception}}
+        EXPORTING iv_port = lv_replay_port
                   iv_reason = 'a replay swaps table content in the caller LUW; for a test or a dev run only, never production: pass iv_allow_replay'.
     ENDIF.
   ENDMETHOD.

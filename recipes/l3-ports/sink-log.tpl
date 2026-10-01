@@ -25,8 +25,4 @@ CLASS {{class}} IMPLEMENTATION.
 {{/group}}
       AND {{seq}} > lv_lines.
   ENDMETHOD.
-
-  METHOD {{iface}}~volatile.
-    rv_volatile = abap_false.
-  ENDMETHOD.
 ENDCLASS.

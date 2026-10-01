@@ -7,12 +7,4 @@ INTERFACE {{iface}} PUBLIC.
   METHODS read
     IMPORTING it_range TYPE tt_range OPTIONAL
     RETURNING VALUE(rt_rows) TYPE tt_rows.
-  " true when the rules read the table themselves, so the rows of read( )
-  " are only what the table holds; false when a run must see read( )'s rows
-  METHODS live
-    RETURNING VALUE(rv_live) TYPE abap_bool.
-  " true when the rows live in this session only (a job of another session
-  " would not see them)
-  METHODS volatile
-    RETURNING VALUE(rv_volatile) TYPE abap_bool.
 ENDINTERFACE.

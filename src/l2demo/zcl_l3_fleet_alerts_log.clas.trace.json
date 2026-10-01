@@ -206,34 +206,6 @@
    "path": "/",
    "node": "set/fleet/port/alerts/variant/log",
    "set_line": 35
-  },
-  {
-   "line": 30,
-   "template_line": 29,
-   "path": "/iface",
-   "node": "set/fleet/port/alerts/variant/log",
-   "set_line": 35
-  },
-  {
-   "line": 31,
-   "template_line": 30,
-   "path": "/",
-   "node": "set/fleet/port/alerts/variant/log",
-   "set_line": 35
-  },
-  {
-   "line": 32,
-   "template_line": 31,
-   "path": "/",
-   "node": "set/fleet/port/alerts/variant/log",
-   "set_line": 35
-  },
-  {
-   "line": 33,
-   "template_line": 32,
-   "path": "/",
-   "node": "set/fleet/port/alerts/variant/log",
-   "set_line": 35
   }
  ]
 }

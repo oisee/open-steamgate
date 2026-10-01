@@ -43,12 +43,4 @@ CLASS {{class}} IMPLEMENTATION.
       APPEND ls_row TO rt_rows.
     ENDLOOP.
   ENDMETHOD.
-
-  METHOD {{iface}}~live.
-    rv_live = abap_false.
-  ENDMETHOD.
-
-  METHOD {{iface}}~volatile.
-    rv_volatile = abap_true.
-  ENDMETHOD.
 ENDCLASS.

@@ -120,8 +120,8 @@ CLASS {{class}} IMPLEMENTATION.
 {{#sources}}
         " {{table}}: the table's own rows are kept, the source's rows stand
         " in their place, and the rules read them as they read the table
-        li_src_{{index}} = {{ports_class}}=>get_{{name}}( {{ports_class}}=>variant( iv_port = {{name | literal}} iv_bind = iv_bind ) ).
-        IF li_src_{{index}}->live( ) = abap_false.
+        IF {{ports_class}}=>swaps( iv_port = {{name | literal}} iv_bind = iv_bind ) = abap_true.
+          li_src_{{index}} = {{ports_class}}=>get_{{name}}( {{ports_class}}=>variant( iv_port = {{name | literal}} iv_bind = iv_bind ) ).
           SELECT * FROM {{table}} INTO TABLE lt_keep_{{index}}.
           lt_scope_{{index}} = li_src_{{index}}->read( ).
 {{#has_client}}

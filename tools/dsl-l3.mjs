@@ -34,7 +34,7 @@ export const PORT_TEMPLATES = {
 // what a port of each kind may be served by without a class of its own
 export const GENERATED = {source: ["table", "dummy", "capture"], sink: ["log", "dummy", "capture"]};
 // the methods a hand-written variant class must implement through the port's interface
-export const PORT_METHODS = {source: ["read", "live", "volatile"], sink: ["put", "volatile"]};
+export const PORT_METHODS = {source: ["read"], sink: ["put"]};
 // the alert log is the one sink the runner knows how to fill
 export const SINK_TABLE = "ZOSD_L3_ALERT";
 export const SINK_GROUP = ["set_name", "rule_name", "model_hash", "check_date"];
@@ -48,17 +48,21 @@ export const SET_NAME = /^[a-z][a-z0-9_]{0,12}$/;
 // ---------------------------------------------------------------------------
 // static checks on ABAP source, read with abaplint (statements, not text)
 
-// Statements that end or write a unit of work. A check class and a variant
-// declared replay_safe hold none of the first two lists; the generated runner
-// and the generated variants may write (the log does) but never end the unit.
-const ENDS_UNIT = new Map([[abaplint.Statements.Commit, "COMMIT"], [abaplint.Statements.Rollback, "ROLLBACK"]]);
+// Statements that end, split or leave the unit of work, and ones that write. A generated check
+// class holds none of either; the generated runner and variants may write (the log does) but
+// never end or split the unit. The one statement the runner may hold is SUBMIT, in the mode P
+// path that a replay refuses (`jobs: true`). Hand-written variants are not scanned: a static
+// scan cannot see what a helper they call does, so a replay does not bind them at all.
+const S0 = abaplint.Statements;
+const ENDS_UNIT = new Map([[S0.Commit, "COMMIT"], [S0.Rollback, "ROLLBACK"], [S0.Wait, "WAIT"], [S0.Submit, "SUBMIT"],
+  [S0.CallTransaction, "CALL TRANSACTION"], [S0.Receive, "RECEIVE RESULTS"]]);
 const WRITES = new Map([[abaplint.Statements.ModifyDatabase, "MODIFY"], [abaplint.Statements.InsertDatabase, "INSERT"],
   [abaplint.Statements.UpdateDatabase, "UPDATE"], [abaplint.Statements.DeleteDatabase, "DELETE"], [abaplint.Statements.MergeDatabase, "MERGE"]]);
 const COMMITTING_FM = /^'(DB_COMMIT|DB_ROLLBACK|BAPI_TRANSACTION_COMMIT|BAPI_TRANSACTION_ROLLBACK)'$/i;
 
 // [{line, what}] for each statement of the source that ends the unit of work, writes (when
 // writes is false), registers an update task or runs native SQL
-export function unitFindings(text, name, {writes = false} = {}) {
+export function unitFindings(text, name, {writes = false, jobs = false} = {}) {
   const registry = new abaplint.Registry();
   registry.addFile(new abaplint.MemoryFile(name, text));
   registry.parse();
@@ -69,9 +73,9 @@ export function unitFindings(text, name, {writes = false} = {}) {
         const type = statement.get().constructor;
         const line = statement.getStart().getRow();
         const source = statement.concatTokens().replace(/\s+/g, " ");
-        if (ENDS_UNIT.has(type)) found.push({line, what: `${ENDS_UNIT.get(type)} statement`});
+        if (ENDS_UNIT.has(type) && !(jobs && type === S0.Submit)) found.push({line, what: `${ENDS_UNIT.get(type)} statement`});
         else if (!writes && WRITES.has(type)) found.push({line, what: `${WRITES.get(type)} database statement`});
-        else if (type === abaplint.Statements.CallFunction && (/\bIN UPDATE TASK\b|\bIN BACKGROUND\b/i.test(source) || COMMITTING_FM.test((source.split(" ")[2] ?? "").replace(/\.$/, "")))) found.push({line, what: "CALL FUNCTION that registers an update or ends the unit"});
+        else if (type === abaplint.Statements.CallFunction && (/\bIN UPDATE TASK\b|\bIN BACKGROUND\b|\bDESTINATION\b|\bSTARTING NEW TASK\b/i.test(source) || COMMITTING_FM.test((source.split(" ")[2] ?? "").replace(/\.$/, "")))) found.push({line, what: "CALL FUNCTION that registers an update or ends the unit"});
         else if (type === abaplint.Statements.SetUpdateTask) found.push({line, what: "SET UPDATE TASK statement"});
         else if (type === abaplint.Statements.CallDatabase) found.push({line, what: "native SQL"});
       }
@@ -112,7 +116,6 @@ export function classShape(text, name, className) {
 }
 
 const KEYS = ["set", "title", "class", "report", "date", "rules", "ports", "bindings"];
-const VARIANT_KEYS = ["class", "replay_safe"];
 const PORT_KEYS = ["kind", "table", "key", "group", "seq", "variants"];
 const PORT_NAME = /^[a-z][a-z0-9_]{0,11}$/;
 const RULE_KEYS = ["rule", "enabled"];
@@ -256,10 +259,10 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   const bindingDocs = doc.bindings === undefined ? (implicit ? {alerts: "log"} : {}) : asMap(doc.bindings, "bindings", "a mapping of port name to the variant it is bound to");
   if (!Object.keys(portDocs).length) fail(line("ports"), "ports names at least one port");
   // a hand-written variant: the named class itself declares the port's interface and implements
-  // each of its methods (read with abaplint, so a second class in the file counts for nothing),
-  // and, when it says replay_safe, holds no statement that ends or writes a unit of work;
-  // refused at the class's own file and line otherwise
-  const checkClass = ({className, iface, kind, at, vname, replaySafe}) => {
+  // each of its methods (read with abaplint, so a second class in the file counts for nothing);
+  // refused at the class's own file and line otherwise. Nothing more is asked of it: a replay
+  // never binds a hand-written class (the factory refuses it from data, before it is created)
+  const checkClass = ({className, iface, kind, at, vname}) => {
     const found = findClassFile(className, classSearch);
     if (!found) fail(at, `class ${className} of variant ${vname} is not found (${className}.clas.abap beside the set or under src)`);
     const text = readFileSync(found, "utf8");
@@ -272,10 +275,6 @@ export function compileSet(file, {ddic, registry, out} = {}) {
       if (!shape.methods.includes(`${iface}~${method}`)) {
         throw new SetError(path(found), shape.line, `class ${className} does not implement ${iface}~${method} in its own implementation; the port's signature is ${PORT_METHODS[kind].join(", ")} (see the generated ${iface})`);
       }
-    }
-    if (replaySafe) {
-      const [first] = unitFindings(text, basename(found));
-      if (first) throw new SetError(path(found), first.line, `class ${className} is declared replay_safe in the manifest (line ${at}) and holds a ${first.what}; a replay swaps table content in the caller LUW and nothing in it may write or end the unit`);
     }
   };
   const ifaceOf = (port) => `zif_l3_${set}_${port}`;
@@ -321,15 +320,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
       const vkey = `${key}/variants/${vname}`;
       const vat = implicit ? at : line(vkey);
       if (!PORT_NAME.test(vname)) fail(vat, `variant ${JSON.stringify(vname)} is a lower-case name of 1 to 12 letters, digits and _ starting with a letter`);
-      let replaySafe = false;
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        for (const k of Object.keys(value)) if (!VARIANT_KEYS.includes(k)) fail(line(`${vkey}/${k}`), `unknown key ${k} in a variant (${VARIANT_KEYS.join(", ")})`);
-        const flag = value.replay_safe ?? "false";
-        if (flag !== "true" && flag !== "false") fail(line(`${vkey}/replay_safe`), `replay_safe is true or false, not ${JSON.stringify(flag)}`);
-        replaySafe = flag === "true";
-        value = value.class;
-      }
-      if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9_]*$/.test(value)) fail(vat, `variant ${vname} is generated or the name of a class (a class: <name> with an optional replay_safe: true)`);
+      if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9_]*$/.test(value)) fail(vat, `variant ${vname} is generated or the name of a class`);
       let className, generated = value === "generated";
       if (generated) {
         if (!GENERATED[kind].includes(vname)) fail(vat, `a generated variant of a ${kind} is one of ${GENERATED[kind].join(", ")}; ${vname} needs a class of its own (${vname}: <class>)`);
@@ -337,14 +328,18 @@ export function compileSet(file, {ddic, registry, out} = {}) {
         tooLong(className, vkey);
       } else {
         className = value.toLowerCase();
-        checkClass({className, iface, kind, at: vat, vname, replaySafe});
+        checkClass({className, iface, kind, at: vat, vname});
       }
       return {
         "@id": `${id}/port/${name}/variant/${vname}`, set_line: vat,
         name: vname, "name@type": CHAR(30), class: className, generated,
         is_table: generated && vname === "table", is_log: generated && vname === "log",
         is_dummy: generated && vname === "dummy", is_capture: generated && vname === "capture",
-        volatile: generated && (vname === "dummy" || vname === "capture"), replay_safe: replaySafe,
+        // what the factory knows of a variant without creating it: a hand-written class counts as live
+        // and not volatile, and a replay does not bind it
+        port: name, "port@type": CHAR(30), hand: !generated,
+        volatile: generated && (vname === "dummy" || vname === "capture"),
+        nonlive: generated && kind === "source" && vname !== "table",
       };
     });
     const bound = bindingDocs[name];
@@ -362,13 +357,6 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     };
   });
   for (const name of Object.keys(bindingDocs)) if (!ports.some((p) => p.name === name)) fail(line(`bindings/${name}`), `binding ${name} names no port of the set`);
-  // a set whose source can replay (a variant that is not the live table) may run any hand-written
-  // variant inside the swap, so each must say, and have checked, that it writes and ends nothing
-  if (ports.some((p) => p.is_source && p.variants.some((v) => !v.is_table))) {
-    for (const p of ports) for (const v of p.variants) {
-      if (!v.generated && !v.replay_safe) fail(v.set_line, `variant ${v.name} of port ${p.name} is a hand-written class in a set whose source can replay; declare it ${v.name}: {class: ${v.class}, replay_safe: true} once it holds no write and no COMMIT or ROLLBACK (checked), or take the replay variants out`);
-    }
-  }
   const sinks = ports.filter((p) => p.is_sink);
   if (sinks.length !== 1) fail(line("ports"), `a set has exactly one sink, the alert sink the runner writes through; this one has ${sinks.length}`);
   const SET = set.toUpperCase();
@@ -476,7 +464,7 @@ export async function renderSet(model) {
   const extra = await renderPorts(model);
   // nothing the runner or a generated variant holds may end the unit of work while a table is swapped
   for (const [name, text] of [[`${model.class}.clas.abap`, runner.text], ...extra.results.map(([n, r]) => [n, r.text])]) {
-    const [first] = unitFindings(text, name, {writes: true});
+    const [first] = unitFindings(text, name, {writes: true, jobs: name === `${model.class}.clas.abap`});
     if (first) throw new SetError(model.where ?? model.source, model.set_line, `the generated ${name} line ${first.line} holds a ${first.what}; nothing generated may end the unit of work`);
   }
   const results = [[`${model.class}.clas.abap`, runner], [`${model.report}.prog.abap`, job], ...extra.results];

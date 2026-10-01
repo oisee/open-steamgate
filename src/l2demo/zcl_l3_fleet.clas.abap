@@ -114,8 +114,8 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
     TRY.
         " zosd_l2_ship: the table's own rows are kept, the source's rows stand
         " in their place, and the rules read them as they read the table
-        li_src_1 = zcl_l3_fleet_ports=>get_ships( zcl_l3_fleet_ports=>variant( iv_port = 'ships' iv_bind = iv_bind ) ).
-        IF li_src_1->live( ) = abap_false.
+        IF zcl_l3_fleet_ports=>swaps( iv_port = 'ships' iv_bind = iv_bind ) = abap_true.
+          li_src_1 = zcl_l3_fleet_ports=>get_ships( zcl_l3_fleet_ports=>variant( iv_port = 'ships' iv_bind = iv_bind ) ).
           SELECT * FROM zosd_l2_ship INTO TABLE lt_keep_1.
           lt_scope_1 = li_src_1->read( ).
           LOOP AT lt_scope_1 ASSIGNING <ls_row_1>.

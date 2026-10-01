@@ -255,62 +255,6 @@
    "path": "/",
    "node": "set/fleet/port/ships/variant/capture",
    "set_line": 28
-  },
-  {
-   "line": 37,
-   "template_line": 47,
-   "path": "/iface",
-   "node": "set/fleet/port/ships/variant/capture",
-   "set_line": 28
-  },
-  {
-   "line": 38,
-   "template_line": 48,
-   "path": "/",
-   "node": "set/fleet/port/ships/variant/capture",
-   "set_line": 28
-  },
-  {
-   "line": 39,
-   "template_line": 49,
-   "path": "/",
-   "node": "set/fleet/port/ships/variant/capture",
-   "set_line": 28
-  },
-  {
-   "line": 40,
-   "template_line": 50,
-   "path": "/",
-   "node": "set/fleet/port/ships/variant/capture",
-   "set_line": 28
-  },
-  {
-   "line": 41,
-   "template_line": 51,
-   "path": "/iface",
-   "node": "set/fleet/port/ships/variant/capture",
-   "set_line": 28
-  },
-  {
-   "line": 42,
-   "template_line": 52,
-   "path": "/",
-   "node": "set/fleet/port/ships/variant/capture",
-   "set_line": 28
-  },
-  {
-   "line": 43,
-   "template_line": 53,
-   "path": "/",
-   "node": "set/fleet/port/ships/variant/capture",
-   "set_line": 28
-  },
-  {
-   "line": 44,
-   "template_line": 54,
-   "path": "/",
-   "node": "set/fleet/port/ships/variant/capture",
-   "set_line": 28
   }
  ]
 }

@@ -9,12 +9,4 @@ CLASS zcl_l3_fleet_ships_table IMPLEMENTATION.
   METHOD zif_l3_fleet_ships~read.
     SELECT * FROM zosd_l2_ship INTO TABLE rt_rows WHERE ship_id IN it_range.
   ENDMETHOD.
-
-  METHOD zif_l3_fleet_ships~live.
-    rv_live = abap_true.
-  ENDMETHOD.
-
-  METHOD zif_l3_fleet_ships~volatile.
-    rv_volatile = abap_false.
-  ENDMETHOD.
 ENDCLASS.

@@ -9,8 +9,4 @@ CLASS {{class}} IMPLEMENTATION.
   METHOD {{iface}}~put.
     rv_count = lines( it_rows ).
   ENDMETHOD.
-
-  METHOD {{iface}}~volatile.
-    rv_volatile = abap_true.
-  ENDMETHOD.
 ENDCLASS.

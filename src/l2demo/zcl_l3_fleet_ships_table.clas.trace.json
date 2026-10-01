@@ -87,62 +87,6 @@
    "path": "/",
    "node": "set/fleet/port/ships/variant/table",
    "set_line": 27
-  },
-  {
-   "line": 13,
-   "template_line": 13,
-   "path": "/iface",
-   "node": "set/fleet/port/ships/variant/table",
-   "set_line": 27
-  },
-  {
-   "line": 14,
-   "template_line": 14,
-   "path": "/",
-   "node": "set/fleet/port/ships/variant/table",
-   "set_line": 27
-  },
-  {
-   "line": 15,
-   "template_line": 15,
-   "path": "/",
-   "node": "set/fleet/port/ships/variant/table",
-   "set_line": 27
-  },
-  {
-   "line": 16,
-   "template_line": 16,
-   "path": "/",
-   "node": "set/fleet/port/ships/variant/table",
-   "set_line": 27
-  },
-  {
-   "line": 17,
-   "template_line": 17,
-   "path": "/iface",
-   "node": "set/fleet/port/ships/variant/table",
-   "set_line": 27
-  },
-  {
-   "line": 18,
-   "template_line": 18,
-   "path": "/",
-   "node": "set/fleet/port/ships/variant/table",
-   "set_line": 27
-  },
-  {
-   "line": 19,
-   "template_line": 19,
-   "path": "/",
-   "node": "set/fleet/port/ships/variant/table",
-   "set_line": 27
-  },
-  {
-   "line": 20,
-   "template_line": 20,
-   "path": "/",
-   "node": "set/fleet/port/ships/variant/table",
-   "set_line": 27
   }
  ]
 }

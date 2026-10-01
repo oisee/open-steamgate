@@ -14,7 +14,4 @@ INTERFACE zif_l3_fleet_alerts PUBLIC.
     IMPORTING it_rows TYPE tt_rows
               is_group TYPE ty_group
     RETURNING VALUE(rv_count) TYPE i.
-  " true when the rows are kept in this session only
-  METHODS volatile
-    RETURNING VALUE(rv_volatile) TYPE abap_bool.
 ENDINTERFACE.

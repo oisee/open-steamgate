@@ -87,34 +87,6 @@
    "path": "/",
    "node": "set/fleet/port/alerts/variant/dummy",
    "set_line": 36
-  },
-  {
-   "line": 13,
-   "template_line": 13,
-   "path": "/iface",
-   "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
-  },
-  {
-   "line": 14,
-   "template_line": 14,
-   "path": "/",
-   "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
-  },
-  {
-   "line": 15,
-   "template_line": 15,
-   "path": "/",
-   "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
-  },
-  {
-   "line": 16,
-   "template_line": 16,
-   "path": "/",
-   "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
   }
  ]
 }

@@ -178,34 +178,6 @@
    "path": "/",
    "node": "set/fleet/port/alerts/variant/capture",
    "set_line": 37
-  },
-  {
-   "line": 26,
-   "template_line": 26,
-   "path": "/iface",
-   "node": "set/fleet/port/alerts/variant/capture",
-   "set_line": 37
-  },
-  {
-   "line": 27,
-   "template_line": 27,
-   "path": "/",
-   "node": "set/fleet/port/alerts/variant/capture",
-   "set_line": 37
-  },
-  {
-   "line": 28,
-   "template_line": 28,
-   "path": "/",
-   "node": "set/fleet/port/alerts/variant/capture",
-   "set_line": 37
-  },
-  {
-   "line": 29,
-   "template_line": 29,
-   "path": "/",
-   "node": "set/fleet/port/alerts/variant/capture",
-   "set_line": 37
   }
  ]
 }

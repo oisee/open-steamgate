@@ -177,8 +177,8 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
     const where = (file) => relative(process.cwd(), file).split(sep).join("/");
     const lineIn = (text, re) => text.split("\n").findIndex((l) => re.test(l)) + 1;
     const HAND = "      table: generated\n      capture: generated\n";
-    const withHand = HAND + "      hand:\n        class: zcl_hand_ships\n        replay_safe: true\n";
-    const handClass = (methods = ["read", "live", "volatile"], interfaces = "    INTERFACES zif_l3_fleet_ships.\n") => `CLASS zcl_hand_ships DEFINITION PUBLIC FINAL CREATE PUBLIC.
+    const withHand = HAND + "      hand: zcl_hand_ships\n";
+    const handClass = (methods = ["read"], interfaces = "    INTERFACES zif_l3_fleet_ships.\n") => `CLASS zcl_hand_ships DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
 ${interfaces}ENDCLASS.
 
@@ -203,14 +203,14 @@ ${methods.map((m) => `  METHOD zif_l3_fleet_ships~${m}.\n  ENDMETHOD.\n`).join("
     });
 
     it("a class that lacks a method of the port's signature is refused at its CLASS line, in its own file", () => {
-      const m = portManifest(HAND, withHand, {"zcl_hand_ships.clas.abap": handClass(["read", "volatile"])});
+      const m = portManifest(HAND, withHand, {"zcl_hand_ships.clas.abap": handClass([])});
       const classFile = join(m.dir, "zcl_hand_ships.clas.abap");
-      refusedAt(m, /^class zcl_hand_ships does not implement zif_l3_fleet_ships~live in its own implementation; the port's signature is read, live, volatile/,
+      refusedAt(m, /^class zcl_hand_ships does not implement zif_l3_fleet_ships~read in its own implementation; the port's signature is read/,
         lineIn(readFileSync(classFile, "utf8"), /^CLASS zcl_hand_ships DEFINITION/), classFile);
     });
 
     it("a class built for another interface is refused at its CLASS line", () => {
-      const m = portManifest(HAND, withHand, {"zcl_hand_ships.clas.abap": handClass(["read", "live", "volatile"], "    INTERFACES zif_l3_fleet_alerts.\n")});
+      const m = portManifest(HAND, withHand, {"zcl_hand_ships.clas.abap": handClass(["read"], "    INTERFACES zif_l3_fleet_alerts.\n")});
       const classFile = join(m.dir, "zcl_hand_ships.clas.abap");
       refusedAt(m, /^class zcl_hand_ships does not implement zif_l3_fleet_ships/, 1, classFile);
     });
@@ -230,10 +230,6 @@ ENDCLASS.
 CLASS zcl_helper IMPLEMENTATION.
   METHOD zif_l3_fleet_ships~read.
   ENDMETHOD.
-  METHOD zif_l3_fleet_ships~live.
-  ENDMETHOD.
-  METHOD zif_l3_fleet_ships~volatile.
-  ENDMETHOD.
 ENDCLASS.
 `;
       const named = `CLASS zcl_hand_ships DEFINITION PUBLIC FINAL CREATE PUBLIC.
@@ -251,33 +247,20 @@ ENDCLASS.
       refusedAt(m, /^class zcl_hand_ships does not implement zif_l3_fleet_ships, the interface of the source port/,
         lineIn(readFileSync(classFile, "utf8"), /^CLASS zcl_hand_ships DEFINITION/), classFile);
       // and the methods must be in the named class's own implementation, not a helper's
-      const split = handClass(["read", "live"]).trimEnd().concat(`
+      const split = handClass([]).trimEnd().concat(`
 CLASS zcl_helper2 DEFINITION FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     INTERFACES zif_l3_fleet_ships.
 ENDCLASS.
 
 CLASS zcl_helper2 IMPLEMENTATION.
-  METHOD zif_l3_fleet_ships~volatile.
+  METHOD zif_l3_fleet_ships~read.
   ENDMETHOD.
 ENDCLASS.
 `);
       const m2 = portManifest(HAND, withHand, {"zcl_hand_ships.clas.abap": split});
-      refusedAt(m2, /does not implement zif_l3_fleet_ships~volatile in its own implementation/, 1,
+      refusedAt(m2, /does not implement zif_l3_fleet_ships~read in its own implementation/, 1,
         join(m2.dir, "zcl_hand_ships.clas.abap"));
-    });
-
-    it("a hand-written variant in a set whose source can replay must be declared replay_safe, and the declaration is checked", () => {
-      let m = portManifest(HAND, HAND + "      hand: zcl_hand_ships\n", {"zcl_hand_ships.clas.abap": handClass()});
-      refusedAt(m, /^variant hand of port ships is a hand-written class in a set whose source can replay; declare it hand: \{class: zcl_hand_ships, replay_safe: true\}/, lineIn(m.text, /^      hand:/));
-      // declared, but it commits: refused at the COMMIT line of the class
-      const commits = handClass().replace("  METHOD zif_l3_fleet_ships~read.\n", "  METHOD zif_l3_fleet_ships~read.\n    COMMIT WORK.\n");
-      m = portManifest(HAND, withHand, {"zcl_hand_ships.clas.abap": commits});
-      const classFile = join(m.dir, "zcl_hand_ships.clas.abap");
-      refusedAt(m, /^class zcl_hand_ships is declared replay_safe in the manifest \(line \d+\) and holds a COMMIT statement/, lineIn(commits, /COMMIT WORK/), classFile);
-      const writes = handClass().replace("  METHOD zif_l3_fleet_ships~read.\n", "  METHOD zif_l3_fleet_ships~read.\n    MODIFY zosd_l2_ship FROM ls_x.\n");
-      m = portManifest(HAND, withHand, {"zcl_hand_ships.clas.abap": writes});
-      refusedAt(m, /holds a MODIFY database statement/, lineIn(writes, /MODIFY zosd/), join(m.dir, "zcl_hand_ships.clas.abap"));
     });
 
     it("a generated check class with a write or a commit injected is refused, naming the class line", async () => {
@@ -295,7 +278,12 @@ ENDCLASS.
         "MODIFY zosd_l2_ship FROM ls_x.": "MODIFY database statement", "INSERT zosd_l2_ship FROM ls_x.": "INSERT database statement",
         "UPDATE zosd_l2_ship SET name = 'x'.": "UPDATE database statement", "DELETE FROM zosd_l2_ship.": "DELETE database statement",
         "CALL FUNCTION 'Z_ANY' IN UPDATE TASK.": "CALL FUNCTION that registers an update or ends the unit",
-        "CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'.": "CALL FUNCTION that registers an update or ends the unit"};
+        "CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'.": "CALL FUNCTION that registers an update or ends the unit",
+        "WAIT UP TO 1 SECONDS.": "WAIT statement", "SUBMIT zl3_fleet AND RETURN.": "SUBMIT statement",
+        "CALL TRANSACTION 'SM37'.": "CALL TRANSACTION statement",
+        "CALL FUNCTION 'Z_ANY' DESTINATION 'NONE'.": "CALL FUNCTION that registers an update or ends the unit",
+        "CALL FUNCTION 'Z_ANY' STARTING NEW TASK 'T1'.": "CALL FUNCTION that registers an update or ends the unit",
+        "RECEIVE RESULTS FROM FUNCTION 'Z_ANY'.": "RECEIVE RESULTS statement"};
       for (const [statement, what] of Object.entries(statements)) {
         const text = clean.replace("  METHOD check.\n", `  METHOD check.\n    ${statement}\n`);
         expect(text).to.not.equal(clean);
@@ -308,14 +296,16 @@ ENDCLASS.
       }
     });
 
-    it("nothing the runner or a generated variant holds ends a unit of work; the check sees a COMMIT in one", () => {
+    it("nothing the runner or a generated variant holds ends or splits a unit of work (its SUBMIT, in mode P, is the one allowed statement); the check sees a COMMIT in one", () => {
       for (const f of readdirSync(OUT).filter((n) => /^(zcl_l3_fleet|zcl_l3_fleet_(ports|ships|alerts)\w*)\.clas\.abap$/.test(n))) {
-        expect(unitFindings(readFileSync(join(OUT, f), "utf8"), f, {writes: true}), f).to.deep.equal([]);
+        expect(unitFindings(readFileSync(join(OUT, f), "utf8"), f, {writes: true, jobs: f === `${RUNNER}.clas.abap`}), f).to.deep.equal([]);
       }
       const runner = readFileSync(join(OUT, `${RUNNER}.clas.abap`), "utf8");
       const bad = runner.replace("    DELETE FROM zosd_l2_ship.\n", "    COMMIT WORK.\n    DELETE FROM zosd_l2_ship.\n");
       expect(bad).to.not.equal(runner);
-      expect(unitFindings(bad, `${RUNNER}.clas.abap`, {writes: true}).map((f) => f.what)).to.deep.equal(["COMMIT statement"]);
+      expect(unitFindings(bad, `${RUNNER}.clas.abap`, {writes: true, jobs: true}).map((f) => f.what)).to.deep.equal(["COMMIT statement"]);
+      const waits = runner.replace("    DELETE FROM zosd_l2_ship.\n", "    WAIT UP TO 1 SECONDS.\n    DELETE FROM zosd_l2_ship.\n");
+      expect(unitFindings(waits, `${RUNNER}.clas.abap`, {writes: true, jobs: true}).map((f) => f.what)).to.deep.equal(["WAIT statement"]);
     });
 
     it("a generated variant a kind does not have, and a binding to a variant that is not there, are refused at their lines", () => {
@@ -1107,7 +1097,7 @@ ENDCLASS.
 
         it("a runner that never swaps the source in is caught: the rows given are not seen", async () => {
           const name = "zcl_l3_fleet_ns";
-          await loadRunner(name, mutate(renamed(name), "        IF li_src_1->live( ) = abap_false.\n          SELECT", "        IF abap_false = abap_true.\n          SELECT"));
+          await loadRunner(name, mutate(renamed(name), "        IF zcl_l3_fleet_ports=>swaps( iv_port = 'ships' iv_bind = iv_bind ) = abap_true.", "        IF abap_false = abap_true."));
           const {problems} = await replayProblems(name);
           expect(problems.join("\n")).to.match(/the rows given are not seen/);
           expect((await replayProblems()).problems, "control: the generated runner passes").to.deep.equal([]);
@@ -1125,7 +1115,7 @@ ENDCLASS.
         });
 
         it("a factory that ignores the opt-in is caught", async () => {
-          await loadPortClass(PORTS, `${PORTS}_m3`, (text) => mutate(text, "IF lv_replay IS NOT INITIAL AND iv_allow_replay = abap_false.", "IF lv_replay IS NOT INITIAL AND abap_false = abap_true."));
+          await loadPortClass(PORTS, `${PORTS}_m3`, (text) => mutate(text, "IF lv_replay_port IS NOT INITIAL AND iv_allow_replay = abap_false.", "IF lv_replay_port IS NOT INITIAL AND abap_false = abap_true."));
           const problems = await withClass(PORTS, `${PORTS}_m3`, optInProblems);
           expect(problems.join("\n")).to.match(/no refusal without the opt-in/);
           await exec(["DELETE FROM zosd_l2_ship", ...FLEET.zosd_l2_ship.map((row) => `INSERT INTO zosd_l2_ship (mandt, ship_id, name, status) VALUES ('123', '${row.join("', '")}')`)]);
@@ -1134,10 +1124,11 @@ ENDCLASS.
         it("a factory that falls back to the default for an unknown variant is caught", async () => {
           await loadPortClass(PORTS, `${PORTS}_m2`, (text) => {
             const at = text.indexOf("METHOD get_alerts.");
-            const edited = text.slice(at).replace("      WHEN OTHERS.\n        RAISE EXCEPTION TYPE zcx_l3_fleet_port\n          EXPORTING iv_port = 'alerts' iv_variant = iv_variant\n                    iv_reason = 'no such variant for the port'.",
-              "      WHEN OTHERS.\n        CREATE OBJECT ri_port TYPE zcl_l3_fleet_alerts_log.");
-            expect(edited, "the mutation applied").to.not.equal(text.slice(at));
-            return text.slice(0, at) + edited;
+            const refuse = "      WHEN OTHERS.\n        RAISE EXCEPTION TYPE zcx_l3_fleet_port\n          EXPORTING iv_port = 'alerts' iv_variant = iv_variant\n                    iv_reason = 'no such variant for the port'.";
+            const check = "    IF lv_known = abap_false.\n      RAISE EXCEPTION TYPE zcx_l3_fleet_port\n        EXPORTING iv_port = 'alerts' iv_variant = lv_variant\n                  iv_reason = 'no such variant for the port'.\n    ENDIF.\n";
+            expect(text, "the check's refusal").to.include(check);
+            const edited = mutate(text.slice(at), refuse, "      WHEN OTHERS.\n        CREATE OBJECT ri_port TYPE zcl_l3_fleet_alerts_log.");
+            return mutate(text.slice(0, at), check, "") + edited;
           });
           await withClass(PORTS, `${PORTS}_m2`, async () => {
             expect((await refusalProblems()).join("\n")).to.match(/no typed refusal for an unknown variant/);
@@ -1151,6 +1142,110 @@ ENDCLASS.
             expect((await bindingProblems()).join("\n")).to.match(/alerts=capture holds \d+ row\(s\), the log variant writes 7/);
           });
         });
+      });
+    });
+
+    // ---- a replay binds generated variants only; validation is data, nothing is created first ----
+    describe("hand-written adapters in a run: validated from the manifest's data before any is created", () => {
+      const PORTS = "zcl_l3_fleet_ports";
+      let handDir;
+      const counted = (name) => `CLASS ${name} DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES zif_l3_fleet_${name === "zcl_hand_ships" ? "ships" : "alerts"}.
+    CLASS-DATA gv_created TYPE i.
+    METHODS constructor.
+ENDCLASS.
+
+CLASS ${name} IMPLEMENTATION.
+  METHOD constructor.
+    gv_created = gv_created + 1.
+  ENDMETHOD.
+
+  METHOD zif_l3_fleet_${name === "zcl_hand_ships" ? "ships" : "alerts"}~${name === "zcl_hand_ships" ? "read" : "put"}.
+${name === "zcl_hand_ships" ? "" : "    rv_count = lines( it_rows ).\n"}  ENDMETHOD.
+ENDCLASS.
+`;
+      const handSources = {"zcl_hand_ships.clas.abap": counted("zcl_hand_ships"), "zcl_hand_alerts.clas.abap": counted("zcl_hand_alerts")};
+      // the fleet's factory regenerated from a manifest that also has a hand-written variant on each port,
+      // loaded under another name with the two hand classes beside it
+      const loadHand = async (name, edit = (t) => t) => {
+        if (!handDir) {
+          handDir = join(scratch, "hand");
+          mkdirSync(handDir);
+          for (const [f, t] of Object.entries(handSources)) writeFileSync(join(handDir, f), t);
+          const rel = (f) => relative(handDir, join(process.cwd(), OUT, f)).split(sep).join("/");
+          writeFileSync(join(handDir, "fleet.l3.yaml"), SET_TEXT.replace(/rule: ([a-z_]+\.l2\.yaml)/g, (m, f) => `rule: ${rel(f)}`)
+            .replace("      table: generated\n      capture: generated\n", "      table: generated\n      capture: generated\n      rship: zcl_hand_ships\n")
+            .replace("      dummy: generated\n      capture: generated\n", "      dummy: generated\n      capture: generated\n      remote: zcl_hand_alerts\n"));
+          await buildSet(join(handDir, "fleet.l3.yaml"), join(handDir, "out"));
+        }
+        const text = readFileSync(join(handDir, "out", `${PORTS}.clas.abap`), "utf8").replaceAll(PORTS, name);
+        const xml = readFileSync(join(OUT, `${RUNNER}.clas.xml`), "utf8");
+        await loadRunner(name, edit(text), {extra: {
+          "zcl_hand_ships.clas.abap": handSources["zcl_hand_ships.clas.abap"], "zcl_hand_ships.clas.xml": xml.replace(RUNNER.toUpperCase(), "ZCL_HAND_SHIPS"),
+          "zcl_hand_alerts.clas.abap": handSources["zcl_hand_alerts.clas.abap"], "zcl_hand_alerts.clas.xml": xml.replace(RUNNER.toUpperCase(), "ZCL_HAND_ALERTS")}});
+      };
+      const created = (cls) => Number(abap.Classes[cls].gv_created.get());
+      const resetCounts = () => { for (const cls of ["ZCL_HAND_SHIPS", "ZCL_HAND_ALERTS"]) abap.Classes[cls].gv_created.set(0); };
+      const ships = () => read("SELECT ship_id FROM zosd_l2_ship ORDER BY ship_id");
+      const refusal = async (work) => { try { await work(); } catch (e) { return e; } return undefined; };
+      const emptyRows = () => new abap.types.Table(new abap.types.Structure({mandt: new abap.types.Character(3), ship_id: new abap.types.Character(4),
+        name: new abap.types.Character(30), status: new abap.types.Character(1)}));
+
+      // a hand-written sink bound in a replay: refused, and its constructor never runs
+      async function handSinkProblems(factory) {
+        const problems = [];
+        resetCounts();
+        await abap.Classes.ZCL_L3_FLEET_SHIPS_CAPTURE.reset();
+        await abap.Classes.ZCL_L3_FLEET_SHIPS_CAPTURE.set_rows({it_rows: emptyRows()});
+        const before = ships();
+        const error = await withClass(PORTS, factory, () => refusal(() => runSet(RUNNER, "S", "ships=capture,alerts=remote", true)));
+        if (error?.constructor?.name?.toUpperCase() !== "ZCX_L3_FLEET_PORT" || !/generated variants only/.test(error.reason?.get() ?? "")) problems.push(`no refusal of a hand-written sink in a replay: ${String(error?.reason?.get?.() ?? error?.message ?? error)}`);
+        if (created("ZCL_HAND_ALERTS")) problems.push(`the hand-written sink was created ${created("ZCL_HAND_ALERTS")} time(s)`);
+        if (JSON.stringify(ships()) !== JSON.stringify(before)) problems.push("the ships table was touched");
+        return problems;
+      }
+      // an unknown variant on a later port is refused before an earlier port's adapter is created
+      async function laterPortProblems(factory) {
+        const problems = [];
+        resetCounts();
+        const error = await withClass(PORTS, factory, () => refusal(() => runSet(RUNNER, "S", "ships=rship,alerts=nope")));
+        if (error?.constructor?.name?.toUpperCase() !== "ZCX_L3_FLEET_PORT" || error.port?.get() !== "alerts" || !/no such variant/.test(error.reason?.get() ?? "")) problems.push(`no refusal for the unknown variant on the later port: ${String(error?.reason?.get?.() ?? error?.message ?? error)}`);
+        if (created("ZCL_HAND_SHIPS")) problems.push(`the earlier port's hand-written source was created ${created("ZCL_HAND_SHIPS")} time(s) before the refusal`);
+        return problems;
+      }
+
+      it("control: the hand-written adapters are bound and created in a run that is not a replay", async () => {
+        await loadHand(`${PORTS}_h0`);
+        resetCounts();
+        await clearLog();
+        const result = await withClass(PORTS, `${PORTS}_h0`, () => runSet(RUNNER, "S", "alerts=remote"));
+        expect(result.alerts).to.equal(7);
+        expect(result.rules.map((r) => r.status)).to.deep.equal(Array(6).fill("DONE"));
+        expect(created("ZCL_HAND_ALERTS"), "the sink was created and used").to.be.at.least(1);
+        expect(log(), "its put( ) wrote nothing").to.deep.equal([]);
+      });
+
+      it("a hand-written alerts sink bound in a replay is refused, and its constructor never runs", async () => {
+        expect(await handSinkProblems(`${PORTS}_h0`)).to.deep.equal([]);
+      });
+
+      it("an unknown binding on a later port is refused before an earlier port's adapter is created", async () => {
+        expect(await laterPortProblems(`${PORTS}_h0`)).to.deep.equal([]);
+      });
+
+      it("mutant: a factory that lets a hand-written variant into a replay is caught", async () => {
+        await loadHand(`${PORTS}_h1`, (t) => mutate(t, "    IF lv_replay_port IS NOT INITIAL AND lv_hand_port IS NOT INITIAL.", "    IF abap_false = abap_true."));
+        const problems = await handSinkProblems(`${PORTS}_h1`);
+        expect(problems.join("\n")).to.match(/the hand-written sink was created \d+ time/);
+        expect(await handSinkProblems(`${PORTS}_h0`), "control").to.deep.equal([]);
+      });
+
+      it("mutant: a check that creates the earlier port's adapter before it validates the later one is caught", async () => {
+        await loadHand(`${PORTS}_h2`, (t) => mutate(t, "  METHOD check.\n", "  METHOD check.\n    get_ships( variant( iv_port = 'ships' iv_bind = iv_bind ) ).\n"));
+        const problems = await laterPortProblems(`${PORTS}_h2`);
+        expect(problems.join("\n")).to.match(/the earlier port's hand-written source was created 1 time/);
+        expect(await laterPortProblems(`${PORTS}_h0`), "control").to.deep.equal([]);
       });
     });
 

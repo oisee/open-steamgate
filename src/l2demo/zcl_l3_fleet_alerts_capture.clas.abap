@@ -22,8 +22,4 @@ CLASS zcl_l3_fleet_alerts_capture IMPLEMENTATION.
     APPEND LINES OF it_rows TO gt_rows.
     rv_count = lines( it_rows ).
   ENDMETHOD.
-
-  METHOD zif_l3_fleet_alerts~volatile.
-    rv_volatile = abap_true.
-  ENDMETHOD.
 ENDCLASS.

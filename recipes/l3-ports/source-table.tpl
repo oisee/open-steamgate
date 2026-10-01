@@ -9,12 +9,4 @@ CLASS {{class}} IMPLEMENTATION.
   METHOD {{iface}}~read.
     SELECT * FROM {{table}} INTO TABLE rt_rows WHERE {{key}} IN it_range.
   ENDMETHOD.
-
-  METHOD {{iface}}~live.
-    rv_live = abap_true.
-  ENDMETHOD.
-
-  METHOD {{iface}}~volatile.
-    rv_volatile = abap_false.
-  ENDMETHOD.
 ENDCLASS.

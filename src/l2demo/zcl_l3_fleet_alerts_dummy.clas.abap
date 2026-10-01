@@ -9,8 +9,4 @@ CLASS zcl_l3_fleet_alerts_dummy IMPLEMENTATION.
   METHOD zif_l3_fleet_alerts~put.
     rv_count = lines( it_rows ).
   ENDMETHOD.
-
-  METHOD zif_l3_fleet_alerts~volatile.
-    rv_volatile = abap_true.
-  ENDMETHOD.
 ENDCLASS.

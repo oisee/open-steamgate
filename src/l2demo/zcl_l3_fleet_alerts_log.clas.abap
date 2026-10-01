@@ -26,8 +26,4 @@ CLASS zcl_l3_fleet_alerts_log IMPLEMENTATION.
       AND check_date = is_group-check_date
       AND alert_seq > lv_lines.
   ENDMETHOD.
-
-  METHOD zif_l3_fleet_alerts~volatile.
-    rv_volatile = abap_false.
-  ENDMETHOD.
 ENDCLASS.
