@@ -3018,3 +3018,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: none yet; whether abaplint should report a malformed object file is a question for an issue, not filed
 - Regression-test location: `test/xml-wellformed.mjs`
 - Upstream version containing a fix: n/a
+
+### ANOMALY-2026-10-01-test-classes-without-with-unit-tests — local test classes run here whether or not the class says it has them
+
+- Status: `fixed here` (23 shipped classes and the L2 generator) and guarded (`test/xml-wellformed.mjs`)
+- Discovery date: `2026-10-01`
+- Affected versions: `@abaplint/transpiler` 2.13.93 and this runtime's ABAP Unit runner
+- Affected ABAP statement, runtime API or adapter: a class's `*.clas.testclasses.abap` next to a `*.clas.xml` whose `VSEOCLASS` has no `<WITH_UNIT_TESTS>X</WITH_UNIT_TESTS>`
+- Minimal ABAP reproducer: any L2 rule class before this entry, e.g. `src/l2demo/zcl_l2_ship_captain.clas.xml` at `f1357c95`
+- Exact command used to run it: here `npm run unit` runs its test methods. On A4H, after an abapGit offline import of `src/l2demo` (status S, 13 objects), `SEOCLASSDF-WITH_UNIT_TESTS` was blank for all eight rule classes, `READ REPORT` of each class's CCAU include returned 0 lines, and the ADT ABAP Unit run (dangerous tests included) returned no test classes
+- Expected SAP behaviour: abapGit deserialises the test include only for a class flagged WITH_UNIT_TESTS; an unflagged class arrives without its tests
+- Actual open-abap behaviour: the transpiler reads the `.testclasses.abap` file whatever the flag says, so the tests pass here and do not exist there
+- Impact on open-steamgate: a class shipped to a system lost its tests silently, so "proved by the same test on OSG and on a system" was not true for the system side. Five shipped classes with test classes have no `clas.xml` at all (two lift demos, two regression classes, `ZCL_OSD_TPL`) and cannot be imported by abapGit; not addressed here
+- Smallest safe workaround: the flag in every shipped `clas.xml` with test classes and in `tools/dsl-l2.mjs`'s template; `test/xml-wellformed.mjs` fails on a shipped class with test classes and without the flag
+- Upstream: none yet; abaplint could warn about a `.testclasses.abap` file whose class XML lacks the flag. Not filed
+- Regression-test location: `test/xml-wellformed.mjs`
+- Upstream version containing a fix: n/a
