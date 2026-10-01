@@ -235,6 +235,10 @@ class Parser {
     if (token.kind === "string") return {kind: "literal", quoted: true, value: token.value, text: `'${token.value}'`};
     if (token.kind === "number") return {kind: "literal", quoted: false, value: token.value, text: token.value};
     if (token.kind === "param") {
+      if (token.value === "date" && this.peek().kind === "number" && this.peek().value.startsWith("-") &&
+          this.peek().column === token.column + token.value.length + 1) {
+        this.fail(`write \`$date - ${this.peek().value.slice(1)}\` for a date window`);
+      }
       if (token.value === "date" && this.peek().kind === "arith") {
         const sign = this.next().value;
         const offset = this.next();
@@ -761,8 +765,10 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
       const offset = right.offset;
       if (offset.kind === "literal") {
         if (!/^(0|[1-9][0-9]*)$/.test(offset.value) || BigInt(offset.value) > 2147483647n) fail(`date window ${right.text} needs a non-negative INT4 day count`);
-      } else if (!INT_RANGE[params.get(offset.name).type.built_in]) {
-        fail(`date window ${right.text} needs an INT parameter; $${offset.name} is ${typeText(params.get(offset.name).type)}`);
+      } else {
+        const offsetType = params.get(offset.name).type;
+        if (!INT_RANGE[offsetType.built_in]) fail(`date window ${right.text} needs an INT parameter; $${offset.name} is ${typeText(offsetType)}`);
+        if (offsetType.built_in === "INT8") fail(`date window ${right.text} cannot use $${offset.name}: INT8 is unavailable in ABAP 7.02`);
       }
       const key = right.text;
       if (!windows.has(key)) {

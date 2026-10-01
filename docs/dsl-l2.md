@@ -649,7 +649,7 @@ their source lines. A direct comparison needs the same DDIC built-in type,
 length and decimals as its selected field.
 
 `$date - N` and `$date + N` compare with DATS fields. `N` is a non-negative
-INT4 literal or a declared INT1/2/4/8 parameter whose supplied values are
+INT4 literal or a declared INT1/2/4 parameter whose supplied values are
 non-negative INT4 day counts. The compiler assigns each distinct bound once
 to `DATA lv_window_<n> TYPE d` before any SELECT; Open SQL compares the
 field with that local. The reference method does the same. The interpreter
@@ -666,7 +666,8 @@ are refused at the comparison line.
 an active ship needs a voyage in the last `$max_days` days, default 30. Its
 first example sets one day and checks the 2024-02-29 lower bound from a
 2024-03-01 check date. The derived cases check the adjacent days. The rule
-is not in an L3 manifest because this tree has no L3 runner or manifest.
+stays out of `fleet.l3.yaml` because the L3 runner passes only the date to
+each rule and cannot supply `$max_days` or other rule parameters.
 
 ## Not yet
 
@@ -676,6 +677,9 @@ the join (a comparison of an `exists` field with an outer field is allowed; one 
 fields is not), a `for` and an `exists` on the same table, a join without an equality, an
 equality under `or` as a join, a clause of `all` or `any` naming another clause, `require` with
 more than one clause, more than three clauses, a message class for the alert, and running a rule
-on A4H. The interpreter's agreement with a system is measured here only, on this runtime (NUMC
+on A4H. Date windows use a proleptic Gregorian calendar in the interpreter;
+their behavior across the 1582 calendar switch still needs measurement on a
+system. There is no runtime guard for very large day offsets. The interpreter's
+agreement with a system is measured here only, on this runtime (NUMC
 comparisons against a literal, for one, are the interpreter's reading of the DDIC and are not
 exercised by an ABAP test).

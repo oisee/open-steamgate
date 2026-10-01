@@ -61,6 +61,24 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
       });
     }
 
+    it("old and parameterized rules trace every output line to the current templates", () => {
+      for (const name of ["zcl_l2_ship_captain", "zcl_l2_recent_voyage"]) {
+        for (const kind of ["clas", "clas.testclasses"]) {
+          const prefix = join(OUT, `${name}.${kind}`);
+          const sidecar = JSON.parse(readFileSync(`${prefix}.trace.json`, "utf8"));
+          const template = readFileSync(sidecar.template, "utf8").split("\n");
+          const output = readFileSync(`${prefix}.abap`, "utf8").split("\n");
+          for (const entry of sidecar.lines) {
+            const source = template[entry.template_line - 1];
+            const rendered = output[entry.line - 1];
+            expect(source, `${name}.${kind} output line ${entry.line} names template line ${entry.template_line}`).to.be.a("string");
+            expect(rendered, `${name}.${kind} output line ${entry.line} exists`).to.be.a("string");
+            if (!source.includes("{{")) expect(rendered, `${name}.${kind} output line ${entry.line} from template line ${entry.template_line}`).to.equal(source);
+          }
+        }
+      }
+    });
+
     it("and the check notices one changed byte", async () => {
       const copy = join(scratch, "drift");
       mkdirSync(copy);
@@ -2676,6 +2694,8 @@ examples:
       refuse("negative", source.replace("$date - $max_days", "$date - -1"), /where:/, /non-negative INT4/);
       refuse("nondats", source.replace("voy.dep_date >= $date - $max_days", "voy.voyage_id >= $date - $max_days"), /where:/, /needs a DATS field/);
       refuse("nonint", source.replace("type: ZOSD_L2_DAYS, default: 30", "type: D, default: 20240301"), /where:/, /needs an INT parameter/);
+      refuse("int8", source.replace("type: ZOSD_L2_DAYS, default: 30", "type: INT8, default: 30"), /where:/, /INT8 is unavailable in ABAP 7\.02/);
+      refuse("tight-minus", source.replace("$date - $max_days", "$date-30"), /where:/, /write `\$date - 30`/);
       refuse("negative-example", source.replace("max_days: 1", "max_days: -1"), /params: \{max_days: -1\}/, /non-negative INT4/);
       refuse("negative-default", source.replace("default: 30", "default: -1"), /max_days:/, /non-negative INT4/);
       refuse("missing-required", source.replace(", default: 30", ""), /- name: default window/, /needs \$max_days/);
