@@ -53,9 +53,24 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
   rc=0
 done
 
+# The size budget (tools/osd-size-budget.mjs): monoliths may shrink, never
+# grow. It measures the working tree, which is what a push of the current
+# branch carries; a budget raised against main needs a reason.
+budget=0
+if [ -f "$root/tools/osd-size-budget.mjs" ] && [ -f "$root/tools/osd-size-budget.json" ]; then
+  git -C "$root" fetch --quiet origin main 2>/dev/null || true
+  node "$root/tools/osd-size-budget.mjs" --base origin/main || budget=1
+fi
+
 if [ $status -ne 0 ]; then
   echo ""
   echo "Пуш остановлен. Это уйдёт в публичный репозиторий."
   echo "Почисти историю (rebase/squash) и попробуй снова."
+fi
+if [ $budget -ne 0 ]; then
+  echo ""
+  echo "Пуш остановлен: бюджет размера (tools/osd-size-budget.json)."
+  echo "Вынеси код в отдельный пакет или подними бюджет с причиной."
+  status=1
 fi
 exit $status

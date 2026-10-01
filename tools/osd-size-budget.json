@@ -1,0 +1,458 @@
+{
+  "about": "Monoliths may shrink, never grow: see tools/osd-size-budget.mjs. Every entry is a ceiling in physical lines; raising one needs a reason a reviewer agrees with.",
+  "fileLimits": {
+    "go": 800,
+    "mjs": 1000
+  },
+  "watched": [
+    "tools/gogen/frontend.mjs",
+    "tools/adt-facade.mjs",
+    "tools/gogen/emit-go.mjs",
+    "tools/segw-gen.mjs",
+    "tools/sqlscript/to-ir.mjs",
+    "tools/osd-store.mjs",
+    "tools/gogen/js/abap.mjs"
+  ],
+  "budgets": {
+    "go:abap": {
+      "lines": 13337,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:amc": {
+      "lines": 506,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:apc": {
+      "lines": 436,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:charsearch": {
+      "lines": 58,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:classname": {
+      "lines": 31,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:cmd/apcprobe": {
+      "lines": 83,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:cmd/bench": {
+      "lines": 83,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:cmd/gateway": {
+      "lines": 177,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:cmd/mediacheck": {
+      "lines": 74,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:cmd/o4dserve": {
+      "lines": 83,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:cmd/osabap": {
+      "lines": 1115,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:cmd/osgo": {
+      "lines": 1178,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:cmd/semantics": {
+      "lines": 1684,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:cmd/storecmp": {
+      "lines": 41,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:cmd/sxmlbench": {
+      "lines": 67,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:cmd/unit": {
+      "lines": 0,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:cmd/zork": {
+      "lines": 42,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:datearith": {
+      "lines": 28,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:enq": {
+      "lines": 431,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:filepick": {
+      "lines": 504,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:hashchar": {
+      "lines": 33,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:reportargs": {
+      "lines": 209,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:session": {
+      "lines": 53,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:shiftleft": {
+      "lines": 9,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:subwrite": {
+      "lines": 10,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:termgui": {
+      "lines": 307,
+      "reason": "baseline 2026-10-01"
+    },
+    "go:tstmpsecs": {
+      "lines": 34,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/adt-documents.mjs": {
+      "lines": 1621,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/adt-facade.mjs": {
+      "lines": 3097,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/cds2ddic.mjs": {
+      "lines": 1097,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/dsl-l2-eval.mjs": {
+      "lines": 1277,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/dsl-l2.mjs": {
+      "lines": 1474,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/emit-go.mjs": {
+      "lines": 2290,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/emit-js.mjs": {
+      "lines": 1206,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/frontend.mjs": {
+      "lines": 6822,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/abap.go": {
+      "lines": 233,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/apc.go": {
+      "lines": 39,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/appendbytes.go": {
+      "lines": 62,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/codepage.go": {
+      "lines": 76,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/conv.go": {
+      "lines": 1097,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/crc32.go": {
+      "lines": 21,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/data.go": {
+      "lines": 412,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/dataset_nofollow_other.go": {
+      "lines": 8,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/dataset_nofollow_unix.go": {
+      "lines": 13,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/dataset.go": {
+      "lines": 914,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/datesplit.go": {
+      "lines": 78,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/db_nodatabase.go": {
+      "lines": 14,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/db_sqlite.go": {
+      "lines": 15,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/db_wasm.go": {
+      "lines": 22,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/db.go": {
+      "lines": 147,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/dbraw.go": {
+      "lines": 84,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/dbstore.go": {
+      "lines": 84,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/dbwrite.go": {
+      "lines": 316,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/events.go": {
+      "lines": 238,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/filedialog.go": {
+      "lines": 94,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/find.go": {
+      "lines": 371,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/frontend.go": {
+      "lines": 184,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/genarith.go": {
+      "lines": 97,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/gencmp.go": {
+      "lines": 203,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/gencmpnum.go": {
+      "lines": 103,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/gzip.go": {
+      "lines": 49,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/httpc.go": {
+      "lines": 643,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/icf_db.go": {
+      "lines": 98,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/icf.go": {
+      "lines": 293,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/inflate.go": {
+      "lines": 509,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/irsql.go": {
+      "lines": 509,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/jsonparse.go": {
+      "lines": 409,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/luw.go": {
+      "lines": 251,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/move.go": {
+      "lines": 210,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/movecorr.go": {
+      "lines": 34,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/osqlwhere.go": {
+      "lines": 727,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/packed.go": {
+      "lines": 467,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/raise.go": {
+      "lines": 200,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/random.go": {
+      "lines": 26,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/ranges.go": {
+      "lines": 420,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/regexclass.go": {
+      "lines": 46,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/registry.go": {
+      "lines": 155,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/row_binding.go": {
+      "lines": 175,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/seckey.go": {
+      "lines": 106,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/select.go": {
+      "lines": 55,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/selectdyn.go": {
+      "lines": 463,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/shift.go": {
+      "lines": 21,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/store_history.go": {
+      "lines": 147,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/store.go": {
+      "lines": 942,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/strings.go": {
+      "lines": 544,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/sxmlscan.go": {
+      "lines": 42,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/sysinfo.go": {
+      "lines": 87,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/tables.go": {
+      "lines": 251,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/trig_libm.go": {
+      "lines": 13,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/trig.go": {
+      "lines": 186,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/unit_session.go": {
+      "lines": 18,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/unitdump.go": {
+      "lines": 80,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/uuid.go": {
+      "lines": 23,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/w3mi.go": {
+      "lines": 213,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/cmd/semantics/main.go": {
+      "lines": 1684,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/js/abap.mjs": {
+      "lines": 1654,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/lift.mjs": {
+      "lines": 1225,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/osd-prove-inplace.mjs": {
+      "lines": 1036,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/osd-prove-on-system.mjs": {
+      "lines": 1382,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/osd-store.mjs": {
+      "lines": 1661,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/segw-gen.mjs": {
+      "lines": 1845,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/sqlscript-procedure-ir.mjs": {
+      "lines": 1352,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/sqlscript/to-ir.mjs": {
+      "lines": 1779,
+      "reason": "baseline 2026-10-01"
+    },
+    "tools/stg-compile.mjs": {
+      "lines": 1242,
+      "reason": "baseline 2026-10-01"
+    }
+  },
+  "readmeMissing": [
+    "amc",
+    "apc",
+    "charsearch",
+    "classname",
+    "datearith",
+    "filepick",
+    "hashchar",
+    "reportargs",
+    "session",
+    "shiftleft",
+    "subwrite",
+    "termgui",
+    "tstmpsecs"
+  ],
+  "importsAbap": {
+    "apc": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
+    "charsearch": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
+    "classname": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
+    "datearith": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
+    "filepick": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
+    "subwrite": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
+    "tstmpsecs": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface"
+  }
+}

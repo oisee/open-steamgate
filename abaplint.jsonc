@@ -111,6 +111,8 @@
     "errorNamespace": "."
   },
   "rules": {
+    "method_length": {"statements": 100, "severity": "Warning"},
+    "cyclomatic_complexity": {"max": 20, "severity": "Warning"},
     "7bit_ascii": true,
     "parser_error": true,
     "check_syntax": true,
