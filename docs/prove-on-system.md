@@ -8,7 +8,7 @@ brought.
 ```
 node tools/osd-prove-on-system.mjs <folder> --unit <deploy unit> [--manifest m.json]
      [--package $ZOSG_TMP_X] [--keep] [--osg count|run] [--server <mcp server>]
-node tools/osd-prove-on-system.mjs <folder> --unit <deploy unit> --cleanup --package $ZOSG_TMP_X
+node tools/osd-prove-on-system.mjs --cleanup --package $ZOSG_TMP_X     # needs the run's receipt
 ```
 
 **Use it on a sandbox only, and never on a productive or customer system.**
@@ -19,18 +19,49 @@ names (default: `.mcp.json` at the repository root, which is gitignored).
 Use `--server`/`OSD_MCP_SERVER` when that file configures more than one
 server. No host, user or client name is written in the tool.
 
-## It deletes only what it brought
+## It deletes only what it brought, unchanged
 
 The run creates its own package and so owns it:
 
 - The package must not exist when the run starts.
 - No object of the zip may exist yet, in any package.
-- The run deletes only the zip's own objects, and only those it finds in
-  that package.
+- The run deletes an object only if it is in the run's **receipt** and its
+  version stamp is unchanged since the import.
 - It deletes only its own repository row.
 - It deletes the package only when nothing else is in it.
 
-There is no abapGit `purge` and there is no `--reuse`.
+There is no abapGit `purge` and there is no `--reuse`. The zip's object
+list alone never authorises a delete.
+
+### The run receipt
+
+Right after an import that was not refused, the run writes
+`.local/prove-runs/<package>.json` (gitignored; `OSD_PROVE_RUNS` names
+another folder). It holds:
+
+- the package;
+- the repository key and name;
+- the zip's object list;
+- for each object that the import wrote into the package, its TADIR
+  identity and a version stamp read on the system right after the import.
+
+The stamps are read by a small snippet (`receiptAbap`), and the cleanup
+reads them again with the same ABAP:
+
+| Kind | Stamp |
+|---|---|
+| CLAS, INTF | the newest REPOSRC `UDAT`+`UTIME` over abapGit's own include list (`zcl_abapgit_oo_factory=>get_by_type( )->get_includes( )`, the list abapGit's `changed_by` reads), plus how many of those includes exist |
+| PROG | its REPOSRC `UDAT`+`UTIME` |
+| TABL, DTEL, DOMA, TTYP | the active DD02L / DD04L / DD01L / DD40L row's `AS4DATE`+`AS4TIME` |
+
+Any other kind gets no stamp. Such an object is not in the receipt, the run
+reports it, and it is never deleted.
+
+A refused import writes no receipt, and neither does an import whose stamps
+could not be read. In both cases the cleanup deletes no object.
+
+A complete cleanup removes the receipt. An incomplete one keeps it, so that
+`--cleanup` can try again.
 
 ## The steps
 
@@ -62,9 +93,11 @@ with "context canceled".
    2. creates the offline repository `OSDPROVE <package>` with
       `new_offline( )`;
    3. runs `set_files_remote( )`, `deserialize_checks( )` and
-      `deserialize( )`. The overwrite decisions are yes. The
-      warning_package decisions are **no**: abapGit then leaves out any
-      object that would move in from another package.
+      `deserialize( )`. Only new objects (action add) and the
+      run's own package entry are approved; any other overwrite refuses
+      the import (see the measured section below). The warning_package
+      decisions are **no**: abapGit then leaves out any object that would
+      move in from another package.
 
    If a repository under any other name is found at this point, the
    snippet does not import into it. The report carries the repository key,
@@ -107,13 +140,18 @@ with "context canceled".
       tool's own by name and the one this run imported into, by the key
       from step 4. Otherwise nothing at all is deleted. If the import
       reported no key, any repository refuses the cleanup.
-   2. **The zip's objects.** For each object in the zip's list, the
-      snippet reads its TADIR row and keeps it only if `DEVCLASS` is this
-      package. It hands exactly those rows to `zcl_abapgit_objects=>delete`,
-      abapGit's object layer, which deletes them one by one in dependency
-      order and commits each. An object of the zip that is missing or in
-      another package is reported and not touched. Nothing outside the
-      zip's list is ever handed to it.
+   2. **The receipt's objects.** For each object in the receipt, the
+      snippet reads its TADIR row. It keeps the object only if `DEVCLASS` is
+      this package **and** the stamp it reads now equals the receipt's
+      stamp.
+      - A changed object is kept and reported, and the run fails (exit 1).
+      - An object that is missing or in another package is reported and
+        not touched.
+      - It hands exactly the objects it kept to `zcl_abapgit_objects=>delete`,
+        abapGit's object layer, which deletes them one by one in dependency
+        order and commits each.
+      - Nothing outside the receipt is ever handed to it. With no receipt,
+        no object is deleted.
    3. **The repository row.** It is deleted with
       `zcl_abapgit_repo_srv->delete`. In abapGit's source, that method
       removes the persisted repository and checksums and drops the
@@ -126,8 +164,11 @@ with "context canceled".
       fails (exit 1). Subpackages are never deleted.
 
    `--keep` skips this step and prints the `--cleanup` command. That
-   command does the same work with the zip's object list. It has no
-   import, so there the repository's name is the evidence of ownership.
+   command needs the receipt. Without one it refuses (exit 2) before it
+   connects to anything, and it says how to inspect the package by hand.
+   With a receipt, it does the same work with the receipt's objects,
+   stamps and repository key, and it removes the receipt when the cleanup
+   is complete.
 
 `execute_abap` returns no output that the caller can read. Each snippet
 therefore ends with `cl_abap_unit_assert=>fail( msg = ... )`, and the result
@@ -201,7 +242,8 @@ models what vsp returned on A4H.
   survives.
 - **Some properties are checked as text.** The fake does not execute ABAP.
   So the snippet's own properties (the `DEVCLASS` check, the subpackage
-  query, the empty-package condition, `warning_package` = no, no `purge`)
+  query, the empty-package condition, `warning_package` = no, no `purge`,
+  the stamp comparison)
   are checked on the snippet's text.
 
 The tests cover:
@@ -212,7 +254,8 @@ The tests cover:
   - a class without CCAU;
   - a failing test method;
   - an object abapGit could not delete;
-  - `--keep` followed by `--cleanup`;
+  - `--keep` followed by `--cleanup`, which cleans completely by the
+    receipt and removes it;
   - the refusal of a package that does not start with `$`.
 - **Preflight refusals:**
   - an existing package (empty, with a foreign object, with a repository);
@@ -223,6 +266,14 @@ The tests cover:
   - a cleanup that deletes only the zip's items when the package holds
     more;
   - a zip item found in another package.
+- **The receipt:**
+  - a refused import writes no receipt, and `--cleanup` then refuses and
+    deletes nothing;
+  - `--cleanup` without a receipt refuses before any connection is made,
+    even with a zip list at hand;
+  - an object changed after the import (its stamp differs) survives both
+    the automatic cleanup and a later `--cleanup`;
+  - a complete automatic cleanup removes the receipt.
 - **Repository ownership:**
   - a foreign repository that appears after the preflight;
   - a repository key that changed;

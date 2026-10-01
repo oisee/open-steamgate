@@ -2,7 +2,7 @@
 //
 //   node tools/osd-prove-on-system.mjs <folder> --unit <unit> [--manifest m.json]
 //        [--package $ZOSG_TMP_X] [--keep] [--osg count|run] [--server <name>]
-//   node tools/osd-prove-on-system.mjs <folder> --unit <unit> --cleanup --package $ZOSG_TMP_X
+//   node tools/osd-prove-on-system.mjs --cleanup --package $ZOSG_TMP_X     (needs the run's receipt)
 //
 // Why (Alice, 2026-10-01): "proven by runs on systems, OSG included". The
 // first such proof was walked by hand on A4H for the L2 rules -- a zip of
@@ -19,13 +19,17 @@
 // (`OSD_MCP_CONFIG`, default `.mcp.json`, gitignored): no host, user or
 // client is written here.
 //
-// **It deletes only what it brought.** The package must not exist when the
-// run starts -- the run creates it and so owns it -- and no object of the
-// zip may exist anywhere. The cleanup does not purge: it hands exactly the
-// zip's objects found in that package to abapGit's object layer, deletes
-// the repository row (only the tool's own, `OSDPROVE <package>`, with the
-// key this run imported into), and deletes the package only when nothing
-// else and no subpackage is in it.
+// **It deletes only what it brought, unchanged.** The package must not
+// exist when the run starts -- the run creates it -- and no object of the
+// zip may exist anywhere. Right after an import that was not refused, the
+// run reads a version stamp for every object the import wrote into the
+// package and writes a receipt, `.local/prove-runs/<package>.json`. The
+// cleanup -- the run's own, or `--cleanup` later -- deletes an object only
+// if it is in the receipt and its stamp is unchanged, through abapGit's
+// object layer; then the repository row (only the tool's own,
+// `OSDPROVE <package>`, with the receipt's key) and the package only when
+// nothing else and no subpackage is in it. No receipt, no delete: the zip's
+// object list alone never authorises one.
 //
 // The steps, each a small MCP call, because a long call can be cut by
 // "context canceled":
@@ -34,7 +38,8 @@
 //      the zip exists already;
 //   3. create the local package (`create DEVC`);
 //   4. import with abapGit (`analyze execute_abap`) into the tool's own
-//      offline repository, recording its key;
+//      offline repository, recording its key; then stamp what it wrote and
+//      write the receipt;
 //   5. read SEOCLASSDF-WITH_UNIT_TESTS and the CCAU line count per class;
 //   6. ABAP Unit per class (`test CLAS`), compared by method identity
 //      (test class -> method), not by count;
@@ -51,7 +56,7 @@
 // MARK_OPEN / MARK_CLOSE so it is found in vsp's text whatever surrounds it
 // ("no output captured" is normal and means nothing).
 import {spawn} from "node:child_process";
-import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {basename, join, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
@@ -206,6 +211,103 @@ function checkItems(items) {
   for (const i of items) if (!OBJECT_ITEM.test(i)) throw new Error(`object "${i}" cannot be put into an ABAP literal`);
 }
 
+// ---------------------------------------------------------------- receipt
+//
+// A run receipt says which objects this run's import wrote into the package
+// and what each looked like right after: its TADIR identity and a version
+// stamp read on the system. Only an object in the receipt with the same
+// stamp is ever deleted, by the run's own cleanup or by `--cleanup` later.
+// The zip's object list alone never authorises a delete.
+
+/** The kinds of object a stamp can be read for, and from where:
+ *  CLAS/INTF the newest REPOSRC UDAT+UTIME over abapGit's own include list
+ *  (zcl_abapgit_oo_factory, the list abapGit's changed_by reads) and how
+ *  many of those includes exist; PROG its REPOSRC row; TABL/DTEL/DOMA/TTYP
+ *  the active DD02L/DD04L/DD01L/DD40L row's AS4DATE+AS4TIME. Any other
+ *  kind gets no stamp, so it is never in a receipt and never deleted. */
+export const STAMPED_KINDS = ["CLAS", "INTF", "PROG", "TABL", "DTEL", "DOMA", "TTYP"];
+const STAMP = /^[A-Z]{4}:[0-9]{14}(\/[0-9]+)?$/;
+
+const STAMP_DECLARATIONS = [
+  "DATA lv_stamp TYPE string.",
+  "DATA lv_max TYPE string.",
+  "DATA lv_cnt TYPE i.",
+  "DATA lv_d TYPE d.",
+  "DATA lv_t TYPE t.",
+  "DATA lt_incs TYPE zif_abapgit_oo_object_fnc=>ty_includes_tt.",
+];
+
+/** ABAP that sets lv_stamp for lv_type / lv_name (empty: no stamp). */
+const STAMP_BLOCK = [
+  "CLEAR: lv_stamp, lv_max, lv_cnt, lt_incs, lv_d, lv_t.",
+  "CASE lv_type.",
+  "  WHEN 'CLAS' OR 'INTF'.",
+  "    TRY.",
+  "        lt_incs = zcl_abapgit_oo_factory=>get_by_type( lv_type )->get_includes( lv_name ).",
+  "      CATCH cx_root.",
+  "        CLEAR lt_incs.",
+  "    ENDTRY.",
+  "    LOOP AT lt_incs INTO DATA(lv_inc).",
+  "      SELECT SINGLE udat, utime FROM reposrc WHERE progname = @lv_inc AND r3state = 'A' INTO (@lv_d, @lv_t).",
+  "      IF sy-subrc = 0.",
+  "        lv_cnt = lv_cnt + 1.",
+  "        IF |{ lv_d }{ lv_t }| > lv_max.",
+  "          lv_max = |{ lv_d }{ lv_t }|.",
+  "        ENDIF.",
+  "      ENDIF.",
+  "    ENDLOOP.",
+  "    IF lv_cnt > 0.",
+  "      lv_stamp = |{ lv_type }:{ lv_max }/{ lv_cnt }|.",
+  "    ENDIF.",
+  "  WHEN 'PROG'.",
+  "    SELECT SINGLE udat, utime FROM reposrc WHERE progname = @lv_name AND r3state = 'A' INTO (@lv_d, @lv_t).",
+  "  WHEN 'TABL'.",
+  "    SELECT SINGLE as4date, as4time FROM dd02l WHERE tabname = @lv_name AND as4local = 'A' AND as4vers = '0000' INTO (@lv_d, @lv_t).",
+  "  WHEN 'DTEL'.",
+  "    SELECT SINGLE as4date, as4time FROM dd04l WHERE rollname = @lv_name AND as4local = 'A' AND as4vers = '0000' INTO (@lv_d, @lv_t).",
+  "  WHEN 'DOMA'.",
+  "    SELECT SINGLE as4date, as4time FROM dd01l WHERE domname = @lv_name AND as4local = 'A' AND as4vers = '0000' INTO (@lv_d, @lv_t).",
+  "  WHEN 'TTYP'.",
+  "    SELECT SINGLE as4date, as4time FROM dd40l WHERE typename = @lv_name AND as4local = 'A' INTO (@lv_d, @lv_t).",
+  "ENDCASE.",
+  "IF lv_stamp IS INITIAL AND lv_d IS NOT INITIAL.",
+  "  lv_stamp = |{ lv_type }:{ lv_d }{ lv_t }|.",
+  "ENDIF.",
+];
+
+/** After the import: each object of the zip whose TADIR row is in the
+ *  package, with its stamp. Nothing is changed. */
+export function receiptAbap(pkg, items) {
+  checkItems(items);
+  return [
+    "DATA lv_out TYPE string.",
+    "DATA lt_items TYPE string_table.",
+    "DATA lv_type TYPE tadir-object.",
+    "DATA lv_name TYPE tadir-obj_name.",
+    ...STAMP_DECLARATIONS,
+    ...items.map((i) => `APPEND \`${i}\` TO lt_items.`),
+    "LOOP AT lt_items INTO DATA(lv_item).",
+    "  SPLIT lv_item AT space INTO lv_type lv_name.",
+    "  SELECT SINGLE devclass FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
+    "    INTO @DATA(lv_where).",
+    "  IF sy-subrc <> 0.",
+    "    lv_out = |{ lv_out } absent={ lv_type }:{ lv_name };|.",
+    `  ELSEIF lv_where <> '${pkg}'.`,
+    "    lv_out = |{ lv_out } elsewhere={ lv_type }:{ lv_name }@{ lv_where };|.",
+    "  ELSE.",
+    ...STAMP_BLOCK.map((l) => `    ${l}`),
+    "    IF lv_stamp IS INITIAL.",
+    "      lv_out = |{ lv_out } nostamp={ lv_type }:{ lv_name };|.",
+    "    ELSE.",
+    "      lv_out = |{ lv_out } stamp={ lv_type }:{ lv_name }@{ lv_stamp };|.",
+    "    ENDIF.",
+    "  ENDIF.",
+    "ENDLOOP.",
+    "lv_out = |{ lv_out } items={ lines( lt_items ) };|.",
+    report("lv_out"),
+  ].join("\n") + "\n";
+}
+
 /** Step 2, the preflight: nothing is changed. Does the package exist, has
  *  it a repository, and does any object of the zip exist already (in any
  *  package)? */
@@ -265,8 +367,10 @@ export function preflightAbap(pkg, items) {
  *      empty package) only if TADIR holds nothing else under it and TDEVC
  *      has no subpackage of it; otherwise it is kept and what is there is
  *      listed. Subpackages are never deleted. */
-export function cleanupAbap(pkg, items, expectedKey) {
+export function cleanupAbap(pkg, entries, expectedKey) {
+  const items = entries.map((e) => e.item);
   checkItems(items);
+  for (const e of entries) if (!STAMP.test(e.stamp ?? "")) throw new Error(`not a stamp: ${e.stamp} (${e.item})`);
   if (expectedKey !== undefined && expectedKey !== "" && !REPO_KEY.test(expectedKey)) throw new Error(`not a repository key: ${expectedKey}`);
   const keyCheck = expectedKey === undefined ? "" : `li_repo->get_key( ) <> '${expectedKey}' OR `;
   return [
@@ -281,7 +385,11 @@ export function cleanupAbap(pkg, items, expectedKey) {
     "DATA lv_n TYPE i.",
     "DATA li_repo TYPE REF TO zif_abapgit_repo.",
     "DATA(li_log) = CAST zif_abapgit_log( NEW zcl_abapgit_log( ) ).",
-    ...items.map((i) => `APPEND \`${i}\` TO lt_items.`),
+    "DATA lt_stamps TYPE string_table.",
+    "DATA lv_want TYPE string.",
+    ...STAMP_DECLARATIONS,
+    ...entries.map((e) => `APPEND \`${e.item}\` TO lt_items.`),
+    ...entries.map((e) => `APPEND \`${e.stamp}\` TO lt_stamps.`),
     "TRY.",
     "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
     `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
@@ -295,6 +403,8 @@ export function cleanupAbap(pkg, items, expectedKey) {
     "ENDIF.",
     "IF lv_go = abap_true.",
     "  LOOP AT lt_items INTO DATA(lv_item).",
+    "    DATA(lv_ix) = sy-tabix.",
+    "    READ TABLE lt_stamps INDEX lv_ix INTO lv_want.",
     "    SPLIT lv_item AT space INTO lv_type lv_name.",
     "    SELECT SINGLE * FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
     "      INTO @DATA(ls_db).",
@@ -303,9 +413,15 @@ export function cleanupAbap(pkg, items, expectedKey) {
     `    ELSEIF ls_db-devclass <> '${pkg}'.`,
     "      lv_out = |{ lv_out } elsewhere={ lv_type }:{ lv_name }@{ ls_db-devclass };|.",
     "    ELSE.",
-    "      CLEAR ls_tadir.",
-    "      MOVE-CORRESPONDING ls_db TO ls_tadir.",
-    "      APPEND ls_tadir TO lt_tadir.",
+    ...STAMP_BLOCK.map((l) => `      ${l}`),
+    "      IF lv_stamp IS INITIAL OR lv_stamp <> lv_want.",
+    "        \" changed since the import (or unreadable now): not ours to delete any more",
+    "        lv_out = |{ lv_out } changed={ lv_type }:{ lv_name }@{ lv_stamp };|.",
+    "      ELSE.",
+    "        CLEAR ls_tadir.",
+    "        MOVE-CORRESPONDING ls_db TO ls_tadir.",
+    "        APPEND ls_tadir TO lt_tadir.",
+    "      ENDIF.",
     "    ENDIF.",
     "  ENDLOOP.",
     "  lv_out = |{ lv_out } to_delete={ lines( lt_tadir ) };|.",
@@ -442,12 +558,23 @@ export function parseClassCheck(msg) {
   return out;
 }
 
+export function parseReceipt(msg) {
+  return {
+    stamped: pairs(msg, "stamp").map((p) => ({item: p.item, stamp: p.where})),
+    nostamp: pairs(msg, "nostamp").map((p) => p.item),
+    absent: pairs(msg, "absent").map((p) => p.item),
+    elsewhere: pairs(msg, "elsewhere"),
+    items: Number(field(msg, "items") ?? NaN),
+  };
+}
+
 export function parseCleanup(msg) {
   return {
     err: [...msg.matchAll(/ERR ([^;]*);/g)].map((m) => m[1]),
     logs: [...msg.matchAll(/\[([EA])\] ([^;]*);/g)].map((m) => `[${m[1]}] ${m[2].trim()}`),
     toDelete: Number(field(msg, "to_delete") ?? NaN),
     absent: pairs(msg, "absent").map((p) => p.item),
+    changed: pairs(msg, "changed"),
     elsewhere: pairs(msg, "elsewhere"),
     repoLeft: Number(field(msg, "repo_left") ?? NaN),
     itemsLeft: Number(field(msg, "items_left") ?? NaN),
@@ -649,18 +776,33 @@ export async function preflight(mcp, pkg, items) {
   return refusals;
 }
 
-/** Step 7: delete the zip's objects in the package, the repository row, and
- *  the package if nothing else is in it (cleanupAbap says how). Returns the
- *  problems; anything left is one. */
-export async function cleanup(mcp, pkg, items, {expectedKey, standalone = false, log = () => {}} = {}) {
-  if (!standalone && expectedKey === undefined) {
-    // without the key of this run's import the repository cannot be told from
-    // one that appeared since; the snippet then refuses any repository at all
-    expectedKey = "";
-  }
+/** Where a run keeps its receipt: `.local/prove-runs/<package>.json`
+ *  (gitignored), or OSD_PROVE_RUNS. */
+export function receiptPath(pkg, dir = process.env.OSD_PROVE_RUNS ?? join(process.env.OSD_ROOT ?? process.cwd(), ".local", "prove-runs")) {
+  return join(dir, `${pkg}.json`);
+}
+
+export function writeReceipt(file, receipt) {
+  mkdirSync(join(file, ".."), {recursive: true});
+  writeFileSync(file, JSON.stringify(receipt, undefined, 1) + "\n");
+}
+
+export function readReceipt(file) {
+  if (!existsSync(file)) return undefined;
+  return JSON.parse(readFileSync(file, "utf8"));
+}
+
+/** Step 7: delete the receipt's objects that are unchanged, the repository
+ *  row, and the package if nothing else is in it (cleanupAbap says how).
+ *  `entries` are the receipt's stamped objects; with none, no object is
+ *  deleted. Returns the problems; anything left is one. */
+export async function cleanup(mcp, pkg, entries, {expectedKey, log = () => {}} = {}) {
+  // without the key of this run's import the repository cannot be told from
+  // one that appeared since; the snippet then refuses any repository at all
+  if (expectedKey === undefined) expectedKey = "";
   let r;
   try {
-    r = await exec(mcp, cleanupAbap(pkg, items, standalone ? undefined : expectedKey), "cleanup");
+    r = await exec(mcp, cleanupAbap(pkg, entries, expectedKey), "cleanup");
   } catch (e) {
     return {ok: false, problems: [`cleanup: ${e.message}`]};
   }
@@ -670,10 +812,14 @@ export async function cleanup(mcp, pkg, items, {expectedKey, standalone = false,
   for (const e of c.err) problems.push(`cleanup: ${e}`);
   for (const l of c.logs) problems.push(`cleanup log ${l}`);
   for (const e of c.elsewhere) problems.push(`cleanup: ${e.item} is in package ${e.where}, not ${pkg}; not touched`);
+  for (const e of c.changed) {
+    problems.push(`cleanup: ${e.item} changed since the import (stamp now "${e.where ?? ""}"); kept`);
+  }
   for (const [name, n] of [["repository", c.repoLeft], ["object(s) of the zip", c.itemsLeft]]) {
     if (!(n === 0)) problems.push(`cleanup incomplete: ${Number.isNaN(n) ? "unknown number of" : n} ${name} left`);
   }
   if (c.itemLeft.length) problems.push(`cleanup: left in ${pkg}:\n${listed(c.itemLeft)}`);
+  if (entries.length === 0) log("cleanup: no receipt entries, so no object was deleted");
   if (!(c.others === 0) || !(c.children === 0)) {
     problems.push(`cleanup: package ${pkg} kept, it holds what this run did not bring`
       + (c.others > 0 ? `\n  ${c.others} object(s):\n${listed(c.other)}` : "")
@@ -708,6 +854,7 @@ export function judgeImport(imp) {
 /** Steps 1-6. `mcp` is {call(action, target, params) -> text}; `osg` is a
  *  provider ({mode, methods(cls)}); `zipper` builds the zip. */
 export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep = false, mcp, osg,
+  receiptFile = receiptPath(pkg),
   zipper = buildZip, log = () => {}}) {
   pkg = checkPackage(pkg);
   const problems = [];
@@ -747,23 +894,43 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
 
   // the repository key the import reports; the cleanup takes that repository and no other
   let importedKey;
-  // the zip's objects this run may delete: none until the import has written
-  // them. An import refused because a zip-named object appeared in the
-  // package after the preflight wrote nothing of ours, so the cleanup then
-  // deletes no object at all (critic round 6), only our repository row and,
-  // if it is empty, the package
-  let ours = [];
+  // the objects this run may delete: those in its receipt, none until the
+  // import has written them. An import refused because a zip-named object
+  // appeared in the package after the preflight wrote nothing of ours and
+  // gets no receipt, so the cleanup then deletes no object at all (critic
+  // round 6), only our repository row and, if it is empty, the package
+  let receipt;
   try {
+    let refused = true;
     try {
       const r = await exec(mcp, importAbap(built.bytes, pkg), "import");
       log(`import: ${r.message.trim()}`);
-      if (!/import refused;/.test(r.message)) ours = built.objects;
+      refused = /import refused;/.test(r.message);
       const imp = parseImport(r.message);
       if (imp.repo !== undefined && REPO_KEY.test(imp.repo)) importedKey = imp.repo;
       else problems.push("import: the report carries no repository key");
       problems.push(...judgeImport(imp));
     } catch (e) {
       problems.push(e.message);
+    }
+
+    // the receipt: what the import wrote, as it was right after
+    if (!refused && importedKey !== undefined) {
+      try {
+        const r = await exec(mcp, receiptAbap(pkg, built.objects), "receipt");
+        const got = parseReceipt(r.message);
+        if (got.items !== built.objects.length) throw new Error(`receipt: the report is incomplete: ${r.message.trim()}`);
+        receipt = {package: pkg, repoKey: importedKey, repoName: ownRepoName(pkg), objects: built.objects,
+          stamped: got.stamped.map((e) => ({...e, devclass: pkg})), written: new Date().toISOString()};
+        writeReceipt(receiptFile, receipt);
+        log(`receipt: ${receipt.stamped.length} object(s) stamped, ${receiptFile}`);
+        for (const i of got.nostamp) problems.push(`receipt: no stamp for ${i}; it will not be deleted`);
+        for (const e of got.elsewhere) problems.push(`receipt: ${e.item} is in package ${e.where}, not ${pkg}; not in the receipt, not touched`);
+        for (const i of got.absent) problems.push(`receipt: ${i} is not on the system after the import`);
+      } catch (e) {
+        problems.push(`receipt not written, so no object will be deleted: ${e.message}`);
+        receipt = undefined;
+      }
     }
 
     let check = new Map();
@@ -825,11 +992,12 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
   } finally {
     if (keep) {
       log(`--keep: package ${pkg} and its objects are left on the system. Remove them with\n`
-        + `  node tools/osd-prove-on-system.mjs ${folder} --unit ${unit}${manifest ? ` --manifest ${manifest}` : ""} `
-        + `--cleanup --package '${pkg}'`);
+        + `  node tools/osd-prove-on-system.mjs --cleanup --package '${pkg}'\n`
+        + `(it deletes only what the receipt ${receiptFile} lists, unchanged)`);
     } else {
-      const c = await cleanup(mcp, pkg, ours, {expectedKey: importedKey, log});
+      const c = await cleanup(mcp, pkg, receipt?.stamped ?? [], {expectedKey: importedKey, log});
       problems.push(...c.problems);
+      if (c.ok && receipt !== undefined) rmSync(receiptFile, {force: true});
     }
   }
   return done();
@@ -914,7 +1082,27 @@ export function mcpStdio({config = process.env.OSD_MCP_CONFIG ?? join(process.cw
 
 // --------------------------------------------------------------------- CLI
 
-export async function main(argv, {mcp: givenMcp, out = console.log} = {}) {
+/** `--cleanup`: only with the receipt a run wrote. */
+export async function cleanupFromReceipt(mcp, pkg, file, out) {
+  const receipt = readReceipt(file);
+  if (receipt === undefined) {
+    out(`refused: no receipt for ${pkg} at ${file}. Without one nothing shows that a run of this tool created `
+      + `what is in ${pkg}, so nothing is deleted. Inspect it by hand (SE80 / ADT package ${pkg}, abapGit's `
+      + "repository list) and remove what is yours there.");
+    return 2;
+  }
+  if (receipt.package !== pkg || !REPO_KEY.test(receipt.repoKey ?? "") || !Array.isArray(receipt.stamped)) {
+    out(`refused: the receipt at ${file} is not a receipt for ${pkg}`);
+    return 2;
+  }
+  const c = await cleanup(mcp, pkg, receipt.stamped, {expectedKey: receipt.repoKey, log: out});
+  for (const p of c.problems) out(`FAIL ${p}`);
+  if (c.ok) rmSync(file, {force: true});
+  out(c.ok ? `cleanup of ${pkg}: complete` : `cleanup of ${pkg}: INCOMPLETE`);
+  return c.ok ? 0 : 1;
+}
+
+export async function main(argv, {mcp: givenMcp, out = console.log, receiptDir} = {}) {
   const flag = (n) => { const i = argv.indexOf(`--${n}`); return i < 0 ? undefined : argv[i + 1]; };
   const valued = new Set(["--unit", "--manifest", "--package", "--osg", "--server"]);
   const folder = argv.find((a, i) => !a.startsWith("--") && !valued.has(argv[i - 1]));
@@ -925,25 +1113,24 @@ export async function main(argv, {mcp: givenMcp, out = console.log} = {}) {
     out(e.message);
     return 2;
   }
-  if (folder === undefined) {
+  const cleanupOnly = argv.includes("--cleanup");
+  if (folder === undefined && !cleanupOnly) {
     out("usage: osd-prove-on-system.mjs <folder> --unit <unit> [--manifest m.json] [--package $ZOSG_TMP_X] [--keep] "
       + "[--osg count|run] [--server <mcp server>]\n"
-      + "       osd-prove-on-system.mjs <folder> --unit <unit> [--manifest m.json] --cleanup --package $ZOSG_TMP_X");
+      + "       osd-prove-on-system.mjs --cleanup --package $ZOSG_TMP_X   (needs the run's receipt)");
     return 2;
+  }
+  const file = receiptPath(pkg, receiptDir);
+  if (cleanupOnly && readReceipt(file) === undefined) {
+    // refused before any connection is made
+    return cleanupFromReceipt(undefined, pkg, file, out);
   }
   const mcp = givenMcp ?? mcpStdio({server: flag("server")});
   try {
-    if (argv.includes("--cleanup")) {
-      // the zip's object list is what may be deleted, so the folder is needed here too
-      const built = buildZip(folder, {unit: flag("unit"), manifest: flag("manifest")});
-      const c = await cleanup(mcp, pkg, built.objects, {standalone: true, log: out});
-      for (const p of c.problems) out(`FAIL ${p}`);
-      out(c.ok ? `cleanup of ${pkg}: complete` : `cleanup of ${pkg}: INCOMPLETE`);
-      return c.ok ? 0 : 1;
-    }
+    if (cleanupOnly) return await cleanupFromReceipt(mcp, pkg, file, out);
     const osg = flag("osg") === "run" ? osgRunner() : osgCounter(folder);
     const r = await prove({folder, unit: flag("unit"), manifest: flag("manifest"), pkg, keep: argv.includes("--keep"),
-      mcp, osg, log: out});
+      mcp, osg, log: out, receiptFile: file});
     out("");
     if (r.rows.length > 0) out(table(r.rows));
     for (const row of r.rows) for (const n of row.notes) out(`  ${row.cls}: ${n}`);

@@ -9,13 +9,13 @@
 // No child process is spawned: the tool writes its zip in process and the
 // fake reads it in process (a sandbox may refuse to spawn `zip`/`unzip`).
 import assert from "node:assert/strict";
-import {cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {inflateRawSync} from "node:zlib";
 import {
   MARK_CLOSE, MARK_OPEN, buildZip, checkPackage, cleanupAbap, classCheckAbap, countTestMethods, importAbap,
-  main, osgRunner, preflightAbap, prove, verdict,
+  main, osgRunner, preflightAbap, prove, receiptAbap, verdict,
 } from "../tools/osd-prove-on-system.mjs";
 
 const FIXTURE = resolve("test/fixtures/prove-on-system");
@@ -59,13 +59,19 @@ const colon = (item) => item.replace(" ", ":");
 function fakeSystem({
   importErrors = [], importWarnings = [], status, failing = new Set(),
   before = {}, intruder, childPackage, undeletable = new Set(), editImport = (m) => m,
-  dropCheck = new Set(), checkOverride = {}, unitText = {}, afterImport = () => {},
+  dropCheck = new Set(), checkOverride = {}, unitText = {}, afterImport = () => {}, touchAfterReceipt = new Set(),
 } = {}) {
   const sys = {
     packages: new Map(Object.entries(before.packages ?? {})),
     tadir: [...(before.tadir ?? [])],
     repos: [...(before.repos ?? [])],
     classes: new Map(), calls: [], deleted: [],
+    // the version stamp each object carries on the system; an edit changes it
+    stamps: new Map(),
+  };
+  const stampOf = (item) => {
+    const type = item.slice(0, 4);
+    return `${type}:20261001120000${type === "CLAS" || type === "INTF" ? "/9" : ""}`;
   };
   const repoOf = (pkg) => sys.repos.find((r) => r.pkg === pkg);
   const row = (item) => sys.tadir.find((t) => t.item === item);
@@ -83,7 +89,7 @@ function fakeSystem({
         const code = params.code;
         assert.match(code, /cl_abap_unit_assert=>fail\( msg = /, "every snippet reports through fail( )");
         assert.ok(/^[\x00-\x7f]*$/.test(code), "snippet is ASCII");
-        const pkg = /iv_package = '([^']+)'/.exec(code)?.[1];
+        const pkg = /iv_package = '([^']+)'/.exec(code)?.[1] ?? /lv_where <> '([^']+)'/.exec(code)?.[1];
         if (code.includes("existing={ lv_n }")) {
           sys.calls.at(-1).kind = "preflight";
           const repo = repoOf(pkg);
@@ -116,7 +122,10 @@ function fakeSystem({
             // what A4H did (#354): without WITH_UNIT_TESTS no CCAU include is created
             const methods = wut ? [...tests.matchAll(/METHODS (\w+) FOR TESTING/g)].map((x) => x[1].toUpperCase()) : [];
             sys.classes.set(name, {wut, methods});
-            if (!row(`CLAS ${name}`)) sys.tadir.push({item: `CLAS ${name}`, devclass: pkg});
+            if (!row(`CLAS ${name}`)) {
+              sys.tadir.push({item: `CLAS ${name}`, devclass: pkg});
+              sys.stamps.set(`CLAS ${name}`, stampOf(`CLAS ${name}`));
+            }
           }
           if (intruder) sys.tadir.push({item: intruder, devclass: pkg});
           if (childPackage) sys.packages.set(childPackage, pkg);
@@ -126,6 +135,22 @@ function fakeSystem({
           const inPkg = sys.tadir.filter((t) => t.devclass === pkg).length;
           return alert(editImport(`${MARK_OPEN}files=${files.size}; repo=${importedKey}; status=${st};${logs} `
             + `logs=${importErrors.length + importWarnings.length}; tadir=${inPkg};${MARK_CLOSE}`));
+        }
+        if (code.includes("nostamp=")) {
+          sys.calls.at(-1).kind = "receipt";
+          assert.match(code, /zcl_abapgit_oo_factory=>get_by_type\( lv_type \)->get_includes\( lv_name \)/);
+          const items = itemsOf(code);
+          let out = "";
+          for (const item of items) {
+            const t = row(item);
+            if (!t) out += ` absent=${colon(item)};`;
+            else if (t.devclass !== pkg) out += ` elsewhere=${colon(item)}@${t.devclass};`;
+            else if (!sys.stamps.has(item)) out += ` nostamp=${colon(item)};`;
+            else out += ` stamp=${colon(item)}@${sys.stamps.get(item)};`;
+          }
+          // somebody edits an object after the receipt was taken
+          for (const item of touchAfterReceipt) sys.stamps.set(item, `${item.slice(0, 4)}:20261001130000/9`);
+          return framed(`${out} items=${items.length};`);
         }
         if (code.includes("seoclassdf")) {
           sys.calls.at(-1).kind = "check";
@@ -144,6 +169,8 @@ function fakeSystem({
           const want = /get_key\( \) <> '([0-9]*)'/.exec(code)?.[1];
           const ownName = /get_name\( \) <> '([^']+)'/.exec(code)[1];
           const items = itemsOf(code);
+          const wants = [...code.matchAll(/APPEND `([A-Z]{4}:[0-9/]+)` TO lt_stamps\./g)].map((m) => m[1]);
+          assert.equal(wants.length, items.length, "a stamp per item");
           let out = "";
           const repo = repoOf(pkg);
           const go = !(repo && ((want !== undefined && repo.key !== want) || repo.name !== ownName));
@@ -151,12 +178,13 @@ function fakeSystem({
           let key;
           if (go) {
             const handed = [];
-            for (const item of items) {
+            items.forEach((item, i) => {
               const t = row(item);
               if (!t) out += ` absent=${colon(item)};`;
               else if (t.devclass !== pkg) out += ` elsewhere=${colon(item)}@${t.devclass};`;
+              else if (sys.stamps.get(item) !== wants[i]) out += ` changed=${colon(item)}@${sys.stamps.get(item) ?? ""};`;
               else handed.push(item);
-            }
+            });
             out += ` to_delete=${handed.length};`;
             for (const item of handed) {
               if (undeletable.has(item)) {
@@ -205,11 +233,12 @@ function fakeSystem({
   };
 }
 
-async function run(args, mcp) {
+async function run(args, mcp, receiptDir = mkdtempSync(join(tmpdir(), "osd-prove-runs-"))) {
   const lines = [];
-  const code = await main(args, {mcp, out: (l) => lines.push(String(l))});
-  return {code, text: lines.join("\n")};
+  const code = await main(args, {mcp, out: (l) => lines.push(String(l)), receiptDir});
+  return {code, text: lines.join("\n"), receiptDir};
 }
+const receiptIn = (dir) => join(dir, `${PKG}.json`);
 
 const base = (folder = join(FIXTURE, "src")) => [folder, "--unit", "prove-demo", "--manifest", MANIFEST, "--package", PKG];
 const kinds = (mcp) => mcp.sys.calls.map((c) => c.kind ?? c.action);
@@ -240,7 +269,7 @@ describe("osd-prove-on-system", () => {
       assert.equal(code, 0, text);
       assert.match(text, /ZCL_OSD_PROVE_DEMO\s+\| 2\s+\| 2\s+\| 0/);
       assert.match(text, /ZCL_OSD_PROVE_PLAIN\s+\| 0\s+\| 0\s+\| 0/);
-      assert.deepEqual(kinds(mcp), ["preflight", "create", "import", "check", "test", "cleanup"]);
+      assert.deepEqual(kinds(mcp), ["preflight", "create", "import", "receipt", "check", "test", "cleanup"]);
       assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS);
       clean(mcp);
     });
@@ -291,16 +320,32 @@ describe("osd-prove-on-system", () => {
       assert.match(text, /^NOT proved/m);
     });
 
-    it("--keep skips the cleanup; the printed --cleanup then removes exactly what the run brought", async () => {
+    it("a run plus --keep followed by --cleanup cleans completely, by the receipt, and removes it", async () => {
       const mcp = fakeSystem();
-      const {code, text} = await run([...base(), "--keep"], mcp);
+      const {code, text, receiptDir} = await run([...base(), "--keep"], mcp);
       assert.equal(code, 0, text);
       assert.ok(!kinds(mcp).includes("cleanup"));
-      assert.match(text, /--unit prove-demo --manifest \S+ --cleanup --package '\$ZOSG_TMP_TEST'/);
-      const again = await run([...base(), "--cleanup"], mcp);
+      assert.match(text, /node tools\/osd-prove-on-system\.mjs --cleanup --package '\$ZOSG_TMP_TEST'/);
+      const receipt = JSON.parse(readFileSync(receiptIn(receiptDir), "utf8"));
+      assert.equal(receipt.package, PKG);
+      assert.equal(receipt.repoKey, "000000000042");
+      assert.equal(receipt.repoName, OWN);
+      assert.deepEqual(receipt.objects, ZIP_OBJECTS);
+      assert.deepEqual(receipt.stamped.map((e) => e.item).sort(), ZIP_OBJECTS);
+      assert.ok(receipt.stamped.every((e) => e.devclass === PKG && /^CLAS:\d{14}\/\d+$/.test(e.stamp)));
+      const again = await run(["--cleanup", "--package", PKG], mcp, receiptDir);
       assert.equal(again.code, 0, again.text);
       assert.match(again.text, /cleanup of \$ZOSG_TMP_TEST: complete/);
+      assert.ok(!existsSync(receiptIn(receiptDir)), "the receipt goes with a complete cleanup");
       clean(mcp);
+    });
+
+    it("a complete automatic cleanup removes the receipt", async () => {
+      const mcp = fakeSystem();
+      const {code, text, receiptDir} = await run(base(), mcp);
+      assert.equal(code, 0, text);
+      assert.match(text, /receipt: 2 object\(s\) stamped/);
+      assert.ok(!existsSync(receiptIn(receiptDir)));
     });
 
     it("a package that is not local ($) is refused before anything is sent", async () => {
@@ -363,6 +408,58 @@ describe("osd-prove-on-system", () => {
       assert.ok(mcp.sys.tadir.some((r) => r.item === "CLAS ZCL_OSD_PROVE_DEMO"), "the foreign object stays");
     });
 
+    it("a refused import writes no receipt, and --cleanup then refuses and deletes nothing", async () => {
+      const mcp = fakeSystem({editImport: (m) => m.replace(/status=S;/, "ERR would overwrite CLAS ZCL_OSD_PROVE_DEMO (action 3); import refused;")});
+      const {text, receiptDir} = await run(base(), mcp);
+      assert.ok(!kinds(mcp).includes("receipt"));
+      assert.ok(!existsSync(receiptIn(receiptDir)), text);
+      assert.deepEqual(mcp.sys.deleted, []);
+      const calls = mcp.sys.calls.length;
+      const again = await run(["--cleanup", "--package", PKG], mcp, receiptDir);
+      assert.equal(again.code, 2, again.text);
+      assert.match(again.text, /refused: no receipt for \$ZOSG_TMP_TEST.*nothing is deleted. Inspect it by hand/);
+      assert.equal(mcp.sys.calls.length, calls, "no call to the system");
+      assert.deepEqual(mcp.sys.deleted, []);
+      assert.ok(mcp.sys.tadir.some((r) => r.item === "CLAS ZCL_OSD_PROVE_DEMO"));
+    });
+
+    it("--cleanup without a receipt refuses before any connection to a system is made", async () => {
+      const saved = process.env.OSD_MCP_CONFIG;
+      process.env.OSD_MCP_CONFIG = join(tmpdir(), "osd-prove-no-such-mcp.json");
+      try {
+        const lines = [];
+        const code = await main(["--cleanup", "--package", PKG],
+          {out: (l) => lines.push(l), receiptDir: mkdtempSync(join(tmpdir(), "osd-prove-runs-"))});
+        assert.equal(code, 2, lines.join("\n"));
+        assert.match(lines.join("\n"), /refused: no receipt/);
+      } finally {
+        if (saved === undefined) delete process.env.OSD_MCP_CONFIG;
+        else process.env.OSD_MCP_CONFIG = saved;
+      }
+    });
+
+    it("--cleanup with a zip list but no receipt refuses: the zip list alone never authorises a delete", async () => {
+      const mcp = fakeSystem({before: {packages: {[PKG]: ""}, tadir: [{item: "CLAS ZCL_OSD_PROVE_DEMO", devclass: PKG}],
+        repos: [{key: "000000000042", name: OWN, pkg: PKG}]}});
+      const again = await run([...base(), "--cleanup"], mcp);
+      assert.equal(again.code, 2, again.text);
+      assert.equal(mcp.sys.calls.length, 0);
+    });
+
+    it("an object changed after the import survives the automatic cleanup and a later --cleanup", async () => {
+      const mcp = fakeSystem({touchAfterReceipt: new Set(["CLAS ZCL_OSD_PROVE_PLAIN"])});
+      const {code, text, receiptDir} = await run(base(), mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import \(stamp now "CLAS:20261001130000\/9"\); kept/);
+      assert.deepEqual(mcp.sys.deleted, ["CLAS ZCL_OSD_PROVE_DEMO"]);
+      assert.ok(existsSync(receiptIn(receiptDir)), "an incomplete cleanup keeps the receipt");
+      const again = await run(["--cleanup", "--package", PKG], mcp, receiptDir);
+      assert.equal(again.code, 1, again.text);
+      assert.match(again.text, /CLAS ZCL_OSD_PROVE_PLAIN changed since the import/);
+      assert.deepEqual(mcp.sys.deleted, ["CLAS ZCL_OSD_PROVE_DEMO"]);
+      assert.ok(mcp.sys.tadir.some((r) => r.item === "CLAS ZCL_OSD_PROVE_PLAIN"));
+    });
+
     it("the cleanup deletes only the zip's items, even when the package holds more", async () => {
       const mcp = fakeSystem({intruder: "TABL ZSOMEBODY_ELSES"});
       await run(base(), mcp);
@@ -384,7 +481,8 @@ describe("osd-prove-on-system", () => {
       }});
       const {code, text} = await run(base(), mcp);
       assert.equal(code, 1, text);
-      assert.match(text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN is in package ZOTHER, not \$ZOSG_TMP_TEST; not touched/);
+      assert.match(text, /FAIL receipt: CLAS ZCL_OSD_PROVE_PLAIN is in package ZOTHER, not \$ZOSG_TMP_TEST; not in the receipt, not touched/);
+      assert.deepEqual(mcp.sys.deleted, ["CLAS ZCL_OSD_PROVE_DEMO"]);
       assert.ok(mcp.sys.tadir.some((t) => t.item === "CLAS ZCL_OSD_PROVE_PLAIN" && t.devclass === "ZOTHER"));
     });
 
@@ -432,12 +530,15 @@ describe("osd-prove-on-system", () => {
     });
 
     it("the cleanup snippet names the key and the tool's repository, and takes nothing but a key", () => {
-      const code = cleanupAbap(PKG, ZIP_OBJECTS, "000000000042");
+      const entries = ZIP_OBJECTS.map((item) => ({item, stamp: "CLAS:20261001120000/9"}));
+      const code = cleanupAbap(PKG, entries, "000000000042");
       assert.match(code, /get_key\( \) <> '000000000042' OR li_repo->get_name\( \) <> 'OSDPROVE \$ZOSG_TMP_TEST'/);
       assert.doesNotMatch(code, /purge/);
-      assert.throws(() => cleanupAbap(PKG, ZIP_OBJECTS, "42' OR 1 = '1"), /not a repository key/);
-      assert.throws(() => cleanupAbap(PKG, ["CLAS ZCL_X` TO lt_items. DELETE FROM tadir."]), /cannot be put into an ABAP literal/);
-      assert.doesNotMatch(cleanupAbap(PKG, ZIP_OBJECTS), /get_key\( \) <>/);
+      assert.throws(() => cleanupAbap(PKG, entries, "42' OR 1 = '1"), /not a repository key/);
+      assert.throws(() => cleanupAbap(PKG, [{item: "CLAS ZCL_X` TO lt_items. DELETE FROM tadir.", stamp: "CLAS:20261001120000/9"}]),
+        /cannot be put into an ABAP literal/);
+      assert.throws(() => cleanupAbap(PKG, [{item: "CLAS ZCL_X", stamp: "x` TO lt_stamps."}]), /not a stamp/);
+      assert.match(code, /IF lv_stamp IS INITIAL OR lv_stamp <> lv_want\./);
     });
   });
 
@@ -519,7 +620,7 @@ describe("osd-prove-on-system", () => {
     it("--osg run compares against the methods OSG ran", async () => {
       const real = buildZip(join(FIXTURE, "src"), {unit: "prove-demo", manifest: MANIFEST});
       const ran = {ZCL_OSD_PROVE_DEMO: ["LTCL_DOUBLE->TWO_IS_FOUR", "LTCL_DOUBLE->ONLY_ON_OSG"], ZCL_OSD_PROVE_PLAIN: []};
-      const r = await prove({folder: "x", unit: "u", pkg: PKG, mcp: fakeSystem(),
+      const r = await prove({folder: "x", unit: "u", pkg: PKG, receiptFile: receiptIn(mkdtempSync(join(tmpdir(), "osd-prove-runs-"))), mcp: fakeSystem(),
         osg: {mode: "run", methods: async (cls) => ({methods: ran[cls].length, names: ran[cls], failing: []})},
         zipper: () => real});
       assert.equal(r.ok, false);
@@ -528,7 +629,7 @@ describe("osd-prove-on-system", () => {
 
     it("a zip without classes fails with nothing to prove, before any call", async () => {
       const mcp = fakeSystem();
-      const r = await prove({folder: "x", unit: "u", pkg: PKG, mcp, osg: {mode: "count", methods: async () => ({methods: 0, names: [], failing: []})},
+      const r = await prove({folder: "x", unit: "u", pkg: PKG, receiptFile: receiptIn(mkdtempSync(join(tmpdir(), "osd-prove-runs-"))), mcp, osg: {mode: "count", methods: async () => ({methods: 0, names: [], failing: []})},
         zipper: () => ({bytes: Buffer.alloc(0), objects: ["TABL ZX"], classes: [], unit: "u"})});
       assert.equal(r.ok, false);
       assert.match(r.problems.join("\n"), /nothing to prove: unit "u" puts no class in the zip/);
@@ -538,7 +639,7 @@ describe("osd-prove-on-system", () => {
     it("no test method run on the system fails with nothing to prove", async () => {
       const mcp = fakeSystem();
       const real = buildZip(join(FIXTURE, "src"), {unit: "prove-demo", manifest: MANIFEST});
-      const r = await prove({folder: "x", unit: "u", pkg: PKG, mcp, osg: {mode: "count", methods: async () => ({methods: 0, names: [], failing: []})},
+      const r = await prove({folder: "x", unit: "u", pkg: PKG, receiptFile: receiptIn(mkdtempSync(join(tmpdir(), "osd-prove-runs-"))), mcp, osg: {mode: "count", methods: async () => ({methods: 0, names: [], failing: []})},
         zipper: () => ({...real, classes: ["ZCL_OSD_PROVE_PLAIN"]})});
       assert.equal(r.ok, false, r.problems.join("\n"));
       assert.match(r.problems.join("\n"), /nothing to prove: no test method ran on the system/);
@@ -594,7 +695,8 @@ describe("osd-prove-on-system", () => {
 
   it("snippets are ASCII and each ends with the fail( msg ) report", () => {
     for (const code of [importAbap(Buffer.from("PK"), "$ZOSG_TMP_X"), classCheckAbap(["ZCL_A"]),
-      cleanupAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"], "000000000042"), preflightAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"])]) {
+      cleanupAbap("$ZOSG_TMP_X", [{item: "CLAS ZCL_A", stamp: "CLAS:20261001120000/9"}], "000000000042"),
+      preflightAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"]), receiptAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"])]) {
       assert.ok(/^[\x00-\x7f]*$/.test(code));
       assert.match(code.trimEnd().split("\n").at(-1), /^cl_abap_unit_assert=>fail\( msg = \|OSDPROVE<<\{ lv_out \}>>OSDPROVE\| \)\.$/);
     }
