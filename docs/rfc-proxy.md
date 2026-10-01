@@ -99,7 +99,7 @@ not forked). A `select` or `openCursor` is read as SQL text: every `FROM` and
 `JOIN` at any depth, quoted names (`"tab"`, `"schema"."tab"`), a comma list,
 subqueries, `UNION`. A `FROM` inside `TRIM`/`EXTRACT`/`SUBSTRING` is not a
 table. A statement with a `WITH` clause (anywhere, outside literals) is not
-classified at all: 7.02 Open SQL has no `WITH`, and CTE scoping is not chased. A statement this cannot classify (a string where a table should be, a
+classified at all, nor is a parenthesized join group `FROM (a JOIN b ...)`: 7.02 Open SQL has no `WITH`, and CTE scoping is not chased. A statement this cannot classify (a string where a table should be, a
 table function, `FROM @x`, an unterminated literal) hydrates **nothing** (not even the tables read before the construct) and is
 journaled as `unclassified` with the reason. For each allow-listed table the
 statement reads and that has not been decided in this process:

@@ -164,7 +164,14 @@ export function readTables(sql, prefix = "") {
     for (;;) {
       const next = tokens[j];
       if (next?.t === "p" && next.v === "(") {
-        break; // a subselect or a join group: its own FROM and JOIN are read in turn
+        // a subselect: its own FROM and JOIN are read in turn. A group of
+        // joined tables, FROM (a JOIN b ...), is not (Open SQL 7.02 does not
+        // produce one, and its first table is not behind a FROM or JOIN)
+        const after = tokens[j + 1];
+        if (after?.t === "word" && after.v.toUpperCase() === "SELECT") {
+          break;
+        }
+        return {tables: [], unclassified: "parenthesized join group; not classified"};
       }
       if (next === undefined || (next.t !== "id" && next.t !== "word")
           || (next.t === "word" && NOT_A_TABLE.has(next.v.toUpperCase()))) {

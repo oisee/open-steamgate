@@ -414,6 +414,14 @@ describe("tools/rfc-table-proxy: a table without rows is filled from the system 
     expect(tableJournal()[0].reason).to.equal("WITH (common table expression) is not produced by Open SQL; not classified");
   });
 
+  it("a parenthesized join group makes no RFC call and is journaled as unclassified", async () => {
+    const {factory, log} = fakeOpenRfc(system);
+    await install({mode: "live", allow: "ZTPROXY_*", clientFactory: factory, connection: CONNECTION});
+    await abap.context.databaseConnections["DEFAULT"].select({select: "SELECT * FROM (\"ztproxy_a\" JOIN \"ztproxy_b\" ON 1 = 1)"}).catch(() => {});
+    expect(log.filter((l) => l.fm === "RFC_READ_TABLE")).to.have.length(0);
+    expect(tableJournal().map((e) => `${e.state}:${e.reason}`)).to.deep.equal(["unclassified:parenthesized join group; not classified"]);
+  });
+
   it("writes never reach the system, and the wrapped connection otherwise behaves as before", async () => {
     const {factory, log} = fakeOpenRfc(system);
     await install({mode: "live", allow: "ZTPROXY_C", clientFactory: factory, connection: CONNECTION});
@@ -499,6 +507,21 @@ describe("tools/rfc-table-proxy: which tables a statement reads", () => {
       expect(readTables(sql)).to.deep.equal({tables: [], unclassified: "WITH (common table expression) is not produced by Open SQL; not classified"});
     });
   }
+
+  for (const sql of [
+    "SELECT * FROM (ztproxy_a JOIN ztproxy_b ON ztproxy_a.id = ztproxy_b.id)",
+    "SELECT * FROM ((ztproxy_a JOIN ztproxy_b ON 1 = 1) JOIN t3 ON 1 = 1)",
+    "SELECT * FROM t1 JOIN (ztproxy_a JOIN ztproxy_b ON 1 = 1) ON 1 = 1",
+    "SELECT * FROM t0, (t1 JOIN t2 ON 1 = 1)",
+  ]) {
+    it(`a parenthesized join group is unclassified and names no table: ${sql}`, () => {
+      expect(readTables(sql)).to.deep.equal({tables: [], unclassified: "parenthesized join group; not classified"});
+    });
+  }
+
+  it("a subquery in FROM or JOIN still classifies", () => {
+    expect(readTables("SELECT * FROM (select k FROM t1) AS s JOIN (SELECT k FROM t2) AS u ON 1 = 1").tables.sort()).to.deep.equal(["T1", "T2"]);
+  });
 
   it("WITH inside a string literal or a quoted name is not a WITH clause", () => {
     expect(readTables("SELECT * FROM t1 WHERE a = 'x WITH y'").tables).to.deep.equal(["T1"]);
