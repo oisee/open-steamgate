@@ -24,7 +24,7 @@ import {readFileSync, appendFileSync} from "node:fs";
 import {dirname, join, relative} from "node:path";
 import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
-import {Sessions} from "./adt-session.mjs";
+import {Sessions, parseCookies, CONTEXT_COOKIE, SESSION_COOKIE} from "./adt-session.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
@@ -1621,10 +1621,26 @@ export function adtRouter(options = {}) {
     }
   });
 
-  // Ending a session. There is nothing to end — the session is a cookie and a
-  // token — but a client that gets 404 here reports a failed logoff.
-  router.delete(`${BASE}/core/http/sessions/:id`, (req, res) => res.status(200).end());
-  router.get("/sap/public/bc/icf/logoff", (req, res) => res.status(200).type("text/plain").send("logged off"));
+  // Ending a session. A client that gets 404 here reports a failed logoff.
+  // Both are the explicit end the session layer waits for before it lets go
+  // of a session's locks (the other is expiry): DELETE on the security
+  // session the poll named, when it names the caller's own, and the logoff
+  // resource for whichever session the cookies carry.
+  router.delete(`${BASE}/core/http/sessions/:id`, (req, res) => {
+    if (String(req.params.id).toUpperCase() === sessionIdentifier(req, identity)) {
+      sessions.end(req.adt.session.id);
+    }
+    res.status(200).end();
+  });
+  router.get("/sap/public/bc/icf/logoff", (req, res) => {
+    const cookies = parseCookies(req.headers.cookie);
+    for (const id of new Set([cookies[CONTEXT_COOKIE], cookies[SESSION_COOKIE]])) {
+      if (id) {
+        sessions.end(id);
+      }
+    }
+    res.status(200).type("text/plain").send("logged off");
+  });
 
   // ---- The workbench type list, which the client pre-loads before it will
   // open anything.
@@ -2139,15 +2155,21 @@ export function adtRouter(options = {}) {
             .send(lockResultDocument("", {modifiable: false}));
           return;
         }
-        const held = [...session.locks.values()].find((l) => l.type === entry.type && l.name === entry.name);
-        const handle = held?.handle ?? randomUUID();
-        session.locks.set(handle, {handle, type: entry.type, name: entry.name, since: Date.now()});
-        res.status(200).type(asXmlTypeFor(req, "com.sap.adt.lock.Result2")).send(lockResultDocument(handle));
+        // one holder per object across sessions; the same session locking
+        // again gets the handle it has, another session gets a refusal that
+        // says who holds it, the way an enqueue conflict reads on a system
+        const taken = req.adt.sessions.lock(session, entry.type, entry.name, () => randomUUID());
+        if (taken.heldBy !== undefined) {
+          res.status(403).type("application/xml").send(exceptionDocument("ExceptionResourceLocked",
+            `${entry.type} ${entry.name} is currently locked by user ${taken.heldBy.user} in another session`));
+          return;
+        }
+        res.status(200).type(asXmlTypeFor(req, "com.sap.adt.lock.Result2")).send(lockResultDocument(taken.handle));
         return;
       }
 
       if (action === "UNLOCK") {
-        session.locks.delete(String(req.query.lockHandle ?? ""));
+        req.adt.sessions.unlock(session, String(req.query.lockHandle ?? ""));
         res.status(200).type("text/plain").send("");
         return;
       }

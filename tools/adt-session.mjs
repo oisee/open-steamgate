@@ -52,8 +52,10 @@ export class Session {
     this.created = Date.now();
     this.touched = this.created;
     this.stateful = false;
-    // lock handle -> what is locked; wave 3 fills this, wave 0 owns the map
-    // because affinity is a property of the session, not of the write
+    // lock handle -> what is locked. The handles are the session's, because
+    // affinity is a property of the session, not of the write; who holds an
+    // object across sessions is Sessions#owners, and the two are changed
+    // together through Sessions#lock / #unlock / #end and nowhere else.
     this.locks = new Map();
   }
 }
@@ -65,14 +67,90 @@ export class Sessions {
   constructor(options = {}) {
     this.ttlMs = options.ttlMs ?? 30 * 60 * 1000;
     this.byId = new Map();
+    // "TYPE NAME" -> {session, handle}: one holder per object across every
+    // session, the enqueue table of a system. A session's own map says which
+    // handles it has; this one says whether anybody else may take the object.
+    this.owners = new Map();
   }
 
   #sweep() {
     const cutoff = Date.now() - this.ttlMs;
     for (const [id, session] of this.byId) {
       if (session.touched < cutoff) {
-        this.byId.delete(id);
+        this.end(id);
       }
+    }
+  }
+
+  static #key(type, name) {
+    return `${String(type).toUpperCase()} ${String(name).toUpperCase()}`;
+  }
+
+  // the session that holds an object, or undefined; an owner whose session
+  // has expired holds nothing, and is released on the way
+  holderOf(type, name) {
+    const key = Sessions.#key(type, name);
+    const owner = this.owners.get(key);
+    if (owner === undefined) {
+      return undefined;
+    }
+    // looked at without touching it: asking who holds an object must not
+    // keep the holder's session alive
+    const alive = this.byId.get(owner.session.id) === owner.session &&
+      owner.session.touched >= Date.now() - this.ttlMs;
+    if (alive === false) {
+      this.end(owner.session.id);
+      this.owners.delete(key);
+      return undefined;
+    }
+    if (owner.session.locks.has(owner.handle) === false) {
+      this.owners.delete(key);
+      return undefined;
+    }
+    return owner;
+  }
+
+  // Take the lock on an object for a session. The same session asking again
+  // gets the handle it already has; another session gets {heldBy}, naming
+  // the session (and so the user) that holds it, and no handle.
+  lock(session, type, name, makeHandle) {
+    const owner = this.holderOf(type, name);
+    if (owner !== undefined && owner.session !== session) {
+      return {heldBy: owner.session};
+    }
+    if (owner !== undefined) {
+      return {handle: owner.handle};
+    }
+    const handle = makeHandle();
+    session.locks.set(handle, {handle, type, name, since: Date.now()});
+    this.owners.set(Sessions.#key(type, name), {session, handle});
+    return {handle};
+  }
+
+  // Release one handle of a session; a handle the session does not hold is
+  // ignored, as UNLOCK always has been.
+  unlock(session, handle) {
+    const lock = session.locks.get(handle);
+    if (lock === undefined) {
+      return;
+    }
+    session.locks.delete(handle);
+    const key = Sessions.#key(lock.type, lock.name);
+    if (this.owners.get(key)?.session === session) {
+      this.owners.delete(key);
+    }
+  }
+
+  // An explicit end (logoff) or an expiry: the session goes, and every lock
+  // it held goes with it. This and UNLOCK are the only ways a lock is lost.
+  end(id) {
+    const session = this.byId.get(id);
+    if (session === undefined) {
+      return;
+    }
+    this.byId.delete(id);
+    for (const handle of [...session.locks.keys()]) {
+      this.unlock(session, handle);
     }
   }
 
@@ -88,7 +166,7 @@ export class Sessions {
       return undefined;
     }
     if (session.touched < Date.now() - this.ttlMs) {
-      this.byId.delete(id);
+      this.end(id);
       return undefined;
     }
     session.touched = Date.now();
@@ -144,14 +222,15 @@ export class Sessions {
         session = this.open(Sessions.user(req));
       }
 
+      // A stateless request is one request that does not need the context,
+      // not the end of the context. A client interleaves them freely -- LOCK
+      // stateful, a stateless GET of the source, then the PUT with the
+      // handle -- and A4H keeps the lock through all three. Clearing the
+      // handles here made that PUT a 409 "lock handle does not hold this
+      // object". Only an explicit end (logoff) or an expiry drops a lock.
       const type = String(req.headers["x-sap-adt-sessiontype"] ?? "").toLowerCase();
       if (type === "stateful") {
         session.stateful = true;
-      } else if (type === "stateless") {
-        // a stateless hop retires the affinity, and with it the handles that
-        // depended on it; the session itself survives so the token holds
-        session.stateful = false;
-        session.locks.clear();
       }
 
       if (fresh || session.stateful) {

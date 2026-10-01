@@ -261,14 +261,6 @@ describe("tools/adt-facade: the development loop", () => {
       expect(res.status).to.equal(405);
     });
 
-    it("a stateless hop retires the handle, the way a real session does", async () => {
-      const {handle} = await lock();
-      // the client says it no longer needs affinity; the locks go with it
-      await call("/core/discovery", {headers: {"x-sap-adt-sessiontype": "stateless"}});
-      const res = await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {method: "PUT", body: SOURCE});
-      expect(res.status).to.equal(409);
-    });
-
     it("unlocking gives the object back", async () => {
       const {handle} = await lock();
       const unlocked = await call(`/oo/classes/${SCRATCH}?_action=UNLOCK&lockHandle=${handle}`, {method: "POST"});
@@ -1207,6 +1199,80 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     expect(existsSync(join(root, "src/demo/zosd_made_cds.ddls.xml")), "the header went too").to.equal(false);
     const twice = await call("/ddic/ddl/sources/zosd_made_cds", {method: "DELETE"});
     expect(twice.status).to.equal(404);
+  });
+
+  // vsp's integration suite found it: LOCK, a stateless GET, then the PUT
+  // with the handle. A4H keeps the lock through the stateless request;
+  // this used to drop it and answer the PUT with a 409.
+  describe("locks across requests and sessions", () => {
+    const LOCKED = "ZCL_MADE_LOCKS";
+    const lockIt = async (caller = call) => {
+      const res = await caller(`/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`, {method: "POST"});
+      const xml = await res.text();
+      return {status: res.status, xml, handle: xml.match(/<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/)?.[1]};
+    };
+    const unlockIt = (handle, caller = call) => caller(`/oo/classes/${LOCKED}?_action=UNLOCK&lockHandle=${handle}`, {method: "POST"});
+    // a second session: its own logon, its own cookie and token
+    const otherSession = async () => {
+      const res = await fetch(`http://localhost:${port}/sap/bc/adt/core/discovery`, {method: "HEAD",
+        headers: {"x-csrf-token": "fetch", authorization: "Basic " + Buffer.from("OTHERDEV:x").toString("base64")}});
+      const id = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
+      const other = (path, options = {}) => fetch(`http://localhost:${port}/sap/bc/adt${path}`, {
+        ...options,
+        headers: {cookie: `sap-contextid=${id}`, "x-csrf-token": res.headers.get("x-csrf-token"), "x-sap-adt-sessiontype": "stateful", ...(options.headers ?? {})},
+      });
+      return {id, other};
+    };
+
+    before(async () => {
+      const made = await call("/oo/classes", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("CLAS", LOCKED, "locked", "$STG_DEMO")});
+      expect(made.status).to.equal(201);
+    });
+
+    it("a stateless request in between keeps the lock, as A4H does", async () => {
+      const {handle} = await lockIt();
+      const read = await call(`/oo/classes/${LOCKED}/source/main`, {headers: {"x-sap-adt-sessiontype": "stateless"}});
+      expect(read.status).to.equal(200);
+      const source = await read.text();
+      const res = await call(`/oo/classes/${LOCKED}/source/main?lockHandle=${handle}`, {method: "PUT", body: source});
+      expect(res.status, await res.text()).to.equal(200);
+      await unlockIt(handle);
+    });
+
+    it("an object locked in one session is refused to another, naming the holder", async () => {
+      const {handle} = await lockIt();
+      const {other} = await otherSession();
+      const refused = await lockIt(other);
+      expect(refused.status).to.equal(403);
+      expect(refused.xml).to.contain("exc:exception");
+      expect(refused.xml).to.contain("ExceptionResourceLocked");
+      expect(refused.xml).to.contain("locked by user OSD");
+      // the holder locking again is still idempotent
+      expect((await lockIt()).handle).to.equal(handle);
+      // released by the holder, the other session gets it -- and gives it back
+      await unlockIt(handle);
+      const taken = await lockIt(other);
+      expect(taken.status).to.equal(200);
+      expect(taken.handle).to.have.length.greaterThan(8);
+      const first = await lockIt();
+      expect(first.status, "the first session is now the one refused").to.equal(403);
+      expect(first.xml).to.contain("locked by user OTHERDEV");
+      await unlockIt(taken.handle, other);
+      const back = await lockIt();
+      expect(back.status).to.equal(200);
+      await unlockIt(back.handle);
+    });
+
+    it("a logoff releases the session's locks", async () => {
+      const {id, other} = await otherSession();
+      expect((await lockIt(other)).status).to.equal(200);
+      expect((await lockIt()).status).to.equal(403);
+      const off = await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${id}`}});
+      expect(off.status).to.equal(200);
+      const after = await lockIt();
+      expect(after.status).to.equal(200);
+      await unlockIt(after.handle);
+    });
   });
 
   it("what abapGit writes on disk, the façade serves without a restart", async () => {
