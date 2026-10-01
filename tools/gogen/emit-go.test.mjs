@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
-import {copyFileSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {dirname, join, basename} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -9,6 +9,43 @@ import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+test("SELECT clauses come from syntax nodes, not WHERE string literals", () => {
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-select-literals-"));
+  try {
+    const table = readFileSync(join(here, "testdata", "zgogen_t_dbw.tabl.xml"), "utf8")
+      .replace("<INTLEN>000020</INTLEN>", "<INTLEN>000160</INTLEN>")
+      .replace("<LENG>000010</LENG>", "<LENG>000080</LENG>");
+    writeFileSync(join(sourceDir, "zgogen_t_dbw.tabl.xml"), table);
+    writeFileSync(join(sourceDir, "zcl_gogen_select_literals.clas.abap"), `
+CLASS zcl_gogen_select_literals DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE i.
+ENDCLASS.
+CLASS zcl_gogen_select_literals IMPLEMENTATION.
+  METHOD run.
+    DATA lt TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    SELECT id FROM zgogen_t_dbw INTO TABLE lt WHERE id = 'UP TO 1 ROWS APPENDING TABLE'.
+    SELECT id FROM zgogen_t_dbw APPENDING TABLE lt WHERE id = 'UP TO 1 ROWS'.
+    SELECT id FROM zgogen_t_dbw INTO TABLE lt UP TO 2 ROWS WHERE id = 'APPENDING TABLE'.
+    rv = lines( lt ).
+  ENDMETHOD.
+ENDCLASS.
+`);
+    const program = compileProgram({folders: [sourceDir], objects: ["ZCL_GOGEN_SELECT_LITERALS"]});
+    const method = program.classes.find((c) => c.name === "ZCL_GOGEN_SELECT_LITERALS").methods.find((m) => m.name === "RUN");
+    assert.ok(method, JSON.stringify({methods: program.classes[0].methods, skipped: program.skipped, partial: program.partial}));
+    const selects = method.body.filter((s) => s.s === "select_table");
+    assert.equal(selects.length, 3, JSON.stringify(method.body));
+    assert.deepEqual(selects.map((s) => s.appending), [false, true, false]);
+    assert.doesNotMatch(selects[0].sql, /LIMIT/i);
+    assert.doesNotMatch(selects[1].sql, /LIMIT/i);
+    assert.match(selects[2].sql, /LIMIT 2/i);
+    assert.doesNotMatch(emitGo(program), /NOT_COMPILED in ZCL_GOGEN_SELECT_LITERALS/);
+  } finally {
+    rmSync(sourceDir, {recursive: true, force: true});
+  }
+});
 
 test("a source literal naming datearith does not add an unused Go import", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-import-source-"));

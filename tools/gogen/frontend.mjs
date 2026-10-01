@@ -4610,7 +4610,7 @@ function selectLoop(node, ctx) {
   const st = node.findDirectStatement(Statements.SelectLoop);
   const text = st?.concatTokens() ?? "";
   const sel = st?.findDirectExpression(Expressions.Select);
-  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|FOR\s+UPDATE)\b/i.test(text)) throw new Unsupported(`SELECT loop form: ${text}`);
+  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|FOR\s+UPDATE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT loop form: ${text}`);
   if (sel.findDirectExpression(Expressions.SQLIntoTable)) throw new Unsupported(`SELECT loop INTO TABLE: ${text}`);
   const tb = selectTable(sel, ctx, text);
   const grouped = !!sel.findDirectExpression(Expressions.SQLGroupBy);
@@ -4642,6 +4642,26 @@ function selectLoop(node, ctx) {
   return {s: "select_loop", table: tb.name, cols, assign, target, sql: lowered.sql, ...loweredArgs(lowered, acc), body};
 }
 
+// Clause checks must inspect the parsed SELECT, not its source text: a WHERE
+// string can contain any of these keywords without adding a SQL clause.
+function selectShape(sel) {
+  return sel.getChildren().map((child) => {
+    if (isTok(child)) return tokenStr(child);
+    if (isExpr(child, Expressions.SQLIntoTable)) return isTok(child.getFirstChild(), "APPENDING") ? "APPENDING TABLE" : "INTO TABLE";
+    if (isExpr(child, Expressions.SQLFrom)) return /\bJOIN\b/i.test(child.concatTokens()) ? "JOIN" : "FROM";
+    if (isExpr(child, Expressions.SQLSetOp)) return "UNION";
+    if (isExpr(child, Expressions.SQLOptions)) return child.concatTokens();
+    const clauses = [
+      [Expressions.SQLUpTo, "UP TO"], [Expressions.SQLGroupBy, "GROUP BY"],
+      [Expressions.SQLOrderBy, "ORDER BY"], [Expressions.SQLForAllEntries, "FOR ALL"],
+      [Expressions.SQLHaving, "HAVING"], [Expressions.SQLPackageSize, "PACKAGE"],
+      [Expressions.SQLBypassingBuffer, "BYPASSING"], [Expressions.SQLClient, "CLIENT"],
+      [Expressions.DatabaseConnection, "CONNECTION"], [Expressions.SQLOffset, "OFFSET"],
+    ];
+    return clauses.find(([kind]) => isExpr(child, kind))?.[1] ?? "";
+  }).join(" ");
+}
+
 /**
  * SELECT fields FROM table INTO [CORRESPONDING FIELDS OF] TABLE itab
  * [WHERE ...] [ORDER BY f ...]: the form the gateway's DPCs use. sy-subrc 0
@@ -4653,7 +4673,7 @@ function selectStatement(node, ctx, text) {
   if (sel && /^SELECT\s+SINGLE\b/i.test(text)) return selectSingle(sel, ctx, text);
   if (sel && /^SELECT\s+COUNT\s*\(\s*\*\s*\)\s+FROM\b/i.test(text)) return selectCount(sel, ctx, text);
   if (sel && /^SELECT\s+SUM\s*\(/i.test(text) && !sel.findDirectExpression(Expressions.SQLGroupBy)) return selectSum(sel, ctx, text);
-  if (!sel || /\b(SINGLE|DISTINCT|HAVING|JOIN|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
+  if (!sel || /\b(SINGLE|DISTINCT|HAVING|JOIN|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT form: ${text}`);
   // parity-wave1: SELECT ... FOR ALL ENTRIES IN itab WHERE ... itab-comp ...
   // (A4H ZCL_GOGEN_T_FAE): the statement once per driving row, the rows
   // made unique over the columns selected (sy-dbcnt counts them), and an
@@ -4744,18 +4764,20 @@ function selectStatement(node, ctx, text) {
     rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
   }
   if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc})));
-  const up = /\bUP\s+TO\s+@?(\w+)\s+ROWS\b/i.exec(text);
+  const up = sel.findDirectExpression(Expressions.SQLUpTo);
   if (up) {
-    const count = /^\d+$/.test(up[1]) ? Number(up[1]) : variable(up[1], ctx);
-    if (typeof count !== "number" && count.type.k !== "i") throw new Unsupported(`UP TO a ${count.type.k} value: ${text}`);
-    if (typeof count === "number") rel = RIR.limit(rel, count);
+    const src = up.findDirectExpression(Expressions.SQLSource);
+    if (!src) throw new Unsupported(`UP TO form: ${text}`);
+    const count = sqlHost(src, [], ctx, text);
+    if (count.type.k !== "i") throw new Unsupported(`UP TO a ${count.type.k} value: ${text}`);
+    if (count.e === "int") rel = RIR.limit(rel, count.value);
     else {
       acc.hosts.push(count);
       rel = RIR.limit(rel, RIR.param(`@@host:${acc.hosts.length - 1}@@`, RIR.T.int));
     }
   }
   const lowered = lowerOrRefuse("SELECT", rel);
-  const appending = /\bAPPENDING\s+TABLE\b/i.test(text);
+  const appending = isTok(into.getFirstChild(), "APPENDING");
   if (fae) {
     // the same columns without the WHERE, for an empty driving table
     const accAll = {hosts: [], ranges: []};
@@ -4816,7 +4838,7 @@ function dynamicTokens(dyn, ctx, what, text) {
  */
 function dynamicSelect(sel, ctx, text) {
   if (/^SELECT\s+SINGLE\b/i.test(text)) throw new Unsupported(`dynamic SELECT SINGLE: ${text}`);
-  if (/\b(UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|CONNECTION|OFFSET)\b/i.test(text)) throw new Unsupported(`dynamic SELECT form: ${text}`);
+  if (/\b(UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|CONNECTION|OFFSET)\b/i.test(selectShape(sel))) throw new Unsupported(`dynamic SELECT form: ${text}`);
   const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
   if (from.length !== 1) throw new Unsupported(`dynamic SELECT FROM form: ${text}`);
   let table;
@@ -4892,7 +4914,7 @@ function dynamicSelect(sel, ctx, text) {
  * the count (A4H, ANORMALIES select-count-dbcnt), sy-subrc 4 when it is 0.
  */
 function selectCount(sel, ctx, text) {
-  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(text)) throw new Unsupported(`SELECT COUNT form: ${text}`);
+  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT COUNT form: ${text}`);
   const fl = sel.findDirectExpression(Expressions.SQLFieldList);
   if (!/^COUNT\s*\(\s*\*\s*\)$/i.test(fl?.concatTokens() ?? "")) throw new Unsupported(`SELECT COUNT form: ${text}`);
   const tb = selectTable(sel, ctx, text);
@@ -4912,7 +4934,7 @@ function selectCount(sel, ctx, text) {
 
 /** Narrow scalar SUM of an i column, into an i field. */
 function selectSum(sel, ctx, text) {
-  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(text)) throw new Unsupported(`SELECT SUM form: ${text}`);
+  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT SUM form: ${text}`);
   const fl = sel.findDirectExpression(Expressions.SQLFieldList);
   const field = /^SUM\s*\(\s*([\w]+)\s*\)$/i.exec(fl?.concatTokens() ?? "")?.[1];
   if (!field) throw new Unsupported(`SELECT SUM form: ${text}`);
@@ -5131,7 +5153,7 @@ function intoWorkArea(sel, ctx, text, cols, verb) {
  * bound; MANDT is the logon client, as for a table.
  */
 function selectSingle(sel, ctx, text) {
-  if (/\b(UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|FOR\s+UPDATE)\b/i.test(text)) throw new Unsupported(`SELECT form: ${text}`);
+  if (/\b(UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|FOR\s+UPDATE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT form: ${text}`);
   const tb = selectTable(sel, ctx, text);
   const cols = selectColumns(sel, tb, text);
   const {assign, target} = intoWorkArea(sel, ctx, text, cols, "SELECT SINGLE");
