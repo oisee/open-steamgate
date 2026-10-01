@@ -1219,7 +1219,14 @@ const RUN_TABLE = {
   // either way, and an unconverted report gets the same "Transaction ...
   // does not exist" the real Easy Access screen would show, in the webview
   // rather than in a dialog -- one fact, wherever it is read.
+  // 0.5 O: F8 builds the report with osabap into a native command and runs
+  // it in a terminal (`osd run`, tools/osd-run.mjs), its selection screen
+  // as the command line; Run with debugger keeps the Easy Access panel the
+  // CodeLens above REPORT also opens
   PROG: (ctx) => {
+    if (!ctx.forceDebugger && ctx.file) {
+      return {kind: "cli", file: ctx.file};
+    }
     const tcode = progTcodeOf(ctx.name);
     if (tcode === undefined) {
       return {kind: "not-yet", text: "not yet: run a report -- no server route to run one headlessly yet"};
@@ -1240,6 +1247,16 @@ const RUN_TABLE = {
   IWSV: () => ({kind: "not-yet", text: "not yet: the Gateway client on the service document"}),
   SICF: () => ({kind: "not-yet", text: "not yet: open the node's URL"}),
 };
+
+/** The terminal command line F8 on a report runs: node on the checkout's
+ *  bin/osd.mjs, `run`, the report's file. Quoted for the shell the terminal
+ *  starts (POSIX single quotes; PowerShell on Windows takes the same). */
+function osdRunCommandLine({home, file, node = "node"}) {
+  const q = (x) => `'${String(x).replaceAll("'", process.platform === "win32" ? "''" : "'\\''")}'`;
+  const osd = path.join(String(home), "bin", "osd.mjs");
+  const call = process.platform === "win32" ? "& " : "";
+  return `${call}${q(node)} ${q(osd)} run ${q(file)}`;
+}
 
 /** SE80's F8 for `object` (`{type, name}`), `ctx.hasUnitTests` told by the
  *  caller (it needs the file system osd/lib.js does not touch): `{kind:
@@ -2534,7 +2551,7 @@ function serviceDetailsHtml(details, nonce = "") {
     </style></head><body>${body}${script}</body></html>`;
 }
 
-module.exports = {unitRiskOf, unitDurationOf, unitSchedule, runUnitQueue, unitPoolSize, riskWarning, objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
+module.exports = {osdRunCommandLine, unitRiskOf, unitDurationOf, unitSchedule, runUnitQueue, unitPoolSize, riskWarning, objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText,
   packSourceMappings, runningAbapSources, breakpointWarning, sourceKey,
   warmStatusText, activationBuildText, closureTestsText,

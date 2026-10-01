@@ -1321,6 +1321,7 @@ something already shipped (then it is a must of the current release, like the ro
 
 **0.5**
 - must: O, program -> binary. F4 and dialogs in the TUI, Open SQL in the native build, `osd run ZREPORT` = F8.
+  `osd run <report.prog.abap>` and F8 on a PROG in VS Code: done (tools/osd-run.mjs, kept builds by source hash; docs/osabap-native.md "osd run").
 - must: check and record in ANORMALIES whether our Node/Go runners keep class statics across test classes (A4H
   resets them per test class).
   **Done 2026-09-30 (stoker): both keep them.** In the second test class the counter reads 3 where A4H reads 1,

@@ -15,7 +15,7 @@ import {entitySetMapFor} from "../tools/segw-entityset-map.mjs";
 import {adtRouter, tableDataDocument} from "../tools/adt-facade.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 
-const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseCheckReport, parseActivationResult, runActionFor,
+const {objectOf, adtObjectOf, uriOf, fileOf, Osd, outcomes, abapFrame, parseCheckReport, parseActivationResult, runActionFor, osdRunCommandLine,
   entitySetMethodLines, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   htmlEscape, freestyleRows, freestyleTableHtml, freestyleOutputItems, notebookAbapSource, amdpCellResult,
@@ -1186,6 +1186,61 @@ describe("editors/vscode: the extension's logic", function () {
     expect(runActionFor({type: "IWSV", name: "ZSTG_DEMO_SRV"}).text).to.equal("not yet: the Gateway client on the service document");
     expect(runActionFor({type: "SICF", name: "ZOSD_APP"}).kind).to.equal("not-yet");
     expect(runActionFor({type: "BOGUS", name: "X"}).text).to.contain("BOGUS");
+  });
+
+  it("0.5 O: F8 on a report runs it as a command; Run with debugger keeps Easy Access", () => {
+    expect(runActionFor({type: "PROG", name: "ZNOTES"}, {file: "/w/znotes.prog.abap"})).to.deep.equal({kind: "cli", file: "/w/znotes.prog.abap"});
+    expect(runActionFor({type: "PROG", name: "ZNOTES"}, {file: "/w/znotes.prog.abap", forceDebugger: true})).to.deep.equal({kind: "webgui", tcode: "ZGUI_NOTES"});
+    // no file known (a caller that does not say): the Easy Access answer as before
+    expect(runActionFor({type: "PROG", name: "ZNOTES"}).kind).to.equal("webgui");
+  });
+
+  it("0.5 O: the terminal line is node on the checkout's bin/osd.mjs, quoted", () => {
+    if (process.platform === "win32") return;
+    expect(osdRunCommandLine({home: "/h/my osd", file: "/w/it's.prog.abap"}))
+      .to.equal("'node' '/h/my osd/bin/osd.mjs' run '/w/it'\\''s.prog.abap'");
+  });
+
+  it("0.5 O: F8 on a report asks for arguments, saves the buffer and runs osd run in a terminal of its own", async () => {
+    const api = vscodeStub({home: ROOT});
+    const terminals = [];
+    let asked = "--add hello -db notes.db";
+    api.window.showInputBox = async (options) => { api.lastInput = options; return asked; };
+    api.window.createTerminal = (options) => {
+      const terminal = {options, lines: [], shown: false, sendText(line) { this.lines.push(line); }, show() { this.shown = true; }};
+      terminals.push(terminal);
+      return terminal;
+    };
+    const {runReportInTerminal} = loadExtension(api);
+    let saved = 0;
+    const editor = {document: {fileName: "/w/znotes.prog.abap", isDirty: true, save: async () => { saved++; }}};
+    const output = {appendLine() {}};
+    await runReportInTerminal("ZNOTES", editor, output);
+    expect(saved).to.equal(1);
+    expect(terminals).to.have.length(1);
+    expect(terminals[0].options).to.deep.equal({name: "osd run ZNOTES", cwd: ROOT});
+    expect(terminals[0].shown).to.equal(true);
+    expect(terminals[0].lines[0]).to.contain(`${path.join(ROOT, "bin", "osd.mjs")}' run '/w/znotes.prog.abap' -- --add hello -db notes.db`);
+    // the last arguments are offered again; empty runs the selection screen
+    asked = "";
+    await runReportInTerminal("ZNOTES", editor, output);
+    expect(api.lastInput.value).to.equal("--add hello -db notes.db");
+    expect(terminals[1].lines[0]).to.match(/run '\/w\/znotes\.prog\.abap'$/);
+    // Escape cancels: no terminal
+    asked = undefined;
+    await runReportInTerminal("ZNOTES", editor, output);
+    expect(terminals).to.have.length(2);
+  });
+
+  it("0.5 O: without a checkout to build in, F8 on a report says so instead of opening a terminal", async () => {
+    const api = vscodeStub({home: tmpdir()});
+    const said = [];
+    api.window.showInformationMessage = (text) => { said.push(text); };
+    api.window.createTerminal = () => { throw new Error("must not open a terminal"); };
+    api.window.showInputBox = async () => { throw new Error("must not ask"); };
+    const {runReportInTerminal} = loadExtension(api);
+    await runReportInTerminal("ZNOTES", {document: {fileName: "/w/znotes.prog.abap"}}, {appendLine() {}});
+    expect(said[0]).to.contain("needs an open-steamgate checkout");
   });
 
   // ---- Q6b "Classrun": F9, ADT's "Run as ABAP Application (Console)" --

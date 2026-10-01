@@ -7,6 +7,7 @@
 //   osd fetch         the folders the packs declare as sources
 //   osd gen <tool>    one generator, as the builder starts it
 //   osd unit ...      a detached ABAP Unit run, as the façade starts it
+//   osd run <prog>    a report built by osabap, run with its arguments
 //   osd protocols     built-in DIAG 32nn and RFC-to-ADT 33nn listeners
 //   osd ready         one-shot readiness check for launchers
 //
@@ -29,7 +30,8 @@ import {compiled, setHostModules, dataDirOf, ensureBinaryHome, isCheckout, layer
 
 const embeddedSeed = typeof __OSD_BINARY_SEEDED__ !== "undefined" && __OSD_BINARY_SEEDED__;
 const [, , mode = "up", ...rawArgs] = process.argv;
-const {folders: userLayers, rest} = layerList(rawArgs);
+// a report's arguments are its own: --layer there is not osd's
+const {folders: userLayers, rest} = mode === "run" ? {folders: [], rest: rawArgs} : layerList(rawArgs);
 if (userLayers.length > 0) process.env.OSD_LAYERS = userLayers.join(process.platform === "win32" ? ";" : ":");
 if (compiled && !isCheckout(process.cwd()) && process.env.OSD_BINARY_HOME !== process.cwd()
     && mode !== "ready" && mode !== "doctor") {
@@ -98,6 +100,9 @@ const GENERATORS = {
   "osd-gui-convert.mjs": () => import("../tools/osd-gui-convert.mjs"),
   // not a generator: the warm build's comparison with a cold transpile
   "osd-warm.mjs": () => import("../tools/osd-warm.mjs"),
+  // not a generator: osabap, for `osd run`; a checkout's tool, so imported
+  // by a computed URL the bundler leaves alone rather than carried in it
+  "osabap.mjs": () => import(new URL("../tools/gogen/osabap.mjs", import.meta.url).href),
 };
 
 switch (mode) {
@@ -136,6 +141,12 @@ switch (mode) {
     process.argv = [process.argv[0], "osd-fetch", ...rest];
     const {main} = await import("../tools/osd-fetch.mjs");
     process.exit(await main(rest));
+    break;
+  }
+  case "run": {
+    // a report built by osabap and run as a command (tools/osd-run.mjs)
+    const {main} = await import("../tools/osd-run.mjs");
+    process.exit(main(rest));
     break;
   }
   case "unit": {
@@ -180,6 +191,6 @@ switch (mode) {
     break;
   }
   default:
-    console.error(`osd: unknown mode ${mode}; one of up, serve, build, fetch, gen, unit, protocols, ready, doctor`);
+    console.error(`osd: unknown mode ${mode}; one of up, serve, build, fetch, gen, unit, run, protocols, ready, doctor`);
     process.exit(2);
 }
