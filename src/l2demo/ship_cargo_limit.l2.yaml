@@ -1,0 +1,47 @@
+rule: ship-cargo-limit
+class: zcl_l2_ship_cargo_limit
+title: A ship books no more than 1000 kilograms across its cargo
+for: ZOSD_L2_SHIP as ship
+limit:
+  sum: ZOSD_L2_CARGO.weight as cargo
+  where: cargo.ship_id = ship.ship_id
+  more_than: 1000.00
+alert: "{ship.ship_id}: {sum} kg booked"
+boundaries: auto
+examples:
+  - name: fractional over
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S003, name: Tern, status: A}]
+      ZOSD_L2_CARGO:
+        - {cargo_id: C00001, ship_id: S003, weight: 500.01}
+        - {cargo_id: C00002, ship_id: S003, weight: 500.00}
+    expect: ["S003: 1000.01 kg booked"]
+  - name: fractional at limit
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S002, name: Cormorant, status: A}]
+      ZOSD_L2_CARGO:
+        - {cargo_id: C00003, ship_id: S002, weight: 250.25}
+        - {cargo_id: C00004, ship_id: S002, weight: 749.75}
+    expect: []
+  - name: fractional under
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: A}]
+      ZOSD_L2_CARGO:
+        - {cargo_id: C00005, ship_id: S001, weight: 500.01}
+        - {cargo_id: C00006, ship_id: S001, weight: 499.98}
+    expect: []
+  - name: two groups
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S010, name: Auk, status: A}
+        - {ship_id: S011, name: Rail, status: A}
+      ZOSD_L2_CARGO:
+        - {cargo_id: C00010, ship_id: S010, weight: 500.01}
+        - {cargo_id: C00011, ship_id: S010, weight: 499.98}
+        - {cargo_id: C00012, ship_id: S011, weight: 500.01}
+        - {cargo_id: C00013, ship_id: S011, weight: 500.00}
+    expect: ["S011: 1000.01 kg booked"]

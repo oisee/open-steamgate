@@ -132,154 +132,154 @@
   },
   {
    "line": 19,
-   "template_line": 46,
+   "template_line": 53,
    "path": "/",
    "node": "rule/ship-in-service-has-a-captain",
    "rule_line": 4
   },
   {
    "line": 20,
-   "template_line": 73,
+   "template_line": 94,
    "path": "/queries/1",
    "node": "rule/ship-in-service-has-a-captain/join",
    "rule_line": 9
   },
   {
    "line": 21,
-   "template_line": 88,
+   "template_line": 109,
    "path": "/queries/1/fields/1/source",
    "node": "rule/ship-in-service-has-a-captain/join/field/1",
    "rule_line": 7
   },
   {
    "line": 22,
-   "template_line": 88,
+   "template_line": 109,
    "path": "/queries/1/fields/2/source",
    "node": "rule/ship-in-service-has-a-captain/join/field/2",
    "rule_line": 12
   },
   {
    "line": 23,
-   "template_line": 92,
+   "template_line": 113,
    "path": "/queries/1/from/table",
    "node": "rule/ship-in-service-has-a-captain/for",
    "rule_line": 7
   },
   {
    "line": 24,
-   "template_line": 100,
+   "template_line": 121,
    "path": "/queries/1/itab",
    "node": "rule/ship-in-service-has-a-captain/join",
    "rule_line": 9
   },
   {
    "line": 25,
-   "template_line": 102,
+   "template_line": 123,
    "path": "/queries/1/where/1/pre",
    "node": "rule/ship-in-service-has-a-captain/when/1",
    "rule_line": 8
   },
   {
    "line": 26,
-   "template_line": 102,
+   "template_line": 123,
    "path": "/queries/1/where/2/pre",
    "node": "rule/ship-in-service-has-a-captain/require",
    "rule_line": 10
   },
   {
    "line": 27,
-   "template_line": 102,
+   "template_line": 123,
    "path": "/queries/1/where/3/pre",
    "node": "rule/ship-in-service-has-a-captain/require/where/1",
    "rule_line": 11
   },
   {
    "line": 28,
-   "template_line": 102,
+   "template_line": 123,
    "path": "/queries/1/where/4/pre",
    "node": "rule/ship-in-service-has-a-captain/require/where/2",
    "rule_line": 11
   },
   {
    "line": 29,
-   "template_line": 102,
+   "template_line": 123,
    "path": "/queries/1/where/5/pre",
    "node": "rule/ship-in-service-has-a-captain/require/where/3",
    "rule_line": 11
   },
   {
    "line": 30,
-   "template_line": 104,
+   "template_line": 125,
    "path": "/queries/1",
    "node": "rule/ship-in-service-has-a-captain/join",
    "rule_line": 9
   },
   {
    "line": 31,
-   "template_line": 106,
+   "template_line": 127,
    "path": "/queries/1/order/1/source",
    "node": "rule/ship-in-service-has-a-captain/join/order/1",
    "rule_line": 7
   },
   {
    "line": 32,
-   "template_line": 154,
+   "template_line": 227,
    "path": "/queries/1/itab",
    "node": "rule/ship-in-service-has-a-captain/join",
    "rule_line": 9
   },
   {
    "line": 33,
-   "template_line": 162,
+   "template_line": 260,
    "path": "/queries/1/alert_parts/1/jref",
    "node": "rule/ship-in-service-has-a-captain/alert/hole/1",
    "rule_line": 12
   },
   {
    "line": 34,
-   "template_line": 162,
+   "template_line": 260,
    "path": "/queries/1/alert_parts/2/value",
    "node": "rule/ship-in-service-has-a-captain/alert/text/1",
    "rule_line": 12
   },
   {
    "line": 35,
-   "template_line": 162,
+   "template_line": 260,
    "path": "/queries/1/alert_parts/3/jref",
    "node": "rule/ship-in-service-has-a-captain/alert/hole/2",
    "rule_line": 12
   },
   {
    "line": 36,
-   "template_line": 162,
+   "template_line": 260,
    "path": "/queries/1/alert_parts/4/value",
    "node": "rule/ship-in-service-has-a-captain/alert/text/2",
    "rule_line": 12
   },
   {
    "line": 37,
-   "template_line": 173,
+   "template_line": 297,
    "path": "/queries/1",
    "node": "rule/ship-in-service-has-a-captain/join",
    "rule_line": 9
   },
   {
    "line": 38,
-   "template_line": 175,
+   "template_line": 299,
    "path": "/queries/1",
    "node": "rule/ship-in-service-has-a-captain/join",
    "rule_line": 9
   },
   {
    "line": 39,
-   "template_line": 188,
+   "template_line": 340,
    "path": "/",
    "node": "rule/ship-in-service-has-a-captain",
    "rule_line": 4
   },
   {
    "line": 40,
-   "template_line": 189,
+   "template_line": 341,
    "path": "/",
    "node": "rule/ship-in-service-has-a-captain",
    "rule_line": 4

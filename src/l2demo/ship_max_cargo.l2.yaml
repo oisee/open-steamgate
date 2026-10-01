@@ -1,0 +1,30 @@
+rule: ship-max-cargo
+class: zcl_l2_ship_max_cargo
+title: No cargo item exceeds two kilograms
+for: ZOSD_L2_SHIP as ship
+limit:
+  max: ZOSD_L2_CARGO.weight as cargo
+  where: cargo.ship_id = ship.ship_id
+  more_than: 2.00
+alert: "{ship.ship_id}: heaviest cargo is {max} kg"
+boundaries: auto
+examples:
+  - name: maximum over
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S020, name: Heron, status: A}]
+      ZOSD_L2_CARGO:
+        - {cargo_id: C00020, ship_id: S020, weight: 1.25}
+        - {cargo_id: C00021, ship_id: S020, weight: 2.50}
+    expect: ["S020: heaviest cargo is 2.50 kg"]
+  - name: maximum at limit
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S021, name: Gull, status: A}]
+      ZOSD_L2_CARGO: [{cargo_id: C00022, ship_id: S021, weight: 2.00}]
+    expect: []
+  - name: empty group
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S022, name: Wren, status: A}]
+    expect: []

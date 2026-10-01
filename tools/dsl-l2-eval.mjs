@@ -283,6 +283,7 @@ export function evaluate(model, rows, params = {}, override = {}) {
   const alertOf = (parts, context) => parts.map((part) => {
     if (part.is_text) return part.value;
     if (part.is_count) return String(context.$count);
+    if (part.is_aggregate) return render(model.aggregate.type, context.$aggregate);
     const at = context[part.alias];
     return render(fieldsOf(at.table)[part.column], valueOf(at.table, at.row, part.column));
   }).join("");
@@ -296,17 +297,44 @@ export function evaluate(model, rows, params = {}, override = {}) {
   if (model.kind === "limit") {
     const clause = model.clauses[0];
     let last = 0;
+    let lastAggregate;
     each((context) => {
-      let count = matching(clause, 0, context).length;
-      // `inner`: the mutant that reads the for rows through the INNER JOIN
-      // only, so a for row with no counted row is never seen
-      if (count === 0 && model.threshold.inner) return;
-      // `stale`: the mutant whose count is not reset per for row, so a row
-      // with no counted row keeps the count of the row before it
-      if (count === 0 && model.threshold.stale) count = last;
-      last = count;
-      if (test(model.threshold.op, Math.sign(count - model.threshold.value))) {
-        alerts.push(alertOf(model.alert.parts, {...context, $count: count}));
+      const found = matching(clause, 0, context);
+      if (model.aggregate.is_count) {
+        let count = found.length;
+        // `inner`: the mutant that reads the for rows through the INNER JOIN
+        // only, so a for row with no counted row is never seen
+        if (count === 0 && model.threshold.inner) return;
+        // `stale`: the mutant whose count is not reset per for row
+        if (count === 0 && model.threshold.stale) count = last;
+        last = count;
+        if (test(model.threshold.op, Math.sign(count - model.threshold.value))) {
+          alerts.push(alertOf(model.alert.parts, {...context, $count: count}));
+        }
+        return;
+      }
+      const type = model.aggregate.type;
+      let value;
+      if (model.aggregate.is_sum) {
+        if (!found.length && model.threshold.inner) return;
+        if (!found.length && model.threshold.stale) value = lastAggregate ?? initialValue(type);
+        else {
+          const total = found.reduce((acc, row) => acc + scaled(valueOf(clause.table, row, model.aggregate.column), type.decimals ?? 0), 0n);
+          value = formatDecimal(total, type.decimals ?? 0);
+        }
+        lastAggregate = value;
+      } else {
+        if (!found.length) return; // chosen empty-group rule: min/max have no value, so emit no alert
+        value = valueOf(clause.table, found[0], model.aggregate.column);
+        for (const row of found.slice(1)) {
+          const candidate = valueOf(clause.table, row, model.aggregate.column);
+          const cmp = compareValues(type, candidate, type, value);
+          if ((model.aggregate.is_min && cmp < 0) || (model.aggregate.is_max && cmp > 0)) value = candidate;
+        }
+      }
+      const threshold = model.threshold.canonical_value ?? String(model.threshold.value);
+      if (test(model.threshold.op, compareValues(type, value, type, threshold))) {
+        alerts.push(alertOf(model.alert.parts, {...context, $aggregate: value}));
       }
     });
   } else if (model.kind === "require") {
@@ -597,12 +625,18 @@ export function structureDiscriminates(model, rows, params) {
 // the resulting count, so a constrained key or a short key cannot fake a case.
 export const COUNT_ROW_CAP = 64;
 
+const countedModel = (model) => ({...model, aggregate: {is_count: true}, threshold: {op: ">", value: 0}, alert: {parts: [{is_count: true}]} });
+const matchingCount = (model, rows, params) => {
+  const result = evaluate(countedModel(model), rows, params);
+  return result.length === 1 ? Number(result[0]) : undefined;
+};
+
 function countTo(model, rows, wanted, params) {
   const clause = model.clauses[0];
   const table = clause.table;
   if (wanted === 0) { rows[table] = []; return true; }
   if (wanted > COUNT_ROW_CAP) return false;
-  const count = () => Number(evaluate({...model, threshold: {op: ">", value: 0}, alert: {parts: [{is_count: true}]}}, rows, params)[0] ?? 0);
+  const count = () => matchingCount(model, rows, params);
   if (count() !== 1) return false;
   const base = {...rows[table][0]};
   for (let i = 1; i < wanted; i++) {
@@ -621,6 +655,85 @@ function countTo(model, rows, wanted, params) {
     if (!added) return false;
   }
   return true;
+}
+
+function splitTotal(type, total) {
+  const decimals = type.decimals ?? 0;
+  const target = kindOf(type) === "int" ? BigInt(total) : scaled(total, decimals);
+  let low, high;
+  if (kindOf(type) === "int") [low, high] = INT_RANGE[type.built_in];
+  else { high = 10n ** BigInt(type.length ?? 0) - 1n; low = -high; }
+  const values = target > high ? [high, target - high] : target < low ? [low, target - low] : [target];
+  if (values.some((part) => part < low || part > high)) return undefined;
+  return values.map((part) => kindOf(type) === "int" ? String(part) : formatDecimal(part, decimals));
+}
+
+function stepAggregate(type, text, dir) {
+  if (kindOf(type) === "int") return String(BigInt(text) + BigInt(dir));
+  return formatDecimal(scaled(text, type.decimals ?? 0) + BigInt(dir), type.decimals ?? 0);
+}
+
+// Make one counted group whose exact sum is `total`. Values are split across
+// two source rows only when a sum boundary is one step past the field range.
+function sumTo(model, baseRows, total, params) {
+  const clause = model.clauses[0], table = clause.table;
+  const type = model.aggregate.type, column = model.aggregate.column;
+  const values = splitTotal(type, total);
+  if (!values) return undefined;
+  const start = clone(baseRows);
+  if (!start[table]?.length && !countTo(model, start, 1, params)) return undefined;
+  let base;
+  for (const candidate of start[table] ?? []) {
+    const row = {...candidate, [column]: values[0]};
+    const probe = clone(start);
+    probe[table] = [row];
+    if (matchingCount(model, probe, params) === 1) { base = row; break; }
+  }
+  if (!base) return undefined;
+  const rows = clone(start);
+  rows[table] = [base];
+  for (let i = 1; i < values.length; i++) {
+    let added;
+    for (const key of model.ddic[table].keys) {
+      const keyType = model.ddic[table].fields[key];
+      for (let seed = 400 + i * 300; seed < 700 + i * 300 && !added; seed++) {
+        const candidate = {...base, [column]: values[i], [key]: defaultValue(keyType, seed)};
+        const probe = clone(rows);
+        probe[table].push(candidate);
+        if (keysDistinct(model, probe) && matchingCount(model, probe, params) === i + 1) added = candidate;
+      }
+      if (added) break;
+    }
+    if (!added) return undefined;
+    rows[table].push(added);
+  }
+  return rows;
+}
+
+function extremeTo(model, baseRows, value, params) {
+  const table = model.clauses[0].table, column = model.aggregate.column;
+  const type = model.aggregate.type;
+  if (value === undefined || misfitNumeric(value, type)) return undefined;
+  const start = clone(baseRows);
+  if (!start[table]?.length && !countTo(model, start, 1, params)) return undefined;
+  for (const candidate of start[table] ?? []) {
+    const row = {...candidate, [column]: canonical(type, value)};
+    const rows = clone(start);
+    rows[table] = [row];
+    if (matchingCount(model, rows, params) === 1) return rows;
+  }
+  return undefined;
+}
+
+function misfitNumeric(value, type) {
+  if (kindOf(type) === "int") {
+    if (!/^-?[0-9]+$/.test(value)) return true;
+    const n = BigInt(value), [low, high] = INT_RANGE[type.built_in];
+    return n < low || n > high;
+  }
+  if (!/^-?[0-9]+(\.[0-9]+)?$/.test(value)) return true;
+  const [whole, fraction = ""] = value.replace(/^-/, "").split(".");
+  return fraction.length > (type.decimals ?? 0) || whole.replace(/^0+(?=.)/, "").length > (type.length ?? 0) - (type.decimals ?? 0);
 }
 
 // the operators a threshold's operator is mistaken for: the bound included
@@ -664,7 +777,10 @@ function nextZero(model, baseRows, carried, params) {
 export function thresholdDiscriminates(model, rows, params) {
   const expected = JSON.stringify(evaluate(model, rows, params));
   const {op, value} = model.threshold;
-  return [...THRESHOLD_MUTANTS[op].map((other) => ({op: other, value})), {op, value: value - 1}, {op, value: value + 1}]
+  const values = model.aggregate.is_count ? [value - 1, value + 1]
+    : [stepValue(model.aggregate.type, model.threshold.canonical_value, -1), stepValue(model.aggregate.type, model.threshold.canonical_value, 1)].filter((v) => v !== undefined);
+  return [...THRESHOLD_MUTANTS[op].map((other) => ({...model.threshold, op: other})),
+    ...values.map((candidate) => ({...model.threshold, value: candidate, canonical_value: candidate}))]
     .some((threshold) => JSON.stringify(evaluate({...model, threshold}, rows, params)) !== expected)
     || (model.threshold.zero === true && JSON.stringify(evaluate({...model, threshold: {...model.threshold, inner: true}}, rows, params)) !== expected);
 }
@@ -689,6 +805,84 @@ export function pivotCounts(threshold) {
     case "=": return {fires: n, flips: Math.max(n, 1)};
     default: throw new Error(`threshold operator ${threshold.op}`);
   }
+}
+
+function aggregateNextZero(model, baseRows, params) {
+  const type = model.aggregate.type;
+  const threshold = model.threshold.canonical_value;
+  const targets = [threshold, stepAggregate(type, threshold, -1), stepAggregate(type, threshold, 1), initialValue(type)]
+    .filter((v, i, all) => v !== undefined && all.indexOf(v) === i);
+  const forTable = model.for.table, {keys, fields} = model.ddic[forTable];
+  for (const target of targets) {
+    const first = sumTo(model, baseRows, target, params);
+    if (!first) continue;
+    const original = first[forTable][0];
+    const named = [...new Set(model.alert.parts.filter((part) => !part.is_text && !part.is_count && !part.is_aggregate
+      && part.alias === model.for.alias && !keys.includes(part.column)).map((part) => part.column))];
+    for (const key of keys) {
+      const keyType = fields[key];
+      const candidates = [stepValue(keyType, original[key], 1), bump(original[key], 1),
+        ...Array.from({length: 298}, (_, i) => defaultValue(keyType, i + 2))];
+      for (const candidate of candidates) {
+        if (candidate === undefined || compareValues(keyType, candidate, keyType, original[key]) <= 0) continue;
+        const rows = clone(first);
+        const second = {...original, [key]: candidate};
+        for (const column of named) second[column] = different(fields[column], original[column]) ?? defaultValue(fields[column], 2);
+        rows[forTable].push(second);
+        if (!keysDistinct(model, rows) || !staleDiscriminates(model, rows, params)) continue;
+        return rows;
+      }
+    }
+  }
+  return undefined;
+}
+
+function aggregateGroups(model, baseRows, params) {
+  const type = model.aggregate.type, t = model.threshold.canonical_value;
+  const below = stepAggregate(type, t, -1), above = stepAggregate(type, t, 1);
+  const targets = {
+    ">": [above, t], ">=": [t, below], "<": [below, t], "=": [t, above],
+  }[model.threshold.op];
+  if (!targets || targets.some((v) => v === undefined)) return undefined;
+  const first = sumTo(model, baseRows, targets[0], params);
+  const second = sumTo(model, baseRows, targets[1], params);
+  if (!first || !second) return undefined;
+  const forTable = model.for.table, clause = model.clauses[0];
+  const fields = model.ddic[forTable].fields, keys = model.ddic[forTable].keys;
+  const named = [...new Set(model.alert.parts.filter((part) => !part.is_text && !part.is_count && !part.is_aggregate
+    && part.alias === model.for.alias && !keys.includes(part.column)).map((part) => part.column))];
+  const original = second[forTable][0];
+  for (const key of keys) {
+    const keyType = fields[key];
+    const candidates = [stepValue(keyType, original[key], 1), ...Array.from({length: 298}, (_, i) => defaultValue(keyType, i + 2))];
+    for (const candidate of candidates) {
+      if (candidate === undefined || compareValues(keyType, candidate, keyType, original[key]) === 0) continue;
+      const variant = clone(second);
+      const secondOuter = variant[forTable][0];
+      secondOuter[key] = candidate;
+      for (const column of named) secondOuter[column] = different(fields[column], original[column]) ?? defaultValue(fields[column], 2);
+      // Keep the JOIN equalities true after giving the second group its own key
+      // and its own alert text.
+      for (const on of clause.on) {
+        if (on.cmp.rhs.kind === "field" && on.cmp.rhs.alias === model.for.alias) {
+          for (const row of variant[clause.table]) row[on.cmp.column] = secondOuter[on.cmp.rhs.column];
+        }
+      }
+      const freeKey = model.ddic[clause.table].keys.find((column) =>
+        !clause.on.some((on) => on.cmp.column === column));
+      if (freeKey) variant[clause.table].forEach((row, i) => {
+        row[freeKey] = defaultValue(model.ddic[clause.table].fields[freeKey], 800 + i);
+      });
+      const rows = clone(first);
+      rows[forTable].push(secondOuter);
+      rows[clause.table].push(...variant[clause.table]);
+      if (!keysDistinct(model, rows)) continue;
+      const combined = evaluate(model, rows, params);
+      const separate = [...evaluate(model, first, params), ...evaluate(model, variant, params)];
+      if (JSON.stringify(combined) === JSON.stringify(separate)) return rows;
+    }
+  }
+  return undefined;
 }
 
 // Every case for the selected conditions, in rule order, then the structural
@@ -730,7 +924,7 @@ export function deriveCases(model, references, {date, example, reserved = new Se
     const isJoin = !owner.when && owner.clause.on.includes(cond);
     // rows in which this comparison alone decides its tree, and every other
     // tree holds; under require a `when` decides only when no exists row is there
-    const start = clone(base.rows);
+    let start = clone(base.rows);
     if (owner.when && model.kind === "require") for (const clause of model.clauses) start[clause.table] = [];
     const why = solveAlternatives(model, params, start, owner.alias, owner.table, sensitize(owner.tree, owner.leaves, owner.index), true, owner.slot);
     const columnTags = [cmp.column, `${cmp.alias}_${cmp.column}`, `c${index}`];
@@ -738,11 +932,26 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       skipped.push({condition: cond.text, reason: `does not isolate ${cond.text}: ${why}`});
       continue;
     }
+    // A condition in a counted table can only change an aggregate alert when
+    // the rows it admits sit on the alerting side of the threshold. Tune the
+    // value first, then derive the condition's matching and nonmatching rows.
+    if (!owner.when && model.kind === "limit" && !model.aggregate.is_count) {
+      const aggregateType = model.aggregate.type;
+      const t = model.threshold.canonical_value;
+      const candidates = model.aggregate.is_sum
+        ? [stepAggregate(aggregateType, t, 1), t, stepAggregate(aggregateType, t, -1), initialValue(aggregateType)]
+        : [stepAggregate(aggregateType, t, 1), t, stepAggregate(aggregateType, t, -1)];
+      const tuned = candidates.filter((value, i, all) => value !== undefined && all.indexOf(value) === i)
+        .map((value) => model.aggregate.is_sum ? sumTo(model, start, value, params) : extremeTo(model, start, value, params))
+        .find((rows) => rows && caseDiscriminates(model, cond, rows, params));
+      if (tuned) start = tuned;
+    }
     if (owner.when) resolveClauses(model, params, start, undefined, true);
     // a limit's comparison decides at its pivot count; a `when` whose pivot is
     // 0 is tested on a for row with no counted row at all (emptied below,
     // after the field is set)
-    const pivot = model.kind === "limit" ? pivotCounts(model.threshold)[owner.when ? "fires" : "flips"] : undefined;
+    const pivot = model.kind === "limit" && model.aggregate.is_count
+      ? pivotCounts(model.threshold)[owner.when ? "fires" : "flips"] : undefined;
     if (pivot !== undefined && pivot > 0 && !countTo(model, start, pivot, params)) {
       skipped.push({condition: cond.text, reason: pivot > COUNT_ROW_CAP
         ? `count exceeds the ${COUNT_ROW_CAP}-row derived-case cap` : "cannot make the threshold count with distinct matching keys",
@@ -777,6 +986,63 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       }
       add(reference, cond.rule_line, suffix, methods, cond.text, rows);
     }
+  }
+
+  if (model.kind === "limit" && !model.aggregate.is_count) {
+    const {operation, type} = model.aggregate;
+    const threshold = model.threshold.canonical_value;
+    if (operation === "sum") {
+      const targets = [stepAggregate(type, threshold, -1), threshold, stepAggregate(type, threshold, 1)];
+      const suffixes = ["below", "at", "above"];
+      const methods = name("sum threshold", [operation, "limit"], suffixes, model.threshold.rule_line);
+      for (let i = 0; i < targets.length; i++) {
+        const rows = sumTo(model, base.rows, targets[i], params);
+        if (!rows) {
+          skipped.push({condition: `limit/${model.threshold.key}`, reason: `cannot make the matching rows sum to ${targets[i]}`, case: suffixes[i]});
+          continue;
+        }
+        add(`limit/${model.threshold.key}`, model.threshold.rule_line, suffixes[i], methods,
+          `matching rows sum to ${targets[i]}`, rows, true);
+      }
+      if (model.threshold.zero) {
+        const rows = clone(base.rows);
+        rows[model.clauses[0].table] = [];
+        const zeroMethod = name("empty sum", [operation], ["zero"], model.threshold.rule_line);
+        if (thresholdDiscriminates(model, rows, params)) {
+          add(`limit/${model.threshold.key}`, model.threshold.rule_line, "zero", zeroMethod, "no matching rows; sum is 0", rows, true);
+        } else {
+          skipped.push({condition: `limit/${model.threshold.key} (zero)`, reason: "empty sum does not discriminate the threshold"});
+        }
+        const next = aggregateNextZero(model, base.rows, params);
+        const nextMethod = name("sum accumulator reset", [operation], ["next_zero"], model.threshold.rule_line);
+        if (next) {
+          add(`limit/${model.threshold.key}`, model.threshold.rule_line, "next_zero", nextMethod,
+            "a nonempty sum followed by a for row with no matching rows", next, true);
+        } else {
+          skipped.push({condition: `limit/${model.threshold.key} (next_zero)`, reason: "cannot make a previous sum whose carried value changes the next empty group's alert"});
+        }
+      }
+      const groups = aggregateGroups(model, base.rows, params);
+      const groupsMethod = name("sum groups", [operation], ["groups"], model.threshold.rule_line);
+      if (groups) {
+        add(`limit/${model.threshold.key}`, model.threshold.rule_line, "groups", groupsMethod,
+          "two for groups with sums on opposite sides of the threshold", groups, true);
+      } else {
+        skipped.push({condition: `limit/${model.threshold.key} (groups)`, reason: "cannot make two groups whose separate sums produce opposite threshold results"});
+      }
+    } else {
+      const rows = extremeTo(model, base.rows, threshold, params);
+      const methods = name(`${operation} threshold`, [operation, "limit"], ["at"], model.threshold.rule_line);
+      if (!rows) {
+        skipped.push({condition: `limit/${model.threshold.key} (at)`, reason: `cannot make a matching group whose ${operation} is ${threshold}`});
+      } else if (!thresholdDiscriminates(model, rows, params)) {
+        skipped.push({condition: `limit/${model.threshold.key} (at)`, reason: `${operation} boundary does not discriminate the threshold`});
+      } else {
+        add(`limit/${model.threshold.key}`, model.threshold.rule_line, "at", methods,
+          `the group's ${operation} is ${threshold}`, rows, true);
+      }
+    }
+    return {cases, skipped};
   }
 
   if (model.kind === "limit") {

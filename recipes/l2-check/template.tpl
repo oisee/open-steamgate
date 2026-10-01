@@ -26,7 +26,14 @@ CLASS {{class}} IMPLEMENTATION.
 {{#keys}}
              {{name}} TYPE {{table}}-{{column}},
 {{/keys}}
+{{#aggregate}}
+{{#is_count}}
              cnt TYPE i,
+{{/is_count}}
+{{^is_count}}
+             aggregate_value TYPE {{accumulator_type}},
+{{/is_count}}
+{{/aggregate}}
            END OF ty_count.
     TYPES: BEGIN OF ty_for,
 {{#for_fields}}
@@ -48,6 +55,20 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_count TYPE i.
     DATA lv_count_text TYPE c LENGTH 12.
 {{/threshold}}
+{{#aggregate}}
+{{^is_count}}
+    DATA lv_aggregate TYPE {{accumulator_type}}.
+    DATA lv_aggregate_text TYPE string.
+{{#is_integer}}
+    DATA lv_aggregate_integer TYPE int8.
+{{/is_integer}}
+{{^is_integer}}
+    DATA lv_aggregate_abs TYPE p LENGTH 16 DECIMALS {{decimals}}.
+    DATA lv_aggregate_signed TYPE string.
+{{/is_integer}}
+    DATA lv_aggregate_seen TYPE c LENGTH 1.
+{{/is_count}}
+{{/aggregate}}
 {{#queries}}
 {{#zero}}
 {{^one_outer}}
@@ -123,28 +144,80 @@ CLASS {{class}} IMPLEMENTATION.
 {{/one_outer}}
       READ TABLE lt_count INTO ls_count WITH TABLE KEY {{join_key}}.
       IF sy-subrc = 0.
+{{#aggregate}}
+{{#is_count}}
         ADD 1 TO ls_count-cnt.
+{{/is_count}}
+{{^is_count}}
+{{#is_sum}}
+        ADD {{wa}}-{{aggregate.result_field}} TO ls_count-aggregate_value.
+{{/is_sum}}
+{{/is_count}}
+{{/aggregate}}
         MODIFY TABLE lt_count FROM ls_count.
       ELSE.
         MOVE-CORRESPONDING {{wa}} TO ls_count.
+{{#aggregate}}
+{{#is_count}}
         ls_count-cnt = 1.
+{{/is_count}}
+{{^is_count}}
+        ls_count-aggregate_value = {{wa}}-{{aggregate.result_field}}.
+{{/is_count}}
+{{/aggregate}}
         INSERT ls_count INTO TABLE lt_count.
       ENDIF.
     ENDLOOP.
     LOOP AT lt_for INTO ls_for.
+{{#aggregate}}
+{{#is_count}}
       CLEAR lv_count.
       READ TABLE lt_count INTO ls_count WITH TABLE KEY {{read_key}}.
       IF sy-subrc = 0.
         lv_count = ls_count-cnt.
       ENDIF.
-      IF lv_count {{op}} {{value}}.
+      IF lv_count {{op}} {{value | literal}}.
         lv_count_text = lv_count.
         CONDENSE lv_count_text NO-GAPS.
+{{/is_count}}
+{{^is_count}}
+      CLEAR lv_aggregate.
+      READ TABLE lt_count INTO ls_count WITH TABLE KEY {{read_key}}.
+      IF sy-subrc = 0.
+        lv_aggregate = ls_count-aggregate_value.
+      ENDIF.
+      IF lv_aggregate {{op}} {{value | literal}}.
+{{#is_integer}}
+        lv_aggregate_integer = lv_aggregate.
+        lv_aggregate_text = lv_aggregate_integer.
+        CONDENSE lv_aggregate_text NO-GAPS.
+{{/is_integer}}
+{{^is_integer}}
+        lv_aggregate_abs = lv_aggregate.
+        IF lv_aggregate < 0.
+          lv_aggregate_abs = 0 - lv_aggregate.
+        ENDIF.
+        lv_aggregate_text = lv_aggregate_abs.
+        CONDENSE lv_aggregate_text NO-GAPS.
+        IF lv_aggregate < 0.
+          CONCATENATE `-` lv_aggregate_text INTO lv_aggregate_signed.
+          lv_aggregate_text = lv_aggregate_signed.
+        ENDIF.
+{{/is_integer}}
+{{/is_count}}
+{{/aggregate}}
 {{#alert_parts}}
         {{#@first}}lv_alert = {{/@first}}{{^@first}}  && {{/@first}}{{#is_text}}{{value | literal}}{{/is_text}}{{^is_text}}{{jref}}{{/is_text}}{{#@last}}.{{/@last}}
 {{/alert_parts}}
         APPEND lv_alert TO rt_alerts.
+{{#aggregate}}
+{{#is_count}}
       ENDIF.
+{{/is_count}}
+{{^is_count}}
+      ENDIF.
+{{/is_count}}
+{{/aggregate}}
     ENDLOOP.
 {{/zero}}
 {{^zero}}
@@ -153,35 +226,114 @@ CLASS {{class}} IMPLEMENTATION.
 {{/limit}}
     LOOP AT {{itab}} INTO {{wa}}.
 {{#limit}}
+{{#aggregate}}
+{{#is_count}}
       IF lv_count > 0 AND ( {{key_change}} ).
-        IF lv_count {{op}} {{value}}.
+        IF lv_count {{op}} {{value | literal}}.
           lv_count_text = lv_count.
           CONDENSE lv_count_text NO-GAPS.
+{{/is_count}}
+{{^is_count}}
+      IF lv_aggregate_seen = 'X' AND ( {{key_change}} ).
+        IF lv_aggregate {{op}} {{value | literal}}.
+{{#is_integer}}
+          lv_aggregate_integer = lv_aggregate.
+          lv_aggregate_text = lv_aggregate_integer.
+          CONDENSE lv_aggregate_text NO-GAPS.
+{{/is_integer}}
+{{^is_integer}}
+          lv_aggregate_abs = lv_aggregate.
+          IF lv_aggregate < 0.
+            lv_aggregate_abs = 0 - lv_aggregate.
+          ENDIF.
+          lv_aggregate_text = lv_aggregate_abs.
+          CONDENSE lv_aggregate_text NO-GAPS.
+          IF lv_aggregate < 0.
+            CONCATENATE `-` lv_aggregate_text INTO lv_aggregate_signed.
+            lv_aggregate_text = lv_aggregate_signed.
+          ENDIF.
+{{/is_integer}}
+{{/is_count}}
+{{/aggregate}}
 {{/limit}}
 {{#alert_parts}}
 {{#limit}}    {{/limit}}      {{#@first}}lv_alert = {{/@first}}{{^@first}}  && {{/@first}}{{#is_text}}{{value | literal}}{{/is_text}}{{^is_text}}{{jref}}{{/is_text}}{{#@last}}.{{/@last}}
 {{/alert_parts}}
 {{#limit}}
+{{#aggregate}}
+{{#is_count}}
           APPEND lv_alert TO rt_alerts.
         ENDIF.
         CLEAR lv_count.
       ENDIF.
       ADD 1 TO lv_count.
       ls_prev = {{wa}}.
+{{/is_count}}
+{{^is_count}}
+          APPEND lv_alert TO rt_alerts.
+        ENDIF.
+        CLEAR lv_aggregate.
+        CLEAR lv_aggregate_seen.
+      ENDIF.
+{{#is_sum}}
+      ADD {{wa}}-{{aggregate.result_field}} TO lv_aggregate.
+{{/is_sum}}
+{{#is_min}}
+      IF lv_aggregate_seen IS INITIAL OR {{wa}}-{{aggregate.result_field}} < lv_aggregate.
+        lv_aggregate = {{wa}}-{{aggregate.result_field}}.
+      ENDIF.
+{{/is_min}}
+{{#is_max}}
+      IF lv_aggregate_seen IS INITIAL OR {{wa}}-{{aggregate.result_field}} > lv_aggregate.
+        lv_aggregate = {{wa}}-{{aggregate.result_field}}.
+      ENDIF.
+{{/is_max}}
+      lv_aggregate_seen = 'X'.
+      ls_prev = {{wa}}.
+{{/is_count}}
+{{/aggregate}}
 {{/limit}}
 {{^limit}}
       APPEND lv_alert TO rt_alerts.
 {{/limit}}
     ENDLOOP.
 {{#limit}}
-    IF lv_count {{op}} {{value}}.
+{{#aggregate}}
+{{#is_count}}
+    IF lv_count {{op}} {{value | literal}}.
       lv_count_text = lv_count.
       CONDENSE lv_count_text NO-GAPS.
+{{/is_count}}
+{{^is_count}}
+    IF lv_aggregate_seen = 'X' AND lv_aggregate {{op}} {{value | literal}}.
+{{#is_integer}}
+      lv_aggregate_integer = lv_aggregate.
+      lv_aggregate_text = lv_aggregate_integer.
+      CONDENSE lv_aggregate_text NO-GAPS.
+{{/is_integer}}
+{{^is_integer}}
+      lv_aggregate_abs = lv_aggregate.
+      IF lv_aggregate < 0.
+        lv_aggregate_abs = 0 - lv_aggregate.
+      ENDIF.
+      lv_aggregate_text = lv_aggregate_abs.
+      CONDENSE lv_aggregate_text NO-GAPS.
+      IF lv_aggregate < 0.
+        CONCATENATE `-` lv_aggregate_text INTO lv_aggregate_signed.
+        lv_aggregate_text = lv_aggregate_signed.
+      ENDIF.
+{{/is_integer}}
+{{/is_count}}
+{{/aggregate}}
 {{#alert_parts}}
       {{#@first}}lv_alert = {{/@first}}{{^@first}}  && {{/@first}}{{#is_text}}{{value | literal}}{{/is_text}}{{^is_text}}{{jref}}{{/is_text}}{{#@last}}.{{/@last}}
 {{/alert_parts}}
       APPEND lv_alert TO rt_alerts.
     ENDIF.
+{{#aggregate}}
+{{^is_count}}
+{{/is_count}}
+{{/aggregate}}
 {{/limit}}
 {{/zero}}
 {{/queries}}

@@ -54,11 +54,19 @@ Format adapted from `larshp/hithub` (MIT).
 - Minimal ABAP reproducer: found by the DSL L2 agreement test (`test/dsl-l2.mjs`, the synthetic rule over INT and DEC fields, first written with `{m.amt}` in the alert): a field of a table, `DEC 5,2`, holding `10.50`, read by `SELECT` into a structure component of the same type, then `lv_alert = ... && ls-amt.`
 - Exact command used to run it: `npx mocha test/dsl-l2.mjs`; by hand, `abap.operators.concat(new abap.types.Packed({length: 3, decimals: 2}).set("10.5"), new abap.types.String().set("x"))` answers `10.5x`, while `string.set(packed)` answers `10.50 `
 - Expected SAP behaviour: converting `p` to a string keeps the declared decimals, so the text is `10.50` (ABAP keyword documentation, conversion of `p`; **not measured on A4H** in this session)
-- Actual open-abap behaviour: `10.5`
-- Impact on open-steamgate: an L2 rule whose alert holes name a DEC/CURR/QUAN field would print differently here and on a system; the demo rule has no such hole, and the agreement test of the synthetic rule keeps DEC in its conditions and INT in its holes. The interpreter (`tools/dsl-l2-eval.mjs`, `render`) prints the ABAP-correct `10.50`, so a rule with such a hole fails its generated test here instead of passing quietly
-- Smallest safe workaround: none in the rule language; do not put a packed field in an alert
+- Actual open-abap behaviour: `10.5`. The slice-6 ABAP probe measured direct
+  packed-to-STRING assignment as `10.50` for positive `10.50` and
+  `10.50-` for negative `-10.50` after `CONDENSE ... NO-GAPS`. Assigning
+  through fixed CHAR first gives `10.5` / `-10.5`. The direct runtime API
+  `String.set(Packed("10.50"))` likewise gives `10.50 `.
+- Impact on open-steamgate: a direct DEC/CURR/QUAN field alert hole still exposes this runtime difference. Slice 6 aggregate holes use a formatter that avoids both conversion paths and are checked against the interpreter by the SUM/MIN/MAX tests.
+- Smallest safe workaround: aggregate alerts convert the absolute packed
+  accumulator directly to STRING, condense it, then prefix `-` for a negative
+  value. This keeps DEC decimals and a leading sign without concatenating a
+  packed operand or converting through fixed CHAR. Integer aggregates pass
+  through INT8 before conversion to STRING, preserving the sign and full range.
 - Upstream issue: not filed
-- Regression-test location: none yet
+- Regression-test location: `docs/probes/dsl-l2/zcl_l2_aggregate_probe.clas.testclasses.abap` distinguishes ABAP assignment from the direct API; `test/dsl-l2.mjs` covers aggregate alert text, including a negative DEC minimum
 - Upstream version containing a fix: `unknown`
 
 ### ANOMALY-2026-09-24-daemon-statics -- a daemon's class data is its own session's on a system, and the process's here

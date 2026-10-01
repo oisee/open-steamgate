@@ -204,7 +204,11 @@ DDIC_PROVIDER.literalType = (registry, type, name, localTypes = new Map()) => {
   const domain = element?.getDomainName?.() && registry.getObject("DOMA", element.getDomainName().toUpperCase());
   domain?.parse();
   const ddic = element?.parsedXML?.leng ? element.parsedXML : domain?.parsedXML;
-  const builtIn = element ? element.getDataType(registry)?.toUpperCase() : ({...Object.fromEntries(BUILTIN), StringType: "STRG"})[type.constructor.name];
+  const builtIn = element ? element.getDataType(registry)?.toUpperCase()
+    : ({...Object.fromEntries(BUILTIN), StringType: "STRG", FloatingPointType: "FLTP"})[type.constructor.name];
+  if (builtIn === "FLTP") {
+    return {resolved: false, reason: "FLTP; floating point equality and rounding cannot be proved here"};
+  }
   if (!builtIn || !LITERAL_TYPES.has(builtIn)) return {resolved: false, reason: `${builtIn ?? type.constructor.name} is not accepted by literal`};
   const result = {built_in: builtIn};
   // DDIC's packed length is digits. abaplint's PackedType length is bytes.
