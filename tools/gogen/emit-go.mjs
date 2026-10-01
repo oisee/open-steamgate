@@ -1112,16 +1112,20 @@ function readSecKey(st, ctx, t) {
 }
 
 function withBuilders(body, ctx, t, emitLoop, outside = []) {
-  // A CATCH can read a variable after the loop panics. A builder's final
-  // write-back would be skipped by that panic, losing every prior append.
+  // A handler or CLEANUP in this method can read a variable before a defer
+  // on the method runs, so keep direct appends in those scopes.
   const names = ctx.catchScope ? [] : builders(body, ctx, outside);
   ctx.builders ??= new Map();
   for (const n of names) ctx.builders.set(n, `sb_${ident(n)}_${ctx.loop++}`);
-  const pre = names.flatMap((n) => [`${t}var ${ctx.builders.get(n)} strings.Builder`, `${t}${ctx.builders.get(n)}.WriteString(${ident(n)})`]);
+  const pre = names.flatMap((n) => {
+    const b = ctx.builders.get(n), active = `active_${b}`;
+    return [`${t}var ${b} strings.Builder`, `${t}${b}.WriteString(${ident(n)})`,
+      `${t}${active} := true`, `${t}defer func() { if ${active} { ${ident(n)} = ${b}.String() } }()`];
+  });
   ctx.loopLevel = (ctx.loopLevel ?? 0) + 1;
   const lines = emitLoop();
   ctx.loopLevel -= 1;
-  const post = names.map((n) => `${t}${ident(n)} = ${ctx.builders.get(n)}.String()`);
+  const post = names.flatMap((n) => [`${t}${ident(n)} = ${ctx.builders.get(n)}.String()`, `${t}active_${ctx.builders.get(n)} = false`]);
   for (const n of names) ctx.builders.delete(n);
   return [...pre, ...lines, ...post];
 }
@@ -1481,7 +1485,7 @@ function stmtLines(st, ctx, d) {
       const frame = {level: ctx.loopLevel ?? 0, mode: "body", used: new Set()};
       (ctx.tries ??= []).push(frame);
       const priorCatchScope = ctx.catchScope;
-      ctx.catchScope = ctx.catchScope || st.catches.length > 0;
+      ctx.catchScope = ctx.catchScope || st.catches.length > 0 || !!st.cleanup;
       const body = st.body.flatMap((x) => stmt(x, ctx, d + 1));
       ctx.catchScope = priorCatchScope;
       frame.mode = "catch";
@@ -2214,6 +2218,7 @@ function fn(e, ctx) {
 
 function cond(c, ctx) {
   switch (c.c) {
+    case "num_data_cmp": return `abap.CmpData(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} 0`;
     case "in_range": {
       const n = ctx.loop++;
       // field names through ident(): capitalised only in a layered build

@@ -16,8 +16,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
   // A raised exception retains reference writes and attributes, but discards
   // VALUE output and RETURNING copy-back (the same fixture runs in both hosts).
-  ZCL_GOGEN_T_EXCPARAMS: "ref/out/before/before/before/attr",
-  ZCL_GOGEN_T_DEFAULTS: "7/11/13",
+  ZCL_GOGEN_T_EXCPARAMS: "ref/out/before/before/before/nxxx/nxxx/uyy/4/9/10/keep",
+  ZCL_GOGEN_T_DEFAULTS: "7/11/13/17",
   ZCL_GOGEN_T_XCASE: "pad/prefix/length",
   ZCL_GOGEN_T_UNCATCH: {Go: "ERROR NOT_COMPILED in find( ): OCC = 0 was not measured at zcl_gogen_t_uncatch.clas.abap:8", JS: "ERROR NOT_COMPILED in find( ) OCC = 0 was not measured"},
   ZCL_GOGEN_T_ROWREF: "append:9",
@@ -879,4 +879,8 @@ for (const f of demoDrift) { bad += 1; console.log(`FAIL testdata/${f} differs f
 const own = refused.broken.includes("zcl_gogen_t_rf_own");
 if (!own) bad += 1;
 console.log(`${own ? "ok  " : "FAIL"} refused ZCL_GOGEN_T_RF_OWN left out by abaplint's syntax check`);
+const resumable = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_resume", "CX_SY_ZERODIVIDE"], tolerant: true});
+const resumeRefused = resumable.partial.some((x) => x.includes("RAISE RESUMABLE:"));
+if (!resumeRefused) bad += 1;
+console.log(`${resumeRefused ? "ok  " : "FAIL"} refused RESUMABLE until continuation support is implemented`);
 process.exit(bad ? 1 : 0);

@@ -7,8 +7,15 @@ import {dirname, join, basename} from "node:path";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
+import {CmpNumericData, cell, TP, TI, TF} from "./js/abap.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+test("generic numeric comparison keeps packed decimal boundaries in JS", () => {
+  assert.equal(CmpNumericData(cell("1.5", TP(4, 1)), cell("1.4", TP(4, 1))), 1);
+  assert.equal(CmpNumericData(cell(1, TI), cell("1.4", TP(4, 1))), -1);
+  assert.equal(CmpNumericData(cell(1.5, TF), cell("1.5", TP(4, 1))), 0);
+});
 
 test("SELECT clauses come from syntax nodes, not WHERE string literals", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-select-literals-"));

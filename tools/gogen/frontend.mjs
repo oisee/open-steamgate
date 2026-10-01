@@ -666,7 +666,7 @@ export function readClass(folder) {
 }
 
 // ultra/events: the host functions whose TYPE p parameters are read as p(16,7) (typeOf)
-const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT", "CL_ABAP_TSTMP=>SUBTRACTSECS", "CL_ABAP_UNIT_ASSERT=>ASSERT_NUMBER_BETWEEN"]);
+const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT", "CL_ABAP_TSTMP=>SUBTRACTSECS"]);
 /** methods whose ABAP is kernel code in the transpiler runtime, and the host function that does their work */
 const NATIVE = new Map([
   // ultra/events (the WEBGUI's transaction sessions, ZCL_OSD_TRAN_SESSION):
@@ -1148,8 +1148,9 @@ function typeOf(t, where, program) {
   // signature cannot say; only the host functions listed in P_GENERIC take
   // one, as p(16,7), which holds a TIMESTAMP and a TIMESTAMPL exactly
   if (t instanceof BasicTypes.PGenericType && P_GENERIC.has(String(where).split(" ")[0])) return {k: "p", len: 16, dec: 7};
-  // TYPE numeric of the same host functions (a count of seconds): taken as i
-  if (t instanceof BasicTypes.NumericGenericType && P_GENERIC.has(String(where).split(" ")[0])) return I;
+  // ASSERT_NUMBER_BETWEEN takes TYPE numeric. Bind the caller's actual type:
+  // converting a packed or float boundary to i rounds before the comparison.
+  if (t instanceof BasicTypes.NumericGenericType && String(where).split(" ")[0] === "CL_ABAP_UNIT_ASSERT=>ASSERT_NUMBER_BETWEEN") return {k: "data", numeric: true};
   // p: declared, initial, copied and compared with initial only, as its
   // decimal text; any arithmetic or conversion is refused until packed
   // numbers are measured on A4H
@@ -6112,6 +6113,11 @@ function defaultValue(p, ctx) {
     const def = ctx.reg.getObject("INTF", p.defaultOwner)?.getDefinition() ?? clasDef(ctx.reg, p.defaultOwner);
     const c = def?.getAttributes().getConstants().find((x) => upper(x.getName()) === upper(t));
     if (c !== undefined && typeof c.getValue() === "string") t = c.getValue();
+    else {
+      const aliased = aliasTarget(ctx.reg, p.defaultOwner, upper(t));
+      const match = /^([\w\/]+)~(\w+)$/.exec(aliased ?? "");
+      if (match) return convert(resolveStatic(upper(match[1]), upper(match[2]), ctx), p.type);
+    }
   }
   if (/^-?\d+$/.test(t)) return convert({e: "int", value: Number(t), type: I}, p.type);
   if (/^'.*'$/s.test(t)) return convert({e: "chars", value: t.slice(1, -1), type: C(Math.max(1, t.length - 2))}, p.type);
@@ -6772,6 +6778,9 @@ function compareValues(op, l, r, ctx) {
   // Holding anything else it dumps NOT_COMPILED (abap.DataChars): those
   // comparisons are numeric or by other rules, not measured here
   const gen = (x) => x.type.k === "data" && !x.type.table;
+  if (gen(l) && gen(r) && l.type.numeric && r.type.numeric) {
+    return {c: "num_data_cmp", op, l, r};
+  }
   if ((gen(l) || gen(r)) && [l, r].every((x) => gen(x) || charlike(x.type))) {
     const side = (x) => (gen(x) ? {e: "unwrap_chars", x, type: S} : convert(x, S));
     return {c: "cmp", op, l: side(l), r: side(r), type: S};

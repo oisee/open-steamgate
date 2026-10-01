@@ -1232,6 +1232,18 @@ export const DivIntP = (a, b) => pCalc(pDivMod(a, b, "DIV")[0], "DIV");
 export const ModP = (a, b) => pCalc(pDivMod(a, b, "MOD")[1], "MOD");
 // CmpP compares two packed values: -1, 0 or 1
 export const CmpP = (a, b) => { const [x, y] = pAlign(pParse(a), pParse(b)); return x.v < y.v ? -1 : x.v > y.v ? 1 : 0; };
+// TYPE numeric parameters retain their caller's type. Packed and integer
+// values compare exactly; floating point follows ABAP's floating comparison.
+export function CmpNumericData(a, b) {
+  const ka = a.t.kind, kb = b.t.kind;
+  const av = a.get(), bv = b.get();
+  if (ka === "F" || kb === "F") {
+    const x = ka === "P" ? Number(av) : av;
+    const y = kb === "P" ? Number(bv) : bv;
+    return x < y ? -1 : x > y ? 1 : 0;
+  }
+  return CmpP(av, bv);
+}
 export const IToP = (i) => String(i);
 export function PFit(a, n, dec, arith) {
   const d = pScale(pParse(a), dec);
