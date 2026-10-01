@@ -1458,6 +1458,10 @@ something already shipped (then it is a must of the current release, like the ro
 - nice (added 2026-10-01): pAMDP `XMLTABLE` / `XMLEXTRACT(VALUE)` / `SELECT ... FOR XML` over the streaming sXML
   parser. Measured on A4H HANA 2.00.075: `XMLTABLE` reads ~5.8 MB/s at ~23 bytes of HANA memory per XML byte (166 MB:
   28.6 s, 3.9 GB); over the streaming parser the memory is the window. Owner: osg-research.
+- nice (added 2026-10-01): carve the ABAP snippets (preflight, receipt, cleanup, residue) out of
+  `tools/osd-prove-on-system.mjs` into a module of their own, so its size budget (1674 lines, re-taken after #409 in
+  #412) can come down. Behaviour unchanged, `test/prove-on-system.mjs` and `test/prove-inplace.mjs` the gate. Owner:
+  osg-research.
 
 ## The lock server (ENQ) and the ADT façade in ABAP (2026-10-01, spike-sprint for 0.6)
 
