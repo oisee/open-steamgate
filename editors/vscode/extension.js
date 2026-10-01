@@ -20,7 +20,7 @@ const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, osdRunCommand
   groupServices, serviceLabel, serviceContextValue, serviceActionContext, normalizeTransactionRow,
   transactionDetailsModel, classifyTransactionClick, transactionDetailsHtml,
   appManifestDetails, httpTestFiles, closureTestNames, dumpsForService, serviceCardModel, serviceDetailsHtml,
-  serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes,
+  serviceHttpUrl, serviceMetadataUrl, serviceMetadataExternalUrl, serviceWsUrl, serviceClassNodes, resolveImplementationMethod,
   webguiPanelHtml, runWebguiPanel,
   warmStatusText, activationBuildText, closureTestsText,
   presetSettings, isOpenSteamgateCheckout: isOpenSteamgateManifest, osdHomeChoice, osdStateContext, systemOverviewModel,
@@ -1343,17 +1343,19 @@ class OsdTreeProvider {
       return items;
     }
     if (map === undefined || !Array.isArray(map.sets) || map.sets.length === 0) return items;
-    let source;
-    const sourceFile = await classSourcePath(row, "dpc", serviceSourceRoot());
-    try {
-      if (sourceFile) source = fs.readFileSync(sourceFile, "utf8");
-    } catch {
-      source = undefined;
+    const root = serviceSourceRoot();
+    const ext = row.handler.toUpperCase();
+    const base = ext.replace(/_EXT$/, "");
+    const sources = {};
+    for (const name of new Set([ext, base])) {
+      const beside = name === base && row.handlerSource
+        ? sourcePath(root, path.join(path.dirname(row.handlerSource), `${base.toLowerCase()}.clas.abap`)) : undefined;
+      const file = beside ?? await classSourcePath(name === ext ? row : {handler: name}, "dpc", root);
+      try { if (file) sources[name] = {path: file, source: fs.readFileSync(file, "utf8")}; } catch {}
     }
-    const lenses = source === undefined ? [] : entitySetLenses(source, map);
     for (const set of map.sets) {
-      const lens = lenses.find((l) => l.set === set.set && l.kind === set.kind);
-      items.push(new EntitySetItem(row.handler, set, lens?.line, sourceFile));
+      const method = resolveImplementationMethod(row.handler, set.method, sources);
+      items.push(new EntitySetItem(method?.owner ?? row.handler, set, method?.line, method?.path ?? sources[ext]?.path));
     }
     return items;
   }
@@ -1484,9 +1486,8 @@ class ServiceClassItem extends vscode.TreeItem {
 }
 
 /** One entity set under an OData row's DPC, from `map.sets` (Osd#entitySets)
- *  -- `line` is the `<set>_get_entityset` / `<set>_get_entity` method's own
- *  line in the DPC's source when it was found in the running base system
- *  or a workspace layer (lib.js entitySetLenses, as for Q2b's CodeLens),
+ *  -- `line` is the mapped method's own line in the DPC EXT or generated base
+ *  when it was found in the running base system or a workspace layer,
  *  `undefined` when it was not (the class opens at its top instead, rather
  *  than the node doing nothing at all). */
 class EntitySetItem extends vscode.TreeItem {

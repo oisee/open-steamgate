@@ -2472,12 +2472,12 @@ function serviceCardModel(row, sets = [], files = []) {
     const candidate = `/iwbep/if_mgw_appl_srv_runtime~${operation.toLowerCase()}`;
     const resolved = resolveImplementationMethod(row.handler, candidate, dpcSources);
     if (!resolved || resolved.owner !== String(row.handler).toUpperCase()) continue;
-    const target = {label: operation, path: resolved.path, line: resolved.line};
+    const target = {label: `${operation} interface operation redefined (${resolved.path}:${resolved.line})`, path: resolved.path, line: resolved.line};
     const body = implementationMethodBody(dpc.source, candidate);
     const named = /\biv_entity_(?:set_)?name\b/i.test(body) ? [...knownSets.values()].filter((name) =>
       new RegExp(`'${String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`, "i").test(body)) : [];
     if (named.length) interfaceTargets.set(operation, {target, named: new Set(named.map((name) => name.toLowerCase()))});
-    else generic.push({...target, label: `${operation} generic (all sets)`});
+    else generic.push({...target, label: `${operation} interface operation generic (all sets) (${resolved.path}:${resolved.line})`});
   }
   const yamlEntity = (name) => {
     if (!yaml) return "";
@@ -2498,7 +2498,7 @@ function serviceCardModel(row, sets = [], files = []) {
           ? {label: `${operation} redefined (${resolved.path}:${resolved.line})`, path: resolved.path, line: resolved.line}
           : undefined;
       return {name: operation, link: found, inherited: !found};
-    }).filter((operation) => !generic.some((target) => target.label.startsWith(`${operation.name} `)) &&
+    }).filter((operation) => !generic.some((target) => target.label.startsWith(`${operation.name} interface operation `)) &&
       (!["GET_STREAM", "UPDATE_STREAM"].includes(operation.name) ||
       /media:\s*true/i.test(entityYaml) || mediaSets.has(prefix)));
     const cds = structures.get(prefix)?.cds;
@@ -2520,11 +2520,12 @@ function serviceCardModel(row, sets = [], files = []) {
   const actionMethod = "/iwbep/if_mgw_appl_srv_runtime~execute_action";
   const actionResolved = resolveImplementationMethod(row.handler, actionMethod, dpcSources);
   const actionLink = actionResolved?.owner === String(row.handler).toUpperCase()
-    ? {label: "EXECUTE_ACTION", path: actionResolved.path, line: actionResolved.line} : undefined;
+    ? {label: `EXECUTE_ACTION function import redefined (${actionResolved.path}:${actionResolved.line})`, path: actionResolved.path, line: actionResolved.line} : undefined;
   const actionBody = implementationMethodBody(dpc?.source, actionMethod);
   const namedActions = actions.filter((name) => /\biv_action_name\b/i.test(actionBody) &&
     new RegExp(`'${String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`, "i").test(actionBody));
-  if (actionLink && !namedActions.length) generic.push({...actionLink, label: "EXECUTE_ACTION generic (all sets)"});
+  if (actionLink && !namedActions.length) generic.push({...actionLink,
+    label: `EXECUTE_ACTION function import generic (all sets) (${actionLink.path}:${actionLink.line})`});
   const functionImports = [...new Set(actions)].map((name) => ({name,
     link: namedActions.includes(name) ? actionLink : undefined,
   }));
@@ -2561,9 +2562,9 @@ function serviceDetailsHtml(details, nonce = "") {
       <h3>Model sources</h3>${list(details.card?.model, (target) => `<li>${cardLink(target)}</li>`)}
       <h3>Entity sets</h3>${list(details.card?.entitySets ?? details.entitySets ?? [], (set) => `<li><code>${esc(set.set)}</code>
         ${set.sources?.length ? `<div>${set.sources.map(cardLink).join(" · ")}</div>` : ""}
-        ${set.operations ? `<ul>${set.operations.map((op) => `<li>${op.link ? cardLink(op.link) : `${esc(op.name)} <span class="muted">inherited (generic)</span>`}</li>`).join("")}</ul>` : `<span class="muted">${esc(set.kind)}</span>`}</li>`)}
+        ${set.operations ? `<ul>${set.operations.map((op) => `<li>${op.link ? cardLink(op.link) : `${esc(op.name)}${INTERFACE_OPERATIONS.has(op.name) ? " interface operation" : ""} <span class="muted">inherited (generic)</span>`}</li>`).join("")}</ul>` : `<span class="muted">${esc(set.kind)}</span>`}</li>`)}
       <h3>Generic service methods</h3>${list(details.card?.generic, (target) => `<li>${cardLink(target)}</li>`)}
-      <h3>Function imports</h3>${list(details.card?.functionImports, (action) => `<li>${esc(action.name)}: ${action.link ? cardLink(action.link) : `<span class="muted">EXECUTE_ACTION inherited (generic)</span>`}</li>`)}</section>`;
+      <h3>Function imports</h3>${list(details.card?.functionImports, (action) => `<li>${esc(action.name)}: ${action.link ? cardLink(action.link) : `<span class="muted">EXECUTE_ACTION function import inherited (generic)</span>`}</li>`)}</section>`;
     body += section("dpc", "DPC", row.handler, details.sources?.dpc, details.readers?.dpc, details.closures?.dpc);
     body += section("mpc", "MPC", row.mpc, details.sources?.mpc, details.readers?.mpc, details.closures?.mpc);
     const warm = details.serving?.warm;

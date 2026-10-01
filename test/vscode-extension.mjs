@@ -2711,6 +2711,37 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
       rmSync(home, {recursive: true, force: true});
     }
   });
+  it("opens an inherited entity set method in its generated DPC base", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "osd-entityset-base-"));
+    const extPath = "src/demo/zcl_sample_dpc_ext.clas.abap";
+    const basePath = "src/demo/zcl_sample_dpc.clas.abap";
+    mkdirSync(path.join(home, "src/demo"), {recursive: true});
+    writeFileSync(path.join(home, extPath), "CLASS zcl_sample_dpc_ext IMPLEMENTATION.\nENDCLASS.\n");
+    writeFileSync(path.join(home, basePath), "CLASS zcl_sample_dpc IMPLEMENTATION.\n  METHOD travelset_get_entityset.\n  ENDMETHOD.\nENDCLASS.\n");
+    const api = vscodeStub({home, url: "http://localhost:5999"});
+    api.workspace.findFiles = async () => [];
+    const oldFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ok: true, status: 200, json: async () => ({sets: [
+      {set: "TravelSet", kind: "get_entityset", method: "TRAVELSET_GET_ENTITYSET"},
+    ]})});
+    const {OsdTreeProvider, clickTreeNode} = loadExtension(api);
+    const provider = new OsdTreeProvider({context: controllerContext(), launcher: {state: "running", osdHome: home}, onDidChange() {}},
+      async () => ({sources: {}, testClasses: []}));
+    try {
+      const items = await provider.serviceClassItems({kind: "ODATA", handler: "ZCL_SAMPLE_DPC_EXT", handlerSource: extPath});
+      const travel = items.find((item) => item.contextValue === "osd-service-entityset");
+      expect(travel.dpcName).to.equal("ZCL_SAMPLE_DPC");
+      expect(travel.sourceFile).to.equal(path.join(home, basePath));
+      expect(travel.line).to.equal(2);
+      await clickTreeNode(travel, provider);
+      expect(api.sourceOpens.at(-1).fsPath).to.equal(path.join(home, basePath));
+      expect(api.sourceEditors.at(-1).selection.start.line).to.equal(1);
+    } finally {
+      provider.dispose();
+      globalThis.fetch = oldFetch;
+      rmSync(home, {recursive: true, force: true});
+    }
+  });
   it("opens a service leaf on one click and keeps expandable service navigation on double click", async () => {
     const api = vscodeStub({home: ROOT});
     const {OsdTreeProvider, clickTreeNode} = loadExtension(api);
@@ -3101,6 +3132,9 @@ describe("editors/vscode: service card source navigation", () => {
     expect(card.model.map((one) => one.label)).to.include.members(["MPC DEFINE", "MPC_EXT DEFINE", "MPC_ANN DEFINE", ".stg.yaml", "IWPR"]);
     const html = serviceDetailsHtml({row: {kind: "ODATA", name: "ZSTG_DEMO_SRV"}, card}, "nonce");
     expect(html).to.contain('data-line="392"').and.to.contain("inherited (generic)").and.to.contain("Function imports");
+    expect(html).to.contain("GET_STREAM interface operation redefined (src/demo/zcl_zstg_demo_dpc_ext.clas.abap:679)");
+    expect(html).to.contain("EXECUTE_ACTION function import redefined (src/demo/zcl_zstg_demo_dpc_ext.clas.abap:525)");
+    expect(html).to.contain("GET_EXPANDED_ENTITY interface operation <span class=\"muted\">inherited (generic)</span>");
   });
 
   it("shows DPC_EXT redefinitions at their source lines and keeps other set operations inherited", () => {
@@ -3179,10 +3213,18 @@ describe("editors/vscode: service card source navigation", () => {
   it("shows an interface method without a named set once at service level", () => {
     const files = [{path: "src/zcl_sample_dpc_ext.clas.abap", source: "METHOD /iwbep/if_mgw_appl_srv_runtime~get_expanded_entity.\n  RETURN.\nENDMETHOD."}];
     const card = serviceCardModel({handler: "ZCL_SAMPLE_DPC_EXT"}, [{set: "TravelSet"}, {set: "BookingSet"}], files);
-    expect(card.generic.map((one) => one.label)).to.deep.equal(["GET_EXPANDED_ENTITY generic (all sets)"]);
+    expect(card.generic.map((one) => one.label)).to.deep.equal([
+      "GET_EXPANDED_ENTITY interface operation generic (all sets) (src/zcl_sample_dpc_ext.clas.abap:1)"]);
     expect(card.entitySets.every((set) => !set.operations.some((op) => op.name === "GET_EXPANDED_ENTITY"))).to.equal(true);
     const html = serviceDetailsHtml({row: {kind: "ODATA"}, card});
-    expect(html).to.contain("GET_EXPANDED_ENTITY generic (all sets)");
+    expect(html).to.contain("GET_EXPANDED_ENTITY interface operation generic (all sets) (src/zcl_sample_dpc_ext.clas.abap:1)");
+  });
+
+  it("classifies an inherited function import in rendered Details", () => {
+    const files = [{path: "src/sample.stg.yaml", source: "service: SAMPLE_SRV\n  Cancel:\n    method: POST\n"}];
+    const row = {kind: "ODATA", name: "SAMPLE_SRV", handler: "ZCL_SAMPLE_DPC_EXT"};
+    const card = serviceCardModel(row, [], files);
+    expect(serviceDetailsHtml({row, card})).to.contain("EXECUTE_ACTION function import inherited (generic)");
   });
 
   it("resolves every operation kind and a function import through the shared EXT/base resolver", () => {
@@ -3205,6 +3247,10 @@ describe("editors/vscode: service card source navigation", () => {
       expect(set.operations[index].link, operation).to.include({path: files[0].path, line: index * 3 + 1});
     }
     expect(card.functionImports.find((one) => one.name === "CancelTravel").link).to.include({path: files[0].path, line: 31});
+    const html = serviceDetailsHtml({row: {kind: "ODATA"}, card});
+    expect(html).to.contain("GET_EXPANDED_ENTITY interface operation redefined (src/zcl_all_dpc_ext.clas.abap:16)");
+    expect(html).to.contain("GET_STREAM interface operation redefined (src/zcl_all_dpc_ext.clas.abap:25)");
+    expect(html).to.contain("EXECUTE_ACTION function import redefined (src/zcl_all_dpc_ext.clas.abap:31)");
   });
 
   it("builds a 1,000-set card within the source-index budget", () => {
