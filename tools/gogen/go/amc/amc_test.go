@@ -237,6 +237,34 @@ func TestSessionIDAndForget(t *testing.T) {
 	}
 }
 
+func TestForgetReleasesBindingsAcrossClasses(t *testing.T) {
+	b := testBroker()
+	for i := 0; i < 100; i++ {
+		s := &session{name: fmt.Sprint(i)}
+		producer, consumer, receiver := &struct{ n int }{i}, &struct{ n int }{i}, &struct{ n int }{i}
+		b.Bind(s, producer, Producer{App: "ZOSD_AMC_TEST", Path: "/text"})
+		b.Bind(s, consumer, Consumer{App: "ZOSD_AMC_TEST", Path: "/text"})
+		sub, err := b.Subscribe("ZOSD_AMC_TEST", "/text", "", at(s, "001", "A"), receiver)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Track(consumer, receiver, sub)
+		b.SessionID(s)
+		if b.Bound(producer) == nil || b.Bound(consumer) == nil {
+			t.Fatal("binding disappeared before the class boundary")
+		}
+		b.Forget(s)
+		if sub.active.Load() || b.Bound(producer) != nil || b.Bound(consumer) != nil {
+			t.Fatalf("class %d retained an active subscription or binding", i)
+		}
+		if len(b.subs) != 0 || len(b.inboxes) != 0 || len(b.ids) != 0 ||
+			len(b.binds.subs) != 0 || len(b.binds.values) != 0 || len(b.binds.owners) != 0 || len(b.binds.stack) != 0 {
+			t.Fatalf("class %d retained broker state: subs=%d inboxes=%d ids=%d tracked=%d values=%d owners=%d stack=%d",
+				i, len(b.subs), len(b.inboxes), len(b.ids), len(b.binds.subs), len(b.binds.values), len(b.binds.owners), len(b.binds.stack))
+		}
+	}
+}
+
 func TestCurrentAndUse(t *testing.T) {
 	first := Current()
 	if Current() != first {
@@ -267,7 +295,7 @@ func TestBindingsAndCaller(t *testing.T) {
 	}
 	outer()
 	p := &struct{ x int }{}
-	b.Bind(p, Producer{App: "A", Path: "/p"})
+	b.Bind(a, p, Producer{App: "A", Path: "/p"})
 	if b.Bound(p).(Producer).Path != "/p" {
 		t.Fatal("bind")
 	}

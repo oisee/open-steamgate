@@ -1268,11 +1268,11 @@ function stmtLines(st, ctx, d) {
         case "create_producer":
           return [`${t}AMCDefine()`, `${t}if ${a("COMM")} == 1 {`, `${t}\t${err} = "Communication type 1 is not supported."`, ...stmt(st.raise, ctx, d + 1), `${t}}`,
             `${t}{`, `${t}\tr := New_${typeName(st.cls)}(s)`,
-            `${t}\tamc.Current().Bind(r, amc.Producer{App: ${a("APP")}, Path: ${a("PATH")}, Extension: ${a("EXT")}, SuppressEcho: ${a("ECHO")} == "X"})`,
+            `${t}\tamc.Current().Bind(s, r, amc.Producer{App: ${a("APP")}, Path: ${a("PATH")}, Extension: ${a("EXT")}, SuppressEcho: ${a("ECHO")} == "X"})`,
             `${t}\t${ret} = r`, `${t}}`];
         case "create_consumer":
           return [`${t}AMCDefine()`, `${t}{`, `${t}\tr := New_${typeName(st.cls)}(s)`,
-            `${t}\tamc.Current().Bind(r, amc.Consumer{App: ${a("APP")}, Path: ${a("PATH")}, Extension: ${a("EXT")}})`,
+            `${t}\tamc.Current().Bind(s, r, amc.Consumer{App: ${a("APP")}, Path: ${a("PATH")}, Extension: ${a("EXT")}})`,
             `${t}\t${ret} = r`, `${t}}`];
         case "session_id":
           return [`${t}${ret} = amc.Current().SessionID(s)`];
