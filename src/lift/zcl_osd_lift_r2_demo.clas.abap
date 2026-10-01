@@ -4,7 +4,7 @@ CLASS zcl_osd_lift_r2_demo DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES:
       BEGIN OF ty_hit,
-        label TYPE c LENGTH 40,
+        ltext TYPE c LENGTH 40,
       END OF ty_hit,
       tt_hits TYPE STANDARD TABLE OF ty_hit WITH DEFAULT KEY,
       BEGIN OF ty_row,
@@ -29,7 +29,7 @@ CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.
     FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.
     LOOP AT ct_rows ASSIGNING <ls_row>.
       CLEAR <ls_row>-result.
-      SELECT label FROM zosd_lift_r2 INTO TABLE lt_hits
+      SELECT ltext FROM zosd_lift_r2 INTO TABLE lt_hits
         WHERE kind = <ls_row>-kind AND code = <ls_row>-code AND active = 'X'
         ORDER BY PRIMARY KEY.
       MOVE sy-tabix TO <ls_row>-tabix_seen.
@@ -37,9 +37,9 @@ CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.
       MOVE sy-dbcnt TO <ls_row>-db_count.
       LOOP AT lt_hits INTO ls_hit.
         IF <ls_row>-result IS INITIAL.
-          <ls_row>-result = ls_hit-label.
+          <ls_row>-result = ls_hit-ltext.
         ELSE.
-          CONCATENATE <ls_row>-result ls_hit-label INTO <ls_row>-result SEPARATED BY ';'.
+          CONCATENATE <ls_row>-result ls_hit-ltext INTO <ls_row>-result SEPARATED BY ';'.
         ENDIF.
       ENDLOOP.
     ENDLOOP.
@@ -59,7 +59,7 @@ CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.
     lv_lift_saved_subrc = sy-subrc.
     lv_lift_saved_dbcnt = sy-dbcnt.
     IF ct_rows IS NOT INITIAL.
-      SELECT kind code seq label FROM zosd_lift_r2
+      SELECT kind code seq ltext FROM zosd_lift_r2
         INTO CORRESPONDING FIELDS OF TABLE lt_all
         FOR ALL ENTRIES IN ct_rows
         WHERE kind = ct_rows-kind AND code = ct_rows-code AND active = 'X'.
@@ -73,7 +73,7 @@ CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.
       CLEAR lt_hits.
       LOOP AT lt_all ASSIGNING <ls_all> WHERE kind = <ls_row>-kind AND code = <ls_row>-code.
         CLEAR ls_lift_r2.
-        ls_lift_r2-label = <ls_all>-label.
+        ls_lift_r2-ltext = <ls_all>-ltext.
         APPEND ls_lift_r2 TO lt_hits.
       ENDLOOP.
       IF lt_hits IS INITIAL.
@@ -88,9 +88,9 @@ CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.
       MOVE sy-dbcnt TO <ls_row>-db_count.
       LOOP AT lt_hits INTO ls_hit.
         IF <ls_row>-result IS INITIAL.
-          <ls_row>-result = ls_hit-label.
+          <ls_row>-result = ls_hit-ltext.
         ELSE.
-          CONCATENATE <ls_row>-result ls_hit-label INTO <ls_row>-result SEPARATED BY ';'.
+          CONCATENATE <ls_row>-result ls_hit-ltext INTO <ls_row>-result SEPARATED BY ';'.
         ENDIF.
       ENDLOOP.
     ENDLOOP.

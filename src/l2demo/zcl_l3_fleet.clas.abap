@@ -3,7 +3,7 @@
 CLASS zcl_l3_fleet DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_rule,
-             rule TYPE zosd_l3_alert-rule,
+             rule TYPE zosd_l3_alert-rule_name,
              model_hash TYPE zosd_l3_alert-model_hash,
              jobname TYPE tbtcjob-jobname,
              jobcount TYPE tbtcjob-jobcount,
@@ -23,17 +23,17 @@ CLASS zcl_l3_fleet DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_set TYPE zosd_l3_alert-set_name VALUE 'fleet'.
     CONSTANTS c_sequential TYPE c LENGTH 1 VALUE 'S'.
     CONSTANTS c_parallel TYPE c LENGTH 1 VALUE 'P'.
-    CONSTANTS c_rule_1 TYPE zosd_l3_alert-rule VALUE 'maintenance-ship-no-future-voyage'.
+    CONSTANTS c_rule_1 TYPE zosd_l3_alert-rule_name VALUE 'maintenance-ship-no-future-voyage'.
     CONSTANTS c_hash_1 TYPE zosd_l3_alert-model_hash VALUE 'sha256:5b94ace0a8ae6ea8dd37f2fa41f62ff23aa83e6533a88f0301c495753e7652a1'.
-    CONSTANTS c_rule_2 TYPE zosd_l3_alert-rule VALUE 'grounded-ship-keeps-only-keepers'.
+    CONSTANTS c_rule_2 TYPE zosd_l3_alert-rule_name VALUE 'grounded-ship-keeps-only-keepers'.
     CONSTANTS c_hash_2 TYPE zosd_l3_alert-model_hash VALUE 'sha256:2b72e97ce478f2a42dfc8e105f67dead7260925b87f6634c0f92f8bc4fd33f2f'.
-    CONSTANTS c_rule_3 TYPE zosd_l3_alert-rule VALUE 'ship-in-service-has-a-captain'.
+    CONSTANTS c_rule_3 TYPE zosd_l3_alert-rule_name VALUE 'ship-in-service-has-a-captain'.
     CONSTANTS c_hash_3 TYPE zosd_l3_alert-model_hash VALUE 'sha256:9fe75f5ad8fa0127298f0c96195200b12eabaea019b569d569fde6276b153a29'.
-    CONSTANTS c_rule_4 TYPE zosd_l3_alert-rule VALUE 'ship-too-many-future-voyages'.
+    CONSTANTS c_rule_4 TYPE zosd_l3_alert-rule_name VALUE 'ship-too-many-future-voyages'.
     CONSTANTS c_hash_4 TYPE zosd_l3_alert-model_hash VALUE 'sha256:817b24b38d55d3f382151282408eb931b80b70dc7ec29a2bfbf92fe7d8827f7f'.
-    CONSTANTS c_rule_5 TYPE zosd_l3_alert-rule VALUE 'ship-min-crew'.
+    CONSTANTS c_rule_5 TYPE zosd_l3_alert-rule_name VALUE 'ship-min-crew'.
     CONSTANTS c_hash_5 TYPE zosd_l3_alert-model_hash VALUE 'sha256:7e156d101af7385078bddbeb4aec645f470ffa22ec9e156a36d5d1fa07741013'.
-    CONSTANTS c_rule_6 TYPE zosd_l3_alert-rule VALUE 'ship-cargo-limit'.
+    CONSTANTS c_rule_6 TYPE zosd_l3_alert-rule_name VALUE 'ship-cargo-limit'.
     CONSTANTS c_hash_6 TYPE zosd_l3_alert-model_hash VALUE 'sha256:6dc361bcc17b388fe102c33fead3d7dd38d6b4993437e78ec508424e0e0f50a5'.
     " not run: ship-max-cargo (src/l2demo/ship_max_cargo.l2.yaml), enabled: false in the set
     CLASS-METHODS run
@@ -208,7 +208,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
     DATA ls_row TYPE zosd_l3_alert.
     DATA lv_alert TYPE string.
     ls_row-set_name = c_set.
-    ls_row-rule = cs_rule-rule.
+    ls_row-rule_name = cs_rule-rule.
     ls_row-model_hash = cs_rule-model_hash.
     ls_row-check_date = iv_date.
     ls_row-run_id = iv_run.
@@ -227,7 +227,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
     cs_rule-alerts = lines( it_alerts ).
     DELETE FROM zosd_l3_alert
       WHERE set_name = c_set
-        AND rule = cs_rule-rule
+        AND rule_name = cs_rule-rule
         AND model_hash = cs_rule-model_hash
         AND check_date = iv_date
         AND alert_seq > cs_rule-alerts.
@@ -349,7 +349,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
       IF ls_rule-status = 'FINISHED' OR ls_rule-status = 'DONE'.
         SELECT COUNT(*) FROM zosd_l3_alert
           WHERE set_name = c_set
-            AND rule = ls_rule-rule
+            AND rule_name = ls_rule-rule
             AND model_hash = ls_rule-model_hash
             AND check_date = is_result-check_date
             AND run_id = is_result-run_id.

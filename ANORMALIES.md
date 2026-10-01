@@ -29,6 +29,38 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-01-rule-reserved-word -- a table field named RULE builds and runs here and does not activate on a system
+
+- Status: `workaround`
+- Discovery date: `2026-10-01`
+- Affected versions: every version; abaplint and the transpiler check no field name against a system's reserved words
+- Affected ABAP statement, runtime API or adapter: a transparent table (`*.tabl.xml`) with a field `RULE`; the same family as `zone-reserved-word`
+- Minimal ABAP reproducer: `src/dsl/zosd_l3_alert.tabl.xml` before this date (field `RULE`, key `MANDT, SET_NAME, RULE, MODEL_HASH, CHECK_DATE, ALERT_SEQ`)
+- Exact command used to run it: the lead's `node tools/osd-prove-on-system.mjs ... --unit l3demo` on A4H, 2026-10-01
+- Expected SAP behaviour: activation refused, "RULE is a reserved word (choose another field name)"; and a warning "Table ZOSD_L3_ALERT: Key length > 120 (restricted functions)"
+- Actual open-abap behaviour: the table is created and the L3 runner and its tests pass
+- Impact on open-steamgate: L3 could not reach a system
+- Smallest safe workaround: the column is `RULE_NAME` and not part of the key (the model hash names the rule); `SET_NAME` is CHAR 16; the key is 102. `tools/osd-ddic-reserved.mjs` (CI: leak-scan.yml) refuses a field named by a public reserved-word list, so the next one is found here
+- Upstream issue: none; a system's dictionary rule, not a transpiler defect
+- Regression-test location: `test/ddic-reserved.mjs`; `test/dsl-l3.mjs`
+- Upstream version containing a fix: not applicable
+
+### ANOMALY-2026-10-01-assert-equals-table-length-msg -- assert_equals on two tables of different length reports its own text, not MSG
+
+- Status: `open`
+- Discovery date: `2026-10-01`
+- Affected versions: `oisee/open-abap-core 909179a` (`src/unit/cl_abap_unit_assert.clas.abap`, the table branch of `assert_equals`)
+- Affected ABAP statement, runtime API or adapter: `cl_abap_unit_assert=>assert_equals( act = lt_a exp = lt_b msg = '...' )` with `lines( lt_a ) <> lines( lt_b )`
+- Minimal ABAP reproducer: the L3 proof's `rerun` method (`src/l3proof/zcl_l3_fleet_proof.clas.testclasses.abap`) against a runner that drops a rule
+- Exact command used to run it: `npx mocha test/dsl-l3.mjs`, "a runner that drops a rule"
+- Expected SAP behaviour: the failure carries the caller's MSG (ABAP Unit shows it as the alert's description), with the difference as detail; not measured on A4H
+- Actual open-abap behaviour: the alert text is `Expected table to contain <n> rows, got <m>` and MSG is dropped; equal-length tables that differ do carry MSG
+- Impact on open-steamgate: a failing table comparison says how it differs but not which check failed; the test still fails
+- Smallest safe workaround: none needed; `test/dsl-l3.mjs` accepts either text for that mutant
+- Upstream issue: none yet (open-abap-core; for the lead)
+- Regression-test location: `test/dsl-l3.mjs`, "a runner that drops a rule"
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-10-01-assert-differs-never-fails -- open-abap-core's cl_abap_unit_assert=>assert_differs passes on equal values
 
 - Status: `workaround`

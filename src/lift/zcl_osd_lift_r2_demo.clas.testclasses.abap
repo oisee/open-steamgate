@@ -35,31 +35,31 @@ CLASS ltcl_r2 IMPLEMENTATION.
     ls_db-code = 'OPEN'.
     ls_db-seq = '001'.
     ls_db-active = 'X'.
-    ls_db-label = 'First'.
+    ls_db-ltext = 'First'.
     APPEND ls_db TO lt_db.
     ls_db-seq = '002'.
-    ls_db-label = 'Second'.
+    ls_db-ltext = 'Second'.
     APPEND ls_db TO lt_db.
     ls_db-seq = '003'.
     ls_db-active = space.
-    ls_db-label = 'Hidden'.
+    ls_db-ltext = 'Hidden'.
     APPEND ls_db TO lt_db.
     ls_db-seq = '004'.
     ls_db-active = 'X'.
-    ls_db-label = 'Second'.
+    ls_db-ltext = 'Second'.
     APPEND ls_db TO lt_db.
     ls_db-code = 'DONE'.
     ls_db-seq = '001'.
     ls_db-active = 'X'.
-    ls_db-label = 'Done'.
+    ls_db-ltext = 'Done'.
     APPEND ls_db TO lt_db.
     ls_db-kind = 'PRIO'.
     ls_db-code = 'OPEN'.
-    ls_db-label = 'Priority'.
+    ls_db-ltext = 'Priority'.
     APPEND ls_db TO lt_db.
     ls_db-seq = '002'.
     ls_db-active = space.
-    ls_db-label = 'Hidden priority'.
+    ls_db-ltext = 'Hidden priority'.
     APPEND ls_db TO lt_db.
     INSERT zosd_lift_r2 FROM TABLE lt_db.
   ENDMETHOD.

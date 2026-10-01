@@ -22,7 +22,7 @@ export const SET_TEMPLATE = "recipes/l3-set/template.tpl";
 export const JOB_TEMPLATE = "recipes/l3-job/template.tpl";
 
 // the widths of ZOSD_L3_ALERT's columns the runner writes from the manifest
-export const WIDTH = {set: 30, rule: 60, hash: 71, file: 128, jobname: 32};
+export const WIDTH = {set: 16, rule: 60, hash: 71, file: 128, jobname: 32};
 // a set name: the class ZCL_L3_<SET>, the report ZL3_<SET> (whose converted
 // class ZCL_OSD_GUITX_L3_<SET> has 30 characters at most) and the job names
 // L3_<SET>_<nn> are made of it
@@ -111,7 +111,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     }
     twice("name", compiled.rule, `rule ${compiled.rule}`);
     twice("class", compiled.class, `class ${compiled.class}`);
-    if (compiled.rule.length > WIDTH.rule) fail(at, `rule name ${compiled.rule} is longer than ${WIDTH.rule} characters, the width of ZOSD_L3_ALERT-RULE`);
+    if (compiled.rule.length > WIDTH.rule) fail(at, `rule name ${compiled.rule} is longer than ${WIDTH.rule} characters, the width of ZOSD_L3_ALERT-RULE_NAME`);
     const hash = modelHash(renderModel(compiled));
     const sidecar = sidecarOf(ruleFile, compiled.class);
     let committed;
@@ -315,7 +315,7 @@ function alertRow(db, key) {
   return import("node:sqlite").then(({DatabaseSync}) => {
     const handle = new DatabaseSync(db, {readOnly: true});
     try {
-      return handle.prepare(`SELECT * FROM zosd_l3_alert WHERE set_name = ? AND rule = ? AND model_hash LIKE ?
+      return handle.prepare(`SELECT * FROM zosd_l3_alert WHERE set_name = ? AND rule_name = ? AND model_hash LIKE ?
         AND check_date = ? AND alert_seq = ?`).get(key.set, key.rule, `sha256:${key.hash}%`, key.date, key.seq);
     } finally { handle.close(); }
   });

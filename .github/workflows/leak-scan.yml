@@ -64,3 +64,9 @@ jobs:
         run: |
           npm install --no-save --no-package-lock --ignore-scripts @abaplint/core@2.120.59
           node tools/osd-oo-comments.mjs
+      # A field a system refuses to activate because its name is a reserved
+      # word (RULE in ZOSD_L3_ALERT, A4H 2026-10-01). The public list is
+      # tracked; a system's own list is never on a runner, so only the
+      # public check runs here, after the step above has installed the deps.
+      - name: reserved words as table field names
+        run: node tools/osd-ddic-reserved.mjs

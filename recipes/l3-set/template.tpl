@@ -3,7 +3,7 @@
 CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_rule,
-             rule TYPE zosd_l3_alert-rule,
+             rule TYPE zosd_l3_alert-rule_name,
              model_hash TYPE zosd_l3_alert-model_hash,
              jobname TYPE tbtcjob-jobname,
              jobcount TYPE tbtcjob-jobcount,
@@ -24,7 +24,7 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_sequential TYPE c LENGTH 1 VALUE 'S'.
     CONSTANTS c_parallel TYPE c LENGTH 1 VALUE 'P'.
 {{#rules}}
-    CONSTANTS c_rule_{{index}} TYPE zosd_l3_alert-rule VALUE {{name | literal}}.
+    CONSTANTS c_rule_{{index}} TYPE zosd_l3_alert-rule_name VALUE {{name | literal}}.
     CONSTANTS c_hash_{{index}} TYPE zosd_l3_alert-model_hash VALUE {{hash | literal}}.
 {{/rules}}
 {{#disabled}}
@@ -138,7 +138,7 @@ CLASS {{class}} IMPLEMENTATION.
     DATA ls_row TYPE zosd_l3_alert.
     DATA lv_alert TYPE string.
     ls_row-set_name = c_set.
-    ls_row-rule = cs_rule-rule.
+    ls_row-rule_name = cs_rule-rule.
     ls_row-model_hash = cs_rule-model_hash.
     ls_row-check_date = iv_date.
     ls_row-run_id = iv_run.
@@ -157,7 +157,7 @@ CLASS {{class}} IMPLEMENTATION.
     cs_rule-alerts = lines( it_alerts ).
     DELETE FROM zosd_l3_alert
       WHERE set_name = c_set
-        AND rule = cs_rule-rule
+        AND rule_name = cs_rule-rule
         AND model_hash = cs_rule-model_hash
         AND check_date = iv_date
         AND alert_seq > cs_rule-alerts.
@@ -279,7 +279,7 @@ CLASS {{class}} IMPLEMENTATION.
       IF ls_rule-status = 'FINISHED' OR ls_rule-status = 'DONE'.
         SELECT COUNT(*) FROM zosd_l3_alert
           WHERE set_name = c_set
-            AND rule = ls_rule-rule
+            AND rule_name = ls_rule-rule
             AND model_hash = ls_rule-model_hash
             AND check_date = is_result-check_date
             AND run_id = is_result-run_id.
