@@ -1230,6 +1230,16 @@ function typeOf(t, where, program) {
     const local = !q || (!q.includes("=>") && (program.currentTypes?.has(upper(q)) ?? true));
     let go = q ? goName(q) : `S_${comps.map((c) => c.name).join("_").slice(0, 40).toUpperCase()}`;
     if (local && program.currentClass) go = `${program.currentClass}__${go}`;
+    // an anonymous structure (the row of a RANGE OF, of a TYPE TABLE OF an
+    // inline BEGIN OF) is one abaplint type wherever it is reached -- an
+    // interface's signature, the caller, the implementing class, LIKE LINE
+    // OF a parameter: it keeps the name it was first given, or the places
+    // that share it name two Go types
+    if (!q) {
+      const seen = (program.anonStructs ??= new WeakMap()).get(t);
+      if (seen !== undefined) go = seen;
+      else program.anonStructs.set(t, go);
+    }
     const shape = comps.map((c) => upper(c.name)).join(",");
     for (let n = 2; program.structs.has(go) && program.structs.get(go).shape !== undefined && program.structs.get(go).shape !== shape; n += 1) {
       go = `${go.replace(/_V\d+$/, "")}_V${n}`;
@@ -1459,7 +1469,14 @@ function classIr(ctx0, obj) {
     const idef = reg.getObject("INTF", intf.name)?.getDefinition();
     if (idef === undefined) throw new Unsupported(`${className}: interface ${intf.name} not in the program`);
     const all = idef.getMethodDefinitions();
-    for (const m of Array.from(Array.isArray(all) ? all : all.getAll())) addSig(m, `${upper(intf.name)}~`, m.isStatic?.() ?? false);
+    // typed as the interface's, as methodSignature types them for a caller
+    const owner = program.currentClass;
+    program.currentClass = goName(intf.name);
+    try {
+      for (const m of Array.from(Array.isArray(all) ? all : all.getAll())) addSig(m, `${upper(intf.name)}~`, m.isStatic?.() ?? false);
+    } finally {
+      program.currentClass = owner;
+    }
   }
 
   // single inheritance: the superclass when it is compiled too (else the
@@ -4198,7 +4215,17 @@ function methodSignature(ctx, owner, name) {
     if (m === undefined) throw new Unsupported(`${defOwner} has no method ${meth}`);
     const p = m.getParameters();
     const optional = new Set((p.getOptional?.() ?? []).map(upper));
-    const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), key, ctx.program), default: defaultOf(p, x),
+    // an anonymous structure of an interface method's signature (the row of
+    // a RANGE OF) is the interface's, named after it: typed while a caller
+    // or an implementing class was compiled, each named it after itself and
+    // the class no longer implemented the interface in Go
+    const typeIn = (t) => {
+      if (!intf) return typeOf(t, key, ctx.program);
+      const saved = ctx.program.currentClass;
+      ctx.program.currentClass = goName(intf);
+      try { return typeOf(t, key, ctx.program); } finally { ctx.program.currentClass = saved; }
+    };
+    const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeIn(x.getType()), default: defaultOf(p, x),
       optional: optional.has(upper(x.getName())), defaultOwner: intf ?? declaringClass(ctx.reg, defOwner, meth, "method") ?? defOwner, defOwner: intf ?? declaringClass(ctx.reg, defOwner, meth, "method") ?? defOwner});
     const ret = p.getReturning();
     const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
@@ -4206,7 +4233,7 @@ function methodSignature(ctx, owner, name) {
     sig = {name, static: m.isStatic?.() ?? false,
       params: withSupplied(ctx.program, intf ? `${intf}=>${meth}`
         : `${declaringClass(ctx.reg, defOwner, meth, "method") ?? defOwner}=>${meth}`, own),
-      returning: ret === undefined ? null : {name: upper(ret.getName()), type: typeOf(ret.getType(), key, ctx.program)}};
+      returning: ret === undefined ? null : {name: upper(ret.getName()), type: typeIn(ret.getType())}};
   } catch (e) {
     if (!(e instanceof Unsupported)) throw e;
     sig = {name, unsupported: e.message};
