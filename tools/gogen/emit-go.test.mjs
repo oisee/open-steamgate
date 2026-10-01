@@ -74,3 +74,46 @@ ENDCLASS.
     rmSync(goDir, {recursive: true, force: true});
   }
 });
+
+test("another class's public static attribute is read in expressions after its constructor", () => {
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-static-source-"));
+  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-static-test-"));
+  try {
+    writeFileSync(join(sourceDir, "zcl_gogen_static_owner.clas.abap"), `
+CLASS zcl_gogen_static_owner DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-DATA gv_y TYPE i.
+    CLASS-METHODS class_constructor.
+ENDCLASS.
+CLASS zcl_gogen_static_owner IMPLEMENTATION.
+  METHOD class_constructor.
+    gv_y = 7.
+  ENDMETHOD.
+ENDCLASS.
+`);
+    writeFileSync(join(sourceDir, "zcl_gogen_static_reader.clas.abap"), `
+CLASS zcl_gogen_static_reader DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE i.
+ENDCLASS.
+CLASS zcl_gogen_static_reader IMPLEMENTATION.
+  METHOD run.
+    rv = zcl_gogen_static_owner=>gv_y + 1.
+    IF zcl_gogen_static_owner=>gv_y = 7.
+      rv = rv + 1.
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
+`);
+    const program = compileProgram({folders: [sourceDir], objects: ["ZCL_GOGEN_STATIC_READER"]});
+    const generated = emitGo(program);
+    assert.doesNotMatch(generated, /NOT_COMPILED in ZCL_GOGEN_STATIC_READER=>RUN/);
+    writeFileSync(join(goDir, "zz_generated.go"), generated);
+    writeFileSync(join(goDir, "zz_generated_test.go"), `package main\nimport ("testing"; "osg/gogen/abap")\nfunc TestRead(t *testing.T) { if got := ZCL_GOGEN_STATIC_READER_RUN(&abap.Session{}); got != 9 { t.Fatalf("got %d", got) } }\n`);
+    const run = spawnSync("go", ["test", `./cmd/${basename(goDir)}`], {cwd: join(here, "go"), encoding: "utf8", timeout: 120000});
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+  } finally {
+    rmSync(sourceDir, {recursive: true, force: true});
+    rmSync(goDir, {recursive: true, force: true});
+  }
+});

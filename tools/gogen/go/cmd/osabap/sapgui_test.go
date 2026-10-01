@@ -59,7 +59,7 @@ func TestSAPGUIWrapperCarriesRealClientSetup(t *testing.T) {
 func TestSAPGUISelectionValues(t *testing.T) {
 	useSAPGUITestSelections(t)
 	selection := ZCL_GG_HOST__TY_RESULT{
-		elements: []*ZCL_GG_HOST_SCREEN__TY_ELEMENT{
+		elements: []ZCL_GG_HOST_SCREEN__TY_ELEMENT{
 			{kind: "PARAMETER", name: "P_NAME", text: "Name", visible_length: 30},
 			{kind: "CHECKBOX", name: "P_LOUD", text: "Loud"},
 			{kind: "SELECT_OPTION", name: "S_TAG", text: "Tags", visible_length: 30},
@@ -90,7 +90,7 @@ func TestSAPGUISessionSelectionExecuteAndEnd(t *testing.T) {
 	server, client := net.Pipe()
 	defer client.Close()
 	selection := ZCL_GG_HOST__TY_RESULT{
-		elements: []*ZCL_GG_HOST_SCREEN__TY_ELEMENT{{kind: "PARAMETER", name: "P_NAME", text: "Name", visible_length: 30}},
+		elements: []ZCL_GG_HOST_SCREEN__TY_ELEMENT{{kind: "PARAMETER", name: "P_NAME", text: "Name", visible_length: 30}},
 		values:   []*ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE{{name: "P_NAME", value: "world"}},
 	}
 	done := make(chan error, 1)

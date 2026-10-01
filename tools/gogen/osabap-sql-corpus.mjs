@@ -11,6 +11,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
+import {convertNativeReport} from "./convert-report.mjs";
 import {home} from "./home.mjs";
 
 const here = import.meta.dirname;
@@ -43,13 +44,12 @@ async function baselineRefusals() {
 
 export async function compileCase(entry, raw = false) {
   const gui = join(home, ".local", "lars", "open-abap-gui");
-  const {convertProgram} = await import(join(gui, "converter", "src", "api.mjs"));
   const name = `ZC${entry.id}`;
   const className = `ZCL_OSABAP_C${entry.id}`;
   const dir = mkdtempSync(join(tmpdir(), "osabap-sql-"));
   try {
-    const converted = await convertProgram({source: entry.source, filename: `${name.toLowerCase()}.prog.abap`,
-      mode: "strict", className, transactionCode: name});
+    const converted = await convertNativeReport({source: entry.source, filename: `${name.toLowerCase()}.prog.abap`,
+      mode: "strict", className, transactionCode: name}, gui);
     if (converted.supported !== true) return {...entry, compiled: false, reason: `converter: ${JSON.stringify(converted.diagnostics)}`};
     writeFileSync(join(dir, `${className.toLowerCase()}.clas.abap`), converted.classSource);
     for (const helper of converted.helperSources ?? []) {

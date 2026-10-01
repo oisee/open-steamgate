@@ -6,14 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {compileCase, corpusCases} from "./osabap-sql-corpus.mjs";
 
-const REFUSED = {
-  "01": /aggregate and no GROUP BY/,
-  "05": /SELECT form/,
-  "08": /SELECT form/,
-  "09": /SORTED table/,
-  "11": /SELECT loop form/,
-  "13": /undefined tables/,
-};
+const REFUSED = {};
 
 test("the Open SQL corpus: which forms the native build compiles", async () => {
   const cases = corpusCases();

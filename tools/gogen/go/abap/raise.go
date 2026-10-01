@@ -34,6 +34,9 @@ func WithAssertQuit(quit int32, f func()) {
 
 func (r *Raised) Error() string {
 	if r.Class == "KERNEL_CX_ASSERT" {
+		if x, ok := r.Obj.(interface{ AssertionMessage() string }); ok {
+			return x.AssertionMessage()
+		}
 		v := reflect.ValueOf(r.Obj)
 		if v.IsValid() && v.Kind() == reflect.Pointer && !v.IsNil() {
 			msg := v.Elem().FieldByName("Msg")

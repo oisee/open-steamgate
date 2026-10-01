@@ -228,6 +228,89 @@ test("a report's own table lives in the -db file", () => {
   }
 });
 
+test("six SQL corpus forms read the notes rows through the native report", {timeout: 120000}, () => {
+  const dir = mkdtempSync(join(tmpdir(), "osabap-sql-rows-"));
+  try {
+    const app = join(dir, "notes");
+    cpSync(join(here, "apps", "notes"), app, {recursive: true});
+    const db = join(dir, "notes.db");
+    execFileSync(process.execPath, [builder, join(app, "znotes.prog.abap")], {stdio: "inherit"});
+    for (const value of ["alpha", "beta", "alpha", "gamma", "beta", "alpha", "gamma", "beta", "alpha", "gamma", "beta", "alpha"]) {
+      const added = run(["-db", db, "--add", value]);
+      assert.equal(added.status, 0, added.stderr);
+    }
+    writeFileSync(join(app, "zcl_sql_corpus_groups.clas.abap"), `
+CLASS zcl_sql_corpus_groups DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+CLASS zcl_sql_corpus_groups IMPLEMENTATION.
+  METHOD run.
+    DATA gv_text TYPE string.
+    DATA gv_count TYPE i.
+    SELECT text COUNT(*) FROM znotes INTO (gv_text, gv_count) GROUP BY text.
+      rv = rv && gv_text && ':' && gv_count && ';'.
+    ENDSELECT.
+    rv = rv && '/' && sy-dbcnt.
+  ENDMETHOD.
+ENDCLASS.
+`);
+    const report = join(app, "zsqlrows.prog.abap");
+    writeFileSync(report, `REPORT zsqlrows.
+PARAMETERS p_id TYPE i.
+DATA gt_notes TYPE STANDARD TABLE OF znotes WITH DEFAULT KEY.
+DATA gt_sorted TYPE SORTED TABLE OF znotes WITH UNIQUE KEY id.
+DATA gt_hash TYPE HASHED TABLE OF znotes WITH UNIQUE KEY id.
+DATA gt_sorted_text TYPE SORTED TABLE OF znotes WITH UNIQUE KEY text.
+DATA gs_note TYPE znotes.
+DATA gv_max TYPE i.
+DATA gv_rc TYPE i.
+DATA gv_limit TYPE i.
+DATA gv_group TYPE string.
+START-OF-SELECTION.
+  SELECT MAX( id ) FROM znotes INTO gv_max.
+  gv_rc = sy-subrc.
+  WRITE: / 'MAX', gv_max, gv_rc, sy-dbcnt.
+  gv_limit = 10.
+  SELECT * FROM znotes INTO TABLE gt_notes UP TO gv_limit ROWS ORDER BY id DESCENDING.
+  READ TABLE gt_notes INTO gs_note INDEX 1.
+  WRITE: / 'TOP', lines( gt_notes ), gs_note-id.
+  SELECT * FROM znotes APPENDING TABLE gt_notes WHERE id > 10.
+  WRITE: / 'APPEND', lines( gt_notes ), sy-dbcnt.
+  SELECT * FROM znotes INTO TABLE gt_sorted.
+  READ TABLE gt_sorted INTO gs_note INDEX 1.
+  WRITE: / 'SORTED', lines( gt_sorted ), gs_note-id.
+  SELECT * FROM znotes INTO TABLE gt_hash.
+  WRITE: / 'HASHED', lines( gt_hash ).
+  SELECT id, text FROM znotes WHERE id >= @p_id INTO TABLE @DATA(lt_new).
+  WRITE: / 'INLINE', lines( lt_new ), sy-dbcnt.
+  gv_group = zcl_sql_corpus_groups=>run( ).
+  WRITE: / 'GROUP', gv_group.
+  IF p_id = 0.
+    SELECT * FROM znotes INTO TABLE gt_sorted_text.
+  ENDIF.
+`);
+    execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
+    const result = run(["-db", db, "--p-id", "10"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /MAX\s+12\s+0\s+1/);
+    assert.match(result.stdout, /TOP\s+10\s+12/);
+    assert.match(result.stdout, /APPEND\s+12\s+2/);
+    assert.match(result.stdout, /SORTED\s+12\s+1/);
+    assert.match(result.stdout, /HASHED\s+12/);
+    assert.match(result.stdout, /INLINE\s+3\s+3/);
+    assert.match(result.stdout, /GROUP\s+alpha:5;beta:4;gamma:3;\/3/);
+    const empty = run(["-db", join(dir, "empty.db"), "--p-id", "10"]);
+    assert.equal(empty.status, 0, empty.stderr);
+    assert.match(empty.stdout, /MAX\s+0\s+0\s+1/);
+    const duplicate = run(["-db", db, "--p-id", "0"]);
+    assert.equal(duplicate.status, 1);
+    assert.match(duplicate.stderr, /ITAB_DUPLICATE_KEY/);
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
+
 test("a report without tables refuses -db", () => {
   execFileSync(process.execPath, [builder], {stdio: "inherit"});
   const result = run(["Alice", "-db", join(tmpdir(), "osabap-never.db")]);
