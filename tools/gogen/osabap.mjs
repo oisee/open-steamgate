@@ -96,9 +96,12 @@ for (const helper of converted.helperSources ?? []) {
 const selections = (converted.reportIR?.selections ?? []).flatMap((screen) => screen.elements ?? [])
   .filter((element) => element.name);
 const selectionNames = [...new Set(selections.map((element) => element.name.toUpperCase()))];
-const positionals = selections.filter((element) => element.kind === "parameter" && !/\bCHECKBOX\b/i.test(element.additions ?? ""))
+// a checkbox is PARAMETERS ... AS CHECKBOX; MEMORY ID checkbox names a
+// memory id, and a select-option is never one
+const isCheckbox = (element) => element.kind === "parameter" && /\bAS\s+CHECKBOX\b/i.test(element.additions ?? "");
+const positionals = selections.filter((element) => element.kind === "parameter" && !isCheckbox(element))
   .map((element) => element.name.toUpperCase());
-const checkboxes = selections.filter((element) => /\bCHECKBOX\b/i.test(element.additions ?? ""))
+const checkboxes = selections.filter(isCheckbox)
   .map((element) => element.name.toUpperCase());
 const ranges = selections.filter((element) => element.kind === "select-option")
   .map((element) => element.name.toUpperCase());
