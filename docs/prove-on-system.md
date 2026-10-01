@@ -357,20 +357,50 @@ The perimeter is a **snapshot**, not the package (`tools/osd-prove-inplace.mjs`)
    approved only for an item of the AFTER list with action update or overwrite;
    any other entry, any data loss, any other repository refuses the import.
 4. **Tests.** The same comparison as the fresh mode (`proveClasses`).
-5. **Rollback, always.** The deployed version's hashes are recorded after the
-   import (only if abapGit reported a status). An object whose current hash
-   equals its deployed hash is re-imported from the snapshot's files; one that
-   differs from both is reported and left alone. Then every object is hashed
-   again and must equal its snapshot hash; only then does the run succeed, the
-   snapshot go, and the tool's repository row (by name and recorded key) get
-   deleted. Objects that appeared since are listed as notes, not touched.
+5. **Rollback, always.** The deployed version's hashes are recorded only if
+   abapGit reported a status, and they are not read by a later call: the
+   deploy snippet serialises and hashes the AFTER objects again right after
+   `deserialize`, in the same dialog step, with the same serialisation and
+   SHA-256 lines as the hash snippet (`dep_file=` / `dep_obj=` in its report).
+   A separate read after the call returned would record a colleague's save in
+   that gap as this run's output, and the rollback would then overwrite it.
+   Each object is also compared with the AFTER zip: a file whose hash equals
+   the zip's passes; a source file whose hash differs is read back by chunks
+   (each carrying the in-step hash, so it is that version) and compared after
+   the normalisation a system applies (BOM, CRLF, trailing blanks, trailing
+   empty lines); if it still differs the object is **not** recorded as this
+   run's, the run fails, and the rollback leaves the object alone.
+   An object whose current hash equals its recorded deployed hash is
+   re-imported from the snapshot's files; one that differs from both is
+   reported and left alone. Then every object is hashed again and must equal
+   its snapshot hash; only then does the run succeed and the snapshot go.
+   The tool's repository row is deleted only if **this run created it**: the
+   deploy (or a restore) reports `repo_new=<key>` when it calls `new_offline`,
+   and that key is kept as `createdRepo` in `snapshot.json`, so `--rollback`
+   from a saved state decides the same way. A row with the tool's name that
+   was there at the snapshot (`repoAtSnapshot`; a fresh-mode `--keep` run
+   leaves exactly that) is used for the import and left in place; a
+   `snapshot.json` written before `createdRepo` existed deletes no row and
+   says so. Objects that appeared since are listed as notes, not touched.
 6. `--keep` leaves AFTER deployed and prints the `--rollback` command.
 
 Content hashes close the stamp limits above (one-second resolution, active rows
 only). Limits: a restore does not delete a file the AFTER version added to an
 object (the verification then fails, honestly); a run that dies between deploy
 and the hash read leaves unknown deployed hashes, so `--rollback` refuses to
-touch any object that differs. The abapGit calls the snippets assume
+touch any object that differs. What the post-deploy check does not decide: an
+XML file whose hash differs from the zip's (abapGit rewrites XML when it
+serialises, so a difference there is not evidence either way), and a file only
+one side carries; for those the object rests on the in-step hash alone, and
+the run logs which files were not compared. The in-step read narrows the gap
+to the lines between `deserialize` and the serialise inside one call; another
+work process writing in exactly that moment is caught for source files by the
+zip comparison and not for XML. A system that normalises a source beyond the
+listed rules makes the comparison fail the run (fail closed, never adopted).
+That `serialize` in the same step sees what `deserialize` just activated is
+read off the abapGit source, not yet measured on A4H; the post-deploy report
+also lengthens the deploy's answer by one entry per file, and a cut answer
+fails the run (no end marker) rather than adopting anything. The abapGit calls the snippets assume
 (`zcl_abapgit_objects=>serialize( is_item io_i18n_params )`,
 `zcl_abapgit_i18n_params=>new`, `cl_abap_message_digest=>calculate_hash_for_raw`)
 are measured only against the abapGit source, not yet on a system.

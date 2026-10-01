@@ -730,7 +730,11 @@ export function buildZip(folder, {unit: unitName, manifest, withPackageXml = tru
     for (const [type, names] of laid.objects) for (const n of names) objects.push(objectKey(type, n));
     objects.sort();
     const classes = objects.filter((o) => o.startsWith("CLAS ")).map((o) => o.slice(5));
-    return {bytes: zipInProcess(staging), objects, classes, unit: unit.name};
+    // the zip's object files by name, for the in-place mode's check that
+    // what a deploy left is what the zip carried
+    const files = new Map(readdirSync(join(staging, "src"), {withFileTypes: true}).filter((e) => e.isFile())
+      .map((e) => e.name).sort().map((n) => [n, readFileSync(join(staging, "src", n))]));
+    return {bytes: zipInProcess(staging), objects, classes, unit: unit.name, files};
   } finally {
     rmSync(work, {recursive: true, force: true});
   }

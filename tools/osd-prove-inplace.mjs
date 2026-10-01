@@ -24,13 +24,19 @@
 //      in between;
 //   3. deploy through abapGit: an overwrite is approved only for an item of
 //      that list, action update or overwrite, and nothing else;
-//   4. the same ABAP Unit comparison as the fresh-package mode;
+//   4. the deployed version: the deploy snippet serialises and hashes the
+//      AFTER objects again right after the deserialise, in the same dialog
+//      step (the hash snippet's code), and an object is recorded as this
+//      run's only when its source files are what the AFTER zip carries;
+//      then the same ABAP Unit comparison as the fresh-package mode;
 //   5. rollback, always (`--keep` excepted): the objects whose current hash
 //      equals the hash of the AFTER version this run deployed are re-imported
 //      from the snapshot's files; an object someone else changed meanwhile is
 //      refused and reported, never clobbered. Then EVERY object is hashed
 //      again and must equal its snapshot hash; only then is the run
-//      successful, the snapshot removed and the tool's repository row deleted.
+//      successful, the snapshot removed and the tool's repository row
+//      deleted -- only a row this run created (`createdRepo` in the state,
+//      from the deploy's own report), never one that was there before.
 //
 // Content hashes close the limits the fresh-package mode documents for its
 // stamps (one-second resolution, active rows only): an edit in the same
@@ -87,16 +93,16 @@ const SERIALIZE_DECLS = [
  *  file, `onOk` after the last, `onFail` when abapGit or the digest raised.
  *  The same ABAP serves the hash report, the chunk reader and the deploy
  *  guard, so all three see the same bytes. */
-function serializeBlock(pkg, {onFile = [], onOk = [], onFail = [], onMissing = []}) {
+function serializeBlock(pkg, {onFile = [], onOk = [], onFail = [], onMissing = [], prefix = ""}) {
   return [
     "SPLIT lv_item AT space INTO lv_type lv_name.",
     "SELECT SINGLE devclass FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
     "  INTO @lv_dev.",
     "IF sy-subrc <> 0.",
-    "  lv_out = |{ lv_out } absent={ lv_type }:{ lv_name };|.",
+    `  lv_out = |{ lv_out } ${prefix}absent={ lv_type }:{ lv_name };|.`,
     ...onMissing.map((l) => `  ${l}`),
     `ELSEIF lv_dev <> '${pkg}'.`,
-    "  lv_out = |{ lv_out } elsewhere={ lv_type }:{ lv_name }@{ lv_dev };|.",
+    `  lv_out = |{ lv_out } ${prefix}elsewhere={ lv_type }:{ lv_name }@{ lv_dev };|.`,
     ...onMissing.map((l) => `  ${l}`),
     "ELSE.",
     "  CLEAR: ls_item, ls_ser, lv_n.",
@@ -119,7 +125,7 @@ function serializeBlock(pkg, {onFile = [], onOk = [], onFail = [], onMissing = [
     "      ENDLOOP.",
     ...onOk.map((l) => `      ${l}`),
     "    CATCH cx_root INTO lx_s.",
-    "      lv_out = |{ lv_out } fail={ lv_type }:{ lv_name }\\|{ lx_s->get_text( ) };|.",
+    `      lv_out = |{ lv_out } ${prefix}fail={ lv_type }:{ lv_name }\\|{ lx_s->get_text( ) };|.`,
     ...onFail.map((l) => `      ${l}`),
     "  ENDTRY.",
     "ENDIF.",
@@ -162,6 +168,23 @@ export function listAbap(pkg) {
   ].join("\n") + "\n";
 }
 
+/** The hash report of every item of lt_items, as `[prefix]file=` and
+ *  `[prefix]obj=` entries: one text for the hash snippet and for the
+ *  post-deploy read inside the deploy snippet, so both report the same
+ *  serialisation and the same digest. */
+const hashLoop = (pkg, prefix = "") => [
+  "LOOP AT lt_items INTO lv_item.",
+  ...serializeBlock(pkg, {
+    prefix,
+    onFile: [`lv_out = |{ lv_out } ${prefix}file={ lv_type }:{ lv_name }\\|{ ls_file-filename }\\|{ lv_hx }\\|{ xstrlen( ls_file-data ) };|.`],
+    onOk: [`lv_out = |{ lv_out } ${prefix}obj={ lv_type }:{ lv_name } files={ lv_n };|.`],
+  }).map((l) => `  ${l}`),
+  "ENDLOOP.",
+];
+
+/** The prefix of the post-deploy hash report inside the deploy snippet. */
+export const DEPLOYED = "dep_";
+
 /** The files of each item as abapGit serialises them now, with their
  *  SHA-256. Nothing is changed. */
 export function hashAbap(pkg, items) {
@@ -169,12 +192,7 @@ export function hashAbap(pkg, items) {
   return [
     ...SERIALIZE_DECLS,
     ...itemLines(items),
-    "LOOP AT lt_items INTO lv_item.",
-    ...serializeBlock(pkg, {
-      onFile: ["lv_out = |{ lv_out } file={ lv_type }:{ lv_name }\\|{ ls_file-filename }\\|{ lv_hx }\\|{ xstrlen( ls_file-data ) };|."],
-      onOk: ["lv_out = |{ lv_out } obj={ lv_type }:{ lv_name } files={ lv_n };|."],
-    }).map((l) => `  ${l}`),
-    "ENDLOOP.",
+    ...hashLoop(pkg),
     report("lv_out"),
   ].join("\n") + "\n";
 }
@@ -298,6 +316,8 @@ export function deployAbap(zipBytes, pkg, expected) {
     "        IF li_repo IS NOT BOUND.",
     "          li_repo = zcl_abapgit_repo_srv=>get_instance( )->new_offline(",
     `            iv_name = '${ownRepoName(pkg)}' iv_package = '${pkg}' ).`,
+    "          \" this call created the row: only such a row is the run's to delete",
+    "          lv_out = |{ lv_out } repo_new={ li_repo->get_key( ) };|.",
     "        ENDIF.",
     "        lv_out = |{ lv_out } repo={ li_repo->get_key( ) };|.",
     "        li_repo->set_files_remote( lt_files ).",
@@ -333,6 +353,11 @@ export function deployAbap(zipBytes, pkg, expected) {
     "          ls_checks-dependencies-decision = zif_abapgit_definitions=>c_yes.",
     "          li_repo->deserialize( is_checks = ls_checks ii_log = li_log ).",
     "          lv_out = |{ lv_out } status={ li_log->get_status( ) };|.",
+    "          \" what the import left, read in this same dialog step with the",
+    "          \" serialisation and digest of the hash snippet: the run records",
+    "          \" this as its deployed version, not a later read another session",
+    "          \" could have written into",
+    ...hashLoop(pkg, DEPLOYED).map((l) => `          ${l}`),
     "        ENDIF.",
     "      ENDIF.",
     "    ENDIF.",
@@ -401,20 +426,20 @@ export function parseList(msg) {
 }
 
 /** item -> {files: [{name, sha256, size}]}, plus what was not readable. */
-export function parseHashes(msg) {
+export function parseHashes(msg, prefix = "") {
   const files = new Map();
-  for (const m of msg.matchAll(/ file=([A-Z0-9]{4}):([^|;]*)\|([^|;]*)\|([0-9A-F]{64})\|(\d+);/g)) {
+  for (const m of msg.matchAll(new RegExp(` ${prefix}file=([A-Z0-9]{4}):([^|;]*)\\|([^|;]*)\\|([0-9A-F]{64})\\|(\\d+);`, "g"))) {
     const item = `${m[1]} ${m[2].trim()}`;
     if (!files.has(item)) files.set(item, []);
     files.get(item).push({name: m[3], sha256: m[4].toLowerCase(), size: Number(m[5])});
   }
   const objs = new Map();
-  for (const m of msg.matchAll(/ obj=([A-Z0-9]{4}):([^;@]*?) files=(\d+);/g)) objs.set(`${m[1]} ${m[2].trim()}`, Number(m[3]));
+  for (const m of msg.matchAll(new RegExp(` ${prefix}obj=([A-Z0-9]{4}):([^;@]*?) files=(\\d+);`, "g"))) objs.set(`${m[1]} ${m[2].trim()}`, Number(m[3]));
   return {
     files, objs,
-    absent: pairs(msg, "absent").map((p) => p.item),
-    elsewhere: pairs(msg, "elsewhere"),
-    fail: [...msg.matchAll(/ fail=([A-Z0-9]{4}):([^|;]*)\|([^;]*);/g)].map((m) => ({item: `${m[1]} ${m[2].trim()}`, text: m[3].trim()})),
+    absent: pairs(msg, `${prefix}absent`).map((p) => p.item),
+    elsewhere: pairs(msg, `${prefix}elsewhere`),
+    fail: [...msg.matchAll(new RegExp(` ${prefix}fail=([A-Z0-9]{4}):([^|;]*)\\|([^;]*);`, "g"))].map((m) => ({item: `${m[1]} ${m[2].trim()}`, text: m[3].trim()})),
   };
 }
 
@@ -425,6 +450,7 @@ export function parseDeploy(msg) {
     elsewhere: pairs(msg, "elsewhere"),
     fail: [...msg.matchAll(/ fail=([A-Z0-9]{4}):([^|;]*)\|([^;]*);/g)].map((m) => `${m[1]} ${m[2].trim()}: ${m[3].trim()}`),
     refused: /import refused;/.test(msg),
+    repoNew: field(msg, "repo_new"),
     wouldOverwrite: [...msg.matchAll(/ERR (would [^;]*);/g)].map((m) => m[1]),
   };
 }
@@ -479,19 +505,24 @@ export async function readHashes(mcp, pkg, items, log = () => {}) {
     const batch = items.slice(i, i + BATCH);
     const r = await exec(mcp, hashAbap(pkg, batch), "hash");
     log(`hash: ${batch.length} object(s)`);
-    const p = parseHashes(r.message);
-    out.absent.push(...p.absent);
-    out.elsewhere.push(...p.elsewhere);
-    out.fail.push(...p.fail);
-    for (const item of batch) {
-      if (p.absent.includes(item) || p.elsewhere.some((e) => e.item === item) || p.fail.some((f) => f.item === item)) continue;
-      const files = p.files.get(item) ?? [];
-      if (!p.objs.has(item) || p.objs.get(item) !== files.length) {
-        out.incomplete.push(item);
-        continue;
-      }
-      out.byItem.set(item, {files, hash: objectHash(files)});
+    collectHashes(parseHashes(r.message), batch, out);
+  }
+  return out;
+}
+
+/** A parsed hash report of `items` into `out` (readHashes' shape). */
+function collectHashes(p, items, out = {byItem: new Map(), absent: [], elsewhere: [], fail: [], incomplete: []}) {
+  out.absent.push(...p.absent);
+  out.elsewhere.push(...p.elsewhere);
+  out.fail.push(...p.fail);
+  for (const item of items) {
+    if (p.absent.includes(item) || p.elsewhere.some((e) => e.item === item) || p.fail.some((f) => f.item === item)) continue;
+    const files = p.files.get(item) ?? [];
+    if (!p.objs.has(item) || p.objs.get(item) !== files.length) {
+      out.incomplete.push(item);
+      continue;
     }
+    out.byItem.set(item, {files, hash: objectHash(files)});
   }
   return out;
 }
@@ -544,8 +575,11 @@ export async function takeSnapshot(mcp, pkg, dir, log = () => {}) {
   const h = await readHashes(mcp, pkg, items, log);
   const bad = problemsOf(h);
   if (bad.length > 0) return {refusals: bad.map((b) => `refused: snapshot: ${b}; an object that cannot be serialised cannot be shown restored`)};
-  const state = {package: pkg, repoKey: l.repo === "none" ? null : l.repo, phase: "snapshot", taken: new Date().toISOString(),
-    objects: [], after: [], deployed: null};
+  // repoAtSnapshot: a row with the tool's name that was there before this
+  // run (a fresh-mode --keep run leaves one) is never this run's to delete;
+  // createdRepo is set only from the deploy's own repo_new= report
+  const state = {package: pkg, repoKey: l.repo === "none" ? null : l.repo, repoAtSnapshot: l.repo === "none" ? null : l.repo,
+    createdRepo: null, phase: "snapshot", taken: new Date().toISOString(), objects: [], after: [], deployed: null};
   let n = 0;
   for (const item of items) {
     const got = h.byItem.get(item);
@@ -601,6 +635,7 @@ export async function rollbackToSnapshot(mcp, pkg, dir, state, {log = () => {}} 
       const d = parseDeploy(r.message);
       const imp = parseImport(r.message);
       if (imp.repo !== undefined && REPO_KEY.test(imp.repo)) state.repoKey = imp.repo;
+      if (d.repoNew !== undefined && REPO_KEY.test(d.repoNew)) state.createdRepo = d.repoNew;
       for (const i of d.changed) problems.push(`rollback: ${i} changed while the restore was starting; refused`);
       for (const i of d.wouldOverwrite) problems.push(`rollback: ${i}`);
       if (d.refused) problems.push("rollback: the restore was refused");
@@ -637,8 +672,16 @@ export async function rollbackToSnapshot(mcp, pkg, dir, state, {log = () => {}} 
   }
   const ok = problems.length === 0 && verified === items.length;
   if (ok) {
-    // the tool's own repository row, only by name and the recorded key
-    const key = state.repoKey;
+    // the tool's own repository row: only one this run created (the deploy
+    // or the restore reported repo_new=), by name and that key. A row that
+    // was there at the snapshot, even under the tool's name, is left alone
+    const key = state.createdRepo;
+    if (key === undefined && REPO_KEY.test(state.repoKey ?? "")) {
+      notes.push(`the snapshot does not record whether this run created repository ${state.repoKey}, so it is left in place; `
+        + "delete it by hand if it is this tool's");
+    } else if (key === null && REPO_KEY.test(state.repoKey ?? "")) {
+      notes.push(`repository ${state.repoKey} was not created by this run${state.repoAtSnapshot ? " (it was there at the snapshot)" : ""}; left in place`);
+    }
     if (REPO_KEY.test(key ?? "")) {
       try {
         const r = await exec(mcp, dropRepoAbap(pkg, key), "repository");
@@ -651,6 +694,79 @@ export async function rollbackToSnapshot(mcp, pkg, dir, state, {log = () => {}} 
     }
   }
   return {ok: problems.length === 0 && verified === items.length, problems, notes, verified, total: items.length};
+}
+
+// ------------------------------------------------------ the deployed version
+
+/** abapGit's file-name prefix of an item: `zcl_x.clas.`, `#ns#x.clas.`. */
+export const filePrefix = (item) => {
+  const [type, name] = item.split(" ");
+  return `${name.toLowerCase().replace(/\//g, "#")}.${type.toLowerCase()}.`;
+};
+
+/** Source text as a system keeps it: no BOM, LF, no trailing blanks on a
+ *  line (a source line is stored without them), no trailing empty lines. */
+export function normalisedSource(buf) {
+  return Buffer.from(buf).toString("utf8").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n")
+    .split("\n").map((l) => l.replace(/[ \t]+$/, "")).join("\n").replace(/\n+$/, "");
+}
+
+/** The deployed hashes of `items`, from the post-deploy report the deploy
+ *  snippet wrote in the same dialog step as the deserialise (`dep_` entries),
+ *  cross-checked against the AFTER zip. An object is adopted (and so may be
+ *  overwritten by the rollback) only when every file both sides carry is the
+ *  zip's: byte-equal by hash, or, for a source file whose hash differs,
+ *  equal after the normalisation a system applies, read back by chunks that
+ *  must carry the same in-step hash. An XML file, or a file only one side
+ *  carries, cannot be decided from here (abapGit rewrites XML on serialise)
+ *  and rests on the in-step hash alone; it is logged, not refused. */
+export async function adoptDeployed({mcp, pkg, items, message, zipFiles, problems, log = () => {}}) {
+  const dep = collectHashes(parseHashes(message, DEPLOYED), items);
+  for (const b of problemsOf(dep)) problems.push(`deployed version: ${b}`);
+  const flagged = new Set([...dep.absent, ...dep.elsewhere.map((e) => e.item), ...dep.fail.map((f) => f.item), ...dep.incomplete]);
+  const deployed = {};
+  for (const item of items) {
+    const got = dep.byItem.get(item);
+    if (got === undefined) {
+      if (!flagged.has(item)) problems.push(`deployed version: the deploy reported no hashes for ${item}`);
+      continue;
+    }
+    if (zipFiles === undefined) {
+      problems.push(`deployed version: ${item} cannot be compared with the AFTER zip (its files were not kept); not adopted`);
+      continue;
+    }
+    const pre = filePrefix(item);
+    const mine = new Map([...zipFiles].filter(([n]) => n.startsWith(pre)));
+    const foreign = [];
+    const undecided = [];
+    for (const f of got.files) {
+      const z = mine.get(f.name);
+      if (z === undefined) {
+        undecided.push(`${f.name} (not in the zip)`);
+        continue;
+      }
+      if (sha256(z) === f.sha256) continue;
+      if (f.name.endsWith(".xml")) {
+        undecided.push(`${f.name} (XML, abapGit rewrites it)`);
+        continue;
+      }
+      try {
+        const sys = await fetchFile(mcp, pkg, item, f);
+        if (normalisedSource(sys) !== normalisedSource(z)) foreign.push(`${f.name} is not the AFTER version`);
+      } catch (e) {
+        foreign.push(`${f.name} could not be read back as the version deployed (${e.message})`);
+      }
+    }
+    for (const n of mine.keys()) if (!got.files.some((f) => f.name === n)) undecided.push(`${n} (in the zip, not serialised)`);
+    if (foreign.length > 0) {
+      problems.push(`deployed version: ${item} is not what this run deployed (${foreign.join("; ")}); `
+        + "not recorded as this run's, so the rollback will not touch it");
+      continue;
+    }
+    if (undecided.length > 0) log(`deployed version: ${item}: not compared with the zip: ${undecided.join(", ")}`);
+    deployed[item] = got.hash;
+  }
+  return deployed;
 }
 
 // ---------------------------------------------------------------------- run
@@ -725,17 +841,18 @@ export async function proveInPlace({folder, unit, manifest, pkg, keep = false, m
   const expected = built.objects.map((item) => ({item, files: state.objects.find((o) => o.item === item).files}));
 
   let ran = false;
+  let deployMsg;
   try {
     try {
       const r = await exec(mcp, deployAbap(built.bytes, pkg, expected), "deploy");
+      deployMsg = r.message;
       log(`deploy: ${r.message.trim()}`);
       const d = parseDeploy(r.message);
       const imp = parseImport(r.message);
       ran = imp.status !== undefined && !d.refused;
-      if (imp.repo !== undefined && REPO_KEY.test(imp.repo)) {
-        state.repoKey = imp.repo;
-        writeState(dir, state);
-      }
+      if (imp.repo !== undefined && REPO_KEY.test(imp.repo)) state.repoKey = imp.repo;
+      if (d.repoNew !== undefined && REPO_KEY.test(d.repoNew)) state.createdRepo = d.repoNew;
+      writeState(dir, state);
       for (const i of d.changed) problems.push(`deploy: ${i} changed since the snapshot; refused, nothing was deployed`);
       for (const i of d.absent) problems.push(`deploy: ${i} is not in the package any more`);
       for (const e of d.elsewhere) problems.push(`deploy: ${e.item} is in package ${e.where}`);
@@ -749,12 +866,13 @@ export async function proveInPlace({folder, unit, manifest, pkg, keep = false, m
     // record what the import left, so the rollback re-imports only an object
     // that is still exactly this. Only when abapGit reported a status: a
     // refused or unreported import wrote nothing we can vouch for, and an
-    // object a colleague edited must never look like our deploy
+    // object a colleague edited must never look like our deploy. The hashes
+    // are the ones the deploy snippet read in its own dialog step, right
+    // after the deserialise -- never a later read, which would adopt an edit
+    // made in between -- and each object is checked against the AFTER zip
     try {
       if (!ran) throw Object.assign(new Error("the import reported no status, so the deployed hashes are unknown and the rollback will not touch an object that differs"), {skip: true});
-      const dep = await readHashes(mcp, pkg, [...built.objects], log);
-      state.deployed = Object.fromEntries([...dep.byItem].map(([item, v]) => [item, v.hash]));
-      for (const b of problemsOf(dep)) problems.push(`deployed version: ${b}`);
+      state.deployed = await adoptDeployed({mcp, pkg, items: [...built.objects], message: deployMsg, zipFiles: built.files, problems, log});
     } catch (e) {
       if (!e.skip) problems.push(`deployed version could not be hashed, so nothing can be rolled back safely: ${e.message}`);
     }

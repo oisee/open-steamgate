@@ -14,7 +14,7 @@ import {join, resolve} from "node:path";
 import {inflateRawSync} from "node:zlib";
 import {MARK_CLOSE, MARK_OPEN, buildZip, main} from "../tools/osd-prove-on-system.mjs";
 import {
-  chunkAbap, dropRepoAbap, deployAbap, hashAbap, listAbap, objectHash, snapshotDir,
+  chunkAbap, dropRepoAbap, deployAbap, hashAbap, listAbap, objectHash, readState, snapshotDir, writeState,
 } from "../tools/osd-prove-inplace.mjs";
 
 const FIXTURE = resolve("test/fixtures/prove-on-system");
@@ -55,8 +55,13 @@ const fixtureFiles = (name) => new Map(readdirSync(join(FIXTURE, "src")).filter(
 const oldFiles = (name) => new Map([...fixtureFiles(name)].map(([f, t]) => [f, t + "* the old version\n"]));
 
 /** A sandbox system: packages, objects with files, repositories. `hooks`
- *  run before the n-th call of a kind: {kind, n, run(sys)}. */
-function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false} = {}) {
+ *  run before the n-th call of a kind: {kind, n, run(sys)}, or before the
+ *  first call of a kind for which `when(sys)` holds: {kind, when, run(sys)}.
+ *  `inStep(sys)` runs inside a deploy call, after the files are written and
+ *  before the call reads its post-deploy hashes (another session writing in
+ *  that moment); `stored(name, text)` is what the system keeps of a file it
+ *  is given (a normalisation). */
+function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, inStep, stored = (n, t) => t} = {}) {
   const sys = {
     packages: new Set([PKG]),
     objects: new Map(),
@@ -91,7 +96,11 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false} =
       const kind = action === "analyze" ? kindOf(params.code) : action;
       sys.seen[kind] = (sys.seen[kind] ?? 0) + 1;
       sys.calls.push({kind, params});
-      for (const h of hooks) if (h.kind === kind && h.n === sys.seen[kind]) h.run(sys, put);
+      for (const h of hooks) {
+        if (h.kind !== kind) continue;
+        const due = h.when === undefined ? h.n === sys.seen[kind] : !h.done && h.when(sys);
+        if (due) { h.done = true; h.run(sys, put); }
+      }
       if (action === "test") {
         const name = target.replace(/^CLAS /, "");
         const c = info(name);
@@ -160,8 +169,9 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false} =
         if (JSON.stringify(want) !== JSON.stringify(guardLines(item).sort())) { out += ` changed=${colon(item)};`; foreign = true; }
       }
       if (foreign) return framed(`${out} import refused; logs=0; tadir=${sys.objects.size};`);
-      if (!repo) { repo = {key: "000000000042", name: OWN, pkg}; sys.repos.push(repo); }
-      out += ` repo=${repo.key};`;
+      let created = false;
+      if (!repo) { repo = {key: "000000000042", name: OWN, pkg}; sys.repos.push(repo); created = true; }
+      out += ` repo=${repo.key};${created ? ` repo_new=${repo.key};` : ""}`;
       const byObject = new Map();
       for (const [f, text] of zip) {
         const m = /^src\/([a-z0-9_]+)\.([a-z]+)\.(.+)$/.exec(f);
@@ -175,10 +185,17 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false} =
       }
       for (const [item, files] of byObject) {
         const o = sys.objects.get(item);
-        for (const [n, t] of files) o.files.set(n, t);
+        for (const [n, t] of files) o.files.set(n, stored(n, t, sys));
         if (restoreCorrupts && sys.imports > 1) o.files.set(`${item.slice(5).toLowerCase()}.clas.abap`, "CLASS broken.\n");
       }
-      return framed(`${out} status=S; logs=0; tadir=${sys.objects.size};`);
+      out += " status=S;";
+      inStep?.(sys);
+      // the deploy snippet's own post-deploy read, same dialog step
+      for (const item of items) {
+        for (const f of hashes(item)) out += ` dep_file=${colon(item)}|${f.n}|${f.h}|${f.size};`;
+        out += ` dep_obj=${colon(item)} files=${sys.objects.get(item).files.size};`;
+      }
+      return framed(`${out} logs=0; tadir=${sys.objects.size};`);
     },
   };
 }
@@ -263,6 +280,84 @@ describe("osd-prove-on-system --in-place", () => {
     assert.equal(mcp.sys.repos.length, 1, "and the repository row, for the next rollback");
   });
 
+  it("a foreign edit between the deploy and a separate hash read is not adopted as the deployed version", async () => {
+    // a colleague saves DEMO the moment the deploy call returns, before any
+    // later read: a post-deploy read in its own call would record that edit
+    // as this run's and the rollback would overwrite it
+    const edit = "edited right after the deploy\n";
+    const mcp = fakeSystem({hooks: [{kind: "hash", when: (sys) => sys.imports === 1,
+      run: (sys) => sys.objects.get(DEMO).files.set("zcl_osd_prove_demo.clas.abap", edit)}]});
+    const {code, text, runs} = await run(inPlace(), mcp);
+    assert.equal(code, 1, text);
+    assert.match(text, /FAIL rollback: CLAS ZCL_OSD_PROVE_DEMO was changed by somebody else since the deploy/);
+    assert.equal(mcp.sys.objects.get(DEMO).files.get("zcl_osd_prove_demo.clas.abap"), edit, "the foreign edit survives");
+    assert.equal(mcp.sys.objects.get(PLAIN).files.get("zcl_osd_prove_plain.clas.abap"), oldFiles("zcl_osd_prove_plain").get("zcl_osd_prove_plain.clas.abap"),
+      "the object nobody touched is restored");
+    assert.ok(existsSync(dirOf(runs)), "an unverified rollback keeps the snapshot");
+  });
+
+  it("an edit inside the deploy's own step is caught by the comparison with the AFTER zip and not adopted", async () => {
+    const edit = "written by another session between the deserialise and the read\n";
+    const mcp = fakeSystem({inStep: (sys) => { if (sys.imports === 1) sys.objects.get(DEMO).files.set("zcl_osd_prove_demo.clas.abap", edit); }});
+    const {code, text} = await run(inPlace(), mcp);
+    assert.equal(code, 1, text);
+    assert.match(text, /FAIL deployed version: CLAS ZCL_OSD_PROVE_DEMO is not what this run deployed \(zcl_osd_prove_demo\.clas\.abap is not the AFTER version\)/);
+    assert.match(text, /FAIL rollback: CLAS ZCL_OSD_PROVE_DEMO was changed by somebody else[\s\S]*the deployed version had none recorded/);
+    assert.equal(mcp.sys.objects.get(DEMO).files.get("zcl_osd_prove_demo.clas.abap"), edit);
+    assert.ok(kinds(mcp).filter((k) => k === "deploy").length === 2, "the deploy and the restore of PLAIN only");
+  });
+
+  it("a source the system normalises (trailing blanks, final newline) is compared normalised and adopted", async () => {
+    // (the snapshot's files are what this system serialised, so the restore stores them as given)
+    const mcp = fakeSystem({stored: (n, t, sys) => (sys.imports === 1 && n.endsWith(".abap") ? t.replace(/\n+$/, "").replace(/$/gm, "  ") : t)});
+    const before = snapHashes(mcp);
+    const {code, text} = await run(inPlace(), mcp);
+    assert.equal(code, 0, text);
+    assert.deepEqual(snapHashes(mcp), before);
+    assert.ok(kinds(mcp).includes("chunk") && mcp.sys.calls.filter((c) => c.kind === "chunk").length > 3, "the deployed sources were read back");
+  });
+
+  it("a repository row with the tool's name that predates the run is not deleted by the rollback", async () => {
+    // a fresh-mode --keep run leaves exactly such a row
+    const left = {key: "000000000009", name: OWN, pkg: PKG};
+    const mcp = fakeSystem({repos: [left]});
+    const before = snapHashes(mcp);
+    const {code, text} = await run(inPlace(), mcp);
+    assert.equal(code, 0, text);
+    assert.deepEqual(snapHashes(mcp), before);
+    assert.deepEqual(mcp.sys.repos, [left], "the row is still there");
+    assert.ok(!kinds(mcp).includes("drop"));
+    assert.match(text, /repository 000000000009 was not created by this run \(it was there at the snapshot\); left in place/);
+  });
+
+  it("--keep with a predating row: the saved state says so and --rollback leaves the row too", async () => {
+    const left = {key: "000000000009", name: OWN, pkg: PKG};
+    const mcp = fakeSystem({repos: [left]});
+    const first = await run(inPlace(["--keep"]), mcp);
+    assert.equal(first.code, 0, first.text);
+    const st = readState(dirOf(first.runs));
+    assert.equal(st.repoAtSnapshot, "000000000009");
+    assert.equal(st.createdRepo, null);
+    const again = await run(["--rollback", "--package", PKG], mcp, first.runs);
+    assert.equal(again.code, 0, again.text);
+    assert.deepEqual(mcp.sys.repos, [left]);
+    assert.ok(!kinds(mcp).includes("drop"));
+  });
+
+  it("a saved state that does not record who created the repository leaves the row in place", async () => {
+    const mcp = fakeSystem();
+    const first = await run(inPlace(["--keep"]), mcp);
+    assert.equal(first.code, 0, first.text);
+    const st = readState(dirOf(first.runs));
+    assert.equal(st.createdRepo, "000000000042", "the run's own row is recorded as created by it");
+    delete st.createdRepo; // a state written before the record existed
+    writeState(dirOf(first.runs), st);
+    const again = await run(["--rollback", "--package", PKG], mcp, first.runs);
+    assert.equal(again.code, 0, again.text);
+    assert.match(again.text, /does not record whether this run created repository 000000000042/);
+    assert.equal(mcp.sys.repos.length, 1);
+  });
+
   it("a hash that differs after the restore fails the run", async () => {
     const mcp = fakeSystem({restoreCorrupts: true});
     const {code, text, runs} = await run(inPlace(), mcp);
@@ -344,6 +439,14 @@ describe("osd-prove-on-system --in-place", () => {
     }
     const d = deployAbap(zip, PKG, exp);
     assert.match(d, /IF lt_a <> lt_b\.[\s\S]*lv_foreign = abap_true\./);
+    // the post-deploy hashes are read in the deploy's own step, right after
+    // the deserialise, with the hash snippet's serialisation and digest
+    const des = d.indexOf("li_repo->deserialize(");
+    const dep = d.indexOf("dep_file=");
+    assert.ok(des > 0 && dep > des, "the post-deploy read follows the deserialise in the same snippet");
+    const hashLine = hashAbap(PKG, [DEMO]).split("\n").find((l) => l.includes(" file="));
+    assert.ok(d.split("\n").some((l) => l.trim() === hashLine.trim().replace(" file=", " dep_file=")), "the same report line as the hash snippet");
+    assert.match(d, /repo_new=\{ li_repo->get_key\( \) \}/);
     assert.ok(d.indexOf("lt_a <> lt_b") < d.indexOf("li_repo->deserialize("), "the guard runs before the deserialise");
     assert.match(d, /zif_abapgit_objects=>c_deserialize_action-update\s+OR <ls_o>-action = zif_abapgit_objects=>c_deserialize_action-overwrite/);
     assert.match(d, /<ls_w>-decision = zif_abapgit_definitions=>c_no\./);
