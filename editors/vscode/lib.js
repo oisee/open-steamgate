@@ -141,6 +141,21 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
   }
   const normalizedRoot = typeof root === "string" && root !== "" ? root.replaceAll("\\", "/").replace(/\/+$/, "") : undefined;
   const buildRoot = normalizedRoot === undefined ? "${workspaceFolder}/build" : `${normalizedRoot}/build`;
+  // Node loads modules through output/, but resolves that link to the immutable
+  // by-input generation. Predict only those scripts, never cached generations.
+  let outputRoot = `${buildRoot}/live/output`;
+  if (root !== undefined) {
+    try {
+      outputRoot = fs.realpathSync(path.join(root, "build", "live", "output")).replaceAll("\\", "/");
+    } catch {
+      // Detached unit children can have output/ without a serving generation.
+      try {
+        outputRoot = fs.realpathSync(path.join(root, "output")).replaceAll("\\", "/");
+      } catch {
+        // An attach requested during a build still has one live alias.
+      }
+    }
+  }
   const modulesRoot = normalizedRoot === undefined ? "${workspaceFolder}/node_modules" : `${normalizedRoot}/node_modules`;
   const sourceMapPathOverrides = {};
   for (const {packSource, source, relativeSource} of packSourceMappings({root: normalizedRoot === undefined ? undefined : root, storageDir, layers})) {
@@ -158,9 +173,10 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
     restart,
     ...(target === "unit" ? {continueOnAttach: true} : {}),
     timeout: 30000,
-    resolveSourceMapLocations: [`${buildRoot}/**`, "!**/node_modules/**"],
+    resolveSourceMapLocations: [`${outputRoot}/**`, "!**/node_modules/**"],
     skipFiles: ["<node_internals>/**", `${modulesRoot}/@abaplint/runtime/**`],
-    outFiles: [`${buildRoot}/**/*.mjs`],
+    outFiles: [`${outputRoot}/**/*.mjs`],
+    pauseForSourceMap: true,
     ...(Object.keys(sourceMapPathOverrides).length ? {sourceMapPathOverrides} : {}),
     customDescriptionGenerator: "this && this.get ? (this.getQualifiedName && this.getQualifiedName() ? this.getQualifiedName() + ' ' : '') + JSON.stringify(this.get()) : undefined",
   };

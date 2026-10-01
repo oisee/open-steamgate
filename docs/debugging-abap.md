@@ -136,9 +136,13 @@ default).
 ## Which copy
 
 A breakpoint binds only in the file a loaded source map names. The
-transpiler writes each `sources` entry relative to the generation's own
-`build/by-input/<hash>/output`, so it always resolves inside the tree that
-built it -- the system's osdHome. Measured 2026-09-27 on this tree:
+transpiler writes `sources` entries relative to the generation's own
+`build/by-input/<hash>/output`, so they resolve inside the tree that
+built it -- the system's osdHome. For a workspace pack projected through
+`globalStorage/packs/ws-*`, the extension's attach configuration maps that
+projection path to the workspace `.abap` file open in the editor. The map
+itself stays relative to the generation, including for symlinked packs.
+Measured 2026-09-27 on this tree:
 `output/zcl_stg_url.clas.mjs.map` names
 `../../../../src/gateway/zcl_stg_url.clas.abap`, which resolves to
 `<osdHome>/src/gateway/zcl_stg_url.clas.abap` and nowhere else.
@@ -246,14 +250,15 @@ inspected after the fact.
       "port": 9229,
       "restart": true,
       "resolveSourceMapLocations": [
-        "${workspaceFolder}/build/**",
+        "${workspaceFolder}/build/live/output/**",
         "!**/node_modules/**"
       ],
       "skipFiles": [
         "<node_internals>/**",
         "${workspaceFolder}/node_modules/@abaplint/runtime/**"
       ],
-      "outFiles": ["${workspaceFolder}/build/**/*.mjs"],
+      "outFiles": ["${workspaceFolder}/build/live/output/**/*.mjs"],
+      "pauseForSourceMap": true,
       "customDescriptionGenerator": "this && this.get ? (this.getQualifiedName && this.getQualifiedName() ? this.getQualifiedName() + ' ' : '') + JSON.stringify(this.get()) : undefined"
     },
     {
@@ -267,14 +272,15 @@ inspected after the fact.
       "autoAttachChildProcesses": true,
       "console": "integratedTerminal",
       "resolveSourceMapLocations": [
-        "${workspaceFolder}/build/**",
+        "${workspaceFolder}/build/live/output/**",
         "!**/node_modules/**"
       ],
       "skipFiles": [
         "<node_internals>/**",
         "${workspaceFolder}/node_modules/@abaplint/runtime/**"
       ],
-      "outFiles": ["${workspaceFolder}/build/**/*.mjs"]
+      "outFiles": ["${workspaceFolder}/build/live/output/**/*.mjs"],
+      "pauseForSourceMap": true
     }
   ]
 }
@@ -286,6 +292,17 @@ and attach to port 9229. The launch config runs `npm start` from VS Code
 itself and relies on `autoAttachChildProcesses` to notice the child's
 inspector. With the extension, no `launch.json` is needed for systems it
 starts itself.
+
+The extension resolves `output/` to the current `build/by-input/<generation>/output`
+when it attaches, so `outFiles` predicts one generation. It refreshes the
+debug session when the serving generation changes. The manual profile uses
+`build/live/output` as a movable alias. js-debug documents `outFiles` as the
+generated JavaScript search globs, `resolveSourceMapLocations` as the places
+whose maps it may use, and `pauseForSourceMap` as waiting for an incoming
+script's map before continuing ([js-debug options](https://github.com/microsoft/vscode-js-debug/blob/main/OPTIONS.md)).
+The latter matters for a DPC imported before attach: enabling the debugger
+replays `scriptParsed` for scripts already known to the VM
+([Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/tot/Debugger/#event-scriptParsed)).
 
 `customDescriptionGenerator` was checked the same way as the breakpoint,
 not through the UI: the expression above, wrapped as

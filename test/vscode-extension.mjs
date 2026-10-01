@@ -198,14 +198,36 @@ describe("editors/vscode: the extension's logic", function () {
   it("builds the attach profile and keeps a supervised restart on one debugger session", () => {
     const config = debuggerConfiguration(9341);
     expect(config).to.include({name: "OSD: ABAP (9341)", type: "node", request: "attach", address: "127.0.0.1", port: 9341, restart: true, timeout: 30000});
-    expect(config.resolveSourceMapLocations).to.deep.equal(["${workspaceFolder}/build/**", "!**/node_modules/**"]);
-    expect(config.outFiles).to.deep.equal(["${workspaceFolder}/build/**/*.mjs"]);
+    expect(config.resolveSourceMapLocations).to.deep.equal(["${workspaceFolder}/build/live/output/**", "!**/node_modules/**"]);
+    expect(config.outFiles).to.deep.equal(["${workspaceFolder}/build/live/output/**/*.mjs"]);
+    expect(config.pauseForSourceMap).to.equal(true);
     expect(debuggerConfiguration(9342, {target: "unit", restart: false}))
       .to.include({name: "OSD: ABAP Unit (9342)", restart: false, continueOnAttach: true});
     const externalRoot = debuggerConfiguration(9343, {root: "C:\\workspace\\osd"});
-    expect(externalRoot.outFiles).to.deep.equal(["C:/workspace/osd/build/**/*.mjs"]);
+    expect(externalRoot.outFiles).to.deep.equal(["C:/workspace/osd/build/live/output/**/*.mjs"]);
     expect(externalRoot.skipFiles).to.include("C:/workspace/osd/node_modules/@abaplint/runtime/**");
     expect(() => debuggerConfiguration(0)).to.throw(/invalid inspector port/);
+
+    const home = mkdtempSync(path.join(tmpdir(), "osd-debug-generation-"));
+    try {
+      const build = path.join(home, "build");
+      const first = path.join(build, "by-input", "first", "output");
+      const second = path.join(build, "by-input", "second", "output");
+      mkdirSync(first, {recursive: true});
+      mkdirSync(second, {recursive: true});
+      symlinkSync(path.dirname(first), path.join(build, "live"), "dir");
+      symlinkSync(first, path.join(home, "output"), "dir");
+      expect(debuggerConfiguration(9341, {root: home}).outFiles).to.deep.equal([`${first}/**/*.mjs`]);
+      rmSync(path.join(build, "live"));
+      symlinkSync(path.dirname(second), path.join(build, "live"), "dir");
+      rmSync(path.join(home, "output"));
+      symlinkSync(second, path.join(home, "output"), "dir");
+      const swapped = debuggerConfiguration(9341, {root: home});
+      expect(swapped.outFiles).to.deep.equal([`${second}/**/*.mjs`]);
+      expect(swapped.resolveSourceMapLocations).to.deep.equal([`${second}/**`, "!**/node_modules/**"]);
+    } finally {
+      rmSync(home, {recursive: true, force: true});
+    }
 
     const first = debugAttachPlan({}, {type: "system-started", enabled: true, port: 9341});
     expect(first.actions).to.deep.equal([{type: "attach", target: "system", port: 9341, restart: true}]);
@@ -806,6 +828,178 @@ describe("editors/vscode: the extension's logic", function () {
     expect(controller.launcher.calls).to.deep.equal(["open"]);
   });
 
+  it("waits for the current system session and a verified DPC breakpoint after prior activity and restart", async () => {
+    const api = debugApi();
+    const statuses = [];
+    api.window.setStatusBarMessage = (message) => {
+      statuses.push(message);
+      return {dispose: () => statuses.push("disposed")};
+    };
+    const listeners = {start: [], end: []};
+    api.debug.onDidStartDebugSession = (fn) => { listeners.start.push(fn); return {dispose() {}}; };
+    api.debug.onDidTerminateDebugSession = (fn) => { listeners.end.push(fn); return {dispose() {}}; };
+    const file = "/w/src/zcl_demo_dpc_ext.clas.abap";
+    const bp = new api.SourceBreakpoint(file);
+    api.debug.breakpoints = [bp];
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {appendLine() {}});
+    controller.launcher = fakeLauncher();
+    // A plain request loads the DPC before the debugger starts.
+    const calls = ["plain request"];
+    await controller.attachSystemDebugger({onDemand: true});
+    let ready = false;
+    const first = controller.waitForDebuggerReady(file, 300).then(() => { ready = true; calls.push("debug request"); });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(ready).to.equal(false);
+    let verified = false;
+    const session = {name: "OSD: ABAP (9401)", id: "first",
+      getDebugProtocolBreakpoint: async () => verified ? {verified: true} : {verified: false}};
+    listeners.start.forEach((fn) => fn(session));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(ready).to.equal(false);
+    verified = true;
+    await first;
+    expect(calls).to.deep.equal(["plain request", "debug request"]);
+    // Shift+F5 ends that session. The next call must wait for a new one.
+    listeners.end.forEach((fn) => fn(session));
+    const second = controller.attachSystemDebugger({onDemand: true});
+    await second;
+    let secondReady = false;
+    const next = controller.waitForDebuggerReady(file, 300).then(() => { secondReady = true; });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(secondReady).to.equal(false);
+    const replacement = {...session, id: "second", getDebugProtocolBreakpoint: async () => ({verified: true})};
+    listeners.start.forEach((fn) => fn(replacement));
+    await next;
+    // A Stop/Start on the same port must not reuse the old session.
+    controller.launcher.state = "stopped";
+    await controller.applyDebuggerEvent({type: "system-stopped"});
+    controller.launcher.state = "running";
+    await controller.attachSystemDebugger({onDemand: true});
+    let restartedReady = false;
+    const restarted = controller.waitForDebuggerReady(file, 300).then(() => { restartedReady = true; });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(restartedReady).to.equal(false);
+    listeners.start.forEach((fn) => fn({...session, id: "third"}));
+    // VS Code reports the old session's termination after the new one starts.
+    listeners.end.forEach((fn) => fn(replacement));
+    expect(controller.debuggerState.systemPort).to.equal(9401);
+    expect(controller.activeSystemSessionId).to.equal("third");
+    await restarted;
+    expect(statuses).to.include("osd: waiting for the debugger…");
+    expect(statuses.filter((s) => s === "disposed")).to.have.length(3);
+    verified = false;
+    expect(await controller.waitForDebuggerReady(file, 80), "unverified breakpoints time out").to.equal(false);
+    expect(statuses.at(-1)).to.equal("disposed");
+  });
+
+  it("bounds a pending DAP breakpoint request and cancels its progress wait", async () => {
+    const api = debugApi();
+    const file = "/w/src/zcl_wait.clas.abap";
+    api.debug.breakpoints = [new api.SourceBreakpoint(file)];
+    const listeners = [];
+    api.debug.onDidStartDebugSession = (fn) => { listeners.push(fn); return {dispose() {}}; };
+    let cancel;
+    api.ProgressLocation = {Notification: 15};
+    api.window.withProgress = (options, task) => {
+      expect(options).to.include({location: 15, cancellable: true});
+      return task({}, {onCancellationRequested(fn) { cancel = fn; return {dispose() {}}; }});
+    };
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {appendLine() {}});
+    controller.launcher = fakeLauncher({inspectPort: 9401});
+    listeners.forEach((fn) => fn({id: "pending", name: "OSD: ABAP (9401)",
+      getDebugProtocolBreakpoint: () => new Promise(() => {})}));
+    const started = Date.now();
+    expect(await controller.waitForDebuggerReady(file, 80)).to.equal(false);
+    expect(Date.now() - started).to.be.lessThan(500);
+    const waiting = controller.waitForDebuggerReady(file, 1000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    cancel();
+    expect(await waiting).to.equal(false);
+  });
+
+  it("reports an absent enabled DPC breakpoint, but verifies one when present", async () => {
+    const api = debugApi();
+    const file = "/w/src/zcl_demo_dpc_ext.clas.abap";
+    const output = [];
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {appendLine: (line) => output.push(line)});
+    controller.launcher = fakeLauncher({inspectPort: 9401});
+    let verified = false;
+    controller.debugSessions.add({id: "dpc", name: "OSD: ABAP (9401)",
+      getDebugProtocolBreakpoint: async () => ({verified})});
+    api.debug.breakpoints = [new api.SourceBreakpoint(file, false)];
+    expect(await controller.waitForDebuggerReady(file, 100, {reportMissingBreakpoint: true})).to.equal(true);
+    expect(output).to.deep.equal([`osd debugger: no enabled breakpoint in ${file}; calling without a verified breakpoint`]);
+    api.debug.breakpoints = [new api.SourceBreakpoint(file)];
+    expect(await controller.waitForDebuggerReady(file, 80, {reportMissingBreakpoint: true})).to.equal(false);
+    verified = true;
+    expect(await controller.waitForDebuggerReady(file, 100, {reportMissingBreakpoint: true})).to.equal(true);
+    expect(output).to.have.length(1);
+  });
+
+  it("serializes a generation refresh with a following attach and ignores the old termination", async () => {
+    const api = debugApi();
+    const listeners = {start: [], end: []};
+    api.debug.onDidStartDebugSession = (fn) => { listeners.start.push(fn); return {dispose() {}}; };
+    api.debug.onDidTerminateDebugSession = (fn) => { listeners.end.push(fn); return {dispose() {}}; };
+    const home = mkdtempSync(path.join(tmpdir(), "osd-debug-refresh-"));
+    try {
+      const first = path.join(home, "build", "by-input", "first", "output");
+      const second = path.join(home, "build", "by-input", "second", "output");
+      mkdirSync(first, {recursive: true});
+      mkdirSync(second, {recursive: true});
+      symlinkSync(first, path.join(home, "output"), "dir");
+      const SystemController = loadSystemController(api);
+      const controller = new SystemController(controllerContext(), {appendLine() {}});
+      controller.launcher = fakeLauncher({osdHome: home, inspectPort: 9401, inspectorOpen: true});
+      controller.debuggerState = {systemPort: 9401};
+      controller.debuggerOutputPattern = `${first}/**/*.mjs`;
+      const old = {id: "old", name: "OSD: ABAP (9401)"};
+      listeners.start.forEach((fn) => fn(old));
+      rmSync(path.join(home, "output"));
+      symlinkSync(second, path.join(home, "output"), "dir");
+      let finishStop;
+      api.debug.stopDebugging = async () => new Promise((resolve) => { finishStop = resolve; });
+      api.debug.startDebugging = async (_folder, config) => {
+        api.debug.started.push(config);
+        listeners.start.forEach((fn) => fn({id: "new", name: config.name}));
+        return true;
+      };
+      const refresh = controller.refreshDebuggerGeneration();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const attach = controller.attachSystemDebugger({onDemand: true});
+      expect(api.debug.started).to.have.length(0);
+      finishStop();
+      await Promise.all([refresh, attach]);
+      listeners.end.forEach((fn) => fn({...old}));
+      expect(api.debug.started).to.have.length(1);
+      expect(controller.activeSystemSessionId).to.equal("new");
+      expect(controller.debuggerState.systemPort).to.equal(9401);
+    } finally {
+      rmSync(home, {recursive: true, force: true});
+    }
+  });
+
+  it("classrun with debugger waits for its class breakpoint before sending the run", async () => {
+    const api = debugApi();
+    api.window.showWarningMessage = () => {};
+    const {classrunObject} = loadExtension(api);
+    const lines = [];
+    const output = {show() {}, appendLine(line) { lines.push(line); }};
+    const calls = [];
+    const options = {attach: async () => true,
+      controller: {waitForDebuggerReady: async (file) => { calls.push(file); return false; }},
+      client: () => ({classrun: async () => { calls.push("run"); return {text: "ok", ms: 1}; }})};
+    await classrunObject("ZCL_X", output, true, "/w/src/zcl_x.clas.abap", options);
+    expect(calls).to.deep.equal(["/w/src/zcl_x.clas.abap"]);
+    options.controller.waitForDebuggerReady = async (file) => { calls.push(file); return true; };
+    await classrunObject("ZCL_X", output, true, "/w/src/zcl_x.clas.abap", options);
+    expect(calls).to.deep.equal(["/w/src/zcl_x.clas.abap", "/w/src/zcl_x.clas.abap", "run"]);
+    expect(lines).to.include("ok");
+  });
+
   it("the debugger on demand says why it cannot attach: not running, or the door refused", async () => {
     const api = debugApi();
     const SystemController = loadSystemController(api);
@@ -837,8 +1031,9 @@ describe("editors/vscode: the extension's logic", function () {
       new api.SourceBreakpoint("/w/tools/x.mjs")];
     // the last one gone while the session is attached (a paused request, a
     // Run with debugger): it stays until the session ends
-    const session = {name: "OSD: ABAP (9401)"};
+    const session = {id: "release-test", name: "OSD: ABAP (9401)"};
     controller.debugSessions.add(session);
+    controller.activeSystemSessionId = session.id;
     expect(await controller.releaseDebugger(), "the session is still in use").to.equal(false);
     expect(controller.launcher.calls).to.deep.equal(["open"]);
     // the session's own end is what releases it (the terminate handler)

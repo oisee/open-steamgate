@@ -491,15 +491,25 @@ class SystemController {
     this.debuggerState = {};
     this.debuggerStarts = new Map();
     this.debuggerTransition = Promise.resolve();
+    this.debuggerOutputPattern = undefined;
+    this.activeSystemSessionId = undefined;
     // The stable VS Code API has no list of running debug sessions (only
     // start/terminate events), so the controller keeps its own.
     this.debugSessions = new Set();
+    this.retiredDebugSessionIds = new Set();
     if (typeof vscode.debug.onDidStartDebugSession === "function") {
-      context.subscriptions.push(vscode.debug.onDidStartDebugSession((session) => { this.debugSessions.add(session); }));
+      context.subscriptions.push(vscode.debug.onDidStartDebugSession((session) => {
+        this.debugSessions.add(session);
+        if (session.name === `OSD: ABAP (${this.launcher?.inspectPort})`)
+          this.activeSystemSessionId = session.id;
+      }));
     }
     context.subscriptions.push(vscode.debug.onDidTerminateDebugSession((session) => {
       this.debugSessions.delete(session);
-      if (session.name === `OSD: ABAP (${this.debuggerState.systemPort})`) {
+      if (this.retiredDebugSessionIds.delete(session.id)) return;
+      if (this.activeSystemSessionId !== undefined && session.id === this.activeSystemSessionId &&
+          session.name === `OSD: ABAP (${this.debuggerState.systemPort})`) {
+        this.activeSystemSessionId = undefined;
         this.debuggerState = debugAttachPlan(this.debuggerState,
           {type: "system-session-ended", port: this.debuggerState.systemPort}).state;
         // the debug session ended: an inspector opened on demand closes
@@ -568,7 +578,8 @@ class SystemController {
   /** Running debug sessions: VS Code's own list where a runtime has one,
    *  otherwise the sessions this controller saw start and not yet end. */
   runningDebugSessions() {
-    return Array.isArray(vscode.debug.sessions) ? vscode.debug.sessions : [...this.debugSessions];
+    const sessions = Array.isArray(vscode.debug.sessions) ? vscode.debug.sessions : [...this.debugSessions];
+    return sessions.filter((session) => !this.retiredDebugSessionIds.has(session.id));
   }
 
   async applyDebuggerEvent(event) {
@@ -588,13 +599,22 @@ class SystemController {
       const name = config.name;
       if (action.type === "stop") {
         const session = this.runningDebugSessions().find((candidate) => candidate.name === name);
-        if (session !== undefined) await vscode.debug.stopDebugging(session);
+        if (session !== undefined) {
+          // VS Code can deliver terminate after a new process has reused the
+          // port. Retire this exact session before requesting its stop.
+          this.retiredDebugSessionIds.add(session.id);
+          this.debugSessions.delete(session);
+          if (session.id === this.activeSystemSessionId) this.activeSystemSessionId = undefined;
+          await vscode.debug.stopDebugging(session);
+        }
         this.debuggerStarts.delete(name);
+        this.debuggerOutputPattern = undefined;
         continue;
       }
       if (this.runningDebugSessions().some((candidate) => candidate.name === name)) {
         if (action.target === "system") {
           this.debuggerState = debugAttachPlan(this.debuggerState, {type: "system-attached", port: action.port}).state;
+          this.debuggerOutputPattern = config.outFiles[0];
         }
         continue;
       }
@@ -613,12 +633,53 @@ class SystemController {
         }
         if (action.target === "system") {
           this.debuggerState = debugAttachPlan(this.debuggerState, {type: "system-attached", port: action.port}).state;
+          this.debuggerOutputPattern = config.outFiles[0];
         }
       } finally {
         this.debuggerStarts.delete(name);
       }
     }
     return true;
+  }
+
+  /** A debug session keeps its outFiles after a warm swap or a supervised
+   *  restart. Reattach it once the serving output link names another build. */
+  async refreshDebuggerGeneration() {
+    return this.#inspectorStep(() => this.#refreshDebuggerGeneration());
+  }
+
+  async #refreshDebuggerGeneration() {
+    if (this.launcher?.state !== "running") return;
+    const port = this.debuggerState.systemPort;
+    if (port === undefined) return;
+    const session = this.runningDebugSessions().find((one) => one.name === `OSD: ABAP (${port})`);
+    if (session === undefined) return;
+    const config = debuggerConfiguration(port, {root: this.launcher.osdHome,
+      storageDir: this.launcher.storageDir, layers: this.launcher.layers});
+    if (this.debuggerOutputPattern === undefined) {
+      this.debuggerOutputPattern = config.outFiles[0];
+      return;
+    }
+    if (this.debuggerOutputPattern === config.outFiles[0]) return;
+    try {
+      // Clear the old session before stopping it so its termination event
+      // cannot close an inspector opened on demand for the replacement.
+      this.debuggerState = {systemPort: undefined};
+      this.retiredDebugSessionIds.add(session.id);
+      this.debugSessions.delete(session);
+      if (session.id === this.activeSystemSessionId) this.activeSystemSessionId = undefined;
+      await vscode.debug.stopDebugging(session);
+      this.debuggerOutputPattern = undefined;
+      if (await vscode.debug.startDebugging(undefined, config) === true) {
+        this.debuggerState = {systemPort: port};
+        this.debuggerOutputPattern = config.outFiles[0];
+        return true;
+      } else {
+        this.output.appendLine(`osd debugger: could not reattach to generation ${config.outFiles[0]}`);
+      }
+    } catch (error) {
+      this.output.appendLine(`osd debugger: ${String(error?.message ?? error)}`);
+    }
   }
 
   /** Attaches VS Code's debugger to the running system. With `onDemand`,
@@ -640,6 +701,65 @@ class SystemController {
     return this.#inspectorStep(() => this.#attachSystemDebugger(options));
   }
 
+  /** startDebugging resolves before js-debug has finished attaching and
+   *  applying source maps. A request sent then can pass a loaded DPC before
+   *  its breakpoint binds. Ask VS Code for this session's DAP breakpoint,
+   *  which is the same verified state shown by the filled editor glyph. */
+  async waitForDebuggerReady(file, timeoutMs = 15000, {reportMissingBreakpoint = false, output = this.output} = {}) {
+    const wait = (token) => this.#waitForDebuggerReady(file, timeoutMs, token, reportMissingBreakpoint, output);
+    if (typeof vscode.window.withProgress === "function") {
+      return vscode.window.withProgress({location: vscode.ProgressLocation.Notification,
+        title: "osd: waiting for debugger breakpoints", cancellable: true}, (_, token) => wait(token));
+    }
+    return wait();
+  }
+
+  async #waitForDebuggerReady(file, timeoutMs, token, reportMissingBreakpoint, output) {
+    const port = this.launcher?.inspectPort;
+    const name = `OSD: ABAP (${port})`;
+    const target = file && path.resolve(file);
+    const breakpoints = (vscode.debug.breakpoints ?? []).filter((bp) =>
+      bp instanceof vscode.SourceBreakpoint && bp.enabled && bp.location.uri.scheme === "file" &&
+      target !== undefined && path.resolve(bp.location.uri.fsPath) === target);
+    const status = vscode.window.setStatusBarMessage?.("osd: waiting for the debugger…");
+    const deadline = Date.now() + timeoutMs;
+    let cancelled = token?.isCancellationRequested === true;
+    const subscription = token?.onCancellationRequested?.(() => { cancelled = true; });
+    try {
+      while (!cancelled && Date.now() < deadline) {
+        const session = this.runningDebugSessions().find((one) => one.name === name);
+        if (session !== undefined && typeof session.getDebugProtocolBreakpoint === "function") {
+          if (breakpoints.length === 0) {
+            if (reportMissingBreakpoint && target !== undefined)
+              output.appendLine(`osd debugger: no enabled breakpoint in ${target}; calling without a verified breakpoint`);
+            return true;
+          }
+          const check = Promise.all(breakpoints.map(async (bp) => {
+            try { return await session.getDebugProtocolBreakpoint(bp); } catch { return undefined; }
+          }));
+          // A DAP request can remain pending after the session disappears.
+          // Race each check against the remaining deadline and cancellation.
+          let timer;
+          const states = await Promise.race([check, new Promise((resolve) => {
+            timer = setTimeout(() => resolve(undefined), Math.min(50, Math.max(0, deadline - Date.now())));
+          })]);
+          clearTimeout(timer);
+          if (cancelled || Date.now() >= deadline) return false;
+          if (states?.every((bp) => bp?.verified === true) &&
+              this.runningDebugSessions().some((one) => one.id === session.id)) return true;
+          if (states !== undefined)
+            await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(0, deadline - Date.now()))));
+          continue;
+        }
+        await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(0, deadline - Date.now()))));
+      }
+      return false;
+    } finally {
+      subscription?.dispose();
+      status?.dispose();
+    }
+  }
+
   async #attachSystemDebugger({onDemand = false} = {}) {
     const launcher = this.launcher;
     this.debuggerError = undefined;
@@ -659,6 +779,9 @@ class SystemController {
       this.output.appendLine(`--- osd debugger: inspector opened on 127.0.0.1:${launcher.inspectPort} ---`);
     }
     await this.debuggerTransition;
+    // Attach and call must inspect the serving link now, while this attach
+    // owns the inspector queue; the status bar's periodic refresh can be late.
+    if (await this.#refreshDebuggerGeneration() === true) return true;
     return this.applyDebuggerEvent({type: "system-started", enabled: true, port: launcher.inspectPort});
   }
 
@@ -677,7 +800,7 @@ class SystemController {
     if (launcher === undefined || launcher.debug === true || launcher.inspectorOpen !== true) return false;
     if (abapBreakpoints().length > 0) return false;
     const name = `OSD: ABAP (${launcher.inspectPort})`;
-    if (!sessionEnded && this.runningDebugSessions().some((session) => session.name === name)) return false;
+    if (this.runningDebugSessions().some((session) => session.name === name)) return false;
     await this.debuggerTransition;
     await this.applyDebuggerEvent({type: "system-detach"});
     const closed = await launcher.closeInspector();
@@ -1032,6 +1155,7 @@ class SystemController {
       const build = activationBuildText(result);
       const tests = closureTestsText(result);
       if (result.ok) {
+        await this.refreshDebuggerGeneration();
         vscode.window.setStatusBarMessage(
           `osd: ${changed.objects.length} object(s) activated${build ? ` (${build})` : ""}${tests ? `, ${tests}` : ""}`, 5000);
       } else {
@@ -2373,9 +2497,7 @@ function activate(context) {
   // Q2b "Runner" (docs/vscode-extension.md): a lens over each
   // `<set>_get_entityset` / `<set>_get_entity` method of a SEGW _DPC_EXT
   // class, and the command it (and F8, above) both call.
-  context.subscriptions.push(vscode.commands.registerCommand("osd.callEntitySet", (args) => callEntitySet(args, output)));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.callEntitySetWithDebugger", (args) =>
-    args === undefined ? run(output, classrunOutput, true) : callEntitySet({...args, withDebugger: true}, output)));
+  registerEntitySetCommands(context, output, classrunOutput, controller);
   context.subscriptions.push(entitySetLensProvider(output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.httpLensInfo", () => {}));
   // gui-reports spike: "Open in VS Code" for a converted report, the same
@@ -2498,6 +2620,8 @@ function statusBar(context) {
     try {
       const serving = await osd().serving();
       setServingAvailability(true);
+      await activeController?.refreshDebuggerGeneration().catch((error) =>
+        activeController.output.appendLine(`osd debugger: ${String(error?.message ?? error)}`));
       const dumps = await osd().dumps().catch(() => []);
       const generation = String(serving.generation ?? "?").slice(0, 8);
       const warm = serving.warm;
@@ -2726,6 +2850,7 @@ async function activateCurrent(diagnostics, output) {
   try {
     const result = await osd().activate(object);
     if (result.ok) {
+      await activeController?.refreshDebuggerGeneration();
       try {
         const reports = await osd().check(object, object.include, editor.document.getText());
         diagnostics.set(editor.document.uri, reports.flatMap((r) => r.issues)
@@ -2773,10 +2898,10 @@ async function activateCurrent(diagnostics, output) {
 // below), reach a real action; everything else answers the text of the
 // server work its turn would add.
 
-async function requireDebugSystem(output, action) {
-  const attached = await activeController?.attachSystemDebugger({onDemand: true});
+async function requireDebugSystem(output, action, controller = activeController) {
+  const attached = await controller?.attachSystemDebugger({onDemand: true});
   if (attached === true) return true;
-  const reason = activeController?.debuggerError ?? "the system is not running; start it with osd: Start";
+  const reason = controller?.debuggerError ?? "the system is not running; start it with osd: Start";
   const message = `${action} with debugger: ${reason}`;
   output.appendLine(`osd debugger: ${message}`);
   vscode.window.showWarningMessage(`osd: ${message}`);
@@ -2836,11 +2961,12 @@ async function run(output, classrunOutput, forceDebugger = false) {
     return;
   }
   if (action.kind === "call-entityset") {
-    await callEntitySet({service: action.service, set: action.set, kind: action.entityKind, withDebugger: forceDebugger}, output);
+    await callEntitySet({service: action.service, set: action.set, kind: action.entityKind,
+      file: editor.document.fileName, withDebugger: forceDebugger}, output);
     return;
   }
   if (action.kind === "classrun") {
-    await classrunObject(object.name, classrunOutput, forceDebugger);
+    await classrunObject(object.name, classrunOutput, forceDebugger, editor.document.fileName);
     return;
   }
   if (action.kind === "webgui") {
@@ -2943,7 +3069,7 @@ async function classrunCurrent(classrunOutput, withDebugger = false) {
     vscode.window.showInformationMessage(`osd: ${object.name} is not a class`);
     return;
   }
-  await classrunObject(object.name, classrunOutput, withDebugger);
+  await classrunObject(object.name, classrunOutput, withDebugger, current.editor.document.fileName);
 }
 
 // ---- the taxi demo's sample data (ZOSD_TAXI_SRV, src/demo_data/): nothing
@@ -2990,12 +3116,17 @@ async function resetTaxiData() {
   }
 }
 
-async function classrunObject(name, classrunOutput, withDebugger = false) {
-  if (withDebugger && !(await requireDebugSystem(classrunOutput, "Classrun"))) return;
+async function classrunObject(name, classrunOutput, withDebugger = false, file,
+  {attach = requireDebugSystem, controller = activeController, client = osd} = {}) {
+  if (withDebugger && !(await attach(classrunOutput, "Classrun"))) return;
+  if (withDebugger && !(await controller.waitForDebuggerReady(file))) {
+    vscode.window.showWarningMessage(`osd: debugger or breakpoints for ${name} did not become ready within 15 s`);
+    return;
+  }
   classrunOutput.show(true);
   classrunOutput.appendLine(`--- classrun ${name} ---`);
   try {
-    const {text, ms, generation} = await osd().classrun(name);
+    const {text, ms, generation} = await client().classrun(name);
     classrunOutput.appendLine(text);
     classrunOutput.appendLine(`(${ms} ms${generation ? `, ${generation}` : ""})`);
   } catch (e) {
@@ -3224,7 +3355,7 @@ function entitySetLensProvider(output) {
       }
       return entitySetLenses(document.getText(), map).flatMap((lens) => {
         const range = new vscode.Range(lens.line - 1, 0, lens.line - 1, 0);
-        const args = {service: lens.service, set: lens.set, kind: lens.kind};
+        const args = {service: lens.service, set: lens.set, kind: lens.kind, file: document.fileName};
         return [new vscode.CodeLens(range, {
           title: lens.title,
           command: "osd.callEntitySet",
@@ -3279,8 +3410,28 @@ function progLensProvider() {
  *  to (lib.js `keyOf`, off `__metadata.uri` -- this client does not
  *  otherwise know the entity type's key properties), then calls the one
  *  entity. Cancelling the prompt leaves nothing called. */
-async function callEntitySet({service, set, kind, withDebugger = false}, output) {
-  if (withDebugger && !(await requireDebugSystem(output, "Call EntitySet"))) return;
+function registerEntitySetCommands(context, output, classrunOutput, controller) {
+  context.subscriptions.push(vscode.commands.registerCommand("osd.callEntitySet", (args) => callEntitySet(args, output, controller)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.callEntitySetWithDebugger", (args) =>
+    args === undefined ? run(output, classrunOutput, true) : callEntitySet({...args, withDebugger: true}, output, controller)));
+}
+
+async function callEntitySet({service, set, kind, file, withDebugger = false}, output, controller = activeController) {
+  const source = file ?? vscode.window.activeTextEditor?.document?.fileName;
+  if (withDebugger && !abapBreakpoints().some((bp) => source && path.resolve(bp.location.uri.fsPath) === path.resolve(source))) {
+    const choice = await vscode.window.showWarningMessage(
+      `osd: no enabled breakpoint in ${source ?? "the DPC file"}; ${set} will run without stopping`,
+      "Continue without stopping", "Cancel");
+    if (choice !== "Continue without stopping") return;
+  }
+  if (withDebugger && !(await requireDebugSystem(output, "Call EntitySet", controller))) return;
+  if (withDebugger) {
+    if (!(await controller.waitForDebuggerReady(source,
+      15000, {reportMissingBreakpoint: true, output}))) {
+      vscode.window.showWarningMessage(`osd: debugger or breakpoints for ${set} did not become ready within 15 s`);
+      return;
+    }
+  }
   try {
     if (kind === "get_entity") {
       const probe = await osd().odata(service, `${set}?$top=1&$format=json`);
@@ -4047,7 +4198,7 @@ async function deactivate() {
   await activeController?.stop();
 }
 
-module.exports = {activate, deactivate, runReportInTerminal, SystemController, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
+module.exports = {activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
   httpLensProvider, openEntitySetMethod, statusBar,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,

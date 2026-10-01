@@ -6,12 +6,14 @@ import {dirname, join, relative, resolve} from "node:path";
 import {pathToFileURL, fileURLToPath} from "node:url";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
+import {hashOf} from "../tools/osd-build.mjs";
 import {modulesOf, transpile} from "../tools/osd-transpile.mjs";
 import {createRequire} from "node:module";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const {pickInspectorPort, packNameOf} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
-const {debuggerConfiguration} = createRequire(import.meta.url)("../editors/vscode/lib.js");
+const {Launcher} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
+const {debuggerConfiguration, runningAbapSources, breakpointWarning} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 function decodeVlq(text) {
@@ -122,11 +124,12 @@ async function inspectorTarget(port) {
 function breakpointFor(sourcePath, sourceLine, sourceColumn) {
   const output = join(ROOT, "output");
   for (const name of readdirSync(output).filter((entry) => entry.endsWith(".mjs.map"))) {
-    const mapFile = join(output, name);
+    const mapFile = realpathSync(join(output, name));
     const data = JSON.parse(readFileSync(mapFile, "utf8"));
     const source = data.sources.find((entry) => {
       const absolute = resolve(dirname(mapFile), entry);
-      return absolute === sourcePath || entry.replaceAll("\\", "/").endsWith("/src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
+      return absolute === sourcePath || (sourcePath.endsWith("/src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap") &&
+        entry.replaceAll("\\", "/").endsWith("/src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap"));
     });
     if (source === undefined) continue;
     const position = generatedPosition(data.mappings, data.sources.indexOf(source), sourceLine, sourceColumn);
@@ -140,6 +143,80 @@ function breakpointFor(sourcePath, sourceLine, sourceColumn) {
 
 describe("VS Code debugger transport: detached ABAP Unit child", function () {
   this.timeout(180000);
+
+  it("keeps projected DPC maps portable and resolves them through attach overrides", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-dpc-map-"));
+    try {
+      const home = join(dir, "home");
+      const storage = join(dir, "storage");
+      const workspace = join(dir, "workspace");
+      const workspaceSource = join(workspace, "src");
+      const packSource = join(storage, "packs", packNameOf(workspace), "src");
+      const generation = join(home, "build", "by-input", "abc123", "output");
+      const otherWorkspace = join(dir, "other-workspace", "src");
+      mkdirSync(workspaceSource, {recursive: true});
+      mkdirSync(otherWorkspace, {recursive: true});
+      mkdirSync(dirname(packSource), {recursive: true});
+      symlinkSync(workspaceSource, packSource, "dir");
+      writeFileSync(join(dirname(packSource), "osd-pack.json"), JSON.stringify({name: "projected", abap: "src"}));
+      const source = join(workspaceSource, "zcl_ship_dpc_ext.clas.abap");
+      const abap = `CLASS zcl_ship_dpc_ext DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS shipset_get_entityset.
+ENDCLASS.
+CLASS zcl_ship_dpc_ext IMPLEMENTATION.
+  METHOD shipset_get_entityset.
+    DATA lv_count TYPE i.
+    lv_count = 1.
+  ENDMETHOD.
+ENDCLASS.`;
+      writeFileSync(source, abap);
+      writeFileSync(join(otherWorkspace, "zcl_ship_dpc_ext.clas.abap"), abap);
+      const config = {input_folder: relative(home, packSource),
+        output_folder: relative(home, generation), input_filter: [".*\\.abap$"], exclude_filter: [],
+        libs: [], options: {}, write_source_map: true, write_unit_tests: false};
+      await transpile({root: home, config, modules: modulesOf(ROOT)});
+      const map = JSON.parse(readFileSync(join(generation, "zcl_ship_dpc_ext.clas.mjs.map"), "utf8"));
+      const mapped = map.sources.find((entry) => entry.endsWith("zcl_ship_dpc_ext.clas.abap"));
+      expect(mapped).to.equal(`${relative(generation, packSource).replaceAll("\\", "/")}/zcl_ship_dpc_ext.clas.abap`);
+      expect(JSON.stringify(map)).not.to.include(workspace);
+      expect(JSON.stringify(map)).not.to.include(storage);
+      symlinkSync(generation, join(home, "output"), "dir");
+      const attach = debuggerConfiguration(9341, {root: home, storageDir: storage,
+        layers: [{folder: workspace, srcDir: workspaceSource}]});
+      expect(attach.outFiles).to.deep.equal([`${generation}/**/*.mjs`]);
+      expect(attach.resolveSourceMapLocations).to.deep.equal([`${generation}/**`, "!**/node_modules/**"]);
+      expect(attach.pauseForSourceMap).to.equal(true);
+      expect(attach.sourceMapPathOverrides[`${dirname(mapped)}/*`]).to.equal(`${workspaceSource}/*`);
+      expect(attach.sourceMapPathOverrides[`file://${packSource}/*`]).to.equal(`${workspaceSource}/*`);
+      const running = runningAbapSources(home, {storageDir: storage,
+        layers: [{folder: workspace, srcDir: workspaceSource}]});
+      expect(breakpointWarning(source, running), "the compiled DPC file is the editor's breakpoint source")
+        .to.equal(undefined);
+      // The same bytes under a retargeted projection may reuse the same
+      // generation: its map names the stable projection, while the attach
+      // config points to the workspace now open in the editor.
+      const previousPacks = process.env.OSD_PACKS;
+      process.env.OSD_PACKS = join(storage, "packs");
+      let before;
+      let after;
+      try {
+        before = hashOf(ROOT);
+        rmSync(packSource);
+        symlinkSync(otherWorkspace, packSource, "dir");
+        after = hashOf(ROOT);
+      } finally {
+        if (previousPacks === undefined) delete process.env.OSD_PACKS;
+        else process.env.OSD_PACKS = previousPacks;
+      }
+      expect(after).to.equal(before);
+      await transpile({root: home, config, modules: modulesOf(ROOT)});
+      const retargeted = JSON.parse(readFileSync(join(generation, "zcl_ship_dpc_ext.clas.mjs.map"), "utf8"));
+      expect(retargeted).to.deep.equal(map);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
 
   it("binds a workspace ABAP Unit breakpoint at a multiline call's executable start", async () => {
     const source = `CLASS ltcl_probe DEFINITION FINAL FOR TESTING.
@@ -190,7 +267,7 @@ ENDCLASS.`;
       const attach = debuggerConfiguration(port, {target: "unit", root: home, storageDir: storage,
         layers: [{folder: workspace, srcDir: workspaceSource, manifest: join(workspace, "osd-pack.json")}]});
       expect(attach.sourceMapPathOverrides[`${dirname(map.sources[0])}/*`]).to.equal(`${workspaceSource}/*`);
-      expect(attach.outFiles).to.include(`${home}/build/**/*.mjs`);
+      expect(attach.outFiles).to.deep.equal([`${home}/build/live/output/**/*.mjs`]);
 
       const runner = join(dir, "runner.mjs");
       const runtime = createRequire(import.meta.url).resolve("@abaplint/runtime");
@@ -318,6 +395,219 @@ ENDCLASS.`;
     } finally {
       cancellation.abort();
       await resultPromise.catch(() => {});
+    }
+  });
+});
+
+describe("VS Code debugger transport: serving DPC after earlier activity", function () {
+  this.timeout(180000);
+
+  it("pauses on a DPC line after a plain call, a detached session, and Stop/Start", async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-dpc-debug-"));
+    const launcher = new Launcher({osdHome: ROOT, storageDir, workspaceFolders: [], warm: "off"});
+    const sourcePath = join(ROOT, "src/demo/zcl_zstg_demo_dpc_ext.clas.abap");
+    const lines = readFileSync(sourcePath, "utf8").split(/\r?\n/);
+    const sourceLine = lines.findIndex((line) => line.includes("lt_status = ranges_for(")) + 1;
+    expect(sourceLine).to.be.greaterThan(0);
+    let client;
+    try {
+      for (let run = 0; run < 2; run++) {
+        const {port} = await launcher.start();
+        const breakpoint = breakpointFor(sourcePath, sourceLine, lines[sourceLine - 1].search(/\S/));
+        const url = `http://127.0.0.1:${port}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$format=json`;
+        // This request loads and executes the DPC before any debugger exists.
+        expect((await fetch(url)).status).to.equal(200);
+        const inspectPort = await launcher.openInspector();
+        for (let session = 0; session < 2; session++) {
+          const target = await inspectorTarget(inspectPort);
+          const socket = new WebSocket(target.webSocketDebuggerUrl);
+          await new Promise((resolve, reject) => {
+            socket.addEventListener("open", resolve, {once: true});
+            socket.addEventListener("error", reject, {once: true});
+          });
+          client = new InspectorClient(socket);
+          await client.send("Debugger.enable");
+          const scripts = client.events.filter((event) => event.method === "Debugger.scriptParsed" &&
+            event.params.url.includes("zcl_zstg_demo_dpc_ext"));
+          expect(scripts.map((event) => event.params.url), `expected ${breakpoint.url}`).to.include(breakpoint.url);
+          const set = await client.send("Debugger.setBreakpointByUrl", {
+            url: breakpoint.url, lineNumber: breakpoint.lineNumber, columnNumber: breakpoint.columnNumber,
+          });
+          if (set.locations.length === 0) {
+            await client.waitFor("Debugger.breakpointResolved", (event) => event.breakpointId === set.breakpointId);
+          }
+          const response = fetch(url);
+          const paused = await client.waitFor("Debugger.paused");
+          expect(paused.hitBreakpoints).to.include(set.breakpointId);
+          await client.send("Debugger.resume");
+          expect((await response).status).to.equal(200);
+          client.socket.close();
+          client = undefined;
+        }
+        await launcher.stop();
+      }
+    } finally {
+      client?.socket.close();
+      await launcher.stop();
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+});
+
+describe("VS Code controller: Attach and call across a generation switch", function () {
+  it("asks before a debugger call with no enabled DPC breakpoint, and honours both choices", async () => {
+    const commands = new Map();
+    const warnings = [];
+    const requests = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      requests.push(url);
+      return {status: 200, text: async () => JSON.stringify({d: {results: []}})};
+    };
+    class SourceBreakpoint {
+      constructor(file, enabled) { this.enabled = enabled; this.location = {uri: {scheme: "file", fsPath: file}}; }
+    }
+    const api = {
+      SourceBreakpoint,
+      TreeItem: class {},
+      EventEmitter: class { event = () => ({dispose() {}}); fire() {} },
+      debug: {breakpoints: [new SourceBreakpoint("/w/zcl_demo_dpc_ext.clas.abap", false)]},
+      ViewColumn: {Beside: 2},
+      commands: {registerCommand(name, handler) { commands.set(name, handler); return {dispose() {}}; }},
+      workspace: {getConfiguration: () => ({get: (_key, fallback) => fallback})},
+      window: {showWarningMessage: async (message, ...choices) => {
+        warnings.push({message, choices});
+        return warnings.length === 1 ? "Cancel" : "Continue without stopping";
+      }, createWebviewPanel: () => ({webview: {html: ""}})},
+    };
+    const require = createRequire(import.meta.url);
+    const Module = require("node:module");
+    const extensionPath = require.resolve("../editors/vscode/extension.js");
+    delete require.cache[extensionPath];
+    const originalLoad = Module._load;
+    Module._load = function (request, parent, isMain) {
+      if (request === "vscode") return api;
+      return originalLoad.call(this, request, parent, isMain);
+    };
+    let registerEntitySetCommands;
+    try { ({registerEntitySetCommands} = require(extensionPath)); }
+    finally { Module._load = originalLoad; }
+    const calls = [];
+    const controller = {attachSystemDebugger: async () => { calls.push("attach"); return true; },
+      waitForDebuggerReady: async () => { calls.push("ready"); return true; }};
+    try {
+      registerEntitySetCommands({subscriptions: []}, {appendLine() {}}, undefined, controller);
+      const command = commands.get("osd.callEntitySetWithDebugger");
+      const args = {service: "ZDEMO_SRV", set: "TravelSet", kind: "get_entityset", file: "/w/zcl_demo_dpc_ext.clas.abap"};
+      await command(args);
+      expect(requests).to.deep.equal([]);
+      expect(calls).to.deep.equal([]);
+      await command(args);
+      expect(warnings).to.have.length(2);
+      expect(warnings[0].message).to.include("no enabled breakpoint");
+      expect(warnings[0].choices).to.deep.equal(["Continue without stopping", "Cancel"]);
+      expect(calls).to.deep.equal(["attach", "ready"]);
+      expect(requests).to.have.length(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("waits for the replacement session's verified DPC breakpoint despite late old termination", async () => {
+    const home = mkdtempSync(join(tmpdir(), "osd-attach-generation-"));
+    const first = join(home, "build", "by-input", "first", "output");
+    const second = join(home, "build", "by-input", "second", "output");
+    mkdirSync(first, {recursive: true});
+    mkdirSync(second, {recursive: true});
+    symlinkSync(first, join(home, "output"), "dir");
+    const listeners = {start: [], end: []};
+    const events = [];
+    const commands = new Map();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      events.push(`request ${url}`);
+      return {status: 200, text: async () => JSON.stringify({d: {results: []}})};
+    };
+    const file = join(home, "src", "zcl_demo_dpc_ext.clas.abap");
+    class SourceBreakpoint {
+      constructor() { this.enabled = true; this.location = {uri: {scheme: "file", fsPath: file}}; }
+    }
+    const api = {
+      SourceBreakpoint,
+      EventEmitter: class { event = () => ({dispose() {}}); fire() {} },
+      TreeItem: class {},
+      ViewColumn: {Beside: 2},
+      commands: {registerCommand(name, handler) { commands.set(name, handler); return {dispose() {}}; }},
+      workspace: {onDidChangeWorkspaceFolders: () => ({dispose() {}}),
+        getConfiguration: () => ({get: (_key, fallback) => fallback})},
+      window: {setStatusBarMessage: () => ({dispose() {}}),
+        showErrorMessage: (message) => { throw new Error(message); },
+        createWebviewPanel: () => ({webview: {html: ""}})},
+      debug: {
+        breakpoints: [new SourceBreakpoint()],
+        onDidStartDebugSession(fn) { listeners.start.push(fn); return {dispose() {}}; },
+        onDidTerminateDebugSession(fn) { listeners.end.push(fn); return {dispose() {}}; },
+        async stopDebugging(session) {
+          events.push(`stop ${session.id}`);
+          // VS Code may deliver termination after the new session starts.
+        },
+        async startDebugging(_folder, config) {
+          events.push(`start ${config.outFiles[0]}`);
+          return true;
+        },
+      },
+    };
+    const require = createRequire(import.meta.url);
+    const Module = require("node:module");
+    const extensionPath = require.resolve("../editors/vscode/extension.js");
+    delete require.cache[extensionPath];
+    const originalLoad = Module._load;
+    Module._load = function (request, parent, isMain) {
+      if (request === "vscode") return api;
+      return originalLoad.call(this, request, parent, isMain);
+    };
+    let SystemController;
+    let registerEntitySetCommands;
+    try { ({SystemController, registerEntitySetCommands} = require(extensionPath)); }
+    finally { Module._load = originalLoad; }
+    try {
+      const output = [];
+      const controller = new SystemController({subscriptions: []}, {appendLine: (line) => output.push(line)});
+      controller.launcher = {state: "running", inspectPort: 9401, inspectorOpen: true, debug: false,
+        osdHome: home, storageDir: home, layers: []};
+      controller.debuggerState = {systemPort: 9401};
+      controller.debuggerOutputPattern = `${first}/**/*.mjs`;
+      registerEntitySetCommands({subscriptions: []}, {appendLine: (line) => output.push(line)}, undefined, controller);
+      const old = {id: "old", name: "OSD: ABAP (9401)",
+        getDebugProtocolBreakpoint: async () => ({verified: true})};
+      listeners.start.forEach((fn) => fn(old));
+      rmSync(join(home, "output"));
+      symlinkSync(second, join(home, "output"), "dir");
+      const command = commands.get("osd.callEntitySetWithDebugger");
+      expect(command).to.be.a("function");
+      let finished = false;
+      const calling = command({service: "ZDEMO_SRV", set: "TravelSet", kind: "get_entityset", file})
+        .then(() => { finished = true; });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(events).to.deep.equal([`stop old`, `start ${second}/**/*.mjs`]);
+      // The old DAP marker was verified, but the serving generation changed.
+      expect(finished).to.equal(false);
+      const replacement = {id: "new", name: old.name,
+        getDebugProtocolBreakpoint: async () => ({verified: false})};
+      listeners.start.forEach((fn) => fn(replacement));
+      listeners.end.forEach((fn) => fn(old));
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(events.some((event) => event.startsWith("request ")), "unverified replacement must not receive the call").to.equal(false);
+      replacement.getDebugProtocolBreakpoint = async () => ({verified: true});
+      await calling;
+      expect(events.at(-1)).to.equal("request http://localhost:3030/sap/opu/odata/sap/ZDEMO_SRV/TravelSet?$top=20&$format=json");
+      expect(finished).to.equal(true);
+      expect(controller.activeSystemSessionId).to.equal("new");
+      expect(controller.debuggerState.systemPort).to.equal(9401);
+      expect(output).to.deep.equal([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      rmSync(home, {recursive: true, force: true});
     }
   });
 });

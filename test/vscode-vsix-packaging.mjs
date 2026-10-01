@@ -3,7 +3,7 @@ import {expect} from "chai";
 import {execFileSync} from "node:child_process";
 import {createRequire} from "node:module";
 import {copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
-import {basename, join} from "node:path";
+import {basename, isAbsolute, join, win32} from "node:path";
 import {excludeStagedPackSources} from "../scripts/build-vsix.mjs";
 import {inventoryThirdParties} from "../scripts/third-party-notices.mjs";
 import {tilesOf} from "../tools/osd-packs.mjs";
@@ -284,6 +284,15 @@ describe("packaging a prebuilt generation (T2, docs/ideas.md)", function () {
       const {ensureMaterializedHome, ensureWorkspacePacks} = createRequire(import.meta.url)(join(extensionDir, "launcher.js"));
       // another path than the one it was built under: the name must not depend on it
       const home = await ensureMaterializedHome(join(extensionDir, "osd"), join(scratch, "elsewhere", "globalStorage"));
+      const mapsDir = join(home, "build", "by-input", generations[0], "output");
+      const maps = readdirSync(mapsDir).filter((name) => name.endsWith(".mjs.map"));
+      expect(maps.length, "the published seed includes source maps").to.be.greaterThan(0);
+      for (const name of maps) {
+        const map = JSON.parse(readFileSync(join(mapsDir, name), "utf8"));
+        for (const source of map.sources) {
+          expect(isAbsolute(source) || win32.isAbsolute(source), `${name}: ${source}`).to.equal(false);
+        }
+      }
       // OSD_PACKS the way the launcher sets it on a first start with no
       // workspace folder: its storage, holding the empty notebook-scratch pack
       const env = {...process.env, OSD_PACKS: ensureWorkspacePacks(join(scratch, "elsewhere", "storage"), [])};
