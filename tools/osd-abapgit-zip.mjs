@@ -148,6 +148,10 @@ export function dataFiles(from, into) {
  *  zip. The list is abap_transpile.json's `not_in_system`, the one the object
  *  store reads, so the build, the store and the zip cannot disagree. */
 function notAnObject(root = process.env.OSD_ROOT ?? process.cwd()) {
+  if (!existsSync(join(root, "abap_transpile.json"))) {
+    // said, not swallowed: without the list a sidecar is refused as an object
+    console.error(`osd-abapgit-zip: no abap_transpile.json in ${root} (set OSD_ROOT): sidecars are not skipped`);
+  }
   const excluded = exclusionsOf(root);
   return (file) => excluded.some((re) => re.test(file.replaceAll("\\", "/")));
 }

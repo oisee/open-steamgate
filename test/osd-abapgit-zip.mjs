@@ -98,6 +98,19 @@ describe("tools/osd-abapgit-zip: what may leave for a system", () => {
     expect(() => layout(dir, out, "a probe", undefined, probe("SICF /sap/bc/ui5_ui5/sap/zosd_{nnn}_app"))).to.not.throw();
   });
 
+  it("a folder zipped directly leaves its DSL sidecars out too", () => {
+    const folder = join(dir, "plain");
+    mkdirSync(folder, {recursive: true});
+    writeFileSync(join(folder, "zcl_zplain.clas.abap"), "CLASS zcl_zplain DEFINITION PUBLIC. ENDCLASS.\n");
+    writeFileSync(join(folder, "zcl_zplain.clas.xml"), "<abapGit><asx:abap><asx:values><VSEOCLASS><CLSNAME>ZCL_ZPLAIN</CLSNAME></VSEOCLASS></asx:values></asx:abap></abapGit>\n");
+    writeFileSync(join(folder, "zplain.l2.yaml"), "rules: []\n");
+    writeFileSync(join(folder, "zcl_zplain.clas.trace.json"), "{}\n");
+    const made = layout(folder, out, "plain", undefined, probe("CLAS ZCL_ZPLAIN"));
+    expect([...made.objects.keys()]).to.deep.equal(["CLAS"]);
+    const files = readdirSync(join(out, "src"));
+    expect(files.filter((f) => /\.(l2\.yaml|trace\.json)$/.test(f))).to.deep.equal([]);
+  });
+
   it("builds a complete pack: compiled SEGW, authored override, TABU and WAPA", () => {
     const pack = join(dir, "probe-pack");
     const src = join(pack, "src");
