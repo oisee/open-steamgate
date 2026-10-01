@@ -207,7 +207,7 @@ DDIC_PROVIDER.literalType = (registry, type, name, localTypes = new Map()) => {
   const builtIn = element ? element.getDataType(registry)?.toUpperCase()
     : ({...Object.fromEntries(BUILTIN), StringType: "STRG", FloatingPointType: "FLTP"})[type.constructor.name];
   if (builtIn === "FLTP") {
-    return {resolved: false, reason: "FLTP; floating point equality and rounding cannot be proved here"};
+    return {resolved: false, reason: "FLTP is not accepted by literal"};
   }
   if (!builtIn || !LITERAL_TYPES.has(builtIn)) return {resolved: false, reason: `${builtIn ?? type.constructor.name} is not accepted by literal`};
   const result = {built_in: builtIn};
@@ -233,7 +233,7 @@ DDIC_PROVIDER.fieldLiteralType = (registry, type, field) => {
   const builtIn = field.DATATYPE.toUpperCase();
   // the same reason literalType gives a floating point field, so that a rule
   // naming one is refused alike whether the field has a data element or not
-  if (builtIn === "FLTP") return {resolved: false, reason: "FLTP; floating point equality and rounding cannot be proved here"};
+  if (builtIn === "FLTP") return {resolved: false, reason: "FLTP is not accepted by literal"};
   if (!LITERAL_TYPES.has(builtIn)) return {resolved: false, reason: `${builtIn} is not accepted by literal`};
   const result = {built_in: builtIn};
   if (LENGTH_TYPES.has(builtIn)) {

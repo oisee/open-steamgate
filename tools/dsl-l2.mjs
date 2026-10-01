@@ -620,7 +620,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
       const field = inner.info.fields.get(column);
       if (!field) failAt(line(epath))(`${inner.table} has no field ${parsed[2].toUpperCase()}`);
       if (field.column === inner.info.client) failAt(line(epath))(`${aggregateKey} cannot use the client field; the runtime sets it`);
-      if (field.literal.reason?.startsWith("FLTP;")) failAt(line(epath))(`${aggregateKey} field ${inner.table}-${column.toUpperCase()} is ${field.literal.reason}`);
+      if (/^FLTP\b/.test(field.literal.reason ?? "")) failAt(line(epath))(`${aggregateKey} field ${inner.table}-${column.toUpperCase()} is FLTP; floating point equality and rounding cannot be proved here`);
       if (field.literal.resolved === false) failAt(line(epath))(`${aggregateKey} field ${inner.table}-${column.toUpperCase()} has no resolved DDIC type: ${field.literal.reason}`);
       const numeric = new Set([...Object.keys(INT_RANGE), ...PACKED]);
       if (!numeric.has(field.literal.built_in)) failAt(line(epath))(`${aggregateKey} field ${inner.table}-${column.toUpperCase()} is ${typeText(field.literal)}; use INT1/2/4/8 or DEC/packed numeric fields`);
