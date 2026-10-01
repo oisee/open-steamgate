@@ -888,12 +888,18 @@ function callStmt(e, ctx, t) {
     if (a.dir === "importing") return importingArg(a, ctx);
     const b = `box${ctx.loop++}_${i}`;
     boxes.push({b, a});
-    return b;
+    return a.byValue ? `${b}_value` : b;
   });
   const lines = [`${t}{`];
-  for (const {b, a} of boxes) lines.push(`${t}  const ${b} = {v: ${a.wrap ? expr(a.wrap, ctx) : a.place ? place(a.place, ctx) : zero(a.type)}};`);
-  lines.push(`${t}  ${callee(e, ctx)}(${["s", ...args].join(", ")});`);
-  for (const {b, a} of boxes) if (a.place) lines.push(`${t}  ${place(a.place, ctx)} = ${b}.v;`);
+  for (const {b, a} of boxes) lines.push(`${t}  const ${b} = {v: ${a.dir === "exporting" && a.byValue ? zero(a.type) : a.wrap ? expr(a.wrap, ctx) : a.place ? place(a.place, ctx) : zero(a.type)}};`);
+  for (const {b, a} of boxes) if (a.byValue) lines.push(`${t}  const ${b}_value = {v: ${composite(a.type) ? `abap.copy(${b}.v)` : `${b}.v`}};`);
+  // Reference parameters retain writes when the callee raises; VALUE
+  // parameters are copied out only after its normal return.
+  lines.push(`${t}  try {`, `${t}    ${callee(e, ctx)}(${["s", ...args].join(", ")});`, `${t}  } finally {`);
+  for (const {b, a} of boxes) if (a.place && !a.byValue) lines.push(`${t}    ${place(a.place, ctx)} = ${b}.v;`);
+  lines.push(`${t}  }`);
+  for (const {b, a} of boxes) if (a.byValue) lines.push(`${t}  ${b}.v = ${b}_value.v;`);
+  for (const {b, a} of boxes) if (a.place && a.byValue) lines.push(`${t}  ${place(a.place, ctx)} = ${b}.v;`);
   lines.push(`${t}}`);
   return lines;
 }
@@ -1157,6 +1163,7 @@ function fn(e, ctx) {
 
 function cond(c, ctx) {
   switch (c.c) {
+    case "num_data_cmp": return `abap.CmpNumericData(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} 0`;
     case "in_range": {
       const n = ctx.loop++;
       return `(() => { const rows${n} = ${expr(c.range, ctx)}; let hasI${n} = false, hit${n} = false; for (const r${n} of rows${n}) { let match${n}; if (r${n}.Option === "EQ") match${n} = ${expr(c.value, ctx)} === r${n}.Low; else if (r${n}.Option === "BT") match${n} = ${expr(c.value, ctx)} >= r${n}.Low && ${expr(c.value, ctx)} <= r${n}.High; else throw new abap.AbapError("NOT_COMPILED", "IN range: selection option other than EQ or BT"); if (r${n}.Sign === "I") { hasI${n} = true; if (match${n}) hit${n} = true; } else if (r${n}.Sign === "E") { if (match${n}) return false; } else throw new abap.AbapError("NOT_COMPILED", "IN range: selection sign other than I or E"); } return !hasI${n} || hit${n}; })()`;

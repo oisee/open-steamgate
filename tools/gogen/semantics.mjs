@@ -1,6 +1,7 @@
 // ABAP semantics pinned against A4H: each class in testdata/ has a static
 // RUN returning a string, and EXPECT below is what A4H returned for the same
-// code (ABAP Unit probe, 2026-09-23). Both emitters must give it.
+// code (ABAP Unit probe, 2026-09-23), except entries marked unmeasured.
+// Both emitters must give it.
 //
 //   node tools/gogen/semantics.mjs
 import {execFileSync} from "node:child_process";
@@ -14,6 +15,13 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // A raised exception retains reference writes and attributes, but discards
+  // VALUE output and RETURNING copy-back (the same fixture runs in both hosts).
+  // Unmeasured (SAP docs): classic exceptions retain by-reference TABLES writes.
+  ZCL_GOGEN_T_EXCPARAMS: "ref/out/before/before/before/nxxx/nxxx/uyy/4/9/10/keep/1",
+  // Unmeasured (SAP docs): optional defaults and exception class matching.
+  ZCL_GOGEN_T_DEFAULTS: "7/11/13/17",
+  ZCL_GOGEN_T_XCASE: "pad/prefix/length",
   ZCL_GOGEN_T_UNCATCH: {Go: "ERROR NOT_COMPILED in find( ): OCC = 0 was not measured at zcl_gogen_t_uncatch.clas.abap:8", JS: "ERROR NOT_COMPILED in find( ) OCC = 0 was not measured"},
   ZCL_GOGEN_T_ROWREF: "append:9",
   ZCL_GOGEN_T_ELEMREF: "append:9 read:8",
@@ -260,6 +268,10 @@ const EXPECT = {
   // from inside two nested TRYs (Go runs a TRY as a closure and hands these
   // out as codes)
   ZCL_GOGEN_T_TRYFLOW: "b cd caught a1 13!",
+  // A write in a TRY loop is visible after an exception leaves the loop,
+  // even when neither CATCH nor CLEANUP reads the string.
+  ZCL_GOGEN_T_TRYAPPEND: "axx",
+  ZCL_GOGEN_T_TRYAPPEND_CLEANUP: "axx",
   // CP / NP / CA / NA; A4H gave "... ca:X1---X", the 1 being sy-fdpos,
   // which the local copy does not read
   ZCL_GOGEN_T_CP: "cp:XX-X--XX-XX-XX-XX ca:X---X",
@@ -874,4 +886,8 @@ for (const f of demoDrift) { bad += 1; console.log(`FAIL testdata/${f} differs f
 const own = refused.broken.includes("zcl_gogen_t_rf_own");
 if (!own) bad += 1;
 console.log(`${own ? "ok  " : "FAIL"} refused ZCL_GOGEN_T_RF_OWN left out by abaplint's syntax check`);
+const resumable = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_resume", "CX_SY_ZERODIVIDE"], tolerant: true});
+const resumeRefused = resumable.partial.some((x) => x.includes("RAISE RESUMABLE:"));
+if (!resumeRefused) bad += 1;
+console.log(`${resumeRefused ? "ok  " : "FAIL"} refused RESUMABLE until continuation support is implemented`);
 process.exit(bad ? 1 : 0);

@@ -11,6 +11,25 @@ CLASS ltcl_lifecycle DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS F
     METHODS after_failure FOR TESTING.
 ENDCLASS.
 
+CLASS ltcl_numeric_boundary DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    METHODS decimal_outside FOR TESTING.
+ENDCLASS.
+CLASS ltcl_numeric_boundary IMPLEMENTATION.
+  METHOD decimal_outside.
+    DATA lv_number TYPE p LENGTH 4 DECIMALS 1 VALUE '1.5'.
+    DATA lv_upper TYPE p LENGTH 4 DECIMALS 1 VALUE '1.4'.
+    DATA lv_caught TYPE abap_bool.
+    TRY.
+        cl_abap_unit_assert=>assert_number_between( number = lv_number lower = 1 upper = lv_upper ).
+      CATCH kernel_cx_assert.
+        lv_caught = abap_true.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_equals( act = lv_caught exp = abap_true ).
+    cl_abap_unit_assert=>assert_number_between( number = 1 lower = 1 upper = 2 ).
+  ENDMETHOD.
+ENDCLASS.
+
 CLASS ltcl_teardown_conditional DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
   PRIVATE SECTION.
     CLASS-DATA gv_count TYPE i.

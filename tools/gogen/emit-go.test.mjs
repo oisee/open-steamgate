@@ -7,8 +7,109 @@ import {dirname, join, basename} from "node:path";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
+import {CmpNumericData, cell, TP, TI, TF} from "./js/abap.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+test("nested string builder loops do not retain deferred buffers", () => {
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-builder-loop-"));
+  try {
+    writeFileSync(join(sourceDir, "zcl_gogen_builder_loop.clas.abap"), `
+CLASS zcl_gogen_builder_loop DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE i.
+ENDCLASS.
+CLASS zcl_gogen_builder_loop IMPLEMENTATION.
+  METHOD run.
+    DATA lv TYPE string.
+    DO 60000 TIMES.
+      DO 1 TIMES.
+        lv = lv && 'x'.
+      ENDDO.
+      rv = strlen( lv ).
+    ENDDO.
+  ENDMETHOD.
+ENDCLASS.
+`);
+    const go = emitGo(compileProgram({folders: [sourceDir], objects: ["ZCL_GOGEN_BUILDER_LOOP"]}));
+    assert.match(go, /strings\.Builder/);
+    assert.doesNotMatch(go, /defer func\(\) \{ if active_sb_/);
+    assert.doesNotMatch(go, /active_sb_/);
+  } finally { rmSync(sourceDir, {recursive: true, force: true}); }
+});
+
+test("TRY handlers block builders for every loop in the TRY body", () => {
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-builder-try-"));
+  try {
+    writeFileSync(join(sourceDir, "zcl_gogen_builder_try.clas.abap"), `
+CLASS zcl_gogen_builder_try DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+CLASS zcl_gogen_builder_try IMPLEMENTATION.
+  METHOD run.
+    DATA seen TYPE string.
+    DATA free TYPE string.
+    DO 3 TIMES.
+      seen = seen && 'a'.
+      free = free && 'b'.
+    ENDDO.
+    rv = free.
+  ENDMETHOD.
+ENDCLASS.
+`);
+    const program = compileProgram({folders: [sourceDir], objects: ["ZCL_GOGEN_BUILDER_TRY"]});
+    const method = program.classes[0].methods.find((m) => m.name === "RUN");
+    const loop = method.body.find((st) => st.s === "do");
+    const readSeen = {s: "assign", target: {e: "var", name: "rv", type: {k: "string"}}, value: {e: "var", name: "seen", type: {k: "string"}}};
+    method.body = [{s: "try", body: [loop], catches: [{covers: ["CX_ROOT"], own: [], body: [readSeen]}], cleanup: [readSeen]}, ...method.body.filter((st) => st !== loop)];
+    const go = emitGo(program);
+    assert.doesNotMatch(go, /sb_free_/);
+    assert.doesNotMatch(go, /sb_seen_/);
+  } finally { rmSync(sourceDir, {recursive: true, force: true}); }
+});
+
+test("numeric generic SUBTRACTSECS reaches its Go native", () => {
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-tstmp-native-"));
+  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-tstmp-test-"));
+  try {
+    writeFileSync(join(sourceDir, "cl_abap_tstmp.clas.abap"), `
+CLASS cl_abap_tstmp DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS subtractsecs IMPORTING tstmp TYPE p secs TYPE numeric RETURNING VALUE(r) TYPE p.
+ENDCLASS.
+CLASS cl_abap_tstmp IMPLEMENTATION.
+  METHOD subtractsecs.
+  ENDMETHOD.
+ENDCLASS.
+`);
+    writeFileSync(join(sourceDir, "zcl_gogen_tstmp_native.clas.abap"), `
+CLASS zcl_gogen_tstmp_native DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE p.
+ENDCLASS.
+CLASS zcl_gogen_tstmp_native IMPLEMENTATION.
+  METHOD run.
+    rv = cl_abap_tstmp=>subtractsecs( tstmp = rv secs = 60 ).
+  ENDMETHOD.
+ENDCLASS.
+`);
+    const go = emitGo(compileProgram({folders: [sourceDir], objects: ["ZCL_GOGEN_TSTMP_NATIVE", "CL_ABAP_TSTMP"]}));
+    assert.match(go, /hTstmpsecs\.SubtractSecs/);
+    writeFileSync(join(goDir, "zz_generated.go"), go);
+    const build = spawnSync("go", ["test", "-vet=off", `./cmd/${basename(goDir)}`], {cwd: join(here, "go"), encoding: "utf8", timeout: 120000});
+    assert.equal(build.status, 0, build.stderr || build.stdout);
+  } finally {
+    rmSync(sourceDir, {recursive: true, force: true});
+    rmSync(goDir, {recursive: true, force: true});
+  }
+});
+
+test("generic numeric comparison keeps packed decimal boundaries in JS", () => {
+  assert.equal(CmpNumericData(cell("1.5", TP(4, 1)), cell("1.4", TP(4, 1))), 1);
+  assert.equal(CmpNumericData(cell(1, TI), cell("1.4", TP(4, 1))), -1);
+  assert.equal(CmpNumericData(cell(1.5, TF), cell("1.5", TP(4, 1))), 0);
+});
 
 test("SELECT clauses come from syntax nodes, not WHERE string literals", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-select-literals-"));
