@@ -21,13 +21,14 @@
 // `.abapgit.xml` with STARTING_FOLDER /src/ and FOLDER_LOGIC PREFIX, a
 // `src/package.devc.xml`, and every object beside it.
 import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
-import {basename, join, resolve} from "node:path";
+import {basename, join, relative, resolve} from "node:path";
 import {execFileSync} from "node:child_process";
 import {compileFile} from "./stg-compile.mjs";
 import {buildApp} from "./osd-bsp-app.mjs";
 import {packAppName} from "./osd-bsp-registry.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {deliveredAt} from "./osd-nodes.mjs";
+import {exclusionsOf} from "./osd-store.mjs";
 import {admit, isStructural, loadManifest, refusalMessage, unitFor} from "./osd-deploy-manifest.mjs";
 
 const BOM = "﻿";
@@ -141,6 +142,20 @@ export function dataFiles(from, into) {
   return {carried, unpaired, dropped};
 }
 
+/** A file beside the ABAP that is not an object of the system -- a SEGW
+ *  model (compiled here, not copied), a DSL L2 rule, a lift trace, the SAMC
+ *  model and declaration a DSL renders the XML from -- never goes into the
+ *  zip. The list is abap_transpile.json's `not_in_system`, the one the object
+ *  store reads, so the build, the store and the zip cannot disagree. */
+function notAnObject(root = process.env.OSD_ROOT ?? process.cwd()) {
+  if (!existsSync(join(root, "abap_transpile.json"))) {
+    // said, not swallowed: without the list a sidecar is refused as an object
+    console.error(`osd-abapgit-zip: no abap_transpile.json in ${root} (set OSD_ROOT): sidecars are not skipped`);
+  }
+  const excluded = exclusionsOf(root);
+  return (file) => excluded.some((re) => re.test(file.replaceAll("\\", "/")));
+}
+
 function filesUnder(root, at = root) {
   if (!existsSync(at)) return [];
   return readdirSync(at).sort().flatMap((name) => {
@@ -177,9 +192,12 @@ export function preparePack(dir, out) {
 
   // Flatten authored source exactly as abapGit's PREFIX layout requires.
   // The copy happens after compilation deliberately: authored files win.
+  const sidecar = notAnObject();
   for (const folder of abap) {
     for (const file of filesUnder(folder)) {
-      if (file.endsWith(".stg.yaml")) continue;
+      // read inside the pack, so a pack that itself lives under a folder
+      // of the list (a test fixture) still has its objects
+      if (file.endsWith(".stg.yaml") || sidecar(`/${relative(root, file)}`)) continue;
       cpSync(file, join(out, basename(file)));
     }
   }
@@ -224,7 +242,8 @@ export function layout(from, into, description, data, unit) {
     throw new Error(`${from} has ${nested.length} subdirector${nested.length === 1 ? "y" : "ies"} (${nested.join(", ")}). `
       + "abapGit reads one as a sub-package and this zip puts every object in one package, so flatten them into the folder.");
   }
-  const all = entries.filter((f) => statSync(join(from, f)).isFile());
+  const sidecar = notAnObject();
+  const all = entries.filter((f) => statSync(join(from, f)).isFile() && !sidecar(f));
   // **A node that would replace a system's own does not go in the zip.**
   //
   // `SAP_DELIVERED` in tools/osd-nodes.mjs names the paths a real system
