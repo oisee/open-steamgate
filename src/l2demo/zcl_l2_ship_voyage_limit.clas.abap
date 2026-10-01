@@ -31,6 +31,7 @@ CLASS zcl_l2_ship_voyage_limit IMPLEMENTATION.
         AND voy~dep_date > iv_date
       ORDER BY
         ship~ship_id.
+    SORT lt_join BY ship_ship_id.
     LOOP AT lt_join INTO ls_join.
       IF lv_count > 0 AND ( ls_join-ship_ship_id <> ls_prev-ship_ship_id ).
         IF lv_count > 2.

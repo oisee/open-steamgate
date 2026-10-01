@@ -21,8 +21,12 @@ CLASS zcl_l2_ship_min_captains IMPLEMENTATION.
              ship_ship_id TYPE zosd_l2_ship-ship_id,
              cnt TYPE i,
            END OF ty_count.
-    DATA lt_for TYPE STANDARD TABLE OF ty_join WITH DEFAULT KEY.
-    DATA ls_for TYPE ty_join.
+    TYPES: BEGIN OF ty_for,
+             ship_ship_id TYPE zosd_l2_ship-ship_id,
+             ship_name TYPE zosd_l2_ship-name,
+           END OF ty_for.
+    DATA lt_for TYPE STANDARD TABLE OF ty_for WITH DEFAULT KEY.
+    DATA ls_for TYPE ty_for.
     DATA lt_count TYPE SORTED TABLE OF ty_count WITH UNIQUE KEY ship_ship_id.
     DATA ls_count TYPE ty_count.
     DATA lv_seen TYPE c LENGTH 1.
@@ -42,9 +46,11 @@ CLASS zcl_l2_ship_min_captains IMPLEMENTATION.
       WHERE ship~status = 'A'
       ORDER BY
         ship~ship_id.
+    SORT lt_join BY ship_ship_id.
     LOOP AT lt_join INTO ls_join.
       IF lv_seen IS INITIAL OR ls_join-ship_ship_id <> ls_prev-ship_ship_id.
-        APPEND ls_join TO lt_for.
+        MOVE-CORRESPONDING ls_join TO ls_for.
+        APPEND ls_for TO lt_for.
       ENDIF.
       lv_seen = 'X'.
       ls_prev = ls_join.

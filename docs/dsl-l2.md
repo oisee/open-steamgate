@@ -455,14 +455,23 @@ currently return no test classes at all.
 The compiler chooses one LEFT OUTER JOIN for `fewer_than` and `exactly` when
 the counted clause's entire `where` is a conjunction of equalities to outer
 fields or literals. Every `where` equality goes in `ON`; `when` alone goes in
-`WHERE`. The query orders by the `for` key. The loop counts a row only when
+`WHERE`. The query orders by the `for` key, and the code then runs `SORT lt_join BY`
+that key itself, so the loop never depends on the database returning the rows
+of one key together (the same `SORT` guards the one-query count of slice 4,
+which also detects a key change by comparing with the previous row). The
+`ORDER BY` stays as a request to the database. A test shuffles the joined rows
+right after the `SELECT` (the first row moves to the end, which splits a key
+of two rows from itself): green with the `SORT`, red without it. Removing
+`ORDER BY` alone stays green by design, since the `SORT` makes it redundant for
+correctness. The loop counts a row only when
 the counted table's `MANDT` key is not initial. On a 7.02 system Open SQL's
 implicit current-client handling guarantees a real joined row has a
-noninitial client marker. This matters:
-the runtime probe accepted a real crew row with an initial `CREW_ID`, so that
-key field cannot distinguish it from a missing side. The generated query
-collects each `for` key once and clears its count before reading
-the counted rows. The `ship_min_captains` demo exercises this form, including
+noninitial client marker. This matters: the runtime probe accepted a real crew
+row with an initial `CREW_ID`, so that key field cannot distinguish it from a
+missing side. The generated query collects each `for` key once into `lt_for`,
+a table of its own type (`ty_for`, the `for` alias's fields only, so the
+counted table's client marker is not in it), and clears its count before
+reading the counted rows. The `ship_min_captains` demo exercises this form, including
 the real row with an initial crew ID. This runtime does not implement implicit
 client filtering: a direct database probe accepted a row with both `MANDT`
 and `CREW_ID` initial, an all-initial DDIC key. Such manually inserted rows

@@ -489,6 +489,26 @@ examples:
   }
   const failed = (results) => Object.entries(results).filter(([, r]) => r === "failed").map(([m]) => m).sort();
 
+  // A database may return the joined rows of one key apart (the ORDER BY is a
+  // request, and the generated code must not lean on it). The shuffle moves the
+  // first joined row to the end, right after the SELECT: with two rows for the
+  // first key and another key behind them, the first key's rows are no longer
+  // adjacent. The generated SORT puts them back; without it the loop must fail.
+  const SORT_JOIN = "    SORT lt_join BY ship_ship_id.\n";
+  const SHUFFLE = "    DATA ls_first LIKE LINE OF lt_join.\n    READ TABLE lt_join INTO ls_first INDEX 1.\n    IF sy-subrc = 0.\n      DELETE lt_join INDEX 1.\n      APPEND ls_first TO lt_join.\n    ENDIF.\n";
+  const interleaving = (copyRule, source, tag, text = readFileSync(source, "utf8")) => {
+    it(`${tag}: the loop does not depend on the database's row order (ORDER BY stays, SORT restores adjacency)`, async () => {
+      const generated = readFileSync(join(OUT, `zcl_l2_${basename(source, ".l2.yaml")}.clas.abap`), "utf8");
+      expect(generated).to.include("      ORDER BY\n        ship~ship_id.\n" + SORT_JOIN);
+      const green = copyRule(`${tag}_shuf`, text);
+      const ok = await runRule(green.file, green.className, {transform: {"clas.abap": (s) => s.replace(SORT_JOIN, SHUFFLE + SORT_JOIN)}});
+      expect(failed(ok.results), JSON.stringify(ok.messages)).to.deep.equal([]);
+      const red = copyRule(`${tag}_nosort`, text);
+      const bad = await runRule(red.file, red.className, {transform: {"clas.abap": (s) => s.replace(SORT_JOIN, SHUFFLE)}});
+      expect(failed(bad.results), "the loop fails when the rows of a key are apart").to.not.deep.equal([]);
+    });
+  };
+
   describe("slice 4: count thresholds", () => {
     before(async () => { await import("./start.mjs"); });
     const text = readFileSync(LIMIT, "utf8");
@@ -529,6 +549,8 @@ examples:
         expect(at(/IF lv_count > 2\./).rule_line).to.equal(text.split("\n").findIndex((l) => /^  more_than:/.test(l)) + 1);
       }
     });
+
+    interleaving(copy, LIMIT, "lim");
 
     it("the threshold operator mutant fails at exactly two", async () => {
       const {file, className} = copy("op", text);
@@ -757,6 +779,23 @@ ${trivial}`,
         expect(compileRule(file, {registry}).queries[0].zero.one_outer, tag).to.equal(undefined);
       }
     });
+
+    // fewer_than: 2 hides the order dependence (a key with two counted rows
+    // never alerts, so a duplicated for row is silent); fewer_than: 3 shows it
+    const THREE = readFileSync(MIN_CAPTAINS, "utf8").replace("fewer_than: 2", "fewer_than: 3").replace(/examples:[\s\S]*$/, `examples:
+  - name: two captains and none
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S002, name: Tern, status: A}
+        - {ship_id: S001, name: Gull, status: A}
+      ZOSD_L2_CREW:
+        - {crew_id: C00002, ship_id: S001, role: C, since: 20260101}
+        - {crew_id: C00001, ship_id: S001, role: C, since: 20260101}
+        - {crew_id: C00003, ship_id: S002, role: K, since: 20260101}
+    expect: ["S001 Gull: 2 captains", "S002 Tern: 0 captains"]
+`);
+    interleaving(copy, MIN_CAPTAINS, "outer", THREE);
 
     it("makes one database call for multiple for rows", async () => {
       const copyRule = copy("outer_calls", readFileSync(MIN_CAPTAINS, "utf8"));
