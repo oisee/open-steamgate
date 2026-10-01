@@ -3,6 +3,7 @@
     "test/generation-diff.mjs",
     "test/generation-hash.mjs",
     "test/osd-abapgit-zip.mjs",
+    "test/osd-enq.mjs",
     "test/osd-binary.mjs",
     "test/osd-branch.mjs",
     "test/osd-build.mjs",
