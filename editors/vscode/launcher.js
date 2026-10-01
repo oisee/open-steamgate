@@ -334,6 +334,23 @@ function packNameOf(folder) {
   return `ws-${base}-${hash}`;
 }
 
+/** The inherited OSD_PACKS entries that do not name a workspace layer's own
+ *  folder. Start projects every workspace layer into its own pack under
+ *  storage; an inherited entry naming the same folder would add the same
+ *  pack name a second time from another directory, which tools/osd-packs.mjs
+ *  refuses (BAD_PACK). The workspace projection wins; `dropped` says which
+ *  entries were left out so Start can say so. */
+function inheritedPacks(value, layers) {
+  const real = (dir) => { try { return fs.realpathSync(dir); } catch { return path.resolve(dir); } };
+  const own = new Set(layers.map((layer) => real(layer.folder)));
+  const kept = [];
+  const dropped = [];
+  for (const entry of (value ?? "").split(path.delimiter).map((s) => s.trim()).filter((s) => s !== "")) {
+    (own.has(real(entry)) ? dropped : kept).push(entry);
+  }
+  return {kept, dropped};
+}
+
 function countFiles(dir, accept, seen = new Set()) {
   if (!isDir(dir)) return 0;
   const real = fs.realpathSync(dir);
@@ -1250,8 +1267,11 @@ class Launcher extends EventEmitter {
       STG_SERVE: "child",
       ...warmEnvironment(this.warmMode),
     }, this.debug, this.inspectPort);
-    env.OSD_PACKS = [process.env.OSD_PACKS, packsDir]
-      .filter((value) => value !== undefined && value !== "").join(path.delimiter);
+    const inherited = inheritedPacks(process.env.OSD_PACKS, this.layers);
+    for (const entry of inherited.dropped) {
+      this.#log(`OSD_PACKS entry ${entry} is also a workspace folder: the workspace layer is used, the entry is left out\n`);
+    }
+    env.OSD_PACKS = [...inherited.kept, packsDir].join(path.delimiter);
     this.env = env;
     this.databaseLabel = describeDatabase(this.database);
     try {
@@ -1657,6 +1677,7 @@ module.exports = {
   decideStartTarget,
   detectWorkspaceLayers,
   packNameOf,
+  inheritedPacks,
   ensureWorkspacePacks,
   layerContributions,
   waitForServing,

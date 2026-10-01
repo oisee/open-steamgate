@@ -12,7 +12,7 @@ import {createServer} from "node:net";
 import {spawn} from "node:child_process";
 import {mkdtempSync, mkdirSync, readdirSync, readlinkSync, rmSync, writeFileSync, existsSync, lstatSync, symlinkSync, readFileSync, statSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {delimiter, join} from "node:path";
+import {delimiter, join, sep} from "node:path";
 import {once} from "node:events";
 import {brotliCompressSync} from "node:zlib";
 import {ObjectStore} from "../tools/osd-store.mjs";
@@ -24,7 +24,7 @@ const {
   PORT_RANGE, isFree, pickPort, classify,
   pickInspectorPort, debugSystemEnv,
   looksLikeAbapGitFolder, isOpenSteamgateCheckout, decideStartTarget,
-  detectWorkspaceLayers, packNameOf, ensureWorkspacePacks,
+  detectWorkspaceLayers, packNameOf, inheritedPacks, ensureWorkspacePacks,
   waitForServing, servingOnce, terminate, Launcher,
   linkOrCopyTree, materializedHomeDir, ensureMaterializedHome, selectOldHomes, listOldHomes, keptHomeNotice, MATERIALIZED_MARKER,
   cleanupOldHomes, hasLiveServingLock, setServingChildPid, SERVING_LOCK_PREFIX,
@@ -316,6 +316,26 @@ describe("editors/vscode/launcher.js: ensureWorkspacePacks (tools/osd-packs.mjs'
   afterEach(() => {
     rmSync(storageDir, {recursive: true, force: true});
     rmSync(wsDir, {recursive: true, force: true});
+  });
+
+  it("leaves out an inherited OSD_PACKS entry that is the workspace pack itself (osg-demo's BAD_PACK)", async () => {
+    writeFileSync(join(wsDir, "osd-pack.json"), JSON.stringify({name: "osg-demo"}));
+    const other = mkdtempSync(join(tmpdir(), "osd-launcher-other-"));
+    try {
+      const {detectWorkspaceLayers: detect} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
+      const layers = detect([wsDir]);
+      const packsDir = ensureWorkspacePacks(storageDir, layers);
+      const {packsOf} = await import("../tools/osd-packs.mjs");
+      // the defect: both the original folder and its projection carry "osg-demo"
+      expect(() => packsOf(storageDir, {OSD_PACKS: [wsDir, packsDir].join(delimiter)})).to.throw(/osg-demo/);
+      const inherited = inheritedPacks([other, `${wsDir}${sep}`].join(delimiter), layers);
+      expect(inherited).to.deep.equal({kept: [other], dropped: [`${wsDir}${sep}`]});
+      const names = packsOf(storageDir, {OSD_PACKS: [...inherited.kept, packsDir].join(delimiter)}).map((p) => p.name);
+      expect(names.filter((name) => name === "osg-demo")).to.have.lengthOf(1);
+      expect(inheritedPacks(undefined, layers)).to.deep.equal({kept: [], dropped: []});
+    } finally {
+      rmSync(other, {recursive: true, force: true});
+    }
   });
 
   it("keeps the permanent notebook scratch pack even with no workspace layers", async () => {
