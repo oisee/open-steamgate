@@ -16,7 +16,9 @@
 // leak scan finds its identifier list, or OSD_DDIC_TRESE), the check also
 // reads it and prints *counts* only -- how many of its words the public list
 // does not cover, and how many fields of the tree it names that the public
-// list does not -- never a word, because this output gets pasted.
+// list does not -- never a word, because this output gets pasted -- and a
+// field it names that neither the public list nor `accepted` covers fails the
+// run. A list it cannot read is reported by path and error name only.
 //
 // What is read: every `*.tabl.xml` (tables and structures, DD03P FIELDNAME)
 // under src/, every pack's ABAP folders, and gen/ when a build has written
@@ -128,7 +130,7 @@ export function localCounts(localWords, list, tables) {
   let fields = 0;
   for (const {table, fields: names} of tables) {
     if (!table || sapNameRule(table) !== undefined) continue;
-    for (const f of names) if (local.has(f) && !list.words.has(f) && !list.allow.has(`${table}-${f}`)) fields++;
+    for (const f of names) if (local.has(f) && !list.words.has(f) && !list.accepted.has(f) && !list.allow.has(`${table}-${f}`)) fields++;
   }
   return {size: local.size, uncovered, fields};
 }
@@ -171,16 +173,24 @@ if (basename(process.argv[1] ?? "") === "osd-ddic-reserved.mjs") {
   for (const {kind} of list.allow.values()) kinds[kind] = (kinds[kind] ?? 0) + 1;
   console.log(`\nosd-ddic-reserved: ${files.length} tables and structures, ${list.words.size} reserved words, `
     + `${list.allow.size} allowed field(s) (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(", ") || "none"}), ${count} finding(s)`);
+  // The local list is a system's own and is never printed: neither its words
+  // nor a parse error, whose message quotes the input (as the leak scan
+  // treats its identifier list). A field it names that neither the public
+  // list nor a measured acceptance covers fails the run, by count only.
   const local = localListPath();
   if (local) {
+    let words;
     try {
-      const words = JSON.parse(readFileSync(local, "utf8")).words ?? [];
-      const c = localCounts(words, list, tables);
-      console.log(`osd-ddic-reserved: local system list: ${c.size} words, ${c.uncovered} of them not in the public list; `
-        + `${c.fields} field(s) of the tree it names that the public list does not`);
+      words = JSON.parse(readFileSync(local, "utf8")).words;
+      if (!Array.isArray(words)) throw new TypeError("no words array");
     } catch (e) {
-      console.error(`osd-ddic-reserved: the local system list could not be read (${e.message.split("\n")[0]})`);
+      console.error(`osd-ddic-reserved: ${local} could not be read (${e?.name ?? "Error"}); its content is not printed`);
+      process.exit(2);
     }
+    const c = localCounts(words, list, tables);
+    console.log(`osd-ddic-reserved: local system list: ${c.size} words, ${c.uncovered} of them not in the public list; `
+      + `${c.fields} field(s) of the tree it names that neither the public list nor a measured acceptance covers`);
+    count += c.fields;
   }
   process.exit(count === 0 ? 0 : 1);
 }

@@ -1442,7 +1442,7 @@
   },
   {
    "word": "LABEL",
-   "why": "A4H, renamed in R3"
+   "why": "A4H, the R3 lift probe (docs/lift-r3.md); ZOSD_LIFT_R2's column is LTEXT since 2026-10-01"
   },
   {
    "word": "RULE",
@@ -1549,11 +1549,6 @@
    "field": "ZOSD_L2_CREW-ROLE",
    "kind": "unmeasured",
    "why": "in Db2's list only; the table goes to A4H with the deploy unit l3demo, whose run measures it (rename it if that run refuses it)"
-  },
-  {
-   "field": "ZOSD_LIFT_R2-LABEL",
-   "kind": "unmeasured",
-   "why": "LABEL is refused on A4H (R3 lift probe); ZOSD_LIFT_R2 is the R2 demo table, in no deploy unit, and its owner renames the field before it goes to a system"
   },
   {
    "field": "ZOSD_DUMP-INCLUDE",

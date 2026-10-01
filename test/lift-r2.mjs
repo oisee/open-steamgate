@@ -36,11 +36,11 @@ describe("verified lift R2: SELECT table per row", function () {
   async function seed() {
     const db = abap.context.databaseConnections.DEFAULT;
     await db.execute("DELETE FROM zosd_lift_r2 WHERE kind IN ('STAT', 'PRIO')");
-    await db.execute("INSERT INTO zosd_lift_r2 (kind, code, seq, active, label) VALUES ('STAT', 'OPEN', '001', 'X', 'First')");
-    await db.execute("INSERT INTO zosd_lift_r2 (kind, code, seq, active, label) VALUES ('STAT', 'OPEN', '002', 'X', 'Second')");
-    await db.execute("INSERT INTO zosd_lift_r2 (kind, code, seq, active, label) VALUES ('STAT', 'OPEN', '003', '', 'Hidden')");
-    await db.execute("INSERT INTO zosd_lift_r2 (kind, code, seq, active, label) VALUES ('STAT', 'OPEN', '004', 'X', 'Second')");
-    await db.execute("INSERT INTO zosd_lift_r2 (kind, code, seq, active, label) VALUES ('STAT', 'DONE', '001', 'X', 'Done')");
+    await db.execute("INSERT INTO zosd_lift_r2 (kind, code, seq, active, ltext) VALUES ('STAT', 'OPEN', '001', 'X', 'First')");
+    await db.execute("INSERT INTO zosd_lift_r2 (kind, code, seq, active, ltext) VALUES ('STAT', 'OPEN', '002', 'X', 'Second')");
+    await db.execute("INSERT INTO zosd_lift_r2 (kind, code, seq, active, ltext) VALUES ('STAT', 'OPEN', '003', '', 'Hidden')");
+    await db.execute("INSERT INTO zosd_lift_r2 (kind, code, seq, active, ltext) VALUES ('STAT', 'OPEN', '004', 'X', 'Second')");
+    await db.execute("INSERT INTO zosd_lift_r2 (kind, code, seq, active, ltext) VALUES ('STAT', 'DONE', '001', 'X', 'Done')");
   }
 
   const makeRows = (keys) => {
@@ -133,28 +133,28 @@ describe("verified lift R2: SELECT table per row", function () {
       {column: "kind", component: "kind"}, {column: "code", component: "code"},
     ]);
     expect(result.source.primary.map((key) => key.column)).to.deep.equal(["kind", "code", "seq"]);
-    expect(result.source.fields.map((field) => field.column)).to.deep.equal(["kind", "code", "seq", "label"]);
+    expect(result.source.fields.map((field) => field.column)).to.deep.equal(["kind", "code", "seq", "ltext"]);
     expect(result.source.conditions).to.deep.equal([{column: "active", text: "active = 'X'"}]);
-    expect(result.result.assignments).to.deep.equal([{column: "label", component: "label"}]);
+    expect(result.result.assignments).to.deep.equal([{column: "ltext", component: "ltext"}]);
     expect(result.before.map((item) => item.text)).to.deep.equal(["CLEAR <ls_row>-result."]);
     expect(result.open).to.include("prefetch may read keys whose loop iteration skips the SELECT");
   });
 
   const refusals = [
     ["an unordered SELECT", (source) => source.replace(" ORDER BY PRIMARY KEY", ""), /^order: /],
-    ["an order other than the primary key", (source) => source.replace("ORDER BY PRIMARY KEY", "ORDER BY label"), /^order: /],
+    ["an order other than the primary key", (source) => source.replace("ORDER BY PRIMARY KEY", "ORDER BY ltext"), /^order: /],
     ["an OR condition", (source) => source.replace("AND code = <ls_row>-code", "OR code = <ls_row>-code"), /^conditions: /],
     ["a nonconstant condition", (source) => source.replace("active = 'X'", "active = lv_active"), /^conditions: /],
     ["a correlation on a non-key column", (source) => source.replace("kind = <ls_row>-kind", "active = <ls_row>-kind"), /^correlation: active is not a key field/],
-    ["a SELECT with an aggregate", (source) => source.replace("SELECT label FROM", "SELECT MAX( label ) FROM"), /^shape: /],
-    ["a SELECT SINGLE", (source) => source.replace("SELECT label FROM", "SELECT SINGLE label FROM"), /^shape: /],
+    ["a SELECT with an aggregate", (source) => source.replace("SELECT ltext FROM", "SELECT MAX( ltext ) FROM"), /^shape: /],
+    ["a SELECT SINGLE", (source) => source.replace("SELECT ltext FROM", "SELECT SINGLE ltext FROM"), /^shape: /],
     ["a row limit", (source) => source.replace("FROM zosd_lift_r2 INTO TABLE", "FROM zosd_lift_r2 UP TO 2 ROWS INTO TABLE"), /^shape: /],
     ["a join", (source) => source.replace("FROM zosd_lift_r2 INTO TABLE", "FROM zosd_lift_r2 INNER JOIN zosd_lift_r2 AS x ON x~kind = zosd_lift_r2~kind INTO TABLE"), /^shape: /],
-    ["a second SELECT in the body", (source) => source.replace("MOVE sy-subrc TO <ls_row>-status.", "SELECT label FROM zosd_lift_r2 INTO TABLE lt_hits WHERE kind = <ls_row>-kind ORDER BY PRIMARY KEY.\n      MOVE sy-subrc TO <ls_row>-status."), /^shape: the loop body has 2 SELECT/],
+    ["a second SELECT in the body", (source) => source.replace("MOVE sy-subrc TO <ls_row>-status.", "SELECT ltext FROM zosd_lift_r2 INTO TABLE lt_hits WHERE kind = <ls_row>-kind ORDER BY PRIMARY KEY.\n      MOVE sy-subrc TO <ls_row>-status."), /^shape: the loop body has 2 SELECT/],
     ["another database statement", (source) => source.replace("CLEAR <ls_row>-result.", "DELETE FROM zosd_lift_r2 WHERE kind = 'NONE'.\n      CLEAR <ls_row>-result."), /^no other database statement in the loop:/],
     ["a result-table write besides SELECT", (source) => source.replace("MOVE sy-subrc TO <ls_row>-status.", "CLEAR lt_hits.\n      MOVE sy-subrc TO <ls_row>-status."), /^result written only by SELECT:/],
     ["no read of the result after SELECT", (source) => source.replace(
-      "      LOOP AT lt_hits INTO ls_hit.\n        IF <ls_row>-result IS INITIAL.\n          <ls_row>-result = ls_hit-label.\n        ELSE.\n          CONCATENATE <ls_row>-result ls_hit-label INTO <ls_row>-result SEPARATED BY ';'.\n        ENDIF.\n      ENDLOOP.",
+      "      LOOP AT lt_hits INTO ls_hit.\n        IF <ls_row>-result IS INITIAL.\n          <ls_row>-result = ls_hit-ltext.\n        ELSE.\n          CONCATENATE <ls_row>-result ls_hit-ltext INTO <ls_row>-result SEPARATED BY ';'.\n        ENDIF.\n      ENDLOOP.",
       "      WRITE 'done'."), /^result read after SELECT:/],
     ["a result read after the outer loop", (source) => source.replace("    ENDLOOP.\n  ENDMETHOD.\n\n  METHOD after.", "    ENDLOOP.\n    IF lt_hits IS NOT INITIAL.\n    ENDIF.\n  ENDMETHOD.\n\n  METHOD after."), /^result read after loop:/],
     ["a loop key written before SELECT", (source) => source.replace("CLEAR <ls_row>-result.", "CLEAR <ls_row>-kind.\n      CLEAR <ls_row>-result."), /^key not written before the read:/],
@@ -166,8 +166,8 @@ describe("verified lift R2: SELECT table per row", function () {
     ["a name already used by the generated region", (source) => source.replace("LOOP AT ct_rows ASSIGNING <ls_row>.", "DATA lt_all TYPE i.\n    LOOP AT ct_rows ASSIGNING <ls_row>."), /^names: lt_all/],
     ["a generic loop table", (source) => source.replace("CHANGING ct_rows TYPE tt_rows", "CHANGING ct_rows TYPE ANY TABLE"), /^shape: ct_rows is not a resolved table/],
     ["a SELECT target other than INTO TABLE", (source) => source.replace("INTO TABLE lt_hits", "APPENDING TABLE lt_hits"), /^shape: /],
-    ["a result table whose access order is not standard", (source) => source.replace("DATA lt_hits TYPE tt_hits.", "DATA lt_hits TYPE SORTED TABLE OF ty_hit WITH UNIQUE KEY label."), /^shape: lt_hits must be a standard table/],
-    ["a result field with a different type", (source) => source.replace("label TYPE c LENGTH 40", "label TYPE c LENGTH 39"), /^shape: lt_hits-label/],
+    ["a result table whose access order is not standard", (source) => source.replace("DATA lt_hits TYPE tt_hits.", "DATA lt_hits TYPE SORTED TABLE OF ty_hit WITH UNIQUE KEY ltext."), /^shape: lt_hits must be a standard table/],
+    ["a result field with a different type", (source) => source.replace("ltext TYPE c LENGTH 40", "ltext TYPE c LENGTH 39"), /^shape: lt_hits-ltext/],
   ];
 
   const aliasSources = [
@@ -204,7 +204,7 @@ describe("verified lift R2: SELECT table per row", function () {
       .replace("      CLEAR <ls_row>-result.", "      CLEAR <ls_row>-result.\n      <ls_new>-kind = 'PRIO'."), "loop table alias"],
     ["GET REFERENCE OF the loop row before SELECT", ORIGINAL
       .replace("    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.\n    DATA lr_row TYPE REF TO ty_row.")
-      .replace("      SELECT label FROM zosd_lift_r2", "      GET REFERENCE OF <ls_row> INTO lr_row.\n      lr_row->kind = 'PRIO'.\n      SELECT label FROM zosd_lift_r2"), "loop row reference"],
+      .replace("      SELECT ltext FROM zosd_lift_r2", "      GET REFERENCE OF <ls_row> INTO lr_row.\n      lr_row->kind = 'PRIO'.\n      SELECT ltext FROM zosd_lift_r2"), "loop row reference"],
     ["REF # of the loop table retained before the loop", ORIGINAL
       .replace("    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.\n    FIELD-SYMBOLS <ls_x> LIKE LINE OF ct_rows.\n    DATA lr_rows TYPE REF TO tt_rows.\n    lr_rows = REF #( ct_rows ).")
       .replace("      CLEAR <ls_row>-result.", "      CLEAR <ls_row>-result.\n      LOOP AT lr_rows->* ASSIGNING <ls_x>.\n        <ls_x>-kind = 'PRIO'.\n      ENDLOOP."), "loop table alias"],
@@ -242,7 +242,7 @@ describe("verified lift R2: SELECT table per row", function () {
   it("refuses a method call in a class-attribute loop table body", () => {
     const source = ORIGINAL
       .replace("    CLASS-METHODS after CHANGING ct_rows TYPE tt_rows.", "    CLASS-METHODS after CHANGING ct_rows TYPE tt_rows.\n    CLASS-METHODS run.\n    CLASS-METHODS bump.\n    CLASS-DATA gt_rows TYPE tt_rows.")
-      .replace("CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.\n", "CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.\n  METHOD bump.\n    FIELD-SYMBOLS <ls_x> LIKE LINE OF gt_rows.\n    LOOP AT gt_rows ASSIGNING <ls_x>.\n      <ls_x>-kind = 'PRIO'.\n    ENDLOOP.\n  ENDMETHOD.\n  METHOD run.\n    DATA lt_hits TYPE tt_hits.\n    DATA ls_hit TYPE ty_hit.\n    FIELD-SYMBOLS <ls_row> LIKE LINE OF gt_rows.\n    LOOP AT gt_rows ASSIGNING <ls_row>.\n      bump( ).\n      SELECT label FROM zosd_lift_r2 INTO TABLE lt_hits\n        WHERE kind = <ls_row>-kind AND code = <ls_row>-code AND active = 'X'\n        ORDER BY PRIMARY KEY.\n      LOOP AT lt_hits INTO ls_hit.\n        <ls_row>-result = ls_hit-label.\n      ENDLOOP.\n    ENDLOOP.\n  ENDMETHOD.\n");
+      .replace("CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.\n", "CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.\n  METHOD bump.\n    FIELD-SYMBOLS <ls_x> LIKE LINE OF gt_rows.\n    LOOP AT gt_rows ASSIGNING <ls_x>.\n      <ls_x>-kind = 'PRIO'.\n    ENDLOOP.\n  ENDMETHOD.\n  METHOD run.\n    DATA lt_hits TYPE tt_hits.\n    DATA ls_hit TYPE ty_hit.\n    FIELD-SYMBOLS <ls_row> LIKE LINE OF gt_rows.\n    LOOP AT gt_rows ASSIGNING <ls_row>.\n      bump( ).\n      SELECT ltext FROM zosd_lift_r2 INTO TABLE lt_hits\n        WHERE kind = <ls_row>-kind AND code = <ls_row>-code AND active = 'X'\n        ORDER BY PRIMARY KEY.\n      LOOP AT lt_hits INTO ls_hit.\n        <ls_row>-result = ls_hit-ltext.\n      ENDLOOP.\n    ENDLOOP.\n  ENDMETHOD.\n");
     let caught;
     try { modelR2FromSource(basename(DEMO), source, "run", DEFAULT_DDIC); } catch (error) { caught = error; }
     expect(caught).to.be.instanceOf(Refusal);
@@ -252,7 +252,7 @@ describe("verified lift R2: SELECT table per row", function () {
     const source = ORIGINAL
       .replace("    CLASS-METHODS after CHANGING ct_rows TYPE tt_rows.", "    CLASS-METHODS after CHANGING ct_rows TYPE tt_rows.\n    CLASS-METHODS run CHANGING ct_rows TYPE tt_rows.\n    CLASS-METHODS bump.");
     const at = source.lastIndexOf("ENDCLASS.");
-    const extra = `  METHOD bump.\n  ENDMETHOD.\n\n  METHOD run.\n    DATA lt_hits TYPE tt_hits.\n    DATA ls_hit TYPE ty_hit.\n    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.\n    LOOP AT ct_rows ASSIGNING <ls_row>.\n      bump( ).\n      SELECT label FROM zosd_lift_r2 INTO TABLE lt_hits\n        WHERE kind = <ls_row>-kind AND code = <ls_row>-code AND active = 'X'\n        ORDER BY PRIMARY KEY.\n      LOOP AT lt_hits INTO ls_hit.\n        <ls_row>-result = ls_hit-label.\n      ENDLOOP.\n    ENDLOOP.\n  ENDMETHOD.\n\n`;
+    const extra = `  METHOD bump.\n  ENDMETHOD.\n\n  METHOD run.\n    DATA lt_hits TYPE tt_hits.\n    DATA ls_hit TYPE ty_hit.\n    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.\n    LOOP AT ct_rows ASSIGNING <ls_row>.\n      bump( ).\n      SELECT ltext FROM zosd_lift_r2 INTO TABLE lt_hits\n        WHERE kind = <ls_row>-kind AND code = <ls_row>-code AND active = 'X'\n        ORDER BY PRIMARY KEY.\n      LOOP AT lt_hits INTO ls_hit.\n        <ls_row>-result = ls_hit-ltext.\n      ENDLOOP.\n    ENDLOOP.\n  ENDMETHOD.\n\n`;
     const withRun = source.slice(0, at) + extra + source.slice(at);
     let caught;
     try { modelR2FromSource(basename(DEMO), withRun, "run", DEFAULT_DDIC); } catch (error) { caught = error; }
@@ -291,22 +291,22 @@ describe("verified lift R2: SELECT table per row", function () {
 
   describe("field symbols that cannot point into the loop table", () => {
     it("accepts LOOP AT the result table ASSIGNING <h> after the SELECT, by the differential", async () => {
-      const source = afterSelect(ORIGINAL, "      LOOP AT lt_hits ASSIGNING FIELD-SYMBOL(<h>).\n        TRANSLATE <h>-label TO UPPER CASE.\n      ENDLOOP.\n");
+      const source = afterSelect(ORIGINAL, "      LOOP AT lt_hits ASSIGNING FIELD-SYMBOL(<h>).\n        TRANSLATE <h>-ltext TO UPPER CASE.\n      ENDLOOP.\n");
       const {before} = await differential(source);
       expect(before.rows.map((row) => row.result.trimEnd())).to.deep.equal(["FIRST;SECOND;SECOND", "", "DONE", "FIRST;SECOND;SECOND"]);
     });
 
     it("accepts the same LOOP over an unrelated local table before the SELECT, by the differential", async () => {
       const source = beforeSelect(declare(ORIGINAL, "    DATA lt_seen TYPE tt_hits.\n    DATA ls_seen TYPE ty_hit."),
-        "      LOOP AT lt_seen ASSIGNING FIELD-SYMBOL(<s>).\n        <s>-label = <ls_row>-code.\n      ENDLOOP.\n"
-        + "      ls_seen-label = <ls_row>-kind.\n      APPEND ls_seen TO lt_seen.\n");
+        "      LOOP AT lt_seen ASSIGNING FIELD-SYMBOL(<s>).\n        <s>-ltext = <ls_row>-code.\n      ENDLOOP.\n"
+        + "      ls_seen-ltext = <ls_row>-kind.\n      APPEND ls_seen TO lt_seen.\n");
       const {before} = await differential(source);
       expect(before.rows.map((row) => row.tabix_seen)).to.deep.equal([1, 2, 3, 4]);
     });
 
     it("accepts ASSIGN of a local and a write through it, by the differential", async () => {
       const source = afterSelect(declare(ORIGINAL, "    DATA ls_local TYPE ty_hit.\n    FIELD-SYMBOLS <x> TYPE ty_hit."),
-        "      ASSIGN ls_local TO <x>.\n      <x>-label = <ls_row>-code.\n      CONCATENATE <ls_row>-result <x>-label INTO <ls_row>-result SEPARATED BY '/'.\n");
+        "      ASSIGN ls_local TO <x>.\n      <x>-ltext = <ls_row>-code.\n      CONCATENATE <ls_row>-result <x>-ltext INTO <ls_row>-result SEPARATED BY '/'.\n");
       const {before} = await differential(source);
       expect(before.rows[1].result.trimEnd()).to.equal("/GONE");
     });
@@ -319,7 +319,7 @@ describe("verified lift R2: SELECT table per row", function () {
       ["ASSIGN COMPONENT of <R>", afterSelect(declare(ORIGINAL, "    FIELD-SYMBOLS <x> TYPE any."),
         "      ASSIGN COMPONENT 'RESULT' OF STRUCTURE <ls_row> TO <x>.\n      <x> = 'A'.\n"), /names <ls_row>/],
       ["ASSIGN of a dereference before the loop", afterSelect(declare(ORIGINAL, "    DATA lr_hit TYPE REF TO ty_hit.\n    FIELD-SYMBOLS <x> TYPE ty_hit.\n    ASSIGN lr_hit->* TO <x>."),
-        "      <x>-label = 'A'.\n"), /dereference/],
+        "      <x>-ltext = 'A'.\n"), /dereference/],
       ["a dynamic ASSIGN COMPONENT of a local", afterSelect(declare(ORIGINAL, "    DATA lv_name TYPE string.\n    FIELD-SYMBOLS <x> TYPE any."),
         "      ASSIGN COMPONENT lv_name OF STRUCTURE ls_hit TO <x>.\n      ASSIGN (lv_name) TO <x>.\n      <x> = 'A'.\n"), /dynamic ASSIGN/],
       ["a field symbol with no visible ASSIGN", afterSelect(declare(ORIGINAL, "    FIELD-SYMBOLS <x> TYPE ty_row."),
@@ -355,7 +355,7 @@ describe("verified lift R2: SELECT table per row", function () {
     const withRun = (signature, extra = "") => {
       const source = attribute(ORIGINAL, `    CLASS-METHODS run ${signature}.\n    CLASS-METHODS bump.\n`);
       const at = source.lastIndexOf("ENDCLASS.");
-      const body = `  METHOD bump.\n  ENDMETHOD.\n\n  METHOD run.\n    DATA lt_hits TYPE tt_hits.\n    DATA ls_hit TYPE ty_hit.\n    FIELD-SYMBOLS <ls_row> LIKE LINE OF et_rows.\n    LOOP AT et_rows ASSIGNING <ls_row>.\n${extra}      SELECT label FROM zosd_lift_r2 INTO TABLE lt_hits\n        WHERE kind = <ls_row>-kind AND code = <ls_row>-code AND active = 'X'\n        ORDER BY PRIMARY KEY.\n      LOOP AT lt_hits INTO ls_hit.\n        <ls_row>-result = ls_hit-label.\n      ENDLOOP.\n    ENDLOOP.\n  ENDMETHOD.\n\n`;
+      const body = `  METHOD bump.\n  ENDMETHOD.\n\n  METHOD run.\n    DATA lt_hits TYPE tt_hits.\n    DATA ls_hit TYPE ty_hit.\n    FIELD-SYMBOLS <ls_row> LIKE LINE OF et_rows.\n    LOOP AT et_rows ASSIGNING <ls_row>.\n${extra}      SELECT ltext FROM zosd_lift_r2 INTO TABLE lt_hits\n        WHERE kind = <ls_row>-kind AND code = <ls_row>-code AND active = 'X'\n        ORDER BY PRIMARY KEY.\n      LOOP AT lt_hits INTO ls_hit.\n        <ls_row>-result = ls_hit-ltext.\n      ENDLOOP.\n    ENDLOOP.\n  ENDMETHOD.\n\n`;
       return source.slice(0, at) + body + source.slice(at);
     };
 
@@ -565,7 +565,7 @@ describe("verified lift R2: SELECT table per row", function () {
     expect(region(readFileSync(DEMO, "utf8"), "before")).to.equal(rendered.text);
     expect(rendered.text).to.contain("IF ct_rows IS NOT INITIAL.");
     expect(rendered.text).to.contain("sy-dbcnt = lines( lt_hits ).");
-    expect(rendered.text).to.contain("SELECT kind code seq label FROM zosd_lift_r2");
+    expect(rendered.text).to.contain("SELECT kind code seq ltext FROM zosd_lift_r2");
     const restoreTabix = rendered.text.indexOf("sy-tabix = lv_lift_saved_tabix.");
     const readTabix = rendered.text.indexOf("MOVE sy-tabix TO <ls_row>-tabix_seen.");
     expect(restoreTabix).to.be.greaterThan(-1);

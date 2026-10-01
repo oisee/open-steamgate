@@ -75,11 +75,47 @@ describe("DDIC reserved field names (tools/osd-ddic-reserved.mjs)", () => {
         {encoding: "utf8", env: {...process.env, OSD_DDIC_TRESE: local}});
       expect(run.status, run.stderr).to.equal(1);
       expect(run.stdout).to.contain("ZT_LOG-RULE: RULE is a reserved word");
-      expect(run.stdout).to.match(/local system list: 3 words, 2 of them not in the public list; 1 field\(s\) of the tree/);
+      expect(run.stdout).to.match(/local system list: 3 words, 2 of them not in the public list; 1 field\(s\) of the tree it names that neither/);
       expect(run.stdout + run.stderr).to.not.match(/QQSECRETWORD|QQUNUSEDWORD/);
     } finally {
       rmSync(dir, {recursive: true, force: true});
     }
+  });
+
+  // one synthetic table in a fresh folder, the command run on it with a
+  // synthetic local list (or malformed text standing in for one)
+  const runLocal = (fields, localText) => {
+    const dir = mkdtempSync(join(tmpdir(), "ddic-reserved-"));
+    try {
+      mkdirSync(join(dir, "src"));
+      writeFileSync(join(dir, "src", "zt_loc.tabl.xml"), TABLE("ZT_LOC", fields));
+      writeFileSync(join(dir, "trese.json"), localText);
+      return spawnSync(process.execPath, ["tools/osd-ddic-reserved.mjs", join(dir, "src")],
+        {encoding: "utf8", env: {...process.env, OSD_DDIC_TRESE: join(dir, "trese.json")}});
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  };
+
+  it("a field only the local list names fails the run, by count and without the word", () => {
+    const run = runLocal(["MANDT", "QQLOCALONLY"], JSON.stringify({words: ["QQLOCALONLY"]}));
+    expect(run.status, run.stdout + run.stderr).to.equal(1);
+    expect(run.stdout).to.match(/, 0 finding\(s\)\n/);
+    expect(run.stdout).to.match(/ 1 field\(s\) of the tree it names that neither the public list nor a measured acceptance covers/);
+    expect(run.stdout + run.stderr).to.not.include("QQLOCALONLY");
+  });
+
+  it("a word measured accepted passes the local list too", () => {
+    const run = runLocal(["TEXT", "LENGTH"], JSON.stringify({words: ["TEXT", "LENGTH"]}));
+    expect(run.status, run.stdout + run.stderr).to.equal(0);
+    expect(run.stdout).to.match(/ 0 field\(s\) of the tree it names/);
+  });
+
+  it("a malformed local list is named by path and error only, never by its content", () => {
+    const run = runLocal(["MANDT"], '{"words": [QQMALFORMEDWORD]}');
+    expect(run.status).to.equal(2);
+    expect(run.stderr).to.match(/trese\.json could not be read \(SyntaxError\); its content is not printed/);
+    expect(run.stdout + run.stderr).to.not.include("QQMALFORMEDWORD");
   });
 
   it("the tree has no finding and no allow entry it does not need", () => {

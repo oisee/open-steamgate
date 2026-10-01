@@ -112,12 +112,12 @@ describe("verified lift R3", () => {
   }
 
   it("refuses a nullable DDIC column, even for an initial value", () => {
-    const s = SOURCE.replace("CHECK ls_row-active = 'X'", "CHECK ls_row-label = '                                        '");
+    const s = SOURCE.replace("CHECK ls_row-active = 'X'", "CHECK ls_row-ltext = '                                        '");
     const folder = mkdtempSync(join(tmpdir(), "lift-r3-ddic-"));
     try {
       const xml = readFileSync("src/lift/zosd_lift_r2.tabl.xml", "utf8");
       writeFileSync(join(folder, "zosd_lift_r2.tabl.xml"), xml.replace(
-        /(<FIELDNAME>LABEL<\/FIELDNAME>[\s\S]*?)<NOTNULL>X<\/NOTNULL>/,
+        /(<FIELDNAME>LTEXT<\/FIELDNAME>[\s\S]*?)<NOTNULL>X<\/NOTNULL>/,
         "$1"));
       expect(() => modelR3FromSource(basename(FILE), s, "before", [folder])).to.throw(/NULL/);
     } finally {
