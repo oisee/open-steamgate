@@ -474,8 +474,10 @@ func InflateHostOpen(s *Session) int32 {
 // InflateHostFeed is ZCL_OSD_INFLATE=>HOST_FEED. State: 1 paused, 2 done,
 // in which case unused holds the bytes after the end and the handle is
 // gone; a corrupt stream answers its reason and drops the handle as well.
-// A stream its reader abandons keeps its handle (at most 64 KiB of window)
-// until the session ends: ABAP has no destructor to drop it with.
+// A stream its reader abandons (a zip-bomb cap stops reading a paused one)
+// keeps its handle, window and unread input until the session ends: ABAP
+// has no destructor to drop it with. A session is one request in osgo and
+// one run in osabap; a long-lived APC session would collect them.
 func InflateHostFeed(s *Session, handle int32, data string, maxOut int32, raw *string, state *int32, unused *string, reason *string) {
 	m := s.inflaters()
 	z := m[handle]
