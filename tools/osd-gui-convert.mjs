@@ -39,6 +39,7 @@ import {readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, statSync} f
 import {basename, join, resolve} from "node:path";
 import {contentFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {hostModules} from "./osd-host.mjs";
+import {stripLiterals} from "./abap-additions.mjs";
 
 const DEFAULT_OUT = "gen/gui";
 const CONVERTER = "converter/src/api.mjs";
@@ -55,7 +56,7 @@ export function batchRegistrySource(reports) {
 ${entry.wired === true ? `        lo_report = NEW ${entry.className.toLowerCase()}( ).
 ${[...new Set(entry.selectionNames ?? [])].map((name) => `        INSERT ${abapLiteral(name)} INTO TABLE lt_allowed.`).join("\n")}
 ${(entry.selectionElements ?? []).filter((element) => element.kind === "select-option").map((element) => `        INSERT ${abapLiteral(element.name)} INTO TABLE lt_select_options.`).join("\n")}
-${(entry.selectionElements ?? []).filter((element) => /LOWER\s+CASE/i.test(element.additions ?? "")).map((element) => `        INSERT ${abapLiteral(element.name)} INTO TABLE lt_lower_case.`).join("\n")}` : `        rs_result-status = 'UNSUPPORTED'.
+${(entry.selectionElements ?? []).filter((element) => /\bLOWER\s+CASE\b/i.test(stripLiterals(element.additions))).map((element) => `        INSERT ${abapLiteral(element.name)} INTO TABLE lt_lower_case.`).join("\n")}` : `        rs_result-status = 'UNSUPPORTED'.
         rs_result-detail = ${abapLiteral(entry.skipped ?? "conversion unsupported")}.
         RETURN.`}`).join("\n");
   return `CLASS zcl_osd_batch_report DEFINITION PUBLIC FINAL CREATE PUBLIC.
@@ -298,10 +299,17 @@ export function namesOf(programName) {
 // The converter emits the declarations, while this host supplies SAP's
 // selection-screen conversion at the boundary where they enter the builder.
 export function selectionSemanticsSource(source, elements) {
+  const additions = new Map(elements.map((element) => [element, stripLiterals(element.additions)]));
+  const hasExplicitRadioDefault = (element) => {
+    const clean = additions.get(element);
+    const marker = /\bDEFAULT\b/i.exec(clean);
+    return marker !== null && /^(?:'X'|X|ABAP_TRUE)(?=\s|$)/i.test(
+      (element.additions ?? "").slice(marker.index + marker[0].length).trimStart());
+  };
   const radios = new Map();
   for (const element of elements) {
     if (element.kind !== "parameter") continue;
-    const group = /RADIOBUTTON\s+GROUP\s+(\w+)/i.exec(element.additions ?? "")?.[1]?.toUpperCase();
+    const group = /\bRADIOBUTTON\s+GROUP\s+(\w+)/i.exec(additions.get(element))?.[1]?.toUpperCase();
     if (!group) continue;
     if (!radios.has(group)) radios.set(group, []);
     radios.get(group).push(element);
@@ -315,21 +323,20 @@ export function selectionSemanticsSource(source, elements) {
         .replace(/\) \)\.$/, ") ) ).");
     }
     if (line.includes("io_builder->add_select_option(")) {
-      const option = /\bOPTION\s+(EQ|NE|GT|GE|LT|LE|BT|NB|CP|NP)\b/i.exec(element.additions ?? "")?.[1]?.toUpperCase();
-      const sign = /\bSIGN\s+([IE])\b/i.exec(element.additions ?? "")?.[1]?.toUpperCase();
+      const option = /\bOPTION\s+(EQ|NE|GT|GE|LT|LE|BT|NB|CP|NP)\b/i.exec(additions.get(element))?.[1]?.toUpperCase();
+      const sign = /\bSIGN\s+([IE])\b/i.exec(additions.get(element))?.[1]?.toUpperCase();
       if (option) line = line.replace(/(default = VALUE #\( sign = '[IE]' option = ')[A-Z]+(')/, `$1${option}$2`);
       if (sign) line = line.replace(/(default = VALUE #\( sign = ')[IE](')/, `$1${sign}$2`);
-      if (/LOWER\s+CASE/i.test(element.additions ?? "")) line = line.replace(/\) \)\.$/, " lower_case = abap_true ) ).");
+      if (/\bLOWER\s+CASE\b/i.test(additions.get(element))) line = line.replace(/\) \)\.$/, " lower_case = abap_true ) ).");
       return line.replace("add_select_option( VALUE #(", "add_select_option( zcl_osd_submit_semantics=>select_option( VALUE #(")
         .replace(/\) \)\.$/, ") ) ).");
     }
-    const group = /RADIOBUTTON\s+GROUP\s+(\w+)/i.exec(element.additions ?? "")?.[1]?.toUpperCase();
+    const group = /\bRADIOBUTTON\s+GROUP\s+(\w+)/i.exec(additions.get(element))?.[1]?.toUpperCase();
     const members = radios.get(group) ?? [];
-    const explicit = /DEFAULT\s+(?:'X'|X|ABAP_TRUE)(?=\s|$)/i;
-    if (explicit.test(element.additions ?? "") && !line.includes(" default = abap_true")) {
+    if (hasExplicitRadioDefault(element) && !line.includes(" default = abap_true")) {
       return line.replace(/\) \)\.$/, " default = abap_true ) ).");
     }
-    if (members[0] === element && !members.some((item) => explicit.test(item.additions ?? ""))) {
+    if (members[0] === element && !members.some(hasExplicitRadioDefault)) {
       return line.replace(/\) \)\.$/, " default = abap_true ) ).");
     }
     return line;

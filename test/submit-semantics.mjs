@@ -1,5 +1,49 @@
 import {expect} from "chai";
 import {dialogStep, workProcess} from "../tools/osd-dialog-step.mjs";
+import {batchRegistrySource, selectionSemanticsSource} from "../tools/osd-gui-convert.mjs";
+
+describe("called report selection additions", () => {
+  const parameter = (name, additions) => ({kind: "parameter", name, additions});
+  const selectOption = (name, additions) => ({kind: "select-option", name, additions});
+  const line = (kind, name, tail) => `io_builder->add_${kind}( VALUE #( name = '${name}' ${tail} ) ).`;
+
+  it("ignores addition keywords inside defaults while keeping real additions", () => {
+    const elements = [
+      parameter("P_TEXT", "TYPE c LENGTH 20 DEFAULT 'lower case'"),
+      selectOption("S_TEXT", "FOR p_text DEFAULT 'option eq sign e group r1 lower case'"),
+      selectOption("S_REAL", "FOR p_text DEFAULT 'option eq' OPTION NE SIGN E LOWER CASE"),
+    ];
+    const source = [
+      line("parameter", "P_TEXT", "default = 'lower case'"),
+      line("select_option", "S_TEXT", "default = VALUE #( sign = 'I' option = 'EQ' low = 'option eq sign e group r1 lower case' )"),
+      line("select_option", "S_REAL", "default = VALUE #( sign = 'I' option = 'EQ' low = 'option eq' )"),
+    ].join("\n");
+    const converted = selectionSemanticsSource(source, elements).split("\n");
+    expect(converted[0]).to.include("zcl_osd_submit_semantics=>parameter(");
+    expect(converted[1]).to.include("sign = 'I' option = 'EQ'");
+    expect(converted[1]).to.not.include("lower_case = abap_true");
+    expect(converted[2]).to.include("sign = 'E' option = 'NE'");
+    expect(converted[2]).to.include("lower_case = abap_true");
+    const registry = batchRegistrySource([{programName: "Z_TEST", className: "ZCL_TEST", wired: true,
+      selectionElements: elements, selectionNames: elements.map((element) => element.name)}]);
+    expect(registry).to.include("INSERT `S_REAL` INTO TABLE lt_lower_case.");
+    expect(registry).to.not.include("INSERT `P_TEXT` INTO TABLE lt_lower_case.");
+    expect(registry).to.not.include("INSERT `S_TEXT` INTO TABLE lt_lower_case.");
+  });
+
+  it("reads radio groups and explicit defaults outside quoted text", () => {
+    const elements = [
+      parameter("P_ONE", "RADIOBUTTON GROUP r1 DEFAULT 'group r2'"),
+      parameter("P_TWO", "RADIOBUTTON GROUP r1 DEFAULT 'X'"),
+      parameter("P_THREE", "DEFAULT 'radiobutton group r1' RADIOBUTTON GROUP r2"),
+    ];
+    const source = elements.map((element) => line("radiobutton", element.name, "")).join("\n");
+    const converted = selectionSemanticsSource(source, elements).split("\n");
+    expect(converted[0]).to.not.include("default = abap_true");
+    expect(converted[1]).to.include("default = abap_true");
+    expect(converted[2]).to.include("default = abap_true");
+  });
+});
 
 describe("called report SUBMIT selections", function () {
   this.timeout(30000);
