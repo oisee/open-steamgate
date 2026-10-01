@@ -30,18 +30,24 @@ with "context canceled".
    by the `zip` binary, so the tool spawns no child. A unit that puts no
    class in the zip fails here: there is nothing to prove.
 2. **Preflight.** Before anything is written, the tool reads what the
-   package holds: the abapGit repository registered for it, its TDEVC row
-   and its TADIR objects. Step 7 purges the package, so without `--reuse`
-   the package must not exist yet. A registered repository, an existing
-   package or any object in it refuses the run (exit 2), and the refusal
-   names the objects. `--reuse` admits a package whose objects are none or
-   exactly the zip's objects, which is what an earlier run of the same zip
-   leaves; any difference is refused and listed.
+   package holds: the abapGit repository registered for it (key and name),
+   its TDEVC row and its TADIR objects. The tool's own offline repository
+   is always named `OSDPROVE <package>`; a repository under any other name
+   is somebody else's and refuses the run (exit 2), with or without
+   `--reuse`. Step 7 purges the package, so without `--reuse` the package
+   must not exist yet: a registered repository, an existing package or any
+   object in it refuses the run, and the refusal names the objects.
+   `--reuse` admits a package with no repository or the tool's own, whose
+   objects are within the zip's objects, which is what an earlier run of
+   the same zip leaves; any other object is refused and listed.
 3. **Package.** Run `create DEVC $X`, unless `--reuse` found it.
 4. **Import.** An `execute_abap` snippet decodes the zip. The zip is
    embedded as base64 in lines of 200 characters. The snippet calls
    `zcl_abapgit_zip=>load( )`, then reuses the package's repository or
-   creates `new_offline( )`. It then runs `set_files_remote( )` and
+   creates `new_offline( )` named `OSDPROVE <package>`; a repository with
+   any other name found at this point (one that appeared after the
+   preflight) is not imported into. The report carries the repository key,
+   and a report without one fails. It then runs `set_files_remote( )` and
    `deserialize_checks( )`, with every decision set to yes, and then
    `deserialize( )`. The tool reports the status, the abapGit log messages
    of types E/W/A, and the TADIR count. Status S passes. Status W passes
@@ -57,13 +63,24 @@ with "context canceled".
    `test CLAS X` with `include_dangerous`. The JSON result has
    `classes[].testMethods[]`, and a failing method has `alerts[]` with a
    title. The result must be JSON and must name a test class of that
-   class; anything else fails. The one exception is a class that has no
+   class; anything else fails. The methods are compared by identity, not by
+   count: the set of `TESTCLASS->METHOD` names the system ran
+   (case-insensitive) must equal the set of `FOR TESTING` methods in the
+   source, or with `--osg run` the set OSG ran, and the run names what is
+   missing on either side. A method entry without a name does not count.
+   (A test method inherited from an abstract local test class is
+   attributed by the source parse to the class that declares it, where ADT
+   names the subclass; such a class shows as a difference, not a pass.) The one exception is a class that has no
    tests on OSG and, by step 5, none on the system (WITH_UNIT_TESTS not
    set, empty CCAU): it is not called and is marked so. If no test method
    ran on the system at all, the run fails: there is nothing to prove.
-7. **Cleanup.** The tool reads the package again and purges only if every
-   object in it is one of the zip's objects; otherwise it refuses the purge
-   and lists what is there. It then runs abapGit `purge( )` with `delete_checks( )`. If
+7. **Cleanup.** The tool reads the package again and purges only when the
+   repository is the tool's own by name and is the one this run imported
+   into by key, and every object in the package is one of the zip's
+   objects; otherwise it refuses the purge (exit 1) and says why. The purge
+   snippet checks the key and the name again on the system before it
+   purges. A stand-alone `--cleanup` has no import, so there the name is
+   the evidence of ownership. It then runs abapGit `purge( )` with `delete_checks( )`. If
    the repository row is still there, the tool deletes it and runs
    `COMMIT WORK`. It then checks that no repository row, no TADIR object
    and no TDEVC package is left. Anything left fails the run. `--keep`
@@ -138,6 +155,12 @@ from the class XML and is not a canned answer. The tests cover:
 - a package that already holds objects, has a repository or exists;
 - `--reuse` with exactly the zip's objects, and with different ones;
 - an object that arrived during the run, which refuses the purge;
+- somebody else's repository, with and without `--reuse`, before the
+  import and appearing after the preflight; a repository key that changed
+  between import and purge; a renamed repository; an import report without
+  a key;
+- method identities: nameless entries, the same count with different
+  names, and `--osg run` against the methods OSG ran;
 - each piece of missing evidence: no status, W with and without its
   messages, E without a message, an unknown status, no end marker, no
   class-check entry, unit output that is not JSON or does not name the

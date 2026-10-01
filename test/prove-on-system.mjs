@@ -50,9 +50,10 @@ function unzip(buf) {
 function fakeSystem({
   importErrors = [], importWarnings = [], status, failing = new Set(), stickyTadir = 0,
   before = {}, intruder, editImport = (m) => m, dropCheck = new Set(), checkOverride = {}, unitText = {},
+  swapKeyAfterImport,
 } = {}) {
   const sys = {
-    packages: new Set(before.packages ?? []), repo: before.repo, tadir: [...(before.tadir ?? [])],
+    packages: new Set(before.packages ?? []), repo: before.repo, repoName: before.repoName, tadir: [...(before.tadir ?? [])],
     classes: new Map(), calls: [],
   };
   const pkgOf = (code) => /devclass = '([^']+)'/.exec(code)?.[1] ?? /iv_package = '([^']+)'/.exec(code)?.[1];
@@ -73,14 +74,21 @@ function fakeSystem({
         if (code.includes("obj={ ls_t-object }")) {
           sys.calls.at(-1).kind = "inventory";
           const objs = sys.tadir.map((t) => ` obj=${t.replace(" ", ":")};`).join("");
-          return framed(`repo=${sys.repo ?? "none"}; tdevc=${sys.packages.has(pkg) ? 1 : 0}; `
+          return framed(`${sys.repo ? `repo=${sys.repo}; repo_name=${sys.repoName};` : "repo=none;"} tdevc=${sys.packages.has(pkg) ? 1 : 0}; `
             + `tadir=${sys.tadir.length};${objs}`);
         }
         if (code.includes("zcl_abapgit_zip=>load")) {
           sys.calls.at(-1).kind = "import";
           const b64 = [...code.matchAll(/APPEND `([A-Za-z0-9+/=]*)` TO lt_b64\./g)].map((m) => m[1]).join("");
           const files = unzip(Buffer.from(b64, "base64"));
-          sys.repo = "000000000042";
+          const own = /iv_name = '([^']+)'/.exec(code)[1];
+          if (sys.repo && sys.repoName !== own) {
+            // the snippet's own guard: never deserialise into somebody else's repository
+            return framed(`files=${files.size}; ERR the package has repository ${sys.repo} named ${sys.repoName}, not this tool's; logs=0; tadir=${sys.tadir.length};`);
+          }
+          sys.repo ??= "000000000042";
+          sys.repoName = own;
+          const importedKey = sys.repo;
           const objects = new Set(sys.tadir);
           objects.add(`DEVC ${pkg}`);
           for (const [f, text] of files) {
@@ -98,7 +106,8 @@ function fakeSystem({
           sys.tadir = [...objects];
           const logs = [...importErrors.map((e) => ` [E] ${e};`), ...importWarnings.map((e) => ` [W] ${e};`)].join("");
           const st = status ?? (importErrors.length ? "E" : importWarnings.length ? "W" : "S");
-          return alert(editImport(`${MARK_OPEN}files=${files.size}; repo=${sys.repo}; status=${st};${logs} `
+          if (swapKeyAfterImport) sys.repo = swapKeyAfterImport;
+          return alert(editImport(`${MARK_OPEN}files=${files.size}; repo=${importedKey}; status=${st};${logs} `
             + `logs=${importErrors.length + importWarnings.length}; tadir=${sys.tadir.length};${MARK_CLOSE}`));
         }
         if (code.includes("seoclassdf")) {
@@ -114,6 +123,12 @@ function fakeSystem({
         }
         if (code.includes("->purge(")) {
           sys.calls.at(-1).kind = "purge";
+          const want = /get_key\( \) <> '([0-9]*)'/.exec(code)[1];
+          const ownName = /get_name\( \) <> '([^']+)'/.exec(code)[1];
+          if (sys.repo && (sys.repo !== want || sys.repoName !== ownName)) {
+            return framed(`ERR purge refused: repository ${sys.repo} named ${sys.repoName} is not the one this run imported into; `
+              + `repo_left=0; tadir_left=${sys.tadir.length}; tdevc_left=1;`);
+          }
           let out = sys.repo ? "purged status=S;" : "no repo;";
           sys.tadir = sys.tadir.slice(0, stickyTadir);
           if (stickyTadir === 0) sys.packages.delete(pkg);
@@ -155,8 +170,8 @@ const kinds = (mcp) => mcp.sys.calls.map((c) => c.kind ?? c.action);
 describe("osd-prove-on-system", () => {
   it("counts FOR TESTING methods from the parse (helpers are not tests)", () => {
     const counts = countTestMethods(join(FIXTURE, "src"));
-    assert.equal(counts.get("ZCL_OSD_PROVE_DEMO"), 2);
-    assert.equal(counts.get("ZCL_OSD_PROVE_PLAIN"), 0);
+    assert.deepEqual(counts.get("ZCL_OSD_PROVE_DEMO"), ["LTCL_DOUBLE->TWO_IS_FOUR", "LTCL_DOUBLE->ZERO_IS_ZERO"]);
+    assert.deepEqual(counts.get("ZCL_OSD_PROVE_PLAIN"), []);
   });
 
   it("builds the zip in process, with the unit's objects", () => {
@@ -197,7 +212,7 @@ describe("osd-prove-on-system", () => {
         const {code, text} = await run([src, "--unit", "prove-demo", "--manifest", MANIFEST, "--package", PKG], fakeSystem());
         assert.equal(code, 1, text);
         assert.match(text, /ZCL_OSD_PROVE_DEMO\s+\| 2\s+\| 0\s+\| 0/);
-        assert.match(text, /FAIL ZCL_OSD_PROVE_DEMO: 2 test method\(s\) on OSG, 0 on the system/);
+        assert.match(text, /FAIL ZCL_OSD_PROVE_DEMO: test methods differ: 2 test method\(s\) on OSG, 0 on the system/);
         assert.match(text, /WITH_UNIT_TESTS is not set on the system/);
         assert.match(text, /no CCAU include on the system/);
       } finally {
@@ -251,8 +266,8 @@ describe("osd-prove-on-system", () => {
       assert.deepEqual(mcp.sys.tadir, ["PROG ZSOMEBODY_ELSES"]);
     });
 
-    it("a package with a registered repository is refused without --reuse", async () => {
-      const mcp = fakeSystem({before: {packages: [PKG], repo: "000000000007"}});
+    it("a package with the tool's own repository is refused without --reuse", async () => {
+      const mcp = fakeSystem({before: {packages: [PKG], repo: "000000000007", repoName: `OSDPROVE ${PKG}`}});
       const {code, text} = await run(base(), mcp);
       assert.equal(code, 2, text);
       assert.match(text, /abapGit repository 000000000007 is registered for it/);
@@ -267,7 +282,7 @@ describe("osd-prove-on-system", () => {
     });
 
     it("--reuse admits a package whose objects are exactly the zip's", async () => {
-      const mcp = fakeSystem({before: {packages: [PKG], repo: "000000000042",
+      const mcp = fakeSystem({before: {packages: [PKG], repo: "000000000042", repoName: `OSDPROVE ${PKG}`,
         tadir: [`DEVC ${PKG}`, ...ZIP_OBJECTS]}});
       const {code, text} = await run([...base(), "--reuse"], mcp);
       assert.equal(code, 0, text);
@@ -279,8 +294,80 @@ describe("osd-prove-on-system", () => {
       const mcp = fakeSystem({before: {packages: [PKG], tadir: [...ZIP_OBJECTS, "TABL ZSOMEBODY_ELSES"]}});
       const {code, text} = await run([...base(), "--reuse"], mcp);
       assert.equal(code, 2, text);
-      assert.match(text, /--reuse takes a package whose objects are exactly the zip's.*\n  not in the zip:\n\s+TABL ZSOMEBODY_ELSES/);
+      assert.match(text, /--reuse takes a package whose objects are within the zip's.*\n  not in the zip:\n\s+TABL ZSOMEBODY_ELSES/);
       assert.deepEqual(kinds(mcp), ["inventory"]);
+    });
+
+    it("somebody else's repository in an empty package is refused, also with --reuse", async () => {
+      for (const extra of [[], ["--reuse"]]) {
+        const mcp = fakeSystem({before: {packages: [PKG], repo: "000000000007", repoName: "TEAM_X_PROJECT"}});
+        const {code, text} = await run([...base(), ...extra], mcp);
+        assert.equal(code, 2, text);
+        assert.match(text, /refused: \$ZOSG_TMP_TEST has abapGit repository 000000000007 named "TEAM_X_PROJECT", not this tool's/);
+        assert.deepEqual(kinds(mcp), ["inventory"]);
+        assert.equal(mcp.sys.repo, "000000000007");
+      }
+    });
+
+    it("--reuse with the tool's own repository whose objects are within the zip's is admitted", async () => {
+      const mcp = fakeSystem({before: {packages: [PKG], repo: "000000000042", repoName: `OSDPROVE ${PKG}`,
+        tadir: ["CLAS ZCL_OSD_PROVE_DEMO"]}});
+      const {code, text} = await run([...base(), "--reuse"], mcp);
+      assert.equal(code, 0, text);
+    });
+
+    it("a repository key that changed between import and purge refuses the purge", async () => {
+      const mcp = fakeSystem({swapKeyAfterImport: "000000000099"});
+      const {code, text} = await run(base(), mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL purge refused: the repository in \$ZOSG_TMP_TEST is 000000000099, this run imported into 000000000042/);
+      assert.ok(!kinds(mcp).includes("purge"));
+    });
+
+    it("an import report without a repository key leaves no purge: the run cannot show which repo it made", async () => {
+      const mcp = fakeSystem({editImport: (m) => m.replace(/ repo=\d+;/, "")});
+      const {code, text} = await run(base(), mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL import: the report carries no repository key/);
+      assert.match(text, /FAIL purge refused: repository 000000000042 is in \$ZOSG_TMP_TEST, and this run recorded no repository key/);
+      assert.ok(!kinds(mcp).includes("purge"));
+    });
+
+    it("a repository that is no longer the tool's by name refuses the purge", async () => {
+      const mcp = fakeSystem();
+      const call = mcp.call.bind(mcp);
+      mcp.call = async (action, target, params) => {
+        const r = await call(action, target, params);
+        if (mcp.sys.calls.at(-1).kind === "import") mcp.sys.repoName = "RENAMED";
+        return r;
+      };
+      const {code, text} = await run(base(), mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL purge refused: \$ZOSG_TMP_TEST has abapGit repository 000000000042 named "RENAMED"/);
+      assert.ok(!kinds(mcp).includes("purge"));
+    });
+
+    it("a foreign repository that appears after the preflight is not imported into and not purged", async () => {
+      const mcp = fakeSystem();
+      const call = mcp.call.bind(mcp);
+      mcp.call = async (action, target, params) => {
+        const r = await call(action, target, params);
+        if (action === "create") Object.assign(mcp.sys, {repo: "000000000007", repoName: "TEAM_X_PROJECT"});
+        return r;
+      };
+      const {code, text} = await run(base(), mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL import failed: the package has repository 000000000007 named TEAM_X_PROJECT, not this tool's/);
+      assert.match(text, /FAIL purge refused: .*named "TEAM_X_PROJECT"/);
+      assert.ok(!kinds(mcp).includes("purge"));
+      assert.match(importAbap(Buffer.from("PK"), PKG),
+        /IF li_repo IS BOUND AND li_repo->get_name\( \) <> 'OSDPROVE \$ZOSG_TMP_TEST'\.[\s\S]*iv_name = 'OSDPROVE \$ZOSG_TMP_TEST'/);
+    });
+
+    it("the purge snippet itself names the key and the tool's repository", () => {
+      const code = cleanupAbap(PKG, "000000000042");
+      assert.match(code, /get_key\( \) <> '000000000042' OR li_repo->get_name\( \) <> 'OSDPROVE \$ZOSG_TMP_TEST'/);
+      assert.throws(() => cleanupAbap(PKG, "42' OR 1 = '1"), /not a repository key/);
     });
 
     it("before the purge: an object that is not the zip's refuses the purge and is named", async () => {
@@ -350,9 +437,37 @@ describe("osd-prove-on-system", () => {
       assert.match(text, /FAIL ZCL_OSD_PROVE_DEMO: the unit result names no test class of ZCL_OSD_PROVE_DEMO/);
     });
 
+    it("nameless method entries do not count: two empty objects for the expected class fail", async () => {
+      const {code, text} = await run(base(), fakeSystem({
+        unitText: {ZCL_OSD_PROVE_DEMO: JSON.stringify({classes: [{name: "LTCL_DOUBLE", parentName: "ZCL_OSD_PROVE_DEMO", testMethods: [{}, {}]}]})},
+      }));
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL ZCL_OSD_PROVE_DEMO: test methods differ: 2 test method\(s\) on OSG, 0 on the system; on OSG, not on the system: LTCL_DOUBLE->TWO_IS_FOUR, LTCL_DOUBLE->ZERO_IS_ZERO/);
+      assert.match(text, /2 test method entr\(ies\) without a name, not counted/);
+    });
+
+    it("the same count with different names fails, naming the missing and the extra", async () => {
+      const {code, text} = await run(base(), fakeSystem({
+        unitText: {ZCL_OSD_PROVE_DEMO: JSON.stringify({classes: [{name: "LTCL_DOUBLE", parentName: "ZCL_OSD_PROVE_DEMO",
+          testMethods: [{name: "two_is_four"}, {name: "SOMETHING_ELSE"}]}]})},
+      }));
+      assert.equal(code, 1, text);
+      assert.match(text, /test methods differ: 2 test method\(s\) on OSG, 2 on the system; on OSG, not on the system: LTCL_DOUBLE->ZERO_IS_ZERO; on the system, not on OSG: LTCL_DOUBLE->SOMETHING_ELSE/);
+    });
+
+    it("--osg run compares against the methods OSG ran", async () => {
+      const real = buildZip(join(FIXTURE, "src"), {unit: "prove-demo", manifest: MANIFEST});
+      const ran = {ZCL_OSD_PROVE_DEMO: ["LTCL_DOUBLE->TWO_IS_FOUR", "LTCL_DOUBLE->ONLY_ON_OSG"], ZCL_OSD_PROVE_PLAIN: []};
+      const r = await prove({folder: "x", unit: "u", pkg: PKG, mcp: fakeSystem(),
+        osg: {mode: "run", methods: async (cls) => ({methods: ran[cls].length, names: ran[cls], failing: []})},
+        zipper: () => real});
+      assert.equal(r.ok, false);
+      assert.match(r.problems.join("\n"), /on OSG, not on the system: LTCL_DOUBLE->ONLY_ON_OSG; on the system, not on OSG: LTCL_DOUBLE->ZERO_IS_ZERO/);
+    });
+
     it("a zip without classes fails with nothing to prove, before any call", async () => {
       const mcp = fakeSystem();
-      const r = await prove({folder: "x", unit: "u", pkg: PKG, mcp, osg: {mode: "count", methods: async () => ({methods: 0, failing: []})},
+      const r = await prove({folder: "x", unit: "u", pkg: PKG, mcp, osg: {mode: "count", methods: async () => ({methods: 0, names: [], failing: []})},
         zipper: () => ({bytes: Buffer.alloc(0), objects: ["TABL ZX"], classes: [], unit: "u"})});
       assert.equal(r.ok, false);
       assert.match(r.problems.join("\n"), /nothing to prove: unit "u" puts no class in the zip/);
@@ -362,7 +477,7 @@ describe("osd-prove-on-system", () => {
     it("no test method run on the system fails with nothing to prove", async () => {
       const mcp = fakeSystem();
       const real = buildZip(join(FIXTURE, "src"), {unit: "prove-demo", manifest: MANIFEST});
-      const r = await prove({folder: "x", unit: "u", pkg: PKG, mcp, osg: {mode: "count", methods: async () => ({methods: 0, failing: []})},
+      const r = await prove({folder: "x", unit: "u", pkg: PKG, mcp, osg: {mode: "count", methods: async () => ({methods: 0, names: [], failing: []})},
         zipper: () => ({...real, classes: ["ZCL_OSD_PROVE_PLAIN"]})});
       assert.equal(r.ok, false, r.problems.join("\n"));
       assert.match(r.problems.join("\n"), /nothing to prove: no test method ran on the system/);

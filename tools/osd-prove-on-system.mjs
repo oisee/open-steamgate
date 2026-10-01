@@ -22,15 +22,20 @@
 // The steps, each a small MCP call, because a long call can be cut by
 // "context canceled":
 //   1. zip the folder (tools/osd-abapgit-zip.mjs, fail closed on the unit);
-//   1a. read what the package holds -- repository, TDEVC, TADIR -- and refuse
-//      a package that is not new, since step 6 purges it; `--reuse` admits
-//      one whose objects are exactly the zip's (an earlier run's leftovers);
+//   1a. read what the package holds -- repository (key and name), TDEVC,
+//      TADIR -- and refuse a package that is not new, since step 6 purges
+//      it; a repository not named `OSDPROVE <package>` (this tool's own)
+//      refuses always; `--reuse` admits the tool's own repository and
+//      objects within the zip's (an earlier run's leftovers);
 //   2. create the local package (`create DEVC`) unless --reuse found it;
-//   3. import it with abapGit (`analyze execute_abap`);
+//   3. import it with abapGit (`analyze execute_abap`) into the tool's own
+//      offline repository, recording its key;
 //   4. read SEOCLASSDF-WITH_UNIT_TESTS and the CCAU line count per class;
-//   5. ABAP Unit per class (`test CLAS`);
-//   6. read the package again and purge only if every object in it is one
-//      of the zip's; delete the repo if it is still registered; verify that
+//   5. ABAP Unit per class (`test CLAS`), compared by method identity
+//      (test class -> method), not by count;
+//   6. read the package again and purge only the tool's own repository with
+//      the key this run imported into, and only if every object in it is
+//      one of the zip's; delete the repo if it is still registered; verify that
 //      no package, no TADIR row and no repo is left.
 //
 // Missing evidence is never a pass: no status, no class-check entry, a unit
@@ -85,9 +90,14 @@ const CLASS_NAME = /^[A-Z0-9_/]{1,30}$/;
 
 const report = (expr) => `cl_abap_unit_assert=>fail( msg = |${MARK_OPEN}{ ${expr} }${MARK_CLOSE}| ).`;
 
-export function repoName(pkg) {
-  return `OSG_${pkg.slice(1)}`.slice(0, 60);
+/** The offline repository this tool creates is named so it can tell it
+ *  from anybody else's: a repository in the package under any other name
+ *  is not ours to deserialise into or to purge. */
+export function ownRepoName(pkg) {
+  return `OSDPROVE ${pkg}`;
 }
+
+const REPO_KEY = /^[0-9]{1,12}$/;
 
 /** Step 3: base64 zip -> abapGit offline repo in `pkg` -> deserialize. */
 export function importAbap(zipBytes, pkg) {
@@ -108,23 +118,27 @@ export function importAbap(zipBytes, pkg) {
     "    DATA li_repo TYPE REF TO zif_abapgit_repo.",
     "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
     `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
-    "    IF li_repo IS NOT BOUND.",
-    "      li_repo = zcl_abapgit_repo_srv=>get_instance( )->new_offline(",
-    `        iv_name = '${repoName(pkg)}' iv_package = '${pkg}' ).`,
+    `    IF li_repo IS BOUND AND li_repo->get_name( ) <> '${ownRepoName(pkg)}'.`,
+    "      lv_out = |{ lv_out } ERR the package has repository { li_repo->get_key( ) } named { li_repo->get_name( ) }, not this tool's;|.",
+    "    ELSE.",
+    "      IF li_repo IS NOT BOUND.",
+    "        li_repo = zcl_abapgit_repo_srv=>get_instance( )->new_offline(",
+    `          iv_name = '${ownRepoName(pkg)}' iv_package = '${pkg}' ).`,
+    "      ENDIF.",
+    "      lv_out = |{ lv_out } repo={ li_repo->get_key( ) };|.",
+    "      li_repo->set_files_remote( lt_files ).",
+    "      DATA(ls_checks) = li_repo->deserialize_checks( ).",
+    "      LOOP AT ls_checks-overwrite ASSIGNING FIELD-SYMBOL(<ls_o>).",
+    "        <ls_o>-decision = zif_abapgit_definitions=>c_yes.",
+    "      ENDLOOP.",
+    "      LOOP AT ls_checks-warning_package ASSIGNING FIELD-SYMBOL(<ls_w>).",
+    "        <ls_w>-decision = zif_abapgit_definitions=>c_yes.",
+    "      ENDLOOP.",
+    "      ls_checks-requirements-decision = zif_abapgit_definitions=>c_yes.",
+    "      ls_checks-dependencies-decision = zif_abapgit_definitions=>c_yes.",
+    "      li_repo->deserialize( is_checks = ls_checks ii_log = li_log ).",
+    "      lv_out = |{ lv_out } status={ li_log->get_status( ) };|.",
     "    ENDIF.",
-    "    lv_out = |{ lv_out } repo={ li_repo->get_key( ) };|.",
-    "    li_repo->set_files_remote( lt_files ).",
-    "    DATA(ls_checks) = li_repo->deserialize_checks( ).",
-    "    LOOP AT ls_checks-overwrite ASSIGNING FIELD-SYMBOL(<ls_o>).",
-    "      <ls_o>-decision = zif_abapgit_definitions=>c_yes.",
-    "    ENDLOOP.",
-    "    LOOP AT ls_checks-warning_package ASSIGNING FIELD-SYMBOL(<ls_w>).",
-    "      <ls_w>-decision = zif_abapgit_definitions=>c_yes.",
-    "    ENDLOOP.",
-    "    ls_checks-requirements-decision = zif_abapgit_definitions=>c_yes.",
-    "    ls_checks-dependencies-decision = zif_abapgit_definitions=>c_yes.",
-    "    li_repo->deserialize( is_checks = ls_checks ii_log = li_log ).",
-    "    lv_out = |{ lv_out } status={ li_log->get_status( ) };|.",
     "  CATCH cx_root INTO DATA(lx).",
     "    lv_out = |{ lv_out } ERR { cl_abap_classdescr=>get_class_name( lx ) }: { lx->get_text( ) };|.",
     "ENDTRY.",
@@ -164,8 +178,10 @@ export function classCheckAbap(classes) {
   ].join("\n") + "\n";
 }
 
-/** Step 6: purge, drop the repo if still registered, verify nothing is left. */
-export function cleanupAbap(pkg) {
+/** Step 7: purge -- only the repository with this run's key and the tool's
+ *  own name -- drop it if still registered, verify nothing is left. */
+export function cleanupAbap(pkg, expectedKey = "") {
+  if (expectedKey !== "" && !REPO_KEY.test(expectedKey)) throw new Error(`not a repository key: ${expectedKey}`);
   return [
     "DATA lv_out TYPE string.",
     "DATA lv_key TYPE zif_abapgit_persistence=>ty_value.",
@@ -173,7 +189,9 @@ export function cleanupAbap(pkg) {
     "TRY.",
     "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
     `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
-    "    IF li_repo IS BOUND.",
+    `    IF li_repo IS BOUND AND ( li_repo->get_key( ) <> '${expectedKey}' OR li_repo->get_name( ) <> '${ownRepoName(pkg)}' ).`,
+    "      lv_out = |ERR purge refused: repository { li_repo->get_key( ) } named { li_repo->get_name( ) } is not the one this run imported into;|.",
+    "    ELSEIF li_repo IS BOUND.",
     "      lv_key = li_repo->get_key( ).",
     "      DATA(ls_checks) = li_repo->delete_checks( ).",
     "      DATA(li_log) = zcl_abapgit_repo_srv=>get_instance( )->purge( ii_repo = li_repo is_checks = ls_checks ).",
@@ -229,7 +247,7 @@ export function inventoryAbap(pkg) {
     "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
     `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
     "    IF li_repo IS BOUND.",
-    "      lv_out = |repo={ li_repo->get_key( ) };|.",
+    "      lv_out = |repo={ li_repo->get_key( ) }; repo_name={ li_repo->get_name( ) };|.",
     "    ELSE.",
     "      lv_out = |repo=none;|.",
     "    ENDIF.",
@@ -285,6 +303,7 @@ export function parseInventory(msg) {
   return {
     err: /ERR ([^;]*);/.exec(msg)?.[1],
     repo: field(msg, "repo"),
+    repoName: /repo_name=([^;]*);/.exec(msg)?.[1]?.trim(),
     tdevc: Number(field(msg, "tdevc") ?? NaN),
     tadir: Number(field(msg, "tadir") ?? NaN),
     objects,
@@ -328,22 +347,41 @@ export function parseUnit(text, className) {
     return {methods: 0, failing: [], error: `the unit result names no test class of ${className}`};
   }
   const failing = [];
-  let methods = 0;
+  const names = [];
+  let nameless = 0;
   for (const c of classes) {
     for (const a of c.alerts ?? []) failing.push({method: `${c.name} (class)`, title: a.title});
     for (const m of c.testMethods ?? []) {
-      methods += 1;
+      // a method without a name is not evidence of a test that ran
+      if (typeof m?.name !== "string" || m.name.trim() === "" || typeof c.name !== "string" || c.name.trim() === "") {
+        nameless += 1;
+        continue;
+      }
+      names.push(methodId(c.name, m.name));
       if ((m.alerts ?? []).length > 0) {
         failing.push({method: `${c.name}->${m.name}`, title: m.alerts.map((a) => a.title).join(" | ")});
       }
     }
   }
-  return {methods, failing};
+  return {methods: names.length, names, nameless, failing};
+}
+
+/** A test method's identity: test class and method, upper case. */
+export const methodId = (testClass, method) => `${String(testClass).trim().toUpperCase()}->${String(method).trim().toUpperCase()}`;
+
+/** What differs between two sets of method identities. */
+export function methodDiff(osgNames, systemNames) {
+  const here = new Set(osgNames);
+  const there = new Set(systemNames);
+  return {missing: [...here].filter((n) => !there.has(n)).sort(), extra: [...there].filter((n) => !here.has(n)).sort()};
 }
 // ---------------------------------------------------------------- OSG side
 
-/** Every class of the folder with its FOR TESTING methods, from abaplint's
- *  parse of the source and the testclasses include. */
+/** Every class of the folder with its FOR TESTING methods ("LTCL->METHOD"),
+ *  from abaplint's parse of the source and the testclasses include. A test
+ *  method inherited from an abstract local test class is attributed to the
+ *  class that declares it, where ADT names the subclass; such a class shows
+ *  as a difference, not as a pass. */
 export function countTestMethods(folder) {
   const reg = new abaplint.Registry();
   for (const f of readdirSync(folder).sort()) {
@@ -355,14 +393,14 @@ export function countTestMethods(folder) {
   const out = new Map();
   for (const o of reg.getObjects()) {
     if (o.getType() !== "CLAS") continue;
-    let n = 0;
+    const names = [];
     for (const file of o.getABAPFiles()) {
       for (const c of file.getInfo().listClassDefinitions()) {
         if (!c.isForTesting) continue;
-        n += c.methods.filter((m) => m.isForTesting).length;
+        for (const m of c.methods.filter((x) => x.isForTesting)) names.push(methodId(c.name, m.name));
       }
     }
-    out.set(o.getName().toUpperCase(), n);
+    out.set(o.getName().toUpperCase(), names.sort());
   }
   return out;
 }
@@ -373,7 +411,10 @@ export function osgCounter(folder) {
   const counts = countTestMethods(folder);
   return {
     mode: "count",
-    async methods(cls) { return {methods: counts.get(cls) ?? 0, failing: []}; },
+    async methods(cls) {
+      const names = counts.get(cls) ?? [];
+      return {methods: names.length, names, failing: []};
+    },
   };
 }
 
@@ -384,10 +425,14 @@ export function osgRunner() {
       const {UnitRun} = await import("./osd-unit.mjs");
       const r = await new UnitRun().run("CLAS", cls, {});
       const failing = [];
+      const names = [];
       for (const tc of r.testClasses) {
-        for (const m of tc.testMethods) if (m.alerts.length > 0) failing.push(`${tc.name}->${m.name}`);
+        for (const m of tc.testMethods) {
+          names.push(methodId(tc.name, m.name));
+          if (m.alerts.length > 0) failing.push(`${tc.name}->${m.name}`);
+        }
       }
-      return {methods: r.counts.methods, failing};
+      return {methods: names.length, names, failing};
     },
   };
 }
@@ -442,6 +487,9 @@ async function inventory(mcp, pkg, step) {
   if (inv.repo === undefined || Number.isNaN(inv.tdevc) || Number.isNaN(inv.tadir)) {
     throw new Error(`${step}: the inventory is incomplete: ${r.message.trim()}`);
   }
+  if (inv.repo !== "none" && (!REPO_KEY.test(inv.repo) || inv.repoName === undefined)) {
+    throw new Error(`${step}: repository ${inv.repo} without a readable key and name: ${r.message.trim()}`);
+  }
   if (inv.objects.length !== inv.tadir) {
     throw new Error(`${step}: ${inv.tadir} TADIR object(s), ${inv.objects.length} listed; what is not listed cannot be checked`);
   }
@@ -450,51 +498,73 @@ async function inventory(mcp, pkg, step) {
   return inv;
 }
 
-/** May the import go into this package? Without --reuse only a package
- *  that does not exist yet; with it, one whose objects are none or exactly
- *  the zip's (the leftovers of an earlier run of the same zip). Returns the
- *  refusals, empty when admitted. */
+const listed = (list) => list.map((o) => `    ${o}`).join("\n");
+
+/** May the import go into this package? A repository under any name but
+ *  the tool's own refuses, with or without --reuse. Without --reuse only a
+ *  package that does not exist yet; with it, one whose objects are within
+ *  the zip's (the leftovers of an earlier run of the same zip), with no
+ *  repository or the tool's own. Returns the refusals, empty when admitted. */
 export function admitPackage(inv, zipObjects, reuse, pkg) {
-  const lines = (list) => list.map((o) => `    ${o}`).join("\n");
+  if (inv.repo !== "none" && inv.repoName !== ownRepoName(pkg)) {
+    return [`refused: ${pkg} has abapGit repository ${inv.repo} named "${inv.repoName}", not this tool's `
+      + `("${ownRepoName(pkg)}"). Somebody else's repository is never imported into or purged.`];
+  }
   if (!reuse) {
     const why = [];
     if (inv.repo !== "none") why.push(`abapGit repository ${inv.repo} is registered for it`);
-    if (inv.foreign.length > 0) why.push(`it holds ${inv.foreign.length} object(s):\n${lines(inv.foreign)}`);
+    if (inv.foreign.length > 0) why.push(`it holds ${inv.foreign.length} object(s):\n${listed(inv.foreign)}`);
     else if (inv.tdevc > 0) why.push("the package already exists (a purge would delete it)");
     return why.length === 0 ? [] : [`refused: ${pkg} is not new: ${why.join("; ")}. `
       + "The cleanup purges the package, so it must not hold anything this run did not bring. "
       + "If this is what an earlier run of the same zip left, pass --reuse."];
   }
-  if (inv.foreign.length === 0) return [];
   const zip = new Set(zipObjects);
-  const have = new Set(inv.foreign);
   const extra = inv.foreign.filter((o) => !zip.has(o));
-  const missing = zipObjects.filter((o) => !have.has(o));
-  if (extra.length === 0 && missing.length === 0) return [];
-  return [`refused: --reuse takes a package whose objects are exactly the zip's, and ${pkg} differs:`
-    + (extra.length ? `\n  not in the zip:\n${lines(extra)}` : "")
-    + (missing.length ? `\n  in the zip, not in the package:\n${lines(missing)}` : "")];
+  if (extra.length === 0) return [];
+  return [`refused: --reuse takes a package whose objects are within the zip's, and ${pkg} holds `
+    + `${extra.length} that are not:\n  not in the zip:\n${listed(extra)}`];
 }
 
-/** Step 6: inventory first; purge only when every object in the package is
- *  one of the zip's; then verify nothing is left. */
-export async function cleanup(mcp, pkg, zipObjects, log = () => {}) {
+/** Step 7: inventory first. The purge goes ahead only when the package's
+ *  repository is the tool's own by name AND the one this run imported into
+ *  by key (`expectedKey`; `adoptOwnKey` is the stand-alone --cleanup, where
+ *  there was no import and the name is the evidence), and every object in
+ *  the package is one of the zip's. Then verify nothing is left. */
+export async function cleanup(mcp, pkg, zipObjects, {expectedKey, adoptOwnKey = false, log = () => {}} = {}) {
   let inv;
   try {
     inv = await inventory(mcp, pkg, "cleanup inventory");
   } catch (e) {
     return {ok: false, problems: [`purge refused: ${e.message}`]};
   }
+  let key = "";
+  if (inv.repo !== "none") {
+    if (inv.repoName !== ownRepoName(pkg)) {
+      return {ok: false, problems: [`purge refused: ${pkg} has abapGit repository ${inv.repo} named "${inv.repoName}", `
+        + `not this tool's ("${ownRepoName(pkg)}")`]};
+    }
+    const want = adoptOwnKey ? inv.repo : expectedKey;
+    if (want === undefined) {
+      return {ok: false, problems: [`purge refused: repository ${inv.repo} is in ${pkg}, and this run recorded no `
+        + "repository key from its import, so it cannot show the repository is the one it imported into"]};
+    }
+    if (inv.repo !== want) {
+      return {ok: false, problems: [`purge refused: the repository in ${pkg} is ${inv.repo}, `
+        + `this run imported into ${want}`]};
+    }
+    key = inv.repo;
+  }
   const zip = new Set(zipObjects);
   const extra = inv.foreign.filter((o) => !zip.has(o));
   if (extra.length > 0) {
     return {ok: false, problems: [`purge refused: ${pkg} holds ${extra.length} object(s) that are not the zip's, `
-      + `and a purge would delete them:\n${extra.map((o) => `    ${o}`).join("\n")}`]};
+      + `and a purge would delete them:\n${listed(extra)}`]};
   }
   const problems = [];
   let r;
   try {
-    r = await exec(mcp, cleanupAbap(pkg), "cleanup");
+    r = await exec(mcp, cleanupAbap(pkg, key), "cleanup");
   } catch (e) {
     return {ok: false, problems: [`cleanup: ${e.message}`]};
   }
@@ -574,11 +644,16 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
     log(`package ${pkg}: exists, reused (--reuse)`);
   }
 
+  // the repository key the import reports; the purge takes that repository and no other
+  let importedKey;
   try {
     try {
       const r = await exec(mcp, importAbap(built.bytes, pkg), "import");
       log(`import: ${r.message.trim()}`);
-      problems.push(...judgeImport(parseImport(r.message)));
+      const imp = parseImport(r.message);
+      if (imp.repo !== undefined && REPO_KEY.test(imp.repo)) importedKey = imp.repo;
+      else problems.push("import: the report carries no repository key");
+      problems.push(...judgeImport(imp));
     } catch (e) {
       problems.push(e.message);
     }
@@ -624,8 +699,13 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
         row.system = there.methods;
         row.failing = there.failing;
         if (there.error !== undefined) problems.push(`${cls}: ${there.error}`);
-        if (here.methods !== there.methods) {
-          problems.push(`${cls}: ${here.methods} test method(s) on OSG, ${there.methods} on the system`
+        if (there.nameless > 0) row.notes.push(`${there.nameless} test method entr(ies) without a name, not counted`);
+        // the same tests, by name: a count can match with different methods behind it
+        const diff = methodDiff(here.names, there.names);
+        if (diff.missing.length > 0 || diff.extra.length > 0) {
+          problems.push(`${cls}: test methods differ: ${here.methods} test method(s) on OSG, ${there.methods} on the system`
+            + (diff.missing.length ? `; on OSG, not on the system: ${diff.missing.join(", ")}` : "")
+            + (diff.extra.length ? `; on the system, not on OSG: ${diff.extra.join(", ")}` : "")
             + (row.notes.length ? ` (${row.notes.join("; ")})` : ""));
         }
         for (const f of there.failing) problems.push(`${cls}: fails on the system: ${f.method}: ${f.title}`);
@@ -640,7 +720,7 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
         + `  node tools/osd-prove-on-system.mjs ${folder} --unit ${unit}${manifest ? ` --manifest ${manifest}` : ""} `
         + `--cleanup --package '${pkg}'`);
     } else {
-      const c = await cleanup(mcp, pkg, built.objects, log);
+      const c = await cleanup(mcp, pkg, built.objects, {expectedKey: importedKey, log});
       problems.push(...c.problems);
     }
   }
@@ -748,7 +828,7 @@ export async function main(argv, {mcp: givenMcp, out = console.log} = {}) {
     if (argv.includes("--cleanup")) {
       // the zip's object list is what may be purged, so the folder is needed here too
       const built = buildZip(folder, {unit: flag("unit"), manifest: flag("manifest")});
-      const c = await cleanup(mcp, pkg, built.objects, out);
+      const c = await cleanup(mcp, pkg, built.objects, {adoptOwnKey: true, log: out});
       for (const p of c.problems) out(`FAIL ${p}`);
       out(c.ok ? `cleanup of ${pkg}: complete` : `cleanup of ${pkg}: INCOMPLETE`);
       return c.ok ? 0 : 1;
