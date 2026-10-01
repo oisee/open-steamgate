@@ -138,6 +138,12 @@ func runSAPGUISession(conn net.Conn, selection ZCL_GG_HOST__TY_RESULT, execute f
 			}
 			continue
 		}
+		if !sapGUIExecute(items) {
+			if err := sendSAPGUIScreen(conn, screen, []ZIF_GG_SESSION_TYPES_V1__TY_MESSAGE{{text: "function not supported here"}}); err != nil {
+				return err
+			}
+			continue
+		}
 		values := sapGUISelectionValues(items, fields)
 		result := execute(values)
 		resultShown = true
@@ -306,8 +312,6 @@ func sapGUIExit(items []diag.Item) bool {
 }
 
 func sapGUIF4(items []diag.Item) bool {
-	// TODO: verify against a DIAG capture before treating this as the full
-	// set of SAP GUI F4 OK codes.
 	for _, item := range items {
 		if item.Type == diag.ItemAPPL && item.ID == 0x0c && item.SID == 0x04 {
 			code := strings.ToUpper(strings.TrimSpace(string(item.Value)))
@@ -317,6 +321,21 @@ func sapGUIF4(items []diag.Item) bool {
 		}
 	}
 	return false
+}
+
+func sapGUIExecute(items []diag.Item) bool {
+	for _, item := range items {
+		if item.Type == diag.ItemAPPL && item.ID == 0x0c && item.SID == 0x04 {
+			switch strings.ToUpper(strings.TrimSpace(string(item.Value))) {
+			case "ONLI", "=ONLI", "F8", "=F8", "":
+				return true
+			default:
+				return false
+			}
+		}
+	}
+	// Some clients send the F8 key as a PAI frame without an OK code.
+	return true
 }
 
 func endSAPGUISession(conn net.Conn) error {

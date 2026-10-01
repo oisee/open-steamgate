@@ -120,6 +120,18 @@ func TestSAPGUISessionSelectionExecuteAndEnd(t *testing.T) {
 	if err != nil || len(diag.ParseItems(selectionMessage.Body)) == 0 {
 		t.Fatalf("selection response: %v", err)
 	}
+	unsupported, err := diag.EncodeMessage(diag.Header{MsgInfo: 1}, []diag.Item{
+		{Type: diag.ItemAPPL, ID: 0x0c, SID: 0x04, Value: []byte("UNKNOWN")},
+		{Type: diag.ItemEOM},
+	}, false)
+	if err != nil { t.Fatal(err) }
+	if err := writeNIFrame(client, unsupported); err != nil { t.Fatal(err) }
+	unsupportedPayload, err := readNIFrame(client)
+	if err != nil { t.Fatal(err) }
+	unsupportedMessage, err := diag.ParseMessage(unsupportedPayload, false)
+	if err != nil || !strings.Contains(string(unsupportedMessage.Body), "function not supported here") {
+		t.Fatalf("unsupported code response: %v", err)
+	}
 	f4, err := diag.EncodeMessage(diag.Header{MsgInfo: 1}, []diag.Item{
 		{Type: diag.ItemAPPL, ID: 0x0c, SID: 0x04, Value: []byte("=F4")},
 		{Type: diag.ItemEOM},

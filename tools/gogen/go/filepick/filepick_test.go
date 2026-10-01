@@ -48,6 +48,22 @@ func TestFIFOIsNeverOpenedOrReturned(t *testing.T) {
 	}
 }
 
+func TestFIFOInitialDirectoryFailsPromptly(t *testing.T) {
+	if runtime.GOOS == "windows" { t.Skip("FIFO requires mkfifo") }
+	root := t.TempDir()
+	pipe := filepath.Join(root, "pipe")
+	if err := exec.Command("mkfifo", pipe).Run(); err != nil { t.Skipf("mkfifo unavailable: %v", err) }
+	b := Browser{Sandbox: &abap.Sandbox{Read: []string{root}}, Mode: Open, Initial: pipe}
+	done := make(chan error, 1)
+	go func() { _, err := b.initial(); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil { t.Fatal("FIFO accepted as initial directory") }
+	case <-time.After(time.Second):
+		t.Fatal("FIFO blocked initial directory")
+	}
+}
+
 func TestLongDirectoryViewportAndNavigation(t *testing.T) {
 	root := t.TempDir()
 	for i := 0; i < 40; i++ {

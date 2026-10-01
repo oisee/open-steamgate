@@ -188,12 +188,10 @@ func (b Browser) initial() (string, error) {
 		return "", errors.New("no -allow-read root")
 	}
 	if b.Initial != "" {
-		if _, f, err := b.Sandbox.BrowsePath(b.Initial, b.Mode == Save); err == nil {
-			defer f.Close()
-			if stat, err := f.Stat(); err == nil && stat.IsDir() {
-				return b.Initial, nil
-			}
-		}
+		_, f, err := b.Sandbox.BrowsePath(b.Initial, b.Mode == Save)
+		if err != nil { return "", err }
+		defer f.Close()
+		return b.Initial, nil
 	}
 	return roots[0], nil
 }

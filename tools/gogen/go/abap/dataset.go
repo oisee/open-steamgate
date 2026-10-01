@@ -585,7 +585,7 @@ func (sb *Sandbox) BrowsePath(name string, save bool) (string, *os.File, error) 
 	if !ok {
 		return "", nil, os.ErrPermission
 	}
-	f, err := root.Open(rel)
+	f, err := openBrowseDirectory(root, rel)
 	return real, f, err
 }
 
@@ -632,8 +632,8 @@ func (sb *Sandbox) BrowseSaveName(name string) (string, error) {
 		return "", os.ErrPermission
 	}
 	if _, info, err := sb.BrowseEntry(real, true); err == nil {
-		if info.IsDir() || !info.Mode().IsRegular() {
-			return "", errors.New("cannot save to a directory")
+		if !info.Mode().IsRegular() {
+			return "", errors.New("not a regular file")
 		}
 	}
 	// Recheck the parent with the root handle before returning the name.
