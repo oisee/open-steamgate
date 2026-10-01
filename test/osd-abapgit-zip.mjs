@@ -120,6 +120,11 @@ entities:
 `);
     const authored = "CLASS zcl_zprobe_dpc_ext DEFINITION PUBLIC. ENDCLASS.\n";
     writeFileSync(join(src, "zcl_zprobe_dpc_ext.clas.abap"), authored);
+    // DSL sidecars beside the ABAP are not objects and stay home (osg-demo, 2026-10-01)
+    writeFileSync(join(src, "zprobe_rules.l2.yaml"), "rules: []\n");
+    writeFileSync(join(src, "zcl_zprobe_dpc_ext.clas.trace.json"), "{}\n");
+    writeFileSync(join(src, "zprobe.samc.model.json"), "{}\n");
+    writeFileSync(join(src, "zprobe.samc.decl.json"), "{}\n");
     writeFileSync(join(data, "zprobe.conf.json"), "{}\n");
     writeFileSync(join(data, "zprobe.tabu.json"), '[{"MANDT":"001","ID":"1"}]\n');
     writeFileSync(join(webapp, "index.html"), "<!doctype html><title>probe</title>\n");
@@ -137,6 +142,7 @@ entities:
     const prepared = preparePack(pack, objects);
     expect(readFileSync(join(objects, "zcl_zprobe_dpc_ext.clas.abap"), "utf8")).to.equal(authored);
     expect(readdirSync(objects)).to.include("zprobe.iwpr.xml");
+    expect(readdirSync(objects).filter((f) => /\.(l2\.yaml|trace\.json|samc\.(model|decl)\.json)$/.test(f))).to.deep.equal([]);
 
     const app = "ZPROBE_PACK";
     expect(readdirSync(objects)).to.include(`${app.toLowerCase()}.wapa.xml`);
