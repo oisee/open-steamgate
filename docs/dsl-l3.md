@@ -412,6 +412,11 @@ variant that calls another system is a hand-written class today). A replay that 
 table needs the L2 check classes to take their rows from a port, a change in L2; a sink other than
 the alert log is not done either.
 
+The third run (2026-10-01, with ports and adapters, commit 65bd6731) passed the same way:
+- 24 objects imported and activated on A4H: the two port interfaces, five generated variants, the factory and its exception, plus the regenerated runner;
+- 109 tests green, the proof's mode P included, again on real background jobs;
+- cleanup by receipt left nothing.
+
 ## Not yet
 
 Ordering between rules, a set parameter other than the date, a schedule, a log
