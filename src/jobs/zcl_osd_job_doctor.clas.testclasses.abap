@@ -91,8 +91,49 @@ CLASS ltcl_job_doctor IMPLEMENTATION.
       EXCEPTIONS jobname_missing = 1 OTHERS = 2.
     cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
     CALL FUNCTION 'JOB_CLOSE'
-      EXPORTING jobname = lv_name jobcount = lv_count sdlstrtdt = '20261001'
+      EXPORTING jobname = lv_name jobcount = lv_count sdlstrtdt = '20261301'
       EXCEPTIONS invalid_startdate = 1 OTHERS = 2.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
+    CALL FUNCTION 'JOB_CLOSE'
+      EXPORTING jobname = lv_name jobcount = lv_count sdlstrtdt = '20260230'
+      EXCEPTIONS invalid_startdate = 1 OTHERS = 2.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
+    CALL FUNCTION 'JOB_CLOSE'
+      EXPORTING jobname = lv_name jobcount = lv_count sdlstrtdt = '20991231'
+                sdlstrttm = '240000'
+      EXCEPTIONS invalid_startdate = 1 OTHERS = 2.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
+    CALL FUNCTION 'JOB_CLOSE'
+      EXPORTING jobname = lv_name jobcount = lv_count laststrtdt = '20991231'
+      EXCEPTIONS invalid_startdate = 1 OTHERS = 2.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
+    CALL FUNCTION 'JOB_CLOSE'
+      EXPORTING jobname = lv_name jobcount = lv_count sdlstrtdt = '20991231'
+                laststrtdt = '20991230'
+      EXCEPTIONS invalid_startdate = 1 OTHERS = 2.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
+    CALL FUNCTION 'JOB_CLOSE'
+      EXPORTING jobname = lv_name jobcount = lv_count prdmins = '5'
+      EXCEPTIONS job_close_failed = 1 OTHERS = 2.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
+    CALL FUNCTION 'JOB_CLOSE'
+      EXPORTING jobname = lv_name jobcount = lv_count sdlstrtdt = '20991231'
+                prdmonths = '1'
+      EXCEPTIONS job_close_failed = 1 OTHERS = 2.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
+    CALL FUNCTION 'JOB_CLOSE'
+      EXPORTING jobname = lv_name jobcount = lv_count sdlstrtdt = '20991231'
+                strtimmed = 'X'
+      EXCEPTIONS job_close_failed = 1 OTHERS = 2.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
+    CALL FUNCTION 'JOB_CLOSE'
+      EXPORTING jobname = lv_name jobcount = lv_count sdlstrtdt = '20991231'
+                prdmins = '1A'
+      EXCEPTIONS job_close_failed = 1 OTHERS = 2.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
+    CALL FUNCTION 'BP_JOB_DELETE'
+      EXPORTING jobname = lv_name jobcount = space
+      EXCEPTIONS jobcount_missing = 1 OTHERS = 2.
     cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
     CALL FUNCTION 'JOB_CLOSE'
       EXPORTING jobname = lv_name jobcount = lv_count targetserver = 'OTHER'

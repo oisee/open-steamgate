@@ -22,6 +22,25 @@ FUNCTION job_close.
   DATA lv_step_index TYPE i.
   DATA ls_intent TYPE zosd_job_outbox.
   DATA ls_step TYPE zosd_job_step.
+  DATA lv_timed TYPE abap_bool.
+  DATA lv_periodic TYPE abap_bool.
+  DATA lv_sdl_date TYPE string.
+  DATA lv_sdl_time TYPE string.
+  DATA lv_last_date TYPE string.
+  DATA lv_last_time TYPE string.
+  DATA lv_now TYPE string.
+  DATA lv_now_time TYPE string.
+  DATA lv_sdl TYPE string.
+  DATA lv_last TYPE string.
+  DATA lv_prd_mins TYPE string.
+  DATA lv_prd_hours TYPE string.
+  DATA lv_prd_days TYPE string.
+  DATA lv_prd_weeks TYPE string.
+  DATA lv_message TYPE string.
+  DATA lv_year TYPE i.
+  DATA lv_month TYPE i.
+  DATA lv_day TYPE i.
+  DATA lv_last_day TYPE i.
   CLEAR job_was_released.
   ret = 0.
   IF jobname IS INITIAL.
@@ -49,9 +68,124 @@ FUNCTION job_close.
       RAISE job_close_failed.
     ENDIF.
   ENDIF.
-  IF sdlstrtdt IS NOT INITIAL OR sdlstrttm IS NOT INITIAL
-      OR laststrtdt IS NOT INITIAL OR laststrttm IS NOT INITIAL.
+* Start by date and time, measured on the sandbox 2026-10-01: the values
+* are system time (sy-datum/sy-uzeit, UTC here), a start in the past is
+* rewritten to the close time, and a past start whose latest start time
+* has also passed is refused with BT 386 before anything is released.
+* A caller passing typed fields hands over '00000000' for an initial date;
+* a time of zeros means midnight only when a date is given.
+  lv_sdl_date = sdlstrtdt.
+  lv_sdl_time = sdlstrttm.
+  lv_last_date = laststrtdt.
+  lv_last_time = laststrttm.
+  IF lv_sdl_date CO '0 '.
+    CLEAR lv_sdl_date.
+  ENDIF.
+  IF lv_sdl_date IS INITIAL AND lv_sdl_time CO '0 '.
+    CLEAR lv_sdl_time.
+  ENDIF.
+  IF lv_last_date CO '0 '.
+    CLEAR lv_last_date.
+  ENDIF.
+  IF lv_last_date IS INITIAL AND lv_last_time CO '0 '.
+    CLEAR lv_last_time.
+  ENDIF.
+  IF lv_sdl_date IS NOT INITIAL OR lv_sdl_time IS NOT INITIAL.
+    lv_timed = abap_true.
+    IF lv_sdl_time IS INITIAL.
+      lv_sdl_time = '000000'.
+    ENDIF.
+    IF lv_sdl_date IS INITIAL.
+      RAISE invalid_startdate.
+    ENDIF.
+  ELSEIF lv_last_date IS NOT INITIAL OR lv_last_time IS NOT INITIAL.
     RAISE invalid_startdate.
+  ENDIF.
+  IF lv_timed = abap_true AND ( lv_last_date IS NOT INITIAL OR lv_last_time IS NOT INITIAL ).
+    IF lv_last_date IS INITIAL.
+      RAISE invalid_startdate.
+    ENDIF.
+    IF lv_last_time IS INITIAL.
+      lv_last_time = '000000'.
+    ENDIF.
+  ENDIF.
+  IF lv_timed = abap_true.
+    DO 2 TIMES.
+      IF sy-index = 1.
+        lv_sdl = lv_sdl_date && lv_sdl_time.
+      ELSEIF lv_last_date IS INITIAL.
+        EXIT.
+      ELSE.
+        lv_sdl = lv_last_date && lv_last_time.
+      ENDIF.
+      IF strlen( lv_sdl ) <> 14 OR lv_sdl CN '0123456789'.
+        RAISE invalid_startdate.
+      ENDIF.
+      lv_year = lv_sdl+0(4).
+      lv_month = lv_sdl+4(2).
+      lv_day = lv_sdl+6(2).
+      IF lv_year < 1 OR lv_month < 1 OR lv_month > 12 OR lv_day < 1
+          OR lv_sdl+8(2) > '23' OR lv_sdl+10(2) > '59' OR lv_sdl+12(2) > '59'.
+        RAISE invalid_startdate.
+      ENDIF.
+      CASE lv_month.
+        WHEN 4 OR 6 OR 9 OR 11.
+          lv_last_day = 30.
+        WHEN 2.
+          lv_last_day = 28.
+          IF lv_year MOD 4 = 0 AND ( lv_year MOD 100 <> 0 OR lv_year MOD 400 = 0 ).
+            lv_last_day = 29.
+          ENDIF.
+        WHEN OTHERS.
+          lv_last_day = 31.
+      ENDCASE.
+      IF lv_day > lv_last_day.
+        RAISE invalid_startdate.
+      ENDIF.
+    ENDDO.
+    lv_sdl = lv_sdl_date && lv_sdl_time.
+    IF lv_last_date IS NOT INITIAL.
+      lv_last = lv_last_date && lv_last_time.
+    ENDIF.
+  ENDIF.
+* Periods in minutes, hours, days and weeks. Months stay refused: calendar
+* months need end-of-month rules nobody has measured yet.
+  lv_prd_mins = prdmins.
+  lv_prd_hours = prdhours.
+  lv_prd_days = prddays.
+  lv_prd_weeks = prdweeks.
+  IF lv_prd_mins CN '0123456789' OR strlen( lv_prd_mins ) > 2
+      OR lv_prd_hours CN '0123456789' OR strlen( lv_prd_hours ) > 2
+      OR lv_prd_days CN '0123456789' OR strlen( lv_prd_days ) > 3
+      OR lv_prd_weeks CN '0123456789' OR strlen( lv_prd_weeks ) > 2.
+    RAISE job_close_failed.
+  ENDIF.
+  IF lv_prd_mins CN '0' OR lv_prd_hours CN '0' OR lv_prd_days CN '0' OR lv_prd_weeks CN '0'.
+    lv_periodic = abap_true.
+  ENDIF.
+  IF lv_periodic = abap_true AND lv_timed = abap_false.
+    RAISE job_close_failed.
+  ENDIF.
+  IF lv_timed = abap_true AND ( strtimmed IS NOT INITIAL OR lv_event_name IS NOT INITIAL
+      OR event_param IS NOT INITIAL OR lv_pred_name IS NOT INITIAL
+      OR pred_jobcount IS NOT INITIAL OR predjob_checkstat IS NOT INITIAL ).
+    RAISE job_close_failed.
+  ENDIF.
+  IF lv_timed = abap_true.
+    GET TIME.
+    lv_now = sy-datum.
+    lv_now_time = sy-uzeit.
+    lv_now = lv_now && lv_now_time.
+    IF lv_sdl < lv_now.
+      IF lv_last IS NOT INITIAL AND lv_last < lv_now.
+        MESSAGE ID 'BT' TYPE 'E' NUMBER '386' INTO lv_message.
+        RAISE invalid_startdate.
+      ENDIF.
+      lv_sdl = lv_now.
+    ENDIF.
+    IF lv_last IS NOT INITIAL AND lv_last < lv_sdl.
+      RAISE invalid_startdate.
+    ENDIF.
   ENDIF.
   IF targetsystem IS NOT INITIAL OR targetserver IS NOT INITIAL
       OR targetgroup IS NOT INITIAL.
@@ -60,13 +194,10 @@ FUNCTION job_close.
   IF time_zone IS NOT INITIAL.
     RAISE invalid_time_zone.
   ENDIF.
-  IF sdlstrtdt IS NOT INITIAL OR sdlstrttm IS NOT INITIAL
-      OR targetsystem IS NOT INITIAL OR event_periodic IS NOT INITIAL
+  IF targetsystem IS NOT INITIAL OR event_periodic IS NOT INITIAL
       OR at_opmode IS NOT INITIAL OR at_opmode_periodic IS NOT INITIAL
-      OR calendar_id IS NOT INITIAL OR laststrtdt IS NOT INITIAL
-      OR laststrttm IS NOT INITIAL OR prddays IS NOT INITIAL
-      OR prdhours IS NOT INITIAL OR prdmins IS NOT INITIAL
-      OR prdmonths IS NOT INITIAL OR prdweeks IS NOT INITIAL
+      OR calendar_id IS NOT INITIAL
+      OR prdmonths IS NOT INITIAL
       OR startdate_restriction IS NOT INITIAL
       OR start_on_workday_not_before IS NOT INITIAL
       OR start_on_workday_nr IS NOT INITIAL OR workday_count_direction IS NOT INITIAL
@@ -83,6 +214,8 @@ FUNCTION job_close.
         OR strlen( lv_event_name ) > 32 OR strlen( event_param ) > 64.
       RAISE job_close_failed.
     ENDIF.
+  ELSEIF lv_timed = abap_true.
+*   Combinations were refused above; the start condition is the time.
   ELSEIF lv_pred_name IS INITIAL AND pred_jobcount IS INITIAL
       AND predjob_checkstat IS INITIAL.
     IF strtimmed <> 'X' OR event_param IS NOT INITIAL.
@@ -155,6 +288,20 @@ FUNCTION job_close.
   ENDIF.
   ls_intent-created_on = sy-datum.
   ls_intent-created_at = sy-uzeit.
+  IF lv_timed = abap_true.
+    ls_intent-sdlstrtdt = lv_sdl+0(8).
+    ls_intent-sdlstrttm = lv_sdl+8(6).
+    IF lv_last IS NOT INITIAL.
+      ls_intent-laststrtdt = lv_last+0(8).
+      ls_intent-laststrttm = lv_last+8(6).
+    ENDIF.
+    IF lv_periodic = abap_true.
+      ls_intent-prdmins = lv_prd_mins.
+      ls_intent-prdhours = lv_prd_hours.
+      ls_intent-prddays = lv_prd_days.
+      ls_intent-prdweeks = lv_prd_weeks.
+    ENDIF.
+  ENDIF.
   lv_step_index = 1.
   WHILE lv_step_index <= lv_step_count.
     lv_step_no = lv_step_index.

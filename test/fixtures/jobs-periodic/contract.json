@@ -1,0 +1,134 @@
+{
+ "contract": "jobs-periodic",
+ "version": 1,
+ "measured": {
+  "date": "2026-10-01",
+  "on": "the SAP sandbox, through a throwaway report that WAITs p_sec seconds in a temporary package; ten jobs, the report and the package deleted afterwards",
+  "by": "docs/job-standard-fms.md, Periodic jobs"
+ },
+ "schema": {
+  "EXPECT": "where the expected values come from: A4H = measured on the sandbox; 'unmeasured: assumption' = chosen here, with the reasoning in 'assumption'",
+  "clock": "the injectable clock's start, system time (UTC); every 'at' and offset below is seconds from it",
+  "steps": "run in order against JOB_OPEN/JOB_SUBMIT/JOB_CLOSE, BP_JOB_READ, SHOW_JOBSTATE, BP_JOB_DELETE and the scheduler",
+  "close": "JOB_OPEN + JOB_SUBMIT + JOB_CLOSE of job <job>; start/last are offsets for SDLSTRTDT/TM and LASTSTRTDT/TM, period is the PRD* fields",
+  "advance": "move the clock by <seconds>; the scheduler's timer fires at each due time it passes",
+  "tick": "move the clock by <seconds> without letting the timer fire first, then one scheduler pass: a start <seconds> late, like the sandbox's tick at hh:mm:51",
+  "hostStart": "a new scheduler over the same stores, started: what a host start does",
+  "runSeconds": "how long each instance of the case runs on the clock (an injected report; the sandbox report WAITed)",
+  "instances": "per job name, the scheduled start of every instance that ran, as offsets, in order",
+  "header": "the TBTCO fields BP_JOB_READ answers for the job's newest instance",
+  "observed": "informational: what the sandbox showed that this runtime does not reproduce (not a gate)"
+ },
+ "cases": [
+  {
+   "id": "time-base",
+   "EXPECT": "A4H",
+   "title": "SDLSTRTDT/TM are system time: a job asked for now+60 waits until exactly then",
+   "clock": "2026-10-01T22:43:01Z",
+   "steps": [
+    {"close": "A", "start": 60, "period": {"mins": 2},
+     "expect": {"subrc": 0, "released": "X", "status": "S",
+      "header": {"sdl": 60, "periodic": "X", "prdmins": "02", "prdhours": "00", "prddays": "000", "prdweeks": "00"}}},
+    {"tick": 59, "expect": {"status": {"A": "S"}, "instances": {"A": []}}},
+    {"tick": 1, "expect": {"instances": {"A": [60]}}}
+   ],
+   "observed": "the sandbox user's time zone was GMTUK (UTC+1 in October); the job started at the system time asked, not an hour off"
+  },
+  {
+   "id": "past-start-rewritten",
+   "EXPECT": "A4H",
+   "title": "a start in the past is rewritten to the close time and released; a periodic chain counts from the rewritten time",
+   "clock": "2026-10-01T22:44:01Z",
+   "steps": [
+    {"close": "B", "start": -300, "period": {"mins": 2},
+     "expect": {"subrc": 0, "released": "X", "status": "S", "header": {"sdl": 0, "periodic": "X", "prdmins": "02"}}},
+    {"close": "E", "start": -300,
+     "expect": {"subrc": 0, "released": "X", "status": "S", "header": {"sdl": 0, "periodic": "", "prdmins": "00"}}},
+    {"tick": 50},
+    {"tick": 120},
+    {"tick": 120},
+    {"tick": 120, "expect": {"instances": {"B": [0, 120, 240, 360], "E": [0]}}}
+   ]
+  },
+  {
+   "id": "past-start-last-refused",
+   "EXPECT": "A4H",
+   "title": "a past start whose latest start has passed too is refused, BT 386, and the job stays P",
+   "clock": "2026-10-01T22:46:01Z",
+   "steps": [
+    {"close": "D", "start": -300, "last": -120,
+     "expect": {"subrc": "INVALID_STARTDATE", "sy-msgid": "BT", "sy-msgno": "386", "released": "", "status": "P",
+      "header": {"sdl": null}}}
+   ]
+  },
+  {
+   "id": "successor-at-start",
+   "EXPECT": "A4H",
+   "title": "the successor is made when the instance starts, status S, at the scheduled time + period, not the actual start + period",
+   "clock": "2026-10-01T22:44:01Z",
+   "steps": [
+    {"close": "A", "start": 60, "period": {"mins": 2}},
+    {"tick": 110, "expect": {"instances": {"A": [60]}, "waiting": {"A": [180]}, "successorCount": "new"}}
+   ],
+   "observed": "instance at 224501 started 22:45:51 (the minute tick); its successor's SDLSTRTTM was 224701 and its JOBCOUNT 22455100, made at that start"
+  },
+  {
+   "id": "no-skip-on-overrun",
+   "EXPECT": "A4H",
+   "title": "an instance that runs longer than the period skips no instance",
+   "clock": "2026-10-01T22:45:01Z",
+   "runSeconds": 150,
+   "steps": [
+    {"close": "C", "start": 60, "period": {"mins": 1}},
+    {"advance": 600, "expect": {"instancePrefix": {"C": [60, 120, 180, 240]}}}
+   ],
+   "observed": "the sandbox ran 2 to 3 instances of C at once, bounded by its free background work processes; this runtime has one work process and queues them (ANORMALIES.md)"
+  },
+  {
+   "id": "delete-ends-chain",
+   "EXPECT": "A4H",
+   "title": "BP_JOB_DELETE of the waiting successor ends the chain",
+   "clock": "2026-10-01T22:50:01Z",
+   "steps": [
+    {"close": "A", "start": 60, "period": {"mins": 2}},
+    {"tick": 60, "expect": {"instances": {"A": [60]}, "waiting": {"A": [180]}}},
+    {"delete": "A", "which": "waiting", "expect": {"subrc": 0}},
+    {"advance": 900, "expect": {"instances": {"A": [60]}, "waiting": {"A": []}}}
+   ]
+  },
+  {
+   "id": "abort-keeps-chain",
+   "EXPECT": "A4H",
+   "title": "an instance that ends aborted does not stop the chain: its successor already exists",
+   "clock": "2026-10-01T22:46:01Z",
+   "aborts": [60],
+   "steps": [
+    {"close": "C", "start": 60, "period": {"mins": 1}},
+    {"tick": 60, "expect": {"aborted": {"C": [60]}, "waiting": {"C": [120]}}},
+    {"tick": 60, "expect": {"instances": {"C": [60, 120]}, "aborted": {"C": [60]}}}
+   ],
+   "observed": "the sandbox aborted a running instance with BP_JOB_ABORT (asynchronous: still R right after, A at the next look, ENDTIME = abort time); the facade has no BP_JOB_ABORT, so here the instance aborts by itself"
+  },
+  {
+   "id": "downtime",
+   "EXPECT": "unmeasured: assumption",
+   "title": "after downtime every overdue released job starts once, and a periodic chain continues from scheduled time + period",
+   "assumption": "not measured: a missed start after scheduler or host downtime cannot be provoked on a shared sandbox. Chosen: at host start every overdue released job starts once, and since the successor is made when an instance starts, with the scheduled time + period, an overdue chain catches up instance by instance, as it does on an overrun, until the next start lies in the future.",
+   "clock": "2026-10-01T22:50:01Z",
+   "steps": [
+    {"close": "A", "start": 60, "period": {"mins": 2}},
+    {"down": 300},
+    {"hostStart": true, "expect": {"instances": {"A": [60, 180, 300]}, "waiting": {"A": [420]}}},
+    {"hostStart": true, "expect": {"instances": {"A": [60, 180, 300]}, "waiting": {"A": [420]}}}
+   ]
+  }
+ ],
+ "unmeasured": [
+  "a missed start after downtime (the downtime case is an assumption)",
+  "a latest start time reached while the job waits: here the job is not started and ends A with result EXPIRED; its periodic successor is still made",
+  "PRDMONTHS: refused (JOB_CLOSE_FAILED) until calendar-month arithmetic is measured",
+  "a periodic start with STRTIMMED = 'X': refused (JOB_CLOSE_FAILED)",
+  "SDLSTRTDT without SDLSTRTTM: taken as 000000",
+  "a latest start before the start: refused (INVALID_STARTDATE)"
+ ]
+}

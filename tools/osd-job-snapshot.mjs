@@ -8,6 +8,7 @@ import {resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
 import {operationsPath} from "./osd-batch-runs.mjs";
 import {jobInputJson} from "./osd-job-input.mjs";
+import {checkSchedule, scheduleOfOutbox, scheduledPayload} from "./osd-job-schedule.mjs";
 
 const value = (row, field) => String(row?.[field] ?? "").trim();
 const fail = (reason) => { throw new JobSnapshotError("JOB_SNAPSHOT_INCONSISTENT", reason); };
@@ -78,8 +79,11 @@ function outboxSnapshot(db, identity, sourceDb, caller, currentSourceInstance) {
       tailParam.length > 64 || sourceInstance !== currentSourceInstance)) {
     fail("outbox has an invalid tail event");
   }
+  const schedule = outboxSchedule(parent);
+  if (schedule && (afterName || namedId)) fail("outbox has a timed start and another condition");
+  const waits = !!namedId || !!schedule;
   return {
-    phase: "OUTBOX", state: namedId ? "WAITING" : "READY", program: value(parent, "program"),
+    phase: "OUTBOX", state: waits ? "WAITING" : "READY", program: value(parent, "program"), schedule,
     generation: value(parent, "generation"),
     createdOn: value(parent, "created_on"), createdAt: value(parent, "created_at"),
     afterEvent: afterName ? {jobname: afterName, jobcount: afterCount, intentId: afterIntent} : null,
@@ -89,9 +93,14 @@ function outboxSnapshot(db, identity, sourceDb, caller, currentSourceInstance) {
     queuedAt: null, startedAt: null, endedAt: null, resultStatus: null, detail: null,
     steps: programs.map((program, index) => ({number: index + 1, program,
       input: legacy ? [] : jobInputJson(rows[index].input_json),
-      state: index === 0 && !namedId ? "READY" : "PENDING", startedAt: null, endedAt: null,
+      state: index === 0 && !waits ? "READY" : "PENDING", startedAt: null, endedAt: null,
       resultStatus: null, detail: null})),
   };
+}
+
+function outboxSchedule(row) {
+  try { return scheduleOfOutbox(row); }
+  catch { fail("outbox has an invalid start time or period"); }
 }
 
 function checkRunState(state, steps) {
@@ -183,7 +192,7 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
     rows.map((row) => ({number: row.step_no, program: value(row, "program"), input: jobInputJson(row.input_json),
       state: value(row, "state"), startedAt: row.started_at || null, endedAt: row.ended_at || null,
       resultStatus: row.result_status ?? null, detail: row.detail ?? null}));
-  checkRunState(run.state, steps);
+  if (run.state !== "DELETED") checkRunState(run.state, steps);
   // Reconstruct the importer's versioned payload using the stored bytes, not
   // the canonical key used for identity lookup. Old imported names can be
   // lowercase even when migration uppercased the retained business key.
@@ -220,7 +229,21 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
   if (tailId !== null && (!/^[A-Z][A-Z0-9_]{0,31}$/.test(tailId) ||
       typeof tailParam !== "string" || tailParam.length > 64 ||
       namedInstance !== currentSourceInstance)) fail("invalid tail event");
-  const versioned = tailId !== null ? JSON.stringify({version: 6, ...base,
+  let schedule = null;
+  if (run.sdl_at !== null && run.sdl_at !== undefined) {
+    try {
+      schedule = checkSchedule({start: run.sdl_at, last: run.last_at ?? "", period: {mins: run.prd_mins,
+        hours: run.prd_hours, days: run.prd_days, weeks: run.prd_weeks}});
+    } catch { fail("invalid start time or period"); }
+    if (afterName !== null || namedId !== null || legacy) fail("timed run has another start condition");
+  }
+  const chainPred = run.chain_pred ?? null;
+  if (chainPred !== null && (schedule === null || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(chainPred))) {
+    fail("invalid periodic predecessor");
+  }
+  const versioned = schedule !== null ? scheduledPayload(base, payloadSteps, schedule, chainPred,
+    tailId === null ? undefined : {id: tailId, param: tailParam, sourceInstance: namedInstance}) :
+    tailId !== null ? JSON.stringify({version: 6, ...base,
     steps: payloadSteps,
     afterEvent: afterName === null ? undefined : afterIntent ?
       {jobname: afterName, jobcount: afterCount, intentId: afterIntent.replaceAll("-", "")} :
@@ -238,6 +261,8 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
   if (createHash("sha256").update(versioned).digest("hex") !== ledger.payload_sha256) {
     fail("operations run differs from immutable import ledger payload");
   }
+  // BP_JOB_DELETE: the run stays for its ledger and log, the job is gone.
+  if (run.state === "DELETED") return {phase: "OPERATIONS", state: "DELETED", steps: []};
   if (tailId !== null) {
     const event = db.prepare("SELECT * FROM batch_named_events WHERE intent_id = ?")
       .get(intentId);
@@ -255,7 +280,9 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
       fail("tail event disagrees with confirmed result");
     }
   }
-  if (run.state === "WAITING" && afterName === null && namedId === null) fail("waiting run has no event condition");
+  if (run.state === "WAITING" && afterName === null && namedId === null && schedule === null) {
+    fail("waiting run has no event condition");
+  }
   if (namedId !== null) {
     const namedTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'batch_named_events'").get();
     if (!namedTable) fail("dependent run has no named event ledger");
@@ -305,6 +332,7 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
         ((outbox.tailEvent?.id ?? null) !== tailId ||
          (outbox.tailEvent?.param ?? null) !== tailParam ||
          (outbox.tailEvent?.sourceInstance ?? null) !== namedInstance)) ||
+      JSON.stringify(outbox.schedule ?? null) !== JSON.stringify(schedule) ||
       outbox.steps.length !== steps.length ||
       outbox.steps.some((step, index) => step.program !== steps[index].program ||
         JSON.stringify(step.input) !== JSON.stringify(steps[index].input)))) {
@@ -319,6 +347,7 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
     afterEvent: afterName === null ? null : {jobname: afterName, jobcount: afterCount},
     namedEvent: namedId === null ? null : {id: namedId, param: namedParam},
     tailEvent: tailId === null ? null : {id: tailId, param: tailParam},
+    schedule, chainPred,
   };
 }
 

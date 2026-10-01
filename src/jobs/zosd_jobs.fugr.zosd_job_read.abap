@@ -8,7 +8,9 @@ FUNCTION zosd_job_read.
          ev_tail_event_id, ev_tail_event_param, ev_step_number,
          ev_step_program, ev_input_json, ev_step_state, ev_step_started_at, ev_step_ended_at,
          ev_step_result_status, ev_log_sequence, ev_log_step, ev_log_at,
-         ev_log_event, ev_log_severity, ev_log_text.
+         ev_log_event, ev_log_severity, ev_log_text, ev_sdlstrtdt, ev_sdlstrttm,
+         ev_laststrtdt, ev_laststrttm, ev_periodic, ev_prdmins, ev_prdhours,
+         ev_prddays, ev_prdweeks.
   CALL FUNCTION 'ZOSD_JOB_PORT' DESTINATION 'JOBS'
     EXPORTING iv_command = 'READ_JOB' iv_jobname = iv_jobname
               iv_jobcount = iv_jobcount iv_item = iv_item iv_index = iv_index
@@ -29,7 +31,12 @@ FUNCTION zosd_job_read.
               ev_step_result_status = ev_step_result_status ev_log_sequence = ev_log_sequence
               ev_log_step = ev_log_step ev_log_at = ev_log_at
               ev_log_event = ev_log_event ev_log_severity = ev_log_severity
-              ev_log_text = ev_log_text ev_error_code = lv_error.
+              ev_log_text = ev_log_text ev_sdlstrtdt = ev_sdlstrtdt
+              ev_sdlstrttm = ev_sdlstrttm ev_laststrtdt = ev_laststrtdt
+              ev_laststrttm = ev_laststrttm ev_periodic = ev_periodic
+              ev_prdmins = ev_prdmins ev_prdhours = ev_prdhours
+              ev_prddays = ev_prddays ev_prdweeks = ev_prdweeks
+              ev_error_code = lv_error.
   CASE lv_error.
     WHEN space.
       RETURN.

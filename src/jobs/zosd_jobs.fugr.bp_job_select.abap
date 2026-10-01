@@ -22,6 +22,15 @@ FUNCTION bp_job_select.
   DATA lv_step_index TYPE i.
   DATA lv_step_index_text TYPE string.
   DATA lv_message TYPE string.
+  DATA lv_sdlstrtdt TYPE string.
+  DATA lv_sdlstrttm TYPE string.
+  DATA lv_laststrtdt TYPE string.
+  DATA lv_laststrttm TYPE string.
+  DATA lv_periodic TYPE string.
+  DATA lv_prdmins TYPE string.
+  DATA lv_prdhours TYPE string.
+  DATA lv_prddays TYPE string.
+  DATA lv_prdweeks TYPE string.
   ret = 0.
   CLEAR: jobsel_param_out, local_client, nr_of_jobs_found.
   IF jobselect_dialog <> 'N'.
@@ -280,6 +289,27 @@ FUNCTION bp_job_select.
     ls_job-jobcount = ls_identity-jobcount.
     ls_job-sdluname = ls_identity-owner.
     ls_job-status = lv_status.
+    CLEAR: lv_sdlstrtdt, lv_sdlstrttm, lv_laststrtdt, lv_laststrttm, lv_periodic,
+           lv_prdmins, lv_prdhours, lv_prddays, lv_prdweeks.
+    CALL FUNCTION 'ZOSD_JOB_READ'
+      EXPORTING iv_jobname = ls_identity-jobname iv_jobcount = ls_identity-jobcount
+      IMPORTING ev_sdlstrtdt = lv_sdlstrtdt ev_sdlstrttm = lv_sdlstrttm
+                ev_laststrtdt = lv_laststrtdt ev_laststrttm = lv_laststrttm
+                ev_periodic = lv_periodic ev_prdmins = lv_prdmins
+                ev_prdhours = lv_prdhours ev_prddays = lv_prddays
+                ev_prdweeks = lv_prdweeks
+      EXCEPTIONS OTHERS = 1.
+    IF sy-subrc = 0.
+      ls_job-sdlstrtdt = lv_sdlstrtdt.
+      ls_job-sdlstrttm = lv_sdlstrttm.
+      ls_job-laststrtdt = lv_laststrtdt.
+      ls_job-laststrttm = lv_laststrttm.
+      ls_job-periodic = lv_periodic.
+      ls_job-prdmins = lv_prdmins.
+      ls_job-prdhours = lv_prdhours.
+      ls_job-prddays = lv_prddays.
+      ls_job-prdweeks = lv_prdweeks.
+    ENDIF.
     APPEND ls_job TO jobselect_joblist.
     nr_of_jobs_found = nr_of_jobs_found + 1.
   ENDSELECT.
