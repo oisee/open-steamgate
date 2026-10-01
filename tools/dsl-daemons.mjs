@@ -21,6 +21,8 @@ export function buildDaemonModel(model) {
     if (typeof channel.scope !== "string" || !channel.scope.trim()) throw new Error(`scope (SCOPE) is required on ${channel["@id"]}`);
     if (typeof channel.messageType !== "string" || !channel.messageType.trim()) throw new Error(`messageType (MESSAGE_TYPE_ID) is required on ${channel["@id"]}`);
   }
+  // abapGit serialises the channels sorted by CHANNEL_ID whatever the input order (A4H capture, 2026-10-01).
+  if (result.kind === "samc") result.channels.sort((a, b) => (a.channelId < b.channelId ? -1 : a.channelId > b.channelId ? 1 : 0));
   for (const row of [...(result.channels ?? []), ...(result.authorities ?? [])]) {
     for (const key of ["applicationId", "version"]) {
       if (row[key] !== undefined && row[key] !== result[key]) {

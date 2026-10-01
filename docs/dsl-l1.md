@@ -197,8 +197,16 @@ Stage 1 renders whole SAMC and SAPC XML files from hand-written JSON L1 models i
 `recipes/samc-xml/sample/` and `recipes/sapc-xml/sample/`. `node tools/dsl-samc.mjs render
 <model.json> --out <file>` writes XML and a line trace sidecar; `check <model.json> <target.xml>`
 reports the first differing line. `dsl-build --check` compiles, links, renders and validates the
-recipes. The SAMC sample is byte-identical with the deserialize input abapGit accepted on A4H;
-abapGit's own pretty-printed serialisation is a follow-up. The SAPC target is real-shaped.
+recipes. The SAMC sample is byte-identical with abapGit's own serialisation, captured on A4H on
+2026-10-01 (deserialize the hand-prepared `zosd_t_amc.samc.xml`, call `zcl_abapgit_objects=>serialize`,
+delete, in one run; saved as `docs/probes/abap-daemons/zosd_t_amc.serialized.samc.xml`). The capture
+showed three things the deserialize input hid: a UTF-8 BOM at the start of the file, channels sorted by
+CHANNEL_ID whatever the input order (authorities keep NR order), and a report program's PROGRAM_ID bare
+while classes are padded with `=` to 30 plus `CP`. The BOM is the first character of each template (one
+place, so `check` compares bytes including it); the sort is a derived fact in the model builder, not in
+the template. The SAPC template carries the BOM too, because every abapGit XML file in the
+vibing-steampunk tree, its `*.sapc.xml` included, starts with one; its target `src/apc/` file now
+does as well, and its layout is still real-shaped rather than captured.
 Authority numbers are explicit in the model; the model builder validates or computes `program_id`
 from each authority's `kind` (`class` by default, `report`, or `function_group`) and derives SAPC's
 XML state flag. The engine escapes XML text.
