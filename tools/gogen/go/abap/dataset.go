@@ -97,6 +97,15 @@ func filesOf(s *Session) map[string]*openDataset {
 	return m.(map[string]*openDataset)
 }
 
+// CloseSessionDatasets releases every handle owned by an ended internal session.
+func CloseSessionDatasets(s *Session) {
+	if m, ok := datasetFiles.LoadAndDelete(s); ok {
+		for _, f := range m.(map[string]*openDataset) {
+			f.h.Close()
+		}
+	}
+}
+
 func datasetName(name string) string { return strings.TrimRight(name, " ") }
 
 func fileOpenMode(stmt string) {

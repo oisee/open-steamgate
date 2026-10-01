@@ -390,7 +390,7 @@ for (const {key, methods} of groups) {
   }
   if (c.methods.some((m) => m.name === "CLASS_TEARDOWN")) generated.push(
     `if err := caught(func(){ ${T}_CLASS_TEARDOWN(s) }); err != "" { for i := groupStart; i < len(results); i++ { results[i].Status = "FAILED"; if isNotCompiled(err) { results[i].Status = "NOT_COMPILED" }; results[i].Message += " class_teardown: " + err } }`);
-  generated.push("session.EndTestClass()", "}");
+  generated.push("abap.EndTestClass(s)", "}");
 }
 generated.push("enc := json.NewEncoder(os.Stdout); if err := enc.Encode(results); err != nil { panic(err) }", "}");
 mkdirSync(out, {recursive: true});
