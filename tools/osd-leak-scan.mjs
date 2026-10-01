@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {createHash} from "node:crypto";
 // Look for live identifiers in what is about to become public.
 //
 // The rule in CLAUDE.md is old and it has been walked past twice. Once a wire
@@ -340,6 +341,33 @@ const pathsAt = args.indexOf("--paths");
 const pathArgs = pathsAt >= 0 ? args.slice(pathsAt + 1).filter((a) => !a.startsWith("--")) : null;
 
 const names = identifiers(root);
+// In CI the list comes from an Actions secret and the log is public, so a hit
+// must not print the very name it caught, nor the category it is filed under
+// (a category name can say more than the name). --redact prints the file, the
+// kind of view, a category number and a short hash of the value; the same scan
+// on a machine with the list says what it is. --print-masks emits one
+// ::add-mask:: line per name and category, so the runner masks them anywhere
+// in the log as a second guard.
+const redact = args.includes("--redact") || process.env.OSD_LEAK_REDACT === "1";
+if (args.includes("--print-masks")) {
+  const seenMask = new Set();
+  for (const { kind, value } of names ?? []) {
+    for (const s of [kind, value]) {
+      if (seenMask.has(s)) continue;
+      seenMask.add(s);
+      console.log(`::add-mask::${s}`);
+    }
+  }
+  process.exit(names ? 0 : 2);
+}
+const kinds = [...new Set((names ?? []).map((n) => n.kind))];
+const shown = (h) => {
+  if (!redact) return `${h.what} (${h.how}): ${h.text}`;
+  const n = kinds.indexOf(h.what);
+  const label = n >= 0 ? `имя из списка, категория #${n + 1}` : h.what;
+  const digest = createHash("sha256").update(h.text.toLowerCase()).digest("hex").slice(0, 8);
+  return `${label} (${h.how}): sha256:${digest}`;
+};
 const files = pathArgs
   ? namedFiles(root, pathArgs)
   : rangeArgs ? blobsInRange(root, rangeArgs) : all ? trackedFiles(root) : stagedFiles(root);
@@ -376,7 +404,7 @@ if (hits.length) {
   console.error("");
   for (const [file, list] of byFile) {
     console.error(`  ${file}`);
-    for (const h of list) console.error(`      ${h.what} (${h.how}): ${h.text}`);
+    for (const h of list) console.error(`      ${shown(h)}`);
   }
   console.error("");
   console.error("Это публичный репозиторий. Вычисти или положи под .local/.");

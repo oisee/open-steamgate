@@ -18,14 +18,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # The identifier list is gitignored and not on a runner, so CI runs the
-      # structural rules only: private addresses in any encoding, the same
-      # addresses packed into four bytes, uuid shapes, and any capture staged
-      # at all. Exit 2 means "ran without the names", which is the expected
-      # state here rather than a failure.
+      # The identifier list is gitignored, so it reaches the runner only as the
+      # LEAK_IDENTIFIERS Actions secret. The log of a public repository is
+      # public, so every name and category is registered with ::add-mask::
+      # before anything runs, and the scan prints a category number and a
+      # hash instead of the value (--redact). Without the secret (a pull
+      # request from a fork gets none) the structural rules still run, and
+      # the job says plainly that the names were not checked: exit 2 means
+      # "ran without the names", not "clean".
+      - name: install the identifier list
+        env:
+          LEAK_IDENTIFIERS: ${{ secrets.LEAK_IDENTIFIERS }}
+        run: |
+          if [ -z "$LEAK_IDENTIFIERS" ]; then
+            echo "::warning::LEAK_IDENTIFIERS is not available to this run: names are NOT checked, only the structural rules"
+            exit 0
+          fi
+          umask 077
+          mkdir -p .local
+          printf '%s' "$LEAK_IDENTIFIERS" > .local/leak-identifiers.json
+          node tools/osd-leak-scan.mjs --print-masks
       - name: scan every tracked file
         run: |
-          node tools/osd-leak-scan.mjs . --all || [ $? -eq 2 ]
+          node tools/osd-leak-scan.mjs . --all --redact || [ $? -eq 2 ]
+      - name: remove the identifier list
+        if: always()
+        run: rm -f .local/leak-identifiers.json
       # The naming rule (G.1d), here for the same reason the leak scan is: a
       # rule that lives in a document is read once and then goes stale in
       # silence. This one needs no identifier list, so it either passes or
