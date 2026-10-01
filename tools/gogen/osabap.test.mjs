@@ -264,13 +264,21 @@ test("MEMORY ID checkbox is a memory id, not a checkbox", () => {
       "REPORT zmemid.",
       "PARAMETERS p_mem TYPE c LENGTH 10 MEMORY ID checkbox LOWER CASE.",
       "PARAMETERS p_cb AS CHECKBOX.",
+      "DATA gv_n TYPE i.",
+      "SELECT-OPTIONS s_m FOR gv_n MEMORY ID checkbox.",
       "START-OF-SELECTION.",
       "  WRITE: / p_mem, p_cb.",
+      "  gv_n = lines( s_m ).",
+      "  WRITE: / 'ranges', gv_n.",
       ""].join("\n"));
     execFileSync(process.execPath, [builder, join(dir, "zmemid.prog.abap")], {stdio: "inherit"});
     const out = run(["--mem", "hello", "--cb"]);
     assert.equal(out.status, 0, out.stderr);
-    assert.match(out.stdout, /^hello\s+X\n$/);
+    assert.match(out.stdout, /^hello\s+X\nranges\s+0\n$/);
+    // a select-option with MEMORY ID checkbox stays a range: repeatable, with values
+    const range = run(["--mem", "x", "--s-m", "3", "--s-m", "5"]);
+    assert.equal(range.status, 0, range.stderr);
+    assert.match(range.stdout, /ranges\s+2\n$/);
     const positional = run(["hi"]);
     assert.equal(positional.status, 0, positional.stderr);
     assert.match(positional.stdout, /^hi\b/);
