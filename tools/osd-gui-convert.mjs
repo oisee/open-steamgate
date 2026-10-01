@@ -327,7 +327,9 @@ export function selectionSemanticsSource(source, elements) {
       const sign = /\bSIGN\s+([IE])\b/i.exec(additions.get(element))?.[1]?.toUpperCase();
       if (option) line = line.replace(/(default = VALUE #\( sign = '[IE]' option = ')[A-Z]+(')/, `$1${option}$2`);
       if (sign) line = line.replace(/(default = VALUE #\( sign = ')[IE](')/, `$1${sign}$2`);
-      if (/\bLOWER\s+CASE\b/i.test(additions.get(element))) line = line.replace(/\) \)\.$/, " lower_case = abap_true ) ).");
+      if (/\bLOWER\s+CASE\b/i.test(additions.get(element)) && !/\blower_case\s*=/i.test(line)) {
+        line = line.replace(/\) \)\.$/, " lower_case = abap_true ) ).");
+      }
       return line.replace("add_select_option( VALUE #(", "add_select_option( zcl_osd_submit_semantics=>select_option( VALUE #(")
         .replace(/\) \)\.$/, ") ) ).");
     }

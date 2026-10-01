@@ -1,11 +1,51 @@
 import {expect} from "chai";
+import * as core from "@abaplint/core";
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {dialogStep, workProcess} from "../tools/osd-dialog-step.mjs";
-import {batchRegistrySource, selectionSemanticsSource} from "../tools/osd-gui-convert.mjs";
+import {batchRegistrySource, generate, selectionSemanticsSource} from "../tools/osd-gui-convert.mjs";
 
 describe("called report selection additions", () => {
   const parameter = (name, additions) => ({kind: "parameter", name, additions});
   const selectOption = (name, additions) => ({kind: "select-option", name, additions});
   const line = (kind, name, tail) => `io_builder->add_${kind}( VALUE #( name = '${name}' ${tail} ) ).`;
+
+  it("converts report defaults once and passes abaplint's field-assignment check", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-selection-defaults-"));
+    try {
+      writeFileSync(join(dir, "zdefaults.prog.abap"), `REPORT zdefaults.
+DATA gv_text TYPE c LENGTH 8.
+PARAMETERS p_char TYPE c LENGTH 3 DEFAULT 'mixed'.
+PARAMETERS p_lower TYPE c LENGTH 5 LOWER CASE DEFAULT 'AbCdEf'.
+PARAMETERS r_one RADIOBUTTON GROUP rad.
+PARAMETERS r_two RADIOBUTTON GROUP rad DEFAULT 'X'.
+SELECT-OPTIONS s_text FOR gv_text DEFAULT 'a' TO 'z' OPTION nb SIGN e.
+SELECT-OPTIONS s_lower FOR gv_text LOWER CASE DEFAULT 'lower'.
+START-OF-SELECTION.
+  WRITE p_char.`);
+      const {reports} = await generate([dir], join(dir, "generated"));
+      expect(reports[0].supported).to.equal(true);
+      const file = "zcl_osd_gui_defaults.clas.abap";
+      const source = readFileSync(join(dir, "generated", file), "utf8");
+      const lines = source.split("\n");
+      expect(lines.find((row) => row.includes("name = 'S_TEXT'"))).to.include("sign = 'E' option = 'NB' low = 'a' high = 'z'");
+      expect(lines.find((row) => row.includes("name = 'R_TWO'"))).to.include("default = abap_true");
+      expect(lines.find((row) => row.includes("name = 'P_LOWER'"))).to.include("lower_case = abap_true");
+      const lowerOption = lines.find((row) => row.includes("name = 'S_LOWER'"));
+      expect(lowerOption?.match(/lower_case\s*=/g)).to.have.length(1);
+      const syntax = (text) => new core.Registry(core.Config.getDefault())
+        .addFile(new core.MemoryFile(file, text)).parse().findIssues()
+        .filter((issue) => issue.getKey() === "check_syntax" && issue.getMessage() === "Duplicate field assignment");
+      expect(syntax(source)).to.have.length(0);
+      // The isolated class lacks its interface dependencies, but this check
+      // still detects duplicate VALUE fields in the generated source.
+      const duplicate = source.replace(lowerOption, lowerOption.replace("lower_case = abap_true", "lower_case = abap_true lower_case = abap_true"));
+      expect(syntax(duplicate)).to.have.length(1);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
 
   it("ignores addition keywords inside defaults while keeping real additions", () => {
     const elements = [
