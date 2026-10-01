@@ -119,6 +119,19 @@ flags (`reportargs.HostFlags`) are in `tools/gogen/go/reportargs`; `osd run`
 passes its arguments to the report binary untouched, so nothing else parses
 them.
 
+## Selection texts
+
+The labels of the terminal form and of `-help` are the report's selection
+texts: the `S` entries of the text pool in the abapGit `<report>.prog.xml`
+beside the report file, when there is one, in the original language (the
+translations in `I18N_TPOOL` are not used). Without it, or for an entry `.`
+(a text taken from the dictionary, which the build does not have), the field
+shows its name; an icon code in front of a text (`@DJ@`) is dropped. `tools/gogen/apps/greet/zgreet.prog.xml` is the sample:
+
+```text
+  --name             Who to greet (P_NAME, value)
+```
+
 ## Headless CLI
 
 For `ZHELLO`, these are equivalent inputs:

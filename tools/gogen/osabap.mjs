@@ -3,7 +3,7 @@
 // selection screen is its command-line contract; the Go host is deliberately
 // separate from OSGo's HTTP/OData/database host.
 import {execFileSync} from "node:child_process";
-import {copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, resolve} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
@@ -38,7 +38,24 @@ mkdirSync(dir, {recursive: true});
 const gui = join(home, ".local", "lars", "open-abap-gui");
 const {convertProgram} = await import(join(gui, "converter", "src", "api.mjs"));
 const source = readFileSync(report, "utf8");
-const converted = await convertProgram({source, filename: basename(report), mode: "strict", nativePassthrough: true, className, transactionCode: name});
+// the selection texts of the report (TPOOL, ID S) from the abapGit <report>.prog.xml
+// beside it: the labels of the terminal form and of -help; the text symbols
+// (ID I) go along for the block titles that name them. Only the first TPOOL
+// counts: I18N_TPOOL after it holds the translations. An S entry "." takes its
+// text from the dictionary, which this build has not, so the name stays, and an
+// icon code in front (@DJ@) is drawn by SAP GUI, not printed
+const xmlEntity = (text) => text.replace(/&(lt|gt|quot|apos|amp);/g, (_, e) => ({lt: "<", gt: ">", quot: "\"", apos: "'", amp: "&"})[e]);
+const programXml = report.replace(/\.abap$/i, ".xml");
+const textPool = {};
+const tpool = existsSync(programXml) ? /<TPOOL>([\s\S]*?)<\/TPOOL>/.exec(readFileSync(programXml, "utf8"))?.[1] ?? "" : "";
+for (const [, item] of tpool.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+  const field = (tag) => xmlEntity(new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(item)?.[1] ?? "");
+  const entry = field("ENTRY").replace(/^@[0-9A-Z]{2}(\\[^@]*)?@/, "").trim();
+  if (field("KEY") === "" || entry === "") continue;
+  if (field("ID") === "S" && entry !== ".") textPool[field("KEY").toUpperCase()] = entry;
+  if (field("ID") === "I") textPool[`TEXT-${field("KEY").toUpperCase()}`] = entry;
+}
+const converted = await convertProgram({source, filename: basename(report), mode: "strict", nativePassthrough: true, className, transactionCode: name, ...(Object.keys(textPool).length > 0 ? {textPool} : {})});
 if (converted.supported !== true || converted.classSource === undefined) {
   throw new Error(`${report}: converter refused the report: ${JSON.stringify(converted.diagnostics)}`);
 }
@@ -155,6 +172,7 @@ var appSelectionNames = []string{${selectionNames.map(JSON.stringify).join(", ")
 var appPositionals = []string{${positionals.map(JSON.stringify).join(", ")}}
 var appCheckboxes = map[string]bool{${checkboxes.map((name) => `${JSON.stringify(name)}: true`).join(", ")}}
 var appRanges = map[string]bool{${ranges.map((name) => `${JSON.stringify(name)}: true`).join(", ")}}
+var appLabels = map[string]string{${Object.entries(textPool).filter(([key]) => selectionNames.includes(key)).map(([key, text]) => `${JSON.stringify(key)}: ${JSON.stringify(text)}`).join(", ")}}
 
 func newReport(s *abap.Session) *${className} { return New_${className}(s) }
 `);
