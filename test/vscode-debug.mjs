@@ -6,6 +6,7 @@ import {dirname, join, relative, resolve} from "node:path";
 import {pathToFileURL, fileURLToPath} from "node:url";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
+import {hashOf} from "../tools/osd-build.mjs";
 import {modulesOf, transpile} from "../tools/osd-transpile.mjs";
 import {createRequire} from "node:module";
 
@@ -141,7 +142,7 @@ function breakpointFor(sourcePath, sourceLine, sourceColumn) {
 describe("VS Code debugger transport: detached ABAP Unit child", function () {
   this.timeout(180000);
 
-  it("maps a projected DPC_EXT generation to its workspace source for OData attach", async () => {
+  it("keeps projected DPC maps portable and resolves them through attach overrides", async () => {
     const dir = mkdtempSync(join(tmpdir(), "osd-dpc-map-"));
     try {
       const home = join(dir, "home");
@@ -150,11 +151,14 @@ describe("VS Code debugger transport: detached ABAP Unit child", function () {
       const workspaceSource = join(workspace, "src");
       const packSource = join(storage, "packs", packNameOf(workspace), "src");
       const generation = join(home, "build", "by-input", "abc123", "output");
+      const otherWorkspace = join(dir, "other-workspace", "src");
       mkdirSync(workspaceSource, {recursive: true});
+      mkdirSync(otherWorkspace, {recursive: true});
       mkdirSync(dirname(packSource), {recursive: true});
       symlinkSync(workspaceSource, packSource, "dir");
+      writeFileSync(join(dirname(packSource), "osd-pack.json"), JSON.stringify({name: "projected", abap: "src"}));
       const source = join(workspaceSource, "zcl_ship_dpc_ext.clas.abap");
-      writeFileSync(source, `CLASS zcl_ship_dpc_ext DEFINITION PUBLIC FINAL CREATE PUBLIC.
+      const abap = `CLASS zcl_ship_dpc_ext DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     METHODS shipset_get_entityset.
 ENDCLASS.
@@ -163,17 +167,44 @@ CLASS zcl_ship_dpc_ext IMPLEMENTATION.
     DATA lv_count TYPE i.
     lv_count = 1.
   ENDMETHOD.
-ENDCLASS.`);
-      await transpile({root: home, config: {input_folder: relative(home, packSource),
+ENDCLASS.`;
+      writeFileSync(source, abap);
+      writeFileSync(join(otherWorkspace, "zcl_ship_dpc_ext.clas.abap"), abap);
+      const config = {input_folder: relative(home, packSource),
         output_folder: relative(home, generation), input_filter: [".*\\.abap$"], exclude_filter: [],
-        libs: [], options: {}, write_source_map: true, write_unit_tests: false}, modules: modulesOf(ROOT)});
+        libs: [], options: {}, write_source_map: true, write_unit_tests: false};
+      await transpile({root: home, config, modules: modulesOf(ROOT)});
       const map = JSON.parse(readFileSync(join(generation, "zcl_ship_dpc_ext.clas.mjs.map"), "utf8"));
-      expect(map.sources).to.include(source);
+      const mapped = map.sources.find((entry) => entry.endsWith("zcl_ship_dpc_ext.clas.abap"));
+      expect(mapped).to.equal(`${relative(generation, packSource).replaceAll("\\", "/")}/zcl_ship_dpc_ext.clas.abap`);
+      expect(JSON.stringify(map)).not.to.include(workspace);
+      expect(JSON.stringify(map)).not.to.include(storage);
       const attach = debuggerConfiguration(9341, {root: home, storageDir: storage,
         layers: [{folder: workspace, srcDir: workspaceSource}]});
       expect(attach.outFiles).to.include(`${home}/build/**/*.mjs`);
       expect(attach.resolveSourceMapLocations).to.include(`${home}/build/**`);
+      expect(attach.sourceMapPathOverrides[`${dirname(mapped)}/*`]).to.equal(`${workspaceSource}/*`);
       expect(attach.sourceMapPathOverrides[`file://${packSource}/*`]).to.equal(`${workspaceSource}/*`);
+      // The same bytes under a retargeted projection may reuse the same
+      // generation: its map names the stable projection, while the attach
+      // config points to the workspace now open in the editor.
+      const previousPacks = process.env.OSD_PACKS;
+      process.env.OSD_PACKS = join(storage, "packs");
+      let before;
+      let after;
+      try {
+        before = hashOf(ROOT);
+        rmSync(packSource);
+        symlinkSync(otherWorkspace, packSource, "dir");
+        after = hashOf(ROOT);
+      } finally {
+        if (previousPacks === undefined) delete process.env.OSD_PACKS;
+        else process.env.OSD_PACKS = previousPacks;
+      }
+      expect(after).to.equal(before);
+      await transpile({root: home, config, modules: modulesOf(ROOT)});
+      const retargeted = JSON.parse(readFileSync(join(generation, "zcl_ship_dpc_ext.clas.mjs.map"), "utf8"));
+      expect(retargeted).to.deep.equal(map);
     } finally {
       rmSync(dir, {recursive: true, force: true});
     }
@@ -219,7 +250,7 @@ ENDCLASS.`;
       await transpile({root: home, config, modules: modulesOf(ROOT)});
       const module = join(home, config.output_folder, "zcl_probe.clas.testclasses.mjs");
       const map = JSON.parse(readFileSync(module + ".map", "utf8"));
-      expect(resolve(dirname(module), map.sources[0]), "the map names the file open in the editor").to.equal(testFile);
+      expect(realpathSync(resolve(dirname(module), map.sources[0]))).to.equal(testFile);
       const position = generatedPosition(map.mappings, 0, 10, 4);
       expect(position, "ABAP call line has a source-map position").to.not.equal(undefined);
       const generated = readFileSync(module, "utf8").split("\n")[position.line - 1];
@@ -227,7 +258,7 @@ ENDCLASS.`;
       const port = await pickInspectorPort();
       const attach = debuggerConfiguration(port, {target: "unit", root: home, storageDir: storage,
         layers: [{folder: workspace, srcDir: workspaceSource, manifest: join(workspace, "osd-pack.json")}]});
-      expect(attach.sourceMapPathOverrides[`file://${packSource}/*`]).to.equal(`${workspaceSource}/*`);
+      expect(attach.sourceMapPathOverrides[`${dirname(map.sources[0])}/*`]).to.equal(`${workspaceSource}/*`);
       expect(attach.outFiles).to.include(`${home}/build/**/*.mjs`);
 
       const runner = join(dir, "runner.mjs");
