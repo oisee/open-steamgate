@@ -1,0 +1,12 @@
+{
+ "version": 1,
+ "about": "Deploy manifest of the prove-on-system fixture (test/prove-on-system.mjs). Never sent anywhere: the tests use a fake MCP transport.",
+ "customerNamespaces": [],
+ "units": {
+  "prove-demo": {
+   "description": "two classes, one with tests, one without",
+   "objects": ["CLAS ZCL_OSD_PROVE_DEMO", "CLAS ZCL_OSD_PROVE_PLAIN"],
+   "sources": ["test/fixtures/prove-on-system/src"]
+  }
+ }
+}

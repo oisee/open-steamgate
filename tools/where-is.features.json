@@ -37,9 +37,9 @@
   {
     "name": "Packs and deployment",
     "commands": ["packs:fetch", "segw:zip"],
-    "main": ["tools/osd-fetch.mjs", "tools/osd-abapgit-zip.mjs", "packs/*/osd-pack.json"],
-    "tests": ["test/osd-fetch.mjs", "test/osd-packs.mjs", "test/osd-abapgit-zip.mjs"],
-    "docs": ["docs/a4h-deploy.md", "docs/release.md"]
+    "main": ["tools/osd-fetch.mjs", "tools/osd-abapgit-zip.mjs", "tools/osd-prove-on-system.mjs", "packs/*/osd-pack.json"],
+    "tests": ["test/osd-fetch.mjs", "test/osd-packs.mjs", "test/osd-abapgit-zip.mjs", "test/prove-on-system.mjs"],
+    "docs": ["docs/a4h-deploy.md", "docs/prove-on-system.md", "docs/release.md"]
   },
   {
     "name": "Go generator and runtime",

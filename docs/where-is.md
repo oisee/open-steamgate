@@ -42,9 +42,9 @@ The feature list groups discovered paths; each linked path is checked when this 
 ## Packs and deployment
 
 - Commands: `npm run packs:fetch` ([tools/osd-fetch.mjs](../tools/osd-fetch.mjs)); `npm run segw:zip` ([tools/osd-abapgit-zip.mjs](../tools/osd-abapgit-zip.mjs))
-- Main files: [tools/osd-fetch.mjs](../tools/osd-fetch.mjs) — A pack's sources: the folders it fetches rather than carries.; [tools/osd-abapgit-zip.mjs](../tools/osd-abapgit-zip.mjs) — A folder of abapGit-named objects, as a zip abapGit will import.; [packs/gui-examples/osd-pack.json](../packs/gui-examples/osd-pack.json); [packs/lsd/osd-pack.json](../packs/lsd/osd-pack.json); [packs/o4d/osd-pack.json](../packs/o4d/osd-pack.json); [packs/travels-a4h/osd-pack.json](../packs/travels-a4h/osd-pack.json); [packs/zork/osd-pack.json](../packs/zork/osd-pack.json); [packs/zvdb/osd-pack.json](../packs/zvdb/osd-pack.json)
-- Tests: [test/osd-fetch.mjs](../test/osd-fetch.mjs); [test/osd-packs.mjs](../test/osd-packs.mjs); [test/osd-abapgit-zip.mjs](../test/osd-abapgit-zip.mjs)
-- Docs: [Deploying to a real system, through abapGit](../docs/a4h-deploy.md); [VS Code prerelease](../docs/release.md)
+- Main files: [tools/osd-fetch.mjs](../tools/osd-fetch.mjs) — A pack's sources: the folders it fetches rather than carries.; [tools/osd-abapgit-zip.mjs](../tools/osd-abapgit-zip.mjs) — A folder of abapGit-named objects, as a zip abapGit will import.; [tools/osd-prove-on-system.mjs](../tools/osd-prove-on-system.mjs) — The same ABAP Unit on OSG and on a sandbox system, in one command.; [packs/gui-examples/osd-pack.json](../packs/gui-examples/osd-pack.json); [packs/lsd/osd-pack.json](../packs/lsd/osd-pack.json); [packs/o4d/osd-pack.json](../packs/o4d/osd-pack.json); [packs/travels-a4h/osd-pack.json](../packs/travels-a4h/osd-pack.json); [packs/zork/osd-pack.json](../packs/zork/osd-pack.json); [packs/zvdb/osd-pack.json](../packs/zvdb/osd-pack.json)
+- Tests: [test/osd-fetch.mjs](../test/osd-fetch.mjs); [test/osd-packs.mjs](../test/osd-packs.mjs); [test/osd-abapgit-zip.mjs](../test/osd-abapgit-zip.mjs); [test/prove-on-system.mjs](../test/prove-on-system.mjs)
+- Docs: [Deploying to a real system, through abapGit](../docs/a4h-deploy.md); [Prove on a system: the same ABAP Unit on OSG and on a sandbox](../docs/prove-on-system.md); [VS Code prerelease](../docs/release.md)
 
 ## Go generator and runtime
 
