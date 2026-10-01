@@ -267,6 +267,23 @@ func (b *Broker) Forget(session any) {
 	}
 	delete(b.inboxes, session)
 	delete(b.ids, session)
+	if b.binds != nil {
+		bs := b.binds
+		bs.mu.Lock()
+		for obj, owner := range bs.owners {
+			if owner == session {
+				delete(bs.values, obj)
+				delete(bs.owners, obj)
+			}
+		}
+		for pair, sub := range bs.subs {
+			if sub.at.Session == session {
+				delete(bs.subs, pair)
+			}
+		}
+		delete(bs.stack, session)
+		bs.mu.Unlock()
+	}
 }
 
 func itoa(n int) string {
@@ -397,6 +414,7 @@ type Consumer struct {
 type bindings struct {
 	mu     sync.Mutex
 	values map[any]any
+	owners map[any]any
 	subs   map[[2]any]*Subscription
 	stack  map[any][]string
 }
@@ -405,16 +423,17 @@ func (b *Broker) bind() *bindings {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.binds == nil {
-		b.binds = &bindings{values: map[any]any{}, subs: map[[2]any]*Subscription{}, stack: map[any][]string{}}
+		b.binds = &bindings{values: map[any]any{}, owners: map[any]any{}, subs: map[[2]any]*Subscription{}, stack: map[any][]string{}}
 	}
 	return b.binds
 }
 
-// Bind keeps v for the object obj (a producer or a consumer); Bound gives it back.
-func (b *Broker) Bind(obj, v any) {
+// Bind keeps v for the object obj in session; Bound gives it back.
+func (b *Broker) Bind(session, obj, v any) {
 	bs := b.bind()
 	bs.mu.Lock()
 	bs.values[obj] = v
+	bs.owners[obj] = session
 	bs.mu.Unlock()
 }
 

@@ -89,6 +89,33 @@ test("a different assertion in a known anomaly method remains DIFFERENT", () => 
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
+test("ABAP Unit class statics and constructor restart for each Go test class", {timeout: 120000}, () => {
+  const run = spawnSync("node", [join(here, "unit.mjs"), "--fixture", "test/fixtures/unit-statics", "--class", "ZCL_OSD_STATICS_TEST"], {
+    cwd: join(here, "..", ".."), encoding: "utf8", timeout: 110000, maxBuffer: 5e6,
+  });
+  assert.equal(run.status, 0, run.stderr || run.error?.message || run.stdout);
+  const rows = JSON.parse(run.stdout).rows;
+  assert.deepEqual(rows.map(({testclass, method, status}) => [testclass, method, status]), [
+    ["LTC_A", "M1_FIRST", "SUCCESS"], ["LTC_A", "M2_SECOND", "SUCCESS"],
+    ["LTC_B", "M1_FIRST", "SUCCESS"], ["LTC_B", "M2_SECOND", "SUCCESS"],
+  ]);
+});
+
+test("unit statics parity labels only reviewed Node assertions as nodeAnomaly", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-statics-compare-"));
+  const base = {class: "ZCL_OSD_STATICS_TEST", testclass: "LTC_B", method: "M1_FIRST"};
+  const go = {...base, status: "SUCCESS", message: ""};
+  try {
+    writeFileSync(join(dir, "go.json"), JSON.stringify({rows: [go]}));
+    for (const [message, category] of [["Expected '1', got '3'", "nodeAnomaly"], ["Expected '1', got '5'", "different"]]) {
+      writeFileSync(join(dir, "node.json"), JSON.stringify([{...base, status: "FAILED", message}]));
+      const run = spawnSync("node", [join(here, "unit-compare.mjs"), "--node-json", join(dir, "node.json"), "--go-json", join(dir, "go.json")], {encoding: "utf8", timeout: 10000});
+      assert.equal(run.error, undefined, run.stderr);
+      assert.deepEqual(JSON.parse(run.stdout).methods[category].map((row) => row.key), ["ZCL_OSD_STATICS_TEST/LTC_B/M1_FIRST"]);
+    }
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
 test("ABAP fixture runs pass, fail, exception, and teardown after failures", {timeout: 120000}, () => {
   const run = spawnSync("node", [join(here, "unit.mjs"), "--fixture", join(here, "testdata-unit")], {
     cwd: join(here, "..", ".."), encoding: "utf8", timeout: 110000, maxBuffer: 5e6,

@@ -76,6 +76,12 @@ const knownNodeAnomalies = new Map([
   ["ZCL_STG_GATEWAY_TEST/LTCL_FUNCTION_IMPORT/PRIMITIVE_RETURNING_ACTION", ["ANOMALY-2026-09-11-no-implicit-mandt", "the action counts three active travels including T0009; client 123 has two", "Expected '{\"d\":{\"TravelCount\":3}}', got '{\"d\":{\"TravelCount\":2}}'"]],
   ["ZCL_OSD_BATCH_RUNNER_TEST/LTCL_BATCH_REPORT/STATIC_SUBMIT_RANGE_BT_AND_E", ["ANOMALY-2026-09-29-runtime-in-options", "Node compareIn throws on BT with E EQ; Go executes the measured range", ""]],
 ]);
+// A4H runs each local test class in a fresh internal session. The Node
+// runner still carries CLASS-DATA into LTC_B; match the assertion result,
+// rather than treating every failure in this method as the same anomaly.
+const unitStaticsNodeAnomalies = new Map([
+  ["ZCL_OSD_STATICS_TEST/LTC_B/M1_FIRST", "Expected '1', got '3'"],
+]);
 const methods = {same: [], different: [], nodeAnomaly: [], nodeOnly: [], goOnly: [], skipped: []};
 for (const [k, n] of node) {
   const g = gorows.get(k);
@@ -85,7 +91,10 @@ for (const [k, n] of node) {
   else if (g.status === n.status && g.message === n.message) methods.same.push(k);
   else {
     const known = knownNodeAnomalies.get(k);
-    if (known && g?.message === known[2] &&
+    const statics = unitStaticsNodeAnomalies.get(k);
+    if (statics && n.status === "FAILED" && n.message === statics && g.status === "SUCCESS" && g.message === "") {
+      methods.nodeAnomaly.push({key: k, entry: "ANOMALY-2026-09-30-unit-statics-across-test-classes", why: "Node carries class statics into the next ABAP Unit test class", node: n, go: g});
+    } else if (known && g?.message === known[2] &&
         (known[0].includes("runtime-in-options") ? n.message === "compareIn todo" && g.status === "SUCCESS" : n.status === "SUCCESS" && g.status === "FAILED")) {
       methods.nodeAnomaly.push({key: k, entry: known[0], why: known[1], node: n, go: g});
     } else methods.different.push({key: k, node: n, go: g});

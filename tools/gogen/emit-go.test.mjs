@@ -185,6 +185,10 @@ ENDCLASS.
 `);
     const program = compileProgram({folders: [sourceDir], objects: ["ZCL_GOGEN_STATIC_READER"]});
     const generated = emitGo(program);
+    // osgo.mjs and osabap.mjs both use the default emitter mode.
+    assert.doesNotMatch(generated, /session\.Register\(/);
+    assert.doesNotMatch(generated, /"osg\/gogen\/session"/);
+    assert.match(emitGo(program, "main", null, true), /session\.Register\(/);
     assert.doesNotMatch(generated, /NOT_COMPILED in ZCL_GOGEN_STATIC_READER=>RUN/);
     writeFileSync(join(goDir, "zz_generated.go"), generated);
     writeFileSync(join(goDir, "zz_generated_test.go"), `package main\nimport ("testing"; "osg/gogen/abap")\nfunc TestRead(t *testing.T) { if got := ZCL_GOGEN_STATIC_READER_RUN(&abap.Session{}); got != 9 { t.Fatalf("got %d", got) } }\n`);

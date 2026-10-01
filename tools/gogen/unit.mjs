@@ -314,7 +314,7 @@ const eventsFor = (i) => new Map([...program.events].filter(([, ev]) =>
   (layer.get(ev.decl) ?? interfaceLayer.get(ev.decl) ?? 0) === i));
 function writeGeneratedGo(dir) {
   if (args.includes("--unlayered") || fixture) {
-    writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
+    writeFileSync(join(dir, "zz_generated.go"), emitGo(program, "main", null, true));
     return;
   }
   const coreDir = join(here, "go", "generated", "core");
@@ -335,18 +335,18 @@ function writeGeneratedGo(dir) {
     classes: layerClasses[0], structs: structsAt(0), consts: constsAt(0), tables: tablesAt(0),
     interfaces: coreInterfaces, events: eventsFor(0), externalClasses: new Set([...allClassNames].filter((n) => !coreNames.has(n))),
     marker: "GogenCoreLayer",
-  }));
+  }, true));
   writeFileSync(join(appDir, "zz_generated.go"), emitGo(program, "app", {
     classes: layerClasses[1], structs: structsAt(1), consts: constsAt(1), tables: tablesAt(1),
     interfaces: appInterfaces, events: eventsFor(1), externalClasses: new Set([...allClassNames].filter((n) => !appNames.has(n))),
     imports: ["osg/gogen/generated/core"], importMarkers: ["GogenCoreLayer"], marker: "GogenAppLayer",
-  }));
+  }, true));
   writeFileSync(join(dir, "zz_generated.go"), emitGo(program, "main", {
     classes: layerClasses[2], structs: structsAt(2), consts: constsAt(2), tables: tablesAt(2),
     interfaces: new Set(), events: eventsFor(2), externalClasses: new Set([...allClassNames].filter((n) => layer.get(n) < 2)),
     imports: ["osg/gogen/generated/core", "osg/gogen/generated/app"],
     importMarkers: ["GogenCoreLayer", "GogenAppLayer"],
-  }));
+  }, true));
 }
 
 const emitStarted = performance.now();
@@ -355,7 +355,7 @@ const ready = rows.filter((x) => x.status === "READY");
 const groups = [...Map.groupBy(ready, (r) => `${r.class}:${r.testclass}`)].map(([key, methods]) => ({key, methods}));
 // A4H: an assertion in TEARDOWN stops this local test class unless the
 // assertion that actually failed was called with QUIT = NO.
-const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; \"fmt\"; \"os\"; \"regexp\"; \"runtime/debug\"; \"strings\"; \"osg/gogen/abap\")", "",
+const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; \"fmt\"; \"os\"; \"regexp\"; \"runtime/debug\"; \"strings\"; \"osg/gogen/abap\"; \"osg/gogen/session\")", "",
   "//go:embed zz_db.json", "var dbScript []byte", "",
   "type result struct { Class string `json:\"class\"`; Testclass string `json:\"testclass\"`; Method string `json:\"method\"`; Status string `json:\"status\"`; Message string `json:\"message\"` }",
   "var assertSite = regexp.MustCompile(`(?m)([A-Za-z0-9_]+\\.clas\\.testclasses\\.abap):([0-9]+)`)\nfunc failureMessage(x any) string { msg := fmt.Sprint(x); if msg != \"Expected abap_true\" && msg != \"Expected abap_false\" { return msg }; sites := assertSite.FindAllStringSubmatch(string(debug.Stack()), -1); if len(sites) == 0 { return msg }; site := sites[len(sites)-1]; return msg + \" at \" + site[1] + \":\" + site[2] }",
@@ -370,7 +370,9 @@ for (const {key, methods} of groups) {
   const T = goName(key);
   const special = (name, receiver) => c.methods.some((m) => m.name === name)
     ? `${receiver}.${goName(name)}(s)` : "";
-  generated.push("{", ...(c.methods.some((m) => m.name === "CLASS_TEARDOWN") ? ["groupStart := len(results)"] : []), "classError := \"\"", "stopClass := false");
+  // Generated class statics are process globals. Keep each whole test class
+  // exclusive until U4 step 2 moves them into abap.Session.
+  generated.push("{", "session.BeginTestClass()", "s = &abap.Session{}", ...(c.methods.some((m) => m.name === "CLASS_TEARDOWN") ? ["groupStart := len(results)"] : []), "classError := \"\"", "stopClass := false");
   // one LUW chain as the Node unit run has (abap.BeginUnitLUW): COMMIT and
   // ROLLBACK WORK end it, nothing between the methods does
   if (methods.some((m) => m.db)) generated.push("classError = caught(func(){ if err := abap.OpenDB(dbScript); err != nil { panic(err) }; abap.BeginUnitLUW() })");
@@ -388,7 +390,7 @@ for (const {key, methods} of groups) {
   }
   if (c.methods.some((m) => m.name === "CLASS_TEARDOWN")) generated.push(
     `if err := caught(func(){ ${T}_CLASS_TEARDOWN(s) }); err != "" { for i := groupStart; i < len(results); i++ { results[i].Status = "FAILED"; if isNotCompiled(err) { results[i].Status = "NOT_COMPILED" }; results[i].Message += " class_teardown: " + err } }`);
-  generated.push("}");
+  generated.push("abap.EndTestClass(s)", "}");
 }
 generated.push("enc := json.NewEncoder(os.Stdout); if err := enc.Encode(results); err != nil { panic(err) }", "}");
 mkdirSync(out, {recursive: true});

@@ -87,8 +87,8 @@ jobs:
       - name: Go vet and tests
         working-directory: tools/gogen/go
         run: |
-          go vet ./abap/ ./termgui/ ./amc/
-          go test ./abap/... ./termgui/...
+          go vet ./abap/ ./termgui/ ./amc/ ./session/...
+          go test ./abap/... ./termgui/... ./session/...
           # the AMC broker is concurrent by nature: its tests run under the race detector
           go test -race ./amc/...
       - name: Semantics, Go and IR-as-JS against the measured answers
@@ -100,7 +100,7 @@ jobs:
         # the library clones must be the pinned ones (tools/gogen/lib-pins.mjs)
         env:
           OSABAP_STRICT_PINS: "1"
-        run: node --test tools/gogen/lib-pins.test.mjs tools/gogen/osabap.test.mjs tools/gogen/osabap-sql-corpus.test.mjs
+        run: node --test tools/gogen/lib-pins.test.mjs tools/gogen/osabap.test.mjs tools/gogen/osabap-sql-corpus.test.mjs tools/gogen/unit.test.mjs
 
   unit-inventory:
     runs-on: ubuntu-latest
