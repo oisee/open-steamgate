@@ -1,0 +1,9 @@
+Usage: zreportdemo [report options] [--] [positionals]
+Report options:
+  --name, --p-name (CHAR, obligatory, default 'world')  Your name
+  --loud, --p-loud (CHAR, flag)
+  --s-tag (CHAR)
+  --in, --p-in (CHAR, radio DIR, default 'X')
+  --out, --p-out (CHAR, radio DIR)
+  DIR: --in, --out
+Host flags: use -help for host options.

@@ -28,6 +28,7 @@
     "test/dsl-abap.mjs",
     "test/dsl-regions.mjs",
     "test/dsl-build.mjs",
+    "test/dsl-report.mjs",
     "test/dsl-daemons.mjs",
     "test/dsl-l2.mjs"
   ]

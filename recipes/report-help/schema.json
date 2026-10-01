@@ -1,0 +1,70 @@
+{
+ "object": {
+  "@id": "scalar",
+  "checkboxes": {
+   "array": "scalar"
+  },
+  "elements": {
+   "array": {
+    "object": {
+     "@id": "scalar",
+     "@type": {
+      "object": {
+       "built_in": "scalar",
+       "length": "scalar",
+       "resolved": "scalar"
+      }
+     },
+     "checkbox": "scalar",
+     "cli": {
+      "array": "scalar"
+     },
+     "cli_label": "scalar",
+     "default": "scalar",
+     "default@type": {
+      "object": {
+       "built_in": "scalar",
+       "length": "scalar"
+      }
+     },
+     "facts": "scalar",
+     "kind": "scalar",
+     "name": "scalar",
+     "obligatory": "scalar",
+     "positional": "scalar",
+     "radio_group": "scalar",
+     "selection_text": "scalar",
+     "text": "scalar",
+     "type_label": "scalar"
+    }
+   }
+  },
+  "go_checkboxes": "scalar",
+  "go_checkboxes_decl": "scalar",
+  "go_positionals": "scalar",
+  "go_positionals_decl": "scalar",
+  "go_ranges": "scalar",
+  "go_ranges_decl": "scalar",
+  "go_selection_decl": "scalar",
+  "go_selection_names": "scalar",
+  "groups": {
+   "array": {
+    "object": {
+     "@id": "scalar",
+     "members": "scalar",
+     "name": "scalar"
+    }
+   }
+  },
+  "name": "scalar",
+  "positionals": {
+   "array": "scalar"
+  },
+  "ranges": {
+   "array": "scalar"
+  },
+  "selection_names": {
+   "array": "scalar"
+  }
+ }
+}
