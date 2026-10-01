@@ -1336,6 +1336,62 @@ something already shipped (then it is a must of the current release, like the ro
 
   Full Node/Go compare counts before and after stayed at 384 SAME, 6 DIFFERENT, 13 nodeAnomaly, 161 Node-only,
   0 Go-only and 1 SKIPPED. A Go test also checks that a class's inserted row is absent from the next class image.
+
+  **U4 step 1b, process shards (2026-10-01):** With all pinned source packs fetched, the same 51-owner inventory
+  was built once per invocation and run with `--jobs 1,2,4,8,16`. Each configuration had three runs under
+  `flock /tmp/osd-heavy.lock`, timed with
+  `/usr/bin/time -f '%e %U %S %M'` (wall seconds, user seconds, system seconds, peak KiB), as in `unit-bench.mjs`.
+  The table reports medians. Runner wall is `timingMs.run` from the same reports; total wall includes frontend and
+  Go build. Every one of the 15 reports had the same 565 class/method/status/message rows as `--jobs 1`.
+
+  | Jobs | total wall | total CPU | peak RSS | runner wall |
+  |---:|---:|---:|---:|---:|
+  | 1 | 22.08 s | 27.34 s | 1,009,448 KiB | 8.31 s |
+  | 2 | 19.56 s | 29.35 s | 1,018,404 KiB | 5.04 s |
+  | 4 | 18.70 s | 28.45 s | 988,504 KiB | 5.02 s |
+  | 8 | 19.99 s | 31.68 s | 986,880 KiB | 5.69 s |
+  | 16 | 19.53 s | 31.63 s | 988,736 KiB | 5.08 s |
+
+  Four processes gave the lowest median total wall on this eight-core allocation. Two and four had almost identical
+  runner times; eight and sixteen spent more CPU without a further gain. Each shard gets its own temp and DATASET
+  directory, including its audit file; the media tree and SQLite seed image are read-only inputs written once before
+  processes start. No ABAP Unit class in this inventory binds an HTTP
+  or APC listening port: the Go network listeners found are in Go tests, not the generated Unit binary. The only
+  shard-owned files under the build directory are its class list, timings, temp files, and DATASET files; the parent
+  writes the one timing report. A failed shard assigns its process error to every method it owned.
+
+  **U4 timing breakdown (2026-10-01):** A follow-up instrumented the same 51-owner, 76-test-class inventory.
+  `unit.mjs` now reports discovery, frontend, emission, build, seed, per-shard start/end and class times in
+  `timingMs`; each Go process also writes its seed/setup duration. These are individual runs under the same
+  `/tmp/osd-heavy.lock` and `/usr/bin/time` instrument, so they show phase proportions rather than replacing
+  the three-run medians above. The 1- and 4-job runs had identical 565 result rows.
+
+  | Phase | jobs 1 | jobs 4 |
+  |---|---:|---:|
+  | Total wall (`/usr/bin/time`) | 29.10 s | 25.62 s |
+  | Discovery/preparation before emission | 1.19 s | 1.15 s |
+  | Frontend closure rounds | 12.10 s | 13.54 s |
+  | Emit Go and seed script | 0.81 s | 0.78 s |
+  | Go build | 5.17 s | 4.31 s |
+  | Runner, including seed and merge | 9.50 s | 5.45 s |
+  | Seed image creation inside runner | 0.27 s | 0.27 s |
+  | Sum of test-class times / critical shard | 9.21 s | 5.14 s |
+  | Merge results and timing file | — | <0.01 s |
+
+  Four-shard start/end times relative to runner start were 0.27–1.29, 0.28–1.38, 0.28–5.45 and 0.29–2.07 s;
+  their respective class-time sums were 0.99, 1.07, 5.14 and 1.73 s. The critical shard contains
+  `ZCL_OSD_DEMO_DATA:LTCL_DEMO_DATA` (4.61 s in this run; 5.17 s with one job). The next longest class was
+  `ZCL_OSD_AMC_TEST:LTCL_AMC` at about 1.06 s. The four-shard wall is already only 0.31 s over its critical
+  shard's class time, so further shard scheduling cannot materially shorten this run. Existing LPT scheduling
+  uses a previous `class-timings.json` when one is present; a fresh output directory has no history.
+
+  The 8.65 s seed-image figure above timed **only the already-built Go binary**. Re-running that binary from
+  this inventory under the same lock and `/usr/bin/time` took 8.16 s. The 22.08/18.70 s shard table and this
+  breakdown time the **whole Node command**, including frontend and Go build. That scope difference explains
+  the apparent regression; the remaining variation between full-command runs is mainly frontend/build timing.
+  The measurement fix is to keep binary-only and full-command figures separately and retain phase/shard timings
+  in the runner. No execution-path optimization follows from these numbers: the four-shard runner is near its
+  measured lower bound, while most full-command time is compilation outside the shard path.
 - nice: accept ADR 0005 (lazy table providers) -- done 2026-09-30, narrowed after three reviews.
 
 **0.5**

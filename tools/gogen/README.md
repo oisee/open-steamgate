@@ -1551,8 +1551,18 @@ is `node-unit-results.mjs`, which instruments the Node metadata and follows
 the SAP lifecycle. A DB-using class gets a fresh in-memory
 SQLite database built from the transpiler's `DatabaseSetup` schema and
 generated rows plus `test/seed.mjs` rows. Explicitly skipped methods remain
-`SKIPPED`. An unbuilt owner cannot make another owner disappear: the full
-inventory builds them one by one.
+`SKIPPED`. An unbuilt owner cannot make another owner disappear; `--per-owner`
+builds each owner separately for diagnosis. The normal runner accepts `--jobs N`
+(`--jobs 1` keeps the single-process path; the default is the available CPU
+count, capped at 16). Each invocation builds in a unique `--out/run-*` Go
+tree and writes one seeded SQLite image, then runs test classes in separate
+working directories with private temporary and DATASET directories. Shard
+scratch and the seed image are removed after the run. `--out` holds
+`class-timings.json`, which balances the next run; without timings, classes
+are assigned in name order round robin. The report's `buildDir` points to
+the run's Go tree for follow-on builds.
+The JSON report keeps the single-process row order and schema. A crashed
+shard marks its assigned methods failed with the process reason.
 
 Run `npm run transpile` first for the Node oracle, then
 `node tools/gogen/unit-compare.mjs --class ZCL_OSD_FORM_TEST --class ZCL_OSD_TIMER_TEST`.

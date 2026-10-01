@@ -132,7 +132,7 @@ jobs:
       - name: Full Go ABAP Unit inventory
         run: |
           set +e
-          node tools/gogen/unit.mjs --out "$RUNNER_TEMP/gogen-unit" > "$RUNNER_TEMP/gogen-unit.json"
+          node tools/gogen/unit.mjs --jobs "$(node -p 'Math.min(require("os").availableParallelism(), 16)')" --out "$RUNNER_TEMP/gogen-unit" > "$RUNNER_TEMP/gogen-unit.json"
           rc=$?
           set -e
           if [[ $rc -gt 2 ]]; then echo "unit.mjs crashed with exit $rc" >&2; exit "$rc"; fi
@@ -149,8 +149,8 @@ jobs:
       # counts itself and panics on a mismatch; the speed goes to the summary
       # (10 MiB, 2026-09-30, one machine: Node 0.42 MiB/s, Go 11.2 MiB/s).
       - name: sXML reader on Go (X1b)
-        working-directory: tools/gogen/go
         run: |
+          cd "$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).buildDir' "$RUNNER_TEMP/gogen-unit.json")"
           go build -o "$RUNNER_TEMP/sxmlbench" ./cmd/sxmlbench
           "$RUNNER_TEMP/sxmlbench" 10 | tee -a "$GITHUB_STEP_SUMMARY"
         env:
