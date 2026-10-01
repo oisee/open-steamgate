@@ -19,7 +19,7 @@
 import {existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync} from "node:fs";
 import {homedir} from "node:os";
 import {join, resolve} from "node:path";
-import {inputOf, fromJson} from "./rfc-replay.mjs";
+import {inputOf, fromJson, isLocal} from "./rfc-replay.mjs";
 
 const expandHome = (p) => (p.startsWith("~/") ? join(homedir(), p.slice(2)) : p);
 
@@ -146,6 +146,13 @@ export class RfcLiveClient {
       if (key === undefined) {
         throw error;
       }
+      if (typeof signature.raise === "function") {
+        // no EXCEPTIONS map on a call without DESTINATION (tools/rfc-proxy.mjs):
+        // the caller catches a classic error by name; the capture is still written
+        capture.exception = key;
+        capture.subrc = 1;
+        signature.raise(key);
+      }
       const exceptions = Object.fromEntries(Object.entries(signature.exceptions ?? {}).map(([k, v]) => [k.toUpperCase(), v]));
       const code = exceptions[key] ?? exceptions["OTHERS"];
       if (code === undefined) {
@@ -219,7 +226,7 @@ export class RfcFallbackClient {
   }
 
   async call(name, signature) {
-    if (globalThis.abap.FunctionModules[name.trimEnd().toUpperCase()] !== undefined) {
+    if (isLocal(name)) {
       return this.local.call(name, signature);
     }
     return this.live.call(name, signature);

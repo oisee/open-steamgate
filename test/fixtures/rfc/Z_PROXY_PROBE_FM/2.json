@@ -1,0 +1,8 @@
+{
+  "name": "Z_PROXY_PROBE_FM",
+  "destination": "SYNTHETIC",
+  "params": {"IV_KEY": "ZZ"},
+  "result": {},
+  "exception": "NOT_FOUND",
+  "subrc": 4
+}
