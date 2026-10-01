@@ -1,0 +1,5020 @@
+{
+ "contract": "enq",
+ "version": 1,
+ "measured": {
+  "date": "2026-10-01",
+  "on": "the SAP sandbox (ABAP release 758), as a client, through RFC-enabled probe modules of our own; every object deleted afterwards",
+  "by": "docs/enq-contract.md"
+ },
+ "lockObject": {
+  "name": "EZOSD_PRB",
+  "table": "ZOSD_PRB",
+  "mode": "MODE_ZOSD_PRB",
+  "args": [
+   {
+    "name": "MANDT",
+    "length": 3
+   },
+   {
+    "name": "K1",
+    "length": 10
+   },
+   {
+    "name": "K2",
+    "length": 10
+   }
+  ],
+  "flags": {
+   "X_K1": "fill K1 with its initial value literally",
+   "X_K2": "fill K2 with its initial value literally"
+  },
+  "other": [
+   "_SCOPE (default 2)",
+   "_WAIT",
+   "_COLLECT"
+  ],
+  "exceptions": [
+   "FOREIGN_LOCK",
+   "SYSTEM_FAILURE"
+  ]
+ },
+ "owners": {
+  "O1": "the calling session: a stateful RFC connection; its locks outlive each call on that connection",
+  "O2": "a second session: synchronous CALL FUNCTION ... DESTINATION 'NONE' from O1; stateful until RFC_CONNECTION_CLOSE",
+  "O3": "a third session: CALL FUNCTION ... STARTING NEW TASK ... DESTINATION 'NONE'; lives until the called module returns",
+  "OJ": "a background job: SUBMIT ... VIA JOB + JOB_CLOSE strtimmed",
+  "model": "a session has two owner ids. GUSR (dialog owner) holds _SCOPE 1 and lives as long as the session; GUSRVB (update owner) holds _SCOPE 2 and is replaced after a ROLLBACK WORK and after a COMMIT WORK that ran an update. _SCOPE 3 is one row carrying both. In expect, GUSR/GUSRVB name the session whose owner id it is; null = blank."
+ },
+ "notation": {
+  "{MANDT}": "the logon client, three characters",
+  "\uffff": "ENQUEUE_READ returns U+FFFF in every character position of a field that was locked generically (initial value, X_<field> not set)",
+  "GARG": "client + K1 (10) + K2 (10); trailing blanks are not significant",
+  "<USER>": "the user name of the holder (sy-msgv1); all sessions ran as one user",
+  "K2": "an ENQUEUE step without K2 in the case text uses K2='K'; an empty K2 is the initial value",
+  "rows": "ENQUEUE_READ (GNAME = 'ZOSD_PRB', GUNAME = space); row order is not part of the contract",
+  "MC 601 / 602": "601 = held by another owner, 602 = refused against the caller's own lock; both raise FOREIGN_LOCK with sy-msgv1 = the user"
+ },
+ "enqueueRead": {
+  "params": {
+   "GCLIENT": "CHAR 3",
+   "GNAME": "CHAR 30",
+   "GARG": "CHAR 150",
+   "GUNAME": "CHAR 12 (default sy-uname; space = all users)",
+   "LOCAL": "CHAR 1",
+   "FAST": "CHAR 1",
+   "GARGNOWC": "CHAR 1"
+  },
+  "exporting": {
+   "NUMBER": "INT4",
+   "SUBRC": "INT4"
+  },
+  "exceptions": [
+   "COMMUNICATION_FAILURE",
+   "SYSTEM_FAILURE"
+  ],
+  "row": {
+   "GCLIENT": "CHAR 3",
+   "GNAME": "CHAR 30 (the table)",
+   "GARG": "CHAR 150",
+   "GMODE": "CHAR 1",
+   "GUSR": "CHAR 58 (dialog owner id)",
+   "GUSRVB": "CHAR 58 (update owner id)",
+   "GOBJ": "CHAR 16 (the lock object)",
+   "GTARG": "CHAR 50 (GARG cut to 50)",
+   "GUNAME": "CHAR 12",
+   "GTHOST": "CHAR 32",
+   "GTSYSNR": "NUMC 2",
+   "GTWP": "NUMC 2",
+   "GTCODE": "CHAR 20",
+   "GTDATE": "DATS",
+   "GTTIME": "TIMS",
+   "GTUSEC": "NUMC 6",
+   "GTMARK": "CHAR 1",
+   "GBCKTYPE": "CHAR 1",
+   "GUSE": "INT4 (count on the dialog owner)",
+   "GUSEVB": "INT4 (count on the update owner)",
+   "GUSETXT": "NUMC 10 (GUSE as text)",
+   "GUSEVBT": "NUMC 10 (GUSEVB as text)"
+  },
+  "ownerId": "58 characters: a 20-digit timestamp (YYYYMMDDhhmmss + 6 digits), 4 digits, 2 digits, then the application server instance name, padded with '.'. Compare for equality only; do not parse.",
+  "observed": {
+   "GOBJ": "EZOSD_PRB",
+   "GNAME": "ZOSD_PRB",
+   "GTCODE": "",
+   "GBCKTYPE": "",
+   "GTMARK": ""
+  }
+ },
+ "ownerMechanisms": [
+  {
+   "how": "same program, direct CALL FUNCTION",
+   "distinctOwner": false
+  },
+  {
+   "how": "CALL FUNCTION ... DESTINATION 'NONE' (synchronous)",
+   "distinctOwner": true,
+   "note": "stateful; released by RFC_CONNECTION_CLOSE (asynchronously, gone within 1 s)"
+  },
+  {
+   "how": "CALL FUNCTION ... STARTING NEW TASK ... DESTINATION 'NONE'",
+   "distinctOwner": true,
+   "note": "locks go when the task's module returns"
+  },
+  {
+   "how": "SUBMIT ... VIA JOB + JOB_CLOSE strtimmed",
+   "distinctOwner": true,
+   "note": "both owner ids differ from the caller's"
+  },
+  {
+   "how": "SUBMIT ... AND RETURN inside an RFC session",
+   "distinctOwner": null,
+   "note": "unmeasured: without WRITE the program set sy-subrc 4 and took no lock; with WRITE the RFC connection broke"
+  }
+ ],
+ "cases": [
+  {
+   "id": "matrix-other-EE",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds E, O2 requests E",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "MEE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "MEE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}MEE       K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-ES",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds E, O2 requests S",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "MES",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "MES",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}MES       K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-EX",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds E, O2 requests X",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "MEX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "MEX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}MEX       K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-EO",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds E, O2 requests O",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "MEO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "MEO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}MEO       K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-SE",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds S, O2 requests E",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "MSE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "MSE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}MSE       K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-SS",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds S, O2 requests S",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "MSS",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "MSS",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}MSS       K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}MSS       K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-SX",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds S, O2 requests X",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "MSX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "MSX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}MSX       K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-SO",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds S, O2 requests O",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "MSO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "MSO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}MSO       K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}MSO       K",
+        "GMODE": "O",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-XE",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds X, O2 requests E",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "MXE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "MXE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}MXE       K",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-XS",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds X, O2 requests S",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "MXS",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "MXS",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}MXS       K",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-XX",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds X, O2 requests X",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "MXX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "MXX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}MXX       K",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-XO",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds X, O2 requests O",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "MXO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "MXO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}MXO       K",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-OE",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds O, O2 requests E",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "MOE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "MOE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}MOE       K",
+        "GMODE": "O",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-OS",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds O, O2 requests S",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "MOS",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "MOS",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}MOS       K",
+        "GMODE": "O",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}MOS       K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-OX",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds O, O2 requests X",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "MOX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "MOX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}MOX       K",
+        "GMODE": "O",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-other-OO",
+   "group": "1-compatibility-other-owner",
+   "title": "O1 holds O, O2 requests O",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "MOO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "MOO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}MOO       K",
+        "GMODE": "O",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}MOO       K",
+        "GMODE": "O",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-EE",
+   "group": "2-same-owner",
+   "title": "O1 holds E, O1 requests E",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "NEE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "NEE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}NEE       K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 2,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-ES",
+   "group": "2-same-owner",
+   "title": "O1 holds E, O1 requests S",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "NES",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "NES",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}NES       K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}NES       K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-EX",
+   "group": "2-same-owner",
+   "title": "O1 holds E, O1 requests X",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "NEX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "NEX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "602",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}NEX       K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-EO",
+   "group": "2-same-owner",
+   "title": "O1 holds E, O1 requests O",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "NEO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "NEO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}NEO       K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}NEO       K",
+        "GMODE": "O",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-SE",
+   "group": "2-same-owner",
+   "title": "O1 holds S, O1 requests E",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "NSE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "NSE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}NSE       K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}NSE       K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-SS",
+   "group": "2-same-owner",
+   "title": "O1 holds S, O1 requests S",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "NSS",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "NSS",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}NSS       K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 2,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-SX",
+   "group": "2-same-owner",
+   "title": "O1 holds S, O1 requests X",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "NSX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "NSX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "602",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}NSX       K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-SO",
+   "group": "2-same-owner",
+   "title": "O1 holds S, O1 requests O",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "NSO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "NSO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}NSO       K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}NSO       K",
+        "GMODE": "O",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-XE",
+   "group": "2-same-owner",
+   "title": "O1 holds X, O1 requests E",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "NXE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "NXE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "602",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}NXE       K",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-XS",
+   "group": "2-same-owner",
+   "title": "O1 holds X, O1 requests S",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "NXS",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "NXS",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "602",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}NXS       K",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-XX",
+   "group": "2-same-owner",
+   "title": "O1 holds X, O1 requests X",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "NXX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "NXX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "602",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}NXX       K",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-XO",
+   "group": "2-same-owner",
+   "title": "O1 holds X, O1 requests O",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "NXO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "NXO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "602",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}NXO       K",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-OE",
+   "group": "2-same-owner",
+   "title": "O1 holds O, O1 requests E",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "NOE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "NOE",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}NOE       K",
+        "GMODE": "O",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}NOE       K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-OS",
+   "group": "2-same-owner",
+   "title": "O1 holds O, O1 requests S",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "NOS",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "NOS",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}NOS       K",
+        "GMODE": "O",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}NOS       K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-OX",
+   "group": "2-same-owner",
+   "title": "O1 holds O, O1 requests X",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "NOX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "NOX",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "602",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}NOX       K",
+        "GMODE": "O",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "matrix-same-OO",
+   "group": "2-same-owner",
+   "title": "O1 holds O, O1 requests O",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "NOO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "O",
+      "K1": "NOO",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}NOO       K",
+        "GMODE": "O",
+        "GUSE": 0,
+        "GUSEVB": 2,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "row order not part of the contract"
+    }
+   ]
+  },
+  {
+   "id": "cumulate-E-twice-dequeue-once",
+   "group": "2-same-owner",
+   "title": "E twice, DEQUEUE once: still held; second DEQUEUE releases",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}P1        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": []
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "S-then-E-dequeue-E",
+   "group": "2-same-owner",
+   "title": "S then E by one owner, DEQUEUE E leaves the S",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "P2",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P2",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P2",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}P2        K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "P2",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P2",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    }
+   ]
+  },
+  {
+   "id": "E-then-S-dequeue-E",
+   "group": "2-same-owner",
+   "title": "E then S by one owner, DEQUEUE E leaves the S",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P3",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "P3",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P3",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}P3        K",
+        "GMODE": "S",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "P3",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P3",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X-twice",
+   "group": "2-same-owner",
+   "title": "X twice by one owner: the second is refused (MC 602), one DEQUEUE releases",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "P4",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "P4",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "602",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}P4        K",
+        "GMODE": "X",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "P4",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "dequeue-wrong-mode",
+   "group": "2-same-owner",
+   "title": "DEQUEUE with another mode does nothing; DEQUEUE of a lock not held answers 0",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P5",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "P5",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}P5        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "X",
+      "K1": "P5",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}P5        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "P6",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "scope1-cumulation",
+   "group": "2-same-owner",
+   "title": "_SCOPE 1 twice counts GUSE; DEQUEUE _SCOPE 2 does not touch it",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "Q1",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "Q1",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}Q1        K",
+        "GMODE": "E",
+        "GUSE": 2,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "Q1",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}Q1        K",
+        "GMODE": "E",
+        "GUSE": 2,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "Q1",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}Q1        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "Q1",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "scope3-split-dequeue",
+   "group": "2-same-owner",
+   "title": "_SCOPE 3 is one row with both counters; DEQUEUE _SCOPE 1 then 2 removes each half",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "Q2",
+      "K2": "K",
+      "_SCOPE": "3"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "Q2",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}Q2        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "Q2",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "scope1-plus-scope2-merge",
+   "group": "2-same-owner",
+   "title": "_SCOPE 1 then _SCOPE 2 on one key merge into one row like _SCOPE 3",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "Q3",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "Q3",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}Q3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 1,
+        "GUSR": "O1",
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "Q3",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    }
+   ]
+  },
+  {
+   "id": "mask-initial-K2-is-generic",
+   "group": "3-argument-masks",
+   "title": "K2 initial (X_K2 not set) locks K1='G1' for every K2",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "G1",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}G1        \uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "G1",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "G1",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "H1",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "G1",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "G1",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "mask-specific-vs-generic",
+   "group": "3-argument-masks",
+   "title": "O1 holds (G2,B); O2's generic (G2,*) collides, (G2,C) does not",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "G2",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "G2",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "G2",
+      "K2": "C"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "mask-X_K2-initial-is-literal",
+   "group": "3-argument-masks",
+   "title": "X_K2='X' locks K2 = blank literally",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "G3",
+      "K2": "",
+      "X_K2": "X"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}G3",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1",
+        "note": "K2 is ten blanks; GARG has its trailing blanks"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "G3",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "G3",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "G3",
+      "K2": "",
+      "X_K2": "X"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    }
+   ]
+  },
+  {
+   "id": "mask-initial-K1",
+   "group": "3-argument-masks",
+   "title": "K1 initial, K2='Q': generic in the first field only",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "",
+      "K2": "Q"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffffQ",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "ZZ",
+      "K2": "Q"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "ZZ",
+      "K2": "P"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "mask-all-initial",
+   "group": "3-argument-masks",
+   "title": "K1 and K2 initial: the whole table in the client",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "ANY",
+      "K2": "THING"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    }
+   ]
+  },
+  {
+   "id": "mask-generic-shared",
+   "group": "3-argument-masks",
+   "title": "S generic against S generic and S specific: compatible; E specific: refused",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "G5",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "G5",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "S",
+      "K1": "G5",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "G5",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    }
+   ]
+  },
+  {
+   "id": "mask-star-is-literal",
+   "group": "3-argument-masks",
+   "title": "'*' in a value is a literal, not a wildcard",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "W*",
+      "K2": ""
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}W*        \uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff\uffff",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "WX",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "W*",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    }
+   ]
+  },
+  {
+   "id": "scope-rows",
+   "group": "4-scope",
+   "title": "_SCOPE 1 = dialog owner only, 2 = update owner only, 3 = both",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S1",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S2",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S3",
+      "K2": "K",
+      "_SCOPE": "3"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 3,
+      "rows": [
+       {
+        "GARG": "{MANDT}S1        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}S2        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}S3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 1,
+        "GUSR": "O1",
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "commit-without-update-module",
+   "group": "4-scope",
+   "title": "COMMIT WORK with nothing registered in the update task releases nothing",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S1",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S2",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S3",
+      "K2": "K",
+      "_SCOPE": "3"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "COMMIT WORK",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 3,
+      "rows": [
+       {
+        "GARG": "{MANDT}S1        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}S2        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}S3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 1,
+        "GUSR": "O1",
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "WAIT UP TO 1 SECONDS",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 3,
+      "rows": [
+       {
+        "GARG": "{MANDT}S1        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}S2        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}S3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 1,
+        "GUSR": "O1",
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S2",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S3",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    }
+   ]
+  },
+  {
+   "id": "commit-and-wait-without-update-module",
+   "group": "4-scope",
+   "title": "COMMIT WORK AND WAIT with nothing registered: same, nothing released",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "C2",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "C3",
+      "K2": "K",
+      "_SCOPE": "3"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "COMMIT WORK AND WAIT",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}C2        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}C3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 1,
+        "GUSR": "O1",
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "C4",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 3,
+      "rows": [
+       {
+        "GARG": "{MANDT}C2        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}C3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 1,
+        "GUSR": "O1",
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}C4        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "C4 carries the same GUSRVB as C2: a COMMIT that ran no update does not renew the update owner"
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "C2",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ROLLBACK WORK",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}C3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "rollback",
+   "group": "4-scope",
+   "title": "ROLLBACK WORK releases the update-owner part (scope 2, and scope 3's GUSEVB), keeps scope 1",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "R1",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "R2",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "R3",
+      "K2": "K",
+      "_SCOPE": "3"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ROLLBACK WORK",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}R1        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}R3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "R1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "R2",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "R3",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    }
+   ]
+  },
+  {
+   "id": "rollback-renews-update-owner",
+   "group": "4-scope",
+   "title": "After ROLLBACK WORK the next _SCOPE 2 lock carries a new GUSRVB",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "RB",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ROLLBACK WORK",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "RC",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}RC        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "GUSRVB of RC differs from the GUSRVB RB had"
+    }
+   ]
+  },
+  {
+   "id": "commit-with-update-module",
+   "group": "4-scope",
+   "title": "COMMIT WORK with a V1 update module: the update owner's locks go when the update task has run (asynchronously)",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "U1",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "U2",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "U3",
+      "K2": "K",
+      "_SCOPE": "3"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "CALL FUNCTION <update module> IN UPDATE TASK",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "COMMIT WORK",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 3,
+      "rows": [
+       {
+        "GARG": "{MANDT}U1        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}U2        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}U3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 1,
+        "GUSR": "O1",
+        "GUSRVB": "O1"
+       }
+      ]
+     },
+     "note": "read immediately after COMMIT WORK: still all three"
+    },
+    {
+     "owner": "O1",
+     "call": "WAIT UP TO 2 SECONDS",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}U1        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}U3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       }
+      ]
+     },
+     "note": "the update task has run and written its row"
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "U1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "U2",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "U3",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    }
+   ]
+  },
+  {
+   "id": "commit-and-wait-with-update-module",
+   "group": "4-scope",
+   "title": "COMMIT WORK AND WAIT with a V1 update module: released when it returns",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "W1",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "W2",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "W3",
+      "K2": "K",
+      "_SCOPE": "3"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "CALL FUNCTION <update module> IN UPDATE TASK",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "COMMIT WORK AND WAIT",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}W1        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}W3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "note": "the next LUW's _SCOPE 2 lock carries a new GUSRVB",
+     "expect": {
+      "newUpdateOwner": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "end-of-session",
+   "group": "4-scope",
+   "title": "End of the session (RFC connection closed) releases every scope, asynchronously",
+   "steps": [
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "E1",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "E2",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "E3",
+      "K2": "K",
+      "_SCOPE": "3"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 3,
+      "rows": [
+       {
+        "GARG": "{MANDT}E1        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O2",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}E2        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2"
+       },
+       {
+        "GARG": "{MANDT}E3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 1,
+        "GUSR": "O2",
+        "GUSRVB": "O2"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "RFC_CONNECTION_CLOSE destination NONE (ends O2)",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 3,
+      "rows": [
+       {
+        "GARG": "{MANDT}E1        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O2",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}E2        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2"
+       },
+       {
+        "GARG": "{MANDT}E3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 1,
+        "GUSR": "O2",
+        "GUSRVB": "O2"
+       }
+      ]
+     },
+     "note": "immediately after the close: still there"
+    },
+    {
+     "owner": "O1",
+     "call": "WAIT UP TO 1 SECONDS",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "rfc-call-return-is-not-end",
+   "group": "4-scope",
+   "title": "The return of an RFC call does not end the session: a stateful caller's locks of every scope survive between calls",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S1",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S2",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S3",
+      "K2": "K",
+      "_SCOPE": "3"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "return from the RFC call; next RFC call on the same connection",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "WAIT UP TO 3 SECONDS",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 3,
+      "rows": [
+       {
+        "GARG": "{MANDT}S1        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "O1",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}S2        K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O1"
+       },
+       {
+        "GARG": "{MANDT}S3        K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 1,
+        "GUSR": "O1",
+        "GUSRVB": "O1"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_ALL",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "background-job",
+   "group": "4-scope",
+   "title": "In a background job (no RFC): COMMIT WORK without update releases nothing; ROLLBACK releases the update part; job end releases the rest",
+   "steps": [
+    {
+     "owner": "OJ",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "JB1",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "OJ",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "JB2",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "OJ",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "JB3",
+      "K2": "K",
+      "_SCOPE": "3"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "OJ",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 3,
+      "rows": [
+       {
+        "GARG": "{MANDT}JB1       K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "OJ",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}JB2       K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "OJ"
+       },
+       {
+        "GARG": "{MANDT}JB3       K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 1,
+        "GUSR": "OJ",
+        "GUSRVB": "OJ"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "OJ",
+     "call": "COMMIT WORK",
+     "params": {}
+    },
+    {
+     "owner": "OJ",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 3,
+      "rows": [
+       {
+        "GARG": "{MANDT}JB1       K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "OJ",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}JB2       K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "OJ"
+       },
+       {
+        "GARG": "{MANDT}JB3       K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 1,
+        "GUSR": "OJ",
+        "GUSRVB": "OJ"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "OJ",
+     "call": "WAIT UP TO 1 SECONDS",
+     "params": {}
+    },
+    {
+     "owner": "OJ",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 3,
+      "rows": [
+       {
+        "GARG": "{MANDT}JB1       K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "OJ",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}JB2       K",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "OJ"
+       },
+       {
+        "GARG": "{MANDT}JB3       K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 1,
+        "GUSR": "OJ",
+        "GUSRVB": "OJ"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "JB1",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "JB2",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>"
+     }
+    },
+    {
+     "owner": "OJ",
+     "call": "ROLLBACK WORK",
+     "params": {}
+    },
+    {
+     "owner": "OJ",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}JB1       K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "OJ",
+        "GUSRVB": null
+       },
+       {
+        "GARG": "{MANDT}JB3       K",
+        "GMODE": "E",
+        "GUSE": 1,
+        "GUSEVB": 0,
+        "GUSR": "OJ",
+        "GUSRVB": null
+       }
+      ]
+     }
+    },
+    {
+     "owner": "OJ",
+     "call": "job ends",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": []
+     },
+     "note": "read about 5 s after the job's last statement"
+    }
+   ]
+  },
+  {
+   "id": "wait-held",
+   "group": "5-wait",
+   "title": "_WAIT='X' against a lock that stays: FOREIGN_LOCK after about 5 s",
+   "steps": [
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "WT",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "WT",
+      "K2": "K",
+      "_WAIT": "X"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>",
+      "elapsedMs": {
+       "measured": 4709,
+       "approx": 5000
+      }
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "WT",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 1,
+      "exception": "FOREIGN_LOCK",
+      "sy-msgid": "MC",
+      "sy-msgno": "601",
+      "sy-msgv1": "<USER>",
+      "elapsedMs": {
+       "measured": 0
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "wait-released",
+   "group": "5-wait",
+   "title": "_WAIT='X' against a lock released about 1 s later: granted at the next retry",
+   "steps": [
+    {
+     "owner": "O3",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "WU",
+      "K2": "K"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O3",
+     "call": "holds 2 s, then its task ends",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "WAIT UP TO 1 SECONDS",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "WU",
+      "K2": "K",
+      "_WAIT": "X"
+     },
+     "expect": {
+      "subrc": 0,
+      "elapsedMs": {
+       "measured": 1014,
+       "approx": 1000
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "dequeue-all-own-scopes",
+   "group": "6-dequeue-all",
+   "title": "DEQUEUE_ALL releases the caller's locks of every scope",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S1",
+      "K2": "K",
+      "_SCOPE": "1"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S2",
+      "K2": "K",
+      "_SCOPE": "2"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "S3",
+      "K2": "K",
+      "_SCOPE": "3"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_ALL",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 0,
+      "rows": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "dequeue-all-not-others",
+   "group": "6-dequeue-all",
+   "title": "DEQUEUE_ALL leaves other owners' locks",
+   "steps": [
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "A",
+      "K2": "B"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "C",
+      "K2": "D"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O3",
+     "call": "ENQUEUE_EZOSD_PRB",
+     "params": {
+      "MODE_ZOSD_PRB": "E",
+      "K1": "F",
+      "K2": "G"
+     },
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "WAIT UP TO 1 SECONDS",
+     "params": {}
+    },
+    {
+     "owner": "O1",
+     "call": "DEQUEUE_ALL",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 2,
+      "rows": [
+       {
+        "GARG": "{MANDT}C         D",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O2"
+       },
+       {
+        "GARG": "{MANDT}F         G",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O3"
+       }
+      ]
+     }
+    },
+    {
+     "owner": "O2",
+     "call": "DEQUEUE_ALL",
+     "params": {},
+     "expect": {
+      "subrc": 0
+     }
+    },
+    {
+     "owner": "O1",
+     "call": "ENQUEUE_READ",
+     "params": {
+      "GCLIENT": "{MANDT}",
+      "GNAME": "ZOSD_PRB",
+      "GUNAME": ""
+     },
+     "expect": {
+      "NUMBER": 1,
+      "rows": [
+       {
+        "GARG": "{MANDT}F         G",
+        "GMODE": "E",
+        "GUSE": 0,
+        "GUSEVB": 1,
+        "GUSR": null,
+        "GUSRVB": "O3"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ],
+ "unmeasured": [
+  "SUBMIT ... AND RETURN as an owner (see ownerMechanisms)",
+  "_COLLECT and FLUSH_ENQUEUE",
+  "the optimistic-lock promotion mode R (O -> E)",
+  "_WAIT retry count and interval as profile values: only two elapsed times were measured",
+  "a lock held across a V2 update module or a failed update (the one failed update seen also released the update owner's locks, but that was a setup artefact and is not a case)",
+  "_SCOPE behaviour inside the update task itself"
+ ]
+}
