@@ -48,15 +48,18 @@ type event struct {
 }
 
 type harness struct {
-	t        *testing.T
-	srv      *Server
-	c        *contract
-	owners   map[string]int64
-	updated  map[string]bool
-	pending  []func()
-	timed    []event
-	now      time.Duration
-	previous map[string]string // the update owner before the last COMMIT
+	t       *testing.T
+	srv     *Server
+	c       *contract
+	owners  map[string]int64
+	updated map[string]bool
+	pending []func()
+	timed   []event
+	now     time.Duration
+	// the update owner before the last COMMIT or ROLLBACK and whether it
+	// ended there: the next _SCOPE 2 lock must carry a new one, or the same
+	ended   map[string]string
+	renewed map[string]bool
 }
 
 func (h *harness) session(name string) int64 {
@@ -111,12 +114,20 @@ func (h *harness) step(owner, call string, p map[string]string, expect map[strin
 			p = map[string]string{"K1": "NEWOWNER"}
 		}
 		start := h.now
-		res := h.srv.enqueueWith(sid, h.request(p), p["_WAIT"] == "X", h.advance)
-		if want, ok := expect["newUpdateOwner"]; ok {
-			got := h.srv.UpdateOwner(sid) != h.previous[owner]
-			if got != want.(bool) {
-				return fmt.Sprintf("newUpdateOwner %v", got)
+		r := h.request(p)
+		res := h.srv.enqueueWith(sid, r, p["_WAIT"] == "X", h.advance)
+		// the GUSRVB the row just taken carries, against the one before the
+		// last COMMIT or ROLLBACK: new after a ROLLBACK or a COMMIT that ran
+		// an update, the same after a COMMIT that had nothing to update
+		if before, ok := h.ended[owner]; ok && res.Subrc == 0 && r.Scope != 1 {
+			stamped := h.stamp(sid, r)
+			if want, ok := expect["newUpdateOwner"]; ok && (stamped != before) != want.(bool) {
+				return fmt.Sprintf("newUpdateOwner %v", stamped != before)
 			}
+			if (stamped != before) != h.renewed[owner] {
+				return fmt.Sprintf("update owner renewed %v, the contract says %v", stamped != before, h.renewed[owner])
+			}
+			delete(h.ended, owner)
 		}
 		if v, ok := expect["subrc"]; ok && number(v) != res.Subrc {
 			return fmt.Sprintf("subrc %d, msgno %s", res.Subrc, res.Msgno)
@@ -145,7 +156,7 @@ func (h *harness) step(owner, call string, p map[string]string, expect map[strin
 	case strings.HasPrefix(call, "CALL FUNCTION") && strings.Contains(call, "IN UPDATE TASK"):
 		h.updated[owner] = true
 	case call == "COMMIT WORK" || call == "COMMIT WORK AND WAIT":
-		h.previous[owner] = h.srv.UpdateOwner(sid)
+		h.ended[owner], h.renewed[owner] = h.srv.UpdateOwner(sid), h.updated[owner]
 		ended := h.srv.Commit(sid, h.updated[owner])
 		h.updated[owner] = false
 		if call == "COMMIT WORK AND WAIT" {
@@ -154,7 +165,7 @@ func (h *harness) step(owner, call string, p map[string]string, expect map[strin
 			h.pending = append(h.pending, func() { h.srv.UpdateDone(sid, ended) })
 		}
 	case call == "ROLLBACK WORK":
-		h.previous[owner] = h.srv.UpdateOwner(sid)
+		h.ended[owner], h.renewed[owner] = h.srv.UpdateOwner(sid), true
 		h.updated[owner] = false
 		h.srv.Rollback(sid)
 	case strings.HasPrefix(call, "WAIT UP TO"):
@@ -166,7 +177,9 @@ func (h *harness) step(owner, call string, p map[string]string, expect map[strin
 		h.pending = nil
 		h.advance(time.Duration(n) * time.Second)
 	case strings.HasPrefix(call, "RFC_CONNECTION_CLOSE"):
-		ended := h.session("O2")
+		var name string
+		fmt.Sscanf(call[strings.Index(call, "(ends ")+len("(ends "):], "%2s", &name)
+		ended := h.session(name)
 		h.pending = append(h.pending, func() { h.srv.End(ended) })
 	case call == "job ends":
 		// the case reads about five seconds after the job's last statement
@@ -179,6 +192,17 @@ func (h *harness) step(owner, call string, p map[string]string, expect map[strin
 		// a stateful connection: the session goes on
 	default:
 		return "unknown call " + call
+	}
+	return ""
+}
+
+// stamp is the GUSRVB of the session's row for this request
+func (h *harness) stamp(sid int64, r Request) string {
+	arg := garg(r.Client, r.Fields)
+	for _, row := range h.srv.Read(Filter{Client: r.Client, Table: r.Table}) {
+		if row.Session == sid && row.Arg == arg && row.Mode == r.Mode {
+			return row.Update
+		}
 	}
 	return ""
 }
@@ -244,7 +268,7 @@ func TestContract(t *testing.T) {
 		t.Run(tc.ID, func(t *testing.T) {
 			srv := New("osdhost_OSD_00")
 			defer srv.Close()
-			h := &harness{t: t, srv: srv, c: &c, owners: map[string]int64{}, updated: map[string]bool{}, previous: map[string]string{}}
+			h := &harness{t: t, srv: srv, c: &c, owners: map[string]int64{}, updated: map[string]bool{}, ended: map[string]string{}, renewed: map[string]bool{}}
 			for i, st := range tc.Steps {
 				if msg := h.step(st.Owner, st.Call, st.Params, st.Expect); msg != "" {
 					t.Fatalf("%s: step %d %s %s %v: %s", tc.Title, i+1, st.Owner, st.Call, st.Params, msg)

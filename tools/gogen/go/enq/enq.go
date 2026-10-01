@@ -21,6 +21,7 @@ package enq
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -44,7 +45,8 @@ type Request struct {
 
 // Result of an ENQUEUE: Subrc 0, or 1 = FOREIGN_LOCK with message MC Msgno
 // (601: another owner holds it, 602: the caller's own lock refuses it) and
-// Holder the user of the lock in the way (sy-msgv1).
+// Holder the user of the lock in the way (sy-msgv1), or 2 = SYSTEM_FAILURE
+// (an unknown session, a closed server).
 type Result struct {
 	Subrc  int
 	Msgno  string
@@ -65,11 +67,7 @@ type Filter struct {
 	Client, Table, User string
 }
 
-type row struct {
-	Row
-	session int64
-	fields  []Field
-}
+type row struct{ Row }
 
 type session struct {
 	user           string
@@ -86,38 +84,51 @@ type state struct {
 
 // Server is a running lock server.
 type Server struct {
-	reqs chan func(*state)
+	reqs   chan func(*state)
+	done   chan struct{}
+	closed sync.Once
 }
 
 // New starts a lock server. instance names the server in owner ids, as an
 // application server's instance name does on a system.
 func New(instance string) *Server {
-	srv := &Server{reqs: make(chan func(*state))}
+	srv := &Server{reqs: make(chan func(*state)), done: make(chan struct{})}
 	st := &state{sessions: map[int64]*session{}, instance: instance, now: time.Now}
 	go func() {
-		for f := range srv.reqs {
-			f(st)
+		for {
+			select {
+			case f := <-srv.reqs:
+				f(st)
+			case <-srv.done:
+				return
+			}
 		}
 	}()
 	return srv
 }
 
-// do runs f on the server's goroutine and waits for it
-func (srv *Server) do(f func(*state)) {
-	done := make(chan struct{})
-	srv.reqs <- func(st *state) { f(st); close(done) }
-	<-done
+// do runs f on the server's goroutine and waits for it; false when the
+// server is closed, and f did not run
+func (srv *Server) do(f func(*state)) bool {
+	ran := make(chan struct{})
+	select {
+	case srv.reqs <- func(st *state) { f(st); close(ran) }:
+		<-ran
+		return true
+	case <-srv.done:
+		return false
+	}
 }
 
-// Close stops the server.
-func (srv *Server) Close() { close(srv.reqs) }
+// Close stops the server; closing it again does nothing, and a request
+// after it answers as for an unknown session.
+func (srv *Server) Close() { srv.closed.Do(func() { close(srv.done) }) }
 
 // ownerID is 58 characters like a system's: a timestamp, a sequence and the
 // instance, padded with dots. It is compared, never parsed.
 func (st *state) ownerID() string {
 	st.seq++
-	id := fmt.Sprintf("%s%06d%s", st.now().UTC().Format("20060102150405.000000"), st.seq%1000000, st.instance)
-	id = strings.ReplaceAll(id, ".", "")
+	id := fmt.Sprintf("%s%06d%s", strings.ReplaceAll(st.now().UTC().Format("20060102150405.000000"), ".", ""), st.seq%1000000, st.instance)
 	if len(id) > 58 {
 		id = id[:58]
 	}
@@ -153,20 +164,32 @@ func garg(client string, fields []Field) string {
 	return strings.TrimRight(b.String(), " ")
 }
 
-// collide says whether two arguments of one table touch a common key
-func collide(a, b []Field) bool {
-	if len(a) != len(b) {
-		return true
-	}
-	for i := range a {
-		if a[i].Generic || b[i].Generic {
-			continue
+// collide says whether two arguments of one table touch a common key: the
+// arguments as ENQUEUE_READ shows them, position by position, U+FFFF (a
+// generic field) matching anything and a missing position a blank
+func collide(a, b string) bool {
+	ra, rb := []rune(a), []rune(b)
+	for i := 0; i < max(len(ra), len(rb)); i++ {
+		x, y := ' ', ' '
+		if i < len(ra) {
+			x = ra[i]
 		}
-		if strings.TrimRight(a[i].Value, " ") != strings.TrimRight(b[i].Value, " ") {
+		if i < len(rb) {
+			y = rb[i]
+		}
+		if x != y && x != '\uffff' && y != '\uffff' {
 			return false
 		}
 	}
 	return true
+}
+
+// owns says whether the session holds the row: its dialog half, or an
+// update half of its current update owner. The half of an update owner a
+// COMMIT ended belongs to the update task until UpdateDone, so to anyone
+// else it is another owner's (not measured: docs/enq-contract.md)
+func (s *session) owns(w *row) bool {
+	return w.Dialogs > 0 && w.Dialog == s.dialog || w.Updates > 0 && w.Update == s.update
 }
 
 func shared(mode string) bool { return mode == "S" || mode == "O" }
@@ -183,32 +206,32 @@ func (st *state) enqueue(sid int64, r Request) Result {
 	if s == nil {
 		return Result{Subrc: 2}
 	}
+	arg := garg(r.Client, r.Fields)
 	// another owner first: E and X refuse everything, S and O share
 	for _, w := range st.rows {
-		if w.session == sid || w.Client != r.Client || w.Table != r.Table || !collide(w.fields, r.Fields) {
+		if s.owns(w) || w.Client != r.Client || w.Table != r.Table || !collide(w.Arg, arg) {
 			continue
 		}
 		if !shared(w.Mode) || !shared(r.Mode) {
 			return Result{Subrc: 1, Msgno: "601", Holder: w.User}
 		}
 	}
-	// the caller's own locks: anything with X is refused, the rest stacks
-	arg := garg(r.Client, r.Fields)
+	// the caller's own locks: anything with X is refused, the rest stacks;
+	// a lock is the table, the argument and the mode (GOBJ is shown only)
 	var same *row
 	for _, w := range st.rows {
-		if w.session != sid || w.Client != r.Client || w.Table != r.Table || !collide(w.fields, r.Fields) {
+		if !s.owns(w) || w.Client != r.Client || w.Table != r.Table || !collide(w.Arg, arg) {
 			continue
 		}
 		if w.Mode == "X" || r.Mode == "X" {
 			return Result{Subrc: 1, Msgno: "602", Holder: w.User}
 		}
-		if w.Arg == arg && w.Mode == r.Mode && w.Object == r.Object && (w.Updates == 0 || w.Update == s.update) {
+		if w.Arg == arg && w.Mode == r.Mode && (w.Updates == 0 || w.Update == s.update) {
 			same = w
 		}
 	}
 	if same == nil {
-		same = &row{Row: Row{Client: r.Client, Table: r.Table, Object: r.Object, Arg: arg, Mode: r.Mode, User: s.user, Taken: st.now(), Session: sid},
-			session: sid, fields: append([]Field(nil), r.Fields...)}
+		same = &row{Row: Row{Client: r.Client, Table: r.Table, Object: r.Object, Arg: arg, Mode: r.Mode, User: s.user, Taken: st.now(), Session: sid}}
 		st.rows = append(st.rows, same)
 	}
 	scope := scopeOf(r)
@@ -238,7 +261,9 @@ const (
 
 func (srv *Server) enqueueWith(sid int64, r Request, wait bool, sleep func(time.Duration)) (res Result) {
 	for try := 0; ; try++ {
-		srv.do(func(st *state) { res = st.enqueue(sid, r) })
+		if !srv.do(func(st *state) { res = st.enqueue(sid, r) }) {
+			return Result{Subrc: 2} // SYSTEM_FAILURE: the server is gone
+		}
 		if res.Subrc != 1 || !wait || try >= waitTries {
 			return res
 		}
@@ -257,16 +282,21 @@ func (srv *Server) Dequeue(sid int64, r Request) {
 		arg := garg(r.Client, r.Fields)
 		scope := scopeOf(r)
 		for _, w := range st.rows {
-			if w.session != sid || w.Client != r.Client || w.Table != r.Table || w.Arg != arg || w.Mode != r.Mode {
+			if !s.owns(w) || w.Client != r.Client || w.Table != r.Table || w.Arg != arg || w.Mode != r.Mode {
 				continue
 			}
-			if (scope == 1 || scope == 3) && w.Dialogs > 0 {
+			released := false
+			if (scope == 1 || scope == 3) && w.Dialogs > 0 && w.Dialog == s.dialog {
 				w.Dialogs--
+				released = true
 			}
 			if (scope == 2 || scope == 3) && w.Updates > 0 && w.Update == s.update {
 				w.Updates--
+				released = true
 			}
-			break
+			if released {
+				break
+			}
 		}
 		st.sweep()
 	})
@@ -294,10 +324,23 @@ func (srv *Server) DequeueAll(sid int64) {
 	srv.do(func(st *state) { st.release(sid) })
 }
 
+// release drops the session's own halves; the half of an update owner a
+// COMMIT ended stays until UpdateDone, so the update task that runs after
+// the session still holds its locks (not measured)
 func (st *state) release(sid int64) {
+	s := st.sessions[sid]
+	if s == nil {
+		return
+	}
 	for _, w := range st.rows {
-		if w.session == sid {
-			w.Dialogs, w.Updates = 0, 0
+		if w.Session != sid {
+			continue
+		}
+		if w.Dialog == s.dialog {
+			w.Dialogs = 0
+		}
+		if w.Update == s.update {
+			w.Updates = 0
 		}
 	}
 	st.sweep()
@@ -318,7 +361,7 @@ func (srv *Server) Rollback(sid int64) {
 
 func (st *state) releaseUpdate(sid int64, owner string) {
 	for _, w := range st.rows {
-		if w.session == sid && w.Update == owner {
+		if w.Session == sid && w.Update == owner && owner != "" {
 			w.Updates = 0
 		}
 	}
