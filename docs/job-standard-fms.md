@@ -123,7 +123,14 @@ rolls back when it dumps. The successor is made when the instance is
 released, which is the moment the sandbox would start it with a background
 work process free; its jobcount is bound in `ZOSD_JOB_IDENTITY` to an intent
 ID derived from the predecessor's run, so a retry after a crash finds the
-successor it made instead of making a second one. The worker
+successor it made instead of making a second one. The intent is a unique key
+there (a partial index, `zosd_job_identity_intent`, made on first use), and
+the reservation is one statement, insert or return the row already there, so
+two workers racing for one successor end with one count; duplicates an older
+build left are reduced first to the count an import used, else the lowest.
+A worker releases only its own source's jobs (its business database, client,
+system, user and source instance): several business databases may share one
+operations store, and another's job is skipped, never an error. The worker
 (`node tools/osd-batch-runs.mjs worker`) is the host: it runs a pass at start,
 on every poll and at each start time.
 

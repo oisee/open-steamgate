@@ -8,10 +8,12 @@ import {mkdtempSync, readFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
-import {BatchRuns, runConvertedBatch} from "../tools/osd-batch-runs.mjs";
+import {BatchRuns, liveGeneration, runConvertedBatch, workerSource} from "../tools/osd-batch-runs.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
-import {JobScheduler, installAbapClock, manualClock} from "../tools/osd-job-scheduler.mjs";
-import {msStamp, stampMs} from "../tools/osd-job-schedule.mjs";
+import {JobScheduler, installAbapClock, manualClock, reserveSuccessorCount} from "../tools/osd-job-scheduler.mjs";
+import {msStamp, stampMs, successorIntentId} from "../tools/osd-job-schedule.mjs";
+import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
+import {randomBytes} from "node:crypto";
 import {jobHeaderType} from "./fixtures/job-header.mjs";
 
 const root = resolve(".");
@@ -369,6 +371,121 @@ describe("periodic and time-scheduled background jobs", function () {
     expect(await deleteJob(w.name("ONCE"), once.count)).to.equal("JOB_DOES_NOT_EXIST");
     await w.clock.advance(120 * 1000);
     expect(w.instances("ONCE")).to.deep.equal([]);
+    w.scheduler.stop();
+  });
+  const done = async () => ({status: "COMPLETED"});
+  const identities = (intentId) => readBusiness(`SELECT TRIM(jobcount) AS count FROM zosd_job_identity
+    WHERE TRIM(intent_id) = ? ORDER BY jobcount`, intentId).map((row) => row.count);
+  const writeBusiness = (work) => {
+    const db = new DatabaseSync(dbPath);
+    try { db.exec("PRAGMA busy_timeout=5000"); return work(db); } finally { db.close(); }
+  };
+
+  it("runs only its own source's timed jobs when two business databases share the operations store", async () => {
+    const w = world("2026-10-01T23:40:01Z", {execute: done});
+    await close(w, "MINE", {start: 60, period: {mins: 2}});
+    await w.scheduler.tick();
+    // a second business database: the same tables, another source instance
+    const other = join(dir, `other-${worlds}.sqlite`);
+    writeBusiness((db) => db.exec(`VACUUM INTO '${other}'`));
+    const copy = new DatabaseSync(other);
+    try {
+      copy.exec("DELETE FROM zosd_job_outbox; DELETE FROM zosd_job_step");
+      copy.prepare("UPDATE zosd_job_source_instance SET id = ?").run(randomBytes(16).toString("hex"));
+    } finally { copy.close(); }
+    const sy = abap.builtin.sy.get();
+    w.store.importIntent({intentId: randomBytes(16).toString("hex"), sourceDb: resolve(other),
+      client: sy.mandt.get().trim(), sysid: sy.sysid.get().trim(), owner: user(),
+      jobname: w.name("THEIRS"), jobcount: "00000042", program: "ZGG_EX_012",
+      generation: abap.context.osdGeneration ?? liveGeneration(root),
+      steps: [{number: 1, program: "ZGG_EX_012", input: []}],
+      schedule: {start: w.at(60), last: "", period: {mins: 2, hours: 0, days: 0, weeks: 0}}});
+    w.clock.set(w.clock.now() + 60 * 1000);
+    await w.scheduler.tick(); // this source's worker: its job runs, the other's is left alone
+    expect([w.instances("MINE"), w.waiting("MINE")]).to.deep.equal([[60], [180]]);
+    expect([w.instances("THEIRS"), w.waiting("THEIRS")]).to.deep.equal([[], [60]]);
+    const theirs = new FileSqliteClient({path: other});
+    await theirs.connect();
+    const ours = abap.context.databaseConnections.DEFAULT;
+    abap.context.databaseConnections.DEFAULT = theirs;
+    try {
+      const worker = new JobScheduler({root, store: w.store, env: process.env, clock: w.clock, execute: done});
+      await worker.tick(); // the other source's worker
+      worker.stop();
+    } finally {
+      abap.context.databaseConnections.DEFAULT = ours;
+      await theirs.disconnect();
+    }
+    expect([w.instances("THEIRS"), w.waiting("THEIRS")]).to.deep.equal([[60], [180]]);
+    expect([w.instances("MINE"), w.waiting("MINE")]).to.deep.equal([[60], [180]]);
+    const [, successor] = w.runs("THEIRS");
+    const reader = new DatabaseSync(other, {readOnly: true});
+    try {
+      expect(reader.prepare("SELECT TRIM(jobcount) AS count FROM zosd_job_identity WHERE TRIM(intent_id) = ?")
+        .all(successorIntentId(w.runs("THEIRS")[0].id)).map((row) => row.count)).to.deep.equal([successor.job_count]);
+    } finally { reader.close(); }
+    w.clock.set(w.clock.now() + 120 * 1000);
+    await w.scheduler.tick();
+    expect(w.instances("MINE")).to.deep.equal([60, 180]);
+    expect(w.instances("THEIRS")).to.deep.equal([60]);
+    w.scheduler.stop();
+  });
+
+  it("ends two workers racing for one successor with one successor and one count", async () => {
+    const w = world("2026-10-01T23:50:01Z", {execute: done});
+    await close(w, "RACE", {start: 60, period: {mins: 2}});
+    await w.scheduler.tick();
+    w.clock.set(w.clock.now() + 60 * 1000);
+    const [run] = w.store.dueTimed(w.at(60), workerSource());
+    const intentId = successorIntentId(run.id);
+    const second = new JobScheduler({root, store: w.store, env: process.env, clock: w.clock,
+      execute: done, candidate: () => 33333333});
+    // the first worker has read "no successor yet"; the second reserves in between,
+    // on a connection of its own, before either has imported
+    let theirs;
+    w.scheduler.candidate = () => 11111111;
+    w.scheduler.beforeReserve = () => writeBusiness((db) => {
+      theirs = reserveSuccessorCount(db, {client: run.source_client, jobname: run.job_name,
+        owner: run.source_owner, intentId}, {candidate: () => 22222222});
+    });
+    await w.scheduler.ensureSuccessor(run);
+    w.scheduler.beforeReserve = undefined;
+    await second.ensureSuccessor(run);
+    expect(theirs).to.equal("22222222");
+    expect(identities(intentId)).to.deep.equal(["22222222"]);
+    expect(w.runs("RACE").map((item) => item.job_count).slice(1)).to.deep.equal(["22222222"]);
+    await w.scheduler.tick();
+    w.clock.set(w.clock.now() + 120 * 1000);
+    await w.scheduler.tick();
+    expect([w.instances("RACE"), w.waiting("RACE")]).to.deep.equal([[60, 180], [300]]);
+    second.stop();
+    w.scheduler.stop();
+  });
+
+  it("converges on one count when a stale losing identity is left from an earlier crash", async () => {
+    const w = world("2026-10-02T00:00:01Z", {execute: done});
+    await close(w, "STALE", {start: 60, period: {mins: 2}});
+    await w.scheduler.tick();
+    w.scheduler.stop();
+    w.clock.set(w.clock.now() + 60 * 1000);
+    const [run] = w.store.dueTimed(w.at(60), workerSource());
+    const intentId = successorIntentId(run.id);
+    const stale = (...counts) => writeBusiness((db) => {
+      db.exec("DROP INDEX IF EXISTS zosd_job_identity_intent");
+      for (const count of counts) {
+        db.prepare(`INSERT INTO zosd_job_identity (mandt, jobname, jobcount, owner, intent_id)
+          VALUES (?, ?, ?, ?, ?)`).run(run.source_client, run.job_name, count, run.source_owner, intentId);
+      }
+    });
+    stale("00000009", "00000003"); // two workers reserved before this fix, neither imported
+    await w.hostStart();
+    expect(identities(intentId)).to.deep.equal(["00000003"]);
+    expect(w.runs("STALE").map((item) => item.job_count).slice(1)).to.deep.equal(["00000003"]);
+    stale("00000001"); // a loser beside an imported winner: the import decides, not the lower count
+    w.clock.set(w.clock.now() + 120 * 1000);
+    await w.scheduler.tick();
+    expect(identities(intentId)).to.deep.equal(["00000003"]);
+    expect([w.instances("STALE"), w.waiting("STALE")]).to.deep.equal([[60, 180], [300]]);
     w.scheduler.stop();
   });
 });

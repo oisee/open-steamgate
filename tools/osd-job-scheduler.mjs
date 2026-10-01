@@ -19,12 +19,62 @@
 import {randomInt} from "node:crypto";
 import {resolve} from "node:path";
 import {exclusive, outsideStepContext} from "./osd-dialog-step.mjs";
-import {runConvertedBatch, workQueuedBatch} from "./osd-batch-runs.mjs";
+import {runConvertedBatch, workQueuedBatch, workerSource} from "./osd-batch-runs.mjs";
 import {drainJobOutbox} from "./osd-job-outbox.mjs";
 import {msStamp, nextSchedule, periodMinutes, stampMs, successorIntentId} from "./osd-job-schedule.mjs";
 
 const MAX_COUNT = 100000000;
-const sqlText = (text) => `'${String(text).replaceAll("'", "''")}'`;
+const INTENT_INDEX = "zosd_job_identity_intent";
+
+/** The successor's count, reserved atomically on its intent: the intent is
+ *  a unique key of ZOSD_JOB_IDENTITY (a partial index; an open job has no
+ *  intent yet), and a reservation is "insert, or return the row that is
+ *  there", so two workers racing for one successor end with one count, and
+ *  a restart finds it. Duplicates left by an earlier build converge first,
+ *  on the count an import already used (`winnerOf`), else the lowest.
+ *  `db` is a node:sqlite connection to the business database with no open
+ *  transaction; `beforeInsert` is a test seam between the read and the
+ *  write. */
+export function reserveSuccessorCount(db, {client, jobname, owner, intentId},
+  {candidate = () => randomInt(MAX_COUNT), winnerOf = () => undefined, beforeInsert} = {}) {
+  const transaction = (work) => {
+    db.exec("BEGIN IMMEDIATE");
+    try { const answer = work(); db.exec("COMMIT"); return answer; }
+    catch (error) { db.exec("ROLLBACK"); throw error; }
+  };
+  transaction(() => {
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?").get(INTENT_INDEX)) return;
+    const groups = db.prepare(`SELECT mandt, TRIM(intent_id) AS intent FROM zosd_job_identity
+      WHERE TRIM(intent_id) <> '' GROUP BY mandt, TRIM(intent_id) HAVING COUNT(*) > 1`).all();
+    for (const group of groups) {
+      const counts = db.prepare(`SELECT TRIM(jobcount) AS count FROM zosd_job_identity
+        WHERE mandt = ? AND TRIM(intent_id) = ? ORDER BY jobcount`).all(group.mandt, group.intent)
+        .map((row) => row.count);
+      const imported = winnerOf(group.intent);
+      const winner = counts.includes(imported) ? imported : counts[0];
+      db.prepare(`DELETE FROM zosd_job_identity WHERE mandt = ? AND TRIM(intent_id) = ?
+        AND TRIM(jobcount) <> ?`).run(group.mandt, group.intent, winner);
+    }
+    db.exec(`CREATE UNIQUE INDEX ${INTENT_INDEX} ON zosd_job_identity (mandt, intent_id)
+      WHERE intent_id <> ''`);
+  });
+  const existing = () => db.prepare(`SELECT TRIM(jobcount) AS count FROM zosd_job_identity
+    WHERE mandt = ? AND intent_id = ?`).get(client, intentId)?.count;
+  const found = existing();
+  if (found) return found;
+  beforeInsert?.();
+  for (let attempt = 0; attempt < 64; attempt++) {
+    const count = String(candidate()).padStart(8, "0");
+    const answer = transaction(() => {
+      db.prepare(`INSERT INTO zosd_job_identity (mandt, jobname, jobcount, owner, intent_id)
+        VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`).run(client, jobname, count, owner, intentId);
+      return existing(); // ours, or the one another worker reserved first
+    });
+    if (answer) return answer;
+    // the count was taken by another job: draw again
+  }
+  throw new Error("could not allocate a job count for a periodic successor");
+}
 
 /** the ABAP clock: what sy-datum/sy-uzeit would read now, to the second */
 export function abapNow(abap = globalThis.abap) {
@@ -116,6 +166,7 @@ export class JobScheduler {
     this.timer = undefined;
     this.stopped = false;
     this.running = undefined;
+    this.beforeReserve = undefined; // test seam, see reserveSuccessorCount
   }
 
   /** host start: every overdue released job starts once, then the timer
@@ -159,7 +210,7 @@ export class JobScheduler {
   async releaseDue() {
     const stamp = msStamp(this.clock.now());
     const released = [];
-    for (const run of this.store.dueTimed(stamp)) {
+    for (const run of this.store.dueTimed(stamp, workerSource())) {
       if (periodMinutes(periodOf(run)) > 0) await this.ensureSuccessor(run);
       const result = this.store.releaseTimed(run.id, stamp, new Date(this.clock.now()).toISOString());
       if (result.kind !== "unchanged") released.push({id: run.id, kind: result.kind});
@@ -185,30 +236,19 @@ export class JobScheduler {
         sourceInstance: run.source_instance}} : {})});
   }
 
-  // JOB_OPEN's allocator: a random eight-digit count, retried on a taken
-  // key, bound to the successor's intent in ZOSD_JOB_IDENTITY. A retry
-  // finds the row it bound before instead of taking a second count.
+  // JOB_OPEN's allocator (a random eight-digit count, retried on a taken
+  // key), bound atomically to the successor's intent; see
+  // reserveSuccessorCount.
   async #reserveCount(run, intentId) {
     return exclusive(async () => {
       const client = globalThis.abap?.context?.databaseConnections?.DEFAULT;
       if (!client?.db || !client.path || resolve(client.path) !== run.source_db) {
         throw new Error("periodic successor needs its own durable business database");
       }
-      const found = client.db.prepare(`SELECT jobcount FROM zosd_job_identity
-        WHERE mandt = ? AND jobname = ? AND intent_id = ?`).get(run.source_client, run.job_name, intentId);
-      if (found) return String(found.jobcount).trim();
-      for (let attempt = 0; attempt < 64; attempt++) {
-        const count = String(this.candidate()).padStart(8, "0");
-        const inserted = await client.insert({table: "zosd_job_identity",
-          columns: ["mandt", "jobname", "jobcount", "owner", "intent_id"],
-          values: [run.source_client, run.job_name, count, run.source_owner, intentId].map(sqlText)});
-        if (inserted.subrc === 0) {
-          await client.commit();
-          return count;
-        }
-      }
-      await client.rollback();
-      throw new Error("could not allocate a job count for a periodic successor");
+      if (client.inTransaction) await client.commit();
+      return reserveSuccessorCount(client.db, {client: run.source_client, jobname: run.job_name,
+        owner: run.source_owner, intentId}, {candidate: this.candidate,
+        winnerOf: (intent) => this.store.importedCount(intent), beforeInsert: this.beforeReserve});
     }, "periodic job successor");
   }
 
@@ -216,7 +256,7 @@ export class JobScheduler {
     if (this.timer !== undefined) this.clock.clearTimer(this.timer);
     this.timer = undefined;
     if (this.stopped) return;
-    const next = this.store.nextTimed();
+    const next = this.store.nextTimed(workerSource());
     if (next === undefined) return;
     const wait = Math.max(0, stampMs(next) - this.clock.now());
     this.timer = this.clock.setTimer(() => this.tick(), wait);

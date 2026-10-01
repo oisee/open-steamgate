@@ -458,18 +458,35 @@ export class BatchRuns {
   }
 
   /** released time jobs whose start time has come, oldest start first */
-  dueTimed(nowStamp) {
+  // Only the source's own timed jobs: the operations store can be shared by
+  // several business databases, and another's job is not this worker's to
+  // start (its successor's count belongs to that database).
+  static #sourceScope = `AND source_db = ? AND source_client = ? AND source_sysid = ? AND source_owner = ?
+      AND (source_instance IS NULL OR source_instance = ?)`;
+  static #sourceParams = (source) => [source.db, source.client, source.sysid, source.owner, source.instance ?? null];
+
+  /** released time jobs of `source` whose start time has come, oldest first */
+  dueTimed(nowStamp, source) {
+    if (!source) return [];
     return this.readSnapshot(() => this.db.prepare(`SELECT id, job_name, job_count, source_db,
       source_client, source_sysid, source_owner, program, generation, sdl_at, last_at,
       prd_mins, prd_hours, prd_days, prd_weeks, tail_event_id, tail_event_param, source_instance
       FROM batch_runs WHERE state = 'WAITING' AND sdl_at IS NOT NULL AND sdl_at <= ?
-      ORDER BY sdl_at, rowid`).all(nowStamp));
+      ${BatchRuns.#sourceScope} ORDER BY sdl_at, rowid`).all(nowStamp, ...BatchRuns.#sourceParams(source)));
   }
 
-  /** the earliest start time still waiting, for the scheduler's next timer */
-  nextTimed() {
+  /** the earliest start time of `source` still waiting, for the next timer */
+  nextTimed(source) {
+    if (!source) return undefined;
     return this.readSnapshot(() => this.db.prepare(`SELECT MIN(sdl_at) AS at FROM batch_runs
-      WHERE state = 'WAITING' AND sdl_at IS NOT NULL`).get()?.at ?? undefined);
+      WHERE state = 'WAITING' AND sdl_at IS NOT NULL ${BatchRuns.#sourceScope}`)
+      .get(...BatchRuns.#sourceParams(source))?.at ?? undefined);
+  }
+
+  /** the job count of the run imported for an intent, if any */
+  importedCount(intentId) {
+    return this.readSnapshot(() => this.db.prepare(`SELECT r.job_count FROM batch_imports i
+      JOIN batch_runs r ON r.id = i.run_id WHERE i.intent_id = ?`).get(intentId)?.job_count);
   }
 
   /** the run a periodic predecessor's start made, if any */
@@ -894,7 +911,11 @@ function resultRecordingError(runId, stepNumber, cause, executionError) {
   return error;
 }
 
-export async function workQueuedBatch(root, store, execute = runConvertedBatch) {
+/** the business source this process works for: its business database,
+ *  client, system, user and source instance. Undefined without a durable
+ *  business database. The worker claims, and the scheduler releases, only
+ *  this source's jobs: another source's are not its business. */
+export function workerSource() {
   const businessClient = globalThis.abap?.context?.databaseConnections?.DEFAULT;
   const businessDb = businessClient?.path;
   const sy = globalThis.abap?.builtin?.sy?.get?.();
@@ -904,9 +925,13 @@ export async function workQueuedBatch(root, store, execute = runConvertedBatch) 
       instance = businessClient.db.prepare("SELECT id FROM zosd_job_source_instance LIMIT 1").get()?.id;
     }
   } catch { instance = undefined; }
-  const source = businessDb && businessDb !== ":memory:" && sy ?
+  return businessDb && businessDb !== ":memory:" && sy ?
     {db: resolve(businessDb), client: String(sy.mandt.get()).trim(), sysid: String(sy.sysid.get()).trim(),
       owner: String(sy.uname.get()).trim(), instance} : undefined;
+}
+
+export async function workQueuedBatch(root, store, execute = runConvertedBatch) {
+  const source = workerSource();
   const next = store.claimNext(source ?? {legacyOnly: true});
   if (next.kind !== "claimed") return next;
   const {run} = next;
