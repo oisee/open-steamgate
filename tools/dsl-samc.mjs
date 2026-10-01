@@ -6,7 +6,7 @@ import {pathToFileURL} from "node:url";
 import {XMLValidator} from "fast-xml-parser";
 import {renderWithEngine} from "./dsl-build.mjs";
 import {buildDaemonModel, traceNodes} from "./dsl-daemons.mjs";
-import {deriveSamc} from "./dsl-samc-derive.mjs";
+import {deriveSamc, historicalAuthorities} from "./dsl-samc-derive.mjs";
 
 export async function renderDaemon(file) {
   return renderDaemonModel(JSON.parse(readFileSync(file, "utf8")));
@@ -32,12 +32,16 @@ export function firstDifference(actual, expected) {
 }
 
 export async function checkDerived(paths, applicationId, decl, target, numberingFile = target) {
-  const rendered = await renderDaemonModel(deriveSamc(paths, applicationId, decl, numberingFile));
+  const rendered = await renderDaemonModel(deriveSamc(paths, applicationId, decl, numberingFile, true));
+  const explained = new Set(rendered.model.authorities.map((row) => `${row.channelId}|${row.program_id}|${row.activity}`));
+  const grantWithoutUse = historicalAuthorities(target, applicationId)
+    .filter((row) => !explained.has(row.key))
+    .map((row) => ({nr: row.nr, key: row.key, node: `samc/${applicationId}/auth/${row.nr}`}));
   const line = firstDifference(rendered.text, readFileSync(target, "utf8"));
-  if (!line) return {line: 0};
+  if (!line) return {line: 0, grantWithoutUse};
   const node = rendered.trace[line - 1]?.node;
   const row = [...rendered.model.channels, ...rendered.model.authorities].find((entry) => entry["@id"] === node);
-  return {line, node, source: row?.source ?? []};
+  return {line, node, source: row?.source ?? [], grantWithoutUse};
 }
 
 async function main(args) {
@@ -63,6 +67,7 @@ async function main(args) {
     let result;
     try { console.log = (...items) => console.error(...items); result = await checkDerived(paths, options.app, decl, options.against, options.numbering ?? options.against); }
     finally { console.log = log; }
+    for (const grant of result.grantWithoutUse) console.error(`${options.against}: grant without use at ${grant.node} (${grant.key})`);
     if (result.line) {
       console.error(`${options.against}: drift at line ${result.line}, node ${result.node ?? "unknown"}${result.source.length ? `, source ${result.source.map((p) => `${p.file}:${p.line}`).join(", ")}` : ""}`);
       return 1;

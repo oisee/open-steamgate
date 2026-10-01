@@ -1,0 +1,20 @@
+{
+  "description": "OSD AMC tests",
+  "lang": "E",
+  "channels": {
+    "/text": {"scope": "C"},
+    "/denied": {"scope": "C"},
+    "/binary": {"scope": "C"},
+    "/pcp": {"scope": "C"}
+  },
+  "callSites": {
+    "zcl_osd_amc_test.clas.testclasses.abap:29": {"messageType": "TEXT"},
+    "zcl_osd_amc_test.clas.testclasses.abap:86": {"authority": "none", "reason": "negative authorization test expects the send to fail"},
+    "zcl_osd_amc_test.clas.testclasses.abap:102": {"messageType": "BINARY"},
+    "zcl_osd_amc_test.clas.testclasses.abap:118": {"messageType": "PCP"},
+    "zcl_osd_amc_test.clas.testclasses.abap:143": {"authority": "none", "messageType": "TEXT", "reason": "synchronous communication is refused before authority use"}
+  },
+  "extraAuthorities": [
+    {"channelId": "/text", "kind": "class", "program": "ZCL_OSD_AMC_SOCKET", "activity": "R", "reason": "APC bind_amc_message_consumer grants R; static AMC call scan does not cover the binding API"}
+  ]
+}

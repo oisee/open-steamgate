@@ -13,7 +13,7 @@
     "zcl_osd_t_ddrv.clas.p8b.testclasses.abap:28": {"channelIds": ["/pc"]}
   },
   "extraAuthorities": [
-    {"channelId": "/pc", "kind": "report", "program": "ZOSD_T_DSUB", "activity": "S"},
-    {"channelId": "/pu", "kind": "class", "program": "ZCL_OSD_T_DDRV", "activity": "R"}
+    {"channelId": "/pc", "kind": "report", "program": "ZOSD_T_DSUB", "activity": "S", "reason": "grant without use: the report makes no AMC call; it shows the report-authority shape"},
+    {"channelId": "/pu", "kind": "class", "program": "ZCL_OSD_T_DDRV", "activity": "R", "reason": "channel passed as PCP data (cmd=amcsub), p8a:74; static derive cannot see it by design"}
   ]
 }

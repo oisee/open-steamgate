@@ -229,17 +229,22 @@ do not affect the model. The renderer has no inference logic.
 
 The overlay contains `description`, `lang`, optional `version` (default `A`),
 `channels: {"/channel": {"scope": "C"}}`, `extraAuthorities` rows with
-`channelId`, `program`, `kind` and `activity`, and `callSites`. A call site is
-keyed by `basename:line`, full `file:line`, or `PROGRAM.method`, and gives
+`channelId`, `program`, `kind`, `activity` and a required `reason`, and `callSites`. A call site is
+keyed by `basename:line`, full `file:line`, or `CLASS.method`, and gives
 `channelIds` (an array) when the channel is dynamic. It may also give
 `applicationIds` or `messageType` when those cannot be proven. A stated value
 that contradicts a statically resolved value refuses the derivation. Scope,
 description and language are declarations; channel IDs, activity and message
 type come from code wherever possible. Every derived channel and authority
 carries its call-site `source` list. XML trace lines point to these nodes.
-`authority: "none"` excludes an actual call site only with a nonempty `reason`;
+`authority: "none"` excludes an actual call site only with a nonempty `reason`
+and a matching application ID;
 an unmatched site is refused. It describes a documented failed call, not a
 positive test call.
+If consumer delivery cannot be connected to its creation, the creation site
+must state `messageType`, `deliveryProgram` and `authority: "R"`; otherwise
+derivation refuses the channel. `check` reports a target grant with neither
+a call nor a reasoned overlay entry as `grant without use` at its authority node.
 
 A producer's declared interface or cast gives `TEXT`, `BINARY` or `PCP`, the
 exact `MESSAGE_TYPE_ID` spellings in the captured XML (`PCP` there). A
@@ -253,16 +258,22 @@ their global class, as SAP's `PROGRAM_ID` does. The capture shows that abapGit
 preserves configured `NR` order rather than sorting it.
 
 The probe fixture at `test/fixtures/samc-derive/` copies the daemon class and
-the driver's p8a and p8b AMC test includes. The tests send `/pc` to the
+renames the driver's p8a and p8b AMC test includes for the fixture. The tests send `/pc` to the
 daemon producer, but `on_message` forwards the unvalidated PCP `ch` field to
 `amc_send`; callers can also supply `/ps` or `/pu`. The daemon consumer is
 reached with `/pc` by p8b and `/pc`, `/pu`, `/ps` by p8a. The p8a source also
-directly sends on all three channels.
+directly sends on all three channels. The daemon producer's three-channel set
+is declared in the overlay because its channel comes from PCP input; static
+derivation cannot prove those values.
 These are positive probes. The p8b include directly sends and receives
 on `/pc`; its consumer catches errors but then waits for delivery and tests
 echo, so `authority: none` would be false. The report `ZOSD_T_DSUB` has no AMC
 call. No inspected include creates a `/pu` consumer in `ZCL_OSD_T_DDRV`.
-Those two captured grants remain `extraAuthorities`, without code provenance.
+Those two captured grants remain `extraAuthorities`, each with a reason and
+without code provenance.
+The second proof uses `src/amc/zstg_amc_test.samc.decl.json` with the AMC
+test class and test include. Its derived XML matches
+`src/amc/zstg_amc_test.samc.xml` byte for byte.
 The derivation has twelve authorities and reports drift against the five-row capture. The Stage 1
 hand-written model reproduces that capture byte for byte; deriving it from
 these sources would omit real calls.

@@ -69,6 +69,45 @@ describe("DSL SAMC derive", function () {
     expect(model.channels[0].messageType).to.equal("TEXT");
   });
 
+  it("keeps method-local constants separate (critic c1)", () => {
+    const model = deriveSamc(["test/fixtures/samc-derive-repro/c1"], "APP",
+      {channels: {"/a": {scope: "C"}, "/b": {scope: "C"}}});
+    expect(model.authorities.map((row) => [row.channelId, row.activity, row.source[0].line]))
+      .to.deep.equal([["/a", "S", 10], ["/b", "S", 15]]);
+  });
+
+  it("resolves qualified global constants despite a local class shadow (critic c5)", () => {
+    const model = deriveSamc(["test/fixtures/samc-derive-repro/c5"], "APP", {channels: {"/global": {scope: "C"}}});
+    expect(model.authorities.map((row) => [row.channelId, row.activity, row.source[0].line]))
+      .to.deep.equal([["/global", "S", 9]]);
+  });
+
+  it("uses a callSites type for a generic producer (critic c2)", () => {
+    const {dir, file} = fixture(cls("  DATA lo_generic TYPE REF TO if_amc_message_producer.\n  lo_generic = cl_amc_channel_manager=>create_message_producer( i_application_id = 'TEST_APP' i_channel_id = '/literal' )."));
+    const model = deriveSamc([dir], "TEST_APP", {channels: {"/literal": {scope: "C"}},
+      callSites: {[`${file}:12`]: {messageType: "TEXT"}}});
+    expect(model.authorities[0]).to.include({activity: "S", channelId: "/literal"});
+  });
+
+  it("resolves named i_receiver = me from its class interface (critic c3)", () => {
+    const {dir} = fixture(cls(`  DATA(lo_c) = cl_amc_channel_manager=>create_message_consumer( i_application_id = 'TEST_APP' i_channel_id = '/literal' ).
+  lo_c->start_message_delivery( i_receiver = me ).`));
+    const model = deriveSamc([dir], "TEST_APP", {channels: {"/literal": {scope: "C"}}});
+    expect(model.authorities[0]).to.include({activity: "R", channelId: "/literal"});
+  });
+
+  it("refuses an unresolved consumer until the overlay explicitly grants R (critic c4)", () => {
+    const dir = "test/fixtures/samc-derive-repro/c4";
+    const channels = {"/a": {scope: "C"}};
+    const key = "zcl_t_amc.clas.abap:10";
+    expect(() => deriveSamc([dir], "APP", {channels, callSites: {[key]: {messageType: "TEXT"}}}))
+      .to.throw(/zcl_t_amc.clas.abap:10: consumer delivery cannot be resolved.*deliveryProgram.*authority: "R"/);
+    const model = deriveSamc([dir], "APP", {channels,
+      callSites: {[key]: {messageType: "TEXT", deliveryProgram: "ZCL_T_AMC", authority: "R"}}});
+    expect(model.authorities.map((row) => [row.channelId, row.activity, row.program]))
+      .to.deep.equal([["/a", "R", "ZCL_T_AMC"]]);
+  });
+
   it("refuses conflicting producer and receiver message types on one channel", () => {
     const {dir} = fixture(cls(`  DATA lo_c TYPE REF TO if_amc_message_consumer.
   lo_p ?= cl_amc_channel_manager=>create_message_producer( i_application_id = 'TEST_APP' i_channel_id = '/literal' ).
@@ -88,6 +127,9 @@ describe("DSL SAMC derive", function () {
     const at = rendered.text.split("\n").findIndex((line) => line.includes("<CHANNEL_ID>/literal</CHANNEL_ID>"));
     const node = rendered.trace[at].node;
     expect(node).to.equal(first.channels[0]["@id"]);
+    const authorityLine = rendered.text.split("\n").findIndex((line) => line.includes("<ACTIVITY>S</ACTIVITY>"));
+    expect(rendered.trace[authorityLine].node).to.equal(first.authorities[0]["@id"]);
+    expect(rendered.text.split("\n")[authorityLine]).to.equal("      <ACTIVITY>S</ACTIVITY>");
     expect(first.channels[0].source.map((source) => source.file)).to.include(a.file);
   });
 
@@ -132,8 +174,42 @@ ENDFUNCTION.
       .to.throw(/authority none requires a reason/);
     expect(() => deriveSamc([dir], "TEST_APP", {...baseDecl, callSites: {[`${file}:12`]: {authority: "none", reason: "negative probe"}}}))
       .to.throw(/does not match an AMC call/);
-    const model = deriveSamc([dir], "TEST_APP", {channels: {}, callSites: {[key]: {authority: "none", reason: "expects cx_amc_error"}}});
+    const model = deriveSamc([dir], "TEST_APP", {channels: {"/literal": {scope: "C"}}, callSites: {[key]: {authority: "none", reason: "expects cx_amc_error"}}});
     expect(model.authorities).to.have.length(0);
+  });
+
+  it("refuses authority none on a call for another application (critic c6)", () => {
+    const {dir, file} = fixture(cls("  lo_p ?= cl_amc_channel_manager=>create_message_producer( i_application_id = 'OTHER' i_channel_id = '/literal' )."));
+    expect(() => deriveSamc([dir], "TEST_APP", {channels: {},
+      callSites: {[`${file}:11`]: {authority: "none", reason: "negative test"}}}))
+      .to.throw(/authority none application ID does not match TEST_APP/);
+  });
+
+  it("requires reasons on extra authorities and reports unexplained target grants", async () => {
+    const {dir} = fixture(cls("  lo_p ?= cl_amc_channel_manager=>create_message_producer( i_application_id = 'TEST_APP' i_channel_id = '/literal' )."));
+    const channels = {"/literal": {scope: "C"}};
+    const extra = {channelId: "/literal", kind: "report", program: "ZT_EXTRA", activity: "S"};
+    expect(() => deriveSamc([dir], "TEST_APP", {channels, extraAuthorities: [extra]})).to.throw(/reason is required/);
+    const model = deriveSamc([dir], "TEST_APP", {channels, extraAuthorities: [{...extra, reason: "manual grant"}]});
+    const xml = fixture((await renderDaemonModel(model)).text, "target.samc.xml");
+    const checked = await checkDerived([dir], "TEST_APP", {channels}, xml.file);
+    expect(checked.grantWithoutUse).to.deep.equal([{nr: 2, key: `/literal|ZT_EXTRA|S`, node: "samc/TEST_APP/auth/2"}]);
+  });
+
+  it("derives dell's ZSTG_AMC_TEST XML byte for byte", async () => {
+    const overlay = JSON.parse(readFileSync("src/amc/zstg_amc_test.samc.decl.json", "utf8"));
+    const paths = ["test/unit/zcl_osd_amc_test.clas.abap", "test/unit/zcl_osd_amc_test.clas.testclasses.abap",
+      "test/unit/zcl_osd_amc_socket.clas.abap"];
+    const checked = await checkDerived(paths, "ZOSD_AMC_TEST", overlay, "src/amc/zstg_amc_test.samc.xml");
+    expect(checked).to.deep.equal({line: 0, grantWithoutUse: []});
+    const changed = structuredClone(overlay);
+    changed.channels["/text"].scope = "S";
+    const drift = await checkDerived(paths, "ZOSD_AMC_TEST", changed, "src/amc/zstg_amc_test.samc.xml");
+    expect(drift.line).to.be.greaterThan(0);
+    expect(drift.node).to.equal("samc/ZOSD_AMC_TEST/ch/text");
+    const unreasoned = structuredClone(overlay);
+    delete unreasoned.extraAuthorities[0].reason;
+    expect(() => deriveSamc(paths, "ZOSD_AMC_TEST", unreasoned)).to.throw(/reason is required/);
   });
 
   it("keeps historical NRs, appends new authorities, and reports removed ones", async () => {
