@@ -463,7 +463,6 @@ describe("tools/rfc-table-proxy: which tables a statement reads", () => {
     ["SELECT * FROM \"t1\", \"t2\" WHERE 1 = 1", ["T1", "T2"]],
     ["SELECT * FROM t1 a, t2 b WHERE a.k = b.k", ["T1", "T2"]],
     ["SELECT * FROM \"t1\" WHERE k IN (SELECT k FROM \"t2\" WHERE z > 1)", ["T1", "T2"]],
-    ["SELECT * FROM (SELECT k FROM \"t1\") AS sub JOIN \"t2\" ON sub.k = t2.k", ["T1", "T2"]],
     ["SELECT * FROM \"myschema\".\"ztab\"", ["ZTAB"]],
     ["SELECT * FROM \"/ns/tab\"", ["/NS/TAB"]],
     ["SELECT * FROM /ns/tab", ["/NS/TAB"]],
@@ -519,8 +518,22 @@ describe("tools/rfc-table-proxy: which tables a statement reads", () => {
     });
   }
 
-  it("a subquery in FROM or JOIN still classifies", () => {
-    expect(readTables("SELECT * FROM (select k FROM t1) AS s JOIN (SELECT k FROM t2) AS u ON 1 = 1").tables.sort()).to.deep.equal(["T1", "T2"]);
+  // Open SQL 7.02 has no derived table; following one through a comma list
+  // or a join is where a read table was missed (critic round 4), so any
+  // derived table in FROM or JOIN leaves the statement unclassified
+  for (const sql of [
+    "SELECT * FROM (SELECT id FROM t1) AS s, t2",
+    "SELECT * FROM t0 JOIN (SELECT id FROM t1) AS s ON 1 = 1, t2",
+    "SELECT * FROM (select k FROM t1) AS s JOIN (SELECT k FROM t2) AS u ON 1 = 1",
+    "SELECT * FROM (SELECT k FROM \"t1\") AS sub JOIN \"t2\" ON sub.k = t2.k",
+  ]) {
+    it(`a derived table in FROM or JOIN is unclassified and names no table: ${sql}`, () => {
+      expect(readTables(sql)).to.deep.equal({tables: [], unclassified: "derived table in FROM/JOIN; not classified"});
+    });
+  }
+
+  it("a subquery in WHERE is still read", () => {
+    expect(readTables("SELECT * FROM t1 WHERE k IN (SELECT k FROM t2) AND z = 1").tables.sort()).to.deep.equal(["T1", "T2"]);
   });
 
   it("WITH inside a string literal or a quoted name is not a WITH clause", () => {

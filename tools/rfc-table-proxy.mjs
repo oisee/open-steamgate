@@ -164,14 +164,14 @@ export function readTables(sql, prefix = "") {
     for (;;) {
       const next = tokens[j];
       if (next?.t === "p" && next.v === "(") {
-        // a subselect: its own FROM and JOIN are read in turn. A group of
-        // joined tables, FROM (a JOIN b ...), is not (Open SQL 7.02 does not
-        // produce one, and its first table is not behind a FROM or JOIN)
+        // Open SQL 7.02 produces neither a derived table, FROM (SELECT ...),
+        // nor a group of joined tables, FROM (a JOIN b ...); following either
+        // through a comma list or a join is where tables were missed, so the
+        // statement is not classified. A subquery elsewhere (WHERE ... IN
+        // (SELECT ...)) is not behind a FROM or JOIN and is read as before.
         const after = tokens[j + 1];
-        if (after?.t === "word" && after.v.toUpperCase() === "SELECT") {
-          break;
-        }
-        return {tables: [], unclassified: "parenthesized join group; not classified"};
+        const derived = after?.t === "word" && after.v.toUpperCase() === "SELECT";
+        return {tables: [], unclassified: derived ? "derived table in FROM/JOIN; not classified" : "parenthesized join group; not classified"};
       }
       if (next === undefined || (next.t !== "id" && next.t !== "word")
           || (next.t === "word" && NOT_A_TABLE.has(next.v.toUpperCase()))) {

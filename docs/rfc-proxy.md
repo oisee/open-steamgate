@@ -97,9 +97,12 @@ The proxy wraps the connection in `abap.context.databaseConnections.DEFAULT`
 (the eleven-method `DatabaseClient` of `docs/db-backends.md`; the runtime is
 not forked). A `select` or `openCursor` is read as SQL text: every `FROM` and
 `JOIN` at any depth, quoted names (`"tab"`, `"schema"."tab"`), a comma list,
-subqueries, `UNION`. A `FROM` inside `TRIM`/`EXTRACT`/`SUBSTRING` is not a
+subqueries in `WHERE`, `UNION`. A `FROM` inside `TRIM`/`EXTRACT`/`SUBSTRING` is not a
 table. A statement with a `WITH` clause (anywhere, outside literals) is not
-classified at all, nor is a parenthesized join group `FROM (a JOIN b ...)`: 7.02 Open SQL has no `WITH`, and CTE scoping is not chased. A statement this cannot classify (a string where a table should be, a
+classified at all, nor is anything in parentheses right after `FROM` or `JOIN`
+(a derived table `FROM (SELECT ...)` or a join group `FROM (a JOIN b ...)`):
+7.02 Open SQL produces none of them, and following them through comma lists
+and joins is where read tables were missed. A statement this cannot classify (a string where a table should be, a
 table function, `FROM @x`, an unterminated literal) hydrates **nothing** (not even the tables read before the construct) and is
 journaled as `unclassified` with the reason. For each allow-listed table the
 statement reads and that has not been decided in this process:
