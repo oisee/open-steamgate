@@ -27,7 +27,9 @@
 //   4. the deployed version: the deploy snippet serialises and hashes the
 //      AFTER objects again right after the deserialise, in the same dialog
 //      step (the hash snippet's code), and an object is recorded as this
-//      run's only when its source files are what the AFTER zip carries;
+//      run's only when every file is the AFTER zip's (by hash, or as
+//      normalised source / canonical XML) or, for XML and files the zip
+//      lacks, unchanged since the snapshot (adoptDeployed);
 //      then the same ABAP Unit comparison as the fresh-package mode;
 //   5. rollback, always (`--keep` excepted): the objects whose current hash
 //      equals the hash of the AFTER version this run deployed are re-imported
@@ -623,7 +625,8 @@ export async function rollbackToSnapshot(mcp, pkg, dir, state, {log = () => {}} 
     if (state.after.includes(item) && dep !== undefined && dep === cur.hash) candidates.push({item, files: cur.files});
     else {
       problems.push(`rollback: ${item} was changed by somebody else since the deploy (hash ${cur.hash.slice(0, 12)}, `
-        + `the deployed version had ${dep === undefined ? "none recorded" : dep.slice(0, 12)}); not rolled back`);
+        + `the deployed version had ${dep === undefined ? "none recorded" : dep.slice(0, 12)}); not rolled back. `
+        + `To restore it by hand, import the snapshot's files: ${snapshotFilesOf(dir, state, item)}`);
     }
   }
   if (candidates.length > 0) {
@@ -711,16 +714,79 @@ export function normalisedSource(buf) {
     .split("\n").map((l) => l.replace(/[ \t]+$/, "")).join("\n").replace(/\n+$/, "");
 }
 
+const ENTITY = {amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'"};
+const unescapeXml = (t) => t.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos);/g, (_, e) => (e[0] === "#"
+  ? String.fromCodePoint(e[1] === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : ENTITY[e]));
+
+/** An XML document as a canonical string: elements with their attributes
+ *  sorted by name and values unescaped, text unescaped (CDATA as text,
+ *  adjacent text joined), whitespace-only text dropped; the declaration,
+ *  comments and processing instructions do not count. Undefined when the
+ *  text is not one well-formed element tree (unbalanced tags, a second
+ *  root, text outside the root, a DOCTYPE): such a file is not decided. */
+export function canonicalXml(buf) {
+  const src = Buffer.from(buf).toString("utf8").replace(/^\uFEFF/, "");
+  const tag = /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[([\s\S]*?)\]\]>|<!|<\/\s*([^\s>]+)\s*>|<([^\s/>!?]+)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>|</g;
+  const out = [];
+  const stack = [];
+  let roots = 0;
+  let text = "";
+  let at = 0;
+  const flush = () => {
+    if (text.trim() !== "") {
+      if (stack.length === 0) return false;
+      out.push(`T${JSON.stringify(text)}`);
+    }
+    text = "";
+    return true;
+  };
+  for (const m of src.matchAll(tag)) {
+    text += unescapeXml(src.slice(at, m.index));
+    at = m.index + m[0].length;
+    if (m[0].startsWith("<!--") || m[0].startsWith("<?")) continue;
+    if (m[1] !== undefined) { text += m[1]; continue; }
+    if (m[0] === "<!" || m[0] === "<") return undefined;
+    if (!flush()) return undefined;
+    if (m[2] !== undefined) {
+      if (stack.pop() !== m[2]) return undefined;
+      out.push(")");
+      continue;
+    }
+    if (stack.length === 0 && (roots += 1) > 1) return undefined;
+    const attrs = [...m[4].matchAll(/([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)]
+      .map((a) => [a[1], unescapeXml(a[2] ?? a[3])]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    if (new Set(attrs.map(([n]) => n)).size !== attrs.length) return undefined;
+    out.push(`(${m[3]}${JSON.stringify(attrs)}`);
+    if (m[5] === "/") out.push(")");
+    else stack.push(m[3]);
+  }
+  text += unescapeXml(src.slice(at));
+  if (!flush() || stack.length > 0 || roots !== 1) return undefined;
+  return out.join("");
+}
+
+/** Where a snapshot's copy of an object lies, for a restore by hand. */
+export function snapshotFilesOf(dir, state, item) {
+  const o = state.objects?.find((x) => x.item === item);
+  return o === undefined ? "" : o.files.map((f) => `${join(dir, f.data)} = ${f.name}`).join(", ");
+}
+
 /** The deployed hashes of `items`, from the post-deploy report the deploy
  *  snippet wrote in the same dialog step as the deserialise (`dep_` entries),
- *  cross-checked against the AFTER zip. An object is adopted (and so may be
- *  overwritten by the rollback) only when every file both sides carry is the
- *  zip's: byte-equal by hash, or, for a source file whose hash differs,
- *  equal after the normalisation a system applies, read back by chunks that
- *  must carry the same in-step hash. An XML file, or a file only one side
- *  carries, cannot be decided from here (abapGit rewrites XML on serialise)
- *  and rests on the in-step hash alone; it is logged, not refused. */
-export async function adoptDeployed({mcp, pkg, items, message, zipFiles, problems, log = () => {}}) {
+ *  cross-checked file by file. An object is adopted (and so may be
+ *  overwritten by the rollback) only when every file it shows is decided:
+ *    (a) its hash equals the zip's file;
+ *    (b) a source file: equal to the zip's after the normalisation a system
+ *        applies; an XML file: the same canonical element tree as the zip's
+ *        (both read back by chunks that must carry the in-step hash);
+ *    (c) an XML file, or one the zip lacks: its hash equals the snapshot's
+ *        file of that name, so the deploy did not change it and nothing of
+ *        ours is in it. A source file the zip carries that is still the
+ *        snapshot's is refused: the deploy did not apply it.
+ *  A file the zip carries and the system does not show is a failed deploy of
+ *  that file; one the system shows and the zip lacks passes only by (c).
+ *  Anything else refuses the object: not recorded, the run fails. */
+export async function adoptDeployed({mcp, pkg, items, message, zipFiles, snapshot = [], problems, log = () => {}}) {
   const dep = collectHashes(parseHashes(message, DEPLOYED), items);
   for (const b of problemsOf(dep)) problems.push(`deployed version: ${b}`);
   const flagged = new Set([...dep.absent, ...dep.elsewhere.map((e) => e.item), ...dep.fail.map((f) => f.item), ...dep.incomplete]);
@@ -737,33 +803,50 @@ export async function adoptDeployed({mcp, pkg, items, message, zipFiles, problem
     }
     const pre = filePrefix(item);
     const mine = new Map([...zipFiles].filter(([n]) => n.startsWith(pre)));
-    const foreign = [];
-    const undecided = [];
+    const snap = new Map((snapshot.find((o) => o.item === item)?.files ?? []).map((f) => [f.name, f.sha256]));
+    const refused = [];
+    const how = [];
     for (const f of got.files) {
       const z = mine.get(f.name);
+      if (z !== undefined && sha256(z) === f.sha256) continue; // (a)
+      const xml = f.name.endsWith(".xml");
+      const unchanged = snap.get(f.name) === f.sha256;
+      if (unchanged && (xml || z === undefined)) { // (c)
+        how.push(`${f.name} unchanged since the snapshot`);
+        continue;
+      }
       if (z === undefined) {
-        undecided.push(`${f.name} (not in the zip)`);
+        refused.push(`${f.name} is shown by the system, is not in the AFTER zip and is not the snapshot's`);
         continue;
       }
-      if (sha256(z) === f.sha256) continue;
-      if (f.name.endsWith(".xml")) {
-        undecided.push(`${f.name} (XML, abapGit rewrites it)`);
+      if (unchanged) {
+        // a source the zip rewrites still reads as before: the tests would
+        // run against BEFORE, and there is nothing of ours to roll back
+        refused.push(`${f.name} is still the snapshot's, not the AFTER zip's: the deploy did not apply it`);
         continue;
       }
+      // (b)
       try {
         const sys = await fetchFile(mcp, pkg, item, f);
-        if (normalisedSource(sys) !== normalisedSource(z)) foreign.push(`${f.name} is not the AFTER version`);
+        const a = xml ? canonicalXml(sys) : normalisedSource(sys);
+        if (a !== undefined && a === (xml ? canonicalXml(z) : normalisedSource(z))) {
+          how.push(`${f.name} equal to the zip's ${xml ? "as an element tree" : "after normalisation"}`);
+          continue;
+        }
+        refused.push(`${f.name} is neither the AFTER zip's${xml ? " (as an element tree)" : ""} nor the snapshot's`);
       } catch (e) {
-        foreign.push(`${f.name} could not be read back as the version deployed (${e.message})`);
+        refused.push(`${f.name} could not be read back as the version deployed (${e.message})`);
       }
     }
-    for (const n of mine.keys()) if (!got.files.some((f) => f.name === n)) undecided.push(`${n} (in the zip, not serialised)`);
-    if (foreign.length > 0) {
-      problems.push(`deployed version: ${item} is not what this run deployed (${foreign.join("; ")}); `
+    for (const n of mine.keys()) {
+      if (!got.files.some((f) => f.name === n)) refused.push(`${n} is in the AFTER zip and the system does not show it: the deploy of that file failed`);
+    }
+    if (refused.length > 0) {
+      problems.push(`deployed version: ${item} is not what this run deployed (${refused.join("; ")}); `
         + "not recorded as this run's, so the rollback will not touch it");
       continue;
     }
-    if (undecided.length > 0) log(`deployed version: ${item}: not compared with the zip: ${undecided.join(", ")}`);
+    if (how.length > 0) log(`deployed version: ${item}: ${how.join(", ")}`);
     deployed[item] = got.hash;
   }
   return deployed;
@@ -872,7 +955,8 @@ export async function proveInPlace({folder, unit, manifest, pkg, keep = false, m
     // made in between -- and each object is checked against the AFTER zip
     try {
       if (!ran) throw Object.assign(new Error("the import reported no status, so the deployed hashes are unknown and the rollback will not touch an object that differs"), {skip: true});
-      state.deployed = await adoptDeployed({mcp, pkg, items: [...built.objects], message: deployMsg, zipFiles: built.files, problems, log});
+      state.deployed = await adoptDeployed({mcp, pkg, items: [...built.objects], message: deployMsg, zipFiles: built.files,
+        snapshot: state.objects, problems, log});
     } catch (e) {
       if (!e.skip) problems.push(`deployed version could not be hashed, so nothing can be rolled back safely: ${e.message}`);
     }

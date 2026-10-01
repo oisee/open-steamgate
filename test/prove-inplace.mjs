@@ -14,7 +14,7 @@ import {join, resolve} from "node:path";
 import {inflateRawSync} from "node:zlib";
 import {MARK_CLOSE, MARK_OPEN, buildZip, main} from "../tools/osd-prove-on-system.mjs";
 import {
-  chunkAbap, dropRepoAbap, deployAbap, hashAbap, listAbap, objectHash, readState, snapshotDir, writeState,
+  chunkAbap, dropRepoAbap, deployAbap, hashAbap, listAbap, canonicalXml, objectHash, readState, snapshotDir, writeState,
 } from "../tools/osd-prove-inplace.mjs";
 
 const FIXTURE = resolve("test/fixtures/prove-on-system");
@@ -301,7 +301,7 @@ describe("osd-prove-on-system --in-place", () => {
     const mcp = fakeSystem({inStep: (sys) => { if (sys.imports === 1) sys.objects.get(DEMO).files.set("zcl_osd_prove_demo.clas.abap", edit); }});
     const {code, text} = await run(inPlace(), mcp);
     assert.equal(code, 1, text);
-    assert.match(text, /FAIL deployed version: CLAS ZCL_OSD_PROVE_DEMO is not what this run deployed \(zcl_osd_prove_demo\.clas\.abap is not the AFTER version\)/);
+    assert.match(text, /FAIL deployed version: CLAS ZCL_OSD_PROVE_DEMO is not what this run deployed \(zcl_osd_prove_demo\.clas\.abap is neither the AFTER zip's nor the snapshot's\)/);
     assert.match(text, /FAIL rollback: CLAS ZCL_OSD_PROVE_DEMO was changed by somebody else[\s\S]*the deployed version had none recorded/);
     assert.equal(mcp.sys.objects.get(DEMO).files.get("zcl_osd_prove_demo.clas.abap"), edit);
     assert.ok(kinds(mcp).filter((k) => k === "deploy").length === 2, "the deploy and the restore of PLAIN only");
@@ -315,6 +315,83 @@ describe("osd-prove-on-system --in-place", () => {
     assert.equal(code, 0, text);
     assert.deepEqual(snapHashes(mcp), before);
     assert.ok(kinds(mcp).includes("chunk") && mcp.sys.calls.filter((c) => c.kind === "chunk").length > 3, "the deployed sources were read back");
+  });
+
+  // the post-deploy check, file by file: (a) the zip's hash, (b) the zip's
+  // content (normalised source, canonical XML), (c) the snapshot's hash
+  const sysFile = (sys, n) => [...sys.objects.values()].find((o) => o.files.has(n))?.files.get(n);
+  const DEMO_XML = "zcl_osd_prove_demo.clas.xml";
+  const PLAIN_LOCALS = "zcl_osd_prove_plain.clas.locals_imp.abap";
+
+  it("a foreign XML edit inside the deploy's step is refused, not adopted, and survives the rollback", async () => {
+    const edit = "<?xml version=\"1.0\"?><abapGit><foreign/></abapGit>\n";
+    const mcp = fakeSystem({inStep: (sys) => { if (sys.imports === 1) sys.objects.get(DEMO).files.set(DEMO_XML, edit); }});
+    const {code, text, runs} = await run(inPlace(), mcp);
+    assert.equal(code, 1, text);
+    assert.match(text, /FAIL deployed version: CLAS ZCL_OSD_PROVE_DEMO is not what this run deployed \(zcl_osd_prove_demo\.clas\.xml is neither the AFTER zip's \(as an element tree\) nor the snapshot's\)/);
+    assert.match(text, /FAIL rollback: CLAS ZCL_OSD_PROVE_DEMO was changed by somebody else[\s\S]*?To restore it by hand, import the snapshot's files: \S+files\/0-0\.bin = zcl_osd_prove_demo\.clas\.abap/);
+    assert.equal(mcp.sys.objects.get(DEMO).files.get(DEMO_XML), edit, "the foreign XML is not overwritten");
+    assert.ok(existsSync(dirOf(runs)));
+  });
+
+  it("(b) an XML file abapGit wrote back reformatted (whitespace, attribute order) is equal as an element tree and adopted", async () => {
+    const reformat = (t) => t.replace(/>\s+</g, "><").replace(/<abapGit version="([^"]*)" serializer="([^"]*)"/, "<abapGit serializer='$2'  version=\"$1\"");
+    const mcp = fakeSystem({stored: (n, t, sys) => (sys.imports === 1 && n.endsWith(".xml") ? reformat(t) : t)});
+    const before = snapHashes(mcp);
+    const {code, text} = await run(inPlace(), mcp);
+    assert.equal(code, 0, text);
+    assert.match(text, /deployed version: CLAS ZCL_OSD_PROVE_DEMO: zcl_osd_prove_demo\.clas\.xml equal to the zip's as an element tree/);
+    assert.deepEqual(snapHashes(mcp), before);
+  });
+
+  it("(c) an XML file the deploy left as it was in the snapshot is adopted (nothing of ours in it)", async () => {
+    const mcp = fakeSystem({stored: (n, t, sys) => (sys.imports === 1 && n.endsWith(".xml") ? sysFile(sys, n) : t)});
+    const before = snapHashes(mcp);
+    const {code, text} = await run(inPlace(), mcp);
+    assert.equal(code, 0, text);
+    assert.match(text, /zcl_osd_prove_demo\.clas\.xml unchanged since the snapshot/);
+    assert.deepEqual(snapHashes(mcp), before);
+  });
+
+  it("a source file the zip rewrites that still reads as the snapshot's is refused: the deploy did not apply it", async () => {
+    const mcp = fakeSystem({stored: (n, t, sys) => (sys.imports === 1 && n === "zcl_osd_prove_plain.clas.abap" ? sysFile(sys, n) : t)});
+    const {code, text} = await run(inPlace(), mcp);
+    assert.equal(code, 1, text);
+    assert.match(text, /CLAS ZCL_OSD_PROVE_PLAIN is not what this run deployed \(zcl_osd_prove_plain\.clas\.abap is still the snapshot's, not the AFTER zip's: the deploy did not apply it\)/);
+  });
+
+  it("one-sided: a file the zip carries and the system does not show is a failed deploy of that file", async () => {
+    const mcp = fakeSystem({inStep: (sys) => { if (sys.imports === 1) sys.objects.get(DEMO).files.delete("zcl_osd_prove_demo.clas.testclasses.abap"); }});
+    const {code, text} = await run(inPlace(), mcp);
+    assert.equal(code, 1, text);
+    assert.match(text, /CLAS ZCL_OSD_PROVE_DEMO is not what this run deployed \(zcl_osd_prove_demo\.clas\.testclasses\.abap is in the AFTER zip and the system does not show it: the deploy of that file failed\)/);
+  });
+
+  it("one-sided: a file the system shows and the zip lacks is adopted when it is the snapshot's", async () => {
+    const plain = new Map([...oldFiles("zcl_osd_prove_plain"), [PLAIN_LOCALS, "* local helpers\n"]]);
+    const mcp = fakeSystem({objects: [[DEMO, oldFiles("zcl_osd_prove_demo")], [PLAIN, plain], [OTHER, new Map([["zcl_osd_untouched.clas.abap", "CLASS zcl_osd_untouched.\n"]])]]});
+    const before = snapHashes(mcp);
+    const {code, text} = await run(inPlace(), mcp);
+    assert.equal(code, 0, text);
+    assert.match(text, /zcl_osd_prove_plain\.clas\.locals_imp\.abap unchanged since the snapshot/);
+    assert.deepEqual(snapHashes(mcp), before);
+  });
+
+  it("one-sided: a file the system shows, the zip lacks and the snapshot does not have is refused", async () => {
+    const mcp = fakeSystem({inStep: (sys) => { if (sys.imports === 1) sys.objects.get(PLAIN).files.set(PLAIN_LOCALS, "* added by somebody\n"); }});
+    const {code, text} = await run(inPlace(), mcp);
+    assert.equal(code, 1, text);
+    assert.match(text, /CLAS ZCL_OSD_PROVE_PLAIN is not what this run deployed \(zcl_osd_prove_plain\.clas\.locals_imp\.abap is shown by the system, is not in the AFTER zip and is not the snapshot's\)/);
+    assert.equal(mcp.sys.objects.get(PLAIN).files.get(PLAIN_LOCALS), "* added by somebody\n");
+  });
+
+  it("canonical XML: attribute order, whitespace-only text, empty-element form, CDATA and entities do not count; content does", () => {
+    const a = "<?xml version=\"1.0\"?>\n<a x=\"1\" y=\"2\">\n <b>t &amp; u</b><c/>\n</a>\n";
+    assert.equal(canonicalXml(a), canonicalXml("﻿<a  y='2' x=\"1\"><!-- c --><b>t &#38; u</b><c></c></a>"));
+    assert.equal(canonicalXml("<a><![CDATA[x<y]]></a>"), canonicalXml("<a>x&lt;y</a>"));
+    assert.notEqual(canonicalXml("<a> x </a>"), canonicalXml("<a>x</a>"));
+    assert.notEqual(canonicalXml("<a x=\"1\"/>"), canonicalXml("<a x=\"2\"/>"));
+    for (const bad of ["<a><b></a>", "<a/><b/>", "<a/>tail", "<a x=\"1\" x=\"2\"/>", "<!DOCTYPE a><a/>"]) assert.equal(canonicalXml(bad), undefined, bad);
   });
 
   it("a repository row with the tool's name that predates the run is not deleted by the rollback", async () => {

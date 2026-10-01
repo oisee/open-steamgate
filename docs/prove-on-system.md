@@ -364,12 +364,24 @@ The perimeter is a **snapshot**, not the package (`tools/osd-prove-inplace.mjs`)
    SHA-256 lines as the hash snippet (`dep_file=` / `dep_obj=` in its report).
    A separate read after the call returned would record a colleague's save in
    that gap as this run's output, and the rollback would then overwrite it.
-   Each object is also compared with the AFTER zip: a file whose hash equals
-   the zip's passes; a source file whose hash differs is read back by chunks
-   (each carrying the in-step hash, so it is that version) and compared after
-   the normalisation a system applies (BOM, CRLF, trailing blanks, trailing
-   empty lines); if it still differs the object is **not** recorded as this
-   run's, the run fails, and the rollback leaves the object alone.
+   Each object is then decided file by file, and is recorded as this run's
+   only when every file passes one of:
+   (a) its in-step hash equals the zip's file;
+   (b) read back by chunks (each carrying the in-step hash, so it is that
+   version), it equals the zip's file -- a source after the normalisation a
+   system applies (BOM, CRLF, trailing blanks, trailing empty lines), an XML
+   file as a canonical element tree (`canonicalXml`: attributes sorted,
+   whitespace-only text dropped, entities and CDATA read, the declaration and
+   comments ignored; a file that is not one well-formed tree is not equal);
+   (c) an XML file, or a file the zip lacks: its in-step hash equals the
+   snapshot's file of that name, so the deploy did not change it and nothing
+   of ours is in it.
+   A file the zip carries that the system does not show is a failed deploy of
+   that file; a source the zip rewrites that still reads as the snapshot's
+   was not applied (the tests would run against BEFORE). Anything else refuses
+   the object: it is **not** recorded in `state.deployed`, the run fails
+   naming the file, and the rollback leaves the object alone and prints the
+   snapshot files (`files/<n>-<k>.bin = <name>`) to import it by hand.
    An object whose current hash equals its recorded deployed hash is
    re-imported from the snapshot's files; one that differs from both is
    reported and left alone. Then every object is hashed again and must equal
@@ -388,15 +400,18 @@ Content hashes close the stamp limits above (one-second resolution, active rows
 only). Limits: a restore does not delete a file the AFTER version added to an
 object (the verification then fails, honestly); a run that dies between deploy
 and the hash read leaves unknown deployed hashes, so `--rollback` refuses to
-touch any object that differs. What the post-deploy check does not decide: an
-XML file whose hash differs from the zip's (abapGit rewrites XML when it
-serialises, so a difference there is not evidence either way), and a file only
-one side carries; for those the object rests on the in-step hash alone, and
-the run logs which files were not compared. The in-step read narrows the gap
-to the lines between `deserialize` and the serialise inside one call; another
-work process writing in exactly that moment is caught for source files by the
-zip comparison and not for XML. A system that normalises a source beyond the
-listed rules makes the comparison fail the run (fail closed, never adopted).
+touch any object that differs. Every file of a deployed object is decided by
+(a), (b) or (c) above, so no file rests on the in-step hash alone. What
+remains: (c) adopts an XML file that equals the snapshot even when the zip
+wanted a different one (abapGit may keep attributes the zip does not carry;
+the tests then run against that metadata, which the class check shows); a
+foreign write between `deserialize` and the serialise inside the one call
+that restores exactly the zip's content, or exactly the snapshot's XML, cannot
+be told from ours, and is harmless for the rollback (it re-imports what was
+there). A system that rewrites XML beyond canonical equality (fields added or
+dropped, values reformatted), or a source beyond the listed rules, makes the
+run fail closed (never adopted) -- how abapGit's serialiser rewrites the XML
+of a deserialised object is not yet measured on A4H.
 That `serialize` in the same step sees what `deserialize` just activated is
 read off the abapGit source, not yet measured on A4H; the post-deploy report
 also lengthens the deploy's answer by one entry per file, and a cut answer
