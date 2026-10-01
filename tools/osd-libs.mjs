@@ -2,7 +2,7 @@
 // Materialise locked library commits and keep .local/lars as the public path.
 import {execFileSync} from "node:child_process";
 import {closeSync, lstatSync, mkdirSync, mkdtempSync, openSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync} from "node:fs";
-import {dirname, join, resolve} from "node:path";
+import {dirname, isAbsolute, join, relative, resolve, sep} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {librariesFromLock, libraryPath} from "./osd-lock.mjs";
 
@@ -16,9 +16,11 @@ export function libraries(root = ".") {
   let shared = lars;
   try { shared = realpathSync(lars); } catch { /* fresh checkout */ }
   const store = dirname(shared);
+  const relativeShared = relative(resolve(root), shared);
+  const external = relativeShared === ".." || relativeShared.startsWith(`..${sep}`) || isAbsolute(relativeShared);
   return librariesFromLock(root).libraries.map((lib) => ({
     ...lib, at: join(shared, lib.name), pin: join(store, "pins", `${lib.name}@${lib.ref}`),
-    dev: join(store, "dev", lib.name), shared: shared !== lars,
+    dev: join(store, "dev", lib.name), sharedRoot: dirname(store), external,
   }));
 }
 
@@ -76,7 +78,7 @@ function pointAtPin(lib) {
   if (fd === undefined) throw new Error(`${lib.name}: timed out waiting for ${lock}`);
   try {
     if (exists(lib.at) && !lstatSync(lib.at).isSymbolicLink()) {
-      if (lib.shared) throw new Error(`${lib.name}: ${lib.at} is shared by worktrees; move it aside manually before syncing`);
+      if (lib.external) throw new Error(`${lib.name}: ${lib.at} is shared by worktrees; cd ${lib.sharedRoot} && node tools/osd-libs.mjs --sync`);
       if (exists(lib.dev)) throw new Error(`${lib.name}: cannot move ${lib.at} to ${lib.dev}: destination exists; move it aside manually`);
       mkdirSync(dirname(lib.dev), {recursive: true});
       renameSync(lib.at, lib.dev);
@@ -96,7 +98,12 @@ function pointAtPin(lib) {
 /** CI keeps real .local/lars clones for the existing artifact and restore path. */
 export function materialise(root = ".", say = () => {}, {ci = process.env.CI === "true", remote = {}} = {}) {
   const made = [];
-  for (const lib of libraries(root)) {
+  const libs = libraries(root);
+  if (!ci) {
+    const sharedClone = libs.find((lib) => lib.external && exists(lib.at) && !lstatSync(lib.at).isSymbolicLink());
+    if (sharedClone) throw new Error(`${sharedClone.name}: ${sharedClone.at} is shared by worktrees; cd ${sharedClone.sharedRoot} && node tools/osd-libs.mjs --sync`);
+  }
+  for (const lib of libs) {
     if (remote[lib.name]) lib.url = remote[lib.name];
     if (ci) {
       if (!exists(lib.at)) {

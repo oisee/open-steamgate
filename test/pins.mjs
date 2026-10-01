@@ -1,6 +1,6 @@
 import {strict as assert} from "node:assert";
 import {execFileSync, spawn} from "node:child_process";
-import {mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, lstatSync, realpathSync, readFileSync, readlinkSync} from "node:fs";
+import {copyFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, lstatSync, realpathSync, readFileSync, readlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, dirname} from "node:path";
 import {materialise} from "../tools/osd-libs.mjs";
@@ -31,7 +31,7 @@ function fixture() {
   writeFileSync(join(home, "abap_transpile.json"), JSON.stringify({libs: [{folder: "/.local/lars/example", url: bare}]}));
   return {root, source, bare, home, ref};
 }
-const run = (home, bare) => materialise(home, () => {}, {remote: {example: bare}});
+const run = (home, bare) => materialise(home, () => {}, {ci: false, remote: {example: bare}});
 
 describe("locked library paths", () => {
   it("materialises a pin, migrates a real clone, refuses drift, and sync repairs it", () => {
@@ -96,8 +96,18 @@ describe("locked library paths", () => {
       symlinkSync(join(shared, "lars"), join(f.home, ".local/lars"), "dir");
       const at = join(shared, "lars/example");
       git(f.home, "clone", "-q", f.bare, at);
-      assert.throws(() => run(f.home, f.bare), /shared by worktrees/);
+      assert.throws(() => run(f.home, f.bare), (error) =>
+        error.message.includes(`cd ${join(f.root, "shared")} && node tools/osd-libs.mjs --sync`));
       assert.equal(git(at, "rev-parse", "HEAD"), git(f.source, "rev-parse", "HEAD"));
+      assert(!lstatSync(at).isSymbolicLink());
+      assert.throws(() => lstatSync(join(shared, `pins/example@${f.ref}`)), {code: "ENOENT"});
+      assert.throws(() => lstatSync(join(shared, "dev/example")), {code: "ENOENT"});
+      const sharedRoot = join(f.root, "shared");
+      copyFileSync(join(f.home, "libs.lock.json"), join(sharedRoot, "libs.lock.json"));
+      copyFileSync(join(f.home, "abap_transpile.json"), join(sharedRoot, "abap_transpile.json"));
+      run(sharedRoot, f.bare);
+      assert.equal(realpathSync(at), realpathSync(join(shared, `pins/example@${f.ref}`)));
+      assert.equal(readFileSync(join(shared, "dev/example/file.txt"), "utf8"), "two");
     } finally { rmSync(f.root, {recursive: true, force: true}); }
   });
 
