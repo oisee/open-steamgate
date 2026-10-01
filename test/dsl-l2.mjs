@@ -86,7 +86,10 @@ function traceLineMismatch(entry, template, output) {
   const rendered = output[entry.line - 1];
   if (source === undefined || rendered === undefined) return "line out of range";
   const pattern = templateLinePattern(source);
-  if (pattern === null) return null; // a standalone control tag emits no text of its own
+  // a line of section tags only emits no text of its own, so no output line
+  // can come from it: an entry naming one is wrong (a whole sidecar pointed at
+  // `{{/fields}}` used to pass)
+  if (pattern === null) return `output line ${entry.line} names a tag-only template line ${entry.template_line}`;
   return pattern.test(rendered) ? null : `output ${JSON.stringify(rendered)} does not match template ${JSON.stringify(source)}`;
 }
 
@@ -158,6 +161,18 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
       expect(traceLineMismatch(original, template, output)).to.equal(null);
       expect(traceLineMismatch(mutant, template, output),
         `shifted ${CLASS} output line ${original.line} to template line ${mutant.template_line}`).to.not.equal(null);
+    });
+
+    it("an entry pointed at a tag-only template line is rejected, so a faked sidecar cannot pass", () => {
+      const prefix = join(OUT, `${CLASS}.clas.testclasses`);
+      const sidecar = JSON.parse(readFileSync(`${prefix}.trace.json`, "utf8"));
+      const template = readFileSync(sidecar.template, "utf8").split("\n");
+      const output = readFileSync(`${prefix}.abap`, "utf8").split("\n");
+      const tagOnly = template.findIndex((line) => line.trim() !== "" && templateLinePattern(line) === null) + 1;
+      expect(tagOnly, "the test-class template has a tag-only line").to.be.greaterThan(0);
+      const faked = sidecar.lines.map((e) => ({...e, template_line: tagOnly}));
+      const accepted = faked.filter((e) => traceLineMismatch(e, template, output) === null).length;
+      expect(accepted, `entries accepted when every one names template line ${tagOnly}`).to.equal(0);
     });
 
     it("and the check notices one changed byte", async () => {
