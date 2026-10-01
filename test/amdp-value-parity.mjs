@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {inputCases, compareOutputs} from "../tools/amdp-value-parity.mjs";
+import {inputCases, compareOutputs, hanaInputsFor} from "../tools/amdp-value-parity.mjs";
 import {T} from "../tools/sqlscript-ir.mjs";
 import {compileProcedure} from "../tools/sqlscript-to-procedure-ir.mjs";
 import {runProcedure} from "../tools/sqlscript-procedure-ir.mjs";
@@ -7,6 +7,24 @@ import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
 
 describe("AMDP value parity report", () => {
+  it("hands HXE the case's inputs under the signature's own parameter names", () => {
+    // the compiled program keys a case upper-case; amdp-run reads the
+    // signature's name lower-cased: without the mapping a procedure with
+    // lower-case parameters got NULL and an empty table on HXE
+    const signature = {parameters: [{name: "iv_n", direction: "IN"}, {name: "it_in", direction: "IN"}, {name: "et_out", direction: "OUT"}]};
+    const sample = {inputs: {IV_N: 7}, tables: {IT_IN: [{ID: 1}, {ID: 2}]}};
+    expect(hanaInputsFor(signature, sample)).to.deep.equal({iv_n: 7, it_in: [{ID: 1}, {ID: 2}]});
+    expect(hanaInputsFor({parameters: [{name: "IV_N", direction: "IN"}]}, {inputs: {IV_N: 0}, tables: {}})).to.deep.equal({iv_n: 0});
+    expect(() => hanaInputsFor({parameters: [{name: "iv_x", direction: "IN"}]}, sample)).to.throw(/no input generated for parameter iv_x/);
+  });
+
+  it("counts an output missing on either side as a difference, not as a matching NULL", () => {
+    const program = {outputs: [{name: "EV", scalar: T.int}]};
+    expect(compareOutputs({}, {outputs: {}}, program)).to.deep.equal({output: "EV", expected: "missing", actual: "missing"});
+    expect(compareOutputs({ev: null}, {outputs: {}}, program)).to.include({actual: "missing"});
+    expect(compareOutputs({ev: null}, {outputs: {EV: {value: null}}}, program)).to.equal(undefined);
+  });
+
   it("generates empty, default and edge inputs from the signature", () => {
     const program = {parameters: [{name: "IV", type: T.int}], relationParameters: [
       {name: "IT", schema: {ID: T.int, AMOUNT: T.dec(9, 2), LABEL: T.char(4)}}]};

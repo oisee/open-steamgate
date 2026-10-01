@@ -107,12 +107,34 @@ function canonical(value, type) {
   return String(value);
 }
 
+/**
+ * The inputs HXE's call reads, keyed by the signature's own parameter names
+ * (amdp-run looks each up as written in the source, lower-cased). The
+ * compiled program, and so the generated case, keys them upper-case: without
+ * this a procedure with lower-case parameters got NULL scalars and empty
+ * tables on HXE while the portable side got the case's values.
+ */
+export function hanaInputsFor(signature, sample) {
+  const inputs = {};
+  for (const p of signature.parameters ?? []) {
+    if (p.direction !== "IN") continue;
+    const key = upper(p.name);
+    const value = key in (sample.inputs ?? {}) ? sample.inputs[key]
+      : key in (sample.tables ?? {}) ? sample.tables[key] : undefined;
+    if (value === undefined) throw new Error(`no input generated for parameter ${p.name}`);
+    inputs[p.name.toLowerCase()] = value;
+  }
+  return inputs;
+}
+
 export function compareOutputs(hana, portable, program, ordered = false) {
   const declared = program.outputs ?? [{name: program.output, ...(program.outputType ? {scalar: program.outputType} : {schema: program.outputSchema})}];
   for (const output of declared) {
     const name = output.name;
-    const actual = portable.outputs?.[name] ?? portable;
+    const actual = program.outputs ? portable.outputs?.[name] : portable;
     const expected = hana[name.toLowerCase()];
+    // an output missing on either side is a difference, never a NULL that matches
+    if (actual === undefined || expected === undefined) return {output: name, expected: expected === undefined ? "missing" : "present", actual: actual === undefined ? "missing" : "present"};
     if (output.scalar) {
       const a = canonical(expected, output.scalar), b = canonical(actual.value, output.scalar);
       if (a !== b) return {output: name, expected: a, actual: b};
@@ -167,7 +189,7 @@ export async function parityBody(body, context, hanaClient) {
           `INSERT INTO ${quote(table)} (${Object.keys(row).map(quote).join(", ")}) VALUES (${Object.values(row).map(sqlValue).join(", ")})`);
       }
       expected = isFunction ? await callFunction(hanaClient, nativeName, signature, sample, program)
-        : await callHana(hanaClient, nativeName, signature, {...sample.inputs, ...sample.tables}, body.types); }
+        : await callHana(hanaClient, nativeName, signature, hanaInputsFor(signature, sample), body.types); }
     catch (error) { rows.push({variant: sample.variant, status: "hana-error", reason: String(error.message).slice(0, 300)}); continue; }
     for (const [dialect, make] of [["sqlite", () => new FileSqliteClient()], ["duckdb", () => new DuckDBDatabaseClient()]]) {
       const client = make();

@@ -50,8 +50,17 @@ not in the portable registry and 7 that reach a function with no measured
 portable rendering: `FLOOR` (1), `LEFT` (1), `ESCAPE_SINGLE_QUOTES` (2),
 `TO_NCHAR` (1), `TO_NCLOB` (1), and `ESCAPE_DOUBLE_QUOTES` (1). One of the
 `hana-error` bodies also reached an unmeasured `TO_BINARY` rendering on
-other input cases. The HXE errors were `SELECT INTO` with no row in one body
-and an invalid datatype on an edge input in another. These remain open.
+other input cases. The HXE errors were a `SELECT INTO` that wants exactly one
+row in one body (no row on the empty and null inputs, two rows on the
+defaults) and an invalid datatype on an edge input in another: what HANA does
+with the generated inputs, not a fault of either side. These remain open.
+
+An earlier run handed HXE the procedure inputs under the compiled program's
+upper-case names, which `amdp-run` does not read for a procedure whose
+parameters are written in lower case: HXE got `NULL` and empty tables there.
+`hanaInputsFor` now keys them by the signature's own names (test in
+`test/amdp-value-parity.mjs`); the counts above are from the run after that
+fix, and they did not move.
 
 The cheap fix in this slice is two-argument `SUBSTR`: the portable renderer
 used to emit `undefined` as the missing length. A hand-written case first
