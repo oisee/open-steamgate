@@ -143,7 +143,12 @@ Rules:
 
 Supplying any report argument selects headless mode. Output lines go to stdout,
 messages go to stderr, an unsupported runtime operation exits with status 2,
-and a runtime failure exits with status 1.
+and a runtime failure exits with status 1. So does a run that a `MESSAGE`
+of type `E`, `A`, `W` or `X` ended (a background job with one is cancelled
+on a system): the lines written before it are printed, the message goes to
+stderr, and the status is 1. A type `I` or `S` message, `DISPLAY LIKE 'E'`
+included, does not end the run or change the status. `tools/gogen/apps/message` is the
+sample.
 
 ## DATASET file access
 
@@ -245,17 +250,10 @@ osabap --add x                               # refused: run it with -db FILE
 
 Which Open SQL forms compile is measured, not claimed:
 `node tools/gogen/osabap-sql-corpus.mjs` compiles each of the 18 forms in
-`tools/gogen/apps/sql-corpus/zsqlcorpus.abap` as a report of its own. On
-2026-09-30, 12 compile. The six that do not are pinned by
-`tools/gogen/osabap-sql-corpus.test.mjs`:
-- an aggregate without GROUP BY into a scalar (`MAX`);
-- `UP TO ... ORDER BY`;
-- `APPENDING TABLE`;
-- `INTO TABLE` of a SORTED table;
-- a `GROUP BY` SELECT loop;
-- an inline `@DATA( )` target.
-
-One such form makes the whole method NOT_COMPILED.
+`tools/gogen/apps/sql-corpus/zsqlcorpus.abap` as a report of its own, and
+all 18 compile since #349. `tools/gogen/osabap-sql-corpus.test.mjs` keeps
+the list of forms that do not (empty now), so a form that stops compiling
+fails the test rather than turning a method NOT_COMPILED unnoticed.
 
 ## Terminal UI
 
@@ -381,7 +379,7 @@ text file through these ABAP APIs.
 The spike intentionally implements a small application runtime, not a whole
 SAP system:
 
-- Open SQL only on the report's own tables, through `-db` (12 of 18 corpus forms compile; see above);
+- Open SQL only on the report's own tables, through `-db` (all 18 corpus forms compile; see above);
 - no OData, HTTP, ICF or Fiori host;
 - one selection screen and one execution per process;
 - select-options in interactive frontends currently use comma-separated
