@@ -1,8 +1,9 @@
 package abap
 
 import (
+	"errors"
+	"io"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -53,8 +54,24 @@ func FrontendFileSize(_ *Session, name string, result *int32) {
 }
 
 func FrontendUpload(_ *Session, filename, filetype string, length *int32, header *string, table *Data) {
-	content, err := os.ReadFile(filename)
+	sb := frontendSandbox()
+	if _, info, err := sb.BrowseEntry(filename, false); err != nil || !info.Mode().IsRegular() {
+		panic(os.ErrPermission)
+	}
+	h, reason := sb.Open(filename, DatasetInput)
+	if h == nil {
+		panic(errors.New(reason))
+	}
+	defer h.Close()
+	size, err := h.Size()
 	if err != nil {
+		panic(err)
+	}
+	if size > 1<<31-1 {
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_OVERFLOW", Op: "CL_GUI_FRONTEND_SERVICES=>GUI_UPLOAD"})
+	}
+	content, err := h.ReadAt(0, int(size))
+	if err != nil && err != io.EOF {
 		panic(err)
 	}
 	if len(content) > 1<<31-1 {
@@ -132,26 +149,36 @@ func FrontendDownload(_ *Session, filename, filetype string, binSize int32, writ
 			content = append(content, '\n')
 		}
 	}
-	flags := os.O_CREATE | os.O_WRONLY
+	sb := frontendSandbox()
+	mode := DatasetOutput
 	if strings.TrimSpace(appendFlag) == "X" {
-		flags |= os.O_APPEND
-	} else {
-		flags |= os.O_TRUNC
+		mode = DatasetAppending
 	}
-	if parent := filepath.Dir(filename); parent != "." {
-		if _, err := os.Stat(parent); err != nil {
+	h, reason := sb.Open(filename, mode)
+	if h == nil {
+		panic(errors.New(reason))
+	}
+	pos := int64(0)
+	if mode == DatasetAppending {
+		var err error
+		pos, err = h.Size()
+		if err != nil {
+			h.Close()
 			panic(err)
 		}
 	}
-	file, err := os.OpenFile(filename, flags, 0o644)
-	if err != nil {
+	if err := h.WriteAt(pos, content); err != nil {
+		h.Close()
 		panic(err)
 	}
-	if _, err := file.Write(content); err != nil {
-		_ = file.Close()
+	if err := h.Close(); err != nil {
 		panic(err)
 	}
-	if err := file.Close(); err != nil {
-		panic(err)
+}
+
+func frontendSandbox() *Sandbox {
+	if sb, ok := currentDatasetHost().(*Sandbox); ok {
+		return sb
 	}
+	return SandboxFromEnv()
 }

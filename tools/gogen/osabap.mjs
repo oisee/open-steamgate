@@ -3,12 +3,13 @@
 // selection screen is its command-line contract; the Go host is deliberately
 // separate from OSGo's HTTP/OData/database host.
 import {execFileSync} from "node:child_process";
-import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, resolve} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
 import {checkLibPins} from "./lib-pins.mjs";
+import {prepareF4} from "./osabap-f4.mjs";
 
 const here = import.meta.dirname;
 // node tools/gogen/osabap.mjs [report.prog.abap] [--lib <folder>]...
@@ -25,10 +26,16 @@ const positional = cli.filter((arg, i) => arg !== "--lib" && cli[i - 1] !== "--l
 const report = resolve(positional[0] ?? join(here, "apps", "hello", "zhello.prog.abap"));
 const name = basename(report).replace(/\.prog\.abap$/i, "").toUpperCase();
 const className = `ZCL_OSABAP_${name.replace(/^Z/, "")}`;
-const generated = join(here, ".out", "osabap-abap");
-const dir = join(here, "go", "cmd", "osabap");
+const buildRoot = process.env.OSABAP_BUILD_ROOT ? resolve(process.env.OSABAP_BUILD_ROOT) : here;
+if (buildRoot !== here) {
+  mkdirSync(buildRoot, {recursive: true});
+  cpSync(join(here, "go"), join(buildRoot, "go"), {recursive: true, filter: (path) =>
+    !/(^|[/\\])(?:\.out|zz_[^/\\]*|generated)(?:[/\\]|$)/.test(path)});
+}
+const generated = join(buildRoot, ".out", "osabap-abap");
+const dir = join(buildRoot, "go", "cmd", "osabap");
 const targetGOOS = process.env.GOOS || (process.platform === "win32" ? "windows" : "");
-const bin = join(here, ".out", targetGOOS === "windows" ? "osabap.exe" : "osabap");
+const bin = join(buildRoot, ".out", targetGOOS === "windows" ? "osabap.exe" : "osabap");
 
 checkLibPins(home);
 rmSync(generated, {recursive: true, force: true});
@@ -37,6 +44,7 @@ mkdirSync(dir, {recursive: true});
 
 const gui = join(home, ".local", "lars", "open-abap-gui");
 const {convertProgram} = await import(join(gui, "converter", "src", "api.mjs"));
+const {parseSource} = await import(join(gui, "converter", "src", "parser.mjs"));
 const source = readFileSync(report, "utf8");
 // the selection texts of the report (TPOOL, ID S) from the abapGit <report>.prog.xml
 // beside it: the labels of the terminal form and of -help; the text symbols
@@ -55,11 +63,51 @@ for (const [, item] of tpool.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
   if (field("ID") === "S" && entry !== ".") textPool[field("KEY").toUpperCase()] = entry;
   if (field("ID") === "I") textPool[`TEXT-${field("KEY").toUpperCase()}`] = entry;
 }
-const converted = await convertProgram({source, filename: basename(report), mode: "strict", nativePassthrough: true, className, transactionCode: name, ...(Object.keys(textPool).length > 0 ? {textPool} : {})});
+// The converter's simple-assignment F4 shortcut replaces the event body at
+// the first assignment, regardless of target. Spell every simple assignment
+// as MOVE so the complete event block passes through native lowering.
+const {fields: f4Fields, events: f4Events, convertedSource} = prepareF4(source, parseSource(source, basename(report)));
+const converted = await convertProgram({source: convertedSource, filename: basename(report), mode: "strict", nativePassthrough: true, className, transactionCode: name, ...(Object.keys(textPool).length > 0 ? {textPool} : {})});
 if (converted.supported !== true || converted.classSource === undefined) {
   throw new Error(`${report}: converter refused the report: ${JSON.stringify(converted.diagnostics)}`);
 }
-writeFileSync(join(generated, `${className.toLowerCase()}.clas.abap`), converted.classSource);
+let classSource = converted.classSource;
+if (f4Fields.length) {
+  const state = converted.reportIR?.statePlan?.selectionState ?? {};
+  const marker = "  METHOD zif_gg_report_v1~at_selection_screen_value_req.";
+  const start = classSource.indexOf(marker);
+  const end = classSource.indexOf("  ENDMETHOD.", start);
+  if (start < 0 || end < 0) throw new Error(`${report}: converter omitted ON VALUE-REQUEST method`);
+  for (const field of f4Fields) {
+    const [base, component] = field.split("-");
+    if (!state[base]?.member || Boolean(component) !== Boolean(state[base].ranges)) {
+      throw new Error(`${report}: F4 target does not match a selection field: ${field}`);
+    }
+  }
+  let method = classSource.slice(start + marker.length, end);
+  let guardPosition = 0;
+  for (const field of f4Events) {
+    const base = field.split("-")[0];
+    const guard = `IF iv_name = '${base}'.`;
+    const position = method.indexOf(guard, guardPosition);
+    if (position < 0) throw new Error(`${report}: converter omitted F4 guard for ${field}`);
+    method = method.slice(0, position) + `IF iv_name = '${field}'.` + method.slice(position + guard.length);
+    guardPosition = position + `IF iv_name = '${field}'.`.length;
+  }
+  // The form sends all current fields. Value-request events can read any of
+  // them, including a field the user just edited before pressing F4.
+  const prefix = Object.entries(state).map(([field, item]) =>
+    `    IF line_exists( it_values[ name = '${field}' ] ).\n      ${item.member} = ${item.ranges ? `CORRESPONDING #( it_values[ name = '${field}' ]-ranges )` : `it_values[ name = '${field}' ]-value`}.\n    ENDIF.`).join("\n");
+  const rangeInit = [...new Set(f4Fields.filter((field) => field.includes("-")).map((field) => field.split("-")[0]))]
+    .map((base) => `    IF ${state[base].member} IS INITIAL.\n      APPEND VALUE #( sign = 'I' option = 'EQ' ) TO ${state[base].member}.\n    ENDIF.`).join("\n");
+  const suffix = f4Fields.map((field) => {
+    const [base, component] = field.split("-");
+    const value = component ? `${state[base].member}[ 1 ]-${component.toLowerCase()}` : state[base].member;
+    return `    IF iv_name = '${field}'.\n      rt_values = VALUE #( ( sign = zif_gg_selection_screen_types=>sign_include option = zif_gg_selection_screen_types=>option_eq low = ${value} ) ).\n    ENDIF.`;
+  }).join("\n");
+  classSource = classSource.slice(0, start + marker.length) + "\n" + prefix + "\n" + rangeInit + method + suffix + "\n" + classSource.slice(end);
+}
+writeFileSync(join(generated, `${className.toLowerCase()}.clas.abap`), classSource);
 // the report's own dictionary: tables, data elements, domains and table
 // types beside the report file are part of it, the way a report on a system
 // brings its tables along in its package
@@ -105,6 +153,38 @@ const hostSources = [join(gui, "framework"), join(gui, "framework", "host")]
   .flatMap((folder) => readdirSync(folder)
     .filter((file) => hostObjects.includes(file.replace(/\.clas\.abap$/i, "")))
     .map((file) => readFileSync(join(folder, file), "utf8")));
+if (f4Fields.some((field) => field.includes("-"))) {
+  // The upstream host applies returned F4 ranges only to a whole selection
+  // value. A component request must update the first range of its base field.
+  const hostPath = join(gui, "framework", "host", "zcl_gg_host.clas.abap");
+  const hostSource = readFileSync(hostPath, "utf8");
+  const hook = "    IF line_exists( ct_values[ name = iv_name ] ) AND lt_requested_ranges IS NOT INITIAL.";
+  if (!hostSource.includes(hook)) throw new Error("osabap: F4 host hook has changed");
+  const componentHook = `    DATA lv_base TYPE zif_gg_selection_screen_types=>ty_name.
+    DATA lv_component TYPE string.
+    SPLIT iv_name AT '-' INTO lv_base lv_component.
+    IF ( lv_component = 'LOW' OR lv_component = 'HIGH' )
+        AND lt_requested_ranges IS NOT INITIAL.
+      IF line_exists( ct_values[ name = lv_base ] ).
+        IF ct_values[ name = lv_base ]-ranges IS INITIAL.
+          ct_values[ name = lv_base ]-ranges = VALUE #( ( sign = 'I' option = 'EQ' ) ).
+        ENDIF.
+        IF lv_component = 'LOW'.
+          ct_values[ name = lv_base ]-ranges[ 1 ]-low = lt_requested_ranges[ 1 ]-low.
+        ELSE.
+          ct_values[ name = lv_base ]-ranges[ 1 ]-high = lt_requested_ranges[ 1 ]-low.
+          ct_values[ name = lv_base ]-ranges[ 1 ]-option = 'BT'.
+        ENDIF.
+      ENDIF.
+    ELSE.`;
+  const closing = "    ENDIF.\n  ENDMETHOD.";
+  const methodStart = hostSource.indexOf("  METHOD run_value_request.");
+  const methodEnd = hostSource.indexOf(closing, methodStart);
+  if (methodEnd < 0 || hostSource.indexOf(hook, methodStart) > methodEnd) throw new Error("osabap: F4 host method has changed");
+  const patched = hostSource.slice(0, methodStart) + hostSource.slice(methodStart, methodEnd).replace(hook, componentHook + "\n" + hook) +
+    "    ENDIF.\n" + hostSource.slice(methodEnd);
+  writeFileSync(join(generated, "zcl_gg_host.clas.abap"), patched);
+}
 const superclasses = (text) => [...text.matchAll(/\bINHERITING\s+FROM\s+([\w\/]+)/gi)].map((m) => m[1].toLowerCase());
 const coreObjects = [];
 const seen = new Set(ownObjects);
@@ -142,7 +222,7 @@ const rttiObjects = readdirSync(join(core, "rtti"))
   .map((file) => file.replace(/\.clas\.abap$/i, ""));
 const appRuntime = join(here, "apps", "runtime");
 const program = compileProgram({
-  folders: [generated, ...libs, appRuntime, join(gui, "framework"), join(gui, "src"), core],
+  folders: [...libs, appRuntime, join(gui, "framework"), join(gui, "src"), core, generated],
   objects: [className.toLowerCase(), ...ownObjects, ...coreObjects, ...hostObjects, ...rttiObjects, "zcl_gg_workbench_utility",
     "cl_gui_control", "cl_gui_container", "cl_gui_cfw", "cl_gui_frontend_services", "zcl_osabap_runtime"],
   skip: (path) => /\.testclasses\.abap$/i.test(path),
@@ -181,13 +261,14 @@ var appPositionals = []string{${positionals.map(JSON.stringify).join(", ")}}
 var appCheckboxes = map[string]bool{${checkboxes.map((name) => `${JSON.stringify(name)}: true`).join(", ")}}
 var appRanges = map[string]bool{${ranges.map((name) => `${JSON.stringify(name)}: true`).join(", ")}}
 var appLabels = map[string]string{${Object.entries(textPool).filter(([key]) => selectionNames.includes(key)).map(([key, text]) => `${JSON.stringify(key)}: ${JSON.stringify(text)}`).join(", ")}}
+var appF4 = map[string]bool{${f4Fields.map((name) => `${JSON.stringify(name)}: true`).join(", ")}}
 
 func newReport(s *abap.Session) *${className} { return New_${className}(s) }
 `);
 
 execFileSync("gofmt", ["-w", dir], {stdio: "inherit"});
 execFileSync("go", ["build", ...(tables.length > 0 ? [] : ["-tags", "nodatabase"]), "-trimpath", "-ldflags=-s -w", "-o", bin, "./cmd/osabap"], {
-  cwd: join(here, "go"), stdio: "inherit",
+  cwd: join(buildRoot, "go"), stdio: "inherit",
 });
 console.log(`osabap: ${name}, ${program.classes.length} classes, ${program.partial.length} statement stubs` +
   `${tables.length ? `, tables ${tables.join(", ")} (-db)` : ""} -> ${bin}`);

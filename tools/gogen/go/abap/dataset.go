@@ -450,12 +450,12 @@ func SetDatasetPosition(s *Session, name string, pos int64, endOfFile bool) {
 // resolves a relative name (default the first write root, else the first
 // read root). Audit, when set, gets every OPEN and DELETE.
 type Sandbox struct {
-	Read, Write []string
-	Home        string
-	Audit       func(entry map[string]any)
-	CreatePerm  os.FileMode
-	once        sync.Once
-	read, write []string
+	Read, Write             []string
+	Home                    string
+	Audit                   func(entry map[string]any)
+	CreatePerm              os.FileMode
+	once                    sync.Once
+	read, write, browseRead []string
 	// one os.Root per real root: every open and unlink goes through the
 	// root that holds the path, so the kernel resolves it beneath that
 	// directory in the same call that creates or opens the file. A parent
@@ -464,6 +464,18 @@ type Sandbox struct {
 	// Linux, O_NOFOLLOW_ANY on Windows); the path checks stay for the
 	// refusal messages and the audit
 	handles map[string]*os.Root
+}
+
+// Close releases the root descriptors owned by a command or dialog.
+func (sb *Sandbox) Close() error {
+	sb.roots()
+	var first error
+	for _, root := range sb.handles {
+		if err := root.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 // SandboxFromEnv is the sandbox of OSD_DATASET_READ / OSD_DATASET_WRITE /
@@ -514,6 +526,11 @@ func (sb *Sandbox) roots() ([]string, []string) {
 			}
 			return p
 		}
+		for _, r := range sb.Read {
+			if p := real(r); p != "" {
+				sb.browseRead = append(sb.browseRead, p)
+			}
+		}
 		for _, r := range append(append([]string{}, sb.Read...), sb.Write...) {
 			if p := real(r); p != "" {
 				sb.read = append(sb.read, p)
@@ -535,6 +552,125 @@ func (sb *Sandbox) roots() ([]string, []string) {
 		}
 	})
 	return sb.read, sb.write
+}
+
+// BrowseRoots returns the normalized roots granted to a file dialog.
+// DATASET itself can read write roots, but open/directory dialogs require
+// explicit read grants.
+func (sb *Sandbox) BrowseRoots(save bool) []string {
+	_, write := sb.roots()
+	if save {
+		return append([]string(nil), write...)
+	}
+	return append([]string(nil), sb.browseRead...)
+}
+
+// BrowsePath checks a candidate with DATASET's lexical and real-path rules.
+// Directories are opened through the same os.Root handle used by DATASET, so
+// a symlink swapped between checking and listing cannot escape the root.
+func (sb *Sandbox) BrowsePath(name string, save bool) (string, *os.File, error) {
+	_, write := sb.roots()
+	roots, given := sb.browseRead, sb.Read
+	if save {
+		roots, given = write, sb.Write
+	}
+	real, _, refused, missing := sb.place(name, roots, given)
+	if refused != "" {
+		return "", nil, errors.New(refused)
+	}
+	if missing {
+		return "", nil, os.ErrNotExist
+	}
+	root, rel, ok := sb.beneath(real, roots)
+	if !ok {
+		return "", nil, os.ErrPermission
+	}
+	f, err := root.Open(rel)
+	return real, f, err
+}
+
+// BrowseEntry inspects a directory entry without opening it. In particular,
+// opening a FIFO here would wait for a writer while the terminal is raw.
+func (sb *Sandbox) BrowseEntry(name string, save bool) (string, os.FileInfo, error) {
+	_, write := sb.roots()
+	roots, given := sb.browseRead, sb.Read
+	if save {
+		roots, given = write, sb.Write
+	}
+	real, _, refused, missing := sb.place(name, roots, given)
+	if refused != "" {
+		return "", nil, errors.New(refused)
+	}
+	if missing {
+		return "", nil, os.ErrNotExist
+	}
+	root, rel, ok := sb.beneath(real, roots)
+	if !ok {
+		return "", nil, os.ErrPermission
+	}
+	info, err := root.Stat(rel)
+	return real, info, err
+}
+
+// BrowseSaveName validates a future file without creating or truncating it.
+func (sb *Sandbox) BrowseSaveName(name string) (string, error) {
+	_, write := sb.roots()
+	real, _, refused, missing := sb.place(name, write, sb.Write)
+	if refused != "" {
+		return "", errors.New(refused)
+	}
+	if missing {
+		return "", os.ErrNotExist
+	}
+	// An existing symlink can be swapped into the target after a directory
+	// listing. Do not return it as a save name, even when its parent is safe.
+	root, rel, ok := sb.beneath(real, write)
+	if !ok {
+		return "", os.ErrPermission
+	}
+	if info, err := root.Lstat(rel); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return "", os.ErrPermission
+	}
+	if _, info, err := sb.BrowseEntry(real, true); err == nil {
+		if info.IsDir() || !info.Mode().IsRegular() {
+			return "", errors.New("cannot save to a directory")
+		}
+	}
+	// Recheck the parent with the root handle before returning the name.
+	_, f, err := sb.BrowsePath(filepath.Dir(real), true)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	return real, nil
+}
+
+// BrowseSaveExists checks the final component through the write root without
+// following a symlink. It is for an overwrite prompt, not authorization to
+// write; the caller must still validate the name again after confirmation.
+func (sb *Sandbox) BrowseSaveExists(name string) (bool, error) {
+	_, write := sb.roots()
+	// name is the path returned by BrowseSaveName. Use it lexically here:
+	// resolving it again would follow a final symlink swapped in while the
+	// user was deciding whether to overwrite.
+	if !filepath.IsAbs(name) || !within(filepath.Clean(name), write) {
+		return false, os.ErrPermission
+	}
+	root, rel, ok := sb.beneath(filepath.Clean(name), write)
+	if !ok {
+		return false, os.ErrPermission
+	}
+	info, err := root.Lstat(rel)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || info.IsDir() {
+		return false, os.ErrPermission
+	}
+	return true, nil
 }
 
 func (sb *Sandbox) note(entry map[string]any) {

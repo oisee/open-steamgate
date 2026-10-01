@@ -14,23 +14,30 @@ import (
 	"runtime/pprof"
 	"strings"
 
+	"github.com/gdamore/tcell/v2"
 	"osg/gogen/abap"
+	"osg/gogen/filepick"
 	"osg/gogen/reportargs"
 	"osg/gogen/termgui"
 )
 
 func hostRun(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, batch, present string) ZCL_GG_HOST__TY_RESULT {
+	return hostRunRequest(s, report, input, batch, present, "")
+}
+
+func hostRunRequest(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, batch, present, valueRequest string) ZCL_GG_HOST__TY_RESULT {
 	values := make([]*ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, len(input))
 	for i := range input {
 		values[i] = &input[i]
 	}
 	empty := []*ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE(nil)
 	return ZCL_GG_HOST_RUN(s, report, nil, appProgram, "1000", "", 0, batch,
-		&values, &empty, &empty, "ONLI", "", "", "", "", 0, 1, "", "", "", 0,
+		&values, &empty, &empty, "ONLI", "", valueRequest, "", "", 0, 1, "", "", "", 0,
 		"", "", "", "", "", present, "", &ZIF_GG_HOST_HTML_V1__TY_NAVIGATION{}, &ZIF_GG_SESSION_TYPES_V1__TY_SUBMIT{})
 }
 
 var stopProfile = func() {}
+var dialogSandbox *abap.Sandbox
 
 func main() {
 	// OSABAP_CPUPROFILE=<file>: Go's CPU profile of the whole run, for
@@ -77,7 +84,7 @@ func main() {
 			abap.DialogStep(func() { screen = hostRun(s, report, nil, "", "X") })
 			if termgui.Available() {
 				var err error
-				input, err = graphicalInput(screen)
+				input, err = graphicalInput(s, report, screen)
 				if errors.Is(err, termgui.ErrCancelled) {
 					cancelled = true
 					return
@@ -91,6 +98,9 @@ func main() {
 			abap.DialogStep(func() { result = hostRun(s, report, input, "", "") })
 		}
 	}()
+	if dialogSandbox != nil {
+		_ = dialogSandbox.Close()
+	}
 	// the -db file is whole only once it is closed: it is opened in WAL mode,
 	// and until the last connection closes, the rows live in <file>-wal
 	closeDB()
@@ -172,10 +182,19 @@ func datasetOptions(host []reportargs.Arg) {
 			panic(err)
 		}
 	}
-	abap.SetDatasetHost(abap.SandboxFromEnv())
+	dialogSandbox = abap.SandboxFromEnv()
+	abap.SetDatasetHost(dialogSandbox)
 }
 
-func graphicalInput(screen ZCL_GG_HOST__TY_RESULT) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, error) {
+func graphicalInput(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST__TY_RESULT) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, error) {
+	fields, err := termgui.Run(graphicalForm(s, report, screen))
+	if err != nil {
+		return nil, err
+	}
+	return selectionValuesFromFields(fields, screen), nil
+}
+
+func graphicalForm(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST__TY_RESULT) termgui.Form {
 	current := map[string]selectionInput{}
 	for _, v := range screen.values {
 		current[strings.TrimSpace(v.name)] = selectionInput{value: strings.TrimSpace(v.value), ranges: v.ranges}
@@ -202,26 +221,125 @@ func graphicalInput(screen ZCL_GG_HOST__TY_RESULT) ([]ZIF_GG_SELECTION_SCREEN_TY
 			field.Kind = termgui.Text
 		}
 		form.Fields = append(form.Fields, field)
+		if e.kind == "SELECT_OPTION" && appF4[name+"-HIGH"] {
+			high := ""
+			if len(input.ranges) > 0 {
+				high = strings.TrimSpace(input.ranges[0].high)
+			}
+			form.Fields = append(form.Fields, termgui.Field{Name: name + "-HIGH", Label: strings.TrimSpace(e.text) + " high", Value: high, Width: int(e.visible_length)})
+		}
 	}
-	fields, err := termgui.Run(form)
-	if err != nil {
-		return nil, err
+	form.OnF4 = func(terminal tcell.Screen, name string, fields []termgui.Field) (string, error) {
+		target := name
+		if appRanges[name] {
+			target += "-LOW"
+		}
+		if !appF4[target] {
+			return "", fmt.Errorf("no ON VALUE-REQUEST for %s", name)
+		}
+		original := ""
+		for _, f := range fields {
+			if f.Name == name {
+				original = f.Value
+			}
+		}
+		var pickErr error
+		abap.FrontendPick = func(options abap.FrontendPickOptions) (string, error) {
+			browser := browserForDialog(options)
+			path, err := browser.Run(terminal)
+			if errors.Is(err, filepick.ErrCancel) {
+				return "", abap.ErrFrontendPickCancel
+			}
+			if err != nil {
+				pickErr = err
+			}
+			return path, err
+		}
+		defer func() { abap.FrontendPick = nil }()
+		var result ZCL_GG_HOST__TY_RESULT
+		abap.DialogStep(func() { result = hostRunRequest(s, report, selectionValuesFromFields(fields, screen), "", "X", target) })
+		if pickErr != nil {
+			return "", pickErr
+		}
+		base := strings.SplitN(target, "-", 2)[0]
+		for _, v := range result.values {
+			if strings.TrimSpace(v.name) == base && len(v.ranges) > 0 {
+				if strings.HasSuffix(target, "-HIGH") {
+					return strings.TrimSpace(v.ranges[0].high), nil
+				}
+				if appRanges[base] {
+					lows := make([]string, 0, len(v.ranges))
+					for _, r := range v.ranges {
+						lows = append(lows, strings.TrimSpace(r.low))
+					}
+					return strings.Join(lows, ","), nil
+				}
+				return strings.TrimSpace(v.ranges[0].low), nil
+			}
+		}
+		return original, nil
+	}
+	return form
+}
+
+func browserForDialog(options abap.FrontendPickOptions) filepick.Browser {
+	mode := filepick.Open
+	switch options.Kind {
+	case "save":
+		mode = filepick.Save
+	case "directory":
+		mode = filepick.Directory
+	}
+	// The generated call passes "" when PROMPT_ON_OVERWRITE is omitted;
+	// SAP's documented default is X. An explicit space disables the prompt.
+	sb := dialogSandbox
+	if sb == nil {
+		sb = abap.SandboxFromEnv()
+	}
+	return filepick.Browser{Sandbox: sb, Mode: mode, Initial: options.Initial, DefaultName: options.Name, Title: options.Title, Multi: options.Kind == "open-multiple", Patterns: filepick.SAPPatterns(options.Filter), Extension: options.Extension, ConfirmOverwrite: options.Kind == "save" && (options.Prompt == "" || strings.EqualFold(strings.TrimSpace(options.Prompt), "X"))}
+}
+
+func selectionValuesFromFields(fields []termgui.Field, screen ZCL_GG_HOST__TY_RESULT) []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE {
+	current := map[string]selectionInput{}
+	for _, v := range screen.values {
+		current[strings.TrimSpace(v.name)] = selectionInput{value: strings.TrimSpace(v.value), ranges: v.ranges}
 	}
 	for _, field := range fields {
 		if field.Kind == termgui.Ranges {
 			input := current[field.Name]
+			previous := input.ranges
 			input.ranges = nil
 			if strings.TrimSpace(field.Value) != "" {
-				for _, value := range strings.Split(field.Value, ",") {
-					input.ranges = append(input.ranges, ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE{sign: "I", option: "EQ", low: strings.TrimSpace(value)})
+				for i, value := range strings.Split(field.Value, ",") {
+					r := ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE{sign: "I", option: "EQ"}
+					if i < len(previous) {
+						r = previous[i]
+					}
+					r.low = strings.TrimSpace(value)
+					input.ranges = append(input.ranges, r)
 				}
 			}
 			current[field.Name] = input
+		} else if strings.HasSuffix(field.Name, "-HIGH") && appRanges[strings.TrimSuffix(field.Name, "-HIGH")] {
+			base := strings.TrimSuffix(field.Name, "-HIGH")
+			input := current[base]
+			if len(input.ranges) == 0 && field.Value != "" {
+				input.ranges = append(input.ranges, ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE{sign: "I", option: "BT"})
+			}
+			if len(input.ranges) > 0 {
+				input.ranges[0].high = field.Value
+				if field.Value != "" {
+					input.ranges[0].option = "BT"
+				} else if input.ranges[0].option == "BT" {
+					input.ranges[0].option = "EQ"
+				}
+			}
+			current[base] = input
 		} else {
 			current[field.Name] = selectionInput{value: field.Value}
 		}
 	}
-	return selectionValues(current), nil
+	return selectionValues(current)
 }
 
 func commandInput(cli reportargs.Result) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, bool) {

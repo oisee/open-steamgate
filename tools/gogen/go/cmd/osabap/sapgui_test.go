@@ -31,6 +31,12 @@ func TestSAPGUIOptionIsSeparateFromReportArguments(t *testing.T) {
 	}
 }
 
+func TestSAPGUIF4IsRefused(t *testing.T) {
+	if !sapGUIF4([]diag.Item{{Type: diag.ItemAPPL, ID: 0x0c, SID: 0x04, Value: []byte("=F4")}}) {
+		t.Fatal("F4 command was not recognized")
+	}
+}
+
 func TestSAPGUINoLaunch(t *testing.T) {
 	enabled, launch, listen := sapGUIOption([]reportargs.Arg{{Name: "sapgui-no-launch"}})
 	if !enabled || launch || listen != defaultSAPGUIListen {
@@ -113,6 +119,24 @@ func TestSAPGUISessionSelectionExecuteAndEnd(t *testing.T) {
 	selectionMessage, err := diag.ParseMessage(selectionPayload, false)
 	if err != nil || len(diag.ParseItems(selectionMessage.Body)) == 0 {
 		t.Fatalf("selection response: %v", err)
+	}
+	f4, err := diag.EncodeMessage(diag.Header{MsgInfo: 1}, []diag.Item{
+		{Type: diag.ItemAPPL, ID: 0x0c, SID: 0x04, Value: []byte("=F4")},
+		{Type: diag.ItemEOM},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeNIFrame(client, f4); err != nil {
+		t.Fatal(err)
+	}
+	f4Payload, err := readNIFrame(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f4Message, err := diag.ParseMessage(f4Payload, false)
+	if err != nil || !strings.Contains(string(f4Message.Body), "F4 is not available in SAP GUI mode; use the terminal") {
+		t.Fatalf("F4 status response: %v", err)
 	}
 
 	paiAtoms := []diag.Atom{

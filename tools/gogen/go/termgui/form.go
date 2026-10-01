@@ -35,6 +35,7 @@ type Field struct {
 type Form struct {
 	Title  string
 	Fields []Field
+	OnF4   func(screen tcell.Screen, field string, fields []Field) (string, error)
 }
 
 var ErrCancelled = errors.New("terminal form cancelled")
@@ -58,6 +59,10 @@ func Run(form Form) ([]Field, error) {
 	screen.EnableMouse()
 	return run(screen, form)
 }
+
+// RunOnScreen drives a form on a caller-owned screen (used by terminal hosts
+// and deterministic keyboard tests).
+func RunOnScreen(screen tcell.Screen, form Form) ([]Field, error) { return run(screen, form) }
 
 type model struct {
 	form  Form
@@ -192,7 +197,23 @@ func run(screen tcell.Screen, form Form) ([]Field, error) {
 		draw(screen, m)
 		switch ev := screen.PollEvent().(type) {
 		case *tcell.EventKey:
-			m.handle(ev)
+			if ev.Key() == tcell.KeyF4 && m.current() != nil {
+				f := m.current()
+				if form.OnF4 == nil {
+					m.err = fmt.Errorf("no F4 value request for %s", f.Name)
+					continue
+				}
+				value, err := form.OnF4(screen, f.Name, m.form.Fields)
+				if err != nil {
+					m.err = err
+				} else {
+					f.Value = value
+					m.err = nil
+					m.end()
+				}
+			} else {
+				m.handle(ev)
+			}
 		case *tcell.EventResize:
 			screen.Sync()
 		case *tcell.EventMouse:
@@ -265,7 +286,7 @@ func draw(screen tcell.Screen, m *model) {
 			put(screen, valueX+width+1, y, tcell.StyleDefault.Dim(true), "comma-separated")
 		}
 	}
-	footer := " Tab/↑/↓ focus   Space toggle   Enter execute   Esc cancel "
+	footer := " Tab/↑/↓ focus   F4 value help   Space toggle   Enter execute   Esc cancel "
 	if m.err != nil && !errors.Is(m.err, ErrCancelled) {
 		footer = " " + m.err.Error() + " "
 	}
