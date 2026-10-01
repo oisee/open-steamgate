@@ -12,8 +12,8 @@ describe("AMC in one Node process", function () {
     const xml = readFileSync("src/amc/zstg_amc_test.samc.xml", "utf8");
     const rows = parseSamc(xml, "fixture");
     expect(rows.map((row) => [row.path, row.type, row.scope]))
-      .to.deep.equal([["/text", "TEXT", "C"], ["/denied", "TEXT", "C"],
-        ["/binary", "BINARY", "C"], ["/pcp", "PCP", "C"]]);
+      .to.deep.equal([["/binary", "BINARY", "C"], ["/denied", "TEXT", "C"],
+        ["/pcp", "PCP", "C"], ["/text", "TEXT", "C"]]);
     const broker = new AmcBroker(rows);
     const sender = "ZCL_OSD_AMC_TEST==============CP";
     expect(() => broker.send({app: "ZOSD_AMC_TEST", path: "/denied", program: sender, type: "TEXT", message: "no"}))
@@ -27,6 +27,36 @@ describe("AMC in one Node process", function () {
     expect(amcChannels().find((row) => row.path === "/text")).to.include({applicationId: "ZOSD_AMC_TEST"});
     expect(callerProgram("at x (/tmp/zcl_osd_amc_test.clas.testclasses.mjs:1:1)"))
       .to.equal(sender);
+  });
+
+  it("reads abapGit SAMC with BOM, TEXT, numbered authorities, and sorted channels", () => {
+    for (const [file, app, paths, authorityCount] of [
+      ["src/amc/zstg_amc_test.samc.xml", "ZOSD_AMC_TEST", ["/binary", "/denied", "/pcp", "/text"], 7],
+      ["docs/probes/abap-daemons/zosd_t_amc.serialized.samc.xml", "ZOSD_T_AMC", ["/pc", "/ps", "/pu"], 5],
+    ]) {
+      const xml = readFileSync(file, "utf8");
+      expect(xml.charCodeAt(0), file).to.equal(0xfeff);
+      expect(xml).to.include("<TEXT>");
+      expect(xml).to.include("<NR>1</NR>");
+      const channels = parseSamc(xml, file);
+      expect(channels.map((row) => row.path), file).to.deep.equal(paths);
+      expect(channels.every((row) => row.applicationId === app && row.authorities.length === authorityCount), file).to.equal(true);
+      expect(channels[0].authorities.map((row) => row.path), file)
+        .to.deep.equal(app === "ZOSD_AMC_TEST"
+          ? ["/text", "/text", "/text", "/binary", "/binary", "/pcp", "/pcp"]
+          : ["/pc", "/pc", "/pc", "/pu", "/ps"]);
+      const broker = new AmcBroker(channels);
+      const allowed = app === "ZOSD_AMC_TEST" ? "ZCL_OSD_AMC_TEST==============CP" : "ZCL_OSD_T_DMN=================CP";
+      expect(() => broker.channel(app, paths[0], "S", allowed), file).not.to.throw();
+      if (app === "ZOSD_T_AMC") {
+        expect(channels[0].authorities[2]).to.deep.equal({path: "/pc", program: "ZOSD_T_DSUB", activity: "S"});
+        expect(() => broker.channel(app, "/pc", "S", "ZOSD_T_DSUB")).not.to.throw();
+      } else {
+        expect(channels[0].authorities[2]).to.deep.equal({
+          path: "/text", program: "ZCL_OSD_AMC_SOCKET============CP", activity: "R",
+        });
+      }
+    }
   });
 
   it("delivers client and user scopes only to matching subscriptions, system to all", () => {

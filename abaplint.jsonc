@@ -2,7 +2,7 @@
   "global": {
     "files": "/{src,packs/zvdb/src,test,gen/bsp,gen/cds,gen/segw,gen/rfc,gen/tran}/**/*.*",
     "errorOnDuplicateFilenames": true,
-    "exclude": ["/test/e2e/", "/test/fixtures/", "\\.mjs$", "\\.cjs$", "\\.stg\\.yaml$", "\\.l2\\.yaml$", "\\.trace\\.json$"]
+    "exclude": ["/test/e2e/", "/test/fixtures/", "\\.mjs$", "\\.cjs$", "\\.stg\\.yaml$", "\\.l2\\.yaml$", "\\.samc\\.model\\.json$", "\\.trace\\.json$"]
   },
   "dependencies": [
     {
