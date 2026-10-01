@@ -3,6 +3,7 @@ import express from "express";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {request} from "node:http";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {Data} from "../tools/osd-data.mjs";
@@ -259,14 +260,6 @@ describe("tools/adt-facade: the development loop", () => {
       const {handle} = await lock();
       const res = await call(`/oo/classes/CL_ABAP_ZIP/source/main?lockHandle=${handle}`, {method: "PUT", body: "nope"});
       expect(res.status).to.equal(405);
-    });
-
-    it("a stateless hop retires the handle, the way a real session does", async () => {
-      const {handle} = await lock();
-      // the client says it no longer needs affinity; the locks go with it
-      await call("/core/discovery", {headers: {"x-sap-adt-sessiontype": "stateless"}});
-      const res = await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {method: "PUT", body: SOURCE});
-      expect(res.status).to.equal(409);
     });
 
     it("unlocking gives the object back", async () => {
@@ -1128,7 +1121,13 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     // a temporary system, so a created object never lands in this repo
     root = mkdtempSync(join(tmpdir(), "osd-adt-"));
     mkdirSync(join(root, "src", "demo"), {recursive: true});
+    mkdirSync(join(root, "src", "zosd_test"), {recursive: true});
     writeFileSync(join(root, "abaplint.jsonc"), readFileSync("abaplint.jsonc", "utf8"));
+    writeFileSync(join(root, "src", "zosd_test", "package.devc.xml"), `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_DEVC" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DEVC><CTEXT>test packages</CTEXT></DEVC></asx:values></asx:abap>
+</abapGit>
+`);
     writeFileSync(join(root, "src", "demo", "package.devc.xml"), `<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_DEVC" serializer_version="v1.0.0">
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DEVC><CTEXT>demo</CTEXT></DEVC></asx:values></asx:abap>
@@ -1207,6 +1206,300 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     expect(existsSync(join(root, "src/demo/zosd_made_cds.ddls.xml")), "the header went too").to.equal(false);
     const twice = await call("/ddic/ddl/sources/zosd_made_cds", {method: "DELETE"});
     expect(twice.status).to.equal(404);
+  });
+
+  // vsp's integration suite found it: LOCK, a stateless GET, then the PUT
+  // with the handle. A4H keeps the lock through the stateless request;
+  // this used to drop it and answer the PUT with a 409.
+  describe("locks across requests and sessions", () => {
+    const LOCKED = "ZCL_MADE_LOCKS";
+    const lockIt = async (caller = call) => {
+      const res = await caller(`/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`, {method: "POST"});
+      const xml = await res.text();
+      return {status: res.status, xml, handle: xml.match(/<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/)?.[1]};
+    };
+    const unlockIt = (handle, caller = call) => caller(`/oo/classes/${LOCKED}?_action=UNLOCK&lockHandle=${handle}`, {method: "POST"});
+    // a second session: its own logon, its own cookie and token; the same
+    // user as the first when no user is named
+    const otherSession = async (user) => {
+      const res = await fetch(`http://localhost:${port}/sap/bc/adt/core/discovery`, {method: "HEAD",
+        headers: {"x-csrf-token": "fetch", ...(user === undefined ? {} : {authorization: "Basic " + Buffer.from(`${user}:x`).toString("base64")})}});
+      const id = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
+      const other = (path, options = {}) => fetch(`http://localhost:${port}/sap/bc/adt${path}`, {
+        ...options,
+        headers: {cookie: `sap-contextid=${id}`, "x-csrf-token": res.headers.get("x-csrf-token"), "x-sap-adt-sessiontype": "stateful", ...(options.headers ?? {})},
+      });
+      return {id, other};
+    };
+
+    before(async () => {
+      const made = await call("/oo/classes", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("CLAS", LOCKED, "locked", "$STG_DEMO")});
+      expect(made.status).to.equal(201);
+    });
+
+    it("a stateless request in between keeps the lock, as A4H does", async () => {
+      const {handle} = await lockIt();
+      const read = await call(`/oo/classes/${LOCKED}/source/main`, {headers: {"x-sap-adt-sessiontype": "stateless"}});
+      expect(read.status).to.equal(200);
+      const source = await read.text();
+      const res = await call(`/oo/classes/${LOCKED}/source/main?lockHandle=${handle}`, {method: "PUT", body: source});
+      expect(res.status, await res.text()).to.equal(200);
+      await unlockIt(handle);
+    });
+
+    // A4H, two stateful sessions: 403, ExceptionResourceNoAccess, the holder
+    // in T100 EU 510 (V1 user, V2 object)
+    const expectLockedBy = ({status, xml}, user) => {
+      expect(status).to.equal(403);
+      expect(xml).to.contain('<type id="ExceptionResourceNoAccess"/>');
+      expect(xml).to.contain(`<message lang="EN">User ${user} is currently editing ${LOCKED}</message>`);
+      expect(xml).to.contain(`<localizedMessage lang="EN">User ${user} is currently editing ${LOCKED}</localizedMessage>`);
+      expect(xml).to.contain('<entry key="T100KEY-ID">EU</entry>');
+      expect(xml).to.contain('<entry key="T100KEY-NO">510</entry>');
+      expect(xml).to.contain(`<entry key="T100KEY-V1">${user}</entry>`);
+      expect(xml).to.contain(`<entry key="T100KEY-V2">${LOCKED}</entry>`);
+      expect(xml).to.match(/<entry key="LONGTEXT">[^<]+<\/entry>/);
+    };
+
+    it("the same user in another session is refused too, because the lock is the session's", async () => {
+      const {handle} = await lockIt();
+      const {id, other} = await otherSession();
+      expectLockedBy(await lockIt(other), "OSD");
+      await unlockIt(handle);
+      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${id}`}});
+    });
+
+    it("an object locked in one session is refused to another, naming the holder", async () => {
+      const {handle} = await lockIt();
+      const {other} = await otherSession("OTHERDEV");
+      const refused = await lockIt(other);
+      expectLockedBy(refused, "OSD");
+      // the holder locking again is still idempotent
+      expect((await lockIt()).handle).to.equal(handle);
+      // released by the holder, the other session gets it -- and gives it back
+      await unlockIt(handle);
+      const taken = await lockIt(other);
+      expect(taken.status).to.equal(200);
+      expect(taken.handle).to.have.length.greaterThan(8);
+      const first = await lockIt();
+      expectLockedBy(first, "OTHERDEV");
+      await unlockIt(taken.handle, other);
+      const back = await lockIt();
+      expect(back.status).to.equal(200);
+      await unlockIt(back.handle);
+    });
+
+    it("a logoff releases the session's locks", async () => {
+      const {id, other} = await otherSession("OTHERDEV");
+      expect((await lockIt(other)).status).to.equal(200);
+      expect((await lockIt()).status).to.equal(403);
+      const off = await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${id}`}});
+      expect(off.status).to.equal(200);
+      const after = await lockIt();
+      expect(after.status).to.equal(200);
+      await unlockIt(after.handle);
+    });
+
+    it("another session cannot delete what one session holds", async () => {
+      const DOOMED = "ZCL_MADE_DOOMED";
+      const made = await call("/oo/classes", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("CLAS", DOOMED, "doomed", "$STG_DEMO")});
+      expect(made.status).to.equal(201);
+      const {id, other} = await otherSession("OTHERDEV");
+      const locked = await other(`/oo/classes/${DOOMED}?_action=LOCK&accessMode=MODIFY`, {method: "POST"});
+      expect(locked.status).to.equal(200);
+      const refused = await call(`/oo/classes/${DOOMED.toLowerCase()}`, {method: "DELETE"});
+      expect(refused.status).to.equal(403);
+      const xml = await refused.text();
+      expect(xml).to.contain('<type id="ExceptionResourceNoAccess"/>');
+      expect(xml).to.contain('<entry key="T100KEY-V1">OTHERDEV</entry>');
+      expect(existsSync(join(root, "src/demo/zcl_made_doomed.clas.abap")), "still there").to.equal(true);
+      // the holder may, and its lock goes with the object
+      const gone = await other(`/oo/classes/${DOOMED.toLowerCase()}`, {method: "DELETE"});
+      expect(gone.status).to.equal(200);
+      expect(existsSync(join(root, "src/demo/zcl_made_doomed.clas.abap"))).to.equal(false);
+      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${id}`}});
+    });
+
+    it("the security session advertised and deleted is the one the middleware chose", async () => {
+      const holder = await otherSession("OTHERDEV");
+      const bystander = await otherSession("THIRDDEV");
+      expect((await lockIt(holder.other)).status).to.equal(200);
+      // the context cookie names the holder, the session cookie the bystander:
+      // the middleware picks the holder, and so must the advertised URL
+      const mixed = {cookie: `sap-contextid=${holder.id}; SAP_SESSIONID_OSD_001=${bystander.id}`};
+      const poll = await holder.other("/core/http/sessions", {headers: mixed});
+      const url = /href="([^"]*\/core\/http\/sessions\/[0-9A-F]+)"/.exec(await poll.text())?.[1];
+      expect(url).to.be.a("string");
+      const own = await holder.other("/core/http/sessions", {headers: {cookie: `sap-contextid=${holder.id}`}});
+      expect(await own.text(), "the holder's own poll names the same URL").to.contain(url);
+      const ended = await fetch(`http://localhost:${port}${url}`, {method: "DELETE",
+        headers: {...mixed, "x-csrf-token": poll.headers.get("x-csrf-token")}});
+      expect(ended.status).to.equal(200);
+      // the holder's session ended, so its lock went with it
+      const mine = await lockIt();
+      expect(mine.status, "the holder's session is the one that ended").to.equal(200);
+      await unlockIt(mine.handle);
+      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${bystander.id}`}});
+    });
+
+    it("a logoff carrying two cookies for two sessions ends only the one the context cookie names", async () => {
+      const holder = await otherSession("OTHERDEV");
+      const bystander = await otherSession("THIRDDEV");
+      expect((await lockIt(holder.other)).status).to.equal(200);
+      // the context cookie names the bystander, the session cookie the holder
+      const off = await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`,
+        {headers: {cookie: `sap-contextid=${bystander.id}; SAP_SESSIONID_OSD_001=${holder.id}`}});
+      expect(off.status).to.equal(200);
+      expectLockedBy(await lockIt(), "OTHERDEV");
+      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${holder.id}`}});
+      const mine = await lockIt();
+      expect(mine.status).to.equal(200);
+      await unlockIt(mine.handle);
+    });
+
+    // Only a host without a body parser reads the body inside the route,
+    // after the lock was checked (this suite's app parses first, which
+    // closes the window); the façade is mounted bare for this one.
+    it("a lock released while the PUT's body is still arriving does not write", async () => {
+      // Synchronised on the route itself, not on a timer: the PUT handler
+      // checks the lock and only then attaches its "data" listener, so the
+      // first chunk reaching that listener proves the first check has
+      // passed. Only then does the lock go and the rest of the body follow.
+      let bodyReached;
+      const reached = new Promise((resolve) => {
+        bodyReached = resolve;
+      });
+      const bare = express();
+      bare.use((req, res, next) => {
+        if (req.method === "PUT") {
+          const on = req.on.bind(req);
+          req.on = (event, listener) => event === "data"
+            ? on(event, (chunk) => {
+              listener(chunk);
+              bodyReached();
+            })
+            : on(event, listener);
+        }
+        next();
+      });
+      bare.use(adtRouter({store, transpileOnActivate: false}).router);
+      const server2 = await new Promise((resolve) => {
+        const s = bare.listen(0, () => resolve(s));
+      });
+      try {
+        const port2 = server2.address().port;
+        const hello = await fetch(`http://localhost:${port2}/sap/bc/adt/core/discovery`, {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
+        const id = (hello.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
+        const headers = {cookie: `sap-contextid=${id}`, "x-csrf-token": hello.headers.get("x-csrf-token"), "x-sap-adt-sessiontype": "stateful"};
+        const at = (path, options = {}) => fetch(`http://localhost:${port2}/sap/bc/adt${path}`, {...options, headers: {...headers, ...(options.headers ?? {})}});
+        const locked = await at(`/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`, {method: "POST"});
+        const handle = (await locked.text()).match(/<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/)?.[1];
+        expect(handle).to.have.length.greaterThan(8);
+        const before = store.read("CLAS", LOCKED).source;
+        const status = new Promise((resolve, reject) => {
+          const put = request({
+            host: "localhost", port: port2, method: "PUT",
+            path: `/sap/bc/adt/oo/classes/${LOCKED}/source/main?lockHandle=${handle}`,
+            headers: {...headers, "content-type": "text/plain", "transfer-encoding": "chunked"},
+          }, (res) => {
+            res.resume();
+            res.on("end", () => resolve(res.statusCode));
+          });
+          put.on("error", reject);
+          put.write("* half a source\n");
+          reached.then(async () => {
+            await at(`/oo/classes/${LOCKED}?_action=UNLOCK&lockHandle=${handle}`, {method: "POST"});
+            put.end("* and the rest\n");
+          }).catch(reject);
+        });
+        expect(await status).to.equal(409);
+        expect(store.read("CLAS", LOCKED).source, "nothing written").to.equal(before);
+      } finally {
+        await new Promise((resolve) => server2.close(resolve));
+      }
+    });
+  });
+
+  it("POST on a class's includes creates the test include, under the class's lock", async () => {
+    const made = await call("/oo/classes", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("CLAS", "ZCL_MADE_INCL", "gets tests", "$STG_DEMO")});
+    expect(made.status).to.equal(201);
+    const body = `<?xml version="1.0" encoding="UTF-8"?>
+<class:abapClassInclude xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="http://www.sap.com/adt/core"
+  adtcore:name="ZCL_MADE_INCL" class:includeType="testclasses"/>`;
+    const include = "/oo/classes/zcl_made_incl/includes";
+    // no lock, no include
+    const unlocked = await call(include, {method: "POST", headers: {"content-type": "application/*"}, body});
+    expect(unlocked.status).to.equal(409);
+    expect(existsSync(join(root, "src/demo/zcl_made_incl.clas.testclasses.abap"))).to.equal(false);
+
+    const locked = await call("/oo/classes/zcl_made_incl?_action=LOCK&accessMode=MODIFY", {method: "POST"});
+    const handle = (await locked.text()).match(/<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/)?.[1];
+    const res = await call(`${include}?lockHandle=${handle}`, {method: "POST", headers: {"content-type": "application/*"}, body});
+    expect(res.status, await res.text()).to.equal(201);
+    expect(res.headers.get("location")).to.equal("/sap/bc/adt/oo/classes/zcl_made_incl/includes/testclasses");
+    expect(readFileSync(join(root, "src/demo/zcl_made_incl.clas.testclasses.abap"), "utf8")).to.equal("");
+    // the next move is the PUT of its source, which the same handle carries
+    const put = await call(`${include}/testclasses?lockHandle=${handle}`, {method: "PUT", body: "* tests\n"});
+    expect(put.status).to.equal(200);
+    const again = await call(`${include}?lockHandle=${handle}`, {method: "POST", headers: {"content-type": "application/*"}, body});
+    expect(again.status, "an include that is there is not created twice").to.equal(409);
+    const bogus = await call(`${include}?lockHandle=${handle}`, {method: "POST", headers: {"content-type": "application/*"},
+      body: body.replace("testclasses", "nonsense")});
+    expect(bogus.status).to.equal(400);
+    await call(`/oo/classes/zcl_made_incl?_action=UNLOCK&lockHandle=${handle}`, {method: "POST"});
+  });
+
+  // vsp's repro: a package created stateless was there for the create and
+  // gone for the nodestructure right after it -- and for quick search, ever.
+  it("a created package stays in the tree, the search, lock and delete, after a rebuild too", async () => {
+    const stateless = {"x-sap-adt-sessiontype": "stateless"};
+    const res = await call("/packages?sap-client=001&sap-language=EN", {method: "POST", headers: {"content-type": "application/*", ...stateless},
+      body: `<?xml version="1.0" encoding="UTF-8"?>
+<pack:package xmlns:pack="http://www.sap.com/adt/packages" xmlns:adtcore="http://www.sap.com/adt/core"
+  adtcore:description="vsp ci probe" adtcore:name="$ZOSD_TEST_VSPCI" adtcore:type="DEVC/K" adtcore:responsible="DEVELOPER">
+  <pack:attributes pack:packageType="development"/>
+  <pack:superPackage adtcore:name="$ZOSD_TEST"/>
+  <pack:applicationComponent/>
+  <pack:transport>
+    <pack:softwareComponent pack:name="LOCAL"/>
+    <pack:transportLayer pack:name=""/>
+  </pack:transport>
+  <pack:subPackages/>
+</pack:package>`});
+    expect(res.status, await res.text()).to.equal(201);
+    expect(res.headers.get("location")).to.equal("/sap/bc/adt/packages/%24zosd_test_vspci");
+    expect(existsSync(join(root, "src/zosd_test/vspci/package.devc.xml"))).to.equal(true);
+
+    const visible = async (when) => {
+      const tree = await call("/repository/nodestructure?parent_name=%24ZOSD_TEST_VSPCI&parent_type=DEVC%2FK&withShortDescriptions=true",
+        {method: "POST", headers: stateless});
+      expect(tree.status, `${when}: nodestructure ${await tree.clone().text()}`).to.equal(200);
+      const parent = await (await call("/repository/nodestructure?parent_name=%24ZOSD_TEST&parent_type=DEVC%2FK&withShortDescriptions=true",
+        {method: "POST", headers: stateless})).text();
+      expect(parent, `${when}: listed under its parent`).to.contain("$ZOSD_TEST_VSPCI");
+      const found = await (await call("/repository/informationsystem/search?operation=quickSearch&query=%24ZOSD_TEST*&maxResults=51&objectType=DEVC%2FK",
+        {headers: stateless})).text();
+      expect(found, `${when}: quick search`).to.contain('adtcore:name="$ZOSD_TEST_VSPCI"');
+    };
+    // the real disk watcher: the create's own write makes it drop the index
+    // (store.index undefined), and the next request rebuilds it
+    for (let i = 0; i < 100 && store.index !== undefined; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(store.index, "the watcher fired on the create's write").to.equal(undefined);
+    await visible("after the watcher fired");
+    // and a rebuild forced by hand
+    store.build();
+    await visible("after a rebuild");
+
+    const locked = await call("/packages/%24zosd_test_vspci?_action=LOCK&accessMode=MODIFY", {method: "POST"});
+    expect(locked.status).to.equal(200);
+    const handle = (await locked.text()).match(/<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/)?.[1];
+    expect(handle).to.have.length.greaterThan(8);
+    await call(`/packages/%24zosd_test_vspci?_action=UNLOCK&lockHandle=${handle}`, {method: "POST"});
+    const gone = await call("/packages/%24zosd_test_vspci", {method: "DELETE"});
+    expect(gone.status, await gone.text()).to.equal(200);
+    expect(existsSync(join(root, "src/zosd_test/vspci/package.devc.xml"))).to.equal(false);
   });
 
   it("what abapGit writes on disk, the façade serves without a restart", async () => {

@@ -191,3 +191,49 @@ describe("tools/sqlite-file-client: an INTEGER parameter binds as INTEGER", () =
     }
   });
 });
+
+// osd-serve and the ADT façade report a failure as String(e.message). The
+// transpiled CX_SY_DYNAMIC_OSQL_SEMANTICS keeps its text in SQLMSG and its
+// JS message empty, so a failed SELECT reached the client as an empty 500.
+describe("tools/sqlite-file-client: a failed SELECT says why", () => {
+  // shaped like the transpiled class: an Error whose message stays empty
+  class FakeOsqlSemantics extends Error {
+    async constructor_({sqlmsg}) {
+      this.sqlmsg = sqlmsg;
+      return this;
+    }
+  }
+  let saved;
+  let hadAbap;
+  before(() => {
+    hadAbap = globalThis.abap !== undefined;
+    globalThis.abap ??= {};
+    globalThis.abap.Classes ??= {};
+    saved = globalThis.abap.Classes.CX_SY_DYNAMIC_OSQL_SEMANTICS;
+    globalThis.abap.Classes.CX_SY_DYNAMIC_OSQL_SEMANTICS = FakeOsqlSemantics;
+  });
+  after(() => {
+    if (hadAbap === false) {
+      delete globalThis.abap;
+    } else if (saved === undefined) {
+      delete globalThis.abap.Classes.CX_SY_DYNAMIC_OSQL_SEMANTICS;
+    } else {
+      globalThis.abap.Classes.CX_SY_DYNAMIC_OSQL_SEMANTICS = saved;
+    }
+  });
+
+  it("raises the ABAP exception with the engine's text in SQLMSG and in .message", async () => {
+    const db = new FileSqliteClient({path: ":memory:"});
+    await db.connect();
+    let error;
+    try {
+      await db.query("SELECT * FROM no_such_table");
+    } catch (e) {
+      error = e;
+    }
+    await db.disconnect();
+    expect(error).to.be.instanceOf(FakeOsqlSemantics);
+    expect(error.sqlmsg).to.match(/no such table/);
+    expect(error.message).to.equal(error.sqlmsg);
+  });
+});

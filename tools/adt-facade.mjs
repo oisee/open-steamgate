@@ -24,12 +24,12 @@ import {readFileSync, appendFileSync} from "node:fs";
 import {dirname, join, relative} from "node:path";
 import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
-import {Sessions} from "./adt-session.mjs";
+import {Sessions, parseCookies, sessionIdOf} from "./adt-session.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
-import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
+import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
-import {uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {portabilityWarnings} from "./amdp-gen.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
@@ -813,7 +813,7 @@ export function adtRouter(options = {}) {
   // client watches; the timeout is advertised and never enforced here,
   // because there is nothing to expire.
   router.get(`${BASE}/core/http/sessions`, (req, res) => {
-    const id = sessionIdentifier(req, identity);
+    const id = sessionIdentifier(req);
     res.type("application/vnd.sap.adt.core.http.session.v3+xml; charset=utf-8").send(
       '<?xml version="1.0" encoding="utf-8"?>' +
       '<http:session xmlns:http="http://www.sap.com/adt/http" xmlns:atom="http://www.w3.org/2005/Atom">' +
@@ -1621,10 +1621,27 @@ export function adtRouter(options = {}) {
     }
   });
 
-  // Ending a session. There is nothing to end — the session is a cookie and a
-  // token — but a client that gets 404 here reports a failed logoff.
-  router.delete(`${BASE}/core/http/sessions/:id`, (req, res) => res.status(200).end());
-  router.get("/sap/public/bc/icf/logoff", (req, res) => res.status(200).type("text/plain").send("logged off"));
+  // Ending a session. A client that gets 404 here reports a failed logoff.
+  // Both are the explicit end the session layer waits for before it lets go
+  // of a session's locks (the other is expiry): DELETE on the security
+  // session the poll named, when it names the caller's own, and the logoff
+  // resource for whichever session the cookies carry.
+  router.delete(`${BASE}/core/http/sessions/:id`, (req, res) => {
+    if (String(req.params.id).toUpperCase() === sessionIdentifier(req)) {
+      sessions.end(req.adt.session.id);
+    }
+    res.status(200).end();
+  });
+  router.get("/sap/public/bc/icf/logoff", (req, res) => {
+    // exactly the one session the cookies name, by the middleware's own
+    // precedence: two cookies naming two sessions end only the one the
+    // client is using, never the other
+    const id = sessionIdOf(parseCookies(req.headers.cookie));
+    if (id) {
+      sessions.end(id);
+    }
+    res.status(200).type("text/plain").send("logged off");
+  });
 
   // ---- The workbench type list, which the client pre-loads before it will
   // open anything.
@@ -2108,13 +2125,24 @@ export function adtRouter(options = {}) {
     });
     router.delete(`${BASE}/${adt}/:name`, (req, res) => {
       answer(res, () => {
-        store.delete(type, decodeURIComponent(req.params.name));
+        const name = decodeURIComponent(req.params.name);
+        // an object another session holds is not this one's to delete
+        const holder = req.adt.sessions.holderOf(type, store.find(type, name)?.name ?? name);
+        if (holder !== undefined && holder.session !== req.adt.session) {
+          res.status(403).type("application/xml").send(lockedByOtherDocument(holder.session.user, String(name).toUpperCase()));
+          return;
+        }
+        const gone = store.delete(type, name);
+        // and a lock on an object that is gone holds nothing
+        req.adt.sessions.release(gone.type, gone.name);
         res.status(200).end();
       });
     });
   }
 
-  for (const {type, adt} of SOURCE_TYPES) {
+  // a package locks like a source object (a client locks it before it
+  // deletes it), and has no source to write
+  for (const {type, adt} of [...SOURCE_TYPES, {type: "DEVC", adt: "packages"}]) {
     // LOCK and UNLOCK arrive on the object's own URI, told apart by _action
     router.post(`${BASE}/${adt}/:name`, (req, res) => {
       const action = String(req.query._action ?? "").toUpperCase();
@@ -2136,40 +2164,71 @@ export function adtRouter(options = {}) {
           // NoModification for perfectly writable local objects, so a client
           // that trusted that field would find nothing writable at all.
           res.status(200).type(asXmlTypeFor(req, "com.sap.adt.lock.Result2"))
-            .send(lockResultDocument("", {modifiable: false}));
+            .send(lockResultDocument(""));
           return;
         }
-        const held = [...session.locks.values()].find((l) => l.type === entry.type && l.name === entry.name);
-        const handle = held?.handle ?? randomUUID();
-        session.locks.set(handle, {handle, type: entry.type, name: entry.name, since: Date.now()});
-        res.status(200).type(asXmlTypeFor(req, "com.sap.adt.lock.Result2")).send(lockResultDocument(handle));
+        // one holder per object across sessions; the same session locking
+        // again gets the handle it has, another session gets a refusal that
+        // says who holds it, the way an enqueue conflict reads on a system
+        const taken = req.adt.sessions.lock(session, entry.type, entry.name, () => randomUUID());
+        if (taken.heldBy !== undefined) {
+          res.status(403).type("application/xml").send(lockedByOtherDocument(taken.heldBy.user, entry.name));
+          return;
+        }
+        res.status(200).type(asXmlTypeFor(req, "com.sap.adt.lock.Result2")).send(lockResultDocument(taken.handle));
         return;
       }
 
       if (action === "UNLOCK") {
-        session.locks.delete(String(req.query.lockHandle ?? ""));
+        req.adt.sessions.unlock(session, String(req.query.lockHandle ?? ""));
         res.status(200).type("text/plain").send("");
         return;
       }
 
       res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", `unknown action ${action || "(none)"}`));
     });
+    if (type === "DEVC") {
+      continue;
+    }
 
-    // WRITE. The file only: the transpile belongs to activation, where the
-    // verdict is what the client waits for and the modules follow after.
-    const writeSource = (req, res) => {
+    // Whether this request may change the object: writable, and the handle
+    // in lockHandle held by this session for this object. Answers the
+    // refusal itself and returns false when not.
+    const mayWrite = (req, res) => {
       const {session} = req.adt;
       const handle = String(req.query.lockHandle ?? "");
       const lock = session.locks.get(handle);
       const entry = store.find(type, req.params.name);
       if (entry !== undefined && entry.writable === false) {
         res.status(405).type("application/xml").send(exceptionDocument("ExceptionResourceNoAccess", `${entry.type} ${entry.name} is a library object and cannot be changed here`));
-        return;
+        return false;
       }
       if (lock === undefined || lock.type !== (entry?.type ?? type) || lock.name !== (entry?.name ?? String(req.params.name).toUpperCase())) {
         // the handle is the client's proof it owns the object right now, and
         // a handle from another session or another object is neither
         res.status(409).type("application/xml").send(exceptionDocument("ExceptionResourceNotLocked", handle === "" ? "no lock handle was given" : `lock handle ${handle} does not hold this object in this session`));
+        return false;
+      }
+      return true;
+    };
+    // the handle of mayWrite, asked again just before a write: still this
+    // session's, still the object's holder
+    const stillHeld = (req, res) => {
+      const {session, sessions} = req.adt;
+      const handle = String(req.query.lockHandle ?? "");
+      const lock = session.locks.get(handle);
+      const holder = lock === undefined ? undefined : sessions.holderOf(lock.type, lock.name);
+      if (lock === undefined || holder?.session !== session || holder.handle !== handle) {
+        res.status(409).type("application/xml").send(exceptionDocument("ExceptionResourceNotLocked",
+          `lock handle ${handle} was released before the source arrived`));
+        return false;
+      }
+      return true;
+    };
+    // WRITE. The file only: the transpile belongs to activation, where the
+    // verdict is what the client waits for and the modules follow after.
+    const writeSource = (req, res) => {
+      if (mayWrite(req, res) === false) {
         return;
       }
       rawBody(req).then((body) => {
@@ -2194,6 +2253,13 @@ export function adtRouter(options = {}) {
             ));
             return;
           }
+          // The body arrives after the lock was checked, and the lock can go
+          // while it does (an UNLOCK, a logoff, an expiry, another session
+          // taking the object after that). Checked again right beside the
+          // write, which is the moment the handle has to be good for.
+          if (stillHeld(req, res) === false) {
+            return;
+          }
           store.write(type, req.params.name, body.toString("utf8"), include);
           // The tag of what was just written, computed from what a read now
           // returns so that it is the tag the next GET will carry. The
@@ -2211,6 +2277,37 @@ export function adtRouter(options = {}) {
     if (type === "CLAS") {
       router.put(`${BASE}/${adt}/:name/includes/:include`, writeSource);
       router.put(`${BASE}/${adt}/:name/includes/:include/source/main`, writeSource);
+      // CREATE of a class include (a client's "new test class" makes the
+      // testclasses one this way): a POST on the class's includes with the
+      // include named in the body, under the class's lock like a PUT,
+      //   <class:abapClassInclude adtcore:name="..." class:includeType="testclasses"/>
+      // and the answer 201 with the include's URI. The include starts
+      // empty; its source is the client's next PUT.
+      router.post(`${BASE}/${adt}/:name/includes`, async (req, res) => {
+        const body = (await rawBody(req)).toString("utf8");
+        if (mayWrite(req, res) === false) {
+          return;
+        }
+        answer(res, () => {
+          const include = attribute(body, undefined, "class:includeType") ?? "";
+          if (include === "" || include === "main" || Object.hasOwn(CLASS_INCLUDES, include) === false) {
+            res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest",
+              include === "" ? "the create body names no include type" : `${include} is not a class include`));
+            return;
+          }
+          const current = store.read(type, req.params.name, include);
+          if (current.empty !== true) {
+            throw new Conflict(type, `${current.name} include ${include}`);
+          }
+          if (stillHeld(req, res) === false) {
+            return;
+          }
+          store.write(type, req.params.name, "", include);
+          res.status(201)
+            .set("Location", `${BASE}/${adt}/${encodeURIComponent(current.name.toLowerCase())}/includes/${include}`)
+            .end();
+        });
+      });
     }
   }
 
@@ -2955,16 +3052,16 @@ function refuse(res, status, type, message, options) {
 
 // sessionIdentifier names the security session in the sessions document.
 //
-// Derived from the cookie the logon set, so that it is stable for as long as
-// the client's session is and changes when that does — the client treats it
-// as an identity and polls it. A client that arrives without one gets a
-// stable placeholder rather than a fresh value per request, which would look
-// like a session ending on every poll.
-function sessionIdentifier(req, identity) {
-  const cookie = req.headers.cookie ?? "";
-  const named = new RegExp(`SAP_SESSIONID_${identity.systemID}_${identity.client}=([^;]+)`).exec(cookie);
-  const seed = named === null ? `${identity.systemID}${identity.client}${identity.userName}` : named[1];
-  return createHash("sha256").update(seed).digest("hex").slice(0, 32).toUpperCase();
+// Stable for as long as the client's session is and changed when that is,
+// because the client treats it as an identity and polls it.
+//
+// Derived from the session the middleware chose for this request
+// (req.adt.session), never from one cookie read on its own: a request can
+// carry a context cookie for one session and a session cookie for another,
+// and the middleware picks the context one. An id built from the session
+// cookie then advertised a URL whose DELETE ended the other session.
+function sessionIdentifier(req) {
+  return createHash("sha256").update(req.adt.session.id).digest("hex").slice(0, 32).toUpperCase();
 }
 
 // asXmlTypeFor echoes back the vnd.sap.as+xml dataname a client asked for.

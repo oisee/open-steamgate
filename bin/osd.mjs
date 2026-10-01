@@ -26,7 +26,7 @@ import * as guiConverter from "../.local/lars/open-abap-gui/converter/src/api.mj
 import * as setup from "../test/setup.mjs";
 import {dirname, resolve} from "node:path";
 import {createRequire} from "node:module";
-import {compiled, setHostModules, dataDirOf, ensureBinaryHome, isCheckout, layerList} from "../tools/osd-host.mjs";
+import {compiled, setHostModules, dataDirOf, ensureBinaryHome, homesIn, isCheckout, layerList} from "../tools/osd-host.mjs";
 
 const embeddedSeed = typeof __OSD_BINARY_SEEDED__ !== "undefined" && __OSD_BINARY_SEEDED__;
 const [, , mode = "up", ...rawArgs] = process.argv;
@@ -174,6 +174,12 @@ switch (mode) {
   }
   case "doctor": {
     console.log(`binary mode: ${embeddedSeed ? "seeded (embedded system seed)" : "checkout (no embedded system seed)"}`);
+    // where a seeded binary keeps the system it works on, and whether one
+    // has been materialized there yet (the first `osd up` does it)
+    const dataDir = dataDirOf();
+    const homes = homesIn(dataDir);
+    console.log(`data dir: ${dataDir}`);
+    console.log(`system home: ${homes.length === 0 ? "none yet" : homes.join(", ")}`);
     // what the bundle did to the runtime: a class the runtime looks up by
     // its name must still carry that name after bundling
     const renamed = [];

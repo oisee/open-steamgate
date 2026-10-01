@@ -35,6 +35,7 @@ import {join} from "node:path";
 
 const require = createRequire(import.meta.url);
 import {trimLiterals} from "./sql-literals.mjs";
+import {osqlSemanticsError} from "./osql-error.mjs";
 
 
 /** Every identifier this client sends goes to HANA quoted in UPPER case.
@@ -495,11 +496,7 @@ export class HanaDatabaseClient {
         return row;
       });
     } catch (error) {
-      if (globalThis.abap?.Classes?.["CX_SY_DYNAMIC_OSQL_SEMANTICS"] !== undefined) {
-        throw await new globalThis.abap.Classes["CX_SY_DYNAMIC_OSQL_SEMANTICS"]()
-          .constructor_({sqlmsg: error.message || ""});
-      }
-      throw error;
+      throw await osqlSemanticsError(error);
     } finally {
       // A prepared SELECT owns a server-side statement even after its rows
       // have been collected. Do not leak one per Open SQL read.

@@ -122,6 +122,79 @@ describe("tools/adt-session: the token dance", () => {
     }
   });
 
+  // vsp's integration suite: LOCK (stateful), a stateless GET, then the PUT
+  // with the handle was a 409 here and works on A4H. A stateless request is
+  // one request without affinity, not the end of the session's locks.
+  it("a stateless request keeps the session's locks and its statefulness", async () => {
+    const app = express();
+    const sessions = new Sessions();
+    app.use(sessions.middleware());
+    app.get("/sap/bc/adt/core/discovery", (req, res) => res.json({stateful: req.adt.session.stateful, locks: req.adt.session.locks.size}));
+    const local = await new Promise((resolve) => {
+      const s = app.listen(0, () => resolve(s));
+    });
+    try {
+      const url = `http://localhost:${local.address().port}/sap/bc/adt/core/discovery`;
+      const first = await fetch(url, {headers: {"x-sap-adt-sessiontype": "stateful"}});
+      const id = cookiesOf(first).match(new RegExp(CONTEXT_COOKIE + "=([^;]+)"))[1];
+      const session = sessions.get(id);
+      sessions.lock(session, "CLAS", "ZCL_X", () => "H1");
+      const after = await (await fetch(url, {headers: {cookie: `${CONTEXT_COOKIE}=${id}`, "x-sap-adt-sessiontype": "stateless"}})).json();
+      expect(after).to.deep.equal({stateful: true, locks: 1});
+      expect(sessions.holderOf("CLAS", "ZCL_X")?.session).to.equal(session);
+    } finally {
+      await new Promise((resolve) => local.close(resolve));
+    }
+  });
+
+  describe("the lock table: one holder per object across sessions", () => {
+    it("a second session is refused and told who holds the object; the holder relocks idempotently", () => {
+      const sessions = new Sessions();
+      const alice = sessions.open("ALICE");
+      const bob = sessions.open("BOB");
+      const first = sessions.lock(alice, "CLAS", "ZCL_X", () => "H1");
+      expect(first).to.deep.equal({handle: "H1"});
+      expect(sessions.lock(alice, "CLAS", "zcl_x", () => "H2")).to.deep.equal({handle: "H1"});
+      const refused = sessions.lock(bob, "CLAS", "ZCL_X", () => "H3");
+      expect(refused.handle).to.equal(undefined);
+      expect(refused.heldBy.user).to.equal("ALICE");
+      expect(bob.locks.size).to.equal(0);
+    });
+
+    it("UNLOCK releases the object for another session", () => {
+      const sessions = new Sessions();
+      const alice = sessions.open("ALICE");
+      const bob = sessions.open("BOB");
+      sessions.lock(alice, "CLAS", "ZCL_X", () => "H1");
+      // somebody else's handle releases nothing
+      sessions.unlock(bob, "H1");
+      expect(sessions.lock(bob, "CLAS", "ZCL_X", () => "H2").heldBy).to.equal(alice);
+      sessions.unlock(alice, "H1");
+      expect(sessions.lock(bob, "CLAS", "ZCL_X", () => "H2")).to.deep.equal({handle: "H2"});
+    });
+
+    it("ending a session releases what it held", () => {
+      const sessions = new Sessions();
+      const alice = sessions.open("ALICE");
+      const bob = sessions.open("BOB");
+      sessions.lock(alice, "CLAS", "ZCL_X", () => "H1");
+      sessions.end(alice.id);
+      expect(sessions.get(alice.id)).to.equal(undefined);
+      expect(sessions.lock(bob, "CLAS", "ZCL_X", () => "H2")).to.deep.equal({handle: "H2"});
+    });
+
+    it("an expired holder holds nothing, and asking does not keep it alive", () => {
+      const sessions = new Sessions({ttlMs: 60000});
+      const alice = sessions.open("ALICE");
+      const bob = sessions.open("BOB");
+      sessions.lock(alice, "CLAS", "ZCL_X", () => "H1");
+      expect(sessions.holderOf("CLAS", "ZCL_X").session).to.equal(alice);
+      alice.touched = Date.now() - 120000;
+      expect(sessions.lock(bob, "CLAS", "ZCL_X", () => "H2")).to.deep.equal({handle: "H2"});
+      expect(alice.locks.size).to.equal(0);
+    });
+  });
+
   it("a session nobody touched expires, and the next request gets a new one", async () => {
     const sessions = new Sessions({ttlMs: -1});
     const open = sessions.open("OSD");

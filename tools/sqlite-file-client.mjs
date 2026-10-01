@@ -19,6 +19,7 @@ import {trimLiterals} from "./sql-literals.mjs";
 import {existsSync, mkdirSync, renameSync, rmSync} from "node:fs";
 import {dirname} from "node:path";
 import {fingerprintOf} from "./osd-persist.mjs";
+import {osqlSemanticsError} from "./osql-error.mjs";
 
 const STAMP = "osd_schema";
 
@@ -276,10 +277,7 @@ export class FileSqliteClient {
     try {
       return this.db.prepare(sql).all().map(plain);
     } catch (error) {
-      if (globalThis.abap?.Classes?.["CX_SY_DYNAMIC_OSQL_SEMANTICS"] !== undefined) {
-        throw await new globalThis.abap.Classes["CX_SY_DYNAMIC_OSQL_SEMANTICS"]().constructor_({sqlmsg: error.message || ""});
-      }
-      throw error;
+      throw await osqlSemanticsError(error);
     }
   }
 

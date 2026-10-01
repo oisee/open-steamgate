@@ -6,6 +6,7 @@
 import {DuckDBInstance} from "@duckdb/node-api";
 import {bindValue} from "./abap-types.mjs";
 import {trimLiterals} from "./sql-literals.mjs";
+import {osqlSemanticsError} from "./osql-error.mjs";
 
 
 function plain(value) {
@@ -200,10 +201,7 @@ export class DuckDBDatabaseClient {
         return row;
       });
     } catch (error) {
-      if (globalThis.abap?.Classes?.["CX_SY_DYNAMIC_OSQL_SEMANTICS"] !== undefined) {
-        throw await new globalThis.abap.Classes["CX_SY_DYNAMIC_OSQL_SEMANTICS"]().constructor_({sqlmsg: error.message || ""});
-      }
-      throw error;
+      throw await osqlSemanticsError(error);
     }
   }
 

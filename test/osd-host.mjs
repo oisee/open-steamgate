@@ -4,7 +4,7 @@ import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {delimiter, join} from "node:path";
 import {inputFoldersOf} from "../tools/osd-packs.mjs";
-import {compiled, serveCommand, toolCommand, unitCommand, dataDirOf, layerList, isCheckout} from "../tools/osd-host.mjs";
+import {compiled, serveCommand, toolCommand, unitCommand, dataDirOf, homesIn, layerList, isCheckout} from "../tools/osd-host.mjs";
 
 // The host module: which process starts which, in a checkout and in the
 // binary. Under mocha this is a checkout, so the commands are node + path;
@@ -41,6 +41,24 @@ describe("standalone binary home and layers", () => {
       const stack = inputFoldersOf(root, {input_folder: ["src", "gen"]}, {OSD_LAYERS: folders.join(delimiter)});
       assert.deepEqual(stack, ["src", "gen", "first", "second", "third"]);
       assert.throws(() => layerList(["--layer", "missing"], {}, root), /not a directory/);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("finds the materialized homes under a data dir, for osd doctor", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-data-dir-"));
+    try {
+      assert.deepEqual(homesIn(join(root, "missing")), []);
+      assert.deepEqual(homesIn(root), []);
+      const id = "a".repeat(64);
+      const home = join(root, `osd-home-${id}`);
+      mkdirSync(home);
+      // a folder without its marker is not a home ensureBinaryHome would use
+      assert.deepEqual(homesIn(root), []);
+      writeFileSync(join(home, ".osd-materialized"), `${id}\n`);
+      mkdirSync(join(root, `.osd-home-${id}-123`));
+      assert.deepEqual(homesIn(root), [home]);
     } finally {
       rmSync(root, {recursive: true, force: true});
     }
