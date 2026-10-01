@@ -1144,10 +1144,13 @@ export function describeCases(model) {
   return out.join("\n");
 }
 
+// Warns exactly when a derived case was skipped for the 64-row cap, naming
+// the cases (a threshold of 32 loses the two-group case, 64 a boundary).
 export function capWarning(model, file = model.source) {
-  return model.kind === "limit" && model.threshold.value >= 64
-    ? `${file}:${model.threshold.rule_line}: warning: the 64-row cap leaves count boundaries without derived coverage; examples must cover them`
-    : undefined;
+  const capped = (model.skipped ?? []).filter((item) => item.cap);
+  if (model.kind !== "limit" || !capped.length) return undefined;
+  const names = capped.map((item) => `${item.condition} (${item.case})`).join(", ");
+  return `${file}:${model.threshold.rule_line}: warning: the 64-row cap skips derived cases: ${names}; examples must cover them`;
 }
 
 async function main(args) {

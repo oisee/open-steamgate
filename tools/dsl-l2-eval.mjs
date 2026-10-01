@@ -668,7 +668,8 @@ export function deriveCases(model, references, {date, example, reserved = new Se
     if (owner.when) resolveClauses(model, params, start, undefined, true);
     if (model.kind === "limit" && !countTo(model, start, model.threshold.value + (model.threshold.op === ">" ? 1 : 0), params)) {
       skipped.push({condition: cond.text, reason: model.threshold.value + (model.threshold.op === ">" ? 1 : 0) > COUNT_ROW_CAP
-        ? `count exceeds the ${COUNT_ROW_CAP}-row derived-case cap` : "cannot make the threshold count with distinct matching keys"});
+        ? `count exceeds the ${COUNT_ROW_CAP}-row derived-case cap` : "cannot make the threshold count with distinct matching keys",
+        cap: model.threshold.value + (model.threshold.op === ">" ? 1 : 0) > COUNT_ROW_CAP, case: "all variants"});
       continue;
     }
     const setField = (value) => {
@@ -710,7 +711,8 @@ export function deriveCases(model, references, {date, example, reserved = new Se
       if (!countTo(model, rows, counts[i], params)) {
         skipped.push({condition: `limit/${model.threshold.key}`, reason: counts[i] > COUNT_ROW_CAP
           ? `${counts[i]} matching rows exceed the ${COUNT_ROW_CAP}-row derived-case cap`
-          : `cannot make ${counts[i]} matching rows with distinct keys`});
+          : `cannot make ${counts[i]} matching rows with distinct keys`,
+          cap: counts[i] > COUNT_ROW_CAP, case: suffixes[i]});
         continue;
       }
       if (!thresholdDiscriminates(model, rows, params)) {
@@ -726,10 +728,21 @@ export function deriveCases(model, references, {date, example, reserved = new Se
     const over = n + (model.threshold.op === ">" ? 1 : 0);
     const at = Math.max(1, n + (model.threshold.op === ">" ? 0 : -1));
     if (over + at > COUNT_ROW_CAP) {
-      skipped.push({condition: `limit/${model.threshold.key}`, reason: `two groups need ${over + at} counted rows, exceeding the ${COUNT_ROW_CAP}-row derived-case cap`});
+      skipped.push({condition: `limit/${model.threshold.key}`, reason: `two groups need ${over + at} counted rows, exceeding the ${COUNT_ROW_CAP}-row derived-case cap`,
+        cap: true, case: "groups"});
     } else {
       const first = clone(base.rows), second = clone(base.rows);
       let joined = false;
+      // The second group must read differently from the first in every field
+      // the alert names, or the alert lines cannot tell the groups apart and
+      // a mutant that never splits them goes unseen.
+      const forAlias = model.for.alias;
+      const alerted = model.alert.parts.filter((part) => !part.is_text && !part.is_count && part.alias === forAlias).map((part) => part.column);
+      const named = [...new Set(alerted)].filter((column) => !model.ddic[model.for.table].keys.includes(column));
+      const counted = model.alert.parts.some((part) => part.is_count);
+      const original_row = {...second[model.for.table][0]};
+      const apart = () => (alerted.length > 0 || counted) && named.every((column) =>
+        compareValues(model.ddic[model.for.table].fields[column], original_row[column], model.ddic[model.for.table].fields[column], second[model.for.table][0][column]) !== 0);
       if (countTo(model, first, over, params)) {
         const outer = second[model.for.table][0];
         for (const key of model.ddic[model.for.table].keys) {
@@ -738,7 +751,13 @@ export function deriveCases(model, references, {date, example, reserved = new Se
           for (let seed = 2; seed < 300 && !joined; seed++) {
             const candidate = defaultValue(type, seed);
             if (compareValues(type, original, type, candidate) === 0) continue;
+            Object.assign(outer, original_row);
             outer[key] = candidate;
+            for (const column of named) {
+              const field = model.ddic[model.for.table].fields[column];
+              const value = seed === 2 ? different(field, original_row[column]) : defaultValue(field, seed);
+              if (value !== undefined) outer[column] = value;
+            }
             for (const on of model.clauses[0].on) {
               if (on.cmp.rhs.kind === "field" && on.cmp.rhs.column === key && on.cmp.op === "=") {
                 second[model.clauses[0].table][0][on.cmp.column] = candidate;
@@ -756,7 +775,7 @@ export function deriveCases(model, references, {date, example, reserved = new Se
               rows[model.for.table].push(outer);
               rows[counted].push(...second[counted]);
               if (keysDistinct(model, rows) && evaluate(model, rows, params).length ===
-                evaluate(model, first, params).length + evaluate(model, second, params).length) {
+                evaluate(model, first, params).length + evaluate(model, second, params).length && apart()) {
                 const multi = name("limit groups", ["count"], ["groups"], model.threshold.rule_line);
                 add(`limit/${model.threshold.key}`, model.threshold.rule_line, "groups", multi,
                   `${over} and ${at} matching rows in two groups`, rows, true);
@@ -764,14 +783,14 @@ export function deriveCases(model, references, {date, example, reserved = new Se
               }
             }
             if (!joined) {
-              second[model.for.table][0][key] = original;
+              Object.assign(outer, original_row);
               second[model.clauses[0].table] = base.rows[model.clauses[0].table].map((row) => ({...row}));
             }
           }
           if (joined) break;
         }
       }
-      if (!joined) skipped.push({condition: `limit/${model.threshold.key}`, reason: "cannot make two distinct for groups with matching counted rows"});
+      if (!joined) skipped.push({condition: `limit/${model.threshold.key}`, reason: "cannot make two distinct for groups with matching counted rows whose alerts differ"});
     }
     return {cases, skipped};
   }
