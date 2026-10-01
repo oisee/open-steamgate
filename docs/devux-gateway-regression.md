@@ -288,7 +288,7 @@ together instead of completing all of GW3/GW4 before editor work begins.
 
 ## Explicit deferrals
 
-- a complete clone of ZSCR_120 or `/IWFND/GW_CLIENT`;
+- a complete clone of an in-house gateway test tool or of `/IWFND/GW_CLIENT`;
 - making standard SAP tables the canonical repository;
 - arbitrary scripts or arbitrary server-side URLs in a case;
 - a full assertion programming language;
