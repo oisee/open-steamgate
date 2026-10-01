@@ -24,8 +24,9 @@
 "! Input: UTF-8 (with or without BOM, declared or not) is read in its bytes
 "! and error offsets are byte offsets in it, a UTF-8 BOM included. A UTF-16
 "! BOM or a declared ISO-8859-1 / US-ASCII is transcoded to UTF-8 chunk by
-"! chunk (ZCL_OSD_BYTES_TO_UTF8), and error offsets then count the bytes of
-"! that UTF-8 stream, not of the input; any other declared encoding drains
+"! chunk (ZCL_OSD_BYTES_TO_UTF8). Error offsets count as a system counts:
+"! the bytes of a UTF-16 input (BOM not counted), the UTF-8 of any other
+"! (measured on A4H); any other declared encoding drains
 "! the source and decodes it with CL_ABAP_CONV_IN_CE. JSON (first character
 "! not '<') is read as JSON-XML, also streaming.
 "!
@@ -169,6 +170,11 @@ CLASS zcl_osd_sxml_pull DEFINITION PUBLIC FINAL CREATE PUBLIC.
     DATA mo_source TYPE REF TO zif_osd_byte_source.
     DATA mv_buf TYPE xstring.
     DATA mv_base TYPE i.
+    " UTF-16 input (ZCL_OSD_BYTES_TO_UTF8): 2, the bytes of the input per
+    " character, else 0; and the input bytes of what the window has dropped,
+    " so an error offset is counted in the input as a system counts it
+    DATA mv_unit TYPE i.
+    DATA mv_dropped TYPE i.
     DATA mv_eof TYPE abap_bool.
     DATA mv_pos TYPE i.
     DATA mv_started TYPE abap_bool.
@@ -194,6 +200,9 @@ CLASS zcl_osd_sxml_pull DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_pos        TYPE i
       RETURNING VALUE(rv_byte) TYPE ty_byte.
     METHODS compact.
+    METHODS input_bytes
+      IMPORTING iv_utf8         TYPE xstring
+      RETURNING VALUE(rv_bytes) TYPE i.
     METHODS seek
       IMPORTING iv_needle      TYPE xstring
                 iv_off         TYPE i
@@ -391,14 +400,43 @@ CLASS zcl_osd_sxml_pull IMPLEMENTATION.
 * drop what is consumed, in steps of at least C_COMPACT so the copy is paid
 * once per that many bytes; nothing before MV_POS is read again
     DATA lv_off TYPE i.
+    DATA lv_gone TYPE xstring.
     lv_off = mv_pos - mv_base.
     IF lv_off >= xstrlen( mv_buf ) AND lv_off > 0.
+      IF mv_unit > 0.
+        mv_dropped = mv_dropped + input_bytes( mv_buf ).
+      ENDIF.
       CLEAR mv_buf.
       mv_base = mv_pos.
     ELSEIF lv_off >= c_compact.
+      IF mv_unit > 0.
+        lv_gone = mv_buf(lv_off).
+        mv_dropped = mv_dropped + input_bytes( lv_gone ).
+      ENDIF.
       mv_buf = mv_buf+lv_off.
       mv_base = mv_pos.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD input_bytes.
+* the bytes UTF-8 text takes in the input it was transcoded from: a
+* character per lead byte (not 80-BF), MV_UNIT bytes each, and a character
+* above U+FFFF (lead F0-F4) a surrogate pair, 4 bytes
+    DATA lv_pos TYPE i.
+    DATA lv_byte TYPE ty_byte.
+    DATA lv_code TYPE i.
+    WHILE lv_pos < xstrlen( iv_utf8 ).
+      lv_byte = iv_utf8+lv_pos(1).
+      lv_code = lv_byte.
+      IF lv_code < 128 OR lv_code >= 192.
+        IF lv_code >= 240 AND mv_unit = 2.
+          rv_bytes = rv_bytes + 4.
+        ELSE.
+          rv_bytes = rv_bytes + mv_unit.
+        ENDIF.
+      ENDIF.
+      lv_pos = lv_pos + 1.
+    ENDWHILE.
   ENDMETHOD.
 
   METHOD seek.
@@ -731,9 +769,24 @@ CLASS zcl_osd_sxml_pull IMPLEMENTATION.
 
 
   METHOD fail.
+* for UTF-16 input the offset is counted in the input as given, the BOM not
+* counted, as a system counts it (measured: UTF-16 <a></b> is 6, where the
+* UTF-8 count is 3); a declared ISO-8859-1 document counts in UTF-8
     DATA lx_error TYPE REF TO cx_sxml_parse_error.
+    DATA lv_at TYPE i.
+    DATA lv_rel TYPE i.
+    DATA lv_before TYPE xstring.
+    lv_at = iv_at.
+    IF mv_unit > 0 AND iv_at >= mv_base.
+      lv_rel = iv_at - mv_base.
+      IF lv_rel > xstrlen( mv_buf ).
+        lv_rel = xstrlen( mv_buf ).
+      ENDIF.
+      lv_before = mv_buf(lv_rel).
+      lv_at = mv_dropped + input_bytes( lv_before ).
+    ENDIF.
     last_error = iv_reason.
-    CREATE OBJECT lx_error EXPORTING xml_offset = iv_at.
+    CREATE OBJECT lx_error EXPORTING xml_offset = lv_at.
     RAISE EXCEPTION lx_error.
   ENDMETHOD.
 
@@ -820,6 +873,14 @@ CLASS zcl_osd_sxml_pull IMPLEMENTATION.
     lv_rest = bytes( iv_begin  = mv_pos
                      iv_length = mv_base + xstrlen( mv_buf ) - mv_pos ).
     IF zcl_osd_bytes_to_utf8=>supports( iv_from ) = abap_true.
+* a system reads UTF-16 as it is and counts its bytes; any other code page
+* it converts to UTF-8 first and counts those (measured: ISO-8859-1
+* <a>e9e9</b> after a 43-byte declaration is 50, UTF-16 <a>e9e9</b> is 10)
+      CLEAR mv_unit.
+      IF iv_from CS 'UTF-16'.
+        mv_unit = 2.
+      ENDIF.
+      mv_dropped = 0.
       CREATE OBJECT lo_utf8
         EXPORTING io_source = mo_source
                   iv_head   = lv_rest

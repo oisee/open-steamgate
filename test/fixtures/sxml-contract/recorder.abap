@@ -207,6 +207,27 @@ APPEND `utf8_truncated_at_eof` TO lt_names.
 lv_hex = `3C6120783D2280222F3E`.
 APPEND lv_hex TO lt_hex.
 APPEND `utf8_in_attribute` TO lt_names.
+lv_hex = `FFFE3C0061003E00E9003C002F0061003E00`.
+APPEND lv_hex TO lt_hex.
+APPEND `utf16le_bom_text` TO lt_names.
+lv_hex = `FFFE3C0061003E003C002F0062003E00`.
+APPEND lv_hex TO lt_hex.
+APPEND `utf16le_bom_mismatched_close` TO lt_names.
+lv_hex = `FEFF003C0061003E003C002F0062003E`.
+APPEND lv_hex TO lt_hex.
+APPEND `utf16be_bom_mismatched_close` TO lt_names.
+lv_hex = `3C3F786D6C2076657273696F6E3D22312E302220656E636F64696E673D2249534F2D383835392D31223F3E3C613EE93C2F613E`.
+APPEND lv_hex TO lt_hex.
+APPEND `latin1_declared_text` TO lt_names.
+lv_hex = `3C3F786D6C2076657273696F6E3D22312E302220656E636F64696E673D2249534F2D383835392D31223F3E3C613EE93C2F623E`.
+APPEND lv_hex TO lt_hex.
+APPEND `latin1_declared_mismatched_close` TO lt_names.
+lv_hex = `3C3F786D6C2076657273696F6E3D22312E302220656E636F64696E673D2249534F2D383835392D31223F3E3C613EE9E93C2F623E`.
+APPEND lv_hex TO lt_hex.
+APPEND `latin1_declared_two_e_mismatched_close` TO lt_names.
+lv_hex = `FFFE3C0061003E00E900E9003C002F0062003E00`.
+APPEND lv_hex TO lt_hex.
+APPEND `utf16le_bom_two_e_mismatched_close` TO lt_names.
 lv_out = `SXML<<`.
 LOOP AT lt_names INTO lv_name.
   lv_index = sy-tabix.

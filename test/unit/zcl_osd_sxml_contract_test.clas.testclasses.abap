@@ -425,7 +425,7 @@ CLASS ltcl_contract IMPLEMENTATION.
 * (CONVT_NO_NUMBER, no CATCH sees it) instead of raising a parse error, so a
 * corrupted declaration would end the whole run: it is left out of this
 * mutant only. ANORMALIES, sXML reader entry.
-    DELETE mt_fixtures WHERE name = `xml_decl_lowercase_utf8`.
+    DELETE mt_fixtures WHERE name = `xml_decl_lowercase_utf8` OR name CP `latin1_declared*`.
     lt_mismatches = beyond_known( run( li_factory ) ).
     cl_abap_unit_assert=>assert_not_initial( lt_mismatches ).
     READ TABLE lt_mismatches WITH KEY split = `whole` TRANSPORTING NO FIELDS.

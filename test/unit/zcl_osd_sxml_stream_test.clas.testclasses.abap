@@ -267,11 +267,19 @@ CLASS ltcl_pull IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD utf16_offset.
-* ANORMALIES 2026-10-01-sxml-stream-transcoded-offsets: counted in the UTF-8
-* the input is transcoded to, the BOM not counted
+* in the input's bytes, the BOM not counted, as a system counts it (A4H:
+* UTF-16 <a></b> is 6; ANORMALIES 2026-10-01-sxml-stream-transcoded-offsets)
     cl_abap_unit_assert=>assert_equals(
       act = events( 'FFFE3C0061003E003C002F0062003E00' )
-      exp = `<a{}>!3` ).
+      exp = `<a{}>!6` ).
+* two code units of e acute: 10 (the UTF-8 count would be 7)
+    cl_abap_unit_assert=>assert_equals(
+      act = events( 'FFFE3C0061003E00E900E9003C002F0062003E00' )
+      exp = `<a{}>'` && cl_abap_codepage=>convert_from( 'C3A9C3A9' ) && `'!10` ).
+* U+1F600 as a surrogate pair is 4 bytes, then e acute 2: 12 (UTF-8: 9)
+    cl_abap_unit_assert=>assert_equals(
+      act = events( 'FFFE3C0061003E003DD800DEE9003C002F0062003E00' )
+      exp = `<a{}>'` && cl_abap_codepage=>convert_from( 'F09F9880C3A9' ) && `'!12` ).
   ENDMETHOD.
 
   METHOD declaration_is_bounded.

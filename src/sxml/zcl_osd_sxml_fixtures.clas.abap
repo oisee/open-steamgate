@@ -970,6 +970,109 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     lv_line = `FINAL`.
     APPEND lv_line TO ls-expected.
     APPEND ls TO rt.
+
+    CLEAR ls.
+    ls-name = `utf16le_bom_text`.
+    ls-group = `transcoded`.
+    ls-status = `measured-a4h-2026-10-01`.
+    lv_hex = `FFFE3C0061003E00E9003C002F0061003E00`.
+    ls-input = lv_hex.
+    lv_line = `OPEN "a" ""`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `VALUE "\u00E9"`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `CLOSE "a"`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `FINAL`.
+    APPEND lv_line TO ls-expected.
+    APPEND ls TO rt.
+
+    CLEAR ls.
+    ls-name = `utf16le_bom_mismatched_close`.
+    ls-group = `transcoded`.
+    ls-status = `measured-a4h-2026-10-01`.
+    ls-fork = `MISS`.
+    lv_hex = `FFFE3C0061003E003C002F0062003E00`.
+    ls-input = lv_hex.
+    lv_line = `OPEN "a" ""`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `ERROR CX_SXML_PARSE_ERROR 6`.
+    APPEND lv_line TO ls-expected.
+    APPEND ls TO rt.
+
+    CLEAR ls.
+    ls-name = `utf16be_bom_mismatched_close`.
+    ls-group = `transcoded`.
+    ls-status = `measured-a4h-2026-10-01`.
+    ls-fork = `MISS`.
+    lv_hex = `FEFF003C0061003E003C002F0062003E`.
+    ls-input = lv_hex.
+    lv_line = `OPEN "a" ""`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `ERROR CX_SXML_PARSE_ERROR 6`.
+    APPEND lv_line TO ls-expected.
+    APPEND ls TO rt.
+
+    CLEAR ls.
+    ls-name = `latin1_declared_text`.
+    ls-group = `transcoded`.
+    ls-status = `measured-a4h-2026-10-01`.
+    lv_hex = `3C3F786D6C2076657273696F6E3D22312E302220656E636F64696E673D2249534F2D383835392D31223F3E3C613EE93C2F613E`.
+    ls-input = lv_hex.
+    lv_line = `OPEN "a" ""`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `VALUE "\u00E9"`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `CLOSE "a"`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `FINAL`.
+    APPEND lv_line TO ls-expected.
+    APPEND ls TO rt.
+
+    CLEAR ls.
+    ls-name = `latin1_declared_mismatched_close`.
+    ls-group = `transcoded`.
+    ls-status = `measured-a4h-2026-10-01`.
+    ls-fork = `MISS`.
+    lv_hex = `3C3F786D6C2076657273696F6E3D22312E302220656E636F64696E673D2249534F2D383835392D31223F3E3C613EE93C2F623E`.
+    ls-input = lv_hex.
+    lv_line = `OPEN "a" ""`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `VALUE "\u00E9"`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `ERROR CX_SXML_PARSE_ERROR 48`.
+    APPEND lv_line TO ls-expected.
+    APPEND ls TO rt.
+
+    CLEAR ls.
+    ls-name = `latin1_declared_two_e_mismatched_close`.
+    ls-group = `transcoded`.
+    ls-status = `measured-a4h-2026-10-01`.
+    ls-fork = `MISS`.
+    lv_hex = `3C3F786D6C2076657273696F6E3D22312E302220656E636F64696E673D2249534F2D383835392D31223F3E3C613EE9E93C2F623E`.
+    ls-input = lv_hex.
+    lv_line = `OPEN "a" ""`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `VALUE "\u00E9\u00E9"`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `ERROR CX_SXML_PARSE_ERROR 50`.
+    APPEND lv_line TO ls-expected.
+    APPEND ls TO rt.
+
+    CLEAR ls.
+    ls-name = `utf16le_bom_two_e_mismatched_close`.
+    ls-group = `transcoded`.
+    ls-status = `measured-a4h-2026-10-01`.
+    ls-fork = `MISS`.
+    lv_hex = `FFFE3C0061003E00E900E9003C002F0062003E00`.
+    ls-input = lv_hex.
+    lv_line = `OPEN "a" ""`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `VALUE "\u00E9\u00E9"`.
+    APPEND lv_line TO ls-expected.
+    lv_line = `ERROR CX_SXML_PARSE_ERROR 10`.
+    APPEND lv_line TO ls-expected.
+    APPEND ls TO rt.
   ENDMETHOD.
 
 ENDCLASS.
