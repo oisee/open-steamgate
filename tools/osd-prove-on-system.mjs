@@ -539,11 +539,11 @@ export function osgCounter(folder) {
   };
 }
 
-export function osgRunner() {
+export function osgRunner(load = () => import("./osd-unit.mjs")) {
   return {
     mode: "run",
     async methods(cls) {
-      const {UnitRun} = await import("./osd-unit.mjs");
+      const {UnitRun} = await load();
       const r = await new UnitRun().run("CLAS", cls, {});
       const failing = [];
       const names = [];
@@ -552,7 +552,11 @@ export function osgRunner() {
           names.push(methodId(tc.name, m.name));
           if (m.alerts.length > 0) failing.push(`${tc.name}->${m.name}`);
         }
+        // class_setup / class_teardown / a class that could not be run:
+        // every method may pass and the class still failed
+        for (const a of tc.alerts ?? []) failing.push(`${tc.name} (class): ${a.title ?? a.kind ?? "alert"}`);
       }
+      if (r.ok === false && failing.length === 0) failing.push(`${cls}: the OSG run reported not ok`);
       return {methods: names.length, names, failing};
     },
   };

@@ -15,7 +15,7 @@ import {join, resolve} from "node:path";
 import {inflateRawSync} from "node:zlib";
 import {
   MARK_CLOSE, MARK_OPEN, buildZip, checkPackage, cleanupAbap, classCheckAbap, countTestMethods, importAbap,
-  main, preflightAbap, prove, verdict,
+  main, osgRunner, preflightAbap, prove, verdict,
 } from "../tools/osd-prove-on-system.mjs";
 
 const FIXTURE = resolve("test/fixtures/prove-on-system");
@@ -558,6 +558,18 @@ describe("osd-prove-on-system", () => {
       assert.equal(verdict({...r, osgMode: "count"}), "system: 2 tests pass; OSG: 2 test methods counted from source, not run");
       assert.equal(verdict({...r, ok: false, problems: ["x"]}), "NOT proved: 1 problem(s)");
     });
+  });
+
+  it("--osg run: a class-level alert (class_teardown) or a not-ok run is a failure even when every method passed", async () => {
+    const fakeUnit = (result) => async () => ({UnitRun: class { async run() { return result; } }});
+    const passing = {testClasses: [{name: "LTCL_X", alerts: [], testMethods: [{name: "A", alerts: []}]}], ok: true};
+    assert.deepEqual((await osgRunner(fakeUnit(passing)).methods("ZCL_X")).failing, []);
+    const teardown = {testClasses: [{name: "LTCL_X", alerts: [{title: "class_teardown failed"}], testMethods: [{name: "A", alerts: []}]}], ok: false};
+    const r1 = await osgRunner(fakeUnit(teardown)).methods("ZCL_X");
+    assert.equal(r1.failing.length, 1);
+    assert.match(r1.failing[0], /LTCL_X \(class\): class_teardown failed/);
+    const notOk = {testClasses: [{name: "LTCL_X", alerts: [], testMethods: [{name: "A", alerts: []}]}], ok: false};
+    assert.match((await osgRunner(fakeUnit(notOk)).methods("ZCL_X")).failing[0], /reported not ok/);
   });
 
   it("snippets are ASCII and each ends with the fail( msg ) report", () => {
