@@ -67,7 +67,7 @@ export function objectHash(files) {
 }
 
 /** A file name that can sit in an ABAP literal and in a zip entry. */
-const FILE_NAME = /^[A-Za-z0-9_.#%$+-]{1,120}$/;
+export const FILE_NAME = /^[A-Za-z0-9_.#%$+-]{1,120}$/;
 const CHUNK_BYTES = 8000;
 const BATCH = 12;
 
@@ -95,7 +95,7 @@ const SERIALIZE_DECLS = [
  *  file, `onOk` after the last, `onFail` when abapGit or the digest raised.
  *  The same ABAP serves the hash report, the chunk reader and the deploy
  *  guard, so all three see the same bytes. */
-function serializeBlock(pkg, {onFile = [], onOk = [], onFail = [], onMissing = [], prefix = ""}) {
+export function serializeBlock(pkg, {onFile = [], onOk = [], onFail = [], onMissing = [], prefix = ""}) {
   return [
     "SPLIT lv_item AT space INTO lv_type lv_name.",
     "SELECT SINGLE devclass FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
@@ -170,17 +170,31 @@ export function listAbap(pkg) {
   ].join("\n") + "\n";
 }
 
-/** The hash report of every item of lt_items, as `[prefix]file=` and
- *  `[prefix]obj=` entries: one text for the hash snippet and for the
- *  post-deploy read inside the deploy snippet, so both report the same
- *  serialisation and the same digest. */
+/** The hash report of ONE item (lv_item), as `[prefix]file=` and
+ *  `[prefix]obj=` entries. One text for the hash snippet, for the post-deploy
+ *  read inside the deploy snippet and for the fresh mode's receipt (which
+ *  reads it in the same dialog step as the stamp), so all three report the
+ *  same serialisation and the same digest. */
+export const hashItemBlock = (pkg, prefix = "") => serializeBlock(pkg, {
+  prefix,
+  onFile: [`lv_out = |{ lv_out } ${prefix}file={ lv_type }:{ lv_name }\\|{ ls_file-filename }\\|{ lv_hx }\\|{ xstrlen( ls_file-data ) };|.`],
+  onOk: [`lv_out = |{ lv_out } ${prefix}obj={ lv_type }:{ lv_name } files={ lv_n };|.`],
+});
+
+/** The declarations hashItemBlock needs beyond lv_out, lv_item, lv_type,
+ *  lv_name (a snippet that already has those adds these). */
+export const HASH_DECLS = [
+  "DATA lv_dev TYPE tadir-devclass.",
+  "DATA ls_item TYPE zif_abapgit_definitions=>ty_item.",
+  "DATA ls_ser TYPE zif_abapgit_objects=>ty_serialization.",
+  "DATA ls_file TYPE zif_abapgit_git_definitions=>ty_file.",
+  "DATA lv_hx TYPE xstring.",
+  "DATA lx_s TYPE REF TO cx_root.",
+];
+
 const hashLoop = (pkg, prefix = "") => [
   "LOOP AT lt_items INTO lv_item.",
-  ...serializeBlock(pkg, {
-    prefix,
-    onFile: [`lv_out = |{ lv_out } ${prefix}file={ lv_type }:{ lv_name }\\|{ ls_file-filename }\\|{ lv_hx }\\|{ xstrlen( ls_file-data ) };|.`],
-    onOk: [`lv_out = |{ lv_out } ${prefix}obj={ lv_type }:{ lv_name } files={ lv_n };|.`],
-  }).map((l) => `  ${l}`),
+  ...hashItemBlock(pkg, prefix).map((l) => `  ${l}`),
   "ENDLOOP.",
 ];
 
@@ -513,7 +527,7 @@ export async function readHashes(mcp, pkg, items, log = () => {}) {
 }
 
 /** A parsed hash report of `items` into `out` (readHashes' shape). */
-function collectHashes(p, items, out = {byItem: new Map(), absent: [], elsewhere: [], fail: [], incomplete: []}) {
+export function collectHashes(p, items, out = {byItem: new Map(), absent: [], elsewhere: [], fail: [], incomplete: []}) {
   out.absent.push(...p.absent);
   out.elsewhere.push(...p.elsewhere);
   out.fail.push(...p.fail);
@@ -536,7 +550,7 @@ const problemsOf = (h) => [
   ...h.incomplete.map((i) => `the hash report for ${i} is incomplete`),
 ];
 
-async function fetchFile(mcp, pkg, item, file) {
+export async function fetchFile(mcp, pkg, item, file) {
   const parts = [];
   for (let off = 0; off < file.size; off += CHUNK_BYTES) {
     const len = Math.min(CHUNK_BYTES, file.size - off);
@@ -720,25 +734,34 @@ const unescapeXml = (t) => t.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|ap
 
 /** An XML document as a canonical string: elements with their attributes
  *  sorted by name and values unescaped, text unescaped (CDATA as text,
- *  adjacent text joined), whitespace-only text dropped; the declaration,
- *  comments and processing instructions do not count. Undefined when the
- *  text is not one well-formed element tree (unbalanced tags, a second
- *  root, text outside the root, a DOCTYPE): such a file is not decided. */
+ *  adjacent text joined); the declaration, comments and processing
+ *  instructions do not count. Whitespace-only text is dropped ONLY between
+ *  the element children of an element that has some (indentation); the text
+ *  of a leaf element is kept exactly, so `<a> </a>` differs from `<a/>` and
+ *  `<a></a>` equals `<a/>` (empty is empty); inside `xml:space="preserve"`
+ *  nothing is dropped. Undefined when the text is not one well-formed
+ *  element tree (unbalanced tags, a second root, text outside the root, a
+ *  DOCTYPE): such a file is not decided. */
 export function canonicalXml(buf) {
   const src = Buffer.from(buf).toString("utf8").replace(/^\uFEFF/, "");
   const tag = /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[([\s\S]*?)\]\]>|<!|<\/\s*([^\s>]+)\s*>|<([^\s/>!?]+)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>|</g;
-  const out = [];
   const stack = [];
-  let roots = 0;
+  let root;
   let text = "";
   let at = 0;
   const flush = () => {
-    if (text.trim() !== "") {
-      if (stack.length === 0) return false;
-      out.push(`T${JSON.stringify(text)}`);
+    if (text !== "") {
+      if (stack.length === 0) {
+        if (text.trim() !== "") return false;
+      } else stack.at(-1).kids.push(text);
     }
     text = "";
     return true;
+  };
+  const render = (n) => {
+    const hasEl = n.kids.some((k) => typeof k !== "string");
+    const kids = n.kids.filter((k) => typeof k !== "string" || n.preserve || !hasEl || k.trim() !== "");
+    return `(${n.name}${JSON.stringify(n.attrs)}${kids.map((k) => (typeof k === "string" ? `T${JSON.stringify(k)}` : render(k))).join("")})`;
   };
   for (const m of src.matchAll(tag)) {
     text += unescapeXml(src.slice(at, m.index));
@@ -748,21 +771,26 @@ export function canonicalXml(buf) {
     if (m[0] === "<!" || m[0] === "<") return undefined;
     if (!flush()) return undefined;
     if (m[2] !== undefined) {
-      if (stack.pop() !== m[2]) return undefined;
-      out.push(")");
+      const n = stack.pop();
+      if (n?.name !== m[2]) return undefined;
+      if (stack.length === 0) root = n;
+      else stack.at(-1).kids.push(n);
       continue;
     }
-    if (stack.length === 0 && (roots += 1) > 1) return undefined;
+    if (stack.length === 0 && root !== undefined) return undefined;
     const attrs = [...m[4].matchAll(/([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)]
-      .map((a) => [a[1], unescapeXml(a[2] ?? a[3])]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+      .map((a) => [a[1], unescapeXml(a[2] ?? a[3])]).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0));
     if (new Set(attrs.map(([n]) => n)).size !== attrs.length) return undefined;
-    out.push(`(${m[3]}${JSON.stringify(attrs)}`);
-    if (m[5] === "/") out.push(")");
-    else stack.push(m[3]);
+    const sp = attrs.find(([n]) => n === "xml:space")?.[1];
+    const n = {name: m[3], attrs, kids: [], preserve: sp === "preserve" || (sp !== "default" && stack.at(-1)?.preserve === true)};
+    if (m[5] === "/") {
+      if (stack.length === 0) root = n;
+      else stack.at(-1).kids.push(n);
+    } else stack.push(n);
   }
   text += unescapeXml(src.slice(at));
-  if (!flush() || stack.length > 0 || roots !== 1) return undefined;
-  return out.join("");
+  if (!flush() || stack.length > 0 || root === undefined) return undefined;
+  return render(root);
 }
 
 /** Where a snapshot's copy of an object lies, for a restore by hand. */

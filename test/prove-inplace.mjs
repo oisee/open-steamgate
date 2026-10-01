@@ -8,7 +8,7 @@
 // properties are also checked on their text.
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
-import {existsSync, mkdtempSync, readFileSync, readdirSync} from "node:fs";
+import {cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {inflateRawSync} from "node:zlib";
@@ -61,15 +61,18 @@ const oldFiles = (name) => new Map([...fixtureFiles(name)].map(([f, t]) => [f, t
  *  before the call reads its post-deploy hashes (another session writing in
  *  that moment); `stored(name, text)` is what the system keeps of a file it
  *  is given (a normalisation). */
-function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, inStep, stored = (n, t) => t} = {}) {
+function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, inStep, stored = (n, t) => t, packages = [PKG]} = {}) {
   const sys = {
-    packages: new Set([PKG]),
+    packages: new Set(packages),
+    // the version stamp of an object; every write of a deploy re-activates it
+    stamps: new Map(), tick: 0,
     objects: new Map(),
     repos: [...repos],
     calls: [], seen: {}, imports: 0,
     deployedZips: [],
   };
   const put = (item, files, devclass = PKG) => sys.objects.set(item, {devclass, files: new Map(files)});
+  const restamp = (item) => sys.stamps.set(item, `${item.slice(0, 4)}:20261001${String(120000 + (sys.tick += 1)).padStart(6, "0")}${item.startsWith("CLAS") ? "/9" : ""}`);
   for (const [item, files, devclass] of objects ?? [
     [DEMO, oldFiles("zcl_osd_prove_demo")], [PLAIN, oldFiles("zcl_osd_prove_plain")], [OTHER, new Map([["zcl_osd_untouched.clas.abap", "CLASS zcl_osd_untouched.\n"]])],
   ]) put(item, files, devclass);
@@ -87,8 +90,11 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
     sys,
     put,
     async call(action, target, params) {
-      const kindOf = (code) => (code.includes("zcl_abapgit_zip=>load") ? "deploy"
-        : code.includes("lv_chunk") ? "chunk"
+      const kindOf = (code) => (code.includes("zcl_abapgit_objects=>delete") ? "cleanup"
+        : code.includes("nostamp=") ? "receipt"
+          : code.includes("existing={ lv_n }") ? "preflight"
+            : code.includes("zcl_abapgit_zip=>load") ? (code.includes("lt_exp") ? "deploy" : "import")
+              : code.includes("lv_chunk") ? "chunk"
           : code.includes("repo_deleted") ? "drop"
             : code.includes("children={ lv_kids }") ? "list"
               : code.includes("seoclassdf") ? "check"
@@ -100,6 +106,10 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
         if (h.kind !== kind) continue;
         const due = h.when === undefined ? h.n === sys.seen[kind] : !h.done && h.when(sys);
         if (due) { h.done = true; h.run(sys, put); }
+      }
+      if (action === "create") {
+        sys.packages.add(params.name);
+        return `Created package ${params.name}`;
       }
       if (action === "test") {
         const name = target.replace(/^CLAS /, "");
@@ -113,6 +123,60 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
       assert.ok(/^[\x00-\x7f]*$/.test(code), "snippet is ASCII");
       const items = itemsOf(code);
       const pkg = /'(\$[A-Z0-9_]+)'/.exec(code)?.[1];
+      // ---- the fresh mode's snippets (the sequence test): preflight, import, receipt, cleanup
+      if (kind === "preflight") {
+        return framed(`tdevc=${sys.packages.has(pkg) ? 1 : 0}; repo=none; existing=0;`);
+      }
+      if (kind === "import") {
+        const b64 = [...code.matchAll(/APPEND `([A-Za-z0-9+/=]*)` TO lt_b64\./g)].map((m) => m[1]).join("");
+        const zip = unzip(Buffer.from(b64, "base64"));
+        let repo = sys.repos.find((r) => r.pkg === pkg);
+        if (!repo) { repo = {key: "000000000042", name: OWN, pkg}; sys.repos.push(repo); }
+        const fresh = new Map();
+        for (const [f, text] of zip) {
+          const m = /^src\/([a-z0-9_]+)\.([a-z]+)\.(.+)$/.exec(f);
+          if (m === null || m[2] === "devc") continue;
+          const item = `${m[2].toUpperCase()} ${m[1].toUpperCase()}`;
+          if (!fresh.has(item)) fresh.set(item, []);
+          fresh.get(item).push([f.slice(4), text]);
+        }
+        for (const [item, files] of fresh) { put(item, files, pkg); restamp(item); }
+        return framed(`files=${zip.size}; repo=${repo.key}; status=S; logs=0; tadir=${sys.objects.size};`);
+      }
+      if (kind === "receipt") {
+        let out = "";
+        for (const item of items) {
+          out += ` stamp=${colon(item)}@${sys.stamps.get(item)};`;
+          for (const f of hashes(item)) out += ` h_file=${colon(item)}|${f.n}|${f.h}|${f.size};`;
+          out += ` h_obj=${colon(item)} files=${sys.objects.get(item).files.size};`;
+        }
+        return framed(`${out} items=${items.length};`);
+      }
+      if (kind === "cleanup") {
+        const stamps = [...code.matchAll(/APPEND `([A-Z]{4}:[0-9/]+)` TO lt_stamps\./g)].map((m) => m[1]);
+        const exp = [...code.matchAll(/APPEND `([A-Z0-9]{4} [A-Z0-9_/]+)@([^=`]+)=([0-9A-F]{64})` TO lt_exp\./g)];
+        let out = "";
+        const handed = [];
+        items.forEach((item, i) => {
+          if (sys.stamps.get(item) === stamps[i]) { handed.push(item); return; }
+          const want = exp.filter((m) => m[1] === item).map((m) => `${m[2]}=${m[3]}`).sort();
+          if (want.length > 0 && JSON.stringify(want) === JSON.stringify(guardLines(item).sort())) {
+            out += ` rehashed=${colon(item)}@${sys.stamps.get(item)};`;
+            handed.push(item);
+          } else {
+            out += ` changed=${colon(item)}@${sys.stamps.get(item)};`;
+            if (want.length > 0) out += ` hashdiff=${colon(item)};`;
+          }
+        });
+        for (const item of handed) sys.objects.delete(item);
+        const repo = sys.repos.find((r) => r.pkg === pkg);
+        if (repo) { sys.repos = sys.repos.filter((r) => r !== repo); out += ` repo_deleted=${repo.key};`; }
+        const left = items.filter((i) => sys.objects.has(i));
+        const rest = [...sys.objects].filter(([, o]) => o.devclass === pkg).map(([i]) => i);
+        if (rest.length === 0) sys.packages.delete(pkg);
+        return framed(`${out} to_delete=${handed.length}; repo_left=0;${left.map((i) => ` item_left=${colon(i)};`).join("")} items_left=${left.length}; `
+          + `others=${rest.length};${rest.map((i) => ` other=${colon(i)};`).join("")} children=0; tdevc_left=${sys.packages.has(pkg) ? 1 : 0};`);
+      }
       if (kind === "list") {
         const repo = sys.repos.find((r) => r.pkg === pkg);
         const mine = [...sys.objects].filter(([, o]) => o.devclass === pkg).map(([i]) => i).sort();
@@ -185,6 +249,7 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
       }
       for (const [item, files] of byObject) {
         const o = sys.objects.get(item);
+        restamp(item);
         for (const [n, t] of files) o.files.set(n, stored(n, t, sys));
         if (restoreCorrupts && sys.imports > 1) o.files.set(`${item.slice(5).toLowerCase()}.clas.abap`, "CLASS broken.\n");
       }
@@ -344,6 +409,21 @@ describe("osd-prove-on-system --in-place", () => {
     assert.deepEqual(snapHashes(mcp), before);
   });
 
+  it("(b) an XML leaf that is empty in the zip and whitespace on the system is NOT equal: refused, not adopted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-prove-after-"));
+    try {
+      cpSync(join(FIXTURE, "src"), dir, {recursive: true});
+      const f = join(dir, DEMO_XML);
+      writeFileSync(f, readFileSync(f, "utf8").replace("<UNICODE>X</UNICODE>", "<UNICODE/>"));
+      const mcp = fakeSystem({stored: (n, t, sys) => (sys.imports === 1 && n === DEMO_XML ? t.replace("<UNICODE/>", "<UNICODE> </UNICODE>") : t)});
+      const {code, text} = await run([dir, "--in-place", "--package", PKG, "--unit", "prove-demo", "--manifest", MANIFEST], mcp);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL deployed version: CLAS ZCL_OSD_PROVE_DEMO is not what this run deployed \(zcl_osd_prove_demo\.clas\.xml is neither the AFTER zip's/);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
   it("(c) an XML file the deploy left as it was in the snapshot is adopted (nothing of ours in it)", async () => {
     const mcp = fakeSystem({stored: (n, t, sys) => (sys.imports === 1 && n.endsWith(".xml") ? sysFile(sys, n) : t)});
     const before = snapHashes(mcp);
@@ -383,6 +463,17 @@ describe("osd-prove-on-system --in-place", () => {
     assert.equal(code, 1, text);
     assert.match(text, /CLAS ZCL_OSD_PROVE_PLAIN is not what this run deployed \(zcl_osd_prove_plain\.clas\.locals_imp\.abap is shown by the system, is not in the AFTER zip and is not the snapshot's\)/);
     assert.equal(mcp.sys.objects.get(PLAIN).files.get(PLAIN_LOCALS), "* added by somebody\n");
+  });
+
+  it("canonical XML: whitespace-only text is dropped only between element children; a leaf keeps it; xml:space=preserve keeps all", () => {
+    assert.notEqual(canonicalXml("<a><b> </b></a>"), canonicalXml("<a><b/></a>"));
+    assert.notEqual(canonicalXml("<a><b> </b></a>"), canonicalXml("<a><b></b></a>"));
+    assert.notEqual(canonicalXml("<a><b>\n</b></a>"), canonicalXml("<a><b> </b></a>"));
+    assert.equal(canonicalXml("<a><b></b></a>"), canonicalXml("<a><b/></a>"));
+    assert.equal(canonicalXml("<a>\n  <b>x</b>\n  <c/>\n</a>"), canonicalXml("<a><b>x</b><c/></a>"));
+    assert.notEqual(canonicalXml("<a xml:space=\"preserve\">\n  <b>x</b>\n</a>"), canonicalXml("<a xml:space=\"preserve\"><b>x</b></a>"));
+    assert.notEqual(canonicalXml("<a xml:space=\"preserve\"><b>\n <c/> </b></a>"), canonicalXml("<a xml:space=\"preserve\"><b><c/></b></a>"), "inherited by the subtree");
+    assert.equal(canonicalXml("<a xml:space=\"preserve\"><b xml:space=\"default\">\n <c/> </b></a>"), canonicalXml("<a xml:space=\"preserve\"><b xml:space=\"default\"><c/></b></a>"));
   });
 
   it("canonical XML: attribute order, whitespace-only text, empty-element form, CDATA and entities do not count; content does", () => {
@@ -539,5 +630,71 @@ describe("osd-prove-on-system --in-place", () => {
     assert.throws(() => chunkAbap(PKG, DEMO, "a.abap", 0, 10 ** 6), /not a chunk/);
     assert.throws(() => dropRepoAbap(PKG, "42' OR 1 = '1"), /not a repository key/);
     assert.throws(() => deployAbap(zip, PKG, [{item: DEMO, files: [{name: "a'b", sha256: "a".repeat(64)}]}]), /not a file entry/);
+  });
+
+  describe("a fresh --keep run, an in-place run on its package, then --cleanup (measured on A4H, 2026-10-01)", () => {
+    // The in-place deploy and its restore re-activate every object they
+    // write: version stamps move, content does not. The fresh run's receipt
+    // used to hold the stamps alone, so its --cleanup refused those objects.
+    const freshArgs = (extra = []) => [join(FIXTURE, "src"), "--unit", "prove-demo", "--manifest", MANIFEST, "--package", PKG, ...extra];
+    const afterFolder = () => {
+      const dir = mkdtempSync(join(tmpdir(), "osd-prove-after-"));
+      cpSync(join(FIXTURE, "src"), dir, {recursive: true});
+      const f = join(dir, "zcl_osd_prove_demo.clas.abap");
+      writeFileSync(f, readFileSync(f, "utf8") + "* the AFTER version\n");
+      return dir;
+    };
+    const sequence = async () => {
+      const mcp = fakeSystem({objects: [], packages: []});
+      const runs = mkdtempSync(join(tmpdir(), "osd-prove-inplace-"));
+      const fresh = await run(freshArgs(["--keep"]), mcp, runs);
+      assert.equal(fresh.code, 0, fresh.text);
+      const stampsAfterFresh = new Map(mcp.sys.stamps);
+      const after = afterFolder();
+      try {
+        const ip = await run([after, "--in-place", "--package", PKG, "--unit", "prove-demo", "--manifest", MANIFEST], mcp, runs);
+        assert.equal(ip.code, 0, ip.text);
+        assert.match(ip.text, /package restored: 2 object\(s\) verified/);
+      } finally {
+        rmSync(after, {recursive: true, force: true});
+      }
+      for (const item of [DEMO, PLAIN]) assert.notEqual(mcp.sys.stamps.get(item), stampsAfterFresh.get(item), `${item} was re-activated`);
+      return {mcp, runs};
+    };
+
+    it("--cleanup deletes both objects by their content hash, although the stamps moved", async () => {
+      const {mcp, runs} = await sequence();
+      const cl = await run(["--cleanup", "--package", PKG], mcp, runs);
+      assert.equal(cl.code, 0, cl.text);
+      assert.match(cl.text, /CLAS ZCL_OSD_PROVE_DEMO: stamp moved .* the content equals the receipt's hash/);
+      assert.match(cl.text, /cleanup of \$ZOSG_TMP_INPL: complete/);
+      assert.equal(mcp.sys.objects.size, 0);
+      assert.deepEqual(mcp.sys.repos, []);
+      assert.ok(!mcp.sys.packages.has(PKG));
+      assert.ok(!existsSync(join(cl.runs, `${PKG}.json`)));
+    });
+
+    it("without the hashes (an old receipt) the same sequence is refused as before: the stamps moved", async () => {
+      const {mcp, runs} = await sequence();
+      const file = join(runs, `${PKG}.json`);
+      const receipt = JSON.parse(readFileSync(file, "utf8"));
+      for (const e of receipt.stamped) { delete e.files; delete e.hash; }
+      writeFileSync(file, JSON.stringify(receipt));
+      const cl = await run(["--cleanup", "--package", PKG], mcp, runs);
+      assert.equal(cl.code, 1, cl.text);
+      assert.match(cl.text, /decided by the version stamp alone, as before/);
+      assert.match(cl.text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_DEMO changed since the import/);
+      assert.match(cl.text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import/);
+      assert.equal(mcp.sys.objects.size, 2, "nothing deleted");
+    });
+
+    it("an edit made after the in-place run is a foreign edit: that object is kept, the other is deleted", async () => {
+      const {mcp, runs} = await sequence();
+      mcp.sys.objects.get(PLAIN).files.set("zcl_osd_prove_plain.clas.abap", "edited by a colleague\n");
+      const cl = await run(["--cleanup", "--package", PKG], mcp, runs);
+      assert.equal(cl.code, 1, cl.text);
+      assert.match(cl.text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import .* a foreign edit; kept/);
+      assert.deepEqual([...mcp.sys.objects.keys()], [PLAIN]);
+    });
   });
 });

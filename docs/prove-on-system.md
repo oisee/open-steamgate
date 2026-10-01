@@ -26,7 +26,9 @@ The run creates its own package and so owns it:
 - The package must not exist when the run starts.
 - No object of the zip may exist yet, in any package.
 - The run deletes an object only if it is in the run's **receipt** and its
-  version stamp is unchanged since the import.
+  version stamp is unchanged since the import, **or** its stamp moved and
+  its content is still the one the receipt hashed (a re-activation is not
+  an edit).
 - It deletes only its own repository row: the one named `OSDPROVE <package>`
   whose key is the key its own import reported. This needs no receipt, and
   it also happens after a refused import, since the row is the run's own.
@@ -47,7 +49,8 @@ another folder). It holds:
 - the repository key and name;
 - the zip's object list;
 - for each object that the import wrote into the package, its TADIR
-  identity and a version stamp read on the system right after the import.
+  identity, a version stamp read on the system right after the import, and
+  the content hash described below.
 
 The stamps are read by a small snippet (`receiptAbap`), and the cleanup
 reads them again with the same ABAP:
@@ -57,9 +60,78 @@ reads them again with the same ABAP:
 | CLAS, INTF | the newest REPOSRC `UDAT`+`UTIME` over abapGit's own include list (`zcl_abapgit_oo_factory=>get_by_type( )->get_includes( )`, the list abapGit's `changed_by` reads), plus how many of those includes exist |
 | PROG | its REPOSRC `UDAT`+`UTIME` |
 | TABL, DTEL, DOMA, TTYP | the active DD02L / DD04L / DD01L / DD40L row's `AS4DATE`+`AS4TIME` |
+| DDLS | the active DDDDLSRC row's `AS4DATE`+`AS4TIME` (**to be measured on A4H**: abapGit's own DDLS object reads the source through `IF_DD_DDL_HANDLER~READ` with `get_state = 'A'` into `DDDDLSRCV`, whose `AS4USER`/`AS4DATE`/`AS4TIME` its `changed_by` uses; the table and field names are read off that source and off memory of the DDIC, not yet seen on a system) |
 
 Any other kind gets no stamp. Such an object is not in the receipt, the run
-reports it, and it is never deleted.
+reports it, and it is never deleted. DCLS (access controls) is one: abapGit
+reads it through a handler into `ACM_S_DCLSRC` and the table behind that is not
+known here, so it is not stamped and not deleted. Its content *can* be hashed
+(abapGit serialises any object) and its files would be `.dcls.asdcls` and
+`.dcls.xml`; giving it a stamp, or deleting a stamp-less object by hash alone,
+is not done.
+
+#### The content hash (fresh mode)
+
+A moved stamp is not an edit. Measured on A4H twice: an `--in-place` run
+(or any deploy) on a package that a fresh `--keep` run installed re-activates
+DDIC objects, so their version stamps (REPOSRC `UDAT`/`UTIME`, DD
+`AS4DATE`/`AS4TIME`) change while the content does not, and the fresh run's
+`--cleanup` refused them as "changed since the import" and they had to be
+removed by hand.
+
+So the receipt also holds, per object, the SHA-256 of each file of its abapGit
+serialisation (`files: [{name, sha256, size, cx?}]`, and `hash`, the SHA-256 of
+the sorted `name=sha256` lines, the same `objectHash` as the in-place
+snapshot). The hash is read **by the in-place mode's own snippet**
+(`hashItemBlock` / `serializeBlock` in `tools/osd-prove-inplace.mjs`:
+`zcl_abapgit_objects=>serialize`, `cl_abap_message_digest` SHA-256), shared and
+not copied, and inside the receipt snippet, in the same dialog step as the
+stamp. The cleanup snippet uses the same `serializeBlock` for its comparison, so
+both sides hash the same bytes.
+
+The rule, in the cleanup snippet (one step, so nothing changes between the
+check and the delete):
+
+- stamp unchanged: delete, as before (the hash plays no part);
+- stamp moved (or unreadable) and the receipt has hashes for the object:
+  abapGit serialises it now; if its files are exactly the receipt's (same
+  names, same hashes), delete (`rehashed=` in the report, "re-activated, not
+  edited" in the log); otherwise keep it, report `hashdiff=` and fail the
+  run: "a foreign edit";
+- stamp moved and no hash in the receipt (an old receipt, or an object abapGit
+  could not serialise at receipt time): keep it as before. The cleanup says so
+  in its log ("decided by the version stamp alone, as before").
+
+A hash never *adds* a delete where the stamp did not: if the stamp is unchanged
+the object goes, hash or not, so the same-second limit below is unchanged. A
+serialisation that raises at cleanup time keeps the object (fail closed, and the
+problem names it).
+
+**XML, and what is sound.** abapGit rewrites XML on serialisation, so a hash of
+raw bytes could in principle differ for a file nobody edited. Measured on A4H
+(`--in-place`, run 3): all 13 XML files were byte-equal after a deploy, so the
+byte hash alone is the rule that held. When the byte hash of an XML file still
+differs, the cleanup does not treat that as an edit by default and does not
+ignore it either. At receipt time each XML file is also read back by chunks (the
+chunk carries the file's hash, so it is that version) and the SHA-256 of its
+**canonical element tree** (`canonicalXml`, the in-place mode's: attributes
+sorted, whitespace-only text dropped only between the element children of an
+element that has some (indentation), the text of a leaf kept exactly so `<a> </a>`
+differs from `<a/>`, `xml:space="preserve"` keeping everything in its subtree,
+entities and CDATA read, declaration and comments ignored; a file that is not one well-formed tree has none) is stored as
+`cx`. At cleanup, an object whose stamp moved and whose hash differs is
+accepted only if **every differing file is XML, the set of file names is the
+same, each such file has a `cx`, and its canonical tree now equals it**. Then the
+tool runs the cleanup snippet a second time with that object's *current*
+file hashes as the expected ones, so the snippet checks again, in its own step,
+that the object is still exactly what was read; the second call replaces the
+first. Why this is sound: a canonical tree keeps every element name, attribute
+and non-blank text, so an edit of a value or a structure changes it; what it
+ignores (indentation, attribute order, line endings, declaration, comments)
+carries no content abapGit would deserialise. Why it is limited to XML: a
+source file differing in bytes is an edit, by the same measurement that found
+XML equal. A receipt whose XML has no `cx` (the read-back failed) decides by
+bytes only. The cost is one chunk read per XML file at receipt time.
 
 **Limit of the stamp.** The stamps have one-second resolution, the system's
 own change stamps. A change made in the *same second* as the stamp it
@@ -76,8 +148,11 @@ leaves the package in place does not move the stamp, and a later
 the run's own objects in its own temporary `$` package are affected, and
 only on an explicit `--cleanup`.
 
-A content hash of every include and of the DDIC rows, with inactive rows
-counted as a change, would close both limits. It is not done here.
+The content hash above covers an object whose stamp moved. It does not close
+the same-second case (a stamp that did not move deletes as before) nor the
+saved-but-inactive case. Reading the hash for every object, whatever its stamp,
+would close both, at the cost of refusing what a stamp lets through today; not
+done here.
 
 A refused import writes no receipt, and neither does an import whose stamps
 could not be read. In both cases the cleanup deletes no object.
@@ -165,7 +240,8 @@ with "context canceled".
    2. **The receipt's objects.** For each object in the receipt, the
       snippet reads its TADIR row. It keeps the object only if `DEVCLASS` is
       this package **and** the stamp it reads now equals the receipt's
-      stamp.
+      stamp, **or** its stamp moved and the files abapGit serialises now are
+      the receipt's hashed files (see the content hash above).
       - A changed object is kept and reported, and the run fails (exit 1).
       - An object that is missing or in another package is reported and
         not touched.
@@ -288,6 +364,30 @@ The tests cover:
   - a cleanup that deletes only the zip's items when the package holds
     more;
   - a zip item found in another package.
+- **The receipt's content hashes** (`describe("the receipt's content hashes")`):
+  - the receipt carries each object's per-file hash and a canonical digest for
+    XML, taken in the receipt snippet's own step with the in-place
+    serialisation;
+  - stamp moved and hash equal: deleted;
+  - stamp moved and hash differs: kept, the receipt stays, and a later
+    `--cleanup` keeps it too;
+  - stamp unchanged and hash differs: deleted as before;
+  - an old receipt (no hashes), or an object that could not be hashed:
+    as before, and the log says so;
+  - XML that abapGit rewrote (same tree, other bytes): deleted through the
+    second cleanup call, which carries the current hashes; a changed XML
+    value, a malformed XML, a source file that differs beside an XML that only
+    moved, a receipt without `cx`: kept;
+  - DDLS: its file names and stamp snippet, a view that is stamped, hashed and
+    deleted, a changed `.asddls` kept (fixture built in a temp folder);
+  - in `test/prove-inplace.mjs` the whole sequence: a fresh `--keep` run, an
+    in-place run on its package (the fake re-activates every object a deploy
+    writes), then `--cleanup`: deleted by hash; the same with the hashes
+    stripped from the receipt: refused as measured; one object edited after:
+    kept, the other deleted.
+  The fake does not execute ABAP: what the cleanup snippet *decides* (compare
+  the sets, delete only on equal) is modelled in the fake and pinned on the
+  snippet's text; the real behaviour is for A4H to measure.
 - **The receipt:**
   - a refused import writes no receipt, and `--cleanup` then refuses and
     deletes nothing;
@@ -425,7 +525,11 @@ Tests: `test/prove-inplace.mjs` (fake system; each rule checked failing without 
 
 - `cl_abap_message_digest` SHA-256 over abapGit's serialized files works on the sandbox; snapshot and verification hashed 13 objects.
 - An AFTER zip without `package.devc.xml` makes abapGit plan a **delete** (action 4) of the package's own DEVC entry. In place nothing is deleted: a delete action is declined (decision no) and reported as `keep=`, never approved.
-- A deploy re-activates DDIC objects even when their content is unchanged, so after an in-place run on a package that a fresh run installed with `--keep`, that fresh run's receipt stamps are stale and its `--cleanup` refuses those objects as changed. The content hashes of the in-place snapshot are unaffected (13/13 equal after rollback).
+- A deploy re-activates DDIC objects even when their content is unchanged, so after an in-place run on a package that a fresh run installed with `--keep`, that fresh run's receipt stamps are stale and its `--cleanup` refuses those objects as changed. The content hashes of the in-place snapshot are unaffected (13/13 equal after rollback). (The fresh-mode receipt now also holds content hashes, and its cleanup deletes a stamp-moved object whose hash equals the receipt's; not yet measured on A4H.)
 - End to end: snapshot of 13 objects, one class changed in AFTER, 127 system tests passed, rollback re-imported that class, 13/13 hashes equal to the snapshot.
 
 - Second run, after the adoption rules above (same day, a fresh package): the hash read inside the deploy's own call works. For every one of the 13 objects, the class and DDIC XML that abapGit wrote back was byte-equal to the snapshot's, so the XML was adopted under "unchanged since the snapshot" and no canonical comparison was needed. The changed class source matched the zip. The abapGit repository row that the earlier `--keep` run had left was used for the import, and the rollback left it in place ("not created by this run"). Rollback re-imported one class and 13/13 hashes were equal to the snapshot. The fresh receipt's `--cleanup` again refused the six re-activated objects, as described above.
+
+### Measured on A4H: cleanup by content hash (2026-10-01)
+
+The sequence was a fresh `--keep` run, then `--in-place` on the same package, then `--cleanup`. Before this change it needed manual deletion of six objects. Now it completes on its own. The cleanup reported one class and five DDIC objects (one data element, four tables) as "stamp moved … but the content equals the receipt's hash (re-activated, not edited)" and deleted them. The repository row and the package went with them, and the residue was zero. abapGit's serialisation of an unedited object was byte-stable between the receipt and the cleanup, so no XML needed the canonical comparison. A DDLS object has not been run through this yet.

@@ -25,8 +25,10 @@
 // run reads a version stamp for every object the import wrote into the
 // package and writes a receipt, `.local/prove-runs/<package>.json`. The
 // cleanup -- the run's own, or `--cleanup` later -- deletes an object only
-// if it is in the receipt and its stamp is unchanged, through abapGit's
-// object layer; then the repository row (only the tool's own,
+// if it is in the receipt and its stamp is unchanged -- or its stamp moved
+// and its content hash (SHA-256 of abapGit's serialisation, read in the
+// same step as the stamp) is still the receipt's, since a re-activation
+// moves stamps and leaves content -- through abapGit's object layer; then the repository row (only the tool's own,
 // `OSDPROVE <package>`, with the receipt's key) and the package only when
 // nothing else and no subpackage is in it. No receipt, no delete: the zip's
 // object list alone never authorises one.
@@ -63,7 +65,10 @@ import * as abaplint from "@abaplint/core";
 import {runsAs} from "./osd-main.mjs";
 import {layout, zipInProcess} from "./osd-abapgit-zip.mjs";
 import {loadManifest, unitFor} from "./osd-deploy-manifest.mjs";
-import {proveInPlace, rollbackFromState, snapshotDir} from "./osd-prove-inplace.mjs";
+import {
+  FILE_NAME, HASH_DECLS, canonicalXml, collectHashes, fetchFile, hashItemBlock, parseHashes, proveInPlace, readHashes,
+  rollbackFromState, serializeBlock, sha256, snapshotDir,
+} from "./osd-prove-inplace.mjs";
 
 export const MARK_OPEN = "OSDPROVE<<";
 export const MARK_CLOSE = ">>OSDPROVE";
@@ -224,9 +229,14 @@ export function checkItems(items) {
  *  CLAS/INTF the newest REPOSRC UDAT+UTIME over abapGit's own include list
  *  (zcl_abapgit_oo_factory, the list abapGit's changed_by reads) and how
  *  many of those includes exist; PROG its REPOSRC row; TABL/DTEL/DOMA/TTYP
- *  the active DD02L/DD04L/DD01L/DD40L row's AS4DATE+AS4TIME. Any other
- *  kind gets no stamp, so it is never in a receipt and never deleted. */
-export const STAMPED_KINDS = ["CLAS", "INTF", "PROG", "TABL", "DTEL", "DOMA", "TTYP"];
+ *  the active DD02L/DD04L/DD01L/DD40L row's AS4DATE+AS4TIME; DDLS the
+ *  active DDDDLSRC row's AS4DATE+AS4TIME (the table abapGit's own DDLS
+ *  object reads through IF_DD_DDL_HANDLER~READ, get_state 'A'; the
+ *  field names are read off abapGit's source, not yet measured on a
+ *  system). Any other kind gets no stamp, so it is never in a receipt and
+ *  never deleted. DCLS has none either: abapGit reads it through a
+ *  handler into ACM_S_DCLSRC and the table behind that is not known here. */
+export const STAMPED_KINDS = ["CLAS", "INTF", "PROG", "TABL", "DTEL", "DOMA", "TTYP", "DDLS"];
 const STAMP = /^[A-Z]{4}:[0-9]{14}(\/[0-9]+)?$/;
 
 const STAMP_DECLARATIONS = [
@@ -270,11 +280,16 @@ const STAMP_BLOCK = [
   "    SELECT SINGLE as4date, as4time FROM dd01l WHERE domname = @lv_name AND as4local = 'A' AND as4vers = '0000' INTO (@lv_d, @lv_t).",
   "  WHEN 'TTYP'.",
   "    SELECT SINGLE as4date, as4time FROM dd40l WHERE typename = @lv_name AND as4local = 'A' INTO (@lv_d, @lv_t).",
+  "  WHEN 'DDLS'.",
+  "    SELECT SINGLE as4date, as4time FROM ddddlsrc WHERE ddlname = @lv_name AND as4local = 'A' INTO (@lv_d, @lv_t).",
   "ENDCASE.",
   "IF lv_stamp IS INITIAL AND lv_d IS NOT INITIAL.",
   "  lv_stamp = |{ lv_type }:{ lv_d }{ lv_t }|.",
   "ENDIF.",
 ];
+
+/** The prefix of the content-hash entries in the receipt snippet's report. */
+export const RECEIPT_HASH = "h_";
 
 /** After the import: each object of the zip whose TADIR row is in the
  *  package, with its stamp. Nothing is changed. */
@@ -285,7 +300,9 @@ export function receiptAbap(pkg, items) {
     "DATA lt_items TYPE string_table.",
     "DATA lv_type TYPE tadir-object.",
     "DATA lv_name TYPE tadir-obj_name.",
+    "DATA lv_n TYPE i.",
     ...STAMP_DECLARATIONS,
+    ...HASH_DECLS,
     ...items.map((i) => `APPEND \`${i}\` TO lt_items.`),
     "LOOP AT lt_items INTO DATA(lv_item).",
     "  SPLIT lv_item AT space INTO lv_type lv_name.",
@@ -301,6 +318,9 @@ export function receiptAbap(pkg, items) {
     "      lv_out = |{ lv_out } nostamp={ lv_type }:{ lv_name };|.",
     "    ELSE.",
     "      lv_out = |{ lv_out } stamp={ lv_type }:{ lv_name }@{ lv_stamp };|.",
+    "      \" the content hash in the same dialog step as the stamp, with the",
+    "      \" in-place mode's own serialisation and digest (hashItemBlock)",
+    ...hashItemBlock(pkg, RECEIPT_HASH).map((l) => `      ${l}`),
     "    ENDIF.",
     "  ENDIF.",
     "ENDLOOP.",
@@ -351,6 +371,18 @@ export function preflightAbap(pkg, items) {
   ].join("\n") + "\n";
 }
 
+/** The cleanup's content check of lv_item: abapGit serialises it now with
+ *  the in-place mode's serializeBlock (same serialisation, same digest),
+ *  every file becomes `ITEM@name=HEX` in lt_b, and the object is the
+ *  receipt's when lt_b equals lt_a (the receipt's lines for the item). A
+ *  serialisation that raises, or an object that is not there, leaves
+ *  lv_same false: kept. */
+const hashCompare = (pkg) => serializeBlock(pkg, {
+  prefix: "h_",
+  onFile: ["lv_line = |{ lv_item }@{ ls_file-filename }={ lv_hx }|.", "APPEND lv_line TO lt_b."],
+  onOk: ["SORT lt_a.", "SORT lt_b.", "IF lt_a = lt_b.", "  lv_same = abap_true.", "ENDIF."],
+});
+
 /** Step 7, the cleanup, in one snippet so nothing changes between the
  *  check and the delete:
  *   a. the package's repository, if any, must be the tool's own by name and,
@@ -372,6 +404,15 @@ export function cleanupAbap(pkg, entries, expectedKey) {
   const items = entries.map((e) => e.item);
   checkItems(items);
   for (const e of entries) if (!STAMP.test(e.stamp ?? "")) throw new Error(`not a stamp: ${e.stamp} (${e.item})`);
+  // the receipt's content hashes: `ITEM@file=HEX`, one per file; an entry
+  // without any (an old receipt) is decided by its stamp alone
+  const expected = [];
+  for (const e of entries) {
+    for (const f of e.files ?? []) {
+      if (!FILE_NAME.test(f.name) || !/^[0-9a-fA-F]{64}$/.test(f.sha256)) throw new Error(`not a file entry: ${f.name} (${e.item})`);
+      expected.push(`APPEND \`${e.item}@${f.name}=${f.sha256.toUpperCase()}\` TO lt_exp.`);
+    }
+  }
   if (expectedKey !== undefined && expectedKey !== "" && !REPO_KEY.test(expectedKey)) throw new Error(`not a repository key: ${expectedKey}`);
   const keyCheck = expectedKey === undefined ? "" : `li_repo->get_key( ) <> '${expectedKey}' OR `;
   return [
@@ -388,9 +429,19 @@ export function cleanupAbap(pkg, entries, expectedKey) {
     "DATA(li_log) = CAST zif_abapgit_log( NEW zcl_abapgit_log( ) ).",
     "DATA lt_stamps TYPE string_table.",
     "DATA lv_want TYPE string.",
+    "DATA lv_same TYPE abap_bool.",
+    "DATA lt_exp TYPE string_table.",
+    "DATA lt_a TYPE string_table.",
+    "DATA lt_b TYPE string_table.",
+    "DATA lv_l TYPE string.",
+    "DATA lv_line TYPE string.",
+    "DATA lv_pre TYPE string.",
+    "DATA lv_pl TYPE i.",
     ...STAMP_DECLARATIONS,
+    ...HASH_DECLS,
     ...entries.map((e) => `APPEND \`${e.item}\` TO lt_items.`),
     ...entries.map((e) => `APPEND \`${e.stamp}\` TO lt_stamps.`),
+    ...expected,
     "TRY.",
     "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
     `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
@@ -415,10 +466,33 @@ export function cleanupAbap(pkg, entries, expectedKey) {
     "      lv_out = |{ lv_out } elsewhere={ lv_type }:{ lv_name }@{ ls_db-devclass };|.",
     "    ELSE.",
     ...STAMP_BLOCK.map((l) => `      ${l}`),
+    "      lv_same = abap_true.",
     "      IF lv_stamp IS INITIAL OR lv_stamp <> lv_want.",
-    "        \" changed since the import (or unreadable now): not ours to delete any more",
-    "        lv_out = |{ lv_out } changed={ lv_type }:{ lv_name }@{ lv_stamp };|.",
-    "      ELSE.",
+    "        \" the stamp moved. A re-activation moves it and leaves the content,",
+    "        \" so the object is still ours when abapGit serialises it now to the",
+    "        \" files the receipt hashed; any other edit changes a hash",
+    "        lv_same = abap_false.",
+    "        CLEAR: lt_a, lt_b.",
+    "        lv_pre = |{ lv_item }@|.",
+    "        lv_pl = strlen( lv_pre ).",
+    "        LOOP AT lt_exp INTO lv_l.",
+    "          IF strlen( lv_l ) > lv_pl AND substring( val = lv_l len = lv_pl ) = lv_pre.",
+    "            APPEND lv_l TO lt_a.",
+    "          ENDIF.",
+    "        ENDLOOP.",
+    "        IF lt_a IS NOT INITIAL.",
+    ...hashCompare(pkg).map((l) => `          ${l}`),
+    "        ENDIF.",
+    "        IF lv_same = abap_true.",
+    "          lv_out = |{ lv_out } rehashed={ lv_type }:{ lv_name }@{ lv_stamp };|.",
+    "        ELSE.",
+    "          lv_out = |{ lv_out } changed={ lv_type }:{ lv_name }@{ lv_stamp };|.",
+    "          IF lt_a IS NOT INITIAL.",
+    "            lv_out = |{ lv_out } hashdiff={ lv_type }:{ lv_name };|.",
+    "          ENDIF.",
+    "        ENDIF.",
+    "      ENDIF.",
+    "      IF lv_same = abap_true.",
     "        CLEAR ls_tadir.",
     "        MOVE-CORRESPONDING ls_db TO ls_tadir.",
     "        APPEND ls_tadir TO lt_tadir.",
@@ -431,6 +505,7 @@ export function cleanupAbap(pkg, entries, expectedKey) {
     "    CATCH cx_root INTO DATA(lx2).",
     "      lv_out = |{ lv_out } ERR delete: { lx2->get_text( ) };|.",
     "  ENDTRY.",
+    "  lv_n = 0.",
     "  LOOP AT li_log->get_messages( ) INTO DATA(ls_m) WHERE type = 'E' OR type = 'A'.",
     "    lv_n = lv_n + 1.",
     `    IF lv_n <= ${MAX_LOG}.`,
@@ -578,6 +653,12 @@ export function parseCleanup(msg) {
     toDelete: Number(field(msg, "to_delete") ?? NaN),
     absent: pairs(msg, "absent").map((p) => p.item),
     changed: pairs(msg, "changed"),
+    // the stamp moved and the content is the receipt's: deleted as ours
+    rehashed: pairs(msg, "rehashed"),
+    // the stamp moved, the receipt had hashes and the content differs
+    hashdiff: pairs(msg, "hashdiff").map((p) => p.item),
+    // abapGit could not serialise the object to compare it
+    hashFail: parseHashes(msg, "h_").fail,
     elsewhere: pairs(msg, "elsewhere"),
     repoLeft: Number(field(msg, "repo_left") ?? NaN),
     itemsLeft: Number(field(msg, "items_left") ?? NaN),
@@ -802,6 +883,82 @@ export function readReceipt(file) {
   return JSON.parse(readFileSync(file, "utf8"));
 }
 
+/** The receipt's entries with their content hashes, from the same report
+ *  as the stamps (the receipt snippet serialised each object in the step
+ *  that read its stamp). An XML file also gets `cx`, the SHA-256 of its
+ *  canonical element tree, read back by chunks that must carry the reported
+ *  hash (so it is that version): the cleanup uses it to tell abapGit
+ *  re-writing an XML file from somebody editing it. An object abapGit could
+ *  not hash, or whose report is incomplete, keeps no hash and is decided by
+ *  its stamp alone, as before; a file that cannot be read back keeps no
+ *  `cx` and is compared by bytes only. Neither fails the run: the hashes
+ *  only ever add a reason to delete. */
+export async function withHashes(mcp, pkg, entries, message, log = () => {}) {
+  const h = collectHashes(parseHashes(message, RECEIPT_HASH), entries.map((e) => e.item));
+  const out = [];
+  for (const e of entries) {
+    const got = h.byItem.get(e.item);
+    if (got === undefined) {
+      log(`receipt: no content hash for ${e.item} (${h.fail.find((f) => f.item === e.item)?.text ?? "the report is incomplete"}); it is decided by its stamp alone`);
+      out.push(e);
+      continue;
+    }
+    const files = [];
+    for (const f of got.files) {
+      const entry = {name: f.name, sha256: f.sha256, size: f.size};
+      if (f.name.endsWith(".xml")) {
+        try {
+          const canon = canonicalXml(await fetchFile(mcp, pkg, e.item, f));
+          if (canon !== undefined) entry.cx = sha256(canon);
+        } catch (err) {
+          log(`receipt: ${e.item} ${f.name} could not be read back (${err.message}); compared by bytes only`);
+        }
+      }
+      files.push(entry);
+    }
+    out.push({...e, hash: got.hash, files});
+  }
+  return out;
+}
+
+/** The pre-pass of a second cleanup call. `names` are the items whose stamp
+ *  moved and whose content hash differs from the receipt's. For each, the
+ *  files abapGit serialises now are hashed; when every file that differs is
+ *  XML and its canonical element tree equals the one the receipt recorded
+ *  (`cx`), and the set of files is the same, the object's expected hashes
+ *  become the current ones, and the cleanup snippet re-checks them in its own
+ *  step. Anything else (a source file differs, a file came or went, no `cx`,
+ *  a file that is not one well-formed tree, a read that fails) leaves the
+ *  entry as it was: kept, a foreign edit. */
+export async function acceptCanonicalXml(mcp, pkg, entries, names, log = () => {}) {
+  const want = entries.filter((e) => names.includes(e.item) && e.files?.length);
+  if (want.length === 0) return {entries, accepted: []};
+  const now = await readHashes(mcp, pkg, want.map((e) => e.item), log);
+  const accepted = [];
+  const next = [];
+  for (const e of entries) {
+    const cur = now.byItem.get(e.item);
+    if (!want.includes(e) || cur === undefined) { next.push(e); continue; }
+    const recorded = new Map(e.files.map((f) => [f.name, f]));
+    const same = cur.files.length === e.files.length && cur.files.every((f) => recorded.has(f.name));
+    const differing = same ? cur.files.filter((f) => recorded.get(f.name).sha256 !== f.sha256) : [];
+    let ok = same && differing.length > 0 && differing.every((f) => f.name.endsWith(".xml") && recorded.get(f.name).cx !== undefined);
+    for (const f of ok ? differing : []) {
+      try {
+        const canon = canonicalXml(await fetchFile(mcp, pkg, e.item, f));
+        if (canon === undefined || sha256(canon) !== recorded.get(f.name).cx) ok = false;
+      } catch {
+        ok = false;
+      }
+      if (!ok) break;
+    }
+    if (!ok) { next.push(e); continue; }
+    accepted.push({item: e.item, files: differing.map((f) => f.name)});
+    next.push({...e, files: cur.files.map((f) => ({name: f.name, sha256: f.sha256}))});
+  }
+  return {entries: next, accepted};
+}
+
 /** Step 7: delete the receipt's objects that are unchanged, the repository
  *  row, and the package if nothing else is in it (cleanupAbap says how).
  *  `entries` are the receipt's stamped objects; with none, no object is
@@ -810,20 +967,49 @@ export async function cleanup(mcp, pkg, entries, {expectedKey, log = () => {}} =
   // without the key of this run's import the repository cannot be told from
   // one that appeared since; the snippet then refuses any repository at all
   if (expectedKey === undefined) expectedKey = "";
+  const unhashed = entries.filter((e) => !(e.files?.length > 0));
+  if (unhashed.length > 0) {
+    log(`cleanup: ${unhashed.length === entries.length ? "the receipt carries" : `${unhashed.length} receipt entr(ies) carry`} no content hashes `
+      + "(written by an older version, or an object that could not be hashed): decided by the version stamp alone, as before");
+  }
   let r;
+  let c;
+  const accepted = [];
   try {
     r = await exec(mcp, cleanupAbap(pkg, entries, expectedKey), "cleanup");
+    c = parseCleanup(r.message);
+    log(`cleanup: ${r.message.trim()}`);
+    // an XML file abapGit rewrote (same tree, other bytes) is not an edit:
+    // when the only difference of a moved object is such a file, say so to
+    // the snippet through the object's current hashes and run it again; the
+    // snippet re-checks them in its own step, so nothing slips in between
+    if (c.hashdiff.length > 0) {
+      const acc = await acceptCanonicalXml(mcp, pkg, entries, c.hashdiff, log);
+      if (acc.accepted.length > 0) {
+        for (const a of acc.accepted) {
+          log(`cleanup: ${a.item}: ${a.files.join(", ")} differs in bytes from the receipt's but is the same XML element tree; accepted as unchanged`);
+        }
+        accepted.push(...acc.accepted);
+        r = await exec(mcp, cleanupAbap(pkg, acc.entries, expectedKey), "cleanup");
+        c = parseCleanup(r.message);
+        log(`cleanup (second call): ${r.message.trim()}`);
+      }
+    }
   } catch (e) {
     return {ok: false, problems: [`cleanup: ${e.message}`]};
   }
-  const c = parseCleanup(r.message);
-  log(`cleanup: ${r.message.trim()}`);
   const problems = [];
+  for (const f of c.hashFail) problems.push(`cleanup: ${f.item} could not be serialised to compare its content (${f.text}); kept`);
   for (const e of c.err) problems.push(`cleanup: ${e}`);
   for (const l of c.logs) problems.push(`cleanup log ${l}`);
   for (const e of c.elsewhere) problems.push(`cleanup: ${e.item} is in package ${e.where}, not ${pkg}; not touched`);
   for (const e of c.changed) {
-    problems.push(`cleanup: ${e.item} changed since the import (stamp now "${e.where ?? ""}"); kept`);
+    problems.push(`cleanup: ${e.item} changed since the import (stamp now "${e.where ?? ""}")`
+      + (c.hashdiff.includes(e.item) && !c.hashFail.some((f) => f.item === e.item) ? " and its content differs from the receipt's hash: a foreign edit" : "")
+      + "; kept");
+  }
+  for (const e of c.rehashed) {
+    log(`cleanup: ${e.item}: stamp moved to "${e.where ?? ""}" but the content equals the receipt's hash (re-activated, not edited); deleted as ours`);
   }
   for (const [name, n] of [["repository", c.repoLeft], ["object(s) of the zip", c.itemsLeft]]) {
     if (!(n === 0)) problems.push(`cleanup incomplete: ${Number.isNaN(n) ? "unknown number of" : n} ${name} left`);
@@ -838,7 +1024,7 @@ export async function cleanup(mcp, pkg, entries, {expectedKey, log = () => {}} =
   } else if (!(c.tdevcLeft === 0)) {
     problems.push(`cleanup incomplete: package ${pkg} ${Number.isNaN(c.tdevcLeft) ? "may be" : "is"} still there`);
   }
-  return {ok: problems.length === 0, problems, parsed: c};
+  return {ok: problems.length === 0, problems, parsed: c, accepted};
 }
 
 /** The import's evidence, checked: a parsed status of S, or W with its W
@@ -992,8 +1178,9 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
         const r = await exec(mcp, receiptAbap(pkg, built.objects), "receipt");
         const got = parseReceipt(r.message);
         if (got.items !== built.objects.length) throw new Error(`receipt: the report is incomplete: ${r.message.trim()}`);
+        const stamped = await withHashes(mcp, pkg, got.stamped.map((e) => ({...e, devclass: pkg})), r.message, log);
         receipt = {package: pkg, repoKey: importedKey, repoName: ownRepoName(pkg), objects: built.objects,
-          stamped: got.stamped.map((e) => ({...e, devclass: pkg})), written: new Date().toISOString()};
+          stamped, written: new Date().toISOString()};
         writeReceipt(receiptFile, receipt);
         log(`receipt: ${receipt.stamped.length} object(s) stamped, ${receiptFile}`);
         for (const i of got.nostamp) problems.push(`receipt: no stamp for ${i}; it will not be deleted`);
