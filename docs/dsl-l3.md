@@ -251,10 +251,13 @@ The first run (2026-10-01) stopped at the import: A4H refused to activate `ZOSD_
 rule column was then named `RULE`, a reserved word, and warned that its key was longer than 120.
 Both are fixed above (the alert log section); nothing else had run.
 
-TODO(lead): run the line above on A4H again; when it passes, record the run here and drop "running on
-A4H" from "Not yet".
+The second run (2026-10-01, after the rename) passed end to end on A4H:
+- the import of 15 objects;
+- 109 ABAP Unit methods, all green: the six rule classes' own tests and the three proof methods, mode S, rerun and mode P;
+- **mode P ran on the system's own job scheduler**: six background jobs, `L3_FLEET_01` to `L3_FLEET_06`, all with status F (finished), within about a second. The log equals mode S's. This is the first check of this runtime's job emulation against a real scheduler;
+- cleanup by receipt removed every object and the package. The jobs stay in SM37's history, as a system keeps them.
 
 ## Not yet
 
-Ordering between rules, a set parameter other than the date, a schedule, running on A4H, a log
+Ordering between rules, a set parameter other than the date, a schedule, a log
 retention policy (old versions are kept forever), and a monitor page over the log.
