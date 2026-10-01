@@ -12,7 +12,9 @@ import (
 // buffer's whole length writes into the room and returns a longer view of
 // the same bytes. The bytes a string shows are never written again: a
 // shorter view (a copy taken before an append) is not the buffer's whole
-// length and is joined by copying, as before.
+// length and is joined by copying, as before. The price is memory: a view
+// keeps a buffer of up to twice its length alive, and the four slots keep
+// their buffers until they are reused, so a 64 MiB result holds 128 MiB.
 func AppendBytes(a, b string) string {
 	if len(b) == 0 {
 		return a

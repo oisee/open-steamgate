@@ -589,6 +589,10 @@ type strMemo struct {
 	ascii bool
 	runes int
 	idx   []int
+	// the last character asked for and its byte offset (k<<32 | b): a parser
+	// walks its document a character at a time, and from there the next one
+	// is a step or two away rather than up to 63 from a checkpoint
+	cursor atomic.Uint64
 }
 
 // A few strings are kept, not one: a parser takes substrings of its
@@ -659,10 +663,19 @@ func (m *strMemo) byteAt(v string, k int) int {
 	if k >= m.runes {
 		return len(v)
 	}
-	b := m.idx[k/64]
-	for j := k % 64; j > 0; j-- {
+	b, from := m.idx[k/64], k/64*64
+	if len(v) < 1<<32 {
+		c := m.cursor.Load()
+		if ck, cb := int(c>>32), int(c&0xffffffff); ck <= k && ck > from {
+			b, from = cb, ck
+		}
+	}
+	for j := k - from; j > 0; j-- {
 		_, w := utf8.DecodeRuneInString(v[b:])
 		b += w
+	}
+	if len(v) < 1<<32 {
+		m.cursor.Store(uint64(k)<<32 | uint64(b))
 	}
 	return b
 }
