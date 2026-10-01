@@ -1,11 +1,46 @@
 package abap
 
 import (
+	"io"
+	"net"
 	"testing"
+	"time"
 
 	"osg/gogen/amc"
 	"osg/gogen/session"
 )
+
+func TestEndTestClassClosesHTTPClients(t *testing.T) {
+	session.BeginTestClass()
+	s := &Session{}
+	var peers []net.Conn
+	for range 2 {
+		clientConn, peer := net.Pipe()
+		peers = append(peers, peer)
+		client := httpcOf(s, new(int))
+		client.conn = clientConn
+		client.connKey = "example"
+	}
+	defer func() {
+		for _, peer := range peers {
+			peer.Close()
+		}
+	}()
+	if len(s.httpc) != 2 {
+		t.Fatalf("expected two HTTP clients, got %d", len(s.httpc))
+	}
+	EndTestClass(s)
+	if s.httpc != nil {
+		t.Fatal("ending session still retains HTTP clients")
+	}
+	for _, peer := range peers {
+		peer.SetReadDeadline(time.Now().Add(time.Second))
+		var b [1]byte
+		if _, err := peer.Read(b[:]); err != io.EOF {
+			t.Fatalf("HTTP client connection remains open: %v", err)
+		}
+	}
+}
 
 type unitDatasetHandle struct{ closed bool }
 

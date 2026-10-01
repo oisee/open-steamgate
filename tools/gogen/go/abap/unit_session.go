@@ -7,6 +7,10 @@ import (
 
 // EndTestClass releases session-owned resources before the next test class.
 func EndTestClass(s *Session) {
+	for _, client := range s.httpc {
+		client.drop()
+	}
+	s.httpc = nil
 	CloseSessionDatasets(s)
 	amc.Current().Forget(s)
 	session.EndTestClass()
