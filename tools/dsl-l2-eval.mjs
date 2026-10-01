@@ -199,8 +199,12 @@ export function defaultValue(type, seed = 1) {
   if (b === "NUMC") return String(seed).padStart(type.length ?? 1, "0").slice(-(type.length ?? 1));
   if (INTEGERS.has(b)) return b === "INT1" ? String(seed % 256) : String(seed);
   if (PACKED.has(b)) {
+    // the seed as a whole number when the integer digits hold it, else as
+    // the scaled digits themselves: a DEC 3,2 takes 5.00 but not 500.00
     const decimals = type.decimals ?? 0;
-    return formatDecimal(BigInt(seed) * 10n ** BigInt(decimals), decimals);
+    const digits = BigInt(type.length ?? decimals + 1);
+    const whole = BigInt(seed) * 10n ** BigInt(decimals);
+    return formatDecimal(whole < 10n ** digits ? whole : BigInt(seed) % 10n ** digits, decimals);
   }
   if (b === "RAW") return "AB";
   const length = b === "STRG" || type.length === undefined ? 8 : type.length;

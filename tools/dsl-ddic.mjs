@@ -217,3 +217,35 @@ DDIC_PROVIDER.literalType = (registry, type, name, localTypes = new Map()) => {
   if (["DEC", "CURR", "QUAN"].includes(builtIn)) result.decimals = element ? Number(ddic?.decimals ?? 0) : type.getDecimals?.() ?? 0;
   return result;
 };
+
+// The literal type of a table field from its DD03P row. A field typed by a
+// data element goes through `literalType` by that name. A field typed by
+// DATATYPE carries its DDIC type in the row itself: abaplint turns INT1, INT2
+// and INT4 alike into an IntegerType with no DDIC name and no width, so the
+// name, LENG and DECIMALS are read off the row, where they are written.
+DDIC_PROVIDER.fieldLiteralType = (registry, type, field) => {
+  if (field?.ROLLNAME || !field?.DATATYPE) return DDIC_PROVIDER.literalType(registry, type, field?.ROLLNAME);
+  if (!type || unresolvedDeep(type)) return {resolved: false, reason: `${field.FIELDNAME ?? "field"} does not resolve`};
+  const builtIn = field.DATATYPE.toUpperCase();
+  if (!LITERAL_TYPES.has(builtIn)) return {resolved: false, reason: `${builtIn} is not accepted by literal`};
+  const result = {built_in: builtIn};
+  if (LENGTH_TYPES.has(builtIn)) {
+    const width = field.LENG !== undefined ? Number(field.LENG) : builtIn === "DATS" ? 8 : builtIn === "TIMS" ? 6 : NaN;
+    if (!Number.isFinite(width) || width <= 0) return {resolved: false, reason: `${builtIn} has no resolved length`};
+    result.length = width;
+  }
+  if (["DEC", "CURR", "QUAN"].includes(builtIn)) result.decimals = Number(field.DECIMALS ?? 0);
+  return result;
+};
+
+// What a field whose type does not resolve is missing: its data element, or
+// that element's domain, by name; undefined when neither is the reason.
+DDIC_PROVIDER.missingOf = (registry, field) => {
+  if (!field?.ROLLNAME) return undefined;
+  const element = registry.getObject("DTEL", field.ROLLNAME.toUpperCase());
+  if (!element) return `data element ${field.ROLLNAME.toUpperCase()}`;
+  element.parse();
+  const domain = element.getDomainName?.();
+  if (domain && !registry.getObject("DOMA", domain.toUpperCase())) return `domain ${domain.toUpperCase()} of data element ${field.ROLLNAME.toUpperCase()}`;
+  return undefined;
+};

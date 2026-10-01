@@ -1,0 +1,33 @@
+# A rule over a table whose INT1, INT2, INT4, INT8 and DEC fields are typed
+# by DATATYPE (no data element) and never named by the rule: boundaries: auto
+# fills every one of them in its derived rows (test/dsl-l2.mjs).
+rule: pack-ints
+class: zcl_l2_pack_ints
+title: A ship in maintenance has no voyage departing after the check date
+for: ZOSD_L2_PKSHIP as ship
+when: ship.status = 'M'
+forbid:
+  exists: ZOSD_L2_PKVOY as voy
+  where: voy.ship_id = ship.ship_id and voy.dep_date > $date
+alert: "{ship.ship_id} {ship.name}: in maintenance, voyage {voy.voyage_id} departs {voy.dep_date}"
+boundaries: auto
+examples:
+  - name: flagged
+    date: 20270301
+    rows:
+      ZOSD_L2_PKSHIP: [{ship_id: X001, name: Zephyr, status: M}]
+      ZOSD_L2_PKVOY: [{voyage_id: X00001, ship_id: X001, dep_date: 20270305}]
+    expect:
+      - "X001 Zephyr: in maintenance, voyage X00001 departs 20270305"
+  - name: an earlier voyage
+    date: 20270301
+    rows:
+      ZOSD_L2_PKSHIP: [{ship_id: X001, name: Zephyr, status: M}]
+      ZOSD_L2_PKVOY: [{voyage_id: X00002, ship_id: X001, dep_date: 20270220}]
+    expect: []
+  - name: a ship aloft is fine
+    date: 20270301
+    rows:
+      ZOSD_L2_PKSHIP: [{ship_id: X002, name: Halcyon, status: A}]
+      ZOSD_L2_PKVOY: [{voyage_id: X00004, ship_id: X002, dep_date: 20270310}]
+    expect: []

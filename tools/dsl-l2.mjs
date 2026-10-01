@@ -11,13 +11,14 @@
 // FAILSAFE schema, so every scalar stays the text written (a key `0012` is not
 // the number 12). js-yaml keeps no positions, so a small line index over the
 // file's own text gives each key and list item its line (`lineIndex`).
+import {spawnSync} from "node:child_process";
 import {createHash} from "node:crypto";
-import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join, relative, sep} from "node:path";
+import {dirname, join, relative, resolve as resolvePath, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import yaml from "js-yaml";
-import {DEFAULT_DDIC, DDIC_PROVIDER, Refusal, registryFor} from "./dsl-ddic.mjs";
+import {DEFAULT_DDIC, DDIC_PROVIDER, Refusal, registryFor, unresolvedDeep} from "./dsl-ddic.mjs";
 import {INT_RANGE, PACKED, allReferences, canonical, deriveCases, evaluate, kindOf} from "./dsl-l2-eval.mjs";
 
 export {evaluate, stepValue} from "./dsl-l2-eval.mjs";
@@ -327,15 +328,20 @@ function tableInfo(registry, name, fail) {
   const components = type.getComponents?.() ?? [];
   const clientDependent = /<CLIDEP>X</.test(object.getXML() ?? "");
   const client = clientDependent ? components[0]?.name.toLowerCase() : undefined;
-  // the data element by name from the field's DD03P row: abaplint's
-  // component type does not carry it, and without it an integer or packed
+  // the field's DD03P row: abaplint's component type carries neither the
+  // data element's name nor a built-in's DDIC name and width (INT1, INT2 and
+  // INT4 are one IntegerType there), and without them an integer or packed
   // field has no resolved width
-  const rollnames = new Map((object.getFields() ?? []).filter((f) => f.ROLLNAME && !f.FIELDNAME.startsWith("."))
-    .map((f) => [f.FIELDNAME.toLowerCase(), f.ROLLNAME]));
+  const rows = new Map((object.getFields() ?? []).filter((f) => !f.FIELDNAME.startsWith("."))
+    .map((f) => [f.FIELDNAME.toLowerCase(), f]));
   const fields = new Map();
   for (const component of components) {
     const column = component.name.toLowerCase();
-    fields.set(column, {column, literal: DDIC_PROVIDER.literalType(registry, component.type, rollnames.get(column))});
+    const row = rows.get(column);
+    const literal = DDIC_PROVIDER.fieldLiteralType(registry, component.type, row);
+    // what a field that does not resolve at all lacks, for the refusal
+    const missing = unresolvedDeep(component.type) ? DDIC_PROVIDER.missingOf(registry, row) ?? "its type" : undefined;
+    fields.set(column, {column, literal, ...(missing ? {missing} : {})});
   }
   return {table: name, fields, client, keys: key.keys.map((k) => k.column)};
 }
@@ -495,9 +501,23 @@ const conjoin = (trees) => {
 const IDENT = /^[a-z][a-z0-9_]*$/;
 const MAX_CLAUSES = 3;
 
-export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
+// The rule's path as the generated files record it (the class header, the
+// traces' "rule"): relative to the top of the rule file's own git repository,
+// so that a build from any working directory, or from another checkout,
+// writes the same bytes; outside a repository, relative to `out`; with
+// neither, relative to the working directory. Errors keep the path as given.
+export function rulePath(file, out) {
+  const real = (path) => { try { return realpathSync(path); } catch { return resolvePath(path); } };
+  const git = spawnSync("git", ["rev-parse", "--show-toplevel"], {cwd: dirname(real(file)), encoding: "utf8"});
+  const top = git.status === 0 ? git.stdout.trim() : "";
+  const base = top ? real(top) : out !== undefined ? real(out) : process.cwd();
+  return relative(base, real(file)).split(sep).join("/");
+}
+
+export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   const text = readFileSync(file, "utf8");
   const where = relative(process.cwd(), file).split(sep).join("/");
+  const recorded = rulePath(file, out);
   const failAt = (line) => (message) => { throw new RuleError(where, line, message); };
   let doc;
   try {
@@ -966,9 +986,11 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
   for (const example of examples) example.long_expect = example.expect.some((x) => !x.single);
 
   const ddicOf = (info) => ({client: info.client, keys: info.keys.filter((k) => k !== info.client),
-    fields: Object.fromEntries([...info.fields].map(([column, f]) => [column, f.literal]))});
+    // a field no literal can hold (FLTP, say) the rule never names (it would
+    // have been refused there): a derived row leaves it initial, as INSERT does
+    fields: Object.fromEntries([...info.fields].filter(([, f]) => f.literal.resolved !== false).map(([column, f]) => [column, f.literal]))});
   const model = {
-    "@id": id, rule_line: line("rule"), rule: name, title, source: where, class: className, kind, combine, comment,
+    "@id": id, rule_line: line("rule"), rule: name, title, source: recorded, class: className, kind, combine, comment,
     for: forNode,
     when: {"@id": `${id}/when`, rule_line: line(doc.when === undefined ? "for" : "when"), conditions: when.conditions,
       ...(when.tree ? {tree: when.tree} : {})},
@@ -996,11 +1018,21 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
   // boundaries: derived cases, their expected alerts from the interpreter
   if (doc.boundaries !== undefined) {
     const selected = selection(doc.boundaries, model, failAt, line);
+    // a derived row fills every field of its table, the ones the rule never
+    // names too, and a field whose type does not resolve cannot be filled
+    for (const info of ruleTables) {
+      const lost = [...info.fields.values()].find((f) => f.missing && f.column !== info.client);
+      if (lost) {
+        failAt(line("boundaries"))(`${info.table}-${lost.column.toUpperCase()}: ${lost.missing} is not in the DDIC given; add a --ddic folder that has it (boundaries fill every field of a row)`);
+      }
+    }
     const first = examples[0];
     const derived = deriveCases(model, selected, {date: first.date.value, example: raw[0], reserved: methods});
     model.skipped = derived.skipped;
     model.cases = derived.cases.map((c) => caseNode(model, c));
   }
+  // the path as given, for messages: not part of the model, so not hashed
+  Object.defineProperty(model, "where", {value: where});
   return model;
 }
 
@@ -1119,7 +1151,7 @@ export async function renderRule(compiled) {
   };
   for (const [kind, result] of [["clas.abap", check], ["clas.testclasses.abap", test]]) {
     const error = result.findings.find((f) => f.severity === "E");
-    if (error) throw new RuleError(model.source, nodeLine(error.node), `the generated ${model.class}.${kind} line ${error.line}: ${error.text} (${error.rule}, ${error.node})`);
+    if (error) throw new RuleError(compiled.where ?? model.source, nodeLine(error.node), `the generated ${model.class}.${kind} line ${error.line}: ${error.text} (${error.rule}, ${error.node})`);
   }
   const name = model.class;
   return {
@@ -1136,7 +1168,7 @@ export async function renderRule(compiled) {
 }
 
 export async function buildRule(file, out, options = {}) {
-  const model = compileRule(file, options);
+  const model = compileRule(file, {out, ...options});
   const rendered = await renderRule(model);
   mkdirSync(out, {recursive: true});
   for (const [name, content] of Object.entries(rendered.files)) writeFileSync(join(out, name), content);
@@ -1147,7 +1179,8 @@ export async function buildRule(file, out, options = {}) {
 export async function checkRule(file, out, options = {}) {
   const scratch = mkdtempSync(join(tmpdir(), "dsl-l2-"));
   try {
-    const {files} = await buildRule(file, scratch, options);
+    // the path recorded is the one a build into `out` records, not scratch's
+    const {files} = await buildRule(file, scratch, {...options, out});
     const drift = [];
     for (const name of Object.keys(files)) {
       let committed;
@@ -1163,7 +1196,7 @@ export async function checkRule(file, out, options = {}) {
 // What a reviewer reads: each derived case, its rows, and the alerts the
 // interpreter expects of it.
 export function describeCases(model) {
-  const out = [`${model.source}: ${model.examples.length} example(s), ${model.cases.length} derived case(s)`];
+  const out = [`${model.where ?? model.source}: ${model.examples.length} example(s), ${model.cases.length} derived case(s)`];
   for (const c of model.cases) {
     out.push("", `${c.method}  [${c.derived.condition}, rule line ${c.rule_line}]  ${c.label}`, `  date ${c.date.value}`);
     for (const t of c.tables) {
@@ -1178,7 +1211,7 @@ export function describeCases(model) {
 
 // Warns exactly when a derived case was skipped for the 64-row cap, naming
 // the cases (a threshold of 32 loses the two-group case, 64 a boundary).
-export function capWarning(model, file = model.source) {
+export function capWarning(model, file = model.where ?? model.source) {
   const capped = (model.skipped ?? []).filter((item) => item.cap);
   if (model.kind !== "limit" || !capped.length) return undefined;
   const names = capped.map((item) => `${item.condition} (${item.case})`).join(", ");
