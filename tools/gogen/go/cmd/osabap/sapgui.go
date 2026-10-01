@@ -133,7 +133,10 @@ func runSAPGUISession(conn net.Conn, selection ZCL_GG_HOST__TY_RESULT, execute f
 			return endSAPGUISession(conn)
 		}
 		if sapGUIF4(items) {
-			return fmt.Errorf("SAP GUI F4 is not supported; use the terminal selection screen")
+			if err := sendSAPGUIScreen(conn, screen, []ZIF_GG_SESSION_TYPES_V1__TY_MESSAGE{{text: "F4 is not available in SAP GUI mode; use the terminal"}}); err != nil {
+				return err
+			}
+			continue
 		}
 		values := sapGUISelectionValues(items, fields)
 		result := execute(values)

@@ -175,3 +175,38 @@ func TestSAPFilterExtensionAndMulti(t *testing.T) {
 		t.Fatalf("overwrite declined: %q %v", path, err)
 	}
 }
+
+func TestOverwriteCheckRejectsSwappedSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	os.WriteFile(outside, nil, 0600)
+	b := Browser{Sandbox: &abap.Sandbox{Write: []string{root}}, Mode: Save, ConfirmOverwrite: true}
+	path, ok := b.saveName(root, "target.txt")
+	if !ok {
+		t.Fatal("save name refused")
+	}
+	for _, target := range []string{outside, filepath.Join(t.TempDir(), "missing.txt")} {
+		if err := os.Symlink(target, path); err != nil {
+			t.Fatal(err)
+		}
+		// No key is posted: a prompt would hang. Neither target's existence
+		// may change the response to a swapped link.
+		if b.confirmSave(simulated(t), path) {
+			t.Fatal("swapped symlink accepted")
+		}
+		os.Remove(path)
+	}
+}
+
+func TestBackspaceSwitchesGrantedRoots(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	wanted := filepath.Join(second, "chosen.txt")
+	if err := os.WriteFile(wanted, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	b := Browser{Sandbox: &abap.Sandbox{Read: []string{first, second}}, Mode: Open}
+	got, err := b.Run(simulated(t, press(tcell.KeyBackspace), press(tcell.KeyDown), press(tcell.KeyEnter), press(tcell.KeyEnter)))
+	if err != nil || got != wanted {
+		t.Fatalf("second root: %q, %v", got, err)
+	}
+}

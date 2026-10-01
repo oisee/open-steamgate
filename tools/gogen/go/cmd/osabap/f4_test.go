@@ -124,6 +124,23 @@ func TestF4FilenameFunctionModules(t *testing.T) {
 	}
 }
 
+func TestF4ReadsEditedOtherField(t *testing.T) {
+	s := &abap.Session{}
+	report := newReport(s)
+	abap.FrontendPick = func(kind, initial, name, title string) (string, error) {
+		if initial != "/edited/directory" {
+			t.Fatalf("initial directory = %q", initial)
+		}
+		return "/chosen/file.txt", nil
+	}
+	defer func() { abap.FrontendPick = nil }()
+	values := selectionValues(map[string]selectionInput{
+		"P_DIR": {value: "/edited/directory"},
+		"P_IN":  {value: "old"},
+	})
+	abap.DialogStep(func() { hostRunRequest(s, report, values, "", "X", "P_IN") })
+}
+
 func TestCancelledSavePreservesField(t *testing.T) {
 	s := &abap.Session{}
 	report := newReport(s)

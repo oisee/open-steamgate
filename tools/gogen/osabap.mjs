@@ -72,11 +72,13 @@ if (f4Fields.length) {
   const start = classSource.indexOf(marker);
   const end = classSource.indexOf("  ENDMETHOD.", start);
   if (start < 0 || end < 0) throw new Error(`${report}: converter omitted ON VALUE-REQUEST method`);
-  const prefix = f4Fields.map((field) => {
-    const member = state[field]?.member;
-    if (!member || state[field].ranges) throw new Error(`${report}: F4 requires a scalar selection field: ${field}`);
-    return `    IF iv_name = '${field}' AND line_exists( it_values[ name = '${field}' ] ).\n      ${member} = it_values[ name = '${field}' ]-value.\n    ENDIF.`;
-  }).join("\n");
+  for (const field of f4Fields) {
+    if (!state[field]?.member || state[field].ranges) throw new Error(`${report}: F4 requires a scalar selection field: ${field}`);
+  }
+  // The form sends all current fields. Value-request events can read any of
+  // them, including a field the user just edited before pressing F4.
+  const prefix = Object.entries(state).map(([field, item]) =>
+    `    IF line_exists( it_values[ name = '${field}' ] ).\n      ${item.member} = ${item.ranges ? `CORRESPONDING #( it_values[ name = '${field}' ]-ranges )` : `it_values[ name = '${field}' ]-value`}.\n    ENDIF.`).join("\n");
   const suffix = f4Fields.map((field) => `    IF iv_name = '${field}'.\n      rt_values = VALUE #( ( sign = zif_gg_selection_screen_types=>sign_include option = zif_gg_selection_screen_types=>option_eq low = ${state[field].member} ) ).\n    ENDIF.`).join("\n");
   classSource = classSource.slice(0, start + marker.length) + "\n" + prefix + classSource.slice(start + marker.length, end) + suffix + "\n" + classSource.slice(end);
 }

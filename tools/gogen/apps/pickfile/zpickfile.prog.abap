@@ -11,6 +11,7 @@ AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_in.
   DATA lv_rc TYPE i.
   DATA lv_action TYPE i.
   cl_gui_frontend_services=>file_open_dialog(
+    EXPORTING initial_directory = p_dir
     CHANGING file_table = lt_files rc = lv_rc user_action = lv_action ).
   IF lv_action = cl_gui_frontend_services=>action_ok AND lv_rc > 0.
     READ TABLE lt_files INDEX 1 INTO DATA(ls_file).

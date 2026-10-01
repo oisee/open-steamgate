@@ -605,6 +605,34 @@ func (sb *Sandbox) BrowseSaveName(name string) (string, error) {
 	return real, nil
 }
 
+// BrowseSaveExists checks the final component through the write root without
+// following a symlink. It is for an overwrite prompt, not authorization to
+// write; the caller must still validate the name again after confirmation.
+func (sb *Sandbox) BrowseSaveExists(name string) (bool, error) {
+	_, write := sb.roots()
+	// name is the path returned by BrowseSaveName. Use it lexically here:
+	// resolving it again would follow a final symlink swapped in while the
+	// user was deciding whether to overwrite.
+	if !filepath.IsAbs(name) || !within(filepath.Clean(name), write) {
+		return false, os.ErrPermission
+	}
+	root, rel, ok := sb.beneath(filepath.Clean(name), write)
+	if !ok {
+		return false, os.ErrPermission
+	}
+	info, err := root.Lstat(rel)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || info.IsDir() {
+		return false, os.ErrPermission
+	}
+	return true, nil
+}
+
 func (sb *Sandbox) note(entry map[string]any) {
 	if sb.Audit != nil {
 		entry["at"] = time.Now().UTC().Format(time.RFC3339Nano)

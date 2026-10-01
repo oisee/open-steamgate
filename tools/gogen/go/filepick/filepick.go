@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -156,7 +155,11 @@ func (b Browser) confirmSave(screen tcell.Screen, path string) bool {
 	if !b.ConfirmOverwrite {
 		return true
 	}
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	exists, err := b.Sandbox.BrowseSaveExists(path)
+	if err != nil {
+		return false
+	}
+	if !exists {
 		return true
 	}
 	_, h := screen.Size()
@@ -204,11 +207,19 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 	}
 	filter, name := "", b.DefaultName
 	selected, editing, editingFilter := 0, false, false
+	atRoots := false
 	marked := map[string]entry{}
 	for {
-		entries, err := b.entries(dir, filter)
-		if err != nil {
-			return "", err
+		var entries []entry
+		if atRoots {
+			for _, root := range b.roots() {
+				entries = append(entries, entry{name: root, dir: true})
+			}
+		} else {
+			entries, err = b.entries(dir, filter)
+			if err != nil {
+				return "", err
+			}
 		}
 		if b.afterList != nil {
 			b.afterList()
@@ -216,7 +227,11 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 		if selected >= len(entries) {
 			selected = max(0, len(entries)-1)
 		}
-		b.draw(screen, dir, entries, selected, filter, name, editing, editingFilter)
+		caption := dir
+		if atRoots {
+			caption = "Granted roots"
+		}
+		b.draw(screen, caption, entries, selected, filter, name, editing, editingFilter)
 		ev, ok := screen.PollEvent().(*tcell.EventKey)
 		if !ok {
 			continue
@@ -265,13 +280,31 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 		case tcell.KeyDown:
 			selected = min(max(0, len(entries)-1), selected+1)
 		case tcell.KeyBackspace, tcell.KeyBackspace2:
-			parent := filepath.Dir(dir)
-			if _, f, err := b.Sandbox.BrowsePath(parent, b.Mode == Save); err == nil {
-				f.Close()
-				dir = parent
+			if !atRoots {
+				parent := filepath.Dir(dir)
+				if _, f, err := b.Sandbox.BrowsePath(parent, b.Mode == Save); err == nil {
+					f.Close()
+					dir = parent
+				} else if len(b.roots()) > 1 {
+					atRoots = true
+					filter = ""
+					marked = map[string]entry{}
+				}
 				selected = 0
 			}
 		case tcell.KeyEnter:
+			if atRoots {
+				if len(entries) > 0 {
+					candidate := entries[selected].name
+					if _, f, err := b.Sandbox.BrowsePath(candidate, b.Mode == Save); err == nil {
+						if info, err := f.Stat(); err == nil && info.IsDir() {
+							dir, atRoots, selected = candidate, false, 0
+						}
+						f.Close()
+					}
+				}
+				continue
+			}
 			if b.Multi && len(marked) > 0 {
 				paths := []string{}
 				for _, item := range entries {
@@ -316,6 +349,9 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 				}
 			}
 		case tcell.KeyRune:
+			if atRoots {
+				continue
+			}
 			switch ev.Rune() {
 			case '/':
 				filter = ""
