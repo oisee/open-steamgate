@@ -1,6 +1,9 @@
 package abap
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 // One million scalar LOOP ... ASSIGNING rows, binding and reading each slot.
 func BenchmarkScalarLoopAssigningMillion(b *testing.B) {
@@ -18,4 +21,26 @@ func BenchmarkScalarLoopAssigningMillion(b *testing.B) {
 			b.Fatal(sum)
 		}
 	}
+}
+
+func BenchmarkBumpTableHot(b *testing.B) {
+	rows := []int{1}
+	binding := BindRow(&rows, 0)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		BumpTable(&rows)
+	}
+	b.StopTimer()
+	runtime.KeepAlive(binding)
+}
+
+func BenchmarkBumpTableNoBinding(b *testing.B) {
+	rows := []int{1}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		BumpTable(&rows)
+	}
+	runtime.KeepAlive(&rows)
 }
