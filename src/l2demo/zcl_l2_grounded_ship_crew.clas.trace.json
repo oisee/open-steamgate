@@ -2,7 +2,7 @@
  "generator": "dsl-l2",
  "rule": "src/l2demo/grounded_ship_crew.l2.yaml",
  "template": "recipes/l2-check/template.tpl",
- "model": "sha256:0bc4b4312151e5692f360ff7c89f228b5437346838096f3b680823d637d90208",
+ "model": "sha256:2b72e97ce478f2a42dfc8e105f67dead7260925b87f6634c0f92f8bc4fd33f2f",
  "lines": [
   {
    "line": 1,

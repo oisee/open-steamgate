@@ -345,10 +345,10 @@ export function allReferences(model) {
 // the tree a comparison belongs to: the `when`, or a clause's `where`
 function ownerOf(model, cond) {
   const at = model.when.conditions.indexOf(cond);
-  if (at >= 0) return {when: true, table: model.for.table, alias: model.for.alias, tree: model.when.tree, leaves: model.when.conditions, index: at};
+  if (at >= 0) return {when: true, table: model.for.table, alias: model.for.alias, tree: model.when.tree, leaves: model.when.conditions, index: at, slot: 0};
   for (const clause of model.clauses) {
     const i = clause.conditions.indexOf(cond);
-    if (i >= 0) return {when: false, clause, table: clause.table, alias: clause.alias, tree: clause.tree, leaves: clause.conditions, index: i};
+    if (i >= 0) return {when: false, clause, table: clause.table, alias: clause.alias, tree: clause.tree, leaves: clause.conditions, index: i, slot: slotOf(clause)};
   }
   throw new Error(`internal: ${cond.text} is in no condition of the rule`);
 }
@@ -393,8 +393,8 @@ function sensitize(tree, leaves, target) {
 // Gives the fields of `table` that `cmps` constrain values that satisfy them
 // (the row's other fields stay); a reason when none does. `cmps` is one
 // alternative: comparisons that must all hold.
-function solveRow(model, params, rows, alias, table, cmps, keep = false) {
-  const row = rows[table][0];
+function solveRow(model, params, rows, alias, table, cmps, keep = false, slot = 0) {
+  const row = rows[table][slot];
   const byColumn = new Map();
   for (const cmp of cmps.filter((x) => x.alias === alias)) {
     if (!byColumn.has(cmp.column)) byColumn.set(cmp.column, []);
@@ -420,13 +420,13 @@ function solveRow(model, params, rows, alias, table, cmps, keep = false) {
 }
 
 // The first alternative that a row of `table` can be made to satisfy.
-function solveAlternatives(model, params, rows, alias, table, alts, keep) {
-  if (!rows[table]?.length) return undefined;
+function solveAlternatives(model, params, rows, alias, table, alts, keep, slot = 0) {
+  if (!rows[table]?.[slot]) return undefined;
   let why = "the condition cannot hold";
   for (const alt of alts) {
     const trial = clone(rows);
-    why = solveRow(model, params, trial, alias, table, alt, keep);
-    if (!why) { rows[table][0] = trial[table][0]; return undefined; }
+    why = solveRow(model, params, trial, alias, table, alt, keep, slot);
+    if (!why) { rows[table][slot] = trial[table][slot]; return undefined; }
   }
   return why;
 }
@@ -437,17 +437,35 @@ const treeAlternatives = (tree, leaves) => tree ? alternatives(tree, leaves, tru
 function resolveClauses(model, params, rows, except, keep) {
   for (const clause of model.clauses) {
     if (clause === except) continue;
-    solveAlternatives(model, params, rows, clause.alias, clause.table, treeAlternatives(clause.tree, clause.conditions), keep);
+    solveAlternatives(model, params, rows, clause.alias, clause.table, treeAlternatives(clause.tree, clause.conditions), keep, slotOf(clause));
   }
 }
 
-// whether every tree of the rule holds on the first row of each table
+// A clause's own row in its table: 0, or 1 for the second of two `any`
+// clauses that read one table (each clause gets a row of its own).
+const slotOf = (clause) => clause.slot ?? 0;
+
+// whether the rows of every table have different keys (an INSERT of the
+// test would refuse two rows with the same one)
+function keysDistinct(model, rows) {
+  return Object.entries(rows).every(([table, list]) => {
+    const {keys, fields} = model.ddic[table];
+    const seen = new Set(list.map((row) => JSON.stringify(keys.map((k) => canonical(fields[k], row[k] ?? initialValue(fields[k]))))));
+    return seen.size === list.length;
+  });
+}
+
+// whether every tree of the rule holds: `when` on the `for` row, each
+// clause's `where` on that row and the clause's own row
 function allHold(model, rows, params) {
-  const context = {[model.for.alias]: {table: model.for.table, row: rows[model.for.table][0]}};
-  const probe = {...model, kind: "forbid", combine: "all", alert: {parts: []}};
-  for (const clause of model.clauses) context[clause.alias] = {table: clause.table, row: rows[clause.table]?.[0]};
-  if (model.clauses.some((c) => !context[c.alias].row)) return false;
-  return evaluate(probe, Object.fromEntries(Object.entries(context).map(([, v]) => [v.table, [v.row]])), params).length === 1;
+  const outer = rows[model.for.table]?.[0];
+  if (!outer) return false;
+  const probe = {...model, kind: "forbid", combine: "all", clauses: [], alert: {parts: []}};
+  if (evaluate(probe, {[model.for.table]: [outer]}, params).length !== 1) return false;
+  return model.clauses.every((clause) => {
+    const row = rows[clause.table]?.[slotOf(clause)];
+    return row !== undefined && evaluate({...probe, clauses: [clause]}, {[model.for.table]: [outer], [clause.table]: [row]}, params).length === 1;
+  }) && keysDistinct(model, rows);
 }
 
 // One row per table on which every condition holds, so that in the cases only
@@ -455,29 +473,36 @@ function allHold(model, rows, params) {
 // do, else rows generated from the field types. Undefined with a reason when
 // the conditions cannot hold together.
 function baseRows(model, params, example) {
-  const fullRow = (table, given = {}) => {
+  const fullRow = (table, given = {}, slot = 0) => {
     const {fields, client} = model.ddic[table];
     const row = {};
-    let seed = 1;
+    let seed = 1 + 50 * slot;
     for (const [column, type] of Object.entries(fields)) {
       if (column === client) continue;
       row[column] = canonical(type, given[column] ?? defaultValue(type, seed++));
     }
     return row;
   };
-  const tables = [model.for.table, ...model.clauses.map((c) => c.table)];
+  const rowsFrom = (given) => {
+    const rows = {[model.for.table]: [fullRow(model.for.table, given?.[model.for.table]?.[0])]};
+    for (const clause of model.clauses) {
+      rows[clause.table] ??= [];
+      rows[clause.table][slotOf(clause)] = fullRow(clause.table, given?.[clause.table]?.[slotOf(clause)], slotOf(clause));
+    }
+    return rows;
+  };
   if (example) {
-    const rows = Object.fromEntries(tables.map((t) => [t, [fullRow(t, example[t]?.[0])]]));
+    const rows = rowsFrom(example);
     if (allHold(model, rows, params)) return {rows};
   }
-  const generated = Object.fromEntries(tables.map((t) => [t, [fullRow(t)]]));
+  const generated = rowsFrom(undefined);
   let why = "no value satisfies the when";
   for (const alt of treeAlternatives(model.when.tree, model.when.conditions)) {
     const rows = clone(generated);
     why = solveRow(model, params, rows, model.for.alias, model.for.table, alt);
     if (why) continue;
     for (const clause of model.clauses) {
-      why = solveAlternatives(model, params, rows, clause.alias, clause.table, treeAlternatives(clause.tree, clause.conditions), false);
+      why = solveAlternatives(model, params, rows, clause.alias, clause.table, treeAlternatives(clause.tree, clause.conditions), false, slotOf(clause));
       if (why) break;
     }
     if (!why && allHold(model, rows, params)) return {rows};
@@ -490,15 +515,15 @@ function baseRows(model, params, example) {
 // hold again, and the tested value stays: a changed exists field is followed
 // by the `for` field of each equality on it; every other exists row then
 // follows the `for` row (the other row is adjusted, the value under test is not).
-function rejoin(model, rows, except, changedTable, changedColumn) {
+function rejoin(model, rows, except, changedClause, changedColumn) {
   const outer = rows[model.for.table][0];
   const byInner = [], byOuter = [];
   for (const clause of model.clauses) {
-    const inner = rows[clause.table]?.[0];
+    const inner = rows[clause.table]?.[slotOf(clause)];
     if (!inner) continue;
     for (const c of clause.on) {
       if (c === except) continue;
-      (clause.table === changedTable && c.cmp.column === changedColumn ? byInner : byOuter).push([inner, c]);
+      (clause === changedClause && c.cmp.column === changedColumn ? byInner : byOuter).push([inner, c]);
     }
   }
   for (const [inner, c] of byInner) outer[c.cmp.rhs.column] = inner[c.cmp.column];
@@ -568,10 +593,13 @@ export function deriveCases(model, references, {date, example, reserved = new Se
     throw new Error(`cannot name the cases of ${condition} (line ${condLine}) within 30 characters`);
   };
   const add = (condition, line, suffix, methods, label, rows, structural = false) => {
+    if (!keysDistinct(model, rows)) {
+      skipped.push({condition: `${label} (${suffix})`, reason: "its rows would share a key"});
+      return;
+    }
     cases.push({method: methods[suffix], label: `${label}: ${suffix}`, kind: suffix, condition, line, date, rows,
       expect: evaluate(model, rows, params), structural});
   };
-  const clauseOf = (table) => model.clauses.find((c) => c.table === table);
   let index = 0;
   for (const reference of references) {
     index++;
@@ -585,7 +613,7 @@ export function deriveCases(model, references, {date, example, reserved = new Se
     // tree holds; under require a `when` decides only when no exists row is there
     const start = clone(base.rows);
     if (owner.when && model.kind === "require") for (const clause of model.clauses) start[clause.table] = [];
-    const why = solveAlternatives(model, params, start, owner.alias, owner.table, sensitize(owner.tree, owner.leaves, owner.index), true);
+    const why = solveAlternatives(model, params, start, owner.alias, owner.table, sensitize(owner.tree, owner.leaves, owner.index), true, owner.slot);
     const columnTags = [cmp.column, `${cmp.alias}_${cmp.column}`, `c${index}`];
     if (why) {
       skipped.push({condition: cond.text, reason: `does not isolate ${cond.text}: ${why}`});
@@ -594,11 +622,11 @@ export function deriveCases(model, references, {date, example, reserved = new Se
     if (owner.when) resolveClauses(model, params, start, undefined, true);
     const setField = (value) => {
       const rows = clone(start);
-      rows[table][0][cmp.column] = value;
-      rejoin(model, rows, cond, table, cmp.column);
+      rows[table][owner.slot][cmp.column] = value;
+      rejoin(model, rows, cond, owner.clause, cmp.column);
       // a changed value may break the other conditions on another row
       // (m.cnt < n.lvl): keep the tested value and adjust the other rows
-      resolveClauses(model, params, rows, owner.when ? undefined : clauseOf(table), true);
+      resolveClauses(model, params, rows, owner.when ? undefined : owner.clause, true);
       return rows;
     };
     const reference_value = canonical(type, cmp.rhs.kind === "literal" ? cmp.rhs.value : cmp.rhs.kind === "param" ? params[cmp.rhs.name]
@@ -639,13 +667,13 @@ export function deriveCases(model, references, {date, example, reserved = new Se
     const inner = model.ddic[clause.table];
     for (const key of inner.keys) {
       const type = inner.fields[key];
-      const first = base.rows[clause.table][0][key];
+      const first = base.rows[clause.table][slotOf(clause)][key];
       const candidates = [different(type, first), stepValue(type, first, -1), stepValue(type, first, 1), bump(first, 1), bump(first, -1)];
       for (const next of candidates) {
         if (next === undefined || compareValues(type, next, type, first) === 0) continue;
         const rows = clone(base.rows);
-        rows[clause.table].push({...rows[clause.table][0], [key]: next});
-        if (evaluate(model, rows, params).length === baseCount + 1) return rows;
+        rows[clause.table].push({...rows[clause.table][slotOf(clause)], [key]: next});
+        if (keysDistinct(model, rows) && evaluate(model, rows, params).length === baseCount + 1) return rows;
       }
     }
     return undefined;
@@ -666,7 +694,11 @@ export function deriveCases(model, references, {date, example, reserved = new Se
     const methods = name(`exists ${clause.table}`, tags, suffixes, clause.exists_line);
     const rows = clone(base.rows);
     if (any) {
-      for (const other of model.clauses) if (other !== clause) rows[other.table] = [];
+      // only this clause's row: the other clauses' rows go, a table they share
+      // with this clause keeps this clause's row
+      for (const other of model.clauses) {
+        if (other !== clause) rows[other.table] = other.table === clause.table ? [base.rows[clause.table][slotOf(clause)]] : [];
+      }
     } else {
       rows[clause.table] = [];
     }

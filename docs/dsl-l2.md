@@ -242,7 +242,11 @@ alert: "{ship.ship_id}: voyage {voy.voyage_id}, crew {crew.crew_id}"
 Under `all` the alert may name every alias. Under `any` each matching row of each clause is one
 alert: a clause may carry its own `alert:` (holes from `for` and its own alias), and the rule's
 `alert:` is shared by the clauses that do not, and may name only `for` fields. A clause's `where`
-sees `for` and its own alias, not another clause's. The tables of a rule are all different.
+sees `for` and its own alias, not another clause's. Under `any` two clauses may read the same
+table under different aliases (each is its own query; in the derived cases each clause gets a row
+of its own in that table, and a case whose rows would share a key is skipped). Under `all` and
+`forbid` every table is read once: a clause's `zero` case empties its table, which would empty
+the other clause too.
 
 **`require:`** is the dual of `forbid:`: one `exists` + `where`, and the alert fires for a `for`
 row that meets `when` when **no** row matches. Its alert names only `for` fields (there is no row
@@ -252,7 +256,9 @@ of the other table to name).
 comparisons are the same after the mirroring every comparison gets anyway (the selected table's
 field on the left: `a = b` and `b = a`, `a < b` and `b > a` meet), the other side compared as the
 field holds it (CHAR without trailing blanks, `12.5` and `12.50` in a DEC alike). The same
-comparison in two different groups (`(a and b) or (a and c)`) is fine.
+comparison in two different groups (`(a and b) or (a and c)`) is fine. A `not` and a group are
+compared as units, the items of a group in any order: `not a and not a` is refused, and so is
+`(a or b) and (b or a)`; `a and not a` is not a duplicate.
 
 ### The lowering
 
@@ -263,7 +269,15 @@ comparison in two different groups (`(a and b) or (a and c)`) is fine.
 - `when` and the rest of each `where` are one `and` in `WHERE`, one comparison per line.
   A group inside a group is parenthesised, and so is everything after a `NOT`, so the lines never
   lean on Open SQL's precedence (which is the rule language's). A line holds one comparison and
-  its parentheses, so it stays under 255 characters (the `abap` profile checks).
+  its parentheses.
+- **No line over 255 characters.** An alert text (up to 255 characters as a literal) is cut into
+  pieces of at most 100, each its own `&&` line; an expected alert of a test method that does not
+  fit one literal is built in `lv_exp` the same way (`APPEND` takes no expression in 7.02). What
+  the `abap` profile still refuses (a long example name in the assert call's line, a long CHAR
+  literal after its column) is a `RuleError` at the rule line of the node the line traces to,
+  raised by `renderRule` before any file is written, so `build`, `check` and the API refuse it
+  alike. Before, the profile's error only made the `build` command exit 1, after writing the
+  files, and `check` and `buildRule` did not look at it.
 - `forbid` with one clause or `all:` is **one** `SELECT`: `for INNER JOIN` each clause in turn,
   ordered by the `for` key and each clause's key. `any:` is **one query per clause** (7.02 Open SQL
   has no `UNION`), each into its own table (`lt_join1`, `lt_join2`), and the alerts come clause

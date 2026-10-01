@@ -1093,7 +1093,7 @@ examples:
         writeRule("all-scope", ALL_RULE.replace("(crew.role = 'C' or crew.role = 'P')", "(crew.role = 'C' or voy.voyage_id = 'V00001')")),
         /^alias voy is not in scope here \(in scope: ship, crew\)/, /^\s+where: crew\.ship_id/));
       it("the same table in two clauses", () => refusedAt(writeRule("all-twin", ALL_RULE.replace("ZOSD_L2_CREW as crew", "ZOSD_L2_VOY as crew")),
-        /^ZOSD_L2_VOY is read twice \(as voy and crew\)/, /^\s+- exists: ZOSD_L2_VOY as crew/));
+        /^ZOSD_L2_VOY is read twice \(as voy and crew\); under all each clause reads its own table \(its zero case empties that table\); any allows a table twice/, /^\s+- exists: ZOSD_L2_VOY as crew/));
       it("a shared alert of any names only fields of for", () => refusedAt(writeRule("any-shared", ANY_RULE.replace("crew aboard\"", "crew {crew.crew_id} aboard\"")),
         /^\{crew\.crew_id\}: a shared alert of any names only fields of the for table/, /^alert:/));
       it("a clause of any without an alert and no shared one", () => refusedAt(writeRule("any-noalert", ANY_RULE.replace(/^alert: .*\n/m, "")),
@@ -1410,5 +1410,137 @@ examples:
         }
       });
     }
+  });
+
+  // ---------------------------------------------------------------------
+  // slice 3, after the critic: duplicates as units, a table twice under any,
+  // no generated line over 255 characters
+
+  const ANY_TWICE = `rule: any-twice
+class: zcl_l2_any_twice
+title: a ship in maintenance with a voyage ahead, or one long ago
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'M'
+forbid:
+  any:
+    - exists: ZOSD_L2_VOY as v1
+      where: v1.ship_id = ship.ship_id and v1.dep_date > $date
+      alert: "{ship.ship_id}: voyage {v1.voyage_id} ahead"
+    - exists: ZOSD_L2_VOY as v2
+      where: v2.ship_id = ship.ship_id and v2.dep_date < '20200101'
+      alert: "{ship.ship_id}: voyage {v2.voyage_id} long ago"
+boundaries: auto
+examples:
+  - name: both
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY:
+        - {voyage_id: V00001, ship_id: S001, dep_date: 20261005}
+        - {voyage_id: V00002, ship_id: S001, dep_date: 20190101}
+    expect: ["S001: voyage V00001 ahead", "S001: voyage V00002 long ago"]
+  - name: one voyage in both
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00003, ship_id: S001, dep_date: 20190101}]
+    expect: ["S001: voyage V00003 long ago"]
+`;
+  const LONG_TEXT = "x".repeat(255);
+  const LONG_ALERT = `rule: long-alert
+class: zcl_l2_long_alert
+title: an alert text as long as a literal may be
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'M'
+forbid:
+  exists: ZOSD_L2_VOY as voy
+  where: voy.ship_id = ship.ship_id and voy.dep_date > $date
+alert: "{ship.ship_id}${LONG_TEXT}"
+boundaries: auto
+examples:
+  - name: fires
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}]
+    expect: ["S001${LONG_TEXT}"]
+`;
+
+  describe("slice 3 critic: duplicates under not and in groups are refused as units", () => {
+    it("not a and not a", () => refusedAt(variant("dup-not", "when: ship.status = 'M'", "when: not ship.status = 'A' and not ship.status = 'A'"),
+      /^not ship\.status = 'A' repeats not ship\.status = 'A' in the same conjunction/, /^when:/));
+    it("two groups with the same items in another order", () => refusedAt(
+      variant("dup-groups", "when: ship.status = 'M'", "when: (ship.status = 'M' or ship.name = 'X') and (ship.name = 'X' or 'M' = ship.status)"),
+      /^ship\.name = 'X' or 'M' = ship\.status repeats ship\.status = 'M' or ship\.name = 'X' in the same conjunction/, /^when:/));
+    it("not (a or b) twice in a disjunction", () => refusedAt(
+      variant("dup-notgroup", "when: ship.status = 'M'", "when: ship.status = 'M' or not (ship.name = 'X' or ship.name = 'Y') or not (ship.name = 'Y' or ship.name = 'X')"),
+      /^not \(ship\.name = 'Y' or ship\.name = 'X'\) repeats not \(ship\.name = 'X' or ship\.name = 'Y'\) in the same disjunction/, /^when:/));
+    it("but a and not a are different", () => {
+      const file = variant("dup-notok", "when: ship.status = 'M'", "when: ship.status = 'M' and not ship.status = 'A'");
+      expect(() => compileRule(file, {registry})).to.not.throw();
+    });
+  });
+
+  describe("slice 3 critic: two clauses of any may read one table", () => {
+    before(async () => {
+      await import("./start.mjs");
+    });
+    it("compiles: one query per clause, each with its own alias, and a row of its own in the derived cases", () => {
+      const model = compileRule(writeRule("any-twice", ANY_TWICE), {registry});
+      expect(model.clauses.map((c) => [c.alias, c.table, c.slot])).to.deep.equal([["v1", "zosd_l2_voy", 0], ["v2", "zosd_l2_voy", 1]]);
+      expect(model.tables.map((t) => t.table)).to.deep.equal(["zosd_l2_ship", "zosd_l2_voy"]);
+      const eq = model.cases.find((c) => c.method === "b_v2_dep_date_eq");
+      expect(rowsOfCase(eq).zosd_l2_voy.map((r) => r.dep_date)).to.deep.equal(["20261005", "20200101"]);
+      expect(eq.expect.map((e) => e.value)).to.deep.equal(["S001: voyage V00001 ahead"]);
+      const only = model.cases.find((c) => c.method === "b_v2_only");
+      expect(rowsOfCase(only).zosd_l2_voy.map((r) => r.voyage_id)).to.deep.equal(["V00002"]);
+      for (const c of model.cases) {
+        const keys = (rowsOfCase(c).zosd_l2_voy ?? []).map((r) => r.voyage_id);
+        expect(new Set(keys).size, `${c.method} keys`).to.equal(keys.length);
+      }
+    });
+    it("and the ABAP agrees on every example and case", async () => {
+      const {results, messages} = await runRule(writeRule("any-twice-abap", ANY_TWICE), "zcl_l2_any_twice");
+      expect(Object.keys(results).length).to.be.greaterThan(15);
+      expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+    });
+  });
+
+  describe("slice 3 critic: no generated line is longer than 255 characters", () => {
+    before(async () => {
+      await import("./start.mjs");
+    });
+    it("a maximal accepted alert text renders in pieces, every line of both classes at most 255", async () => {
+      const out = join(scratch, "long-alert");
+      const {files, findings} = await buildRule(writeRule("long-alert", LONG_ALERT), out, {registry});
+      expect(findings.filter((f) => f.severity === "E")).to.deep.equal([]);
+      for (const [name, text] of Object.entries(files).filter(([n]) => n.endsWith(".abap"))) {
+        const long = text.split("\n").filter((l) => l.length > 255);
+        expect(long, name).to.deep.equal([]);
+      }
+      expect(files["zcl_l2_long_alert.clas.testclasses.abap"]).to.contain("APPEND lv_exp TO lt_exp.");
+    });
+    it("and its ABAP builds the same alert as the interpreter", async () => {
+      const {results, messages} = await runRule(writeRule("long-alert-abap", LONG_ALERT.replace("zcl_l2_long_alert", "zcl_l2_long_alert2")), "zcl_l2_long_alert2");
+      expect(Object.keys(results).length).to.be.greaterThan(5);
+      expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+    });
+    it("a line the profile still refuses is a RuleError at its rule line, before any file is written", async () => {
+      // an example name that fits the literal check but not the assert call's line
+      const name = `nb${"!".repeat(170)}`;
+      const file = writeRule("long-name", LONG_ALERT.replace("  - name: fires", `  - name: ${name}`));
+      const out = join(scratch, "long-name-out");
+      let error;
+      try {
+        await buildRule(file, out, {registry});
+      } catch (e) {
+        error = e;
+      }
+      expect(error).to.be.instanceOf(RuleError);
+      const where = relative(process.cwd(), file).split(sep).join("/");
+      expect(error.message.startsWith(`${where}:${lineIn(readFileSync(file, "utf8"), /^\s+- name: n/)}: the generated zcl_l2_long_alert.clas.testclasses.abap line `), error.message).to.equal(true);
+      expect(error.message).to.contain("Line exceeds 255 characters");
+      expect(() => readdirSync(out)).to.throw();
+    });
   });
 });

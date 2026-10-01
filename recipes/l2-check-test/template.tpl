@@ -94,6 +94,9 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+{{#long_expect}}
+    DATA lv_exp TYPE string.
+{{/long_expect}}
 {{#tables}}
 {{#rows}}
     CLEAR {{wa}}.
@@ -108,7 +111,15 @@ CLASS ltcl_examples IMPLEMENTATION.
     INSERT {{table}} FROM TABLE {{itab}}.
 {{/tables}}
 {{#expect}}
+{{#single}}
     APPEND {{value | literal}} TO lt_exp.
+{{/single}}
+{{^single}}
+{{#pieces}}
+    {{lead}}{{value | literal}}{{stop}}
+{{/pieces}}
+    APPEND lv_exp TO lt_exp.
+{{/single}}
 {{/expect}}
     lt_act = {{date.call}}( iv_date = {{date.value | literal}} ).
     lt_ref = check_reference( iv_date = {{date.value | literal}} ).

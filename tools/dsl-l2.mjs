@@ -349,6 +349,37 @@ const typeText = (type) => `${type.built_in}${type.length === undefined ? "" : `
 // test/dsl-l2.mjs runs boundary values through both and asserts they agree.
 const QUOTED_TYPES = new Set(["CHAR", "NUMC", "CLNT", "LANG", "CUKY", "UNIT", "ACCP", "DATS", "TIMS"]);
 
+// A text cut into pieces of at most PIECE characters as an ABAP literal
+// (backticks doubled), never inside a character: what does not fit one line
+// is written as several literals joined by &&, one per line.
+export const PIECE = 100;
+export function pieces(text) {
+  const out = [];
+  let current = "", width = 0;
+  for (const ch of text) {
+    const w = ch === "`" ? 2 : ch.length;
+    if (width + w > PIECE && current) {
+      out.push(current);
+      current = "";
+      width = 0;
+    }
+    current += ch;
+    width += w;
+  }
+  if (current || !out.length) out.push(current);
+  return out;
+}
+
+// An expected alert line of a test method: one literal when it fits, else
+// pieces joined into lv_exp (APPEND takes no expression in 7.02).
+function expectNode(nodeId, ruleLine, value) {
+  const STRG = {built_in: "STRG"};
+  const list = pieces(value);
+  return {"@id": nodeId, rule_line: ruleLine, value, "value@type": STRG, single: list.length === 1,
+    pieces: list.map((piece, k) => ({"@id": `${nodeId}/piece/${k + 1}`, rule_line: ruleLine, value: piece, "value@type": STRG,
+      lead: k === 0 ? "lv_exp = " : "  && ", stop: k === list.length - 1 ? "." : ""}))};
+}
+
 export function misfit(value, type, quoted = true) {
   const b = type.built_in;
   const length = type.length ?? 0;
@@ -538,7 +569,14 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     if (aliases.has(inner.alias)) failAt(line(epath))(`alias ${inner.alias} is already the alias of ${aliases.get(inner.alias).table}`);
     if (inner.table === outer.table) failAt(line(epath))(`for and exists are both ${outer.table}; a rule joins different tables`);
     const twin = [...aliases.values()].find((s) => s.table === inner.table);
-    if (twin) failAt(line(epath))(`${inner.table} is read twice (as ${twin.alias} and ${inner.alias}); a rule joins different tables`);
+    // under any each clause is its own query, so two clauses may read one table
+    // (each its own alias, its own row in the derived cases); under all the
+    // derived cases empty a clause's table to make it unmatched, which would
+    // empty the other clause too
+    if (twin && (combine !== "any" || twin === outer)) {
+      failAt(line(epath))(`${inner.table} is read twice (as ${twin.alias} and ${inner.alias}); ${combine === "all"
+        ? "under all each clause reads its own table (its zero case empties that table); any allows a table twice" : "a rule joins different tables"}`);
+    }
     aliases.set(inner.alias, inner);
     return {spec, inner};
   });
@@ -614,18 +652,25 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
       : rhs.kind === "param" ? `$${rhs.name}` : `${rhs.alias}.${rhs.column}`;
     return `${cmp.alias}.${cmp.column} ${cmp.op} ${rhs.kind}:${value}`;
   };
+  // A `not` or a group is compared as a unit: its key is built from the keys
+  // of what it holds (the items of a group in any order).
+  const keyOf = (node, leaves) => node.op === "cmp" ? identity(leaves[node.index])
+    : node.op === "not" ? `not(${keyOf(node.item, leaves)})` : `${node.op}(${node.items.map((x) => keyOf(x, leaves)).sort().join(",")})`;
+  const textOf = (node, leaves) => node.op === "cmp" ? leaves[node.index].text
+    : node.op === "not" ? `not ${node.item.op === "cmp" ? textOf(node.item, leaves) : `(${textOf(node.item, leaves)})`}`
+      : node.items.map((x) => x.op === "cmp" || x.op === "not" ? textOf(x, leaves) : `(${textOf(x, leaves)})`).join(` ${node.op} `);
+  const firstLeaf = (node) => node.op === "cmp" ? node : firstLeaf(node.op === "not" ? node.item : node.items[0]);
   const refuseDuplicates = (tree, leaves) => {
     if (tree.op === "cmp") return;
     if (tree.op === "not") { refuseDuplicates(tree.item, leaves); return; }
     const seen = new Map();
     for (const item of tree.items) {
-      if (item.op !== "cmp") { refuseDuplicates(item, leaves); continue; }
-      const leaf = leaves[item.index];
-      const key = identity(leaf);
+      refuseDuplicates(item, leaves);
+      const key = keyOf(item, leaves);
       if (seen.has(key)) {
-        failAt(leaf.rule_line)(`${leaf.text} repeats ${seen.get(key).text} in the same ${tree.op === "and" ? "conjunction" : "disjunction"}`);
+        failAt(leaves[firstLeaf(item).index].rule_line)(`${textOf(item, leaves)} repeats ${textOf(seen.get(key), leaves)} in the same ${tree.op === "and" ? "conjunction" : "disjunction"}`);
       }
-      seen.set(key, leaf);
+      seen.set(key, item);
     }
   };
 
@@ -669,6 +714,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     }
     return {"@id": spec.id, rule_line: line(spec.path), exists_line: line(`${spec.path}/exists`), path: spec.path,
       table: inner.table.toLowerCase(), alias: inner.alias, itab: `lt_${inner.alias}`, wa: wa(inner.alias), loops: kind !== "require",
+      slot: sources.slice(0, sources.findIndex((x) => x.spec === spec)).filter((x) => x.inner.table === inner.table).length,
       conditions, tree, on: top.filter(isOn).map((t) => conditions[t.index]), rest: conjoin(top.filter((t) => !isOn(t))),
       info: inner.info, alertSpec: spec.value.alert};
   });
@@ -678,12 +724,13 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
     const alertText = need(value, path, "text with {alias.field} holes");
     const alertFail = failAt(line(path));
     let texts = 0, holes = 0;
-    const parts = parseAlert(alertText, alertFail).map((part) => {
+    const parts = parseAlert(alertText, alertFail).flatMap((part) => {
       if (part.kind === "text") {
         const why = misfit(part.value, {built_in: "STRG"});
         if (why) alertFail(`alert text: ${why}`);
-        return {"@id": `${idBase}/alert/text/${++texts}`, rule_line: line(path), is_text: true,
-          value: part.value, "value@type": {built_in: "STRG"}};
+        // a long text is several literals joined by &&, one per line
+        return pieces(part.value).map((value) => ({"@id": `${idBase}/alert/text/${++texts}`, rule_line: line(path), is_text: true,
+          value, "value@type": {built_in: "STRG"}}));
       }
       if (only && part.alias !== outer.alias && aliases.has(part.alias)) alertFail(`${part.text}: ${only}`);
       const {field} = fieldOf({kind: "field", alias: part.alias, field: part.field, text: part.text}, scope, alertFail);
@@ -776,7 +823,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
 
   // examples: rows of the rule's own tables, the date, the alerts expected
   // each table where it enters the rule: `for`, or its clause's `exists`
-  const ruleTables = [{...outer.info, rule_line: line("for")}, ...clauses.map((c) => ({...c.info, rule_line: c.exists_line}))];
+  const ruleTables = [{...outer.info, rule_line: line("for")}, ...clauses.filter((c) => c.slot === 0).map((c) => ({...c.info, rule_line: c.exists_line}))];
   const testName = (table) => ({itab: `mt_${table.toLowerCase()}`, wa: `ls_${table.toLowerCase()}`});
   const methods = new Set(["check_reference"]);
   // a rule carries its proof: examples, each saying what it expects
@@ -840,11 +887,12 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry} = {}) {
       tables: exampleTables,
       expect: expect.map((value, x) => {
         if (typeof value !== "string") failAt(line(`${base}/expect/${x}`))("an expected alert is one line of text");
-        const why = misfit(value, {built_in: "STRG"});
+        const why = pieces(value).map((piece) => misfit(piece, {built_in: "STRG"})).find(Boolean);
         if (why) failAt(line(`${base}/expect/${x}`))(`expected alert: ${why}`);
-        return {"@id": `${exampleId}/expect/${x + 1}`, rule_line: line(`${base}/expect/${x}`), value, "value@type": {built_in: "STRG"}};
+        return expectNode(`${exampleId}/expect/${x + 1}`, line(`${base}/expect/${x}`), value);
       })};
   });
+  for (const example of examples) example.long_expect = example.expect.some((x) => !x.single);
 
   const ddicOf = (info) => ({client: info.client, keys: info.keys.filter((k) => k !== info.client),
     fields: Object.fromEntries([...info.fields].map(([column, f]) => [column, f.literal]))});
@@ -922,6 +970,7 @@ function caseNode(model, c) {
           })};
       })};
   }).filter(Boolean);
+  const expect = c.expect.map((value, x) => expectNode(`${id}/expect/${x + 1}`, ruleLine, value));
   const label = c.label;
   const refWhy = misfit(`${label} (check against check_reference)`, STRG);
   if (refWhy) throw new Error(`derived case ${c.method}: ${refWhy}`);
@@ -930,7 +979,7 @@ function caseNode(model, c) {
     derived: {condition: c.condition, kind: c.kind, structural: c.structural},
     date: {...literal(`${id}/date`, c.date, DATE_TYPE), call: `${model.class}=>check`},
     tables,
-    expect: c.expect.map((value, x) => literal(`${id}/expect/${x + 1}`, value, STRG))};
+    expect, long_expect: expect.some((x) => !x.single)};
 }
 
 // ---------------------------------------------------------------------------
@@ -984,6 +1033,23 @@ export async function renderRule(compiled) {
   } finally {
     console.log = quiet;
   }
+  // what the abap profile refuses (a line over 255 characters, for one) is
+  // refused here, at the rule line of the node the line traces to, before
+  // any file is written: a rule the compiler accepts never renders it
+  const nodeLine = (nodeId) => {
+    let found;
+    const walk = (x) => {
+      if (found || !x || typeof x !== "object") return;
+      if (x["@id"] === nodeId && x.rule_line) { found = x.rule_line; return; }
+      for (const v of Array.isArray(x) ? x : Object.values(x)) walk(v);
+    };
+    walk(model);
+    return found ?? model.rule_line;
+  };
+  for (const [kind, result] of [["clas.abap", check], ["clas.testclasses.abap", test]]) {
+    const error = result.findings.find((f) => f.severity === "E");
+    if (error) throw new RuleError(model.source, nodeLine(error.node), `the generated ${model.class}.${kind} line ${error.line}: ${error.text} (${error.rule}, ${error.node})`);
+  }
   const name = model.class;
   return {
     files: {
@@ -1032,7 +1098,7 @@ export function describeCases(model) {
     for (const t of c.tables) {
       for (const r of t.rows) out.push(`  ${t.table}: ${r.fields.map((f) => `${f.column}=${JSON.stringify(f.value)}`).join(" ")}`);
     }
-    for (const clause of model.clauses) if (!c.tables.some((t) => t.table === clause.table)) out.push(`  ${clause.table}: (no rows)`);
+    for (const table of new Set(model.clauses.map((clause) => clause.table))) if (!c.tables.some((t) => t.table === table)) out.push(`  ${table}: (no rows)`);
     out.push(c.expect.length ? `  expect: ${c.expect.map((e) => JSON.stringify(e.value)).join("\n          ")}` : "  expect: no alert");
   }
   for (const k of model.skipped ?? []) out.push("", `skipped ${k.condition}: ${k.reason}`);
