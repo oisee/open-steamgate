@@ -693,6 +693,18 @@ const NATIVE = new Map([
   ["ZCL_AJSON:LCL_UTILS=>STRING_TO_XSTRING_UTF8", "Native_AJSON_ENCODE"],
   ["ZCL_AJSON:LCL_UTILS=>XSTRING_TO_STRING_UTF8", "Native_AJSON_DECODE"],
   ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~UNESCAPE_URL", "abap.UnescapeURL"],
+  // the zip reader's CRC-32 register over a piece (src/zip): the ABAP loop,
+  // a byte at a time, was a third of a 150 MB zip read (go/abap/crc32.go)
+  ["ZCL_OSD_CRC32=>COMBINE", "abap.Crc32Combine"],
+  // the zip reader's raw DEFLATE: the same state machine in Go, with a table
+  // for short codes (go/abap/inflate.go); FEED decodes in ABAP without it
+  ["ZCL_OSD_INFLATE=>HOST_OPEN", "abap.InflateHostOpen"],
+  ["ZCL_OSD_INFLATE=>HOST_FEED", {fn: "abap.InflateHostFeed", args: ["IV_HANDLE:i", "IV_DATA:xstring", "IV_MAX_OUT:i", "&EV_RAW:xstring", "&EV_STATE:i", "&EV_UNUSED:xstring", "&EV_REASON:string"]}],
+  // the streaming sXML parser's scans over its window (src/sxml): a name to
+  // its delimiter, white space to its end (go/abap/sxmlscan.go)
+  ["ZCL_OSD_SXML_PULL=>NAME_END", "abap.SxmlNameEnd"],
+  ["ZCL_OSD_SXML_PULL=>SPACE_END", "abap.SxmlSpaceEnd"],
+  ["ZCL_OSD_SXML_PULL=>UTF8_TEXT", {fn: "abap.SxmlUtf8Text", args: ["IV_PART:xstring", "&EV_TEXT:string", "&EV_OK:i"]}],
   // the value text of CL_ABAP_UNIT_ASSERT's messages: Object.keys( ) of a
   // structure and an object's constructor name are @KERNEL lines in
   // open-abap-core's LCL_DUMP (go/abap/unitdump.go)

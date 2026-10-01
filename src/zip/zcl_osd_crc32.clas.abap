@@ -15,6 +15,13 @@ CLASS zcl_osd_crc32 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "! The checksum as a number, most significant byte first
     METHODS value
       RETURNING VALUE(rv_crc) TYPE ty_crc.
+    "! The register IV_CRC carried over the bytes IV_DATA (most significant
+    "! byte first, not inverted): the loop UPDATE runs. A native build may
+    "! answer it from the host (gogen: hash/crc32), with the same result
+    CLASS-METHODS combine
+      IMPORTING iv_crc        TYPE xstring
+                iv_data       TYPE xstring
+      RETURNING VALUE(rv_crc) TYPE xstring.
   PRIVATE SECTION.
     CLASS-DATA gt_table TYPE STANDARD TABLE OF ty_crc WITH DEFAULT KEY.
     DATA mv_crc TYPE x LENGTH 4.
@@ -61,6 +68,14 @@ CLASS zcl_osd_crc32 IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD update.
+    DATA lv_register TYPE xstring.
+    lv_register = mv_crc.
+    mv_crc = combine( iv_crc  = lv_register
+                      iv_data = iv_data ).
+  ENDMETHOD.
+
+
+  METHOD combine.
     DATA lv_crc TYPE ty_crc.
     DATA lv_byte TYPE x LENGTH 1.
     DATA lv_low TYPE x LENGTH 1.
@@ -70,7 +85,7 @@ CLASS zcl_osd_crc32 IMPLEMENTATION.
     DATA lv_entry TYPE ty_crc.
     DATA lv_pos TYPE i.
     DATA lv_len TYPE i.
-    lv_crc = mv_crc.
+    lv_crc = iv_crc.
     lv_len = xstrlen( iv_data ).
     WHILE lv_pos < lv_len.
       lv_byte = iv_data+lv_pos(1).
@@ -84,7 +99,7 @@ CLASS zcl_osd_crc32 IMPLEMENTATION.
       lv_crc = lv_crc BIT-XOR lv_entry.
       lv_pos = lv_pos + 1.
     ENDWHILE.
-    mv_crc = lv_crc.
+    rv_crc = lv_crc.
   ENDMETHOD.
 
   METHOD value.
