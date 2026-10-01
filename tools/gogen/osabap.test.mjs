@@ -13,7 +13,8 @@ const builder = join(here, "osabap.mjs");
 const binary = join(here, ".out", "osabap");
 
 execFileSync(process.execPath, [builder], {stdio: "inherit"});
-execFileSync("go", ["test", "-tags", "nodatabase", "./cmd/osabap"], {
+// the SAP GUI test is written against hello's generated types (osabap_hello)
+execFileSync("go", ["test", "-tags", "nodatabase,osabap_hello", "./cmd/osabap"], {
   cwd: join(here, "go"), stdio: "inherit",
 });
 

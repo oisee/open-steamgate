@@ -1,3 +1,12 @@
+//go:build osabap_hello
+
+// The host's SAP GUI path against the default report's selection screen
+// (tools/gogen/apps/hello): the generated types it names exist only when
+// that report is the one generated last, against the pinned open-abap-gui,
+// so the file builds only under the osabap_hello tag, which
+// tools/gogen/osabap.test.mjs sets right after it builds hello. Any other
+// report leaves cmd/osabap vettable and testable.
+
 package main
 
 import (
