@@ -8,7 +8,8 @@
 "! huge: IV_MAX_TOTAL bytes in all, and IV_MAX_RATIO output bytes per
 "! compressed byte (both 0 = no limit). A stop, and a damaged entry, raise
 "! ZCX_OSD_BYTE_SOURCE from NEXT; the end of the entry is an empty NEXT, then
-"! every later one is empty too.
+"! every later one is empty too. Counts are type i: an entry is under 2 GiB,
+"! as ZCL_OSD_ZIP_READER reads no ZIP64 anyway.
 "!
 "! Usage:
 "!   CREATE OBJECT lo_zip EXPORTING io_source = lo_file.
@@ -55,6 +56,10 @@ CLASS zcl_osd_byte_source_zip IMPLEMENTATION.
     mv_max_ratio = iv_max_ratio.
     lt_entries = mo_zip->get_entries( ).
     READ TABLE lt_entries INTO ls_entry WITH KEY name = iv_name.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_osd_zip
+        EXPORTING iv_reason = |{ iv_name }: no such entry|.
+    ENDIF.
     mv_compressed = ls_entry-compressed_size.
     mo_zip->open( iv_name ).
   ENDMETHOD.

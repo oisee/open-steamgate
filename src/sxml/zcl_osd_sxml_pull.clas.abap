@@ -12,7 +12,8 @@
 "! longest single construct whole: a text value, a tag with its attributes,
 "! and equally a comment, a processing instruction, a CDATA section or a
 "! run of white space outside the root element, however long. An XML
-"! declaration is looked for in the first 1024 bytes only.
+"! declaration is looked for in the first 1024 bytes only. Positions are
+"! type i, so a document is under 2 GiB.
 "!
 "! The parser is a port of open-abap-core's CL_SXML_STRING_READER (local
 "! class lcl_xml_parser, the byte-mode version of oisee/open-abap-core

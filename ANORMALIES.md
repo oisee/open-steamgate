@@ -69,7 +69,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Affected ABAP statement, runtime API or adapter: `cx_sxml_parse_error-xml_offset` of `ZCL_OSD_SXML_PULL` / `ZCL_OSD_SXML_STREAM_READER` for input with a UTF-16 BOM or a declared ISO-8859-1 / US-ASCII
 - Minimal ABAP reproducer: `FFFE` then `<a></b>` in UTF-16LE through `ZCL_OSD_SXML_STREAM_READER=>CREATE( )`: the error offset is 3, the start of `</b>` in the UTF-8 the input was transcoded to
 - Exact command used to run it: `npm run unit`, `test/unit/zcl_osd_sxml_stream_test` (`ltcl_pull->utf16_offset`)
-- Expected SAP behaviour: not measured; a byte offset is presumably one into the input as given (here 8, after the BOM's 2 and three UTF-16 code units of `<a>`)
+- Expected SAP behaviour: measured on A4H (2026-10-01, `CL_SXML_STRING_READER`): the offset counts the bytes of the input as given, the BOM not counted -- `FFFE` or `FEFF` then `<a></b>` in UTF-16 is 6; a declared ISO-8859-1 `<a>` `E9` `</b>` after a 44-byte declaration is 48 (the UTF-8 count would be 49)
 - Actual open-abap behaviour: the offset counts the bytes of the transcoded UTF-8 stream from its start (the BOM not counted); a US-ASCII byte above 7F is read as U+FFFD, not refused
 - Impact on open-steamgate: an error position in a non-UTF-8 document points at the wrong byte; values and events are unaffected
 - Smallest safe workaround: none needed for UTF-8 input; for the others, measure the system's offsets with a contract fixture before relying on them
