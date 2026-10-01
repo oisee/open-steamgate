@@ -33,7 +33,7 @@ Format adapted from `larshp/hithub` (MIT).
 
 - Status: `workaround`
 - Discovery date: `2026-10-01`
-- Affected versions: `oisee/open-abap-core 909179a` (pinned in `libs.lock.json`) and upstream `open-abap/open-abap-core` main at `9959c70`
+- Affected versions: `oisee/open-abap-core 909179a`; at `8b397be` (#372, open-abap-core#1279) the invalid-UTF-8, byte-offset and lower-case-encoding fixtures pass, and the marks in `cases.json` say which still miss. Still open at `8b397be`: a declaration with one byte cut out of it (`xml_decl_lowercase_utf8` under the drop-a-boundary-byte mutant) ends the run with `CONVT_NO_NUMBER` instead of a parse error, so that mutant leaves the fixture out and upstream `open-abap/open-abap-core` main at `9959c70`
 - Affected ABAP statement, runtime API or adapter: `cl_abap_unit_assert=>assert_differs( act = x exp = x )`
 - Minimal ABAP reproducer: `cl_abap_unit_assert=>assert_differs( act = 1 exp = 1 ).` in any test method: the method passes
 - Exact command used to run it: found by the sXML contract's mutant test (`test/unit/zcl_osd_sxml_contract_test`, `mutant_decode_per_chunk`): a loop of `assert_differs( act = split exp = whole )` passed over two rows whose split was `whole`

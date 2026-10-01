@@ -670,7 +670,6 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     ls-name = `xml_decl_lowercase_utf8`.
     ls-group = `xml`.
     ls-status = `measured-a4h-2026-10-01`.
-    ls-fork = `DUMPS`.
     lv_hex = `3C3F786D6C2076657273696F6E3D22312E302220656E636F64696E673D227574662D38223F3E3C613EC3A93C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -722,7 +721,6 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     ls-name = `xml_ff_in_comment`.
     ls-group = `xml`.
     ls-status = `measured-a4h-2026-10-01`.
-    ls-fork = `MISS`.
     lv_hex = `3C613E3C212D2DFF2D2D3E3C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -755,7 +753,6 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     ls-name = `xml_mismatched_close`.
     ls-group = `xml-invalid`.
     ls-status = `measured-a4h-2026-10-01`.
-    ls-fork = `MISS`.
     lv_hex = `3C613E3C2F623E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -768,7 +765,6 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     ls-name = `xml_mismatched_close_non_ascii`.
     ls-group = `xml-invalid`.
     ls-status = `measured-a4h-2026-10-01`.
-    ls-fork = `MISS`.
     lv_hex = `3C613EC3A9E282AC3C2F623E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -783,7 +779,6 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     ls-name = `xml_lt_in_attribute`.
     ls-group = `xml-invalid`.
     ls-status = `measured-a4h-2026-10-01`.
-    ls-fork = `MISS`.
     lv_hex = `3C6120783D22C3A9C3A93C222F3E`.
     ls-input = lv_hex.
     lv_line = `ERROR CX_SXML_PARSE_ERROR 6`.
@@ -859,7 +854,6 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     ls-name = `utf8_lone_continuation`.
     ls-group = `utf8`.
     ls-status = `measured-a4h-2026-10-01`.
-    ls-fork = `MISS`.
     lv_hex = `3C613E80613C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -876,7 +870,6 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     ls-name = `utf8_overlong`.
     ls-group = `utf8`.
     ls-status = `measured-a4h-2026-10-01`.
-    ls-fork = `MISS`.
     lv_hex = `3C613EC0AF613C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -893,7 +886,6 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     ls-name = `utf8_truncated_3`.
     ls-group = `utf8`.
     ls-status = `measured-a4h-2026-10-01`.
-    ls-fork = `MISS`.
     lv_hex = `3C613EE282613C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -910,7 +902,6 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     ls-name = `utf8_truncated_3_before_lt`.
     ls-group = `utf8`.
     ls-status = `measured-a4h-2026-10-01`.
-    ls-fork = `MISS`.
     lv_hex = `3C613EE2823C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -923,7 +914,6 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     ls-name = `utf8_truncated_4_before_lt`.
     ls-group = `utf8`.
     ls-status = `measured-a4h-2026-10-01`.
-    ls-fork = `MISS`.
     lv_hex = `3C613EF09F983C2F613E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -953,7 +943,6 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     ls-name = `utf8_truncated_at_eof`.
     ls-group = `utf8`.
     ls-status = `measured-a4h-2026-10-01`.
-    ls-fork = `MISS`.
     lv_hex = `3C613E613C2F613EE282`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.
@@ -970,7 +959,6 @@ CLASS zcl_osd_sxml_fixtures IMPLEMENTATION.
     ls-name = `utf8_in_attribute`.
     ls-group = `utf8`.
     ls-status = `measured-a4h-2026-10-01`.
-    ls-fork = `MISS`.
     lv_hex = `3C6120783D2280222F3E`.
     ls-input = lv_hex.
     lv_line = `OPEN "a" ""`.

@@ -589,8 +589,7 @@
         "CLOSE \"a\"",
         "FINAL"
       ],
-      "measured": "a lower-case encoding=\"utf-8\" is accepted",
-      "fork": "DUMPS"
+      "measured": "a lower-case encoding=\"utf-8\" is accepted"
     },
     {
       "name": "xml_astral_text",
@@ -640,8 +639,7 @@
         "CLOSE \"a\"",
         "FINAL"
       ],
-      "measured": "the byte FF inside a comment is ignored; the event lines are derived",
-      "fork": "MISS"
+      "measured": "the byte FF inside a comment is ignored; the event lines are derived"
     },
     {
       "name": "xml_unclosed",
@@ -668,8 +666,7 @@
       "expected": [
         "OPEN \"a\" \"\"",
         "ERROR CX_SXML_PARSE_ERROR 3"
-      ],
-      "fork": "MISS"
+      ]
     },
     {
       "name": "xml_mismatched_close_non_ascii",
@@ -683,8 +680,7 @@
         "VALUE \"\\u00E9\\u20AC\"",
         "ERROR CX_SXML_PARSE_ERROR 8"
       ],
-      "measured": "the error is at byte 8, the start of the wrong close tag: a byte offset, not a character offset",
-      "fork": "MISS"
+      "measured": "the error is at byte 8, the start of the wrong close tag: a byte offset, not a character offset"
     },
     {
       "name": "xml_lt_in_attribute",
@@ -696,8 +692,7 @@
       "expected": [
         "ERROR CX_SXML_PARSE_ERROR 6"
       ],
-      "measured": "the error is at byte 6, the start of the attribute value",
-      "fork": "MISS"
+      "measured": "the error is at byte 6, the start of the attribute value"
     },
     {
       "name": "xml_cdata_end_in_text",
@@ -779,8 +774,7 @@
         "CLOSE \"a\"",
         "FINAL"
       ],
-      "measured": "VALUE FFFD a",
-      "fork": "MISS"
+      "measured": "VALUE FFFD a"
     },
     {
       "name": "utf8_overlong",
@@ -799,8 +793,7 @@
         "CLOSE \"a\"",
         "FINAL"
       ],
-      "measured": "VALUE: ONE FFFD for the two bytes, then a",
-      "fork": "MISS"
+      "measured": "VALUE: ONE FFFD for the two bytes, then a"
     },
     {
       "name": "utf8_truncated_3",
@@ -819,8 +812,7 @@
         "CLOSE \"a\"",
         "FINAL"
       ],
-      "measured": "VALUE: TWO FFFD, one per byte, then a",
-      "fork": "MISS"
+      "measured": "VALUE: TWO FFFD, one per byte, then a"
     },
     {
       "name": "utf8_truncated_3_before_lt",
@@ -837,8 +829,7 @@
         "OPEN \"a\" \"\"",
         "ERROR CX_SXML_PARSE_ERROR 5"
       ],
-      "measured": "parse error at byte 5, the <; the OPEN line is derived",
-      "fork": "MISS"
+      "measured": "parse error at byte 5, the <; the OPEN line is derived"
     },
     {
       "name": "utf8_truncated_4_before_lt",
@@ -855,8 +846,7 @@
         "OPEN \"a\" \"\"",
         "ERROR CX_SXML_PARSE_ERROR 6"
       ],
-      "measured": "parse error at byte 6, the <; the OPEN line is derived",
-      "fork": "MISS"
+      "measured": "parse error at byte 6, the <; the OPEN line is derived"
     },
     {
       "name": "utf8_encoded_surrogate",
@@ -894,8 +884,7 @@
         "VALUE \"a\"",
         "CLOSE \"a\"",
         "FINAL"
-      ],
-      "fork": "MISS"
+      ]
     },
     {
       "name": "utf8_in_attribute",
@@ -914,8 +903,7 @@
         "ATTR \"x\" \"\" \"\\uFFFD\"",
         "CLOSE \"a\"",
         "FINAL"
-      ],
-      "fork": "MISS"
+      ]
     }
   ]
 }

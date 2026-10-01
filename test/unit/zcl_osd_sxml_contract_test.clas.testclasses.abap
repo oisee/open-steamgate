@@ -421,6 +421,11 @@ CLASS ltcl_contract IMPLEMENTATION.
     DATA li_factory TYPE REF TO zif_osd_sxml_factory.
     DATA lt_mismatches TYPE zcl_osd_sxml_contract=>ty_mismatches.
     CREATE OBJECT li_factory TYPE lcl_drop_boundary_byte.
+* The pinned fork reads a declaration with a byte cut out of it by dumping
+* (CONVT_NO_NUMBER, no CATCH sees it) instead of raising a parse error, so a
+* corrupted declaration would end the whole run: it is left out of this
+* mutant only. ANORMALIES, sXML reader entry.
+    DELETE mt_fixtures WHERE name = `xml_decl_lowercase_utf8`.
     lt_mismatches = beyond_known( run( li_factory ) ).
     cl_abap_unit_assert=>assert_not_initial( lt_mismatches ).
     READ TABLE lt_mismatches WITH KEY split = `whole` TRANSPORTING NO FIELDS.
