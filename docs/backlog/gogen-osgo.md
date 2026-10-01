@@ -1402,3 +1402,58 @@ something already shipped (then it is a must of the current release, like the ro
 - nice (added 2026-10-01): pAMDP `XMLTABLE` / `XMLEXTRACT(VALUE)` / `SELECT ... FOR XML` over the streaming sXML
   parser. Measured on A4H HANA 2.00.075: `XMLTABLE` reads ~5.8 MB/s at ~23 bytes of HANA memory per XML byte (166 MB:
   28.6 s, 3.9 GB); over the streaming parser the memory is the window. Owner: osg-research.
+
+## The lock server (ENQ) and the ADT façade in ABAP (2026-10-01, spike-sprint for 0.6)
+
+Why now: vsp's integration suite against `osd` 0.4.1444 (2026-10-01) found that two sessions can lock one object
+and that a stateless request drops a session's ADT locks. The façade's lock map is a private enqueue table. Two 0.6
+items need a real one: the ADT façade moving to ABAP (Alice and stoker, 2026-10-01: a lock becomes an ordinary
+`ENQUEUE_*` call, as on a system) and the OSGo dispatcher's several work processes (above: "serialise only where
+SAP does (ENQUEUE, V2 update)"). Alice, 2026-10-01: start in-process as a goroutine, then the same protocol over a
+socket. Clean room: the contract is measured on A4H as a client (Alice: test there as much as needed); no SAP
+kernel or server code is read.
+
+Labels follow the release rule: only a must blocks its tag.
+
+**0.4.x patch (Node façade, already shipped code)**
+- must: a stateless request keeps the stateful session's locks (`tools/adt-session.mjs`); LOCK, a stateless read,
+  PUT answers 200 as on A4H. Owner: dell. Branch `fix/adt-lock-session`.
+- must: a database error reaches the client with its text (the wrapped `CX_SY_DYNAMIC_OSQL_SEMANTICS` had an empty
+  JS message). Owner: dell.
+- should: one lock owner per object across sessions in the façade; a second session is refused with the holder's
+  name. Replaced by ENQ E1 when the façade moves to ABAP. Owner: dell.
+- should: a package created over ADT (stateless, no packageRef) is visible at once to nodestructure, quickSearch,
+  LOCK and DELETE. Owner: dell; becomes a conformance case (osg-research).
+- should: `POST .../oo/classes/<name>/includes` creates a test-class include. Owner: dell.
+
+**0.5** -- nothing here blocks the 0.5 tag.
+
+**0.6 -- ENQ, the lock server**
+- must: **E0, the contract measured on A4H.** Throwaway lock objects in `$ZOSG_TMP`, deleted afterwards. Measure:
+  the E/S/X/O compatibility matrix, same-owner cumulation (E twice, E after S), argument masks and initial fields,
+  `_SCOPE` 1/2/3 and what COMMIT WORK / ROLLBACK WORK / the end of the session release, `_WAIT`, `FOREIGN_LOCK` with
+  `sy-msgv1` = the holder, `DEQUEUE_ALL`, and the row shape of `ENQUEUE_READ`. Recorded as fixtures with
+  `EXPECT` = what A4H answered. Owner: dell.
+- must: **E1, the lock table as one goroutine.** Own package `tools/gogen/go/enq` (go-runtime-self-contained
+  rule): one goroutine owns the table, requests arrive on a channel, no mutex; owner = session + LUW; release on
+  scope rules and on session end. The same contract in-process on Node (one module all hosts import, the
+  `osd-dialog-step` lesson). ABAP side: `ENQUEUE_<obj>` / `DEQUEUE_<obj>` generated from lock objects (abapGit
+  `ENQU`), `DEQUEUE_ALL`, `ENQUEUE_READ`. Gate: every E0 fixture SAME on Go and Node. Owners: stoker (Go), dell
+  (ABAP generation, Node host).
+- must: **ADT façade skeleton in ABAP** (ADR 0007): an ICF handler for `/sap/bc/adt/*`, our own URL router, CSRF,
+  the stateful session; ADT LOCK/UNLOCK call ENQ E1. The ABAP façade replaces the Node one only when vsp's
+  scenarios and the A4H diff harness pass for what it serves (migration by diff against OSG-JS). Owner: dell.
+- should: ADT endpoint groups on the skeleton, in parallel: versions + lock/write/unlock/activate (stoker);
+  search, nodestructure, source read (osg-research); check, ABAP Unit, data preview (dell).
+- should: **E2, the same protocol over a socket.** A local socket (unix socket, or 127.0.0.1 on Windows), no
+  authentication, never on a public address. The lock server runs as its own process; OSGo work processes and
+  OSG-JS are its clients. A client holds its locks under a lease with a heartbeat, so a dead process's locks go.
+  Lands with the dispatcher's several work processes. Owner: stoker.
+- should: the CROSS `PROG` and WBCROSSGT `DIRECT` columns, for vsp's callee queries. Owner: osg-research (with
+  the where-used group).
+- nice: a writable `$TMP` and LOCK on a package, so a test can create and clean up its own package.
+
+**0.7**
+- nice: **E3, an SM12 view.** The lock table in the VS Code tree and in webgui, with a manual release.
+- generous: a lock table that survives the lock server's restart (replication, as a standalone enqueue server
+  keeps it). Only if a measured case needs it.
