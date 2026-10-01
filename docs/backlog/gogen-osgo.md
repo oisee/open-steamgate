@@ -1375,6 +1375,17 @@ something already shipped (then it is a must of the current release, like the ro
   that reads it enters the tree (ADR 0005, gated part).
 - nice: D, daemons DX: `osd samc --derive/--check` on DSL L1, CodeLens from the trace sidecar.
 - nice: Node ABAP Unit in worker_threads, one DB copy each.
+- must (added 2026-10-01, a correctness gap in shipped code): Go loses what a method wrote before it raised
+  `cx_sxml_parse_error` (ZCL_OSD_SXML_STREAM_TEST `ltcl_pull->error_offset` / `utf16_offset` FAILED on Go: the events
+  string built before the RAISE is gone). Measure on A4H which writes survive a RAISE (by-reference CHANGING, an
+  attribute, EXPORTING by value) and match it. Owner: dell.
+- should (added 2026-10-01, Alice's yes): **native sXML, inflate and CRC32 in gogen.** The report keeps its ABAP;
+  ZCL_OSD_SXML_PULL, ZCL_OSD_INFLATE and ZCL_OSD_CRC32 get Go host implementations behind the same classes, checked
+  by the same suites (the A4H-recorded sXML contract at every split, the zip tests). Baseline: the 150 MB XML
+  converter report streams in 21.4 s at 29 MB RSS (#380); target ~10 s, output byte-identical. Node keeps the ABAP
+  path for now (estimated 30-90 s; a measurement decides whether Node gets the same hook). Owner: stoker.
+- nice (added 2026-10-01): the three Go compile gaps ZCL_OSD_SXML_STREAM_TEST shows (ASSERT_NUMBER, a comparison of
+  x with x, a parameter DEFAULT that names a class constant). Owner: dell.
 
 **0.6**
 - should: the Go side of host relations. A SQLite virtual table over stable Go rows, per call, gated by
@@ -1388,3 +1399,6 @@ something already shipped (then it is a must of the current release, like the ro
 - generous: IR-JS on the database seam, so DB tests run too.
 - generous: one DB IR for both runtimes (`docs/pamdp-ir-portability.md`, a proposal; pAMDP parked).
 - generous: the lazy-table status group (needs the pooled snapshot design first).
+- nice (added 2026-10-01): pAMDP `XMLTABLE` / `XMLEXTRACT(VALUE)` / `SELECT ... FOR XML` over the streaming sXML
+  parser. Measured on A4H HANA 2.00.075: `XMLTABLE` reads ~5.8 MB/s at ~23 bytes of HANA memory per XML byte (166 MB:
+  28.6 s, 3.9 GB); over the streaming parser the memory is the window. Owner: osg-research.
