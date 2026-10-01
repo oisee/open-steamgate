@@ -23,13 +23,13 @@ CLASS ltcl_r3 IMPLEMENTATION.
     ls-code = 'A'.
     ls-seq = '012'.
     ls-active = 'X'.
-    ls-label = 'mixed'.
+    ls-ltext = 'mixed'.
     ls-amt = '10.50'.
     INSERT zosd_lift_r3 FROM ls.
     ls-code = 'B'.
     ls-seq = '001'.
     ls-active = space.
-    ls-label = 'MIXED'.
+    ls-ltext = 'MIXED'.
     ls-amt = '10.00'.
     INSERT zosd_lift_r3 FROM ls.
   ENDMETHOD.
@@ -96,10 +96,10 @@ CLASS ltcl_r3 IMPLEMENTATION.
     DATA before_count TYPE i.
     DATA after_count TYPE i.
     SELECT * FROM zosd_lift_r3 INTO ls WHERE kind = 'R3P'.
-      CHECK ls-label = 'MIXED'.
+      CHECK ls-ltext = 'MIXED'.
       ADD 1 TO before_count.
     ENDSELECT.
-    SELECT * FROM zosd_lift_r3 INTO ls WHERE kind = 'R3P' AND label = 'MIXED'.
+    SELECT * FROM zosd_lift_r3 INTO ls WHERE kind = 'R3P' AND ltext = 'MIXED'.
       ADD 1 TO after_count.
     ENDSELECT.
     cl_abap_unit_assert=>assert_equals( exp = before_count act = after_count ).
