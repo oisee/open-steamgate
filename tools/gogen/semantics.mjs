@@ -14,6 +14,11 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // A raised exception retains reference writes and attributes, but discards
+  // VALUE output and RETURNING copy-back (the same fixture runs in both hosts).
+  ZCL_GOGEN_T_EXCPARAMS: "ref/out/before/before/before/attr",
+  ZCL_GOGEN_T_DEFAULTS: "7/11/13",
+  ZCL_GOGEN_T_XCASE: "pad/prefix/length",
   ZCL_GOGEN_T_UNCATCH: {Go: "ERROR NOT_COMPILED in find( ): OCC = 0 was not measured at zcl_gogen_t_uncatch.clas.abap:8", JS: "ERROR NOT_COMPILED in find( ) OCC = 0 was not measured"},
   ZCL_GOGEN_T_ROWREF: "append:9",
   ZCL_GOGEN_T_ELEMREF: "append:9 read:8",

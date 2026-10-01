@@ -922,7 +922,19 @@ function method(cls, m) {
   if (m.returning && !isGoZero(zero(m.returning.type))) lines.push(`\t${ident(m.returning.name)} = ${zero(m.returning.type)}`);
   for (const f of m.fieldSymbols ?? []) lines.push(`\tvar ${ident(f.name)} ${f.type.k === "data" ? "abap.Data" : f.type.k === "struct" ? `*${goType(f.type)}` : `*abap.RowBinding[${goType(f.type)}]`}`, `\t_ = ${ident(f.name)}`);
   const ctx = {cls, loop: 0, inCtor: m.name === "CONSTRUCTOR", method: m};
-  lines.push(...m.body.flatMap((st) => stmt(st, ctx, 1)));
+  const valueOutputs = m.params.filter((p) => p.dir !== "importing" && p.byValue);
+  if (valueOutputs.length) {
+    ctx.valueOutputs = new Set(valueOutputs.map((p) => p.name));
+    // The callee owns VALUE output parameters. Copy them to the caller only
+    // after a normal return; a panic unwinds this closure without copy-back.
+    for (const p of valueOutputs) lines.push(`\tvar ${ident(p.name)}_value ${goType(p.type)}`);
+    lines.push("\tfunc() {");
+    for (const p of valueOutputs) lines.push(`\t\tvar ${ident(p.name)} ${goType(p.type)} = ${p.dir === "changing" ? copied(`*${ident(p.name)}`, p.type) : zero(p.type)}`, `\t\t_ = ${ident(p.name)}`,
+      `\t\tdefer func() { ${ident(p.name)}_value = ${ident(p.name)} }()`);
+    lines.push(...m.body.flatMap((st) => stmt(st, ctx, 2)));
+    lines.push("\t}()");
+    for (const p of valueOutputs) lines.push(`\t*${ident(p.name)} = ${copied(`${ident(p.name)}_value`, p.type)}`);
+  } else lines.push(...m.body.flatMap((st) => stmt(st, ctx, 1)));
   lines.push("\treturn", "}");
   if (LINES && m.pos) lines.push(RESET);
   return lines;
@@ -980,7 +992,7 @@ function addressable(x) {
 
 function place(p, ctx) {
   switch (p.e) {
-    case "var": return p.ref ? `(*${ident(p.name)})` : ident(p.name);
+    case "var": return p.ref && !ctx.valueOutputs?.has(p.name) ? `(*${ident(p.name)})` : ident(p.name);
     case "attr": return `me.${ident(p.name)}`;
     case "static": return p.go;
     case "const": return p.go;
@@ -1100,7 +1112,9 @@ function readSecKey(st, ctx, t) {
 }
 
 function withBuilders(body, ctx, t, emitLoop, outside = []) {
-  const names = builders(body, ctx, outside);
+  // A CATCH can read a variable after the loop panics. A builder's final
+  // write-back would be skipped by that panic, losing every prior append.
+  const names = ctx.catchScope ? [] : builders(body, ctx, outside);
   ctx.builders ??= new Map();
   for (const n of names) ctx.builders.set(n, `sb_${ident(n)}_${ctx.loop++}`);
   const pre = names.flatMap((n) => [`${t}var ${ctx.builders.get(n)} strings.Builder`, `${t}${ctx.builders.get(n)}.WriteString(${ident(n)})`]);
@@ -1466,7 +1480,10 @@ function stmtLines(st, ctx, d) {
       const n = ctx.loop++;
       const frame = {level: ctx.loopLevel ?? 0, mode: "body", used: new Set()};
       (ctx.tries ??= []).push(frame);
+      const priorCatchScope = ctx.catchScope;
+      ctx.catchScope = ctx.catchScope || st.catches.length > 0;
       const body = st.body.flatMap((x) => stmt(x, ctx, d + 1));
+      ctx.catchScope = priorCatchScope;
       frame.mode = "catch";
       const cases = st.catches.map((c) => [`${t}\t\t\tcase ${catchCond(c)}:`,
         ...catchInto(c, t, ctx),

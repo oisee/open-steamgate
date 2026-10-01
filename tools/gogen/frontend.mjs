@@ -666,7 +666,7 @@ export function readClass(folder) {
 }
 
 // ultra/events: the host functions whose TYPE p parameters are read as p(16,7) (typeOf)
-const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT", "CL_ABAP_TSTMP=>SUBTRACTSECS"]);
+const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT", "CL_ABAP_TSTMP=>SUBTRACTSECS", "CL_ABAP_UNIT_ASSERT=>ASSERT_NUMBER_BETWEEN"]);
 /** methods whose ABAP is kernel code in the transpiler runtime, and the host function that does their work */
 const NATIVE = new Map([
   // ultra/events (the WEBGUI's transaction sessions, ZCL_OSD_TRAN_SESSION):
@@ -1084,20 +1084,20 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (got !== undefined && got.kw !== want) throw new Unsupported(`CALL FUNCTION '${name}': ${p.name} passed as ${got.kw}, it is ${want}`);
     if (got === undefined) {
       if (!p.optional) throw new Unsupported(`CALL FUNCTION '${name}': parameter ${p.name} not supplied`);
-      return {dir: p.dir, place: null, type: p.type};
+      return {dir: p.dir, byValue: p.byValue, place: null, type: p.type};
     }
     const t = got.target;
     const direct = sameType(t.type, p.type);
     if (!direct && !(charlike(t.type) && charlike(p.type))) {
       throw new Unsupported(`CALL FUNCTION '${name}': ${want} ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
     }
-    if (!p.byValue && direct) return {dir: p.dir, place: t, type: p.type};
+    if (!p.byValue && direct) return {dir: p.dir, byValue: false, place: t, type: p.type};
     const tmp = {e: "var", name: `FMV_${ctx.temps++}`, type: p.type};
     ctx.locals.set(tmp.name, p.type);
     if (p.dir === "changing") before.push({s: "assign", target: tmp, value: convert(t, p.type)});
     else before.push({s: "clear", target: tmp});
     after.push({s: "assign", target: t, value: convert(tmp, t.type)});
-    return {dir: p.dir, place: tmp, type: p.type};
+    return {dir: p.dir, byValue: p.byValue, place: tmp, type: p.type};
   });
   const call = {s: "call", call: {e: "call", method: name, static: true, owner, receiver: null, sup: null, args, type: {k: "void"}, exceptions, receiving: null, callee: name}};
   const subrc = {e: "sy", field: "Subrc", type: I};
@@ -5619,8 +5619,10 @@ function constructorSignature(ctx, clsName) {
   const p = m.getParameters();
   if (p.getExporting().length + p.getChanging().length > 0) throw new Unsupported(`${clsName} constructor with EXPORTING/CHANGING`);
   const optional = new Set((p.getOptional?.() ?? []).map(upper));
+  const defOwner = declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName;
   const own = p.getImporting().map((x) => ({name: upper(x.getName()), dir: "importing", byValue: x.getMeta().includes("pass_by_value"),
-    type: typeOf(x.getType(), `${clsName}=>CONSTRUCTOR`, ctx.program), default: defaultOf(p, x), optional: optional.has(upper(x.getName()))}));
+    type: typeOf(x.getType(), `${clsName}=>CONSTRUCTOR`, ctx.program), default: defaultOf(p, x), defaultOwner: defOwner, defOwner,
+    optional: optional.has(upper(x.getName()))}));
   return withSupplied(ctx.program, `${declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName}=>CONSTRUCTOR`, own);
 }
 
@@ -6077,14 +6079,14 @@ function call(chain, ctx, statement, hint) {
     // through a binding to the caller's typed variable, as ABAP passes it by
     // reference; an ANY TABLE takes only a table
     if (p.type.k === "data" && !p.byValue && t.type.k !== "data" && t.type.k !== "dref" && (!p.type.table || t.type.k === "table")) {
-      return {dir: p.dir, place: null, wrap: {e: "wrap", x: t, type: p.type}, type: p.type};
+      return {dir: p.dir, byValue: false, place: null, wrap: {e: "wrap", x: t, type: p.type}, type: p.type};
     }
     // ultra/events: a generic TYPE c parameter (C(262143) here) takes the
     // caller's c of any length: the callee writes the caller's field, which
     // keeps its own length (the value is fitted to it after the call)
-    if (statement && p.type.k === "c" && p.type.len === 262143 && t.type.k === "c" && p.dir !== "importing") return {dir: p.dir, place: t, type: p.type, fitc: t.type.len};
+    if (statement && p.type.k === "c" && p.type.len === 262143 && t.type.k === "c" && p.dir !== "importing") return {dir: p.dir, byValue: p.byValue, place: t, type: p.type, fitc: t.type.len};
     if (!sameType(t.type, p.type)) throw new Unsupported(`${name}: IMPORTING ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
-    return {dir: p.dir, place: t, type: p.type};
+    return {dir: p.dir, byValue: p.byValue, place: t, type: p.type};
   });
   if (owner === null && !sig.static && ctx.sig.static) throw new Unsupported(`${name}: an instance method called from a static one`);
   if (owner === null && sup === null) (ctx.calls = ctx.calls ?? []).push(name);
@@ -6706,6 +6708,12 @@ function compareBytes(op, l, r, node) {
 
 /** character comparisons: c ignores trailing blanks, which the stored form already has */
 function compareValues(op, l, r, ctx) {
+  // CASE and table-row comparisons arrive here without the syntax-node path
+  // in compare(), but use the same byte rules as IF comparisons.
+  if ([l.type, r.type].some((t) => t.k === "x" || t.k === "xstring")) {
+    const bytes = compareBytes(op, l, r, {concatTokens: () => `${l.type.k} ${op} ${r.type.k}`});
+    if (bytes) return bytes;
+  }
   // two tables of one row type, = or <>: the same number of rows and each
   // row equal to the one at its index, a row of a structure component by
   // component by the rules below (the report converter of open-abap-gui

@@ -888,12 +888,18 @@ function callStmt(e, ctx, t) {
     if (a.dir === "importing") return importingArg(a, ctx);
     const b = `box${ctx.loop++}_${i}`;
     boxes.push({b, a});
-    return b;
+    return a.byValue ? `${b}_value` : b;
   });
   const lines = [`${t}{`];
-  for (const {b, a} of boxes) lines.push(`${t}  const ${b} = {v: ${a.wrap ? expr(a.wrap, ctx) : a.place ? place(a.place, ctx) : zero(a.type)}};`);
-  lines.push(`${t}  ${callee(e, ctx)}(${["s", ...args].join(", ")});`);
-  for (const {b, a} of boxes) if (a.place) lines.push(`${t}  ${place(a.place, ctx)} = ${b}.v;`);
+  for (const {b, a} of boxes) lines.push(`${t}  const ${b} = {v: ${a.dir === "exporting" && a.byValue ? zero(a.type) : a.wrap ? expr(a.wrap, ctx) : a.place ? place(a.place, ctx) : zero(a.type)}};`);
+  for (const {b, a} of boxes) if (a.byValue) lines.push(`${t}  const ${b}_value = {v: ${composite(a.type) ? `abap.copy(${b}.v)` : `${b}.v`}};`);
+  // Reference parameters retain writes when the callee raises; VALUE
+  // parameters are copied out only after its normal return.
+  lines.push(`${t}  try {`, `${t}    ${callee(e, ctx)}(${["s", ...args].join(", ")});`, `${t}  } finally {`);
+  for (const {b, a} of boxes) if (a.place && !a.byValue) lines.push(`${t}    ${place(a.place, ctx)} = ${b}.v;`);
+  lines.push(`${t}  }`);
+  for (const {b, a} of boxes) if (a.byValue) lines.push(`${t}  ${b}.v = ${b}_value.v;`);
+  for (const {b, a} of boxes) if (a.place && a.byValue) lines.push(`${t}  ${place(a.place, ctx)} = ${b}.v;`);
   lines.push(`${t}}`);
   return lines;
 }
