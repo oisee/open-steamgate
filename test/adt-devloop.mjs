@@ -1361,7 +1361,27 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     // after the lock was checked (this suite's app parses first, which
     // closes the window); the façade is mounted bare for this one.
     it("a lock released while the PUT's body is still arriving does not write", async () => {
+      // Synchronised on the route itself, not on a timer: the PUT handler
+      // checks the lock and only then attaches its "data" listener, so the
+      // first chunk reaching that listener proves the first check has
+      // passed. Only then does the lock go and the rest of the body follow.
+      let bodyReached;
+      const reached = new Promise((resolve) => {
+        bodyReached = resolve;
+      });
       const bare = express();
+      bare.use((req, res, next) => {
+        if (req.method === "PUT") {
+          const on = req.on.bind(req);
+          req.on = (event, listener) => event === "data"
+            ? on(event, (chunk) => {
+              listener(chunk);
+              bodyReached();
+            })
+            : on(event, listener);
+        }
+        next();
+      });
       bare.use(adtRouter({store, transpileOnActivate: false}).router);
       const server2 = await new Promise((resolve) => {
         const s = bare.listen(0, () => resolve(s));
@@ -1387,11 +1407,10 @@ describe("tools/adt-facade: create and delete over the wire", () => {
           });
           put.on("error", reject);
           put.write("* half a source\n");
-          // the headers have been checked by now; the lock goes, then the rest
-          setTimeout(async () => {
+          reached.then(async () => {
             await at(`/oo/classes/${LOCKED}?_action=UNLOCK&lockHandle=${handle}`, {method: "POST"});
             put.end("* and the rest\n");
-          }, 200);
+          }).catch(reject);
         });
         expect(await status).to.equal(409);
         expect(store.read("CLAS", LOCKED).source, "nothing written").to.equal(before);
