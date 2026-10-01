@@ -13,6 +13,27 @@ const SOURCE = readFileSync(FILE, "utf8");
 const model = (source = SOURCE) => modelR3FromSource(basename(FILE), source, "before");
 
 describe("verified lift R3", () => {
+  describe("a statement sharing a line with the cut points is refused, not dropped", () => {
+    const BODY = "CONCATENATE rv_text ls_row-seq INTO rv_text.";
+    const cases = [
+      ["after CHECK", (s) => s.replace(`CHECK ls_row-active = 'X'.\n      ${BODY}`, `CHECK ls_row-active = 'X'. ${BODY}`)],
+      ["after ENDIF of IF ... CONTINUE", (s) => s.replace(`CHECK ls_row-active = 'X'.\n      ${BODY}`,
+        `IF ls_row-active <> 'X'.\n        CONTINUE.\n      ENDIF. ${BODY}`)],
+      ["before ENDSELECT", (s) => s.replace(`${BODY}\n    ENDSELECT.`, `${BODY} ENDSELECT.`)],
+    ];
+    for (const [label, edit] of cases) {
+      it(label, () => {
+        const source = edit(SOURCE);
+        expect(source).to.not.equal(SOURCE);
+        expect(() => model(source)).to.throw(/shares its line/);
+      });
+    }
+    it("a comment after the filter is fine", () => {
+      const source = SOURCE.replace("CHECK ls_row-active = 'X'.", "CHECK ls_row-active = 'X'. \" active only");
+      expect(model(source).body).to.equal(BODY);
+    });
+  });
+
   it("moves the first CHECK into WHERE and keeps ORDER BY", () => {
     const result = model();
     expect(result.select).to.equal("SELECT * FROM zosd_lift_r2 INTO ls_row WHERE kind = 'STAT' AND active = 'X' ORDER BY PRIMARY KEY.");

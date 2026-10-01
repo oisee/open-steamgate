@@ -1128,7 +1128,17 @@ export function modelR3FromSource(name, source, method, ddicFolders = DEFAULT_DD
     : oldSelect.replace(/\.$/, () => ` AND ${predicate}.`);
   const end = loop.getLastToken().getStart();
   const start = body[ifContinue ? 2 : 0].getEnd();
-  const lines = source.split("\n");
+  const lines = source.split(/\r?\n/);
+  // The body is cut by whole lines, so a statement sharing a line with the
+  // filter or with ENDSELECT would be lost: refuse rather than drop it.
+  const afterFilter = lines[start.getRow() - 1].slice(start.getCol() - 1);
+  if (afterFilter.trim() !== "" && !afterFilter.trim().startsWith("\"")) {
+    throw new Refusal("shape/line", "a statement shares its line with the filter; put it on a line of its own");
+  }
+  const endselect = loop.findAllStatementNodes().at(-1).getFirstToken().getStart();
+  if (lines[endselect.getRow() - 1].slice(0, endselect.getCol() - 1).trim() !== "") {
+    throw new Refusal("shape/line", "a statement shares its line with ENDSELECT; put it on a line of its own");
+  }
   const bodyText = lines.slice(start.getRow(), end.getRow() - 1)
     .map((line) => line.replace(/^ {0,6}/, "")).join("\n").trimEnd();
   return {recipe: "R3", source: {table: dbtab, row, column, op, value}, select: newSelect,
