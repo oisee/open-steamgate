@@ -15,8 +15,12 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 13337,
+      "lines": 12762,
       "reason": "baseline 2026-10-01"
+    },
+    "go:abaperr": {
+      "lines": 13,
+      "reason": "recorded by --update"
     },
     "go:amc": {
       "lines": 506,
@@ -42,10 +46,6 @@
       "lines": 83,
       "reason": "baseline 2026-10-01"
     },
-    "go:cmd/gateway": {
-      "lines": 177,
-      "reason": "baseline 2026-10-01"
-    },
     "go:cmd/mediacheck": {
       "lines": 74,
       "reason": "baseline 2026-10-01"
@@ -62,10 +62,6 @@
       "lines": 1178,
       "reason": "baseline 2026-10-01"
     },
-    "go:cmd/semantics": {
-      "lines": 1684,
-      "reason": "baseline 2026-10-01"
-    },
     "go:cmd/storecmp": {
       "lines": 41,
       "reason": "baseline 2026-10-01"
@@ -74,13 +70,13 @@
       "lines": 67,
       "reason": "baseline 2026-10-01"
     },
-    "go:cmd/unit": {
-      "lines": 0,
-      "reason": "baseline 2026-10-01"
-    },
     "go:cmd/zork": {
       "lines": 42,
       "reason": "baseline 2026-10-01"
+    },
+    "go:crc32x": {
+      "lines": 21,
+      "reason": "recorded by --update"
     },
     "go:datearith": {
       "lines": 28,
@@ -94,9 +90,21 @@
       "lines": 504,
       "reason": "baseline 2026-10-01"
     },
+    "go:gzipx": {
+      "lines": 44,
+      "reason": "recorded by --update"
+    },
     "go:hashchar": {
       "lines": 33,
       "reason": "baseline 2026-10-01"
+    },
+    "go:inflate": {
+      "lines": 499,
+      "reason": "recorded by --update"
+    },
+    "go:nodehdr": {
+      "lines": 19,
+      "reason": "recorded by --update"
     },
     "go:reportargs": {
       "lines": 209,
@@ -113,6 +121,10 @@
     "go:subwrite": {
       "lines": 10,
       "reason": "baseline 2026-10-01"
+    },
+    "go:sxmlscan": {
+      "lines": 42,
+      "reason": "recorded by --update"
     },
     "go:termgui": {
       "lines": 307,
@@ -155,7 +167,7 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/abap.go": {
-      "lines": 233,
+      "lines": 228,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/apc.go": {
@@ -171,11 +183,11 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/conv.go": {
-      "lines": 1097,
+      "lines": 1096,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/crc32.go": {
-      "lines": 21,
+      "lines": 5,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/data.go": {
@@ -215,7 +227,7 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/dbraw.go": {
-      "lines": 84,
+      "lines": 71,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/dbstore.go": {
@@ -255,11 +267,11 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/gzip.go": {
-      "lines": 49,
+      "lines": 21,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/httpc.go": {
-      "lines": 643,
+      "lines": 615,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/icf_db.go": {
@@ -267,11 +279,11 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/icf.go": {
-      "lines": 293,
+      "lines": 277,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/inflate.go": {
-      "lines": 509,
+      "lines": 19,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/irsql.go": {
@@ -355,7 +367,7 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/sxmlscan.go": {
-      "lines": 42,
+      "lines": 12,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/sysinfo.go": {
@@ -375,8 +387,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/unit_session.go": {
-      "lines": 18,
-      "reason": "baseline 2026-10-01"
+      "lines": 22,
+      "reason": "#411: EndTestClass drops the inflate registry (a leak fix with its own test)"
     },
     "tools/gogen/go/abap/unitdump.go": {
       "lines": 80,
@@ -387,11 +399,7 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/w3mi.go": {
-      "lines": 213,
-      "reason": "baseline 2026-10-01"
-    },
-    "tools/gogen/go/cmd/semantics/main.go": {
-      "lines": 1684,
+      "lines": 208,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/js/abap.mjs": {
@@ -429,6 +437,22 @@
     "tools/stg-compile.mjs": {
       "lines": 1242,
       "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/deref.go": {
+      "lines": 14,
+      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
+    },
+    "tools/gogen/go/abap/fmarg.go": {
+      "lines": 6,
+      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
+    },
+    "tools/gogen/go/abap/gzip_http.go": {
+      "lines": 24,
+      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
+    },
+    "tools/gogen/go/abap/http_utility.go": {
+      "lines": 9,
+      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
     }
   },
   "readmeMissing": [

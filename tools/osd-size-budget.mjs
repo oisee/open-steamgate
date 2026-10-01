@@ -219,9 +219,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       else console.error("osd-size-budget: no Go toolchain -- the dependency direction was not checked");
     }
     if (errors.length > 0) {
-      console.error(`osd-size-budget: ${errors.length} breach(es):`);
-      for (const e of errors) console.error(`  ${e}`);
-      process.exit(1);
+      // --warn reports and passes: CI is advisory (Alice, 2026-10-02); the
+      // pre-push hook is where a breach stops you
+      const warn = args.includes("--warn");
+      console.error(`osd-size-budget: ${errors.length} breach(es)${warn ? " (advisory)" : ""}:`);
+      for (const e of errors) console.error(warn && process.env.GITHUB_ACTIONS ? `::warning title=size budget::${e}` : `  ${e}`);
+      if (!warn) process.exit(1);
+      process.exit(0);
     }
     console.log(`osd-size-budget: ${Object.keys(budget.budgets).length} budgets, all within`);
   }
