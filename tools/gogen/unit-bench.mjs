@@ -22,12 +22,12 @@ function timed(label, cmd, argv, options = {}) {
   const rows = [];
   for (let i = 0; i < samples; i++) {
     const file = join(dir, `${label}-${i}.time`);
-    run("/usr/bin/time", ["-f", "%e %M", "-o", file, cmd, ...argv], options);
-    const [wall, rss] = readFileSync(file, "utf8").trim().split(/\s+/).map(Number);
-    rows.push({wallSeconds: wall, peakRssKiB: rss});
+    run("/usr/bin/time", ["-f", "%e %U %S %M", "-o", file, cmd, ...argv], options);
+    const [wall, user, system, rss] = readFileSync(file, "utf8").trim().split(/\s+/).map(Number);
+    rows.push({wallSeconds: wall, cpuSeconds: user + system, peakRssKiB: rss});
   }
   const median = (field) => rows.map((r) => r[field]).sort((a, b) => a - b)[1];
-  return {runs: rows, median: {wallSeconds: median("wallSeconds"), peakRssKiB: median("peakRssKiB")}};
+  return {runs: rows, median: {wallSeconds: median("wallSeconds"), cpuSeconds: median("cpuSeconds"), peakRssKiB: median("peakRssKiB")}};
 }
 try {
   // The runner writes the class closure into cmd/unit. Its own build and run
@@ -39,23 +39,23 @@ try {
   run("node", [join(gogen, "node-unit-select.mjs"), ...classes.flatMap((x) => ["--class", x])]);
   const nodeScript = join(home, "output", "_unit_selected.mjs");
   const bin = join(dir, "unit");
-  const result = {classes, methods: plan.rows.length, instrument: "/usr/bin/time -f '%e %M' (seconds, KiB)", samples};
+  const result = {classes, methods: plan.rows.length, instrument: "/usr/bin/time -f '%e %U %S %M' (seconds, KiB)", samples};
   result.node = timed("node", "node", ["--expose-gc", "--import", "./tools/osd-unit-bootstrap.mjs", nodeScript]);
   // A new cache per cold sample includes Go's standard-library compilation.
   result.goColdBuild = {runs: []};
   for (let i = 0; i < samples; i++) {
     const cache = mkdtempSync(join(tmpdir(), "gogen-unit-cold-"));
     const file = join(dir, `cold-${i}.time`);
-    run("/usr/bin/time", ["-f", "%e %M", "-o", file, "go", "build", "-trimpath", "-o", bin, "./cmd/unit"],
+    run("/usr/bin/time", ["-f", "%e %U %S %M", "-o", file, "go", "build", "-trimpath", "-o", bin, "./cmd/unit"],
       {cwd: go, env: {...process.env, GOCACHE: cache}});
-    const [wallSeconds, peakRssKiB] = readFileSync(file, "utf8").trim().split(/\s+/).map(Number);
-    result.goColdBuild.runs.push({wallSeconds, peakRssKiB});
+    const [wallSeconds, userSeconds, systemSeconds, peakRssKiB] = readFileSync(file, "utf8").trim().split(/\s+/).map(Number);
+    result.goColdBuild.runs.push({wallSeconds, cpuSeconds: userSeconds + systemSeconds, peakRssKiB});
     rmSync(cache, {recursive: true, force: true});
   }
   result.goWarmBuild = timed("warm", "go", ["build", "-trimpath", "-o", bin, "./cmd/unit"],
     {cwd: go, env: {...process.env, GOCACHE: process.env.GOCACHE ?? "/tmp/gogen-unit-gocache"}});
   result.goRun = timed("go", bin, []);
   const median = (rows, field) => rows.map((r) => r[field]).sort((a, b) => a - b)[1];
-  result.goColdBuild.median = {wallSeconds: median(result.goColdBuild.runs, "wallSeconds"), peakRssKiB: median(result.goColdBuild.runs, "peakRssKiB")};
+  result.goColdBuild.median = {wallSeconds: median(result.goColdBuild.runs, "wallSeconds"), cpuSeconds: median(result.goColdBuild.runs, "cpuSeconds"), peakRssKiB: median(result.goColdBuild.runs, "peakRssKiB")};
   console.log(JSON.stringify(result, null, 2));
 } finally { rmSync(dir, {recursive: true, force: true}); }

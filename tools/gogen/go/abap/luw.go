@@ -35,6 +35,8 @@ func conn() querier {
 }
 
 func plainConn() querier {
+	// DB may lazily open the Unit class's image and its transaction.
+	DB()
 	if tx != nil {
 		return tx
 	}
