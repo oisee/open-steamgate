@@ -52,6 +52,19 @@ describe("stateful APC timers", function () {
     await import("./start.mjs");
     Host = (await import("../output/zcl_apc_host.clas.mjs")).zcl_apc_host;
     await import("../output/zcl_osd_timer_probe.clas.mjs");
+    generation = {context: globalThis.abap.context.osdGeneration,
+      jobs: globalThis.abap.context.RFCDestinations?.JOBS?.generation};
+  });
+  // A hot swap names the process's generation (the context and the JOBS
+  // destination). Put both back after each case: a suite that runs after this
+  // one in the same process (test/batch-runs.mjs in a shard) otherwise sees
+  // "timer-next" as the live generation and refuses its queued runs.
+  let generation;
+  afterEach(() => {
+    const context = globalThis.abap.context;
+    if (generation.context === undefined) delete context.osdGeneration;
+    else context.osdGeneration = generation.context;
+    if (context.RFCDestinations?.JOBS !== undefined) context.RFCDestinations.JOBS.generation = generation.jobs;
   });
   async function channel() {
     const socket = new Socket();

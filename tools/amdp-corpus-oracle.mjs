@@ -6,11 +6,18 @@
 // cannot parse is a gap in our grammar, named by where our parser stopped.
 //
 //   node tools/amdp-corpus-oracle.mjs [--export <dir>] [--ddic <dir>]... [--passes n]
+//   node tools/amdp-corpus-oracle.mjs --sweep [--older-than <hours>] [--yes]
 //
 // The HANA it talks to is amdp-run's (HXE_HOST / HXE_PORT / HXE_PASSWORD or
-// the password file). It works in ONE schema, OSD_CORPUS, which it drops
-// and recreates at the start of every run and never leaves; statements go
-// one at a time, each with a timeout, since the database shares its host.
+// the password file). Every run works in a schema of its own,
+// OSD_CORPUS_<runid> (runid: base36 of the time, of the pid and two random
+// characters), which it creates at the start and drops, and only it, at
+// the end -- also on SIGINT / SIGTERM -- so two runs on one HANA do not
+// kill each other. There is no fixed schema. A run that was killed hard
+// leaves its schema behind: `--sweep` lists the OSD_CORPUS_% schemas older
+// than --older-than hours (default 6, by CREATE_TIME in SYS.SCHEMAS) and,
+// with --yes, drops them; it touches no other schema. Statements go one at
+// a time, each with a timeout, since the database shares its host.
 //
 // The report goes to .local/amdp-oracle/ only: HANA's messages name the
 // corpus's objects, and corpus names stay local (CLAUDE.md). What is printed
@@ -44,15 +51,117 @@
 // and of a table function here is ours, not read off a system.
 import {mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync} from "node:fs";
 import {join} from "node:path";
+import {randomInt} from "node:crypto";
 import {measure} from "./sqlscript/coverage.mjs";
 import {resolveType} from "./osd-type-graph.mjs";
 import {connection} from "./amdp-run.mjs";
 import {compileProcedure} from "./sqlscript-to-procedure-ir.mjs";
 import {runsAs} from "./osd-main.mjs";
 
-export const SCHEMA = "OSD_CORPUS";
+/** the prefix of every schema this tool makes; the bare name is never made */
+export const SCHEMA_PREFIX = "OSD_CORPUS";
 const upper = (v) => String(v ?? "").toUpperCase().trim();
 const quote = (name) => `"${String(name).replace(/"/g, '""')}"`;
+const HANA_NAME_MAX = 127;
+
+/**
+ * a run id of one fixed shape, R + nine base36 digits of the time + eight
+ * random ones: 36^8 tails per millisecond, so two runs do not meet, and a
+ * name of this shape is one this tool made (RUN_ID_SHAPE), which a lookalike
+ * such as OSD_CORPUS_BACKUP is not
+ */
+export function newRunId(now = Date.now(), random = () => randomInt(36)) {
+  const time = Math.floor(now).toString(36).toUpperCase().padStart(9, "0").slice(-9);
+  let tail = "";
+  for (let i = 0; i < 8; i += 1) tail += random().toString(36).toUpperCase();
+  return `R${time}${tail}`;
+}
+export const RUN_ID_SHAPE = /^R[0-9A-Z]{17}$/;
+/** the table every run's schema carries, written right after CREATE SCHEMA: what the sweep reads as ownership */
+export const RUN_MARKER = "OSD_CORPUS_RUN";
+
+/** drop() runs the drop at most once, and only after created(): a schema whose CREATE did not answer is not ours */
+export function ownership(drop) {
+  let owned = false;
+  let done = false;
+  return {
+    created() { owned = true; },
+    async drop() {
+      if (!owned || done) return false;
+      done = true;
+      await Promise.resolve().then(drop).catch(() => undefined);
+      return true;
+    },
+  };
+}
+
+/** OSD_CORPUS_<runid>, within HANA's length limit and [A-Z0-9_] */
+export function schemaName(runId) {
+  const id = upper(runId);
+  if (!/^[A-Z0-9]+$/.test(id)) throw new Error(`run id "${runId}" is not [A-Z0-9]+`);
+  const name = `${SCHEMA_PREFIX}_${id}`;
+  if (name.length > HANA_NAME_MAX) throw new Error(`schema name ${name.length} characters long, HANA allows ${HANA_NAME_MAX}`);
+  return name;
+}
+
+/** a schema of the family: the bare name or OSD_CORPUS_<anything> */
+export const inFamily = (name) => upper(name) === SCHEMA_PREFIX || upper(name).startsWith(`${SCHEMA_PREFIX}_`);
+
+/** a user-supplied schema that is (or could be) one of ours is refused */
+export function refuseSchema(theirs) {
+  if (inFamily(theirs)) throw new Error(`HXE_SCHEMA / HANA_SCHEMA is ${upper(theirs)}, in the ${SCHEMA_PREFIX}[_%] family of the schemas this tool drops: refused`);
+}
+
+/**
+ * which of the catalogue's schemas a sweep drops: only OSD_CORPUS_<run id>
+ * of the shape newRunId makes, carrying the run marker table, created more
+ * than `olderThanHours` ago. The age is HANA's own (AGE_SECONDS, from
+ * SECONDS_BETWEEN(CREATE_TIME, CURRENT_TIMESTAMP), both in the database's
+ * clock), so the Node process's time zone plays no part.
+ * A schema whose run is still connected (LIVE > 0: the marker's
+ * CONNECTION_ID is an open connection in M_CONNECTIONS) is never taken,
+ * however old: a long run is not an abandoned one.
+ * rows: [{SCHEMA_NAME, AGE_SECONDS, MARKED, LIVE}]
+ */
+export function sweepSelection(rows, olderThanHours = 6) {
+  return rows.filter((row) => {
+    const name = String(row.SCHEMA_NAME);
+    if (!name.startsWith(`${SCHEMA_PREFIX}_`) || !RUN_ID_SHAPE.test(name.slice(SCHEMA_PREFIX.length + 1))) return false;
+    if (Number(row.MARKED) !== 1) return false;
+    if (row.LIVE === null || row.LIVE === undefined || Number(row.LIVE) !== 0) return false;
+    const age = Number(row.AGE_SECONDS);
+    return row.AGE_SECONDS !== null && row.AGE_SECONDS !== undefined && Number.isFinite(age) && age > olderThanHours * 3600;
+  }).map((row) => String(row.SCHEMA_NAME));
+}
+
+/** --sweep: list (dry run) or, with `yes`, drop the leftover schemas of crashed runs */
+export async function sweep({olderThanHours = 6, yes = false, log = console.log} = {}) {
+  const hdb = (await import("hdb")).default;
+  const client = hdb.createClient(connection());
+  await new Promise((resolve, reject) => client.connect((e) => (e ? reject(e) : resolve())));
+  const exec = (sql) => new Promise((resolve, reject) => client.exec(sql, (e, rows) => (e ? reject(e) : resolve(rows))));
+  try {
+    const rows = await exec("SELECT S.SCHEMA_NAME, SECONDS_BETWEEN(S.CREATE_TIME, CURRENT_TIMESTAMP) AS AGE_SECONDS,"
+      + ` (SELECT COUNT(*) FROM SYS.TABLES T WHERE T.SCHEMA_NAME = S.SCHEMA_NAME AND T.TABLE_NAME = '${RUN_MARKER}') AS MARKED`
+      + " FROM SYS.SCHEMAS S WHERE S.SCHEMA_NAME LIKE 'OSD\\_CORPUS\\_%' ESCAPE '\\'");
+    // a run's marker names its connection; a schema whose connection is open belongs to a run still going
+    for (const row of rows) {
+      if (Number(row.MARKED) !== 1) continue;
+      const live = await exec(`SELECT COUNT(*) AS N FROM ${quote(row.SCHEMA_NAME)}.${quote(RUN_MARKER)} R`
+        + " JOIN SYS.M_CONNECTIONS C ON C.CONNECTION_ID = R.CONNECTION_ID AND C.CONNECTION_STATUS <> ''");
+      row.LIVE = live[0]?.N;
+    }
+    const names = sweepSelection(rows, olderThanHours);
+    for (const name of names) {
+      if (yes) { await exec(`DROP SCHEMA ${quote(name)} CASCADE`); log(`amdp-corpus-oracle: dropped ${name}`); }
+      else log(`amdp-corpus-oracle: would drop ${name}`);
+    }
+    log(`amdp-corpus-oracle: sweep: ${names.length} of ${rows.length} ${SCHEMA_PREFIX}_% schemas older than ${olderThanHours} h${yes ? " dropped" : " (dry run, --yes drops)"}`);
+    return names;
+  } finally {
+    client.end();
+  }
+}
 
 export class TypeGap extends Error {}
 
@@ -430,9 +539,9 @@ export function hanaParameterType(abapType, types, store, asScalar = false) {
 }
 
 /** the CREATE statement for one corpus body, the way amdp-destination writes one of ours */
-export function createStatement(body, store) {
+export function createStatement(body, store, schema = schemaName("RUN")) {
   const sig = body.signature;
-  const name = `${quote(SCHEMA)}.${quote(`${upper(body.className)}=>${upper(sig.name)}`)}`;
+  const name = `${quote(schema)}.${quote(`${upper(body.className)}=>${upper(sig.name)}`)}`;
   const params = (sig.parameters ?? []).map((p) => {
     const hana = hanaParameterType(p.abapType, body.types, store);
     return {...p, hana, dflt: defaultClause(p, hana)};
@@ -633,11 +742,22 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
   const exec = (sql) => withTimeout(new Promise((resolve, reject) =>
     client.exec(sql, (e, rows) => (e ? reject(e) : resolve(rows)))), timeoutMs, sql.slice(0, 60));
   const version = (await exec("SELECT VERSION FROM M_DATABASE"))[0]?.VERSION;
-  const theirs = upper(process.env.HXE_SCHEMA ?? process.env.HANA_SCHEMA ?? "");
-  if (theirs === SCHEMA) throw new Error(`HXE_SCHEMA / HANA_SCHEMA is ${SCHEMA}, the schema this tool drops: refused`);
-  await exec(`DROP SCHEMA ${quote(SCHEMA)} CASCADE`).catch(() => undefined);
+  try { refuseSchema(process.env.HXE_SCHEMA ?? process.env.HANA_SCHEMA ?? ""); }
+  catch (error) { client.end(); throw error; }
+  const SCHEMA = schemaName(newRunId());
+  // ours only once our CREATE SCHEMA has answered: a CREATE that fails (the
+  // name exists) or a signal before it answers drops nothing
+  const own = ownership(() => exec(`DROP SCHEMA ${quote(SCHEMA)} CASCADE`));
+  const onSignal = (signal) => { own.drop().finally(() => process.exit(signal === "SIGINT" ? 130 : 143)); };
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+  try {
   await exec(`CREATE SCHEMA ${quote(SCHEMA)}`);
+  own.created();
+  await exec(`CREATE COLUMN TABLE ${quote(SCHEMA)}.${quote(RUN_MARKER)} ("RUN_ID" NVARCHAR(32), "CONNECTION_ID" INTEGER)`);
+  await exec(`INSERT INTO ${quote(SCHEMA)}.${quote(RUN_MARKER)} VALUES ('${SCHEMA.slice(SCHEMA_PREFIX.length + 1)}', CURRENT_CONNECTION)`);
   await exec(`SET SCHEMA ${quote(SCHEMA)}`);
+  console.log(`amdp-corpus-oracle: schema ${SCHEMA}`);
 
   const tables = new Map();       // name -> "created" | reason
   const created = [];             // routine keys, in the order HANA took them
@@ -669,7 +789,7 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
     let progress = 0;
     for (const body of pending) {
       let statement;
-      try { statement = createStatement(body, r.dictionary); }
+      try { statement = createStatement(body, r.dictionary, SCHEMA); }
       catch (error) {
         if (!(error instanceof TypeGap)) throw error;
         result.set(body.key, {status: "refused", class: "ddic-type", message: error.message});
@@ -717,7 +837,12 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
     if (progress === 0) break;
     pending = next;
   }
-  client.end();
+  } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+    await own.drop();
+    client.end();
+  }
 
   // a body that needs an absent library is its own class, whatever the
   // passes sorted it into (see the header)
@@ -759,6 +884,12 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
 if (runsAs("amdp-corpus-oracle.mjs")) {
   const args = process.argv.slice(2);
   const opt = (name, fallback) => { const i = args.indexOf(name); return i < 0 ? fallback : args[i + 1]; };
+  if (args.includes("--sweep")) {
+    const hours = Number(opt("--older-than", 6));
+    if (!(hours >= 0)) throw new Error("--older-than takes a number of hours");
+    await sweep({olderThanHours: hours, yes: args.includes("--yes")});
+    process.exit(0);
+  }
   const ddic = args.flatMap((a, i) => (a === "--ddic" ? [args[i + 1]] : []));
   const {summary, gaps} = await runOracle({
     exportDir: opt("--export", ".local/a4h-export"),

@@ -80,7 +80,10 @@ The measurements behind each rule are in `docs/sqlscript-hana-observed.md`
 - **Probing HANA by hand.** A throwaway schema on HXE through the node `hdb`
   client. `CREATE COLUMN TABLE … AS (SELECT …)` plus `SYS.TABLE_COLUMNS`
   gives an expression's type; a procedure created and CALLed gives its
-  behaviour; the schema is dropped afterwards. Every rule added in these two
+  behaviour; the schema is dropped afterwards. The corpus oracle
+  (`tools/amdp-corpus-oracle.mjs`) does this itself with a schema per run,
+  `OSD_CORPUS_<runid>`, so concurrent runs on one HXE do not collide;
+  `--sweep [--older-than <hours>] [--yes]` clears leftovers of crashed runs. Every rule added in these two
   days was measured that way first and quoted with its numbers.
 - **The Go port** of the same IR is foreman-dell's (`spike/go-backend`). It
   reads the pairs in `test/fixtures/ir-pairs/`. A change to the IR's shape or
