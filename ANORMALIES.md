@@ -3002,3 +3002,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: needs an issue: abaplint/transpiler database setup lacks a column type for Integer8Type (SQLite `INTEGER`, PostgreSQL `BIGINT`)
 - Regression-test location: `test/dsl-l2.mjs`, "a rule in a pack: built-in typed fields and a stable rule path"
 - Upstream version containing a fix: unknown
+
+### ANOMALY-2026-10-01-lenient-abapgit-xml — the toolchain reads malformed abapGit XML that abapGit on a system refuses
+
+- Status: `fixed here` (both files) and guarded (`test/xml-wellformed.mjs`)
+- Discovery date: `2026-10-01`
+- Affected versions: `@abaplint/core` 2.120.x and `@abaplint/transpiler` 2.13.93 as used by `npm run transpile`, and this runtime's DDIC readers
+- Affected ABAP statement, runtime API or adapter: reading an object's `*.xml` (abapGit serialisation): `src/l2demo/zosd_l2_cargo.tabl.xml` had no closing `</abapGit>`, and `src/jobs/btch0000.tabl.xml` closed `</asx:abap>` without closing `</asx:values>`
+- Minimal ABAP reproducer: either file as it was before this entry (`git show 768eed0c:src/l2demo/zosd_l2_cargo.tabl.xml`)
+- Exact command used to run it: `npm run transpile` and every suite passed with both files; on A4H, `zcl_abapgit_repo->deserialize` of an offline repository holding the first file raised `ZCX_ABAPGIT_EXCEPTION: XML parser error: unexpected symbol ... Line 1 Col. 1 File zosd_l2_cargo.tabl.xml` (measured with `NEW zcl_abapgit_xml_input( )` per file: the other 15 XML files of the package parsed)
+- Expected SAP behaviour: abapGit parses each file with iXML and refuses the object when it is not well-formed, so the import stops
+- Actual open-abap behaviour: the readers here take the elements they need and ignore a missing closing tag, so the table builds, is served and is tested
+- Impact on open-steamgate: an object that passes everything here fails to install on a system; found only by importing the package on A4H
+- Smallest safe workaround: none needed in the runtime; `test/xml-wellformed.mjs` validates every tracked `*.xml` strictly (`fast-xml-parser` `XMLValidator`, already a dependency), shown failing on both files before the fix
+- Upstream: none yet; whether abaplint should report a malformed object file is a question for an issue, not filed
+- Regression-test location: `test/xml-wellformed.mjs`
+- Upstream version containing a fix: n/a
