@@ -1,6 +1,7 @@
 // ABAP semantics pinned against A4H: each class in testdata/ has a static
 // RUN returning a string, and EXPECT below is what A4H returned for the same
-// code (ABAP Unit probe, 2026-09-23). Both emitters must give it.
+// code (ABAP Unit probe, 2026-09-23), except entries marked unmeasured.
+// Both emitters must give it.
 //
 //   node tools/gogen/semantics.mjs
 import {execFileSync} from "node:child_process";
@@ -16,7 +17,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
   // A raised exception retains reference writes and attributes, but discards
   // VALUE output and RETURNING copy-back (the same fixture runs in both hosts).
-  ZCL_GOGEN_T_EXCPARAMS: "ref/out/before/before/before/nxxx/nxxx/uyy/4/9/10/keep",
+  // Unmeasured (SAP docs): classic exceptions retain by-reference TABLES writes.
+  ZCL_GOGEN_T_EXCPARAMS: "ref/out/before/before/before/nxxx/nxxx/uyy/4/9/10/keep/1",
+  // Unmeasured (SAP docs): optional defaults and exception class matching.
   ZCL_GOGEN_T_DEFAULTS: "7/11/13/17",
   ZCL_GOGEN_T_XCASE: "pad/prefix/length",
   ZCL_GOGEN_T_UNCATCH: {Go: "ERROR NOT_COMPILED in find( ): OCC = 0 was not measured at zcl_gogen_t_uncatch.clas.abap:8", JS: "ERROR NOT_COMPILED in find( ) OCC = 0 was not measured"},

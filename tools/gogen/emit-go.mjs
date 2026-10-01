@@ -1063,6 +1063,18 @@ function appendsOnly(body, name) {
   return appends > 0 && refs === 2 * appends;
 }
 
+function referencedVars(body) {
+  const names = new Set();
+  const walk = (n) => {
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    if (!n || typeof n !== "object") return;
+    if (n.e === "var") names.add(n.name.toUpperCase());
+    for (const k of Object.keys(n)) if (k !== "type") walk(n[k]);
+  };
+  walk(body);
+  return names;
+}
+
 /** a loop's lines, wrapped in the builders of the strings it only appends to */
 /*
  * A sorted secondary key (frontend secondaryKey, ultra/json): the rows in the
@@ -1112,20 +1124,18 @@ function readSecKey(st, ctx, t) {
 }
 
 function withBuilders(body, ctx, t, emitLoop, outside = []) {
-  // A handler or CLEANUP in this method can read a variable before a defer
-  // on the method runs, so keep direct appends in those scopes.
-  const names = ctx.catchScope ? [] : builders(body, ctx, outside);
+  // A handler can observe an append before the loop's final write-back.
+  const names = builders(body, ctx, outside).filter((n) => !ctx.catchScope?.has(n));
   ctx.builders ??= new Map();
   for (const n of names) ctx.builders.set(n, `sb_${ident(n)}_${ctx.loop++}`);
   const pre = names.flatMap((n) => {
-    const b = ctx.builders.get(n), active = `active_${b}`;
-    return [`${t}var ${b} strings.Builder`, `${t}${b}.WriteString(${ident(n)})`,
-      `${t}${active} := true`, `${t}defer func() { if ${active} { ${ident(n)} = ${b}.String() } }()`];
+    const b = ctx.builders.get(n);
+    return [`${t}var ${b} strings.Builder`, `${t}${b}.WriteString(${ident(n)})`];
   });
   ctx.loopLevel = (ctx.loopLevel ?? 0) + 1;
   const lines = emitLoop();
   ctx.loopLevel -= 1;
-  const post = names.flatMap((n) => [`${t}${ident(n)} = ${ctx.builders.get(n)}.String()`, `${t}active_${ctx.builders.get(n)} = false`]);
+  const post = names.map((n) => `${t}${ident(n)} = ${ctx.builders.get(n)}.String()`);
   for (const n of names) ctx.builders.delete(n);
   return [...pre, ...lines, ...post];
 }
@@ -1361,6 +1371,8 @@ function stmtLines(st, ctx, d) {
     }
     case "native": {
       const m = ctx.method;
+      if (ctx.valueOutputs?.size && m.returning && !st.stmt)
+        throw new Error(`${ctx.cls.name}=>${m.name}: native return cannot run inside a VALUE output closure`);
       // a host function with arguments of its own (frontend NATIVE / KERNEL):
       // "&" places are pointers it writes; a kernel line inside a body (stmt)
       // returns nothing
@@ -1485,7 +1497,7 @@ function stmtLines(st, ctx, d) {
       const frame = {level: ctx.loopLevel ?? 0, mode: "body", used: new Set()};
       (ctx.tries ??= []).push(frame);
       const priorCatchScope = ctx.catchScope;
-      ctx.catchScope = ctx.catchScope || st.catches.length > 0 || !!st.cleanup;
+      ctx.catchScope = new Set([...(ctx.catchScope ?? []), ...referencedVars(st.catches), ...referencedVars(st.cleanup)]);
       const body = st.body.flatMap((x) => stmt(x, ctx, d + 1));
       ctx.catchScope = priorCatchScope;
       frame.mode = "catch";

@@ -101,6 +101,6 @@ CLASS zcl_gogen_t_excparams IMPLEMENTATION.
       TABLES ct_row = lt_fm
       CHANGING cv_n = lv_fm_change
       EXCEPTIONS boom = 4 OTHERS = 8.
-    rv = |{ lv_ref }/{ lv_out }/{ lv_value }/{ lv_value_out }/{ lv_result }/{ lo->mv_seen }/{ lv_nested }/{ lv_uncaught }/{ sy-subrc }/{ lv_fm_out }/{ lv_fm_change }/{ lv_fm_text }|.
+    rv = |{ lv_ref }/{ lv_out }/{ lv_value }/{ lv_value_out }/{ lv_result }/{ lo->mv_seen }/{ lv_nested }/{ lv_uncaught }/{ sy-subrc }/{ lv_fm_out }/{ lv_fm_change }/{ lv_fm_text }/{ lines( lt_fm ) }|.
   ENDMETHOD.
 ENDCLASS.

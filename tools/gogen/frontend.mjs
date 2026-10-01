@@ -1151,6 +1151,7 @@ function typeOf(t, where, program) {
   // ASSERT_NUMBER_BETWEEN takes TYPE numeric. Bind the caller's actual type:
   // converting a packed or float boundary to i rounds before the comparison.
   if (t instanceof BasicTypes.NumericGenericType && String(where).split(" ")[0] === "CL_ABAP_UNIT_ASSERT=>ASSERT_NUMBER_BETWEEN") return {k: "data", numeric: true};
+  if (t instanceof BasicTypes.NumericGenericType && P_GENERIC.has(String(where).split(" ")[0])) return {k: "i"};
   // p: declared, initial, copied and compared with initial only, as its
   // decimal text; any arithmetic or conversion is refused until packed
   // numbers are measured on A4H
