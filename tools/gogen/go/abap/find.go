@@ -121,6 +121,21 @@ func checkLines(p, s, where string) {
 	}
 }
 
+// FindBytes is FIND p IN [SECTION OFFSET off OF] s IN BYTE MODE over xstrings:
+// the byte offset of p in s from off on, false when it is not there. An
+// offset past the end is CX_SY_RANGE_OUT_OF_BOUNDS, as for a section of a
+// string.
+func FindBytes(s, p string, off int32) (int32, bool) {
+	if off < 0 || int(off) > len(s) {
+		rangeError()
+	}
+	i := strings.Index(s[off:], p)
+	if i < 0 {
+		return 0, false
+	}
+	return off + int32(i), true
+}
+
 // FindSection is FIND p IN SECTION [OFFSET off] [LENGTH n] OF s for a
 // substring (not a regex), measured on A4H 2026-09-24 (ZCL_GOGEN_T_FINDSEC):
 // the match offset counts from the start of s; an offset below 0 or past the

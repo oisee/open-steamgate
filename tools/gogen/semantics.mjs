@@ -145,6 +145,12 @@ const EXPECT = {
   // (ANORMALIES byte-to-i-move)
   ZCL_GOGEN_T_XMOVI: "a:11 b:-1 c:255 d:258 e:0 f:-2147483648 g:-2 h:255 x5:2 xs5:2",
   ZCL_GOGEN_T_BYTECAT: "cat:FFAB00CD00/5/0 zeros:0000AB00CD00/6 empty:0/0",
+  // FIND ... IN [SECTION OFFSET o OF] xs IN BYTE MODE [MATCH OFFSET m]
+  // (A4H 2026-10-01, execute_abap): byte offsets, a miss leaves m alone with
+  // sy-subrc 4, a section offset at the end is a miss and not an error, an
+  // empty pattern is found where the search starts, an offset past the end
+  // is CX_SY_RANGE_OUT_OF_BOUNDS
+  ZCL_GOGEN_T_FINDBYTE: "a:0/1 b:0/4 c:0/2 d:4/7 e:4/7 f:4 g:0/0 h:0/3 i:range",
   // CONCATENATE LINES OF ... IN BYTE MODE and x = x + y grown in place
   // (abap.AppendBytes; the zip reader's read_all and the inflater).
   // Derived, not measured on A4H: the rows joined; an empty table gives an
@@ -833,6 +839,9 @@ const REFUSED = {
   14: "ZCL_GOGEN_T_RF_OBJ->ZIF_GOGEN_T_RF~MV_RO: a write to a READ-ONLY attribute outside ZCL_GOGEN_T_RF_OBJ (a syntax error on A4H)",
   15: "ZIF_GOGEN_T_RF->CO_K: a constant through an interface reference is not in the subset",
   17: "ZIF_GOGEN_T_RF->MV_X: a write to a READ-ONLY attribute through an interface reference (a syntax error on A4H)",
+  // REGEX in byte mode is a syntax error on A4H that abaplint lets through;
+  // refused rather than searched for as bytes
+  22: "FIND form: FIND REGEX lv_p IN lv_xs IN BYTE MODE MATCH OFFSET lv_o.",
 };
 const refused = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf", "zcl_gogen_t_rf_obj", "zcl_gogen_t_rf_own"], tolerant: true});
 const got = new Map(refused.partial.map((x) => [Number(/zcl_gogen_t_rf\.clas\.abap:(\d+)\)/.exec(x)?.[1]), x.slice(x.indexOf("): ") + 3)]));

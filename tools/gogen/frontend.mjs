@@ -2782,6 +2782,23 @@ function statement(node, ctx) {
     // 2026-09-25 (ZCL_GOGEN_T_FINDRES, _FINDPCRE): see abap.FindResults
     if (/^FIND (FIRST OCCURRENCE OF |ALL OCCURRENCES OF )?IN ((IGNORING|RESPECTING) CASE )?RESULTS$/.test(tw)
       && node.findDirectExpressions(Expressions.Source).length === 2) return findResults(node, ctx, text, tw);
+    // FIND [FIRST OCCURRENCE OF] p IN [SECTION OFFSET o OF] xs IN BYTE MODE
+    // [MATCH OFFSET m]: a byte sequence in an xstring (the sXML reader crosses
+    // a UTF-8 document with it); offsets in bytes, sy-subrc 4 and m left
+    // alone when it is not there
+    if (/^FIND (FIRST OCCURRENCE OF )?IN (SECTION OFFSET OF )?IN BYTE MODE( MATCH OFFSET)?$/.test(tw)
+      && !/\b(REGEX|PCRE)\b/i.test(node.findDirectExpression(Expressions.FindType)?.concatTokens() ?? "")) {
+      const srcs = node.findDirectExpressions(Expressions.Source);
+      const section = words.includes("SECTION");
+      if (srcs.length !== (section ? 3 : 2)) throw new Unsupported(`FIND form: ${text}`);
+      const pat = source(srcs[0], ctx);
+      const subject = source(srcs[srcs.length - 1], ctx);
+      for (const x of [pat, subject]) if (x.type.k !== "x" && x.type.k !== "xstring") throw new Unsupported(`FIND IN BYTE MODE of a ${x.type.k}`);
+      const target = node.findDirectExpression(Expressions.Target);
+      const off = target ? lvalue(target, ctx) : null;
+      if (off && off.type.k !== "i") throw new Unsupported(`MATCH OFFSET into a ${off.type.k}`);
+      return {s: "find_bytes", pattern: convert(pat, XS), subject: convert(subject, XS), secOff: section ? convert(source(srcs[1], ctx, I), I) : null, off};
+    }
     if (words.includes("ALL") || /\b(RESULTS|MATCH\s+COUNT|IN\s+BYTE\s+MODE|RESPECTING)\b/i.test(text)) throw new Unsupported(`FIND form: ${text}`);
     const ft = node.findDirectExpression(Expressions.FindType);
     const kind = ft ? upper(ft.concatTokens()) : "";

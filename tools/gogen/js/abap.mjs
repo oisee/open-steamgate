@@ -271,6 +271,13 @@ export function XToI(v) {
 }
 
 const rangeError = () => { throw new AbapError("CX_SY_RANGE_OUT_OF_BOUNDS", "offset/length"); };
+// FIND p IN [SECTION OFFSET off OF] s IN BYTE MODE: the byte offset of p in
+// the xstring s from off on, -1 when it is not there (as abap.FindBytes)
+export function FindBytes(s, p, off) {
+  if (off < 0 || off > s.length) rangeError();
+  return s.indexOf(p, off);
+}
+
 // v+off(len) of a string in characters; len -1 is the rest; out of range raises
 export function SubS(v, off, len) {
   if (flat(v)) {
