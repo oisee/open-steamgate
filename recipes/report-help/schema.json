@@ -83,6 +83,7 @@
    }
   },
   "name": "scalar",
+  "positional_line": "scalar",
   "positionals": {
    "array": "scalar"
   },
