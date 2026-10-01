@@ -27,11 +27,15 @@ The run creates its own package and so owns it:
 - No object of the zip may exist yet, in any package.
 - The run deletes an object only if it is in the run's **receipt** and its
   version stamp is unchanged since the import.
-- It deletes only its own repository row.
-- It deletes the package only when nothing else is in it.
+- It deletes only its own repository row: the one named `OSDPROVE <package>`
+  whose key is the key its own import reported. This needs no receipt, and
+  it also happens after a refused import, since the row is the run's own.
+- It deletes the package (created by this run) only when nothing else is in it.
 
 There is no abapGit `purge` and there is no `--reuse`. The zip's object
-list alone never authorises a delete.
+list alone never authorises a delete. **Objects** need the receipt. The run's
+repository row and its empty package are recognised by identity: name and
+key, and emptiness.
 
 ### The run receipt
 
@@ -56,6 +60,15 @@ reads them again with the same ABAP:
 
 Any other kind gets no stamp. Such an object is not in the receipt, the run
 reports it, and it is never deleted.
+
+**Limit of the stamp.** The stamps have one-second resolution, the system's
+own change stamps. A change made in the *same second* as the stamp it
+replaces is not seen. Any later edit of a class include moves that
+include's `UDAT`+`UTIME` past the recorded maximum and is seen. The
+package is created by the run and exists only for its duration, so such
+an edit would have to come from someone writing into it in that second. A
+content hash of every include (and of the DDIC rows) would close this. It
+is not done here.
 
 A refused import writes no receipt, and neither does an import whose stamps
 could not be read. In both cases the cleanup deletes no object.
