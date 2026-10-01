@@ -13,6 +13,7 @@ CLASS zcl_osd_lift_r2_demo DEFINITION PUBLIC FINAL CREATE PUBLIC.
         result TYPE c LENGTH 100,
         status TYPE i,
         db_count TYPE i,
+        tabix_seen TYPE i,
       END OF ty_row,
       tt_rows TYPE STANDARD TABLE OF ty_row WITH DEFAULT KEY.
 
@@ -31,6 +32,7 @@ CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.
       SELECT label FROM zosd_lift_r2 INTO TABLE lt_hits
         WHERE kind = <ls_row>-kind AND code = <ls_row>-code AND active = 'X'
         ORDER BY PRIMARY KEY.
+      MOVE sy-tabix TO <ls_row>-tabix_seen.
       MOVE sy-subrc TO <ls_row>-status.
       MOVE sy-dbcnt TO <ls_row>-db_count.
       LOOP AT lt_hits INTO ls_hit.
@@ -81,6 +83,7 @@ CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.
       ENDIF.
       sy-dbcnt = lines( lt_hits ).
       sy-tabix = lv_lift_saved_tabix.
+      MOVE sy-tabix TO <ls_row>-tabix_seen.
       MOVE sy-subrc TO <ls_row>-status.
       MOVE sy-dbcnt TO <ls_row>-db_count.
       LOOP AT lt_hits INTO ls_hit.

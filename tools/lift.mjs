@@ -278,6 +278,22 @@ function methodContext(name, source, method, ddicFolders, recipe, allowNestedLoo
   const m = file.getStructure().findAllStructures(Structures.Method).find((s) => methodName(s) === method.toLowerCase());
   if (!m) throw new Refusal("shape", `no method ${method} in ${name}`);
   const foundLoops = m.findAllStructures(Structures.Loop);
+  if (allowNestedLoops) {
+    const topLoops = foundLoops.filter((candidate) => !candidate.findParent(Structures.Loop));
+    const candidates = topLoops.filter((candidate) => candidate.findAllStatementNodes().some(isSelectIntoTablePerRow));
+    if (candidates.length === 1) {
+      const targetLoop = candidates[0];
+      const targetTable = targetLoop.getFirstStatement().getTokens()[2]?.getStr().toLowerCase();
+      for (const candidate of topLoops) {
+        if (candidate === targetLoop || !candidate.getFirstToken().getStart().isBefore(targetLoop.getFirstToken().getStart())) continue;
+        const tokens = candidate.getFirstStatement().getTokens().map((token) => token.getStr().toLowerCase());
+        if (tokens[0] === "loop" && tokens[1] === "at" && tokens[2] === targetTable
+          && (tokens.includes("assigning") || (tokens.includes("reference") && tokens.includes("into")))) {
+          throw new Refusal("loop table alias", `${candidate.getFirstStatement().concatTokens()} may retain a row alias of ${targetTable} before the selected loop`);
+        }
+      }
+    }
+  }
   const loops = allowNestedLoops ? foundLoops.filter((candidate) => !candidate.findParent(Structures.Loop)) : foundLoops;
   if (loops.length !== 1) throw new Refusal("shape/loops", `${loops.length} loops in ${method}, ${recipe} takes one${allowNestedLoops ? " outer" : ""}`);
   const loop = loops[0];
@@ -523,19 +539,37 @@ function structureComponents(type) {
     ? new Map(type.getComponents().map((c) => [c.name.toLowerCase(), c.type])) : undefined;
 }
 
-function sourceText(source, structure) {
+function sourceTextRange(source, startPosition, endPosition, baseIndent = startPosition.getCol() - 1) {
   const starts = [0];
   for (let at = source.indexOf("\n"); at >= 0; at = source.indexOf("\n", at + 1)) starts.push(at + 1);
   const offset = (position) => starts[position.getRow() - 1] + position.getCol() - 1;
-  const first = structure.getFirstToken().getStart();
-  const text = source.slice(offset(first), offset(structure.getLastToken().getEnd())).trim();
-  const baseIndent = first.getCol() - 1;
+  const text = source.slice(offset(startPosition), offset(endPosition)).trim();
   return text.split("\n").map((line, index) => {
-    if (index === 0) return line;
+    if (index === 0) return line.startsWith("*") ? `"${line}` : line;
     let leading = 0;
     while (leading < line.length && line[leading] === " ") leading++;
-    return `  ${line.slice(Math.min(baseIndent, leading))}`;
+    const content = line.slice(Math.min(baseIndent, leading));
+    return `  ${content.startsWith("*") ? `"${content}` : content}`;
   }).join("\n");
+}
+
+function isChainedBodyStatement(statements) {
+  const owners = new Map();
+  for (const statement of statements) {
+    for (const token of statement.getTokens()) {
+      if (token.getStr() === ":") return statement;
+      const owner = owners.get(token);
+      if (owner && owner !== statement) return statement;
+      owners.set(token, statement);
+    }
+  }
+  return undefined;
+}
+
+function methodCall(statement) {
+  const tokens = statement.getTokens().map((token) => token.getStr().toLowerCase());
+  return statement.findAllExpressions(Expressions.MethodCall).length > 0
+    || (tokens[0] === "call" && tokens[1] === "method");
 }
 
 function tableType(scope, name, obligation) {
@@ -555,6 +589,8 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
   requireNamesFree(used, [ALL_ROWS, ALL_ROW, R2_WORK, SAVED_SUBRC, SAVED_DBCNT, SAVED_TABIX], name);
   const items = children(loop.findDirectStructure(Structures.Body));
   const bodyStatements = items.flatMap((item) => item.findAllStatementNodes());
+  const chain = isChainedBodyStatement(bodyStatements);
+  if (chain) throw new Refusal("chain/body", `the loop body contains an ABAP chain: ${chain.concatTokens()}`);
   const selects = bodyStatements.filter((st) => st.get() instanceof Statements.Select);
   if (selects.length !== 1) throw new Refusal("shape/select", `the loop body has ${selects.length} SELECT statements; R2 takes one`);
   const selectStatement = selects[0];
@@ -622,11 +658,21 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
 
   const syntax = new abaplint.SyntaxLogic(registry, object).run();
   const scope = syntax.spaghetti.lookupPosition(selectStatement.getStart(), name);
-  for (const st of m.findAllStatementNodes()) {
-    if (st.getStart().isBefore(loop.getFirstToken().getStart()) && st.get() instanceof Statements.Assign
-      && st.getTokens().some((token) => token.getStr().toLowerCase() === table)) {
-      throw new Refusal("key not written before the read", `${st.concatTokens()} may alias loop table ${table} before the loop`);
+  const preLoopStatements = m.findAllStatementNodes().filter((st) => st.getStart().isBefore(loop.getFirstToken().getStart()));
+  const tableVariable = scope?.findVariable(table);
+  for (const st of preLoopStatements) {
+    const tokens = st.getTokens().map((token) => token.getStr().toLowerCase());
+    const directAssign = st.get() instanceof Statements.Assign && tokens.includes(table);
+    const readAlias = st.get() instanceof Statements.ReadTable && tokens[2] === table
+      && (tokens.includes("assigning") || (tokens.includes("reference") && tokens.includes("into")));
+    const tableReference = st.get() instanceof Statements.GetReference && tokens.includes(table);
+    if (directAssign || readAlias || tableReference) {
+      throw new Refusal("loop table alias", `${st.concatTokens()} may retain a reference or row alias of ${table} before the loop`);
     }
+  }
+  if (tableVariable?.constructor?.name !== "TypedIdentifier" && bodyStatements.some(methodCall)) {
+    const call = bodyStatements.find(methodCall);
+    throw new Refusal("loop table method call", `${call.concatTokens()} may change nonlocal loop table ${table}`);
   }
   const loopType = tableType(scope, table, "shape/loop-table");
   const lineType = loopType.getRowType();
@@ -717,8 +763,10 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
     }
   }
 
-  const before = items.slice(0, position).map((item) => ({text: sourceText(source, item)}));
-  const after = items.slice(position + 1).map((item) => ({text: sourceText(source, item)}));
+  const before = position === 0 ? [] : [{text: sourceTextRange(source, items[0].getFirstToken().getStart(),
+    selectStatement.getFirstToken().getStart(), items[0].getFirstToken().getStart().getCol() - 1)}];
+  const after = position === items.length - 1 ? [] : [{text: sourceTextRange(source, selectStatement.getLastToken().getEnd(),
+    items[items.length - 1].getLastToken().getEnd(), items[position + 1].getFirstToken().getStart().getCol() - 1)}];
   const sort = [...keys.map((key) => key.column), ...primaryNames].filter((column, i, all) => all.indexOf(column) === i);
   return {
     recipe: "R2",

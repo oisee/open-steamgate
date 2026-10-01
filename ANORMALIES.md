@@ -2875,3 +2875,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Known limits: scalar Go tables remain value slices. A structural change can conservatively reject a binding even when its row survived. `LOOP ... ASSIGNING` followed by `APPEND` in the body and a use of the field symbol after the loop has not been measured on SAP; the current version rule raises `GETWA_NOT_ASSIGNED` on that use. No SAP compatibility claim is made for that case.
 - Planned fix: U4's 0.5 table-header representation will put the version on the table itself and replace the present side-table model.
 - Regression-test location: `tools/gogen/testdata/zcl_gogen_t_rebind.clas.abap`, `zcl_gogen_t_initbind.clas.abap`, and `tools/gogen/go/abap/row_binding_bench_test.go`
+
+### ANOMALY-2026-10-01-fae-sorts-result — FOR ALL ENTRIES sorts results while removing duplicates
+
+- Status: `recorded`; R2 keeps an explicit sort in its template
+- Discovery date: `2026-10-01`
+- Affected versions: `@abaplint/transpiler` 2.13.93, as pinned in this tree
+- Affected ABAP statement, runtime API or adapter: `SELECT ... FOR ALL ENTRIES IN itab` into a standard internal table
+- Minimal ABAP reproducer: `zcl_osd_lift_r2_demo=>after` (`src/lift/`), which reads with FAE and then sorts by correlation keys and the DDIC primary key
+- Exact command used to inspect it: `npm run transpile`; inspect `output/zcl_osd_lift_r2_demo.clas.mjs` around the generated FAE call
+- Expected SAP behaviour: FOR ALL ENTRIES does not itself sort the result; without an explicit `SORT` or `ORDER BY`, row order is not guaranteed. This order behavior was not measured on A4H
+- Actual open-abap behaviour: the transpiled FAE path sorts a standard target by every line component before `DELETE ADJACENT DUPLICATES` with `allFields: true`. That makes a differential test pass even if the recipe's explicit sort is removed
+- Impact on open-steamgate: the R2 reconstruction depends on rows being grouped by correlation key and ordered by the source table's primary key. The runtime's all-component sort cannot serve as evidence that the template sort is redundant on SAP
+- Smallest safe workaround: retain `SORT lt_all BY` correlation keys followed by primary-key fields; this is required on a real system to reconstruct each SELECT result in its original order
+- Upstream: not raised
+- Regression-test location: `test/lift-r2.mjs` asserts the rendered sort line and its column order
+- Upstream version containing a fix: none; the order difference is recorded, not fixed

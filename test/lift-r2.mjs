@@ -70,6 +70,70 @@ describe("verified lift R2: SELECT table per row", function () {
     ["a result field with a different type", (source) => source.replace("label TYPE c LENGTH 40", "label TYPE c LENGTH 39"), /^shape: lt_hits-label/],
   ];
 
+  const aliasSources = [
+    ["READ TABLE ASSIGNING before the loop", () => ORIGINAL
+      .replace("    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.\n    FIELD-SYMBOLS <ls_first> LIKE LINE OF ct_rows.\n    READ TABLE ct_rows ASSIGNING <ls_first> INDEX 2.")
+      .replace("      CLEAR <ls_row>-result.", "      CLEAR <ls_row>-result.\n      <ls_first>-kind = 'PRIO'.")],
+    ["READ TABLE REFERENCE INTO before the loop", () => ORIGINAL
+      .replace("    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.\n    DATA lr_first TYPE REF TO ty_row.\n    READ TABLE ct_rows REFERENCE INTO lr_first INDEX 2.")
+      .replace("      CLEAR <ls_row>-result.", "      CLEAR <ls_row>-result.\n      lr_first->kind = 'PRIO'.")],
+    ["GET REFERENCE OF the loop table before the loop", () => ORIGINAL
+      .replace("    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.\n    DATA lr_rows TYPE REF TO tt_rows.\n    GET REFERENCE OF ct_rows INTO lr_rows.")
+      .replace("      CLEAR <ls_row>-result.", "      CLEAR <ls_row>-result.\n      LOOP AT lr_rows->* ASSIGNING FIELD-SYMBOL(<ls_x>).\n        <ls_x>-kind = 'PRIO'.\n      ENDLOOP.")],
+    ["a pre-loop LOOP ASSIGNING alias", () => ORIGINAL
+      .replace("    LOOP AT ct_rows ASSIGNING <ls_row>.", "    FIELD-SYMBOLS <ls_first> LIKE LINE OF ct_rows.\n    LOOP AT ct_rows ASSIGNING <ls_first>.\n      EXIT.\n    ENDLOOP.\n    LOOP AT ct_rows ASSIGNING <ls_row>.")],
+    ["a pre-loop LOOP REFERENCE INTO alias", () => ORIGINAL
+      .replace("    LOOP AT ct_rows ASSIGNING <ls_row>.", "    DATA lr_first TYPE REF TO ty_row.\n    LOOP AT ct_rows REFERENCE INTO lr_first.\n      EXIT.\n    ENDLOOP.\n    LOOP AT ct_rows ASSIGNING <ls_row>.")],
+    ["an alias used after SELECT", () => ORIGINAL
+      .replace("    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.\n    FIELD-SYMBOLS <ls_first> LIKE LINE OF ct_rows.\n    READ TABLE ct_rows ASSIGNING <ls_first> INDEX 2.")
+      .replace("      MOVE sy-dbcnt TO <ls_row>-db_count.", "      MOVE sy-dbcnt TO <ls_row>-db_count.\n      <ls_first>-kind = 'PRIO'.")],
+  ];
+
+  for (const [what, makeSource] of aliasSources) {
+    it(`refuses ${what}`, () => {
+      let caught;
+      try { model(makeSource()); } catch (error) { caught = error; }
+      expect(caught, what).to.be.instanceOf(Refusal);
+      if (what.startsWith("a pre-loop LOOP")) expect(caught.obligation).to.equal("loop table alias");
+    });
+  }
+
+  it("names a chained body statement before SELECT", () => {
+    const source = ORIGINAL.replace("      CLEAR <ls_row>-result.", "      CLEAR: <ls_row>-result, ls_hit.");
+    let caught;
+    try { model(source); } catch (error) { caught = error; }
+    expect(caught).to.be.instanceOf(Refusal);
+    expect(caught.message).to.match(/chain/i);
+  });
+
+  it("names a chained body statement after SELECT", () => {
+    const source = ORIGINAL.replace("      MOVE sy-subrc TO <ls_row>-status.\n      MOVE sy-dbcnt TO <ls_row>-db_count.",
+      "      MOVE: sy-subrc TO <ls_row>-status, sy-dbcnt TO <ls_row>-db_count.");
+    let caught;
+    try { model(source); } catch (error) { caught = error; }
+    expect(caught).to.be.instanceOf(Refusal);
+    expect(caught.message).to.match(/chain/i);
+  });
+
+  it("refuses a method call in a class-attribute loop table body", () => {
+    const source = ORIGINAL
+      .replace("    CLASS-METHODS after CHANGING ct_rows TYPE tt_rows.", "    CLASS-METHODS after CHANGING ct_rows TYPE tt_rows.\n    CLASS-METHODS run.\n    CLASS-METHODS bump.\n    CLASS-DATA gt_rows TYPE tt_rows.")
+      .replace("CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.\n", "CLASS zcl_osd_lift_r2_demo IMPLEMENTATION.\n  METHOD bump.\n    FIELD-SYMBOLS <ls_x> LIKE LINE OF gt_rows.\n    LOOP AT gt_rows ASSIGNING <ls_x>.\n      <ls_x>-kind = 'PRIO'.\n    ENDLOOP.\n  ENDMETHOD.\n  METHOD run.\n    DATA lt_hits TYPE tt_hits.\n    DATA ls_hit TYPE ty_hit.\n    FIELD-SYMBOLS <ls_row> LIKE LINE OF gt_rows.\n    LOOP AT gt_rows ASSIGNING <ls_row>.\n      bump( ).\n      SELECT label FROM zosd_lift_r2 INTO TABLE lt_hits\n        WHERE kind = <ls_row>-kind AND code = <ls_row>-code AND active = 'X'\n        ORDER BY PRIMARY KEY.\n      LOOP AT lt_hits INTO ls_hit.\n        <ls_row>-result = ls_hit-label.\n      ENDLOOP.\n    ENDLOOP.\n  ENDMETHOD.\n");
+    let caught;
+    try { modelR2FromSource(basename(DEMO), source, "run", DEFAULT_DDIC); } catch (error) { caught = error; }
+    expect(caught).to.be.instanceOf(Refusal);
+  });
+
+  it("keeps standalone comments between body statements", async () => {
+    const source = ORIGINAL
+      .replace("      CLEAR <ls_row>-result.\n      SELECT", "      CLEAR <ls_row>-result.\n      \" before the read\n* column-one comment\n      SELECT")
+      .replace("      MOVE sy-subrc TO <ls_row>-status.\n      MOVE sy-dbcnt", "      MOVE sy-subrc TO <ls_row>-status.\n      \" after the read\n      MOVE sy-dbcnt");
+    const rendered = await render(model(source), TEMPLATE);
+    expect(rendered.text).to.contain('" before the read');
+    expect(rendered.text).to.contain('"* column-one comment');
+    expect(rendered.text).to.contain('" after the read');
+  });
+
   for (const [what, mutate, reason] of refusals) {
     it(`refuses ${what} by its obligation`, () => {
       let caught;
@@ -96,6 +160,19 @@ describe("verified lift R2: SELECT table per row", function () {
     expect(rendered.text).to.contain("IF ct_rows IS NOT INITIAL.");
     expect(rendered.text).to.contain("sy-dbcnt = lines( lt_hits ).");
     expect(rendered.text).to.contain("SELECT kind code seq label FROM zosd_lift_r2");
+    const restoreTabix = rendered.text.indexOf("sy-tabix = lv_lift_saved_tabix.");
+    const readTabix = rendered.text.indexOf("MOVE sy-tabix TO <ls_row>-tabix_seen.");
+    expect(restoreTabix).to.be.greaterThan(-1);
+    expect(readTabix).to.be.greaterThan(restoreTabix);
+  });
+
+  it("renders SORT by correlation keys followed by the primary key", async () => {
+    const rendered = await render(model(), TEMPLATE);
+    const line = rendered.text.split("\n").find((item) => item.trimStart().startsWith("SORT lt_all BY"));
+    const orderedColumns = [...model().source.keys.map((key) => key.column),
+      ...model().source.primary.map((key) => key.column)].filter((column, i, all) => all.indexOf(column) === i);
+    expect(orderedColumns).to.deep.equal(["kind", "code", "seq"]);
+    expect(line).to.equal(`SORT lt_all BY ${orderedColumns.join(" ")}.`);
   });
 
   it("BEFORE makes one SELECT per row; AFTER makes one guarded FAE call", async () => {
@@ -111,6 +188,7 @@ describe("verified lift R2: SELECT table per row", function () {
       const line = new abap.types.Structure({
         kind: new abap.types.Character(4), code: new abap.types.Character(10),
         result: new abap.types.Character(100), status: new abap.types.Integer(), db_count: new abap.types.Integer(),
+        tabix_seen: new abap.types.Integer(),
       });
       const table = abap.types.TableFactory.construct(line, {withHeader: false, keyType: "DEFAULT",
         primaryKey: {name: "primary_key", type: "STANDARD", isUnique: false, keyFields: []}, secondary: []});
@@ -135,6 +213,7 @@ describe("verified lift R2: SELECT table per row", function () {
       return {calls, rows: rows.array().map((r) => ({
         kind: r.get().kind.get(), code: r.get().code.get(), result: r.get().result.get(),
         status: r.get().status.get(), db_count: r.get().db_count.get(),
+        tabix_seen: r.get().tabix_seen.get(),
       }))};
     };
     const keys = [["STAT", "OPEN"], ["STAT", "GONE"], ["STAT", "DONE"], ["STAT", "OPEN"]];
@@ -145,6 +224,7 @@ describe("verified lift R2: SELECT table per row", function () {
     expect(after.calls).to.equal(1);
     expect(after.rows.map((row) => row.result.trimEnd())).to.deep.equal(["First;Second;Second", "", "Done", "First;Second;Second"]);
     expect(after.rows.map((row) => [row.status, row.db_count])).to.deep.equal([[0, 3], [4, 0], [0, 1], [0, 3]]);
+    expect(after.rows.map((row) => row.tabix_seen)).to.deep.equal([1, 2, 3, 4]);
 
     const empty = await counted("after", []);
     expect(empty.calls).to.equal(0);
