@@ -294,7 +294,8 @@ test("MEMORY ID checkbox is a memory id, not a checkbox", () => {
 test("osd run builds a report once, keeps it and passes its arguments through", () => {
   const dir = mkdtempSync(join(tmpdir(), "osd-run-"));
   const osd = join(here, "..", "..", "bin", "osd.mjs");
-  const osdRun = (args) => spawnSync(process.execPath, [osd, "run", ...args], {encoding: "utf8"});
+  // the kept builds go to the test's own folder, not the checkout's .local
+  const osdRun = (args) => spawnSync(process.execPath, [osd, "run", ...args], {encoding: "utf8", env: {...process.env, OSD_RUN_CACHE: join(dir, "cache")}});
   try {
     const app = join(dir, "notes");
     cpSync(join(here, "apps", "notes"), app, {recursive: true});

@@ -200,13 +200,21 @@ with the arguments as given; F8 on a `.prog.abap` in VS Code types exactly
 this into a terminal of its own, after asking for the arguments. Nothing
 after the report is osd's: `--layer` there is the report's to refuse, and
 one bare `--` right after the report is dropped, so `osd run x -- -help`
-shows the report's help. The command is kept under `.local/osd-run/<hash>`,
-the hash taken over the report and the objects beside it, every `--lib`
-folder and the compiler (`tools/gogen`, open-abap-core, open-abap-gui by
-size and time); the same source runs the kept command at once, an edit
-builds again. Builds take a lock, since osabap writes its Go module in
-place. The build talks on stderr, so stdout is the report's alone. It needs
-a checkout run by node; the bundled binary refuses and says so.
+shows the report's help. The command is kept under `.local/osd-run/<hash>`
+(or `$OSD_RUN_CACHE`; the newest 16 stay), the hash taken over the report
+and the objects beside it, every `--lib` folder and the compiler: the files
+git lists under `tools/gogen` (its runtime ABAP included) and `tools/*.mjs`,
+open-abap-core and open-abap-gui by size and time, the `@abaplint/core` and
+`@abaplint/transpiler` versions and the Go toolchain (`go env GOVERSION`,
+`GOTOOLCHAIN`, `GOFLAGS`, `CGO_ENABLED`). The same source runs the kept
+command at once, an edit builds again. Builds take a lock holding the
+builder's pid, so a build stopped with Ctrl+C or killed leaves nothing the
+next run waits for; `GOOS`/`GOARCH` are cleared, since the command runs
+here. The build talks on stderr, so stdout is the report's alone, and a
+build that fails ends `osd run` with 2. F8's terminal starts in the
+checkout, so relative paths (`-db notes.db`) are the checkout's; on
+Windows it is PowerShell, which the command line is quoted for. It needs a
+checkout run by node; the bundled binary refuses and says so.
 
 ## Open SQL and the -db file
 

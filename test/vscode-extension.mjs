@@ -1232,15 +1232,15 @@ describe("editors/vscode: the extension's logic", function () {
     expect(terminals).to.have.length(2);
   });
 
-  it("0.5 O: without a checkout to build in, F8 on a report says so instead of opening a terminal", async () => {
+  it("0.5 O: without a checkout to build in, F8 on a report falls back to Easy Access instead of a terminal", async () => {
     const api = vscodeStub({home: tmpdir()});
-    const said = [];
-    api.window.showInformationMessage = (text) => { said.push(text); };
+    const lines = [];
     api.window.createTerminal = () => { throw new Error("must not open a terminal"); };
     api.window.showInputBox = async () => { throw new Error("must not ask"); };
     const {runReportInTerminal} = loadExtension(api);
-    await runReportInTerminal("ZNOTES", {document: {fileName: "/w/znotes.prog.abap"}}, {appendLine() {}});
-    expect(said[0]).to.contain("needs an open-steamgate checkout");
+    const ran = await runReportInTerminal("ZNOTES", {document: {fileName: "/w/znotes.prog.abap"}}, {appendLine: (line) => lines.push(line)});
+    expect(ran).to.equal(false);
+    expect(lines[0]).to.contain("opening it in Easy Access");
   });
 
   // ---- Q6b "Classrun": F9, ADT's "Run as ABAP Application (Console)" --
