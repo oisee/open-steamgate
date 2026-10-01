@@ -307,7 +307,8 @@ async function setupDatabase(abap, schemas, insert) {
         const root = process.cwd();
         updateModules = functionModules(generatorFoldersOf(root).map((f) => `${root}/${f}`))
           .filter((fm) => fm.updateTask).map((fm) => fm.name);
-      } catch {
+      } catch (e) {
+        console.warn(`osd-enq-host: the update-task modules were not read (${e?.message ?? e}); COMMIT WORK hands no lock to an update`);
         updateModules = [];
       }
     }

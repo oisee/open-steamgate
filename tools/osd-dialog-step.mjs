@@ -93,6 +93,12 @@ export function holderToken() {
   return holder;
 }
 
+/** whether a step's context follows its async work (AsyncLocalStorage, on
+ *  Node); without it (the browser) the holder is the only way to tell */
+export function stepContextTracked() {
+  return steps !== undefined;
+}
+
 export function currentStepToken() {
   const token = steps?.getStore();
   return token !== undefined && token.dialog === true && token.done !== true && token === holder ? token : undefined;

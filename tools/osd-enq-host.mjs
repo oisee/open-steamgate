@@ -21,7 +21,7 @@
 // - _WAIT sleeps through WAIT UP TO, which gives the work process up inside
 //   a step (tools/osd-dialog-step.mjs) -- and, as WAIT does, commits.
 import {locks} from "./osd-enq.mjs";
-import {currentStepToken, holderToken, onEveryStep} from "./osd-dialog-step.mjs";
+import {currentStepToken, holderToken, onEveryStep, stepContextTracked} from "./osd-dialog-step.mjs";
 
 const PROCESS = {what: "the process, outside any step"};
 const sessions = new Map(); // a session key (a step token, or a bound key) -> handle
@@ -30,8 +30,12 @@ const updated = new Set(); // session handles whose LUW ran an update module
 const value = (v) => (v === undefined || v === null ? "" : typeof v.get === "function" ? String(v.get()) : String(v));
 const upper = (s) => String(s).toUpperCase();
 
+// the step running this code: its own context on Node; in the browser,
+// which tracks none, the step that holds the work process. ABAP outside any
+// step on Node (startup, a unit run, a timer) is the process's own session,
+// which nothing ends: a lock taken there stays until DEQUEUE or DEQUEUE_ALL
 function token() {
-  return currentStepToken() ?? holderToken();
+  return stepContextTracked() ? currentStepToken() : holderToken();
 }
 
 function sessionKey() {
@@ -101,7 +105,10 @@ function request(abap, table, object, input) {
     }
     const v = value(p[name]);
     const literal = value(p[`x_${name}`]).trim().toUpperCase() === "X";
-    fields.push({value: v.replace(/ +$/, ""), generic: v.trim() === "" && !literal, length: length(name)});
+    // initial is generic: blank, or all zeros for a numeric field (NUMC, INT)
+    const numeric = ["Integer", "Integer8", "Numc", "Packed", "Float", "DecFloat34"].includes(components[name]?.constructor?.name);
+    const initial = v.trim() === "" || (numeric && /^[0\s.,+-]*$/.test(v));
+    fields.push({value: v.replace(/ +$/, ""), generic: initial && !literal, length: length(name)});
   }
   const mode = value(p[`mode_${t.toLowerCase()}`]).trim().toUpperCase() || "E";
   return {client, table: t, object, mode, scope: value(p._scope).trim(), fields, wait: value(p._wait).trim().toUpperCase() === "X",
@@ -147,7 +154,17 @@ export function installEnq(abap, {updateModules = []} = {}) {
       abap.builtin.sy.get().subrc.set(0);
     },
   };
-  Object.defineProperty(abap.Classes, "KERNEL_LOCK", {get: () => kernelLock, set: () => {}, enumerable: true, configurable: true});
+  let replaced = false;
+  Object.defineProperty(abap.Classes, "KERNEL_LOCK", {
+    get: () => kernelLock,
+    set: () => {
+      // the first assignment is open-abap-core's own class loading; another
+      // one is somebody else's double, said rather than dropped silently
+      if (replaced) console.warn("osd-enq-host: KERNEL_LOCK is the lock server's; a second assignment is ignored");
+      replaced = true;
+    },
+    enumerable: true, configurable: true,
+  });
 
   abap.FunctionModules.DEQUEUE_ALL = async () => {
     locks().dequeueAll(currentEnqSession());
@@ -157,7 +174,12 @@ export function installEnq(abap, {updateModules = []} = {}) {
   // as the caller's row has them (GUSR/GUSRVB, GUSE/GUSEVB, GARG, GMODE ...)
   abap.FunctionModules.ENQUEUE_READ = async (INPUT) => {
     const p = Object.fromEntries(Object.entries(INPUT?.exporting ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
-    const rows = locks().read({client: value(p.gclient).trim(), table: upper(value(p.gname)).trim(), user: upper(value(p.guname)).trim()});
+    // GCLIENT defaults to sy-mandt and GUNAME to sy-uname, as on a system;
+    // GUNAME = space is every user
+    const sy = abap.builtin.sy.get();
+    const gclient = "gclient" in p ? value(p.gclient).trim() : value(sy.mandt).trim();
+    const guname = "guname" in p ? upper(value(p.guname)).trim() : upper(value(sy.uname)).trim();
+    const rows = locks().read({client: gclient, table: upper(value(p.gname)).trim(), user: guname});
     const enq = INPUT?.tables?.enq ?? INPUT?.tables?.ENQ;
     if (enq !== undefined) {
       enq.clear?.();
