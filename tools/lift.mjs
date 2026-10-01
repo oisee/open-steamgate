@@ -3,10 +3,10 @@
 // docs/verified-lift.md on the research/verified-lift branch).
 //
 //   node tools/lift.mjs find <folder>...          database work inside loops, counted
-//   node tools/lift.mjs model <file.abap> <method> [--recipe r1|r2] [--ddic <folder>]...
-//                                                 the R1/R2 model of that method's loop, or why not
-//   node tools/lift.mjs survey <folder> [--ddic <folder>]... [--list]
-//                                                 R1/R2 over lookup SELECTs inside loops:
+//   node tools/lift.mjs model <file.abap> <method> [--recipe r1|r2|r3] [--ddic <folder>]...
+//                                                 the recipe model of that method's loop, or why not
+//   node tools/lift.mjs survey <folder> [--recipe r3] [--ddic <folder>]... [--list]
+//                                                 R1/R2 lookups or R3 SELECT loops:
 //                                                 how many are accepted, and the refusals by obligation
 //
 // `find` counts two things abaplint's db_operation_in_loop does not tell
@@ -160,6 +160,10 @@ export function modelR1(path, method, ddicFolders = DEFAULT_DDIC) {
 
 export function modelR2(path, method, ddicFolders = DEFAULT_DDIC) {
   return modelR2FromSource(basename(path), readFileSync(path, "utf8"), method, ddicFolders);
+}
+
+export function modelR3(path, method, ddicFolders = DEFAULT_DDIC) {
+  return modelR3FromSource(basename(path), readFileSync(path, "utf8"), method, ddicFolders);
 }
 
 const LOOKUP = "lt_lookup";
@@ -998,9 +1002,125 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
   };
 }
 
+// R3 deliberately accepts a narrow, inspectable SELECT loop. In particular,
+// a table materialisation has uses outside the LOOP that this model cannot
+// prove absent, so it is refused rather than silently moving its boundary.
+export function modelR3FromSource(name, source, method, ddicFolders = DEFAULT_DDIC) {
+  const registry = registryFor(ddicFolders, [{name, source}]);
+  const object = [...registry.getObjects()].find((o) => o instanceof abaplint.ABAPObject
+    && o.getABAPFiles().some((f) => f.getFilename() === name));
+  const file = object?.getABAPFiles().find((f) => f.getFilename() === name);
+  const m = file?.getStructure()?.findAllStructures(Structures.Method).find((s) => methodName(s) === method.toLowerCase());
+  if (!m) throw new Refusal("shape", `no parsed method ${method} in ${name}`);
+  const loops = m.findAllStructures(Structures.Select);
+  if (loops.length !== 1 || m.findAllStructures(Structures.Loop).length) {
+    throw new Refusal("shape", "R3 needs exactly one SELECT/ENDSELECT loop; INTO TABLE/LOOP needs proof that the table has no other use");
+  }
+  const loop = loops[0];
+  const selectStatement = loop.getFirstStatement();
+  const select = selectStatement.findDirectExpression(Expressions.Select);
+  const from = select?.findDirectExpression(Expressions.SQLFrom);
+  const into = select?.findDirectExpression(Expressions.SQLIntoStructure);
+  const cond = select?.findDirectExpression(Expressions.SQLCond);
+  const fields = select?.findDirectExpression(Expressions.SQLFieldList);
+  const order = select?.findDirectExpression(Expressions.SQLOrderBy);
+  if (!select || !from || !into || !fields || !cond) throw new Refusal("shape", "SELECT needs a static FROM, INTO work area, and WHERE");
+  if (select.findDirectExpression(Expressions.SQLUpTo)) throw new Refusal("UP TO n ROWS", "filtering after a row limit differs from filtering before it");
+  const table = from.findAllExpressions(Expressions.DatabaseTable);
+  if (table.length !== 1 || from.getTokens().length !== 2) throw new Refusal("shape", "FROM must name one table without an alias or join");
+  const dbtab = word(table[0]);
+  const row = into.findAllExpressions(Expressions.SQLTarget)?.[0]?.concatTokens().toLowerCase();
+  if (!row || !/^[a-z][a-z0-9_]*$/.test(row) || into.getTokens().length !== 2) {
+    throw new Refusal("shape", "INTO must name one work area");
+  }
+  if (fields.concatTokens() !== "*") throw new Refusal("projection", "R3 currently requires SELECT * into a work area typed as the table; explicit lists need a column-to-component proof");
+  if (!m.findAllStatementNodes().some((st) => st.get() instanceof Statements.Data
+    && new RegExp(`^DATA\\s+${row}\\s+TYPE\\s+${dbtab}\\s*\\.$`, "i").test(st.concatTokens()))) {
+    throw new Refusal("row type", `${row} must be declared TYPE ${dbtab} in this method`);
+  }
+  const clauses = children(select).filter((n) => ![from, into, cond, fields, order].includes(n)).map(word);
+  if (clauses.join(" ") !== "select where") throw new Refusal("shape", "SELECT has an unsupported clause");
+  if (/\bOR\b/i.test(cond.concatTokens())) throw new Refusal("WHERE grouping", "an OR condition needs explicit grouping before appending AND");
+  const body = loop.findAllStatementNodes().slice(1, -1);
+  if (!body.length) throw new Refusal("shape", "SELECT body is empty");
+  const ifContinue = body[0].get() instanceof Statements.If
+    && body[1]?.get() instanceof Statements.Continue
+    && body[2]?.get() instanceof Statements.EndIf;
+  if (!(body[0].get() instanceof Statements.Check) && !ifContinue) {
+    throw new Refusal("no side effect before the filter", "CHECK or IF/CONTINUE must be the first action in the SELECT body");
+  }
+  const check = body[0];
+  const filter = /^(?:CHECK|IF)\s+([\w]+)-([\w]+)\s*(=|<>|<=|>=|<|>)\s*('(?:[^']|'')*'|[\w]+)\s*\.$/i.exec(check.concatTokens());
+  if (!filter) throw new Refusal("op mapping", "R3 takes CHECK row-column with a simple SQL comparison; CP/CS/NP/NS, BETWEEN and IN are not mapped");
+  const [, checkedRow, columnRaw, rawOp, value] = filter;
+  const op = ifContinue ? ({"=": "<>", "<>": "=", "<": ">=", ">": "<=", "<=": ">", ">=": "<"})[rawOp] : rawOp;
+  const column = columnRaw.toLowerCase();
+  if (checkedRow.toLowerCase() !== row) throw new Refusal("reads only the row", `CHECK reads ${checkedRow}, not ${row}`);
+  const ddic = registry.getObject("TABL", dbtab.toUpperCase());
+  const field = ddic?.getFields()?.find((f) => f.FIELDNAME?.toLowerCase() === column);
+  if (!field) throw new Refusal("reads only the row", `${dbtab}-${column} is not a resolved database column`);
+  // abaplint's field projection omits NOTNULL, so retain the DD03P evidence
+  // from the same registry object instead of treating its absence as false.
+  const xml = ddic.files?.find((f) => f.getFilename().endsWith(".tabl.xml"))?.getRaw() ?? "";
+  const fieldXml = [...xml.matchAll(/<DD03P>([\s\S]*?)<\/DD03P>/g)].map((m) => m[1])
+    .find((part) => new RegExp(`<FIELDNAME>${column}</FIELDNAME>`, "i").test(part));
+  if (!fieldXml || (!/<NOTNULL>X<\/NOTNULL>/.test(fieldXml) && field.KEYFLAG !== "X")) {
+    throw new Refusal("NULL", `${dbtab}-${column} may be NULL; an ABAP initial value can pass CHECK but not WHERE`);
+  }
+  const type = field.DATATYPE?.toUpperCase();
+  const width = Number(field.LENG);
+  if (type !== "CHAR" || !Number.isFinite(width)) throw new Refusal("type pair", `${dbtab}-${column} is ${type ?? "unresolved"}; comparison equivalence is not measured`);
+  let host = value;
+  if (value.startsWith("'")) {
+    const length = value.slice(1, -1).replaceAll("''", "'").length;
+    if (length !== width) throw new Refusal("CHAR length", `literal length ${length} differs from CHAR(${width})`);
+  } else {
+    const syntax = new abaplint.SyntaxLogic(registry, object).run();
+    const scope = syntax.spaghetti.lookupPosition(check.getStart(), name);
+    const variable = scope?.findVariable(value.toLowerCase());
+    const variableType = variable?.getType();
+    if (!(variableType instanceof abaplint.BasicTypes.CharacterType) || variableType.getLength() !== width) {
+      throw new Refusal("type pair", `${value} is not proven CHAR(${width})`);
+    }
+    const bodyText = loop.concatTokens().toLowerCase();
+    if (new RegExp(`\\b(?:move\\s+[^.]+\\s+to|clear|free|add\\s+[^.]+\\s+to)\\s+${value.toLowerCase()}\\b`).test(bodyText)
+      || body.slice(ifContinue ? 3 : 1).some((st) => st.getTokens().some((t) => word(t) === value.toLowerCase())
+        && (methodCall(st) || /\b(?:=|to|into|changing)\b/i.test(st.concatTokens())))) {
+      throw new Refusal("loop invariant", `${value} may be written in the loop`);
+    }
+    // Escaped host variables were introduced after 7.02; the unescaped
+    // host form preserves the source release this repository targets.
+    host = value;
+  }
+  const following = m.findAllStatementNodes().filter((st) => st.getStart().isAfter(loop.getLastToken().getEnd()));
+  const remaining = body.slice(ifContinue ? 3 : 1);
+  if ([...remaining, ...following].some((st) => /\bsy\s*-\s*dbcnt\b/i.test(st.concatTokens()))) {
+    throw new Refusal("sy-dbcnt", "a later read of sy-dbcnt observes fetched rows");
+  }
+  if ([...remaining, ...following].some((st) => /\bsy\s*-\s*subrc\b/i.test(st.concatTokens()))) {
+    throw new Refusal("sy-subrc", "sy-subrc after ENDSELECT requires a separate measured proof");
+  }
+  if (remaining.some((st) => st.get() instanceof Statements.Select || st.get() instanceof Statements.SelectLoop)) {
+    throw new Refusal("shape", "nested SELECT is outside R3");
+  }
+  const issue = new abaplint.SyntaxLogic(registry, object).run().issues.find((i) => i.getFilename() === name);
+  if (issue) throw new Refusal("shape/syntax", issue.getMessage());
+  const oldSelect = selectStatement.concatTokens();
+  const orderText = order?.concatTokens();
+  const predicate = `${column} ${op} ${host}`;
+  const newSelect = orderText
+    ? oldSelect.replace(orderText, `AND ${predicate} ${orderText}`)
+    : oldSelect.replace(/\.$/, ` AND ${predicate}.`);
+  const bodyText = remaining.map((st) => st.concatTokens()).join("\n");
+  return {recipe: "R3", source: {table: dbtab, row, column, op, value}, select: newSelect,
+    body: bodyText, open: ["ABAP and Open SQL CHAR case/collation agreement on A4H",
+      ...(value.startsWith("'") ? [] : [`${value} is not changed through an alias or call during the loop`]),
+      "no concurrent change to selected rows", "same client and database snapshot"]};
+}
+
 // Every method of every class in `folder` whose loop holds an R1 or R2 lookup,
 // put through the corresponding model: what it accepts and what stops the rest.
-export function survey(folder, ddicFolders = DEFAULT_DDIC) {
+export function survey(folder, ddicFolders = DEFAULT_DDIC, onlyRecipe) {
   const result = {folder, candidates: 0, accepted: 0, refused: {}, cases: []};
   for (const path of walk(folder, /\.clas\.abap$/)) {
     const source = readFileSync(path, "utf8");
@@ -1008,14 +1128,16 @@ export function survey(folder, ddicFolders = DEFAULT_DDIC) {
     for (const method of file?.getStructure()?.findAllStructures(Structures.Method) ?? []) {
       const selects = loopsOf(method).flatMap((l) => l.findAllStatementNodes()
         .filter((st) => st.get() instanceof Statements.Select));
-      const candidate = selects.find(isSelectIntoTablePerRow)
+      const r3 = method.findAllStructures(Structures.Select)[0];
+      const candidate = onlyRecipe === "r3" ? r3?.getFirstStatement() : selects.find(isSelectIntoTablePerRow)
         ?? selects.find((st) => /^SELECT SINGLE /i.test(st.concatTokens()));
       if (!candidate) continue;
-      const recipe = candidate.findDirectExpression(Expressions.Select)?.findDirectExpression(Expressions.SQLIntoTable) ? "R2" : "R1";
+      const recipe = onlyRecipe === "r3" ? "R3" : candidate.findDirectExpression(Expressions.Select)?.findDirectExpression(Expressions.SQLIntoTable) ? "R2" : "R1";
       result.candidates++;
       const where = `${basename(path)}:${methodName(method)}`;
       try {
-        if (recipe === "R2") modelR2FromSource(basename(path), source, methodName(method), ddicFolders);
+        if (recipe === "R3") modelR3FromSource(basename(path), source, methodName(method), ddicFolders);
+        else if (recipe === "R2") modelR2FromSource(basename(path), source, methodName(method), ddicFolders);
         else modelR1FromSource(basename(path), source, methodName(method), ddicFolders);
         result.accepted++;
         result.cases.push({where, recipe, accepted: true});
@@ -1036,13 +1158,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } else if (command === "survey") {
     const ddic = [];
     let list = false;
+    let recipe;
     const rest = [];
     for (let i = 0; i < args.length; i++) {
       if (args[i] === "--ddic") ddic.push(args[++i]);
+      else if (args[i] === "--recipe") recipe = (args[++i] ?? "").toLowerCase();
       else if (args[i] === "--list") list = true;
       else rest.push(args[i]);
     }
-    const r = survey(rest[0], ddic.length ? ddic : DEFAULT_DDIC);
+    const r = survey(rest[0], ddic.length ? ddic : DEFAULT_DDIC, recipe);
     const {cases, ...counts} = r;
     console.log(JSON.stringify(counts));
     if (list) for (const c of cases) console.log(`  ${c.where}  ${c.accepted ? "ACCEPTED" : c.refused}`);
@@ -1056,8 +1180,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       else rest.push(args[i]);
     }
     try {
-      if (!["r1", "r2"].includes(recipe)) throw new Refusal("recipe", `unknown recipe ${recipe}`);
-      const model = recipe === "r2" ? modelR2 : modelR1;
+      if (!["r1", "r2", "r3"].includes(recipe)) throw new Refusal("recipe", `unknown recipe ${recipe}`);
+      const model = recipe === "r3" ? modelR3 : recipe === "r2" ? modelR2 : modelR1;
       console.log(JSON.stringify(model(rest[0], rest[1], ddic.length ? ddic : DEFAULT_DDIC), null, 2));
     } catch (e) {
       if (!(e instanceof Refusal)) throw e;
@@ -1065,7 +1189,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       process.exit(1);
     }
   } else {
-    console.error("usage: node tools/lift.mjs find <folder>... | model <file.abap> <method> [--recipe r1|r2] [--ddic <folder>]... | survey <folder> [--ddic <folder>]... [--list]");
+    console.error("usage: node tools/lift.mjs find <folder>... | model <file.abap> <method> [--recipe r1|r2|r3] [--ddic <folder>]... | survey <folder> [--recipe r3] [--ddic <folder>]... [--list]");
     process.exit(2);
   }
 }
