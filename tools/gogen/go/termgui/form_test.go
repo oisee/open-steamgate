@@ -58,3 +58,49 @@ func TestDrawOnSimulationScreen(t *testing.T) {
 		t.Fatalf("form was not placed at expected cells")
 	}
 }
+
+// After an error in AT SELECTION-SCREEN ON P_B the form opens on P_B with the
+// message in the status line, and the other fields take no input.
+func TestModelLockedFieldsAndMessage(t *testing.T) {
+	m := newModel(Form{Message: "E: B is wrong", Focus: "P_B", Fields: []Field{
+		{Name: "P_A", Kind: Text, Value: "a", Locked: true},
+		{Name: "P_B", Kind: Text, Value: "b"},
+		{Name: "P_C", Kind: Checkbox, Locked: true},
+	}})
+	if m.current().Name != "P_B" {
+		t.Fatalf("focus %s", m.current().Name)
+	}
+	m.handle(key(tcell.KeyTab))
+	if m.current().Name != "P_B" {
+		t.Fatalf("tab left the only open field for %s", m.current().Name)
+	}
+	m.handle(runeKey('x'))
+	m.handle(key(tcell.KeyEnter))
+	if got := m.form.Fields; got[0].Value != "a" || got[1].Value != "bx" || got[2].Value != "" {
+		t.Fatalf("fields = %#v", got)
+	}
+
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(40, 8)
+	draw(screen, newModel(Form{Message: "E: B is wrong", Fields: []Field{{Name: "P", Kind: Text}}}))
+	cells, width, _ := screen.GetContents()
+	line := ""
+	for x := 0; x < width; x++ {
+		line += string(cells[7*width+x].Runes[0])
+	}
+	if line[1:14] != "E: B is wrong" {
+		t.Fatalf("status line %q", line)
+	}
+}
+
+// A locked field the focus would open on is skipped.
+func TestModelFocusSkipsLocked(t *testing.T) {
+	m := newModel(Form{Fields: []Field{{Name: "P_A", Locked: true}, {Name: "P_B"}}})
+	if m.current().Name != "P_B" {
+		t.Fatalf("focus %s", m.current().Name)
+	}
+}

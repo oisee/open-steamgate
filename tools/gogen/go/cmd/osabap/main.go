@@ -22,10 +22,10 @@ import (
 )
 
 func hostRun(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, batch, present string) ZCL_GG_HOST__TY_RESULT {
-	return hostRunRequest(s, report, input, batch, present, "")
+	return hostRunRequest(s, report, input, batch, present, "", "")
 }
 
-func hostRunRequest(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, batch, present, valueRequest string) ZCL_GG_HOST__TY_RESULT {
+func hostRunRequest(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, batch, present, valueRequest, confirmWarnings string) ZCL_GG_HOST__TY_RESULT {
 	values := make([]*ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, len(input))
 	for i := range input {
 		values[i] = &input[i]
@@ -33,7 +33,7 @@ func hostRunRequest(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SEL
 	empty := []*ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE(nil)
 	return ZCL_GG_HOST_RUN(s, report, nil, appProgram, "1000", "", 0, batch,
 		&values, &empty, &empty, "ONLI", "", valueRequest, "", "", 0, 1, "", "", "", 0,
-		"", "", "", "", "", present, "", &ZIF_GG_HOST_HTML_V1__TY_NAVIGATION{}, &ZIF_GG_SESSION_TYPES_V1__TY_SUBMIT{})
+		"", "", "", "", "", present, "", confirmWarnings, &ZIF_GG_HOST_HTML_V1__TY_NAVIGATION{}, &ZIF_GG_SESSION_TYPES_V1__TY_SUBMIT{})
 }
 
 var stopProfile = func() {}
@@ -82,9 +82,18 @@ func main() {
 		} else {
 			var screen ZCL_GG_HOST__TY_RESULT
 			abap.DialogStep(func() { screen = hostRun(s, report, nil, "", "X") })
-			if termgui.Available() {
+			if !termgui.Available() {
+				input = terminalInput(screen)
+				abap.DialogStep(func() { result = hostRun(s, report, input, "", "") })
+				return
+			}
+			// a MESSAGE E or W of the selection-screen events sends the screen
+			// again with the values kept and the message in the status line;
+			// Enter on a warning with nothing changed confirms it (selection.go)
+			var retry selectionRetry
+			for {
 				var err error
-				input, err = graphicalInput(s, report, screen)
+				input, err = graphicalInput(s, report, screen, retry)
 				if errors.Is(err, termgui.ErrCancelled) {
 					cancelled = true
 					return
@@ -92,10 +101,14 @@ func main() {
 				if err != nil {
 					panic(err)
 				}
-			} else {
-				input = terminalInput(screen)
+				confirm := retry.confirms(input)
+				abap.DialogStep(func() { result = hostRunRequest(s, report, input, "", "", "", confirm) })
+				next, again := selectionAgain(result, input)
+				if !again {
+					break
+				}
+				screen, retry = result, next
 			}
-			abap.DialogStep(func() { result = hostRun(s, report, input, "", "") })
 		}
 	}()
 	if dialogSandbox != nil {
@@ -186,8 +199,8 @@ func datasetOptions(host []reportargs.Arg) {
 	abap.SetDatasetHost(dialogSandbox)
 }
 
-func graphicalInput(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST__TY_RESULT) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, error) {
-	fields, err := termgui.Run(graphicalForm(s, report, screen))
+func graphicalInput(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST__TY_RESULT, retry selectionRetry) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, error) {
+	fields, err := termgui.Run(retry.apply(graphicalForm(s, report, screen)))
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +270,9 @@ func graphicalForm(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST_
 		}
 		defer func() { abap.FrontendPick = nil }()
 		var result ZCL_GG_HOST__TY_RESULT
-		abap.DialogStep(func() { result = hostRunRequest(s, report, selectionValuesFromFields(fields, screen), "", "X", target) })
+		abap.DialogStep(func() {
+			result = hostRunRequest(s, report, selectionValuesFromFields(fields, screen), "", "X", target, "")
+		})
 		if pickErr != nil {
 			return "", pickErr
 		}

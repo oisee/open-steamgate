@@ -281,6 +281,28 @@ With no arguments, a real terminal uses the tcell form in
 - Escape cancels;
 - mouse clicks move focus.
 
+A `MESSAGE` of type `E` or `W` in the selection-screen events sends the
+form again, as SAP GUI sends the selection screen again, instead of ending the
+run:
+
+- the values typed are kept and the message is in the status line;
+- the cursor is on the message's field (an empty `OBLIGATORY` field, or the
+  field of `AT SELECTION-SCREEN ON <field>`);
+- after an error in `AT SELECTION-SCREEN ON <field>` only that field takes
+  input, the others are dimmed: the ABAP documentation of
+  [`AT SELECTION-SCREEN ON`](https://help.sap.com/doc/abapdocu_latest_index_htm/latest/en-US/abapat_selection-screen_events.htm)
+  says the same for SAP GUI;
+- after a warning, Enter with the values unchanged confirms it and the event
+  goes on to `START-OF-SELECTION`; changed values run the checks again.
+
+`START-OF-SELECTION` runs only once the checks pass. Escape still cancels.
+Headless runs are unchanged: the message goes to stderr and the status is 1.
+The host reports this as `selection_error` of `ZCL_GG_HOST=>RUN` and takes the
+confirmation as `iv_confirm_warnings`; `tools/gogen/apps/selcheck` is the
+sample, `cmd/osabap/selcheck_test.go` the test. An error in
+`AT SELECTION-SCREEN ON BLOCK` leaves every field ready (the block's fields
+are not told apart yet).
+
 When stdin is not a terminal, OSABAP uses a deterministic line form instead.
 That keeps the no-argument path testable through pipes.
 

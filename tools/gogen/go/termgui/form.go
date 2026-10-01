@@ -30,12 +30,19 @@ type Field struct {
 	Width    int
 	Required bool
 	Secret   bool
+	// Locked: shown but not ready for input, as SAP GUI shows the other
+	// fields after an error in AT SELECTION-SCREEN ON <field>
+	Locked bool
 }
 
 type Form struct {
 	Title  string
 	Fields []Field
 	OnF4   func(screen tcell.Screen, field string, fields []Field) (string, error)
+	// Message: the status line the form opens with (a selection-screen
+	// error or warning); Focus: the field the cursor starts in
+	Message string
+	Focus   string
 }
 
 var ErrCancelled = errors.New("terminal form cancelled")
@@ -80,6 +87,14 @@ func newModel(form Form) *model {
 		}
 	}
 	m := &model{form: form}
+	for i, f := range form.Fields {
+		if form.Focus != "" && f.Name == form.Focus {
+			m.focus = i
+		}
+	}
+	if f := m.current(); f != nil && f.Locked {
+		m.move(1)
+	}
 	m.end()
 	return m
 }
@@ -95,7 +110,12 @@ func (m *model) move(delta int) {
 	if len(m.form.Fields) == 0 {
 		return
 	}
-	m.focus = (m.focus + delta + len(m.form.Fields)) % len(m.form.Fields)
+	for range m.form.Fields {
+		m.focus = (m.focus + delta + len(m.form.Fields)) % len(m.form.Fields)
+		if !m.form.Fields[m.focus].Locked {
+			break
+		}
+	}
 	m.end()
 }
 
@@ -146,7 +166,7 @@ func (m *model) handle(ev *tcell.EventKey) {
 		return
 	}
 	f := m.current()
-	if f == nil {
+	if f == nil || f.Locked {
 		return
 	}
 	if f.Kind == Checkbox {
@@ -197,7 +217,7 @@ func run(screen tcell.Screen, form Form) ([]Field, error) {
 		draw(screen, m)
 		switch ev := screen.PollEvent().(type) {
 		case *tcell.EventKey:
-			if ev.Key() == tcell.KeyF4 && m.current() != nil {
+			if ev.Key() == tcell.KeyF4 && m.current() != nil && !m.current().Locked {
 				f := m.current()
 				if form.OnF4 == nil {
 					m.err = fmt.Errorf("no F4 value request for %s", f.Name)
@@ -218,7 +238,7 @@ func run(screen tcell.Screen, form Form) ([]Field, error) {
 			screen.Sync()
 		case *tcell.EventMouse:
 			_, y := ev.Position()
-			if ev.Buttons()&tcell.Button1 != 0 && y >= 3 && y < 3+len(m.form.Fields) {
+			if ev.Buttons()&tcell.Button1 != 0 && y >= 3 && y < 3+len(m.form.Fields) && !m.form.Fields[y-3].Locked {
 				m.focus = y - 3
 				m.end()
 			}
@@ -258,6 +278,8 @@ func draw(screen tcell.Screen, m *model) {
 		style := tcell.StyleDefault
 		if i == m.focus {
 			style = style.Reverse(true)
+		} else if f.Locked {
+			style = style.Dim(true)
 		}
 		if f.Kind == Checkbox {
 			mark := " "
@@ -289,6 +311,8 @@ func draw(screen tcell.Screen, m *model) {
 	footer := " Tab/↑/↓ focus   F4 value help   Space toggle   Enter execute   Esc cancel "
 	if m.err != nil && !errors.Is(m.err, ErrCancelled) {
 		footer = " " + m.err.Error() + " "
+	} else if m.form.Message != "" {
+		footer = " " + m.form.Message + " "
 	}
 	if h > 0 {
 		put(screen, 0, h-1, tcell.StyleDefault.Reverse(true), footer+strings.Repeat(" ", max(0, w-len([]rune(footer)))))

@@ -549,6 +549,17 @@ test("headless ABAP dialog call maps ERROR_NO_GUI through EXCEPTIONS", () => {
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
+test("a selection-screen E or W sends the form again; Enter confirms a warning", () => {
+  execFileSync(process.execPath, [builder, join(here, "apps", "selcheck", "zselcheck.prog.abap")], {stdio: "inherit"});
+  execFileSync("go", ["test", "-tags", "nodatabase,osabap_selcheck", "./cmd/osabap"], {
+    cwd: join(here, "go"), stdio: "inherit",
+  });
+  // headless: the message on stderr and status 1, as before
+  const result = run(["--a", "ok", "--b", "BAD"]);
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /B is wrong/);
+});
+
 test("select-option LOW and HIGH F4 handlers build and run in the terminal", () => {
   execFileSync(process.execPath, [builder, join(here, "apps", "pickrange", "zpickrange.prog.abap")], {stdio: "inherit"});
   execFileSync("go", ["test", "-tags", "nodatabase,osabap_pickrange", "./cmd/osabap"], {

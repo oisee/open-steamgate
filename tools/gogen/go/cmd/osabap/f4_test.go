@@ -168,7 +168,7 @@ func TestF4FilenameFunctionModules(t *testing.T) {
 	for _, name := range []string{"P_FM1", "P_FM2"} {
 		var result ZCL_GG_HOST__TY_RESULT
 		abap.DialogStep(func() {
-			result = hostRunRequest(s, report, selectionValues(map[string]selectionInput{name: {value: "old"}}), "", "X", name)
+			result = hostRunRequest(s, report, selectionValues(map[string]selectionInput{name: {value: "old"}}), "", "X", name, "")
 		})
 		found := false
 		for _, value := range result.values {
@@ -199,7 +199,7 @@ func TestF4ReadsEditedOtherField(t *testing.T) {
 		"P_DIR": {value: "/edited/directory"},
 		"P_IN":  {value: "old"},
 	})
-	abap.DialogStep(func() { hostRunRequest(s, report, values, "", "X", "P_IN") })
+	abap.DialogStep(func() { hostRunRequest(s, report, values, "", "X", "P_IN", "") })
 }
 
 func TestCancelledSavePreservesField(t *testing.T) {
@@ -214,7 +214,7 @@ func TestCancelledSavePreservesField(t *testing.T) {
 	defer func() { abap.FrontendPick = nil }()
 	var result ZCL_GG_HOST__TY_RESULT
 	abap.DialogStep(func() {
-		result = hostRunRequest(s, report, selectionValues(map[string]selectionInput{"P_OUT": {value: "previous"}}), "", "X", "P_OUT")
+		result = hostRunRequest(s, report, selectionValues(map[string]selectionInput{"P_OUT": {value: "previous"}}), "", "X", "P_OUT", "")
 	})
 	for _, value := range result.values {
 		if strings.TrimSpace(value.name) == "P_OUT" && len(value.ranges) > 0 {
