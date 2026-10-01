@@ -89,6 +89,29 @@ describe("leak scanner", () => {
       }
     });
 
+    for (const [label, list] of [
+      ["a line break in a name", {k: [`${name}\nmore`]}],
+      ["a line break in a category", {[`k\n${name}`]: ["abcdef"]}],
+      ["a string where an array belongs", {k: name}],
+      ["a name that is not a string", {k: [42]}],
+      ["a name too short to scan", {k: ["ab"]}],
+      ["a category without names", {k: []}],
+    ]) {
+      it(`refuses a list with ${label}, without printing it`, () => {
+        const broken = mkdtempSync(join(tmpdir(), "osd-leak-shape-"));
+        try {
+          mkdirSync(join(broken, ".local"), {recursive: true});
+          writeFileSync(join(broken, ".local", "leak-identifiers.json"), JSON.stringify(list));
+          const result = spawnSync(process.execPath, ["tools/osd-leak-scan.mjs", broken, "--print-masks"], {encoding: "utf8"});
+          assert.equal(result.status, 1);
+          assert.doesNotMatch(result.stdout + result.stderr, new RegExp(name));
+          assert.doesNotMatch(result.stdout, /add-mask/);
+        } finally {
+          rmSync(broken, {recursive: true, force: true});
+        }
+      });
+    }
+
     it("emits a mask for every name and category", () => {
       const result = run("--print-masks");
       assert.equal(result.status, 0);

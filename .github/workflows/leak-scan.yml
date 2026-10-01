@@ -26,6 +26,12 @@ jobs:
       # request from a fork gets none) the structural rules still run, and
       # the job says plainly that the names were not checked: exit 2 means
       # "ran without the names", not "clean".
+      #
+      # A secret is readable by code running in this repository, so whoever
+      # can push a branch here could print it from that branch. Today only the
+      # owner can (checked 2026-10-01: one collaborator, oisee), and that
+      # account already holds the list. If a collaborator is ever added, move
+      # the secret into an environment whose deployment policy allows main only.
       - name: install the identifier list
         env:
           LEAK_IDENTIFIERS: ${{ secrets.LEAK_IDENTIFIERS }}

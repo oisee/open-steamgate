@@ -183,12 +183,28 @@ function identifiers(root) {
     console.error(`osd-leak-scan: ${path} is not valid JSON (${error.name}); its content is not printed`);
     process.exit(1);
   }
+  // The list is checked whole before anything uses it: a name the scan would
+  // silently skip (too short, not a string, a string where an array belongs)
+  // is coverage lost without a word, and a line break inside a name or a
+  // category would split the one-line ::add-mask:: command and leave the rest
+  // of it in a public log. Errors name the position, never the content.
+  const bad = (where, why) => {
+    console.error(`osd-leak-scan: ${path}: ${where}: ${why}; its content is not printed`);
+    process.exit(1);
+  };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) bad("top level", "not an object of categories");
   const list = [];
-  for (const [kind, values] of Object.entries(raw)) {
-    for (const v of values) {
-      if (typeof v === "string" && v.length >= 3) list.push({ kind, value: v });
-    }
-  }
+  Object.entries(raw).forEach(([kind, values], i) => {
+    if (/[\r\n]/.test(kind)) bad(`category #${i + 1}`, "a line break in its name");
+    if (!Array.isArray(values)) bad(`category #${i + 1}`, "not an array of names");
+    if (values.length === 0) bad(`category #${i + 1}`, "no names");
+    values.forEach((v, j) => {
+      if (typeof v !== "string") bad(`category #${i + 1}, name #${j + 1}`, "not a string");
+      if (/[\r\n]/.test(v)) bad(`category #${i + 1}, name #${j + 1}`, "a line break in it");
+      if (v.trim().length < 3) bad(`category #${i + 1}, name #${j + 1}`, "shorter than 3 characters, which the scan cannot match without noise");
+      list.push({ kind, value: v });
+    });
+  });
   return list;
 }
 
