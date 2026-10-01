@@ -198,14 +198,36 @@ describe("editors/vscode: the extension's logic", function () {
   it("builds the attach profile and keeps a supervised restart on one debugger session", () => {
     const config = debuggerConfiguration(9341);
     expect(config).to.include({name: "OSD: ABAP (9341)", type: "node", request: "attach", address: "127.0.0.1", port: 9341, restart: true, timeout: 30000});
-    expect(config.resolveSourceMapLocations).to.deep.equal(["${workspaceFolder}/build/**", "!**/node_modules/**"]);
-    expect(config.outFiles).to.deep.equal(["${workspaceFolder}/build/**/*.mjs"]);
+    expect(config.resolveSourceMapLocations).to.deep.equal(["${workspaceFolder}/build/live/output/**", "!**/node_modules/**"]);
+    expect(config.outFiles).to.deep.equal(["${workspaceFolder}/build/live/output/**/*.mjs"]);
+    expect(config.pauseForSourceMap).to.equal(true);
     expect(debuggerConfiguration(9342, {target: "unit", restart: false}))
       .to.include({name: "OSD: ABAP Unit (9342)", restart: false, continueOnAttach: true});
     const externalRoot = debuggerConfiguration(9343, {root: "C:\\workspace\\osd"});
-    expect(externalRoot.outFiles).to.deep.equal(["C:/workspace/osd/build/**/*.mjs"]);
+    expect(externalRoot.outFiles).to.deep.equal(["C:/workspace/osd/build/live/output/**/*.mjs"]);
     expect(externalRoot.skipFiles).to.include("C:/workspace/osd/node_modules/@abaplint/runtime/**");
     expect(() => debuggerConfiguration(0)).to.throw(/invalid inspector port/);
+
+    const home = mkdtempSync(path.join(tmpdir(), "osd-debug-generation-"));
+    try {
+      const build = path.join(home, "build");
+      const first = path.join(build, "by-input", "first", "output");
+      const second = path.join(build, "by-input", "second", "output");
+      mkdirSync(first, {recursive: true});
+      mkdirSync(second, {recursive: true});
+      symlinkSync(path.dirname(first), path.join(build, "live"), "dir");
+      symlinkSync(first, path.join(home, "output"), "dir");
+      expect(debuggerConfiguration(9341, {root: home}).outFiles).to.deep.equal([`${first}/**/*.mjs`]);
+      rmSync(path.join(build, "live"));
+      symlinkSync(path.dirname(second), path.join(build, "live"), "dir");
+      rmSync(path.join(home, "output"));
+      symlinkSync(second, path.join(home, "output"), "dir");
+      const swapped = debuggerConfiguration(9341, {root: home});
+      expect(swapped.outFiles).to.deep.equal([`${second}/**/*.mjs`]);
+      expect(swapped.resolveSourceMapLocations).to.deep.equal([`${second}/**`, "!**/node_modules/**"]);
+    } finally {
+      rmSync(home, {recursive: true, force: true});
+    }
 
     const first = debugAttachPlan({}, {type: "system-started", enabled: true, port: 9341});
     expect(first.actions).to.deep.equal([{type: "attach", target: "system", port: 9341, restart: true}]);

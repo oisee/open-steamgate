@@ -491,6 +491,7 @@ class SystemController {
     this.debuggerState = {};
     this.debuggerStarts = new Map();
     this.debuggerTransition = Promise.resolve();
+    this.debuggerOutputPattern = undefined;
     // The stable VS Code API has no list of running debug sessions (only
     // start/terminate events), so the controller keeps its own.
     this.debugSessions = new Set();
@@ -590,11 +591,13 @@ class SystemController {
         const session = this.runningDebugSessions().find((candidate) => candidate.name === name);
         if (session !== undefined) await vscode.debug.stopDebugging(session);
         this.debuggerStarts.delete(name);
+        this.debuggerOutputPattern = undefined;
         continue;
       }
       if (this.runningDebugSessions().some((candidate) => candidate.name === name)) {
         if (action.target === "system") {
           this.debuggerState = debugAttachPlan(this.debuggerState, {type: "system-attached", port: action.port}).state;
+          this.debuggerOutputPattern = config.outFiles[0];
         }
         continue;
       }
@@ -613,12 +616,48 @@ class SystemController {
         }
         if (action.target === "system") {
           this.debuggerState = debugAttachPlan(this.debuggerState, {type: "system-attached", port: action.port}).state;
+          this.debuggerOutputPattern = config.outFiles[0];
         }
       } finally {
         this.debuggerStarts.delete(name);
       }
     }
     return true;
+  }
+
+  /** A debug session keeps its outFiles after a warm swap or a supervised
+   *  restart. Reattach it once the serving output link names another build. */
+  async refreshDebuggerGeneration() {
+    if (this.refreshingDebugger || this.launcher?.state !== "running") return;
+    const port = this.debuggerState.systemPort;
+    if (port === undefined) return;
+    const session = this.runningDebugSessions().find((one) => one.name === `OSD: ABAP (${port})`);
+    if (session === undefined) return;
+    const config = debuggerConfiguration(port, {root: this.launcher.osdHome,
+      storageDir: this.launcher.storageDir, layers: this.launcher.layers});
+    if (this.debuggerOutputPattern === undefined) {
+      this.debuggerOutputPattern = config.outFiles[0];
+      return;
+    }
+    if (this.debuggerOutputPattern === config.outFiles[0]) return;
+    this.refreshingDebugger = true;
+    try {
+      // Clear the old session before stopping it so its termination event
+      // cannot close an inspector opened on demand for the replacement.
+      this.debuggerState = {systemPort: undefined};
+      await vscode.debug.stopDebugging(session);
+      this.debuggerOutputPattern = undefined;
+      if (await vscode.debug.startDebugging(undefined, config) === true) {
+        this.debuggerState = {systemPort: port};
+        this.debuggerOutputPattern = config.outFiles[0];
+      } else {
+        this.output.appendLine(`osd debugger: could not reattach to generation ${config.outFiles[0]}`);
+      }
+    } catch (error) {
+      this.output.appendLine(`osd debugger: ${String(error?.message ?? error)}`);
+    } finally {
+      this.refreshingDebugger = false;
+    }
   }
 
   /** Attaches VS Code's debugger to the running system. With `onDemand`,
@@ -1032,6 +1071,7 @@ class SystemController {
       const build = activationBuildText(result);
       const tests = closureTestsText(result);
       if (result.ok) {
+        await this.refreshDebuggerGeneration();
         vscode.window.setStatusBarMessage(
           `osd: ${changed.objects.length} object(s) activated${build ? ` (${build})` : ""}${tests ? `, ${tests}` : ""}`, 5000);
       } else {
@@ -2498,6 +2538,8 @@ function statusBar(context) {
     try {
       const serving = await osd().serving();
       setServingAvailability(true);
+      await activeController?.refreshDebuggerGeneration().catch((error) =>
+        activeController.output.appendLine(`osd debugger: ${String(error?.message ?? error)}`));
       const dumps = await osd().dumps().catch(() => []);
       const generation = String(serving.generation ?? "?").slice(0, 8);
       const warm = serving.warm;
@@ -2726,6 +2768,7 @@ async function activateCurrent(diagnostics, output) {
   try {
     const result = await osd().activate(object);
     if (result.ok) {
+      await activeController?.refreshDebuggerGeneration();
       try {
         const reports = await osd().check(object, object.include, editor.document.getText());
         diagnostics.set(editor.document.uri, reports.flatMap((r) => r.issues)

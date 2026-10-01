@@ -179,13 +179,14 @@ ENDCLASS.`;
       expect(mapped).to.equal(`${relative(generation, packSource).replaceAll("\\", "/")}/zcl_ship_dpc_ext.clas.abap`);
       expect(JSON.stringify(map)).not.to.include(workspace);
       expect(JSON.stringify(map)).not.to.include(storage);
+      symlinkSync(generation, join(home, "output"), "dir");
       const attach = debuggerConfiguration(9341, {root: home, storageDir: storage,
         layers: [{folder: workspace, srcDir: workspaceSource}]});
-      expect(attach.outFiles).to.include(`${home}/build/**/*.mjs`);
-      expect(attach.resolveSourceMapLocations).to.include(`${home}/build/**`);
+      expect(attach.outFiles).to.deep.equal([`${generation}/**/*.mjs`]);
+      expect(attach.resolveSourceMapLocations).to.deep.equal([`${generation}/**`, "!**/node_modules/**"]);
+      expect(attach.pauseForSourceMap).to.equal(true);
       expect(attach.sourceMapPathOverrides[`${dirname(mapped)}/*`]).to.equal(`${workspaceSource}/*`);
       expect(attach.sourceMapPathOverrides[`file://${packSource}/*`]).to.equal(`${workspaceSource}/*`);
-      symlinkSync(generation, join(home, "output"), "dir");
       const running = runningAbapSources(home, {storageDir: storage,
         layers: [{folder: workspace, srcDir: workspaceSource}]});
       expect(breakpointWarning(source, running), "the compiled DPC file is the editor's breakpoint source")
@@ -264,7 +265,7 @@ ENDCLASS.`;
       const attach = debuggerConfiguration(port, {target: "unit", root: home, storageDir: storage,
         layers: [{folder: workspace, srcDir: workspaceSource, manifest: join(workspace, "osd-pack.json")}]});
       expect(attach.sourceMapPathOverrides[`${dirname(map.sources[0])}/*`]).to.equal(`${workspaceSource}/*`);
-      expect(attach.outFiles).to.include(`${home}/build/**/*.mjs`);
+      expect(attach.outFiles).to.deep.equal([`${home}/build/live/output/**/*.mjs`]);
 
       const runner = join(dir, "runner.mjs");
       const runtime = createRequire(import.meta.url).resolve("@abaplint/runtime");
