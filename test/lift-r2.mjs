@@ -98,6 +98,30 @@ describe("verified lift R2: SELECT table per row", function () {
     });
   }
 
+  const aliasRegressionCases = [
+    ["APPEND ASSIGNING a row before the loop", ORIGINAL
+      .replace("    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.\n    FIELD-SYMBOLS <ls_new> LIKE LINE OF ct_rows.\n    APPEND INITIAL LINE TO ct_rows ASSIGNING <ls_new>.")
+      .replace("      CLEAR <ls_row>-result.", "      CLEAR <ls_row>-result.\n      <ls_new>-kind = 'PRIO'."), "loop table alias"],
+    ["GET REFERENCE OF the loop row before SELECT", ORIGINAL
+      .replace("    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.\n    DATA lr_row TYPE REF TO ty_row.")
+      .replace("      SELECT label FROM zosd_lift_r2", "      GET REFERENCE OF <ls_row> INTO lr_row.\n      lr_row->kind = 'PRIO'.\n      SELECT label FROM zosd_lift_r2"), "loop row reference"],
+    ["REF # of the loop table retained before the loop", ORIGINAL
+      .replace("    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.\n    FIELD-SYMBOLS <ls_x> LIKE LINE OF ct_rows.\n    DATA lr_rows TYPE REF TO tt_rows.\n    lr_rows = REF #( ct_rows ).")
+      .replace("      CLEAR <ls_row>-result.", "      CLEAR <ls_row>-result.\n      LOOP AT lr_rows->* ASSIGNING <ls_x>.\n        <ls_x>-kind = 'PRIO'.\n      ENDLOOP."), "loop table alias"],
+    ["dynamic ASSIGN of the loop table", ORIGINAL
+      .replace("    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.", "    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.\n    FIELD-SYMBOLS <lt> TYPE tt_rows.\n    FIELD-SYMBOLS <ls_x> LIKE LINE OF ct_rows.\n    ASSIGN ('CT_ROWS') TO <lt>.")
+      .replace("      CLEAR <ls_row>-result.", "      CLEAR <ls_row>-result.\n      LOOP AT <lt> ASSIGNING <ls_x>.\n        <ls_x>-kind = 'PRIO'.\n      ENDLOOP."), "dynamic ASSIGN"],
+  ];
+
+  for (const [what, source, obligation] of aliasRegressionCases) {
+    it(`refuses ${what}`, () => {
+      let caught;
+      try { model(source); } catch (error) { caught = error; }
+      expect(caught, what).to.be.instanceOf(Refusal);
+      expect(caught.obligation).to.equal(obligation);
+    });
+  }
+
   it("names a chained body statement before SELECT", () => {
     const source = ORIGINAL.replace("      CLEAR <ls_row>-result.", "      CLEAR: <ls_row>-result, ls_hit.");
     let caught;
@@ -122,6 +146,18 @@ describe("verified lift R2: SELECT table per row", function () {
     let caught;
     try { modelR2FromSource(basename(DEMO), source, "run", DEFAULT_DDIC); } catch (error) { caught = error; }
     expect(caught).to.be.instanceOf(Refusal);
+  });
+
+  it("refuses a method call with a by-reference CHANGING driver table", () => {
+    const source = ORIGINAL
+      .replace("    CLASS-METHODS after CHANGING ct_rows TYPE tt_rows.", "    CLASS-METHODS after CHANGING ct_rows TYPE tt_rows.\n    CLASS-METHODS run CHANGING ct_rows TYPE tt_rows.\n    CLASS-METHODS bump.");
+    const at = source.lastIndexOf("ENDCLASS.");
+    const extra = `  METHOD bump.\n  ENDMETHOD.\n\n  METHOD run.\n    DATA lt_hits TYPE tt_hits.\n    DATA ls_hit TYPE ty_hit.\n    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.\n    LOOP AT ct_rows ASSIGNING <ls_row>.\n      bump( ).\n      SELECT label FROM zosd_lift_r2 INTO TABLE lt_hits\n        WHERE kind = <ls_row>-kind AND code = <ls_row>-code AND active = 'X'\n        ORDER BY PRIMARY KEY.\n      LOOP AT lt_hits INTO ls_hit.\n        <ls_row>-result = ls_hit-label.\n      ENDLOOP.\n    ENDLOOP.\n  ENDMETHOD.\n\n`;
+    const withRun = source.slice(0, at) + extra + source.slice(at);
+    let caught;
+    try { modelR2FromSource(basename(DEMO), withRun, "run", DEFAULT_DDIC); } catch (error) { caught = error; }
+    expect(caught).to.be.instanceOf(Refusal);
+    expect(caught.obligation).to.equal("loop table method call");
   });
 
   it("keeps standalone comments between body statements", async () => {
@@ -166,13 +202,18 @@ describe("verified lift R2: SELECT table per row", function () {
     expect(readTabix).to.be.greaterThan(restoreTabix);
   });
 
-  it("renders SORT by correlation keys followed by the primary key", async () => {
-    const rendered = await render(model(), TEMPLATE);
+  it("renders SORT by source.sort when correlation order differs from the primary key", async () => {
+    const source = ORIGINAL.replace("WHERE kind = <ls_row>-kind AND code = <ls_row>-code",
+      "WHERE code = <ls_row>-code AND kind = <ls_row>-kind");
+    const alternate = model(source);
+    const rendered = await render(alternate, TEMPLATE);
     const line = rendered.text.split("\n").find((item) => item.trimStart().startsWith("SORT lt_all BY"));
-    const orderedColumns = [...model().source.keys.map((key) => key.column),
-      ...model().source.primary.map((key) => key.column)].filter((column, i, all) => all.indexOf(column) === i);
-    expect(orderedColumns).to.deep.equal(["kind", "code", "seq"]);
-    expect(line).to.equal(`SORT lt_all BY ${orderedColumns.join(" ")}.`);
+    const sort = alternate.source.sort.map((key) => key.column);
+    const primary = alternate.source.primary.map((key) => key.column);
+    expect(alternate.source.keys.map((key) => key.column)).to.deep.equal(["code", "kind"]);
+    expect(sort).to.deep.equal(["code", "kind", "seq"]);
+    expect(sort).not.to.deep.equal(primary);
+    expect(line).to.equal(`SORT lt_all BY ${sort.join(" ")}.`);
   });
 
   it("BEFORE makes one SELECT per row; AFTER makes one guarded FAE call", async () => {

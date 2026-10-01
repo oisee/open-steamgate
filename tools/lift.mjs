@@ -302,7 +302,7 @@ function methodContext(name, source, method, ddicFolders, recipe, allowNestedLoo
     .filter((st) => st.findDirectExpression(Expressions.MethodName)?.concatTokens().toLowerCase() === method.toLowerCase());
   const used = new Set([...m.findAllStatementNodes(), ...signature]
     .flatMap((st) => st.getTokens().map((t) => t.getStr().toLowerCase())));
-  return {registry, object, file, method: m, loop, table, row, used};
+  return {registry, object, file, method: m, signature, loop, table, row, used};
 }
 
 function requireNamesFree(used, names, name) {
@@ -572,6 +572,22 @@ function methodCall(statement) {
     || (tokens[0] === "call" && tokens[1] === "method");
 }
 
+function dynamicAssign(tokens) {
+  return tokens[0] === "assign" && tokens[1] === "(";
+}
+
+function refHash(tokens) {
+  return tokens.some((token, i) => token === "ref" && (tokens[i + 1] === "#" || tokens[i + 1] === "#("));
+}
+
+function getReferenceOf(tokens) {
+  return tokens.some((token, i) => token === "get" && tokens[i + 1] === "reference" && tokens[i + 2] === "of");
+}
+
+function referencesRowOrTable(tokens, row, table) {
+  return (tokens.includes(row) || tokens.includes(table)) && (refHash(tokens) || getReferenceOf(tokens));
+}
+
 function tableType(scope, name, obligation) {
   const type = scope?.findVariable(name)?.getType();
   if (!(type instanceof abaplint.BasicTypes.TableType) || type.isGeneric?.() || type.isWithHeader?.()) {
@@ -585,7 +601,7 @@ function tableType(scope, name, obligation) {
 // the old result table and its statement order while keeping the bulk query
 // outside the row loop.
 export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DDIC) {
-  const {registry, object, method: m, loop, table, row, used} = methodContext(name, source, method, ddicFolders, "R2", true);
+  const {registry, object, method: m, signature, loop, table, row, used} = methodContext(name, source, method, ddicFolders, "R2", true);
   requireNamesFree(used, [ALL_ROWS, ALL_ROW, R2_WORK, SAVED_SUBRC, SAVED_DBCNT, SAVED_TABIX], name);
   const items = children(loop.findDirectStructure(Structures.Body));
   const bodyStatements = items.flatMap((item) => item.findAllStatementNodes());
@@ -660,19 +676,49 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
   const scope = syntax.spaghetti.lookupPosition(selectStatement.getStart(), name);
   const preLoopStatements = m.findAllStatementNodes().filter((st) => st.getStart().isBefore(loop.getFirstToken().getStart()));
   const tableVariable = scope?.findVariable(table);
+  const bodyWritePositions = syntax.spaghetti.listWritePositions(name);
+  const inStatement = (ref, st) => !ref.getStart().isBefore(st.getStart()) && !ref.getStart().isAfter(st.getEnd());
   for (const st of preLoopStatements) {
     const tokens = st.getTokens().map((token) => token.getStr().toLowerCase());
-    const directAssign = st.get() instanceof Statements.Assign && tokens.includes(table);
-    const readAlias = st.get() instanceof Statements.ReadTable && tokens[2] === table
-      && (tokens.includes("assigning") || (tokens.includes("reference") && tokens.includes("into")));
-    const tableReference = st.get() instanceof Statements.GetReference && tokens.includes(table);
-    if (directAssign || readAlias || tableReference) {
-      throw new Refusal("loop table alias", `${st.concatTokens()} may retain a reference or row alias of ${table} before the loop`);
+    if (dynamicAssign(tokens)) {
+      throw new Refusal("dynamic ASSIGN", `${st.concatTokens()} uses a dynamic ASSIGN before the loop`);
+    }
+    const namesTableWithAliasOperation = tokens.includes(table) && (
+      tokens.includes("assigning")
+      || tokens.includes("assign")
+      || (tokens.includes("reference") && tokens.includes("into"))
+      || refHash(tokens)
+      || getReferenceOf(tokens));
+    if (namesTableWithAliasOperation) {
+      throw new Refusal("loop table alias", `${st.concatTokens()} may retain a row alias of ${table} before the loop`);
     }
   }
-  if (tableVariable?.constructor?.name !== "TypedIdentifier" && bodyStatements.some(methodCall)) {
+  const formalByReferenceTable = signature.some((st) => {
+    const tokens = st.getTokens().map((token) => token.getStr().toLowerCase());
+    const at = tokens.indexOf(table);
+    if (at < 0 || tokens[at - 2] === "value" || tokens[at - 1] === "value") return false;
+    const direction = tokens.slice(0, at).reverse().find((token) => ["importing", "changing", "exporting", "returning"].includes(token));
+    return direction === "importing" || direction === "changing";
+  });
+  if ((tableVariable?.constructor?.name !== "TypedIdentifier" || formalByReferenceTable) && bodyStatements.some(methodCall)) {
     const call = bodyStatements.find(methodCall);
     throw new Refusal("loop table method call", `${call.concatTokens()} may change nonlocal loop table ${table}`);
+  }
+  for (const st of bodyStatements) {
+    const tokens = st.getTokens().map((token) => token.getStr().toLowerCase());
+    if (dynamicAssign(tokens)) {
+      throw new Refusal("dynamic ASSIGN", `${st.concatTokens()} uses a dynamic ASSIGN in the loop body`);
+    }
+    if (referencesRowOrTable(tokens, row, table)) {
+      throw new Refusal("loop row reference", `${st.concatTokens()} may retain a reference to ${row} or ${table}`);
+    }
+    if (tokens.includes("->") && bodyWritePositions.some((ref) => inStatement(ref, st))) {
+      throw new Refusal("dereference write", `${st.concatTokens()} writes through a dereference`);
+    }
+    for (const ref of bodyWritePositions.filter((candidate) => inStatement(candidate, st)
+      && candidate.getName().startsWith("<") && candidate.getName().toLowerCase() !== row)) {
+      throw new Refusal("field-symbol write", `${st.concatTokens()} writes through field symbol ${ref.getName()}`);
+    }
   }
   const loopType = tableType(scope, table, "shape/loop-table");
   const lineType = loopType.getRowType();
@@ -726,7 +772,6 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
 
   const reads = syntax.spaghetti.listReadPositions(name).filter((ref) => ref.getName().toLowerCase() === resultTable);
   const writes = syntax.spaghetti.listWritePositions(name).filter((ref) => ref.getName().toLowerCase() === resultTable);
-  const inStatement = (ref, st) => !ref.getStart().isBefore(st.getStart()) && !ref.getStart().isAfter(st.getEnd());
   const insideLoop = (ref) => !ref.getStart().isBefore(loop.getFirstToken().getStart())
     && !ref.getStart().isAfter(loop.getLastToken().getStart());
   if (writes.some((ref) => insideLoop(ref) && !inStatement(ref, selectStatement))) {
