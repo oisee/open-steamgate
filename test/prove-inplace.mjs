@@ -6,8 +6,9 @@
 // guards on the expected hashes and writes the zip's files over the objects
 // it was told it may overwrite. It answers the way vsp v2.58.0-54 does:
 // execute_abap as JSON whose result_text is the snippet's RETURN_VALUE( lt_out )
-// table, and, for the fresh mode's sequence below, git_import_zip,
-// git_delete_objects and `read DEVC` with inventory. The fake does not execute
+// table, and, for the fresh mode's sequence below, git_import_zip and
+// `read DEVC` with inventory (the fresh mode deletes with its own one-step
+// cleanup snippet). The fake does not execute
 // ABAP, so snippet properties are also checked on their text.
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
@@ -183,7 +184,7 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
         out.push(["items", items.length]);
         return answer(out);
       }
-      if (kind === "decide") {
+      if (kind === "decide" || kind === "cleanup") {
         const stamps = [...code.matchAll(/APPEND `([A-Z]{4}:[0-9/]+)` TO lt_stamps\./g)].map((m) => m[1]);
         const exp = [...code.matchAll(/APPEND `([A-Z0-9]{4} [A-Z0-9_/]+)@([^=`]+)=([0-9A-F]{64})` TO lt_exp\./g)];
         const repo = sys.repos.find((r) => r.pkg === pkg);
@@ -202,6 +203,13 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
           }
           if (same) { n += 1; out.push(["delete", colon(item)]); }
         });
+        if (kind === "cleanup") {
+          // the cleanup snippet deletes what it decided, in the same call
+          for (const [k, v] of out) if (k === "delete") sys.objects.delete(v.replace(":", " "));
+          if (repo && /DATA lv_drop TYPE abap_bool VALUE abap_true\./.test(code)) { sys.repos = sys.repos.filter((r) => r !== repo); out.push(["repo_deleted", repo.key]); }
+          const empty = ![...sys.objects.values()].some((o) => o.devclass === pkg);
+          if (empty && !sys.repos.some((r) => r.pkg === pkg)) { sys.packages.delete(pkg); out.push(["package_deleted", "X"]); }
+        }
         out.push(["go", "X"], ["to_delete", n], ["items", items.length]);
         return answer(out);
       }

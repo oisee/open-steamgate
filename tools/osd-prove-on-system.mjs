@@ -24,24 +24,27 @@
 // zip may exist anywhere. Right after an import that was not refused, the
 // run reads a version stamp for every object the import wrote into the
 // package and writes a receipt, `.local/prove-runs/<package>.json`. The
-// cleanup -- the run's own, or `--cleanup` later -- decides, in one snippet
-// of ours, which objects are still the receipt's: in the package, and the
-// stamp unchanged -- or the stamp moved and the content hash (SHA-256 of
-// abapGit's serialisation, read in the same step as the stamp) is still the
-// receipt's, since a re-activation moves stamps and leaves content. Exactly
-// that list goes to vsp's `git_delete_objects`, with `delete_repo` only when
-// this run's import created the repository row (`OSDPROVE <package>`, the
-// receipt's key) and it is still the one registered. No receipt, no delete:
-// the zip's object list alone never authorises one.
+// cleanup -- the run's own, or `--cleanup` later -- deletes, in one snippet
+// of ours and one dialog step, the objects that are still the receipt's: in
+// the package, and the stamp unchanged -- or the stamp moved and the content
+// hash (SHA-256 of abapGit's serialisation, read in the same step as the
+// stamp) is still the receipt's, since a re-activation moves stamps and
+// leaves content; then the repository row only when this run's import
+// created it (`OSDPROVE <package>`, the receipt's key, checked in that same
+// step), then the package if nothing is left. No receipt, no delete: the
+// zip's object list alone never authorises one. vsp's git_delete_objects is
+// not used: it has no conditional delete (no expected version per object, no
+// expected repository key), so an object replaced between a decision and
+// its call would be deleted.
 //
 // What vsp does (v2.58.0-54 or later, `MIN_VSP`) and what stays ours:
 //   - the import is vsp's `git_import_zip` (abapGit on the system, as a
 //     background job; overwrite false, so nothing that exists is touched);
-//   - the deletion is vsp's `git_delete_objects`, of the decided list only;
+//   - the deletion stays ours (cleanupAbap), decided and done in one step;
 //   - the residue is read twice: vsp's `read DEVC <pkg> {inventory}` and our
 //     own TADIR / repository / REPOSRC-and-DD count, and the two must agree;
 //   - every snippet we still run (preflight, receipt stamps and hashes,
-//     chunk reads, the cleanup decision, the residue count, the class check)
+//     chunk reads, the cleanup, the residue count, the class check)
 //     hands its result back with RETURN_VALUE( ) as a table of rows, which
 //     vsp answers as JSON; no result is read out of an alert title any more.
 //
@@ -77,7 +80,7 @@ import {
 
 /** The vsp this tool needs: execute_abap answering JSON with result_text and
  *  RETURN_VALUE( ), ABAP Unit with ok and counts, git_import_zip /
- *  git_import_status / git_delete_objects, and `read DEVC` with inventory. */
+ *  git_import_status, and `read DEVC` with inventory. */
 export const MIN_VSP = "vsp v2.58.0-54 (vibing-steampunk main at 0a83078, #301)";
 export const DEFAULT_PACKAGE = "$ZOSG_TMP_PROVE";
 export const B64_LINE = 200;
@@ -449,17 +452,28 @@ const hashCompare = (pkg) => serializeBlock(pkg, {
   onOk: ["SORT lt_a.", "SORT lt_b.", "IF lt_a = lt_b.", "  lv_same = abap_true.", "ENDIF."],
 });
 
-/** Step 7a, the cleanup's decision. Reads only; nothing is deleted here.
+/** Step 7a, the cleanup, in ONE snippet so nothing changes between the
+ *  check and the delete (vsp's git_delete_objects cannot be used here: it
+ *  takes no expected version per object and no expected repository key,
+ *  so an object replaced between a decision and its call would be deleted):
  *   a. the package's repository, if any, must be the tool's own by name and,
  *      when `expectedKey` is given, the one this run imported into -- else
- *      `go` is not set and nothing at all is decided for deletion;
+ *      `go` is not set and nothing at all is deleted;
  *   b. each receipt entry whose TADIR row is in this package and whose stamp
- *      is unchanged -- or moved, with the receipt's content hashes -- is
- *      decided for deletion (`delete=`); an entry in another package, or one
- *      that is not there, is reported and not touched; a changed one is kept.
- *  The deletion itself is vsp's git_delete_objects, of exactly the `delete=`
- *  rows (cleanup() below). */
-export function decideAbap(pkg, entries, expectedKey) {
+ *      is unchanged -- or moved, with the receipt's content hashes -- goes
+ *      into one list for zcl_abapgit_objects=>delete (abapGit's object
+ *      layer, dependency order, a commit per object), in the same step; an
+ *      entry in another package, or one that is not there, is reported and
+ *      not touched; a changed one is kept; nothing outside the receipt is
+ *      ever handed to it;
+ *   c. the repository row is deleted (zcl_abapgit_repo_srv->delete, which
+ *      removes the persisted repository and no object) only when `dropRepo`:
+ *      this run's import created it, and (a) just checked it is that row;
+ *   d. the package is deleted (abapGit's DEVC object, which deletes only an
+ *      empty package) only if no repository is left registered for it,
+ *      TADIR holds nothing else under it and TDEVC has no subpackage of it.
+ *      Subpackages are never deleted. */
+export function cleanupAbap(pkg, entries, expectedKey, dropRepo = false) {
   const items = entries.map((e) => e.item);
   checkItems(items);
   for (const e of entries) if (!STAMP.test(e.stamp ?? "")) throw new Error(`not a stamp: ${e.stamp} (${e.item})`);
@@ -475,9 +489,16 @@ export function decideAbap(pkg, entries, expectedKey) {
   if (expectedKey !== undefined && expectedKey !== "" && !REPO_KEY.test(expectedKey)) throw new Error(`not a repository key: ${expectedKey}`);
   const keyCheck = expectedKey === undefined ? "" : `li_repo->get_key( ) <> '${expectedKey}' OR `;
   return [
-    head("decide"),
+    head("cleanup"),
     ...OUT_DECLS,
     "DATA lv_go TYPE abap_bool VALUE abap_true.",
+    `DATA lv_drop TYPE abap_bool VALUE ${dropRepo === true ? "abap_true" : "abap_false"}.`,
+    "DATA lv_gone TYPE abap_bool.",
+    "DATA lv_logs TYPE i.",
+    "DATA lt_tadir TYPE zif_abapgit_definitions=>ty_tadir_tt.",
+    "DATA ls_tadir TYPE zif_abapgit_definitions=>ty_tadir.",
+    "DATA lv_key TYPE string.",
+    "DATA(li_log) = CAST zif_abapgit_log( NEW zcl_abapgit_log( ) ).",
     "DATA lt_items TYPE string_table.",
     "DATA lv_type TYPE tadir-object.",
     "DATA lv_name TYPE tadir-obj_name.",
@@ -558,9 +579,66 @@ export function decideAbap(pkg, entries, expectedKey) {
     "      IF lv_same = abap_true.",
     "        lv_del = lv_del + 1.",
     `        ${put("delete", "{ lv_type }:{ lv_name }")}`,
+    "        CLEAR ls_tadir.",
+    "        MOVE-CORRESPONDING ls_db TO ls_tadir.",
+    "        APPEND ls_tadir TO lt_tadir.",
     "      ENDIF.",
     "    ENDIF.",
     "  ENDLOOP.",
+    "  \" the delete, in the step that checked: exactly what was decided above",
+    "  IF lt_tadir IS NOT INITIAL.",
+    "    TRY.",
+    "        zcl_abapgit_objects=>delete( it_tadir = lt_tadir ii_log = li_log ).",
+    "      CATCH cx_root INTO DATA(lx2).",
+    `        ${put("err", "delete: { lx2->get_text( ) }")}`,
+    "    ENDTRY.",
+    "  ENDIF.",
+    "  LOOP AT li_log->get_messages( ) INTO DATA(ls_m) WHERE type = 'E' OR type = 'A'.",
+    "    lv_logs = lv_logs + 1.",
+    `    IF lv_logs <= ${MAX_LOG}.`,
+    `      ${put("log", "{ ls_m-type }\\|{ ls_m-obj_type } { ls_m-obj_name }: { ls_m-text }")}`,
+    "    ENDIF.",
+    "  ENDLOOP.",
+    `  ${put("logs", "{ lv_logs }")}`,
+    "  IF li_repo IS BOUND.",
+    "    lv_key = li_repo->get_key( ).",
+    "    IF lv_drop = abap_true.",
+    "      TRY.",
+    "          zcl_abapgit_repo_srv=>get_instance( )->delete( li_repo ).",
+    "          COMMIT WORK.",
+    "          lv_gone = abap_true.",
+    `          ${put("repo_deleted", "{ lv_key }")}`,
+    "        CATCH cx_root INTO DATA(lx3).",
+    `          ${put("err", "repo delete: { lx3->get_text( ) }")}`,
+    "      ENDTRY.",
+    "    ELSE.",
+    `      ${put("repo_kept", "{ lv_key }")}`,
+    "    ENDIF.",
+    "  ENDIF.",
+    "ENDIF.",
+    `SELECT object, obj_name FROM tadir WHERE devclass = '${pkg}'`,
+    `  AND NOT ( object = 'DEVC' AND obj_name = '${pkg}' ) INTO TABLE @DATA(lt_rest).`,
+    `SELECT devclass FROM tdevc WHERE parentcl = '${pkg}' INTO TABLE @DATA(lt_children).`,
+    "IF lv_go = abap_true AND ( li_repo IS NOT BOUND OR lv_gone = abap_true )",
+    "    AND lt_rest IS INITIAL AND lt_children IS INITIAL.",
+    "  CLEAR: ls_tadir, lt_tadir.",
+    `  SELECT SINGLE * FROM tadir WHERE pgmid = 'R3TR' AND object = 'DEVC' AND obj_name = '${pkg}' INTO @DATA(ls_devc).`,
+    "  IF sy-subrc = 0.",
+    "    MOVE-CORRESPONDING ls_devc TO ls_tadir.",
+    "  ELSE.",
+    "    ls_tadir-pgmid = 'R3TR'.",
+    "    ls_tadir-object = 'DEVC'.",
+    `    ls_tadir-obj_name = '${pkg}'.`,
+    `    ls_tadir-devclass = '${pkg}'.`,
+    "  ENDIF.",
+    "  APPEND ls_tadir TO lt_tadir.",
+    "  TRY.",
+    "      zcl_abapgit_objects=>delete( it_tadir = lt_tadir ).",
+    "      COMMIT WORK.",
+    `      ${put("package_deleted", "X")}`,
+    "    CATCH cx_root INTO DATA(lx4).",
+    `      ${put("err", "package delete: { lx4->get_text( ) }")}`,
+    "  ENDTRY.",
     "ENDIF.",
     put("go", "{ lv_go }"),
     put("to_delete", "{ lv_del }"),
@@ -569,7 +647,7 @@ export function decideAbap(pkg, entries, expectedKey) {
   ].join("\n") + "\n";
 }
 
-/** Step 7c, what is left, read from the database after vsp's delete:
+/** Step 7b, what is left, read from the database after the cleanup:
  *  the repository rows with this run's key, the receipt's objects still in
  *  the package's TADIR, the REPOSRC / DD rows of a receipt object that has
  *  no TADIR row any more (`stamp_left`: STAMP_BLOCK finds a stamp, so its
@@ -694,9 +772,13 @@ export function parseReceipt(rows) {
   };
 }
 
-export function parseDecision(rows) {
+export function parseCleanup(rows) {
   return {
     err: all(rows, "err"),
+    logs: all(rows, "log").map((v) => { const i = v.indexOf("|"); return `[${v.slice(0, i)}] ${v.slice(i + 1).trim()}`; }),
+    repoDeleted: one(rows, "repo_deleted"),
+    repoKept: one(rows, "repo_kept"),
+    packageDeleted: one(rows, "package_deleted") === "X",
     repo: one(rows, "repo"),
     repoName: one(rows, "repo_name")?.trim(),
     go: one(rows, "go") === "X",
@@ -984,7 +1066,7 @@ export async function withHashes(mcp, pkg, entries, rows, log = () => {}) {
   return out;
 }
 
-/** The pre-pass of a second decision call. `names` are the items whose stamp
+/** The pre-pass of a second cleanup call. `names` are the items whose stamp
  *  moved and whose content hash differs from the receipt's. For each, the
  *  files abapGit serialises now are hashed; when every file that differs is
  *  XML and its canonical element tree equals the one the receipt recorded
@@ -1022,66 +1104,15 @@ export async function acceptCanonicalXml(mcp, pkg, entries, names, log = () => {
   return {entries: next, accepted};
 }
 
-/** vsp's git_delete_objects, with exactly `items`, read back strictly:
- *  every item must come back deleted (a skipped or failed one is a
- *  problem), and vsp must report no object this run did not ask for. With
- *  no item to delete, the package itself is named (`DEVC <pkg>`): vsp never
- *  deletes a package as an item (it answers "skipped") and then deletes the
- *  package only when nothing is in it and no repository is registered for
- *  it, which is the run's own rule for its package. */
-export async function deleteThroughVsp(mcp, pkg, items, {deleteRepo, expectedKey, log = () => {}}) {
-  const problems = [];
-  const sentinel = `DEVC ${pkg}`;
-  checkItems(items);
-  const want = items.length > 0 ? [...items] : [sentinel];
-  let ans;
-  try {
-    ans = jsonAnswer(await mcp.call("system", undefined, {type: "git_delete_objects", package: pkg, objects: want, delete_repo: deleteRepo}),
-      "git_delete_objects");
-  } catch (e) {
-    return {problems: [`cleanup: ${e.message}`], deleted: []};
-  }
-  const res = ans.json.result ?? ans.json;
-  if (typeof ans.json.error === "string") problems.push(`cleanup: git_delete_objects: ${ans.json.error}`);
-  else if (ans.isError) problems.push("cleanup: git_delete_objects answered an error");
-  const outcomes = Array.isArray(res.objects) ? res.objects : undefined;
-  if (outcomes === undefined) {
-    problems.push(`cleanup: git_delete_objects answered no outcome per object: ${JSON.stringify(ans.json).slice(0, 300)}`);
-    return {problems, deleted: []};
-  }
-  const key = (o) => `${String(o?.type ?? "").toUpperCase()} ${String(o?.name ?? "").toUpperCase()}`;
-  const byItem = new Map(outcomes.map((o) => [key(o), o]));
-  const deleted = [];
-  for (const item of want) {
-    const o = byItem.get(item);
-    if (o === undefined) problems.push(`cleanup: git_delete_objects reported nothing for ${item}`);
-    else if (item === sentinel && items.length === 0) {
-      if (o.status !== "skipped") problems.push(`cleanup: git_delete_objects did not skip the package entry ${item} (${o.status})`);
-    } else if (o.status === "deleted") deleted.push(item);
-    else problems.push(`cleanup: ${item} ${o.status ?? "not deleted"}${o.reason ? `: ${o.reason}` : ""}`);
-  }
-  for (const k of byItem.keys()) {
-    if (!want.includes(k)) problems.push(`cleanup: git_delete_objects reported ${k}, which this run did not ask it to delete`);
-  }
-  if (res.repoDeleted === true) {
-    if (!deleteRepo) problems.push("cleanup: git_delete_objects unregistered a repository this run did not ask it to");
-    else if (res.repo?.key !== undefined && String(res.repo.key).trim() !== expectedKey) {
-      problems.push(`cleanup: git_delete_objects unregistered repository ${res.repo.key}, not this run's ${expectedKey}`);
-    } else log(`cleanup: repository ${expectedKey} (${ownRepoName(pkg)}) unregistered by git_delete_objects`);
-  }
-  if (res.repoNote) log(`cleanup: repository: ${res.repoNote}`);
-  if (res.packageNote) log(`cleanup: package: ${res.packageNote}`);
-  if (res.packageDeleted === true) log(`cleanup: package ${pkg} deleted by git_delete_objects`);
-  return {problems, deleted, result: res};
-}
-
 /** vsp's `read DEVC <pkg> {inventory}`: the package's TADIR objects (its own
  *  entry left out), subpackages and abapGit repositories, or a throw when
  *  the answer is not that (or says it is incomplete). */
 export async function inventory(mcp, pkg) {
   const {json, isError} = jsonAnswer(await mcp.call("read", `DEVC ${pkg}`, {inventory: true}), "inventory");
   if (isError) throw new Error(`inventory: vsp answered an error: ${JSON.stringify(json).slice(0, 300)}`);
-  if (!Array.isArray(json.objects ?? []) || !Array.isArray(json.subpackages ?? [])) throw new Error("inventory: the answer has no objects or subpackages list");
+  // both lists must be there; null is how vsp (Go) writes an empty one
+  const list = (k) => Object.hasOwn(json, k) && (json[k] === null || Array.isArray(json[k]));
+  if (!list("objects") || !list("subpackages")) throw new Error(`inventory: the answer has no objects or subpackages list: ${JSON.stringify(json).slice(0, 200)}`);
   if (json.objects_truncated || json.subpackages_truncated) throw new Error("inventory: the answer is truncated");
   if (!Array.isArray(json.abapgit_repos)) {
     throw new Error(`inventory: the abapGit repositories were not checked${json.skipped?.length ? ` (${json.skipped.join("; ")})` : ""}`);
@@ -1093,16 +1124,17 @@ export async function inventory(mcp, pkg) {
   };
 }
 
-/** Step 7: decide (our snippet: stamps and hashes), delete exactly the
- *  decided objects through vsp's git_delete_objects -- the repository row
- *  only when `createdKey` names this run's own and it is still the one
- *  registered -- then read the residue twice (our count and vsp's
+/** Step 7: the cleanup snippet decides and deletes in one dialog step
+ *  (cleanupAbap: stamps, content hashes and the repository key checked where
+ *  the delete happens) -- the repository row only when `createdKey` names
+ *  this run's own -- then the residue is read twice (our count and vsp's
  *  inventory). `entries` are the receipt's stamped objects; with none, no
  *  object is deleted. Returns the problems; anything left is one. */
 export async function cleanup(mcp, pkg, entries, {expectedKey, createdKey, log = () => {}} = {}) {
   // without the key of this run's import the repository cannot be told from
-  // one that appeared since; the decision then refuses any repository at all
+  // one that appeared since; the snippet then refuses any repository at all
   if (expectedKey === undefined) expectedKey = "";
+  const dropRepo = createdKey !== undefined && REPO_KEY.test(createdKey) && createdKey === expectedKey;
   const unhashed = entries.filter((e) => !(e.files?.length > 0));
   if (unhashed.length > 0) {
     log(`cleanup: ${unhashed.length === entries.length ? "the receipt carries" : `${unhashed.length} receipt entr(ies) carry`} no content hashes `
@@ -1111,14 +1143,23 @@ export async function cleanup(mcp, pkg, entries, {expectedKey, createdKey, log =
   const problems = [];
   let c;
   const accepted = [];
+  // errors and abapGit log lines of every call count, not only the last's
+  const seen = [];
+  const check = (x, r) => {
+    if (!x.goSeen || x.items !== entries.length || x.toDelete !== x.delete.length) throw new Error(`cleanup: the result is incomplete: ${r.message}`);
+    seen.push(...x.err.map((e) => `cleanup: ${e}`), ...x.logs.map((l) => `cleanup log ${l}`));
+    if (x.repoDeleted) log(`cleanup: repository ${x.repoDeleted} (${ownRepoName(pkg)}) deleted`);
+    if (x.repoKept) log(`cleanup: repository ${x.repoKept} is not one this run's import created${createdKey === undefined ? " (the receipt does not say it did)" : ""}; it is left registered, and the package with it`);
+  };
   try {
-    let r = await exec(mcp, decideAbap(pkg, entries, expectedKey), "cleanup decision");
-    c = parseDecision(r.rows);
-    log(`cleanup decision: ${r.message}`);
+    let r = await exec(mcp, cleanupAbap(pkg, entries, expectedKey, dropRepo), "cleanup");
+    c = parseCleanup(r.rows);
+    log(`cleanup: ${r.message}`);
+    check(c, r);
     // an XML file abapGit rewrote (same tree, other bytes) is not an edit:
     // when the only difference of a moved object is such a file, say so to
-    // the snippet through the object's current hashes and decide again; the
-    // snippet re-checks them in its own step
+    // the snippet through the object's current hashes and run it again; the
+    // snippet re-checks them in its own step, so nothing slips in between
     if (c.hashdiff.length > 0) {
       const acc = await acceptCanonicalXml(mcp, pkg, entries, c.hashdiff, log);
       if (acc.accepted.length > 0) {
@@ -1126,19 +1167,17 @@ export async function cleanup(mcp, pkg, entries, {expectedKey, createdKey, log =
           log(`cleanup: ${a.item}: ${a.files.join(", ")} differs in bytes from the receipt's but is the same XML element tree; accepted as unchanged`);
         }
         accepted.push(...acc.accepted);
-        r = await exec(mcp, decideAbap(pkg, acc.entries, expectedKey), "cleanup decision");
-        c = parseDecision(r.rows);
-        log(`cleanup decision (second call): ${r.message}`);
+        r = await exec(mcp, cleanupAbap(pkg, acc.entries, expectedKey, dropRepo), "cleanup");
+        c = parseCleanup(r.rows);
+        log(`cleanup (second call): ${r.message}`);
+        check(c, r);
       }
     }
-    if (!c.goSeen || c.items !== entries.length || c.toDelete !== c.delete.length) {
-      throw new Error(`cleanup decision: the result is incomplete: ${r.message}`);
-    }
   } catch (e) {
-    return {ok: false, problems: [`cleanup: ${e.message}`]};
+    return {ok: false, problems: [...seen, `cleanup: ${e.message}`]};
   }
   for (const f of c.hashFail) problems.push(`cleanup: ${f.item} could not be serialised to compare its content (${f.text}); kept`);
-  for (const e of c.err) problems.push(`cleanup: ${e}`);
+  problems.push(...new Set(seen));
   for (const e of c.elsewhere) problems.push(`cleanup: ${e.item} is in package ${e.where}, not ${pkg}; not touched`);
   for (const e of c.changed) {
     problems.push(`cleanup: ${e.item} changed since the import (stamp now "${e.where ?? ""}")`
@@ -1148,25 +1187,8 @@ export async function cleanup(mcp, pkg, entries, {expectedKey, createdKey, log =
   for (const e of c.rehashed) {
     log(`cleanup: ${e.item}: stamp moved to "${e.where ?? ""}" but the content equals the receipt's hash (re-activated, not edited); deleted as ours`);
   }
-  // nothing outside the receipt is ever handed to vsp, whatever the result says
-  const receiptItems = new Set(entries.map((e) => e.item));
-  const decided = [...new Set(c.delete)].filter((i) => receiptItems.has(i));
-  for (const i of c.delete) if (!receiptItems.has(i)) problems.push(`cleanup: the decision named ${i}, which is not in the receipt; not deleted`);
-  if (entries.length === 0) log("cleanup: no receipt entries, so no object is deleted");
-  if (c.go) {
-    // the repository row goes only if this run's import created it and it is
-    // still that row, by key and by the tool's name (the decision read both)
-    const deleteRepo = createdKey !== undefined && REPO_KEY.test(createdKey) && createdKey === expectedKey
-      && c.repo === createdKey && c.repoName === ownRepoName(pkg);
-    if (!deleteRepo && c.repo !== undefined && c.repo !== "none") {
-      log(`cleanup: repository ${c.repo} is not one this run's import created${createdKey === undefined ? " (the receipt does not say it did)" : ""}; it is left registered`);
-    }
-    const d = await deleteThroughVsp(mcp, pkg, decided, {deleteRepo, expectedKey, log});
-    problems.push(...d.problems);
-    if (d.deleted.length) log(`cleanup: deleted by git_delete_objects: ${d.deleted.join(", ")}`);
-  } else {
-    log("cleanup: the decision refused, so nothing is deleted");
-  }
+  if (entries.length === 0) log("cleanup: no receipt entries, so no object was deleted");
+  if (!c.go) log("cleanup: refused, so nothing was deleted");
   // what is left, read twice: our count, and vsp's inventory; they must agree
   let left;
   try {
@@ -1399,8 +1421,8 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
   // the objects this run may delete: those in its receipt, none until the
   // import has written them. A refused import wrote nothing of ours and gets
   // no receipt, so the cleanup then deletes no object at all, only the
-  // package if it is empty (vsp removes the repository a refused import
-  // created)
+  // package if it is empty and no repository is registered for it (vsp
+  // removes the repository a refused import created)
   let receipt;
   // an import job that has not finished may still be writing into the
   // package: then nothing at all is deleted, not even an empty package. Open

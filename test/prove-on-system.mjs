@@ -7,10 +7,14 @@
 // by the zip the tool really builds: the model reads the zip -- the class
 // XML, the test include -- so the WITH_UNIT_TESTS case is the system's
 // behaviour following from the file, not a canned answer.
-// git_delete_objects does what vsp does and nothing more: it deletes the
-// TADIR items of the package it is handed, the offline repository only on
-// delete_repo and only from an emptied package, and the package only when
-// nothing and no repository is left -- so a test can see what survives.
+// The cleanup snippet (decide and delete in one dialog step) is modelled as
+// one call that does what the snippet asks of abapGit and nothing more: it
+// deletes the receipt's objects whose stamp is unchanged (or whose content is
+// the receipt's), the repository row only when the snippet says this run
+// created it, and the package only when nothing and no repository is left --
+// so a test can see what survives. git_delete_objects and the split decision
+// are still modelled, so the previous, split design can be run against these
+// tests (it fails the one-step test).
 // No child process is spawned: the tool writes its zip in process and the
 // fake reads it in process (a sandbox may refuse to spawn `zip`/`unzip`).
 import assert from "node:assert/strict";
@@ -21,7 +25,7 @@ import {join, resolve} from "node:path";
 import {inflateRawSync} from "node:zlib";
 import * as abaplint from "@abaplint/core";
 import {
-  STAMPED_KINDS, buildZip, checkPackage, classCheckAbap, countTestMethods, decideAbap, main, osgRunner, preflightAbap,
+  STAMPED_KINDS, buildZip, checkPackage, classCheckAbap, cleanupAbap, countTestMethods, main, osgRunner, preflightAbap,
   prove, receiptAbap, residueAbap, rowsOf, verdict,
 } from "../tools/osd-prove-on-system.mjs";
 import {chunkAbap, deployAbap, dropRepoAbap, hashAbap, listAbap} from "../tools/osd-prove-inplace.mjs";
@@ -74,6 +78,7 @@ function fakeSystem({
   dropCheck = new Set(), checkOverride = {}, unitText = {}, afterImport = () => {}, touchAfterReceipt = new Set(),
   afterReceipt = () => {}, beforeCheck = () => {}, withHashes = true, hashFail = new Set(), execAnswer = {},
   failedImport = false, refuseImport, pendingPolls = 0, inventoryEdit = (i) => i, deleteEdit = (r) => r,
+  beforeCall = () => {},
 } = {}) {
   const sys = {
     packages: new Map(Object.entries(before.packages ?? {})),
@@ -160,7 +165,6 @@ function fakeSystem({
       return out;
     }
     if (kind === "decide") {
-      assert.doesNotMatch(code, /->purge\(|zcl_abapgit_objects=>delete|->delete\(/, "the decision deletes nothing");
       const want = /get_key\( \) <> '([0-9]*)'/.exec(code)?.[1];
       const ownName = /get_name\( \) <> '([^']+)'/.exec(code)[1];
       const items = itemsOf(code);
@@ -197,6 +201,38 @@ function fakeSystem({
       }
       out.push(["go", go ? "X" : ""], ["to_delete", n], ["items", items.length]);
       return out;
+    }
+    if (kind === "cleanup") {
+      // the decision, exactly as above, and in the same call what it decided
+      assert.doesNotMatch(code, /->purge\(/, "no purge");
+      const decided = exec("decide", code.replace(/zcl_abapgit_objects=>delete|->delete\(/g, ""), pkg);
+      const go = decided.find(([k]) => k === "go")[1] === "X";
+      const drop = /DATA lv_drop TYPE abap_bool VALUE abap_true\./.test(code);
+      const rows = decided.filter(([k]) => !["go", "to_delete", "items"].includes(k));
+      let repo = repoOf(pkg);
+      if (go) {
+        let logs = 0;
+        for (const [, v] of decided.filter(([k]) => k === "delete")) {
+          const item = v.replace(":", " ");
+          if (undeletable.has(item)) { rows.push(["log", `E|${item}: Deletion of object failed`]); logs += 1; continue; }
+          sys.tadir = sys.tadir.filter((t) => t.item !== item);
+          sys.files.delete(item);
+          sys.stamps.delete(item);
+          sys.deleted.push(item);
+        }
+        rows.push(["logs", logs]);
+        if (repo && drop) { sys.repos = sys.repos.filter((r) => r !== repo); rows.push(["repo_deleted", repo.key]); repo = undefined; }
+        else if (repo) rows.push(["repo_kept", repo.key]);
+      }
+      const rest = sys.tadir.filter((t) => t.devclass === pkg && t.item !== `DEVC ${pkg}`);
+      const children = [...sys.packages].filter(([, parent]) => parent === pkg);
+      if (go && !repo && rest.length === 0 && children.length === 0 && sys.packages.has(pkg)) {
+        sys.packages.delete(pkg);
+        sys.tadir = sys.tadir.filter((t) => t.item !== `DEVC ${pkg}`);
+        rows.push(["package_deleted", "X"]);
+      }
+      rows.push(...decided.filter(([k]) => ["go", "to_delete", "items"].includes(k)));
+      return rows;
     }
     if (kind === "residue") {
       const key = /lv_key = '([0-9]+)'\./.exec(code)?.[1];
@@ -279,6 +315,10 @@ function fakeSystem({
     sys,
     async call(action, target, params) {
       sys.calls.push({action, target, params});
+      const pre = action === "analyze" ? kindOf(params.code)
+        : action === "system" ? {git_import_zip: "import", git_import_status: "status", git_delete_objects: "delete"}[params.type]
+          : action === "read" ? "inventory" : action;
+      beforeCall(sys, pre);
       if (action === "create") {
         if (sys.packages.has(params.name)) return `ERROR: package ${params.name} already exists`;
         sys.packages.set(params.name, "");
@@ -402,7 +442,10 @@ const receiptIn = (dir) => join(dir, `${PKG}.json`);
 
 const base = (folder = join(FIXTURE, "src")) => [folder, "--unit", "prove-demo", "--manifest", MANIFEST, "--package", PKG];
 const kinds = (mcp) => mcp.sys.calls.map((c) => c.kind ?? c.action);
-const deleteCalls = (mcp) => mcp.sys.calls.filter((c) => c.kind === "delete").map((c) => c.params);
+/** the cleanup snippets sent: the receipt items they carry, and whether
+ *  they may drop the repository row */
+const cleanupCalls = (mcp) => mcp.sys.calls.filter((c) => c.kind === "cleanup")
+  .map((c) => ({items: itemsOf(c.params.code), drop: /DATA lv_drop TYPE abap_bool VALUE abap_true\./.test(c.params.code)}));
 const clean = (mcp) => {
   assert.equal(mcp.sys.packages.size, 0);
   assert.deepEqual(mcp.sys.tadir, []);
@@ -424,7 +467,7 @@ describe("osd-prove-on-system", () => {
   });
 
   describe("happy path and the failures it must not hide", () => {
-    it("happy path: preflight, create, git_import_zip, run, compare, decide, git_delete_objects, residue, exit 0", async () => {
+    it("happy path: preflight, create, git_import_zip, run, compare, cleanup in one step, residue, exit 0", async () => {
       const mcp = fakeSystem();
       const {code, text} = await run(base(), mcp);
       assert.equal(code, 0, text);
@@ -432,12 +475,12 @@ describe("osd-prove-on-system", () => {
       assert.match(text, /ZCL_OSD_PROVE_PLAIN\s+\| 0\s+\| 0\s+\| 0/);
       // one chunk read per XML file: the receipt keeps its canonical digest
       assert.deepEqual(kinds(mcp), ["preflight", "create", "import", "receipt", "chunk", "chunk", "check", "test",
-        "decide", "delete", "residue", "inventory"]);
+        "cleanup", "residue", "inventory"]);
       const imp = mcp.sys.calls.find((c) => c.kind === "import").params;
       assert.equal(imp.package, PKG);
       assert.equal(imp.overwrite, false);
       assert.deepEqual(unzip(Buffer.from(imp.zip_base64, "base64")), unzip(buildZip(join(FIXTURE, "src"), {unit: "prove-demo", manifest: MANIFEST}).bytes));
-      assert.deepEqual(deleteCalls(mcp), [{type: "git_delete_objects", package: PKG, objects: ZIP_OBJECTS, delete_repo: true}]);
+      assert.deepEqual(cleanupCalls(mcp), [{items: ZIP_OBJECTS, drop: true}]);
       assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS);
       clean(mcp);
     });
@@ -478,14 +521,12 @@ describe("osd-prove-on-system", () => {
       assert.match(text, /FAIL ZCL_OSD_PROVE_DEMO: fails on the system: LTCL_DOUBLE->TWO_IS_FOUR: .*Expected 4, got 5/);
     });
 
-    it("an object vsp could not delete fails the run: it is named, and the repository and the package are kept", async () => {
+    it("an object abapGit could not delete fails the run: it is named and the package is kept", async () => {
       const mcp = fakeSystem({undeletable: new Set(["CLAS ZCL_OSD_PROVE_PLAIN"])});
       const {code, text} = await run(base(), mcp);
       assert.equal(code, 1, text);
-      assert.match(text, /FAIL cleanup: git_delete_objects: CLAS ZCL_OSD_PROVE_PLAIN could not be deleted: Deletion of object failed/);
-      assert.match(text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN failed: Deletion of object failed/);
+      assert.match(text, /FAIL cleanup log \[E\] CLAS ZCL_OSD_PROVE_PLAIN: Deletion of object failed/);
       assert.match(text, /FAIL cleanup incomplete: 1 object\(s\) of the zip left/);
-      assert.match(text, /FAIL cleanup incomplete: 1 repository left/);
       assert.ok(mcp.sys.packages.has(PKG));
       assert.match(text, /^NOT proved/m);
     });
@@ -494,7 +535,7 @@ describe("osd-prove-on-system", () => {
       const mcp = fakeSystem();
       const {code, text, receiptDir} = await run([...base(), "--keep"], mcp);
       assert.equal(code, 0, text);
-      assert.ok(!kinds(mcp).includes("decide") && !kinds(mcp).includes("delete"));
+      assert.ok(!kinds(mcp).includes("cleanup"));
       assert.match(text, /node tools\/osd-prove-on-system\.mjs --cleanup --package '\$ZOSG_TMP_TEST'/);
       const receipt = JSON.parse(readFileSync(receiptIn(receiptDir), "utf8"));
       assert.equal(receipt.package, PKG);
@@ -561,8 +602,7 @@ describe("osd-prove-on-system", () => {
       assert.match(text, /FAIL cleanup: package \$ZOSG_TMP_TEST kept, it holds what this run did not bring\n\s+1 object\(s\):\n\s+PROG ZARRIVED_MEANWHILE\n\s+1 subpackage\(s\):\n\s+\$ZOSG_TMP_TEST_SUB/);
       assert.ok(mcp.sys.packages.has(PKG) && mcp.sys.packages.has("$ZOSG_TMP_TEST_SUB"));
       assert.deepEqual(mcp.sys.tadir.map((t) => t.item).sort(), [`DEVC ${PKG}`, "PROG ZARRIVED_MEANWHILE"]);
-      assert.deepEqual(deleteCalls(mcp)[0].objects, ZIP_OBJECTS, "only the receipt's objects were handed to vsp");
-      assert.equal(mcp.sys.repos.length, 1, "vsp keeps the repository of a package that is not empty");
+      assert.deepEqual(cleanupCalls(mcp)[0].items, ZIP_OBJECTS, "only the receipt's objects are in the snippet");
     });
 
     it("a refused import (a zip-named object that appeared after the preflight) deletes no object and writes no receipt", async () => {
@@ -583,7 +623,7 @@ describe("osd-prove-on-system", () => {
       assert.ok(!kinds(mcp).includes("receipt"));
       assert.ok(!existsSync(receiptIn(receiptDir)));
       assert.deepEqual(mcp.sys.deleted, []);
-      assert.deepEqual(deleteCalls(mcp)[0].objects, [`DEVC ${PKG}`], "no object, only the package entry, which vsp never deletes as an item");
+      assert.deepEqual(cleanupCalls(mcp)[0].items, [], "no receipt, no object in the cleanup");
       assert.ok(mcp.sys.tadir.some((r) => r.item === "CLAS ZCL_OSD_PROVE_DEMO"), "the foreign object stays");
       assert.ok(mcp.sys.packages.has(PKG), "and so does the package that holds it");
       const calls = mcp.sys.calls.length;
@@ -593,12 +633,12 @@ describe("osd-prove-on-system", () => {
       assert.equal(mcp.sys.calls.length, calls, "no call to the system");
     });
 
-    it("a refused import into an empty package: vsp deletes the empty package it created, and only that", async () => {
+    it("a refused import into an empty package: the cleanup deletes the empty package the run created, and only that", async () => {
       const mcp = fakeSystem({refuseImport: "an unmet requirement"});
       const {code, text} = await run(base(), mcp);
       assert.equal(code, 1, text);
       assert.deepEqual(mcp.sys.deleted, []);
-      assert.deepEqual(deleteCalls(mcp), [{type: "git_delete_objects", package: PKG, objects: [`DEVC ${PKG}`], delete_repo: false}]);
+      assert.deepEqual(cleanupCalls(mcp), [{items: [], drop: false}]);
       clean(mcp);
     });
 
@@ -638,43 +678,67 @@ describe("osd-prove-on-system", () => {
       assert.match(again.text, /CLAS ZCL_OSD_PROVE_PLAIN changed since the import/);
       assert.deepEqual(mcp.sys.deleted, ["CLAS ZCL_OSD_PROVE_DEMO"]);
       assert.ok(mcp.sys.tadir.some((r) => r.item === "CLAS ZCL_OSD_PROVE_PLAIN"));
-      assert.equal(mcp.sys.repos.length, 1, "the repository row stays with the object that stays");
     });
 
-    it("git_delete_objects is handed exactly the decided objects: a changed one is never in the list", async () => {
-      // the mutant this pins: handing vsp the whole receipt instead of the
-      // decision's delete= list would delete the edited class
-      const mcp = fakeSystem({touchAfterReceipt: new Set(["CLAS ZCL_OSD_PROVE_PLAIN"]),
-        afterReceipt: (sys) => sys.files.get("CLAS ZCL_OSD_PROVE_PLAIN").set("zcl_osd_prove_plain.clas.abap", "edited by somebody\n")});
-      await run(base(), mcp);
-      const calls = deleteCalls(mcp);
-      assert.equal(calls.length, 1);
-      assert.deepEqual(calls[0].objects, ["CLAS ZCL_OSD_PROVE_DEMO"]);
-      assert.equal(calls[0].delete_repo, true);
-      assert.ok(mcp.sys.tadir.some((t) => t.item === "CLAS ZCL_OSD_PROVE_PLAIN"), "the edited class survives");
-    });
-
-    it("an outcome for an object this run did not ask about is a problem", async () => {
-      const mcp = fakeSystem({deleteEdit: (r) => ({...r, objects: [...r.objects, {type: "PROG", name: "ZOTHER", status: "deleted"}]})});
+    it("an object replaced right before the cleanup call is not deleted", async () => {
+      // somebody puts another version in place after the receipt and the
+      // tests: its stamp and its content differ, and the step that checks
+      // them is the step that deletes
+      const replaced = "CLASS zcl_osd_prove_plain DEFINITION PUBLIC. \" somebody else's version\nENDCLASS.\n";
+      const mcp = fakeSystem({beforeCall: (sys, kind) => {
+        if (kind !== "cleanup" || sys.replaced) return;
+        sys.replaced = true;
+        sys.files.get("CLAS ZCL_OSD_PROVE_PLAIN").set("zcl_osd_prove_plain.clas.abap", replaced);
+        sys.stamps.set("CLAS ZCL_OSD_PROVE_PLAIN", "CLAS:20261001130500/9");
+      }});
       const {code, text} = await run(base(), mcp);
       assert.equal(code, 1, text);
-      assert.match(text, /FAIL cleanup: git_delete_objects reported PROG ZOTHER, which this run did not ask it to delete/);
+      assert.match(text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import .* a foreign edit; kept/);
+      assert.deepEqual(mcp.sys.deleted, ["CLAS ZCL_OSD_PROVE_DEMO"]);
+      assert.equal(mcp.sys.files.get("CLAS ZCL_OSD_PROVE_PLAIN").get("zcl_osd_prove_plain.clas.abap"), replaced);
+    });
+
+    it("the check and the delete are one call: a replacement after the cleanup's first call is never deleted", async () => {
+      // the pin on the single step: whatever the tool sends after its first
+      // cleanup call, a version put in place at that moment must survive. A
+      // design that decides in one call and deletes in the next (the split
+      // through vsp's git_delete_objects, which takes no expected version)
+      // deletes it, and fails here
+      const replaced = "CLASS zcl_osd_prove_plain DEFINITION PUBLIC. \" put in place after the check\nENDCLASS.\n";
+      let cleanupSeen = false;
+      const mcp = fakeSystem({beforeCall: (sys, kind) => {
+        if (kind === "cleanup" || kind === "decide") { cleanupSeen = true; return; }
+        if (!cleanupSeen || sys.replaced) return;
+        sys.replaced = true;
+        if (!sys.tadir.some((t) => t.item === "CLAS ZCL_OSD_PROVE_PLAIN")) sys.tadir.push({item: "CLAS ZCL_OSD_PROVE_PLAIN", devclass: PKG});
+        if (!sys.files.has("CLAS ZCL_OSD_PROVE_PLAIN")) sys.files.set("CLAS ZCL_OSD_PROVE_PLAIN", new Map());
+        sys.files.get("CLAS ZCL_OSD_PROVE_PLAIN").set("zcl_osd_prove_plain.clas.abap", replaced);
+        sys.stamps.set("CLAS ZCL_OSD_PROVE_PLAIN", "CLAS:20261001130500/9");
+      }});
+      await run(base(), mcp);
+      assert.ok(mcp.sys.replaced, "the replacement happened");
+      assert.ok(mcp.sys.tadir.some((t) => t.item === "CLAS ZCL_OSD_PROVE_PLAIN"), "the replaced class survives");
+      assert.equal(mcp.sys.files.get("CLAS ZCL_OSD_PROVE_PLAIN")?.get("zcl_osd_prove_plain.clas.abap"), replaced);
+      assert.ok(!kinds(mcp).includes("delete"), "no unconditional delete through vsp");
     });
 
     it("the cleanup hands vsp only the zip's items, even when the package holds more", async () => {
       const mcp = fakeSystem({intruder: "TABL ZSOMEBODY_ELSES"});
       await run(base(), mcp);
       assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS);
-      const code = mcp.sys.calls.find((c) => c.kind === "decide").params.code;
+      const code = mcp.sys.calls.find((c) => c.kind === "cleanup").params.code;
       assert.deepEqual(code.match(/APPEND `[^`]+` TO lt_items\./g).map((l) => l.slice(8, -14)), ZIP_OBJECTS);
       assert.doesNotMatch(code, /ZSOMEBODY_ELSES/);
       assert.match(code, /SELECT SINGLE \* FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name/);
       assert.match(code, /ELSEIF ls_db-devclass <> '\$ZOSG_TMP_TEST'\./);
-      assert.doesNotMatch(code, /zcl_abapgit_objects=>delete|->delete\(|purge/, "the decision deletes nothing itself");
+      assert.match(code, /zcl_abapgit_objects=>delete\( it_tadir = lt_tadir ii_log = li_log \)/);
+      assert.match(code, /zcl_abapgit_repo_srv=>get_instance\( \)->delete\( li_repo \)/);
+      assert.match(code, /SELECT devclass FROM tdevc WHERE parentcl = '\$ZOSG_TMP_TEST'/);
+      assert.match(code, /IF lv_go = abap_true AND \( li_repo IS NOT BOUND OR lv_gone = abap_true \)\n\s+AND lt_rest IS INITIAL AND lt_children IS INITIAL\./);
+      assert.doesNotMatch(code, /purge/);
       const res = mcp.sys.calls.find((c) => c.kind === "residue").params.code;
       assert.match(res, /SELECT devclass FROM tdevc WHERE parentcl = '\$ZOSG_TMP_TEST'/);
       assert.match(res, /stamp_left/);
-      assert.deepEqual(deleteCalls(mcp)[0].objects, ZIP_OBJECTS);
     });
 
     it("a zip item found in another package is not touched and is reported", async () => {
@@ -688,7 +752,7 @@ describe("osd-prove-on-system", () => {
       assert.ok(mcp.sys.tadir.some((t) => t.item === "CLAS ZCL_OSD_PROVE_PLAIN" && t.devclass === "ZOTHER"));
     });
 
-    it("a foreign repository that appears after the preflight: vsp refuses the import, and nothing is deleted", async () => {
+    it("a foreign repository that appears after the preflight: vsp refuses the import, and the cleanup deletes nothing", async () => {
       const mcp = fakeSystem();
       const call = mcp.call.bind(mcp);
       mcp.call = async (action, target, params) => {
@@ -700,7 +764,6 @@ describe("osd-prove-on-system", () => {
       assert.equal(code, 1, text);
       assert.match(text, /FAIL import refused: package \$ZOSG_TMP_TEST has repository 000000000007 named TEAM_X_PROJECT/);
       assert.match(text, /FAIL cleanup: refused: repository 000000000007 named TEAM_X_PROJECT/);
-      assert.ok(!kinds(mcp).includes("delete"), "a refused decision sends no delete");
       assert.deepEqual(mcp.sys.deleted, []);
       assert.equal(mcp.sys.repos.length, 1);
     });
@@ -711,7 +774,6 @@ describe("osd-prove-on-system", () => {
       assert.equal(code, 1, text);
       assert.match(text, /FAIL cleanup: refused: repository 000000000099 named OSDPROVE \$ZOSG_TMP_TEST is not the one this run imported into/);
       assert.deepEqual(mcp.sys.deleted, []);
-      assert.ok(!kinds(mcp).includes("delete"));
     });
 
     it("a renamed repository refuses the cleanup", async () => {
@@ -731,12 +793,12 @@ describe("osd-prove-on-system", () => {
       assert.deepEqual(mcp.sys.deleted, []);
     });
 
-    it("the repository row goes only when this run's import created it: repoCreated false keeps it (delete_repo false)", async () => {
+    it("the repository row goes only when this run's import created it: repoCreated false keeps it", async () => {
       const mcp = fakeSystem({editImport: (a) => ({...a, repoCreated: false})});
       const {code, text, receiptDir} = await run(base(), mcp);
       assert.equal(code, 1, text);
       assert.match(text, /import: repository 000000000042 was not created by this import/);
-      assert.deepEqual(deleteCalls(mcp), [{type: "git_delete_objects", package: PKG, objects: ZIP_OBJECTS, delete_repo: false}]);
+      assert.deepEqual(cleanupCalls(mcp), [{items: ZIP_OBJECTS, drop: false}]);
       assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS, "the objects of the receipt still go");
       assert.deepEqual(mcp.sys.repos.map((r) => r.key), ["000000000042"], "the row is left registered");
       assert.match(text, /FAIL cleanup incomplete: 1 repository left/);
@@ -753,26 +815,25 @@ describe("osd-prove-on-system", () => {
       const again = await run(["--cleanup", "--package", PKG], mcp, receiptDir);
       assert.equal(again.code, 1, again.text);
       assert.match(again.text, /does not record whether its run created repository 000000000042/);
-      assert.equal(deleteCalls(mcp)[0].delete_repo, false);
+      assert.equal(cleanupCalls(mcp)[0].drop, false);
       assert.equal(mcp.sys.repos.length, 1);
     });
 
-    it("vsp unregistering another repository than this run's is reported", async () => {
-      const mcp = fakeSystem({deleteEdit: (r) => (r.repoDeleted ? {...r, repo: {key: "000000000007", name: "X", offline: true}} : r)});
-      const {code, text} = await run(base(), mcp);
-      assert.equal(code, 1, text);
-      assert.match(text, /FAIL cleanup: git_delete_objects unregistered repository 000000000007, not this run's 000000000042/);
-    });
-
-    it("the decision snippet names the key and the tool's repository, and takes nothing but a key", () => {
+    it("the cleanup snippet names the key and the tool's repository, takes nothing but a key, and deletes in the step that checks", () => {
       const entries = ZIP_OBJECTS.map((item) => ({item, stamp: "CLAS:20261001120000/9"}));
-      const code = decideAbap(PKG, entries, "000000000042");
+      const code = cleanupAbap(PKG, entries, "000000000042", true);
       assert.match(code, /get_key\( \) <> '000000000042' OR li_repo->get_name\( \) <> 'OSDPROVE \$ZOSG_TMP_TEST'/);
-      assert.doesNotMatch(code, /purge|zcl_abapgit_objects=>delete|->delete\(/);
-      assert.throws(() => decideAbap(PKG, entries, "42' OR 1 = '1"), /not a repository key/);
-      assert.throws(() => decideAbap(PKG, [{item: "CLAS ZCL_X` TO lt_items. DELETE FROM tadir.", stamp: "CLAS:20261001120000/9"}]),
+      assert.doesNotMatch(code, /purge/);
+      // lt_tadir is filled only where lv_same holds, and handed to abapGit after the loop, in the same snippet
+      assert.match(code, /IF lv_same = abap_true\.\n\s+lv_del = lv_del \+ 1\.\n.*k = 'delete'.*\n\s+CLEAR ls_tadir\.\n\s+MOVE-CORRESPONDING ls_db TO ls_tadir\.\n\s+APPEND ls_tadir TO lt_tadir\./);
+      assert.equal(code.match(/APPEND ls_tadir TO lt_tadir\./g).length, 2, "the decided objects, and the package entry");
+      assert.ok(code.indexOf("zcl_abapgit_objects=>delete( it_tadir = lt_tadir ii_log") > code.indexOf("APPEND ls_tadir TO lt_tadir."));
+      assert.match(code, /DATA lv_drop TYPE abap_bool VALUE abap_true\./);
+      assert.match(cleanupAbap(PKG, entries, "000000000042"), /DATA lv_drop TYPE abap_bool VALUE abap_false\./, "the row is kept unless asked");
+      assert.throws(() => cleanupAbap(PKG, entries, "42' OR 1 = '1"), /not a repository key/);
+      assert.throws(() => cleanupAbap(PKG, [{item: "CLAS ZCL_X` TO lt_items. DELETE FROM tadir.", stamp: "CLAS:20261001120000/9"}]),
         /cannot be put into an ABAP literal/);
-      assert.throws(() => decideAbap(PKG, [{item: "CLAS ZCL_X", stamp: "x` TO lt_stamps."}]), /not a stamp/);
+      assert.throws(() => cleanupAbap(PKG, [{item: "CLAS ZCL_X", stamp: "x` TO lt_stamps."}]), /not a stamp/);
       assert.throws(() => residueAbap(PKG, ZIP_OBJECTS, "1' OR '1"), /not a repository key/);
       assert.match(code, /IF lv_stamp IS INITIAL OR lv_stamp <> lv_want\./);
     });
@@ -789,13 +850,24 @@ describe("osd-prove-on-system", () => {
       assert.match(c.text, /FAIL residue: inventory: the answer is truncated/);
     });
 
+    it("an inventory without its objects or subpackages list is not an empty package; null is vsp's empty list", async () => {
+      const bare = await run(base(), fakeSystem({inventoryEdit: () => ({abapgit_repos: []})}));
+      assert.equal(bare.code, 1, bare.text);
+      assert.match(bare.text, /FAIL residue: inventory: the answer has no objects or subpackages list/);
+      const noSubs = await run(base(), fakeSystem({inventoryEdit: (i) => ({objects: i.objects, abapgit_repos: i.abapgit_repos})}));
+      assert.equal(noSubs.code, 1, noSubs.text);
+      assert.match(noSubs.text, /no objects or subpackages list/);
+      const nulls = await run(base(), fakeSystem({inventoryEdit: (i) => ({...i, objects: i.objects.length ? i.objects : null, subpackages: null})}));
+      assert.equal(nulls.code, 0, nulls.text);
+    });
+
     it("a deleted object whose source or dictionary rows survived is residue", async () => {
       const mcp = fakeSystem();
       const call = mcp.call.bind(mcp);
       mcp.call = async (action, target, params) => {
         const r = await call(action, target, params);
-        // vsp removed the TADIR row, the REPOSRC rows stayed
-        if (params?.type === "git_delete_objects") mcp.sys.stamps.set("CLAS ZCL_OSD_PROVE_DEMO", "CLAS:20261001120000/9");
+        // the TADIR row went, the REPOSRC rows stayed
+        if (params?.type === "execute_abap" && /^" osdprove:cleanup$/m.test(params.code)) mcp.sys.stamps.set("CLAS ZCL_OSD_PROVE_DEMO", "CLAS:20261001120000/9");
         return r;
       };
       const {code, text} = await run(base(), mcp);
@@ -840,7 +912,7 @@ describe("osd-prove-on-system", () => {
       assert.ok(!kinds(mcp).includes("receipt"), "no receipt step");
       assert.ok(!existsSync(receiptIn(receiptDir)));
       assert.deepEqual(mcp.sys.deleted, []);
-      assert.deepEqual(deleteCalls(mcp)[0].objects, [`DEVC ${PKG}`]);
+      assert.deepEqual(cleanupCalls(mcp)[0].items, []);
     });
 
     it("a failed import (stopped partway) gets a receipt, so what it did write is cleaned up", async () => {
@@ -868,7 +940,7 @@ describe("osd-prove-on-system", () => {
       assert.equal(r2.ok, false);
       assert.match(r2.problems.join("\n"), /import: status pending/);
       assert.match(r2.problems.join("\n"), /cleanup skipped: the import job may still be running/);
-      assert.ok(!kinds(never).includes("decide") && !kinds(never).includes("delete"), "nothing is decided or deleted");
+      assert.ok(!kinds(never).includes("cleanup"), "nothing is decided or deleted");
     });
 
     it("an import call that breaks (no answer) is treated as a job that may be running: nothing is deleted", async () => {
@@ -881,7 +953,7 @@ describe("osd-prove-on-system", () => {
       const {code, text} = await run(base(), mcp);
       assert.equal(code, 1, text);
       assert.match(text, /FAIL cleanup skipped/);
-      assert.ok(!kinds(mcp).includes("delete"));
+      assert.ok(!kinds(mcp).includes("cleanup"));
     });
 
     it("a snippet result that is not JSON, cut, or without its end row fails closed", async () => {
@@ -1063,7 +1135,7 @@ describe("osd-prove-on-system", () => {
     const e = [{item: "CLAS ZCL_A", stamp: "CLAS:20261001120000/9", files: [{name: "zcl_a.clas.abap", sha256: "a".repeat(64)}]}];
     return {
       preflight: preflightAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"]), receipt: receiptAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"]),
-      decide: decideAbap("$ZOSG_TMP_X", e, "000000000042"), residue: residueAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"], "000000000042"),
+      cleanup: cleanupAbap("$ZOSG_TMP_X", e, "000000000042", true), residue: residueAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"], "000000000042"),
       residueNoKey: residueAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"]), check: classCheckAbap(["ZCL_A"]), list: listAbap("$ZOSG_TMP_X"),
       hash: hashAbap("$ZOSG_TMP_X", ["CLAS ZCL_A"]), chunk: chunkAbap("$ZOSG_TMP_X", "CLAS ZCL_A", "zcl_a.clas.abap", 0, 10),
       deploy: deployAbap(Buffer.from("PK"), "$ZOSG_TMP_X", [{item: "CLAS ZCL_A", files: e[0].files}]), drop: dropRepoAbap("$ZOSG_TMP_X", "000000000042"),
@@ -1170,7 +1242,7 @@ describe("osd-prove-on-system", () => {
       assert.match(again.text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import \(stamp now "CLAS:20261001130000\/9"\); kept/);
       assert.doesNotMatch(again.text, /foreign edit/, "no hash was compared");
       assert.deepEqual(mcp.sys.deleted, ["CLAS ZCL_OSD_PROVE_DEMO"]);
-      const code = mcp.sys.calls.filter((c) => c.kind === "decide").at(-1).params.code;
+      const code = mcp.sys.calls.filter((c) => c.kind === "cleanup").at(-1).params.code;
       assert.doesNotMatch(code, /TO lt_exp\./, "the snippet carries no hash of an old receipt");
     });
 
@@ -1186,10 +1258,10 @@ describe("osd-prove-on-system", () => {
       assert.match(again.text, /1 receipt entr\(ies\) carry no content hashes/);
     });
 
-    it("the decision snippet: the hash is compared only where the stamp moved, with the in-place serialisation, and a file that is not there is a difference", async () => {
+    it("the cleanup snippet: the hash is compared only where the stamp moved, with the in-place serialisation, and a file that is not there is a difference", async () => {
       const {receiptDir} = await keptRun();
       const receipt = JSON.parse(readFileSync(receiptIn(receiptDir), "utf8"));
-      const code = decideAbap(PKG, receipt.stamped.map((e) => ({item: e.item, stamp: e.stamp, files: e.files})), "000000000042");
+      const code = cleanupAbap(PKG, receipt.stamped.map((e) => ({item: e.item, stamp: e.stamp, files: e.files})), "000000000042");
       assert.match(code, /IF lv_stamp IS INITIAL OR lv_stamp <> lv_want\.[\s\S]*zcl_abapgit_objects=>serialize\([\s\S]*IF lt_a = lt_b\.\s+lv_same = abap_true\./);
       assert.match(code, /k = 'rehashed'/);
       // what the hash check decides: only an equal set of files keeps the object ours, and a stamp that did not move needs no hash
@@ -1198,7 +1270,7 @@ describe("osd-prove-on-system", () => {
       assert.match(code, /IF lv_same = abap_true\.\n\s+lv_del = lv_del \+ 1\.\n\s+APPEND VALUE #\( k = 'delete' v = \|\{ lv_type \}:\{ lv_name \}\| \) TO lt_out\./);
       assert.match(code, /IF lt_a IS NOT INITIAL\./);
       assert.match(code, /APPEND `CLAS ZCL_OSD_PROVE_PLAIN@zcl_osd_prove_plain\.clas\.abap=[0-9A-F]{64}` TO lt_exp\./);
-      assert.throws(() => decideAbap(PKG, [{item: PLAIN_ITEM, stamp: "CLAS:20261001120000/9", files: [{name: "x y", sha256: "00"}]}]), /not a file entry/);
+      assert.throws(() => cleanupAbap(PKG, [{item: PLAIN_ITEM, stamp: "CLAS:20261001120000/9", files: [{name: "x y", sha256: "00"}]}]), /not a file entry/);
       assert.ok(STAMPED_KINDS.includes("DDLS"));
       assert.ok(!STAMPED_KINDS.includes("DCLS"), "no stamp table for DCLS is known");
     });
@@ -1207,7 +1279,7 @@ describe("osd-prove-on-system", () => {
       const crlf = (sys) => sys.files.get(PLAIN_ITEM).set(PLAIN_XML, sys.files.get(PLAIN_ITEM).get(PLAIN_XML).replace(/\n/g, "\r\n"));
       const moved = new Set([PLAIN_ITEM]);
 
-      it("only XML bytes differ and the canonical tree equals the receipt's: deleted, through a second decision that re-checks the hashes in its step", async () => {
+      it("only XML bytes differ and the canonical tree equals the receipt's: deleted, through a second cleanup call that re-checks the hashes in its step", async () => {
         let rewritten;
         const mcp = fakeSystem({touchAfterReceipt: moved, beforeCheck: (sys) => {
           crlf(sys);
@@ -1216,12 +1288,12 @@ describe("osd-prove-on-system", () => {
         const {code, text} = await run(base(), mcp);
         assert.equal(code, 0, text);
         assert.match(text, /CLAS ZCL_OSD_PROVE_PLAIN: zcl_osd_prove_plain\.clas\.xml differs in bytes from the receipt's but is the same XML element tree; accepted as unchanged/);
-        assert.deepEqual(kinds(mcp).filter((k) => k === "decide" || k === "hash" || k === "delete"), ["decide", "hash", "decide", "delete"]);
+        assert.deepEqual(kinds(mcp).filter((k) => k === "cleanup" || k === "hash"), ["cleanup", "hash", "cleanup"]);
         assert.deepEqual(mcp.sys.deleted.sort(), ZIP_OBJECTS);
         // the second call expects the CURRENT bytes (the snippet checks them in its own step)
-        const second = mcp.sys.calls.filter((c) => c.kind === "decide")[1].params.code;
+        const second = mcp.sys.calls.filter((c) => c.kind === "cleanup")[1].params.code;
         assert.ok(second.includes(`zcl_osd_prove_plain.clas.xml=${rewritten}`), "the accepted hash is the current one");
-        assert.ok(!mcp.sys.calls.filter((c) => c.kind === "decide")[0].params.code.includes(rewritten));
+        assert.ok(!mcp.sys.calls.filter((c) => c.kind === "cleanup")[0].params.code.includes(rewritten));
         clean(mcp);
       });
 
@@ -1231,7 +1303,7 @@ describe("osd-prove-on-system", () => {
         const {code, text} = await run(base(), mcp);
         assert.equal(code, 1, text);
         assert.match(text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import .* a foreign edit; kept/);
-        assert.equal(kinds(mcp).filter((k) => k === "decide").length, 1);
+        assert.equal(kinds(mcp).filter((k) => k === "cleanup").length, 1);
         assert.ok(mcp.sys.tadir.some((t) => t.item === PLAIN_ITEM));
       });
 
@@ -1242,7 +1314,7 @@ describe("osd-prove-on-system", () => {
         const {code, text} = await run(base(), mcp);
         assert.equal(code, 1, text);
         assert.match(text, /a foreign edit; kept/);
-        assert.equal(kinds(mcp).filter((k) => k === "decide").length, 1);
+        assert.equal(kinds(mcp).filter((k) => k === "cleanup").length, 1);
         assert.ok(mcp.sys.tadir.some((t) => t.item === PLAIN_ITEM));
       });
 
@@ -1262,7 +1334,7 @@ describe("osd-prove-on-system", () => {
         const {code, text} = await run(base(), mcp);
         assert.equal(code, 1, text);
         assert.match(text, /a foreign edit; kept/);
-        assert.equal(kinds(mcp).filter((k) => k === "decide").length, 1);
+        assert.equal(kinds(mcp).filter((k) => k === "cleanup").length, 1);
         assert.ok(mcp.sys.tadir.some((t) => t.item === PLAIN_ITEM));
       });
 
