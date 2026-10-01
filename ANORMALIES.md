@@ -1394,7 +1394,7 @@ twice out loud before reading the code that answers it.
 - Status: `fixed in this tree with @abaplint/core 2.120.59`
 - Affected versions: `@abaplint/core 2.120.55`
 - Reproducer: `SELECT :a AS x, :b AS y FROM dummy;` inside an AMDP method was split into two NativeSQL statements and their tokens lost the colons.
-- Resolution: `tools/amdp-extract.mjs` takes the body from NativeSQL statement spans with core 2.120.59. The position-based #4307 canary was removed. A separate text fallback remains for the unrelated #4329 parser defect, which can swallow the next method.
+- Resolution: abaplint #4307 is fixed in 2.120.59, and its canary was removed. NativeSQL token-span extraction nevertheless lost body tails and first tokens on the measured A4H corpus (teaching parsed 77→64, working parsed 223→182, package exports 894→858). `tools/amdp-extract.mjs` keeps the earlier source-position extraction, which also handles the separate #4329 parser defect.
 - Regression-test location: `test/amdp.mjs`, AMDP body extraction and colon assertions.
 - Upstream version containing a fix: `@abaplint/core 2.120.59` (verified by the former canary).
 
