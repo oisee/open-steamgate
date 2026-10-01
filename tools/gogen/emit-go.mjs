@@ -1063,18 +1063,6 @@ function appendsOnly(body, name) {
   return appends > 0 && refs === 2 * appends;
 }
 
-function referencedVars(body) {
-  const names = new Set();
-  const walk = (n) => {
-    if (Array.isArray(n)) { n.forEach(walk); return; }
-    if (!n || typeof n !== "object") return;
-    if (n.e === "var") names.add(n.name.toUpperCase());
-    for (const k of Object.keys(n)) if (k !== "type") walk(n[k]);
-  };
-  walk(body);
-  return names;
-}
-
 /** a loop's lines, wrapped in the builders of the strings it only appends to */
 /*
  * A sorted secondary key (frontend secondaryKey, ultra/json): the rows in the
@@ -1124,8 +1112,9 @@ function readSecKey(st, ctx, t) {
 }
 
 function withBuilders(body, ctx, t, emitLoop, outside = []) {
-  // A handler can observe an append before the loop's final write-back.
-  const names = builders(body, ctx, outside).filter((n) => !ctx.catchScope?.has(n));
+  // An exception can skip the loop's write-back, and code after ENDTRY can
+  // read the appended value even when the handler does not.
+  const names = ctx.tryBuilderBlocked ? [] : builders(body, ctx, outside);
   ctx.builders ??= new Map();
   for (const n of names) ctx.builders.set(n, `sb_${ident(n)}_${ctx.loop++}`);
   const pre = names.flatMap((n) => {
@@ -1496,10 +1485,10 @@ function stmtLines(st, ctx, d) {
       const n = ctx.loop++;
       const frame = {level: ctx.loopLevel ?? 0, mode: "body", used: new Set()};
       (ctx.tries ??= []).push(frame);
-      const priorCatchScope = ctx.catchScope;
-      ctx.catchScope = new Set([...(ctx.catchScope ?? []), ...referencedVars(st.catches), ...referencedVars(st.cleanup)]);
+      const priorTryBuilderBlocked = ctx.tryBuilderBlocked;
+      ctx.tryBuilderBlocked = priorTryBuilderBlocked || st.catches.length > 0 || !!st.cleanup;
       const body = st.body.flatMap((x) => stmt(x, ctx, d + 1));
-      ctx.catchScope = priorCatchScope;
+      ctx.tryBuilderBlocked = priorTryBuilderBlocked;
       frame.mode = "catch";
       const cases = st.catches.map((c) => [`${t}\t\t\tcase ${catchCond(c)}:`,
         ...catchInto(c, t, ctx),

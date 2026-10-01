@@ -38,7 +38,7 @@ ENDCLASS.
   } finally { rmSync(sourceDir, {recursive: true, force: true}); }
 });
 
-test("TRY handlers block builders only for strings they observe", () => {
+test("TRY handlers block builders for every loop in the TRY body", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-builder-try-"));
   try {
     writeFileSync(join(sourceDir, "zcl_gogen_builder_try.clas.abap"), `
@@ -64,7 +64,7 @@ ENDCLASS.
     const readSeen = {s: "assign", target: {e: "var", name: "rv", type: {k: "string"}}, value: {e: "var", name: "seen", type: {k: "string"}}};
     method.body = [{s: "try", body: [loop], catches: [{covers: ["CX_ROOT"], own: [], body: [readSeen]}], cleanup: [readSeen]}, ...method.body.filter((st) => st !== loop)];
     const go = emitGo(program);
-    assert.match(go, /sb_free_/);
+    assert.doesNotMatch(go, /sb_free_/);
     assert.doesNotMatch(go, /sb_seen_/);
   } finally { rmSync(sourceDir, {recursive: true, force: true}); }
 });

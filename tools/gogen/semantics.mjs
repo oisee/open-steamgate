@@ -268,6 +268,10 @@ const EXPECT = {
   // from inside two nested TRYs (Go runs a TRY as a closure and hands these
   // out as codes)
   ZCL_GOGEN_T_TRYFLOW: "b cd caught a1 13!",
+  // A write in a TRY loop is visible after an exception leaves the loop,
+  // even when neither CATCH nor CLEANUP reads the string.
+  ZCL_GOGEN_T_TRYAPPEND: "axx",
+  ZCL_GOGEN_T_TRYAPPEND_CLEANUP: "axx",
   // CP / NP / CA / NA; A4H gave "... ca:X1---X", the 1 being sy-fdpos,
   // which the local copy does not read
   ZCL_GOGEN_T_CP: "cp:XX-X--XX-XX-XX-XX ca:X---X",
