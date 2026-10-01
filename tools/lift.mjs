@@ -572,18 +572,44 @@ function methodCall(statement) {
     || (tokens[0] === "call" && tokens[1] === "method");
 }
 
-// Statements besides method calls that run code this method does not show: a
-// subroutine, a function module, a constructor (NEW, CREATE OBJECT, an
-// exception's), an event handler, a BAdI, the ON COMMIT / ON ROLLBACK
-// subroutines of COMMIT and ROLLBACK WORK, the callbacks a WAIT lets run.
-// Each can change an attribute or the actual behind a by-reference parameter.
+// The statement kinds that run no code of their own: moves, string and
+// table operations, control flow, declarations, the SELECT. An allow-list:
+// a statement of any other kind -- PERFORM, CALL FUNCTION, CALL DIALOG,
+// CALL TRANSFORMATION, EML, COMMIT WORK, WAIT, CREATE OBJECT, one abaplint
+// adds tomorrow -- counts as a call into code this method does not show,
+// which may change an attribute, the actual behind a by-reference parameter,
+// or what it is passed. A method call inside an allowed statement is caught
+// by `methodCall`, a constructor by NEW below. WRITE is left out on purpose:
+// its conversion exits are function modules.
+const LOCAL_KINDS = [Statements.Move, Statements.MoveCorresponding, Statements.Clear, Statements.Free,
+  Statements.If, Statements.ElseIf, Statements.Else, Statements.EndIf, Statements.Check,
+  Statements.Case, Statements.When, Statements.WhenOthers, Statements.EndCase,
+  Statements.Do, Statements.EndDo, Statements.While, Statements.EndWhile, Statements.Loop, Statements.EndLoop,
+  Statements.Exit, Statements.Continue, Statements.ReadTable, Statements.Append, Statements.InsertInternal,
+  Statements.ModifyInternal, Statements.DeleteInternal, Statements.Collect, Statements.Sort,
+  Statements.Concatenate, Statements.Condense, Statements.Split, Statements.Translate, Statements.Shift,
+  Statements.Replace, Statements.Find, Statements.Overlay, Statements.Describe,
+  Statements.Assign, Statements.Unassign, Statements.GetReference, Statements.Select, Statements.Data, Statements.FieldSymbol,
+  abaplint.Comment, abaplint.Empty];
+const localKind = (statement) => LOCAL_KINDS.some((kind) => statement.get() instanceof kind);
+
+// A statement that runs code this method does not show, other than a method
+// call statement (CALL METHOD, a functional call standing alone), which the
+// method-call rules handle: every kind outside LOCAL_KINDS, and any statement
+// holding a constructor (NEW).
 function otherCall(statement) {
-  const tokens = statement.getTokens().map((token) => token.getStr().toLowerCase());
-  return [Statements.Perform, Statements.CallFunction, Statements.CreateObject, Statements.RaiseEvent,
-    Statements.CallBadi, Statements.Commit, Statements.Rollback, Statements.Wait].some((kind) => statement.get() instanceof kind)
-    || (statement.get() instanceof Statements.Raise && tokens.includes("exception"))
-    || statement.findAllExpressions(Expressions.NewObject).length > 0;
+  if (statement.get() instanceof Statements.Call) return statement.findAllExpressions(Expressions.NewObject).length > 0;
+  return !localKind(statement) || statement.findAllExpressions(Expressions.NewObject).length > 0;
 }
+
+// The kinds whose writes abaplint reports as write positions (each write-
+// capable one checked by a test): before the SELECT, a statement of another kind naming <R>
+// may write a key unseen (OVERLAY does, and abaplint reports nothing).
+const KEY_WRITE_KINDS = [Statements.Move, Statements.MoveCorresponding, Statements.Clear,
+  Statements.If, Statements.ElseIf, Statements.Check, Statements.Case, Statements.When, Statements.While,
+  Statements.Loop, Statements.ReadTable, Statements.Append, Statements.InsertInternal, Statements.ModifyInternal,
+  Statements.Concatenate, Statements.Condense, Statements.Split, Statements.Translate, Statements.Shift,
+  Statements.Replace, Statements.Assign];
 
 // A data object the method does not own: an attribute, a by-reference
 // parameter, a built-in. Each may be T itself, or alias T or one of its rows,
@@ -676,7 +702,7 @@ function tableType(scope, name, obligation) {
 // the old result table and its statement order while keeping the bulk query
 // outside the row loop.
 export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DDIC) {
-  const {registry, object, method: m, signature, loop, table, row, used} = methodContext(name, source, method, ddicFolders, "R2", true);
+  const {registry, object, file, method: m, signature, loop, table, row, used} = methodContext(name, source, method, ddicFolders, "R2", true);
   requireNamesFree(used, [ALL_ROWS, ALL_ROW, R2_WORK, SAVED_SUBRC, SAVED_DBCNT, SAVED_TABIX], name);
   const items = children(loop.findDirectStructure(Structures.Body));
   const bodyStatements = items.flatMap((item) => item.findAllStatementNodes());
@@ -784,22 +810,6 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
     const call = bodyStatements.find(methodCall);
     throw new Refusal("loop table method call", `${call.concatTokens()} may change nonlocal loop table ${table}`);
   }
-  if (tableNonlocal && bodyStatements.some(otherCall)) {
-    const call = bodyStatements.find(otherCall);
-    throw new Refusal("loop table call", `${call.concatTokens()} runs code that may change nonlocal loop table ${table}`);
-  }
-  // A local T is reached by a subroutine or function module only through its
-  // parameter list: T itself anywhere, or the row before the SELECT (a FORM's
-  // USING is by reference too). Passing the row after the SELECT can only
-  // change a row the prefetch no longer needs.
-  for (const [index, item] of items.entries()) {
-    for (const st of item.findAllStatementNodes().filter((candidate) => candidate !== selectStatement && otherCall(candidate))) {
-      const tokens = st.getTokens().map((token) => token.getStr().toLowerCase());
-      if (tokens.includes(table) || (index < position && tokens.includes(row))) {
-        throw new Refusal("loop table call", `${st.concatTokens()} passes ${tokens.includes(table) ? table : row} to code this method does not show`);
-      }
-    }
-  }
   const unsafeSymbol = unsafeFieldSymbols({method: m, table, row, tableNonlocal,
     scopeAt: (st) => syntax.spaghetti.lookupPosition(st.getStart(), name)});
   for (const st of bodyStatements) {
@@ -893,6 +903,25 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
     && ref.getStart().isBefore(m.getLastToken().getStart()))) {
     throw new Refusal("result read after loop", `${resultTable} is read after the loop`);
   }
+  // Calls into code the method does not show, by the LOCAL_KINDS allow-list.
+  // Checked after the alias and result guards, so a statement one of them can
+  // name keeps its obligation.
+  if (tableNonlocal && bodyStatements.some(otherCall)) {
+    const call = bodyStatements.find(otherCall);
+    throw new Refusal("loop table call", `${call.concatTokens()} runs code that may change nonlocal loop table ${table}`);
+  }
+  // A local T is reached by a subroutine or function module only through its
+  // parameter list: T itself anywhere, or the row before the SELECT (a FORM's
+  // USING is by reference too). Passing the row after the SELECT can only
+  // change a row the prefetch no longer needs.
+  for (const [index, item] of items.entries()) {
+    for (const st of item.findAllStatementNodes().filter((candidate) => candidate !== selectStatement && otherCall(candidate))) {
+      const tokens = st.getTokens().map((token) => token.getStr().toLowerCase());
+      if (tokens.includes(table) || (index < position && tokens.includes(row))) {
+        throw new Refusal("loop table call", `${st.concatTokens()} passes ${tokens.includes(table) ? table : row} to code this method does not show`);
+      }
+    }
+  }
   for (const [index, item] of items.entries()) {
     if (index === position) continue;
     for (const st of item.findAllStatementNodes()) {
@@ -913,9 +942,18 @@ export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DD
       if ((methodCall(st) || otherCall(st)) && tokens.includes(row)) {
         throw new Refusal("key not written before the read", `${st.concatTokens()} passes ${row} to a call`);
       }
+      if (tokens.includes(row) && !KEY_WRITE_KINDS.some((kind) => st.get() instanceof kind)) {
+        throw new Refusal("key not written before the read", `${st.concatTokens()} names ${row} in a statement whose writes abaplint does not report`);
+      }
     }
   }
 
+  // A statement abaplint cannot parse (CALL DIALOG ... IMPORTING ... TO is
+  // one) is left out of the structure every guard walks, so it would be
+  // neither a call nor a write: refuse the file instead.
+  // Checked last with the syntax, for the same reason.
+  const unparsed = file.getStatements().find((st) => st.get() instanceof abaplint.Unknown);
+  if (unparsed) throw new Refusal("shape/parse", `abaplint does not parse ${unparsed.concatTokens().slice(0, 80)}`);
   // abaplint stops reading a method at its first error, and the read and
   // write positions the guards above rely on stop with it: a guard that found
   // nothing to refuse may not have looked. Checked last, so a refusal a guard

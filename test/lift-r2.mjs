@@ -439,6 +439,52 @@ describe("verified lift R2: SELECT table per row", function () {
     });
   });
 
+  describe("allow-lists: statement kinds that run no code, and kinds whose writes abaplint reports", () => {
+    const localDecl = (source) => declare(localTable(source), "    DATA lt_other TYPE tt_rows.\n    DATA lv_text TYPE string.");
+    const unseen = [
+      ["CALL DIALOG passing the row before the SELECT (local T)", beforeSelect(localTable(ORIGINAL), "      CALL DIALOG 'Z_LIFT_BUMP' EXPORTING is_row FROM <ls_row>.\n"), ""],
+      ["CALL TRANSFORMATION with T a by-reference parameter", afterSelect(ORIGINAL, "      CALL TRANSFORMATION zlift_x SOURCE x = ls_hit RESULT x = ls_hit.\n"), "nonlocal"],
+      ["MODIFY ENTITIES with T a by-reference parameter", afterSelect(ORIGINAL, "      MODIFY ENTITIES OF zi_lift ENTITY lift UPDATE FIELDS ( kind ) WITH VALUE #( ( kind = 'X' ) ).\n"), "nonlocal"],
+    ];
+    for (const [what, source, kind] of unseen) {
+      it(`refuses ${what} as a call`, () => {
+        const caught = refuse(source);
+        expect(caught, what).to.be.instanceOf(Refusal);
+        expect(caught.obligation).to.equal("loop table call");
+        if (kind) expect(caught.message).to.match(/nonlocal loop table ct_rows/);
+      });
+    }
+
+    it("refuses a statement abaplint cannot parse (CALL DIALOG ... IMPORTING ... TO)", () => {
+      const caught = refuse(beforeSelect(localTable(ORIGINAL), "      CALL DIALOG 'Z_LIFT_BUMP' IMPORTING is_row TO <ls_row>.\n"));
+      expect(caught).to.be.instanceOf(Refusal);
+      expect(caught.obligation).to.equal("shape/parse");
+    });
+
+    it("refuses OVERLAY of a key before the SELECT, whose write abaplint does not report", () => {
+      const caught = refuse(beforeSelect(localDecl(ORIGINAL), "      OVERLAY <ls_row>-kind WITH 'ABCD'.\n"));
+      expect(caught).to.be.instanceOf(Refusal);
+      expect(caught.obligation).to.equal("key not written before the read");
+      expect(caught.message).to.match(/does not report/);
+    });
+
+    // every write-capable kind of KEY_WRITE_KINDS: abaplint reports its write
+    // of a key, so the refusal names the write
+    const reported = ["MOVE 'PRIO' TO <ls_row>-kind.", "MOVE-CORRESPONDING lt_other TO <ls_row>.", "CLEAR <ls_row>-kind.",
+      "CONCATENATE 'A' 'B' INTO <ls_row>-kind.", "CONDENSE <ls_row>-kind.", "SPLIT lv_text AT ';' INTO <ls_row>-kind <ls_row>-code.",
+      "TRANSLATE <ls_row>-kind TO UPPER CASE.", "SHIFT <ls_row>-kind LEFT.", "REPLACE 'A' WITH 'B' INTO <ls_row>-kind.",
+      "READ TABLE lt_other INTO <ls_row> INDEX 1.", "LOOP AT lt_other INTO <ls_row>.\n      ENDLOOP.",
+      "APPEND INITIAL LINE TO lt_other ASSIGNING <ls_row>.", "INSERT INITIAL LINE INTO lt_other ASSIGNING <ls_row> INDEX 1."];
+    for (const statement of reported) {
+      it(`refuses ${statement.split("\n")[0]} before the SELECT as a reported write`, () => {
+        const caught = refuse(beforeSelect(localDecl(ORIGINAL), `      ${statement}\n`));
+        expect(caught, statement).to.be.instanceOf(Refusal);
+        expect(caught.obligation).to.equal("key not written before the read");
+        expect(caught.message).to.match(/ writes <ls_row>/);
+      });
+    }
+  });
+
   describe("aliases set outside the method", () => {
     it("lists the outside data reference as open when T is nonlocal", () => {
       expect(model().open).to.include.members(["no data reference into ct_rows set outside this method",
