@@ -1327,6 +1327,20 @@ something already shipped (then it is a must of the current release, like the ro
   **Done 2026-09-30 (stoker): both keep them.** In the second test class the counter reads 3 where A4H reads 1,
   on Node and on Go alike. See `ANOMALY-2026-09-30-unit-statics-across-test-classes`, with the fixture in
   `test/fixtures/unit-statics/`. The Go half of the fix is U4 step 2 below; the Node half needs a transpiler issue.
+- **status 2026-10-01 (dell):** The SQL corpus of the native build is 18/18, merged (#349).
+  Class statics are reset per test class on Go, merged (#365); the Node half stays an upstream issue.
+  F4 and the file/folder dialogs in the TUI: branch feat/osabap-f4-file-dialogs.
+- should (moved from must, 2026-10-01, decided with codex-astra): **the table-header row model.** The version moves from
+  the weak-keyed side map onto the table: `type Itab[T any] struct { Rows []T; ver uint64 }` (`Itab[*T]` for stable
+  rows). The version belongs to the destination storage, not the copied ABAP value: a clone starts with its own
+  version, an assignment into an existing table keeps and bumps the destination's. Slices, each gated on 388 SAME:
+  (1) centralise the emitter's table access/replacement/mutation while keeping slices and the map; (2) add `Itab` and
+  header bindings next to the legacy path; (3) an opt-in header backend for the whole generated type graph, parity on
+  both backends -- the first slice that removes the lookup cost; (4) headers by default, then delete the map, cache,
+  bloom filter and cleanup. **Why not must:** it removes bookkeeping, not a correctness gap. The bloom filter (#337)
+  already took the long report from 41 s to 28 s, and the open question in ANOMALY-2026-09-30-go-row-binding-model
+  (whether a scalar binding survives a structural change on SAP) is not answered by moving the counter; measure that
+  on A4H first. Statics, DB and LUW in the session (U4 step 2) are the prerequisite for parallel classes, not this.
 - nice (foreman-dell, after U3 wave 3): the Go generator refuses to read another class's public static attribute in
   an expression (`cl_abap_unit_assert=>assert_equals( act = zcl_x=>gv_attr … )` is NOT_COMPILED, alert
   `ZCL_X=>GV_ATTR`). `--fixture` mode also reports a failed assertion as `KERNEL_CX_ASSERT` without its text.
