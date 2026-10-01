@@ -116,7 +116,7 @@ test("ABAP Unit class statics and constructor restart for each Go test class", {
   assert.equal(sharded.status, 0, sharded.stderr || sharded.error?.message || sharded.stdout);
   assert.deepEqual(JSON.parse(sharded.stdout).rows, rows);
   const buildDir = JSON.parse(sharded.stdout).buildDir;
-  assert.ok(existsSync(join(buildDir, "generated", "core", "zz_generated.go")));
+  assert.ok(existsSync(join(buildDir, "cmd", "unit", "zz_generated.go")));
   assert.equal(existsSync(join(dirname(buildDir), "shards")), false);
   rmSync(dir, {recursive: true, force: true});
 });
