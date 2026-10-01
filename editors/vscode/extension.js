@@ -10,7 +10,7 @@ const vscode = require("vscode");
 const path = require("node:path");
 const fs = require("node:fs");
 const crypto = require("node:crypto");
-const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
+const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, osdRunCommandLine, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   freestyleTableHtml, freestyleOutputItems, notebookAbapSource, notebookFromJson, notebookToJson, sqlNotebookStarter, htmlEscape,
   hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun,
@@ -2813,7 +2813,7 @@ async function run(output, classrunOutput, forceDebugger = false) {
       }
     }
   }
-  const action = runActionFor(object, {hasUnitTests, hasClassrun, entitySet});
+  const action = runActionFor(object, {hasUnitTests, hasClassrun, entitySet, forceDebugger, file: editor.document.fileName});
   // Q4: a run is server work, so it is a point the table this object's own
   // heat comes from may have changed -- fire-and-forget, the same as the
   // timer, so F8 does not wait on it.
@@ -2835,8 +2835,48 @@ async function run(output, classrunOutput, forceDebugger = false) {
     await openWebguiTransaction(action.tcode, output);
     return;
   }
+  if (action.kind === "cli") {
+    if (await runReportInTerminal(object.name, editor, output) === false) {
+      const fallback = runActionFor(object, {forceDebugger: true});
+      if (fallback.kind === "webgui") await openWebguiTransaction(fallback.tcode, output);
+    }
+    return;
+  }
   output.appendLine(`osd run ${object.name}: ${action.text}`);
   vscode.window.showInformationMessage(`osd: ${action.text}`);
+}
+
+// ---- 0.5 O: F8 on a report -- `osd run` (tools/osd-run.mjs) builds it
+// with osabap into a native command, kept by the hash of its sources, and
+// runs it in a terminal of its own. The arguments are asked for first, the
+// last ones offered again; left empty, the command presents its own
+// selection screen in the terminal. The build reads the file, so the
+// buffer is saved first; it needs a checkout (Go, tools/gogen), not the
+// bundled copy.
+const reportArgs = new Map();
+async function runReportInTerminal(name, editor, output) {
+  const home = osdHomeOf();
+  if (home === undefined || !isOpenSteamgatePath(home)) {
+    // no checkout to build in: the converted report in Easy Access, as F8
+    // did before osd run
+    output.appendLine(`osd run ${name}: no open-steamgate checkout (osd.home or the workspace folder) to build the report in; opening it in Easy Access`);
+    return false;
+  }
+  const file = editor.document.fileName;
+  const typed = await vscode.window.showInputBox({
+    title: `Run ${name}`,
+    prompt: "Report options as --name value, host flags as -db FILE (paths from the checkout); empty opens the selection screen",
+    value: reportArgs.get(file) ?? "",
+  });
+  if (typed === undefined) return;
+  reportArgs.set(file, typed);
+  if (editor.document.isDirty) await editor.document.save();
+  // the line is quoted for PowerShell on Windows, so the terminal is one
+  const terminal = vscode.window.createTerminal({name: `osd run ${name}`, cwd: home,
+    ...(process.platform === "win32" ? {shellPath: "powershell.exe"} : {})});
+  terminal.show();
+  terminal.sendText(`${osdRunCommandLine({home, file})}${typed.trim() === "" ? "" : ` -- ${typed.trim()}`}`);
+  return true;
 }
 
 // ---- gui-reports spike (docs/gui-reports.md): F8 on a converted report
@@ -3963,7 +4003,7 @@ async function deactivate() {
   await activeController?.stop();
 }
 
-module.exports = {activate, deactivate, SystemController, debugOnDemand, testExplorer, OsdTreeProvider, TransactionItem, EntitySetItem,
+module.exports = {activate, deactivate, runReportInTerminal, SystemController, debugOnDemand, testExplorer, OsdTreeProvider, TransactionItem, EntitySetItem,
   httpLensProvider, openEntitySetMethod, statusBar,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,

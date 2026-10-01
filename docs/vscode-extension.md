@@ -62,7 +62,7 @@ F8's dispatch by object type (`lib.js` `runActionFor`, held to this table by
 | CLAS, declares `IF_OO_ADT_CLASSRUN`, no tests | classrun (Q6b, below) -- ABAP Unit still wins when a class carries both |
 | CLAS, neither | not yet: put `IF_OO_ADT_CLASSRUN` on the class, or give it tests |
 | INTF | nothing of its own to run |
-| PROG | opens its converted report's WebGUI transaction in a reusable VS Code panel (see `docs/gui-reports.md`) |
+| PROG | F8: asks for the report's arguments, then builds it with osabap and runs it in a terminal of its own (`osd run`, `docs/osabap-native.md`; needs a checkout and Go); empty arguments open its selection screen in the terminal. Run with debugger: opens its converted report's WebGUI transaction in a reusable VS Code panel (see `docs/gui-reports.md`), as the CodeLens above REPORT does |
 | FUGR | not yet: a test form from `GET /sap/bc/osd/rfc/functions/<NAME>`, then `POST /call` |
 | TABL, DDLS | data preview (Q7, below) |
 | IWSV | not yet: the Gateway client on the service document |

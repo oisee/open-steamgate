@@ -286,3 +286,51 @@ test("MEMORY ID checkbox is a memory id, not a checkbox", () => {
     rmSync(dir, {recursive: true, force: true});
   }
 });
+
+// F8 on a report (0.5 O): `osd run` builds it with osabap, keeps the command
+// by the hash of what the build read, and passes the arguments through. The
+// second run of the same source does not build; an edit of the report does;
+// one bare `--` after the report is osd's, so -help reaches the report.
+test("osd run builds a report once, keeps it and passes its arguments through", () => {
+  const dir = mkdtempSync(join(tmpdir(), "osd-run-"));
+  const osd = join(here, "..", "..", "bin", "osd.mjs");
+  // the kept builds go to the test's own folder, not the checkout's .local
+  const osdRun = (args) => spawnSync(process.execPath, [osd, "run", ...args], {encoding: "utf8", env: {...process.env, OSD_RUN_CACHE: join(dir, "cache")}});
+  try {
+    const app = join(dir, "notes");
+    cpSync(join(here, "apps", "notes"), app, {recursive: true});
+    const report = join(app, "znotes.prog.abap");
+    const file = join(dir, "notes.db");
+    // a folder of the user's own in the cache directory is not osd's to prune
+    mkdirSync(join(dir, "cache", "mine"), {recursive: true});
+    const first = osdRun([report, "-db", file, "--add", "hello"]);
+    assert.equal(first.status, 0, first.stderr);
+    assert.match(first.stderr, /osd run: building znotes\.prog\.abap/);
+    assert.equal(first.stdout, "1 hello\n1 notes\n");
+
+    const second = osdRun([report, "-db", file, "--add", "again"]);
+    assert.equal(second.status, 0, second.stderr);
+    assert.doesNotMatch(second.stderr, /building/);
+    assert.equal(second.stdout, "1 hello\n2 again\n2 notes\n");
+
+    const help = osdRun([report, "--", "-help"]);
+    assert.equal(help.status, 0, help.stderr);
+    assert.match(help.stdout, /-db FILE .*ZNOTES/);
+
+    // a layer flag is the report's, not osd's: the report refuses it
+    const layer = osdRun([report, "--layer", dir]);
+    assert.notEqual(layer.status, 0);
+
+    writeFileSync(report, readFileSync(report, "utf8") + "\n* edited\n");
+    const edited = osdRun([report, "-db", file, "--add", "third"]);
+    assert.equal(edited.status, 0, edited.stderr);
+    assert.match(edited.stderr, /building/);
+
+    const missing = osdRun([join(dir, "nope.prog.abap")]);
+    assert.equal(missing.status, 2);
+    assert.match(missing.stderr, /no such report/);
+    assert.equal(existsSync(join(dir, "cache", "mine")), true);
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
