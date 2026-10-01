@@ -186,7 +186,7 @@ func duplicateKey(err error) bool {
 // 15 columns: 28 million comparisons). insertParams keeps that small while a
 // statement still carries many rows; parts of the same size share one cached
 // prepared statement.
-var insertParams = 256
+const insertParams = 256
 
 func insertChunk(columns int) int {
 	return max(1, insertParams/max(1, columns))
