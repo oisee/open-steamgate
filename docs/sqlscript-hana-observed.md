@@ -951,3 +951,42 @@ to ABAP as the initial value; a NULL comes back as initial too. The
 portable engines have no such value (and DuckDB's TIMESTAMP stops at
 microseconds), so a portable UTCL has to be carried as its 27-character
 text with the empty value as `''` -- measured here, not built yet.
+
+## Direct HXE scalar function NULL versus the ABAP output boundary (2026-10-01)
+
+The corpus value-parity run exposed one scalar result with NULL inputs. A
+minimal synthetic function was created and called by hand on HXE 2.00.088
+under the HXE lock:
+
+```sql
+CREATE FUNCTION "OSD_CORPUS"."OSD_PARITY_NULL_CONCAT"
+  (IN A NVARCHAR(4), IN B NVARCHAR(4))
+  RETURNS RESULT NVARCHAR(20)
+  LANGUAGE SQLSCRIPT SQL SECURITY INVOKER READS SQL DATA
+  AS BEGIN RESULT = 'p_' || :A || '_' || :B; END;
+SELECT "OSD_CORPUS"."OSD_PARITY_NULL_CONCAT"(NULL, 'X') AS RESULT,
+       "OSD_CORPUS"."OSD_PARITY_NULL_CONCAT"('A', 'X') AS CONTROL FROM DUMMY;
+```
+
+HXE returned `RESULT = NULL`, `CONTROL = 'p_A_X'`. The portable pAMDP
+scalar output boundary returns the ABAP initial `''` for the NULL result,
+as documented above for NULL into an AMDP scalar output. The parity runner
+currently compares a direct SQL function call with that boundary, so it
+reports a value difference. This is a comparison-boundary difference; the
+portable runtime's ABAP output conversion is intentional. The synthetic
+regression is in `test/amdp-value-parity.mjs`.
+
+## Two-argument SUBSTR in a corpus procedure (2026-10-01)
+
+The value-parity run found that portable lowering printed `undefined` as a
+third argument to a two-argument `SUBSTR`. HXE accepted the source body. A
+minimal synthetic query run by hand under the HXE lock gave:
+
+```sql
+SELECT SUBSTR('abcdef', 3) AS V FROM DUMMY;
+-- V = 'cdef' on HXE 2.00.088
+```
+
+The two-argument form takes the remainder of the string. The regression in
+`test/amdp-value-parity.mjs` uses a hand-written SQLScript procedure and
+checks the portable engines against that observed HXE value.

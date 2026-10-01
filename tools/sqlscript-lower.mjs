@@ -65,7 +65,7 @@ export const DIALECTS = {
     intDiv: (a, b) => `DIV(${a}, ${b})`,
     concat: (args) => args.join(" || "),
     ifnull: (a, b) => `IFNULL(${a}, ${b})`,
-    substr: (s, from, len) => `SUBSTRING(${s}, ${from}, ${len})`,
+    substr: (s, from, len) => `SUBSTRING(${s}, ${from}${len === undefined ? "" : `, ${len}`})`,
     castInt: (e) => `CAST(${e} AS INTEGER)`,
     castChar: (e, n) => `CAST(${e} AS NVARCHAR(${n}))`,
     castDec: (e, n, s) => `CAST(${e} AS DECIMAL(${n}, ${s}))`,
@@ -110,7 +110,7 @@ export const DIALECTS = {
     intDiv: (a, b) => `CAST(TRUNC(CAST(${a} AS NUMERIC) / CAST(${b} AS NUMERIC)) AS INTEGER)`,
     concat: (args) => args.join(" || "),
     ifnull: (a, b) => `COALESCE(${a}, ${b})`,
-    substr: (s, from, len) => `SUBSTRING(${s} FROM ${from} FOR ${len})`,
+    substr: (s, from, len) => `SUBSTRING(${s} FROM ${from}${len === undefined ? "" : ` FOR ${len}`})`,
     // PostgreSQL rounds some numeric-to-integer casts. SQLScript truncates
     // toward zero, so make that step explicit as for DuckDB.
     castInt: (e) => `CAST(TRUNC(CAST(${e} AS NUMERIC)) AS INTEGER)`,
@@ -150,7 +150,7 @@ export const DIALECTS = {
     intDiv: (a, b) => `(${a} // ${b})`,
     concat: (args) => args.join(" || "),
     ifnull: (a, b) => `COALESCE(${a}, ${b})`,
-    substr: (s, from, len) => `SUBSTRING(${s}, ${from}, ${len})`,
+    substr: (s, from, len) => `SUBSTRING(${s}, ${from}${len === undefined ? "" : `, ${len}`})`,
     // It raises like HANA on a value that will not convert -- and ROUNDS
     // where HANA truncates, which is the divergence this dialect shipped
     // with. TRUNC through DOUBLE truncates toward zero and still raises.
@@ -212,7 +212,7 @@ export const DIALECTS = {
     intDiv: (a, b) => `(${a} / ${b})`,
     concat: (args) => args.join(" || "),
     ifnull: (a, b) => `IFNULL(${a}, ${b})`,
-    substr: (s, from, len) => `SUBSTR(${s}, ${from}, ${len})`,
+    substr: (s, from, len) => `SUBSTR(${s}, ${from}${len === undefined ? "" : `, ${len}`})`,
     // SQLite's CAST never raises: 'x' becomes 0, which is a DIFFERENT
     // program. There is no expression that makes it raise, so this dialect
     // declines the node rather than returning a wrong number quietly.
