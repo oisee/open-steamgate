@@ -90,13 +90,8 @@ func (b Browser) entries(dir, filter string) ([]entry, error) {
 			continue
 		}
 		path := filepath.Join(dir, info.Name())
-		_, candidate, err := b.Sandbox.BrowsePath(path, b.Mode == Save)
-		if err != nil {
-			continue
-		} // includes symlinks escaping the sandbox
-		stat, err := candidate.Stat()
-		candidate.Close()
-		if err != nil {
+		_, stat, err := b.Sandbox.BrowseEntry(path, b.Mode == Save)
+		if err != nil || (!stat.IsDir() && !stat.Mode().IsRegular()) {
 			continue
 		}
 		if b.Mode == Directory && !stat.IsDir() {
@@ -112,14 +107,19 @@ func (b Browser) entries(dir, filter string) ([]entry, error) {
 // Listing alone cannot authorize a path because the directory may change.
 func (b Browser) selected(dir string, item entry) (string, bool) {
 	path := filepath.Join(dir, item.name)
-	checked, file, err := b.Sandbox.BrowsePath(path, b.Mode == Save)
-	if err != nil {
+	checked, info, err := b.Sandbox.BrowseEntry(path, b.Mode == Save)
+	if err != nil || info.IsDir() != item.dir || (!item.dir && !info.Mode().IsRegular()) {
 		return "", false
 	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil || info.IsDir() != item.dir {
-		return "", false
+	if item.dir {
+		_, file, err := b.Sandbox.BrowsePath(path, b.Mode == Save)
+		if err != nil {
+			return "", false
+		}
+		defer file.Close()
+		if info, err := file.Stat(); err != nil || !info.IsDir() {
+			return "", false
+		}
 	}
 	return checked, true
 }
@@ -142,13 +142,8 @@ func (b Browser) openName(dir, name string) (string, bool) {
 	if b.Extension != "" && filepath.Ext(name) == "" {
 		name += "." + strings.TrimPrefix(b.Extension, ".")
 	}
-	path, file, err := b.Sandbox.BrowsePath(filepath.Join(dir, name), false)
-	if err != nil {
-		return "", false
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	return path, err == nil && !info.IsDir()
+	path, info, err := b.Sandbox.BrowseEntry(filepath.Join(dir, name), false)
+	return path, err == nil && info.Mode().IsRegular()
 }
 
 func (b Browser) confirmSave(screen tcell.Screen, path string) (bool, error) {
@@ -212,6 +207,8 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 	selected, scroll, editing, editingFilter := 0, 0, false, false
 	atRoots := false
 	marked := map[string]entry{}
+	cachedDir, cachedFilter := "", ""
+	var cachedEntries []entry
 	for {
 		var entries []entry
 		if atRoots {
@@ -219,10 +216,14 @@ func (b Browser) Run(screen tcell.Screen) (string, error) {
 				entries = append(entries, entry{name: root, dir: true})
 			}
 		} else {
-			entries, err = b.entries(dir, filter)
-			if err != nil {
-				return "", err
+			if cachedEntries == nil || cachedDir != dir || cachedFilter != filter {
+				cachedEntries, err = b.entries(dir, filter)
+				if err != nil {
+					return "", err
+				}
+				cachedDir, cachedFilter = dir, filter
 			}
+			entries = cachedEntries
 		}
 		if b.afterList != nil {
 			b.afterList()

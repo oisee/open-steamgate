@@ -72,3 +72,12 @@ func TestSelectOptionLowF4KeepsOtherRanges(t *testing.T) {
 		t.Fatalf("submitted ranges: %#v", values)
 	}
 }
+
+func TestEmptyHighKeepsNonBetweenOption(t *testing.T) {
+	screen := ZCL_GG_HOST__TY_RESULT{values: []*ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE{{name: "S_FILE", ranges: []ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE{{sign: "I", option: "CP", low: "*.txt"}}}}}
+	fields := []termgui.Field{{Name: "S_FILE", Kind: termgui.Ranges, Value: "*.txt"}, {Name: "S_FILE-HIGH", Value: ""}}
+	values := selectionValuesFromFields(fields, screen)
+	if len(values) != 1 || len(values[0].ranges) != 1 || values[0].ranges[0].option != "CP" {
+		t.Fatalf("empty HIGH reset option: %#v", values)
+	}
+}

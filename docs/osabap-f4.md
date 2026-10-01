@@ -12,14 +12,15 @@ not implement F4; frontend dialog calls there report that they are available
 only in the terminal selection screen.
 
 The terminal browser uses DATASET's sandbox. Open and directory dialogs list
-only `-allow-read` roots (write roots are readable); save lists only
+only `-allow-read` roots (write-only roots are not shown); save lists only
 `-allow-write` roots. A path or symlink outside a root is refused. F4 reports
 the missing grant in the form footer. Arrows move, PageUp/PageDown scroll by a
 screen, Home/End jump to the first/last entry, Enter descends or chooses a
 file, Backspace goes up within the root, `/` filters, Space chooses the current
 directory (or marks files with `MULTISELECTION = 'X'`), `n` enters an open or save name,
 and Esc cancels. Enter returns marked files. Each chosen path is validated
-again after the listing.
+again after the listing. Marks hidden by a changed filter are dropped when
+Enter returns the visible marked files.
 
 ## ABAP contract
 
@@ -42,6 +43,10 @@ on either cancellation or failure, save reports `ACTION_CANCEL` and keeps the
 caller's path fields; directory browse keeps `SELECTED_FOLDER`. The terminal
 form reports failures for these dialogs in its footer too.
 
+In a headless run, a dialog raises the classic `ERROR_NO_GUI` exception.
+An ABAP `EXCEPTIONS error_no_gui = 3 OTHERS = 5` list therefore sets
+`sy-subrc` to 3. Without a matching handler, the call ends the report.
+
 For `F4_FILENAME`, the documented call supplies `PROGRAM_NAME`,
 `DYNPRO_NUMBER`, and `FIELD_NAME` as EXPORTING inputs and receives
 `FILE_NAME` under IMPORTING. For `KD_GET_FILENAME_ON_F4`, the documented
@@ -49,7 +54,7 @@ EXPORTING inputs are `PROGRAM_NAME`, `DYNPRO_NUMBER`, `FIELD_NAME`, `MASK`,
 and `STATIC`; `FILE_NAME` is CHANGING, and SAP's example lists
 `MASK_TOO_LONG = 1` under EXCEPTIONS. The terminal implementation accepts
 these inputs but uses the sandbox's directory listing; it does not apply
-`MASK` or the SAP GUI dynpro context. The terminal Cancel preserves
+`MASK` or the SAP GUI dynpro context. A non-empty `MASK` is ignored. The terminal Cancel preserves
 `FILE_NAME` and is not an exception. That behavior is an implementation
 choice, not an A4H measurement.
 
@@ -61,7 +66,10 @@ terminal browser shows the union of the patterns. `DEFAULT_EXTENSION` is
 appended to an entered name without an extension. `INITIAL_DIRECTORY` sets the
 starting folder when it is inside a granted root; `WINDOW_TITLE` heads the
 browser. `DEFAULT_FILE_NAME` supplies the save name, and
-`PROMPT_ON_OVERWRITE` defaults to `'X'` and asks yes or no before returning an
-existing file; passing a space disables the prompt.
+`PROMPT_ON_OVERWRITE` asks yes or no before returning an existing file. In
+`osabap`, its optional ABAP parameter has no declared default: omission and
+an explicit space both compile to the same empty Go value. The host treats
+that value as the documented default `'X'`, so passing a space cannot disable
+the prompt in this host.
 These input behaviors follow SAP's published parameter contract and remain
 **unverified on A4H**.

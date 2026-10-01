@@ -3,7 +3,7 @@
 // selection screen is its command-line contract; the Go host is deliberately
 // separate from OSGo's HTTP/OData/database host.
 import {execFileSync} from "node:child_process";
-import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, resolve} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
@@ -26,10 +26,16 @@ const positional = cli.filter((arg, i) => arg !== "--lib" && cli[i - 1] !== "--l
 const report = resolve(positional[0] ?? join(here, "apps", "hello", "zhello.prog.abap"));
 const name = basename(report).replace(/\.prog\.abap$/i, "").toUpperCase();
 const className = `ZCL_OSABAP_${name.replace(/^Z/, "")}`;
-const generated = join(here, ".out", "osabap-abap");
-const dir = join(here, "go", "cmd", "osabap");
+const buildRoot = process.env.OSABAP_BUILD_ROOT ? resolve(process.env.OSABAP_BUILD_ROOT) : here;
+if (buildRoot !== here) {
+  mkdirSync(buildRoot, {recursive: true});
+  cpSync(join(here, "go"), join(buildRoot, "go"), {recursive: true, filter: (path) =>
+    !/(^|[/\\])(?:\.out|zz_[^/\\]*|generated)(?:[/\\]|$)/.test(path)});
+}
+const generated = join(buildRoot, ".out", "osabap-abap");
+const dir = join(buildRoot, "go", "cmd", "osabap");
 const targetGOOS = process.env.GOOS || (process.platform === "win32" ? "windows" : "");
-const bin = join(here, ".out", targetGOOS === "windows" ? "osabap.exe" : "osabap");
+const bin = join(buildRoot, ".out", targetGOOS === "windows" ? "osabap.exe" : "osabap");
 
 checkLibPins(home);
 rmSync(generated, {recursive: true, force: true});
@@ -262,7 +268,7 @@ func newReport(s *abap.Session) *${className} { return New_${className}(s) }
 
 execFileSync("gofmt", ["-w", dir], {stdio: "inherit"});
 execFileSync("go", ["build", ...(tables.length > 0 ? [] : ["-tags", "nodatabase"]), "-trimpath", "-ldflags=-s -w", "-o", bin, "./cmd/osabap"], {
-  cwd: join(here, "go"), stdio: "inherit",
+  cwd: join(buildRoot, "go"), stdio: "inherit",
 });
 console.log(`osabap: ${name}, ${program.classes.length} classes, ${program.partial.length} statement stubs` +
   `${tables.length ? `, tables ${tables.join(", ")} (-db)` : ""} -> ${bin}`);

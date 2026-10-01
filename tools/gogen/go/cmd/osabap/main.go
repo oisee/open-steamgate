@@ -37,6 +37,7 @@ func hostRunRequest(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SEL
 }
 
 var stopProfile = func() {}
+var dialogSandbox *abap.Sandbox
 
 func main() {
 	// OSABAP_CPUPROFILE=<file>: Go's CPU profile of the whole run, for
@@ -97,6 +98,9 @@ func main() {
 			abap.DialogStep(func() { result = hostRun(s, report, input, "", "") })
 		}
 	}()
+	if dialogSandbox != nil {
+		_ = dialogSandbox.Close()
+	}
 	// the -db file is whole only once it is closed: it is opened in WAL mode,
 	// and until the last connection closes, the rows live in <file>-wal
 	closeDB()
@@ -178,7 +182,8 @@ func datasetOptions(host []reportargs.Arg) {
 			panic(err)
 		}
 	}
-	abap.SetDatasetHost(abap.SandboxFromEnv())
+	dialogSandbox = abap.SandboxFromEnv()
+	abap.SetDatasetHost(dialogSandbox)
 }
 
 func graphicalInput(s *abap.Session, report ZIF_GG_REPORT_V1, screen ZCL_GG_HOST__TY_RESULT) ([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE, error) {
@@ -287,7 +292,11 @@ func browserForDialog(options abap.FrontendPickOptions) filepick.Browser {
 	}
 	// The generated call passes "" when PROMPT_ON_OVERWRITE is omitted;
 	// SAP's documented default is X. An explicit space disables the prompt.
-	return filepick.Browser{Sandbox: abap.SandboxFromEnv(), Mode: mode, Initial: options.Initial, DefaultName: options.Name, Title: options.Title, Multi: options.Kind == "open-multiple", Patterns: filepick.SAPPatterns(options.Filter), Extension: options.Extension, ConfirmOverwrite: options.Kind == "save" && (options.Prompt == "" || strings.EqualFold(strings.TrimSpace(options.Prompt), "X"))}
+	sb := dialogSandbox
+	if sb == nil {
+		sb = abap.SandboxFromEnv()
+	}
+	return filepick.Browser{Sandbox: sb, Mode: mode, Initial: options.Initial, DefaultName: options.Name, Title: options.Title, Multi: options.Kind == "open-multiple", Patterns: filepick.SAPPatterns(options.Filter), Extension: options.Extension, ConfirmOverwrite: options.Kind == "save" && (options.Prompt == "" || strings.EqualFold(strings.TrimSpace(options.Prompt), "X"))}
 }
 
 func selectionValuesFromFields(fields []termgui.Field, screen ZCL_GG_HOST__TY_RESULT) []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE {
@@ -298,10 +307,16 @@ func selectionValuesFromFields(fields []termgui.Field, screen ZCL_GG_HOST__TY_RE
 	for _, field := range fields {
 		if field.Kind == termgui.Ranges {
 			input := current[field.Name]
+			previous := input.ranges
 			input.ranges = nil
 			if strings.TrimSpace(field.Value) != "" {
-				for _, value := range strings.Split(field.Value, ",") {
-					input.ranges = append(input.ranges, ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE{sign: "I", option: "EQ", low: strings.TrimSpace(value)})
+				for i, value := range strings.Split(field.Value, ",") {
+					r := ZIF_GG_SELECTION_SCREEN_TYPES__TY_RANGE{sign: "I", option: "EQ"}
+					if i < len(previous) {
+						r = previous[i]
+					}
+					r.low = strings.TrimSpace(value)
+					input.ranges = append(input.ranges, r)
 				}
 			}
 			current[field.Name] = input
@@ -315,7 +330,7 @@ func selectionValuesFromFields(fields []termgui.Field, screen ZCL_GG_HOST__TY_RE
 				input.ranges[0].high = field.Value
 				if field.Value != "" {
 					input.ranges[0].option = "BT"
-				} else {
+				} else if input.ranges[0].option == "BT" {
 					input.ranges[0].option = "EQ"
 				}
 			}

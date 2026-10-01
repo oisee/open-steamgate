@@ -306,6 +306,8 @@ func sapGUIExit(items []diag.Item) bool {
 }
 
 func sapGUIF4(items []diag.Item) bool {
+	// TODO: verify against a DIAG capture before treating this as the full
+	// set of SAP GUI F4 OK codes.
 	for _, item := range items {
 		if item.Type == diag.ItemAPPL && item.ID == 0x0c && item.SID == 0x04 {
 			code := strings.ToUpper(strings.TrimSpace(string(item.Value)))

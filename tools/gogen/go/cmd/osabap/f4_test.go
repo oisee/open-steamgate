@@ -63,6 +63,8 @@ func TestSaveOverwritePromptDefaultAndSpace(t *testing.T) {
 		t.Fatalf("declined overwrite: %q, %v", got, err)
 	}
 	options.Prompt = " "
+	// This distinguishes the direct Go API only. The ABAP compiler lowers
+	// explicit SPACE and an omitted optional argument to the same empty value.
 	browser = browserForDialog(options)
 	if browser.ConfirmOverwrite {
 		t.Fatal("explicit space still prompts")

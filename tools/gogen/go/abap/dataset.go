@@ -466,6 +466,18 @@ type Sandbox struct {
 	handles map[string]*os.Root
 }
 
+// Close releases the root descriptors owned by a command or dialog.
+func (sb *Sandbox) Close() error {
+	sb.roots()
+	var first error
+	for _, root := range sb.handles {
+		if err := root.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
 // SandboxFromEnv is the sandbox of OSD_DATASET_READ / OSD_DATASET_WRITE /
 // OSD_DATASET_HOME / OSD_DATASET_AUDIT, the variables tools/osd-dataset.mjs
 // reads; with neither root set it refuses everything.
@@ -577,6 +589,29 @@ func (sb *Sandbox) BrowsePath(name string, save bool) (string, *os.File, error) 
 	return real, f, err
 }
 
+// BrowseEntry inspects a directory entry without opening it. In particular,
+// opening a FIFO here would wait for a writer while the terminal is raw.
+func (sb *Sandbox) BrowseEntry(name string, save bool) (string, os.FileInfo, error) {
+	_, write := sb.roots()
+	roots, given := sb.browseRead, sb.Read
+	if save {
+		roots, given = write, sb.Write
+	}
+	real, _, refused, missing := sb.place(name, roots, given)
+	if refused != "" {
+		return "", nil, errors.New(refused)
+	}
+	if missing {
+		return "", nil, os.ErrNotExist
+	}
+	root, rel, ok := sb.beneath(real, roots)
+	if !ok {
+		return "", nil, os.ErrPermission
+	}
+	info, err := root.Stat(rel)
+	return real, info, err
+}
+
 // BrowseSaveName validates a future file without creating or truncating it.
 func (sb *Sandbox) BrowseSaveName(name string) (string, error) {
 	_, write := sb.roots()
@@ -596,9 +631,8 @@ func (sb *Sandbox) BrowseSaveName(name string) (string, error) {
 	if info, err := root.Lstat(rel); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return "", os.ErrPermission
 	}
-	if _, existing, err := sb.BrowsePath(real, true); err == nil {
-		defer existing.Close()
-		if info, err := existing.Stat(); err == nil && info.IsDir() {
+	if _, info, err := sb.BrowseEntry(real, true); err == nil {
+		if info.IsDir() || !info.Mode().IsRegular() {
 			return "", errors.New("cannot save to a directory")
 		}
 	}

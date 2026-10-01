@@ -2,7 +2,7 @@
 // the local open-abap-gui/core checkouts, just like osabap.mjs itself.
 import test from "node:test";
 import assert from "node:assert/strict";
-import {execFileSync, spawnSync} from "node:child_process";
+import {execFileSync, spawn, spawnSync} from "node:child_process";
 import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {delimiter, dirname, join} from "node:path";
@@ -467,6 +467,34 @@ test("osd run builds a report once, keeps it and passes its arguments through", 
   }
 });
 
+test("two concurrent osd run builds share a checkout without generated-file races", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "osd-run-parallel-"));
+  try {
+    const osd = join(here, "..", "..", "bin", "osd.mjs");
+    const reports = ["first", "second"].map((name) => {
+      const folder = join(dir, name);
+      cpSync(join(here, "apps", "hello"), folder, {recursive: true});
+      return join(folder, "zhello.prog.abap");
+    });
+    const runParallel = (report) => new Promise((resolveResult) => {
+      const child = spawn(process.execPath, [osd, "run", report, "--name", "Alice"], {
+        env: {...process.env, OSD_RUN_CACHE: join(dir, "cache")}, stdio: ["ignore", "pipe", "pipe"]});
+      let stdout = "", stderr = "";
+      child.stdout.on("data", (chunk) => { stdout += chunk; });
+      child.stderr.on("data", (chunk) => { stderr += chunk; });
+      child.on("close", (status) => resolveResult({status, stdout, stderr}));
+    });
+    const results = await Promise.all(reports.map(runParallel));
+    for (const result of results) {
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /Hello Alice/);
+    }
+    const cached = await runParallel(reports[0]);
+    assert.equal(cached.status, 0, cached.stderr);
+    assert.doesNotMatch(cached.stderr, /osd run: building/);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
 test("F4 report builds and terminal keyboard drives open, directory, save", () => {
   execFileSync(process.execPath, [builder, join(here, "apps", "pickfile", "zpickfile.prog.abap")], {stdio: "inherit"});
   execFileSync("go", ["test", "-tags", "nodatabase,osabap_pickfile", "./cmd/osabap"], {
@@ -476,6 +504,45 @@ test("F4 report builds and terminal keyboard drives open, directory, save", () =
   const result = run(["--in", "input", "--dir", "folder", "--out", "output", "--fm1", "one", "--fm2", "two"]);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /input\s+folder\s+output/);
+});
+
+test("ABAP compiler lowers explicit space and omitted overwrite prompt identically", () => {
+  const dir = mkdtempSync(join(tmpdir(), "osabap-prompt-"));
+  try {
+    const report = join(dir, "zprompt.prog.abap");
+    writeFileSync(report, [
+      "REPORT zprompt.", "PARAMETERS p_file TYPE string.",
+      "AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_file.",
+      "  DATA lv_name TYPE string.", "  DATA lv_path TYPE string.", "  DATA lv_full TYPE string.", "  DATA lv_action TYPE i.",
+      "  cl_gui_frontend_services=>file_save_dialog( CHANGING filename = lv_name path = lv_path fullpath = lv_full user_action = lv_action ).",
+      "  cl_gui_frontend_services=>file_save_dialog( EXPORTING prompt_on_overwrite = space CHANGING filename = lv_name path = lv_path fullpath = lv_full user_action = lv_action ).",
+      "START-OF-SELECTION.", "  WRITE p_file.", ""].join("\n"));
+    execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
+    const generated = readFileSync(join(here, "go", "cmd", "osabap", "zz_generated.go"), "utf8");
+    const calls = generated.match(/abap\.FrontendFileSaveDialog\([^\n]+/g) ?? [];
+    assert.equal(calls.length, 1); // wrapper once; ABAP calls the wrapper twice
+    const event = /func \(.*?AT_SELECTION_SCREEN_VALUE_REQ[\s\S]*?\n}/.exec(generated)?.[0] ?? generated;
+    assert.match(event, /FILE_SAVE_DIALOG\([^\n]*""[^\n]*\)/);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("headless ABAP dialog call maps ERROR_NO_GUI through EXCEPTIONS", () => {
+  const dir = mkdtempSync(join(tmpdir(), "osabap-headless-f4-"));
+  try {
+    const report = join(dir, "zheadlessf4.prog.abap");
+    writeFileSync(report, ["REPORT zheadlessf4.", "DATA lv_folder TYPE string.",
+      "START-OF-SELECTION.",
+      "  cl_gui_frontend_services=>directory_browse( CHANGING selected_folder = lv_folder EXCEPTIONS error_no_gui = 3 OTHERS = 5 ).",
+      "  WRITE: / sy-subrc.",
+      "  CALL FUNCTION 'F4_FILENAME' IMPORTING file_name = lv_folder EXCEPTIONS error_no_gui = 3 OTHERS = 5.",
+      "  WRITE: / sy-subrc.",
+      "  CALL FUNCTION 'KD_GET_FILENAME_ON_F4' CHANGING file_name = lv_folder EXCEPTIONS error_no_gui = 3 OTHERS = 5.",
+      "  WRITE: / sy-subrc.", ""].join("\n"));
+    execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
+    const result = run(["-params", "{}"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^3\s*\n3\s*\n3\s*\n$/);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
 test("select-option LOW and HIGH F4 handlers build and run in the terminal", () => {

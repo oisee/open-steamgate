@@ -4,13 +4,49 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"osg/gogen/abap"
 )
+
+func TestFIFOIsNeverOpenedOrReturned(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFO requires mkfifo")
+	}
+	root := t.TempDir()
+	if err := exec.Command("mkfifo", filepath.Join(root, "pipe")).Run(); err != nil {
+		t.Skipf("mkfifo unavailable: %v", err)
+	}
+	b := Browser{Sandbox: &abap.Sandbox{Read: []string{root}}, Mode: Open}
+	done := make(chan error, 1)
+	go func() {
+		entries, err := b.entries(root, "")
+		if err == nil && len(entries) != 0 {
+			err = fmt.Errorf("FIFO listed: %+v", entries)
+		}
+		if _, ok := b.openName(root, "pipe"); err == nil && ok {
+			err = errors.New("FIFO selected by name")
+		}
+		if _, ok := b.selected(root, entry{name: "pipe"}); err == nil && ok {
+			err = errors.New("FIFO selected")
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("FIFO blocked picker")
+	}
+}
 
 func TestLongDirectoryViewportAndNavigation(t *testing.T) {
 	root := t.TempDir()

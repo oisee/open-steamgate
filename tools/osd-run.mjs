@@ -60,12 +60,12 @@ function* walk(dir, filter) {
 
 // The compiler's own files: tools/gogen (its runtime ABAP under apps/runtime
 // included) and the tools/*.mjs its front end imports, as git knows them,
-// tracked or new but never ignored, so what a build or another tool writes
+// tracked only, so what a build or another tool writes
 // there (zz_*, go/generated, the gateway's main.go) is not an input
 function compilerFiles() {
-  const listed = spawnSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "tools/gogen", ":(glob)tools/*.mjs"],
+  const listed = spawnSync("git", ["ls-files", "-z", "--cached", "--", "tools/gogen", ":(glob)tools/*.mjs"],
     {cwd: root, encoding: "utf8"});
-  if (listed.status === 0) return listed.stdout.split("\0").filter(Boolean).sort().map((file) => join(root, file));
+  if (listed.status === 0) return listed.stdout.split("\0").filter((file) => file && !/(^|\/)(?:\.out|zz_[^/]*)(\/|$)/.test(file)).sort().map((file) => join(root, file));
   return [...walk(join(root, "tools", "gogen"), (name) => /\.(mjs|go|mod|sum|abap|xml)$/.test(name) && !name.startsWith("zz_"))];
 }
 
@@ -95,9 +95,8 @@ export function buildHash({report, libs}) {
   return hash.digest("hex").slice(0, 32);
 }
 
-// One build at a time: osabap writes its Go module in place. The lock holds
-// the builder's pid, so a build that died (Ctrl+C, a kill) leaves a lock the
-// next run takes over at once instead of waiting it out.
+// Coordinate cache publication and pruning across processes. The lock holds
+// the builder's pid, so a build that died leaves a lock the next run can take.
 const alive = (pid) => {
   try {
     process.kill(pid, 0);
@@ -196,18 +195,23 @@ export function binaryFor({report, libs}, {log = (line) => console.error(line)} 
     if (existsSync(kept)) return kept;
     log(`osd run: building ${basename(report)}`);
     const [command, ...args] = toolCommand(join(root, "tools", "gogen", "osabap.mjs"), [report, ...libs.flatMap((lib) => ["--lib", lib])]);
-    const env = {...process.env};
+    const buildRoot = join(hashed, `.build-${process.pid}`);
+    const env = {...process.env, OSABAP_BUILD_ROOT: buildRoot};
     delete env.GOOS;
     delete env.GOARCH;
-    // the build talks on stderr: stdout is the report's own output
-    const built = spawnSync(command, args, {cwd: root, env, stdio: ["ignore", 2, 2]});
-    if (built.error) throw new Error(`osd run: the build of ${basename(report)} did not start: ${built.error.message}`);
-    if (built.signal) throw new Error(`osd run: the build of ${basename(report)} was stopped (${built.signal})`);
-    if (built.status !== 0) throw new Error(`osd run: the build of ${basename(report)} failed`);
-    mkdirSync(dirname(kept), {recursive: true});
-    const temp = `${kept}.${process.pid}`;
-    copyFileSync(join(root, "tools", "gogen", ".out", exe), temp);
-    renameSync(temp, kept);
+    try {
+      // the build talks on stderr: stdout is the report's own output
+      const built = spawnSync(command, args, {cwd: root, env, stdio: ["ignore", 2, 2]});
+      if (built.error) throw new Error(`osd run: the build of ${basename(report)} did not start: ${built.error.message}`);
+      if (built.signal) throw new Error(`osd run: the build of ${basename(report)} was stopped (${built.signal})`);
+      if (built.status !== 0) throw new Error(`osd run: the build of ${basename(report)} failed`);
+      mkdirSync(dirname(kept), {recursive: true});
+      const temp = `${kept}.${process.pid}`;
+      copyFileSync(join(buildRoot, ".out", exe), temp);
+      renameSync(temp, kept);
+    } finally {
+      rmSync(buildRoot, {recursive: true, force: true});
+    }
     prune(dir);
     return kept;
   }, log);
