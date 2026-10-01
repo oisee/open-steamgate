@@ -87,10 +87,11 @@ jobs:
       - name: Go vet and tests
         working-directory: tools/gogen/go
         run: |
-          go vet ./abap/ ./termgui/ ./filepick/ ./amc/ ./session/...
+          go vet ./abap/ ./termgui/ ./filepick/ ./amc/ ./session/... ./enq/
           go test ./abap/... ./termgui/... ./filepick/... ./session/...
-          # the AMC broker is concurrent by nature: its tests run under the race detector
-          go test -race ./amc/...
+          # the AMC broker and the lock server are concurrent by nature: their
+          # tests run under the race detector (enq: the E0 contract gate)
+          go test -race ./amc/... ./enq/...
       - name: Semantics, Go and IR-as-JS against the measured answers
         run: node tools/gogen/semantics.mjs
       # osabap: a report built into a native command (open-abap-gui's
