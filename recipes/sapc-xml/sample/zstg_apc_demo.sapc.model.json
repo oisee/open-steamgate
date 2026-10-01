@@ -1,0 +1,12 @@
+{
+  "@id": "sapc/ZSTG_APC_DEMO",
+  "kind": "sapc",
+  "applicationId": "ZSTG_APC_DEMO",
+  "version": "A",
+  "path": "/sap/bc/apc/sap/zstg_apc_demo",
+  "className": "ZCL_STG_APC_DEMO",
+  "applicationVersion": 1,
+  "stateful": true,
+  "description": "OSD demo push channel",
+  "lang": "E"
+}

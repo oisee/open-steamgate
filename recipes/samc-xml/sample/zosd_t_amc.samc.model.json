@@ -1,0 +1,126 @@
+{
+  "@id": "samc/ZOSD_T_AMC",
+  "kind": "samc",
+  "applicationId": "ZOSD_T_AMC",
+  "version": "A",
+  "description": "OSD AMC probe (throwaway)",
+  "lang": "E",
+  "channels": [
+    {
+      "@id": "samc/ZOSD_T_AMC/ch/pc",
+      "channelId": "/pc",
+      "scope": "C",
+      "messageType": "PCP"
+    },
+    {
+      "@id": "samc/ZOSD_T_AMC/ch/pu",
+      "channelId": "/pu",
+      "scope": "U",
+      "messageType": "PCP"
+    },
+    {
+      "@id": "samc/ZOSD_T_AMC/ch/ps",
+      "channelId": "/ps",
+      "scope": "S",
+      "messageType": "PCP"
+    }
+  ],
+  "authorities": [
+    {
+      "@id": "samc/ZOSD_T_AMC/auth/1",
+      "nr": 1,
+      "channelId": "/pc",
+      "program": "ZCL_OSD_T_DMN",
+      "program_id": "ZCL_OSD_T_DMN=================CP",
+      "activity": "S"
+    },
+    {
+      "@id": "samc/ZOSD_T_AMC/auth/2",
+      "nr": 2,
+      "channelId": "/pc",
+      "program": "ZCL_OSD_T_DMN",
+      "program_id": "ZCL_OSD_T_DMN=================CP",
+      "activity": "R"
+    },
+    {
+      "@id": "samc/ZOSD_T_AMC/auth/3",
+      "nr": 3,
+      "channelId": "/pc",
+      "program": "ZCL_OSD_T_DDRV",
+      "program_id": "ZCL_OSD_T_DDRV================CP",
+      "activity": "S"
+    },
+    {
+      "@id": "samc/ZOSD_T_AMC/auth/4",
+      "nr": 4,
+      "channelId": "/pc",
+      "program": "ZCL_OSD_T_DDRV",
+      "program_id": "ZCL_OSD_T_DDRV================CP",
+      "activity": "R"
+    },
+    {
+      "@id": "samc/ZOSD_T_AMC/auth/5",
+      "nr": 5,
+      "channelId": "/pu",
+      "program": "ZCL_OSD_T_DMN",
+      "program_id": "ZCL_OSD_T_DMN=================CP",
+      "activity": "S"
+    },
+    {
+      "@id": "samc/ZOSD_T_AMC/auth/6",
+      "nr": 6,
+      "channelId": "/pu",
+      "program": "ZCL_OSD_T_DMN",
+      "program_id": "ZCL_OSD_T_DMN=================CP",
+      "activity": "R"
+    },
+    {
+      "@id": "samc/ZOSD_T_AMC/auth/7",
+      "nr": 7,
+      "channelId": "/pu",
+      "program": "ZCL_OSD_T_DDRV",
+      "program_id": "ZCL_OSD_T_DDRV================CP",
+      "activity": "S"
+    },
+    {
+      "@id": "samc/ZOSD_T_AMC/auth/8",
+      "nr": 8,
+      "channelId": "/pu",
+      "program": "ZCL_OSD_T_DDRV",
+      "program_id": "ZCL_OSD_T_DDRV================CP",
+      "activity": "R"
+    },
+    {
+      "@id": "samc/ZOSD_T_AMC/auth/9",
+      "nr": 9,
+      "channelId": "/ps",
+      "program": "ZCL_OSD_T_DMN",
+      "program_id": "ZCL_OSD_T_DMN=================CP",
+      "activity": "S"
+    },
+    {
+      "@id": "samc/ZOSD_T_AMC/auth/10",
+      "nr": 10,
+      "channelId": "/ps",
+      "program": "ZCL_OSD_T_DMN",
+      "program_id": "ZCL_OSD_T_DMN=================CP",
+      "activity": "R"
+    },
+    {
+      "@id": "samc/ZOSD_T_AMC/auth/11",
+      "nr": 11,
+      "channelId": "/ps",
+      "program": "ZCL_OSD_T_DDRV",
+      "program_id": "ZCL_OSD_T_DDRV================CP",
+      "activity": "S"
+    },
+    {
+      "@id": "samc/ZOSD_T_AMC/auth/12",
+      "nr": 12,
+      "channelId": "/ps",
+      "program": "ZCL_OSD_T_DDRV",
+      "program_id": "ZCL_OSD_T_DDRV================CP",
+      "activity": "R"
+    }
+  ]
+}

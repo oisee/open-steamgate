@@ -29,14 +29,15 @@ describe("dsl build: recipes as build units", function () {
   const manifest = (base, patch) => ({...JSON.parse(readFileSync(join("recipes", base, "recipe.json"), "utf8")), ...patch});
 
   describe("the recipes of the repository", () => {
-    it("are found, all three, each with a manifest", () => {
-      expect(recipeNames()).to.deep.equal(["abap-constants", "abap-methods", "r1-lookup-enrich"]);
+    it("are found, all five, each with a manifest", () => {
+      expect(recipeNames()).to.deep.equal(["abap-constants", "abap-methods", "r1-lookup-enrich", "samc-xml", "sapc-xml"]);
     });
 
     it("build clean: compiled, linked, rendered through the engine, schema in step", async () => {
       const results = await buildAll(undefined, {check: true});
       expect(results.map((r) => [r.recipe, r.errors.map(format), r.samples])).to.deep.equal([
         ["abap-constants", [], 1], ["abap-methods", [], 1], ["r1-lookup-enrich", [], 2],
+        ["samc-xml", [], 1], ["sapc-xml", [], 1],
       ]);
     });
 
@@ -46,7 +47,7 @@ describe("dsl build: recipes as build units", function () {
         const template = readFileSync(join("recipes", name, recipe.template), "utf8");
         expect(compileTemplate(template).errors, name).to.deep.equal([]);
         for (const [label, model] of await PROVIDERS[recipe.model].samples(join("recipes", name))) {
-          const rendered = await renderWithEngine(template, model);
+          const rendered = await renderWithEngine(template, model, {}, "main", recipe.profile === "xml" ? "html" : "none");
           expect(rendered.text, `${name} ${label}`).to.be.a("string").that.is.not.empty;
         }
       }
@@ -243,7 +244,7 @@ describe("dsl build: recipes as build units", function () {
       expect(bad.stdout).to.include("FAIL copy: 1 error(s)").and.include("copy/template.tpl:1: section classes not closed");
       const good = run("--static");
       expect(good.status).to.equal(0);
-      expect(good.stdout.trim().split("\n")).to.have.length(3);
+      expect(good.stdout.trim().split("\n")).to.have.length(5);
       expect(good.stdout).to.include("ok   abap-constants: compiled and linked");
     });
 

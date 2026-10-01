@@ -1,0 +1,42 @@
+{
+ "object": {
+  "@id": "scalar",
+  "applicationId": "scalar",
+  "has_authorities": "scalar",
+  "has_channels": "scalar",
+  "has_description": "scalar",
+  "has_lang": "scalar",
+  "has_text": "scalar",
+  "authorities": {
+   "array": {
+    "object": {
+     "@id": "scalar",
+     "activity": "scalar",
+     "applicationId": "scalar",
+     "channelId": "scalar",
+     "kind": "scalar",
+     "nr": "scalar",
+     "program": "scalar",
+     "program_id": "scalar",
+     "version": "scalar"
+    }
+   }
+  },
+  "channels": {
+   "array": {
+    "object": {
+     "@id": "scalar",
+     "applicationId": "scalar",
+     "channelId": "scalar",
+     "messageType": "scalar",
+     "scope": "scalar",
+     "version": "scalar"
+    }
+   }
+  },
+  "description": "scalar",
+  "kind": "scalar",
+  "lang": "scalar",
+  "version": "scalar"
+ }
+}

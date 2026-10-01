@@ -25,6 +25,7 @@ CLASS ltcl_osd_tpl DEFINITION FOR TESTING
     METHODS probes_erased_when_off FOR TESTING RAISING cx_static_check.
     METHODS deterministic FOR TESTING RAISING cx_static_check.
     METHODS html_escape_only_on_request FOR TESTING RAISING cx_static_check.
+    METHODS xml_escape_all_five FOR TESTING RAISING cx_static_check.
     METHODS tag_whitespace FOR TESTING RAISING cx_static_check.
     METHODS loop_first_last_index FOR TESTING RAISING cx_static_check.
     METHODS filters FOR TESTING RAISING cx_static_check.
@@ -471,6 +472,24 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
       iv_escape   = zcl_osd_tpl=>c_escape-html ).
     cl_abap_unit_assert=>assert_equals(
       exp = `&lt;&amp;&gt;|<&>|<&>`
+      act = zcl_osd_tpl=>to_string( ls_result ) ).
+  ENDMETHOD.
+
+  METHOD xml_escape_all_five.
+    DATA ls_result TYPE zcl_osd_tpl=>ty_result.
+    ls_result = zcl_osd_tpl=>render(
+      iv_template = `{{v}}|{{{v}}}|{{& v}}`
+      ii_data     = data( `{"v":"&<>\"'"}` )
+      iv_escape   = zcl_osd_tpl=>c_escape-xml ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `&amp;&lt;&gt;&quot;&apos;|&<>"'|&<>"'`
+      act = zcl_osd_tpl=>to_string( ls_result ) ).
+    ls_result = zcl_osd_tpl=>render(
+      iv_template = `{{v}}`
+      ii_data     = data( `{"v":"'"}` )
+      iv_escape   = zcl_osd_tpl=>c_escape-html ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = `'`
       act = zcl_osd_tpl=>to_string( ls_result ) ).
   ENDMETHOD.
 
