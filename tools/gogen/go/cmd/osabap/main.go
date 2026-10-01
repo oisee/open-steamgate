@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"strings"
 
 	"osg/gogen/abap"
@@ -29,7 +30,16 @@ func hostRun(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SELECTION_
 		"", "", "", "", "", present, "", &ZIF_GG_HOST_HTML_V1__TY_NAVIGATION{}, &ZIF_GG_SESSION_TYPES_V1__TY_SUBMIT{})
 }
 
+var stopProfile = func() {}
+
 func main() {
+	// OSABAP_CPUPROFILE=<file>: Go's CPU profile of the whole run, for
+	// go tool pprof; an environment variable, so no report option is taken
+	if path := os.Getenv("OSABAP_CPUPROFILE"); path != "" {
+		if f, err := os.Create(path); err == nil && pprof.StartCPUProfile(f) == nil {
+			stopProfile = func() { pprof.StopCPUProfile(); f.Close() }
+		}
+	}
 	var result ZCL_GG_HOST__TY_RESULT
 	failed := false
 	cancelled := false
@@ -84,6 +94,7 @@ func main() {
 	// the -db file is whole only once it is closed: it is opened in WAL mode,
 	// and until the last connection closes, the rows live in <file>-wal
 	closeDB()
+	stopProfile() // before any os.Exit, which runs no deferred call
 	if cancelled {
 		return
 	}

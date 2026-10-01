@@ -145,6 +145,12 @@ const EXPECT = {
   // (ANORMALIES byte-to-i-move)
   ZCL_GOGEN_T_XMOVI: "a:11 b:-1 c:255 d:258 e:0 f:-2147483648 g:-2 h:255 x5:2 xs5:2",
   ZCL_GOGEN_T_BYTECAT: "cat:FFAB00CD00/5/0 zeros:0000AB00CD00/6 empty:0/0",
+  // CONCATENATE LINES OF ... IN BYTE MODE and x = x + y grown in place
+  // (abap.AppendBytes; the zip reader's read_all and the inflater).
+  // Derived, not measured on A4H: the rows joined; an empty table gives an
+  // empty xstring and sy-subrc 0; a view taken at 5000 bytes keeps them while
+  // the history grows to 6000, and its own append ends in EE
+  ZCL_GOGEN_T_BYTELINES: "empty:0/0 lines:ABCDEF/0 hist:6000/8889/70 old:5001/88EE fork:same",
   // cl_http_utility=>encode_x_base64: RFC 4648, padded (A4H 2026-09-24,
   // $ZOSG_TMP_0460; the LSD channel). A host function of the Go runtime: the
   // JS emitter refuses

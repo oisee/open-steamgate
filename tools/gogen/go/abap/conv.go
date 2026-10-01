@@ -591,15 +591,21 @@ type strMemo struct {
 	idx   []int
 }
 
-var lastStr atomic.Pointer[strMemo]
+// A few strings are kept, not one: a parser takes substrings of its
+// document and of the long values in it by turns, and with one slot each
+// value evicted the document, which was then scanned whole again (a third of the
+// time of a 3.7 MB XML conversion went here)
+var strMemos [4]atomic.Pointer[strMemo]
 
 func memoOf(v string) *strMemo {
 	if len(v) < 256 {
 		return nil
 	}
 	p := unsafe.StringData(v)
-	if m := lastStr.Load(); m != nil && m.p == p && m.n == len(v) {
-		return m
+	for i := range strMemos {
+		if m := strMemos[i].Load(); m != nil && m.p == p && m.n == len(v) {
+			return m
+		}
 	}
 	m := &strMemo{p: p, n: len(v), ascii: true}
 	for i := 0; i < len(v); i++ {
@@ -618,7 +624,20 @@ func memoOf(v string) *strMemo {
 		}
 		m.runes = k
 	}
-	lastStr.Store(m)
+	// the shortest gives its place up: a string costs its length to scan
+	// again, and a document must not be pushed out by the values in it
+	slot := 0
+	for i := range strMemos {
+		o := strMemos[i].Load()
+		if o == nil {
+			slot = i
+			break
+		}
+		if o.n < strMemos[slot].Load().n {
+			slot = i
+		}
+	}
+	strMemos[slot].Store(m)
 	return m
 }
 

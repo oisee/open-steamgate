@@ -10,7 +10,13 @@ import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
 
 const here = import.meta.dirname;
-const report = resolve(process.argv[2] ?? join(here, "apps", "hello", "zhello.prog.abap"));
+// node tools/gogen/osabap.mjs [report.prog.abap] [--lib <folder>]...
+// --lib adds a folder of ABAP classes and interfaces the report may use; the
+// classes, interfaces and dictionary beside the report are always part of it.
+const cli = process.argv.slice(2);
+const libs = cli.flatMap((arg, i) => arg === "--lib" ? [resolve(cli[i + 1] ?? "")] : []);
+const positional = cli.filter((arg, i) => arg !== "--lib" && cli[i - 1] !== "--lib");
+const report = resolve(positional[0] ?? join(here, "apps", "hello", "zhello.prog.abap"));
 const name = basename(report).replace(/\.prog\.abap$/i, "").toUpperCase();
 const className = `ZCL_OSABAP_${name.replace(/^Z/, "")}`;
 const generated = join(here, ".out", "osabap-abap");
@@ -35,6 +41,48 @@ writeFileSync(join(generated, `${className.toLowerCase()}.clas.abap`), converted
 // brings its tables along in its package
 const ddic = readdirSync(dirname(report)).filter((file) => /\.(tabl|dtel|doma|ttyp)\.xml$/i.test(file)).sort();
 for (const file of ddic) copyFileSync(join(dirname(report), file), join(generated, file.toLowerCase()));
+// the report's own classes and interfaces: whatever sits beside it, tests and
+// all (the build skips test classes), under the name abapGit gives them
+const own = readdirSync(dirname(report)).filter((file) => /\.(clas|intf)\.(abap|xml|[a-z_]+\.abap)$/i.test(file)).sort();
+for (const file of own) copyFileSync(join(dirname(report), file), join(generated, file.toLowerCase()));
+// compiled by name: the report's classes and interfaces, and every one in a --lib folder
+const objectsIn = (folder) => readdirSync(folder).filter((f) => /\.(clas|intf)\.abap$/i.test(f)).map((f) => f.split(".")[0].toLowerCase());
+const ownObjects = [...new Set([...objectsIn(dirname(report)), ...libs.flatMap(objectsIn)])].sort();
+// the open-abap-core classes and interfaces the program names are pulled in
+// by name, and whatever those name in turn, local classes included, until
+// nothing new turns up: a static call is not followed into the core the way a
+// class of the program is, and a CLI should not need a list of them
+const core = join(home, ".local", "lars", "open-abap-core", "src");
+const coreFiles = new Map();
+const walk = (folder) => {
+  for (const entry of readdirSync(folder, {withFileTypes: true})) {
+    const path = join(folder, entry.name);
+    if (entry.isDirectory()) walk(path);
+    else if (/\.(clas|intf)\.(abap|locals_imp\.abap|locals_def\.abap)$/i.test(entry.name)) {
+      const name = entry.name.split(".")[0].toLowerCase();
+      coreFiles.set(name, [...(coreFiles.get(name) ?? []), path]);
+    }
+  }
+};
+walk(core);
+const namesIn = (text) => new Set(text.toLowerCase().match(/[a-z_/][a-z0-9_/]*/g) ?? []);
+const ownSources = [source, ...[dirname(report), ...libs].flatMap((folder) => readdirSync(folder)
+  .filter((f) => /\.(clas|intf)\.(abap|locals_imp\.abap|locals_def\.abap)$/i.test(f))
+  .map((f) => readFileSync(join(folder, f), "utf8")))];
+const coreObjects = [];
+const seen = new Set(ownObjects);
+let pending = [...namesIn(ownSources.join("\n"))];
+while (pending.length > 0) {
+  const next = [];
+  for (const name of pending) {
+    if (seen.has(name) || !coreFiles.has(name)) continue;
+    seen.add(name);
+    coreObjects.push(name);
+    for (const path of coreFiles.get(name)) next.push(...namesIn(readFileSync(path, "utf8")));
+  }
+  pending = next;
+}
+coreObjects.sort();
 for (const helper of converted.helperSources ?? []) {
   writeFileSync(join(generated, `${helper.className.toLowerCase()}.clas.abap`), helper.source);
 }
@@ -49,7 +97,6 @@ const checkboxes = selections.filter((element) => /\bCHECKBOX\b/i.test(element.a
 const ranges = selections.filter((element) => element.kind === "select-option")
   .map((element) => element.name.toUpperCase());
 
-const core = join(home, ".local", "lars", "open-abap-core", "src");
 const rttiObjects = readdirSync(join(core, "rtti"))
   .filter((file) => /^cl_abap_.*\.clas\.abap$/i.test(file))
   .map((file) => file.replace(/\.clas\.abap$/i, ""));
@@ -59,8 +106,8 @@ const hostObjects = [join(gui, "framework"), join(gui, "framework", "host")]
     .filter((file) => /^(?:zcl_gg_host|zcx_gg_).*\.clas\.abap$/i.test(file) && !/\.testclasses\./i.test(file))
     .map((file) => file.replace(/\.clas\.abap$/i, "")));
 const program = compileProgram({
-  folders: [generated, appRuntime, join(gui, "framework"), join(gui, "src"), core],
-  objects: [className.toLowerCase(), ...hostObjects, ...rttiObjects, "zcl_gg_workbench_utility",
+  folders: [generated, ...libs, appRuntime, join(gui, "framework"), join(gui, "src"), core],
+  objects: [className.toLowerCase(), ...ownObjects, ...coreObjects, ...hostObjects, ...rttiObjects, "zcl_gg_workbench_utility",
     "cl_gui_control", "cl_gui_container", "cl_gui_cfw", "cl_gui_frontend_services", "zcl_osabap_runtime"],
   skip: (path) => /\.testclasses\.abap$/i.test(path),
 });
