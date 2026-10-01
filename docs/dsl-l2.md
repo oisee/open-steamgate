@@ -614,8 +614,8 @@ fixed CHAR first loses the decimals; packed `-10.50` becomes `10.50-`. The
 packed formatter copies the magnitude to packed, converts it to STRING,
 condenses it, then prefixes a negative sign. For integer aggregate alerts,
 direct INT8-to-STRING conversion puts the sign first here and last on SAP
-(ANORMALIES `int8-string-sign`); it is not measured on A4H because the ABAP
-Unit runner there is down. The generated formatter converts the magnitude to
+(ANORMALIES `int8-string-sign`, measured on A4H: INT8 and I -3 to STRING
+both give `3-`). The generated formatter converts the magnitude to
 INT8, converts it to STRING, condenses it, then prefixes `-`; INT8 minimum
 uses its known decimal magnitude because that positive value cannot fit in
 INT8. The interpreter emits the same field-literal text, including DEC scale.
