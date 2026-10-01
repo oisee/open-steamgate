@@ -329,3 +329,49 @@ approves only `add`, plus the package's own `DEVC` entry, which `package.devc.xm
 that appeared after the preflight, so the import is refused and nothing is overwritten. Measured 2026-10-01:
 a guard that refused every entry stopped a clean import on the first new class, and one that approved only `add`
 stopped it on the run's own package. Both were caught by real runs and are the reason for this rule.
+
+## `--in-place`: prove a rewrite inside an existing package, then roll back
+
+```
+node tools/osd-prove-on-system.mjs --in-place --package $ZPKG <folder-with-AFTER> --unit <unit> [--keep]
+node tools/osd-prove-on-system.mjs --rollback --package $ZPKG     # needs the snapshot of a --keep run
+```
+
+The perimeter is a **snapshot**, not the package (`tools/osd-prove-inplace.mjs`).
+
+1. **Snapshot.** Every TADIR object of the package (no DEVC, no subpackage) is
+   serialised with `zcl_abapgit_objects=>serialize`; each file is hashed
+   (SHA-256) on the system, fetched in chunks, checked against that hash and
+   stored under `.local/prove-runs/<package>-snapshot/` with `snapshot.json`
+   (an object's hash is the SHA-256 of its sorted `name=sha256` lines). This is
+   the rollback source and replaces the receipt. A repository of somebody else
+   in the package, an object that cannot be serialised, or a leftover snapshot
+   of an earlier run refuses the run (exit 2).
+2. **Perimeter.** Every object of the AFTER zip (built without
+   `package.devc.xml`) must be in the snapshot: no new objects, else refused.
+   Every object of the snapshot is hashed again and must equal its snapshot
+   hash, else refused and nothing is deployed. The deploy snippet serialises
+   the objects once more inside the call that deserialises, so nothing slips in
+   between.
+3. **Deploy.** Through the tool's own offline repository. An overwrite is
+   approved only for an item of the AFTER list with action update or overwrite;
+   any other entry, any data loss, any other repository refuses the import.
+4. **Tests.** The same comparison as the fresh mode (`proveClasses`).
+5. **Rollback, always.** The deployed version's hashes are recorded after the
+   import (only if abapGit reported a status). An object whose current hash
+   equals its deployed hash is re-imported from the snapshot's files; one that
+   differs from both is reported and left alone. Then every object is hashed
+   again and must equal its snapshot hash; only then does the run succeed, the
+   snapshot go, and the tool's repository row (by name and recorded key) get
+   deleted. Objects that appeared since are listed as notes, not touched.
+6. `--keep` leaves AFTER deployed and prints the `--rollback` command.
+
+Content hashes close the stamp limits above (one-second resolution, active rows
+only). Limits: a restore does not delete a file the AFTER version added to an
+object (the verification then fails, honestly); a run that dies between deploy
+and the hash read leaves unknown deployed hashes, so `--rollback` refuses to
+touch any object that differs. The abapGit calls the snippets assume
+(`zcl_abapgit_objects=>serialize( is_item io_i18n_params )`,
+`zcl_abapgit_i18n_params=>new`, `cl_abap_message_digest=>calculate_hash_for_raw`)
+are measured only against the abapGit source, not yet on a system.
+Tests: `test/prove-inplace.mjs` (fake system; each rule checked failing without it).
