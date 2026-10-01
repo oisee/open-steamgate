@@ -112,3 +112,18 @@ func TestDequeuePassesARowItCannotRelease(t *testing.T) {
 		t.Fatalf("%+v", rows)
 	}
 }
+
+// The update task's half refuses the session alike on a _SCOPE 2 row and on
+// a _SCOPE 3 row whose dialog half is the session's own.
+func TestUpdateTaskHalfIsForeignOnEveryRow(t *testing.T) {
+	for _, scope := range []int{2, 3} {
+		srv := New("i")
+		a := srv.Open("U")
+		srv.Enqueue(a, lockOn("A", "S", scope), false)
+		srv.Commit(a, true)
+		if res := srv.Enqueue(a, lockOn("A", "E", 2), false); res.Subrc != 1 || res.Msgno != "601" {
+			t.Errorf("scope %d: E next to the update task's S: %+v", scope, res)
+		}
+		srv.Close()
+	}
+}

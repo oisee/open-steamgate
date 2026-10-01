@@ -16,9 +16,11 @@ import (
 //
 // What the system does asynchronously is the harness's to model, not the
 // lock server's: the update task that releases the update owner's locks
-// after a COMMIT WORK, and the teardown of a closed RFC session. Both are
-// queued and happen at the next WAIT UP TO, which is when the measurement
-// saw them done. Time is a fake clock, so _WAIT runs in no real time.
+// after a COMMIT WORK, and the teardown of an ended session. Both are queued
+// and happen at the next WAIT UP TO or at a read with a deadline
+// (eventuallyWithinMs); an END_SESSION with async fires on the fake clock,
+// so _WAIT runs in no real time. Informational steps run and are not
+// checked.
 
 type contract struct {
 	LockObject struct {
@@ -32,10 +34,14 @@ type contract struct {
 		ID    string `json:"id"`
 		Title string `json:"title"`
 		Steps []struct {
-			Owner  string            `json:"owner"`
-			Call   string            `json:"call"`
-			Params map[string]string `json:"params"`
-			Expect map[string]any    `json:"expect"`
+			Owner         string            `json:"owner"`
+			Call          string            `json:"call"`
+			Params        map[string]string `json:"params"`
+			Expect        map[string]any    `json:"expect"`
+			Informational bool              `json:"informational"`
+			Async         *struct {
+				DelayMs int `json:"delayMs"`
+			} `json:"async"`
 		} `json:"steps"`
 	} `json:"cases"`
 }
@@ -60,6 +66,8 @@ type harness struct {
 	// ended there: the next _SCOPE 2 lock must carry a new one, or the same
 	ended   map[string]string
 	renewed map[string]bool
+	// when the last timed END_SESSION ran (grantedWithinMsOfRelease)
+	released time.Duration
 }
 
 func (h *harness) session(name string) int64 {
@@ -106,7 +114,15 @@ func number(v any) int {
 	return int(f)
 }
 
-func (h *harness) step(owner, call string, p map[string]string, expect map[string]any) string {
+func (h *harness) flush() {
+	for _, f := range h.pending {
+		f()
+	}
+	h.pending = nil
+}
+
+// step runs one step; delay is an async step's delay in ms, -1 for none
+func (h *harness) step(owner, call string, p map[string]string, expect map[string]any, delay int) string {
 	sid := h.session(owner)
 	switch {
 	case strings.HasPrefix(call, "ENQUEUE_") && call != "ENQUEUE_READ":
@@ -139,12 +155,17 @@ func (h *harness) step(owner, call string, p map[string]string, expect map[strin
 			return "holder " + res.Holder
 		}
 		if e, ok := expect["elapsedMs"].(map[string]any); ok {
-			approx, has := e["approx"]
-			if !has {
-				approx = e["measured"]
+			took := h.now - start
+			if v, ok := e["min"]; ok && took < time.Duration(number(v))*time.Millisecond {
+				return fmt.Sprintf("elapsed %v", took)
 			}
-			if d := h.now - start - time.Duration(number(approx))*time.Millisecond; d > 500*time.Millisecond || d < -500*time.Millisecond {
-				return fmt.Sprintf("elapsed %v", h.now-start)
+			if v, ok := e["max"]; ok && took > time.Duration(number(v))*time.Millisecond {
+				return fmt.Sprintf("elapsed %v", took)
+			}
+		}
+		if v, ok := expect["grantedWithinMsOfRelease"]; ok {
+			if h.released == 0 || h.now-h.released > time.Duration(number(v))*time.Millisecond {
+				return fmt.Sprintf("granted at %v, released at %v", h.now, h.released)
 			}
 		}
 	case strings.HasPrefix(call, "DEQUEUE_ALL"):
@@ -152,6 +173,11 @@ func (h *harness) step(owner, call string, p map[string]string, expect map[strin
 	case strings.HasPrefix(call, "DEQUEUE_"):
 		h.srv.Dequeue(sid, h.request(p))
 	case call == "ENQUEUE_READ":
+		if _, ok := expect["eventuallyWithinMs"]; ok {
+			// a release that is asynchronous on a system has happened by the
+			// deadline: the queued update task and session teardowns run
+			h.flush()
+		}
 		return h.read(p, expect)
 	case strings.HasPrefix(call, "CALL FUNCTION") && strings.Contains(call, "IN UPDATE TASK"):
 		h.updated[owner] = true
@@ -171,23 +197,26 @@ func (h *harness) step(owner, call string, p map[string]string, expect map[strin
 	case strings.HasPrefix(call, "WAIT UP TO"):
 		var n int
 		fmt.Sscanf(strings.TrimPrefix(call, "WAIT UP TO "), "%d", &n)
-		for _, f := range h.pending {
-			f()
-		}
-		h.pending = nil
+		h.flush()
 		h.advance(time.Duration(n) * time.Second)
+	case call == "END_SESSION":
+		if delay >= 0 {
+			h.timed = append(h.timed, event{at: h.now + time.Duration(delay)*time.Millisecond, do: func() {
+				h.srv.End(sid)
+				h.released = h.now
+			}})
+		} else {
+			h.pending = append(h.pending, func() { h.srv.End(sid) })
+		}
 	case strings.HasPrefix(call, "RFC_CONNECTION_CLOSE"):
+		at := strings.Index(call, "(ends ")
+		if at < 0 {
+			return "which session the close ends: " + call
+		}
 		var name string
-		fmt.Sscanf(call[strings.Index(call, "(ends ")+len("(ends "):], "%2s", &name)
+		fmt.Sscanf(call[at+len("(ends "):], "%2s", &name)
 		ended := h.session(name)
 		h.pending = append(h.pending, func() { h.srv.End(ended) })
-	case call == "job ends":
-		// the case reads about five seconds after the job's last statement
-		h.srv.End(sid)
-	case strings.HasPrefix(call, "holds "):
-		var n int
-		fmt.Sscanf(strings.TrimPrefix(call, "holds "), "%d", &n)
-		h.timed = append(h.timed, event{at: h.now + time.Duration(n)*time.Second, do: func() { h.srv.End(sid) }})
 	case strings.HasPrefix(call, "return from the RFC call"):
 		// a stateful connection: the session goes on
 	default:
@@ -270,7 +299,15 @@ func TestContract(t *testing.T) {
 			defer srv.Close()
 			h := &harness{t: t, srv: srv, c: &c, owners: map[string]int64{}, updated: map[string]bool{}, ended: map[string]string{}, renewed: map[string]bool{}}
 			for i, st := range tc.Steps {
-				if msg := h.step(st.Owner, st.Call, st.Params, st.Expect); msg != "" {
+				delay := -1
+				if st.Async != nil {
+					delay = st.Async.DelayMs
+				}
+				expect := st.Expect
+				if st.Informational {
+					expect = nil // what the sandbox showed in a race, not a gate
+				}
+				if msg := h.step(st.Owner, st.Call, st.Params, expect, delay); msg != "" {
 					t.Fatalf("%s: step %d %s %s %v: %s", tc.Title, i+1, st.Owner, st.Call, st.Params, msg)
 				}
 			}

@@ -156,6 +156,9 @@ func garg(client string, fields []Field) string {
 			continue
 		}
 		v := f.Value
+		if rs := []rune(v); f.Length > 0 && len(rs) > f.Length {
+			v = string(rs[:f.Length])
+		}
 		if n := len([]rune(v)); n < f.Length {
 			v += strings.Repeat(" ", f.Length-n)
 		}
@@ -207,25 +210,28 @@ func (st *state) enqueue(sid int64, r Request) Result {
 		return Result{Subrc: 2}
 	}
 	arg := garg(r.Client, r.Fields)
-	// another owner first: E and X refuse everything, S and O share
-	for _, w := range st.rows {
-		if s.owns(w) || w.Client != r.Client || w.Table != r.Table || !collide(w.Arg, arg) {
-			continue
-		}
-		if !shared(w.Mode) || !shared(r.Mode) {
-			return Result{Subrc: 1, Msgno: "601", Holder: w.User}
-		}
-	}
-	// the caller's own locks: anything with X is refused, the rest stacks;
-	// a lock is the table, the argument and the mode (GOBJ is shown only)
+	// the conflicting lock taken first decides, whoever holds it (measured,
+	// precedence-* in E0): another owner's E or X, or any of its own when one
+	// side is X; S and O are shared with other owners, the caller's own
+	// locks stack. The rows are in the order they were taken.
 	var same *row
 	for _, w := range st.rows {
-		if !s.owns(w) || w.Client != r.Client || w.Table != r.Table || !collide(w.Arg, arg) {
+		if w.Client != r.Client || w.Table != r.Table || !collide(w.Arg, arg) {
+			continue
+		}
+		// halves, not rows: another session's row, or the half of an update
+		// owner a COMMIT ended (the update task's), is another owner's even
+		// when the row's dialog half is the caller's
+		if (w.Session != sid || w.Updates > 0 && w.Update != s.update) && (!shared(w.Mode) || !shared(r.Mode)) {
+			return Result{Subrc: 1, Msgno: "601", Holder: w.User}
+		}
+		if !s.owns(w) {
 			continue
 		}
 		if w.Mode == "X" || r.Mode == "X" {
 			return Result{Subrc: 1, Msgno: "602", Holder: w.User}
 		}
+		// a lock is the table, the argument and the mode (GOBJ is shown only)
 		if w.Arg == arg && w.Mode == r.Mode && (w.Updates == 0 || w.Update == s.update) {
 			same = w
 		}
