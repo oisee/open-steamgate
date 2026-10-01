@@ -1,0 +1,42 @@
+{
+  "name": "RFC_READ_TABLE",
+  "destination": "SYN",
+  "params": {
+    "QUERY_TABLE": "ZTPROXY_B",
+    "DELIMITER": "|",
+    "ROWCOUNT": 1000
+  },
+  "result": {
+    "FIELDS": [
+      {
+        "FIELDNAME": "MANDT",
+        "OFFSET": "000000",
+        "LENGTH": "000003",
+        "TYPE": "C",
+        "FIELDTEXT": ""
+      },
+      {
+        "FIELDNAME": "ID",
+        "OFFSET": "000004",
+        "LENGTH": "000004",
+        "TYPE": "C",
+        "FIELDTEXT": ""
+      },
+      {
+        "FIELDNAME": "NOTE",
+        "OFFSET": "000009",
+        "LENGTH": "000010",
+        "TYPE": "C",
+        "FIELDTEXT": ""
+      }
+    ],
+    "DATA": [
+      {
+        "WA": "001|A1  |note one"
+      },
+      {
+        "WA": "001|C3  |note three"
+      }
+    ]
+  }
+}
