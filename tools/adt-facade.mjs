@@ -29,7 +29,7 @@ import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-prope
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
-import {uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {portabilityWarnings} from "./amdp-gen.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
@@ -2162,8 +2162,7 @@ export function adtRouter(options = {}) {
         // says who holds it, the way an enqueue conflict reads on a system
         const taken = req.adt.sessions.lock(session, entry.type, entry.name, () => randomUUID());
         if (taken.heldBy !== undefined) {
-          res.status(403).type("application/xml").send(exceptionDocument("ExceptionResourceLocked",
-            `${entry.type} ${entry.name} is currently locked by user ${taken.heldBy.user} in another session`));
+          res.status(403).type("application/xml").send(lockedByOtherDocument(taken.heldBy.user, entry.name));
           return;
         }
         res.status(200).type(asXmlTypeFor(req, "com.sap.adt.lock.Result2")).send(lockResultDocument(taken.handle));

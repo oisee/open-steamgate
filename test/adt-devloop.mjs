@@ -1218,10 +1218,11 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       return {status: res.status, xml, handle: xml.match(/<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/)?.[1]};
     };
     const unlockIt = (handle, caller = call) => caller(`/oo/classes/${LOCKED}?_action=UNLOCK&lockHandle=${handle}`, {method: "POST"});
-    // a second session: its own logon, its own cookie and token
-    const otherSession = async () => {
+    // a second session: its own logon, its own cookie and token; the same
+    // user as the first when no user is named
+    const otherSession = async (user) => {
       const res = await fetch(`http://localhost:${port}/sap/bc/adt/core/discovery`, {method: "HEAD",
-        headers: {"x-csrf-token": "fetch", authorization: "Basic " + Buffer.from("OTHERDEV:x").toString("base64")}});
+        headers: {"x-csrf-token": "fetch", ...(user === undefined ? {} : {authorization: "Basic " + Buffer.from(`${user}:x`).toString("base64")})}});
       const id = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
       const other = (path, options = {}) => fetch(`http://localhost:${port}/sap/bc/adt${path}`, {
         ...options,
@@ -1245,14 +1246,33 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       await unlockIt(handle);
     });
 
+    // A4H, two stateful sessions: 403, ExceptionResourceNoAccess, the holder
+    // in T100 EU 510 (V1 user, V2 object)
+    const expectLockedBy = ({status, xml}, user) => {
+      expect(status).to.equal(403);
+      expect(xml).to.contain('<type id="ExceptionResourceNoAccess"/>');
+      expect(xml).to.contain(`<message lang="EN">User ${user} is currently editing ${LOCKED}</message>`);
+      expect(xml).to.contain(`<localizedMessage lang="EN">User ${user} is currently editing ${LOCKED}</localizedMessage>`);
+      expect(xml).to.contain('<entry key="T100KEY-ID">EU</entry>');
+      expect(xml).to.contain('<entry key="T100KEY-NO">510</entry>');
+      expect(xml).to.contain(`<entry key="T100KEY-V1">${user}</entry>`);
+      expect(xml).to.contain(`<entry key="T100KEY-V2">${LOCKED}</entry>`);
+      expect(xml).to.match(/<entry key="LONGTEXT">[^<]+<\/entry>/);
+    };
+
+    it("the same user in another session is refused too, because the lock is the session's", async () => {
+      const {handle} = await lockIt();
+      const {id, other} = await otherSession();
+      expectLockedBy(await lockIt(other), "OSD");
+      await unlockIt(handle);
+      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${id}`}});
+    });
+
     it("an object locked in one session is refused to another, naming the holder", async () => {
       const {handle} = await lockIt();
-      const {other} = await otherSession();
+      const {other} = await otherSession("OTHERDEV");
       const refused = await lockIt(other);
-      expect(refused.status).to.equal(403);
-      expect(refused.xml).to.contain("exc:exception");
-      expect(refused.xml).to.contain("ExceptionResourceLocked");
-      expect(refused.xml).to.contain("locked by user OSD");
+      expectLockedBy(refused, "OSD");
       // the holder locking again is still idempotent
       expect((await lockIt()).handle).to.equal(handle);
       // released by the holder, the other session gets it -- and gives it back
@@ -1261,8 +1281,7 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       expect(taken.status).to.equal(200);
       expect(taken.handle).to.have.length.greaterThan(8);
       const first = await lockIt();
-      expect(first.status, "the first session is now the one refused").to.equal(403);
-      expect(first.xml).to.contain("locked by user OTHERDEV");
+      expectLockedBy(first, "OTHERDEV");
       await unlockIt(taken.handle, other);
       const back = await lockIt();
       expect(back.status).to.equal(200);
@@ -1270,7 +1289,7 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     });
 
     it("a logoff releases the session's locks", async () => {
-      const {id, other} = await otherSession();
+      const {id, other} = await otherSession("OTHERDEV");
       expect((await lockIt(other)).status).to.equal(200);
       expect((await lockIt()).status).to.equal(403);
       const off = await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${id}`}});
@@ -1279,6 +1298,7 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       expect(after.status).to.equal(200);
       await unlockIt(after.handle);
     });
+
   });
 
   it("POST on a class's includes creates the test include, under the class's lock", async () => {

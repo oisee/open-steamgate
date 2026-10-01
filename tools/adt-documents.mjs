@@ -1269,16 +1269,41 @@ export function lockResultDocument(handle, options = {}) {
 // How a system refuses. A client looks for the exception marker and shows the
 // type and the message, so an honest refusal reaches a person rather than
 // becoming a status code they have to guess about.
+//
+// options.properties: [key, value] pairs for <properties>, the way a system
+// carries a message's T100 key and long text.
 export function exceptionDocument(type, message, options = {}) {
+  const properties = options.properties ?? [];
+  const props = properties.length === 0 ? "  <properties/>" : "  <properties>\n" +
+    properties.map(([key, value]) => `    <entry key="${xmlEscape(key)}">${xmlEscape(value)}</entry>\n`).join("") +
+    "  </properties>";
   return `<?xml version="1.0" encoding="utf-8"?>
 <exc:exception xmlns:exc="http://www.sap.com/abapxml/types/communicationframework">
   <namespace id="${xmlEscape(options.namespace ?? "com.sap.adt")}"/>
   <type id="${xmlEscape(type)}"/>
   <message lang="EN">${xmlEscape(message)}</message>
   <localizedMessage lang="EN">${xmlEscape(message)}</localizedMessage>
-  <properties/>
+${props}
 </exc:exception>
 `;
+}
+
+// The refusal of a LOCK, or of a change, while another session holds the
+// object. Shaped as A4H answers it (measured from two stateful sessions of
+// one user): 403, ExceptionResourceNoAccess, and the holder named through
+// the T100 message EU 510 with the user in V1 and the object in V2. The
+// lock is the session's, not the user's, so the same user in another
+// session is refused too. The long text is ours.
+export function lockedByOtherDocument(user, object) {
+  const message = `User ${user} is currently editing ${object}`;
+  return exceptionDocument("ExceptionResourceNoAccess", message, {properties: [
+    ["LONGTEXT", `${object} is locked by another editing session of user ${user}. ` +
+      "It can be changed once that session saves and unlocks it, logs off, or expires."],
+    ["T100KEY-ID", "EU"],
+    ["T100KEY-NO", "510"],
+    ["T100KEY-V1", user],
+    ["T100KEY-V2", object],
+  ]});
 }
 
 // The answer to an activation that happened. Three properties, all true,
