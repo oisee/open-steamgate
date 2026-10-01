@@ -991,6 +991,42 @@
         "ERROR CX_SXML_PARSE_ERROR 48"
       ],
       "fork": "MISS"
+    },
+    {
+      "name": "latin1_declared_two_e_mismatched_close",
+      "input": [
+        "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><a>",
+        {
+          "hex": "E9E9"
+        },
+        "</b>"
+      ],
+      "note": "two Latin-1 bytes before the bad close: the offset counts the converted UTF-8 (50), not input bytes (49); stoker measured 50",
+      "group": "transcoded",
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"\\u00E9\\u00E9\"",
+        "ERROR CX_SXML_PARSE_ERROR 50"
+      ],
+      "fork": "MISS"
+    },
+    {
+      "name": "utf16le_bom_two_e_mismatched_close",
+      "input": [
+        {
+          "hex": "FFFE3C0061003E00E900E9003C002F0062003E00"
+        }
+      ],
+      "note": "UTF-16LE: the offset counts the input's own bytes after the BOM (10), not UTF-8 (7); stoker measured 10",
+      "group": "transcoded",
+      "status": "measured-a4h-2026-10-01",
+      "expected": [
+        "OPEN \"a\" \"\"",
+        "VALUE \"\\u00E9\\u00E9\"",
+        "ERROR CX_SXML_PARSE_ERROR 10"
+      ],
+      "fork": "MISS"
     }
   ]
 }
