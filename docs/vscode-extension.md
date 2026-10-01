@@ -1272,8 +1272,18 @@ a temporary clone outside the checkout and removes the clone afterward.
 
 Bootstrap reads `libs.lock.json` for the pinned library repositories and
 commits, fetches the packs named by their manifests, then runs the transpile to
-create `gen/`. A clone already at its locked commit is left untouched; a clone
-at another commit is reported without changing it. `npm run vsix` checks for
+create `gen/`. On a workstation, `node tools/osd-libs.mjs --sync` materialises
+each commit at `.local/pins/<folder>@<sha>` and points `.local/lars/<folder>`
+there. An existing real clone moves to `.local/dev/<folder>`; if that destination
+already exists, sync refuses and leaves both directories alone. Pins are
+read-only by convention: edit the development clone and use
+`OSD_LIB_<FOLDER>=<path>` to select it explicitly. The override is printed
+when used. On Windows, sync creates junctions; if the OS refuses a link,
+enable Developer Mode or run an elevated terminal. CI keeps real clones under
+`.local/lars` so its build artefact and restore paths stay the same. A pin moves
+only in a pin PR that also carries its licence approval.
+
+`npm run vsix` checks for
 installed dependencies and every library before packaging; `gen/` is generated
 on first start from the selected packs. Missing dependencies or libraries are
 reported with the setup commands. The preview and test workflows use the same

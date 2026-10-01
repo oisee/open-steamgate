@@ -24,6 +24,7 @@ import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {hostModules} from "./osd-host.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
+import {libraryPath} from "./osd-lock.mjs";
 
 // the transpiler package in use by this tree, and the core it was built
 // against. A tree with the library installed resolves it directly; a tree
@@ -150,6 +151,10 @@ export async function loadLibs(root, config, log = () => {}) {
   for (const lib of config.libs ?? []) {
     let dir;
     let cleanup = false;
+    if (existsSync(join(root, "libs.lock.json"))) {
+      dir = libraryPath(root, basename(lib.folder));
+      log(`lib from locked folder: ${lib.folder}`);
+    } else
     if (lib.folder !== undefined && lib.folder !== "" && existsSync(root + lib.folder)) {
       dir = root + lib.folder;
       log(`lib from folder: ${lib.folder}`);

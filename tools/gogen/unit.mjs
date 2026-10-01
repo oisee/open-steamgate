@@ -11,6 +11,7 @@ import {emitGo, referencedClasses} from "./emit-go.mjs";
 import {reconcile} from "./unit-results.mjs";
 import {home} from "./home.mjs";
 import {inputFoldersOf} from "../osd-packs.mjs";
+import {libraryPath} from "../osd-lock.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const commandStarted = performance.now();
@@ -69,7 +70,7 @@ mkdirSync(out, {recursive: true});
 const runDir = mkdtempSync(join(out, "run-"));
 const goDir = join(runDir, "go");
 const libDirs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/framework", "open-abap-odata/src", "ajson/src/core"]
-  .map((x) => join(home, ".local", "lars", x)).filter(existsSync);
+  .map((x) => join(existsSync(join(home, "libs.lock.json")) ? libraryPath(home, x.split("/")[0]) : join(home, ".local/lars", x.split("/")[0]), x.slice(x.indexOf("/") + 1))).filter(existsSync);
 const folders = [...(fixture ? sourceFolders : inputFoldersOf(home, config).map((f) => join(home, f))), ...libDirs].filter(existsSync);
 const excluded = (config.exclude_filter ?? []).map((p) => new RegExp(p));
 const skip = (file) => excluded.some((re) => re.test("/" + file.slice(home.length + 1)));

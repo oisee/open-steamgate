@@ -6,6 +6,7 @@
     "test/dataset.mjs",
     "test/taxi-import.mjs",
     "test/bootstrap.mjs",
+    "test/pins.mjs",
     "test/e2e-instance.mjs",
     "test/gui-reports.mjs",
     "test/journal.mjs",

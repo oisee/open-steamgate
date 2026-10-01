@@ -1,131 +1,131 @@
 #!/usr/bin/env node
-// The library folders this tree reads, materialised from the config.
-//
-//   node tools/osd-libs.mjs           clone whatever is missing
-//   node tools/osd-libs.mjs --check   say what is missing, clone nothing
-//
-// The library list comes from abap_transpile.json and its pinned repositories
-// and refs come from libs.lock.json. The transpiler can fall back to a URL for
-// a generic build, but the object store reads each folder from disk, so this
-// command materialises and verifies the complete locked closure.
-//
-// On a workstation every folder is cloned, so the two agree and nobody
-// notices. On a clean runner four of the six were missing, and the store's
-// registry had no `/IWBEP/` and no APC family -- which came back as twelve
-// failures that looked like twelve different things: "RAISE, unknown class
-// /iwbep/cx_mgw_busi_exception", a check run that never reached `processed`,
-// an activation that never reported `activationExecuted="true"`. Every one
-// of them was this.
-//
-// The list is the config's, not a second one in a workflow file. A pair
-// obliged to agree and maintained in two places is a defect deferred to its
-// first divergence -- which is the sentence already written in
-// osd-store.mjs, about the same list.
+// Materialise locked library commits and keep .local/lars as the public path.
 import {execFileSync} from "node:child_process";
-import {existsSync, mkdirSync, readdirSync, statSync} from "node:fs";
-import {dirname, join} from "node:path";
+import {closeSync, lstatSync, mkdirSync, mkdtempSync, openSync, readlinkSync, renameSync, rmSync, symlinkSync} from "node:fs";
+import {dirname, join, relative, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
-import {librariesFromLock} from "./osd-lock.mjs";
+import {librariesFromLock, libraryPath} from "./osd-lock.mjs";
+
+const git = (cwd, ...args) => execFileSync("git", args, {cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}).trim();
+const exists = (path) => { try { lstatSync(path); return true; } catch { return false; } };
+const head = (path) => { try { return git(path, "rev-parse", "HEAD"); } catch { return "missing"; } };
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 export function libraries(root = ".") {
-  return librariesFromLock(root).libraries.map((lib) => ({...lib, at: lib.path}));
+  return librariesFromLock(root).libraries.map((lib) => ({
+    ...lib, at: lib.path, pin: join(root, ".local", "pins", `${lib.name}@${lib.ref}`),
+    dev: join(root, ".local", "dev", lib.name),
+  }));
 }
 
-/** The library folders absent or empty on disk. */
 export function missing(root = ".") {
-  return libraries(root).filter((lib) => directoryHasContent(lib.at) === false);
+  return libraries(root).filter((lib) => !exists(lib.at));
 }
 
-function directoryHasContent(path) {
+function cloneInto(path, lib) {
+  git(dirname(path), "init", "--quiet", path);
+  git(path, "remote", "add", "origin", lib.url);
+  git(path, "fetch", "--quiet", "--depth", "1", "origin", lib.ref);
+  git(path, "checkout", "--quiet", "--detach", "FETCH_HEAD");
+  if (head(path) !== lib.ref) throw new Error(`${lib.name}: fetched a different commit`);
+}
+
+// The exclusive lock covers clone and rename. Other sessions wait for the
+// winner and then validate its finished directory; no session removes a peer's
+// temporary checkout or treats a half-fetched directory as a pin.
+function ensurePin(lib) {
+  mkdirSync(dirname(lib.pin), {recursive: true});
+  const lock = `${lib.pin}.lock`;
+  let fd;
+  for (let attempt = 0; attempt < 600; attempt++) {
+    try { fd = openSync(lock, "wx"); break; }
+    catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      if (exists(lib.pin)) break;
+      pause(100);
+    }
+  }
+  if (fd === undefined && !exists(lib.pin)) throw new Error(`${lib.name}: timed out waiting for ${lock}`);
   try {
-    return statSync(path).isDirectory() && readdirSync(path).length > 0;
-  } catch {
-    return false;
+    if (!exists(lib.pin)) {
+      const temp = mkdtempSync(join(dirname(lib.pin), `.${lib.name}-`));
+      try { cloneInto(temp, lib); renameSync(temp, lib.pin); }
+      finally { if (exists(temp)) rmSync(temp, {recursive: true, force: true}); }
+    }
+    if (head(lib.pin) !== lib.ref) throw new Error(`${lib.name}: pin ${lib.pin} has drifted; leave it untouched and inspect it manually`);
+  } finally {
+    if (fd !== undefined) { closeSync(fd); rmSync(lock, {force: true}); }
   }
 }
 
-function git(cwd, args) {
-  return execFileSync("git", args, {cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}).trim();
-}
-
-function currentCommit(path) {
-  try {
-    return git(path, ["rev-parse", "HEAD"]);
-  } catch {
-    return undefined;
+function pointAtPin(lib) {
+  mkdirSync(dirname(lib.at), {recursive: true});
+  const lock = `${lib.at}.lock`;
+  let fd;
+  for (let attempt = 0; attempt < 600; attempt++) {
+    try { fd = openSync(lock, "wx"); break; }
+    catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      pause(100);
+    }
   }
+  if (fd === undefined) throw new Error(`${lib.name}: timed out waiting for ${lock}`);
+  try {
+    if (exists(lib.at) && !lstatSync(lib.at).isSymbolicLink()) {
+      if (exists(lib.dev)) throw new Error(`${lib.name}: cannot move ${lib.at} to ${lib.dev}: destination exists; move it aside manually`);
+      mkdirSync(dirname(lib.dev), {recursive: true});
+      renameSync(lib.at, lib.dev);
+    }
+    const target = relative(dirname(lib.at), lib.pin);
+    if (exists(lib.at)) {
+      if (resolve(dirname(lib.at), readlinkSync(lib.at)) === resolve(lib.pin)) return;
+      rmSync(lib.at); // only our symlink, never a directory
+    }
+    try { symlinkSync(process.platform === "win32" ? resolve(lib.pin) : target, lib.at, process.platform === "win32" ? "junction" : "dir"); }
+    catch (error) {
+      throw new Error(`${lib.name}: could not create ${lib.at} link (${error.message}); on Windows enable Developer Mode or run in an elevated terminal`);
+    }
+  } finally { closeSync(fd); rmSync(lock, {force: true}); }
 }
 
-function ensurePinnedClone(lib) {
-  if (existsSync(lib.at)) {
-    const actual = currentCommit(lib.at);
-    if (actual === lib.ref) return false;
-    let modified = false;
-    if (actual !== undefined) {
-      try {
-        modified = git(lib.at, ["status", "--porcelain"]).length > 0;
-      } catch {
-        modified = true;
+/** CI keeps real .local/lars clones for the existing artifact and restore path. */
+export function materialise(root = ".", say = () => {}, {ci = process.env.CI === "true", remote = {}} = {}) {
+  const made = [];
+  for (const lib of libraries(root)) {
+    if (remote[lib.name]) lib.url = remote[lib.name];
+    if (ci) {
+      if (!exists(lib.at)) {
+        mkdirSync(dirname(lib.at), {recursive: true});
+        const temp = mkdtempSync(join(dirname(lib.at), `.${lib.name}-`));
+        try { cloneInto(temp, lib); renameSync(temp, lib.at); }
+        finally { if (exists(temp)) rmSync(temp, {recursive: true, force: true}); }
+        made.push(lib.name);
       }
     } else {
-      modified = directoryHasContent(lib.at);
+      ensurePin(lib);
+      pointAtPin(lib);
+      made.push(lib.name);
     }
-    const state = actual === undefined ? "not a Git clone" : `at ${actual}`;
-    throw new Error(`${lib.folder}: existing checkout is ${state}, expected ${lib.ref}${modified ? " and has local changes" : ""}; left untouched`);
+    libraryPath(root, lib.name);
+    say(`osd-libs: ${lib.name} @ ${lib.ref} via ${lib.at}`);
   }
-
-  mkdirSync(dirname(lib.at), {recursive: true});
-  mkdirSync(lib.at, {recursive: false});
-  try {
-    git(process.cwd(), ["init", "--quiet", lib.at]);
-    git(lib.at, ["remote", "add", "origin", lib.url]);
-    git(lib.at, ["fetch", "--quiet", "--depth", "1", "origin", lib.ref]);
-    git(lib.at, ["checkout", "--quiet", "--detach", "FETCH_HEAD"]);
-    const actual = currentCommit(lib.at);
-    if (actual !== lib.ref) throw new Error(`${lib.folder}: fetched ${actual}, expected ${lib.ref}`);
-    return true;
-  } catch (error) {
-    throw new Error(`${lib.folder}: could not clone ${lib.repo} at ${lib.ref}: ${String(error.stderr ?? error.message).trim()}`);
-  }
+  return made;
 }
 
-export function materialise(root = ".", say = () => {}) {
-  const cloned = [];
+export function status(root = ".", say = console.log) {
   for (const lib of libraries(root)) {
-    if (existsSync(lib.at)) {
-      const actual = currentCommit(lib.at);
-      if (actual !== lib.ref) {
-        // Do not move an existing checkout, even if it is clean: it may be a
-        // worktree or a developer's source tree. Report the mismatch clearly.
-        ensurePinnedClone(lib);
-      }
-      say(`osd-libs: ${lib.folder} already at ${lib.ref.slice(0, 12)}; left untouched`);
-      continue;
-    }
-    say(`osd-libs: ${lib.folder} <- ${lib.url} @ ${lib.ref}`);
-    ensurePinnedClone(lib);
-    cloned.push(lib.folder);
+    let state;
+    try { libraryPath(root, lib.name); state = "ready"; }
+    catch (error) { state = error.message; }
+    say(`${lib.name}: ${state}`);
   }
-  return cloned;
 }
 
 if (runsAs("osd-libs.mjs")) {
   const root = process.cwd();
-  if (process.argv.includes("--check")) {
-    const gone = missing(root);
-    for (const lib of gone) {
-      console.log(`missing: ${lib.folder} (${lib.repo} at ${lib.ref})`);
-    }
-    const wrong = libraries(root).filter((lib) => directoryHasContent(lib.at) && currentCommit(lib.at) !== lib.ref);
-    for (const lib of wrong) {
-      const actual = currentCommit(lib.at);
-      console.log(`wrong ref: ${lib.folder} is ${actual ?? "not a Git clone"}, expected ${lib.ref}; left untouched`);
-    }
-    console.log(`${libraries(root).length} libraries, ${gone.length} missing, ${wrong.length} at a different ref`);
-    process.exit(gone.length === 0 && wrong.length === 0 ? 0 : 1);
-  }
-  const cloned = materialise(root, (m) => console.log(m));
-  console.log(cloned.length === 0
-    ? "osd-libs: every library folder is already there"
-    : `osd-libs: cloned ${cloned.length}`);
+  if (process.argv.includes("--status")) status(root);
+  else if (process.argv.includes("--check")) {
+    for (const lib of libraries(root)) libraryPath(root, lib.name);
+    console.log(`${libraries(root).length} libraries at locked commits`);
+  } else materialise(root, console.log);
 }
