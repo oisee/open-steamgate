@@ -1359,6 +1359,39 @@ something already shipped (then it is a must of the current release, like the ro
   or APC listening port: the Go network listeners found are in Go tests, not the generated Unit binary. The only
   shard-owned files under the build directory are its class list, timings, temp files, and DATASET files; the parent
   writes the one timing report. A failed shard assigns its process error to every method it owned.
+
+  **U4 timing breakdown (2026-10-01):** A follow-up instrumented the same 51-owner, 76-test-class inventory.
+  `unit.mjs` now reports discovery, frontend, emission, build, seed, per-shard start/end and class times in
+  `timingMs`; each Go process also writes its seed/setup duration. These are individual runs under the same
+  `/tmp/osd-heavy.lock` and `/usr/bin/time` instrument, so they show phase proportions rather than replacing
+  the three-run medians above. The 1- and 4-job runs had identical 565 result rows.
+
+  | Phase | jobs 1 | jobs 4 |
+  |---|---:|---:|
+  | Total wall (`/usr/bin/time`) | 29.10 s | 25.62 s |
+  | Discovery/preparation before emission | 1.19 s | 1.15 s |
+  | Frontend closure rounds | 12.10 s | 13.54 s |
+  | Emit Go and seed script | 0.81 s | 0.78 s |
+  | Go build | 5.17 s | 4.31 s |
+  | Runner, including seed and merge | 9.50 s | 5.45 s |
+  | Seed image creation inside runner | 0.27 s | 0.27 s |
+  | Sum of test-class times / critical shard | 9.21 s | 5.14 s |
+  | Merge results and timing file | — | <0.01 s |
+
+  Four-shard start/end times relative to runner start were 0.27–1.29, 0.28–1.38, 0.28–5.45 and 0.29–2.07 s;
+  their respective class-time sums were 0.99, 1.07, 5.14 and 1.73 s. The critical shard contains
+  `ZCL_OSD_DEMO_DATA:LTCL_DEMO_DATA` (4.61 s in this run; 5.17 s with one job). The next longest class was
+  `ZCL_OSD_AMC_TEST:LTCL_AMC` at about 1.06 s. The four-shard wall is already only 0.31 s over its critical
+  shard's class time, so further shard scheduling cannot materially shorten this run. Existing LPT scheduling
+  uses a previous `class-timings.json` when one is present; a fresh output directory has no history.
+
+  The 8.65 s seed-image figure above timed **only the already-built Go binary**. Re-running that binary from
+  this inventory under the same lock and `/usr/bin/time` took 8.16 s. The 22.08/18.70 s shard table and this
+  breakdown time the **whole Node command**, including frontend and Go build. That scope difference explains
+  the apparent regression; the remaining variation between full-command runs is mainly frontend/build timing.
+  The measurement fix is to keep binary-only and full-command figures separately and retain phase/shard timings
+  in the runner. No execution-path optimization follows from these numbers: the four-shard runner is near its
+  measured lower bound, while most full-command time is compilation outside the shard path.
 - nice: accept ADR 0005 (lazy table providers) -- done 2026-09-30, narrowed after three reviews.
 
 **0.5**

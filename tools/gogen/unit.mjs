@@ -13,6 +13,7 @@ import {home} from "./home.mjs";
 import {inputFoldersOf} from "../osd-packs.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+const commandStarted = performance.now();
 const args = process.argv.slice(2);
 const values = (flag) => args.flatMap((x, i) => x === flag ? [args[i + 1]] : []);
 const jobsText = values("--jobs")[0];
@@ -353,6 +354,7 @@ function writeGeneratedGo(dir) {
   }, true));
 }
 
+timingMs.discovery = Math.round(performance.now() - commandStarted - timingMs.frontendClosureRounds.reduce((a, b) => a + b, 0));
 const emitStarted = performance.now();
 const goName = (x) => x.toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
 const ready = rows.filter((x) => x.status === "READY");
@@ -371,13 +373,15 @@ const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; 
   "imageFile := flag.String(\"seed-image\", \"\", \"seeded SQLite image\")",
   "imageOut := flag.String(\"seed-image-out\", \"\", \"write seeded SQLite image and exit\")",
   "timingsOut := flag.String(\"timings-out\", \"\", \"write per-class durations\")",
+  "phasesOut := flag.String(\"phases-out\", \"\", \"write startup and seed durations\")",
   "flag.Parse()",
   "selected := map[string]bool{}; if *classesFile != \"\" { data, err := os.ReadFile(*classesFile); if err != nil { panic(err) }; var names []string; if err := json.Unmarshal(data, &names); err != nil { panic(err) }; for _, name := range names { selected[name] = true } }",
-  "durations := map[string]float64{}",
+  "durations := map[string]float64{}; startupStarted := time.Now()",
   "s := &abap.Session{}"];
 if (groups.some(({methods}) => methods.some((m) => m.db))) generated.push(
   "var dbImage []byte; if *imageFile != \"\" { var err error; dbImage, err = os.ReadFile(*imageFile); if err != nil { panic(err) } } else { if err := abap.OpenDB(dbScript); err != nil { panic(err) }; var err error; dbImage, err = abap.DBImage(); if err != nil { panic(err) }; abap.CloseUnitDB() }; if *imageOut != \"\" { if err := os.WriteFile(*imageOut, dbImage, 0600); err != nil { panic(err) }; return }; abap.SetUnitDBImage(dbImage)");
 else generated.push("_ = imageFile; if *imageOut != \"\" { if err := os.WriteFile(*imageOut, nil, 0600); err != nil { panic(err) }; return }");
+generated.push("if *phasesOut != \"\" { data, _ := json.Marshal(map[string]float64{\"startupSeedMs\": float64(time.Since(startupStarted).Microseconds()) / 1000}); if err := os.WriteFile(*phasesOut, data, 0600); err != nil { panic(err) } }");
 for (const {key, methods} of groups) {
   const [owner, local] = key.split(":");
   const c = classes.get(key);
@@ -483,6 +487,7 @@ if (build.status !== 0) {
   process.exit(2);
 }
 const runStarted = performance.now();
+const runDetail = {seedImageMs: 0, shards: [], mergeMs: 0};
 // One class is the scheduling unit: its hooks and methods stay in one Go
 // process. Keep the old single-process path for --jobs 1 and existing binary
 // callers. Shards share only immutable generated code, media and seed bytes.
@@ -511,38 +516,53 @@ const runProcess = (argv, env) => new Promise((resolveRun) => {
 let actual = [];
 let durations = {};
 if (shards.length <= 1) {
-  const run = spawnSync(bin, ["--timings-out", timingFile], {encoding: "utf8", timeout: 120000, maxBuffer: 20e6});
+  const started = performance.now();
+  const phasesFile = join(out, "phases.json");
+  const run = spawnSync(bin, ["--timings-out", timingFile, "--phases-out", phasesFile], {encoding: "utf8", timeout: 120000, maxBuffer: 20e6});
   if (run.status !== 0) {
     for (const r of ready) { r.status = "FAILED"; r.message = `runner: ${run.stderr || run.error?.message || run.signal || run.status}`; }
     updateCompiledCount();
     console.log(JSON.stringify({...summary, rows})); process.exit(1);
   }
   actual = JSON.parse(run.stdout);
+  runDetail.shards.push({index: 0, startMs: Math.round(started - runStarted), endMs: Math.round(performance.now() - runStarted),
+    classes: groups.length, startupSeedMs: JSON.parse(readFileSync(phasesFile, "utf8")).startupSeedMs,
+    classMs: Object.values(JSON.parse(readFileSync(timingFile, "utf8"))).reduce((a, b) => a + b, 0)});
 } else {
+  const seedStarted = performance.now();
   const seed = spawnSync(bin, ["--seed-image-out", join(out, "seed.sqlite")], {encoding: "utf8", timeout: 120000, maxBuffer: 20e6});
+  runDetail.seedImageMs = Math.round(performance.now() - seedStarted);
   if (seed.status !== 0) {
     for (const r of ready) { r.status = "FAILED"; r.message = `seed image: ${seed.stderr || seed.error?.message || seed.signal || seed.status}`; }
     updateCompiledCount();
     console.log(JSON.stringify({...summary, rows})); process.exit(1);
   }
   const results = await Promise.all(shards.map(async (shard, index) => {
+    const started = performance.now();
     const shardDir = join(out, `shard-${index}`);
     const tempDir = join(shardDir, "tmp");
     const datasetDir = join(shardDir, "dataset");
     mkdirSync(tempDir, {recursive: true}); mkdirSync(datasetDir, {recursive: true});
     const classesFile = join(shardDir, "classes.json");
     const durationsFile = join(shardDir, "timings.json");
+    const phasesFile = join(shardDir, "phases.json");
     writeFileSync(classesFile, JSON.stringify(shard.keys));
     const env = {...process.env, TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir,
       OSD_DATASET_READ: datasetDir, OSD_DATASET_WRITE: datasetDir, OSD_DATASET_HOME: datasetDir,
       OSD_DATASET_AUDIT: join(datasetDir, "audit.ndjson")};
     const run = await runProcess(["--classes-file", classesFile, "--seed-image", join(out, "seed.sqlite"),
-      "--timings-out", durationsFile], env);
+      "--timings-out", durationsFile, "--phases-out", phasesFile], env);
+    const phase = {index, startMs: Math.round(started - runStarted), endMs: Math.round(performance.now() - runStarted), classes: shard.keys.length};
+    runDetail.shards.push(phase);
     if (run.status !== 0) return {keys: shard.keys, error: run.stderr || run.error?.message || run.signal || `exit ${run.status}`};
     try {
-      return {keys: shard.keys, rows: JSON.parse(run.stdout), durations: JSON.parse(readFileSync(durationsFile, "utf8"))};
+      const durations = JSON.parse(readFileSync(durationsFile, "utf8"));
+      phase.classMs = Object.values(durations).reduce((a, b) => a + b, 0);
+      phase.startupSeedMs = JSON.parse(readFileSync(phasesFile, "utf8")).startupSeedMs;
+      return {keys: shard.keys, rows: JSON.parse(run.stdout), durations};
     } catch (error) { return {keys: shard.keys, error: `invalid shard result: ${error.message}`}; }
   }));
+  const mergeStarted = performance.now();
   for (const result of results) {
     if (result.error) {
       for (const group of groups.filter((g) => result.keys.includes(g.key)))
@@ -550,8 +570,11 @@ if (shards.length <= 1) {
     } else { actual.push(...result.rows); Object.assign(durations, result.durations); }
   }
   writeFileSync(timingFile, JSON.stringify({...oldTimings, ...durations}, null, 2));
+  runDetail.mergeMs = Math.round(performance.now() - mergeStarted);
 }
 timingMs.run = Math.round(performance.now() - runStarted);
+timingMs.runDetail = runDetail;
+timingMs.total = Math.round(performance.now() - commandStarted);
 const reconciled = reconcile(ready, actual);
 for (let i = 0; i < ready.length; i++) { ready[i].status = reconciled[i].status; ready[i].message = reconciled[i].message; }
 updateCompiledCount();
